@@ -1,0 +1,12 @@
+# Rojo / Roblox build output
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.lock
+sourcemap.json
+/build
+
+# Generated tool files
+roblox.yml
+/tests/out

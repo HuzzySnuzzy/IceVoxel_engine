@@ -1,0 +1,23 @@
+{
+	"name": "IceVoxel",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"IceVoxel": {
+				"$path": "src/shared"
+			}
+		},
+		"ServerScriptService": {
+			"IceVoxel": {
+				"$path": "src/server"
+			}
+		},
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"IceVoxel": {
+					"$path": "src/client"
+				}
+			}
+		}
+	}
+}
