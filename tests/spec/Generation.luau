@@ -85,7 +85,7 @@ return function(t, shared, require)
 
 	t.test("LOD chunks follow the full detail terrain", function()
 		for level = 1, Config.Lod.Levels - 1 do
-			local step = 2 ^ level
+			local step, stepY = ChunkLayout.steps(level)
 			local r = gen.generate(level, 1, -1)
 			local worst = 0
 			for lz = 0, SIZE - 1, 5 do
@@ -97,15 +97,16 @@ return function(t, shared, require)
 					local topCell = -1
 					for y = r.height - 1, 0, -1 do
 						local id = ChunkLayout.get(r.data, lx, y, lz)
-						if Blocks.isOpaque(id) and y * step <= h then
+						if Blocks.isOpaque(id) and y * stepY <= h then
 							topCell = y
 							break
 						end
 					end
-					worst = math.max(worst, math.abs((topCell + 1) * step - h))
+					worst = math.max(worst, math.abs((topCell + 1) * stepY - h))
 				end
 			end
-			t.ok(worst <= step, `level {level}: LOD surface off by {worst} blocks`)
+			t.ok(worst <= stepY, `level {level}: LOD surface off by {worst} blocks`)
+			t.eq(r.height, Config.WorldHeight // stepY, "cells per column")
 		end
 	end)
 

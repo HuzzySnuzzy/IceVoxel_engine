@@ -11,7 +11,7 @@
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
-	  5. players    -> spawning and keeping chunks around players generated
+	  5. players    -> safe spawning, map teleports, waypoints, keeping chunks around players generated
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,6 +29,8 @@ local Simulation = require(Server.World.Simulation)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
 local Spawning = require(Server.Players.Spawning)
+local Teleport = require(Server.Players.Teleport)
+local WaypointStore = require(Server.Players.WaypointStore)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -42,6 +44,8 @@ end
 
 local net = ServerNet.start(world)
 Spawning.start(world)
+Teleport.start(world, net)
+WaypointStore.start(net)
 Simulation.start(world)
 Api._ready(world, ticker)
 

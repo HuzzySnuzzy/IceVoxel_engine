@@ -15,10 +15,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
+local ChunkLayout = require(Shared.World.ChunkLayout)
+local Blocks = require(Shared.Blocks)
 
 local PartPool = require(script.Parent.PartPool)
 
 local BOX = GreedyMesher.BOX_BYTES
+local FLUID_FULL = Blocks.FLUID_FULL
 local readu16 = buffer.readu16
 
 -- What the renderer needs to know about a chunk node.
@@ -156,8 +159,9 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 			t.folder = folder
 		end
 
-		local step = bit32.lshift(1, node.level)
+		local step, stepY = ChunkLayout.steps(node.level)
 		local scale = step * Config.BlockSize
+		local scaleY = stepY * Config.BlockSize
 		local originX = node.nx * Config.ChunkSize * scale
 		local originZ = node.nz * Config.ChunkSize * scale
 		local far = node.level > 0
@@ -168,10 +172,19 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 			local o = t.cursor * BOX
 			local x, y, z = readu16(boxes, o), readu16(boxes, o + 2), readu16(boxes, o + 4)
 			local sx, sy, sz = readu16(boxes, o + 6), readu16(boxes, o + 8), readu16(boxes, o + 10)
-			local part = pool:acquire(readu16(boxes, o + 12), far)
-			part.Size = Vector3.new(sx * scale, sy * scale, sz * scale)
-			part.CFrame =
-				CFrame.new(originX + (x + sx * 0.5) * scale, (y + sy * 0.5) * scale, originZ + (z + sz * 0.5) * scale)
+			local appearance, surface = GreedyMesher.decodeKey(readu16(boxes, o + 12))
+			local part = pool:acquire(appearance, far)
+			local height = sy * scaleY
+			if surface > 0 then
+				-- Fluid surface below the top of its cell (flowing water steps down).
+				height -= (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize
+			end
+			part.Size = Vector3.new(sx * scale, height, sz * scale)
+			part.CFrame = CFrame.new(
+				originX + (x + sx * 0.5) * scale,
+				y * scaleY + height * 0.5,
+				originZ + (z + sz * 0.5) * scale
+			)
 			part.Parent = folder
 			self.partCount += 1
 			t.cursor += 1

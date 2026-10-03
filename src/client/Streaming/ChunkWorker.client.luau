@@ -5,6 +5,7 @@
 	Jobs ("Job" actor message):
 	  generate   { level, nx, nz, edits?, reveal? } -> chunk data (LOD 0 only) + section meshes
 	  mesh       { data, height, solidBelow, emptyAbove, sections, reveal } -> section meshes
+	  map        { x, z, scale, size } -> RGBA pixels of a map tile (Map/MapPainter)
 
 	Long jobs are split across frames: after Config.Workers.SliceBudgetMs the worker waits for the
 	next frame, so a busy worker never stalls rendering. Jobs run one at a time per worker because
@@ -25,6 +26,7 @@ local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local MapPainter = require(Shared.Map.MapPainter)
 
 local resultEvent = actor:WaitForChild("Result") :: BindableEvent
 
@@ -34,6 +36,7 @@ while type(seed) ~= "number" do
 	seed = Shared:GetAttribute("Seed")
 end
 local generator = TerrainGenerator.new(seed :: number)
+local paintMap = MapPainter.new(generator)
 
 local SECTION = Config.SectionHeight
 local LAYER = ChunkLayout.LAYER
@@ -140,6 +143,12 @@ local function remesh(job: { [string]: any }): { [string]: any }
 	return { id = job.id, sections = indices, meshes = meshes }
 end
 
+local function map(job: { [string]: any }): { [string]: any }
+	return { id = job.id, pixels = paintMap(job.x, job.z, job.scale, job.size, yieldIfNeeded) }
+end
+
+local RUN = { generate = generate, mesh = remesh, map = map }
+
 local queue: { { [string]: any } } = {}
 local running = false
 
@@ -148,7 +157,7 @@ local function run()
 	while #queue > 0 do
 		local job = table.remove(queue, 1) :: { [string]: any }
 		sliceStart = os.clock()
-		local ok, result = pcall(if job.kind == "mesh" then remesh else generate, job)
+		local ok, result = pcall(RUN[job.kind] or generate, job)
 		if not ok then
 			warn(`[IceVoxel] worker job failed: {result}`)
 			result = { id = job.id, failed = true, sections = {}, meshes = {} }

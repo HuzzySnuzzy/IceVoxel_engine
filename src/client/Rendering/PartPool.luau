@@ -5,8 +5,14 @@
 	One template per (appearance, near/far) pair holds every property except size and position, so
 	reusing a part only costs two property writes. Near parts (full detail chunks) collide and can be
 	raycast; far parts (LOD chunks) do neither and skip shadows.
+
+	Textures: a block with `texture` uses that MaterialVariant (it must exist in MaterialService with
+	the block's material as BaseMaterial, otherwise the plain colour is used and a warning printed).
+	`faces` images become Texture children of near templates, tiled once per block, so recycled parts
+	keep them for free.
 ]]
 
+local MaterialService = game:GetService("MaterialService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -35,6 +41,8 @@ local function material(name: string): Enum.Material
 	return Enum.Material.SmoothPlastic
 end
 
+local warned: { [string]: boolean } = {}
+
 local function makeTemplate(appearance: number, far: boolean): BasePart
 	local info = Blocks.appearances[appearance]
 	local opaque = info.kind == Blocks.KIND_OPAQUE
@@ -54,6 +62,31 @@ local function makeTemplate(appearance: number, far: boolean): BasePart
 	part.Color = Color3.fromRGB(info.color[1], info.color[2], info.color[3])
 	part.Transparency = info.transparency
 	part.Reflectance = info.reflectance
+
+	if Config.Render.Textures then
+		local texture = info.texture
+		if texture then
+			if MaterialService:GetMaterialVariant(part.Material, texture) then
+				part.MaterialVariant = texture
+				part.Color = Color3.fromRGB(info.tint[1], info.tint[2], info.tint[3])
+			elseif not warned[texture] then
+				warned[texture] = true
+				warn(
+					`[IceVoxel] MaterialVariant '{texture}' with BaseMaterial {info.material} not found in MaterialService`
+				)
+			end
+		end
+		if info.faces and not far then
+			for face, image in info.faces do
+				local overlay = Instance.new("Texture")
+				overlay.Face = (Enum.NormalId :: any)[face]
+				overlay.Texture = image
+				overlay.StudsPerTileU = Config.BlockSize
+				overlay.StudsPerTileV = Config.BlockSize
+				overlay.Parent = part
+			end
+		end
+	end
 	return part
 end
 

@@ -25,7 +25,9 @@ border copied from its neighbours ("padding", 18 × 18 cells per layer), so mesh
 look at another chunk. Y is the outermost axis, so a vertical section is a contiguous slice.
 
 Level-of-detail chunks use the same layout with bigger cells: a level `L` chunk covers
-`16 × 2^L` blocks with 16 × 16 cells, and `256 / 2^L` cells vertically.
+`16 × 2^L` blocks with 16 × 16 cells. Cells are `2^L` blocks wide but at most
+`Lod.MaxVerticalStep` (16) blocks tall (`ChunkLayout.steps`), so the coarsest levels keep their
+mountain shapes instead of collapsing into a couple of 64-block steps.
 
 Keys are plain numbers (`World/Coords`): `nodeKey(level, x, z)`, `chunkKey(x, z)` (equal to the level 0
 node key) and `posKey(x, y, z)` for block positions.
@@ -85,11 +87,15 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
 - opaque blocks enclosed by opaque blocks are **wildcards**: an opaque box may extend through them,
   whatever their material, or leave them out. This lets a grass box run under a one-block step and
   keeps hillsides and underground cheap;
-- glass is covered exactly; **fluids** only where they touch a different non-opaque block, so oceans
-  become thin sheets instead of tall transparent boxes;
+- glass is covered exactly; **fluids** only where they touch a non-opaque block other than
+  themselves, so oceans become thin sheets instead of tall transparent boxes;
+- a fluid cell without the same fluid above it is **lowered to its level** like Minecraft
+  (`Blocks.fluidHeightLut`, in ninths of a block: sources 8, flowing levels 7..1, falling full).
+  The height is packed next to the appearance id in the box key (`GreedyMesher.decodeKey`), so only
+  cells of the same height merge and flowing water visibly steps down;
 - with `hideCaves`, cave air counts as rock and every cave wall disappears.
 
-Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box. Tests check the
+Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box (position, size, key). Tests check the
 invariants (every visible block covered once, nothing visible covered by a wrong box) on generated
 chunks of every LOD.
 
@@ -141,6 +147,34 @@ whole. Parts come from `PartPool`: one template per appearance and near/far vari
 part only needs a new size and position. Near parts collide and can be raycast; far parts do
 neither and never cast shadows.
 
+**Textures.** A block's `texture` names a MaterialVariant in MaterialService; templates set
+`Material` to the block's material (it must be the variant's BaseMaterial) and `MaterialVariant` to
+the name. Scripts cannot create textured variants at runtime (their maps are plugin-only), so they
+are authored in Studio or synced by Rojo. With `StudsPerTile = BlockSize` and the Regular pattern
+one tile covers one block face, and because box parts start and end on the block grid the tiles
+line up across boxes. `faces` images become `Texture` children of near templates (e.g. a grass top
+over a dirt texture), so pooled parts keep them without extra work.
+
+### Map (`Map/`)
+
+Map tiles are painted from the generator, not from loaded chunks, so the map shows the whole
+(infinite) world. `Map/MapPainter` (shared, pure) runs inside the worker actors as a `map` job and
+returns RGBA pixels: surface colour, hill shading from the neighbouring heights, tree density,
+water depth and sea ice.
+
+Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
+EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
+`(tx mod n, tz mod n)`; tiles entering the view take over the slots of tiles that left it and are
+painted closest-first. `Map/MapView` shows a window of the ring with up to four ImageLabels (one per
+wrapped piece) sharing the same image. The minimap uses a 256² image, the world map an 832² one
+(~3 MB together). Creating an EditableImage throws when the experience has not enabled the API and
+returns nil when the memory budget is used up; the maps then show markers only.
+
+Waypoints live on the client (`Map/Waypoints`) and are saved by the server per player in a
+DataStore (`Players/WaypointStore`, names text-filtered). Teleport requests go to the server
+(`Players/Teleport`), which checks `Map.Teleport` and a cooldown and lands the player on a safe spot;
+`Player/SpawnGuard` holds the character until the terrain at the destination is built.
+
 ### Interaction
 
 Targeting uses `World/VoxelRaycast` (grid traversal) on the client's block data. Edits are applied
@@ -157,8 +191,15 @@ live edits after it must arrive in the order they were sent.
 | --------------- | --------------- | --------------------------------------------- |
 | client → server | `RequestChunks` | up to 256 chunk coordinates                   |
 | client → server | `Edit`          | break / place, position, block                |
+| client → server | `Teleport`      | target column (map)                           |
+| client → server | `SaveWaypoints` | the player's waypoint list                    |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
+| server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
+
+On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
+listener that connects) and routes messages by type, keeping early messages until a handler exists.
+On the server, `ServerNet.on(kind, handler)` registers handlers.
 
 ## Server
 
@@ -172,6 +213,37 @@ live edits after it must arrive in the order they were sent.
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
   placing inside players. Rejections never generate terrain.
+- `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
+  listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
+  in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
+  spawns). The search checks the target column, then rings around it. Spawning re-checks the spawn
+  spot on every respawn, since players may have built or poured water there.
+
+## Hidden caves, octrees and regions
+
+**How caves are hidden today.** Caves are carved as `CaveAir` and never reach the surface. The
+mesher can treat cave air as rock (`hideCaves`), which removes every cave wall; sections are meshed
+with caves visible only while the camera is below the terrain surface and within
+`Caves.RevealRadius`. That is a cheap form of occlusion culling that needs no extra data structure.
+
+**Octrees** are a storage / search structure: a cube split into 8 children until regions are
+uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD
+schemes. They are not what hides caves. Our quadtree LOD (`World/LodTree`) is the 2D cousin. With
+column chunks and greedy boxes, an octree would mostly help memory (a mostly-air column could be
+stored as a few nodes instead of 166 KB), and could be added later as a chunk storage format.
+
+**What Minecraft does for caves.** Minecraft splits chunks into 16³ sections and, for each section,
+flood-fills its air to record which of the six faces connect to each other ("advanced cave
+culling", 2014). At render time it walks from the camera's section through connected faces;
+sections it never reaches are not drawn. The IceVoxel equivalent would compute that face
+connectivity in the worker after meshing a section and parent / unparent section folders as the
+camera moves. It would replace the "camera below the surface" rule with an exact answer (for
+example, caves seen through a hole a player dug), at the cost of extra bookkeeping per section.
+
+**Regions** in Minecraft are a *storage* format: the save file groups 32 × 32 chunks into one
+`.mca` file so disks do not juggle millions of tiny files. They have nothing to do with rendering.
+For IceVoxel the same idea fits persistence: saving edits per region (one DataStore key per
+32 × 32 chunks) keeps the number of DataStore requests and keys low.
 
 ## Rules to keep in mind
 

@@ -84,6 +84,42 @@ return function(t, shared, require, server)
 		t.eq(next(lists[2].edits), nil)
 	end)
 
+	t.test("teleport and waypoint messages round trip and reject bad input", function()
+		local x, z = Protocol.decodeTeleport(Protocol.encodeTeleport(-12345, 678))
+		t.eq(x, -12345)
+		t.eq(z, 678)
+		t.eq((Protocol.decodeTeleport(Protocol.encodeTeleport(Protocol.MAX_COORDINATE + 1, 0))), nil, "too far")
+		t.eq((Protocol.decodeTeleport(buffer.create(3))), nil, "wrong length")
+
+		local list = {
+			{ name = "Home", x = 10, y = 70, z = -20, color = { 255, 0, 10 } },
+			{ name = "Mine ⛏", x = -400, y = 12, z = 999, color = { 1, 2, 3 } },
+		}
+		local decoded = Protocol.decodeWaypoints(Protocol.encodeWaypoints(list))
+		assert(decoded)
+		t.eq(#decoded, 2)
+		t.eq(decoded[2].name, "Mine ⛏")
+		t.eq(decoded[2].x, -400)
+		t.eq(decoded[1].color[1], 255)
+
+		local long = { { name = string.rep("a", 100), x = 0, y = 0, z = 0, color = { 0, 0, 0 } } }
+		local trimmed = Protocol.decodeWaypoints(Protocol.encodeWaypoints(long))
+		assert(trimmed)
+		t.eq(#trimmed[1].name, Protocol.MAX_WAYPOINT_NAME, "names are capped")
+		local emoji = Protocol.truncateName(string.rep("a", 31) .. "⛏⛏")
+		t.eq(emoji, string.rep("a", 31), "never splits a UTF-8 character")
+		t.ok(utf8.len(Protocol.truncateName(string.rep("é", 40))) ~= nil, "still valid UTF-8")
+
+		local bad = Protocol.encodeWaypoints(list)
+		t.eq(Protocol.decodeWaypoints(buffer.create(0)), nil, "empty")
+		local truncated = buffer.create(buffer.len(bad) - 1)
+		buffer.copy(truncated, 0, bad, 0, buffer.len(truncated))
+		t.eq(Protocol.decodeWaypoints(truncated), nil, "truncated")
+		local tooMany = buffer.create(1)
+		buffer.writeu8(tooMany, 0, Protocol.MAX_WAYPOINTS + 1)
+		t.eq(Protocol.decodeWaypoints(tooMany), nil, "too many")
+	end)
+
 	t.test("world records edits, queues replication and survives eviction", function()
 		local world = newWorld()
 		t.eq(world:peekBlock(0, 5, 0), nil, "nothing generated yet")
@@ -191,6 +227,44 @@ return function(t, shared, require, server)
 			ticker:step()
 		end
 		t.eq(world:getBlock(-1, FLOOR, 2), Blocks.fluidId("Water", 3), "continued into the loaded chunk")
+	end)
+
+	t.test("safe spots avoid water, leaves, cactus, low ceilings and caves", function()
+		local SafeSpot = require(server.Players.SafeSpot)
+		local world = newWorld()
+		t.ok(SafeSpot.isSafe(world, 0, FLOOR, 0), "flat ground")
+		t.ok(not SafeSpot.isSafe(world, 0, FLOOR - 1, 0), "inside the ground")
+
+		world:setBlock(0, FLOOR, 0, WATER)
+		t.ok(not SafeSpot.isSafe(world, 0, FLOOR, 0), "standing in water")
+
+		world:setBlock(5, FLOOR, 5, Blocks.id.Cactus)
+		t.ok(not SafeSpot.isSafe(world, 4, FLOOR, 5), "next to a cactus")
+
+		world:setBlock(8, FLOOR + 1, 8, Blocks.id.Planks)
+		t.ok(not SafeSpot.isSafe(world, 8, FLOOR, 8), "head inside a block")
+		t.eq(SafeSpot.column(world, 8, 8), FLOOR + 2, "stands on top of the block instead")
+
+		world:setBlock(12, FLOOR, 12, Blocks.id.OakLeaves)
+		t.ok(not SafeSpot.isSafe(world, 12, FLOOR + 1, 12), "standing on leaves")
+
+		-- A water pool around the target: the closest dry spot is found.
+		for dz = -2, 2 do
+			for dx = -2, 2 do
+				world:setBlock(30 + dx, FLOOR - 1, 30 + dz, WATER)
+				world:setBlock(30 + dx, FLOOR, 30 + dz, WATER)
+			end
+		end
+		local x, y, z = SafeSpot.find(world, 30, 30)
+		assert(x)
+		t.eq(y, FLOOR)
+		t.eq(math.max(math.abs(x - 30), math.abs(z - 30)), 3, "first ring outside the pool")
+
+		-- Never below the natural surface (no spawning in caves).
+		world:setBlock(40, FLOOR - 1, 40, AIR)
+		world:setBlock(40, FLOOR - 2, 40, AIR)
+		world:setBlock(40, FLOOR - 3, 40, AIR)
+		t.eq(SafeSpot.column(world, 40, 40), nil, "a pit below the surface is not a spawn")
 	end)
 
 	t.test("grass under a block turns into dirt", function()

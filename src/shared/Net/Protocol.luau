@@ -11,10 +11,15 @@
 	Client -> server
 	  RequestChunks  u16 count, count x (i32 cx, i32 cz)
 	  Edit           u8 action, i32 x, u16 y, i32 z, u16 block
+	  Teleport       i32 x, i32 z
+	  SaveWaypoints  waypoint list (below)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
 	  Edits          u32 count, count x (i32 x, u16 y, i32 z, u16 block)
+	  Waypoints      waypoint list (below)
+
+	Waypoint list: u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name bytes)
 ]]
 
 local Protocol = {}
@@ -22,11 +27,14 @@ local Protocol = {}
 Protocol.ClientMessage = {
 	RequestChunks = 1,
 	Edit = 2,
+	Teleport = 3,
+	SaveWaypoints = 4,
 }
 
 Protocol.ServerMessage = {
 	ChunkEdits = 1,
 	Edits = 2,
+	Waypoints = 3,
 }
 
 Protocol.EditAction = {
@@ -37,6 +45,18 @@ Protocol.EditAction = {
 -- Limits enforced when decoding untrusted client data.
 Protocol.MAX_CHUNKS_PER_REQUEST = 256
 Protocol.EDIT_BYTES = 12
+Protocol.MAX_WAYPOINTS = 64
+Protocol.MAX_WAYPOINT_NAME = 32
+-- Edits and teleports outside this many blocks from the origin are rejected.
+Protocol.MAX_COORDINATE = 1000000
+
+export type Waypoint = {
+	name: string,
+	x: number,
+	y: number,
+	z: number,
+	color: { number },
+}
 
 export type ChunkCoord = { number }
 export type ChunkEditList = { cx: number, cz: number, edits: { [number]: number } }
@@ -163,6 +183,106 @@ function Protocol.forEachEdit(b: buffer, callback: (number, number, number, numb
 		callback(buffer.readi32(b, o), buffer.readu16(b, o + 4), buffer.readi32(b, o + 6), buffer.readu16(b, o + 10))
 		o += Protocol.EDIT_BYTES
 	end
+end
+
+--[[ Teleport ]]
+
+function Protocol.encodeTeleport(x: number, z: number): buffer
+	local b = buffer.create(8)
+	buffer.writei32(b, 0, x)
+	buffer.writei32(b, 4, z)
+	return b
+end
+
+function Protocol.decodeTeleport(b: buffer): (number?, number)
+	if buffer.len(b) ~= 8 then
+		return nil, 0
+	end
+	local x, z = buffer.readi32(b, 0), buffer.readi32(b, 4)
+	if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
+		return nil, 0
+	end
+	return x, z
+end
+
+--[[ Waypoints ]]
+
+-- Cuts a name to MAX_WAYPOINT_NAME bytes without splitting a UTF-8 character.
+function Protocol.truncateName(name: string): string
+	local cut = Protocol.MAX_WAYPOINT_NAME
+	if #name <= cut then
+		return name
+	end
+	-- Step back while the first byte after the cut is a continuation byte (10xxxxxx).
+	while cut > 0 and bit32.band(string.byte(name, cut + 1), 0xC0) == 0x80 do
+		cut -= 1
+	end
+	return string.sub(name, 1, cut)
+end
+
+function Protocol.encodeWaypoints(list: { Waypoint }): buffer
+	local count = math.min(#list, Protocol.MAX_WAYPOINTS)
+	local size = 1
+	local names = table.create(count)
+	for i = 1, count do
+		names[i] = Protocol.truncateName(list[i].name)
+		size += 16 + #names[i]
+	end
+	local b = buffer.create(size)
+	buffer.writeu8(b, 0, count)
+	local o = 1
+	for i = 1, count do
+		local w = list[i]
+		buffer.writei32(b, o, w.x)
+		buffer.writei32(b, o + 4, w.y)
+		buffer.writei32(b, o + 8, w.z)
+		buffer.writeu8(b, o + 12, w.color[1])
+		buffer.writeu8(b, o + 13, w.color[2])
+		buffer.writeu8(b, o + 14, w.color[3])
+		buffer.writeu8(b, o + 15, #names[i])
+		buffer.writestring(b, o + 16, names[i])
+		o += 16 + #names[i]
+	end
+	return b
+end
+
+-- Returns nil when the payload is malformed.
+function Protocol.decodeWaypoints(b: buffer): { Waypoint }?
+	local len = buffer.len(b)
+	if len < 1 then
+		return nil
+	end
+	local count = buffer.readu8(b, 0)
+	if count > Protocol.MAX_WAYPOINTS then
+		return nil
+	end
+	local list: { Waypoint } = {}
+	local o = 1
+	for _ = 1, count do
+		if o + 16 > len then
+			return nil
+		end
+		local nameLength = buffer.readu8(b, o + 15)
+		if nameLength > Protocol.MAX_WAYPOINT_NAME or o + 16 + nameLength > len then
+			return nil
+		end
+		local x, y, z = buffer.readi32(b, o), buffer.readi32(b, o + 4), buffer.readi32(b, o + 8)
+		if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE or math.abs(y) > 4096 then
+			return nil
+		end
+		table.insert(list, {
+			x = x,
+			y = y,
+			z = z,
+			color = { buffer.readu8(b, o + 12), buffer.readu8(b, o + 13), buffer.readu8(b, o + 14) },
+			name = buffer.readstring(b, o + 16, nameLength),
+		})
+		o += 16 + nameLength
+	end
+	if o ~= len then
+		return nil
+	end
+	return list
 end
 
 return Protocol

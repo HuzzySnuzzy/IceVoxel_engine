@@ -19,6 +19,14 @@
 	  placeable     Shows up in the hotbar. Default true for drawn, solid blocks.
 	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours).
 	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below).
+
+	Textures (optional, see "Block textures" in the README):
+	  texture       Name of a MaterialVariant in MaterialService whose BaseMaterial is `material`
+	                (e.g. "IV_Stone" with BaseMaterial Slate, StudsPerTile = BlockSize, Pattern Regular).
+	                `color` stays the block's colour on the map; the part is tinted with `tint`.
+	  tint          { r, g, b } multiplied with the texture. Default white (the texture's own colours).
+	  faces         { Top = "rbxassetid://...", ... }: extra images drawn on single faces of full
+	                detail parts, e.g. a grass top over a dirt texture. Costs one instance per face.
 ]]
 
 export type BlockSpec = {
@@ -34,6 +42,9 @@ export type BlockSpec = {
 	placeable: boolean?,
 	behaviour: string?,
 	fluid: { group: string, level: number, tickDelay: number }?,
+	texture: string?,
+	tint: { number }?,
+	faces: { [string]: string }?,
 }
 
 local list: { BlockSpec } = {

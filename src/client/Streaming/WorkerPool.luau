@@ -28,7 +28,7 @@ export type WorkerPool = {
 	perWorker: number,
 
 	hasCapacity: (self: WorkerPool) -> boolean,
-	submit: (self: WorkerPool, job: { [string]: any }, callback: Callback) -> boolean,
+	submit: (self: WorkerPool, job: { [string]: any }, callback: Callback, overflow: boolean?) -> boolean,
 	busy: (self: WorkerPool) -> number,
 }
 
@@ -92,11 +92,16 @@ function WorkerPool.hasCapacity(self: WorkerPool): boolean
 	return false
 end
 
--- Sends a job to the least busy ready worker. Returns false if every worker is full.
-function WorkerPool.submit(self: WorkerPool, job: { [string]: any }, callback: Callback): boolean
+--[[
+	Sends a job to the least busy ready worker. Returns false if every worker is full.
+	`overflow` lets a small, low priority job (map tiles) use one extra slot per worker, so it still
+	makes progress while chunk streaming keeps every regular slot busy.
+]]
+function WorkerPool.submit(self: WorkerPool, job: { [string]: any }, callback: Callback, overflow: boolean?): boolean
+	local limit = if overflow then self.perWorker + 1 else self.perWorker
 	local best: Worker? = nil
 	for _, worker in self.workers do
-		if worker.ready and worker.inFlight < self.perWorker and (best == nil or worker.inFlight < best.inFlight) then
+		if worker.ready and worker.inFlight < limit and (best == nil or worker.inFlight < best.inFlight) then
 			best = worker
 		end
 	end

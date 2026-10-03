@@ -18,7 +18,8 @@
 
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
-	  same terrain every 2^L blocks, which is what makes far LOD chunks cheap to generate.
+	  same terrain every 2^L blocks horizontally (and every min(2^L, Lod.MaxVerticalStep) blocks
+	  vertically), which is what makes far LOD chunks cheap to generate.
 
 	  LOD chunks lower their border (padding) columns by one cell. A coarse chunk next to a finer
 	  one would otherwise hide border cells the finer neighbour leaves exposed, which shows up as
@@ -214,9 +215,9 @@ function TerrainGenerator.new(seed: number): Generator
 	local surfaces: { number } = table.create(P * P, 0)
 
 	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?): ChunkResult
-		local step = bit32.lshift(1, level)
-		local half = step // 2
-		local cells = WORLD_HEIGHT // step
+		local step, stepY = ChunkLayout.steps(level)
+		local half, halfY = step // 2, stepY // 2
+		local cells = WORLD_HEIGHT // stepY
 		local originX, originZ = nx * SIZE * step, nz * SIZE * step
 		local data = ChunkLayout.create(cells)
 
@@ -235,7 +236,7 @@ function TerrainGenerator.new(seed: number): Generator
 
 		-- 2. Fill the columns.
 		local solidBelow, emptyAbove = cells, 0
-		local waterTop = (SEA - half + step - 1) // step - 1 -- highest cell whose sample is below sea level
+		local waterTop = (SEA - halfY + stepY - 1) // stepY - 1 -- highest cell whose sample is below sea level
 		local stride = LAYER * 2
 		for pz = 0, P - 1 do
 			for px = 0, P - 1 do
@@ -266,14 +267,14 @@ function TerrainGenerator.new(seed: number): Generator
 					end
 				end
 
-				local topCell = (h - half + step - 1) // step - 1
+				local topCell = (h - halfY + stepY - 1) // stepY - 1
 				if level > 0 and (px == 0 or pz == 0 or px == P - 1 or pz == P - 1) and topCell > 1 then
 					topCell -= 1
 				end
 				local base = (pz * P + px) * 2
 				writeu16(data, base, BEDROCK)
 				for y = 1, topCell do
-					local depth = (topCell - y) * step
+					local depth = (topCell - y) * stepY
 					local block = if depth == 0 then top elseif depth <= fillerDepth then filler else STONE
 					writeu16(data, base + y * stride, block)
 				end
@@ -313,7 +314,7 @@ function TerrainGenerator.new(seed: number): Generator
 
 		-- 4. Trees and other structures.
 		if level <= Config.StructureMaxLevel then
-			local w = Writer.new(data, originX, originZ, step, cells)
+			local w = Writer.new(data, originX, originZ, step, stepY, cells)
 			local span = SIZE * step
 			Structures.populate(
 				seed,

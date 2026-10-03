@@ -79,8 +79,15 @@ local function intersectsCharacter(x: number, y: number, z: number): boolean
 	return false
 end
 
+export type Handler = (player: Player, payload: buffer) -> ()
+
 export type ServerNet = {
+	-- Broadcasts the world changes made since the last call (once per frame).
 	flush: () -> (),
+	-- Registers the handler for a client message type (Protocol.ClientMessage).
+	on: (kind: number, handler: Handler) -> (),
+	-- Sends a message to one player.
+	send: (player: Player, kind: number, payload: buffer) -> (),
 }
 
 local ServerNet = {}
@@ -125,7 +132,12 @@ function ServerNet.start(world: World): ServerNet
 
 	local function handleEdit(player: Player, payload: buffer)
 		local action, x, y, z, block = Protocol.decodeEdit(payload)
-		if action == nil or y >= HEIGHT then
+		if
+			action == nil
+			or y >= HEIGHT
+			or math.abs(x) > Protocol.MAX_COORDINATE
+			or math.abs(z) > Protocol.MAX_COORDINATE
+		then
 			return
 		end
 		local rate = Config.Server.EditsPerSecond
@@ -159,14 +171,18 @@ function ServerNet.start(world: World): ServerNet
 		end
 	end
 
+	local handlers: { [number]: Handler } = {
+		[ClientMessage.RequestChunks] = handleChunkRequest,
+		[ClientMessage.Edit] = handleEdit,
+	}
+
 	remote.OnServerEvent:Connect(function(player: Player, kind: unknown, payload: unknown)
 		if typeof(kind) ~= "number" or typeof(payload) ~= "buffer" then
 			return
 		end
-		if kind == ClientMessage.RequestChunks then
-			handleChunkRequest(player, payload)
-		elseif kind == ClientMessage.Edit then
-			handleEdit(player, payload)
+		local handler = handlers[kind]
+		if handler then
+			handler(player, payload)
 		end
 	end)
 
@@ -187,7 +203,16 @@ function ServerNet.start(world: World): ServerNet
 		end
 	end
 
-	return { flush = flush }
+	return {
+		flush = flush,
+		on = function(kind: number, handler: Handler)
+			assert(handlers[kind] == nil, `A handler for message {kind} already exists`)
+			handlers[kind] = handler
+		end,
+		send = function(player: Player, kind: number, payload: buffer)
+			remote:FireClient(player, kind, payload)
+		end,
+	}
 end
 
 return ServerNet

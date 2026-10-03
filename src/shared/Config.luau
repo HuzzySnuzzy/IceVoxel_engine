@@ -20,7 +20,7 @@ local Config = {
 	-- Blocks per chunk along X and Z. Chunks are full-height columns.
 	ChunkSize = 16,
 
-	-- World height in blocks. Must be a multiple of SectionHeight and of 2^(Lod.Levels - 1).
+	-- World height in blocks. Must be a multiple of SectionHeight and of Lod.MaxVerticalStep.
 	WorldHeight = 256,
 
 	-- LOD 0 chunks are meshed in vertical sections of this many blocks so edits only rebuild a slice.
@@ -47,7 +47,9 @@ local Config = {
 
 	Lod = {
 		-- Number of detail levels. Level L chunks cover (ChunkSize * 2^L) blocks with ChunkSize cells.
-		Levels = 5,
+		Levels = 7,
+		-- Cells are 2^L blocks wide but never taller than this, so far mountains keep their shape.
+		MaxVerticalStep = 16,
 		-- A node is split into four children while the camera is closer than SplitDistance * nodeSize.
 		-- Higher = more full detail chunks around the player (radius of LOD 0 is ~2 * SplitDistance chunks).
 		SplitDistance = 3,
@@ -87,6 +89,45 @@ local Config = {
 		PoolLimit = 8000,
 		-- Fades the edge of the view distance with Lighting fog (ignored if an Atmosphere exists).
 		Fog = true,
+		-- Use the blocks' MaterialVariant textures / face images (BlockList `texture`, `faces`).
+		Textures = true,
+	},
+
+	-- Water (client: swimming and currents for the local character) --------------------------------
+
+	Water = {
+		-- Fraction of gravity cancelled while waist deep / fully under water (1 = weightless).
+		Buoyancy = 0.7,
+		SubmergedBuoyancy = 1.05,
+		-- Push of flowing water in studs/s^2 along the current.
+		CurrentAcceleration = 60,
+		-- Studs/s: swimming up while Jump is held, fastest sinking speed.
+		SwimUpSpeed = 14,
+		SinkSpeed = 8,
+		-- Walk speed multiplier in water.
+		WalkSpeedFactor = 0.6,
+	},
+
+	-- Map --------------------------------------------------------------------------------------------
+
+	Map = {
+		Enabled = true,
+		-- Minimap size in pixels and blocks per minimap pixel.
+		MinimapSize = 192,
+		MinimapScale = 2,
+		-- Zoom levels of the world map (M), in blocks per pixel.
+		ZoomLevels = { 1, 2, 4, 8, 16, 32, 64 },
+		-- Pixels per side of a map tile, and how many painted tiles are kept in memory.
+		TileSize = 64,
+		MaxTiles = 160,
+		-- Who may teleport by right clicking the world map: true = everyone, false = nobody,
+		-- or a list of user ids. Checked by the server.
+		Teleport = (true :: any) :: boolean | { number },
+		-- Seconds between teleports of one player.
+		TeleportCooldown = 2,
+		-- Keep waypoints between sessions in a DataStore. In Studio this needs
+		-- Game Settings > Security > "Enable Studio Access to API Services".
+		SaveWaypoints = true,
 	},
 
 	-- Interaction ------------------------------------------------------------------------------------

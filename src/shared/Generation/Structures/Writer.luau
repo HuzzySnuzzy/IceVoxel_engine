@@ -36,18 +36,26 @@ export type Writer = {
 
 local Writer = {}
 
--- `originX` / `originZ`: world block coordinate of the first *core* cell. `heightCells`: cells per column.
-function Writer.new(data: buffer, originX: number, originZ: number, step: number, heightCells: number): Writer
+-- `originX` / `originZ`: world block coordinate of the first *core* cell; `step` / `stepY`: cell size
+-- in blocks; `heightCells`: cells per column.
+function Writer.new(
+	data: buffer,
+	originX: number,
+	originZ: number,
+	step: number,
+	stepY: number,
+	heightCells: number
+): Writer
 	local minX = originX - step
 	local minZ = originZ - step
-	local half = step // 2
+	local half, halfY = step // 2, stepY // 2
 	local highest = 0
 
 	-- Byte offset of the cell containing a block, or -1 when outside the chunk.
 	local function cellOffset(x: number, y: number, z: number): number
 		local px = (x - minX) // step
 		local pz = (z - minZ) // step
-		local cy = y // step
+		local cy = y // stepY
 		if px < 0 or px >= P or pz < 0 or pz >= P or cy < 0 or cy >= heightCells then
 			return -1
 		end
@@ -56,7 +64,7 @@ function Writer.new(data: buffer, originX: number, originZ: number, step: number
 
 	-- Same, but only when the block is the sample point of its cell.
 	local function sampleOffset(x: number, y: number, z: number): number
-		if (x - minX) % step ~= half or y % step ~= half or (z - minZ) % step ~= half then
+		if (x - minX) % step ~= half or y % stepY ~= halfY or (z - minZ) % step ~= half then
 			return -1
 		end
 		return cellOffset(x, y, z)
@@ -65,7 +73,7 @@ function Writer.new(data: buffer, originX: number, originZ: number, step: number
 	local forceOffset: (number, number, number) -> number = if step <= 2 then cellOffset else sampleOffset
 
 	local function touch(y: number)
-		local cell = y // step + 1
+		local cell = y // stepY + 1
 		if cell > highest then
 			highest = cell
 		end

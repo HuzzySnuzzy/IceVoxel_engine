@@ -38,7 +38,13 @@ return function(t, shared, require)
 		elseif kind == FLUID then
 			for _, d in dirs do
 				local n = neighbour(d[1], d[2], d[3])
-				if n ~= nil and buffer.readu8(cull, n) == 0 and Blocks.get(n).appearance ~= app then
+				if n ~= nil and buffer.readu8(cull, n) == 0 and n ~= id then
+					-- Visible; lowered to its level unless the same fluid continues above.
+					local above = neighbour(0, 1, 0)
+					local surface = buffer.readu8(Blocks.fluidHeightLut, id)
+					if surface < Blocks.FLUID_FULL and Blocks.get(above :: number).appearance ~= app then
+						return app + surface * GreedyMesher.KEY_STRIDE, false
+					end
 					return app, false
 				end
 			end
@@ -54,8 +60,8 @@ return function(t, shared, require)
 			local o = b * GreedyMesher.BOX_BYTES
 			local bx, by, bz = buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
 			local sx, sy, sz = buffer.readu16(boxes, o + 6), buffer.readu16(boxes, o + 8), buffer.readu16(boxes, o + 10)
-			local app = buffer.readu16(boxes, o + 12)
-			local opaqueBox = Blocks.appearances[app].kind == OPAQUE
+			local app = buffer.readu16(boxes, o + 12) -- appearance + fluid surface height (see GreedyMesher)
+			local opaqueBox = Blocks.appearances[app % GreedyMesher.KEY_STRIDE].kind == OPAQUE
 			assert(bx + sx <= SIZE and bz + sz <= SIZE and by >= y0 and by + sy <= y1, "box outside the section")
 			for y = by, by + sy - 1 do
 				for z = bz, bz + sz - 1 do
@@ -109,6 +115,37 @@ return function(t, shared, require)
 		ChunkLayout.set(data, 8, 3, 8, Blocks.AIR)
 		local count = verify(data, 8, 0, 8, false)
 		t.ok(count > 1 and count < 12, `hole produced {count} boxes`)
+	end)
+
+	t.test("flowing water is lowered per level and only equal levels merge", function()
+		local data = ChunkLayout.create(8)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				ChunkLayout.setPadded(data, x, 0, z, Blocks.id.Stone)
+			end
+		end
+		-- A source with a row of weaker and weaker flowing water next to it, plus a falling column.
+		ChunkLayout.set(data, 0, 1, 0, Blocks.fluidId("Water", 0))
+		for level = 1, 7 do
+			ChunkLayout.set(data, level, 1, 0, Blocks.fluidId("Water", level))
+		end
+		for y = 1, 4 do
+			ChunkLayout.set(data, 10, y, 10, Blocks.fluidId("Water", 8))
+		end
+		local boxes, count = GreedyMesher.mesh(data, 8, 0, 8, false)
+		local heights: { [number]: number } = {}
+		for b = 0, count - 1 do
+			local o = b * GreedyMesher.BOX_BYTES
+			local appearance, surface = GreedyMesher.decodeKey(buffer.readu16(boxes, o + 12))
+			if Blocks.appearances[appearance].kind == FLUID then
+				heights[buffer.readu16(boxes, o) * 100 + buffer.readu16(boxes, o + 4)] = surface
+			end
+		end
+		t.eq(heights[0], 8, "source surface is 8/9")
+		t.eq(heights[300], 5, "level 3 is 5/9")
+		t.eq(heights[700], 1, "level 7 is 1/9")
+		t.eq(heights[1010], 0, "falling water is full height")
+		verify(data, 8, 0, 8, false)
 	end)
 
 	t.test("glass and water are covered correctly", function()

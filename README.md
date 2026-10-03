@@ -15,6 +15,13 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Server-authoritative interaction.** Break and place blocks with client prediction and server
   validation. Block updates power falling sand and gravel, flowing water (Minecraft rules, including
   infinite sources) and grass turning into dirt.
+- **Water you can see flow and swim in.** Flowing water steps down level by level like Minecraft,
+  currents push the player downstream, and you can swim (float, sink slowly, hold Jump to rise).
+- **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
+  Right click the map to add waypoints (saved between sessions), teleport, or center the view.
+- **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
+  live in `SpawnUnsafeBlocks`.
+- **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
 
 ## Getting started
 
@@ -45,6 +52,10 @@ Studio tips:
 | Break block   | Left click (hold to repeat) | R2      | Tap        |
 | Place block   | Right click                 | L2      | Long press |
 | Select block  | `1`–`9`, `Q` / `E` to cycle |         |            |
+| Swim up       | Hold `Space` in water       | A       | Jump       |
+| World map     | `M`, or click the minimap   |         | Tap minimap |
+| Map menu      | Right click the map         | R3      | Long press |
+| Minimap zoom  | `-` / `=`                   |         |            |
 | Debug overlay | `F3`                        |         |            |
 
 ## Project layout
@@ -60,7 +71,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Caves, Ores             full detail only
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
   Meshing/GreedyMesher      blocks -> boxes
-  World/                    ChunkLayout, Coords, LodTree, VoxelRaycast
+  Map/MapPainter            map tile colours from the generator (runs in the workers)
+  World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
   Net/                      Protocol (buffer encoding), Remotes
   Util/Hash                 deterministic hashing and RNG
 
@@ -70,7 +82,8 @@ src/server   -> ServerScriptService.IceVoxel
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation
   Behaviours/               Gravity, Fluid, Grass (block update logic)
   Network/ServerNet         edit lists, edit validation, replication
-  Players/Spawning          spawn point on dry land
+  Players/                  Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
+                            Teleport (map), WaypointStore (DataStore)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -78,7 +91,11 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
   Rendering/                ChunkRenderer (boxes -> parts), PartPool
   Interaction/              BlockInteraction, Hotbar
-  Player/SpawnGuard         holds the character until the ground exists
+  Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
+                            Waypoints, ContextMenu
+  Net/ClientNet             routes server messages
+  Player/                   SpawnGuard (holds the character until the ground exists),
+                            WaterController (swimming, currents)
   Debug/DebugOverlay        F3 stats
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview
@@ -95,12 +112,16 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | ------------------------- | ------- | ------------------------------------------------------------------- |
 | `Lod.ViewDistance`        | 1024    | How far terrain is drawn (blocks).                                  |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
-| `Lod.Levels`              | 5       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
+| `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
+| `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
 | `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
 | `Render.Shadows`          | true    | Shadows on full detail chunks (far chunks never cast shadows).      |
 | `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
+| `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
+| `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
+| `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 
 Part count depends on the terrain: flat land costs ~35 parts per full detail chunk, steep
 mountains ~120. Measured view from spawn with the default settings: 19k parts on seed 12345
@@ -119,6 +140,54 @@ table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Mar
 ```
 
 It is immediately placeable from the hotbar. Blocks that look identical share one part template.
+
+**Block textures.** Blocks already use Roblox materials (Slate, Grass, Sand...), which have
+built-in textures. For your own, per-block textures use a MaterialVariant per block:
+
+1. In Studio open the Material Manager (Model tab) and create a variant, e.g. `IV_Stone`, with the
+   block's material as Base Material (Stone uses `Slate`), your uploaded images as Color (and
+   optionally Normal / Roughness) maps, **Studs Per Tile = 3** (the block size, so one tile covers
+   one block face) and **Pattern = Regular**. Scripts cannot create textured variants at runtime;
+   they have to be authored in Studio (or synced by Rojo, below).
+2. Point the block at it in `BlockList.luau`:
+   ```lua
+   { name = "Stone", color = { 125, 125, 128 }, material = "Slate", texture = "IV_Stone" },
+   ```
+   `color` still colours the map; the part is tinted with `tint` (default white, i.e. the
+   texture's own colours). A missing variant just prints a warning and keeps the plain material.
+3. Different faces, e.g. a grass top on a dirt-textured block: `faces = { Top = "rbxassetid://..." }`.
+   Each face image is one extra instance per part, so it is only drawn on full detail chunks.
+
+With Rojo the variants can live in the project instead:
+
+```json
+"MaterialService": {
+  "IV_Stone": {
+    "$className": "MaterialVariant",
+    "$properties": {
+      "BaseMaterial": "Slate",
+      "ColorMap": "rbxassetid://YOUR_IMAGE_ID",
+      "StudsPerTile": 3,
+      "MaterialPattern": "Regular"
+    }
+  }
+}
+```
+
+(add it inside `"tree"` in `default.project.json`; Rojo 7.5+ also accepts `ColorMapContent`). Check
+the tile alignment once in Studio: a 9-stud and three 3-stud parts next to each other should show
+identical tiles.
+
+**Spawn safety.** `src/server/Players/SpawnUnsafeBlocks.luau` lists what a player must not stand on
+(`Floor`), stand in (`Body`, fluids by name) or touch (`Hazards`), plus the headroom and search
+radius. Spawns and map teleports search outward for the closest spot that passes, and never put
+players below the natural surface (caves).
+
+**The map.** The minimap and world map draw terrain with EditableImage. That API works in Studio
+right away, but **published games** need the experience owner to be 13+ and ID verified and to turn
+on *Enable Mesh / Image APIs* (Creator Dashboard, experience settings). Without it the maps still
+show players and waypoints, and the right click menu still works. Teleporting is controlled by
+`Config.Map.Teleport` and checked by the server.
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with a climate position
 (temperature, humidity), terrain shape (`heightOffset`, `hilliness`), surface blocks and
@@ -169,10 +238,12 @@ luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
 
 Natural next steps, roughly in order:
 
-- **Persistence.** Edits live in memory (`WorldServer.edits`); save them per chunk to a DataStore.
-- **Edits in LOD chunks.** Far chunks show generated terrain only; player builds appear once in
-  full detail range.
-- **Swimming.** Water is drawn and flows, but characters fall through it.
+- **Persistence.** Edits live in memory (`WorldServer.edits`); save them to a DataStore per region
+  of 32 × 32 chunks (see "regions" in docs/ARCHITECTURE.md).
+- **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
+  builds appear once in full detail range.
+- **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
+  connectivity (docs/ARCHITECTURE.md, "Hidden caves, octrees and regions").
 - **Bigger structures.** Villages / dungeons using the same stateless placement with a larger grid.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result.

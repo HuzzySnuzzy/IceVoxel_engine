@@ -1,0 +1,178 @@
+--!strict
+--[[
+	The player's waypoints: the list, beacons in the world, and syncing with the server
+	(Players/WaypointStore), which keeps them between sessions.
+
+	Every change sends the whole list (debounced); the server answers with the saved list when the
+	player joins and with filtered names if filtering changed any.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
+local Protocol = require(Shared.Net.Protocol)
+
+local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+
+type Waypoint = Protocol.Waypoint
+
+local BLOCK = Config.BlockSize
+local SAVE_DELAY = 1
+local PALETTE = {
+	{ 255, 99, 71 },
+	{ 255, 196, 61 },
+	{ 120, 220, 90 },
+	{ 64, 200, 255 },
+	{ 170, 120, 255 },
+	{ 255, 120, 200 },
+}
+
+export type Waypoints = {
+	list: { Waypoint },
+	-- Called whenever the list changes.
+	onChanged: (() -> ())?,
+	-- Rebuilds beacons, notifies listeners and (if `save`) schedules sending the list.
+	changed: (save: boolean) -> (),
+
+	add: (self: Waypoints, name: string, x: number, y: number, z: number) -> (),
+	remove: (self: Waypoints, index: number) -> (),
+	nearest: (self: Waypoints, x: number, z: number, radius: number) -> number?,
+}
+
+local Waypoints = {}
+Waypoints.__index = Waypoints
+
+function Waypoints.new(): Waypoints
+	local self = (
+		setmetatable({ list = {}, onChanged = nil, changed = function(_: boolean) end }, Waypoints) :: any
+	) :: Waypoints
+
+	local folder = Instance.new("Folder")
+	folder.Name = "IceVoxelWaypoints"
+	folder.Parent = workspace.CurrentCamera
+	local beacons: { { part: Part, label: TextLabel } } = {}
+	local saveAt: number? = nil
+
+	local function rebuildBeacons()
+		for _, beacon in beacons do
+			beacon.part:Destroy()
+		end
+		table.clear(beacons)
+		for _, waypoint in self.list do
+			local part = Instance.new("Part")
+			part.Name = waypoint.name
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanQuery = false
+			part.CanTouch = false
+			part.Transparency = 1
+			part.Size = Vector3.one
+			part.Position =
+				Vector3.new((waypoint.x + 0.5) * BLOCK, (waypoint.y + 2) * BLOCK, (waypoint.z + 0.5) * BLOCK)
+
+			local billboard = Instance.new("BillboardGui")
+			billboard.AlwaysOnTop = true
+			billboard.LightInfluence = 0
+			billboard.MaxDistance = math.huge
+			billboard.Size = UDim2.fromOffset(160, 40)
+			billboard.Parent = part
+
+			local label = Instance.new("TextLabel")
+			label.BackgroundTransparency = 1
+			label.Size = UDim2.fromScale(1, 1)
+			label.Font = Enum.Font.GothamBold
+			label.TextSize = 14
+			label.TextStrokeTransparency = 0.3
+			label.TextColor3 = Color3.fromRGB(waypoint.color[1], waypoint.color[2], waypoint.color[3])
+			label.Text = waypoint.name
+			label.Parent = billboard
+
+			part.Parent = folder
+			table.insert(beacons, { part = part, label = label })
+		end
+	end
+
+	local function changed(save: boolean)
+		rebuildBeacons()
+		if save then
+			saveAt = os.clock() + SAVE_DELAY
+		end
+		if self.onChanged then
+			self.onChanged()
+		end
+	end
+	self.changed = changed
+
+	ClientNet.on(Protocol.ServerMessage.Waypoints, function(payload)
+		local list = Protocol.decodeWaypoints(payload)
+		if list then
+			self.list = list
+			changed(false)
+		end
+	end)
+
+	local sinceLabels = 0
+	RunService.Heartbeat:Connect(function(dt)
+		if saveAt and os.clock() >= saveAt then
+			saveAt = nil
+			ClientNet.send(Protocol.ClientMessage.SaveWaypoints, Protocol.encodeWaypoints(self.list))
+		end
+		sinceLabels += dt
+		if sinceLabels < 0.25 then
+			return
+		end
+		sinceLabels = 0
+		local camera = workspace.CurrentCamera.CFrame.Position
+		for i, beacon in beacons do
+			local waypoint = self.list[i]
+			if waypoint then
+				local distance = (beacon.part.Position - camera).Magnitude / BLOCK
+				beacon.label.Text = `{waypoint.name}\n{math.floor(distance)} m`
+			end
+		end
+	end)
+
+	return self
+end
+
+function Waypoints.add(self: Waypoints, name: string, x: number, y: number, z: number)
+	if #self.list >= Protocol.MAX_WAYPOINTS then
+		return
+	end
+	local trimmed = Protocol.truncateName(name)
+	if trimmed == "" then
+		trimmed = `Waypoint {#self.list + 1}`
+	end
+	table.insert(self.list, {
+		name = trimmed,
+		x = math.floor(x),
+		y = math.floor(y),
+		z = math.floor(z),
+		color = PALETTE[#self.list % #PALETTE + 1],
+	})
+	self.changed(true)
+end
+
+function Waypoints.remove(self: Waypoints, index: number)
+	if self.list[index] then
+		table.remove(self.list, index)
+		self.changed(true)
+	end
+end
+
+-- Index of the waypoint closest to (x, z) within `radius` blocks, if any.
+function Waypoints.nearest(self: Waypoints, x: number, z: number, radius: number): number?
+	local best, bestDistance = nil, radius * radius
+	for i, waypoint in self.list do
+		local dx, dz = waypoint.x - x, waypoint.z - z
+		local distance = dx * dx + dz * dz
+		if distance <= bestDistance then
+			best, bestDistance = i, distance
+		end
+	end
+	return best
+end
+
+return Waypoints

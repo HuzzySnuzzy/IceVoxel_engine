@@ -27,6 +27,9 @@ export type BlockDef = {
 	placeable: boolean,
 	behaviour: string?,
 	fluid: { group: string, level: number, tickDelay: number }?,
+	texture: string?,
+	tint: { number },
+	faces: { [string]: string }?,
 	appearance: number,
 }
 
@@ -38,6 +41,10 @@ export type Appearance = {
 	transparency: number,
 	reflectance: number,
 	solid: boolean,
+	-- MaterialVariant name, tint applied with it and per-face images (see BlockList).
+	texture: string?,
+	tint: { number },
+	faces: { [string]: string }?,
 }
 
 local Blocks = {}
@@ -90,13 +97,23 @@ for index, spec in BlockList do
 		placeable = if spec.placeable ~= nil then spec.placeable else (drawn and solid),
 		behaviour = spec.behaviour,
 		fluid = spec.fluid,
+		texture = spec.texture,
+		tint = spec.tint or { 255, 255, 255 },
+		faces = spec.faces,
 		appearance = 0,
 	}
 
 	if drawn then
-		local c = def.color
-		local key =
-			`{kind}|{def.material}|{c[1]},{c[2]},{c[3]}|{def.transparency}|{def.reflectance}|{if solid then 1 else 0}`
+		local c, t = def.color, def.tint
+		local faces = {}
+		local faceImages: { [string]: string } = def.faces or {}
+		for face, image in faceImages do
+			table.insert(faces, `{face}={image}`)
+		end
+		table.sort(faces)
+		local look = `{kind}|{def.material}|{c[1]},{c[2]},{c[3]}|{def.transparency}|{def.reflectance}`
+		local texture = `{def.texture or ""}|{t[1]},{t[2]},{t[3]}|{table.concat(faces, ";")}`
+		local key = `{look}|{if solid then 1 else 0}|{texture}`
 		local appearance = appearanceByKey[key]
 		if appearance == nil then
 			appearance = #appearances + 1
@@ -109,6 +126,9 @@ for index, spec in BlockList do
 				transparency = def.transparency,
 				reflectance = def.reflectance,
 				solid = solid,
+				texture = def.texture,
+				tint = def.tint,
+				faces = def.faces,
 			})
 		end
 		def.appearance = appearance
@@ -129,6 +149,8 @@ for index, spec in BlockList do
 end
 
 assert(ids.Air == Blocks.AIR and ids.CaveAir == Blocks.CAVE_AIR, "Air and CaveAir must be the first two blocks")
+-- The mesher packs a fluid height next to the appearance id in 16 bits (see GreedyMesher).
+assert(#appearances < 1024, "At most 1023 distinct block appearances are supported")
 
 Blocks.count = #BlockList
 Blocks.defs = defs
@@ -183,6 +205,20 @@ end)
 Blocks.replaceableLut = u8Lut(function(def)
 	return def.replaceable
 end)
+
+--[[
+	Surface height of fluid blocks in ninths of a block (like Minecraft): sources 8, flowing levels
+	1..7 get lower (7..1), falling fluid is full (9). 0 for everything else.
+]]
+Blocks.FLUID_FULL = 9
+Blocks.fluidHeightLut = buffer.create(Blocks.count)
+for id, def in defs do
+	local fluid = def.fluid
+	if fluid then
+		local height = if fluid.level == 0 then 8 elseif fluid.level >= 8 then Blocks.FLUID_FULL else 8 - fluid.level
+		buffer.writeu8(Blocks.fluidHeightLut, id, height)
+	end
+end
 
 -- Blocks a player can point at (everything drawn except fluids).
 Blocks.targetLut = u8Lut(function(def)

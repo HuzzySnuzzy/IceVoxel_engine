@@ -21,7 +21,8 @@ local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
 local Protocol = require(Shared.Net.Protocol)
-local Remotes = require(Shared.Net.Remotes)
+
+local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 
 local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
@@ -45,7 +46,6 @@ export type ClientWorld = {
 	edits: { [number]: { [number]: number } | false },
 	chunks: { [number]: ChunkData },
 	requestQueue: { { number } },
-	remote: RemoteEvent,
 
 	-- Set by the streamer.
 	onSectionDirty: (cx: number, cz: number, section: number) -> (),
@@ -74,26 +74,24 @@ function ClientWorld.new(): ClientWorld
 			edits = {},
 			chunks = {},
 			requestQueue = {},
-			remote = Remotes.net(),
 			onSectionDirty = function() end,
 			onChunkTouched = function() end,
 		}, ClientWorld) :: any
 	) :: ClientWorld
 
-	self.remote.OnClientEvent:Connect(function(kind: number, payload: buffer)
-		if kind == Protocol.ServerMessage.ChunkEdits then
-			for _, list in Protocol.decodeChunkEdits(payload) do
-				local key = Coords.chunkKey(list.cx, list.cz)
-				-- Only accept lists we asked for (and still want).
-				if self.edits[key] == false then
-					self.edits[key] = list.edits
-				end
+	ClientNet.on(Protocol.ServerMessage.ChunkEdits, function(payload)
+		for _, list in Protocol.decodeChunkEdits(payload) do
+			local key = Coords.chunkKey(list.cx, list.cz)
+			-- Only accept lists we asked for (and still want).
+			if self.edits[key] == false then
+				self.edits[key] = list.edits
 			end
-		elseif kind == Protocol.ServerMessage.Edits then
-			Protocol.forEachEdit(payload, function(x, y, z, block)
-				self:applyEdit(x, y, z, block)
-			end)
 		end
+	end)
+	ClientNet.on(Protocol.ServerMessage.Edits, function(payload)
+		Protocol.forEachEdit(payload, function(x, y, z, block)
+			self:applyEdit(x, y, z, block)
+		end)
 	end)
 
 	return self
@@ -169,7 +167,7 @@ function ClientWorld.flush(self: ClientWorld)
 	local batch = Config.Streaming.DiffRequestBatch
 	for first = 1, #queue, batch do
 		local coords = table.move(queue, first, math.min(first + batch - 1, #queue), 1, {})
-		self.remote:FireServer(Protocol.ClientMessage.RequestChunks, Protocol.encodeChunkRequest(coords))
+		ClientNet.send(Protocol.ClientMessage.RequestChunks, Protocol.encodeChunkRequest(coords))
 	end
 	self.requestQueue = {}
 end
@@ -274,12 +272,12 @@ end
 
 function ClientWorld.breakBlock(self: ClientWorld, x: number, y: number, z: number)
 	ClientWorld.applyEdit(self, x, y, z, AIR)
-	self.remote:FireServer(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Break, x, y, z, AIR))
+	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Break, x, y, z, AIR))
 end
 
 function ClientWorld.placeBlock(self: ClientWorld, x: number, y: number, z: number, block: number)
 	ClientWorld.applyEdit(self, x, y, z, block)
-	self.remote:FireServer(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Place, x, y, z, block))
+	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Place, x, y, z, block))
 end
 
 return ClientWorld
