@@ -51,6 +51,14 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
+- **WAILA (What Am I Looking At).** A panel at the top of the screen names what the crosshair
+  points at, like the Jade mod: the block's icon and name, the tool and tier it needs with a
+  green check or red cross for the item in hand ("Requires Iron Pickaxe"), the mining progress
+  as a line along its bottom edge, and "IceVoxel" as the mod name. It also names dropped items,
+  other players (health, game mode) and water when no block is in reach. While `F3` is open it
+  shows everything the game knows about the block: id, position and chunk, biome, hardness,
+  tool, drops with the held item and by hand, break time, light, fluid level, render kind,
+  friction and menu.
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel, flowing water (Minecraft rules, including infinite sources) and grass
@@ -125,7 +133,7 @@ Studio tips:
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
-| Debug overlay | `F3`                        |         |            |
+| Debug overlay | `F3` (also WAILA's extended view) |         |            |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
 
 ## Project layout
@@ -191,7 +199,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
                             chest and furnace panels laid out by MenuLayout), CreativeScreen,
                             ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
-                            clicks), Style
+                            clicks), Style, Waila + WailaInfo (what the crosshair points at)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
@@ -200,7 +208,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             CharacterAnimator (avatar animations from the hull), HeldItems
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables and furnaces)
-  Debug/DebugOverlay        F3 stats
+  Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview
 docs/        ARCHITECTURE.md (how everything fits together)

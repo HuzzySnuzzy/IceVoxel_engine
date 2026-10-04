@@ -10,6 +10,7 @@
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
 	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons
+	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
 	  Entities/EntityRenderer    dropped items
 	  Net/Notices                server messages in the chat (/gamemode answers)
@@ -44,6 +45,7 @@ local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
+local Waila = require(Client.Ui.Waila)
 local Map = require(Client.Map)
 
 local seed = Shared:GetAttribute("Seed")
@@ -70,6 +72,7 @@ CharacterAnimator.start()
 HeldItems.start()
 BlockInteraction.start(world)
 DebugOverlay.start(streamer)
+Waila.start(world, generator)
 Map.start(pool, generator)
 
 RunService.Heartbeat:Connect(function(dt)

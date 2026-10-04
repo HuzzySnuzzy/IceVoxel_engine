@@ -375,6 +375,50 @@ prediction.
 - Middle click picks the block (Minecraft's pick block), `Q` drops the held item (`Ctrl`: the
   stack). On touch screens a tap uses or places and holding breaks.
 
+### WAILA (`Ui/Waila`, `Ui/WailaInfo`)
+
+A panel at the top centre names what the crosshair points at, like the Jade mod.
+
+- **Target.** `BlockInteraction.target()`: the highlighted block, with the same reach and rules
+  (outlines included). A dropped item (`EntityRenderer.itemsNear`, a 0.5 × 0.8 block box around
+  its bobbing model) or another player (their standing hull) nearer on the same aim and in reach
+  wins, except while mining (`BlockInteraction.miningProgress()`), so the progress stays on
+  screen; an entity behind a block is never named, even when that block is too far to target
+  (WAILA casts BlockInteraction's ray without its reach check). Water shows only when no block is
+  in reach: BlockInteraction aims and mines through water, so WAILA must not hide the highlighted
+  block. The water ray skips the water the camera starts in. The rule is `WailaInfo.choose`
+  (tested). Items, players, water and the hiding block are looked for every 0.05 s; touch
+  screens aim with a finger only while breaking, so they show blocks only.
+- **Content.** `WailaInfo` (pure, tested) turns (block, held item, x, y, z, extended) into an icon
+  (the item's 3D icon; a colour box for blocks that are no item; a player's head shot) and lines
+  of coloured segments:
+  - the name (a chest adds "(27 slots)"; contents are only known while it is open);
+  - the harvest line from `Items.canHarvest` and the block's `tool` / `toolLevel`:
+    "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable";
+  - while the F3 overlay is open (`DebugOverlay.isOpen()`), gray lines: `Stone #3`, position,
+    chunk (floored, with the local column), biome (`generator.column`), hardness, tool kind and
+    level, drops with the held item and by hand (`Items.drops`), break time (`Mining.ticks / 20`,
+    standing and dry), light (`Blocks.light`), fluid level, render kind, solidity, friction, menu;
+  - "IceVoxel" in blue italics, always last.
+- **Drawing.** Minecraft's tooltip shape, Jade's default theme: a translucent dark background
+  with cut corners and a 1 pixel purple border fading downwards, the Arcade font with its shadow,
+  in GUI pixels at the HUD's scale. Checks and crosses are pixel art; the italic mod name is the
+  label cut into 2 pixel strips, each shifted a whole pixel or none like Minecraft's italic shear
+  (`WailaInfo.italicShifts`; UDim offsets are integers). Mining progress is a white line over the
+  bottom border.
+- **Placement.** `WailaInfo.placement` (tested): the top centre, clear of the minimap's corner
+  and, with F3 open, right of the debug text when the screen allows (screen edges first, then the
+  minimap, then the F3 text); drawn smaller when it doesn't fit (whole scales on desktops,
+  eighths on touch, at least half size). Where the room left of the minimap is too narrow to read
+  it, it goes over the minimap's corner, as far left as it can.
+- **Updates.** Every frame builds a short key (target, held item, F3) and rebuilds the text only
+  when it changes, at most once a tick (0.05 s); hiding keeps the text, so a target flickering on
+  and off is shown again without a rebuild. Progress only resizes its line. The panel hides while
+  a screen is open, while the HUD is hidden (the world map) and with nothing aimed at.
+
+The F3 overlay also shows the time: clock, day number, tick, sky light and how much of it reaches
+the camera (`LightingController.dayTime`, `skyExposure`).
+
 ### Movement (`Shared/Movement`, `Player/MovementController`, `Player/CharacterAnimator`)
 
 Players move like in Minecraft Java Edition (1.20): a hull, an axis-aligned box, is simulated

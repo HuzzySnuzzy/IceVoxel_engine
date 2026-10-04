@@ -21,6 +21,7 @@
 
 	The models (ItemModels: anchored, nothing collides, touches or is queried) live in a Folder in
 	the workspace and are moved together with one BulkMoveTo per frame, after the camera.
+	`itemsNear` lists the items around a point, read only (WAILA aims at them, Ui/Waila).
 ]]
 
 local Players = game:GetService("Players")
@@ -416,6 +417,28 @@ end
 -- Number of dropped items the client knows (for the debug overlay).
 function EntityRenderer.count(): number
 	return itemCount
+end
+
+-- A dropped item as other modules see it: its entity id, stack and where it is drawn (blocks,
+-- the bottom centre of its box, without the bobbing).
+export type ItemView = { id: number, item: number, count: number, x: number, y: number, z: number }
+
+--[[
+	The dropped items within `radius` blocks of (x, y, z) (blocks), e.g. for WAILA (Ui/Waila). A new
+	list of copies each call: changing it changes nothing. Items flying to a collector are left out.
+]]
+function EntityRenderer.itemsNear(x: number, y: number, z: number, radius: number): { ItemView }
+	local found: { ItemView } = {}
+	local limit = radius * radius
+	for _, entity in items do
+		local body = entity.body
+		local ix, iy, iz = body.x + entity.errX, body.y + entity.errY, body.z + entity.errZ
+		local dx, dy, dz = ix - x, iy - y, iz - z
+		if dx * dx + dy * dy + dz * dz <= limit then
+			table.insert(found, { id = entity.id, item = entity.item, count = entity.count, x = ix, y = iy, z = iz })
+		end
+	end
+	return found
 end
 
 return EntityRenderer

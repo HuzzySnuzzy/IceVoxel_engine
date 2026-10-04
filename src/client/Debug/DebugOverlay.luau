@@ -3,7 +3,12 @@
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
 	builds pending, parts in the world, far mesh status (MeshOverlay), the frame rate, and the
 	player's movement hull (position, speed, ground / water / sprint / flying / pose, game mode;
-	MovementController) and the dropped items the client knows about (EntityRenderer).
+	MovementController), the dropped items the client knows about (EntityRenderer) and the time
+	of day (the clock, day number, Minecraft's sky light outdoors and how much of it reaches the
+	camera; Rendering/LightingController).
+
+	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
+	its extended view while it is, as Jade does with F3.
 ]]
 
 local Players = game:GetService("Players")
@@ -14,11 +19,38 @@ local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
+local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local GameMode = require(ReplicatedStorage:WaitForChild("IceVoxel").GameMode)
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local DayCycle = require(Shared.DayCycle)
+local GameMode = require(Shared.GameMode)
 
 local DebugOverlay = {}
+
+local open = false
+local changedEvent = Instance.new("BindableEvent")
+-- Fires with `true` when F3 shows the overlay and `false` when it hides it.
+DebugOverlay.changed = changedEvent.Event
+
+-- Is the overlay shown (F3)?
+function DebugOverlay.isOpen(): boolean
+	return open
+end
+
+-- The time of day line: clock, day number, tick in the day, sky light outdoors (0..15) and the
+-- share of the sky's light reaching the camera (1 outdoors, 0 deep underground).
+local function timeLine(): string
+	local now = LightingController.dayTime()
+	return string.format(
+		"time    %s  day %d  tick %d  sky %d  exposure %.2f",
+		DayCycle.clockString(now),
+		DayCycle.day(now),
+		DayCycle.timeInDay(now),
+		DayCycle.skyLight(now),
+		LightingController.skyExposure()
+	)
+end
 
 -- Movement hull line (blocks; speeds in blocks per second).
 local function movementLine(): string
@@ -79,7 +111,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
-	label.Size = UDim2.fromOffset(380, 210)
+	label.Size = UDim2.fromOffset(380, 226)
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.BackgroundTransparency = 0.5
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -97,7 +129,9 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if not processed and input.KeyCode == Enum.KeyCode.F3 then
-			gui.Enabled = not gui.Enabled
+			open = not open
+			gui.Enabled = open
+			changedEvent:Fire(open)
 		end
 	end)
 
@@ -130,6 +164,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			`parts   {streamer.renderer.partCount}  pooled {streamer.renderer.pool.freeCount}`,
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
+			timeLine(),
 		}, "\n")
 	end)
 end

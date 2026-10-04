@@ -41,6 +41,9 @@
 	predicted locally and confirmed / corrected by the server. Nothing happens while an inventory
 	screen is open (Ui/Screens). Broken blocks throw a few debris particles in their colour;
 	hitting, placing, using and dropping swing the held item (Player/HeldItems).
+
+	`target()` and `miningProgress()` let other modules (Ui/Waila) read what is aimed at and how far
+	mining has got, without changing anything.
 ]]
 
 local Players = game:GetService("Players")
@@ -95,6 +98,24 @@ type Hit = VoxelRaycast.Hit
 
 -- A block being mined (survival), and the item in hand when it started (nil: bare hands).
 type MinedBlock = { x: number, y: number, z: number, block: number, tool: number?, progress: number }
+
+-- Read-only views of the aim and the mining state, for other modules (set by start).
+local readTarget: () -> Hit? = function()
+	return nil
+end
+local readProgress: () -> number? = function()
+	return nil
+end
+
+-- The block the player aims at this frame (the highlighted one, in reach), or nil. Read only.
+function BlockInteraction.target(): Hit?
+	return readTarget()
+end
+
+-- Survival mining progress (0..1) of the aimed-at block while it is being mined, else nil.
+function BlockInteraction.miningProgress(): number?
+	return readProgress()
+end
 
 type Particle = {
 	part: Part,
@@ -368,6 +389,23 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	local target: Hit? = nil
 	local mining: MinedBlock? = nil
+	readTarget = function()
+		return target
+	end
+	readProgress = function()
+		local current, hit = mining, target
+		if
+			current
+			and hit
+			and current.x == hit.x
+			and current.y == hit.y
+			and current.z == hit.z
+			and current.block == hit.block
+		then
+			return current.progress
+		end
+		return nil
+	end
 	-- Ticks left before mining can start again after a break.
 	local destroyDelay = 0
 	local tickClock = 0

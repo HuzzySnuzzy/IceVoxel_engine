@@ -1,0 +1,577 @@
+--!strict
+--[[
+	What WAILA ("What Am I Looking At", Ui/Waila) says about the thing under the crosshair: an icon
+	and lines of coloured text in Jade's order. Pure (no Roblox APIs), so the tests check the
+	content; Ui/Waila draws it.
+
+	  name      the block's name, white (a chest adds its slots in gray: "Chest (27 slots)"); a
+	            dropped item's name and count; a player's display name and @name
+	  harvest   blocks only: the tool and tier they need to drop anything, with a green check or a
+	            red cross for whether the held item harvests them ("Requires Iron Pickaxe"), or
+	            the tool that mines them fastest when any hand will do ("Tool: Shovel"), or
+	            "Unbreakable"
+	  details   players: health and game mode
+	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
+	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
+	            held item and by hand, break time with the held item (Mining.ticks / 20, standing
+	            and dry), light, fluid level, render kind, solidity, friction and menu
+	  mod name  "IceVoxel" in blue italics, always last (Jade names the mod a thing comes from)
+
+	Survival mining progress travels in `Info.progress` (Ui/Waila draws it as Jade's line along
+	the panel's bottom edge, so it moves without rebuilding the text).
+
+	Colours are names (Minecraft's chat colours, see Ui/Waila); a segment with `mark` starts with a
+	check (true) or a cross (false).
+
+	The panel's decisions live here too, so they are tested: what it names when a block, an entity
+	and water are on the aim (`choose`), where it goes and at what scale (`placement`: centred, out
+	of the minimap's corner and right of the F3 text when it can), and the italic shear
+	(`italicShifts`).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Biomes = require(Shared.Biomes)
+local Blocks = require(Shared.Blocks)
+local Config = require(Shared.Config)
+local Items = require(Shared.Items)
+local Mining = require(Shared.Mining)
+
+export type Colour = "white" | "gray" | "darkGray" | "blue" | "green" | "red" | "yellow" | "gold"
+
+-- A run of text in one colour. `mark` draws a check (true) or a cross (false) before it.
+export type Segment = { text: string, colour: Colour, italic: boolean?, mark: boolean? }
+export type Line = { Segment }
+
+-- What the panel shows on the left: an item's icon, a plain colour box (blocks that are no item,
+-- like bedrock) or a player's head.
+export type Icon = { item: number?, colour: { number }?, userId: number? }
+
+export type Info = {
+	icon: Icon?,
+	lines: { Line },
+	-- Survival mining progress of the block, 0..1 (nil: not being mined).
+	progress: number?,
+}
+
+-- Optional facts about a block's surroundings that only the client knows.
+export type BlockContext = {
+	-- Mining progress (BlockInteraction.miningProgress).
+	progress: number?,
+	-- The biome's name at the block's column (extended view).
+	biome: string?,
+}
+
+local WailaInfo = {}
+
+WailaInfo.MOD_NAME = "IceVoxel"
+-- Text drawn for a check / cross in `text` (the panel draws them as pixel art).
+WailaInfo.CHECK = "✔"
+WailaInfo.CROSS = "✘"
+
+local CHUNK = Config.ChunkSize
+
+--[[ Text helpers ]]
+
+-- "OakLog" -> "Oak Log" (the same rule as Items' display names).
+local function spaced(name: string): string
+	return (string.gsub(name, "(%l)(%u)", "%1 %2"))
+end
+
+-- 1.5 -> "1.5", 2 -> "2", 0.989 -> "0.989".
+local function number(value: number): string
+	if value == math.floor(value) and math.abs(value) < 1e15 then
+		return string.format("%d", value)
+	end
+	return string.format("%g", value)
+end
+
+-- Seconds with at most two decimals: 23 ticks -> "1.15 s".
+local function seconds(ticks: number): string
+	return `{number(math.floor(ticks / Mining.TICK_RATE * 100 + 0.5) / 100)} s`
+end
+
+local function segment(text: string, colour: Colour): Segment
+	return { text = text, colour = colour }
+end
+
+-- White text after a check (true) or a cross (false).
+local function marked(text: string, ok: boolean): Segment
+	return { text = text, colour = "white", mark = ok }
+end
+
+local function gray(text: string): Line
+	return { segment(text, "gray") }
+end
+
+-- The plain text of a line, a mark written as CHECK / CROSS and a space (for tests and logs).
+function WailaInfo.text(line: Line): string
+	local parts = {}
+	for _, s in line do
+		if s.mark ~= nil then
+			table.insert(parts, (if s.mark then WailaInfo.CHECK else WailaInfo.CROSS) .. " ")
+		end
+		table.insert(parts, s.text)
+	end
+	return table.concat(parts)
+end
+
+-- Every line's text (WailaInfo.text), in order.
+function WailaInfo.texts(info: Info): { string }
+	local out = {}
+	for _, line in info.lines do
+		table.insert(out, WailaInfo.text(line))
+	end
+	return out
+end
+
+local function modLine(): Line
+	local name: Segment = { text = WailaInfo.MOD_NAME, colour = "blue", italic = true }
+	return { name }
+end
+
+--[[ Names ]]
+
+-- A biome's display name by index (Biomes.list): "BirchForest" -> "Birch Forest".
+function WailaInfo.biomeName(index: number): string
+	local biome = Biomes.list[index]
+	return if biome then spaced(biome.name) else "?"
+end
+
+--[[
+	A block's name as players know it: its display name ("Wall Torch", "Block of Coal"), a fluid's
+	group ("Water" for every level of water), or the spaced internal name.
+]]
+function WailaInfo.blockName(block: number): string
+	local def = Blocks.get(block)
+	if def == nil then
+		return "?"
+	end
+	local fluid = def.fluid
+	if fluid and fluid.level ~= 0 then
+		return WailaInfo.blockName(Blocks.fluidId(fluid.group, 0))
+	end
+	if def.displayName then
+		return def.displayName
+	end
+	local item = Items.ofBlock(block)
+	return if item then Items.displayName(item) else spaced(def.name)
+end
+
+-- The icon of a block: its item (a wall torch shows the Torch, flowing water the Water), else a
+-- box in its colour.
+function WailaInfo.blockIcon(block: number): Icon
+	local def = Blocks.get(block)
+	local fluid = def and def.fluid
+	local source = if fluid then Blocks.fluidId(fluid.group, 0) else block
+	local item = Items.ofBlock(source)
+	if item then
+		return { item = item }
+	end
+	return { colour = if def then def.color else { 255, 0, 255 } }
+end
+
+-- The weakest tool of each kind and harvest level (Wooden rather than Golden at level 0), by name.
+local toolNames: { [string]: { [number]: { name: string, speed: number } } } = {}
+for _, def in Items.list do
+	local tool = def.tool
+	if tool then
+		local byLevel = toolNames[tool.kind]
+		if byLevel == nil then
+			byLevel = {}
+			toolNames[tool.kind] = byLevel
+		end
+		local known = byLevel[tool.level]
+		if known == nil or tool.speed < known.speed then
+			byLevel[tool.level] = { name = def.displayName, speed = tool.speed }
+		end
+	end
+end
+
+-- "pickaxe" -> "Pickaxe".
+local function kindName(kind: string): string
+	return string.upper(string.sub(kind, 1, 1)) .. string.sub(kind, 2)
+end
+
+-- The tool of `kind` at harvest `level` ("Iron Pickaxe"), or a generic name when there is none.
+function WailaInfo.toolName(kind: string, level: number): string
+	local byLevel = toolNames[kind]
+	local known = byLevel and byLevel[level]
+	return if known then known.name else `Level {level} {kindName(kind)}`
+end
+
+-- A stack as text: "Cobblestone", "Glowstone Dust x4"; nil is "nothing".
+local function stackText(stack: Items.Stack?): string
+	if stack == nil then
+		return "nothing"
+	end
+	local name = Items.displayName(stack.item)
+	return if stack.count > 1 then `{name} x{stack.count}` else name
+end
+
+-- "source", "flowing 3" or "falling" for a fluid block, nil for anything else.
+function WailaInfo.fluidState(block: number): string?
+	local def = Blocks.get(block)
+	local fluid = def and def.fluid
+	if fluid == nil then
+		return nil
+	end
+	if fluid.level == 0 then
+		return "source"
+	elseif fluid.level >= 8 then
+		return "falling"
+	end
+	return `flowing {fluid.level}`
+end
+
+-- The chunk of a block column and the column's place in it (floored, so -1 is in chunk -1 at 15).
+function WailaInfo.chunkOf(x: number, z: number): (number, number, number, number)
+	return x // CHUNK, z // CHUNK, x % CHUNK, z % CHUNK
+end
+
+--[[ Blocks ]]
+
+--[[
+	The harvest line of `block` for a player holding `held` (an item id, nil = bare hands), or nil
+	when no tool matters:
+	  * blocks needing a tool of some tier: "Requires Iron Pickaxe", checked when the held item
+	    harvests it (Items.canHarvest), crossed when it would drop nothing;
+	  * blocks any hand harvests that a tool mines faster: "Tool: Shovel", always checked;
+	  * "Unbreakable" for bedrock and the like.
+]]
+function WailaInfo.harvest(block: number, held: number?): Line?
+	local def = Blocks.get(block)
+	if def == nil or def.fluid then
+		return nil
+	end
+	if not def.breakable or def.hardness < 0 then
+		return { segment("Unbreakable", "red") }
+	end
+	local tool = def.tool
+	if tool == nil then
+		return nil
+	end
+	local level = def.toolLevel
+	if level ~= nil then
+		return { marked(`Requires {WailaInfo.toolName(tool, level)}`, Items.canHarvest(block, held)) }
+	end
+	return { marked(`Tool: {kindName(tool)}`, true) }
+end
+
+-- The extended (F3) lines of a block.
+local function blockDetails(
+	block: number,
+	held: number?,
+	x: number,
+	y: number,
+	z: number,
+	context: BlockContext?
+): { Line }
+	local def = Blocks.get(block)
+	local lines: { Line } = {}
+	local cx, cz, lx, lz = WailaInfo.chunkOf(x, z)
+	table.insert(lines, gray(`{def.name} #{block}`))
+	table.insert(lines, gray(`Position {x}, {y}, {z}`))
+	table.insert(lines, gray(`Chunk {cx}, {cz} (local {lx}, {lz})`))
+	local biome = context and context.biome
+	if biome then
+		table.insert(lines, gray(`Biome {biome}`))
+	end
+	local fluidState = WailaInfo.fluidState(block)
+	local fluid = def.fluid
+	if fluidState and fluid then
+		table.insert(lines, gray(`Fluid {fluid.group}, {fluidState}`))
+	else
+		local unbreakable = not def.breakable or def.hardness < 0
+		table.insert(lines, gray(if unbreakable then "Hardness unbreakable" else `Hardness {number(def.hardness)}`))
+		local tool = def.tool
+		if tool then
+			local level = def.toolLevel
+			table.insert(lines, gray(if level ~= nil then `Tool {tool}, level {level}` else `Tool {tool}, any level`))
+		else
+			table.insert(lines, gray("Tool none"))
+		end
+		if not unbreakable then
+			if held ~= nil then
+				table.insert(lines, gray(`Drops with {Items.displayName(held)}: {stackText(Items.drops(block, held))}`))
+			end
+			table.insert(lines, gray(`Drops by hand: {stackText(Items.drops(block, nil))}`))
+			if def.hardness == 0 then
+				table.insert(lines, gray("Breaks at once"))
+			else
+				local ticks = Mining.ticks(block, true, false, held)
+				table.insert(lines, gray(`Breaks in {seconds(ticks)} ({ticks} ticks)`))
+			end
+		end
+	end
+	table.insert(lines, gray(`Light {Blocks.light(block)}`))
+	local solid = if def.solid then "solid" else "not solid"
+	table.insert(lines, gray(`Render {def.render}, {solid}, friction {number(def.friction)}`))
+	if def.menu then
+		table.insert(
+			lines,
+			gray(if def.container > 0 then `Menu {def.menu}, {def.container} slots` else `Menu {def.menu}`)
+		)
+	end
+	return lines
+end
+
+--[[
+	What WAILA shows for `block` at (x, y, z) to a player holding `held` (an item id, nil = bare
+	hands); `extended` adds the F3 details.
+]]
+function WailaInfo.block(
+	block: number,
+	held: number?,
+	x: number,
+	y: number,
+	z: number,
+	extended: boolean,
+	context: BlockContext?
+): Info
+	local def = Blocks.get(block)
+	local name: Line = { segment(WailaInfo.blockName(block), "white") }
+	-- Storage shows its size (contents are only known while it is open, so nothing more).
+	if def and def.menu == "Chest" and def.container > 0 then
+		table.insert(name, segment(` ({def.container} slots)`, "gray"))
+	end
+	local lines: { Line } = { name }
+	local harvest = WailaInfo.harvest(block, held)
+	if harvest then
+		table.insert(lines, harvest)
+	end
+	if extended and def then
+		for _, line in blockDetails(block, held, x, y, z, context) do
+			table.insert(lines, line)
+		end
+	end
+	table.insert(lines, modLine())
+	return { icon = WailaInfo.blockIcon(block), lines = lines, progress = context and context.progress }
+end
+
+--[[ Entities ]]
+
+-- A dropped item (entity `id`, at (x, y, z) in blocks, the bottom centre of its box).
+function WailaInfo.item(
+	item: number,
+	count: number,
+	extended: boolean,
+	id: number?,
+	x: number?,
+	y: number?,
+	z: number?
+): Info
+	local name: Line = { segment(Items.displayName(item), "white") }
+	if count > 1 then
+		table.insert(name, segment(` x{count}`, "gray"))
+	end
+	local lines: { Line } = { name }
+	if extended then
+		local def = Items.get(item)
+		table.insert(lines, gray(`{if def then def.name else "?"} #{item}`))
+		if id then
+			table.insert(lines, gray(`Item entity {id}`))
+		end
+		if x and y and z then
+			table.insert(lines, gray(string.format("Position %.2f, %.2f, %.2f", x, y, z)))
+		end
+	end
+	table.insert(lines, modLine())
+	return { icon = { item = item }, lines = lines, progress = nil }
+end
+
+export type PlayerFacts = {
+	displayName: string,
+	name: string,
+	userId: number,
+	-- Health and its maximum (the Humanoid's; shown in Minecraft's 20 points).
+	health: number,
+	maxHealth: number,
+	gameMode: string,
+	-- Feet position (blocks); the extended view shows the block it is in.
+	x: number?,
+	y: number?,
+	z: number?,
+}
+
+-- Health in Minecraft's points (20 = 10 hearts), rounded up like the HUD's hearts.
+function WailaInfo.healthPoints(health: number, maxHealth: number): number
+	if maxHealth <= 0 then
+		return 0
+	end
+	return math.clamp(math.ceil(health / maxHealth * 20 - 1e-6), 0, 20)
+end
+
+-- Another player.
+function WailaInfo.player(facts: PlayerFacts, extended: boolean): Info
+	local name: Line = { segment(facts.displayName, "white") }
+	if facts.name ~= facts.displayName then
+		table.insert(name, segment(` @{facts.name}`, "gray"))
+	end
+	local lines: { Line } = {
+		name,
+		{ segment(`Health {WailaInfo.healthPoints(facts.health, facts.maxHealth)} / 20`, "red") },
+		gray(facts.gameMode),
+	}
+	if extended then
+		table.insert(lines, gray(`User {facts.userId}`))
+		local x, y, z = facts.x, facts.y, facts.z
+		if x and y and z then
+			-- (The block of the feet: the text only changes when they reach another block.)
+			table.insert(lines, gray(`Position {math.floor(x)}, {math.floor(y)}, {math.floor(z)}`))
+		end
+	end
+	table.insert(lines, modLine())
+	return { icon = { userId = facts.userId }, lines = lines, progress = nil }
+end
+
+--[[ Aiming at entities ]]
+
+--[[
+	Where the ray from (ox, oy, oz) along (dx, dy, dz) (any length; distances are along it as a
+	unit vector) enters the box (minX, minY, minZ)..(maxX, maxY, maxZ): the distance, 0 when it
+	starts inside, nil when it misses or the box is behind.
+]]
+function WailaInfo.rayBox(
+	ox: number,
+	oy: number,
+	oz: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	minX: number,
+	minY: number,
+	minZ: number,
+	maxX: number,
+	maxY: number,
+	maxZ: number
+): number?
+	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
+	if length < 1e-9 then
+		return nil
+	end
+	local d = { dx / length, dy / length, dz / length }
+	local o = { ox, oy, oz }
+	local lo = { minX, minY, minZ }
+	local hi = { maxX, maxY, maxZ }
+	local near, far = -math.huge, math.huge
+	for axis = 1, 3 do
+		if math.abs(d[axis]) < 1e-12 then
+			if o[axis] < lo[axis] or o[axis] > hi[axis] then
+				return nil
+			end
+		else
+			local t1, t2 = (lo[axis] - o[axis]) / d[axis], (hi[axis] - o[axis]) / d[axis]
+			if t1 > t2 then
+				t1, t2 = t2, t1
+			end
+			near, far = math.max(near, t1), math.min(far, t2)
+		end
+	end
+	if near > far or far < 0 then
+		return nil
+	end
+	return math.max(near, 0)
+end
+
+export type Choice = "block" | "entity" | "fluid"
+
+--[[
+	What the panel names, from what lies on the aim (distances in blocks along it):
+	  block   BlockInteraction's target (nil when no block is in reach), `mining` it or not;
+	  entity  the nearest dropped item or player in reach (nil: none);
+	  wall    the first block on the aim at any distance, in reach or not (nil: none);
+	  fluid   water in reach with nothing before it.
+	An entity in front of the block wins, unless the block is being mined (its progress stays on
+	screen) or a block hides the entity (also one out of reach: BlockInteraction can't target it,
+	but it is still in the way). Water only shows when no block is in reach.
+]]
+function WailaInfo.choose(block: number?, mining: boolean, entity: number?, wall: number?, fluid: boolean): Choice?
+	if entity and (wall == nil or entity < wall) and not (block and (mining or block <= entity)) then
+		return "entity"
+	elseif block then
+		return "block"
+	elseif fluid then
+		return "fluid"
+	end
+	return nil
+end
+
+--[[ Placing the panel ]]
+
+-- The screen the panel is placed on (screen pixels; `height` is below Roblox's top bar).
+export type Screen = {
+	width: number,
+	height: number,
+	-- The HUD's GUI scale (Style.guiScale) and whether it is a touch screen (fractional scales).
+	scale: number,
+	touch: boolean,
+	-- Pixels from the screen's top to the panel, and kept free inside every edge.
+	top: number,
+	margin: number,
+	-- Pixels at the right the panel keeps out of (the minimap; 0 for none).
+	rightReserve: number,
+	-- With F3 open: the right edge of the debug text, which the panel keeps right of if it can.
+	avoidLeft: number?,
+}
+
+--[[
+	The scale to draw a `width` x `height` (GUI pixels) panel at and its shift right of the top
+	centre (whole screen pixels). The panel gets the HUD's scale, drawn smaller (down to half
+	size: whole scales on desktops, eighths on touch screens, like Style.guiScale) when it does not
+	fit between the margins, the minimap and the bottom. It stays centred unless that covers the
+	minimap or the F3 text: the screen edges come first, then the minimap, then the F3 text.
+	Where the room left of the minimap is too narrow to read the panel (it would be drawn below
+	the HUD's scale and below 1, as on a phone held upright), it goes over the minimap's corner
+	instead, as far left as it can.
+]]
+function WailaInfo.placement(screen: Screen, width: number, height: number): (number, number)
+	local scale = screen.scale
+	if width <= 0 or height <= 0 then
+		return scale, 0
+	end
+	local leftLimit = screen.margin
+	local beside = screen.width - math.max(screen.rightReserve, screen.margin)
+	local right = beside
+	if (beside - leftLimit) / width < math.min(scale, 1) then
+		right = screen.width - screen.margin
+	end
+	local fit = math.min((right - leftLimit) / width, (screen.height - screen.top - screen.margin) / height)
+	if scale > fit then
+		scale = if fit >= 1 and not screen.touch then math.floor(fit) else math.floor(fit * 8) / 8
+		scale = math.max(scale, 0.5)
+	end
+	local w = width * scale
+	local centred = (screen.width - w) / 2
+	local left = centred
+	local avoid = screen.avoidLeft
+	if avoid and left < avoid then
+		left = avoid
+	end
+	if left + w > beside then
+		left = beside - w
+	end
+	if left < leftLimit then
+		left = leftLimit
+	end
+	return scale, math.floor(left - centred + 0.5)
+end
+
+--[[
+	Minecraft's italics, drawn as `strips` horizontal strips 2 pixels tall: how far (whole GUI
+	pixels) each strip is shifted. Minecraft shears a glyph 1 pixel right at its top and 1 pixel
+	left at its bottom (BakedGlyph: 1 - 0.25 * y); a strip takes its middle row's share, rounded,
+	because GUI offsets are whole pixels (UDim offsets are integers).
+]]
+function WailaInfo.italicShifts(strips: number): { number }
+	local shifts = {}
+	for k = 0, strips - 1 do
+		local shift = math.round(1 - 0.25 * (2 * k + 1))
+		-- (math.round(-0.25) is -0.)
+		table.insert(shifts, if shift == 0 then 0 else shift)
+	end
+	return shifts
+end
+
+return WailaInfo
