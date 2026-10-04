@@ -172,6 +172,9 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
 - opaque blocks enclosed by opaque blocks are **wildcards**: an opaque box may extend through them,
   whatever their material, or leave them out. This lets a grass box run under a one-block step and
   keeps hillsides and underground cheap;
+- **decorated** blocks (`decor`: chests, crafting tables, furnaces; `Blocks.singleLut`) always get a
+  box of their own, one block in size, so their faces can be drawn per block. Other opaque boxes may
+  still run through them where they are hidden;
 - glass is covered exactly; **fluids** only where they touch a non-opaque block other than
   themselves, so oceans become thin sheets instead of tall transparent boxes;
 - a fluid cell without the same fluid above it is **lowered to its level** like Minecraft
@@ -342,16 +345,20 @@ Targeting uses `World/VoxelRaycast` (grid traversal) on the client's block data.
 immediately and sent to the server; a rejected edit comes back as the real block and undoes the
 prediction.
 
-- **Survival mining.** Holding the break button adds `Mining.progressPerTick` every 20 Hz tick:
-  1 / hardness / 30 with bare hands, five times slower in the air or under water (Minecraft's rules;
-  there are no tools, so every block can be harvested). The client sends `Mine` when it starts on
+- **Survival mining.** Holding the break button adds `Mining.progressPerTick` every 20 Hz tick,
+  Minecraft's formula: the held tool's speed (1 by hand; wood 2, stone 4, iron 6, diamond 8, gold
+  12 on blocks of its kind; swords 1.5 on leaves) / hardness / 30, or / 100 if the block needs a
+  tool it can't harvest with (stone by hand, iron ore with a wooden pickaxe), five times slower in
+  the air or under water. Switching to another item restarts the block. The client sends `Mine` when it starts on
   a block and when it stops early. The first tick on a block only starts it (Minecraft's
   `startDestroyBlock`), and `CrackOverlay` draws the ten crack stages as the progress grows
   (procedural lines on SurfaceGuis, no assets). At 100% the block breaks, then mining pauses for 5
   ticks.
 - **The server** only counts a `Mine` start for a minable block in reach. It accepts the break if
   the player started mining that very block long enough ago (`Mining.mayBreak`: 70% of the time,
-  Minecraft's tolerance), and drops `Items.drops(block)`. A break that arrives earlier still (network
+  Minecraft's tolerance) with the tool held when the break arrives, drops `Items.drops(block,
+  tool)` (nothing when that tool can't harvest it) and wears the tool (`Mining.wear`: 1 per block, 2
+  for swords, none on instant blocks; it breaks at its durability). A break that arrives earlier still (network
   jitter) is kept and finished once the full time has passed, or undone after a second, like
   Minecraft's delayed destroy. Only one timer runs at a time: a block started meanwhile counts from
   when the waiting break is done.
@@ -359,7 +366,8 @@ prediction.
   drops nothing. Creative players make items from nothing, so the stacks they throw or spill by
   breaking a chest come out of a budget (10 a second, 64 at once); a chest that would overdraw it
   stays.
-- **Using and placing.** Right click on a container block (a chest) opens it, unless sneaking.
+- **Using and placing.** Right click on a block with a `menu` (chest, crafting table, furnace)
+  opens it, unless sneaking with an item in hand.
   Otherwise the selected item is placed if it is a block. Survival placing uses the item up: the
   Edit message carries the inventory action number of that use (see below), so the prediction
   and the server's answer line up. The own hull is checked standing, like the server checks every
@@ -474,20 +482,36 @@ Minecraft's flying player):
   `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
 
 **Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
-the 20 Minecraft armor pieces) have ids from 4096 up. A stack is `{ item, count }`, at most
-`maxStack` (64, armor 1). Blocks say what they drop (`drops`), how long they take to mine
-(`hardness`) and whether they are containers (`container`, the Chest's 27 slots).
+the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets, gems, snowballs and the 25
+tools) have ids from 4096 up. A stack is `{ item, count, damage }`, at most `maxStack` (64; armor
+and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone 131, iron 250,
+diamond 1561, gold 32). Blocks say how long they take to mine (`hardness`), which tool harvests them
+(`tool`, and `toolLevel` when only that tool of that tier or better drops anything: iron ore needs
+stone, diamond, gold and emerald ore iron), what they drop (`drops`, `dropCount`: snow gives 4
+snowballs), what right click opens (`menu`) and how many slots they hold (`container`).
 
 **The inventory** (`Inventory/Types`, `Inventory/Menu`). It is Minecraft's: 36 slots (1–9 the
 hotbar), 4 armor slots, the stack carried by the mouse, and the selected hotbar slot. A *window*
-is what a screen shows: the inventory plus, when open, a container. Its slots are numbered:
+is what a screen shows: the inventory plus a container, its top part. Its slots are numbered:
 
 | Window slots      | What                                    |
 | ----------------- | --------------------------------------- |
-| `0 .. n-1`        | the container's n slots (none if closed) |
+| `0 .. n-1`        | the container's n slots                 |
 | `n .. n+3`        | armor: head, chest, legs, feet          |
 | `n+4 .. n+30`     | inventory slots 10–36                   |
 | `n+31 .. n+39`    | the hotbar                              |
+
+Containers come in four kinds:
+
+| Kind        | Slots                                          | Whose                               |
+| ----------- | ---------------------------------------------- | ----------------------------------- |
+| `inventory` | 1 result, 2–5 the 2 × 2 grid                   | window 0: the inventory screen's own |
+| `crafting`  | 1 result, 2–10 the 3 × 3 grid                  | a crafting table; personal          |
+| `chest`     | 27                                             | shared by everyone who opens it     |
+| `furnace`   | 1 input, 2 fuel, 3 output, plus `data`         | shared                              |
+
+So window 0 is numbered exactly like Minecraft's InventoryMenu (0 result, 1–4 grid, 5–8 armor,
+9–35 inventory, 36–44 hotbar).
 
 `Menu.apply(window, action, creative)` performs one action, ported from Minecraft 1.20.1's
 `AbstractContainerMenu.doClick` and `Inventory.add`:
@@ -497,7 +521,15 @@ is what a screen shows: the inventory plus, when open, a container. Its slots ar
 - drags that split a stack evenly or one per slot;
 - select, drop, the use of a placed block;
 - creative slots;
-- close (the cursor goes back into the inventory).
+- crafting (Minecraft's ResultSlot): the result is `Crafting.match` of the grid, recomputed after
+  every action; taking it (click, shift-click repeatedly, number key, `Q`) takes the whole result
+  and uses one item from every grid slot. Shift-click routing follows InventoryMenu,
+  CraftingMenu (inventory items go into the 3 × 3 grid first) and AbstractFurnaceMenu (smeltable
+  items to the input, fuel to the fuel slot). Nothing can be put into a result or the furnace
+  output, and the fuel slot takes only fuel;
+- close (the cursor, then a crafting grid's items, go back into the inventory; what doesn't fit
+  is thrown).
+Stacks stack only with the same item and wear (Minecraft's isSameItemSameTags).
 
 It is pure and deterministic, and returns the stacks thrown out of the window. Tests fuzz it for item
 conservation.
@@ -513,11 +545,26 @@ conservation.
   pickups, chest changes by other players, refused actions and the server's own changes all end up
   exactly as on the server, without flicker.
 
-**Chests** (`Players/Containers`): contents per block position, created on first use and shared by
-everyone who opens them (each viewer's snapshot includes the shared container).
-- `Use` opens one (reach-checked) as window 1–255.
-- It closes when the player walks away, dies or leaves, or when the block changes.
+**Crafting** (`Crafting/`). `Recipes` lists Minecraft 1.20's recipes for the game's items by
+name (shaped patterns, shapeless ingredient lists, `#planks` / `#logs` tags, smelting and fuel);
+`Crafting` compiles them into ids and matches a grid: shaped recipes anywhere inside it, as written
+or mirrored, with nothing else around; shapeless ones by assigning stacks to ingredients; and two
+worn tools of a kind repair into one with 5% extra (RepairItemRecipe). It is pure, so the server
+crafts and the client predicts with the same code.
+
+**Chests, crafting tables and furnaces** (`Players/Containers`, `InventoryState`):
+- `Use` on a block with a `menu` (reach-checked) opens it as window 1–255. Chests and furnaces are
+  contents per block position, created on first use and shared by everyone who opens them (each
+  viewer's snapshot includes the shared container). A crafting table gives each player a grid of
+  their own, which goes back into their inventory when they close it.
+- A window closes when the player walks away, dies or leaves, or when the block changes.
 - Breaking or replacing the block drops what it holds (`world.onChanged`).
+- Furnaces (`Crafting/Smelting`, Minecraft's AbstractFurnaceBlockEntity tick) run at 20 Hz on the
+  server, whether or not anyone is watching: a fuel item lights the furnace for its burn time
+  (coal 1600 ticks, planks and logs 300, sticks 100...) when there is something to smelt that fits
+  the output, an item takes 200 ticks, progress falls back when the fire goes out. Only furnaces
+  that are doing something are ticked (`Containers.tickFurnaces`). Viewers get a snapshot when the
+  slots change, and every other tick while only the gauges move.
 
 Death drops the whole inventory (unless `Gameplay.KeepInventory`). Inventories and chests live for
 the session.
@@ -526,8 +573,11 @@ the session.
 the Arcade pixel font):
 - `Hud`: the hotbar (1–9, the wheel, L1 / R1, taps), the held item's name, and hearts and armor in
   survival. Roblox's health bar and backpack are turned off.
-- `InventoryScreen` (`E`): the armor column on the left with a character preview, the 27 slots and
-  the hotbar, and an open chest's panel above.
+- `InventoryScreen` (`E`): the armor column on the left with a character preview, the 2 × 2
+  crafting grid and its result at the top right, the 27 slots and the hotbar. An open block's panel
+  sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a crafting table's
+  3 × 3 grid and result, or a furnace's input, fuel and output with the flame and arrow gauges
+  from the furnace's `data`. Worn tools show Minecraft's durability bar.
 - `CreativeScreen` (`E` in creative): the "Item selection" picker, a search box that filters
   `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it. Clicking an item
   gives a full stack; dropping a stack on the grid deletes it.
@@ -540,7 +590,13 @@ block's look (the terrain's part template: material, colour, texture, face image
 boxes. Icons show it in a ViewportFrame, lit so the top is brightest, then the left face, then the
 right. They are built once per slot and only rebuilt when the item changes. The same models are
 dropped items and, in `Player/HeldItems`, the item in each character's hand (from the
-`IceVoxelHeldItem` attribute the server sets) and in the first person corner.
+`IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
+diagonally in icons (`tilt`) and are held by the handle, pointing forward.
+
+**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables and furnaces are drawn
+without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
+SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
+blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
 
 ## Item entities (`Entities/`)
 
@@ -578,7 +634,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
-| server → client | `Inventory`     | inventory + open container after action `ack` |
+| server → client | `Inventory`     | inventory + window container after action `ack` |
 | server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
 | server → client | `Notice`        | a message for the chat                        |
 
@@ -650,6 +706,9 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 
 - Generation must stay deterministic: use `Util/Hash` (never `math.random` or `Random`) and only
   the seed and coordinates as inputs. Clients and server must agree on every unedited block.
-- Block ids are list positions in `BlockList`: append, never reorder.
+- Block ids are list positions in `BlockList`: append, never reorder. The same holds for items in
+  `ItemList` (ids from 4096).
+- `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
+  inventory action with them and must reach exactly the server's result.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.

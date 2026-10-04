@@ -20,14 +20,21 @@ A fast, Minecraft-style voxel engine for Roblox.
   lets anything cross chunk borders.
 - **Survival and creative.** Minecraft's two game modes, switched with `/gamemode creative` or
   `/gm s` in the chat.
-  - **Survival:** blocks take time to mine at Minecraft's bare hand speed (every block can be
-    harvested, as there are no tools yet: stone takes 2.25 s), cracking as they go, and drop as
-    items that bob on the ground until someone walks over them. Placing uses items up. Players have
-    a Minecraft inventory: 36 slots, armor slots on the left, and chests that open above it. Clicks
-    work as in Minecraft: shift-click, number keys, dragging to spread, double click. Items drop on
-    death.
+  - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
+    go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
+    a pickaxe of the right tier to drop anything (iron ore a stone pickaxe, diamonds an iron one),
+    and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor
+    slots on the left and a 2 × 2 crafting grid at the top right; chests, crafting tables and
+    furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
+    spread, double click. Items drop on death.
   - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
     (double tap jump) and no fall damage.
+- **Crafting and smelting.** Minecraft's recipes for everything the game has: planks, sticks,
+  crafting tables, chests, furnaces, wooden to diamond tools, iron, gold and diamond armor, storage
+  blocks, stone bricks and polished stones. Shaped recipes fit anywhere in the grid and mirrored,
+  shift-click crafts as many as possible, and two worn tools repair into one. Furnaces smelt raw
+  ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while nobody
+  watches.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -87,7 +94,7 @@ Studio tips:
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once) | R2 | Hold |
-| Place / use   | Right click (opens chests)  | L2      | Tap        |
+| Place / use   | Right click (opens chests, crafting tables, furnaces) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
 | Pick block    | Middle click                |         |            |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
@@ -111,13 +118,15 @@ Studio tips:
 ```
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
-  Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, drops,
-                            containers)
-  Items/   ItemList         items: every placeable block, plus armor
+  Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
+                            drops, menus)
+  Items/   ItemList         items: every placeable block, plus armor, tools and materials
+  Crafting/                 Recipes (Minecraft's recipes, smelting and fuel), Crafting (grid
+                            matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
                             clicks, used by the server and for client prediction)
   Entities/ItemPhysics      dropped item movement (server and client)
-  GameMode, Mining          survival / creative, bare hand mining times
+  GameMode, Mining          survival / creative, mining times by hand and with tools
   Biomes/  BiomeList        biome definitions and altitude bands
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
@@ -139,12 +148,13 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation
   Behaviours/               Gravity, Fluid, Grass (block update logic)
-  Network/ServerNet         edit lists, edit validation (EditRules: mining time, drops),
+  Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops),
                             replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
                             (spawning, replication)
   Players/                  GameModes + GameModeCommand (/gamemode), Inventories +
-                            InventoryState (authoritative inventories), Containers (chests),
+                            InventoryState (authoritative inventories), Containers (chests,
+                            furnaces),
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage), Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
                             Teleport (map), WaypointStore (DataStore)
@@ -157,15 +167,18 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             MeshOverlay + MeshRegions (far meshes)
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
   Inventory/                ClientInventory + Prediction (predicted inventory)
-  Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen, CreativeScreen,
-                            ItemIcon (viewport icons), SlotClicks (Minecraft clicks), Style
+  Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
+                            chest and furnace panels laid out by MenuLayout), CreativeScreen,
+                            ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
+                            clicks), Style
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
   Net/ClientNet             routes server messages; Notices shows server messages in the chat
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
-  Rendering/ItemModels      3D models of items (icons, drops, hands)
+  Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
+                            chests, crafting tables and furnaces)
   Debug/DebugOverlay        F3 stats
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview
@@ -238,13 +251,23 @@ table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Mar
 ```
 
 It is immediately an item: it shows up in the creative picker, and survival players get it by
-mining it (`hardness = 1.5` for stone-like mining time, `drops = "Cobblestone"` or `false` to drop
-something else or nothing, `container = 27` for a chest-like block). Blocks that look identical
+mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `toolLevel = 0` to
+need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
+nothing, `container = 27, menu = "Chest"` for a chest-like block). Blocks that look identical
 share one part template.
 
-**An item.** Items that are not blocks (armor today) live in `src/shared/Items/ItemList.luau`
-(again appended at the end). They are drawn from boxes measured in pixels (1/16 block), so icons,
-dropped items and hands show them without any assets.
+**An item.** Items that are not blocks (armor, tools, materials) live in
+`src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured
+in pixels (1/16 block), so icons, dropped items and hands show them without any assets.
+
+**A recipe.** `src/shared/Crafting/Recipes.luau` lists them by item name, like Minecraft's data
+files:
+
+```lua
+shape({ "##", "##" }, { ["#"] = "Marble" }, "MarbleBricks", 4) -- shaped, anywhere in the grid
+mix({ "Marble", "Coal" }, "DarkMarble")                       -- shapeless
+smelt("Marble", "SmoothMarble")                               -- furnace
+```
 
 **Block textures.** Blocks already use Roblox materials (Slate, Grass, Sand...), which have
 built-in textures. For your own, per-block textures use a MaterialVariant per block:
@@ -369,10 +392,10 @@ Natural next steps, roughly in order:
 - **Persistence.** Edits, inventories and chest contents live in memory (`WorldServer.edits`,
   `Players/InventoryState`, `Players/Containers`); save them to DataStores (edits per region of
   32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
-- **Tools and crafting.** Mining is by hand only (every block can be harvested); pickaxes, axes and
-  shovels with Minecraft's speeds and harvest rules would plug into `Mining.progressPerTick`, and a
-  crafting grid into the inventory screen's empty top right corner. Armor is worn but nothing deals
-  damage it reduces yet (`Items.damageAfterArmor` is ready for it).
+- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling
+  (`Items.damageAfterArmor` is ready for it).
+- **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on
+  every side and furnaces don't light up while burning.
 - **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
   builds appear once in full detail range.
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
