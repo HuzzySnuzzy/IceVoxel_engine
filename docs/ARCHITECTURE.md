@@ -336,11 +336,28 @@ player leaves, names that could not be filtered become "Waypoint" so the positio
 (`Players/Teleport`), which checks `Map.Teleport` and a cooldown and lands the player on a safe spot;
 the movement hull stays frozen until the terrain at the destination is built.
 
-### Interaction
+### Interaction (`Interaction/BlockInteraction`)
 
 Targeting uses `World/VoxelRaycast` (grid traversal) on the client's block data. Edits are applied
 immediately and sent to the server; a rejected edit comes back as the real block and undoes the
-prediction. Placing is refused where the block would overlap the movement hull.
+prediction.
+
+- **Survival mining.** Holding the break button adds `Mining.progressPerTick` every 20 Hz tick:
+  1 / hardness / 30 with bare hands, five times slower in the air or under water (Minecraft's rules;
+  there are no tools, so every block can be harvested). The client sends `Mine` when it starts on
+  a block and when it stops early. `CrackOverlay` draws the ten crack stages from 10% on
+  (procedural lines on SurfaceGuis, no assets). At 100% the block breaks, then mining pauses for 5
+  ticks. The server accepts the break only if the player started mining that block long enough ago
+  (`Mining.mayBreak`: 70% of the time, Minecraft's tolerance), and drops `Items.drops(block)`.
+- **Creative** breaks at once, again every `Interaction.BreakInterval` while held, and drops
+  nothing.
+- **Using and placing.** Right click on a container block (a chest) opens it, unless sneaking.
+  Otherwise the selected item is placed if it is a block. Survival placing uses the item up: the
+  Edit message carries the inventory action number of that use (see below), so the prediction
+  and the server's answer line up. The own hull is checked standing, like the server checks every
+  player.
+- Middle click picks the block (Minecraft's pick block), `Q` drops the held item (`Ctrl`: the
+  stack). On touch screens a tap uses or places and holding breaks.
 
 ### Movement (`Shared/Movement`, `Player/MovementController`, `Player/CharacterAnimator`)
 
@@ -395,8 +412,9 @@ hull is.
 
   Other duties:
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
-    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint`, the sprint key turns sprinting on and
-    off; turning it off also stops a sprint started by double tapping.
+    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint`, the
+    sprint key turns sprinting on and off; turning it off also stops a sprint started by double
+    tapping. While a screen (inventory) is open, the input is neutral.
   - The hull stays frozen until the chunk under it and the eight around it are shown, and after
     teleports. Server teleports arrive as attributes; other scripts moving the character far are
     detected and followed.
@@ -412,6 +430,16 @@ hull is.
   - fades of 0.2 / 0.1 / 0.4 s;
   - Core priority for movement tracks, Idle for `toolnone`.
 
+**Creative flight** (`PlayerPhysics`, Minecraft 1.20.1 tick for tick). Creative players `mayFly`.
+A second jump press within 7 ticks toggles flying. While flying:
+- jump / sneak add ±0.15 to the vertical speed;
+- horizontal acceleration is the flying speed, 0.05 (0.1 sprinting);
+- afterwards the vertical speed is the one from before the move × 0.6, so it settles at 0.375 blocks
+  per tick (7.5 m/s); horizontally 10.9 m/s, 21.8 sprinting;
+- no crouching, no edge back-off; landing stops it;
+- creative players take no fall damage. The field of view widens by 1.1 in flight (× 1.15 when also
+  sprinting).
+
 **Fluids and the player.**
 - `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
   treats an open side with the same fluid below it as a drop, and makes falling fluid next to a solid
@@ -423,6 +451,105 @@ hull is.
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
   Minecraft instead of flooding the ground around it.
 
+## Items, inventories and game modes
+
+**Game modes** (`GameMode`, server `Players/GameModes`). A player's mode is the Player attribute
+`IceVoxelGameMode`, set by the server (`Gameplay.DefaultGameMode` on joining).
+- `/gamemode <survival|creative|s|c|0|1> [player]`, alias `/gm`: `TextChatCommand`s created by the
+  server, whose `Triggered` fires on the server. The legacy chat falls back to `Player.Chatted`.
+- Permissions are in `Players/GameModeCommand`, pure and tested:
+  - `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode;
+  - `Gameplay.Admins` for other players (by name, display name, unique prefix, `@s`, `@a`);
+  - the game's owner and Studio always may.
+- Answers ("Set own game mode to Creative Mode") are `Notice` messages, shown in the chat by
+  `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
+
+**Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
+the 20 Minecraft armor pieces) have ids from 4096 up. A stack is `{ item, count }`, at most
+`maxStack` (64, armor 1). Blocks say what they drop (`drops`), how long they take to mine
+(`hardness`) and whether they are containers (`container`, the Chest's 27 slots).
+
+**The inventory** (`Inventory/Types`, `Inventory/Menu`). It is Minecraft's: 36 slots (1–9 the
+hotbar), 4 armor slots, the stack carried by the mouse, and the selected hotbar slot. A *window*
+is what a screen shows: the inventory plus, when open, a container. Its slots are numbered:
+
+| Window slots      | What                                    |
+| ----------------- | --------------------------------------- |
+| `0 .. n-1`        | the container's n slots (none if closed) |
+| `n .. n+3`        | armor: head, chest, legs, feet          |
+| `n+4 .. n+30`     | inventory slots 10–36                   |
+| `n+31 .. n+39`    | the hotbar                              |
+
+`Menu.apply(window, action, creative)` performs one action, ported from Minecraft 1.20.1's
+`AbstractContainerMenu.doClick` and `Inventory.add`:
+- clicks: left / right pickup, shift-click (`quickMoveStack`: a chest to the inventory from the
+  hotbar's right end, the inventory to the chest, armor to its slot, inventory ↔ hotbar), number key
+  swap, middle-click clone (creative), throw, double click collect;
+- drags that split a stack evenly or one per slot;
+- select, drop, the use of a placed block;
+- creative slots;
+- close (the cursor goes back into the inventory).
+
+It is pure and deterministic, and returns the stacks thrown out of the window. Tests fuzz it for item
+conservation.
+
+**Prediction.** Every inventory action gets a number (`seq`) on the client
+(`Inventory/ClientInventory`, `Prediction`):
+- The client applies it at once to its predicted state and sends it (`Inventory` message; a
+  placement's number travels in its `Edit`).
+- The server (`Players/Inventories` + `InventoryState`) applies actions in arrival order with the
+  same `Menu`. Once per frame it sends each changed player a snapshot: the inventory, an open
+  container, and `ack`, the last action it processed.
+- The client takes the snapshot as the new base and replays its actions numbered above `ack`. So
+  pickups, chest changes by other players, refused actions and the server's own changes all end up
+  exactly as on the server, without flicker.
+
+**Chests** (`Players/Containers`): contents per block position, created on first use and shared by
+everyone who opens them (each viewer's snapshot includes the shared container).
+- `Use` opens one (reach-checked) as window 1–255.
+- It closes when the player walks away, dies or leaves, or when the block changes.
+- Breaking or replacing the block drops what it holds (`world.onChanged`).
+
+Death drops the whole inventory (unless `Gameplay.KeepInventory`). Inventories and chests live for
+the session.
+
+**Screens** (`Ui/`), old-school Minecraft styled from Frames only (gray beveled panels, inset slots,
+the Arcade pixel font):
+- `Hud`: the hotbar (1–9, the wheel, L1 / R1, taps), the held item's name, and hearts and armor in
+  survival. Roblox's health bar and backpack are turned off.
+- `InventoryScreen` (`E`): the armor column on the left with a character preview, the 27 slots and
+  the hotbar, and an open chest's panel above.
+- `CreativeScreen` (`E` in creative): the "Item selection" picker, a search box that filters
+  `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it. Clicking an item
+  gives a full stack; dropping a stack on the grid deletes it.
+- `SlotClicks` turns mouse, keys, touch and gamepad into Minecraft's click actions (pure, tested).
+- `Screens` opens and closes them, frees the mouse (in first person too) and stops the character
+  while one is open.
+
+**Item icons and models** (`Rendering/ItemModels`, `Ui/ItemIcon`). An item's model is a cube with the
+block's look (the terrain's part template: material, colour, texture, face images), or the item's
+boxes. Icons show it in a ViewportFrame, lit so the top is brightest, then the left face, then the
+right. They are built once per slot and only rebuilt when the item changes. The same models are
+dropped items and, in `Player/HeldItems`, the item in each character's hand (from the
+`IceVoxelHeldItem` attribute the server sets) and in the first person corner.
+
+## Item entities (`Entities/`)
+
+Dropped items are Minecraft's ItemEntity:
+- `Entities/ItemPhysics` (shared) is its movement, one 20 Hz tick on a 0.25 block box:
+  - gravity 0.04 and drag 0.98, ground friction (ice slides);
+  - floating up in water; pushed out of blocks placed on it;
+  - collision through `Hull`.
+- `EntityWorld` (server, pure, tested) holds the rules:
+  - pickup delay 10 ticks (40 when thrown);
+  - pickup by a player box grown by (1, 0.5, 1);
+  - merging of equal items (the smaller into the larger, every 2 ticks while moving, 40 at rest);
+  - despawn after `Entities.ItemLifetime`; at most `Entities.MaxItems`.
+- `Entities` replicates the items within `Entities.TrackingDistance` of each player: spawns, a
+  sync every 20 ticks while moving, count changes, and removals naming who picked them up.
+- Clients run the same `ItemPhysics` between syncs, ease corrections in, and draw items bobbing and
+  spinning (more copies for bigger stacks). A picked-up item flies to the player.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -432,13 +559,19 @@ live edits after it must arrive in the order they were sent.
 | Direction       | Message         | Content                                       |
 | --------------- | --------------- | --------------------------------------------- |
 | client → server | `RequestChunks` | up to 256 chunk coordinates                   |
-| client → server | `Edit`          | break / place, position, block                |
+| client → server | `Edit`          | break / place, position, block, action number |
 | client → server | `Teleport`      | target column (map)                           |
 | client → server | `SaveWaypoints` | the player's waypoint list                    |
 | client → server | `Fall`          | fall distance of a landing (fall damage)      |
+| client → server | `Mine`          | started / stopped mining a block              |
+| client → server | `Inventory`     | a numbered inventory action                   |
+| client → server | `Use`           | right click on a container block              |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
+| server → client | `Inventory`     | inventory + open container after action `ack` |
+| server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
+| server → client | `Notice`        | a message for the chat                        |
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
 listener that connects) and routes messages by type, keeping early messages until a handler exists.
@@ -456,11 +589,17 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   to dirt when covered).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
-  placing inside players. Rejections never generate terrain.
+  placing inside players, survival mining time and drops (`EditRules`), and the rules injected by
+  the boot script (`setRules`: using up placed items, dropping items and chest contents).
+  Rejections never generate terrain.
+- `Entities/`: dropped items (see Item entities).
+- `Players/GameModes`, `Players/Inventories`, `Players/Containers`: see Items, inventories and game
+  modes.
 - `Players/Characters`: puts every character part in the `IceVoxelCharacters` collision group
-  (collides with nothing; back to Default on death so the body falls), teleports characters by
-  setting the feet position as attributes the client's hull follows, and turns reported landings
-  into fall damage (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
+  (it collides with none of the groups registered when the server starts; parts go back to Default
+  on death, so the body falls, and when they leave the character), teleports characters by setting the
+  feet position as attributes the client's hull follows, and turns reported landings into fall
+  damage in survival (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
   `TakeDamage`; at most 4 reports a second).
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed

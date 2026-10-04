@@ -110,7 +110,13 @@ Studio tips:
 ```
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
-  Blocks/  BlockList        block definitions -> ids, appearances, lookup tables
+  Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, drops,
+                            containers)
+  Items/   ItemList         items: every placeable block, plus armor
+  Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
+                            clicks, used by the server and for client prediction)
+  Entities/ItemPhysics      dropped item movement (server and client)
+  GameMode, Mining          survival / creative, bare hand mining times
   Biomes/  BiomeList        biome definitions and altitude bands
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
@@ -132,8 +138,13 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation
   Behaviours/               Gravity, Fluid, Grass (block update logic)
-  Network/ServerNet         edit lists, edit validation, replication
-  Players/                  Characters (cosmetic characters: collision group, teleports, fall
+  Network/ServerNet         edit lists, edit validation (EditRules: mining time, drops),
+                            replication
+  Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
+                            (spawning, replication)
+  Players/                  GameModes + GameModeCommand (/gamemode), Inventories +
+                            InventoryState (authoritative inventories), Containers (chests),
+                            Characters (cosmetic characters: collision group, teleports, fall
                             damage), Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
                             Teleport (map), WaypointStore (DataStore)
 
@@ -143,12 +154,17 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
   Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
                             MeshOverlay + MeshRegions (far meshes)
-  Interaction/              BlockInteraction, Hotbar
+  Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
+  Inventory/                ClientInventory + Prediction (predicted inventory)
+  Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen, CreativeScreen,
+                            ItemIcon (viewport icons), SlotClicks (Minecraft clicks), Style
+  Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
-  Net/ClientNet             routes server messages
+  Net/ClientNet             routes server messages; Notices shows server messages in the chat
   Player/                   MovementController (the hull, input, the cosmetic character),
-                            CharacterAnimator (avatar animations from the hull)
+                            CharacterAnimator (avatar animations from the hull), HeldItems
+  Rendering/ItemModels      3D models of items (icons, drops, hands)
   Debug/DebugOverlay        F3 stats
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview
@@ -179,6 +195,12 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
+| `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join.                              |
+| `Gameplay.GameModeCommand` | true   | Who may use `/gamemode`: everyone, nobody, or a user id list (the owner and Studio always may). |
+| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes.                  |
+| `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it.                 |
+| `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
+| `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 
 Part count depends on the terrain: flat land costs ~35 parts per full detail chunk, steep
 mountains ~110. Most parts are near the player; doubling the view distance adds comparatively
@@ -214,7 +236,14 @@ positions and saved edits depend on them):
 table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Marble" })
 ```
 
-It is immediately placeable from the hotbar. Blocks that look identical share one part template.
+It is immediately an item: it shows up in the creative picker, and survival players get it by
+mining it (`hardness = 1.5` for stone-like mining time, `drops = "Cobblestone"` or `false` to drop
+something else or nothing, `container = 27` for a chest-like block). Blocks that look identical
+share one part template.
+
+**An item.** Items that are not blocks (armor today) live in `src/shared/Items/ItemList.luau`
+(again appended at the end). They are drawn from boxes measured in pixels (1/16 block), so icons,
+dropped items and hands show them without any assets.
 
 **Block textures.** Blocks already use Roblox materials (Slate, Grass, Sand...), which have
 built-in textures. For your own, per-block textures use a MaterialVariant per block:
@@ -336,8 +365,13 @@ luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
 
 Natural next steps, roughly in order:
 
-- **Persistence.** Edits live in memory (`WorldServer.edits`); save them to a DataStore per region
-  of 32 × 32 chunks (see "regions" in docs/ARCHITECTURE.md).
+- **Persistence.** Edits, inventories and chest contents live in memory (`WorldServer.edits`,
+  `Players/InventoryState`, `Players/Containers`); save them to DataStores (edits per region of
+  32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
+- **Tools and crafting.** Mining is by hand only (every block can be harvested); pickaxes, axes and
+  shovels with Minecraft's speeds and harvest rules would plug into `Mining.progressPerTick`, and a
+  crafting grid into the inventory screen's empty top right corner. Armor is worn but nothing deals
+  damage it reduces yet (`Items.damageAfterArmor` is ready for it).
 - **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
   builds appear once in full detail range.
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
