@@ -1,0 +1,99 @@
+--!strict
+--!native
+--[[
+	Paints top-down map tiles straight from the terrain generator, so the map can show any part of
+	the (infinite) world without anything being loaded. Runs inside the worker actors.
+
+	A tile is `size` x `size` pixels, each pixel covering `scale` x `scale` blocks (sampled at its
+	center). North (-Z) is up and east (+X) is right. Output is RGBA8, row by row, which is the
+	format EditableImage:WritePixelsBuffer expects.
+
+	Colouring: the surface block's colour, darkened where trees are dense, lit from the north-west
+	using the height difference to the neighbouring pixel (hill shading); water is tinted by depth
+	and frozen seas are drawn as ice.
+]]
+
+local Config = require(script.Parent.Parent.Config)
+local Blocks = require(script.Parent.Parent.Blocks)
+local Biomes = require(script.Parent.Parent.Biomes)
+local TerrainGenerator = require(script.Parent.Parent.Generation.TerrainGenerator)
+
+local SEA = Config.SeaLevel
+local ICE = Blocks.get(Blocks.id.Ice).color
+
+local writeu32 = buffer.writeu32
+local floor = math.floor
+
+export type Painter = (originX: number, originZ: number, scale: number, size: number, yield: (() -> ())?) -> buffer
+
+local MapPainter = {}
+
+local function pack(r: number, g: number, b: number): number
+	r = if r < 0 then 0 elseif r > 255 then 255 else floor(r)
+	g = if g < 0 then 0 elseif g > 255 then 255 else floor(g)
+	b = if b < 0 then 0 elseif b > 255 then 255 else floor(b)
+	-- Little endian: bytes R, G, B, A.
+	return r + g * 256 + b * 65536 + 255 * 16777216
+end
+
+-- Colour (packed RGBA) of one map pixel.
+local function shade(
+	height: number,
+	west: number,
+	north: number,
+	biome: number,
+	vegetation: number,
+	surface: number
+): number
+	if height < SEA then
+		if Biomes.list[biome].frozen then
+			return pack(ICE[1], ICE[2], ICE[3])
+		end
+		local t = math.min(1, (SEA - height) / 40)
+		return pack(64 - 46 * t, 138 - 90 * t, 214 - 94 * t)
+	end
+	local c = Blocks.get(surface).color
+	-- Light from the north-west: slopes facing it are brighter.
+	local light = 1 + ((height - west) + (height - north)) * 0.06
+	light = if light < 0.65 then 0.65 elseif light > 1.3 then 1.3 else light
+	local altitude = 0.92 + (height - SEA) / 450
+	local forest = 1 - math.min(0.35, vegetation * 0.7)
+	local k = light * altitude * forest
+	return pack(c[1] * k, c[2] * k, c[3] * k)
+end
+
+function MapPainter.new(generator: TerrainGenerator.Generator): Painter
+	local column = generator.column
+	local heights: { number } = {}
+
+	return function(originX: number, originZ: number, scale: number, size: number, yield: (() -> ())?): buffer
+		local pixels = buffer.create(size * size * 4)
+		local half = scale // 2
+		-- Heights on a (size + 1)^2 grid: one extra row to the north and column to the west, used
+		-- for shading. Grid cell (i, j) is at heights[j * stride + i + 1]; pixel (px, py) is (px + 1, py + 1).
+		local stride = size + 1
+
+		for i = 0, size do
+			heights[i + 1] = column(originX + (i - 1) * scale + half, originZ - scale + half)
+		end
+		for py = 0, size - 1 do
+			local z = originZ + py * scale + half
+			local row = (py + 1) * stride
+			heights[row + 1] = column(originX - scale + half, z)
+			for px = 0, size - 1 do
+				local h, biome, vegetation, surface = column(originX + px * scale + half, z)
+				local i = px + 1
+				heights[row + i + 1] = h
+				local west = heights[row + i]
+				local north = heights[row - stride + i + 1]
+				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, biome, vegetation, surface))
+			end
+			if yield then
+				yield()
+			end
+		end
+		return pixels
+	end
+end
+
+return MapPainter
