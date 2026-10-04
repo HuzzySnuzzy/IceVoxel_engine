@@ -1,10 +1,11 @@
 --[[
 	Generation / meshing benchmark and part count estimate.
 
-	    lune run tests/bench [seed] [viewDistance] [splitDistance]
+	    lune run tests/bench [seed] [viewDistance] [splitDistance] [splitDistanceL1]
 
 	Times generating and meshing chunks at every LOD level, then runs the real LOD selection around
-	the spawn point and meshes every selected node to estimate how many parts the client creates.
+	the spawn point and meshes every selected node to estimate how many parts the client creates,
+	and how many remain when far meshes (Config.Render.FarMeshes) merge every eligible region.
 ]]
 
 local process = require("@lune/process")
@@ -15,22 +16,26 @@ local Config = require(shared.Config)
 local Coords = require(shared.World.Coords)
 local LodTree = require(shared.World.LodTree)
 local GreedyMesher = require(shared.Meshing.GreedyMesher)
+local QuadMesher = require(shared.Meshing.QuadMesher)
 local TerrainGenerator = require(shared.Generation.TerrainGenerator)
 
 local seed = tonumber(process.args[1]) or 12345
 LodTree.configure(
 	tonumber(process.args[2]) or Config.Lod.ViewDistance,
-	tonumber(process.args[3]) or Config.Lod.SplitDistance
+	tonumber(process.args[3]) or Config.Lod.SplitDistance,
+	tonumber(process.args[4]) or tonumber(process.args[3]) or Config.Lod.SplitDistanceL1
 )
 local gen = TerrainGenerator.new(seed)
 local sx, sh, sz = gen.findSpawn()
 print(`seed {seed}, spawn at {sx}, {sh}, {sz}`)
 
-local function meshNode(level: number, nx: number, nz: number, revealAll: boolean): (number, number, number)
+-- Generates and meshes a node like ChunkWorker (far nodes with their far seam borders). Returns
+-- generation time, meshing time, boxes and (far nodes) the quad count for far meshes.
+local function meshNode(level: number, nx: number, nz: number, revealAll: boolean): (number, number, number, number)
 	local t0 = os.clock()
 	local r = gen.generate(level, nx, nz)
 	local t1 = os.clock()
-	local boxes = 0
+	local boxes, quads = 0, 0
 	if level == 0 then
 		for y0 = 0, r.height - 1, Config.SectionHeight do
 			local y1 = y0 + Config.SectionHeight
@@ -41,13 +46,22 @@ local function meshNode(level: number, nx: number, nz: number, revealAll: boolea
 			end
 		end
 	else
-		local y0, y1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
+		local open = gen.farSeamLimits(level, nx, nz)
+		local below = math.min(r.solidBelow, GreedyMesher.lowestOpen(open))
+		local y0, y1 = GreedyMesher.activeRange(below, r.emptyAbove, r.height)
 		if y1 > y0 then
-			local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, true)
+			local data = if open
+				then GreedyMesher.applyBorder(r.data, r.height, y0, y1, true, { open = open, hidden = 0 })
+				else r.data
+			local _, count = GreedyMesher.mesh(data, r.height, y0, y1, true)
 			boxes += count
+			local tMesh = os.clock()
+			local _, q = QuadMesher.mesh(data, r.height, y0, y1, true, true)
+			quads = q
+			t1 += os.clock() - tMesh -- quads are not part of the box meshing time
 		end
 	end
-	return t1 - t0, os.clock() - t1, boxes
+	return t1 - t0, os.clock() - t1, boxes, quads
 end
 
 print("\nPer chunk (average of 16 chunks around spawn):")
@@ -76,15 +90,25 @@ print(`\nFull view from spawn (caves hidden, view distance {LodTree.viewDistance
 local nodes = LodTree.select(sx + 0.5, sz + 0.5)
 local perLevel: { [number]: { count: number, boxes: number } } = {}
 local total, totalTime = 0, 0
+local FarMeshes = Config.Render.FarMeshes
+local merged, regionTriangles = 0, {}
 local t0 = os.clock()
 for key, level in nodes do
 	local _, nx, nz = Coords.decodeNodeKey(key)
-	local _, _, boxes = meshNode(level, nx, nz, false)
+	local _, _, boxes, quads = meshNode(level, nx, nz, false)
 	local entry = perLevel[level] or { count = 0, boxes = 0 }
 	entry.count += 1
 	entry.boxes += boxes
 	perLevel[level] = entry
 	total += boxes
+	-- Regions as Rendering/MeshRegions forms them.
+	local size = LodTree.nodeSize(level)
+	if level >= FarMeshes.MinLevel and size <= FarMeshes.MaxRegionBlocks then
+		local perSide = math.max(1, math.min(FarMeshes.RegionNodes, FarMeshes.MaxRegionBlocks // size))
+		local region = `{level}:{nx // perSide},{nz // perSide}`
+		regionTriangles[region] = (regionTriangles[region] or 0) + quads * 2
+		merged += boxes
+	end
 end
 totalTime = os.clock() - t0
 for level = 0, Config.Lod.Levels - 1 do
@@ -94,3 +118,19 @@ for level = 0, Config.Lod.Levels - 1 do
 	end
 end
 print(string.format("  total: %d parts, generated + meshed in %.2f s on one thread", total, totalTime))
+local meshParts, triangles, regions = 0, 0, 0
+for _, tris in regionTriangles do
+	regions += 1
+	triangles += tris
+	meshParts += math.max(1, math.ceil(tris / (FarMeshes.MaxTriangles - 2)))
+end
+print(
+	string.format(
+		"  with far meshes (level %d+): %d parts + %d MeshParts in %d regions (%dk triangles)",
+		FarMeshes.MinLevel,
+		total - merged,
+		meshParts,
+		regions,
+		triangles // 1000
+	)
+)

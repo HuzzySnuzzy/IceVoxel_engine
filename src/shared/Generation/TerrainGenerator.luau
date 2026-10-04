@@ -122,6 +122,14 @@ export type Generator = {
 		level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none). nil when no side has one.
 	]]
 	seamLimits: (level: number, nx: number, nz: number, coarser: { number }) -> buffer?,
+	--[[
+		Seam limits of a far node (level >= 1) that hold whatever its neighbours are: the LOD tree
+		only ever puts a node next to nodes at most one level coarser, so opening the padding for a
+		one and a two levels coarser neighbour on every side (the lower of the two) covers every
+		case. Far nodes then never need to be rebuilt when their neighbours change. nil for the
+		coarsest level.
+	]]
+	farSeamLimits: (level: number, nx: number, nz: number) -> buffer?,
 }
 
 local TerrainGenerator = {}
@@ -384,6 +392,26 @@ function TerrainGenerator.new(seed: number): Generator
 		return out
 	end
 
+	local function farSeamLimits(level: number, nx: number, nz: number): buffer?
+		local maxLevel = Config.Lod.Levels - 1
+		if level >= maxLevel then
+			return nil
+		end
+		local up = level + 1
+		local limits = seamLimits(level, nx, nz, { up, up, up, up }) :: buffer
+		if level + 2 <= maxLevel then
+			local up2 = level + 2
+			local other = seamLimits(level, nx, nz, { up2, up2, up2, up2 }) :: buffer
+			for i = 0, buffer.len(limits) - 2, 2 do
+				local b = buffer.readu16(other, i)
+				if b < buffer.readu16(limits, i) then
+					buffer.writeu16(limits, i, b)
+				end
+			end
+		end
+		return limits
+	end
+
 	local function findSpawn(): (number, number, number)
 		-- Walk an outward square spiral until we find dry land that is not a beach or a cliff.
 		-- Samples every 16 blocks, up to ~1000 blocks from the origin.
@@ -408,6 +436,7 @@ function TerrainGenerator.new(seed: number): Generator
 		generate = generate,
 		findSpawn = findSpawn,
 		seamLimits = seamLimits,
+		farSeamLimits = farSeamLimits,
 	}
 end
 

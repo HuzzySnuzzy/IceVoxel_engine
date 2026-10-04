@@ -23,6 +23,10 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
   live in `SpawnUnsafeBlocks`.
 - **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
+- **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
+  built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
+  25k parts become 9k parts + 86 meshes on plains. Parts stay the fallback, so nothing breaks
+  where the Mesh APIs are unavailable.
 
 ## Getting started
 
@@ -75,7 +79,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Noise                   seeded noise on top of math.noise
     Caves, Ores             full detail only
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
-  Meshing/GreedyMesher      blocks -> boxes
+  Meshing/GreedyMesher      blocks -> boxes (parts)
+  Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
   Map/MapPainter            map tile colours from the generator (runs in the workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
   Net/                      Protocol (buffer encoding), Remotes
@@ -94,7 +99,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
   World/ClientWorld         nearby block data, edit lists, prediction
   Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
-  Rendering/                ChunkRenderer (boxes -> parts), PartPool
+  Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
+                            MeshOverlay + MeshRegions (far meshes)
   Interaction/              BlockInteraction, Hotbar
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
@@ -118,6 +124,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks).                                  |
 | `Lod.Mobile`              | 512 / 2 | View / split distance on phones and tablets.                        |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
+| `Lod.SplitDistanceL1`     | 3       | Same for full detail only; 2 = ~12% fewer parts in mountains.       |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
@@ -126,6 +133,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
 | `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
+| `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 
@@ -135,8 +143,17 @@ few. Measured view from spawn (`lune run tests/bench <seed> <viewDistance> [spli
 
 | Seed              | 512 (mobile) | 1024 | 2048 (default) | 4096 |
 | ----------------- | ------------ | ---- | -------------- | ---- |
-| 12345 (plains)    | 9k           | 19k  | 25k            | 34k  |
-| 777 (mountains)   | 24k          | 45k  | 49k            | 59k  |
+| 12345 (plains)    | 9k           | 19k  | 25k            | 35k  |
+| 777 (mountains)   | 25k          | 45k  | 50k            | 60k  |
+
+With far meshes, once every region near the player has settled (the bench prints this too):
+
+| Seed              | 2048 (default)         | 4096                    |
+| ----------------- | ---------------------- | ----------------------- |
+| 12345 (plains)    | 9.0k parts + 86 meshes | 12.1k parts + 182 meshes |
+| 777 (mountains)   | 33k parts + 94 meshes  | 36k parts + 190 meshes  |
+
+What remains in mountains are the near levels (full detail and level 1), which stay parts.
 
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
@@ -201,6 +218,27 @@ right away, but **published games** need the experience owner to be 13+ and ID v
 on *Enable Mesh / Image APIs* (Creator Dashboard, experience settings). Without it the maps still
 show players and waypoints, and the right click menu still works. Teleporting is controlled by
 `Config.Map.Teleport` and checked by the server.
+
+**Far meshes (EditableMesh superchunks).** Distant terrain (LOD level 2 and up, about 200 blocks
+and further) is merged per region of 4 × 4 chunks into MeshParts once the region has not changed
+for 2 seconds. About the "8 EditableMesh limit": it is not a count but a memory budget. A PC
+client gets 80 MiB for editable objects and every growable EditableMesh is charged a flat 10 MiB,
+whatever it holds. IceVoxel therefore keeps one EditableMesh for the whole session as a scratch
+buffer: each region is written into it, *baked* into static content with
+`AssetService:CreateDataModelContentAsync` (which does not count against that budget), cleared,
+and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
+
+- Like EditableImage, it needs the Mesh / Image APIs enabled for published games (see The map).
+- At startup a probe builds a few test meshes and times them; press **F3** to see the status,
+  how many regions and chunks are merged, and how long builds take. Meshes stay off (parts only)
+  when the probe fails or a build blocks a frame longer than `MaxBlockingMs`.
+- Merged levels use a plain look for their parts too (SmoothPlastic in the block colour, opaque
+  water), so swapping between parts and a mesh is invisible.
+- Phones keep parts by default (`FarMeshes.Mobile`).
+- Not yet measured on live servers: how long builds take on real clients, whether baked content
+  is reclaimed over very long sessions (a safety limit stops new meshes after
+  `MaxSessionTriangles`), and how far the engine then actually draws. Check F3 and the
+  MicroProfiler in a published test place before relying on it.
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with a climate position
 (temperature, humidity), terrain shape (`heightOffset`, `hilliness`), surface blocks and

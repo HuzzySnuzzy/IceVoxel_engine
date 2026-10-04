@@ -152,7 +152,11 @@ function GreedyMesher.lowestOpen(open: buffer?): number
 	return lowest
 end
 
--- Returns a copy of layers y0-1 .. y1 of `data` (same layout) with `border` applied.
+--[[
+	Returns a copy of layers y0-1 .. y1 of `data` (same layout) with `border` applied. The copy is
+	scratch memory reused by the next call. Meshing that copy with no border gives the same result
+	as meshing `data` with `border` (QuadMesher uses it the same way).
+]]
 local function applyBorder(
 	data: buffer,
 	height: number,
@@ -241,6 +245,8 @@ local function applyBorder(
 	end
 	return d
 end
+
+GreedyMesher.applyBorder = applyBorder
 
 --[[
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.

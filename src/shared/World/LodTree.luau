@@ -24,15 +24,18 @@ local HYSTERESIS = 0.85
 
 local view = Config.Lod.ViewDistance
 local split = Config.Lod.SplitDistance
+local splitL1 = Config.Lod.SplitDistanceL1 or split
 
 local LodTree = {}
 
 LodTree.MAX_LEVEL = MAX_LEVEL
 
--- Sets the view distance (blocks) and split distance (node sizes) used by `select`.
-function LodTree.configure(viewDistance: number, splitDistance: number)
+-- Sets the view distance (blocks) and split distances (node sizes; level 1 may differ) used by `select`.
+function LodTree.configure(viewDistance: number, splitDistance: number, splitDistanceL1: number?)
 	assert(viewDistance > 0 and splitDistance >= 1, "invalid LOD distances")
 	view, split = viewDistance, splitDistance
+	splitL1 = splitDistanceL1 or splitDistance
+	assert(splitL1 >= 1, "invalid LOD distances")
 end
 
 function LodTree.viewDistance(): number
@@ -66,7 +69,7 @@ function LodTree.select(x: number, z: number, previous: { [number]: number }?): 
 			return
 		end
 		if level > 0 then
-			local threshold = split * SIZE * bit32.lshift(1, level)
+			local threshold = (if level == 1 then splitL1 else split) * SIZE * bit32.lshift(1, level)
 			if previous and previous[Coords.nodeKey(level, nx, nz)] then
 				threshold *= HYSTERESIS
 			end

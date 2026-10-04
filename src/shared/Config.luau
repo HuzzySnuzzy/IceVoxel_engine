@@ -53,6 +53,10 @@ local Config = {
 		-- A node is split into four children while the camera is closer than SplitDistance * nodeSize.
 		-- Higher = more full detail chunks around the player (radius of LOD 0 is ~2 * SplitDistance chunks).
 		SplitDistance = 3,
+		-- SplitDistance for level 1 nodes only, i.e. how far full detail chunks reach (radius about
+		-- 2 x this, in chunks). Full detail chunks are the most expensive (collision, caves, textures):
+		-- 2 removes about 12% of all parts in mountains, at the cost of full detail ending sooner.
+		SplitDistanceL1 = 3,
 		-- Nothing is rendered further away than this (blocks).
 		ViewDistance = 2048,
 		-- Used instead on phones and tablets (touch screen without keyboard). They also draw parts
@@ -97,6 +101,40 @@ local Config = {
 		Fog = true,
 		-- Use the blocks' MaterialVariant textures / face images (BlockList `texture`, `faces`).
 		Textures = true,
+
+		--[[
+			Far meshes (Rendering/MeshOverlay): regions of far chunks that stopped changing are merged
+			into a few MeshParts built with EditableMesh, replacing thousands of parts. Parts are
+			always built first and come back instantly when a region changes or a build fails.
+			Published games need the Mesh / Image APIs enabled (see README). Levels below MinLevel and
+			nodes wider than MaxRegionBlocks always stay parts; parts of merged levels use a plain
+			look (SmoothPlastic, block colour, opaque water) so the swap is invisible.
+		]]
+		FarMeshes = {
+			Enabled = true,
+			-- Phones and tablets keep parts (unknown mesh budgets, slower CPUs).
+			Mobile = false,
+			-- Lowest LOD level merged. Level 1 starts ~100 blocks away, where block textures still show.
+			MinLevel = 2,
+			-- A region is RegionNodes x RegionNodes nodes of one level, at most MaxRegionBlocks wide
+			-- (a part can be at most 2048 studs long).
+			RegionNodes = 4,
+			MaxRegionBlocks = 512,
+			-- Seconds a region's chunks must stay unchanged before it is merged.
+			StableSeconds = 2,
+			-- Triangles per MeshPart (EditableMesh allows 20,000; smaller meshes build in shorter steps).
+			MaxTriangles = 10000,
+			-- Seconds between mesh builds; none starts after a frame longer than MaxFrameTime seconds.
+			BuildInterval = 0.35,
+			MaxFrameTime = 1 / 40,
+			-- Studs each quad overlaps its neighbours (hides cracks where quads meet).
+			Overlap = 0.05,
+			-- Meshes stay off when the startup probe sees a build block a frame longer than this (ms).
+			MaxBlockingMs = 35,
+			-- No new meshes after this many triangles were baked in one session (the engine keeps
+			-- baked content for the session; how it is reclaimed is not documented).
+			MaxSessionTriangles = 5000000,
+		},
 	},
 
 	-- Water (client: swimming and currents for the local character) --------------------------------

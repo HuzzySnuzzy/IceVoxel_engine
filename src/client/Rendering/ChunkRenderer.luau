@@ -8,6 +8,9 @@
 
 	A node's model stays out of the workspace until the streamer calls `show`, which lets the
 	streamer reveal a whole chunk at once and remove the chunk it replaces in the same frame.
+
+	MeshOverlay sits on top: it may merge stable far nodes into MeshParts and unparent their
+	models meanwhile; it is told about every show, clear and rebuild so it can put them back.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,6 +22,7 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local Blocks = require(Shared.Blocks)
 
 local PartPool = require(script.Parent.PartPool)
+local MeshOverlay = require(script.Parent.MeshOverlay)
 
 local BOX = GreedyMesher.BOX_BYTES
 local FLUID_FULL = Blocks.FLUID_FULL
@@ -49,6 +53,7 @@ type Task = {
 export type ChunkRenderer = {
 	root: Folder,
 	pool: PartPool.PartPool,
+	overlay: MeshOverlay.MeshOverlay,
 	-- Parts currently owned by sections (including ones not shown yet).
 	partCount: number,
 	urgent: { Task },
@@ -64,6 +69,8 @@ export type ChunkRenderer = {
 	) -> (),
 	show: (self: ChunkRenderer, node: RenderNode) -> (),
 	clear: (self: ChunkRenderer, node: RenderNode) -> (),
+	wantsQuads: (self: ChunkRenderer, level: number) -> boolean,
+	setQuads: (self: ChunkRenderer, node: RenderNode, quads: buffer, count: number) -> (),
 	step: (self: ChunkRenderer) -> (),
 	pending: (self: ChunkRenderer) -> number,
 }
@@ -79,6 +86,7 @@ function ChunkRenderer.new(): ChunkRenderer
 	local self = {
 		root = root,
 		pool = PartPool.new(Config.Render.PoolLimit),
+		overlay = MeshOverlay.new(root),
 		partCount = 0,
 		urgent = {},
 		normal = {},
@@ -130,10 +138,12 @@ end
 -- Puts the node's model into the workspace.
 function ChunkRenderer.show(self: ChunkRenderer, node: RenderNode)
 	modelOf(node).Parent = self.root
+	self.overlay:onShow(node)
 end
 
 -- Removes everything the node displays. Pending builds for it are dropped when reached.
 function ChunkRenderer.clear(self: ChunkRenderer, node: RenderNode)
+	self.overlay:onClear(node)
 	local model = node.model
 	if model then
 		model.Parent = nil
@@ -167,6 +177,7 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 		local originX = node.nx * Config.ChunkSize * scale
 		local originZ = node.nz * Config.ChunkSize * scale
 		local far = node.level > 0
+		local plain = far and self.overlay:plainLevel(node.level)
 		local boxes = t.boxes
 		local pool = self.pool
 
@@ -187,7 +198,7 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 				local wx = math.min(maxCells, x + sx - px)
 				for pz = z, z + sz - 1, maxCells do
 					local wz = math.min(maxCells, z + sz - pz)
-					local part = pool:acquire(appearance, far)
+					local part = pool:acquire(appearance, far, plain)
 					part.Size = Vector3.new(wx * scale, height, wz * scale)
 					part.CFrame = CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
 					part.Parent = folder
@@ -212,6 +223,8 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 	end
 	if old then
 		releaseFolder(self, old)
+		-- A merged mesh may still show the old content.
+		self.overlay:onChanged(node)
 	end
 	if t.onDone then
 		t.onDone()
@@ -219,8 +232,18 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 	return true
 end
 
+-- Should the workers also make quads (for far meshes) for nodes of this level?
+function ChunkRenderer.wantsQuads(self: ChunkRenderer, level: number): boolean
+	return self.overlay:wantsQuads(level)
+end
+
+function ChunkRenderer.setQuads(self: ChunkRenderer, node: RenderNode, quads: buffer, count: number)
+	self.overlay:setQuads(node, quads, count)
+end
+
 -- Runs queued builds until the frame budget is used. Call once per frame.
 function ChunkRenderer.step(self: ChunkRenderer)
+	self.overlay:step()
 	local deadline = os.clock() + Config.Render.BuildBudgetMs / 1000
 	for _, queue in { self.urgent, self.normal } do
 		while #queue > 0 do

@@ -10,6 +10,9 @@
 	the block's material as BaseMaterial, otherwise the plain colour is used and a warning printed).
 	`faces` images become Texture children of near templates, tiled once per block, so recycled parts
 	keep them for free.
+
+	"Plain" templates (far levels merged into meshes, see MeshOverlay) look like those meshes:
+	SmoothPlastic in the block's colour, no textures, fluids opaque.
 ]]
 
 local MaterialService = game:GetService("MaterialService")
@@ -26,7 +29,7 @@ export type PartPool = {
 	freeCount: number,
 	limit: number,
 
-	acquire: (self: PartPool, appearance: number, far: boolean) -> BasePart,
+	acquire: (self: PartPool, appearance: number, far: boolean, plain: boolean?) -> BasePart,
 	release: (self: PartPool, part: BasePart) -> (),
 }
 
@@ -43,7 +46,7 @@ end
 
 local warned: { [string]: boolean } = {}
 
-local function makeTemplate(appearance: number, far: boolean): BasePart
+local function makeTemplate(appearance: number, far: boolean, plain: boolean): BasePart
 	local info = Blocks.appearances[appearance]
 	local opaque = info.kind == Blocks.KIND_OPAQUE
 
@@ -62,6 +65,13 @@ local function makeTemplate(appearance: number, far: boolean): BasePart
 	part.Color = Color3.fromRGB(info.color[1], info.color[2], info.color[3])
 	part.Transparency = info.transparency
 	part.Reflectance = info.reflectance
+
+	if plain then
+		part.Material = Enum.Material.SmoothPlastic
+		part.Transparency = 0
+		part.Reflectance = 0
+		return part
+	end
 
 	if Config.Render.Textures then
 		local texture = info.texture
@@ -104,8 +114,8 @@ function PartPool.new(limit: number): PartPool
 	return (setmetatable(self, PartPool) :: any) :: PartPool
 end
 
-function PartPool.acquire(self: PartPool, appearance: number, far: boolean): BasePart
-	local key = appearance * 2 + (if far then 1 else 0)
+function PartPool.acquire(self: PartPool, appearance: number, far: boolean, plain: boolean?): BasePart
+	local key = appearance * 4 + (if far then 1 else 0) + (if plain then 2 else 0)
 	local list = self.free[key]
 	if list then
 		local part = table.remove(list)
@@ -117,7 +127,7 @@ function PartPool.acquire(self: PartPool, appearance: number, far: boolean): Bas
 
 	local template = self.templates[key] :: BasePart?
 	if template == nil then
-		local created = makeTemplate(appearance, far)
+		local created = makeTemplate(appearance, far, plain == true)
 		self.templates[key] = created
 		template = created
 	end

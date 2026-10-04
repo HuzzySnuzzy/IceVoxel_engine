@@ -17,10 +17,11 @@
 	Node states: waiting (for edit lists) -> queued -> working (in a worker) -> built (parts being
 	created) -> ready (visible).
 
-	Borders (GreedyMesher.Border): a node next to a coarser node is meshed knowing that node's
-	level, so it draws the border cells the coarser node leaves open (no see-through seams), and a
-	section with visible caves next to hidden caves closes its tunnels. Both depend on the
-	neighbours, so nodes are remeshed when their neighbourhood changes.
+	Borders (GreedyMesher.Border): a full detail chunk next to a coarser node is meshed knowing that
+	node's level, so it draws the border cells the coarser node leaves open (no see-through seams),
+	and a section with visible caves next to hidden caves closes its tunnels. Both depend on the
+	neighbours, so those chunks are remeshed when their neighbourhood changes. Far nodes use
+	borders that hold for any neighbours and never change once built.
 ]]
 
 local Players = game:GetService("Players")
@@ -475,6 +476,9 @@ local function onGenerated(self: ChunkStreamer, node: Node, job: number, result:
 	end
 
 	node.state = "built"
+	if result.quads then
+		self.renderer:setQuads(node, result.quads, result.quadCount)
+	end
 	if node.level == 0 then
 		local chunk: ClientWorld.ChunkData = {
 			data = result.data,
@@ -505,8 +509,14 @@ local function onGenerated(self: ChunkStreamer, node: Node, job: number, result:
 end
 
 local function dispatchGenerate(self: ChunkStreamer, node: Node): boolean
-	local job: { [string]: any } =
-		{ kind = "generate", level = node.level, nx = node.nx, nz = node.nz, coarser = node.coarser }
+	local job: { [string]: any } = {
+		kind = "generate",
+		level = node.level,
+		nx = node.nx,
+		nz = node.nz,
+		coarser = node.coarser,
+		quads = self.renderer:wantsQuads(node.level),
+	}
 	node.coarserUsed = node.coarser
 	local reveal: { number } = {}
 	if node.level == 0 then
@@ -688,22 +698,22 @@ local function refresh(self: ChunkStreamer)
 				keepEdits[Coords.chunkKey(nx + offset[1], nz + offset[2])] = true
 			end
 		end
-		node.coarser = coarserSides(desired, level, node.nx, node.nz)
-		if node.coarserUsed and seamsChanged(node.coarserUsed, node.coarser) then
-			-- A coarser neighbour appeared or changed level: the border must be redrawn.
-			local chunk = node.chunk
-			if node.state == "working" then
-				node.stale = true
-			elseif chunk then
-				-- Remeshed as soon as the node is ready (dispatch waits for that).
-				for s = 0, (chunk.emptyAbove - 1) // SECTION do
-					node.dirty[s] = true
+		-- Full detail chunks are meshed for their actual neighbours (exact seams); far nodes use
+		-- borders that hold for any neighbours (generator.farSeamLimits), so they never change.
+		if level == 0 then
+			node.coarser = coarserSides(desired, level, node.nx, node.nz)
+			if node.coarserUsed and seamsChanged(node.coarserUsed, node.coarser) then
+				-- A coarser neighbour appeared or changed level: the border must be redrawn.
+				local chunk = node.chunk
+				if node.state == "working" then
+					node.stale = true
+				elseif chunk then
+					-- Remeshed as soon as the node is ready (dispatch waits for that).
+					for s = 0, (chunk.emptyAbove - 1) // SECTION do
+						node.dirty[s] = true
+					end
+					self.dirtyNodes[node] = true
 				end
-				self.dirtyNodes[node] = true
-			elseif node.state == "ready" then
-				-- LOD nodes keep no block data: generate again. (A node still building is
-				-- handled at the first refresh after it is ready.)
-				node.state = "queued"
 			end
 		end
 	end

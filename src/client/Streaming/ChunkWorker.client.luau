@@ -3,15 +3,17 @@
 	Chunk worker, cloned into every Actor by WorkerPool. Runs generation and meshing in parallel.
 
 	Jobs ("Job" actor message):
-	  generate   { level, nx, nz, coarser, edits?, reveal?, caps? } -> chunk data (LOD 0 only) + section meshes
+	  generate   { level, nx, nz, coarser, edits?, reveal?, caps?, quads? } -> chunk data (LOD 0 only)
+	             + section meshes (+ the node's quads for Rendering/MeshOverlay when `quads`)
 	  mesh       { nx, nz, coarser, data, height, solidBelow, emptyAbove, sections, reveal, caps? }
 	             -> section meshes (full detail chunks only)
 
 	  map        { x, z, scale, size } -> RGBA pixels of a map tile (Map/MapPainter)
 
-	`coarser` is the level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none) and `caps`
-	the GreedyMesher.Border hidden mask of each revealed section ({ section, mask, ... }); together
-	they give the mesher's border (seams between LOD levels, cave caps).
+	`coarser` is the level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none) of a full
+	detail chunk and `caps` the GreedyMesher.Border hidden mask of each revealed section
+	({ section, mask, ... }); together they give the mesher's border (seams between LOD levels, cave
+	caps). Far nodes use generator.farSeamLimits instead, which holds for any neighbours.
 
 	Long jobs are split across frames: after Config.Workers.SliceBudgetMs the worker waits for the
 	next frame, so a busy worker never stalls rendering. Jobs run one at a time per worker because
@@ -31,6 +33,7 @@ local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
+local QuadMesher = require(Shared.Meshing.QuadMesher)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local MapPainter = require(Shared.Map.MapPainter)
 
@@ -95,7 +98,12 @@ local function generate(job: { [string]: any }): { [string]: any }
 	local r = generator.generate(level, job.nx, job.nz, yieldIfNeeded)
 	local data, height = r.data, r.height
 	local solidBelow, emptyAbove = r.solidBelow, r.emptyAbove
-	local open = if job.coarser then generator.seamLimits(level, job.nx, job.nz, job.coarser) else nil
+	local open
+	if level > 0 then
+		open = generator.farSeamLimits(level, job.nx, job.nz)
+	elseif job.coarser then
+		open = generator.seamLimits(level, job.nx, job.nz, job.coarser)
+	end
 	local caps = capMap(job.caps)
 
 	local edits = job.edits :: { number }?
@@ -116,6 +124,7 @@ local function generate(job: { [string]: any }): { [string]: any }
 	-- Cells a seam opens up may lie below the otherwise buried range.
 	local meshBelow = math.min(solidBelow, GreedyMesher.lowestOpen(open))
 	local indices: { number }, meshes: { buffer } = {}, {}
+	local quads, quadCount = nil, 0
 	if level == 0 then
 		local reveal = toSet(job.reveal)
 		for section = 0, height // SECTION - 1 do
@@ -133,10 +142,16 @@ local function generate(job: { [string]: any }): { [string]: any }
 	else
 		local y0, y1 = GreedyMesher.activeRange(meshBelow, emptyAbove, height)
 		if y1 > y0 then
-			local boxes, count = GreedyMesher.mesh(data, height, y0, y1, true, borderOf(open, nil, 0))
+			local border = borderOf(open, nil, 0)
+			local meshData = if border then GreedyMesher.applyBorder(data, height, y0, y1, true, border) else data
+			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true)
 			if count > 0 then
 				table.insert(indices, 0)
 				table.insert(meshes, boxes)
+			end
+			if job.quads then
+				-- Far meshes draw fluids opaque (see Rendering/MeshOverlay).
+				quads, quadCount = QuadMesher.mesh(meshData, height, y0, y1, true, true)
 			end
 		end
 	end
@@ -150,6 +165,8 @@ local function generate(job: { [string]: any }): { [string]: any }
 		emptyAbove = emptyAbove,
 		sections = indices,
 		meshes = meshes,
+		quads = quads,
+		quadCount = quadCount,
 	}
 end
 

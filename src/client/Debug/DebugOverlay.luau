@@ -1,7 +1,7 @@
 --!strict
 --[[
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
-	builds pending, parts in the world and the frame rate.
+	builds pending, parts in the world, far mesh status (MeshOverlay) and the frame rate.
 ]]
 
 local Players = game:GetService("Players")
@@ -9,8 +9,26 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
+local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 
 local DebugOverlay = {}
+
+local function meshLine(stats: MeshOverlay.Stats): string
+	return string.format(
+		"meshes  %s\n        %d/%d regions, %d/%d chunks, %d parts, %dk tris\n        %d built, %d failed, last %.0f ms, worst frame %.0f ms",
+		stats.status,
+		stats.meshedRegions,
+		stats.regions,
+		stats.meshedNodes,
+		stats.nodes,
+		stats.meshParts,
+		stats.triangles // 1000,
+		stats.builds,
+		stats.failures,
+		stats.lastBuildMs,
+		stats.slowestFrameMs
+	)
+end
 
 function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 	local gui = Instance.new("ScreenGui")
@@ -20,7 +38,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
-	label.Size = UDim2.fromOffset(320, 150)
+	label.Size = UDim2.fromOffset(380, 210)
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.BackgroundTransparency = 0.5
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -69,6 +87,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			`waiting {stats.waiting}  queued {stats.queued}  working {stats.working}`,
 			`workers busy {stats.busyWorkers}  builds pending {stats.building}`,
 			`parts   {streamer.renderer.partCount}  pooled {streamer.renderer.pool.freeCount}`,
+			meshLine(streamer.renderer.overlay:getStats()),
 		}, "\n")
 	end)
 end

@@ -177,6 +177,50 @@ one tile covers one block face, and because box parts start and end on the block
 line up across boxes. `faces` images become `Texture` children of near templates (e.g. a grass top
 over a dirt texture), so pooled parts keep them without extra work.
 
+### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
+
+Thousands of far parts can be replaced by a few MeshParts built at runtime with EditableMesh. The
+constraints that shape the design (creator-docs, API dump and live client flags, October 2026):
+
+- An EditableMesh holds at most 60,000 vertices and 20,000 triangles.
+- Clients have an editable memory budget (80 MiB on PC); every growable EditableMesh is charged a
+  flat 10 MiB, which is where the "8 EditableMesh limit" comes from. Freed budget reportedly
+  returns only after many seconds.
+- `AssetService:CreateDataModelContentAsync` bakes an EditableMesh into static content that does
+  not count against that budget; `CreateMeshPartAsync` then makes a MeshPart from it. Both yield,
+  and a MeshPart reportedly costs ~20-30 ms to create, which cannot be split across frames.
+- A MeshPart has one material, is centred on its mesh, and can be at most 2048 studs long.
+
+So meshes are kept off the critical path: **parts first, meshes as an overlay.** Every node is still
+built and shown as parts exactly as before; the streamer's protocol is unchanged. The overlay:
+
+1. **Regions** (`MeshRegions`, pure and unit tested): shown far nodes of level >= `MinLevel` are
+   grouped into aligned regions of 4 × 4 nodes of one level (at most 512 blocks wide). A region whose
+   members have not changed for `StableSeconds` is a candidate; larger regions go first.
+2. **Build** (builder thread, one region at a time, at most one every `BuildInterval` and never
+   right after a slow frame): the members' quads (`Meshing/QuadMesher`, made by the workers next to
+   the boxes) become mesh arrays (`Meshing/MeshGeometry`: centred, split at `MaxTriangles`, a tiny
+   anchor quad when a mesh would be flat), written into the session's single scratch EditableMesh
+   with the batch APIs (vertex colours via the automatically created colour ids; with unshared
+   vertices the automatic normals are the face normals), baked, cleared, and turned into a
+   MeshPart (Box collision, no collision/queries/touch, Precise render fidelity so the engine does
+   not decimate it into cracks). Its size is checked before it is trusted.
+3. **Swap**: if the members are unchanged, the MeshParts are parented, and two frames later the
+   members' part folders are unparented (kept). Parts of merged levels use a plain look
+   (SmoothPlastic, block colour, opaque water), so both look the same.
+4. **Demote**: when a member of a mesh is removed or rebuilt, the mesh is destroyed and the parts are
+   parented again in the same frame. Members added to a meshed region stay parts until it is
+   rebuilt. A failed build leaves the parts; failures back off per region, three in a row pause
+   building for a minute, and StorageLimitExceeded / PermissionDenied switch meshes off.
+
+Far nodes never change once built because their borders do not depend on their neighbours
+(`generator.farSeamLimits`): the LOD tree is 2:1 balanced, so a node is meshed as if every side had
+a one or a two levels coarser neighbour, which costs ~2% more boxes and ~1% more triangles. Full
+detail chunks keep exact seams (and are never merged: they need exact collision, edits and caves).
+
+A startup probe (an off-centre block, a flat sheet, and a full-size mesh timed against the frame
+time) decides whether meshes are used at all. F3 shows the status and counters.
+
 ### Map (`Map/`)
 
 Map tiles are painted from the generator, not from loaded chunks, so the map shows the whole
