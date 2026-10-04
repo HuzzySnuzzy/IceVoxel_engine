@@ -91,6 +91,9 @@ Types.CURSOR = -1
 -- Most slots a drag can cover / a container can have.
 Types.MAX_DRAG = 64
 Types.MAX_CONTAINER = 54
+-- Player attribute with the item id in the player's hand (0 = nothing), set by the server so every
+-- client can draw it in the character's hand.
+Types.HELD_ATTRIBUTE = "IceVoxelHeldItem"
 
 function Types.newInventory(): Inventory
 	return { slots = {}, armor = {}, cursor = nil, selected = 1 }
