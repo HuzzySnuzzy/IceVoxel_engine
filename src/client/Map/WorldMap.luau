@@ -27,6 +27,7 @@ local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local Hud = require(script.Parent.Parent.Ui.Hud)
 
 local BLOCK = Config.BlockSize
 local ZOOMS = Config.Map.ZoomLevels
@@ -223,6 +224,8 @@ function WorldMap.new(
 		end
 		open = value
 		backdrop.Visible = value
+		-- The map and the HUD / inventory screens are never on screen together.
+		Hud.setVisible(not value)
 		dragging, dragInput = nil, nil
 		ContextMenu.close()
 		if value then
@@ -238,6 +241,11 @@ function WorldMap.new(
 			ContextActionService:UnbindAction(ZOOM_ACTION)
 		end
 	end
+	Screens.changed:Connect(function(isOpen: boolean)
+		if isOpen then
+			setOpen(false)
+		end
+	end)
 
 	close.Activated:Connect(function()
 		setOpen(false)

@@ -366,7 +366,8 @@ local function updateWater(state: State, world: World)
 		end
 	end
 	local length = sqrt(px * px + py * py + pz * pz)
-	if length > 0 then
+	-- A flying player is not pushed by currents (Player.isPushedByFluid).
+	if length > 0 and not state.flying then
 		px, py, pz = px / cells * FLUID_PUSH, py / cells * FLUID_PUSH, pz / cells * FLUID_PUSH
 		length = length / cells * FLUID_PUSH
 		if abs(state.vx) < MIN_VELOCITY and abs(state.vz) < MIN_VELOCITY and length < 0.0045 then
@@ -618,8 +619,9 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			state.jumpTriggerTime = 0
 		end
 	end
-	-- Sneaking in water sinks (LocalPlayer.goDownInWater).
-	if state.inWater and input.sneak then
+	-- Sneaking in water sinks (LocalPlayer.goDownInWater). A flying player is not affected by
+	-- fluids at all (Player.isAffectedByFluids): no sinking, swimming up or water movement.
+	if state.inWater and input.sneak and not state.flying then
 		state.vy -= WATER_JUMP
 	end
 	-- Flying: jump rises, sneak sinks.
@@ -648,7 +650,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if abs(state.vz) < MIN_VELOCITY then
 		state.vz = 0
 	end
-	if input.jump then
+	if input.jump and not state.flying then
 		local height = if state.inWater then state.waterHeight else 0
 		local swimming = state.inWater and height > 0
 		if swimming and (not state.onGround or height > FLUID_JUMP_THRESHOLD) then
@@ -679,7 +681,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 
 	-- LivingEntity.travel (Player.travel keeps the vertical speed from before it when flying).
 	local flyingVy = state.vy
-	if state.inWater then
+	if state.inWater and not state.flying then
 		local startY = state.y
 		local drag = if state.sprinting then WATER_SPRINT_DRAG else WATER_DRAG
 		accelerate(state, WATER_ACCELERATION, inputX, inputZ)

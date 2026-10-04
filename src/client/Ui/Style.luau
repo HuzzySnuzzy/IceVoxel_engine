@@ -70,11 +70,14 @@ local MARGIN = 8
 
 --[[
 	The UIScale for content of `width` x `height` GUI pixels on a `viewport`-sized screen:
-	Minecraft's automatic scale (a whole number, at most MAX_SCALE), shrunk to fit the content.
-	Touch screens may use fractions (in eighths), so they get as big as fits.
+	Minecraft's automatic scale (a whole number, at most MAX_SCALE), shrunk to fit the content into
+	`area` (default: the whole viewport; the automatic scale always comes from the viewport, so
+	content fitted into part of the screen matches the rest). Touch screens may use fractions (in
+	eighths), so they get as big as fits.
 ]]
-function Style.guiScale(viewport: Vector2, width: number, height: number, touch: boolean): number
-	local fit = math.min((viewport.X - 2 * MARGIN) / width, (viewport.Y - 2 * MARGIN) / height)
+function Style.guiScale(viewport: Vector2, width: number, height: number, touch: boolean, area: Vector2?): number
+	local space = area or viewport
+	local fit = math.min((space.X - 2 * MARGIN) / width, (space.Y - 2 * MARGIN) / height)
 	local scale
 	if touch then
 		scale = math.min(viewport.X / BASE_WIDTH, viewport.Y / BASE_HEIGHT, MAX_SCALE, fit)

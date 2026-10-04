@@ -87,6 +87,9 @@ return function(t, shared, require)
 		t.ok(not Mining.mayBreak(Blocks.id.Stone, 1.0), "stone after 1 s")
 		t.ok(Mining.mayBreak(Blocks.id.Stone, 1.6), "stone after 70% of 2.25 s")
 		t.ok(Mining.mayBreak(Blocks.id.OakLeaves, 0.2))
+		-- A delayed break (arrived early) finishes once all of the time has passed.
+		t.ok(not Mining.mayBreak(Blocks.id.Stone, 2.15, 1), "stone not done after 2.15 s")
+		t.ok(Mining.mayBreak(Blocks.id.Stone, 2.2, 1), "stone done after 44 ticks + the start tick")
 	end)
 
 	t.test("game modes parse like /gamemode", function()
@@ -203,8 +206,12 @@ return function(t, shared, require)
 			{ op = "sync", id = 2, x = 0, y = 1, z = 2, vx = 0, vy = -0.5, vz = 0 },
 			{ op = "count", id = 3, count = 64 },
 			{ op = "remove", id = 4, collector = 4123456789 },
+			{ op = "take", id = 5, count = 7, collector = 99 },
 		}))
-		t.eq(#ops, 4)
+		t.eq(#ops, 5)
+		t.eq((ops[5] :: any).op, "take")
+		t.eq((ops[5] :: any).count, 7)
+		t.eq((ops[5] :: any).collector, 99)
 		local spawn = ops[1] :: any
 		t.eq(spawn.op, "spawn")
 		t.eq(spawn.item, Items.id.Dirt)

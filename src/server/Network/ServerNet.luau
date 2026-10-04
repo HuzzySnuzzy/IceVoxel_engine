@@ -34,6 +34,7 @@ local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EditRules = require(script.Parent.EditRules)
+local Mining = require(Shared.Mining)
 
 type World = WorldServer.World
 
@@ -41,6 +42,8 @@ local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
 local EDITS_PER_MESSAGE = 4096
 local CHUNK_REQUESTS_PER_SECOND = 1500
+-- A break that arrived early is finished within this many seconds or undone.
+local DELAY_LIMIT = 1
 
 local ClientMessage = Protocol.ClientMessage
 local ServerMessage = Protocol.ServerMessage
@@ -110,6 +113,9 @@ export type Rules = {
 	-- A container block was broken: drop its contents and close it for its viewers.
 	-- (Players/Inventories.removeContainer)
 	removeContainer: ((x: number, y: number, z: number) -> ())?,
+	-- May this player break the container at (x, y, z) now? (Creative players make items from
+	-- nothing, so what a chest spills is charged to their budget: Players/Inventories.)
+	mayRemoveContainer: ((player: Player, x: number, y: number, z: number) -> boolean)?,
 }
 
 export type ServerNet = {
@@ -131,6 +137,10 @@ function ServerNet.start(world: World): ServerNet
 	local chunkBuckets: { [Player]: Bucket } = {}
 	-- The block each survival player is mining (Mine messages).
 	local mining: { [Player]: EditRules.Mine } = {}
+	-- A survival break that arrived before its time (network jitter): finished once the time has
+	-- passed, like Minecraft's delayed destroy (ServerPlayerGameMode.hasDelayedDestroy).
+	type DelayedBreak = { x: number, y: number, z: number, block: number, startedAt: number, expires: number }
+	local delayed: { [Player]: DelayedBreak } = {}
 	local rules: Rules = {}
 
 	local function bucket(map: { [Player]: Bucket }, player: Player, initial: number): Bucket
@@ -166,7 +176,15 @@ function ServerNet.start(world: World): ServerNet
 		remote:FireClient(player, ServerMessage.ChunkEdits, Protocol.encodeChunkEdits(lists))
 	end
 
-	-- Mine messages: a survival player started (or stopped) mining a block.
+	-- Is block (x, y, z) within the player's reach (with some slack for movement and latency)?
+	local function inReach(player: Player, x: number, y: number, z: number): boolean
+		local root = rootOf(player)
+		local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
+		return root ~= nil and (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+	end
+
+	-- Mine messages: a survival player started (or stopped) mining a block. A start only counts for
+	-- a minable block in reach, so the timer can't be started early from afar.
 	local function handleMine(player: Player, payload: buffer)
 		local started, x, y, z = Protocol.decodeMine(payload)
 		if started == nil then
@@ -174,6 +192,20 @@ function ServerNet.start(world: World): ServerNet
 		end
 		local mine = mining[player]
 		if started then
+			local block = if y < HEIGHT
+					and math.abs(x) <= Protocol.MAX_COORDINATE
+					and math.abs(z) <= Protocol.MAX_COORDINATE
+				then world:peekBlock(x, y, z)
+				else nil
+			if
+				block == nil
+				or Mining.progressPerTick(block, true, false) <= 0
+				or GameMode.isCreative(player)
+				or not inReach(player, x, y, z)
+			then
+				mining[player] = nil
+				return
+			end
 			if mine == nil then
 				mining[player] = { x = x, y = y, z = z, startedAt = os.clock() }
 			else
@@ -184,14 +216,59 @@ function ServerNet.start(world: World): ServerNet
 		end
 	end
 
+	-- Breaks block (x, y, z), which holds `current`: drops (survival) and a container's contents.
+	-- false if the world refused the change.
+	local function performBreak(x: number, y: number, z: number, current: number, creative: boolean): boolean
+		if not world:setBlock(x, y, z, Blocks.AIR) then
+			return false
+		end
+		local removeContainer = rules.removeContainer
+		if removeContainer and EditRules.isContainer(current) then
+			removeContainer(x, y, z)
+		end
+		local drop = EditRules.drops(current, creative)
+		local dropBlock = rules.dropBlock
+		if drop and dropBlock then
+			dropBlock(x, y, z, drop)
+		end
+		return true
+	end
+
+	-- Finishes (or gives up) the delayed breaks, every frame.
+	local function updateDelayed()
+		local now = os.clock()
+		for player, pending in delayed do
+			local current = world:peekBlock(pending.x, pending.y, pending.z)
+			local alive = player.Parent ~= nil and inReach(player, pending.x, pending.y, pending.z)
+			if current ~= pending.block or not alive or GameMode.isCreative(player) then
+				delayed[player] = nil
+				if player.Parent then
+					sendBlock(player, pending.x, pending.y, pending.z)
+				end
+			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1) then
+				delayed[player] = nil
+				if not performBreak(pending.x, pending.y, pending.z, pending.block, false) then
+					sendBlock(player, pending.x, pending.y, pending.z)
+				end
+			elseif now > pending.expires then
+				delayed[player] = nil
+				sendBlock(player, pending.x, pending.y, pending.z)
+			end
+		end
+	end
+
 	local function handleEdit(player: Player, payload: buffer)
 		local action, x, y, z, block, seq = Protocol.decodeEdit(payload)
-		if
-			action == nil
-			or y >= HEIGHT
-			or math.abs(x) > Protocol.MAX_COORDINATE
-			or math.abs(z) > Protocol.MAX_COORDINATE
-		then
+		if action == nil then
+			return
+		end
+		if y >= HEIGHT or math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
+			-- Nothing to restore out there (and no terrain to generate), but a placement's predicted
+			-- use of an item still needs its answer.
+			local acknowledge = rules.acknowledge
+			if action == EditAction.Place and seq > 0 and acknowledge then
+				acknowledge(player, seq)
+			end
 			return
 		end
 
@@ -211,10 +288,7 @@ function ServerNet.start(world: World): ServerNet
 			return
 		end
 
-		local root = rootOf(player)
-		local reach = (Config.Interaction.Reach + 2) * BLOCK
-		local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-		if root == nil or (root.Position - center).Magnitude > reach then
+		if not inReach(player, x, y, z) then
 			reject()
 			return
 		end
@@ -222,23 +296,44 @@ function ServerNet.start(world: World): ServerNet
 		local creative = GameMode.isCreative(player)
 		local current = world:getBlock(x, y, z)
 		if action == EditAction.Break then
-			if not EditRules.mayBreak(current, creative, mining[player], x, y, z, os.clock()) then
+			local mine = mining[player]
+			local now = os.clock()
+			if not EditRules.mayBreak(current, creative, mine, x, y, z, now) then
+				if
+					not creative
+					and mine
+					and mine.x == x
+					and mine.y == y
+					and mine.z == z
+					and Mining.progressPerTick(current, true, false) > 0
+				then
+					-- Mined, but arrived before its time: keep the client's air and finish it when the
+					-- time has passed (a second early break replaces the first, which is undone).
+					mining[player] = nil
+					local previous = delayed[player]
+					if previous then
+						sendBlock(player, previous.x, previous.y, previous.z)
+					end
+					delayed[player] = {
+						x = x,
+						y = y,
+						z = z,
+						block = current,
+						startedAt = mine.startedAt,
+						expires = now + DELAY_LIMIT,
+					}
+					return
+				end
+				reject()
+				return
+			end
+			local mayRemove = rules.mayRemoveContainer
+			if mayRemove and EditRules.isContainer(current) and not mayRemove(player, x, y, z) then
 				reject()
 				return
 			end
 			mining[player] = nil
-			if not world:setBlock(x, y, z, Blocks.AIR) then
-				return
-			end
-			local removeContainer = rules.removeContainer
-			if removeContainer and EditRules.isContainer(current) then
-				removeContainer(x, y, z)
-			end
-			local drop = EditRules.drops(current, creative)
-			local dropBlock = rules.dropBlock
-			if drop and dropBlock then
-				dropBlock(x, y, z, drop)
-			end
+			performBreak(x, y, z, current, creative)
 		elseif action == EditAction.Place then
 			if not EditRules.mayPlace(block, current) or (Blocks.isSolid(block) and intersectsCharacter(x, y, z)) then
 				reject()
@@ -276,9 +371,11 @@ function ServerNet.start(world: World): ServerNet
 		editBuckets[player] = nil
 		chunkBuckets[player] = nil
 		mining[player] = nil
+		delayed[player] = nil
 	end)
 
 	local function flush()
+		updateDelayed()
 		local pending = world:takePending()
 		local n = #pending
 		local step = EDITS_PER_MESSAGE * 4

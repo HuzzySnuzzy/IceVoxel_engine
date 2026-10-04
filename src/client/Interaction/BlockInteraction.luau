@@ -356,6 +356,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- Ticks left before mining can start again after a break.
 	local destroyDelay = 0
 	local tickClock = 0
+	-- When the break button went down (the first frame after it only counts the time since).
+	local pressedAt: number? = nil
 	local lastCreativeBreak = -math.huge
 
 	local function stopMining()
@@ -397,9 +399,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		if current == nil then
+			-- Minecraft's startDestroyBlock: the first tick on a block only starts it, unless it
+			-- breaks at once.
 			current = { x = hit.x, y = hit.y, z = hit.z, block = hit.block, progress = 0 }
 			mining = current
 			ClientNet.send(Protocol.ClientMessage.Mine, Protocol.encodeMine(true, hit.x, hit.y, hit.z))
+			if perTick < 1 then
+				return
+			end
 		end
 		assert(current, "mining state")
 		current.progress += perTick
@@ -410,13 +417,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			destroyDelay = Mining.DELAY_TICKS
 			breakBlock(hit)
 		else
-			-- Minecraft's destroy stage: nothing below 10%, then stages 0..9.
-			local stage = math.floor(current.progress * 10) - 1
-			if stage >= 0 then
-				cracks:show(hit.x, hit.y, hit.z, stage)
-			else
-				cracks:hide()
-			end
+			-- Minecraft's destroy stage (MultiPlayerGameMode.getDestroyStage): 0..9 once started.
+			cracks:show(hit.x, hit.y, hit.z, math.floor(current.progress * 10))
 		end
 	end
 
@@ -465,6 +467,15 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local x, y, z = hit.x, hit.y, hit.z
 		if not Blocks.isReplaceable(hit.block) then
 			x, y, z = x + hit.nx, y + hit.ny, z + hit.nz
+		end
+		-- Inside the world's build limits only (the server refuses the rest).
+		if
+			y < 0
+			or y >= Config.WorldHeight
+			or math.abs(x) > Protocol.MAX_COORDINATE
+			or math.abs(z) > Protocol.MAX_COORDINATE
+		then
+			return
 		end
 		local current = world:getBlock(x, y, z)
 		if current == nil or not Blocks.isReplaceable(current) then
@@ -519,6 +530,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		else
 			-- Start on this frame rather than the next tick.
 			tickClock = 0
+			pressedAt = os.clock()
 			miningTick()
 		end
 	end
@@ -634,7 +646,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					creativeBreak(now)
 				end
 			else
-				tickClock = math.min(tickClock + dt, TICK * MAX_TICKS_PER_FRAME)
+				-- Right after a press, only the time since it counts (not the whole frame).
+				local elapsed = dt
+				local pressed = pressedAt
+				if pressed then
+					elapsed = math.clamp(now - pressed, 0, dt)
+					pressedAt = nil
+				end
+				tickClock = math.min(tickClock + elapsed, TICK * MAX_TICKS_PER_FRAME)
 				while tickClock >= TICK do
 					tickClock -= TICK
 					miningTick()

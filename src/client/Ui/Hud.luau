@@ -111,6 +111,8 @@ local Hud = {}
 
 local mode: Mode = "play"
 local started = false
+local hudGui: ScreenGui? = nil
+local hudVisible = true
 local wheelHandler: ((delta: number) -> ())? = nil
 local inventoryHandler: (() -> ())? = nil
 local previewWindow: Types.Window? = nil
@@ -131,6 +133,14 @@ function Hud.setMode(value: Mode)
 		for _, cell in cells do
 			cell.Selectable = value == "creative"
 		end
+	end
+end
+
+-- Shows or hides the whole HUD (the world map hides it while open).
+function Hud.setVisible(value: boolean)
+	hudVisible = value
+	if hudGui then
+		hudGui.Enabled = value
 	end
 end
 
@@ -229,6 +239,8 @@ function Hud.start()
 	gui.IgnoreGuiInset = true
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	gui.DisplayOrder = 10
+	gui.Enabled = hudVisible
+	hudGui = gui
 
 	local canvas = Instance.new("Frame")
 	canvas.Name = "Hud"

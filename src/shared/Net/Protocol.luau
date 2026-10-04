@@ -37,6 +37,7 @@
 	                   2 sync    f32 x, y, z, vx, vy, vz
 	                   3 count   u8 count
 	                   4 remove  f64 collector (UserId of the player who picked it up, 0 = none)
+	                   5 take    u8 count, f64 collector: a partial pickup (the item stays, smaller)
 	  Notice         u16 length, text: a message for the player (shown in the chat)
 
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
@@ -382,10 +383,17 @@ export type EntityOp =
 	| { op: "sync", id: number, x: number, y: number, z: number, vx: number, vy: number, vz: number }
 	| { op: "count", id: number, count: number }
 	| { op: "remove", id: number, collector: number }
+	| { op: "take", id: number, count: number, collector: number }
 
-local OP_SPAWN, OP_SYNC, OP_COUNT, OP_REMOVE = 1, 2, 3, 4
-local OP_SIZE = { [OP_SPAWN] = 5 + 3 + 24 + 2, [OP_SYNC] = 5 + 24, [OP_COUNT] = 5 + 1, [OP_REMOVE] = 5 + 8 }
-local OP_CODE = { spawn = OP_SPAWN, sync = OP_SYNC, count = OP_COUNT, remove = OP_REMOVE }
+local OP_SPAWN, OP_SYNC, OP_COUNT, OP_REMOVE, OP_TAKE = 1, 2, 3, 4, 5
+local OP_SIZE = {
+	[OP_SPAWN] = 5 + 3 + 24 + 2,
+	[OP_SYNC] = 5 + 24,
+	[OP_COUNT] = 5 + 1,
+	[OP_REMOVE] = 5 + 8,
+	[OP_TAKE] = 5 + 1 + 8,
+}
+local OP_CODE = { spawn = OP_SPAWN, sync = OP_SYNC, count = OP_COUNT, remove = OP_REMOVE, take = OP_TAKE }
 
 function Protocol.encodeEntities(ops: { EntityOp }): buffer
 	local size = 2
@@ -422,6 +430,10 @@ function Protocol.encodeEntities(ops: { EntityOp }): buffer
 		elseif op.op == "remove" then
 			buffer.writef64(b, o, op.collector)
 			o += 8
+		elseif op.op == "take" then
+			buffer.writeu8(b, o, op.count)
+			buffer.writef64(b, o + 1, op.collector)
+			o += 9
 		end
 	end
 	return b
@@ -468,6 +480,12 @@ function Protocol.decodeEntities(b: buffer): { EntityOp }
 		elseif code == OP_REMOVE then
 			table.insert(ops, { op = "remove", id = id, collector = buffer.readf64(b, o) })
 			o += 8
+		elseif code == OP_TAKE then
+			table.insert(
+				ops,
+				{ op = "take", id = id, count = buffer.readu8(b, o), collector = buffer.readf64(b, o + 1) }
+			)
+			o += 9
 		else
 			error(`Unknown entity op {code}`)
 		end

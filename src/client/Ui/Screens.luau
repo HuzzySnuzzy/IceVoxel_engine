@@ -37,6 +37,7 @@ local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -95,6 +96,39 @@ type TouchState = {
 	button: number,
 	lastY: number,
 }
+
+-- Typing into a text box or Roblox's chat bar?
+local function typing(): boolean
+	if UserInputService:GetFocusedTextBox() ~= nil then
+		return true
+	end
+	local bar = TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
+	return bar ~= nil and bar.IsFocused
+end
+
+-- Is a point (input coordinates, below the top bar inset) over Roblox's own UI: the top bar or
+-- the chat window and bar?
+local function overCoreGui(point: Vector2): boolean
+	if point.Y < 0 then
+		return true
+	end
+	for _, config in TextChatService:GetChildren() do
+		if config:IsA("ChatWindowConfiguration") or config:IsA("ChatInputBarConfiguration") then
+			if config.Enabled then
+				local position, size = config.AbsolutePosition, config.AbsoluteSize
+				if
+					point.X >= position.X
+					and point.Y >= position.Y
+					and point.X <= position.X + size.X
+					and point.Y <= position.Y + size.Y
+				then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
 
 local Screens = {}
 
@@ -270,6 +304,10 @@ function Screens.start()
 	})
 
 	local function targetAt(point: Vector2): Target?
+		-- Over Roblox's own UI (the top bar, the chat): neither a slot nor outside.
+		if overCoreGui(point) then
+			return nil
+		end
 		if current == "creative" then
 			return creative:targetAt(point)
 		end
@@ -383,7 +421,7 @@ function Screens.start()
 				bottom = cell.AbsolutePosition.Y - gui.AbsolutePosition.Y - cell.AbsoluteSize.Y * 0.2
 			end
 			local size = creative:size()
-			scale = Style.guiScale(Vector2.new(viewport.X, math.max(bottom, 60)), size.X, size.Y, touchScreen)
+			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen, Vector2.new(viewport.X, math.max(bottom, 60)))
 			setScale(creativeScale, scale)
 			local y = math.floor(bottom / 2 + size.Y * scale / 2)
 			if creative.root.Position.Y.Offset ~= y then
@@ -652,6 +690,10 @@ function Screens.start()
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		local kind, key = input.UserInputType, input.KeyCode
+		if (kind == Enum.UserInputType.Keyboard or kind == Enum.UserInputType.Gamepad1) and typing() then
+			-- Keys go to the chat (or another text box), not to the screens.
+			return
+		end
 		if current == nil then
 			if not processed and (key == Enum.KeyCode.E or key == Enum.KeyCode.ButtonY) then
 				Screens.toggle()

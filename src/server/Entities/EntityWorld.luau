@@ -60,6 +60,8 @@ export type Changes = {
 	moved: { number },
 	counts: { number },
 	removed: { { id: number, collector: any } },
+	-- Partial pickups: `count` items of entity `id` went to `collector` (the entity keeps the rest).
+	taken: { { id: number, count: number, collector: any } },
 }
 
 export type Options = {
@@ -83,6 +85,7 @@ export type EntityWorld = {
 	movedSet: { [number]: boolean },
 	countSet: { [number]: boolean },
 	removedList: { { id: number, collector: any } },
+	takenList: { { id: number, count: number, collector: any } },
 
 	spawnItem: (
 		self: EntityWorld,
@@ -146,6 +149,7 @@ function EntityWorld.new(getBlock: ItemPhysics.GetBlock, options: Options): Enti
 		movedSet = {},
 		countSet = {},
 		removedList = {},
+		takenList = {},
 	}
 	return (setmetatable(self, EntityWorld) :: any) :: EntityWorld
 end
@@ -266,10 +270,16 @@ local function buildGrid(entities: { Entity }): Grid
 end
 
 -- Calls `visit` for every live entity whose column lies within [x0, x1] x [z0, z1] (blocks).
+-- (Loops over a bounded number of columns, so no position, however far out, can make it run long.)
+local MAX_COLUMNS = 8
 local function forColumns(grid: Grid, x0: number, x1: number, z0: number, z1: number, visit: (Entity) -> boolean?)
-	for cx = floor(x0), floor(x1) do
-		for cz = floor(z0), floor(z1) do
-			local cell = grid[columnKey(cx, cz)]
+	local bx, bz = floor(x0), floor(z0)
+	if bx ~= bx or bz ~= bz or bx == math.huge or bx == -math.huge or bz == math.huge or bz == -math.huge then
+		return
+	end
+	for i = 0, math.min(floor(x1) - bx, MAX_COLUMNS) do
+		for j = 0, math.min(floor(z1) - bz, MAX_COLUMNS) do
+			local cell = grid[columnKey(bx + i, bz + j)]
 			if cell then
 				for _, entity in cell do
 					if not entity.removed and visit(entity) then
@@ -425,6 +435,7 @@ function EntityWorld.tick(
 						removeEntity(self, entity, player.key)
 					else
 						self.countSet[entity.id] = true
+						table.insert(self.takenList, { id = entity.id, count = taken, collector = player.key })
 					end
 				end
 			end
@@ -462,11 +473,13 @@ function EntityWorld.takeChanges(self: EntityWorld): Changes
 		moved = sortedLive(self, self.movedSet),
 		counts = sortedLive(self, self.countSet),
 		removed = self.removedList,
+		taken = self.takenList,
 	}
 	self.spawnedSet = {}
 	self.movedSet = {}
 	self.countSet = {}
 	self.removedList = {}
+	self.takenList = {}
 	return changes
 end
 

@@ -61,6 +61,7 @@ net.setRules({
 	acknowledge = Inventories.acknowledge,
 	dropBlock = Entities.dropBlock,
 	removeContainer = Inventories.removeContainer,
+	mayRemoveContainer = Inventories.mayRemoveContainer,
 })
 Spawning.start(world)
 Teleport.start(world, net)

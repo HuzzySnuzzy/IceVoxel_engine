@@ -70,10 +70,26 @@ local function finite(...: number): boolean
 	return true
 end
 
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
+-- Players own their characters, so a position from one may be anything: only finite ones within
+-- the world's coordinate range count (EntityWorld's grids and Hull would otherwise loop forever).
+local MAX_SPEED = 4
+local LIMIT = Protocol.MAX_COORDINATE + 64
+local MAX_HEIGHT = 4096
+local function sane(x: number, y: number, z: number): boolean
+	return finite(x, y, z) and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT and math.abs(y) <= MAX_HEIGHT
+end
+
+-- A character's feet, if they are a sane position.
+local function characterFeet(character: Model?): Vector3?
 	local feet = if character then Rig.feet(character) else nil
-	return feet or lastFeet[player]
+	if feet and sane(feet.X, feet.Y, feet.Z) then
+		return feet
+	end
+	return nil
+end
+
+local function feetOf(player: Player): Vector3?
+	return characterFeet(player.Character) or lastFeet[player]
 end
 
 local function tryPickup(key: any, item: number, count: number): number
@@ -108,6 +124,10 @@ local function spawnOp(entity: EntityWorld.Entity): EntityOp
 end
 
 -- Sends every player what changed about the items around them this tick.
+local function userIdOf(collector: any): number
+	return if typeof(collector) == "Instance" and collector:IsA("Player") then collector.UserId else 0
+end
+
 local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: boolean)
 	local changes = entities:takeChanges()
 	local range = Config.Entities.TrackingDistance
@@ -125,11 +145,18 @@ local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: bool
 		for _, removal in changes.removed do
 			if known[removal.id] then
 				known[removal.id] = nil
-				local collector = removal.collector
-				local userId = if typeof(collector) == "Instance" and collector:IsA("Player")
-					then collector.UserId
-					else 0
-				table.insert(ops, { op = "remove", id = removal.id, collector = userId })
+				table.insert(ops, { op = "remove", id = removal.id, collector = userIdOf(removal.collector) })
+			end
+		end
+		-- Partial pickups fly to the collector too (the count op that follows shrinks the rest).
+		for _, take in changes.taken do
+			if known[take.id] then
+				table.insert(ops, {
+					op = "take",
+					id = take.id,
+					count = math.min(take.count, 255),
+					collector = userIdOf(take.collector),
+				})
 			end
 		end
 
@@ -211,7 +238,7 @@ local function step(net: Net, entities: EntityWorld.EntityWorld, tick: number)
 	local pickers: { EntityWorld.PlayerBox } = {}
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
-		local feet = if character then Rig.feet(character) else nil
+		local feet = characterFeet(character)
 		if character and feet then
 			lastFeet[player] = feet
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -280,9 +307,13 @@ function Entities.spawnItem(
 	local entities = entityWorld
 	assert(entities, "Entities.start must run before items spawn")
 	local count = math.floor(stack.count)
-	if not Items.isValid(stack.item) or count < 1 or not finite(x, y, z, vx or 0, vy or 0, vz or 0) then
+	if not Items.isValid(stack.item) or count < 1 or not sane(x, y, z) or not finite(vx or 0, vy or 0, vz or 0) then
 		return 0
 	end
+	-- (Blocks per tick; far faster than anything throws, small enough to keep collision cheap.)
+	vx = if vx then math.clamp(vx, -MAX_SPEED, MAX_SPEED) else nil
+	vy = if vy then math.clamp(vy, -MAX_SPEED, MAX_SPEED) else nil
+	vz = if vz then math.clamp(vz, -MAX_SPEED, MAX_SPEED) else nil
 	local max = Items.maxStack(stack.item)
 	local first = 0
 	while count > 0 do

@@ -20,7 +20,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   lets anything cross chunk borders.
 - **Survival and creative.** Minecraft's two game modes, switched with `/gamemode creative` or
   `/gm s` in the chat.
-  - **Survival:** blocks take Minecraft's time to mine by hand, cracking as they go, and drop as
+  - **Survival:** blocks take time to mine at Minecraft's bare hand speed (every block can be
+    harvested, as there are no tools yet: stone takes 2.25 s), cracking as they go, and drop as
     items that bob on the ground until someone walks over them. Placing uses items up. Players have
     a Minecraft inventory: 36 slots, armor slots on the left, and chests that open above it. Clicks
     work as in Minecraft: shift-click, number keys, dragging to spread, double click. Items drop on

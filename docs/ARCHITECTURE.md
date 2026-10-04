@@ -345,12 +345,19 @@ prediction.
 - **Survival mining.** Holding the break button adds `Mining.progressPerTick` every 20 Hz tick:
   1 / hardness / 30 with bare hands, five times slower in the air or under water (Minecraft's rules;
   there are no tools, so every block can be harvested). The client sends `Mine` when it starts on
-  a block and when it stops early. `CrackOverlay` draws the ten crack stages from 10% on
+  a block and when it stops early. The first tick on a block only starts it (Minecraft's
+  `startDestroyBlock`), and `CrackOverlay` draws the ten crack stages as the progress grows
   (procedural lines on SurfaceGuis, no assets). At 100% the block breaks, then mining pauses for 5
-  ticks. The server accepts the break only if the player started mining that block long enough ago
-  (`Mining.mayBreak`: 70% of the time, Minecraft's tolerance), and drops `Items.drops(block)`.
-- **Creative** breaks at once, again every `Interaction.BreakInterval` while held, and drops
-  nothing.
+  ticks.
+- **The server** only counts a `Mine` start for a minable block in reach. It accepts the break if
+  the player started mining that very block long enough ago (`Mining.mayBreak`: 70% of the time,
+  Minecraft's tolerance), and drops `Items.drops(block)`. A break that arrives earlier still (network
+  jitter) is kept and finished once the full time has passed, or undone after a second, like
+  Minecraft's delayed destroy.
+- **Creative** breaks at once, again every `Interaction.BreakInterval` (6 ticks) while held, and
+  drops nothing. Creative players make items from nothing, so the stacks they throw or spill by
+  breaking a chest come out of a budget (10 a second, 64 at once); a chest that would overdraw it
+  stays.
 - **Using and placing.** Right click on a container block (a chest) opens it, unless sneaking.
   Otherwise the selected item is placed if it is a block. Survival placing uses the item up: the
   Edit message carries the inventory action number of that use (see below), so the prediction
@@ -431,7 +438,8 @@ hull is.
   - Core priority for movement tracks, Idle for `toolnone`.
 
 **Creative flight** (`PlayerPhysics`, Minecraft 1.20.1 tick for tick). Creative players `mayFly`.
-A second jump press within 7 ticks toggles flying. While flying:
+A second jump press within 7 ticks toggles flying. While flying (and unaffected by water, like
+Minecraft's flying player):
 - jump / sneak add ±0.15 to the vertical speed;
 - horizontal acceleration is the flying speed, 0.05 (0.1 sprinting);
 - afterwards the vertical speed is the one from before the move × 0.6, so it settles at 0.375 blocks

@@ -10,7 +10,9 @@
 	unbreakable blocks (hardness < 0) never.
 
 	The server accepts a break once `TOLERANCE` of the time has passed since the player started
-	(Minecraft's ServerPlayerGameMode does the same), which covers network delay.
+	(Minecraft's ServerPlayerGameMode does the same), which covers network delay. A break arriving
+	earlier still is finished by the server once the full time has passed (Minecraft's delayed
+	destroy, in ServerNet).
 ]]
 
 local Blocks = require(script.Parent.Blocks)
@@ -52,15 +54,17 @@ end
 
 --[[
 	Server check: may a player who started mining `block` `elapsed` seconds ago break it now? Uses
-	the fastest possible speed (on the ground, dry), like Minecraft's server.
+	the fastest possible speed (on the ground, dry), like Minecraft's server, and accepts a break
+	once `needed` of the progress is done (default TOLERANCE; 1 for a delayed break finishing).
 ]]
-function Mining.mayBreak(block: number, elapsed: number): boolean
+function Mining.mayBreak(block: number, elapsed: number, needed: number?): boolean
 	local progress = Mining.progressPerTick(block, true, false)
 	if progress <= 0 then
 		return false
 	end
 	local ticks = math.floor(elapsed * Mining.TICK_RATE + 1e-6)
-	return progress * (ticks + 1) >= Mining.TOLERANCE
+	-- (1e-9: progress sums like 45 x 1/45 come out a hair under 1.)
+	return progress * (ticks + 1) >= (needed or Mining.TOLERANCE) - 1e-9
 end
 
 return Mining

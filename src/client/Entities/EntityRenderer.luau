@@ -279,6 +279,24 @@ local function remove(entity: Item, collector: number, alpha: number)
 	end
 end
 
+-- A partial pickup: `count` of the item fly to the collector while the rest stays.
+local function take(entity: Item, count: number, collector: number, alpha: number)
+	local player = if collector ~= 0 then Players:GetPlayerByUserId(collector) else nil
+	local character = player and player.Character
+	if character == nil then
+		return
+	end
+	local from, offset = pose(entity, alpha)
+	local taken: Item = table.clone(entity)
+	taken.count = count
+	taken.model = Instance.new("Model")
+	taken.model.Name = `Taken{entity.id}`
+	taken.copies = {}
+	buildCopies(taken)
+	taken.model.Parent = folder
+	table.insert(flights, { item = taken, from = from, pose = offset, character = character, life = 0 })
+end
+
 local function tick(getBlock: ItemPhysics.GetBlock)
 	for _, entity in items do
 		local body = entity.body
@@ -371,6 +389,11 @@ function EntityRenderer.start(world: ClientWorld.ClientWorld)
 				local entity = items[op.id]
 				if entity then
 					remove(entity, op.collector, alpha)
+				end
+			elseif op.op == "take" then
+				local entity = items[op.id]
+				if entity then
+					take(entity, op.count, op.collector, alpha)
 				end
 			end
 		end

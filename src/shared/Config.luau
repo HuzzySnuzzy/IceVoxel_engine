@@ -201,9 +201,9 @@ local Config = {
 		-- Max distance in blocks between the character and a block it edits.
 		Reach = 8,
 		-- Seconds between repeated places while a button is held, and between breaks in creative
-		-- (Minecraft: 4 and 5 ticks).
+		-- (Minecraft: 4 ticks, and a 5 tick destroy delay, so every 6th tick).
 		RepeatInterval = 0.2,
-		BreakInterval = 0.25,
+		BreakInterval = 0.3,
 		-- The mouse wheel changes the selected hotbar slot (as in Minecraft) instead of zooming
 		-- the camera (I / O still zoom).
 		ScrollWheelHotbar = true,

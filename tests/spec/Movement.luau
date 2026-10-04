@@ -796,6 +796,24 @@ return function(t, shared, require)
 			t.ok(not diver.swimming, "no swimming while flying")
 		end
 		t.ok(diver.flying and diver.underWater, "flying under water")
+		-- Water does not slow flight (Player.isAffectedByFluids is false while flying).
+		local wet = flyer(0.5, 10, 0.5)
+		local x0 = 0
+		for tick = 1, 100 do
+			PlayerPhysics.tick(wet, input(1, 0), deep)
+			if tick == 80 then
+				x0 = wet.x
+			end
+		end
+		t.ok(wet.flying and wet.inWater, "still flying in the water")
+		t.near((wet.x - x0) / 20 * PlayerPhysics.TICK_RATE, 10.8889, 0.01, "full flying speed under water")
+		local riser = flyer(0.5, 5, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(riser, input(0, 0, { jump = true }), deep)
+		end
+		local y0 = riser.y
+		PlayerPhysics.tick(riser, input(0, 0, { jump = true }), deep)
+		t.near(riser.y - y0, 0.375, 1e-4, "rises at the flying speed in water")
 
 		-- A swimming player cannot start flying.
 		local swimmer = PlayerPhysics.new(0.5, 10, 0.5)

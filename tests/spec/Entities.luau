@@ -340,6 +340,9 @@ return function(t, shared, require, server)
 		t.eq(#changes.counts, 1)
 		t.eq(changes.counts[1], id)
 		t.eq(#changes.removed, 0)
+		t.eq(#changes.taken, 1, "the partial pickup is reported for its flight")
+		t.eq(changes.taken[1].count, 3)
+		t.eq(changes.taken[1].collector, "alex")
 		-- Handlers returning nonsense take nothing (or at most everything).
 		world:tick(players, function()
 			return -5
@@ -506,5 +509,15 @@ return function(t, shared, require, server)
 		t.ok(syncs[3] > 44 and syncs[3] < 60, "once at rest (4 ticks without moving)")
 		t.eq(world:get(falling).body.y, 1)
 		t.ok(world:get(resting) ~= nil)
+	end)
+	t.test("entity world: players at absurd positions cannot stall the tick", function()
+		-- Characters belong to their clients, so the server may see any position (even 1e16 blocks
+		-- out, where a float loop over columns would never end, or inf / nan).
+		local world = newWorld()
+		world:spawnItem(Items.id.Dirt, 1, 0.5, 1, 0.5, 0, 0, 0, 0)
+		for _, x in { 1e16, -3e16, math.huge, -math.huge, 0 / 0 } do
+			tickN(world, 3, { { key = "far", x = x, y = 1, z = x } })
+		end
+		t.ok(world:count() >= 1, "the tick returned and the item is untouched")
 	end)
 end

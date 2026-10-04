@@ -48,8 +48,10 @@ local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
 -- Seconds between the checks that close chests players walked away from.
 local CHECK_INTERVAL = 0.25
--- Creative throws per second (and burst), like Minecraft's creative drop spam limit.
-local CREATIVE_THROWS_PER_SECOND = 10
+-- Stacks a creative player may put into the world per second (throws, chests they break), like
+-- Minecraft's creative drop spam limit, and how many at once (a full chest is 27).
+local CREATIVE_STACKS_PER_SECOND = 10
+local CREATIVE_STACKS_BURST = 64
 
 local Inventories = {}
 
@@ -83,25 +85,28 @@ local function withinReach(player: Player, x: number, y: number, z: number): boo
 	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
 end
 
-local function mayThrow(player: Player): boolean
-	if not GameMode.isCreative(player) then
-		-- Survival players only throw what they have.
+-- Takes `cost` stacks from a creative player's budget (survival players only drop what they have).
+local function mayCreate(player: Player, cost: number): boolean
+	if not GameMode.isCreative(player) or cost <= 0 then
 		return true
 	end
 	local now = os.clock()
 	local budget = throwBudget[player]
 	if budget == nil then
-		budget = { tokens = CREATIVE_THROWS_PER_SECOND, last = now }
+		budget = { tokens = CREATIVE_STACKS_BURST, last = now }
 		throwBudget[player] = budget
 	end
-	local rate = CREATIVE_THROWS_PER_SECOND
-	budget.tokens = math.min(rate, budget.tokens + (now - budget.last) * rate)
+	budget.tokens = math.min(CREATIVE_STACKS_BURST, budget.tokens + (now - budget.last) * CREATIVE_STACKS_PER_SECOND)
 	budget.last = now
-	if budget.tokens < 1 then
+	if budget.tokens < cost then
 		return false
 	end
-	budget.tokens -= 1
+	budget.tokens -= cost
 	return true
+end
+
+local function mayThrow(player: Player): boolean
+	return mayCreate(player, 1)
 end
 
 -- Stacks leaving a player: thrown forwards, or scattered (death).
@@ -141,6 +146,25 @@ end
 	The container block at (x, y, z) is gone (broken or replaced): its contents drop there and
 	every viewer's window closes. Safe to call for any block and more than once.
 ]]
+--[[
+	May `player` break the container at (x, y, z) now? A creative player's break spills items made
+	from nothing, so each stack in it costs one from their creative budget (if it is short, the
+	chest stays, contents and all).
+]]
+function Inventories.mayRemoveContainer(player: Player, x: number, y: number, z: number): boolean
+	local container = Containers.default:peek(x, y, z)
+	if container == nil then
+		return true
+	end
+	local stacks = 0
+	for slot = 1, container.size do
+		if container.slots[slot] then
+			stacks += 1
+		end
+	end
+	return mayCreate(player, stacks)
+end
+
 function Inventories.removeContainer(x: number, y: number, z: number)
 	local contents, leftovers = state:removeContainer(x, y, z)
 	for _, stack in contents do
