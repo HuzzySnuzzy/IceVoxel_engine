@@ -11,10 +11,12 @@
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
-	  5. players    -> game modes (/gamemode), cosmetic characters (collision group, teleports, fall
-	                   damage), item entities (drops), inventories, chests, furnaces and crafting
-	                   tables, tools (mining speed, drops, wear), safe spawning, map teleports,
-	                   waypoints, keeping chunks around players generated
+	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
+	  6. players    -> game modes (/gamemode), the time (/time, /gamerule doDaylightCycle), cosmetic
+	                   characters (collision group, teleports, fall damage), item entities (drops),
+	                   inventories, chests, furnaces and crafting tables, tools (mining speed, drops,
+	                   wear), safe spawning, map teleports, waypoints, keeping chunks around players
+	                   generated
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,10 +31,12 @@ local Api = require(Server.Api)
 local WorldServer = require(Server.World.WorldServer)
 local BlockTicker = require(Server.World.BlockTicker)
 local Simulation = require(Server.World.Simulation)
+local TimeOfDay = require(Server.World.TimeOfDay)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
 local Characters = require(Server.Players.Characters)
 local GameModes = require(Server.Players.GameModes)
+local TimeCommands = require(Server.Players.TimeCommands)
 local Inventories = require(Server.Players.Inventories)
 local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
@@ -53,7 +57,9 @@ world.onChanged = function(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
+TimeOfDay.start()
 GameModes.start(net)
+TimeCommands.start(net)
 Characters.start(net)
 -- Items must exist before anything can drop them.
 Entities.start(net, world)

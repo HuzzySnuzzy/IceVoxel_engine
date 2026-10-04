@@ -468,6 +468,37 @@ Minecraft's flying player):
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
   Minecraft instead of flooding the ground around it.
 
+## Day and night (`DayCycle`, server `World/TimeOfDay`, client `Rendering/LightingController`)
+
+**Time.** Minecraft's day: 24000 ticks, with 0 sunrise, 6000 noon, 12000 sunset and 18000 midnight. The count keeps going past 24000, which gives the day number. The server is the authority. It publishes three workspace attributes:
+- `IceVoxelDayTime`: the day time at one moment;
+- `IceVoxelDaySync`: that moment as `workspace:GetServerTimeNow()`;
+- `IceVoxelDayRate`: ticks per second (24000 / `Time.DayLength`, 0 while doDaylightCycle is off).
+
+Clients compute the time from these at every update, so a running clock costs no traffic.
+- The attributes change only when `/time` or `/gamerule` changes the clock. Every 60 s the same values are written again, which only restores them if something else changed them.
+- The clock is never re-based on a timer. Server and clients compute the same closed form from the same numbers, so nothing drifts. A re-base would change all three attributes at once, and a client could apply that change halfway.
+- `Lighting.ClockTime` is set by each client, never the server, so the two never fight.
+
+**Sun position.** `DayCycle.timeOfDay` is Minecraft's celestial angle (DimensionType.timeOfDay): it lingers around noon and midnight, and at tick 0 the sun is already 12° up. `clockTime = (12 + angle × 24) % 24` puts Roblox's sun at that angle. Roblox then tilts the sun's path by `GeographicLatitude` and its Earth tilt.
+
+**Commands.** `/time set|add|query` and `/gamerule doDaylightCycle` are TextChatCommands, with `Player.Chatted` for the legacy chat. Parsing and permissions are in `Players/TimeCommand`, pure and tested:
+- Time arguments follow Minecraft's TimeArgument: `d` = 24000 ticks, `s` = 20, `t` = 1, rounded, never negative.
+- Changing the time or the rule needs `Gameplay.Admins`, the owner or Studio; queries are open to everyone.
+- Answers use Minecraft's wording and come back as Notices.
+
+**Lighting.** Roblox's engine does the lighting. `default.project.json` sets Future technology and global shadows (Technology cannot be set from scripts). Near opaque parts cast shadows (`Render.Shadows`); far ones do not.
+
+`LightingController` writes the Lighting properties at 10 Hz, only when they change, from `DayCycle.environment`:
+- Minecraft's sky brightness and sunrise glow depend only on how high the sun stands (`DayCycle.sunHeight`). The controller feeds them the height of the sun Roblox really draws (`Lighting:GetSunDirection().Y`), so the light matches the sky at any latitude.
+- `Config.Lighting.Night` is blended to `Day` by `daylight(h) = clamp(2h + 0.2, 0, 1)`.
+- `Dusk` colours are mixed in by `glow(h)`, the alpha of Minecraft's sunrise colour, times `Dusk.Strength`.
+- `Ambient` is always `CaveAmbient`. It is the only light the engine gives places closed to the sky, so caves are equally dark at noon and at midnight, as in Minecraft.
+
+Roblox's sky occlusion probably does not reach far enough for caves hundreds of blocks deep. So the sky's light (outdoor ambient, sun, sky box) also fades with the camera's depth under the generator's ground height: from `Underground.Start` to `End` blocks. The fade is smoothed with a time constant of `Seconds` (`DayCycle.approach`, which lands exactly so the writes stop). A camera with nothing opaque above it in the loaded blocks (a pit open to the sky) keeps full sky light, as Minecraft's sky light runs straight down a shaft. Generated caves never reach the surface, so nothing that should be sunlit is darkened.
+
+Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in Lighting is left alone, because Roblox lights both by the sun and moon itself.
+
 ## Items, inventories and game modes
 
 **Game modes** (`GameMode`, server `Players/GameModes`). A player's mode is the Player attribute

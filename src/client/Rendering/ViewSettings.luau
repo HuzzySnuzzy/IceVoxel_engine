@@ -7,7 +7,8 @@
 	  * Lighting.PrioritizeLightingQuality = false: when the engine has to lower quality it keeps the
 	    draw distance and gives up lighting detail first.
 	  * Fog fades the edge of the view distance (skipped when the place has an Atmosphere, which
-	    replaces fog).
+	    replaces fog). Its distance is set here; its colour follows the time of day
+	    (Rendering/LightingController, while `usesFog` says this fog is in use).
 
 	How far parts are really drawn is decided by the engine from the graphics quality level and how
 	many objects are visible; scripts can not raise it. Studio ignores that limit, so check long
@@ -28,6 +29,11 @@ function ViewSettings.isMobile(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
 
+-- Is IceVoxel's distance fog in use (Config.Render.Fog, and no Atmosphere replacing it)?
+function ViewSettings.usesFog(): boolean
+	return Config.Render.Fog and Lighting:FindFirstChildOfClass("Atmosphere") == nil
+end
+
 function ViewSettings.apply()
 	if ViewSettings.isMobile() then
 		LodTree.configure(Config.Lod.Mobile.ViewDistance, Config.Lod.Mobile.SplitDistance)
@@ -40,7 +46,7 @@ function ViewSettings.apply()
 		warn(`[IceVoxel] could not set Lighting.PrioritizeLightingQuality: {err}`)
 	end
 
-	if Config.Render.Fog and Lighting:FindFirstChildOfClass("Atmosphere") == nil then
+	if ViewSettings.usesFog() then
 		Lighting.FogEnd = LodTree.viewDistance() * Config.BlockSize
 		Lighting.FogStart = Lighting.FogEnd * 0.55
 	end

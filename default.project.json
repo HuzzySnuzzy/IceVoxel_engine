@@ -2,6 +2,21 @@
 	"name": "IceVoxel",
 	"tree": {
 		"$className": "DataModel",
+		"Lighting": {
+			"$properties": {
+				"Technology": "Future",
+				"GlobalShadows": true,
+				"ShadowSoftness": 0.15,
+				"ClockTime": 7.84,
+				"Brightness": 3,
+				"Ambient": [0.102, 0.102, 0.125],
+				"OutdoorAmbient": [0.439, 0.439, 0.463],
+				"ColorShift_Top": [0.039, 0.024, 0],
+				"EnvironmentDiffuseScale": 1,
+				"EnvironmentSpecularScale": 0.5,
+				"FogColor": [0.753, 0.847, 1]
+			}
+		},
 		"ReplicatedStorage": {
 			"IceVoxel": {
 				"$path": "src/shared"

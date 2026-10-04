@@ -145,6 +145,90 @@ local Config = {
 		},
 	},
 
+	-- Day cycle (server clock, shared maths) ---------------------------------------------------------
+
+	--[[
+		Minecraft's day: 24000 ticks, 0 sunrise (06:00), 6000 noon, 12000 sunset, 18000 midnight
+		(Shared/DayCycle). The server keeps the clock (World/TimeOfDay) and admins change it with
+		/time and /gamerule doDaylightCycle (Players/TimeCommands; who may: Gameplay.Admins, the
+		owner and Studio).
+	]]
+	Time = {
+		-- Real seconds per day (Minecraft: 1200, i.e. 20 minutes at 20 ticks a second).
+		DayLength = 1200,
+		-- Day time when the server starts, in ticks (1000 is Minecraft's "/time set day").
+		StartTime = 1000,
+		-- Minecraft's doDaylightCycle game rule: false stops the clock.
+		Cycle = true,
+	},
+
+	-- Lighting (client) ------------------------------------------------------------------------------
+
+	--[[
+		Rendering/LightingController drives the Lighting service from the day time. Roblox's own
+		engine does the lighting (Future technology and shadows, set in default.project.json): the sun
+		and moon move with Lighting.ClockTime, and the settings below are blended by daylight (Night
+		to Day, by Minecraft's sky brightness for the height of the sun Roblox draws), the sunrise /
+		sunset glow (Dusk) and how deep the camera is under the natural ground (Underground). Colours
+		are { r, g, b } in 0..255.
+
+		Lighting.Ambient lights everything, caves and closed rooms too, while OutdoorAmbient, the sun
+		and the environment light only reach what the engine sees as open to the sky. So CaveAmbient
+		is how dark caves are, at any time of day as in Minecraft. Raise it to brighten them, like
+		Minecraft's Brightness slider (Moody to Bright).
+
+		An Atmosphere or Sky the place has is left alone (Roblox lights them by the sun and moon
+		itself). Fog colour follows FogColor only while IceVoxel's fog is in use (Render.Fog and no
+		Atmosphere, see Rendering/ViewSettings).
+	]]
+	Lighting = {
+		-- false: only Lighting.ClockTime follows the day; everything else is left to the place.
+		Enabled = true,
+		-- Seconds between updates (the sun moves 0.3 degrees a second at the default day length).
+		UpdateInterval = 0.1,
+		-- Lighting.Ambient: the light that reaches everywhere (caves are this dark).
+		CaveAmbient = { 26, 26, 32 },
+		Day = {
+			OutdoorAmbient = { 112, 112, 118 },
+			-- Lighting.Brightness: the sun's (and at night the moon's) strength.
+			Brightness = 3,
+			-- Lighting.ColorShift_Top: tint of faces lit by the sun / moon.
+			ColorShiftTop = { 10, 6, 0 },
+			-- Lighting.EnvironmentDiffuseScale / EnvironmentSpecularScale: light from the sky box.
+			EnvironmentDiffuse = 1,
+			EnvironmentSpecular = 0.5,
+			-- Lighting.FogColor (Minecraft's day fog).
+			FogColor = { 192, 216, 255 },
+		},
+		-- Dark blue but readable (Minecraft's night sky light is 4 of 15).
+		Night = {
+			OutdoorAmbient = { 44, 52, 84 },
+			Brightness = 1,
+			ColorShiftTop = { 16, 24, 48 },
+			EnvironmentDiffuse = 0.4,
+			EnvironmentSpecular = 0.2,
+			FogColor = { 14, 18, 34 },
+		},
+		-- Warm sunrise and sunset light, mixed in up to Strength (Minecraft's sunrise colour curve).
+		Dusk = {
+			Strength = 0.8,
+			OutdoorAmbient = { 150, 104, 84 },
+			ColorShiftTop = { 200, 96, 30 },
+			FogColor = { 230, 140, 96 },
+		},
+		-- Sky light fades out between Start and End blocks below the natural ground at the camera,
+		-- smoothed with a time constant of Seconds (settled after about 3 x Seconds), leaving only
+		-- CaveAmbient (and light blocks): the engine's own sky occlusion does not reach far, so big
+		-- caves would otherwise be lit. A pit or shaft with nothing opaque above the camera keeps
+		-- the sky's light.
+		Underground = {
+			Start = 4,
+			End = 16,
+			Seconds = 0.75,
+			FogColor = { 12, 12, 16 },
+		},
+	},
+
 	-- Player movement (client) ----------------------------------------------------------------------
 
 	--[[

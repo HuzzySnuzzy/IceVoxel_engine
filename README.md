@@ -35,6 +35,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   shift-click crafts as many as possible, and two worn tools repair into one. Furnaces smelt raw
   ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while nobody
   watches.
+- **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
+  midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
+  sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
+  sunrises and sunsets, dark blue nights you can still find your way in (Minecraft's night sky
+  light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
+  `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -112,6 +118,7 @@ Studio tips:
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
 | Debug overlay | `F3`                        |         |            |
+| Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
 
 ## Project layout
 
@@ -127,6 +134,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             clicks, used by the server and for client prediction)
   Entities/ItemPhysics      dropped item movement (server and client)
   GameMode, Mining          survival / creative, mining times by hand and with tools
+  DayCycle                  Minecraft's day: celestial angle, sky light, /time arguments, lighting
+                            blends
   Biomes/  BiomeList        biome definitions and altitude bands
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
@@ -146,13 +155,15 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
 src/server   -> ServerScriptService.IceVoxel
   IceVoxel_Server           boot: seed, world, ticker, network, players
   Api                       require this from your own server scripts
-  World/                    WorldServer (chunks + edits), BlockTicker, Simulation
+  World/                    WorldServer (chunks + edits), BlockTicker, Simulation, TimeOfDay (the
+                            day clock, published as workspace attributes)
   Behaviours/               Gravity, Fluid, Grass (block update logic)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops),
                             replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
                             (spawning, replication)
-  Players/                  GameModes + GameModeCommand (/gamemode), Inventories +
+  Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
+                            (/time, /gamerule), Inventories +
                             InventoryState (authoritative inventories), Containers (chests,
                             furnaces),
                             Characters (cosmetic characters: collision group, teleports, fall
@@ -164,6 +175,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
   World/ClientWorld         nearby block data, edit lists, prediction
   Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
   Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
+                            LightingController (day, night and cave lighting),
                             MeshOverlay + MeshRegions (far meshes)
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
   Inventory/                ClientInventory + Prediction (predicted inventory)
@@ -215,6 +227,17 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it.                 |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
+| `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
+| `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
+| `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
+| `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
+| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves).            |
+
+Lighting comes from `default.project.json`: Future technology, shadows and a dark ambient light. With
+`rojo serve` into an existing place, check that `Lighting.Technology` is Future (or LightingStyle
+Realistic in newer Studios). An Atmosphere or Sky you add is left alone, and
+`Lighting.GeographicLatitude` sets how high the sun climbs; the lighting follows the sun wherever
+Roblox draws it.
 
 Part count depends on the terrain: flat land costs ~35 parts per full detail chunk, steep
 mountains ~110. Most parts are near the player; doubling the view distance adds comparatively

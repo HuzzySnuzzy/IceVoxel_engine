@@ -6,7 +6,8 @@
 	  Streaming/ChunkStreamer    which chunks (and LOD levels) exist, job scheduling
 	  Streaming/WorkerPool       Actors running Streaming/ChunkWorker (parallel generation + meshing)
 	  Rendering/ChunkRenderer    mesh boxes -> parts, within a per-frame budget
-	  Rendering/ViewSettings     view distance per device, lighting and fog
+	  Rendering/ViewSettings     view distance per device, lighting quality and fog
+	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
 	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
@@ -33,6 +34,7 @@ local ChunkStreamer = require(Client.Streaming.ChunkStreamer)
 local WorkerPool = require(Client.Streaming.WorkerPool)
 local ChunkRenderer = require(Client.Rendering.ChunkRenderer)
 local ViewSettings = require(Client.Rendering.ViewSettings)
+local LightingController = require(Client.Rendering.LightingController)
 local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
@@ -57,6 +59,7 @@ local renderer = ChunkRenderer.new()
 local pool = WorkerPool.new(Client.Streaming.ChunkWorker :: LocalScript)
 local generator = TerrainGenerator.new(seed :: number)
 local streamer = ChunkStreamer.new(generator, world, pool, renderer)
+LightingController.start(generator, world)
 
 ClientInventory.start()
 Screens.start()
