@@ -220,8 +220,8 @@ waiting ──► queued ──► working ──► built ──► ready
 covering its area is ready (an ancestor, or all of its descendants). It is removed in the same frame
 the last replacement appears. Replacements that finish earlier wait unshown, so two levels of
 detail are never drawn over each other. `Streaming.ReplaceTimeout` is a safety net. Since a chunk
-can wait unshown (without collision) for its whole old ancestor, `SpawnGuard` holds a character
-until the chunk under it and the eight around it are shown.
+can wait unshown for its whole old ancestor, the movement controller keeps the hull frozen until
+the chunk under it and the eight around it are shown (`isReady`).
 
 **Edits.** Full detail chunks keep their block data on the main thread (`World/ClientWorld`). Edits
 (local predictions and server messages) update the data and the neighbours' padding, and mark the
@@ -334,40 +334,91 @@ per player: filtered names are cached (so a replaced or failed list never filter
 token bucket limits filtering per player, failed filter calls are retried with backoff, and when the
 player leaves, names that could not be filtered become "Waypoint" so the positions are still saved. Teleport requests go to the server
 (`Players/Teleport`), which checks `Map.Teleport` and a cooldown and lands the player on a safe spot;
-`Player/SpawnGuard` holds the character until the terrain at the destination is built.
+the movement hull stays frozen until the terrain at the destination is built.
 
 ### Interaction
 
 Targeting uses `World/VoxelRaycast` (grid traversal) on the client's block data. Edits are applied
 immediately and sent to the server; a rejected edit comes back as the real block and undoes the
-prediction. `Player/SpawnGuard` keeps a new character anchored until the chunk under it is ready.
+prediction. Placing is refused where the block would overlap the movement hull.
 
-### Water (`Player/WaterController`)
+### Movement (`Shared/Movement`, `Player/MovementController`, `Player/CharacterAnimator`)
 
-Water parts do not collide, and Roblox's swimming only knows Terrain water, so the character is
-handled by one `VectorForce` on the root part, set every `PreSimulation` from the client's block
-data (force = `AssemblyMass` × acceleration; velocity is never written):
+Players move like in Minecraft Java Edition (1.20): a hull, an axis-aligned box, is simulated
+against the client's block data at 20 ticks per second. The Roblox character only shows where the
+hull is.
 
-- **Submersion** (0–1) comes from the real water surface in the character's column, including the
-  lowered surfaces of flowing water.
-- **Buoyancy and drag**: `g × Buoyancy × submersion − Drag × v.y × submersion` vertically. Below 1
-  the character sinks slowly (terminal speed ≈ `g (1 − Buoyancy) / Drag`), and as buoyancy fades
-  near the surface, holding Jump bobs there. Jump (read from `Humanoid.Jump`, which the default
-  controls set for keyboard, gamepad and touch) adds `SwimUpAcceleration` while the waist is under.
-- **Current**: `World/FluidFlow` gives the flow direction (Minecraft's rule: towards lower levels
-  and drops, down in falling water). A one-sided servo pushes along it until the character moves at
-  `CurrentSpeed`, so it never brakes the player and cannot build up speed. The Humanoid brakes hard
-  on the ground, so the push limit is higher there.
-- **Climbing out**: holding Jump while swimming towards a ledge at most one block above the water,
-  with two free blocks above it and room over the character's head, lifts the character at
-  `ClimbOutSpeed` until its feet clear the ledge (like jumping out of water in Minecraft); without
-  it, a bank one block above the surface could not be climbed from deep water. A climb that does
-  not get there within 1.5 s gives up until Jump is released.
-- Walk speed is multiplied by `WalkSpeedFactor` in water; a WalkSpeed another script assigns
-  meanwhile becomes the new normal speed and is kept when leaving the water (relative changes such
-  as `+=` would apply to the slowed speed, so assign absolute values).
-- The Humanoid keeps its normal states: forcing `Swimming` outside Terrain water makes it switch to
-  GettingUp, steer with the camera's pitch and lie horizontal, which is wrong for shallow water.
+- **`Movement/Hull`**: box vs block grid collision, ported from `Entity.collide`. One axis at a
+  time: Y first, then the larger horizontal component. Each axis is clipped against the first
+  solid block whose cross section the box overlaps. Step-up tries Minecraft's two candidates and
+  keeps the longer horizontal move. The sneaking edge back-off (`maybeBackOffFromEdge`) works in
+  0.05-block steps. Unloaded blocks count as solid.
+- **`Movement/PlayerPhysics`**: the player tick, in Minecraft's order:
+  1. fluid push and the eyes-in-water test;
+  2. `LocalPlayer.aiStep` (crouching, the ×0.3 slow-down, sprint start / stop rules, the double tap);
+  3. `LivingEntity.aiStep` (jump delay, tiny velocities zeroed, jumping);
+  4. `travel` (ground / air / water acceleration, gravity and drag);
+  5. the pose (standing 1.8, crouching 1.5, swimming / crawling 0.6 tall).
+
+  The numbers are Minecraft's floats. The tests check speeds tick by tick against Minecraft:
+  walk 4.317 m/s, sprint 5.612 m/s, sneak 1.295 m/s, sprint jumping 7.13 m/s, a 1.2522-block jump.
+  The one deliberate difference is `State.stepHeight`, set from `Config.Movement.StepHeight`
+  (1.0625 blocks, so the steep terrain is walkable). Sneaking still looks only Minecraft's
+  0.6 blocks down at an edge, so it stops at every block edge. Pure Luau, deterministic.
+- **`Movement/Rig`**: where the hull is relative to a character (root part height above the feet,
+  R15 / R6), the character collision group and the teleport attributes.
+- **`Player/MovementController`** runs at `RenderPriority.Camera − 1`, so the camera follows this
+  frame's position. Each frame it:
+  - Reads input from the default control scripts' move vector (`PlayerModule` `GetMoveVector`). It
+    turns that by the camera the way the `ControlModule` does, and leaves keyboard diagonals longer
+    than 1 so diagonal sprinting works as in Minecraft. `Humanoid.MoveDirection` is the fallback.
+    Jump comes from `Humanoid.Jump`, latched between ticks so short taps count.
+  - Runs whole ticks, at most 5 per frame.
+  - Draws the character interpolated between the last two ticks:
+    - `root.CFrame` and `AssemblyLinearVelocity` are set; the client owns the character, so this
+      replicates.
+    - A step up, a whole block in one tick, is drawn as a quick climb: a render offset that decays
+      at 14/s.
+    - In the swimming / crawling pose the body lies down at Minecraft's `swimAmount` rate. It faces
+      down when crawling and follows the view pitch when swimming. Roblox's Swimming state tilts
+      the root the same way, and the swim animation is made for that.
+  - Keeps the cosmetic rig inert:
+    - parts in a collision group that collides with nothing;
+    - the Humanoid held in the `Physics` state, which applies no forces;
+    - a `VectorForce` cancelling gravity.
+  - Puts the camera at the hull's eye height. Roblox's camera adds `CameraOffset` in the root
+    part's space, so the offset is computed through the root's CFrame. The eye height eases like
+    Minecraft's, half the remaining way per tick.
+  - Scales the camera's field of view by `SprintFov` (1.15) while sprinting, eased the same way, on
+    top of whatever the field of view is set to.
+
+  Other duties:
+  - Sprint and sneak are `ContextActionService` actions at High priority that sink the key, so
+    Shift no longer toggles shift lock. With `ToggleSprint`, the sprint key turns sprinting on and
+    off; turning it off also stops a sprint started by double tapping.
+  - The hull stays frozen until the chunk under it and the eight around it are shown, and after
+    teleports. Server teleports arrive as attributes; other scripts moving the character far are
+    detected and followed.
+  - The `Physics` state never dies by itself, so health ≤ 0 puts the Humanoid into `Dead`. On death
+    the rig is released: its parts go back to Default, the forces and the camera offset are removed.
+- **`Player/CharacterAnimator`** replaces the `Animate` script, which needs Humanoid states the
+  character never enters. It loads the avatar's own animation ids from `Animate`, falling back to
+  Roblox's defaults. It uses the script's rules:
+  - R15 walk / run blend by `speed / 16 × 1.25 / heightScale`;
+  - idle below 0.75 × height scale;
+  - jump for 0.31 s, then fall;
+  - swim at `speed / 10`;
+  - fades of 0.2 / 0.1 / 0.4 s;
+  - Core priority for movement tracks, Idle for `toolnone`.
+
+**Fluids and the player.**
+- `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
+  treats an open side with fluid or air below it as a drop, and makes falling fluid next to a solid
+  face push almost straight down. `PlayerPhysics` pushes the hull along it at 0.014 per tick.
+- Water spreads like Minecraft's `FlowingFluid.getSpread` (`Behaviours/Fluid`): sideways only
+  towards the side(s) with the shortest way to a hole, searching up to 4 blocks. A pool of sources
+  pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
+  Minecraft instead of flooding the ground around it.
 
 ## Networking (`Net/Protocol`)
 
@@ -381,6 +432,7 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Edit`          | break / place, position, block                |
 | client → server | `Teleport`      | target column (map)                           |
 | client → server | `SaveWaypoints` | the player's waypoint list                    |
+| client → server | `Fall`          | fall distance of a landing (fall damage)      |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -397,10 +449,16 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   its six neighbours; blocks with a behaviour schedule ticks. Overflow beyond
   `MaxUpdatesPerTick` moves to the next tick. Updates never generate chunks.
 - `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling, infinite
-  sources; waits at unloaded chunks), `Grass` (turns to dirt when covered).
+  sources, spreading only towards the nearest way down; waits at unloaded chunks), `Grass` (turns
+  to dirt when covered).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
   placing inside players. Rejections never generate terrain.
+- `Players/Characters`: puts every character part in the `IceVoxelCharacters` collision group
+  (collides with nothing; back to Default on death so the body falls), teleports characters by
+  setting the feet position as attributes the client's hull follows, and turns reported landings
+  into fall damage (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
+  `TakeDamage`; at most 4 reports a second).
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave

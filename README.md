@@ -23,12 +23,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   infinite sources) and grass turning into dirt.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
-  (double tap or Ctrl), sneaking that never walks off edges, crouching and crawling under low
-  ceilings, 1.25-block jumps, 0.6-block step up, sprint jumping, slippery ice, swimming, currents,
-  hopping out of water and fall damage. The Roblox character is purely cosmetic: it is drawn on the
-  hull (interpolated) and never collides with anything.
-- **Water you can see flow.** Flowing water steps down level by level like Minecraft, and its
-  current pushes the player downstream.
+  (Ctrl toggles it, or double tap forward) with Minecraft's widening field of view, sneaking that
+  never walks off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint
+  jumping, slippery ice, swimming (sprint under water, steered by the view), currents, hopping out
+  of water and fall damage. Steps up to just over a block are walked up without jumping, so the
+  steep terrain is walkable (`Config.Movement.StepHeight`; Minecraft's is 0.6). The Roblox
+  character is purely cosmetic: it is drawn on the hull (interpolated) and never collides with
+  anything.
+- **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
+  within 4 blocks, so it runs down slopes instead of flooding the ground around it. Flowing water
+  steps down level by level, and its current pushes the player downstream.
 - **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
   Right click the map to add waypoints (saved between sessions), teleport, or center the view.
 - **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
@@ -71,10 +75,11 @@ Studio tips:
 | Break block   | Left click (hold to repeat) | R2      | Tap        |
 | Place block   | Right click                 | L2      | Long press |
 | Select block  | `1`–`9`, `Q` / `E` to cycle, or click a slot | L1 / R1 | Tap a slot, ‹ › pages |
-| Sprint        | Hold `Ctrl`, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
+| Sprint        | `Ctrl` turns it on / off, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
 | Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
 | Swim up / down | Hold `Space` / `Shift` in water | A / B | Jump / Sneak |
+| Swim fast     | Sprint under water; look where to go | L3 | Sprint button |
 | Climb out     | Swim at a ledge just above the water | stick | move |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
