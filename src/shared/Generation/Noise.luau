@@ -27,18 +27,25 @@ local Noise = {}
 
 export type Sampler2 = (x: number, z: number) -> number
 export type Sampler3 = (x: number, y: number, z: number) -> number
+-- `limit`: evaluate only the first (widest) `limit` octaves.
+export type OctaveSampler2 = (x: number, z: number, limit: number?) -> number
 
--- Offsets kept small (< 4096) because math.noise works in single precision internally.
+--[[
+	Offsets kept below 256: math.noise computes in single precision (so large inputs lose their
+	fractional part: at 4096 they are only 1/2048 apart, which turns kilometre-wide noise into steps
+	several blocks long), and its lattice repeats every 256 units anyway, so larger offsets would
+	not give different fields.
+]]
 function Noise.offsets(seed: number, salt: string, octave: number?): (number, number, number)
 	local s = Hash.string(salt)
 	local o = octave or 0
 	local a = Hash.hash3(seed, s, o, 1)
 	local b = Hash.hash3(seed, s, o, 2)
 	local c = Hash.hash3(seed, s, o, 3)
-	-- (h % 4096) gives the integer part, the scaled hash gives a non-lattice fractional part.
-	return (a % 4096) + 0.1 + (a / 4294967296) * 0.8,
-		(b % 4096) + 0.1 + (b / 4294967296) * 0.8,
-		(c % 4096) + 0.1 + (c / 4294967296) * 0.8
+	-- (h % 256) gives the integer part, the scaled hash gives a non-lattice fractional part.
+	return (a % 256) + 0.1 + (a / 4294967296) * 0.8,
+		(b % 256) + 0.1 + (b / 4294967296) * 0.8,
+		(c % 256) + 0.1 + (c / 4294967296) * 0.8
 end
 
 --[[
@@ -123,6 +130,54 @@ function Noise.ridged2(
 			sum += amps[i] * r * r
 		end
 		return sum * inv
+	end
+end
+
+--[[
+	Octave noise in 2D weighted like Minecraft's: octave i (from 1) has wavelength
+	`wavelength / 2^(i-1)` and amplitude 2^-(i-1). Scaled so the sum of all `octaves` has a standard
+	deviation of `std`. With a `limit`, the narrower octaves are left out: the same field without its
+	finest detail (far LOD chunks, whose cells are too wide for it, use that).
+]]
+function Noise.octaves2(seed: number, salt: string, wavelength: number, octaves: number, std: number): OctaveSampler2
+	local ox: { number }, oz: { number }, oy: { number }, freqs: { number }, amps: { number } = {}, {}, {}, {}, {}
+	local a, sumSq = 1, 0
+	for i = 1, octaves do
+		ox[i], oy[i], oz[i] = Noise.offsets(seed, salt, i)
+		freqs[i] = 2 ^ (i - 1) / wavelength
+		amps[i] = a
+		sumSq += a * a
+		a *= 0.5
+	end
+	local norm = std / (RAW_STD * sqrt(sumSq))
+	for i = 1, octaves do
+		amps[i] *= norm
+	end
+
+	return function(x: number, z: number, limit: number?): number
+		local n = if limit and limit < octaves then limit else octaves
+		local sum = 0
+		for i = 1, n do
+			local f = freqs[i]
+			sum += amps[i] * noise(x * f + ox[i], z * f + oz[i], oy[i])
+		end
+		return sum
+	end
+end
+
+--[[
+	Single octave 2D noise made of two Perlin fields at slightly different frequencies (Minecraft's
+	"normal noise"): smoother large scale shapes with a more bell-shaped distribution than one field.
+	Standard deviation `std`.
+]]
+function Noise.double2(seed: number, salt: string, wavelength: number, std: number): Sampler2
+	local ax, ay, az = Noise.offsets(seed, salt, 1)
+	local bx, by, bz = Noise.offsets(seed, salt, 2)
+	local f = 1 / wavelength
+	local g = f * 1.0181268882175227
+	local norm = std / (RAW_STD * sqrt(2))
+	return function(x: number, z: number): number
+		return (noise(x * f + ax, z * f + az, ay) + noise(x * g + bx, z * g + bz, by)) * norm
 	end
 end
 

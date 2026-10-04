@@ -122,4 +122,17 @@ fluid("Water", {
 
 -- Add new blocks below this line (and never above, see the note at the top).
 
+-- Mountains, rivers and islands (terrain generator).
+table.insert(list, { name = "PackedIce", color = { 141, 180, 236 }, material = "Ice" })
+table.insert(list, { name = "Calcite", color = { 222, 223, 218 }, material = "Marble" })
+table.insert(list, { name = "PackedMud", color = { 142, 106, 79 }, material = "Mud" })
+table.insert(list, { name = "Mycelium", color = { 122, 104, 116 }, material = "Grass", behaviour = "Grass" })
+table.insert(list, { name = "Podzol", color = { 106, 74, 38 }, material = "Ground", behaviour = "Grass" })
+table.insert(list, { name = "CoarseDirt", color = { 112, 80, 56 }, material = "Ground" })
+-- Stone varieties and ores by altitude (Ores.luau).
+table.insert(list, { name = "Andesite", color = { 134, 134, 136 }, material = "Rock" })
+table.insert(list, { name = "Diorite", color = { 190, 190, 190 }, material = "Limestone" })
+table.insert(list, { name = "Granite", color = { 150, 103, 85 }, material = "Granite" })
+table.insert(list, { name = "EmeraldOre", color = { 62, 168, 94 }, material = "Rock" })
+
 return list

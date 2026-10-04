@@ -3,6 +3,9 @@ return function(t, shared, require)
 	local Blocks = require(shared.Blocks)
 	local ChunkLayout = require(shared.World.ChunkLayout)
 	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
+	local Relief = require(shared.Generation.Relief)
+	local Biomes = require(shared.Biomes)
+	local Hash = require(shared.Util.Hash)
 
 	local SIZE = ChunkLayout.SIZE
 	local gen = TerrainGenerator.new(12345)
@@ -153,5 +156,83 @@ return function(t, shared, require)
 		local x, h, z = gen.findSpawn()
 		t.ok(h > Config.SeaLevel, `spawn height {h}`)
 		t.eq(gen.column(x, z), h)
+	end)
+
+	t.test("relief: terrain types, heights and rivers like JJThunder To The Max", function()
+		local relief = Relief.new(777)
+		local rng = Hash.rng(5)
+		local function between(a: number, b: number): number
+			return a + (b - a) * rng:float()
+		end
+		local n, ranges, ocean, belowSea, rivers = 4000, 0, 0, 0, 0
+		local heights = {}
+		for _ = 1, n do
+			local x, z = between(-200000, 200000), between(-200000, 200000)
+			local y, unrivered, selector, river = relief.height(x, z, 0)
+			local a = math.abs(selector)
+			if a < 0.0375 then
+				ranges += 1
+			elseif a >= 0.4 then
+				ocean += 1
+			end
+			if y < Config.SeaLevel then
+				belowSea += 1
+				if river > 0.9 then
+					rivers += 1
+				end
+			end
+			t.ok(y <= unrivered + 1e-9, "rivers only dig")
+			table.insert(heights, y)
+		end
+		table.sort(heights)
+		-- The datapack: 7.4% extreme mountain cores, 27% ocean, 27% below sea level (scaled heights:
+		-- median ~130, p99 ~680, highest ~900).
+		t.ok(ranges / n > 0.04 and ranges / n < 0.11, `mountain cores {ranges / n}`)
+		t.ok(ocean / n > 0.2 and ocean / n < 0.34, `ocean {ocean / n}`)
+		t.ok(belowSea / n > 0.18 and belowSea / n < 0.36, `below sea level {belowSea / n}`)
+		local median, p99 = heights[n // 2], heights[math.floor(n * 0.99)]
+		t.ok(median > 80 and median < 200, `median height {median}`)
+		t.ok(p99 > 550 and p99 < 820, `99th percentile height {p99}`)
+		t.ok(heights[n] < Config.WorldHeight - 32, `highest {heights[n]}`)
+		t.ok(rivers > 0, "no river below sea level")
+
+		-- Far LOD heights only lose jagged detail narrower than two of their cells, which moves them
+		-- by less than a cell.
+		for _ = 1, 300 do
+			local x, z = between(-50000, 50000), between(-50000, 50000)
+			local y0 = relief.height(x, z, 0)
+			for level = 1, Config.Lod.Levels - 1 do
+				local _, stepY = ChunkLayout.steps(level)
+				local y = relief.height(x, z, level)
+				t.ok(math.abs(y - y0) < math.max(3, 2 * stepY), `level {level} height {y} vs {y0}`)
+			end
+		end
+	end)
+
+	t.test("biomes follow altitude bands", function()
+		local relief = Relief.new(12345)
+		local rng = Hash.rng(9)
+		local mushroom = (Biomes.byName("MushroomFields") :: any).index
+		local seen: { [number]: boolean } = {}
+		for _ = 1, 3000 do
+			local x, z = rng:int(-100000, 100000), rng:int(-100000, 100000)
+			local _, biome = gen.column(x, z)
+			local _, unrivered, selector = relief.height(x, z, 0)
+			seen[biome] = true
+			if biome == mushroom then
+				t.ok(selector < -0.4, "mushroom fields only in the middle of seas")
+			else
+				-- Band borders are dithered by a few blocks.
+				local band = Biomes.bandAt(unrivered)
+				local near = false
+				for _, b in Biomes.list[biome].bands do
+					near = near or math.abs(b - band) <= 1
+				end
+				t.ok(near, `{Biomes.list[biome].name} at height {unrivered}`)
+			end
+		end
+		for _, name in { "Plains", "Forest", "SnowySlopes", "Grove", "Meadow" } do
+			t.ok(seen[(Biomes.byName(name) :: any).index], `no {name} found`)
+		end
 	end)
 end

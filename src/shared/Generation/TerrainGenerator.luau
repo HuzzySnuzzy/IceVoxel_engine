@@ -7,14 +7,12 @@
 	coordinates, so the server, every client and every worker actor produce identical worlds without
 	sending any terrain over the network. Only player edits are replicated.
 
-	Terrain shape
-	  continentalness  low frequency noise deciding ocean / coast / inland (a spline maps it to a
-	                   base height),
-	  mountains        where it is high (and we are inland), ridged noise raises mountain ranges,
-	  hills            rolling noise whose amplitude comes from the blended biomes,
-	  biomes           weighted by distance in (temperature, humidity) space; their height offset,
-	                   hilliness and vegetation density are averaged with those weights, so biome
-	                   borders blend smoothly.
+	Terrain shape (Relief.luau): huge mountain ranges, hills, plains, river valleys and enclosed seas
+	in the style of the JJThunder To The Max datapack; one height per column.
+
+	Biomes (Biomes/BiomeList.luau) are picked by altitude band first (lowland, forest, highland,
+	meadow, alpine, snowy slopes, peaks), then by climate (temperature and humidity noise) among
+	the biomes of that band. Islands far out in some seas are mushroom fields.
 
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
@@ -31,6 +29,7 @@ local Blocks = require(script.Parent.Parent.Blocks)
 local Biomes = require(script.Parent.Parent.Biomes)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 local Noise = require(script.Parent.Noise)
+local Relief = require(script.Parent.Relief)
 local Caves = require(script.Parent.Caves)
 local Ores = require(script.Parent.Ores)
 local Structures = require(script.Parent.Structures)
@@ -45,57 +44,38 @@ local STRUCTURE_ROOM = 32
 local SEA = Config.SeaLevel
 
 -- Tuning --------------------------------------------------------------------------------------------
-local BIOME_SHARPNESS = 1 / (0.3 * 0.3) -- 1 / sigma^2 of the biome weight gaussian
-local BORDER_JITTER = 0.07 -- climate noise added when picking the surface biome
-local LAPSE_RATE = 1 / 110 -- temperature drop per block above SEA + 40
-local MOUNTAIN_HEIGHT = 105
-local SNOW_LINE = SEA + 100
-local TREE_LINE_START, TREE_LINE_END = SEA + 60, SEA + 85
 local CLIMATE_SPREAD = 1.7 -- stretches climate noise so the outer biomes are reached as often as the inner ones
-local COAST = -0.04 -- continentalness below which low land becomes beach
-local CLIFF_SLOPE = 3 -- height difference (blocks per block) that turns the surface into stone
+local BORDER_JITTER = 0.07 -- climate noise added when picking the biome
+local BAND_JITTER = 12 -- altitude noise (blocks) added when picking the band
+local CLIFF_SLOPE = 1.6 -- slope (blocks per block) above which the surface is bare rock (Biome.steep)
+local MUSHROOM_SELECTOR = -0.475 -- selector below which islands are mushroom fields
+local RIVER_MUD = 0.3 -- river strength (Relief) from which a river bed is packed mud
+local DEEP_WATER = 14 -- sea floor deeper than this is gravel
 
-local exp = math.exp
 local floor = math.floor
 local huge = math.huge
 local writeu16 = buffer.writeu16
 
 local id = Blocks.id
 local BEDROCK, STONE, GRAVEL, SNOW, ICE = id.Bedrock, id.Stone, id.Gravel, id.Snow, id.Ice
+local PACKED_MUD = id.PackedMud
 local WATER = Blocks.fluidId("Water", 0)
+local MUSHROOM = (Biomes.byName("MushroomFields") :: Biomes.Biome).index
 
-local biomeCount = Biomes.count
 local biomeTemp: { number }, biomeHum: { number } = {}, {}
-local biomeOffset: { number }, biomeHills: { number }, biomeVeg: { number } = {}, {}, {}
+-- Patch noise threshold of each biome (the patch noise has a standard deviation of 1/3; the
+-- logistic approximation of the normal quantile is plenty for blotches).
+local patchThreshold: { number } = {}
 for i, biome in Biomes.list do
 	biomeTemp[i], biomeHum[i] = biome.temperature, biome.humidity
-	biomeOffset[i], biomeHills[i], biomeVeg[i] = biome.heightOffset, biome.hilliness, biome.vegetation
+	local cover = math.clamp(biome.patchCover, 1e-3, 1 - 1e-3)
+	patchThreshold[i] = if biome.patch ~= 0 then math.log((1 - cover) / cover) / 1.702 / 3 else huge
 end
-
-local function smoothstep(edge0: number, edge1: number, x: number): number
-	local t = (x - edge0) / (edge1 - edge0)
-	if t <= 0 then
-		return 0
-	elseif t >= 1 then
-		return 1
-	end
-	return t * t * (3 - 2 * t)
-end
-
--- Continentalness -> base height relative to sea level (piecewise linear spline).
-local SPLINE_X = { -1.0, -0.55, -0.3, -0.15, 0.0, 0.45, 1.0 }
-local SPLINE_Y = { -40, -34, -14, -2, 4, 14, 26 }
-local function continentalHeight(c: number): number
-	if c <= SPLINE_X[1] then
-		return SPLINE_Y[1]
-	end
-	for i = 2, #SPLINE_X do
-		if c <= SPLINE_X[i] then
-			local t = (c - SPLINE_X[i - 1]) / (SPLINE_X[i] - SPLINE_X[i - 1])
-			return SPLINE_Y[i - 1] + (SPLINE_Y[i] - SPLINE_Y[i - 1]) * t
-		end
-	end
-	return SPLINE_Y[#SPLINE_Y]
+local inBand = Biomes.inBand
+-- Deepest filler of any biome (blocks): below that every column is stone.
+local MAX_FILLER = 0
+for _, biome in Biomes.list do
+	MAX_FILLER = math.max(MAX_FILLER, biome.fillerDepth)
 end
 
 export type ChunkResult = {
@@ -117,7 +97,7 @@ export type Generator = {
 	column: (x: number, z: number) -> (number, number, number, number),
 	-- `yield` is called regularly so callers can spread the work over several frames.
 	generate: (level: number, nx: number, nz: number, yield: (() -> ())?) -> ChunkResult,
-	-- A dry land column near the origin: x, height, z.
+	-- A spawn column: low, dry, gentle land near the hills. x, height, z.
 	findSpawn: () -> (number, number, number),
 	--[[
 		Seam limits for the mesher (GreedyMesher.Border.open) of node (level, nx, nz), given the
@@ -137,90 +117,63 @@ export type Generator = {
 local TerrainGenerator = {}
 
 function TerrainGenerator.new(seed: number): Generator
-	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / 1100, 3)
-	local humidity = Noise.fbm2(seed, "climate.humidity", 1 / 900, 3)
-	local continental = Noise.fbm2(seed, "terrain.continental", 1 / 1600, 4)
-	local mountains = Noise.fbm2(seed, "terrain.mountains", 1 / 1000, 3)
-	local ridges = Noise.ridged2(seed, "terrain.ridges", 1 / 380, 5, 0.5)
-	local hills = Noise.fbm2(seed, "terrain.hills", 1 / 170, 4, 0.5)
+	local relief = Relief.new(seed)
+	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / 5900, 3)
+	local humidity = Noise.fbm2(seed, "climate.humidity", 1 / 1500, 3)
 	local jitterT = Noise.fbm2(seed, "climate.jitterT", 1 / 24, 2)
 	local jitterH = Noise.fbm2(seed, "climate.jitterH", 1 / 24, 2)
-	local snowNoise = Noise.fbm2(seed, "terrain.snow", 1 / 40, 2)
+	local bandJitter = Noise.fbm2(seed, "climate.band", 1 / 24, 2)
+	local patchNoise = Noise.fbm2(seed, "surface.patches", 1 / 10, 2)
 
 	local carveCaves = Caves.new(seed)
 
-	-- Returns height (first air block), surface biome, vegetation chance, surface block, continentalness.
-	local function sample(x: number, z: number): (number, number, number, number, number)
-		local t = math.clamp(temperature(x, z) * CLIMATE_SPREAD, -1, 1)
-		local m = math.clamp(humidity(x, z) * CLIMATE_SPREAD, -1, 1)
-		local c = continental(x, z)
-
-		-- Blend biome terrain properties by climate distance.
-		local wsum, offset, hilliness, vegetation = 0, 0, 0, 0
-		for i = 1, biomeCount do
-			local dt, dm = t - biomeTemp[i], m - biomeHum[i]
-			local w = exp(-(dt * dt + dm * dm) * BIOME_SHARPNESS)
-			wsum += w
-			offset += w * biomeOffset[i]
-			hilliness += w * biomeHills[i]
-			vegetation += w * biomeVeg[i]
-		end
-		wsum = 1 / wsum
-		offset *= wsum
-		hilliness *= wsum
-		vegetation *= wsum
-
-		local land = smoothstep(-0.28, -0.08, c)
-		local h = SEA + continentalHeight(c) + offset * land + hills(x, z) * (4 + (hilliness - 4) * land)
-		local mountainness = smoothstep(0.04, 0.4, mountains(x, z)) * smoothstep(-0.15, 0.2, c)
-		if mountainness > 0 then
-			h += mountainness * (6 + ridges(x, z) * MOUNTAIN_HEIGHT)
-		end
-		h = floor(h)
+	--[[
+		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
+		surface block, the relief's selector and river strength.
+	]]
+	local function sample(x: number, z: number, level: number): (number, number, number, number, number, number)
+		local y, unrivered, selector, river = relief.height(x, z, level)
+		local h = floor(y)
 		if h < 2 then
 			h = 2
-		elseif h > WORLD_HEIGHT - 24 then
-			h = WORLD_HEIGHT - 24
+		elseif h > WORLD_HEIGHT - STRUCTURE_ROOM then
+			h = WORLD_HEIGHT - STRUCTURE_ROOM
 		end
 
-		-- Surface biome: nearest biome to a slightly jittered climate. Colder higher up.
-		local st = t + jitterT(x, z) * BORDER_JITTER
-		if h > SEA + 40 then
-			st -= (h - SEA - 40) * LAPSE_RATE
-		end
-		local sm = m + jitterH(x, z) * BORDER_JITTER
-		local biome, best = 1, huge
-		for i = 1, biomeCount do
-			local dt, dm = st - biomeTemp[i], sm - biomeHum[i]
-			local d = dt * dt + dm * dm
-			if d < best then
-				best, biome = d, i
+		local biome = MUSHROOM
+		if selector >= MUSHROOM_SELECTOR then
+			-- Altitude band, then the biome of that band nearest to a slightly jittered climate.
+			local band = Biomes.bandAt(unrivered + bandJitter(x, z) * BAND_JITTER)
+			local t = math.clamp(temperature(x, z) * CLIMATE_SPREAD, -1, 1) + jitterT(x, z) * BORDER_JITTER
+			local m = math.clamp(humidity(x, z) * CLIMATE_SPREAD, -1, 1) + jitterH(x, z) * BORDER_JITTER
+			local best = huge
+			for _, i in inBand[band] do
+				local dt, dm = t - biomeTemp[i], m - biomeHum[i]
+				local d = dt * dt + dm * dm
+				if d < best then
+					best, biome = d, i
+				end
 			end
 		end
 
 		local def = Biomes.list[biome]
 		local surface
 		if h < SEA then
-			surface = if SEA - h > 14 then GRAVEL else def.underwater
-		elseif h <= SEA + 2 and c < COAST then
+			surface = if river >= RIVER_MUD then PACKED_MUD elseif SEA - h > DEEP_WATER then GRAVEL else def.underwater
+		elseif h <= SEA + 2 then
 			surface = def.beach
-		elseif h >= SNOW_LINE - 8 and h >= SNOW_LINE + snowNoise(x, z) * 8 then
-			surface = SNOW
+		elseif patchNoise(x, z) > patchThreshold[biome] then
+			surface = def.patch
 		else
 			surface = def.top
 		end
 
-		if h <= SEA then
-			vegetation = 0
-		elseif h > TREE_LINE_START then
-			vegetation *= 1 - smoothstep(TREE_LINE_START, TREE_LINE_END, h)
-		end
-
-		return h, biome, vegetation, surface, c
+		local vegetation = if h <= SEA + 1 or river >= RIVER_MUD then 0 else def.vegetation
+		return h, biome, vegetation, surface, selector, river
 	end
 
 	local function column(x: number, z: number): (number, number, number, number)
-		local h, biome, vegetation, surface = sample(x, z)
+		local h, biome, vegetation, surface = sample(x, z, 0)
 		return h, biome, vegetation, surface
 	end
 
@@ -228,6 +181,7 @@ function TerrainGenerator.new(seed: number): Generator
 	local heights: { number } = table.create(P * P, 0)
 	local biomes: { number } = table.create(P * P, 1)
 	local surfaces: { number } = table.create(P * P, 0)
+	local topCells: { number } = table.create(P * P, 0)
 
 	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?): ChunkResult
 		local step, stepY = ChunkLayout.steps(level)
@@ -239,7 +193,7 @@ function TerrainGenerator.new(seed: number): Generator
 		for pz = 0, P - 1 do
 			local wz = originZ + (pz - 1) * step + half
 			for px = 0, P - 1 do
-				local h, biome, _, surface = sample(originX + (px - 1) * step + half, wz)
+				local h, biome, _, surface = sample(originX + (px - 1) * step + half, wz, level)
 				local i = pz * P + px + 1
 				heights[i], biomes[i], surfaces[i] = h, biome, surface
 				if h > highest then
@@ -255,10 +209,39 @@ function TerrainGenerator.new(seed: number): Generator
 		local cells = ChunkLayout.croppedHeight((highest + STRUCTURE_ROOM + stepY - 1) // stepY, stepY)
 		local data = ChunkLayout.create(cells)
 
-		-- 2. Fill the columns.
+		-- 2. Fill the columns. Highest cell of each column (border columns of LOD chunks one lower,
+		-- see the header).
+		local allStone = huge
+		for pz = 0, P - 1 do
+			for px = 0, P - 1 do
+				local i = pz * P + px + 1
+				local topCell = (heights[i] - halfY + stepY - 1) // stepY - 1
+				if level > 0 and (px == 0 or pz == 0 or px == P - 1 or pz == P - 1) and topCell > 1 then
+					topCell -= 1
+				end
+				topCells[i] = topCell
+				allStone = math.min(allStone, topCell - MAX_FILLER // stepY - 1)
+			end
+		end
+
+		-- Bedrock, then every column is stone up to `allStone`: write that a whole layer at a time
+		-- (a tall mountain chunk is mostly that).
+		local stride = LAYER * 2
+		for j = 0, LAYER - 1 do
+			writeu16(data, j * 2, BEDROCK)
+		end
+		if allStone >= 1 then
+			for j = 0, LAYER - 1 do
+				writeu16(data, stride + j * 2, STONE)
+			end
+			for y = 2, allStone do
+				buffer.copy(data, y * stride, data, stride, stride)
+			end
+		end
+		local firstY = math.max(1, allStone + 1)
+
 		local solidBelow, emptyAbove = cells, 0
 		local waterTop = (SEA - halfY + stepY - 1) // stepY - 1 -- highest cell whose sample is below sea level
-		local stride = LAYER * 2
 		for pz = 0, P - 1 do
 			for px = 0, P - 1 do
 				local i = pz * P + px + 1
@@ -268,7 +251,7 @@ function TerrainGenerator.new(seed: number): Generator
 				local filler = if top == biome.top then biome.filler else top
 				local fillerDepth = biome.fillerDepth
 
-				-- Steep slopes become bare stone.
+				-- Steep slopes become bare rock.
 				if h > SEA + 2 then
 					local slope = 0
 					if px > 0 then
@@ -283,18 +266,14 @@ function TerrainGenerator.new(seed: number): Generator
 					if pz < P - 1 then
 						slope = math.max(slope, math.abs(h - heights[i + P]))
 					end
-					if slope >= CLIFF_SLOPE * step then
-						top, filler = STONE, STONE
+					if slope >= (biome.steepSlope or CLIFF_SLOPE) * step then
+						top, filler = biome.steep, biome.steep
 					end
 				end
 
-				local topCell = (h - halfY + stepY - 1) // stepY - 1
-				if level > 0 and (px == 0 or pz == 0 or px == P - 1 or pz == P - 1) and topCell > 1 then
-					topCell -= 1
-				end
+				local topCell = topCells[i]
 				local base = (pz * P + px) * 2
-				writeu16(data, base, BEDROCK)
-				for y = 1, topCell do
+				for y = firstY, topCell do
 					local depth = (topCell - y) * stepY
 					local block = if depth == 0 then top elseif depth <= fillerDepth then filler else STONE
 					writeu16(data, base + y * stride, block)
@@ -390,7 +369,7 @@ function TerrainGenerator.new(seed: number): Generator
 					else
 						x, z = originX + along, originZ + SIZE * step + half
 					end
-					local h = sample((x // cs) * cs + halfC, (z // cs) * cs + halfC)
+					local h = sample((x // cs) * cs + halfC, (z // cs) * cs + halfC, coarse)
 					-- Same rounding as `generate` at the coarse level: blocks below `solidTop` are drawn.
 					local solidTop = ((h - halfCY + csY - 1) // csY) * csY
 					writeu16(limits, ((side - 1) * SIZE + i) * 2, math.max(solidTop // stepY, 1))
@@ -421,20 +400,43 @@ function TerrainGenerator.new(seed: number): Generator
 	end
 
 	local function findSpawn(): (number, number, number)
-		-- Walk an outward square spiral until we find dry land that is not a beach or a cliff.
-		-- Samples every 16 blocks, up to ~1000 blocks from the origin.
+		--[[
+			Walk an outward square spiral (every SPAWN_STEP blocks, up to ~13 km out) for the first
+			gentle, dry, unfrozen column in the hills or plains next to the mountains: a view of the
+			ranges without starting on a cliff. The cheap selector rules out most spots first.
+		]]
+		local SPAWN_STEP = 64
 		local x, z, dx, dz = 0, 0, 0, -1
-		for _ = 1, 16384 do
-			local h, _, _, surface, c = sample(x * 16, z * 16)
-			if h > SEA + 2 and c > COAST and surface ~= SNOW then
-				return x * 16, h, z * 16
+		for _ = 1, 160000 do
+			local wx, wz = x * SPAWN_STEP, z * SPAWN_STEP
+			local a = math.abs(relief.selector(wx, wz))
+			if a > 0.2 and a < 0.32 then
+				local h, biome, _, surface, _, river = sample(wx, wz, 0)
+				if
+					h > SEA + 3
+					and h < SEA + 160
+					and river == 0
+					and surface == Biomes.list[biome].top
+					and surface ~= SNOW
+				then
+					local gentle = true
+					for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
+						if math.abs(sample(wx + offset[1], wz + offset[2], 0) - h) > 2 then
+							gentle = false
+							break
+						end
+					end
+					if gentle then
+						return wx, h, wz
+					end
+				end
 			end
 			if x == z or (x < 0 and x == -z) or (x > 0 and x == 1 - z) then
 				dx, dz = -dz, dx
 			end
 			x, z = x + dx, z + dz
 		end
-		local h = sample(0, 0)
+		local h = sample(0, 0, 0)
 		return 0, h, 0
 	end
 

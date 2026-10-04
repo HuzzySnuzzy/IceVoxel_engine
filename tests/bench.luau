@@ -1,7 +1,7 @@
 --[[
 	Generation / meshing benchmark and part count estimate.
 
-	    lune run tests/bench [seed] [viewDistance] [splitDistance] [splitDistanceL1]
+	    lune run tests/bench [seed] [viewDistance] [splitDistance] [splitDistanceL1] [x z]
 
 	Times generating and meshing chunks at every LOD level, then runs the real LOD selection around
 	the spawn point and meshes every selected node to estimate how many parts the client creates,
@@ -27,7 +27,12 @@ LodTree.configure(
 )
 local gen = TerrainGenerator.new(seed)
 local sx, sh, sz = gen.findSpawn()
-print(`seed {seed}, spawn at {sx}, {sh}, {sz}`)
+if process.args[6] then
+	-- Somewhere else than the spawn (e.g. inside a mountain range).
+	sx, sz = tonumber(process.args[5]) :: number, tonumber(process.args[6]) :: number
+	sh = gen.column(sx, sz)
+end
+print(`seed {seed}, viewpoint {sx}, {sh}, {sz}`)
 
 -- Generates and meshes a node like ChunkWorker (far nodes with their far seam borders). Returns
 -- generation time, meshing time, boxes and (far nodes) the quad count for far meshes.

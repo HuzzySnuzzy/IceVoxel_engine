@@ -39,7 +39,14 @@ local Structures = {}
 Structures.SPACING = 5
 Structures.RADIUS = 5
 
-local TREE_SOIL = { [id.Grass] = true, [id.DryGrass] = true, [id.Dirt] = true, [id.Snow] = true }
+local TREE_SOIL = {
+	[id.Grass] = true,
+	[id.DryGrass] = true,
+	[id.Dirt] = true,
+	[id.Snow] = true,
+	[id.Podzol] = true,
+	[id.CoarseDirt] = true,
+}
 
 Structures.registry = {
 	OakTree = { build = Trees.oak, soil = TREE_SOIL },

@@ -2,46 +2,68 @@
 --[[
 	Biome definitions.
 
-	Biomes live in a 2D climate space (temperature, humidity), both roughly in [-1, 1]. Every column
-	samples the climate noise and weighs every biome by its distance in that space, so biome terrain
-	properties blend smoothly into each other instead of producing walls at borders.
+	Biomes are picked by altitude first, as in JJThunder To The Max: the terrain's height (before
+	rivers are dug, so a river bed belongs to its banks) falls into one of the BANDS below, and the
+	biome is the one of that band closest to the column's climate (temperature, humidity, both
+	roughly in [-1, 1]). Band borders and climate borders are dithered a little so they look natural.
+	Islands in the middle of some seas are mushroom fields instead (see TerrainGenerator).
 
-	Blended (weighted average of nearby biomes):
-	  heightOffset   Blocks added to the base terrain height on land.
-	  hilliness      Amplitude (blocks) of the rolling hills noise on land.
+	  bands          Altitude bands the biome appears in (names from BANDS).
+	  temperature, humidity
+	                 Its place in climate space.
 	  vegetation     Chance (0-1) that a vegetation spot (one per 5x5 blocks) grows something.
-
-	Taken from the dominant biome only (with a little noise on the border so it looks natural):
-	  top / filler / fillerDepth   Surface block, blocks below it and how deep they go.
-	  underwater                   Surface block below sea level.
-	  beach                        Surface block near sea level on coasts.
-	  frozen                       Sea surface freezes to ice.
-	  features                     { { structureName, weight } } picked when vegetation succeeds.
+	  top / filler / fillerDepth
+	                 Surface block, blocks below it and how deep they go.
+	  patches        Optional { block =, cover = }: `cover` (0-1) of the surface is `block` instead of
+	                 `top`, in blotches a few blocks wide (stone in windswept hills...).
+	  steep          Optional block for slopes steeper than `steepSlope` (blocks per block;
+	                 default Stone and TerrainGenerator's CLIFF_SLOPE).
+	  underwater     Surface block below sea level.
+	  beach          Surface block just above sea level, on coasts and river banks.
+	  frozen         Water freezes to ice at the surface.
+	  features       { { structureName, weight } } picked when vegetation succeeds.
 ]]
 
 export type BiomeSpec = {
 	name: string,
+	bands: { string },
 	temperature: number,
 	humidity: number,
-	heightOffset: number,
-	hilliness: number,
 	vegetation: number,
 	top: string,
 	filler: string,
 	fillerDepth: number,
+	patches: { block: string, cover: number }?,
+	steep: string?,
+	steepSlope: number?,
 	underwater: string,
 	beach: string,
 	frozen: boolean?,
 	features: { { any } },
 }
 
+export type Band = { name: string, from: number }
+
+--[[
+	Altitude bands, by the lowest height (blocks) each starts at. These are the datapack's biome
+	altitudes scaled like the terrain (Generation/Relief): 64 + 0.43 (y - 63).
+]]
+local BANDS: { Band } = {
+	{ name = "Lowland", from = -math.huge },
+	{ name = "Forest", from = 190 },
+	{ name = "Highland", from = 312 },
+	{ name = "Meadow", from = 467 },
+	{ name = "Alpine", from = 553 },
+	{ name = "Slopes", from = 639 },
+	{ name = "Peaks", from = 725 },
+}
+
 local list: { BiomeSpec } = {
 	{
 		name = "Tundra",
+		bands = { "Lowland", "Forest" },
 		temperature = -0.75,
 		humidity = 0,
-		heightOffset = 3,
-		hilliness = 7,
 		vegetation = 0.025,
 		top = "Snow",
 		filler = "Dirt",
@@ -53,10 +75,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Taiga",
+		bands = { "Lowland", "Forest", "Highland" },
 		temperature = -0.35,
 		humidity = 0.3,
-		heightOffset = 8,
-		hilliness = 16,
 		vegetation = 0.32,
 		top = "Grass",
 		filler = "Dirt",
@@ -67,10 +88,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Plains",
+		bands = { "Lowland" },
 		temperature = 0.1,
 		humidity = -0.25,
-		heightOffset = 3,
-		hilliness = 6,
 		vegetation = 0.012,
 		top = "Grass",
 		filler = "Dirt",
@@ -81,10 +101,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Forest",
+		bands = { "Lowland", "Forest", "Highland" },
 		temperature = 0.1,
 		humidity = 0.3,
-		heightOffset = 6,
-		hilliness = 12,
 		vegetation = 0.45,
 		top = "Grass",
 		filler = "Dirt",
@@ -95,10 +114,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "BirchForest",
+		bands = { "Forest" },
 		temperature = -0.1,
 		humidity = 0.65,
-		heightOffset = 6,
-		hilliness = 10,
 		vegetation = 0.4,
 		top = "Grass",
 		filler = "Dirt",
@@ -109,10 +127,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Savanna",
+		bands = { "Lowland", "Forest" },
 		temperature = 0.5,
 		humidity = -0.3,
-		heightOffset = 5,
-		hilliness = 8,
 		vegetation = 0.05,
 		top = "DryGrass",
 		filler = "Dirt",
@@ -123,10 +140,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Desert",
+		bands = { "Lowland" },
 		temperature = 0.8,
 		humidity = -0.7,
-		heightOffset = 3,
-		hilliness = 5,
 		vegetation = 0.03,
 		top = "Sand",
 		filler = "Sandstone",
@@ -137,10 +153,9 @@ local list: { BiomeSpec } = {
 	},
 	{
 		name = "Jungle",
+		bands = { "Lowland", "Forest", "Highland" },
 		temperature = 0.65,
 		humidity = 0.55,
-		heightOffset = 7,
-		hilliness = 14,
 		vegetation = 0.55,
 		top = "Grass",
 		filler = "Dirt",
@@ -149,6 +164,153 @@ local list: { BiomeSpec } = {
 		beach = "Sand",
 		features = { { "JungleTree", 2 }, { "OakTree", 1 } },
 	},
+	{
+		name = "WindsweptHills",
+		bands = { "Highland" },
+		temperature = -0.15,
+		humidity = -0.35,
+		vegetation = 0.04,
+		top = "Grass",
+		filler = "Dirt",
+		fillerDepth = 2,
+		patches = { block = "Stone", cover = 0.3 },
+		underwater = "Gravel",
+		beach = "Gravel",
+		features = { { "SpruceTree", 2 }, { "OakTree", 1 } },
+	},
+	{
+		name = "OldGrowthTaiga",
+		bands = { "Highland", "Meadow" },
+		temperature = -0.45,
+		humidity = 0.45,
+		vegetation = 0.42,
+		top = "Podzol",
+		filler = "Dirt",
+		fillerDepth = 3,
+		patches = { block = "CoarseDirt", cover = 0.25 },
+		underwater = "Gravel",
+		beach = "Gravel",
+		features = { { "SpruceTree", 1 } },
+	},
+	{
+		name = "WindsweptSavanna",
+		bands = { "Highland" },
+		temperature = 0.65,
+		humidity = -0.5,
+		vegetation = 0.03,
+		top = "DryGrass",
+		filler = "Dirt",
+		fillerDepth = 2,
+		patches = { block = "CoarseDirt", cover = 0.3 },
+		underwater = "Sand",
+		beach = "Sand",
+		features = { { "AcaciaTree", 1 } },
+	},
+	{
+		name = "Meadow",
+		bands = { "Meadow" },
+		temperature = 0.15,
+		humidity = 0,
+		vegetation = 0.012,
+		top = "Grass",
+		filler = "Dirt",
+		fillerDepth = 3,
+		underwater = "Gravel",
+		beach = "Gravel",
+		features = { { "BirchTree", 1 }, { "OakTree", 1 } },
+	},
+	{
+		name = "Grove",
+		bands = { "Alpine" },
+		temperature = -0.3,
+		humidity = 0.2,
+		vegetation = 0.2,
+		top = "Snow",
+		filler = "Dirt",
+		fillerDepth = 3,
+		underwater = "Gravel",
+		beach = "Gravel",
+		frozen = true,
+		features = { { "SpruceTree", 1 } },
+	},
+	{
+		name = "StonyPeaks",
+		bands = { "Alpine" },
+		temperature = 0.45,
+		humidity = 0,
+		vegetation = 0,
+		top = "Stone",
+		filler = "Stone",
+		fillerDepth = 3,
+		patches = { block = "Calcite", cover = 0.25 },
+		underwater = "Gravel",
+		beach = "Gravel",
+		features = {},
+	},
+	{
+		name = "SnowySlopes",
+		bands = { "Slopes" },
+		temperature = 0,
+		humidity = 0,
+		vegetation = 0,
+		top = "Snow",
+		filler = "Snow",
+		fillerDepth = 2,
+		steepSlope = 1.1,
+		underwater = "Gravel",
+		beach = "Gravel",
+		frozen = true,
+		features = {},
+	},
+	{
+		name = "JaggedPeaks",
+		bands = { "Peaks" },
+		temperature = 0.2,
+		humidity = 0,
+		vegetation = 0,
+		top = "Snow",
+		filler = "Snow",
+		fillerDepth = 2,
+		steepSlope = 1.1,
+		underwater = "Gravel",
+		beach = "Gravel",
+		frozen = true,
+		features = {},
+	},
+	{
+		name = "FrozenPeaks",
+		bands = { "Peaks" },
+		temperature = -0.4,
+		humidity = 0,
+		vegetation = 0,
+		top = "Snow",
+		filler = "Snow",
+		fillerDepth = 2,
+		patches = { block = "PackedIce", cover = 0.35 },
+		steep = "PackedIce",
+		steepSlope = 1.1,
+		underwater = "Gravel",
+		beach = "Gravel",
+		frozen = true,
+		features = {},
+	},
+	{
+		-- Islands far out in some seas (TerrainGenerator picks it; it belongs to no band).
+		name = "MushroomFields",
+		bands = {},
+		temperature = 0.3,
+		humidity = 0.6,
+		vegetation = 0,
+		top = "Mycelium",
+		filler = "Dirt",
+		fillerDepth = 3,
+		underwater = "Sand",
+		beach = "Mycelium",
+		features = {},
+	},
 }
 
-return list
+return {
+	bands = BANDS,
+	list = list,
+}
