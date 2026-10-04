@@ -20,6 +20,13 @@
 	    same height merge.
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
 	    the camera is not close to.
+	  * `border` (optional) describes what surrounds the meshed range (see `Border`):
+	      - seams: where a coarser LOD node is next to this one, it is drawn lower than the exact
+	        terrain in the padding says. Padding above what the neighbour really draws is opened,
+	        so this side draws its border cells there instead of leaving see-through holes.
+	      - cave caps: a section meshed with caves visible, next to space where they are hidden
+	        (a hidden section, or a coarser node), closes its tunnels with stone where they run
+	        into that space; otherwise you would look out of the tunnel into the void.
 
 	Output: a buffer of boxes, BOX_BYTES each, as u16 values
 	  x, y, z      first cell (x / z local to the chunk core, y absolute cell index),
@@ -53,10 +60,27 @@ local writeu8 = buffer.writeu8
 local readu16 = buffer.readu16
 local writeu16 = buffer.writeu16
 
+local CAVE_AIR = Blocks.CAVE_AIR
+local STONE = Blocks.id.Stone
+
+--[[
+	open     4 * SIZE u16 values (sides -X, +X, -Z, +Z, then position along the side): padding
+	         cells at or above this cell index count as air. 0xFFFF = nothing opened.
+	hidden   bit mask of the sides beyond which caves are hidden (only used when caves are visible):
+	         1 -X, 2 +X, 4 -Z, 8 +Z, 16 below the range, 32 above it.
+]]
+export type Border = {
+	open: buffer?,
+	hidden: number,
+}
+
 local GreedyMesher = {}
 
 GreedyMesher.BOX_BYTES = 14
 GreedyMesher.KEY_STRIDE = KEY_STRIDE
+GreedyMesher.NOT_OPEN = 0xFFFF
+GreedyMesher.HIDDEN_BELOW = 16
+GreedyMesher.HIDDEN_ABOVE = 32
 
 -- Splits a box key into its appearance id and surface height (0 = full height, else ninths).
 function GreedyMesher.decodeKey(key: number): (number, number)
@@ -69,6 +93,7 @@ local need = buffer.create(0) -- u16 appearance that must be covered, 0 = nothin
 local wild = buffer.create(0) -- u8 1 = hidden opaque cell (wildcard)
 local done = buffer.create(0) -- u8 1 = already covered
 local boxes = buffer.create(14 * 256)
+local borderData = buffer.create(0) -- copy of the chunk with the border applied
 
 local function ensureScratch(cells: number)
 	if cells > scratchCells then
@@ -116,11 +141,122 @@ function GreedyMesher.activeRange(solidBelow: number, emptyAbove: number, height
 	return y0, y1
 end
 
+-- Lowest opened cell of a seam buffer (cells below it are unaffected), or NOT_OPEN.
+function GreedyMesher.lowestOpen(open: buffer?): number
+	local lowest = 0xFFFF
+	if open then
+		for i = 0, buffer.len(open) // 2 - 1 do
+			lowest = math.min(lowest, readu16(open, i * 2))
+		end
+	end
+	return lowest
+end
+
+-- Returns a copy of layers y0-1 .. y1 of `data` (same layout) with `border` applied.
+local function applyBorder(
+	data: buffer,
+	height: number,
+	y0: number,
+	y1: number,
+	hideCaves: boolean,
+	border: Border
+): buffer
+	local lo, hi = math.max(y0 - 1, 0), math.min(y1, height - 1)
+	if buffer.len(borderData) < buffer.len(data) then
+		borderData = buffer.create(buffer.len(data))
+	end
+	local d = borderData
+	buffer.copy(d, lo * LAYER * 2, data, lo * LAYER * 2, (hi - lo + 1) * LAYER * 2)
+
+	local open = border.open
+	if open then
+		for side = 0, 3 do
+			for i = 0, SIZE - 1 do
+				local limit = readu16(open, (side * SIZE + i) * 2)
+				if limit <= hi then
+					local px, pz
+					if side == 0 then
+						px, pz = 0, i + 1
+					elseif side == 1 then
+						px, pz = P - 1, i + 1
+					elseif side == 2 then
+						px, pz = i + 1, 0
+					else
+						px, pz = i + 1, P - 1
+					end
+					for y = math.max(limit, lo), hi do
+						local o = ((y * P + pz) * P + px) * 2
+						if readu8(cullHiddenCaves, readu16(d, o)) == 1 then
+							writeu16(d, o, AIR)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local hidden = border.hidden
+	if hidden ~= 0 and not hideCaves then
+		-- `own` is a cell being meshed, `beyond` its neighbour in hidden space (byte offsets).
+		-- Hidden cave air counts as rock, and our own cave air touching hidden rock becomes a
+		-- stone cap (the hidden side never draws its rock there).
+		local function cap(own: number, beyond: number)
+			local b = readu16(d, beyond)
+			if readu8(cullHiddenCaves, b) == 1 then
+				if b == CAVE_AIR then
+					writeu16(d, beyond, STONE)
+				end
+				if readu16(d, own) == CAVE_AIR then
+					writeu16(d, own, STONE)
+				end
+			end
+		end
+		for y = y0, y1 - 1 do
+			local layer = y * P
+			for i = 1, SIZE do
+				if bit32.btest(hidden, 1) then
+					cap(((layer + i) * P + 1) * 2, ((layer + i) * P) * 2)
+				end
+				if bit32.btest(hidden, 2) then
+					cap(((layer + i) * P + SIZE) * 2, ((layer + i) * P + SIZE + 1) * 2)
+				end
+				if bit32.btest(hidden, 4) then
+					cap(((layer + 1) * P + i) * 2, (layer * P + i) * 2)
+				end
+				if bit32.btest(hidden, 8) then
+					cap(((layer + SIZE) * P + i) * 2, ((layer + SIZE + 1) * P + i) * 2)
+				end
+			end
+		end
+		for _, pair in { { 16, y0, y0 - 1 }, { 32, y1 - 1, y1 } } do
+			local yOwn, yBeyond = pair[2], pair[3]
+			if bit32.btest(hidden, pair[1]) and yBeyond >= 0 and yBeyond < height then
+				for z = 1, SIZE do
+					for x = 1, SIZE do
+						cap(((yOwn * P + z) * P + x) * 2, ((yBeyond * P + z) * P + x) * 2)
+					end
+				end
+			end
+		end
+	end
+	return d
+end
+
 --[[
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.
 	Returns a new buffer of boxes and the box count.
 ]]
-function GreedyMesher.mesh(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean): (buffer, number)
+function GreedyMesher.mesh(
+	data: buffer,
+	height: number,
+	y0: number,
+	y1: number,
+	hideCaves: boolean,
+	border: Border?
+): (buffer, number)
+	if border and (border.open or border.hidden ~= 0) then
+		data = applyBorder(data, height, y0, y1, hideCaves, border)
+	end
 	local cull = if hideCaves then cullHiddenCaves else cullVisibleCaves
 	local sh = y1 - y0
 	local cells = SIZE * SIZE * sh

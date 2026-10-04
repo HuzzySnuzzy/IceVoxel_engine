@@ -10,10 +10,17 @@
 	  4. lets the renderer build parts within its frame budget.
 
 	Seamless LOD changes: a node that is no longer wanted stays visible until every node covering
-	its area is fully built, then it is removed in the same frame the last replacement appears.
+	its area is fully built, then it is removed in the same frame the last replacement appears. A
+	built node whose area is still shown by a coarser node waits (unshown) until then, so two
+	levels of detail are never drawn on top of each other.
 
 	Node states: waiting (for edit lists) -> queued -> working (in a worker) -> built (parts being
 	created) -> ready (visible).
+
+	Borders (GreedyMesher.Border): a node next to a coarser node is meshed knowing that node's
+	level, so it draws the border cells the coarser node leaves open (no see-through seams), and a
+	section with visible caves next to hidden caves closes its tunnels. Both depend on the
+	neighbours, so nodes are remeshed when their neighbourhood changes.
 ]]
 
 local Players = game:GetService("Players")
@@ -39,6 +46,9 @@ local EDIT_RETRY = 5
 local MAX_FAILURES = 2
 
 local NEIGHBOURS = { { 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
+-- Border sides in GreedyMesher order: -X, +X, -Z, +Z.
+local SIDES = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } }
+local NO_COARSER = table.freeze({ 0, 0, 0, 0 })
 
 export type Node = {
 	-- RenderNode fields
@@ -57,11 +67,18 @@ export type Node = {
 	since: number,
 	retireSince: number?,
 	pendingBuilds: number,
+	-- Built (all parts created) / in the workspace.
 	ready: boolean,
+	shown: boolean,
 	chunk: ClientWorld.ChunkData?,
 	reveal: { [number]: boolean },
 	dirty: { [number]: boolean },
 	meshing: boolean,
+	-- Level of the coarser node on each side (0 = none): wanted now / used by the current mesh.
+	coarser: { number },
+	coarserUsed: { number }?,
+	-- Cave cap mask each section was meshed with.
+	caps: { [number]: number },
 }
 
 export type Stats = {
@@ -83,6 +100,8 @@ export type ChunkStreamer = {
 	queue: { Node },
 	waiting: { [Node]: boolean },
 	dirtyNodes: { [Node]: boolean },
+	-- Ready nodes waiting for a coarser node over their area to go away.
+	unshown: { [Node]: boolean },
 	sinceRefresh: number,
 
 	update: (self: ChunkStreamer, dt: number) -> (),
@@ -118,16 +137,20 @@ local function caveViewpoint(self: ChunkStreamer): Vector3?
 	return nil
 end
 
--- Should section `s` of a full detail chunk be meshed with caves visible?
-local function wantsReveal(node: Node, s: number, camera: Vector3?): boolean
+-- Should section `s` of full detail chunk (cx, cz) be meshed with caves visible?
+local function wantsRevealAt(cx: number, cz: number, s: number, camera: Vector3?): boolean
 	if camera == nil then
 		return false
 	end
-	local dx = (node.nx + 0.5) * SIZE - camera.X
-	local dz = (node.nz + 0.5) * SIZE - camera.Z
+	local dx = (cx + 0.5) * SIZE - camera.X
+	local dz = (cz + 0.5) * SIZE - camera.Z
 	local dy = (s + 0.5) * SECTION - camera.Y
 	local reach = Config.Caves.RevealRadius + SECTION
 	return dx * dx + dy * dy + dz * dz < reach * reach
+end
+
+local function wantsReveal(node: Node, s: number, camera: Vector3?): boolean
+	return wantsRevealAt(node.nx, node.nz, s, camera)
 end
 
 local function revealList(node: Node, camera: Vector3?): { number }
@@ -161,6 +184,73 @@ local function priorityOf(node: Node, pos: Vector3, look: Vector3): number
 	return distance * (1.4 - 0.4 * facing)
 end
 
+-- Levels of the coarser nodes next to each side of a node in `desired` (0 = same or finer).
+local function coarserSides(desired: { [number]: number }, level: number, nx: number, nz: number): { number }
+	local out = { 0, 0, 0, 0 }
+	for i, side in SIDES do
+		local x, z = nx + side[1], nz + side[2]
+		for coarse = level + 1, MAX_LEVEL do
+			local f = bit32.lshift(1, coarse - level)
+			if desired[Coords.nodeKey(coarse, x // f, z // f)] then
+				out[i] = coarse
+				break
+			end
+		end
+	end
+	return out
+end
+
+-- Does a mesh made with coarser sides `used` leave holes next to the neighbours `wanted`?
+local function seamsChanged(used: { number }?, wanted: { number }): boolean
+	for i = 1, 4 do
+		if wanted[i] ~= 0 and (used == nil or used[i] ~= wanted[i]) then
+			return true
+		end
+	end
+	return false
+end
+
+-- GreedyMesher.Border hidden mask of revealed section `s` of chunk (cx, cz): the sides beyond
+-- which caves are hidden (neighbours that are not revealed full detail chunks / sections).
+local function capMask(desired: { [number]: number }, cx: number, cz: number, s: number, camera: Vector3?): number
+	local mask = 0
+	for i, side in SIDES do
+		local x, z = cx + side[1], cz + side[2]
+		if desired[Coords.chunkKey(x, z)] == nil or not wantsRevealAt(x, z, s, camera) then
+			mask += bit32.lshift(1, i - 1)
+		end
+	end
+	if s > 0 and not wantsRevealAt(cx, cz, s - 1, camera) then
+		mask += GreedyMesher.HIDDEN_BELOW
+	end
+	if s < SECTIONS - 1 and not wantsRevealAt(cx, cz, s + 1, camera) then
+		mask += GreedyMesher.HIDDEN_ABOVE
+	end
+	return mask
+end
+
+-- Cap masks for the revealed sections in `reveal`, recorded on the node. Returned as a flat
+-- { section, mask, ... } list (actor messages only copy plain arrays reliably).
+local function capsFor(
+	self: ChunkStreamer,
+	node: Node,
+	sections: { number },
+	reveal: { number },
+	camera: Vector3?
+): { number }
+	local caps: { number } = {}
+	for _, s in sections do
+		node.caps[s] = 0
+	end
+	for _, s in reveal do
+		local mask = capMask(self.desired, node.nx, node.nz, s, camera)
+		table.insert(caps, s)
+		table.insert(caps, mask)
+		node.caps[s] = mask
+	end
+	return caps
+end
+
 --[[ Construction ]]
 
 function ChunkStreamer.new(
@@ -180,6 +270,7 @@ function ChunkStreamer.new(
 			queue = {},
 			waiting = {},
 			dirtyNodes = {},
+			unshown = {},
 			sinceRefresh = math.huge,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer
@@ -222,10 +313,14 @@ local function newNode(key: number, level: number, nx: number, nz: number): Node
 		retireSince = nil,
 		pendingBuilds = 0,
 		ready = false,
+		shown = false,
 		chunk = nil,
 		reveal = {},
 		dirty = {},
 		meshing = false,
+		coarser = NO_COARSER,
+		coarserUsed = nil,
+		caps = {},
 	}
 end
 
@@ -239,6 +334,7 @@ local function removeNode(self: ChunkStreamer, node: Node)
 	self.nodes[node.key] = nil
 	self.waiting[node] = nil
 	self.dirtyNodes[node] = nil
+	self.unshown[node] = nil
 end
 
 local function isReadyKey(self: ChunkStreamer, key: number): boolean
@@ -281,13 +377,42 @@ local function covered(self: ChunkStreamer, node: Node): boolean
 	return descendantsReady(self, node.level, node.nx, node.nz)
 end
 
+-- Is a coarser node still showing (part of) this node's area?
+local function hiddenByAncestor(self: ChunkStreamer, node: Node): boolean
+	for level = node.level + 1, MAX_LEVEL do
+		local shift = level - node.level
+		local ancestor =
+			self.nodes[Coords.nodeKey(level, node.nx // bit32.lshift(1, shift), node.nz // bit32.lshift(1, shift))]
+		if ancestor and ancestor.shown then
+			return true
+		end
+	end
+	return false
+end
+
+local function show(self: ChunkStreamer, node: Node)
+	node.shown = true
+	self.unshown[node] = nil
+	self.renderer:show(node)
+end
+
 local function retire(self: ChunkStreamer)
 	local now = os.clock()
 	local timeout = Config.Streaming.ReplaceTimeout
+	local removed = false
 	for _, node in self.nodes do
 		local since = node.retireSince
 		if since and (not node.ready or now - since > timeout or covered(self, node)) then
 			removeNode(self, node)
+			removed = true
+		end
+	end
+	-- Show the nodes that were waiting for what was just removed, in the same frame.
+	if removed then
+		for node in self.unshown do
+			if not hiddenByAncestor(self, node) then
+				show(self, node)
+			end
 		end
 	end
 end
@@ -295,7 +420,13 @@ end
 local function markReady(self: ChunkStreamer, node: Node)
 	node.ready = true
 	node.state = "ready"
-	self.renderer:show(node)
+	if not node.shown then
+		if hiddenByAncestor(self, node) then
+			self.unshown[node] = true
+		else
+			show(self, node)
+		end
+	end
 	-- Remove whatever this node replaces in the same frame.
 	retire(self)
 end
@@ -359,12 +490,20 @@ local function onGenerated(self: ChunkStreamer, node: Node, result: WorkerPool.R
 end
 
 local function dispatchGenerate(self: ChunkStreamer, node: Node): boolean
-	local job: { [string]: any } = { kind = "generate", level = node.level, nx = node.nx, nz = node.nz }
+	local job: { [string]: any } =
+		{ kind = "generate", level = node.level, nx = node.nx, nz = node.nz, coarser = node.coarser }
+	node.coarserUsed = node.coarser
 	local reveal: { number } = {}
 	if node.level == 0 then
 		job.edits = self.world:collectJobEdits(node.nx, node.nz)
-		reveal = revealList(node, caveViewpoint(self))
+		local camera = caveViewpoint(self)
+		reveal = revealList(node, camera)
 		job.reveal = reveal
+		local all = {}
+		for s = 0, SECTIONS - 1 do
+			all[s + 1] = s
+		end
+		job.caps = capsFor(self, node, all, reveal, camera)
 	end
 	node.state = "working"
 	node.stale = false
@@ -390,14 +529,19 @@ local function dispatchRemesh(self: ChunkStreamer, node: Node): boolean
 	self.dirtyNodes[node] = nil
 	node.meshing = true
 
+	node.coarserUsed = node.coarser
 	local job = {
 		kind = "mesh",
+		nx = node.nx,
+		nz = node.nz,
+		coarser = node.coarser,
 		data = chunk.data,
 		height = chunk.height,
 		solidBelow = chunk.solidBelow,
 		emptyAbove = chunk.emptyAbove,
 		sections = sections,
 		reveal = reveal,
+		caps = capsFor(self, node, sections, reveal, camera),
 	}
 	return self.pool:submit(job, function(result)
 		node.meshing = false
@@ -462,7 +606,16 @@ local function updateReveal(self: ChunkStreamer)
 		if chunk and node.ready then
 			for s = 0, SECTIONS - 1 do
 				local want = wantsReveal(node, s, camera)
-				if want ~= (node.reveal[s] == true) then
+				if
+					want
+					and node.reveal[s]
+					and not node.dirty[s]
+					and capMask(self.desired, node.nx, node.nz, s, camera) ~= (node.caps[s] or 0)
+				then
+					-- Still revealed, but caves around it were revealed or hidden.
+					node.dirty[s] = true
+					self.dirtyNodes[node] = true
+				elseif want ~= (node.reveal[s] == true) then
 					if
 						GreedyMesher.isTrivial(
 							s * SECTION,
@@ -510,6 +663,21 @@ local function refresh(self: ChunkStreamer)
 			local _, nx, nz = Coords.decodeNodeKey(key)
 			for _, offset in NEIGHBOURS do
 				keepEdits[Coords.chunkKey(nx + offset[1], nz + offset[2])] = true
+			end
+		end
+		node.coarser = coarserSides(desired, level, node.nx, node.nz)
+		if node.coarserUsed and seamsChanged(node.coarserUsed, node.coarser) then
+			-- A coarser neighbour appeared or changed level: the border must be redrawn.
+			local chunk = node.chunk
+			if node.state == "working" then
+				node.stale = true
+			elseif node.ready and chunk then
+				for s = 0, (chunk.emptyAbove - 1) // SECTION do
+					node.dirty[s] = true
+				end
+				self.dirtyNodes[node] = true
+			elseif node.ready then
+				node.state = "queued"
 			end
 		end
 	end
@@ -571,7 +739,7 @@ end
 -- Is the full detail chunk containing block (x, z) visible?
 function ChunkStreamer.isReady(self: ChunkStreamer, x: number, z: number): boolean
 	local node = self.nodes[Coords.chunkKey(x // SIZE, z // SIZE)]
-	return node ~= nil and node.ready
+	return node ~= nil and node.shown
 end
 
 function ChunkStreamer.stats(self: ChunkStreamer): Stats

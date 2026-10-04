@@ -106,8 +106,11 @@ local Config = {
 		Buoyancy = 0.92,
 		-- Vertical drag in water (1/s). Sinking speed is about Gravity * (1 - Buoyancy) / Drag.
 		Drag = 4,
-		-- Upward acceleration (studs/s^2) while Jump is held with the waist under water.
-		SwimUpAcceleration = 60,
+		-- Upward acceleration (studs/s^2) while Jump is held with the waist under water. Must beat
+		-- the gravity left over at waist depth (Gravity * (1 - Buoyancy * 0.55)) to reach the surface.
+		SwimUpAcceleration = 110,
+		-- Rising speed (studs/s) while climbing out of the water onto a ledge.
+		ClimbOutSpeed = 12,
 		-- Speed (studs/s) a full strength current carries you at, and how fast (1/s) it gets you
 		-- there. The current never slows you down; it only pushes until you move at its speed.
 		CurrentSpeed = 8,

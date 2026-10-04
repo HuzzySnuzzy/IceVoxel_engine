@@ -55,8 +55,9 @@ Studio tips:
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Left click (hold to repeat) | R2      | Tap        |
 | Place block   | Right click                 | L2      | Long press |
-| Select block  | `1`–`9`, `Q` / `E` to cycle |         |            |
+| Select block  | `1`–`9`, `Q` / `E` to cycle, or click a slot | L1 / R1 | Tap a slot, ‹ › pages |
 | Swim up       | Hold `Space` in water       | A       | Jump button |
+| Climb out     | Hold `Space` and walk at a ledge | A + stick | Jump + move |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |

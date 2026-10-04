@@ -60,9 +60,19 @@ The generator also returns two hints the mesher uses to skip work: `solidBelow` 
 rock or cave air) and `emptyAbove` (everything above is air).
 
 **LOD sampling.** A level `L` chunk samples each cell at its center, so it costs about the same as a
-full detail chunk while covering `4^L` times the area. LOD chunks also lower their border columns by
-one cell ("skirts"): where a coarse chunk meets a finer one, this keeps the coarse chunk from hiding
-border cells the finer neighbour leaves exposed, which would otherwise show up as thin cracks.
+full detail chunk while covering `4^L` times the area. LOD chunks also lower their padding columns
+by one cell ("skirts"): where a coarse chunk meets a finer one, this keeps the coarse chunk from
+hiding border cells the finer neighbour leaves exposed.
+
+**Seams.** The finer side of a border has the opposite problem. Its padding holds its own, exact
+terrain, but the coarser neighbour draws that column rounded down to its own cells (and sampled
+elsewhere), often lower. A border cell the padding calls buried can therefore face open air, and
+you could look into the terrain through it. So a node is meshed knowing the level of the coarser
+node on each side: `generator.seamLimits` computes, per padding column, how high that node's terrain
+really goes (with `generate`'s own rounding), and the mesher treats padding above it as air
+(`GreedyMesher.Border.open`). This adds well under 1% parts and leaves no holes at any level pair
+(`tests/spec/Meshing` checks the limits against the coarse node's generated data). The streamer
+remeshes a node when a side gets a coarser neighbour.
 
 ### Structures
 
@@ -133,7 +143,8 @@ waiting ──► queued ──► working ──► built ──► ready
 
 **Seamless LOD changes.** A node that is no longer wanted stays visible until every wanted node
 covering its area is ready (an ancestor, or all of its descendants). It is removed in the same frame
-the last replacement appears. `Streaming.ReplaceTimeout` is a safety net.
+the last replacement appears. Replacements that finish earlier wait unshown, so two levels of
+detail are never drawn over each other. `Streaming.ReplaceTimeout` is a safety net.
 
 **Edits.** Full detail chunks keep their block data on the main thread (`World/ClientWorld`). Edits
 (local predictions and server messages) update the data and the neighbours' padding, and mark the
@@ -143,7 +154,11 @@ is regenerated.
 
 **Caves.** While the camera is below the terrain surface, sections within `Caves.RevealRadius` are
 meshed with caves visible; everywhere else cave air counts as rock. Sections are remeshed as they
-enter or leave that radius.
+enter or leave that radius. Where a revealed tunnel runs into hidden space (a hidden section above
+or below, a neighbour chunk whose section is hidden, or a coarser node), nobody would draw its walls
+there and you would look into the void. A revealed section is therefore meshed with a mask of those
+sides (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock, and its own cave
+air touching that rock becomes a stone cap. It is remeshed when the mask changes.
 
 ### Rendering (`Rendering/`)
 
@@ -181,7 +196,10 @@ number sent with the list; the server ignores lists older than the newest one it
 filtering yields, so updates can finish out of order) and echoes the revision when filtering changed
 a name, and the client applies an echo only if it made no change since. The client sends nothing
 before the saved list arrives. If the saved list cannot be loaded, that session's waypoints are not
-saved, so a DataStore outage never overwrites them. Teleport requests go to the server
+saved, so a DataStore outage never overwrites them. The server works through one list at a time
+per player: filtered names are cached (so a replaced or failed list never filters a name twice), a
+token bucket limits filtering per player, failed filter calls are retried with backoff, and when the
+player leaves, names that could not be filtered become "Waypoint" so the positions are still saved. Teleport requests go to the server
 (`Players/Teleport`), which checks `Map.Teleport` and a cooldown and lands the player on a safe spot;
 `Player/SpawnGuard` holds the character until the terrain at the destination is built.
 
@@ -207,6 +225,11 @@ data (force = `AssemblyMass` × acceleration; velocity is never written):
   and drops, down in falling water). A one-sided servo pushes along it until the character moves at
   `CurrentSpeed`, so it never brakes the player and cannot build up speed. The Humanoid brakes hard
   on the ground, so the push limit is higher there.
+- **Climbing out**: holding Jump while swimming towards a ledge with two free blocks above it lifts
+  the character at `ClimbOutSpeed` until its feet clear the ledge (like jumping out of water in
+  Minecraft); without it, a bank one block above the surface could not be climbed from deep water.
+- Walk speed is multiplied by `WalkSpeedFactor` in water; a WalkSpeed another script sets meanwhile
+  becomes the new normal speed and is kept when leaving the water.
 - The Humanoid keeps its normal states: forcing `Swimming` outside Terrain water makes it switch to
   GettingUp, steer with the camera's pitch and lie horizontal, which is wrong for shallow water.
 

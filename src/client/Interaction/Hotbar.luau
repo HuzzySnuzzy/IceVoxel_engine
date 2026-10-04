@@ -2,8 +2,9 @@
 --[[
 	Block picker: nine slots at the bottom of the screen.
 
-	  1-9    select a slot
-	  Q / E  previous / next block (pages through every placeable block)
+	  1-9 / click or tap a slot   select it
+	  Q / E, gamepad L1 / R1      previous / next block (pages through every placeable block)
+	  ‹ / › buttons               previous / next page
 ]]
 
 local Players = game:GetService("Players")
@@ -45,7 +46,7 @@ function Hotbar.new(): Hotbar
 	local bar = Instance.new("Frame")
 	bar.AnchorPoint = Vector2.new(0.5, 1)
 	bar.Position = UDim2.new(0.5, 0, 1, -12)
-	bar.Size = UDim2.fromOffset(SLOTS * (SLOT_SIZE + 6), SLOT_SIZE)
+	bar.Size = UDim2.fromOffset(SLOTS * (SLOT_SIZE + 6) + 2 * (28 + 6), SLOT_SIZE)
 	bar.BackgroundTransparency = 1
 	bar.Parent = gui
 
@@ -66,10 +67,42 @@ function Hotbar.new(): Hotbar
 	label.TextStrokeTransparency = 0.4
 	label.Parent = gui
 
-	local slots: { Frame } = {}
+	local render: () -> ()
+
+	-- Buttons sink their clicks and taps, so tapping the hotbar never breaks the block behind it.
+	local function pageButton(text: string, order: number, delta: number)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.fromOffset(28, SLOT_SIZE)
+		b.BackgroundColor3 = Color3.fromRGB(30, 32, 38)
+		b.BackgroundTransparency = 0.3
+		b.BorderSizePixel = 0
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 22
+		b.TextColor3 = Color3.new(1, 1, 1)
+		b.Text = text
+		b.LayoutOrder = order
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 6)
+		corner.Parent = b
+		b.Activated:Connect(function()
+			local pages = (#blocks - 1) // SLOTS + 1
+			local page = ((index - 1) // SLOTS + delta) % pages
+			index = page * SLOTS + 1
+			render()
+		end)
+		b.Parent = bar
+	end
+	if #blocks > SLOTS then
+		pageButton("‹", 0, -1)
+		pageButton("›", SLOTS + 1, 1)
+	end
+
+	local slots: { TextButton } = {}
 	local strokes: { UIStroke } = {}
 	for i = 1, SLOTS do
-		local slot = Instance.new("Frame")
+		local slot = Instance.new("TextButton")
+		slot.Text = ""
+		slot.AutoButtonColor = false
 		slot.Size = UDim2.fromOffset(SLOT_SIZE, SLOT_SIZE)
 		slot.BorderSizePixel = 0
 		slot.LayoutOrder = i
@@ -88,12 +121,19 @@ function Hotbar.new(): Hotbar
 		number.TextStrokeTransparency = 0.3
 		number.Text = tostring(i)
 		number.Parent = slot
+		slot.Activated:Connect(function()
+			local candidate = ((index - 1) // SLOTS) * SLOTS + i
+			if blocks[candidate] then
+				index = candidate
+				render()
+			end
+		end)
 		slot.Parent = bar
 		slots[i] = slot
 		strokes[i] = stroke
 	end
 
-	local function render()
+	function render()
 		local page = (index - 1) // SLOTS
 		for i = 1, SLOTS do
 			local id = blocks[page * SLOTS + i]
@@ -122,10 +162,10 @@ function Hotbar.new(): Hotbar
 				index = candidate
 				render()
 			end
-		elseif input.KeyCode == Enum.KeyCode.E then
+		elseif input.KeyCode == Enum.KeyCode.E or input.KeyCode == Enum.KeyCode.ButtonR1 then
 			index = index % #blocks + 1
 			render()
-		elseif input.KeyCode == Enum.KeyCode.Q then
+		elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.ButtonL1 then
 			index = (index - 2) % #blocks + 1
 			render()
 		end

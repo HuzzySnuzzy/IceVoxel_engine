@@ -117,6 +117,11 @@ export type Generator = {
 	generate: (level: number, nx: number, nz: number, yield: (() -> ())?) -> ChunkResult,
 	-- A dry land column near the origin: x, height, z.
 	findSpawn: () -> (number, number, number),
+	--[[
+		Seam limits for the mesher (GreedyMesher.Border.open) of node (level, nx, nz), given the
+		level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none). nil when no side has one.
+	]]
+	seamLimits: (level: number, nx: number, nz: number, coarser: { number }) -> buffer?,
 }
 
 local TerrainGenerator = {}
@@ -341,6 +346,44 @@ function TerrainGenerator.new(seed: number): Generator
 		}
 	end
 
+	local function seamLimits(level: number, nx: number, nz: number, coarser: { number }): buffer?
+		local out: buffer? = nil
+		local step, stepY = ChunkLayout.steps(level)
+		local half = step // 2
+		local originX, originZ = nx * SIZE * step, nz * SIZE * step
+		for side = 1, 4 do
+			local coarse = coarser[side]
+			if coarse and coarse > level then
+				local limits = out or buffer.create(4 * SIZE * 2)
+				if out == nil then
+					buffer.fill(limits, 0, 0xFF)
+					out = limits
+				end
+				local cs, csY = ChunkLayout.steps(coarse)
+				local halfC, halfCY = cs // 2, csY // 2
+				for i = 0, SIZE - 1 do
+					-- Sample point of the padding column, then the coarse cell containing it.
+					local along = i * step + half
+					local x, z
+					if side == 1 then
+						x, z = originX - step + half, originZ + along
+					elseif side == 2 then
+						x, z = originX + SIZE * step + half, originZ + along
+					elseif side == 3 then
+						x, z = originX + along, originZ - step + half
+					else
+						x, z = originX + along, originZ + SIZE * step + half
+					end
+					local h = sample((x // cs) * cs + halfC, (z // cs) * cs + halfC)
+					-- Same rounding as `generate` at the coarse level: blocks below `solidTop` are drawn.
+					local solidTop = ((h - halfCY + csY - 1) // csY) * csY
+					writeu16(limits, ((side - 1) * SIZE + i) * 2, math.max(solidTop // stepY, 1))
+				end
+			end
+		end
+		return out
+	end
+
 	local function findSpawn(): (number, number, number)
 		-- Walk an outward square spiral until we find dry land that is not a beach or a cliff.
 		-- Samples every 16 blocks, up to ~1000 blocks from the origin.
@@ -364,6 +407,7 @@ function TerrainGenerator.new(seed: number): Generator
 		column = column,
 		generate = generate,
 		findSpawn = findSpawn,
+		seamLimits = seamLimits,
 	}
 end
 

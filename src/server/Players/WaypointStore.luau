@@ -7,12 +7,14 @@
 	server:
 	  * loads the saved list on join (retrying); if loading fails the session's waypoints are never
 	    saved, so a DataStore hiccup can not wipe a player's saved waypoints,
-	  * ignores lists older than the newest one it has seen (filtering yields, so updates can finish
-	    out of order),
-	  * text-filters new names (only a few per update; names already in the list are reused) and
-	    sends the list back when filtering changed something,
-	  * rate limits updates but always keeps the latest one,
-	  * saves on leave and on shutdown, waiting for saves still in flight.
+	  * keeps only the newest list it received, ignoring older revisions,
+	  * text-filters names it has not seen before, one list at a time per player. Filtered names are
+	    cached, so a list that is replaced or fails half way never has to filter the same name
+	    twice. A token bucket limits how many names a player can have filtered per minute; lists
+	    with more new names simply take longer. A failed filter call is retried with backoff,
+	  * sends the list back (with its revision) when filtering changed a name,
+	  * saves on leave and on shutdown. Names that could not be filtered by then are replaced by
+	    "Waypoint" so the positions are still kept.
 	Without DataStore access (e.g. Studio without API services) waypoints still work per session.
 ]]
 
@@ -31,27 +33,35 @@ type Waypoint = Protocol.Waypoint
 
 type State = {
 	list: { Waypoint },
-	-- Raw name -> filtered name, for the names in `list` only.
-	filtered: { [string]: string },
-	-- Highest revision received / revision of `list`.
-	latest: number,
+	-- Revision of `list`, and the highest revision received.
+	revision: number,
+	received: number,
+	-- Newest list waiting to be filtered and applied.
+	pending: { Waypoint }?,
+	-- Raw name -> filtered name (filtered names map to themselves). Survives replaced and failed
+	-- updates; trimmed to the current list when it grows large.
+	names: { [string]: string },
+	cached: number,
+	-- Name filter budget.
+	tokens: number,
+	refilled: number,
+	working: boolean,
 	loaded: boolean,
 	canSave: boolean,
 	dirty: boolean,
 	saving: boolean,
 	leaving: boolean,
-	-- Updates currently being filtered.
-	busy: number,
-	updateTimes: { number },
-	pending: buffer?,
-	pendingScheduled: boolean,
 }
 
 local STORE_NAME = "IceVoxelWaypoints_v1"
-local UPDATES_PER_MINUTE = 30
-local NEW_NAMES_PER_UPDATE = 8
 local LOAD_ATTEMPTS = 3
 local SHUTDOWN_WAIT = 25
+-- Names a player can have filtered at once, and per second after that.
+local FILTER_BURST = 20
+local FILTER_RATE = 0.5
+local MAX_CACHED = 4 * Protocol.MAX_WAYPOINTS
+local MAX_RETRY_DELAY = 30
+local PLACEHOLDER = "Waypoint"
 
 local WaypointStore = {}
 
@@ -96,6 +106,17 @@ local function filterName(player: Player, name: string): string?
 	return if ok and type(result) == "string" then result else nil
 end
 
+local function remember(state: State, raw: string, filtered: string)
+	if state.names[raw] == nil then
+		state.cached += 1
+	end
+	state.names[raw] = filtered
+	if state.names[filtered] == nil then
+		state.cached += 1
+		state.names[filtered] = filtered
+	end
+end
+
 function WaypointStore.start(net: ServerNet.ServerNet)
 	local store: DataStore? = nil
 	if Config.Map.SaveWaypoints then
@@ -111,9 +132,40 @@ function WaypointStore.start(net: ServerNet.ServerNet)
 
 	local states: { [Player]: State } = {}
 	local savesInFlight = 0
+	local closing = false
 
 	local function key(player: Player): string
 		return `player_{player.UserId}`
+	end
+
+	-- No more waiting for filter budget or retries: the player is leaving or the server closing.
+	local function hurry(state: State): boolean
+		return state.leaving or closing
+	end
+
+	-- Waits up to `seconds`, returning early when in a hurry or when a newer list than `list` arrived.
+	local function pause(state: State, seconds: number, list: { Waypoint }?)
+		local until_ = os.clock() + seconds
+		while os.clock() < until_ and not hurry(state) and state.pending == list do
+			task.wait(math.min(0.25, until_ - os.clock()))
+		end
+	end
+
+	-- Takes one name from the filter budget, waiting for it unless in a hurry.
+	local function takeToken(state: State): boolean
+		while true do
+			local now = os.clock()
+			state.tokens = math.min(FILTER_BURST, state.tokens + (now - state.refilled) * FILTER_RATE)
+			state.refilled = now
+			if state.tokens >= 1 then
+				state.tokens -= 1
+				return true
+			end
+			if hurry(state) then
+				return false
+			end
+			pause(state, (1 - state.tokens) / FILTER_RATE, state.pending)
+		end
 	end
 
 	-- Saves the list if it changed; keeps saving while it changes during the save.
@@ -148,7 +200,7 @@ function WaypointStore.start(net: ServerNet.ServerNet)
 		savesInFlight -= 1
 	end
 
-	-- Called when a player left and no update is being filtered for them anymore.
+	-- Called when a player left and their last list has been applied.
 	local function finish(player: Player, state: State)
 		save(player, state)
 		if states[player] == state then
@@ -156,20 +208,86 @@ function WaypointStore.start(net: ServerNet.ServerNet)
 		end
 	end
 
+	-- Makes `list` (revision `revision`) the player's list, with filtered names.
+	local function apply(player: Player, state: State, list: { Waypoint }, revision: number)
+		local raws: { string } = {}
+		local changed = false
+		for i, waypoint in list do
+			raws[i] = waypoint.name
+			local filtered = state.names[waypoint.name] or PLACEHOLDER
+			if filtered ~= waypoint.name then
+				changed = true
+			end
+			waypoint.name = filtered
+		end
+		state.list, state.revision = list, revision
+		state.dirty = true
+		if state.cached > MAX_CACHED then
+			state.names, state.cached = {}, 0
+			for i, waypoint in list do
+				remember(state, raws[i], waypoint.name)
+			end
+		end
+		if changed and not state.leaving then
+			net.send(player, Protocol.ServerMessage.Waypoints, Protocol.encodeWaypoints(list, revision))
+		end
+	end
+
+	-- Filters and applies pending lists until there are none; one worker per player at a time.
+	local function work(player: Player, state: State)
+		state.working = true
+		local failures = 0
+		while state.pending do
+			local list = state.pending :: { Waypoint }
+			local revision = state.received
+			local complete = true
+			for _, waypoint in list do
+				if state.pending ~= list then
+					break -- a newer list arrived: start over with it (finished names stay cached)
+				end
+				local raw = waypoint.name
+				if state.names[raw] == nil then
+					local filtered = if takeToken(state) then filterName(player, raw) else nil
+					if filtered == nil then
+						complete = false
+						break
+					end
+					remember(state, raw, filtered)
+				end
+			end
+			if state.pending == list then
+				if complete or hurry(state) then
+					state.pending = nil
+					failures = 0
+					apply(player, state, list, revision)
+				else
+					failures += 1
+					pause(state, math.min(2 ^ failures, MAX_RETRY_DELAY), list)
+				end
+			end
+		end
+		state.working = false
+		if state.leaving then
+			finish(player, state)
+		end
+	end
+
 	local function onPlayer(player: Player)
 		local state: State = {
 			list = {},
-			filtered = {},
-			latest = 0,
+			revision = 0,
+			received = 0,
+			pending = nil,
+			names = {},
+			cached = 0,
+			tokens = FILTER_BURST,
+			refilled = os.clock(),
+			working = false,
 			loaded = false,
 			canSave = store ~= nil,
 			dirty = false,
 			saving = false,
 			leaving = false,
-			busy = 0,
-			updateTimes = {},
-			pending = nil,
-			pendingScheduled = false,
 		}
 		states[player] = state
 
@@ -198,103 +316,26 @@ function WaypointStore.start(net: ServerNet.ServerNet)
 		end
 		-- Stored names were filtered when they were saved.
 		for _, waypoint in state.list do
-			state.filtered[waypoint.name] = waypoint.name
+			remember(state, waypoint.name, waypoint.name)
 		end
 		state.loaded = true
 		net.send(player, Protocol.ServerMessage.Waypoints, Protocol.encodeWaypoints(state.list, 0))
 	end
 
-	local function apply(player: Player, state: State, payload: buffer)
-		local list, revision = Protocol.decodeWaypoints(payload)
-		if list == nil or revision <= state.latest then
-			return
-		end
-		local newNames = 0
-		for _, waypoint in list do
-			if state.filtered[waypoint.name] == nil then
-				newNames += 1
-			end
-		end
-		if newNames > NEW_NAMES_PER_UPDATE then
-			return
-		end
-		state.latest = revision
-
-		-- Filter new names (this yields). Any failure rejects the whole update; the client sends
-		-- its list again with its next change.
-		state.busy += 1
-		local names: { [string]: string } = {}
-		local failed = false
-		for _, waypoint in list do
-			local raw = waypoint.name
-			if names[raw] == nil then
-				local filtered = state.filtered[raw] or filterName(player, raw)
-				if filtered == nil then
-					failed = true
-					break
-				end
-				names[raw] = filtered
-			end
-		end
-		state.busy -= 1
-
-		-- Apply only if no newer update arrived while filtering.
-		if not failed and revision == state.latest then
-			local changed = false
-			for _, waypoint in list do
-				local filtered = names[waypoint.name]
-				if filtered ~= waypoint.name then
-					changed = true
-				end
-				waypoint.name = filtered
-			end
-			state.list = list
-			state.filtered = {}
-			for raw, filtered in names do
-				state.filtered[raw] = filtered
-				state.filtered[filtered] = filtered
-			end
-			state.dirty = true
-			if changed and not state.leaving then
-				net.send(player, Protocol.ServerMessage.Waypoints, Protocol.encodeWaypoints(list, revision))
-			end
-		end
-		if state.leaving and state.busy == 0 then
-			finish(player, state)
-		end
-	end
-
-	local function receive(player: Player, payload: buffer)
+	net.on(Protocol.ClientMessage.SaveWaypoints, function(player: Player, payload: buffer)
 		local state = states[player]
 		if state == nil or not state.loaded or state.leaving then
 			return
 		end
-		-- Rate limit, but keep the newest update and apply it once the window allows.
-		local now = os.clock()
-		local times = state.updateTimes
-		while times[1] and now - times[1] > 60 do
-			table.remove(times, 1)
-		end
-		if #times >= UPDATES_PER_MINUTE then
-			state.pending = payload
-			if not state.pendingScheduled then
-				state.pendingScheduled = true
-				task.delay(60 - (now - times[1]) + 0.1, function()
-					state.pendingScheduled = false
-					local latest = state.pending
-					state.pending = nil
-					if latest and states[player] == state then
-						receive(player, latest)
-					end
-				end)
-			end
+		local list, revision = Protocol.decodeWaypoints(payload)
+		if list == nil or revision <= state.received then
 			return
 		end
-		table.insert(times, now)
-		apply(player, state, payload)
-	end
-
-	net.on(Protocol.ClientMessage.SaveWaypoints, receive)
+		state.pending, state.received = list, revision
+		if not state.working then
+			task.spawn(work, player, state)
+		end
+	end)
 
 	Players.PlayerAdded:Connect(onPlayer)
 	for _, player in Players:GetPlayers() do
@@ -307,29 +348,29 @@ function WaypointStore.start(net: ServerNet.ServerNet)
 			return
 		end
 		state.leaving = true
-		if state.busy == 0 then
+		-- A running worker applies what is pending (without waiting) and then finishes.
+		if not state.working then
 			finish(player, state)
 		end
 	end)
 
 	game:BindToClose(function()
-		-- Save everything that is not being filtered; updates still filtering are saved as soon
-		-- as they finish (their players are leaving) or by a later pass of this loop.
+		closing = true
 		local started = os.clock()
 		repeat
 			local waiting = savesInFlight > 0
 			for player, state in states do
-				if state.busy > 0 then
+				if state.working then
 					waiting = true
 				elseif state.dirty and state.canSave and not state.saving then
 					task.spawn(save, player, state)
-					waiting = waiting or state.dirty
+					waiting = true
 				end
 			end
-			if waiting or savesInFlight > 0 then
+			if waiting then
 				task.wait(0.2)
 			end
-		until (savesInFlight == 0 and not waiting) or os.clock() - started > SHUTDOWN_WAIT
+		until not waiting or os.clock() - started > SHUTDOWN_WAIT
 	end)
 end
 

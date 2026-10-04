@@ -23,6 +23,8 @@ local PartPool = require(script.Parent.PartPool)
 local BOX = GreedyMesher.BOX_BYTES
 local FLUID_FULL = Blocks.FLUID_FULL
 local readu16 = buffer.readu16
+-- Longest side of a part in studs (engine limit).
+local MAX_PART = 2048
 
 -- What the renderer needs to know about a chunk node.
 export type RenderNode = {
@@ -168,25 +170,30 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 		local boxes = t.boxes
 		local pool = self.pool
 
+		-- Parts can be at most MAX_PART studs long, so wide boxes of coarse levels are split.
+		local maxCells = math.max(1, MAX_PART // scale)
 		while t.cursor < t.count do
 			local o = t.cursor * BOX
 			local x, y, z = readu16(boxes, o), readu16(boxes, o + 2), readu16(boxes, o + 4)
 			local sx, sy, sz = readu16(boxes, o + 6), readu16(boxes, o + 8), readu16(boxes, o + 10)
 			local appearance, surface = GreedyMesher.decodeKey(readu16(boxes, o + 12))
-			local part = pool:acquire(appearance, far)
 			local height = sy * scaleY
 			if surface > 0 then
 				-- Fluid surface below the top of its cell (flowing water steps down).
 				height -= (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize
 			end
-			part.Size = Vector3.new(sx * scale, height, sz * scale)
-			part.CFrame = CFrame.new(
-				originX + (x + sx * 0.5) * scale,
-				y * scaleY + height * 0.5,
-				originZ + (z + sz * 0.5) * scale
-			)
-			part.Parent = folder
-			self.partCount += 1
+			local cy = y * scaleY + height * 0.5
+			for px = x, x + sx - 1, maxCells do
+				local wx = math.min(maxCells, x + sx - px)
+				for pz = z, z + sz - 1, maxCells do
+					local wz = math.min(maxCells, z + sz - pz)
+					local part = pool:acquire(appearance, far)
+					part.Size = Vector3.new(wx * scale, height, wz * scale)
+					part.CFrame = CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
+					part.Parent = folder
+					self.partCount += 1
+				end
+			end
 			t.cursor += 1
 			if t.cursor % 32 == 0 and os.clock() > deadline then
 				return false

@@ -3,9 +3,15 @@
 	Chunk worker, cloned into every Actor by WorkerPool. Runs generation and meshing in parallel.
 
 	Jobs ("Job" actor message):
-	  generate   { level, nx, nz, edits?, reveal? } -> chunk data (LOD 0 only) + section meshes
-	  mesh       { data, height, solidBelow, emptyAbove, sections, reveal } -> section meshes
+	  generate   { level, nx, nz, coarser, edits?, reveal?, caps? } -> chunk data (LOD 0 only) + section meshes
+	  mesh       { nx, nz, coarser, data, height, solidBelow, emptyAbove, sections, reveal, caps? }
+	             -> section meshes (full detail chunks only)
+
 	  map        { x, z, scale, size } -> RGBA pixels of a map tile (Map/MapPainter)
+
+	`coarser` is the level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none) and `caps`
+	the GreedyMesher.Border hidden mask of each revealed section ({ section, mask, ... }); together
+	they give the mesher's border (seams between LOD levels, cave caps).
 
 	Long jobs are split across frames: after Config.Workers.SliceBudgetMs the worker waits for the
 	next frame, so a busy worker never stalls rendering. Jobs run one at a time per worker because
@@ -64,11 +70,33 @@ local function toSet(list: { number }?): { [number]: boolean }
 	return set
 end
 
+-- { section, mask, ... } -> { [section] = mask }
+local function capMap(list: { number }?): { [number]: number }
+	local map = {}
+	if list then
+		for i = 1, #list, 2 do
+			map[list[i]] = list[i + 1]
+		end
+	end
+	return map
+end
+
+-- Border for one mesh call; nil when there is nothing special around it.
+local function borderOf(open: buffer?, caps: { [number]: number }?, section: number): GreedyMesher.Border?
+	local hidden = if caps then caps[section] or 0 else 0
+	if open == nil and hidden == 0 then
+		return nil
+	end
+	return { open = open, hidden = hidden }
+end
+
 local function generate(job: { [string]: any }): { [string]: any }
 	local level = job.level :: number
 	local r = generator.generate(level, job.nx, job.nz, yieldIfNeeded)
 	local data, height = r.data, r.height
 	local solidBelow, emptyAbove = r.solidBelow, r.emptyAbove
+	local open = if job.coarser then generator.seamLimits(level, job.nx, job.nz, job.coarser) else nil
+	local caps = capMap(job.caps)
 
 	local edits = job.edits :: { number }?
 	if edits then
@@ -85,14 +113,16 @@ local function generate(job: { [string]: any }): { [string]: any }
 		end
 	end
 
+	-- Cells a seam opens up may lie below the otherwise buried range.
+	local meshBelow = math.min(solidBelow, GreedyMesher.lowestOpen(open))
 	local indices: { number }, meshes: { buffer } = {}, {}
 	if level == 0 then
 		local reveal = toSet(job.reveal)
 		for section = 0, height // SECTION - 1 do
 			local y0, y1 = section * SECTION, (section + 1) * SECTION
 			local hide = not reveal[section]
-			if not GreedyMesher.isTrivial(y0, y1, solidBelow, emptyAbove, hide) then
-				local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hide)
+			if not GreedyMesher.isTrivial(y0, y1, meshBelow, emptyAbove, hide) then
+				local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section))
 				if count > 0 then
 					table.insert(indices, section)
 					table.insert(meshes, boxes)
@@ -101,9 +131,9 @@ local function generate(job: { [string]: any }): { [string]: any }
 			end
 		end
 	else
-		local y0, y1 = GreedyMesher.activeRange(solidBelow, emptyAbove, height)
+		local y0, y1 = GreedyMesher.activeRange(meshBelow, emptyAbove, height)
 		if y1 > y0 then
-			local boxes, count = GreedyMesher.mesh(data, height, y0, y1, true)
+			local boxes, count = GreedyMesher.mesh(data, height, y0, y1, true, borderOf(open, nil, 0))
 			if count > 0 then
 				table.insert(indices, 0)
 				table.insert(meshes, boxes)
@@ -127,13 +157,16 @@ local function remesh(job: { [string]: any }): { [string]: any }
 	local data = job.data :: buffer
 	local height = job.height :: number
 	local reveal = toSet(job.reveal)
+	local open = if job.coarser then generator.seamLimits(0, job.nx, job.nz, job.coarser) else nil
+	local caps = capMap(job.caps)
+	local meshBelow = math.min(job.solidBelow, GreedyMesher.lowestOpen(open))
 	local indices: { number }, meshes: { buffer } = {}, {}
 	for _, section in job.sections :: { number } do
 		local y0, y1 = section * SECTION, math.min((section + 1) * SECTION, height)
 		local hide = not reveal[section]
 		local boxes = buffer.create(0)
-		if not GreedyMesher.isTrivial(y0, y1, job.solidBelow, job.emptyAbove, hide) then
-			boxes = GreedyMesher.mesh(data, height, y0, y1, hide)
+		if not GreedyMesher.isTrivial(y0, y1, meshBelow, job.emptyAbove, hide) then
+			boxes = GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section))
 		end
 		-- Empty meshes are sent too: they clear the section's old parts.
 		table.insert(indices, section)

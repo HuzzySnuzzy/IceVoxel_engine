@@ -3,7 +3,7 @@
 	Breaking and placing blocks.
 
 	  Mouse:    left = break, right click (without dragging the camera) = place
-	  Gamepad:  R2 = break, L2 = place
+	  Gamepad:  R2 = break, L2 = place (aims at the screen centre, shown by a crosshair)
 	  Touch:    tap = break, long press = place
 	Holding a button repeats every Config.Interaction.RepeatInterval seconds.
 
@@ -51,6 +51,24 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	selection.Parent = highlight
 	highlight.Parent = workspace.CurrentCamera
 
+	local crosshairGui = Instance.new("ScreenGui")
+	crosshairGui.Name = "IceVoxelCrosshair"
+	crosshairGui.IgnoreGuiInset = true
+	crosshairGui.ResetOnSpawn = false
+	local crosshair = Instance.new("Frame")
+	crosshair.AnchorPoint = Vector2.new(0.5, 0.5)
+	crosshair.Position = UDim2.fromScale(0.5, 0.5)
+	crosshair.Size = UDim2.fromOffset(6, 6)
+	crosshair.BackgroundColor3 = Color3.new(1, 1, 1)
+	crosshair.Visible = false
+	local round = Instance.new("UICorner")
+	round.CornerRadius = UDim.new(1, 0)
+	round.Parent = crosshair
+	local outline = Instance.new("UIStroke")
+	outline.Parent = crosshair
+	crosshair.Parent = crosshairGui
+	crosshairGui.Parent = player:WaitForChild("PlayerGui")
+
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
 	end
@@ -96,8 +114,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return hit
 	end
 
+	-- Where the player aims, in viewport coordinates: the mouse while it is the active input and
+	-- free, otherwise the screen centre. (A PC with a controller still has a mouse, so
+	-- MouseEnabled alone would aim at wherever the hidden cursor was left.)
 	local function pointer(): Vector2
-		if UserInputService.MouseEnabled and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+		local preferred = UserInputService.PreferredInput
+		crosshair.Visible = preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad
+		if
+			preferred == Enum.PreferredInput.KeyboardAndMouse
+			and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
+		then
 			-- GetMouseLocation ignores the GUI inset, i.e. it is in viewport coordinates.
 			return UserInputService:GetMouseLocation()
 		end

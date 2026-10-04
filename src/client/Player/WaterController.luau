@@ -9,10 +9,11 @@
 
 	  * buoyancy cancels most of gravity in proportion to how deep you are, and vertical drag
 	    limits sinking speed: you sink slowly and bob at the surface while holding Jump,
-	  * holding Jump with the waist under water swims upwards,
+	  * holding Jump with the waist under water swims upwards; holding Jump while swimming towards a
+	    ledge with room above it lifts the character out onto it (like Minecraft),
 	  * the current (Shared/World/FluidFlow, Minecraft's flow rule) pushes along the flow until you
 	    move at Config.Water.CurrentSpeed; it never slows you down, and still water does not push,
-	  * walking is slower.
+	  * walking is slower (WalkSpeed changes made by other scripts meanwhile are kept).
 
 	The Humanoid stays in its normal states (forcing Swimming outside Terrain water makes it pitch
 	over and steer with the camera). The client owns its character's physics, so this is all local
@@ -43,6 +44,11 @@ local function isFluid(block: number?): boolean
 	return block ~= nil and Blocks.get(block).fluid ~= nil
 end
 
+local function fluidGroup(block: number?): string?
+	local fluid = if block then Blocks.get(block).fluid else nil
+	return if fluid then fluid.group else nil
+end
+
 function WaterController.start(world: ClientWorld.ClientWorld)
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
@@ -52,7 +58,17 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 	local humanoid: Humanoid? = nil
 	local force: VectorForce? = nil
 	local baseWalkSpeed = 16
+	-- WalkSpeed as read back after writing the slowed value (it is stored as a float32).
+	local appliedWalkSpeed = 0
 	local swimming = false
+	-- Top (studs) of the ledge being climbed onto, and when to give up.
+	local exitLedge: number? = nil
+	local exitUntil = 0
+
+	local function isSolidAt(x: number, y: number, z: number): boolean
+		local block = getBlock(x, y, z)
+		return block ~= nil and Blocks.isSolid(block)
+	end
 
 	local function onCharacter(character: Model)
 		local r = character:WaitForChild("HumanoidRootPart", 10)
@@ -74,21 +90,51 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 		root, humanoid, force = r, h, f
 		baseWalkSpeed = h.WalkSpeed
 		swimming = false
+		exitLedge = nil
 	end
 
 	local function stopSwimming()
+		exitLedge = nil
 		if swimming then
 			swimming = false
 			if force then
 				force.Enabled = false
 			end
-			if humanoid then
-				humanoid.WalkSpeed = baseWalkSpeed
+			-- Restore the walk speed unless another script changed it meanwhile.
+			local h = humanoid
+			if h and math.abs(h.WalkSpeed - appliedWalkSpeed) < 1e-3 then
+				h.WalkSpeed = baseWalkSpeed
 			end
 		end
 	end
 
+	local function slowDown(h: Humanoid)
+		baseWalkSpeed = h.WalkSpeed
+		h.WalkSpeed = baseWalkSpeed * Water.WalkSpeedFactor
+		appliedWalkSpeed = h.WalkSpeed
+	end
+
+	-- Top (studs) of a block the character swims against that it could climb onto, or nil.
+	local function ledgeAhead(h: Humanoid, p: Vector3, r: BasePart, bottom: number): number?
+		local move = Vector3.new(h.MoveDirection.X, 0, h.MoveDirection.Z)
+		if move.Magnitude < 0.1 then
+			return nil
+		end
+		local ahead = p + move.Unit * (r.Size.X / 2 + 1)
+		local ax, az = math.floor(ahead.X / BLOCK), math.floor(ahead.Z / BLOCK)
+		for y = math.floor((p.Y + r.Size.Y / 2) / BLOCK), math.floor(bottom / BLOCK), -1 do
+			if isSolidAt(ax, y, az) then
+				if isSolidAt(ax, y + 1, az) or isSolidAt(ax, y + 2, az) then
+					return nil -- no room to stand
+				end
+				return (y + 1) * BLOCK
+			end
+		end
+		return nil
+	end
+
 	-- Highest water surface (studs) reaching into the body between block rows y0 and y1, or nil.
+	-- A fluid block is lowered to its level's height only when the same fluid is not above it.
 	local function waterTop(bx: number, y0: number, y1: number, bz: number): (number?, number)
 		local top, first = nil, y0
 		for y = y0, y1 do
@@ -97,7 +143,11 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 				if top == nil then
 					first = y
 				end
-				top = (y + buffer.readu8(FLUID_HEIGHT, block :: number) / FLUID_FULL) * BLOCK
+				if fluidGroup(getBlock(bx, y + 1, bz)) == fluidGroup(block) then
+					top = (y + 1) * BLOCK
+				else
+					top = (y + buffer.readu8(FLUID_HEIGHT, block :: number) / FLUID_FULL) * BLOCK
+				end
 			elseif top then
 				break
 			end
@@ -126,19 +176,41 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 		local bx, bz = math.floor(p.X / BLOCK), math.floor(p.Z / BLOCK)
 		local top, flowY = waterTop(bx, math.floor(bottom / BLOCK), math.floor((bottom + height) / BLOCK), bz)
 		local submerged = if top then math.clamp((top - bottom) / height, 0, 1) else 0
-		if submerged <= 0 then
+		local g = workspace.Gravity
+		local v = r.AssemblyLinearVelocity
+
+		-- Climbing out onto a ledge continues (briefly) after leaving the water, until the feet
+		-- are above it.
+		if exitLedge and (bottom >= exitLedge or os.clock() > exitUntil or not h.Jump) then
+			exitLedge = nil
+		end
+		if submerged > 0 and h.Jump and exitLedge == nil then
+			local ledge = ledgeAhead(h, p, r, bottom)
+			if ledge and bottom < ledge then
+				exitLedge, exitUntil = ledge, os.clock() + 1.5
+			end
+		end
+		if submerged <= 0 and exitLedge == nil then
 			stopSwimming()
 			return
 		end
 
 		if not swimming then
 			swimming = true
-			baseWalkSpeed = h.WalkSpeed
-			h.WalkSpeed = baseWalkSpeed * Water.WalkSpeedFactor
+			slowDown(h)
 			f.Enabled = true
+		elseif math.abs(h.WalkSpeed - appliedWalkSpeed) >= 1e-3 then
+			-- Another script set a new walk speed: treat it as the new normal speed.
+			slowDown(h)
 		end
 
-		local v = r.AssemblyLinearVelocity
+		if exitLedge then
+			-- Rise at ClimbOutSpeed regardless of how deep the character is.
+			local ay = g + (Water.ClimbOutSpeed - v.Y) * 8
+			f.Force = Vector3.new(0, ay, 0) * mass
+			return
+		end
+
 		local accel = Vector3.zero
 
 		-- Current: push along the flow until moving at the current's speed; never brakes.
@@ -160,7 +232,6 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 
 		-- Buoyancy and drag grow with how deep you are, so holding Jump bobs at the surface.
 		-- Humanoid.Jump is set every frame by the default controls (keyboard, gamepad and touch).
-		local g = workspace.Gravity
 		local ay = (g * Water.Buoyancy - Water.Drag * v.Y) * submerged
 		if h.Jump and top and top >= p.Y then
 			ay += Water.SwimUpAcceleration

@@ -192,4 +192,180 @@ return function(t, shared, require)
 			verify(r.data, r.height, 0, r.height, true)
 		end
 	end)
+
+	-- Opaque cells covered by the boxes of `meshes` ({ boxes, count } pairs), keyed by local index.
+	local function coverage(meshes: { { any } }): { [number]: boolean }
+		local covered: { [number]: boolean } = {}
+		for _, m in meshes do
+			local boxes, count = m[1] :: buffer, m[2] :: number
+			for b = 0, count - 1 do
+				local o = b * GreedyMesher.BOX_BYTES
+				local app = GreedyMesher.decodeKey(buffer.readu16(boxes, o + 12))
+				if Blocks.appearances[app].kind == OPAQUE then
+					local x, y, z = buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
+					for yy = y, y + buffer.readu16(boxes, o + 8) - 1 do
+						for zz = z, z + buffer.readu16(boxes, o + 10) - 1 do
+							for xx = x, x + buffer.readu16(boxes, o + 6) - 1 do
+								covered[ChunkLayout.localIndex(xx, yy, zz)] = true
+							end
+						end
+					end
+				end
+			end
+		end
+		return covered
+	end
+
+	-- Meshes a generated node the way ChunkWorker does (caves hidden).
+	local function meshNode(level: number, r: any, border: GreedyMesher.Border?): { { any } }
+		local below = math.min(r.solidBelow, GreedyMesher.lowestOpen(border and border.open))
+		local meshes = {}
+		if level == 0 then
+			for y0 = 0, r.height - 1, Config.SectionHeight do
+				local y1 = y0 + Config.SectionHeight
+				if not GreedyMesher.isTrivial(y0, y1, below, r.emptyAbove, true) then
+					table.insert(meshes, { GreedyMesher.mesh(r.data, r.height, y0, y1, true, border) })
+				end
+			end
+		else
+			local y0, y1 = GreedyMesher.activeRange(below, r.emptyAbove, r.height)
+			table.insert(meshes, { GreedyMesher.mesh(r.data, r.height, y0, y1, true, border) })
+		end
+		return meshes
+	end
+
+	local function isTerrain(id: number): boolean
+		local name = Blocks.get(id).name
+		return Blocks.isOpaque(id) and not (string.find(name, "Log") or string.find(name, "Leaves") or name == "Cactus")
+	end
+
+	t.test("LOD seams: the finer side draws every border cell its coarser neighbour leaves open", function()
+		local gen = TerrainGenerator.new(12345)
+		local sx, _, sz = gen.findSpawn()
+		local checked = 0
+		-- Plains around spawn and steep mountains, at several level pairs.
+		for _, case in { { 0, sx, sz }, { 1, sx, sz }, { 0, 4544, -7488 }, { 1, 4544, -7488 }, { 2, 4544, -7488 } } do
+			local level = case[1]
+			local step, stepY = ChunkLayout.steps(level)
+			local cs, csY = ChunkLayout.steps(level + 1)
+			local span = SIZE * step
+			local nx, nz = case[2] // span, case[3] // span
+			local r = gen.generate(level, nx, nz)
+			for side = 1, 4 do
+				local coarser = { 0, 0, 0, 0 }
+				coarser[side] = level + 1
+				local open = gen.seamLimits(level, nx, nz, coarser) :: buffer
+				local covered = coverage(meshNode(level, r, { open = open, hidden = 0 }))
+				local coarseNodes: { [string]: any } = {}
+				for i = 0, SIZE - 1 do
+					local limit = buffer.readu16(open, ((side - 1) * SIZE + i) * 2)
+					local lx = if side == 1 then 0 elseif side == 2 then SIZE - 1 else i
+					local lz = if side == 3 then 0 elseif side == 4 then SIZE - 1 else i
+					-- The limit is where the coarser node's generated terrain ends next to this cell.
+					local px = nx * span + (lx + (if side == 1 then -1 elseif side == 2 then 1 else 0)) * step
+					local pz = nz * span + (lz + (if side == 3 then -1 elseif side == 4 then 1 else 0)) * step
+					local cnx, cnz = px // (SIZE * cs), pz // (SIZE * cs)
+					local key = `{cnx},{cnz}`
+					local coarse = coarseNodes[key] or gen.generate(level + 1, cnx, cnz)
+					coarseNodes[key] = coarse
+					local clx, clz = (px - cnx * SIZE * cs) // cs, (pz - cnz * SIZE * cs) // cs
+					local top = 1
+					while top < coarse.height and isTerrain(ChunkLayout.get(coarse.data, clx, top, clz)) do
+						top += 1
+					end
+					t.eq(limit * stepY, top * csY, `seam limit vs coarse terrain (level {level}, side {side}, {i})`)
+					-- Every opaque fine cell from there up is visible across the seam, so it is drawn.
+					for y = limit, r.height - 1 do
+						if Blocks.isOpaque(ChunkLayout.get(r.data, lx, y, lz)) then
+							checked += 1
+							t.ok(
+								covered[ChunkLayout.localIndex(lx, y, lz)],
+								`border cell ({lx},{y},{lz}) of level {level} node {nx},{nz} not drawn (side {side})`
+							)
+						end
+					end
+				end
+			end
+		end
+		t.ok(checked > 100, `enough exposed border cells checked ({checked})`)
+	end)
+
+	t.test("cave caps: tunnels running into a hidden section end in stone, not the void", function()
+		local gen = TerrainGenerator.new(12345)
+		local section = Config.SectionHeight
+		-- Undrawn opaque cells reachable from the open caves of the revealed sections.
+		local function holes(r: any, boundary: number, capped: boolean): number
+			local meshes = {}
+			for s = 0, r.height // section - 1 do
+				local y0, y1 = s * section, (s + 1) * section
+				local hide = y0 < boundary
+				if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, hide) then
+					local border = if capped and y0 == boundary
+						then { open = nil, hidden = GreedyMesher.HIDDEN_BELOW }
+						else nil
+					table.insert(meshes, { GreedyMesher.mesh(r.data, r.height, y0, y1, hide, border) })
+				end
+			end
+			local covered = coverage(meshes)
+			local seen: { [number]: boolean } = {}
+			local queue = {}
+			for y = boundary + 1, r.height - 1 do
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local i = ChunkLayout.localIndex(x, y, z)
+						if ChunkLayout.get(r.data, x, y, z) == Blocks.CAVE_AIR and not covered[i] then
+							seen[i] = true
+							table.insert(queue, { x, y, z })
+						end
+					end
+				end
+			end
+			local found, head = 0, 1
+			while head <= #queue do
+				local p = queue[head]
+				head += 1
+				if Blocks.isOpaque(ChunkLayout.get(r.data, p[1], p[2], p[3])) then
+					found += 1
+				else
+					for _, d in { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } } do
+						local x, y, z = p[1] + d[1], p[2] + d[2], p[3] + d[3]
+						if x >= 0 and x < SIZE and z >= 0 and z < SIZE and y >= 0 and y < r.height then
+							local i = ChunkLayout.localIndex(x, y, z)
+							if not seen[i] and not covered[i] then
+								seen[i] = true
+								table.insert(queue, { x, y, z })
+							end
+						end
+					end
+				end
+			end
+			return found
+		end
+		local before = 0
+		for _, chunk in { { -13, -11 }, { -12, -11 }, { -10, -10 } } do
+			local r = gen.generate(0, chunk[1], chunk[2])
+			-- The section boundary crossed by the most tunnels.
+			local boundary, most = 0, 0
+			for s = 1, r.height // section - 1 do
+				local count = 0
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						if
+							ChunkLayout.get(r.data, x, s * section, z) == Blocks.CAVE_AIR
+							and ChunkLayout.get(r.data, x, s * section - 1, z) == Blocks.CAVE_AIR
+						then
+							count += 1
+						end
+					end
+				end
+				if count > most then
+					boundary, most = s * section, count
+				end
+			end
+			t.ok(most > 0, "chunk has a tunnel crossing a section boundary")
+			before += holes(r, boundary, false)
+			t.eq(holes(r, boundary, true), 0, `holes at the cave boundary of chunk {chunk[1]},{chunk[2]}`)
+		end
+		t.ok(before > 0, "without caps the tunnels would end in the void")
+	end)
 end
