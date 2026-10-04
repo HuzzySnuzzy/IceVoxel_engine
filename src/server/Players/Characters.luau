@@ -14,7 +14,6 @@
 ]]
 
 local Players = game:GetService("Players")
-local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -54,11 +53,11 @@ function Characters.teleport(character: Model, x: number, y: number, z: number)
 end
 
 function Characters.start(net: ServerNet.ServerNet)
-	pcall(function()
-		PhysicsService:RegisterCollisionGroup(Rig.COLLISION_GROUP)
-	end)
-	PhysicsService:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, "Default", false)
-	PhysicsService:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, Rig.COLLISION_GROUP, false)
+	if not workspace:IsCollisionGroupRegistered(Rig.COLLISION_GROUP) then
+		workspace:RegisterCollisionGroup(Rig.COLLISION_GROUP)
+	end
+	workspace:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, "Default", false)
+	workspace:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, Rig.COLLISION_GROUP, false)
 
 	local function onCharacter(character: Model)
 		for _, part in character:GetDescendants() do
