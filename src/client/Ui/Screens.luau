@@ -32,6 +32,14 @@
 
 	Drags show their result as they grow: the screen draws a copy of the window with the drag
 	applied.
+
+	JEI (Ui/Jei) comes with every open screen: the item list at the right of the screen and,
+	opened from it, the recipe view, which takes the inventory panel's place (no slot clicks while
+	it is shown). Clicks on the list or the view go to JEI before anything else; R and U over any
+	item (the list, the view, a slot, the creative grid or hotbar) show its recipes or uses,
+	Backspace goes back through the views, and E, Escape and gamepad B close the view before the
+	screen (Escape still opens Roblox's menu, over the inventory then). The mouse wheel turns JEI's
+	pages over the list or the view.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -52,12 +60,14 @@ local CreativeScreen = require(script.Parent.CreativeScreen)
 local Hud = require(script.Parent.Hud)
 local InventoryScreen = require(script.Parent.InventoryScreen)
 local ItemIcon = require(script.Parent.ItemIcon)
+local Jei = require(script.Parent.Jei)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
 
 type Target = SlotClicks.Target
 type Kind = "inventory" | "creative"
+type Line = { text: string, colour: Color3 }
 
 -- Touch: a long press is a right click; a finger moving this far (pixels) drags or scrolls.
 local LONG_PRESS = 0.4
@@ -67,6 +77,9 @@ local STICK_REPEAT = 0.12
 local STICK_DEAD_ZONE = 0.5
 -- Minecraft's tooltip sits 12 GUI pixels right of and above the pointer.
 local TOOLTIP_OFFSET = 12
+-- Escape both reaches InputBegan (sometimes) and opens Roblox's menu: one press within this many
+-- seconds acts once.
+local ESCAPE_REPEAT = 0.3
 local MOUSE_STEP = "IceVoxelScreensMouse"
 local STICK_ACTION = "IceVoxelScreensStick"
 
@@ -95,10 +108,15 @@ type TouchState = {
 	started: number,
 	target: Target?,
 	-- pending: not yet a click, drag or scroll; pressed: a button is down (SlotClicks); scroll:
-	-- scrolling the creative grid; scrollbar: dragging its thumb.
-	phase: "pending" | "pressed" | "scroll" | "scrollbar",
+	-- scrolling the creative grid; scrollbar: dragging its thumb; ignored: a JEI touch that slid
+	-- away or already acted.
+	phase: "pending" | "pressed" | "scroll" | "scrollbar" | "ignored",
 	button: number,
 	lastY: number,
+	-- The JEI item (list or recipe view) the touch started on: a tap shows its recipes, a long
+	-- press its uses. `jeiList`: it is the list's.
+	jeiItem: number?,
+	jeiList: boolean,
 }
 
 -- Typing into a text box or Roblox's chat bar?
@@ -155,6 +173,7 @@ end
 -- Set by start.
 local open: (kind: Kind) -> () = function() end
 local close: () -> () = function() end
+local escape: () -> () = function() end
 
 -- Opens the inventory (creative item selection in creative), or closes the open screen.
 function Screens.toggle()
@@ -165,8 +184,8 @@ function Screens.toggle()
 	end
 end
 
-local function tooltipLines(item: number): { { text: string, colour: Color3 } }
-	local lines = { { text = Items.displayName(item), colour = Style.Colour.Text } }
+local function tooltipLines(item: number): { Line }
+	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
 	local def = Items.get(item)
 	local armor = def and def.armor
 	if armor then
@@ -181,12 +200,11 @@ local function tooltipLines(item: number): { { text: string, colour: Color3 } }
 end
 
 -- Minecraft's tooltip: a dark purple box with a lighter purple border, the name, then details.
-local function buildTooltip(parent: Frame, item: number): Vector2
+local function buildTooltip(parent: Frame, lines: { Line }): Vector2
 	parent:ClearAllChildren()
 	local scale = Instance.new("UIScale")
 	scale.Name = "Scale"
 	scale.Parent = parent
-	local lines = tooltipLines(item)
 	local width = 0
 	for _, line in lines do
 		width = math.max(width, Style.textWidth(line.text))
@@ -298,8 +316,20 @@ function Screens.start()
 	tooltip.Visible = false
 	tooltip.ZIndex = 2
 	tooltip.Parent = top
-	local tooltipItem: number? = nil
+	-- What the tooltip shows (the item and its extra lines, joined), to rebuild it only on a change.
+	local tooltipKey = ""
 	local tooltipSize = Vector2.zero
+
+	-- JEI: the item list beside the screens and the recipe view (Ui/Jei). Recipes are moved into
+	-- the crafting grid only from the inventory screen, which shows it.
+	local jei = Jei.new(gui, {
+		window = ClientInventory.window,
+		creative = ClientInventory.isCreative,
+		apply = ClientInventory.apply,
+		gridShown = function(): boolean
+			return current == "inventory"
+		end,
+	})
 
 	gui.Parent = playerGui
 	top.Parent = playerGui
@@ -313,8 +343,9 @@ function Screens.start()
 	})
 
 	local function targetAt(point: Vector2): Target?
-		-- Over Roblox's own UI (the top bar, the chat): neither a slot nor outside.
-		if overCoreGui(point) then
+		-- Over Roblox's own UI (the top bar, the chat) or JEI: neither a slot nor outside. While the
+		-- recipe view is shown, nothing else is either.
+		if overCoreGui(point) or jei:covers(point) or jei:viewOpen() then
 			return nil
 		end
 		if current == "creative" then
@@ -324,6 +355,9 @@ function Screens.start()
 	end
 
 	local function targetOf(object: GuiObject): Target?
+		if jei:viewOpen() then
+			return nil
+		end
 		if current == "creative" then
 			return creative:targetOf(object)
 		end
@@ -422,6 +456,9 @@ function Screens.start()
 		local viewport = gui.AbsoluteSize
 		local touchScreen = UserInputService.TouchEnabled
 		local scale
+		-- Where JEI's list may reach down to: above the creative screen's hotbar row (also while the
+		-- recipe view hides it, so the list keeps its cells instead of rebuilding them).
+		local listBottom = viewport.Y
 		if current == "creative" then
 			-- Centred in the space above the HUD's hotbar (the screen's hotbar row).
 			local cell = Hud.hotbarCell(1)
@@ -429,6 +466,7 @@ function Screens.start()
 			if cell and cell.AbsoluteSize.Y > 0 then
 				bottom = cell.AbsolutePosition.Y - gui.AbsolutePosition.Y - cell.AbsoluteSize.Y * 0.2
 			end
+			listBottom = bottom
 			local size = creative:size()
 			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen, Vector2.new(viewport.X, math.max(bottom, 60)))
 			setScale(creativeScale, scale)
@@ -441,6 +479,17 @@ function Screens.start()
 			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen)
 			setScale(inventoryScale, scale)
 		end
+		-- JEI: the recipe view in the panel's place (at most the panel's scale), the list to the right
+		-- of the panels (all three are centred and MenuLayout.WIDTH wide).
+		local viewSize = jei.view:size()
+		jei:place({
+			viewportX = viewport.X,
+			top = GuiService:GetGuiInset().Y,
+			bottom = listBottom,
+			guiRight = viewport.X / 2 + MenuLayout.WIDTH / 2 * scale,
+			scale = scale,
+			viewScale = math.min(scale, Style.guiScale(viewport, viewSize.X, viewSize.Y, touchScreen)),
+		})
 		setScale(carriedScale, scale)
 		local tooltipScale = tooltip:FindFirstChild("Scale")
 		if tooltipScale and tooltipScale:IsA("UIScale") then
@@ -453,7 +502,14 @@ function Screens.start()
 		if inputKind() ~= "gamepad" then
 			return
 		end
-		local first = if current == "creative" then creative:firstSelectable() else inventory:firstSelectable()
+		local first
+		if jei:viewOpen() then
+			first = jei:firstSelectable()
+		elseif current == "creative" then
+			first = creative:firstSelectable()
+		else
+			first = inventory:firstSelectable()
+		end
 		if first then
 			GuiService.SelectedObject = first
 		end
@@ -473,10 +529,20 @@ function Screens.start()
 
 	local lastWindowId = 0
 
+	-- Shows the open screen's panel, or the JEI recipe view in its place; the HUD's hotbar is the
+	-- creative screen's hotbar row.
+	local function applyVisibility()
+		local viewing = jei:viewOpen()
+		inventory.root.Visible = current == "inventory" and not viewing
+		creative.root.Visible = current == "creative" and not viewing
+		if current then
+			Hud.setMode(if current == "creative" and not viewing then "creative" else "hidden")
+		end
+	end
+
 	local function showPage(kind: Kind)
 		local window = ClientInventory.window()
-		inventory.root.Visible = kind == "inventory"
-		creative.root.Visible = kind == "creative"
+		applyVisibility()
 		if kind == "inventory" then
 			inventory:setLayout(window.container, ClientInventory.isCreative())
 			inventory:opened()
@@ -486,7 +552,6 @@ function Screens.start()
 		if kind ~= "creative" then
 			creative:releaseFocus()
 		end
-		Hud.setMode(if kind == "creative" then "creative" else "hidden")
 		Hud.setHover(nil)
 		Hud.setPreview(nil)
 	end
@@ -503,6 +568,7 @@ function Screens.start()
 		if not wasOpen then
 			gui.Enabled = true
 			top.Enabled = true
+			jei:setVisible(true)
 			setControls(false)
 			mouseIconWas = UserInputService.MouseIconEnabled
 			RunService:BindToRenderStep(MOUSE_STEP, Enum.RenderPriority.Camera.Value + 1, function()
@@ -532,6 +598,8 @@ function Screens.start()
 		current = nil
 		resetPointer()
 		creative:releaseFocus()
+		-- (Also closes the recipe view and drops the search field's focus.)
+		jei:setVisible(false)
 		inventory:closed()
 		-- The carried stack and a crafting grid go back into the inventory; a block's window closes.
 		ClientInventory.apply({ kind = "close", window = ClientInventory.window().id })
@@ -557,10 +625,25 @@ function Screens.start()
 
 	Hud.onInventoryButton(Screens.toggle)
 	Hud.onScreenWheel(function(delta: number)
-		if current == "creative" then
+		if jei:wheel(mousePoint(), delta) then
+			return
+		end
+		if current == "creative" and not jei:viewOpen() then
 			creative:scrollBy(-delta)
 		end
 	end)
+	-- The recipe view opened or closed: it and the panel swap places.
+	jei.onViewChanged = function(_open: boolean)
+		if current == nil then
+			return
+		end
+		resetPointer()
+		applyVisibility()
+		Hud.setHover(nil)
+		Hud.setPreview(nil)
+		layout()
+		selectFirst()
+	end
 	inventory.onTab = function()
 		open("creative")
 	end
@@ -572,6 +655,7 @@ function Screens.start()
 
 	-- Blocks' windows opened and closed by the server, and game mode changes.
 	ClientInventory.changed:Connect(function()
+		jei:inventoryChanged()
 		local window = ClientInventory.window()
 		if window.id ~= lastWindowId then
 			local previous = lastWindowId
@@ -595,8 +679,30 @@ function Screens.start()
 		end
 	end)
 
-	-- The Roblox menu (Escape) and death close the screen.
-	GuiService.MenuOpened:Connect(close)
+	--[[
+		Escape closes the recipe view, else the screen. Roblox opens its menu on Escape
+		(MenuOpened), and the key may reach InputBegan too, before or after: whichever comes first
+		acts and the other, right after, is ignored; so is the Escape that closes the menu. The
+		menu opened any other way (its button) does the same.
+	]]
+	local lastEscape = -math.huge
+	escape = function()
+		local now = os.clock()
+		if now - lastEscape < ESCAPE_REPEAT then
+			return
+		end
+		lastEscape = now
+		if jei:viewOpen() then
+			jei:closeView()
+		else
+			close()
+		end
+	end
+	GuiService.MenuOpened:Connect(escape)
+	GuiService.MenuClosed:Connect(function()
+		lastEscape = os.clock()
+	end)
+	-- Death closes the screen.
 	local function watchCharacter(character: Model)
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and humanoid:IsA("Humanoid") then
@@ -613,6 +719,31 @@ function Screens.start()
 	UserInputService.WindowFocusReleased:Connect(resetPointer)
 
 	--[[ Input ]]
+
+	-- The item under the pointer, wherever it is: JEI's list or view, a slot, the creative grid.
+	local function hoveredItem(): number?
+		local point, hover = pointer()
+		if point then
+			local item = jei:itemAt(point)
+			if item then
+				return item
+			end
+		end
+		local object = GuiService.SelectedObject
+		if inputKind() == "gamepad" and object then
+			local item = jei:itemOf(object)
+			if item then
+				return item
+			end
+		end
+		if hover and hover.kind == "slot" then
+			local stack = Menu.get(ClientInventory.window(), hover.index)
+			return if stack then stack.item else nil
+		elseif hover and hover.kind == "grid" and Items.isValid(hover.item) then
+			return hover.item
+		end
+		return nil
+	end
 
 	local function touchBegan(input: InputObject)
 		if touch then
@@ -631,9 +762,12 @@ function Screens.start()
 				phase = "scrollbar",
 				button = 0,
 				lastY = point.Y,
+				jeiItem = nil,
+				jeiList = false,
 			}
 			return
 		end
+		local jeiItem, jeiList = jei:itemAt(point)
 		touch = {
 			input = input,
 			origin = point,
@@ -643,6 +777,8 @@ function Screens.start()
 			phase = "pending",
 			button = 0,
 			lastY = point.Y,
+			jeiItem = jeiItem,
+			jeiList = jeiList,
 		}
 	end
 
@@ -659,7 +795,10 @@ function Screens.start()
 			return
 		end
 		if t.phase == "pending" and (point - t.origin).Magnitude > TOUCH_MOVE then
-			if current == "creative" and creative:inGrid(t.origin) then
+			if t.jeiItem or jei:viewOpen() then
+				-- JEI items are tapped, not dragged.
+				t.phase = "ignored"
+			elseif current == "creative" and creative:inGrid(t.origin) then
 				t.phase = "scroll"
 			else
 				t.phase = "pressed"
@@ -685,7 +824,14 @@ function Screens.start()
 		local now = os.clock()
 		if t.phase == "scrollbar" or t.phase == "scroll" then
 			creative:pointerUp()
+		elseif t.phase == "ignored" then
+			return
 		elseif t.phase == "pending" then
+			local jeiItem = t.jeiItem
+			if jeiItem then
+				jei:activate(jeiItem, SlotClicks.Button.Left, false, t.jeiList)
+				return
+			end
 			local target = t.target
 			if target and target.kind == "outside" and ClientInventory.window().inventory.cursor == nil then
 				close()
@@ -716,8 +862,27 @@ function Screens.start()
 				return
 			end
 			local digit = NUMBER_KEYS[key]
-			if key == Enum.KeyCode.E or key == Enum.KeyCode.Escape then
-				close()
+			local viewing = jei:viewOpen()
+			if key == Enum.KeyCode.E then
+				-- The recipe view first, then the screen.
+				if viewing then
+					jei:closeView()
+				else
+					close()
+				end
+			elseif key == Enum.KeyCode.Escape then
+				if not GuiService.MenuIsOpen then
+					escape()
+				end
+			elseif key == Enum.KeyCode.Backspace then
+				if viewing then
+					jei:back()
+				end
+			elseif key == Enum.KeyCode.R or key == Enum.KeyCode.U then
+				jei:show(hoveredItem(), if key == Enum.KeyCode.R then "recipes" else "uses")
+			elseif viewing then
+				-- (No slot keys: the slots are hidden behind the view.)
+				return
 			elseif digit then
 				clicks:hotbarKey(hoverTarget(), digit)
 			elseif key == Enum.KeyCode.Q then
@@ -728,6 +893,10 @@ function Screens.start()
 		local button = MOUSE_BUTTONS[kind]
 		if button then
 			local point = Vector2.new(input.Position.X, input.Position.Y)
+			-- JEI's items and panels take their clicks (nothing else is clickable under the view).
+			if jei:press(point, button, shiftDown()) or jei:viewOpen() then
+				return
+			end
 			if current == "creative" and button == SlotClicks.Button.Left and creative:pointerDown(point) then
 				scrollbarHeld = true
 				return
@@ -741,9 +910,25 @@ function Screens.start()
 			return
 		end
 		if key == Enum.KeyCode.ButtonB then
-			close()
+			if jei:viewOpen() then
+				jei:closeView()
+			else
+				close()
+			end
 		elseif key == Enum.KeyCode.ButtonA or key == Enum.KeyCode.ButtonX or key == Enum.KeyCode.ButtonY then
 			local object = GuiService.SelectedObject
+			-- A JEI item: A its recipes, X its uses, Y (creative) a full stack.
+			local item, inList = nil, false
+			if object then
+				item, inList = jei:itemOf(object)
+			end
+			if item then
+				local jeiButton = if key == Enum.KeyCode.ButtonX
+					then SlotClicks.Button.Right
+					else SlotClicks.Button.Left
+				jei:activate(item, jeiButton, key == Enum.KeyCode.ButtonY, inList)
+				return
+			end
 			local target = if object then targetOf(object) else nil
 			if target then
 				local right = key == Enum.KeyCode.ButtonX
@@ -818,16 +1003,27 @@ function Screens.start()
 		local now = os.clock()
 		local scale = layout()
 
-		-- A touch held still is a right click.
+		-- A touch held still is a right click (on a JEI item: its uses).
 		local t = touch
 		if t and t.phase == "pending" and now - t.started >= LONG_PRESS then
-			t.phase = "pressed"
-			t.button = SlotClicks.Button.Right
-			clicks:press(t.target, t.button, false, now)
-			clicks:move(t.target)
+			local jeiItem = t.jeiItem
+			if jeiItem then
+				t.phase = "ignored"
+				jei:activate(jeiItem, SlotClicks.Button.Right, false, t.jeiList)
+			else
+				t.phase = "pressed"
+				t.button = SlotClicks.Button.Right
+				clicks:press(t.target, t.button, false, now)
+				clicks:move(t.target)
+			end
 		end
-		-- The right stick scrolls the creative grid.
-		if current == "creative" and math.abs(stickY) > STICK_DEAD_ZONE and now >= nextStickScroll then
+		-- The right stick scrolls the creative grid (not while the recipe view hides it).
+		if
+			current == "creative"
+			and not jei:viewOpen()
+			and math.abs(stickY) > STICK_DEAD_ZONE
+			and now >= nextStickScroll
+		then
 			nextStickScroll = now + STICK_REPEAT
 			creative:scrollBy(if stickY > 0 then -1 else 1)
 		end
@@ -850,7 +1046,14 @@ function Screens.start()
 		end
 
 		local point, hover = pointer()
-		if current == "creative" then
+		local viewing = jei:viewOpen()
+		if viewing then
+			-- (The panel is hidden behind the recipe view.)
+			if previewing then
+				previewing = false
+				Hud.setPreview(nil)
+			end
+		elseif current == "creative" then
 			creative:render(shown, hover, dragged)
 			if shown ~= window or previewing then
 				previewing = shown ~= window
@@ -860,6 +1063,7 @@ function Screens.start()
 			inventory:render(shown, hover, dragged)
 			inventory:follow(point)
 		end
+		jei:render(now, point)
 
 		-- The carried stack follows the pointer.
 		local cursor = shown.inventory.cursor
@@ -872,20 +1076,35 @@ function Screens.start()
 			carried.Visible = false
 		end
 
-		-- The hovered item's tooltip (only with nothing carried, like Minecraft).
+		-- The hovered item's tooltip (only with nothing carried, like Minecraft), or JEI's: its items
+		-- (a tag ingredient says which tag) and its buttons.
 		local item: number? = nil
-		if cursor == nil and hover and point then
-			if hover.kind == "slot" then
-				local stack = Menu.get(window, hover.index)
-				item = stack and stack.item
-			elseif hover.kind == "grid" and Items.isValid(hover.item) then
-				item = hover.item
+		local extra: { Line }? = nil
+		if cursor == nil and point then
+			item, extra = jei:tooltipAt(point)
+			if item == nil and extra == nil and hover then
+				if hover.kind == "slot" then
+					local stack = Menu.get(window, hover.index)
+					item = stack and stack.item
+				elseif hover.kind == "grid" and Items.isValid(hover.item) then
+					item = hover.item
+				end
 			end
 		end
-		if item and point then
-			if item ~= tooltipItem then
-				tooltipItem = item
-				tooltipSize = buildTooltip(tooltip, item)
+		local key = if item then tostring(item) else ""
+		if extra then
+			for _, line in extra do
+				key ..= `|{line.text}`
+			end
+		end
+		if key ~= "" and point then
+			if key ~= tooltipKey then
+				local lines: { Line } = if item then tooltipLines(item) else {}
+				if extra then
+					table.move(extra, 1, #extra, #lines + 1, lines)
+				end
+				tooltipKey = key
+				tooltipSize = buildTooltip(tooltip, lines)
 				layout()
 			end
 			local size = tooltipSize * scale

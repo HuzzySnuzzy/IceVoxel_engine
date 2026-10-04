@@ -57,12 +57,7 @@ local PREVIEW_FOV = 30
 local ARROW_COLOUR = Style.Colour.Slot
 local PROGRESS_COLOUR = Color3.new(1, 1, 1)
 local PROGRESS_ARROW_W, PROGRESS_ARROW_H = 22, 15
-local FIRE_PALETTE: { [string]: Color3 } = {
-	R = Color3.fromRGB(214, 78, 0),
-	O = Color3.fromRGB(255, 140, 0),
-	Y = Color3.fromRGB(255, 214, 40),
-	W = Color3.fromRGB(255, 250, 190),
-}
+local FIRE_PALETTE = Style.FirePalette
 local UNLIT_PALETTE: { [string]: Color3 } = { R = ARROW_COLOUR, O = ARROW_COLOUR, Y = ARROW_COLOUR, W = ARROW_COLOUR }
 
 -- Faint outlines in empty armor slots (16 x 16 pixel art).

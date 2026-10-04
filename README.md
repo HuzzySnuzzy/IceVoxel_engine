@@ -35,6 +35,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   shift-click crafts as many as possible, and two worn tools repair into one. Furnaces smelt raw
   ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while nobody
   watches.
+- **Just Enough Items.** Next to every inventory screen (the inventory, chests, crafting tables,
+  furnaces, the creative picker), a JEI-style list of every item, a page at a time, with a search
+  box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
+  see how it is made; right click or `U` shows what it is used for: crafting recipes on a 3 × 3
+  grid (an ingredient any planks will do for cycles through them), smelting with its 10 seconds,
+  and fuels with how many items they smelt. Items inside a recipe open their own recipes,
+  `Backspace` goes back and `E` or `Escape` returns to the inventory. The `+` beside a crafting
+  recipe moves its ingredients from the inventory into the open crafting grid (`Shift`: as many
+  sets as you have); when it is greyed out, hovering it says why and shows what is missing. In
+  creative, `Shift` + click gives a full stack.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
   sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
@@ -130,6 +140,9 @@ Studio tips:
 | Swim fast     | Sprint under water; look where to go | L3 | Sprint button |
 | Climb out     | Swim at a ledge just above the water | stick | move |
 | In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the hotbar, `Q` drop, double click to collect, drag to spread | A / X / Y, B closes | tap / long press |
+| Recipes / uses (JEI) | Click / right click an item in the list, or `R` / `U` over any item; `Backspace` back, `E` / `Escape` back to the inventory | A / X on a list item, B leaves the recipes | Tap / long press |
+| Move a recipe (JEI) | `+` beside a crafting recipe (`Shift`: as many as possible) | A | Tap |
+| Full stack (JEI, creative) | `Shift` + click or middle click an item in the list | Y | |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
@@ -199,7 +212,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
                             chest and furnace panels laid out by MenuLayout), CreativeScreen,
                             ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
-                            clicks), Style, Waila + WailaInfo (what the crosshair points at)
+                            clicks), Style, Waila + WailaInfo (what the crosshair points at),
+                            Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu

@@ -12,6 +12,8 @@
 	    becomes the recipe's result in the output;
 	  * with nothing to smelt the progress resets; going out, it falls back 2 per tick;
 	  * a different item in the input starts its progress over (`cookingItem`).
+
+	`recipes()` and `fuels()` list the same recipes and fuels for recipe browsers (Ui/Jei).
 ]]
 
 local Items = require(script.Parent.Parent.Items)
@@ -26,6 +28,12 @@ Smelting.COOK_TIME = 200
 
 local results: { [number]: Stack } = {}
 local fuels: { [number]: number } = {}
+-- The same, as lists for recipe browsers (Ui/Jei): one entry per Recipes.smelting line (a tag
+-- keeps its items together), and the fuels in item id order.
+export type Recipe = { inputs: { number }, result: Stack }
+export type Fuel = { item: number, ticks: number }
+local recipeList: { Recipe } = {}
+local fuelList: { Fuel } = {}
 
 -- Item ids named by an ingredient string (an item or "#tag").
 local function namesOf(name: string): { number }
@@ -47,15 +55,23 @@ end
 
 for _, recipe in Recipes.smelting do
 	local result = namesOf(recipe.result)[1]
-	for _, input in namesOf(recipe.input) do
+	local inputs = namesOf(recipe.input)
+	for _, input in inputs do
 		results[input] = { item = result, count = recipe.count or 1 }
 	end
+	table.insert(recipeList, { inputs = inputs, result = { item = result, count = recipe.count or 1 } })
 end
 for name, ticks in Recipes.fuel :: { [string]: number } do
 	for _, id in namesOf(name) do
 		fuels[id] = ticks
 	end
 end
+for item, ticks in fuels do
+	table.insert(fuelList, { item = item, ticks = ticks })
+end
+table.sort(fuelList, function(a, b)
+	return a.item < b.item
+end)
 
 -- What smelting one `item` makes, or nil.
 function Smelting.result(item: number): Stack?
@@ -66,6 +82,30 @@ end
 -- Burn time (ticks) of `item` as fuel, 0 if it doesn't burn.
 function Smelting.fuel(item: number): number
 	return fuels[item] or 0
+end
+
+--[[
+	Every smelting recipe, in Recipes.smelting order: the inputs it accepts (several for a tag such
+	as #logs) and what one of them makes. New tables each call; matching never reads them.
+]]
+function Smelting.recipes(): { Recipe }
+	local list: { Recipe } = {}
+	for _, recipe in recipeList do
+		table.insert(list, {
+			inputs = table.clone(recipe.inputs),
+			result = { item = recipe.result.item, count = recipe.result.count },
+		})
+	end
+	return list
+end
+
+-- Every fuel and its burn time in ticks, in item id order (Items.list order). New tables.
+function Smelting.fuels(): { Fuel }
+	local list: { Fuel } = {}
+	for _, fuel in fuelList do
+		table.insert(list, { item = fuel.item, ticks = fuel.ticks })
+	end
+	return list
 end
 
 -- A furnace's data, fresh.

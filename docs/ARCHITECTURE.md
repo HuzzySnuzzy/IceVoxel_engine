@@ -677,6 +677,71 @@ blocks), and on item models as thin raised slabs, since ViewportFrames don't dra
 
 Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there: solid, drawn, unshaped (`Blocks.canSurvive`). An item can place several variants (BlockList `item`: the Torch places the four wall torches; the Lantern a hanging lantern). Placing follows Minecraft's BlockPlaceContext (`Blocks.placementFor`): the clicked face's side first, then the directions the player looks along (`Blocks.lookOrder`, Direction.orderedByNearest). Up or down gives the variant hanging that way if it survives; a side gives the wall variant, which is the first side in the whole order that holds one (StandingAndWallBlockItem, WallTorchBlock). The client sends the variant; the server re-checks support (`EditRules.supported`, never generating terrain) and uses up the item through `Items.ofBlock`. The `Attached` behaviour breaks a block whose support stopped being sturdy and drops it (`Items.blockDrops`: no tool needed, like Minecraft's updateShape); `Fluid` washes away `brokenByFluid` blocks (torches) the same way. Behaviours drop items through `Behaviours/Drops`, which ServerNet wires to `Entities.dropBlock`. Aiming uses each block's outline (`Blocks.outline`, Minecraft's VoxelShapes), so a ray passes beside a torch to the wall behind it and the highlight fits the torch.
 
+## Just Enough Items (`Ui/Jei/`)
+
+JEI's three parts, simplified: an item list beside every inventory screen, a recipe view with an
+item's recipes or uses, and the recipe transfer ("+"). The logic is pure and tested (`JeiData`,
+`JeiLayout`, `JeiTransfer`); `JeiPanel` and `RecipeView` draw, and the controller (`Ui/Jei`) acts
+on the input `Ui/Screens` hands it before anything else.
+
+**The index** (`JeiData`). Built once, on first use, from the data the game plays with:
+- crafting: `Crafting.recipes`, the compiled recipes the grids match. Each is drawn on a 3 × 3
+  grid laid out like JEI's CraftingGridHelper: one wide in the middle column, one high in the
+  middle row, shapeless ones in a 1 × 1, 2 × 2 or 3 × 3 square. A cell lists every item it
+  accepts, in creative order; a tag (`#planks`) shows one a second, and the looked-up item stays
+  put;
+- smelting: `Smelting.recipes()`, one per line of `Recipes.smelting` (a tag stays one recipe),
+  200 ticks each;
+- fuel: `Smelting.fuels()`, the burn time shown as "Burns N items" (ticks / 200).
+
+`recipes(item)` are the entries that make the item, `uses(item)` those that take it (in any cell,
+as a smelting input, as a fuel). Both come grouped by category in that order, without the empty
+ones.
+
+**Screens.** While an inventory screen is open:
+- The list sits right of the 176 px panels at their GUI scale (`JeiLayout.list`): up to 9 columns
+  and 16 rows of 18 px cells (every cell is a ViewportFrame), fewer on narrow screens, hidden when
+  not even 3 columns fit, and in creative above the hotbar row (also while the recipe view hides
+  it, so the cells are not rebuilt). Its arrows or the wheel turn the pages; the page text drops
+  to "n" where "n / m" does not fit. The search field filters with `Items.search` as you type; it
+  is a TextBox, Screens ignores keys while one has focus, and the list gives up the focus when it
+  hides.
+- Left click or R: recipes; right click or U: uses. R and U work over any item: the list, the
+  view, slots, the creative grid and the hotbar. Lookups that find nothing do nothing.
+- The recipe view takes the inventory panel's place: Screens hides the panel and makes no slot
+  clicks while it is shown. It has category tabs, pages, and as many recipes as fit (two crafting
+  or smelting recipes, three fuels). Clicking its items navigates, Back or Backspace returns
+  through the history, and E, Escape or gamepad B go back to the inventory. Escape also opens
+  Roblox's menu (MenuOpened): with the view open that only closes the view, so the menu shows
+  over the inventory; the key and the menu are debounced so one press acts once. A gamepad
+  selection the rebuilt view destroys or hides moves to its first slot.
+- Creative (JEI's cheat mode): shift-left or middle click puts a full stack on the cursor, and
+  clicking the list with a carried stack deletes it, both through the existing `creative` action.
+
+**Recipe transfer** (`JeiTransfer`). The "+" shows on crafting recipes while the inventory screen
+shows a crafting grid: window 0's 2 × 2 or a crafting table's 3 × 3. A recipe goes where the view
+draws it: cell for cell on a table, and on the inventory's grid the view's top left 2 × 2, which
+holds every recipe that fits there (bigger ones: "Recipe too large for this grid"). `check` shares
+the inventory, the grid and the carried stack out among the cells (a tag cell takes the kind there
+is most of; the cells of every recipe accept the same items or none in common, which keeps that
+greedy choice right) and names the cells it cannot fill. `status`, which the button uses, also
+makes the one set plan, so the button is greyed out as well when the carried stack or the grid's
+contents have no room to go back ("No room in the inventory"). A greyed button's tooltip says
+why, and hovering it shows the missing cells red.
+
+`plan(window, recipe, all)` is a list of ordinary inventory actions:
+1. the carried stack is put down in the inventory;
+2. the grid is shift-clicked empty;
+3. for each kind of ingredient, the biggest stack is picked up and spread with drags (Split when an
+   even share fits every cell, One for an item each). An excess goes back by right clicks or by
+   halving the stack. One set takes about 3 actions per kind of ingredient; random tests average
+   8 actions a plan (shift: as many sets as the inventory holds, up to a stack; snowballs 16).
+
+The plan is applied to a copy with `Menu.apply` before it is returned. It must leave exactly the
+recipe in the grid, its result in the result slot, nothing carried and every item still there.
+The client sends it through `ClientInventory.apply`, so the server checks it like any click, then
+closes the view. A fuzz test plans and applies hundreds of random transfers.
+
 ## Item entities (`Entities/`)
 
 Dropped items are Minecraft's ItemEntity:

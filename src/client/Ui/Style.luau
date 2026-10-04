@@ -52,7 +52,20 @@ Style.Colour = {
 	ButtonDark = Color3.fromRGB(70, 70, 70),
 	Field = Color3.fromRGB(0, 0, 0),
 	FieldBorder = Color3.fromRGB(160, 160, 160),
+	-- Minecraft's red text (§c), its inactive button and the red over missing ingredients (JEI).
+	Red = Color3.fromRGB(255, 85, 85),
+	ButtonDisabled = Color3.fromRGB(44, 44, 44),
+	TextDisabled = Color3.fromRGB(160, 160, 160),
+	Missing = Color3.fromRGB(255, 0, 0),
 }
+
+-- The lit furnace flame's colours (MenuLayout.FLAME_ART): R red edge, O orange, Y yellow, W core.
+Style.FirePalette = {
+	R = Color3.fromRGB(214, 78, 0),
+	O = Color3.fromRGB(255, 140, 0),
+	Y = Color3.fromRGB(255, 214, 40),
+	W = Color3.fromRGB(255, 250, 190),
+} :: { [string]: Color3 }
 
 Style.FONT = Enum.Font.Arcade
 -- Text height in GUI pixels (Minecraft's font is 8 px tall with the shadow).
@@ -397,6 +410,130 @@ function Style.contains(object: GuiObject, point: Vector2): boolean
 		and point.Y >= position.Y
 		and point.X < position.X + size.X
 		and point.Y < position.Y + size.Y
+end
+
+--[[
+	A bare item cell at (x, y) (slot coordinates, like Style.slot): an invisible 18 x 18 TextButton
+	with no frame, for item lists (JEI's). Gamepads can select it; put the icon at (1, 1) inside.
+]]
+function Style.itemButton(parent: Instance, x: number, y: number, z: number?): TextButton
+	local button = Instance.new("TextButton")
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.BorderSizePixel = 0
+	button.BackgroundTransparency = 1
+	button.Position = UDim2.fromOffset(x - 1, y - 1)
+	button.Size = UDim2.fromOffset(Style.SLOT, Style.SLOT)
+	button.ZIndex = z or 4
+	button.SelectionImageObject = noSelectionImage
+	button.Parent = parent
+	return button
+end
+
+--[[
+	Minecraft's text field at (x, y), `w` x 12: black with a gray border, white text, `placeholder`
+	in gray while empty. Returns the TextBox (keys typed into it never reach the game: the screens
+	check for a focused TextBox).
+]]
+function Style.field(parent: Instance, x: number, y: number, w: number, placeholder: string, z: number?): TextBox
+	local zIndex = z or 4
+	Style.frame(parent, x, y, w, 12, Style.Colour.FieldBorder, zIndex)
+	-- (The inside clips long text.)
+	local inside = Style.frame(parent, x + 1, y + 1, w - 2, 10, Style.Colour.Field, zIndex + 1)
+	inside.ClipsDescendants = true
+	local box = Instance.new("TextBox")
+	box.Name = "Field"
+	box.BackgroundTransparency = 1
+	box.BorderSizePixel = 0
+	box.Position = UDim2.fromOffset(2, 1)
+	box.Size = UDim2.fromOffset(w - 6, 8)
+	box.ClearTextOnFocus = false
+	box.Font = Style.FONT
+	box.TextSize = Style.TEXT_SIZE
+	box.TextColor3 = Style.Colour.Text
+	box.PlaceholderText = placeholder
+	box.PlaceholderColor3 = Color3.fromRGB(112, 112, 112)
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.TextYAlignment = Enum.TextYAlignment.Top
+	box.Text = ""
+	box.ZIndex = 1
+	box.SelectionImageObject = Style.selectionImage
+	box.Parent = inside
+	return box
+end
+
+--[[
+	Style.button that can be turned off: inactive, it is drawn like Minecraft's inactive button
+	(dark face, gray label) and does not light up when hovered. Returns the button and a function
+	that turns it on or off (the caller still decides what a click on an inactive button does).
+]]
+function Style.toggleButton(
+	parent: Instance,
+	text: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	z: number?
+): (TextButton, (enabled: boolean) -> ())
+	local button = Instance.new("TextButton")
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.BorderSizePixel = 0
+	button.BackgroundColor3 = Style.Colour.Outline
+	button.Position = UDim2.fromOffset(x, y)
+	button.Size = UDim2.fromOffset(w, h)
+	button.ZIndex = z or 4
+	local light = Style.frame(button, 1, 1, w - 2, h - 2, Style.Colour.ButtonLight, 1)
+	local dark = Style.frame(button, 2, 2, w - 3, h - 3, Style.Colour.ButtonDark, 2)
+	local face = Style.frame(button, 2, 2, w - 4, h - 4, Style.Colour.Button, 3)
+	local label, shadow = Style.shadowText(
+		button,
+		text,
+		0,
+		math.floor((h - Style.TEXT_SIZE) / 2),
+		w,
+		Style.TEXT_SIZE,
+		Style.Colour.Text,
+		4,
+		Enum.TextXAlignment.Center
+	)
+	local enabled, hovered = true, false
+	local function paint()
+		face.BackgroundColor3 = if not enabled
+			then Style.Colour.ButtonDisabled
+			elseif hovered then Style.Colour.ButtonHover
+			else Style.Colour.Button
+		light.BackgroundColor3 = if enabled then Style.Colour.ButtonLight else Style.Colour.ButtonDisabled
+		dark.BackgroundColor3 = if enabled then Style.Colour.ButtonDark else Style.Colour.ButtonDisabled
+		local colour = if enabled then Style.Colour.Text else Style.Colour.TextDisabled
+		label.TextColor3 = colour
+		shadow.TextColor3 = Style.shadowOf(colour)
+	end
+	local function hover(on: boolean)
+		hovered = on
+		paint()
+	end
+	button.MouseEnter:Connect(function()
+		hover(true)
+	end)
+	button.MouseLeave:Connect(function()
+		hover(false)
+	end)
+	button.SelectionGained:Connect(function()
+		hover(true)
+	end)
+	button.SelectionLost:Connect(function()
+		hover(false)
+	end)
+	button.SelectionImageObject = noSelectionImage
+	button.Parent = parent
+	return button, function(value: boolean)
+		if value ~= enabled then
+			enabled = value
+			paint()
+		end
+	end
 end
 
 -- Is the object and every ancestor up to its ScreenGui visible (and the ScreenGui enabled)?
