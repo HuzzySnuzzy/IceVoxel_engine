@@ -23,9 +23,11 @@
 	80 MiB on PC (the "8 EditableMesh limit"), and memory of destroyed meshes reportedly comes back
 	only after many seconds. Baked content does not count against that budget.
 
-	Startup probe (before anything is merged): creates the scratch mesh, builds an off-centre quad
-	and a flat plane to check placement, and times a full-size mesh; meshes stay off when anything
-	fails or a build blocks a frame for longer than MaxBlockingMs. Off on phones by default.
+	Startup probe (before anything is merged): creates the scratch mesh, builds an off-centre block
+	and a flat sheet to check placement, and times a full-size mesh against the usual frame time
+	(up to three tries, a few seconds after joining); meshes stay off when anything fails or a build
+	makes frames more than MaxBlockingMs longer than usual. If meshes are off from the start, far
+	parts keep their normal look. Off on phones by default.
 ]]
 
 local AssetService = game:GetService("AssetService")
@@ -53,6 +55,8 @@ local SLICE = 0.003
 -- Frames between showing a new mesh and hiding the parts under it (a new mesh may need a frame
 -- before it is drawn; the overlap is invisible, both look the same).
 local SWAP_FRAMES = 2
+-- Seconds after startup before the probe runs.
+local PROBE_DELAY = 5
 local FIDELITY = {
 	RenderFidelity = Enum.RenderFidelity.Precise,
 	CollisionFidelity = Enum.CollisionFidelity.Box,
@@ -62,8 +66,10 @@ type Node = any
 
 type RegionParts = {
 	parts: { MeshPart },
+	triangles: number,
 	-- Previous mesh, destroyed once the new one has been shown for SWAP_FRAMES.
 	retiring: { MeshPart },
+	retiringTriangles: number,
 	-- Members whose part folders are unparented.
 	hidden: { [Node]: boolean },
 	pendingHide: { Node }?,
@@ -73,8 +79,11 @@ type RegionParts = {
 type Done = {
 	job: MeshRegions.Job,
 	parts: { MeshPart }?,
+	triangles: number,
 	err: string?,
 }
+
+type QuadsEntry = { buffer: buffer, count: number }
 
 export type Stats = {
 	status: string,
@@ -87,7 +96,9 @@ export type Stats = {
 	failures: number,
 	lastBuildMs: number,
 	slowestFrameMs: number,
+	-- Triangles in shown meshes / baked this session.
 	triangles: number,
+	baked: number,
 }
 
 export type MeshOverlay = {
@@ -100,16 +111,19 @@ export type MeshOverlay = {
 	active: boolean,
 	status: string,
 	regions: MeshRegions.MeshRegions,
-	quads: { [Node]: { buffer: buffer, count: number } },
+	quads: { [Node]: QuadsEntry },
 	instances: { [MeshRegions.Region]: RegionParts },
 	pending: MeshRegions.Job?,
 	done: { Done },
 	frame: number,
 	lastBuild: number,
 	lastFrameTime: number,
+	averageFrameTime: number,
 	failuresInRow: number,
 	pausedUntil: number,
-	triangles: number,
+	-- Triangles of the meshes in the world, and baked in total.
+	liveTriangles: number,
+	baked: number,
 	stats: Stats,
 
 	plainLevel: (self: MeshOverlay, level: number) -> boolean,
@@ -255,13 +269,15 @@ local function destroyAll(parts: { MeshPart })
 	end
 end
 
--- Builds every MeshPart of a region. Returns the parts or an error message.
-local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions.Job): ({ MeshPart }?, string?)
+-- Builds every MeshPart of a region. Returns the parts and their triangles, or nil and an error.
+local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions.Job): ({ MeshPart }?, number, string?)
 	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles)
-	for _, node in job.members do
-		local entry = self.quads[node]
+	-- The members' quads as they were when the build started (see MeshOverlay.step).
+	local snapshot = job.payload :: { QuadsEntry }
+	for i, node in job.members do
+		local entry = snapshot[i]
 		if entry == nil then
-			return nil, "member without quads"
+			return nil, 0, "member without quads"
 		end
 		local step, stepY = ChunkLayout.steps(node.level)
 		local scale = step * BLOCK
@@ -269,16 +285,18 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 		slice()
 	end
 	local parts: { MeshPart } = {}
+	local triangles = 0
 	for _, mesh in builder:finish() do
 		local ok, part, err = pcall(buildMesh, em, mesh)
 		if not ok or part == nil then
 			destroyAll(parts)
-			return nil, if ok then err else tostring(part)
+			return nil, 0, if ok then err else tostring(part)
 		end
 		table.insert(parts, part :: MeshPart)
-		self.triangles += mesh.quads * 2
+		triangles += mesh.quads * 2
+		self.baked += mesh.quads * 2
 	end
-	return parts, nil
+	return parts, triangles, nil
 end
 
 -- A mesh made of `quads` (MeshGeometry builder input) for the probe.
@@ -308,7 +326,7 @@ local function testQuads(cells: number, flat: boolean): (buffer, number)
 			end
 		end
 	end
-	return QuadMesher.mesh(data, 8, 0, 8, true, true)
+	return QuadMesher.mesh(data, 8, 0, 8, true)
 end
 
 -- Runs the startup probe. Returns nil when meshes can be used, else the reason.
@@ -337,37 +355,47 @@ local function probe(self: MeshOverlay, em: EditableMesh): string?
 	end
 	flat:Destroy()
 
-	-- 3. Timing: a mesh of about MaxTriangles triangles, measuring the longest frame meanwhile.
+	-- 3. Timing: a mesh of about MaxTriangles triangles. Its cost is how much longer frames get
+	-- while it is built than the usual frame time just before (other startup work may cause
+	-- hitches too, so it gets up to three tries).
 	quads, count = testQuads(SIZE, false)
 	local perNode = count * 2
 	local nodes = math.max(1, Settings.MaxTriangles // math.max(perNode, 1))
-	local slowest = 0
-	local connection = RunService.Heartbeat:Connect(function(dt)
-		slowest = math.max(slowest, dt)
-	end)
-	local started = os.clock()
-	local timed, timedErr = probeMesh(em, function(builder)
-		for i = 0, nodes - 1 do
-			builder:add(quads, count, (i % 8) * SIZE * BLOCK, (i // 8) * SIZE * BLOCK, BLOCK, BLOCK)
+	local excess = math.huge
+	for attempt = 1, 3 do
+		local usual = 0
+		for _ = 1, 30 do
+			usual += task.wait()
 		end
-	end)
-	local elapsed = os.clock() - started
-	task.wait()
-	connection:Disconnect()
-	if not timed then
-		return `timing mesh failed: {timedErr}`
+		usual /= 30
+		local slowest = 0
+		local connection = RunService.Heartbeat:Connect(function(dt)
+			slowest = math.max(slowest, dt)
+		end)
+		local started = os.clock()
+		local timed, timedErr = probeMesh(em, function(builder)
+			for i = 0, nodes - 1 do
+				builder:add(quads, count, (i % 8) * SIZE * BLOCK, (i // 8) * SIZE * BLOCK, BLOCK, BLOCK)
+			end
+		end)
+		local elapsed = os.clock() - started
+		task.wait()
+		connection:Disconnect()
+		if not timed then
+			return `timing mesh failed: {timedErr}`
+		end
+		timed:Destroy()
+		excess = math.min(excess, math.max(slowest - usual, 0))
+		self.stats.lastBuildMs = elapsed * 1000
+		self.stats.slowestFrameMs = excess * 1000
+		if excess * 1000 <= Settings.MaxBlockingMs then
+			return nil
+		end
+		if attempt < 3 then
+			task.wait(15)
+		end
 	end
-	timed:Destroy()
-	self.stats.lastBuildMs = elapsed * 1000
-	self.stats.slowestFrameMs = slowest * 1000
-	if slowest * 1000 > Settings.MaxBlockingMs then
-		return string.format(
-			"too slow here: a %d-triangle mesh blocked a frame for %.0f ms",
-			nodes * perNode,
-			slowest * 1000
-		)
-	end
-	return nil
+	return string.format("too slow here: a %d-triangle mesh made frames %.0f ms longer", nodes * perNode, excess * 1000)
 end
 
 local function builderLoop(self: MeshOverlay)
@@ -376,18 +404,23 @@ local function builderLoop(self: MeshOverlay)
 		return AssetService:CreateEditableMesh()
 	end)
 	if not ok or em == nil then
+		-- Known before any part is built: far parts keep their normal look.
 		self.status = if ok then "off: no editable memory budget" else "off: mesh APIs unavailable"
 		warn(`[IceVoxel] far meshes {self.status} ({if ok then "nil" else tostring(em)})`)
 		self.active = false
+		self.configured = false
 		return
 	end
 	local scratch = em :: EditableMesh
 	self.status = "probing"
+	-- Let joining settle first (the probe compares against the usual frame time).
+	task.wait(PROBE_DELAY)
 	local reason = probe(self, scratch)
 	if reason then
 		self.status = `off: {reason}`
 		warn(`[IceVoxel] far meshes {self.status}`)
 		self.active = false
+		self.configured = false
 		return
 	end
 	self.status = "on"
@@ -406,18 +439,19 @@ local function builderLoop(self: MeshOverlay)
 		end)
 		sliceStart = os.clock()
 		local started = os.clock()
-		local okRun, parts, err = pcall(buildRegion, self, scratch, job)
+		local okRun, parts, triangles, err = pcall(buildRegion, self, scratch, job)
 		pcall(function()
 			scratch:Clear()
 		end);
 		(connection :: RBXScriptConnection):Disconnect()
 		self.stats.lastBuildMs = (os.clock() - started) * 1000
-		self.stats.slowestFrameMs = math.max(self.stats.slowestFrameMs * 0.9, slowest * 1000)
+		local excess = math.max(slowest - self.averageFrameTime, 0)
+		self.stats.slowestFrameMs = math.max(self.stats.slowestFrameMs * 0.9, excess * 1000)
 		self.pending = nil
 		if okRun and parts then
-			table.insert(self.done, { job = job, parts = parts })
+			table.insert(self.done, { job = job, parts = parts, triangles = triangles })
 		else
-			table.insert(self.done, { job = job, err = if okRun then err else tostring(parts) })
+			table.insert(self.done, { job = job, triangles = 0, err = if okRun then err else tostring(parts) })
 		end
 	end
 end
@@ -427,7 +461,15 @@ end
 local function partsOf(self: MeshOverlay, region: MeshRegions.Region): RegionParts
 	local entry = self.instances[region]
 	if entry == nil then
-		entry = { parts = {}, retiring = {}, hidden = {}, pendingHide = nil, hideFrame = 0 }
+		entry = {
+			parts = {},
+			triangles = 0,
+			retiring = {},
+			retiringTriangles = 0,
+			hidden = {},
+			pendingHide = nil,
+			hideFrame = 0,
+		}
 		self.instances[region] = entry
 	end
 	return entry :: RegionParts
@@ -444,6 +486,7 @@ local function demote(self: MeshOverlay, region: MeshRegions.Region)
 		end
 		destroyAll(entry.parts)
 		destroyAll(entry.retiring)
+		self.liveTriangles -= entry.triangles + entry.retiringTriangles
 		self.instances[region] = nil
 	end
 	self.regions:demoted(region, os.clock())
@@ -479,8 +522,10 @@ local function apply(self: MeshOverlay, finished: Done)
 	local region = job.region
 	local entry = partsOf(self, region)
 	destroyAll(entry.retiring)
-	entry.retiring = entry.parts
-	entry.parts = parts
+	self.liveTriangles -= entry.retiringTriangles
+	entry.retiring, entry.retiringTriangles = entry.parts, entry.triangles
+	entry.parts, entry.triangles = parts, finished.triangles
+	self.liveTriangles += finished.triangles
 	for _, part in parts do
 		part.Parent = self.root
 	end
@@ -502,7 +547,8 @@ local function finishSwaps(self: MeshOverlay)
 				end
 			end
 			destroyAll(entry.retiring)
-			entry.retiring = {}
+			self.liveTriangles -= entry.retiringTriangles
+			entry.retiring, entry.retiringTriangles = {}, 0
 		end
 	end
 end
@@ -526,6 +572,7 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 			regionNodes = Settings.RegionNodes,
 			maxRegionBlocks = Settings.MaxRegionBlocks,
 			stableSeconds = Settings.StableSeconds,
+			rebuildSeconds = Settings.RebuildSeconds,
 			nodeSize = LodTree.nodeSize,
 		}),
 		quads = {},
@@ -535,9 +582,11 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 		frame = 0,
 		lastBuild = 0,
 		lastFrameTime = 0,
+		averageFrameTime = 1 / 60,
 		failuresInRow = 0,
 		pausedUntil = 0,
-		triangles = 0,
+		liveTriangles = 0,
+		baked = 0,
 		stats = {
 			status = "",
 			regions = 0,
@@ -550,6 +599,7 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 			lastBuildMs = 0,
 			slowestFrameMs = 0,
 			triangles = 0,
+			baked = 0,
 		},
 	}
 	setmetatable(self, MeshOverlay)
@@ -558,6 +608,7 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 		task.spawn(builderLoop, overlay)
 		RunService.Heartbeat:Connect(function(dt)
 			overlay.lastFrameTime = dt
+			overlay.averageFrameTime += (dt - overlay.averageFrameTime) * 0.05
 		end)
 	end
 	return overlay
@@ -624,9 +675,6 @@ function MeshOverlay.step(self: MeshOverlay)
 		-- Meshes are off: quads are no longer needed.
 		table.clear(self.quads)
 	end
-	if self.triangles >= Settings.MaxSessionTriangles and self.status == "on" then
-		self.status = "stopped: session triangle limit"
-	end
 	if
 		self.active
 		and self.status ~= "probing"
@@ -634,8 +682,8 @@ function MeshOverlay.step(self: MeshOverlay)
 		and self.pending == nil
 		and now >= self.pausedUntil
 		and now - self.lastBuild >= Settings.BuildInterval
-		and self.lastFrameTime <= Settings.MaxFrameTime
-		and self.triangles < Settings.MaxSessionTriangles
+		and self.lastFrameTime <= math.max(self.averageFrameTime * 1.5, Settings.MaxFrameTime)
+		and self.liveTriangles < Settings.MaxLiveTriangles
 	then
 		if self.status == "paused after failures" then
 			self.status = "on"
@@ -645,7 +693,14 @@ function MeshOverlay.step(self: MeshOverlay)
 		end)
 		if region then
 			self.lastBuild = now
-			self.pending = self.regions:begin(region)
+			local job = self.regions:begin(region)
+			-- Quads as they are now: a member may be removed before the builder runs.
+			local snapshot = table.create(#job.members)
+			for i, node in job.members do
+				snapshot[i] = self.quads[node]
+			end
+			job.payload = snapshot
+			self.pending = job
 		end
 	end
 end
@@ -663,7 +718,8 @@ function MeshOverlay.getStats(self: MeshOverlay): Stats
 		parts += #entry.parts
 	end
 	stats.meshParts = parts
-	stats.triangles = self.triangles
+	stats.triangles = self.liveTriangles
+	stats.baked = self.baked
 	return stats
 end
 

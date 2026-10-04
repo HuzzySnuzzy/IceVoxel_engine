@@ -15,7 +15,7 @@ local DebugOverlay = {}
 
 local function meshLine(stats: MeshOverlay.Stats): string
 	return string.format(
-		"meshes  %s\n        %d/%d regions, %d/%d chunks, %d parts, %dk tris\n        %d built, %d failed, last %.0f ms, worst frame %.0f ms",
+		"meshes  %s\n        %d/%d regions, %d/%d chunks, %d parts, %dk tris\n        %d built, %d failed, last %.0f ms, frames +%.0f ms",
 		stats.status,
 		stats.meshedRegions,
 		stats.regions,

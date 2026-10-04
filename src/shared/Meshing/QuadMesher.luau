@@ -15,8 +15,6 @@
 	    fluid above is lowered to its level's height (Blocks.fluidHeightLut), like GreedyMesher; only
 	    faces of the same height merge.
 	Below the world counts as solid, above it as air.
-	With `solidFluids` fluids are drawn like opaque blocks: they hide the faces behind them (the sea
-	floor under far water is not meshed) and only their faces towards air are drawn.
 
 	Output: a buffer of quads, QUAD_BYTES each, as u16 values
 	  dir          0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z (the face's outward normal),
@@ -47,15 +45,6 @@ local fluidHeightLut = Blocks.fluidHeightLut
 local kindLut = Blocks.kindLut
 local cullVisibleCaves = Blocks.cullLut
 local cullHiddenCaves = Blocks.cullLutHiddenCaves
-
--- Hidden caves, and fluids hide like opaque blocks.
-local cullSolidFluids = buffer.create(buffer.len(cullHiddenCaves))
-buffer.copy(cullSolidFluids, 0, cullHiddenCaves)
-for id, def in Blocks.defs do
-	if def.fluid then
-		buffer.writeu8(cullSolidFluids, id, 1)
-	end
-end
 
 local readu8 = buffer.readu8
 local readu16 = buffer.readu16
@@ -205,15 +194,8 @@ end
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.
 	Returns a new buffer of quads and the quad count.
 ]]
-function QuadMesher.mesh(
-	data: buffer,
-	height: number,
-	y0: number,
-	y1: number,
-	hideCaves: boolean,
-	solidFluids: boolean?
-): (buffer, number)
-	local cull = if solidFluids then cullSolidFluids elseif hideCaves then cullHiddenCaves else cullVisibleCaves
+function QuadMesher.mesh(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean): (buffer, number)
+	local cull = if hideCaves then cullHiddenCaves else cullVisibleCaves
 	local sh = y1 - y0
 	if sh <= 0 then
 		return buffer.create(0), 0

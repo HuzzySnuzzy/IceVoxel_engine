@@ -11,62 +11,13 @@ return function(t, shared, require, _server, client)
 
 	local SIZE = ChunkLayout.SIZE
 
-	--[[ QuadMesher with solid fluids (far meshes) ]]
-
-	t.test("solid fluids hide the sea floor and only show their faces towards air", function()
-		local height = 8
-		local data = ChunkLayout.create(height)
-		local water = Blocks.fluidId("Water", 0)
-		for z = 0, SIZE - 1 do
-			for x = 0, SIZE - 1 do
-				ChunkLayout.set(data, x, 0, z, Blocks.id.Bedrock)
-				ChunkLayout.set(data, x, 1, z, Blocks.id.Sand)
-				ChunkLayout.set(data, x, 2, z, water)
-				ChunkLayout.set(data, x, 3, z, water)
-			end
-		end
-		-- An island poking out of the water.
-		for y = 1, 4 do
-			ChunkLayout.set(data, 5, y, 5, Blocks.id.Stone)
-		end
-		-- The same sea around the chunk (padding).
-		for y = 0, 3 do
-			local block = if y == 0 then Blocks.id.Bedrock elseif y == 1 then Blocks.id.Sand else water
-			for i = -1, SIZE do
-				ChunkLayout.setPadded(data, -1, y, i, block)
-				ChunkLayout.setPadded(data, SIZE, y, i, block)
-				ChunkLayout.setPadded(data, i, y, -1, block)
-				ChunkLayout.setPadded(data, i, y, SIZE, block)
-			end
-		end
-		local quads, count = QuadMesher.mesh(data, height, 0, height, true, true)
-		local waterApp = Blocks.get(water).appearance
-		local seenWater, seenSand = 0, 0
-		for i = 0, count - 1 do
-			local o = i * QuadMesher.QUAD_BYTES
-			local dir = buffer.readu16(quads, o)
-			local app = buffer.readu16(quads, o + 12) % QuadMesher.KEY_STRIDE
-			if app == waterApp then
-				seenWater += 1
-				t.eq(dir, 2, "water only shows its top")
-			elseif app == Blocks.get(Blocks.id.Sand).appearance then
-				seenSand += 1
-			end
-		end
-		t.ok(seenWater > 0, "water surface drawn")
-		t.eq(seenSand, 0, "sea floor under solid water not drawn")
-		-- Without solid fluids the floor is drawn.
-		local _, plainCount = QuadMesher.mesh(data, height, 0, height, true, false)
-		t.ok(plainCount > count, "transparent water shows the floor")
-	end)
-
 	--[[ MeshGeometry ]]
 
 	-- Quads of a little test terrain at LOD level `level`.
 	local function nodeQuads(gen: any, level: number, nx: number, nz: number): (buffer, number)
 		local r = gen.generate(level, nx, nz)
 		local y0, y1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
-		return QuadMesher.mesh(r.data, r.height, y0, y1, true, true)
+		return QuadMesher.mesh(r.data, r.height, y0, y1, true)
 	end
 
 	t.test("mesh geometry: centred positions, triangle cap, winding and colours", function()
@@ -196,6 +147,7 @@ return function(t, shared, require, _server, client)
 			regionNodes = 4,
 			maxRegionBlocks = 512,
 			stableSeconds = stable or 2,
+			rebuildSeconds = 8,
 			nodeSize = LodTree.nodeSize,
 		})
 	end
@@ -249,7 +201,8 @@ return function(t, shared, require, _server, client)
 		r:add(c, 1)
 		t.eq(r:changed(c, 1), nil, "change of a member not in the mesh")
 		t.ok(region.meshed ~= nil, "still meshed")
-		t.eq(r:candidate(1, always), region, "re-promoted to include the new member")
+		t.eq(r:candidate(1, always), nil, "a meshed region waits longer before it is rebuilt")
+		t.eq(r:candidate(9.5, always), region, "re-promoted to include the new member")
 		-- Changing a member inside the mesh demotes.
 		t.eq(r:changed(a, 2), region)
 		r:demoted(region, 2)
@@ -295,6 +248,22 @@ return function(t, shared, require, _server, client)
 		t.ok(not r:finish(job, false, 5.1))
 		t.eq(r:candidate(9, always), nil, "longer back off")
 		t.ok(r:candidate(9.2, always) ~= nil)
+	end)
+
+	t.test("regions: a small region that waited long is not starved by larger ones", function()
+		local r = regions(2)
+		local lone = node(5, 0, 0) -- 512-block nodes: one per region
+		r:add(lone, 0)
+		local big = {}
+		for i = 0, 15 do
+			big[i + 1] = node(2, i % 4, i // 4)
+			r:add(big[i + 1], 9)
+		end
+		local first = r:candidate(11, always) :: any
+		t.eq(first.count, 16, "a big region that just became stable goes first")
+		-- The big region keeps changing; the lone one has waited a minute.
+		r:changed(big[1], 58)
+		t.eq(r:candidate(60, always), r.regionOf[lone], "the long wait wins")
 	end)
 
 	t.test("regions: a region emptied while building is dropped", function()

@@ -8,7 +8,10 @@
 	shown nodes; they are always built as parts first (the streamer and ChunkRenderer work as without
 	meshes). Once a region's members have not changed for `stableSeconds`, it is a candidate: a mesh
 	of exactly those members is built in the background and, if they are still the same when it is
-	done, shown instead of their parts.
+	done, shown instead of their parts. A meshed region that gained members (still drawn as parts,
+	correctly) is rebuilt only after `rebuildSeconds`, so regions on the edge of the view are not
+	rebuilt for every node that appears. Candidates are ranked by the parts a build saves times how
+	long they have waited, so no region waits forever.
 
 	A mesh only ever shows nodes that are members: when a node it contains is removed or changes, the
 	region is demoted (mesh destroyed, parts shown again) in the same frame. Nodes added to a meshed
@@ -38,6 +41,8 @@ export type Job = {
 	version: number,
 	members: { Node },
 	revisions: { number },
+	-- For the caller (e.g. the members' mesh data at the time the build started).
+	payload: any,
 }
 
 export type Options = {
@@ -45,6 +50,7 @@ export type Options = {
 	regionNodes: number,
 	maxRegionBlocks: number,
 	stableSeconds: number,
+	rebuildSeconds: number,
 	nodeSize: (level: number) -> number,
 }
 
@@ -173,31 +179,44 @@ function MeshRegions.changed(self: MeshRegions, node: Node, now: number): Region
 end
 
 --[[
-	The region most worth meshing now: stable for `stableSeconds`, not failed recently, not being
-	built, with every member `ready` (its quads are known), and not already meshed as it is. Larger
-	regions first (they save the most parts).
+	The region most worth meshing now: stable (see the header), not failed recently, not being
+	built, with every member `ready` (its quads are known), and not already meshed as it is. Ranked
+	by the nodes the build would take out of the workspace times the seconds it has been waiting.
 ]]
 function MeshRegions.candidate(self: MeshRegions, now: number, ready: (node: Node) -> boolean): Region?
 	local best: Region? = nil
-	local stable = self.options.stableSeconds
+	local bestScore = 0
+	local options = self.options
 	for _, region in self.regions do
+		local meshed = region.meshed
+		local waited = now - region.changedAt
 		if
 			region.building == nil
 			and region.count > 0
-			and now - region.changedAt >= stable
 			and now >= region.retryAt
 			and region.meshVersion ~= region.version
-			and (best == nil or region.count > (best :: Region).count)
+			and waited >= (if meshed then options.rebuildSeconds else options.stableSeconds)
 		then
-			local allReady = true
-			for node in region.members do
-				if not ready(node) then
-					allReady = false
-					break
+			local saves = region.count
+			if meshed then
+				for node in region.members do
+					if (meshed :: { [Node]: number })[node] then
+						saves -= 1
+					end
 				end
 			end
-			if allReady then
-				best = region
+			local score = math.max(saves, 0.5) * (waited + 1)
+			if score > bestScore then
+				local allReady = true
+				for node in region.members do
+					if not ready(node) then
+						allReady = false
+						break
+					end
+				end
+				if allReady then
+					best, bestScore = region, score
+				end
 			end
 		end
 	end
@@ -222,7 +241,8 @@ function MeshRegions.begin(self: MeshRegions, region: Region): Job
 	for i, node in members do
 		revisions[i] = self.revision[node]
 	end
-	local job: Job = { region = region, version = region.version, members = members, revisions = revisions }
+	local job: Job =
+		{ region = region, version = region.version, members = members, revisions = revisions, payload = nil }
 	region.building = job
 	return job
 end

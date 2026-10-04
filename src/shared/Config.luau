@@ -120,20 +120,24 @@ local Config = {
 			-- (a part can be at most 2048 studs long).
 			RegionNodes = 4,
 			MaxRegionBlocks = 512,
-			-- Seconds a region's chunks must stay unchanged before it is merged.
+			-- Seconds a region's chunks must stay unchanged before it is merged, and before a merged
+			-- region that gained chunks (shown as parts meanwhile) is merged again.
 			StableSeconds = 2,
+			RebuildSeconds = 8,
 			-- Triangles per MeshPart (EditableMesh allows 20,000; smaller meshes build in shorter steps).
 			MaxTriangles = 10000,
-			-- Seconds between mesh builds; none starts after a frame longer than MaxFrameTime seconds.
+			-- Seconds between mesh builds. None starts right after a hitch: a frame longer than both
+			-- 1.5 x the average frame and MaxFrameTime seconds.
 			BuildInterval = 0.35,
 			MaxFrameTime = 1 / 40,
 			-- Studs each quad overlaps its neighbours (hides cracks where quads meet).
 			Overlap = 0.05,
-			-- Meshes stay off when the startup probe sees a build block a frame longer than this (ms).
+			-- Meshes stay off when, in the startup probe, building a full-size mesh makes frames this
+			-- much longer than usual (ms; measured up to three times).
 			MaxBlockingMs = 35,
-			-- No new meshes after this many triangles were baked in one session (the engine keeps
-			-- baked content for the session; how it is reclaimed is not documented).
-			MaxSessionTriangles = 5000000,
+			-- No new meshes while the shown ones hold this many triangles (a safety limit; the whole
+			-- default view needs ~100-200k).
+			MaxLiveTriangles = 1000000,
 		},
 	},
 

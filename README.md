@@ -229,16 +229,17 @@ buffer: each region is written into it, *baked* into static content with
 and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
 
 - Like EditableImage, it needs the Mesh / Image APIs enabled for published games (see The map).
-- At startup a probe builds a few test meshes and times them; press **F3** to see the status,
-  how many regions and chunks are merged, and how long builds take. Meshes stay off (parts only)
-  when the probe fails or a build blocks a frame longer than `MaxBlockingMs`.
+- A few seconds after joining, a probe builds a few test meshes and times them against the usual
+  frame time; press **F3** to see the status, how many regions and chunks are merged, and how long
+  builds take. Meshes stay off (parts only, with their normal look) when the Mesh APIs are
+  unavailable, the probe fails, or building makes frames more than `MaxBlockingMs` longer.
 - Merged levels use a plain look for their parts too (SmoothPlastic in the block colour, opaque
   water), so swapping between parts and a mesh is invisible.
 - Phones keep parts by default (`FarMeshes.Mobile`).
 - Not yet measured on live servers: how long builds take on real clients, whether baked content
-  is reclaimed over very long sessions (a safety limit stops new meshes after
-  `MaxSessionTriangles`), and how far the engine then actually draws. Check F3 and the
-  MicroProfiler in a published test place before relying on it.
+  is reclaimed over long sessions (a bake that hits the engine's storage limit switches meshes
+  off; meshes in the world are capped at `MaxLiveTriangles`), and how far the engine then
+  actually draws. Check F3 and the MicroProfiler in a published test place before relying on it.
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with a climate position
 (temperature, humidity), terrain shape (`heightOffset`, `hilliness`), surface blocks and

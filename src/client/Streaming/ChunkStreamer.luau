@@ -403,14 +403,22 @@ end
 local function retire(self: ChunkStreamer)
 	local now = os.clock()
 	local timeout = Config.Streaming.ReplaceTimeout
-	local removed = false
+	-- Mark everything that goes first, so clearing one node never puts back parts of another that
+	-- goes in the same pass (MeshOverlay demotes merged regions on removal).
+	local leaving = {}
 	for _, node in self.nodes do
 		local since = node.retireSince
 		if since and (not node.ready or now - since > timeout or covered(self, node)) then
-			removeNode(self, node)
-			removed = true
+			table.insert(leaving, node)
 		end
 	end
+	for _, node in leaving do
+		node.removed = true
+	end
+	for _, node in leaving do
+		removeNode(self, node)
+	end
+	local removed = #leaving > 0
 	-- Show the nodes that were waiting for what was just removed, in the same frame. Coarser
 	-- ones first: a waiting node may itself cover other waiting nodes (when the node above both
 	-- timed out), and those must keep waiting for it.

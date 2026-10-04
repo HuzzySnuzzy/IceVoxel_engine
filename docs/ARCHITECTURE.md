@@ -196,9 +196,12 @@ built and shown as parts exactly as before; the streamer's protocol is unchanged
 
 1. **Regions** (`MeshRegions`, pure and unit tested): shown far nodes of level >= `MinLevel` are
    grouped into aligned regions of 4 × 4 nodes of one level (at most 512 blocks wide). A region whose
-   members have not changed for `StableSeconds` is a candidate; larger regions go first.
+   members have not changed for `StableSeconds` is a candidate (a meshed region that gained members,
+   drawn as parts meanwhile, waits `RebuildSeconds`). Candidates are ranked by the parts a build
+   saves times how long they have waited.
 2. **Build** (builder thread, one region at a time, at most one every `BuildInterval` and never
-   right after a slow frame): the members' quads (`Meshing/QuadMesher`, made by the workers next to
+   right after a hitch, i.e. a frame much longer than usual): the members' quads (snapshotted when
+   the build starts) (`Meshing/QuadMesher`, made by the workers next to
    the boxes) become mesh arrays (`Meshing/MeshGeometry`: centred, split at `MaxTriangles`, a tiny
    anchor quad when a mesh would be flat), written into the session's single scratch EditableMesh
    with the batch APIs (vertex colours via the automatically created colour ids; with unshared
@@ -218,8 +221,12 @@ Far nodes never change once built because their borders do not depend on their n
 a one or a two levels coarser neighbour, which costs ~2% more boxes and ~1% more triangles. Full
 detail chunks keep exact seams (and are never merged: they need exact collision, edits and caves).
 
-A startup probe (an off-centre block, a flat sheet, and a full-size mesh timed against the frame
-time) decides whether meshes are used at all. F3 shows the status and counters.
+A startup probe a few seconds after joining (an off-centre block, a flat sheet, and a full-size
+mesh timed against the usual frame time, up to three tries) decides whether meshes are used at
+all; when they are not, far parts keep their normal look. Meshes in the world are capped at
+`MaxLiveTriangles`. Far meshes keep the sea floor: near water is transparent, so looking through
+it across into a merged region must find the same ground the parts had. F3 shows the status and
+counters.
 
 ### Map (`Map/`)
 

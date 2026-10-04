@@ -104,6 +104,7 @@ local function generate(job: { [string]: any }): { [string]: any }
 	elseif job.coarser then
 		open = generator.seamLimits(level, job.nx, job.nz, job.coarser)
 	end
+	yieldIfNeeded()
 	local caps = capMap(job.caps)
 
 	local edits = job.edits :: { number }?
@@ -142,6 +143,7 @@ local function generate(job: { [string]: any }): { [string]: any }
 	else
 		local y0, y1 = GreedyMesher.activeRange(meshBelow, emptyAbove, height)
 		if y1 > y0 then
+			-- The worker runs one job at a time, so the border scratch survives these yields.
 			local border = borderOf(open, nil, 0)
 			local meshData = if border then GreedyMesher.applyBorder(data, height, y0, y1, true, border) else data
 			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true)
@@ -150,8 +152,8 @@ local function generate(job: { [string]: any }): { [string]: any }
 				table.insert(meshes, boxes)
 			end
 			if job.quads then
-				-- Far meshes draw fluids opaque (see Rendering/MeshOverlay).
-				quads, quadCount = QuadMesher.mesh(meshData, height, y0, y1, true, true)
+				yieldIfNeeded()
+				quads, quadCount = QuadMesher.mesh(meshData, height, y0, y1, true)
 			end
 		end
 	end
