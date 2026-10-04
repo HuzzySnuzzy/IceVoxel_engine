@@ -144,7 +144,9 @@ waiting ──► queued ──► working ──► built ──► ready
 **Seamless LOD changes.** A node that is no longer wanted stays visible until every wanted node
 covering its area is ready (an ancestor, or all of its descendants). It is removed in the same frame
 the last replacement appears. Replacements that finish earlier wait unshown, so two levels of
-detail are never drawn over each other. `Streaming.ReplaceTimeout` is a safety net.
+detail are never drawn over each other. `Streaming.ReplaceTimeout` is a safety net. Since a chunk
+can wait unshown (without collision) for its whole old ancestor, `SpawnGuard` holds a character
+until the chunk under it and the eight around it are shown.
 
 **Edits.** Full detail chunks keep their block data on the main thread (`World/ClientWorld`). Edits
 (local predictions and server messages) update the data and the neighbours' padding, and mark the
@@ -225,11 +227,14 @@ data (force = `AssemblyMass` × acceleration; velocity is never written):
   and drops, down in falling water). A one-sided servo pushes along it until the character moves at
   `CurrentSpeed`, so it never brakes the player and cannot build up speed. The Humanoid brakes hard
   on the ground, so the push limit is higher there.
-- **Climbing out**: holding Jump while swimming towards a ledge with two free blocks above it lifts
-  the character at `ClimbOutSpeed` until its feet clear the ledge (like jumping out of water in
-  Minecraft); without it, a bank one block above the surface could not be climbed from deep water.
-- Walk speed is multiplied by `WalkSpeedFactor` in water; a WalkSpeed another script sets meanwhile
-  becomes the new normal speed and is kept when leaving the water.
+- **Climbing out**: holding Jump while swimming towards a ledge at most one block above the water,
+  with two free blocks above it and room over the character's head, lifts the character at
+  `ClimbOutSpeed` until its feet clear the ledge (like jumping out of water in Minecraft); without
+  it, a bank one block above the surface could not be climbed from deep water. A climb that does
+  not get there within 1.5 s gives up until Jump is released.
+- Walk speed is multiplied by `WalkSpeedFactor` in water; a WalkSpeed another script assigns
+  meanwhile becomes the new normal speed and is kept when leaving the water (relative changes such
+  as `+=` would apply to the slowed speed, so assign absolute values).
 - The Humanoid keeps its normal states: forcing `Swimming` outside Terrain water makes it switch to
   GettingUp, steer with the camera's pitch and lie horizontal, which is wrong for shallow water.
 

@@ -79,6 +79,8 @@ export type Node = {
 	coarserUsed: { number }?,
 	-- Cave cap mask each section was meshed with.
 	caps: { [number]: number },
+	-- Incremented per generation job; results of older jobs are ignored.
+	job: number,
 }
 
 export type Stats = {
@@ -321,6 +323,7 @@ local function newNode(key: number, level: number, nx: number, nz: number): Node
 		coarser = NO_COARSER,
 		coarserUsed = nil,
 		caps = {},
+		job = 0,
 	}
 end
 
@@ -407,9 +410,18 @@ local function retire(self: ChunkStreamer)
 			removed = true
 		end
 	end
-	-- Show the nodes that were waiting for what was just removed, in the same frame.
-	if removed then
+	-- Show the nodes that were waiting for what was just removed, in the same frame. Coarser
+	-- ones first: a waiting node may itself cover other waiting nodes (when the node above both
+	-- timed out), and those must keep waiting for it.
+	if removed and next(self.unshown) then
+		local waiting = {}
 		for node in self.unshown do
+			table.insert(waiting, node)
+		end
+		table.sort(waiting, function(a, b)
+			return a.level > b.level
+		end)
+		for _, node in waiting do
 			if not hiddenByAncestor(self, node) then
 				show(self, node)
 			end
@@ -419,7 +431,10 @@ end
 
 local function markReady(self: ChunkStreamer, node: Node)
 	node.ready = true
-	node.state = "ready"
+	-- A regenerated node may already have a newer job queued or running.
+	if node.state ~= "queued" and node.state ~= "working" then
+		node.state = "ready"
+	end
 	if not node.shown then
 		if hiddenByAncestor(self, node) then
 			self.unshown[node] = true
@@ -439,8 +454,8 @@ end
 
 --[[ Jobs ]]
 
-local function onGenerated(self: ChunkStreamer, node: Node, result: WorkerPool.Result, reveal: { number })
-	if node.removed then
+local function onGenerated(self: ChunkStreamer, node: Node, job: number, result: WorkerPool.Result, reveal: { number })
+	if node.removed or job ~= node.job then
 		return
 	end
 	if result.failed then
@@ -507,8 +522,10 @@ local function dispatchGenerate(self: ChunkStreamer, node: Node): boolean
 	end
 	node.state = "working"
 	node.stale = false
+	node.job += 1
+	local token = node.job
 	return self.pool:submit(job, function(result)
-		onGenerated(self, node, result, reveal)
+		onGenerated(self, node, token, result, reveal)
 	end)
 end
 
@@ -516,6 +533,12 @@ local function dispatchRemesh(self: ChunkStreamer, node: Node): boolean
 	local chunk = node.chunk
 	if chunk == nil then
 		return false
+	end
+	-- A mesh made for other neighbours has to be redone everywhere, not only where edited.
+	if seamsChanged(node.coarserUsed, node.coarser) then
+		for s = 0, (chunk.emptyAbove - 1) // SECTION do
+			node.dirty[s] = true
+		end
 	end
 	local camera = caveViewpoint(self)
 	local sections, reveal = {}, {}
@@ -671,12 +694,15 @@ local function refresh(self: ChunkStreamer)
 			local chunk = node.chunk
 			if node.state == "working" then
 				node.stale = true
-			elseif node.ready and chunk then
+			elseif chunk then
+				-- Remeshed as soon as the node is ready (dispatch waits for that).
 				for s = 0, (chunk.emptyAbove - 1) // SECTION do
 					node.dirty[s] = true
 				end
 				self.dirtyNodes[node] = true
-			elseif node.ready then
+			elseif node.state == "ready" then
+				-- LOD nodes keep no block data: generate again. (A node still building is
+				-- handled at the first refresh after it is ready.)
 				node.state = "queued"
 			end
 		end
@@ -736,10 +762,19 @@ function ChunkStreamer.update(self: ChunkStreamer, dt: number)
 	self.renderer:step()
 end
 
--- Is the full detail chunk containing block (x, z) visible?
+-- Are the full detail chunk containing block (x, z) and the eight around it visible (so a
+-- character released there has solid ground to walk on in every direction)?
 function ChunkStreamer.isReady(self: ChunkStreamer, x: number, z: number): boolean
-	local node = self.nodes[Coords.chunkKey(x // SIZE, z // SIZE)]
-	return node ~= nil and node.shown
+	local cx, cz = x // SIZE, z // SIZE
+	for dz = -1, 1 do
+		for dx = -1, 1 do
+			local node = self.nodes[Coords.chunkKey(cx + dx, cz + dz)]
+			if node == nil or not node.shown then
+				return false
+			end
+		end
+	end
+	return true
 end
 
 function ChunkStreamer.stats(self: ChunkStreamer): Stats

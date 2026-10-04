@@ -13,7 +13,9 @@
 	    ledge with room above it lifts the character out onto it (like Minecraft),
 	  * the current (Shared/World/FluidFlow, Minecraft's flow rule) pushes along the flow until you
 	    move at Config.Water.CurrentSpeed; it never slows you down, and still water does not push,
-	  * walking is slower (WalkSpeed changes made by other scripts meanwhile are kept).
+	  * walking is slower. A WalkSpeed another script assigns while the character swims becomes its
+	    new normal speed (slowed while in water, kept afterwards). Assign absolute values: relative
+	    changes (`+=`, `*=`) would be applied to the slowed speed.
 
 	The Humanoid stays in its normal states (forcing Swimming outside Terrain water makes it pitch
 	over and steer with the camera). The client owns its character's physics, so this is all local
@@ -64,6 +66,8 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 	-- Top (studs) of the ledge being climbed onto, and when to give up.
 	local exitLedge: number? = nil
 	local exitUntil = 0
+	-- After a climb gave up, no new one starts until Jump is released.
+	local exitBlocked = false
 
 	local function isSolidAt(x: number, y: number, z: number): boolean
 		local block = getBlock(x, y, z)
@@ -114,8 +118,9 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 		appliedWalkSpeed = h.WalkSpeed
 	end
 
-	-- Top (studs) of a block the character swims against that it could climb onto, or nil.
-	local function ledgeAhead(h: Humanoid, p: Vector3, r: BasePart, bottom: number): number?
+	-- Top (studs) of a block the character swims against and could climb onto, or nil. The block
+	-- needs two free blocks above it, and the character room above its own head to rise.
+	local function ledgeAhead(h: Humanoid, p: Vector3, r: BasePart, bottom: number, height: number): number?
 		local move = Vector3.new(h.MoveDirection.X, 0, h.MoveDirection.Z)
 		if move.Magnitude < 0.1 then
 			return nil
@@ -127,7 +132,14 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 				if isSolidAt(ax, y + 1, az) or isSolidAt(ax, y + 2, az) then
 					return nil -- no room to stand
 				end
-				return (y + 1) * BLOCK
+				local ledge = (y + 1) * BLOCK
+				local bx, bz = math.floor(p.X / BLOCK), math.floor(p.Z / BLOCK)
+				for above = math.floor((bottom + height) / BLOCK), math.floor((ledge + height) / BLOCK) do
+					if isSolidAt(bx, above, bz) then
+						return nil -- something overhead
+					end
+				end
+				return ledge
 			end
 		end
 		return nil
@@ -181,12 +193,17 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 
 		-- Climbing out onto a ledge continues (briefly) after leaving the water, until the feet
 		-- are above it.
+		if not h.Jump then
+			exitBlocked = false
+		end
 		if exitLedge and (bottom >= exitLedge or os.clock() > exitUntil or not h.Jump) then
+			exitBlocked = os.clock() > exitUntil
 			exitLedge = nil
 		end
-		if submerged > 0 and h.Jump and exitLedge == nil then
-			local ledge = ledgeAhead(h, p, r, bottom)
-			if ledge and bottom < ledge then
+		if submerged > 0 and top and h.Jump and exitLedge == nil and not exitBlocked then
+			local ledge = ledgeAhead(h, p, r, bottom, height)
+			-- At most one block above the water's top row, however high a jump carried the body.
+			if ledge and bottom < ledge and ledge <= (math.ceil(top / BLOCK) + 1) * BLOCK then
 				exitLedge, exitUntil = ledge, os.clock() + 1.5
 			end
 		end

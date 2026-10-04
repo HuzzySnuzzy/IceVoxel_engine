@@ -2,7 +2,8 @@
 --[[
 	Terrain is generated on the client, so a fresh or teleported character could fall through the
 	world before the ground under it is built. This keeps the character anchored (locally; the
-	client owns its character's physics) until the full detail chunk under it is visible.
+	client owns its character's physics) until the full detail chunks under and around it are
+	visible.
 ]]
 
 local Players = game:GetService("Players")

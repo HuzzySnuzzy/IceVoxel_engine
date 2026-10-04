@@ -54,6 +54,7 @@ function Hotbar.new(): Hotbar
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = bar
 
 	local label = Instance.new("TextLabel")
