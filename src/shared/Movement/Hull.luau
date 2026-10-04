@@ -185,6 +185,7 @@ end
 	The movement an entity actually makes (Entity.collide): collideBox, and if that stopped it
 	horizontally while it is on the ground (or just landed), also try stepping up to `stepHeight`
 	over the obstacle; the step wins when it gets further horizontally, and then steps back down.
+	The fourth result tells whether the step was taken.
 ]]
 function Hull.collide(
 	solidAt: SolidAt,
@@ -194,9 +195,9 @@ function Hull.collide(
 	dz: number,
 	stepHeight: number,
 	onGround: boolean
-): (number, number, number)
+): (number, number, number, boolean)
 	if dx == 0 and dy == 0 and dz == 0 then
-		return 0, 0, 0
+		return 0, 0, 0, false
 	end
 	local rx, ry, rz = Hull.collideBox(solidAt, box, dx, dy, dz)
 	local hitX, hitY, hitZ = rx ~= dx, ry ~= dy, rz ~= dz
@@ -214,10 +215,10 @@ function Hull.collide(
 		end
 		if ax * ax + az * az > rx * rx + rz * rz then
 			local _, down, _ = Hull.collideBox(solidAt, Hull.offset(box, ax, ay, az), 0, -ay + dy, 0)
-			return ax, ay + down, az
+			return ax, ay + down, az, true
 		end
 	end
-	return rx, ry, rz
+	return rx, ry, rz, false
 end
 
 --[[

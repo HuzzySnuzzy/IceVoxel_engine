@@ -12,7 +12,8 @@
 	           drag 0.98;
 	  jumping  vertical speed 0.42, plus 0.2 along the facing direction when sprinting; holding jump
 	           jumps again on landing (10 tick delay);
-	  stepping up 0.6 blocks; sneaking (input x 0.3) never walks off an edge; crouching (1.5 tall)
+	  stepping up 0.6 blocks (State.stepHeight; IceVoxel uses more, see Config.Movement.StepHeight);
+	           sneaking (input x 0.3) never walks off an edge; crouching (1.5 tall)
 	           when sneaking or when there is no room to stand, crawling (0.6 tall) when there is no
 	           room to crouch either;
 	  sprint   starts with the sprint key or a double tap forward (not while crouching), stops without
@@ -20,7 +21,8 @@
 	           at the surface; crouching does not stop it (sprint-sneaking, as in 1.20);
 	  water    acceleration 0.02, drag 0.8 (sprinting 0.9) on every axis, slow sinking (gravity / 16),
 	           jump swims up and sneak down (0.04 per tick), the current pushes (0.014), and swimming
-	           against a ledge just above the water hops out (0.3);
+	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
+	           tall, no sinking, up and down where the view points);
 	  falling  the fall distance is counted while airborne and turned into damage on landing
 	           (ceil(distance - 3) half hearts); water resets it.
 
@@ -50,6 +52,8 @@ local SPRINT_AIR_ACCELERATION = 0.025999999
 local GROUND_FACTOR = 0.21600002 -- = 0.6^3: speed is unchanged on normal blocks
 local JUMP_POWER = 0.42
 local SPRINT_JUMP_BOOST = 0.2
+-- Minecraft's player step height. Also how far below the feet sneaking looks for ground at an edge
+-- (whatever the state's own step height), so sneaking always stops at block edges.
 local STEP_HEIGHT = 0.6
 local INPUT_SCALE = 0.98
 local SNEAK_FACTOR = 0.3
@@ -59,12 +63,13 @@ local SPRINT_IMPULSE = 0.8
 local DOUBLE_TAP_TICKS = 7
 local MINOR_COLLISION_ANGLE = 0.13962634 -- 8 degrees
 
-local WATER_ACCELERATION = 0.02
-local WATER_DRAG = 0.8
-local WATER_SPRINT_DRAG = 0.9
-local WATER_VERTICAL_DRAG = 0.8
-local WATER_JUMP = 0.04
-local WATER_EXIT_HOP = 0.3
+local WATER_ACCELERATION = 0.019999999552965164 -- 0.02F
+local WATER_DRAG = 0.800000011920929 -- 0.8F
+local WATER_SPRINT_DRAG = 0.8999999761581421 -- 0.9F
+local WATER_VERTICAL_DRAG = 0.800000011920929
+local WATER_JUMP = 0.03999999910593033 -- 0.04F
+local WATER_EXIT_HOP = 0.30000001192092896 -- 0.3F
+local WATER_EXIT_RISE = 0.6000000238418579 -- 0.6F
 local FLUID_PUSH = 0.014
 local FLUID_JUMP_THRESHOLD = 0.4
 
@@ -93,6 +98,8 @@ export type State = {
 	vy: number,
 	vz: number,
 	pose: Pose,
+	-- Highest step walked up without jumping (blocks).
+	stepHeight: number,
 	onGround: boolean,
 	horizontalCollision: boolean,
 	minorHorizontalCollision: boolean,
@@ -110,10 +117,14 @@ export type State = {
 	sprintTriggerTime: number,
 	-- Had enough forward input to sprint last tick (for the double tap).
 	hadSprintImpulse: boolean,
-	-- Touching water, how high it reaches above the feet (blocks) and whether the eyes are in it.
+	-- Touching water, how high it reaches above the feet (blocks), whether the eyes are in it (and
+	-- were last tick: under water), and swimming (sprinting under water: 0.6 tall, steered by the
+	-- view's pitch).
 	inWater: boolean,
 	waterHeight: number,
+	eyeInWater: boolean,
 	underWater: boolean,
+	swimming: boolean,
 }
 
 export type Input = {
@@ -125,6 +136,8 @@ export type Input = {
 	-- Direction the player faces (x, z unit vector): where a sprint jump goes.
 	facingX: number,
 	facingZ: number,
+	-- Vertical part of the view direction (-1 down .. 1 up): where swimming goes.
+	lookY: number,
 	jump: boolean,
 	sneak: boolean,
 	-- Sprint key held.
@@ -138,6 +151,8 @@ export type World = {
 
 export type Events = {
 	jumped: boolean,
+	-- Height (blocks) stepped up onto something this tick, 0 if none.
+	stepUp: number,
 	-- Landed this tick after falling `fallDistance` blocks; `damage` in half hearts (0 = none).
 	landed: boolean,
 	fallDistance: number,
@@ -157,6 +172,7 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		vy = 0,
 		vz = 0,
 		pose = "standing",
+		stepHeight = STEP_HEIGHT,
 		onGround = false,
 		horizontalCollision = false,
 		minorHorizontalCollision = false,
@@ -172,7 +188,9 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		hadSprintImpulse = false,
 		inWater = false,
 		waterHeight = 0,
+		eyeInWater = false,
 		underWater = false,
+		swimming = false,
 	}
 end
 
@@ -268,14 +286,8 @@ local function updateWater(state: State, world: World)
 					if surface >= minY then
 						touching = true
 						height = math.max(surface - minY, height)
-						-- Flow: horizontal unit vector, falling water mostly downwards (Minecraft adds
-						-- -6 on Y and normalises).
 						local fx, fy, fz = FluidFlow.at(world.getBlock, x, y, z)
-						if fy ~= 0 then
-							fy *= 6
-							local length = sqrt(fx * fx + fy * fy + fz * fz)
-							fx, fy, fz = fx / length, fy / length, fz / length
-						end
+						-- (`height` is the deepest so far, not this cell's: Minecraft's quirk.)
 						if height < 0.4 then
 							fx, fy, fz = fx * height, fy * height, fz * height
 						end
@@ -303,11 +315,21 @@ local function updateWater(state: State, world: World)
 		state.fallDistance = 0
 	end
 
-	-- Eyes under water (Entity.updateFluidOnEyes).
-	local eyeY = state.y + PlayerPhysics.eyeHeight(state) - 0.11111111
+	-- Eyes under water (Entity.updateFluidOnEyes); "under water" uses last tick's eyes.
+	local eyeY = state.y + PlayerPhysics.eyeHeight(state) - 0.1111111119389534
 	local bx, by, bz = floor(state.x), floor(eyeY), floor(state.z)
 	local block = world.getBlock(bx, by, bz)
-	state.underWater = block ~= nil and isWater(block) and by + fluidHeight(world, bx, by, bz, block) > eyeY
+	state.underWater = state.eyeInWater and touching
+	state.eyeInWater = block ~= nil and isWater(block) and by + fluidHeight(world, bx, by, bz, block) > eyeY
+
+	-- Swimming (Entity.updateSwimming): sprinting under water, until sprinting stops or the water
+	-- ends.
+	if state.swimming then
+		state.swimming = state.sprinting and touching
+	else
+		local feet = world.getBlock(floor(state.x), floor(state.y), floor(state.z))
+		state.swimming = state.sprinting and state.underWater and isWater(feet)
+	end
 end
 
 -- Friction of the block the player walks on (getBlockPosBelowThatAffectsMyMovement): below the
@@ -357,7 +379,10 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 		end
 	end
 
-	local rx, ry, rz = Hull.collide(solidAt, box, dx, dy, dz, STEP_HEIGHT, state.onGround)
+	local rx, ry, rz, stepped = Hull.collide(solidAt, box, dx, dy, dz, state.stepHeight, state.onGround)
+	if stepped and ry > 0 then
+		events.stepUp = ry
+	end
 	if rx * rx + ry * ry + rz * rz > 1.0e-7 then
 		state.x += rx
 		state.y += ry
@@ -439,7 +464,7 @@ end
 ]]
 function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	local solidAt = solidChecker(world)
-	local events: Events = { jumped = false, landed = false, fallDistance = 0, damage = 0 }
+	local events: Events = { jumped = false, stepUp = 0, landed = false, fallDistance = 0, damage = 0 }
 
 	-- Entity.baseTick: water and its current.
 	updateWater(state, world)
@@ -451,9 +476,12 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	end
 	local prevShift = state.sneaking
 	local prevImpulse = state.hadSprintImpulse
-	state.crouching = fits(solidAt, state, "crouching") and (prevShift or not fits(solidAt, state, "standing"))
+	state.crouching = not state.swimming
+		and fits(solidAt, state, "crouching")
+		and (prevShift or not fits(solidAt, state, "standing"))
 	local inputX, inputZ, forward = input.moveX, input.moveZ, input.forward
-	if state.crouching or state.pose == "crawling" then
+	-- Slow when crouching or crawling (the swimming pose out of water: isVisuallyCrawling).
+	if state.crouching or (state.pose == "crawling" and not state.inWater) then
 		inputX, inputZ, forward = inputX * SNEAK_FACTOR, inputZ * SNEAK_FACTOR, forward * SNEAK_FACTOR
 	end
 	state.sneaking = input.sneak
@@ -481,15 +509,19 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		state.sprinting = true
 	end
 	-- (Uses last tick's collision flags.)
-	if
-		state.sprinting
-		and (
-			forward <= 1.0e-5
+	if state.sprinting then
+		local noForward = forward <= 1.0e-5
+		if state.swimming then
+			if (not state.onGround and not input.sneak and noForward) or not state.inWater then
+				state.sprinting = false
+			end
+		elseif
+			noForward
 			or (state.horizontalCollision and not state.minorHorizontalCollision)
 			or (state.inWater and not state.underWater)
-		)
-	then
-		state.sprinting = false
+		then
+			state.sprinting = false
+		end
 	end
 	-- Sneaking in water sinks (LocalPlayer.goDownInWater).
 	if state.inWater and input.sneak then
@@ -528,27 +560,34 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	end
 	inputX, inputZ = inputX * INPUT_SCALE, inputZ * INPUT_SCALE
 
+	-- Player.travel: swimming steers up and down with the view (not up out of the water by
+	-- looking alone).
+	if state.swimming then
+		local look = input.lookY
+		local rate = if look < -0.2 then 0.085 else 0.06
+		if look <= 0 or input.jump or isWater(world.getBlock(floor(state.x), floor(state.y + 0.9), floor(state.z))) then
+			state.vy += (look - state.vy) * rate
+		end
+	end
+
 	-- LivingEntity.travel.
 	if state.inWater then
 		local startY = state.y
 		local drag = if state.sprinting then WATER_SPRINT_DRAG else WATER_DRAG
-		local falling = state.vy <= 0
 		accelerate(state, WATER_ACCELERATION, inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		state.vx *= drag
 		state.vy *= WATER_VERTICAL_DRAG
 		state.vz *= drag
-		-- Gravity in water is a sixteenth (none while sprinting, i.e. swimming).
+		-- Gravity in water is a sixteenth, none while sprinting (Entity.getFluidFallingAdjustedMovement;
+		-- its -0.003 case only applies with slow falling).
 		if not state.sprinting then
-			if falling and abs(state.vy - 0.005) >= 0.003 and abs(state.vy - GRAVITY / 16) < 0.003 then
-				state.vy = -0.003
-			else
-				state.vy -= GRAVITY / 16
-			end
+			state.vy -= GRAVITY / 16
 		end
 		-- Swimming against a ledge just above the water hops out.
 		if state.horizontalCollision then
-			local box = Hull.offset(PlayerPhysics.box(state), state.vx, state.vy + 0.6 - state.y + startY, state.vz)
+			local box =
+				Hull.offset(PlayerPhysics.box(state), state.vx, state.vy + WATER_EXIT_RISE - state.y + startY, state.vz)
 			if Hull.noCollision(solidAt, box) and not containsWater(world, box) then
 				state.vy = WATER_EXIT_HOP
 			end
@@ -567,8 +606,9 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		state.vz *= drag
 	end
 
-	-- Player.updatePlayerPose: crouch when sneaking, and whenever there is no room to stand.
-	local wanted: Pose = if input.sneak then "crouching" else "standing"
+	-- Player.updatePlayerPose: swim, crouch when sneaking, and crouch or crawl whenever there is no
+	-- room to stand.
+	local wanted: Pose = if state.swimming then "crawling" elseif input.sneak then "crouching" else "standing"
 	if fits(solidAt, state, wanted) then
 		state.pose = wanted
 	elseif fits(solidAt, state, "crouching") then

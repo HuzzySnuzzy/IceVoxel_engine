@@ -144,6 +144,7 @@ return function(t, shared, require)
 			forward = if o.forward ~= nil then o.forward else length,
 			facingX = if length > 0 then moveX / length else 0,
 			facingZ = if length > 0 then moveZ / length else 1,
+			lookY = o.lookY or 0,
 			jump = o.jump == true,
 			sneak = o.sneak == true,
 			sprint = o.sprint == true,
@@ -487,5 +488,87 @@ return function(t, shared, require)
 			PlayerPhysics.tick(diver, input(0, 0, { sneak = true }), deep)
 		end
 		t.ok(diver.y < floater.y - 1, `shift sinks faster: {diver.y} vs {floater.y}`)
+	end)
+
+	t.test("physics: a step height over one block walks up blocks, sneaking still stops at edges", function()
+		-- Stairs of full blocks going up in +X (column x is x blocks tall), then a plateau 6 high.
+		local stairs = physicsWorld(function(x, y, _z)
+			if x >= 1 and y >= 1 and y <= math.min(x, 6) then
+				return STONE
+			end
+			return nil
+		end)
+		local climber = PlayerPhysics.new(0.5, 1, 0.5)
+		climber.stepHeight = 1.0625
+		climber.onGround = true
+		local stepped = 0
+		for _ = 1, 80 do
+			local events = PlayerPhysics.tick(climber, input(1, 0), stairs)
+			if events.stepUp > 0 then
+				stepped += 1
+				t.ok(near(events.stepUp, 1, 1e-6), `stepped {events.stepUp}`)
+			end
+		end
+		t.ok(near(climber.y, 7) and climber.x > 6, `walked up the stairs to {climber.x}, {climber.y}`)
+		t.eq(stepped, 6, "one step per block")
+
+		-- Minecraft's 0.6 cannot.
+		local walker = PlayerPhysics.new(0.5, 1, 0.5)
+		walker.onGround = true
+		for _ = 1, 80 do
+			PlayerPhysics.tick(walker, input(1, 0), stairs)
+		end
+		t.ok(near(walker.y, 1) and walker.x < 1, `stopped at the first step: {walker.x}, {walker.y}`)
+
+		-- A two block wall is still a wall.
+		local wall = physicsWorld(function(x, y, _z)
+			return if x == 3 and (y == 1 or y == 2) then STONE else nil
+		end)
+		local blocked = PlayerPhysics.new(0.5, 1, 0.5)
+		blocked.stepHeight = 1.0625
+		blocked.onGround = true
+		for _ = 1, 60 do
+			PlayerPhysics.tick(blocked, input(1, 0), wall)
+		end
+		t.ok(near(blocked.x, 2.7, 1e-6) and near(blocked.y, 1), "two blocks are too high")
+
+		-- Sneaking at the edge of a one block drop still stops.
+		local ledge = physicsWorld(function(x, y, _z)
+			return if y == 1 and x <= 2 then STONE else nil
+		end)
+		local sneaker = PlayerPhysics.new(1.5, 2, 0.5)
+		sneaker.stepHeight = 1.0625
+		sneaker.onGround = true
+		for _ = 1, 60 do
+			PlayerPhysics.tick(sneaker, input(1, 0, { sneak = true }), ledge)
+		end
+		t.ok(near(sneaker.y, 2) and sneaker.x < 3.3, `sneaking stops at the one block drop: {sneaker.x}, {sneaker.y}`)
+	end)
+
+	t.test("physics: sprinting under water swims, steered by the view", function()
+		local deep = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 30 then WATER else nil
+		end)
+		local state = PlayerPhysics.new(0.5, 10, 0.5)
+		for _ = 1, 3 do
+			PlayerPhysics.tick(state, input(0, 0), deep)
+		end
+		t.ok(state.underWater, "under water")
+		for _ = 1, 10 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true, lookY = -0.5 }), deep)
+		end
+		t.ok(state.sprinting and state.swimming, "sprinting under water swims")
+		t.eq(state.pose, "crawling", "0.6 tall")
+		local y0 = state.y
+		for _ = 1, 20 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true, lookY = -0.5 }), deep)
+		end
+		t.ok(state.y < y0 - 1, `dives where the view points: {y0} -> {state.y}`)
+		local swim = speedOver(deep, input(1, 0, { sprint = true }), 60, 120)
+		t.ok(swim > 2.5, `swimming is faster than walking in water: {swim} m/s`)
+		for _ = 1, 5 do
+			PlayerPhysics.tick(state, input(0, 0), deep)
+		end
+		t.ok(not state.sprinting and not state.swimming, "stopping ends the swim")
 	end)
 end

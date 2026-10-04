@@ -156,10 +156,18 @@ local Config = {
 		-- Landing after a fall of more than 3 blocks hurts: ceil(distance - 3) half hearts of the
 		-- 20 a Minecraft player has, scaled to Humanoid.MaxHealth.
 		FallDamage = true,
-		-- Hold to sprint (also: double tap forward) / to sneak, as Enum.KeyCode names. Sneaking on
-		-- Shift takes Shift away from Roblox's shift lock while the character is alive.
+		-- Highest step (blocks) walked up without jumping. Minecraft's is 0.6 (a slab); just over one
+		-- block makes the steep terrain walkable. Sneaking still stops at every block edge.
+		StepHeight = 1.0625,
+		-- Sprint (also: double tap forward) and sneak keys, as Enum.KeyCode names. Sneaking on Shift
+		-- takes Shift away from Roblox's shift lock while the character is alive.
 		SprintKeys = { "LeftControl", "ButtonL3" },
 		SneakKeys = { "LeftShift", "ButtonB" },
+		-- true: the sprint key turns sprinting on and off (Minecraft's "Sprint: Toggle"; while on,
+		-- moving forward sprints). false: hold the key.
+		ToggleSprint = true,
+		-- Field of view while sprinting, relative to normal (Minecraft: 1.15). 1 turns it off.
+		SprintFov = 1.15,
 		-- Sprint and sneak buttons on touch screens (toggles).
 		TouchButtons = true,
 		-- How fast the character turns towards where it walks (radians per second; third person).

@@ -76,9 +76,13 @@ return function(t, shared, require)
 		fx, fy, fz = FluidFlow.at(get, 3, 0, 0)
 		t.ok(fz > 0.7, `flows towards the drop (got {fx}, {fz})`)
 
+		-- Falling water pushes down along a solid face (not in mid-air).
 		set(-2, 0, 0, water(8))
+		local _, airborne = FluidFlow.at(get, -2, 0, 0)
+		t.eq(airborne, 0, "falling water in the open does not push down")
+		set(-2, 0, 1, Blocks.id.Stone)
 		local _, down = FluidFlow.at(get, -2, 0, 0)
-		t.eq(down, -1, "falling water pushes down")
+		t.eq(down, -1, "falling water by a wall pushes down")
 		t.eq(select(1, FluidFlow.at(get, 0, -1, 0)), 0, "solid blocks do not flow")
 	end)
 end

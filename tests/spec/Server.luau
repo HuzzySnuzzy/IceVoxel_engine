@@ -259,6 +259,40 @@ return function(t, shared, require, server)
 		t.eq(world2:getBlock(41, FLOOR, 40), WATER, "infinite source")
 	end)
 
+	t.test("water spreads only towards the nearest way down", function()
+		local world, _, settle = newWorld()
+		for cz = -1, 0 do
+			for cx = -1, 0 do
+				world:getChunk(cx, cz)
+			end
+		end
+		-- A one block pit three blocks east of the source.
+		world:setBlock(3, FLOOR - 1, 0, AIR)
+		world:setBlock(0, FLOOR, 0, WATER)
+		settle()
+		t.ok(Blocks.get(world:getBlock(3, FLOOR - 1, 0)).fluid ~= nil, "the pit fills")
+		for x = 1, 2 do
+			t.ok(Blocks.get(world:getBlock(x, FLOOR, 0)).fluid ~= nil, `flows east at {x}`)
+		end
+		for _, p in { { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { 1, -1 }, { 2, 1 } } do
+			t.eq(world:getBlock(p[1], FLOOR, p[2]), AIR, `dry at {p[1]},{p[2]}`)
+		end
+
+		-- With no way down within four blocks it spreads everywhere (the diamond above); a pit five
+		-- blocks away is out of reach.
+		local far, _, settleFar = newWorld()
+		for cz = -1, 0 do
+			for cx = -1, 0 do
+				far:getChunk(cx, cz)
+			end
+		end
+		far:setBlock(6, FLOOR - 1, 0, AIR)
+		far:setBlock(0, FLOOR, 0, WATER)
+		settleFar()
+		t.ok(Blocks.get(far:getBlock(-1, FLOOR, 0)).fluid ~= nil, "spreads west too")
+		t.ok(Blocks.get(far:getBlock(0, FLOOR, 1)).fluid ~= nil, "and sideways")
+	end)
+
 	t.test("water waits at unloaded chunks and continues once they load", function()
 		local world, ticker, _ = newWorld()
 		world:setBlock(2, FLOOR, 2, WATER) -- chunk (0, 0); chunk (-1, 0) is not loaded
