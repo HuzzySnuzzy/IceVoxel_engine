@@ -25,6 +25,7 @@ local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SlotClicks = require(script.Parent.SlotClicks)
@@ -128,6 +129,7 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	self.tabFrames =
 		table.move(inventoryTab.frames, 1, #inventoryTab.frames, #thisTab.frames + 1, table.clone(thisTab.frames))
 	inventoryTab.button.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onTab()
 	end)
 
@@ -139,6 +141,7 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 	local close = Style.button(panel, "x", WIDTH - 15, 3, 12, 12, 6)
 	close.Visible = UserInputService.TouchEnabled
 	close.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onClose()
 	end)
 

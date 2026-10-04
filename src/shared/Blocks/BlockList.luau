@@ -38,6 +38,14 @@
 	                or "Furnace".
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace"; client
 	                Rendering/BlockDecor). Such blocks are drawn one part per block.
+	  sound         What breaking, placing, hitting, walking and falling on it sounds like
+	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
+	                Shared/Sounds): "stone", "wood", "gravel", "grass", "sand", "glass", "snow",
+	                "metal", "wool" or "water". Default: from the material (Wood / WoodPlanks wood;
+	                Grass / LeafyGrass grass; Ground / Mud / Pebble gravel, as Minecraft's dirt
+	                sounds; Sand sand; Snow snow; Glass / Ice / Glacier / Neon glass; Metal /
+	                DiamondPlate / CorrodedMetal / Foil metal; Fabric wool; anything else stone),
+	                "water" for fluids and none for blocks that are never drawn (air).
 
 	Light and shapes (torches, lanterns, glowstone):
 	  light         Light the block gives off, 0..15 (Minecraft's luminance: torches 14, glowstone
@@ -114,6 +122,7 @@ export type BlockSpec = {
 	container: number?,
 	menu: string?,
 	decor: string?,
+	sound: string?,
 	texture: string?,
 	tint: { number }?,
 	faces: { [string]: string }?,
@@ -256,7 +265,8 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 	},
-	{ name = "Cactus", color = { 64, 122, 52 }, material = "Grass", hardness = 0.4 },
+	-- (Minecraft's cactus sounds like wool.)
+	{ name = "Cactus", color = { 64, 122, 52 }, material = "Grass", hardness = 0.4, sound = "wool" },
 	{
 		name = "CoalOre",
 		color = { 58, 58, 62 },
@@ -670,6 +680,7 @@ table.insert(list, {
 	name = "Torch",
 	color = WOOD,
 	material = "Wood",
+	sound = "wood",
 	solid = false,
 	placeable = true,
 	hardness = 0,
@@ -710,6 +721,7 @@ for _, facing in { "North", "South", "West", "East" } do
 		displayName = "Wall Torch",
 		color = WOOD,
 		material = "Wood",
+		sound = "wood",
 		solid = false,
 		placeable = false,
 		hardness = 0,
@@ -730,6 +742,7 @@ table.insert(list, {
 	name = "Glowstone",
 	color = { 222, 178, 98 },
 	material = "Neon",
+	sound = "glass",
 	hardness = 0.3,
 	light = 15,
 	lightColor = { 255, 214, 150 },
@@ -765,6 +778,7 @@ table.insert(list, {
 	name = "Lantern",
 	color = IRON,
 	material = "Metal",
+	sound = "metal",
 	solid = false,
 	placeable = true,
 	hardness = 3.5,
@@ -782,6 +796,7 @@ table.insert(list, {
 	displayName = "Lantern",
 	color = IRON,
 	material = "Metal",
+	sound = "metal",
 	solid = false,
 	placeable = false,
 	hardness = 3.5,

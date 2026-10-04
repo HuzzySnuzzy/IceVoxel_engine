@@ -36,6 +36,7 @@ local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
@@ -199,6 +200,7 @@ local function closeButton(self: Self, panel: Frame): TextButton
 	local button = Style.button(panel, "x", WIDTH - 15, 3, 12, 12, 6)
 	button.Visible = UserInputService.TouchEnabled
 	button.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onClose()
 	end)
 	return button
@@ -262,6 +264,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 		frame.Visible = false
 	end
 	itemsTab.button.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onTab()
 	end)
 

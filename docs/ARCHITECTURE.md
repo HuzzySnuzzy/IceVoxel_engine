@@ -759,6 +759,102 @@ Dropped items are Minecraft's ItemEntity:
 - Clients run the same `ItemPhysics` between syncs, ease corrections in, and draw items bobbing and
   spinning (more copies for bigger stacks). A picked-up item flies to the player.
 
+## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
+
+Sounds are Minecraft's sound events, played with files that ship with every Roblox client.
+
+**The catalogue** (`Sounds`, from `Sounds/SoundList`). Events are numbered by position: the block
+events first (`Blocks.SOUND_TYPES` x the five actions), then SoundList's list, in a fixed order,
+so the server and clients agree on the numbers without sending names. Each event has a file, a
+volume and pitch (final: Sound.Volume and PlaybackSpeed), a random pitch variance, the distance it
+carries (16 blocks), the volume setting it follows (`source`), and who plays it (`side`).
+- Blocks have a sound type (`sound`, else by material: Wood wood, Ground gravel as Minecraft's
+  dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type has a dig clip
+  (break, place) and a step clip (step, hit, fall), scaled per action like Minecraft (break and
+  place (v + 1) / 2 and pitch 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15, fall v x 0.5 and 0.75).
+  With one thud and one footstep for everything, pitch tells the materials apart (placed: wool
+  0.6, gravel 0.72, stone 0.8, sand 0.88, wood 0.96, grass 1.08, metal 1.2, snow 1.32; glass is
+  placed like stone and shatters when broken).
+- Files: a client ships eleven sounds (content/sounds in Roblox's file manifest, checked against
+  version 0.741): action_falling.ogg, action_footsteps_plastic.mp3, action_get_up.mp3,
+  action_jump.mp3, action_jump_land.mp3, action_swim.mp3, impact_explosion_03.mp3,
+  impact_water.mp3, oof.ogg, ouch.ogg and volume_slider.ogg. The catalogue uses only those (the
+  classic gear sounds such as glassbreak.wav or unsheath.wav, and uuhhh.mp3, are gone). An event
+  may still name a `fallback`, which clients play when its file fails to load.
+- Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
+  (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
+
+**Who plays what** (Minecraft's split between server and client):
+
+| Side        | Events                                                     | How                              |
+| ----------- | ---------------------------------------------------------- | -------------------------------- |
+| `predicted` | block break / place / fall, player small / big fall        | the acting client at once; the server sends everyone else |
+| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip | the server sends everyone near, the player included |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave ambience | clients only, never sent |
+
+**The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
+within the event's distance (times a volume above 1, at most 2.55) plus `Sounds.BroadcastSlack`
+blocks one `Sound` message with all of theirs, at most `Sounds.MaxPerFrame`, leaving out the player
+whose client predicted it. Sounds a player's own messages cause (chest lids, armor put on) use up
+that player's budget (`Sounds.PlayerRate` a second, bursts of twice that), so a client spamming
+inventory or Use messages can't stream sounds to everyone near. Hooks: ServerNet (players' breaks
+and placements), Behaviours/Attached (torches popping off; water washing one away is silent, as in
+Minecraft), Containers' `onOpeners` (first viewer in, last out; a broken chest closes silently),
+Inventories (armor put on by any action, a tool breaking), Entities (pickups, at the item),
+Characters (health lost, at most every 0.5 s; death; a hurting landing's fall and the fall sound of
+the block below the feet).
+
+**Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
+else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
+picked at random.
+
+**The client** (`Audio/`). `SoundPlayer` plays everything: the server's `Sound` messages and the
+client's own sounds, which play at once as Minecraft's client does.
+- Voices: 32 Sounds in Attachments of one invisible anchored Part
+  (`workspace.IceVoxelAudio.Emitter`) for 3D, and 4 in `SoundService.IceVoxelAudio` for the
+  interface. Nothing is created per sound.
+  - A voice is free again when its sound ends, or when it is cut at `duration / PlaybackSpeed`.
+  - When all voices are busy, the oldest is taken. A kind of sound (an event's category) has at
+    most a few at once (`SoundRules.CAPS`: three mining hits, six footsteps).
+  - At most 32 sounds start per frame. Sounds beyond hearing of the listener are never started.
+- Listener: the camera, as in Minecraft, but never more than 4 blocks (`SoundRules.LISTENER_REACH`,
+  Minecraft's third person distance) from the eyes it looks at (`Camera.Focus`), turned like the
+  camera (`SoundService:SetListener`, every frame after the camera). Roblox's camera zooms out to
+  128 studs, where everything near the player would fade out, and the server only sends sounds
+  near the character. A Scriptable camera keeps Roblox's camera listener.
+- Playback (`SoundRules.playback`):
+  - Volume: the event's (or the override's) x the cue's x `Sounds.Volume` x the source's.
+  - Pitch: the event's pitch (or the override's PlaybackSpeed), varied by the event's variance,
+    x the cue's.
+  - Linear rolloff from `MinDistance` to `maxDistance x max(1, cue volume)` blocks.
+- Files are preloaded. One whose Sound has not loaded after 15 s (2 s once the preload reports it
+  failed; a Sound that loads always counts) plays its fallback from then on, with a warning.
+- Overrides: the override folder (SoundService, else ReplicatedStorage) is indexed by Sound name
+  and watched. The event's name wins over its category; several Sounds with one name are picked
+  at random.
+- Roblox's `RbxCharacterSounds` is disabled (its running, landing and death sounds would double
+  ours) and the sounds it made are removed.
+
+What the client plays itself:
+- `BlockInteraction`: break and place, and the survival hit every 4 ticks from the tick after the
+  start (`destroyTicks`; unbreakable blocks too).
+- `MovementSounds.tick`, after every hull tick (Minecraft's `Entity.move`):
+  - `moveDist` grows by 0.6 per block walked; a step plays each time it passes the next whole
+    number (every 1.67 blocks), on the block the hull stands on (else `floor(y - 0.2)`);
+  - fluids make no step; flying and sneaking on the ground are silent; in the air the step waits
+    for the landing;
+  - in water off the ground: swim sounds; entering water: a splash; both scaled by speed;
+  - a landing that hurts: `Sounds.fall` and the block's fall sound.
+- Other players' characters within 24 blocks of the listener, followed per player (a new
+  character starts over): the same rules every frame, from their feet (`SoundRules.observe`
+  guesses the ground, edges included, and the water; lying down in water is swimming).
+- Screens and JEI: clicks on buttons, tabs, page arrows, Back and "+" (not on slots or items).
+- `Ambience`:
+  - the open furnace window, while burning: crackles with Minecraft's odds for a furnace a block
+    or two away (about every 4 s);
+  - under `skyExposure` 0.2: `ambient.cave` every 90 to 300 seconds spent there, from up to 8
+    blocks each way around the listener.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -774,13 +870,14 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Fall`          | fall distance of a landing (fall damage)      |
 | client → server | `Mine`          | started / stopped mining a block              |
 | client → server | `Inventory`     | a numbered inventory action                   |
-| client → server | `Use`           | right click on a container block              |
+| client → server | `Use`           | right click on a block with a menu            |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
 | server → client | `Inventory`     | inventory + window container after action `ack` |
 | server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
 | server → client | `Notice`        | a message for the chat                        |
+| server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
 listener that connects) and routes messages by type, keeping early messages until a handler exists.

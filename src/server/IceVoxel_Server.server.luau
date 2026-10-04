@@ -10,7 +10,8 @@
 	  1. seed       -> published as an attribute on ReplicatedStorage.IceVoxel
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
-	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
+	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
+	                   the sounds players should hear (Audio/Sounds)
 	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
 	  6. players    -> game modes (/gamemode), the time (/time, /gamerule doDaylightCycle), cosmetic
 	                   characters (collision group, teleports, fall damage), item entities (drops),
@@ -34,6 +35,7 @@ local Simulation = require(Server.World.Simulation)
 local TimeOfDay = require(Server.World.TimeOfDay)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
+local Sounds = require(Server.Audio.Sounds)
 local Characters = require(Server.Players.Characters)
 local GameModes = require(Server.Players.GameModes)
 local TimeCommands = require(Server.Players.TimeCommands)
@@ -57,10 +59,11 @@ world.onChanged = function(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
+Sounds.start(net)
 TimeOfDay.start()
 GameModes.start(net)
 TimeCommands.start(net)
-Characters.start(net)
+Characters.start(net, world)
 -- Items must exist before anything can drop them.
 Entities.start(net, world)
 Inventories.start(net, world)

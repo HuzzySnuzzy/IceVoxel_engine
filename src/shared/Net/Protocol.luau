@@ -42,6 +42,10 @@
 	                   4 remove  f64 collector (UserId of the player who picked it up, 0 = none)
 	                   5 take    u8 count, f64 collector: a partial pickup (the item stays, smaller)
 	  Notice         u16 length, text: a message for the player (shown in the chat)
+	  Sound          u16 count, count x (u16 sound, f32 x, y, z, u8 volume, u8 pitch): sound events
+	                 to play at (x, y, z) (blocks), `sound` an event number of Shared/Sounds,
+	                 volume and pitch in hundredths of the event's own (100 = as listed). The
+	                 sounds near the player this frame (server Audio/Sounds).
 
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
 	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
@@ -70,6 +74,7 @@ Protocol.ServerMessage = {
 	Inventory = 4,
 	Entities = 5,
 	Notice = 6,
+	Sound = 7,
 }
 
 Protocol.EditAction = {
@@ -534,6 +539,67 @@ end
 
 function Protocol.decodeNotice(b: buffer): string
 	return buffer.readstring(b, 2, buffer.readu16(b, 0))
+end
+
+--[[ Sounds (server -> client) ]]
+
+-- A sound to play: event `sound` (Shared/Sounds) at (x, y, z) in blocks, its volume and pitch
+-- multiplied by `volume` and `pitch` (0..2.55, in steps of 0.01).
+export type SoundCue = { sound: number, x: number, y: number, z: number, volume: number, pitch: number }
+
+Protocol.SOUND_BYTES = 16
+Protocol.MAX_SOUNDS = 65535
+
+-- A multiplier as a u8 of hundredths (nonsense becomes 1).
+local function hundredths(value: number): number
+	if value ~= value then
+		return 100
+	end
+	return math.clamp(math.round(value * 100), 0, 255)
+end
+
+function Protocol.encodeSounds(cues: { SoundCue }): buffer
+	local count = math.min(#cues, Protocol.MAX_SOUNDS)
+	local b = buffer.create(2 + count * Protocol.SOUND_BYTES)
+	buffer.writeu16(b, 0, count)
+	local o = 2
+	for i = 1, count do
+		local cue = cues[i]
+		buffer.writeu16(b, o, cue.sound)
+		buffer.writef32(b, o + 2, cue.x)
+		buffer.writef32(b, o + 6, cue.y)
+		buffer.writef32(b, o + 10, cue.z)
+		buffer.writeu8(b, o + 14, hundredths(cue.volume))
+		buffer.writeu8(b, o + 15, hundredths(cue.pitch))
+		o += Protocol.SOUND_BYTES
+	end
+	return b
+end
+
+-- The cues of a Sound message, or nil when it is malformed.
+function Protocol.decodeSounds(b: buffer): { SoundCue }?
+	local len = buffer.len(b)
+	if len < 2 then
+		return nil
+	end
+	local count = buffer.readu16(b, 0)
+	if len ~= 2 + count * Protocol.SOUND_BYTES then
+		return nil
+	end
+	local cues: { SoundCue } = table.create(count)
+	local o = 2
+	for i = 1, count do
+		cues[i] = {
+			sound = buffer.readu16(b, o),
+			x = buffer.readf32(b, o + 2),
+			y = buffer.readf32(b, o + 6),
+			z = buffer.readf32(b, o + 10),
+			volume = buffer.readu8(b, o + 14) / 100,
+			pitch = buffer.readu8(b, o + 15) / 100,
+		}
+		o += Protocol.SOUND_BYTES
+	end
+	return cues
 end
 
 --[[ Server -> client ]]

@@ -59,8 +59,17 @@ export type Entity = {
 
 export type PlayerBox = { key: any, x: number, y: number, z: number }
 
--- How many of `count` items (`damage`: a tool's wear) player `key` takes.
-export type TryPickup = (key: any, item: number, count: number, damage: number?) -> number
+-- How many of `count` items (`damage`: a tool's wear) player `key` takes from the item at
+-- (x, y, z) (blocks: the centre of its box, where the pickup sound plays).
+export type TryPickup = (
+	key: any,
+	item: number,
+	count: number,
+	damage: number?,
+	x: number,
+	y: number,
+	z: number
+) -> number
 
 export type Changes = {
 	spawned: { number },
@@ -357,7 +366,8 @@ end
 
 --[[
 	One server tick. `players` are the living players that may pick items up (feet positions in
-	blocks); `tryPickup(key, item, count, damage)` returns how many of the items the player took.
+	blocks); `tryPickup(key, item, count, damage, x, y, z)` returns how many of the items the
+	player took.
 ]]
 function EntityWorld.tick(self: EntityWorld, players: { PlayerBox }, tryPickup: TryPickup)
 	local getBlock = self.getBlock
@@ -433,7 +443,8 @@ function EntityWorld.tick(self: EntityWorld, players: { PlayerBox }, tryPickup: 
 				and b.z - HALF < maxZ
 				and b.z + HALF > minZ
 			then
-				local taken = tryPickup(player.key, entity.item, entity.count, entity.damage)
+				local taken =
+					tryPickup(player.key, entity.item, entity.count, entity.damage, b.x, b.y + HEIGHT / 2, b.z)
 				taken = if type(taken) == "number" and taken == taken
 					then math.clamp(floor(taken), 0, entity.count)
 					else 0

@@ -11,7 +11,9 @@
 	  * light sources and attached blocks (torches, lanterns): `lightLut`, the `shape` boxes and
 	    `bounds` they are drawn and aimed at with, what they hang on (`canSurvive`) and which
 	    variant a placement makes (`placementFor`, `torchFor`), following Minecraft's TorchBlock,
-	    WallTorchBlock, LanternBlock and StandingAndWallBlockItem.
+	    WallTorchBlock, LanternBlock and StandingAndWallBlockItem,
+	  * sound types (`sound`, `soundLut`, `soundType`): what the block sounds like when it is
+	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`).
 ]]
 
 local BlockList = require(script.BlockList)
@@ -50,6 +52,8 @@ export type BlockDef = {
 	menu: string?,
 	-- Faces drawn on its parts (client Rendering/BlockDecor), one part per block.
 	decor: string?,
+	-- Sound type (one of Blocks.SOUND_TYPES; Shared/Sounds), nil for silent blocks (air).
+	sound: string?,
 	texture: string?,
 	tint: { number },
 	faces: { [string]: string }?,
@@ -115,6 +119,40 @@ local DEFAULT_LIGHT_COLOR = { 255, 220, 170 }
 local FULL_CELL: Bounds = table.freeze({ min = table.freeze({ 0, 0, 0 }), max = table.freeze({ 16, 16, 16 }) })
 -- Boxes a shaped block may have (the renderer keys part templates by box index).
 Blocks.MAX_SHAPE_BOXES = 15
+
+--[[
+	Sound types, Minecraft's SoundType: how a block sounds when broken, placed, hit while mining,
+	walked on and fallen on. Shared/Sounds has the events `block.<type>.<action>` for each. A
+	block's type is its `sound`, else its material's (SOUND_BY_MATERIAL), else stone; fluids sound
+	like water and blocks that are never drawn (air) like nothing.
+]]
+Blocks.SOUND_TYPES =
+	table.freeze({ "stone", "wood", "gravel", "grass", "sand", "glass", "snow", "metal", "wool", "water" })
+local SOUND_BY_MATERIAL: { [string]: string } = {
+	Wood = "wood",
+	WoodPlanks = "wood",
+	Grass = "grass",
+	LeafyGrass = "grass",
+	-- (Minecraft's dirt, coarse dirt and podzol sound like gravel.)
+	Ground = "gravel",
+	Mud = "gravel",
+	Pebble = "gravel",
+	Sand = "sand",
+	Snow = "snow",
+	Glass = "glass",
+	Ice = "glass",
+	Glacier = "glass",
+	Neon = "glass",
+	Metal = "metal",
+	DiamondPlate = "metal",
+	CorrodedMetal = "metal",
+	Foil = "metal",
+	Fabric = "wool",
+}
+local soundIndex: { [string]: number } = {}
+for index, name in Blocks.SOUND_TYPES do
+	soundIndex[name] = index
+end
 
 -- The box around a shape's boxes (turned ones included), in pixels 0..16.
 local function shapeBounds(shape: { ShapeBox }): Bounds
@@ -185,6 +223,11 @@ for index, spec in BlockList do
 		container = spec.container or 0,
 		menu = spec.menu,
 		decor = spec.decor,
+		sound = if spec.sound
+			then spec.sound
+			elseif kind == Blocks.KIND_NONE then nil
+			elseif kind == Blocks.KIND_FLUID then "water"
+			else SOUND_BY_MATERIAL[spec.material or "SmoothPlastic"] or "stone",
 		texture = spec.texture,
 		tint = spec.tint or { 255, 255, 255 },
 		faces = spec.faces,
@@ -198,6 +241,7 @@ for index, spec in BlockList do
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
+	assert(def.sound == nil or soundIndex[def.sound], `Block {spec.name} has unknown sound {def.sound}`)
 
 	if drawn then
 		local c, t = def.color, def.tint
@@ -337,6 +381,12 @@ for id, def in defs do
 	buffer.writeu8(Blocks.lightLut, id, def.light)
 end
 
+-- Sound type of each block (u8): its index in SOUND_TYPES, 0 = silent.
+Blocks.soundLut = buffer.create(Blocks.count)
+for id, def in defs do
+	buffer.writeu8(Blocks.soundLut, id, if def.sound then soundIndex[def.sound] else 0)
+end
+
 -- Blocks a player can point at (everything drawn except fluids).
 Blocks.targetLut = u8Lut(function(def)
 	return def.kind == Blocks.KIND_OPAQUE or def.kind == Blocks.KIND_TRANSPARENT
@@ -412,6 +462,15 @@ end)
 
 function Blocks.isSturdy(id: number): boolean
 	return id >= 0 and id < Blocks.count and buffer.readu8(Blocks.sturdyLut, id) == 1
+end
+
+-- Sound type of a block (one of SOUND_TYPES), nil for silent blocks (air) and unknown ids.
+function Blocks.soundType(id: number): string?
+	if id < 0 or id >= Blocks.count or id ~= id // 1 then
+		return nil
+	end
+	local index = buffer.readu8(Blocks.soundLut, id)
+	return if index > 0 then Blocks.SOUND_TYPES[index] else nil
 end
 
 -- Light given off by a block (0..15).

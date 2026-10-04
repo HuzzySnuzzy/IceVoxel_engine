@@ -35,6 +35,7 @@ local Items = require(Shared.Items)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local Style = require(script.Parent.Style)
 
@@ -316,6 +317,7 @@ function Hud.start()
 	moreButton.Parent = more
 	moreButton.Activated:Connect(function()
 		if inventoryHandler then
+			SoundPlayer.click()
 			inventoryHandler()
 		end
 	end)

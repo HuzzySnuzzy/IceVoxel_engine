@@ -34,6 +34,8 @@
 	            character far are noticed too, and the hull follows.
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
 	            does not die on its own, so the controller puts the Humanoid into Dead itself.
+	  Sounds    after every tick, Audio/MovementSounds plays the footsteps, swimming, splashes and
+	            hurting landings of what the hull did.
 
 	CharacterAnimator plays the avatar's animations from the hull state.
 ]]
@@ -54,6 +56,7 @@ local Rig = require(Shared.Movement.Rig)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
 
 local BLOCK = Config.BlockSize
 local Movement = Config.Movement
@@ -550,6 +553,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					accumulator -= TICK
 					previous = Vector3.new(state.x, state.y, state.z)
 					local events = PlayerPhysics.tick(state, frameInput, physicsWorld)
+					MovementSounds.tick(state, events, previous, physicsWorld.getBlock)
 					frameInput.jump = jumpHeld()
 					jumpLatched = false
 					view.speed = math.sqrt((state.x - previous.X) ^ 2 + (state.z - previous.Z) ^ 2) * TICK_RATE

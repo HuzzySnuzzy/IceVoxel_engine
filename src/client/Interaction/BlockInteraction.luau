@@ -44,6 +44,11 @@
 
 	`target()` and `miningProgress()` let other modules (Ui/Waila) read what is aimed at and how far
 	mining has got, without changing anything.
+
+	Sounds (Audio/SoundPlayer), played here at once as Minecraft's client does (the server sends
+	them to everyone else): a block's break sound when it breaks, its place sound when placed (the
+	variant placed), and while mining in survival its hit sound every 4 ticks on one block
+	(SoundRules.hitTick), unbreakable ones too.
 ]]
 
 local Players = game:GetService("Players")
@@ -68,6 +73,8 @@ local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local CrackOverlay = require(script.Parent.CrackOverlay)
 
 local BLOCK = Config.BlockSize
@@ -378,6 +385,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local function breakBlock(hit: Hit)
 		world:breakBlock(hit.x, hit.y, hit.z)
 		spawnDebris(hit.x, hit.y, hit.z, hit.block)
+		SoundPlayer.playBlock(hit.block, "break", hit.x, hit.y, hit.z)
 	end
 
 	-- Sources holding the break / use buttons down ("mouse", "gamepad", "touch").
@@ -412,6 +420,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- When the break button went down (the first frame after it only counts the time since).
 	local pressedAt: number? = nil
 	local lastCreativeBreak = -math.huge
+	-- Ticks spent hitting one block, for its hit sound (Minecraft's destroyTicks).
+	local hits = SoundRules.newHitClock()
 
 	-- The item in hand (a tool or anything else; nil: bare hands), for Mining's speeds.
 	local function heldItem(): number?
@@ -420,6 +430,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function stopMining()
+		SoundRules.resetHits(hits)
 		local current = mining
 		if current then
 			mining = nil
@@ -462,21 +473,30 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local underWater = if view then view.state.eyeInWater else false
 		local perTick = Mining.progressPerTick(hit.block, onGround, underWater, tool)
 		if perTick <= 0 then
-			-- Unbreakable.
+			-- Unbreakable: it only sounds hit.
+			if SoundRules.hitTick(hits, hit.x, hit.y, hit.z, hit.block) then
+				SoundPlayer.playBlock(hit.block, "hit", hit.x, hit.y, hit.z)
+			end
 			return
 		end
+		local starting = current == nil
 		if current == nil then
 			-- Minecraft's startDestroyBlock: the first tick on a block only starts it, unless it
 			-- breaks at once.
 			current = { x = hit.x, y = hit.y, z = hit.z, block = hit.block, tool = tool, progress = 0 }
 			mining = current
 			ClientNet.send(Protocol.ClientMessage.Mine, Protocol.encodeMine(true, hit.x, hit.y, hit.z))
+			SoundRules.resetHits(hits)
 			if perTick < 1 then
 				return
 			end
 		end
 		assert(current, "mining state")
 		current.progress += perTick
+		-- The hit sound, from the tick after the start (continueDestroyBlock).
+		if not starting and SoundRules.hitTick(hits, hit.x, hit.y, hit.z, hit.block) then
+			SoundPlayer.playBlock(hit.block, "hit", hit.x, hit.y, hit.z)
+		end
 		if current.progress >= 1 then
 			-- (No "stopped" message: the break itself ends it.)
 			mining = nil
@@ -567,6 +587,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- Survival uses one up (predicted); creative only numbers the action.
 		local seq = ClientInventory.place(stack.item)
 		world:placeBlock(x, y, z, block, seq)
+		SoundPlayer.playBlock(block, "place", x, y, z)
 		swing()
 	end
 

@@ -318,6 +318,54 @@ local Config = {
 		TrackingDistance = 96,
 	},
 
+	-- Sounds -----------------------------------------------------------------------------------------
+
+	--[[
+		Minecraft's sound events (Shared/Sounds, listed in Sounds/SoundList) played with sounds that
+		ship with Roblox. The server sends the ones other players cause (breaking, placing, chests,
+		pickups, tools breaking, hurting; server Audio/Sounds); clients play their own actions,
+		footsteps and the interface themselves (Audio/SoundPlayer).
+
+		To use your own sounds, put Sound instances in a Folder named OverrideFolder in SoundService
+		or ReplicatedStorage, named like an event ("block.stone.break") or its category with the
+		variant left out ("block.break"); several with one name are picked from at random. They play
+		with their own Volume and PlaybackSpeed instead of the event's (still scaled by the settings
+		below and varied by the event's pitch variance), heard as far as the event.
+	]]
+	Sounds = {
+		-- false: no sounds at all (the server sends none and clients play none).
+		Enabled = true,
+		-- Master volume (client): multiplies every sound.
+		Volume = 1,
+		-- Volume per kind of sound (client), like Minecraft's Music & Sounds options. Every event
+		-- names its `source`.
+		Sources = {
+			blocks = 1,
+			players = 1,
+			ambient = 1,
+			ui = 1,
+		},
+		-- Sounds are heard within their event's maxDistance (blocks; Minecraft's 16) and fade out
+		-- linearly; closer than MinDistance they are at full volume (client).
+		MinDistance = 1,
+		-- The server sends a sound to the players whose feet are within its maxDistance plus this
+		-- (a third person camera hears from behind the character).
+		BroadcastSlack = 8,
+		-- Most sounds one player is sent per frame (the rest are dropped).
+		MaxPerFrame = 64,
+		-- Sounds a player's own inventory clicks and chest opening may cause per second (armor put
+		-- on, chest lids), in bursts of twice that; more are dropped, so a client spamming those
+		-- messages can't flood everyone near with sounds.
+		PlayerRate = 8,
+		-- Where developers' replacement Sounds live (see above).
+		OverrideFolder = "IceVoxelSounds",
+		-- Footsteps (the player's and others'), interface clicks and the rare cave rumble
+		-- underground (client).
+		Footsteps = true,
+		Interface = true,
+		Ambient = true,
+	},
+
 	-- Server -----------------------------------------------------------------------------------------
 
 	Server = {

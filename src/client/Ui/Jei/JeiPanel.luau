@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 
+local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
 local Style = require(script.Parent.Parent.Style)
 local JeiData = require(script.Parent.JeiData)
@@ -140,9 +141,11 @@ function JeiPanel.new(parent: Instance): JeiPanel
 	end)
 
 	prev.Activated:Connect(function()
+		SoundPlayer.click()
 		self:turn(-1)
 	end)
 	nextButton.Activated:Connect(function()
+		SoundPlayer.click()
 		self:turn(1)
 	end)
 	return self

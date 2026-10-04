@@ -30,6 +30,11 @@
 	  Snapshots  a player whose inventory changed (their own actions, pickups, a viewer of the same
 	             chest clicking, a furnace cooking, tool wear, opening, closing) gets one snapshot
 	             per frame at most, and one on joining and respawning.
+	  Sounds     everyone near hears (Audio/Sounds): a chest's lid open for its first viewer and
+	             close after its last (Containers' onOpeners), armor put on by an inventory action
+	             (Shared/Sounds.equip, at the player) and a tool wearing out (entity.item.break).
+	             Lids and armor that a player's messages cause use up that player's sound budget
+	             (Audio/Sounds.allow), so spamming them can't flood the players near.
 
 	Inventories last for the session: nothing is saved.
 ]]
@@ -43,6 +48,7 @@ local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
+local SharedSounds = require(Shared.Sounds)
 local Types = require(Shared.Inventory.Types)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
@@ -50,6 +56,7 @@ local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Containers = require(script.Parent.Containers)
 local InventoryState = require(script.Parent.InventoryState)
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
 
 type Stack = Types.Stack
 
@@ -71,6 +78,9 @@ local Inventories = {}
 
 local state = InventoryState.new(Containers.default)
 local started = false
+-- The player whose message is being handled (Use, Inventory), whose sound budget a chest lid it
+-- opens or closes uses up (Audio/Sounds.allow); nil for the server's own closes.
+local actor: Player? = nil
 -- Creative throw budget per player.
 local throwBudget: { [Player]: { tokens: number, last: number } } = {}
 
@@ -163,9 +173,11 @@ function Inventories.heldTool(player: Player): number?
 end
 
 -- The tool in the player's hand was used `amount` times (ServerNet's breaks); at its durability it
--- breaks.
+-- breaks, which everyone near hears (the owner too: clients don't predict wear).
 function Inventories.wearTool(player: Player, amount: number)
-	state:wearHeld(player, amount)
+	if state:wearHeld(player, amount) then
+		Sounds.playAt(player, "entity.item.break")
+	end
 end
 
 --[[
@@ -252,7 +264,10 @@ local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 	if not Blocks.isValid(block) or Blocks.get(block).menu == nil then
 		return
 	end
-	throw(player, state:open(player, x, y, z, block), false)
+	actor = player
+	local thrown = state:open(player, x, y, z, block)
+	actor = nil
+	throw(player, thrown, false)
 end
 
 local function onInventory(player: Player, payload: buffer)
@@ -264,9 +279,27 @@ local function onInventory(player: Player, payload: buffer)
 	local window = state:window(player)
 	local container = window and window.container
 	local fx, fy, fz = state:openPosition(player)
-	throw(player, state:apply(player, seq, action, GameMode.isCreative(player)), false)
+	-- (The armor as it was, to hear what the action put on.)
+	local armor: { [number]: Stack? } = {}
+	if window then
+		for slot = 1, Types.ARMOR_SIZE do
+			armor[slot] = window.inventory.armor[slot]
+		end
+	end
+	actor = player
+	local thrown = state:apply(player, seq, action, GameMode.isCreative(player))
+	actor = nil
+	throw(player, thrown, false)
 	if fx ~= nil and container and container.kind == "furnace" then
 		Containers.default:markActive(fx, fy, fz)
+	end
+	if window then
+		for slot = 1, Types.ARMOR_SIZE do
+			local sound = SharedSounds.equip(armor[slot], window.inventory.armor[slot])
+			if sound and Sounds.allow(player) then
+				Sounds.playAt(player, sound)
+			end
+		end
 	end
 end
 
@@ -324,6 +357,21 @@ end
 function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	assert(not started, "Inventories.start was already called")
 	started = true
+
+	-- Chest lids: open for the first viewer, closed after the last (the block's menu decides).
+	Containers.default.onOpeners = function(
+		x: number,
+		y: number,
+		z: number,
+		container: Types.Container,
+		opened: boolean
+	)
+		local sound = SharedSounds.container(container.block, opened)
+		local by = actor
+		if sound and (by == nil or Sounds.allow(by)) then
+			Sounds.play(sound, x + 0.5, y + 0.5, z + 0.5)
+		end
+	end
 
 	net.on(Protocol.ClientMessage.Inventory, onInventory)
 	net.on(Protocol.ClientMessage.Use, function(player: Player, payload: buffer)

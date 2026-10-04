@@ -13,7 +13,9 @@
 	Viewers are tracked per container (any keys; Players in the game). A container that is empty
 	(and, for a furnace, neither burning nor cooking) and open by nobody is forgotten: opening it
 	again creates it again, empty, which is the same thing, and keeps the table as small as the
-	number of containers in use.
+	number of containers in use. A store's `onOpeners` hears when a container gets its first viewer
+	and loses its last (Minecraft's ContainerOpenersCounter: the chest lid sounds, set by
+	Players/Inventories); a container taken away (its block broken) closes silently.
 
 	Furnaces cook whether anyone looks or not: `tickFurnaces` runs one Crafting/Smelting tick (20
 	per second, Minecraft's AbstractFurnaceBlockEntity.serverTick) on every active furnace and says
@@ -52,6 +54,8 @@ export type Store = {
 	count: number,
 	-- Keys of the furnaces to tick.
 	active: { [string]: boolean },
+	-- Called when a container gets its first viewer (opened = true) or loses its last (false).
+	onOpeners: ((x: number, y: number, z: number, container: Container, opened: boolean) -> ())?,
 
 	get: (self: Store, x: number, y: number, z: number, block: number) -> Container,
 	peek: (self: Store, x: number, y: number, z: number) -> Container?,
@@ -157,6 +161,10 @@ function Store.addViewer(self: Store, x: number, y: number, z: number, viewer: a
 	if entry and not entry.viewers[viewer] then
 		entry.viewers[viewer] = true
 		entry.viewerCount += 1
+		local onOpeners = self.onOpeners
+		if entry.viewerCount == 1 and onOpeners then
+			onOpeners(x, y, z, entry.container, true)
+		end
 	end
 end
 
@@ -169,6 +177,10 @@ function Store.removeViewer(self: Store, x: number, y: number, z: number, viewer
 	end
 	entry.viewers[viewer] = nil
 	entry.viewerCount -= 1
+	local onOpeners = self.onOpeners
+	if entry.viewerCount == 0 and onOpeners then
+		onOpeners(x, y, z, entry.container, false)
+	end
 	if entry.viewerCount == 0 and isEmpty(entry.container) then
 		self.entries[key] = nil
 		self.count -= 1

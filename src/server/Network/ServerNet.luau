@@ -18,6 +18,8 @@
 	    A broken container drops its contents in both modes, and any block with a window (chest,
 	    furnace, crafting table) closes it for everyone using it.
 	  * Broadcasts all world changes once per frame.
+	  * Plays the sounds of players' breaks and placements to everyone near but that player, whose
+	    client already played them (Audio/Sounds; Minecraft's levelEvent 2001 and place sound).
 
 	The inventory and item entity sides come in through `setRules` (the server script wires
 	Players/Inventories and Entities), so ServerNet requires neither of them. Its `dropBlock` rule
@@ -39,6 +41,7 @@ local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Drops = require(script.Parent.Parent.Behaviours.Drops)
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local EditRules = require(script.Parent.EditRules)
 local Mining = require(Shared.Mining)
 
@@ -258,9 +261,10 @@ function ServerNet.start(world: World): ServerNet
 	end
 
 	--[[
-		Breaks block (x, y, z), which holds `current`, mined with `tool`: what the tool harvests
-		drops (survival), a container's contents drop and its window closes. `wearer` (a survival
-		player) has the tool in their hand worn. false if the world refused the change.
+		Breaks block (x, y, z), which holds `current`, mined with `tool` by `breaker`: what the tool
+		harvests drops (survival), a container's contents drop and its window closes, and everyone
+		near but the breaker hears it break. `wearer` (a survival player) has the tool in their hand
+		worn. false if the world refused the change.
 	]]
 	local function performBreak(
 		x: number,
@@ -269,11 +273,13 @@ function ServerNet.start(world: World): ServerNet
 		current: number,
 		creative: boolean,
 		tool: number?,
-		wearer: Player?
+		wearer: Player?,
+		breaker: Player
 	): boolean
 		if not world:setBlock(x, y, z, Blocks.AIR) then
 			return false
 		end
+		Sounds.playBlock(current, "break", x, y, z, breaker)
 		local removeContainer = rules.removeContainer
 		if removeContainer and EditRules.hasMenu(current) then
 			removeContainer(x, y, z)
@@ -309,7 +315,16 @@ function ServerNet.start(world: World): ServerNet
 				-- Like Minecraft's delayed destroy, the item in hand when it completes times, harvests
 				-- and wears (switching to a slower one just waits, until `expires` undoes it).
 				if
-					not performBreak(pending.x, pending.y, pending.z, pending.block, false, heldTool(player), player)
+					not performBreak(
+						pending.x,
+						pending.y,
+						pending.z,
+						pending.block,
+						false,
+						heldTool(player),
+						player,
+						player
+					)
 				then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
@@ -400,7 +415,7 @@ function ServerNet.start(world: World): ServerNet
 				return
 			end
 			mining[player] = nil
-			performBreak(x, y, z, current, creative, tool, if creative then nil else player)
+			performBreak(x, y, z, current, creative, tool, if creative then nil else player, player)
 		elseif action == EditAction.Place then
 			if
 				not EditRules.mayPlace(block, current)
@@ -416,7 +431,9 @@ function ServerNet.start(world: World): ServerNet
 				reject()
 				return
 			end
-			world:setBlock(x, y, z, block)
+			if world:setBlock(x, y, z, block) then
+				Sounds.playBlock(block, "place", x, y, z, player)
+			end
 		else
 			reject()
 		end

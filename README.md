@@ -69,6 +69,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   shows everything the game knows about the block: id, position and chunk, biome, hardness,
   tool, drops with the held item and by hand, break time, light, fluid level, render kind,
   friction and menu.
+- **Sounds.** Minecraft's sound events for everything that should make a sound: breaking, placing
+  and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
+  water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
+  swimming, chest lids, a lit furnace crackling, items picked up, tools breaking, armor put on,
+  getting hurt and dying, interface clicks and a rare rumble deep in caves. They are stand-ins made
+  from the eleven sounds every Roblox client ships, told apart by pitch, so nothing has to be
+  uploaded, and players hear what others do within 16 blocks. Each one can be replaced by your own
+  sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel, flowing water (Minecraft rules, including infinite sources) and grass
@@ -163,6 +171,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             clicks, used by the server and for client prediction)
   Entities/ItemPhysics      dropped item movement (server and client)
   GameMode, Mining          survival / creative, mining times by hand and with tools
+  Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
   DayCycle                  Minecraft's day: celestial angle, sky light, /time arguments, lighting
                             blends
   Biomes/  BiomeList        biome definitions and altitude bands
@@ -188,6 +197,7 @@ src/server   -> ServerScriptService.IceVoxel
                             day clock, published as workspace attributes)
   Behaviours/               Gravity, Fluid, Grass, Attached (torches and lanterns need support),
                             Drops (block update logic)
+  Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops),
                             replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
@@ -214,6 +224,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
                             clicks), Style, Waila + WailaInfo (what the crosshair points at),
                             Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
+  Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
+                            overrides), MovementSounds (footsteps, swimming, landings), Ambience
+                            (furnace, caves), SoundRules (the pure rules)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
@@ -258,6 +271,14 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it.                 |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
+| `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
+| `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui). |
+| `Sounds.PlayerRate`       | 8       | Sounds a player's inventory clicks and chest opening may cause per second (anti-spam). |
+| `Sounds.OverrideFolder`   | IceVoxelSounds | Folder (SoundService / ReplicatedStorage) of replacement Sounds. |
+| `Sounds.Sources`          | 1 each  | Volume of blocks, players, ambient and ui sounds.                   |
+| `Sounds.Footsteps`        | true    | Footsteps of everyone (swimming and splashes still play).           |
+| `Sounds.Interface`        | true    | Clicks of buttons and tabs.                                         |
+| `Sounds.Ambient`          | true    | The rare cave rumble deep underground.                              |
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
@@ -309,6 +330,50 @@ mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `
 need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
 nothing, `container = 27, menu = "Chest"` for a chest-like block). Blocks that look identical
 share one part template.
+
+**Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
+`ui.button.click`...; the full list is `src/shared/Sounds/SoundList.luau`) played with one of the
+eleven sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, jump,
+landing, swimming and splash, the explosion, `oof`, `ouch` and the volume slider's tick), as
+stand-ins told apart by pitch. To use your own, add a Folder named `IceVoxelSounds` to SoundService
+(or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
+
+```
+SoundService
+  IceVoxelSounds            Folder
+    block.stone.break       Sound (SoundId = rbxassetid://...)
+    block.stone.break       another Sound: a variant, one is picked at random
+    block.break             every other block type's break sound
+    item.armor.equip        every armor material
+    entity.item.pickup
+```
+
+A Sound named like the event wins; otherwise one named like its category, the event with the
+variant left out (`block.break` for every `block.<type>.break`, `item.armor.equip` for every
+`item.armor.equip_<material>`). Several Sounds with one name are Minecraft's variants. They play
+with their own Volume and PlaybackSpeed (times the volume settings, varied a little like the
+built-in ones), heard as far as the event (16 blocks). To change the defaults instead, edit `id`,
+`volume` and `pitch` in SoundList: block types have a `dig` clip (breaking, placing) and a `step`
+clip (walking, mining hits, falls), scaled per action like Minecraft. A block's sound type is its
+`sound` in BlockList (`sound = "metal"`), else its material's. Server scripts can play any event
+to the players near a point:
+
+```lua
+local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
+Sounds.play("block.glass.break", x + 0.5, y + 0.5, z + 0.5) -- block coordinates
+```
+
+Client scripts can play any event for the local player alone:
+
+```lua
+local SoundPlayer = require(game.Players.LocalPlayer.PlayerScripts.IceVoxel.Audio.SoundPlayer)
+SoundPlayer.play("entity.generic.splash", x, y, z) -- blocks
+SoundPlayer.click()                                -- ui.button.click
+```
+
+Sounds are heard from the camera, but never more than 4 blocks from the player's eyes
+(`SoundRules.LISTENER_REACH`, Minecraft's third person distance), so zooming out does not
+silence the world; a Scriptable camera hears from where it is.
 
 **A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
 offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from

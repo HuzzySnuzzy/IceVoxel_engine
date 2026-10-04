@@ -16,6 +16,9 @@
 	  Net/Notices                server messages in the chat (/gamemode answers)
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
+	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
+	                             Sound messages, developer overrides), MovementSounds (footsteps,
+	                             swimming, landings), Ambience (a lit furnace, caves)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
@@ -47,6 +50,12 @@ local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
 local Map = require(Client.Map)
+local SoundPlayer = require(Client.Audio.SoundPlayer)
+local MovementSounds = require(Client.Audio.MovementSounds)
+local Ambience = require(Client.Audio.Ambience)
+
+-- First, so the server's sounds play from the start instead of piling up.
+SoundPlayer.start()
 
 local seed = Shared:GetAttribute("Seed")
 while type(seed) ~= "number" do
@@ -74,6 +83,8 @@ BlockInteraction.start(world)
 DebugOverlay.start(streamer)
 Waila.start(world, generator)
 Map.start(pool, generator)
+MovementSounds.start(world)
+Ambience.start()
 
 RunService.Heartbeat:Connect(function(dt)
 	streamer:update(dt)

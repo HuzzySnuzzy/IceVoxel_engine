@@ -4,8 +4,9 @@
 
 	When a neighbour changes, the block checks the block it hangs on next tick; if that is no longer
 	sturdy (broken, replaced by water, never there), the block breaks and drops its item, in every
-	game mode (Minecraft's updateShape returning air: TorchBlock, WallTorchBlock, LanternBlock). A
-	support in an unloaded chunk is waited for, not guessed. Drops go through Behaviours/Drops.
+	game mode (Minecraft's updateShape returning air: TorchBlock, WallTorchBlock, LanternBlock), and
+	everyone near hears it break (Level.destroyBlock's break effect, Audio/Sounds). A support in an
+	unloaded chunk is waited for, not guessed. Drops go through Behaviours/Drops.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,6 +15,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 
 local Drops = require(script.Parent.Drops)
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
 
 local RETRY_TICKS = 40
 
@@ -32,6 +34,7 @@ function Attached.onTick(world: any, ticker: any, x: number, y: number, z: numbe
 		return
 	end
 	if not Blocks.isSturdy(support) and world:setBlock(x, y, z, Blocks.AIR) then
+		Sounds.playBlock(block, "break", x, y, z)
 		Drops.block(x, y, z, block)
 	end
 end

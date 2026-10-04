@@ -33,6 +33,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 
+local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.Parent.MenuLayout)
 local Style = require(script.Parent.Parent.Style)
@@ -179,6 +180,7 @@ local function newTab(self: Self, root: Frame, category: JeiData.Category)
 		end
 		for index, group in state.groups do
 			if group.category == category then
+				SoundPlayer.click()
 				self:selectCategory(index)
 				return
 			end
@@ -233,19 +235,23 @@ function RecipeView.new(parent: Instance): RecipeView
 	local b = JeiLayout.BACK
 	self.back = Style.button(panel, "Back", b.x, b.y, b.w, b.h, 6)
 	self.back.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onBack()
 	end)
 	local c = JeiLayout.CLOSE
 	self.close = Style.button(panel, "x", c.x, c.y, c.w, c.h, 6)
 	self.close.Visible = UserInputService.TouchEnabled
 	self.close.Activated:Connect(function()
+		SoundPlayer.click()
 		self.onClose()
 	end)
 	local p, n = JeiLayout.PREV, JeiLayout.NEXT
 	Style.button(panel, "<", p.x, p.y, p.w, p.h, 6).Activated:Connect(function()
+		SoundPlayer.click()
 		self:turn(-1)
 	end)
 	Style.button(panel, ">", n.x, n.y, n.w, n.h, 6).Activated:Connect(function()
+		SoundPlayer.click()
 		self:turn(1)
 	end)
 	return self
@@ -397,6 +403,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		button.Activated:Connect(function()
 			local status = widget.status
 			if status and status.ok then
+				SoundPlayer.click()
 				self.onTransfer(entry, shiftDown())
 			end
 		end)

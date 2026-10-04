@@ -7,6 +7,8 @@
 	            not generated (or evicted) is frozen; unloaded neighbours count as solid.
 	  Pickups   living characters (Humanoid.Health > 0) pick items up at their feet (Rig.feet);
 	            the pickup handler (Players/Inventories) says how many fit in the inventory.
+	            Everyone near hears it, the collector too (entity.item.pickup at the item,
+	            Audio/Sounds; Minecraft's clients play it on the take packet).
 	  Spawning  `dropBlock` is Minecraft's Block.popResource, `dropContents` its
 	            Containers.dropItemStack (chest contents, in random handfuls), `throwFromPlayer`
 	            its Player.drop (thrown forwards from the eyes, or scattered around on death).
@@ -35,6 +37,7 @@ local ItemPhysics = require(Shared.Entities.ItemPhysics)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EntityWorld = require(script.Parent.EntityWorld)
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
 
 type Stack = Items.Stack
 type EntityOp = Protocol.EntityOp
@@ -95,7 +98,15 @@ local function feetOf(player: Player): Vector3?
 	return characterFeet(player.Character) or lastFeet[player]
 end
 
-local function tryPickup(key: any, item: number, count: number, damage: number?): number
+local function tryPickup(
+	key: any,
+	item: number,
+	count: number,
+	damage: number?,
+	x: number,
+	y: number,
+	z: number
+): number
 	local handler = pickupHandler
 	local player = key :: Player
 	if handler == nil or player.Parent == nil then
@@ -106,7 +117,11 @@ local function tryPickup(key: any, item: number, count: number, damage: number?)
 		warn(`[IceVoxel] the item pickup handler failed: {taken}`)
 		return 0
 	end
-	return if type(taken) == "number" then taken else 0
+	local amount = if type(taken) == "number" then taken else 0
+	if amount >= 1 then
+		Sounds.play("entity.item.pickup", x, y, z)
+	end
+	return amount
 end
 
 local function spawnOp(entity: EntityWorld.Entity): EntityOp
