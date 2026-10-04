@@ -140,13 +140,17 @@ return function(t, shared, require)
 		t.ok(land > 0 and ocean > 0 and high > 0, `land {land}, ocean {ocean}, mountains {high}`)
 		t.ok(biomeCount >= 6, `only {biomeCount} biomes in a 12k block square`)
 
+		-- Caves come in regions (a few hundred blocks wide): look along a line of chunks.
 		local caveCells = 0
-		for cx = 0, 3 do
+		for cx = 0, 120, 4 do
 			local r = gen.generate(0, cx, 0)
 			for i = 0, buffer.len(r.data) // 2 - 1 do
 				if buffer.readu16(r.data, i * 2) == Blocks.CAVE_AIR then
 					caveCells += 1
 				end
+			end
+			if caveCells > 0 then
+				break
 			end
 		end
 		t.ok(caveCells > 0, "no caves generated")

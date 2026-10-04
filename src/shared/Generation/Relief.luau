@@ -112,6 +112,17 @@ function Relief.toY(h: number): number
 end
 local toY = Relief.toY
 
+-- Block height -> datapack height H (inverse of toY).
+function Relief.toH(y: number): number
+	if y >= SEA then
+		return H_SEA + (y - SEA) / LAND_BLOCKS
+	end
+	return H_SEA + (y - SEA) / DEEP_BLOCKS
+end
+
+-- Blocks per H on land: depths below the surface in H (caves) are depth / LAND_BLOCKS.
+Relief.LAND_BLOCKS = LAND_BLOCKS
+
 -- Jagged octaves a level keeps: those at least two cells wide (`wavelength` in datapack blocks).
 local function octaveLimits(wavelength: number): { number }
 	local limits = {}

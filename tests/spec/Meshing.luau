@@ -341,10 +341,8 @@ return function(t, shared, require)
 			end
 			return found
 		end
-		local before = 0
-		for _, chunk in { { -13, -11 }, { -12, -11 }, { -10, -10 } } do
-			local r = gen.generate(0, chunk[1], chunk[2])
-			-- The section boundary crossed by the most tunnels.
+		-- The section boundary of a chunk crossed by the most tunnels (0 = none).
+		local function busiestBoundary(r: any): (number, number)
 			local boundary, most = 0, 0
 			for s = 1, r.height // section - 1 do
 				local count = 0
@@ -362,10 +360,23 @@ return function(t, shared, require)
 					boundary, most = s * section, count
 				end
 			end
-			t.ok(most > 0, "chunk has a tunnel crossing a section boundary")
-			before += holes(r, boundary, false)
-			t.eq(holes(r, boundary, true), 0, `holes at the cave boundary of chunk {chunk[1]},{chunk[2]}`)
+			return boundary, most
 		end
+		-- Caves come in regions: test the first chunks along a line that have tunnels across sections.
+		local before, tested = 0, 0
+		for cx = -40, 120, 3 do
+			local r = gen.generate(0, cx, -11)
+			local boundary, most = busiestBoundary(r)
+			if most > 0 then
+				before += holes(r, boundary, false)
+				t.eq(holes(r, boundary, true), 0, `holes at the cave boundary of chunk {cx},-11`)
+				tested += 1
+				if tested == 3 then
+					break
+				end
+			end
+		end
+		t.eq(tested, 3, "chunks with a tunnel crossing a section boundary")
 		t.ok(before > 0, "without caps the tunnels would end in the void")
 	end)
 end

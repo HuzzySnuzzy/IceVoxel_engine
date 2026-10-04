@@ -37,6 +37,7 @@ local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local WorkerPool = require(script.Parent.WorkerPool)
 local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
+local CaveReach = require(script.Parent.CaveReach)
 
 local SIZE = Config.ChunkSize
 local SECTION = Config.SectionHeight
@@ -84,6 +85,9 @@ export type Node = {
 	job: number,
 }
 
+-- Underground camera (blocks) and how far around it caves are revealed (blocks, to section centres).
+type CaveView = { position: Vector3, reach: number }
+
 export type Stats = {
 	nodes: { [number]: number },
 	waiting: number,
@@ -106,6 +110,9 @@ export type ChunkStreamer = {
 	-- Ready nodes waiting for a coarser node over their area to go away.
 	unshown: { [Node]: boolean },
 	sinceRefresh: number,
+	caveReach: CaveReach.Tracker,
+	-- Updated every refresh; nil while the camera is above the terrain.
+	caveView: CaveView?,
 
 	update: (self: ChunkStreamer, dt: number) -> (),
 	isReady: (self: ChunkStreamer, x: number, z: number) -> boolean,
@@ -130,33 +137,51 @@ local function viewerPosition(): Vector3
 	return workspace.CurrentCamera.CFrame.Position
 end
 
--- Camera position in blocks, or nil while it is above the terrain surface (caves stay hidden then).
-local function caveViewpoint(self: ChunkStreamer): Vector3?
+-- Where caves are revealed from: nil while the camera is above the terrain surface (caves stay
+-- hidden then). See updateCaveView.
+local function caveViewpoint(self: ChunkStreamer): CaveView?
+	return self.caveView
+end
+
+--[[
+	Underground, caves are revealed around the camera out to a radius that grows with the open
+	space around it (CaveReach), so big caverns are not cut off by rock a few dozen blocks away.
+]]
+local function updateCaveView(self: ChunkStreamer)
 	local camera = workspace.CurrentCamera.CFrame.Position / BLOCK
 	local surface = self.generator.column(math.floor(camera.X), math.floor(camera.Z))
-	if camera.Y < surface - 1 then
-		return camera
+	local now = os.clock()
+	if camera.Y >= surface - 1 then
+		self.caveReach:update(nil, now)
+		self.caveView = nil
+		return
 	end
-	return nil
+	local caves = Config.Caves
+	local open = CaveReach.probe(function(x, y, z)
+		return self.world:getBlock(x, y, z)
+	end, camera.X, camera.Y, camera.Z, caves.RevealRadiusMax)
+	local radius = self.caveReach:update(open, now)
+	self.caveView = { position = camera, reach = radius + SECTION }
 end
 
 -- Should section `s` of full detail chunk (cx, cz) be meshed with caves visible?
-local function wantsRevealAt(cx: number, cz: number, s: number, camera: Vector3?): boolean
-	if camera == nil then
+local function wantsRevealAt(cx: number, cz: number, s: number, view: CaveView?): boolean
+	if view == nil then
 		return false
 	end
+	local camera = view.position
 	local dx = (cx + 0.5) * SIZE - camera.X
 	local dz = (cz + 0.5) * SIZE - camera.Z
 	local dy = (s + 0.5) * SECTION - camera.Y
-	local reach = Config.Caves.RevealRadius + SECTION
+	local reach = view.reach
 	return dx * dx + dy * dy + dz * dz < reach * reach
 end
 
-local function wantsReveal(node: Node, s: number, camera: Vector3?): boolean
+local function wantsReveal(node: Node, s: number, camera: CaveView?): boolean
 	return wantsRevealAt(node.nx, node.nz, s, camera)
 end
 
-local function revealList(node: Node, camera: Vector3?): { number }
+local function revealList(node: Node, camera: CaveView?): { number }
 	if camera == nil then
 		return {}
 	end
@@ -215,7 +240,7 @@ end
 
 -- GreedyMesher.Border hidden mask of revealed section `s` of chunk (cx, cz): the sides beyond
 -- which caves are hidden (neighbours that are not revealed full detail chunks / sections).
-local function capMask(desired: { [number]: number }, cx: number, cz: number, s: number, camera: Vector3?): number
+local function capMask(desired: { [number]: number }, cx: number, cz: number, s: number, camera: CaveView?): number
 	local mask = 0
 	for i, side in SIDES do
 		local x, z = cx + side[1], cz + side[2]
@@ -239,7 +264,7 @@ local function capsFor(
 	node: Node,
 	sections: { number },
 	reveal: { number },
-	camera: Vector3?
+	camera: CaveView?
 ): { number }
 	local caps: { number } = {}
 	for _, s in sections do
@@ -275,6 +300,13 @@ function ChunkStreamer.new(
 			dirtyNodes = {},
 			unshown = {},
 			sinceRefresh = math.huge,
+			caveReach = CaveReach.tracker(
+				Config.Caves.RevealRadius,
+				math.max(Config.Caves.RevealRadius, Config.Caves.RevealRadiusMax),
+				SECTION,
+				2
+			),
+			caveView = nil,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer
 
@@ -744,6 +776,7 @@ local function refresh(self: ChunkStreamer)
 	end)
 	self.queue = queue
 
+	updateCaveView(self)
 	updateReveal(self)
 	retire(self)
 end

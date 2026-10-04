@@ -39,6 +39,9 @@ local Config = {
 		-- While the camera is below the surface, cave walls are meshed in sections within this many
 		-- blocks of it. Otherwise caves are treated as solid rock, which keeps the part count low.
 		RevealRadius = 48,
+		-- In big caverns (the Underlands) the radius grows with the open space around the camera, up
+		-- to this. Caves only exist in full detail chunks, so more than their reach does nothing.
+		RevealRadiusMax = 96,
 	},
 
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).

@@ -125,7 +125,9 @@ function TerrainGenerator.new(seed: number): Generator
 	local bandJitter = Noise.fbm2(seed, "climate.band", 1 / 24, 2)
 	local patchNoise = Noise.fbm2(seed, "surface.patches", 1 / 10, 2)
 
-	local carveCaves = Caves.new(seed)
+	local carveCaves = Caves.new(seed, function(x: number, z: number): number
+		return (relief.height(x, z, 0))
+	end)
 
 	--[[
 		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
@@ -304,7 +306,7 @@ function TerrainGenerator.new(seed: number): Generator
 		-- 3. Caves and ores only exist in full detail chunks.
 		if level == 0 then
 			if Config.Caves.Enabled then
-				carveCaves(data, originX, originZ, heights)
+				carveCaves(data, originX, originZ, heights, cells)
 				if yield then
 					yield()
 				end
