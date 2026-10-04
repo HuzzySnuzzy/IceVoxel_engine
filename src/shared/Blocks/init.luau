@@ -29,13 +29,23 @@ export type BlockDef = {
 	-- Minecraft block friction (slipperiness) when walking on it.
 	friction: number,
 	fluid: { group: string, level: number, tickDelay: number }?,
-	-- Minecraft destroy time (survival mining by hand takes hardness x 1.5 s); < 0 = unbreakable.
+	displayName: string?,
+	-- Minecraft destroy time (see Shared/Mining); < 0 = unbreakable.
 	hardness: number,
-	-- Item name dropped when broken in survival (nil = the block itself, false = nothing); see
-	-- Items.drops.
+	-- The tool that mines it fast ("pickaxe", "axe", "shovel", "hoe"), and the tier it needs to
+	-- drop anything (nil: drops by hand).
+	tool: string?,
+	toolLevel: number?,
+	-- Item name dropped when broken in survival (nil = the block itself, false = nothing) and how
+	-- many; see Items.drops.
 	drops: (string | false)?,
-	-- Item slots of a container block (chest), 0 for other blocks.
+	dropCount: number,
+	-- Item slots the block keeps (chest 27, furnace 3), 0 for other blocks.
 	container: number,
+	-- What right clicking opens ("Chest", "Crafting", "Furnace"), nil for nothing.
+	menu: string?,
+	-- Faces drawn on its parts (client Rendering/BlockDecor), one part per block.
+	decor: string?,
 	texture: string?,
 	tint: { number },
 	faces: { [string]: string }?,
@@ -54,6 +64,8 @@ export type Appearance = {
 	texture: string?,
 	tint: { number },
 	faces: { [string]: string }?,
+	-- Faces drawn on its parts (Rendering/BlockDecor); such blocks are meshed one box per block.
+	decor: string?,
 }
 
 local Blocks = {}
@@ -108,9 +120,15 @@ for index, spec in BlockList do
 		behaviour = spec.behaviour,
 		friction = spec.friction or 0.6,
 		fluid = spec.fluid,
+		displayName = spec.displayName,
 		hardness = if breakable then spec.hardness or 1 else -1,
+		tool = spec.tool,
+		toolLevel = spec.toolLevel,
 		drops = spec.drops,
+		dropCount = spec.dropCount or 1,
 		container = spec.container or 0,
+		menu = spec.menu,
+		decor = spec.decor,
 		texture = spec.texture,
 		tint = spec.tint or { 255, 255, 255 },
 		faces = spec.faces,
@@ -127,7 +145,7 @@ for index, spec in BlockList do
 		table.sort(faces)
 		local look = `{kind}|{def.material}|{c[1]},{c[2]},{c[3]}|{def.transparency}|{def.reflectance}`
 		local texture = `{def.texture or ""}|{t[1]},{t[2]},{t[3]}|{table.concat(faces, ";")}`
-		local key = `{look}|{if solid then 1 else 0}|{texture}`
+		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}`
 		local appearance = appearanceByKey[key]
 		if appearance == nil then
 			appearance = #appearances + 1
@@ -143,6 +161,7 @@ for index, spec in BlockList do
 				texture = def.texture,
 				tint = def.tint,
 				faces = def.faces,
+				decor = def.decor,
 			})
 		end
 		def.appearance = appearance
@@ -194,6 +213,12 @@ end
 Blocks.appearanceLut = buffer.create(Blocks.count * 2)
 for id, def in defs do
 	buffer.writeu16(Blocks.appearanceLut, id * 2, def.appearance)
+end
+
+-- 1 per *appearance* id when its blocks are meshed one box per block (decorated faces).
+Blocks.singleLut = buffer.create(#appearances + 1)
+for _, appearance in appearances do
+	buffer.writeu8(Blocks.singleLut, appearance.id, if appearance.decor then 1 else 0)
 end
 
 -- Render kind per *appearance* id (u8).

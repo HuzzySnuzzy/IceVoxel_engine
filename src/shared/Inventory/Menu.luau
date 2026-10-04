@@ -799,7 +799,13 @@ function Menu.copyWindow(window: Window): Window
 		for slot = 1, container.size do
 			slots[slot] = copy(container.slots[slot])
 		end
-		copied = { block = container.block, size = container.size, slots = slots }
+		copied = {
+			kind = container.kind,
+			block = container.block,
+			size = container.size,
+			slots = slots,
+			data = if container.data then table.clone(container.data) else nil,
+		}
 	end
 	return { id = window.id, inventory = Menu.copyInventory(window.inventory), container = copied }
 end

@@ -6,15 +6,22 @@
 	(head, chest, legs, feet), the stack carried by the mouse while a screen is open, and the
 	selected hotbar slot.
 
-	A window is what a screen shows: the inventory, plus a container (chest) when one is open.
+	A window is what a screen shows: the inventory plus the panel above or beside it, its container.
 	Clicks address window slots, numbered from 0:
 
-	    [0, n)            the container's n slots (none without a container)
+	    [0, n)            the container's n slots
 	    [n, n + 4)        armor: head, chest, legs, feet
 	    [n + 4, n + 31)   inventory slots 10..36 (the three rows above the hotbar)
 	    [n + 31, n + 40)  the hotbar, inventory slots 1..9
 
-	Window 0 is the inventory alone; containers get ids 1..255.
+	Containers by kind (slot numbers within the container, 1-based):
+
+	    inventory  the inventory screen's own 2 x 2 crafting grid: 1 result, 2..5 the grid (window 0)
+	    crafting   a crafting table: 1 result, 2..10 the 3 x 3 grid (personal, emptied on close)
+	    chest      a chest's 27 slots (shared by everyone who opens it)
+	    furnace    1 input, 2 fuel, 3 output, plus `data` (Crafting/Smelting; shared)
+
+	Window 0 is the inventory screen (its container the 2 x 2 grid); the others get ids 1..255.
 ]]
 
 local Items = require(script.Parent.Parent.Items)
@@ -33,10 +40,14 @@ export type Inventory = {
 }
 
 export type Container = {
-	-- The container block (e.g. Blocks.id.Chest), for its name.
+	-- "inventory", "crafting", "chest" or "furnace" (see above).
+	kind: string,
+	-- The block it belongs to (e.g. Blocks.id.Chest), for its name; 0 for the inventory's grid.
 	block: number,
 	size: number,
 	slots: { [number]: Stack? },
+	-- Furnace: litTime, litDuration, cookingProgress, cookingTotalTime, cookingItem (ticks, item).
+	data: { number }?,
 }
 
 export type Window = {
@@ -91,12 +102,36 @@ Types.CURSOR = -1
 -- Most slots a drag can cover / a container can have.
 Types.MAX_DRAG = 64
 Types.MAX_CONTAINER = 54
+-- Container kinds, and their numbers on the wire.
+Types.KINDS = { "inventory", "crafting", "chest", "furnace" }
+-- Slot of a crafting container's result; its grid follows (width x width, row by row).
+Types.CRAFT_RESULT = 1
+
 -- Player attribute with the item id in the player's hand (0 = nothing), set by the server so every
 -- client can draw it in the character's hand.
 Types.HELD_ATTRIBUTE = "IceVoxelHeldItem"
 
 function Types.newInventory(): Inventory
 	return { slots = {}, armor = {}, cursor = nil, selected = 1 }
+end
+
+-- A crafting container: the inventory's 2 x 2 grid ("inventory") or a crafting table's 3 x 3
+-- ("crafting", for `block`).
+function Types.newCrafting(kind: string, block: number?): Container
+	local width = if kind == "crafting" then 3 else 2
+	return { kind = kind, block = block or 0, size = 1 + width * width, slots = {}, data = nil }
+end
+
+-- Grid width of a crafting container (0 for other kinds).
+function Types.craftWidth(container: Container?): number
+	if container == nil then
+		return 0
+	elseif container.kind == "inventory" then
+		return 2
+	elseif container.kind == "crafting" then
+		return 3
+	end
+	return 0
 end
 
 -- Number of window slots with a container of `containerSize` slots.

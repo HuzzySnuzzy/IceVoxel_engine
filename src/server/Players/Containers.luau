@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Types = require(Shared.Inventory.Types)
+local Smelting = require(Shared.Crafting.Smelting)
 
 type Container = Types.Container
 
@@ -81,7 +82,14 @@ function Store.get(self: Store, x: number, y: number, z: number, block: number):
 	end
 	local size = sizeOf(block)
 	assert(size > 0, `Block {block} is not a container`)
-	local container: Container = { block = block, size = size, slots = {} }
+	local furnace = Blocks.get(block).menu == "Furnace"
+	local container: Container = {
+		kind = if furnace then "furnace" else "chest",
+		block = block,
+		size = size,
+		slots = {},
+		data = if furnace then Smelting.newData() else nil,
+	}
 	if entry then
 		entry.container = container
 	else

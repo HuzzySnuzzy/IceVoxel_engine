@@ -30,8 +30,11 @@
 	  Edits          u32 count, count x (i32 x, u16 y, i32 z, u16 block)
 	  Waypoints      waypoint list (below)
 	  Inventory      the player's inventory after their action `ack`: u32 ack, u8 selected,
-	                 4 armor + 36 inventory + 1 cursor stacks, u8 window, u16 containerBlock,
-	                 u8 containerSize, containerSize stacks. A stack is u16 item, u8 count (0 = empty).
+	                 4 armor + 36 inventory + 1 cursor stacks, u8 window, u8 containerKind (0 none,
+	                 else its index in Types.KINDS), u16 containerBlock, u8 containerSize,
+	                 4 x u16 container data (a furnace's litTime, litDuration, cookingProgress,
+	                 cookingTotalTime), containerSize stacks. A stack is u16 item, u8 count
+	                 (0 = empty), u16 damage (a tool's wear).
 	  Entities       u16 count, count x entity update (u8 op, u32 id, then by op):
 	                   1 spawn   u16 item, u8 count, f32 x, y, z, vx, vy, vz (blocks, per tick), u16 age (ticks)
 	                   2 sync    f32 x, y, z, vx, vy, vz
@@ -288,15 +291,20 @@ end
 
 --[[ Inventory snapshot (server -> client) ]]
 
+local STACK_BYTES = 5
+local CONTAINER_DATA = 4
+
 local function writeStack(b: buffer, o: number, stack: InventoryTypes.Stack?): number
 	if stack and stack.count > 0 then
 		buffer.writeu16(b, o, stack.item)
 		buffer.writeu8(b, o + 2, math.min(stack.count, 255))
+		buffer.writeu16(b, o + 3, math.clamp(stack.damage or 0, 0, 65535))
 	else
 		buffer.writeu16(b, o, 0)
 		buffer.writeu8(b, o + 2, 0)
+		buffer.writeu16(b, o + 3, 0)
 	end
-	return o + 3
+	return o + STACK_BYTES
 end
 
 local function readStack(b: buffer, o: number): InventoryTypes.Stack?
@@ -304,13 +312,19 @@ local function readStack(b: buffer, o: number): InventoryTypes.Stack?
 	if count == 0 then
 		return nil
 	end
-	return { item = buffer.readu16(b, o), count = count }
+	local damage = buffer.readu16(b, o + 3)
+	return { item = buffer.readu16(b, o), count = count, damage = if damage > 0 then damage else nil }
+end
+
+local KIND_CODE: { [string]: number } = {}
+for code, kind in InventoryTypes.KINDS do
+	KIND_CODE[kind] = code
 end
 
 function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	local container = snapshot.container
 	local size = if container then container.size else 0
-	local b = buffer.create(4 + 1 + 41 * 3 + 4 + size * 3)
+	local b = buffer.create(4 + 1 + 41 * STACK_BYTES + 5 + CONTAINER_DATA * 2 + size * STACK_BYTES)
 	local inventory = snapshot.inventory
 	buffer.writeu32(b, 0, snapshot.ack)
 	buffer.writeu8(b, 4, inventory.selected)
@@ -323,9 +337,15 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	end
 	o = writeStack(b, o, inventory.cursor)
 	buffer.writeu8(b, o, snapshot.window)
-	buffer.writeu16(b, o + 1, if container then container.block else 0)
-	buffer.writeu8(b, o + 3, size)
-	o += 4
+	buffer.writeu8(b, o + 1, if container then KIND_CODE[container.kind] or 0 else 0)
+	buffer.writeu16(b, o + 2, if container then container.block else 0)
+	buffer.writeu8(b, o + 4, size)
+	o += 5
+	local data = if container then container.data else nil
+	for i = 1, CONTAINER_DATA do
+		buffer.writeu16(b, o, math.clamp(if data then data[i] or 0 else 0, 0, 65535))
+		o += 2
+	end
 	if container then
 		for slot = 1, size do
 			o = writeStack(b, o, container.slots[slot])
@@ -340,26 +360,33 @@ function Protocol.decodeInventory(b: buffer): InventoryTypes.Snapshot
 	local o = 5
 	for slot = 1, InventoryTypes.ARMOR_SIZE do
 		inventory.armor[slot] = readStack(b, o)
-		o += 3
+		o += STACK_BYTES
 	end
 	for slot = 1, InventoryTypes.INVENTORY_SIZE do
 		inventory.slots[slot] = readStack(b, o)
-		o += 3
+		o += STACK_BYTES
 	end
 	inventory.cursor = readStack(b, o)
-	o += 3
+	o += STACK_BYTES
 	local window = buffer.readu8(b, o)
-	local block = buffer.readu16(b, o + 1)
-	local size = buffer.readu8(b, o + 3)
-	o += 4
+	local kind = InventoryTypes.KINDS[buffer.readu8(b, o + 1)]
+	local block = buffer.readu16(b, o + 2)
+	local size = buffer.readu8(b, o + 4)
+	o += 5
+	local data = table.create(CONTAINER_DATA, 0)
+	for i = 1, CONTAINER_DATA do
+		data[i] = buffer.readu16(b, o)
+		o += 2
+	end
 	local container: InventoryTypes.Container? = nil
-	if size > 0 then
+	if kind then
 		local slots = {}
 		for slot = 1, size do
 			slots[slot] = readStack(b, o)
-			o += 3
+			o += STACK_BYTES
 		end
-		container = { block = block, size = size, slots = slots }
+		container =
+			{ kind = kind, block = block, size = size, slots = slots, data = if kind == "furnace" then data else nil }
 	end
 	return { ack = buffer.readu32(b, 0), inventory = inventory, window = window, container = container }
 end

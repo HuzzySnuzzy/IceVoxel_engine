@@ -28,17 +28,38 @@ return function(t, shared, require)
 		t.ok(not pcall(function()
 			return Items.id.NoSuchItem
 		end), "unknown names error")
-		-- Creative order: blocks first, armor last.
+		-- Creative order: blocks first, then armor, materials and tools.
 		t.eq(Items.list[1].name, "Stone")
-		t.eq(Items.list[#Items.list].name, "DiamondBoots")
+		t.eq(Items.list[#Items.list].name, "DiamondHoe")
+		t.eq(Items.get(Items.id.Planks).displayName, "Oak Planks", "a block's own display name")
+		t.eq(Items.maxStack(Items.id.IronPickaxe), 1, "tools don't stack")
+		t.eq(Items.get(Items.id.IronPickaxe).durability, 250)
+		t.eq(Items.tool(Items.id.DiamondAxe).speed, 8)
+		t.eq(Items.tool(Items.id.Dirt), nil)
+		t.eq(Items.maxStack(Items.id.Snowball), 16)
 	end)
 
-	t.test("items: drops follow Minecraft (stone -> cobblestone, grass -> dirt, glass -> nothing)", function()
-		t.eq(Items.drops(Blocks.id.Stone).item, Items.id.Cobblestone)
+	t.test("items: drops follow Minecraft (tools, ores, stone -> cobblestone, glass -> nothing)", function()
+		local wooden, stone, iron = Items.id.WoodenPickaxe, Items.id.StonePickaxe, Items.id.IronPickaxe
+		t.eq(Items.drops(Blocks.id.Stone), nil, "stone needs a pickaxe")
+		t.eq(Items.drops(Blocks.id.Stone, Items.id.WoodenShovel), nil, "the right kind of tool")
+		t.eq(Items.drops(Blocks.id.Stone, wooden).item, Items.id.Cobblestone)
 		t.eq(Items.drops(Blocks.id.Grass).item, Items.id.Dirt)
 		t.eq(Items.drops(Blocks.id.Podzol).item, Items.id.Dirt)
 		t.eq(Items.drops(Blocks.id.Dirt).item, Items.id.Dirt)
-		t.eq(Items.drops(Blocks.id.DiamondOre).item, Items.id.DiamondOre)
+		t.eq(Items.drops(Blocks.id.OakLog).item, Items.id.OakLog, "logs by hand")
+		t.eq(Items.drops(Blocks.id.CoalOre, wooden).item, Items.id.Coal)
+		t.eq(Items.drops(Blocks.id.IronOre, wooden), nil, "iron ore needs stone")
+		t.eq(Items.drops(Blocks.id.IronOre, stone).item, Items.id.RawIron)
+		t.eq(Items.drops(Blocks.id.DiamondOre, stone), nil, "diamond needs iron")
+		t.eq(Items.drops(Blocks.id.DiamondOre, iron).item, Items.id.Diamond)
+		t.eq(Items.drops(Blocks.id.DiamondOre, Items.id.GoldenPickaxe), nil, "gold is wood tier")
+		t.eq(Items.drops(Blocks.id.EmeraldOre, Items.id.DiamondPickaxe).item, Items.id.Emerald)
+		t.eq(Items.drops(Blocks.id.Snow), nil, "snow needs a shovel")
+		local snowballs = Items.drops(Blocks.id.Snow, Items.id.WoodenShovel)
+		assert(snowballs)
+		t.eq(snowballs.item, Items.id.Snowball)
+		t.eq(snowballs.count, 4)
 		t.eq(Items.drops(Blocks.id.Glass), nil)
 		t.eq(Items.drops(Blocks.id.OakLeaves), nil)
 		t.eq(Items.drops(Blocks.id.Ice), nil)
@@ -75,21 +96,39 @@ return function(t, shared, require)
 		t.near(Items.damageAfterArmor(10, 0, 0), 10, 1e-9)
 	end)
 
-	t.test("mining: Minecraft's bare hand times", function()
-		t.eq(Mining.ticks(Blocks.id.Stone), 45, "stone 2.25 s")
-		t.eq(Mining.ticks(Blocks.id.Dirt), 15)
+	t.test("mining: Minecraft's times by hand and with tools", function()
+		local STONE, DIRT = Blocks.id.Stone, Blocks.id.Dirt
+		t.eq(Mining.ticks(STONE), 150, "stone by hand: 7.5 s (no pickaxe: / 100)")
+		t.eq(Mining.ticks(STONE, true, false, Items.id.WoodenPickaxe), 23, "wooden pickaxe 1.15 s")
+		t.eq(Mining.ticks(STONE, true, false, Items.id.StonePickaxe), 12)
+		t.eq(Mining.ticks(STONE, true, false, Items.id.IronPickaxe), 8)
+		t.eq(Mining.ticks(STONE, true, false, Items.id.DiamondPickaxe), 6)
+		t.eq(Mining.ticks(STONE, true, false, Items.id.GoldenPickaxe), 4, "gold is fast")
+		t.eq(Mining.ticks(STONE, true, false, Items.id.DiamondAxe), 150, "the wrong tool is a hand")
+		t.eq(Mining.ticks(DIRT), 15)
+		t.eq(Mining.ticks(DIRT, true, false, Items.id.WoodenShovel), 8)
+		t.eq(Mining.ticks(Blocks.id.OakLog), 60, "logs by hand drop, at / 30")
+		t.eq(Mining.ticks(Blocks.id.OakLog, true, false, Items.id.StoneAxe), 15)
 		t.eq(Mining.ticks(Blocks.id.OakLeaves), 6)
-		t.eq(Mining.ticks(Blocks.id.DiamondOre), 90)
-		t.eq(Mining.ticks(Blocks.id.Stone, false), 225, "five times slower in the air")
-		t.eq(Mining.ticks(Blocks.id.Stone, true, true), 225, "and under water")
+		t.eq(Mining.ticks(Blocks.id.OakLeaves, true, false, Items.id.IronSword), 4, "swords cut leaves")
+		t.eq(Mining.ticks(Blocks.id.IronOre, true, false, Items.id.WoodenPickaxe), 150, "can't harvest: / 100")
+		t.eq(Mining.ticks(DIRT, false), 75, "five times slower in the air")
+		t.eq(Mining.ticks(DIRT, true, true), 75, "and under water")
 		t.eq(Mining.ticks(Blocks.id.Bedrock), math.huge)
 		t.ok(not Mining.mayBreak(Blocks.id.Bedrock, 1000))
-		t.ok(not Mining.mayBreak(Blocks.id.Stone, 1.0), "stone after 1 s")
-		t.ok(Mining.mayBreak(Blocks.id.Stone, 1.6), "stone after 70% of 2.25 s")
+		t.ok(not Mining.mayBreak(DIRT, 0.4), "dirt after 0.4 s")
+		t.ok(Mining.mayBreak(DIRT, 0.55), "dirt after 70% of 0.75 s")
+		t.ok(not Mining.mayBreak(STONE, 0.5, nil, Items.id.WoodenPickaxe))
+		t.ok(Mining.mayBreak(STONE, 0.8, nil, Items.id.WoodenPickaxe))
 		t.ok(Mining.mayBreak(Blocks.id.OakLeaves, 0.2))
 		-- A delayed break (arrived early) finishes once all of the time has passed.
-		t.ok(not Mining.mayBreak(Blocks.id.Stone, 2.15, 1), "stone not done after 2.15 s")
-		t.ok(Mining.mayBreak(Blocks.id.Stone, 2.2, 1), "stone done after 44 ticks + the start tick")
+		t.ok(not Mining.mayBreak(DIRT, 0.65, 1), "dirt not done after 0.65 s")
+		t.ok(Mining.mayBreak(DIRT, 0.7, 1), "dirt done after 14 ticks + the start tick")
+		-- Wear: tools 1 per block, swords 2, nothing by hand or on instant blocks.
+		t.eq(Mining.wear(STONE, Items.id.IronPickaxe), 1)
+		t.eq(Mining.wear(STONE, Items.id.IronSword), 2)
+		t.eq(Mining.wear(STONE, nil), 0)
+		t.eq(Mining.wear(STONE, Items.id.Dirt), 0)
 	end)
 
 	t.test("game modes parse like /gamemode", function()
@@ -176,16 +215,50 @@ return function(t, shared, require)
 		t.eq(snapshot.window, 0)
 		t.eq(snapshot.container, nil)
 
-		local chest = { block = Blocks.id.Chest, size = 27, slots = { [27] = { item = Items.id.Brick, count = 5 } } }
+		local chest = {
+			kind = "chest",
+			block = Blocks.id.Chest,
+			size = 27,
+			slots = { [27] = { item = Items.id.Brick, count = 5 } },
+		}
 		local opened = Protocol.decodeInventory(
 			Protocol.encodeInventory({ ack = 1, inventory = inventory, window = 9, container = chest })
 		)
 		t.eq(opened.window, 9)
 		assert(opened.container)
+		t.eq(opened.container.kind, "chest")
 		t.eq(opened.container.block, Blocks.id.Chest)
 		t.eq(opened.container.size, 27)
 		t.eq(opened.container.slots[27].count, 5)
 		t.eq(opened.container.slots[1], nil)
+
+		-- Furnace data and tool wear travel too; the inventory's own crafting grid has kind "inventory".
+		inventory.slots[2] = { item = Items.id.IronPickaxe, count = 1, damage = 17 }
+		local furnace = {
+			kind = "furnace",
+			block = Blocks.id.Furnace,
+			size = 3,
+			slots = { [1] = { item = Items.id.RawIron, count = 3 } },
+			data = { 1500, 1600, 120, 200, 0 },
+		}
+		local hot = Protocol.decodeInventory(
+			Protocol.encodeInventory({ ack = 2, inventory = inventory, window = 3, container = furnace })
+		)
+		assert(hot.container and hot.container.data)
+		t.eq(hot.container.kind, "furnace")
+		t.eq(hot.container.data[1], 1500)
+		t.eq(hot.container.data[3], 120)
+		t.eq(hot.inventory.slots[2].damage, 17)
+		t.eq(hot.inventory.slots[1].damage, nil)
+		local grid = Types.newCrafting("inventory")
+		grid.slots[2] = { item = Items.id.OakLog, count = 1 }
+		local own = Protocol.decodeInventory(
+			Protocol.encodeInventory({ ack = 3, inventory = inventory, window = 0, container = grid })
+		)
+		assert(own.container)
+		t.eq(own.container.kind, "inventory")
+		t.eq(own.container.size, 5)
+		t.eq(own.container.slots[2].item, Items.id.OakLog)
 	end)
 
 	t.test("protocol: entity updates and notices round trip", function()
