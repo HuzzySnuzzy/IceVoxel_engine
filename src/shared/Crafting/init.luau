@@ -149,26 +149,44 @@ local function matchesShaped(recipe: Recipe, grid: { [number]: Stack? }, size: n
 	return false
 end
 
--- Can every stack take a different ingredient (a perfect matching, by backtracking)?
-local function assign(stacks: { Stack }, cells: { Ingredient | false }, i: number, used: { boolean }): boolean
-	local stack = stacks[i]
-	if stack == nil then
-		return true
-	end
+--[[
+	Finds a cell for stack `i`, moving earlier stacks to other cells if needed (an augmenting path
+	of Kuhn's bipartite matching: polynomial, where trying every assignment would take 9! steps on
+	a grid that almost matches a nine ingredient recipe).
+]]
+local function augment(
+	stacks: { Stack },
+	cells: { Ingredient | false },
+	i: number,
+	seen: { boolean },
+	owner: { [number]: number }
+): boolean
+	local item = stacks[i].item
 	for j, cell in cells do
-		if not used[j] and cell ~= false and (cell :: Ingredient)[stack.item] then
-			used[j] = true
-			if assign(stacks, cells, i + 1, used) then
+		if not seen[j] and cell ~= false and (cell :: Ingredient)[item] then
+			seen[j] = true
+			local other = owner[j]
+			if other == nil or augment(stacks, cells, other, seen, owner) then
+				owner[j] = i
 				return true
 			end
-			used[j] = false
 		end
 	end
 	return false
 end
 
+-- Can every stack take a different ingredient (a perfect matching)?
 local function matchesShapeless(recipe: Recipe, stacks: { Stack }): boolean
-	return #stacks == #recipe.cells and assign(stacks, recipe.cells, 1, {})
+	if #stacks ~= #recipe.cells then
+		return false
+	end
+	local owner: { [number]: number } = {}
+	for i = 1, #stacks do
+		if not augment(stacks, recipe.cells, i, {}, owner) then
+			return false
+		end
+	end
+	return true
 end
 
 -- Minecraft's tool repair: exactly two of the same wearing item, durability left added + 5%.

@@ -53,7 +53,9 @@ function EditRules.mayBreak(
 		return false
 	end
 	if creative then
-		return true
+		-- Minecraft's SwordItem.canAttackBlock: creative players can't break blocks with a sword.
+		local held = Items.tool(tool)
+		return held == nil or held.kind ~= "sword"
 	end
 	if mine == nil or mine.x ~= x or mine.y ~= y or mine.z ~= z then
 		return false

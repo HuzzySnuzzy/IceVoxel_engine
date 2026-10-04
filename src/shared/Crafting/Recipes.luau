@@ -117,7 +117,7 @@ for _, material in TOOL_MATERIALS do
 	shape({ "X", "X", "#" }, key, tier .. "Sword")
 end
 
---[[ Armor: iron, gold and diamond (leather needs leather; chainmail is not craftable) ]]
+--[[ Armor: iron, gold and diamond (leather needs leather; chainmail is not craftable, but smelts) ]]
 
 for _, material in { { "Iron", "IronIngot" }, { "Gold", "GoldIngot" }, { "Diamond", "Diamond" } } do
 	local key = { X = material[2] }
@@ -149,6 +149,7 @@ for _, piece in { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" } do
 end
 for _, piece in { "Helmet", "Chestplate", "Leggings", "Boots" } do
 	smelt("Iron" .. piece, "IronNugget")
+	smelt("Chainmail" .. piece, "IronNugget")
 	smelt("Gold" .. piece, "GoldNugget")
 end
 

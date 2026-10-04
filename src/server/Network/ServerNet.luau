@@ -294,11 +294,13 @@ function ServerNet.start(world: World): ServerNet
 				if player.Parent then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
-			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, pending.tool) then
+			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, heldTool(player)) then
 				delayed[player] = nil
-				-- The tool wears if it is still in hand (switching away wears nothing else).
-				local wearer = if heldTool(player) == pending.tool then player else nil
-				if not performBreak(pending.x, pending.y, pending.z, pending.block, false, pending.tool, wearer) then
+				-- Like Minecraft's delayed destroy, the item in hand when it completes times, harvests
+				-- and wears (switching to a slower one just waits, until `expires` undoes it).
+				if
+					not performBreak(pending.x, pending.y, pending.z, pending.block, false, heldTool(player), player)
+				then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
 			elseif now > pending.expires then
@@ -349,8 +351,9 @@ function ServerNet.start(world: World): ServerNet
 		if action == EditAction.Break then
 			local mine = mining[player]
 			local now = os.clock()
-			-- Minecraft times (and harvests) a break with the item in hand when it arrives.
-			local tool = if creative then nil else heldTool(player)
+			-- Minecraft times (and harvests) a break with the item in hand when it arrives. (Creative
+			-- players need it too: they can't break with a sword.)
+			local tool = heldTool(player)
 			if not EditRules.mayBreak(current, creative, mine, x, y, z, now, tool) then
 				if
 					not creative

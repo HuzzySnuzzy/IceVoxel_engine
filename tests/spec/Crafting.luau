@@ -115,6 +115,21 @@ return function(t, shared, require)
 		t.eq(Crafting.match({ [1] = { item = id.Dirt, count = 1 }, [2] = { item = id.Dirt, count = 1 } }, 2), nil)
 	end)
 
+	t.test("crafting: grids that almost match a nine ingredient recipe are quick to refuse", function()
+		local cells = {}
+		for slot = 1, 8 do
+			cells[slot] = id.Ice
+		end
+		cells[9] = id.Dirt
+		local started = os.clock()
+		for _ = 1, 20 do
+			t.eq(result(cells, 3), nil)
+		end
+		cells[9] = id.Ice
+		t.eq(result(cells, 3).item, id.PackedIce)
+		t.ok(os.clock() - started < 0.05, "no backtracking blow-up")
+	end)
+
 	t.test("crafting: consuming takes one from every used slot (new tables)", function()
 		local before = {
 			[2] = { item = id.Planks, count = 3 },
@@ -164,6 +179,7 @@ return function(t, shared, require)
 		t.eq(Smelting.result(id.Cobblestone).item, id.Stone)
 		t.eq(Smelting.result(id.JungleLog).item, id.Charcoal)
 		t.eq(Smelting.result(id.IronPickaxe).item, id.IronNugget)
+		t.eq(Smelting.result(id.ChainmailHelmet).item, id.IronNugget)
 		t.eq(Smelting.result(id.Dirt), nil)
 		t.eq(Smelting.fuel(id.Coal), 1600)
 		t.eq(Smelting.fuel(id.CoalBlock), 16000)

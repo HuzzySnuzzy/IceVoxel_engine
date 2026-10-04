@@ -772,6 +772,8 @@ return function(t, shared, require, server)
 		t.ok(not breaks(Blocks.id.Bedrock, 1e9), "bedrock never")
 		t.ok(not EditRules.mayBreak(Blocks.id.Bedrock, true, nil, 1, 2, 3, 0), "not even in creative")
 		t.ok(EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0), "creative: at once")
+		t.ok(EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0, id.DiamondPickaxe), "creative, any tool")
+		t.ok(not EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0, id.DiamondSword), "but not a sword")
 		t.ok(EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0, id.Stick), "whatever is in hand")
 		t.ok(not EditRules.mayBreak(9999, true, nil, 1, 2, 3, 0), "unknown block")
 		-- Dirt (0.5, no tool needed) by hand takes 15 ticks: 10 + 1 >= 10.5 after 10 ticks; a

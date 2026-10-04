@@ -43,7 +43,8 @@ function HeldItems.swing()
 	swingStart = os.clock()
 end
 
-type Held = { item: number, model: Model }
+-- `parts` and `hidden` let the first person hiding write only when it changes.
+type Held = { item: number, model: Model, parts: { BasePart }, hidden: boolean }
 
 -- First person pose of a block (or any item but tools): `dip` is the swing, 0..1..0.
 local function blockPose(dip: number): CFrame
@@ -136,7 +137,14 @@ function HeldItems.start()
 					clear(player)
 					local model = ItemModels.build(item, ItemModels.handSize(item))
 					model.Parent = folder
-					current = { item = item, model = model }
+					local parts: { BasePart } = {}
+					for _, part in model:GetDescendants() do
+						if part:IsA("BasePart") then
+							table.insert(parts, part)
+						end
+					end
+					-- New parts are visible (LocalTransparencyModifier 0).
+					current = { item = item, model = model, parts = parts, hidden = false }
 					held[player] = current
 				end
 				assert(current, "held model")
@@ -147,8 +155,9 @@ function HeldItems.start()
 					and head ~= nil
 					and head:IsA("BasePart")
 					and head.LocalTransparencyModifier > 0.5
-				for _, part in current.model:GetDescendants() do
-					if part:IsA("BasePart") then
+				if hidden ~= current.hidden then
+					current.hidden = hidden
+					for _, part in current.parts do
 						part.LocalTransparencyModifier = if hidden then 1 else 0
 					end
 				end

@@ -447,6 +447,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		swing()
+		-- Minecraft's SwordItem.canAttackBlock: no breaking with a sword in creative.
+		local tool = Items.tool(heldItem())
+		if tool and tool.kind == "sword" then
+			return
+		end
 		if now - lastCreativeBreak >= Config.Interaction.BreakInterval and Blocks.get(hit.block).breakable then
 			lastCreativeBreak = now
 			breakBlock(hit)
