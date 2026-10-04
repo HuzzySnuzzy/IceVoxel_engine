@@ -181,28 +181,32 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 		local boxes = t.boxes
 		local pool = self.pool
 
-		-- Parts can be at most MAX_PART studs long, so wide boxes of coarse levels are split.
+		-- Parts can be at most MAX_PART studs long: wide boxes of coarse levels and tall boxes in
+		-- high terrain are split.
 		local maxCells = math.max(1, MAX_PART // scale)
+		local maxCellsY = math.max(1, MAX_PART // scaleY)
 		while t.cursor < t.count do
 			local o = t.cursor * BOX
 			local x, y, z = readu16(boxes, o), readu16(boxes, o + 2), readu16(boxes, o + 4)
 			local sx, sy, sz = readu16(boxes, o + 6), readu16(boxes, o + 8), readu16(boxes, o + 10)
 			local appearance, surface = GreedyMesher.decodeKey(readu16(boxes, o + 12))
-			local height = sy * scaleY
-			if surface > 0 then
-				-- Fluid surface below the top of its cell (flowing water steps down).
-				height -= (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize
-			end
-			local cy = y * scaleY + height * 0.5
-			for px = x, x + sx - 1, maxCells do
-				local wx = math.min(maxCells, x + sx - px)
-				for pz = z, z + sz - 1, maxCells do
-					local wz = math.min(maxCells, z + sz - pz)
-					local part = pool:acquire(appearance, far, plain)
-					part.Size = Vector3.new(wx * scale, height, wz * scale)
-					part.CFrame = CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
-					part.Parent = folder
-					self.partCount += 1
+			-- Fluid surface below the top of its cell (flowing water steps down).
+			local lower = if surface > 0 then (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize else 0
+			for py = y, y + sy - 1, maxCellsY do
+				local wy = math.min(maxCellsY, y + sy - py)
+				local height = wy * scaleY - (if py + wy == y + sy then lower else 0)
+				local cy = py * scaleY + height * 0.5
+				for px = x, x + sx - 1, maxCells do
+					local wx = math.min(maxCells, x + sx - px)
+					for pz = z, z + sz - 1, maxCells do
+						local wz = math.min(maxCells, z + sz - pz)
+						local part = pool:acquire(appearance, far, plain)
+						part.Size = Vector3.new(wx * scale, height, wz * scale)
+						part.CFrame =
+							CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
+						part.Parent = folder
+						self.partCount += 1
+					end
 				end
 			end
 			t.cursor += 1

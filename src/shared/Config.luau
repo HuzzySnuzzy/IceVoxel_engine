@@ -17,11 +17,12 @@ local Config = {
 	-- Size of one block in studs. 3 makes the default character ~1.7 blocks tall (Minecraft is 1.8).
 	BlockSize = 3,
 
-	-- Blocks per chunk along X and Z. Chunks are full-height columns.
+	-- Blocks per chunk along X and Z. Chunks are full-height columns (stored cropped just above
+	-- their highest block, see World/ChunkLayout).
 	ChunkSize = 16,
 
 	-- World height in blocks. Must be a multiple of SectionHeight and of Lod.MaxVerticalStep.
-	WorldHeight = 256,
+	WorldHeight = 1024,
 
 	-- LOD 0 chunks are meshed in vertical sections of this many blocks so edits only rebuild a slice.
 	SectionHeight = 16,

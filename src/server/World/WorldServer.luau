@@ -31,7 +31,9 @@ local writeu16 = buffer.writeu16
 export type Chunk = {
 	cx: number,
 	cz: number,
+	-- Cropped column buffer (ChunkLayout): cells from `height` up are air.
 	data: buffer,
+	height: number,
 	lastUsed: number,
 }
 
@@ -82,16 +84,31 @@ function WorldServer.getChunk(self: World, cx: number, cz: number): Chunk
 		return chunk
 	end
 
-	local data = self.generator.generate(0, cx, cz).data
+	local result = self.generator.generate(0, cx, cz)
+	local data, height = result.data, result.height
 	local edits = self.edits[key]
 	if edits then
+		-- Edits may lie above the generated terrain's crop.
+		local top = 0
+		for index, block in edits do
+			if block ~= AIR then
+				local _, y = ChunkLayout.fromLocalIndex(index)
+				top = math.max(top, y + 1)
+			end
+		end
+		if top > height then
+			height = ChunkLayout.croppedHeight(top, 1)
+			data = ChunkLayout.grow(data, height)
+		end
 		for index, block in edits do
 			local lx, y, lz = ChunkLayout.fromLocalIndex(index)
-			writeu16(data, ((y * P + lz + 1) * P + lx + 1) * 2, block)
+			if y < height then
+				writeu16(data, ((y * P + lz + 1) * P + lx + 1) * 2, block)
+			end
 		end
 	end
 
-	local created: Chunk = { cx = cx, cz = cz, data = data, lastUsed = self.clock() }
+	local created: Chunk = { cx = cx, cz = cz, data = data, height = height, lastUsed = self.clock() }
 	self.chunks[key] = created
 	self.chunkCount += 1
 	return created
@@ -110,6 +127,9 @@ function WorldServer.getBlock(self: World, x: number, y: number, z: number): num
 	end
 	local cx, cz = x // SIZE, z // SIZE
 	local chunk = WorldServer.getChunk(self, cx, cz)
+	if y >= chunk.height then
+		return AIR
+	end
 	return readu16(chunk.data, ((y * P + z - cz * SIZE + 1) * P + x - cx * SIZE + 1) * 2)
 end
 
@@ -124,6 +144,8 @@ function WorldServer.peekBlock(self: World, x: number, y: number, z: number): nu
 	local chunk = self.chunks[Coords.chunkKey(cx, cz)]
 	if chunk == nil then
 		return nil
+	elseif y >= chunk.height then
+		return AIR
 	end
 	return readu16(chunk.data, ((y * P + z - cz * SIZE + 1) * P + x - cx * SIZE + 1) * 2)
 end
@@ -136,6 +158,13 @@ function WorldServer.setBlock(self: World, x: number, y: number, z: number, bloc
 	local cx, cz = x // SIZE, z // SIZE
 	local lx, lz = x - cx * SIZE, z - cz * SIZE
 	local chunk = WorldServer.getChunk(self, cx, cz)
+	if y >= chunk.height then
+		if block == AIR then
+			return false
+		end
+		chunk.height = ChunkLayout.croppedHeight(y + 1, 1)
+		chunk.data = ChunkLayout.grow(chunk.data, chunk.height)
+	end
 	local offset = ((y * P + lz + 1) * P + lx + 1) * 2
 	local old = readu16(chunk.data, offset)
 	if old == block then
@@ -166,7 +195,8 @@ end
 
 -- Y of the highest non-air block in a column (-1 if the column is empty).
 function WorldServer.topBlock(self: World, x: number, z: number): number
-	for y = HEIGHT - 1, 0, -1 do
+	local chunk = WorldServer.getChunk(self, x // SIZE, z // SIZE)
+	for y = chunk.height - 1, 0, -1 do
 		local block = WorldServer.getBlock(self, x, y, z)
 		if block ~= AIR and block ~= Blocks.CAVE_AIR then
 			return y

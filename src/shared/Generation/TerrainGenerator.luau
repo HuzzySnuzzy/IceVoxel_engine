@@ -40,6 +40,8 @@ local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
 local LAYER = ChunkLayout.LAYER
 local WORLD_HEIGHT = Config.WorldHeight
+-- Blocks above the terrain kept in a chunk's buffer for structures (trees).
+local STRUCTURE_ROOM = 32
 local SEA = Config.SeaLevel
 
 -- Tuning --------------------------------------------------------------------------------------------
@@ -230,22 +232,28 @@ function TerrainGenerator.new(seed: number): Generator
 	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?): ChunkResult
 		local step, stepY = ChunkLayout.steps(level)
 		local half, halfY = step // 2, stepY // 2
-		local cells = WORLD_HEIGHT // stepY
 		local originX, originZ = nx * SIZE * step, nz * SIZE * step
-		local data = ChunkLayout.create(cells)
 
 		-- 1. Sample every padded column at its cell center.
+		local highest = SEA
 		for pz = 0, P - 1 do
 			local wz = originZ + (pz - 1) * step + half
 			for px = 0, P - 1 do
 				local h, biome, _, surface = sample(originX + (px - 1) * step + half, wz)
 				local i = pz * P + px + 1
 				heights[i], biomes[i], surfaces[i] = h, biome, surface
+				if h > highest then
+					highest = h
+				end
 			end
 			if yield and pz % 6 == 5 then
 				yield()
 			end
 		end
+
+		-- The column buffer ends a little above the highest terrain (room for structures).
+		local cells = ChunkLayout.croppedHeight((highest + STRUCTURE_ROOM + stepY - 1) // stepY, stepY)
+		local data = ChunkLayout.create(cells)
 
 		-- 2. Fill the columns.
 		local solidBelow, emptyAbove = cells, 0

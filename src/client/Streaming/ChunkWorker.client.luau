@@ -109,8 +109,22 @@ local function generate(job: { [string]: any }): { [string]: any }
 
 	local edits = job.edits :: { number }?
 	if edits then
+		-- Edits may lie above the generated terrain's crop: make room first.
+		local top = 0
+		for i = 1, #edits, 2 do
+			if edits[i + 1] ~= AIR then
+				top = math.max(top, edits[i] // LAYER + 1)
+			end
+		end
+		if top > height then
+			height = ChunkLayout.croppedHeight(top, 1)
+			data = ChunkLayout.grow(data, height)
+		end
 		for i = 1, #edits, 2 do
 			local index, block = edits[i], edits[i + 1]
+			if index // LAYER >= height then
+				continue -- air above the crop
+			end
 			buffer.writeu16(data, index * 2, block)
 			local y = index // LAYER
 			if block ~= AIR and y + 1 > emptyAbove then

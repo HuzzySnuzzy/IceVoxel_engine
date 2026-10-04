@@ -1,5 +1,6 @@
 return function(t, shared, require, server)
 	local Blocks = require(shared.Blocks)
+	local Config = require(shared.Config)
 	local ChunkLayout = require(shared.World.ChunkLayout)
 	local Protocol = require(shared.Net.Protocol)
 	local WorldServer = require(server.World.WorldServer)
@@ -10,16 +11,26 @@ return function(t, shared, require, server)
 	local FLOOR = 10 -- first air block of the flat test world
 	local WATER = Blocks.fluidId("Water", 0)
 
-	-- A flat stone world: y < FLOOR is stone, the rest is air.
+	-- A flat stone world: y < FLOOR is stone, the rest is air (chunks cropped at CROP, like the
+	-- real generator crops them a little above the terrain).
+	local CROP = 32
 	local flat = {
 		generate = function(level: number, nx: number, nz: number)
-			local data = ChunkLayout.create(256)
+			local data = ChunkLayout.create(CROP)
 			for y = 0, FLOOR - 1 do
 				for i = 0, ChunkLayout.LAYER - 1 do
 					buffer.writeu16(data, (y * ChunkLayout.LAYER + i) * 2, STONE)
 				end
 			end
-			return { data = data, level = level, nx = nx, nz = nz, height = 256, solidBelow = FLOOR, emptyAbove = FLOOR }
+			return {
+				data = data,
+				level = level,
+				nx = nx,
+				nz = nz,
+				height = CROP,
+				solidBelow = FLOOR,
+				emptyAbove = FLOOR,
+			}
 		end,
 		column = function()
 			return FLOOR, 1, 0, STONE
@@ -129,7 +140,7 @@ return function(t, shared, require, server)
 
 		t.ok(world:setBlock(-1, FLOOR, -1, Blocks.id.Planks))
 		t.ok(not world:setBlock(-1, FLOOR, -1, Blocks.id.Planks), "same block is not a change")
-		t.ok(not world:setBlock(0, 999, 0, STONE), "outside the world")
+		t.ok(not world:setBlock(0, Config.WorldHeight, 0, STONE), "outside the world")
 		local pending = world:takePending()
 		t.eq(#pending, 4)
 		t.eq(pending[4], Blocks.id.Planks)
@@ -144,6 +155,39 @@ return function(t, shared, require, server)
 		local edits = world:chunkEdits(-1, -1)
 		assert(edits)
 		t.eq(edits[ChunkLayout.localIndex(15, FLOOR, 15)], Blocks.id.Planks)
+	end)
+
+	t.test("cropped chunks grow for blocks placed above them", function()
+		local world = newWorld()
+		local high = Config.WorldHeight - 5
+		t.eq(world:getBlock(2, high, 2), AIR, "air above the crop")
+		t.eq(world:getChunk(0, 0).height, CROP)
+		t.ok(not world:setBlock(2, high, 2, AIR), "air above the crop is no change")
+		t.eq(world:getChunk(0, 0).height, CROP, "air does not grow the chunk")
+		t.ok(world:setBlock(2, high, 2, Blocks.id.Planks))
+		local chunk = world:getChunk(0, 0)
+		t.ok(chunk.height > high and chunk.height <= Config.WorldHeight, `grown to {chunk.height}`)
+		t.eq(buffer.len(chunk.data), ChunkLayout.LAYER * chunk.height * 2, "buffer matches the height")
+		t.eq(world:getBlock(2, high, 2), Blocks.id.Planks)
+		t.eq(world:getBlock(2, FLOOR - 1, 2), STONE, "terrain kept")
+		t.eq(world:getBlock(2, high - 1, 2), AIR)
+		t.eq(world:topBlock(2, 2), high)
+		t.eq(world:topBlock(3, 2), FLOOR - 1)
+
+		-- Regenerated after eviction: the edit lies above the generated crop again.
+		world:evict(function()
+			return false
+		end, 0)
+		t.eq(world:getBlock(2, high, 2), Blocks.id.Planks, "edit above the crop re-applied")
+		t.eq(world:getBlock(2, FLOOR - 1, 2), STONE)
+
+		-- An air edit above the crop is kept as an edit but needs no room.
+		t.ok(world:setBlock(2, high, 2, AIR))
+		world:evict(function()
+			return false
+		end, 0)
+		t.eq(world:getBlock(2, high, 2), AIR)
+		t.eq(world:getChunk(0, 0).height, CROP, "air edits do not grow regenerated chunks")
 	end)
 
 	t.test("sand falls until it lands", function()

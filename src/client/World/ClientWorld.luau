@@ -35,6 +35,8 @@ local readu16 = buffer.readu16
 local writeu16 = buffer.writeu16
 
 export type ChunkData = {
+	-- Cropped column buffer (ChunkLayout): cells from `height` up are air. Edits above it grow
+	-- the buffer, so keep a reference to this table rather than to `data`.
 	data: buffer,
 	height: number,
 	solidBelow: number,
@@ -190,6 +192,8 @@ function ClientWorld.getBlock(self: ClientWorld, x: number, y: number, z: number
 	local chunk = self.chunks[Coords.chunkKey(cx, cz)]
 	if chunk == nil then
 		return nil
+	elseif y >= chunk.height then
+		return AIR
 	end
 	return readu16(chunk.data, ((y * P + z - cz * SIZE + 1) * P + x - cx * SIZE + 1) * 2)
 end
@@ -200,7 +204,35 @@ end
 
 --[[ Edits ]]
 
--- Writes a cell (padded coordinates) of a loaded chunk; returns true if it changed.
+-- Gives a loaded chunk room up to `top` cells. The new rows' padding is copied from the loaded
+-- neighbours (their border columns), so meshing them sees the right neighbours.
+local function grow(self: ClientWorld, cx: number, cz: number, chunk: ChunkData, top: number)
+	local old = chunk.height
+	local height = ChunkLayout.croppedHeight(top, 1)
+	local data = ChunkLayout.grow(chunk.data, height)
+	local function copyFrom(ncx: number, ncz: number, fromX: number?, fromZ: number?, toX: number?, toZ: number?)
+		local n = self.chunks[Coords.chunkKey(ncx, ncz)]
+		if n == nil then
+			return
+		end
+		for y = old, math.min(height, n.height) - 1 do
+			for i = 0, SIZE - 1 do
+				local sx, sz = fromX or i, fromZ or i
+				local dx, dz = toX or i, toZ or i
+				local block = readu16(n.data, ((y * P + sz + 1) * P + sx + 1) * 2)
+				writeu16(data, ((y * P + dz + 1) * P + dx + 1) * 2, block)
+			end
+		end
+	end
+	copyFrom(cx - 1, cz, SIZE - 1, nil, -1, nil)
+	copyFrom(cx + 1, cz, 0, nil, SIZE, nil)
+	copyFrom(cx, cz - 1, nil, SIZE - 1, nil, -1)
+	copyFrom(cx, cz + 1, nil, 0, nil, SIZE)
+	chunk.data, chunk.height = data, height
+end
+
+-- Writes a cell (padded coordinates) of a loaded chunk; returns true if it changed. `own` is
+-- false for writes into a neighbour's padding, which never grow that chunk (it has no cells there).
 local function writeCell(
 	self: ClientWorld,
 	cx: number,
@@ -208,11 +240,18 @@ local function writeCell(
 	px: number,
 	y: number,
 	pz: number,
-	block: number
+	block: number,
+	own: boolean
 ): boolean
 	local chunk = self.chunks[Coords.chunkKey(cx, cz)]
 	if chunk == nil then
 		return false
+	end
+	if y >= chunk.height then
+		if block == AIR or not own then
+			return false
+		end
+		grow(self, cx, cz, chunk, y + 1)
 	end
 	local offset = ((y * P + pz + 1) * P + px + 1) * 2
 	if readu16(chunk.data, offset) == block then
@@ -240,7 +279,7 @@ function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: numbe
 	end
 
 	local section = y // SECTION
-	if writeCell(self, cx, cz, lx, y, lz, block) then
+	if writeCell(self, cx, cz, lx, y, lz, block, true) then
 		self.onSectionDirty(cx, cz, section)
 		-- The block above / below in the neighbouring section can change visibility too.
 		if y % SECTION == 0 and section > 0 then
@@ -253,7 +292,7 @@ function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: numbe
 
 	-- Border blocks also live in the neighbour's padding.
 	local function neighbour(ncx: number, ncz: number, px: number, pz: number)
-		if writeCell(self, ncx, ncz, px, y, pz, block) then
+		if writeCell(self, ncx, ncz, px, y, pz, block, false) then
 			self.onSectionDirty(ncx, ncz, section)
 		end
 		self.onChunkTouched(ncx, ncz)

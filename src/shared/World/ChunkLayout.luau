@@ -3,7 +3,8 @@
 --[[
 	Memory layout of chunk voxel data.
 
-	A chunk is a full-height column stored in a `buffer` with one u16 block id per cell. Every chunk
+	A chunk is a column stored in a `buffer` with one u16 block id per cell, cropped a little above
+	its highest block (see `croppedHeight`; above that is air up to WorldHeight). Every chunk
 	carries a one-cell border ("padding") copied from its four neighbours, so the mesher can decide
 	which faces are visible without touching other chunks:
 
@@ -69,6 +70,24 @@ end
 
 function ChunkLayout.height(data: buffer): number
 	return buffer.len(data) // (LAYER * 2)
+end
+
+--[[
+	Chunks are cropped: a column buffer only reaches a little above the highest block (everything
+	above it, up to WorldHeight, is air). `croppedHeight` rounds a needed height up to whole
+	sections (at LOD levels: to whole sections' worth of cells), at most the full height.
+]]
+function ChunkLayout.croppedHeight(cells: number, stepY: number): number
+	local unit = math.max(1, Config.SectionHeight // stepY)
+	local full = ChunkLayout.HEIGHT // stepY
+	return math.min(full, math.max(unit, (cells + unit - 1) // unit * unit))
+end
+
+-- A copy of `data` with room for `height` cells per column; the new cells are air.
+function ChunkLayout.grow(data: buffer, height: number): buffer
+	local grown = buffer.create(LAYER * height * 2)
+	buffer.copy(grown, 0, data, 0, math.min(buffer.len(data), buffer.len(grown)))
+	return grown
 end
 
 function ChunkLayout.get(data: buffer, lx: number, y: number, lz: number): number

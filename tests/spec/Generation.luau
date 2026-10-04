@@ -68,6 +68,8 @@ return function(t, shared, require)
 		for level = 0, 3 do
 			for _, p in { { 0, 0 }, { 5, -3 }, { -2, 9 } } do
 				local r = gen.generate(level, p[1], p[2])
+				-- Cropped a little above the terrain: the top row is still air.
+				t.ok(r.emptyAbove < r.height, `L{level} crop leaves no air on top`)
 				for y = 0, r.height - 1 do
 					for i = 0, ChunkLayout.LAYER - 1 do
 						local id = buffer.readu16(r.data, (y * ChunkLayout.LAYER + i) * 2)
@@ -106,7 +108,8 @@ return function(t, shared, require)
 				end
 			end
 			t.ok(worst <= stepY, `level {level}: LOD surface off by {worst} blocks`)
-			t.eq(r.height, Config.WorldHeight // stepY, "cells per column")
+			t.ok(r.height <= Config.WorldHeight // stepY, "cells per column")
+			t.eq(buffer.len(r.data), ChunkLayout.LAYER * r.height * 2, "buffer matches the height")
 		end
 	end)
 

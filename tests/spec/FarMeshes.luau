@@ -110,6 +110,47 @@ return function(t, shared, require, _server, client)
 		t.ok(ny < 0 and uy == 0 and vy == 0, "anchor normal points down")
 	end)
 
+	t.test("mesh geometry: tall faces are cut into bands that fit in a part", function()
+		local BAND = MeshGeometry.BAND
+		local quads = buffer.create(2 * QuadMesher.QUAD_BYTES)
+		local stone = Blocks.get(Blocks.id.Stone).appearance
+		-- A +X wall 1000 cells (3000 studs) high, and a floor exactly on the first band boundary.
+		buffer.writeu16(quads, 0, 0)
+		buffer.writeu16(quads, 8, 1000)
+		buffer.writeu16(quads, 10, 4)
+		buffer.writeu16(quads, 12, stone)
+		local floorY = BAND // Config.BlockSize - 1 -- its +Y face is at y = BAND studs
+		local o = QuadMesher.QUAD_BYTES
+		buffer.writeu16(quads, o, 2)
+		buffer.writeu16(quads, o + 4, floorY)
+		buffer.writeu16(quads, o + 8, 4)
+		buffer.writeu16(quads, o + 10, 4)
+		buffer.writeu16(quads, o + 12, stone)
+		local builder = MeshGeometry.builder(Config.BlockSize, 0, 1000)
+		builder:add(quads, 2, 0, 0, Config.BlockSize, Config.BlockSize)
+		local meshes = builder:finish()
+		t.eq(#meshes, 2, "one mesh per band")
+		local wallArea = 0
+		for band, mesh in meshes do
+			t.ok(mesh.size[2] <= BAND + 2 * MeshGeometry.MIN_EXTENT, `band {band} is {mesh.size[2]} studs high`)
+			local bottom = mesh.center[2] - mesh.size[2] / 2
+			local top = mesh.center[2] + mesh.size[2] / 2
+			t.ok(bottom >= (band - 1) * BAND - MeshGeometry.MIN_EXTENT - 1e-6, "below its band")
+			t.ok(top <= band * BAND + 1e-6, "above its band")
+			for q = 0, mesh.quads - 1 do
+				local p = mesh.positions
+				local ys = { p[q * 12 + 2], p[q * 12 + 5], p[q * 12 + 8], p[q * 12 + 11] }
+				local height = math.max(table.unpack(ys)) - math.min(table.unpack(ys))
+				if height > 0 then
+					wallArea += height
+				end
+			end
+		end
+		t.ok(math.abs(wallArea - 1000 * Config.BlockSize) < 1e-6, `wall pieces add up ({wallArea})`)
+		-- The floor on the boundary belongs to the upper band (whose box starts there).
+		t.eq(meshes[2].quads, 2, "upper band: wall piece and floor")
+	end)
+
 	--[[ Far seam limits ]]
 
 	t.test("far seam limits never leave more padding than a coarser neighbour draws", function()
