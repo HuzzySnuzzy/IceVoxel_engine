@@ -16,11 +16,18 @@
 	  solid         Collides with characters. Default true for drawn blocks.
 	  replaceable   Placing a block may overwrite it (air, fluids). Default false.
 	  breakable     Players can break it. Default true.
-	  placeable     Shows up in the hotbar. Default true for drawn, solid blocks.
+	  placeable     Is an item players can hold and place (creative inventory, drops). Default true
+	                for drawn, solid blocks.
 	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours).
 	  friction      How slippery the block is to walk on (Minecraft's block friction): 0.6 by
 	                default, 0.98 for ice. Higher keeps more of the speed from tick to tick.
 	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below).
+	  hardness      Minecraft's destroy time: survival players mine it by hand in hardness x 1.5
+	                seconds (0 = instantly). Default 1.
+	  drops         Name of the item a survival player gets for breaking it (default: the block
+	                itself), or false for nothing (e.g. glass, leaves).
+	  container     Number of item slots: right clicking the block opens them (e.g. a chest), and
+	                breaking it drops what is inside.
 
 	Textures (optional, see "Block textures" in the README):
 	  texture       Name of a MaterialVariant in MaterialService whose BaseMaterial is `material`
@@ -45,6 +52,9 @@ export type BlockSpec = {
 	behaviour: string?,
 	friction: number?,
 	fluid: { group: string, level: number, tickDelay: number }?,
+	hardness: number?,
+	drops: (string | false)?,
+	container: number?,
 	texture: string?,
 	tint: { number }?,
 	faces: { [string]: string }?,
@@ -56,39 +66,55 @@ local list: { BlockSpec } = {
 	-- rock so cave walls far from the camera are not drawn.
 	{ name = "CaveAir", render = "None", solid = false, replaceable = true, breakable = false },
 	{ name = "Bedrock", color = { 45, 45, 50 }, material = "Basalt", breakable = false, placeable = false },
-	{ name = "Stone", color = { 125, 125, 128 }, material = "Slate" },
-	{ name = "Cobblestone", color = { 110, 110, 112 }, material = "Cobblestone" },
-	{ name = "Dirt", color = { 121, 85, 58 }, material = "Ground" },
-	{ name = "Grass", color = { 92, 158, 62 }, material = "Grass", behaviour = "Grass" },
-	{ name = "DryGrass", color = { 168, 162, 84 }, material = "Grass", behaviour = "Grass" },
-	{ name = "Snow", color = { 238, 242, 248 }, material = "Snow" },
-	{ name = "Sand", color = { 220, 206, 160 }, material = "Sand", behaviour = "Gravity" },
-	{ name = "Sandstone", color = { 206, 188, 138 }, material = "Sandstone" },
-	{ name = "Gravel", color = { 132, 126, 122 }, material = "Pebble", behaviour = "Gravity" },
-	{ name = "Ice", color = { 165, 205, 240 }, material = "Glacier", friction = 0.98 },
-	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood" },
-	{ name = "OakLeaves", color = { 68, 128, 46 }, material = "LeafyGrass" },
-	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood" },
-	{ name = "BirchLeaves", color = { 112, 150, 68 }, material = "LeafyGrass" },
-	{ name = "SpruceLog", color = { 74, 54, 34 }, material = "Wood" },
-	{ name = "SpruceLeaves", color = { 44, 88, 56 }, material = "LeafyGrass" },
-	{ name = "AcaciaLog", color = { 118, 108, 98 }, material = "Wood" },
-	{ name = "AcaciaLeaves", color = { 108, 138, 40 }, material = "LeafyGrass" },
-	{ name = "JungleLog", color = { 96, 76, 44 }, material = "Wood" },
-	{ name = "JungleLeaves", color = { 40, 120, 30 }, material = "LeafyGrass" },
-	{ name = "Cactus", color = { 64, 122, 52 }, material = "Grass" },
-	{ name = "CoalOre", color = { 58, 58, 62 }, material = "Rock" },
-	{ name = "IronOre", color = { 176, 142, 118 }, material = "Rock" },
-	{ name = "GoldOre", color = { 222, 190, 72 }, material = "Rock" },
-	{ name = "DiamondOre", color = { 92, 202, 212 }, material = "Rock" },
-	{ name = "Planks", color = { 170, 134, 84 }, material = "WoodPlanks" },
-	{ name = "Brick", color = { 160, 82, 62 }, material = "Brick" },
+	{ name = "Stone", color = { 125, 125, 128 }, material = "Slate", hardness = 1.5, drops = "Cobblestone" },
+	{ name = "Cobblestone", color = { 110, 110, 112 }, material = "Cobblestone", hardness = 2 },
+	{ name = "Dirt", color = { 121, 85, 58 }, material = "Ground", hardness = 0.5 },
+	{
+		name = "Grass",
+		color = { 92, 158, 62 },
+		material = "Grass",
+		behaviour = "Grass",
+		hardness = 0.6,
+		drops = "Dirt",
+	},
+	{
+		name = "DryGrass",
+		color = { 168, 162, 84 },
+		material = "Grass",
+		behaviour = "Grass",
+		hardness = 0.6,
+		drops = "Dirt",
+	},
+	{ name = "Snow", color = { 238, 242, 248 }, material = "Snow", hardness = 0.2 },
+	{ name = "Sand", color = { 220, 206, 160 }, material = "Sand", behaviour = "Gravity", hardness = 0.5 },
+	{ name = "Sandstone", color = { 206, 188, 138 }, material = "Sandstone", hardness = 0.8 },
+	{ name = "Gravel", color = { 132, 126, 122 }, material = "Pebble", behaviour = "Gravity", hardness = 0.6 },
+	{ name = "Ice", color = { 165, 205, 240 }, material = "Glacier", friction = 0.98, hardness = 0.5, drops = false },
+	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood", hardness = 2 },
+	{ name = "OakLeaves", color = { 68, 128, 46 }, material = "LeafyGrass", hardness = 0.2, drops = false },
+	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood", hardness = 2 },
+	{ name = "BirchLeaves", color = { 112, 150, 68 }, material = "LeafyGrass", hardness = 0.2, drops = false },
+	{ name = "SpruceLog", color = { 74, 54, 34 }, material = "Wood", hardness = 2 },
+	{ name = "SpruceLeaves", color = { 44, 88, 56 }, material = "LeafyGrass", hardness = 0.2, drops = false },
+	{ name = "AcaciaLog", color = { 118, 108, 98 }, material = "Wood", hardness = 2 },
+	{ name = "AcaciaLeaves", color = { 108, 138, 40 }, material = "LeafyGrass", hardness = 0.2, drops = false },
+	{ name = "JungleLog", color = { 96, 76, 44 }, material = "Wood", hardness = 2 },
+	{ name = "JungleLeaves", color = { 40, 120, 30 }, material = "LeafyGrass", hardness = 0.2, drops = false },
+	{ name = "Cactus", color = { 64, 122, 52 }, material = "Grass", hardness = 0.4 },
+	{ name = "CoalOre", color = { 58, 58, 62 }, material = "Rock", hardness = 3 },
+	{ name = "IronOre", color = { 176, 142, 118 }, material = "Rock", hardness = 3 },
+	{ name = "GoldOre", color = { 222, 190, 72 }, material = "Rock", hardness = 3 },
+	{ name = "DiamondOre", color = { 92, 202, 212 }, material = "Rock", hardness = 3 },
+	{ name = "Planks", color = { 170, 134, 84 }, material = "WoodPlanks", hardness = 2 },
+	{ name = "Brick", color = { 160, 82, 62 }, material = "Brick", hardness = 2 },
 	{
 		name = "Glass",
 		render = "Transparent",
 		color = { 210, 235, 245 },
 		material = "Glass",
 		transparency = 0.6,
+		hardness = 0.3,
+		drops = false,
 	},
 }
 
@@ -109,6 +135,8 @@ local function fluid(group: string, spec: BlockSpec, tickDelay: number)
 			solid = false,
 			replaceable = true,
 			placeable = level == 0,
+			hardness = 100,
+			drops = false,
 			behaviour = "Fluid",
 			fluid = { group = group, level = level, tickDelay = tickDelay },
 		})
@@ -126,16 +154,38 @@ fluid("Water", {
 -- Add new blocks below this line (and never above, see the note at the top).
 
 -- Mountains, rivers and islands (terrain generator).
-table.insert(list, { name = "PackedIce", color = { 141, 180, 236 }, material = "Ice", friction = 0.98 })
-table.insert(list, { name = "Calcite", color = { 222, 223, 218 }, material = "Marble" })
-table.insert(list, { name = "PackedMud", color = { 142, 106, 79 }, material = "Mud" })
-table.insert(list, { name = "Mycelium", color = { 122, 104, 116 }, material = "Grass", behaviour = "Grass" })
-table.insert(list, { name = "Podzol", color = { 106, 74, 38 }, material = "Ground", behaviour = "Grass" })
-table.insert(list, { name = "CoarseDirt", color = { 112, 80, 56 }, material = "Ground" })
+table.insert(
+	list,
+	{ name = "PackedIce", color = { 141, 180, 236 }, material = "Ice", friction = 0.98, hardness = 0.5, drops = false }
+)
+table.insert(list, { name = "Calcite", color = { 222, 223, 218 }, material = "Marble", hardness = 0.75 })
+table.insert(list, { name = "PackedMud", color = { 142, 106, 79 }, material = "Mud", hardness = 1 })
+table.insert(list, {
+	name = "Mycelium",
+	color = { 122, 104, 116 },
+	material = "Grass",
+	behaviour = "Grass",
+	hardness = 0.6,
+	drops = "Dirt" :: string,
+})
+table.insert(list, {
+	name = "Podzol",
+	color = { 106, 74, 38 },
+	material = "Ground",
+	behaviour = "Grass",
+	hardness = 0.5,
+	drops = "Dirt" :: string,
+})
+table.insert(list, { name = "CoarseDirt", color = { 112, 80, 56 }, material = "Ground", hardness = 0.5 })
 -- Stone varieties and ores by altitude (Ores.luau).
-table.insert(list, { name = "Andesite", color = { 134, 134, 136 }, material = "Rock" })
-table.insert(list, { name = "Diorite", color = { 190, 190, 190 }, material = "Limestone" })
-table.insert(list, { name = "Granite", color = { 150, 103, 85 }, material = "Granite" })
-table.insert(list, { name = "EmeraldOre", color = { 62, 168, 94 }, material = "Rock" })
+table.insert(list, { name = "Andesite", color = { 134, 134, 136 }, material = "Rock", hardness = 1.5 })
+table.insert(list, { name = "Diorite", color = { 190, 190, 190 }, material = "Limestone", hardness = 1.5 })
+table.insert(list, { name = "Granite", color = { 150, 103, 85 }, material = "Granite", hardness = 1.5 })
+table.insert(list, { name = "EmeraldOre", color = { 62, 168, 94 }, material = "Rock", hardness = 3 })
+-- Containers (server Players/Containers): right clicking opens the slots, breaking drops them.
+table.insert(
+	list,
+	{ name = "Chest", color = { 162, 118, 58 }, material = "WoodPlanks", hardness = 2.5, container = 27 }
+)
 
 return list

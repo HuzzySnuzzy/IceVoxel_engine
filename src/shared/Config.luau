@@ -200,8 +200,38 @@ local Config = {
 	Interaction = {
 		-- Max distance in blocks between the character and a block it edits.
 		Reach = 8,
-		-- Seconds between repeated breaks / places while a button is held.
+		-- Seconds between repeated places while a button is held, and between breaks in creative
+		-- (Minecraft: 4 and 5 ticks).
 		RepeatInterval = 0.2,
+		BreakInterval = 0.25,
+		-- The mouse wheel changes the selected hotbar slot (as in Minecraft) instead of zooming
+		-- the camera (I / O still zoom).
+		ScrollWheelHotbar = true,
+	},
+
+	-- Game modes, inventories and item drops ---------------------------------------------------------
+
+	Gameplay = {
+		-- Game mode of players when they join: "Survival" (blocks are mined over time and drop as
+		-- items, placing uses them up) or "Creative" (every block, instant breaking, flying).
+		DefaultGameMode = "Survival",
+		-- Who may switch their own game mode with the /gamemode chat command: true = everyone,
+		-- false = nobody, or a list of user ids. The game's owner and Studio sessions always may.
+		GameModeCommand = (true :: any) :: boolean | { number },
+		-- Who may change other players' game modes (/gamemode creative Name): user ids, besides the
+		-- game's owner and Studio sessions.
+		Admins = {} :: { number },
+		-- Keep the inventory when dying (Minecraft's keepInventory rule); otherwise it drops.
+		KeepInventory = false,
+	},
+
+	Entities = {
+		-- Dropped items disappear after this many seconds (Minecraft: 5 minutes).
+		ItemLifetime = 300,
+		-- At most this many dropped items exist; the oldest disappear first.
+		MaxItems = 1000,
+		-- Players see dropped items within this many blocks.
+		TrackingDistance = 96,
 	},
 
 	-- Server -----------------------------------------------------------------------------------------

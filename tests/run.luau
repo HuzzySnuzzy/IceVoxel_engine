@@ -1,7 +1,8 @@
 --[[
 	Runs every spec in tests/spec.
 
-	    lune run tests/run
+	    lune run tests/run            every spec
+	    lune run tests/run Items      only specs whose file name contains "Items"
 
 	Each spec receives (t, shared, require, server, client): the test context, the fake
 	ReplicatedStorage.IceVoxel, ServerScriptService.IceVoxel and StarterPlayerScripts.IceVoxel
@@ -20,10 +21,11 @@ local server = env.mount("src/server", "ServerScriptService", "IceVoxel")
 local client = env.mount("src/client", "StarterPlayerScripts", "IceVoxel")
 local t, results = Test.new()
 
+local filter = process.args[1]
 local specs = fs.readDir("tests/spec")
 table.sort(specs)
 for _, file in specs do
-	if string.sub(file, -5) == ".luau" then
+	if string.sub(file, -5) == ".luau" and (filter == nil or string.find(file, filter, 1, true)) then
 		print(`{file}`)
 		local spec = require(`./spec/{string.sub(file, 1, -6)}`)
 		spec(t, shared, env.require, server, client)

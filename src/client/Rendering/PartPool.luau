@@ -103,6 +103,11 @@ end
 local PartPool = {}
 PartPool.__index = PartPool
 
+-- A new part with the look of `appearance` (full detail: textures and face images), e.g. for items.
+function PartPool.makeTemplate(appearance: number): BasePart
+	return makeTemplate(appearance, false, false)
+end
+
 function PartPool.new(limit: number): PartPool
 	local self = {
 		templates = {},

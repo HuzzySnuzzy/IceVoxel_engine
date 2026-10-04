@@ -29,6 +29,13 @@ export type BlockDef = {
 	-- Minecraft block friction (slipperiness) when walking on it.
 	friction: number,
 	fluid: { group: string, level: number, tickDelay: number }?,
+	-- Minecraft destroy time (survival mining by hand takes hardness x 1.5 s); < 0 = unbreakable.
+	hardness: number,
+	-- Item name dropped when broken in survival (nil = the block itself, false = nothing); see
+	-- Items.drops.
+	drops: (string | false)?,
+	-- Item slots of a container block (chest), 0 for other blocks.
+	container: number,
 	texture: string?,
 	tint: { number },
 	faces: { [string]: string }?,
@@ -84,6 +91,7 @@ for index, spec in BlockList do
 
 	local drawn = kind ~= Blocks.KIND_NONE
 	local solid = if spec.solid ~= nil then spec.solid else drawn
+	local breakable = if spec.breakable ~= nil then spec.breakable else drawn
 	local def: BlockDef = {
 		id = id,
 		name = spec.name,
@@ -95,11 +103,14 @@ for index, spec in BlockList do
 		reflectance = spec.reflectance or 0,
 		solid = solid,
 		replaceable = spec.replaceable or false,
-		breakable = if spec.breakable ~= nil then spec.breakable else drawn,
+		breakable = breakable,
 		placeable = if spec.placeable ~= nil then spec.placeable else (drawn and solid),
 		behaviour = spec.behaviour,
 		friction = spec.friction or 0.6,
 		fluid = spec.fluid,
+		hardness = if breakable then spec.hardness or 1 else -1,
+		drops = spec.drops,
+		container = spec.container or 0,
 		texture = spec.texture,
 		tint = spec.tint or { 255, 255, 255 },
 		faces = spec.faces,
