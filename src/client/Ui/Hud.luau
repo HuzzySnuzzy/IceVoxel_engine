@@ -1,0 +1,503 @@
+--!strict
+--[[
+	The in-game HUD, Minecraft's:
+
+	  hotbar     9 slots at the bottom centre with the selection frame, item icons and counts.
+	             Click or tap a slot to select it; keys 1-9, the mouse wheel (down = next slot,
+	             when Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The
+	             wheel is bound through ContextActionService at High priority and sunk, so the
+	             camera does not zoom.
+	  item name  the held item's name above the hotbar for 2 s after the selection changes,
+	             fading over the last half second
+	  hearts     survival only: 10 hearts (the Humanoid's health as 20 half hearts) and, above them,
+	             10 armor icons when armor is worn (Items.armorPoints). Drawn as pixel art from
+	             Frames. Low health makes them shake; damage makes their outline blink.
+	  touch      a "..." button at the end of the hotbar opens the inventory
+
+	Roblox's own health bar and backpack are turned off.
+
+	The screens (Ui/Screens) set the mode: "play" (input above), "creative" (the creative screen is
+	open: the hotbar stays, it is that screen's hotbar row, and the screens handle its clicks and
+	hover) or "hidden" (the survival inventory has its own hotbar row).
+]]
+
+local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
+local Items = require(Shared.Items)
+local Types = require(Shared.Inventory.Types)
+
+local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local ItemIcon = require(script.Parent.ItemIcon)
+local Style = require(script.Parent.Style)
+
+export type Mode = "play" | "creative" | "hidden"
+
+local HOTBAR = Types.HOTBAR_SIZE
+-- Layout (GUI pixels): Minecraft's hotbar is 182 x 22, hearts 17 px above its top, armor 10
+-- above them, the item name 37 above (23 without hearts).
+local WIDTH = 182
+local TOUCH_BUTTON = 22
+local HEIGHT = 70
+local BAR_Y = HEIGHT - 22
+local HEARTS_Y = BAR_Y - 17
+local ARMOR_Y = HEARTS_Y - 10
+local NAME_Y_SURVIVAL = BAR_Y - 37
+local NAME_Y_CREATIVE = BAR_Y - 23
+-- The name shows this long (Minecraft: 40 ticks), fading over the last part (10 ticks).
+local NAME_TIME = 2
+local NAME_FADE = 0.5
+-- Hearts blink this long after damage, and shake at this many half hearts or less.
+local BLINK_TIME = 1
+local SHAKE_AT = 4
+local TICK = 0.05
+
+local NUMBER_KEYS: { [Enum.KeyCode]: number } = {
+	[Enum.KeyCode.One] = 1,
+	[Enum.KeyCode.Two] = 2,
+	[Enum.KeyCode.Three] = 3,
+	[Enum.KeyCode.Four] = 4,
+	[Enum.KeyCode.Five] = 5,
+	[Enum.KeyCode.Six] = 6,
+	[Enum.KeyCode.Seven] = 7,
+	[Enum.KeyCode.Eight] = 8,
+	[Enum.KeyCode.Nine] = 9,
+}
+
+--[[
+	9 x 8 pixel art. K outline, L / R the left / right half of the fill, H a highlight (left half).
+	The half sprites show the left half filled, like Minecraft's.
+]]
+local HEART = {
+	".KK...KK.",
+	"KHLK.KRRK",
+	"KHLLKRRRK",
+	"KLLLLRRRK",
+	".KLLLRRK.",
+	"..KLLRK..",
+	"...KLK...",
+	"....K....",
+}
+local ARMOR = {
+	".KK...KK.",
+	"KHLK.KRRK",
+	"KHLLKRRRK",
+	".KLLLRRK.",
+	".KLLLRRK.",
+	".KLLLRRK.",
+	".KLLLRRK.",
+	".KKKKKKK.",
+}
+
+local HEART_RED = Color3.fromRGB(219, 21, 21)
+local HEART_SHINE = Color3.fromRGB(255, 170, 170)
+local HEART_EMPTY = Color3.fromRGB(46, 30, 30)
+local HEART_EMPTY_SHINE = Color3.fromRGB(70, 52, 52)
+local ARMOR_FULL = Color3.fromRGB(200, 200, 205)
+local ARMOR_SHINE = Color3.fromRGB(255, 255, 255)
+local ARMOR_EMPTY = Color3.fromRGB(50, 50, 52)
+local OUTLINE = Color3.fromRGB(16, 16, 16)
+local BLINK_OUTLINE = Color3.fromRGB(255, 255, 255)
+
+type Icon = { frame: Frame, parts: { [string]: { Frame } }, state: number }
+
+local Hud = {}
+
+local mode: Mode = "play"
+local started = false
+local wheelHandler: ((delta: number) -> ())? = nil
+local inventoryHandler: (() -> ())? = nil
+local previewWindow: Types.Window? = nil
+local dirty = true
+
+local cells: { TextButton } = {}
+-- The hotbar and the touch button (for Hud.covers).
+local coverage: { GuiObject } = {}
+local icons: { ItemIcon.ItemIcon } = {}
+local hovers: { Frame } = {}
+
+-- What the screens show while open in creative ("creative") or survival ("hidden"); "play" else.
+function Hud.setMode(value: Mode)
+	if value ~= mode then
+		mode = value
+		dirty = true
+		-- Gamepads can reach the hotbar from the creative grid.
+		for _, cell in cells do
+			cell.Selectable = value == "creative"
+		end
+	end
+end
+
+function Hud.mode(): Mode
+	return mode
+end
+
+-- The mouse wheel while a screen is open goes to `handler` (e.g. scrolling the creative grid).
+function Hud.onScreenWheel(handler: (delta: number) -> ())
+	wheelHandler = handler
+end
+
+-- The touch "..." button calls `handler` (the screens open the inventory).
+function Hud.onInventoryButton(handler: () -> ())
+	inventoryHandler = handler
+end
+
+-- The on-screen area of hotbar slot 1..9 (the creative screen clicks it like a window slot).
+function Hud.hotbarCell(slot: number): GuiObject
+	return cells[slot]
+end
+
+-- Is `point` (screen pixels) on the hotbar or the touch inventory button?
+function Hud.covers(point: Vector2): boolean
+	for _, object in coverage do
+		if Style.contains(object, point) and Style.shown(object) then
+			return true
+		end
+	end
+	return false
+end
+
+-- The hover overlay of hotbar slot 1..9 (nil: none).
+function Hud.setHover(slot: number?)
+	for i, hover in hovers do
+		local on = i == slot
+		if hover.Visible ~= on then
+			hover.Visible = on
+		end
+	end
+end
+
+-- Draws the hotbar from this window (a drag preview) instead of the inventory; nil = the inventory.
+function Hud.setPreview(window: Types.Window?)
+	previewWindow = window
+	dirty = true
+end
+
+local function disableCoreGui()
+	task.spawn(function()
+		for _ = 1, 30 do
+			local ok = pcall(function()
+				StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Health, false)
+				StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
+			end)
+			if ok then
+				return
+			end
+			task.wait(0.5)
+		end
+	end)
+end
+
+local function newIcon(parent: Instance, x: number, art: { string }): Icon
+	local frame = Instance.new("Frame")
+	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.fromOffset(9, 9)
+	frame.Position = UDim2.fromOffset(x, 0)
+	frame.Parent = parent
+	local parts = Style.pixelArt(frame, 0, 0, art, { K = OUTLINE, L = OUTLINE, R = OUTLINE, H = OUTLINE }, 1)
+	return { frame = frame, parts = parts, state = -1 }
+end
+
+-- state: 0 empty, 1 half, 2 full.
+local function paintIcon(icon: Icon, state: number, fill: Color3, shine: Color3, empty: Color3, emptyShine: Color3)
+	if icon.state == state then
+		return
+	end
+	icon.state = state
+	Style.paint(icon.parts.L, if state >= 1 then fill else empty)
+	Style.paint(icon.parts.H, if state >= 1 then shine else emptyShine)
+	Style.paint(icon.parts.R, if state >= 2 then fill else empty)
+end
+
+function Hud.start()
+	if started then
+		return
+	end
+	started = true
+	disableCoreGui()
+
+	local player = Players.LocalPlayer
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "IceVoxelHud"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = 10
+
+	local canvas = Instance.new("Frame")
+	canvas.Name = "Hud"
+	canvas.BackgroundTransparency = 1
+	canvas.AnchorPoint = Vector2.new(0.5, 1)
+	canvas.Position = UDim2.new(0.5, 0, 1, -1)
+	canvas.Size = UDim2.fromOffset(WIDTH, HEIGHT)
+	canvas.Parent = gui
+	local scale = Instance.new("UIScale")
+	scale.Parent = canvas
+
+	--[[ Hotbar ]]
+
+	local bar = Style.frame(canvas, 0, BAR_Y, WIDTH, 22, Color3.new(0, 0, 0), 1)
+	bar.BackgroundTransparency = 0.55
+	table.insert(coverage, bar)
+	Style.border(bar, 0, 0, WIDTH, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	for i = 1, HOTBAR do
+		local x = 1 + (i - 1) * 20
+		-- Each cell has a light rim top-left and a darker one bottom-right.
+		local rim = Style.border(bar, x, 1, 20, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+		rim[2].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
+		rim[4].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
+		for _, frame in rim do
+			frame.BackgroundTransparency = 0.15
+		end
+
+		local cell = Instance.new("TextButton")
+		cell.Name = `Slot{i}`
+		cell.Text = ""
+		cell.BackgroundTransparency = 1
+		cell.AutoButtonColor = false
+		cell.Position = UDim2.fromOffset(x, BAR_Y + 1)
+		cell.Size = UDim2.fromOffset(20, 20)
+		cell.ZIndex = 4
+		cell.Selectable = false
+		cell.Parent = canvas
+		cell.Activated:Connect(function()
+			if mode == "play" then
+				ClientInventory.select(i)
+			end
+		end)
+		cells[i] = cell
+		icons[i] = ItemIcon.new(canvas, x + 2, BAR_Y + 3, 5)
+		hovers[i] = Style.hover(canvas, x + 2, BAR_Y + 3, 7)
+	end
+
+	-- The selection frame, 24 x 24 around the selected cell.
+	local selection = Instance.new("Frame")
+	selection.BackgroundTransparency = 1
+	selection.Size = UDim2.fromOffset(24, 24)
+	selection.ZIndex = 6
+	selection.Parent = canvas
+	Style.border(selection, 0, 0, 24, 24, 1, Color3.new(0, 0, 0), 1)
+	Style.border(selection, 1, 1, 22, 22, 2, Color3.new(1, 1, 1), 2)
+	Style.border(selection, 3, 3, 18, 18, 1, Color3.fromRGB(40, 40, 40), 2)
+
+	-- The touch "..." button opens the inventory.
+	local more = Style.frame(canvas, WIDTH + 2, BAR_Y, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
+	more.BackgroundTransparency = 0.55
+	table.insert(coverage, more)
+	Style.border(more, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	Style.border(more, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+	for dot = 0, 2 do
+		Style.frame(more, 5 + dot * 5, 10, 2, 2, Color3.new(1, 1, 1), 4)
+	end
+	local moreButton = Instance.new("TextButton")
+	moreButton.Text = ""
+	moreButton.BackgroundTransparency = 1
+	moreButton.Size = UDim2.fromScale(1, 1)
+	moreButton.ZIndex = 5
+	moreButton.Parent = more
+	moreButton.Activated:Connect(function()
+		if inventoryHandler then
+			inventoryHandler()
+		end
+	end)
+
+	--[[ Hearts and armor ]]
+
+	local hearts: { Icon } = {}
+	local armor: { Icon } = {}
+	local heartRow = Instance.new("Frame")
+	heartRow.BackgroundTransparency = 1
+	heartRow.Position = UDim2.fromOffset(0, HEARTS_Y)
+	heartRow.Size = UDim2.fromOffset(81, 9)
+	heartRow.ZIndex = 2
+	heartRow.Parent = canvas
+	local armorRow = Instance.new("Frame")
+	armorRow.BackgroundTransparency = 1
+	armorRow.Position = UDim2.fromOffset(0, ARMOR_Y)
+	armorRow.Size = UDim2.fromOffset(81, 9)
+	armorRow.ZIndex = 2
+	armorRow.Parent = canvas
+	for i = 1, 10 do
+		hearts[i] = newIcon(heartRow, (i - 1) * 8, HEART)
+		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
+	end
+
+	--[[ Held item name ]]
+
+	local name, nameShadow =
+		Style.shadowText(canvas, "", 0, NAME_Y_SURVIVAL, WIDTH, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Center)
+
+	local function updateScale()
+		local touch = UserInputService.TouchEnabled
+		more.Visible = touch
+		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
+		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
+	end
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
+	gui.Parent = player:WaitForChild("PlayerGui")
+	updateScale()
+
+	ClientInventory.changed:Connect(function()
+		dirty = true
+	end)
+
+	--[[ Every frame ]]
+
+	local lastSlot, lastItem = 0, -1
+	local nameUntil = 0
+	local lastHalves = -1
+	local blinkUntil = 0
+	local blinking = false
+	local nextShake = 0
+	local lastPoints = -1
+	local shown = true
+
+	RunService.RenderStepped:Connect(function()
+		local now = os.clock()
+		local visible = mode ~= "hidden"
+		if visible ~= shown then
+			shown = visible
+			canvas.Visible = visible
+		end
+		if not visible then
+			return
+		end
+		local window = previewWindow or ClientInventory.window()
+		local inventory = window.inventory
+		local survival = not ClientInventory.isCreative()
+
+		if dirty then
+			dirty = false
+			for i = 1, HOTBAR do
+				local stack = inventory.slots[i]
+				icons[i]:set(stack and stack.item, stack and stack.count)
+			end
+			selection.Position = UDim2.fromOffset(-1 + (inventory.selected - 1) * 20, BAR_Y - 1)
+		end
+
+		-- The held item's name, shown when the selection or the item in it changes.
+		local held = ClientInventory.selectedStack()
+		local item = if held then held.item else 0
+		if ClientInventory.selected() ~= lastSlot or item ~= lastItem then
+			lastSlot, lastItem = ClientInventory.selected(), item
+			if held then
+				name.Text = Items.displayName(item)
+				nameShadow.Text = name.Text
+				nameUntil = now + NAME_TIME
+			else
+				nameUntil = 0
+			end
+		end
+		local remaining = nameUntil - now
+		-- (Not over an open screen.)
+		local alpha = if mode == "play" then math.clamp(remaining / NAME_FADE, 0, 1) else 0
+		name.Visible = alpha > 0
+		nameShadow.Visible = alpha > 0
+		if alpha > 0 then
+			name.TextTransparency = 1 - alpha
+			nameShadow.TextTransparency = 1 - alpha
+			local y = if survival then NAME_Y_SURVIVAL else NAME_Y_CREATIVE
+			name.Position = UDim2.fromOffset(0, y)
+			nameShadow.Position = UDim2.fromOffset(1, y + 1)
+		end
+
+		-- Hearts and armor (survival).
+		local points = if survival then Items.armorPoints(inventory.armor) else 0
+		if heartRow.Visible ~= survival then
+			heartRow.Visible = survival
+		end
+		if armorRow.Visible ~= (points > 0) then
+			armorRow.Visible = points > 0
+		end
+		if not survival then
+			return
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local halves = 0
+		if humanoid and humanoid.MaxHealth > 0 then
+			halves = math.clamp(math.ceil(humanoid.Health / humanoid.MaxHealth * 20 - 1e-6), 0, 20)
+		end
+		if halves < lastHalves then
+			blinkUntil = now + BLINK_TIME
+		end
+		lastHalves = halves
+		local blink = now < blinkUntil and math.floor((blinkUntil - now) / 0.15) % 2 == 0
+		local shake = halves <= SHAKE_AT and now >= nextShake
+		if shake then
+			nextShake = now + TICK
+		end
+		local repaintOutline = blink ~= blinking
+		blinking = blink
+		for i, heart in hearts do
+			local state = math.clamp(halves - (i - 1) * 2, 0, 2)
+			paintIcon(heart, state, HEART_RED, HEART_SHINE, HEART_EMPTY, HEART_EMPTY_SHINE)
+			if repaintOutline then
+				Style.paint(heart.parts.K, if blink then BLINK_OUTLINE else OUTLINE)
+			end
+			if shake then
+				heart.frame.Position = UDim2.fromOffset((i - 1) * 8, math.random(0, 1))
+			elseif halves > SHAKE_AT and heart.frame.Position.Y.Offset ~= 0 then
+				heart.frame.Position = UDim2.fromOffset((i - 1) * 8, 0)
+			end
+		end
+		if points ~= lastPoints then
+			lastPoints = points
+			for i, icon in armor do
+				local state = math.clamp(points - (i - 1) * 2, 0, 2)
+				paintIcon(icon, state, ARMOR_FULL, ARMOR_SHINE, ARMOR_EMPTY, ARMOR_EMPTY)
+			end
+		end
+	end)
+
+	--[[ Input ]]
+
+	local function step(delta: number)
+		local slot = (ClientInventory.selected() - 1 + delta) % HOTBAR + 1
+		ClientInventory.select(slot)
+	end
+
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or mode ~= "play" then
+			return
+		end
+		local slot = NUMBER_KEYS[input.KeyCode]
+		if slot then
+			ClientInventory.select(slot)
+		elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
+			step(1)
+		elseif input.KeyCode == Enum.KeyCode.ButtonL1 then
+			step(-1)
+		end
+	end)
+
+	-- The wheel picks hotbar slots (down = next, like Minecraft) instead of zooming the camera,
+	-- and scrolls the screens while one is open.
+	ContextActionService:BindActionAtPriority("IceVoxelHotbarWheel", function(_, state, input)
+		if state ~= Enum.UserInputState.Change then
+			return Enum.ContextActionResult.Pass
+		end
+		local delta = input.Position.Z
+		if mode ~= "play" then
+			if wheelHandler and delta ~= 0 then
+				wheelHandler(delta)
+			end
+			return Enum.ContextActionResult.Sink
+		end
+		if not Config.Interaction.ScrollWheelHotbar then
+			return Enum.ContextActionResult.Pass
+		end
+		if delta ~= 0 then
+			step(if delta < 0 then 1 else -1)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.UserInputType.MouseWheel)
+end
+
+return Hud
