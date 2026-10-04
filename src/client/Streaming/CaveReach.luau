@@ -79,14 +79,12 @@ function CaveReach.tracker(min: number, max: number, step: number, shrinkDelay: 
 		if open then
 			want = math.clamp(math.ceil((open + step) / step) * step, min, max)
 		end
-		if want >= self.radius then
+		local since = smallerSince
+		if want >= self.radius or (since and now - since >= shrinkDelay) then
 			self.radius = want
 			smallerSince = nil
-		elseif smallerSince == nil then
+		elseif since == nil then
 			smallerSince = now
-		elseif now - smallerSince >= shrinkDelay then
-			self.radius = want
-			smallerSince = nil
 		end
 		return self.radius
 	end

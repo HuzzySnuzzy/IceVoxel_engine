@@ -5,14 +5,19 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Client-side generation in parallel.** Terrain is generated from the world seed on every
   client, inside a pool of Actors (Parallel Luau). The server never sends terrain, only edits.
 - **Level of detail.** A quadtree of chunk sizes gives a default view distance of 2048 blocks
-  (128 chunks) at roughly 25–50k parts. Far chunks use cells up to 64 blocks wide (but at most 16
-  tall, so mountains keep their shape). LOD changes swap in place without holes or flicker.
+  (128 chunks). Far chunks use cells up to 64 blocks wide (but at most 16 tall, so mountains keep
+  their shape). LOD changes swap in place without holes or flicker.
 - **Greedy box meshing.** Blocks become as few Parts as possible; blocks you can never see are
   merged into neighbouring boxes for free, and caves are only meshed when the camera is underground.
-- **Blended biomes.** Continents, oceans, beaches, mountain ranges and 8 biomes (tundra, taiga,
-  plains, forest, birch forest, savanna, desert, jungle) whose terrain blends smoothly.
-- **Caves, ores and structures.** Tunnels and caverns, ore veins, and a deterministic structure
-  system (trees and cacti today) that lets anything cross chunk borders.
+- **Terrain like JJThunder To The Max.** A 1024 block tall world in the style of the Minecraft
+  datapack: mountain ranges up to ~900 blocks high with snowy peaks, eroded flanks and plateau
+  hills, plains, wide river valleys and enclosed seas with islands. Its height functions are ported
+  directly and scaled to fit. 18 biomes are picked by altitude band (lowland, forest, highland,
+  meadow, alpine, snowy slopes, peaks), then by climate.
+- **Caves, ores and structures.** Dry caves that grow with depth, from tunnels to huge stratified
+  caverns, and the Underlands: a cavern hundreds of blocks tall under the highest mountains. Ores and
+  stone varieties by altitude, and a deterministic structure system (trees and cacti today) that
+  lets anything cross chunk borders.
 - **Server-authoritative interaction.** Break and place blocks with client prediction and server
   validation. Block updates power falling sand and gravel, flowing water (Minecraft rules, including
   infinite sources) and grass turning into dirt.
@@ -25,7 +30,7 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
-  25k parts become 9k parts + 86 meshes on plains. Parts stay the fallback, so nothing breaks
+  83k parts become 36k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
   where the Mesh APIs are unavailable.
 
 ## Getting started
@@ -73,9 +78,10 @@ Studio tips:
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables
-  Biomes/  BiomeList        biome definitions
+  Biomes/  BiomeList        biome definitions and altitude bands
   Generation/
-    TerrainGenerator        heights, biome blending, filling chunks at any LOD
+    TerrainGenerator        biomes, surfaces, filling chunks at any LOD
+    Relief                  terrain heights (JJThunder To The Max style)
     Noise                   seeded noise on top of math.noise
     Caves, Ores             full detail only
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
@@ -131,6 +137,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
 | `Render.Shadows`          | true    | Shadows on full detail chunks (far chunks never cast shadows).      |
 | `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
+| `Caves.RevealRadiusMax`   | 96      | Same in big caverns (the radius follows the open space around you). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
 | `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
@@ -138,22 +145,24 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 
 Part count depends on the terrain: flat land costs ~35 parts per full detail chunk, steep
-mountains ~120. Most parts are near the player; doubling the view distance adds comparatively
-few. Measured view from spawn (`lune run tests/bench <seed> <viewDistance> [splitDistance]`):
+mountains ~110. Most parts are near the player; doubling the view distance adds comparatively
+few. Measured views (`lune run tests/bench <seed> <viewDistance> [splitDistance] [splitL1] [x z]`,
+seed 12345; "mountains" is inside a range at 3200, -14600):
 
-| Seed              | 512 (mobile) | 1024 | 2048 (default) | 4096 |
+| View from         | 512 (mobile) | 1024 | 2048 (default) | 4096 |
 | ----------------- | ------------ | ---- | -------------- | ---- |
-| 12345 (plains)    | 9k           | 19k  | 25k            | 35k  |
-| 777 (mountains)   | 25k          | 45k  | 50k            | 60k  |
+| spawn (hills)     | 14k          | 28k  | 34k            | 46k  |
+| mountains         | 29k          | 68k  | 83k            | 99k  |
 
 With far meshes, once every region near the player has settled (the bench prints this too):
 
-| Seed              | 2048 (default)         | 4096                    |
-| ----------------- | ---------------------- | ----------------------- |
-| 12345 (plains)    | 9.0k parts + 86 meshes | 12.1k parts + 182 meshes |
-| 777 (mountains)   | 33k parts + 94 meshes  | 36k parts + 190 meshes  |
+| View from         | 2048 (default)          | 4096                     |
+| ----------------- | ----------------------- | ------------------------ |
+| spawn (hills)     | 16.7k parts + 88 meshes | 20.6k parts + 187 meshes |
+| mountains         | 35.5k parts + 90 meshes | 40.1k parts + 191 meshes |
 
-What remains in mountains are the near levels (full detail and level 1), which stay parts.
+What remains are the near levels (full detail and level 1), which stay parts. In the mountains,
+`Lod.SplitDistanceL1 = 2` or a shorter view on weaker devices brings that down.
 
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
@@ -241,9 +250,10 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
   off; meshes in the world are capped at `MaxLiveTriangles`), and how far the engine then
   actually draws. Check F3 and the MicroProfiler in a published test place before relying on it.
 
-**A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with a climate position
-(temperature, humidity), terrain shape (`heightOffset`, `hilliness`), surface blocks and
-vegetation. Terrain shape blends with neighbouring biomes automatically.
+**A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
+in, a climate position (temperature, humidity), surface blocks (optionally patches of another
+block and a block for steep slopes) and vegetation. The terrain shape comes from `Relief`, so a
+biome only decides what grows and what the ground is made of.
 
 **A structure.** Write a builder in `Generation/Structures/` (see `Trees.luau`), register it in
 `Structures.registry` with the blocks it may grow on, and list it in a biome's `features`. Builders
@@ -296,6 +306,10 @@ Natural next steps, roughly in order:
   builds appear once in full detail range.
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
   connectivity (docs/ARCHITECTURE.md, "Hidden caves, octrees and regions").
+- **The Underlands at a distance.** Caves only exist in full detail chunks, so a big cavern ends
+  where they do (~96 blocks). Carving the Underlands (an analytic interval per column, cheap at any
+  level) into far chunks and meshing those with caves visible while the camera is inside would
+  show them whole.
 - **Bigger structures.** Villages / dungeons using the same stateless placement with a larger grid.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result.

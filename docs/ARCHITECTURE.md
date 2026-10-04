@@ -19,10 +19,21 @@ thousands of parts from the server is slow. IceVoxel never does either:
 
 ## Chunks
 
-A chunk is a full-height column (`Config.ChunkSize` = 16 wide, `Config.WorldHeight` = 256 tall) stored
+A chunk is a full-height column (`Config.ChunkSize` = 16 wide, `Config.WorldHeight` = 1024 tall) stored
 in a `buffer`, one u16 block id per cell (`World/ChunkLayout`). Each chunk also stores a one-cell
 border copied from its neighbours ("padding", 18 × 18 cells per layer), so meshing never needs to
 look at another chunk. Y is the outermost axis, so a vertical section is a contiguous slice.
+
+**Cropping.** A full 1024-tall column would be 648 KB, almost all of it air. So the buffer ends a
+little above the chunk's highest block (generated chunks keep 32 blocks of room for trees, rounded
+up to whole sections, `ChunkLayout.croppedHeight`), and everything above it is air. The chunk's
+`height` says where it ends; `getBlock` answers air above it. Placing a block above the crop grows
+the buffer (`ChunkLayout.grow`) on the server, on the client (which also copies the neighbours'
+border columns into the new rows' padding) and in workers applying edits; air above the crop needs
+no room.
+
+Parts and meshes are limited to 2048 studs per axis, and 1024 blocks are 3072 studs, so tall boxes
+are split vertically (`ChunkRenderer`) and far meshes are cut into height bands (`MeshGeometry`).
 
 Level-of-detail chunks use the same layout with bigger cells: a level `L` chunk covers
 `16 × 2^L` blocks with 16 × 16 cells. Cells are `2^L` blocks wide but at most
@@ -36,28 +47,85 @@ node key) and `posKey(x, y, z)` for block positions.
 
 `TerrainGenerator.generate(level, nx, nz)` builds one padded chunk:
 
-1. **Columns.** For every padded column, `sample(x, z)` computes the height and surface:
-   - *continentalness* (very low frequency) maps through a spline to a base height: deep ocean,
-     ocean, coast, lowland, inland, highland;
-   - *mountains* noise raises ridged mountain ranges where it is high and we are inland;
-   - *biome blending*: temperature and humidity place the column in a 2D climate space. Every biome
-     gets a gaussian weight from its distance in that space, and the biome terrain properties
-     (`heightOffset`, `hilliness`, `vegetation`) are weighted averages. Because climate varies
-     slowly, biome borders become smooth transitions instead of cliffs;
-   - the *surface biome* (top / filler blocks) is the nearest biome to a slightly jittered climate,
-     which makes borders look natural. Temperature drops with altitude, so peaks turn snowy.
-   - beaches near sea level on coasts, gravel deep underwater, snow above the snow line.
+1. **Columns.** For every padded column, `sample(x, z, level)` computes the height and surface:
+   - the *relief* (`Relief.luau`, below) gives the height, the height without rivers, the
+     terrain-type selector and the river strength;
+   - the *biome* is picked by altitude first: the height without rivers (so a river bed belongs to
+     its banks), dithered by a few blocks, falls into one of seven bands (lowland, forest, highland,
+     meadow, alpine, snowy slopes, peaks; `BiomeList.bands`), and the biome is the one of that band
+     nearest to the column's climate (temperature and humidity noise, also slightly jittered).
+     Islands far out in some seas (very negative selector) are mushroom fields;
+   - the surface: beach blocks just above sea level, gravel deep underwater, packed mud in river
+     beds, biome patches (stone in windswept hills, calcite on stony peaks...) or the biome's top.
 2. **Fill.** Bedrock, stone, filler and surface blocks; water up to sea level (ice in frozen biomes);
-   bare stone on steep slopes.
-3. **Caves** (level 0 only, `Caves.luau`). "Spaghetti" tunnels where two 3D noise fields are both near
-   zero, and caverns where a third is high. The noise is sampled on a 4-block grid and interpolated;
-   segments where carving is impossible are skipped. Caves are carved as **CaveAir** and stay
+   bare rock (`Biome.steep`) on slopes steeper than the biome's limit. Below the lowest column top
+   every column is stone, so that part is written a whole layer at a time (`buffer.copy`).
+3. **Caves** (level 0 only, `Caves.luau`). See below. Caves are carved as **CaveAir** and stay
    `Caves.SurfaceMargin` blocks below the surface.
-4. **Ores** (level 0 only). Random-walk veins inside the chunk's own core.
+4. **Ores** (level 0 only). Random-walk veins inside the chunk's own core, in altitude bands
+   (diorite, andesite and granite blobs low to high, emeralds only inside high mountains), with a
+   vein count proportional to the height range the column has.
 5. **Structures** (up to `Config.StructureMaxLevel`). See below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
 rock or cave air) and `emptyAbove` (everything above is air).
+
+### Relief: JJThunder To The Max style (`Relief.luau`)
+
+The terrain shape follows the "JJThunder To The Max" Minecraft datapack (version 0.6.0), whose
+density functions were ported directly and calibrated against a simulation of the datapack. Its
+surface is a pure heightfield, so IceVoxel keeps one height per column. Everything is computed in
+the datapack's units (height `H`, 1 H = 1048 of its blocks; positions in its blocks) and mapped at
+the end: `y = 64 + 450 (H - H_sea)` above sea level, `524 (H - H_sea)` below, and the same 0.43
+scale horizontally, so slopes keep the datapack's steepness in a 1024 block world.
+
+- **Selector.** One single-octave noise with a ~18 km wavelength, warped by a second noise near its
+  zero contour. `a = |selector|` picks the terrain type: extreme mountains (0, the ranges follow the
+  zero contour), mountains (0.075), extreme hills (0.15), hills (0.225), plains (0.3), ocean (0.4 and
+  more: the selector's extremes are enclosed seas 9–17 km across). Neighbouring types are blended
+  with a smoothstep, so at most two are evaluated per column.
+- **Types.** `offset + offset noise + factor + jagged`: a wide offset noise, a kilometre-scale
+  "factor" noise (ridges and valleys) and many-octave "jagged" detail whose amplitude grows on high
+  ground. The factor is *eroded*: multiplied by `E = 1 / (1 + c)` where `c` grows with the factor's
+  slope over one noise unit, so flanks flatten while crests and troughs keep their height. The hill
+  types also squash positive factor values, which gives them plateau tops.
+- **Rivers.** Valleys dug to 14 blocks below sea level along the zero contour of an independent
+  ~9 km noise, through hills and plains and on into the sea. The distance to the contour is
+  `|r| / |∇r|`, so valleys keep their width (about 200 blocks of water in a 600 block valley).
+- **LOD.** Far levels leave out jagged octaves narrower than two of their cells (they would only
+  alias).
+
+Calibrated against the datapack: the terrain types cover the same share of the map, heights have
+the same distribution (median ~120, 99th percentile ~680, highest ~930; a quarter of the map is
+below sea level), and slopes and erosion match (mountain slopes ~0.7, plains ~0.16 blocks per
+block over 14 blocks). `tests/spec/Generation` checks the main numbers.
+
+`math.noise` computes in single precision, so noise offsets stay below 256 (its lattice repeats
+every 256 units anyway): larger offsets turned kilometre-wide noise into steps several blocks long.
+
+### Caves and the Underlands (`Caves.luau`)
+
+Also after the datapack: caves are dry and grow with depth. A density F is computed from the depth
+below the column's surface in H (`d = depth / 450`), and rock is carved where F < 0.
+
+- Nothing in the top ~22 blocks (`d` < 0.05), with a smooth fade-in.
+- Three cave sets take over at ~45, ~158 and ~315 blocks deep (small, medium, large), blended with
+  smoothsteps. Each mixes *blob* caves (one 3D noise) with *strata*, a smooth sawtooth over height
+  tilted by a kilometre-scale noise plus 3D and jagged noise, by a very wide `barrier1` noise.
+- `barrier2` (3D, ~190 blocks) gates everything: below 0 there are no caves, from 0.5 on the sets
+  are at full strength. So caves come in regions, and ~14% of the rock between 22 and 316 blocks
+  deep is air (the datapack: 8–16%).
+- **The Underlands.** From ~315 blocks deep the large set blends into an analytic air layer (no
+  noise, the datapack's `ygrad - 1.6 H`): its floor sinks as the surface rises, its ceiling is
+  ~450 blocks below the surface. It only exists under surfaces above ~557 and is up to ~480 blocks
+  tall under the highest peaks.
+
+Cave and strata sizes are 0.75 of the datapack's (the player is not scaled down with the terrain);
+the depths scale with the terrain. 3D noise per block would be far too slow, so F is evaluated on
+a world-aligned 4 × 8 × 4 lattice and interpolated. Lattice points where `barrier2` rules caves out
+cost one noise call, cells positive at all eight corners are skipped, and the near-surface fade
+uses each block's own depth (lattice depths are off on steep slopes). A tall mountain chunk takes
+~10 ms in Lune.
 
 **LOD sampling.** A level `L` chunk samples each cell at its center, so it costs about the same as a
 full detail chunk while covering `4^L` times the area. LOD chunks also lower their padding columns
@@ -77,7 +145,7 @@ remeshes a node when a side gets a coarser neighbour.
 ### Structures
 
 `Structures.populate` divides the world into 5 × 5 cells with one candidate spot per cell at a hashed
-position. A spot grows something if a hash-derived roll is below the blended vegetation chance
+position. A spot grows something if a hash-derived roll is below the biome's vegetation chance
 there; the biome's `features` pick what grows, and the surface block must be a valid soil.
 
 This is stateless: any chunk can find every structure that reaches into it (spots within
@@ -154,9 +222,14 @@ affected mesh sections dirty. Dirty sections are remeshed by workers before any 
 If an edit arrives while a chunk is being generated, the outdated result is discarded and the chunk
 is regenerated.
 
-**Caves.** While the camera is below the terrain surface, sections within `Caves.RevealRadius` are
+**Caves.** While the camera is below the terrain surface, sections within a reveal radius are
 meshed with caves visible; everywhere else cave air counts as rock. Sections are remeshed as they
-enter or leave that radius. Where a revealed tunnel runs into hidden space (a hidden section above
+enter or leave that radius. The radius follows the open space around the camera
+(`Streaming/CaveReach`): rays are cast sideways and upwards through the loaded blocks and their
+median distance, plus a section, sets the radius between `Caves.RevealRadius` (tunnels) and
+`Caves.RevealRadiusMax` (big caverns such as the Underlands). It grows at once and shrinks only
+after two seconds, so the revealed sections do not churn. Caves only exist in full detail chunks,
+so a cavern ends where they do. Where a revealed tunnel runs into hidden space (a hidden section above
 or below, a neighbour chunk whose section is hidden, or a coarser node), nobody would draw its walls
 there and you would look into the void. A revealed section is therefore meshed with a mask of those
 sides (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock, and its own cave
@@ -334,14 +407,15 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 
 **How caves are hidden today.** Caves are carved as `CaveAir` and never reach the surface. The
 mesher can treat cave air as rock (`hideCaves`), which removes every cave wall; sections are meshed
-with caves visible only while the camera is below the terrain surface and within
-`Caves.RevealRadius`. That is a cheap form of occlusion culling that needs no extra data structure.
+with caves visible only while the camera is below the terrain surface and within the reveal radius
+(see Streaming above). That is a cheap form of occlusion culling that needs no extra data structure.
 
 **Octrees** are a storage / search structure: a cube split into 8 children until regions are
 uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD
 schemes. They are not what hides caves. Our quadtree LOD (`World/LodTree`) is the 2D cousin. With
 column chunks and greedy boxes, an octree would mostly help memory (a mostly-air column could be
-stored as a few nodes instead of 166 KB), and could be added later as a chunk storage format.
+stored as a few nodes instead of a cropped column buffer), and could be added later as a chunk
+storage format.
 
 **What Minecraft does for caves.** Minecraft splits chunks into 16³ sections and, for each section,
 flood-fills its air to record which of the six faces connect to each other ("advanced cave

@@ -10,12 +10,17 @@ return function(t, shared, require)
 	local SIZE = ChunkLayout.SIZE
 	local gen = TerrainGenerator.new(12345)
 
-	-- Ores only exist in a chunk's own core, so treat them as stone when comparing borders.
+	-- Ores (and stone varieties) only exist in a chunk's own core, so treat them as stone when
+	-- comparing borders.
 	local ORE = {
 		[Blocks.id.CoalOre] = true,
 		[Blocks.id.IronOre] = true,
 		[Blocks.id.GoldOre] = true,
 		[Blocks.id.DiamondOre] = true,
+		[Blocks.id.EmeraldOre] = true,
+		[Blocks.id.Diorite] = true,
+		[Blocks.id.Andesite] = true,
+		[Blocks.id.Granite] = true,
 	}
 	local function norm(id: number): number
 		return if ORE[id] then Blocks.id.Stone else id
@@ -210,6 +215,47 @@ return function(t, shared, require)
 				local y = relief.height(x, z, level)
 				t.ok(math.abs(y - y0) < math.max(3, 2 * stepY), `level {level} height {y} vs {y0}`)
 			end
+		end
+	end)
+
+	t.test("ores and stone varieties keep to their altitudes", function()
+		local bands = {
+			[Blocks.id.Diorite] = { 5, 200 },
+			[Blocks.id.Andesite] = { 200, 370 },
+			[Blocks.id.Granite] = { 370, 540 },
+			[Blocks.id.DiamondOre] = { 5, 30 },
+			[Blocks.id.EmeraldOre] = { 600, math.huge },
+		}
+		local seen: { [number]: number } = {}
+		local relief = Relief.new(12345)
+		-- Mountain chunks (every band, unless the Underlands hollowed it out) and a lowland one.
+		local rng = Hash.rng(11)
+		local spots = {}
+		while #spots < 6 do
+			local x, z = rng:int(-40000, 40000), rng:int(-40000, 40000)
+			local y = relief.height(x, z, 0)
+			if (#spots < 3 and y > 640 and y < 720) or (#spots >= 3 and y > 90 and y < 140) then
+				table.insert(spots, { x // SIZE, z // SIZE })
+			end
+		end
+		for _, spot in spots do
+			local r = gen.generate(0, spot[1], spot[2])
+			for y = 0, r.height - 1 do
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local id = ChunkLayout.get(r.data, x, y, z)
+						local band = bands[id]
+						if band then
+							seen[id] = (seen[id] or 0) + 1
+							-- Veins wander up to their size from where they start.
+							t.ok(y >= band[1] - 40 and y <= band[2] + 40, `{Blocks.get(id).name} at y {y}`)
+						end
+					end
+				end
+			end
+		end
+		for id in bands do
+			t.ok((seen[id] or 0) > 0, `no {Blocks.get(id).name}`)
 		end
 	end)
 

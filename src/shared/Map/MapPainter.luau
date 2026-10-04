@@ -9,8 +9,8 @@
 	format EditableImage:WritePixelsBuffer expects.
 
 	Colouring: the surface block's colour, darkened where trees are dense, lit from the north-west
-	using the height difference to the neighbouring pixel (hill shading); water is tinted by depth
-	and frozen seas are drawn as ice.
+	using the slope towards the neighbouring pixel (hill shading) and a little brighter higher up;
+	water is tinted by depth and frozen seas are drawn as ice.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -36,11 +36,18 @@ local function pack(r: number, g: number, b: number): number
 	return r + g * 256 + b * 65536 + 255 * 16777216
 end
 
--- Colour (packed RGBA) of one map pixel.
+-- Hill shading per unit of slope (blocks per block) facing the light, and the brightening from sea
+-- level to ALTITUDE_TOP.
+local LIGHT = 0.3
+local ALTITUDE_GAIN, ALTITUDE_TOP = 0.25, 700
+
+-- Colour (packed RGBA) of one map pixel; `west` / `north` are the neighbouring pixels' heights,
+-- `scale` blocks away.
 local function shade(
 	height: number,
 	west: number,
 	north: number,
+	scale: number,
 	biome: number,
 	vegetation: number,
 	surface: number
@@ -54,9 +61,9 @@ local function shade(
 	end
 	local c = Blocks.get(surface).color
 	-- Light from the north-west: slopes facing it are brighter.
-	local light = 1 + ((height - west) + (height - north)) * 0.06
-	light = if light < 0.65 then 0.65 elseif light > 1.3 then 1.3 else light
-	local altitude = 0.92 + (height - SEA) / 450
+	local light = 1 + ((height - west) + (height - north)) / scale * LIGHT
+	light = if light < 0.6 then 0.6 elseif light > 1.35 then 1.35 else light
+	local altitude = 0.92 + ALTITUDE_GAIN * math.min(1, (height - SEA) / ALTITUDE_TOP)
 	local forest = 1 - math.min(0.35, vegetation * 0.7)
 	local k = light * altitude * forest
 	return pack(c[1] * k, c[2] * k, c[3] * k)
@@ -86,7 +93,7 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 				heights[row + i + 1] = h
 				local west = heights[row + i]
 				local north = heights[row - stride + i + 1]
-				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, biome, vegetation, surface))
+				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, scale, biome, vegetation, surface))
 			end
 			if yield then
 				yield()
