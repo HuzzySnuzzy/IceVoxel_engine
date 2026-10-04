@@ -9,7 +9,8 @@
 	    dragged (or the track clicked), and on touch screens the grid scrolls with the finger;
 	  * the hotbar row underneath is the real one: the HUD's hotbar stays on screen below the panel
 	    and its slots are clicked like inventory slots (Ui/Hud, mode "creative");
-	  * tabs above the panel switch to the inventory screen (armor and the rest) and back.
+	  * tabs above the panel switch to the inventory screen (armor, the 2 x 2 crafting grid and the
+	    rest) and back.
 
 	The grid only has as many slot widgets as are visible; scrolling changes which items they
 	show. Clicks are Ui/SlotClicks (grid targets: full stacks, deleting carried ones), driven by
@@ -116,7 +117,8 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 			shownRow = -1,
 			shownList = nil,
 			draggingThumb = false,
-			hotbarBase = Types.PLAYER_SLOTS - Types.HOTBAR_SIZE,
+			-- Window 0's hotbar (after its 2 x 2 grid); render() follows the window shown.
+			hotbarBase = Menu.windowIndex(Types.newWindow(Types.newInventory()), "inventory", 1) :: number,
 		}, CreativeScreen) :: any
 	) :: Self
 

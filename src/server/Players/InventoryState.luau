@@ -4,8 +4,11 @@
 	Players/Inventories), so the tests can run it.
 
 	Per player (any key; Players in the game):
-	  window   Types.Window: id 0 with the inventory alone, or a container window (ids 1..255,
-	           cycling, never 0) sharing the container's table with its other viewers (Containers)
+	  window   Types.Window: id 0, the inventory screen with its own 2 x 2 crafting grid
+	           (Types.newWindow), or a block's window (ids 1..255, cycling, never 0): a chest or a
+	           furnace shares the container's table with its other viewers (Containers); a crafting
+	           table's 3 x 3 grid is the player's own, made on opening and emptied back into the
+	           inventory on closing
 	  ack      the number of the player's last inventory action handled. Clients number their
 	           actions (Protocol) and predict them; a snapshot says which ones it includes, so the
 	           client drops those and replays the rest on top of it
@@ -14,7 +17,10 @@
 
 	Actions run through Inventory/Menu in arrival order. Invalid ones change nothing but are still
 	acknowledged, so the client's prediction of them is undone. A change to a shared container
-	marks its other viewers dirty too.
+	marks its other viewers dirty too. Crafting results are derived from their grids
+	(Menu.updateCraft), so every snapshot carries the right one.
+
+	Tools wear through `wearHeld` (the server's mining calls it); `heldStack` is what is in hand.
 
 	Functions that take stacks out of the world (throws, close leftovers, deaths) return them; the
 	caller turns them into item entities.
@@ -23,6 +29,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
@@ -42,7 +49,7 @@ export type PlayerState = {
 	dirty: boolean,
 	-- Last container window id given out.
 	lastWindow: number,
-	-- Block position of the open container.
+	-- Block position of the open block window (chest, furnace or crafting table).
 	open: { x: number, y: number, z: number }?,
 }
 
@@ -66,6 +73,8 @@ export type InventoryState = {
 	openPosition: (self: InventoryState, key: any) -> (number?, number, number),
 	removeContainer: (self: InventoryState, x: number, y: number, z: number) -> ({ Stack }, { Leftovers }),
 	pickup: (self: InventoryState, key: any, stack: Stack) -> number,
+	heldStack: (self: InventoryState, key: any) -> Stack?,
+	wearHeld: (self: InventoryState, key: any, amount: number) -> boolean,
 	die: (self: InventoryState, key: any, keepInventory: boolean) -> { Stack },
 	markDirty: (self: InventoryState, key: any) -> (),
 	takeDirty: (self: InventoryState) -> { any },
@@ -87,7 +96,7 @@ function InventoryState.join(self: InventoryState, key: any): PlayerState
 		return existing
 	end
 	local player: PlayerState = {
-		window = { id = 0, inventory = Types.newInventory(), container = nil },
+		window = Types.newWindow(Types.newInventory()),
 		ack = 0,
 		dirty = true,
 		lastWindow = 0,
@@ -132,9 +141,15 @@ local function acknowledge(player: PlayerState, seq: number)
 	player.dirty = true
 end
 
+-- Is the container one that other players can have open too (a chest or a furnace)? Crafting
+-- grids (the inventory's and a crafting table's) belong to one player.
+local function isShared(container: Types.Container?): boolean
+	return container ~= nil and Types.craftWidth(container) == 0
+end
+
 local function markViewers(self: InventoryState, key: any, player: PlayerState)
 	local open = player.open
-	if open == nil then
+	if open == nil or not isShared(player.window.container) then
 		return
 	end
 	for _, viewer in self.containers:viewers(open.x, open.y, open.z) do
@@ -208,28 +223,43 @@ function InventoryState.acknowledge(self: InventoryState, key: any, seq: number)
 end
 
 --[[
-	Opens the container block `block` at (x, y, z) for the player in a new window, closing what
-	was open (the cursor goes back into the inventory). Returns the stacks that did not fit back.
+	Opens the block `block` at (x, y, z) for the player in a new window, closing what was open
+	(the cursor and the 2 x 2 grid go back into the inventory). A crafting table (menu "Crafting")
+	gets a 3 x 3 grid of the player's own; a chest or a furnace is the shared container there
+	(Containers). Returns the stacks that did not fit back. Blocks with no window open nothing.
 ]]
 function InventoryState.open(self: InventoryState, key: any, x: number, y: number, z: number, block: number): { Stack }
 	local player = self.players[key]
-	if player == nil then
+	if player == nil or not Blocks.isValid(block) then
+		return {}
+	end
+	local def = Blocks.get(block)
+	local personal = def.menu == "Crafting"
+	if not personal and def.container <= 0 then
 		return {}
 	end
 	local thrown = self:close(key)
-	local container = self.containers:get(x, y, z, block)
-	self.containers:addViewer(x, y, z, key)
+	local container: Types.Container
+	if personal then
+		container = Types.newCrafting("crafting", block)
+	else
+		container = self.containers:get(x, y, z, block)
+		self.containers:addViewer(x, y, z, key)
+	end
+	local window = player.window
 	player.lastWindow = player.lastWindow % MAX_WINDOW + 1
-	player.window.id = player.lastWindow
-	player.window.container = container
+	window.id = player.lastWindow
+	window.container = container
 	player.open = { x = x, y = y, z = z }
+	Menu.updateCraft(window)
 	player.dirty = true
 	return thrown
 end
 
 --[[
-	Closes the player's screen: the cursor goes back into the inventory and an open container
-	window becomes the inventory alone (id 0). Returns what did not fit back.
+	Closes the player's screen (Menu.close: the cursor, then a crafting grid's items, go back into
+	the inventory) and returns what did not fit back. A block's window becomes the inventory
+	screen's window again (id 0, a fresh 2 x 2 grid); closing window 0 itself keeps it.
 ]]
 function InventoryState.close(self: InventoryState, key: any): { Stack }
 	local player = self.players[key]
@@ -241,15 +271,20 @@ function InventoryState.close(self: InventoryState, key: any): { Stack }
 	local open = player.open
 	if open then
 		player.open = nil
-		self.containers:removeViewer(open.x, open.y, open.z, key)
+		if isShared(window.container) then
+			self.containers:removeViewer(open.x, open.y, open.z, key)
+		end
 	end
-	window.id = 0
-	window.container = nil
+	local container = window.container
+	if window.id ~= 0 or container == nil or container.kind ~= "inventory" then
+		window.id = 0
+		window.container = Types.newCrafting("inventory")
+	end
 	player.dirty = true
 	return thrown
 end
 
--- Block position of the player's open container, or nil.
+-- Block position of the player's open block window, or nil.
 function InventoryState.openPosition(self: InventoryState, key: any): (number?, number, number)
 	local player = self.players[key]
 	local open = player and player.open
@@ -260,9 +295,11 @@ function InventoryState.openPosition(self: InventoryState, key: any): (number?, 
 end
 
 --[[
-	The container block at (x, y, z) is gone: closes it for everyone who has it open and removes
-	it. Returns its contents (to drop where it was) and the viewers' leftovers (cursor stacks that
-	did not fit back into their inventories).
+	The block at (x, y, z) with a window is gone: closes that window for every player who has it
+	open (a chest's or furnace's viewers and the players at a crafting table there; their cursors
+	and grids go back into their inventories) and removes a shared container there. Returns its
+	contents (to drop where it was) and the players' leftovers (what did not fit back into their
+	inventories).
 ]]
 function InventoryState.removeContainer(
 	self: InventoryState,
@@ -271,25 +308,23 @@ function InventoryState.removeContainer(
 	z: number
 ): ({ Stack }, { Leftovers })
 	local leftovers: { Leftovers } = {}
-	for _, viewer in self.containers:viewers(x, y, z) do
-		local player = self.players[viewer]
-		local open = player and player.open
+	for key, player in self.players do
+		local open = player.open
 		if open and open.x == x and open.y == y and open.z == z then
-			local stacks = self:close(viewer)
+			local stacks = self:close(key)
 			if #stacks > 0 then
-				table.insert(leftovers, { key = viewer, stacks = stacks })
+				table.insert(leftovers, { key = key, stacks = stacks })
 			end
-		else
-			self.containers:removeViewer(x, y, z, viewer)
 		end
 	end
 	local contents: { Stack } = {}
+	-- (take forgets any viewers left, e.g. players who are gone.)
 	local container = self.containers:take(x, y, z)
 	if container then
 		for slot = 1, container.size do
 			local stack = container.slots[slot]
 			if stack and stack.count > 0 then
-				table.insert(contents, { item = stack.item, count = stack.count })
+				table.insert(contents, { item = stack.item, count = stack.count, damage = stack.damage })
 			end
 		end
 	end
@@ -310,9 +345,52 @@ function InventoryState.pickup(self: InventoryState, key: any, stack: Stack): nu
 	return taken
 end
 
+-- The stack in the player's hand (the selected hotbar slot), or nil. Read only.
+function InventoryState.heldStack(self: InventoryState, key: any): Stack?
+	local player = self.players[key]
+	if player == nil then
+		return nil
+	end
+	local inventory = player.window.inventory
+	local held = inventory.slots[inventory.selected]
+	if held == nil or held.count < 1 then
+		return nil
+	end
+	return held
+end
+
 --[[
-	The player died: their screen closes, and unless `keepInventory` everything they had (armor and
-	cursor too) is returned, to scatter where they died.
+	The tool in the player's hand was used (Minecraft's ItemStack.hurtAndBreak): its damage grows by
+	`amount` and at its item's durability it breaks (the slot empties). Returns true when it broke.
+	Nothing happens (false) for an amount below 1 or a held stack that does not wear.
+]]
+function InventoryState.wearHeld(self: InventoryState, key: any, amount: number): boolean
+	local player = self.players[key]
+	if player == nil or type(amount) ~= "number" or not (amount >= 1) or amount == math.huge then
+		return false
+	end
+	local inventory = player.window.inventory
+	local selected = inventory.selected
+	local held = inventory.slots[selected]
+	local def = if held and held.count >= 1 then Items.get(held.item) else nil
+	local durability = if def then def.durability else nil
+	if held == nil or durability == nil then
+		return false
+	end
+	local damage = (held.damage or 0) + math.floor(amount)
+	player.dirty = true
+	if damage >= durability then
+		inventory.slots[selected] = nil
+		return true
+	end
+	inventory.slots[selected] = { item = held.item, count = held.count, damage = damage }
+	return false
+end
+
+--[[
+	The player died: their screen closes (the cursor and a crafting grid go back into the
+	inventory), and unless `keepInventory` everything they had (armor and cursor too) is returned,
+	to scatter where they died.
 ]]
 function InventoryState.die(self: InventoryState, key: any, keepInventory: boolean): { Stack }
 	local player = self.players[key]

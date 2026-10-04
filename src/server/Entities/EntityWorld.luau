@@ -7,16 +7,18 @@
 	  physics    ItemPhysics.tick (frozen while the item's block is not loaded);
 	  pickup     the pickup delay counts down (10 ticks for block drops, 40 for thrown items);
 	  merging    every 2 ticks while the item moved to another block this tick, else every 40: it
-	             merges with items of the same kind whose boxes touch its box grown by 0.5
-	             sideways. Both must hold less than a full stack and their sum must fit one; the
-	             smaller merges into the larger (on a tie, the item checking merges into the
-	             other), which keeps the longer pickup delay and the younger age
-	             (ItemEntity.mergeWithNeighbours / tryToMerge). Merging runs after every item has
-	             moved, rather than in the middle of the tick as in Minecraft;
+	             merges with items of the same kind (and the same damage: a tool's wear) whose
+	             boxes touch its box grown by 0.5 sideways. Both must hold less than a full stack
+	             and their sum must fit one; the smaller merges into the larger (on a tie, the
+	             item checking merges into the other), which keeps the longer pickup delay and the
+	             younger age (ItemEntity.mergeWithNeighbours / tryToMerge). Merging runs after
+	             every item has moved, rather than in the middle of the tick as in Minecraft;
 	  despawn    after `lifetimeTicks` of age (Minecraft: 6000, 5 minutes).
 	Then players pick items up: a player's box (0.6 x 1.8 at the feet) grown by (1, 0.5, 1)
 	touching an item whose pickup delay is over (Player.aiStep / ItemEntity.playerTouch).
 	`tryPickup` answers how many it took; the item keeps the rest.
+
+	Items carry their stack's `damage` (a tool's wear; nil when new) from spawning to pickup.
 
 	At most `maxItems` items exist; spawning more removes the oldest first.
 
@@ -40,6 +42,8 @@ export type Entity = {
 	id: number,
 	item: number,
 	count: number,
+	-- A tool's wear (Items.Stack.damage), nil when new.
+	damage: number?,
 	body: Body,
 	-- Ticks until players can pick it up.
 	pickupDelay: number,
@@ -54,6 +58,9 @@ export type Entity = {
 }
 
 export type PlayerBox = { key: any, x: number, y: number, z: number }
+
+-- How many of `count` items (`damage`: a tool's wear) player `key` takes.
+export type TryPickup = (key: any, item: number, count: number, damage: number?) -> number
 
 export type Changes = {
 	spawned: { number },
@@ -97,13 +104,10 @@ export type EntityWorld = {
 		vx: number?,
 		vy: number?,
 		vz: number?,
-		pickupDelay: number?
+		pickupDelay: number?,
+		damage: number?
 	) -> number,
-	tick: (
-		self: EntityWorld,
-		players: { PlayerBox },
-		tryPickup: (key: any, item: number, count: number) -> number
-	) -> (),
+	tick: (self: EntityWorld, players: { PlayerBox }, tryPickup: TryPickup) -> (),
 	takeChanges: (self: EntityWorld) -> Changes,
 	get: (self: EntityWorld, id: number) -> Entity?,
 	count: (self: EntityWorld) -> number,
@@ -172,6 +176,7 @@ end
 --[[
 	Adds an item entity and returns its id (ids only grow). Without a velocity it gets
 	Minecraft's default: (random +-0.1, 0.2, random +-0.1). The pickup delay defaults to 10 ticks.
+	`damage` is the stack's wear (a whole number; 0, nil or nonsense mean new).
 ]]
 function EntityWorld.spawnItem(
 	self: EntityWorld,
@@ -183,7 +188,8 @@ function EntityWorld.spawnItem(
 	vx: number?,
 	vy: number?,
 	vz: number?,
-	pickupDelay: number?
+	pickupDelay: number?,
+	damage: number?
 ): number
 	local id = self.nextId
 	self.nextId += 1
@@ -193,6 +199,7 @@ function EntityWorld.spawnItem(
 		id = id,
 		item = item,
 		count = count,
+		damage = if type(damage) == "number" and damage >= 1 and damage < math.huge then floor(damage) else nil,
 		body = body,
 		pickupDelay = pickupDelay or EntityWorld.DEFAULT_PICKUP_DELAY,
 		age = 0,
@@ -307,7 +314,12 @@ local function merge(self: EntityWorld, into: Entity, from: Entity)
 end
 
 local function tryToMerge(self: EntityWorld, entity: Entity, other: Entity)
-	if other.item ~= entity.item or other.count + entity.count > Items.maxStack(entity.item) then
+	-- (ItemStack.isSameItemSameTags: worn tools only merge with equally worn ones.)
+	if
+		other.item ~= entity.item
+		or (other.damage or 0) ~= (entity.damage or 0)
+		or other.count + entity.count > Items.maxStack(entity.item)
+	then
 		return
 	end
 	if other.count < entity.count then
@@ -345,13 +357,9 @@ end
 
 --[[
 	One server tick. `players` are the living players that may pick items up (feet positions in
-	blocks); `tryPickup(key, item, count)` returns how many of the items the player took.
+	blocks); `tryPickup(key, item, count, damage)` returns how many of the items the player took.
 ]]
-function EntityWorld.tick(
-	self: EntityWorld,
-	players: { PlayerBox },
-	tryPickup: (key: any, item: number, count: number) -> number
-)
+function EntityWorld.tick(self: EntityWorld, players: { PlayerBox }, tryPickup: TryPickup)
 	local getBlock = self.getBlock
 	local entities = EntityWorld.each(self)
 
@@ -425,7 +433,7 @@ function EntityWorld.tick(
 				and b.z - HALF < maxZ
 				and b.z + HALF > minZ
 			then
-				local taken = tryPickup(player.key, entity.item, entity.count)
+				local taken = tryPickup(player.key, entity.item, entity.count, entity.damage)
 				taken = if type(taken) == "number" and taken == taken
 					then math.clamp(floor(taken), 0, entity.count)
 					else 0

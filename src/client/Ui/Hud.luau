@@ -2,7 +2,8 @@
 --[[
 	The in-game HUD, Minecraft's:
 
-	  hotbar     9 slots at the bottom centre with the selection frame, item icons and counts.
+	  hotbar     9 slots at the bottom centre with the selection frame, item icons, counts and the
+	             durability bars of worn tools.
 	             Click or tap a slot to select it; keys 1-9, the mouse wheel (down = next slot,
 	             when Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The
 	             wheel is bound through ContextActionService at High priority and sunk, so the
@@ -388,7 +389,7 @@ function Hud.start()
 			dirty = false
 			for i = 1, HOTBAR do
 				local stack = inventory.slots[i]
-				icons[i]:set(stack and stack.item, stack and stack.count)
+				icons[i]:set(stack and stack.item, stack and stack.count, stack and stack.damage)
 			end
 			selection.Position = UDim2.fromOffset(-1 + (inventory.selected - 1) * 20, BAR_Y - 1)
 		end

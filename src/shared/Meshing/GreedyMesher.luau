@@ -18,6 +18,9 @@
 	    boxes. A fluid cell without the same fluid above is lowered to its level's height
 	    (Blocks.fluidHeightLut), so flowing water steps down like in Minecraft; only cells of the
 	    same height merge.
+	  * Blocks with decorated faces (Blocks.singleLut, e.g. chests) are always one box per block, so
+	    each gets its own part to draw the faces on. Other opaque boxes may still grow through such
+	    blocks where they are hidden (wildcards), which nobody can see.
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
 	    the camera is not close to.
 	  * `border` (optional) describes what surrounds the meshed range (see `Border`):
@@ -52,6 +55,7 @@ local FLUID_FULL = Blocks.FLUID_FULL
 local appearanceLut = Blocks.appearanceLut
 local fluidHeightLut = Blocks.fluidHeightLut
 local kindLut = Blocks.kindLut
+local singleLut = Blocks.singleLut
 local cullVisibleCaves = Blocks.cullLut
 local cullHiddenCaves = Blocks.cullLutHiddenCaves
 
@@ -357,10 +361,16 @@ function GreedyMesher.mesh(
 				local c = (ly * SIZE + z) * SIZE + x
 				local key = readu16(need, c * 2)
 				if key ~= 0 and readu8(done, c) == 0 then
-					local opaque = readu8(kindLut, key % KEY_STRIDE) == OPAQUE
+					local app = key % KEY_STRIDE
+					local opaque = readu8(kindLut, app) == OPAQUE
+					-- Decorated blocks never grow: the limits below stop every loop at once.
+					local single = readu8(singleLut, app) == 1
+					local maxX = if single then x + 1 else SIZE
+					local maxZ = if single then z + 1 else SIZE
+					local maxY = if single then ly + 1 else sh
 
 					local x1 = x
-					while x1 + 1 < SIZE do
+					while x1 + 1 < maxX do
 						local c2 = c + x1 + 1 - x
 						local a2 = readu16(need, c2 * 2)
 						if (a2 == key and readu8(done, c2) == 0) or (opaque and readu8(wild, c2) == 1) then
@@ -371,7 +381,7 @@ function GreedyMesher.mesh(
 					end
 
 					local z1 = z
-					while z1 + 1 < SIZE do
+					while z1 + 1 < maxZ do
 						local row = (ly * SIZE + z1 + 1) * SIZE
 						local ok = true
 						for xx = x, x1 do
@@ -389,7 +399,7 @@ function GreedyMesher.mesh(
 					end
 
 					local ly1 = ly
-					while ly1 + 1 < sh do
+					while ly1 + 1 < maxY do
 						local ok = true
 						for zz = z, z1 do
 							local row = ((ly1 + 1) * SIZE + zz) * SIZE

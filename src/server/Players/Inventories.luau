@@ -7,20 +7,29 @@
 	             out (Q, clicks outside the screen) flies off in front of the player as item
 	             entities (Entities.throwFromPlayer). Creative players conjure items, so their
 	             throws are rate limited (the extra ones vanish).
-	  Chests     a Use message on a container block within reach opens it in a new window (one at a
-	             time; opening another closes the first). It closes when the player walks away
-	             (more than Config.Interaction.Reach + 2 blocks, checked a few times a second), when
-	             the block stops being that container, when they die and when they leave. When the
-	             block goes, its contents drop (Entities.dropContents) and every viewer's window
-	             closes (`removeContainer`, called by ServerNet when a player breaks it).
+	  Windows    a Use message on a block with a menu (Blocks `menu`: a chest, a furnace, a crafting
+	             table) within reach opens it in a new window (one at a time; opening another closes
+	             the first). It closes when the player walks away (more than
+	             Config.Interaction.Reach + 2 blocks, checked a few times a second), when the block
+	             stops being that block, when they die and when they leave. When the block goes, a
+	             container's contents drop (Entities.dropContents) and every user's window closes
+	             (`removeContainer`, called by ServerNet when a player breaks it and by
+	             `blockChanged` for any other change); a crafting table's grid goes back into its
+	             user's inventory.
+	  Furnaces   cook 20 times a second whether anyone looks or not (Containers.tickFurnaces, on a
+	             fixed step that catches up at most a few ticks per frame). Any action in a furnace
+	             window marks that furnace active. Its viewers get a snapshot at once when its slots
+	             change, and every other tick when only the flame or the arrow moved.
+	  Tools      ServerNet times and harvests breaks with `heldTool` and wears the tool with
+	             `wearTool` (InventoryState.wearHeld: at its durability it breaks).
 	  Placing    ServerNet asks `place` before putting a block down: survival players use up the held
 	             item; refused edits are still acknowledged so the client's prediction is undone.
 	  Pickups    item entities that touch a player go into the inventory (Entities' pickup handler).
 	  Death      everything drops where the player died (scattered), unless
 	             Config.Gameplay.KeepInventory.
 	  Snapshots  a player whose inventory changed (their own actions, pickups, a viewer of the same
-	             chest clicking, opening, closing) gets one snapshot per frame at most, and one on
-	             joining and respawning.
+	             chest clicking, a furnace cooking, tool wear, opening, closing) gets one snapshot
+	             per frame at most, and one on joining and respawning.
 
 	Inventories last for the session: nothing is saved.
 ]]
@@ -48,6 +57,11 @@ local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
 -- Seconds between the checks that close chests players walked away from.
 local CHECK_INTERVAL = 0.25
+-- Furnace ticks per second (Minecraft's), the most run in one frame (a hitch does not
+-- fast-forward them), and the ticks between snapshots for a furnace whose slots did not change.
+local FURNACE_TICK = 1 / 20
+local MAX_FURNACE_TICKS_PER_FRAME = 4
+local FURNACE_DATA_INTERVAL = 2
 -- Stacks a creative player may put into the world per second (throws, chests they break), like
 -- Minecraft's creative drop spam limit, and how many at once (a full chest is 27).
 local CREATIVE_STACKS_PER_SECOND = 10
@@ -142,10 +156,18 @@ function Inventories.markDirty(player: Player)
 	state:markDirty(player)
 end
 
---[[
-	The container block at (x, y, z) is gone (broken or replaced): its contents drop there and
-	every viewer's window closes. Safe to call for any block and more than once.
-]]
+-- The item in the player's hand (nil = empty hand), for ServerNet's mining rules.
+function Inventories.heldTool(player: Player): number?
+	local held = state:heldStack(player)
+	return if held then held.item else nil
+end
+
+-- The tool in the player's hand was used `amount` times (ServerNet's breaks); at its durability it
+-- breaks.
+function Inventories.wearTool(player: Player, amount: number)
+	state:wearHeld(player, amount)
+end
+
 --[[
 	May `player` break the container at (x, y, z) now? A creative player's break spills items made
 	from nothing, so each stack in it costs one from their creative budget (if it is short, the
@@ -165,6 +187,11 @@ function Inventories.mayRemoveContainer(player: Player, x: number, y: number, z:
 	return mayCreate(player, stacks)
 end
 
+--[[
+	The block with a window at (x, y, z) is gone (broken or replaced): a container's contents drop
+	there and every user's window closes (their cursors and crafting grids go back into their
+	inventories, what does not fit is thrown). Safe to call for any block and more than once.
+]]
 function Inventories.removeContainer(x: number, y: number, z: number)
 	local contents, leftovers = state:removeContainer(x, y, z)
 	for _, stack in contents do
@@ -176,11 +203,11 @@ function Inventories.removeContainer(x: number, y: number, z: number)
 end
 
 --[[
-	For WorldServer.onChanged: a container block replaced by anything (by players, block updates
-	or the Api) drops its contents.
+	For WorldServer.onChanged: a block with a window replaced by anything (by players, block updates
+	or the Api) drops its contents and closes for its users.
 ]]
 function Inventories.blockChanged(x: number, y: number, z: number, old: number, new: number)
-	if old ~= new and Blocks.isValid(old) and Blocks.get(old).container > 0 then
+	if old ~= new and Blocks.isValid(old) and Blocks.get(old).menu ~= nil then
 		Inventories.removeContainer(x, y, z)
 	end
 end
@@ -190,7 +217,8 @@ local function closeFor(player: Player)
 	throw(player, state:close(player), false)
 end
 
--- Closes chests their viewers walked away from (or died near), and chests whose block changed.
+-- Closes windows their users walked away from (or died near), and those whose block changed (a
+-- crafting table's grid remembers the table's block id too).
 local function checkOpenContainers(world: WorldServer.World)
 	for _, player in Players:GetPlayers() do
 		local x, y, z = state:openPosition(player)
@@ -221,7 +249,7 @@ local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 	end
 	-- Within reach, so the chunk is around the player already.
 	local block = world:getBlock(x, y, z)
-	if not Blocks.isValid(block) or Blocks.get(block).container <= 0 then
+	if not Blocks.isValid(block) or Blocks.get(block).menu == nil then
 		return
 	end
 	throw(player, state:open(player, x, y, z, block), false)
@@ -232,7 +260,43 @@ local function onInventory(player: Player, payload: buffer)
 	if seq == nil or action == nil then
 		return
 	end
+	-- An action in a furnace window may give it something to cook or burn.
+	local window = state:window(player)
+	local container = window and window.container
+	local fx, fy, fz = state:openPosition(player)
 	throw(player, state:apply(player, seq, action, GameMode.isCreative(player)), false)
+	if fx ~= nil and container and container.kind == "furnace" then
+		Containers.default:markActive(fx, fy, fz)
+	end
+end
+
+-- Marks every viewer of the container at (x, y, z) for a snapshot.
+local function markViewers(x: number, y: number, z: number)
+	for _, viewer in Containers.default:viewers(x, y, z) do
+		state:markDirty(viewer)
+	end
+end
+
+--[[
+	One furnace tick for every active furnace. Viewers see changed slots at once; changes to the
+	flame and the arrow alone wait for every FURNACE_DATA_INTERVAL-th tick (`pending` keeps them).
+]]
+local function tickFurnaces(tick: number, pending: { [string]: Containers.FurnaceChange })
+	for _, change in Containers.default:tickFurnaces() do
+		local key = `{change.x},{change.y},{change.z}`
+		if change.slots then
+			pending[key] = nil
+			markViewers(change.x, change.y, change.z)
+		else
+			pending[key] = change
+		end
+	end
+	if tick % FURNACE_DATA_INTERVAL == 0 then
+		for key, change in pending do
+			pending[key] = nil
+			markViewers(change.x, change.y, change.z)
+		end
+	end
 end
 
 local function onCharacter(player: Player, character: Model)
@@ -279,7 +343,16 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	end)
 
 	local sinceCheck = 0
+	local furnaceTime = 0
+	local furnaceTicks = 0
+	local furnacePending: { [string]: Containers.FurnaceChange } = {}
 	RunService.Heartbeat:Connect(function(dt)
+		furnaceTime = math.min(furnaceTime + dt, FURNACE_TICK * MAX_FURNACE_TICKS_PER_FRAME)
+		while furnaceTime >= FURNACE_TICK do
+			furnaceTime -= FURNACE_TICK
+			furnaceTicks += 1
+			tickFurnaces(furnaceTicks, furnacePending)
+		end
 		sinceCheck += dt
 		if sinceCheck >= CHECK_INTERVAL then
 			sinceCheck = 0

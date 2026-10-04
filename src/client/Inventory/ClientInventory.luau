@@ -12,8 +12,10 @@
 	returns its number, which travels inside the Edit message (BlockInteraction / ClientWorld), so
 	the server applies the placement and the use together.
 
-	The window (inventory alone, or with a container) comes from the snapshots: when the server
-	opens a chest, the predicted window becomes that chest's window, and actions name it.
+	The window comes from the snapshots: window 0 is the inventory screen's (the inventory and its
+	own 2 x 2 crafting grid, Types.newWindow); when the server opens a block (a chest, a crafting
+	table, a furnace) the predicted window becomes that block's window, and actions name it.
+	Crafting results are predicted too: Inventory/Menu derives them the same way on both sides.
 
 	`changed` fires (deferred, once per change) after the prediction changes: a snapshot, a local
 	action or a game mode switch.
@@ -71,7 +73,8 @@ function ClientInventory.start()
 	end)
 end
 
--- The predicted window (the inventory, plus the open container). Read only.
+-- The predicted window (the inventory, plus its container: window 0's 2 x 2 grid or a block's).
+-- Read only.
 function ClientInventory.window(): Types.Window
 	return prediction:window()
 end
@@ -90,7 +93,7 @@ function ClientInventory.selected(): number
 	return prediction:window().inventory.selected
 end
 
--- The stack in the selected hotbar slot (the item in hand).
+-- The stack in the selected hotbar slot (the item in hand, e.g. the tool mining uses).
 function ClientInventory.selectedStack(): Types.Stack?
 	local inventory = prediction:window().inventory
 	local stack = inventory.slots[inventory.selected]

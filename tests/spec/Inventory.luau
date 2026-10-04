@@ -1,36 +1,83 @@
 --[[
 	Inventory/Menu: Minecraft 1.20.1 container clicks on the window layout (container, armor,
 	inventory 10..36, hotbar), quick moves, drags, double clicks, Inventory.add, pick block,
-	creative actions, invalid input and a conservation fuzz.
+	creative actions, crafting grids (the inventory's 2 x 2 and the crafting table's 3 x 3, their
+	result slot), furnace slots, tool wear (damage) on stacks, invalid input and a conservation
+	fuzz.
 ]]
 
 return function(t, shared, require)
+	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local Types = require(shared.Inventory.Types)
 	local Menu = require(shared.Inventory.Menu)
+	local Crafting = require(shared.Crafting)
+	local Smelting = require(shared.Crafting.Smelting)
 	local Protocol = require(shared.Net.Protocol)
 
 	local DIRT, STONE, COBBLE, PLANKS = Items.id.Dirt, Items.id.Stone, Items.id.Cobblestone, Items.id.Planks
 	local HELMET, CHESTPLATE, LEGGINGS, BOOTS =
 		Items.id.IronHelmet, Items.id.IronChestplate, Items.id.IronLeggings, Items.id.IronBoots
 	local GOLD_HELMET = Items.id.GoldHelmet
+	local LOG, STICK, COAL = Items.id.OakLog, Items.id.Stick, Items.id.Coal
+	local RAW_IRON, INGOT = Items.id.RawIron, Items.id.IronIngot
+	local PICKAXE, STONE_PICKAXE = Items.id.WoodenPickaxe, Items.id.StonePickaxe
 	local Click = Menu.ClickType
 	local Drag = Menu.DragMode
 	local OUTSIDE, CURSOR = Types.OUTSIDE, Types.CURSOR
 	local UNKNOWN = 60000
 
-	local function S(item: number, count: number)
-		return { item = item, count = count }
+	local function S(item: number, count: number, damage: number?)
+		return { item = item, count = count, damage = damage }
 	end
 
-	-- Window 0 (inventory alone), or window 1 with a container of `size` slots.
+	-- Window 0 (the inventory screen, with its 2 x 2 grid), or window 1 with a chest of `size` slots.
 	local function newWindow(size: number?)
-		local window = { id = 0, inventory = Types.newInventory(), container = nil }
+		local window = Types.newWindow(Types.newInventory())
 		if size then
 			window.id = 1
-			window.container = { block = Items.id.Chest, size = size, slots = {} }
+			window.container = { kind = "chest", block = Blocks.id.Chest, size = size, slots = {} }
 		end
 		return window
+	end
+
+	-- A window with no container at all (the layout before window 0 had its grid).
+	local function bareWindow()
+		return { id = 0, inventory = Types.newInventory(), container = nil }
+	end
+
+	-- Window 1 at a crafting table (3 x 3 grid).
+	local function tableWindow()
+		local window = Types.newWindow(Types.newInventory())
+		window.id = 1
+		window.container = Types.newCrafting("crafting", Blocks.id.CraftingTable)
+		return window
+	end
+
+	-- Window 1 at a furnace.
+	local function furnaceWindow()
+		local window = Types.newWindow(Types.newInventory())
+		window.id = 1
+		window.container =
+			{ kind = "furnace", block = Blocks.id.Furnace, size = 3, slots = {}, data = Smelting.newData() }
+		return window
+	end
+
+	-- Puts `cells` ({ [grid slot] = stack }) in a crafting window's grid and derives the result.
+	local function setGrid(window, cells)
+		local width = Types.craftWidth(window.container)
+		for i = 1, width * width do
+			window.container.slots[Types.CRAFT_RESULT + i] = cells[i]
+		end
+		Menu.updateCraft(window)
+	end
+
+	-- A crafting window's grid slot i (1..width^2) and result, as window slots.
+	local function grid(window, i: number): number
+		return Menu.windowIndex(window, "container", Types.CRAFT_RESULT + i)
+	end
+	local function result(window): number
+		return Menu.windowIndex(window, "container", Types.CRAFT_RESULT)
 	end
 
 	-- Window slot of inventory slot i (1-9 hotbar, 10-36), armor slot a, container slot c.
@@ -70,8 +117,19 @@ return function(t, shared, require)
 		end
 	end
 
+	-- `is` plus the stack's damage (nil = new).
+	local function worn(stack, item: number, count: number, damage: number?, what: string)
+		if stack == nil or stack.item ~= item or stack.count ~= count or stack.damage ~= damage then
+			local got = if stack then `{stack.item} x {stack.count} damage {stack.damage}` else "empty"
+			error(`{what}: expected {item} x {count} damage {damage}, got {got}`, 2)
+		end
+	end
+
 	local function stackText(stack): string
-		return if stack then `{stack.item}x{stack.count}` else "-"
+		if stack == nil then
+			return "-"
+		end
+		return if stack.damage then `{stack.item}x{stack.count}d{stack.damage}` else `{stack.item}x{stack.count}`
 	end
 
 	-- Everything about a window as text, to compare states.
@@ -79,7 +137,7 @@ return function(t, shared, require)
 		local parts = { `id{window.id}` }
 		local container = window.container
 		if container then
-			table.insert(parts, `c{container.block}/{container.size}`)
+			table.insert(parts, `c{container.kind}/{container.block}/{container.size}`)
 			for i = 1, container.size do
 				table.insert(parts, stackText(container.slots[i]))
 			end
@@ -97,7 +155,8 @@ return function(t, shared, require)
 		return table.concat(parts, " ")
 	end
 
-	-- Item -> count over the window, cursor and `extra` stacks.
+	-- Item -> count over the window, cursor and `extra` stacks (not counting crafting results,
+	-- which are only a preview of the grid).
 	local function totals(window, extra): { [number]: number }
 		local sums = {}
 		local function add(stack)
@@ -107,7 +166,8 @@ return function(t, shared, require)
 		end
 		local container = window.container
 		if container then
-			for i = 1, container.size do
+			local first = if Types.craftWidth(container) > 0 then Types.CRAFT_RESULT + 1 else 1
+			for i = first, container.size do
 				add(container.slots[i])
 			end
 		end
@@ -163,29 +223,50 @@ return function(t, shared, require)
 	--[[ Layout ]]
 
 	t.test("inventory menu: window layout, locate and windowIndex", function()
+		-- Window 0 numbers its slots like Minecraft's InventoryMenu: 0 result, 1..4 grid, 5..8
+		-- armor, 9..35 inventory 10..36, 36..44 the hotbar.
 		local w = newWindow()
-		t.eq(Menu.size(w), 40)
+		t.eq(w.id, 0)
+		t.eq(w.container.kind, "inventory")
+		t.eq(Menu.size(w), 45)
 		local store, i = Menu.locate(w, 0)
+		t.eq(store, "container")
+		t.eq(i, 1, "window slot 0 is the result")
+		store, i = Menu.locate(w, 4)
+		t.eq(store, "container")
+		t.eq(i, 5, "window slot 4 is the last grid slot")
+		store, i = Menu.locate(w, 5)
 		t.eq(store, "armor")
 		t.eq(i, 1)
-		store, i = Menu.locate(w, 3)
+		store, i = Menu.locate(w, 8)
 		t.eq(store, "armor")
 		t.eq(i, 4)
-		store, i = Menu.locate(w, 4)
+		store, i = Menu.locate(w, 9)
 		t.eq(store, "inventory")
-		t.eq(i, 10, "window slot 4 is inventory slot 10")
-		store, i = Menu.locate(w, 30)
+		t.eq(i, 10, "window slot 9 is inventory slot 10")
+		store, i = Menu.locate(w, 35)
 		t.eq(i, 36)
-		store, i = Menu.locate(w, 31)
+		store, i = Menu.locate(w, 36)
 		t.eq(store, "inventory")
-		t.eq(i, 1, "window slot 31 is hotbar slot 1")
-		store, i = Menu.locate(w, 39)
+		t.eq(i, 1, "window slot 36 is hotbar slot 1")
+		store, i = Menu.locate(w, 44)
 		t.eq(i, 9)
-		t.eq((Menu.locate(w, 40)), nil)
+		t.eq((Menu.locate(w, 45)), nil)
 		t.eq((Menu.locate(w, -1)), nil)
 		t.eq((Menu.locate(w, OUTSIDE)), nil)
 		t.eq((Menu.locate(w, 1.5)), nil)
 		t.eq((Menu.locate(w, 0 / 0)), nil)
+
+		-- Without a container: armor first.
+		local b = bareWindow()
+		t.eq(Menu.size(b), 40)
+		store, i = Menu.locate(b, 0)
+		t.eq(store, "armor")
+		t.eq(i, 1)
+		store, i = Menu.locate(b, 4)
+		t.eq(i, 10)
+		store, i = Menu.locate(b, 31)
+		t.eq(i, 1)
 
 		local c = newWindow(27)
 		t.eq(Menu.size(c), 67)
@@ -204,16 +285,19 @@ return function(t, shared, require)
 		t.eq(i, 1)
 		t.eq((Menu.locate(c, 67)), nil)
 
-		-- windowIndex is locate's inverse, for both layouts.
-		for _, window in { w, c } do
+		-- windowIndex is locate's inverse, for every layout.
+		for _, window in { w, c, b, tableWindow(), furnaceWindow() } do
 			for index = 0, Menu.size(window) - 1 do
 				local s, n = Menu.locate(window, index)
 				t.eq(Menu.windowIndex(window, s, n), index, `round trip of {index}`)
 			end
 		end
-		t.eq(Menu.windowIndex(w, "container", 1), nil)
+		t.eq(Menu.windowIndex(w, "container", 6), nil)
+		t.eq(Menu.windowIndex(b, "container", 1), nil)
 		t.eq(Menu.windowIndex(w, "inventory", 37), nil)
 		t.eq(Menu.windowIndex(w, "armor", 0), nil)
+		t.eq(Menu.size(tableWindow()), 50)
+		t.eq(Menu.size(furnaceWindow()), 43)
 	end)
 
 	t.test("inventory menu: get and set reach the right store", function()
@@ -250,13 +334,13 @@ return function(t, shared, require)
 		t.ok(Menu.mayPlace(w, inv(w, 10), HELMET), "armor may go anywhere else")
 		t.ok(Menu.mayPlace(w, inv(w, 1), DIRT))
 		t.ok(not Menu.mayPlace(w, inv(w, 1), UNKNOWN), "unknown items go nowhere")
-		t.ok(not Menu.mayPlace(w, 40, DIRT), "out of range")
+		t.ok(not Menu.mayPlace(w, Menu.size(w), DIRT), "out of range")
 		t.ok(not Menu.mayPlace(w, OUTSIDE, DIRT))
 		t.eq(Menu.maxStackFor(w, inv(w, 1), DIRT), 64)
 		t.eq(Menu.maxStackFor(w, inv(w, 1), HELMET), 1)
 		t.eq(Menu.maxStackFor(w, arm(w, 1), HELMET), 1)
 		t.eq(Menu.maxStackFor(w, arm(w, 1), DIRT), 1, "armor slots hold one item")
-		t.eq(Menu.maxStackFor(w, 40, DIRT), 0)
+		t.eq(Menu.maxStackFor(w, Menu.size(w), DIRT), 0)
 		local c = newWindow(27)
 		t.ok(Menu.mayPlace(c, con(c, 1), DIRT))
 		t.ok(Menu.mayPlace(c, arm(c, 1), HELMET))
@@ -1017,7 +1101,12 @@ return function(t, shared, require)
 		local good = { inv(w, 10), inv(w, 11) }
 		unchanged(w, { kind = "drag", window = 0, mode = 3, slots = good }, true, "mode 3")
 		unchanged(w, { kind = "drag", window = 1, mode = 0, slots = good }, false, "wrong window")
-		unchanged(w, { kind = "drag", window = 0, mode = 0, slots = { inv(w, 10), 40 } }, false, "slot out of range")
+		unchanged(
+			w,
+			{ kind = "drag", window = 0, mode = 0, slots = { inv(w, 10), Menu.size(w) } },
+			false,
+			"slot out of range"
+		)
 		unchanged(w, { kind = "drag", window = 0, mode = 0, slots = { inv(w, 10), OUTSIDE } }, false, "outside")
 		unchanged(w, { kind = "drag", window = 0, mode = 0, slots = { inv(w, 10), 1.5 } }, false, "fraction")
 		unchanged(w, { kind = "drag", window = 0, mode = 0, slots = { inv(w, 10), "x" } }, false, "string")
@@ -1113,7 +1202,7 @@ return function(t, shared, require)
 		unchanged(w, creative(CURSOR, UNKNOWN, 1), true, "unknown item on the cursor")
 		unchanged(w, creative(inv(w, 1), DIRT, -1), true, "negative count")
 		unchanged(w, creative(inv(w, 1), DIRT, 1.5), true, "fractional count")
-		unchanged(w, creative(40, DIRT, 1), true, "out of range")
+		unchanged(w, creative(Menu.size(w), DIRT, 1), true, "out of range")
 		unchanged(w, creative(-2, DIRT, 1), true, "negative slot")
 		unchanged(w, creative(OUTSIDE, DIRT, 1), true, "outside")
 		unchanged(w, { kind = "creative", window = 3, slot = 0, item = HELMET, count = 1 }, true, "wrong window")
@@ -1276,7 +1365,7 @@ return function(t, shared, require)
 		t.ok(inventory.slots[3] ~= c.inventory.slots[3])
 		is(inventory.slots[3], STONE, 6, "copyInventory")
 		is(inventory.cursor, PLANKS, 2, "copyInventory cursor")
-		t.eq(Menu.copyWindow(newWindow()).container, nil)
+		t.eq(Menu.copyWindow(bareWindow()).container, nil)
 	end)
 
 	t.test("apply never shares a table between two slots or changes old stacks", function()
@@ -1289,6 +1378,555 @@ return function(t, shared, require)
 		local slotTable = w.inventory.slots[10]
 		click(w, inv(w, 10), Click.Pickup, 1)
 		is(slotTable, DIRT, 32, "the old slot table is untouched")
+	end)
+
+	--[[ Crafting grids and their result ]]
+
+	t.test("crafting (2 x 2): a log makes planks; taking the result crafts", function()
+		local w = newWindow()
+		w.inventory.cursor = S(LOG, 3)
+		click(w, grid(w, 4), Click.Pickup, 0)
+		is(w.container.slots[5], LOG, 3, "logs in the grid's last slot")
+		is(w.container.slots[1], PLANKS, 4, "the result shows at once")
+		t.ok(Menu.isResultSlot(w, result(w)))
+		t.ok(not Menu.isResultSlot(w, grid(w, 1)))
+		t.ok(not Menu.mayPlace(w, result(w), PLANKS), "nothing goes into the result")
+
+		-- Taking it: the cursor gets the planks and the grid loses one log.
+		click(w, result(w), Click.Pickup, 0)
+		is(w.inventory.cursor, PLANKS, 4, "cursor")
+		is(w.container.slots[5], LOG, 2, "one log used")
+		is(w.container.slots[1], PLANKS, 4, "the next result")
+		-- Again, onto the same item: the cursor grows.
+		click(w, result(w), Click.Pickup, 0)
+		is(w.inventory.cursor, PLANKS, 8, "cursor grows")
+		is(w.container.slots[5], LOG, 1, "another log used")
+		-- A right click takes the whole result too (ResultContainer ignores the amount).
+		click(w, result(w), Click.Pickup, 1)
+		is(w.inventory.cursor, PLANKS, 12, "right click: the whole result")
+		t.eq(w.container.slots[5], nil, "the last log used")
+		t.eq(w.container.slots[1], nil, "nothing left to craft")
+		-- An empty result gives nothing and takes nothing.
+		local before = dump(w)
+		click(w, result(w), Click.Pickup, 0)
+		click(w, result(w), Click.Pickup, 1)
+		t.eq(dump(w), before, "nothing placed into the result")
+
+		-- A right click with an empty cursor takes it whole as well.
+		setGrid(w, { [2] = S(LOG, 1) })
+		w.inventory.cursor = nil
+		click(w, result(w), Click.Pickup, 1)
+		is(w.inventory.cursor, PLANKS, 4, "all four")
+		t.eq(w.container.slots[3], nil, "crafted")
+	end)
+
+	t.test("crafting: the result only joins a carried stack it fits; other items do nothing", function()
+		local w = newWindow()
+		setGrid(w, { [1] = S(LOG, 5) })
+		w.inventory.cursor = S(DIRT, 10)
+		local before = dump(w)
+		click(w, result(w), Click.Pickup, 0)
+		click(w, result(w), Click.Pickup, 1)
+		t.eq(dump(w), before, "another item: no swap, no craft")
+		w.inventory.cursor = S(PLANKS, 61)
+		before = dump(w)
+		click(w, result(w), Click.Pickup, 0)
+		t.eq(dump(w), before, "61 + 4 > 64: nothing")
+		w.inventory.cursor = S(PLANKS, 60)
+		click(w, result(w), Click.Pickup, 0)
+		is(w.inventory.cursor, PLANKS, 64, "60 + 4 fits")
+		is(w.container.slots[2], LOG, 4, "crafted")
+	end)
+
+	t.test("crafting: a shift click on the result crafts until the grid runs out", function()
+		local w = newWindow()
+		setGrid(w, { [2] = S(LOG, 3) })
+		local thrown = click(w, result(w), Click.QuickMove, 0)
+		t.eq(#thrown, 0)
+		is(w.inventory.slots[9], PLANKS, 12, "three crafts, into the hotbar's right end")
+		t.eq(w.container.slots[3], nil, "the logs are used up")
+		t.eq(w.container.slots[1], nil, "no result left")
+
+		-- Sticks: the shortest stack sets how many crafts.
+		w = newWindow()
+		setGrid(w, { [1] = S(PLANKS, 2), [3] = S(PLANKS, 5) })
+		is(w.container.slots[1], STICK, 4, "sticks")
+		click(w, result(w), Click.QuickMove, 1)
+		is(w.inventory.slots[9], STICK, 8, "two crafts")
+		t.eq(w.container.slots[2], nil, "the short stack ran out")
+		is(w.container.slots[4], PLANKS, 3, "the rest stays in the grid")
+		t.eq(w.container.slots[1], nil, "one plank makes nothing")
+
+		-- Merging into what is there first, backwards.
+		w = newWindow()
+		w.inventory.slots[20] = S(PLANKS, 60)
+		setGrid(w, { [4] = S(LOG, 2) })
+		click(w, result(w), Click.QuickMove, 0)
+		is(w.inventory.slots[20], PLANKS, 64, "merged first")
+		is(w.inventory.slots[9], PLANKS, 4, "then hotbar 9")
+	end)
+
+	t.test("crafting: a shift click throws what does not fit and stops when nothing fits", function()
+		local w = newWindow()
+		fillInventory(w, STONE)
+		w.inventory.slots[9] = S(PLANKS, 62)
+		setGrid(w, { [1] = S(LOG, 5) })
+		local thrown = click(w, result(w), Click.QuickMove, 0)
+		t.eq(#thrown, 1, "one part thrown")
+		is(thrown[1], PLANKS, 2, "the two planks that did not fit")
+		is(w.inventory.slots[9], PLANKS, 64, "filled")
+		is(w.container.slots[2], LOG, 4, "one craft only: nothing fits the next")
+		is(w.container.slots[1], PLANKS, 4, "the result is still there")
+		-- Nothing fits at all: nothing happens.
+		local before = dump(w)
+		t.eq(#click(w, result(w), Click.QuickMove, 0), 0)
+		t.eq(dump(w), before, "full: no craft")
+	end)
+
+	t.test("crafting: number keys, Q, middle click, double clicks, drags and creative on the result", function()
+		local w = newWindow()
+		setGrid(w, { [1] = S(LOG, 4) })
+		-- Number keys: only into an empty hotbar slot, and that crafts.
+		w.inventory.slots[1] = S(DIRT, 1)
+		local before = dump(w)
+		click(w, result(w), Click.Swap, 0)
+		t.eq(dump(w), before, "hotbar 1 is taken")
+		click(w, result(w), Click.Swap, 1)
+		is(w.inventory.slots[2], PLANKS, 4, "into the empty hotbar 2")
+		is(w.container.slots[2], LOG, 3, "crafted")
+
+		-- Q: the whole result whatever the button, and that crafts.
+		local thrown = click(w, result(w), Click.Throw, 0)
+		t.eq(#thrown, 1)
+		is(thrown[1], PLANKS, 4, "Q throws the whole result")
+		is(w.container.slots[2], LOG, 2, "crafted")
+		thrown = click(w, result(w), Click.Throw, 1)
+		is(thrown[1], PLANKS, 4, "Ctrl+Q too")
+		is(w.container.slots[2], LOG, 1, "crafted")
+		w.inventory.cursor = S(DIRT, 1)
+		before = dump(w)
+		t.eq(#click(w, result(w), Click.Throw, 0), 0)
+		t.eq(dump(w), before, "not with a carried stack")
+
+		-- Creative middle click: a full stack, no craft.
+		w.inventory.cursor = nil
+		click(w, result(w), Click.Clone, 2, true)
+		is(w.inventory.cursor, PLANKS, 64, "full stack")
+		is(w.container.slots[2], LOG, 1, "no craft")
+
+		-- Double clicks never gather from the result.
+		w.inventory.cursor = S(PLANKS, 1)
+		click(w, inv(w, 20), Click.PickupAll, 0)
+		is(w.inventory.cursor, PLANKS, 5, "hotbar 2's planks, not the result's")
+		is(w.container.slots[1], PLANKS, 4, "result untouched")
+		is(w.container.slots[2], LOG, 1, "no craft")
+
+		-- Drags skip the result.
+		w.inventory.cursor = S(PLANKS, 10)
+		drag(w, Drag.Split, { result(w), inv(w, 20), inv(w, 21) })
+		is(w.inventory.slots[20], PLANKS, 5, "20")
+		is(w.inventory.slots[21], PLANKS, 5, "21")
+		is(w.container.slots[1], PLANKS, 4, "result untouched")
+		w.inventory.cursor = S(PLANKS, 10)
+		unchanged(
+			w,
+			{ kind = "drag", window = 0, mode = Drag.Split, slots = { result(w) } },
+			false,
+			"drag on the result"
+		)
+
+		-- Creative actions never set the result, but may fill the grid.
+		unchanged(
+			w,
+			{ kind = "creative", window = 0, slot = result(w), item = DIRT, count = 1 },
+			true,
+			"set the result"
+		)
+		unchanged(
+			w,
+			{ kind = "creative", window = 0, slot = result(w), item = DIRT, count = 0 },
+			true,
+			"clear the result"
+		)
+		Menu.apply(w, { kind = "creative", window = 0, slot = grid(w, 4), item = LOG, count = 1 }, true)
+		t.eq(w.container.slots[1], nil, "two logs make nothing")
+	end)
+
+	t.test("crafting (inventory): grid and armor go to the player slots; nothing goes into the grid", function()
+		local w = newWindow()
+		setGrid(w, { [1] = S(DIRT, 10), [4] = S(STONE, 3) })
+		click(w, grid(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[10], DIRT, 10, "grid -> inventory 10..36 first, forwards")
+		t.eq(w.container.slots[2], nil)
+		click(w, inv(w, 10), Click.QuickMove, 0)
+		is(w.inventory.slots[1], DIRT, 10, "inventory -> hotbar, not the grid")
+		is(w.container.slots[5], STONE, 3, "grid untouched")
+		click(w, inv(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[10], DIRT, 10, "hotbar -> inventory, not the grid")
+		w.inventory.armor[1] = S(HELMET, 1)
+		click(w, arm(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[11], HELMET, 1, "armor off, forwards")
+		click(w, inv(w, 11), Click.QuickMove, 0)
+		is(w.inventory.armor[1], HELMET, 1, "and back on")
+		-- Number keys and drags reach the grid.
+		click(w, grid(w, 2), Click.Swap, 0)
+		t.eq(w.container.slots[3], nil, "hotbar 1 is empty: nothing")
+		w.inventory.slots[1] = S(LOG, 2)
+		click(w, grid(w, 2), Click.Swap, 0)
+		is(w.container.slots[3], LOG, 2, "into the grid")
+		t.eq(w.container.slots[1], nil, "a log with stone makes nothing")
+		click(w, grid(w, 4), Click.QuickMove, 0)
+		is(w.container.slots[1], PLANKS, 4, "the stone gone: planks")
+	end)
+
+	t.test("crafting table (3 x 3): a pickaxe; shift clicks from the player fill the grid first", function()
+		local w = tableWindow()
+		t.eq(w.container.kind, "crafting")
+		t.eq(w.container.size, 10)
+		setGrid(w, { S(COBBLE, 2), S(COBBLE, 2), S(COBBLE, 2), nil, S(STICK, 2), nil, nil, S(STICK, 2) })
+		worn(w.container.slots[1], STONE_PICKAXE, 1, nil, "a stone pickaxe")
+		click(w, result(w), Click.QuickMove, 0)
+		worn(w.inventory.slots[9], STONE_PICKAXE, 1, nil, "the first in hotbar 9")
+		worn(w.inventory.slots[8], STONE_PICKAXE, 1, nil, "the second in hotbar 8 (tools don't stack)")
+		for i = 1, 9 do
+			t.eq(w.container.slots[1 + i], nil, `grid slot {i} used up`)
+		end
+		t.eq(Crafting.match({ [5] = S(COBBLE, 1) }, 2), nil, "(a pickaxe needs the table)")
+
+		-- From the player: into the grid, merging first, then the next empty grid slot.
+		w.inventory.slots[10] = S(PLANKS, 20)
+		click(w, inv(w, 10), Click.QuickMove, 0)
+		is(w.container.slots[2], PLANKS, 20, "into the grid's first slot")
+		t.eq(w.inventory.slots[10], nil)
+		w.inventory.slots[3] = S(PLANKS, 50)
+		click(w, inv(w, 3), Click.QuickMove, 0)
+		is(w.container.slots[2], PLANKS, 64, "merged")
+		is(w.container.slots[3], PLANKS, 6, "the rest in the next grid slot")
+		t.eq(w.inventory.slots[3], nil)
+
+		-- A full grid: the usual inventory <-> hotbar move.
+		for i = 2, 9 do
+			w.container.slots[1 + i] = S(STONE, 64)
+		end
+		Menu.updateCraft(w)
+		w.inventory.slots[12] = S(DIRT, 5)
+		click(w, inv(w, 12), Click.QuickMove, 0)
+		is(w.inventory.slots[1], DIRT, 5, "inventory -> hotbar")
+		click(w, inv(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[10], DIRT, 5, "hotbar -> inventory")
+
+		-- The grid and armor go to the player slots, forwards.
+		click(w, grid(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[11], PLANKS, 64, "grid -> inventory")
+		w.inventory.armor[4] = S(BOOTS, 1)
+		click(w, arm(w, 4), Click.QuickMove, 0)
+		is(w.inventory.slots[12], BOOTS, 1, "armor -> inventory")
+		-- Armor items from the player go to the grid here, not to their armor slot.
+		click(w, inv(w, 12), Click.QuickMove, 0)
+		is(w.container.slots[2], BOOTS, 1, "boots into the grid")
+		t.eq(w.inventory.armor[4], nil)
+	end)
+
+	t.test("crafting table: closing returns the cursor, then the grid; what does not fit is thrown", function()
+		local w = tableWindow()
+		setGrid(w, { [1] = S(PLANKS, 3), [5] = S(DIRT, 7), [9] = S(STICK, 2) })
+		w.inventory.cursor = S(STONE, 4)
+		local thrown = Menu.close(w)
+		t.eq(#thrown, 0)
+		is(w.inventory.slots[1], STONE, 4, "the cursor first")
+		is(w.inventory.slots[2], PLANKS, 3, "then the grid, in order")
+		is(w.inventory.slots[3], DIRT, 7, "grid slot 5")
+		is(w.inventory.slots[4], STICK, 2, "grid slot 9")
+		for i = 1, 10 do
+			t.eq(w.container.slots[i], nil, `container slot {i} empty`)
+		end
+		t.ok(w.container ~= nil, "still attached: the caller decides")
+
+		-- A full inventory: thrown, cursor first.
+		w = tableWindow()
+		fillInventory(w, COBBLE)
+		setGrid(w, { [2] = S(PLANKS, 3), [8] = S(PLANKS, 1) })
+		t.eq(w.container.slots[1], nil, "planks apart make nothing")
+		w.inventory.cursor = S(DIRT, 2)
+		thrown = Menu.apply(w, { kind = "close", window = 1 }, false)
+		t.eq(#thrown, 3)
+		is(thrown[1], DIRT, 2, "the cursor")
+		is(thrown[2], PLANKS, 3, "grid slot 2")
+		is(thrown[3], PLANKS, 1, "grid slot 8")
+
+		-- Window 0's 2 x 2 grid goes back the same way; the result clears.
+		local i = newWindow()
+		setGrid(i, { [1] = S(LOG, 2) })
+		i.inventory.cursor = S(PLANKS, 4)
+		thrown = Menu.apply(i, { kind = "close", window = 0 }, false)
+		t.eq(#thrown, 0)
+		is(i.inventory.slots[1], PLANKS, 4, "cursor")
+		is(i.inventory.slots[2], LOG, 2, "grid")
+		t.eq(i.container.slots[1], nil, "no result")
+		t.eq(i.container.slots[2], nil, "grid empty")
+		t.eq(i.container.kind, "inventory")
+	end)
+
+	t.test("crafting: two worn tools of a kind repair into one (Minecraft's 5% bonus)", function()
+		local w = newWindow()
+		setGrid(w, { [1] = S(PICKAXE, 1, 50), [4] = S(PICKAXE, 1, 40) })
+		-- 59 uses: (59 - 50) + (59 - 40) + 59 * 5 // 100 = 30 left, so damage 29.
+		worn(w.container.slots[1], PICKAXE, 1, 29, "repaired")
+		click(w, result(w), Click.Pickup, 0)
+		worn(w.inventory.cursor, PICKAXE, 1, 29, "taken")
+		t.eq(w.container.slots[2], nil, "both used")
+		t.eq(w.container.slots[5], nil, "both used")
+		setGrid(w, { [1] = S(PICKAXE, 1, 2), [2] = S(PICKAXE, 1, 1) })
+		worn(w.container.slots[1], PICKAXE, 1, nil, "as good as new")
+		setGrid(w, { [1] = S(PICKAXE, 1, 2), [2] = S(Items.id.WoodenAxe, 1, 1) })
+		t.eq(w.container.slots[1], nil, "different tools don't")
+	end)
+
+	t.test("crafting: the result is derived after any action; other kinds are left alone", function()
+		local w = newWindow()
+		w.container.slots[2] = S(LOG, 1)
+		t.eq(w.container.slots[1], nil, "not derived yet")
+		Menu.apply(w, { kind = "select", slot = 2 }, false)
+		is(w.container.slots[1], PLANKS, 4, "any action derives it")
+		w.container.slots[2] = nil
+		Menu.apply(w, { kind = "click", window = 5, slot = 0, clickType = Click.Pickup, button = 0 }, false)
+		t.eq(w.container.slots[1], nil, "even an invalid one")
+
+		local c = newWindow(9)
+		c.container.slots[1] = S(DIRT, 1)
+		c.container.slots[2] = S(LOG, 1)
+		Menu.updateCraft(c)
+		is(c.container.slots[1], DIRT, 1, "chests are left alone")
+		local f = furnaceWindow()
+		f.container.slots[1] = S(RAW_IRON, 1)
+		Menu.updateCraft(f)
+		is(f.container.slots[1], RAW_IRON, 1, "furnaces too")
+		Menu.updateCraft(bareWindow())
+
+		-- A crafting container whose size does not fit its kind never crafts.
+		local bad = newWindow()
+		bad.container = { kind = "crafting", block = 0, size = 5, slots = { [2] = S(LOG, 1) } }
+		Menu.updateCraft(bad)
+		t.eq(bad.container.slots[1], nil, "no result")
+		t.ok(Menu.mayPlace(bad, 0, DIRT), "slot 1 is a plain slot then")
+	end)
+
+	--[[ Furnaces ]]
+
+	t.test("furnace: the fuel slot takes only fuel, the output nothing; the output gives all or half", function()
+		local w = furnaceWindow()
+		local input, fuel, output = con(w, 1), con(w, 2), con(w, 3)
+		t.ok(Menu.mayPlace(w, input, DIRT), "input: anything")
+		t.ok(Menu.mayPlace(w, fuel, COAL), "coal burns")
+		t.ok(Menu.mayPlace(w, fuel, PLANKS), "planks burn")
+		t.ok(Menu.mayPlace(w, fuel, PICKAXE), "wooden tools burn")
+		t.ok(not Menu.mayPlace(w, fuel, DIRT), "dirt does not")
+		t.ok(not Menu.mayPlace(w, output, INGOT), "nothing goes into the output")
+		t.ok(Menu.isResultSlot(w, output))
+		t.ok(not Menu.isResultSlot(w, input) and not Menu.isResultSlot(w, fuel))
+
+		w.inventory.cursor = S(DIRT, 5)
+		local before = dump(w)
+		click(w, fuel, Click.Pickup, 0)
+		click(w, output, Click.Pickup, 0)
+		click(w, output, Click.Pickup, 1)
+		drag(w, Drag.Split, { fuel, output })
+		t.eq(dump(w), before, "dirt goes into neither")
+		click(w, input, Click.Pickup, 0)
+		is(w.container.slots[1], DIRT, 5, "input")
+		w.inventory.cursor = S(COAL, 8)
+		click(w, fuel, Click.Pickup, 1)
+		is(w.container.slots[2], COAL, 1, "one coal")
+		unchanged(
+			w,
+			{ kind = "creative", window = 1, slot = fuel, item = DIRT, count = 1 },
+			true,
+			"creative dirt as fuel"
+		)
+		unchanged(w, { kind = "creative", window = 1, slot = output, item = INGOT, count = 1 }, true, "creative output")
+
+		-- The output: a right click takes half; a carried stack takes all of it or nothing.
+		w.container.slots[3] = S(INGOT, 5)
+		w.inventory.cursor = nil
+		click(w, output, Click.Pickup, 1)
+		is(w.inventory.cursor, INGOT, 3, "right click: half, rounded up")
+		is(w.container.slots[3], INGOT, 2, "left")
+		w.inventory.cursor = S(INGOT, 63)
+		before = dump(w)
+		click(w, output, Click.Pickup, 0)
+		t.eq(dump(w), before, "63 + 2 > 64: all or nothing")
+		w.inventory.cursor = S(INGOT, 62)
+		click(w, output, Click.Pickup, 0)
+		is(w.inventory.cursor, INGOT, 64, "both")
+		t.eq(w.container.slots[3], nil)
+
+		-- Number keys take out of the output into an empty hotbar slot only.
+		w.container.slots[3] = S(INGOT, 2)
+		w.inventory.cursor = nil
+		w.inventory.slots[1] = S(DIRT, 1)
+		before = dump(w)
+		click(w, output, Click.Swap, 0)
+		t.eq(dump(w), before, "hotbar 1 is taken")
+		click(w, output, Click.Swap, 1)
+		is(w.inventory.slots[2], INGOT, 2, "taken out")
+		t.eq(w.container.slots[3], nil)
+
+		-- Double clicks gather from the output.
+		w.container.slots[3] = S(INGOT, 3)
+		w.inventory.cursor = S(INGOT, 1)
+		click(w, inv(w, 20), Click.PickupAll, 0)
+		is(w.inventory.cursor, INGOT, 6, "1 + the output's 3 + hotbar 2's 2")
+		t.eq(w.container.slots[3], nil)
+	end)
+
+	t.test("furnace: shift clicks (AbstractFurnaceMenu.quickMoveStack)", function()
+		local w = furnaceWindow()
+		w.inventory.slots[10] = S(RAW_IRON, 10)
+		click(w, inv(w, 10), Click.QuickMove, 0)
+		is(w.container.slots[1], RAW_IRON, 10, "what smelts -> the input")
+		w.inventory.slots[11] = S(COAL, 5)
+		click(w, inv(w, 11), Click.QuickMove, 0)
+		is(w.container.slots[2], COAL, 5, "fuel -> the fuel slot")
+		w.inventory.slots[12] = S(LOG, 3)
+		local before = dump(w)
+		click(w, inv(w, 12), Click.QuickMove, 0)
+		t.eq(dump(w), before, "logs smelt (charcoal): the input only, which is taken")
+		w.inventory.slots[1] = S(PLANKS, 3)
+		before = dump(w)
+		click(w, inv(w, 1), Click.QuickMove, 0)
+		t.eq(dump(w), before, "planks only burn: the fuel slot only, which is taken")
+		w.inventory.slots[13] = S(DIRT, 4)
+		click(w, inv(w, 13), Click.QuickMove, 0)
+		is(w.inventory.slots[2], DIRT, 4, "neither: inventory -> hotbar")
+		click(w, inv(w, 2), Click.QuickMove, 0)
+		is(w.inventory.slots[10], DIRT, 4, "hotbar -> inventory")
+
+		-- Out of the furnace: the output backwards, the input and fuel forwards.
+		w.container.slots[3] = S(INGOT, 7)
+		click(w, con(w, 3), Click.QuickMove, 0)
+		is(w.inventory.slots[9], INGOT, 7, "the output -> the hotbar's right end first")
+		t.eq(w.container.slots[3], nil)
+		click(w, con(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[11], RAW_IRON, 10, "the input -> inventory, forwards")
+		click(w, con(w, 2), Click.QuickMove, 0)
+		is(w.inventory.slots[13], COAL, 5, "the fuel -> inventory, forwards")
+		w.inventory.armor[2] = S(CHESTPLATE, 1)
+		click(w, arm(w, 2), Click.QuickMove, 0)
+		is(w.inventory.slots[14], CHESTPLATE, 1, "armor -> inventory")
+		-- The output keeps what does not fit.
+		fillInventory(w, STONE)
+		w.inventory.slots[30] = S(INGOT, 60)
+		w.container.slots[3] = S(INGOT, 10)
+		click(w, con(w, 3), Click.QuickMove, 0)
+		is(w.inventory.slots[30], INGOT, 64, "filled")
+		is(w.container.slots[3], INGOT, 6, "the rest stays in the output")
+
+		-- A worn wooden pickaxe burns; an iron one smelts into a nugget.
+		w = furnaceWindow()
+		w.inventory.slots[15] = S(PICKAXE, 1, 7)
+		click(w, inv(w, 15), Click.QuickMove, 0)
+		worn(w.container.slots[2], PICKAXE, 1, 7, "into the fuel slot, worn")
+		w.inventory.slots[16] = S(Items.id.IronPickaxe, 1, 100)
+		click(w, inv(w, 16), Click.QuickMove, 0)
+		worn(w.container.slots[1], Items.id.IronPickaxe, 1, 100, "into the input")
+	end)
+
+	--[[ Tool wear (damage) ]]
+
+	t.test("damage: worn tools keep their wear through clicks, keys, copies and throws", function()
+		local w = newWindow()
+		w.inventory.slots[10] = S(PICKAXE, 1, 5)
+		click(w, inv(w, 10), Click.Pickup, 0)
+		worn(w.inventory.cursor, PICKAXE, 1, 5, "picked up")
+		click(w, inv(w, 11), Click.Pickup, 0)
+		worn(w.inventory.slots[11], PICKAXE, 1, 5, "put down")
+		-- A new pickaxe over the worn one: they swap (not the same item for stacking).
+		w.inventory.cursor = S(PICKAXE, 1)
+		click(w, inv(w, 11), Click.Pickup, 0)
+		worn(w.inventory.slots[11], PICKAXE, 1, nil, "the new one in")
+		worn(w.inventory.cursor, PICKAXE, 1, 5, "the worn one out")
+		-- Two identical tools: no room (they stack to 1), nothing happens.
+		w.inventory.slots[12] = S(PICKAXE, 1, 5)
+		local before = dump(w)
+		click(w, inv(w, 12), Click.Pickup, 0)
+		click(w, inv(w, 12), Click.Pickup, 1)
+		t.eq(dump(w), before, "identical tools don't stack")
+
+		w.inventory.cursor = nil
+		click(w, inv(w, 12), Click.Swap, 4)
+		worn(w.inventory.slots[5], PICKAXE, 1, 5, "number key")
+		click(w, inv(w, 5), Click.QuickMove, 0)
+		worn(w.inventory.slots[10], PICKAXE, 1, 5, "shift click")
+		local copied = Menu.copyWindow(w)
+		worn(copied.inventory.slots[10], PICKAXE, 1, 5, "copied")
+		t.eq(dump(copied), dump(w))
+		local thrown = click(w, inv(w, 10), Click.Throw, 0)
+		worn(thrown[1], PICKAXE, 1, 5, "thrown with Q")
+		w.inventory.cursor = S(PICKAXE, 1, 9)
+		thrown = click(w, OUTSIDE, Click.Pickup, 0)
+		worn(thrown[1], PICKAXE, 1, 9, "thrown from the cursor")
+		w.inventory.selected = 3
+		w.inventory.slots[3] = S(PICKAXE, 1, 4)
+		thrown = Menu.apply(w, { kind = "drop", all = false }, false)
+		worn(thrown[1], PICKAXE, 1, 4, "dropped from the hand")
+
+		-- Inventory.add, closing and death keep it too.
+		t.eq(Menu.add(w.inventory, S(PICKAXE, 1, 3)), nil)
+		worn(w.inventory.slots[1], PICKAXE, 1, 3, "added")
+		w.inventory.cursor = S(PICKAXE, 1, 8)
+		Menu.close(w)
+		worn(w.inventory.slots[2], PICKAXE, 1, 8, "back from the cursor")
+		local found = 0
+		for _, stack in Menu.clear(w.inventory) do
+			if stack.item == PICKAXE and (stack.damage == 3 or stack.damage == 8) then
+				found += 1
+			end
+		end
+		t.eq(found, 2, "death drops keep the wear")
+
+		-- 0 (as the network sends a new tool) is the same as none.
+		local z = newWindow()
+		z.inventory.slots[1] = S(PICKAXE, 1, 0)
+		t.eq(Menu.copyWindow(z).inventory.slots[1].damage, nil, "0 reads as new")
+		t.ok(Menu.stacksMatch(S(PICKAXE, 1), S(PICKAXE, 1, 0)), "0 matches none")
+		t.ok(not Menu.stacksMatch(S(PICKAXE, 1), S(PICKAXE, 1, 1)), "1 does not")
+	end)
+
+	t.test("damage: stacks of one item with different wear never merge (isSameItemSameTags)", function()
+		-- The rule is generic; a worn stackable item shows it.
+		local d = newWindow()
+		d.inventory.slots[10] = S(DIRT, 10, 2)
+		d.inventory.cursor = S(DIRT, 5)
+		click(d, inv(d, 10), Click.Pickup, 0)
+		worn(d.inventory.slots[10], DIRT, 5, nil, "swapped in")
+		worn(d.inventory.cursor, DIRT, 10, 2, "swapped out")
+
+		d = newWindow()
+		d.inventory.slots[1] = S(DIRT, 10, 2)
+		d.inventory.slots[10] = S(DIRT, 10)
+		click(d, inv(d, 10), Click.QuickMove, 0)
+		worn(d.inventory.slots[1], DIRT, 10, 2, "a shift click does not merge")
+		worn(d.inventory.slots[2], DIRT, 10, nil, "the next empty hotbar slot")
+		Menu.add(d.inventory, S(DIRT, 5, 2))
+		worn(d.inventory.slots[1], DIRT, 15, 2, "Inventory.add merges the same wear")
+		Menu.add(d.inventory, S(DIRT, 1))
+		worn(d.inventory.slots[2], DIRT, 11, nil, "and new with new")
+
+		d.inventory.cursor = S(DIRT, 1)
+		click(d, inv(d, 30), Click.PickupAll, 0)
+		worn(d.inventory.cursor, DIRT, 12, nil, "a double click gathers the same wear only")
+		worn(d.inventory.slots[1], DIRT, 15, 2, "the worn stack stays")
+
+		d.inventory.cursor = S(DIRT, 10)
+		drag(d, Drag.Split, { inv(d, 1), inv(d, 20), inv(d, 21) })
+		worn(d.inventory.slots[1], DIRT, 15, 2, "drags skip other wear")
+		worn(d.inventory.slots[20], DIRT, 5, nil, "20")
+		worn(d.inventory.slots[21], DIRT, 5, nil, "21")
+
+		d.inventory.cursor = S(DIRT, 3, 2)
+		click(d, inv(d, 1), Click.Pickup, 0)
+		worn(d.inventory.slots[1], DIRT, 18, 2, "the same wear merges")
+		t.eq(d.inventory.cursor, nil)
 	end)
 
 	--[[ pick block ]]
@@ -1321,10 +1959,11 @@ return function(t, shared, require)
 		t.eq(actions[1].window, 0)
 		t.eq(actions[1].clickType, Click.Swap)
 		t.eq(actions[1].button, 1)
-		t.eq(actions[1].slot, 14, "window slot of inventory slot 20")
+		t.eq(actions[1].slot, 19, "window 0's slot of inventory slot 20")
+		t.eq(actions[1].slot, inv(newWindow(), 20))
 		t.eq(actions[2].kind, "select")
 		t.eq(actions[2].slot, 2)
-		local w = { id = 0, inventory = inventory, container = nil }
+		local w = Types.newWindow(inventory)
 		applyAll(w, actions, false)
 		is(inventory.slots[2], DIRT, 9, "in hotbar 2")
 		t.eq(inventory.slots[20], nil)
@@ -1347,7 +1986,7 @@ return function(t, shared, require)
 		end
 		inventory.selected = 3
 		inventory.slots[25] = S(DIRT, 9)
-		w = { id = 0, inventory = inventory, container = nil }
+		w = Types.newWindow(inventory)
 		applyAll(w, Menu.pickBlock(inventory, DIRT, false), false)
 		is(inventory.slots[3], DIRT, 9, "into the selected slot")
 		is(inventory.slots[25], STONE, 3, "the old stack where the dirt was")
@@ -1368,7 +2007,7 @@ return function(t, shared, require)
 		t.eq(actions[1].window, 0)
 		t.eq(actions[1].count, 64)
 		t.eq(actions[2].slot, 6)
-		local w = { id = 0, inventory = inventory, container = nil }
+		local w = Types.newWindow(inventory)
 		applyAll(w, actions, true)
 		is(inventory.slots[6], DIRT, 64, "hotbar 6")
 		t.eq(inventory.selected, 6)
@@ -1381,7 +2020,7 @@ return function(t, shared, require)
 		end
 		inventory.slots[10] = S(PLANKS, 1)
 		inventory.selected = 4
-		w = { id = 0, inventory = inventory, container = nil }
+		w = Types.newWindow(inventory)
 		actions = Menu.pickBlock(inventory, HELMET, true)
 		t.eq(#actions, 3)
 		applyAll(w, actions, true)
@@ -1394,7 +2033,7 @@ return function(t, shared, require)
 		for i = 1, 36 do
 			inventory.slots[i] = S(STONE, 64)
 		end
-		w = { id = 0, inventory = inventory, container = nil }
+		w = Types.newWindow(inventory)
 		applyAll(w, Menu.pickBlock(inventory, DIRT, true), true)
 		is(inventory.slots[1], DIRT, 64, "replaced")
 
@@ -1403,7 +2042,7 @@ return function(t, shared, require)
 		inventory.slots[15] = S(DIRT, 2)
 		actions = Menu.pickBlock(inventory, DIRT, true)
 		t.eq(actions[1].clickType, Click.Swap)
-		w = { id = 0, inventory = inventory, container = nil }
+		w = Types.newWindow(inventory)
 		applyAll(w, actions, true)
 		is(inventory.slots[1], DIRT, 2, "swapped, not a new stack")
 
@@ -1426,7 +2065,7 @@ return function(t, shared, require)
 		end
 		local cases = {
 			{ c(inv(w, 1), Click.Pickup, 0, 1), "wrong window" },
-			{ c(40, Click.Pickup, 0), "slot = size" },
+			{ c(Menu.size(w), Click.Pickup, 0), "slot = size" },
 			{ c(-2, Click.Pickup, 0), "slot -2" },
 			{ c(CURSOR, Click.Pickup, 0), "slot -1" },
 			{ c(1.5, Click.Pickup, 0), "fractional slot" },
@@ -1477,21 +2116,83 @@ return function(t, shared, require)
 		return seed % n
 	end
 
-	local POOL = { DIRT, STONE, COBBLE, PLANKS, HELMET, CHESTPLATE, LEGGINGS, BOOTS, GOLD_HELMET }
+	local POOL = {
+		DIRT,
+		STONE,
+		COBBLE,
+		PLANKS,
+		HELMET,
+		CHESTPLATE,
+		LEGGINGS,
+		BOOTS,
+		GOLD_HELMET,
+		LOG,
+		STICK,
+		COAL,
+		RAW_IRON,
+		INGOT,
+		PICKAXE,
+	}
 	local ARMOR_OF = { HELMET, CHESTPLATE, LEGGINGS, BOOTS }
 
-	local function randomWindow()
-		local w = newWindow(if rand(2) == 0 then nil else 9 * (1 + rand(6)))
-		local function stack()
-			if rand(3) == 0 then
-				return nil
-			end
-			local item = POOL[1 + rand(#POOL)]
-			return S(item, 1 + rand(Items.maxStack(item)))
+	-- A random stack (or nil); tools are sometimes worn.
+	local function stack(): any
+		if rand(3) == 0 then
+			return nil
 		end
-		if w.container then
-			for i = 1, w.container.size do
-				w.container.slots[i] = stack()
+		local item = POOL[1 + rand(#POOL)]
+		local durability = Items.get(item).durability
+		local damage = if durability and rand(2) == 0 then 1 + rand(durability - 1) else nil
+		return S(item, 1 + rand(Items.maxStack(item)), damage)
+	end
+
+	-- A grid that crafts something: logs, sticks, a table, two worn pickaxes or (3 x 3) a pickaxe.
+	local function recipeCells(width: number): { [number]: any }
+		local function some(item: number)
+			return S(item, 1 + rand(64))
+		end
+		local r = rand(if width == 3 then 5 else 4)
+		if r == 0 then
+			return { [1 + rand(width * width)] = some(LOG) }
+		elseif r == 1 then
+			return { [2] = some(PLANKS), [2 + width] = some(PLANKS) }
+		elseif r == 2 then
+			return { [1] = some(PLANKS), [2] = some(PLANKS), [1 + width] = some(PLANKS), [2 + width] = some(PLANKS) }
+		elseif r == 3 then
+			return { [1] = S(PICKAXE, 1, 1 + rand(58)), [width * width] = S(PICKAXE, 1, 1 + rand(58)) }
+		end
+		return { some(PLANKS), some(PLANKS), some(PLANKS), nil, some(STICK), nil, nil, some(STICK) }
+	end
+
+	-- A window of any kind (the inventory screen's, a chest, a crafting table, a furnace or no
+	-- container at all), filled at random but by the rules.
+	local function randomWindow()
+		local r = rand(8)
+		local w = if r < 3
+			then newWindow()
+			elseif r < 5 then newWindow(9 * (1 + rand(6)))
+			elseif r < 6 then tableWindow()
+			elseif r < 7 then furnaceWindow()
+			else bareWindow()
+		local container = w.container
+		local width = Types.craftWidth(container)
+		if width > 0 then
+			local cells = {}
+			if rand(2) == 0 then
+				cells = recipeCells(width)
+			else
+				for i = 1, width * width do
+					cells[i] = stack()
+				end
+			end
+			setGrid(w, cells)
+		elseif container then
+			for i = 1, container.size do
+				container.slots[i] = stack()
+			end
+			local fuel = container.slots[Types.FURNACE_FUEL]
+			if container.kind == "furnace" and fuel and Smelting.fuel(fuel.item) == 0 then
+				container.slots[Types.FURNACE_FUEL] = S(COAL, 1 + rand(64))
 			end
 		end
 		for i = 1, 36 do
@@ -1517,6 +2218,9 @@ return function(t, shared, require)
 			return -1 - rand(3)
 		elseif r == 3 then
 			return rand(65536) - 32768
+		elseif r < 10 and Types.craftWidth(w.container) > 0 then
+			-- Crafting results often, so crafts happen.
+			return result(w)
 		end
 		return rand(Menu.size(w))
 	end
@@ -1572,7 +2276,10 @@ return function(t, shared, require)
 		}
 	end
 
-	-- Every stored stack is valid where it is, and no table is stored twice.
+	--[[
+		Every stored stack is valid where it is (wear included), no table is stored twice, a
+		furnace's fuel slot holds fuel and a crafting result is what its grid makes.
+	]]
 	local function checkInvariants(w, context: string)
 		local seen = {}
 		local function check(stack, where: string, max: number)
@@ -1588,6 +2295,31 @@ return function(t, shared, require)
 			end
 			if stack.count ~= math.floor(stack.count) or stack.count < 1 or stack.count > max then
 				error(`{context}: {where} holds {stack.count} of {stack.item} (max {max})`)
+			end
+			local damage = stack.damage
+			if damage ~= nil then
+				local durability = Items.get(stack.item).durability
+				if durability == nil or damage < 1 or damage >= durability or damage ~= math.floor(damage) then
+					error(`{context}: {where} holds {stack.item} with damage {damage}`)
+				end
+			end
+		end
+		local container = w.container
+		local width = Types.craftWidth(container)
+		if width > 0 then
+			local cells = {}
+			for i = 1, width * width do
+				cells[i] = container.slots[Types.CRAFT_RESULT + i]
+			end
+			local made = Crafting.match(cells, width)
+			local now = container.slots[Types.CRAFT_RESULT]
+			if stackText(made) ~= stackText(now) then
+				error(`{context}: the result is {stackText(now)}, the grid makes {stackText(made)}`)
+			end
+		elseif container and container.kind == "furnace" then
+			local fuel = container.slots[Types.FURNACE_FUEL]
+			if fuel and Smelting.fuel(fuel.item) == 0 then
+				error(`{context}: the fuel slot holds {fuel.item}`)
 			end
 		end
 		for index = 0, Menu.size(w) - 1 do
@@ -1613,13 +2345,68 @@ return function(t, shared, require)
 		end
 	end
 
-	t.test("fuzz (survival): counts are conserved, nothing errors, invariants hold", function()
-		local applied = 0
+	--[[
+		What k crafts in a row from a window's grid change (k = 0, 1, 2, ... while the grid makes
+		something): each gives the result and takes one item from every used grid slot.
+	]]
+	local function craftChanges(w): { { [number]: number } }
+		local changes = { {} }
+		local container = w.container
+		local width = Types.craftWidth(container)
+		if width == 0 then
+			return changes
+		end
+		local cells = {}
+		for i = 1, width * width do
+			cells[i] = container.slots[Types.CRAFT_RESULT + i]
+		end
+		local sums = {}
+		while true do
+			local made = Crafting.match(cells, width)
+			if made == nil then
+				break
+			end
+			sums = table.clone(sums)
+			sums[made.item] = (sums[made.item] or 0) + made.count
+			for i = 1, width * width do
+				local cell = cells[i]
+				if cell then
+					sums[cell.item] = (sums[cell.item] or 0) - 1
+				end
+			end
+			cells = Crafting.consume(cells, width)
+			table.insert(changes, sums)
+		end
+		return changes
+	end
+
+	-- Is after - before (item -> count) one of `changes`?
+	local function oneOf(before, after, changes): boolean
+		for _, change in changes do
+			local expected = table.clone(before)
+			for item, n in change do
+				expected[item] = (expected[item] or 0) + n
+			end
+			if sameTotals(expected, after) then
+				return true
+			end
+		end
+		return false
+	end
+
+	t.test("fuzz (survival): counts are conserved but for crafts, nothing errors, invariants hold", function()
+		local applied, crafted = 0, 0
 		for round = 1, 150 do
 			local w = randomWindow()
+			local width = Types.craftWidth(w.container)
 			for step = 1, 60 do
+				if width > 0 and w.container.slots[Types.CRAFT_RESULT] == nil and rand(8) == 0 then
+					-- (Closes and clicks empty grids: something to craft again.)
+					setGrid(w, recipeCells(width))
+				end
 				local action = randomAction(w)
 				local before = totals(w)
+				local changes = craftChanges(w)
 				local selected = w.inventory.slots[w.inventory.selected]
 				local text = dump(w)
 				local ok, thrown = pcall(Menu.apply, w, action, false)
@@ -1633,7 +2420,11 @@ return function(t, shared, require)
 				end
 				local same, why = sameTotals(before, after)
 				if not same then
-					error(`round {round} step {step} ({action.kind}): {why}\n  state {text}`)
+					-- Only crafting changes the totals, by whole crafts.
+					if not oneOf(before, after, changes) then
+						error(`round {round} step {step} ({action.kind}): {why}\n  state {text}`)
+					end
+					crafted += 1
 				end
 				for _, stack in thrown do
 					t.ok(stack.count >= 1 and Items.isValid(stack.item), "thrown stacks are real")
@@ -1643,6 +2434,7 @@ return function(t, shared, require)
 			end
 		end
 		t.eq(applied, 150 * 60)
+		t.ok(crafted > 40, `enough crafts ({crafted})`)
 	end)
 
 	t.test("fuzz (creative): nothing errors, invariants hold", function()
@@ -1672,9 +2464,9 @@ return function(t, shared, require)
 			for i = 0, length - 1 do
 				buffer.writeu8(b, i, rand(256))
 			end
-			if length > 7 and rand(5) ~= 0 then
+			if length > 4 and rand(5) ~= 0 then
 				buffer.writeu8(b, 4, kind)
-				if kind == 2 then
+				if kind == 2 and length > 7 then
 					buffer.writeu8(b, 7, count)
 				end
 			end

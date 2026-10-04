@@ -9,6 +9,12 @@
 	  first person  the local player's item in the bottom right corner of the screen, in a
 	                ViewportFrame, dipping in a short swing when breaking or placing (`swing`).
 
+	Blocks and most items are held turned like a block. Tools and sticks are held like Minecraft's
+	"handheld" items (ItemModels.handPivot / holdPivot): at the handle, upright rather than lying
+	diagonally as in their icon. In third person they point forward and up from the fist; in first
+	person they rise from the bottom right corner towards the middle, leaning left, their face to
+	the camera, and chop forward when swinging.
+
 	Nothing is drawn for an empty hand or while a Tool is equipped.
 ]]
 
@@ -17,16 +23,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 
-local BLOCK = Config.BlockSize
--- Size (studs) of an item in a character's hand: a block is drawn 0.4 blocks wide.
-local HAND_SIZE = 0.4 * BLOCK
 -- Minecraft's arm swing lasts 6 ticks.
 local SWING_TIME = 0.3
 -- The camera counts as first person this close (studs) to its focus.
@@ -43,18 +45,21 @@ end
 
 type Held = { item: number, model: Model }
 
--- The hand an item is held in, and where in it.
-local function grip(character: Model): CFrame?
-	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
-	if hand == nil or not hand:IsA("BasePart") then
-		return nil
-	end
-	local attachment = hand:FindFirstChild("RightGripAttachment")
-	local base = if attachment and attachment:IsA("Attachment")
-		then attachment.WorldCFrame
-		else hand.CFrame * CFrame.new(0, -hand.Size.Y / 2, 0)
-	-- Turned like a block held in Minecraft, a little in front of the fist.
-	return base * CFrame.new(0, 0, -HAND_SIZE * 0.3) * CFrame.Angles(0, math.rad(45), 0)
+-- First person pose of a block (or any item but tools): `dip` is the swing, 0..1..0.
+local function blockPose(dip: number): CFrame
+	return CFrame.new(0.35 - 0.25 * dip, -0.45 - 0.2 * dip, -2.4)
+		* CFrame.Angles(math.rad(-15 - 40 * dip), math.rad(40), math.rad(5))
+end
+
+--[[
+	First person pose of a tool's upright view space, at its grip: low in the bottom right corner
+	(the handle runs off the bottom), leaning left towards the middle, tipped away a little and
+	turned so its face shows. Swinging chops it forward and down towards the middle.
+]]
+local function toolPose(dip: number): CFrame
+	return CFrame.new(0.5 - 0.2 * dip, -0.62 - 0.1 * dip, -2.2)
+		* CFrame.Angles(math.rad(-25 - 55 * dip), math.rad(-20), 0)
+		* CFrame.Angles(0, 0, math.rad(30))
 end
 
 function HeldItems.start()
@@ -115,7 +120,7 @@ function HeldItems.start()
 			local character = player.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 			local item = itemOf(player)
-			local where = character and grip(character)
+			local where = if character and item ~= 0 then ItemModels.handPivot(item, character) else nil
 			if
 				character == nil
 				or humanoid == nil
@@ -129,7 +134,7 @@ function HeldItems.start()
 				local current = held[player]
 				if current == nil or current.item ~= item then
 					clear(player)
-					local model = ItemModels.build(item, HAND_SIZE)
+					local model = ItemModels.build(item, ItemModels.handSize(item))
 					model.Parent = folder
 					current = { item = item, model = model }
 					held[player] = current
@@ -182,10 +187,11 @@ function HeldItems.start()
 		local t = math.clamp((os.clock() - swingStart) / SWING_TIME, 0, 1)
 		local dip = math.sin(t * math.pi)
 		local model = handModel :: Model
-		model:PivotTo(
-			CFrame.new(0.35 - 0.25 * dip, -0.45 - 0.2 * dip, -2.4)
-				* CFrame.Angles(math.rad(-15 - 40 * dip), math.rad(40), math.rad(5))
-		)
+		if ItemModels.isHandheld(item) then
+			model:PivotTo(ItemModels.holdPivot(item, 1, toolPose(dip)))
+		else
+			model:PivotTo(blockPose(dip))
+		end
 	end)
 
 	Players.PlayerRemoving:Connect(clear)

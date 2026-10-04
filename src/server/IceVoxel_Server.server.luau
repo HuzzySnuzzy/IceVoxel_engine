@@ -12,8 +12,9 @@
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
 	  5. players    -> game modes (/gamemode), cosmetic characters (collision group, teleports, fall
-	                   damage), item entities (drops), inventories and chests, safe spawning, map
-	                   teleports, waypoints, keeping chunks around players generated
+	                   damage), item entities (drops), inventories, chests, furnaces and crafting
+	                   tables, tools (mining speed, drops, wear), safe spawning, map teleports,
+	                   waypoints, keeping chunks around players generated
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -46,7 +47,8 @@ local world = WorldServer.new(TerrainGenerator.new(seed))
 local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
 world.onChanged = function(x, y, z, old, new)
 	ticker:blockChanged(x, y, z)
-	-- A chest replaced by anything (breaking, the Api, block updates) drops what it holds.
+	-- A chest or furnace replaced by anything (breaking, the Api, block updates) drops what it
+	-- holds, and any block with a window closes it for its users.
 	Inventories.blockChanged(x, y, z, old, new)
 end
 
@@ -62,6 +64,8 @@ net.setRules({
 	dropBlock = Entities.dropBlock,
 	removeContainer = Inventories.removeContainer,
 	mayRemoveContainer = Inventories.mayRemoveContainer,
+	heldTool = Inventories.heldTool,
+	wearTool = Inventories.wearTool,
 })
 Spawning.start(world)
 Teleport.start(world, net)

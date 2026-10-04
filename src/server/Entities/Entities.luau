@@ -10,6 +10,9 @@
 	  Spawning  `dropBlock` is Minecraft's Block.popResource, `dropContents` its
 	            Containers.dropItemStack (chest contents, in random handfuls), `throwFromPlayer`
 	            its Player.drop (thrown forwards from the eyes, or scattered around on death).
+	  Damage    items keep their stack's `damage` (a worn tool stays worn when thrown, dropped
+	            from a chest or scattered on death, and is picked up as it was). Clients do not
+	            need it: they only draw the item.
 	  Tracking  every player sees the items within Config.Entities.TrackingDistance blocks of their
 	            feet. An item is spawned on their client when it comes into range (with its current
 	            state and age) and removed when it leaves; ranges are checked every half second, and
@@ -92,13 +95,13 @@ local function feetOf(player: Player): Vector3?
 	return characterFeet(player.Character) or lastFeet[player]
 end
 
-local function tryPickup(key: any, item: number, count: number): number
+local function tryPickup(key: any, item: number, count: number, damage: number?): number
 	local handler = pickupHandler
 	local player = key :: Player
 	if handler == nil or player.Parent == nil then
 		return 0
 	end
-	local ok, taken = pcall(handler, player, { item = item, count = count })
+	local ok, taken = pcall(handler, player, { item = item, count = count, damage = damage })
 	if not ok then
 		warn(`[IceVoxel] the item pickup handler failed: {taken}`)
 		return 0
@@ -293,7 +296,7 @@ end
 	Drops an item at (x, y, z) (blocks: the bottom centre of the item) with a velocity in blocks
 	per tick (Minecraft's random pop when left out) and a pickup delay in ticks (10 by default).
 	Returns the item's id, 0 if nothing was spawned. Stacks larger than a full stack become
-	several items (the first one's id is returned).
+	several items (the first one's id is returned), each with the stack's damage.
 ]]
 function Entities.spawnItem(
 	stack: Stack,
@@ -320,7 +323,7 @@ function Entities.spawnItem(
 	while count > 0 do
 		local part = math.min(count, max)
 		count -= part
-		local id = entities:spawnItem(stack.item, part, x, y, z, vx, vy, vz, pickupDelay)
+		local id = entities:spawnItem(stack.item, part, x, y, z, vx, vy, vz, pickupDelay, stack.damage)
 		if first == 0 then
 			first = id
 		end
@@ -366,7 +369,7 @@ function Entities.dropContents(x: number, y: number, z: number, stack: Stack)
 		local part = math.min(left, random:NextInteger(10, 30))
 		left -= part
 		Entities.spawnItem(
-			{ item = stack.item, count = part },
+			{ item = stack.item, count = part, damage = stack.damage },
 			px,
 			py,
 			pz,

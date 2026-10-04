@@ -1,6 +1,7 @@
 --[[
 	Item entities: Minecraft's item physics (Shared/Entities/ItemPhysics) and the server's item
-	rules (Entities/EntityWorld: pickup delay, pickups, merging, despawning, the cap, changes).
+	rules (Entities/EntityWorld: pickup delay, pickups, merging, despawning, the cap, changes, a
+	tool's damage).
 ]]
 
 -- (Modules come from the test loader's require, so their types are restated here.)
@@ -519,5 +520,57 @@ return function(t, shared, require, server)
 			tickN(world, 3, { { key = "far", x = x, y = 1, z = x } })
 		end
 		t.ok(world:count() >= 1, "the tick returned and the item is untouched")
+	end)
+
+	t.test("entity world: items keep their damage from spawning to pickup", function()
+		local world = newWorld()
+		local PICKAXE = Items.id.WoodenPickaxe
+		local worn = world:spawnItem(PICKAXE, 1, 0.5, 1, 0.5, 0, 0, 0, 0, 17)
+		local new = world:spawnItem(PICKAXE, 1, 3.5, 1, 0.5, 0, 0, 0, 0)
+		t.eq(world:get(worn).damage, 17)
+		t.eq(world:get(new).damage, nil, "a new tool")
+		-- Nonsense is a new tool; fractions are whole uses.
+		for _, bad in { 0, -4, 0 / 0, math.huge, -math.huge } do
+			t.eq(world:get(world:spawnItem(PICKAXE, 1, 9.5, 1, 9.5, 0, 0, 0, 100, bad)).damage, nil, tostring(bad))
+		end
+		t.eq(world:get(world:spawnItem(PICKAXE, 1, 9.5, 1, 9.5, 0, 0, 0, 100, 2.7)).damage, 2)
+
+		local seen = {}
+		world:tick({ { key = "steve", x = 0.5, y = 1, z = 0.5 } }, function(key, item, count, damage)
+			table.insert(seen, { item = item, count = count, damage = damage })
+			return count
+		end)
+		t.eq(#seen, 1, "only the item in reach")
+		t.eq(seen[1].item, PICKAXE)
+		t.eq(seen[1].count, 1)
+		t.eq(seen[1].damage, 17, "the pickup handler gets the wear")
+		t.eq(world:get(worn), nil, "taken")
+		world:tick({ { key = "steve", x = 3.5, y = 1, z = 0.5 } }, function(key, item, count, damage)
+			t.eq(damage, nil, "a new tool is picked up new")
+			return count
+		end)
+		t.eq(world:get(new), nil)
+	end)
+
+	t.test("entity world: items merge only with the same damage", function()
+		-- (Tools never stack, so this is Minecraft's isSameItemSameTags rule on its own.)
+		local function merges(damage1: number?, damage2: number?): boolean
+			local world = newWorld()
+			world:spawnItem(DIRT, 1, 1.9, 1, 0.5, 0, 0, 0, 10, damage1)
+			world:spawnItem(DIRT, 1, 2.1, 1, 0.5, 0, 0, 0, 10, damage2)
+			tickN(world, 40)
+			return world:count() == 1
+		end
+		t.ok(merges(nil, nil))
+		t.ok(merges(3, 3), "the same wear")
+		t.ok(not merges(3, 4), "different wear")
+		t.ok(not merges(nil, 4), "new and worn")
+		t.ok(merges(nil, 0), "0 is new")
+		local world = newWorld()
+		local PICKAXE = Items.id.WoodenPickaxe
+		world:spawnItem(PICKAXE, 1, 1.9, 1, 0.5, 0, 0, 0, 10, 5)
+		world:spawnItem(PICKAXE, 1, 2.1, 1, 0.5, 0, 0, 0, 10, 5)
+		tickN(world, 40)
+		t.eq(world:count(), 2, "tools stack to 1: never merge")
 	end)
 end

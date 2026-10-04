@@ -1,3 +1,9 @@
+--[[
+	The server's world: the protocol's world messages, WorldServer (edits, eviction, cropped
+	chunks), block updates (falling sand, water, grass), safe spawn spots and furnaces cooking
+	(Players/Containers.tickFurnaces).
+]]
+
 return function(t, shared, require, server)
 	local Blocks = require(shared.Blocks)
 	local Config = require(shared.Config)
@@ -380,5 +386,201 @@ return function(t, shared, require, server)
 		world:setBlock(5, FLOOR, 5, STONE)
 		settle()
 		t.eq(world:getBlock(5, FLOOR - 1, 5), Blocks.id.Dirt)
+	end)
+
+	--[[ Furnaces (Players/Containers) ]]
+
+	local Items = require(shared.Items)
+	local Smelting = require(shared.Crafting.Smelting)
+	local Containers = require(server.Players.Containers)
+	local FURNACE, CHEST = Blocks.id.Furnace, Blocks.id.Chest
+	local RAW_IRON, COAL, INGOT = Items.id.RawIron, Items.id.Coal, Items.id.IronIngot
+
+	-- Runs `n` furnace ticks; returns every change reported, in order.
+	local function tickFurnaces(store, n: number): { any }
+		local all = {}
+		for _ = 1, n do
+			for _, change in store:tickFurnaces() do
+				table.insert(all, change)
+			end
+		end
+		return all
+	end
+
+	t.test("furnaces: tickFurnaces smelts what a viewer put in and says where and what changed", function()
+		local store = Containers.new()
+		local furnace = store:get(4, 5, -6, FURNACE)
+		t.eq(#store:tickFurnaces(), 0, "nothing is ticked before it is marked")
+		furnace.slots[1] = { item = RAW_IRON, count = 2 }
+		furnace.slots[2] = { item = COAL, count = 1 }
+		t.eq(#store:tickFurnaces(), 0, "still not marked")
+		store:markActive(4, 5, -6)
+
+		local first = store:tickFurnaces()
+		t.eq(#first, 1)
+		t.eq(first[1].x, 4)
+		t.eq(first[1].y, 5)
+		t.eq(first[1].z, -6)
+		t.ok(first[1].slots, "the coal was used up to light it")
+		t.eq(furnace.slots[2], nil)
+		t.eq(furnace.data[1], Smelting.fuel(COAL), "lit with coal's burn time")
+		t.eq(furnace.data[3], 1, "cooking")
+
+		local second = store:tickFurnaces()
+		t.eq(#second, 1)
+		t.ok(not second[1].slots, "only the flame and the arrow moved")
+
+		-- The first ingot after 200 ticks of cooking (198 more), then the second.
+		local changes = tickFurnaces(store, 198)
+		t.eq(#changes, 198, "it changes every tick while it cooks")
+		t.ok(changes[198].slots, "the ingot came out")
+		for i = 1, 197 do
+			t.ok(not changes[i].slots, `data only at tick {i + 2}`)
+		end
+		t.eq(furnace.slots[3].item, INGOT)
+		t.eq(furnace.slots[3].count, 1)
+		t.eq(furnace.slots[1].count, 1)
+		tickFurnaces(store, 200)
+		t.eq(furnace.slots[3].count, 2)
+		t.eq(furnace.slots[1], nil, "the raw iron is used up")
+
+		-- It burns on with nothing to cook (coal lasts 1600 ticks after the one that lit it), then
+		-- goes out and settles.
+		t.eq(#tickFurnaces(store, 1601 - 400), 1201, "burning down")
+		t.eq(furnace.data[1], 0, "out")
+		t.eq(#store:tickFurnaces(), 0, "settled")
+		t.eq(next(store.active), nil, "and no longer ticked")
+		t.eq(store:peek(4, 5, -6), furnace, "its ingots keep it")
+	end)
+
+	t.test("furnaces: idle ones leave the active set; burning ones are kept, then forgotten", function()
+		local store = Containers.new()
+		-- Fuel alone does nothing.
+		local fuelOnly = store:get(0, 1, 0, FURNACE)
+		fuelOnly.slots[2] = { item = COAL, count = 5 }
+		store:markActive(0, 1, 0)
+		t.eq(#store:tickFurnaces(), 0)
+		t.eq(next(store.active), nil, "nothing to do: not ticked again")
+
+		-- Something to smelt but the output holds something else: the furnace notes the item
+		-- once, then nothing changes and it stops being ticked.
+		local blocked = store:get(0, 2, 0, FURNACE)
+		blocked.slots[1] = { item = RAW_IRON, count = 1 }
+		blocked.slots[2] = { item = COAL, count = 1 }
+		blocked.slots[3] = { item = Items.id.Dirt, count = 1 }
+		store:markActive(0, 2, 0)
+		t.eq(#tickFurnaces(store, 5), 1, "one change")
+		t.eq(next(store.active), nil)
+		t.eq(blocked.slots[2].count, 1, "the coal was not wasted")
+
+		-- Marking a chest, or where nothing is stored, does nothing.
+		store:get(0, 3, 0, CHEST).slots[1] = { item = COAL, count = 1 }
+		store:markActive(0, 3, 0)
+		store:markActive(9, 9, 9)
+		t.eq(next(store.active), nil)
+
+		-- A furnace that smelted its one item burns on: emptied and closed, it is kept until the
+		-- fire goes out, then forgotten like an empty chest.
+		local burning = store:get(0, 4, 0, FURNACE)
+		store:addViewer(0, 4, 0, "a")
+		burning.slots[1] = { item = RAW_IRON, count = 1 }
+		burning.slots[2] = { item = COAL, count = 1 }
+		store:markActive(0, 4, 0)
+		tickFurnaces(store, 200)
+		t.eq(burning.slots[3].item, INGOT)
+		burning.slots[3] = nil
+		store:removeViewer(0, 4, 0, "a")
+		t.eq(store:peek(0, 4, 0), burning, "still burning: kept")
+		local before = store.count
+		tickFurnaces(store, Smelting.fuel(COAL) + 1 - 200)
+		t.eq(burning.data[1], 0, "gone out")
+		t.eq(store:peek(0, 4, 0), burning, "forgotten on the tick that finds it idle")
+		t.eq(#store:tickFurnaces(), 0)
+		t.eq(store:peek(0, 4, 0), nil, "forgotten")
+		t.eq(store.count, before - 1)
+
+		-- An empty, unlit furnace is forgotten when its last viewer leaves, as chests are.
+		store:get(0, 5, 0, FURNACE)
+		store:addViewer(0, 5, 0, "a")
+		store:removeViewer(0, 5, 0, "a")
+		t.eq(store:peek(0, 5, 0), nil)
+	end)
+
+	t.test("furnaces: a broken furnace stops cooking; nobody needs to watch one", function()
+		local store = Containers.new()
+		local furnace = store:get(7, 7, 7, FURNACE)
+		furnace.slots[1] = { item = RAW_IRON, count = 3 }
+		furnace.slots[2] = { item = COAL, count = 1 }
+		store:markActive(7, 7, 7)
+		t.eq(#store:viewers(7, 7, 7), 0, "no viewers")
+		tickFurnaces(store, 10)
+		t.eq(furnace.data[3], 10, "cooks unwatched")
+		local taken = store:take(7, 7, 7)
+		t.eq(taken, furnace)
+		t.eq(next(store.active), nil, "taking it stops its ticks")
+		t.eq(#store:tickFurnaces(), 0)
+		-- A new furnace in the same place starts afresh, unmarked.
+		local fresh = store:get(7, 7, 7, FURNACE)
+		t.ok(fresh ~= furnace)
+		t.eq(#store:tickFurnaces(), 0)
+	end)
+
+	t.test("furnaces: through the inventory, shift-clicked ore and coal cook for every viewer", function()
+		local InventoryState = require(server.Players.InventoryState)
+		local Menu = require(shared.Inventory.Menu)
+		local store = Containers.new()
+		local state = InventoryState.new(store)
+		state:join("a")
+		state:join("b")
+		local inventory = state:window("a").inventory
+		inventory.slots[1] = { item = RAW_IRON, count = 3 }
+		inventory.slots[2] = { item = COAL, count = 2 }
+		state:open("a", 1, 2, 3, FURNACE)
+		state:open("b", 1, 2, 3, FURNACE)
+		local window = state:window("a")
+		local furnace = window.container
+		t.eq(state:window("b").container, furnace, "one shared furnace")
+		state:takeDirty()
+
+		-- What Players/Inventories does with an action in a furnace window.
+		local seq = 0
+		local function shiftClick(slot: number)
+			seq += 1
+			local open = state:window("a").container
+			local x, y, z = state:openPosition("a")
+			state:apply("a", seq, {
+				kind = "click",
+				window = window.id,
+				slot = Menu.windowIndex(window, "inventory", slot),
+				clickType = Menu.ClickType.QuickMove,
+				button = 0,
+			}, false)
+			if x ~= nil and open and open.kind == "furnace" then
+				store:markActive(x, y, z)
+			end
+		end
+		shiftClick(1)
+		shiftClick(2)
+		t.eq(furnace.slots[1].item, RAW_IRON, "ore into the input")
+		t.eq(furnace.slots[2].item, COAL, "coal into the fuel slot")
+		t.eq(#state:takeDirty(), 2, "both viewers see it")
+
+		local changes = tickFurnaces(store, 200 * 3)
+		t.eq(furnace.slots[3].count, 3, "three ingots")
+		t.eq(furnace.slots[2].count, 1, "one coal burnt")
+		local outputs = 0
+		for _, change in changes do
+			t.eq(change.x, 1)
+			if change.slots then
+				outputs += 1
+			end
+		end
+		t.eq(outputs, 4, "slots changed four times: lighting and three ingots")
+
+		-- Closing keeps it cooking (it is still burning), and nobody's window is needed for that.
+		state:close("a")
+		state:close("b")
+		t.eq(store:peek(1, 2, 3), furnace)
+		t.ok(store.active["1,2,3"], "still burning")
 	end)
 end

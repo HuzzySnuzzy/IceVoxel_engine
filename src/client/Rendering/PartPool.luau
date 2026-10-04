@@ -13,6 +13,10 @@
 
 	"Plain" templates (far levels merged into meshes, see MeshOverlay) look like those meshes:
 	SmoothPlastic in the block's colour, no textures, fluids opaque.
+
+	Decorated blocks (appearances with `decor`: chests, crafting tables, furnaces): near templates
+	carry the faces as SurfaceGuis (Rendering/BlockDecor), which every recycled part keeps. The
+	mesher draws such blocks one part each, so the faces fit. Far and plain templates stay plain.
 ]]
 
 local MaterialService = game:GetService("MaterialService")
@@ -21,6 +25,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+
+local BlockDecor = require(script.Parent.BlockDecor)
 
 export type PartPool = {
 	templates: { [number]: BasePart },
@@ -46,7 +52,7 @@ end
 
 local warned: { [string]: boolean } = {}
 
-local function makeTemplate(appearance: number, far: boolean, plain: boolean): BasePart
+local function makeTemplate(appearance: number, far: boolean, plain: boolean, decor: boolean): BasePart
 	local info = Blocks.appearances[appearance]
 	local opaque = info.kind == Blocks.KIND_OPAQUE
 
@@ -97,15 +103,21 @@ local function makeTemplate(appearance: number, far: boolean, plain: boolean): B
 			end
 		end
 	end
+	if decor and info.decor and not far then
+		BlockDecor.applySurfaces(part, info.decor)
+	end
 	return part
 end
 
 local PartPool = {}
 PartPool.__index = PartPool
 
--- A new part with the look of `appearance` (full detail: textures and face images), e.g. for items.
+--[[
+	A new part with the look of `appearance` (full detail: textures and face images), e.g. for items.
+	Decorated faces are left out: item models draw them with parts (BlockDecor.buildParts).
+]]
 function PartPool.makeTemplate(appearance: number): BasePart
-	return makeTemplate(appearance, false, false)
+	return makeTemplate(appearance, false, false, false)
 end
 
 function PartPool.new(limit: number): PartPool
@@ -132,7 +144,7 @@ function PartPool.acquire(self: PartPool, appearance: number, far: boolean, plai
 
 	local template = self.templates[key] :: BasePart?
 	if template == nil then
-		local created = makeTemplate(appearance, far, plain == true)
+		local created = makeTemplate(appearance, far, plain == true, true)
 		self.templates[key] = created
 		template = created
 	end

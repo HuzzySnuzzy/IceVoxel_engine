@@ -11,7 +11,8 @@
 	  panel   #C6C6C6 face, 2 px white bevel top-left and #555555 bottom-right, black outline with
 	          slightly rounded corners
 	  slot    18 x 18 inset: #373737 top-left, white bottom-right, #8B8B8B inside (the item is the
-	          16 x 16 inside it, one pixel in)
+	          16 x 16 inside it, one pixel in); crafting results and furnace outputs get the same
+	          look 26 x 26
 	  hover   white at 50 % over a slot's item
 	  text    the pixel font (Arcade, Press Start 2P); titles #404040, white text gets a #3F3F3F
 	          shadow one pixel down-right like Minecraft's
@@ -58,9 +59,10 @@ Style.FONT = Enum.Font.Arcade
 Style.TEXT_SIZE = 8
 -- Stack counts are a little smaller: the pixel font is wider than Minecraft's.
 Style.COUNT_SIZE = 7
--- A slot is 18 x 18, its item 16 x 16.
+-- A slot is 18 x 18, its item 16 x 16; a result slot's large frame 26 x 26.
 Style.SLOT = 18
 Style.ITEM = 16
+Style.BIG_SLOT = 26
 
 -- Minecraft's automatic GUI scale keeps at least 320 x 240 GUI pixels on screen.
 local BASE_WIDTH, BASE_HEIGHT = 320, 240
@@ -174,9 +176,11 @@ Style.selectionImage.Size = UDim2.fromScale(1, 1)
 --[[
 	An inventory slot for an item at (x, y) (Minecraft's slot coordinates: the 18 x 18 frame is drawn
 	one pixel up and left of them). It is a TextButton, so gamepads can select it and clicks on it
-	never reach the world.
+	never reach the world. A `big` slot (a crafting result, a furnace output) is drawn with
+	Minecraft's 26 x 26 result frame around the item instead; the button, which is what gets hit,
+	stays 18 x 18.
 ]]
-function Style.slot(parent: Instance, x: number, y: number, z: number?): TextButton
+function Style.slot(parent: Instance, x: number, y: number, z: number?, big: boolean?): TextButton
 	local button = Instance.new("TextButton")
 	button.Text = ""
 	button.AutoButtonColor = false
@@ -186,8 +190,15 @@ function Style.slot(parent: Instance, x: number, y: number, z: number?): TextBut
 	button.Size = UDim2.fromOffset(Style.SLOT, Style.SLOT)
 	button.ZIndex = z or 4
 	button.SelectionImageObject = noSelectionImage
-	Style.frame(button, 1, 1, Style.SLOT - 1, Style.SLOT - 1, Style.Colour.SlotLight, 1)
-	Style.frame(button, 1, 1, Style.ITEM, Style.ITEM, Style.Colour.Slot, 2)
+	if big then
+		-- (Inside the transparent button, so it moves and hides with it; the item draws above it.)
+		local inset = (Style.BIG_SLOT - Style.SLOT) // 2
+		button.BackgroundTransparency = 1
+		Style.inset(button, -inset, -inset, Style.BIG_SLOT, Style.BIG_SLOT, 1)
+	else
+		Style.frame(button, 1, 1, Style.SLOT - 1, Style.SLOT - 1, Style.Colour.SlotLight, 1)
+		Style.frame(button, 1, 1, Style.ITEM, Style.ITEM, Style.Colour.Slot, 2)
+	end
 	button.Parent = parent
 	return button
 end

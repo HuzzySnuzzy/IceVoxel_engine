@@ -23,7 +23,13 @@
 	    whatever is under the pointer then (Pickup, Quick move with shift, or a throw outside).
 	  * A second left press on the same slot within 250 ms is a double click: on release it
 	    gathers the item onto the cursor (Pickup all), or with shift quick moves every stack of
-	    that item from the same part of the window (the container or the player's slots).
+	    that item from the same part of the window (the container or the player's slots). A
+	    crafting result is no part of that (Minecraft keeps it in a container of its own and
+	    canTakeItemForPickAll refuses it): a double click there is two plain clicks, so it crafts
+	    twice.
+	  * Stacks only count as the same item (to gather, to quick move together, to drag onto) when
+	    their wear matches too (Menu.stacksMatch). Clicks on result slots are ordinary clicks:
+	    Inventory/Menu decides what taking a result does.
 	  * Number keys over a slot swap it with that hotbar slot, Q throws one of it (Ctrl+Q all), as
 	    long as the cursor is empty.
 	  * The creative grid gives full stacks: a click puts one on the cursor, shift a full stack in
@@ -75,8 +81,8 @@ type Self = SlotClicks & {
 	quickButton: number,
 	quickType: number,
 	quickSlots: { number },
-	-- Item of the last shift click (for shift + double click).
-	lastQuickMoved: number?,
+	-- What the last shift click moved (for shift + double click; a copy).
+	lastQuickMoved: Stack?,
 }
 
 local SlotClicks = {}
@@ -107,6 +113,20 @@ local function cursorOf(window: Window): Stack?
 		return nil
 	end
 	return cursor
+end
+
+-- The stack a shift click is about to move (Minecraft's lastQuickMoved, a copy), nil if none.
+local function quickMoved(window: Window, index: number): Stack?
+	local stack = Menu.get(window, index)
+	return if stack then { item = stack.item, count = stack.count, damage = stack.damage } else nil
+end
+
+--[[
+	Minecraft's canItemQuickReplace(slot, stack, true): the slot is empty, or holds the same item with
+	the same wear and no more than a full stack (the carried count does not matter).
+]]
+local function canQuickReplace(current: Stack?, stack: Stack): boolean
+	return current == nil or (Menu.stacksMatch(current, stack) and current.count <= Items.maxStack(stack.item))
 end
 
 function SlotClicks.new(host: Host): SlotClicks
@@ -187,8 +207,7 @@ function SlotClicks.press(self: Self, target: Target?, button: number, shift: bo
 						click(self, target.index, Click.Clone, MIDDLE)
 					end
 				elseif shift then
-					local stack = Menu.get(window, target.index)
-					self.lastQuickMoved = if stack then stack.item else nil
+					self.lastQuickMoved = quickMoved(window, target.index)
 					click(self, target.index, Click.QuickMove, button)
 				else
 					click(self, target.index, Click.Pickup, button)
@@ -228,9 +247,8 @@ function SlotClicks.move(self: Self, target: Target?)
 	if carried.count <= #self.quickSlots and self.quickType ~= MIDDLE then
 		return
 	end
-	-- canItemQuickReplace (ignoring the carried count) and mayPlace.
-	local current = Menu.get(window, index)
-	if current and (current.item ~= carried.item or current.count > Items.maxStack(carried.item)) then
+	-- canItemQuickReplace (ignoring the carried count) and mayPlace (never a result or an output).
+	if not canQuickReplace(Menu.get(window, index), carried) then
 		return
 	end
 	if not Menu.mayPlace(window, index, carried.item) then
@@ -241,17 +259,27 @@ end
 
 function SlotClicks.release(self: Self, target: Target?, button: number, shift: boolean, _now: number)
 	local window = self.host.window()
-	if self.doubleClick and target ~= nil and target.kind == "slot" and button == LEFT then
+	if
+		self.doubleClick
+		and target ~= nil
+		and target.kind == "slot"
+		and button == LEFT
+		and not Menu.isCraftResult(window, target.index)
+	then
 		if shift then
-			local item = self.lastQuickMoved
-			if item then
+			local moved = self.lastQuickMoved
+			if moved then
+				-- Every slot of the same container (the block's, or the player's own: armor and
+				-- inventory) holding that stack; never a crafting result.
 				local inContainer = Menu.locate(window, target.index) == "container"
 				for index = 0, Menu.size(window) - 1 do
-					local current = Menu.get(self.host.window(), index)
+					local now = self.host.window()
+					local current = Menu.get(now, index)
 					if
 						current
-						and current.item == item
-						and (Menu.locate(window, index) == "container") == inContainer
+						and canQuickReplace(current, moved)
+						and (Menu.locate(now, index) == "container") == inContainer
+						and not Menu.isCraftResult(now, index)
 					then
 						click(self, index, Click.QuickMove, LEFT)
 					end
@@ -287,8 +315,7 @@ function SlotClicks.release(self: Self, target: Target?, button: number, shift: 
 				gridDrop(self, carried, button)
 			elseif target.kind == "slot" then
 				if shift then
-					local stack = Menu.get(window, target.index)
-					self.lastQuickMoved = if stack then stack.item else nil
+					self.lastQuickMoved = quickMoved(window, target.index)
 					click(self, target.index, Click.QuickMove, button)
 				else
 					click(self, target.index, Click.Pickup, button)

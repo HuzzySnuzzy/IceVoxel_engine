@@ -7,13 +7,15 @@
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, not inside a player.
 	    Rejected requests are answered with the real block so the client undoes its prediction.
 	  * Applies the game modes' rules to edits (Network/EditRules):
-	      survival  a block breaks only once the player has mined it long enough (Mine messages
-	                say when they started; Mining.mayBreak) and drops its item; placing uses up
-	                the held item (Players/Inventories.place, just before the block is set). A
-	                refused placement is still acknowledged, so the client's predicted use is
-	                undone.
-	      creative  instant breaking, no drops, nothing used up.
-	    A broken container drops its contents in both modes.
+	      survival  a block breaks only once the player has mined it long enough with the tool in
+	                their hand when the break arrives (Mine messages say when they started;
+	                Mining.mayBreak), drops what that tool harvests (Items.drops: stone by hand
+	                drops nothing) and wears the tool (Mining.wear); placing uses up the held item
+	                (Players/Inventories.place, just before the block is set). A refused placement
+	                is still acknowledged, so the client's predicted use is undone.
+	      creative  instant breaking, no drops, nothing used up or worn.
+	    A broken container drops its contents in both modes, and any block with a window (chest,
+	    furnace, crafting table) closes it for everyone using it.
 	  * Broadcasts all world changes once per frame.
 
 	The inventory and item entity sides come in through `setRules` (the server script wires
@@ -110,12 +112,18 @@ export type Rules = {
 	acknowledge: ((player: Player, seq: number) -> ())?,
 	-- Drops a survival player's broken block as an item entity. (Entities.dropBlock)
 	dropBlock: ((x: number, y: number, z: number, stack: Items.Stack) -> ())?,
-	-- A container block was broken: drop its contents and close it for its viewers.
-	-- (Players/Inventories.removeContainer)
+	-- A block with a window (chest, furnace, crafting table) was broken: drop its contents and
+	-- close it for everyone using it. (Players/Inventories.removeContainer)
 	removeContainer: ((x: number, y: number, z: number) -> ())?,
 	-- May this player break the container at (x, y, z) now? (Creative players make items from
 	-- nothing, so what a chest spills is charged to their budget: Players/Inventories.)
 	mayRemoveContainer: ((player: Player, x: number, y: number, z: number) -> boolean)?,
+	-- The item in the player's hand (nil = empty): the tool their mining is timed and harvested
+	-- with. (Players/Inventories.heldTool)
+	heldTool: ((player: Player) -> number?)?,
+	-- Wears the tool in the player's hand by `amount` (it breaks at its durability).
+	-- (Players/Inventories.wearTool)
+	wearTool: ((player: Player, amount: number) -> ())?,
 }
 
 export type ServerNet = {
@@ -138,8 +146,17 @@ function ServerNet.start(world: World): ServerNet
 	-- The block each survival player is mining (Mine messages).
 	local mining: { [Player]: EditRules.Mine } = {}
 	-- A survival break that arrived before its time (network jitter): finished once the time has
-	-- passed, like Minecraft's delayed destroy (ServerPlayerGameMode.hasDelayedDestroy).
-	type DelayedBreak = { x: number, y: number, z: number, block: number, startedAt: number, expires: number }
+	-- passed, like Minecraft's delayed destroy (ServerPlayerGameMode.hasDelayedDestroy). `tool` is
+	-- what the player held when the break arrived (its timing and drops).
+	type DelayedBreak = {
+		x: number,
+		y: number,
+		z: number,
+		block: number,
+		startedAt: number,
+		expires: number,
+		tool: number?,
+	}
 	local delayed: { [Player]: DelayedBreak } = {}
 	local rules: Rules = {}
 
@@ -176,6 +193,12 @@ function ServerNet.start(world: World): ServerNet
 		remote:FireClient(player, ServerMessage.ChunkEdits, Protocol.encodeChunkEdits(lists))
 	end
 
+	-- The item in the player's hand (nil when empty or without inventories).
+	local function heldTool(player: Player): number?
+		local rule = rules.heldTool
+		return if rule then rule(player) else nil
+	end
+
 	-- Is block (x, y, z) within the player's reach (with some slack for movement and latency)?
 	local function inReach(player: Player, x: number, y: number, z: number): boolean
 		local root = rootOf(player)
@@ -200,7 +223,7 @@ function ServerNet.start(world: World): ServerNet
 				or math.abs(z) > Protocol.MAX_COORDINATE
 				or GameMode.isCreative(player)
 				or not inReach(player, x, y, z)
-				or Mining.progressPerTick(world:getBlock(x, y, z), true, false) <= 0
+				or Mining.progressPerTick(world:getBlock(x, y, z), true, false, heldTool(player)) <= 0
 			then
 				mining[player] = nil
 				return
@@ -210,7 +233,8 @@ function ServerNet.start(world: World): ServerNet
 			local startedAt = os.clock()
 			local pending = delayed[player]
 			if pending then
-				local ready = pending.startedAt + (Mining.ticks(pending.block, true, false) - 1) / Mining.TICK_RATE
+				local ready = pending.startedAt
+					+ (Mining.ticks(pending.block, true, false, pending.tool) - 1) / Mining.TICK_RATE
 				startedAt = math.max(startedAt, ready)
 			end
 			if mine == nil then
@@ -223,20 +247,38 @@ function ServerNet.start(world: World): ServerNet
 		end
 	end
 
-	-- Breaks block (x, y, z), which holds `current`: drops (survival) and a container's contents.
-	-- false if the world refused the change.
-	local function performBreak(x: number, y: number, z: number, current: number, creative: boolean): boolean
+	--[[
+		Breaks block (x, y, z), which holds `current`, mined with `tool`: what the tool harvests
+		drops (survival), a container's contents drop and its window closes. `wearer` (a survival
+		player) has the tool in their hand worn. false if the world refused the change.
+	]]
+	local function performBreak(
+		x: number,
+		y: number,
+		z: number,
+		current: number,
+		creative: boolean,
+		tool: number?,
+		wearer: Player?
+	): boolean
 		if not world:setBlock(x, y, z, Blocks.AIR) then
 			return false
 		end
 		local removeContainer = rules.removeContainer
-		if removeContainer and EditRules.isContainer(current) then
+		if removeContainer and EditRules.hasMenu(current) then
 			removeContainer(x, y, z)
 		end
-		local drop = EditRules.drops(current, creative)
+		-- (The drop is decided by the tool as it was: one that breaks on this block still harvests
+		-- it, as Minecraft copies the stack before hurting it.)
+		local drop = EditRules.drops(current, creative, tool)
 		local dropBlock = rules.dropBlock
 		if drop and dropBlock then
 			dropBlock(x, y, z, drop)
+		end
+		local wear = EditRules.wear(current, creative, tool)
+		local wearTool = rules.wearTool
+		if wearer and wear > 0 and wearTool then
+			wearTool(wearer, wear)
 		end
 		return true
 	end
@@ -252,9 +294,11 @@ function ServerNet.start(world: World): ServerNet
 				if player.Parent then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
-			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1) then
+			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, pending.tool) then
 				delayed[player] = nil
-				if not performBreak(pending.x, pending.y, pending.z, pending.block, false) then
+				-- The tool wears if it is still in hand (switching away wears nothing else).
+				local wearer = if heldTool(player) == pending.tool then player else nil
+				if not performBreak(pending.x, pending.y, pending.z, pending.block, false, pending.tool, wearer) then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
 			elseif now > pending.expires then
@@ -305,14 +349,16 @@ function ServerNet.start(world: World): ServerNet
 		if action == EditAction.Break then
 			local mine = mining[player]
 			local now = os.clock()
-			if not EditRules.mayBreak(current, creative, mine, x, y, z, now) then
+			-- Minecraft times (and harvests) a break with the item in hand when it arrives.
+			local tool = if creative then nil else heldTool(player)
+			if not EditRules.mayBreak(current, creative, mine, x, y, z, now, tool) then
 				if
 					not creative
 					and mine
 					and mine.x == x
 					and mine.y == y
 					and mine.z == z
-					and Mining.progressPerTick(current, true, false) > 0
+					and Mining.progressPerTick(current, true, false, tool) > 0
 				then
 					-- Mined, but arrived before its time: keep the client's air and finish it when the
 					-- time has passed (a second early break replaces the first, which is undone).
@@ -328,6 +374,7 @@ function ServerNet.start(world: World): ServerNet
 						block = current,
 						startedAt = mine.startedAt,
 						expires = now + DELAY_LIMIT,
+						tool = tool,
 					}
 					return
 				end
@@ -340,7 +387,7 @@ function ServerNet.start(world: World): ServerNet
 				return
 			end
 			mining[player] = nil
-			performBreak(x, y, z, current, creative)
+			performBreak(x, y, z, current, creative, tool, if creative then nil else player)
 		elseif action == EditAction.Place then
 			if not EditRules.mayPlace(block, current) or (Blocks.isSolid(block) and intersectsCharacter(x, y, z)) then
 				reject()

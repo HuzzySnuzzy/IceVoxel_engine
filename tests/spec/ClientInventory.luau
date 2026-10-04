@@ -1,16 +1,22 @@
 --[[
-	Client inventory: prediction by replay (Inventory/Prediction) and the screens' Minecraft click
-	logic (Ui/SlotClicks): clicks, drags, double clicks, keys, throws and the creative grid.
+	Client inventory: prediction by replay (Inventory/Prediction, also against the server's
+	Players/InventoryState through the protocol, crafting included) and the screens' Minecraft
+	click logic (Ui/SlotClicks): clicks, drags, double clicks, keys, throws and the creative grid.
 ]]
 
-return function(t, shared, require, _server, client)
+return function(t, shared, require, server, client)
+	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local Types = require(shared.Inventory.Types)
 	local Menu = require(shared.Inventory.Menu)
+	local Protocol = require(shared.Net.Protocol)
 	local Prediction = require(client.Inventory.Prediction)
 	local SlotClicks = require(client.Ui.SlotClicks)
+	local InventoryState = require(server.Players.InventoryState)
 
 	local DIRT, STONE, PLANKS = Items.id.Dirt, Items.id.Stone, Items.id.Planks
+	local COBBLE, GLASS, LOG = Items.id.Cobblestone, Items.id.Glass, Items.id.OakLog
+	local STICK, PICKAXE = Items.id.Stick, Items.id.WoodenPickaxe
 	local HELMET = Items.id.IronHelmet
 	local Click = Menu.ClickType
 	local LEFT, RIGHT, MIDDLE = 0, 1, 2
@@ -29,12 +35,13 @@ return function(t, shared, require, _server, client)
 		end
 	end
 
+	-- A snapshot of window 0 (with its 2 x 2 grid, as the server sends it).
 	local function snapshot(ack: number, slots, extra)
 		local inventory = Types.newInventory()
 		for slot, stack in slots do
 			inventory.slots[slot] = stack
 		end
-		local snap = { ack = ack, inventory = inventory, window = 0, container = nil }
+		local snap = { ack = ack, inventory = inventory, window = 0, container = Types.newCrafting("inventory") }
 		if extra then
 			for key, value in extra do
 				snap[key] = value
@@ -120,7 +127,7 @@ return function(t, shared, require, _server, client)
 		local p = Prediction.new()
 		local snap = snapshot(0, { [1] = S(DIRT, 8) }, {
 			window = 7,
-			container = { block = Items.id.Chest, size = 27, slots = { [1] = S(STONE, 4) } },
+			container = { kind = "chest", block = Blocks.id.Chest, size = 27, slots = { [1] = S(STONE, 4) } },
 		})
 		p:receive(snap, false)
 		local w = p:window()
@@ -136,11 +143,12 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(found, "stone moved into the inventory")
-		-- Closing resets the prediction to window 0, even when a snapshot from before the close
-		-- still shows the chest open.
+		-- Closing resets the prediction to window 0 (its own fresh 2 x 2 grid), even when a
+		-- snapshot from before the close still shows the chest open.
 		p:push({ kind = "close", window = 7 }, false)
 		t.eq(p:window().id, 0, "closed")
-		t.ok(p:window().container == nil, "no container")
+		t.eq(p:window().container.kind, "inventory", "window 0's grid")
+		t.eq(p:window().container.size, 5)
 		p:receive(snapshot(1, { [1] = S(DIRT, 8) }, { window = 7, container = snap.container }), false)
 		t.eq(p:window().id, 0, "still closed after an older snapshot")
 		-- A click for the old window does nothing on window 0.
@@ -161,6 +169,131 @@ return function(t, shared, require, _server, client)
 		is(p:window().inventory.cursor, STONE, 64, "creative cursor")
 		p:replay(false)
 		is(p:window().inventory.cursor, nil, nil, "not in survival")
+	end)
+
+	--[[ Prediction against the server ]]
+
+	-- Everything about a window as text (wear included), to compare states.
+	local function dump(window): string
+		local function text(stack): string
+			return if stack then `{stack.item}x{stack.count}d{stack.damage or 0}` else "-"
+		end
+		local parts = { `id{window.id}` }
+		local container = window.container
+		if container then
+			table.insert(parts, `{container.kind}/{container.block}/{container.size}`)
+			for i = 1, container.size do
+				table.insert(parts, text(container.slots[i]))
+			end
+		end
+		for i = 1, 4 do
+			table.insert(parts, text(window.inventory.armor[i]))
+		end
+		for i = 1, 36 do
+			table.insert(parts, text(window.inventory.slots[i]))
+		end
+		table.insert(parts, `cursor {text(window.inventory.cursor)} sel {window.inventory.selected}`)
+		return table.concat(parts, " ")
+	end
+
+	-- The server's snapshot of `key` as the client gets it.
+	local function sent(state, key)
+		return Protocol.decodeInventory(Protocol.encodeInventory(state:snapshot(key)))
+	end
+
+	-- Predicts and sends `actions` one by one; after each, the prediction must equal the server.
+	local function play(p, state, key, actions)
+		local server = state:window(key)
+		for i, action in actions do
+			local seq = p:push(action, false)
+			state:apply(key, seq, action, false)
+			t.eq(dump(p:window()), dump(server), `action {i} ({action.kind}) predicted`)
+		end
+		p:receive(sent(state, key), false)
+		t.eq(#p.pending, 0, "everything acknowledged")
+		t.eq(dump(p:window()), dump(server), "the last snapshot agrees")
+	end
+
+	t.test("prediction: before any snapshot, window 0 with its 2 x 2 grid", function()
+		local w = Prediction.new():window()
+		t.eq(w.id, 0)
+		t.eq(w.container.kind, "inventory")
+		t.eq(Menu.size(w), 45)
+	end)
+
+	t.test("prediction: matches the server after crafting in the 2 x 2 grid and closing", function()
+		local state = InventoryState.new()
+		state:join("a")
+		local server = state:window("a")
+		server.inventory.slots[1] = S(LOG, 3)
+		server.inventory.slots[2] = { item = PICKAXE, count = 1, damage = 12 }
+		local p = Prediction.new()
+		p:receive(sent(state, "a"), false)
+		t.eq(dump(p:window()), dump(server), "the first snapshot")
+		local w = p:window()
+		local function at(store, i)
+			return Menu.windowIndex(w, store, i)
+		end
+		play(p, state, "a", {
+			-- The logs into the grid; a right click takes the planks; they go into slot 20.
+			{ kind = "click", window = 0, slot = at("inventory", 1), clickType = Click.Pickup, button = 0 },
+			{ kind = "click", window = 0, slot = at("container", 3), clickType = Click.Pickup, button = 0 },
+			{ kind = "click", window = 0, slot = at("container", 1), clickType = Click.Pickup, button = 1 },
+			{ kind = "click", window = 0, slot = at("inventory", 20), clickType = Click.Pickup, button = 0 },
+			-- A shift click crafts the other two logs.
+			{ kind = "click", window = 0, slot = at("container", 1), clickType = Click.QuickMove, button = 0 },
+			-- The worn pickaxe into the grid with a number key, then the screen closes.
+			{ kind = "click", window = 0, slot = at("container", 2), clickType = Click.Swap, button = 1 },
+			{ kind = "close", window = 0 },
+		})
+		local final = p:window()
+		t.eq(final.id, 0)
+		is(final.inventory.slots[20], PLANKS, 12, "three logs crafted")
+		is(final.inventory.slots[1], PICKAXE, 1, "the pickaxe back from the grid")
+		t.eq(final.inventory.slots[1].damage, 12, "still worn")
+		t.eq(final.container.kind, "inventory")
+		t.eq(next(final.container.slots), nil, "the grid is empty")
+	end)
+
+	t.test("prediction: matches the server at a crafting table, through closing", function()
+		local state = InventoryState.new()
+		state:join("a")
+		local server = state:window("a")
+		server.inventory.slots[1] = S(PLANKS, 3)
+		server.inventory.slots[2] = S(STICK, 2)
+		server.inventory.slots[3] = S(DIRT, 5)
+		state:open("a", 1, 2, 3, Blocks.id.CraftingTable)
+		local p = Prediction.new()
+		p:receive(sent(state, "a"), false)
+		local w = p:window()
+		t.eq(w.container.kind, "crafting")
+		t.eq(dump(w), dump(server), "the table's snapshot")
+		local id = w.id
+		local function at(store, i)
+			return Menu.windowIndex(w, store, i)
+		end
+		play(p, state, "a", {
+			-- One plank each across the top row, one stick each down the middle: a wooden pickaxe.
+			{ kind = "click", window = id, slot = at("inventory", 1), clickType = Click.Pickup, button = 0 },
+			{
+				kind = "drag",
+				window = id,
+				mode = 1,
+				slots = { at("container", 2), at("container", 3), at("container", 4) },
+			},
+			{ kind = "click", window = id, slot = at("inventory", 2), clickType = Click.Pickup, button = 0 },
+			{ kind = "drag", window = id, mode = 1, slots = { at("container", 6), at("container", 9) } },
+			{ kind = "click", window = id, slot = at("container", 1), clickType = Click.QuickMove, button = 0 },
+			-- Dirt shift clicked into the grid, then the table closes with it there.
+			{ kind = "click", window = id, slot = at("inventory", 3), clickType = Click.QuickMove, button = 0 },
+			{ kind = "close", window = id },
+		})
+		local final = p:window()
+		t.eq(final.id, 0, "back to window 0")
+		t.eq(final.container.kind, "inventory", "with a fresh 2 x 2 grid")
+		is(final.inventory.slots[9], PICKAXE, 1, "the pickaxe")
+		is(final.inventory.slots[1], DIRT, 5, "the dirt back from the grid")
+		t.eq(state:openPosition("a"), nil)
 	end)
 
 	--[[ Slot clicks ]]
@@ -185,14 +318,15 @@ return function(t, shared, require, _server, client)
 		return host, log
 	end
 
+	-- Window 0 (with its 2 x 2 grid), or window 3 with a chest of `size` slots.
 	local function newWindow(slots, size: number?)
-		local window = { id = 0, inventory = Types.newInventory(), container = nil }
+		local window = Types.newWindow(Types.newInventory())
 		for slot, stack in slots do
 			window.inventory.slots[slot] = stack
 		end
 		if size then
 			window.id = 3
-			window.container = { block = Items.id.Chest, size = size, slots = {} }
+			window.container = { kind = "chest", block = Blocks.id.Chest, size = size, slots = {} }
 		end
 		return window
 	end
@@ -278,8 +412,9 @@ return function(t, shared, require, _server, client)
 		local w = newWindow({})
 		w.inventory.cursor = S(DIRT, 10)
 		local clicks = SlotClicks.new((newHost(w)))
-		clicks:press(slot(0), LEFT, false, 0)
-		clicks:move(slot(0)) -- head slot
+		local head = Menu.windowIndex(w, "armor", 1)
+		clicks:press(slot(head), LEFT, false, 0)
+		clicks:move(slot(head))
 		clicks:move(slot(inv(w, 10)))
 		local _, dragged = clicks:dragging()
 		t.eq(#dragged, 1, "armor slot refused")
@@ -459,7 +594,9 @@ return function(t, shared, require, _server, client)
 				n += if stack then stack.count else 0
 			end
 			if w.container then
-				for i = 1, w.container.size do
+				-- (Not a crafting result: only a preview of its grid.)
+				local first = if Types.craftWidth(w.container) > 0 then Types.CRAFT_RESULT + 1 else 1
+				for i = first, w.container.size do
 					local stack = w.container.slots[i]
 					n += if stack then stack.count else 0
 				end
@@ -467,7 +604,8 @@ return function(t, shared, require, _server, client)
 			local cursor = w.inventory.cursor
 			return n + (if cursor then cursor.count else 0)
 		end
-		local items = { DIRT, STONE, PLANKS, HELMET }
+		-- (Nothing these make in the 2 x 2 grid: crafting would change the counts.)
+		local items = { DIRT, COBBLE, GLASS, HELMET }
 		for round = 1, 30 do
 			local w = newWindow({}, if round % 2 == 0 then 27 else nil)
 			for i = 1, 36 do

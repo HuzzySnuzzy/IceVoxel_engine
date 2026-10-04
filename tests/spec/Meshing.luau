@@ -1,4 +1,4 @@
-return function(t, shared, require)
+return function(t, shared, require, _server, client)
 	local Config = require(shared.Config)
 	local Blocks = require(shared.Blocks)
 	local ChunkLayout = require(shared.World.ChunkLayout)
@@ -63,6 +63,9 @@ return function(t, shared, require)
 			local app = buffer.readu16(boxes, o + 12) -- appearance + fluid surface height (see GreedyMesher)
 			local opaqueBox = Blocks.appearances[app % GreedyMesher.KEY_STRIDE].kind == OPAQUE
 			assert(bx + sx <= SIZE and bz + sz <= SIZE and by >= y0 and by + sy <= y1, "box outside the section")
+			if buffer.readu8(Blocks.singleLut, app % GreedyMesher.KEY_STRIDE) == 1 then
+				assert(sx == 1 and sy == 1 and sz == 1, `decorated block box ({bx},{by},{bz}) is {sx}x{sy}x{sz}`)
+			end
 			for y = by, by + sy - 1 do
 				for z = bz, bz + sz - 1 do
 					for x = bx, bx + sx - 1 do
@@ -146,6 +149,250 @@ return function(t, shared, require)
 		t.eq(heights[700], 1, "level 7 is 1/9")
 		t.eq(heights[1010], 0, "falling water is full height")
 		verify(data, 8, 0, 8, false)
+	end)
+
+	-- Boxes of `data` (one section 0..height) as { x, y, z, sx, sy, sz, appearance } lists.
+	local function boxList(data: buffer, height: number): { { number } }
+		local boxes, count = GreedyMesher.mesh(data, height, 0, height, false)
+		local list = {}
+		for b = 0, count - 1 do
+			local o = b * GreedyMesher.BOX_BYTES
+			local row = {}
+			for k = 0, 6 do
+				row[k + 1] = buffer.readu16(boxes, o + k * 2)
+			end
+			table.insert(list, row)
+		end
+		return list
+	end
+
+	local function stoneFloor(height: number): buffer
+		local data = ChunkLayout.create(height)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				ChunkLayout.setPadded(data, x, 0, z, Blocks.id.Stone)
+			end
+		end
+		return data
+	end
+
+	t.test("decorated blocks: every chest is its own box, a row of stone stays one box", function()
+		local chest = Blocks.get(Blocks.id.Chest).appearance
+		local stone = Blocks.get(Blocks.id.Stone).appearance
+		t.eq(buffer.readu8(Blocks.singleLut, chest), 1, "chests are meshed one box per block")
+		t.eq(buffer.readu8(Blocks.singleLut, stone), 0, "stone merges")
+		for _, name in { "CraftingTable", "Furnace" } do
+			t.eq(buffer.readu8(Blocks.singleLut, Blocks.get(Blocks.id[name]).appearance), 1, name)
+		end
+
+		local data = stoneFloor(4)
+		ChunkLayout.set(data, 3, 1, 3, Blocks.id.Chest)
+		ChunkLayout.set(data, 4, 1, 3, Blocks.id.Chest)
+		for x = 0, 5 do
+			ChunkLayout.set(data, x, 1, 8, Blocks.id.Stone)
+		end
+		verify(data, 4, 0, 4, false)
+		local chests, row = 0, 0
+		for _, b in boxList(data, 4) do
+			if b[7] == chest then
+				chests += 1
+				t.eq(b[4] * b[5] * b[6], 1, "a chest box is one block")
+				t.eq(b[2], 1, "chest box height")
+			elseif b[7] == stone and b[2] == 1 then
+				row += 1
+				t.eq(b[4], 6, "the stone row is one box along x")
+			end
+		end
+		t.eq(chests, 2, "two adjacent chests give two boxes")
+		t.eq(row, 1, "a row of stone stays one box")
+	end)
+
+	t.test("decorated blocks: stacks and walls never merge, hidden ones may be swallowed", function()
+		local table_ = Blocks.get(Blocks.id.CraftingTable).appearance
+		local furnace = Blocks.get(Blocks.id.Furnace).appearance
+		local data = stoneFloor(6)
+		-- A 2 x 2 x 2 cube of crafting tables and a wall of furnaces.
+		for y = 1, 2 do
+			for z = 2, 3 do
+				for x = 2, 3 do
+					ChunkLayout.set(data, x, y, z, Blocks.id.CraftingTable)
+				end
+			end
+			for x = 6, 10 do
+				ChunkLayout.set(data, x, y, 6, Blocks.id.Furnace)
+			end
+		end
+		verify(data, 6, 0, 6, false)
+		local tables, furnaces = 0, 0
+		for _, b in boxList(data, 6) do
+			if b[7] == table_ then
+				tables += 1
+			elseif b[7] == furnace then
+				furnaces += 1
+			end
+		end
+		t.eq(tables, 8, "one box per crafting table")
+		t.eq(furnaces, 10, "one box per furnace")
+
+		-- A chest buried in stone is never seen: the stone around it may cover it in one box.
+		local buried = ChunkLayout.create(6)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				for y = 0, 4 do
+					ChunkLayout.setPadded(buried, x, y, z, Blocks.id.Stone)
+				end
+			end
+		end
+		ChunkLayout.set(buried, 7, 2, 7, Blocks.id.Chest)
+		t.eq(verify(buried, 6, 0, 6, false), 1, "the buried chest is swallowed by the stone box")
+	end)
+
+	t.test("decorated faces: every decor draws all six faces inside the 16 x 16 grid", function()
+		local BlockDecor = require(client.Rendering.BlockDecor)
+		local grid = BlockDecor.GRID
+		local decors: { [string]: boolean } = {}
+		for _, appearance in Blocks.appearances do
+			if appearance.decor then
+				decors[appearance.decor] = true
+			end
+		end
+		t.ok(decors.Chest and decors.CraftingTable and decors.Furnace, "the three decorated blocks")
+		for decor in decors do
+			local faces = BlockDecor.faces(decor)
+			t.ok(faces ~= nil, `faces of {decor}`)
+			assert(faces)
+			for _, face in BlockDecor.FACES do
+				local rects = faces[face]
+				t.ok(rects ~= nil and #rects > 0, `{decor} has a {face} face`)
+				for i, r in rects do
+					t.ok(r.w > 0 and r.h > 0, `{decor} {face} rect {i} is empty`)
+					t.ok(
+						r.x >= 0 and r.y >= 0 and r.x + r.w <= grid and r.y + r.h <= grid,
+						`{decor} {face} rect {i} out of the face`
+					)
+					t.eq(#r.colour, 3, `{decor} {face} rect {i} colour`)
+					for _, c in r.colour do
+						t.ok(c >= 0 and c <= 255 and c == math.floor(c), `{decor} {face} rect {i} colour value {c}`)
+					end
+				end
+				-- Item model layers: drawn rects stack above every earlier one they overlap.
+				local layers = BlockDecor.layers(rects, true)
+				for i, r in rects do
+					t.eq(layers[i] == 0, r.surfaceOnly == true, `{decor} {face} rect {i} drawn on item models`)
+				end
+			end
+			-- Item models (icons, dropped and held items) stay cheap.
+			local parts = BlockDecor.partCount(decor)
+			t.ok(parts > 0 and parts < 40, `{decor} item model slabs: {parts}`)
+		end
+		t.eq(BlockDecor.faces("Nothing"), nil)
+	end)
+
+	t.test("decorated faces: the face axes are right handed, seen from outside", function()
+		local BlockDecor = require(client.Rendering.BlockDecor)
+		local seen: { [string]: boolean } = {}
+		for _, face in BlockDecor.FACES do
+			local n, r, u = BlockDecor.basis(face)
+			local cross = { r[2] * u[3] - r[3] * u[2], r[3] * u[1] - r[1] * u[3], r[1] * u[2] - r[2] * u[1] }
+			t.ok(cross[1] == n[1] and cross[2] == n[2] and cross[3] == n[3], `{face}: right x up = normal`)
+			seen[`{n[1]},{n[2]},{n[3]}`] = true
+			if face ~= "Top" and face ~= "Bottom" then
+				t.ok(u[2] == 1, `{face} is upright`)
+			end
+		end
+		for _, key in { "1,0,0", "-1,0,0", "0,1,0", "0,-1,0", "0,0,1", "0,0,-1" } do
+			t.ok(seen[key], `a face points {key}`)
+		end
+	end)
+
+	t.test("decorated faces: overlapping rects stack, separate ones stay on the block", function()
+		local BlockDecor = require(client.Rendering.BlockDecor)
+		local black = { 0, 0, 0 }
+		local rects = {
+			{ x = 0, y = 0, w = 16, h = 16, colour = black },
+			{ x = 1, y = 1, w = 4, h = 4, colour = black },
+			{ x = 8, y = 8, w = 4, h = 4, colour = black, surfaceOnly = true },
+			{ x = 2, y = 2, w = 1, h = 1, colour = black },
+			{ x = 10, y = 10, w = 1, h = 1, colour = black },
+		}
+		local items = BlockDecor.layers(rects :: any, true)
+		t.eq(table.concat(items, ","), "1,2,0,3,2", "item model layers")
+		local world = BlockDecor.layers(rects :: any, false)
+		t.eq(table.concat(world, ","), "1,2,2,3,3", "world layers")
+	end)
+
+	t.test("decorated faces: item model tops and bottoms look the same turned by a quarter", function()
+		-- (SurfaceGuis may turn those faces differently from BlockDecor.basis; see there.)
+		local BlockDecor = require(client.Rendering.BlockDecor)
+		local function picture(rects: { any }): { string }
+			local cells = table.create(256, "")
+			for _, r in rects do
+				if not r.surfaceOnly then
+					for y = r.y, r.y + r.h - 1 do
+						for x = r.x, r.x + r.w - 1 do
+							cells[y * 16 + x + 1] = table.concat(r.colour, ",")
+						end
+					end
+				end
+			end
+			return cells
+		end
+		for _, decor in { "Chest", "CraftingTable", "Furnace" } do
+			local faces = BlockDecor.faces(decor)
+			assert(faces)
+			for _, face in { "Top", "Bottom" } do
+				local cells = picture(faces[face])
+				for y = 0, 15 do
+					for x = 0, 15 do
+						local turned = cells[x * 16 + (15 - y) + 1]
+						t.eq(cells[y * 16 + x + 1], turned, `{decor} {face} at {x},{y}`)
+					end
+				end
+			end
+		end
+	end)
+
+	t.test("item models: boxes are well formed and fit their cube", function()
+		local Items = require(shared.Items)
+		local models = 0
+		for _, def in Items.list do
+			if def.block == nil then
+				local boxes = def.model
+				t.ok(boxes ~= nil and #boxes > 0, `{def.name} has a model`)
+				assert(boxes)
+				models += 1
+				local tilt = math.rad(def.tilt)
+				for i, box in boxes do
+					t.ok(#box.size == 3 and #box.offset == 3, `{def.name} box {i} vectors`)
+					for k = 1, 3 do
+						t.ok(box.size[k] > 0, `{def.name} box {i} size`)
+					end
+					t.ok(box.shape == nil or box.shape == "Ball" or box.shape == "Cylinder", `{def.name} box {i} shape`)
+					t.ok(box.color == nil or #box.color == 3, `{def.name} box {i} colour`)
+					-- Corners in the icon's plane, turned by the box's rotation and the item's tilt.
+					local r = math.rad(box.rotation or 0)
+					for _, sx in { -1, 1 } do
+						for _, sy in { -1, 1 } do
+							local hx, hy = box.size[1] / 2 * sx, box.size[2] / 2 * sy
+							local x = box.offset[1] + hx * math.cos(r) - hy * math.sin(r)
+							local y = box.offset[2] + hx * math.sin(r) + hy * math.cos(r)
+							local tx = x * math.cos(tilt) - y * math.sin(tilt)
+							local ty = x * math.sin(tilt) + y * math.cos(tilt)
+							-- The cube is 8 pixels each way: Minecraft's sprites fill it, 3D boxes a bit more.
+							t.ok(
+								math.abs(tx) <= 10 and math.abs(ty) <= 10,
+								`{def.name} box {i} sticks out ({tx}, {ty})`
+							)
+						end
+					end
+				end
+			end
+		end
+		t.ok(models >= 45, `models checked ({models})`)
+		-- Tools and sticks lie diagonally like Minecraft's icons (head at the top right).
+		for _, name in { "Stick", "WoodenPickaxe", "DiamondSword", "IronHoe" } do
+			t.eq(Items.get(Items.id[name]).tilt, -45, `{name} tilt`)
+		end
 	end)
 
 	t.test("glass and water are covered correctly", function()

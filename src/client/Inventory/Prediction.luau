@@ -14,9 +14,11 @@
 	without the local actions sent after it being lost.
 
 	Actions are applied the same way the server applies them: a `close` that names the open window
-	also resets it to the inventory alone (window 0, no container), as the server does after
-	Menu.close. Replays use the game mode the client has now; it only matters for creative-only
-	actions, and modes change rarely.
+	goes through Menu.close (the cursor and a crafting grid go back into the inventory), and a
+	block's window then becomes the inventory screen's window again (window 0 with a fresh 2 x 2
+	grid, Types.newWindow), as the server does; window 0 keeps its own. Crafting results come from
+	Menu, the same way on both sides. Replays use the game mode the client has now; it only
+	matters for creative-only actions, and modes change rarely.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -54,18 +56,19 @@ export type Prediction = {
 local Prediction = {}
 Prediction.__index = Prediction
 
--- Applies an action the way the server does (a close of the open window resets it).
+-- Applies an action the way the server does (a close of a block's window resets it).
 local function applyLocal(window: Window, action: Action, creative: boolean)
 	local closes = action.kind == "close" and action.window == window.id
 	Menu.apply(window, action, creative)
-	if closes then
+	local container = window.container
+	if closes and (window.id ~= 0 or container == nil or container.kind ~= "inventory") then
 		window.id = 0
-		window.container = nil
+		window.container = Types.newCrafting("inventory")
 	end
 end
 
 function Prediction.new(): Prediction
-	local base: Window = { id = 0, inventory = Types.newInventory(), container = nil }
+	local base: Window = Types.newWindow(Types.newInventory())
 	return (
 		setmetatable({
 			base = base,

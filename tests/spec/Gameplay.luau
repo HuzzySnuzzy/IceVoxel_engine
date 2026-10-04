@@ -1,7 +1,8 @@
 --[[
 	Server gameplay rules: container storage (Players/Containers), the authoritative inventories
-	(Players/InventoryState: acks, chests, pickups, deaths), the /gamemode command and its
-	permissions (Players/GameModeCommand) and the edit rules of each game mode (Network/EditRules).
+	(Players/InventoryState: acks, chests, crafting tables, the 2 x 2 grid, pickups, deaths, tool
+	wear), the /gamemode command and its permissions (Players/GameModeCommand) and the edit rules of
+	each game mode (Network/EditRules).
 ]]
 
 return function(t, shared, require, server)
@@ -16,12 +17,13 @@ return function(t, shared, require, server)
 	local GameModeCommand = require(server.Players.GameModeCommand)
 	local EditRules = require(server.Network.EditRules)
 
-	local CHEST = Blocks.id.Chest
+	local CHEST, TABLE, FURNACE = Blocks.id.Chest, Blocks.id.CraftingTable, Blocks.id.Furnace
 	local STONE, DIRT = Items.id.Stone, Items.id.Dirt
+	local LOG, PLANKS, PICKAXE = Items.id.OakLog, Items.id.Planks, Items.id.WoodenPickaxe
 	local QUICK_MOVE, PICKUP = Menu.ClickType.QuickMove, Menu.ClickType.Pickup
-	-- Window slot of hotbar slot 1 with an n slot container open.
-	local function hotbar(n: number, slot: number): number
-		return n + 31 + slot - 1
+	-- Window slot of hotbar slot `slot` in `window`.
+	local function hotbar(window, slot: number): number
+		return Menu.windowIndex(window, "inventory", slot)
 	end
 
 	local function count(inventory, item: number): number
@@ -49,6 +51,19 @@ return function(t, shared, require, server)
 		t.eq(store.count, 1)
 		t.ok(store:get(1, 2, 4, CHEST) ~= chest, "positions are separate")
 		t.ok(not pcall(store.get, store, 5, 5, 5, Blocks.id.Stone), "stone is not a container")
+	end)
+
+	t.test("containers: a furnace is a 3 slot container with fresh smelting data", function()
+		local store = Containers.new()
+		local furnace = store:get(0, 1, 0, FURNACE)
+		t.eq(furnace.kind, "furnace")
+		t.eq(furnace.size, 3)
+		t.eq(furnace.block, FURNACE)
+		t.ok(furnace.data ~= nil, "data")
+		t.eq(furnace.data[1], 0, "not burning")
+		t.eq(store:get(0, 2, 0, CHEST).kind, "chest")
+		t.eq(store:get(0, 2, 0, CHEST).data, nil)
+		t.ok(not pcall(store.get, store, 0, 3, 0, TABLE), "a crafting table has no stored container")
 	end)
 
 	t.test("containers: viewers; an empty chest nobody looks at is forgotten", function()
@@ -119,7 +134,8 @@ return function(t, shared, require, server)
 		local snapshot = state:snapshot("a")
 		t.eq(snapshot.ack, 0)
 		t.eq(snapshot.window, 0)
-		t.eq(snapshot.container, nil)
+		t.eq(snapshot.container.kind, "inventory", "window 0's 2 x 2 grid")
+		t.eq(snapshot.container.size, 5)
 		t.eq(snapshot.inventory.selected, 1)
 		t.eq(state:snapshot("nobody"), nil)
 		t.eq(state:window("nobody"), nil)
@@ -135,7 +151,12 @@ return function(t, shared, require, server)
 		-- Out of range slot, wrong window, creative action in survival: nothing changes.
 		state:window("a").inventory.slots[1] = { item = STONE, count = 5 }
 		state:apply("a", 2, { kind = "click", window = 0, slot = 999, clickType = PICKUP, button = 0 }, false)
-		state:apply("a", 3, { kind = "click", window = 9, slot = hotbar(0, 1), clickType = PICKUP, button = 0 }, false)
+		state:apply(
+			"a",
+			3,
+			{ kind = "click", window = 9, slot = hotbar(state:window("a"), 1), clickType = PICKUP, button = 0 },
+			false
+		)
 		state:apply("a", 4, { kind = "creative", window = 0, slot = Types.CURSOR, item = DIRT, count = 64 }, false)
 		t.eq(state:snapshot("a").ack, 4)
 		t.eq(state:window("a").inventory.cursor, nil)
@@ -257,7 +278,7 @@ return function(t, shared, require, server)
 		state:apply(
 			"a",
 			1,
-			{ kind = "click", window = a.id, slot = hotbar(27, 1), clickType = QUICK_MOVE, button = 0 },
+			{ kind = "click", window = a.id, slot = hotbar(a, 1), clickType = QUICK_MOVE, button = 0 },
 			false
 		)
 		t.eq(b.container.slots[1].item, STONE, "b's window shows a's shift click")
@@ -290,7 +311,7 @@ return function(t, shared, require, server)
 		local thrown = state:apply("a", 2, { kind = "close", window = id }, false)
 		t.eq(#thrown, 0)
 		t.eq(window.id, 0)
-		t.eq(window.container, nil)
+		t.eq(window.container.kind, "inventory", "window 0 with a fresh 2 x 2 grid")
 		t.eq(window.inventory.cursor, nil)
 		t.eq(count(window.inventory, STONE), 2)
 		t.eq(state:openPosition("a"), nil)
@@ -328,7 +349,7 @@ return function(t, shared, require, server)
 		t.eq(leftovers[1].stacks[1].count, 5)
 		t.eq(a.id, 0)
 		t.eq(b.id, 0)
-		t.eq(a.container, nil)
+		t.eq(a.container.kind, "inventory")
 		t.eq(state.containers.count, 0)
 		t.eq(#state:takeDirty(), 2)
 
@@ -416,6 +437,169 @@ return function(t, shared, require, server)
 		t.eq(decoded.container.block, CHEST)
 		t.eq(decoded.container.size, 27)
 		t.eq(decoded.container.slots[27].count, 64)
+	end)
+
+	t.test("inventories: the 2 x 2 grid crafts, its result travels in snapshots, closing empties it", function()
+		local state = newState()
+		local window = state:window("a")
+		window.inventory.slots[1] = { item = LOG, count = 2 }
+		local log = Menu.windowIndex(window, "inventory", 1)
+		local cell = Menu.windowIndex(window, "container", 2)
+		state:apply("a", 1, { kind = "click", window = 0, slot = log, clickType = PICKUP, button = 0 }, false)
+		state:apply("a", 2, { kind = "click", window = 0, slot = cell, clickType = PICKUP, button = 0 }, false)
+		t.eq(window.container.slots[1].item, PLANKS, "the result is derived")
+		local decoded = Protocol.decodeInventory(Protocol.encodeInventory(state:snapshot("a")))
+		t.eq(decoded.container.kind, "inventory")
+		t.eq(decoded.container.slots[1].item, PLANKS, "the snapshot carries the result")
+		t.eq(decoded.container.slots[1].count, 4)
+		t.eq(decoded.container.slots[2].item, LOG)
+
+		-- Closing window 0 (the inventory screen shutting) puts the grid back and keeps id 0.
+		local thrown = state:apply("a", 3, { kind = "close", window = 0 }, false)
+		t.eq(#thrown, 0)
+		t.eq(window.id, 0)
+		t.eq(window.container.kind, "inventory")
+		t.eq(window.container.slots[1], nil, "no result")
+		t.eq(window.container.slots[2], nil, "the grid is empty")
+		t.eq(count(window.inventory, LOG), 2, "the logs are back")
+	end)
+
+	t.test("inventories: opening a crafting table gives a personal 3 x 3 grid", function()
+		local state = newState()
+		state:window("a").inventory.slots[1] = { item = DIRT, count = 1 }
+		local thrown = state:open("a", 5, 6, 7, TABLE)
+		t.eq(#thrown, 0)
+		state:open("b", 5, 6, 7, TABLE)
+		local a, b = state:window("a"), state:window("b")
+		t.eq(a.id, 1)
+		t.eq(a.container.kind, "crafting")
+		t.eq(a.container.size, 10)
+		t.eq(a.container.block, TABLE)
+		t.ok(a.container ~= b.container, "each player has their own grid")
+		t.eq(state.containers:peek(5, 6, 7), nil, "nothing stored for the table")
+		t.eq(#state.containers:viewers(5, 6, 7), 0, "and no viewers")
+		local x, y, z = state:openPosition("a")
+		t.eq(x, 5)
+		t.eq(y, 6)
+		t.eq(z, 7)
+		local snapshot = state:snapshot("a")
+		t.eq(snapshot.window, 1)
+		t.eq(snapshot.container.kind, "crafting")
+
+		-- a's clicks don't touch b.
+		state:takeDirty()
+		local dirt = Menu.windowIndex(a, "inventory", 1)
+		state:apply("a", 1, { kind = "click", window = a.id, slot = dirt, clickType = QUICK_MOVE, button = 0 }, false)
+		t.eq(a.container.slots[2].item, DIRT, "shift click into a's grid")
+		t.eq(b.container.slots[2], nil, "not b's")
+		local dirty = state:takeDirty()
+		t.eq(#dirty, 1, "only a hears about it")
+
+		-- Closing returns the grid to the inventory and makes window 0 again.
+		thrown = state:close("a")
+		t.eq(#thrown, 0)
+		t.eq(a.id, 0)
+		t.eq(a.container.kind, "inventory")
+		t.eq(count(a.inventory, DIRT), 1, "the dirt is back")
+		t.eq(state:openPosition("a"), nil)
+
+		-- A block with no window opens nothing (and closes nothing).
+		state:open("a", 0, 0, 0, CHEST)
+		t.eq(#state:open("a", 9, 9, 9, Blocks.id.Stone), 0)
+		t.eq(a.container.kind, "chest", "still the chest")
+	end)
+
+	t.test("inventories: a crafting table that goes closes its users' grids, items back", function()
+		local state = newState()
+		state:open("a", 1, 1, 1, TABLE)
+		state:open("b", 2, 2, 2, TABLE)
+		local a, b = state:window("a"), state:window("b")
+		a.container.slots[2] = { item = LOG, count = 3 }
+		a.container.slots[6] = { item = DIRT, count = 10 }
+		a.inventory.cursor = { item = STONE, count = 2 }
+		Menu.updateCraft(a)
+		-- Only room for the cursor and the logs.
+		for slot = 3, Types.INVENTORY_SIZE do
+			a.inventory.slots[slot] = { item = STONE, count = 64 }
+		end
+		state:takeDirty()
+
+		local contents, leftovers = state:removeContainer(1, 1, 1)
+		t.eq(#contents, 0, "a table holds nothing itself")
+		t.eq(#leftovers, 1)
+		t.eq(leftovers[1].key, "a")
+		t.eq(#leftovers[1].stacks, 1)
+		t.eq(leftovers[1].stacks[1].item, DIRT, "what did not fit")
+		t.eq(leftovers[1].stacks[1].count, 10)
+		t.eq(a.id, 0)
+		t.eq(a.container.kind, "inventory")
+		t.eq(count(a.inventory, LOG), 3, "the logs came back")
+		t.eq(count(a.inventory, STONE), 34 * 64 + 2, "the cursor came back")
+		t.eq(b.container.kind, "crafting", "b's table elsewhere stays open")
+		t.eq(#state:takeDirty(), 1)
+	end)
+
+	t.test("inventories: dying at a crafting table puts the grid back first, then drops it all", function()
+		local state = newState()
+		state:open("a", 1, 1, 1, TABLE)
+		local window = state:window("a")
+		window.container.slots[2] = { item = LOG, count = 3 }
+		window.inventory.slots[1] = { item = DIRT, count = 5 }
+		local dropped = state:die("a", false)
+		local total = 0
+		for _, stack in dropped do
+			total += stack.count
+		end
+		t.eq(total, 8, "the grid's logs and the dirt")
+		t.eq(window.id, 0)
+		t.eq(next(window.container.slots), nil)
+
+		local kept = newState()
+		kept:open("a", 1, 1, 1, TABLE)
+		kept:window("a").container.slots[2] = { item = LOG, count = 3 }
+		t.eq(#kept:die("a", true), 0, "keepInventory")
+		t.eq(count(kept:window("a").inventory, LOG), 3, "the logs are kept in the inventory")
+	end)
+
+	t.test("inventories: the held stack, and tools wearing until they break", function()
+		local state = newState()
+		local inventory = state:window("a").inventory
+		t.eq(state:heldStack("a"), nil, "empty hand")
+		t.eq(state:heldStack("nobody"), nil)
+		inventory.slots[1] = { item = PICKAXE, count = 1 }
+		t.eq(state:heldStack("a").item, PICKAXE)
+		state:takeDirty()
+
+		local durability = Items.get(PICKAXE).durability
+		t.eq(durability, 59)
+		t.ok(not state:wearHeld("a", 1), "one use")
+		t.eq(inventory.slots[1].damage, 1)
+		t.eq(#state:takeDirty(), 1, "a snapshot is due")
+		local before = inventory.slots[1]
+		t.ok(not state:wearHeld("a", 2), "a sword's two")
+		t.eq(inventory.slots[1].damage, 3)
+		t.eq(before.damage, 1, "a new stack table, the old one unchanged")
+		t.ok(not state:wearHeld("a", 0), "nothing")
+		t.ok(not state:wearHeld("a", -3), "nothing")
+		t.ok(not state:wearHeld("a", 0 / 0), "nothing")
+		t.eq(inventory.slots[1].damage, 3)
+		inventory.slots[1] = { item = PICKAXE, count = 1, damage = durability - 2 }
+		t.ok(not state:wearHeld("a", 1), "one use left")
+		t.eq(inventory.slots[1].damage, durability - 1)
+		t.ok(state:wearHeld("a", 1), "broken")
+		t.eq(inventory.slots[1], nil, "gone")
+
+		-- Only the selected slot, and only what wears.
+		inventory.slots[2] = { item = PICKAXE, count = 1, damage = 4 }
+		inventory.slots[1] = { item = DIRT, count = 5 }
+		state:takeDirty()
+		t.ok(not state:wearHeld("a", 1), "dirt does not wear")
+		t.eq(inventory.slots[1].damage, nil)
+		t.eq(#state:takeDirty(), 0, "nothing changed")
+		inventory.selected = 2
+		t.ok(state:wearHeld("a", 100), "a big hit breaks it")
+		t.eq(inventory.slots[2], nil)
+		t.ok(not state:wearHeld("nobody", 1))
 	end)
 
 	--[[ /gamemode ]]
@@ -553,32 +737,60 @@ return function(t, shared, require, server)
 
 	--[[ Edits by game mode ]]
 
-	t.test("edits: survival breaks need a Mine start on that block, long enough ago", function()
-		local stone = Blocks.id.Stone
+	t.test("edits: survival breaks need a Mine start on that block, long enough ago, with the tool", function()
+		local stone, ironOre, dirt = Blocks.id.Stone, Blocks.id.IronOre, Blocks.id.Dirt
 		local mine = { x = 1, y = 2, z = 3, startedAt = 100 }
-		-- Stone (hardness 1.5) takes 45 ticks; the server accepts 70% of that: 31 ticks, 1.55 s.
-		t.ok(not EditRules.mayBreak(stone, false, nil, 1, 2, 3, 200), "never started")
-		t.ok(not EditRules.mayBreak(stone, false, mine, 1, 2, 3, 100), "just started")
-		t.ok(not EditRules.mayBreak(stone, false, mine, 1, 2, 3, 101.5))
-		t.ok(EditRules.mayBreak(stone, false, mine, 1, 2, 3, 101.55))
-		t.ok(not EditRules.mayBreak(stone, false, mine, 1, 2, 4, 200), "another block")
-		t.ok(not EditRules.mayBreak(Blocks.id.Bedrock, false, mine, 1, 2, 3, 1e9), "bedrock never")
+		-- May a survival player who started mining (1, 2, 3) at 100 break `block` there at `now`?
+		local function breaks(block: number, now: number, tool: number?): boolean
+			return EditRules.mayBreak(block, false, mine, 1, 2, 3, now, tool)
+		end
+		local id = Items.id
+		t.ok(not EditRules.mayBreak(stone, false, nil, 1, 2, 3, 200, id.WoodenPickaxe), "never started")
+		t.ok(not EditRules.mayBreak(stone, false, mine, 1, 2, 4, 200, id.WoodenPickaxe), "another block")
+		t.ok(not breaks(stone, 100, id.WoodenPickaxe), "just started")
+		-- A wooden pickaxe (speed 2) on stone (hardness 1.5, harvested: / 30) takes 22.5 ticks; the
+		-- server accepts 70% of that: 15 ticks, 0.75 s.
+		t.ok(not breaks(stone, 100.7, id.WoodenPickaxe))
+		t.ok(breaks(stone, 100.75, id.WoodenPickaxe))
+		-- By hand stone is not harvested (/ 100): 150 ticks, accepted after 104 (5.2 s).
+		t.ok(not breaks(stone, 101.55), "the old bare-handed time is too soon")
+		t.ok(not breaks(stone, 105.15))
+		t.ok(breaks(stone, 105.25))
+		-- The wrong kind of tool is no better than a hand; better tiers are faster.
+		t.ok(not breaks(stone, 105.15, id.DiamondAxe), "an axe")
+		t.ok(not breaks(stone, 100.1, id.DiamondPickaxe))
+		t.ok(breaks(stone, 100.15, id.DiamondPickaxe), "diamond: 3 ticks")
+		t.ok(not breaks(stone, 100.05, id.GoldenPickaxe))
+		t.ok(breaks(stone, 100.1, id.GoldenPickaxe), "gold: 2 ticks")
+		-- Iron ore with a wooden pickaxe: mined at the tool's speed but not harvested (/ 100).
+		t.ok(not breaks(ironOre, 103, id.WoodenPickaxe))
+		t.ok(breaks(ironOre, 105.25, id.WoodenPickaxe), "105 ticks")
+		-- A stone pickaxe (speed 4, harvested) on iron ore (hardness 3): 22.5 ticks, 15 accepted.
+		t.ok(not breaks(ironOre, 100.7, id.StonePickaxe))
+		t.ok(breaks(ironOre, 100.75, id.StonePickaxe))
+
+		t.ok(not breaks(Blocks.id.Bedrock, 1e9), "bedrock never")
 		t.ok(not EditRules.mayBreak(Blocks.id.Bedrock, true, nil, 1, 2, 3, 0), "not even in creative")
 		t.ok(EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0), "creative: at once")
+		t.ok(EditRules.mayBreak(stone, true, nil, 1, 2, 3, 0, id.Stick), "whatever is in hand")
 		t.ok(not EditRules.mayBreak(9999, true, nil, 1, 2, 3, 0), "unknown block")
-		-- Dirt (0.5) takes 15 ticks: 10 + 1 >= 10.5 after 10 ticks.
-		t.ok(not EditRules.mayBreak(Blocks.id.Dirt, false, mine, 1, 2, 3, 100.45))
-		t.ok(EditRules.mayBreak(Blocks.id.Dirt, false, mine, 1, 2, 3, 100.5))
+		-- Dirt (0.5, no tool needed) by hand takes 15 ticks: 10 + 1 >= 10.5 after 10 ticks; a
+		-- wooden shovel halves it (5 ticks).
+		t.ok(not breaks(dirt, 100.45))
+		t.ok(breaks(dirt, 100.5))
+		t.ok(not breaks(dirt, 100.2, id.WoodenShovel))
+		t.ok(breaks(dirt, 100.25, id.WoodenShovel))
+		t.ok(not breaks(dirt, 100.45, id.Dirt), "a block in hand is a hand")
 		-- Blocks without hardness break as soon as mining starts.
-		for id = 0, Blocks.count - 1 do
-			local def = Blocks.get(id)
+		for block = 0, Blocks.count - 1 do
+			local def = Blocks.get(block)
 			if def.breakable and def.hardness == 0 then
-				t.ok(EditRules.mayBreak(id, false, mine, 1, 2, 3, 100), def.name)
+				t.ok(breaks(block, 100), def.name)
 			end
 		end
 	end)
 
-	t.test("edits: placing, drops and containers", function()
+	t.test("edits: placing, drops by tool, and blocks with windows", function()
 		local AIR = Blocks.AIR
 		local water = Blocks.fluidId("Water", 0)
 		t.ok(EditRules.mayPlace(Blocks.id.Stone, AIR))
@@ -589,12 +801,75 @@ return function(t, shared, require, server)
 		t.ok(not EditRules.mayPlace(Blocks.id.Bedrock, AIR), "bedrock is not placeable")
 		t.ok(not EditRules.mayPlace(9999, AIR))
 
-		t.eq(EditRules.drops(Blocks.id.Stone, false).item, Items.id.Cobblestone)
-		t.eq(EditRules.drops(Blocks.id.Stone, true), nil, "creative: no drops")
-		t.eq(EditRules.drops(Blocks.id.Glass, false), nil)
-		t.eq(EditRules.drops(CHEST, false).item, Items.id.Chest)
+		local function drop(block: number, tool: number?): (number?, number?)
+			local stack = EditRules.drops(block, false, tool)
+			return if stack then stack.item else nil, if stack then stack.count else nil
+		end
+		t.eq(drop(Blocks.id.Stone), nil, "stone by hand drops nothing")
+		t.eq(drop(Blocks.id.Stone, Items.id.WoodenPickaxe), Items.id.Cobblestone)
+		t.eq(drop(Blocks.id.Stone, Items.id.WoodenShovel), nil, "the wrong tool")
+		t.eq(drop(Blocks.id.Stone, Items.id.Cobblestone), nil, "a block in hand")
+		t.eq(drop(Blocks.id.IronOre, Items.id.WoodenPickaxe), nil, "iron needs a stone pickaxe")
+		t.eq(drop(Blocks.id.IronOre, Items.id.GoldenPickaxe), nil, "gold is wood's tier")
+		t.eq(drop(Blocks.id.IronOre, Items.id.StonePickaxe), Items.id.RawIron)
+		t.eq(drop(Blocks.id.DiamondOre, Items.id.StonePickaxe), nil)
+		t.eq(drop(Blocks.id.DiamondOre, Items.id.IronPickaxe), Items.id.Diamond)
+		t.eq(drop(Blocks.id.CoalOre, Items.id.WoodenPickaxe), Items.id.Coal)
+		t.eq(drop(Blocks.id.Dirt), Items.id.Dirt, "dirt needs no tool")
+		t.eq(drop(Blocks.id.OakLog, Items.id.DiamondSword), Items.id.OakLog, "nor do logs")
+		t.eq(drop(Blocks.id.Glass, Items.id.DiamondPickaxe), nil, "glass drops nothing")
+		t.eq(drop(Blocks.id.Furnace), nil, "a furnace needs a pickaxe")
+		t.eq(drop(Blocks.id.Furnace, Items.id.WoodenPickaxe), Items.id.Furnace)
+		t.eq(drop(CHEST), Items.id.Chest, "chests and tables come off by hand")
+		t.eq(drop(TABLE), Items.id.CraftingTable)
+		t.eq(EditRules.drops(Blocks.id.Stone, true, Items.id.DiamondPickaxe), nil, "creative: no drops")
+
+		-- Windows close when their block goes; only containers hold items to drop.
+		t.ok(EditRules.hasMenu(CHEST))
+		t.ok(EditRules.hasMenu(FURNACE))
+		t.ok(EditRules.hasMenu(TABLE), "a crafting table has a window")
+		t.ok(not EditRules.hasMenu(Blocks.id.Stone))
+		t.ok(not EditRules.hasMenu(9999))
 		t.ok(EditRules.isContainer(CHEST))
+		t.ok(EditRules.isContainer(FURNACE))
+		t.ok(not EditRules.isContainer(TABLE), "but holds nothing")
 		t.ok(not EditRules.isContainer(Blocks.id.Stone))
 		t.ok(not EditRules.isContainer(9999))
+	end)
+
+	t.test("edits: survival breaks wear the tool in hand, creative ones never", function()
+		local stone = Blocks.id.Stone
+		t.eq(EditRules.wear(stone, false, Items.id.WoodenPickaxe), 1)
+		t.eq(EditRules.wear(Blocks.id.Dirt, false, PICKAXE), 1, "the wrong tool wears too")
+		t.eq(EditRules.wear(stone, false, Items.id.IronSword), 2, "swords take two")
+		t.eq(EditRules.wear(Blocks.id.OakLeaves, false, Items.id.WoodenHoe), 1)
+		t.eq(EditRules.wear(stone, false, nil), 0, "a hand")
+		t.eq(EditRules.wear(stone, false, Items.id.Dirt), 0, "a block")
+		t.eq(EditRules.wear(stone, true, Items.id.WoodenPickaxe), 0, "creative")
+		t.eq(EditRules.wear(9999, false, Items.id.WoodenPickaxe), 0, "unknown block")
+		for id = 0, Blocks.count - 1 do
+			local def = Blocks.get(id)
+			if def.breakable and def.hardness == 0 then
+				t.eq(EditRules.wear(id, false, Items.id.DiamondPickaxe), 0, `{def.name} breaks at once`)
+			end
+		end
+
+		-- With the inventory: a wooden pickaxe lasts 59 stone blocks.
+		local state = InventoryState.new()
+		state:join("a")
+		local inventory = state:window("a").inventory
+		inventory.slots[1] = { item = PICKAXE, count = 1 }
+		local broken, uses = false, 0
+		while not broken and uses < 100 do
+			local held = state:heldStack("a")
+			local wear = EditRules.wear(stone, false, held and held.item)
+			local drop = EditRules.drops(stone, false, held and held.item)
+			t.eq(drop and drop.item, Items.id.Cobblestone, "harvested")
+			broken = state:wearHeld("a", wear)
+			uses += 1
+		end
+		t.eq(uses, 59)
+		t.eq(state:heldStack("a"), nil, "broken: an empty hand")
+		t.eq(EditRules.drops(stone, false, nil), nil, "and stone drops nothing now")
 	end)
 end

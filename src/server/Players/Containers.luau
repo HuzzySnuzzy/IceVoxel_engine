@@ -1,16 +1,25 @@
 --!strict
 --[[
-	The contents of container blocks (chests), by block position, for the session.
+	The contents of container blocks (chests and furnaces), by block position, for the session.
+	(Crafting tables hold nothing: their grids belong to the players using them, InventoryState.)
 
 	A container is created empty the first time someone opens it (with the block's `container`
-	slot count, Blocks) and is shared by everyone who has it open: every viewer's window holds the
-	same Types.Container table, so a click by one viewer changes what the others see
+	slot count, Blocks; kind "furnace" with fresh smelting data for menu "Furnace" blocks, else
+	"chest") and is shared by everyone who has it open: every viewer's window holds the same
+	Types.Container table, so a click by one viewer changes what the others see
 	(Players/Inventories sends them a new snapshot). When the block goes (broken, replaced), `take`
 	removes the contents so they can drop as items.
 
 	Viewers are tracked per container (any keys; Players in the game). A container that is empty
-	and open by nobody is forgotten: opening it again creates it again, empty, which is the same
-	thing, and keeps the table as small as the number of chests in use.
+	(and, for a furnace, neither burning nor cooking) and open by nobody is forgotten: opening it
+	again creates it again, empty, which is the same thing, and keeps the table as small as the
+	number of containers in use.
+
+	Furnaces cook whether anyone looks or not: `tickFurnaces` runs one Crafting/Smelting tick (20
+	per second, Minecraft's AbstractFurnaceBlockEntity.serverTick) on every active furnace and says
+	which ones changed. Only furnaces marked active (`markActive`, after a viewer changed one) are
+	ticked; one whose tick changes nothing stays that way until someone changes it again (the tick
+	only depends on the furnace), so it leaves the set and idle furnaces cost nothing.
 
 	Pure Luau (no Roblox APIs) so the tests can run it. `Containers.new()` makes a store; the
 	module's own functions (`Containers.get`, `Containers.take`...) use the server's store.
@@ -34,9 +43,15 @@ export type Entry = {
 	viewerCount: number,
 }
 
+-- A furnace that changed in a tick: where, and whether its slots changed (else only its data:
+-- the flame and the progress arrow).
+export type FurnaceChange = { x: number, y: number, z: number, slots: boolean }
+
 export type Store = {
 	entries: { [string]: Entry },
 	count: number,
+	-- Keys of the furnaces to tick.
+	active: { [string]: boolean },
 
 	get: (self: Store, x: number, y: number, z: number, block: number) -> Container,
 	peek: (self: Store, x: number, y: number, z: number) -> Container?,
@@ -44,6 +59,8 @@ export type Store = {
 	addViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
 	removeViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
 	viewers: (self: Store, x: number, y: number, z: number) -> { any },
+	markActive: (self: Store, x: number, y: number, z: number) -> (),
+	tickFurnaces: (self: Store) -> { FurnaceChange },
 }
 
 local Store = {}
@@ -53,6 +70,7 @@ local function keyOf(x: number, y: number, z: number): string
 	return `{x},{y},{z}`
 end
 
+-- Nothing in it worth keeping: no items and, for a furnace, no fire or cooking progress.
 local function isEmpty(container: Container): boolean
 	for slot = 1, container.size do
 		local stack = container.slots[slot]
@@ -60,7 +78,8 @@ local function isEmpty(container: Container): boolean
 			return false
 		end
 	end
-	return true
+	local data = container.data
+	return data == nil or (data[1] <= 0 and data[3] <= 0)
 end
 
 -- Slot count of a container block (0 for other blocks).
@@ -124,6 +143,7 @@ function Store.take(self: Store, x: number, y: number, z: number): (Container?, 
 	end
 	self.entries[key] = nil
 	self.count -= 1
+	self.active[key] = nil
 	local viewers = {}
 	for viewer in entry.viewers do
 		table.insert(viewers, viewer)
@@ -152,6 +172,7 @@ function Store.removeViewer(self: Store, x: number, y: number, z: number, viewer
 	if entry.viewerCount == 0 and isEmpty(entry.container) then
 		self.entries[key] = nil
 		self.count -= 1
+		self.active[key] = nil
 	end
 end
 
@@ -167,11 +188,54 @@ function Store.viewers(self: Store, x: number, y: number, z: number): { any }
 	return list
 end
 
+--[[
+	Something may have changed the furnace at (x, y, z) (a viewer's click): it is ticked from now
+	on until it settles. Does nothing where there is no furnace.
+]]
+function Store.markActive(self: Store, x: number, y: number, z: number)
+	local key = keyOf(x, y, z)
+	local entry = self.entries[key]
+	if entry and entry.container.kind == "furnace" then
+		self.active[key] = true
+	end
+end
+
+--[[
+	One furnace tick (Crafting/Smelting.tick) for every active furnace, viewed or not. Returns the
+	furnaces that changed. A furnace that settles (nothing to burn or cook, or nothing changed)
+	leaves the active set, and is forgotten if it is also empty and nobody has it open.
+]]
+function Store.tickFurnaces(self: Store): { FurnaceChange }
+	local changes: { FurnaceChange } = {}
+	for key in self.active do
+		local entry = self.entries[key]
+		local furnace = if entry then entry.container else nil
+		if entry == nil or furnace == nil or furnace.kind ~= "furnace" then
+			self.active[key] = nil
+			continue
+		end
+		local slots = furnace.slots
+		local input, fuel, output = slots[1], slots[2], slots[3]
+		if Smelting.active(furnace) and Smelting.tick(furnace) then
+			-- (Smelting replaces stack tables rather than changing them.)
+			local slotsChanged = slots[1] ~= input or slots[2] ~= fuel or slots[3] ~= output
+			table.insert(changes, { x = entry.x, y = entry.y, z = entry.z, slots = slotsChanged })
+		else
+			self.active[key] = nil
+			if entry.viewerCount == 0 and isEmpty(furnace) then
+				self.entries[key] = nil
+				self.count -= 1
+			end
+		end
+	end
+	return changes
+end
+
 local Containers = {}
 
 -- A new, empty store (the tests make their own; the game uses `Containers.default`).
 function Containers.new(): Store
-	return (setmetatable({ entries = {}, count = 0 }, Store) :: any) :: Store
+	return (setmetatable({ entries = {}, count = 0, active = {} }, Store) :: any) :: Store
 end
 
 -- The server's containers.

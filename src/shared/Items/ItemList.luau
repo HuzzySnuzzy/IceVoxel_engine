@@ -20,8 +20,14 @@
 	  model        Boxes the item is drawn with, in pixels (1/16 of a block) around the item's centre:
 	               { size = { x, y, z }, offset = { x, y, z }, color = { r, g, b }?, material = "Metal"?,
 	                 rotation = degrees about the view axis (Z)?, shape = "Ball" | "Cylinder"? }.
-	  tilt         Degrees the whole model is turned about Z (tools and sticks lie diagonally, as in
-	               Minecraft's inventory).
+	               Coordinates are as the inventory icon shows the item: x to the right, y up, z towards
+	               the viewer (the front of armor is +z); angles are anticlockwise. A ball takes the
+	               smallest of its sizes; a cylinder's axis is z (its round face looks at the viewer).
+	               Boxes without a colour / material take the item's.
+	  tilt         Degrees the whole model is turned (anticlockwise) about the view axis. Tools and
+	               sticks are modelled upright (handle down, head up) and tilted -45 so they lie
+	               diagonally, head at the top right, as in Minecraft's inventory; held in a hand they
+	               are drawn upright again (client Rendering/ItemModels).
 ]]
 
 export type ModelBox = {
@@ -51,8 +57,8 @@ local HELMET: { ModelBox } = {
 	{ size = { 10, 2, 10 }, offset = { 0, 4, 0 } },
 	{ size = { 1, 6, 10 }, offset = { -4.5, 0, 0 } },
 	{ size = { 1, 6, 10 }, offset = { 4.5, 0, 0 } },
-	{ size = { 8, 6, 1 }, offset = { 0, 0, 4.5 } },
-	{ size = { 8, 2, 1 }, offset = { 0, 2, -4.5 } },
+	{ size = { 8, 6, 1 }, offset = { 0, 0, -4.5 } },
+	{ size = { 8, 2, 1 }, offset = { 0, 2, 4.5 } },
 }
 local CHESTPLATE: { ModelBox } = {
 	{ size = { 8, 11, 4 }, offset = { 0, -1, 0 } },
@@ -65,10 +71,10 @@ local LEGGINGS: { ModelBox } = {
 	{ size = { 4, 10, 4.5 }, offset = { 2.5, -1.5, 0 } },
 }
 local BOOTS: { ModelBox } = {
-	{ size = { 4, 4, 4 }, offset = { -3, 0, 1 } },
-	{ size = { 4, 4, 4 }, offset = { 3, 0, 1 } },
-	{ size = { 4, 2, 3 }, offset = { -3, -1, -2.5 } },
-	{ size = { 4, 2, 3 }, offset = { 3, -1, -2.5 } },
+	{ size = { 4, 4, 4 }, offset = { -3, 0, -1 } },
+	{ size = { 4, 4, 4 }, offset = { 3, 0, -1 } },
+	{ size = { 4, 2, 3 }, offset = { -3, -1, 2.5 } },
+	{ size = { 4, 2, 3 }, offset = { 3, -1, 2.5 } },
 }
 
 local list: { ItemSpec } = {}
@@ -113,60 +119,134 @@ end
 --[[ Crafting materials ]]
 
 local HANDLE = { 104, 76, 42 }
+local HANDLE_DARK = { 70, 50, 30 }
 
--- A lump (coal, raw ore).
-local function lump(colour: { number }): { ModelBox }
+-- `colour` scaled by `factor` (pixel art highlights and shadows).
+local function shade(colour: { number }, factor: number): { number }
 	return {
-		{ size = { 6, 5, 5 }, offset = { -1.5, 0, 0 }, color = colour },
-		{ size = { 5, 5, 5 }, offset = { 2, 1, 0.5 }, color = colour },
-		{ size = { 5, 4, 4 }, offset = { 0, -2.5, -0.5 }, color = colour },
+		math.min(255, math.round(colour[1] * factor)),
+		math.min(255, math.round(colour[2] * factor)),
+		math.min(255, math.round(colour[3] * factor)),
 	}
 end
-local INGOT: { ModelBox } = {
-	{ size = { 12, 3, 6 }, offset = { 0, -1, 0 } },
-	{ size = { 10, 1.5, 4 }, offset = { 0, 1.2, 0 } },
-}
-local NUGGET: { ModelBox } = {
-	{ size = { 4, 3, 4 }, offset = { 0, -0.5, 0 } },
-	{ size = { 3, 1.5, 3 }, offset = { 0, 1.5, 0 } },
-}
+
+-- A rounded lump (coal, raw ore) with light and dark specks on both faces.
+local function lump(colour: { number }, light: { number }, dark: { number }): { ModelBox }
+	return {
+		{ size = { 7, 6, 4 }, offset = { 0, 0, 0 }, color = colour },
+		{ size = { 5, 2, 3.5 }, offset = { -0.5, 3.5, 0 }, color = colour },
+		{ size = { 5, 2, 3.5 }, offset = { 0.5, -3.5, 0 }, color = colour },
+		{ size = { 2, 4, 3.5 }, offset = { -4, 0.5, 0 }, color = colour },
+		{ size = { 2, 4, 3.5 }, offset = { 4, -0.5, 0 }, color = colour },
+		{ size = { 1.5, 1.5, 0.5 }, offset = { -1.5, 1.5, 2.1 }, color = light },
+		{ size = { 1, 1, 0.5 }, offset = { 2, 1, 2.1 }, color = light },
+		{ size = { 1.5, 1, 0.5 }, offset = { 0.5, -1.75, 2.1 }, color = dark },
+		{ size = { 1.5, 1.5, 0.5 }, offset = { 1.5, 0.5, -2.1 }, color = light },
+		{ size = { 1.5, 1, 0.5 }, offset = { -1.5, -1.5, -2.1 }, color = dark },
+	}
+end
+
+-- A bar with a narrower, lighter top and a shaded foot (tilted up to the right, like Minecraft's).
+local function ingot(colour: { number }): { ModelBox }
+	return {
+		{ size = { 12, 3, 5 }, offset = { 0, -1, 0 } },
+		{ size = { 10, 1.5, 4 }, offset = { 0, 1.25, 0 }, color = shade(colour, 1.12) },
+		{ size = { 12.1, 0.75, 5.1 }, offset = { 0, -2.1, 0 }, color = shade(colour, 0.72) },
+	}
+end
+
+-- A small cluster.
+local function nugget(colour: { number }): { ModelBox }
+	return {
+		{ size = { 4, 3, 3 }, offset = { 0, -0.5, 0 } },
+		{ size = { 2.5, 1.5, 2.5 }, offset = { -0.25, 1.5, 0 }, color = shade(colour, 1.12) },
+		{ size = { 2, 2, 2.5 }, offset = { 2, -1.5, 0 }, color = shade(colour, 0.8) },
+		{ size = { 2, 1.5, 2.5 }, offset = { -2, -1.25, 0 } },
+	}
+end
+
+local COAL = { 34, 34, 38 }
+local CHARCOAL = { 58, 46, 36 }
+local RAW_IRON = { 196, 160, 128 }
+local RAW_GOLD = { 232, 180, 50 }
+local IRON = { 222, 222, 224 }
+local GOLD = { 250, 213, 58 }
+local DIAMOND = { 90, 236, 227 }
+local EMERALD = { 40, 210, 90 }
 
 table.insert(list, {
 	name = "Stick",
 	color = HANDLE,
 	material = "Wood",
-	model = { { size = { 1.5, 14, 1.5 }, offset = { 0, 0, 0 } } },
+	model = {
+		{ size = { 1.5, 16, 1.5 }, offset = { 0, 0, 0 } },
+		{ size = { 0.5, 15, 1.6 }, offset = { -0.45, 0.25, 0 }, color = shade(HANDLE, 1.3) },
+	},
 	tilt = -45,
 })
-table.insert(list, { name = "Coal", color = { 34, 34, 38 }, material = "Slate", model = lump({ 34, 34, 38 }) })
-table.insert(list, { name = "Charcoal", color = { 58, 46, 36 }, material = "Slate", model = lump({ 58, 46, 36 }) })
-table.insert(list, { name = "RawIron", color = { 196, 160, 128 }, material = "Rock", model = lump({ 196, 160, 128 }) })
-table.insert(list, { name = "RawGold", color = { 232, 180, 50 }, material = "Rock", model = lump({ 232, 180, 50 }) })
-table.insert(list, { name = "IronIngot", color = { 222, 222, 224 }, material = "Metal", model = INGOT })
-table.insert(list, { name = "GoldIngot", color = { 250, 213, 58 }, material = "Metal", model = INGOT })
-table.insert(list, { name = "IronNugget", color = { 222, 222, 224 }, material = "Metal", model = NUGGET })
-table.insert(list, { name = "GoldNugget", color = { 250, 213, 58 }, material = "Metal", model = NUGGET })
 table.insert(list, {
-	name = "Diamond",
-	color = { 90, 236, 227 },
-	material = "Glass",
-	model = {
-		{ size = { 7, 7, 7 }, offset = { 0, 0, 0 }, rotation = 45 },
-		{ size = { 9, 2, 4 }, offset = { 0, 2.5, 0 } },
-	},
+	name = "Coal",
+	color = COAL,
+	material = "Slate",
+	model = lump(COAL, { 82, 82, 88 }, { 14, 14, 16 }),
 })
 table.insert(list, {
-	name = "Emerald",
-	color = { 40, 210, 90 },
+	name = "Charcoal",
+	color = CHARCOAL,
+	material = "Slate",
+	model = lump(CHARCOAL, { 102, 84, 66 }, { 30, 24, 18 }),
+})
+table.insert(list, {
+	name = "RawIron",
+	color = RAW_IRON,
+	material = "Rock",
+	model = lump(RAW_IRON, { 228, 200, 174 }, { 146, 112, 86 }),
+})
+table.insert(list, {
+	name = "RawGold",
+	color = RAW_GOLD,
+	material = "Rock",
+	model = lump(RAW_GOLD, { 252, 228, 122 }, { 180, 126, 28 }),
+})
+table.insert(list, { name = "IronIngot", color = IRON, material = "Metal", model = ingot(IRON), tilt = 25 })
+table.insert(list, { name = "GoldIngot", color = GOLD, material = "Metal", model = ingot(GOLD), tilt = 25 })
+table.insert(list, { name = "IronNugget", color = IRON, material = "Metal", model = nugget(IRON) })
+table.insert(list, { name = "GoldNugget", color = GOLD, material = "Metal", model = nugget(GOLD) })
+-- A cut gem: a wide crown with its table, a pointed pavilion and a glint.
+table.insert(list, {
+	name = "Diamond",
+	color = DIAMOND,
 	material = "Glass",
-	model = { { size = { 5, 9, 5 }, offset = { 0, 0, 0 }, rotation = 45 } },
+	model = {
+		{ size = { 10, 3, 3 }, offset = { 0, 2.5, 0 } },
+		{ size = { 6, 1, 2.5 }, offset = { 0, 4.5, 0 }, color = shade(DIAMOND, 1.15) },
+		{ size = { 7.07, 7.07, 3 }, offset = { 0, -0.5, 0 }, rotation = 45, color = shade(DIAMOND, 0.75) },
+		{ size = { 2, 2, 0.5 }, offset = { -2.5, 2.5, 1.6 }, color = { 225, 255, 252 } },
+	},
+})
+-- An upright octagonal gem with darker bevels and a light centre.
+table.insert(list, {
+	name = "Emerald",
+	color = EMERALD,
+	material = "Glass",
+	model = {
+		{ size = { 6, 9, 3 }, offset = { 0, 0, 0 } },
+		{ size = { 4, 1, 3 }, offset = { 0, 5, 0 } },
+		{ size = { 4, 1, 3 }, offset = { 0, -5, 0 } },
+		{ size = { 1, 7, 3 }, offset = { -3.5, 0, 0 }, color = shade(EMERALD, 0.7) },
+		{ size = { 1, 7, 3 }, offset = { 3.5, 0, 0 }, color = shade(EMERALD, 0.7) },
+		{ size = { 2, 6, 0.5 }, offset = { -0.5, 0.5, 1.6 }, color = { 150, 250, 172 } },
+	},
 })
 table.insert(list, {
 	name = "Snowball",
 	maxStack = 16,
 	color = { 240, 245, 250 },
 	material = "Snow",
-	model = { { size = { 8, 8, 8 }, offset = { 0, 0, 0 }, shape = "Ball" } },
+	model = {
+		{ size = { 8, 8, 8 }, offset = { 0, 0, 0 }, shape = "Ball" },
+		{ size = { 4, 4, 4 }, offset = { 1.75, 1.75, 1.5 }, shape = "Ball", color = { 255, 255, 255 } },
+	},
 })
 
 --[[ Tools: Minecraft's tiers (speed, harvest level, durability) and shapes ]]
@@ -179,46 +259,88 @@ local TIERS: { Tier } = {
 	{ name = "Golden", speed = 12, level = 0, durability = 32, color = { 250, 213, 58 }, material = "Metal" },
 	{ name = "Diamond", speed = 8, level = 3, durability = 1561, color = { 90, 236, 227 }, material = "Metal" },
 }
--- Upright shapes (the handle down); `tilt` lays them diagonally. Boxes without a colour take the
--- tier's.
+
+--[[
+	Upright shapes: Minecraft's sprites turned so the handle is vertical, from y = -10 up, with the
+	head on top (the axe's blade and the hoe's head on the left, where the sprites have them).
+	`tilt` lays them back on the diagonal. Boxes without a colour take the tier's (`head`).
+]]
 local function handle(length: number, y: number): ModelBox
-	return { size = { 1.5, length, 1.5 }, offset = { 0, y, 0 }, color = HANDLE, material = "Wood" }
+	return { size = { 1.5, length, 1.25 }, offset = { 0, y, 0 }, color = HANDLE, material = "Wood" }
 end
-type ToolShape = { name: string, kind: string, model: { ModelBox } }
+type ToolShape = { name: string, kind: string, model: (head: { number }) -> { ModelBox } }
 local SHAPES: { ToolShape } = {
 	{
 		name = "Sword",
 		kind = "sword",
-		model = {
-			{ size = { 2.5, 10, 1 }, offset = { 0, 3, 0 } },
-			{ size = { 6, 1.5, 2 }, offset = { 0, -2.75, 0 }, color = { 70, 50, 30 }, material = "Wood" },
-			handle(4, -5.5),
-		},
+		model = function(head)
+			-- Blade (shaded on one side) with a pointed tip, crossguard, grip and pommel.
+			return {
+				{ size = { 3, 10, 1 }, offset = { 0, 2.5, 0 } },
+				{ size = { 1, 10, 1.1 }, offset = { 1, 2.5, 0 }, color = shade(head, 0.72) },
+				{ size = { 2.12, 2.12, 1 }, offset = { 0, 7.5, 0 }, rotation = 45 },
+				{ size = { 7, 1.5, 1.5 }, offset = { 0, -3.25, 0 }, color = HANDLE_DARK, material = "Wood" },
+				{ size = { 1.5, 4.5, 1.25 }, offset = { 0, -6.25, 0 }, color = HANDLE, material = "Wood" },
+				{ size = { 2, 1.5, 1.5 }, offset = { 0, -9.25, 0 }, color = HANDLE_DARK, material = "Wood" },
+			}
+		end,
 	},
 	{
 		name = "Shovel",
 		kind = "shovel",
-		model = { { size = { 5, 5, 1.5 }, offset = { 0, 5, 0 } }, handle(12, -2) },
+		model = function(head)
+			-- A spade with a rounded point, shaded on one side, on a collar.
+			return {
+				handle(13, -3.5),
+				{ size = { 5, 5.5, 1.25 }, offset = { 0, 5.75, 0 } },
+				{ size = { 2.83, 2.83, 1.25 }, offset = { 0, 8.5, 0 }, rotation = 45 },
+				{ size = { 1, 5.5, 1.35 }, offset = { 2, 5.75, 0 }, color = shade(head, 0.72) },
+				{ size = { 2.25, 1.5, 1.5 }, offset = { 0, 2.75, 0 }, color = shade(head, 0.6) },
+			}
+		end,
 	},
 	{
 		name = "Pickaxe",
 		kind = "pickaxe",
-		model = {
-			{ size = { 8, 2, 2 }, offset = { 0, 5.5, 0 } },
-			{ size = { 3, 2, 2 }, offset = { -5, 4.5, 0 } },
-			{ size = { 3, 2, 2 }, offset = { 5, 4.5, 0 } },
-			handle(13, -1.5),
-		},
+		model = function(head)
+			-- An arc across the top: a middle bar, then wings and tips drooping on both sides.
+			return {
+				handle(16, -2),
+				{ size = { 6, 2.5, 1.5 }, offset = { 0, 6, 0 } },
+				{ size = { 6, 0.75, 1.6 }, offset = { 0, 5.1, 0 }, color = shade(head, 0.72) },
+				{ size = { 5, 2, 1.5 }, offset = { -4.85, 5.15, 0 }, rotation = 20 },
+				{ size = { 5, 2, 1.5 }, offset = { 4.85, 5.15, 0 }, rotation = -20 },
+				{ size = { 3, 1.75, 1.5 }, offset = { -7.76, 3.45, 0 }, rotation = 50 },
+				{ size = { 3, 1.75, 1.5 }, offset = { 7.76, 3.45, 0 }, rotation = -50 },
+			}
+		end,
 	},
 	{
 		name = "Axe",
 		kind = "axe",
-		model = { { size = { 5, 6, 1.5 }, offset = { -2.75, 3.5, 0 } }, handle(13, -1.5) },
+		model = function(head)
+			-- The head left of the handle's top, flaring out to a long, brighter edge; a poll behind.
+			return {
+				handle(17, -1.5),
+				{ size = { 3, 3.5, 1.5 }, offset = { -0.75, 6.5, 0 }, color = shade(head, 0.8) },
+				{ size = { 2.25, 4.75, 1.5 }, offset = { -3.375, 5.875, 0 } },
+				{ size = { 1.25, 6.5, 1.5 }, offset = { -5.125, 5, 0 }, color = shade(head, 1.15) },
+				{ size = { 1.5, 2.5, 1.5 }, offset = { 1.5, 7, 0 }, color = shade(head, 0.8) },
+			}
+		end,
 	},
 	{
 		name = "Hoe",
 		kind = "hoe",
-		model = { { size = { 5, 2, 2 }, offset = { -2, 5.5, 0 } }, handle(13, -1.5) },
+		model = function(head)
+			-- The head runs down to the left from the handle's top and hooks back at its end.
+			return {
+				handle(17, -1.5),
+				{ size = { 5.5, 2, 1.5 }, offset = { -1.44, 6.31, 0 }, rotation = 45 },
+				{ size = { 2.5, 2, 1.5 }, offset = { -2.51, 3.48, 0 }, rotation = -45, color = shade(head, 1.15) },
+				{ size = { 2, 1.5, 1.6 }, offset = { 0, 7.5, 0 }, color = shade(head, 0.72) },
+			}
+		end,
 	},
 }
 for _, tier in TIERS do
@@ -230,7 +352,7 @@ for _, tier in TIERS do
 			durability = tier.durability,
 			color = tier.color,
 			material = tier.material,
-			model = shape.model,
+			model = shape.model(tier.color),
 			tilt = -45,
 		})
 	end

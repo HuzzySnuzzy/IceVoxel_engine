@@ -6,12 +6,14 @@
 	                "Item selection" screen in creative, the inventory screen in survival (creative
 	                players reach it through a tab). Escape (and the Roblox menu opening), gamepad
 	                B, death and the touch "x" buttons close it. Closing sends `close` for the open
-	                window (window 0 too, so the carried stack goes back into the inventory, like
-	                Minecraft).
-	  containers    when a snapshot opens a container window (the server answered a right click on
-	                a chest), the inventory screen opens with the container's panel above the
-	                player's. When the server closes it (too far, the block broke, death), the
-	                screen closes, as in Minecraft.
+	                window (window 0 too, so the carried stack and the 2 x 2 crafting grid go back
+	                into the inventory, like Minecraft).
+	  blocks        when a snapshot opens a block's window (the server answered a right click on a
+	                chest, crafting table or furnace), the inventory screen opens with the block's
+	                panel above the player's. Window 0 (the inventory screen's own, whose
+	                container is the player panel's 2 x 2 grid) never shows a panel. When the
+	                server closes a block's window (too far, the block broke, death), the screen
+	                closes, as in Minecraft.
 	  while open    the mouse is free (a Modal button, MouseBehavior Default every frame after the
 	                camera, the mouse icon on), the default controls are disabled so the character
 	                stops, and `isOpen()` is true for the other client modules.
@@ -43,12 +45,14 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
+local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local CreativeScreen = require(script.Parent.CreativeScreen)
 local Hud = require(script.Parent.Hud)
 local InventoryScreen = require(script.Parent.InventoryScreen)
 local ItemIcon = require(script.Parent.ItemIcon)
+local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
 
@@ -128,6 +132,11 @@ local function overCoreGui(point: Vector2): boolean
 		end
 	end
 	return false
+end
+
+-- Is `window` a block's (a chest, crafting table or furnace open), not the inventory screen's?
+local function blockOpen(window: Types.Window): boolean
+	return window.id ~= 0 and MenuLayout.hasPanel(window.container)
 end
 
 local Screens = {}
@@ -524,7 +533,7 @@ function Screens.start()
 		resetPointer()
 		creative:releaseFocus()
 		inventory:closed()
-		-- The carried stack goes back into the inventory; a container window closes.
+		-- The carried stack and a crafting grid go back into the inventory; a block's window closes.
 		ClientInventory.apply({ kind = "close", window = ClientInventory.window().id })
 		lastWindowId = ClientInventory.window().id
 		gui.Enabled = false
@@ -561,13 +570,13 @@ function Screens.start()
 	inventory.onClose = close
 	creative.onClose = close
 
-	-- Containers opened and closed by the server, and game mode changes.
+	-- Blocks' windows opened and closed by the server, and game mode changes.
 	ClientInventory.changed:Connect(function()
 		local window = ClientInventory.window()
 		if window.id ~= lastWindowId then
 			local previous = lastWindowId
 			lastWindowId = window.id
-			if window.id ~= 0 then
+			if blockOpen(window) then
 				if current == "inventory" then
 					inventory:setLayout(window.container, ClientInventory.isCreative())
 					resetPointer()
@@ -856,7 +865,7 @@ function Screens.start()
 		local cursor = shown.inventory.cursor
 		local origin = top.AbsolutePosition
 		if cursor and point then
-			carriedIcon:set(cursor.item, cursor.count)
+			carriedIcon:set(cursor.item, cursor.count, cursor.damage)
 			carried.Position = UDim2.fromOffset(point.X - origin.X, point.Y - origin.Y)
 			carried.Visible = true
 		else

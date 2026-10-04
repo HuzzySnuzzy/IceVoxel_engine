@@ -12,7 +12,12 @@
 	item changes (models of items no longer shown go back to a pool, per item), so a screen of a
 	hundred icons does no work while nothing changes.
 
-	`ItemIcon.slot` is an inventory slot with an icon and the hover overlay.
+	A worn tool gets Minecraft's durability bar under it (Ui/MenuLayout.durabilityBar: up to 13
+	pixels at (2, 13) of the 16 x 16 item on a black 13 x 2 background, from green to red). It is
+	made the first time an icon needs one and scales with the icon.
+
+	`ItemIcon.slot` is an inventory slot with an icon and the hover overlay (`big`: a result slot's
+	large frame).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,6 +26,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
+local MenuLayout = require(script.Parent.MenuLayout)
 local Style = require(script.Parent.Style)
 
 local MODEL_SIZE = Config.BlockSize
@@ -52,7 +58,9 @@ export type ItemIcon = {
 	root: Frame,
 	item: number?,
 	count: number,
-	set: (self: ItemIcon, item: number?, count: number?) -> (),
+	-- The tool wear shown (0 = none).
+	damage: number,
+	set: (self: ItemIcon, item: number?, count: number?, damage: number?) -> (),
 	setCountColour: (self: ItemIcon, colour: Color3?) -> (),
 	destroy: (self: ItemIcon) -> (),
 }
@@ -64,6 +72,9 @@ type Self = ItemIcon & {
 	shadow: TextLabel,
 	model: Model?,
 	block: boolean?,
+	-- The durability bar (made when first needed) and its coloured part.
+	bar: Frame?,
+	barFill: Frame?,
 }
 
 -- An inventory slot: the inset frame (a TextButton), the icon and the hover overlay.
@@ -192,19 +203,63 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 		root = root,
 		item = nil,
 		count = 0,
+		damage = 0,
 		viewport = viewport,
 		camera = camera,
 		label = label,
 		shadow = shadow,
 		model = nil,
 		block = nil,
+		bar = nil,
+		barFill = nil,
 	}
 	return (setmetatable(self, ItemIcon) :: any) :: ItemIcon
 end
 
--- Shows `item` (nil = nothing) with `count` (drawn when above 1). Cheap when nothing changed.
-function ItemIcon.set(self: Self, item: number?, count: number?)
-	if item ~= self.item then
+-- Shows (or hides) the durability bar of the icon's item worn by `damage`.
+local function setDurability(self: Self, damage: number)
+	local width, hue = MenuLayout.durabilityBar(self.item, damage)
+	local bar, fill = self.bar, self.barFill
+	if width == nil then
+		if bar and bar.Visible then
+			bar.Visible = false
+		end
+		return
+	end
+	if bar == nil or fill == nil then
+		-- Fractions of the 16 x 16 item, so it scales with any icon size.
+		local item = Style.ITEM
+		local newBar = Instance.new("Frame")
+		newBar.Name = "Durability"
+		newBar.BorderSizePixel = 0
+		newBar.BackgroundColor3 = Color3.new(0, 0, 0)
+		newBar.Position = UDim2.fromScale(MenuLayout.BAR_X / item, MenuLayout.BAR_Y / item)
+		newBar.Size = UDim2.fromScale(MenuLayout.BAR_WIDTH / item, MenuLayout.BAR_HEIGHT / item)
+		-- Above the model and the count.
+		newBar.ZIndex = 4
+		newBar.Parent = self.root
+		local newFill = Instance.new("Frame")
+		newFill.Name = "Fill"
+		newFill.BorderSizePixel = 0
+		newFill.ZIndex = 1
+		newFill.Parent = newBar
+		bar, fill = newBar, newFill
+		self.bar, self.barFill = newBar, newFill
+	end
+	assert(bar and fill, "durability bar")
+	-- The top one of its two rows, `width` of 13 pixels.
+	fill.Size = UDim2.fromScale(width / MenuLayout.BAR_WIDTH, 1 / MenuLayout.BAR_HEIGHT)
+	fill.BackgroundColor3 = Color3.fromHSV(hue, 1, 1)
+	bar.Visible = true
+end
+
+--[[
+	Shows `item` (nil = nothing) with `count` (drawn when above 1) and a tool's wear `damage` (its
+	durability bar when worn). Cheap when nothing changed.
+]]
+function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?)
+	local itemChanged = item ~= self.item
+	if itemChanged then
 		local old, model = self.item, self.model
 		if old and model then
 			returnModel(old, model)
@@ -234,6 +289,11 @@ function ItemIcon.set(self: Self, item: number?, count: number?)
 		self.label.Visible = shown > 1
 		self.shadow.Visible = shown > 1
 	end
+	local wear = if item and damage and damage > 0 then damage else 0
+	if wear ~= self.damage or itemChanged then
+		self.damage = wear
+		setDurability(self, wear)
+	end
 end
 
 -- Count colour (Minecraft draws an over-full drag preview in yellow); nil = white.
@@ -258,10 +318,10 @@ end
 --[[
 	An inventory slot in `parent` for the item at (x, y) (GUI pixels; the slot frame is one pixel up
 	and left of it): the inset frame, which is a selectable TextButton, its icon and the hover
-	overlay, all inside the button.
+	overlay, all inside the button. `big`: drawn with the 26 x 26 result frame (Style.slot).
 ]]
-function ItemIcon.slot(parent: Instance, x: number, y: number, z: number?): Slot
-	local button = Style.slot(parent, x, y, z)
+function ItemIcon.slot(parent: Instance, x: number, y: number, z: number?, big: boolean?): Slot
+	local button = Style.slot(parent, x, y, z, big)
 	local icon = ItemIcon.new(button, 1, 1, 5)
 	local hover = Style.hover(button, 1, 1, 10)
 	return { button = button, icon = icon, hover = hover }

@@ -51,7 +51,7 @@ export type Container = {
 }
 
 export type Window = {
-	-- 0 = the inventory alone.
+	-- 0 = the inventory screen (its container the 2 x 2 grid, Types.newWindow).
 	id: number,
 	inventory: Inventory,
 	container: Container?,
@@ -83,7 +83,7 @@ export type Action =
 export type Snapshot = {
 	ack: number,
 	inventory: Inventory,
-	-- Open window (0 = none / the inventory alone) and its container.
+	-- Open window (0 = the inventory screen) and its container.
 	window: number,
 	container: Container?,
 }
@@ -106,6 +106,10 @@ Types.MAX_CONTAINER = 54
 Types.KINDS = { "inventory", "crafting", "chest", "furnace" }
 -- Slot of a crafting container's result; its grid follows (width x width, row by row).
 Types.CRAFT_RESULT = 1
+-- A furnace's slots.
+Types.FURNACE_INPUT = 1
+Types.FURNACE_FUEL = 2
+Types.FURNACE_OUTPUT = 3
 
 -- Player attribute with the item id in the player's hand (0 = nothing), set by the server so every
 -- client can draw it in the character's hand.
@@ -120,6 +124,11 @@ end
 function Types.newCrafting(kind: string, block: number?): Container
 	local width = if kind == "crafting" then 3 else 2
 	return { kind = kind, block = block or 0, size = 1 + width * width, slots = {}, data = nil }
+end
+
+-- The inventory screen's window: id 0, the inventory and its own 2 x 2 crafting grid.
+function Types.newWindow(inventory: Inventory): Window
+	return { id = 0, inventory = inventory, container = Types.newCrafting("inventory") }
 end
 
 -- Grid width of a crafting container (0 for other kinds).

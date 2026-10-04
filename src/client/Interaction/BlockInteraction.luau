@@ -2,28 +2,32 @@
 --[[
 	Breaking, using and placing blocks, as in Minecraft.
 
-	  Mouse    left (hold) = break; right click = open a chest / place the held block (held down it
-	           repeats in first person and with shift lock; with a free mouse, right dragging turns
-	           the camera, so only a short click counts); middle click = pick block;
-	           Q = drop one of the held item, Ctrl+Q the whole stack
+	  Mouse    left (hold) = break; right click = open a chest, crafting table or furnace / place
+	           the held block (held down it repeats in first person and with shift lock; with a
+	           free mouse, right dragging turns the camera, so only a short click counts); middle
+	           click = pick block; Q = drop one of the held item, Ctrl+Q the whole stack
 	  Gamepad  R2 = break, L2 = use / place (aiming at the screen centre, shown by a crosshair),
 	           DPad down = drop one
 	  Touch    (Bedrock's scheme) tap = use / place, hold still = break, aiming under the finger
 	           (not in the movement thumbstick's corner)
 
-	  Survival  mining takes time: Shared/Mining's progress is added at a fixed 20 ticks per second
+	  Survival  mining takes time: Shared/Mining's progress for the held tool (its speed on the
+	            block's kind, and whether it can harvest it) is added at a fixed 20 ticks per second
 	            (slower in the air and with the eyes under water) and the block breaks at 1, then a
-	            Mining.DELAY_TICKS pause comes before the next one. The server is told when mining
-	            starts and stops (ClientMessage.Mine) and checks the time before it accepts the
-	            break. CrackOverlay shows the progress. Placing uses up the held block:
-	            ClientInventory.place predicts it and numbers it, and the Edit carries the number.
+	            Mining.DELAY_TICKS pause comes before the next one. Switching to another item starts
+	            the block over (Minecraft's sameDestroyTarget). The server is told when mining
+	            starts and stops (ClientMessage.Mine) and checks the time, with the tool in hand,
+	            before it accepts the break; it also wears the tool. CrackOverlay shows the
+	            progress. Placing uses up the held block: ClientInventory.place predicts it and
+	            numbers it, and the Edit carries the number.
 	  Creative  breaking is instant and repeats every Config.Interaction.BreakInterval while held;
 	            any block item places without being used up.
 
-	Right clicking a container block (a chest) asks the server to open it (ClientMessage.Use), unless
-	the player sneaks with something in hand (Minecraft's secondary use). Holding the use button
-	repeats every Config.Interaction.RepeatInterval. A block is never placed where it would overlap
-	a player's standing hull (the server checks the same and would undo it).
+	Right clicking a block with a menu (BlockList `menu`: a chest, crafting table or furnace) asks the
+	server to open it (ClientMessage.Use), unless the player sneaks with something in hand
+	(Minecraft's secondary use). Holding the use button repeats every
+	Config.Interaction.RepeatInterval. A block is never placed where it would overlap a player's
+	standing hull (the server checks the same and would undo it).
 
 	Targeting is a voxel raycast on the client's block data, so it is exact and independent of the
 	parts. Edits are predicted locally and confirmed / corrected by the server. Nothing happens
@@ -79,8 +83,8 @@ local BlockInteraction = {}
 
 type Hit = VoxelRaycast.Hit
 
--- A block being mined (survival).
-type MinedBlock = { x: number, y: number, z: number, block: number, progress: number }
+-- A block being mined (survival), and the item in hand when it started (nil: bare hands).
+type MinedBlock = { x: number, y: number, z: number, block: number, tool: number?, progress: number }
 
 type Particle = {
 	part: Part,
@@ -360,6 +364,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local pressedAt: number? = nil
 	local lastCreativeBreak = -math.huge
 
+	-- The item in hand (a tool or anything else; nil: bare hands), for Mining's speeds.
+	local function heldItem(): number?
+		local stack = ClientInventory.selectedStack()
+		return if stack then stack.item else nil
+	end
+
 	local function stopMining()
 		local current = mining
 		if current then
@@ -377,10 +387,18 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local current = mining
+		local tool = heldItem()
 		if
-			current and (current.x ~= hit.x or current.y ~= hit.y or current.z ~= hit.z or current.block ~= hit.block)
+			current
+			and (
+				current.x ~= hit.x
+				or current.y ~= hit.y
+				or current.z ~= hit.z
+				or current.block ~= hit.block
+				or current.tool ~= tool
+			)
 		then
-			-- Another block now: the old one's progress is lost.
+			-- Another block or another item in hand now: the old progress is lost.
 			stopMining()
 			current = nil
 		end
@@ -393,7 +411,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local view = MovementController.current
 		local onGround = if view then view.state.onGround else true
 		local underWater = if view then view.state.eyeInWater else false
-		local perTick = Mining.progressPerTick(hit.block, onGround, underWater)
+		local perTick = Mining.progressPerTick(hit.block, onGround, underWater, tool)
 		if perTick <= 0 then
 			-- Unbreakable.
 			return
@@ -401,7 +419,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if current == nil then
 			-- Minecraft's startDestroyBlock: the first tick on a block only starts it, unless it
 			-- breaks at once.
-			current = { x = hit.x, y = hit.y, z = hit.z, block = hit.block, progress = 0 }
+			current = { x = hit.x, y = hit.y, z = hit.z, block = hit.block, tool = tool, progress = 0 }
 			mining = current
 			ClientNet.send(Protocol.ClientMessage.Mine, Protocol.encodeMine(true, hit.x, hit.y, hit.z))
 			if perTick < 1 then
@@ -437,7 +455,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[ Using and placing ]]
 
-	-- After opening a container, the held use button does nothing more until released.
+	-- After opening a block's menu, the held use button does nothing more until released.
 	local useSpent = false
 	local lastUse = -math.huge
 
@@ -447,9 +465,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 		local view = MovementController.current
 		local stack = ClientInventory.selectedStack()
-		-- Containers open, unless sneaking with something in hand (Minecraft's secondary use).
+		-- Blocks with a menu open, unless sneaking with something in hand (Minecraft's secondary use).
 		local sneaking = view ~= nil and view.state.sneaking
-		if Blocks.get(hit.block).container > 0 and not (sneaking and stack ~= nil) then
+		if Blocks.get(hit.block).menu ~= nil and not (sneaking and stack ~= nil) then
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()

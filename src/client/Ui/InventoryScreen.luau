@@ -7,14 +7,22 @@
 	    outline of its piece;
 	  * next to it the player, drawn in a ViewportFrame (the character cloned into a WorldModel),
 	    facing the viewer and turning a little towards the mouse like Minecraft's;
+	  * at the top right the 2 x 2 crafting grid under its "Crafting" label, an arrow and the
+	    result slot (window 0's own "inventory" container, slots 2..5 and 1);
 	  * the 27 inventory slots and, below them after a small gap, the hotbar row.
 
-	When a container is open, its panel sits ABOVE the player panel: its name (e.g. "Chest") and
-	size / 9 rows of 9 slots. In creative mode (without a container) two tabs above the panel switch
-	between the item selection and this screen.
+	When a block's window is open, its panel sits ABOVE the player panel (Ui/MenuLayout):
+	  chest     its name and size / 9 rows of 9 slots
+	  crafting  "Crafting": the 3 x 3 grid, an arrow and the result in a large frame
+	  furnace   "Furnace": the input over the flame over the fuel, the progress arrow and the output;
+	            the flame burns down and the arrow fills from the container's `data`
+	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
+	grid. In creative mode (with no block open) two tabs above the panel switch between the item
+	selection and this screen.
 
 	This module only draws and hit-tests (in screen pixels, the InputObject.Position space): the
-	clicks themselves are Ui/SlotClicks, driven by Ui/Screens. Slots map to window slots by the
+	clicks themselves are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules
+	of each slot (results are only taken, crafting happens there). Slots map to window slots by the
 	window layout of Inventory/Types (container, armor, inventory 10..36, hotbar).
 ]]
 
@@ -23,30 +31,39 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Blocks = require(Shared.Blocks)
-local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ItemIcon = require(script.Parent.ItemIcon)
+local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
 
 type Window = Types.Window
 type Target = SlotClicks.Target
 
-local WIDTH = 176
-local PLAYER_HEIGHT = 166
+local WIDTH = MenuLayout.WIDTH
+local PLAYER_HEIGHT = MenuLayout.PLAYER_HEIGHT
 -- Gap between the container panel and the player panel.
 local GAP = 2
 local TAB_HEIGHT = ItemIcon.TAB_HEIGHT
 -- The character preview box (Minecraft's: 51 x 72 at (26, 8)).
 local PREVIEW_X, PREVIEW_Y, PREVIEW_W, PREVIEW_H = 26, 8, 49, 69
 local PREVIEW_FOV = 30
--- The held item in the preview's hand (as Player/HeldItems draws it on characters).
-local HAND_SIZE = 0.4 * Config.BlockSize
+-- The crafting arrows and the furnace's unlit flame are the slot grey; its progress arrow fills
+-- white over the grey one, inside the 24 x 16 progress area (one pixel in).
+local ARROW_COLOUR = Style.Colour.Slot
+local PROGRESS_COLOUR = Color3.new(1, 1, 1)
+local PROGRESS_ARROW_W, PROGRESS_ARROW_H = 22, 15
+local FIRE_PALETTE: { [string]: Color3 } = {
+	R = Color3.fromRGB(214, 78, 0),
+	O = Color3.fromRGB(255, 140, 0),
+	Y = Color3.fromRGB(255, 214, 40),
+	W = Color3.fromRGB(255, 250, 190),
+}
+local UNLIT_PALETTE: { [string]: Color3 } = { R = ARROW_COLOUR, O = ARROW_COLOUR, Y = ARROW_COLOUR, W = ARROW_COLOUR }
 
 -- Faint outlines in empty armor slots (16 x 16 pixel art).
 local ARMOR_GHOSTS: { { string } } = {
@@ -134,6 +151,9 @@ export type InventoryScreen = {
 	follow: (self: InventoryScreen, point: Vector2?) -> (),
 }
 
+-- A furnace panel's gauge: a clipping frame over `rect` showing part of the lit art (in `holder`).
+type Gauge = { clip: Frame, holder: Frame, rect: MenuLayout.Rect, shown: number }
+
 type Self = InventoryScreen & {
 	playerPanel: Frame,
 	containerPanel: Frame?,
@@ -142,6 +162,14 @@ type Self = InventoryScreen & {
 	tabsShown: boolean,
 	playerSlots: { SlotWidget },
 	containerSlots: { SlotWidget },
+	-- The player panel's 2 x 2 crafting area (window 0) and the name shown instead of it.
+	gridGroup: Frame,
+	gridSlots: { SlotWidget },
+	gridShown: boolean,
+	nameLabel: TextLabel,
+	-- The open furnace's flame (rows shown) and arrow (columns shown).
+	flame: Gauge?,
+	progress: Gauge?,
 	byButton: { [GuiObject]: SlotWidget },
 	height: number,
 	-- The player panel's touch close button (hidden under a container panel, which has its own).
@@ -166,6 +194,11 @@ local function itemNamed(name: string): number?
 	return if ok then id else nil
 end
 
+-- A crafting arrow filling `rect` (Style pixel art).
+local function drawArrow(parent: Instance, rect: MenuLayout.Rect, colour: Color3, z: number)
+	Style.pixelArt(parent, rect.x, rect.y, MenuLayout.arrowArt(rect.w, rect.h), { ["#"] = colour }, z)
+end
+
 -- The touch close button ("x") at the top right of a panel.
 local function closeButton(self: Self, panel: Frame): TextButton
 	local button = Style.button(panel, "x", WIDTH - 15, 3, 12, 12, 6)
@@ -183,9 +216,10 @@ local function newSlot(
 	x: number,
 	y: number,
 	store: string,
-	index: number
+	index: number,
+	big: boolean?
 )
-	local view = ItemIcon.slot(parent, x, y)
+	local view = ItemIcon.slot(parent, x, y, nil, big)
 	local widget: SlotWidget = { view = view, store = store, index = index, window = -1, ghost = nil }
 	table.insert(list, widget)
 	self.byButton[view.button] = widget
@@ -212,6 +246,10 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			tabsShown = false,
 			playerSlots = {},
 			containerSlots = {},
+			gridSlots = {},
+			gridShown = false,
+			flame = nil,
+			progress = nil,
 			byButton = {},
 			height = PLAYER_HEIGHT,
 			clone = nil,
@@ -269,8 +307,26 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 	world.Parent = preview
 	self.preview, self.previewCamera, self.world = preview, camera, world
 
+	-- With a block's window open (it has no 2 x 2 grid), the player's name takes the grid's place.
 	local name = Style.text(panel, Players.LocalPlayer.DisplayName, 80, 8, 78, 8, Style.Colour.Title, 5)
 	name.TextTruncate = Enum.TextTruncate.AtEnd
+	self.nameLabel = name
+
+	-- The 2 x 2 crafting area (Minecraft's InventoryScreen), shown with window 0.
+	local grid = Instance.new("Frame")
+	grid.Name = "Crafting"
+	grid.BackgroundTransparency = 1
+	grid.Size = UDim2.fromOffset(WIDTH, PLAYER_HEIGHT)
+	grid.ZIndex = 4
+	grid.Visible = false
+	grid.Parent = panel
+	self.gridGroup = grid
+	local area = MenuLayout.inventoryGrid
+	Style.text(grid, area.label.text, area.label.x, area.label.y, 70, 8, Style.Colour.Title, 5)
+	for _, spot in area.slots do
+		newSlot(self, grid, self.gridSlots, spot.x, spot.y, "container", spot.slot, spot.big)
+	end
+	drawArrow(grid, area.arrow, ARROW_COLOUR, 5)
 
 	-- Inventory slots 10..36, then the hotbar.
 	for row = 0, 2 do
@@ -298,14 +354,94 @@ local function assignIndices(self: Self, window: Window)
 	for _, widget in self.containerSlots do
 		widget.window = Menu.windowIndex(window, widget.store, widget.index) or -1
 	end
+	-- (The 2 x 2 grid's slots are window 0's container slots: they are nothing in other windows.)
+	for _, widget in self.gridSlots do
+		widget.window = if self.gridShown then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
+	end
 end
 
 --[[
-	Shows the panels for an open container (nil: none) and the creative tabs. Rebuilds the container
-	panel only when the container's block or size changes.
+	A furnace gauge: `draw` draws its art grey in the panel, and again lit inside a clipping frame
+	that render() grows (from the bottom for the flame, from the left for the arrow).
+]]
+local function newGauge(panel: Frame, rect: MenuLayout.Rect, draw: (parent: Instance, lit: boolean) -> ()): Gauge
+	draw(panel, false)
+	local clip = Instance.new("Frame")
+	clip.BackgroundTransparency = 1
+	clip.ClipsDescendants = true
+	clip.Position = UDim2.fromOffset(rect.x, rect.y)
+	clip.Size = UDim2.fromOffset(0, 0)
+	clip.ZIndex = 6
+	clip.Parent = panel
+	local holder = Instance.new("Frame")
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.fromOffset(rect.w, rect.h)
+	holder.ZIndex = 1
+	holder.Parent = clip
+	draw(holder, true)
+	return { clip = clip, holder = holder, rect = rect, shown = 0 }
+end
+
+-- A block's panel above the player panel (Ui/MenuLayout.panel).
+local function buildPanel(self: Self, container: Types.Container)
+	local layout = MenuLayout.panel(container)
+	local panel = Style.panel(self.root, 0, 0, WIDTH, layout.height)
+	panel.Name = "Container"
+	if layout.centred then
+		Style.text(panel, layout.title, 0, layout.titleY, WIDTH, 8, Style.Colour.Title, 5, Enum.TextXAlignment.Center)
+	else
+		Style.text(panel, layout.title, layout.titleX, layout.titleY, 140, 8, Style.Colour.Title, 5)
+	end
+	for _, spot in layout.slots do
+		newSlot(self, panel, self.containerSlots, spot.x, spot.y, "container", spot.slot, spot.big)
+	end
+	local arrow = layout.arrow
+	if arrow then
+		drawArrow(panel, arrow, ARROW_COLOUR, 5)
+	end
+	local flame = layout.flame
+	if flame then
+		self.flame = newGauge(panel, flame, function(parent: Instance, lit: boolean)
+			local x, y = if lit then 0 else flame.x, if lit then 0 else flame.y
+			Style.pixelArt(parent, x, y, MenuLayout.FLAME_ART, if lit then FIRE_PALETTE else UNLIT_PALETTE, 5)
+		end)
+	end
+	local progress = layout.progress
+	if progress then
+		self.progress = newGauge(panel, progress, function(parent: Instance, lit: boolean)
+			local x, y = if lit then 1 else progress.x + 1, if lit then 1 else progress.y + 1
+			local rect = { x = x, y = y, w = PROGRESS_ARROW_W, h = PROGRESS_ARROW_H }
+			drawArrow(parent, rect, if lit then PROGRESS_COLOUR else ARROW_COLOUR, 5)
+		end)
+	end
+	closeButton(self, panel)
+	self.containerPanel = panel
+end
+
+-- Shows `shown` rows of a flame (from the bottom) or columns of an arrow (from the left).
+local function setGauge(gauge: Gauge?, shown: number, vertical: boolean)
+	if gauge == nil or gauge.shown == shown then
+		return
+	end
+	gauge.shown = shown
+	local rect = gauge.rect
+	if vertical then
+		gauge.clip.Position = UDim2.fromOffset(rect.x, rect.y + rect.h - shown)
+		gauge.clip.Size = UDim2.fromOffset(rect.w, shown)
+		gauge.holder.Position = UDim2.fromOffset(0, shown - rect.h)
+	else
+		gauge.clip.Size = UDim2.fromOffset(shown, rect.h)
+	end
+end
+
+--[[
+	Shows the panels for the window's container and the creative tabs. A block's container gets its
+	panel above the player panel (rebuilt only when its kind, block or size changes); window 0's
+	"inventory" container is the player panel's 2 x 2 grid and has no panel.
 ]]
 function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs: boolean)
-	local key = if container then `{container.block}:{container.size}` else ""
+	local panelContainer = if container and MenuLayout.hasPanel(container) then container else nil
+	local key = MenuLayout.panelKey(container)
 	if key ~= self.containerKey then
 		self.containerKey = key
 		local old = self.containerPanel
@@ -318,26 +454,21 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 		end
 		self.containerSlots = {}
 		self.containerPanel = nil
-		if container then
-			local rows = math.ceil(container.size / 9)
-			local panel = Style.panel(self.root, 0, 0, WIDTH, 24 + rows * 18)
-			panel.Name = "Container"
-			-- The block's name ("Chest").
-			local title = if Items.isValid(container.block)
-				then Items.displayName(container.block)
-				elseif Blocks.isValid(container.block) then Blocks.get(container.block).name
-				else "Container"
-			Style.text(panel, title, 8, 6, 140, 8, Style.Colour.Title, 5)
-			for slot = 1, container.size do
-				local row, column = (slot - 1) // 9, (slot - 1) % 9
-				newSlot(self, panel, self.containerSlots, 8 + column * 18, 18 + row * 18, "container", slot)
-			end
-			closeButton(self, panel)
-			self.containerPanel = panel
+		self.flame = nil
+		self.progress = nil
+		if panelContainer then
+			buildPanel(self, panelContainer)
 		end
 	end
-	self.playerClose.Visible = UserInputService.TouchEnabled and container == nil
-	local showTabs = tabs and container == nil
+	-- The 2 x 2 grid only belongs to window 0; other windows show the player's name there.
+	local grid = MenuLayout.showsGrid(container)
+	if grid ~= self.gridShown then
+		self.gridShown = grid
+		self.gridGroup.Visible = grid
+		self.nameLabel.Visible = not grid
+	end
+	self.playerClose.Visible = UserInputService.TouchEnabled and panelContainer == nil
+	local showTabs = tabs and panelContainer == nil
 	self.tabsShown = showTabs
 	for _, frame in self.tabFrames do
 		frame.Visible = showTabs
@@ -356,17 +487,17 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 	assignIndices(self, { id = 0, inventory = Types.newInventory(), container = container })
 end
 
--- Where an item sits in a character's right hand (as Player/HeldItems places it).
-local function grip(character: Model): CFrame?
-	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
-	if hand == nil or not hand:IsA("BasePart") then
-		return nil
+-- The open furnace's flame and arrow, from its `data` (MenuLayout.flameRows / arrowColumns).
+local function renderGauges(self: Self, window: Window)
+	if self.flame == nil and self.progress == nil then
+		return
 	end
-	local attachment = hand:FindFirstChild("RightGripAttachment")
-	local base = if attachment and attachment:IsA("Attachment")
-		then attachment.WorldCFrame
-		else hand.CFrame * CFrame.new(0, -hand.Size.Y / 2, 0)
-	return base * CFrame.new(0, 0, -HAND_SIZE * 0.3) * CFrame.Angles(0, math.rad(45), 0)
+	local container = window.container
+	local data = if container and container.kind == "furnace" then container.data else nil
+	setGauge(self.flame, MenuLayout.flameRows(data), true)
+	-- (Minecraft draws the arrow one column wider than its progress; the art starts one in.)
+	local columns = MenuLayout.arrowColumns(data)
+	setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
 end
 
 -- Puts the selected item in the preview's hand (rebuilt only when it changes).
@@ -384,9 +515,10 @@ local function updateHeld(self: Self, window: Window)
 		self.heldModel = nil
 	end
 	local clone = self.clone
-	local at = clone and grip(clone)
+	-- Held as Player/HeldItems holds it on characters (tools upright from the fist).
+	local at = if clone and item then ItemModels.handPivot(item, clone) else nil
 	if clone and at and item then
-		local model = ItemModels.build(item, HAND_SIZE)
+		local model = ItemModels.build(item, ItemModels.handSize(item))
 		model:PivotTo(at)
 		-- Inside the clone, so it turns with it.
 		model.Parent = clone
@@ -400,7 +532,7 @@ function InventoryScreen.render(self: Self, window: Window, hover: Target?, drag
 	local hovered = if hover and hover.kind == "slot" then hover.index else -1
 	local function draw(widget: SlotWidget)
 		local stack = Menu.get(window, widget.window)
-		widget.view.icon:set(stack and stack.item, stack and stack.count)
+		widget.view.icon:set(stack and stack.item, stack and stack.count, stack and stack.damage)
 		local lit = widget.window == hovered or dragged[widget.window] == true
 		if widget.view.hover.Visible ~= lit then
 			widget.view.hover.Visible = lit
@@ -413,14 +545,20 @@ function InventoryScreen.render(self: Self, window: Window, hover: Target?, drag
 	for _, widget in self.containerSlots do
 		draw(widget)
 	end
+	if self.gridShown then
+		for _, widget in self.gridSlots do
+			draw(widget)
+		end
+	end
 	for _, widget in self.playerSlots do
 		draw(widget)
 	end
+	renderGauges(self, window)
 end
 
 -- What is under `point` (screen pixels): a slot, nil over a panel, or outside.
 function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
-	for _, list in { self.containerSlots, self.playerSlots } do
+	for _, list in { self.containerSlots, self.gridSlots, self.playerSlots } do
 		for _, widget in list do
 			if widget.window >= 0 and Style.contains(widget.view.button, point) then
 				return { kind = "slot", index = widget.window }
@@ -448,7 +586,8 @@ function InventoryScreen.targetOf(self: Self, object: GuiObject): Target?
 	return nil
 end
 
--- Where gamepad selection starts: the container's first slot, else the first hotbar slot.
+-- Where gamepad selection starts: the block panel's first slot (a grid's top left, a furnace's
+-- input), else the first hotbar slot.
 function InventoryScreen.firstSelectable(self: Self): GuiObject?
 	local first = self.containerSlots[1]
 	if first then
