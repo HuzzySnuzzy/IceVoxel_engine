@@ -20,6 +20,8 @@ local SafeSpot = require(script.Parent.SafeSpot)
 local BLOCK = Config.BlockSize
 -- The root part sits ~3 studs above the ground for default characters; add a little margin.
 local ROOT_HEIGHT = 3.5
+-- Seconds between searches while the spawn area has no safe spot.
+local RETRY_DELAY = 30
 
 local Spawning = {}
 
@@ -31,18 +33,27 @@ end
 function Spawning.start(world: WorldServer.World)
 	local sx, _, sz = world.generator.findSpawn()
 	local spot: { number }? = nil
+	-- When no safe spot exists nearby, searching again on every spawn would generate chunks and
+	-- scan thousands of columns each time, so wait a while before the next search.
+	local retryAt = -math.huge
 
 	local function spawnPosition(): Vector3
-		if spot == nil or not SafeSpot.isSafe(world, spot[1], spot[2], spot[3]) then
+		local current = spot
+		if
+			current == nil or (os.clock() >= retryAt and not SafeSpot.isSafe(world, current[1], current[2], current[3]))
+		then
 			local x, y, z = SafeSpot.find(world, sx, sz)
 			if x == nil then
 				warn("[IceVoxel] no safe spawn found near the world spawn; using the top of its column")
-				spot = { sx, world:topBlock(sx, sz) + 1, sz }
+				current = { sx, world:topBlock(sx, sz) + 1, sz }
+				retryAt = os.clock() + RETRY_DELAY
 			else
-				spot = { x, y, z }
+				current = { x, y, z }
+				retryAt = -math.huge
 			end
+			spot = current
 		end
-		local s = spot :: { number }
+		local s = current :: { number }
 		return Spawning.rootPosition(s[1], s[2], s[3])
 	end
 

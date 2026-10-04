@@ -6,11 +6,15 @@
 	columns further and further away, and within each column the highest safe spot that is not
 	below the natural terrain surface. Uses the real world data (player builds included), and may
 	generate chunks on the server while searching.
+
+	Columns in chunks nobody edited are exactly what the generator made, so for those the scan
+	starts just above the tallest structure and open water is skipped without loading the chunk.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Biomes = require(Shared.Biomes)
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 
@@ -20,6 +24,10 @@ local SpawnUnsafeBlocks = require(script.Parent.SpawnUnsafeBlocks)
 type World = WorldServer.World
 
 local HEIGHT = Config.WorldHeight
+local SEA = Config.SeaLevel
+local CHUNK = Config.ChunkSize
+-- Generated structures (trees) never reach higher than this above the terrain surface.
+local STRUCTURE_CLEARANCE = 20
 local SIDES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 
 -- Turns block / fluid group names into a set of block ids.
@@ -75,8 +83,17 @@ end
 
 -- Highest safe feet position in a column that is not below the natural surface, or nil.
 function SafeSpot.column(world: World, x: number, z: number): number?
-	local surface = world.generator.column(x, z)
-	for y = world:topBlock(x, z) + 1, math.max(surface, 1), -1 do
+	local surface, biome = world.generator.column(x, z)
+	local top
+	if world:chunkEdits(x // CHUNK, z // CHUNK) then
+		top = world:topBlock(x, z) + 1
+	else
+		if surface < SEA and not Biomes.list[biome].frozen then
+			return nil -- open water
+		end
+		top = math.min(math.max(surface, SEA) + STRUCTURE_CLEARANCE, HEIGHT - headroom)
+	end
+	for y = top, math.max(surface, 1), -1 do
 		if SafeSpot.isSafe(world, x, y, z) then
 			return y
 		end

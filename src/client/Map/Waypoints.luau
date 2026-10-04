@@ -3,8 +3,11 @@
 	The player's waypoints: the list, beacons in the world, and syncing with the server
 	(Players/WaypointStore), which keeps them between sessions.
 
-	Every change sends the whole list (debounced); the server answers with the saved list when the
-	player joins and with filtered names if filtering changed any.
+	Every change bumps a revision number and sends the whole list (debounced) with it. The server
+	sends the saved list when the player joins (revision 0) and echoes a revision when filtering
+	changed names in it; an echo is applied only if no newer change was made since, so a slow
+	answer never undoes a change. Nothing is sent before the saved list arrived; waypoints added
+	before that are merged into it.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -54,6 +57,8 @@ function Waypoints.new(): Waypoints
 	folder.Parent = workspace.CurrentCamera
 	local beacons: { { part: Part, label: TextLabel } } = {}
 	local saveAt: number? = nil
+	local revision = 0
+	local synced = false
 
 	local function rebuildBeacons()
 		for _, beacon in beacons do
@@ -97,7 +102,10 @@ function Waypoints.new(): Waypoints
 	local function changed(save: boolean)
 		rebuildBeacons()
 		if save then
-			saveAt = os.clock() + SAVE_DELAY
+			revision += 1
+			if synced then
+				saveAt = os.clock() + SAVE_DELAY
+			end
 		end
 		if self.onChanged then
 			self.onChanged()
@@ -106,8 +114,26 @@ function Waypoints.new(): Waypoints
 	self.changed = changed
 
 	ClientNet.on(Protocol.ServerMessage.Waypoints, function(payload)
-		local list = Protocol.decodeWaypoints(payload)
-		if list then
+		local list, answered = Protocol.decodeWaypoints(payload)
+		if list == nil then
+			return
+		end
+		if not synced then
+			synced = true
+			local added = self.list
+			self.list = list
+			if revision > 0 then
+				for _, waypoint in added do
+					if #list >= Protocol.MAX_WAYPOINTS then
+						break
+					end
+					table.insert(list, waypoint)
+				end
+				changed(true)
+				return
+			end
+			changed(false)
+		elseif answered == revision then
 			self.list = list
 			changed(false)
 		end
@@ -117,7 +143,7 @@ function Waypoints.new(): Waypoints
 	RunService.Heartbeat:Connect(function(dt)
 		if saveAt and os.clock() >= saveAt then
 			saveAt = nil
-			ClientNet.send(Protocol.ClientMessage.SaveWaypoints, Protocol.encodeWaypoints(self.list))
+			ClientNet.send(Protocol.ClientMessage.SaveWaypoints, Protocol.encodeWaypoints(self.list, revision))
 		end
 		sinceLabels += dt
 		if sinceLabels < 0.25 then

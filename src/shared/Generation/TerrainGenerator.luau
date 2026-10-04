@@ -343,11 +343,12 @@ function TerrainGenerator.new(seed: number): Generator
 
 	local function findSpawn(): (number, number, number)
 		-- Walk an outward square spiral until we find dry land that is not a beach or a cliff.
+		-- Samples every 16 blocks, up to ~1000 blocks from the origin.
 		local x, z, dx, dz = 0, 0, 0, -1
-		for _ = 1, 4096 do
-			local h, _, _, surface, c = sample(x * 8, z * 8)
+		for _ = 1, 16384 do
+			local h, _, _, surface, c = sample(x * 16, z * 16)
 			if h > SEA + 2 and c > COAST and surface ~= SNOW then
-				return x * 8, h, z * 8
+				return x * 16, h, z * 16
 			end
 			if x == z or (x < 0 and x == -z) or (x > 0 and x == 1 - z) then
 				dx, dz = -dz, dx

@@ -95,29 +95,30 @@ return function(t, shared, require, server)
 			{ name = "Home", x = 10, y = 70, z = -20, color = { 255, 0, 10 } },
 			{ name = "Mine ⛏", x = -400, y = 12, z = 999, color = { 1, 2, 3 } },
 		}
-		local decoded = Protocol.decodeWaypoints(Protocol.encodeWaypoints(list))
+		local decoded, revision = Protocol.decodeWaypoints(Protocol.encodeWaypoints(list, 7))
 		assert(decoded)
+		t.eq(revision, 7)
 		t.eq(#decoded, 2)
 		t.eq(decoded[2].name, "Mine ⛏")
 		t.eq(decoded[2].x, -400)
 		t.eq(decoded[1].color[1], 255)
 
 		local long = { { name = string.rep("a", 100), x = 0, y = 0, z = 0, color = { 0, 0, 0 } } }
-		local trimmed = Protocol.decodeWaypoints(Protocol.encodeWaypoints(long))
+		local trimmed = Protocol.decodeWaypoints(Protocol.encodeWaypoints(long, 1))
 		assert(trimmed)
 		t.eq(#trimmed[1].name, Protocol.MAX_WAYPOINT_NAME, "names are capped")
 		local emoji = Protocol.truncateName(string.rep("a", 31) .. "⛏⛏")
 		t.eq(emoji, string.rep("a", 31), "never splits a UTF-8 character")
 		t.ok(utf8.len(Protocol.truncateName(string.rep("é", 40))) ~= nil, "still valid UTF-8")
 
-		local bad = Protocol.encodeWaypoints(list)
-		t.eq(Protocol.decodeWaypoints(buffer.create(0)), nil, "empty")
+		local bad = Protocol.encodeWaypoints(list, 2)
+		t.eq((Protocol.decodeWaypoints(buffer.create(0))), nil, "empty")
 		local truncated = buffer.create(buffer.len(bad) - 1)
 		buffer.copy(truncated, 0, bad, 0, buffer.len(truncated))
-		t.eq(Protocol.decodeWaypoints(truncated), nil, "truncated")
-		local tooMany = buffer.create(1)
-		buffer.writeu8(tooMany, 0, Protocol.MAX_WAYPOINTS + 1)
-		t.eq(Protocol.decodeWaypoints(tooMany), nil, "too many")
+		t.eq((Protocol.decodeWaypoints(truncated)), nil, "truncated")
+		local tooMany = buffer.create(5)
+		buffer.writeu8(tooMany, 4, Protocol.MAX_WAYPOINTS + 1)
+		t.eq((Protocol.decodeWaypoints(tooMany)), nil, "too many")
 	end)
 
 	t.test("world records edits, queues replication and survives eviction", function()

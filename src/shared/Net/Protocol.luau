@@ -19,7 +19,9 @@
 	  Edits          u32 count, count x (i32 x, u16 y, i32 z, u16 block)
 	  Waypoints      waypoint list (below)
 
-	Waypoint list: u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name bytes)
+	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
+	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
+	  list loaded on join), so neither side ever applies an older list over a newer one.
 ]]
 
 local Protocol = {}
@@ -220,17 +222,18 @@ function Protocol.truncateName(name: string): string
 	return string.sub(name, 1, cut)
 end
 
-function Protocol.encodeWaypoints(list: { Waypoint }): buffer
+function Protocol.encodeWaypoints(list: { Waypoint }, revision: number): buffer
 	local count = math.min(#list, Protocol.MAX_WAYPOINTS)
-	local size = 1
+	local size = 5
 	local names = table.create(count)
 	for i = 1, count do
 		names[i] = Protocol.truncateName(list[i].name)
 		size += 16 + #names[i]
 	end
 	local b = buffer.create(size)
-	buffer.writeu8(b, 0, count)
-	local o = 1
+	buffer.writeu32(b, 0, revision)
+	buffer.writeu8(b, 4, count)
+	local o = 5
 	for i = 1, count do
 		local w = list[i]
 		buffer.writei32(b, o, w.x)
@@ -246,29 +249,30 @@ function Protocol.encodeWaypoints(list: { Waypoint }): buffer
 	return b
 end
 
--- Returns nil when the payload is malformed.
-function Protocol.decodeWaypoints(b: buffer): { Waypoint }?
+-- Returns the list and its revision, or nil when the payload is malformed.
+function Protocol.decodeWaypoints(b: buffer): ({ Waypoint }?, number)
 	local len = buffer.len(b)
-	if len < 1 then
-		return nil
+	if len < 5 then
+		return nil, 0
 	end
-	local count = buffer.readu8(b, 0)
+	local revision = buffer.readu32(b, 0)
+	local count = buffer.readu8(b, 4)
 	if count > Protocol.MAX_WAYPOINTS then
-		return nil
+		return nil, 0
 	end
 	local list: { Waypoint } = {}
-	local o = 1
+	local o = 5
 	for _ = 1, count do
 		if o + 16 > len then
-			return nil
+			return nil, 0
 		end
 		local nameLength = buffer.readu8(b, o + 15)
 		if nameLength > Protocol.MAX_WAYPOINT_NAME or o + 16 + nameLength > len then
-			return nil
+			return nil, 0
 		end
 		local x, y, z = buffer.readi32(b, o), buffer.readi32(b, o + 4), buffer.readi32(b, o + 8)
 		if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE or math.abs(y) > 4096 then
-			return nil
+			return nil, 0
 		end
 		table.insert(list, {
 			x = x,
@@ -280,9 +284,9 @@ function Protocol.decodeWaypoints(b: buffer): { Waypoint }?
 		o += 16 + nameLength
 	end
 	if o ~= len then
-		return nil
+		return nil, 0
 	end
-	return list
+	return list, revision
 end
 
 return Protocol
