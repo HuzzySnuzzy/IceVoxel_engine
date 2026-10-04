@@ -11,8 +11,9 @@
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
-	  5. players    -> cosmetic characters (collision group, teleports, fall damage), safe spawning,
-	                   map teleports, waypoints, keeping chunks around players generated
+	  5. players    -> game modes (/gamemode), cosmetic characters (collision group, teleports, fall
+	                   damage), item entities (drops), inventories and chests, safe spawning, map
+	                   teleports, waypoints, keeping chunks around players generated
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -30,6 +31,9 @@ local Simulation = require(Server.World.Simulation)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
 local Characters = require(Server.Players.Characters)
+local GameModes = require(Server.Players.GameModes)
+local Inventories = require(Server.Players.Inventories)
+local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
 local WaypointStore = require(Server.Players.WaypointStore)
@@ -40,12 +44,24 @@ print(`[IceVoxel] world seed {seed}`)
 
 local world = WorldServer.new(TerrainGenerator.new(seed))
 local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
-world.onChanged = function(x, y, z)
+world.onChanged = function(x, y, z, old, new)
 	ticker:blockChanged(x, y, z)
+	-- A chest replaced by anything (breaking, the Api, block updates) drops what it holds.
+	Inventories.blockChanged(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
+GameModes.start(net)
 Characters.start(net)
+-- Items must exist before anything can drop them.
+Entities.start(net, world)
+Inventories.start(net, world)
+net.setRules({
+	place = Inventories.place,
+	acknowledge = Inventories.acknowledge,
+	dropBlock = Entities.dropBlock,
+	removeContainer = Inventories.removeContainer,
+})
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
