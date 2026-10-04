@@ -11,6 +11,7 @@
 	    the hull moves with it,
 	  * landings reported by the client turn into fall damage (Config.Movement.FallDamage), like
 	    Minecraft: ceil(distance - 3) half hearts of 20, scaled to the Humanoid's MaxHealth.
+	    Survival players only: creative players never take fall damage (they may fly).
 ]]
 
 local Players = game:GetService("Players")
@@ -18,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local Rig = require(Shared.Movement.Rig)
 
@@ -56,8 +58,11 @@ function Characters.start(net: ServerNet.ServerNet)
 	if not workspace:IsCollisionGroupRegistered(Rig.COLLISION_GROUP) then
 		workspace:RegisterCollisionGroup(Rig.COLLISION_GROUP)
 	end
-	workspace:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, "Default", false)
-	workspace:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, Rig.COLLISION_GROUP, false)
+	-- Every group registered so far (Default, this one, a game's own); groups registered later
+	-- collide with characters unless the game turns that off itself.
+	for _, group in workspace:GetRegisteredCollisionGroups() do
+		workspace:CollisionGroupSetCollidable(Rig.COLLISION_GROUP, group.name, false)
+	end
 
 	local function onCharacter(character: Model)
 		for _, part in character:GetDescendants() do
@@ -66,10 +71,15 @@ function Characters.start(net: ServerNet.ServerNet)
 		local added = character.DescendantAdded:Connect(function(part)
 			setGroup(part, Rig.COLLISION_GROUP)
 		end)
+		-- Parts leaving the character (a dropped tool) collide normally again.
+		local removing = character.DescendantRemoving:Connect(function(part)
+			setGroup(part, "Default")
+		end)
 		local humanoid = character:WaitForChild("Humanoid", 10)
 		if humanoid and humanoid:IsA("Humanoid") then
 			humanoid.Died:Connect(function()
 				added:Disconnect()
+				removing:Disconnect()
 				for _, part in character:GetDescendants() do
 					setGroup(part, "Default")
 				end
@@ -91,7 +101,7 @@ function Characters.start(net: ServerNet.ServerNet)
 	-- Fall damage reported by the client when it lands.
 	local landings: { [Player]: { count: number, since: number } } = {}
 	net.on(Protocol.ClientMessage.Fall, function(player: Player, payload: buffer)
-		if not Config.Movement.FallDamage then
+		if not Config.Movement.FallDamage or GameMode.of(player) ~= GameMode.SURVIVAL then
 			return
 		end
 		local distance = Protocol.decodeFall(payload)
