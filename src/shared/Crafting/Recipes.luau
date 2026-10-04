@@ -26,6 +26,7 @@ Recipes.tags = {
 	logs = { "OakLog", "BirchLog", "SpruceLog", "AcaciaLog", "JungleLog" },
 	stone_tool_materials = { "Cobblestone" },
 	stone_crafting_materials = { "Cobblestone" },
+	coals = { "Coal", "Charcoal" },
 }
 
 local shaped: { Shaped } = {}
@@ -126,6 +127,12 @@ for _, material in { { "Iron", "IronIngot" }, { "Gold", "GoldIngot" }, { "Diamon
 	shape({ "XXX", "X X", "X X" }, key, material[1] .. "Leggings")
 	shape({ "X X", "X X" }, key, material[1] .. "Boots")
 end
+
+--[[ Light ]]
+
+shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)
+shape({ "XXX", "X#X", "XXX" }, { X = "IronNugget", ["#"] = "Torch" }, "Lantern")
+shape({ "##", "##" }, { ["#"] = "GlowstoneDust" }, "Glowstone")
 
 --[[ Smelting ]]
 

@@ -5,6 +5,8 @@
 	  * Every placeable block (BlockList `placeable`) is an item whose id is the block's id, so a
 	    block item places `block = id`.
 	  * Other items (ItemList: crafting materials, tools, armor) have ids from ITEM_BASE up.
+	  * Block variants that are no item of their own (wall torches) name the item that places and
+	    drops them (BlockList `item`); `ofBlock` answers it.
 
 	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
@@ -118,6 +120,19 @@ end
 
 assert(#list < 65535, "Item ids must fit 16 bits")
 
+-- What blocks drop and the items placing their variants must exist (`drops` / `item` are looked up
+-- without erroring later, so a typo would silently drop nothing).
+for id = 0, Blocks.count - 1 do
+	local block = Blocks.get(id)
+	local drops = block.drops
+	assert(type(drops) ~= "string" or ids[drops] ~= nil, `Block {block.name} drops unknown item {drops}`)
+	local item = block.item
+	assert(
+		item == nil or (ids[item] ~= nil and defs[ids[item]].block ~= nil),
+		`Block {block.name} is placed by {item}, which is no block item`
+	)
+end
+
 -- Every item, in creative inventory order.
 Items.list = list
 
@@ -148,13 +163,19 @@ function Items.displayName(id: number): string
 	return if def then def.displayName else "?"
 end
 
--- The item of a block, if the block is one.
+--[[
+	The item of a block: the block itself when it is an item, else the item its `item` field names
+	(a wall torch's is the Torch: what placing uses up, pick block selects and breaking drops).
+	nil when it is neither.
+]]
 function Items.ofBlock(block: number): number?
 	local def = defs[block]
 	if def and def.block == block then
 		return block
 	end
-	return nil
+	local blockDef = if Blocks.isValid(block) then Blocks.get(block) else nil
+	local name = blockDef and blockDef.item
+	return if name then rawget(ids :: any, name) else nil
 end
 
 -- Armor slot (1 head .. 4 feet) an item is worn in, if it is armor.
@@ -183,17 +204,29 @@ function Items.canHarvest(block: number, tool: number?): boolean
 	return data ~= nil and data.kind == def.tool and data.level >= def.toolLevel
 end
 
--- What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing).
-function Items.drops(block: number, tool: number?): Stack?
-	local def = Blocks.get(block)
-	if def == nil or def.drops == false or not Items.canHarvest(block, tool) then
+--[[
+	What `block` drops when it breaks by itself (nil = nothing): a torch losing its wall, a lantern
+	its ceiling, a torch washed away. No tool is involved, so nothing is held back for want of one
+	(Minecraft only asks for the right tool when a player breaks the block).
+]]
+function Items.blockDrops(block: number): Stack?
+	local def = if Blocks.isValid(block) then Blocks.get(block) else nil
+	if def == nil or def.drops == false then
 		return nil
 	end
-	local item = if type(def.drops) == "string" then ids[def.drops] else Items.ofBlock(block)
+	local item = if type(def.drops) == "string" then rawget(ids :: any, def.drops) else Items.ofBlock(block)
 	if item == nil then
 		return nil
 	end
 	return { item = item, count = def.dropCount }
+end
+
+-- What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing).
+function Items.drops(block: number, tool: number?): Stack?
+	if not Blocks.isValid(block) or not Items.canHarvest(block, tool) then
+		return nil
+	end
+	return Items.blockDrops(block)
 end
 
 -- Items whose name or display name contains `query` (any case), in creative order.

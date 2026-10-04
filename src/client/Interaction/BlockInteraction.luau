@@ -29,10 +29,18 @@
 	Config.Interaction.RepeatInterval. A block is never placed where it would overlap a player's
 	standing hull (the server checks the same and would undo it).
 
+	Torches and lanterns go where something holds them (Blocks.placementFor, Minecraft's rules): a
+	torch on top of a block stands, on a side it is a wall torch facing away from it, under a
+	ceiling it goes on a wall or the floor next to the spot (by where the player looks) or nowhere;
+	a lantern clicked under a block hangs from it. The variant's block id is what is sent; the
+	server checks the support again.
+
 	Targeting is a voxel raycast on the client's block data, so it is exact and independent of the
-	parts. Edits are predicted locally and confirmed / corrected by the server. Nothing happens
-	while an inventory screen is open (Ui/Screens). Broken blocks throw a few debris particles in
-	their colour; hitting, placing, using and dropping swing the held item (Player/HeldItems).
+	parts; blocks smaller than their cell (torches, lanterns) are aimed at and outlined by their own
+	box (Blocks.outline), so the ray passes beside a torch to the wall behind it. Edits are
+	predicted locally and confirmed / corrected by the server. Nothing happens while an inventory
+	screen is open (Ui/Screens). Broken blocks throw a few debris particles in their colour;
+	hitting, placing, using and dropping swing the held item (Player/HeldItems).
 ]]
 
 local Players = game:GetService("Players")
@@ -78,6 +86,8 @@ local MAX_PARTICLES = 40
 local PARTICLE_GRAVITY = 45 -- studs / s^2
 -- The arm swing restarts once it is half done (LivingEntity.swing; a swing lasts 6 ticks).
 local SWING_RESTART = 0.15
+-- A whole cell, as Blocks.outline gives boxes.
+local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
 
 local BlockInteraction = {}
 
@@ -186,7 +196,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			ray.Direction.Z,
 			maxDistance,
 			getBlock,
-			Blocks.isTargetable
+			Blocks.isTargetable,
+			Blocks.outline
 		)
 		if hit then
 			local center = Vector3.new(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5) * BLOCK
@@ -504,6 +515,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if current == nil or not Blocks.isReplaceable(current) then
 			return
 		end
+		-- Torches and lanterns: the variant that something holds there (the clicked face first,
+		-- then the way the player looks), or nothing.
+		local look = workspace.CurrentCamera.CFrame.LookVector
+		local variant = Blocks.placementFor(block, hit.nx, hit.ny, hit.nz, look.X, look.Y, look.Z, getBlock, x, y, z)
+		if variant == nil then
+			return
+		end
+		block = variant
 		if Blocks.isSolid(block) and blocksCharacter(x, y, z) then
 			return
 		end
@@ -619,6 +638,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[ Every frame ]]
 
+	-- The outline the highlight was last sized for.
+	local outlined: { number }? = nil
+
 	RunService.RenderStepped:Connect(function(dt: number)
 		local now = os.clock()
 		local open = Screens.isOpen()
@@ -649,7 +671,18 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			if highlight.Parent ~= workspace.CurrentCamera then
 				highlight.Parent = workspace.CurrentCamera
 			end
-			highlight.CFrame = CFrame.new((hit.x + 0.5) * BLOCK, (hit.y + 0.5) * BLOCK, (hit.z + 0.5) * BLOCK)
+			-- The block's outline: its cell, or the box of a torch or lantern.
+			local box = Blocks.outline(hit.block) or FULL_OUTLINE
+			if box ~= outlined then
+				outlined = box
+				highlight.Size = Vector3.new(box[4] - box[1], box[5] - box[2], box[6] - box[3]) * BLOCK
+					+ Vector3.one * 0.05
+			end
+			highlight.CFrame = CFrame.new(
+				(hit.x + (box[1] + box[4]) / 2) * BLOCK,
+				(hit.y + (box[2] + box[5]) / 2) * BLOCK,
+				(hit.z + (box[3] + box[6]) / 2) * BLOCK
+			)
 			selection.Visible = true
 		else
 			selection.Visible = false

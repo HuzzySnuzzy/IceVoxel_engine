@@ -20,7 +20,10 @@
 	    same height merge.
 	  * Blocks with decorated faces (Blocks.singleLut, e.g. chests) are always one box per block, so
 	    each gets its own part to draw the faces on. Other opaque boxes may still grow through such
-	    blocks where they are hidden (wildcards), which nobody can see.
+	    blocks where they are hidden (wildcards), which nobody can see. The same goes for shaped
+	    blocks (torches, lanterns: the renderer draws their shape boxes in the cell) and blocks
+	    giving off light (glowstone: one PointLight per block). Shaped blocks render like glass, so
+	    they never hide a neighbour and no opaque box runs through them.
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
 	    the camera is not close to.
 	  * `border` (optional) describes what surrounds the meshed range (see `Border`):

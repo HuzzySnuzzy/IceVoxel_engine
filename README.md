@@ -41,6 +41,13 @@ A fast, Minecraft-style voxel engine for Roblox.
   sunrises and sunsets, dark blue nights you can still find your way in (Minecraft's night sky
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
   `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
+- **Torches, lanterns and glowstone.** Light sources for the dark: torches (light 14) stand on
+  blocks or hang on walls, leaning out like Minecraft's; lanterns (15) stand on a block or hang
+  under one; glowstone (15) is a glowing full block. Each gives off a Roblox PointLight, with
+  shadows when `Config.Render.Shadows` is on, so light stops at walls. Torches and lanterns pop off
+  and drop when the block holding them goes, and flowing water washes torches away. Recipes: 4
+  torches from coal or charcoal over a stick, a lantern from 8 iron nuggets around a torch,
+  glowstone from 4 glowstone dust.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -102,6 +109,7 @@ Studio tips:
 | Break block   | Hold left click (survival mines, creative breaks at once) | R2 | Hold |
 | Place / use   | Right click (opens chests, crafting tables, furnaces) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
+| Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Pick block    | Middle click                |         |            |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker) | Y   | `…` button |
@@ -157,7 +165,8 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation, TimeOfDay (the
                             day clock, published as workspace attributes)
-  Behaviours/               Gravity, Fluid, Grass (block update logic)
+  Behaviours/               Gravity, Fluid, Grass, Attached (torches and lanterns need support),
+                            Drops (block update logic)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops),
                             replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
@@ -278,6 +287,12 @@ mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `
 need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
 nothing, `container = 27, menu = "Chest"` for a chest-like block). Blocks that look identical
 share one part template.
+
+**A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
+offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from
+boxes; `support = "Down"` (or "Up", "North"...) makes it need a sturdy block there; `item =
+"Torch"` makes it a variant placed by and dropping another item (the name must be a block item:
+checked at load).
 
 **An item.** Items that are not blocks (armor, tools, materials) live in
 `src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured

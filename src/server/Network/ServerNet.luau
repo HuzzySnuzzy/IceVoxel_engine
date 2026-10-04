@@ -4,8 +4,9 @@
 
 	  * Answers chunk edit requests (clients ask for the edit list of every full detail chunk they
 	    build; terrain itself is generated locally).
-	  * Validates block edit requests: rate limit, reach, breakable / placeable, not inside a player.
-	    Rejected requests are answered with the real block so the client undoes its prediction.
+	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
+	    block (torch, lantern) hangs on, not inside a player. Rejected requests are answered with
+	    the real block so the client undoes its prediction.
 	  * Applies the game modes' rules to edits (Network/EditRules):
 	      survival  a block breaks only once the player has mined it long enough with the tool in
 	                their hand when the break arrives (Mine messages say when they started;
@@ -19,7 +20,9 @@
 	  * Broadcasts all world changes once per frame.
 
 	The inventory and item entity sides come in through `setRules` (the server script wires
-	Players/Inventories and Entities), so ServerNet requires neither of them.
+	Players/Inventories and Entities), so ServerNet requires neither of them. Its `dropBlock` rule
+	also goes to Behaviours/Drops, so block updates (a torch losing its wall, water washing one
+	away) drop items the same way.
 ]]
 
 local Players = game:GetService("Players")
@@ -35,6 +38,7 @@ local Remotes = require(Shared.Net.Remotes)
 local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
+local Drops = require(script.Parent.Parent.Behaviours.Drops)
 local EditRules = require(script.Parent.EditRules)
 local Mining = require(Shared.Mining)
 
@@ -110,7 +114,8 @@ export type Rules = {
 	-- A refused placement: acknowledge `seq` so the client undoes its predicted use.
 	-- (Players/Inventories.acknowledge)
 	acknowledge: ((player: Player, seq: number) -> ())?,
-	-- Drops a survival player's broken block as an item entity. (Entities.dropBlock)
+	-- Drops a survival player's broken block as an item entity (Entities.dropBlock). Block
+	-- behaviours use it too (Behaviours/Drops: torches popping off, washed away).
 	dropBlock: ((x: number, y: number, z: number, stack: Items.Stack) -> ())?,
 	-- A block with a window (chest, furnace, crafting table) was broken: drop its contents and
 	-- close it for everyone using it. (Players/Inventories.removeContainer)
@@ -159,6 +164,11 @@ function ServerNet.start(world: World): ServerNet
 	}
 	local delayed: { [Player]: DelayedBreak } = {}
 	local rules: Rules = {}
+
+	-- World reads that never generate terrain (what an attached block would hang on).
+	local function peekBlock(x: number, y: number, z: number): number?
+		return world:peekBlock(x, y, z)
+	end
 
 	local function bucket(map: { [Player]: Bucket }, player: Player, initial: number): Bucket
 		local b = map[player]
@@ -392,7 +402,11 @@ function ServerNet.start(world: World): ServerNet
 			mining[player] = nil
 			performBreak(x, y, z, current, creative, tool, if creative then nil else player)
 		elseif action == EditAction.Place then
-			if not EditRules.mayPlace(block, current) or (Blocks.isSolid(block) and intersectsCharacter(x, y, z)) then
+			if
+				not EditRules.mayPlace(block, current)
+				or not EditRules.supported(block, peekBlock, x, y, z)
+				or (Blocks.isSolid(block) and intersectsCharacter(x, y, z))
+			then
 				reject()
 				return
 			end
@@ -455,6 +469,7 @@ function ServerNet.start(world: World): ServerNet
 		end,
 		setRules = function(newRules: Rules)
 			rules = newRules
+			Drops.set(newRules.dropBlock)
 		end,
 	}
 end

@@ -29,12 +29,17 @@
 
 	Block updates never generate chunks. A fluid whose neighbours or whose slope search reach a
 	chunk that is not loaded waits and retries later instead of guessing what is there.
+
+	Fluids flow into replaceable blocks (air) and wash away blocks marked `brokenByFluid` (torches),
+	which drop their item (Behaviours/Drops), like Minecraft's canHoldFluid / beforeDestroyingBlock.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+
+local Drops = require(script.Parent.Drops)
 
 local FALLING = 8
 local MAX_FLOW = 7
@@ -71,6 +76,20 @@ local function levelOf(block: number?, group: string): number?
 	return nil
 end
 
+-- Does `block` make way for any fluid: air and other replaceable non-fluids, and blocks the flow
+-- washes away (torches)?
+local function yields(block: number): boolean
+	local def = Blocks.get(block)
+	return def.fluid == nil and (def.replaceable or def.brokenByFluid)
+end
+
+-- Puts `fluid` at (x, y, z), where `old` was; a washed away block drops its item.
+local function flowInto(world: any, x: number, y: number, z: number, old: number, fluid: number)
+	if world:setBlock(x, y, z, fluid) and Blocks.get(old).brokenByFluid then
+		Drops.block(x, y, z, old)
+	end
+end
+
 -- Can fluid of `group` flow into `block` with `level`?
 local function canFlowInto(block: number, group: string, level: number): boolean
 	local existing = levelOf(block, group)
@@ -81,7 +100,7 @@ local function canFlowInto(block: number, group: string, level: number): boolean
 		-- Strengthen weaker flowing fluid, or turn it into falling fluid.
 		return level == FALLING or existing > level
 	end
-	return Blocks.isReplaceable(block) and Blocks.get(block).fluid == nil
+	return yields(block)
 end
 
 local function rulesOf(group: string): Rules
@@ -164,12 +183,12 @@ local function cellAt(world: any, x0: number, y: number, z0: number, dx: number,
 		cell = CELL_UNKNOWN
 	else
 		local level = levelOf(block, group)
-		local open = if level ~= nil then level ~= 0 else Blocks.isReplaceable(block) and Blocks.get(block).fluid == nil
+		local open = if level ~= nil then level ~= 0 else yields(block)
 		if open then
 			local below = world:peekBlock(x, y - 1, z)
 			if below == nil then
 				cell = CELL_UNKNOWN
-			elseif levelOf(below, group) ~= nil or (Blocks.isReplaceable(below) and Blocks.get(below).fluid == nil) then
+			elseif levelOf(below, group) ~= nil or yields(below) then
 				cell = CELL_HOLE
 			else
 				cell = CELL_OPEN
@@ -269,7 +288,7 @@ local function spreadToSides(world: any, x: number, y: number, z: number, group:
 		local sx, sz = x + side[1], z + side[2]
 		local neighbour = world:peekBlock(sx, y, sz)
 		if neighbour ~= nil and canFlowInto(neighbour, group, nextLevel) then
-			world:setBlock(sx, y, sz, Blocks.fluidId(group, nextLevel))
+			flowInto(world, sx, y, sz, neighbour, Blocks.fluidId(group, nextLevel))
 		end
 	end
 	return true
@@ -305,7 +324,7 @@ function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, 
 		return
 	end
 	if canFlowInto(below, group, FALLING) then
-		world:setBlock(x, y - 1, z, Blocks.fluidId(group, FALLING))
+		flowInto(world, x, y - 1, z, below, Blocks.fluidId(group, FALLING))
 		-- The edge of a pool of sources keeps spreading while it pours down.
 		if level == 0 then
 			local sources = 0

@@ -169,7 +169,7 @@ return function(t, shared, require)
 			local made = result(cells, 3)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
-		t.eq(#Crafting.recipes, 75, "recipes compiled")
+		t.eq(#Crafting.recipes, 78, "recipes compiled")
 	end)
 
 	t.test("smelting: recipes and fuel follow Minecraft", function()

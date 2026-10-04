@@ -6,6 +6,10 @@
 	server raycast without any parts existing there.
 
 	Positions and distances are in *block units* (studs / Config.BlockSize).
+
+	Blocks smaller than their cell (torches, lanterns) can pass an `outline` (Blocks.outline): the
+	ray must hit that box inside the cell, else it goes on past it (to the wall behind a torch), and
+	the face reported is the outline's.
 ]]
 
 local VoxelRaycast = {}
@@ -22,8 +26,73 @@ export type Hit = {
 	distance: number,
 }
 
--- `getBlock(x, y, z)` returns a block id or nil (unloaded = passes through).
--- `isTarget(id)` decides which blocks stop the ray.
+-- Where the ray (o + t d) crosses one axis' slab lo..hi: entry and exit distances (nil: parallel to
+-- the slab and outside it).
+local function slab(o: number, d: number, lo: number, hi: number): (number?, number)
+	if math.abs(d) < 1e-12 then
+		if o < lo or o > hi then
+			return nil, 0
+		end
+		return -math.huge, math.huge
+	end
+	local t1, t2 = (lo - o) / d, (hi - o) / d
+	if t1 > t2 then
+		return t2, t1
+	end
+	return t1, t2
+end
+
+--[[
+	Where the ray from (ox, oy, oz) along (dx, dy, dz) enters the box (x0, y0, z0)..(x1, y1, z1):
+	the distance and the entry face's axis (1..3), or nil when it misses. Starting inside counts as
+	entering at 0 (axis 0). Scalars only: this runs every frame while aiming at a torch.
+]]
+local function enterBox(
+	ox: number,
+	oy: number,
+	oz: number,
+	dx: number,
+	dy: number,
+	dz: number,
+	x0: number,
+	y0: number,
+	z0: number,
+	x1: number,
+	y1: number,
+	z1: number
+): (number?, number)
+	local nearX, farX = slab(ox, dx, x0, x1)
+	local nearY, farY = slab(oy, dy, y0, y1)
+	local nearZ, farZ = slab(oz, dz, z0, z1)
+	if nearX == nil or nearY == nil or nearZ == nil then
+		return nil, 0
+	end
+	local near, axis = -math.huge, 0
+	if nearX > near then
+		near, axis = nearX, 1
+	end
+	if nearY > near then
+		near, axis = nearY, 2
+	end
+	if nearZ > near then
+		near, axis = nearZ, 3
+	end
+	local far = math.min(farX, farY, farZ)
+	if near > far or far < 0 then
+		return nil, 0
+	end
+	if near < 0 then
+		return 0, 0
+	end
+	return near, axis
+end
+
+--[[
+	`getBlock(x, y, z)` returns a block id or nil (unloaded = passes through).
+	`isTarget(id)` decides which blocks stop the ray.
+	`outline(id)` (optional): the part of the cell a block fills, { minX, minY, minZ, maxX, maxY,
+	maxZ } in 0..1, or nil for the whole cell.
+]]
 function VoxelRaycast.cast(
 	ox: number,
 	oy: number,
@@ -33,7 +102,8 @@ function VoxelRaycast.cast(
 	dz: number,
 	maxDistance: number,
 	getBlock: (x: number, y: number, z: number) -> number?,
-	isTarget: (id: number) -> boolean
+	isTarget: (id: number) -> boolean,
+	outline: ((id: number) -> { number }?)?
 ): Hit?
 	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
 	if length < 1e-9 then
@@ -64,7 +134,23 @@ function VoxelRaycast.cast(
 	while t <= maxDistance do
 		local block = getBlock(x, y, z)
 		if block ~= nil and isTarget(block) then
-			return { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = t }
+			local box = if outline then outline(block) else nil
+			if box == nil then
+				return { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = t }
+			end
+			local enter, axis =
+				enterBox(ox, oy, oz, dx, dy, dz, x + box[1], y + box[2], z + box[3], x + box[4], y + box[5], z + box[6])
+			if enter and enter <= maxDistance then
+				local hit = { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = enter }
+				if axis ~= 0 then
+					local d = if axis == 1 then dx elseif axis == 2 then dy else dz
+					local n = if d > 0 then -1 else 1
+					hit.nx = if axis == 1 then n else 0
+					hit.ny = if axis == 2 then n else 0
+					hit.nz = if axis == 3 then n else 0
+				end
+				return hit
+			end
 		end
 		if tMaxX < tMaxY and tMaxX < tMaxZ then
 			x += stepX

@@ -5,7 +5,10 @@
 	  block items  a cube with the block's look, as the terrain draws it (material, colour,
 	               MaterialVariant texture, face images). Decorated blocks (chest, crafting table,
 	               furnace) get their faces as thin raised slabs (Rendering/BlockDecor), since
-	               ViewportFrames do not draw SurfaceGuis.
+	               ViewportFrames do not draw SurfaceGuis. Shaped blocks (torches, lanterns) are
+	               their shape's boxes, as the terrain draws them (glowing boxes Neon), centred on
+	               the shape; they count as items rather than blocks (`isBlock`), so icons show
+	               them from the front and they drop like items.
 	  other items  their ItemList boxes (pixels, 1/16 of the size), in the item's colour and material,
 	               turned by each box's `rotation`, as balls or cylinders by `shape`, and the whole
 	               model turned by the item's `tilt` (tools and sticks lie diagonally).
@@ -21,7 +24,8 @@
 	In a hand: `handSize` / `handPivot` place a model in a character's right hand (Player/HeldItems,
 	the inventory's character preview). Tools and sticks are held like Minecraft's "handheld" items:
 	upright (their tilt undone), held at the handle, pointing forward and up with the blade forward.
-	Everything else keeps the block pose. `holdPivot` does the same for any pose (first person).
+	Torches are held the same way, by the stick, flame up. Everything else keeps the block pose.
+	`holdPivot` does the same for any pose (first person).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -47,8 +51,8 @@ local HANDHELD_SIZE = 0.6 * BLOCK
 local HANDHELD_PITCH = math.rad(45)
 -- Where the fist holds a handheld item: this many pixels above the bottom of its model.
 local GRIP_FROM_END = 3.5
--- Non-tool items held like tools.
-local HANDHELD_NAMES: { [string]: boolean } = { Stick = true }
+-- Non-tool items held like tools (by the end, pointing forward).
+local HANDHELD_NAMES: { [string]: boolean } = { Stick = true, Torch = true }
 
 local ItemModels = {}
 
@@ -75,6 +79,37 @@ local function viewFrame(def: Items.ItemDef?): CFrame
 end
 
 local prototypes: { [string]: Model } = {}
+
+-- The centre of a shape's outline (pixels from the cell's centre): shaped models are built
+-- around it.
+local function shapeCentre(block: number): Vector3
+	local bounds = Blocks.get(block).bounds
+	return Vector3.new(
+		(bounds.min[1] + bounds.max[1]) / 2 - 8,
+		(bounds.min[2] + bounds.max[2]) / 2 - 8,
+		(bounds.min[3] + bounds.max[3]) / 2 - 8
+	)
+end
+
+-- A shaped block (torch, lantern): its boxes as the terrain draws them, centred on the shape.
+local function shapePrototype(model: Model, block: number, shape: { Blocks.ShapeBox }, size: number)
+	local appearance = Blocks.get(block).appearance
+	local pixel = size / 16
+	local centre = shapeCentre(block)
+	for i, box in shape do
+		local part = PartPool.makeTemplate(appearance, i)
+		inert(part)
+		part.Name = `Box{i}`
+		part.Size = Vector3.new(box.size[1], box.size[2], box.size[3]) * pixel
+		local r = box.rotation or { 0, 0, 0 }
+		local offset = Vector3.new(box.offset[1], box.offset[2], box.offset[3]) - centre
+		part.CFrame = CFrame.new(offset * pixel) * CFrame.Angles(math.rad(r[1]), math.rad(r[2]), math.rad(r[3]))
+		part.Parent = model
+		if i == 1 then
+			model.PrimaryPart = part
+		end
+	end
+end
 
 local function blockPrototype(model: Model, block: number, size: number)
 	local appearance = Blocks.get(block).appearance
@@ -140,7 +175,10 @@ local function prototype(item: number, size: number): Model
 	local model = Instance.new("Model")
 	model.Name = Items.displayName(item)
 	local def = Items.get(item)
-	if def and def.block then
+	local shape = if def and def.block then Blocks.get(def.block).shape else nil
+	if def and def.block and shape then
+		shapePrototype(model, def.block, shape, size)
+	elseif def and def.block then
 		blockPrototype(model, def.block, size)
 	elseif def and def.model then
 		boxesPrototype(model, def, def.model, size)
@@ -169,16 +207,16 @@ function ItemModels.build(item: number, size: number): Model
 	return cached:Clone()
 end
 
--- Is the item drawn as a block (a cube), rather than from boxes?
+-- Is the item drawn as a block (a cube), rather than from boxes (items, shaped blocks)?
 function ItemModels.isBlock(item: number): boolean
 	local def = Items.get(item)
-	return def ~= nil and def.block ~= nil
+	return def ~= nil and def.block ~= nil and Blocks.get(def.block).shape == nil
 end
 
--- Is the item held like a tool (Minecraft's "handheld" models: tools and sticks)?
+-- Is the item held like a tool (Minecraft's "handheld" models: tools and sticks; and torches)?
 function ItemModels.isHandheld(item: number): boolean
 	local def = Items.get(item)
-	return def ~= nil and def.block == nil and (def.tool ~= nil or HANDHELD_NAMES[def.name] == true)
+	return def ~= nil and ((def.block == nil and def.tool ~= nil) or HANDHELD_NAMES[def.name] == true)
 end
 
 -- Height (view space pixels) of the point a handheld item is held by: near the end of its handle.
@@ -190,7 +228,12 @@ local function gripHeight(item: number): number
 	end
 	local def = Items.get(item)
 	local bottom = 0
-	if def and def.model then
+	local shape = if def and def.block then Blocks.get(def.block).shape else nil
+	if def and def.block and shape then
+		-- Shaped blocks are built around their outline's centre.
+		local bounds = Blocks.get(def.block).bounds
+		bottom = (bounds.min[2] - bounds.max[2]) / 2 + GRIP_FROM_END
+	elseif def and def.model then
 		bottom = math.huge
 		for _, box in def.model do
 			bottom = math.min(bottom, box.offset[2] - box.size[2] / 2)

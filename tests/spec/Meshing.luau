@@ -247,6 +247,67 @@ return function(t, shared, require, _server, client)
 		t.eq(verify(buried, 6, 0, 6, false), 1, "the buried chest is swallowed by the stone box")
 	end)
 
+	t.test("light blocks: torches never merge and hide nothing; glowstone is one box per block", function()
+		local torch = Blocks.get(Blocks.id.Torch).appearance
+		local wall = Blocks.get(Blocks.id.WallTorchEast).appearance
+		local glowstone = Blocks.get(Blocks.id.Glowstone).appearance
+		local stone = Blocks.get(Blocks.id.Stone).appearance
+		t.ok(torch ~= wall, "each shape is its own appearance")
+		for _, app in { torch, wall, glowstone, Blocks.get(Blocks.id.Lantern).appearance } do
+			t.eq(buffer.readu8(Blocks.singleLut, app), 1)
+		end
+
+		-- A row and a stack of torches on a floor, a wall torch on a pillar, glowstone in a 2 x 2.
+		local data = stoneFloor(6)
+		for x = 2, 6 do
+			ChunkLayout.set(data, x, 1, 2, Blocks.id.Torch)
+		end
+		for y = 1, 3 do
+			ChunkLayout.set(data, 9, y, 9, Blocks.id.Torch)
+		end
+		ChunkLayout.set(data, 12, 1, 4, Blocks.id.Stone)
+		ChunkLayout.set(data, 13, 1, 4, Blocks.id.WallTorchEast)
+		for z = 6, 7 do
+			for x = 12, 13 do
+				ChunkLayout.set(data, x, 1, z, Blocks.id.Glowstone)
+			end
+		end
+		verify(data, 6, 0, 6, false)
+		local counts: { [number]: number } = {}
+		for _, b in boxList(data, 6) do
+			local app = b[7]
+			counts[app] = (counts[app] or 0) + 1
+			if app == torch or app == wall or app == glowstone then
+				t.eq(b[4] * b[5] * b[6], 1, "one block per box")
+			end
+		end
+		t.eq(counts[torch], 8, "one box per torch")
+		t.eq(counts[wall], 1)
+		t.eq(counts[glowstone], 4, "one box (and light) per glowstone")
+
+		-- A torch sealed inside solid stone: the stone around it has no other open side, yet it is
+		-- drawn, since torches hide nothing (and no stone box may run through the torch).
+		local buried = ChunkLayout.create(8)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				for y = 0, 5 do
+					ChunkLayout.setPadded(buried, x, y, z, Blocks.id.Stone)
+				end
+			end
+		end
+		ChunkLayout.set(buried, 7, 4, 7, Blocks.id.Torch)
+		verify(buried, 8, 0, 8, false)
+		local covered = false
+		for _, b in boxList(buried, 8) do
+			if b[7] == stone and b[1] <= 7 and 7 < b[1] + b[4] and b[3] <= 7 and 7 < b[3] + b[6] then
+				if b[2] <= 3 and 3 < b[2] + b[5] then
+					covered = true
+				end
+			end
+		end
+		t.ok(covered, "the stone under the torch is drawn")
+	end)
+
 	t.test("decorated faces: every decor draws all six faces inside the 16 x 16 grid", function()
 		local BlockDecor = require(client.Rendering.BlockDecor)
 		local grid = BlockDecor.GRID

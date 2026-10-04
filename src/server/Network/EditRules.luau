@@ -8,7 +8,11 @@
 	            ago, holding the tool they hold now: Mining.mayBreak, the server side of
 	            Minecraft's ServerPlayerGameMode check, which allows for network delay.
 	  Placing   a placeable block into a replaceable one (air, water, ...), never the same block.
-	            Survival placement also needs the item in hand (Players/Inventories.place).
+	            Variants placed by another block's item (wall torches by the Torch, a hanging
+	            lantern by the Lantern: BlockList `item`) count as placeable. Blocks that hang on
+	            another one (`support`: torches, lanterns) need it to be sturdy (`supported`,
+	            Blocks.canSurvive). Survival placement also needs the item in hand
+	            (Players/Inventories.place, which maps a variant to its item with Items.ofBlock).
 	  Drops     survival breaks drop Items.drops(block, tool): blocks that need a tool (stone,
 	            ores) drop nothing without a good enough one. A container's contents drop in both
 	            modes (Minecraft's Containers.dropContents runs whatever the game mode).
@@ -63,10 +67,30 @@ function EditRules.mayBreak(
 	return Mining.mayBreak(block, now - mine.startedAt, nil, tool)
 end
 
--- May `block` be placed where `current` is (ignoring players in the way and the inventory)?
+--[[
+	May `block` be placed where `current` is (ignoring what it hangs on, players in the way and the
+	inventory)? Placeable blocks and the variants their items place.
+]]
 function EditRules.mayPlace(block: number, current: number): boolean
 	local d = def(block)
-	return d ~= nil and d.placeable and block ~= current and Blocks.isReplaceable(current)
+	if d == nil or block == current or not Blocks.isReplaceable(current) then
+		return false
+	end
+	return d.placeable or (d.item ~= nil and Items.ofBlock(block) ~= nil)
+end
+
+--[[
+	Is what `block` hangs on there, were it at (x, y, z)? Blocks without a `support` always are.
+	`getBlock` answers nil for blocks that are not loaded, which hold nothing up.
+]]
+function EditRules.supported(
+	block: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number
+): boolean
+	return def(block) ~= nil and Blocks.canSurvive(block, getBlock, x, y, z)
 end
 
 -- What breaking `block` with `tool` drops as an item (nil = nothing; creative players get none).

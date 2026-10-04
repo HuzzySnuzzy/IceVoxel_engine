@@ -802,6 +802,16 @@ return function(t, shared, require, server)
 		t.ok(not EditRules.mayPlace(water, water), "not the same block")
 		t.ok(not EditRules.mayPlace(Blocks.id.Bedrock, AIR), "bedrock is not placeable")
 		t.ok(not EditRules.mayPlace(9999, AIR))
+		-- Torch variants: the Torch item places wall torches; nothing goes over a torch, and a
+		-- torch needs something sturdy to hang on (see LightBlocks).
+		t.ok(EditRules.mayPlace(Blocks.id.WallTorchWest, AIR), "a wall torch is placeable")
+		t.ok(not EditRules.mayPlace(Blocks.id.Stone, Blocks.id.Torch), "not over a torch")
+		local floor = function(_x: number, y: number, _z: number): number?
+			return if y < 5 then Blocks.id.Stone else AIR
+		end
+		t.ok(EditRules.supported(Blocks.id.Torch, floor, 0, 5, 0), "on the floor")
+		t.ok(not EditRules.supported(Blocks.id.Torch, floor, 0, 6, 0), "in the air")
+		t.ok(EditRules.supported(Blocks.id.Stone, floor, 0, 6, 0), "stone needs nothing")
 
 		local function drop(block: number, tool: number?): (number?, number?)
 			local stack = EditRules.drops(block, false, tool)
@@ -824,6 +834,9 @@ return function(t, shared, require, server)
 		t.eq(drop(Blocks.id.Furnace, Items.id.WoodenPickaxe), Items.id.Furnace)
 		t.eq(drop(CHEST), Items.id.Chest, "chests and tables come off by hand")
 		t.eq(drop(TABLE), Items.id.CraftingTable)
+		t.eq(drop(Blocks.id.WallTorchNorth), Items.id.Torch, "a wall torch drops a torch")
+		t.eq(drop(Blocks.id.HangingLantern), nil, "a lantern needs a pickaxe")
+		t.eq(drop(Blocks.id.HangingLantern, Items.id.WoodenPickaxe), Items.id.Lantern)
 		t.eq(EditRules.drops(Blocks.id.Stone, true, Items.id.DiamondPickaxe), nil, "creative: no drops")
 
 		-- Windows close when their block goes; only containers hold items to drop.

@@ -11,6 +11,11 @@
 
 	MeshOverlay sits on top: it may merge stable far nodes into MeshParts and unparent their
 	models meanwhile; it is told about every show, clear and rebuild so it can put them back.
+
+	Shaped blocks (torches, lanterns: BlockList `shape`) come out of the mesher one cell per box
+	(Blocks.singleLut); each becomes one part per shape box, sized and placed from the shape (in
+	pixels, 1/16 of a cell) and turned by the box's rotation. PartPool keeps a template per box,
+	the glowing one carrying the block's PointLight.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,6 +34,25 @@ local FLUID_FULL = Blocks.FLUID_FULL
 local readu16 = buffer.readu16
 -- Longest side of a part in studs (engine limit).
 local MAX_PART = 2048
+
+-- The boxes of shaped appearances, in pixels: size, centre from the cell's centre, rotation.
+type ShapePart = { size: Vector3, offset: Vector3, rotation: CFrame }
+local shapes: { [number]: { ShapePart } } = {}
+for _, appearance in Blocks.appearances do
+	local shape = appearance.shape
+	if shape then
+		local parts: { ShapePart } = {}
+		for _, box in shape do
+			local r = box.rotation or { 0, 0, 0 }
+			table.insert(parts, {
+				size = Vector3.new(box.size[1], box.size[2], box.size[3]),
+				offset = Vector3.new(box.offset[1], box.offset[2], box.offset[3]),
+				rotation = CFrame.Angles(math.rad(r[1]), math.rad(r[2]), math.rad(r[3])),
+			})
+		end
+		shapes[appearance.id] = parts
+	end
+end
 
 -- What the renderer needs to know about a chunk node.
 export type RenderNode = {
@@ -190,6 +214,34 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 			local x, y, z = readu16(boxes, o), readu16(boxes, o + 2), readu16(boxes, o + 4)
 			local sx, sy, sz = readu16(boxes, o + 6), readu16(boxes, o + 8), readu16(boxes, o + 10)
 			local appearance, surface = GreedyMesher.decodeKey(readu16(boxes, o + 12))
+			local shape = shapes[appearance]
+			if shape then
+				-- One part per shape box in every cell (shaped boxes are single cells).
+				local pixel = Vector3.new(scale, scaleY, scale) / 16
+				for cy = y, y + sy - 1 do
+					for cz = z, z + sz - 1 do
+						for cx = x, x + sx - 1 do
+							local centre = Vector3.new(
+								originX + (cx + 0.5) * scale,
+								(cy + 0.5) * scaleY,
+								originZ + (cz + 0.5) * scale
+							)
+							for i, box in shape do
+								local part = pool:acquire(appearance, far, plain, i)
+								part.Size = box.size * pixel
+								part.CFrame = CFrame.new(centre + box.offset * pixel) * box.rotation
+								part.Parent = folder
+								self.partCount += 1
+							end
+						end
+					end
+				end
+				t.cursor += 1
+				if t.cursor % 32 == 0 and os.clock() > deadline then
+					return false
+				end
+				continue
+			end
 			-- Fluid surface below the top of its cell (flowing water steps down).
 			local lower = if surface > 0 then (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize else 0
 			for py = y, y + sy - 1, maxCellsY do
