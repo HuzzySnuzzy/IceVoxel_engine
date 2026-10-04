@@ -92,10 +92,11 @@ end
 -- A new model of `item` fitting a cube of `size` studs, centred on its pivot.
 function ItemModels.build(item: number, size: number): Model
 	local key = `{item}:{size}`
-	local cached = prototypes[key]
-	if cached == nil then
-		cached = prototype(item, size)
-		prototypes[key] = cached
+	local cached: Model? = prototypes[key]
+	if not cached then
+		local built = prototype(item, size)
+		prototypes[key] = built
+		return built:Clone()
 	end
 	return cached:Clone()
 end
