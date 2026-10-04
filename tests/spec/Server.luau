@@ -278,18 +278,26 @@ return function(t, shared, require, server)
 			t.eq(world:getBlock(p[1], FLOOR, p[2]), AIR, `dry at {p[1]},{p[2]}`)
 		end
 
-		-- With no way down within four blocks it spreads everywhere (the diamond above); a pit five
-		-- blocks away is out of reach.
-		local far, _, settleFar = newWorld()
-		for cz = -1, 0 do
-			for cx = -1, 0 do
-				far:getChunk(cx, cz)
+		-- The search follows open blocks for 4 blocks past the neighbour, so a pit 5 blocks away is
+		-- found and draws the water east; with no way down within reach (a pit 6 blocks away) it
+		-- spreads everywhere (the diamond above).
+		local function pitAt(distance: number)
+			local w, _, settleW = newWorld()
+			for cz = -1, 0 do
+				for cx = -1, 0 do
+					w:getChunk(cx, cz)
+				end
 			end
+			w:setBlock(distance, FLOOR - 1, 0, AIR)
+			w:setBlock(0, FLOOR, 0, WATER)
+			settleW()
+			return w
 		end
-		far:setBlock(6, FLOOR - 1, 0, AIR)
-		far:setBlock(0, FLOOR, 0, WATER)
-		settleFar()
-		t.ok(Blocks.get(far:getBlock(-1, FLOOR, 0)).fluid ~= nil, "spreads west too")
+		local near = pitAt(5)
+		t.eq(near:getBlock(-1, FLOOR, 0), AIR, "a pit 5 blocks away keeps the west dry")
+		t.ok(Blocks.get(near:getBlock(5, FLOOR - 1, 0)).fluid ~= nil, "and fills")
+		local far = pitAt(6)
+		t.ok(Blocks.get(far:getBlock(-1, FLOOR, 0)).fluid ~= nil, "a pit 6 blocks away is out of reach: west too")
 		t.ok(Blocks.get(far:getBlock(0, FLOOR, 1)).fluid ~= nil, "and sideways")
 	end)
 

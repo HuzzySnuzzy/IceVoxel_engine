@@ -123,88 +123,104 @@ local function expectedLevel(world: any, x: number, y: number, z: number, group:
 end
 
 --[[
-	One slope search (FlowingFluid.getSpread): the blocks it looks at are read once (Minecraft keeps
-	the same cache), and `unknown` is set when it reaches an unloaded block.
+	The slope search (FlowingFluid.getSpread / getSlopeDistance): for every open side, the fewest
+	blocks along open blocks to a hole, up to the fluid's slope distance. Minecraft walks every path
+	recursively (with cached block reads); a breadth-first search over the same blocks finds the
+	same shortest distance and looks at each block once. What each block around the fluid is gets
+	read once per search into flat arrays, stamped so nothing needs clearing between searches.
 ]]
-type Search = {
-	world: any,
-	y: number,
-	group: string,
-	limit: number,
-	-- Block at (x, y or y - 1, z) by key (see blockAt).
-	cache: { [number]: number | false },
-	unknown: boolean,
-}
+-- Largest slope distance supported, plus one.
+local REACH = 8
+local SPAN = 2 * REACH + 1
+local CELL_BLOCKED, CELL_OPEN, CELL_HOLE, CELL_UNKNOWN = 1, 2, 3, 4
+local readStamp = table.create(SPAN * SPAN, 0)
+local cells = table.create(SPAN * SPAN, 0)
+local visitStamp = table.create(SPAN * SPAN, 0)
+local queueX = table.create(SPAN * SPAN, 0)
+local queueZ = table.create(SPAN * SPAN, 0)
+local queueDepth = table.create(SPAN * SPAN, 0)
+local searchStamp = 0
+local visitCount = 0
 
-local function blockAt(search: Search, x: number, y: number, z: number): number?
-	-- Coordinates stay within +-2^20 (Protocol.MAX_COORDINATE), and y is the search's or one below.
-	local key = ((x + 1048576) * 2097152 + (z + 1048576)) * 2 + (search.y - y)
-	local cached = search.cache[key]
-	if cached == nil then
-		local block: number? = search.world:peekBlock(x, y, z)
-		if block == nil then
-			search.unknown = true
-			search.cache[key] = false
-			return nil
-		end
-		search.cache[key] = block
-		return block
-	end
-	if type(cached) == "number" then
-		return cached
-	end
-	return nil
-end
-
--- Can fluid spread sideways into (x, y, z)? Open blocks and weaker fluid of the group, not sources
--- (FlowingFluid.canPassThrough). Unloaded blocks are not.
-local function passable(search: Search, x: number, z: number): boolean
-	local block = blockAt(search, x, search.y, z)
-	if block == nil then
-		return false
-	end
-	local level = levelOf(block, search.group)
-	if level ~= nil then
-		return level ~= 0
-	end
-	return Blocks.isReplaceable(block) and Blocks.get(block).fluid == nil
-end
-
--- Is there a way down below (x, y, z): the same fluid or an open block (FlowingFluid.isWaterHole)?
-local function isHole(search: Search, x: number, z: number): boolean
-	local below = blockAt(search, x, search.y - 1, z)
-	if below == nil then
-		return false
-	end
-	if levelOf(below, search.group) ~= nil then
-		return true
-	end
-	return Blocks.isReplaceable(below) and Blocks.get(below).fluid == nil
+local function cellIndex(dx: number, dz: number): number
+	return (dx + REACH) * SPAN + dz + REACH + 1
 end
 
 --[[
-	Blocks from (x, y, z) to the nearest hole, not going back the way it came (FlowingFluid.
-	getSlopeDistance); NO_HOLE if there is none within `limit`.
+	What block (x0 + dx, y, z0 + dz) is to fluid of `group` spreading sideways: blocked, open
+	(FlowingFluid.canPassThrough: open blocks and weaker fluid of the group, not sources), a hole (open
+	with the same fluid or an open block below: isWaterHole) or unknown (not loaded).
 ]]
-local function slopeDistance(search: Search, x: number, z: number, depth: number, fromX: number, fromZ: number): number
-	local best = NO_HOLE
-	for _, side in SIDES do
-		if side[1] ~= fromX or side[2] ~= fromZ then
-			local nx, nz = x + side[1], z + side[2]
-			if passable(search, nx, nz) then
-				if isHole(search, nx, nz) then
+local function cellAt(world: any, x0: number, y: number, z0: number, dx: number, dz: number, group: string): number
+	local i = cellIndex(dx, dz)
+	if readStamp[i] == searchStamp then
+		return cells[i]
+	end
+	readStamp[i] = searchStamp
+	local x, z = x0 + dx, z0 + dz
+	local cell = CELL_BLOCKED
+	local block = world:peekBlock(x, y, z)
+	if block == nil then
+		cell = CELL_UNKNOWN
+	else
+		local level = levelOf(block, group)
+		local open = if level ~= nil then level ~= 0 else Blocks.isReplaceable(block) and Blocks.get(block).fluid == nil
+		if open then
+			local below = world:peekBlock(x, y - 1, z)
+			if below == nil then
+				cell = CELL_UNKNOWN
+			elseif levelOf(below, group) ~= nil or (Blocks.isReplaceable(below) and Blocks.get(below).fluid == nil) then
+				cell = CELL_HOLE
+			else
+				cell = CELL_OPEN
+			end
+		end
+	end
+	cells[i] = cell
+	return cell
+end
+
+--[[
+	Blocks from the open side (sx, sz) (an offset from the fluid at x0, z0) to the nearest hole,
+	never through the fluid's own block; NO_HOLE if there is none within `limit`, UNKNOWN if the
+	search reached an unloaded block.
+]]
+local function slopeDistance(
+	world: any,
+	x0: number,
+	y: number,
+	z0: number,
+	group: string,
+	limit: number,
+	sx: number,
+	sz: number
+): number
+	visitCount += 1
+	visitStamp[cellIndex(0, 0)] = visitCount
+	visitStamp[cellIndex(sx, sz)] = visitCount
+	queueX[1], queueZ[1], queueDepth[1] = sx, sz, 1
+	local head, tail = 1, 1
+	while head <= tail do
+		local dx, dz, depth = queueX[head], queueZ[head], queueDepth[head]
+		head += 1
+		for _, side in SIDES do
+			local nx, nz = dx + side[1], dz + side[2]
+			local i = cellIndex(nx, nz)
+			if visitStamp[i] ~= visitCount then
+				visitStamp[i] = visitCount
+				local cell = cellAt(world, x0, y, z0, nx, nz, group)
+				if cell == CELL_UNKNOWN then
+					return UNKNOWN
+				elseif cell == CELL_HOLE then
 					return depth
-				end
-				if depth < search.limit then
-					local d = slopeDistance(search, nx, nz, depth + 1, -side[1], -side[2])
-					if d < best then
-						best = d
-					end
+				elseif cell == CELL_OPEN and depth < limit then
+					tail += 1
+					queueX[tail], queueZ[tail], queueDepth[tail] = nx, nz, depth + 1
 				end
 			end
 		end
 	end
-	return best
+	return NO_HOLE
 end
 
 --[[
@@ -212,14 +228,20 @@ end
 	UNKNOWN if the search reached an unloaded block (the answer could be wrong, so wait).
 ]]
 local function spreadSides(world: any, x: number, y: number, z: number, group: string): { { number } } | number
-	local search: Search =
-		{ world = world, y = y, group = group, limit = rulesOf(group).slopeDistance, cache = {}, unknown = false }
+	local limit = math.min(rulesOf(group).slopeDistance, REACH - 1)
+	searchStamp += 1
 	local best = NO_HOLE
 	local sides: { { number } } = {}
 	for _, side in SIDES do
-		local nx, nz = x + side[1], z + side[2]
-		if passable(search, nx, nz) then
-			local d = if isHole(search, nx, nz) then 0 else slopeDistance(search, nx, nz, 1, -side[1], -side[2])
+		local cell = cellAt(world, x, y, z, side[1], side[2], group)
+		if cell == CELL_UNKNOWN then
+			return UNKNOWN
+		end
+		if cell ~= CELL_BLOCKED then
+			local d = if cell == CELL_HOLE then 0 else slopeDistance(world, x, y, z, group, limit, side[1], side[2])
+			if d == UNKNOWN then
+				return UNKNOWN
+			end
 			if d < best then
 				table.clear(sides)
 				best = d
@@ -229,15 +251,13 @@ local function spreadSides(world: any, x: number, y: number, z: number, group: s
 			end
 		end
 	end
-	if search.unknown then
-		return UNKNOWN
-	end
 	return sides
 end
 
 -- Spreads sideways; false if that has to wait for unloaded chunks.
 local function spreadToSides(world: any, x: number, y: number, z: number, group: string, level: number): boolean
-	local nextLevel = if level == 0 or level == FALLING then 1 else level + rulesOf(group).dropOff
+	-- Falling fluid and sources spread like full ones (FlowingFluid.getSpread: amount - drop off).
+	local nextLevel = (if level == FALLING then 0 else level) + rulesOf(group).dropOff
 	if nextLevel > MAX_FLOW then
 		return true
 	end

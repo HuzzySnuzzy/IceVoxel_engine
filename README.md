@@ -31,7 +31,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   character is purely cosmetic: it is drawn on the hull (interpolated) and never collides with
   anything.
 - **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
-  within 4 blocks, so it runs down slopes instead of flooding the ground around it. Flowing water
+  up to 5 blocks away, so it runs down slopes instead of flooding the ground around it. Flowing water
   steps down level by level, and its current pushes the player downstream.
 - **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
   Right click the map to add waypoints (saved between sessions), teleport, or center the view.

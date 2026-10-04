@@ -394,8 +394,8 @@ hull is.
     top of whatever the field of view is set to.
 
   Other duties:
-  - Sprint and sneak are `ContextActionService` actions at High priority that sink the key, so
-    Shift no longer toggles shift lock. With `ToggleSprint`, the sprint key turns sprinting on and
+  - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
+    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint`, the sprint key turns sprinting on and
     off; turning it off also stops a sprint started by double tapping.
   - The hull stays frozen until the chunk under it and the eight around it are shown, and after
     teleports. Server teleports arrive as attributes; other scripts moving the character far are
@@ -417,7 +417,9 @@ hull is.
   treats an open side with the same fluid below it as a drop, and makes falling fluid next to a solid
   face push almost straight down. `PlayerPhysics` pushes the hull along it at 0.014 per tick.
 - Water spreads like Minecraft's `FlowingFluid.getSpread` (`Behaviours/Fluid`): sideways only
-  towards the side(s) with the shortest way to a hole, searching up to 4 blocks. A pool of sources
+  towards the side(s) with the shortest way to a hole. The search follows open blocks for up to 4
+  blocks past the neighbour, so holes up to 5 blocks away count; it is a breadth-first search with
+  each block read once. A search that reaches an unloaded chunk waits for it. A pool of sources
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
   Minecraft instead of flooding the ground around it.
 
