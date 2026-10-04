@@ -205,8 +205,8 @@ return function(t, shared, require)
 		t.ok(heights[n] < Config.WorldHeight - 32, `highest {heights[n]}`)
 		t.ok(rivers > 0, "no river below sea level")
 
-		-- Far LOD heights only lose jagged detail narrower than two of their cells, which moves them
-		-- by less than a cell.
+		-- Far LOD heights only lose jagged detail narrower than two of their cells: less than a cell
+		-- up to level 4, up to two cells at levels 5-6 (where cells stop growing taller).
 		for _ = 1, 300 do
 			local x, z = between(-50000, 50000), between(-50000, 50000)
 			local y0 = relief.height(x, z, 0)

@@ -204,8 +204,12 @@ end
 
 --[[ Edits ]]
 
--- Gives a loaded chunk room up to `top` cells. The new rows' padding is copied from the loaded
--- neighbours (their border columns), so meshing them sees the right neighbours.
+--[[
+	Gives a loaded chunk room up to `top` cells. The new rows' padding gets the neighbours' border
+	columns: copied from loaded neighbours, and from the known edit lists of the others (above our
+	old crop their generated terrain is air, so their edits are all there is), so meshing the new
+	rows sees the right neighbours.
+]]
 local function grow(self: ClientWorld, cx: number, cz: number, chunk: ChunkData, top: number)
 	local old = chunk.height
 	local height = ChunkLayout.croppedHeight(top, 1)
@@ -228,6 +232,21 @@ local function grow(self: ClientWorld, cx: number, cz: number, chunk: ChunkData,
 	copyFrom(cx + 1, cz, 0, nil, SIZE, nil)
 	copyFrom(cx, cz - 1, nil, SIZE - 1, nil, -1)
 	copyFrom(cx, cz + 1, nil, 0, nil, SIZE)
+	local layer = ChunkLayout.LAYER
+	local edits = ClientWorld.collectJobEdits(self, cx, cz)
+	for i = 1, #edits, 2 do
+		local index = edits[i]
+		local y = index // layer
+		if y >= old and y < height then
+			local cell = index % layer
+			local px, pz = cell % P, cell // P
+			local ncx = if px == 0 then cx - 1 elseif px == P - 1 then cx + 1 else cx
+			local ncz = if pz == 0 then cz - 1 elseif pz == P - 1 then cz + 1 else cz
+			if (ncx ~= cx or ncz ~= cz) and self.chunks[Coords.chunkKey(ncx, ncz)] == nil then
+				writeu16(data, index * 2, edits[i + 1])
+			end
+		end
+	end
 	chunk.data, chunk.height = data, height
 end
 

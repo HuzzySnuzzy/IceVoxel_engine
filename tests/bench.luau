@@ -17,6 +17,8 @@ local Coords = require(shared.World.Coords)
 local LodTree = require(shared.World.LodTree)
 local GreedyMesher = require(shared.Meshing.GreedyMesher)
 local QuadMesher = require(shared.Meshing.QuadMesher)
+local MeshGeometry = require(shared.Meshing.MeshGeometry)
+local ChunkLayout = require(shared.World.ChunkLayout)
 local TerrainGenerator = require(shared.Generation.TerrainGenerator)
 
 local seed = tonumber(process.args[1]) or 12345
@@ -35,12 +37,17 @@ end
 print(`seed {seed}, viewpoint {sx}, {sh}, {sz}`)
 
 -- Generates and meshes a node like ChunkWorker (far nodes with their far seam borders). Returns
--- generation time, meshing time, boxes and (far nodes) the quad count for far meshes.
-local function meshNode(level: number, nx: number, nz: number, revealAll: boolean): (number, number, number, number)
+-- generation time, meshing time, boxes and (far nodes) the quads for far meshes and their count.
+local function meshNode(
+	level: number,
+	nx: number,
+	nz: number,
+	revealAll: boolean
+): (number, number, number, buffer?, number)
 	local t0 = os.clock()
 	local r = gen.generate(level, nx, nz)
 	local t1 = os.clock()
-	local boxes, quads = 0, 0
+	local boxes, quads, quadCount = 0, nil, 0
 	if level == 0 then
 		for y0 = 0, r.height - 1, Config.SectionHeight do
 			local y1 = y0 + Config.SectionHeight
@@ -61,12 +68,11 @@ local function meshNode(level: number, nx: number, nz: number, revealAll: boolea
 			local _, count = GreedyMesher.mesh(data, r.height, y0, y1, true)
 			boxes += count
 			local tMesh = os.clock()
-			local _, q = QuadMesher.mesh(data, r.height, y0, y1, true, true)
-			quads = q
+			quads, quadCount = QuadMesher.mesh(data, r.height, y0, y1, true)
 			t1 += os.clock() - tMesh -- quads are not part of the box meshing time
 		end
 	end
-	return t1 - t0, os.clock() - t1, boxes, quads
+	return t1 - t0, os.clock() - t1, boxes, quads, quadCount
 end
 
 print("\nPer chunk (average of 16 chunks around spawn):")
@@ -96,11 +102,14 @@ local nodes = LodTree.select(sx + 0.5, sz + 0.5)
 local perLevel: { [number]: { count: number, boxes: number } } = {}
 local total, totalTime = 0, 0
 local FarMeshes = Config.Render.FarMeshes
-local merged, regionTriangles = 0, {}
+local merged = 0
+-- One MeshGeometry builder per region, fed like Rendering/MeshOverlay builds them (meshes are
+-- split by triangle count and by height band).
+local regionBuilders: { [string]: MeshGeometry.Builder } = {}
 local t0 = os.clock()
 for key, level in nodes do
 	local _, nx, nz = Coords.decodeNodeKey(key)
-	local _, _, boxes, quads = meshNode(level, nx, nz, false)
+	local _, _, boxes, quads, quadCount = meshNode(level, nx, nz, false)
 	local entry = perLevel[level] or { count = 0, boxes = 0 }
 	entry.count += 1
 	entry.boxes += boxes
@@ -111,7 +120,23 @@ for key, level in nodes do
 	if level >= FarMeshes.MinLevel and size <= FarMeshes.MaxRegionBlocks then
 		local perSide = math.max(1, math.min(FarMeshes.RegionNodes, FarMeshes.MaxRegionBlocks // size))
 		local region = `{level}:{nx // perSide},{nz // perSide}`
-		regionTriangles[region] = (regionTriangles[region] or 0) + quads * 2
+		local builder = regionBuilders[region]
+		if builder == nil then
+			builder = MeshGeometry.builder(Config.BlockSize, FarMeshes.Overlap, FarMeshes.MaxTriangles)
+			regionBuilders[region] = builder
+		end
+		if quads and quadCount > 0 then
+			local step, stepY = ChunkLayout.steps(level)
+			local scale = step * Config.BlockSize
+			builder:add(
+				quads,
+				quadCount,
+				nx * Config.ChunkSize * scale,
+				nz * Config.ChunkSize * scale,
+				scale,
+				stepY * Config.BlockSize
+			)
+		end
 		merged += boxes
 	end
 end
@@ -124,10 +149,12 @@ for level = 0, Config.Lod.Levels - 1 do
 end
 print(string.format("  total: %d parts, generated + meshed in %.2f s on one thread", total, totalTime))
 local meshParts, triangles, regions = 0, 0, 0
-for _, tris in regionTriangles do
+for _, builder in regionBuilders do
 	regions += 1
-	triangles += tris
-	meshParts += math.max(1, math.ceil(tris / (FarMeshes.MaxTriangles - 2)))
+	for _, mesh in builder:finish() do
+		meshParts += 1
+		triangles += mesh.quads * 2
+	end
 end
 print(
 	string.format(

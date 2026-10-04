@@ -179,6 +179,17 @@ function TerrainGenerator.new(seed: number): Generator
 		return h, biome, vegetation, surface
 	end
 
+	-- Can a tree grow at (x, z)? Not where `generate` turns the surface into bare rock (steep rule,
+	-- with full detail heights so every level and chunk agrees).
+	local function gentle(x: number, z: number, biome: number): boolean
+		local h = column(x, z)
+		local limit = Biomes.list[biome].steepSlope or CLIFF_SLOPE
+		return math.abs(column(x - 1, z) - h) < limit
+			and math.abs(column(x + 1, z) - h) < limit
+			and math.abs(column(x, z - 1) - h) < limit
+			and math.abs(column(x, z + 1) - h) < limit
+	end
+
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
 	local biomes: { number } = table.create(P * P, 1)
@@ -286,7 +297,8 @@ function TerrainGenerator.new(seed: number): Generator
 
 				local columnTop = topCell + 1
 				if topCell < waterTop then
-					for y = topCell + 1, waterTop do
+					-- (Deep trenches and coarse cells can put topCell below 0: keep the bedrock.)
+					for y = math.max(topCell + 1, 1), waterTop do
 						writeu16(data, base + y * stride, WATER)
 					end
 					if biome.frozen then
@@ -306,7 +318,7 @@ function TerrainGenerator.new(seed: number): Generator
 		-- 3. Caves and ores only exist in full detail chunks.
 		if level == 0 then
 			if Config.Caves.Enabled then
-				carveCaves(data, originX, originZ, heights, cells)
+				carveCaves(data, originX, originZ, heights, cells, yield)
 				if yield then
 					yield()
 				end
@@ -314,18 +326,28 @@ function TerrainGenerator.new(seed: number): Generator
 			Ores.place(data, seed, nx, nz, cells)
 		end
 
-		-- 4. Trees and other structures.
+		-- 4. Trees and other structures. On LOD chunks they are rooted on the chunk's own (coarser)
+		-- terrain: the height of the cell their root is in, sampled like `generate` does.
 		if level <= Config.StructureMaxLevel then
 			local w = Writer.new(data, originX, originZ, step, stepY, cells)
 			local span = SIZE * step
+			local structureColumn = column
+			if level > 0 then
+				structureColumn = function(x: number, z: number): (number, number, number, number)
+					local _, biome, vegetation, surface = column(x, z)
+					local h = sample(x // step * step + half, z // step * step + half, level)
+					return h, biome, vegetation, surface
+				end
+			end
 			Structures.populate(
 				seed,
-				column,
+				structureColumn,
 				w,
 				originX - step,
 				originZ - step,
 				originX + span + step - 1,
-				originZ + span + step - 1
+				originZ + span + step - 1,
+				gentle
 			)
 			if w.top() > emptyAbove then
 				emptyAbove = w.top()
@@ -403,40 +425,50 @@ function TerrainGenerator.new(seed: number): Generator
 
 	local function findSpawn(): (number, number, number)
 		--[[
-			Walk an outward square spiral (every SPAWN_STEP blocks, up to ~13 km out) for the first
-			gentle, dry, unfrozen column in the hills or plains next to the mountains: a view of the
-			ranges without starting on a cliff. The cheap selector rules out most spots first.
+			Walk an outward square spiral (every SPAWN_STEP blocks) for the first gentle, dry,
+			unfrozen column in the hills or plains next to the mountains: a view of the ranges without
+			starting on a cliff. The cheap selector rules out most spots first. The search stays within
+			SPAWN_RANGE of the origin, where float precision is fine. Some seeds put the origin in the
+			middle of a sea with no such land in range: then any dry land in range is taken (an
+			island), then any dry land further out, then the origin itself.
 		]]
-		local SPAWN_STEP = 64
-		local x, z, dx, dz = 0, 0, 0, -1
-		for _ = 1, 160000 do
-			local wx, wz = x * SPAWN_STEP, z * SPAWN_STEP
-			local a = math.abs(relief.selector(wx, wz))
-			if a > 0.2 and a < 0.32 then
-				local h, biome, _, surface, _, river = sample(wx, wz, 0)
-				if
-					h > SEA + 3
-					and h < SEA + 160
-					and river == 0
-					and surface == Biomes.list[biome].top
-					and surface ~= SNOW
-				then
-					local gentle = true
-					for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
-						if math.abs(sample(wx + offset[1], wz + offset[2], 0) - h) > 2 then
-							gentle = false
-							break
+		local SPAWN_STEP, SPAWN_RANGE, FAR_RANGE = 64, 5000, 12800
+		for pass = 1, 3 do
+			local strict = pass == 1
+			local rings = (if pass == 3 then FAR_RANGE else SPAWN_RANGE) // SPAWN_STEP
+			local x, z, dx, dz = 0, 0, 0, -1
+			for _ = 1, (2 * rings + 1) ^ 2 do
+				local wx, wz = x * SPAWN_STEP, z * SPAWN_STEP
+				local a = if strict then math.abs(relief.selector(wx, wz)) else 0.25
+				if a > 0.2 and a < 0.32 then
+					local h, biome, _, surface, _, river = sample(wx, wz, 0)
+					local ok
+					if strict then
+						ok = h > SEA + 3
+							and h < SEA + 160
+							and river == 0
+							and surface == Biomes.list[biome].top
+							and surface ~= SNOW
+					else
+						ok = h > SEA + 1 and river < RIVER_MUD
+					end
+					if ok then
+						for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
+							if math.abs(sample(wx + offset[1], wz + offset[2], 0) - h) > (if strict then 2 else 4) then
+								ok = false
+								break
+							end
+						end
+						if ok then
+							return wx, h, wz
 						end
 					end
-					if gentle then
-						return wx, h, wz
-					end
 				end
+				if x == z or (x < 0 and x == -z) or (x > 0 and x == 1 - z) then
+					dx, dz = -dz, dx
+				end
+				x, z = x + dx, z + dz
 			end
-			if x == z or (x < 0 and x == -z) or (x > 0 and x == 1 - z) then
-				dx, dz = -dz, dx
-			end
-			x, z = x + dx, z + dz
 		end
 		local h = sample(0, 0, 0)
 		return 0, h, 0

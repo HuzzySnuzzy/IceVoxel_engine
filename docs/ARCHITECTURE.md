@@ -33,7 +33,8 @@ border columns into the new rows' padding) and in workers applying edits; air ab
 no room.
 
 Parts and meshes are limited to 2048 studs per axis, and 1024 blocks are 3072 studs, so tall boxes
-are split vertically (`ChunkRenderer`) and far meshes are cut into height bands (`MeshGeometry`).
+are split vertically (`ChunkRenderer`), and a far mesh region whose geometry is taller than that is
+cut into height bands from its lowest point (`MeshGeometry`; most regions fit and stay whole).
 
 Level-of-detail chunks use the same layout with bigger cells: a level `L` chunk covers
 `16 × 2^L` blocks with 16 × 16 cells. Cells are `2^L` blocks wide but at most
@@ -108,24 +109,30 @@ every 256 units anyway): larger offsets turned kilometre-wide noise into steps s
 Also after the datapack: caves are dry and grow with depth. A density F is computed from the depth
 below the column's surface in H (`d = depth / 450`), and rock is carved where F < 0.
 
-- Nothing in the top ~22 blocks (`d` < 0.05), with a smooth fade-in.
+- No caves within ~9 blocks of the surface (`d` < 0.02); between ~9 and ~22 blocks (`d` = 0.05)
+  they fade in, so the first ones appear ~11 blocks down.
 - Three cave sets take over at ~45, ~158 and ~315 blocks deep (small, medium, large), blended with
   smoothsteps. Each mixes *blob* caves (one 3D noise) with *strata*, a smooth sawtooth over height
   tilted by a kilometre-scale noise plus 3D and jagged noise, by a very wide `barrier1` noise.
-- `barrier2` (3D, ~190 blocks) gates everything: below 0 there are no caves, from 0.5 on the sets
-  are at full strength. So caves come in regions, and ~14% of the rock between 22 and 316 blocks
-  deep is air (the datapack: 8–16%).
-- **The Underlands.** From ~315 blocks deep the large set blends into an analytic air layer (no
-  noise, the datapack's `ygrad - 1.6 H`): its floor sinks as the surface rises, its ceiling is
-  ~450 blocks below the surface. It only exists under surfaces above ~557 and is up to ~480 blocks
-  tall under the highest peaks.
+- `barrier2` (3D, ~190 blocks) gates the three sets: below 0 there are no caves, from 0.5 on the
+  sets are at full strength. So caves come in regions, and ~14% of the rock between 22 and 316
+  blocks deep is air (the datapack: 8–16%).
+- **The Underlands.** From ~315 blocks deep (`d` = 0.7) the large set blends into the datapack's
+  analytic `ygrad - 1.6 H` (no noise, not gated by `barrier2`), which takes over completely at
+  `d` = 1. Under high ground that term is already strongly negative early in the blend, so the
+  cavern opens ~330 blocks below the surface (~380 under lower ground), down to a floor that sinks
+  as the surface rises. It appears under surfaces above ~540, reaches down to `Caves.MinY` under
+  surfaces above ~700, and is up to ~600 blocks tall under the highest (~930) peaks. The datapack
+  blends the same way.
 
 Cave and strata sizes are 0.75 of the datapack's (the player is not scaled down with the terrain);
 the depths scale with the terrain. 3D noise per block would be far too slow, so F is evaluated on
 a world-aligned 4 × 8 × 4 lattice and interpolated. Lattice points where `barrier2` rules caves out
 cost one noise call, cells positive at all eight corners are skipped, and the near-surface fade
-uses each block's own depth (lattice depths are off on steep slopes). A tall mountain chunk takes
-~10 ms in Lune.
+uses each block's own depth (lattice depths are off on steep slopes); cells that are air at all
+eight corners are carved without interpolating. In Lune, caves cost ~5–7 ms per chunk under most
+terrain and ~16–20 ms (worst ~40) over the Underlands, where a chunk has 100k+ blocks of air; the
+carver calls the generator's `yield` per lattice layer so workers keep to their time slice.
 
 **LOD sampling.** A level `L` chunk samples each cell at its center, so it costs about the same as a
 full detail chunk while covering `4^L` times the area. LOD chunks also lower their padding columns

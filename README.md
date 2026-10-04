@@ -30,7 +30,7 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
-  83k parts become 36k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
+  81k parts become 35k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
   where the Mesh APIs are unavailable.
 
 ## Getting started
@@ -152,14 +152,14 @@ seed 12345; "mountains" is inside a range at 3200, -14600):
 | View from         | 512 (mobile) | 1024 | 2048 (default) | 4096 |
 | ----------------- | ------------ | ---- | -------------- | ---- |
 | spawn (hills)     | 14k          | 28k  | 34k            | 46k  |
-| mountains         | 29k          | 68k  | 83k            | 99k  |
+| mountains         | 29k          | 68k  | 81k            | 97k  |
 
 With far meshes, once every region near the player has settled (the bench prints this too):
 
 | View from         | 2048 (default)          | 4096                     |
 | ----------------- | ----------------------- | ------------------------ |
 | spawn (hills)     | 16.7k parts + 88 meshes | 20.6k parts + 187 meshes |
-| mountains         | 35.5k parts + 90 meshes | 40.1k parts + 191 meshes |
+| mountains         | 34.8k parts + 90 meshes | 39.5k parts + 191 meshes |
 
 What remains are the near levels (full detail and level 1), which stay parts. In the mountains,
 `Lod.SplitDistanceL1 = 2` or a shorter view on weaker devices brings that down.
@@ -307,9 +307,9 @@ Natural next steps, roughly in order:
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
   connectivity (docs/ARCHITECTURE.md, "Hidden caves, octrees and regions").
 - **The Underlands at a distance.** Caves only exist in full detail chunks, so a big cavern ends
-  where they do (~96 blocks). Carving the Underlands (an analytic interval per column, cheap at any
-  level) into far chunks and meshing those with caves visible while the camera is inside would
-  show them whole.
+  where they do (~96 blocks). Carving the Underlands (mostly an analytic interval per column, cheap
+  at any level) into far chunks and meshing those with caves visible while the camera is inside
+  would show them whole.
 - **Bigger structures.** Villages / dungeons using the same stateless placement with a larger grid.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result.

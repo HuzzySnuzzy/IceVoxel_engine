@@ -31,7 +31,9 @@
 	             (0.43) on land, and by the same SCALE horizontally so slopes keep their steepness.
 
 	Far LOD chunks (`level` > 0) leave out jagged octaves narrower than two of their cells, which
-	would only alias: a few blocks of detail on cells that are 16 blocks tall far away.
+	would only alias. That moves heights by up to ~3 blocks at level 2 and ~12 at level 4; at levels
+	5-6 (cells 32-64 wide but still 16 tall) all jagged detail of the mountains is gone and heights
+	move by up to ~30 blocks, less than resampling the terrain at those widths does anyway.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -60,9 +62,9 @@ local KNOTS = { 0, 0.075, 0.15, 0.225, 0.3, 0.4 }
 -- bed height, and the selector range they fade in over (hills and lower).
 local RIVER_WAVELENGTH = 9000
 local RIVER_STD = 0.33
--- Bound on |gradient| of the river noise per block (measured maximum ~10 std / wavelength), and
--- the step its gradient is measured over (blocks).
-local RIVER_MAX_GRADIENT = 13 * RIVER_STD / RIVER_WAVELENGTH
+-- Bound on |gradient| of the river noise per block (measured maximum ~14.4 std / wavelength over
+-- the whole noise period), and the step its gradient is measured over (blocks).
+local RIVER_MAX_GRADIENT = 16 * RIVER_STD / RIVER_WAVELENGTH
 local RIVER_STEP = 8
 local RIVER_VALLEY = 300
 local RIVER_BED = SEA - 14

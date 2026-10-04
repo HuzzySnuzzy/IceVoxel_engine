@@ -6,7 +6,7 @@
 
 	A cave density F is computed from the depth below the column's surface, in the datapack's height
 	unit (d = depth / Relief.LAND_BLOCKS, ~450 blocks); rock is carved where F < 0.
-	  * d < 0.05 (~22 blocks): solid, apart from a smooth fade-in from 0.02.
+	  * d < 0.02 (~9 blocks): solid; up to d = 0.05 (~22 blocks) caves fade in.
 	  * Cave sets "small", "medium" and "large" take over at d = 0.1, 0.35 and 0.7 (~45, 158 and
 	    315 blocks deep), blended with smoothsteps. Each set mixes
 	      old  blobs: one 3D noise (wavelength 24 / 32 / 48 blocks),
@@ -14,10 +14,12 @@
 	           kilometre-scale noise, plus 3D noise and 2D jagged noise,
 	    by `barrier1` (a very wide 3D noise, so most caves are a mix of both kinds).
 	  * `barrier2` (3D, ~190 blocks) gates every set: below 0 there are no caves, from 0.5 on the
-	    sets are at full strength. Caves come in regions that way, and ~10% of the rock is air.
+	    sets are at full strength. Caves come in regions that way, and ~14% of the rock is air.
 	  * Beyond d = 0.7 the large set blends into the Underlands, which take over completely at d = 1:
-	    an analytic air layer (no noise) from a floor that sinks as the surface rises up to ~450
-	    blocks below the surface. It only exists under surfaces above ~557.
+	    the datapack's analytic ygrad - 1.6 H (no noise, no barrier). Under high ground it is
+	    strongly negative early in the blend, so the cavern opens ~330 blocks below the surface,
+	    down to a floor that sinks as the surface rises: it appears under surfaces above ~540 and
+	    is up to ~600 blocks tall under the highest peaks.
 	Feature sizes are 0.75 of the datapack's (the player is not scaled down with the terrain), the
 	depths scale with the terrain (0.43).
 
@@ -84,9 +86,17 @@ export type SurfaceSampler = (x: number, z: number) -> number
 
 --[[
 	`heights[pz * P + px + 1]` is the terrain height of every padded column, `cells` the chunk's
-	buffer height (cells above it are air anyway).
+	buffer height (cells above it are air anyway). `yield` is called regularly (carving a chunk over
+	the Underlands is a lot of blocks) so callers can spread the work over several frames.
 ]]
-export type Carver = (data: buffer, originX: number, originZ: number, heights: { number }, cells: number) -> ()
+export type Carver = (
+	data: buffer,
+	originX: number,
+	originZ: number,
+	heights: { number },
+	cells: number,
+	yield: (() -> ())?
+) -> ()
 
 local Caves = {}
 
@@ -210,7 +220,14 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 	local colSurface: { number }, colTilt: { number }, colUnder: { number } = {}, {}, {}
 	local colJags: { { number } } = {}
 
-	return function(data: buffer, originX: number, originZ: number, heights: { number }, cells: number)
+	return function(
+		data: buffer,
+		originX: number,
+		originZ: number,
+		heights: { number },
+		cells: number,
+		yield: (() -> ())?
+	)
 		-- Highest block any cave may reach in this chunk.
 		local maxTop = -huge
 		for i = 1, P * P do
@@ -262,6 +279,9 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 		-- Density at every lattice point.
 		local i = 1
 		for ly = 0, nyg - 1 do
+			if yield and ly % 4 == 3 then
+				yield()
+			end
 			local y = (gy0 + ly) * GRID_Y
 			for lz = 0, nzg - 1 do
 				local z = (gz0 + lz) * GRID_XZ
@@ -276,6 +296,9 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 		-- Carve every lattice cell that is not solid at all eight corners.
 		local stride = LAYER * 2
 		for ly = 0, nyg - 2 do
+			if yield then
+				yield()
+			end
 			local cellY = (gy0 + ly) * GRID_Y
 			for lz = 0, nzg - 2 do
 				local cellZ = (gz0 + lz) * GRID_XZ
@@ -287,6 +310,15 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 					local f001, f101 = field[i001], field[i001 + 1]
 					local f011, f111 = field[i001 + nxg], field[i001 + nxg + 1]
 					if f000 < 0 or f100 < 0 or f010 < 0 or f110 < 0 or f001 < 0 or f101 < 0 or f011 < 0 or f111 < 0 then
+						-- Air at every corner is air throughout (below the fade-in).
+						local open = f000 < 0
+							and f100 < 0
+							and f010 < 0
+							and f110 < 0
+							and f001 < 0
+							and f101 < 0
+							and f011 < 0
+							and f111 < 0
 						local cellX = (gx0 + lx) * GRID_XZ
 						-- Padded chunk coordinates of the cell's blocks.
 						local px0 = math.max(cellX - originX + 1, 0)
@@ -300,6 +332,15 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 							for px = px0, px1 do
 								local tx = (originX + px - 1 - cellX) / GRID_XZ
 								local top = heights[pz * P + px + 1] - margin
+								local surface = top + margin
+								local last = math.min(y1, top - 1, floor(surface - caveDepth))
+								local base = (pz * P + px) * 2
+								if open and last < surface - D_START * DEPTH_UNIT then
+									for y = y0, last do
+										writeu16(data, base + y * stride, caveAir)
+									end
+									continue
+								end
 								-- Bilinear in x / z at the cell's bottom and top.
 								local b0 = f000 + (f100 - f000) * tx
 								local b1 = f010 + (f110 - f010) * tx
@@ -308,9 +349,6 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 								local t1 = f011 + (f111 - f011) * tx
 								local upper = t0 + (t1 - t0) * tz
 								if bottom < 0 or upper < 0 then
-									local base = (pz * P + px) * 2
-									local surface = top + margin
-									local last = math.min(y1, top - 1, floor(surface - caveDepth))
 									for y = y0, last do
 										local f = bottom + (upper - bottom) * (y - cellY) / GRID_Y
 										local d = (surface - y) / DEPTH_UNIT

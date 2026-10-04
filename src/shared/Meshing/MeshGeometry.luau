@@ -5,7 +5,7 @@
 	Vector3 / Color3 values and feeds them to the batch APIs (see Rendering/MeshOverlay).
 
 	A mesh holds whole quads, at most `maxTriangles / 2` of them, in the order the nodes and their
-	quads are added (per band), so the result is deterministic. Each quad becomes four vertices of its own
+	quads are added (per band, see below), so the result is deterministic. Each quad becomes four vertices of its own
 	(corners wound counter-clockwise, see QuadMesher.corners) and two triangles (0, 1, 2) and
 	(0, 2, 3); with unshared vertices the engine's automatic normals are exactly the face normals.
 
@@ -13,9 +13,11 @@
 	mesh; place it at `center`). A mesh whose box is flat on some axis (e.g. a sheet of sea water)
 	gets one extra tiny quad below it, so no axis of its part is (almost) zero.
 
-	A part may be at most 2048 studs on any axis, and a tall world is taller than that. So every mesh
-	keeps to one horizontal band of BAND studs: quads go to the mesh of their band, and a side face
-	crossing a band boundary is cut there (its corners clamped to each band it crosses).
+	A part may be at most 2048 studs on any axis, and a tall world is taller than that. A region
+	whose geometry spans at most MAX_SPAN studs vertically (most do) stays as it is. A taller one is
+	cut into horizontal bands of BAND studs from its lowest point: quads go to the meshes of their
+	band, and a side face crossing a band boundary is cut there (its corners clamped to each band it
+	crosses, plus the overlap). Such a mesh is at most BAND + 2 grow + MIN_EXTENT tall.
 ]]
 
 local QuadMesher = require(script.Parent.QuadMesher)
@@ -23,7 +25,9 @@ local QuadMesher = require(script.Parent.QuadMesher)
 local KEY_STRIDE = QuadMesher.KEY_STRIDE
 -- Thinnest a mesh's box may be on any axis (studs); also the size of the quad that ensures it.
 local MIN_EXTENT = 0.1
--- Height of a band (studs): with the in-plane overlap and the anchor quad well under 2048.
+-- Tallest geometry kept in one band, and the height of a band when it has to be cut (studs): both
+-- with the in-plane overlap and the anchor quad under the 2048 stud part limit.
+local MAX_SPAN = 2000
 local BAND = 1536
 
 export type Mesh = {
@@ -65,6 +69,7 @@ local MeshGeometry = {}
 
 MeshGeometry.MIN_EXTENT = MIN_EXTENT
 MeshGeometry.BAND = BAND
+MeshGeometry.MAX_SPAN = MAX_SPAN
 
 local function newRaw(): Raw
 	return {
@@ -109,21 +114,11 @@ function MeshGeometry.builder(blockSize: number, grow: number, maxTriangles: num
 	assert(maxTriangles >= 4, "maxTriangles too small")
 	-- Leave room for the anchor quad.
 	local perMesh = maxTriangles // 2 - 1
-	local done: { Raw } = {}
-	-- Mesh being filled for each band.
-	local current: { [number]: Raw } = {}
-
-	local function rawFor(band: number): Raw
-		local raw = current[band]
-		if raw == nil or raw.quads >= perMesh then
-			if raw then
-				table.insert(done, raw)
-			end
-			raw = newRaw()
-			current[band] = raw
-		end
-		return raw
-	end
+	-- Quads added so far: corners (12 numbers each), appearance, and the vertical extent of the face
+	-- itself (without the overlap).
+	local corners: { number } = {}
+	local appearances: { number } = {}
+	local extents: { number } = {}
 
 	local builder = { total = 0 }
 
@@ -136,38 +131,89 @@ function MeshGeometry.builder(blockSize: number, grow: number, maxTriangles: num
 		scale: number,
 		scaleY: number
 	)
-		local clamp = math.clamp
 		for i = 0, count - 1 do
-			local appearance = buffer.readu16(quads, i * QuadMesher.QUAD_BYTES + 12) % KEY_STRIDE
 			local ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz =
 				QuadMesher.corners(quads, i, originX, originZ, scale, scaleY, blockSize, grow)
+			local n = #corners
+			corners[n + 1], corners[n + 2], corners[n + 3] = ax, ay, az
+			corners[n + 4], corners[n + 5], corners[n + 6] = bx, by, bz
+			corners[n + 7], corners[n + 8], corners[n + 9] = cx, cy, cz
+			corners[n + 10], corners[n + 11], corners[n + 12] = dx, dy, dz
+			table.insert(appearances, buffer.readu16(quads, i * QuadMesher.QUAD_BYTES + 12) % KEY_STRIDE)
 			local low = math.min(ay, by, cy, dy)
 			local high = math.max(ay, by, cy, dy)
-			local first = low // BAND
-			-- The band holding the top edge; one lower when that edge is exactly on a boundary.
-			local last = if high > low then math.max(first, math.ceil(high / BAND) - 1) else first
-			for band = first, last do
-				local raw = rawFor(band)
-				if first == last then
-					push(raw, ax, ay, az)
-					push(raw, bx, by, bz)
-					push(raw, cx, cy, cz)
-					push(raw, dx, dy, dz)
-				else
-					local bottom, top = band * BAND, (band + 1) * BAND
-					push(raw, ax, clamp(ay, bottom, top), az)
-					push(raw, bx, clamp(by, bottom, top), bz)
-					push(raw, cx, clamp(cy, bottom, top), cz)
-					push(raw, dx, clamp(dy, bottom, top), dz)
-				end
-				raw.quads += 1
-				raw.appearances[raw.quads] = appearance
+			-- Side faces are grown vertically too.
+			if high > low then
+				low += grow
+				high -= grow
 			end
+			table.insert(extents, low)
+			table.insert(extents, high)
 		end
 		self.total += count
 	end
 
 	function builder.finish(_self: Builder): { Mesh }
+		local count = #appearances
+		-- Bands: one, unless the geometry is too tall for a part.
+		local spanMin, spanMax, origin = math.huge, -math.huge, math.huge
+		for q = 0, count - 1 do
+			for k = 2, 11, 3 do
+				local y = corners[q * 12 + k]
+				spanMin = math.min(spanMin, y)
+				spanMax = math.max(spanMax, y)
+			end
+			origin = math.min(origin, extents[q * 2 + 1])
+		end
+		local banded = spanMax - spanMin + MIN_EXTENT > MAX_SPAN
+
+		local done: { Raw } = {}
+		-- Mesh being filled for each band.
+		local current: { [number]: Raw } = {}
+		local function rawFor(band: number): Raw
+			local raw = current[band]
+			if raw == nil or raw.quads >= perMesh then
+				if raw then
+					table.insert(done, raw)
+				end
+				raw = newRaw()
+				current[band] = raw
+			end
+			return raw
+		end
+
+		local clamp = math.clamp
+		for q = 0, count - 1 do
+			local o = q * 12
+			local first, last = 0, 0
+			local low, high = extents[q * 2 + 1], extents[q * 2 + 2]
+			if banded then
+				first = (low - origin) // BAND
+				-- The band holding the top edge; one lower when that edge is exactly on a boundary.
+				last = if high > low then math.max(first, math.ceil((high - origin) / BAND) - 1) else first
+			end
+			for band = first, last do
+				local raw = rawFor(band)
+				if first == last then
+					for k = 1, 12, 3 do
+						push(raw, corners[o + k], corners[o + k + 1], corners[o + k + 2])
+					end
+				else
+					-- Pieces overlap by `grow` across the cut, like neighbouring quads.
+					local bottom = origin + band * BAND - grow
+					local top = origin + (band + 1) * BAND + grow
+					for k = 1, 12, 3 do
+						push(raw, corners[o + k], clamp(corners[o + k + 1], bottom, top), corners[o + k + 2])
+					end
+				end
+				raw.quads += 1
+				raw.appearances[raw.quads] = appearances[q + 1]
+			end
+		end
+		table.clear(corners)
+		table.clear(appearances)
+		table.clear(extents)
+
 		local bands: { number } = {}
 		for band in current do
 			table.insert(bands, band)
@@ -178,7 +224,6 @@ function MeshGeometry.builder(blockSize: number, grow: number, maxTriangles: num
 				table.insert(done, current[band])
 			end
 		end
-		table.clear(current)
 		local meshes: { Mesh } = {}
 		for _, raw in done do
 			-- Keep every axis of the box at least MIN_EXTENT thick with a tiny quad facing down,
@@ -210,7 +255,6 @@ function MeshGeometry.builder(blockSize: number, grow: number, maxTriangles: num
 				size = { max[1] - min[1], max[2] - min[2], max[3] - min[3] },
 			})
 		end
-		done = {}
 		return meshes
 	end
 

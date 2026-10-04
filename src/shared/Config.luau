@@ -140,7 +140,7 @@ local Config = {
 			-- much longer than usual (ms; measured up to three times).
 			MaxBlockingMs = 35,
 			-- No new meshes while the shown ones hold this many triangles (a safety limit; the whole
-			-- default view needs ~100-200k).
+			-- default view needs ~100k on hills and ~300k in the mountains).
 			MaxLiveTriangles = 1000000,
 		},
 	},

@@ -83,7 +83,8 @@ end
 
 --[[
 	Runs every vegetation spot whose structure could reach the block rectangle
-	[minX, maxX] x [minZ, maxZ] (inclusive).
+	[minX, maxX] x [minZ, maxZ] (inclusive). `accept(x, z, biome)`, when given, gets the final say on
+	a spot that passed every other test (e.g. no trees on cliffs); it must be deterministic.
 ]]
 function Structures.populate(
 	seed: number,
@@ -92,7 +93,8 @@ function Structures.populate(
 	minX: number,
 	minZ: number,
 	maxX: number,
-	maxZ: number
+	maxZ: number,
+	accept: ((x: number, z: number, biome: number) -> boolean)?
 )
 	local spacing = Structures.SPACING
 	local radius = Structures.RADIUS
@@ -113,7 +115,7 @@ function Structures.populate(
 				if vegetation and roll < vegetation then
 					local rng = Hash.rng(h)
 					local structure = pickFeature(biome, rng)
-					if structure and structure.soil[surface] then
+					if structure and structure.soil[surface] and (accept == nil or accept(x, z, biome)) then
 						structure.build(w, x, height, z, rng)
 					end
 				end

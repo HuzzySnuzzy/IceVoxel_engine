@@ -149,6 +149,49 @@ return function(t, shared, require, _server, client)
 		t.ok(math.abs(wallArea - 1000 * Config.BlockSize) < 1e-6, `wall pieces add up ({wallArea})`)
 		-- The floor on the boundary belongs to the upper band (whose box starts there).
 		t.eq(meshes[2].quads, 2, "upper band: wall piece and floor")
+
+		-- With the production overlap: a wall ending exactly on the boundary stays one quad in one
+		-- mesh, and the pieces of a cut wall overlap across the cut.
+		local grow = Config.Render.FarMeshes.Overlap
+		local walls = buffer.create(2 * QuadMesher.QUAD_BYTES)
+		buffer.writeu16(walls, 0, 0)
+		buffer.writeu16(walls, 8, BAND // Config.BlockSize) -- ends exactly at BAND studs
+		buffer.writeu16(walls, 10, 4)
+		buffer.writeu16(walls, 12, stone)
+		buffer.writeu16(walls, o, 1)
+		buffer.writeu16(walls, o + 2, 3)
+		buffer.writeu16(walls, o + 8, 4)
+		buffer.writeu16(walls, o + 10, 1000)
+		buffer.writeu16(walls, o + 12, stone)
+		local grown = MeshGeometry.builder(Config.BlockSize, grow, 1000)
+		grown:add(walls, 2, 0, 0, Config.BlockSize, Config.BlockSize)
+		local split = grown:finish()
+		t.eq(#split, 2)
+		t.eq(split[1].quads, 2, "lower band: the short wall whole and the tall wall's lower piece")
+		-- (A single wall is flat on x, so its mesh also gets the anchor quad.)
+		t.eq(split[2].quads, 2, "upper band: only the tall wall's upper piece, plus the anchor")
+		local lowerTop = split[1].center[2] + split[1].size[2] / 2
+		local upperBottom = split[2].center[2] - split[2].size[2] / 2
+		t.ok(lowerTop >= BAND + grow - 1e-6, `lower piece reaches {lowerTop}`)
+		t.ok(upperBottom <= BAND - grow + 1e-6, `upper piece starts at {upperBottom}`)
+		for _, mesh in split do
+			t.ok(mesh.size[2] <= BAND + 2 * grow + MeshGeometry.MIN_EXTENT + 1e-6, "fits its band")
+		end
+
+		-- Geometry that fits in a part is not cut, wherever it is: a 600 block (1800 stud) wall
+		-- from y 300 crosses y = BAND but stays one quad in one mesh.
+		local tall = buffer.create(QuadMesher.QUAD_BYTES)
+		buffer.writeu16(tall, 0, 0)
+		buffer.writeu16(tall, 4, 300)
+		buffer.writeu16(tall, 8, 600)
+		buffer.writeu16(tall, 10, 4)
+		buffer.writeu16(tall, 12, stone)
+		local whole = MeshGeometry.builder(Config.BlockSize, grow, 1000)
+		whole:add(tall, 1, 0, 0, Config.BlockSize, Config.BlockSize)
+		local one = whole:finish()
+		t.eq(#one, 1, "one mesh")
+		t.eq(one[1].quads, 2, "the wall (and the anchor)")
+		t.ok(one[1].size[2] <= MeshGeometry.MAX_SPAN, "fits in a part")
 	end)
 
 	--[[ Far seam limits ]]
