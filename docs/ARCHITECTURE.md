@@ -353,7 +353,8 @@ prediction.
   the player started mining that very block long enough ago (`Mining.mayBreak`: 70% of the time,
   Minecraft's tolerance), and drops `Items.drops(block)`. A break that arrives earlier still (network
   jitter) is kept and finished once the full time has passed, or undone after a second, like
-  Minecraft's delayed destroy.
+  Minecraft's delayed destroy. Only one timer runs at a time: a block started meanwhile counts from
+  when the waiting break is done.
 - **Creative** breaks at once, again every `Interaction.BreakInterval` (6 ticks) while held, and
   drops nothing. Creative players make items from nothing, so the stacks they throw or spill by
   breaking a chest come out of a budget (10 a second, 64 at once); a chest that would overdraw it

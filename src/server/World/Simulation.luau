@@ -11,11 +11,20 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
+local Protocol = require(Shared.Net.Protocol)
 
 local WorldServer = require(script.Parent.WorldServer)
 
 local CHUNK_STUDS = Config.ChunkSize * Config.BlockSize
 local SCAN_INTERVAL = 0.5
+-- Players own their characters, so a position may be anything: only finite ones inside the world
+-- count (studs).
+local LIMIT = (Protocol.MAX_COORDINATE + 64) * Config.BlockSize
+
+local function sane(position: Vector3): boolean
+	local x, z = position.X, position.Z
+	return x == x and z == z and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT
+end
 
 local Simulation = {}
 
@@ -30,7 +39,7 @@ function Simulation.start(world: WorldServer.World)
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
 			local root = character and character:FindFirstChild("HumanoidRootPart")
-			if root and root:IsA("BasePart") then
+			if root and root:IsA("BasePart") and sane(root.Position) then
 				local pcx = math.floor(root.Position.X / CHUNK_STUDS)
 				local pcz = math.floor(root.Position.Z / CHUNK_STUDS)
 				for dz = -radius - 1, radius + 1 do

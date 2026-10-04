@@ -192,24 +192,31 @@ function ServerNet.start(world: World): ServerNet
 		end
 		local mine = mining[player]
 		if started then
-			local block = if y < HEIGHT
-					and math.abs(x) <= Protocol.MAX_COORDINATE
-					and math.abs(z) <= Protocol.MAX_COORDINATE
-				then world:peekBlock(x, y, z)
-				else nil
+			-- (Reach first: a block next to the player may be read even if its chunk has to be
+			-- generated.)
 			if
-				block == nil
-				or Mining.progressPerTick(block, true, false) <= 0
+				y >= HEIGHT
+				or math.abs(x) > Protocol.MAX_COORDINATE
+				or math.abs(z) > Protocol.MAX_COORDINATE
 				or GameMode.isCreative(player)
 				or not inReach(player, x, y, z)
+				or Mining.progressPerTick(world:getBlock(x, y, z), true, false) <= 0
 			then
 				mining[player] = nil
 				return
 			end
+			-- One mining timer at a time: while an early break waits for its time, the next block's
+			-- timer starts when that one is done.
+			local startedAt = os.clock()
+			local pending = delayed[player]
+			if pending then
+				local ready = pending.startedAt + (Mining.ticks(pending.block, true, false) - 1) / Mining.TICK_RATE
+				startedAt = math.max(startedAt, ready)
+			end
 			if mine == nil then
-				mining[player] = { x = x, y = y, z = z, startedAt = os.clock() }
+				mining[player] = { x = x, y = y, z = z, startedAt = startedAt }
 			else
-				mine.x, mine.y, mine.z, mine.startedAt = x, y, z, os.clock()
+				mine.x, mine.y, mine.z, mine.startedAt = x, y, z, startedAt
 			end
 		elseif mine and mine.x == x and mine.y == y and mine.z == z then
 			mining[player] = nil

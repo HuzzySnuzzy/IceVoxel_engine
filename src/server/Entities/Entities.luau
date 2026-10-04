@@ -142,13 +142,8 @@ local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: bool
 		end
 		local ops: { EntityOp } = {}
 
-		for _, removal in changes.removed do
-			if known[removal.id] then
-				known[removal.id] = nil
-				table.insert(ops, { op = "remove", id = removal.id, collector = userIdOf(removal.collector) })
-			end
-		end
-		-- Partial pickups fly to the collector too (the count op that follows shrinks the rest).
+		-- Partial pickups fly to the collector too (the count op that follows shrinks the rest),
+		-- sent first: another player may have taken the rest in the same tick.
 		for _, take in changes.taken do
 			if known[take.id] then
 				table.insert(ops, {
@@ -157,6 +152,12 @@ local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: bool
 					count = math.min(take.count, 255),
 					collector = userIdOf(take.collector),
 				})
+			end
+		end
+		for _, removal in changes.removed do
+			if known[removal.id] then
+				known[removal.id] = nil
+				table.insert(ops, { op = "remove", id = removal.id, collector = userIdOf(removal.collector) })
 			end
 		end
 

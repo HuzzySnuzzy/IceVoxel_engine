@@ -407,7 +407,10 @@ function WorldMap.new(
 			return open
 		end,
 		toggle = function()
-			setOpen(not open)
+			-- (Never over an inventory screen, like the M key.)
+			if open or not Screens.isOpen() then
+				setOpen(not open)
+			end
 		end,
 		update = update,
 	}
