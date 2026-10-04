@@ -24,7 +24,12 @@
 	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
 	           tall, no sinking, up and down where the view points);
 	  falling  the fall distance is counted while airborne and turned into damage on landing
-	           (ceil(distance - 3) half hearts); water resets it.
+	           (ceil(distance - 3) half hearts); water resets it. Players who may fly (creative)
+	           never take fall damage;
+	  flying   (creative, State.mayFly) double tapping jump within 7 ticks toggles it: air
+	           acceleration 0.05 (0.1 sprinting: 10.89 and 21.78 m/s), jump / sneak add 0.15 up /
+	           down per tick and the vertical speed keeps 0.6 of itself (at most 0.375 blocks per
+	           tick), no gravity, crouching, edge back-off or swimming; landing stops it.
 
 	Units are blocks and ticks: positions in blocks (feet centre), velocities in blocks per tick.
 	Pure Luau and deterministic, so the same code can run on the server or in tests.
@@ -74,6 +79,12 @@ local FLUID_PUSH = 0.014
 local FLUID_JUMP_THRESHOLD = 0.4
 
 local FALL_SAFE = 3
+
+-- Creative flight (Abilities.flyingSpeed 0.05F, doubled when sprinting; jump / sneak add it x 3).
+local FLYING_SPEED = 0.05000000074505806 -- 0.05F
+local SPRINT_FLYING_SPEED = 0.10000000149011612 -- 0.1F
+local FLYING_VERTICAL = 0.15000000596046448 -- 0.05F * 3.0F
+local FLYING_VERTICAL_DRAG = 0.6
 
 -- Box sizes (width, height, eye height) of each pose.
 export type Pose = "standing" | "crouching" | "crawling"
@@ -125,6 +136,12 @@ export type State = {
 	eyeInWater: boolean,
 	underWater: boolean,
 	swimming: boolean,
+	-- Creative flight: allowed (set by the owner from the game mode), flying now, ticks left to
+	-- double tap jump (Player.jumpTriggerTime) and whether jump was held last tick.
+	mayFly: boolean,
+	flying: boolean,
+	jumpTriggerTime: number,
+	wasJumping: boolean,
 }
 
 export type Input = {
@@ -191,6 +208,10 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		eyeInWater = false,
 		underWater = false,
 		swimming = false,
+		mayFly = false,
+		flying = false,
+		jumpTriggerTime = 0,
+		wasJumping = false,
 	}
 end
 
@@ -369,8 +390,10 @@ local function updateWater(state: State, world: World)
 	state.eyeInWater = block ~= nil and isWater(block) and by + fluidHeight(world, bx, by, bz, block) > eyeY
 
 	-- Swimming (Entity.updateSwimming): sprinting under water, until sprinting stops or the water
-	-- ends.
-	if state.swimming then
+	-- ends. Never while flying (Player.updateSwimming).
+	if state.flying then
+		state.swimming = false
+	elseif state.swimming then
 		state.swimming = state.sprinting and touching
 	else
 		local feet = world.getBlock(floor(state.x), floor(state.y), floor(state.z))
@@ -413,8 +436,8 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 	local dx, dy, dz = state.vx, state.vy, state.vz
 	local box = PlayerPhysics.box(state)
 
-	-- Sneaking never walks off an edge (Player.maybeBackOffFromEdge).
-	if state.sneaking and dy <= 0 then
+	-- Sneaking never walks off an edge (Player.maybeBackOffFromEdge), except when flying.
+	if state.sneaking and not state.flying and dy <= 0 then
 		local aboveGround = state.onGround
 			or (
 				state.fallDistance < STEP_HEIGHT
@@ -459,7 +482,8 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 		state.supportX, state.supportZ = nil, nil
 	end
 
-	-- Fall distance and landing (Entity.checkFallDamage); landing in water first resets it.
+	-- Fall distance and landing (Entity.checkFallDamage); landing in water first resets it. Players
+	-- who may fly take no fall damage at all (Player.causeFallDamage).
 	if state.onGround and not state.inWater and touchesWater(state, world) then
 		state.fallDistance = 0
 	end
@@ -467,7 +491,7 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 		if state.fallDistance > 0 then
 			events.landed = true
 			events.fallDistance = state.fallDistance
-			events.damage = math.max(0, math.ceil(state.fallDistance - FALL_SAFE))
+			events.damage = if state.mayFly then 0 else math.max(0, math.ceil(state.fallDistance - FALL_SAFE))
 		end
 		state.fallDistance = 0
 	elseif ry < 0 then
@@ -512,6 +536,12 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	local solidAt = solidChecker(world)
 	local events: Events = { jumped = false, stepUp = 0, landed = false, fallDistance = 0, damage = 0 }
 
+	-- The game mode changed between ticks (the server updates the abilities): no flying without
+	-- being allowed to.
+	if not state.mayFly then
+		state.flying = false
+	end
+
 	-- Entity.baseTick: water and its current.
 	updateWater(state, world)
 
@@ -522,7 +552,10 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	end
 	local prevShift = state.sneaking
 	local prevImpulse = state.hadSprintImpulse
-	state.crouching = not state.swimming
+	local prevJump = state.wasJumping
+	state.wasJumping = input.jump
+	state.crouching = not state.flying
+		and not state.swimming
 		and fits(solidAt, state, "crouching")
 		and (prevShift or not fits(solidAt, state, "standing"))
 	local inputX, inputZ, forward = input.moveX, input.moveZ, input.forward
@@ -575,9 +608,31 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			state.sprinting = false
 		end
 	end
+	-- Double tapping jump toggles flying: the first press arms it for DOUBLE_TAP_TICKS (counted down
+	-- in Player.aiStep below), a second press within them toggles (not while swimming).
+	if state.mayFly and input.jump and not prevJump then
+		if state.jumpTriggerTime == 0 then
+			state.jumpTriggerTime = DOUBLE_TAP_TICKS
+		elseif not state.swimming then
+			state.flying = not state.flying
+			state.jumpTriggerTime = 0
+		end
+	end
 	-- Sneaking in water sinks (LocalPlayer.goDownInWater).
 	if state.inWater and input.sneak then
 		state.vy -= WATER_JUMP
+	end
+	-- Flying: jump rises, sneak sinks.
+	if state.flying then
+		local direction = (if input.jump then 1 else 0) - (if input.sneak then 1 else 0)
+		if direction ~= 0 then
+			state.vy += direction * FLYING_VERTICAL
+		end
+	end
+
+	-- Player.aiStep.
+	if state.jumpTriggerTime > 0 then
+		state.jumpTriggerTime -= 1
 	end
 
 	-- LivingEntity.aiStep: jump delay, tiny velocities, jumping.
@@ -622,7 +677,8 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		end
 	end
 
-	-- LivingEntity.travel.
+	-- LivingEntity.travel (Player.travel keeps the vertical speed from before it when flying).
+	local flyingVy = state.vy
 	if state.inWater then
 		local startY = state.y
 		local drag = if state.sprinting then WATER_SPRINT_DRAG else WATER_DRAG
@@ -648,20 +704,37 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		-- Friction and drag come from where the player stood before this tick's move.
 		local friction = frictionBelow(state, world)
 		local drag = if state.onGround then friction * AIR_DRAG else AIR_DRAG
+		-- In the air: Player.getFlyingSpeed (flying or not).
+		local airSpeed = if state.flying
+			then (if state.sprinting then SPRINT_FLYING_SPEED else FLYING_SPEED)
+			else (if state.sprinting then SPRINT_AIR_ACCELERATION else AIR_ACCELERATION)
 		local speed = if state.onGround
 			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED) * (GROUND_FACTOR / (friction * friction * friction))
-			else (if state.sprinting then SPRINT_AIR_ACCELERATION else AIR_ACCELERATION)
+			else airSpeed
 		accelerate(state, speed, inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		state.vx *= drag
 		state.vy = (state.vy - GRAVITY) * VERTICAL_DRAG
 		state.vz *= drag
 	end
+	if state.flying then
+		state.vy = flyingVy * FLYING_VERTICAL_DRAG
+		state.fallDistance = 0
+	end
 
-	-- Player.updatePlayerPose: swim, crouch when sneaking, and crouch or crawl whenever there is no
-	-- room to stand. Stuck in blocks (not even crawling fits), the pose stays as it is.
+	-- LocalPlayer.aiStep, after the move: touching the ground stops flying.
+	if state.onGround and state.flying then
+		state.flying = false
+	end
+
+	-- Player.updatePlayerPose: swim, crouch when sneaking (not when flying), and crouch or crawl
+	-- whenever there is no room to stand. Stuck in blocks (not even crawling fits), the pose stays
+	-- as it is.
 	if fits(solidAt, state, "crawling") then
-		local wanted: Pose = if state.swimming then "crawling" elseif input.sneak then "crouching" else "standing"
+		local wanted: Pose = if state.swimming
+			then "crawling"
+			elseif input.sneak and not state.flying then "crouching"
+			else "standing"
 		if fits(solidAt, state, wanted) then
 			state.pose = wanted
 		elseif fits(solidAt, state, "crouching") then

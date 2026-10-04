@@ -266,6 +266,13 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 			local snapshot = state:snapshot(player)
 			if snapshot and player.Parent then
 				net.send(player, Protocol.ServerMessage.Inventory, Protocol.encodeInventory(snapshot))
+				-- What is in the player's hand, for every client to draw (Player/HeldItems).
+				local inventory = snapshot.inventory
+				local held = inventory.slots[inventory.selected]
+				local item = if held then held.item else 0
+				if player:GetAttribute(Types.HELD_ATTRIBUTE) ~= item then
+					player:SetAttribute(Types.HELD_ATTRIBUTE, item)
+				end
 			end
 		end
 	end)

@@ -10,7 +10,7 @@
 
 	Block edits made by this player are applied immediately (prediction) and sent to the server.
 	If the server rejects one, it answers with the real block and the prediction is undone by the
-	normal edit path.
+	normal edit path. A placement carries the inventory action number of the item it uses up.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -63,7 +63,7 @@ export type ClientWorld = {
 	isLoaded: (self: ClientWorld, x: number, z: number) -> boolean,
 	applyEdit: (self: ClientWorld, x: number, y: number, z: number, block: number) -> (),
 	breakBlock: (self: ClientWorld, x: number, y: number, z: number) -> (),
-	placeBlock: (self: ClientWorld, x: number, y: number, z: number, block: number) -> (),
+	placeBlock: (self: ClientWorld, x: number, y: number, z: number, block: number, seq: number) -> (),
 	flush: (self: ClientWorld) -> (),
 }
 
@@ -333,9 +333,11 @@ function ClientWorld.breakBlock(self: ClientWorld, x: number, y: number, z: numb
 	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Break, x, y, z, AIR))
 end
 
-function ClientWorld.placeBlock(self: ClientWorld, x: number, y: number, z: number, block: number)
+-- `seq` is the number of the inventory action that uses the item up (ClientInventory.place), so
+-- the server can acknowledge it even when it rejects the placement.
+function ClientWorld.placeBlock(self: ClientWorld, x: number, y: number, z: number, block: number, seq: number)
 	ClientWorld.applyEdit(self, x, y, z, block)
-	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Place, x, y, z, block))
+	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Place, x, y, z, block, seq))
 end
 
 return ClientWorld

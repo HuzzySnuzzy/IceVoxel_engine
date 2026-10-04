@@ -26,6 +26,7 @@ local ContextMenu = require(script.Parent.ContextMenu)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
+local Screens = require(script.Parent.Parent.Ui.Screens)
 
 local BLOCK = Config.BlockSize
 local ZOOMS = Config.Map.ZoomLevels
@@ -336,7 +337,7 @@ function WorldMap.new(
 	end)
 
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == Enum.KeyCode.M then
+		if not processed and input.KeyCode == Enum.KeyCode.M and not Screens.isOpen() then
 			setOpen(not open)
 		end
 	end)

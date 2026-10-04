@@ -190,7 +190,7 @@ function CharacterAnimator.start()
 				nextMode = "swim"
 			elseif state.inWater and state.waterHeight > 0.9 and not state.onGround and tracks.swimidle then
 				nextMode = "swimidle"
-			elseif state.onGround or view.frozen or view.tilt > 0.5 or state.inWater then
+			elseif state.onGround or state.flying or view.frozen or view.tilt > 0.5 or state.inWater then
 				nextMode = if moving then "walk" else "idle"
 			else
 				nextMode = if os.clock() - view.jumpedAt < JUMP_TIME then "jump" else "fall"

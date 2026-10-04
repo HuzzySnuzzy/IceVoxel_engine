@@ -2,7 +2,8 @@
 --[[
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
 	builds pending, parts in the world, far mesh status (MeshOverlay), the frame rate, and the
-	player's movement hull (position, speed, ground / water / sprint / pose; MovementController).
+	player's movement hull (position, speed, ground / water / sprint / flying / pose, game mode;
+	MovementController) and the dropped items the client knows about (EntityRenderer).
 ]]
 
 local Players = game:GetService("Players")
@@ -12,6 +13,10 @@ local UserInputService = game:GetService("UserInputService")
 local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
+local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GameMode = require(ReplicatedStorage:WaitForChild("IceVoxel").GameMode)
 
 local DebugOverlay = {}
 
@@ -32,17 +37,20 @@ local function movementLine(): string
 	flag(s.inWater, "water")
 	flag(s.sprinting, "sprint")
 	flag(s.sneaking, "sneak")
+	flag(s.flying, "flying")
 	flag(view.frozen, "waiting")
 	local speed = math.sqrt(s.vx * s.vx + s.vz * s.vz) * 20
 	return string.format(
-		"player  %.2f %.2f %.2f  %.2f m/s  vy %.3f  %s %s",
+		"player  %.2f %.2f %.2f  %.2f m/s  vy %.3f  %s %s\n        %s, %d items nearby",
 		s.x,
 		s.y,
 		s.z,
 		speed,
 		s.vy,
 		s.pose,
-		table.concat(flags, " ")
+		table.concat(flags, " "),
+		GameMode.of(Players.LocalPlayer),
+		EntityRenderer.count()
 	)
 end
 

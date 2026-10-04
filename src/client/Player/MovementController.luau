@@ -21,8 +21,13 @@
 	  Facing    towards where the character walks, or where the camera looks in first person and
 	            with shift lock.
 	  Camera    at the hull's eye height (eased like Minecraft's when crouching / crawling); the
-	            field of view widens while sprinting (Config.Movement.SprintFov, eased like
-	            Minecraft's FOV modifier) on top of whatever the camera's field of view is.
+	            field of view widens while flying (x 1.1) and sprinting (Config.Movement.SprintFov),
+	            eased like Minecraft's FOV modifier, on top of whatever the camera's field of view
+	            is.
+	  Flying    creative players (the game mode attribute, GameMode) may fly: double tap jump.
+	            Switching to survival stops it.
+	  Screens   while an inventory screen is open (Ui/Screens) the input is neutral: the player
+	            stops (a sprint toggled on stays on).
 	  Waiting   until the full detail chunks under the hull are visible (after spawning and
 	            teleports), it stays frozen in place.
 	  Teleports the server sets the feet position as attributes (Rig); other scripts moving the
@@ -41,12 +46,14 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Screens = require(script.Parent.Parent.Ui.Screens)
 
 local BLOCK = Config.BlockSize
 local Movement = Config.Movement
@@ -75,11 +82,14 @@ local MAX_STEP_LAG = 1.5
 local FIRST_PERSON_DISTANCE = 1
 -- Roblox's camera can't go wider than this.
 local MAX_FOV = 120
+-- Field of view modifier while flying (AbstractClientPlayer.getFieldOfViewModifier).
+local FLYING_FOV = 1.1
 
 type Streamer = { isReady: (self: any, x: number, z: number) -> boolean }
 
 export type View = {
-	-- Hull state (blocks), updated every tick.
+	-- Hull state (blocks), updated every tick; also whether the player may fly (creative) and
+	-- flies (state.mayFly, state.flying).
 	state: PlayerPhysics.State,
 	-- Where the hull is drawn this frame (feet, blocks, between the last two ticks) and the
 	-- character's facing (radians around Y).
@@ -203,13 +213,18 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	local function bind(name: string, keys: { string }, title: string, onChange: (held: boolean, touch: boolean) -> ())
 		ContextActionService:BindActionAtPriority(name, function(_, inputState: Enum.UserInputState, input: InputObject)
 			local touch = input.UserInputType == Enum.UserInputType.Touch
+			-- In an inventory screen, gamepad buttons (B closes it) and touches go on to the
+			-- screens; releases still count, so nothing stays held.
+			local pass = Screens.isOpen() and input.UserInputType ~= Enum.UserInputType.Keyboard
 			if inputState == Enum.UserInputState.Begin then
-				onChange(true, touch)
+				if not pass then
+					onChange(true, touch)
+				end
 			elseif inputState == Enum.UserInputState.End or inputState == Enum.UserInputState.Cancel then
 				onChange(false, touch)
 			end
 			-- Keep Shift from also toggling the shift lock.
-			return Enum.ContextActionResult.Sink
+			return if pass then Enum.ContextActionResult.Pass else Enum.ContextActionResult.Sink
 		end, Movement.TouchButtons, Enum.ContextActionPriority.High.Value, table.unpack(keyCodes(keys)))
 		if Movement.TouchButtons then
 			ContextActionService:SetTitle(name, title)
@@ -222,7 +237,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	end
 	bind("IceVoxelSprint", Movement.SprintKeys, "Sprint", function(held, touch)
 		if touch or Movement.ToggleSprint then
-			if held then
+			-- (Ctrl+Q in an inventory screen must not toggle sprinting.)
+			if held and not Screens.isOpen() then
 				-- Toggles what the player sees: a sprint started by double tapping stops too.
 				local view = MovementController.current
 				sprintOn = not (sprintOn or (view ~= nil and view.state.sprinting))
@@ -252,7 +268,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	local baseFov = 70
 	-- What this controller last set the field of view to (nil: nothing yet).
 	local setFov: number? = nil
-	local function updateFov(dt: number, sprinting: boolean)
+	local function updateFov(dt: number, target: number)
 		local camera = workspace.CurrentCamera
 		if camera == nil then
 			return
@@ -262,7 +278,6 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			fovCamera = camera
 			baseFov = camera.FieldOfView
 		end
-		local target = if sprinting then Movement.SprintFov else 1
 		fovModifier += (target - fovModifier) * ease(dt)
 		if math.abs(target - fovModifier) < 1e-4 then
 			fovModifier = target
@@ -348,6 +363,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local start = if typeof(feet) == "Vector3" then feet else Rig.feet(character) or Vector3.zero
 		local state = PlayerPhysics.new(start.X, start.Y, start.Z)
 		state.stepHeight = Movement.StepHeight
+		state.mayFly = GameMode.isCreative(player)
 		local _, rootYaw = rootPart.CFrame:ToOrientation()
 		local view: View = {
 			state = state,
@@ -413,7 +429,27 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end
 		table.insert(connections, hum.HealthChanged:Connect(dieIfDead))
 
+		-- Jump held now (never while a screen is open).
+		local function jumpHeld(): boolean
+			return hum.Jump and not Screens.isOpen()
+		end
+
 		local function readInput(dt: number): PlayerPhysics.Input
+			-- An open inventory screen takes the input: stand still, keep facing the same way.
+			if Screens.isOpen() then
+				jumpLatched = false
+				return {
+					moveX = 0,
+					moveZ = 0,
+					forward = 0,
+					facingX = -math.sin(view.yaw),
+					facingZ = -math.cos(view.yaw),
+					lookY = math.clamp(workspace.CurrentCamera.CFrame.LookVector.Y, -1, 1),
+					jump = false,
+					sneak = false,
+					sprint = false,
+				}
+			end
 			local camera = workspace.CurrentCamera
 			local cameraCFrame = camera.CFrame
 			local headingX, headingZ = cameraHeading(cameraCFrame)
@@ -454,7 +490,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				forward = math.min(length, 1)
 			end
 
-			jumpLatched = jumpLatched or hum.Jump
+			jumpLatched = jumpLatched or jumpHeld()
 			return {
 				moveX = moveX,
 				moveZ = moveZ,
@@ -514,7 +550,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					accumulator -= TICK
 					previous = Vector3.new(state.x, state.y, state.z)
 					local events = PlayerPhysics.tick(state, frameInput, physicsWorld)
-					frameInput.jump = hum.Jump
+					frameInput.jump = jumpHeld()
 					jumpLatched = false
 					view.speed = math.sqrt((state.x - previous.X) ^ 2 + (state.z - previous.Z) ^ 2) * TICK_RATE
 					if events.jumped then
@@ -566,9 +602,25 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0) + lag
 			hum.CameraOffset = cframe:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(hum, rootPart), 0)
 
-			updateFov(dt, state.sprinting and not view.frozen)
+			-- Minecraft's FOV modifier: x 1.1 flying, x SprintFov sprinting.
+			local fov = 1
+			if not view.frozen then
+				fov = (if state.flying then FLYING_FOV else 1) * (if state.sprinting then Movement.SprintFov else 1)
+			end
+			updateFov(dt, fov)
 		end)
 	end
+
+	-- The server sets the game mode; switching to survival stops flying at once.
+	player:GetAttributeChangedSignal(GameMode.ATTRIBUTE):Connect(function()
+		local view = MovementController.current
+		if view then
+			view.state.mayFly = GameMode.isCreative(player)
+			if not view.state.mayFly then
+				view.state.flying = false
+			end
+		end
+	end)
 
 	player.CharacterAdded:Connect(onCharacter)
 	player.CharacterRemoving:Connect(disconnectAll)

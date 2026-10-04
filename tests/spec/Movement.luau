@@ -591,4 +591,279 @@ return function(t, shared, require)
 		t.ok(state.x - 0.3 >= 1 - 1e-6, `pushed out east to x = {state.x}`)
 		t.eq(state.pose, "standing")
 	end)
+
+	--[[ Creative flight (Minecraft 1.20.1: LocalPlayer.aiStep, Player.travel) ]]
+
+	-- A player who may fly, flying in the air at (x, y, z).
+	local function flyer(x: number, y: number, z: number): PlayerPhysics.State
+		local state = PlayerPhysics.new(x, y, z)
+		state.mayFly = true
+		state.flying = true
+		return state
+	end
+	-- Average speed (blocks per second) over ticks `from`..`to` of flying with input `i`, high up.
+	local function flyingSpeed(i: PlayerPhysics.Input, from: number, to: number): number
+		local flat = physicsWorld()
+		local state = flyer(0.5, 100, 0.5)
+		local x0 = 0
+		for tick = 1, to do
+			PlayerPhysics.tick(state, i, flat)
+			if tick == from then
+				x0 = state.x
+			end
+		end
+		t.ok(state.flying, "still flying")
+		return (state.x - x0) / (to - from) * PlayerPhysics.TICK_RATE
+	end
+	-- Ticks 1..n of jump input from a list of the ticks it is held; returns the state afterwards.
+	local function jumpPattern(state: PlayerPhysics.State, held: { [number]: boolean }, n: number)
+		local flat = physicsWorld()
+		for tick = 1, n do
+			PlayerPhysics.tick(state, input(0, 0, { jump = held[tick] == true }), flat)
+		end
+	end
+
+	t.test("flight: a second jump press within 7 ticks of the first toggles flying", function()
+		-- First press at tick 1; the second press can come at ticks 3..7 (the key must be released
+		-- in between), not at tick 8.
+		for second = 3, 8 do
+			local state = PlayerPhysics.new(0.5, 1, 0.5)
+			state.onGround = true
+			state.mayFly = true
+			jumpPattern(state, { [1] = true, [second] = true }, second)
+			t.eq(state.flying, second <= 7, `second press at tick {second}`)
+			t.eq(state.jumpTriggerTime, if second <= 7 then 0 else 6, `trigger time after tick {second}`)
+		end
+		-- A late second press arms a new double tap instead.
+		local late = PlayerPhysics.new(0.5, 1, 0.5)
+		late.onGround = true
+		late.mayFly = true
+		jumpPattern(late, { [1] = true, [8] = true, [10] = true }, 10)
+		t.ok(late.flying, "the press after a late one toggles")
+
+		-- Holding jump is one press; without mayFly nothing toggles.
+		local holder = PlayerPhysics.new(0.5, 1, 0.5)
+		holder.onGround = true
+		holder.mayFly = true
+		local held = {}
+		for tick = 1, 40 do
+			held[tick] = true
+		end
+		jumpPattern(holder, held, 40)
+		t.ok(not holder.flying, "holding jump does not fly")
+		local walker = PlayerPhysics.new(0.5, 1, 0.5)
+		walker.onGround = true
+		jumpPattern(walker, { [1] = true, [3] = true }, 3)
+		t.ok(not walker.flying, "survival players can't fly")
+
+		-- Double tapping again while flying stops flying; the player falls and lands.
+		local state = flyer(0.5, 5, 0.5)
+		jumpPattern(state, { [1] = true, [4] = true }, 4)
+		t.ok(not state.flying, "double tap while flying stops it")
+		jumpPattern(state, {}, 40)
+		t.ok(state.onGround and near(state.y, 1), `fell to the floor: {state.y}`)
+	end)
+
+	t.test("flight: tick by tick from a double tapped jump", function()
+		-- Jump at tick 1, press again at tick 3: Minecraft's numbers.
+		local state = PlayerPhysics.new(0.5, 1, 0.5)
+		state.onGround = true
+		state.mayFly = true
+		local flat = physicsWorld()
+		-- (y above the floor after each tick.)
+		local expected = {}
+		local y, vy = 0.42, (0.42 - 0.08) * 0.98 -- tick 1: the jump
+		expected[1] = y
+		y += vy -- tick 2: still a normal jump
+		vy = (vy - 0.08) * 0.98
+		expected[2] = y
+		vy += 0.15000000596046448 -- tick 3: flying, jump held: +0.15, then the vertical drag 0.6
+		y += vy
+		vy *= 0.6
+		expected[3] = y
+		for tick = 4, 8 do -- released: no gravity, 0.6 of the speed each tick
+			y += vy
+			vy *= 0.6
+			expected[tick] = y
+		end
+		for tick = 1, 8 do
+			PlayerPhysics.tick(state, input(0, 0, { jump = tick == 1 or tick == 3 }), flat)
+			t.ok(near(state.y - 1, expected[tick], 1e-6), `tick {tick}: {state.y - 1} vs {expected[tick]}`)
+			t.eq(state.flying, tick >= 3, `flying at tick {tick}`)
+		end
+		-- Hovering: the speed decays to nothing and the height stays.
+		for _ = 1, 40 do
+			PlayerPhysics.tick(state, input(0, 0), flat)
+		end
+		local hover = state.y
+		for _ = 1, 20 do
+			PlayerPhysics.tick(state, input(0, 0), flat)
+		end
+		t.ok(state.vy == 0 and state.y == hover and state.flying, `hovers at {state.y}`)
+		t.eq(state.fallDistance, 0, "no fall distance while flying")
+	end)
+
+	t.test("flight: 10.89 m/s flying, 21.78 m/s sprint flying", function()
+		local fly = flyingSpeed(input(1, 0), 150, 250)
+		t.ok(near(fly, 10.8889, 0.0005), `flying {fly} m/s`)
+		local sprint = flyingSpeed(input(1, 0, { sprint = true }), 150, 250)
+		t.ok(near(sprint, 21.7778, 0.0005), `sprint flying {sprint} m/s`)
+		-- Holding sneak and jump together: no vertical movement and no sneaking slowdown.
+		local both = flyingSpeed(input(1, 0, { jump = true, sneak = true }), 150, 250)
+		t.ok(near(both, 10.8889, 0.0005), `sneak + jump {both} m/s`)
+		-- The horizontal ramp: a = 0.05 * 0.98, then 0.91 drag each tick.
+		local state = flyer(0.5, 100, 0.5)
+		local flat = physicsWorld()
+		local x, vx = 0.5, 0
+		for tick = 1, 6 do
+			vx += 0.05000000074505806 * 0.98
+			x += vx
+			vx *= 0.91
+			PlayerPhysics.tick(state, input(1, 0), flat)
+			t.ok(near(state.x, x, 1e-9), `flying ramp tick {tick}: {state.x} vs {x}`)
+			t.eq(state.y, 100, "level")
+		end
+	end)
+
+	t.test("flight: jump rises and sneak sinks 0.375 blocks per tick at most", function()
+		local flat = physicsWorld()
+		local up = flyer(0.5, 100, 0.5)
+		local y0 = up.y
+		local steps = { 0.15, 0.24, 0.294, 0.3264 }
+		for tick, step in steps do
+			PlayerPhysics.tick(up, input(0, 0, { jump = true }), flat)
+			t.ok(near(up.y - y0, step, 1e-6), `rise at tick {tick}: {up.y - y0} vs {step}`)
+			y0 = up.y
+		end
+		for _ = 1, 40 do
+			PlayerPhysics.tick(up, input(0, 0, { jump = true }), flat)
+		end
+		y0 = up.y
+		PlayerPhysics.tick(up, input(0, 0, { jump = true }), flat)
+		t.ok(near(up.y - y0, 0.375, 1e-6), `rising {up.y - y0} blocks per tick`)
+		t.ok(up.flying, "holding jump keeps flying")
+
+		local down = flyer(0.5, 200, 0.5)
+		for _ = 1, 40 do
+			PlayerPhysics.tick(down, input(0, 0, { sneak = true }), flat)
+		end
+		y0 = down.y
+		PlayerPhysics.tick(down, input(0, 0, { sneak = true }), flat)
+		t.ok(near(down.y - y0, -0.375, 1e-6), `sinking {down.y - y0} blocks per tick`)
+		t.eq(down.pose, "standing", "no crouching pose while flying")
+		t.ok(not down.crouching, "not crouching")
+		t.eq(down.fallDistance, 0, "flying never builds a fall distance")
+	end)
+
+	t.test("flight: landing stops flying, then sneaking crouches", function()
+		local flat = physicsWorld()
+		local state = flyer(0.5, 4, 0.5)
+		local landedAt = nil
+		for tick = 1, 30 do
+			local events = PlayerPhysics.tick(state, input(0, 0, { sneak = true }), flat)
+			t.ok(events.damage == 0, "no damage")
+			if landedAt == nil and state.onGround then
+				landedAt = tick
+				t.ok(not state.flying, "touching the ground stops flying")
+			end
+		end
+		t.ok(landedAt ~= nil and near(state.y, 1), `landed on the floor: {state.y}`)
+		t.eq(state.pose, "crouching", "sneaking on the ground crouches again")
+	end)
+
+	t.test("flight: no edge back-off, no swimming; toggling needs mayFly and no swimming", function()
+		-- A 3 x 3 platform at y = 10 over nothing: flying 0.3 above it with sneak + jump held (no
+		-- vertical movement, but sneaking) goes past the edge.
+		local platform = physicsWorld(function(x, y, z)
+			if y == 10 and x >= 0 and x <= 2 and z >= 0 and z <= 2 then
+				return STONE
+			end
+			return if y <= 0 then STONE else AIR
+		end)
+		local state = flyer(1.5, 11.3, 1.5)
+		for _ = 1, 30 do
+			PlayerPhysics.tick(state, input(1, 0, { sneak = true, jump = true }), platform)
+		end
+		t.ok(state.x > 6 and near(state.y, 11.3) and state.flying, `flew past the edge: {state.x}, {state.y}`)
+
+		-- Flying under water with sprint never swims.
+		local deep = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 30 then WATER else nil
+		end)
+		local diver = flyer(0.5, 10, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(diver, input(1, 0, { sprint = true, lookY = -0.5 }), deep)
+			t.ok(not diver.swimming, "no swimming while flying")
+		end
+		t.ok(diver.flying and diver.underWater, "flying under water")
+
+		-- A swimming player cannot start flying.
+		local swimmer = PlayerPhysics.new(0.5, 10, 0.5)
+		swimmer.mayFly = true
+		for _ = 1, 3 do
+			PlayerPhysics.tick(swimmer, input(0, 0), deep)
+		end
+		for _ = 1, 10 do
+			PlayerPhysics.tick(swimmer, input(1, 0, { sprint = true, lookY = -0.5 }), deep)
+		end
+		t.ok(swimmer.swimming, "swimming")
+		for tick = 1, 4 do
+			PlayerPhysics.tick(
+				swimmer,
+				input(1, 0, { sprint = true, lookY = -0.5, jump = tick == 1 or tick == 3 }),
+				deep
+			)
+		end
+		t.ok(not swimmer.flying, "double tapping jump while swimming does not fly")
+
+		-- Losing mayFly (switching to survival) stops flying at once; the player falls.
+		local lost = flyer(0.5, 20, 0.5)
+		PlayerPhysics.tick(lost, input(0, 0), physicsWorld())
+		lost.mayFly = false
+		PlayerPhysics.tick(lost, input(0, 0), physicsWorld())
+		t.ok(not lost.flying and lost.vy < 0, `falls after losing mayFly: vy {lost.vy}`)
+	end)
+
+	t.test("flight: players who may fly take no fall damage but still report landings", function()
+		local flat = physicsWorld()
+		local function drop(height: number, mayFly: boolean): (number, number)
+			local s = PlayerPhysics.new(0.5, 1 + height, 0.5)
+			s.mayFly = mayFly
+			for _ = 1, 100 do
+				local events = PlayerPhysics.tick(s, input(0, 0), flat)
+				if events.landed then
+					return events.fallDistance, events.damage
+				end
+			end
+			return -1, -1
+		end
+		local distance, damage = drop(24, true)
+		t.ok(distance > 22 and damage == 0, `24 blocks with mayFly: {distance}, {damage}`)
+		distance, damage = drop(24, false)
+		t.ok(damage >= 19, `24 blocks without: {distance}, {damage}`)
+	end)
+
+	t.test("flight: the same double tap and flight give the same path", function()
+		local world = physicsWorld(function(x, y, z)
+			return if y == 1 and (x + z) % 7 == 0 then STONE else nil
+		end)
+		local function run(): string
+			local state = PlayerPhysics.new(0.5, 1, 0.5)
+			state.mayFly = true
+			for tick = 1, 300 do
+				local a = tick * 0.05
+				PlayerPhysics.tick(
+					state,
+					input(math.cos(a), math.sin(a), {
+						jump = tick == 1 or tick == 4 or (tick > 100 and tick < 140),
+						sneak = tick > 200,
+						sprint = tick > 50,
+					}),
+					world
+				)
+			end
+			return `{state.x},{state.y},{state.z},{state.vx},{state.vy},{state.vz},{state.flying}`
+		end
+		t.eq(run(), run())
+	end)
 end

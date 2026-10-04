@@ -18,9 +18,22 @@ A fast, Minecraft-style voxel engine for Roblox.
   caverns, and the Underlands: a cavern hundreds of blocks tall under the highest mountains. Ores and
   stone varieties by altitude, and a deterministic structure system (trees and cacti today) that
   lets anything cross chunk borders.
-- **Server-authoritative interaction.** Break and place blocks with client prediction and server
-  validation. Block updates power falling sand and gravel, flowing water (Minecraft rules, including
-  infinite sources) and grass turning into dirt.
+- **Survival and creative.** Minecraft's two game modes, switched with `/gamemode creative` or
+  `/gm s` in the chat.
+  - **Survival:** blocks take Minecraft's time to mine by hand, cracking as they go, and drop as
+    items that bob on the ground until someone walks over them. Placing uses items up. Players have
+    a Minecraft inventory: 36 slots, armor slots on the left, and chests that open above it. Clicks
+    work as in Minecraft: shift-click, number keys, dragging to spread, double click. Items drop on
+    death.
+  - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
+    (double tap jump) and no fall damage.
+- **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
+  ViewportFrame with the same look as the block in the world. Dropped items and the item in a
+  character's hand are drawn the same way.
+- **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
+  the client and validated by the server: timing, reach, what the player holds. Block updates power
+  falling sand and gravel, flowing water (Minecraft rules, including infinite sources) and grass
+  turning into dirt.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or double tap forward) with Minecraft's widening field of view, sneaking that
@@ -72,15 +85,21 @@ Studio tips:
 
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
-| Break block   | Left click (hold to repeat) | R2      | Tap        |
-| Place block   | Right click                 | L2      | Long press |
-| Select block  | `1`–`9`, `Q` / `E` to cycle, or click a slot | L1 / R1 | Tap a slot, ‹ › pages |
+| Break block   | Hold left click (survival mines, creative breaks at once) | R2 | Hold |
+| Place / use   | Right click (opens chests)  | L2      | Tap        |
+| Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
+| Pick block    | Middle click                |         |            |
+| Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
+| Inventory     | `E` (creative: the item picker) | Y   | `…` button |
+| Fly (creative) | Double tap `Space`; `Space` / `Shift` up / down | double tap A | double tap jump |
+| Game mode     | `/gamemode survival` / `creative` (or `/gm s` / `c`) in the chat | | |
 | Sprint        | `Ctrl` turns it on / off, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
 | Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
 | Swim up / down | Hold `Space` / `Shift` in water | A / B | Jump / Sneak |
 | Swim fast     | Sprint under water; look where to go | L3 | Sprint button |
 | Climb out     | Swim at a ledge just above the water | stick | move |
+| In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the hotbar, `Q` drop, double click to collect, drag to spread | A / X / Y, B closes | tap / long press |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
