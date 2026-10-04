@@ -1,7 +1,7 @@
 --[[
 	Generation / meshing benchmark and part count estimate.
 
-	    lune run tests/bench [seed]
+	    lune run tests/bench [seed] [viewDistance] [splitDistance]
 
 	Times generating and meshing chunks at every LOD level, then runs the real LOD selection around
 	the spawn point and meshes every selected node to estimate how many parts the client creates.
@@ -18,6 +18,10 @@ local GreedyMesher = require(shared.Meshing.GreedyMesher)
 local TerrainGenerator = require(shared.Generation.TerrainGenerator)
 
 local seed = tonumber(process.args[1]) or 12345
+LodTree.configure(
+	tonumber(process.args[2]) or Config.Lod.ViewDistance,
+	tonumber(process.args[3]) or Config.Lod.SplitDistance
+)
 local gen = TerrainGenerator.new(seed)
 local sx, sh, sz = gen.findSpawn()
 print(`seed {seed}, spawn at {sx}, {sh}, {sz}`)
@@ -68,7 +72,7 @@ local _, _, caveBoxes = meshNode(0, sx // 16, sz // 16, true)
 local _, _, hiddenBoxes = meshNode(0, sx // 16, sz // 16, false)
 print(`\nSpawn chunk boxes with caves revealed: {caveBoxes}, hidden: {hiddenBoxes}`)
 
-print("\nFull view from spawn (caves hidden):")
+print(`\nFull view from spawn (caves hidden, view distance {LodTree.viewDistance()}):`)
 local nodes = LodTree.select(sx + 0.5, sz + 0.5)
 local perLevel: { [number]: { count: number, boxes: number } } = {}
 local total, totalTime = 0, 0

@@ -80,7 +80,9 @@ function WorldMap.new(
 	local centerX, centerZ = 0, 0
 	local following = true
 	local open = false
+	-- Where the drag was last seen, and the input moving it (the touch, or nil for the mouse).
 	local dragging: Vector2? = nil
+	local dragInput: InputObject? = nil
 
 	local backdrop = Instance.new("Frame")
 	backdrop.Name = "WorldMap"
@@ -190,20 +192,23 @@ function WorldMap.new(
 		return marker
 	end
 
+	-- Zooms keeping the world point at `around` (frame pixels) in place; nil keeps the center.
 	local function setZoom(index: number, around: Vector2?)
 		index = math.clamp(index, 1, #ZOOMS)
 		if index == zoom then
 			return
 		end
-		-- Keep the world point under the cursor where it is.
 		if around then
 			local wx, wz = view:toWorld(around)
 			local ratio = ZOOMS[index] / ZOOMS[zoom]
 			centerX = wx + (centerX - wx) * ratio
 			centerZ = wz + (centerZ - wz) * ratio
+			following = false
 		end
 		zoom = index
 		layer:setScale(ZOOMS[zoom])
+		-- Keep toWorld right for input arriving before the next render.
+		view:setCenter(centerX, centerZ)
 	end
 
 	local function mouseInPanel(): Vector2
@@ -217,7 +222,7 @@ function WorldMap.new(
 		end
 		open = value
 		backdrop.Visible = value
-		dragging = nil
+		dragging, dragInput = nil, nil
 		ContextMenu.close()
 		if value then
 			following = true
@@ -240,22 +245,26 @@ function WorldMap.new(
 		following = true
 	end)
 	zoomIn.Activated:Connect(function()
-		setZoom(zoom - 1, panel.AbsoluteSize / 2)
+		setZoom(zoom - 1)
 	end)
 	zoomOut.Activated:Connect(function()
-		setZoom(zoom + 1, panel.AbsoluteSize / 2)
+		setZoom(zoom + 1)
 	end)
 
-	catcher.InputBegan:Connect(function(input)
+	catcher.InputBegan:Connect(function(input: InputObject)
 		local kind = input.UserInputType
-		if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch then
+		if kind == Enum.UserInputType.MouseButton1 or (kind == Enum.UserInputType.Touch and dragInput == nil) then
 			dragging = Vector2.new(input.Position.X, input.Position.Y)
+			dragInput = if kind == Enum.UserInputType.Touch then input else nil
 		end
 	end)
-	UserInputService.InputChanged:Connect(function(input)
+	UserInputService.InputChanged:Connect(function(input: InputObject)
 		local last = dragging
-		local kind = input.UserInputType
-		if last and (kind == Enum.UserInputType.MouseMovement or kind == Enum.UserInputType.Touch) then
+		if last == nil then
+			return
+		end
+		local moved = if dragInput then input == dragInput else input.UserInputType == Enum.UserInputType.MouseMovement
+		if moved then
 			local now = Vector2.new(input.Position.X, input.Position.Y)
 			local delta = now - last
 			dragging = now
@@ -264,19 +273,23 @@ function WorldMap.new(
 				local blocksPerPixel = view.pixels * layer.scale / panel.AbsoluteSize.X
 				centerX -= delta.X * blocksPerPixel
 				centerZ -= delta.Y * blocksPerPixel
+				view:setCenter(centerX, centerZ)
 			end
 		end
 	end)
-	UserInputService.InputEnded:Connect(function(input)
-		local kind = input.UserInputType
-		if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch then
-			dragging = nil
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		local ended = if dragInput then input == dragInput else input.UserInputType == Enum.UserInputType.MouseButton1
+		if ended then
+			dragging, dragInput = nil, nil
 		end
 	end)
 
 	catcher.SecondaryActivated:Connect(function(input)
-		dragging = nil
-		local screen = Vector2.new(input.Position.X, input.Position.Y)
+		dragging, dragInput = nil, nil
+		-- A gamepad has no pointer here: use the middle of the map.
+		local screen = if input.UserInputType.Name:sub(1, 7) == "Gamepad"
+			then panel.AbsolutePosition + panel.AbsoluteSize / 2
+			else Vector2.new(input.Position.X, input.Position.Y)
 		local wx, wz = view:toWorld(screen - panel.AbsolutePosition)
 		local x, z = math.floor(wx), math.floor(wz)
 		local items: { ContextMenu.Item } = {
@@ -316,6 +329,7 @@ function WorldMap.new(
 			action = function()
 				following = false
 				centerX, centerZ = wx, wz
+				view:setCenter(centerX, centerZ)
 			end,
 		})
 		ContextMenu.show(gui, screen, items)

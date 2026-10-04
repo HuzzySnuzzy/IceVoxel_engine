@@ -125,6 +125,35 @@ return function(t, shared, require)
 		end
 	end)
 
+	t.test("LOD view distance can be changed (mobile preset)", function()
+		local function farthest(nodes: { [number]: number }): number
+			local best = 0
+			for key, level in nodes do
+				local _, nx, nz = Coords.decodeNodeKey(key)
+				best = math.max(best, LodTree.distance(level, nx, nz, 0, 0))
+			end
+			return best
+		end
+		local default = LodTree.select(0, 0)
+		LodTree.configure(Config.Lod.Mobile.ViewDistance, Config.Lod.Mobile.SplitDistance)
+		local ok, err = pcall(function()
+			t.eq(LodTree.viewDistance(), Config.Lod.Mobile.ViewDistance)
+			local mobile = LodTree.select(0, 0)
+			t.ok(farthest(mobile) <= Config.Lod.Mobile.ViewDistance, "nothing beyond the mobile view distance")
+			t.ok(farthest(default) > Config.Lod.Mobile.ViewDistance, "default reaches further")
+			local count, defaultCount = 0, 0
+			for _ in mobile do
+				count += 1
+			end
+			for _ in default do
+				defaultCount += 1
+			end
+			t.ok(count < defaultCount, `fewer nodes on mobile ({count} vs {defaultCount})`)
+		end)
+		LodTree.configure(Config.Lod.ViewDistance, Config.Lod.SplitDistance)
+		assert(ok, err)
+	end)
+
 	t.test("LOD hysteresis keeps leaves until the viewer is clearly closer", function()
 		local first = LodTree.select(0, 0)
 		local again = LodTree.select(0.5, 0.5, first)

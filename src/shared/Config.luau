@@ -54,7 +54,13 @@ local Config = {
 		-- Higher = more full detail chunks around the player (radius of LOD 0 is ~2 * SplitDistance chunks).
 		SplitDistance = 3,
 		-- Nothing is rendered further away than this (blocks).
-		ViewDistance = 1024,
+		ViewDistance = 2048,
+		-- Used instead on phones and tablets (touch screen without keyboard). They also draw parts
+		-- much less far than computers do, so a long view distance would only cost memory there.
+		Mobile = {
+			ViewDistance = 512,
+			SplitDistance = 2,
+		},
 	},
 
 	-- Streaming (client) -----------------------------------------------------------------------------
@@ -96,14 +102,20 @@ local Config = {
 	-- Water (client: swimming and currents for the local character) --------------------------------
 
 	Water = {
-		-- Fraction of gravity cancelled while waist deep / fully under water (1 = weightless).
-		Buoyancy = 0.7,
-		SubmergedBuoyancy = 1.05,
-		-- Push of flowing water in studs/s^2 along the current.
-		CurrentAcceleration = 60,
-		-- Studs/s: swimming up while Jump is held, fastest sinking speed.
-		SwimUpSpeed = 14,
-		SinkSpeed = 8,
+		-- Fraction of gravity cancelled when fully under water (below 1 = sink slowly).
+		Buoyancy = 0.92,
+		-- Vertical drag in water (1/s). Sinking speed is about Gravity * (1 - Buoyancy) / Drag.
+		Drag = 4,
+		-- Upward acceleration (studs/s^2) while Jump is held with the waist under water.
+		SwimUpAcceleration = 60,
+		-- Speed (studs/s) a full strength current carries you at, and how fast (1/s) it gets you
+		-- there. The current never slows you down; it only pushes until you move at its speed.
+		CurrentSpeed = 8,
+		CurrentGain = 3,
+		-- Strongest push of the current (studs/s^2) while swimming / while standing on the ground
+		-- (the Humanoid brakes hard on the ground, so it needs more there).
+		CurrentMaxAcceleration = 40,
+		CurrentMaxAccelerationGrounded = 150,
 		-- Walk speed multiplier in water.
 		WalkSpeedFactor = 0.6,
 	},
@@ -117,9 +129,8 @@ local Config = {
 		MinimapScale = 2,
 		-- Zoom levels of the world map (M), in blocks per pixel.
 		ZoomLevels = { 1, 2, 4, 8, 16, 32, 64 },
-		-- Pixels per side of a map tile, and how many painted tiles are kept in memory.
+		-- Pixels per side of a map tile (tiles are painted and uploaded one at a time).
 		TileSize = 64,
-		MaxTiles = 160,
 		-- Who may teleport by right clicking the world map: true = everyone, false = nobody,
 		-- or a list of user ids. Checked by the server.
 		Teleport = (true :: any) :: boolean | { number },

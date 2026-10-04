@@ -24,6 +24,7 @@ export type MapView = {
 	u0: number,
 	v0: number,
 
+	setCenter: (self: MapView, centerX: number, centerZ: number) -> (),
 	render: (self: MapView, centerX: number, centerZ: number) -> (),
 	toFrame: (self: MapView, x: number, z: number) -> Vector2,
 	toWorld: (self: MapView, position: Vector2) -> (number, number),
@@ -64,13 +65,18 @@ local function split(start: number, length: number, size: number): { { number } 
 	return { { start, first, 0 }, { 0, length - first, first } }
 end
 
+-- Moves the window (for toFrame / toWorld) without drawing; render does this too.
+function MapView.setCenter(self: MapView, centerX: number, centerZ: number)
+	local scale = self.layer.scale
+	self.u0 = centerX / scale - self.pixels / 2
+	self.v0 = centerZ / scale - self.pixels / 2
+end
+
 function MapView.render(self: MapView, centerX: number, centerZ: number)
 	local layer = self.layer
-	local scale = layer.scale
 	local pixels = self.pixels
-	local u0 = centerX / scale - pixels / 2
-	local v0 = centerZ / scale - pixels / 2
-	self.u0, self.v0 = u0, v0
+	MapView.setCenter(self, centerX, centerZ)
+	local u0, v0 = self.u0, self.v0
 
 	local iu, iv = math.floor(u0), math.floor(v0)
 	layer:request(iu, iv, iu + pixels + 1, iv + pixels + 1)
@@ -98,7 +104,7 @@ function MapView.render(self: MapView, centerX: number, centerZ: number)
 	end
 end
 
--- World block position -> pixel offset inside the frame (as of the last render).
+-- World block position -> pixel offset inside the frame (for the current window).
 function MapView.toFrame(self: MapView, x: number, z: number): Vector2
 	local size = self.frame.AbsoluteSize
 	local scale = self.layer.scale

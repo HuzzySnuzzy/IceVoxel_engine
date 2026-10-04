@@ -4,8 +4,9 @@ A fast, Minecraft-style voxel engine for Roblox.
 
 - **Client-side generation in parallel.** Terrain is generated from the world seed on every
   client, inside a pool of Actors (Parallel Luau). The server never sends terrain, only edits.
-- **Level of detail.** A quadtree of chunk sizes gives a default view distance of 1024 blocks
-  (64 chunks) at roughly 20–45k parts. LOD changes swap in place without holes or flicker.
+- **Level of detail.** A quadtree of chunk sizes gives a default view distance of 2048 blocks
+  (128 chunks) at roughly 25–50k parts. Far chunks use cells up to 64 blocks wide (but at most 16
+  tall, so mountains keep their shape). LOD changes swap in place without holes or flicker.
 - **Greedy box meshing.** Blocks become as few Parts as possible; blocks you can never see are
   merged into neighbouring boxes for free, and caves are only meshed when the camera is underground.
 - **Blended biomes.** Continents, oceans, beaches, mountain ranges and 8 biomes (tundra, taiga,
@@ -43,7 +44,10 @@ Studio tips:
 - Delete the template's `Baseplate`; the world starts at y = 0 and the baseplate only sits under it.
 - New places come with an `Atmosphere` in Lighting, which adds haze to the far LOD chunks. Without
   one, IceVoxel uses distance fog at the edge of the view distance instead.
-- Studio's graphics quality limits how far parts are drawn. Raise it to see the full view distance.
+- How far parts are drawn is up to the engine, not the script: it depends on the graphics quality
+  level and how many objects are on screen. Studio ignores that limit, so judge long views in the
+  Roblox player with a high graphics level. Phones draw far less (a few hundred studs), which is why
+  they get a shorter view distance (`Lod.Mobile`).
 
 ## Controls
 
@@ -52,7 +56,7 @@ Studio tips:
 | Break block   | Left click (hold to repeat) | R2      | Tap        |
 | Place block   | Right click                 | L2      | Long press |
 | Select block  | `1`–`9`, `Q` / `E` to cycle |         |            |
-| Swim up       | Hold `Space` in water       | A       | Jump       |
+| Swim up       | Hold `Space` in water       | A       | Jump button |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
@@ -110,7 +114,8 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 
 | Setting                   | Default | Effect                                                              |
 | ------------------------- | ------- | ------------------------------------------------------------------- |
-| `Lod.ViewDistance`        | 1024    | How far terrain is drawn (blocks).                                  |
+| `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks).                                  |
+| `Lod.Mobile`              | 512 / 2 | View / split distance on phones and tablets.                        |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
@@ -124,9 +129,16 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 
 Part count depends on the terrain: flat land costs ~35 parts per full detail chunk, steep
-mountains ~120. Measured view from spawn with the default settings: 19k parts on seed 12345
-(plains), 45k on seed 777 (mountain taiga). For phones, try `ViewDistance = 512` and
-`SplitDistance = 2`, which roughly halves that (10k and 25k on the same seeds).
+mountains ~120. Most parts are near the player; doubling the view distance adds comparatively
+few. Measured view from spawn (`lune run tests/bench <seed> <viewDistance> [splitDistance]`):
+
+| Seed              | 512 (mobile) | 1024 | 2048 (default) | 4096 |
+| ----------------- | ------------ | ---- | -------------- | ---- |
+| 12345 (plains)    | 9k           | 19k  | 25k            | 34k  |
+| 777 (mountains)   | 24k          | 45k  | 49k            | 59k  |
+
+Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
+float precision makes parts and characters jitter.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one.
 
@@ -247,4 +259,4 @@ Natural next steps, roughly in order:
 - **Bigger structures.** Villages / dungeons using the same stateless placement with a larger grid.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result.
-- **Floating origin** for worlds far beyond ±100k studs.
+- **Floating origin** for play far beyond ±16k studs, where float precision starts to show.

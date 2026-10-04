@@ -3,21 +3,25 @@
 	Swimming and currents for the local character in IceVoxel water.
 
 	Water blocks are drawn with non-colliding parts, so Roblox's own swimming (which only knows
-	Terrain water) never starts. Instead, every physics step this checks the client's block data at
-	the character's feet, waist and head, and while the character is in water:
+	Terrain water) never starts. Instead, every physics step this measures how much of the
+	character is under water (using the lowered surfaces of flowing water) and sets one VectorForce
+	on the root part (force = mass * acceleration; velocity is never written directly):
 
-	  * a VectorForce cancels most of gravity (sinks slowly; floats up when fully under water),
-	  * the same force pushes along the current (Shared/World/FluidFlow, Minecraft's flow rule):
-	    flowing water carries you downstream and over edges, still water does not move you,
-	  * holding Jump swims upwards, falling speed is capped, walking is slower.
+	  * buoyancy cancels most of gravity in proportion to how deep you are, and vertical drag
+	    limits sinking speed: you sink slowly and bob at the surface while holding Jump,
+	  * holding Jump with the waist under water swims upwards,
+	  * the current (Shared/World/FluidFlow, Minecraft's flow rule) pushes along the flow until you
+	    move at Config.Water.CurrentSpeed; it never slows you down, and still water does not push,
+	  * walking is slower.
 
-	The client owns its character's physics, so all of this is local and replicates as movement.
+	The Humanoid stays in its normal states (forcing Swimming outside Terrain water makes it pitch
+	over and steer with the camera). The client owns its character's physics, so this is all local
+	and replicates as movement.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
@@ -27,6 +31,10 @@ local FluidFlow = require(Shared.World.FluidFlow)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 
 local BLOCK = Config.BlockSize
+local FLUID_FULL = Blocks.FLUID_FULL
+local FLUID_HEIGHT = Blocks.fluidHeightLut
+-- Studs from the top of the root part to the top of the head (default avatars).
+local HEAD = 1.5
 local Water = Config.Water
 
 local WaterController = {}
@@ -80,10 +88,21 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 		end
 	end
 
-	local function wantsUp(h: Humanoid): boolean
-		return h.Jump
-			or UserInputService:IsKeyDown(Enum.KeyCode.Space)
-			or UserInputService:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonA)
+	-- Highest water surface (studs) reaching into the body between block rows y0 and y1, or nil.
+	local function waterTop(bx: number, y0: number, y1: number, bz: number): (number?, number)
+		local top, first = nil, y0
+		for y = y0, y1 do
+			local block = getBlock(bx, y, bz)
+			if isFluid(block) then
+				if top == nil then
+					first = y
+				end
+				top = (y + buffer.readu8(FLUID_HEIGHT, block :: number) / FLUID_FULL) * BLOCK
+			elseif top then
+				break
+			end
+		end
+		return top, first
 	end
 
 	RunService.PreSimulation:Connect(function()
@@ -92,19 +111,25 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 			stopSwimming()
 			return
 		end
-
-		local p = r.Position
-		local bx, bz = math.floor(p.X / BLOCK), math.floor(p.Z / BLOCK)
-		local feetY = math.floor((p.Y - 2.5) / BLOCK)
-		local waistY = math.floor(p.Y / BLOCK)
-		local headY = math.floor((p.Y + 1.5) / BLOCK)
-		local feet = isFluid(getBlock(bx, feetY, bz))
-		local waist = isFluid(getBlock(bx, waistY, bz))
-		if not feet and not waist then
+		local mass = r.AssemblyMass
+		if mass ~= mass or mass == math.huge then
+			-- Welded to something anchored (e.g. held during a teleport).
 			stopSwimming()
 			return
 		end
-		local submerged = waist and isFluid(getBlock(bx, headY, bz))
+
+		-- How much of the body is under water (0..1), from the real (lowered) water surface.
+		local p = r.Position
+		local legs = if h.RigType == Enum.HumanoidRigType.R15 then h.HipHeight else 2
+		local bottom = p.Y - r.Size.Y / 2 - legs
+		local height = r.Size.Y + legs + HEAD
+		local bx, bz = math.floor(p.X / BLOCK), math.floor(p.Z / BLOCK)
+		local top, flowY = waterTop(bx, math.floor(bottom / BLOCK), math.floor((bottom + height) / BLOCK), bz)
+		local submerged = if top then math.clamp((top - bottom) / height, 0, 1) else 0
+		if submerged <= 0 then
+			stopSwimming()
+			return
+		end
 
 		if not swimming then
 			swimming = true
@@ -113,23 +138,36 @@ function WaterController.start(world: ClientWorld.ClientWorld)
 			f.Enabled = true
 		end
 
-		local mass = r.AssemblyMass
-		local lift = if submerged then Water.SubmergedBuoyancy elseif waist then Water.Buoyancy else 0
-		local fx, fy, fz = FluidFlow.at(getBlock, bx, if waist then waistY else feetY, bz)
-		local current = Vector3.new(fx, fy * 0.5, fz) * Water.CurrentAcceleration
-		f.Force = (Vector3.new(0, workspace.Gravity * lift, 0) + current) * mass
-
-		-- Vertical control: swim up while Jump is held, otherwise sink no faster than SinkSpeed.
 		local v = r.AssemblyLinearVelocity
-		local vy = v.Y
-		if waist and wantsUp(h) then
-			vy = math.max(vy, Water.SwimUpSpeed)
-		elseif vy < -Water.SinkSpeed then
-			vy = -Water.SinkSpeed
+		local accel = Vector3.zero
+
+		-- Current: push along the flow until moving at the current's speed; never brakes.
+		local waistY = math.floor(p.Y / BLOCK)
+		if isFluid(getBlock(bx, waistY, bz)) then
+			flowY = waistY
 		end
-		if vy ~= v.Y then
-			r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z)
+		local fx, fy, fz = FluidFlow.at(getBlock, bx, flowY, bz)
+		local flow = Vector3.new(fx, fy, fz)
+		local strength = flow.Magnitude
+		if strength > 1e-3 then
+			local direction = flow / strength
+			local cap = if h.FloorMaterial ~= Enum.Material.Air
+				then Water.CurrentMaxAccelerationGrounded
+				else Water.CurrentMaxAcceleration
+			local target = Water.CurrentSpeed * math.min(strength, 1)
+			accel += direction * math.clamp(Water.CurrentGain * (target - v:Dot(direction)), 0, cap)
 		end
+
+		-- Buoyancy and drag grow with how deep you are, so holding Jump bobs at the surface.
+		-- Humanoid.Jump is set every frame by the default controls (keyboard, gamepad and touch).
+		local g = workspace.Gravity
+		local ay = (g * Water.Buoyancy - Water.Drag * v.Y) * submerged
+		if h.Jump and top and top >= p.Y then
+			ay += Water.SwimUpAcceleration
+		end
+		accel += Vector3.new(0, ay, 0)
+
+		f.Force = accel * mass
 	end)
 
 	local player = Players.LocalPlayer

@@ -109,6 +109,11 @@ LOD chunks are meshed as one range between `solidBelow - 1` and `emptyAbove`.
 `LodTree.select` tiles the world with root nodes of the coarsest level and splits a node into four
 children while the viewer is closer than `SplitDistance × nodeSize`. The leaves are the chunks to
 show. They never overlap and leave no gaps. Hysteresis prevents flapping at split boundaries.
+View and split distance come from `Config.Lod`; on phones and tablets `Rendering/ViewSettings`
+switches to `Lod.Mobile`, because the engine draws parts only a few hundred studs far there anyway.
+It also sets `Lighting.PrioritizeLightingQuality = false`, so that when the engine has to lower
+quality it keeps draw distance and gives up lighting detail first. How far parts are actually drawn
+is the engine's decision (graphics level and visible object count); scripts cannot raise it.
 
 Each node goes through states:
 
@@ -171,7 +176,12 @@ wrapped piece) sharing the same image. The minimap uses a 256² image, the world
 returns nil when the memory budget is used up; the maps then show markers only.
 
 Waypoints live on the client (`Map/Waypoints`) and are saved by the server per player in a
-DataStore (`Players/WaypointStore`, names text-filtered). Teleport requests go to the server
+DataStore (`Players/WaypointStore`, names text-filtered). Every client change bumps a revision
+number sent with the list; the server ignores lists older than the newest one it has seen (text
+filtering yields, so updates can finish out of order) and echoes the revision when filtering changed
+a name, and the client applies an echo only if it made no change since. The client sends nothing
+before the saved list arrives. If the saved list cannot be loaded, that session's waypoints are not
+saved, so a DataStore outage never overwrites them. Teleport requests go to the server
 (`Players/Teleport`), which checks `Map.Teleport` and a cooldown and lands the player on a safe spot;
 `Player/SpawnGuard` holds the character until the terrain at the destination is built.
 
@@ -180,6 +190,25 @@ DataStore (`Players/WaypointStore`, names text-filtered). Teleport requests go t
 Targeting uses `World/VoxelRaycast` (grid traversal) on the client's block data. Edits are applied
 immediately and sent to the server; a rejected edit comes back as the real block and undoes the
 prediction. `Player/SpawnGuard` keeps a new character anchored until the chunk under it is ready.
+
+### Water (`Player/WaterController`)
+
+Water parts do not collide, and Roblox's swimming only knows Terrain water, so the character is
+handled by one `VectorForce` on the root part, set every `PreSimulation` from the client's block
+data (force = `AssemblyMass` × acceleration; velocity is never written):
+
+- **Submersion** (0–1) comes from the real water surface in the character's column, including the
+  lowered surfaces of flowing water.
+- **Buoyancy and drag**: `g × Buoyancy × submersion − Drag × v.y × submersion` vertically. Below 1
+  the character sinks slowly (terminal speed ≈ `g (1 − Buoyancy) / Drag`), and as buoyancy fades
+  near the surface, holding Jump bobs there. Jump (read from `Humanoid.Jump`, which the default
+  controls set for keyboard, gamepad and touch) adds `SwimUpAcceleration` while the waist is under.
+- **Current**: `World/FluidFlow` gives the flow direction (Minecraft's rule: towards lower levels
+  and drops, down in falling water). A one-sided servo pushes along it until the character moves at
+  `CurrentSpeed`, so it never brakes the player and cannot build up speed. The Humanoid brakes hard
+  on the ground, so the push limit is higher there.
+- The Humanoid keeps its normal states: forcing `Swimming` outside Terrain water makes it switch to
+  GettingUp, steer with the camera's pitch and lie horizontal, which is wrong for shallow water.
 
 ## Networking (`Net/Protocol`)
 
@@ -216,8 +245,11 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
-  spawns). The search checks the target column, then rings around it. Spawning re-checks the spawn
-  spot on every respawn, since players may have built or poured water there.
+  spawns). The search checks the target column, then rings around it. In chunks nobody edited
+  the terrain is exactly what the generator makes, so open water is skipped from the generator's
+  height alone and columns are scanned from just above the tallest structure. Spawning re-checks the
+  spawn spot on every respawn, since players may have built or poured water there; when no safe
+  spot exists it waits 30 s before searching again.
 
 ## Hidden caves, octrees and regions
 
