@@ -293,19 +293,37 @@ return function(t, shared, require, server)
 		t.ok(Blocks.get(far:getBlock(0, FLOOR, 1)).fluid ~= nil, "and sideways")
 	end)
 
+	t.test("two sources make a third even under falling water (Minecraft's getNewLiquid order)", function()
+		local world, _, settle = newWorld()
+		for cz = -1, 1 do
+			for cx = -1, 1 do
+				world:getChunk(cx, cz)
+			end
+		end
+		world:setBlock(7, FLOOR, 8, WATER)
+		world:setBlock(9, FLOOR, 8, WATER)
+		-- A source floating above the gap pours into it.
+		world:setBlock(8, FLOOR + 2, 8, WATER)
+		settle()
+		t.eq(world:getBlock(8, FLOOR, 8), WATER, "the gap between the sources is a source")
+	end)
+
 	t.test("water waits at unloaded chunks and continues once they load", function()
 		local world, ticker, _ = newWorld()
-		world:setBlock(2, FLOOR, 2, WATER) -- chunk (0, 0); chunk (-1, 0) is not loaded
+		world:setBlock(8, FLOOR, 8, WATER) -- chunk (0, 0); chunk (-1, 0) is not loaded
 		for _ = 1, 200 do
 			ticker:step()
 		end
-		t.eq(world:getBlock(0, FLOOR, 2), Blocks.fluidId("Water", 2), "reached the chunk edge")
+		-- Spreading west would look for a way down into the unloaded chunk (up to 5 blocks away),
+		-- so the water stops where its search would reach it instead of guessing.
+		t.eq(world:getBlock(4, FLOOR, 8), Blocks.fluidId("Water", 4), "spread while the search stays loaded")
+		t.eq(world:getBlock(3, FLOOR, 8), AIR, "waits where the search reaches the unloaded chunk")
 		t.ok(ticker:pendingCount() > 0, "edge blocks keep retrying")
 		world:getChunk(-1, 0)
 		for _ = 1, 400 do
 			ticker:step()
 		end
-		t.eq(world:getBlock(-1, FLOOR, 2), Blocks.fluidId("Water", 3), "continued into the loaded chunk")
+		t.eq(world:getBlock(1, FLOOR, 8), Blocks.fluidId("Water", 7), "continued once it loaded")
 	end)
 
 	t.test("safe spots avoid water, leaves, cactus, low ceilings and caves", function()

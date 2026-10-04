@@ -66,8 +66,6 @@ local VELOCITY_SCALE = BLOCK * TICK_RATE
 local EASE_PER_TICK = 0.5
 -- How fast the body lies down / gets up (Minecraft's swimAmount: 0.09 per tick).
 local TILT_PER_SECOND = 0.09 * TICK_RATE
--- Height (studs) of the root part above the feet when lying: the middle of the crawling hull.
-local LYING_ROOT = PlayerPhysics.dimensions("crawling").height / 2 * BLOCK
 -- After a step up the drawn character catches up with the hull at this rate (per second), at
 -- most this many blocks behind.
 local STEP_CATCH_UP = 14
@@ -83,7 +81,8 @@ type Streamer = { isReady: (self: any, x: number, z: number) -> boolean }
 export type View = {
 	-- Hull state (blocks), updated every tick.
 	state: PlayerPhysics.State,
-	-- Where the character is drawn this frame (feet, blocks) and its facing (radians around Y).
+	-- Where the hull is drawn this frame (feet, blocks, between the last two ticks) and the
+	-- character's facing (radians around Y).
 	feet: Vector3,
 	yaw: number,
 	-- How far the body lies down: 0 upright .. 1 in the swimming / crawling pose.
@@ -312,6 +311,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				setGroup(part, Rig.COLLISION_GROUP)
 			end)
 		)
+		-- Parts leaving the character (a dropped tool) collide normally again.
+		table.insert(
+			connections,
+			character.DescendantRemoving:Connect(function(part)
+				setGroup(part, "Default")
+			end)
+		)
 		hum.AutoRotate = false
 		hum:ChangeState(Enum.HumanoidStateType.Physics)
 		local attachment = Instance.new("Attachment")
@@ -323,6 +329,18 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		antiGravity.RelativeTo = Enum.ActuatorRelativeTo.World
 		antiGravity.ApplyAtCenterOfMass = true
 		antiGravity.Parent = rootPart
+		-- The joint holding the body to the root part (R15 LowerTorso.Root, R6 RootJoint). The
+		-- step-up catch-up lowers the body through it, so the root part (the player's position for
+		-- the server and other players) always stays on the hull.
+		local rootJoint: Motor6D? = nil
+		local rootJointC0 = CFrame.identity
+		for _, descendant in character:GetDescendants() do
+			if descendant:IsA("Motor6D") and descendant.Part0 == rootPart then
+				rootJoint = descendant
+				rootJointC0 = descendant.C0
+				break
+			end
+		end
 
 		-- Hull, starting where the server put the character.
 		local spawnedAt = os.clock()
@@ -349,9 +367,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local stepLag = 0
 		-- Eye height (blocks) the camera is at, easing towards the hull's.
 		local eye = PlayerPhysics.eyeHeight(state)
-		-- Where the root part was put last frame (studs) and its velocity then.
+		-- Where the root part was put last frame (studs), its velocity then and that frame's length.
 		local lastPlaced: Vector3? = nil
 		local lastVelocity = Vector3.zero
+		local lastDt = 0
 		local settled = typeof(feet) == "Vector3"
 
 		local function snap(position: Vector3)
@@ -378,6 +397,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			antiGravity:Destroy()
 			attachment:Destroy()
 			hum.CameraOffset = Vector3.zero
+			if rootJoint then
+				rootJoint.C0 = rootJointC0
+			end
 			for _, part in character:GetDescendants() do
 				setGroup(part, "Default")
 			end
@@ -461,9 +483,12 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			end
 			antiGravity.Force = Vector3.new(0, rootPart.AssemblyMass * workspace.Gravity, 0)
 
-			-- Moved by some other script? Follow it.
+			-- Moved by some other script? Follow it. Roblox physics moves the root along its velocity
+			-- in between, for a step that need not match this frame's dt (hitches), so allow for
+			-- the velocity over both frames.
 			local placed = lastPlaced
-			if placed and (rootPart.Position - (placed + lastVelocity * dt)).Magnitude > MOVED_TOLERANCE then
+			local drift = lastVelocity.Magnitude * (dt + lastDt)
+			if placed and (rootPart.Position - placed).Magnitude > MOVED_TOLERANCE + drift then
 				local moved = Rig.feet(character)
 				if moved then
 					snap(moved)
@@ -477,6 +502,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				if not settled and os.clock() - spawnedAt > SPAWN_SETTLE then
 					settled = true
 				end
+				-- Jumps pressed while waiting don't fire afterwards.
+				jumpLatched = false
 				if settled and streamer:isReady(math.floor(state.x), math.floor(state.z)) then
 					view.frozen = false
 					accumulator = 0
@@ -507,7 +534,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			-- Draw the character between the last two ticks.
 			local alpha = if view.frozen then 1 else accumulator / TICK
 			local hull = previous:Lerp(Vector3.new(state.x, state.y, state.z), alpha)
-			view.feet = hull - Vector3.new(0, stepLag, 0)
+			view.feet = hull
 
 			-- Lie down in the swimming / crawling pose: face down, or along the view when swimming
 			-- (Minecraft's PlayerRenderer), the body's middle at the middle of the low hull.
@@ -517,8 +544,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			if state.inWater then
 				bodyPitch = math.clamp(math.pi / 2 - math.asin(frameInput.lookY), 0, math.pi)
 			end
-			local standingRoot = Rig.rootOffset(character)
-			local rootHeight = standingRoot + (LYING_ROOT - standingRoot) * view.tilt
+			local rootHeight = Rig.rootHeight(character, view.tilt)
 			local cframe = CFrame.new(view.feet * BLOCK + Vector3.new(0, rootHeight, 0))
 				* CFrame.Angles(0, view.yaw, 0)
 				* CFrame.Angles(-bodyPitch * view.tilt, 0, 0)
@@ -528,12 +554,16 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			rootPart.CFrame = cframe
 			rootPart.AssemblyLinearVelocity = velocity
 			rootPart.AssemblyAngularVelocity = Vector3.zero
-			lastPlaced, lastVelocity = cframe.Position, velocity
+			lastPlaced, lastVelocity, lastDt = cframe.Position, velocity, dt
 
 			-- The camera looks from the hull's eyes, whatever the body does (Roblox's camera adds
 			-- CameraOffset in the root part's space).
 			eye += (PlayerPhysics.eyeHeight(state) - eye) * ease(dt)
-			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0)
+			local lag = Vector3.new(0, -stepLag * BLOCK, 0)
+			if rootJoint then
+				rootJoint.C0 = CFrame.new(cframe:VectorToObjectSpace(lag)) * rootJointC0
+			end
+			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0) + lag
 			hum.CameraOffset = cframe:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(hum, rootPart), 0)
 
 			updateFov(dt, state.sprinting and not view.frozen)

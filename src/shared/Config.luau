@@ -159,8 +159,8 @@ local Config = {
 		-- Highest step (blocks) walked up without jumping. Minecraft's is 0.6 (a slab); just over one
 		-- block makes the steep terrain walkable. Sneaking still stops at every block edge.
 		StepHeight = 1.0625,
-		-- Sprint (also: double tap forward) and sneak keys, as Enum.KeyCode names. Sneaking on Shift
-		-- takes Shift away from Roblox's shift lock while the character is alive.
+		-- Sprint (also: double tap forward) and sneak keys, as Enum.KeyCode names. Sneaking on Left
+		-- Shift takes that key away from Roblox's shift lock (Right Shift still toggles it).
 		SprintKeys = { "LeftControl", "ButtonL3" },
 		SneakKeys = { "LeftShift", "ButtonB" },
 		-- true: the sprint key turns sprinting on and off (Minecraft's "Sprint: Toggle"; while on,

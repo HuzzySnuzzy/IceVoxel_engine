@@ -23,7 +23,7 @@ Rig.COLLISION_GROUP = "IceVoxelCharacters"
 Rig.TELEPORT_FEET = "IceVoxelFeet"
 Rig.TELEPORT_COUNT = "IceVoxelTeleports"
 
--- Studs from the character's feet to the centre of its HumanoidRootPart.
+-- Studs from the character's feet to the centre of its HumanoidRootPart, standing.
 function Rig.rootOffset(character: Model): number
 	local root = character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -36,13 +36,29 @@ function Rig.rootOffset(character: Model): number
 	return half + (if leg and leg:IsA("BasePart") then leg.Size.Y else 2)
 end
 
--- Feet position (blocks) of a character, from its root part.
+-- Height (studs) of the root part above the feet when lying down (swimming / crawling): the
+-- middle of the crawling hull.
+Rig.LYING_ROOT = PlayerPhysics.dimensions("crawling").height / 2 * BLOCK
+
+-- Root height above the feet for a body `tilt` of the way (0..1) into the lying pose.
+function Rig.rootHeight(character: Model, tilt: number): number
+	local standing = Rig.rootOffset(character)
+	return standing + (Rig.LYING_ROOT - standing) * tilt
+end
+
+--[[
+	Feet position (blocks) of a character, from its root part. A lying body (MovementController
+	pitches the root forward) has its root lower; how far it lies is read from the root's pitch
+	(exact for crawling, close for swimming, whose pitch follows the view).
+]]
 function Rig.feet(character: Model): Vector3?
 	local root = character:FindFirstChild("HumanoidRootPart")
 	if root == nil or not root:IsA("BasePart") then
 		return nil
 	end
-	return (root.Position - Vector3.new(0, Rig.rootOffset(character), 0)) / BLOCK
+	local pitch = math.acos(math.clamp(root.CFrame.UpVector.Y, -1, 1))
+	local tilt = math.clamp(pitch / (math.pi / 2), 0, 1)
+	return (root.Position - Vector3.new(0, Rig.rootHeight(character, tilt), 0)) / BLOCK
 end
 
 -- The standing hull of a character (blocks): min and max corners.

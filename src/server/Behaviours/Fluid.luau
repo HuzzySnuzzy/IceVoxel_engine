@@ -5,24 +5,30 @@
 	Levels (see Blocks.fluidId): 0 = source, 1..7 = flowing (weaker as the number grows),
 	8 = falling (fed from above).
 
-	On every update a non-source block recomputes its level from its neighbours:
+	On every update a non-source block recomputes its level from its neighbours
+	(FlowingFluid.getNewLiquid, in its order):
+	  * two or more horizontal sources on solid ground or a source -> becomes a source (infinite
+	    water; fluids whose RULES say so)
 	  * fluid above            -> falling (8)
-	  * otherwise              -> strongest horizontal neighbour + 1 (falling and sources count as 0)
-	  * two or more horizontal sources on solid ground -> becomes a source (infinite water)
+	  * otherwise              -> strongest horizontal neighbour + dropOff (falling and sources
+	                              count as 0)
 	  * nothing feeds it       -> disappears
 	Then it spreads (FlowingFluid.spread):
 	  * straight down if possible (a source with three or more source neighbours also spreads
 	    sideways meanwhile, so the edge of a lake over a hole keeps spreading),
-	  * otherwise sideways with level + 1 (up to 7), but only towards the nearest way down: each
-	    open side is scored by how many blocks it takes to reach a hole (open block with room
-	    below), searching up to SLOPE_FIND_DISTANCE blocks, and only the sides with the lowest
-	    score get fluid. With no hole in reach, every open side gets fluid. That is what makes
-	    Minecraft water run down a slope instead of flooding the plateau above it.
+	  * otherwise sideways (level + dropOff, up to 7), but only towards the nearest way down: each
+	    open side is scored by how many blocks it takes to reach a hole (an open block with room
+	    below), following open blocks up to the fluid's slope distance (water 4, so holes up to 5
+	    blocks away count), and only the sides with the lowest score get fluid. With no hole in
+	    reach, every open side gets fluid. That is what makes Minecraft water run down a slope
+	    instead of flooding the plateau above it. Block lookups are cached during one search, as
+	    Minecraft does.
 
-	Works for any fluid group registered in BlockList, so lava etc. only need new block entries.
+	Any fluid group registered in BlockList works; its rules (slope distance, drop off, infinite
+	sources) come from RULES (Minecraft's lava: 2, 2, no).
 
-	Block updates never generate chunks. A fluid next to a chunk that is not loaded waits and
-	retries later instead of guessing what is there.
+	Block updates never generate chunks. A fluid whose neighbours or whose slope search reach a
+	chunk that is not loaded waits and retries later instead of guessing what is there.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -34,10 +40,17 @@ local FALLING = 8
 local MAX_FLOW = 7
 local RETRY_TICKS = 40
 local SIDES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
--- How far (blocks) sideways spreading looks for a way down, per fluid group (Minecraft: water 4,
--- lava 2 in the overworld).
-local SLOPE_FIND_DISTANCE: { [string]: number } = { Water = 4 }
+-- Per fluid group: how far sideways spreading looks for a way down, how much weaker each step
+-- sideways gets and whether two sources make a third (Minecraft: water 4 / 1 / yes, lava in the
+-- overworld 2 / 2 / no).
+type Rules = { slopeDistance: number, dropOff: number, infinite: boolean }
+local RULES: { [string]: Rules } = {
+	Water = { slopeDistance = 4, dropOff = 1, infinite = true },
+}
+local DEFAULT_RULES: Rules = { slopeDistance = 4, dropOff = 1, infinite = false }
 local NO_HOLE = 1000
+-- A slope search reached an unloaded block.
+local UNKNOWN = -1
 
 local Fluid = {}
 
@@ -71,11 +84,12 @@ local function canFlowInto(block: number, group: string, level: number): boolean
 	return Blocks.isReplaceable(block) and Blocks.get(block).fluid == nil
 end
 
-local function expectedLevel(world: any, x: number, y: number, z: number, group: string): number?
-	if levelOf(world:peekBlock(x, y + 1, z), group) ~= nil then
-		return FALLING
-	end
+local function rulesOf(group: string): Rules
+	return RULES[group] or DEFAULT_RULES
+end
 
+local function expectedLevel(world: any, x: number, y: number, z: number, group: string): number?
+	local rules = rulesOf(group)
 	local best: number? = nil
 	local sources = 0
 	for _, side in SIDES do
@@ -84,18 +98,22 @@ local function expectedLevel(world: any, x: number, y: number, z: number, group:
 			if level == 0 then
 				sources += 1
 			end
-			local candidate = (if level == FALLING then 0 else level) + 1
+			local candidate = (if level == FALLING then 0 else level) + rules.dropOff
 			if best == nil or candidate < best then
 				best = candidate
 			end
 		end
 	end
 
-	if sources >= 2 then
+	if rules.infinite and sources >= 2 then
 		local below = world:peekBlock(x, y - 1, z)
 		if below ~= nil and (Blocks.isSolid(below) or levelOf(below, group) == 0) then
 			return 0
 		end
+	end
+
+	if levelOf(world:peekBlock(x, y + 1, z), group) ~= nil then
+		return FALLING
 	end
 
 	if best ~= nil and best <= MAX_FLOW then
@@ -104,14 +122,48 @@ local function expectedLevel(world: any, x: number, y: number, z: number, group:
 	return nil
 end
 
+--[[
+	One slope search (FlowingFluid.getSpread): the blocks it looks at are read once (Minecraft keeps
+	the same cache), and `unknown` is set when it reaches an unloaded block.
+]]
+type Search = {
+	world: any,
+	y: number,
+	group: string,
+	limit: number,
+	-- Block at (x, y or y - 1, z) by key (see blockAt).
+	cache: { [number]: number | false },
+	unknown: boolean,
+}
+
+local function blockAt(search: Search, x: number, y: number, z: number): number?
+	-- Coordinates stay within +-2^20 (Protocol.MAX_COORDINATE), and y is the search's or one below.
+	local key = ((x + 1048576) * 2097152 + (z + 1048576)) * 2 + (search.y - y)
+	local cached = search.cache[key]
+	if cached == nil then
+		local block: number? = search.world:peekBlock(x, y, z)
+		if block == nil then
+			search.unknown = true
+			search.cache[key] = false
+			return nil
+		end
+		search.cache[key] = block
+		return block
+	end
+	if type(cached) == "number" then
+		return cached
+	end
+	return nil
+end
+
 -- Can fluid spread sideways into (x, y, z)? Open blocks and weaker fluid of the group, not sources
 -- (FlowingFluid.canPassThrough). Unloaded blocks are not.
-local function passable(world: any, x: number, y: number, z: number, group: string): boolean
-	local block = world:peekBlock(x, y, z)
+local function passable(search: Search, x: number, z: number): boolean
+	local block = blockAt(search, x, search.y, z)
 	if block == nil then
 		return false
 	end
-	local level = levelOf(block, group)
+	local level = levelOf(block, search.group)
 	if level ~= nil then
 		return level ~= 0
 	end
@@ -119,12 +171,12 @@ local function passable(world: any, x: number, y: number, z: number, group: stri
 end
 
 -- Is there a way down below (x, y, z): the same fluid or an open block (FlowingFluid.isWaterHole)?
-local function isHole(world: any, x: number, y: number, z: number, group: string): boolean
-	local below = world:peekBlock(x, y - 1, z)
+local function isHole(search: Search, x: number, z: number): boolean
+	local below = blockAt(search, x, search.y - 1, z)
 	if below == nil then
 		return false
 	end
-	if levelOf(below, group) ~= nil then
+	if levelOf(below, search.group) ~= nil then
 		return true
 	end
 	return Blocks.isReplaceable(below) and Blocks.get(below).fluid == nil
@@ -134,27 +186,17 @@ end
 	Blocks from (x, y, z) to the nearest hole, not going back the way it came (FlowingFluid.
 	getSlopeDistance); NO_HOLE if there is none within `limit`.
 ]]
-local function slopeDistance(
-	world: any,
-	x: number,
-	y: number,
-	z: number,
-	depth: number,
-	fromX: number,
-	fromZ: number,
-	group: string,
-	limit: number
-): number
+local function slopeDistance(search: Search, x: number, z: number, depth: number, fromX: number, fromZ: number): number
 	local best = NO_HOLE
 	for _, side in SIDES do
 		if side[1] ~= fromX or side[2] ~= fromZ then
 			local nx, nz = x + side[1], z + side[2]
-			if passable(world, nx, y, nz, group) then
-				if isHole(world, nx, y, nz, group) then
+			if passable(search, nx, nz) then
+				if isHole(search, nx, nz) then
 					return depth
 				end
-				if depth < limit then
-					local d = slopeDistance(world, nx, y, nz, depth + 1, -side[1], -side[2], group, limit)
+				if depth < search.limit then
+					local d = slopeDistance(search, nx, nz, depth + 1, -side[1], -side[2])
 					if d < best then
 						best = d
 					end
@@ -165,17 +207,19 @@ local function slopeDistance(
 	return best
 end
 
--- The sides fluid at (x, y, z) spreads to: those closest to a way down (FlowingFluid.getSpread).
-local function spreadSides(world: any, x: number, y: number, z: number, group: string): { { number } }
-	local limit = SLOPE_FIND_DISTANCE[group] or 4
+--[[
+	The sides fluid at (x, y, z) spreads to: those closest to a way down (FlowingFluid.getSpread).
+	UNKNOWN if the search reached an unloaded block (the answer could be wrong, so wait).
+]]
+local function spreadSides(world: any, x: number, y: number, z: number, group: string): { { number } } | number
+	local search: Search =
+		{ world = world, y = y, group = group, limit = rulesOf(group).slopeDistance, cache = {}, unknown = false }
 	local best = NO_HOLE
 	local sides: { { number } } = {}
 	for _, side in SIDES do
 		local nx, nz = x + side[1], z + side[2]
-		if passable(world, nx, y, nz, group) then
-			local d = if isHole(world, nx, y, nz, group)
-				then 0
-				else slopeDistance(world, nx, y, nz, 1, -side[1], -side[2], group, limit)
+		if passable(search, nx, nz) then
+			local d = if isHole(search, nx, nz) then 0 else slopeDistance(search, nx, nz, 1, -side[1], -side[2])
 			if d < best then
 				table.clear(sides)
 				best = d
@@ -185,21 +229,30 @@ local function spreadSides(world: any, x: number, y: number, z: number, group: s
 			end
 		end
 	end
+	if search.unknown then
+		return UNKNOWN
+	end
 	return sides
 end
 
-local function spreadToSides(world: any, x: number, y: number, z: number, group: string, level: number)
-	local nextLevel = if level == 0 or level == FALLING then 1 else level + 1
+-- Spreads sideways; false if that has to wait for unloaded chunks.
+local function spreadToSides(world: any, x: number, y: number, z: number, group: string, level: number): boolean
+	local nextLevel = if level == 0 or level == FALLING then 1 else level + rulesOf(group).dropOff
 	if nextLevel > MAX_FLOW then
-		return
+		return true
 	end
-	for _, side in spreadSides(world, x, y, z, group) do
+	local sides = spreadSides(world, x, y, z, group)
+	if type(sides) == "number" then
+		return false
+	end
+	for _, side in sides do
 		local sx, sz = x + side[1], z + side[2]
 		local neighbour = world:peekBlock(sx, y, sz)
 		if neighbour ~= nil and canFlowInto(neighbour, group, nextLevel) then
 			world:setBlock(sx, y, sz, Blocks.fluidId(group, nextLevel))
 		end
 	end
+	return true
 end
 
 function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, block: number)
@@ -241,8 +294,8 @@ function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, 
 					sources += 1
 				end
 			end
-			if sources >= 3 then
-				spreadToSides(world, x, y, z, group, level)
+			if sources >= 3 and not spreadToSides(world, x, y, z, group, level) then
+				ticker:schedule(x, y, z, RETRY_TICKS)
 			end
 		end
 		return
@@ -251,7 +304,9 @@ function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, 
 	if level ~= 0 and levelOf(below, group) ~= nil then
 		return
 	end
-	spreadToSides(world, x, y, z, group, level)
+	if not spreadToSides(world, x, y, z, group, level) then
+		ticker:schedule(x, y, z, RETRY_TICKS)
+	end
 end
 
 return Fluid

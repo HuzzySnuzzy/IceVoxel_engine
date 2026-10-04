@@ -6,11 +6,12 @@ return function(t, shared, require)
 	-- A little block world: `solid["x,y,z"] = true`, everything else air.
 	local function world(cells: { { number } }): Hull.SolidAt
 		local solid: { [string]: boolean } = {}
+		-- (+ 0 turns -0 into 0, so both name the same cell.)
 		for _, c in cells do
-			solid[`{c[1]},{c[2]},{c[3]}`] = true
+			solid[`{c[1] + 0},{c[2] + 0},{c[3] + 0}`] = true
 		end
 		return function(x: number, y: number, z: number): boolean
-			return solid[`{x},{y},{z}`] == true
+			return solid[`{x + 0},{y + 0},{z + 0}`] == true
 		end
 	end
 	-- A floor of blocks at y = 0 over [-r, r] x [-r, r], plus extra cells.
@@ -570,5 +571,24 @@ return function(t, shared, require)
 			PlayerPhysics.tick(state, input(0, 0), deep)
 		end
 		t.ok(not state.sprinting and not state.swimming, "stopping ends the swim")
+	end)
+	t.test("physics: a player stuck in a block is pushed out towards the nearest free side", function()
+		-- Blocks fill x = 0 at the body's height; x = 1 and beyond are free. The hull is near the
+		-- east side of its block, so east is the closest way out.
+		local walled = physicsWorld(function(x, y, _z)
+			if x == 0 and (y == 1 or y == 2) then
+				return STONE
+			end
+			return nil
+		end)
+		local state = PlayerPhysics.new(0.7, 1, 0.5)
+		local pose = state.pose
+		PlayerPhysics.tick(state, input(0, 0), walled)
+		t.eq(state.pose, pose, "stuck: the pose stays (Minecraft keeps it when nothing fits)")
+		for _ = 1, 20 do
+			PlayerPhysics.tick(state, input(0, 0), walled)
+		end
+		t.ok(state.x - 0.3 >= 1 - 1e-6, `pushed out east to x = {state.x}`)
+		t.eq(state.pose, "standing")
 	end)
 end

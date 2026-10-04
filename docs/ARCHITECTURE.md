@@ -377,8 +377,9 @@ hull is.
   - Draws the character interpolated between the last two ticks:
     - `root.CFrame` and `AssemblyLinearVelocity` are set; the client owns the character, so this
       replicates.
-    - A step up, a whole block in one tick, is drawn as a quick climb: a render offset that decays
-      at 14/s.
+    - A step up, a whole block in one tick, is drawn as a quick climb: an offset that decays at
+      14/s, applied to the body through its root joint and to the camera. The root part stays on
+      the hull, so the server always sees the real position.
     - In the swimming / crawling pose the body lies down at Minecraft's `swimAmount` rate. It faces
       down when crawling and follows the view pitch when swimming. Roblox's Swimming state tilts
       the root the same way, and the swim animation is made for that.
@@ -413,7 +414,7 @@ hull is.
 
 **Fluids and the player.**
 - `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
-  treats an open side with fluid or air below it as a drop, and makes falling fluid next to a solid
+  treats an open side with the same fluid below it as a drop, and makes falling fluid next to a solid
   face push almost straight down. `PlayerPhysics` pushes the hull along it at 0.014 per tick.
 - Water spreads like Minecraft's `FlowingFluid.getSpread` (`Behaviours/Fluid`): sideways only
   towards the side(s) with the shortest way to a hole, searching up to 4 blocks. A pool of sources

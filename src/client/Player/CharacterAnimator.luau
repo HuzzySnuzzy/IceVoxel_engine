@@ -147,17 +147,23 @@ function CharacterAnimator.start()
 		end
 
 		local playing: { [string]: boolean } = {}
+		local weights: { [string]: number } = {}
 		local function set(name: string, on: boolean, fade: number, weight: number?, speed: number?)
 			local track = tracks[name]
 			if not track then
 				return
 			end
 			if on then
+				local w = weight or 1
 				if not playing[name] then
-					track:Play(fade)
+					-- Play fades the weight in itself; adjusting it again would cut the fade short.
+					track:Play(fade, w)
 					playing[name] = true
+					weights[name] = w
+				elseif weights[name] ~= w then
+					track:AdjustWeight(w, fade)
+					weights[name] = w
 				end
-				track:AdjustWeight(weight or 1)
 				track:AdjustSpeed(speed or 1)
 			elseif playing[name] then
 				track:Stop(fade)

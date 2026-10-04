@@ -19,7 +19,7 @@
 	  sprint   starts with the sprint key or a double tap forward (not while crouching), stops without
 	           forward input, when running into a wall (not when sliding along one) or when swimming
 	           at the surface; crouching does not stop it (sprint-sneaking, as in 1.20);
-	  water    acceleration 0.02, drag 0.8 (sprinting 0.9) on every axis, slow sinking (gravity / 16),
+	  water    acceleration 0.02, drag 0.8 (0.9 horizontally when sprinting), slow sinking (gravity / 16),
 	           jump swims up and sneak down (0.04 per tick), the current pushes (0.014), and swimming
 	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
 	           tall, no sinking, up and down where the view points);
@@ -218,6 +218,52 @@ local function solidChecker(world: World): Hull.SolidAt
 	return function(x: number, y: number, z: number): boolean
 		local block = getBlock(x, y, z)
 		return block == nil or Blocks.isSolid(block)
+	end
+end
+
+--[[
+	LocalPlayer.suffocatesAt: does block column (bx, bz), over the height of the hull, hold a block
+	the player would suffocate in (a solid, opaque one; unloaded counts too)?
+]]
+local function suffocatesAt(world: World, state: State, bx: number, bz: number): boolean
+	local height = POSES[state.pose].height
+	local minY, maxY = state.y + 1.0e-7, state.y + height - 1.0e-7
+	for by = math.floor(minY), math.ceil(maxY) - 1 do
+		local block = world.getBlock(bx, by, bz)
+		if block == nil or (Blocks.isSolid(block) and Blocks.isOpaque(block)) then
+			return true
+		end
+	end
+	return false
+end
+
+-- West, east, north, south, in Minecraft's order.
+local PUSH_SIDES = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } }
+
+--[[
+	LocalPlayer.moveTowardsClosestSpace: a player stuck in a block (placed on them, sand fallen on
+	them) is pushed at 0.1 blocks per tick towards the nearest side that is free.
+]]
+local function moveTowardsClosestSpace(world: World, state: State, x: number, z: number)
+	local bx, bz = math.floor(x), math.floor(z)
+	if not suffocatesAt(world, state, bx, bz) then
+		return
+	end
+	local dx, dz = x - bx, z - bz
+	local best, push = math.huge, nil
+	for _, side in PUSH_SIDES do
+		local along = if side[1] ~= 0 then dx else dz
+		local distance = if side[1] + side[2] > 0 then 1 - along else along
+		if distance < best and not suffocatesAt(world, state, bx + side[1], bz + side[2]) then
+			best, push = distance, side
+		end
+	end
+	if push then
+		if push[1] ~= 0 then
+			state.vx = 0.1 * push[1]
+		else
+			state.vz = 0.1 * push[2]
+		end
 	end
 end
 
@@ -487,6 +533,12 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	state.sneaking = input.sneak
 	local impulse = forward >= SPRINT_IMPULSE or (state.underWater and forward > 1.0e-5)
 	state.hadSprintImpulse = impulse
+	-- Out of blocks the player is stuck in, checked at four points inside the hull.
+	local inset = POSES[state.pose].width * 0.35
+	moveTowardsClosestSpace(world, state, state.x - inset, state.z + inset)
+	moveTowardsClosestSpace(world, state, state.x - inset, state.z - inset)
+	moveTowardsClosestSpace(world, state, state.x + inset, state.z - inset)
+	moveTowardsClosestSpace(world, state, state.x + inset, state.z + inset)
 	if prevShift then
 		state.sprintTriggerTime = 0
 	end
@@ -607,14 +659,16 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	end
 
 	-- Player.updatePlayerPose: swim, crouch when sneaking, and crouch or crawl whenever there is no
-	-- room to stand.
-	local wanted: Pose = if state.swimming then "crawling" elseif input.sneak then "crouching" else "standing"
-	if fits(solidAt, state, wanted) then
-		state.pose = wanted
-	elseif fits(solidAt, state, "crouching") then
-		state.pose = "crouching"
-	else
-		state.pose = "crawling"
+	-- room to stand. Stuck in blocks (not even crawling fits), the pose stays as it is.
+	if fits(solidAt, state, "crawling") then
+		local wanted: Pose = if state.swimming then "crawling" elseif input.sneak then "crouching" else "standing"
+		if fits(solidAt, state, wanted) then
+			state.pose = wanted
+		elseif fits(solidAt, state, "crouching") then
+			state.pose = "crouching"
+		else
+			state.pose = "crawling"
+		end
 	end
 
 	return events
