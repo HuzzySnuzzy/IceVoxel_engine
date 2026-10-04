@@ -18,6 +18,8 @@
 	  breakable     Players can break it. Default true.
 	  placeable     Shows up in the hotbar. Default true for drawn, solid blocks.
 	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours).
+	  friction      How slippery the block is to walk on (Minecraft's block friction): 0.6 by
+	                default, 0.98 for ice. Higher keeps more of the speed from tick to tick.
 	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below).
 
 	Textures (optional, see "Block textures" in the README):
@@ -41,6 +43,7 @@ export type BlockSpec = {
 	breakable: boolean?,
 	placeable: boolean?,
 	behaviour: string?,
+	friction: number?,
 	fluid: { group: string, level: number, tickDelay: number }?,
 	texture: string?,
 	tint: { number }?,
@@ -62,7 +65,7 @@ local list: { BlockSpec } = {
 	{ name = "Sand", color = { 220, 206, 160 }, material = "Sand", behaviour = "Gravity" },
 	{ name = "Sandstone", color = { 206, 188, 138 }, material = "Sandstone" },
 	{ name = "Gravel", color = { 132, 126, 122 }, material = "Pebble", behaviour = "Gravity" },
-	{ name = "Ice", color = { 165, 205, 240 }, material = "Glacier" },
+	{ name = "Ice", color = { 165, 205, 240 }, material = "Glacier", friction = 0.98 },
 	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood" },
 	{ name = "OakLeaves", color = { 68, 128, 46 }, material = "LeafyGrass" },
 	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood" },
@@ -123,7 +126,7 @@ fluid("Water", {
 -- Add new blocks below this line (and never above, see the note at the top).
 
 -- Mountains, rivers and islands (terrain generator).
-table.insert(list, { name = "PackedIce", color = { 141, 180, 236 }, material = "Ice" })
+table.insert(list, { name = "PackedIce", color = { 141, 180, 236 }, material = "Ice", friction = 0.98 })
 table.insert(list, { name = "Calcite", color = { 222, 223, 218 }, material = "Marble" })
 table.insert(list, { name = "PackedMud", color = { 142, 106, 79 }, material = "Mud" })
 table.insert(list, { name = "Mycelium", color = { 122, 104, 116 }, material = "Grass", behaviour = "Grass" })

@@ -11,7 +11,8 @@
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet)
-	  5. players    -> safe spawning, map teleports, waypoints, keeping chunks around players generated
+	  5. players    -> cosmetic characters (collision group, teleports, fall damage), safe spawning,
+	                   map teleports, waypoints, keeping chunks around players generated
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,6 +29,7 @@ local BlockTicker = require(Server.World.BlockTicker)
 local Simulation = require(Server.World.Simulation)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
+local Characters = require(Server.Players.Characters)
 local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
 local WaypointStore = require(Server.Players.WaypointStore)
@@ -43,6 +45,7 @@ world.onChanged = function(x, y, z)
 end
 
 local net = ServerNet.start(world)
+Characters.start(net)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)

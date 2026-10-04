@@ -13,7 +13,7 @@ local Protocol = require(Shared.Net.Protocol)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local SafeSpot = require(script.Parent.SafeSpot)
-local Spawning = require(script.Parent.Spawning)
+local Characters = require(script.Parent.Characters)
 
 -- Blocks around the requested column searched for a safe spot.
 local LANDING_RADIUS = 24
@@ -46,16 +46,14 @@ function Teleport.start(world: WorldServer.World, net: ServerNet.ServerNet)
 		lastTeleport[player] = now
 
 		local character = player.Character
-		local root = character and character:FindFirstChild("HumanoidRootPart")
-		if character == nil or root == nil or not root:IsA("BasePart") then
+		if character == nil or character:FindFirstChild("HumanoidRootPart") == nil then
 			return
 		end
 		local fx, fy, fz = SafeSpot.find(world, x, z, LANDING_RADIUS)
 		if fx == nil then
 			return
 		end
-		-- Keep the direction the character is facing.
-		character:PivotTo(CFrame.new(Spawning.rootPosition(fx, fy, fz)) * root.CFrame.Rotation)
+		Characters.teleport(character, fx, fy, fz)
 	end)
 
 	game:GetService("Players").PlayerRemoving:Connect(function(player)

@@ -1,7 +1,8 @@
 --!strict
 --[[
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
-	builds pending, parts in the world, far mesh status (MeshOverlay) and the frame rate.
+	builds pending, parts in the world, far mesh status (MeshOverlay), the frame rate, and the
+	player's movement hull (position, speed, ground / water / sprint / pose; MovementController).
 ]]
 
 local Players = game:GetService("Players")
@@ -10,8 +11,40 @@ local UserInputService = game:GetService("UserInputService")
 
 local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
 
 local DebugOverlay = {}
+
+-- Movement hull line (blocks; speeds in blocks per second).
+local function movementLine(): string
+	local view = MovementController.current
+	if view == nil then
+		return "player  -"
+	end
+	local s = view.state
+	local flags: { string } = {}
+	local function flag(on: boolean, name: string)
+		if on then
+			table.insert(flags, name)
+		end
+	end
+	flag(s.onGround, "ground")
+	flag(s.inWater, "water")
+	flag(s.sprinting, "sprint")
+	flag(s.sneaking, "sneak")
+	flag(view.frozen, "waiting")
+	local speed = math.sqrt(s.vx * s.vx + s.vz * s.vz) * 20
+	return string.format(
+		"player  %.2f %.2f %.2f  %.2f m/s  vy %.3f  %s %s",
+		s.x,
+		s.y,
+		s.z,
+		speed,
+		s.vy,
+		s.pose,
+		table.concat(flags, " ")
+	)
+end
 
 local function meshLine(stats: MeshOverlay.Stats): string
 	return string.format(
@@ -88,6 +121,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			`workers busy {stats.busyWorkers}  builds pending {stats.building}`,
 			`parts   {streamer.renderer.partCount}  pooled {streamer.renderer.pool.freeCount}`,
 			meshLine(streamer.renderer.overlay:getStats()),
+			movementLine(),
 		}, "\n")
 	end)
 end

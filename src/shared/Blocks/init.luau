@@ -26,6 +26,8 @@ export type BlockDef = {
 	breakable: boolean,
 	placeable: boolean,
 	behaviour: string?,
+	-- Minecraft block friction (slipperiness) when walking on it.
+	friction: number,
 	fluid: { group: string, level: number, tickDelay: number }?,
 	texture: string?,
 	tint: { number },
@@ -96,6 +98,7 @@ for index, spec in BlockList do
 		breakable = if spec.breakable ~= nil then spec.breakable else drawn,
 		placeable = if spec.placeable ~= nil then spec.placeable else (drawn and solid),
 		behaviour = spec.behaviour,
+		friction = spec.friction or 0.6,
 		fluid = spec.fluid,
 		texture = spec.texture,
 		tint = spec.tint or { 255, 255, 255 },

@@ -145,28 +145,25 @@ local Config = {
 		},
 	},
 
-	-- Water (client: swimming and currents for the local character) --------------------------------
+	-- Player movement (client) ----------------------------------------------------------------------
 
-	Water = {
-		-- Fraction of gravity cancelled when fully under water (below 1 = sink slowly).
-		Buoyancy = 0.92,
-		-- Vertical drag in water (1/s). Sinking speed is about Gravity * (1 - Buoyancy) / Drag.
-		Drag = 4,
-		-- Upward acceleration (studs/s^2) while Jump is held with the waist under water. Must beat
-		-- the gravity left over at waist depth (Gravity * (1 - Buoyancy * 0.55)) to reach the surface.
-		SwimUpAcceleration = 110,
-		-- Rising speed (studs/s) while climbing out of the water onto a ledge.
-		ClimbOutSpeed = 12,
-		-- Speed (studs/s) a full strength current carries you at, and how fast (1/s) it gets you
-		-- there. The current never slows you down; it only pushes until you move at its speed.
-		CurrentSpeed = 8,
-		CurrentGain = 3,
-		-- Strongest push of the current (studs/s^2) while swimming / while standing on the ground
-		-- (the Humanoid brakes hard on the ground, so it needs more there).
-		CurrentMaxAcceleration = 40,
-		CurrentMaxAccelerationGrounded = 150,
-		-- Walk speed multiplier in water.
-		WalkSpeedFactor = 0.6,
+	--[[
+		Players move like in Minecraft Java Edition (Movement/PlayerPhysics): a 0.6 x 1.8 block hull
+		simulated at 20 ticks per second against the block data, with the Roblox character only
+		drawn on top of it (Player/MovementController).
+	]]
+	Movement = {
+		-- Landing after a fall of more than 3 blocks hurts: ceil(distance - 3) half hearts of the
+		-- 20 a Minecraft player has, scaled to Humanoid.MaxHealth.
+		FallDamage = true,
+		-- Hold to sprint (also: double tap forward) / to sneak, as Enum.KeyCode names. Sneaking on
+		-- Shift takes Shift away from Roblox's shift lock while the character is alive.
+		SprintKeys = { "LeftControl", "ButtonL3" },
+		SneakKeys = { "LeftShift", "ButtonB" },
+		-- Sprint and sneak buttons on touch screens (toggles).
+		TouchButtons = true,
+		-- How fast the character turns towards where it walks (radians per second; third person).
+		TurnSpeed = 14,
 	},
 
 	-- Map --------------------------------------------------------------------------------------------

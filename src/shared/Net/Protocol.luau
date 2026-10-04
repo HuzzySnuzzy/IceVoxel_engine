@@ -13,6 +13,7 @@
 	  Edit           u8 action, i32 x, u16 y, i32 z, u16 block
 	  Teleport       i32 x, i32 z
 	  SaveWaypoints  waypoint list (below)
+	  Fall           f32 fall distance (blocks) of a landing, for fall damage
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -31,6 +32,7 @@ Protocol.ClientMessage = {
 	Edit = 2,
 	Teleport = 3,
 	SaveWaypoints = 4,
+	Fall = 5,
 }
 
 Protocol.ServerMessage = {
@@ -205,6 +207,29 @@ function Protocol.decodeTeleport(b: buffer): (number?, number)
 		return nil, 0
 	end
 	return x, z
+end
+
+--[[ Fall damage ]]
+
+-- Longest fall a landing can report (blocks).
+Protocol.MAX_FALL = 2048
+
+function Protocol.encodeFall(distance: number): buffer
+	local b = buffer.create(4)
+	buffer.writef32(b, 0, distance)
+	return b
+end
+
+-- Fall distance, or nil when the payload is malformed.
+function Protocol.decodeFall(b: buffer): number?
+	if buffer.len(b) ~= 4 then
+		return nil
+	end
+	local distance = buffer.readf32(b, 0)
+	if distance ~= distance or distance < 0 or distance > Protocol.MAX_FALL then
+		return nil
+	end
+	return distance
 end
 
 --[[ Waypoints ]]

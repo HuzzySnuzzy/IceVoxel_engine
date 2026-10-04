@@ -16,6 +16,7 @@ local Config = require(Shared.Config)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local SafeSpot = require(script.Parent.SafeSpot)
+local Characters = require(script.Parent.Characters)
 
 local BLOCK = Config.BlockSize
 -- The root part sits ~3 studs above the ground for default characters; add a little margin.
@@ -37,7 +38,8 @@ function Spawning.start(world: WorldServer.World)
 	-- scan thousands of columns each time, so wait a while before the next search.
 	local retryAt = -math.huge
 
-	local function spawnPosition(): Vector3
+	-- Feet block of the spawn (x, y, z).
+	local function spawnSpot(): { number }
 		local current = spot
 		if
 			current == nil or (os.clock() >= retryAt and not SafeSpot.isSafe(world, current[1], current[2], current[3]))
@@ -53,17 +55,17 @@ function Spawning.start(world: WorldServer.World)
 			end
 			spot = current
 		end
-		local s = current :: { number }
-		return Spawning.rootPosition(s[1], s[2], s[3])
+		return current :: { number }
 	end
 
-	Shared:SetAttribute("SpawnPosition", spawnPosition())
+	local first = spawnSpot()
+	Shared:SetAttribute("SpawnPosition", Spawning.rootPosition(first[1], first[2], first[3]))
 
 	local function onCharacter(character: Model)
 		if character:WaitForChild("HumanoidRootPart", 10) then
-			local position = spawnPosition()
-			Shared:SetAttribute("SpawnPosition", position)
-			character:PivotTo(CFrame.new(position))
+			local s = spawnSpot()
+			Shared:SetAttribute("SpawnPosition", Spawning.rootPosition(s[1], s[2], s[3]))
+			Characters.teleport(character, s[1], s[2], s[3])
 		end
 	end
 

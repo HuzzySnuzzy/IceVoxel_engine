@@ -21,8 +21,14 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Server-authoritative interaction.** Break and place blocks with client prediction and server
   validation. Block updates power falling sand and gravel, flowing water (Minecraft rules, including
   infinite sources) and grass turning into dirt.
-- **Water you can see flow and swim in.** Flowing water steps down level by level like Minecraft,
-  currents push the player downstream, and you can swim (float, sink slowly, hold Jump to rise).
+- **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
+  Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
+  (double tap or Ctrl), sneaking that never walks off edges, crouching and crawling under low
+  ceilings, 1.25-block jumps, 0.6-block step up, sprint jumping, slippery ice, swimming, currents,
+  hopping out of water and fall damage. The Roblox character is purely cosmetic: it is drawn on the
+  hull (interpolated) and never collides with anything.
+- **Water you can see flow.** Flowing water steps down level by level like Minecraft, and its
+  current pushes the player downstream.
 - **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
   Right click the map to add waypoints (saved between sessions), teleport, or center the view.
 - **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
@@ -65,8 +71,11 @@ Studio tips:
 | Break block   | Left click (hold to repeat) | R2      | Tap        |
 | Place block   | Right click                 | L2      | Long press |
 | Select block  | `1`–`9`, `Q` / `E` to cycle, or click a slot | L1 / R1 | Tap a slot, ‹ › pages |
-| Swim up       | Hold `Space` in water       | A       | Jump button |
-| Climb out     | Hold `Space` and walk at a ledge | A + stick | Jump + move |
+| Sprint        | Hold `Ctrl`, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
+| Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
+| Jump          | `Space` (hold to keep jumping) | A    | Jump button |
+| Swim up / down | Hold `Space` / `Shift` in water | A / B | Jump / Sneak |
+| Climb out     | Swim at a ledge just above the water | stick | move |
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
@@ -89,6 +98,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
   Map/MapPainter            map tile colours from the generator (runs in the workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
+  Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
+                            tick), Rig (hull <-> cosmetic character)
   Net/                      Protocol (buffer encoding), Remotes
   Util/Hash                 deterministic hashing and RNG
 
@@ -98,7 +109,8 @@ src/server   -> ServerScriptService.IceVoxel
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation
   Behaviours/               Gravity, Fluid, Grass (block update logic)
   Network/ServerNet         edit lists, edit validation, replication
-  Players/                  Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
+  Players/                  Characters (cosmetic characters: collision group, teleports, fall
+                            damage), Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
                             Teleport (map), WaypointStore (DataStore)
 
 src/client   -> StarterPlayerScripts.IceVoxel
@@ -111,8 +123,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
   Net/ClientNet             routes server messages
-  Player/                   SpawnGuard (holds the character until the ground exists),
-                            WaterController (swimming, currents)
+  Player/                   MovementController (the hull, input, the cosmetic character),
+                            CharacterAnimator (avatar animations from the hull)
   Debug/DebugOverlay        F3 stats
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview

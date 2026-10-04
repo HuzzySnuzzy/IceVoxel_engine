@@ -10,8 +10,9 @@
 	  Interaction/               breaking / placing blocks, hotbar
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
-	  Player/SpawnGuard          holds the character until the ground exists
-	  Player/WaterController     swimming and water currents
+	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
+	                             character only drawn on top of it (waits for the ground to load)
+	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Debug/DebugOverlay         F3 statistics
 ]]
 
@@ -28,8 +29,8 @@ local WorkerPool = require(Client.Streaming.WorkerPool)
 local ChunkRenderer = require(Client.Rendering.ChunkRenderer)
 local ViewSettings = require(Client.Rendering.ViewSettings)
 local BlockInteraction = require(Client.Interaction.BlockInteraction)
-local SpawnGuard = require(Client.Player.SpawnGuard)
-local WaterController = require(Client.Player.WaterController)
+local MovementController = require(Client.Player.MovementController)
+local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Map = require(Client.Map)
 
@@ -47,8 +48,8 @@ local pool = WorkerPool.new(Client.Streaming.ChunkWorker :: LocalScript)
 local generator = TerrainGenerator.new(seed :: number)
 local streamer = ChunkStreamer.new(generator, world, pool, renderer)
 
-SpawnGuard.start(streamer)
-WaterController.start(world)
+MovementController.start(world, streamer)
+CharacterAnimator.start()
 BlockInteraction.start(world)
 DebugOverlay.start(streamer)
 Map.start(pool, generator)

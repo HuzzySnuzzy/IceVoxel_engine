@@ -20,9 +20,11 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
+local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local Hotbar = require(script.Parent.Hotbar)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -131,20 +133,19 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return Vector2.new(size.X / 2, size.Y / 2)
 	end
 
-	-- Would a solid block at (x, y, z) overlap the local character?
+	-- Would a solid block at (x, y, z) overlap the local player's movement hull?
 	local function blocksCharacter(x: number, y: number, z: number): boolean
-		local root = rootPart()
-		if root == nil then
+		local view = MovementController.current
+		if view == nil then
 			return false
 		end
-		local p = root.Position
-		local minX, minY, minZ = x * BLOCK, y * BLOCK, z * BLOCK
-		return p.X + 0.9 > minX
-			and p.X - 0.9 < minX + BLOCK
-			and p.Z + 0.9 > minZ
-			and p.Z - 0.9 < minZ + BLOCK
-			and p.Y + 2.2 > minY
-			and p.Y - 2.9 < minY + BLOCK
+		local box = PlayerPhysics.box(view.state)
+		return box.maxX > x
+			and box.minX < x + 1
+			and box.maxY > y
+			and box.minY < y + 1
+			and box.maxZ > z
+			and box.minZ < z + 1
 	end
 
 	local function breakAt(hit: VoxelRaycast.Hit?)

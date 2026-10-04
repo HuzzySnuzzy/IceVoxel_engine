@@ -17,6 +17,7 @@ local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local Protocol = require(Shared.Net.Protocol)
 local Remotes = require(Shared.Net.Remotes)
+local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 
@@ -56,21 +57,21 @@ local function rootOf(player: Player): BasePart?
 	return nil
 end
 
--- Does block (x, y, z) overlap any character? Uses a box around the root part.
+-- Does block (x, y, z) overlap any player's (standing) movement hull?
 local function intersectsCharacter(x: number, y: number, z: number): boolean
-	local minX, minY, minZ = x * BLOCK, y * BLOCK, z * BLOCK
-	local maxX, maxY, maxZ = minX + BLOCK, minY + BLOCK, minZ + BLOCK
 	for _, player in Players:GetPlayers() do
-		local root = rootOf(player)
-		if root then
-			local p = root.Position
+		local character = player.Character
+		if character then
+			local min, max = Rig.hull(character)
 			if
-				p.X + 0.9 > minX
-				and p.X - 0.9 < maxX
-				and p.Z + 0.9 > minZ
-				and p.Z - 0.9 < maxZ
-				and p.Y + 2.2 > minY
-				and p.Y - 2.9 < maxY
+				min
+				and max
+				and max.X > x
+				and min.X < x + 1
+				and max.Z > z
+				and min.Z < z + 1
+				and max.Y > y
+				and min.Y < y + 1
 			then
 				return true
 			end
