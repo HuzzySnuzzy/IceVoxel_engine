@@ -13,6 +13,11 @@
 
 	View and split distance come from Config.Lod; `configure` changes them (the client uses this
 	for its device preset).
+
+	Plants (`drawsFoliage`): every box of a plant is a part, so full detail chunks draw theirs only
+	within Config.Lod.FoliageDistance (`setFoliageDistance` for the device preset), and only while
+	Config.Render.Foliage is on. A chunk drawing them keeps them until it is half a chunk further
+	(hysteresis again: walking along the edge does not remesh chunks back and forth).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -21,10 +26,13 @@ local Coords = require(script.Parent.Coords)
 local SIZE = Config.ChunkSize
 local MAX_LEVEL = Config.Lod.Levels - 1
 local HYSTERESIS = 0.85
+-- Blocks beyond the foliage distance a chunk that draws plants keeps them.
+local FOLIAGE_HYSTERESIS = SIZE / 2
 
 local view = Config.Lod.ViewDistance
 local split = Config.Lod.SplitDistance
 local splitL1 = Config.Lod.SplitDistanceL1 or split
+local foliage = Config.Lod.FoliageDistance
 
 local LodTree = {}
 
@@ -42,6 +50,18 @@ function LodTree.viewDistance(): number
 	return view
 end
 
+LodTree.FOLIAGE_HYSTERESIS = FOLIAGE_HYSTERESIS
+
+-- Sets how far full detail chunks draw their plants (blocks; Config.Lod.FoliageDistance).
+function LodTree.setFoliageDistance(distance: number)
+	assert(distance >= 0, "invalid foliage distance")
+	foliage = distance
+end
+
+function LodTree.foliageDistance(): number
+	return foliage
+end
+
 function LodTree.nodeSize(level: number): number
 	return SIZE * bit32.lshift(1, level)
 end
@@ -53,6 +73,19 @@ function LodTree.distance(level: number, nx: number, nz: number, x: number, z: n
 	local dx = math.max(minX - x, 0, x - (minX + size))
 	local dz = math.max(minZ - z, 0, z - (minZ + size))
 	return math.sqrt(dx * dx + dz * dz)
+end
+
+--[[
+	Does node (level, nx, nz) draw its plants for the viewer at (x, z)? Full detail chunks closer
+	than the foliage distance do, while Config.Render.Foliage is on; one that `drawn` them keeps
+	them up to FOLIAGE_HYSTERESIS blocks further.
+]]
+function LodTree.drawsFoliage(level: number, nx: number, nz: number, x: number, z: number, drawn: boolean?): boolean
+	if level ~= 0 or not Config.Render.Foliage then
+		return false
+	end
+	local reach = if drawn then foliage + FOLIAGE_HYSTERESIS else foliage
+	return LodTree.distance(level, nx, nz, x, z) < reach
 end
 
 --[[

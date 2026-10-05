@@ -16,6 +16,15 @@
 	(Blocks.singleLut); each becomes one part per shape box, sized and placed from the shape (in
 	pixels, 1/16 of a cell) and turned by the box's rotation. PartPool keeps a template per box,
 	the glowing one carrying the block's PointLight.
+
+	Plants (Blocks.appearances `scatter`, `tinted`) are shaped blocks too:
+	  * scattered ones are drawn off their cell's centre and turned about its vertical axis
+	    (Meshing/Scatter.at, from the world block position: the node's origin plus the cell); each
+	    box goes to the cell's centre plus the offset, turned by the yaw, then by its own rotation;
+	  * tinted ones (grass, ferns) take their soil's foliage colour, which the mesher packs into
+	    the box key (GreedyMesher.decodeKey's surface field): every box's colour times
+	    Blocks.FOLIAGE_TINTS[tint], clamped. Their parts' colour is always set, tint or none,
+	    because a pooled part may come back from a cell with another tint.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,6 +32,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
+local Scatter = require(Shared.Meshing.Scatter)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Blocks = require(Shared.Blocks)
 
@@ -51,6 +61,36 @@ for _, appearance in Blocks.appearances do
 			})
 		end
 		shapes[appearance.id] = parts
+	end
+end
+
+-- Scattered appearances (plants: Meshing/Scatter).
+local scattered: { [number]: boolean } = {}
+--[[
+	Colours of tinted appearances' boxes (grass, ferns), per box and tint: [box][1] untinted,
+	[box][t + 1] times Blocks.FOLIAGE_TINTS[t], each channel clamped to 255.
+]]
+local tintColours: { [number]: { { Color3 } } } = {}
+for _, appearance in Blocks.appearances do
+	local shape = appearance.shape
+	if shape and appearance.scatter then
+		scattered[appearance.id] = true
+	end
+	if shape and appearance.tinted then
+		local boxes = {}
+		for i, box in shape do
+			local c = box.color or appearance.color
+			local colours = { Color3.fromRGB(c[1], c[2], c[3]) }
+			for t, m in Blocks.FOLIAGE_TINTS do
+				colours[t + 1] = Color3.fromRGB(
+					math.min(255, math.round(c[1] * m[1])),
+					math.min(255, math.round(c[2] * m[2])),
+					math.min(255, math.round(c[3] * m[3]))
+				)
+			end
+			boxes[i] = colours
+		end
+		tintColours[appearance.id] = boxes
 	end
 end
 
@@ -218,6 +258,10 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 			if shape then
 				-- One part per shape box in every cell (shaped boxes are single cells).
 				local pixel = Vector3.new(scale, scaleY, scale) / 16
+				local scatter = scattered[appearance]
+				-- (For tinted plants the surface field is the soil's tint; see GreedyMesher.)
+				local tints = tintColours[appearance]
+				local tint = if tints then math.min(surface, #Blocks.FOLIAGE_TINTS) + 1 else 1
 				for cy = y, y + sy - 1 do
 					for cz = z, z + sz - 1 do
 						for cx = x, x + sx - 1 do
@@ -226,10 +270,27 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 								(cy + 0.5) * scaleY,
 								originZ + (cz + 0.5) * scale
 							)
+							-- A plant's offset and turn come from its world block position.
+							local cell: CFrame? = nil
+							if scatter then
+								local dx, dz, yaw = Scatter.at(
+									appearance,
+									(node.nx * Config.ChunkSize + cx) * step,
+									cy * stepY,
+									(node.nz * Config.ChunkSize + cz) * step
+								)
+								cell = CFrame.new(centre + Vector3.new(dx * pixel.X, 0, dz * pixel.Z))
+									* CFrame.Angles(0, yaw, 0)
+							end
 							for i, box in shape do
 								local part = pool:acquire(appearance, far, plain, i)
 								part.Size = box.size * pixel
-								part.CFrame = CFrame.new(centre + box.offset * pixel) * box.rotation
+								part.CFrame = if cell
+									then cell * CFrame.new(box.offset * pixel) * box.rotation
+									else CFrame.new(centre + box.offset * pixel) * box.rotation
+								if tints then
+									part.Color = tints[i][tint]
+								end
 								part.Parent = folder
 								self.partCount += 1
 							end

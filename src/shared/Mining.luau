@@ -6,7 +6,8 @@
 	    progress = speed / hardness / (canHarvest ? 30 : 100)
 
 	where `speed` is the held tool's speed when it is the block's kind of tool (BlockList `tool`;
-	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves), else 1,
+	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves; Shears 15
+	on blocks they harvest, BlockList `shearDrops`: leaves, and plants that break at once), else 1,
 	divided by 5 under water and by 5 while not standing on the ground. `canHarvest`: the block drops
 	anything with that tool (Items.canHarvest: blocks with a `toolLevel` need a good enough tool, so
 	stone by hand takes 7.5 s and drops nothing). The block breaks when the progress reaches 1:
@@ -37,9 +38,13 @@ function Mining.toolSpeed(block: number, tool: number?): number
 	if data == nil then
 		return 1
 	end
-	local kind = Blocks.get(block).tool
+	local def = Blocks.get(block)
+	local kind = def.tool
 	if data.kind == "sword" then
 		return if kind == "hoe" then SWORD_SPEED else 1
+	elseif data.kind == "shears" then
+		-- (Minecraft's ShearsItem.getDestroySpeed: 15 on leaves and cobwebs, which they harvest.)
+		return if def.shearDrops ~= nil then data.speed else 1
 	end
 	return if kind ~= nil and data.kind == kind then data.speed else 1
 end
@@ -88,12 +93,20 @@ function Mining.mayBreak(block: number, elapsed: number, needed: number?, tool: 
 	return progress * (ticks + 1) >= (needed or Mining.TOLERANCE) - 1e-9
 end
 
--- Wear a tool takes from breaking a block (Minecraft: 1 for tools, 2 for swords, nothing for
--- blocks that break at once or for anything else held).
+--[[
+	Wear a tool takes from a survival player breaking a block (creative players' tools never wear:
+	the callers' business). Minecraft: 1 for tools, 2 for swords, nothing for blocks that break at
+	once or for anything else held; Shears 1 for every block, instant ones too (ShearsItem.mineBlock
+	wears them on everything but fire).
+]]
 function Mining.wear(block: number, tool: number?): number
 	local data = Items.tool(tool)
 	local def = Blocks.get(block)
-	if data == nil or def == nil or def.hardness == 0 then
+	if data == nil or def == nil then
+		return 0
+	elseif data.kind == "shears" then
+		return 1
+	elseif def.hardness == 0 then
 		return 0
 	end
 	return if data.kind == "sword" then 2 else 1

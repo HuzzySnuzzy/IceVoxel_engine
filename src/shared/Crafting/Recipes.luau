@@ -144,6 +144,10 @@ for _, material in { { "Iron", "IronIngot" }, { "Gold", "GoldIngot" }, { "Diamon
 	shape({ "X X", "X X" }, key, material[1] .. "Boots")
 end
 
+--[[ Shears: two iron ingots on a diagonal (Minecraft's " #", "# "; mirrored works too) ]]
+
+shape({ " #", "# " }, { ["#"] = "IronIngot" }, "Shears")
+
 --[[ Light ]]
 
 shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)

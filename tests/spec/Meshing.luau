@@ -49,6 +49,14 @@ return function(t, shared, require, _server, client)
 				end
 			end
 			return 0, false
+		elseif buffer.readu8(Blocks.tintedLut, app) == 1 then
+			-- A tinted plant: its soil's foliage tint in the key (under a tall plant's top, the soil
+			-- is below its lower half).
+			local soil = if y >= 1 then ChunkLayout.get(data, x, y - 1, z) else Blocks.AIR
+			if buffer.readu8(Blocks.tintedLut, Blocks.get(soil).appearance) == 1 then
+				soil = if y >= 2 then ChunkLayout.get(data, x, y - 2, z) else Blocks.AIR
+			end
+			return app + buffer.readu8(Blocks.tintLut, soil) * GreedyMesher.KEY_STRIDE, false
 		end
 		return app, false
 	end
@@ -493,9 +501,22 @@ return function(t, shared, require, _server, client)
 	t.test("generated chunks: every visible block covered once, nothing visible over-covered", function()
 		local gen = TerrainGenerator.new(777)
 		local sectionHeight = Config.SectionHeight
-		local total = 0
-		for _, p in { { 0, 0 }, { 3, -8 }, { -20, 11 } } do
+		local total, plants, tinted = 0, 0, 0
+		-- (The last two: a savanna and a jungle with their plants, tinted ones on dry grass.)
+		for _, p in { { 0, 0 }, { 3, -8 }, { -20, 11 }, { -1760, 24 }, { -1340, 20 } } do
 			local r = gen.generate(0, p[1], p[2])
+			for i = 0, buffer.len(r.data) // 2 - 1 do
+				local block = buffer.readu16(r.data, i * 2)
+				if Blocks.isPlant(block) and i >= ChunkLayout.LAYER then
+					plants += 1
+					if
+						Blocks.get(block).tinted
+						and Blocks.get(buffer.readu16(r.data, (i - ChunkLayout.LAYER) * 2)).name == "DryGrass"
+					then
+						tinted += 1
+					end
+				end
+			end
 			for y0 = 0, r.height - 1, sectionHeight do
 				local y1 = y0 + sectionHeight
 				for _, hide in { true, false } do
@@ -509,6 +530,8 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(total > 0)
+		t.ok(plants > 30, `plants in the generated chunks: {plants}`)
+		t.ok(tinted > 5, `grass and ferns on dry grass: {tinted}`)
 	end)
 
 	t.test("LOD chunks mesh correctly as a whole column", function()

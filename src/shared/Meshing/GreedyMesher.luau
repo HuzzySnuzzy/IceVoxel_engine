@@ -26,6 +26,12 @@
 	    they never hide a neighbour and no opaque box runs through them.
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
 	    the camera is not close to.
+	  * Plants (Blocks.foliageLut: grass, ferns, flowers, mushrooms) are shaped blocks like torches.
+	    With `hideFoliage` (Config.Render.Foliage off, or a chunk too far: LodTree.drawsFoliage)
+	    they are not drawn at all; they hide nothing, so that changes no other box. `mesh` counts
+	    them either way. A `tinted` plant (Blocks.tintedLut: grass and ferns) takes the
+	    foliage colour of the soil it grows on: the soil's Blocks.tintLut entry is packed into its
+	    key (the block below; for the top of a tall plant, the block below its lower half).
 	  * `border` (optional) describes what surrounds the meshed range (see `Border`):
 	      - seams: where a coarser LOD node is next to this one, it is drawn lower than the exact
 	        terrain in the padding says. Padding above what the neighbour really draws is opened,
@@ -37,8 +43,11 @@
 	Output: a buffer of boxes, BOX_BYTES each, as u16 values
 	  x, y, z      first cell (x / z local to the chunk core, y absolute cell index),
 	  sx, sy, sz   size in cells,
-	  key          appearance id + surfaceHeight * KEY_STRIDE. surfaceHeight is 0 for full cells,
-	               otherwise the height of the top cell in ninths of a block (see `decodeKey`).
+	  key          appearance id + surface * KEY_STRIDE (see `decodeKey`). The surface field has two
+	               uses, told apart by the appearance: a fluid's height (0 for full cells, otherwise
+	               the height of the top cell in ninths of a block), and a tinted plant's foliage
+	               tint (0 = none, t = Blocks.FOLIAGE_TINTS[t]). Shaped blocks never use the first,
+	               so the field is free for the second. At most 63 either way (u16 keys).
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -59,6 +68,9 @@ local appearanceLut = Blocks.appearanceLut
 local fluidHeightLut = Blocks.fluidHeightLut
 local kindLut = Blocks.kindLut
 local singleLut = Blocks.singleLut
+local tintLut = Blocks.tintLut
+local tintedLut = Blocks.tintedLut
+local foliageLut = Blocks.foliageLut
 local cullVisibleCaves = Blocks.cullLut
 local cullHiddenCaves = Blocks.cullLutHiddenCaves
 
@@ -89,9 +101,33 @@ GreedyMesher.NOT_OPEN = 0xFFFF
 GreedyMesher.HIDDEN_BELOW = 16
 GreedyMesher.HIDDEN_ABOVE = 32
 
--- Splits a box key into its appearance id and surface height (0 = full height, else ninths).
+--[[
+	Splits a box key into its appearance id and its surface field: for fluids the surface height
+	(0 = full height, else ninths), for tinted plants the foliage tint (0 = none, else an index
+	into Blocks.FOLIAGE_TINTS).
+]]
 function GreedyMesher.decodeKey(key: number): (number, number)
 	return key % KEY_STRIDE, key // KEY_STRIDE
+end
+
+--[[
+	The foliage tint (Blocks.tintLut) of the soil under the tinted plant at padded cell index `idx`
+	(cell y of `data`): the block below, or the one below that when the block below is a tinted
+	plant too (the plant is the top of a tall one, standing on its lower half). 0 at the bottom of
+	the world.
+]]
+local function soilTint(data: buffer, idx: number, y: number): number
+	if y < 1 then
+		return 0
+	end
+	local soil = readu16(data, (idx - LAYER) * 2)
+	if readu8(tintedLut, readu16(appearanceLut, soil * 2)) == 1 then
+		if y < 2 then
+			return 0
+		end
+		soil = readu16(data, (idx - 2 * LAYER) * 2)
+	end
+	return readu8(tintLut, soil)
 end
 
 -- Scratch space, grown on demand and reused (every actor has its own copy of this module).
@@ -160,9 +196,10 @@ function GreedyMesher.lowestOpen(open: buffer?): number
 end
 
 --[[
-	Returns a copy of layers y0-1 .. y1 of `data` (same layout) with `border` applied. The copy is
+	Returns a copy of layers y0-2 .. y1 of `data` (same layout) with `border` applied. The copy is
 	scratch memory reused by the next call. Meshing that copy with no border gives the same result
-	as meshing `data` with `border` (QuadMesher uses it the same way).
+	as meshing `data` with `border` (QuadMesher uses it the same way). (Two layers below the range:
+	a tinted plant's soil may be two cells down, under a tall plant's lower half.)
 ]]
 local function applyBorder(
 	data: buffer,
@@ -172,7 +209,7 @@ local function applyBorder(
 	hideCaves: boolean,
 	border: Border
 ): buffer
-	local lo, hi = math.max(y0 - 1, 0), math.min(y1, height - 1)
+	local lo, hi = math.max(y0 - 2, 0), math.min(y1, height - 1)
 	if buffer.len(borderData) < buffer.len(data) then
 		borderData = buffer.create(buffer.len(data))
 	end
@@ -257,7 +294,10 @@ GreedyMesher.applyBorder = applyBorder
 
 --[[
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.
-	Returns a new buffer of boxes and the box count.
+	`hideFoliage`: leave plants out (Config.Render.Foliage off, or a chunk beyond
+	LodTree.drawsFoliage). Returns a new buffer of boxes, the box count and the number of plant
+	cells in the range, drawn or not (the streamer remeshes those sections when its chunk starts or
+	stops drawing plants).
 ]]
 function GreedyMesher.mesh(
 	data: buffer,
@@ -265,12 +305,14 @@ function GreedyMesher.mesh(
 	y0: number,
 	y1: number,
 	hideCaves: boolean,
-	border: Border?
-): (buffer, number)
+	border: Border?,
+	hideFoliage: boolean?
+): (buffer, number, number)
 	if border and (border.open or border.hidden ~= 0) then
 		data = applyBorder(data, height, y0, y1, hideCaves, border)
 	end
 	local cull = if hideCaves then cullHiddenCaves else cullVisibleCaves
+	local noFoliage = hideFoliage == true
 	local sh = y1 - y0
 	local cells = SIZE * SIZE * sh
 	ensureScratch(cells)
@@ -278,6 +320,7 @@ function GreedyMesher.mesh(
 
 	-- Pass 1: classify every cell.
 	local anyNeeded = false
+	local plants = 0
 	for y = y0, y1 - 1 do
 		local hasAbove = y + 1 < height
 		local hasBelow = y > 0
@@ -337,6 +380,18 @@ function GreedyMesher.mesh(
 								needed = app
 							end
 						end
+					elseif readu8(foliageLut, app) == 1 then
+						-- Plants (never opaque or fluid): counted, and drawn unless hidden; tinted ones
+						-- carry their soil's foliage tint in the surface field. They hide nothing, so
+						-- leaving them out changes no other box.
+						plants += 1
+						if noFoliage then
+							needed = 0
+						elseif readu8(tintedLut, app) == 1 then
+							needed = app + soilTint(data, idx, y) * KEY_STRIDE
+						else
+							needed = app
+						end
 					else
 						needed = app
 					end
@@ -353,7 +408,7 @@ function GreedyMesher.mesh(
 	end
 
 	if not anyNeeded then
-		return buffer.create(0), 0
+		return buffer.create(0), 0, plants
 	end
 
 	-- Pass 2: grow boxes along X, then Z, then Y.
@@ -447,7 +502,7 @@ function GreedyMesher.mesh(
 
 	local out = buffer.create(count * 14)
 	buffer.copy(out, 0, boxes, 0, count * 14)
-	return out, count
+	return out, count, plants
 end
 
 return GreedyMesher

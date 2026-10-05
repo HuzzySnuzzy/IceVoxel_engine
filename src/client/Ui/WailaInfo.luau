@@ -24,7 +24,8 @@
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
-	            held item and by hand, break time with the held item (Mining.ticks / 20, standing
+	            held item and by hand (a tall plant's top: what its lower half drops, as breaking
+	            either half harvests the plant once), break time with the held item (Mining.ticks / 20, standing
 	            and dry), light, fluid level, render kind, solidity, friction and menu; for
 	            transmitters their tier's numbers, the packed side modes and each side's mode,
 	            colour and fill byte, the connected sides and the network the client sees; for
@@ -549,10 +550,15 @@ local function blockDetails(
 			table.insert(lines, gray("Tool none"))
 		end
 		if not unbreakable then
+			-- (Breaking either half of a tall plant harvests its lower half: server EditRules.harvested.)
+			local harvested = Blocks.plantBottom(block) or block
 			if held ~= nil then
-				table.insert(lines, gray(`Drops with {Items.displayName(held)}: {stackText(Items.drops(block, held))}`))
+				table.insert(
+					lines,
+					gray(`Drops with {Items.displayName(held)}: {stackText(Items.drops(harvested, held))}`)
+				)
 			end
-			table.insert(lines, gray(`Drops by hand: {stackText(Items.drops(block, nil))}`))
+			table.insert(lines, gray(`Drops by hand: {stackText(Items.drops(harvested, nil))}`))
 			if def.hardness == 0 then
 				table.insert(lines, gray("Breaks at once"))
 			else

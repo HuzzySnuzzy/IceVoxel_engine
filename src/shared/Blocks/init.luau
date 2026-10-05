@@ -17,10 +17,26 @@
 	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`),
 	  * Mekanism's transmitters and fluid tanks (`transmitter`, `tank`, `icon`), which
 	    Shared/Transmitters reads, and machines (`machine`, `energy`), which Shared/Machines
-	    reads (a machine opens a "Machine" menu unless BlockList names another).
+	    reads (a machine opens a "Machine" menu unless BlockList names another),
+	  * plants (BlockList `plant`: grass, ferns, flowers, mushrooms and the two halves of tall
+	    ones), Minecraft's BushBlock, DeadBushBlock, MushroomBlock and DoublePlantBlock:
+	      - what they stand on: `mayPlaceOn` (the soil sets), `canSurvive` (a single plant or
+	        lower half needs its soil below, an upper half its own lower half) and `canPlace`
+	        (`canSurvive`, plus room for the upper half of a tall plant: inside the world and
+	        replaceable), which `placementFor` uses;
+	      - their halves: `isPlant`, `plantTop`, `plantBottom`, `otherHalf` (the partner's dy).
+	        Upper halves name the lower half as their `item`, so `Items.ofBlock` answers the
+	        plant's item and they are the lower half's variants; having no `support`, they are
+	        never placed by `placementFor`;
+	      - their look: the soil's foliage colour (`foliageColorOf`; the mesher's `tintLut` into
+	        `FOLIAGE_TINTS`, multipliers of the authored green) for `tinted` plants, and per
+	        appearance `tinted`, `scatter`, `upperHalf` and `foliage` (also as `tintedLut` and
+	        `foliageLut`). Plants never share an appearance with anything else;
+	      - what Shears harvest (`shearDrops`, `shearCount`; Items.drops, Shared/Mining).
 ]]
 
 local BlockList = require(script.BlockList)
+local Config = require(script.Parent.Config)
 
 export type BlockDef = {
 	id: number,
@@ -87,6 +103,17 @@ export type BlockDef = {
 	-- Mekanism machines (Shared/Machines): the kind, and the energy it holds and moves.
 	machine: MachineSpec?,
 	energy: EnergySpec?,
+	-- Plants: the soil set and the other half's name (see Blocks.canSurvive); `tinted` plants
+	-- take their soil's foliage colour, which soil blocks may have (`foliageColor`); `scatter`
+	-- plants are drawn at a per-position offset and turn.
+	plant: PlantSpec?,
+	tinted: boolean,
+	foliageColor: { number }?,
+	scatter: boolean,
+	-- What Shears harvest from it (true: itself, else an item's name) and how many; see
+	-- Items.drops.
+	shearDrops: (string | boolean)?,
+	shearCount: number,
 	appearance: number,
 }
 
@@ -109,6 +136,14 @@ export type Appearance = {
 	lightColor: { number },
 	-- Boxes drawn instead of a cube (see BlockList); such blocks are meshed one box per block.
 	shape: { ShapeBox }?,
+	-- Plants (`foliage`, every plant): `tinted` ones take the foliage colour of the soil below
+	-- (the mesher packs Blocks.tintLut of it into the box key), `scatter` ones are drawn at a
+	-- per-position offset and turn, and an `upperHalf` (a tall plant's top) is offset like the
+	-- lower half below it.
+	tinted: boolean,
+	scatter: boolean,
+	upperHalf: boolean,
+	foliage: boolean,
 }
 
 export type ShapeBox = BlockList.ShapeBox
@@ -117,6 +152,7 @@ export type TransmitterSpec = BlockList.TransmitterSpec
 export type TankSpec = BlockList.TankSpec
 export type MachineSpec = BlockList.MachineSpec
 export type EnergySpec = BlockList.EnergySpec
+export type PlantSpec = BlockList.PlantSpec
 
 local Blocks = {}
 
@@ -274,6 +310,12 @@ for index, spec in BlockList do
 		icon = spec.icon,
 		machine = spec.machine,
 		energy = spec.energy,
+		plant = spec.plant,
+		tinted = spec.tinted == true,
+		foliageColor = spec.foliageColor,
+		scatter = spec.scatter == true,
+		shearDrops = spec.shearDrops,
+		shearCount = spec.shearCount or 1,
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
@@ -309,6 +351,14 @@ for index, spec in BlockList do
 	)
 	assert(spec.tank == nil or (isTier(spec.tank.tier) and spec.tank.capacity > 0), `Block {spec.name} has a bad tank`)
 	assert(transmitter == nil or spec.tank == nil, `Block {spec.name} is a transmitter and a tank`)
+	assert(
+		spec.shearDrops == nil or spec.shearDrops == true or type(spec.shearDrops) == "string",
+		`Block {spec.name} has bad shearDrops`
+	)
+	assert(
+		def.shearCount >= 1 and def.shearCount <= 64 and def.shearCount == math.floor(def.shearCount),
+		`Block {spec.name} has a bad shearCount`
+	)
 
 	if drawn then
 		local c, t = def.color, def.tint
@@ -323,7 +373,10 @@ for index, spec in BlockList do
 		local lc = def.lightColor
 		-- (Shaped blocks get an appearance each: their boxes are their look.)
 		local glow = `{def.light}|{lc[1]},{lc[2]},{lc[3]}|{if def.shape then def.name else ""}`
-		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}`
+		-- (Plants never share one with anything else: the mesher and renderer treat them apart.)
+		local upperHalf = spec.plant ~= nil and spec.plant.bottom ~= nil
+		local foliage = `{spec.plant ~= nil},{def.tinted},{def.scatter},{upperHalf}`
+		local key = `{look}|{if solid then 1 else 0}|{texture}|{def.decor or ""}|{glow}|{foliage}`
 		local appearance = appearanceByKey[key]
 		if appearance == nil then
 			appearance = #appearances + 1
@@ -343,6 +396,10 @@ for index, spec in BlockList do
 				light = def.light,
 				lightColor = def.lightColor,
 				shape = def.shape,
+				tinted = def.tinted,
+				scatter = def.scatter,
+				upperHalf = upperHalf,
+				foliage = spec.plant ~= nil,
 			})
 		end
 		def.appearance = appearance
@@ -427,6 +484,38 @@ end)
 Blocks.replaceableLut = u8Lut(function(def)
 	return def.replaceable
 end)
+
+--[[
+	Foliage tints: every block with a `foliageColor` (DryGrass), numbered from 1 in id order.
+	`tintLut` gives a block's number (u8, 0 = none) and `FOLIAGE_TINTS[number]` the { r, g, b }
+	multipliers tinted plants on it are drawn with: its foliage colour / the Grass block's colour,
+	per channel, since plants are authored in the Grass block's green. The mesher packs the number
+	of the soil under a tinted plant into its box key (GreedyMesher), which has room for 63.
+]]
+local grassColour = defs[ids.Grass].color
+local foliageTints: { { number } } = {}
+Blocks.tintLut = buffer.create(Blocks.count)
+for id = 0, Blocks.count - 1 do
+	local colour = defs[id].foliageColor
+	if colour then
+		table.insert(
+			foliageTints,
+			table.freeze({ colour[1] / grassColour[1], colour[2] / grassColour[2], colour[3] / grassColour[3] })
+		)
+		buffer.writeu8(Blocks.tintLut, id, #foliageTints)
+	end
+end
+assert(#foliageTints < 64, "At most 63 foliage colours fit the mesher's box keys")
+Blocks.FOLIAGE_TINTS = table.freeze(foliageTints)
+
+-- 1 per *appearance* id when it is tinted by its soil (`tinted`), and when it is a plant
+-- (`foliage`; drawn only with Config.Render.Foliage on).
+Blocks.tintedLut = buffer.create(#appearances + 1)
+Blocks.foliageLut = buffer.create(#appearances + 1)
+for _, appearance in appearances do
+	buffer.writeu8(Blocks.tintedLut, appearance.id, if appearance.tinted then 1 else 0)
+	buffer.writeu8(Blocks.foliageLut, appearance.id, if appearance.foliage then 1 else 0)
+end
 
 --[[
 	Surface height of fluid blocks in ninths of a block (like Minecraft): sources 8, flowing levels
@@ -607,10 +696,109 @@ function Blocks.supportOffset(block: number): (number?, number?, number?)
 	return d[1], d[2], d[3]
 end
 
+--[[ Plants (BlockList `plant`) ]]
+
 --[[
-	Can `block` stay at (x, y, z)? Blocks with a `support` need a sturdy block on that side
-	(Minecraft's canSurvive: TorchBlock, WallTorchBlock, LanternBlock). `getBlock` answers nil for
-	unknown (unloaded) blocks, which hold nothing up.
+	Soil sets (BlockList `plant.soil`): "dirt" is Minecraft's DIRT tag as far as this game has it,
+	"deadbush" adds sand (DeadBushBlock; there is no terracotta), "mushroom" is Minecraft's
+	MUSHROOM_GROW_BLOCK tag, plus any sturdy opaque full block (`mayPlaceOn`).
+]]
+local DIRT_SOIL = { "Grass", "DryGrass", "Dirt", "CoarseDirt", "Podzol", "Mycelium" }
+local soils: { [string]: { [number]: boolean } } = { dirt = {}, deadbush = {}, mushroom = {} }
+for _, name in DIRT_SOIL do
+	soils.dirt[ids[name]] = true
+	soils.deadbush[ids[name]] = true
+end
+soils.deadbush[ids.Sand] = true
+soils.mushroom[ids.Mycelium] = true
+soils.mushroom[ids.Podzol] = true
+
+-- Single plants and lower halves: their soil set; tall plants: each half's other half.
+local plantSoil: { [number]: string } = {}
+local plantTops: { [number]: number } = {}
+local plantBottoms: { [number]: number } = {}
+for id, def in defs do
+	local info = def.plant
+	if info and info.bottom then
+		local bottom = rawget(ids :: any, info.bottom) :: number?
+		local lower = if bottom then defs[bottom].plant else nil
+		assert(bottom and lower and lower.top == def.name, `Plant {def.name} names a bad bottom {info.bottom}`)
+		assert(info.soil == nil and info.top == nil, `Upper half {def.name} has a soil or a top`)
+		assert(
+			def.support == nil and def.item == info.bottom,
+			`Upper half {def.name} must hang on nothing and be its bottom's`
+		)
+		plantBottoms[id] = bottom
+	elseif info then
+		assert(info.soil and soils[info.soil], `Plant {def.name} has unknown soil {info.soil}`)
+		assert(def.support == "Down", `Plant {def.name} must stand on its soil (support "Down")`)
+		plantSoil[id] = info.soil
+		if info.top then
+			local top = rawget(ids :: any, info.top) :: number?
+			local upper = if top then defs[top].plant else nil
+			assert(top and upper and upper.bottom == def.name, `Plant {def.name} names a bad top {info.top}`)
+			plantTops[id] = top
+		end
+	end
+	assert(info or not def.tinted, `Block {def.name} is tinted but no plant`)
+end
+
+-- Is the block a plant (either half of a tall one included)?
+function Blocks.isPlant(id: number): boolean
+	local def = defs[id]
+	return def ~= nil and def.plant ~= nil
+end
+
+-- The upper half of a tall plant's lower half (nil for anything else).
+function Blocks.plantTop(id: number): number?
+	return plantTops[id]
+end
+
+-- The lower half of a tall plant's upper half (nil for anything else).
+function Blocks.plantBottom(id: number): number?
+	return plantBottoms[id]
+end
+
+-- Where a tall plant's other half is, as dy: +1 from a lower half, -1 from an upper half; nil for
+-- anything else.
+function Blocks.otherHalf(id: number): number?
+	if plantTops[id] then
+		return 1
+	elseif plantBottoms[id] then
+		return -1
+	end
+	return nil
+end
+
+--[[
+	May `plant` (a single plant or a lower half) stand on `soil`? Its soil set (Minecraft's
+	BushBlock.mayPlaceOn and its overrides): mushrooms also stand on any sturdy opaque full block
+	(MushroomBlock, without its light check: there are no block light levels). Upper halves stand
+	on their lower half only (`canSurvive`), so they and non-plants answer false.
+]]
+function Blocks.mayPlaceOn(plant: number, soil: number): boolean
+	local set = plantSoil[plant]
+	if set == nil or defs[soil] == nil then
+		return false
+	end
+	return soils[set][soil] == true or (set == "mushroom" and Blocks.isSturdy(soil) and Blocks.isOpaque(soil))
+end
+
+-- The foliage colour ({ r, g, b }) tinted plants take on `soil` (BlockList `foliageColor`), nil
+-- when they keep their own. Read only.
+function Blocks.foliageColorOf(soil: number): { number }?
+	local def = defs[soil]
+	return if def then def.foliageColor else nil
+end
+
+--[[
+	Can `block` stay at (x, y, z)? Minecraft's canSurvive:
+	  * a plant (a single one or a lower half) needs a block of its soil set below (`mayPlaceOn`;
+	    BushBlock), an upper half its own lower half (DoublePlantBlock; whether a lower half has
+	    its top is the server's Plant behaviour's business);
+	  * other blocks with a `support` need a sturdy block on that side (TorchBlock,
+	    WallTorchBlock, LanternBlock).
+	`getBlock` answers nil for unknown (unloaded) blocks, which hold nothing up.
 ]]
 function Blocks.canSurvive(
 	block: number,
@@ -619,12 +807,46 @@ function Blocks.canSurvive(
 	y: number,
 	z: number
 ): boolean
+	local bottom = plantBottoms[block]
+	if bottom ~= nil then
+		return getBlock(x, y - 1, z) == bottom
+	end
+	if plantSoil[block] ~= nil then
+		local soil = getBlock(x, y - 1, z)
+		return soil ~= nil and Blocks.mayPlaceOn(block, soil)
+	end
 	local dx, dy, dz = Blocks.supportOffset(block)
 	if dx == nil or dy == nil or dz == nil then
 		return true
 	end
 	local support = getBlock(x + dx, y + dy, z + dz)
 	return support ~= nil and Blocks.isSturdy(support)
+end
+
+--[[
+	May `block` be placed at (x, y, z)? It must survive there (`canSurvive`), and a tall plant's
+	lower half needs room for its upper half: y + 1 inside the world (below Config.WorldHeight)
+	and replaceable there (Minecraft's DoublePlantBlock.getStateForPlacement). `getBlock` answers
+	nil for unknown blocks, which leave no room.
+]]
+function Blocks.canPlace(
+	block: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number
+): boolean
+	if not Blocks.canSurvive(block, getBlock, x, y, z) then
+		return false
+	end
+	if plantTops[block] == nil then
+		return true
+	end
+	if y + 1 >= Config.WorldHeight then
+		return false
+	end
+	local above = getBlock(x, y + 1, z)
+	return above ~= nil and defs[above] ~= nil and Blocks.isReplaceable(above)
 end
 
 --[[
@@ -681,14 +903,16 @@ local HORIZONTAL: { [string]: boolean } = { North = true, South = true, West = t
 --[[
 	The block placing `block`'s item at (x, y, z) makes: Minecraft's BlockPlaceContext order (the
 	clicked face's support first, then the directions the player looks along, `lookOrder`).
-	  * Up or down: the variant hanging that way, if it can survive there (TorchBlock,
-	    LanternBlock.getStateForPlacement).
+	  * Up or down: the variant hanging that way, if it can be placed there (`canPlace`: it
+	    survives, and a tall plant has room for its top; TorchBlock,
+	    LanternBlock.getStateForPlacement, DoublePlantBlock).
 	  * A side: the wall variant, which is the first side in the whole order whose variant
 	    survives (WallTorchBlock.getStateForPlacement), even one listed after a floor that would
 	    hold a standing torch (StandingAndWallBlockItem asks the wall block at the first side).
 	The first answer wins. A torch clicked under a ceiling still goes on a wall or the floor next
 	to it when there is one. nil: nothing can hold it. (nx, ny, nz) = (0, 0, 0) uses the look order
-	alone. Blocks without supports place as they are.
+	alone. Blocks without supports place as they are. A plant gives itself or nil, never the upper
+	half of a tall one (it hangs on nothing, so no direction picks it).
 ]]
 function Blocks.placementFor(
 	block: number,
@@ -719,7 +943,7 @@ function Blocks.placementFor(
 	local wall: number? = nil
 	for _, direction in order do
 		local variant = hanging[direction]
-		if HORIZONTAL[direction] and variant and Blocks.canSurvive(variant, getBlock, x, y, z) then
+		if HORIZONTAL[direction] and variant and Blocks.canPlace(variant, getBlock, x, y, z) then
 			wall = variant
 			break
 		end
@@ -731,7 +955,7 @@ function Blocks.placementFor(
 			end
 		else
 			local variant = hanging[direction]
-			if variant and Blocks.canSurvive(variant, getBlock, x, y, z) then
+			if variant and Blocks.canPlace(variant, getBlock, x, y, z) then
 				return variant
 			end
 		end

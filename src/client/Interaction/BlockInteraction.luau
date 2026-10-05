@@ -49,6 +49,17 @@
 	a lantern clicked under a block hangs from it. The variant's block id is what is sent; the
 	server checks the support again.
 
+	A block goes into the clicked block when that can be replaced, else against the clicked face;
+	a replaceable block is not replaced by its own item (Items.isReplacedBy: Short Grass clicked on
+	short grass goes beside it, as in Minecraft).
+
+	Plants go the same way: only on their soil, and a tall plant's lower half only with room for
+	its top (a replaceable cell inside the world; Blocks.canPlace). Placing or breaking one half of
+	a tall plant predicts that half alone: the server places or removes the other and replicates it
+	as an ordinary edit, which ClientWorld applies like any other (block edits carry no action
+	number; an inventory snapshot settles the item). Until it arrives the other half stands alone;
+	breaking it meanwhile is answered with air, like any break of a block that is already gone.
+
 	Targeting is a voxel raycast on the client's block data, so it is exact and independent of the
 	parts; blocks smaller than their cell (torches, lanterns) are aimed at and outlined by their own
 	box (Blocks.outline), so the ray passes beside a torch to the wall behind it. Edits are
@@ -367,9 +378,33 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local particles: { Particle } = {}
 	local spare: { Part } = {}
 
+	-- The colour of `block`'s debris at (x, y, z): a tinted plant's (grass, ferns) is tinted by its
+	-- soil as the terrain draws it (GreedyMesher, Rendering/ChunkRenderer).
+	local function debrisColour(block: number, x: number, y: number, z: number): Color3
+		local def = Blocks.get(block)
+		local c = def.color
+		if def.tinted then
+			-- (Below the top of a tall plant is its lower half; the soil is under that.)
+			local soil = world:getBlock(x, y - 1, z)
+			if soil and Blocks.isValid(soil) and Blocks.get(soil).tinted then
+				soil = world:getBlock(x, y - 2, z)
+			end
+			local tint = if soil and Blocks.isValid(soil) then buffer.readu8(Blocks.tintLut, soil) else 0
+			local m = Blocks.FOLIAGE_TINTS[tint]
+			if m then
+				return Color3.fromRGB(
+					math.min(255, c[1] * m[1]),
+					math.min(255, c[2] * m[2]),
+					math.min(255, c[3] * m[3])
+				)
+			end
+		end
+		return Color3.fromRGB(c[1], c[2], c[3])
+	end
+
 	local function spawnDebris(x: number, y: number, z: number, block: number)
 		local def = Blocks.get(block)
-		local colour = Color3.fromRGB(def.color[1], def.color[2], def.color[3])
+		local colour = debrisColour(block, x, y, z)
 		local look = material(def.material)
 		if particleFolder.Parent ~= workspace.CurrentCamera then
 			particleFolder.Parent = workspace.CurrentCamera
@@ -735,9 +770,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if hit == nil or block == nil then
 			return
 		end
-		-- Into the clicked block if it can be replaced, else against the clicked face.
+		-- Into the clicked block if it can be replaced (not by its own item), else against the
+		-- clicked face.
 		local x, y, z = hit.x, hit.y, hit.z
-		if not Blocks.isReplaceable(hit.block) then
+		if not Items.isReplacedBy(hit.block, stack.item) then
 			x, y, z = x + hit.nx, y + hit.ny, z + hit.nz
 		end
 		-- Inside the world's build limits only (the server refuses the rest).
@@ -750,7 +786,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local current = world:getBlock(x, y, z)
-		if current == nil or not Blocks.isReplaceable(current) then
+		if current == nil or not Items.isReplacedBy(current, stack.item) then
 			return
 		end
 		-- Torches and lanterns: the variant that something holds there (the clicked face first,

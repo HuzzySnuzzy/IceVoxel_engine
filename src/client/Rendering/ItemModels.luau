@@ -5,12 +5,14 @@
 	  block items  a cube with the block's look, as the terrain draws it (material, colour,
 	               MaterialVariant texture, face images). Decorated blocks (chest, crafting table,
 	               furnace) get their faces as thin raised slabs (Rendering/BlockDecor), since
-	               ViewportFrames do not draw SurfaceGuis. Shaped blocks (torches, lanterns) are
-	               their shape's boxes, as the terrain draws them (glowing boxes Neon), centred on
-	               the shape; they count as items rather than blocks (`isBlock`), so icons show
-	               them from the front and they drop like items. A block's `icon` boxes replace
-	               its shape when it has them (a Mekanism transmitter: its core and two arms),
-	               each in its own colour, material and transparency.
+	               ViewportFrames do not draw SurfaceGuis. Shaped blocks (torches, lanterns,
+	               plants) are their shape's boxes, as the terrain draws them (glowing boxes Neon),
+	               centred on the shape's outline; they count as items rather than blocks
+	               (`isBlock`), so icons show them from the front and they drop like items. A
+	               block's `icon` boxes replace its shape when it has them (a Mekanism transmitter:
+	               its core and two arms; a tall plant: its lower half and the top's look, in one
+	               cell), each in its own colour, material and transparency. Plants are drawn
+	               untinted (the Grass block's green) and held like blocks, upright.
 	  other items  their ItemList boxes (pixels, 1/16 of the size), in the item's colour and material,
 	               turned by each box's `rotation`, as balls or cylinders by `shape`, and the whole
 	               model turned by the item's `tilt` (tools and sticks lie diagonally).

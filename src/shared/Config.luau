@@ -63,11 +63,18 @@ local Config = {
 		SplitDistanceL1 = 3,
 		-- Nothing is rendered further away than this (blocks).
 		ViewDistance = 2048,
+		-- Plants (Render.Foliage) are drawn in full detail chunks closer than this (blocks from the
+		-- viewer to the chunk; once drawn, up to half a chunk further: LodTree.drawsFoliage). Every
+		-- box of a plant is a part, up to 4 a plant: 25-32 chunks (45 in that band) hold about
+		-- 1,000-3,000 parts of plants on grassland, at most 6,000 (tests/spec/FoliageGeneration);
+		-- all ~180 full detail chunks would hold 10,000-20,000. Further chunks leave them out.
+		FoliageDistance = 40,
 		-- Used instead on phones and tablets (touch screen without keyboard). They also draw parts
 		-- much less far than computers do, so a long view distance would only cost memory there.
 		Mobile = {
 			ViewDistance = 512,
 			SplitDistance = 2,
+			FoliageDistance = 24,
 		},
 	},
 
@@ -107,6 +114,10 @@ local Config = {
 		Fog = true,
 		-- Use the blocks' MaterialVariant textures / face images (BlockList `texture`, `faces`).
 		Textures = true,
+		-- Draw plants (grass, ferns, flowers, mushrooms: up to 4 parts each, in full detail chunks
+		-- within Lod.FoliageDistance only). false saves those parts on slow devices; plants are still
+		-- there, aimed at and broken as usual, only not drawn. Read by the streamer's refresh.
+		Foliage = true,
 
 		--[[
 			Far meshes (Rendering/MeshOverlay): regions of far chunks that stopped changing are merged

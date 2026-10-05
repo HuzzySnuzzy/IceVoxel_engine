@@ -3,7 +3,8 @@
 	Picks the view distance for this device and sets up lighting for long views.
 
 	  * Phones and tablets (touch screen, no keyboard) use Config.Lod.Mobile: they draw parts much
-	    less far than computers anyway, and have less memory.
+	    less far than computers anyway, and have less memory. That includes a shorter distance
+	    for plants (LodTree.setFoliageDistance), whose every box is a part.
 	  * Lighting.PrioritizeLightingQuality = false: when the engine has to lower quality it keeps the
 	    draw distance and gives up lighting detail first.
 	  * Fog fades the edge of the view distance (skipped when the place has an Atmosphere, which
@@ -37,6 +38,7 @@ end
 function ViewSettings.apply()
 	if ViewSettings.isMobile() then
 		LodTree.configure(Config.Lod.Mobile.ViewDistance, Config.Lod.Mobile.SplitDistance)
+		LodTree.setFoliageDistance(Config.Lod.Mobile.FoliageDistance)
 	end
 
 	local ok, err = pcall(function()

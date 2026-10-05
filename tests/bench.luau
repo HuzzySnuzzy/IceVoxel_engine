@@ -53,7 +53,9 @@ local function meshNode(
 			local y1 = y0 + Config.SectionHeight
 			local hide = not revealAll
 			if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, hide) then
-				local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, hide)
+				-- (Plants are left out: the README counts their parts separately, see
+				-- Lod.FoliageDistance.)
+				local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, hide, nil, true)
 				boxes += count
 			end
 		end

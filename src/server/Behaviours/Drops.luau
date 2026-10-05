@@ -1,6 +1,7 @@
 --!strict
 --[[
-	How block behaviours drop items into the world (a torch popping off, water washing one away).
+	How block behaviours drop items into the world (a torch popping off, a plant losing its soil,
+	water washing either away, a bucket's water poured over a dead bush: Transmitters/UseRules).
 
 	Behaviours run inside the block ticker and know nothing about item entities, so the server
 	plugs the spawner in: Network/ServerNet passes the `dropBlock` rule it is given (Entities.dropBlock)

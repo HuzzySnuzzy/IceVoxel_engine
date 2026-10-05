@@ -7,20 +7,30 @@
 	            players must have started mining that very block (a Mine message) long enough
 	            ago, holding the tool they hold now: Mining.mayBreak, the server side of
 	            Minecraft's ServerPlayerGameMode check, which allows for network delay.
-	  Placing   a placeable block into a replaceable one (air, water, ...), never the same block.
-	            Variants placed by another block's item (wall torches by the Torch, a hanging
-	            lantern by the Lantern: BlockList `item`) count as placeable. Blocks that hang on
-	            another one (`support`: torches, lanterns) need it to be sturdy (`supported`,
-	            Blocks.canSurvive). Nothing is placed where it would overlap a player (`obstructs`:
-	            a solid block's cell, a lantern's outline; Minecraft's BlockItem.canPlace), but
-	            torches, which have no collision box, may be. Survival placement also needs the
-	            item in hand (Players/Inventories.place, which maps a variant to its item with
-	            Items.ofBlock).
+	  Placing   a placeable block into a replaceable one (air, water, short grass, ...), never
+	            the same block; what it replaces goes without a drop (Minecraft). Variants placed
+	            by another block's item (wall torches by the Torch, a hanging lantern by the
+	            Lantern: BlockList `item`) count as placeable, but a tall plant's upper half never
+	            does: the server sets it itself (`setPlaced`). Blocks that hang on another one
+	            (`support`: torches, lanterns) need it to be sturdy, plants their soil, and a tall
+	            plant room for its top (`supported`, Blocks.canPlace). Nothing is placed where it
+	            would overlap a player (`obstructs`: a solid block's cell, a lantern's outline;
+	            Minecraft's BlockItem.canPlace), but torches and plants, which have no collision
+	            box, may be. Survival placement also needs the item in hand
+	            (Players/Inventories.place, which maps a variant to its item with Items.ofBlock).
+	  Plants    a tall plant is two blocks (Minecraft's DoublePlantBlock): placing its lower half
+	            also sets its upper half right above (`setPlaced`), and a player breaking either
+	            half removes both (`removeBroken`) with one drop, what the lower half gives the
+	            player's tool (`harvested`: 2 short grass from tall grass with Shears, the flower
+	            of a tall flower), and one sound and one wear (playerWillDestroy and the loot
+	            tables' half = lower).
 	  Drops     survival breaks drop Items.drops(block, tool): blocks that need a tool (stone,
-	            ores) drop nothing without a good enough one. A container's contents drop in both
-	            modes (Minecraft's Containers.dropContents runs whatever the game mode).
+	            ores) drop nothing without a good enough one, Shears harvest what a block's
+	            `shearDrops` names. A container's contents drop in both modes (Minecraft's
+	            Containers.dropContents runs whatever the game mode).
 	  Wear      a survival break wears the tool in hand (Mining.wear: 1, 2 for swords, nothing on
-	            blocks that break at once); creative players never wear their tools.
+	            blocks that break at once, but Shears 1 on every block); creative players never
+	            wear their tools.
 	  Menus     blocks that open a window (chests, furnaces, crafting tables) close it for everyone
 	            using them when they go; only containers (chests, furnaces) hold items to drop.
 	  Data      Mekanism's sustained data: a block whose state some part of the server keeps (a
@@ -36,9 +46,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
+
+local WorldServer = require(script.Parent.Parent.World.WorldServer)
+
+type World = WorldServer.World
 
 -- The block a survival player started mining, and when (seconds, os.clock()).
 export type Mine = { x: number, y: number, z: number, startedAt: number }
@@ -115,19 +130,22 @@ end
 
 --[[
 	May `block` be placed where `current` is (ignoring what it hangs on, players in the way and the
-	inventory)? Placeable blocks and the variants their items place.
+	inventory)? Placeable blocks and the variants their items place, but no tall plant's upper half:
+	placing the lower half sets it (`setPlaced`).
 ]]
 function EditRules.mayPlace(block: number, current: number): boolean
 	local d = def(block)
-	if d == nil or block == current or not Blocks.isReplaceable(current) then
+	if d == nil or block == current or not Blocks.isReplaceable(current) or Blocks.plantBottom(block) ~= nil then
 		return false
 	end
 	return d.placeable or (d.item ~= nil and Items.ofBlock(block) ~= nil)
 end
 
 --[[
-	Is what `block` hangs on there, were it at (x, y, z)? Blocks without a `support` always are.
-	`getBlock` answers nil for blocks that are not loaded, which hold nothing up.
+	Is what `block` hangs on there, were it at (x, y, z)? Blocks without a `support` always are;
+	plants need their soil (or lower half) below, and a tall plant's lower half room for its top
+	(Blocks.canPlace). `getBlock` answers nil for blocks that are not loaded, which hold nothing up
+	and leave no room.
 ]]
 function EditRules.supported(
 	block: number,
@@ -136,7 +154,97 @@ function EditRules.supported(
 	y: number,
 	z: number
 ): boolean
-	return def(block) ~= nil and Blocks.canSurvive(block, getBlock, x, y, z)
+	return def(block) ~= nil and Blocks.canPlace(block, getBlock, x, y, z)
+end
+
+--[[ Tall plants (Minecraft's DoublePlantBlock) ]]
+
+--[[
+	The other half of the tall plant whose half `block` is at (x, y, z): its y and block, when it
+	is in place (the upper half right above a lower half, the lower half right below an upper
+	half). nil for other blocks and for a half standing alone (the Plant behaviour pops those).
+]]
+function EditRules.pairedHalf(
+	block: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number
+): (number?, number?)
+	local dy = Blocks.otherHalf(block)
+	if dy == nil then
+		return nil, nil
+	end
+	local partner = if dy > 0 then Blocks.plantTop(block) else Blocks.plantBottom(block)
+	if partner == nil or getBlock(x, y + dy, z) ~= partner then
+		return nil, nil
+	end
+	return y + dy, partner
+end
+
+--[[
+	The block whose drop a player's break of `block` at (x, y, z) harvests, and its y: a tall
+	plant's lower half, whichever half was hit, so it drops once, with the player's tool
+	(DoublePlantBlock.playerWillDestroy; the loot tables' half = lower); the block itself
+	otherwise. (An upper half alone harvests itself: nothing.)
+]]
+function EditRules.harvested(
+	block: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number
+): (number, number)
+	if Blocks.plantBottom(block) ~= nil then
+		local otherY, lower = EditRules.pairedHalf(block, getBlock, x, y, z)
+		if otherY ~= nil and lower ~= nil then
+			return lower, otherY
+		end
+	end
+	return block, y
+end
+
+--[[
+	Takes what a player's break of `block` at (x, y, z) removes out of `world`: the block, and the
+	other half of a tall plant with it (no drop and no sound of its own: `harvested` already counts
+	the plant's drop). false if the world refused the change (then nothing changed).
+]]
+function EditRules.removeBroken(world: World, x: number, y: number, z: number, block: number): boolean
+	local otherY = EditRules.pairedHalf(block, function(bx: number, by: number, bz: number): number?
+		return world:peekBlock(bx, by, bz)
+	end, x, y, z)
+	if not world:setBlock(x, y, z, Blocks.AIR) then
+		return false
+	end
+	if otherY ~= nil then
+		world:setBlock(x, otherY, z, Blocks.AIR)
+	end
+	return true
+end
+
+--[[
+	Sets a placement of `block` that passed `mayPlace` and `supported` at (x, y, z) in `world`: the
+	block, and a tall plant's upper half right above, over whatever replaceable block is there
+	(DoublePlantBlock.setPlacedBy). The room is looked at again first (`supported` checked it
+	before the item was used up; nothing should have changed it since): without it nothing is set
+	and the result is false, as when the world refuses the block.
+]]
+function EditRules.setPlaced(world: World, x: number, y: number, z: number, block: number): boolean
+	local top = Blocks.plantTop(block)
+	if top ~= nil then
+		local above = if y + 1 < Config.WorldHeight then world:peekBlock(x, y + 1, z) else nil
+		if above == nil or not Blocks.isValid(above) or not Blocks.isReplaceable(above) then
+			return false
+		end
+	end
+	if not world:setBlock(x, y, z, block) then
+		return false
+	end
+	if top ~= nil then
+		-- (Both halves together: the lower half's Plant behaviour finds its top on its next tick.)
+		world:setBlock(x, y + 1, z, top)
+	end
+	return true
 end
 
 --[[

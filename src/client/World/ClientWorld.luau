@@ -44,6 +44,7 @@ local cullHidden = Blocks.cullLutHiddenCaves
 
 local readu16 = buffer.readu16
 local writeu16 = buffer.writeu16
+local tintLut = Blocks.tintLut
 
 export type ChunkData = {
 	-- Cropped column buffer (ChunkLayout): cells from `height` up are air. Edits above it grow
@@ -385,8 +386,11 @@ local function apply(self: ClientWorld, x: number, y: number, z: number, block: 
 	end
 
 	local section = y // SECTION
-	-- (Read before the write, for the listeners; nil when the chunk is not loaded.)
-	local previous = if #self.blockListeners > 0 then ClientWorld.getBlock(self, x, y, z) else nil
+	-- A soil's foliage colour tints the plants up to two cells above it (the top of a tall plant;
+	-- GreedyMesher), which may be in the next section.
+	local tintsAbove = y % SECTION == SECTION - 2 and y + 2 < HEIGHT
+	-- (Read before the write, for the listeners and tints; nil when the chunk is not loaded.)
+	local previous = if #self.blockListeners > 0 or tintsAbove then ClientWorld.getBlock(self, x, y, z) else nil
 	local changed = writeCell(self, cx, cz, lx, y, lz, block, true)
 	if changed then
 		self.onSectionDirty(cx, cz, section)
@@ -394,6 +398,8 @@ local function apply(self: ClientWorld, x: number, y: number, z: number, block: 
 		if y % SECTION == 0 and section > 0 then
 			self.onSectionDirty(cx, cz, section - 1)
 		elseif y % SECTION == SECTION - 1 and y + 1 < HEIGHT then
+			self.onSectionDirty(cx, cz, section + 1)
+		elseif tintsAbove and previous ~= nil and buffer.readu8(tintLut, previous) ~= buffer.readu8(tintLut, block) then
 			self.onSectionDirty(cx, cz, section + 1)
 		end
 	end

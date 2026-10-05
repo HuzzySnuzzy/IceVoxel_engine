@@ -22,6 +22,12 @@
 	and a section with visible caves next to hidden caves closes its tunnels. Both depend on the
 	neighbours, so those chunks are remeshed when their neighbourhood changes. Far nodes use
 	borders that hold for any neighbours and never change once built.
+
+	Plants: every box of a plant is a part, so only full detail chunks near the viewer draw them
+	(LodTree.drawsFoliage: Config.Lod.FoliageDistance, Config.Render.Foliage). Each job says
+	whether its chunk does (`foliage`), and the worker says which sections hold plants; when a
+	chunk starts or stops drawing them (the viewer moved, the setting changed), those sections are
+	remeshed like edited ones.
 ]]
 
 local Players = game:GetService("Players")
@@ -81,6 +87,9 @@ export type Node = {
 	coarserUsed: { number }?,
 	-- Cave cap mask each section was meshed with.
 	caps: { [number]: number },
+	-- Whether its meshes draw plants (what its jobs were told), and the sections holding plants.
+	foliage: boolean,
+	plants: { [number]: boolean },
 	-- Incremented per generation job; results of older jobs are ignored.
 	job: number,
 }
@@ -113,6 +122,8 @@ export type ChunkStreamer = {
 	caveReach: CaveReach.Tracker,
 	-- Updated every refresh; nil while the camera is above the terrain.
 	caveView: CaveView?,
+	-- The viewer's position (blocks) at the last refresh.
+	viewer: Vector3,
 
 	update: (self: ChunkStreamer, dt: number) -> (),
 	isReady: (self: ChunkStreamer, x: number, z: number) -> boolean,
@@ -307,6 +318,7 @@ function ChunkStreamer.new(
 				2
 			),
 			caveView = nil,
+			viewer = Vector3.zero,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer
 
@@ -356,6 +368,8 @@ local function newNode(key: number, level: number, nx: number, nz: number): Node
 		coarser = NO_COARSER,
 		coarserUsed = nil,
 		caps = {},
+		foliage = false,
+		plants = {},
 		job = 0,
 	}
 end
@@ -528,6 +542,7 @@ local function onGenerated(self: ChunkStreamer, node: Node, job: number, result:
 		}
 		node.chunk = chunk
 		node.reveal = toSet(reveal)
+		node.plants = toSet(result.plants or {})
 		self.world:attach(node.nx, node.nz, chunk)
 	end
 
@@ -548,7 +563,14 @@ local function onGenerated(self: ChunkStreamer, node: Node, job: number, result:
 	end
 end
 
+-- Should `node` draw its plants now (LodTree.drawsFoliage, from the last refresh's viewer)?
+local function wantsFoliage(self: ChunkStreamer, node: Node): boolean
+	local viewer = self.viewer
+	return LodTree.drawsFoliage(node.level, node.nx, node.nz, viewer.X, viewer.Z, node.foliage)
+end
+
 local function dispatchGenerate(self: ChunkStreamer, node: Node): boolean
+	node.foliage = wantsFoliage(self, node)
 	local job: { [string]: any } = {
 		kind = "generate",
 		level = node.level,
@@ -556,6 +578,7 @@ local function dispatchGenerate(self: ChunkStreamer, node: Node): boolean
 		nz = node.nz,
 		coarser = node.coarser,
 		quads = self.renderer:wantsQuads(node.level),
+		foliage = node.foliage,
 	}
 	node.coarserUsed = node.coarser
 	local reveal: { number } = {}
@@ -615,6 +638,7 @@ local function dispatchRemesh(self: ChunkStreamer, node: Node): boolean
 		sections = sections,
 		reveal = reveal,
 		caps = capsFor(self, node, sections, reveal, camera),
+		foliage = node.foliage,
 	}
 	return self.pool:submit(job, function(result)
 		node.meshing = false
@@ -625,7 +649,11 @@ local function dispatchRemesh(self: ChunkStreamer, node: Node): boolean
 		local meshes = result.meshes :: { buffer }
 		for i, section in result.sections :: { number } do
 			node.reveal[section] = revealed[section] == true
+			node.plants[section] = nil
 			self.renderer:build(node, section, meshes[i], true)
+		end
+		for _, section in (result.plants or {}) :: { number } do
+			node.plants[section] = true
 		end
 		if next(node.dirty) then
 			self.dirtyNodes[node] = true
@@ -709,8 +737,36 @@ local function updateReveal(self: ChunkStreamer)
 	end
 end
 
+--[[
+	Full detail chunks that should start or stop drawing their plants (the viewer moved, or
+	Config.Render.Foliage changed) remesh the sections holding them. Nodes with a generation job
+	queued or running are left alone: that job takes the current answer.
+]]
+local function updateFoliage(self: ChunkStreamer)
+	for _, node in self.nodes do
+		if
+			node.level == 0
+			and node.chunk ~= nil
+			and node.ready
+			and node.state ~= "queued"
+			and node.state ~= "working"
+			and node.retireSince == nil
+		then
+			local want = wantsFoliage(self, node)
+			if want ~= node.foliage then
+				node.foliage = want
+				for s in node.plants do
+					node.dirty[s] = true
+					self.dirtyNodes[node] = true
+				end
+			end
+		end
+	end
+end
+
 local function refresh(self: ChunkStreamer)
 	local pos = viewerPosition() / BLOCK
+	self.viewer = pos
 	local lookVector = workspace.CurrentCamera.CFrame.LookVector
 	local look = Vector3.new(lookVector.X, 0, lookVector.Z)
 	look = if look.Magnitude > 1e-3 then look.Unit else Vector3.new(0, 0, -1)
@@ -778,6 +834,7 @@ local function refresh(self: ChunkStreamer)
 
 	updateCaveView(self)
 	updateReveal(self)
+	updateFoliage(self)
 	retire(self)
 end
 

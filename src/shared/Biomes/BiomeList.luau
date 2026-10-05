@@ -22,6 +22,23 @@
 	  beach          Surface block just above sea level, on coasts and river banks.
 	  frozen         Water freezes to ice at the surface.
 	  features       { { structureName, weight } } picked when vegetation succeeds.
+	  foliage        Optional ground plants (Generation/Foliage; full detail chunks only), Minecraft's
+	                 vegetal decoration. A column grows at most one plant, on its surface block, when
+	                 that block is in the plant's soil set and the block above is air:
+	                   density   Share (0-1) of the biome's soil columns growing a plant, on average.
+	                             They grow in patches: `cover` (0-1, default 0.5) of the ground is
+	                             patches, where the chance is about density / cover, and the rest is
+	                             clearings (a low-frequency noise, like Minecraft's random patches).
+	                   plants    { { blockName, weight } }: what grows. A two block tall plant
+	                             without air above its top falls back to its single form (tall
+	                             grass to short grass, a large fern to a fern) or to nothing.
+	                   flowers   Optional { chance =, cover =, species = { { blockName, weight } } }:
+	                             flowers in their own patches (`chance` and `cover` as density and
+	                             cover above, cover default 0.3). The species follows another
+	                             low-frequency noise, so a patch is one or two species.
+	                 Every box of a plant is a Part: tests/spec/FoliageGeneration keeps the Parts per
+	                 soil column within budget (0.6 in jungles and meadows, 0.45 on plains and
+	                 savannas, 0.35 elsewhere).
 ]]
 
 export type BiomeSpec = {
@@ -40,6 +57,15 @@ export type BiomeSpec = {
 	beach: string,
 	frozen: boolean?,
 	features: { { any } },
+	foliage: FoliageSpec?,
+}
+
+-- Ground plants (see the header): { blockName, weight } lists.
+export type FoliageSpec = {
+	density: number,
+	cover: number?,
+	plants: { { any } },
+	flowers: { chance: number, cover: number?, species: { { any } } }?,
 }
 
 export type Band = { name: string, from: number }
@@ -56,6 +82,17 @@ local BANDS: { Band } = {
 	{ name = "Alpine", from = 553 },
 	{ name = "Slopes", from = 639 },
 	{ name = "Peaks", from = 725 },
+}
+
+-- Forest flowers (Minecraft's forest: dandelions and poppies, lilies of the valley and the tall
+-- forest flowers).
+local FOREST_FLOWERS: { { any } } = {
+	{ "Dandelion", 2 },
+	{ "Poppy", 2 },
+	{ "LilyOfTheValley", 1 },
+	{ "Lilac", 1 },
+	{ "RoseBush", 1 },
+	{ "Peony", 1 },
 }
 
 local list: { BiomeSpec } = {
@@ -85,6 +122,19 @@ local list: { BiomeSpec } = {
 		underwater = "Gravel",
 		beach = "Gravel",
 		features = { { "SpruceTree", 1 } },
+		-- Minecraft's taiga: ferns over grass, large ferns, rare mushrooms, a rare dandelion or poppy.
+		foliage = {
+			density = 0.085,
+			cover = 0.55,
+			plants = {
+				{ "Fern", 4 },
+				{ "ShortGrass", 2 },
+				{ "LargeFern", 1 },
+				{ "BrownMushroom", 0.12 },
+				{ "RedMushroom", 0.06 },
+			},
+			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
+		},
 	},
 	{
 		name = "Plains",
@@ -98,6 +148,28 @@ local list: { BiomeSpec } = {
 		underwater = "Sand",
 		beach = "Sand",
 		features = { { "OakTree", 1 } },
+		-- Lots of short grass and some tall grass; plains flowers, tulips side by side, a rare
+		-- patch of sunflowers.
+		foliage = {
+			density = 0.09,
+			cover = 0.6,
+			plants = { { "ShortGrass", 7 }, { "TallGrass", 2 } },
+			flowers = {
+				chance = 0.012,
+				species = {
+					{ "Dandelion", 3 },
+					{ "Poppy", 2 },
+					{ "AzureBluet", 2 },
+					{ "OxeyeDaisy", 2 },
+					{ "Cornflower", 2 },
+					{ "RedTulip", 1 },
+					{ "OrangeTulip", 1 },
+					{ "WhiteTulip", 1 },
+					{ "PinkTulip", 1 },
+					{ "Sunflower", 0.4 },
+				},
+			},
+		},
 	},
 	{
 		name = "Forest",
@@ -111,6 +183,12 @@ local list: { BiomeSpec } = {
 		underwater = "Dirt",
 		beach = "Sand",
 		features = { { "OakTree", 3 }, { "BirchTree", 1 } },
+		-- Some grass; dandelions, poppies, lilies of the valley and the tall forest flowers.
+		foliage = {
+			density = 0.07,
+			plants = { { "ShortGrass", 1 } },
+			flowers = { chance = 0.014, species = FOREST_FLOWERS },
+		},
 	},
 	{
 		name = "BirchForest",
@@ -124,6 +202,11 @@ local list: { BiomeSpec } = {
 		underwater = "Dirt",
 		beach = "Sand",
 		features = { { "BirchTree", 1 } },
+		foliage = {
+			density = 0.07,
+			plants = { { "ShortGrass", 1 } },
+			flowers = { chance = 0.014, species = FOREST_FLOWERS },
+		},
 	},
 	{
 		name = "Savanna",
@@ -137,6 +220,13 @@ local list: { BiomeSpec } = {
 		underwater = "Sand",
 		beach = "Sand",
 		features = { { "AcaciaTree", 1 } },
+		-- Lots of grass and tall grass (tinted dry by DryGrass), a rare dandelion or poppy.
+		foliage = {
+			density = 0.095,
+			cover = 0.65,
+			plants = { { "ShortGrass", 3 }, { "TallGrass", 1 } },
+			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
+		},
 	},
 	{
 		name = "Desert",
@@ -150,6 +240,8 @@ local list: { BiomeSpec } = {
 		underwater = "Sand",
 		beach = "Sand",
 		features = { { "Cactus", 1 } },
+		-- Sparse dead bushes.
+		foliage = { density = 0.015, cover = 0.8, plants = { { "DeadBush", 1 } } },
 	},
 	{
 		name = "Jungle",
@@ -163,6 +255,14 @@ local list: { BiomeSpec } = {
 		underwater = "Dirt",
 		beach = "Sand",
 		features = { { "JungleTree", 2 }, { "OakTree", 1 } },
+		-- Dense grass and ferns, some tall grass and large ferns. Blue orchids grow in swamps in
+		-- Minecraft; there are none here, so they share the jungle's flowers.
+		foliage = {
+			density = 0.13,
+			cover = 0.8,
+			plants = { { "ShortGrass", 6 }, { "Fern", 3 }, { "TallGrass", 1 }, { "LargeFern", 1 } },
+			flowers = { chance = 0.008, species = { { "Dandelion", 2 }, { "Poppy", 2 }, { "BlueOrchid", 1 } } },
+		},
 	},
 	{
 		name = "WindsweptHills",
@@ -177,6 +277,11 @@ local list: { BiomeSpec } = {
 		underwater = "Gravel",
 		beach = "Gravel",
 		features = { { "SpruceTree", 2 }, { "OakTree", 1 } },
+		foliage = {
+			density = 0.06,
+			plants = { { "ShortGrass", 1 } },
+			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
+		},
 	},
 	{
 		name = "OldGrowthTaiga",
@@ -191,6 +296,19 @@ local list: { BiomeSpec } = {
 		underwater = "Gravel",
 		beach = "Gravel",
 		features = { { "SpruceTree", 1 } },
+		-- Ferns and large ferns on podzol, some dead bushes, more mushrooms.
+		foliage = {
+			density = 0.075,
+			cover = 0.55,
+			plants = {
+				{ "Fern", 4 },
+				{ "LargeFern", 2 },
+				{ "ShortGrass", 1 },
+				{ "DeadBush", 0.4 },
+				{ "BrownMushroom", 0.5 },
+				{ "RedMushroom", 0.3 },
+			},
+		},
 	},
 	{
 		name = "WindsweptSavanna",
@@ -205,6 +323,12 @@ local list: { BiomeSpec } = {
 		underwater = "Sand",
 		beach = "Sand",
 		features = { { "AcaciaTree", 1 } },
+		foliage = {
+			density = 0.075,
+			cover = 0.6,
+			plants = { { "ShortGrass", 3 }, { "TallGrass", 1 } },
+			flowers = { chance = 0.004, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
+		},
 	},
 	{
 		name = "Meadow",
@@ -218,6 +342,24 @@ local list: { BiomeSpec } = {
 		underwater = "Gravel",
 		beach = "Gravel",
 		features = { { "BirchTree", 1 }, { "OakTree", 1 } },
+		-- Dense grass and tall grass, and many flowers.
+		foliage = {
+			density = 0.09,
+			cover = 0.75,
+			plants = { { "ShortGrass", 3 }, { "TallGrass", 2 } },
+			flowers = {
+				chance = 0.03,
+				cover = 0.5,
+				species = {
+					{ "Allium", 1 },
+					{ "AzureBluet", 1 },
+					{ "Dandelion", 1 },
+					{ "Cornflower", 1 },
+					{ "OxeyeDaisy", 1 },
+					{ "Poppy", 1 },
+				},
+			},
+		},
 	},
 	{
 		name = "Grove",
@@ -307,6 +449,10 @@ local list: { BiomeSpec } = {
 		underwater = "Sand",
 		beach = "Mycelium",
 		features = {},
+		foliage = {
+			density = 0.045,
+			plants = { { "BrownMushroom", 1 }, { "RedMushroom", 1 } },
+		},
 	},
 }
 

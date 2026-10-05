@@ -30,11 +30,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
     (double tap jump) and no fall damage.
 - **Crafting and smelting.** Minecraft's recipes for everything the game has: planks, sticks,
-  crafting tables, chests, furnaces, wooden to diamond tools, iron, gold and diamond armor, storage
-  blocks, stone bricks and polished stones. Shaped recipes fit anywhere in the grid and mirrored,
-  shift-click crafts as many as possible, and two worn tools repair into one. Furnaces smelt raw
-  ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while nobody
-  watches.
+  crafting tables, chests, furnaces, wooden to diamond tools, shears, iron, gold and diamond armor,
+  storage blocks, stone bricks and polished stones. Shaped recipes fit anywhere in the grid and
+  mirrored, shift-click crafts as many as possible, and two worn tools repair into one. Furnaces
+  smelt raw ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while
+  nobody watches.
 - **Just Enough Items.** Next to every inventory screen (the inventory, chests, crafting tables,
   furnaces, the creative picker), a JEI-style list of every item, a page at a time, with a search
   box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
@@ -63,6 +63,32 @@ A fast, Minecraft-style voxel engine for Roblox.
   water washes torches away. Players walk through lanterns (in Minecraft they bump into them), but
   a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
   a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
+- **Foliage.** Minecraft 1.20.1's ground plants: short grass, ferns, tall grass and large ferns,
+  dead bushes, twelve flowers (dandelion, poppy, blue orchid, allium, azure bluet, four tulips,
+  oxeye daisy, cornflower, lily of the valley), four two-block tall flowers (sunflower, lilac,
+  rose bush, peony) and brown and red mushrooms. Biomes grow them in full detail chunks as
+  Minecraft's vegetal decoration does: patches of grass with clearings between them, ferns and
+  large ferns in taigas, savanna grass tinted dry, flower patches of one or two species (plains,
+  forests, meadows; blue orchids in jungles, as there are no swamps), dead bushes in deserts and
+  mushrooms on mycelium and in old growth taigas. They stand on Minecraft's soils (grass, dirt,
+  podzol, mycelium...; dead bushes also on sand; mushrooms on mycelium, podzol or any solid opaque
+  block), break at once, pop off with their drops when their soil goes and wash away in flowing
+  water; grass, ferns and dead bushes can be built over (but Short Grass clicked on short grass
+  goes beside it). A tall plant needs room for its top and is placed and broken whole, with one
+  drop. By hand grass and ferns drop nothing and a dead bush drops a stick; flowers and mushrooms
+  drop themselves. Shears (2 iron ingots on a diagonal, 238 uses) harvest grass, ferns, dead
+  bushes and leaves (tall grass gives 2 short grass, a large fern 2 ferns), cut leaves at once and
+  wear on every block they break, once per tall plant.
+  Each plant is a few thin boxes (at most 4 parts): splayed blades and fronds in shades of green,
+  or a stem with a head in Minecraft's colours; grass and ferns take a savanna yellow-green on dry
+  grass. Plants are drawn a few pixels off their cell's centre and turned, by a hash of their
+  position, so fields don't look like grids (both halves of a tall plant alike; the sunflower
+  always faces east); the outline stays on the cell. Every box is a part, so plants are drawn
+  within 40 blocks (24 on phones): about 1,000-3,000 parts on grassland, at most 6,000.
+  `Config.Render.Foliage = false` stops drawing them on slow devices; they are still there to aim
+  at and break. Left out: Minecraft's light check for mushrooms, seeds from grass (there is no
+  wheat) and the plants the game has no blocks for (saplings, sugar cane, berry bushes, lily pads,
+  vines, seagrass); plants are sparser than in Minecraft, to keep the part count down.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -229,8 +255,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
-  falling sand and gravel (which break into an item on a torch, Minecraft's torch trick), flowing
-  water (Minecraft rules, including infinite sources) and grass turning into dirt.
+  falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
+  trick), flowing water (Minecraft rules, including infinite sources), grass turning into dirt and
+  plants popping off when their soil goes.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or double tap forward) with Minecraft's widening field of view, sneaking that
@@ -315,7 +342,7 @@ Studio tips:
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
-                            drops, menus)
+                            drops, menus), plants (soil sets, tall halves, foliage tints)
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats); ItemList (items that are not blocks)
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
@@ -345,7 +372,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Noise                   seeded noise on top of math.noise
     Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
+    Foliage                 ground plants by biome (full detail only)
   Meshing/GreedyMesher      blocks -> boxes (parts)
+  Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
   Map/MapPainter            map tile colours from the generator (runs in the workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
@@ -360,10 +389,11 @@ src/server   -> ServerScriptService.IceVoxel
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation, TimeOfDay (the
                             day clock, published as workspace attributes)
   Behaviours/               Gravity, Fluid, Grass, Attached (torches and lanterns need support),
-                            Drops (block update logic)
+                            Plant (plants need their soil and their other half), Drops (block
+                            update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
-                            sustained data hooks), replication
+                            sustained data hooks, both halves of tall plants), replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
                             (spawning, replication)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
@@ -434,14 +464,16 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | Setting                   | Default | Effect                                                              |
 | ------------------------- | ------- | ------------------------------------------------------------------- |
 | `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks).                                  |
-| `Lod.Mobile`              | 512 / 2 | View / split distance on phones and tablets.                        |
+| `Lod.Mobile`              | 512 / 2 / 24 | View / split / foliage distance on phones and tablets.         |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
 | `Lod.SplitDistanceL1`     | 3       | Same for full detail only; 2 = ~12% fewer parts in mountains.       |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
+| `Lod.FoliageDistance`     | 40      | How far plants are drawn (blocks; every box of a plant is a part).  |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
 | `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
 | `Render.Shadows`          | true    | Shadows on full detail chunks and of torch and lantern light (far chunks never cast shadows). |
+| `Render.Foliage`          | true    | Draw plants (up to 4 parts each); false saves those parts, plants can still be aimed at and broken. |
 | `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
 | `Caves.RevealRadiusMax`   | 96      | Same in big caverns (the radius follows the open space around you). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
@@ -494,6 +526,9 @@ With far meshes, once every region near the player has settled (the bench prints
 
 What remains are the near levels (full detail and level 1), which stay parts. In the mountains,
 `Lod.SplitDistanceL1 = 2` or a shorter view on weaker devices brings that down.
+
+Plants add parts of their own, only within `Lod.FoliageDistance`: about 1,000-3,000 on grassland,
+at most 6,000 (half that on phones); `Render.Foliage = false` saves them.
 
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
@@ -625,6 +660,18 @@ checked at load); without `placeable = false` it is an item of its own and drops
 player and lets falling sand land on it; `sturdy = false` keeps torches and lanterns off a solid
 cube (leaves, chests, cactus).
 
+**A plant.** Add it through BlockList's `plant()` helper with `plant = { soil = "dirt" }` (or
+`"deadbush"`, `"mushroom"`: the soil set it stands on, `Blocks.mayPlaceOn`); the helper fills in
+the rest (not solid, instant, grass sounds, `support = "Down"`, `brokenByFluid`, `behaviour =
+"Plant"`, `scatter`). A tall plant is two entries: the lower half with `plant = { soil = "dirt",
+top = "MyPlantTop" }`, the upper with `plant = { bottom = "MyPlant" }`, which the helper makes the
+lower half's variant (no item, no drops, not placeable); give both halves full block `bounds`, as
+DoublePlantBlock has. `tinted = true` colours its boxes by the soil's `foliageColor`;
+`shearDrops = true` (or an item name, with `shearCount`) is what Shears harvest. Keep the shape
+to 4 boxes inside the outline whichever way it turns: tests/spec/Plants checks it. From your own
+server scripts place a tall plant with `EditRules.setPlaced(world, x, y, z, block)`:
+`world:setBlock` sets only the half you give it, and a half alone pops on the next tick.
+
 **An item.** Items that are not blocks (armor, tools, materials) live in
 `src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured
 in pixels (1/16 block), so icons, dropped items and hands show them without any assets.
@@ -711,7 +758,10 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another
 block and a block for steep slopes) and vegetation. The terrain shape comes from `Relief`, so a
-biome only decides what grows and what the ground is made of.
+biome only decides what grows and what the ground is made of. Its ground plants are `foliage`: an
+average `density`, the share of the ground in patches (`cover`), weighted `plants` and optional
+`flowers` (see the BiomeList header); keep within the parts budget tests/spec/FoliageGeneration
+checks.
 
 **A structure.** Write a builder in `Generation/Structures/` (see `Trees.luau`), register it in
 `Structures.registry` with the blocks it may grow on, and list it in a biome's `features`. Builders
@@ -769,6 +819,10 @@ Natural next steps, roughly in order:
   (`Items.damageAfterArmor` is ready for it).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on
   every side and furnaces don't light up while burning.
+- **More plants.** Saplings (dropped by leaves, growing into the existing tree builders), bone
+  meal, sugar cane, seagrass and kelp, lily pads, vines, sweet berry bushes, and wheat, so grass
+  can drop seeds. Plants are drawn only within `Lod.FoliageDistance`; Minecraft draws them to the
+  render distance, which would need them merged into far fewer parts or meshes.
 - **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
   builds appear once in full detail range.
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section

@@ -170,8 +170,8 @@ return function(t, shared, require)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
 		-- (99 before the four Universal Cables; 105 before the upgrade cards and the Solar Panel;
-		-- 108 before the four Batteries.)
-		t.eq(#Crafting.recipes, 112, "recipes compiled")
+		-- 108 before the four Batteries; 112 before Shears.)
+		t.eq(#Crafting.recipes, 113, "recipes compiled")
 	end)
 
 	t.test("smelting: recipes and fuel follow Minecraft", function()

@@ -59,8 +59,12 @@ node key) and `posKey(x, y, z)` for block positions.
    - the surface: beach blocks just above sea level, gravel deep underwater, packed mud in river
      beds, biome patches (stone in windswept hills, calcite on stony peaks...) or the biome's top.
 2. **Fill.** Bedrock, stone, filler and surface blocks; water up to sea level (ice in frozen biomes);
-   bare rock (`Biome.steep`) on slopes steeper than the biome's limit. Below the lowest column top
-   every column is stone, so that part is written a whole layer at a time (`buffer.copy`).
+   bare rock (`Biome.steep`) on slopes steeper than the biome's limit. A full detail chunk's
+   outermost padding columns also measure the slope to their missing neighbour just outside the
+   padding (only when that could still change the answer), so their surface is exactly the
+   neighbouring chunk's core's and plants grow by it (LOD padding is a lowered skirt anyway).
+   Below the lowest column top every column is stone, so that part is written a whole layer at a
+   time (`buffer.copy`).
 3. **Caves** (level 0 only, `Caves.luau`). See below. Caves are carved as **CaveAir** and stay
    `Caves.SurfaceMargin` blocks below the surface.
 4. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
@@ -78,9 +82,11 @@ node key) and `posKey(x, y, z)` for block positions.
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
 5. **Structures** (up to `Config.StructureMaxLevel`). See below.
+6. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+   trunk or leaves. See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
-rock or cave air) and `emptyAbove` (everything above is air).
+rock or cave air) and `emptyAbove` (everything above is air; raised over the plants).
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -174,6 +180,45 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away.
 
+### Foliage (`Foliage.luau`)
+
+Minecraft 1.20.1's vegetal decoration from each biome's `foliage` (BiomeList): grass, ferns and
+their tall forms, dead bushes, flowers, tall flowers and mushrooms. It runs after structures, in
+full detail chunks only: LOD cells are 2+ blocks wide, and every box of a plant is a part.
+
+Every padded column is decided alone, from the seed, its world (x, z) and its own blocks, so a
+chunk's padding grows exactly what its neighbour's core grows:
+- the surface (the column's top cell from the fill) must be ground (Grass, DryGrass, Dirt,
+  CoarseDirt, Podzol, Mycelium, Sand: `Foliage.GROUND`) in the plant's soil set
+  (`Blocks.mayPlaceOn`), with air above it: a trunk, leaves, a cactus, water or ice there means no
+  plant. Mushrooms, which may stand on any sturdy opaque block, also grow on that ground only (no
+  beach gravel or bare rock);
+- a per-column hash (`columnHash`, MurmurHash3's finaliser) is rolled against the biome's
+  chances. Flowers take the bottom of its range and other plants the part above, so a column grows
+  one or the other. Each chance is the biome's average (`density`, `flowers.chance`) over the mean
+  of a patch ramp, times that ramp: 0 where a low-frequency noise (`Noise.fbm2`, ~24 blocks) is
+  below a threshold (clearings), 1 above it (patches), fading in between. The threshold leaves
+  `cover` of the ground in patches (0.5 by default, 0.3 for flowers), so `density` stays the
+  average share of soil columns with a plant. Flowers have their own patch noise (~20 blocks);
+- other plants are picked by weight from the same hash; a flower's species follows a wider noise
+  (~128 blocks) made uniform, with a little per-column jitter, so neighbouring flowers are mostly
+  the same species (Minecraft's noise-based flower providers);
+- a tall plant also needs air above its lower half, inside the buffer, or it grows as its single
+  form (tall grass as short grass, a large fern as a fern), or not at all (tall flowers).
+
+The placer returns one above the highest cell it wrote, and `generate` raises `emptyAbove` to it.
+Generated plants always satisfy `Blocks.canSurvive`, tall ones whole, so the server's Plant
+behaviour finds nothing to pop.
+
+Budget: averaged over a biome's soil columns, its plants cost at most 0.6 parts in jungles and
+meadows, 0.45 on plains and savannas and 0.35 elsewhere (measured on generated terrain: about 0.5,
+0.36-0.42 and 0.06-0.31). That is still 10,000-20,000 parts over every full detail chunk, so the
+client draws them only near the viewer (see Streaming). Patches are noise thresholds (blobs and
+winding bands) rather than Minecraft's clusters of tries, and the density is lower than
+Minecraft's. tests/spec/FoliageGeneration checks the budget, determinism across borders (every
+side and corner, next to trees), the placement rules and the cost (plants about 0.2-0.35 ms per
+chunk in Lune; the edge columns' extra heights about 0.4 ms more).
+
 ## Meshing (`Meshing/GreedyMesher`)
 
 Roblox parts are boxes, so the mesher covers blocks with as few boxes as possible:
@@ -192,7 +237,15 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   (`Blocks.fluidHeightLut`, in ninths of a block: sources 8, flowing levels 7..1, falling full).
   The height is packed next to the appearance id in the box key (`GreedyMesher.decodeKey`), so only
   cells of the same height merge and flowing water visibly steps down;
-- with `hideCaves`, cave air counts as rock and every cave wall disappears.
+- with `hideCaves`, cave air counts as rock and every cave wall disappears;
+- **plants** (`Blocks.foliageLut`) are shaped single cells like torches. With `hideFoliage`
+  (`Config.Render.Foliage` off, or a chunk beyond `LodTree.drawsFoliage`; see Streaming) they are
+  not meshed; they hide nothing, so every other box stays the same. `mesh` also returns how many
+  plant cells the range holds, drawn or not. A **tinted** plant's key (`Blocks.tintedLut`: grass
+  and ferns) carries its soil's foliage tint, `Blocks.tintLut` of the block below (below its lower
+  half for a tall plant's top), in the surface field fluids use for their height; `decodeKey`
+  returns it and the appearance tells the two uses apart (a shaped block is never a fluid). Border
+  copies (`applyBorder`) keep two layers below the range for it.
 
 Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box (position, size, key). Tests check the
 invariants (every visible block covered once, nothing visible covered by a wrong box) on generated
@@ -256,6 +309,16 @@ there and you would look into the void. A revealed section is therefore meshed w
 sides (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock, and its own cave
 air touching that rock becomes a stone cap. It is remeshed when the mask changes.
 
+**Plants.** Every box of a plant is a part, and all ~180 full detail chunks would hold
+10,000-20,000 of them. So only full detail chunks within `Lod.FoliageDistance` of the viewer (40
+blocks to the chunk's square, 24 on phones through `ViewSettings`; one already drawing them keeps
+them up to half a chunk further) draw their plants, while `Render.Foliage` is on
+(`LodTree.drawsFoliage`): about 1,000-3,000 parts on grassland, at most 6,000. Jobs carry the
+node's `foliage` and workers report which sections hold plants (drawn or not); when a chunk
+starts or stops drawing them (the viewer moved, `Render.Foliage` changed), each refresh remeshes
+only those sections, like edited ones. A node with a generation job queued or running is left to
+that job, which takes the current answer.
+
 ### Rendering (`Rendering/`)
 
 Every node is a Folder of section Folders. A section is built outside the workspace and swapped in
@@ -270,6 +333,20 @@ are authored in Studio or synced by Rojo. With `StudsPerTile = BlockSize` and th
 one tile covers one block face, and because box parts start and end on the block grid the tiles
 line up across boxes. `faces` images become `Texture` children of near templates (e.g. a grass top
 over a dirt texture), so pooled parts keep them without extra work.
+
+**Plants.** A `scatter` appearance's boxes are drawn off the cell's centre and turned about its
+vertical axis: `Meshing/Scatter.at` hashes the world block position (the node's origin plus the
+cell; not the seed, like Minecraft's OffsetType) into an offset of up to ±3 pixels along X and Z
+(16 steps) and a turn (64 steps). Each box goes to the centre plus the offset, turned by the yaw,
+then by its own rotation. A tall plant's top uses its lower half's position, so both halves line
+up; the sunflower is never turned (its head faces east, as in Minecraft, which turns no plant).
+Every plant's boxes stay inside its outline whichever way they turn, and within a pixel of the
+cell after the offset (BlockList, tests/spec/Plants). The outline does not move (Minecraft's
+does). Tinted boxes (grass and ferns) are coloured authored colour × `Blocks.FOLIAGE_TINTS[tint]`,
+each channel clamped, with the tint from the box key; their parts' colour is set every time, since
+a pooled part may come from a cell with another tint. An edit that changes a soil's tint two cells
+below a section's bottom also remeshes that section (`ClientWorld`): a tall plant's top there
+reads its tint from it.
 
 ### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
 
@@ -358,21 +435,23 @@ prediction.
 
 - **Survival mining.** Holding the break button adds `Mining.progressPerTick` every 20 Hz tick,
   Minecraft's formula: the held tool's speed (1 by hand; wood 2, stone 4, iron 6, diamond 8, gold
-  12 on blocks of its kind; swords 1.5 on leaves) / hardness / 30, or / 100 if the block needs a
-  tool it can't harvest with (stone by hand, iron ore with a wooden pickaxe), five times slower in
-  the air or under water. Switching to another item restarts the block. The client sends `Mine` when it starts on
-  a block and when it stops early. The first tick on a block only starts it (Minecraft's
+  12 on blocks of its kind; swords 1.5 on leaves; shears 15 on what they harvest, `shearDrops`, so
+  leaves break at once) / hardness / 30, or / 100 if the block needs a tool it can't harvest with
+  (stone by hand, iron ore with a wooden pickaxe), five times slower in the air or under water.
+  Switching to another item restarts the block. The client sends `Mine` when it starts on a block
+  and when it stops early. The first tick on a block only starts it (Minecraft's
   `startDestroyBlock`), and `CrackOverlay` draws the ten crack stages as the progress grows
   (procedural lines on SurfaceGuis, no assets) on the block's outline like the highlight, so they
   fit a lantern instead of its cell. At 100% the block breaks, then mining pauses for 5 ticks.
 - **The server** only counts a `Mine` start for a minable block in reach. It accepts the break if
   the player started mining that very block long enough ago (`Mining.mayBreak`: 70% of the time,
   Minecraft's tolerance) with the tool held when the break arrives, drops `Items.drops(block,
-  tool)` (nothing when that tool can't harvest it) and wears the tool (`Mining.wear`: 1 per block, 2
-  for swords, none on instant blocks; it breaks at its durability). A break that arrives earlier still (network
-  jitter) is kept and finished once the full time has passed, or undone after a second, like
-  Minecraft's delayed destroy. Only one timer runs at a time: a block started meanwhile counts from
-  when the waiting break is done.
+  tool)` (nothing when that tool can't harvest it; with Shears, the block's `shearDrops`) and
+  wears the tool (`Mining.wear`: 1 per block, 2 for swords, none on instant blocks, but Shears 1
+  on every block, instant ones too; it breaks at its durability). A break that arrives earlier
+  still (network jitter) is kept and finished once the full time has passed, or undone after a
+  second, like Minecraft's delayed destroy. Only one timer runs at a time: a block started
+  meanwhile counts from when the waiting break is done.
 - **Creative** breaks at once, again every `Interaction.BreakInterval` (6 ticks) while held (not
   with a sword in hand, as in Minecraft), and drops nothing. Creative players make items from nothing, so the stacks they throw or spill by
   breaking a chest come out of a budget (10 a second, 64 at once); a chest that would overdraw it
@@ -382,7 +461,15 @@ prediction.
   Otherwise the selected item is placed if it is a block. Survival placing uses the item up: the
   Edit message carries the inventory action number of that use (see below), so the prediction
   and the server's answer line up. The own hull is checked standing, like the server checks every
-  player.
+  player. A block goes into the clicked block if that is replaceable and the held item is not its
+  own (`Items.isReplacedBy`, Minecraft's canBeReplaced: Short Grass clicked on short grass goes
+  beside it), else against the clicked face.
+- **Plants** place through `placementFor` (their soil, and room for a tall plant's top:
+  `Blocks.canPlace`). The client predicts only the half of a tall plant it places or breaks; the
+  server sets or removes the other and replicates it as an ordinary edit (block edits carry no
+  action number, so nothing needs reconciling; a placement's `seq` still settles the item). Until
+  it arrives the other half stands alone, and breaking it meanwhile is answered with air. Debris
+  of grass and ferns takes the soil's tint.
 - Middle click picks the block (Minecraft's pick block), `Q` drops the held item (`Ctrl`: the
   stack). On touch screens a tap uses or places and holding breaks.
 
@@ -408,7 +495,8 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
     "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable";
   - while the F3 overlay is open (`DebugOverlay.isOpen()`), gray lines: `Stone #3`, position,
     chunk (floored, with the local column), biome (`generator.column`), hardness, tool kind and
-    level, drops with the held item and by hand (`Items.drops`), break time (`Mining.ticks / 20`,
+    level, drops with the held item and by hand (`Items.drops`; a tall plant's top shows its lower
+    half's, which breaking either half harvests), break time (`Mining.ticks / 20`,
     standing and dry), light (`Blocks.light`), fluid level, render kind, solidity, friction, menu;
   - "IceVoxel" in blue italics, always last.
 - **Drawing.** Minecraft's tooltip shape, Jade's default theme: a translucent dark background
@@ -616,13 +704,14 @@ Lighting is left alone, because Roblox lights both by the sun and moon itself.
   `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
 
 **Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
-the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's osmium), gems, snowballs and the 25
-tools) have ids from 4096 up. A stack is `{ item, count, damage }`, at most `maxStack` (64; armor
-and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone 131, iron 250,
-diamond 1561, gold 32). Blocks say how long they take to mine (`hardness`), which tool harvests them
-(`tool`, and `toolLevel` when only that tool of that tier or better drops anything: iron and osmium
-ore need stone, diamond, gold and emerald ore iron), what they drop (`drops`, `dropCount`: snow gives 4
-snowballs), what right click opens (`menu`) and how many slots they hold (`container`).
+the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's osmium), gems, snowballs, the 25
+tools and Shears) have ids from 4096 up. A stack is `{ item, count, damage }`, at most `maxStack`
+(64; armor and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone
+131, iron 250, diamond 1561, gold 32, shears 238). Blocks say how long they take to mine
+(`hardness`), which tool harvests them (`tool`, and `toolLevel` when only that tool of that tier
+or better drops anything: iron and osmium ore need stone, diamond, gold and emerald ore iron),
+what they drop (`drops`, `dropCount`: snow gives 4 snowballs; `shearDrops`, `shearCount`: what
+Shears get instead), what right click opens (`menu`) and how many slots they hold (`container`).
 
 **The inventory** (`Inventory/Types`, `Inventory/Menu`). It is Minecraft's: 36 slots (1–9 the
 hotbar), 4 armor slots, the stack carried by the mouse, and the selected hotbar slot. A *window*
@@ -731,7 +820,10 @@ boxes. Icons show it in a ViewportFrame, lit so the top is brightest, then the l
 right. They are built once per slot and only rebuilt when the item changes. The same models are
 dropped items and, in `Player/HeldItems`, the item in each character's hand (from the
 `IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
-diagonally in icons (`tilt`) and are held by the handle, pointing forward.
+diagonally in icons (`tilt`) and are held by the handle, pointing forward. Plants are shaped-block
+items: icons from the front, held upright like blocks, dropped like items, drawn untinted (the
+Grass block's green); a tall plant shows its `icon`, the lower half plus the top's look in one
+cell. Shears are a tool: diagonal in icons, held by the handles.
 
 **Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube, the Heat Generator, the Electric Furnace and the Batteries are drawn
 without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
@@ -781,6 +873,47 @@ Minecraft's collision checks that move nothing see: a solid block's whole cell, 
 block's outline, nothing for a torch, air or water. The server refuses a placement whose box
 overlaps a player's standing hull (`EditRules.obstructs`, Minecraft's BlockItem.canPlace; a torch
 may overlap one), and falling sand and gravel land on that box (see Server).
+
+**Plants** (`Blocks`, BlockList `plant`; Minecraft's BushBlock family). The 29 plant blocks
+(short grass, ferns, dead bushes, flowers, mushrooms and both halves of tall grass, large ferns
+and tall flowers) are shaped blocks: one part per box, at most 4, every box inside the outline
+whichever way the client's scatter turns it. They are not solid and do not `obstruct` (players
+walk through them, and a plant may be placed where a player stands), break at once, sound like
+grass, are `brokenByFluid` and stand through the attached-block machinery:
+- Standing: a single plant or lower half has `support = "Down"`, but needs a block of its soil set
+  below instead of a sturdy one (`Blocks.mayPlaceOn`: "dirt" = Grass, DryGrass, Dirt, CoarseDirt,
+  Podzol, Mycelium; "deadbush" adds Sand; "mushroom" = Mycelium, Podzol or any sturdy opaque cube,
+  without Minecraft's light check, as there are no block light levels). An upper half
+  (`plant.bottom`) needs its own lower half below. That is `Blocks.canSurvive`; `Blocks.canPlace`
+  adds room for a tall plant's top (y + 1 below `Config.WorldHeight` and replaceable), and
+  `placementFor` and `EditRules.supported` use it. Upper halves have no `support`, so
+  `placementFor` never returns one.
+- Halves: `plantTop`, `plantBottom`, `otherHalf` (the partner's dy). Upper halves name the lower
+  half as their `item`, so `Items.ofBlock` gives the plant's item (WAILA, pick block, placing) and
+  they are its variants; they are no item of their own and drop nothing. Each half of a tall plant
+  is aimed at and outlined as a full block (DoublePlantBlock keeps a block's default shape); the
+  others have Minecraft's outlines (grass, ferns and dead bushes 2..14 x 0..13 pixels, flowers
+  5..11 x 0..10, mushrooms 5..11 x 0..6).
+- Replacing: short grass, ferns, both halves of tall grass and large ferns, and dead bushes are
+  `replaceable` (Minecraft 1.20), so anything placed there replaces them without a drop; flowers
+  and mushrooms are not.
+- Look: per appearance `foliage` (every plant, `Blocks.foliageLut`), `tinted` (grass and ferns,
+  `Blocks.tintedLut`), `scatter` and `upperHalf`; plants never share an appearance with other
+  blocks. A soil's `foliageColor` (only DryGrass, a savanna yellow-green) becomes a multiplier of
+  the authored green (foliage colour / Grass colour) in `Blocks.FOLIAGE_TINTS`, indexed by
+  `Blocks.tintLut[soil]` (u8 per block, 0 = none, at most 63 so it fits the mesher's key). See
+  Meshing and Rendering.
+- Drops: `Items.drops(block, tool)` gives Shears a block's `shearDrops`, `shearCount` of it
+  (Minecraft's `match_tool shears`: tall grass 2 short grass, large ferns 2 ferns; short grass,
+  ferns, dead bushes and leaves themselves), and the usual drops to anything else: nothing for
+  grass and ferns, a stick for a dead bush (Minecraft: 0-2), the flower or mushroom itself.
+  Shears (ItemList: tool kind "shears", speed 15, 238 uses; Minecraft's recipe, two iron ingots on
+  a diagonal) mine `shearDrops` blocks at 15 (`Mining.toolSpeed`) and wear 1 on every block they
+  break, instant ones included (`Mining.wear`, Minecraft's ShearsItem.mineBlock); creative
+  players' tools never wear.
+- Server: `Behaviours/Plant` re-checks a plant when a neighbour changes (`Plant.stays`: soil or own
+  lower half below, own top above a lower half; unloaded blocks are waited for) and breaks it with
+  its no-tool drop and a sound; players' tall plant edits are EditRules' (see Server).
 
 ## Item data (`Items`, Mekanism's sustained data)
 
@@ -1069,7 +1202,9 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     one water bucket at most). A tank with 1000 mB loses it (creative gets nothing, as in
     Mekanism).
   - Water Bucket: a tank with room for 1000 mB, else a water source in the clicked block if
-    replaceable or the block beyond its side; survival gets the empty bucket back.
+    replaceable or the block beyond its side; what the water replaces drops what it drops by
+    itself (`UseRules.pour`: short grass nothing, a dead bush a stick); survival gets the empty
+    bucket back.
   - Sneaking skips tanks. Nothing is predicted: the snapshot, edits and records bring the results.
 
 ### Mekanism pipes on the client (`Rendering/TransmitterRenderer`, `Rendering/TransmitterModel`)
@@ -1391,10 +1526,10 @@ whose client predicted it. Sounds a player's own messages cause (chest lids, arm
 that player's budget (`Sounds.PlayerRate` a second, bursts of twice that), so a client spamming
 inventory or Use messages can't stream sounds to everyone near. Hooks: ServerNet (players' breaks
 and placements), Behaviours/Attached (torches popping off; water washing one away is silent, as in
-Minecraft), Containers' `onOpeners` (first viewer in, last out; a broken chest closes silently),
-Inventories (armor put on by any action, a tool breaking), Entities (pickups, at the item),
-Characters (health lost, at most every 0.5 s; death; a hurting landing's fall and the fall sound of
-the block below the feet).
+Minecraft), Behaviours/Plant (plants popping off), Containers' `onOpeners` (first viewer in, last
+out; a broken chest closes silently), Inventories (armor put on by any action, a tool breaking),
+Entities (pickups, at the item), Characters (health lost, at most every 0.5 s; death; a hurting
+landing's fall and the fall sound of the block below the feet).
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
@@ -1493,18 +1628,35 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 - `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling, infinite
   sources, spreading only towards the nearest way down; waits at unloaded chunks; washes away
   `brokenByFluid` blocks), `Grass` (turns to dirt when covered), `Attached` (torches and lanterns
-  break and drop when what they hang on stops being sturdy). They drop items through `Drops`, which
-  ServerNet wires to `Entities.dropBlock`.
+  break and drop when what they hang on stops being sturdy), `Plant` (a plant whose soil or other
+  half is gone breaks and drops what it drops by itself, in every game mode: a tall plant's lower
+  half drops, its top never does, so a tall plant drops once). They drop items through `Drops`,
+  which ServerNet wires to `Entities.dropBlock` (Transmitters/UseRules uses it too).
   - In `Gravity`, as in Minecraft, a falling block passes through blocks without a collision box
     (torches) and lands on those with one (`Blocks.obstruction`). Coming to rest in a torch's cell
     (a solid block under the torch) or on a lantern, it breaks into an item and the torch or
     lantern stays: the torch trick for clearing sand and gravel. Past wall torches with air under
     them it keeps falling, and a block placed on a torch stays where it is.
+  - Plants in `Gravity` and `Fluid`: falling sand replaces the replaceable plants (no drop) and
+    breaks into an item on flowers, tall flowers and mushrooms, which are not replaceable and have
+    no collision box, as on a torch; flowing water washes every plant away with its drop. Plants are
+    not opaque, so the grass under them stays grass and the sun reaches through them (`SkyCheck`),
+    and a spawn may stand in one (`SafeSpot`).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
-  placing inside players (`EditRules.obstructs`: solid blocks and lanterns, not torches), survival
-  mining time and drops (`EditRules`), and the rules injected by the boot script (`setRules`: using
-  up placed items, dropping items and chest contents). Rejections never generate terrain.
+  placing inside players (`EditRules.obstructs`: solid blocks and lanterns, not torches or plants),
+  survival mining time and drops (`EditRules`), and the rules injected by the boot script
+  (`setRules`: using up placed items, dropping items and chest contents). Rejections never generate
+  terrain.
+  Tall plants follow Minecraft's DoublePlantBlock through pure `EditRules` rules: `mayPlace`
+  refuses upper halves and `supported` (`Blocks.canPlace`) wants room for the top; `setPlaced`
+  sets the lower half and its top together (looking at the room again first: without it nothing
+  is set and the edit is rejected); a player breaking either half removes both (`removeBroken`)
+  with one drop, the lower half's with the breaker's tool and game mode (`harvested`: 2 short
+  grass from tall grass with Shears, the flower from either half of a tall flower), one break
+  sound and one wear. The client predicts the half it touched; the other comes as an ordinary
+  edit. Placing over a replaceable plant drops nothing; the other half of a tall one then pops by
+  itself with its no-tool drop (nothing for tall grass and large ferns).
 - `Entities/`: dropped items (see Item entities).
 - `Players/GameModes`, `Players/Inventories`, `Players/Containers`: see Items, inventories and game
   modes. `World/TimeOfDay` and `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see
@@ -1517,7 +1669,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   `TakeDamage`; at most 4 reports a second). It also plays the hurt, death and hurting-landing
   sounds to everyone near (see Sounds).
 - `Transmitters/`: Mekanism pipes (see Mekanism pipes); `Players/ItemUse`: the Configurator and
-  buckets (UseItem).
+  buckets (UseItem). A water bucket that replaces a plant (`UseRules.pour`) drops it, as
+  Minecraft's BucketItem.emptyContents destroys the block with drops.
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
@@ -1576,6 +1729,10 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   faces are decided.
 - Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
   append new ones, never reorder or change earlier ones, or every unedited world's ores move.
+- Ground plants (`Generation/Foliage`) decide each column from the seed, its (x, z) and its own
+  blocks only, so a chunk's padding grows what its neighbour's core grows; keep it so. A plant's
+  shape has at most 4 boxes (each is a part per plant in the world), and a tall plant is placed
+  through `EditRules.setPlaced` (both halves), never one half alone (it would pop).
 - Machine data starts with the shared header (energy always at 1); kinds append fields, at most
   16 values in all. Kind ticks replace slot stacks (never change a stack table) and add or use
   energy through `Machines.produce` / `use`, so energy stays exact.

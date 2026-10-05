@@ -13,8 +13,10 @@
 	  maxStack     Most items of this kind in one slot. Default 64.
 	  armor        { slot = "Head" | "Chest" | "Legs" | "Feet", defense, toughness }: worn in that armor
 	               slot; Minecraft's armor points and toughness.
-	  tool         { kind = "pickaxe" | "axe" | "shovel" | "hoe" | "sword", speed, level }: Minecraft's
-	               tool tiers (mining speed on blocks of its kind, harvest level; see Shared/Mining).
+	  tool         { kind = "pickaxe" | "axe" | "shovel" | "hoe" | "sword" | "shears", speed, level }:
+	               Minecraft's tool tiers (mining speed on blocks of its kind, harvest level; see
+	               Shared/Mining). Shears are no tier (level 0): fast on blocks with `shearDrops`
+	               (BlockList), which they harvest (Items.drops), and worn by every block.
 	  durability   Uses before it breaks (Minecraft's max damage); such items stack to 1.
 	  color        { r, g, b } in 0-255, a representative colour.
 	  model        Boxes the item is drawn with, in pixels (1/16 of a block) around the item's centre:
@@ -516,6 +518,54 @@ table.insert(list, {
 		{ size = { 4, 1.3, 0.4 }, offset = { 0, 1.5, 1 }, material = "Neon" },
 		{ size = { 1.4, 4.5, 0.4 }, offset = { 0.55, -0.55, 1 }, rotation = -25, material = "Neon" },
 	}),
+})
+
+--[[
+	Minecraft's Shears: 238 uses, a tool of their own kind (Shared/Mining: 15 on leaves, worn by
+	every block broken, instant ones too) that harvests grass, ferns, dead bushes and leaves
+	(BlockList `shearDrops`; Items.drops). Two grey blades crossing at a rivet over two darker
+	handle loops, modelled upright like the tools (blades up) and tilted the same way.
+]]
+local SHEARS = { 204, 206, 210 }
+local SHEARS_HANDLE = { 112, 114, 120 }
+local SHEARS_HOLE = { 40, 40, 44 }
+-- (Each blade runs on through the rivet into the opposite handle, 12 degrees off upright.)
+local SHEARS_ANGLE = 12
+local function shearsArm(side: number): { ModelBox }
+	local a = math.rad(SHEARS_ANGLE)
+	-- Along the arm, from the rivet at (0, -1): +d up the blade, -d down the handle.
+	local dx, dy = side * math.sin(a), math.cos(a)
+	return {
+		{ size = { 1.8, 8, 0.6 }, offset = { dx * 4, -1 + dy * 4, side * 0.3 }, rotation = -side * SHEARS_ANGLE },
+		{
+			size = { 2.8, 5, 0.8 },
+			offset = { -dx * 3.6, -1 - dy * 3.6, side * 0.3 },
+			rotation = -side * SHEARS_ANGLE,
+			color = SHEARS_HANDLE,
+		},
+		{
+			size = { 1, 2.6, 0.9 },
+			offset = { -dx * 4, -1 - dy * 4, side * 0.3 },
+			rotation = -side * SHEARS_ANGLE,
+			color = SHEARS_HOLE,
+		},
+	}
+end
+local shearsModel: { ModelBox } = {}
+for _, side in { 1, -1 } do
+	for _, box in shearsArm(side) do
+		table.insert(shearsModel, box)
+	end
+end
+table.insert(shearsModel, { size = { 1.4, 1.4, 1.4 }, offset = { 0, -1, 0 }, color = SHEARS_HANDLE })
+table.insert(list, {
+	name = "Shears",
+	durability = 238,
+	tool = { kind = "shears", speed = 15, level = 0 },
+	color = SHEARS,
+	material = "Metal",
+	model = shearsModel,
+	tilt = -45,
 })
 
 return list

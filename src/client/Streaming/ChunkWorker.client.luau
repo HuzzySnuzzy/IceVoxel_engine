@@ -3,10 +3,12 @@
 	Chunk worker, cloned into every Actor by WorkerPool. Runs generation and meshing in parallel.
 
 	Jobs ("Job" actor message):
-	  generate   { level, nx, nz, coarser, edits?, reveal?, caps?, quads? } -> chunk data (LOD 0 only)
-	             + section meshes (+ the node's quads for Rendering/MeshOverlay when `quads`)
-	  mesh       { nx, nz, coarser, data, height, solidBelow, emptyAbove, sections, reveal, caps? }
-	             -> section meshes (full detail chunks only)
+	  generate   { level, nx, nz, coarser, edits?, reveal?, caps?, quads?, foliage? } -> chunk data
+	             (LOD 0 only) + section meshes (+ the node's quads for Rendering/MeshOverlay when
+	             `quads`) + `plants`, the sections holding plants
+	  mesh       { nx, nz, coarser, data, height, solidBelow, emptyAbove, sections, reveal, caps?,
+	             foliage? } -> section meshes + `plants`, those of `sections` holding plants (full
+	             detail chunks only)
 
 	  map        { x, z, scale, size } -> RGBA pixels of a map tile (Map/MapPainter)
 
@@ -14,6 +16,10 @@
 	detail chunk and `caps` the GreedyMesher.Border hidden mask of each revealed section
 	({ section, mask, ... }); together they give the mesher's border (seams between LOD levels, cave
 	caps). Far nodes use generator.farSeamLimits instead, which holds for any neighbours.
+	`foliage` is whether the chunk draws its plants (LodTree.drawsFoliage: Config.Render.Foliage and
+	the foliage distance, as the streamer saw them; this worker's own Config.Render.Foliage when it
+	is missing): false meshes without plants (GreedyMesher's `hideFoliage`). Plants are counted
+	either way, so the streamer knows which sections to remesh when that changes.
 
 	Long jobs are split across frames: after Config.Workers.SliceBudgetMs the worker waits for the
 	next frame, so a busy worker never stalls rendering. Jobs run one at a time per worker because
@@ -84,6 +90,15 @@ local function capMap(list: { number }?): { [number]: number }
 	return map
 end
 
+-- Should a job's meshes leave plants out (Config.Render.Foliage off)?
+local function hidesFoliage(job: { [string]: any }): boolean
+	local foliage = job.foliage
+	if type(foliage) ~= "boolean" then
+		foliage = Config.Render.Foliage
+	end
+	return not foliage
+end
+
 -- Border for one mesh call; nil when there is nothing special around it.
 local function borderOf(open: buffer?, caps: { [number]: number }?, section: number): GreedyMesher.Border?
 	local hidden = if caps then caps[section] or 0 else 0
@@ -138,7 +153,9 @@ local function generate(job: { [string]: any }): { [string]: any }
 
 	-- Cells a seam opens up may lie below the otherwise buried range.
 	local meshBelow = math.min(solidBelow, GreedyMesher.lowestOpen(open))
+	local hideFoliage = hidesFoliage(job)
 	local indices: { number }, meshes: { buffer } = {}, {}
+	local plants: { number } = {}
 	local quads, quadCount = nil, 0
 	if level == 0 then
 		local reveal = toSet(job.reveal)
@@ -146,10 +163,14 @@ local function generate(job: { [string]: any }): { [string]: any }
 			local y0, y1 = section * SECTION, (section + 1) * SECTION
 			local hide = not reveal[section]
 			if not GreedyMesher.isTrivial(y0, y1, meshBelow, emptyAbove, hide) then
-				local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section))
+				local boxes, count, plantCells =
+					GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section), hideFoliage)
 				if count > 0 then
 					table.insert(indices, section)
 					table.insert(meshes, boxes)
+				end
+				if plantCells > 0 then
+					table.insert(plants, section)
 				end
 				yieldIfNeeded()
 			end
@@ -160,7 +181,7 @@ local function generate(job: { [string]: any }): { [string]: any }
 			-- The worker runs one job at a time, so the border scratch survives these yields.
 			local border = borderOf(open, nil, 0)
 			local meshData = if border then GreedyMesher.applyBorder(data, height, y0, y1, true, border) else data
-			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true)
+			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true, nil, hideFoliage)
 			if count > 0 then
 				table.insert(indices, 0)
 				table.insert(meshes, boxes)
@@ -181,6 +202,7 @@ local function generate(job: { [string]: any }): { [string]: any }
 		emptyAbove = emptyAbove,
 		sections = indices,
 		meshes = meshes,
+		plants = plants,
 		quads = quads,
 		quadCount = quadCount,
 	}
@@ -193,20 +215,27 @@ local function remesh(job: { [string]: any }): { [string]: any }
 	local open = if job.coarser then generator.seamLimits(0, job.nx, job.nz, job.coarser) else nil
 	local caps = capMap(job.caps)
 	local meshBelow = math.min(job.solidBelow, GreedyMesher.lowestOpen(open))
+	local hideFoliage = hidesFoliage(job)
 	local indices: { number }, meshes: { buffer } = {}, {}
+	local plants: { number } = {}
 	for _, section in job.sections :: { number } do
 		local y0, y1 = section * SECTION, math.min((section + 1) * SECTION, height)
 		local hide = not reveal[section]
 		local boxes = buffer.create(0)
 		if not GreedyMesher.isTrivial(y0, y1, meshBelow, job.emptyAbove, hide) then
-			boxes = GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section))
+			local meshed, _, plantCells =
+				GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section), hideFoliage)
+			boxes = meshed
+			if plantCells > 0 then
+				table.insert(plants, section)
+			end
 		end
 		-- Empty meshes are sent too: they clear the section's old parts.
 		table.insert(indices, section)
 		table.insert(meshes, boxes)
 		yieldIfNeeded()
 	end
-	return { id = job.id, sections = indices, meshes = meshes }
+	return { id = job.id, sections = indices, meshes = meshes, plants = plants }
 end
 
 local function map(job: { [string]: any }): { [string]: any }

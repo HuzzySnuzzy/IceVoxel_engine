@@ -6,8 +6,13 @@
 	    block item places `block = id`.
 	  * Other items (ItemList: crafting materials, tools, armor, the Configurator and buckets)
 	    have ids from ITEM_BASE up.
-	  * Block variants that are no item of their own (wall torches) name the item that places and
-	    drops them (BlockList `item`); `ofBlock` answers it.
+	  * Block variants that are no item of their own (wall torches, the upper halves of tall plants)
+	    name the item that places and drops them (BlockList `item`); `ofBlock` answers it. A
+	    replaceable block is replaced by what is placed into it, but not by its own item
+	    (`isReplacedBy`: Short Grass clicked on short grass goes against the clicked face).
+	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
+	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
+	    of it: grass, ferns, dead bushes and leaves) and `blockDrops` (breaking by itself, no tool).
 
 	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
@@ -157,6 +162,14 @@ for id = 0, Blocks.count - 1 do
 		item == nil or (ids[item] ~= nil and defs[ids[item]].block ~= nil),
 		`Block {block.name} is placed by {item}, which is no block item`
 	)
+	-- (What Shears harvest: an item, or the block's own item.)
+	local shear = block.shearDrops
+	assert(
+		shear == nil
+			or (type(shear) == "string" and ids[shear] ~= nil)
+			or (shear == true and (block.placeable or item ~= nil)),
+		`Block {block.name} gives unknown shear drops`
+	)
 end
 
 -- Every item, in creative inventory order.
@@ -204,6 +217,16 @@ function Items.ofBlock(block: number): number?
 	return if name then rawget(ids :: any, name) else nil
 end
 
+--[[
+	Does placing `item` (nil = nothing in hand) at a cell holding `block` replace that block?
+	Replaceable blocks are replaced (air, water, short grass...), but not by their own item: a click
+	on short grass with Short Grass, or on either half of tall grass with Tall Grass, places against
+	the clicked face instead (Minecraft's BlockBehaviour.canBeReplaced(state, context)).
+]]
+function Items.isReplacedBy(block: number, item: number?): boolean
+	return Blocks.isValid(block) and Blocks.isReplaceable(block) and (item == nil or Items.ofBlock(block) ~= item)
+end
+
 -- Armor slot (1 head .. 4 feet) an item is worn in, if it is armor.
 function Items.armorSlot(id: number): number?
 	local def = defs[id]
@@ -247,10 +270,29 @@ function Items.blockDrops(block: number): Stack?
 	return { item = item, count = def.dropCount }
 end
 
--- What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing).
+-- Is `item` Shears (a tool of kind "shears")?
+function Items.isShears(item: number?): boolean
+	local data = Items.tool(item)
+	return data ~= nil and data.kind == "shears"
+end
+
+--[[
+	What breaking `block` with `tool` (nil = bare hands) gives a survival player (nil = nothing):
+	nothing when the tool can't harvest it (`canHarvest`); with Shears, what the block's
+	`shearDrops` names, `shearCount` of it (Minecraft's loot tables' `match_tool shears`: tall grass
+	gives 2 short grass, leaves themselves); otherwise its `blockDrops`.
+]]
 function Items.drops(block: number, tool: number?): Stack?
 	if not Blocks.isValid(block) or not Items.canHarvest(block, tool) then
 		return nil
+	end
+	local def = Blocks.get(block)
+	local shear = def.shearDrops
+	if shear ~= nil and Items.isShears(tool) then
+		local item = if type(shear) == "string" then rawget(ids :: any, shear) else Items.ofBlock(block)
+		if item ~= nil then
+			return { item = item, count = def.shearCount }
+		end
 	end
 	return Items.blockDrops(block)
 end

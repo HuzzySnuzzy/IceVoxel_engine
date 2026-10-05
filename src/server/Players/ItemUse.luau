@@ -20,7 +20,8 @@
 	                 (the sound at the tank).
 	  Water Bucket   on a fluid tank with room for 1000 mB, not sneaking: fills it; elsewhere:
 	                 places a water source in the block, or beyond the clicked side
-	                 (item.bucket.empty where the water goes). Block updates take it from there.
+	                 (item.bucket.empty where the water goes); a plant it replaces drops
+	                 (UseRules.pour). Block updates take it from there.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
 	thrown).
 ]]
@@ -201,9 +202,9 @@ local function empty(
 	if tx == nil then
 		return
 	end
-	-- (Pouring into a water source changes nothing but still empties the bucket, as in Minecraft.)
-	local before = world:peekBlock(tx, ty, tz)
-	if not world:setBlock(tx, ty, tz, UseRules.WATER_SOURCE) and before ~= UseRules.WATER_SOURCE then
+	-- (Pouring into a water source changes nothing but still empties the bucket, as in Minecraft;
+	-- a plant there drops.)
+	if not UseRules.pour(world, tx, ty, tz) then
 		return
 	end
 	apply(player, UseRules.emptied(held, creative))

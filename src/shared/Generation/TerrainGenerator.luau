@@ -32,6 +32,7 @@ local Noise = require(script.Parent.Noise)
 local Relief = require(script.Parent.Relief)
 local Caves = require(script.Parent.Caves)
 local Ores = require(script.Parent.Ores)
+local Foliage = require(script.Parent.Foliage)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
 
@@ -128,6 +129,18 @@ function TerrainGenerator.new(seed: number): Generator
 	local carveCaves = Caves.new(seed, function(x: number, z: number): number
 		return (relief.height(x, z, 0))
 	end)
+	local growFoliage = Foliage.new(seed)
+
+	-- Terrain height (first air block) of a relief height: whole blocks, with room for structures.
+	local function clampHeight(y: number): number
+		local h = floor(y)
+		if h < 2 then
+			return 2
+		elseif h > WORLD_HEIGHT - STRUCTURE_ROOM then
+			return WORLD_HEIGHT - STRUCTURE_ROOM
+		end
+		return h
+	end
 
 	--[[
 		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
@@ -135,12 +148,7 @@ function TerrainGenerator.new(seed: number): Generator
 	]]
 	local function sample(x: number, z: number, level: number): (number, number, number, number, number, number)
 		local y, unrivered, selector, river = relief.height(x, z, level)
-		local h = floor(y)
-		if h < 2 then
-			h = 2
-		elseif h > WORLD_HEIGHT - STRUCTURE_ROOM then
-			h = WORLD_HEIGHT - STRUCTURE_ROOM
-		end
+		local h = clampHeight(y)
 
 		local biome = MUSHROOM
 		if selector >= MUSHROOM_SELECTOR then
@@ -172,6 +180,11 @@ function TerrainGenerator.new(seed: number): Generator
 
 		local vegetation = if h <= SEA + 1 or river >= RIVER_MUD then 0 else def.vegetation
 		return h, biome, vegetation, surface, selector, river
+	end
+
+	-- Full detail height of a column just outside a chunk's padding (see the steep rule).
+	local function outsideHeight(x: number, z: number): number
+		return clampHeight((relief.height(x, z, 0)))
 	end
 
 	local function column(x: number, z: number): (number, number, number, number)
@@ -264,8 +277,12 @@ function TerrainGenerator.new(seed: number): Generator
 				local filler = if top == biome.top then biome.filler else top
 				local fillerDepth = biome.fillerDepth
 
-				-- Steep slopes become bare rock.
+				-- Steep slopes become bare rock. A full detail chunk's outermost columns also look
+				-- past the padding for their missing neighbour, so they get the surface the
+				-- neighbouring chunk's core gets (plants grow by it). (LOD padding is a lowered
+				-- skirt anyway.)
 				if h > SEA + 2 then
+					local limit = (biome.steepSlope or CLIFF_SLOPE) * step
 					local slope = 0
 					if px > 0 then
 						slope = math.max(slope, math.abs(h - heights[i - 1]))
@@ -279,7 +296,19 @@ function TerrainGenerator.new(seed: number): Generator
 					if pz < P - 1 then
 						slope = math.max(slope, math.abs(h - heights[i + P]))
 					end
-					if slope >= (biome.steepSlope or CLIFF_SLOPE) * step then
+					local edge = px == 0 or px == P - 1 or pz == 0 or pz == P - 1
+					if slope < limit and level == 0 and edge and (top ~= biome.steep or filler ~= biome.steep) then
+						local x, z = originX + px - 1, originZ + pz - 1
+						local dx = if px == 0 then -1 elseif px == P - 1 then 1 else 0
+						local dz = if pz == 0 then -1 elseif pz == P - 1 then 1 else 0
+						if dx ~= 0 then
+							slope = math.max(slope, math.abs(h - outsideHeight(x + dx, z)))
+						end
+						if dz ~= 0 and slope < limit then
+							slope = math.max(slope, math.abs(h - outsideHeight(x, z + dz)))
+						end
+					end
+					if slope >= limit then
 						top, filler = biome.steep, biome.steep
 					end
 				end
@@ -351,6 +380,14 @@ function TerrainGenerator.new(seed: number): Generator
 			)
 			if w.top() > emptyAbove then
 				emptyAbove = w.top()
+			end
+		end
+
+		-- 5. Ground plants (full detail only: LOD cells would lose them, and each box is a Part).
+		if level == 0 then
+			local top = growFoliage(data, cells, originX, originZ, biomes, topCells)
+			if top > emptyAbove then
+				emptyAbove = top
 			end
 		end
 

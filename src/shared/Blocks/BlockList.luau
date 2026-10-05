@@ -92,6 +92,37 @@
 	  brokenByFluid Flowing water washes it away and it drops (torches: Minecraft's canHoldFluid).
 	                Players still can't place blocks into it.
 
+	Plants (grass, ferns, flowers, mushrooms; Minecraft's BushBlock family, see "Plants" below):
+	  plant         { soil = "dirt" | "deadbush" | "mushroom"?, top = "<Name>"?, bottom = "<Name>"? }.
+	                A single plant or the lower half of a tall one stands on a block of its `soil`
+	                set (Blocks.mayPlaceOn, Blocks.canSurvive):
+	                  "dirt"      Minecraft's DIRT tag here: Grass, DryGrass, Dirt, CoarseDirt,
+	                              Podzol and Mycelium;
+	                  "deadbush"  Sand and the dirt set (DeadBushBlock: sand, terracotta, dirt);
+	                  "mushroom"  Mycelium or Podzol, or any sturdy opaque full block (Minecraft
+	                              also needs a raw light level below 13 on the other blocks; this
+	                              game has no block light levels, so that part is left out).
+	                `top` names a lower half's upper half, `bottom` an upper half's lower half
+	                (DoublePlantBlock). An upper half stands on its own lower half, hangs on
+	                nothing (no `support`), is no item of its own (`item` names the lower half,
+	                `placeable` is false) and drops nothing; the server places and removes both
+	                halves together.
+	  tinted        true: the plant's boxes take the foliage colour of the soil it grows on
+	                (Minecraft's biome grass tint, `tintindex`): their authored green times the
+	                soil's Blocks.FOLIAGE_TINTS entry (Blocks.tintLut; the mesher finds the soil).
+	                Short grass, ferns and their tall forms only, whose boxes are all green.
+	  foliageColor  { r, g, b } on a soil block: what tinted plants on it look like instead of their
+	                authored green (which is the Grass block's). Only DryGrass has one, so savanna
+	                grass matches its ground.
+	  scatter       true: drawn with a per-position offset (up to 3 pixels each way) and turn about
+	                the vertical axis (Minecraft's OffsetType; client rendering). The outline does
+	                not move.
+	  shearDrops    What Shears harvest from it: true for the block itself, or an item's name
+	                (Minecraft's loot tables' `match_tool shears`: leaves, grass, ferns, dead
+	                bushes). Anything else held gets the usual drops (Items.drops).
+	  shearCount    How many of `shearDrops` (default 1): tall grass gives 2 short grass.
+	A plant's `shape` has at most 4 boxes: each is a Part per plant in the world.
+
 	Mekanism pipes (Shared/Transmitters):
 	  transmitter   { kind = "item" | "fluid" | "energy", tier = 1..4, restrictive = true? }: a
 	                Logistical Transporter ("item"), the Restrictive Transporter (`restrictive`), a
@@ -148,6 +179,8 @@ export type TankSpec = { tier: number, capacity: number }
 -- A machine (`machine`) and the energy it holds and moves (`energy`); see Shared/Machines.
 export type MachineSpec = { kind: string }
 export type EnergySpec = { capacity: number, input: number?, output: number? }
+-- A plant (`plant`): its soil set, and the names of its other half.
+export type PlantSpec = { soil: string?, top: string?, bottom: string? }
 
 export type BlockSpec = {
 	name: string,
@@ -191,6 +224,12 @@ export type BlockSpec = {
 	icon: { ShapeBox }?,
 	machine: MachineSpec?,
 	energy: EnergySpec?,
+	plant: PlantSpec?,
+	tinted: boolean?,
+	foliageColor: { number }?,
+	scatter: boolean?,
+	shearDrops: (string | boolean)?,
+	shearCount: number?,
 }
 
 local list: { BlockSpec } = {
@@ -234,6 +273,9 @@ local list: { BlockSpec } = {
 		behaviour = "Grass",
 		hardness = 0.6,
 		drops = "Dirt",
+		-- Grass and ferns on it: Minecraft's savanna #BFB755 in this game's palette, a little
+		-- greener than the block itself so they read against it.
+		foliageColor = { 156, 160, 76 },
 	},
 	{
 		name = "Snow",
@@ -279,7 +321,8 @@ local list: { BlockSpec } = {
 		tool = "pickaxe",
 	},
 	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood", hardness = 2, tool = "axe" },
-	-- (Leaves hold up no torches or lanterns: Minecraft's LeavesBlock has no support shape.)
+	-- (Leaves hold up no torches or lanterns: Minecraft's LeavesBlock has no support shape. They drop
+	-- nothing, but Shears harvest them, as in Minecraft.)
 	{
 		name = "OakLeaves",
 		color = { 68, 128, 46 },
@@ -288,6 +331,7 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 		sturdy = false,
+		shearDrops = true,
 	},
 	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -298,6 +342,7 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 		sturdy = false,
+		shearDrops = true,
 	},
 	{ name = "SpruceLog", color = { 74, 54, 34 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -308,6 +353,7 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 		sturdy = false,
+		shearDrops = true,
 	},
 	{ name = "AcaciaLog", color = { 118, 108, 98 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -318,6 +364,7 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 		sturdy = false,
+		shearDrops = true,
 	},
 	{ name = "JungleLog", color = { 96, 76, 44 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -328,6 +375,7 @@ local list: { BlockSpec } = {
 		drops = false,
 		tool = "hoe",
 		sturdy = false,
+		shearDrops = true,
 	},
 	-- (Minecraft's cactus sounds like wool, and is a pixel short of its cell on every side but the
 	-- bottom: nothing hangs on it.)
@@ -1242,5 +1290,638 @@ for tier, name in TIER_NAMES do
 		energy = { capacity = numbers.batteryCapacity, input = numbers.batteryRate, output = numbers.batteryRate },
 	})
 end
+
+--[[
+	Plants: Minecraft 1.20.1's ground foliage (BushBlock and its family). Short grass ("Grass" is
+	the grass block here; 1.20.3's name), ferns and their two block tall forms, the dead bush, the
+	twelve flowers, the four tall flowers and both mushrooms.
+
+	Every plant is shaped, not solid, breaks at once, sounds like grass, is washed away by flowing
+	water (and drops), stands on its soil (`plant`, `support` "Down") and is kept up by the
+	server's Plant behaviour. Tall plants are two blocks: the lower half is the item, the upper
+	half names it (`item`) and drops nothing. Short grass, ferns, their tall forms and the dead bush
+	are replaceable, as in Minecraft 1.20; flowers and mushrooms are not.
+
+	Minecraft draws plants as crossed textured quads; there are no texture uploads here, so they
+	are a few thin boxes each (pixels from the cell's centre, the ground at y = -8), and every box
+	is one Part per plant in the world: at most 4, 3 on the common ones. Blades and fronds lean out
+	in different directions in a few shades of green; flowers are a thin stem with a head in
+	Minecraft's colours. Plants are drawn at a scattered offset and turn (`scatter`), so every box
+	stays inside 2..14 (grass, ferns, dead bushes and tall plants) or 5..11 (flowers and mushrooms)
+	whichever way it is turned, and at most a pixel out of its cell after the offset of up to 3
+	pixels (like a wall torch's foot). Those are Minecraft's outlines too, aimed at and highlighted,
+	except for tall plants: DoublePlantBlock keeps a block's default shape, so each half is aimed at
+	and outlined as a full block.
+
+	Tall grass gives 2 short grass with Shears and large ferns 2 ferns; short grass, ferns and dead
+	bushes give themselves, and nothing (a dead bush a stick) without. Flowers and mushrooms always
+	drop themselves.
+]]
+local SMOOTH = "SmoothPlastic"
+local GROUND = -8
+-- (Minecraft's outlines.)
+local GRASS_BOUNDS: Bounds = { min = { 2, 0, 2 }, max = { 14, 13, 14 } }
+-- (Both halves of a tall plant: a full block, DoublePlantBlock has no shape of its own.)
+local TALL_BOUNDS: Bounds = FULL_BOUNDS
+local FLOWER_BOUNDS: Bounds = { min = { 5, 0, 5 }, max = { 11, 10, 11 } }
+local MUSHROOM_BOUNDS: Bounds = { min = { 5, 0, 5 }, max = { 11, 6, 11 } }
+
+-- Greens of grass and ferns: the Grass block's and a shade darker and lighter (they are tinted by
+-- the soil's foliage colour, so this is how they look on Grass).
+local GRASS = { 92, 158, 62 }
+local GRASS_DARK = { 72, 134, 48 }
+local GRASS_LIGHT = { 118, 178, 76 }
+local FERN = { 74, 140, 54 }
+local FERN_DARK = { 58, 118, 44 }
+local FERN_LIGHT = { 96, 160, 64 }
+-- Flower stems and leaves (not tinted).
+local STEM = { 70, 126, 42 }
+local LEAF = { 60, 114, 38 }
+local LEAF_LIGHT = { 88, 146, 54 }
+
+-- The unit vector `lean` degrees from upright towards `facing` (degrees about the vertical axis
+-- from east: 0 = east (+X), 90 = south (+Z)).
+local function leaning(lean: number, facing: number): { number }
+	local t, f = math.rad(lean), math.rad(facing)
+	return { math.cos(f) * math.sin(t), math.cos(t), math.sin(f) * math.sin(t) }
+end
+
+-- The point `distance` pixels from `from` along a blade leaning `lean` towards `facing`.
+local function along(from: { number }, lean: number, facing: number, distance: number): { number }
+	local d = leaning(lean, facing)
+	return { from[1] + d[1] * distance, from[2] + d[2] * distance, from[3] + d[3] * distance }
+end
+
+--[[
+	A thin box from `foot` ({ x, y, z }) leaning `lean` degrees from upright towards `facing`:
+	`size` = { width, length, thickness }. Its foot stays put whatever the lean:
+	CFrame.Angles(0, 180 - facing, lean) leans it about its own Z axis, then turns it. `flat`: its
+	broad face looks out and up (a leaf); otherwise the lean is in the plane of its broad face, so
+	the splay of grass blades and fronds shows from the side.
+]]
+local function slat(
+	foot: { number },
+	size: { number },
+	lean: number,
+	facing: number,
+	colour: { number },
+	flat: boolean
+): ShapeBox
+	return {
+		size = if flat then { size[3], size[2], size[1] } else { size[1], size[2], size[3] },
+		offset = along(foot, lean, facing, size[2] / 2),
+		rotation = { 0, 180 - facing, lean },
+		color = colour,
+		material = SMOOTH,
+	}
+end
+
+-- A grass blade, frond, stem or twig: leaning in the plane of its broad face.
+local function blade(foot: { number }, size: { number }, lean: number, facing: number, colour: { number }): ShapeBox
+	return slat(foot, size, lean, facing, colour, false)
+end
+
+-- A leaf: its broad face looks out and up.
+local function leaf(foot: { number }, size: { number }, lean: number, facing: number, colour: { number }): ShapeBox
+	return slat(foot, size, lean, facing, colour, true)
+end
+
+-- The length of a blade `width` wide from `foot` whose highest corner is at `top` (a tall plant's
+-- lower half reaching the top of its cell, where the upper half carries on).
+local function reaching(foot: { number }, top: number, lean: number, width: number): number
+	local t = math.rad(lean)
+	return (top - foot[2] - width / 2 * math.sin(t)) / math.cos(t)
+end
+
+-- A box at `offset` (a flower head, a cap, a bush), turned by `rotation` (degrees, CFrame.Angles
+-- order).
+local function lump(size: { number }, offset: { number }, colour: { number }, rotation: { number }?): ShapeBox
+	return { size = size, offset = offset, rotation = rotation, color = colour, material = SMOOTH }
+end
+
+-- Everything plants share (see above). Upper halves are no item, hang on nothing and drop nothing.
+local function plant(spec: BlockSpec)
+	local info = spec.plant :: PlantSpec
+	local upper = info.bottom ~= nil
+	spec.material = spec.material or SMOOTH
+	spec.solid = false
+	spec.placeable = not upper
+	spec.hardness = 0
+	spec.sound = "grass"
+	spec.brokenByFluid = true
+	spec.behaviour = "Plant"
+	spec.scatter = true
+	if upper then
+		spec.item = info.bottom
+		spec.drops = false
+	else
+		spec.support = "Down"
+	end
+	assert(spec.shape and #spec.shape <= 4, `Plant {spec.name} has more than 4 boxes`)
+	table.insert(list, spec)
+end
+
+--[[ Grass and ferns ]]
+
+-- The point on the ground `distance` pixels from the middle, away from `facing`: blades whose foot
+-- is a pixel behind the middle cross at the root, like a tuft.
+local function behind(facing: number, distance: number): { number }
+	return along({ 0, GROUND, 0 }, 90, facing + 180, distance)
+end
+
+-- Short grass: three blades crossing at the root and splaying out, 9 to 12 pixels tall.
+plant({
+	name = "ShortGrass",
+	displayName = "Short Grass",
+	color = GRASS,
+	replaceable = true,
+	tinted = true,
+	plant = { soil = "dirt" },
+	shape = {
+		blade(behind(15, 1), { 2.4, 12.5, 0.4 }, 28, 15, GRASS),
+		blade(behind(140, 1), { 2, 13, 0.4 }, 20, 140, GRASS_LIGHT),
+		blade(behind(255, 1), { 2.2, 10.5, 0.4 }, 34, 255, GRASS_DARK),
+	},
+	bounds = GRASS_BOUNDS,
+	shearDrops = true,
+	drops = false,
+})
+
+-- A fern: an upright frond and two broad ones arching out low, their faces up.
+plant({
+	name = "Fern",
+	color = FERN,
+	replaceable = true,
+	tinted = true,
+	plant = { soil = "dirt" },
+	shape = {
+		blade(behind(100, 0.8), { 3, 12, 0.4 }, 12, 100, FERN),
+		leaf({ 0, GROUND, 0 }, { 3, 8.5, 0.4 }, 40, 330, FERN_LIGHT),
+		leaf({ 0, GROUND, 0 }, { 2.8, 7.8, 0.4 }, 46, 210, FERN_DARK),
+	},
+	bounds = GRASS_BOUNDS,
+	shearDrops = true,
+	drops = false,
+})
+
+--[[
+	A tall plant's blades fan out from the middle like a vase: the lower half's from the ground to
+	the top of the cell, and the upper half's carry on from where they end (the same place one cell
+	up: both halves are drawn at the lower half's offset), leaning further out.
+]]
+type TallBlade = {
+	facing: number,
+	lean: number,
+	width: number,
+	colour: { number },
+	-- The upper half's part: its length, lean, width and colour, and whether it is a leaf (face
+	-- up, a fern's arching frond).
+	length: number,
+	topLean: number,
+	topWidth: number,
+	topColour: { number },
+	flat: boolean?,
+}
+local function tallBlades(blades: { TallBlade }): ({ ShapeBox }, { ShapeBox })
+	local lower, upper = {}, {}
+	for _, b in blades do
+		-- (Half a pixel behind the middle, so the blades cross at the root.)
+		local foot = behind(b.facing, 0.5)
+		local length = reaching(foot, 8, b.lean, b.width)
+		local top = along(foot, b.lean, b.facing, length)
+		table.insert(lower, blade(foot, { b.width, length, 0.4 }, b.lean, b.facing, b.colour))
+		local size = { b.topWidth, b.length, 0.4 }
+		local start = { top[1], GROUND, top[3] }
+		table.insert(upper, slat(start, size, b.topLean, b.facing, b.topColour, b.flat == true))
+	end
+	return lower, upper
+end
+
+local tallGrass, tallGrassTop = tallBlades({
+	{
+		facing = 30,
+		lean = 10,
+		width = 2.4,
+		colour = GRASS,
+		length = 13,
+		topLean = 11,
+		topWidth = 2,
+		topColour = GRASS_LIGHT,
+	},
+	{
+		facing = 150,
+		lean = 8,
+		width = 2.2,
+		colour = GRASS_DARK,
+		length = 12,
+		topLean = 15,
+		topWidth = 1.8,
+		topColour = GRASS,
+	},
+	{
+		facing = 270,
+		lean = 9,
+		width = 2.4,
+		colour = GRASS_LIGHT,
+		length = 14,
+		topLean = 11,
+		topWidth = 2,
+		topColour = GRASS_DARK,
+	},
+})
+
+local largeFern, largeFernTop = tallBlades({
+	{
+		facing = 10,
+		lean = 8,
+		width = 3,
+		colour = FERN,
+		length = 12.5,
+		topLean = 11,
+		topWidth = 2.6,
+		topColour = FERN_LIGHT,
+	},
+	{
+		facing = 130,
+		lean = 8,
+		width = 2.8,
+		colour = FERN_DARK,
+		length = 5.8,
+		topLean = 36,
+		topWidth = 2.6,
+		topColour = FERN,
+		flat = true,
+	},
+	{
+		facing = 250,
+		lean = 8,
+		width = 3,
+		colour = FERN_LIGHT,
+		length = 5.8,
+		topLean = 36,
+		topWidth = 2.6,
+		topColour = FERN_DARK,
+		flat = true,
+	},
+})
+
+-- Their items: the lower half with shorter blades fanning out of it, like the upper half's.
+local function tallIcon(lower: { ShapeBox }, extra: { ShapeBox }): { ShapeBox }
+	local icon = table.clone(lower)
+	for _, box in extra do
+		table.insert(icon, box)
+	end
+	return icon
+end
+
+plant({
+	name = "TallGrass",
+	displayName = "Tall Grass",
+	color = GRASS,
+	replaceable = true,
+	tinted = true,
+	plant = { soil = "dirt", top = "TallGrassTop" },
+	shape = tallGrass,
+	icon = tallIcon(tallGrass, {
+		blade({ 0, -3, 0 }, { 2, 10, 0.4 }, 34, 90, GRASS_LIGHT),
+		blade({ 0, -4, 0 }, { 2, 10, 0.4 }, 36, 200, GRASS),
+		blade({ 0, -2, 0 }, { 1.8, 9, 0.4 }, 30, 320, GRASS_DARK),
+	}),
+	bounds = TALL_BOUNDS,
+	shearDrops = "ShortGrass",
+	shearCount = 2,
+	drops = false,
+})
+plant({
+	name = "TallGrassTop",
+	displayName = "Tall Grass",
+	color = GRASS,
+	replaceable = true,
+	tinted = true,
+	plant = { bottom = "TallGrass" },
+	shape = tallGrassTop,
+	bounds = TALL_BOUNDS,
+})
+plant({
+	name = "LargeFern",
+	displayName = "Large Fern",
+	color = FERN,
+	replaceable = true,
+	tinted = true,
+	plant = { soil = "dirt", top = "LargeFernTop" },
+	shape = largeFern,
+	icon = tallIcon(largeFern, {
+		leaf({ 0, -1, 0 }, { 3, 8, 0.4 }, 48, 90, FERN_LIGHT),
+		leaf({ 0, -2, 0 }, { 3, 8, 0.4 }, 50, 200, FERN),
+		blade({ 0, -3, 0 }, { 2.6, 10, 0.4 }, 32, 320, FERN_DARK),
+	}),
+	bounds = TALL_BOUNDS,
+	shearDrops = "Fern",
+	shearCount = 2,
+	drops = false,
+})
+plant({
+	name = "LargeFernTop",
+	displayName = "Large Fern",
+	color = FERN,
+	replaceable = true,
+	tinted = true,
+	plant = { bottom = "LargeFern" },
+	shape = largeFernTop,
+	bounds = TALL_BOUNDS,
+})
+
+--[[ The dead bush: brown twigs, a main one and three splaying out (one a branch off it) ]]
+
+local TWIG = { 124, 88, 44 }
+local TWIG_DARK = { 100, 70, 36 }
+local TWIG_LIGHT = { 146, 108, 60 }
+plant({
+	name = "DeadBush",
+	displayName = "Dead Bush",
+	color = TWIG,
+	replaceable = true,
+	plant = { soil = "deadbush" },
+	shape = {
+		blade({ 0, GROUND, 0 }, { 0.8, 11.5, 0.8 }, 8, 100, TWIG),
+		blade({ 0.2, GROUND, 0.1 }, { 0.7, 8.5, 0.7 }, 40, 15, TWIG_DARK),
+		blade({ -0.1, GROUND, 0.1 }, { 0.7, 8, 0.7 }, 42, 150, TWIG_LIGHT),
+		blade(along({ 0, GROUND, 0 }, 8, 100, 4.5), { 0.6, 6.5, 0.6 }, 40, 255, TWIG),
+	},
+	bounds = GRASS_BOUNDS,
+	shearDrops = true,
+	drops = "Stick" :: string,
+})
+
+--[[
+	Flowers: a stem with a leaf or two and a head in Minecraft's colours, up to 10 pixels tall
+	(Minecraft's 5..11 outline). Heads are two crossed boxes or one turned 45 degrees, so they look
+	round from every side.
+]]
+
+local function stem(height: number, lean: number?, facing: number?): ShapeBox
+	return blade({ 0, GROUND, 0 }, { 0.8, height, 0.8 }, lean or 0, facing or 0, STEM)
+end
+
+local function flower(name: string, colour: { number }, shape: { ShapeBox }, displayName: string?)
+	plant({
+		name = name,
+		displayName = displayName,
+		color = colour,
+		plant = { soil = "dirt" },
+		shape = shape,
+		bounds = FLOWER_BOUNDS,
+	})
+end
+
+local DANDELION = { 255, 216, 36 }
+flower("Dandelion", DANDELION, {
+	stem(6),
+	leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 58, 30, LEAF),
+	lump({ 3.2, 2, 2.2 }, { 0, -1.2, 0 }, DANDELION, { 0, 20, 0 }),
+	lump({ 2.2, 2.4, 3.2 }, { 0, -1.2, 0 }, { 246, 196, 30 }, { 0, 20, 0 }),
+})
+
+local POPPY = { 214, 34, 30 }
+flower("Poppy", POPPY, {
+	stem(7, 4, 0),
+	leaf({ 0, -6.5, 0 }, { 1.4, 3.4, 0.4 }, 50, 220, LEAF),
+	lump({ 3.6, 2.6, 3.6 }, { 0.3, 0.1, 0 }, POPPY, { 0, 30, 0 }),
+	-- The dark middle, seen from above.
+	lump({ 1.3, 0.3, 1.3 }, { 0.3, 1.5, 0 }, { 44, 36, 20 }, { 0, 30, 0 }),
+})
+
+-- The blue orchid: a star of bright blue petals, two crossed and tilted.
+local ORCHID = { 40, 168, 228 }
+local orchidTop = along({ 0, GROUND, 0 }, 6, 300, 6.5)
+flower("BlueOrchid", ORCHID, {
+	stem(6.5, 6, 300),
+	leaf({ 0, GROUND, 0 }, { 1.2, 4, 0.4 }, 30, 120, LEAF),
+	lump({ 3.8, 1, 1.4 }, { orchidTop[1], orchidTop[2] + 0.3, orchidTop[3] }, ORCHID, { 0, 20, 18 }),
+	lump({ 1.4, 1.2, 3.8 }, { orchidTop[1], orchidTop[2] + 0.6, orchidTop[3] }, { 96, 200, 244 }, { -15, 20, 0 }),
+}, "Blue Orchid")
+
+local ALLIUM = { 166, 92, 212 }
+flower("Allium", ALLIUM, {
+	stem(7.5),
+	leaf({ 0, GROUND, 0 }, { 1, 4.5, 0.35 }, 28, 160, LEAF),
+	lump({ 3.6, 2.4, 3.6 }, { 0, 0.25, 0 }, ALLIUM),
+	lump({ 2.6, 3.4, 2.6 }, { 0, 0.25, 0 }, { 192, 132, 230 }, { 0, 45, 0 }),
+})
+
+-- The azure bluet: a pale stem with a white flower and its yellow middle, and a bud lower down.
+local BLUET_STEM = { 116, 146, 98 }
+local WHITE = { 236, 240, 238 }
+local bluetTop = along({ 0, GROUND, 0 }, 6, 30, 5.6)
+flower("AzureBluet", WHITE, {
+	blade({ 0, GROUND, 0 }, { 0.6, 5.6, 0.6 }, 6, 30, BLUET_STEM),
+	lump({ 2.6, 0.8, 2.6 }, { bluetTop[1], bluetTop[2] + 0.2, bluetTop[3] }, WHITE, { 0, 45, 0 }),
+	lump({ 1, 0.4, 1 }, { bluetTop[1], bluetTop[2] + 0.7, bluetTop[3] }, { 232, 204, 70 }, { 0, 45, 0 }),
+	lump({ 1.8, 0.7, 1.8 }, { -1, -4.2, 0.6 }, { 226, 232, 236 }, { 0, 20, 0 }),
+}, "Azure Bluet")
+
+-- Tulips: a cup on a stem between two long leaves.
+local function tulip(name: string, colour: { number })
+	flower(name, colour, {
+		stem(6),
+		leaf({ 0, GROUND, 0 }, { 1.6, 5, 0.4 }, 22, 45, LEAF),
+		leaf({ 0, GROUND, 0 }, { 1.6, 4.4, 0.4 }, 26, 225, LEAF_LIGHT),
+		lump({ 2.6, 3.4, 2.6 }, { 0, -0.6, 0 }, colour, { 0, 45, 0 }),
+	})
+end
+tulip("RedTulip", { 212, 42, 34 })
+tulip("OrangeTulip", { 240, 128, 36 })
+tulip("WhiteTulip", { 234, 238, 234 })
+tulip("PinkTulip", { 238, 162, 198 })
+
+flower("OxeyeDaisy", WHITE, {
+	stem(6.5),
+	leaf({ 0, GROUND, 0 }, { 1.4, 3.2, 0.4 }, 50, 300, LEAF),
+	lump({ 4, 0.9, 4 }, { 0, -0.8, 0 }, { 242, 242, 238 }, { 12, 45, 0 }),
+	lump({ 1.6, 0.5, 1.6 }, { 0, -0.25, 0.1 }, { 236, 196, 40 }, { 12, 45, 0 }),
+}, "Oxeye Daisy")
+
+local CORNFLOWER = { 70, 104, 228 }
+flower("Cornflower", CORNFLOWER, {
+	stem(6.5),
+	leaf({ 0, GROUND, 0 }, { 1, 4.2, 0.35 }, 30, 70, LEAF),
+	lump({ 3, 1.8, 3 }, { 0, -1, 0 }, CORNFLOWER, { 0, 45, 0 }),
+	lump({ 1.8, 2.6, 1.8 }, { 0, -0.2, 0 }, { 50, 78, 200 }),
+})
+
+-- Lily of the valley: two broad upright leaves and an arching stem with white bells under its tip.
+local LILY_LEAF = { 62, 130, 48 }
+local lilyTop = along({ 0, GROUND, 0 }, 15, 100, 7)
+flower("LilyOfTheValley", WHITE, {
+	blade({ -0.4, GROUND, 0.2 }, { 2.2, 7.5, 0.4 }, 8, 200, LILY_LEAF),
+	blade({ 0.4, GROUND, -0.2 }, { 2, 6.5, 0.4 }, 12, 20, LEAF_LIGHT),
+	blade({ 0, GROUND, 0 }, { 0.5, 7, 0.5 }, 15, 100, STEM),
+	-- (A row of bells along the arch, hanging under it.)
+	lump({ 1.2, 1.4, 2.4 }, { lilyTop[1] * 0.8, lilyTop[2] - 1.1, lilyTop[3] * 0.75 }, { 244, 246, 240 }, { 0, 10, 0 }),
+}, "Lily of the Valley")
+
+--[[
+	Tall flowers: two blocks like tall grass. The sunflower's yellow disc with its brown middle
+	faces east and a little up, as in Minecraft; the lilac and the peony are leafy bushes with pale
+	purple and pink blossoms on top, the rose bush a dark green bush dotted with red roses. Their
+	items show the lower half with the top's blossoms (Minecraft's item uses the top half's
+	texture), fitted in one cell; the sunflower's head faces the viewer there.
+]]
+
+local SUN_PETALS = { 252, 200, 32 }
+local SUN_MIDDLE = { 96, 60, 28 }
+local SUN_TILT = 22.5
+
+-- The sunflower's head: a disc (two crossed rectangles, a pixel-art circle) and its middle, centred
+-- at `centre`, facing east (+X) or towards -Z (the item), tilted up.
+local function sunflowerHead(centre: { number }, east: boolean): { ShapeBox }
+	local x, y, z = centre[1], centre[2], centre[3]
+	local t = math.rad(SUN_TILT)
+	if east then
+		local rotation = { 0, 0, SUN_TILT }
+		return {
+			lump({ 0.8, 9, 6.4 }, centre, SUN_PETALS, rotation),
+			lump({ 0.8, 6.4, 9 }, centre, SUN_PETALS, rotation),
+			lump({ 0.8, 3.6, 3.6 }, { x + 0.6 * math.cos(t), y + 0.6 * math.sin(t), z }, SUN_MIDDLE, rotation),
+		}
+	end
+	local rotation = { SUN_TILT, 0, 0 }
+	return {
+		lump({ 6.4, 9, 0.8 }, centre, SUN_PETALS, rotation),
+		lump({ 9, 6.4, 0.8 }, centre, SUN_PETALS, rotation),
+		lump({ 3.6, 3.6, 0.8 }, { x, y + 0.6 * math.sin(t), z - 0.6 * math.cos(t) }, SUN_MIDDLE, rotation),
+	}
+end
+
+-- Adds a tall flower's halves from their boxes; its item shows the lower half and then `extra`.
+local function tallFlower(
+	name: string,
+	colour: { number },
+	lower: { ShapeBox },
+	upper: { ShapeBox },
+	extra: { ShapeBox },
+	displayName: string?
+)
+	plant({
+		name = name,
+		displayName = displayName,
+		color = colour,
+		plant = { soil = "dirt", top = name .. "Top" },
+		shape = lower,
+		icon = tallIcon(lower, extra),
+		bounds = TALL_BOUNDS,
+	})
+	plant({
+		name = name .. "Top",
+		displayName = displayName or name,
+		color = colour,
+		plant = { bottom = name },
+		shape = upper,
+		bounds = TALL_BOUNDS,
+	})
+end
+
+-- (The stem leans a little east, under the head.)
+local sunStemTop = along({ 0, GROUND, 0 }, 12, 0, 8.5)
+local sunflowerTop = { blade({ 0, GROUND, 0 }, { 1.2, 8.5, 1.2 }, 12, 0, STEM) }
+for _, box in sunflowerHead({ sunStemTop[1] + 0.5, sunStemTop[2] + 1, 0 }, true) do
+	table.insert(sunflowerTop, box)
+end
+tallFlower("Sunflower", SUN_PETALS, {
+	blade({ 0, GROUND, 0 }, { 1.2, 16, 1.2 }, 0, 0, STEM),
+	leaf({ 0, -3, 0 }, { 2.4, 5.5, 0.4 }, 55, 160, LEAF),
+	leaf({ 0, 2, 0 }, { 2.2, 5, 0.4 }, 50, 340, LEAF_LIGHT),
+}, sunflowerTop, sunflowerHead({ 0, 3.4, -0.9 }, false))
+
+-- Bushes: leafy masses of a few sizes, side by side and a little tilted, so their outline is
+-- uneven; the upper half's lowest mass reaches down to the lower half's.
+local BUSH_LEAVES = { 70, 124, 46 }
+local BUSH_LEAVES_LIGHT = { 90, 146, 58 }
+local ROSE_LEAVES = { 44, 100, 36 }
+local ROSE_LEAVES_LIGHT = { 58, 120, 44 }
+
+local function bushLower(leaves: { number }, light: { number }): { ShapeBox }
+	return {
+		lump({ 6, 9, 6 }, { -1, -3.5, 0.6 }, leaves, { 0, 25, 8 }),
+		lump({ 5.4, 8, 5.4 }, { 1.3, 3.2, -0.8 }, light, { -8, 65, 0 }),
+	}
+end
+
+local function bushUpper(leaves: { number }): ShapeBox
+	return lump({ 6, 7.4, 6 }, { -0.5, -4.4, 0.4 }, leaves, { 8, 35, 0 })
+end
+
+local LILAC = { 196, 148, 212 }
+local LILAC_LIGHT = { 220, 180, 232 }
+local lilacLower = bushLower(BUSH_LEAVES, BUSH_LEAVES_LIGHT)
+table.insert(lilacLower, leaf({ 0, -6, 0 }, { 2.6, 5, 0.5 }, 50, 120, BUSH_LEAVES_LIGHT))
+tallFlower("Lilac", LILAC, lilacLower, {
+	bushUpper(BUSH_LEAVES),
+	lump({ 4.6, 6.5, 4.6 }, { 0.6, -0.4, -0.4 }, LILAC, { 0, 15, -8 }),
+	lump({ 3.4, 5, 3.4 }, { -0.5, 3.4, 0.6 }, LILAC_LIGHT, { 10, 60, 0 }),
+	leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 300, BUSH_LEAVES_LIGHT),
+}, {
+	lump({ 5.8, 4.4, 5.8 }, { 1.2, 5.4, -0.6 }, LILAC, { 0, 40, 0 }),
+	lump({ 3.6, 3, 3.6 }, { 0.8, 6.4, -0.4 }, LILAC_LIGHT, { 0, 70, 0 }),
+})
+
+local ROSE = { 206, 28, 34 }
+local function rose(offset: { number }): ShapeBox
+	return lump({ 1.6, 1.6, 1.6 }, offset, ROSE, { 0, 20, 0 })
+end
+local roseLower = bushLower(ROSE_LEAVES, ROSE_LEAVES_LIGHT)
+table.insert(roseLower, rose({ 2.4, -4, 2.6 }))
+table.insert(roseLower, rose({ -2.6, 4.4, -1.6 }))
+tallFlower("RoseBush", ROSE, roseLower, {
+	bushUpper(ROSE_LEAVES),
+	lump({ 4.6, 5, 4.6 }, { 0.8, 0.4, -0.5 }, ROSE_LEAVES_LIGHT, { 0, 10, -10 }),
+	rose({ -3, -3, 2 }),
+	rose({ 1.6, 2.6, 1.4 }),
+}, { rose({ 1, 7.4, -0.6 }) }, "Rose Bush")
+
+local PEONY = { 236, 176, 220 }
+local PEONY_LIGHT = { 248, 206, 236 }
+local peonyLower = bushLower(BUSH_LEAVES_LIGHT, BUSH_LEAVES)
+table.insert(peonyLower, leaf({ 0, -6, 0 }, { 2.6, 5, 0.5 }, 50, 300, BUSH_LEAVES))
+tallFlower("Peony", PEONY, peonyLower, {
+	bushUpper(BUSH_LEAVES_LIGHT),
+	lump({ 5.4, 4, 5.4 }, { 0.6, -0.8, -0.4 }, PEONY, { 10, 15, -6 }),
+	lump({ 4, 3.4, 4 }, { -0.6, 1.8, 0.5 }, PEONY_LIGHT, { -8, 55, 0 }),
+	leaf({ 0.5, -4, -0.5 }, { 2.4, 4.5, 0.5 }, 55, 120, BUSH_LEAVES),
+}, {
+	lump({ 5.8, 3.6, 5.8 }, { 1.2, 5.8, -0.6 }, PEONY, { 0, 15, 0 }),
+	lump({ 3.6, 2.4, 3.6 }, { 0.6, 6.6, -0.2 }, PEONY_LIGHT, { 0, 55, 0 }),
+})
+
+--[[
+	Mushrooms: a short pale stem under a cap, the brown one flat and wide (two crossed slabs, a
+	pixel-art circle), the red one domed with a white spot. Minecraft's brown mushroom gives off a
+	little light (1); this one gives none.
+]]
+local function mushroom(name: string, colour: { number }, shape: { ShapeBox }, displayName: string)
+	plant({
+		name = name,
+		displayName = displayName,
+		color = colour,
+		plant = { soil = "mushroom" },
+		shape = shape,
+		bounds = MUSHROOM_BOUNDS,
+	})
+end
+
+local BROWN_CAP = { 152, 112, 84 }
+mushroom("BrownMushroom", BROWN_CAP, {
+	lump({ 1.6, 3.6, 1.6 }, { 0, -6.2, 0 }, { 212, 196, 164 }),
+	lump({ 4.8, 1.4, 3.2 }, { 0, -3.8, 0 }, BROWN_CAP),
+	lump({ 3.2, 1.4, 4.8 }, { 0, -3.8, 0 }, BROWN_CAP),
+}, "Brown Mushroom")
+
+local RED_CAP = { 200, 36, 32 }
+mushroom("RedMushroom", RED_CAP, {
+	lump({ 1.6, 3.4, 1.6 }, { 0, -6.3, 0 }, { 228, 220, 206 }),
+	lump({ 4.2, 1.6, 4.2 }, { 0, -4.4, 0 }, RED_CAP, { 0, 45, 0 }),
+	lump({ 2.8, 1.2, 2.8 }, { 0, -3.1, 0 }, RED_CAP),
+	lump({ 0.9, 0.3, 0.9 }, { 0.5, -2.4, -0.4 }, { 246, 240, 232 }),
+}, "Red Mushroom")
 
 return list

@@ -18,9 +18,10 @@
 	             (`ui`) events are the local player's alone and are never sent.
 
 	What plays where (the hooks): blocks broken and placed by players (Network/ServerNet), torches
-	and lanterns popping off (Behaviours/Attached), chest lids (Players/Inventories through
-	Containers' `onOpeners`), armor put on and tools wearing out (Players/Inventories), item pickups
-	(Entities/Entities), hurting, dying and hurting landings (Players/Characters).
+	and lanterns popping off (Behaviours/Attached), plants popping off (Behaviours/Plant), chest
+	lids (Players/Inventories through Containers' `onOpeners`), armor put on and tools wearing out
+	(Players/Inventories), item pickups (Entities/Entities), hurting, dying and hurting landings
+	(Players/Characters).
 
 	From your own server scripts:
 

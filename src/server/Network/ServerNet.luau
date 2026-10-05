@@ -7,9 +7,13 @@
 	    rule sends what else those chunks hold (Mekanism transmitters' and fluid tanks' states:
 	    Transmitters/Transmitters), so a client always has a chunk's blocks before their state.
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
-	    block (torch, lantern) hangs on, not inside a player (solid blocks and lanterns, not
-	    torches: EditRules.obstructs). Rejected requests are answered with the real block so the
-	    client undoes its prediction.
+	    block (torch, lantern) hangs on or a plant stands on, room for a tall plant's top, not
+	    inside a player (solid blocks and lanterns, not torches or plants: EditRules.obstructs).
+	    Rejected requests are answered with the real block so the client undoes its prediction.
+	  * Tall plants (EditRules): placing the lower half also sets the upper half, and breaking
+	    either half removes both, with one drop (the lower half's, with the breaker's tool), one
+	    sound and one wear. The client predicts only the half it touched; the other half comes as
+	    an ordinary replicated edit.
 	  * Applies the game modes' rules to edits (Network/EditRules):
 	      survival  a block breaks only once the player has mined it long enough with the tool in
 	                their hand when the break arrives (Mine messages say when they started;
@@ -31,8 +35,8 @@
 
 	The inventory and item entity sides come in through `setRules` (the server script wires
 	Players/Inventories and Entities), so ServerNet requires neither of them. Its `dropBlock` rule
-	also goes to Behaviours/Drops, so block updates (a torch losing its wall, water washing one
-	away) drop items the same way.
+	also goes to Behaviours/Drops, so block updates (a torch losing its wall, a plant its soil,
+	water washing one away) drop items the same way.
 ]]
 
 local Players = game:GetService("Players")
@@ -40,7 +44,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local Blocks = require(Shared.Blocks)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
@@ -277,8 +280,9 @@ function ServerNet.start(world: World): ServerNet
 		Breaks block (x, y, z), which holds `current`, mined with `tool` by `breaker`: what the tool
 		harvests drops (survival; the block's own item with the data it kept, read before it goes),
 		a container's contents drop and its window closes, and everyone near but the breaker hears
-		it break. `wearer` (a survival player) has the tool in their hand worn. false if the world
-		refused the change.
+		it break. `wearer` (a survival player) has the tool in their hand worn. Either half of a tall
+		plant takes the other with it, and the plant drops, sounds and wears once, its lower half's
+		drop (EditRules.harvested, removeBroken). false if the world refused the change.
 	]]
 	local function performBreak(
 		x: number,
@@ -293,8 +297,9 @@ function ServerNet.start(world: World): ServerNet
 		-- (The drop is decided by the tool as it was: one that breaks on this block still harvests
 		-- it, as Minecraft copies the stack before hurting it. What the block keeps in its item is
 		-- read while it is still there: setBlock tells its keepers it is gone.)
-		local drop = EditRules.breakDrop(blockData, x, y, z, current, creative, tool)
-		if not world:setBlock(x, y, z, Blocks.AIR) then
+		local harvested, harvestedY = EditRules.harvested(current, peekBlock, x, y, z)
+		local drop = EditRules.breakDrop(blockData, x, harvestedY, z, harvested, creative, tool)
+		if not EditRules.removeBroken(world, x, y, z, current) then
 			return false
 		end
 		Sounds.playBlock(current, "break", x, y, z, breaker)
@@ -452,10 +457,14 @@ function ServerNet.start(world: World): ServerNet
 				end
 				from = stack
 			end
-			if world:setBlock(x, y, z, block) then
+			-- (A tall plant's top too. Without room for it, which `supported` already ruled out
+			-- before the item was used up, nothing is set and the client is answered.)
+			if EditRules.setPlaced(world, x, y, z, block) then
 				Sounds.playBlock(block, "place", x, y, z, player)
 				-- Sustained data back into the fresh block (a Fluid Tank's water).
 				blockData:placed(player, x, y, z, block, from)
+			else
+				reject()
 			end
 		else
 			reject()

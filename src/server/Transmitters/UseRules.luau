@@ -13,9 +13,10 @@
 	    way, except that creative players get nothing (Mekanism fills the bucket only in
 	    simulation for them: the tank still loses the water).
 	  * A water bucket on a fluid tank with room for 1000 mB empties into it; on any other block it
-	    places a water source in that block if it is replaceable (air, water), else in the block
-	    beyond the clicked side if that one is (BucketItem.emptyContents). Survival players are
-	    left with an empty bucket, creative players keep the water bucket
+	    places a water source in that block if it is replaceable (air, water, short grass), else
+	    in the block beyond the clicked side if that one is (BucketItem.emptyContents). What the
+	    water replaces is destroyed with its drops (a dead bush its stick; `pour`). Survival
+	    players are left with an empty bucket, creative players keep the water bucket
 	    (getEmptySuccessItem).
 	  * Sneaking skips the tank, as Minecraft skips a block's use for a sneaking player with an
 	    item in hand: the bucket acts on the world.
@@ -31,6 +32,9 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Transmitters = require(Shared.Transmitters)
+
+local WorldServer = require(script.Parent.Parent.World.WorldServer)
+local Drops = require(script.Parent.Parent.Behaviours.Drops)
 
 type Stack = Items.Stack
 
@@ -142,6 +146,29 @@ function UseRules.waterTarget(
 		return x + dx, y + dy, z + dz
 	end
 	return nil, 0, 0
+end
+
+--[[
+	Pours a water bucket into (x, y, z) of `world` (where `waterTarget` points): a water source
+	takes the block's place, and what flowing water would wash away (short grass, a dead bush)
+	drops what it drops by itself (BucketItem.emptyContents: Level.destroyBlock with drops;
+	Behaviours/Drops). The Plant behaviour pops a tall plant's other half. Pouring into a water
+	source changes nothing but still counts: the bucket empties, as in Minecraft. false when the
+	world refused the water (the bucket stays full).
+]]
+function UseRules.pour(world: WorldServer.World, x: number, y: number, z: number): boolean
+	local before = world:peekBlock(x, y, z)
+	if before == nil then
+		return false
+	end
+	if not world:setBlock(x, y, z, UseRules.WATER_SOURCE) then
+		return before == UseRules.WATER_SOURCE
+	end
+	local def = if Blocks.isValid(before) then Blocks.get(before) else nil
+	if def and def.fluid == nil and def.brokenByFluid then
+		Drops.block(x, y, z, before)
+	end
+	return true
 end
 
 -- Mekanism's message after the Configurator changed a side: "Connection type changed to pull".
