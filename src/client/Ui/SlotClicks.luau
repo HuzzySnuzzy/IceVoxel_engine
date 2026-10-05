@@ -28,13 +28,13 @@
 	    canTakeItemForPickAll refuses it): a double click there is two plain clicks, so it crafts
 	    twice.
 	  * Stacks only count as the same item (to gather, to quick move together, to drag onto) when
-	    their wear matches too (Menu.stacksMatch). Clicks on result slots are ordinary clicks:
-	    Inventory/Menu decides what taking a result does.
+	    their wear and item data match too (Menu.stacksMatch). Clicks on result slots are ordinary
+	    clicks: Inventory/Menu decides what taking a result does.
 	  * Number keys over a slot swap it with that hotbar slot, Q throws one of it (Ctrl+Q all), as
 	    long as the cursor is empty.
 	  * The creative grid gives full stacks: a click puts one on the cursor, shift a full stack in
 	    the selected hotbar slot, a number key one in that hotbar slot. Clicking it with a carried
-	    stack deletes the stack (right click: one item).
+	    stack deletes the stack (right click: one item; the rest keeps its wear and data).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -118,7 +118,7 @@ end
 -- The stack a shift click is about to move (Minecraft's lastQuickMoved, a copy), nil if none.
 local function quickMoved(window: Window, index: number): Stack?
 	local stack = Menu.get(window, index)
-	return if stack then { item = stack.item, count = stack.count, damage = stack.damage } else nil
+	return Items.copyStack(stack)
 end
 
 --[[
@@ -156,8 +156,16 @@ local function click(self: Self, index: number, clickType: number, button: numbe
 	})
 end
 
-local function creative(self: Self, slot: number, item: number, count: number)
-	self.host.apply({ kind = "creative", window = self.host.window().id, slot = slot, item = item, count = count })
+local function creative(self: Self, slot: number, item: number, count: number, damage: number?, data: Items.Data?)
+	self.host.apply({
+		kind = "creative",
+		window = self.host.window().id,
+		slot = slot,
+		item = item,
+		count = count,
+		damage = damage,
+		data = data,
+	})
 end
 
 -- Window slot of hotbar slot 1..9.
@@ -186,7 +194,7 @@ local function gridDrop(self: Self, carried: Stack, button: number)
 	if button == LEFT then
 		creative(self, Types.CURSOR, carried.item, 0)
 	elseif button == RIGHT then
-		creative(self, Types.CURSOR, carried.item, carried.count - 1)
+		creative(self, Types.CURSOR, carried.item, carried.count - 1, carried.damage, carried.data)
 	end
 end
 

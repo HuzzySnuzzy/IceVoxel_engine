@@ -20,6 +20,11 @@
 	      creative  instant breaking, no drops, nothing used up or worn.
 	    A broken container drops its contents in both modes, and any block with a window (chest,
 	    furnace, crafting table) closes it for everyone using it.
+	  * Sustained data (Mekanism): parts of the server that keep blocks' state (Transmitters: a
+	    Fluid Tank's water) register hooks with `addBlockData` (EditRules.newBlockData). A
+	    survival break that drops the block's own item puts the data `save` read just before the
+	    block went on it; a placement hands the stack it came from (as `place` returned it, data
+	    intact, before the item was used up) to every `placed` hook right after setBlock.
 	  * Broadcasts all world changes once per frame.
 	  * Plays the sounds of players' breaks and placements to everyone near but that player, whose
 	    client already played them (Audio/Sounds; Minecraft's levelEvent 2001 and place sound).
@@ -106,8 +111,10 @@ export type Handler = (player: Player, payload: buffer) -> ()
 -- nothing.
 export type Rules = {
 	-- A placement passed every block check: use up the held item (survival) and acknowledge
-	-- inventory action `seq`. false refuses the edit. (Players/Inventories.place)
-	place: ((player: Player, block: number, seq: number) -> boolean)?,
+	-- inventory action `seq`. false refuses the edit; the second result is the stack the block
+	-- came from, before it was used up (data intact), for the `placed` hooks.
+	-- (Players/Inventories.place)
+	place: ((player: Player, block: number, seq: number) -> (boolean, Items.Stack?))?,
 	-- A refused placement: acknowledge `seq` so the client undoes its predicted use.
 	-- (Players/Inventories.acknowledge)
 	acknowledge: ((player: Player, seq: number) -> ())?,
@@ -140,6 +147,9 @@ export type ServerNet = {
 	send: (player: Player, kind: number, payload: buffer) -> (),
 	-- Sets the inventory / item entity side of edits (replaces the earlier rules).
 	setRules: (rules: Rules) -> (),
+	-- Adds a part of the server's sustained data hooks (EditRules.BlockDataHooks: what a block
+	-- keeps in its item when broken, and getting it back when placed). Hooks stay for good.
+	addBlockData: (hooks: EditRules.BlockDataHooks) -> (),
 }
 
 local ServerNet = {}
@@ -164,6 +174,7 @@ function ServerNet.start(world: World): ServerNet
 	}
 	local delayed: { [Player]: DelayedBreak } = {}
 	local rules: Rules = {}
+	local blockData = EditRules.newBlockData()
 
 	-- World reads that never generate terrain (what an attached block would hang on).
 	local function peekBlock(x: number, y: number, z: number): number?
@@ -264,9 +275,10 @@ function ServerNet.start(world: World): ServerNet
 
 	--[[
 		Breaks block (x, y, z), which holds `current`, mined with `tool` by `breaker`: what the tool
-		harvests drops (survival), a container's contents drop and its window closes, and everyone
-		near but the breaker hears it break. `wearer` (a survival player) has the tool in their hand
-		worn. false if the world refused the change.
+		harvests drops (survival; the block's own item with the data it kept, read before it goes),
+		a container's contents drop and its window closes, and everyone near but the breaker hears
+		it break. `wearer` (a survival player) has the tool in their hand worn. false if the world
+		refused the change.
 	]]
 	local function performBreak(
 		x: number,
@@ -278,6 +290,10 @@ function ServerNet.start(world: World): ServerNet
 		wearer: Player?,
 		breaker: Player
 	): boolean
+		-- (The drop is decided by the tool as it was: one that breaks on this block still harvests
+		-- it, as Minecraft copies the stack before hurting it. What the block keeps in its item is
+		-- read while it is still there: setBlock tells its keepers it is gone.)
+		local drop = EditRules.breakDrop(blockData, x, y, z, current, creative, tool)
 		if not world:setBlock(x, y, z, Blocks.AIR) then
 			return false
 		end
@@ -286,9 +302,6 @@ function ServerNet.start(world: World): ServerNet
 		if removeContainer and EditRules.hasMenu(current) then
 			removeContainer(x, y, z)
 		end
-		-- (The drop is decided by the tool as it was: one that breaks on this block still harvests
-		-- it, as Minecraft copies the stack before hurting it.)
-		local drop = EditRules.drops(current, creative, tool)
 		local dropBlock = rules.dropBlock
 		if drop and dropBlock then
 			dropBlock(x, y, z, drop)
@@ -427,14 +440,22 @@ function ServerNet.start(world: World): ServerNet
 				reject()
 				return
 			end
-			-- Last, as it uses up the item: nothing may refuse the edit after it.
+			-- Last, as it uses up the item: nothing may refuse the edit after it. (It hands back the
+			-- stack as it was, data intact.)
 			local place = rules.place
-			if place and not place(player, block, seq) then
-				reject()
-				return
+			local from: Items.Stack? = nil
+			if place then
+				local ok, stack = place(player, block, seq)
+				if not ok then
+					reject()
+					return
+				end
+				from = stack
 			end
 			if world:setBlock(x, y, z, block) then
 				Sounds.playBlock(block, "place", x, y, z, player)
+				-- Sustained data back into the fresh block (a Fluid Tank's water).
+				blockData:placed(player, x, y, z, block, from)
 			end
 		else
 			reject()
@@ -489,6 +510,9 @@ function ServerNet.start(world: World): ServerNet
 		setRules = function(newRules: Rules)
 			rules = newRules
 			Drops.set(newRules.dropBlock)
+		end,
+		addBlockData = function(hooks: EditRules.BlockDataHooks)
+			blockData:add(hooks)
 		end,
 	}
 end

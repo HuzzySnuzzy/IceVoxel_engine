@@ -21,7 +21,9 @@
 	                   2 drag      u8 window, u8 mode, u8 count, count x u16 slot
 	                   3 select    u8 slot (1..9)
 	                   4 drop      u8 all (0 / 1)
-	                   5 creative  u8 window, i16 slot (-1 = cursor), u16 item, u8 count
+	                   5 creative  u8 window, i16 slot (-1 = cursor), u16 item, u8 count,
+	                               u16 damage, item data (below): the whole stack, as
+	                               Minecraft's creative slot packet
 	                   6 close     u8 window
 	  Use            i32 x, u16 y, i32 z: right click on a usable block (opens a chest)
 	  UseItem        i32 x, u16 y, i32 z, u8 side (0..5), u8 flags (bit 0: sneaking): a right click
@@ -36,12 +38,15 @@
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
 	  Edits          u32 count, count x (i32 x, u16 y, i32 z, u16 block)
 	  Waypoints      waypoint list (below)
-	  Inventory      the player's inventory after their action `ack`: u32 ack, u8 selected,
+	  Inventory      the player's inventory after their action `ack`: u32 ack, u8 selected (1..9),
 	                 4 armor + 36 inventory + 1 cursor stacks, u8 window, u8 containerKind (0 none,
 	                 else its index in Types.KINDS), u16 containerBlock, u8 containerSize,
-	                 4 x u16 container data (a furnace's litTime, litDuration, cookingProgress,
-	                 cookingTotalTime), containerSize stacks. A stack is u16 item, u8 count
-	                 (0 = empty), u16 damage (a tool's wear).
+	                 u8 n + n x f64 container data (at most Types.MAX_CONTAINER_DATA, no NaN: a
+	                 furnace's litTime, litDuration, cookingProgress, cookingTotalTime,
+	                 cookingItem; machines' energy), containerSize stacks. A stack is u16 item,
+	                 u8 count (0 = empty, and nothing more follows), u16 damage (a tool's wear),
+	                 item data (below). A malformed snapshot (bad lengths, kinds, data) decodes to
+	                 nil.
 	  Entities       u16 count, count x entity update (u8 op, u32 id, then by op):
 	                   1 spawn   u16 item, u8 count, f32 x, y, z, vx, vy, vz (blocks, per tick), u16 age (ticks)
 	                   2 sync    f32 x, y, z, vx, vy, vz
@@ -75,12 +80,20 @@
 	                 Clients move items along the path themselves at 20 ticks a second; nothing
 	                 is sent per block.
 
+	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
+	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
+	  u8 type, value: type 0 a number (f64, finite), 1 a string (u8 length (at most 64) + bytes),
+	  2 a boolean (u8 0 / 1). Duplicate keys, other types and anything Items.validData refuses are
+	  malformed. Item entities and items in transporters carry no data on the wire (clients only
+	  draw them).
+
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
 	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
 	  list loaded on join), so neither side ever applies an older list over a newer one.
 ]]
 
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
+local Items = require(script.Parent.Parent.Items)
 
 local Protocol = {}
 
@@ -255,6 +268,140 @@ function Protocol.decodeUseItem(b: buffer): (number?, number, number, number, bo
 	return x, y, z, side, flags == 1
 end
 
+--[[ Item data (Items.Data) ]]
+
+local DATA_NUMBER, DATA_STRING, DATA_BOOLEAN = 0, 1, 2
+
+-- The keys of `data` in the order they travel (sorted, so equal data always encodes alike).
+local function sortedKeys(data: Items.Data): { string }
+	local keys: { string } = {}
+	for key in next, data do
+		table.insert(keys, key)
+	end
+	table.sort(keys)
+	return keys
+end
+
+-- Bytes `data` takes on the wire (1 for none; data Items.validData refuses travels as none).
+function Protocol.dataSize(data: Items.Data?): number
+	if data == nil or not Items.validData(data) then
+		return 1
+	end
+	local size = 1
+	for key, value in next, data do
+		size += 2 + #key
+		if type(value) == "number" then
+			size += 8
+		elseif type(value) == "string" then
+			size += 1 + #value
+		else
+			size += 1
+		end
+	end
+	return size
+end
+
+-- Writes `data` at offset `o` (Protocol.dataSize bytes) and returns the offset after it.
+function Protocol.writeData(b: buffer, o: number, data: Items.Data?): number
+	if data == nil or not Items.validData(data) then
+		buffer.writeu8(b, o, 0)
+		return o + 1
+	end
+	local keys = sortedKeys(data)
+	buffer.writeu8(b, o, #keys)
+	o += 1
+	for _, key in keys do
+		buffer.writeu8(b, o, #key)
+		buffer.writestring(b, o + 1, key)
+		o += 1 + #key
+		local value = data[key]
+		if type(value) == "number" then
+			buffer.writeu8(b, o, DATA_NUMBER)
+			buffer.writef64(b, o + 1, value)
+			o += 9
+		elseif type(value) == "string" then
+			buffer.writeu8(b, o, DATA_STRING)
+			buffer.writeu8(b, o + 1, #value)
+			buffer.writestring(b, o + 2, value)
+			o += 2 + #value
+		else
+			buffer.writeu8(b, o, DATA_BOOLEAN)
+			buffer.writeu8(b, o + 1, if value then 1 else 0)
+			o += 2
+		end
+	end
+	return o
+end
+
+--[[
+	Reads item data at offset `o` of the first `len` bytes of `b`: the data (nil: none, or frozen
+	valid data) and the offset after it, or ok = false when it is malformed.
+]]
+function Protocol.readData(b: buffer, o: number, len: number): (boolean, Items.Data?, number)
+	if o + 1 > len then
+		return false, nil, o
+	end
+	local n = buffer.readu8(b, o)
+	o += 1
+	if n == 0 then
+		return true, nil, o
+	elseif n > Items.MAX_DATA_KEYS then
+		return false, nil, o
+	end
+	local data: Items.Data = {}
+	for _ = 1, n do
+		if o + 1 > len then
+			return false, nil, o
+		end
+		local keyLength = buffer.readu8(b, o)
+		-- (Room for the key and the type byte.)
+		if keyLength < 1 or keyLength > Items.MAX_DATA_KEY or o + 2 + keyLength > len then
+			return false, nil, o
+		end
+		local key = buffer.readstring(b, o + 1, keyLength)
+		if not Items.validDataKey(key) or data[key] ~= nil then
+			return false, nil, o
+		end
+		o += 1 + keyLength
+		local kind = buffer.readu8(b, o)
+		o += 1
+		if kind == DATA_NUMBER then
+			if o + 8 > len then
+				return false, nil, o
+			end
+			data[key] = buffer.readf64(b, o)
+			o += 8
+		elseif kind == DATA_STRING then
+			if o + 1 > len then
+				return false, nil, o
+			end
+			local length = buffer.readu8(b, o)
+			if length > Items.MAX_DATA_STRING or o + 1 + length > len then
+				return false, nil, o
+			end
+			data[key] = buffer.readstring(b, o + 1, length)
+			o += 1 + length
+		elseif kind == DATA_BOOLEAN then
+			if o + 1 > len then
+				return false, nil, o
+			end
+			local flag = buffer.readu8(b, o)
+			if flag > 1 then
+				return false, nil, o
+			end
+			data[key] = flag == 1
+			o += 1
+		else
+			return false, nil, o
+		end
+	end
+	-- (NaN and infinities are caught here.)
+	if not Items.validData(data) then
+		return false, nil, o
+	end
+	return true, table.freeze(data), o
+end
+
 --[[ Inventory actions (client -> server) ]]
 
 local ACTION_CLICK, ACTION_DRAG, ACTION_SELECT, ACTION_DROP, ACTION_CREATIVE, ACTION_CLOSE = 1, 2, 3, 4, 5, 6
@@ -288,12 +435,14 @@ function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Acti
 		buffer.writeu8(b, 4, ACTION_DROP)
 		buffer.writeu8(b, 5, if action.all then 1 else 0)
 	elseif action.kind == "creative" then
-		b = buffer.create(11)
+		b = buffer.create(13 + Protocol.dataSize(action.data))
 		buffer.writeu8(b, 4, ACTION_CREATIVE)
 		buffer.writeu8(b, 5, action.window)
 		buffer.writei16(b, 6, action.slot)
 		buffer.writeu16(b, 8, action.item)
 		buffer.writeu8(b, 10, action.count)
+		buffer.writeu16(b, 11, math.clamp(Items.cleanDamage(action.damage) or 0, 0, 65535))
+		Protocol.writeData(b, 13, action.data)
 	elseif action.kind == "close" then
 		b = buffer.create(6)
 		buffer.writeu8(b, 4, ACTION_CLOSE)
@@ -339,7 +488,12 @@ function Protocol.decodeInventoryAction(b: buffer): (number?, InventoryTypes.Act
 		return seq, { kind = "select", slot = buffer.readu8(b, 5) }
 	elseif kind == ACTION_DROP and len == 6 then
 		return seq, { kind = "drop", all = buffer.readu8(b, 5) ~= 0 }
-	elseif kind == ACTION_CREATIVE and len == 11 then
+	elseif kind == ACTION_CREATIVE and len >= 14 then
+		local ok, data, after = Protocol.readData(b, 13, len)
+		if not ok or after ~= len then
+			return nil, nil
+		end
+		local damage = buffer.readu16(b, 11)
 		return seq,
 			{
 				kind = "creative",
@@ -347,6 +501,8 @@ function Protocol.decodeInventoryAction(b: buffer): (number?, InventoryTypes.Act
 				slot = buffer.readi16(b, 6),
 				item = buffer.readu16(b, 8),
 				count = buffer.readu8(b, 10),
+				damage = if damage > 0 then damage else nil,
+				data = data,
 			}
 	elseif kind == ACTION_CLOSE and len == 6 then
 		return seq, { kind = "close", window = buffer.readu8(b, 5) }
@@ -356,29 +512,48 @@ end
 
 --[[ Inventory snapshot (server -> client) ]]
 
+-- A stack's fixed part: u16 item, u8 count, u16 damage (its data follows).
 local STACK_BYTES = 5
-local CONTAINER_DATA = 4
+
+local function stackSize(stack: InventoryTypes.Stack?): number
+	if stack and stack.count > 0 then
+		return STACK_BYTES + Protocol.dataSize(stack.data)
+	end
+	return 3
+end
 
 local function writeStack(b: buffer, o: number, stack: InventoryTypes.Stack?): number
 	if stack and stack.count > 0 then
 		buffer.writeu16(b, o, stack.item)
 		buffer.writeu8(b, o + 2, math.min(stack.count, 255))
-		buffer.writeu16(b, o + 3, math.clamp(stack.damage or 0, 0, 65535))
-	else
-		buffer.writeu16(b, o, 0)
-		buffer.writeu8(b, o + 2, 0)
-		buffer.writeu16(b, o + 3, 0)
+		buffer.writeu16(b, o + 3, math.clamp(Items.cleanDamage(stack.damage) or 0, 0, 65535))
+		return Protocol.writeData(b, o + STACK_BYTES, stack.data)
 	end
-	return o + STACK_BYTES
+	-- An empty slot: item 0, count 0.
+	buffer.writeu16(b, o, 0)
+	buffer.writeu8(b, o + 2, 0)
+	return o + 3
 end
 
-local function readStack(b: buffer, o: number): InventoryTypes.Stack?
+-- The stack at `o` (nil: an empty slot) and the offset after it; ok = false when malformed.
+local function readStack(b: buffer, o: number, len: number): (boolean, InventoryTypes.Stack?, number)
+	if o + 3 > len then
+		return false, nil, o
+	end
 	local count = buffer.readu8(b, o + 2)
 	if count == 0 then
-		return nil
+		return true, nil, o + 3
+	elseif o + STACK_BYTES > len then
+		return false, nil, o
+	end
+	local ok, data, after = Protocol.readData(b, o + STACK_BYTES, len)
+	if not ok then
+		return false, nil, o
 	end
 	local damage = buffer.readu16(b, o + 3)
-	return { item = buffer.readu16(b, o), count = count, damage = if damage > 0 then damage else nil }
+	return true,
+		{ item = buffer.readu16(b, o), count = count, damage = if damage > 0 then damage else nil, data = data },
+		after
 end
 
 local KIND_CODE: { [string]: number } = {}
@@ -386,11 +561,44 @@ for code, kind in InventoryTypes.KINDS do
 	KIND_CODE[kind] = code
 end
 
+-- A container data value as sent: NaN (which the decoder refuses) becomes 0.
+local function dataValue(value: number?): number
+	if value == nil or value ~= value then
+		return 0
+	end
+	return value
+end
+
+--[[
+	An Inventory message for `snapshot`. A container of a kind Types.KINDS does not list travels as
+	none (kind 0, no slots, no data), so the snapshot still decodes; container data beyond
+	Types.MAX_CONTAINER_DATA values is cut and NaN is sent as 0.
+]]
 function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	local container = snapshot.container
-	local size = if container then container.size else 0
-	local b = buffer.create(4 + 1 + 41 * STACK_BYTES + 5 + CONTAINER_DATA * 2 + size * STACK_BYTES)
+	if container and KIND_CODE[container.kind] == nil then
+		container = nil
+	end
+	local size = if container then math.min(container.size, InventoryTypes.MAX_CONTAINER) else 0
+	local data = if container then container.data else nil
+	local dataCount = if data then math.min(#data, InventoryTypes.MAX_CONTAINER_DATA) else 0
 	local inventory = snapshot.inventory
+
+	local bytes = 5 + 5 + 1 + dataCount * 8
+	for slot = 1, InventoryTypes.ARMOR_SIZE do
+		bytes += stackSize(inventory.armor[slot])
+	end
+	for slot = 1, InventoryTypes.INVENTORY_SIZE do
+		bytes += stackSize(inventory.slots[slot])
+	end
+	bytes += stackSize(inventory.cursor)
+	if container then
+		for slot = 1, size do
+			bytes += stackSize(container.slots[slot])
+		end
+	end
+
+	local b = buffer.create(bytes)
 	buffer.writeu32(b, 0, snapshot.ack)
 	buffer.writeu8(b, 4, inventory.selected)
 	local o = 5
@@ -402,14 +610,14 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	end
 	o = writeStack(b, o, inventory.cursor)
 	buffer.writeu8(b, o, snapshot.window)
-	buffer.writeu8(b, o + 1, if container then KIND_CODE[container.kind] or 0 else 0)
+	buffer.writeu8(b, o + 1, if container then KIND_CODE[container.kind] else 0)
 	buffer.writeu16(b, o + 2, if container then container.block else 0)
 	buffer.writeu8(b, o + 4, size)
-	o += 5
-	local data = if container then container.data else nil
-	for i = 1, CONTAINER_DATA do
-		buffer.writeu16(b, o, math.clamp(if data then data[i] or 0 else 0, 0, 65535))
-		o += 2
+	buffer.writeu8(b, o + 5, dataCount)
+	o += 6
+	for i = 1, dataCount do
+		buffer.writef64(b, o, dataValue((data :: { number })[i]))
+		o += 8
 	end
 	if container then
 		for slot = 1, size do
@@ -419,39 +627,88 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	return b
 end
 
-function Protocol.decodeInventory(b: buffer): InventoryTypes.Snapshot
+--[[
+	The snapshot in an Inventory message, or nil when it is malformed: wrong lengths, a selected
+	slot outside 1..9, an unknown container kind (or slots without one), more container slots or
+	data than allowed, NaN data, or item data Items.validData refuses.
+]]
+function Protocol.decodeInventory(b: buffer): InventoryTypes.Snapshot?
+	local len = buffer.len(b)
+	if len < 5 then
+		return nil
+	end
 	local inventory = InventoryTypes.newInventory()
 	inventory.selected = buffer.readu8(b, 4)
+	if inventory.selected < 1 or inventory.selected > InventoryTypes.HOTBAR_SIZE then
+		return nil
+	end
 	local o = 5
+	local ok: boolean, stack: InventoryTypes.Stack? = true, nil
 	for slot = 1, InventoryTypes.ARMOR_SIZE do
-		inventory.armor[slot] = readStack(b, o)
-		o += STACK_BYTES
+		ok, stack, o = readStack(b, o, len)
+		if not ok then
+			return nil
+		end
+		inventory.armor[slot] = stack
 	end
 	for slot = 1, InventoryTypes.INVENTORY_SIZE do
-		inventory.slots[slot] = readStack(b, o)
-		o += STACK_BYTES
+		ok, stack, o = readStack(b, o, len)
+		if not ok then
+			return nil
+		end
+		inventory.slots[slot] = stack
 	end
-	inventory.cursor = readStack(b, o)
-	o += STACK_BYTES
+	ok, stack, o = readStack(b, o, len)
+	if not ok then
+		return nil
+	end
+	inventory.cursor = stack
+	if o + 6 > len then
+		return nil
+	end
 	local window = buffer.readu8(b, o)
-	local kind = InventoryTypes.KINDS[buffer.readu8(b, o + 1)]
+	local code = buffer.readu8(b, o + 1)
+	local kind = InventoryTypes.KINDS[code]
 	local block = buffer.readu16(b, o + 2)
 	local size = buffer.readu8(b, o + 4)
-	o += 5
-	local data = table.create(CONTAINER_DATA, 0)
-	for i = 1, CONTAINER_DATA do
-		data[i] = buffer.readu16(b, o)
-		o += 2
+	local dataCount = buffer.readu8(b, o + 5)
+	o += 6
+	if
+		(code ~= 0 and kind == nil)
+		or (kind == nil and (size > 0 or dataCount > 0))
+		or size > InventoryTypes.MAX_CONTAINER
+		or dataCount > InventoryTypes.MAX_CONTAINER_DATA
+		or o + dataCount * 8 > len
+	then
+		return nil
+	end
+	local data: { number }? = nil
+	if dataCount > 0 then
+		local values = table.create(dataCount)
+		for i = 1, dataCount do
+			local value = buffer.readf64(b, o)
+			if value ~= value then
+				return nil
+			end
+			values[i] = value
+			o += 8
+		end
+		data = values
 	end
 	local container: InventoryTypes.Container? = nil
 	if kind then
 		local slots = {}
 		for slot = 1, size do
-			slots[slot] = readStack(b, o)
-			o += STACK_BYTES
+			ok, stack, o = readStack(b, o, len)
+			if not ok then
+				return nil
+			end
+			slots[slot] = stack
 		end
-		container =
-			{ kind = kind, block = block, size = size, slots = slots, data = if kind == "furnace" then data else nil }
+		container = { kind = kind, block = block, size = size, slots = slots, data = data }
+	end
+	if o ~= len then
+		return nil
 	end
 	return { ack = buffer.readu32(b, 0), inventory = inventory, window = window, container = container }
 end

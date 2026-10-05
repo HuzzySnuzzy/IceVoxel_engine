@@ -12,6 +12,10 @@
 	                         taken), returning the grid's new contents. (No recipe here leaves
 	                         anything behind, like Minecraft's empty buckets.)
 
+	Ingredients match by item whatever their data (Items `data`); results carry none, a repaired
+	tool's included (Minecraft's RepairItemRecipe makes a fresh stack). What stays in the grid after
+	a craft keeps its wear and data.
+
 	Pure and deterministic: the server crafts with it and clients predict with it.
 ]]
 
@@ -189,7 +193,8 @@ local function matchesShapeless(recipe: Recipe, stacks: { Stack }): boolean
 	return true
 end
 
--- Minecraft's tool repair: exactly two of the same wearing item, durability left added + 5%.
+-- Minecraft's tool repair: exactly two of the same wearing item, durability left added + 5% (a
+-- fresh stack: no data).
 local function repair(stacks: { Stack }): Stack?
 	if #stacks ~= 2 then
 		return nil
@@ -228,13 +233,14 @@ function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
 	return repair(stacks)
 end
 
--- The grid after one craft: one item less in every used slot (new stack tables).
+-- The grid after one craft: one item less in every used slot (new stack tables, wear and data
+-- kept).
 function Crafting.consume(grid: { [number]: Stack? }, width: number): { [number]: Stack? }
 	local after: { [number]: Stack? } = {}
 	for slot = 1, width * width do
 		local stack = grid[slot]
 		if stack and stack.count > 1 then
-			after[slot] = { item = stack.item, count = stack.count - 1, damage = stack.damage }
+			after[slot] = Items.withCount(stack, stack.count - 1)
 		end
 	end
 	return after

@@ -759,6 +759,61 @@ block's outline, nothing for a torch, air or water. The server refuses a placeme
 overlaps a player's standing hull (`EditRules.obstructs`, Minecraft's BlockItem.canPlace; a torch
 may overlap one), and falling sand and gravel land on that box (see Server).
 
+## Item data (`Items`, Mekanism's sustained data)
+
+A stack may carry `data`, Minecraft's item NBT kept small and flat: `Stack = { item, count,
+damage?, data? }`, where `data` maps up to 16 keys (1-32 letters, digits and `_`) to finite numbers,
+strings of at most 64 bytes or booleans. No data is nil, never an empty table.
+- **Values.** A data table is shared by every copy of its stack and frozen (`Items.cleanData`,
+  `withData`): never change one, make a new one. `Items.newStack`, `copyStack` and `withCount` keep
+  data and wear on every copy, so data travels through clicks, drags, shift-clicks, number keys,
+  throws, chests, furnaces (what is left of the input and fuel), transporters, item entities,
+  death drops, close leftovers and the client's prediction.
+- **Matching.** Stacks only stack with the same item, wear and data (`Items.stacksMatch`, also
+  `Menu.stacksMatch`: Minecraft's isSameItemSameTags; `sameData` compares data alone, `dataKey`
+  gives equal data an equal string): in the menu, `Menu.add`, transporters' insert and room, item
+  entity merging and JEI's transfer, which uses plain stacks before ones with data. Pick block
+  takes plain stacks only (the picked stack has no tags).
+- **Where data comes from.** Crafting results have none (a repaired tool is a fresh stack, and so
+  is an Advanced Fluid Tank made from a tank holding water); what stays in the grid keeps its own.
+  Creative middle-click clone copies the whole stack, and the `creative` action carries wear and
+  data (Minecraft's creative slot packet), checked by `Items.validData` and the item's durability.
+- **Trust.** Everything from the network passes `Items.validData`; Net/Protocol decodes nothing
+  else and hands out frozen tables. `Items.dataNumber(data, key)` reads a number back.
+
+**On the wire.** Snapshots and creative actions send a stack's data after its wear: u8 n (0 none,
+at most 16), then n entries sorted by key (equal data encodes alike): u8 key length + key, u8 type
+and value (0 f64, finite; 1 u8 length + string; 2 u8 0 / 1). Duplicate keys, unknown types, NaN or
+infinities make the message malformed: the client drops such a snapshot, the server such an
+action. Item entities and items in transporters send no data (clients only draw them). A
+container's `data` (Minecraft's ContainerData) is u8 n + n x f64 (at most
+`Types.MAX_CONTAINER_DATA` = 16, NaN refused), so machines can show energy far beyond 16 bits; the
+furnace keeps indices 1..5. A container whose kind is not in `Types.KINDS` travels as none.
+
+**Tooltips.** `Items.describe(stack)` gives a line for each data key with a describer, in the order
+they were added; other keys show nothing (Minecraft hides NBT). "fluid" ("Water: 12,000 mB", with
+`amount`) and "energy" ("Energy: 1.2 MJ") are built in; `Items.addDescriber(key, fn)` adds or
+replaces one (a failing one is skipped). `formatEnergy` is Mekanism's short form (J, kJ, MJ, GJ,
+two decimals cut, so nothing short of full reads full; "Infinite"); `formatFluid` and `thousands`
+write "12,000". `Ui/Screens` shows the lines in grey under a hovered slot's item name.
+
+**Sustained data** (`Network/EditRules`, `Network/ServerNet`). Mekanism keeps a block's contents in
+its item when it is broken. Parts of the server that keep block state register hooks with
+`ServerNet.addBlockData({ save, placed })` (a registry from `EditRules.newBlockData`):
+- a survival break computes its drop with `EditRules.breakDrop` while the block is still there:
+  every part's `save(x, y, z, block)`, merged (an earlier part wins a shared key, at most 16 keys),
+  goes on the drop when it is the block's own item (`dropWithData`; an ore dropping raw ore drops
+  it plain). Then setBlock removes the block and its state. Creative breaks drop nothing;
+- a placement asks `place` (Players/Inventories) first, which hands back the stack the block came
+  from as it was before one was used up (data intact; in creative the held stack if it is the
+  block's item). Right after setBlock every part's `placed(player, x, y, z, block, stack)` puts
+  its contents back into the fresh block;
+- a hook that errors is reported and skipped; it never stops a break or a placement.
+The first user is the Fluid Tank (`TransmitterWorld.blockDataHooks`): `tankData` is `{ fluid,
+amount }` while it holds anything (an empty tank drops a plain item that stacks with new ones);
+`restoreTank` fills the placed tank (whole mB, at most its capacity, known fluids only) and marks
+it dirty, so its Tanks record follows the edit to clients.
+
 ## Just Enough Items (`Ui/Jei/`)
 
 JEI's three parts, simplified: an item list beside every inventory screen, a recipe view with an

@@ -59,8 +59,8 @@ function ClientInventory.start()
 	started = true
 	ClientNet.on(Protocol.ServerMessage.Inventory, function(payload: buffer)
 		local ok, snapshot = pcall(Protocol.decodeInventory, payload)
-		if not ok then
-			warn(`[IceVoxel] Bad inventory snapshot: {snapshot}`)
+		if not ok or snapshot == nil then
+			warn(`[IceVoxel] Bad inventory snapshot: {if ok then "malformed" else snapshot}`)
 			return
 		end
 		prediction:receive(snapshot, isCreative())

@@ -21,6 +21,13 @@
 	    chest      a chest's 27 slots (shared by everyone who opens it)
 	    furnace    1 input, 2 fuel, 3 output, plus `data` (Crafting/Smelting; shared)
 
+	A container's `data` is a list of up to MAX_CONTAINER_DATA numbers its screen shows (Minecraft's
+	ContainerData): a furnace's flame and arrow (Crafting/Smelting, indices 1..5). The protocol
+	sends them as f64, so machines may keep energy far beyond 16 bits there.
+
+	Stacks keep their item data (Items.Stack `data`) wherever they go: every copy, click and move
+	carries it, and stacks with different data never merge (Inventory/Menu).
+
 	Window 0 is the inventory screen (its container the 2 x 2 grid); the others get ids 1..255.
 ]]
 
@@ -46,7 +53,8 @@ export type Container = {
 	block: number,
 	size: number,
 	slots: { [number]: Stack? },
-	-- Furnace: litTime, litDuration, cookingProgress, cookingTotalTime, cookingItem (ticks, item).
+	-- Numbers the screen shows (at most MAX_CONTAINER_DATA). Furnace: litTime, litDuration,
+	-- cookingProgress, cookingTotalTime, cookingItem (ticks, item).
 	data: { number }?,
 }
 
@@ -66,7 +74,8 @@ export type Window = {
 	  select    hotbar slot 1..9
 	  drop      throw the held item (one, or the whole stack)
 	  place     one of the held item is used up placing a block (survival)
-	  creative  creative inventory: put a stack (count 0 = nothing) in a window slot or, with slot
+	  creative  creative inventory: put a stack (count 0 = nothing; with its wear and item data, as
+	            Minecraft's creative slot packet sends whole stacks) in a window slot or, with slot
 	            CURSOR, on the cursor
 	  close     close the window (the carried stack goes back into the inventory)
 ]]
@@ -76,7 +85,15 @@ export type Action =
 	| { kind: "select", slot: number }
 	| { kind: "drop", all: boolean }
 	| { kind: "place", item: number }
-	| { kind: "creative", window: number, slot: number, item: number, count: number }
+	| {
+		kind: "creative",
+		window: number,
+		slot: number,
+		item: number,
+		count: number,
+		damage: number?,
+		data: Items.Data?,
+	}
 	| { kind: "close", window: number }
 
 -- The server's state of a player's inventory, after the player's action number `ack`.
@@ -102,6 +119,8 @@ Types.CURSOR = -1
 -- Most slots a drag can cover / a container can have.
 Types.MAX_DRAG = 64
 Types.MAX_CONTAINER = 54
+-- Most numbers in a container's `data`.
+Types.MAX_CONTAINER_DATA = 16
 -- Container kinds, and their numbers on the wire.
 Types.KINDS = { "inventory", "crafting", "chest", "furnace" }
 -- Slot of a crafting container's result; its grid follows (width x width, row by row).

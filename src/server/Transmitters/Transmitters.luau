@@ -15,6 +15,9 @@
 	            hold); Players/Inventories.containerChanged sends viewers a snapshot and wakes a
 	            furnace after a transporter put something in or took something out.
 	  Drops     a broken transporter's items drop where it was (Entities.dropBlock).
+	  Tanks     a Fluid Tank broken by a survival player keeps its water in its item, and placing
+	            that item puts it back (TransmitterWorld.blockDataHooks, registered with
+	            ServerNet's `addBlockData`: Mekanism's sustained data).
 	  Records   Transmitters (side modes, colour, pipe fill) and Tanks records: a chunk's
 	            non-default ones go to a player right after its edit list (ServerNet's
 	            `chunksSent` rule calls `sendChunks`), and changes go once per frame to every
@@ -43,6 +46,7 @@ local Rig = require(Shared.Movement.Rig)
 local SharedTransmitters = require(Shared.Transmitters)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
+local EditRules = require(script.Parent.Parent.Network.EditRules)
 local Containers = require(script.Parent.Parent.Players.Containers)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
@@ -53,7 +57,10 @@ type TransmitterRecord = Protocol.TransmitterRecord
 type TankRecord = Protocol.TankRecord
 
 -- Only what this uses of ServerNet.ServerNet.
-type Net = { send: (player: Player, kind: number, payload: buffer) -> () }
+type Net = {
+	send: (player: Player, kind: number, payload: buffer) -> (),
+	addBlockData: (hooks: EditRules.BlockDataHooks) -> (),
+}
 
 local HEIGHT = Config.WorldHeight
 local TICK = 1 / SharedTransmitters.TICK_RATE
@@ -262,6 +269,8 @@ function Transmitters.start(serverNet: Net, world: WorldServer.World)
 		drop = Entities.dropBlock,
 	})
 	state = simulation
+	-- A tank's water stays in its item (Mekanism's sustained data).
+	serverNet.addBlockData(TransmitterWorld.blockDataHooks(simulation))
 
 	Players.PlayerRemoving:Connect(function(player)
 		tracked[player] = nil

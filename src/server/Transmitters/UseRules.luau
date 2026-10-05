@@ -45,11 +45,9 @@ UseRules.CONFIGURATOR = Items.id.Configurator
 UseRules.WATER_SOURCE = Blocks.fluidId("Water", 0)
 UseRules.WATER = Transmitters.FLUIDS.WATER
 
+-- `count` of `stack` (its wear and data kept); nil below 1.
 local function copy(stack: Stack, count: number): Stack?
-	if count < 1 then
-		return nil
-	end
-	return { item = stack.item, count = count, damage = stack.damage }
+	return Items.withCount(stack, count)
 end
 
 --[[

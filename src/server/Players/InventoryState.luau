@@ -26,7 +26,9 @@
 	`has` is Minecraft's Inventory.contains.
 
 	Functions that take stacks out of the world (throws, close leftovers, deaths) return them; the
-	caller turns them into item entities.
+	caller turns them into item entities. Stacks keep their item data (Items `data`) through all of
+	it; `place` hands back the stack a block was placed from, data included, so whatever kept the
+	block's contents in its item (a Fluid Tank's water) can put them back.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -69,7 +71,7 @@ export type InventoryState = {
 	window: (self: InventoryState, key: any) -> Window?,
 	snapshot: (self: InventoryState, key: any) -> Types.Snapshot?,
 	apply: (self: InventoryState, key: any, seq: number, action: Action, creative: boolean) -> { Stack },
-	place: (self: InventoryState, key: any, block: number, seq: number, creative: boolean) -> boolean,
+	place: (self: InventoryState, key: any, block: number, seq: number, creative: boolean) -> (boolean, Stack?),
 	acknowledge: (self: InventoryState, key: any, seq: number) -> (),
 	open: (self: InventoryState, key: any, x: number, y: number, z: number, block: number) -> { Stack },
 	close: (self: InventoryState, key: any) -> { Stack },
@@ -199,25 +201,40 @@ end
 --[[
 	A block placement (inventory action `seq`), after the edit passed every other check. Survival:
 	the held stack must be the block's item, and one is used up. Creative: nothing is used.
-	Acknowledges `seq` either way. false = refuse the placement.
+	Acknowledges `seq` either way. false = refuse the placement. The second result is the stack
+	the block came from, as it was before placing used one up (a copy, its data intact: Mekanism's
+	sustained data comes back from it); nil when the hand does not hold the block's item (creative
+	players may place anything).
 ]]
-function InventoryState.place(self: InventoryState, key: any, block: number, seq: number, creative: boolean): boolean
+function InventoryState.place(
+	self: InventoryState,
+	key: any,
+	block: number,
+	seq: number,
+	creative: boolean
+): (boolean, Stack?)
 	local player = self.players[key]
 	if player == nil then
-		return false
+		return false, nil
 	end
 	acknowledge(player, seq)
-	if creative then
-		return true
-	end
 	local item = Items.ofBlock(block)
 	local inventory = player.window.inventory
 	local held = inventory.slots[inventory.selected]
-	if item == nil or held == nil or held.item ~= item or held.count < 1 then
-		return false
+	local from = if item ~= nil
+			and held ~= nil
+			and held.item == item
+			and held.count >= 1
+		then Items.copyStack(held)
+		else nil
+	if creative then
+		return true, from
+	end
+	if item == nil or from == nil then
+		return false, nil
 	end
 	Menu.apply(player.window, { kind = "place", item = item }, false)
-	return true
+	return true, from
 end
 
 -- Acknowledges action `seq` without changing anything (a refused placement: undoes the prediction).
@@ -331,8 +348,9 @@ function InventoryState.removeContainer(
 	if container then
 		for slot = 1, container.size do
 			local stack = container.slots[slot]
-			if stack and stack.count > 0 then
-				table.insert(contents, { item = stack.item, count = stack.count, damage = stack.damage })
+			local copied = Items.copyStack(stack)
+			if copied then
+				table.insert(contents, copied)
 			end
 		end
 	end
@@ -369,7 +387,8 @@ end
 
 --[[
 	Replaces the stack in the player's hand (the selected hotbar slot) with `stack` (nil or a
-	count below 1 empties it): a bucket filled or emptied (Players/ItemUse). A snapshot is due.
+	count below 1 empties it; its wear and data kept): a bucket filled or emptied
+	(Players/ItemUse). A snapshot is due.
 ]]
 function InventoryState.setHeld(self: InventoryState, key: any, stack: Stack?)
 	local player = self.players[key]
@@ -385,7 +404,7 @@ function InventoryState.setHeld(self: InventoryState, key: any, stack: Stack?)
 		and count == math.floor(count)
 		and Items.isValid(stack.item)
 	then
-		inventory.slots[inventory.selected] = { item = stack.item, count = count, damage = stack.damage }
+		inventory.slots[inventory.selected] = Items.withCount(stack, count)
 	else
 		inventory.slots[inventory.selected] = nil
 	end
@@ -400,7 +419,7 @@ end
 function InventoryState.give(self: InventoryState, key: any, stack: Stack): Stack?
 	local player = self.players[key]
 	if player == nil then
-		return { item = stack.item, count = stack.count, damage = stack.damage }
+		return Items.copyStack(stack)
 	end
 	local left = Menu.add(player.window.inventory, stack)
 	player.dirty = true
@@ -453,7 +472,7 @@ function InventoryState.wearHeld(self: InventoryState, key: any, amount: number)
 		inventory.slots[selected] = nil
 		return true
 	end
-	inventory.slots[selected] = { item = held.item, count = held.count, damage = damage }
+	inventory.slots[selected] = Items.newStack(held.item, held.count, damage, held.data)
 	return false
 end
 

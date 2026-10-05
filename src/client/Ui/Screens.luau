@@ -184,8 +184,15 @@ function Screens.toggle()
 	end
 end
 
-local function tooltipLines(item: number): { Line }
+-- The tooltip of `item`: its name, the lines of a stack's item data (Items.describe: a tank's
+-- water, stored energy), then an armor piece's stats.
+local function tooltipLines(item: number, details: { string }?): { Line }
 	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
+	if details then
+		for _, text in details do
+			table.insert(lines, { text = text, colour = Style.Colour.Gray })
+		end
+	end
 	local def = Items.get(item)
 	local armor = def and def.armor
 	if armor then
@@ -1077,21 +1084,29 @@ function Screens.start()
 		end
 
 		-- The hovered item's tooltip (only with nothing carried, like Minecraft), or JEI's: its items
-		-- (a tag ingredient says which tag) and its buttons.
+		-- (a tag ingredient says which tag) and its buttons. A slot's stack adds the lines of its
+		-- item data.
 		local item: number? = nil
 		local extra: { Line }? = nil
+		local details: { string }? = nil
 		if cursor == nil and point then
 			item, extra = jei:tooltipAt(point)
 			if item == nil and extra == nil and hover then
 				if hover.kind == "slot" then
 					local stack = Menu.get(window, hover.index)
 					item = stack and stack.item
+					details = if stack and stack.data then Items.describe(stack) else nil
 				elseif hover.kind == "grid" and Items.isValid(hover.item) then
 					item = hover.item
 				end
 			end
 		end
 		local key = if item then tostring(item) else ""
+		if details then
+			for _, text in details do
+				key ..= `#{text}`
+			end
+		end
 		if extra then
 			for _, line in extra do
 				key ..= `|{line.text}`
@@ -1099,7 +1114,7 @@ function Screens.start()
 		end
 		if key ~= "" and point then
 			if key ~= tooltipKey then
-				local lines: { Line } = if item then tooltipLines(item) else {}
+				local lines: { Line } = if item then tooltipLines(item, details) else {}
 				if extra then
 					table.move(extra, 1, #extra, #lines + 1, lines)
 				end

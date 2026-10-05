@@ -41,6 +41,9 @@
 
 	Breaking. The items in a transporter that goes drop there as item entities (Env.drop).
 
+	Item data (Items `data`) rides along: a stack keeps it from the inventory it was pulled from to
+	the one it ends in (or the ground), and only joins stacks with the same data.
+
 	Replication (Protocol Transport ops in `world.ops`): an `add` when an item enters, is re-routed
 	(also when it waits), changes speed (enters a transporter of another tier) or has travelled
 	RESEND_HOPS hops of a route longer than Protocol.MAX_PATH; a `remove` when it arrives, drops
@@ -50,6 +53,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local Transmitters = require(Shared.Transmitters)
 
@@ -593,7 +597,7 @@ local function pullSide(
 	local candidates, back = routes()
 	local pull = Transmitters.pullAmount(node.block)
 	for _, kind in types do
-		local want = { item = kind.item, count = math.min(kind.count, pull), damage = kind.damage }
+		local want = Items.withCount(kind, math.min(kind.count, pull)) :: Stack
 		local candidate, room = choose(world, candidates, want, inventory, nil, nil)
 		if candidate then
 			local newSlots, taken = Transmitters.extract(block, face, container.slots, math.min(want.count, room), kind)

@@ -21,7 +21,10 @@
 	            old network the share of its buffer that its pipes held (by capacity): merging
 	            adds buffers up, splitting shares one out. A broken pipe takes its share with it
 	            (lost, counted in `lost`), as in Mekanism.
-	  Tanks     a fluid tank's fluid and mB. Breaking one loses what it held.
+	  Tanks     a fluid tank's fluid and mB. Breaking one loses what it held, unless a survival
+	            player broke it: then its item keeps it (Mekanism's sustained data, `tankData`,
+	            through ServerNet's hooks, `blockDataHooks`) and placing that item puts it back
+	            (`restoreTank`).
 	  Items     stacks in Logistical Transporters (Transmitters/Transport).
 
 	Each `step` (20 a second): queued network work, then Transport.step (items move, transporters
@@ -38,7 +41,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Coords = require(Shared.World.Coords)
+local Items = require(Shared.Items)
 local Transmitters = require(Shared.Transmitters)
+
+local EditRules = require(script.Parent.Parent.Network.EditRules)
 
 local Fluids = require(script.Parent.Fluids)
 local Grid = require(script.Parent.Grid)
@@ -645,6 +651,70 @@ function TransmitterWorld.drainTank(
 		world.dirtyTanks[tank.key] = true
 	end
 	return taken, fluid
+end
+
+--[[ Sustained data (Mekanism keeps a Fluid Tank's contents in its item) ]]
+
+--[[
+	The item data the tank at (x, y, z) keeps when broken: `{ fluid = id, amount = mB }` while it
+	holds anything, nil when it is empty (so an empty tank's item stacks with new ones) or there is
+	no tank.
+]]
+function TransmitterWorld.tankData(world: World, x: number, y: number, z: number): Items.Data?
+	local tank = TransmitterWorld.tank(world, x, y, z)
+	if tank == nil or tank.amount <= 0 or tank.fluid == NONE then
+		return nil
+	end
+	local data: Items.Data = { fluid = tank.fluid, amount = tank.amount }
+	return table.freeze(data)
+end
+
+--[[
+	Puts a tank item's data (`tankData`) into the tank at (x, y, z), which was just placed: what it
+	held is replaced. `fluid` must be a known fluid (Transmitters.FLUID_NAMES) and `amount` at
+	least 1 mB (whole mB; more than the tank holds is cut to its capacity). Returns whether the
+	tank took anything (false: no tank, no data or data of something else).
+]]
+function TransmitterWorld.restoreTank(world: World, x: number, y: number, z: number, data: Items.Data?): boolean
+	local tank = TransmitterWorld.tank(world, x, y, z)
+	if tank == nil or data == nil then
+		return false
+	end
+	local fluid, amount = Items.dataNumber(data, "fluid"), Items.dataNumber(data, "amount")
+	if
+		fluid == nil
+		or Transmitters.FLUID_NAMES[fluid] == nil
+		or amount == nil
+		or not (amount >= 1)
+		or amount == math.huge
+	then
+		return false
+	end
+	tank.fluid = fluid
+	tank.amount = math.min(math.floor(amount), tank.capacity)
+	world.dirtyTanks[tank.key] = true
+	return true
+end
+
+--[[
+	The tanks' sustained data hooks, for ServerNet.addBlockData: a broken tank's item keeps its
+	water (`tankData`), and a tank placed from such an item gets it back (`restoreTank`), in
+	creative too.
+]]
+function TransmitterWorld.blockDataHooks(world: World): EditRules.BlockDataHooks
+	return {
+		save = function(x: number, y: number, z: number, block: number): Items.Data?
+			if not Transmitters.isTank(block) then
+				return nil
+			end
+			return TransmitterWorld.tankData(world, x, y, z)
+		end,
+		placed = function(_player: any, x: number, y: number, z: number, block: number, stack: Items.Stack?)
+			if stack and stack.data and Transmitters.isTank(block) then
+				TransmitterWorld.restoreTank(world, x, y, z, stack.data)
+			end
+		end,
+	}
 end
 
 --[[ Ticking ]]

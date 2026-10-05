@@ -32,8 +32,10 @@
 
 	Stacks are treated as values: a changed slot gets a new table, so no table is ever shared by
 	two slots and a caller holding an old stack never sees it change. A stack's `damage` (a tool's
-	wear) travels with every copy, and two stacks only stack together when their item and damage
-	are equal (Minecraft's isSameItemSameTags).
+	wear) and item data (`data`, Items) travel with every copy, and two stacks only stack together
+	when their item, damage and data are equal (Minecraft's isSameItemSameTags). Middle-click clone
+	copies the data, crafting results have none, and a creative `creative` action may set both
+	(Minecraft's creative slot packet; the data must pass Items.validData).
 ]]
 
 local Items = require(script.Parent.Parent.Items)
@@ -77,31 +79,24 @@ local function isInt(value: any): boolean
 end
 
 -- A tool's wear as stored: a positive whole number, or nil when new (0 and junk read as new).
-local function cleanDamage(damage: any): number?
-	if type(damage) == "number" and damage >= 1 and damage == math.floor(damage) then
-		return damage
-	end
-	return nil
-end
+local cleanDamage = Items.cleanDamage
 
--- A new stack, or nil for a count below 1 (Minecraft's empty ItemStack).
-local function make(item: number, count: number, damage: number?): Stack?
-	if count < 1 then
-		return nil
-	end
-	return { item = item, count = count, damage = cleanDamage(damage) }
-end
+-- A new stack with its wear and data, or nil for a count below 1 (Minecraft's empty ItemStack).
+local make = Items.newStack
 
-local function copy(stack: Stack?): Stack?
-	if stack == nil or stack.count < 1 then
-		return nil
-	end
-	return { item = stack.item, count = stack.count, damage = cleanDamage(stack.damage) }
-end
+local copy = Items.copyStack
 
--- Minecraft's isSameItemSameTags: the same item with the same wear (nil and 0 alike).
-local function same(a: Stack, b: Stack): boolean
-	return a.item == b.item and (cleanDamage(a.damage) or 0) == (cleanDamage(b.damage) or 0)
+-- Minecraft's isSameItemSameTags: the same item with the same wear (nil and 0 alike) and data.
+local same = Items.stacksMatch
+
+-- Wear a stack of `item` may have: none (nil or 0), or 1 .. durability - 1 of an item that wears.
+local function validWear(item: number, damage: any): boolean
+	if damage == nil or damage == 0 then
+		return true
+	end
+	local def = Items.get(item)
+	local durability = def and def.durability
+	return isInt(damage) and durability ~= nil and damage >= 1 and damage < durability
 end
 
 local function containerSize(window: Window): number
@@ -263,7 +258,7 @@ function Menu.isCraftResult(window: Window, index: number): boolean
 	return isCraftResult(window, index)
 end
 
--- Do two stacks stack together: the same item and the same wear (Minecraft's isSameItemSameTags)?
+-- Do two stacks stack together: the same item, wear and data (Minecraft's isSameItemSameTags)?
 function Menu.stacksMatch(a: Stack, b: Stack): boolean
 	return same(a, b)
 end
@@ -331,14 +326,14 @@ local function safeInsert(window: Window, index: number, carried: Stack, n: numb
 	local have = if current then current.count else 0
 	local moved = math.min(n, carried.count, maxStackFor(window, index, carried.item) - have)
 	if current == nil then
-		set(window, index, make(carried.item, moved, carried.damage))
+		set(window, index, make(carried.item, moved, carried.damage, carried.data))
 	elseif same(current, carried) then
 		moved = math.max(moved, 0)
-		set(window, index, make(current.item, have + moved, current.damage))
+		set(window, index, make(current.item, have + moved, current.damage, current.data))
 	else
 		return carried
 	end
-	return make(carried.item, carried.count - moved, carried.damage)
+	return make(carried.item, carried.count - moved, carried.damage, carried.data)
 end
 
 --[[
@@ -358,8 +353,8 @@ local function tryRemove(window: Window, index: number, n: number, limit: number
 	if taken < 1 then
 		return nil
 	end
-	set(window, index, make(current.item, current.count - taken, current.damage))
-	return make(current.item, taken, current.damage)
+	set(window, index, make(current.item, current.count - taken, current.damage, current.data))
+	return make(current.item, taken, current.damage, current.data)
 end
 
 --[[ Adding to the inventory (Minecraft's Inventory.add) ]]
@@ -367,7 +362,7 @@ end
 --[[
 	Puts `stack` into the inventory (it is not changed) and returns what did not fit (nil = all of
 	it fitted). Each round picks, like Inventory.getSlotWithRemainingSpace / getFreeSlot:
-	  1. the selected hotbar slot, if it holds the same item (and wear) and has room;
+	  1. the selected hotbar slot, if it holds the same item (wear and data) and has room;
 	  2. the first slot (1..36, so the hotbar first) with the same item and room;
 	  3. the first empty slot (1..36).
 	Items that don't stack (max 1: tools, armor) only go into empty slots.
@@ -380,7 +375,7 @@ function Menu.add(inventory: Inventory, stack: Stack): Stack?
 	if not Items.isValid(item) then
 		return copy(stack)
 	end
-	local damage = cleanDamage(stack.damage)
+	local damage, data = cleanDamage(stack.damage), stack.data
 	local slots = inventory.slots
 	local max = math.min(Items.maxStack(item), Items.MAX_STACK)
 	local function hasRoom(slot: number): boolean
@@ -419,10 +414,10 @@ function Menu.add(inventory: Inventory, stack: Stack): Stack?
 		if put < 1 then
 			break
 		end
-		slots[target] = make(item, have + put, damage)
+		slots[target] = make(item, have + put, damage, data)
 		count -= put
 	end
-	return make(item, count, damage)
+	return make(item, count, damage, data)
 end
 
 --[[ Clicks ]]
@@ -437,8 +432,8 @@ local function throwCursor(window: Window, button: number): { Stack }
 		window.inventory.cursor = nil
 		return { copy(carried) :: Stack }
 	end
-	window.inventory.cursor = make(carried.item, carried.count - 1, carried.damage)
-	return { make(carried.item, 1, carried.damage) :: Stack }
+	window.inventory.cursor = make(carried.item, carried.count - 1, carried.damage, carried.data)
+	return { make(carried.item, 1, carried.damage, carried.data) :: Stack }
 end
 
 --[[
@@ -455,7 +450,7 @@ local function pickupResult(window: Window, index: number)
 	if carried == nil then
 		inventory.cursor = copy(result)
 	elseif same(carried, result) and carried.count + result.count <= Items.maxStack(carried.item) then
-		inventory.cursor = make(carried.item, carried.count + result.count, carried.damage)
+		inventory.cursor = make(carried.item, carried.count + result.count, carried.damage, carried.data)
 	else
 		-- No room, or another item: nothing at all (no swap, nothing goes into the result).
 		return
@@ -487,7 +482,7 @@ local function pickup(window: Window, index: number, button: number)
 		if same(current, carried) then
 			inventory.cursor = safeInsert(window, index, carried, if button == 0 then carried.count else 1)
 		elseif carried.count <= maxStackFor(window, index, carried.item) then
-			-- Different items (or wear): swap them.
+			-- Different items (or wear, or data): swap them.
 			inventory.cursor = current
 			set(window, index, carried)
 		end
@@ -496,14 +491,14 @@ local function pickup(window: Window, index: number, button: number)
 		-- join it, all or none.
 		local taken = tryRemove(window, index, current.count, Items.maxStack(carried.item) - carried.count)
 		if taken then
-			inventory.cursor = make(carried.item, carried.count + taken.count, carried.damage)
+			inventory.cursor = make(carried.item, carried.count + taken.count, carried.damage, carried.data)
 		end
 	end
 end
 
 --[[
 	moveItemStackTo: moves `stack` into window slots [from, to) (backwards when `reverse`): first
-	merging into stacks of the same item and wear, then into the FIRST suitable empty slot only.
+	merging into stacks of the same item, wear and data, then into the FIRST suitable empty slot only.
 	Returns what is left (nil = everything moved) and whether anything moved.
 ]]
 local function moveItemStackTo(
@@ -514,7 +509,7 @@ local function moveItemStackTo(
 	reverse: boolean
 ): (Stack?, boolean)
 	local item = stack.item
-	local damage = stack.damage
+	local damage, data = stack.damage, stack.data
 	local count = stack.count
 	local max = Items.maxStack(item)
 	local step = if reverse then -1 else 1
@@ -528,11 +523,11 @@ local function moveItemStackTo(
 				local total = current.count + count
 				if total <= max then
 					count = 0
-					set(window, index, make(item, total, damage))
+					set(window, index, make(item, total, damage, data))
 					moved = true
 				elseif current.count < max then
 					count -= max - current.count
-					set(window, index, make(item, max, damage))
+					set(window, index, make(item, max, damage, data))
 					moved = true
 				end
 			end
@@ -544,7 +539,7 @@ local function moveItemStackTo(
 		while index >= from and index < to do
 			if get(window, index) == nil and mayPlace(window, index, item) then
 				local put = math.min(count, slotLimit(window, index))
-				set(window, index, make(item, put, damage))
+				set(window, index, make(item, put, damage, data))
 				count -= put
 				moved = true
 				break
@@ -552,7 +547,7 @@ local function moveItemStackTo(
 			index += step
 		end
 	end
-	return make(item, count, damage), moved
+	return make(item, count, damage, data), moved
 end
 
 --[[
@@ -705,8 +700,8 @@ local function swap(window: Window, index: number, button: number): { Stack }
 		if mayPlace(window, index, held.item) then
 			local max = maxStackFor(window, index, held.item)
 			if held.count > max then
-				set(window, index, make(held.item, max, held.damage))
-				inventory.slots[hotbarSlot] = make(held.item, held.count - max, held.damage)
+				set(window, index, make(held.item, max, held.damage, held.data))
+				inventory.slots[hotbarSlot] = make(held.item, held.count - max, held.damage, held.data)
 			else
 				inventory.slots[hotbarSlot] = nil
 				set(window, index, held)
@@ -716,8 +711,8 @@ local function swap(window: Window, index: number, button: number): { Stack }
 		local max = maxStackFor(window, index, held.item)
 		if held.count > max then
 			-- Only part of the hotbar stack fits: the slot's old stack goes into the inventory.
-			set(window, index, make(held.item, max, held.damage))
-			inventory.slots[hotbarSlot] = make(held.item, held.count - max, held.damage)
+			set(window, index, make(held.item, max, held.damage, held.data))
+			inventory.slots[hotbarSlot] = make(held.item, held.count - max, held.damage, held.data)
 			local left = Menu.add(inventory, current)
 			return if left then { left } else {}
 		end
@@ -773,7 +768,7 @@ local function pickupAll(window: Window, index: number, button: number)
 			slot += step
 		end
 	end
-	window.inventory.cursor = make(item, count, carried.damage)
+	window.inventory.cursor = make(item, count, carried.damage, carried.data)
 end
 
 local function click(window: Window, index: number, clickType: number, button: number, creative: boolean): { Stack }
@@ -806,11 +801,12 @@ local function click(window: Window, index: number, clickType: number, button: n
 		end
 		return swap(window, index, button)
 	elseif clickType == CLONE then
-		-- Middle click: a full stack of the slot's item on the empty cursor (creative only). A
-		-- crafting result is copied without crafting.
+		-- Middle click: a full stack of the slot's item on the empty cursor (creative only), its
+		-- wear and data too (Minecraft copies the whole stack). A crafting result is copied without
+		-- crafting.
 		local current = get(window, index)
 		if creative and current and cursorOf(window) == nil then
-			window.inventory.cursor = make(current.item, Items.maxStack(current.item), current.damage)
+			window.inventory.cursor = make(current.item, Items.maxStack(current.item), current.damage, current.data)
 		end
 	elseif clickType == THROW then
 		if (button == 0 or button == 1) and cursorOf(window) == nil then
@@ -870,11 +866,11 @@ local function drag(window: Window, mode: number, slots: { number })
 		local have = if current then current.count else 0
 		local total = math.min(each + have, math.min(max, maxStackFor(window, index, item)))
 		remaining -= total - have
-		set(window, index, make(item, total, carried.damage))
+		set(window, index, make(item, total, carried.damage, carried.data))
 	end
 	-- Mode 2 makes items out of nothing but still subtracts them, like Minecraft (the cursor
 	-- usually ends up empty).
-	window.inventory.cursor = make(item, remaining, carried.damage)
+	window.inventory.cursor = make(item, remaining, carried.damage, carried.data)
 end
 
 --[[ Actions ]]
@@ -923,8 +919,8 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 			return {}
 		end
 		local n = if action.all == true then held.count else 1
-		inventory.slots[selected] = make(held.item, held.count - n, held.damage)
-		return { make(held.item, n, held.damage) :: Stack }
+		inventory.slots[selected] = make(held.item, held.count - n, held.damage, held.data)
+		return { make(held.item, n, held.damage, held.data) :: Stack }
 	elseif action.kind == "place" then
 		-- Placing a block uses one up (survival). Creative keeps everything.
 		local selected = inventory.selected
@@ -933,7 +929,7 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 		end
 		local held = inventory.slots[selected]
 		if held and held.count >= 1 and held.item == action.item and Items.isValid(held.item) then
-			inventory.slots[selected] = make(held.item, held.count - 1, held.damage)
+			inventory.slots[selected] = make(held.item, held.count - 1, held.damage, held.data)
 		end
 		return {}
 	elseif action.kind == "creative" then
@@ -944,11 +940,18 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 		if count > 0 and not (isInt(item) and Items.isValid(item)) then
 			return {}
 		end
+		-- The whole stack, as Minecraft's creative slot packet: wear within the item's durability,
+		-- data that passes Items.validData.
+		local damage, data = action.damage, action.data
+		if count > 0 and (not validWear(item, damage) or not Items.validData(data)) then
+			return {}
+		end
+		data = Items.cleanData(data)
 		if slot == CURSOR then
 			if count > Items.maxStack(item) then
 				return {}
 			end
-			inventory.cursor = make(item, count)
+			inventory.cursor = make(item, count, damage, data)
 			return {}
 		end
 		-- (A crafting result is derived from its grid: never set directly.)
@@ -958,7 +961,7 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 		if count > 0 and (not mayPlace(window, slot, item) or count > maxStackFor(window, slot, item)) then
 			return {}
 		end
-		set(window, slot, make(item, count))
+		set(window, slot, make(item, count, damage, data))
 		return {}
 	elseif action.kind == "close" then
 		if action.window ~= window.id then
@@ -1097,6 +1100,9 @@ end
 	  * in slots 10..36: swap it into a suitable hotbar slot and select that;
 	  * nowhere (creative only): put a full stack in a suitable hotbar slot (moving what was there
 	    to a free slot, if any, like Inventory.setPickedItem) and select it.
+	The picked stack is a plain one, so only stacks without item data count as the item
+	(Inventory.findSlotMatchingItem compares with isSameItemSameTags): a Fluid Tank holding water
+	is not picked for a tank.
 ]]
 function Menu.pickBlock(inventory: Inventory, item: number, creative: boolean): { Action }
 	if not isInt(item) or not Items.isValid(item) then
@@ -1104,10 +1110,11 @@ function Menu.pickBlock(inventory: Inventory, item: number, creative: boolean): 
 	end
 	-- Window 0's slot numbers (its 2 x 2 grid comes first).
 	local window = Types.newWindow(inventory)
+	local picked: Stack = { item = item, count = 1 }
 	local found: number? = nil
 	for slot = 1, INVENTORY do
 		local stack = inventory.slots[slot]
-		if stack and stack.count >= 1 and stack.item == item then
+		if stack and stack.count >= 1 and same(stack, picked) then
 			found = slot
 			break
 		end

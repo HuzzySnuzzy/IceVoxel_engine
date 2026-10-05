@@ -20,8 +20,8 @@
 	           with a `container`.
 
 	Inserting (`insert`, `room`) follows Forge's ItemHandlerHelper.insertItemStacked, as Mekanism's
-	transporters insert: first it tops up stacks of the same item and wear (Menu.stacksMatch) in
-	slot order, then it fills empty slots in order, never beyond the item's max stack (at most 64,
+	transporters insert: first it tops up stacks of the same item, wear and data (Menu.stacksMatch)
+	in slot order, then it fills empty slots in order, never beyond the item's max stack (at most 64,
 	a container's limit). (Minecraft's hopper goes slot by slot instead, merging or filling as it
 	meets them.)
 
@@ -32,7 +32,8 @@
 
 	Everything is pure. Slots come in as `{ [slot]: Stack? }` and new tables come out: an input is
 	never changed and a changed slot gets a new stack table (as in Inventory/Menu), so the server
-	simulates (finds where an item can go) with the same calls it applies.
+	simulates (finds where an item can go) with the same calls it applies. Stacks keep their wear
+	and item data in and out (a tank with water stays one); different data never merges.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -87,20 +88,10 @@ local function isFace(face: number): boolean
 	return face == 0 or face == 1 or face == 2 or face == 3 or face == 4 or face == 5
 end
 
--- A tool's wear as kept in a stack (Menu's rule: a positive whole number, else nil).
-local function cleanDamage(damage: number?): number?
-	if type(damage) == "number" and damage >= 1 and damage == math.floor(damage) then
-		return damage
-	end
-	return nil
-end
-
-local function make(item: number, count: number, damage: number?): Stack?
-	if count < 1 then
-		return nil
-	end
-	return { item = item, count = count, damage = cleanDamage(damage) }
-end
+-- A tool's wear as kept in a stack (a positive whole number, else nil), and a new stack with its
+-- wear and data (nil for a count below 1).
+local cleanDamage = Items.cleanDamage
+local make = Items.newStack
 
 local function isStack(stack: Stack?): boolean
 	return stack ~= nil
@@ -174,8 +165,8 @@ end
 
 --[[
 	How many of `stack` would go into `slots` of `block` through `face` (0..stack.count), as
-	`insert` would put them: room on stacks of the same item and wear, then empty slots that take
-	it.
+	`insert` would put them: room on stacks of the same item, wear and data, then empty slots that
+	take it.
 ]]
 function Inventories.room(block: number, face: number, slots: Slots, stack: Stack): number
 	if not isStack(stack) then
@@ -201,17 +192,17 @@ end
 
 --[[
 	`stack` put into `slots` of `block` through `face`: the new slots and what is left over (nil:
-	all of it went in). Stacks of the same item and wear are topped up first, in slot order, then
-	empty slots are filled in order.
+	all of it went in). Stacks of the same item, wear and data are topped up first, in slot order,
+	then empty slots are filled in order.
 ]]
 function Inventories.insert(block: number, face: number, slots: Slots, stack: Stack): (Slots, Stack?)
 	local out = table.clone(slots)
 	if not isStack(stack) then
 		-- Nothing goes in: a stack of an unknown item is all left over.
 		local some = type(stack.count) == "number" and stack.count >= 1
-		return out, if some then make(stack.item, math.floor(stack.count), stack.damage) else nil
+		return out, if some then make(stack.item, math.floor(stack.count), stack.damage, stack.data) else nil
 	end
-	local item, damage, max = stack.item, cleanDamage(stack.damage), slotMax(stack.item)
+	local item, damage, data, max = stack.item, cleanDamage(stack.damage), stack.data, slotMax(stack.item)
 	local left = stack.count
 	local order = Inventories.insertSlots(block, face)
 	-- Top up matching stacks first...
@@ -228,7 +219,7 @@ function Inventories.insert(block: number, face: number, slots: Slots, stack: St
 			and mayPlace(block, slot, item)
 		then
 			local put = math.min(left, max - current.count)
-			out[slot] = make(item, current.count + put, damage)
+			out[slot] = make(item, current.count + put, damage, data)
 			left -= put
 		end
 	end
@@ -240,16 +231,17 @@ function Inventories.insert(block: number, face: number, slots: Slots, stack: St
 		local current = out[slot]
 		if (current == nil or current.count < 1) and mayPlace(block, slot, item) then
 			local put = math.min(left, max)
-			out[slot] = make(item, put, damage)
+			out[slot] = make(item, put, damage, data)
 			left -= put
 		end
 	end
-	return out, make(item, left, damage)
+	return out, make(item, left, damage, data)
 end
 
 --[[
-	The item types that may be taken out of `slots` of `block` through `face`, in the order of their
-	first slot, each with its total count over all those slots (which may be more than a stack).
+	The item types (item, wear and data) that may be taken out of `slots` of `block` through
+	`face`, in the order of their first slot, each with its total count over all those slots (which
+	may be more than a stack).
 	Mekanism's TransitRequest: a transporter looks for somewhere to send each type, in this order,
 	before it takes anything.
 ]]
@@ -267,10 +259,7 @@ function Inventories.available(block: number, face: number, slots: Slots): { Sta
 				end
 			end
 			if not merged then
-				table.insert(
-					found,
-					{ item = current.item, count = current.count, damage = cleanDamage(current.damage) }
-				)
+				table.insert(found, Items.copyStack(current) :: Stack)
 			end
 		end
 	end
@@ -278,9 +267,9 @@ function Inventories.available(block: number, face: number, slots: Slots): { Sta
 end
 
 --[[
-	Takes up to `count` items like `match` (the same item and wear; nil: the first type `available`
-	lists) out of `slots` of `block` through `face`, from its slots in order: the new slots and the
-	stack taken (nil: nothing). Never more than the item's max stack.
+	Takes up to `count` items like `match` (the same item, wear and data; nil: the first type
+	`available` lists) out of `slots` of `block` through `face`, from its slots in order: the new
+	slots and the stack taken (nil: nothing). Never more than the item's max stack.
 ]]
 function Inventories.extract(block: number, face: number, slots: Slots, count: number, match: Stack?): (Slots, Stack?)
 	local out = table.clone(slots)
@@ -304,12 +293,12 @@ function Inventories.extract(block: number, face: number, slots: Slots, count: n
 			and mayTake(block, face, slot, item)
 		then
 			local take = math.min(left, current.count)
-			out[slot] = make(item, current.count - take, current.damage)
+			out[slot] = make(item, current.count - take, current.damage, current.data)
 			left -= take
 			taken += take
 		end
 	end
-	return out, make(item, taken, wanted.damage)
+	return out, make(item, taken, wanted.damage, wanted.data)
 end
 
 return Inventories

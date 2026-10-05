@@ -91,6 +91,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   show their water. The Configurator acts on the arm you point at (or the face of the core);
   WAILA names that side's mode, a transporter's colour and the items inside it, and the water in
   a pipe or tank.
+- **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
+  named numbers, strings or flags. A Fluid Tank broken in survival keeps its water in its item
+  ("Water: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
+  Mekanism; in creative, placing a tank item that holds water fills the new tank too. Items with
+  different data never stack, and wherever a stack goes (clicks, chests, furnaces, transporters,
+  the ground, death drops) its data goes with it.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -199,7 +205,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Config                    every tunable setting
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
                             drops, menus)
-  Items/   ItemList         items: every placeable block, plus armor, tools and materials
+  Items/                    the item registry, stacks and item data (validation, tooltip lines,
+                            Mekanism's energy and fluid formats); ItemList (items that are not blocks)
   Transmitters/             Mekanism pipes: Tiers (Mekanism's numbers), sides, connection modes,
                             colours, the connection rule, route costs, Inventories (sided slots,
                             insert / extract)
@@ -236,8 +243,8 @@ src/server   -> ServerScriptService.IceVoxel
   Behaviours/               Gravity, Fluid, Grass, Attached (torches and lanterns need support),
                             Drops (block update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
-  Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops),
-                            replication
+  Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
+                            sustained data hooks), replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
                             (spawning, replication)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
@@ -427,6 +434,25 @@ silence the world; a Scriptable camera hears from where it is.
 per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
 `container` slots is an inventory transporters connect to (all slots from every side, unless it is
 a furnace, `menu = "Furnace"`).
+
+**Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
+numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
+a new stack instead of changing one: `Items.withData(stack, { energy = 5000 })`; read it back with
+`Items.dataNumber(stack.data, "energy")`. A data key gets a tooltip line with a describer:
+
+```lua
+Items.addDescriber("charge", function(data) return `Charge: {data.charge}%` end)
+```
+
+A block that keeps its state in its item when broken (Mekanism's sustained data) registers hooks
+with the server, the way the Fluid Tank does (`TransmitterWorld.blockDataHooks`):
+
+```lua
+serverNet.addBlockData({
+	save = function(x, y, z, block) return { energy = 5000 } end, -- just before a survival break
+	placed = function(player, x, y, z, block, stack) end, -- right after placing; stack.data intact
+})
+```
 
 **A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
 offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from

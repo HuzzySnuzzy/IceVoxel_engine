@@ -262,7 +262,8 @@ function Jei.activate(self: Self, item: number, button: number, shift: boolean, 
 		local window = host.window()
 		local carried = window.inventory.cursor
 		if inList and carried and carried.count >= 1 then
-			-- Dropping a stack on JEI deletes it (one item with the right button).
+			-- Dropping a stack on JEI deletes it (one item with the right button; the rest keeps its
+			-- wear and item data).
 			local count = if button == RIGHT then carried.count - 1 elseif button == LEFT then 0 else nil
 			if count then
 				host.apply({
@@ -271,6 +272,8 @@ function Jei.activate(self: Self, item: number, button: number, shift: boolean, 
 					slot = Types.CURSOR,
 					item = carried.item,
 					count = count,
+					damage = if count > 0 then carried.damage else nil,
+					data = if count > 0 then carried.data else nil,
 				})
 			end
 			return

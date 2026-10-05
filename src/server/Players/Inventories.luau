@@ -24,6 +24,8 @@
 	             `wearTool` (InventoryState.wearHeld: at its durability it breaks).
 	  Placing    ServerNet asks `place` before putting a block down: survival players use up the held
 	             item; refused edits are still acknowledged so the client's prediction is undone.
+	             It hands ServerNet the stack the block came from (data intact), for the sustained
+	             data hooks (a Fluid Tank placed from an item with water gets its water back).
 	  Pickups    item entities that touch a player go into the inventory (Entities' pickup handler).
 	  Using      Players/ItemUse (buckets) reads the held stack (`heldStack`, `hasItem`), replaces it
 	             (`setHeld`) and hands stacks over (`give`: what does not fit is thrown).
@@ -155,9 +157,11 @@ end
 --[[
 	A player places `block` (their inventory action `seq`, from the Edit message), after every
 	other check passed. Survival: the held stack must be the block's item; one is used up.
-	Creative: nothing is used. Returns false to refuse the edit. Acknowledges `seq` either way.
+	Creative: nothing is used. Returns false to refuse the edit, and the stack the block came from
+	as it was before (data intact; nil when the hand holds something else). Acknowledges `seq`
+	either way.
 ]]
-function Inventories.place(player: Player, block: number, seq: number): boolean
+function Inventories.place(player: Player, block: number, seq: number): (boolean, Stack?)
 	return state:place(player, block, seq, GameMode.isCreative(player))
 end
 

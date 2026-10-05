@@ -17,7 +17,9 @@
 	     and what is left is put back where it came from.
 	`all` (shift on the "+") places as many sets as the inventory has, up to a stack (JEI's max
 	transfer); otherwise one set. Ingredients that a tag accepts in several items go to the item
-	the inventory has most of, so a set usually uses one kind of planks.
+	the inventory has most of, so a set usually uses one kind of planks. Stacks are kinds by item,
+	wear and item data (they only stack that way), and plain stacks go before ones with data, so a
+	Fluid Tank holding water is only used when no empty one will do.
 
 	Every plan is applied to a copy of the window with Menu.apply before it is returned and must
 	leave exactly the recipe in the grid (and its result in the result slot), nothing on the
@@ -98,15 +100,15 @@ end
 
 --[[ Counting what the inventory has ]]
 
--- A kind of stack: the item and its wear (stacks only join when both match).
-type Kind = { item: number, damage: number, total: number, key: string }
+-- A kind of stack: the item, its wear and its data (stacks only join when all match).
+type Kind = { item: number, damage: number, data: Items.Data?, total: number, key: string }
 
 local function wearOf(stack: Stack): number
 	return if stack.damage and stack.damage >= 1 then stack.damage else 0
 end
 
-local function keyOf(item: number, damage: number): string
-	return `{item}:{damage}`
+local function keyOf(item: number, damage: number, data: Items.Data?): string
+	return `{item}:{damage}:{Items.dataKey(data)}`
 end
 
 -- Totals by kind of the stacks in `stacks`, in first-seen order.
@@ -116,10 +118,10 @@ local function count(stacks: { Stack }): { Kind }
 	for _, stack in stacks do
 		if stack.count >= 1 then
 			local damage = wearOf(stack)
-			local key = keyOf(stack.item, damage)
+			local key = keyOf(stack.item, damage, stack.data)
 			local kind = byKey[key]
 			if kind == nil then
-				kind = { item = stack.item, damage = damage, total = 0, key = key }
+				kind = { item = stack.item, damage = damage, data = stack.data, total = 0, key = key }
 				byKey[key] = kind
 				table.insert(kinds, kind)
 			end
@@ -169,10 +171,18 @@ local function supply(window: Window, width: number): { Stack }
 	return stacks
 end
 
+-- Is `kind` a better pick than `best`: no data where it has some, else more left?
+local function better(kind: Kind, best: Kind, left: { [string]: number }): boolean
+	if (kind.data == nil) ~= (best.data == nil) then
+		return kind.data == nil
+	end
+	return left[kind.key] > left[best.key]
+end
+
 --[[
 	Gives every display cell a kind of stack with `sets` items to spare, cells in order, each the
-	kind it accepts that has the most left (ties: the first). Returns cell -> kind, and the cells
-	nothing was left for.
+	kind it accepts that has the most left (ties: the first), plain stacks before ones with item
+	data. Returns cell -> kind, and the cells nothing was left for.
 ]]
 local function allocate(
 	grid: { [number]: { number } },
@@ -194,7 +204,7 @@ local function allocate(
 					table.find(accepts, kind.item)
 					and left[kind.key] >= sets
 					and Items.maxStack(kind.item) >= sets
-					and (best == nil or left[kind.key] > left[best.key])
+					and (best == nil or better(kind, best, left))
 				then
 					best = kind
 				end
@@ -272,7 +282,7 @@ local function census(window: Window): { [string]: number }
 	local totals: { [string]: number } = {}
 	local function note(stack: Stack?)
 		if stack and stack.count >= 1 then
-			local key = keyOf(stack.item, wearOf(stack))
+			local key = keyOf(stack.item, wearOf(stack), stack.data)
 			totals[key] = (totals[key] or 0) + stack.count
 		end
 	end
@@ -316,7 +326,10 @@ local function clickSlot(b: Builder, slot: number, clickType: number)
 end
 
 local function matches(stack: Stack?, kind: Kind): boolean
-	return stack ~= nil and stack.item == kind.item and wearOf(stack) == kind.damage
+	return stack ~= nil
+		and stack.item == kind.item
+		and wearOf(stack) == kind.damage
+		and Items.sameData(stack.data, kind.data)
 end
 
 -- Puts the carried stack down in the inventory: on stacks of it with room, then an empty slot.

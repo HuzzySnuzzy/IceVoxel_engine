@@ -165,7 +165,8 @@ function Smelting.tick(furnace: { slots: { [number]: Stack? }, data: { number }?
 			local burn = Smelting.fuel(fuel.item)
 			if burn > 0 then
 				data[1], data[2] = burn, burn
-				slots[2] = if fuel.count > 1 then { item = fuel.item, count = fuel.count - 1 } else nil
+				-- (What is left keeps its wear and item data, as Minecraft's shrink(1) does.)
+				slots[2] = Items.withCount(fuel, fuel.count - 1)
 				changed = true
 			end
 		end
@@ -176,9 +177,9 @@ function Smelting.tick(furnace: { slots: { [number]: Stack? }, data: { number }?
 				data[3] = 0
 				data[4] = Smelting.COOK_TIME
 				slots[3] = if output
-					then { item = output.item, count = output.count + result.count }
+					then Items.withCount(output, output.count + result.count)
 					else { item = result.item, count = result.count }
-				slots[1] = if input.count > 1 then { item = input.item, count = input.count - 1 } else nil
+				slots[1] = Items.withCount(input, input.count - 1)
 			end
 		elseif data[3] ~= 0 then
 			data[3] = 0
