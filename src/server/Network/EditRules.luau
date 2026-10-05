@@ -37,14 +37,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
 
 -- The block a survival player started mining, and when (seconds, os.clock()).
 export type Mine = { x: number, y: number, z: number, startedAt: number }
 
 --[[
-	One part of the server's sustained data (Transmitters for Fluid Tanks; machines later). Both
-	are optional, and each answers for its own blocks only.
+	One part of the server's sustained data (Transmitters for Fluid Tanks, Machines for energy).
+	Both are optional, and each answers for its own blocks only.
 ]]
 export type BlockDataHooks = {
 	-- The item data `block` at (x, y, z) keeps when a survival player breaks it (read just before
@@ -188,10 +189,10 @@ function EditRules.hasMenu(block: number): boolean
 	return d ~= nil and d.menu ~= nil
 end
 
--- Does `block` hold items (a chest or a furnace)? Its contents drop when it is broken.
+-- Does `block` hold items (a chest, a furnace, a machine with slots)? Its contents drop when it
+-- is broken.
 function EditRules.isContainer(block: number): boolean
-	local d = def(block)
-	return d ~= nil and d.container > 0
+	return def(block) ~= nil and Machines.containerSize(block) > 0
 end
 
 --[[ Sustained data ]]

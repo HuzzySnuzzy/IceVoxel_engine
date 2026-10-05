@@ -19,6 +19,10 @@
 	                       taking it crafts (the grid loses one item per used slot, Crafting.consume)
 	  furnace              1 input (anything), 2 fuel (only what burns), 3 output (never placed into)
 	  chest                27 slots that take anything
+	  machine              a Mekanism machine's slots: Shared/Machines decides by the container's
+	                       block what each slot takes (Machines.mayPlace), how many (slotLimit),
+	                       which are outputs (only taken from, like a furnace's) and where a
+	                       shift-click from the inventory goes (quickMoveTargets)
 
 	The server applies every player action with `Menu.apply` (it is the authority) and the client
 	predicts by replaying its unacknowledged actions on a copy of the last snapshot, so everything
@@ -40,6 +44,7 @@
 
 local Items = require(script.Parent.Parent.Items)
 local Crafting = require(script.Parent.Parent.Crafting)
+local Machines = require(script.Parent.Parent.Machines)
 local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Types = require(script.Parent.Types)
 
@@ -121,16 +126,39 @@ local function isCraftResult(window: Window, index: number): boolean
 	return index == RESULT - 1 and gridWidth(window.container) > 0
 end
 
--- Is window slot `index` a furnace's output?
-local function isFurnaceOutput(window: Window, index: number): boolean
-	local container = window.container
-	return container ~= nil and container.kind == "furnace" and index == FURNACE_OUTPUT - 1
+-- Is `container` a machine's (Shared/Machines decides its slots)?
+local function isMachine(container: Container?): boolean
+	return container ~= nil and container.kind == Machines.CONTAINER_KIND
 end
 
--- Minecraft's Slot.getMaxStackSize() (without an item): 1 for armor, else the container's 64.
+-- Is window slot `index` a furnace's output or a machine's (only taken from)?
+local function isOutput(window: Window, index: number): boolean
+	local container = window.container
+	if container == nil or not isInt(index) then
+		return false
+	elseif container.kind == "furnace" then
+		return index == FURNACE_OUTPUT - 1
+	elseif isMachine(container) then
+		return index >= 0 and index < container.size and Machines.isOutput(container.block, index + 1)
+	end
+	return false
+end
+
+--[[
+	Minecraft's Slot.getMaxStackSize() (without an item): 1 for armor, a machine slot's limit,
+	else the container's 64.
+]]
 local function slotLimit(window: Window, index: number): number
-	local offset = index - containerSize(window)
-	return if offset >= 0 and offset < ARMOR then 1 else Items.MAX_STACK
+	local n = containerSize(window)
+	local offset = index - n
+	if offset >= 0 and offset < ARMOR then
+		return 1
+	end
+	local container = window.container
+	if index >= 0 and index < n and container and isMachine(container) then
+		return Machines.slotLimit(container.block, index + 1)
+	end
+	return Items.MAX_STACK
 end
 
 --[[ Slots ]]
@@ -215,7 +243,8 @@ end
 
 --[[
 	Slot.mayPlace: armor slots take only armor of their slot, a furnace's fuel slot only what burns,
-	crafting results and furnace outputs nothing, other slots any known item.
+	a machine's slots what its kind says, crafting results and outputs nothing, other slots any
+	known item.
 ]]
 function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	if not Items.isValid(item) then
@@ -225,11 +254,13 @@ function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	if store == "armor" then
 		return Items.armorSlot(item) == i
 	elseif store == "container" then
-		if isCraftResult(window, index) or isFurnaceOutput(window, index) then
+		if isCraftResult(window, index) or isOutput(window, index) then
 			return false
 		end
 		local container = window.container :: Container
-		if container.kind == "furnace" and i == FURNACE_FUEL then
+		if isMachine(container) then
+			return Machines.mayPlace(container.block, i, item)
+		elseif container.kind == "furnace" and i == FURNACE_FUEL then
 			return Smelting.fuel(item) > 0
 		end
 		return true
@@ -245,9 +276,10 @@ function Menu.maxStackFor(window: Window, index: number, item: number): number
 	return math.min(Items.maxStack(item), slotLimit(window, index))
 end
 
--- Is window slot `index` one that only gives items: a crafting result or a furnace output?
+-- Is window slot `index` one that only gives items: a crafting result, a furnace's or a
+-- machine's output?
 function Menu.isResultSlot(window: Window, index: number): boolean
-	return isCraftResult(window, index) or isFurnaceOutput(window, index)
+	return isCraftResult(window, index) or isOutput(window, index)
 end
 
 --[[
@@ -551,6 +583,46 @@ local function moveItemStackTo(
 end
 
 --[[
+	Mekanism's MekanismContainer.insertItem over a list of window slots (a machine's shift-click
+	targets): first merging into stacks of the same item, wear and data, then into the empty
+	slots that take it, in order, each slot up to its own limit (Menu.maxStackFor). Returns what is
+	left and whether anything moved.
+]]
+local function moveItemStackToSlots(window: Window, stack: Stack, indices: { number }): (Stack?, boolean)
+	local item, damage, data = stack.item, stack.damage, stack.data
+	local count = stack.count
+	local moved = false
+	if Items.maxStack(item) > 1 then
+		for _, index in indices do
+			if count <= 0 then
+				break
+			end
+			local current = get(window, index)
+			local max = maxStackFor(window, index, item)
+			if current and same(current, stack) and current.count < max then
+				local put = math.min(count, max - current.count)
+				set(window, index, make(item, current.count + put, damage, data))
+				count -= put
+				moved = true
+			end
+		end
+	end
+	for _, index in indices do
+		if count <= 0 then
+			break
+		end
+		local max = maxStackFor(window, index, item)
+		if get(window, index) == nil and max > 0 and mayPlace(window, index, item) then
+			local put = math.min(count, max)
+			set(window, index, make(item, put, damage, data))
+			count -= put
+			moved = true
+		end
+	end
+	return make(item, count, damage, data), moved
+end
+
+--[[
 	quickMoveStack (one round of a shift click) on any slot but a crafting result. Returns the
 	slot's stack as it was before the move, or nil when nothing moved, like Minecraft (the caller
 	repeats while it keeps moving). "Player slots" are inventory 10..36 and the hotbar.
@@ -565,6 +637,11 @@ end
 	                             -> the fuel slot only, else 10..36 <-> hotbar.
 	  chest (ChestMenu)          container -> player slots backwards (hotbar right end first);
 	                             anything else -> the container.
+	  machine (Mekanism's        output -> player slots backwards, other machine slots and armor
+	  MekanismContainer)         -> player slots; from the player, in one pass: into the
+	                             machine's slots that take it (Machines.quickMoveTargets), and
+	                             only when none took anything 10..36 <-> hotbar (what did not fit
+	                             stays where it was).
 ]]
 local function quickMoveStack(window: Window, index: number): Stack?
 	local current = get(window, index)
@@ -586,7 +663,31 @@ local function quickMoveStack(window: Window, index: number): Stack?
 		end
 	end
 
-	if kind ~= "inventory" and kind ~= "crafting" and kind ~= "furnace" then
+	if kind == Machines.CONTAINER_KIND then
+		if index < main then
+			-- Out of the machine (an output backwards, like a furnace's) or the armor.
+			left, moved = moveItemStackTo(window, current, main, last, isOutput(window, index))
+		else
+			local targets = {}
+			for _, slot in Machines.quickMoveTargets((container :: Container).block, current.item) do
+				if slot <= n then
+					table.insert(targets, slot - 1)
+				end
+			end
+			if #targets > 0 then
+				left, moved = moveItemStackToSlots(window, current, targets)
+			end
+			if not moved then
+				toOtherPart()
+			end
+			if moved then
+				set(window, index, left)
+			end
+			-- (One pass, as Mekanism's: the caller's loop would move the rest between the inventory
+			-- and the hotbar.)
+			return nil
+		end
+	elseif kind ~= "inventory" and kind ~= "crafting" and kind ~= "furnace" then
 		if index < n then
 			left, moved = moveItemStackTo(window, current, main, last, true)
 		else
@@ -594,7 +695,7 @@ local function quickMoveStack(window: Window, index: number): Stack?
 		end
 	elseif index < n then
 		-- Out of the container (the output backwards, like Minecraft).
-		left, moved = moveItemStackTo(window, current, main, last, isFurnaceOutput(window, index))
+		left, moved = moveItemStackTo(window, current, main, last, isOutput(window, index))
 	elseif index < main then
 		-- Armor.
 		left, moved = moveItemStackTo(window, current, main, last, false)

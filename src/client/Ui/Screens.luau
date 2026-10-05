@@ -23,7 +23,8 @@
 	  mouse    left / right / middle click and drag on slots, shift click, double click, clicks
 	           outside the panels throw the carried stack; number keys over a slot swap it with
 	           the hotbar, Q throws one (Ctrl+Q all); the carried stack follows the mouse and the
-	           hovered item shows its tooltip. The wheel scrolls the creative grid.
+	           hovered item shows its tooltip (a machine's energy bar its "stored / capacity").
+	           The wheel scrolls the creative grid.
 	  gamepad  GuiService selection moves between slots; A = left click, X = right click,
 	           Y = shift click, B closes, the right stick scrolls the creative grid.
 	  touch    a tap is a left click, a long press (0.4 s) a right click, sliding a finger drags;
@@ -1098,6 +1099,17 @@ function Screens.start()
 					details = if stack and stack.data then Items.describe(stack) else nil
 				elseif hover.kind == "grid" and Items.isValid(hover.item) then
 					item = hover.item
+				end
+			end
+			if item == nil and extra == nil and current == "inventory" and not viewing then
+				-- What is no item on a panel: a machine's energy bar ("1.2 kJ / 20 kJ").
+				local lines = inventory:tooltipAt(point, window)
+				if lines then
+					local built: { Line } = {}
+					for _, text in lines do
+						table.insert(built, { text = text, colour = Style.Colour.Text })
+					end
+					extra = built
 				end
 			end
 		end

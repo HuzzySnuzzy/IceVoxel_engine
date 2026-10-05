@@ -1,6 +1,7 @@
 --!strict
 --[[
-	Decorated block faces: chests, crafting tables and furnaces drawn like Minecraft's pixel art.
+	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube
+	drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -222,10 +223,40 @@ local FURNACE: Faces = {
 	Right = furnaceSide(true),
 }
 
+--[[
+	Creative Energy Cube (Mekanism's creative energy cube): the same on every face, a dark steel
+	plate with magenta corners and a glowing magenta window in the middle, the colour Minecraft
+	gives epic, creative-only things.
+]]
+local CUBE_EDGE = { 24, 22, 30 }
+local CUBE_CORNER = { 176, 64, 196 }
+local CUBE_WINDOW = { 30, 16, 40 }
+local CUBE_CORE = { 236, 128, 252 }
+
+local function cubeFace(): { Rect }
+	local rects = outline(CUBE_EDGE, true)
+	for _, corner in { { 1, 1 }, { 12, 1 }, { 1, 12 }, { 12, 12 } } do
+		table.insert(rects, rect(corner[1], corner[2], 3, 3, CUBE_CORNER))
+	end
+	table.insert(rects, rect(4, 4, 8, 8, CUBE_WINDOW))
+	table.insert(rects, rect(6, 6, 4, 4, CUBE_CORE))
+	return rects
+end
+
+local CREATIVE_ENERGY_CUBE: Faces = {
+	Top = cubeFace(),
+	Bottom = cubeFace(),
+	Front = cubeFace(),
+	Back = cubeFace(),
+	Left = cubeFace(),
+	Right = cubeFace(),
+}
+
 local DECORS: { [string]: Faces } = {
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
 	Furnace = FURNACE,
+	CreativeEnergyCube = CREATIVE_ENERGY_CUBE,
 }
 
 -- The faces of `decor` (BlockList `decor`), or nil when it is unknown.

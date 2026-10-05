@@ -89,16 +89,27 @@
 	                Players still can't place blocks into it.
 
 	Mekanism pipes (Shared/Transmitters):
-	  transmitter   { kind = "item" | "fluid", tier = 1..4, restrictive = true? }: a Logistical
-	                Transporter ("item"), the Restrictive Transporter (`restrictive`) or a Mechanical
-	                Pipe ("fluid") of that tier (1 Basic .. 4 Ultimate; the numbers are in
-	                Transmitters/Tiers). Its `shape` is the core; the client draws the arms towards
-	                what it connects to.
+	  transmitter   { kind = "item" | "fluid" | "energy", tier = 1..4, restrictive = true? }: a
+	                Logistical Transporter ("item"), the Restrictive Transporter (`restrictive`), a
+	                Mechanical Pipe ("fluid") or a Universal Cable ("energy") of that tier (1 Basic
+	                .. 4 Ultimate; the numbers are in Transmitters/Tiers). Its `shape` is the core;
+	                the client draws the arms towards what it connects to.
 	  tank          { tier = 1..4, capacity = mB }: a Fluid Tank (Transmitters.isTank).
 	  icon          Boxes the item's model shows instead of `shape` (same format), starting with
 	                the shape's own boxes in the same order: a transmitter's core plus two arms.
 	  Shape boxes may also have `transparency` (0..1, default the block's): a transmitter's glass
 	  is see-through, its frame is not.
+
+	Mekanism machines (Shared/Machines; the server runs them in server/Machines):
+	  machine       { kind = "<kind>" }: a machine of a kind Shared/Machines defines (its slots,
+	                data, panel and tick). Its contents live in a container of kind "machine"
+	                (server Players/Containers); right clicking opens its panel (`menu` defaults
+	                to "Machine"). Don't set `container`: the slots are the kind's.
+	  energy        { capacity = J, input = J/t?, output = J/t? }: the energy it holds and the
+	                most it takes from / gives to an energy network per tick (Universal Cables
+	                and directly adjacent energy blocks). Output only: a producer (generators);
+	                input only: a consumer (machines); both: storage (batteries, the backup).
+	                `math.huge` is Mekanism's creative infinity.
 
 	Directions are Minecraft's: North = -Z, South = +Z, West = -X, East = +X.
 
@@ -130,6 +141,9 @@ export type Bounds = { min: { number }, max: { number } }
 -- A transmitter (`transmitter`) and a fluid tank (`tank`); see Shared/Transmitters.
 export type TransmitterSpec = { kind: string, tier: number, restrictive: boolean? }
 export type TankSpec = { tier: number, capacity: number }
+-- A machine (`machine`) and the energy it holds and moves (`energy`); see Shared/Machines.
+export type MachineSpec = { kind: string }
+export type EnergySpec = { capacity: number, input: number?, output: number? }
 
 export type BlockSpec = {
 	name: string,
@@ -170,6 +184,8 @@ export type BlockSpec = {
 	transmitter: TransmitterSpec?,
 	tank: TankSpec?,
 	icon: { ShapeBox }?,
+	machine: MachineSpec?,
+	energy: EnergySpec?,
 }
 
 local list: { BlockSpec } = {
@@ -1037,6 +1053,79 @@ table.insert(list, {
 	hardness = 7.5,
 	tool = "pickaxe",
 	toolLevel = 1,
+})
+
+--[[
+	Mekanism's Universal Cables (energy transmitters, Basic to Ultimate; Shared/Transmitters, the
+	throughput per tier is in Transmitters/Tiers) and the Creative Energy Cube (Shared/Machines).
+
+	A Universal Cable is Mekanism's small transmitter: a 6 pixel core (Mekanism's 5..11 box), a
+	red-ish conductor in a frame of twelve edges in the tier's colour. Like every transmitter it is
+	aimed at over its whole cell, not solid but obstructing, breaks fast and drops itself; the
+	client draws its arms (thinner than a pipe's) towards the cables and energy blocks it joins.
+
+	The Creative Energy Cube is Mekanism's: infinite energy, given out without limit, creative only
+	(no recipe). A cube of dark steel with a magenta frame (BlockDecor "CreativeEnergyCube").
+]]
+local CABLE_CORE = { 176, 58, 44 }
+
+-- A Universal Cable's core, 6 pixels wide: the conductor, then the twelve frame edges.
+local function cableCore(frame: { number }): { ShapeBox }
+	local boxes: { ShapeBox } = { metal({ 5, 5, 5 }, { 0, 0, 0 }, CABLE_CORE) }
+	for _, a in { -2.5, 2.5 } do
+		for _, b in { -2.5, 2.5 } do
+			table.insert(boxes, metal({ 6, 1, 1 }, { 0, a, b }, frame))
+			table.insert(boxes, metal({ 1, 4, 1 }, { a, 0, b }, frame))
+			table.insert(boxes, metal({ 1, 1, 4 }, { a, b, 0 }, frame))
+		end
+	end
+	-- (The conductor is SmoothPlastic, so it reads as a coloured core inside a metal frame.)
+	boxes[1].material = "SmoothPlastic"
+	return boxes
+end
+
+-- The item's model: the core with an arm to the west and east, each ending in a collar.
+local function cableIcon(core: { ShapeBox }, frame: { number }): { ShapeBox }
+	local boxes = table.clone(core)
+	for _, side in { -1, 1 } do
+		local arm = metal({ 4.5, 4, 4 }, { side * 5.25, 0, 0 }, CABLE_CORE)
+		arm.material = "SmoothPlastic"
+		table.insert(boxes, arm)
+		table.insert(boxes, metal({ 1, 5, 5 }, { side * 7.5, 0, 0 }, frame))
+	end
+	return boxes
+end
+
+for tier, name in TIER_NAMES do
+	local frame = Tiers.TIERS[tier].colour
+	local core = cableCore(frame)
+	table.insert(list, {
+		name = `{name}UniversalCable`,
+		color = frame,
+		material = "Metal",
+		sound = "metal",
+		solid = false,
+		placeable = true,
+		obstructs = true,
+		hardness = 1,
+		tool = "pickaxe",
+		shape = core,
+		icon = cableIcon(core, frame),
+		bounds = FULL_BOUNDS,
+		transmitter = { kind = "energy", tier = tier },
+	})
+end
+
+table.insert(list, {
+	name = "CreativeEnergyCube",
+	color = { 40, 38, 46 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 2,
+	tool = "pickaxe",
+	decor = "CreativeEnergyCube",
+	machine = { kind = "creative" },
+	energy = { capacity = math.huge, output = math.huge },
 })
 
 return list

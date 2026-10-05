@@ -21,6 +21,8 @@
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
 	                   transporters, water in pipes, replication), and the Configurator and buckets
 	                   (Players/ItemUse)
+	  8. machines   -> Mekanism's machines and energy (Machines/Machines: machine ticks, energy
+	                   networks through Universal Cables, energy kept in items, replication)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,6 +50,7 @@ local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
 local WaypointStore = require(Server.Players.WaypointStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
+local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
@@ -62,8 +65,10 @@ world.onChanged = function(x, y, z, old, new)
 	-- holds, and any block with a window closes it for its users.
 	Inventories.blockChanged(x, y, z, old, new)
 	-- Transmitters and fluid tanks come and go (a transporter's items drop), and pipes notice the
-	-- chests, furnaces and tanks around them.
+	-- chests, furnaces, tanks and energy blocks around them.
 	Transmitters.blockChanged(x, y, z, old, new)
+	-- Machines come and go, and energy networks are worked out again around them.
+	Machines.blockChanged(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
@@ -83,18 +88,23 @@ net.setRules({
 	mayRemoveContainer = Inventories.mayRemoveContainer,
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
-	chunksSent = Transmitters.sendChunks,
+	chunksSent = function(player: Player, coords: { { number } })
+		Transmitters.sendChunks(player, coords)
+		Machines.sendChunks(player, coords)
+	end,
 })
--- Pipes after inventories and items (they fill chests and drop items); item use after the pipes.
+-- Pipes after inventories and items (they fill chests and drop items); item use after the pipes;
+-- machines after the pipes (their cables are the pipes' nodes).
 Transmitters.start(net, world)
 ItemUse.start(net, world)
+Machines.start(net, world)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
 Simulation.start(world)
 Api._ready(world, ticker)
 
--- Fixed rate block updates, then one replication message per frame, then the pipes.
+-- Fixed rate block updates, then one replication message per frame, then the pipes and machines.
 local tickLength = 1 / Config.Server.TickRate
 local accumulator = 0
 RunService.Heartbeat:Connect(function(dt)
@@ -106,4 +116,5 @@ RunService.Heartbeat:Connect(function(dt)
 	net.flush()
 	-- The pipes after the edits: a client knows a transmitter's block before its state.
 	Transmitters.update(dt)
+	Machines.update(dt)
 end)

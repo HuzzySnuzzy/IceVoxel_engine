@@ -20,10 +20,13 @@
 	    crafting   a crafting table: 1 result, 2..10 the 3 x 3 grid (personal, emptied on close)
 	    chest      a chest's 27 slots (shared by everyone who opens it)
 	    furnace    1 input, 2 fuel, 3 output, plus `data` (Crafting/Smelting; shared)
+	    machine    a Mekanism machine (Shared/Machines): its kind's slots (0 or more) and `data`,
+	               energy first (shared); its block says which kind
 
 	A container's `data` is a list of up to MAX_CONTAINER_DATA numbers its screen shows (Minecraft's
-	ContainerData): a furnace's flame and arrow (Crafting/Smelting, indices 1..5). The protocol
-	sends them as f64, so machines may keep energy far beyond 16 bits there.
+	ContainerData): a furnace's flame and arrow (Crafting/Smelting, indices 1..5), a machine's
+	energy and gauges (Shared/Machines, energy always at 1). The protocol sends them as f64, so
+	machines keep energy far beyond 16 bits there.
 
 	Stacks keep their item data (Items.Stack `data`) wherever they go: every copy, click and move
 	carries it, and stacks with different data never merge (Inventory/Menu).
@@ -47,7 +50,7 @@ export type Inventory = {
 }
 
 export type Container = {
-	-- "inventory", "crafting", "chest" or "furnace" (see above).
+	-- "inventory", "crafting", "chest", "furnace" or "machine" (see above).
 	kind: string,
 	-- The block it belongs to (e.g. Blocks.id.Chest), for its name; 0 for the inventory's grid.
 	block: number,
@@ -122,7 +125,7 @@ Types.MAX_CONTAINER = 54
 -- Most numbers in a container's `data`.
 Types.MAX_CONTAINER_DATA = 16
 -- Container kinds, and their numbers on the wire.
-Types.KINDS = { "inventory", "crafting", "chest", "furnace" }
+Types.KINDS = { "inventory", "crafting", "chest", "furnace", "machine" }
 -- Slot of a crafting container's result; its grid follows (width x width, row by row).
 Types.CRAFT_RESULT = 1
 -- A furnace's slots.

@@ -2,7 +2,10 @@
 --[[
 	The server's Mekanism pipes, pure (no Roblox APIs, so the tests run it): every transmitter's
 	state, the pipes' networks and their water, the fluid tanks, the items in transporters, and
-	what has to be replicated. Transmitters/Transmitters runs it in the game.
+	what has to be replicated. Transmitters/Transmitters runs it in the game. Universal Cables are
+	nodes too (their side modes, links to cables and energy blocks); their energy networks are
+	server/Machines/EnergyNet's, which reads the nodes and `energyDirty` (cables that came, went
+	or changed links).
 
 	State (Transmitters/Types), all in memory like chests: nothing is saved.
 	  Nodes     one per transmitter block, made and dropped by `blockChanged` (the server chains
@@ -109,6 +112,7 @@ function TransmitterWorld.new(env: Env): World
 		ops = {},
 		dirtyNodes = {},
 		dirtyTanks = {},
+		energyDirty = {},
 		lost = 0,
 	}
 end
@@ -372,9 +376,14 @@ local function relink(world: World, node: Node)
 	end
 	local links, acceptors =
 		Transmitters.connections(node.block, node.modes, node.colour, node.x, node.y, node.z, getBlock, getState)
-	local oldLinks = node.links
+	local oldLinks, oldAcceptors = node.links, node.acceptors
 	node.links, node.acceptors = links, acceptors
-	if node.kind == "fluid" then
+	if node.kind == "energy" then
+		-- (Energy networks are server/Machines/EnergyNet's.)
+		if links ~= oldLinks or acceptors ~= oldAcceptors then
+			world.energyDirty[node.key] = true
+		end
+	elseif node.kind == "fluid" then
 		if links ~= oldLinks then
 			seed(world, node.key)
 			local changed = bit32.bxor(links, oldLinks)
@@ -412,7 +421,7 @@ end
 --[[ Block changes ]]
 
 local function addNode(world: World, key: number, x: number, y: number, z: number, block: number)
-	local kind: Types.Kind = if Transmitters.kindOf(block) == "item" then "item" else "fluid"
+	local kind: Types.Kind = Transmitters.kindOf(block) or "fluid"
 	local node: Node = {
 		key = key,
 		x = x,
@@ -436,6 +445,8 @@ local function addNode(world: World, key: number, x: number, y: number, z: numbe
 	if kind == "fluid" then
 		-- (A lone pipe is a network of its own until a flood fill joins it to its neighbours.)
 		join(newNetwork(world), node)
+	elseif kind == "energy" then
+		world.energyDirty[key] = true
 	end
 	relink(world, node)
 end
@@ -446,6 +457,9 @@ local function removeNode(world: World, node: Node)
 	world.nodes[node.key] = nil
 	world.pullers[node.key] = nil
 	world.dirtyNodes[node.key] = nil
+	if node.kind == "energy" then
+		world.energyDirty[node.key] = true
+	end
 	unindex(world, node.key, node.x, node.z)
 end
 
@@ -473,9 +487,13 @@ local function removeTank(world: World, tank: Tank)
 	unindex(world, tank.key, tank.x, tank.z)
 end
 
--- Does a change from or to `block` matter to transmitters (one, a tank, an inventory)?
+-- Does a change from or to `block` matter to transmitters (one, a tank, an inventory, an energy
+-- block)?
 local function matters(block: number): boolean
-	return Transmitters.isTransmitter(block) or Transmitters.isTank(block) or Transmitters.isItemAcceptor(block)
+	return Transmitters.isTransmitter(block)
+		or Transmitters.isTank(block)
+		or Transmitters.isItemAcceptor(block)
+		or Transmitters.isEnergyAcceptor(block)
 end
 
 --[[

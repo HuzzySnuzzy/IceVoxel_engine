@@ -18,6 +18,9 @@
 	                                     bucket a lava bucket leaves)
 	  chest    a plain Container: every slot, through every face, anything. So is any other block
 	           with a `container`.
+	  machine  a Mekanism machine with slots (Shared/Machines): its kind says which slots each face
+	           reaches (by default every face puts items into its inputs and takes them out of its
+	           outputs), what each slot takes (Machines.mayPlace) and how many (Machines.slotLimit).
 
 	Inserting (`insert`, `room`) follows Forge's ItemHandlerHelper.insertItemStacked, as Mekanism's
 	transporters insert: first it tops up stacks of the same item, wear and data (Menu.stacksMatch)
@@ -38,6 +41,7 @@
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Items = require(script.Parent.Parent.Items)
+local Machines = require(script.Parent.Parent.Machines)
 local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Menu = require(script.Parent.Parent.Inventory.Menu)
 local Types = require(script.Parent.Parent.Inventory.Types)
@@ -106,14 +110,30 @@ local function slotMax(item: number): number
 	return math.min(Items.maxStack(item), Items.MAX_STACK)
 end
 
--- Does `block` keep items (a chest or a furnace: BlockList `container`)?
+-- Is `block` a machine with item slots? (Asked each time: tests bind machines at run time.)
+local function isMachine(block: number): boolean
+	return Machines.isMachine(block) and Machines.containerSize(block) > 0
+end
+
+-- The most of `item` `slot` of `block` holds (a machine's slot may hold fewer).
+local function slotLimit(block: number, slot: number, item: number): number
+	if Machines.isMachine(block) then
+		return Machines.slotLimit(block, slot, item)
+	end
+	return slotMax(item)
+end
+
+-- Does `block` keep items (a chest, a furnace, a machine with slots: BlockList `container`)?
 function Inventories.isInventory(block: number): boolean
-	return kinds[block] ~= nil
+	return kinds[block] ~= nil or isMachine(block)
 end
 
 -- The slots items may enter `block` by through `face`, in the order they are tried (do not
 -- change the list). Empty for blocks without slots and bad faces.
 function Inventories.insertSlots(block: number, face: number): { number }
+	if Machines.isMachine(block) then
+		return Machines.insertSlots(block, face)
+	end
 	local kind = kinds[block]
 	if kind == nil or not isFace(face) then
 		return NO_SLOTS
@@ -124,15 +144,20 @@ function Inventories.insertSlots(block: number, face: number): { number }
 end
 
 -- The slots items may be taken from through `face`, in order (WorldlyContainer.getSlotsForFace:
--- the same slots as for inserting).
+-- the same slots as for inserting; a machine's kind lists its own, its outputs by default).
 function Inventories.extractSlots(block: number, face: number): { number }
+	if Machines.isMachine(block) then
+		return Machines.extractSlots(block, face)
+	end
 	return Inventories.insertSlots(block, face)
 end
 
 -- The item rules of a slot the face reaches (canPlaceItem / canTakeItemThroughFace), for the
 -- loops below, which only visit such slots.
 local function mayPlace(block: number, slot: number, item: number): boolean
-	if kinds[block] == "furnace" then
+	if Machines.isMachine(block) then
+		return Machines.mayPlace(block, slot, item)
+	elseif kinds[block] == "furnace" then
 		if slot == OUTPUT then
 			return false
 		elseif slot == FUEL then
@@ -172,10 +197,11 @@ function Inventories.room(block: number, face: number, slots: Slots, stack: Stac
 	if not isStack(stack) then
 		return 0
 	end
-	local item, max = stack.item, slotMax(stack.item)
+	local item = stack.item
 	local room = 0
 	for _, slot in Inventories.insertSlots(block, face) do
 		if mayPlace(block, slot, item) then
+			local max = slotLimit(block, slot, item)
 			local current = slots[slot]
 			if current == nil or current.count < 1 then
 				room += max
@@ -202,7 +228,7 @@ function Inventories.insert(block: number, face: number, slots: Slots, stack: St
 		local some = type(stack.count) == "number" and stack.count >= 1
 		return out, if some then make(stack.item, math.floor(stack.count), stack.damage, stack.data) else nil
 	end
-	local item, damage, data, max = stack.item, cleanDamage(stack.damage), stack.data, slotMax(stack.item)
+	local item, damage, data = stack.item, cleanDamage(stack.damage), stack.data
 	local left = stack.count
 	local order = Inventories.insertSlots(block, face)
 	-- Top up matching stacks first...
@@ -211,6 +237,7 @@ function Inventories.insert(block: number, face: number, slots: Slots, stack: St
 			break
 		end
 		local current = out[slot]
+		local max = slotLimit(block, slot, item)
 		if
 			current ~= nil
 			and current.count >= 1
@@ -229,7 +256,8 @@ function Inventories.insert(block: number, face: number, slots: Slots, stack: St
 			break
 		end
 		local current = out[slot]
-		if (current == nil or current.count < 1) and mayPlace(block, slot, item) then
+		local max = slotLimit(block, slot, item)
+		if (current == nil or current.count < 1) and max > 0 and mayPlace(block, slot, item) then
 			local put = math.min(left, max)
 			out[slot] = make(item, put, damage, data)
 			left -= put

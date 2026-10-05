@@ -3,8 +3,8 @@
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
 	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
-	transmitters, fluid tanks and Configurator adapted to the game's materials (see "Mekanism
-	pipes and buckets" below).
+	transmitters, fluid tanks, Configurator and Universal Cables adapted to the game's materials
+	(see "Mekanism pipes and buckets" and "Universal Cables" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -174,6 +174,19 @@ for tier = 2, 4 do
 	shape({ " A ", "ATA", " A " }, { T = lower .. "FluidTank", A = alloy }, name .. "FluidTank")
 end
 shape({ " G ", "ISI", " S " }, { G = "GlowstoneDust", I = "IronIngot", S = "Stick" }, "Configurator")
+
+--[[
+	Mekanism's Universal Cables. Mekanism makes 8 Basic Universal Cables from steel, redstone and
+	steel in a row; osmium ingots stand for the steel (Mekanism's steel is made with osmium's
+	help) and glowstone dust for the redstone, which the game has neither of. The upgrades are
+	Mekanism's shape, as for transporters and pipes: 8 cables around an alloy (gold, diamond,
+	emerald) make 8 of the next tier.
+]]
+shape({ "OGO" }, { O = "OsmiumIngot", G = "GlowstoneDust" }, "BasicUniversalCable", 8)
+for tier = 2, 4 do
+	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
+	shape({ "CCC", "CAC", "CCC" }, { C = lower .. "UniversalCable", A = alloy }, name .. "UniversalCable", 8)
+end
 
 --[[ Smelting ]]
 

@@ -12,9 +12,14 @@
 	                            and the result (slot 1) in a large 26 x 26 frame
 	                  furnace   AbstractFurnaceScreen: the input (1) over the flame over the fuel
 	                            (2), the progress arrow and the output (3) in a large frame
+	                  machine   a Mekanism machine's (Shared/Machines.panel): its kind's slots where
+	                            it puts them, Mekanism's vertical energy bar (GuiVerticalPowerBar,
+	                            right edge), optionally an arrow, a flame and a status line
 	  gauges        the furnace's flame and arrow (AbstractFurnaceMenu.getLitProgress /
-	                getBurnProgress) and the durability bar under worn tools (ItemStack.getBarWidth
-	                / getBarColor)
+	                getBurnProgress), a machine's (from the data fields its panel names), the
+	                energy bar (stored over capacity, red when empty to green when full, "x / y"
+	                on hover) and the durability bar under worn tools (ItemStack.getBarWidth /
+	                getBarColor)
 
 	A slot's (x, y) is its item's top left corner, as in Minecraft's menus: the 18 x 18 slot frame
 	(and the hit area) is one pixel up and left of it, a large frame five.
@@ -25,6 +30,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Types = require(Shared.Inventory.Types)
 
 type Container = Types.Container
@@ -32,6 +38,8 @@ type Container = Types.Container
 -- A slot: container slot `slot` with its item at (x, y); `big` draws Minecraft's 26 x 26 result frame.
 export type Spot = { slot: number, x: number, y: number, big: boolean }
 export type Rect = { x: number, y: number, w: number, h: number }
+-- Where a machine's gauge reads its data: `value` over `total` (data indices) or over `fixed`.
+export type Source = { value: number, total: number?, fixed: number? }
 
 -- The player panel's crafting area (window 0 only).
 export type Grid = {
@@ -57,6 +65,12 @@ export type Panel = {
 	-- The furnace: its progress arrow (filling left to right) and flame (filling from the bottom).
 	progress: Rect?,
 	flame: Rect?,
+	-- Machines: where their arrow and flame read their data (nil: the furnace's indices), the
+	-- energy bar and the status line.
+	progressSource: Source?,
+	flameSource: Source?,
+	energy: Rect?,
+	status: { x: number, y: number }?,
 }
 
 local MenuLayout = {}
@@ -130,6 +144,10 @@ local function chestPanel(container: Container): Panel
 		arrow = nil,
 		progress = nil,
 		flame = nil,
+		progressSource = nil,
+		flameSource = nil,
+		energy = nil,
+		status = nil,
 	}
 end
 
@@ -153,6 +171,10 @@ local function craftingPanel(container: Container): Panel
 		arrow = { x = 90, y = 35, w = 22, h = 15 },
 		progress = nil,
 		flame = nil,
+		progressSource = nil,
+		flameSource = nil,
+		energy = nil,
+		status = nil,
 	}
 end
 
@@ -174,6 +196,67 @@ local function furnacePanel(container: Container): Panel
 		arrow = nil,
 		progress = { x = 79, y = 34, w = MenuLayout.ARROW_WIDTH, h = MenuLayout.ARROW_HEIGHT },
 		flame = { x = 56, y = 36, w = MenuLayout.FLAME_SIZE, h = MenuLayout.FLAME_SIZE },
+		progressSource = nil,
+		flameSource = nil,
+		energy = nil,
+		status = nil,
+	}
+end
+
+-- Where a machine's gauge (Machines.Gauge) reads its data, from its kind's field names.
+local function sourceOf(block: number, gauge: Machines.Gauge): Source?
+	local value = Machines.field(block, gauge.value)
+	if value == nil then
+		return nil
+	end
+	local total = gauge.total
+	if type(total) == "number" then
+		return { value = value, total = nil, fixed = total }
+	end
+	local index = Machines.field(block, total)
+	return if index then { value = value, total = index, fixed = nil } else nil
+end
+
+--[[
+	A Mekanism machine's panel (Shared/Machines.panel): its kind's slots at their places, the
+	title centred, the energy bar (Mekanism's GuiVerticalPowerBar at (164, 15) unless the kind puts
+	it elsewhere), the arrow, flame and status line the kind asks for.
+]]
+local function machinePanel(container: Container): Panel
+	local block = container.block
+	local spec: Machines.PanelSpec = Machines.panel(block) or {}
+	local kind = Machines.kindOf(block)
+	local slots: { Spot } = {}
+	if kind then
+		for slot, slotSpec in kind.slots do
+			if slot <= container.size then
+				table.insert(slots, { slot = slot, x = slotSpec.x, y = slotSpec.y, big = slotSpec.big == true })
+			end
+		end
+	end
+	local bar = Machines.ENERGY_BAR
+	local at = spec.energy
+	local progress, flame = spec.progress, spec.flame
+	return {
+		kind = container.kind,
+		width = MenuLayout.WIDTH,
+		height = spec.height or Machines.PANEL_HEIGHT,
+		title = spec.title or blockTitle(block),
+		titleX = 8,
+		titleY = 6,
+		centred = true,
+		slots = slots,
+		arrow = nil,
+		progress = if progress
+			then { x = progress.x, y = progress.y, w = MenuLayout.ARROW_WIDTH, h = MenuLayout.ARROW_HEIGHT }
+			else nil,
+		flame = if flame
+			then { x = flame.x, y = flame.y, w = MenuLayout.FLAME_SIZE, h = MenuLayout.FLAME_SIZE }
+			else nil,
+		progressSource = if progress then sourceOf(block, progress) else nil,
+		flameSource = if flame then sourceOf(block, flame) else nil,
+		energy = { x = if at then at.x else bar.x, y = if at then at.y else bar.y, w = bar.w, h = bar.h },
+		status = spec.status,
 	}
 end
 
@@ -187,6 +270,8 @@ function MenuLayout.panel(container: Container): Panel
 		return craftingPanel(container)
 	elseif container.kind == "furnace" and container.size == Types.FURNACE_OUTPUT then
 		return furnacePanel(container)
+	elseif Machines.isContainer(container) and Machines.containerSize(container.block) == container.size then
+		return machinePanel(container)
 	end
 	return chestPanel(container)
 end
@@ -233,6 +318,100 @@ function MenuLayout.arrowColumns(data: { number }?): number
 		return 0
 	end
 	return math.clamp(math.floor(progress * MenuLayout.ARROW_WIDTH / total), 0, MenuLayout.ARROW_WIDTH)
+end
+
+--[[ Machine gauges ]]
+
+-- How full a machine's gauge is (0..1): its value over its total (or fixed total), 0 without one.
+function MenuLayout.gaugeFraction(data: { number }?, source: Source?): number
+	if source == nil then
+		return 0
+	end
+	local amount = value(data, source.value)
+	local total = if source.fixed then source.fixed else value(data, source.total or 0)
+	if amount <= 0 or total <= 0 then
+		return 0
+	end
+	return math.clamp(amount / total, 0, 1)
+end
+
+-- A machine's flame rows (as the furnace's: 0 while out, else value * 13 / total + 1).
+function MenuLayout.machineFlameRows(data: { number }?, source: Source?): number
+	local fraction = MenuLayout.gaugeFraction(data, source)
+	if fraction <= 0 then
+		return 0
+	end
+	return math.clamp(math.floor(fraction * 13), 0, 13) + 1
+end
+
+-- A machine's arrow columns (0..24, as the furnace's).
+function MenuLayout.machineArrowColumns(data: { number }?, source: Source?): number
+	local fraction = MenuLayout.gaugeFraction(data, source)
+	return math.clamp(math.floor(fraction * MenuLayout.ARROW_WIDTH), 0, MenuLayout.ARROW_WIDTH)
+end
+
+--[[ The energy bar (Mekanism's GuiVerticalPowerBar) ]]
+
+-- A machine's stored energy over its capacity (0..1; the creative cube is full).
+function MenuLayout.energyFraction(data: { number }?): number
+	local energy, capacity = value(data, Machines.ENERGY), value(data, Machines.CAPACITY)
+	if capacity == math.huge then
+		return 1
+	elseif energy <= 0 or capacity <= 0 then
+		return 0
+	end
+	return math.clamp(energy / capacity, 0, 1)
+end
+
+--[[
+	Rows of the energy bar filled (from the bottom, 0..height): Mekanism's (int) (level * height),
+	so it only looks full when it is, but never empty while it holds any.
+]]
+function MenuLayout.energyRows(data: { number }?, height: number): number
+	local fraction = MenuLayout.energyFraction(data)
+	if fraction <= 0 then
+		return 0
+	end
+	return math.clamp(math.floor(fraction * height), 1, height)
+end
+
+-- The bar's colour for a fill of `fraction`: red when empty, through yellow, to green when full.
+function MenuLayout.energyColour(fraction: number): { number }
+	local f = math.clamp(if fraction == fraction then fraction else 0, 0, 1)
+	if f < 0.5 then
+		return { 255, math.floor(f * 2 * 255 + 0.5), 0 }
+	end
+	return { math.floor((1 - f) * 2 * 255 + 0.5), 255, 0 }
+end
+
+-- The bar's tooltip, Mekanism's "stored / capacity": "1.2 kJ / 20 kJ" ("Infinite" for creative).
+function MenuLayout.energyTooltip(data: { number }?): string
+	local energy, capacity = value(data, Machines.ENERGY), value(data, Machines.CAPACITY)
+	if capacity == math.huge then
+		return "Infinite"
+	end
+	return `{Items.formatEnergy(energy)} / {Items.formatEnergy(capacity)}`
+end
+
+--[[
+	A machine's status line from its container's data (Machines.status), "" when it has none. Reads
+	`data` as it is (Machines.view would fill in a missing one: the client's window is read only).
+]]
+function MenuLayout.statusText(container: Container?): string
+	if container == nil or not Machines.isContainer(container) then
+		return ""
+	end
+	local data = container.data
+	local view: Machines.View = {
+		block = container.block,
+		energy = value(data, Machines.ENERGY),
+		capacity = value(data, Machines.CAPACITY),
+		input = value(data, Machines.INPUT),
+		output = value(data, Machines.OUTPUT),
+		rate = value(data, Machines.RATE),
+		active = value(data, Machines.ACTIVE) ~= 0,
+	}
+	return Machines.status(container.block, view) or ""
 end
 
 --[[ Durability bar ]]

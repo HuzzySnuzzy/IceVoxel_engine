@@ -7,10 +7,13 @@
 	    inventories (chests, furnaces); the Restrictive Transporter is a basic one that routes
 	    avoid (path cost 1000 instead of a basic one's 10).
 	  * Mechanical Pipes ("fluid" transmitters, Basic to Ultimate) move water between Fluid Tanks.
-	  * Tiers (Transmitters/Tiers): Mekanism's TransporterTier, PipeTier and FluidTankTier numbers.
+	  * Universal Cables ("energy" transmitters, Basic to Ultimate) join energy blocks (Mekanism
+	    machines, Shared/Machines) into energy networks; a network moves at most the sum of its
+	    cables' capacities per tick (Mekanism's CableTier: 8 000 to 8 192 000 J/t).
+	  * Tiers (Transmitters/Tiers): Mekanism's TransporterTier, PipeTier, CableTier and
+	    FluidTankTier numbers.
 
-	Universal Cables, Pressurized Tubes and Thermodynamic Conductors are left out: the game has no
-	energy, gas or heat.
+	Pressurized Tubes and Thermodynamic Conductors are left out: the game has no gas or heat.
 
 	Sides are numbered like Minecraft's Direction ordinal: 0 Down, 1 Up, 2 North (-Z), 3 South
 	(+Z), 4 West (-X), 5 East (+X) (SIDES, Blocks.DIRECTIONS names). Side s of the block at p is
@@ -23,6 +26,8 @@
 	  PULL    takes from the acceptor there (every PULL_DELAY ticks for transporters, every tick
 	          for pipes) and never gives to it
 	  NONE    no connection at all
+	Universal Cables only know NONE: PUSH and PULL act as NORMAL there (an energy block's part in
+	its network is its own: Machines.role).
 	The six modes travel and are stored packed in 16 bits, 2 bits a side with side 0 lowest
 	(`packModes`, `modeOf`, `withMode`); 0 is all NORMAL.
 
@@ -30,7 +35,8 @@
 	is the Configurator's sneak click). Two transmitters connect when they are the same kind,
 	neither side is NONE and, for transporters, their colours are compatible (either is
 	uncoloured or both are the same); a transmitter connects to an acceptor of its kind (a block
-	with item slots, or a fluid tank) unless its side is NONE. That rule is `connects`, used by the
+	with item slots, a fluid tank, an energy block) unless its side is NONE. That rule is
+	`connects`, used by the
 	client to draw arms and by the server to build networks. An item takes the colour of the
 	transporter that pulled it and only enters uncoloured transporters or ones of its colour
 	(`carries`).
@@ -45,13 +51,14 @@
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Machines = require(script.Parent.Machines)
 local Inventories = require(script.Inventories)
 local Tiers = require(script.Tiers)
 
 export type Slots = Inventories.Slots
 export type Tier = Tiers.Tier
 -- What a transmitter carries.
-export type Kind = "item" | "fluid"
+export type Kind = "item" | "fluid" | "energy"
 -- What a side connects to.
 export type Connection = "transmitter" | "acceptor"
 export type Colour = { name: string, displayName: string, rgb: { number } }
@@ -272,7 +279,8 @@ for id = 0, Blocks.count - 1 do
 	local def = Blocks.get(id)
 	local transmitter = def.transmitter
 	if transmitter then
-		kinds[id] = if transmitter.kind == "item" then "item" else "fluid"
+		local kind = transmitter.kind
+		kinds[id] = if kind == "item" then "item" elseif kind == "energy" then "energy" else "fluid"
 		tierIndex[id] = transmitter.tier
 		restrictive[id] = transmitter.restrictive == true
 	elseif def.tank then
@@ -282,7 +290,7 @@ for id = 0, Blocks.count - 1 do
 	end
 end
 
--- What a transmitter carries ("item" or "fluid"), nil for every other block.
+-- What a transmitter carries ("item", "fluid" or "energy"), nil for every other block.
 function Transmitters.kindOf(block: number): Kind?
 	return kinds[block]
 end
@@ -348,6 +356,22 @@ function Transmitters.pipeCapacity(block: number): number
 	return if kinds[block] == "fluid" then Tiers.TIERS[tierIndex[block]].pipeCapacity else 0
 end
 
+-- J per tick a Universal Cable adds to its energy network's throughput; 0 for other blocks.
+function Transmitters.cableCapacity(block: number): number
+	return if kinds[block] == "energy" then Tiers.TIERS[tierIndex[block]].cableCapacity else 0
+end
+
+-- What a transmitter adds to its network: a pipe's mB, a cable's J per tick; 0 for others.
+function Transmitters.capacity(block: number): number
+	local kind = kinds[block]
+	if kind == "fluid" then
+		return Tiers.TIERS[tierIndex[block]].pipeCapacity
+	elseif kind == "energy" then
+		return Tiers.TIERS[tierIndex[block]].cableCapacity
+	end
+	return 0
+end
+
 -- mB a fluid tank holds; 0 for other blocks.
 function Transmitters.tankCapacity(block: number): number
 	return tankCapacities[block] or 0
@@ -368,9 +392,19 @@ function Transmitters.isFluidAcceptor(block: number): boolean
 	return tanks[block] == true
 end
 
+-- Does the block hold energy Universal Cables connect to (a Mekanism machine, Shared/Machines)?
+function Transmitters.isEnergyAcceptor(block: number): boolean
+	return Machines.hasEnergy(block)
+end
+
 -- Is `block` an acceptor for transmitters of `kind`?
 function Transmitters.isAcceptor(kind: Kind, block: number): boolean
-	return if kind == "item" then Inventories.isInventory(block) else tanks[block] == true
+	if kind == "item" then
+		return Inventories.isInventory(block)
+	elseif kind == "energy" then
+		return Machines.hasEnergy(block)
+	end
+	return tanks[block] == true
 end
 
 --[[
@@ -380,7 +414,8 @@ end
 	NORMAL and none).
 	  "transmitter"  the same kind of transmitter (any tier), neither side NONE, colours compatible
 	                 (transporters only: Mekanism's pipes have no colour, so theirs is ignored)
-	  "acceptor"     an inventory (item) or fluid tank (fluid), and the side is not NONE
+	  "acceptor"     an inventory (item), a fluid tank (fluid) or an energy block (energy), and
+	                 the side is not NONE
 	  nil            anything else, and every side of a block that is no transmitter
 ]]
 function Transmitters.connects(

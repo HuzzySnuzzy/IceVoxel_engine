@@ -36,6 +36,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
@@ -248,8 +249,9 @@ end
 --[[
 	Opens the block `block` at (x, y, z) for the player in a new window, closing what was open
 	(the cursor and the 2 x 2 grid go back into the inventory). A crafting table (menu "Crafting")
-	gets a 3 x 3 grid of the player's own; a chest or a furnace is the shared container there
-	(Containers). Returns the stacks that did not fit back. Blocks with no window open nothing.
+	gets a 3 x 3 grid of the player's own; a chest, a furnace or a machine (even one without
+	slots: its panel shows its energy) is the shared container there (Containers). Returns the
+	stacks that did not fit back. Blocks with no window open nothing.
 ]]
 function InventoryState.open(self: InventoryState, key: any, x: number, y: number, z: number, block: number): { Stack }
 	local player = self.players[key]
@@ -258,7 +260,7 @@ function InventoryState.open(self: InventoryState, key: any, x: number, y: numbe
 	end
 	local def = Blocks.get(block)
 	local personal = def.menu == "Crafting"
-	if not personal and def.container <= 0 then
+	if not personal and Machines.containerSize(block) <= 0 and not Machines.isMachine(block) then
 		return {}
 	end
 	local thrown = self:close(key)

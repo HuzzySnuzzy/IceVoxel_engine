@@ -69,6 +69,14 @@
 	                 the players near a change.
 	  Tanks          u32 count, count x (i32 x, u16 y, i32 z, u8 fluid (0 none, 1 water), u32 amount
 	                 (mB)): fluid tanks, the same way.
+	  Machines       u32 count, count x (i32 x, u16 y, i32 z, f64 energy, f64 capacity (J; math.huge
+	                 is the creative cube's infinity), f32 input, f32 output (J the energy network
+	                 put in / took out last tick), f32 rate (J/t the machine made, + or used, -),
+	                 u8 flags (bit 0: active)): Mekanism machines (Shared/Machines) for WAILA and
+	                 the world, the same way as Tanks (a record replaces what the client knew; a
+	                 machine without one is empty and idle at its block's capacity). NaN is
+	                 malformed. A viewer of the machine's window gets its whole data in Inventory
+	                 snapshots instead.
 	  Transport      u32 count, count x op (u8 op, u32 id, then by op): items in transporters.
 	                   1 add     u16 item, u8 count, i32 x, u16 y, i32 z (the transporter it is in),
 	                             u8 progress (0..100 through that block), u8 speed (progress per
@@ -120,6 +128,7 @@ Protocol.ServerMessage = {
 	Transmitters = 8,
 	Tanks = 9,
 	Transport = 10,
+	Machines = 11,
 }
 
 Protocol.EditAction = {
@@ -919,12 +928,25 @@ function Protocol.decodeSounds(b: buffer): { SoundCue }?
 	return cues
 end
 
---[[ Mekanism transmitters, fluid tanks and items in transit (server -> client) ]]
+--[[ Mekanism transmitters, fluid tanks, machines and items in transit (server -> client) ]]
 
 -- A transmitter's state: packed side modes (u16), colour (0..16), fill (0..255).
 export type TransmitterRecord = { x: number, y: number, z: number, modes: number, colour: number, fluid: number }
 -- A fluid tank: fluid (0 none, 1 water) and amount in mB.
 export type TankRecord = { x: number, y: number, z: number, fluid: number, amount: number }
+-- A Mekanism machine: energy and capacity (J), the network's input / output and its own rate (J
+-- per tick, the last tick's) and whether it is working.
+export type MachineRecord = {
+	x: number,
+	y: number,
+	z: number,
+	energy: number,
+	capacity: number,
+	input: number,
+	output: number,
+	rate: number,
+	active: boolean,
+}
 -- An item entering a transporter or re-routed (`add`), or leaving the transporters (`remove`).
 export type TransportOp = {
 	op: "add",
@@ -942,6 +964,7 @@ export type TransportOp = {
 
 Protocol.TRANSMITTER_BYTES = 14
 Protocol.TANK_BYTES = 15
+Protocol.MACHINE_BYTES = 39
 -- Most sides an `add` carries; a longer route is sent again on the way.
 Protocol.MAX_PATH = 255
 -- Why an item left the transporters (`remove`).
@@ -1048,6 +1071,72 @@ function Protocol.decodeTanks(b: buffer): { TankRecord }?
 			amount = buffer.readu32(b, o + 11),
 		}
 		o += Protocol.TANK_BYTES
+	end
+	return records
+end
+
+-- A number as sent: NaN (which the decoder refuses) becomes 0.
+local function finiteOrInfinite(value: number): number
+	return if value ~= value then 0 else value
+end
+
+function Protocol.encodeMachines(records: { MachineRecord }): buffer
+	local b = buffer.create(4 + #records * Protocol.MACHINE_BYTES)
+	buffer.writeu32(b, 0, #records)
+	local o = 4
+	for _, record in records do
+		buffer.writei32(b, o, record.x)
+		buffer.writeu16(b, o + 4, record.y)
+		buffer.writei32(b, o + 6, record.z)
+		buffer.writef64(b, o + 10, finiteOrInfinite(record.energy))
+		buffer.writef64(b, o + 18, finiteOrInfinite(record.capacity))
+		buffer.writef32(b, o + 26, finiteOrInfinite(record.input))
+		buffer.writef32(b, o + 30, finiteOrInfinite(record.output))
+		buffer.writef32(b, o + 34, finiteOrInfinite(record.rate))
+		buffer.writeu8(b, o + 38, if record.active then 1 else 0)
+		o += Protocol.MACHINE_BYTES
+	end
+	return b
+end
+
+-- The records of a Machines message, or nil when it is malformed (NaN, flags beyond bit 0).
+function Protocol.decodeMachines(b: buffer): { MachineRecord }?
+	local len = buffer.len(b)
+	if len < 4 then
+		return nil
+	end
+	local count = buffer.readu32(b, 0)
+	if len ~= 4 + count * Protocol.MACHINE_BYTES then
+		return nil
+	end
+	local records: { MachineRecord } = table.create(count)
+	local o = 4
+	for i = 1, count do
+		local energy, capacity = buffer.readf64(b, o + 10), buffer.readf64(b, o + 18)
+		local input, output, rate = buffer.readf32(b, o + 26), buffer.readf32(b, o + 30), buffer.readf32(b, o + 34)
+		local flags = buffer.readu8(b, o + 38)
+		if
+			energy ~= energy
+			or capacity ~= capacity
+			or input ~= input
+			or output ~= output
+			or rate ~= rate
+			or flags > 1
+		then
+			return nil
+		end
+		records[i] = {
+			x = buffer.readi32(b, o),
+			y = buffer.readu16(b, o + 4),
+			z = buffer.readi32(b, o + 6),
+			energy = energy,
+			capacity = capacity,
+			input = input,
+			output = output,
+			rate = rate,
+			active = flags == 1,
+		}
+		o += Protocol.MACHINE_BYTES
 	end
 	return records
 end

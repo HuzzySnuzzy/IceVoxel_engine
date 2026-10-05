@@ -16,6 +16,9 @@
 	  crafting  "Crafting": the 3 x 3 grid, an arrow and the result in a large frame
 	  furnace   "Furnace": the input over the flame over the fuel, the progress arrow and the output;
 	            the flame burns down and the arrow fills from the container's `data`
+	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots, gauges and status
+	            line, and Mekanism's vertical energy bar filling from the bottom, red when nearly
+	            empty to green when full; hovering it shows "stored / capacity" (`tooltipAt`)
 	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
 	grid. In creative mode (with no block open) two tabs above the panel switch between the item
 	selection and this screen.
@@ -133,6 +136,8 @@ type SlotWidget = {
 
 export type InventoryScreen = {
 	root: Frame,
+	-- The lines of a tooltip for what is under `point` that is no item (a machine's energy bar).
+	tooltipAt: (self: InventoryScreen, point: Vector2, window: Window) -> { string }?,
 	-- Called when the "Item selection" tab is clicked (creative), and the touch close button.
 	onTab: () -> (),
 	onClose: () -> (),
@@ -150,6 +155,9 @@ export type InventoryScreen = {
 -- A furnace panel's gauge: a clipping frame over `rect` showing part of the lit art (in `holder`).
 type Gauge = { clip: Frame, holder: Frame, rect: MenuLayout.Rect, shown: number }
 
+-- A machine's energy bar: its sunken frame and the fill (rows shown, colour key).
+type EnergyBar = { frame: Frame, fill: Frame, rect: MenuLayout.Rect, shown: number, colour: string }
+
 type Self = InventoryScreen & {
 	playerPanel: Frame,
 	containerPanel: Frame?,
@@ -166,6 +174,13 @@ type Self = InventoryScreen & {
 	-- The open furnace's flame (rows shown) and arrow (columns shown).
 	flame: Gauge?,
 	progress: Gauge?,
+	-- A machine's panel: where its gauges read their data, its energy bar and status line, and
+	-- the data they last showed (`machineShown`: drawn at all since the panel was built).
+	layout: MenuLayout.Panel?,
+	energyBar: EnergyBar?,
+	statusLabel: TextLabel?,
+	machineData: { number }?,
+	machineShown: boolean,
 	byButton: { [GuiObject]: SlotWidget },
 	height: number,
 	-- The player panel's touch close button (hidden under a container panel, which has its own).
@@ -247,6 +262,11 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			gridShown = false,
 			flame = nil,
 			progress = nil,
+			layout = nil,
+			energyBar = nil,
+			statusLabel = nil,
+			machineData = nil,
+			machineShown = false,
 			byButton = {},
 			height = PLAYER_HEIGHT,
 			clone = nil,
@@ -412,6 +432,21 @@ local function buildPanel(self: Self, container: Types.Container)
 			drawArrow(parent, rect, if lit then PROGRESS_COLOUR else ARROW_COLOUR, 5)
 		end)
 	end
+	local energy = layout.energy
+	if energy then
+		-- Mekanism's vertical power bar: a sunken frame, filling from the bottom.
+		local frame = Style.inset(panel, energy.x - 1, energy.y - 1, energy.w + 2, energy.h + 2, 5, Color3.new(0, 0, 0))
+		local fill = Style.frame(frame, 1, 1 + energy.h, energy.w, 0, Color3.new(0, 1, 0), 3)
+		self.energyBar = { frame = frame, fill = fill, rect = energy, shown = -1, colour = "" }
+	end
+	local status = layout.status
+	if status then
+		local label = Style.text(panel, "", status.x, status.y, WIDTH - status.x - 16, 8, Style.Colour.Title, 5)
+		-- (A long line ends in "..." before the energy bar instead of running under it.)
+		label.TextTruncate = Enum.TextTruncate.AtEnd
+		self.statusLabel = label
+	end
+	self.layout = layout
 	closeButton(self, panel)
 	self.containerPanel = panel
 end
@@ -454,6 +489,11 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 		self.containerPanel = nil
 		self.flame = nil
 		self.progress = nil
+		self.layout = nil
+		self.energyBar = nil
+		self.statusLabel = nil
+		self.machineData = nil
+		self.machineShown = false
 		if panelContainer then
 			buildPanel(self, panelContainer)
 		end
@@ -485,12 +525,59 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 	assignIndices(self, { id = 0, inventory = Types.newInventory(), container = container })
 end
 
--- The open furnace's flame and arrow, from its `data` (MenuLayout.flameRows / arrowColumns).
+-- A machine's energy bar from its `data` (MenuLayout.energyRows / energyColour).
+local function renderEnergy(self: Self, data: { number }?)
+	local bar = self.energyBar
+	if bar == nil then
+		return
+	end
+	local rect = bar.rect
+	local rows = MenuLayout.energyRows(data, rect.h)
+	local rgb = MenuLayout.energyColour(MenuLayout.energyFraction(data))
+	local colour = `{rgb[1]},{rgb[2]},{rgb[3]}`
+	if rows ~= bar.shown then
+		bar.shown = rows
+		bar.fill.Position = UDim2.fromOffset(1, 1 + rect.h - rows)
+		bar.fill.Size = UDim2.fromOffset(rect.w, rows)
+	end
+	if colour ~= bar.colour then
+		bar.colour = colour
+		bar.fill.BackgroundColor3 = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+	end
+end
+
+--[[
+	The open furnace's flame and arrow, from its `data` (MenuLayout.flameRows / arrowColumns), or a
+	machine's gauges, energy bar and status line from the fields its panel names.
+]]
 local function renderGauges(self: Self, window: Window)
+	local container = window.container
+	local layout = self.layout
+	if container and container.kind == "machine" and layout then
+		local data = container.data
+		-- (Snapshots and replays replace the data table, never change it: the same table shows
+		-- the same, so nothing is worked out again every frame.)
+		if self.machineShown and data == self.machineData then
+			return
+		end
+		self.machineShown = true
+		self.machineData = data
+		setGauge(self.flame, MenuLayout.machineFlameRows(data, layout.flameSource), true)
+		local columns = MenuLayout.machineArrowColumns(data, layout.progressSource)
+		setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
+		renderEnergy(self, data)
+		local label = self.statusLabel
+		if label then
+			local text = MenuLayout.statusText(container)
+			if label.Text ~= text then
+				label.Text = text
+			end
+		end
+		return
+	end
 	if self.flame == nil and self.progress == nil then
 		return
 	end
-	local container = window.container
 	local data = if container and container.kind == "furnace" then container.data else nil
 	setGauge(self.flame, MenuLayout.flameRows(data), true)
 	-- (Minecraft draws the arrow one column wider than its progress; the art starts one in.)
@@ -573,6 +660,16 @@ function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
 		end
 	end
 	return { kind = "outside" }
+end
+
+-- A tooltip for what is under `point` besides items: a machine's energy bar ("1.2 kJ / 20 kJ").
+function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): { string }?
+	local bar = self.energyBar
+	local container = window.container
+	if bar and container and Style.contains(bar.frame, point) then
+		return { MenuLayout.energyTooltip(container.data) }
+	end
+	return nil
 end
 
 -- The target of a (gamepad) selected object, if it is one of this screen's slots.

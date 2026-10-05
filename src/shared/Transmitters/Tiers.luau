@@ -1,8 +1,8 @@
 --!strict
 --[[
 	Mekanism's tier numbers for transmitters and fluid tanks (Mekanism 10.x for Minecraft 1.20.1:
-	TransporterTier, PipeTier and FluidTankTier), with nothing required, so BlockList can read
-	them too. Shared/Transmitters re-exports everything here; use that.
+	TransporterTier, PipeTier, CableTier and FluidTankTier), with nothing required, so BlockList
+	can read them too. Shared/Transmitters re-exports everything here; use that.
 
 	Tier 1..4 = Basic, Advanced, Elite, Ultimate.
 
@@ -24,6 +24,7 @@ export type Tier = {
 	transporterSpeed: number,
 	pipeCapacity: number,
 	pipePull: number,
+	cableCapacity: number,
 	tankCapacity: number,
 	tankOutput: number,
 }
@@ -38,6 +39,7 @@ local TIERS: { Tier } = {
 		transporterSpeed = 5,
 		pipeCapacity = 2000,
 		pipePull = 250,
+		cableCapacity = 8000,
 		tankCapacity = 32000,
 		tankOutput = 1000,
 	},
@@ -48,6 +50,7 @@ local TIERS: { Tier } = {
 		transporterSpeed = 10,
 		pipeCapacity = 8000,
 		pipePull = 1000,
+		cableCapacity = 128000,
 		tankCapacity = 64000,
 		tankOutput = 4000,
 	},
@@ -58,6 +61,7 @@ local TIERS: { Tier } = {
 		transporterSpeed = 20,
 		pipeCapacity = 32000,
 		pipePull = 8000,
+		cableCapacity = 1024000,
 		tankCapacity = 128000,
 		tankOutput = 16000,
 	},
@@ -68,6 +72,7 @@ local TIERS: { Tier } = {
 		transporterSpeed = 50,
 		pipeCapacity = 128000,
 		pipePull = 32000,
+		cableCapacity = 8192000,
 		tankCapacity = 256000,
 		tankOutput = 64000,
 	},

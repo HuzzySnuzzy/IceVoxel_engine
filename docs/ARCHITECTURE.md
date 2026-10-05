@@ -637,6 +637,7 @@ Containers come in four kinds:
 | `crafting`  | 1 result, 2–10 the 3 × 3 grid                  | a crafting table; personal          |
 | `chest`     | 27                                             | shared by everyone who opens it     |
 | `furnace`   | 1 input, 2 fuel, 3 output, plus `data`         | shared                              |
+| `machine`   | its kind's slots (0 or more), plus `data` (energy first) | shared |
 
 So window 0 is numbered exactly like Minecraft's InventoryMenu (0 result, 1–4 grid, 5–8 armor,
 9–35 inventory, 36–44 hotbar).
@@ -896,8 +897,8 @@ closes the view. A fuzz test plans and applies hundreds of random transfers.
 
 Mekanism 10's transmitters (Minecraft 1.20.1) for what the game has: Logistical Transporters and
 the Restrictive Transporter (items), Mechanical Pipes (water), Fluid Tanks, the Configurator and
-Minecraft's buckets. Universal Cables, Pressurized Tubes and Thermodynamic Conductors are out of
-scope: there is no energy, gas or heat.
+Minecraft's buckets. Universal Cables are described in Electricity and machines; Pressurized Tubes
+and Thermodynamic Conductors are out of scope: there is no gas or heat.
 
 **Blocks and items.** BlockList gives transmitters `transmitter = { kind = "item" | "fluid", tier,
 restrictive? }` and tanks `tank = { tier, capacity }`; the numbers per tier are Mekanism's
@@ -1075,6 +1076,85 @@ capacity of the pipes the client sees connected), "Water: n / m mB" for a tank; 
 tier's numbers, packed modes and each side's, colour and fill byte, connected sides and the
 network size. Item icons draw a block's `icon` (a transmitter's core and two arms) box by box.
 
+## Electricity and machines (`Machines/`, server `Machines/`)
+
+Mekanism's energy, in joules (`Items.formatEnergy`: J, kJ, MJ, GJ), and the framework every
+machine is built on.
+
+**Universal Cables** are transmitters of kind "energy", Basic to Ultimate, with Mekanism's
+CableTier capacities (8 000, 128 000, 1 024 000, 8 192 000 J/t; `Transmitters.cableCapacity`).
+They are Mekanism's small transmitters: a 6 pixel core, a red-ish conductor in a frame of the
+tier's colour; the client draws thinner opaque arms (4 px, 5 px collars, 8 px plates:
+`TransmitterModel.sizes`) and the Configurator aims at the smaller core. They connect to cables
+of any tier and to energy blocks (any machine, `Transmitters.isEnergyAcceptor`) on every side
+that is not NONE; PUSH and PULL act as NORMAL. They are TransmitterWorld nodes like pipes (modes,
+the Configurator, Transmitters records) without a network there: a cable that comes, goes or
+changes links is flagged in `energyDirty` for the energy networks.
+
+**Machines** (`Shared/Machines`: init loads Core and every kind in `Kinds/`, then binds BlockList
+blocks with `machine`). A machine block has `machine = { kind }` and `energy = { capacity,
+input?, output? }`; output only makes it a producer, input only a consumer, both storage
+(`Machines.role`). A kind (`Core.define`) gives its slots (panel position, what each takes,
+outputs, limits, transporter faces), data fields, fields kept in the item, its panel, its server
+tick, a status line and optional rate overrides. Its contents are a container of kind "machine"
+(Types.KINDS) with the kind's slots and f64 `data` (at most 16): a header every machine shares,
+1 energy, 2 capacity, 3 input and 4 output (what the network moved last tick), 5 rate (made +,
+used -), 6 active, then the kind's fields. Inventory/Menu asks Machines for a machine's slot
+rules, limits and outputs, and shift-clicks from the inventory into the slots that take the
+item in one pass (Mekanism's MekanismContainer; only when none takes anything does it move
+between the inventory and the hotbar). A machine with slots is an inventory for transporters
+(Transmitters/Inventories), through the faces its kind gives each slot (by default inputs take
+items through every face and outputs give them out through every face). Energy is kept in
+multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact; `produce` and `use` keep
+it so, and `share` is Mekanism's even split in whole quanta: every recipient gets the same share,
+those that take less get all they take and the rest is shared again, smallest limits first.
+
+**On the server** (`server/Machines/`). `MachineWorld` (pure) keeps a machine per machine block
+(`blockChanged`, chained onto WorldServer.onChanged after Inventories and Transmitters) and
+creates its container in Players/Containers at once, so a machine works before anyone opens it;
+machine containers are never forgotten while their block stands, and a broken machine's slots
+drop through Inventories like a chest's. Each `step` (20 a second, Machines.update right after the pipes): queued network work, every
+machine's kind tick (`Machines.tick`: afterwards, even when the kind's tick errors, which is reported
+once per kind, the data holds no NaN and energy is within 0..capacity in whole quanta), then
+`EnergyNet.solve` (a kind whose `rates` override errors moves nothing). `EnergyNet` (pure) joins
+cables (`links`), cables and machines (`acceptors`) and directly adjacent machines into networks;
+positions whose links changed dissolve their network and their neighbours' and are flood filled
+again, at most 4096 a tick (the rest carries over and waiting positions move nothing meanwhile). A
+change at or next to a position the fill in progress has visited starts it over; one elsewhere
+leaves it going, so players building elsewhere never starve a big network's fill. Per network and tick: producers' supply
+(their energy, at most their output rate) goes to consumers' demand (their room, at most their
+input rate), at most the throughput (the cables' capacities summed, unlimited without cables),
+split evenly both ways; what producers still have charges storage up to its input rates, and
+what consumers still need is covered by storage discharging up to its output rates, within the
+throughput left. Storage never charges storage. What is taken is exactly what is given.
+
+Viewers of a machine's window get a snapshot at once when its slots change and every 2 ticks
+while only its data moves (as furnaces). `Machines` records (energy, capacity, input, output,
+rate, active) go to players within 192 blocks sideways when they change, at most 4 a second per
+machine, and with a chunk's edit list when not in the default state (empty, idle, the block's
+capacity). Mekanism's sustained data (`MachineWorld.blockDataHooks`): a survival break keeps the
+energy and the kind's `keep` fields in the item's data (`Machines.save`; the creative cube keeps
+nothing), and placing that item puts them back (`Machines.restore`, at most the capacity).
+
+**On the client.** TransmitterRenderer keeps Machines records like Tanks records
+(`machine(x, y, z)`); WAILA shows "Energy: 1.2 kJ / 20 kJ" and the status (`Machines.status`:
+the kind's, else "Producing x/t", "Using x/t", "Charging" / "Discharging"), and for cables
+"Capacity: 8 kJ/t" (a side set to push or pull reads "Push (as Normal)"), with F3 details (a
+cable's network line counts the cables linked to it as the client sees them; the server's network
+may also join cables through machines). A machine's panel (MenuLayout) is its kind's: slots where
+it puts them, the title centred, Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling
+from the bottom in whole rows rounded down, at least one while it holds any, red when empty
+through yellow to green when full, "stored / capacity" on hover), and the arrow, flame and status
+line it asks for, read from the data fields it names. The panel reads the window's data without
+changing it and redraws only when a snapshot replaces it.
+
+**The Creative Energy Cube** (kind "creative"): infinite capacity and output, always full,
+gives whatever its network takes; creative only (no recipe).
+
+**A new machine:** a BlockList block with `machine` and `energy`, a module in
+`Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
+`Machines/init`. Tests bind test-only kinds to spare blocks (`Machines.bind`).
+
 ## Item entities (`Entities/`)
 
 Dropped items are Minecraft's ItemEntity:
@@ -1215,6 +1295,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill |
 | server → client | `Tanks`         | fluid tank contents (fluid, mB)               |
 | server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |
+| server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active |
 | server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
@@ -1308,5 +1389,12 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   learn about it.
 - Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
   append new ones, never reorder or change earlier ones, or every unedited world's ores move.
+- Machine data starts with the shared header (energy always at 1); kinds append fields, at most
+  16 values in all. Kind ticks replace slot stacks (never change a stack table) and add or use
+  energy through `Machines.produce` / `use`, so energy stays exact.
+- Machines and cables only come from edits, like pipes.
+- Kind modules require Machines/Core and plain shared modules (Items, Crafting/Smelting), never
+  Shared/Machines, Inventory/Menu or Shared/Transmitters (those require Machines: a cycle). A
+  kind keeps per-machine state in its data fields, not in module tables.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.

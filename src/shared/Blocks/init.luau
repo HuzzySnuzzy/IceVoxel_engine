@@ -16,7 +16,8 @@
 	  * sound types (`sound`, `soundLut`, `soundType`): what the block sounds like when it is
 	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`),
 	  * Mekanism's transmitters and fluid tanks (`transmitter`, `tank`, `icon`), which
-	    Shared/Transmitters reads.
+	    Shared/Transmitters reads, and machines (`machine`, `energy`), which Shared/Machines
+	    reads (a machine opens a "Machine" menu unless BlockList names another).
 ]]
 
 local BlockList = require(script.BlockList)
@@ -81,6 +82,9 @@ export type BlockDef = {
 	transmitter: TransmitterSpec?,
 	tank: TankSpec?,
 	icon: { ShapeBox }?,
+	-- Mekanism machines (Shared/Machines): the kind, and the energy it holds and moves.
+	machine: MachineSpec?,
+	energy: EnergySpec?,
 	appearance: number,
 }
 
@@ -109,6 +113,8 @@ export type ShapeBox = BlockList.ShapeBox
 export type Bounds = BlockList.Bounds
 export type TransmitterSpec = BlockList.TransmitterSpec
 export type TankSpec = BlockList.TankSpec
+export type MachineSpec = BlockList.MachineSpec
+export type EnergySpec = BlockList.EnergySpec
 
 local Blocks = {}
 
@@ -242,7 +248,7 @@ for index, spec in BlockList do
 		drops = spec.drops,
 		dropCount = spec.dropCount or 1,
 		container = spec.container or 0,
-		menu = spec.menu,
+		menu = spec.menu or (if spec.machine then "Machine" else nil),
 		decor = spec.decor,
 		sound = if spec.sound
 			then spec.sound
@@ -263,14 +269,36 @@ for index, spec in BlockList do
 		transmitter = spec.transmitter,
 		tank = spec.tank,
 		icon = spec.icon,
+		machine = spec.machine,
+		energy = spec.energy,
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
 	assert(def.sound == nil or soundIndex[def.sound], `Block {spec.name} has unknown sound {def.sound}`)
 	local transmitter = spec.transmitter
 	assert(
-		transmitter == nil or ((transmitter.kind == "item" or transmitter.kind == "fluid") and isTier(transmitter.tier)),
+		transmitter == nil
+			or (
+				(transmitter.kind == "item" or transmitter.kind == "fluid" or transmitter.kind == "energy")
+				and isTier(transmitter.tier)
+			),
 		`Block {spec.name} has a bad transmitter`
+	)
+	local energy = spec.energy
+	assert(
+		energy == nil
+			or (
+				type(energy.capacity) == "number"
+				and energy.capacity > 0
+				and (energy.input == nil or energy.input >= 0)
+				and (energy.output == nil or energy.output >= 0)
+			),
+		`Block {spec.name} has bad energy`
+	)
+	assert(spec.machine == nil or type(spec.machine.kind) == "string", `Block {spec.name} has a bad machine`)
+	assert(
+		spec.machine == nil or (spec.container == nil and transmitter == nil and spec.tank == nil),
+		`Machine {spec.name} must not be a container, transmitter or tank (its slots are its kind's)`
 	)
 	assert(spec.tank == nil or (isTier(spec.tank.tier) and spec.tank.capacity > 0), `Block {spec.name} has a bad tank`)
 	assert(transmitter == nil or spec.tank == nil, `Block {spec.name} is a transmitter and a tank`)

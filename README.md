@@ -78,8 +78,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   normal, push, pull and none (right click) and a transporter's colour (sneak + right click).
   Recipes follow Mekanism's shapes with the game's materials (gold, diamond and emerald stand for
   its alloys). Players walk through transmitters, as through lanterns; their state and the tanks'
-  water live in memory, like chests. Universal Cables, Pressurized Tubes and Thermodynamic
-  Conductors are not included: the game has no energy, gas or heat.
+  water live in memory, like chests. Pressurized Tubes and Thermodynamic Conductors are not
+  included: the game has no gas or heat (Universal Cables: see Electricity).
   Items that no inventory takes go back to the one they came from, or wait in their transporter
   until one turns up; a broken transporter drops what is in it. Pipes join into networks that share
   their water (breaking a pipe loses its share), and both keep working where no player is, like
@@ -91,6 +91,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   show their water. The Configurator acts on the arm you point at (or the face of the core);
   WAILA names that side's mode, a transporter's colour and the items inside it, and the water in
   a pipe or tank.
+- **Electricity.** Mekanism's energy, counted in joules (J, kJ, MJ, GJ). Universal Cables (Basic,
+  Advanced, Elite, Ultimate) join machines into energy networks; a network moves at most the sum
+  of its cables' capacities a tick (8 kJ, 128 kJ, 1.02 MJ and 8.19 MJ per cable, Mekanism's
+  numbers), and machines that touch each other need no cable at all. Every tick, generators give
+  what they hold up to their output rate, shared out evenly among the machines that need it (up
+  to their input rates, Mekanism's even split); what is left over charges batteries, and when the
+  generators fall short the batteries cover the rest: backup power. Energy is counted exactly and
+  never made or lost on the way. The Configurator cuts a cable's side (none) as on pipes; push and
+  pull act as normal (WAILA says "Push (as Normal)"). Right click opens a machine's panel with
+  Mekanism's energy bar (red when empty to green when full, full only when it is, "stored /
+  capacity" on hover); WAILA shows a machine's energy and what it is doing ("Producing 200 J/t",
+  "Using 50 J/t") and a cable's capacity. A machine broken in survival keeps its energy in its
+  item ("Energy: 1.2 MJ") and gets it back when placed; its slots drop like a chest's. The
+  Creative Energy Cube (creative only, no recipe) gives infinite energy for trying machines out.
+  Recipes: 8 Basic Universal Cables from an osmium ingot, glowstone dust and an osmium ingot in a
+  row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
+  make 8 of the next tier. Like chests, energy lives in memory.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -178,10 +195,10 @@ Studio tips:
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once) | R2 | Hold |
-| Place / use   | Right click (opens chests, crafting tables, furnaces) | L2 | Tap |
+| Place / use   | Right click (opens chests, crafting tables, furnaces, machines) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
-| Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none; `Shift` + right click a transporter: next colour | L2 | Tap |
+| Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
 | Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
 | Pick block    | Middle click                |         |            |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
@@ -213,9 +230,12 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             drops, menus)
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats); ItemList (items that are not blocks)
-  Transmitters/             Mekanism pipes: Tiers (Mekanism's numbers), sides, connection modes,
-                            colours, the connection rule, route costs, Inventories (sided slots,
-                            insert / extract)
+  Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
+                            connection modes, colours, the connection rule, route costs,
+                            Inventories (sided slots, insert / extract)
+  Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
+                            slot rules, panels, energy maths and the even split, sustained data),
+                            Kinds/ (a module per kind: Creative, the Creative Energy Cube)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
                             Crafting (grid matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
@@ -256,6 +276,10 @@ src/server   -> ServerScriptService.IceVoxel
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (water in pipes),
                             UseRules (buckets, Configurator), Transmitters (ticks, replication)
+  Machines/                 Mekanism machines and energy on the server: MachineWorld (machines,
+                            their ticks, sustained data, records; pure), EnergyNet (energy
+                            networks over Universal Cables and touching machines; pure), Machines
+                            (20 Hz ticks, viewers' snapshots, replication)
   Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
   Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
                             (/time, /gamerule), Inventories +
@@ -276,7 +300,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
-                            chest and furnace panels laid out by MenuLayout), CreativeScreen,
+                            chest, furnace and machine panels laid out by MenuLayout, machines'
+                            energy bar), CreativeScreen,
                             ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
                             clicks), Style, Waila + WailaInfo (what the crosshair points at),
                             Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
@@ -289,9 +314,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Net/ClientNet             routes server messages; Notices shows server messages in the chat
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
-  Rendering/TransmitterRenderer  Mekanism pipes: arms, water in pipes and tanks, items moving
-                            through transporters; TransmitterModel (their geometry, aiming,
-                            item paths)
+  Rendering/TransmitterRenderer  Mekanism pipes and cables: arms, water in pipes and tanks, items
+                            moving through transporters, machines' records (WAILA);
+                            TransmitterModel (their geometry, aiming, item paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables and furnaces)
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
@@ -440,6 +465,23 @@ silence the world; a Scriptable camera hears from where it is.
 per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
 `container` slots is an inventory transporters connect to (all slots from every side, unless it is
 a furnace, `menu = "Furnace"`).
+
+**A machine.** A machine is a block with `machine = { kind = "name" }` and `energy = { capacity =
+J, input = J/t?, output = J/t? }` in BlockList (output only: a generator; input only: a machine
+that uses energy; both: a battery). Its kind is a module in `src/shared/Machines/Kinds/`,
+required from `Machines/init.luau`:
+
+    return Core.define("generator", {
+        slots = { { x = 80, y = 53, accepts = function(item) return Smelting.fuel(item) > 0 end } },
+        fields = { "burnTime", "burnTotal" },            -- data after energy and the shared header
+        keep = { "burnTime" },                           -- kept in the item with its energy
+        panel = { flame = { x = 80, y = 36, value = "burnTime", total = "burnTotal" } },
+        tick = function(container, ctx) ... Core.produce(container, 200) ... end,
+    })
+
+The server ticks it 20 times a second, joins it to cables and touching machines, keeps its energy
+in its item and replicates it; the client draws its panel (slots, gauges, energy bar) and WAILA
+lines. Tests bind test-only kinds to spare blocks with `Machines.bind`.
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
@@ -608,8 +650,8 @@ Natural next steps, roughly in order:
   `Players/InventoryState`, `Players/Containers`), as do transmitter states, network water, tank
   contents and items in transit (`Transmitters/TransmitterWorld`); save them to DataStores (edits per region of
   32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
-- **More of Mekanism.** Machines, energy (Universal Cables), gases (Pressurized Tubes), heat
-  (Thermodynamic Conductors) and the Logistical Sorter would build on the transmitter networks.
+- **More of Mekanism.** Machines on the machine framework, side configuration for machines, gases
+  (Pressurized Tubes), heat (Thermodynamic Conductors) and the Logistical Sorter.
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling
   (`Items.damageAfterArmor` is ready for it).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on

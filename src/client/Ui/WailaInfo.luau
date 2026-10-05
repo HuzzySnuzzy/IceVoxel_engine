@@ -13,8 +13,13 @@
 	  pipes     Mekanism's transmitters: the mode of the side the Configurator points at ("Side:
 	            Pull"); a transporter's colour ("Colour: Red") and the items inside it ("Items:
 	            12"); a Mechanical Pipe's water ("Water: ~4,000 / 8,000 mB": its network's fill
-	            byte times the capacity of the pipes the client sees connected, so approximate).
+	            byte times the capacity of the pipes the client sees connected, so approximate);
+	            a Universal Cable's capacity ("Capacity: 8 kJ/t", Mekanism's tooltip; its sides
+	            set to push or pull read "Side: Push (as Normal)": that is how they act).
 	            Fluid Tanks: "Water: 12,000 / 32,000 mB" (Jade's Mekanism tank tooltip).
+	  machines  Mekanism machines (Shared/Machines), from their Machines record: "Energy: 1.2 kJ /
+	            20 kJ" ("Energy: Infinite" for the creative cube) and the machine's status
+	            ("Producing 200 J/t", "Using 50 J/t", "Charging 4 kJ/t": Machines.status).
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
@@ -22,7 +27,8 @@
 	            and dry), light, fluid level, render kind, solidity, friction and menu; for
 	            transmitters their tier's numbers, the packed side modes and each side's mode,
 	            colour and fill byte, the connected sides and the network the client sees; for
-	            tanks their tier's numbers and contents
+	            tanks their tier's numbers and contents; for machines their kind and part in an
+	            energy network, the block's energy numbers and the last tick's flows
 	  mod name  "IceVoxel" in blue italics, always last (Jade names the mod a thing comes from)
 
 	Survival mining progress travels in `Info.progress` (Ui/Waila draws it as Jade's line along
@@ -44,6 +50,7 @@ local Biomes = require(Shared.Biomes)
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
 local Transmitters = require(Shared.Transmitters)
 
@@ -88,15 +95,26 @@ export type TransmitterFacts = {
 -- A fluid tank's contents (fluid 0 none, 1 water; mB).
 export type TankFacts = { fluid: number, amount: number }
 
+-- A machine's state (its Machines record, Rendering/TransmitterRenderer.machine; J and J/t).
+export type MachineFacts = {
+	energy: number,
+	capacity: number,
+	input: number,
+	output: number,
+	rate: number,
+	active: boolean,
+}
+
 -- Optional facts about a block's surroundings that only the client knows.
 export type BlockContext = {
 	-- Mining progress (BlockInteraction.miningProgress).
 	progress: number?,
 	-- The biome's name at the block's column (extended view).
 	biome: string?,
-	-- Mekanism transmitters and fluid tanks.
+	-- Mekanism transmitters, fluid tanks and machines.
 	transmitter: TransmitterFacts?,
 	tank: TankFacts?,
+	machine: MachineFacts?,
 }
 
 local WailaInfo = {}
@@ -309,15 +327,23 @@ end
 function WailaInfo.transmitterLines(block: number, facts: TransmitterFacts): { Line }
 	local lines: { Line } = {}
 	local side = facts.side
-	if side ~= nil and Transmitters.isSide(side) then
-		table.insert(lines, labelled("Side: ", Transmitters.modeName(Transmitters.modeOf(facts.modes, side))))
-	end
 	local kind = Transmitters.kindOf(block)
+	if side ~= nil and Transmitters.isSide(side) then
+		local mode = Transmitters.modeOf(facts.modes, side)
+		local name = Transmitters.modeName(mode)
+		-- (A Universal Cable's PUSH and PULL act as NORMAL: say so, the arm shows no band.)
+		if kind == "energy" and (mode == Transmitters.MODES.PUSH or mode == Transmitters.MODES.PULL) then
+			name ..= ` (as {Transmitters.modeName(Transmitters.MODES.NORMAL)})`
+		end
+		table.insert(lines, labelled("Side: ", name))
+	end
 	if kind == "item" then
 		table.insert(lines, labelled("Colour: ", Transmitters.colourName(facts.colour)))
 		if facts.items > 0 then
 			table.insert(lines, labelled("Items: ", WailaInfo.thousands(facts.items)))
 		end
+	elseif kind == "energy" then
+		table.insert(lines, labelled("Capacity: ", `{Items.formatEnergy(Transmitters.cableCapacity(block))}/t`))
 	elseif kind == "fluid" then
 		local capacity = if facts.networkCapacity > 0 then facts.networkCapacity else Transmitters.pipeCapacity(block)
 		local amount = Transmitters.fillAmount(facts.fluid, capacity)
@@ -341,6 +367,9 @@ function WailaInfo.transmitterDetails(block: number, facts: TransmitterFacts): {
 			lines,
 			gray(`Transporter tier {tierIndex} ({tierName}{restrictive}), pull {pull}, speed {speed}, cost {cost}`)
 		)
+	elseif kind == "energy" then
+		local capacity = WailaInfo.thousands(Transmitters.cableCapacity(block))
+		table.insert(lines, gray(`Cable tier {tierIndex} ({tierName}), {capacity} J/t`))
 	else
 		local capacity = WailaInfo.thousands(Transmitters.pipeCapacity(block))
 		table.insert(
@@ -361,6 +390,8 @@ function WailaInfo.transmitterDetails(block: number, facts: TransmitterFacts): {
 	local network = `Network {facts.networkSize}{more} transmitters`
 	if kind == "fluid" then
 		network ..= `, {WailaInfo.thousands(facts.networkCapacity)}{more} mB`
+	elseif kind == "energy" then
+		network ..= `, {WailaInfo.thousands(facts.networkCapacity)}{more} J/t`
 	end
 	table.insert(lines, gray(network))
 	if kind == "item" then
@@ -385,6 +416,69 @@ function WailaInfo.tankDetails(block: number, facts: TankFacts): { Line }
 		gray(`Tank tier {tierIndex} ({tierName}), output {output} mB/t`),
 		gray(`Fluid {facts.fluid} ({fluid}), {WailaInfo.thousands(facts.amount)} mB`),
 	}
+end
+
+--[[ Mekanism machines ]]
+
+local function viewOf(block: number, facts: MachineFacts): Machines.View
+	return {
+		block = block,
+		energy = facts.energy,
+		capacity = facts.capacity,
+		input = facts.input,
+		output = facts.output,
+		rate = facts.rate,
+		active = facts.active,
+	}
+end
+
+-- What WAILA knows of a machine without a record: empty and idle at its block's capacity.
+function WailaInfo.machineDefaults(block: number): MachineFacts
+	local energy = Machines.energyOf(block)
+	local capacity = if energy then energy.capacity else 0
+	return {
+		energy = if capacity == math.huge then math.huge else 0,
+		capacity = capacity,
+		input = 0,
+		output = 0,
+		rate = 0,
+		active = false,
+	}
+end
+
+-- "Energy: 1.2 kJ / 20 kJ" (Mekanism's energy display), "Energy: Infinite" for the creative cube.
+function WailaInfo.energyText(energy: number, capacity: number): string
+	if capacity == math.huge then
+		return "Infinite"
+	end
+	return `{Items.formatEnergy(energy)} / {Items.formatEnergy(capacity)}`
+end
+
+-- The lines of a machine: its energy, then its status (Machines.status) when it has one.
+function WailaInfo.machineLines(block: number, facts: MachineFacts): { Line }
+	local lines: { Line } = { labelled("Energy: ", WailaInfo.energyText(facts.energy, facts.capacity)) }
+	local status = Machines.status(block, viewOf(block, facts))
+	if status then
+		table.insert(lines, { segment(status, "white") })
+	end
+	return lines
+end
+
+-- The extended (F3) lines of a machine.
+function WailaInfo.machineDetails(block: number, facts: MachineFacts): { Line }
+	local kind = Machines.kindOf(block)
+	local energy = Machines.energyOf(block)
+	local role = Machines.role(block) or "no energy flow"
+	local lines: { Line } = { gray(`Machine {if kind then kind.name else "?"} ({role})`) }
+	if energy then
+		local input = if energy.input then `{Items.formatEnergy(energy.input)}/t` else "none"
+		local output = if energy.output then `{Items.formatEnergy(energy.output)}/t` else "none"
+		table.insert(lines, gray(`Holds {Items.formatEnergy(energy.capacity)}, in {input}, out {output}`))
+	end
+	table.insert(lines, gray(`Last tick: in {Items.formatEnergy(facts.input)}, out {Items.formatEnergy(facts.output)}`))
+	local working = if facts.active then "active" else "idle"
+	table.insert(lines, gray(`Rate {Items.formatEnergy(facts.rate)}/t, {working}`))
+	return lines
 end
 
 --[[ Blocks ]]
@@ -466,10 +560,9 @@ local function blockDetails(
 	local solid = if def.solid then "solid" else "not solid"
 	table.insert(lines, gray(`Render {def.render}, {solid}, friction {number(def.friction)}`))
 	if def.menu then
-		table.insert(
-			lines,
-			gray(if def.container > 0 then `Menu {def.menu}, {def.container} slots` else `Menu {def.menu}`)
-		)
+		-- (A machine's slots are its kind's, not BlockList's `container`.)
+		local slots = Machines.containerSize(block)
+		table.insert(lines, gray(if slots > 0 then `Menu {def.menu}, {slots} slots` else `Menu {def.menu}`))
 	end
 	return lines
 end
@@ -498,15 +591,20 @@ function WailaInfo.block(
 	if harvest then
 		table.insert(lines, harvest)
 	end
-	-- Mekanism pipes and tanks: what the server says about them.
+	-- Mekanism pipes, tanks and machines: what the server says about them.
 	local transmitter = if context and Transmitters.isTransmitter(block) then context.transmitter else nil
 	local tank = if context and Transmitters.isTank(block) then context.tank else nil
+	local machine = if context and Machines.isMachine(block) then context.machine else nil
 	if transmitter then
 		for _, line in WailaInfo.transmitterLines(block, transmitter) do
 			table.insert(lines, line)
 		end
 	elseif tank then
 		for _, line in WailaInfo.tankLines(block, tank) do
+			table.insert(lines, line)
+		end
+	elseif machine then
+		for _, line in WailaInfo.machineLines(block, machine) do
 			table.insert(lines, line)
 		end
 	end
@@ -520,6 +618,10 @@ function WailaInfo.block(
 			end
 		elseif tank then
 			for _, line in WailaInfo.tankDetails(block, tank) do
+				table.insert(lines, line)
+			end
+		elseif machine then
+			for _, line in WailaInfo.machineDetails(block, machine) do
 				table.insert(lines, line)
 			end
 		end

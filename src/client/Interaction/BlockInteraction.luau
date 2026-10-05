@@ -605,7 +605,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local function transmitterSide(hit: Hit, ray: Ray): number
 		local linked, acceptors = TransmitterRenderer.connections(hit.x, hit.y, hit.z)
 		local o, d = ray.origin, ray.direction
-		local side = TransmitterModel.pickSide(o.X, o.Y, o.Z, d.X, d.Y, d.Z, hit.x, hit.y, hit.z, linked, acceptors)
+		local side =
+			TransmitterModel.pickSide(o.X, o.Y, o.Z, d.X, d.Y, d.Z, hit.x, hit.y, hit.z, linked, acceptors, hit.block)
 		if side == nil then
 			local t = hit.distance
 			side = TransmitterModel.sideFromPoint(

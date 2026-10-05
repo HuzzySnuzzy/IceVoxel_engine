@@ -9,6 +9,7 @@
 	  arms     towards each side a transmitter connects (Transmitters.connections: the neighbours'
 	           blocks, both sides' modes, transporters' colours), collars between transmitters,
 	           connector plates on acceptors, PUSH / PULL bands, a coloured transporter's tint;
+	           Universal Cables' thinner arms reach the energy blocks around them;
 	  water    in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity);
 	  items    moving through Logistical Transporters, small models of the item along their path.
 
@@ -24,6 +25,9 @@
 	                comes back if the server refuses the break (it answers with an edit back to
 	                the same block and sends no record).
 	  Tanks         per position: fluid and amount (mB), the same way.
+	  Machines      per position: a Mekanism machine's energy, capacity, the network's input and
+	                output, its rate and whether it works (Protocol MachineRecord), the same way;
+	                no record: empty and idle (WAILA reads them: `machine`).
 	  Transport     items entering or re-routed in the transporters (an id, the item, where it is,
 	                its progress, speed, the server time of that and its path) and leaving them.
 	                Items are moved here every frame from workspace:GetServerTimeNow(), 20 ticks a
@@ -54,8 +58,8 @@
 	on unseen). Item models are moved together with one BulkMoveTo per frame, after the camera.
 
 	Read-only queries for WAILA (Ui/Waila) and aiming (Interaction/BlockInteraction): `state`,
-	`tank`, `connections`, `itemsIn`, `network` (the pipes or transporters connected to a
-	position, as the client sees them) and `stats`.
+	`tank`, `machine`, `connections`, `itemsIn`, `network` (the pipes, transporters or cables
+	connected to a position, as the client sees them) and `stats`.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -65,6 +69,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
+local Machines = require(Shared.Machines)
 local Protocol = require(Shared.Net.Protocol)
 local Transmitters = require(Shared.Transmitters)
 
@@ -117,6 +122,7 @@ local LOOKS: { [string]: { material: Enum.Material, transparency: number } } = {
 	band = { material = Enum.Material.Neon, transparency = 0 },
 	tint = { material = Enum.Material.SmoothPlastic, transparency = 0.45 },
 	water = { material = Enum.Material.Glass, transparency = 0.3 },
+	cable = { material = Enum.Material.SmoothPlastic, transparency = 0 },
 }
 
 -- A transmitter or tank position in a loaded chunk.
@@ -135,9 +141,16 @@ type Cell = {
 
 type TransmitterState = { modes: number, colour: number, fluid: number }
 type TankState = { fluid: number, amount: number }
+type MachineState = Protocol.MachineRecord
 
 -- The state a predicted break took away (see UNDO_WINDOW).
-type Undone = { block: number, at: number, transmitter: TransmitterState?, tank: TankState? }
+type Undone = {
+	block: number,
+	at: number,
+	transmitter: TransmitterState?,
+	tank: TankState?,
+	machine: MachineState?,
+}
 
 -- An item model and its parts, with each part's offset from the model's pivot.
 type ItemModel = { item: number, model: Model, parts: { BasePart }, offsets: { CFrame } }
@@ -171,6 +184,7 @@ local cellsByChunk: { [number]: { [number]: boolean } } = {}
 -- Replicated state per position, and the positions per chunk key.
 local transmitterStates: { [number]: TransmitterState } = {}
 local tankStates: { [number]: TankState } = {}
+local machineStates: { [number]: MachineState } = {}
 local statesByChunk: { [number]: { [number]: boolean } } = {}
 -- States taken by this player's own breaks, per position.
 local undone: { [number]: Undone } = {}
@@ -386,6 +400,7 @@ end
 local function dropStates(key: number)
 	transmitterStates[key] = nil
 	tankStates[key] = nil
+	machineStates[key] = nil
 end
 
 -- Forgets the states of chunk `chunk` (a chunk key): its positions look default until records
@@ -434,9 +449,13 @@ local function onBlockChanged(x: number, y: number, z: number, block: number, pr
 	undone[key] = nil
 	-- A new block is a new transmitter or tank on the server, in the default state (no record
 	-- comes for it). This player's own break may still be refused: keep what it took a while.
-	local oldTransmitter, oldTank = transmitterStates[key], tankStates[key]
-	if predicted and isSpecial(previous) and (oldTransmitter or oldTank) then
-		undone[key] = { block = previous, at = now, transmitter = oldTransmitter, tank = oldTank }
+	local oldTransmitter, oldTank, oldMachine = transmitterStates[key], tankStates[key], machineStates[key]
+	if
+		predicted
+		and (isSpecial(previous) or Machines.isMachine(previous))
+		and (oldTransmitter or oldTank or oldMachine)
+	then
+		undone[key] = { block = previous, at = now, transmitter = oldTransmitter, tank = oldTank, machine = oldMachine }
 	end
 	dropStates(key)
 	if not predicted and stash and stash.block == block and now - stash.at <= UNDO_WINDOW then
@@ -447,6 +466,9 @@ local function onBlockChanged(x: number, y: number, z: number, block: number, pr
 		if stash.tank then
 			tankStates[key] = stash.tank
 		end
+		if stash.machine then
+			machineStates[key] = stash.machine
+		end
 		indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
 		markAround(x, y, z)
 	end
@@ -455,7 +477,7 @@ local function onBlockChanged(x: number, y: number, z: number, block: number, pr
 	elseif cells[key] then
 		removeCell(key)
 	else
-		-- A chest or furnace placed or broken next to a transporter changes its arms.
+		-- A chest, furnace or energy block placed or broken next to a transmitter changes its arms.
 		markAround(x, y, z)
 	end
 	if Transmitters.isTransmitter(block) or Transmitters.isTransmitter(previous) then
@@ -492,7 +514,8 @@ local function onChunkLoaded(cx: number, cz: number, loaded: boolean)
 		end
 	end
 	if loaded and w then
-		-- (States of positions that are no transmitter or tank in the chunk's data are stale.)
+		-- (States of positions that are no transmitter, tank or machine in the chunk's data are
+		-- stale.)
 		local states = statesByChunk[chunk]
 		if states then
 			for key in states do
@@ -503,6 +526,9 @@ local function onChunkLoaded(cx: number, cz: number, loaded: boolean)
 				end
 				if block == nil or not Transmitters.isTank(block) then
 					tankStates[key] = nil
+				end
+				if block == nil or not Machines.isMachine(block) then
+					machineStates[key] = nil
 				end
 			end
 		end
@@ -575,6 +601,17 @@ local function onTanks(records: { Protocol.TankRecord })
 				indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
 			end
 			markDirty(key)
+		end
+	end
+end
+
+local function onMachines(records: { Protocol.MachineRecord })
+	for _, record in records do
+		local x, y, z = record.x, record.y, record.z
+		if wanted(x, z) then
+			local key = posKey(x, y, z)
+			machineStates[key] = record
+			indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
 		end
 	end
 end
@@ -899,6 +936,14 @@ function TransmitterRenderer.state(x: number, y: number, z: number): (number, nu
 	return 0, 0, 0
 end
 
+--[[
+	The replicated state of a Mekanism machine (its last Machines record), nil when none came: an
+	empty, idle machine at its block's capacity.
+]]
+function TransmitterRenderer.machine(x: number, y: number, z: number): Protocol.MachineRecord?
+	return machineStates[posKey(x, y, z)]
+end
+
 -- The replicated contents of a fluid tank: fluid (0 none, 1 water) and amount (mB).
 function TransmitterRenderer.tank(x: number, y: number, z: number): (number, number)
 	local state = tankStates[posKey(x, y, z)]
@@ -924,8 +969,11 @@ end
 
 --[[
 	The transmitters connected to the one at (x, y, z) (itself included), as the client sees them:
-	how many, the mB their pipes hold together (Mechanical Pipes: a network's buffer capacity) and
-	whether the walk saw them all (it stops at MAX_NETWORK). 0, 0, true for anything else.
+	how many, what they add up to (Mechanical Pipes: a network's buffer, mB; Universal Cables: their
+	throughput, J per tick; Transmitters.capacity) and whether the walk saw them all (it stops at
+	MAX_NETWORK). 0, 0, true for anything else. The walk follows transmitter links only: the
+	server's energy network also joins cables through the machines between them (EnergyNet), so
+	its throughput can be more than this.
 ]]
 function TransmitterRenderer.network(x: number, y: number, z: number): (number, number, boolean)
 	local start = posKey(x, y, z)
@@ -946,7 +994,7 @@ function TransmitterRenderer.network(x: number, y: number, z: number): (number, 
 		local here = getBlock(cx, cy, cz)
 		if here then
 			size += 1
-			capacity += Transmitters.pipeCapacity(here)
+			capacity += Transmitters.capacity(here)
 			if size >= MAX_NETWORK then
 				complete = false
 				break
@@ -1033,6 +1081,12 @@ function TransmitterRenderer.start(clientWorld: ClientWorld.ClientWorld, shown: 
 		local records = Protocol.decodeTanks(payload)
 		if records then
 			onTanks(records)
+		end
+	end)
+	ClientNet.on(Protocol.ServerMessage.Machines, function(payload)
+		local records = Protocol.decodeMachines(payload)
+		if records then
+			onMachines(records)
 		end
 	end)
 	ClientNet.on(Protocol.ServerMessage.Transport, function(payload)

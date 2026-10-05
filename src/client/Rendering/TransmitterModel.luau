@@ -6,16 +6,20 @@
 
 	Boxes are axis-aligned, in pixels (1/16 block) from the cell's centre, like BlockList shapes.
 	The block's own `shape` (Mekanism's 8 pixel core: a glass cube in a frame of twelve edges, drawn
-	by the terrain) stays as it is; these boxes go around and inside it:
+	by the terrain; a Universal Cable's is Mekanism's small 6 pixel core, `sizes`) stays as it is;
+	these boxes go around and inside it:
 
 	  arms     towards every side that connects (Transmitters.connections): a glass tube ARM pixels
 	           across from the core's frame to the cell's face. Between two transmitters it ends in
 	           a collar in the tier's colour (the neighbour's collar meets it: a joint two pixels
-	           long); into an acceptor (chest, furnace, tank) it ends in a wider connector plate.
+	           long); into an acceptor (chest, furnace, tank, energy block) it ends in a wider
+	           connector plate. A Universal Cable's arm is its red-ish conductor ("cable": opaque),
+	           4 pixels across, with a 5 pixel collar and an 8 pixel plate.
 	  bands    a glowing ring around an arm into an acceptor whose side is PUSH (orange) or PULL
 	           (blue): Mekanism tints configured connections; these are the client's colours for
 	           them. Between two transmitters PUSH and PULL act as NORMAL, and Mekanism draws them
-	           so (Transmitter.getConnectionType), so those arms carry no band.
+	           so (Transmitter.getConnectionType), so those arms carry no band; nor do cables',
+	           whose PUSH and PULL act as NORMAL everywhere (server Machines/EnergyNet).
 	  colour   a coloured transporter (dye 1..16) gets a translucent cube of its colour around the
 	           core's glass, and its arms' glass in that colour (Mekanism tints the transporter).
 	  water    a Mechanical Pipe's fill (Protocol `Transmitters.fluid`, 0..255): a water box in the
@@ -47,7 +51,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Transmitters = require(Shared.Transmitters)
 
-export type BoxKind = "glass" | "frame" | "band" | "tint" | "water"
+export type BoxKind = "glass" | "frame" | "band" | "tint" | "water" | "cable"
 
 -- One box: its look (`kind`, `colour`), size and centre in pixels from the cell's centre.
 export type Box = { kind: BoxKind, size: { number }, offset: { number }, colour: { number } }
@@ -116,6 +120,21 @@ local COLLAR = TransmitterModel.COLLAR
 local PLATE = TransmitterModel.PLATE
 local DOWN, UP = Transmitters.DOWN, Transmitters.UP
 local PULL, PUSH = Transmitters.MODES.PULL, Transmitters.MODES.PUSH
+
+-- A transmitter's sizes (pixels): half its core with the frame, and its arms' tube, collar and
+-- plate across.
+export type Sizes = { core: number, arm: number, collar: number, plate: number }
+
+local LARGE: Sizes = table.freeze({ core = CORE, arm = ARM, collar = COLLAR, plate = PLATE })
+-- Mekanism's small transmitters (Universal Cables): a 6 pixel core.
+local SMALL: Sizes = table.freeze({ core = 3, arm = 4, collar = 5, plate = 8 })
+TransmitterModel.SMALL = SMALL
+TransmitterModel.LARGE = LARGE
+
+-- The sizes of the transmitter `block` (small for Universal Cables, else Mekanism's large ones).
+function TransmitterModel.sizes(block: number?): Sizes
+	return if block and Transmitters.kindOf(block) == "energy" then SMALL else LARGE
+end
 
 --[[ Boxes ]]
 
@@ -189,6 +208,8 @@ function TransmitterModel.transmitterBoxes(
 	local frame, glass = looks(block)
 	local dye = if kind == "item" then Transmitters.colourRgb(colour) else nil
 	local armGlass = dye or glass
+	local sizes = TransmitterModel.sizes(block)
+	local armKind: BoxKind = if kind == "energy" then "cable" else "glass"
 	if dye then
 		table.insert(boxes, box("tint", { TINT, TINT, TINT }, { 0, 0, 0 }, dye))
 	end
@@ -206,14 +227,14 @@ function TransmitterModel.transmitterBoxes(
 		local toAcceptor = bit32.band(acceptorMask, bit) ~= 0
 		if toAcceptor or bit32.band(transmitterMask, bit) ~= 0 then
 			local glassTo = if toAcceptor then ARM_GLASS_TO_ACCEPTOR else ARM_GLASS_TO
-			table.insert(boxes, along("glass", side, CORE, glassTo, ARM, ARM, 0, armGlass))
+			table.insert(boxes, along(armKind, side, sizes.core, glassTo, sizes.arm, sizes.arm, 0, armGlass))
 			if toAcceptor then
-				table.insert(boxes, along("frame", side, 7, 8, PLATE, PLATE, 0, frame))
+				table.insert(boxes, along("frame", side, 7, 8, sizes.plate, sizes.plate, 0, frame))
 			else
-				table.insert(boxes, along("frame", side, 7, 8, COLLAR, COLLAR, 0, frame))
+				table.insert(boxes, along("frame", side, 7, 8, sizes.collar, sizes.collar, 0, frame))
 			end
 			local mode = Transmitters.modeOf(modes, side)
-			if toAcceptor and (mode == PULL or mode == PUSH) then
+			if toAcceptor and kind ~= "energy" and (mode == PULL or mode == PUSH) then
 				local band = if mode == PULL then TransmitterModel.PULL_COLOUR else TransmitterModel.PUSH_COLOUR
 				table.insert(boxes, along("band", side, BAND_FROM, BAND_TO, BAND, BAND, 0, band))
 			end
@@ -317,17 +338,14 @@ local function axisSide(k: number, sign: number): number
 	return if sign < 0 then Transmitters.NORTH else Transmitters.SOUTH
 end
 
--- (Arms are aimed at as wide as their collars, or plates into acceptors.)
-local ARM_HALF = COLLAR / 2 / 16
-local PLATE_HALF = PLATE / 2 / 16
-local CORE_HALF = CORE / 16
-
 --[[
 	The side of the transmitter at (x, y, z) a ray (origin and direction in blocks) points at, as
 	Mekanism's Configurator picks it: the side of the arm it hits first (arms to transmitters on
 	the sides in `arms`, to acceptors on those in `acceptorArms`: masks of bit `side`), else the
 	face of the core it enters by. nil when it misses the core and every arm (it passes through
-	the cell beside them). A ray starting inside the core picks the side it looks out of.
+	the cell beside them). A ray starting inside the core picks the side it looks out of. Arms are
+	aimed at as wide as their collars, or plates into acceptors; `block` gives the sizes
+	(`sizes`: a Universal Cable's are smaller; nil: Mekanism's large transmitters).
 ]]
 function TransmitterModel.pickSide(
 	ox: number,
@@ -340,8 +358,13 @@ function TransmitterModel.pickSide(
 	y: number,
 	z: number,
 	arms: number,
-	acceptorArms: number?
+	acceptorArms: number?,
+	block: number?
 ): number?
+	local sizes = TransmitterModel.sizes(block)
+	local armHalf = sizes.collar / 2 / 16
+	local plateHalf = sizes.plate / 2 / 16
+	local coreHalf = sizes.core / 16
 	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
 	if length < 1e-9 then
 		return nil
@@ -349,7 +372,7 @@ function TransmitterModel.pickSide(
 	local d = { dx / length, dy / length, dz / length }
 	local o = { ox - x - 0.5, oy - y - 0.5, oz - z - 0.5 }
 	local bestDistance, bestSide = math.huge, nil :: number?
-	local t, axis = enter(o, d, { -CORE_HALF, -CORE_HALF, -CORE_HALF }, { CORE_HALF, CORE_HALF, CORE_HALF })
+	local t, axis = enter(o, d, { -coreHalf, -coreHalf, -coreHalf }, { coreHalf, coreHalf, coreHalf })
 	if t then
 		bestDistance = t
 		if axis ~= 0 then
@@ -359,7 +382,7 @@ function TransmitterModel.pickSide(
 			local exitAxis, exitDistance = 1, math.huge
 			for k = 1, 3 do
 				if math.abs(d[k]) > 1e-12 then
-					local toFace = (CORE_HALF - o[k] * math.sign(d[k])) / math.abs(d[k])
+					local toFace = (coreHalf - o[k] * math.sign(d[k])) / math.abs(d[k])
 					if toFace < exitDistance then
 						exitAxis, exitDistance = k, toFace
 					end
@@ -375,13 +398,13 @@ function TransmitterModel.pickSide(
 		if plate or bit32.band(arms, bit) ~= 0 then
 			local sx, sy, sz = Transmitters.offset(side)
 			local s = { sx, sy, sz }
-			local half = if plate then PLATE_HALF else ARM_HALF
+			local half = if plate then plateHalf else armHalf
 			local lo, hi = table.create(3, -half), table.create(3, half)
 			for k = 1, 3 do
 				if s[k] > 0 then
-					lo[k], hi[k] = CORE_HALF, 0.5
+					lo[k], hi[k] = coreHalf, 0.5
 				elseif s[k] < 0 then
-					lo[k], hi[k] = -0.5, -CORE_HALF
+					lo[k], hi[k] = -0.5, -coreHalf
 				end
 			end
 			local armDistance = enter(o, d, lo, hi)

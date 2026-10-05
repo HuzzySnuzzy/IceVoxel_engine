@@ -3,10 +3,11 @@
 	The shapes the server's Mekanism pipes share (Transmitters/TransmitterWorld, Transport, Fluids),
 	in a module of their own so those can type each other without requiring each other.
 
-	  Node     one transmitter (a Logistical Transporter, the Restrictive Transporter or a
-	           Mechanical Pipe) at a block position: its side modes and colour, which of its
-	           sides join other transmitters (`links`) and acceptors (`acceptors`), a pipe's
-	           network, a transporter's pull timer, and what its last Transmitters record said
+	  Node     one transmitter (a Logistical Transporter, the Restrictive Transporter, a
+	           Mechanical Pipe or a Universal Cable) at a block position: its side modes and
+	           colour, which of its sides join other transmitters (`links`) and acceptors
+	           (`acceptors`), a pipe's network, a transporter's pull timer, and what its last
+	           Transmitters record said
 	  Network  the pipes joined into one (a connected component): their shared water buffer
 	  Tank     a fluid tank's contents
 	  Item     a stack travelling through transporters: where it is, its route and why
@@ -24,7 +25,7 @@ local Protocol = require(Shared.Net.Protocol)
 local Containers = require(script.Parent.Parent.Players.Containers)
 
 export type Stack = Items.Stack
-export type Kind = "item" | "fluid"
+export type Kind = "item" | "fluid" | "energy"
 
 export type Network = {
 	id: number,
@@ -155,6 +156,9 @@ export type World = {
 	-- Transmitters and tanks whose record may have changed.
 	dirtyNodes: { [number]: boolean },
 	dirtyTanks: { [number]: boolean },
+	-- Universal Cables that came, went or joined something new: the energy networks
+	-- (server/Machines/EnergyNet) work out their part again and clear this.
+	energyDirty: { [number]: boolean },
 	-- mB of water lost with broken pipes and tanks (for conservation checks).
 	lost: number,
 }

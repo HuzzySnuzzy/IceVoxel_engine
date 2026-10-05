@@ -1,21 +1,26 @@
 --!strict
 --[[
-	The contents of container blocks (chests and furnaces), by block position, for the session.
-	(Crafting tables hold nothing: their grids belong to the players using them, InventoryState.)
+	The contents of container blocks (chests, furnaces and Mekanism machines), by block position,
+	for the session. (Crafting tables hold nothing: their grids belong to the players using them,
+	InventoryState.)
 
 	A container is created empty the first time someone opens it (with the block's `container`
 	slot count, Blocks; kind "furnace" with fresh smelting data for menu "Furnace" blocks, else
-	"chest") and is shared by everyone who has it open: every viewer's window holds the same
-	Types.Container table, so a click by one viewer changes what the others see
-	(Players/Inventories sends them a new snapshot). When the block goes (broken, replaced), `take`
-	removes the contents so they can drop as items.
+	"chest"), or for a machine (Shared/Machines) by server/Machines when the block appears: kind
+	"machine" with its kind's slots and fresh data (Machines.newContainer). It is shared by
+	everyone who has it open: every viewer's window holds the same Types.Container table, so a
+	click by one viewer changes what the others see (Players/Inventories sends them a new
+	snapshot). When the block goes (broken, replaced), `take` removes the contents so they can
+	drop as items.
 
 	Viewers are tracked per container (any keys; Players in the game). A container that is empty
 	(and, for a furnace, neither burning nor cooking) and open by nobody is forgotten: opening it
 	again creates it again, empty, which is the same thing, and keeps the table as small as the
-	number of containers in use. A store's `onOpeners` hears when a container gets its first viewer
-	and loses its last (Minecraft's ContainerOpenersCounter: the chest lid sounds, set by
-	Players/Inventories); a container taken away (its block broken) closes silently.
+	number of containers in use. A machine's is never forgotten while its block stands (it holds
+	energy and its machine ticks it): only `take` removes it. A store's `onOpeners` hears when a
+	container gets its first viewer and loses its last (Minecraft's ContainerOpenersCounter: the
+	chest lid sounds, set by Players/Inventories); a container taken away (its block broken)
+	closes silently.
 
 	Furnaces cook whether anyone looks or not: `tickFurnaces` runs one Crafting/Smelting tick (20
 	per second, Minecraft's AbstractFurnaceBlockEntity.serverTick) on every active furnace and says
@@ -31,6 +36,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Machines = require(Shared.Machines)
 local Types = require(Shared.Inventory.Types)
 local Smelting = require(Shared.Crafting.Smelting)
 
@@ -74,8 +80,12 @@ local function keyOf(x: number, y: number, z: number): string
 	return `{x},{y},{z}`
 end
 
--- Nothing in it worth keeping: no items and, for a furnace, no fire or cooking progress.
+-- Nothing in it worth keeping: no items and, for a furnace, no fire or cooking progress. A
+-- machine's always is worth keeping (its energy, its place in an energy network).
 local function isEmpty(container: Container): boolean
+	if container.kind == Machines.CONTAINER_KIND then
+		return false
+	end
 	for slot = 1, container.size do
 		local stack = container.slots[slot]
 		if stack and stack.count > 0 then
@@ -86,10 +96,9 @@ local function isEmpty(container: Container): boolean
 	return data == nil or (data[1] <= 0 and data[3] <= 0)
 end
 
--- Slot count of a container block (0 for other blocks).
+-- Slot count of a container block (a machine's kind's; 0 for other blocks).
 local function sizeOf(block: number): number
-	local def = if Blocks.isValid(block) then Blocks.get(block) else nil
-	return if def then math.clamp(def.container, 0, Types.MAX_CONTAINER) else 0
+	return math.clamp(Machines.containerSize(block), 0, Types.MAX_CONTAINER)
 end
 
 --[[
@@ -103,16 +112,21 @@ function Store.get(self: Store, x: number, y: number, z: number, block: number):
 	if entry and entry.container.block == block then
 		return entry.container
 	end
-	local size = sizeOf(block)
-	assert(size > 0, `Block {block} is not a container`)
-	local furnace = Blocks.get(block).menu == "Furnace"
-	local container: Container = {
-		kind = if furnace then "furnace" else "chest",
-		block = block,
-		size = size,
-		slots = {},
-		data = if furnace then Smelting.newData() else nil,
-	}
+	local container: Container
+	if Machines.isMachine(block) then
+		container = Machines.newContainer(block)
+	else
+		local size = sizeOf(block)
+		assert(size > 0, `Block {block} is not a container`)
+		local furnace = Blocks.get(block).menu == "Furnace"
+		container = {
+			kind = if furnace then "furnace" else "chest",
+			block = block,
+			size = size,
+			slots = {},
+			data = if furnace then Smelting.newData() else nil,
+		}
+	end
 	if entry then
 		entry.container = container
 	else

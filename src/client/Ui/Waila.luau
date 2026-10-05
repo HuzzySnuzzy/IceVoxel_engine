@@ -17,10 +17,11 @@
 	            tool and tier a block needs, with a check or a cross for the held item), and
 	            "IceVoxel" in blue italics. With F3 (Debug/DebugOverlay.isOpen) the extended lines:
 	            id, position, chunk, biome (the generator's column), hardness, tool, drops, break
-	            time, light, fluid level, render kind, menu. Mekanism's transmitters and tanks add
-	            what Rendering/TransmitterRenderer knows (the side the Configurator points at,
-	            BlockInteraction.targetSide, and its mode; colour, items inside, water), and with
-	            F3 their packed modes, connections and network.
+	            time, light, fluid level, render kind, menu. Mekanism's transmitters, tanks and
+	            machines add what Rendering/TransmitterRenderer knows (the side the Configurator
+	            points at, BlockInteraction.targetSide, and its mode; colour, items inside, water,
+	            a cable's capacity; a machine's energy and status from its Machines record), and
+	            with F3 their packed modes, connections and network, a machine's energy numbers.
 	  Progress  survival mining progress (BlockInteraction.miningProgress) is Jade's white line
 	            along the panel's bottom edge.
 	  Look      Minecraft's tooltip, which is Jade's default theme: a dark translucent panel with cut
@@ -63,6 +64,7 @@ local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
+local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
@@ -460,11 +462,11 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		return WailaInfo.biomeName(biome)
 	end
 
-	-- What the client knows about a transmitter or a tank, and a key that changes with it.
+	-- What the client knows about a transmitter, a tank or a machine, and a key that changes with it.
 	local function pipeFacts(
 		hit: VoxelRaycast.Hit,
 		extended: boolean
-	): (WailaInfo.TransmitterFacts?, WailaInfo.TankFacts?, string)
+	): (WailaInfo.TransmitterFacts?, WailaInfo.TankFacts?, WailaInfo.MachineFacts?, string)
 		local x, y, z = hit.x, hit.y, hit.z
 		if Transmitters.isTransmitter(hit.block) then
 			local modes, colour, fluid = TransmitterRenderer.state(x, y, z)
@@ -491,17 +493,31 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			}
 			local key =
 				`{modes} {colour} {fluid} {side or -1} {items} {stacks} {linked} {acceptors} {size} {capacity} {complete}`
-			return facts, nil, key
+			return facts, nil, nil, key
 		elseif Transmitters.isTank(hit.block) then
 			local fluid, amount = TransmitterRenderer.tank(x, y, z)
-			return nil, { fluid = fluid, amount = amount }, `{fluid} {amount}`
+			return nil, { fluid = fluid, amount = amount }, nil, `{fluid} {amount}`
+		elseif Machines.isMachine(hit.block) then
+			local record = TransmitterRenderer.machine(x, y, z)
+			local facts: WailaInfo.MachineFacts = if record
+				then {
+					energy = record.energy,
+					capacity = record.capacity,
+					input = record.input,
+					output = record.output,
+					rate = record.rate,
+					active = record.active,
+				}
+				else WailaInfo.machineDefaults(hit.block)
+			local key = `{facts.energy} {facts.capacity} {facts.input} {facts.output} {facts.rate} {facts.active}`
+			return nil, nil, facts, key
 		end
-		return nil, nil, ""
+		return nil, nil, nil, ""
 	end
 
 	local function showBlock(hit: VoxelRaycast.Hit, progress: number?, extended: boolean)
 		local held = heldItem()
-		local transmitter, tank, facts = pipeFacts(hit, extended)
+		local transmitter, tank, machine, facts = pipeFacts(hit, extended)
 		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
@@ -512,7 +528,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				hit.y,
 				hit.z,
 				extended,
-				{ progress = progress, biome = biome, transmitter = transmitter, tank = tank }
+				{ progress = progress, biome = biome, transmitter = transmitter, tank = tank, machine = machine }
 			)
 		end)
 		setProgress(progress)
