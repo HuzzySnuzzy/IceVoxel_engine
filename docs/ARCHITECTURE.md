@@ -686,6 +686,9 @@ name (shaped patterns, shapeless ingredient lists, `#planks` / `#logs` tags, sme
 or mirrored, with nothing else around; shapeless ones by assigning stacks to ingredients; and two
 worn tools of a kind repair into one with 5% extra (RepairItemRecipe). It is pure, so the server
 crafts and the client predicts with the same code.
+A shaped recipe with `keep` (a key character it uses once) gives its result that ingredient's item
+data as it is (`Recipe.keep`, the cell; Mekanism's MekDataShapedRecipe): a Battery crafted into the
+next tier keeps its charge. Other results carry none.
 
 **Chests, crafting tables and furnaces** (`Players/Containers`, `InventoryState`):
 - `Use` on a block with a `menu` (reach-checked) opens it as window 1–255. Chests and furnaces are
@@ -712,7 +715,7 @@ the Arcade pixel font):
   crafting grid and its result at the top right, the 27 slots and the hotbar. An open block's panel
   sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a crafting table's
   3 × 3 grid and result, or a furnace's input, fuel and output with the flame and arrow gauges
-  from the furnace's `data`. Worn tools show Minecraft's durability bar.
+  from the furnace's `data`. Worn tools show Minecraft's durability bar, and machines' items that hold energy an energy bar in its place.
 - `CreativeScreen` (`E` in creative): the "Item selection" picker, a search box that filters
   `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it. Clicking an item
   gives a full stack; dropping a stack on the grid deletes it.
@@ -728,7 +731,7 @@ dropped items and, in `Player/HeldItems`, the item in each character's hand (fro
 `IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
 diagonally in icons (`tilt`) and are held by the handle, pointing forward.
 
-**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube, the Heat Generator and the Electric Furnace are drawn
+**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube, the Heat Generator, the Electric Furnace and the Batteries are drawn
 without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
 SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
 blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
@@ -793,7 +796,9 @@ strings of at most 64 bytes or booleans. No data is nil, never an empty table.
   entity merging and JEI's transfer, which uses plain stacks before ones with data. Pick block
   takes plain stacks only (the picked stack has no tags).
 - **Where data comes from.** Crafting results have none (a repaired tool is a fresh stack, and so
-  is an Advanced Fluid Tank made from a tank holding water); what stays in the grid keeps its own.
+  is an Advanced Fluid Tank made from a tank holding water), except a recipe's kept ingredient's
+  (Recipes `keep`: a Battery crafted into the next tier keeps its charge); what stays in the grid
+  keeps its own.
   Creative middle-click clone copies the whole stack, and the `creative` action carries wear and
   data (Minecraft's creative slot packet), checked by `Items.validData` and the item's durability.
 - **Trust.** Everything from the network passes `Items.validData`; Net/Protocol decodes nothing
@@ -1124,6 +1129,9 @@ is none. Energy is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differ
 `produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta: every
 recipient gets the same share, those that take less get all they take and the rest is shared again,
 smallest limits first.
+A kind's `lines(view)` gives up to `MAX_LINES` (4) more panel lines under its status line, where
+its panel's `lines = { x, y }` puts the first (`Machines.lines`; one every 12 pixels,
+`MenuLayout.LINE_HEIGHT`, as many as fit the panel).
 
 **On the server** (`server/Machines/`). `MachineWorld` (pure) keeps a machine per machine block
 (`blockChanged`, chained onto WorldServer.onChanged after Inventories and Transmitters) and
@@ -1173,13 +1181,22 @@ the kind's, else "Producing x/t", "Using x/t", "Charging" / "Discharging"), and 
 cable's network line counts the cables linked to it as the client sees them; the server's network
 may also join cables through machines). A machine's panel (MenuLayout) is its kind's: slots where it puts them (a slot with a `ghost` shows that outline while empty, as empty armor slots do: the upgrade cards'), the title centred, Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling
 from the bottom in whole rows rounded down, at least one while it holds any, red when empty
-through yellow to green when full, "stored / capacity" on hover), and the arrow, flame and status
-line it asks for, read from the data fields it names. The panel reads the window's data without
+through yellow to green when full, "stored / capacity" on hover), and the arrow, flame, status line and lines it asks for, read from the data fields it names. The panel reads the window's data without
 changing it and redraws only when a snapshot replaces it.
 Machines whose decor has a window (`TransmitterModel.hasMachineBoxes`: the Heat Generator and the Electric Furnace) are
 TransmitterRenderer cells like tanks, redrawn on each record: `machineBoxes` gives a working one
 a Neon pane over its window on each of its four sides (BlockDecor.GENERATOR_WINDOW and ELECTRIC_FURNACE_WINDOW, 0.2 px out of the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point from
 their records (Audio/Ambience).
+Batteries (`hasMachineBoxes`) are cells too: `machineBoxes` fills each side's gauge
+(BlockDecor.BATTERY_GAUGE) from the bottom with `chargeRows` of its 10 rows (the record's energy
+over capacity, rounded down, at least one while it holds any, as the panels' bar), a Neon pane
+in `Machines.energyColour` of that fill (red when nearly empty, yellow, green when full; the
+panels' energy bar and items' energy bars use the same function); the signature names the rows,
+so a battery is redrawn only when a whole row changes. A machine's item whose data holds energy
+shows an energy bar where the durability bar goes (`MenuLayout.energyItemBar`: 13 pixels x energy
+over the block's capacity, rounded down, at least 1; Mekanism rounds to the nearest pixel, uses
+0x3CFE9A and draws it on Energy Cubes only, empty ones too; `ItemIcon:set(item, count, damage,
+data)`, which Hud, InventoryScreen and the carried stack pass the stack's data to).
 
 **The Creative Energy Cube** (kind "creative"): infinite capacity and output, always full,
 gives whatever its network takes; creative only (no recipe).
@@ -1255,6 +1272,25 @@ the state code carries it to WAILA. A day without cards makes about 621 kJ (13 0
 daylight). Its item keeps its energy, at most 96 kJ when placed again (the cards drop). Mekanism's
 biome factor (SolarCheck's peak multiplier from temperature and rainfall: about 0.65 in a desert
 to 1.2 on frozen peaks) and rain don't apply.
+
+**Batteries** (kind "battery", `Machines/Kinds/Battery`; Mekanism's Energy Cubes). BlockList
+`BasicBattery`, `AdvancedBattery`, `EliteBattery` and `UltimateBattery` have `energy = { capacity,
+input, output }` from Mekanism's EnergyCubeTier (`Transmitters/Tiers` `batteryCapacity` and
+`batteryRate`: 4, 16, 64, 256 MJ at 4, 16, 64, 256 kJ/t, the same in and out), so they are storage
+(`Machines.role`) and EnergyNet gives them the backup's part: the producers' surplus after the
+consumers charges them up to their rate, within the throughput left, and the consumers' shortfall
+is covered by them discharging up to their rate; storage never charges storage. The kind has no
+slots, no fields and no tick: the header's INPUT and OUTPUT (what the network moved last tick)
+are all it reads. Its status is "Charging x/t" / "Discharging x/t" (input minus output), else
+"Full", "Empty" or "Idle"; its panel puts the status line at (8, 20) and its `lines` under it
+("Input: 150 J/t", "Output: 0 J/t", "Max rate: 4 kJ/t"). Its item keeps its energy (sustained
+data, at most its capacity when placed again), so BlockList gives it `maxStack = 1` (Mekanism's
+cubes stack to 1). A tier upgrade recipe keeps the energy of the battery in its middle (Recipes
+`keep`). The look: BlockDecor "<Tier>Battery" (dark steel, 3 x 3 corners in the tier's colour, a
+dark gauge on each side, BATTERY_GAUGE, a "+" terminal on top); TransmitterModel fills the gauges
+from its record (below). Left out: Mekanism's charge and discharge slots, side configuration (a
+battery, like any machine, joins the networks on its sides into one, so it cannot buffer between
+two networks) and its unlimited insert rate from cables (the cube only limits its own output).
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in

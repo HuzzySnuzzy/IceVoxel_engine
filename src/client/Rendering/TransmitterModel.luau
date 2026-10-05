@@ -28,7 +28,7 @@
 	  tanks    a Fluid Tank's water, from the bottom plate up to amount / capacity of the inside.
 	  machines what a Mekanism machine shows from its Machines record (`machineBoxes`): a burning
 	           Heat Generator's fuel window and a smelting Electric Furnace's heating chamber glow
-	           on their four sides.
+	           on their four sides, and a Battery's gauges fill with its charge.
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -308,39 +308,90 @@ local function glowOf(block: number): { x: number, y: number, w: number, h: numb
 	return if decor then GLOWS[decor] else nil
 end
 
+-- Batteries (Mekanism's Energy Cubes), by BlockList `decor`: the charge gauge on each side face
+-- (BlockDecor pixels, from the face's top left), the same rectangle their decor draws dark.
+local CHARGES: { [string]: { x: number, y: number, w: number, h: number } } = {}
+for _, tier in Transmitters.TIERS do
+	CHARGES[`{tier.name}Battery`] = BlockDecor.BATTERY_GAUGE
+end
+
+local function chargeOf(block: number): { x: number, y: number, w: number, h: number }?
+	if not Machines.isMachine(block) or not Blocks.isValid(block) then
+		return nil
+	end
+	local decor = Blocks.get(block).decor
+	return if decor then CHARGES[decor] else nil
+end
+
 -- Does the machine `block` show anything over its faces (TransmitterRenderer keeps a cell for it)?
 function TransmitterModel.hasMachineBoxes(block: number): boolean
-	return glowOf(block) ~= nil
+	return glowOf(block) ~= nil or chargeOf(block) ~= nil
 end
 
 --[[
-	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
-	idle machine), and a signature of what they show (equal signatures, equal boxes). A Heat
-	Generator that burns or an Electric Furnace that smelts (active) lights its window on its four
-	sides: a thin glowing pane GLOW_DEPTH out of each face over the window its decor draws.
-	Nothing for other blocks.
+	Rows of a battery's gauge `height` pixels tall its charge fills (from the bottom, 0..height),
+	from its record's energy and capacity: as the panels' energy bar (Ui/MenuLayout.energyRows),
+	full only when it is, never empty while it holds any.
 ]]
-function TransmitterModel.machineBoxes(block: number, look: MachineLook?): ({ Box }, string)
-	local glow = glowOf(block)
-	local active = look ~= nil and look.active
-	if glow == nil or not active then
-		return {}, `m{block}`
+function TransmitterModel.chargeRows(look: MachineLook?, height: number): number
+	if look == nil then
+		return 0
 	end
+	local energy, capacity = look.energy, look.capacity
+	if capacity == math.huge then
+		return height
+	elseif energy ~= energy or capacity ~= capacity or energy <= 0 or capacity <= 0 then
+		return 0
+	end
+	return math.clamp(math.floor(math.min(energy / capacity, 1) * height), 1, height)
+end
+
+-- A thin pane GLOW_DEPTH out of each of the four side faces over `rect` (face pixels), in `colour`.
+local function sidePanes(rect: { x: number, y: number, w: number, h: number }, colour: { number }): { Box }
 	local boxes: { Box } = {}
 	local depth = TransmitterModel.GLOW_DEPTH
-	local across = glow.x + glow.w / 2 - 8
-	local up = 8 - (glow.y + glow.h / 2)
+	local across = rect.x + rect.w / 2 - 8
+	local up = 8 - (rect.y + rect.h / 2)
 	for _, face in SIDE_FACES do
 		local normal, right = BlockDecor.basis(face)
 		local size, offset = table.create(3, 0), table.create(3, 0)
 		for k = 1, 3 do
 			local n, r = math.abs(normal[k]), math.abs(right[k])
-			size[k] = n * depth + r * glow.w + (if k == 2 then glow.h else 0)
+			size[k] = n * depth + r * rect.w + (if k == 2 then rect.h else 0)
 			offset[k] = normal[k] * (8 + depth / 2) + right[k] * across + (if k == 2 then up else 0)
 		end
-		table.insert(boxes, box("glow", size, offset, TransmitterModel.GLOW_COLOUR))
+		table.insert(boxes, box("glow", size, offset, colour))
 	end
-	return boxes, `m{block} lit`
+	return boxes
+end
+
+--[[
+	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
+	idle, empty machine), and a signature of what they show (equal signatures, equal boxes):
+	  * a Heat Generator that burns or an Electric Furnace that smelts (active) lights its window on
+	    its four sides: a thin glowing pane GLOW_DEPTH out of each face over the window its decor
+	    draws;
+	  * a Battery fills each side's gauge from the bottom with its charge (`chargeRows` of the
+	    gauge's height), glowing in the energy bar's colour for that fill (Machines.energyColour:
+	    red when nearly empty to green when full), so the boxes only change when a whole row does.
+	Nothing for other blocks.
+]]
+function TransmitterModel.machineBoxes(block: number, look: MachineLook?): ({ Box }, string)
+	local gauge = chargeOf(block)
+	if gauge then
+		local rows = TransmitterModel.chargeRows(look, gauge.h)
+		if rows <= 0 then
+			return {}, `m{block}`
+		end
+		local fill = { x = gauge.x, y = gauge.y + gauge.h - rows, w = gauge.w, h = rows }
+		return sidePanes(fill, Machines.energyColour(rows / gauge.h)), `m{block} c{rows}`
+	end
+	local glow = glowOf(block)
+	local active = look ~= nil and look.active
+	if glow == nil or not active then
+		return {}, `m{block}`
+	end
+	return sidePanes(glow, TransmitterModel.GLOW_COLOUR), `m{block} lit`
 end
 
 --[[ Aiming ]]

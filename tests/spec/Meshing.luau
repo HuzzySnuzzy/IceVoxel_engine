@@ -319,6 +319,10 @@ return function(t, shared, require, _server, client)
 		end
 		t.ok(decors.Chest and decors.CraftingTable and decors.Furnace, "the three decorated blocks")
 		t.ok(decors.CreativeEnergyCube and decors.HeatGenerator and decors.ElectricFurnace, "and Mekanism's machines")
+		t.ok(
+			decors.BasicBattery and decors.AdvancedBattery and decors.EliteBattery and decors.UltimateBattery,
+			"and its energy cubes"
+		)
 		for decor in decors do
 			local faces = BlockDecor.faces(decor)
 			t.ok(faces ~= nil, `faces of {decor}`)
@@ -400,7 +404,18 @@ return function(t, shared, require, _server, client)
 			return cells
 		end
 		for _, decor in
-			{ "Chest", "CraftingTable", "Furnace", "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace" }
+			{
+				"Chest",
+				"CraftingTable",
+				"Furnace",
+				"CreativeEnergyCube",
+				"HeatGenerator",
+				"ElectricFurnace",
+				"BasicBattery",
+				"AdvancedBattery",
+				"EliteBattery",
+				"UltimateBattery",
+			}
 		do
 			local faces = BlockDecor.faces(decor)
 			assert(faces)

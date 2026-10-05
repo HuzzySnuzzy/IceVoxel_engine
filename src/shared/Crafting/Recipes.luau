@@ -3,13 +3,16 @@
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
 	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
-	transmitters, fluid tanks, Configurator, Universal Cables, machines and upgrade cards adapted
-	to the game's materials (see "Mekanism pipes and buckets", "Universal Cables", "Heat
-	Generator", "Electric Furnace", "upgrade cards" and "Solar Generator" below).
+	transmitters, fluid tanks, Configurator, Universal Cables, machines, upgrade cards and energy
+	cubes adapted to the game's materials (see "Mekanism pipes and buckets", "Universal Cables",
+	"Heat Generator", "Electric Furnace", "upgrade cards", "Solar Generator" and "Energy Cubes"
+	below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
-	             ShapedRecipe).
+	             ShapedRecipe). `keep`, a key character used once in the pattern: the result takes
+	             that ingredient's item data (Mekanism's MekDataShapedRecipe: a Battery crafted into
+	             the next tier keeps its charge); other results carry none.
 	  shapeless  `ingredients` in any slots.
 	  smelting   furnace recipes: one `input` cooks into `result` (200 ticks).
 	  fuel       burn time in ticks of furnace fuel.
@@ -18,7 +21,13 @@
 	Shared/Crafting compiles these into ids and matches them.
 ]]
 
-export type Shaped = { pattern: { string }, key: { [string]: string }, result: string, count: number? }
+export type Shaped = {
+	pattern: { string },
+	key: { [string]: string },
+	result: string,
+	count: number?,
+	keep: string?,
+}
 export type Shapeless = { ingredients: { string }, result: string, count: number? }
 export type Smelting = { input: string, result: string, count: number? }
 
@@ -36,8 +45,8 @@ local shaped: { Shaped } = {}
 local shapeless: { Shapeless } = {}
 local smelting: { Smelting } = {}
 
-local function shape(pattern: { string }, key: { [string]: string }, result: string, count: number?)
-	table.insert(shaped, { pattern = pattern, key = key, result = result, count = count })
+local function shape(pattern: { string }, key: { [string]: string }, result: string, count: number?, keep: string?)
+	table.insert(shaped, { pattern = pattern, key = key, result = result, count = count, keep = keep })
 end
 local function mix(ingredients: { string }, result: string, count: number?)
 	table.insert(shapeless, { ingredients = ingredients, result = result, count = count })
@@ -233,6 +242,32 @@ shape(
 	{ G = "Glass", A = "GoldIngot", I = "IronIngot", O = "OsmiumIngot", D = "GlowstoneDust" },
 	"SolarPanel"
 )
+
+--[[
+	Mekanism's Energy Cubes (the Batteries), in Mekanism's shape: an alloy, an energy tablet and an
+	alloy, over an ingot, the casing or the tier below and an ingot, over the top row again ("ATA",
+	"IPI", "ATA"; redstone for the Basic's alloy). Glowstone dust stands for the redstone (as in
+	the cables), glowstone for the energy tablet (Mekanism's is mostly redstone), a block of iron
+	for the steel casing, and gold ingots, diamonds and emeralds for the infused, reinforced and
+	atomic alloys (as in the transmitter upgrades); the ingots are Mekanism's: iron, osmium, gold
+	and a diamond. A tier crafted around the tier below keeps its charge (`keep`, Mekanism's
+	MekDataShapedRecipe).
+]]
+shape(
+	{ "DTD", "ICI", "DTD" },
+	{ D = "GlowstoneDust", T = "Glowstone", I = "IronIngot", C = "IronBlock" },
+	"BasicBattery"
+)
+local BATTERY_INGOTS = { "OsmiumIngot", "GoldIngot", "Diamond" }
+for tier = 2, 4 do
+	shape(
+		{ "ATA", "IBI", "ATA" },
+		{ A = ALLOYS[tier - 1], T = "Glowstone", I = BATTERY_INGOTS[tier - 1], B = TIER_NAMES[tier - 1] .. "Battery" },
+		TIER_NAMES[tier] .. "Battery",
+		1,
+		"B"
+	)
+end
 
 --[[ Smelting ]]
 

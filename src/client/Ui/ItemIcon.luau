@@ -13,8 +13,12 @@
 	hundred icons does no work while nothing changes.
 
 	A worn tool gets Minecraft's durability bar under it (Ui/MenuLayout.durabilityBar: up to 13
-	pixels at (2, 13) of the 16 x 16 item on a black 13 x 2 background, from green to red). It is
-	made the first time an icon needs one and scales with the icon.
+	pixels at (2, 13) of the 16 x 16 item on a black 13 x 2 background, from green to red). A
+	machine's item that holds energy (its data's `energy`: a charged Battery, a generator broken
+	with energy in it) gets Mekanism's energy bar in the same place instead
+	(MenuLayout.energyItemBar: its charge, coloured like the panels' energy bar), so `set` takes
+	the stack's data too. The bar is made the first time an icon needs one and scales with the
+	icon.
 
 	`ItemIcon.slot` is an inventory slot with an icon and the hover overlay (`big`: a result slot's
 	large frame).
@@ -24,6 +28,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Items = require(Shared.Items)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local MenuLayout = require(script.Parent.MenuLayout)
@@ -58,9 +63,10 @@ export type ItemIcon = {
 	root: Frame,
 	item: number?,
 	count: number,
-	-- The tool wear shown (0 = none).
+	-- The tool wear shown (0 = none) and the item data shown (its energy bar).
 	damage: number,
-	set: (self: ItemIcon, item: number?, count: number?, damage: number?) -> (),
+	data: Items.Data?,
+	set: (self: ItemIcon, item: number?, count: number?, damage: number?, data: Items.Data?) -> (),
 	setCountColour: (self: ItemIcon, colour: Color3?) -> (),
 	destroy: (self: ItemIcon) -> (),
 }
@@ -72,7 +78,7 @@ type Self = ItemIcon & {
 	shadow: TextLabel,
 	model: Model?,
 	block: boolean?,
-	-- The durability bar (made when first needed) and its coloured part.
+	-- The durability or energy bar (made when first needed) and its coloured part.
 	bar: Frame?,
 	barFill: Frame?,
 }
@@ -204,6 +210,7 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 		item = nil,
 		count = 0,
 		damage = 0,
+		data = nil,
 		viewport = viewport,
 		camera = camera,
 		label = label,
@@ -216,9 +223,18 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 	return (setmetatable(self, ItemIcon) :: any) :: ItemIcon
 end
 
--- Shows (or hides) the durability bar of the icon's item worn by `damage`.
-local function setDurability(self: Self, damage: number)
-	local width, hue = MenuLayout.durabilityBar(self.item, damage)
+--[[
+	Shows (or hides) the bar under the icon's item: the durability bar when it is worn by `damage`,
+	else Mekanism's energy bar when it holds energy (`data`).
+]]
+local function setBar(self: Self, damage: number, data: Items.Data?)
+	local width, colour = MenuLayout.durabilityBar(self.item, damage)
+	local rgb: Color3 = Color3.fromHSV(colour, 1, 1)
+	if width == nil then
+		local energy, energyColour = MenuLayout.energyItemBar(self.item, data)
+		width = energy
+		rgb = Color3.fromRGB(energyColour[1], energyColour[2], energyColour[3])
+	end
 	local bar, fill = self.bar, self.barFill
 	if width == nil then
 		if bar and bar.Visible then
@@ -230,7 +246,7 @@ local function setDurability(self: Self, damage: number)
 		-- Fractions of the 16 x 16 item, so it scales with any icon size.
 		local item = Style.ITEM
 		local newBar = Instance.new("Frame")
-		newBar.Name = "Durability"
+		newBar.Name = "Bar"
 		newBar.BorderSizePixel = 0
 		newBar.BackgroundColor3 = Color3.new(0, 0, 0)
 		newBar.Position = UDim2.fromScale(MenuLayout.BAR_X / item, MenuLayout.BAR_Y / item)
@@ -249,15 +265,16 @@ local function setDurability(self: Self, damage: number)
 	assert(bar and fill, "durability bar")
 	-- The top one of its two rows, `width` of 13 pixels.
 	fill.Size = UDim2.fromScale(width / MenuLayout.BAR_WIDTH, 1 / MenuLayout.BAR_HEIGHT)
-	fill.BackgroundColor3 = Color3.fromHSV(hue, 1, 1)
+	fill.BackgroundColor3 = rgb
 	bar.Visible = true
 end
 
 --[[
-	Shows `item` (nil = nothing) with `count` (drawn when above 1) and a tool's wear `damage` (its
-	durability bar when worn). Cheap when nothing changed.
+	Shows `item` (nil = nothing) with `count` (drawn when above 1), a tool's wear `damage` (its
+	durability bar when worn) and the stack's `data` (the energy bar of an item that holds energy).
+	Cheap when nothing changed (data tables are values: a new one is new data).
 ]]
-function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?)
+function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?, data: Items.Data?)
 	local itemChanged = item ~= self.item
 	if itemChanged then
 		local old, model = self.item, self.model
@@ -290,9 +307,11 @@ function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?
 		self.shadow.Visible = shown > 1
 	end
 	local wear = if item and damage and damage > 0 then damage else 0
-	if wear ~= self.damage or itemChanged then
+	local held = if item then data else nil
+	if wear ~= self.damage or held ~= self.data or itemChanged then
 		self.damage = wear
-		setDurability(self, wear)
+		self.data = held
+		setBar(self, wear, held)
 	end
 end
 

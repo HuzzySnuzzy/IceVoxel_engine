@@ -37,12 +37,15 @@
 	  drops         Name of the item a survival player gets for breaking it (default: the block
 	                itself), or false for nothing (e.g. glass, leaves).
 	  dropCount     How many of `drops` (default 1).
+	  maxStack      Most of its item in one slot (1..64, default 64): Mekanism's Energy Cubes
+	                (Batteries) stack to 1, as their charge is in each item.
 	  container     Number of item slots the block keeps (a chest's 27, a furnace's 3); breaking it
 	                drops what is inside.
 	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid)
 	                or "Furnace".
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
-	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace"; client
+	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
+	                "AdvancedBattery", "EliteBattery", "UltimateBattery"; client
 	                Rendering/BlockDecor). Such blocks are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
 	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
@@ -167,6 +170,7 @@ export type BlockSpec = {
 	toolLevel: number?,
 	drops: (string | false)?,
 	dropCount: number?,
+	maxStack: number?,
 	container: number?,
 	menu: string?,
 	decor: string?,
@@ -1210,5 +1214,33 @@ table.insert(list, {
 	machine = { kind = "solar" },
 	energy = { capacity = 96000, output = 100 },
 })
+
+--[[
+	Mekanism's Energy Cubes, named Batteries (Shared/Machines/Kinds/Battery, kind "battery"), Basic
+	to Ultimate: Mekanism's EnergyCubeTier stores (4, 16, 64 and 256 MJ) and rates (4, 16, 64 and
+	256 kJ/t), the same in and out (Transmitters/Tiers), so they are storage: the energy networks
+	charge them with what generators have left over and draw on them when generators fall short,
+	the backup. Mekanism's machine block: hardness 3.5, a pickaxe to drop anything; its item keeps
+	its charge, so it stacks to 1 (Mekanism's energy cubes do). A dark steel cube with corners in
+	the tier's colour (Mekanism's energy cube frame), a charge gauge on each side and a terminal on
+	top (BlockDecor "<Tier>Battery"; the client fills the gauges from the machine's record,
+	Rendering/TransmitterModel.machineBoxes).
+]]
+for tier, name in TIER_NAMES do
+	local numbers = Tiers.TIERS[tier]
+	table.insert(list, {
+		name = `{name}Battery`,
+		color = { 52, 54, 60 },
+		material = "Metal",
+		sound = "metal",
+		hardness = 3.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		maxStack = 1,
+		decor = `{name}Battery`,
+		machine = { kind = "battery" },
+		energy = { capacity = numbers.batteryCapacity, input = numbers.batteryRate, output = numbers.batteryRate },
+	})
+end
 
 return list

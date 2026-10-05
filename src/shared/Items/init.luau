@@ -13,9 +13,10 @@
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
 	other items.
 
-	A stack is `{ item = id, count = n, damage = d?, data = t? }` with 1 <= n <= maxStack; empty
-	slots are nil. `damage` is a tool's wear (Minecraft's damage value, 0 / nil = new); the tool
-	breaks when it reaches the item's `durability`.
+	A stack is `{ item = id, count = n, damage = d?, data = t? }` with 1 <= n <= maxStack (an item's
+	ItemList `maxStack`, a block's BlockList `maxStack`; 64 by default); empty slots are nil.
+	`damage` is a tool's wear (Minecraft's damage value, 0 / nil = new); the tool breaks when it
+	reaches the item's `durability`.
 
 	Item data (`data`) is Minecraft's item NBT, made small and flat: a table of up to MAX_DATA_KEYS
 	string keys (1..32 characters of letters, digits and "_") to finite numbers, strings of at most
@@ -104,7 +105,8 @@ for id = 0, Blocks.count - 1 do
 			name = block.name,
 			displayName = block.displayName or spaced(block.name),
 			block = id,
-			maxStack = Items.MAX_STACK,
+			-- (64 unless BlockList says less: a Battery's 1, its charge being in each item.)
+			maxStack = block.maxStack,
 			armor = nil,
 			tool = nil,
 			durability = nil,

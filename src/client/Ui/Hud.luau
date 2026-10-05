@@ -391,7 +391,7 @@ function Hud.start()
 			dirty = false
 			for i = 1, HOTBAR do
 				local stack = inventory.slots[i]
-				icons[i]:set(stack and stack.item, stack and stack.count, stack and stack.damage)
+				icons[i]:set(stack and stack.item, stack and stack.count, stack and stack.damage, stack and stack.data)
 			end
 			selection.Position = UDim2.fromOffset(-1 + (inventory.selected - 1) * 20, BAR_Y - 1)
 		end

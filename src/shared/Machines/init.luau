@@ -34,6 +34,7 @@ require(script.Kinds.Creative)
 require(script.Kinds.Generator)
 require(script.Kinds.Smelter)
 require(script.Kinds.Solar)
+require(script.Kinds.Battery)
 
 Core.bindBlocks()
 

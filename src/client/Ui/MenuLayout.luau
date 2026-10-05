@@ -15,12 +15,14 @@
 	                  machine   a Mekanism machine's (Shared/Machines.panel): its kind's slots where
 	                            it puts them (with the outline of what goes in while empty: upgrade
 	                            cards), Mekanism's vertical energy bar (GuiVerticalPowerBar, right
-	                            edge), optionally an arrow, a flame and a status line
+	                            edge), optionally an arrow, a flame, a status line and more lines
+	                            under it (a battery's input and output)
 	  gauges        the furnace's flame and arrow (AbstractFurnaceMenu.getLitProgress /
 	                getBurnProgress), a machine's (from the data fields its panel names), the
 	                energy bar (stored over capacity, red when empty to green when full, "x / y"
-	                on hover) and the durability bar under worn tools (ItemStack.getBarWidth /
-	                getBarColor)
+	                on hover), the durability bar under worn tools (ItemStack.getBarWidth /
+	                getBarColor) and Mekanism's energy bar in its place on items that hold energy
+	                (batteries)
 
 	A slot's (x, y) is its item's top left corner, as in Minecraft's menus: the 18 x 18 slot frame
 	(and the hit area) is one pixel up and left of it, a large frame five.
@@ -73,6 +75,8 @@ export type Panel = {
 	flameSource: Source?,
 	energy: Rect?,
 	status: { x: number, y: number }?,
+	-- Where the machine's extra lines go (Machines.lines), one position per line that fits.
+	lines: { { x: number, y: number } },
 }
 
 local MenuLayout = {}
@@ -87,6 +91,11 @@ MenuLayout.BAR_X, MenuLayout.BAR_Y, MenuLayout.BAR_WIDTH, MenuLayout.BAR_HEIGHT 
 -- The furnace's flame (14 x 14) and arrow (24 x 16) sprites, and the smelting time with no data.
 MenuLayout.FLAME_SIZE = 14
 MenuLayout.ARROW_WIDTH, MenuLayout.ARROW_HEIGHT = 24, 16
+-- A machine's extra lines: pixels from one to the next, a line's text height, and the room kept
+-- under the last one (the panel's border).
+MenuLayout.LINE_HEIGHT = 12
+MenuLayout.LINE_TEXT = 8
+MenuLayout.LINE_MARGIN = 4
 local DEFAULT_BURN = 200
 
 --[[ The player panel's 2 x 2 crafting area ]]
@@ -150,6 +159,7 @@ local function chestPanel(container: Container): Panel
 		flameSource = nil,
 		energy = nil,
 		status = nil,
+		lines = {},
 	}
 end
 
@@ -177,6 +187,7 @@ local function craftingPanel(container: Container): Panel
 		flameSource = nil,
 		energy = nil,
 		status = nil,
+		lines = {},
 	}
 end
 
@@ -202,6 +213,7 @@ local function furnacePanel(container: Container): Panel
 		flameSource = nil,
 		energy = nil,
 		status = nil,
+		lines = {},
 	}
 end
 
@@ -242,10 +254,23 @@ local function machinePanel(container: Container): Panel
 	local bar = Machines.ENERGY_BAR
 	local at = spec.energy
 	local progress, flame = spec.progress, spec.flame
+	local height = spec.height or Machines.PANEL_HEIGHT
+	-- (As many lines as fit above the panel's bottom border.)
+	local lines: { { x: number, y: number } } = {}
+	local first = spec.lines
+	if first then
+		for i = 1, Machines.MAX_LINES do
+			local y = first.y + (i - 1) * MenuLayout.LINE_HEIGHT
+			if y + MenuLayout.LINE_TEXT > height - MenuLayout.LINE_MARGIN then
+				break
+			end
+			table.insert(lines, { x = first.x, y = y })
+		end
+	end
 	return {
 		kind = container.kind,
 		width = MenuLayout.WIDTH,
-		height = spec.height or Machines.PANEL_HEIGHT,
+		height = height,
 		title = spec.title or blockTitle(block),
 		titleX = 8,
 		titleY = 6,
@@ -262,6 +287,7 @@ local function machinePanel(container: Container): Panel
 		flameSource = if flame then sourceOf(block, flame) else nil,
 		energy = { x = if at then at.x else bar.x, y = if at then at.y else bar.y, w = bar.w, h = bar.h },
 		status = spec.status,
+		lines = lines,
 	}
 end
 
@@ -380,14 +406,9 @@ function MenuLayout.energyRows(data: { number }?, height: number): number
 	return math.clamp(math.floor(fraction * height), 1, height)
 end
 
--- The bar's colour for a fill of `fraction`: red when empty, through yellow, to green when full.
-function MenuLayout.energyColour(fraction: number): { number }
-	local f = math.clamp(if fraction == fraction then fraction else 0, 0, 1)
-	if f < 0.5 then
-		return { 255, math.floor(f * 2 * 255 + 0.5), 0 }
-	end
-	return { math.floor((1 - f) * 2 * 255 + 0.5), 255, 0 }
-end
+-- The bar's colour for a fill of `fraction`: red when empty, through yellow, to green when full
+-- (Machines.energyColour, which items' energy bars and batteries' gauges share).
+MenuLayout.energyColour = Machines.energyColour
 
 -- The bar's tooltip, Mekanism's "stored / capacity": "1.2 kJ / 20 kJ" ("Infinite" for creative).
 function MenuLayout.energyTooltip(data: { number }?): string
@@ -398,16 +419,11 @@ function MenuLayout.energyTooltip(data: { number }?): string
 	return `{Items.formatEnergy(energy)} / {Items.formatEnergy(capacity)}`
 end
 
---[[
-	A machine's status line from its container's data (Machines.status), "" when it has none. Reads
-	`data` as it is (Machines.view would fill in a missing one: the client's window is read only).
-]]
-function MenuLayout.statusText(container: Container?): string
-	if container == nil or not Machines.isContainer(container) then
-		return ""
-	end
+-- A machine container's header as a View, read as it is (Machines.view would fill in missing
+-- data: the client's window is read only).
+local function viewOf(container: Container): Machines.View
 	local data = container.data
-	local view: Machines.View = {
+	return {
 		block = container.block,
 		energy = value(data, Machines.ENERGY),
 		capacity = value(data, Machines.CAPACITY),
@@ -417,7 +433,22 @@ function MenuLayout.statusText(container: Container?): string
 		active = value(data, Machines.ACTIVE) ~= 0,
 		state = Machines.state(container),
 	}
-	return Machines.status(container.block, view) or ""
+end
+
+-- A machine's status line from its container's data (Machines.status), "" when it has none.
+function MenuLayout.statusText(container: Container?): string
+	if container == nil or not Machines.isContainer(container) then
+		return ""
+	end
+	return Machines.status(container.block, viewOf(container)) or ""
+end
+
+-- A machine's extra panel lines from its container's data (Machines.lines), none for others.
+function MenuLayout.lineTexts(container: Container?): { string }
+	if container == nil or not Machines.isContainer(container) then
+		return {}
+	end
+	return Machines.lines(container.block, viewOf(container))
 end
 
 --[[ Durability bar ]]
@@ -440,6 +471,31 @@ function MenuLayout.durabilityBar(item: number?, damage: number?): (number?, num
 	local width = math.clamp(math.floor(13 - damage * 13 / max + 0.5), 0, MenuLayout.BAR_WIDTH)
 	local hue = math.max(0, (max - damage) / max) / 3
 	return width, hue
+end
+
+--[[
+	Mekanism's energy bar on an item (StorageUtils' energy bar), where the durability bar goes: on
+	the item of a machine whose data holds energy (sustained data, "energy": a charged Battery, a
+	generator broken with energy in it). Returns the coloured width in pixels (1..13: the energy
+	over the block's capacity, like the panels' bar full only when full and never empty while it
+	holds any) and its colour ({ r, g, b }, Machines.energyColour); nil when there is no bar (no
+	energy in the data, no machine's item, the creative cube's infinite store). (Mekanism rounds
+	13 x the fraction to the nearest pixel, colours it 0x3CFE9A and draws it on every Energy Cube,
+	empty ones too, and on no other machine's item.)
+]]
+function MenuLayout.energyItemBar(item: number?, data: Items.Data?): (number?, { number })
+	local def = if item then Items.get(item) else nil
+	local block = def and def.block
+	local energy = if block then Machines.energyOf(block) else nil
+	local stored = Items.dataNumber(data, "energy")
+	if energy == nil or stored == nil or stored ~= stored or stored <= 0 then
+		return nil, Machines.energyColour(0)
+	elseif energy.capacity == math.huge or energy.capacity <= 0 then
+		return nil, Machines.energyColour(0)
+	end
+	local fraction = math.min(stored / energy.capacity, 1)
+	local width = math.clamp(math.floor(fraction * MenuLayout.BAR_WIDTH), 1, MenuLayout.BAR_WIDTH)
+	return width, Machines.energyColour(fraction)
 end
 
 --[[ Pixel art ]]

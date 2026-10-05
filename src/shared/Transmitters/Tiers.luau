@@ -1,8 +1,9 @@
 --!strict
 --[[
-	Mekanism's tier numbers for transmitters and fluid tanks (Mekanism 10.x for Minecraft 1.20.1:
-	TransporterTier, PipeTier, CableTier and FluidTankTier), with nothing required, so BlockList
-	can read them too. Shared/Transmitters re-exports everything here; use that.
+	Mekanism's tier numbers for transmitters, fluid tanks and energy cubes (Mekanism 10.x for
+	Minecraft 1.20.1: TransporterTier, PipeTier, CableTier, FluidTankTier and EnergyCubeTier), with
+	nothing required, so BlockList can read them too. Shared/Transmitters re-exports everything
+	here; use that.
 
 	Tier 1..4 = Basic, Advanced, Elite, Ultimate.
 
@@ -13,6 +14,9 @@
 	  pipePull          mB per tick a pipe takes from a tank through each PULL side
 	  tankCapacity      mB a Fluid Tank holds
 	  tankOutput        mB per tick a tank gives out at most (Mekanism's output rate)
+	  cableCapacity     J per tick a Universal Cable adds to its network's throughput
+	  batteryCapacity   J a Battery (Mekanism's Energy Cube) stores
+	  batteryRate       J per tick a Battery takes in and gives out at most (Mekanism's output)
 	  colour            the tier's colour on frames (Mekanism's: Basic dark grey, Advanced red,
 	                    Elite dark aqua, Ultimate purple)
 ]]
@@ -27,6 +31,8 @@ export type Tier = {
 	cableCapacity: number,
 	tankCapacity: number,
 	tankOutput: number,
+	batteryCapacity: number,
+	batteryRate: number,
 }
 
 local Tiers = {}
@@ -42,6 +48,8 @@ local TIERS: { Tier } = {
 		cableCapacity = 8000,
 		tankCapacity = 32000,
 		tankOutput = 1000,
+		batteryCapacity = 4000000,
+		batteryRate = 4000,
 	},
 	{
 		name = "Advanced",
@@ -53,6 +61,8 @@ local TIERS: { Tier } = {
 		cableCapacity = 128000,
 		tankCapacity = 64000,
 		tankOutput = 4000,
+		batteryCapacity = 16000000,
+		batteryRate = 16000,
 	},
 	{
 		name = "Elite",
@@ -64,6 +74,8 @@ local TIERS: { Tier } = {
 		cableCapacity = 1024000,
 		tankCapacity = 128000,
 		tankOutput = 16000,
+		batteryCapacity = 64000000,
+		batteryRate = 64000,
 	},
 	{
 		name = "Ultimate",
@@ -75,6 +87,8 @@ local TIERS: { Tier } = {
 		cableCapacity = 8192000,
 		tankCapacity = 256000,
 		tankOutput = 64000,
+		batteryCapacity = 256000000,
+		batteryRate = 256000,
 	},
 }
 for _, tier in TIERS do

@@ -13,8 +13,10 @@
 	                         anything behind, like Minecraft's empty buckets.)
 
 	Ingredients match by item whatever their data (Items `data`); results carry none, a repaired
-	tool's included (Minecraft's RepairItemRecipe makes a fresh stack). What stays in the grid after
-	a craft keeps its wear and data.
+	tool's included (Minecraft's RepairItemRecipe makes a fresh stack), except where a shaped
+	recipe keeps an ingredient's (Recipes `keep`: a Battery crafted into the next tier keeps its
+	charge, as Mekanism's MekDataShapedRecipe does): that ingredient's data, as it is. What stays
+	in the grid after a craft keeps its wear and data.
 
 	Pure and deterministic: the server crafts with it and clients predict with it.
 ]]
@@ -34,6 +36,9 @@ export type Recipe = {
 	cells: { Ingredient | false },
 	result: number,
 	count: number,
+	-- Shaped: the cell (an index into `cells`) whose stack's data the result takes (Recipes
+	-- `keep`).
+	keep: number?,
 }
 
 local Crafting = {}
@@ -69,6 +74,7 @@ for _, spec in Recipes.shaped do
 		width = math.max(width, #row)
 	end
 	local cells: { Ingredient | false } = {}
+	local keep: number? = nil
 	for y = 1, height do
 		local row = spec.pattern[y]
 		for x = 1, width do
@@ -79,9 +85,17 @@ for _, spec in Recipes.shaped do
 				local key = spec.key[char]
 				assert(key, `Crafting: no key for '{char}' in the {spec.result} recipe`)
 				table.insert(cells, ingredient(key))
+				if char == spec.keep then
+					assert(keep == nil, `Crafting: the {spec.result} recipe keeps '{char}', which it uses twice`)
+					keep = #cells
+				end
 			end
 		end
 	end
+	assert(
+		spec.keep == nil or keep ~= nil,
+		`Crafting: the {spec.result} recipe keeps '{spec.keep}', which it never uses`
+	)
 	table.insert(recipes, {
 		kind = "shaped",
 		width = width,
@@ -89,6 +103,7 @@ for _, spec in Recipes.shaped do
 		cells = cells,
 		result = itemId(spec.result),
 		count = spec.count or 1,
+		keep = keep,
 	})
 end
 for _, spec in Recipes.shapeless do
@@ -103,6 +118,7 @@ for _, spec in Recipes.shapeless do
 		cells = cells,
 		result = itemId(spec.result),
 		count = spec.count or 1,
+		keep = nil,
 	})
 end
 
@@ -139,18 +155,36 @@ local function shapedAt(
 	return true
 end
 
-local function matchesShaped(recipe: Recipe, grid: { [number]: Stack? }, size: number): boolean
+-- The grid slot holding recipe cell `cell` when the recipe sits at (dx, dy), mirrored or not.
+local function slotOf(recipe: Recipe, cell: number, size: number, dx: number, dy: number, mirror: boolean): number
+	local row, column = (cell - 1) // recipe.width, (cell - 1) % recipe.width
+	local x = if mirror then recipe.width - 1 - column else column
+	return (dy + row) * size + dx + x + 1
+end
+
+--[[
+	Does the shaped recipe fit the grid? Also returns the grid slot of the cell it keeps the data
+	of (Recipes `keep`), if any.
+]]
+local function matchesShaped(recipe: Recipe, grid: { [number]: Stack? }, size: number): (boolean, number?)
 	if recipe.width > size or recipe.height > size then
-		return false
+		return false, nil
 	end
+	local keep = recipe.keep
 	for dy = 0, size - recipe.height do
 		for dx = 0, size - recipe.width do
-			if shapedAt(recipe, grid, size, dx, dy, false) or shapedAt(recipe, grid, size, dx, dy, true) then
-				return true
+			local mirror = false
+			local fits = shapedAt(recipe, grid, size, dx, dy, false)
+			if not fits then
+				mirror = true
+				fits = shapedAt(recipe, grid, size, dx, dy, true)
+			end
+			if fits then
+				return true, if keep then slotOf(recipe, keep, size, dx, dy, mirror) else nil
 			end
 		end
 	end
-	return false
+	return false, nil
 end
 
 --[[
@@ -223,11 +257,17 @@ function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
 		return nil
 	end
 	for _, recipe in recipes do
-		local ok = if recipe.kind == "shaped"
-			then matchesShaped(recipe, grid, width)
-			else matchesShapeless(recipe, stacks)
+		local ok, kept = false, nil
+		if recipe.kind == "shaped" then
+			ok, kept = matchesShaped(recipe, grid, width)
+		else
+			ok = matchesShapeless(recipe, stacks)
+		end
 		if ok then
-			return { item = recipe.result, count = recipe.count }
+			local from = if kept then grid[kept] else nil
+			-- (A result keeps an ingredient's data only where its recipe says: Recipes `keep`.)
+			local data = if from then Items.cleanData(from.data) else nil
+			return { item = recipe.result, count = recipe.count, data = data }
 		end
 	end
 	return repair(stacks)

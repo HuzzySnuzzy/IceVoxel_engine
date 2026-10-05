@@ -38,8 +38,9 @@
 	two slots and a caller holding an old stack never sees it change. A stack's `damage` (a tool's
 	wear) and item data (`data`, Items) travel with every copy, and two stacks only stack together
 	when their item, damage and data are equal (Minecraft's isSameItemSameTags). Middle-click clone
-	copies the data, crafting results have none, and a creative `creative` action may set both
-	(Minecraft's creative slot packet; the data must pass Items.validData).
+	copies the data, crafting results have none (except a recipe that keeps an ingredient's,
+	Crafting/Recipes `keep`: a Battery's tier upgrade keeps its charge), and a creative `creative`
+	action may set both (Minecraft's creative slot packet; the data must pass Items.validData).
 ]]
 
 local Items = require(script.Parent.Parent.Items)

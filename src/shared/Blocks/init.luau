@@ -52,6 +52,8 @@ export type BlockDef = {
 	-- many; see Items.drops.
 	drops: (string | false)?,
 	dropCount: number,
+	-- Most of its item in one slot (1..64; Items.maxStack): a Battery's 1.
+	maxStack: number,
 	-- Item slots the block keeps (chest 27, furnace 3), 0 for other blocks.
 	container: number,
 	-- What right clicking opens ("Chest", "Crafting", "Furnace"), nil for nothing.
@@ -247,6 +249,7 @@ for index, spec in BlockList do
 		toolLevel = spec.toolLevel,
 		drops = spec.drops,
 		dropCount = spec.dropCount or 1,
+		maxStack = spec.maxStack or 64,
 		container = spec.container or 0,
 		menu = spec.menu or (if spec.machine then "Machine" else nil),
 		decor = spec.decor,
@@ -274,6 +277,10 @@ for index, spec in BlockList do
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
+	assert(
+		def.maxStack >= 1 and def.maxStack <= 64 and def.maxStack == math.floor(def.maxStack),
+		`Block {spec.name} has a bad maxStack`
+	)
 	assert(def.sound == nil or soundIndex[def.sound], `Block {spec.name} has unknown sound {def.sound}`)
 	local transmitter = spec.transmitter
 	assert(

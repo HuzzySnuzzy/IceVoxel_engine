@@ -45,6 +45,8 @@
 	            a cell sees the sky) is lent for the call only.
 	  status    status(view) -> line: WAILA's and the panel's "Producing 200 J/t" (default from
 	            RATE: "Producing x/t", "Using x/t"; storage "Charging" / "Discharging")
+	  lines     lines(view) -> { line }: more lines of text for its panel, under the status line
+	            (`panel.lines` says where; at most MAX_LINES): a battery's input and output
 	  state     the name of one of its fields holding a state code, a whole number 0..MAX_STATE
 	            the kind sets in its tick to say why it is not working (Mekanism's recipe errors:
 	            the Electric Furnace's "No power"). It travels in Machines records with the header,
@@ -72,7 +74,9 @@
 	  energy maths      QUANTUM, quantise, quantiseUp, produce, use, rates, share, tick
 	  slots             isOutput, mayPlace, slotLimit, quickMoveTargets (Inventory/Menu),
 	                    insertSlots, extractSlots (Transmitters/Inventories: transporters)
-	  what players see  view, status, panel (Ui/MenuLayout, Ui/WailaInfo), ENERGY_BAR, PANEL_HEIGHT
+	  what players see  view, status, lines, MAX_LINES, panel (Ui/MenuLayout, Ui/WailaInfo),
+	                    ENERGY_BAR, PANEL_HEIGHT, energyColour (the energy bar's colour, also on
+	                    items and batteries' gauges)
 	  sustained data    save, restore (server MachineWorld.blockDataHooks)
 ]]
 
@@ -121,6 +125,9 @@ export type PanelSpec = {
 	flame: Gauge?,
 	-- Where the status line goes (nil: none in the panel; WAILA always shows it).
 	status: { x: number, y: number }?,
+	-- Where the kind's `lines` go: the first at (x, y), each next one 12 pixels lower
+	-- (Ui/MenuLayout.LINE_HEIGHT); nil: none.
+	lines: { x: number, y: number }?,
 }
 
 -- What `status` and WAILA see of a machine: its data header (or a server Machines record).
@@ -165,6 +172,7 @@ export type KindSpec = {
 	panel: PanelSpec?,
 	tick: ((container: Container, ctx: TickContext) -> ())?,
 	status: ((view: View) -> string?)?,
+	lines: ((view: View) -> { string })?,
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean?,
@@ -184,6 +192,7 @@ export type Kind = {
 	size: number,
 	tick: ((container: Container, ctx: TickContext) -> ())?,
 	status: ((view: View) -> string?)?,
+	lines: ((view: View) -> { string })?,
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean,
@@ -222,6 +231,8 @@ Machines.MAX_STATE = 255
 -- Mekanism's GuiVerticalPowerBar and the furnace panel's height (GUI pixels).
 Machines.ENERGY_BAR = table.freeze({ x = 164, y = 15, w = 6, h = 52 })
 Machines.PANEL_HEIGHT = 78
+-- The most lines a kind's `lines` gives its panel.
+Machines.MAX_LINES = 4
 
 --[[ Energy maths ]]
 
@@ -393,6 +404,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		size = Machines.HEADER + #fields,
 		tick = spec.tick,
 		status = spec.status,
+		lines = spec.lines,
 		rates = spec.rates,
 		quickMove = spec.quickMove,
 		creative = spec.creative == true,
@@ -826,6 +838,44 @@ function Machines.status(block: number, view: View): string?
 		end
 	end
 	return nil
+end
+
+--[[
+	The panel's lines of a machine under its status line (its kind's `lines`: a battery's input and
+	output): at most MAX_LINES non-empty strings, none for kinds without them (or whose `lines`
+	fails).
+]]
+function Machines.lines(block: number, view: View): { string }
+	local binding = bindings[block]
+	local lines = if binding then binding.kind.lines else nil
+	local shown: { string } = {}
+	if lines == nil then
+		return shown
+	end
+	local ok, result = pcall(lines, view)
+	if not ok or type(result) ~= "table" then
+		return shown
+	end
+	for _, line in result do
+		if type(line) == "string" and line ~= "" and #shown < Machines.MAX_LINES then
+			table.insert(shown, line)
+		end
+	end
+	return shown
+end
+
+--[[
+	The colour of stored energy at a fill of `fraction` (0..1), Mekanism's energy bar as drawn here:
+	red when empty, through yellow, to green when full ({ r, g, b }, 0..255). The panels' energy
+	bar (Ui/MenuLayout), the bar on items that hold energy and a battery's gauges
+	(Rendering/TransmitterModel) all use it.
+]]
+function Machines.energyColour(fraction: number): { number }
+	local f = math.clamp(if fraction == fraction then fraction else 0, 0, 1)
+	if f < 0.5 then
+		return { 255, math.floor(f * 2 * 255 + 0.5), 0 }
+	end
+	return { math.floor((1 - f) * 2 * 255 + 0.5), 255, 0 }
 end
 
 -- The panel of the machine `block` (its kind's, nil for other blocks).

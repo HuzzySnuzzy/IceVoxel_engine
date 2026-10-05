@@ -17,9 +17,12 @@
 	  furnace   "Furnace": the input over the flame over the fuel, the progress arrow and the output;
 	            the flame burns down and the arrow fills from the container's `data`
 	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots (an empty upgrade
-	            slot shows a faint outline of its card), gauges and status line, and Mekanism's
-	            vertical energy bar filling from the bottom, red when nearly empty to green when
-	            full; hovering it shows "stored / capacity" (`tooltipAt`)
+	            slot shows a faint outline of its card), gauges, status line and the lines under it
+	            (a battery's input and output), and Mekanism's vertical energy bar filling from the
+	            bottom, red when nearly empty to green when full; hovering it shows "stored /
+	            capacity" (`tooltipAt`)
+	Machines' items that hold energy (charged batteries, machines broken with energy in them) show
+	Mekanism's energy bar where a worn tool's durability bar goes (Ui/ItemIcon).
 	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
 	grid. In creative mode (with no block open) two tabs above the panel switch between the item
 	selection and this screen.
@@ -180,6 +183,8 @@ type Self = InventoryScreen & {
 	layout: MenuLayout.Panel?,
 	energyBar: EnergyBar?,
 	statusLabel: TextLabel?,
+	-- Its extra lines under the status line (a battery's input and output), one label each.
+	lineLabels: { TextLabel },
 	machineData: { number }?,
 	machineShown: boolean,
 	byButton: { [GuiObject]: SlotWidget },
@@ -278,6 +283,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			layout = nil,
 			energyBar = nil,
 			statusLabel = nil,
+			lineLabels = {},
 			machineData = nil,
 			machineShown = false,
 			byButton = {},
@@ -457,6 +463,11 @@ local function buildPanel(self: Self, container: Types.Container)
 		label.TextTruncate = Enum.TextTruncate.AtEnd
 		self.statusLabel = label
 	end
+	for _, at in layout.lines do
+		local label = Style.text(panel, "", at.x, at.y, WIDTH - at.x - 16, 8, Style.Colour.Title, 5)
+		label.TextTruncate = Enum.TextTruncate.AtEnd
+		table.insert(self.lineLabels, label)
+	end
 	self.layout = layout
 	closeButton(self, panel)
 	self.containerPanel = panel
@@ -503,6 +514,7 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 		self.layout = nil
 		self.energyBar = nil
 		self.statusLabel = nil
+		self.lineLabels = {}
 		self.machineData = nil
 		self.machineShown = false
 		if panelContainer then
@@ -584,6 +596,16 @@ local function renderGauges(self: Self, window: Window)
 				label.Text = text
 			end
 		end
+		local labels = self.lineLabels
+		if #labels > 0 then
+			local texts = MenuLayout.lineTexts(container)
+			for i, line in labels do
+				local text = texts[i] or ""
+				if line.Text ~= text then
+					line.Text = text
+				end
+			end
+		end
 		return
 	end
 	if self.flame == nil and self.progress == nil then
@@ -628,7 +650,7 @@ function InventoryScreen.render(self: Self, window: Window, hover: Target?, drag
 	local hovered = if hover and hover.kind == "slot" then hover.index else -1
 	local function draw(widget: SlotWidget)
 		local stack = Menu.get(window, widget.window)
-		widget.view.icon:set(stack and stack.item, stack and stack.count, stack and stack.damage)
+		widget.view.icon:set(stack and stack.item, stack and stack.count, stack and stack.damage, stack and stack.data)
 		local lit = widget.window == hovered or dragged[widget.window] == true
 		if widget.view.hover.Visible ~= lit then
 			widget.view.hover.Visible = lit

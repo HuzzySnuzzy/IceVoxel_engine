@@ -1077,7 +1077,7 @@ function Screens.start()
 		local cursor = shown.inventory.cursor
 		local origin = top.AbsolutePosition
 		if cursor and point then
-			carriedIcon:set(cursor.item, cursor.count, cursor.damage)
+			carriedIcon:set(cursor.item, cursor.count, cursor.damage, cursor.data)
 			carried.Position = UDim2.fromOffset(point.X - origin.X, point.Y - origin.Y)
 			carried.Visible = true
 		else

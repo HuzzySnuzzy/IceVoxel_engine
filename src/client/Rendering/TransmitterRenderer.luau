@@ -13,7 +13,8 @@
 	  water    in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity);
 	  items    moving through Logistical Transporters, small models of the item along their path;
 	  machines what their Machines record shows (TransmitterModel.machineBoxes): a burning Heat
-	           Generator's glowing fuel window.
+	           Generator's glowing fuel window, a smelting Electric Furnace's heating chamber and
+	           a Battery's charge in its gauges.
 
 	State, as the server sends it (Shared/Net/Protocol):
 	  Transmitters  per position: packed side modes, colour, pipe fill. A record replaces what was
@@ -619,7 +620,8 @@ local function onMachines(records: { Protocol.MachineRecord })
 			local key = posKey(x, y, z)
 			machineStates[key] = record
 			indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
-			-- (A Heat Generator's or Electric Furnace's window lights or goes out.)
+			-- (A Heat Generator's or Electric Furnace's window lights or goes out; a Battery's
+			-- gauges fill or empty.)
 			markDirty(key)
 		end
 	end

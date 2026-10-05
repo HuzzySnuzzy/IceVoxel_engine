@@ -1,7 +1,7 @@
 --!strict
 --[[
 	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube,
-	Heat Generator and Electric Furnace drawn like Minecraft's pixel art.
+	Heat Generator, Electric Furnace and Batteries (Energy Cubes) drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -26,6 +26,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Tiers = require(Shared.Transmitters.Tiers)
 
 export type Rect = {
 	x: number,
@@ -359,6 +360,60 @@ local ELECTRIC_FURNACE: Faces = {
 	Right = smelterSide(true),
 }
 
+--[[
+	Batteries (Mekanism's Energy Cubes, "<Tier>Battery"): a dark steel cube with 3 x 3 corners in
+	the tier's colour on every face (Mekanism's energy cube frame; Transmitters/Tiers colours, as on
+	cables and tanks), a charge gauge on each side, a terminal on top and a plate underneath. The
+	gauge is dark while empty; the client fills it from the bottom with the battery's charge
+	(Rendering/TransmitterModel.machineBoxes draws glowing panes over BATTERY_GAUGE from its
+	record). Item models show the gauge on the front pair only, like the furnace's mouth.
+]]
+local BATTERY_EDGE = { 28, 29, 34 }
+local GAUGE_FRAME = { 34, 35, 40 }
+local GAUGE_EMPTY = { 14, 15, 18 }
+local GAUGE_TICK = { 70, 72, 80 }
+local TERMINAL = { 176, 178, 186 }
+local BATTERY_PLATE = { 40, 42, 48 }
+-- The charge gauge on every side (pixels from the face's top left; the charge fills it from the
+-- bottom, exactly over it).
+BlockDecor.BATTERY_GAUGE = table.freeze({ x = 6, y = 3, w = 4, h = 10 })
+local GAUGE = BlockDecor.BATTERY_GAUGE
+
+local function batteryCorners(tier: { number }): { Rect }
+	local rects = outline(BATTERY_EDGE, true)
+	for _, corner in { { 1, 1 }, { 12, 1 }, { 1, 12 }, { 12, 12 } } do
+		table.insert(rects, rect(corner[1], corner[2], 3, 3, tier))
+	end
+	return rects
+end
+
+local function batterySide(tier: { number }, gaugeSurfaceOnly: boolean): { Rect }
+	return join(batteryCorners(tier), {
+		rect(GAUGE.x - 1, GAUGE.y - 1, GAUGE.w + 2, GAUGE.h + 2, GAUGE_FRAME, gaugeSurfaceOnly),
+		rect(GAUGE.x, GAUGE.y, GAUGE.w, GAUGE.h, GAUGE_EMPTY, gaugeSurfaceOnly),
+		-- Marks at a quarter, a half and three quarters, beside the gauge.
+		rect(GAUGE.x + GAUGE.w + 1, GAUGE.y + 2, 1, 1, GAUGE_TICK, true),
+		rect(GAUGE.x + GAUGE.w + 1, GAUGE.y + 5, 1, 1, GAUGE_TICK, true),
+		rect(GAUGE.x + GAUGE.w + 1, GAUGE.y + 7, 1, 1, GAUGE_TICK, true),
+	})
+end
+
+local function batteryFaces(tier: { number }): Faces
+	return {
+		-- A "+" terminal (the same turned by a quarter, as item models need).
+		Top = join(batteryCorners(tier), {
+			rect(7, 4, 2, 8, TERMINAL),
+			rect(4, 7, 3, 2, TERMINAL),
+			rect(9, 7, 3, 2, TERMINAL),
+		}),
+		Bottom = join(batteryCorners(tier), { rect(5, 5, 6, 6, BATTERY_PLATE) }),
+		Front = batterySide(tier, false),
+		Back = batterySide(tier, false),
+		Left = batterySide(tier, true),
+		Right = batterySide(tier, true),
+	}
+end
+
 local DECORS: { [string]: Faces } = {
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
@@ -367,6 +422,9 @@ local DECORS: { [string]: Faces } = {
 	HeatGenerator = HEAT_GENERATOR,
 	ElectricFurnace = ELECTRIC_FURNACE,
 }
+for _, tier in Tiers.TIERS do
+	DECORS[`{tier.name}Battery`] = batteryFaces(tier.colour)
+end
 
 -- The faces of `decor` (BlockList `decor`), or nil when it is unknown.
 function BlockDecor.faces(decor: string): Faces?

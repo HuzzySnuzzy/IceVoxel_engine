@@ -166,6 +166,27 @@ A fast, Minecraft-style voxel engine for Roblox.
   500 J/t in full sun) and stores 96 kJ x 10^(e/8) (8 cards: 960 kJ). Taking cards out applies at
   once: energy over a smaller store is lost. The cards drop when the machine is broken (Mekanism
   keeps them in its item), so a machine placed again holds at most its base store.
+- **Batteries.** Mekanism's Energy Cubes, named Batteries: Basic, Advanced, Elite and Ultimate
+  store 4, 16, 64 and 256 MJ and take in and give out up to 4, 16, 64 and 256 kJ a tick
+  (Mekanism's numbers). They are the backup power: every tick, what the generators have left after
+  the machines took what they need charges the batteries on the network, and when the generators
+  fall short (a Heat Generator out of fuel, a Solar Panel at night) the batteries cover what the
+  machines still need, so an Electric Furnace on a battery smelts on through the night and the
+  battery charges again when the sun comes up or the generator gets fuel. Batteries never charge
+  each other. Joined like any machine, by Universal Cables or touching (a network moves no more a
+  tick than its cables carry together: on a single Basic cable a battery charges at 8 kJ/t at
+  most). Its panel shows the energy bar with "Charging 150 J/t", "Discharging 50 J/t", "Full",
+  "Empty" or "Idle" and what went in and out last tick; WAILA says the same, and the gauge on each
+  of its sides fills with its charge, red when nearly empty to green when full. Broken with a
+  pickaxe it keeps its charge in its item ("Energy: 1.23 MJ", and an energy bar where a tool's
+  durability bar goes), so batteries stack to 1, and placed again it has it back. Recipes:
+  Mekanism's shapes with glowstone dust for the redstone, glowstone for the energy tablets, a
+  block of iron for the steel casing and gold ingots, diamonds and emeralds for the alloys: the
+  Basic Battery is glowstone dust, glowstone and glowstone dust, over an iron ingot, a block of
+  iron and an iron ingot, over the top row again; each next tier puts the tier below in the
+  middle, glowstone above and below it, osmium ingots, gold ingots or diamonds beside it and gold
+  ingots, diamonds or emeralds in the corners, and keeps its charge (Mekanism's upgrade recipes
+  do). Mekanism's charge and discharge slots and side configuration are not in.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -292,13 +313,14 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract)
   Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
-                            slot rules, panels, energy maths and the even split, state codes,
-                            sustained data), Upgrades (Mekanism's upgrade cards: their slots and
-                            maths), Kinds/ (a module per kind: Creative, the Creative Energy
-                            Cube; Generator, the Heat Generator; Smelter, the Electric Furnace;
-                            Solar, the Solar Panel)
-  Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
-                            Crafting (grid matching), Smelting (the furnace tick)
+                            slot rules, panels and their lines, energy maths and the even split,
+                            state codes, sustained data), Upgrades (Mekanism's upgrade cards:
+                            their slots and maths), Kinds/ (a module per kind: Creative, the
+                            Creative Energy Cube; Generator, the Heat Generator; Smelter, the
+                            Electric Furnace; Solar, the Solar Panel; Battery, the Batteries)
+  Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
+                            recipe may keep an ingredient's data), Crafting (grid matching),
+                            Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
                             clicks, used by the server and for client prediction)
   Entities/ItemPhysics      dropped item movement (server and client)
@@ -365,9 +387,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
                             energy bar, empty armor and upgrade slots' outlines), CreativeScreen,
-                            ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
-                            clicks), Style, Waila + WailaInfo (what the crosshair points at),
-                            Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
+                            ItemIcon (viewport icons, durability and energy bars), SlotClicks
+                            (Minecraft clicks), Style, Waila + WailaInfo (what the crosshair
+                            points at), Jei/ (Just Enough Items: item list, recipe view, recipe
+                            transfer)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces and Heat Generators crackling, caves), SoundRules (the pure
@@ -380,9 +403,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             CharacterAnimator (avatar animations from the hull), HeldItems
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
                             tanks, items moving through transporters, the windows of a burning
-                            Heat Generator and a smelting Electric Furnace, machines' records
-                            (WAILA, Ambience); TransmitterModel (their geometry, aiming, item
-                            paths)
+                            Heat Generator and a smelting Electric Furnace, Batteries' charge
+                            gauges, machines' records (WAILA, Ambience); TransmitterModel (their
+                            geometry, aiming, item paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables, furnaces and Mekanism's machines)
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
@@ -478,7 +501,7 @@ table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Mar
 It is immediately an item: it shows up in the creative picker, and survival players get it by
 mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `toolLevel = 0` to
 need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
-nothing, `container = 27, menu = "Chest"` for a chest-like block). Blocks that look identical
+nothing, `container = 27, menu = "Chest"` for a chest-like block, `maxStack = 1` for an item that doesn't stack). Blocks that look identical
 share one part template.
 
 **Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
@@ -556,6 +579,10 @@ The Solar Panel (`Kinds/Solar.luau`) reads the server's day time and whether its
 from its tick context (`ctx.dayTime`, `ctx.sky(x, y, z)`: cached, never generating terrain), and
 `Machines/Upgrades` gives any kind Mekanism's upgrade slots (`Upgrades.slots(x, y)`) and maths
 (`ticks`, `energyPerTick`, `capacity`, `production`, `setCapacity`).
+Batteries (`Kinds/Battery.luau`) are storage: the same `input` and `output`, no slots and no tick;
+EnergyNet does the rest. A kind's `lines(view)` adds lines under its status line (`panel.lines =
+{ x, y }`), and a shaped recipe's `keep` (a key character used once) makes its result take that
+ingredient's item data, as a battery's tier upgrade keeps its charge.
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
@@ -724,8 +751,9 @@ Natural next steps, roughly in order:
   `Players/InventoryState`, `Players/Containers`), as do transmitter states, network water, tank
   contents and items in transit (`Transmitters/TransmitterWorld`); save them to DataStores (edits per region of
   32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
-- **More of Mekanism.** Machines on the machine framework, side configuration for machines, gases
-  (Pressurized Tubes), heat (Thermodynamic Conductors) and the Logistical Sorter.
+- **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
+  items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
+  Conductors) and the Logistical Sorter.
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling
   (`Items.damageAfterArmor` is ready for it).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on
