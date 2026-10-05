@@ -584,7 +584,7 @@ function Template.capture(options: CaptureOptions): (Template, { string })
 								and not slots[slot]
 								and count >= 1
 								and type(item.item) == "string"
-								and Items.isValid(rawget(Items.id :: any, item.item) or -1)
+								and Items.isValid(Items.find(item.item) or -1)
 								and #kept < Template.MAX_CONTAINER_ITEMS
 								and items < Template.MAX_ITEMS
 							then
@@ -1151,10 +1151,13 @@ local function decodeBody(r: Reader, warnings: { string }): Template
 				fail(`The structure has a container with a bad stack at {x}, {y}, {z}`)
 			end
 			slots[slot] = true
-			if rawget(Items.id :: any, item) == nil then
+			-- (Items.find knows renamed items; the record keeps the current name.)
+			local found = Items.find(item)
+			local def = if found then Items.get(found) else nil
+			if def == nil then
 				table.insert(warnings, `Unknown item '{item}' in the container at {x}, {y}, {z} was left out`)
 			else
-				table.insert(list, { slot = slot, item = item, count = stack, damage = damage })
+				table.insert(list, { slot = slot, item = def.name, count = stack, damage = damage })
 			end
 		end
 		if #list > 0 then

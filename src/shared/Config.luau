@@ -44,16 +44,16 @@ local Config = {
 		-- underground they reach about Lod.UndergroundSplitDistanceL1 x 32 blocks (up to 15% less
 		-- ahead of a moving camera: LodTree's hysteresis).
 		RevealRadiusMax = 128,
-		-- Glow lichen carries one PointLight per 8 x 8 x 8 blocks (Meshing/GreedyMesher), and only
-		-- lights within this many blocks of the camera are on (Rendering/ChunkRenderer): about
-		-- 25-50 in a cave, instead of every lichen of the revealed caves (1,000-3,000). Farther
-		-- lichen still glows (its speck is Neon).
-		LichenLightDistance = 32,
+		-- Glow lichen carries one PointLight per 8 x 8 x 8 blocks (Meshing/GreedyMesher), on in
+		-- every revealed cave (a few hundred, instead of one per lichen: 1,000-3,000). A number
+		-- switches off the lights farther than that many blocks from the camera (Rendering/
+		-- ChunkRenderer) on slow devices; the lichen still glows there (its speck is Neon).
+		LichenLightDistance = math.huge,
 		-- Used instead on phones and tablets (Rendering/ViewSettings).
 		Mobile = {
 			RevealRadius = 48,
 			RevealRadiusMax = 96,
-			LichenLightDistance = 24,
+			LichenLightDistance = math.huge,
 		},
 	},
 

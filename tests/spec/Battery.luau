@@ -184,7 +184,7 @@ return function(t, shared, require, server, client)
 	end
 
 	t.test("battery: Mekanism's energy cube recipes; a tier upgrade keeps the charge", function()
-		local D, T, Fe, Au, Os = I.GlowstoneDust, I.Glowstone, I.IronIngot, I.GoldIngot, I.OsmiumIngot
+		local D, T, Fe, Au, Os = I.GlowDust, I.GlowBlock, I.IronIngot, I.GoldIngot, I.OsmiumIngot
 		local basic = Crafting.match(grid({ { D, T, D }, { Fe, I.IronBlock, Fe }, { D, T, D } }), 3) :: any
 		t.eq(basic.item, BASIC)
 		t.eq(basic.count, 1)
@@ -256,7 +256,7 @@ return function(t, shared, require, server, client)
 		-- Shift click (crafts into the inventory), Q (throws it) and a number key (into the
 		-- hotbar): each is a copy of the result, so each keeps the charge, and the battery in
 		-- the grid is used up: one battery in, one out.
-		local Au, Os, T = I.GoldIngot, I.OsmiumIngot, I.Glowstone
+		local Au, Os, T = I.GoldIngot, I.OsmiumIngot, I.GlowBlock
 		local rows = { { Au, T, Au }, { Os, BASIC, Os }, { Au, T, Au } }
 		local function table3(energy: number)
 			local window = Types.newWindow(Types.newInventory())
@@ -601,9 +601,9 @@ return function(t, shared, require, server, client)
 		t.eq(#Items.describe(plain), 0)
 		-- Broken, crafted into an Advanced Battery and placed: the same charge.
 		local rows = {
-			{ I.GoldIngot, I.Glowstone, I.GoldIngot },
+			{ I.GoldIngot, I.GlowBlock, I.GoldIngot },
 			{ I.OsmiumIngot, BASIC, I.OsmiumIngot },
-			{ I.GoldIngot, I.Glowstone, I.GoldIngot },
+			{ I.GoldIngot, I.GlowBlock, I.GoldIngot },
 		}
 		local upgraded = Crafting.match(grid(rows, drop), 3) :: any
 		t.eq(upgraded.item, BATTERIES[2])

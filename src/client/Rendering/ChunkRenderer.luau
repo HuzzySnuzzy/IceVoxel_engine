@@ -19,10 +19,10 @@
 
 	Sparse lights (glow lichen: GreedyMesher.sparseLightLut) carry their PointLight only where the
 	mesher marked the cell (surface field 1, one per GreedyMesher.LIGHT_BOX box); the other cells
-	get PartPool's dark template for the light's box. Even so a revealed cavern holds hundreds, so
-	only those within Caves.LichenLightDistance of the camera are on (ViewSettings; switched every
-	SPARSE_SWEEP seconds, off again SPARSE_HYSTERESIS blocks further): a few dozen. Lichen
-	further away still glows: its speck is Neon.
+	get PartPool's dark template for the light's box. A revealed cavern holds a few hundred, all on
+	by default; a finite Caves.LichenLightDistance switches off those farther from the camera
+	(ViewSettings; every SPARSE_SWEEP seconds, off again SPARSE_HYSTERESIS blocks further). Lichen
+	whose light is off still glows: its speck is Neon.
 
 	Plants (Blocks.appearances `scatter`, `tinted`) are shaped blocks too:
 	  * scattered ones are drawn off their cell's centre and turned about its vertical axis

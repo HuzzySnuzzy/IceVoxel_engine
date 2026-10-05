@@ -142,7 +142,7 @@ return function(t, shared, require, server, client)
 			end
 			return Crafting.match(stacks, 3)
 		end
-		local G, A, Fe, O, D = I.Glass, I.GoldIngot, I.IronIngot, I.OsmiumIngot, I.GlowstoneDust
+		local G, A, Fe, O, D = I.Glass, I.GoldIngot, I.IronIngot, I.OsmiumIngot, I.GlowDust
 		local made = craft({ { G, G, G }, { A, Fe, A }, { O, D, O } })
 		t.eq(made and made.item, SOLAR)
 		t.eq(made and made.count, 1)

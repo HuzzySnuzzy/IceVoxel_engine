@@ -3,7 +3,7 @@
 	camera is in a cave (LodTree's underground split, held a few seconds after coming up), caves are
 	revealed further (Config.Caves), revealed sections next to hidden space get their caps at the
 	new edges (CaveReach.capMask), and glow lichen's lights stay few (GreedyMesher's sparse lights:
-	one per LIGHT_BOX box; Rendering/ChunkRenderer turns on only those near the camera).
+	one per LIGHT_BOX box, all on: Config.Caves.LichenLightDistance is math.huge).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -220,7 +220,7 @@ return function(t, shared, require, _server, client)
 		print(`    {revealed} sections revealed at radius {radius}, {edge} sides next to coarser nodes`)
 	end)
 
-	t.test("cave view: lichen light is sparse, steady, and near the camera only a few dozen", function()
+	t.test("cave view: lichen light is sparse and steady: a few hundred lights in a revealed cave", function()
 		local gen = TerrainGenerator.new(12345)
 		-- A camera in the most open cave cell of a stretch of chunks under the hills.
 		local chunks: { [number]: any } = {}
@@ -257,9 +257,8 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		assert(camera, "a cave under the hills")
-		local distance = Config.Caves.LichenLightDistance
 		local reach = Config.Caves.RevealRadius + SECTION
-		local lichen, marked, near, boxesLit = 0, 0, 0, 0
+		local lichen, marked, boxesLit = 0, 0, 0
 		for cx = (camera[1] - reach) // SIZE, (camera[1] + reach) // SIZE do
 			for cz = (camera[3] - reach) // SIZE, (camera[3] + reach) // SIZE do
 				local r = chunk(cx, cz)
@@ -290,12 +289,6 @@ return function(t, shared, require, _server, client)
 									t.ok(not lit[key], "one light per box")
 									lit[key] = true
 									boxesLit += 1
-									local dx = cx * SIZE + bx + 0.5 - camera[1]
-									local dy = by + 0.5 - camera[2]
-									local dz = cz * SIZE + bz + 0.5 - camera[3]
-									if dx * dx + dy * dy + dz * dz < distance * distance then
-										near += 1
-									end
 								end
 							end
 						end
@@ -305,18 +298,19 @@ return function(t, shared, require, _server, client)
 		end
 		print(
 			string.format(
-				"    camera in a cave at %d, %d, %d: %d lichen revealed, %d carry a light, %d of those within %d blocks",
+				"    camera in a cave at %d, %d, %d: %d lichen revealed, %d carry a light (all on)",
 				camera[1],
 				camera[2],
 				camera[3],
 				lichen,
-				marked,
-				near,
-				distance
+				marked
 			)
 		)
 		t.ok(lichen > 0, "lichen in the caves around")
 		t.ok(marked < lichen / 2, "most lichen carries no light")
-		t.ok(near <= 120, `lights on near the camera: {near}`)
+		-- (Every lichen light is on, Caves.LichenLightDistance being math.huge: one per 8^3 box
+		-- keeps a revealed cave to a few hundred PointLights.)
+		t.eq(Config.Caves.LichenLightDistance, math.huge, "lichen lights on at any distance")
+		t.ok(marked <= 600, `lichen lights in the revealed caves: {marked}`)
 	end)
 end

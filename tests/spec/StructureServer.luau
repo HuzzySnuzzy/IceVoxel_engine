@@ -242,7 +242,7 @@ return function(t, shared, require, server)
 		end
 	end)
 
-	t.test("glow lichen and its cave twins: Shears harvest them, nothing else drops anything", function()
+	t.test("glow lichen and its cave twins: 2 Glow Dust, themselves with Shears", function()
 		local shears = I.Shears
 		for _, side in { "", "Up", "North", "South", "West", "East" } do
 			for _, prefix in { "", "Cave" } do
@@ -250,10 +250,14 @@ return function(t, shared, require, server)
 				local label = Blocks.get(block).name
 				local drop = EditRules.drops(block, false, shears)
 				t.ok(drop ~= nil and drop.item == I.GlowLichen and drop.count == 1, `{label} with Shears`)
-				t.eq(EditRules.drops(block, false, nil), nil, `{label} by hand`)
-				t.eq(EditRules.drops(block, false, I.DiamondAxe), nil, `{label} with an axe`)
+				local byHand, withAxe = EditRules.drops(block, false, nil), EditRules.drops(block, false, I.DiamondAxe)
+				for _, dust in { byHand, withAxe } do
+					t.ok(dust ~= nil and dust.item == I.GlowDust and dust.count == 2, `{label}: 2 glow dust`)
+				end
+				t.ok(byHand ~= nil and withAxe ~= nil, `{label}: dust by hand and with an axe`)
 				t.eq(EditRules.drops(block, true, shears), nil, `{label} in creative`)
-				t.eq(Items.blockDrops(block), nil, `{label} popping off`)
+				local popped = Items.blockDrops(block)
+				t.ok(popped ~= nil and popped.item == I.GlowDust and popped.count == 2, `{label} popping off`)
 				t.eq(Mining.toolSpeed(block, shears), 2, `{label}: Shears mine it at 2`)
 				t.eq(Items.ofBlock(block), I.GlowLichen, `{label}'s item`)
 				-- 0.2 hardness: with Shears it takes a few ticks; a survival break after them passes.

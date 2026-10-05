@@ -224,7 +224,7 @@ return function(t, shared, require, server)
 			t.ok(not Blocks.mayPlaceOn(plant, -1) and not Blocks.mayPlaceOn(plant, Blocks.count), "unknown soil")
 		end
 		-- Mushrooms: mycelium and podzol, and any sturdy opaque full block (no light check here).
-		for _, soil in { B.Mycelium, B.Podzol, STONE, B.Dirt, B.Grass, B.Cobblestone, B.OakLog, B.Glowstone } do
+		for _, soil in { B.Mycelium, B.Podzol, STONE, B.Dirt, B.Grass, B.Cobblestone, B.OakLog, B.GlowBlock } do
 			t.ok(Blocks.mayPlaceOn(B.RedMushroom, soil), `a mushroom on {Blocks.get(soil).name}`)
 		end
 		for _, soil in { B.Glass, B.OakLeaves, B.Chest, B.BasicFluidTank, B.Torch, AIR, WATER, B.Cactus } do

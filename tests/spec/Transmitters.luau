@@ -761,7 +761,7 @@ return function(t, shared, require, _server, client)
 		makes({ "IGI", "G G", "IGI" }, { I = I.IronIngot, G = I.Glass }, TANKS[1], 1, "basic tank")
 		makes(
 			{ " G ", "ISI", " S " },
-			{ G = I.GlowstoneDust, I = I.IronIngot, S = I.Stick },
+			{ G = I.GlowDust, I = I.IronIngot, S = I.Stick },
 			I.Configurator,
 			1,
 			"configurator"

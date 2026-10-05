@@ -184,7 +184,7 @@ return function(t, shared, require, server, client)
 			end
 			return Crafting.match(stacks, 3)
 		end
-		local O, G = I.OsmiumIngot, I.GlowstoneDust
+		local O, G = I.OsmiumIngot, I.GlowDust
 		local basic = craft({ [4] = O, [5] = G, [6] = O })
 		t.eq(basic and basic.item, CABLE)
 		t.eq(basic and basic.count, 8)

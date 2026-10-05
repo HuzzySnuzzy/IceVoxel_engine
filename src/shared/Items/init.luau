@@ -190,6 +190,21 @@ function Items.get(id: number): ItemDef?
 	return defs[id]
 end
 
+-- Items that were renamed: old name -> new name (blocks' items through Blocks.RENAMED too).
+Items.RENAMED = table.freeze({
+	GlowstoneDust = "GlowDust",
+	Glowstone = "GlowBlock",
+} :: { [string]: string })
+
+-- The id of the item named `name` (or formerly named, Items.RENAMED), or nil when there is none:
+-- for names that come from data (structure containers), where `Items.id` would error.
+function Items.find(name: string): number?
+	if type(name) ~= "string" then
+		return nil
+	end
+	return rawget(ids :: any, name) or rawget(ids :: any, Items.RENAMED[name] or "")
+end
+
 function Items.isValid(id: number): boolean
 	return defs[id] ~= nil
 end

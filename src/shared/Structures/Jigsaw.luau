@@ -998,6 +998,14 @@ function Jigsaw.finalStateBlock(name: string): number
 		for id = 0, Blocks.count - 1 do
 			built[blockKey(Blocks.get(id).name)] = id
 		end
+		-- (Final states saved before a block was renamed.)
+		for old, new in Blocks.RENAMED do
+			local key = blockKey(old)
+			local renamed = Blocks.find(new)
+			if built[key] == nil and renamed ~= nil then
+				built[key] = renamed
+			end
+		end
 		map = built
 		blockByKey = built
 	end

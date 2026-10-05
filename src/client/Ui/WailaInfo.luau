@@ -277,7 +277,7 @@ function WailaInfo.toolName(kind: string, level: number): string
 	return if known then known.name else `Level {level} {kindName(kind)}`
 end
 
--- A stack as text: "Cobblestone", "Glowstone Dust x4"; nil is "nothing".
+-- A stack as text: "Cobblestone", "Glow Dust x4"; nil is "nothing".
 local function stackText(stack: Items.Stack?): string
 	if stack == nil then
 		return "nothing"

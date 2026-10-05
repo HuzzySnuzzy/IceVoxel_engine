@@ -152,7 +152,7 @@ shape({ " #", "# " }, { ["#"] = "IronIngot" }, "Shears")
 
 shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)
 shape({ "XXX", "X#X", "XXX" }, { X = "IronNugget", ["#"] = "Torch" }, "Lantern")
-shape({ "##", "##" }, { ["#"] = "GlowstoneDust" }, "Glowstone")
+shape({ "##", "##" }, { ["#"] = "GlowDust" }, "GlowBlock")
 
 --[[
 	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
@@ -169,7 +169,7 @@ shape({ "##", "##" }, { ["#"] = "GlowstoneDust" }, "Glowstone")
 	  * Basic Fluid Tank: iron at the corners, glass at the sides and an empty middle (Mekanism's
 	    needs a control circuit and alloys). The next tiers put the tank below them in the middle
 	    of 4 gold ingots / diamonds / emeralds, standing for the alloys again.
-	  * Configurator: glowstone dust over a stick between two iron ingots, a stick below, after
+	  * Configurator: glow dust over a stick between two iron ingots, a stick below, after
 	    Mekanism's " L ", "AEA", " S " (lapis lazuli over an energy tablet between two infused
 	    alloys, a stick below).
 ]]
@@ -187,16 +187,16 @@ for tier = 2, 4 do
 	end
 	shape({ " A ", "ATA", " A " }, { T = lower .. "FluidTank", A = alloy }, name .. "FluidTank")
 end
-shape({ " G ", "ISI", " S " }, { G = "GlowstoneDust", I = "IronIngot", S = "Stick" }, "Configurator")
+shape({ " G ", "ISI", " S " }, { G = "GlowDust", I = "IronIngot", S = "Stick" }, "Configurator")
 
 --[[
 	Mekanism's Universal Cables. Mekanism makes 8 Basic Universal Cables from steel, redstone and
 	steel in a row; osmium ingots stand for the steel (Mekanism's steel is made with osmium's
-	help) and glowstone dust for the redstone, which the game has neither of. The upgrades are
+	help) and glow dust for the redstone, which the game has neither of. The upgrades are
 	Mekanism's shape, as for transporters and pipes: 8 cables around an alloy (gold, diamond,
 	emerald) make 8 of the next tier.
 ]]
-shape({ "OGO" }, { O = "OsmiumIngot", G = "GlowstoneDust" }, "BasicUniversalCable", 8)
+shape({ "OGO" }, { O = "OsmiumIngot", G = "GlowDust" }, "BasicUniversalCable", 8)
 for tier = 2, 4 do
 	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
 	shape({ "CCC", "CAC", "CCC" }, { C = lower .. "UniversalCable", A = alloy }, name .. "UniversalCable", 8)
@@ -212,15 +212,11 @@ shape({ "III", "WOW", "IFI" }, { I = "IronIngot", W = "#planks", O = "OsmiumIngo
 --[[
 	Mekanism's Energized Smelter (the Electric Furnace), in Mekanism's shape: redstone, a basic
 	control circuit and redstone, over glass, a steel casing and glass, over redstone, a circuit
-	and redstone ("RCR", "GSG", "RCR"). Glowstone dust stands for the redstone (as in the cables),
+	and redstone ("RCR", "GSG", "RCR"). Glow dust stands for the redstone (as in the cables),
 	osmium ingots for the circuits (Mekanism's are osmium and redstone) and a furnace for the
 	casing, the machine it builds on.
 ]]
-shape(
-	{ "DOD", "GFG", "DOD" },
-	{ D = "GlowstoneDust", O = "OsmiumIngot", G = "Glass", F = "Furnace" },
-	"ElectricFurnace"
-)
+shape({ "DOD", "GFG", "DOD" }, { D = "GlowDust", O = "OsmiumIngot", G = "Glass", F = "Furnace" }, "ElectricFurnace")
 
 --[[
 	Mekanism's upgrade cards, in Mekanism's shape: glass over an alloy, a dust and an alloy, over
@@ -238,35 +234,31 @@ shape({ " G ", "AUA", " G " }, { G = "Glass", A = "GoldIngot", U = "GoldIngot" }
 	over an alloy, an iron ingot and an alloy, over osmium dust, an energy tablet and osmium dust
 	("SSS", "AIA", "PEP"). Glass stands for the solar panels (Mekanism's are glass panes over
 	redstone, alloy and osmium), gold ingots for the infused alloy, osmium ingots for the dust and
-	glowstone dust for the energy tablet (redstone, gold and alloy in Mekanism; glowstone dust
-	stands for redstone, as in the cables).
+	glow dust for the energy tablet (redstone, gold and alloy in Mekanism; glow dust stands for
+	redstone, as in the cables).
 ]]
 shape(
 	{ "GGG", "AIA", "ODO" },
-	{ G = "Glass", A = "GoldIngot", I = "IronIngot", O = "OsmiumIngot", D = "GlowstoneDust" },
+	{ G = "Glass", A = "GoldIngot", I = "IronIngot", O = "OsmiumIngot", D = "GlowDust" },
 	"SolarPanel"
 )
 
 --[[
 	Mekanism's Energy Cubes (the Batteries), in Mekanism's shape: an alloy, an energy tablet and an
 	alloy, over an ingot, the casing or the tier below and an ingot, over the top row again ("ATA",
-	"IPI", "ATA"; redstone for the Basic's alloy). Glowstone dust stands for the redstone (as in
-	the cables), glowstone for the energy tablet (Mekanism's is mostly redstone), a block of iron
+	"IPI", "ATA"; redstone for the Basic's alloy). Glow dust stands for the redstone (as in
+	the cables), the Glow Block for the energy tablet (Mekanism's is mostly redstone), a block of iron
 	for the steel casing, and gold ingots, diamonds and emeralds for the infused, reinforced and
 	atomic alloys (as in the transmitter upgrades); the ingots are Mekanism's: iron, osmium, gold
 	and a diamond. A tier crafted around the tier below keeps its charge (`keep`, Mekanism's
 	MekDataShapedRecipe).
 ]]
-shape(
-	{ "DTD", "ICI", "DTD" },
-	{ D = "GlowstoneDust", T = "Glowstone", I = "IronIngot", C = "IronBlock" },
-	"BasicBattery"
-)
+shape({ "DTD", "ICI", "DTD" }, { D = "GlowDust", T = "GlowBlock", I = "IronIngot", C = "IronBlock" }, "BasicBattery")
 local BATTERY_INGOTS = { "OsmiumIngot", "GoldIngot", "Diamond" }
 for tier = 2, 4 do
 	shape(
 		{ "ATA", "IBI", "ATA" },
-		{ A = ALLOYS[tier - 1], T = "Glowstone", I = BATTERY_INGOTS[tier - 1], B = TIER_NAMES[tier - 1] .. "Battery" },
+		{ A = ALLOYS[tier - 1], T = "GlowBlock", I = BATTERY_INGOTS[tier - 1], B = TIER_NAMES[tier - 1] .. "Battery" },
 		TIER_NAMES[tier] .. "Battery",
 		1,
 		"B"

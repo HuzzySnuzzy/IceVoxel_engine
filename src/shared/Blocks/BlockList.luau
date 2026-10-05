@@ -58,9 +58,9 @@
 	                DiamondPlate / CorrodedMetal / Foil metal; Fabric wool; anything else stone),
 	                "water" for fluids and none for blocks that are never drawn (air).
 
-	Light and shapes (torches, lanterns, glowstone):
+	Light and shapes (torches, lanterns, the glow block):
 	  light         Light the block gives off, 0..15 (Minecraft's luminance: torches 14, glowstone
-	                and lanterns 15). The renderer gives each such block one PointLight (on its
+	                (here the Glow Block) and lanterns 15). The renderer gives each such block one PointLight (on its
 	                `glow` box), and lit blocks are drawn one part per block, so lights never merge or
 	                pile up.
 	  lightColor    { r, g, b } of that light. Default a warm white.
@@ -766,7 +766,8 @@ add({
 })
 
 --[[
-	Light sources (Minecraft's torch, wall torch, lantern and glowstone). Torches and lanterns are
+	Light sources (Minecraft's torch, wall torch, lantern and glowstone, here the blue Glow Block).
+	Torches and lanterns are
 	shaped (pixels from the cell's centre) and need a block to hang on; the light is a PointLight on
 	the `glow` box (client Rendering/PartPool).
 ]]
@@ -886,17 +887,20 @@ for _, facing in { "North", "South", "West", "East" } do
 	})
 end
 
--- Glowstone: a full glowing cube (Neon). Minecraft drops 2-4 dust (random); here always 4, which
--- craft back into the block.
+-- The Glow Block: a full glowing cube of glow dust (Neon, blue), in place of Minecraft's glowstone
+-- (the game has no Nether; its dust comes from glow lichen in caves). Minecraft's glowstone drops
+-- 2-4 dust (random); here always 4, which craft back into the block. It was named "Glowstone"
+-- (Blocks.RENAMED keeps saved structures that name it working).
 table.insert(list, {
-	name = "Glowstone",
-	color = { 222, 178, 98 },
+	name = "GlowBlock",
+	displayName = "Glow Block",
+	color = { 104, 168, 255 },
 	material = "Neon",
 	sound = "glass",
 	hardness = 0.3,
 	light = 15,
-	lightColor = { 255, 214, 150 },
-	drops = "GlowstoneDust" :: string,
+	lightColor = { 150, 200, 255 },
+	drops = "GlowDust" :: string,
 	dropCount = 4,
 })
 
@@ -2049,7 +2053,8 @@ end
 	GlowLichen lies on the block below (the item), GlowLichenUp hangs under the one above and
 	GlowLichenNorth / South / West / East cover the wall on that side (`support`, kept up by the
 	Attached behaviour like torches). Light 7 in a cool yellow green, hardness 0.2, mined fastest
-	with an axe; it drops only with Shears (2 x slower with them than on leaves: `shearSpeed`), is
+	with an axe; it drops 2 Glow Dust (the game's glowing dust, which only lichen gives), or itself
+	with Shears (Minecraft's only drop; 2 x slower with them than on leaves: `shearSpeed`), is
 	replaceable and is washed away by flowing water.
 
 	Each is a very thin plate a tenth of a pixel off its face, with a small Neon speck that carries
@@ -2140,7 +2145,8 @@ for _, cave in { false, true } do
 			item = if item then nil else "GlowLichen",
 			hardness = 0.2,
 			tool = "axe",
-			drops = false,
+			drops = "GlowDust" :: string,
+			dropCount = 2,
 			shearDrops = true,
 			shearSpeed = 2,
 			light = 7,

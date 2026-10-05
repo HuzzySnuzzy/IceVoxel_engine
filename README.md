@@ -75,16 +75,19 @@ A fast, Minecraft-style voxel engine for Roblox.
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
   A tunnel dug into a hillside darkens with the distance from its mouth, not the depth of the rock
   above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
-- **Torches, lanterns and glowstone.** Light sources for the dark: torches (light 14) stand on
+- **Torches, lanterns and the Glow Block.** Light sources for the dark: torches (light 14) stand on
   blocks or hang on walls, leaning out like Minecraft's; lanterns (15) stand on a block or hang
-  under one; glowstone (15) is a glowing full block. Each gives off a Roblox PointLight. With
-  `Config.Render.Shadows` on, a torch's or lantern's light stops at walls; glowstone casts a shadow
-  like any full block (a glowstone roof keeps the sun out), so its own light has none and reaches
+  under one; the Glow Block (15, the game's blue stand-in for glowstone) is a glowing full block.
+  Each gives off a Roblox PointLight. With `Config.Render.Shadows` on, a torch's or lantern's light
+  stops at walls; the Glow Block casts a shadow like any full block (a roof of them keeps the sun
+  out), so its own light has none and reaches
   through a wall within its range. Torches and lanterns need a sturdy block to hang on, as in
   Minecraft (not leaves, a chest or a cactus), pop off and drop when that block goes, and flowing
   water washes torches away. Players walk through lanterns (in Minecraft they bump into them), but
   a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
-  a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
+  a lantern from 8 iron nuggets around a torch, a Glow Block from 4 Glow Dust (it breaks into 4
+  again). **Glow Dust** is the game's blue glowing dust, in place of Minecraft's glowstone dust (the
+  game has no Nether): glow lichen in caves drops it.
 - **Foliage.** Minecraft 1.20.1's ground plants: short grass, ferns, tall grass and large ferns,
   dead bushes, twelve flowers (dandelion, poppy, blue orchid, allium, azure bluet, four tulips,
   oxeye daisy, cornflower, lily of the valley), four two-block tall flowers (sunflower, lilac,
@@ -180,10 +183,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   false none generate.
 - **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
   more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
-  Each is a thin plate on its face with a glowing Neon speck: 2 parts. Only one lichen per 8 × 8 × 8
-  blocks carries a PointLight, and only those within 32 blocks of the camera (24 on phones) are on,
-  so a cave is dotted with a few dozen dim glows instead of hundreds of lights; farther lichen still
-  glows. Shears harvest it (by hand or any other tool it drops nothing; an axe breaks it fastest);
+  Each is a thin plate on its face with a glowing Neon speck: 2 parts. One lichen per 8 × 8 × 8
+  blocks carries a PointLight, which shines at any distance, so a revealed cave holds a few hundred
+  lights instead of thousands (`Caves.LichenLightDistance` can switch far ones off on slow devices).
+  It drops 2 Glow Dust (by hand or with any tool; an axe breaks it fastest), or itself with Shears;
   it is replaceable, washes away in flowing water, and placed by hand it lies on the floor or hangs
   on a ceiling or wall like a torch (one face per block). Generated lichen counts as cave air while
   caves are hidden, so a cave's lichen costs nothing until you are in it.
@@ -194,7 +197,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   mouth doesn't rebuild the chunks around it. Phones reveal 48 to 96 blocks, with full detail to
   about 96. In a cave near the spawn that is 268 full detail chunks instead of 164, and about 57,000
   parts instead of 47,000 before far meshes. F3 shows how far caves are revealed and how many lichen
-  lights are on.
+  lights there are.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -245,7 +248,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   its energy in its item ("Energy: 1.2 MJ") and gets it back when placed; its slots drop like a
   chest's. The Creative Energy Cube (creative only, no recipe) gives infinite energy for trying
   machines out.
-  Recipes: 8 Basic Universal Cables from an osmium ingot, glowstone dust and an osmium ingot in a
+  Recipes: 8 Basic Universal Cables from an osmium ingot, glow dust and an osmium ingot in a
   row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
   make 8 of the next tier. Like chests, energy lives in memory.
 - **Heat Generator.** Mekanism Generators' Heat Generator burns furnace fuel for electricity: put
@@ -276,9 +279,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   J/t", "No power", "Output full" or "Idle"; WAILA says the same. While it smelts the heating
   chamber on its sides glows, steadily even when too little power makes it stop and start
   (Mekanism's 3-second deactivation delay). Broken with a pickaxe it keeps its energy in its
-  item ("Energy: 12 kJ"); its slots drop. Recipe: Mekanism's shape with glowstone dust for the
-  redstone, osmium ingots for the control circuits and a furnace for the steel casing: glowstone
-  dust, an osmium ingot and glowstone dust, over glass, a furnace and glass, over the top row
+  item ("Energy: 12 kJ"); its slots drop. Recipe: Mekanism's shape with glow dust for the
+  redstone, osmium ingots for the control circuits and a furnace for the steel casing: glow
+  dust, an osmium ingot and glow dust, over glass, a furnace and glass, over the top row
   again. JEI lists every smelting recipe under its uses. It takes Speed and Energy Upgrades (below).
 - **Solar Panel.** Mekanism Generators' Solar Generator, named the Solar Panel: a thin panel of four
   dark blue cells on a short post (no full cube, as Mekanism's; players walk through it, as through
@@ -290,9 +293,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   96 kJ and gives up to 100 J/t to the cables and machines around it. Its panel and WAILA say
   "Producing 50 J/t", "Full", "Night" or "No sky"; its panel also has its upgrade slots. Broken
   with a pickaxe it keeps its energy in its item. Recipe: Mekanism's shape with glass for the
-  solar cells, gold ingots for the alloy, osmium ingots for the osmium dust and glowstone dust for
+  solar cells, gold ingots for the alloy, osmium ingots for the osmium dust and glow dust for
   the energy tablet: three glass, over a gold ingot, an iron ingot and a gold ingot, over an osmium
-  ingot, glowstone dust and an osmium ingot. Mekanism's biome and rain factors don't apply (the
+  ingot, glow dust and an osmium ingot. Mekanism's biome and rain factors don't apply (the
   game has no weather).
 - **Upgrade cards.** Mekanism's Speed Upgrade and Energy Upgrade, which stack to 8 here (the most a
   machine takes of each; Mekanism's stack to 64). Recipes: Mekanism's shape with the ingots for its
@@ -321,11 +324,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   of its sides fills with its charge, red when nearly empty to green when full. Broken with a
   pickaxe it keeps its charge in its item ("Energy: 1.23 MJ", and an energy bar where a tool's
   durability bar goes), so batteries stack to 1, and placed again it has it back. Recipes:
-  Mekanism's shapes with glowstone dust for the redstone, glowstone for the energy tablets, a
+  Mekanism's shapes with glow dust for the redstone, Glow Blocks for the energy tablets, a
   block of iron for the steel casing and gold ingots, diamonds and emeralds for the alloys: the
-  Basic Battery is glowstone dust, glowstone and glowstone dust, over an iron ingot, a block of
+  Basic Battery is glow dust, a Glow Block and glow dust, over an iron ingot, a block of
   iron and an iron ingot, over the top row again; each next tier puts the tier below in the
-  middle, glowstone above and below it, osmium ingots, gold ingots or diamonds beside it and gold
+  middle, Glow Blocks above and below it, osmium ingots, gold ingots or diamonds beside it and gold
   ingots, diamonds or emeralds in the corners, and keeps its charge (Mekanism's upgrade recipes
   do). Mekanism's charge and discharge slots and side configuration are not in.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
@@ -623,7 +626,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Render.Foliage`          | true    | Draw plants (up to 4 parts each); false saves those parts, plants can still be aimed at and broken. |
 | `Caves.RevealRadius`      | 64      | How far around an underground camera caves are meshed (phones 48: `Caves.Mobile`). |
 | `Caves.RevealRadiusMax`   | 128     | Same in big caverns (the radius follows the open space around you; phones 96). |
-| `Caves.LichenLightDistance` | 32    | Glow lichen's lights are on this close to the camera (phones 24); farther lichen still glows. |
+| `Caves.LichenLightDistance` | math.huge | Glow lichen's lights shine at any distance; a number switches off those farther from the camera (the lichen still glows). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |

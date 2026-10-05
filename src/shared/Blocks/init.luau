@@ -1136,13 +1136,20 @@ end
 
 --[[ Structures: creative only blocks, structure block modes, jigsaws, turning, cave twins ]]
 
--- The id of the block named `name`, or nil when there is none: for names that come from data
--- (structure palettes, jigsaw final states), where `Blocks.id` would error.
+-- Blocks that were renamed: old name -> new name. Names in data (structure palettes, jigsaw
+-- final states) saved before the rename still find their block through `find`.
+Blocks.RENAMED = table.freeze({
+	Glowstone = "GlowBlock",
+} :: { [string]: string })
+
+-- The id of the block named `name` (or formerly named, Blocks.RENAMED), or nil when there is
+-- none: for names that come from data (structure palettes, jigsaw final states), where
+-- `Blocks.id` would error.
 function Blocks.find(name: string): number?
 	if type(name) ~= "string" then
 		return nil
 	end
-	return rawget(ids :: any, name)
+	return rawget(ids :: any, name) or rawget(ids :: any, Blocks.RENAMED[name] or "")
 end
 
 -- Is the block creative only (structure blocks, structure voids, jigsaws; BlockList

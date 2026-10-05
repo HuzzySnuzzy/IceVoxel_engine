@@ -147,7 +147,7 @@ return function(t, shared, require, server, _client)
 			PackedIce = "glass",
 			BlueIce = "glass",
 			Glass = "glass",
-			Glowstone = "glass",
+			GlowBlock = "glass",
 			OakLog = "wood",
 			Planks = "wood",
 			Chest = "wood",

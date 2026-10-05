@@ -22,7 +22,7 @@ return function(t, shared, require, server)
 
 	local id = Blocks.id
 	local AIR, STONE = Blocks.AIR, id.Stone
-	local TORCH, LANTERN, HANGING, GLOWSTONE = id.Torch, id.Lantern, id.HangingLantern, id.Glowstone
+	local TORCH, LANTERN, HANGING, GLOWSTONE = id.Torch, id.Lantern, id.HangingLantern, id.GlowBlock
 	local NORTH, SOUTH, WEST, EAST = id.WallTorchNorth, id.WallTorchSouth, id.WallTorchWest, id.WallTorchEast
 	local WATER = Blocks.fluidId("Water", 0)
 
@@ -46,7 +46,7 @@ return function(t, shared, require, server)
 			WallTorchEast = 14,
 			Lantern = 15,
 			HangingLantern = 15,
-			Glowstone = 15,
+			GlowBlock = 15,
 			Stone = 0,
 			Glass = 0,
 			Air = 0,
@@ -63,7 +63,7 @@ return function(t, shared, require, server)
 		t.eq(Blocks.light(-1), 0)
 		t.eq(Blocks.light(Blocks.count), 0, "unknown ids give no light")
 		-- Lit blocks are meshed one box per block (one light each), shaped ones too.
-		for _, name in { "Torch", "WallTorchEast", "Lantern", "HangingLantern", "Glowstone" } do
+		for _, name in { "Torch", "WallTorchEast", "Lantern", "HangingLantern", "GlowBlock" } do
 			t.eq(buffer.readu8(Blocks.singleLut, Blocks.get(id[name]).appearance), 1, `{name} is single`)
 		end
 		t.eq(buffer.readu8(Blocks.singleLut, Blocks.get(STONE).appearance), 0)
@@ -223,7 +223,7 @@ return function(t, shared, require, server)
 			{
 				Stone = true,
 				Glass = true,
-				Glowstone = true,
+				GlowBlock = true,
 				CraftingTable = true,
 				Furnace = true,
 				OakLeaves = false,
@@ -273,7 +273,7 @@ return function(t, shared, require, server)
 			local world = sparse({ ["0,0,0"] = block })
 			t.eq(Blocks.placementFor(TORCH, 0, 1, 0, look[1], look[2], look[3], world, 0, 1, 0), nil, name)
 		end
-		for _, name in { "Stone", "Glass", "Glowstone", "OakLog", "Planks", "Sand", "Ice", "Furnace" } do
+		for _, name in { "Stone", "Glass", "GlowBlock", "OakLog", "Planks", "Sand", "Ice", "Furnace" } do
 			t.ok(Blocks.isSturdy(id[name]), `{name} is sturdy`)
 			t.ok(Blocks.get(id[name]).sturdy, name)
 		end
@@ -442,7 +442,7 @@ return function(t, shared, require, server)
 		t.eq(Items.drops(LANTERN, Items.id.WoodenPickaxe).item, Items.id.Lantern)
 		t.eq(Items.blockDrops(HANGING).item, Items.id.Lantern, "falling off needs no tool")
 		local dust = Items.drops(GLOWSTONE)
-		t.eq(dust and dust.item, Items.id.GlowstoneDust)
+		t.eq(dust and dust.item, Items.id.GlowDust)
 		t.eq(dust and dust.count, 4)
 		t.eq(Items.blockDrops(STONE).item, Items.id.Cobblestone)
 		t.eq(Items.blockDrops(Blocks.id.Glass), nil)
@@ -452,7 +452,7 @@ return function(t, shared, require, server)
 		for _, def in Items.list do
 			listed[def.name] = true
 		end
-		t.ok(listed.Torch and listed.Lantern and listed.Glowstone and listed.GlowstoneDust)
+		t.ok(listed.Torch and listed.Lantern and listed.GlowBlock and listed.GlowDust)
 		t.ok(not listed.WallTorchNorth and not listed.HangingLantern)
 	end)
 
@@ -475,9 +475,9 @@ return function(t, shared, require, server)
 		local lantern = craft({ n, n, n, n, item.Torch, n, n, n, n }, 3)
 		t.eq(lantern and lantern.item, item.Lantern)
 		t.eq(craft({ n, n, n, n, item.Stick, n, n, n, n }, 3), nil)
-		local d = item.GlowstoneDust
+		local d = item.GlowDust
 		local glowstone = craft({ d, d, d, d }, 2)
-		t.eq(glowstone and glowstone.item, item.Glowstone)
+		t.eq(glowstone and glowstone.item, item.GlowBlock)
 		t.eq(glowstone and glowstone.count, 1)
 	end)
 

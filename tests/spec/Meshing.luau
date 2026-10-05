@@ -301,7 +301,7 @@ return function(t, shared, require, _server, client)
 	t.test("light blocks: torches never merge and hide nothing; glowstone is one box per block", function()
 		local torch = Blocks.get(Blocks.id.Torch).appearance
 		local wall = Blocks.get(Blocks.id.WallTorchEast).appearance
-		local glowstone = Blocks.get(Blocks.id.Glowstone).appearance
+		local glowstone = Blocks.get(Blocks.id.GlowBlock).appearance
 		local stone = Blocks.get(Blocks.id.Stone).appearance
 		t.ok(torch ~= wall, "each shape is its own appearance")
 		for _, app in { torch, wall, glowstone, Blocks.get(Blocks.id.Lantern).appearance } do
@@ -320,7 +320,7 @@ return function(t, shared, require, _server, client)
 		ChunkLayout.set(data, 13, 1, 4, Blocks.id.WallTorchEast)
 		for z = 6, 7 do
 			for x = 12, 13 do
-				ChunkLayout.set(data, x, 1, z, Blocks.id.Glowstone)
+				ChunkLayout.set(data, x, 1, z, Blocks.id.GlowBlock)
 			end
 		end
 		verify(data, 6, 0, 6, false)
@@ -367,7 +367,7 @@ return function(t, shared, require, _server, client)
 		for _, name in { "GlowLichen", "GlowLichenUp", "GlowLichenNorth", "CaveGlowLichenEast" } do
 			t.eq(buffer.readu8(GreedyMesher.sparseLightLut, Blocks.get(Blocks.id[name]).appearance), 1, name)
 		end
-		for _, name in { "Torch", "Lantern", "Glowstone", "Stone" } do
+		for _, name in { "Torch", "Lantern", "GlowBlock", "Stone" } do
 			t.eq(buffer.readu8(GreedyMesher.sparseLightLut, Blocks.get(Blocks.id[name]).appearance), 0, name)
 		end
 

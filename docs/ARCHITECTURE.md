@@ -466,11 +466,12 @@ reads its tint from it.
 **Glow lichen's lights.** A revealed cave can hold 1,000-3,000 lichen, and a PointLight each
 would be far too many. The mesher marks one lit cell per 8³ box (sparse lights, see Meshing); for
 the others PartPool's `acquire(..., dark)` gives the light's box from a "dark" template, the same
-part without its PointLight, so lit and unlit lichen look alike (a Neon speck). Even so a revealed
-cavern holds hundreds, so ChunkRenderer keeps every lichen light's part and position and switches
-on only those within `Caves.LichenLightDistance` of the camera (32 blocks, 24 on phones:
-`ViewSettings.lichenLightDistance`), every 0.25 s, turning them off again 8 blocks further: a few
-dozen in a cave (in the CaveView test scene 1,272 lichen, 343 lit cells, ~56 on). Lichen lights
+part without its PointLight, so lit and unlit lichen look alike (a Neon speck). A revealed
+cavern holds a few hundred lit cells (in the CaveView test scene 1,272 lichen, 343 lit), all on:
+lichen should light a cave at any distance. ChunkRenderer keeps every lichen light's part and
+position, so a finite `Caves.LichenLightDistance` (`ViewSettings.lichenLightDistance`; default
+math.huge) switches off those farther from the camera on slow devices, every 0.25 s, turning them
+off again 8 blocks further. Lichen lights
 cast no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
 reaching through a thin cave wall shows nowhere it shouldn't. Each lichen is two parts, its plate
 and the Neon speck that carries the light. The renderer counts parts with a light (`lightCount`)
@@ -1194,17 +1195,17 @@ their parts' templates (recycled parts keep them; they stop drawing beyond 96 bl
 models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
 
 **Light sources and shaped blocks** (`Blocks`, `Rendering/PartPool`, `Behaviours/Attached`).
-Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and glowstone 15;
+Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and the Glow Block 15;
 `Blocks.lightLut`) and may be drawn from boxes instead of a cube (`shape`: pixels from the cell's
 centre, turned with CFrame.Angles). Shaped blocks render like glass (they hide no neighbour and no
 opaque box runs through them). Shaped and lit blocks are meshed one box per block
 (`Blocks.singleLut`). The renderer draws one part per shape box, each from its own template. The
-glowing box's near template (glowstone's cube) carries one PointLight: range light × 0.9 blocks,
+glowing box's near template (the Glow Block's cube) carries one PointLight: range light × 0.9 blocks,
 warm colour. A light inside a part that casts a shadow is hidden by that part, so one of the two
 gives way:
 - torches' and lanterns' boxes cast no shadow (they are small, so it hardly shows), and their
   light has shadows when `Render.Shadows` is on, so it stops at walls;
-- glowstone's cube casts one like any opaque cube, so a glowstone roof keeps the sun out; its
+- the Glow Block's cube casts one like any opaque cube, so a roof of them keeps the sun out; its
   light has no shadows instead and also reaches the far side of a wall within its range (lights
   just outside each face would need up to six per block, placed by its neighbours, which shared
   templates can't do).
@@ -1306,8 +1307,12 @@ needs the server's `operator` rule (see Server). They are in the creative picker
 **Glow lichen** (Minecraft's GlowLichenBlock, one face per block): GlowLichen on the floor (the
 item), GlowLichenUp on a ceiling and GlowLichenNorth / South / West / East on walls, through the
 torch machinery (`support`, `Attached`, `placementFor`). Light 7 in a cool yellow green, hardness
-0.2, mined fastest with an axe, drops only with Shears (`shearDrops`; Shears mine it at 2,
-`shearSpeed`, Minecraft's ShearsItem.getDestroySpeed), replaceable and `brokenByFluid`. Its shape is
+0.2, mined fastest with an axe. It drops 2 Glow Dust (the game's blue glowing dust, which stands
+in for glowstone and Mekanism's redstone in recipes; also when its wall goes or water washes it
+away), or itself with Shears (`shearDrops`, Minecraft's only drop; Shears mine it at 2,
+`shearSpeed`, Minecraft's ShearsItem.getDestroySpeed); replaceable and `brokenByFluid`. The block
+of 4 Glow Dust is the Glow Block (formerly Glowstone: `Blocks.RENAMED` / `Items.RENAMED` keep
+structure data that names Glowstone or GlowstoneDust working). Its shape is
 a 13 × 13 pixel plate a tenth of a pixel off its face and a 3 × 3 pixel Neon speck, the `glow` box
 that carries the light: two boxes, two parts. Its outline is a pixel thick plate over the face.
 
