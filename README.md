@@ -263,7 +263,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract)
-    Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
+  Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
                             slot rules, panels, energy maths and the even split, state codes,
                             sustained data), Kinds/ (a module per kind: Creative, the Creative
                             Energy Cube; Generator, the Heat Generator; Smelter, the Electric
