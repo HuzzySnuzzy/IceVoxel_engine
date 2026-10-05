@@ -108,6 +108,19 @@ A fast, Minecraft-style voxel engine for Roblox.
   Recipes: 8 Basic Universal Cables from an osmium ingot, glowstone dust and an osmium ingot in a
   row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
   make 8 of the next tier. Like chests, energy lives in memory.
+- **Heat Generator.** Mekanism Generators' Heat Generator burns furnace fuel for electricity: put
+  coal, charcoal, wood or anything else a furnace burns in its fuel slot (by hand, shift-click or
+  a transporter, through any side) and for as long as the item would burn in a furnace it makes
+  200 J a tick (Mekanism's numbers), so a coal is 320 kJ and a plank 60 kJ. It stores 160 kJ and
+  gives up to 400 J/t to the cables and machines around it. It burns only as much as it has room
+  for, so a machine using less than 200 J/t still gets all of each item's energy; full, it stops,
+  keeping what is left of the item, and goes on as soon as energy is taken. Its panel shows the
+  fuel slot under a flame (the burn time left), "Producing 200 J/t" or "Idle", and the energy
+  bar; WAILA says the same, and while it burns the window on its sides glows and it crackles like
+  a lit furnace. Broken with a pickaxe it keeps its energy and what is left burning in its item
+  ("Energy: 80 kJ", "Fuel: 60 s"). Recipe: Mekanism's with iron for its copper, three iron ingots
+  over planks, an osmium ingot and planks, over iron, a furnace and iron. JEI lists every fuel
+  under its uses. Mekanism's lava and nether bonuses don't apply.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -235,7 +248,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Inventories (sided slots, insert / extract)
   Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
                             slot rules, panels, energy maths and the even split, sustained data),
-                            Kinds/ (a module per kind: Creative, the Creative Energy Cube)
+                            Kinds/ (a module per kind: Creative, the Creative Energy Cube;
+                            Generator, the Heat Generator)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
                             Crafting (grid matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
@@ -307,18 +321,20 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
-                            (furnace, caves), SoundRules (the pure rules)
+                            (furnaces and Heat Generators crackling, caves), SoundRules (the pure
+                            rules)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
   Net/ClientNet             routes server messages; Notices shows server messages in the chat
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
-  Rendering/TransmitterRenderer  Mekanism pipes and cables: arms, water in pipes and tanks, items
-                            moving through transporters, machines' records (WAILA);
-                            TransmitterModel (their geometry, aiming, item paths)
+  Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
+                            tanks, items moving through transporters, a burning Heat Generator's
+                            window, machines' records (WAILA, Ambience); TransmitterModel (their
+                            geometry, aiming, item paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
-                            chests, crafting tables and furnaces)
+                            chests, crafting tables, furnaces and Mekanism's machines)
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview
@@ -482,6 +498,8 @@ required from `Machines/init.luau`:
 The server ticks it 20 times a second, joins it to cables and touching machines, keeps its energy
 in its item and replicates it; the client draws its panel (slots, gauges, energy bar) and WAILA
 lines. Tests bind test-only kinds to spare blocks with `Machines.bind`.
+The Heat Generator (`src/shared/Machines/Kinds/Generator.luau`) is the complete version of this
+example.
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make

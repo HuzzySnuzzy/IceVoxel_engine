@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube
-	drawn like Minecraft's pixel art.
+	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube and
+	Heat Generator drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -252,11 +252,63 @@ local CREATIVE_ENERGY_CUBE: Faces = {
 	Right = cubeFace(),
 }
 
+--[[
+	Heat Generator (Mekanism Generators'): a dark steel casing with osmium bolts, a grille across the
+	top of each side and over the top, and the fuel window low on each side, dark while it is out.
+	While it burns the client lights the window (Rendering/TransmitterModel.machineBoxes draws a
+	glowing pane over GENERATOR_WINDOW from the machine's record). Item models show the window on
+	the front pair only, like the furnace's mouth.
+]]
+local GENERATOR_EDGE = { 30, 31, 36 }
+local GENERATOR_BOLT = { 150, 172, 200 }
+local GRILLE_DARK = { 20, 20, 24 }
+local GRILLE_LIGHT = { 96, 100, 110 }
+local WINDOW_FRAME = { 36, 36, 40 }
+local EMBER = { 74, 36, 22 }
+-- The fuel window on every side (pixels from the face's top left; the glow covers exactly it).
+BlockDecor.GENERATOR_WINDOW = table.freeze({ x = 5, y = 10, w = 6, h = 3 })
+local WINDOW = BlockDecor.GENERATOR_WINDOW
+
+local function bolts(): { Rect }
+	return {
+		rect(1, 1, 1, 1, GENERATOR_BOLT, true),
+		rect(14, 1, 1, 1, GENERATOR_BOLT, true),
+		rect(1, 14, 1, 1, GENERATOR_BOLT, true),
+		rect(14, 14, 1, 1, GENERATOR_BOLT, true),
+	}
+end
+
+local function generatorSide(windowSurfaceOnly: boolean): { Rect }
+	return join(outline(GENERATOR_EDGE, true), bolts(), {
+		rect(3, 2, 10, 5, GRILLE_DARK),
+		rect(3, 3, 10, 1, GRILLE_LIGHT, true),
+		rect(3, 5, 10, 1, GRILLE_LIGHT, true),
+		rect(WINDOW.x - 1, WINDOW.y - 1, WINDOW.w + 2, WINDOW.h + 2, WINDOW_FRAME, windowSurfaceOnly),
+		rect(WINDOW.x, WINDOW.y, WINDOW.w, WINDOW.h, EMBER, windowSurfaceOnly),
+	})
+end
+
+local HEAT_GENERATOR: Faces = {
+	Top = join(outline(GENERATOR_EDGE, true), bolts(), {
+		rect(3, 3, 10, 10, GRILLE_DARK),
+		rect(3, 5, 10, 1, GRILLE_LIGHT, true),
+		rect(3, 7, 10, 1, GRILLE_LIGHT, true),
+		rect(3, 9, 10, 1, GRILLE_LIGHT, true),
+		rect(3, 11, 10, 1, GRILLE_LIGHT, true),
+	}),
+	Bottom = outline(GENERATOR_EDGE, true),
+	Front = generatorSide(false),
+	Back = generatorSide(false),
+	Left = generatorSide(true),
+	Right = generatorSide(true),
+}
+
 local DECORS: { [string]: Faces } = {
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
 	Furnace = FURNACE,
 	CreativeEnergyCube = CREATIVE_ENERGY_CUBE,
+	HeatGenerator = HEAT_GENERATOR,
 }
 
 -- The faces of `decor` (BlockList `decor`), or nil when it is unknown.

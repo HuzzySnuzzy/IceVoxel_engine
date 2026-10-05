@@ -318,6 +318,7 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(decors.Chest and decors.CraftingTable and decors.Furnace, "the three decorated blocks")
+		t.ok(decors.CreativeEnergyCube and decors.HeatGenerator, "and Mekanism's machines")
 		for decor in decors do
 			local faces = BlockDecor.faces(decor)
 			t.ok(faces ~= nil, `faces of {decor}`)
@@ -398,7 +399,7 @@ return function(t, shared, require, _server, client)
 			end
 			return cells
 		end
-		for _, decor in { "Chest", "CraftingTable", "Furnace" } do
+		for _, decor in { "Chest", "CraftingTable", "Furnace", "CreativeEnergyCube", "HeatGenerator" } do
 			local faces = BlockDecor.faces(decor)
 			assert(faces)
 			for _, face in { "Top", "Bottom" } do

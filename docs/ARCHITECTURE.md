@@ -722,7 +722,7 @@ dropped items and, in `Player/HeldItems`, the item in each character's hand (fro
 `IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
 diagonally in icons (`tilt`) and are held by the handle, pointing forward.
 
-**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables and furnaces are drawn
+**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube and the Heat Generator are drawn
 without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
 SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
 blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
@@ -845,7 +845,7 @@ on the input `Ui/Screens` hands it before anything else.
 
 `recipes(item)` are the entries that make the item, `uses(item)` those that take it (in any cell,
 as a smelting input, as a fuel). A catalyst, the block a category's recipes are made in
-(`CATALYSTS`: the crafting table for crafting, the furnace for smelting and fuel), also uses every
+(`CATALYSTS`: the crafting table for crafting, the furnace for smelting, the furnace and the Heat Generator for fuel), also uses every
 entry of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace
 lists them. Both come grouped by category in that order, without the empty ones.
 
@@ -1147,9 +1147,32 @@ from the bottom in whole rows rounded down, at least one while it holds any, red
 through yellow to green when full, "stored / capacity" on hover), and the arrow, flame and status
 line it asks for, read from the data fields it names. The panel reads the window's data without
 changing it and redraws only when a snapshot replaces it.
+Machines whose decor has a window (`TransmitterModel.hasMachineBoxes`: the Heat Generator) are
+TransmitterRenderer cells like tanks, redrawn on each record: `machineBoxes` gives a working one
+a Neon pane over its window on each of its four sides (BlockDecor.GENERATOR_WINDOW, 0.2 px out of
+the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point from
+their records (Audio/Ambience).
 
 **The Creative Energy Cube** (kind "creative"): infinite capacity and output, always full,
 gives whatever its network takes; creative only (no recipe).
+
+**The Heat Generator** (kind "generator", `Machines/Kinds/Generator`; Mekanism Generators').
+BlockList `HeatGenerator` has `energy = { capacity = 160 000, output = 400 }`: a producer whose
+output is twice what it makes, so a network takes all of it. One fuel slot takes what
+`Smelting.fuel` burns, from every face, and gives nothing to transporters; data 7 is `burnTime`
+(ticks left of the item burning, a fraction after a part tick) and 8 `burnTotal` (its burn time,
+0 while out), both clamped to the longest fuel's burn time. Each tick it makes up to 200 J
+(Mekanism's heatGeneration; `produce`, so at most its room) and burns that share of a tick: what
+is left of the item is counted in whole energy quanta (`TICK_QUANTA` = 200 J / QUANTUM a tick),
+so a nearly full generator burns part ticks and no energy is made or lost. An item lights only
+when there is room (it is used up, both fields its furnace burn time); one that runs out partway
+through a tick lights the next, which makes the rest of the tick, and one out at the end of a
+tick lights the next at once, so neither the flame nor the output dips between items. Full, it
+keeps its item and lights nothing new. RATE is what it made, ACTIVE whether it made anything; its
+status line is "Producing 200 J/t" or "Idle". Its item keeps its energy and both burn fields
+(tooltip "Fuel: 60 s", a describer the kind adds). Mekanism's lava tank (which burns a whole
+tick's lava whenever there is any room), lava around it and the nether bonus are left out: fuel
+burns directly. JEI lists it as a fuel catalyst.
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
@@ -1266,6 +1289,9 @@ What the client plays itself:
 - `Ambience`:
   - the open furnace window, while burning: crackles with Minecraft's odds for a furnace a block
     or two away (about every 4 s);
+  - every Heat Generator whose record says it burns, within 16 blocks of the listener
+    (`SoundRules.crackles`, `TransmitterRenderer.activeMachines`): the same crackle, at the
+    generator;
   - under `skyExposure` 0.2: `ambient.cave` every 90 to 300 seconds spent there, from up to 8
     blocks each way around the listener.
 

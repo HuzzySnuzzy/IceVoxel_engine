@@ -32,7 +32,8 @@
 	  hits       Minecraft's mining hit (MultiPlayerGameMode.destroyTicks): every HIT_INTERVAL
 	             ticks on one block, from its first (`hitTick`).
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
-	             (CRACKLE_CHANCE per tick); caves rumble now and then (`caveDelay`).
+	             (CRACKLE_CHANCE per tick), and so does a burning Heat Generator within
+	             CRACKLE_RANGE blocks (`crackles`); caves rumble now and then (`caveDelay`).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -452,6 +453,20 @@ end
 	the player is about 12% of ticks: a crackle every 4 seconds or so.
 ]]
 SoundRules.CRACKLE_CHANCE = 0.012
+-- Blocks from the listener within which a working machine that `crackles` is heard crackling
+-- (Minecraft's animateTick reaches 16 blocks around the player).
+SoundRules.CRACKLE_RANGE = 16
+-- Machines that crackle like a lit furnace while they work (their Machines record says active).
+local CRACKLING: { [string]: boolean } = {
+	-- Mekanism Generators' Heat Generator, burning furnace fuel.
+	HeatGenerator = true,
+}
+
+-- Does the machine `block` crackle like a lit furnace while it works?
+function SoundRules.crackles(block: number): boolean
+	return Blocks.isValid(block) and CRACKLING[Blocks.get(block).name] == true
+end
+
 -- Caves: the rumble comes when the sky light reaching the camera is below CAVE_EXPOSURE, every
 -- CAVE_MIN to CAVE_MAX seconds spent there (time above ground counts back down).
 SoundRules.CAVE_EXPOSURE = 0.2

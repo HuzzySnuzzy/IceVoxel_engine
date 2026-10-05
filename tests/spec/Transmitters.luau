@@ -10,6 +10,7 @@ return function(t, shared, require, _server, client)
 	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local Crafting = require(shared.Crafting)
+	local Machines = require(shared.Machines)
 	local Menu = require(shared.Inventory.Menu)
 	local Protocol = require(shared.Net.Protocol)
 	local Sounds = require(shared.Sounds)
@@ -340,9 +341,9 @@ return function(t, shared, require, _server, client)
 		t.ok(Transmitters.isItemAcceptor(CHEST) and Transmitters.isItemAcceptor(FURNACE))
 		t.ok(not Transmitters.isItemAcceptor(B.CraftingTable) and not Transmitters.isItemAcceptor(B.Stone))
 		t.ok(Transmitters.isAcceptor("fluid", TANKS[3]) and not Transmitters.isAcceptor("item", TANKS[3]))
-		-- Every block with slots is an item acceptor.
+		-- Every block with slots is an item acceptor (a machine's slots are its kind's).
 		for block = 0, Blocks.count - 1 do
-			t.eq(Transmitters.isItemAcceptor(block), Blocks.get(block).container > 0, Blocks.get(block).name)
+			t.eq(Transmitters.isItemAcceptor(block), Machines.containerSize(block) > 0, Blocks.get(block).name)
 		end
 	end)
 

@@ -1,8 +1,8 @@
 --!strict
 --[[
-	What the client draws for Mekanism's transmitters and fluid tanks, and the maths of aiming at
-	them and of items moving through them. Plain numbers only (no Roblox APIs), so the tests check
-	it; Rendering/TransmitterRenderer turns the boxes into parts and moves the items.
+	What the client draws for Mekanism's transmitters, fluid tanks and machines, and the maths of
+	aiming at them and of items moving through them. Plain numbers only (no Roblox APIs), so the
+	tests check it; Rendering/TransmitterRenderer turns the boxes into parts and moves the items.
 
 	Boxes are axis-aligned, in pixels (1/16 block) from the cell's centre, like BlockList shapes.
 	The block's own `shape` (Mekanism's 8 pixel core: a glass cube in a frame of twelve edges, drawn
@@ -26,6 +26,8 @@
 	           core and in each sideways arm, its height the fill; the arm down is a full column
 	           as soon as there is any water, the arm up only when the pipe is (nearly) full.
 	  tanks    a Fluid Tank's water, from the bottom plate up to amount / capacity of the inside.
+	  machines what a Mekanism machine shows from its Machines record (`machineBoxes`): a burning
+	           Heat Generator's fuel window glows on its four sides.
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -49,9 +51,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
 
-export type BoxKind = "glass" | "frame" | "band" | "tint" | "water" | "cable"
+local BlockDecor = require(script.Parent.BlockDecor)
+
+export type BoxKind = "glass" | "frame" | "band" | "tint" | "water" | "cable" | "glow"
 
 -- One box: its look (`kind`, `colour`), size and centre in pixels from the cell's centre.
 export type Box = { kind: BoxKind, size: { number }, offset: { number }, colour: { number } }
@@ -275,6 +280,64 @@ function TransmitterModel.tankBoxes(block: number, _fluid: number, amount: numbe
 			TransmitterModel.WATER_COLOUR
 		),
 	}
+end
+
+--[[ Machines ]]
+
+-- What a machine's boxes are drawn from: its Machines record (Protocol.MachineRecord) or less.
+export type MachineLook = { active: boolean, energy: number, capacity: number }
+
+-- A lit window's colour (a furnace's fire) and how far it stands out of the face (pixels).
+TransmitterModel.GLOW_COLOUR = table.freeze({ 255, 138, 44 })
+TransmitterModel.GLOW_DEPTH = 0.2
+
+-- Machines whose window lights while they work, by BlockList `decor`: the window on each side face
+-- (BlockDecor pixels, from the face's top left), the same rectangle their decor draws dark.
+local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
+	HeatGenerator = BlockDecor.GENERATOR_WINDOW,
+}
+local SIDE_FACES = { "Front", "Back", "Left", "Right" }
+
+local function glowOf(block: number): { x: number, y: number, w: number, h: number }?
+	if not Machines.isMachine(block) or not Blocks.isValid(block) then
+		return nil
+	end
+	local decor = Blocks.get(block).decor
+	return if decor then GLOWS[decor] else nil
+end
+
+-- Does the machine `block` show anything over its faces (TransmitterRenderer keeps a cell for it)?
+function TransmitterModel.hasMachineBoxes(block: number): boolean
+	return glowOf(block) ~= nil
+end
+
+--[[
+	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
+	idle machine), and a signature of what they show (equal signatures, equal boxes). A Heat
+	Generator that burns (active) lights its fuel window on its four sides: a thin glowing pane
+	GLOW_DEPTH out of each face over the window its decor draws. Nothing for other blocks.
+]]
+function TransmitterModel.machineBoxes(block: number, look: MachineLook?): ({ Box }, string)
+	local glow = glowOf(block)
+	local active = look ~= nil and look.active
+	if glow == nil or not active then
+		return {}, `m{block}`
+	end
+	local boxes: { Box } = {}
+	local depth = TransmitterModel.GLOW_DEPTH
+	local across = glow.x + glow.w / 2 - 8
+	local up = 8 - (glow.y + glow.h / 2)
+	for _, face in SIDE_FACES do
+		local normal, right = BlockDecor.basis(face)
+		local size, offset = table.create(3, 0), table.create(3, 0)
+		for k = 1, 3 do
+			local n, r = math.abs(normal[k]), math.abs(right[k])
+			size[k] = n * depth + r * glow.w + (if k == 2 then glow.h else 0)
+			offset[k] = normal[k] * (8 + depth / 2) + right[k] * across + (if k == 2 then up else 0)
+		end
+		table.insert(boxes, box("glow", size, offset, TransmitterModel.GLOW_COLOUR))
+	end
+	return boxes, `m{block} lit`
 end
 
 --[[ Aiming ]]

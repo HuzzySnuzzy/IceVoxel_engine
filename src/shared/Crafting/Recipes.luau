@@ -3,8 +3,8 @@
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
 	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
-	transmitters, fluid tanks, Configurator and Universal Cables adapted to the game's materials
-	(see "Mekanism pipes and buckets" and "Universal Cables" below).
+	transmitters, fluid tanks, Configurator, Universal Cables and machines adapted to the game's
+	materials (see "Mekanism pipes and buckets", "Universal Cables" and "Heat Generator" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -187,6 +187,13 @@ for tier = 2, 4 do
 	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
 	shape({ "CCC", "CAC", "CCC" }, { C = lower .. "UniversalCable", A = alloy }, name .. "UniversalCable", 8)
 end
+
+--[[
+	Mekanism Generators' Heat Generator, in Mekanism's shape: three iron ingots over planks, an
+	osmium ingot and planks, over copper, a furnace and copper ("III", "WOW", "CFC"). The game has
+	no copper, so iron ingots stand for it.
+]]
+shape({ "III", "WOW", "IFI" }, { I = "IronIngot", W = "#planks", O = "OsmiumIngot", F = "Furnace" }, "HeatGenerator")
 
 --[[ Smelting ]]
 

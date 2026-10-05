@@ -13,15 +13,17 @@
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
 	  Entities/EntityRenderer    dropped items
-	  Rendering/TransmitterRenderer  Mekanism pipes: arms, water in pipes and tanks, items moving
-	                             through transporters (the server's Transmitters / Tanks /
-	                             Transport messages)
+	  Rendering/TransmitterRenderer  Mekanism pipes and machines: arms, water in pipes and tanks,
+	                             items moving through transporters, a burning Heat Generator's
+	                             window (the server's Transmitters / Tanks / Machines / Transport
+	                             messages)
 	  Net/Notices                server messages in the chat (/gamemode answers)
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
-	                             swimming, landings), Ambience (a lit furnace, caves)
+	                             swimming, landings), Ambience (a lit furnace or Heat
+	                             Generator, caves)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement

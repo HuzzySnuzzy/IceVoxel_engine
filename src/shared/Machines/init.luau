@@ -30,6 +30,7 @@ export type Role = Core.Role
 
 -- Every machine kind (append one line per kind module).
 require(script.Kinds.Creative)
+require(script.Kinds.Generator)
 
 Core.bindBlocks()
 

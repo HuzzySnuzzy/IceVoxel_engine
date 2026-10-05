@@ -41,8 +41,9 @@
 	                drops what is inside.
 	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid)
 	                or "Furnace".
-	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace"; client
-	                Rendering/BlockDecor). Such blocks are drawn one part per block.
+	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
+	                "CreativeEnergyCube", "HeatGenerator"; client Rendering/BlockDecor). Such blocks
+	                are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
 	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
 	                Shared/Sounds): "stone", "wood", "gravel", "grass", "sand", "glass", "snow",
@@ -1126,6 +1127,27 @@ table.insert(list, {
 	decor = "CreativeEnergyCube",
 	machine = { kind = "creative" },
 	energy = { capacity = math.huge, output = math.huge },
+})
+
+--[[
+	Mekanism Generators' Heat Generator (Shared/Machines/Kinds/Generator, kind "generator"): burns
+	furnace fuel, 200 J a tick of burning, into Mekanism's 160 000 J store, given out at up to
+	400 J/t (twice what it makes) to cables and machines touching it. Mekanism's machine block:
+	hardness 3.5 like a furnace, mined fast with a pickaxe, which it needs to drop anything. A dark
+	steel casing with grilles and a fuel window (BlockDecor "HeatGenerator"; the client lights the
+	window while it burns, Rendering/TransmitterModel.machineBoxes).
+]]
+table.insert(list, {
+	name = "HeatGenerator",
+	color = { 62, 64, 70 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "HeatGenerator",
+	machine = { kind = "generator" },
+	energy = { capacity = 160000, output = 400 },
 })
 
 return list

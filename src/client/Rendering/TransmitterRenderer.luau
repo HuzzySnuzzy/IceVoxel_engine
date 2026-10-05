@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Mekanism's pipes on the client: what the terrain cannot draw by itself.
+	Mekanism's pipes and machines on the client: what the terrain cannot draw by itself.
 
 	The terrain draws every transmitter's core and every fluid tank's frame (their BlockList
 	`shape`). This module draws, within RADIUS blocks of the camera, what depends on neighbours and
@@ -11,7 +11,9 @@
 	           connector plates on acceptors, PUSH / PULL bands, a coloured transporter's tint;
 	           Universal Cables' thinner arms reach the energy blocks around them;
 	  water    in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity);
-	  items    moving through Logistical Transporters, small models of the item along their path.
+	  items    moving through Logistical Transporters, small models of the item along their path;
+	  machines what their Machines record shows (TransmitterModel.machineBoxes): a burning Heat
+	           Generator's glowing fuel window.
 
 	State, as the server sends it (Shared/Net/Protocol):
 	  Transmitters  per position: packed side modes, colour, pipe fill. A record replaces what was
@@ -27,7 +29,8 @@
 	  Tanks         per position: fluid and amount (mB), the same way.
 	  Machines      per position: a Mekanism machine's energy, capacity, the network's input and
 	                output, its rate and whether it works (Protocol MachineRecord), the same way;
-	                no record: empty and idle (WAILA reads them: `machine`).
+	                no record: empty and idle (WAILA reads them: `machine`; Audio/Ambience:
+	                `activeMachines`).
 	  Transport     items entering or re-routed in the transporters (an id, the item, where it is,
 	                its progress, speed, the server time of that and its path) and leaving them.
 	                Items are moved here every frame from workspace:GetServerTimeNow(), 20 ticks a
@@ -42,8 +45,8 @@
 	                only tells players near them, so items that stayed out of range for
 	                FORGET_AFTER seconds are forgotten (moving ones end with their way anyway).
 
-	Which positions hold transmitters and tanks: they only come from edits (never from generation),
-	so a chunk's are found in its edit list when its data is loaded (World/ClientWorld
+	Which positions hold transmitters, tanks and machines: they only come from edits (never from
+	generation), so a chunk's are found in its edit list when its data is loaded (World/ClientWorld
 	onChunkLoaded, knownEdits) and followed through its block changes (onBlockChanged). Positions
 	are only decorated while their chunk is shown (`isShown`, from the streamer), so arms never
 	float over the coarse terrain that stands in for a chunk still being built.
@@ -57,9 +60,10 @@
 	keep their bare core until parts free up) and MAX_ITEMS item models (more items in range move
 	on unseen). Item models are moved together with one BulkMoveTo per frame, after the camera.
 
-	Read-only queries for WAILA (Ui/Waila) and aiming (Interaction/BlockInteraction): `state`,
-	`tank`, `machine`, `connections`, `itemsIn`, `network` (the pipes, transporters or cables
-	connected to a position, as the client sees them) and `stats`.
+	Read-only queries for WAILA (Ui/Waila), aiming (Interaction/BlockInteraction) and sounds
+	(Audio/Ambience): `state`, `tank`, `machine`, `activeMachines`, `connections`, `itemsIn`,
+	`network` (the pipes, transporters or cables connected to a position, as the client sees them)
+	and `stats`.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -123,9 +127,10 @@ local LOOKS: { [string]: { material: Enum.Material, transparency: number } } = {
 	tint = { material = Enum.Material.SmoothPlastic, transparency = 0.45 },
 	water = { material = Enum.Material.Glass, transparency = 0.3 },
 	cable = { material = Enum.Material.SmoothPlastic, transparency = 0 },
+	glow = { material = Enum.Material.Neon, transparency = 0 },
 }
 
--- A transmitter or tank position in a loaded chunk.
+-- A transmitter, tank or machine with boxes (TransmitterModel.hasMachineBoxes) in a loaded chunk.
 type Cell = {
 	x: number,
 	y: number,
@@ -178,7 +183,8 @@ local isShown: (cx: number, cz: number) -> boolean = function(_cx: number, _cz: 
 	return true
 end
 
--- Positions (Coords.posKey) of transmitters and tanks in loaded chunks, and per chunk key.
+-- Positions (Coords.posKey) of transmitters, tanks and machines with boxes in loaded chunks, and
+-- per chunk key.
 local cells: { [number]: Cell } = {}
 local cellsByChunk: { [number]: { [number]: boolean } } = {}
 -- Replicated state per position, and the positions per chunk key.
@@ -225,8 +231,9 @@ local function getState(x: number, y: number, z: number): (number, number)
 	return 0, 0
 end
 
+-- Is `block` drawn here (a cell): a transmitter, a tank, or a machine that shows its state?
 local function isSpecial(block: number): boolean
-	return Transmitters.isTransmitter(block) or Transmitters.isTank(block)
+	return Transmitters.isTransmitter(block) or Transmitters.isTank(block) or TransmitterModel.hasMachineBoxes(block)
 end
 
 --[[ Parts ]]
@@ -612,6 +619,8 @@ local function onMachines(records: { Protocol.MachineRecord })
 			local key = posKey(x, y, z)
 			machineStates[key] = record
 			indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
+			-- (A Heat Generator's window lights or goes out.)
+			markDirty(key)
 		end
 	end
 end
@@ -622,6 +631,9 @@ end
 local function design(cell: Cell): ({ TransmitterModel.Box }, string)
 	local key = posKey(cell.x, cell.y, cell.z)
 	local block = cell.block
+	if Machines.isMachine(block) then
+		return TransmitterModel.machineBoxes(block, machineStates[key])
+	end
 	if Transmitters.isTank(block) then
 		local state = tankStates[key]
 		local fluid, amount = if state then state.fluid else 0, if state then state.amount else 0
@@ -942,6 +954,34 @@ end
 ]]
 function TransmitterRenderer.machine(x: number, y: number, z: number): Protocol.MachineRecord?
 	return machineStates[posKey(x, y, z)]
+end
+
+--[[
+	The records of the machines whose last record says they work (active), within `radius` blocks
+	of (x, y, z) and whose block passes `filter` (Audio/Ambience: burning Heat Generators crackle).
+	A new list each call; the records in it are read only.
+]]
+function TransmitterRenderer.activeMachines(
+	x: number,
+	y: number,
+	z: number,
+	radius: number,
+	filter: (block: number) -> boolean
+): { Protocol.MachineRecord }
+	local found: { Protocol.MachineRecord } = {}
+	local limit = radius * radius
+	for _, record in machineStates do
+		if record.active then
+			local dx, dy, dz = record.x + 0.5 - x, record.y + 0.5 - y, record.z + 0.5 - z
+			if dx * dx + dy * dy + dz * dz <= limit then
+				local block = getBlock(record.x, record.y, record.z)
+				if block and filter(block) then
+					table.insert(found, record)
+				end
+			end
+		end
+	end
+	return found
 end
 
 -- The replicated contents of a fluid tank: fluid (0 none, 1 water) and amount (mB).

@@ -62,7 +62,8 @@ JeiData.TAB_ITEMS = { crafting = "CraftingTable", smelting = "Furnace", fuel = "
 JeiData.CATALYSTS = {
 	crafting = { "CraftingTable" },
 	smelting = { "Furnace" },
-	fuel = { "Furnace" },
+	-- (Mekanism Generators' Heat Generator burns the same fuel.)
+	fuel = { "Furnace", "HeatGenerator" },
 } :: { [Category]: { string } }
 -- JEI's ingredient cycle: one item per second.
 JeiData.CYCLE_SECONDS = 1

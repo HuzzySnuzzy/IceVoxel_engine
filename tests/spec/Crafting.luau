@@ -170,7 +170,7 @@ return function(t, shared, require)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
 		-- (99 before the four Universal Cables.)
-		t.eq(#Crafting.recipes, 103, "recipes compiled")
+		t.eq(#Crafting.recipes, 104, "recipes compiled")
 	end)
 
 	t.test("smelting: recipes and fuel follow Minecraft", function()

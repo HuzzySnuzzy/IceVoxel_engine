@@ -7,6 +7,10 @@
 	           client only knows while the window shows it), it crackles at random
 	           (block.furnace.fire_crackle, SoundRules.CRACKLE_CHANCE per tick) at the furnace:
 	           the block aimed at when the window opened, else the player.
+	  Machines every burning Heat Generator within SoundRules.CRACKLE_RANGE blocks of the
+	           listener (its Machines record says it works: Rendering/TransmitterRenderer
+	           .activeMachines; the client knows these without opening them) crackles the same
+	           way, at the generator.
 	  Caves    deep underground (the sky light reaching the camera below SoundRules.CAVE_EXPOSURE,
 	           Rendering/LightingController.skyExposure), a low rumble (ambient.cave) every few
 	           minutes spent there, somewhere near the listener. Config.Sounds.Ambient turns it off.
@@ -25,6 +29,7 @@ local LightingController = require(script.Parent.Parent.Rendering.LightingContro
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local SoundPlayer = require(script.Parent.SoundPlayer)
 local SoundRules = require(script.Parent.SoundRules)
+local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 
 local TICK = 1 / Mining.TICK_RATE
 -- Ticks run at most per frame (a hitch does not make a burst of crackles).
@@ -82,6 +87,21 @@ function Ambience.start()
 			clock -= TICK
 			if furnaceBurning() and math.random() < SoundRules.CRACKLE_CHANCE then
 				crackle()
+			end
+			local listener = SoundPlayer.listener()
+			if listener then
+				local burning = TransmitterRenderer.activeMachines(
+					listener.X,
+					listener.Y,
+					listener.Z,
+					SoundRules.CRACKLE_RANGE,
+					SoundRules.crackles
+				)
+				for _, record in burning do
+					if math.random() < SoundRules.CRACKLE_CHANCE then
+						SoundPlayer.play("block.furnace.fire_crackle", record.x + 0.5, record.y + 0.5, record.z + 0.5)
+					end
+				end
 			end
 		end
 
