@@ -15,8 +15,10 @@
 	  fuel      Smelting.fuels(): `inputs[1]` the fuel, `ticks` its burn time.
 
 	`recipes(item)` lists the entries that make an item (crafting and smelting), `uses(item)` those
-	that take it: as an ingredient (tags included), as a smelting input or as a fuel. Both return
-	groups by category, only the categories that have entries.
+	that take it: as an ingredient (tags included), as a smelting input or as a fuel. A catalyst
+	(CATALYSTS: the block a category's recipes are made in) also uses every entry of its
+	categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists them.
+	Both return groups by category, only the categories that have entries.
 
 	The index is built once, on first use.
 ]]
@@ -56,6 +58,12 @@ JeiData.CATEGORIES = { "crafting", "smelting", "fuel" } :: { Category }
 JeiData.TITLES = { crafting = "Crafting", smelting = "Smelting", fuel = "Fuel" } :: { [Category]: string }
 -- The item each category's tab shows (Minecraft's catalysts).
 JeiData.TAB_ITEMS = { crafting = "CraftingTable", smelting = "Furnace", fuel = "Coal" } :: { [Category]: string }
+-- The items each category's recipes are made in (JEI's recipe catalysts), whose uses list them all.
+JeiData.CATALYSTS = {
+	crafting = { "CraftingTable" },
+	smelting = { "Furnace" },
+	fuel = { "Furnace" },
+} :: { [Category]: { string } }
 -- JEI's ingredient cycle: one item per second.
 JeiData.CYCLE_SECONDS = 1
 -- A furnace's smelting time in ticks (one item per 200 ticks: what "burns N items" counts in).
@@ -136,7 +144,8 @@ end
 
 local built = false
 local all: { Entry } = {}
--- item -> entries making it / using it (each entry once per item).
+-- item -> entries making it / using it (each entry once per item; a catalyst's uses end with the
+-- entries of its categories).
 local byOutput: { [number]: { Entry } } = {}
 local byInput: { [number]: { Entry } } = {}
 -- Sorted item lists of Recipes.tags, keyed by the joined ids (to name a tag ingredient).
@@ -231,6 +240,23 @@ local function build()
 			tagNames[keyOf(ids)] = `#{name}`
 		end
 	end
+	-- Catalysts, after everything that takes them (so their own uses come first in each group).
+	for category, names in JeiData.CATALYSTS do
+		for _, name in names do
+			local item = Items.id[name]
+			local list: { Entry } = byInput[item] or {}
+			byInput[item] = list
+			local listed: { [Entry]: boolean } = {}
+			for _, entry in list do
+				listed[entry] = true
+			end
+			for _, entry in all do
+				if entry.category == category and not listed[entry] then
+					table.insert(list, entry)
+				end
+			end
+		end
+	end
 end
 
 -- Every entry: crafting recipes, then smelting, then fuels.
@@ -266,7 +292,8 @@ function JeiData.recipes(item: number): { Group }
 	return grouped(byOutput[item])
 end
 
--- What takes `item`: recipes using it (tags included), smelting it, burning it (JEI's "Show uses", U).
+-- What takes `item`: recipes using it (tags included), smelting it, burning it, and for a catalyst
+-- every entry of its categories (JEI's "Show uses", U).
 function JeiData.uses(item: number): { Group }
 	build()
 	return grouped(byInput[item])

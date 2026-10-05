@@ -233,10 +233,11 @@ return function(t, shared, require, _server, client)
 		)
 		t.ok(find(JeiData.uses(id.IronPickaxe), "smelting", makes(id.IronNugget)), "pickaxe melts")
 		t.eq(#JeiData.uses(id.Lantern), 0, "nothing uses a lantern")
-		-- Every use really takes the item, and lists it once.
+		-- Every use really takes the item (or the item is its category's catalyst), and lists it once.
 		for _, def in Items.list do
 			for _, group in JeiData.uses(def.id) do
 				local seen = {}
+				local catalyst = table.find(JeiData.CATALYSTS[group.category], def.name) ~= nil
 				for _, entry in group.entries do
 					t.ok(not seen[entry], `{def.name}: entry listed once`)
 					seen[entry] = true
@@ -246,7 +247,53 @@ return function(t, shared, require, _server, client)
 							takes = true
 						end
 					end
-					t.ok(takes, `{def.name}: the entry takes it`)
+					t.ok(takes or catalyst, `{def.name}: the entry takes it`)
+				end
+			end
+		end
+	end)
+
+	t.test("jei: uses of a catalyst list every recipe of its categories, its own uses first", function()
+		local counts = {}
+		for _, entry in JeiData.entries() do
+			counts[entry.category] = (counts[entry.category] or 0) + 1
+		end
+		t.eq(counts.crafting, #Crafting.recipes, "every crafting recipe is an entry")
+		t.eq(counts.fuel, #Smelting.fuels(), "every fuel is an entry")
+
+		local furnace = JeiData.uses(id.Furnace)
+		same(categories(furnace) :: any, { "smelting", "fuel" } :: any, "furnace categories")
+		t.eq(#furnace[1].entries, counts.smelting, "furnace: every smelting recipe")
+		t.eq(#furnace[2].entries, counts.fuel, "furnace: every fuel")
+		t.ok(find(furnace, "smelting", makes(id.IronIngot)), "furnace: iron ore -> ingot")
+		t.ok(JeiData.has("uses", id.Furnace), "has: furnace")
+
+		local workbench = JeiData.uses(id.CraftingTable)
+		same(categories(workbench) :: any, { "crafting", "fuel" } :: any, "crafting table categories")
+		t.eq(#workbench[1].entries, counts.crafting, "crafting table: every crafting recipe")
+		t.ok(find(workbench, "crafting", makes(id.Furnace)), "crafting table: furnace recipe")
+		-- Its own use (as a fuel) is still there, once: the catalyst adds nothing to that category.
+		t.eq(#workbench[2].entries, 1, "crafting table: burns")
+		t.ok(table.find(workbench[2].entries[1].inputs[1], id.CraftingTable) ~= nil, "the fuel entry is the table")
+
+		-- In a catalyst's own categories, the entries that take it come before the rest.
+		for category, names in JeiData.CATALYSTS do
+			for _, name in names do
+				local item = id[name]
+				for _, group in JeiData.uses(item) do
+					if group.category == category then
+						local catalysed = false
+						for _, entry in group.entries do
+							local takes = false
+							for cell = 1, 9 do
+								if entry.inputs[cell] and table.find(entry.inputs[cell], item) then
+									takes = true
+								end
+							end
+							t.ok(not (takes and catalysed), `{name}: own {category} uses come first`)
+							catalysed = catalysed or not takes
+						end
+					end
 				end
 			end
 		end

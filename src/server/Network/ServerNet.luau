@@ -5,8 +5,9 @@
 	  * Answers chunk edit requests (clients ask for the edit list of every full detail chunk they
 	    build; terrain itself is generated locally).
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
-	    block (torch, lantern) hangs on, not inside a player. Rejected requests are answered with
-	    the real block so the client undoes its prediction.
+	    block (torch, lantern) hangs on, not inside a player (solid blocks and lanterns, not
+	    torches: EditRules.obstructs). Rejected requests are answered with the real block so the
+	    client undoes its prediction.
 	  * Applies the game modes' rules to edits (Network/EditRules):
 	      survival  a block breaks only once the player has mined it long enough with the tool in
 	                their hand when the break arrives (Mine messages say when they started;
@@ -83,22 +84,13 @@ local function rootOf(player: Player): BasePart?
 	return nil
 end
 
--- Does block (x, y, z) overlap any player's (standing) movement hull?
-local function intersectsCharacter(x: number, y: number, z: number): boolean
+-- Would `block` at (x, y, z) overlap any player's (standing) movement hull (EditRules.obstructs)?
+local function intersectsCharacter(block: number, x: number, y: number, z: number): boolean
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		if character then
 			local min, max = Rig.hull(character)
-			if
-				min
-				and max
-				and max.X > x
-				and min.X < x + 1
-				and max.Z > z
-				and min.Z < z + 1
-				and max.Y > y
-				and min.Y < y + 1
-			then
+			if min and max and EditRules.obstructs(block, x, y, z, min.X, min.Y, min.Z, max.X, max.Y, max.Z) then
 				return true
 			end
 		end
@@ -420,7 +412,7 @@ function ServerNet.start(world: World): ServerNet
 			if
 				not EditRules.mayPlace(block, current)
 				or not EditRules.supported(block, peekBlock, x, y, z)
-				or (Blocks.isSolid(block) and intersectsCharacter(x, y, z))
+				or intersectsCharacter(block, x, y, z)
 			then
 				reject()
 				return

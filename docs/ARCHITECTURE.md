@@ -248,9 +248,9 @@ air touching that rock becomes a stone cap. It is remeshed when the mask changes
 ### Rendering (`Rendering/`)
 
 Every node is a Folder of section Folders. A section is built outside the workspace and swapped in
-whole. Parts come from `PartPool`: one template per appearance and near/far variant, so a recycled
-part only needs a new size and position. Near parts collide and can be raycast; far parts do
-neither and never cast shadows.
+whole. Parts come from `PartPool`: one template per appearance, shape box and near / far / plain
+variant, so a recycled part only needs a new size and position. Near parts collide and can be
+raycast; far parts do neither and never cast shadows.
 
 **Textures.** A block's `texture` names a MaterialVariant in MaterialService; templates set
 `Material` to the block's material (it must be the variant's BaseMaterial) and `MaterialVariant` to
@@ -352,8 +352,8 @@ prediction.
   the air or under water. Switching to another item restarts the block. The client sends `Mine` when it starts on
   a block and when it stops early. The first tick on a block only starts it (Minecraft's
   `startDestroyBlock`), and `CrackOverlay` draws the ten crack stages as the progress grows
-  (procedural lines on SurfaceGuis, no assets). At 100% the block breaks, then mining pauses for 5
-  ticks.
+  (procedural lines on SurfaceGuis, no assets) on the block's outline like the highlight, so they
+  fit a lantern instead of its cell. At 100% the block breaks, then mining pauses for 5 ticks.
 - **The server** only counts a `Mine` start for a minable block in reach. It accepts the break if
   the player started mining that very block long enough ago (`Mining.mayBreak`: 70% of the time,
   Minecraft's tolerance) with the tool held when the break arrives, drops `Items.drops(block,
@@ -514,34 +514,75 @@ Minecraft's flying player):
 
 ## Day and night (`DayCycle`, server `World/TimeOfDay`, client `Rendering/LightingController`)
 
-**Time.** Minecraft's day: 24000 ticks, with 0 sunrise, 6000 noon, 12000 sunset and 18000 midnight. The count keeps going past 24000, which gives the day number. The server is the authority. It publishes three workspace attributes:
+**Time.** Minecraft's day: 24000 ticks, with 0 sunrise, 6000 noon, 12000 sunset and 18000
+midnight. The count keeps going past 24000, which gives the day number. The server is the
+authority. It publishes three workspace attributes:
 - `IceVoxelDayTime`: the day time at one moment;
 - `IceVoxelDaySync`: that moment as `workspace:GetServerTimeNow()`;
 - `IceVoxelDayRate`: ticks per second (24000 / `Time.DayLength`, 0 while doDaylightCycle is off).
 
 Clients compute the time from these at every update, so a running clock costs no traffic.
-- The attributes change only when `/time` or `/gamerule` changes the clock. Every 60 s the same values are written again, which only restores them if something else changed them.
-- The clock is never re-based on a timer. Server and clients compute the same closed form from the same numbers, so nothing drifts. A re-base would change all three attributes at once, and a client could apply that change halfway.
+- The attributes change only when `/time` or `/gamerule` changes the clock. Every 60 s the same
+  values are written again, which only restores them if something else changed them.
+- The clock is never re-based on a timer. Server and clients compute the same closed form from the
+  same numbers, so nothing drifts. A re-base would change all three attributes at once, and a
+  client could apply that change halfway.
 - `Lighting.ClockTime` is set by each client, never the server, so the two never fight.
 
-**Sun position.** `DayCycle.timeOfDay` is Minecraft's celestial angle (DimensionType.timeOfDay): it lingers around noon and midnight, and at tick 0 the sun is already 12° up. `clockTime = (12 + angle × 24) % 24` puts Roblox's sun at that angle. Roblox then tilts the sun's path by `GeographicLatitude` and its Earth tilt.
+**Sun position.** `DayCycle.timeOfDay` is Minecraft's celestial angle (DimensionType.timeOfDay):
+it lingers around noon and passes midnight fastest, so Minecraft's sun is up for about 13600 of
+the 24000 ticks, and at tick 0 it is already 12° up. `clockTime = (12 + angle × 24) % 24` puts
+Roblox's sun at that angle. Roblox then tilts the sun's path by `GeographicLatitude` and its Earth
+tilt.
 
-**Commands.** `/time set|add|query` and `/gamerule doDaylightCycle` are TextChatCommands, with `Player.Chatted` for the legacy chat. Parsing and permissions are in `Players/TimeCommand`, pure and tested:
-- Time arguments follow Minecraft's TimeArgument: `d` = 24000 ticks, `s` = 20, `t` = 1, rounded, never negative.
-- Changing the time or the rule needs `Gameplay.Admins`, the owner or Studio; queries are open to everyone.
+**Commands.** `/time set|add|query` and `/gamerule doDaylightCycle` are TextChatCommands, with
+`Player.Chatted` for the legacy chat. Parsing and permissions are in `Players/TimeCommand`, pure
+and tested:
+- Time arguments follow Minecraft's TimeArgument: `d` = 24000 ticks, `s` = 20, `t` = 1, rounded,
+  never negative.
+- Changing the time or the rule needs `Gameplay.Admins`, the owner or Studio; queries are open to
+  everyone.
 - Answers use Minecraft's wording and come back as Notices.
 
-**Lighting.** Roblox's engine does the lighting. `default.project.json` sets Future technology and global shadows (Technology cannot be set from scripts). Near opaque parts cast shadows (`Render.Shadows`); far ones do not.
+**Lighting.** Roblox's engine does the lighting. `default.project.json` sets Future technology and
+global shadows (Technology cannot be set from scripts). Near opaque parts cast shadows
+(`Render.Shadows`); far ones do not.
 
-`LightingController` writes the Lighting properties at 10 Hz, only when they change, from `DayCycle.environment`:
-- Minecraft's sky brightness and sunrise glow depend only on how high the sun stands (`DayCycle.sunHeight`). The controller feeds them the height of the sun Roblox really draws (`Lighting:GetSunDirection().Y`), so the light matches the sky at any latitude.
+`LightingController` writes the Lighting properties at 10 Hz, only when they change, from
+`DayCycle.environment`:
+- Minecraft's sky brightness and sunrise glow depend only on how high the sun stands
+  (`DayCycle.sunHeight`). The controller feeds them the height of the sun Roblox really draws
+  (`Lighting:GetSunDirection().Y`), so the light matches the sky at any latitude.
 - `Config.Lighting.Night` is blended to `Day` by `daylight(h) = clamp(2h + 0.2, 0, 1)`.
-- `Dusk` colours are mixed in by `glow(h)`, the alpha of Minecraft's sunrise colour, times `Dusk.Strength`.
-- `Ambient` is always `CaveAmbient`. It is the only light the engine gives places closed to the sky, so caves are equally dark at noon and at midnight, as in Minecraft.
+- `Dusk` colours are mixed in by `glow(h)`, the alpha of Minecraft's sunrise colour, times
+  `Dusk.Strength`.
+- `Ambient` is always `CaveAmbient`. It is the only light the engine gives places closed to the
+  sky, so caves are equally dark at noon and at midnight, as in Minecraft.
 
-Roblox's sky occlusion probably does not reach far enough for caves hundreds of blocks deep. So the sky's light (outdoor ambient, sun, sky box) also fades with the camera's depth under the generator's ground height: from `Underground.Start` to `End` blocks. The fade is smoothed with a time constant of `Seconds` (`DayCycle.approach`, which lands exactly so the writes stop). A camera with nothing opaque above it in the loaded blocks (a pit open to the sky) keeps full sky light, as Minecraft's sky light runs straight down a shaft. Generated caves never reach the surface, so nothing that should be sunlit is darkened.
+With `Lighting.Enabled = false` it writes only `ClockTime`, but still works out the sky exposure
+below: the cave rumble (`Audio/Ambience`) and F3 read it.
 
-Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in Lighting is left alone, because Roblox lights both by the sun and moon itself.
+**Underground.** Roblox's sky occlusion probably does not reach far enough for caves hundreds of
+blocks deep. So the sky's light (outdoor ambient, sun, sky box) also fades with the camera's depth
+under the generator's ground height: from `Underground.Start` to `End` blocks. The fade is smoothed
+with a time constant of `Seconds` (`DayCycle.approach`, which lands exactly so the writes stop).
+Depth alone would also darken places open to the sky, so `Rendering/SkyExposure` (pure, tested)
+looks at the loaded blocks around the camera:
+- With nothing opaque above the camera (a pit open to the sky) it keeps full sky light, as
+  Minecraft's sky light runs straight down a shaft.
+- Otherwise rays step out from the camera's cell through cells that are not opaque, up to `End`
+  blocks: the 8 horizontal directions and the 8 rising at 45° (stairs dug up to the surface). A
+  cell at most `Start` blocks under its own column's ground, or open to the sky, raises the
+  exposure to `1 - distance / End`. So a tunnel into a hillside, or a quarry under an overhang,
+  darkens with the distance from the open air rather than the depth of the rock above.
+- The rays stop at a wall, at an unloaded cell and once they cannot beat the best so far; their
+  looks up for the sky share a budget of 2048 blocks, and the controller caches ground heights
+  per column, so this fits the 10 Hz update.
+
+Generated caves never open to the surface, so they still go dark.
+
+Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
+Lighting is left alone, because Roblox lights both by the sun and moon itself.
 
 ## Items, inventories and game modes
 
@@ -551,7 +592,8 @@ Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmospher
   server, whose `Triggered` fires on the server. The legacy chat falls back to `Player.Chatted`.
 - Permissions are in `Players/GameModeCommand`, pure and tested:
   - `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode;
-  - `Gameplay.Admins` for other players (by name, display name, unique prefix, `@s`, `@a`);
+  - `Gameplay.Admins` for other players (by name, display name, unique prefix, `@s`, `@a`); the
+    same ids may change the time (see Day and night);
   - the game's owner and Studio always may.
 - Answers ("Set own game mode to Creative Mode") are `Notice` messages, shown in the chat by
   `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
@@ -673,9 +715,49 @@ without image assets from pure face data (rectangles on a 16 × 16 grid per face
 SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
 blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
 
-**Light sources and shaped blocks** (`Blocks`, `Rendering/PartPool`, `Behaviours/Attached`). Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and glowstone 15; `Blocks.lightLut`) and may be drawn from boxes instead of a cube (`shape`: pixels from the cell's centre, turned with CFrame.Angles). Shaped blocks render like glass (they hide no neighbour and no opaque box runs through them). Shaped and lit blocks are meshed one box per block (`Blocks.singleLut`). The renderer draws one part per shape box, each from its own template. The glowing box's near template (glowstone's cube) carries one PointLight: range light × 0.9 blocks, warm colour, shadows when `Render.Shadows` is on, so light stops at walls. Light-source parts cast no shadow themselves. There is no light field in the block data; Roblox's lighting engine does the rest.
+**Light sources and shaped blocks** (`Blocks`, `Rendering/PartPool`, `Behaviours/Attached`).
+Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and glowstone 15;
+`Blocks.lightLut`) and may be drawn from boxes instead of a cube (`shape`: pixels from the cell's
+centre, turned with CFrame.Angles). Shaped blocks render like glass (they hide no neighbour and no
+opaque box runs through them). Shaped and lit blocks are meshed one box per block
+(`Blocks.singleLut`). The renderer draws one part per shape box, each from its own template. The
+glowing box's near template (glowstone's cube) carries one PointLight: range light × 0.9 blocks,
+warm colour. A light inside a part that casts a shadow is hidden by that part, so one of the two
+gives way:
+- torches' and lanterns' boxes cast no shadow (they are small, so it hardly shows), and their
+  light has shadows when `Render.Shadows` is on, so it stops at walls;
+- glowstone's cube casts one like any opaque cube, so a glowstone roof keeps the sun out; its
+  light has no shadows instead and also reaches the far side of a wall within its range (lights
+  just outside each face would need up to six per block, placed by its neighbours, which shared
+  templates can't do).
 
-Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there: solid, drawn, unshaped (`Blocks.canSurvive`). An item can place several variants (BlockList `item`: the Torch places the four wall torches; the Lantern a hanging lantern). Placing follows Minecraft's BlockPlaceContext (`Blocks.placementFor`): the clicked face's side first, then the directions the player looks along (`Blocks.lookOrder`, Direction.orderedByNearest). Up or down gives the variant hanging that way if it survives; a side gives the wall variant, which is the first side in the whole order that holds one (StandingAndWallBlockItem, WallTorchBlock). The client sends the variant; the server re-checks support (`EditRules.supported`, never generating terrain) and uses up the item through `Items.ofBlock`. The `Attached` behaviour breaks a block whose support stopped being sturdy and drops it (`Items.blockDrops`: no tool needed, like Minecraft's updateShape); `Fluid` washes away `brokenByFluid` blocks (torches) the same way. Behaviours drop items through `Behaviours/Drops`, which ServerNet wires to `Entities.dropBlock`. Aiming uses each block's outline (`Blocks.outline`, Minecraft's VoxelShapes), so a ray passes beside a torch to the wall behind it and the highlight fits the torch.
+There is no light field in the block data; Roblox's lighting engine does the rest.
+
+Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there
+(`Blocks.canSurvive`, `Blocks.isSturdy`): solid, drawn and unshaped, unless BlockList says
+`sturdy = false`. Leaves, chests and cactus say so: in Minecraft leaves have no support shape and a
+chest's and a cactus's sides stop short of the cell, so no torch or lantern hangs on them. An item
+can place several variants (BlockList `item`: the Torch places the four wall torches; the Lantern a
+hanging lantern). Placing follows Minecraft's BlockPlaceContext (`Blocks.placementFor`): the clicked
+face's side first, then the directions the player looks along (`Blocks.lookOrder`,
+Direction.orderedByNearest). Up or down gives the variant hanging that way if it survives; a side
+gives the wall variant, which is the first side in the whole order that holds one
+(StandingAndWallBlockItem, WallTorchBlock). The client sends the variant; the server re-checks
+support (`EditRules.supported`, never generating terrain) and uses up the item through
+`Items.ofBlock`. The `Attached` behaviour breaks a block whose support stopped being sturdy and
+drops it (`Items.blockDrops`: no tool needed, like Minecraft's updateShape); `Fluid` washes away
+`brokenByFluid` blocks (torches) the same way. Behaviours drop items through `Behaviours/Drops`,
+which ServerNet wires to `Entities.dropBlock`. Aiming uses each block's outline (`Blocks.outline`,
+Minecraft's VoxelShapes), so a ray passes beside a torch to the wall behind it, and the highlight
+and the mining cracks fit the block.
+
+Lanterns are not `solid`: the movement hull only knows full cubes, so a solid lantern would be an
+invisible wall. Players and dropped items pass through them (in Minecraft they bump into them and
+stand on them). They are marked `obstructs` instead, and `Blocks.obstruction` gives the box
+Minecraft's collision checks that move nothing see: a solid block's whole cell, an `obstructs`
+block's outline, nothing for a torch, air or water. The server refuses a placement whose box
+overlaps a player's standing hull (`EditRules.obstructs`, Minecraft's BlockItem.canPlace; a torch
+may overlap one), and falling sand and gravel land on that box (see Server).
 
 ## Just Enough Items (`Ui/Jei/`)
 
@@ -695,8 +777,10 @@ on the input `Ui/Screens` hands it before anything else.
 - fuel: `Smelting.fuels()`, the burn time shown as "Burns N items" (ticks / 200).
 
 `recipes(item)` are the entries that make the item, `uses(item)` those that take it (in any cell,
-as a smelting input, as a fuel). Both come grouped by category in that order, without the empty
-ones.
+as a smelting input, as a fuel). A catalyst, the block a category's recipes are made in
+(`CATALYSTS`: the crafting table for crafting, the furnace for smelting and fuel), also uses every
+entry of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace
+lists them. Both come grouped by category in that order, without the empty ones.
 
 **Screens.** While an inventory screen is open:
 - The list sits right of the 176 px panels at their GUI scale (`JeiLayout.list`): up to 9 columns
@@ -778,9 +862,10 @@ carries (16 blocks), the volume setting it follows (`source`), and who plays it 
 - Files: a client ships eleven sounds (content/sounds in Roblox's file manifest, checked against
   version 0.741): action_falling.ogg, action_footsteps_plastic.mp3, action_get_up.mp3,
   action_jump.mp3, action_jump_land.mp3, action_swim.mp3, impact_explosion_03.mp3,
-  impact_water.mp3, oof.ogg, ouch.ogg and volume_slider.ogg. The catalogue uses only those (the
-  classic gear sounds such as glassbreak.wav or unsheath.wav, and uuhhh.mp3, are gone). An event
-  may still name a `fallback`, which clients play when its file fails to load.
+  impact_water.mp3, oof.ogg, ouch.ogg and volume_slider.ogg. The catalogue uses only those, all
+  but action_jump.mp3 (the classic gear sounds such as glassbreak.wav or unsheath.wav, and
+  uuhhh.mp3, are gone). An event may still name a `fallback`, which clients play when its file
+  fails to load.
 - Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
   (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
 
@@ -891,22 +976,31 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   its six neighbours; blocks with a behaviour schedule ticks. Overflow beyond
   `MaxUpdatesPerTick` moves to the next tick. Updates never generate chunks.
 - `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling, infinite
-  sources, spreading only towards the nearest way down; waits at unloaded chunks), `Grass` (turns
-  to dirt when covered).
+  sources, spreading only towards the nearest way down; waits at unloaded chunks; washes away
+  `brokenByFluid` blocks), `Grass` (turns to dirt when covered), `Attached` (torches and lanterns
+  break and drop when what they hang on stops being sturdy). They drop items through `Drops`, which
+  ServerNet wires to `Entities.dropBlock`.
+  - In `Gravity`, as in Minecraft, a falling block passes through blocks without a collision box
+    (torches) and lands on those with one (`Blocks.obstruction`). Coming to rest in a torch's cell
+    (a solid block under the torch) or on a lantern, it breaks into an item and the torch or
+    lantern stays: the torch trick for clearing sand and gravel. Past wall torches with air under
+    them it keeps falling, and a block placed on a torch stays where it is.
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
-  placing inside players, survival mining time and drops (`EditRules`), and the rules injected by
-  the boot script (`setRules`: using up placed items, dropping items and chest contents).
-  Rejections never generate terrain.
+  placing inside players (`EditRules.obstructs`: solid blocks and lanterns, not torches), survival
+  mining time and drops (`EditRules`), and the rules injected by the boot script (`setRules`: using
+  up placed items, dropping items and chest contents). Rejections never generate terrain.
 - `Entities/`: dropped items (see Item entities).
 - `Players/GameModes`, `Players/Inventories`, `Players/Containers`: see Items, inventories and game
-  modes.
+  modes. `World/TimeOfDay` and `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see
+  Sounds.
 - `Players/Characters`: puts every character part in the `IceVoxelCharacters` collision group
   (it collides with none of the groups registered when the server starts; parts go back to Default
   on death, so the body falls, and when they leave the character), teleports characters by setting the
   feet position as attributes the client's hull follows, and turns reported landings into fall
   damage in survival (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
-  `TakeDamage`; at most 4 reports a second).
+  `TakeDamage`; at most 4 reports a second). It also plays the hurt, death and hurting-landing
+  sounds to everyone near (see Sounds).
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave

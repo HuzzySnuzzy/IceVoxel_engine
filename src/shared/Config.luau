@@ -96,7 +96,9 @@ local Config = {
 	Render = {
 		-- Milliseconds per frame spent creating / recycling parts.
 		BuildBudgetMs = 4,
-		-- Shadows on full detail chunks / on LOD chunks.
+		-- Shadows on full detail chunks / on LOD chunks. Shadows also gives torches' and
+		-- lanterns' light shadows, so it stops at walls (Rendering/PartPool; glowstone's cube
+		-- casts one instead).
 		Shadows = true,
 		FarShadows = false,
 		-- Recycled parts kept around for reuse.
@@ -182,7 +184,8 @@ local Config = {
 		Atmosphere, see Rendering/ViewSettings).
 	]]
 	Lighting = {
-		-- false: only Lighting.ClockTime follows the day; everything else is left to the place.
+		-- false: only Lighting.ClockTime follows the day; everything else is left to the place. The
+		-- sky light reaching the camera is still worked out (the cave rumble and F3 read it).
 		Enabled = true,
 		-- Seconds between updates (the sun moves 0.3 degrees a second at the default day length).
 		UpdateInterval = 0.1,
@@ -220,7 +223,8 @@ local Config = {
 		-- smoothed with a time constant of Seconds (settled after about 3 x Seconds), leaving only
 		-- CaveAmbient (and light blocks): the engine's own sky occlusion does not reach far, so big
 		-- caves would otherwise be lit. A pit or shaft with nothing opaque above the camera keeps
-		-- the sky's light.
+		-- the sky's light, and open air within End blocks (a tunnel's mouth, a quarry under an
+		-- overhang) gives 1 - distance / End of it (Rendering/SkyExposure).
 		Underground = {
 			Start = 4,
 			End = 16,
@@ -302,8 +306,9 @@ local Config = {
 		-- Who may switch their own game mode with the /gamemode chat command: true = everyone,
 		-- false = nobody, or a list of user ids. The game's owner and Studio sessions always may.
 		GameModeCommand = (true :: any) :: boolean | { number },
-		-- Who may change other players' game modes (/gamemode creative Name): user ids, besides the
-		-- game's owner and Studio sessions.
+		-- Who may change other players' game modes (/gamemode creative Name) and the time
+		-- (/time set|add, /gamerule doDaylightCycle): user ids, besides the game's owner and
+		-- Studio sessions.
 		Admins = {} :: { number },
 		-- Keep the inventory when dying (Minecraft's keepInventory rule); otherwise it drops.
 		KeepInventory = false,

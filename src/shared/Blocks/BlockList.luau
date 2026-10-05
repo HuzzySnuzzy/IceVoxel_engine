@@ -14,6 +14,10 @@
 	  transparency  Part transparency for Transparent / Fluid blocks.
 	  reflectance   Part reflectance.
 	  solid         Collides with characters. Default true for drawn blocks.
+	  sturdy        false: torches and lanterns can't hang on it, though it is a solid cube
+	                (Minecraft's support shape: leaves have none, and a chest's and a cactus's
+	                faces stop short of the cell's). Default true for solid, drawn blocks without a
+	                `shape` (Blocks.isSturdy).
 	  replaceable   Placing a block may overwrite it (air, fluids). Default false.
 	  breakable     Players can break it. Default true.
 	  placeable     Is an item players can hold and place (creative inventory, drops). Default true
@@ -65,10 +69,16 @@
 	  bounds        { min = { x, y, z }, max = { x, y, z } } in pixels 0..16: the outline players
 	                aim at and see highlighted (Minecraft's VoxelShape). Default: the box around
 	                the shape, or the whole cell.
+	  obstructs     Has a collision box in Minecraft though it is not `solid` (lanterns): its
+	                `bounds` keep it from being placed inside a player (Minecraft's
+	                BlockItem.canPlace) and falling sand lands on it (Blocks.obstruction). Players
+	                and items still pass through it, unlike Minecraft's, where they bump into and
+	                stand on lanterns: the movement hull only knows full cubes, and a solid lantern
+	                would be an invisible wall. Torches have no collision box in either game.
 	  support       The side the block hangs on: "Down" stands on the block below, "Up" hangs from
 	                the one above, "North" / "South" / "West" / "East" are fixed to that side. That
-	                block must be sturdy (solid and a full cube); when it goes, this one breaks and
-	                drops (server Behaviours/Attached).
+	                block must be sturdy (`sturdy` above); when it goes, this one breaks and drops
+	                if it also has `behaviour = "Attached"` (server Behaviours/Attached).
 	  item          Name of the item that places and drops this block, for variants that are no
 	                item of their own (wall torches are placed by, and drop, a Torch); Items.ofBlock
 	                answers it. A block and every block naming it as `item` are its variants:
@@ -107,6 +117,7 @@ export type BlockSpec = {
 	transparency: number?,
 	reflectance: number?,
 	solid: boolean?,
+	sturdy: boolean?,
 	replaceable: boolean?,
 	breakable: boolean?,
 	placeable: boolean?,
@@ -130,6 +141,7 @@ export type BlockSpec = {
 	lightColor: { number }?,
 	shape: { ShapeBox }?,
 	bounds: Bounds?,
+	obstructs: boolean?,
 	support: string?,
 	item: string?,
 	brokenByFluid: boolean?,
@@ -221,6 +233,7 @@ local list: { BlockSpec } = {
 		tool = "pickaxe",
 	},
 	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood", hardness = 2, tool = "axe" },
+	-- (Leaves hold up no torches or lanterns: Minecraft's LeavesBlock has no support shape.)
 	{
 		name = "OakLeaves",
 		color = { 68, 128, 46 },
@@ -228,6 +241,7 @@ local list: { BlockSpec } = {
 		hardness = 0.2,
 		drops = false,
 		tool = "hoe",
+		sturdy = false,
 	},
 	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -237,6 +251,7 @@ local list: { BlockSpec } = {
 		hardness = 0.2,
 		drops = false,
 		tool = "hoe",
+		sturdy = false,
 	},
 	{ name = "SpruceLog", color = { 74, 54, 34 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -246,6 +261,7 @@ local list: { BlockSpec } = {
 		hardness = 0.2,
 		drops = false,
 		tool = "hoe",
+		sturdy = false,
 	},
 	{ name = "AcaciaLog", color = { 118, 108, 98 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -255,6 +271,7 @@ local list: { BlockSpec } = {
 		hardness = 0.2,
 		drops = false,
 		tool = "hoe",
+		sturdy = false,
 	},
 	{ name = "JungleLog", color = { 96, 76, 44 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
@@ -264,9 +281,18 @@ local list: { BlockSpec } = {
 		hardness = 0.2,
 		drops = false,
 		tool = "hoe",
+		sturdy = false,
 	},
-	-- (Minecraft's cactus sounds like wool.)
-	{ name = "Cactus", color = { 64, 122, 52 }, material = "Grass", hardness = 0.4, sound = "wool" },
+	-- (Minecraft's cactus sounds like wool, and is a pixel short of its cell on every side but the
+	-- bottom: nothing hangs on it.)
+	{
+		name = "Cactus",
+		color = { 64, 122, 52 },
+		material = "Grass",
+		hardness = 0.4,
+		sound = "wool",
+		sturdy = false,
+	},
 	{
 		name = "CoalOre",
 		color = { 58, 58, 62 },
@@ -447,6 +473,8 @@ table.insert(list, {
 	container = 27,
 	menu = "Chest",
 	decor = "Chest",
+	-- (Minecraft's chest is 14 pixels tall and a pixel in from the sides: nothing hangs on it.)
+	sturdy = false,
 })
 
 -- Crafting (Shared/Crafting): the other planks, the crafting table and furnace, and the blocks
@@ -788,6 +816,7 @@ table.insert(list, {
 	lightColor = TORCH_LIGHT,
 	shape = lantern(-8, false),
 	bounds = { min = { 5, 0, 5 }, max = { 11, 9, 11 } },
+	obstructs = true,
 	support = "Down",
 	behaviour = "Attached",
 })
@@ -806,6 +835,7 @@ table.insert(list, {
 	lightColor = TORCH_LIGHT,
 	shape = lantern(-7, true),
 	bounds = { min = { 5, 1, 5 }, max = { 11, 10, 11 } },
+	obstructs = true,
 	support = "Up",
 	item = "Lantern",
 	behaviour = "Attached",

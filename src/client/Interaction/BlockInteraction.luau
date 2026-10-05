@@ -255,29 +255,45 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[ Placement checks ]]
 
-	local function overlaps(min: Vector3, max: Vector3, x: number, y: number, z: number): boolean
-		return max.X > x and min.X < x + 1 and max.Y > y and min.Y < y + 1 and max.Z > z and min.Z < z + 1
+	-- Does the box min..max overlap `cell` (Blocks.obstruction: block units within the cell) at
+	-- (x, y, z)? Boxes that only touch don't.
+	local function overlaps(min: Vector3, max: Vector3, x: number, y: number, z: number, cell: { number }): boolean
+		return max.X > x + cell[1]
+			and min.X < x + cell[4]
+			and max.Y > y + cell[2]
+			and min.Y < y + cell[5]
+			and max.Z > z + cell[3]
+			and min.Z < z + cell[6]
 	end
 
 	--[[
-		Would a solid block at (x, y, z) overlap a player? The local player is checked with the
-		standing hull (as the server does, whatever the pose) at the hull's position and where the
-		character is drawn (what the server sees); other players at their characters.
+		Would a block whose obstruction box is `cell` (solid blocks: the whole cell; lanterns: their
+		outline) at (x, y, z) overlap a player? Mirrors the server's EditRules.obstructs. The local
+		player is checked with the standing hull (as the server does, whatever the pose) at the
+		hull's position and where the character is drawn (what the server sees); other players at
+		their characters.
 	]]
-	local function blocksCharacter(x: number, y: number, z: number): boolean
+	local function blocksCharacter(x: number, y: number, z: number, cell: { number }): boolean
 		local view = MovementController.current
 		if view then
 			local standing = PlayerPhysics.STANDING
 			local state = view.state
 			local box = Hull.box(state.x, state.y, state.z, standing.width, standing.height)
 			if
-				overlaps(Vector3.new(box.minX, box.minY, box.minZ), Vector3.new(box.maxX, box.maxY, box.maxZ), x, y, z)
+				overlaps(
+					Vector3.new(box.minX, box.minY, box.minZ),
+					Vector3.new(box.maxX, box.maxY, box.maxZ),
+					x,
+					y,
+					z,
+					cell
+				)
 			then
 				return true
 			end
 			local half = Vector3.new(standing.width / 2, 0, standing.width / 2)
 			local top = Vector3.new(standing.width / 2, standing.height, standing.width / 2)
-			if overlaps(view.feet - half, view.feet + top, x, y, z) then
+			if overlaps(view.feet - half, view.feet + top, x, y, z, cell) then
 				return true
 			end
 		end
@@ -285,7 +301,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			local character = other.Character
 			if other ~= player and character then
 				local min, max = Rig.hull(character)
-				if min and max and overlaps(min, max, x, y, z) then
+				if min and max and overlaps(min, max, x, y, z, cell) then
 					return true
 				end
 			end
@@ -504,8 +520,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			destroyDelay = Mining.DELAY_TICKS
 			breakBlock(hit)
 		else
-			-- Minecraft's destroy stage (MultiPlayerGameMode.getDestroyStage): 0..9 once started.
-			cracks:show(hit.x, hit.y, hit.z, math.floor(current.progress * 10))
+			-- Minecraft's destroy stage (MultiPlayerGameMode.getDestroyStage): 0..9 once started,
+			-- on the block's outline like the highlight (a lantern's box, not its cell).
+			cracks:show(hit.x, hit.y, hit.z, math.floor(current.progress * 10), Blocks.outline(hit.block))
 		end
 	end
 
@@ -581,7 +598,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		block = variant
-		if Blocks.isSolid(block) and blocksCharacter(x, y, z) then
+		-- Like the server (EditRules.obstructs): solid blocks and lanterns may not go inside a
+		-- player; torches may.
+		local obstruction = Blocks.obstruction(block)
+		if obstruction and blocksCharacter(x, y, z, obstruction) then
 			return
 		end
 		-- Survival uses one up (predicted); creative only numbers the action.

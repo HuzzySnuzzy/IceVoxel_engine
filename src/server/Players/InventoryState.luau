@@ -295,9 +295,9 @@ function InventoryState.openPosition(self: InventoryState, key: any): (number?, 
 end
 
 --[[
-	The block at (x, y, z) with a window is gone: closes that window for every player who has it
-	open (a chest's or furnace's viewers and the players at a crafting table there; their cursors
-	and grids go back into their inventories) and removes a shared container there. Returns its
+	The block at (x, y, z) with a window is gone: removes a shared container there and closes that
+	window for every player who has it open (a chest's or furnace's viewers and the players at a
+	crafting table there; their cursors and grids go back into their inventories). Returns its
 	contents (to drop where it was) and the players' leftovers (what did not fit back into their
 	inventories).
 ]]
@@ -307,6 +307,10 @@ function InventoryState.removeContainer(
 	y: number,
 	z: number
 ): ({ Stack }, { Leftovers })
+	-- Taken first, so closing its viewers' windows no longer finds it: a broken chest's lid makes
+	-- no closing sound (Containers' onOpeners; Minecraft's ChestBlockEntity.stopOpen ignores a
+	-- removed chest). take also forgets viewers who are gone.
+	local container = self.containers:take(x, y, z)
 	local leftovers: { Leftovers } = {}
 	for key, player in self.players do
 		local open = player.open
@@ -318,8 +322,6 @@ function InventoryState.removeContainer(
 		end
 	end
 	local contents: { Stack } = {}
-	-- (take forgets any viewers left, e.g. players who are gone.)
-	local container = self.containers:take(x, y, z)
 	if container then
 		for slot = 1, container.size do
 			local stack = container.slots[slot]

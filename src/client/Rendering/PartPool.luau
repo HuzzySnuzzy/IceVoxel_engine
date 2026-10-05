@@ -26,8 +26,15 @@
 	Light: the near template of a light source's glowing box (its cube for glowstone) carries one
 	PointLight: range `light` x LIGHT_RANGE blocks (at most 60 studs), a warm colour from the block
 	(`lightColor`), shadows on when Config.Render.Shadows is (so light stops at walls instead of
-	shining through them). The parts of light sources cast no shadow themselves, or they would block
-	their own light. Far and plain templates and item models get no light.
+	shining through them). A light inside a part that casts a shadow is blocked by that part, so
+	one of the two has to give way:
+	  - shaped boxes (torches, lanterns) cast no shadow: they are small, so their missing shadow
+	    hardly shows, and their light keeps its shadows;
+	  - full cubes (glowstone) do cast one, or a glowstone roof or wall would let the sun through
+	    like glass; their light has no shadows instead, so it also reaches the far side of a wall
+	    within its range. (Lights just outside each face would need up to six shadowed lights per
+	    block, placed by its neighbours, which the shared templates can't do.)
+	Far and plain templates and item models get no light.
 ]]
 
 local MaterialService = game:GetService("MaterialService")
@@ -100,7 +107,8 @@ local function addLight(part: BasePart, info: Blocks.Appearance)
 	light.Range = math.min(MAX_LIGHT_RANGE, info.light * LIGHT_RANGE * Config.BlockSize)
 	light.Brightness = LIGHT_BRIGHTNESS * info.light / 15
 	light.Color = colour(info.lightColor)
-	light.Shadows = LIGHT_SHADOWS and Config.Render.Shadows
+	-- Inside a part that casts a shadow (glowstone's cube) shadows would hide the light itself.
+	light.Shadows = LIGHT_SHADOWS and Config.Render.Shadows and not part.CastShadow
 	light.Parent = part
 end
 
@@ -128,10 +136,8 @@ local function makeTemplate(
 	part.CanTouch = false
 	part.CanCollide = info.solid and not far
 	part.CanQuery = not far and info.kind ~= Blocks.KIND_FLUID and shapeBox == nil
-	part.CastShadow = opaque
-		and not glowing
-		and shapeBox == nil
-		and (if far then Config.Render.FarShadows else Config.Render.Shadows)
+	-- Light sources' full cubes too (glowstone blocks the sun; addLight gives way instead).
+	part.CastShadow = opaque and shapeBox == nil and (if far then Config.Render.FarShadows else Config.Render.Shadows)
 	part.EnableFluidForces = false
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth

@@ -40,7 +40,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
   see how it is made; right click or `U` shows what it is used for: crafting recipes on a 3 × 3
   grid (an ingredient any planks will do for cycles through them), smelting with its 10 seconds,
-  and fuels with how many items they smelt. Items inside a recipe open their own recipes,
+  and fuels with how many items they smelt. On a crafting table or a furnace, `U` also lists every
+  recipe made in it (JEI's catalysts). Items inside a recipe open their own recipes,
   `Backspace` goes back and `E` or `Escape` returns to the inventory. The `+` beside a crafting
   recipe moves its ingredients from the inventory into the open crafting grid (`Shift`: as many
   sets as you have); when it is greyed out, hovering it says why and shows what is missing. In
@@ -50,14 +51,18 @@ A fast, Minecraft-style voxel engine for Roblox.
   sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
   sunrises and sunsets, dark blue nights you can still find your way in (Minecraft's night sky
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
-  `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
+  A tunnel dug into a hillside darkens with the distance from its mouth, not the depth of the rock
+  above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
 - **Torches, lanterns and glowstone.** Light sources for the dark: torches (light 14) stand on
   blocks or hang on walls, leaning out like Minecraft's; lanterns (15) stand on a block or hang
-  under one; glowstone (15) is a glowing full block. Each gives off a Roblox PointLight, with
-  shadows when `Config.Render.Shadows` is on, so light stops at walls. Torches and lanterns pop off
-  and drop when the block holding them goes, and flowing water washes torches away. Recipes: 4
-  torches from coal or charcoal over a stick, a lantern from 8 iron nuggets around a torch,
-  glowstone from 4 glowstone dust.
+  under one; glowstone (15) is a glowing full block. Each gives off a Roblox PointLight. With
+  `Config.Render.Shadows` on, a torch's or lantern's light stops at walls; glowstone casts a shadow
+  like any full block (a glowstone roof keeps the sun out), so its own light has none and reaches
+  through a wall within its range. Torches and lanterns need a sturdy block to hang on, as in
+  Minecraft (not leaves, a chest or a cactus), pop off and drop when that block goes, and flowing
+  water washes torches away. Players walk through lanterns (in Minecraft they bump into them), but
+  a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
+  a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -72,15 +77,15 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Sounds.** Minecraft's sound events for everything that should make a sound: breaking, placing
   and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
   water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
-  swimming, chest lids, a lit furnace crackling, items picked up, tools breaking, armor put on,
-  getting hurt and dying, interface clicks and a rare rumble deep in caves. They are stand-ins made
-  from the eleven sounds every Roblox client ships, told apart by pitch, so nothing has to be
-  uploaded, and players hear what others do within 16 blocks. Each one can be replaced by your own
-  sound (see Extending).
+  swimming, chest lids, the furnace you are using crackling while it burns, items picked up, tools
+  breaking, armor put on, getting hurt and dying, interface clicks and a rare rumble deep in caves.
+  They are stand-ins made from the sounds every Roblox client ships, told apart by pitch, so
+  nothing has to be uploaded, and players hear what others do within 16 blocks. Each one can be
+  replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
-  falling sand and gravel, flowing water (Minecraft rules, including infinite sources) and grass
-  turning into dirt.
+  falling sand and gravel (which break into an item on a torch, Minecraft's torch trick), flowing
+  water (Minecraft rules, including infinite sources) and grass turning into dirt.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or double tap forward) with Minecraft's widening field of view, sneaking that
@@ -215,8 +220,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
   World/ClientWorld         nearby block data, edit lists, prediction
   Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
   Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
-                            LightingController (day, night and cave lighting),
-                            MeshOverlay + MeshRegions (far meshes)
+                            LightingController (day, night and cave lighting), SkyExposure (how
+                            much sky light reaches the camera), MeshOverlay + MeshRegions (far
+                            meshes)
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
@@ -257,7 +263,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
 | `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
-| `Render.Shadows`          | true    | Shadows on full detail chunks (far chunks never cast shadows).      |
+| `Render.Shadows`          | true    | Shadows on full detail chunks and of torch and lantern light (far chunks never cast shadows). |
 | `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
 | `Caves.RevealRadiusMax`   | 96      | Same in big caverns (the radius follows the open space around you). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
@@ -267,7 +273,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join.                              |
 | `Gameplay.GameModeCommand` | true   | Who may use `/gamemode`: everyone, nobody, or a user id list (the owner and Studio always may). |
-| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes.                  |
+| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes and the time (`/time set\|add`, `/gamerule`). |
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it.                 |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
@@ -283,7 +289,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
-| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves).            |
+| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the cave rumble still plays). |
 
 Lighting comes from `default.project.json`: Future technology, shadows and a dark ambient light. With
 `rojo serve` into an existing place, check that `Lighting.Technology` is Future (or LightingStyle
@@ -333,9 +339,10 @@ share one part template.
 
 **Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
 `ui.button.click`...; the full list is `src/shared/Sounds/SoundList.luau`) played with one of the
-eleven sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, jump,
-landing, swimming and splash, the explosion, `oof`, `ouch` and the volume slider's tick), as
-stand-ins told apart by pitch. To use your own, add a Folder named `IceVoxelSounds` to SoundService
+sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, landing,
+get-up rustle (chest lids, armor), free-fall wind (the cave rumble), swimming and splash, the
+explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
+told apart by pitch. To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
 
 ```
@@ -377,9 +384,14 @@ silence the world; a Scriptable camera hears from where it is.
 
 **A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
 offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from
-boxes; `support = "Down"` (or "Up", "North"...) makes it need a sturdy block there; `item =
-"Torch"` makes it a variant placed by and dropping another item (the name must be a block item:
-checked at load).
+boxes, and `bounds` is the box players aim at. `support = "Down"` (or "Up", "North"...) makes it
+need a sturdy block there, and with `behaviour = "Attached"` it pops off and drops when that block
+goes; `brokenByFluid = true` lets flowing water wash it away. `item = "Torch"` with `placeable =
+false` makes it a variant placed by and dropping another item (the name must be a block item:
+checked at load); without `placeable = false` it is an item of its own and drops itself.
+`obstructs = true` keeps a block that is not `solid` (a lantern) from being placed inside a
+player and lets falling sand land on it; `sturdy = false` keeps torches and lanterns off a solid
+cube (leaves, chests, cactus).
 
 **An item.** Items that are not blocks (armor, tools, materials) live in
 `src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured
@@ -473,7 +485,7 @@ biome only decides what grows and what the ground is made of.
 `Structures.registry` with the blocks it may grow on, and list it in a biome's `features`. Builders
 write in world coordinates; chunk clipping, cross-chunk consistency and LOD are handled for you.
 
-**A block behaviour.** Create a module in `src/server/Behaviours/` (see `Gravity.luau`) with
+**A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
 `onTick(world, ticker, x, y, z, block)` and set `behaviour = "YourModule"` on the block.
 
 **Server-side world access** from your own scripts:

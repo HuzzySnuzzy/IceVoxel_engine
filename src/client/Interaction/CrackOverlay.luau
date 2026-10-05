@@ -10,7 +10,11 @@
 	(s + 1) / 10 of them: the cracks spread as the stage rises. A faint dark layer deepens with
 	the stage too.
 
-	`show` only toggles visibility; everything is built once in `new`.
+	A block smaller than its cell (a lantern) passes its outline box (Blocks.outline, as the
+	selection highlight): the part takes that box, and each face shows the middle of the pattern
+	at the same size, like Minecraft's cracks on the block's own model.
+
+	`show` only toggles visibility and resizes; everything is built once in `new`.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -39,9 +43,13 @@ local FACES = {
 	Enum.NormalId.Left,
 	Enum.NormalId.Right,
 }
+-- The box axes (1 = X, 2 = Y, 3 = Z) across and down each face of FACES.
+local FACE_AXES = { { 1, 3 }, { 1, 3 }, { 1, 2 }, { 1, 2 }, { 3, 2 }, { 3, 2 } }
+-- A whole cell, as Blocks.outline gives boxes.
+local FULL_BOX = { 0, 0, 0, 1, 1, 1 }
 
 export type CrackOverlay = {
-	show: (self: CrackOverlay, x: number, y: number, z: number, stage: number) -> (),
+	show: (self: CrackOverlay, x: number, y: number, z: number, stage: number, box: { number }?) -> (),
 	hide: (self: CrackOverlay) -> (),
 	destroy: (self: CrackOverlay) -> (),
 }
@@ -130,6 +138,8 @@ type Self = CrackOverlay & {
 	faces: { Face },
 	stage: number,
 	visible: boolean,
+	-- The outline box the part was last sized for.
+	box: { number },
 }
 
 function CrackOverlay.new(): CrackOverlay
@@ -165,12 +175,22 @@ function CrackOverlay.new(): CrackOverlay
 		shade.BorderSizePixel = 0
 		shade.Parent = gui
 
+		-- The whole pattern, centred on the face: a smaller face (a smaller box) crops its middle.
+		local pattern = Instance.new("Frame")
+		pattern.Name = "Pattern"
+		pattern.AnchorPoint = Vector2.new(0.5, 0.5)
+		pattern.Position = UDim2.fromScale(0.5, 0.5)
+		pattern.Size = UDim2.fromOffset(CANVAS, CANVAS)
+		pattern.BackgroundTransparency = 1
+		pattern.ZIndex = 2
+		pattern.Parent = gui
+
 		local lines: { Frame } = {}
 		for i, segment in crackPattern(7919 * index + 104729) do
 			local frame = line(segment)
 			frame.Name = `Crack{i}`
 			frame.ZIndex = 2
-			frame.Parent = gui
+			frame.Parent = pattern
 			lines[i] = frame
 		end
 		gui.Parent = part
@@ -183,19 +203,38 @@ function CrackOverlay.new(): CrackOverlay
 		faces = faces,
 		stage = -1,
 		visible = false,
+		box = FULL_BOX,
 	}, CrackOverlay) :: any
 	return self
 end
 
--- Shows destroy stage `stage` (0..9, clamped) on block (x, y, z).
-function CrackOverlay.show(self: Self, x: number, y: number, z: number, stage: number)
+--[[
+	Shows destroy stage `stage` (0..9, clamped) on block (x, y, z): on its whole cell, or on `box`
+	(Blocks.outline: min x, y, z, max x, y, z in blocks within the cell) for a block smaller than it.
+]]
+function CrackOverlay.show(self: Self, x: number, y: number, z: number, stage: number, box: { number }?)
 	stage = math.clamp(math.floor(stage), 0, STAGES - 1)
 	local part = self.part
 	if part.Parent ~= workspace.CurrentCamera then
 		-- The camera was replaced.
 		part.Parent = workspace.CurrentCamera
 	end
-	part.CFrame = CFrame.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
+	local outline = box or FULL_BOX
+	if outline ~= self.box then
+		self.box = outline
+		local size = { outline[4] - outline[1], outline[5] - outline[2], outline[6] - outline[3] }
+		part.Size = Vector3.new(size[1], size[2], size[3]) * BLOCK + Vector3.one * (2 * LIFT)
+		-- Canvas pixels per block stay the same, so the cracks keep their size.
+		for index, face in self.faces do
+			local axes = FACE_AXES[index]
+			face.gui.CanvasSize = Vector2.new(CANVAS * size[axes[1]], CANVAS * size[axes[2]])
+		end
+	end
+	part.CFrame = CFrame.new(
+		(x + (outline[1] + outline[4]) / 2) * BLOCK,
+		(y + (outline[2] + outline[5]) / 2) * BLOCK,
+		(z + (outline[3] + outline[6]) / 2) * BLOCK
+	)
 	if stage ~= self.stage then
 		self.stage = stage
 		for _, face in self.faces do

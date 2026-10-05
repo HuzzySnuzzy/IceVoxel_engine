@@ -9,9 +9,10 @@
 	    mesher merges boxes per appearance, and the renderer keeps one part template per appearance,
 	  * flat buffer lookup tables used by the hot generation / meshing loops,
 	  * light sources and attached blocks (torches, lanterns): `lightLut`, the `shape` boxes and
-	    `bounds` they are drawn and aimed at with, what they hang on (`canSurvive`) and which
-	    variant a placement makes (`placementFor`, `torchFor`), following Minecraft's TorchBlock,
-	    WallTorchBlock, LanternBlock and StandingAndWallBlockItem,
+	    `bounds` they are drawn and aimed at with, what they hang on (`canSurvive`, `isSturdy`),
+	    which variant a placement makes (`placementFor`, `torchFor`) and what keeps them out of
+	    players (`obstruction`), following Minecraft's TorchBlock, WallTorchBlock, LanternBlock
+	    and StandingAndWallBlockItem,
 	  * sound types (`sound`, `soundLut`, `soundType`): what the block sounds like when it is
 	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`).
 ]]
@@ -28,6 +29,8 @@ export type BlockDef = {
 	transparency: number,
 	reflectance: number,
 	solid: boolean,
+	-- Torches and lanterns can hang on it (see Blocks.isSturdy).
+	sturdy: boolean,
 	replaceable: boolean,
 	breakable: boolean,
 	placeable: boolean,
@@ -64,6 +67,8 @@ export type BlockDef = {
 	-- (pixels 0..16); see BlockList.
 	shape: { ShapeBox }?,
 	bounds: Bounds,
+	-- Not solid, but has a collision box in Minecraft (lanterns; see Blocks.obstruction).
+	obstructs: boolean,
 	-- The direction of the block it hangs on (nil: needs nothing) and the item placing / dropping
 	-- it when that is not the block itself.
 	support: string?,
@@ -208,6 +213,7 @@ for index, spec in BlockList do
 		transparency = spec.transparency or 0,
 		reflectance = spec.reflectance or 0,
 		solid = solid,
+		sturdy = solid and drawn and spec.shape == nil and spec.sturdy ~= false,
 		replaceable = spec.replaceable or false,
 		breakable = breakable,
 		placeable = if spec.placeable ~= nil then spec.placeable else (drawn and solid),
@@ -235,6 +241,7 @@ for index, spec in BlockList do
 		lightColor = spec.lightColor or DEFAULT_LIGHT_COLOR,
 		shape = spec.shape,
 		bounds = spec.bounds or (if spec.shape then shapeBounds(spec.shape) else FULL_CELL),
+		obstructs = spec.obstructs == true,
 		support = spec.support,
 		item = spec.item,
 		brokenByFluid = spec.brokenByFluid == true,
@@ -455,9 +462,10 @@ for _, def in defs do
 	assert(def.support == nil or DIRECTIONS[def.support], `Block {def.name} has unknown support {def.support}`)
 end
 
--- 1 if attached blocks can hang on the block: solid full cubes (Minecraft's isFaceSturdy).
+-- 1 if attached blocks can hang on the block: solid full cubes (Minecraft's isFaceSturdy), but
+-- not those whose support shape is smaller (BlockList `sturdy = false`: leaves, chests, cactus).
 Blocks.sturdyLut = u8Lut(function(def)
-	return def.solid and def.kind ~= Blocks.KIND_NONE and def.shape == nil
+	return def.sturdy
 end)
 
 function Blocks.isSturdy(id: number): boolean
@@ -693,6 +701,27 @@ end
 
 function Blocks.outline(id: number): { number }?
 	return outlines[id]
+end
+
+--[[
+	The box a block fills for Minecraft's collision checks that move nothing, in block units within
+	its cell like `outline` (minX, minY, minZ, maxX, maxY, maxZ): a solid block's whole cell, an
+	`obstructs` block's outline (a lantern), else nil (torches, air, water). A block isn't placed
+	where that box overlaps a player (Minecraft's BlockItem.canPlace; server Network/ServerNet and
+	the client's BlockInteraction), and falling blocks land on it (server Behaviours/Gravity).
+]]
+local WHOLE_CELL = table.freeze({ 0, 0, 0, 1, 1, 1 })
+local obstructions: { [number]: { number } } = {}
+for id, def in defs do
+	if def.solid then
+		obstructions[id] = WHOLE_CELL
+	elseif def.obstructs then
+		obstructions[id] = outlines[id] or WHOLE_CELL
+	end
+end
+
+function Blocks.obstruction(id: number): { number }?
+	return obstructions[id]
 end
 
 return Blocks

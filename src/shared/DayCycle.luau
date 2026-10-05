@@ -6,9 +6,9 @@
 	             sunset, 18000 midnight. It keeps counting past 24000 (day 1, 2 ...), as Minecraft's
 	             dayTime does. At 20 ticks a second a day lasts 20 minutes; Config.Time.DayLength
 	             changes that (`rate`).
-	  Angle      Minecraft's celestial angle (DimensionType.timeOfDay): 0 is noon, 0.5 midnight, and
-	             the sun lingers a little around noon and midnight. ClockTime turns it into
-	             Roblox's Lighting.ClockTime, so the sun stands where Minecraft draws it.
+	  Angle      Minecraft's celestial angle (DimensionType.timeOfDay): 0 is noon, 0.5 midnight;
+	             the sun lingers a little around noon and passes midnight fastest. ClockTime turns
+	             it into Roblox's Lighting.ClockTime, so the sun stands where Minecraft draws it.
 	  Sky light  Level.getSkyDarken (0 by day to 11 at night, so the night sky light is 4 of 15),
 	             and the client's smooth 0..1 version (skyBrightness), used to blend lighting.
 	             Both, and the sunrise glow, only depend on how high the sun stands (sunHeight), so

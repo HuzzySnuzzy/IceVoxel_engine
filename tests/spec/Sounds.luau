@@ -2,7 +2,7 @@
 	Sounds: the catalogue (Shared/Sounds: Minecraft's event names, block sound types and their
 	per action scaling, lookups for chests, armor and falls, override names), the Protocol `Sound`
 	message, the server's routing of sounds to the players near them (Audio/Sounds), chest lids
-	(Containers' onOpeners) and where item pickups sound (EntityWorld).
+	(Containers' onOpeners, also through InventoryState) and where item pickups sound (EntityWorld).
 ]]
 
 return function(t, shared, require, server, _client)
@@ -14,6 +14,7 @@ return function(t, shared, require, server, _client)
 	local SoundList = require(shared.Sounds.SoundList)
 	local ServerSounds = require(server.Audio.Sounds)
 	local Containers = require(server.Players.Containers)
+	local InventoryState = require(server.Players.InventoryState)
 	local EntityWorld = require(server.Entities.EntityWorld)
 
 	local B = Blocks.id
@@ -506,6 +507,33 @@ return function(t, shared, require, server, _client)
 		plain:get(0, 0, 0, chest)
 		plain:addViewer(0, 0, 0, "a")
 		plain:removeViewer(0, 0, 0, "a")
+	end)
+
+	t.test("sounds: a chest broken while players have it open makes no closing sound", function()
+		local store = Containers.new()
+		local calls = {}
+		store.onOpeners = function(x, y, z, _container, opened)
+			table.insert(calls, `{x},{y},{z} {if opened then "open" else "close"}`)
+		end
+		local state = InventoryState.new(store)
+		state:join("a")
+		state:join("b")
+		state:open("a", 1, 2, 3, B.Chest)
+		state:open("b", 1, 2, 3, B.Chest)
+		state:window("a").container.slots[1] = { item = I.Dirt, count = 3 }
+		t.eq(table.concat(calls, ";"), "1,2,3 open")
+		-- Broken (Players/Inventories.removeContainer): its viewers' windows close, silently.
+		local contents = state:removeContainer(1, 2, 3)
+		t.eq(table.concat(calls, ";"), "1,2,3 open", "no lid closing")
+		t.eq(#contents, 1, "its contents still drop")
+		t.eq(state:openPosition("a"), nil, "closed for a")
+		t.eq(state:openPosition("b"), nil, "and for b")
+		t.eq(state:window("b").id, 0)
+		t.eq(store.count, 0)
+		-- Closed by its last viewer, a chest still closes with a sound.
+		state:open("a", 4, 5, 6, B.Chest)
+		state:close("a")
+		t.eq(table.concat(calls, ";"), "1,2,3 open;4,5,6 open;4,5,6 close")
 	end)
 
 	t.test("sounds: pickups are heard at the item", function()

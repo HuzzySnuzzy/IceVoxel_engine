@@ -1,9 +1,10 @@
 --[[
 	Light sources: torches, wall torches, lanterns and glowstone. Their light values and shapes,
 	which variant a click places (Minecraft's TorchBlock / WallTorchBlock / LanternBlock and
-	StandingAndWallBlockItem), what holds them up (Blocks.canSurvive, EditRules.supported), the
-	server's attached-block behaviour and water washing torches away (with their drops), recipes,
-	items and aiming at their outlines (VoxelRaycast).
+	StandingAndWallBlockItem), what holds them up (Blocks.canSurvive, EditRules.supported, sturdy
+	blocks), not placing a lantern inside a player (EditRules.obstructs), the server's
+	attached-block behaviour, water washing torches away and falling sand breaking on them (with
+	their drops), recipes, items and aiming at their outlines (VoxelRaycast).
 ]]
 
 return function(t, shared, require, server)
@@ -96,6 +97,18 @@ return function(t, shared, require, server)
 		t.ok(Blocks.isOpaque(GLOWSTONE) and Blocks.isSturdy(GLOWSTONE), "glowstone is a full block")
 		t.eq(Blocks.outline(GLOWSTONE), nil)
 		t.eq(Blocks.outline(STONE), nil)
+		-- Minecraft's collision boxes: none for torches, the outline for lanterns (players still
+		-- walk through those here, but they aren't placed inside one), the cell for full blocks.
+		for _, block in { TORCH, NORTH, SOUTH, WEST, EAST } do
+			t.eq(Blocks.obstruction(block), nil, `{Blocks.get(block).name} has no collision box`)
+		end
+		t.eq(Blocks.obstruction(LANTERN), Blocks.outline(LANTERN))
+		t.eq(Blocks.obstruction(HANGING), Blocks.outline(HANGING))
+		t.ok(Blocks.get(LANTERN).obstructs and not Blocks.get(TORCH).obstructs)
+		t.eq(table.concat(Blocks.obstruction(STONE) :: { number }, ","), "0,0,0,1,1,1")
+		t.eq(table.concat(Blocks.obstruction(GLOWSTONE) :: { number }, ","), "0,0,0,1,1,1")
+		t.eq(Blocks.obstruction(AIR), nil)
+		t.eq(Blocks.obstruction(WATER), nil)
 		-- Minecraft's outlines: torch 6..10 x 0..10, wall torch 5 deep against the wall.
 		local torch = Blocks.outline(TORCH) :: { number }
 		t.near(torch[1], 6 / 16, 1e-9)
@@ -210,9 +223,13 @@ return function(t, shared, require, server)
 			{
 				Stone = true,
 				Glass = true,
-				OakLeaves = true,
 				Glowstone = true,
-				Chest = true,
+				CraftingTable = true,
+				Furnace = true,
+				OakLeaves = false,
+				SpruceLeaves = false,
+				Chest = false,
+				Cactus = false,
 				Air = false,
 				Torch = false,
 				Lantern = false,
@@ -237,6 +254,58 @@ return function(t, shared, require, server)
 		t.ok(Blocks.canSurvive(STONE, ceiling, 5, 5, 5), "plain blocks need nothing")
 		t.ok(EditRules.supported(STONE, sparse({}), 5, 5, 5))
 		t.ok(not EditRules.supported(9999, sparse({}), 0, 0, 0), "unknown block")
+	end)
+
+	t.test("placement: leaves, chests and cactus hold up nothing (Minecraft's support shapes)", function()
+		local weak = { "OakLeaves", "BirchLeaves", "SpruceLeaves", "AcaciaLeaves", "JungleLeaves", "Chest", "Cactus" }
+		for _, name in weak do
+			local block = id[name]
+			t.ok(Blocks.isSolid(block), `{name} is still solid`)
+			t.ok(not Blocks.isSturdy(block), `{name} is not sturdy`)
+			t.ok(not Blocks.get(block).sturdy, name)
+			t.eq(buffer.readu8(Blocks.sturdyLut, block), 0, name)
+			-- Not under a hanging lantern, nor beside a wall torch, nor under a standing lantern.
+			t.ok(not Blocks.canSurvive(HANGING, sparse({ ["0,3,0"] = block }), 0, 2, 0), `lantern under {name}`)
+			t.ok(not Blocks.canSurvive(EAST, sparse({ ["-1,1,0"] = block }), 0, 1, 0), `wall torch on {name}`)
+			t.ok(not EditRules.supported(LANTERN, sparse({ ["0,0,0"] = block }), 0, 1, 0), `lantern on {name}`)
+			-- Clicking its top places nothing (no other side holds a torch).
+			local look = { 0, -1, 0 }
+			local world = sparse({ ["0,0,0"] = block })
+			t.eq(Blocks.placementFor(TORCH, 0, 1, 0, look[1], look[2], look[3], world, 0, 1, 0), nil, name)
+		end
+		for _, name in { "Stone", "Glass", "Glowstone", "OakLog", "Planks", "Sand", "Ice", "Furnace" } do
+			t.ok(Blocks.isSturdy(id[name]), `{name} is sturdy`)
+			t.ok(Blocks.get(id[name]).sturdy, name)
+		end
+		for _, block in { AIR, WATER, TORCH, LANTERN } do
+			t.ok(not Blocks.get(block).sturdy, Blocks.get(block).name)
+		end
+	end)
+
+	t.test("placement: lanterns and solid blocks aren't placed inside a player, torches are", function()
+		-- A player standing at (0.5, 1, 0.5): Minecraft's 0.6 x 1.8 hull.
+		local function obstructs(block: number, x: number, y: number, z: number, fx: number?): boolean
+			local feetX = fx or 0.5
+			return EditRules.obstructs(block, x, y, z, feetX - 0.3, 1, 0.2, feetX + 0.3, 2.8, 0.8)
+		end
+		t.ok(obstructs(STONE, 0, 1, 0), "stone in the legs")
+		t.ok(obstructs(STONE, 0, 2, 0), "stone in the head")
+		t.ok(obstructs(LANTERN, 0, 1, 0), "a lantern at the feet")
+		t.ok(obstructs(HANGING, 0, 2, 0), "a hanging lantern at the head")
+		for _, block in { TORCH, EAST, WEST, NORTH, SOUTH } do
+			t.ok(not obstructs(block, 0, 1, 0), `{Blocks.get(block).name}: torches have no collision box`)
+		end
+		t.ok(not obstructs(AIR, 0, 1, 0))
+		t.ok(not obstructs(WATER, 0, 1, 0))
+		t.ok(not obstructs(STONE, 0, 3, 0), "above the head")
+		t.ok(not obstructs(STONE, 0, 0, 0), "under the feet (touching)")
+		t.ok(not obstructs(LANTERN, 1, 1, 0), "the next cell")
+		-- A player at the edge of a cell keeps out of a stone there, but not of the lantern's
+		-- outline (5..11 pixels): the outline counts, not the cell.
+		t.ok(obstructs(STONE, 1, 1, 0, 0.75), "stone overlaps a player reaching into its cell")
+		t.ok(not obstructs(LANTERN, 1, 1, 0, 0.75), "the lantern's outline does not")
+		t.ok(obstructs(LANTERN, 1, 1, 0, 1.1), "nearer it does")
+		t.ok(not obstructs(9999, 0, 1, 0), "unknown block")
 	end)
 
 	t.test("placement: placementFor tries the clicked face, then where the player looks", function()
@@ -577,6 +646,24 @@ return function(t, shared, require, server)
 		Drops.set(nil)
 	end)
 
+	t.test("attached: a support turned into leaves, a chest or cactus drops what hung on it", function()
+		local world, settle, dropped = newWorld()
+		world:setBlock(0, FLOOR, 0, TORCH)
+		world:setBlock(2, FLOOR, 0, LANTERN)
+		world:setBlock(4, FLOOR + 2, 0, STONE)
+		world:setBlock(4, FLOOR + 1, 0, HANGING)
+		settle()
+		world:setBlock(0, FLOOR - 1, 0, id.OakLeaves)
+		world:setBlock(2, FLOOR - 1, 0, id.Chest)
+		world:setBlock(4, FLOOR + 2, 0, id.Cactus)
+		settle()
+		t.eq(world:getBlock(0, FLOOR, 0), AIR, "not on leaves")
+		t.eq(world:getBlock(2, FLOOR, 0), AIR, "not on a chest")
+		t.eq(world:getBlock(4, FLOOR + 1, 0), AIR, "not under cactus")
+		t.eq(#dropped, 3)
+		Drops.set(nil)
+	end)
+
 	t.test("attached: a torch with an unloaded support waits instead of breaking", function()
 		local world, _, dropped, ticker = newWorld()
 		-- (Edge of the loaded area: x = 47 is the last loaded column, its east neighbour is not.)
@@ -613,6 +700,101 @@ return function(t, shared, require, server)
 			end
 		end
 		t.eq(torches, 2, "both torches dropped")
+		Drops.set(nil)
+	end)
+
+	--[[ Falling sand and gravel on torches and lanterns (Behaviours/Gravity) ]]
+
+	local SAND, GRAVEL = id.Sand, id.Gravel
+
+	-- The column (x, z) from the floor up, by name.
+	local function column(world, x: number, z: number, height: number): string
+		local names = {}
+		for y = FLOOR, FLOOR + height - 1 do
+			table.insert(names, Blocks.get(world:getBlock(x, y, z)).name)
+		end
+		return table.concat(names, " ")
+	end
+
+	t.test("gravity: sand falling onto a torch breaks into an item and the torch stays", function()
+		local world, settle, dropped = newWorld()
+		world:setBlock(0, FLOOR, 0, TORCH)
+		settle()
+		world:setBlock(0, FLOOR + 6, 0, SAND)
+		settle()
+		t.eq(column(world, 0, 0, 8), "Torch Air Air Air Air Air Air Air")
+		t.eq(#dropped, 1)
+		t.eq(dropped[1].item, Items.id.Sand)
+		t.eq(dropped[1].count, 1)
+		t.eq(`{dropped[1].x},{dropped[1].y},{dropped[1].z}`, `0,{FLOOR},0`, "in the torch's cell")
+
+		-- A column of gravel: every block of it, each dropping itself (not flint).
+		table.clear(dropped)
+		for y = FLOOR + 3, FLOOR + 5 do
+			world:setBlock(0, y, 0, GRAVEL)
+		end
+		settle()
+		t.eq(column(world, 0, 0, 7), "Torch Air Air Air Air Air Air")
+		t.eq(#dropped, 3)
+		for _, drop in dropped do
+			t.eq(drop.item, Items.id.Gravel)
+			t.eq(drop.y, FLOOR)
+		end
+		Drops.set(nil)
+	end)
+
+	t.test("gravity: sand placed right on a torch stays (it never falls)", function()
+		local world, settle, dropped = newWorld()
+		world:setBlock(0, FLOOR, 0, TORCH)
+		world:setBlock(0, FLOOR + 1, 0, SAND)
+		world:setBlock(0, FLOOR + 2, 0, GRAVEL)
+		settle()
+		t.eq(column(world, 0, 0, 4), "Torch Sand Gravel Air")
+		t.eq(#dropped, 0)
+		-- Breaking the torch lets them fall to the floor.
+		world:setBlock(0, FLOOR, 0, AIR)
+		settle()
+		t.eq(column(world, 0, 0, 4), "Sand Gravel Air Air")
+		Drops.set(nil)
+	end)
+
+	t.test("gravity: sand lands on a lantern's box, inside its cell, and breaks", function()
+		local world, settle, dropped = newWorld()
+		world:setBlock(0, FLOOR, 0, LANTERN)
+		world:setBlock(0, FLOOR + 5, 0, SAND)
+		settle()
+		t.eq(column(world, 0, 0, 6), "Lantern Air Air Air Air Air")
+		t.eq(#dropped, 1)
+		t.eq(dropped[1].item, Items.id.Sand)
+		t.eq(dropped[1].y, FLOOR, "in the lantern's cell")
+		-- Placed right on it, it stays.
+		table.clear(dropped)
+		world:setBlock(0, FLOOR + 1, 0, SAND)
+		settle()
+		t.eq(column(world, 0, 0, 3), "Lantern Sand Air")
+		t.eq(#dropped, 0)
+		Drops.set(nil)
+	end)
+
+	t.test("gravity: sand falls past wall torches with nothing under them, onto the floor", function()
+		local world, settle, dropped = newWorld()
+		-- Two wall torches up a wall, two blocks above the floor.
+		for y = FLOOR + 2, FLOOR + 3 do
+			world:setBlock(-1, y, 0, STONE)
+			world:setBlock(0, y, 0, EAST)
+		end
+		-- And one right above the floor, by another wall.
+		world:setBlock(4, FLOOR, 0, STONE)
+		world:setBlock(3, FLOOR, 0, WEST)
+		settle()
+		world:setBlock(0, FLOOR + 7, 0, SAND)
+		world:setBlock(3, FLOOR + 7, 0, SAND)
+		settle()
+		t.eq(column(world, 0, 0, 8), "Sand Air WallTorchEast WallTorchEast Air Air Air Air", "through both")
+		t.eq(column(world, 3, 0, 8), "WallTorchWest Air Air Air Air Air Air Air", "into the torch's cell")
+		t.eq(#dropped, 1)
+		t.eq(`{dropped[1].x},{dropped[1].y}`, `3,{FLOOR}`)
+		t.eq(dropped[1].item, Items.id.Sand)
 		Drops.set(nil)
 	end)
 end

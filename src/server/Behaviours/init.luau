@@ -9,7 +9,7 @@
 	  onNeighborChanged   (world, ticker, x, y, z, block) -> ()   override the default scheduling
 	  onTick              (world, ticker, x, y, z, block) -> ()   the actual update
 
-	See Gravity.luau for the smallest example.
+	See Grass.luau for the smallest example.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

@@ -1,7 +1,7 @@
 --!strict
 --[[
 	The game rules ServerNet applies to block edits, kept free of Roblox APIs so the tests can run
-	them. (Rate limits, reach and the player overlap check stay in ServerNet.)
+	them. (Rate limits, reach and finding the players' hulls stay in ServerNet.)
 
 	  Breaking  any breakable block (hardness >= 0). Creative players break at once. Survival
 	            players must have started mining that very block (a Mine message) long enough
@@ -11,8 +11,11 @@
 	            Variants placed by another block's item (wall torches by the Torch, a hanging
 	            lantern by the Lantern: BlockList `item`) count as placeable. Blocks that hang on
 	            another one (`support`: torches, lanterns) need it to be sturdy (`supported`,
-	            Blocks.canSurvive). Survival placement also needs the item in hand
-	            (Players/Inventories.place, which maps a variant to its item with Items.ofBlock).
+	            Blocks.canSurvive). Nothing is placed where it would overlap a player (`obstructs`:
+	            a solid block's cell, a lantern's outline; Minecraft's BlockItem.canPlace), but
+	            torches, which have no collision box, may be. Survival placement also needs the
+	            item in hand (Players/Inventories.place, which maps a variant to its item with
+	            Items.ofBlock).
 	  Drops     survival breaks drop Items.drops(block, tool): blocks that need a tool (stone,
 	            ores) drop nothing without a good enough one. A container's contents drop in both
 	            modes (Minecraft's Containers.dropContents runs whatever the game mode).
@@ -91,6 +94,33 @@ function EditRules.supported(
 	z: number
 ): boolean
 	return def(block) ~= nil and Blocks.canSurvive(block, getBlock, x, y, z)
+end
+
+--[[
+	Would `block` placed at (x, y, z) overlap a player's hull, the box (minX, minY, minZ) to (maxX,
+	maxY, maxZ)? Its Blocks.obstruction counts: a solid block's cell, a lantern's outline, nothing
+	for a torch. Boxes that only touch don't overlap.
+]]
+function EditRules.obstructs(
+	block: number,
+	x: number,
+	y: number,
+	z: number,
+	minX: number,
+	minY: number,
+	minZ: number,
+	maxX: number,
+	maxY: number,
+	maxZ: number
+): boolean
+	local box = Blocks.obstruction(block)
+	return box ~= nil
+		and maxX > x + box[1]
+		and minX < x + box[4]
+		and maxY > y + box[2]
+		and minY < y + box[5]
+		and maxZ > z + box[3]
+		and minZ < z + box[6]
 end
 
 -- What breaking `block` with `tool` drops as an item (nil = nothing; creative players get none).
