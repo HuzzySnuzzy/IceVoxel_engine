@@ -592,6 +592,42 @@ return function(t, shared, require)
 		t.eq(state.pose, "standing")
 	end)
 
+	t.test("physics: isInWall: the eyes in a solid, opaque block (Entity.isInWall)", function()
+		local GLASS = Blocks.id.Glass
+		-- Stone at x = 0, glass at x = 3, water at x = 6, unloaded at x = 9 (y = 5, z = 0).
+		local cells: PlayerPhysics.World = {
+			getBlock = function(x: number, y: number, z: number): number?
+				if y ~= 5 or z ~= 0 then
+					return AIR
+				end
+				return if x == 0
+					then STONE
+					elseif x == 3 then GLASS
+					elseif x == 6 then WATER
+					elseif x == 9 then nil
+					else AIR
+			end,
+		}
+		t.ok(PlayerPhysics.isInWall(cells, 0.5, 5.5, 0.5), "stone")
+		t.ok(not PlayerPhysics.isInWall(cells, 3.5, 5.5, 0.5), "glass lets the player breathe")
+		t.ok(not PlayerPhysics.isInWall(cells, 6.5, 5.5, 0.5), "water")
+		t.ok(not PlayerPhysics.isInWall(cells, 9.5, 5.5, 0.5), "unloaded blocks")
+		t.ok(not PlayerPhysics.isInWall(cells, 0.5, 6.5, 0.5), "air")
+		-- A box 0.48 wide (0.8 of the hull's width) around the eyes: 0.25 from the stone is out of
+		-- it, 0.2 in; it is 1e-6 tall.
+		t.ok(not PlayerPhysics.isInWall(cells, 1.25, 5.5, 0.5), "0.25 from the stone")
+		t.ok(PlayerPhysics.isInWall(cells, 1.2, 5.5, 0.5), "0.2 from it")
+		t.ok(not PlayerPhysics.isInWall(cells, 0.5, 6.001, 0.5), "just above it")
+		-- A hull that collides normally never has its eyes in a wall, in any pose: standing against
+		-- the stone, or crawling under it.
+		for _, pose in { "standing", "crouching", "crawling" } do
+			local eye = PlayerPhysics.dimensions(pose :: PlayerPhysics.Pose).eye
+			t.ok(not PlayerPhysics.isInWall(cells, 1.3, 4 + eye, 0.5), `{pose}, against the stone`)
+		end
+		local crawling = PlayerPhysics.dimensions("crawling")
+		t.ok(not PlayerPhysics.isInWall(cells, 0.5, 5 - crawling.height + crawling.eye, 0.5), "crawling under it")
+	end)
+
 	--[[ Creative flight (Minecraft 1.20.1: LocalPlayer.aiStep, Player.travel) ]]
 
 	-- A player who may fly, flying in the air at (x, y, z).
@@ -881,6 +917,253 @@ return function(t, shared, require)
 				)
 			end
 			return `{state.x},{state.y},{state.z},{state.vx},{state.vy},{state.vz},{state.flying}`
+		end
+		t.eq(run(), run())
+	end)
+
+	--[[ Spectators (Minecraft 1.20.1: Player.noPhysics, isAlwaysFlying, Abilities.flyingSpeed) ]]
+
+	local GameMode = require(shared.GameMode)
+
+	-- A spectator at (x, y, z).
+	local function spectator(x: number, y: number, z: number): PlayerPhysics.State
+		local state = PlayerPhysics.new(x, y, z)
+		PlayerPhysics.setGameMode(state, GameMode.SPECTATOR)
+		return state
+	end
+	-- Solid rock everywhere.
+	local rock = physicsWorld(function()
+		return STONE
+	end)
+	-- Steady speed (blocks per tick) of `state` after `ticks` ticks of input `i` in `world`.
+	local function steady(state: PlayerPhysics.State, i: PlayerPhysics.Input, world, ticks: number): (number, number)
+		local x0, y0 = state.x, state.y
+		for _ = 1, ticks - 1 do
+			x0, y0 = state.x, state.y
+			PlayerPhysics.tick(state, i, world)
+		end
+		return state.x - x0, state.y - y0
+	end
+
+	t.test("spectator: flies through walls, floors and unloaded blocks, never on the ground", function()
+		local state = spectator(0.5, 10, 0.5)
+		t.ok(state.noClip and state.flying and state.mayFly, "a spectator flies, through blocks")
+		for _ = 1, 40 do
+			local events = PlayerPhysics.tick(state, input(1, 0), rock)
+			t.ok(not events.landed and not events.jumped and events.stepUp == 0, "nothing happens to them")
+			t.ok(not state.onGround and not state.horizontalCollision and not state.verticalCollision)
+		end
+		t.ok(state.x > 15, `went 15 blocks into solid rock: {state.x}`)
+		t.near(state.y, 10, 1e-9, "no gravity")
+		t.eq(state.pose, "standing", "stands, even in rock")
+		t.ok(not state.crouching)
+
+		-- Sneak sinks through the floor, jump rises through the ceiling.
+		local ground = physicsWorld(function(_x, y, _z)
+			return if y < 10 then STONE else nil
+		end)
+		local diver = spectator(0.5, 13, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(diver, input(0, 0, { sneak = true }), ground)
+		end
+		t.ok(diver.y < 7, `sank through the stone below y = 10: {diver.y}`)
+		t.eq(diver.pose, "standing", "no crouching when sneaking")
+		local riser = spectator(0.5, 2, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(riser, input(0, 0, { jump = true }), rock)
+		end
+		t.ok(riser.y > 8, `rose up through the rock: {riser.y}`)
+
+		local void = {
+			getBlock = function(): number?
+				return nil
+			end,
+		}
+		local lost = spectator(0.5, 50, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(lost, input(0, 1), void)
+		end
+		t.ok(lost.z > 5, `unloaded blocks don't stop them either: {lost.z}`)
+	end)
+
+	t.test("spectator: flying speed 0.05, doubled sprinting, jump / sneak 3 x it", function()
+		-- Horizontally: 0.98 x speed / 0.09 a tick, as creative flight (10.89 m/s, 21.78 sprinting).
+		local dx = steady(spectator(0.5, 50, 0.5), input(1, 0), rock, 200)
+		t.near(dx * 20, 10.8889, 0.0005, "flying through rock at creative's speed")
+		dx = steady(spectator(0.5, 50, 0.5), input(1, 0, { sprint = true }), rock, 200)
+		t.near(dx * 20, 21.7778, 0.0005, "the sprint key doubles it")
+		-- Vertically: 7.5 x the flying speed a tick (0.375 blocks).
+		local _, dy = steady(spectator(0.5, 50, 0.5), input(0, 0, { jump = true }), rock, 100)
+		t.near(dy, 0.375, 1e-4, "rises 0.375 blocks a tick")
+		_, dy = steady(spectator(0.5, 500, 0.5), input(0, 0, { sneak = true, sprint = true }), rock, 100)
+		t.near(dy, -0.375, 1e-4, "sprinting doesn't speed up sinking")
+
+		-- Tick by tick: jump adds 0.05F x 3.0F, the vertical speed keeps 0.6 of itself.
+		local state = spectator(0.5, 50, 0.5)
+		local y, vy = 50, 0
+		for tick = 1, 10 do
+			PlayerPhysics.tick(state, input(0, 0, { jump = true }), rock)
+			vy += 0.15000000596046448
+			y += vy
+			vy *= 0.6
+			t.ok(near(state.y, y, 1e-12) and near(state.vy, vy, 1e-12), `tick {tick}: {state.y} vs {y}`)
+		end
+
+		-- Double tapping forward never sprints (never on the ground); no input, no drift.
+		local tapper = spectator(0.5, 50, 0.5)
+		for tick = 1, 10 do
+			PlayerPhysics.tick(tapper, input(if tick == 1 or tick == 3 then 1 else 0, 0), rock)
+		end
+		t.ok(not tapper.sprinting, "a double tap doesn't sprint")
+		local idle = spectator(0.5, 50, 0.5)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(idle, input(0, 0), rock)
+		end
+		t.ok(idle.x == 0.5 and idle.y == 50 and idle.z == 0.5, "hovers in place")
+	end)
+
+	t.test("spectator: the mouse wheel changes the flying speed by 0.005, between 0 and 0.2", function()
+		local state = spectator(0.5, 50, 0.5)
+		t.eq(state.flyingSpeed, PlayerPhysics.FLYING_SPEED)
+		t.eq(PlayerPhysics.FLYING_SPEED, 0.05000000074505806, "0.05F")
+		t.near(PlayerPhysics.scrollFlyingSpeed(state, 1), 0.055, 1e-8, "one notch up")
+		t.near(PlayerPhysics.scrollFlyingSpeed(state, -2), 0.045, 1e-8, "two down")
+		t.eq(PlayerPhysics.scrollFlyingSpeed(state, 100), PlayerPhysics.MAX_FLYING_SPEED, "at most 0.2F")
+		t.eq(PlayerPhysics.MAX_FLYING_SPEED, 0.20000000298023224)
+		t.eq(PlayerPhysics.scrollFlyingSpeed(state, -100), 0, "at least 0")
+		-- Each value is a float, like Minecraft's: 0.05F + 0.005F (rounded) and so on.
+		local f = buffer.create(4)
+		local function float(v: number): number
+			buffer.writef32(f, 0, v)
+			return buffer.readf32(f, 0)
+		end
+		state.flyingSpeed = PlayerPhysics.FLYING_SPEED
+		local expected = PlayerPhysics.FLYING_SPEED
+		for _ = 1, 30 do
+			expected = math.min(float(expected + float(PlayerPhysics.FLYING_SPEED_STEP)), 0.20000000298023224)
+			t.eq(PlayerPhysics.scrollFlyingSpeed(state, 1), expected)
+		end
+
+		-- Speed 0 stops them; 0.2 is four times creative's (43.56 m/s; 1.5 blocks a tick up).
+		local stopped = spectator(0.5, 50, 0.5)
+		PlayerPhysics.scrollFlyingSpeed(stopped, -10)
+		for _ = 1, 20 do
+			PlayerPhysics.tick(stopped, input(1, 0, { jump = true, sprint = true }), rock)
+		end
+		t.ok(near(stopped.x, 0.5, 1e-6) and near(stopped.y, 50, 1e-6), `speed 0: {stopped.x}, {stopped.y}`)
+		local fast = spectator(0.5, 50, 0.5)
+		PlayerPhysics.scrollFlyingSpeed(fast, 30)
+		local dx = steady(fast, input(1, 0), rock, 200)
+		t.near(dx * 20, 43.5556, 0.001, "0.2 flies four times as fast")
+		local up = spectator(0.5, 50, 0.5)
+		PlayerPhysics.scrollFlyingSpeed(up, 30)
+		local _, dy = steady(up, input(0, 0, { jump = true }), rock, 100)
+		t.near(dy, 1.5, 1e-4, "and rises 1.5 blocks a tick")
+	end)
+
+	t.test("spectator: water doesn't touch them; no fall damage; heights stay in the world", function()
+		local sea = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 40 then WATER else nil
+		end)
+		local diver = spectator(0.5, 20, 0.5)
+		for _ = 1, 40 do
+			PlayerPhysics.tick(diver, input(1, 0, { sprint = true, lookY = -1 }), sea)
+			t.ok(not diver.inWater and not diver.swimming and not diver.eyeInWater and not diver.underWater)
+		end
+		t.near(diver.y, 20, 1e-9, "no sinking, no swimming down")
+		t.eq(diver.pose, "standing")
+		local dx = steady(spectator(0.5, 20, 0.5), input(1, 0), sea, 200)
+		t.near(dx * 20, 10.8889, 0.0005, "full speed in water")
+
+		-- Diving from high up into the ground: no landing, no fall distance.
+		local faller = spectator(0.5, 60, 0.5)
+		for _ = 1, 100 do
+			local events = PlayerPhysics.tick(faller, input(0, 0, { sneak = true }), physicsWorld())
+			t.ok(not events.landed and events.damage == 0 and faller.fallDistance == 0)
+		end
+
+		-- The height stays within NO_CLIP_MIN_Y .. NO_CLIP_MAX_Y: from the bottom of the world (below
+		-- it everything is bedrock, no void: a spectator leaving the mode there would be walled in
+		-- for good) to 64 blocks above its top.
+		t.eq(PlayerPhysics.NO_CLIP_MIN_Y, 0)
+		local deep = spectator(0.5, 4, 0.5)
+		for _ = 1, 60 do
+			PlayerPhysics.tick(deep, input(0, 0, { sneak = true }), rock)
+		end
+		t.eq(deep.y, PlayerPhysics.NO_CLIP_MIN_Y, "no deeper than the bottom of the world")
+		local high = spectator(0.5, PlayerPhysics.NO_CLIP_MAX_Y - 3, 0.5)
+		for _ = 1, 40 do
+			PlayerPhysics.tick(high, input(0, 0, { jump = true }), physicsWorld())
+		end
+		t.eq(high.y, PlayerPhysics.NO_CLIP_MAX_Y)
+		t.ok(PlayerPhysics.NO_CLIP_MAX_Y > 1024, "above the top of the world")
+	end)
+
+	t.test("game modes: setGameMode gives each mode's abilities and switches like Minecraft", function()
+		local state = PlayerPhysics.new(0.5, 30, 0.5)
+		PlayerPhysics.setGameMode(state, GameMode.SURVIVAL)
+		t.ok(not state.mayFly and not state.flying and not state.noClip, "survival")
+		PlayerPhysics.setGameMode(state, GameMode.ADVENTURE)
+		t.ok(not state.mayFly and not state.flying and not state.noClip, "adventure")
+		PlayerPhysics.setGameMode(state, GameMode.CREATIVE)
+		t.ok(state.mayFly and not state.flying and not state.noClip, "creative may fly, isn't flying yet")
+		PlayerPhysics.setGameMode(state, GameMode.SPECTATOR)
+		t.ok(state.mayFly and state.flying and state.noClip, "spectator flies at once")
+
+		-- Spectator -> creative keeps flying (Minecraft keeps abilities.flying); the flying speed
+		-- goes back to 0.05 (the server's abilities).
+		PlayerPhysics.scrollFlyingSpeed(state, 10)
+		PlayerPhysics.setGameMode(state, GameMode.CREATIVE)
+		t.ok(state.flying and state.mayFly and not state.noClip, "creative from spectator keeps flying")
+		t.eq(state.flyingSpeed, PlayerPhysics.FLYING_SPEED, "speed reset")
+		for _ = 1, 20 do
+			PlayerPhysics.tick(state, input(0, 0), physicsWorld())
+		end
+		t.ok(state.flying and near(state.y, 30, 1e-9), "and hovers")
+
+		-- Spectator -> survival or adventure: flying stops and they fall, onto the ground.
+		for _, mode in { GameMode.SURVIVAL, GameMode.ADVENTURE } do
+			local s = spectator(0.5, 30, 0.5)
+			PlayerPhysics.tick(s, input(0, 0), physicsWorld())
+			PlayerPhysics.setGameMode(s, mode)
+			t.ok(not s.flying and not s.noClip and not s.mayFly, mode)
+			local landed = false
+			for _ = 1, 100 do
+				local events = PlayerPhysics.tick(s, input(0, 0), physicsWorld())
+				landed = landed or events.landed
+			end
+			t.ok(landed and s.onGround and near(s.y, 1, 1e-6), `{mode}: fell onto the ground at {s.y}`)
+		end
+
+		-- A spectator can't stop flying by double tapping jump, nor land.
+		local tapper = spectator(0.5, 1, 0.5)
+		for tick = 1, 12 do
+			PlayerPhysics.tick(tapper, input(0, 0, { jump = tick == 1 or tick == 3, sneak = tick > 4 }), physicsWorld())
+		end
+		t.ok(tapper.flying and tapper.y < 1, `still flying, under the floor: {tapper.y}`)
+		-- Losing noClip without a game mode (only abilities changed) still makes the tick sane.
+		local odd = spectator(0.5, 30, 0.5)
+		odd.noClip = false
+		odd.mayFly = false
+		PlayerPhysics.tick(odd, input(0, 0), physicsWorld())
+		t.ok(not odd.flying and odd.vy < 0, "falls without the abilities")
+	end)
+
+	t.test("spectator: the same inputs give the same path", function()
+		local function run(): string
+			local state = spectator(0.5, 40, 0.5)
+			for tick = 1, 300 do
+				local a = tick * 0.05
+				if tick % 50 == 0 then
+					PlayerPhysics.scrollFlyingSpeed(state, if tick < 150 then 2 else -3)
+				end
+				PlayerPhysics.tick(
+					state,
+					input(math.cos(a), math.sin(a), { jump = tick % 40 < 10, sneak = tick > 200, sprint = tick > 50 }),
+					rock
+				)
+			end
+			return `{state.x},{state.y},{state.z},{state.vx},{state.vy},{state.vz},{state.flyingSpeed}`
 		end
 		t.eq(run(), run())
 	end)

@@ -3,17 +3,21 @@
 	The inventory screens' controller.
 
 	  open / close  E, gamepad Y and the HUD's touch button toggle the inventory: the creative
-	                "Item selection" screen in creative, the inventory screen in survival (creative
-	                players reach it through a tab). Escape (and the Roblox menu opening), gamepad
-	                B, death and the touch "x" buttons close it. Closing sends `close` for the open
-	                window (window 0 too, so the carried stack and the 2 x 2 crafting grid go back
-	                into the inventory, like Minecraft).
+	                "Item selection" screen with the instabuild ability (creative), the inventory
+	                screen in survival and adventure (creative players reach it through a tab);
+	                spectators have none (E does nothing, and switching to spectator closes the
+	                player's own inventory). Escape (and the Roblox menu opening), gamepad B, death
+	                and the touch "x" buttons close it. Closing sends `close` for the open window
+	                (window 0 too, so the carried stack and the 2 x 2 crafting grid go back into the
+	                inventory, like Minecraft).
 	  blocks        when a snapshot opens a block's window (the server answered a right click on a
 	                chest, crafting table or furnace), the inventory screen opens with the block's
 	                panel above the player's. Window 0 (the inventory screen's own, whose
 	                container is the player panel's 2 x 2 grid) never shows a panel. When the
 	                server closes a block's window (too far, the block broke, death), the screen
-	                closes, as in Minecraft.
+	                closes, as in Minecraft. A spectator's block window is read only: every click
+	                goes nowhere (ClientInventory refuses what Menu.allows refuses), and JEI's
+	                recipe transfer is off.
 	  while open    the mouse is free (a Modal button, MouseBehavior Default every frame after the
 	                camera, the mouse icon on), the default controls are disabled so the character
 	                stops, and `isOpen()` is true for the other client modules.
@@ -59,6 +63,7 @@ local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
@@ -230,11 +235,14 @@ function Screens.panelShown(p: Panel): boolean
 	return current == "panel" and panel == p
 end
 
--- Opens the inventory (creative item selection in creative), or closes the open screen.
+--[[
+	Opens the inventory (the creative item selection with instabuild), or closes the open screen.
+	Spectators have no inventory to open.
+]]
 function Screens.toggle()
 	if current then
 		close()
-	else
+	elseif GameMode.canInteract(ClientInventory.mode()) then
 		open(if ClientInventory.isCreative() then "creative" else "inventory")
 	end
 end
@@ -390,8 +398,9 @@ function Screens.start()
 		window = ClientInventory.window,
 		creative = ClientInventory.isCreative,
 		apply = ClientInventory.apply,
+		-- (Spectators look at a crafting table's grid but move nothing into it.)
 		gridShown = function(): boolean
-			return current == "inventory"
+			return current == "inventory" and GameMode.canInteract(ClientInventory.mode())
 		end,
 	})
 
@@ -799,7 +808,12 @@ function Screens.start()
 				close()
 			end
 		end
-		if current == "creative" and not ClientInventory.isCreative() then
+		-- A game mode change: spectators keep only a block's window open (read only), and the
+		-- item selection needs instabuild.
+		local spectator = not GameMode.canInteract(ClientInventory.mode())
+		if spectator and (current == "creative" or (current == "inventory" and not blockOpen(window))) then
+			close()
+		elseif current == "creative" and not ClientInventory.isCreative() then
 			open("inventory")
 		elseif current == "inventory" then
 			inventory:setLayout(window.container, ClientInventory.isCreative())
@@ -1188,13 +1202,13 @@ function Screens.start()
 		local shown = window
 		local dragged: { [number]: boolean } = {}
 		local mode, slots = clicks:dragging()
-		if mode ~= nil and #slots > 1 then
+		-- (Not for spectators, whose drags do nothing.)
+		local drag: Types.Action? = if mode ~= nil and #slots > 1
+			then { kind = "drag", window = window.id, mode = mode, slots = table.clone(slots) }
+			else nil
+		if drag and ClientInventory.allows(drag) then
 			shown = Menu.copyWindow(window)
-			Menu.apply(
-				shown,
-				{ kind = "drag", window = window.id, mode = mode, slots = table.clone(slots) },
-				ClientInventory.isCreative()
-			)
+			Menu.apply(shown, drag, ClientInventory.isCreative())
 			for _, index in slots do
 				dragged[index] = true
 			end

@@ -585,7 +585,8 @@ prediction.
   breaking a chest come out of a budget (10 a second, 64 at once); a chest that would overdraw it
   stays.
 - **Using and placing.** Right click on a block with a `menu` (chest, crafting table, furnace)
-  opens it, unless sneaking with an item in hand.
+  opens it, in every game mode, unless sneaking with an item in hand. Adventure and spectator
+  players do nothing else with blocks (see Game modes: On the client).
   Otherwise the selected item is placed if it is a block. Survival placing uses the item up: the
   Edit message carries the inventory action number of that use (see below), so the prediction
   and the server's answer line up. The own hull is checked standing, like the server checks every
@@ -600,8 +601,8 @@ prediction.
   of grass and ferns takes the soil's tint.
 - **Operator blocks** (`Blocks.isCreativeOnly`: structure blocks, structure voids, jigsaws). In
   creative a right click on a structure block or jigsaw sends a Use, which the server answers with
-  its screen (Structure blocks and jigsaw structures, below) or a refusal; in survival they are
-  plain blocks to build against, and their items are not placed. A jigsaw's orientation comes from
+  its screen (Structure blocks and jigsaw structures, below) or a refusal; in the other modes they
+  are plain blocks, and their items are not placed. A jigsaw's orientation comes from
   `Blocks.placementFor` (Minecraft's JigsawBlock.getStateForPlacement, `Blocks.jigsawPlacement`):
   the front faces out of the clicked face; a horizontal front has its top Up, a vertical one the
   opposite of the player's horizontal facing (`Blocks.horizontalFacing`, Direction.fromYRot). The
@@ -623,7 +624,9 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   in reach: BlockInteraction aims and mines through water, so WAILA must not hide the highlighted
   block. The water ray skips the water the camera starts in. The rule is `WailaInfo.choose`
   (tested). Items, players, water and the hiding block are looked for every 0.05 s; touch
-  screens aim with a finger only while breaking, so they show blocks only.
+  screens aim with a finger only while breaking, so they show blocks only. Spectators are never
+  named, nor the player being spectated; a spectator sees blocks with a menu and players only
+  (see Game modes: On the client).
 - **Content.** `WailaInfo` (pure, tested) turns (block, held item, x, y, z, extended) into an icon
   (the item's 3D icon; a colour box for blocks that are no item; a player's head shot) and lines
   of coloured segments:
@@ -715,7 +718,7 @@ hull is.
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
     Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint`, the
     sprint key turns sprinting on and off; turning it off also stops a sprint started by double
-    tapping. While a screen (inventory) is open, the input is neutral.
+    tapping. While a screen (inventory) or the game mode switcher is open, the input is neutral.
   - The hull stays frozen until the chunk under it and the eight around it are shown, and after
     teleports. Server teleports arrive as attributes; other scripts moving the character far are
     detected and followed.
@@ -734,13 +737,28 @@ hull is.
 **Creative flight** (`PlayerPhysics`, Minecraft 1.20.1 tick for tick). Creative players `mayFly`.
 A second jump press within 7 ticks toggles flying. While flying (and unaffected by water, like
 Minecraft's flying player):
-- jump / sneak add ±0.15 to the vertical speed;
-- horizontal acceleration is the flying speed, 0.05 (0.1 sprinting);
+- jump / sneak add ±3 × the flying speed (0.15) to the vertical speed;
+- horizontal acceleration is the flying speed, `State.flyingSpeed` (Abilities.flyingSpeed, a
+  float: 0.05; × 2 sprinting);
 - afterwards the vertical speed is the one from before the move × 0.6, so it settles at 0.375 blocks
   per tick (7.5 m/s); horizontally 10.9 m/s, 21.8 sprinting;
 - no crouching, no edge back-off; landing stops it;
-- creative players take no fall damage. The field of view widens by 1.1 in flight (× 1.15 when also
-  sprinting).
+- players who may fly take no fall damage. The field of view widens by 1.1 in flight (× 1.15 when
+  also sprinting).
+
+**Spectators** (`State.noClip`, Minecraft's `noPhysics`) always fly and move straight where their
+velocity takes them: no collision, never on the ground, no fall distance or landings, no water,
+swimming or currents, no pushing out of blocks, always standing. Double tapping jump does nothing,
+and sprinting (× 2) starts only with the sprint key: Minecraft starts a sprint by double tapping
+only on the ground or under water. The mouse wheel changes the flying speed by 0.005 between 0 and
+0.2 while the spectator menu is closed (`scrollFlyingSpeed`, MouseHandler.onScroll), and every game
+mode change sets it back to 0.05, as Minecraft's abilities packet does. Only the height is limited:
+from the bottom of the world (`NO_CLIP_MIN_Y`, 0: below it everything is bedrock, there is no void)
+to 64 blocks above its top (`NO_CLIP_MAX_Y`). `setGameMode(state, mode)` applies a mode's abilities
+(MovementController calls it when the hull is made and whenever the mode attribute changes):
+spectator flies at once, creative keeps flying as it was (from spectator too), survival and
+adventure stop flying and fall. `PlayerPhysics.isInWall` is Minecraft's in-wall test, which the
+server uses for suffocation (see Game modes: On the server).
 
 **Fluids and the player.**
 - `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
@@ -831,19 +849,213 @@ Generated caves never open to the surface, so they still go dark.
 Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
 Lighting is left alone, because Roblox lights both by the sun and moon itself.
 
-## Items, inventories and game modes
+## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 
-**Game modes** (`GameMode`, server `Players/GameModes`). A player's mode is the Player attribute
-`IceVoxelGameMode`, set by the server (`Gameplay.DefaultGameMode` on joining).
-- `/gamemode <survival|creative|s|c|0|1> [player]`, alias `/gm`: `TextChatCommand`s created by the
-  server, whose `Triggered` fires on the server. The legacy chat falls back to `Player.Chatted`.
-- Permissions are in `Players/GameModeCommand`, pure and tested:
-  - `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode;
-  - `Gameplay.Admins` for other players (by name, display name, unique prefix, `@s`, `@a`); the
-    same ids may change the time (see Day and night);
-  - the game's owner and Studio always may.
-- Answers ("Set own game mode to Creative Mode") are `Notice` messages, shown in the chat by
-  `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
+Minecraft 1.20.1's survival, creative, adventure and spectator (GameType). A player's mode is the
+Player attribute `IceVoxelGameMode` (`GameMode.ATTRIBUTE`), set by the server
+(`Gameplay.DefaultGameMode` on joining) and replicated to every client.
+
+### Abilities (`Shared/GameMode`)
+
+Code never compares modes: it asks what one allows, `GameMode.<ability>(mode)` or
+`GameMode.<ability>Of(player)`, as GameType.updatePlayerAbilities gives them:
+
+| Ability                                 | Survival | Creative | Adventure | Spectator |
+| --------------------------------------- | -------- | -------- | --------- | --------- |
+| `mayFly`                                |          | yes      |           | yes       |
+| `alwaysFlying`, `noClip`, `isSpectator` |          |          |           | yes       |
+| `instabuild`                            |          | yes      |           |           |
+| `invulnerable`                          |          | yes      |           | yes       |
+| `mayBuild`                              | yes      | yes      |           |           |
+| `isSurvivalLike`                        | yes      |          | yes       |           |
+| `canPickUp`, `canInteract`, `showsHud`  | yes      | yes      | yes       |           |
+
+- `instabuild` is what "creative" means everywhere else: instant breaking, nothing used up, worn
+  or dropped, the item selection, creative slots and middle-click clones, operator blocks. Every
+  `creative` parameter (`Menu.apply`, `EditRules`, `UseRules`, `InventoryState.apply`) is this
+  ability. `GameMode.isCreative(player)` is kept for older callers.
+- `mayBuild`: breaking, placing and using items on blocks. `isSurvivalLike`: hearts and armour.
+  `canInteract`: slot clicks, drags and drops (spectators open menus read only). `showsHud`: the
+  hotbar and the held item's name.
+- `ALL` lists the modes by Minecraft's GameType id (0 survival, 1 creative, 2 adventure,
+  3 spectator; `id`, `fromId`), `ORDER` the switcher's (Creative, Survival, Adventure, Spectator).
+  `parse` reads `survival` / `s` / `0`, `creative` / `c` / `1`, `adventure` / `a` / `2` and
+  `spectator` / `sp` / `3` in any case; `displayName` gives "Spectator Mode".
+- `Inventory/Menu.allows(action, mode)` says what a mode may do in a window: spectators only select
+  a hotbar slot and close windows (Minecraft's handleContainerClick sends a spectator the menu
+  again instead of clicking), and creative actions need instabuild. The server and the client's
+  prediction both check it before `Menu.apply`.
+
+### Switching (`Players/GameModes`; the pure rules in `Players/GameModeCommand`, tested)
+
+- `/gamemode <survival|creative|adventure|spectator> [player]`, alias `/gm`, with the modes as
+  `parse` reads them: `TextChatCommand`s created by the server, whose `Triggered` fires on the
+  server; the legacy chat falls back to `Player.Chatted`. `player` is a name, display name or
+  unique prefix, `@s` or `@a`.
+- Permissions: `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode;
+  `Gameplay.Admins` for other players' (the same ids may change the time, see Day and night) and
+  for their own even where the command is off (`mayChangeOwn`, Minecraft's permission level 2);
+  the game's owner and Studio always may. A group game's owner is looked up once per server
+  (GroupService); a failed lookup is tried again after 5 s, doubling up to 300 s, and the first
+  one that works updates every player's permission.
+- The server tells each client whether it may change its own mode: the attribute
+  `IceVoxelGameModePermission` (`GameMode.mayChangeOwn`), false on joining until the owner check
+  is done and refreshed on every command and switch. Clients refuse `F3` + `N` and `F3` + `F4`
+  themselves with it.
+- The previous mode, `IceVoxelPreviousGameMode` (`GameMode.previousOf`), changes only when the
+  mode does (`previousAfter`; none until the first change), as Minecraft's client keeps it
+  (MultiPlayerGameMode.setLocalMode; the server's copy is bug MC-259571, which Paper fixes the
+  same way). `F3` + `N` and the switcher read it.
+- The switcher and `F3` + `N` send `SetGameMode` (a GameType id). The server answers it like the
+  command (`switchOwn`: the same permission and answer) and does nothing at all when the player is
+  in that mode already; at most 4 a second per player (a token bucket).
+- Answers ("Set own game mode to Spectator Mode"; the other player reads "Your game mode has been
+  updated to ...") are `Notice` messages, shown in the chat by `Net/Notices`. `GameModes.changed`
+  fires `(player, mode, previous?)`. Inventories stay as they are when the mode changes, as in
+  Minecraft.
+
+### On the server (`Network/EditRules`, `Players/GameModeRules`, pure, tested in `GameModesServer`)
+
+- **Edits** (`Network/ServerNet`). Survival and creative players break and place
+  (`EditRules.mayEdit`, mayBuild); an adventure or spectator player's edit is answered with the
+  real block, and a placement is still acknowledged, so the client's prediction is undone. Only
+  survival players' `Mine` messages count (`minesOverTime`), and a delayed survival break is
+  dropped (the block sent back) once the player's mode no longer mines over time. Spectators never
+  keep a block from being placed (`blocksPlacing`, Minecraft's Level.isUnobstructed).
+- **Items on blocks** (`Players/ItemUse`): the Configurator and buckets need mayBuild
+  (`mayUseItemOn`), so adventure and spectator players use nothing; their UseItem gets no answer.
+- **Menus** (`Players/Inventories`). A Use on a block with a menu opens it in every mode, as
+  ServerPlayerGameMode.useItemOn opens a spectator's MenuProvider. Every inventory action goes
+  through `InventoryState.applyAs` (`Menu.allows`): what the mode does not allow changes nothing
+  but is acknowledged, so the snapshot rolls the prediction back. Spectators are quiet viewers
+  (`opensContainers`; `Containers`' `addViewer(..., quiet)`, ChestBlockEntity.startOpen skips
+  them): they get the container's snapshots, but no lid opens or sounds for them, and `onOpeners`
+  counts openers, not viewers. A mode change does not close an open window.
+- **Pickups**: never by spectators (`picksUp`): Entities leaves them out of the pickers, and the
+  pickup handler takes nothing.
+- **Damage** (`Players/Characters`). While a player is in creative or spectator (`invulnerable`)
+  their character holds an invisible ForceField named `IceVoxelInvulnerable`, updated on spawning
+  and whenever the mode attribute changes; `Humanoid:TakeDamage` respects it (setting `Health`
+  directly still hurts, like Minecraft's /kill). Falls hurt survival and adventure players
+  (`fallDamage`: `ceil(distance − 3)` half hearts, none for players who may fly). Players in a
+  wall suffocate (`inWall`, LivingEntity.baseTick): every `IN_WALL_INTERVAL` (0.5 s) a living
+  player whose eyes are in a solid, opaque block (`PlayerPhysics.isInWall`, Entity.isInWall: a box
+  0.48 wide at the eyes; unloaded blocks never count) loses `IN_WALL_DAMAGE` (half a heart),
+  scaled to `MaxHealth`, so 20 health lasts 10 s. The server can't see the client's pose, so the
+  eyes of all three poses (standing, crouching, crawling) must be in a wall: crouching or crawling
+  under blocks never hurts. The feet come from the character (`Rig.feet`), the blocks from the
+  server's generated chunks only; not creative or spectator players. So a player who leaves
+  spectator inside rock (or is buried in sand) isn't walled in for good.
+- **Death**: spectators drop nothing and keep their inventory (`keepsInventory`,
+  ServerPlayer.die); everyone does with `Gameplay.KeepInventory`.
+- **Sounds**: spectators make no hurt or death sound and open no chest lid (`makesSounds`).
+- **Spectator teleport** (`Players/Teleport`). `SpectatorTeleport` (the spectator menu's
+  "Teleport to Player", Minecraft's handleTeleportToEntityPacket) moves a living spectator's feet
+  to another player's exactly (`spectatorTeleport`: only a spectator, not to themselves, the
+  target in the game with a character, at a finite spot within `Protocol.MAX_COORDINATE`
+  sideways, the height kept between `PlayerPhysics.NO_CLIP_MIN_Y` (0) and `NO_CLIP_MAX_Y`
+  (`WorldHeight` + 64)), without a safe spot search (`Characters.teleportFeet`), at most one
+  every 0.25 s. Other spectators are valid targets, as on Minecraft's server. The spectator keeps
+  their own view direction, and refusals send nothing back.
+- **Operator blocks** (`Structures/Permission`): instabuild players only (canUseGameMasterBlocks),
+  so never adventure or spectator players.
+
+Spectators' movement is `PlayerPhysics`' (see Movement: Spectators).
+
+### On the client
+
+Client modules ask Shared/GameMode's abilities of the local player's mode
+(`ClientInventory.mode()`); none compares modes.
+
+- **Debug keys** (`Debug/DebugKeys`, pure, tested; `Debug/DebugOverlay` feeds it the keyboard).
+  Minecraft's KeyboardHandler: `F3` toggles the overlay when it is let go, unless a combination
+  ran while it was held (handledDebugKey) or a screen is open. `F3` + `N` asks for spectator, or
+  from spectator for the previous mode (Creative when there is none); `F3` + `F4` opens the
+  switcher; `F3` + `Q` lists the three in the chat. Combinations run only while no screen and no
+  switcher is open and the player isn't typing (a focused TextBox or chat bar), and `N` and `F4`
+  only with `GameMode.mayChangeOwn` (else "[Debug]: Unable to switch game mode; no permission" or
+  "... open game mode switcher; no permission"). The "[Debug]:" prefix is bold yellow
+  (`Notices.debug`; white in the legacy chat). A key that ran a combination does nothing else:
+  `F3` + `Q` throws nothing (BlockInteraction ignores `Q` while `F3` is down). Losing the window's
+  focus forgets that `F3` was held.
+- **The switcher** (`Ui/GameModeSwitcher`; its model `Ui/ModeSwitch`, pure, tested): Minecraft's
+  GameModeSwitcherScreen at its offsets from the screen's centre, scaled like the HUD. Four slots
+  in `GameMode.ORDER` (a grass block and an iron sword from ItemIcon, a map and an ender eye in
+  pixel art) on a dark translucent box, the highlighted mode's name above them and "[ F4 ] Next"
+  under them. It opens on the previous mode (else Survival from Creative, Creative otherwise).
+  `F4` steps on, wrapping round (DebugOverlay passes it on while the switcher is open); the mouse
+  highlights the slot it moves onto, but not one it rested on when the screen opened or `F4` was
+  last pressed, and clicking does nothing more, as in Minecraft. Every frame it checks that `F3`
+  is still down: once not, it sends `SetGameMode` for the highlighted mode unless that is the
+  current one, and closes. Escape (Roblox's menu), an inventory screen opening or respawning
+  close it without switching. While it is shown, a Modal button frees the mouse and takes the
+  clicks, and it has the keys like a Minecraft Screen: the player stands still
+  (MovementController), the hotbar's and spectator menu's keys and the wheel do nothing
+  (`Hud.setInputTaken`), and neither do BlockInteraction's buttons.
+- **HUD** (`Ui/Hud`). Hearts and armour show in `isSurvivalLike` modes (survival, adventure), the
+  held item's name higher above them; without `showsHud` (spectators) there is no hotbar, item
+  name, hearts or armour, and the spectator menu takes the hotbar's place.
+- **The spectator menu** (`Ui/SpectatorGui`; its model `Ui/SpectatorMenu`, pure, tested):
+  Minecraft's SpectatorMenu and SpectatorGui, drawn with the hotbar's bar and selection frame. A
+  spectator's number key, middle click, gamepad L1 / R1 or the touch "…" button opens its root
+  page; then a number selects a slot and the same number again (or the middle click, gamepad
+  D-pad up, the "…" button) uses it; a click or tap on a slot is its number. Slot 1 "Teleport to
+  Player" (enabled while there is someone to teleport to) lists the other players who are not
+  spectating, by user id, as they were when the menu opened, with their head shots: slots 1-7,
+  then 6 a page after "Previous Page"; 8 "Next Page" (dimmed on the last page) and 9 "Close Menu"
+  on every page. Using a player sends `SpectatorTeleport`; the menu stays open, as in Minecraft.
+  Enabled items show their number, the selected item's name (or the page's prompt) shows above
+  the bar, and the menu fades 3 s after the last key (a CanvasGroup) and closes after 5.
+  "Teleport to Team Member" is left out: the game has no teams. While the menu is open the wheel
+  (and L1 / R1) moves the selection, skipping empty and dimmed slots; while it is closed the wheel
+  changes the flying speed (`SpectatorGui.onFlyingSpeed`, which MovementController turns into
+  `PlayerPhysics.scrollFlyingSpeed`).
+- **Interaction** (`Interaction/BlockInteraction`). Breaking, placing and using items on blocks
+  need `mayBuild`, instant breaking `instabuild`, and only survival mines over time. Menus open
+  in every mode (operator blocks' screens with instabuild only). Adventure players' left click
+  only swings the arm, and no block is outlined (Minecraft outlines blocks in adventure only for
+  items with CanDestroy / CanPlaceOn tags, which the game has none of); WAILA still names them.
+  Spectators aim at and outline blocks with a menu only (the aim passes through the rest), open
+  them with a right click, never swing, throw nothing, and their middle click is the spectator
+  menu's. A spectator's left click on a player (another player's standing hull on the aim, in
+  reach, not behind a block, not a spectator, not the one already spectated) spectates them.
+  Spectators never keep a block from being placed, on the client either.
+- **Spectating a player** (`Player/MovementController.spectate`, `spectating`). The camera's
+  subject becomes the target's Humanoid, in first person, with its CameraOffset set locally every
+  frame to their eyes (standing, or lying as far as the body is pitched: their own client's
+  offset and pose never replicate); the hull is put at their feet every frame, so chunks stream
+  around them. Sneaking, a teleport, a game mode change or the target dying or leaving ends it
+  where the target was, and the camera comes back. Clicking another player switches to them
+  (ServerPlayer.attack's setCamera). The view stays free (Minecraft locks it to the target's),
+  and the server only sees the spectator's invisible character move with the target.
+- **Inventory** (`Inventory/ClientInventory`, `Prediction`). Actions go through `Menu.allows`
+  before they are predicted or sent, so a spectator's clicks, drags, drops and creative actions
+  never leave the client, and spectators pick no blocks. `Prediction` takes the game mode and does
+  what the server does (`Menu.allows`, then `Menu.apply` with instabuild); pending actions replay
+  by the new mode's rules after a change. `E` opens nothing for spectators, and the item
+  selection needs instabuild, so adventure gets the survival inventory. Switching to spectator
+  closes one's own inventory (and the item selection), while a block's window stays open, read
+  only, without JEI's recipe transfer.
+- **Seeing spectators** (`Player/SpectatorView`; the rules in `Player/SpectatorRules`, pure,
+  tested). Every frame after the camera, a spectator's parts, the decals on them (the face) and
+  their effects (`SpectatorRules.HIDDEN_CLASSES`) get LocalTransparencyModifier 1 for players who
+  don't spectate, and their name and health display is hidden (DisplayDistanceType None, locally);
+  spectators see the head and what is worn on it at 0.85 (Minecraft's alpha 0.15). Values are
+  only ever raised above what the camera's first person fade set, and put back once the player
+  stops spectating. Spectators hold nothing (`Player/HeldItems`, which also hides any player's
+  held item while the camera fades their head: one's own in first person, and the spectated
+  player's), have no minimap dot where they are hidden (`Map/Minimap`) and make no movement
+  sounds (`Audio/MovementSounds`: none from any spectator, this player included). WAILA and a
+  spectator's click never aim at a spectator or at the player being spectated
+  (`SpectatorRules.aimable`).
+- **WAILA** for a spectator: blocks with a menu (all BlockInteraction aims at) and players; no
+  dropped items or water.
+- **Structure outlines** (`Rendering/StructureBoxes`) show with instabuild and to spectators, as
+  in Minecraft.
+
+## Items and inventories
+
+What each game mode may do with items and inventories is in Game modes, above.
 
 **Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
 the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's osmium), gems, snowballs, the 25
@@ -879,8 +1091,9 @@ Containers come in four kinds:
 So window 0 is numbered exactly like Minecraft's InventoryMenu (0 result, 1–4 grid, 5–8 armor,
 9–35 inventory, 36–44 hotbar).
 
-`Menu.apply(window, action, creative)` performs one action, ported from Minecraft 1.20.1's
-`AbstractContainerMenu.doClick` and `Inventory.add`:
+`Menu.apply(window, action, creative)` performs one action (`creative`: the instabuild ability;
+whether a game mode may do it at all is `Menu.allows`, checked first on both sides), ported from
+Minecraft 1.20.1's `AbstractContainerMenu.doClick` and `Inventory.add`:
 - clicks: left / right pickup, shift-click (`quickMoveStack`: a chest to the inventory from the
   hotbar's right end, the inventory to the chest, armor to its slot, inventory ↔ hotbar), number key
   swap, middle-click clone (creative), throw, double click collect;
@@ -922,7 +1135,8 @@ data as it is (`Recipe.keep`, the cell; Mekanism's MekDataShapedRecipe): a Batte
 next tier keeps its charge. Other results carry none.
 
 **Chests, crafting tables and furnaces** (`Players/Containers`, `InventoryState`):
-- `Use` on a block with a `menu` (reach-checked) opens it as window 1–255. Chests and furnaces are
+- `Use` on a block with a `menu` (reach-checked) opens it as window 1–255, in every game mode
+  (spectators read only and as quiet viewers: see Game modes). Chests and furnaces are
   contents per block position, created on first use and shared by everyone who opens them (each
   viewer's snapshot includes the shared container). A crafting table gives each player a grid of
   their own, which goes back into their inventory when they close it.
@@ -937,21 +1151,23 @@ next tier keeps its charge. Other results carry none.
   output holds something (`Containers.ejectingFurnaces`) push it into the chests next to them
   (`Transmitters/Eject`, below).
 
-Death drops the whole inventory (unless `Gameplay.KeepInventory`). Inventories and chests live for
-the session.
+Death drops the whole inventory (unless `Gameplay.KeepInventory`, or the player was spectating).
+Inventories and chests live for the session.
 
 **Screens** (`Ui/`), old-school Minecraft styled from Frames only (gray beveled panels, inset slots,
 the Arcade pixel font):
 - `Hud`: the hotbar (1–9, the wheel, L1 / R1, taps), the held item's name, and hearts and armor in
-  survival. Roblox's health bar and backpack are turned off.
-- `InventoryScreen` (`E`): the armor column on the left with a character preview, the 2 × 2
-  crafting grid and its result at the top right, the 27 slots and the hotbar. An open block's panel
-  sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a crafting table's
-  3 × 3 grid and result, or a furnace's input, fuel and output with the flame and arrow gauges
-  from the furnace's `data`. Worn tools show Minecraft's durability bar, and machines' items that hold energy an energy bar in its place.
-- `CreativeScreen` (`E` in creative): the "Item selection" picker, a search box that filters
-  `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it. Clicking an item
-  gives a full stack; dropping a stack on the grid deletes it.
+  survival and adventure; spectators get the spectator menu in the hotbar's place (see Game
+  modes). Roblox's health bar and backpack are turned off.
+- `InventoryScreen` (`E`; spectators have none): the armor column on the left with a character
+  preview, the 2 × 2 crafting grid and its result at the top right, the 27 slots and the hotbar. An
+  open block's panel sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a
+  crafting table's 3 × 3 grid and result, or a furnace's input, fuel and output with the flame and
+  arrow gauges from the furnace's `data`. Worn tools show Minecraft's durability bar, and machines'
+  items that hold energy an energy bar in its place.
+- `CreativeScreen` (`E` with instabuild, in creative): the "Item selection" picker, a search box
+  that filters `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it.
+  Clicking an item gives a full stack; dropping a stack on the grid deletes it.
 - `SlotClicks` turns mouse, keys, touch and gamepad into Minecraft's click actions (pure, tested).
 - `Screens` opens and closes them, frees the mouse (in first person too) and stops the character
   while one is open. Other modules' screens (the structure block and jigsaw screens) are shown as
@@ -1065,7 +1281,8 @@ grass, are `brokenByFluid` and stand through the attached-block machinery:
   its no-tool drop and a sound; players' tall plant edits are EditRules' (see Server).
 
 **Operator blocks** (BlockList `creativeOnly`; Minecraft's GameMasterBlock): the four structure
-block modes, the structure void and the twelve jigsaws. Survival players can't mine them
+block modes, the structure void and the twelve jigsaws. Survival players can't mine them (adventure
+and spectator players break nothing at all)
 (`Mining.progressPerTick` is 0, Minecraft's hardness -1); creative players break them at once like
 any block, and they never drop (`Items.drops`, `Items.blockDrops`); placing, breaking and using them
 needs the server's `operator` rule (see Server). They are in the creative picker and JEI
@@ -1379,8 +1596,9 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     10 ticks). An `add` is sent when an item enters, is re-routed or waits, changes speed, or has
     gone 128 blocks along a route longer than 255 sides; a `remove` when it arrives, drops or
     leaves the player's range. `startTime` is the server time of the tick that produced it.
-- **Use** (`Players/ItemUse`, rules in `Transmitters/UseRules`). UseItem from a living player, in
-  reach, at most 10 a second, with the item in hand:
+- **Use** (`Players/ItemUse`, rules in `Transmitters/UseRules`). UseItem from a living player in
+  survival or creative (`GameModeRules.mayUseItemOn`: mayBuild), in reach, at most 10 a second,
+  with the item in hand:
   - Configurator: cycles the clicked side (a same-kind transmitter beyond it matches, so a cut
     joint is joined again from either end; Mekanism changes only the clicked side), or sneaking on
     a transporter its colour; Mekanism's message in the chat and a click sound.
@@ -1908,8 +2126,8 @@ levels).
 - **`Rendering/StructureBoxes`** outlines the regions of the nearest 24 structure blocks within
   128 blocks (a SelectionBox on an invisible, non-colliding, non-queried part), labels their
   blocks with the name within 48 blocks, and for "Show Invisible Blocks" marks the region's air
-  (at most 2,048 markers, in regions of at most 16,384 cells). Like Minecraft's, none of it shows
-  outside creative.
+  (at most 2,048 markers, in regions of at most 16,384 cells). Like Minecraft's, it shows only in
+  creative (instabuild) and to spectators.
 
 ## Item entities (`Entities/`)
 
@@ -1920,7 +2138,7 @@ Dropped items are Minecraft's ItemEntity:
   - collision through `Hull`.
 - `EntityWorld` (server, pure, tested) holds the rules:
   - pickup delay 10 ticks (40 when thrown);
-  - pickup by a player box grown by (1, 0.5, 1);
+  - pickup by a player box grown by (1, 0.5, 1), living players only, never spectators;
   - merging of equal items (the smaller into the larger, every 2 ticks while moving, 40 at rest);
   - despawn after `Entities.ItemLifetime`; at most `Entities.MaxItems`.
 - `Entities` replicates the items within `Entities.TrackingDistance` of each player: spawns, a
@@ -1969,10 +2187,11 @@ whose client predicted it. Sounds a player's own messages cause (chest lids, arm
 that player's budget (`Sounds.PlayerRate` a second, bursts of twice that), so a client spamming
 inventory or Use messages can't stream sounds to everyone near. Hooks: ServerNet (players' breaks
 and placements), Behaviours/Attached (torches popping off; water washing one away is silent, as in
-Minecraft), Behaviours/Plant (plants popping off), Containers' `onOpeners` (first viewer in, last
-out; a broken chest closes silently), Inventories (armor put on by any action, a tool breaking),
-Entities (pickups, at the item), Characters (health lost, at most every 0.5 s; death; a hurting
-landing's fall and the fall sound of the block below the feet).
+Minecraft), Behaviours/Plant (plants popping off), Containers' `onOpeners` (first opener in, last
+out; spectators look in without opening the lid; a broken chest closes silently), Inventories
+(armor put on by any action, a tool breaking), Entities (pickups, at the item), Characters (health
+lost, at most every 0.5 s; death; a hurting landing's fall and the fall sound of the block below
+the feet; none for spectators).
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
@@ -2012,12 +2231,13 @@ What the client plays itself:
   - `moveDist` grows by 0.6 per block walked; a step plays each time it passes the next whole
     number (every 1.67 blocks), on the block the hull stands on (else `floor(y - 0.2)`);
   - fluids make no step; flying and sneaking on the ground are silent; in the air the step waits
-    for the landing;
+    for the landing; spectators (`state.noClip`) make no sound at all;
   - in water off the ground: swim sounds; entering water: a splash; both scaled by speed;
   - a landing that hurts: `Sounds.fall` and the block's fall sound.
 - Other players' characters within 24 blocks of the listener, followed per player (a new
-  character starts over): the same rules every frame, from their feet (`SoundRules.observe`
-  guesses the ground, edges included, and the water; lying down in water is swimming).
+  character starts over; spectators are not followed): the same rules every frame, from their
+  feet (`SoundRules.observe` guesses the ground, edges included, and the water; lying down in
+  water is swimming).
 - Screens and JEI: clicks on buttons, tabs, page arrows, Back and "+" (not on slots or items).
 - `Ambience`:
   - the open furnace window, while burning: crackles with Minecraft's odds for a furnace a block
@@ -2048,6 +2268,8 @@ live edits after it must arrive in the order they were sent.
 | client → server | `StructureBlock` | position, op (open, update, save, load, detect), the screen's settings; load: an upload's transfer number (0: by name) |
 | client → server | `Jigsaw`        | position, op (open, update, generate), the jigsaw's settings; generate: levels (0..7), keep jigsaws |
 | client → server | `StructureData` | a piece of pasted structure text: transfer, index, count, text (16,000 characters) |
+| client → server | `SetGameMode`   | a GameType id (u8: 0 survival … 3 spectator): switch one's own game mode (the switcher, `F3` + `N`) |
+| client → server | `SpectatorTeleport` | a player's user id (f64, whole and finite): a spectator teleports to them |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -2101,11 +2323,14 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
     not opaque, so the grass under them stays grass and the sun reaches through them (`SkyCheck`),
     and a spawn may stand in one (`SafeSpot`).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
-- `Network/ServerNet`: rate limits, reach checks, breakable / placeable / replaceable checks, no
-  placing inside players (`EditRules.obstructs`: solid blocks and lanterns, not torches or plants),
-  survival mining time and drops (`EditRules`), and the rules injected by the boot script
-  (`setRules`: using up placed items, dropping items and chest contents). Rejections never generate
-  terrain.
+- `Network/ServerNet`: rate limits, reach checks, the game mode (`EditRules.mayEdit`: survival and
+  creative edit, adventure and spectator edits are answered with the real block;
+  `EditRules.minesOverTime`: only survival's Mine messages count), breakable / placeable /
+  replaceable checks, no placing inside players (`EditRules.obstructs`: solid blocks and lanterns,
+  not torches or plants; spectators are never in the way, `EditRules.blocksPlacing`), survival
+  mining time and drops (`EditRules`; its `creative` is the instabuild ability), and the rules
+  injected by the boot script (`setRules`: using up placed items, dropping items and chest
+  contents). Rejections never generate terrain.
   Tall plants follow Minecraft's DoublePlantBlock through pure `EditRules` rules: `mayPlace`
   refuses upper halves and `supported` (`Blocks.canPlace`) wants room for the top; `setPlaced`
   sets the lower half and its top together (looking at the room again first: without it nothing
@@ -2116,16 +2341,22 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   edit. Placing over a replaceable plant drops nothing; the other half of a tall one then pops by
   itself with its no-tool drop (nothing for tall grass and large ferns).
 - `Entities/`: dropped items (see Item entities).
-- `Players/GameModes`, `Players/Inventories`, `Players/Containers`: see Items, inventories and game
-  modes. `World/TimeOfDay` and `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see
-  Sounds.
+- `Players/GameModes`, `Players/GameModeCommand`, `Players/GameModeRules`: see Game modes.
+  `Players/Inventories`, `Players/Containers`: see Items and inventories. `World/TimeOfDay` and
+  `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see Sounds.
 - `Players/Characters`: puts every character part in the `IceVoxelCharacters` collision group
   (it collides with none of the groups registered when the server starts; parts go back to Default
-  on death, so the body falls, and when they leave the character), teleports characters by setting the
-  feet position as attributes the client's hull follows, and turns reported landings into fall
-  damage in survival (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
-  `TakeDamage`; at most 4 reports a second). It also plays the hurt, death and hurting-landing
-  sounds to everyone near (see Sounds).
+  on death, so the body falls, and when they leave the character), teleports characters by setting
+  the feet position as attributes the client's hull follows (`teleport` to a block, `teleportFeet`
+  to an exact spot), and turns reported landings into fall damage in survival and adventure
+  (`GameModeRules.fallDamage`: `ceil(distance − 3)` of 20 half hearts, none for players who may
+  fly, scaled to `MaxHealth`, through `TakeDamage`; landings that do no damage are ignored, the
+  others at most 4 a second). Creative and spectator characters hold an invisible ForceField
+  (`IceVoxelInvulnerable`), so `TakeDamage` can't hurt them. Players in a wall suffocate
+  (`GameModeRules.inWall`): half a heart every 0.5 s. It also plays the hurt, death and
+  hurting-landing sounds to everyone near (see Sounds), never a spectator's.
+- `Players/Teleport`: map teleports (see Map), and spectators' `SpectatorTeleport` (see Game
+  modes: On the server).
 - `Structures/`: structure blocks, jigsaws and their Generate, and who may use them (see
   Structure blocks and jigsaw structures). `Players/Containers` fills a generated structure's chest
   from the generator the first time its contents are needed; ServerNet's `operator` rule
@@ -2178,7 +2409,10 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - Block ids are list positions in `BlockList`: append, never reorder. The same holds for items in
   `ItemList` (ids from 4096).
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
-  inventory action with them and must reach exactly the server's result.
+  inventory action with them and must reach exactly the server's result. Both sides check
+  `Menu.allows(action, mode)` before `Menu.apply`, and pass the instabuild ability as `creative`.
+- Game modes are asked for what they allow (`GameMode.mayBuild(mode)`, `instabuildOf(player)`...),
+  never compared (`mode == GameMode.CREATIVE`), the way Minecraft reads a player's Abilities.
 - Sides are Minecraft's Direction ordinal everywhere in the pipes (0 Down .. 5 East,
   `Transmitters.SIDES`); transmitter modes, colours, network buffers and tank contents live in
   memory, like chests.

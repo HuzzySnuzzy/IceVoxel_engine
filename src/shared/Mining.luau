@@ -1,7 +1,8 @@
 --!strict
 --[[
 	How long survival players take to break blocks, with Minecraft's rules (Block.getDestroyProgress,
-	Player.getDestroySpeed). Each tick of mining adds
+	Player.getDestroySpeed). (Adventure and spectator players break nothing: GameMode.mayBuild;
+	creative players break at once: GameMode.instabuild.) Each tick of mining adds
 
 	    progress = speed / hardness / (canHarvest ? 30 : 100)
 

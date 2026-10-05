@@ -335,11 +335,14 @@ local Config = {
 	-- Game modes, inventories and item drops ---------------------------------------------------------
 
 	Gameplay = {
-		-- Game mode of players when they join: "Survival" (blocks are mined over time and drop as
-		-- items, placing uses them up) or "Creative" (every block, instant breaking, flying).
+		-- Game mode of players when they join (Shared/GameMode): "Survival" (blocks are mined over
+		-- time and drop as items, placing uses them up), "Creative" (every block, instant breaking,
+		-- flying), "Adventure" (survival without breaking or placing; menus still open) or
+		-- "Spectator" (flies through everything, invisible, changes nothing).
 		DefaultGameMode = "Survival",
-		-- Who may switch their own game mode with the /gamemode chat command: true = everyone,
-		-- false = nobody, or a list of user ids. The game's owner and Studio sessions always may.
+		-- Who may switch their own game mode, with the /gamemode chat command or the F3 + F4 game
+		-- mode switcher and F3 + N (Minecraft's permission level 2): true = everyone, false =
+		-- nobody, or a list of user ids. Admins, the game's owner and Studio sessions always may.
 		GameModeCommand = (true :: any) :: boolean | { number },
 		-- Who may change other players' game modes (/gamemode creative Name) and the time
 		-- (/time set|add, /gamerule doDaylightCycle): user ids, besides the game's owner and

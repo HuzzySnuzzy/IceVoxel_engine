@@ -16,7 +16,8 @@
 	               make footsteps. The server never sends footsteps, so every client makes
 	               everyone's.
 
-	Footsteps follow Config.Sounds.Footsteps; swimming and splashes always play.
+	Footsteps follow Config.Sounds.Footsteps; swimming and splashes always play. Spectators make no
+	sound at all (Player/SpectatorRules: no physics in Minecraft), this player included.
 ]]
 
 local Players = game:GetService("Players")
@@ -25,11 +26,13 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
 local Sounds = require(Shared.Sounds)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local SoundPlayer = require(script.Parent.SoundPlayer)
 local SoundRules = require(script.Parent.SoundRules)
 
@@ -72,7 +75,8 @@ function MovementSounds.tick(
 	previous: Vector3,
 	getBlock: GetBlock
 )
-	if not SoundPlayer.isEnabled() then
+	-- (Spectators pass through everything: Entity.move without physics makes no sound.)
+	if not SoundPlayer.isEnabled() or state.noClip then
 		return
 	end
 	if state ~= walkerState then
@@ -146,7 +150,8 @@ function MovementSounds.start(world: ClientWorld.ClientWorld)
 		local listener = SoundPlayer.listener()
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
-			if player ~= localPlayer and character == nil then
+			local audible = SpectatorRules.audible(GameMode.of(player))
+			if player ~= localPlayer and (character == nil or not audible) then
 				followed[player] = nil
 			elseif player ~= localPlayer and character then
 				local record = followed[player]

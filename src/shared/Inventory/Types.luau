@@ -70,13 +70,14 @@ export type Window = {
 
 --[[
 	Everything a player does to their inventory. Clients send these (numbered, see Protocol) and
-	predict them; the server applies them in order with Inventory/Menu.apply.
+	predict them; the server applies them in order with Inventory/Menu.apply (spectators' only
+	where Menu.allows: select and close).
 
 	  click     a window slot (or OUTSIDE) with a click type (Menu.ClickType) and button
 	  drag      spread the carried stack over slots (mode 0 evenly, 1 one each, 2 creative: full)
 	  select    hotbar slot 1..9
 	  drop      throw the held item (one, or the whole stack)
-	  place     one of the held item is used up placing a block (survival)
+	  place     one of the held item is used up placing a block (survival; creative keeps it)
 	  creative  creative inventory: put a stack (count 0 = nothing; with its wear and item data, as
 	            Minecraft's creative slot packet sends whole stacks) in a window slot or, with slot
 	            CURSOR, on the cursor

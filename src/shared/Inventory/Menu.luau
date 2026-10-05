@@ -31,8 +31,13 @@
 	`apply` mutates the window in place and returns the stacks thrown out of it (THROW clicks,
 	clicks outside, `drop`, crafts that did not fit, close leftovers), which the server turns into
 	item entities. Actions that break a rule (wrong window id, slot out of range, unknown item,
-	count above the max stack, creative-only action in survival, bad drag mode...) change nothing
-	and return {}. It never errors, whatever a client sends.
+	count above the max stack, creative-only action outside creative, bad drag mode...) change
+	nothing and return {}. It never errors, whatever a client sends.
+
+	`creative` everywhere here is Minecraft's instabuild ability (GameMode.instabuild: creative
+	mode): middle-click clones, full stack drags, creative slots, placing without using items up
+	and pick block from nothing. Adventure plays like survival. What a game mode may do at all is
+	`allows` (spectators look into menus but change nothing), checked before `apply`.
 
 	Stacks are treated as values: a changed slot gets a new table, so no table is ever shared by
 	two slots and a caller holding an old stack never sees it change. A stack's `damage` (a tool's
@@ -44,6 +49,7 @@
 ]]
 
 local Items = require(script.Parent.Parent.Items)
+local GameMode = require(script.Parent.Parent.GameMode)
 local Crafting = require(script.Parent.Parent.Crafting)
 local Machines = require(script.Parent.Parent.Machines)
 local Smelting = require(script.Parent.Parent.Crafting.Smelting)
@@ -1024,7 +1030,7 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 		inventory.slots[selected] = make(held.item, held.count - n, held.damage, held.data)
 		return { make(held.item, n, held.damage, held.data) :: Stack }
 	elseif action.kind == "place" then
-		-- Placing a block uses one up (survival). Creative keeps everything.
+		-- Placing a block uses one up (survival, adventure). Creative keeps everything.
 		local selected = inventory.selected
 		if creative or not isInt(selected) or selected < 1 or selected > HOTBAR then
 			return {}
@@ -1075,9 +1081,28 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 end
 
 --[[
+	May a player in game `mode` (Shared/GameMode) perform `action` at all? Spectators open menus
+	read only: they may only close a window and pick a hotbar slot (Minecraft's
+	handleContainerClick sends a spectator the menu again instead of clicking, Q drops nothing,
+	handleSetCreativeModeSlot wants creative). Creative slots need instabuild. The rest is up to
+	`apply`'s rules.
+]]
+function Menu.allows(action: Action, mode: string): boolean
+	if action.kind == "close" or action.kind == "select" then
+		return true
+	elseif not GameMode.canInteract(mode) then
+		return false
+	elseif action.kind == "creative" then
+		return GameMode.instabuild(mode)
+	end
+	return true
+end
+
+--[[
 	Applies one action to the window in place and returns the stacks thrown out of it (to drop as
 	item entities). Invalid actions change nothing and return {}. A crafting window's result is
-	derived again at the end, whatever happened.
+	derived again at the end, whatever happened. `creative`: the player's instabuild ability
+	(GameMode.instabuild).
 ]]
 function Menu.apply(window: Window, action: Action, creative: boolean): { Stack }
 	local thrown = applyAction(window, action, creative)
@@ -1200,8 +1225,10 @@ end
 	window 0 (the inventory screen's window, Types.newWindow; none when nothing happens):
 	  * the item in the hotbar: select it;
 	  * in slots 10..36: swap it into a suitable hotbar slot and select that;
-	  * nowhere (creative only): put a full stack in a suitable hotbar slot (moving what was there
-	    to a free slot, if any, like Inventory.setPickedItem) and select it.
+	  * nowhere (`creative`: instabuild, so creative only; adventure picks like survival): put a
+	    full stack in a suitable hotbar slot (moving what was there to a free slot, if any, like
+	    Inventory.setPickedItem) and select it.
+	Spectators don't pick blocks (their middle click opens the spectator menu).
 	The picked stack is a plain one, so only stacks without item data count as the item
 	(Inventory.findSlotMatchingItem compares with isSameItemSameTags): a Fluid Tank holding water
 	is not picked for a tank.

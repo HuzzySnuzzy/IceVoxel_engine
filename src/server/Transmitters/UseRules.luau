@@ -23,6 +23,10 @@
 
 	The Configurator's messages are Mekanism's: "Connection type changed to pull", "Colour bumped
 	to: red".
+
+	`creative` everywhere here is the instabuild ability (Shared/GameMode.instabuild: creative
+	mode). Players whose mode may not use items on blocks (adventure, spectator:
+	Players/GameModeRules.mayUseItemOn) never get this far.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

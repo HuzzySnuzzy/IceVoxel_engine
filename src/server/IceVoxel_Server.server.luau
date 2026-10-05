@@ -13,11 +13,12 @@
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
 	                   the sounds players should hear (Audio/Sounds)
 	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
-	  6. players    -> game modes (/gamemode), the time (/time, /gamerule doDaylightCycle), cosmetic
-	                   characters (collision group, teleports, fall damage), item entities (drops),
-	                   inventories, chests, furnaces and crafting tables, tools (mining speed, drops,
-	                   wear), safe spawning, map teleports, waypoints, keeping chunks around players
-	                   generated
+	  6. players    -> game modes (/gamemode, the F3 + F4 switcher and F3 + N), the time (/time,
+	                   /gamerule doDaylightCycle), cosmetic characters (collision group, teleports,
+	                   fall damage, invulnerability), item entities (drops), inventories, chests,
+	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
+	                   spawning, map and spectator teleports, waypoints, keeping chunks around
+	                   players generated
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
 	                   transporters, water in pipes, replication), and the Configurator and buckets
 	                   (Players/ItemUse)

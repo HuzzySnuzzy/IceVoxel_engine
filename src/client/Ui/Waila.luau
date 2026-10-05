@@ -11,7 +11,11 @@
 	            too far to target. While survival mining, the mined block always wins. Water shows
 	            only when no block is in reach (its surface, not the water the camera is in), so it
 	            never hides the highlighted block (BlockInteraction mines and places through water).
-	            The choice is WailaInfo.choose (tested).
+	            The choice is WailaInfo.choose (tested). Spectators are never named, nor the player
+	            being spectated, whose eyes the camera is in (Player/SpectatorRules.aimable). A
+	            spectator sees only what it can aim at: blocks with a menu (BlockInteraction aims at
+	            nothing else for spectators) and players, no dropped items or water. (Jade itself
+	            names any block for spectators.)
 	  Content   Ui/WailaInfo (pure, tested): the icon (the item's 3D icon; a colour box for blocks
 	            that are no item, like bedrock; a player's head shot), the name, the harvest line (the
 	            tool and tier a block needs, with a check or a cross for the held item), and
@@ -62,10 +66,12 @@ local VoxelRaycast = require(Shared.World.VoxelRaycast)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 local StructureNet = require(script.Parent.Parent.Net.StructureNet)
 local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
@@ -629,11 +635,20 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		return Vector2.new(size.X / 2, size.Y / 2)
 	end
 
-	-- The nearest item or player on the ray (blocks) within `maxDistance` and in reach of `body`.
-	local function pickEntity(origin: Vector3, direction: Vector3, maxDistance: number, body: Vector3): Entity?
+	--[[
+		The nearest item or player on the ray (blocks) within `maxDistance` and in reach of `body`
+		(no spectators, nor the player spectated; a spectator only players).
+	]]
+	local function pickEntity(
+		origin: Vector3,
+		direction: Vector3,
+		maxDistance: number,
+		body: Vector3,
+		spectating: boolean
+	): Entity?
 		local best: Entity? = nil
 		local bestDistance = maxDistance
-		if SHOW_ITEMS then
+		if SHOW_ITEMS and not spectating then
 			local half = ITEM_WIDTH / 2
 			for _, view in EntityRenderer.itemsNear(body.X, body.Y, body.Z, REACH) do
 				local t = WailaInfo.rayBox(
@@ -656,9 +671,10 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			end
 		end
 		if SHOW_PLAYERS then
+			local spectated = MovementController.spectating()
 			for _, other in Players:GetPlayers() do
 				local character = other.Character
-				if other ~= player and character then
+				if other ~= player and character and SpectatorRules.aimable(GameMode.of(other), other == spectated) then
 					local min, max = Rig.hull(character)
 					if min and max and ((min + max) / 2 - body).Magnitude <= REACH then
 						local t = WailaInfo.rayBox(
@@ -739,6 +755,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		local origin = ray.Origin / BLOCK
 		local direction = ray.Direction
 		local body = rootPart.Position / BLOCK
+		local spectating = GameMode.isSpectator(ClientInventory.mode())
 		-- (BlockInteraction's limit: the camera's distance to the player plus the reach.)
 		local maxDistance = (ray.Origin - rootPart.Position).Magnitude / BLOCK + REACH
 		if SHOW_ITEMS or SHOW_PLAYERS then
@@ -757,9 +774,9 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				Blocks.outline
 			)
 			pickedWall = if wall then wall.distance else nil
-			pickedEntity = pickEntity(origin, direction, maxDistance, body)
+			pickedEntity = pickEntity(origin, direction, maxDistance, body, spectating)
 		end
-		if SHOW_FLUIDS then
+		if SHOW_FLUIDS and not spectating then
 			pickedFluid = pickFluid(origin, direction, maxDistance, body)
 		end
 	end

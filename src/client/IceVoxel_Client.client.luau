@@ -9,7 +9,9 @@
 	  Rendering/ViewSettings     view distance per device, lighting quality and fog
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
-	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons
+	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons,
+	                             the spectator menu (SpectatorGui), the game mode switcher
+	                             (GameModeSwitcher: F3 + F4)
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
 	  Entities/EntityRenderer    dropped items
@@ -31,7 +33,8 @@
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Player/HeldItems           the item in every character's hand, and in first person
-	  Debug/DebugOverlay         F3 statistics
+	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
+	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -59,6 +62,8 @@ local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
+local SpectatorView = require(Client.Player.SpectatorView)
+local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
 local Map = require(Client.Map)
@@ -98,7 +103,9 @@ end)
 MovementController.start(world, streamer)
 CharacterAnimator.start()
 HeldItems.start()
+SpectatorView.start()
 BlockInteraction.start(world)
+GameModeSwitcher.start()
 DebugOverlay.start(streamer)
 Waila.start(world, generator)
 Map.start(pool, generator)

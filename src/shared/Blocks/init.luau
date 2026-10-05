@@ -35,7 +35,8 @@
 	      - what Shears harvest (`shearDrops`, `shearCount`; Items.drops, Shared/Mining).
 	  * structures (Shared/Structures):
 	      - creative only blocks (`creativeOnly`, `isCreativeOnly`): structure blocks, structure
-	        voids and jigsaws, which survival players can't mine and which never drop;
+	        voids and jigsaws, which only creative players break (survival players can't mine
+	        them) and which never drop;
 	      - structure block modes (`structureMode`, `structureBlock`): one block per mode;
 	      - jigsaw orientations (`jigsawOrientation`, `jigsawBlock`; Minecraft's FrontAndTop),
 	        placed from the clicked face and the look (`jigsawPlacement`, through `placementFor`);

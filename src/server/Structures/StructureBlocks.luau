@@ -10,10 +10,12 @@
 	               HEAVY_PER_SECOND with a small burst, uploaded pieces at a little over
 	               Config.Structures.DataPiecesPerSecond. A Use (right click) on these blocks
 	               opens them too (Players/Inventories.onMenu).
-	  Permission   Structures/Permission: creative, then Config.Structures.Permission (by default
-	               nobody else), with the game's owner (looked up once per player, as /gamemode
-	               does), Config.Gameplay.Admins and Studio always allowed. `operator` is
-	               ServerNet's rule for placing and breaking these blocks.
+	  Permission   Structures/Permission: creative (the instabuild ability, as Minecraft's
+	               canUseGameMasterBlocks: never adventure or spectator), then
+	               Config.Structures.Permission (by default nobody else), with the game's owner
+	               (looked up once per player, as /gamemode does), Config.Gameplay.Admins and
+	               Studio always allowed. `operator` is ServerNet's rule for placing and breaking
+	               these blocks.
 	  State        StructureStore follows every block change (`blockChanged`, chained onto
 	               WorldServer.onChanged by the server script). A chunk's records go to a player
 	               right after its edit list (`sendChunks`, ServerNet's `chunksSent`), and changed
@@ -141,7 +143,7 @@ function StructureBlocks.operator(player: Player): boolean
 	return Permission.allowed(
 		player.UserId,
 		Config.Structures.Permission,
-		GameMode.isCreative(player),
+		GameMode.instabuildOf(player),
 		owners[player] == true,
 		RunService:IsStudio(),
 		Config.Gameplay.Admins

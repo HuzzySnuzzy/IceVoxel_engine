@@ -5,7 +5,8 @@
 	player's ownership worked out ahead (a group game's owner takes a web call).
 
 	As Minecraft's Player.canUseGameMasterBlocks (creative and an operator):
-	  * creative players only, always;
+	  * creative players only, always (Abilities.instabuild: never adventure or spectator
+	    players);
 	  * of those, Config.Structures.Permission decides: a list of user ids (by default none),
 	    true = every one, false = nobody;
 	  * the game's owner, Config.Gameplay.Admins (who may change others' game modes and the time:

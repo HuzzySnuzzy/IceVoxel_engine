@@ -7,10 +7,17 @@
 	             out (Q, clicks outside the screen) flies off in front of the player as item
 	             entities (Entities.throwFromPlayer). Creative players conjure items, so their
 	             throws are rate limited (the extra ones vanish).
+	  Modes      what a player's game mode allows (InventoryState.applyAs, Menu.allows):
+	             spectators only select hotbar slots and close windows (every other action is
+	             acknowledged without a change, so the snapshot undoes the client's prediction),
+	             the creative actions are creative only, adventure is survival. Spectators pick
+	             nothing up, keep everything when they die and are no chest's opener (no lid).
 	  Windows    a Use message on a block with a menu (Blocks `menu`: a chest, a furnace, a crafting
-	             table) within reach opens it in a new window (one at a time; opening another closes
-	             the first); menus with a handler of their own (`onMenu`: structure blocks and
-	             jigsaws, Structures/StructureBlocks) go there instead. A window closes when the
+	             table) within reach opens it in a new window, in every game mode (spectators read
+	             only: Minecraft's ServerPlayerGameMode.useItemOn opens their MenuProvider). One at
+	             a time: opening another closes the first. Menus with a handler of their own
+	             (`onMenu`: structure blocks and jigsaws, Structures/StructureBlocks, which only
+	             creative players may use) go there instead. A window closes when the
 	             player walks away (more than Config.Interaction.Reach + 2 blocks, checked a few
 	             times a second), when the block stops being that block, when they die and when
 	             they leave. When the block goes, a container's contents drop
@@ -29,7 +36,8 @@
 	             item; refused edits are still acknowledged so the client's prediction is undone.
 	             It hands ServerNet the stack the block came from (data intact), for the sustained
 	             data hooks (a Fluid Tank placed from an item with water gets its water back).
-	  Pickups    item entities that touch a player go into the inventory (Entities' pickup handler).
+	  Pickups    item entities that touch a player go into the inventory (Entities' pickup handler;
+	             never a spectator's: GameModeRules.picksUp).
 	  Using      Players/ItemUse (buckets) reads the held stack (`heldStack`, `hasItem`), replaces it
 	             (`setHeld`) and hands stacks over (`give`: what does not fit is thrown).
 	  Pipes      Mekanism's transporters put items into chests and furnaces and take them out
@@ -37,7 +45,7 @@
 	             results into chests (Transmitters/Eject); `containerChanged` then sends the
 	             viewers a snapshot and lets a furnace cook.
 	  Death      everything drops where the player died (scattered), unless
-	             Config.Gameplay.KeepInventory.
+	             Config.Gameplay.KeepInventory or they were spectating (GameModeRules.keepsInventory).
 	  Snapshots  a player whose inventory changed (their own actions, pickups, a viewer of the same
 	             chest clicking, a furnace cooking, tool wear, opening, closing) gets one snapshot
 	             per frame at most, and one on joining and respawning.
@@ -71,6 +79,7 @@ local Containers = require(script.Parent.Containers)
 local InventoryState = require(script.Parent.InventoryState)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Eject = require(script.Parent.Parent.Transmitters.Eject)
+local GameModeRules = require(script.Parent.GameModeRules)
 
 type Stack = Types.Stack
 
@@ -123,9 +132,10 @@ local function withinReach(player: Player, x: number, y: number, z: number): boo
 	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
 end
 
--- Takes `cost` stacks from a creative player's budget (survival players only drop what they have).
+-- Takes `cost` stacks from a creative (instabuild) player's budget (the other modes only drop what
+-- they have).
 local function mayCreate(player: Player, cost: number): boolean
-	if not GameMode.isCreative(player) or cost <= 0 then
+	if not GameMode.instabuildOf(player) or cost <= 0 then
 		return true
 	end
 	local now = os.clock()
@@ -169,7 +179,7 @@ end
 	either way.
 ]]
 function Inventories.place(player: Player, block: number, seq: number): (boolean, Stack?)
-	return state:place(player, block, seq, GameMode.isCreative(player))
+	return state:place(player, block, seq, GameMode.instabuildOf(player))
 end
 
 -- Acknowledges inventory action `seq` (a refused placement), so the client undoes its prediction.
@@ -334,8 +344,9 @@ local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 		handler(player, x, y, z, block)
 		return
 	end
+	-- (Spectators look in read only, and open no chest lid.)
 	actor = player
-	local thrown = state:open(player, x, y, z, block)
+	local thrown = state:open(player, x, y, z, block, not GameModeRules.opensContainers(GameMode.of(player)))
 	actor = nil
 	throw(player, thrown, false)
 end
@@ -357,7 +368,7 @@ local function onInventory(player: Player, payload: buffer)
 		end
 	end
 	actor = player
-	local thrown = state:apply(player, seq, action, GameMode.isCreative(player))
+	local thrown = state:applyAs(player, seq, action, GameMode.of(player))
 	actor = nil
 	throw(player, thrown, false)
 	if fx ~= nil and container and container.kind == "furnace" then
@@ -413,7 +424,8 @@ local function onCharacter(player: Player, character: Model)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if humanoid and humanoid:IsA("Humanoid") then
 		humanoid.Died:Connect(function()
-			throw(player, state:die(player, Config.Gameplay.KeepInventory), true)
+			local keep = GameModeRules.keepsInventory(GameMode.of(player), Config.Gameplay.KeepInventory)
+			throw(player, state:die(player, keep), true)
 		end)
 	end
 end
@@ -453,6 +465,9 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 		onUse(world, player, payload)
 	end)
 	Entities.setPickupHandler(function(player: Player, stack: Stack): number
+		if not GameModeRules.picksUp(GameMode.of(player)) then
+			return 0
+		end
 		return state:pickup(player, stack)
 	end)
 

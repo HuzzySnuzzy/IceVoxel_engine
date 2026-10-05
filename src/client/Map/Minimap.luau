@@ -1,8 +1,9 @@
 --!strict
 --[[
 	Minimap in the top right corner: terrain around the player (north up), the player's heading,
-	waypoints (pinned to the edge when off the map) and other players. Click it to open the world
-	map; `-` / `=` zoom out / in.
+	waypoints (pinned to the edge when off the map) and other players (not spectators, unless this
+	player spectates too: Player/SpectatorRules). Click it to open the world map; `-` / `=` zoom
+	out / in.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,7 +12,9 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 
+local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
@@ -169,8 +172,10 @@ function Minimap.new(
 			waypointDots[i].Visible = false
 		end
 
+		local viewer = GameMode.of(Players.LocalPlayer)
 		for _, player in Players:GetPlayers() do
-			local root = if player ~= Players.LocalPlayer then rootOf(player) else nil
+			local shown = player ~= Players.LocalPlayer and SpectatorRules.sees(viewer, GameMode.of(player))
+			local root = if shown then rootOf(player) else nil
 			local existing: Frame? = playerDots[player]
 			if root then
 				local marker = existing or dot(holder, 6, 5)

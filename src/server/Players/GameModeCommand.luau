@@ -1,19 +1,24 @@
 --!strict
 --[[
-	The /gamemode chat command (alias /gm), without the Roblox parts (those are in
-	Players/GameModes), so the tests can run it.
+	The /gamemode chat command (alias /gm) and the client's game mode switching (the F3 + F4
+	switcher, F3 + N: Protocol SetGameMode), without the Roblox parts (those are in
+	Players/GameModes), so the tests can run them.
 
-	    /gamemode <survival | creative | s | c | 0 | 1> [player]
+	    /gamemode <survival | creative | adventure | spectator> [player]
 
-	`player` is a name or display name, or the start of one (any case), or Minecraft's selectors
-	@s (yourself) and @a (everyone). Who may use it:
+	Modes may be shortened as Shared/GameMode.parse reads them (s / c / a / sp, 0..3). `player` is
+	a name or display name, or the start of one (any case), or Minecraft's selectors @s (yourself)
+	and @a (everyone). Who may use it:
 	  * your own game mode: Config.Gameplay.GameModeCommand (true = everyone, false = nobody, or a
-	    list of user ids), plus admins;
+	    list of user ids), plus admins (`mayChangeOwn`, which the server also tells each client as
+	    the GameMode.PERMISSION_ATTRIBUTE);
 	  * other players': Config.Gameplay.Admins;
 	  * the game's owner and Studio sessions may always do both.
 
 	The feedback uses Minecraft's wording ("Set own game mode to Creative Mode", "Set Steve's game
 	mode to Survival Mode"; the other player reads "Your game mode has been updated to ...").
+	`switchOwn` is the switcher's way in: the same permission and answer, and nothing at all when
+	the mode is already the one asked for (Minecraft's switcher sends nothing then).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48,15 +53,13 @@ export type Result = {
 local GameModeCommand = {}
 
 GameModeCommand.ALIASES = { "/gamemode", "/gm" }
-GameModeCommand.USAGE = "Usage: /gamemode <survival | creative> [player]"
+GameModeCommand.USAGE = "Usage: /gamemode <survival | creative | adventure | spectator> [player]"
 GameModeCommand.DENIED = "You can't change game modes here"
 GameModeCommand.DENIED_OTHERS = "You can't change other players' game modes"
 GameModeCommand.NO_PLAYER = "No player was found"
 
 -- "Creative" -> "Creative Mode" (Minecraft's gameMode.* names).
-function GameModeCommand.modeName(mode: string): string
-	return `{mode} Mode`
-end
+GameModeCommand.modeName = GameMode.displayName
 
 --[[
 	May user `userId` change their own game mode? `rule` is Config.Gameplay.GameModeCommand: true
@@ -80,6 +83,21 @@ end
 -- May user `userId` change other players' game modes (Config.Gameplay.Admins)?
 function GameModeCommand.isAdmin(userId: number, admins: { number }, isOwner: boolean, isStudio: boolean): boolean
 	return isOwner or isStudio or table.find(admins, userId) ~= nil
+end
+
+--[[
+	May user `userId` change their own game mode, by the command or the switcher? `allowed`, or an
+	admin (who may even where the command is off for everyone). Minecraft's permission level 2.
+]]
+function GameModeCommand.mayChangeOwn(
+	userId: number,
+	rule: boolean | { number },
+	admins: { number },
+	isOwner: boolean,
+	isStudio: boolean
+): boolean
+	return GameModeCommand.allowed(userId, rule, isOwner, isStudio)
+		or GameModeCommand.isAdmin(userId, admins, isOwner, isStudio)
 end
 
 -- Is `text` a /gamemode command (the alias, then nothing or a space)?
@@ -156,7 +174,9 @@ function GameModeCommand.run(text: string, context: Context): Result?
 	end
 	local mode = GameMode.parse(words[2])
 	if mode == nil then
-		return say(`Unknown game mode '{words[2]}'. Use survival (s, 0) or creative (c, 1)`)
+		return say(
+			`Unknown game mode '{words[2]}'. Use survival (s, 0), creative (c, 1), adventure (a, 2) or spectator (sp, 3)`
+		)
 	end
 
 	local source = context.source
@@ -196,6 +216,34 @@ function GameModeCommand.run(text: string, context: Context): Result?
 		else
 			say(`Everyone is already in {name}`)
 		end
+	end
+	return result
+end
+
+--[[
+	The previous mode after a player's mode is set from `old` (the attribute as it was: nil before
+	the first mode) to `new`: `old` when the mode really changes, else nil (the previous mode stays
+	as it is). Minecraft's client (MultiPlayerGameMode.setLocalMode).
+]]
+function GameModeCommand.previousAfter(old: unknown, new: string): string?
+	if old ~= new and GameMode.isValid(old) then
+		return old :: string
+	end
+	return nil
+end
+
+--[[
+	A player asks to switch their own mode to `mode` (Protocol SetGameMode: the switcher, F3 + N).
+	The command's permission and answer; no change and no answer when they are in `mode` already.
+	`context.players` is not used.
+]]
+function GameModeCommand.switchOwn(mode: string, context: Context): Result
+	local result: Result = { changes = {}, feedback = {}, notices = {} }
+	if not context.mayUse and not context.mayTarget then
+		table.insert(result.feedback, GameModeCommand.DENIED)
+	elseif context.modeOf(context.source.key) ~= mode then
+		table.insert(result.changes, { key = context.source.key, mode = mode })
+		table.insert(result.feedback, `Set own game mode to {GameModeCommand.modeName(mode)}`)
 	end
 	return result
 end

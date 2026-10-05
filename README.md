@@ -19,8 +19,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   stone varieties by altitude, and a deterministic structure system (trees and cacti, and jigsaw
   structures from the structure library: see Generated structures) that lets anything cross chunk
   borders.
-- **Survival and creative.** Minecraft's two game modes, switched with `/gamemode creative` or
-  `/gm s` in the chat.
+- **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
+  `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
+  back) or the `F3` + `F4` game mode switcher.
   - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
     go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
     a pickaxe of the right tier to drop anything (iron and osmium ore a stone pickaxe, diamonds an iron one),
@@ -29,7 +30,27 @@ A fast, Minecraft-style voxel engine for Roblox.
     furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
     spread, double click. Items drop on death.
   - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
-    (double tap jump) and no fall damage.
+    (double tap jump), and nothing hurts.
+  - **Adventure:** survival without building: blocks can't be broken or placed and items can't be
+    used on them (buckets, the Configurator), and no block is outlined; chests, furnaces, crafting
+    tables and machines still open. Health, falls, pickups, the inventory and death drops are
+    survival's.
+  - **Spectator:** always flies, through blocks and water, from the bottom of the world to 64
+    blocks above its top (the mouse wheel sets the flying speed); nothing hurts. Players who don't
+    spectate neither see nor hear a spectator (other spectators see a translucent floating head).
+    Spectators pick up and change nothing, look into chests, furnaces and machines read only, and
+    keep their inventory if they die. Instead of the hotbar, a number key or the middle click
+    opens Minecraft's spectator menu: `1` "Teleport to Player" lists the other players' heads (7
+    on the first page, then 6 a page), a player's number pressed twice teleports there, `9`
+    closes it. A left click on a player looks through their eyes until you sneak. Switching from
+    spectator to survival or adventure inside a block suffocates you (half a heart every half
+    second) until you get out, as in Minecraft.
+- **Game mode switcher and debug keys.** Minecraft's `F3` + `F4` switcher: hold `F3`, press `F4`
+  to step through Creative, Survival, Adventure and Spectator (or point at one) and let go of `F3`
+  to switch. `F3` + `N` toggles spectator and the previous mode, `F3` + `Q` lists the keys in the
+  chat, and `F3` alone opens the debug overlay when let go. Who may switch is
+  `Gameplay.GameModeCommand`, as for `/gamemode`; without the permission the keys say so
+  ("[Debug]: Unable to open game mode switcher; no permission").
 - **Crafting and smelting.** Minecraft's recipes for everything the game has: planks, sticks,
   crafting tables, chests, furnaces, wooden to diamond tools, shears, iron, gold and diamond armor,
   storage blocks, stone bricks and polished stones. Shaped recipes fit anywhere in the grid and
@@ -394,19 +415,23 @@ Studio tips:
 
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
-| Break block   | Hold left click (survival mines, creative breaks at once) | R2 | Hold |
-| Place / use   | Right click (opens chests, crafting tables, furnaces, machines) | L2 | Tap |
-| Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
+| Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
+| Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
+| Select slot   | `1`–`9`, mouse wheel, or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
 | Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
-| Pick block    | Middle click                |         |            |
-| Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
-| Inventory     | `E` (creative: the item picker) | Y   | `…` button |
+| Pick block    | Middle click (spectator: the spectator menu) |  |      |
+| Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
+| Inventory     | `E` (creative: the item picker; spectator: none) | Y   | `…` button |
 | Fly (creative) | Double tap `Space`; `Space` / `Shift` up / down | double tap A | double tap jump |
-| Game mode     | `/gamemode survival` / `creative` (or `/gm s` / `c`) in the chat | | |
+| Fly (spectator) | Always, through blocks; `Space` / `Shift` up / down, sprinting (`Ctrl`) twice as fast; mouse wheel (spectator menu closed): flying speed | A / B | Jump / Sneak |
+| Spectator menu | `1`–`9` or middle click open it, then a number selects and the same number again (or middle click) uses; the wheel moves the selection | L1 / R1 open and move, D-pad up uses | `…` button; tap a slot |
+| Spectate a player (spectator) | Left click them; `Shift` leaves | R2; B leaves | Hold on them; Sneak button leaves |
+| Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
+| Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
 | Sprint        | `Ctrl` turns it on / off, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
 | Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
@@ -420,7 +445,8 @@ Studio tips:
 | World map     | `M`, or click the minimap   |         | Tap minimap |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
-| Debug overlay | `F3` (also WAILA's extended view) |         |            |
+| Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
+| Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
 
 ## Project layout
@@ -455,7 +481,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   StructureLibrary/         the structure library: Templates/ (IVS1 modules; Outpost, the
                             example), Pools (explicit template pools), Structures (what generates)
   Entities/ItemPhysics      dropped item movement (server and client)
-  GameMode, Mining          survival / creative, mining times by hand and with tools
+  GameMode, Mining          the four game modes and what each allows, mining times by hand and
+                            with tools
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
@@ -476,7 +503,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Map/MapPainter            map tile colours from the generator (runs in the workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
-                            tick), Rig (hull <-> cosmetic character)
+                            tick, spectators' flight through blocks), Rig (hull <-> cosmetic
+                            character)
   Net/                      Protocol (buffer encoding), Remotes
   Util/Hash                 deterministic hashing and RNG
 
@@ -508,13 +536,15 @@ src/server   -> ServerScriptService.IceVoxel
                             Generate; pure), StructureStore (their settings), Placement (LOAD and
                             Generate plans, placed over frames), Permission (who may use them)
   Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
-  Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
-                            (/time, /gamerule), Inventories +
-                            InventoryState (authoritative inventories), Containers (chests,
-                            furnaces, generated structures' chests),
+  Players/                  GameModes + GameModeCommand (/gamemode, the switcher's requests,
+                            permissions, the previous mode), GameModeRules (what each mode may
+                            do on the server; pure), TimeCommands + TimeCommand (/time,
+                            /gamerule), Inventories + InventoryState (authoritative inventories),
+                            Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
-                            damage), Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
-                            Teleport (map), WaypointStore (DataStore)
+                            damage, invulnerability, suffocation), Spawning, SafeSpot +
+                            SpawnUnsafeBlocks (safety rules), Teleport (map, spectators),
+                            WaypointStore (DataStore)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -537,7 +567,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             points at), Jei/ (Just Enough Items: item list, recipe view, recipe
                             transfer), StructureScreen + StructureForm (the structure block and
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
-                            buttons)
+                            buttons), SpectatorGui + SpectatorMenu (the spectator menu and its
+                            model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
+                            model)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces and Heat Generators crackling, caves), SoundRules (the pure
@@ -547,8 +579,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             Waypoints, ContextMenu
   Net/ClientNet             routes server messages; Notices shows server messages in the chat;
                             StructureNet (structure blocks' and jigsaws' messages and screens)
-  Player/                   MovementController (the hull, input, the cosmetic character),
-                            CharacterAnimator (avatar animations from the hull), HeldItems
+  Player/                   MovementController (the hull, input, the cosmetic character,
+                            spectating a player), CharacterAnimator (avatar animations from the
+                            hull), HeldItems, SpectatorView + SpectatorRules (who sees, hears and
+                            aims at spectators)
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
                             tanks, items moving through transporters, the windows of a burning
                             Heat Generator and a smelting Electric Furnace, Batteries' charge
@@ -558,7 +592,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             chests, crafting tables, furnaces, Mekanism's machines, structure
                             blocks and jigsaws)
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
-  Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
+  Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view); DebugKeys
+                            (Minecraft's debug keys: F3 when let go, F3 + N, F3 + F4, F3 + Q)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
              command line), build_structures (the example outpost's builder)
@@ -601,10 +636,10 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
-| `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join.                              |
-| `Gameplay.GameModeCommand` | true   | Who may use `/gamemode`: everyone, nobody, or a user id list (the owner and Studio always may). |
-| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes and the time (`/time set\|add`, `/gamerule`). |
-| `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it.                 |
+| `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
+| `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (`Gameplay.Admins`, the owner and Studio always may). |
+| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes (and their own) and the time (`/time set\|add`, `/gamerule`). |
+| `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
@@ -1029,8 +1064,8 @@ Natural next steps, roughly in order:
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
-- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling
-  (`Items.damageAfterArmor` is ready for it).
+- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling and
+  suffocating inside a block (`Items.damageAfterArmor` is ready for it).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on
   every side and furnaces don't light up while burning.
 - **More plants.** Saplings (dropped by leaves, growing into the existing tree builders), bone

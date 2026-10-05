@@ -10,6 +10,9 @@
 
 	`listen` lets a screen show them too (the structure block screen repeats the answers to its
 	buttons on its status line, where the player is looking).
+
+	`debug` shows the debug keys' feedback (Debug/DebugKeys) as Minecraft's debugFeedbackTranslated
+	does: "[Debug]:" in bold yellow, then the message (the legacy chat shows it all in white).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,11 +27,13 @@ local ClientNet = require(script.Parent.ClientNet)
 -- Seconds to wait for the chat to be ready, and between legacy retries.
 local CHAT_TIMEOUT = 60
 local RETRY_DELAY = 0.5
--- Minecraft shows command feedback in white.
+-- Minecraft shows command feedback in white, and the debug prefix in yellow (§e).
 local LEGACY_COLOUR = Color3.fromRGB(255, 255, 255)
+local DEBUG_COLOUR = "#FFFF55"
 
 local Notices = {}
 
+-- Rich text waiting for the system channel.
 local queue: { string } = {}
 local channel: TextChannel? = nil
 local waiting = false
@@ -64,8 +69,8 @@ local function flush()
 		return
 	end
 	while #queue > 0 do
-		local text = table.remove(queue, 1) :: string
-		pcall(system.DisplaySystemMessage, system, escape(text))
+		local rich = table.remove(queue, 1) :: string
+		pcall(system.DisplaySystemMessage, system, rich)
 	end
 end
 
@@ -97,8 +102,8 @@ function Notices.listen(listener: (text: string) -> ())
 	table.insert(listeners, listener)
 end
 
--- Shows `text` in this player's chat.
-function Notices.show(text: string)
+-- Shows `text` (plain) in this player's chat, `rich` (its rich text form) where rich text shows.
+local function display(text: string, rich: string)
 	for _, listener in listeners do
 		task.spawn(listener, text)
 	end
@@ -106,12 +111,22 @@ function Notices.show(text: string)
 		showLegacy(text)
 		return
 	end
-	table.insert(queue, text)
+	table.insert(queue, rich)
 	if channel then
 		flush()
 	else
 		findChannel()
 	end
+end
+
+-- Shows `text` in this player's chat.
+function Notices.show(text: string)
+	display(text, escape(text))
+end
+
+-- Shows `text` after Minecraft's bold yellow debug prefix (`prefix`, "[Debug]:").
+function Notices.debug(prefix: string, text: string)
+	display(`{prefix} {text}`, `<font color="{DEBUG_COLOUR}"><b>{escape(prefix)}</b></font> {escape(text)}`)
 end
 
 function Notices.start()

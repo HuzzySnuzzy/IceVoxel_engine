@@ -16,7 +16,11 @@
 	           frame make one snapshot (`takeDirty`)
 
 	Actions run through Inventory/Menu in arrival order. Invalid ones change nothing but are still
-	acknowledged, so the client's prediction of them is undone. A change to a shared container
+	acknowledged, so the client's prediction of them is undone. So are the ones the player's game
+	mode does not allow (`applyAs`, Menu.allows): a spectator only selects hotbar slots and closes
+	windows (Minecraft's handleContainerClick resends the menu to spectators and changes nothing),
+	and only creative players use the creative actions. Spectators open containers without being
+	their openers (`open`'s `quiet`: no chest lid). A change to a shared container
 	marks its other viewers dirty too. Crafting results are derived from their grids
 	(Menu.updateCraft), so every snapshot carries the right one.
 
@@ -35,6 +39,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Menu = require(Shared.Inventory.Menu)
@@ -72,9 +77,18 @@ export type InventoryState = {
 	window: (self: InventoryState, key: any) -> Window?,
 	snapshot: (self: InventoryState, key: any) -> Types.Snapshot?,
 	apply: (self: InventoryState, key: any, seq: number, action: Action, creative: boolean) -> { Stack },
+	applyAs: (self: InventoryState, key: any, seq: number, action: Action, mode: string) -> { Stack },
 	place: (self: InventoryState, key: any, block: number, seq: number, creative: boolean) -> (boolean, Stack?),
 	acknowledge: (self: InventoryState, key: any, seq: number) -> (),
-	open: (self: InventoryState, key: any, x: number, y: number, z: number, block: number) -> { Stack },
+	open: (
+		self: InventoryState,
+		key: any,
+		x: number,
+		y: number,
+		z: number,
+		block: number,
+		quiet: boolean?
+	) -> { Stack },
 	close: (self: InventoryState, key: any) -> { Stack },
 	openPosition: (self: InventoryState, key: any) -> (number?, number, number),
 	removeContainer: (self: InventoryState, x: number, y: number, z: number) -> ({ Stack }, { Leftovers }),
@@ -171,7 +185,8 @@ end
 
 --[[
 	Handles the player's inventory action number `seq` (Menu.apply). Returns the stacks thrown out
-	(to drop in front of the player). A valid `close` also closes the container window.
+	(to drop in front of the player). A valid `close` also closes the container window. `creative`:
+	the instabuild ability (GameMode.instabuild); `applyAs` checks the game mode first.
 ]]
 function InventoryState.apply(self: InventoryState, key: any, seq: number, action: Action, creative: boolean): { Stack }
 	local player = self.players[key]
@@ -197,6 +212,20 @@ function InventoryState.apply(self: InventoryState, key: any, seq: number, actio
 		markViewers(self, key, player)
 	end
 	return thrown
+end
+
+--[[
+	Handles action `seq` of a player in game mode `mode` (Players/Inventories): what the mode does
+	not allow (Menu.allows: everything but selecting a hotbar slot and closing for spectators, the
+	creative actions outside creative) changes nothing and is acknowledged, so the snapshot undoes
+	the client's prediction; the rest is `apply` with the mode's instabuild ability.
+]]
+function InventoryState.applyAs(self: InventoryState, key: any, seq: number, action: Action, mode: string): { Stack }
+	if type(action) ~= "table" or not Menu.allows(action, mode) then
+		self:acknowledge(key, seq)
+		return {}
+	end
+	return self:apply(key, seq, action, GameMode.instabuild(mode))
 end
 
 --[[
@@ -251,9 +280,18 @@ end
 	(the cursor and the 2 x 2 grid go back into the inventory). A crafting table (menu "Crafting")
 	gets a 3 x 3 grid of the player's own; a chest, a furnace or a machine (even one without
 	slots: its panel shows its energy) is the shared container there (Containers). Returns the
-	stacks that did not fit back. Blocks with no window open nothing.
+	stacks that did not fit back. Blocks with no window open nothing. A `quiet` viewer (a
+	spectator) sees the container without being one of its openers (Containers.addViewer).
 ]]
-function InventoryState.open(self: InventoryState, key: any, x: number, y: number, z: number, block: number): { Stack }
+function InventoryState.open(
+	self: InventoryState,
+	key: any,
+	x: number,
+	y: number,
+	z: number,
+	block: number,
+	quiet: boolean?
+): { Stack }
 	local player = self.players[key]
 	if player == nil or not Blocks.isValid(block) then
 		return {}
@@ -269,7 +307,7 @@ function InventoryState.open(self: InventoryState, key: any, x: number, y: numbe
 		container = Types.newCrafting("crafting", block)
 	else
 		container = self.containers:get(x, y, z, block)
-		self.containers:addViewer(x, y, z, key)
+		self.containers:addViewer(x, y, z, key, quiet)
 	end
 	local window = player.window
 	player.lastWindow = player.lastWindow % MAX_WINDOW + 1

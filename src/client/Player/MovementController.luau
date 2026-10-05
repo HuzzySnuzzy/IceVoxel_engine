@@ -24,10 +24,22 @@
 	            field of view widens while flying (x 1.1) and sprinting (Config.Movement.SprintFov),
 	            eased like Minecraft's FOV modifier, on top of whatever the camera's field of view
 	            is.
-	  Flying    creative players (the game mode attribute, GameMode) may fly: double tap jump.
-	            Switching to survival stops it.
-	  Screens   while an inventory screen is open (Ui/Screens) the input is neutral: the player
-	            stops (a sprint toggled on stays on).
+	  Modes     the game mode attribute (Shared/GameMode) gives the hull its abilities
+	            (PlayerPhysics.setGameMode): creative may fly (double tap jump); spectators always
+	            fly, through everything (noClip), and their mouse wheel changes the flying speed
+	            while the spectator menu is closed (Ui/SpectatorGui, PlayerPhysics.
+	            scrollFlyingSpeed). Switching to survival or adventure stops flying: the player
+	            falls; from spectator to creative keeps flying, as in Minecraft.
+	  Spectate  a spectator's left click on a player (Interaction/BlockInteraction) spectates them:
+	            the camera looks from their eyes (CameraSubject: their Humanoid, first person, its
+	            CameraOffset set here every frame, as their own client's never replicates: standing
+	            eyes, or lying ones as far as the body is pitched, since the pose doesn't replicate
+	            either) and the hull follows their feet every frame, so the world streams around
+	            them. Sneaking, a teleport, leaving spectator mode or the target dying or leaving
+	            stops it, where the target was (ServerPlayer.setCamera, wantsToStopRiding).
+	  Screens   while an inventory screen (Ui/Screens) or the game mode switcher (Ui/
+	            GameModeSwitcher) is open the input is neutral: the player stops (a sprint toggled
+	            on stays on), as Minecraft releases every key mapping when a screen opens.
 	  Waiting   until the full detail chunks under the hull are visible (after spawning and
 	            teleports), it stays frozen in place.
 	  Teleports the server sets the feet position as attributes (Rig); other scripts moving the
@@ -55,7 +67,9 @@ local Rig = require(Shared.Movement.Rig)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
 
 local BLOCK = Config.BlockSize
@@ -87,12 +101,16 @@ local FIRST_PERSON_DISTANCE = 1
 local MAX_FOV = 120
 -- Field of view modifier while flying (AbstractClientPlayer.getFieldOfViewModifier).
 local FLYING_FOV = 1.1
+-- Eye heights (blocks) of a standing and a lying (swimming / crawling) player.
+local STANDING_EYE = PlayerPhysics.dimensions("standing").eye
+local LYING_EYE = PlayerPhysics.dimensions("crawling").eye
 
 type Streamer = { isReady: (self: any, x: number, z: number) -> boolean }
 
 export type View = {
-	-- Hull state (blocks), updated every tick; also whether the player may fly (creative) and
-	-- flies (state.mayFly, state.flying).
+	-- Hull state (blocks), updated every tick; also the game mode's abilities: whether the player
+	-- may fly (creative, spectator), flies, moves through blocks (spectator) and how fast it flies
+	-- (state.mayFly, state.flying, state.noClip, state.flyingSpeed).
 	state: PlayerPhysics.State,
 	-- Where the hull is drawn this frame (feet, blocks, between the last two ticks) and the
 	-- character's facing (radians around Y).
@@ -113,6 +131,58 @@ local MovementController = {}
 -- The local player's movement while a character exists (BlockInteraction, the F3 overlay, the
 -- animator read it).
 MovementController.current = nil :: View?
+
+-- The player a spectator spectates (nil: none), and the camera mode to go back to afterwards.
+local spectated: Player? = nil
+local cameraModeBefore: Enum.CameraMode? = nil
+-- The spectated player's Humanoid whose CameraOffset is set here, and what it was before.
+local offsetHumanoid: Humanoid? = nil
+local offsetBefore = Vector3.zero
+
+-- Gives the spectated player's Humanoid its own CameraOffset back.
+local function releaseOffset()
+	local humanoid = offsetHumanoid
+	if humanoid then
+		humanoid.CameraOffset = offsetBefore
+		offsetHumanoid = nil
+	end
+end
+
+--[[
+	Spectates `target` (a spectator's click on them), or stops (nil): the camera looks from the
+	target's eyes and the hull follows them until sneaking, a teleport or a game mode change.
+]]
+function MovementController.spectate(target: Player?)
+	if target == spectated then
+		return
+	end
+	local player = Players.LocalPlayer
+	spectated = target
+	releaseOffset()
+	if target then
+		if cameraModeBefore == nil then
+			cameraModeBefore = player.CameraMode
+		end
+		player.CameraMode = Enum.CameraMode.LockFirstPerson
+		return
+	end
+	-- Back to the player's own eyes, where the target was.
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local camera = workspace.CurrentCamera
+	if camera and humanoid then
+		camera.CameraSubject = humanoid
+	end
+	if cameraModeBefore then
+		player.CameraMode = cameraModeBefore
+		cameraModeBefore = nil
+	end
+end
+
+-- The player being spectated, or nil.
+function MovementController.spectating(): Player?
+	return spectated
+end
 
 local function keyCodes(names: { string }): { Enum.KeyCode }
 	local codes = {}
@@ -179,6 +249,31 @@ local function cameraHeight(hum: Humanoid, root: BasePart): number
 	return 1.5
 end
 
+--[[
+	Puts the camera at the eyes of the spectated player (`humanoid`, feet at `feet` in blocks):
+	Roblox's camera aims at its fixed height above their root part plus their CameraOffset in the
+	root's space, and the offset their own client sets (below) never replicates. Their pose doesn't
+	either: standing eyes, or lying ones as far as the body is pitched (as Rig.feet reads it).
+]]
+local function aimAtEyes(humanoid: Humanoid, feet: Vector3)
+	local root = humanoid.RootPart
+	if root == nil then
+		return
+	end
+	if offsetHumanoid ~= humanoid then
+		releaseOffset()
+		offsetHumanoid, offsetBefore = humanoid, humanoid.CameraOffset
+	end
+	local pitch = math.acos(math.clamp(root.CFrame.UpVector.Y, -1, 1))
+	local tilt = math.clamp(pitch / (math.pi / 2), 0, 1)
+	local eye = STANDING_EYE + (LYING_EYE - STANDING_EYE) * tilt
+	local toEye = (feet + Vector3.new(0, eye, 0)) * BLOCK - root.Position
+	local offset = root.CFrame:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(humanoid, root), 0)
+	if (humanoid.CameraOffset - offset).Magnitude > 1e-3 then
+		humanoid.CameraOffset = offset
+	end
+end
+
 function MovementController.start(world: ClientWorld.ClientWorld, streamer: Streamer)
 	local player = Players.LocalPlayer
 	local physicsWorld: PlayerPhysics.World = {
@@ -208,6 +303,11 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			return controls:GetMoveVector()
 		end)
 		return if ok and typeof(vector) == "Vector3" then vector else nil
+	end
+
+	-- An inventory screen or the game mode switcher has the keys: the player stands still.
+	local function inputTaken(): boolean
+		return Screens.isOpen() or GameModeSwitcher.isOpen()
 	end
 
 	-- Sprint / sneak keys and touch toggles.
@@ -241,7 +341,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	bind("IceVoxelSprint", Movement.SprintKeys, "Sprint", function(held, touch)
 		if touch or Movement.ToggleSprint then
 			-- (Ctrl+Q in an inventory screen must not toggle sprinting.)
-			if held and not Screens.isOpen() then
+			if held and not inputTaken() then
 				-- Toggles what the player sees: a sprint started by double tapping stops too.
 				local view = MovementController.current
 				sprintOn = not (sprintOn or (view ~= nil and view.state.sprinting))
@@ -304,6 +404,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		table.clear(connections)
 		RunService:UnbindFromRenderStep("IceVoxelMovement")
 		MovementController.current = nil
+		MovementController.spectate(nil)
 		resetFov()
 	end
 
@@ -366,7 +467,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local start = if typeof(feet) == "Vector3" then feet else Rig.feet(character) or Vector3.zero
 		local state = PlayerPhysics.new(start.X, start.Y, start.Z)
 		state.stepHeight = Movement.StepHeight
-		state.mayFly = GameMode.isCreative(player)
+		PlayerPhysics.setGameMode(state, GameMode.of(player))
 		local _, rootYaw = rootPart.CFrame:ToOrientation()
 		local view: View = {
 			state = state,
@@ -404,6 +505,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		local function onTeleport()
 			local target = character:GetAttribute(Rig.TELEPORT_FEET)
 			if typeof(target) == "Vector3" then
+				-- (A teleport ends spectating, as ServerPlayer.teleportTo sets the camera back.)
+				MovementController.spectate(nil)
 				settled = true
 				snap(target)
 			end
@@ -434,12 +537,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 
 		-- Jump held now (never while a screen is open).
 		local function jumpHeld(): boolean
-			return hum.Jump and not Screens.isOpen()
+			return hum.Jump and not inputTaken()
 		end
 
 		local function readInput(dt: number): PlayerPhysics.Input
-			-- An open inventory screen takes the input: stand still, keep facing the same way.
-			if Screens.isOpen() then
+			-- An open inventory screen (or the switcher) takes the input: stand still, keep facing
+			-- the same way.
+			if inputTaken() then
 				jumpLatched = false
 				return {
 					moveX = 0,
@@ -536,7 +640,39 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 
 			local frameInput = readInput(dt)
 			stepLag *= math.exp(-STEP_CATCH_UP * dt)
-			if view.frozen then
+			-- Spectating someone: follow their feet (no ticks of our own); sneaking leaves (not a
+			-- Shift that a screen or the switcher takes: a container's shift click).
+			local following: Vector3? = nil
+			local target = spectated
+			if target then
+				local other = target.Character
+				local otherHumanoid = other and other:FindFirstChildOfClass("Humanoid")
+				local otherFeet = other and Rig.feet(other)
+				if
+					not GameMode.isSpectatorOf(player)
+					or target.Parent == nil
+					or otherHumanoid == nil
+					or otherHumanoid.Health <= 0
+					or otherFeet == nil
+					or frameInput.sneak
+				then
+					MovementController.spectate(nil)
+				else
+					local camera = workspace.CurrentCamera
+					if camera and camera.CameraSubject ~= otherHumanoid then
+						camera.CameraSubject = otherHumanoid
+					end
+					aimAtEyes(otherHumanoid, otherFeet)
+					following = otherFeet
+				end
+			end
+			if following then
+				PlayerPhysics.place(state, following.X, following.Y, following.Z)
+				previous = following
+				accumulator = 0
+				stepLag = 0
+				view.speed = 0
+			elseif view.frozen then
 				-- Wait for the server's spawn teleport (fresh characters) and for the ground.
 				if not settled and os.clock() - spawnedAt > SPAWN_SETTLE then
 					settled = true
@@ -615,14 +751,23 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end)
 	end
 
-	-- The server sets the game mode; switching to survival stops flying at once.
+	-- The server sets the game mode: the hull gets its abilities at once (survival and adventure
+	-- stop flying; spectators fly through everything), and only spectators spectate.
 	player:GetAttributeChangedSignal(GameMode.ATTRIBUTE):Connect(function()
+		local mode = GameMode.of(player)
 		local view = MovementController.current
 		if view then
-			view.state.mayFly = GameMode.isCreative(player)
-			if not view.state.mayFly then
-				view.state.flying = false
-			end
+			PlayerPhysics.setGameMode(view.state, mode)
+		end
+		if not GameMode.isSpectator(mode) then
+			MovementController.spectate(nil)
+		end
+	end)
+	-- The spectator's wheel with the spectator menu closed: the flying speed, by whole notches.
+	SpectatorGui.onFlyingSpeed(function(steps: number)
+		local view = MovementController.current
+		if view and view.state.noClip then
+			PlayerPhysics.scrollFlyingSpeed(view.state, steps)
 		end
 	end)
 

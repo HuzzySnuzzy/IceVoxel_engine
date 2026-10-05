@@ -3,17 +3,24 @@
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
 	builds pending, parts and PointLights in the world, the cave view (how far caves are revealed,
 	the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
-	player's movement hull (position, speed, ground / water / sprint / flying / pose, game mode;
-	MovementController), the dropped items the client knows about (EntityRenderer) and the time
-	of day (the clock, day number, Minecraft's sky light outdoors and how much of it reaches the
-	camera; Rendering/LightingController).
+	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
+	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
+	knows about (EntityRenderer) and the time of day (the clock, day number, Minecraft's sky light
+	outdoors and how much of it reaches the camera; Rendering/LightingController).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
+
+	F3 is also Minecraft's debug key (Debug/DebugKeys, pure): the overlay toggles when F3 is let go,
+	not pressed, unless a combination ran while it was held: F3 + N (spectator <-> the previous
+	game mode: Protocol SetGameMode), F3 + F4 (the game mode switcher, Ui/GameModeSwitcher, which
+	then gets F4 itself) and F3 + Q (the list, in the chat). Their "[Debug]:" lines go to the chat
+	through Net/Notices. No combination runs while a screen is open or the player types.
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
 local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
@@ -22,12 +29,18 @@ local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
+local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Notices = require(script.Parent.Parent.Net.Notices)
+local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
+local Screens = require(script.Parent.Parent.Ui.Screens)
+local DebugKeys = require(script.Parent.DebugKeys)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
+local Protocol = require(Shared.Net.Protocol)
 
 local DebugOverlay = {}
 
@@ -73,10 +86,12 @@ local function movementLine(): string
 	flag(s.sprinting, "sprint")
 	flag(s.sneaking, "sneak")
 	flag(s.flying, "flying")
+	flag(s.noClip, "noclip")
 	flag(view.frozen, "waiting")
+	flag(MovementController.spectating() ~= nil, "spectating")
 	local speed = math.sqrt(s.vx * s.vx + s.vz * s.vz) * 20
 	return string.format(
-		"player  %.2f %.2f %.2f  %.2f m/s  vy %.3f  %s %s\n        %s, %d items nearby",
+		"player  %.2f %.2f %.2f  %.2f m/s  vy %.3f  %s %s\n        %s, flying speed %.3f, %d items nearby",
 		s.x,
 		s.y,
 		s.z,
@@ -85,6 +100,7 @@ local function movementLine(): string
 		s.pose,
 		table.concat(flags, " "),
 		GameMode.of(Players.LocalPlayer),
+		s.flyingSpeed,
 		EntityRenderer.count()
 	)
 end
@@ -145,12 +161,77 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-	UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == Enum.KeyCode.F3 then
+	--[[ Debug keys ]]
+
+	local player = Players.LocalPlayer
+	local keys = DebugKeys.new()
+
+	-- Typing into a text box or Roblox's chat bar?
+	local function typing(): boolean
+		if UserInputService:GetFocusedTextBox() ~= nil then
+			return true
+		end
+		local bar = TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
+		return bar ~= nil and bar.IsFocused
+	end
+
+	local function context(): DebugKeys.Context
+		return {
+			screenOpen = Screens.isOpen() or GameModeSwitcher.isOpen() or typing(),
+			mode = GameMode.of(player),
+			previous = GameMode.previousOf(player),
+			mayChange = GameMode.mayChangeOwn(player),
+		}
+	end
+
+	local function perform(action: DebugKeys.Action?)
+		if action == nil then
+			return
+		end
+		if action.kind == "toggle" then
 			open = not open
 			gui.Enabled = open
 			changedEvent:Fire(open)
+		elseif action.kind == "setMode" then
+			local mode = action.mode
+			if mode and GameMode.mayChangeOwn(player) then
+				ClientNet.send(Protocol.ClientMessage.SetGameMode, Protocol.encodeSetGameMode(mode))
+			end
+		elseif action.kind == "switcher" then
+			GameModeSwitcher.open()
+		elseif action.kind == "chat" then
+			if action.feedback then
+				Notices.debug(DebugKeys.PREFIX, action.feedback)
+			end
+			local lines = action.lines
+			if lines then
+				for _, line in lines do
+					Notices.show(line)
+				end
+			end
 		end
+	end
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if input.UserInputType ~= Enum.UserInputType.Keyboard or processed then
+			return
+		end
+		-- The open switcher takes F4 itself (GameModeSwitcherScreen.keyPressed).
+		if input.KeyCode == Enum.KeyCode.F4 and GameModeSwitcher.isOpen() then
+			GameModeSwitcher.next()
+			return
+		end
+		local action = DebugKeys.press(keys, input.KeyCode.Name, context())
+		perform(action)
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			perform(DebugKeys.release(keys, input.KeyCode.Name, context()))
+		end
+	end)
+	-- (Key releases are missed while the window has no focus.)
+	UserInputService.WindowFocusReleased:Connect(function()
+		DebugKeys.reset(keys)
 	end)
 
 	local frames, elapsed, fps = 0, 0, 0

@@ -24,18 +24,32 @@
 	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
 	           tall, no sinking, up and down where the view points);
 	  falling  the fall distance is counted while airborne and turned into damage on landing
-	           (ceil(distance - 3) half hearts); water resets it. Players who may fly (creative)
-	           never take fall damage;
-	  flying   (creative, State.mayFly) double tapping jump within 7 ticks toggles it: air
-	           acceleration 0.05 (0.1 sprinting: 10.89 and 21.78 m/s), jump / sneak add 0.15 up /
-	           down per tick and the vertical speed keeps 0.6 of itself (at most 0.375 blocks per
-	           tick), no gravity, crouching, edge back-off or swimming; landing stops it.
+	           (ceil(distance - 3) half hearts); water resets it. Players who may fly (creative,
+	           spectator) never take fall damage;
+	  flying   (State.mayFly: creative) double tapping jump within 7 ticks toggles it: air
+	           acceleration the flying speed (State.flyingSpeed, 0.05; doubled sprinting: 10.89 and
+	           21.78 m/s), jump / sneak add 3 x the flying speed (0.15) up / down per tick and the
+	           vertical speed keeps 0.6 of itself (at most 0.375 blocks per tick), no gravity,
+	           crouching, edge back-off or swimming; landing stops it;
+	  spectator (State.noClip, Player.noPhysics) always flying, through everything: no collision,
+	           never on the ground, no fall distance, untouched by fluids (no water, swimming or
+	           currents), always standing, no pushing out of blocks. Only the height is kept
+	           within NO_CLIP_MIN_Y .. NO_CLIP_MAX_Y. The mouse wheel changes the flying speed
+	           (scrollFlyingSpeed: steps of 0.005 between 0 and 0.2, MouseHandler.onScroll);
+	  in a wall  `isInWall` (Entity.isInWall): the eyes in a block the player suffocates in, which
+	           hurts (the server's Players/GameModeRules.inWall), e.g. after leaving spectator in rock.
+
+	`setGameMode` gives a state the abilities of a game mode (Shared/GameMode), as Minecraft's
+	GameType.updatePlayerAbilities does.
 
 	Units are blocks and ticks: positions in blocks (feet centre), velocities in blocks per tick.
+	Speeds of Minecraft's Abilities are floats, so they are kept rounded to floats here too.
 	Pure Luau and deterministic, so the same code can run on the server or in tests.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Config = require(script.Parent.Parent.Config)
+local GameMode = require(script.Parent.Parent.GameMode)
 local FluidFlow = require(script.Parent.Parent.World.FluidFlow)
 local Hull = require(script.Parent.Hull)
 
@@ -80,11 +94,31 @@ local FLUID_JUMP_THRESHOLD = 0.4
 
 local FALL_SAFE = 3
 
--- Creative flight (Abilities.flyingSpeed 0.05F, doubled when sprinting; jump / sneak add it x 3).
+-- Flight (Abilities.flyingSpeed 0.05F, doubled when sprinting; jump / sneak add it x 3). The
+-- spectators' mouse wheel changes it in steps of 0.005F between 0 and 0.2F.
 local FLYING_SPEED = 0.05000000074505806 -- 0.05F
-local SPRINT_FLYING_SPEED = 0.10000000149011612 -- 0.1F
-local FLYING_VERTICAL = 0.15000000596046448 -- 0.05F * 3.0F
+local MAX_FLYING_SPEED = 0.20000000298023224 -- 0.2F
+local FLYING_SPEED_STEP = 0.004999999888241291 -- 0.005F
 local FLYING_VERTICAL_DRAG = 0.6
+PlayerPhysics.FLYING_SPEED = FLYING_SPEED
+PlayerPhysics.MAX_FLYING_SPEED = MAX_FLYING_SPEED
+PlayerPhysics.FLYING_SPEED_STEP = FLYING_SPEED_STEP
+
+-- Heights (feet, blocks) a spectator moves between: the bottom of the world and 64 blocks past its
+-- top. Below the bottom there is no void as in Minecraft: everything there is bedrock to the client
+-- and the server, so nothing to see, and a spectator leaving the mode there would be walled in.
+local NO_CLIP_MIN_Y = 0
+local NO_CLIP_MAX_Y = Config.WorldHeight + 64
+PlayerPhysics.NO_CLIP_MIN_Y = NO_CLIP_MIN_Y
+PlayerPhysics.NO_CLIP_MAX_Y = NO_CLIP_MAX_Y
+
+-- Rounds to the nearest float (Java's float arithmetic: one double operation on floats, then
+-- rounded, gives the same float).
+local floatScratch = buffer.create(4)
+local function float(value: number): number
+	buffer.writef32(floatScratch, 0, value)
+	return buffer.readf32(floatScratch, 0)
+end
 
 -- Box sizes (width, height, eye height) of each pose.
 export type Pose = "standing" | "crouching" | "crawling"
@@ -136,12 +170,16 @@ export type State = {
 	eyeInWater: boolean,
 	underWater: boolean,
 	swimming: boolean,
-	-- Creative flight: allowed (set by the owner from the game mode), flying now, ticks left to
-	-- double tap jump (Player.jumpTriggerTime) and whether jump was held last tick.
+	-- Flight: allowed (creative, spectator), flying now, ticks left to double tap jump
+	-- (Player.jumpTriggerTime) and whether jump was held last tick. setGameMode sets these.
 	mayFly: boolean,
 	flying: boolean,
 	jumpTriggerTime: number,
 	wasJumping: boolean,
+	-- Spectator (Player.noPhysics): always flying, through blocks, untouched by fluids.
+	noClip: boolean,
+	-- Abilities.flyingSpeed (a float): flying acceleration, x 2 sprinting, x 3 up and down.
+	flyingSpeed: number,
 }
 
 export type Input = {
@@ -212,7 +250,47 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		flying = false,
 		jumpTriggerTime = 0,
 		wasJumping = false,
+		noClip = false,
+		flyingSpeed = FLYING_SPEED,
 	}
+end
+
+--[[
+	Gives the player the movement abilities of game `mode` (GameType.updatePlayerAbilities, then the
+	abilities the server sends, which reset the flying speed):
+	  creative          may fly; flying stays as it was (from spectator it keeps flying);
+	  spectator         flies through everything (noClip), always;
+	  survival, adventure  no flying: the player falls.
+	Leaving or entering spectator also forgets the collision flags.
+]]
+function PlayerPhysics.setGameMode(state: State, mode: string)
+	local noClip = GameMode.noClip(mode)
+	state.mayFly = GameMode.mayFly(mode)
+	if GameMode.alwaysFlying(mode) then
+		state.flying = true
+	elseif not state.mayFly then
+		state.flying = false
+	end
+	if noClip ~= state.noClip then
+		state.noClip = noClip
+		state.onGround = false
+		state.horizontalCollision = false
+		state.minorHorizontalCollision = false
+		state.verticalCollision = false
+		state.supportX, state.supportZ = nil, nil
+		state.fallDistance = 0
+	end
+	state.flyingSpeed = FLYING_SPEED
+end
+
+--[[
+	The mouse wheel while spectating (MouseHandler.onScroll): `steps` whole notches (positive:
+	faster) change the flying speed by 0.005 each, kept within 0 .. 0.2. Returns the new speed.
+]]
+function PlayerPhysics.scrollFlyingSpeed(state: State, steps: number): number
+	local speed = float(state.flyingSpeed + float(steps * FLYING_SPEED_STEP))
+	state.flyingSpeed = math.clamp(speed, 0, MAX_FLYING_SPEED)
+	return state.flyingSpeed
 end
 
 -- Box of the player in its current pose.
@@ -253,6 +331,31 @@ local function suffocatesAt(world: World, state: State, bx: number, bz: number):
 		local block = world.getBlock(bx, by, bz)
 		if block == nil or (Blocks.isSolid(block) and Blocks.isOpaque(block)) then
 			return true
+		end
+	end
+	return false
+end
+
+-- Width of the box at the eyes that suffocates (Entity.isInWall: 0.8 of the player's 0.6).
+local IN_WALL_WIDTH = 0.48000001907348633 -- 0.6F * 0.8F
+
+--[[
+	Entity.isInWall: are the eyes at (x, eyeY, z) (blocks) in a wall, that is does a box
+	IN_WALL_WIDTH wide and 1e-6 tall around them overlap a block the player suffocates in (solid and
+	opaque, suffocatesAt's test; never an unloaded one)? Minecraft hurts players in a wall every
+	tick (LivingEntity.baseTick), which the server does (Players/GameModeRules.inWall). Spectators
+	(noPhysics) never are; that is the caller's to check. The position must be in the world (finite).
+]]
+function PlayerPhysics.isInWall(world: World, x: number, eyeY: number, z: number): boolean
+	local half = IN_WALL_WIDTH / 2
+	for bx = floor(x - half), math.ceil(x + half) - 1 do
+		for by = floor(eyeY - 5.0e-7), math.ceil(eyeY + 5.0e-7) - 1 do
+			for bz = floor(z - half), math.ceil(z + half) - 1 do
+				local block = world.getBlock(bx, by, bz)
+				if block ~= nil and Blocks.isSolid(block) and Blocks.isOpaque(block) then
+					return true
+				end
+			end
 		end
 	end
 	return false
@@ -510,6 +613,22 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 	end
 end
 
+--[[
+	Entity.move for a spectator (noPhysics): straight to the new position, touching nothing. Only
+	the height stays within NO_CLIP_MIN_Y .. NO_CLIP_MAX_Y.
+]]
+local function moveNoClip(state: State)
+	state.x += state.vx
+	state.y = math.clamp(state.y + state.vy, NO_CLIP_MIN_Y, NO_CLIP_MAX_Y)
+	state.z += state.vz
+	state.onGround = false
+	state.horizontalCollision = false
+	state.minorHorizontalCollision = false
+	state.verticalCollision = false
+	state.supportX, state.supportZ = nil, nil
+	state.fallDistance = 0
+end
+
 -- Adds the input acceleration (Entity.moveRelative; the input is already in world space).
 local function accelerate(state: State, speed: number, inputX: number, inputZ: number)
 	local lengthSq = inputX * inputX + inputZ * inputZ
@@ -538,13 +657,21 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	local events: Events = { jumped = false, stepUp = 0, landed = false, fallDistance = 0, damage = 0 }
 
 	-- The game mode changed between ticks (the server updates the abilities): no flying without
-	-- being allowed to.
-	if not state.mayFly then
+	-- being allowed to; spectators always fly (LocalPlayer.aiStep: isAlwaysFlying).
+	local noClip = state.noClip
+	if noClip then
+		state.flying = true
+	elseif not state.mayFly then
 		state.flying = false
 	end
 
-	-- Entity.baseTick: water and its current.
-	updateWater(state, world)
+	-- Entity.baseTick: water and its current. Spectators ignore fluids altogether.
+	if noClip then
+		state.inWater, state.waterHeight, state.eyeInWater, state.underWater = false, 0, false, false
+		state.swimming = false
+	else
+		updateWater(state, world)
+	end
 
 	-- LocalPlayer.aiStep: crouching, input, sprinting. (Shift is read as it was last tick until the
 	-- input updates, as in Minecraft, so sneaking slows the player one tick late.)
@@ -567,12 +694,15 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	state.sneaking = input.sneak
 	local impulse = forward >= SPRINT_IMPULSE or (state.underWater and forward > 1.0e-5)
 	state.hadSprintImpulse = impulse
-	-- Out of blocks the player is stuck in, checked at four points inside the hull.
-	local inset = POSES[state.pose].width * 0.35
-	moveTowardsClosestSpace(world, state, state.x - inset, state.z + inset)
-	moveTowardsClosestSpace(world, state, state.x - inset, state.z - inset)
-	moveTowardsClosestSpace(world, state, state.x + inset, state.z - inset)
-	moveTowardsClosestSpace(world, state, state.x + inset, state.z + inset)
+	-- Out of blocks the player is stuck in, checked at four points inside the hull (not
+	-- spectators, who belong in blocks).
+	if not noClip then
+		local inset = POSES[state.pose].width * 0.35
+		moveTowardsClosestSpace(world, state, state.x - inset, state.z + inset)
+		moveTowardsClosestSpace(world, state, state.x - inset, state.z - inset)
+		moveTowardsClosestSpace(world, state, state.x + inset, state.z - inset)
+		moveTowardsClosestSpace(world, state, state.x + inset, state.z + inset)
+	end
 	if prevShift then
 		state.sprintTriggerTime = 0
 	end
@@ -610,8 +740,9 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		end
 	end
 	-- Double tapping jump toggles flying: the first press arms it for DOUBLE_TAP_TICKS (counted down
-	-- in Player.aiStep below), a second press within them toggles (not while swimming).
-	if state.mayFly and input.jump and not prevJump then
+	-- in Player.aiStep below), a second press within them toggles (not while swimming, and never
+	-- for spectators, who always fly).
+	if state.mayFly and not noClip and input.jump and not prevJump then
 		if state.jumpTriggerTime == 0 then
 			state.jumpTriggerTime = DOUBLE_TAP_TICKS
 		elseif not state.swimming then
@@ -624,11 +755,11 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if state.inWater and input.sneak and not state.flying then
 		state.vy -= WATER_JUMP
 	end
-	-- Flying: jump rises, sneak sinks.
+	-- Flying: jump rises, sneak sinks, by 3 x the flying speed (a float).
 	if state.flying then
 		local direction = (if input.jump then 1 else 0) - (if input.sneak then 1 else 0)
 		if direction ~= 0 then
-			state.vy += direction * FLYING_VERTICAL
+			state.vy += float(float(direction * state.flyingSpeed) * 3)
 		end
 	end
 
@@ -704,17 +835,21 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		end
 	else
 		-- Friction and drag come from where the player stood before this tick's move.
-		local friction = frictionBelow(state, world)
+		local friction = if state.onGround then frictionBelow(state, world) else 0.6
 		local drag = if state.onGround then friction * AIR_DRAG else AIR_DRAG
-		-- In the air: Player.getFlyingSpeed (flying or not).
+		-- In the air: Player.getFlyingSpeed (flying or not; x 2 is exact in floats).
 		local airSpeed = if state.flying
-			then (if state.sprinting then SPRINT_FLYING_SPEED else FLYING_SPEED)
+			then (if state.sprinting then state.flyingSpeed * 2 else state.flyingSpeed)
 			else (if state.sprinting then SPRINT_AIR_ACCELERATION else AIR_ACCELERATION)
 		local speed = if state.onGround
 			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED) * (GROUND_FACTOR / (friction * friction * friction))
 			else airSpeed
 		accelerate(state, speed, inputX, inputZ)
-		move(state, solidAt, world, inputX, inputZ, events)
+		if noClip then
+			moveNoClip(state)
+		else
+			move(state, solidAt, world, inputX, inputZ, events)
+		end
 		state.vx *= drag
 		state.vy = (state.vy - GRAVITY) * VERTICAL_DRAG
 		state.vz *= drag
@@ -731,8 +866,10 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 
 	-- Player.updatePlayerPose: swim, crouch when sneaking (not when flying), and crouch or crawl
 	-- whenever there is no room to stand. Stuck in blocks (not even crawling fits), the pose stays
-	-- as it is.
-	if fits(solidAt, state, "crawling") then
+	-- as it is. Spectators fly, so they stand, wherever they are.
+	if noClip then
+		state.pose = "standing"
+	elseif fits(solidAt, state, "crawling") then
 		local wanted: Pose = if state.swimming
 			then "crawling"
 			elseif input.sneak and not state.flying then "crouching"

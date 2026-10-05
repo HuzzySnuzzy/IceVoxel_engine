@@ -15,7 +15,11 @@
 	person they rise from the bottom right corner towards the middle, leaning left, their face to
 	the camera, and chop forward when swinging.
 
-	Nothing is drawn for an empty hand or while a Tool is equipped.
+	Nothing is drawn for an empty hand or while a Tool is equipped, nor for spectators (Shared/
+	GameMode): their body is invisible or a floating head (Player/SpectatorRules), and in first
+	person they have no hand. A third person model hides with its character's head when the camera
+	fades that out: the local player's in first person, and the player a spectator spectates, whose
+	eyes the camera is in (Roblox fades the camera subject's character).
 ]]
 
 local Players = game:GetService("Players")
@@ -23,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local GameMode = require(Shared.GameMode)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
@@ -80,6 +85,9 @@ function HeldItems.start()
 	end
 
 	local function itemOf(player: Player): number
+		if GameMode.isSpectator(GameMode.of(player)) then
+			return 0
+		end
 		if player == localPlayer then
 			local stack = ClientInventory.selectedStack()
 			return if stack then stack.item else 0
@@ -149,12 +157,10 @@ function HeldItems.start()
 				end
 				assert(current, "held model")
 				current.model:PivotTo(where)
-				-- Hidden with the local character in first person (Roblox hides the body there).
+				-- Hidden with the camera subject's character in first person (Roblox hides the body
+				-- there): the local player's, or the one a spectator spectates.
 				local head = character:FindFirstChild("Head")
-				local hidden = player == localPlayer
-					and head ~= nil
-					and head:IsA("BasePart")
-					and head.LocalTransparencyModifier > 0.5
+				local hidden = head ~= nil and head:IsA("BasePart") and head.LocalTransparencyModifier > 0.5
 				if hidden ~= current.hidden then
 					current.hidden = hidden
 					for _, part in current.parts do

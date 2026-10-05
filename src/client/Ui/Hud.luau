@@ -10,16 +10,26 @@
 	             camera does not zoom.
 	  item name  the held item's name above the hotbar for 2 s after the selection changes,
 	             fading over the last half second
-	  hearts     survival only: 10 hearts (the Humanoid's health as 20 half hearts) and, above them,
-	             10 armor icons when armor is worn (Items.armorPoints). Drawn as pixel art from
-	             Frames. Low health makes them shake; damage makes their outline blink.
-	  touch      a "..." button at the end of the hotbar opens the inventory
+	  hearts     survival and adventure only (GameMode.isSurvivalLike, Minecraft's canHurtPlayer):
+	             10 hearts (the Humanoid's health as 20 half hearts) and, above them, 10 armor icons
+	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
+	             makes them shake; damage makes their outline blink.
+	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
+	             the spectator menu's middle click)
+
+	Game modes (Shared/GameMode): creative has no hearts and its item name sits lower. Spectators
+	(no showsHud) get neither the hotbar nor its item name, hearts or armor: their number keys,
+	middle click (Interaction/BlockInteraction), gamepad L1 / R1 / DPad up and the "..." button
+	open the spectator menu in the hotbar's place instead (Ui/SpectatorGui), and their wheel moves
+	its selection, or the flying speed while it is closed.
 
 	Roblox's own health bar and backpack are turned off.
 
 	The screens (Ui/Screens) set the mode: "play" (input above), "creative" (the creative screen is
 	open: the hotbar stays, it is that screen's hotbar row, and the screens handle its clicks and
-	hover) or "hidden" (the survival inventory has its own hotbar row).
+	hover) or "hidden" (the survival inventory has its own hotbar row). While the game mode switcher
+	is open (Ui/GameModeSwitcher, `setInputTaken`) the keys and the wheel do nothing here, as no
+	key mapping works while a Minecraft Screen is open; the hotbar stays drawn.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -31,12 +41,14 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
+local SpectatorGui = require(script.Parent.SpectatorGui)
 local Style = require(script.Parent.Style)
 
 export type Mode = "play" | "creative" | "hidden"
@@ -52,6 +64,8 @@ local HEARTS_Y = BAR_Y - 17
 local ARMOR_Y = HEARTS_Y - 10
 local NAME_Y_SURVIVAL = BAR_Y - 37
 local NAME_Y_CREATIVE = BAR_Y - 23
+-- The spectator menu's label: 35 pixels above the screen's bottom (SpectatorGui.renderTooltip).
+local SPECTATOR_LABEL_Y = HEIGHT - 35
 -- The name shows this long (Minecraft: 40 ticks), fading over the last part (10 ticks).
 local NAME_TIME = 2
 local NAME_FADE = 0.5
@@ -116,6 +130,8 @@ local started = false
 local hudGui: ScreenGui? = nil
 local hudVisible = true
 local wheelHandler: ((delta: number) -> ())? = nil
+-- Something over the game that is not a screen has the keys (the game mode switcher).
+local inputTaken = false
 local inventoryHandler: (() -> ())? = nil
 local previewWindow: Types.Window? = nil
 local dirty = true
@@ -136,6 +152,12 @@ function Hud.setMode(value: Mode)
 			cell.Selectable = value == "creative"
 		end
 	end
+end
+
+-- While true, the hotbar's (or the spectator menu's) keys and the wheel do nothing: the game mode
+-- switcher (Ui/GameModeSwitcher, which Screens and so this can't require) is open.
+function Hud.setInputTaken(value: boolean)
+	inputTaken = value
 end
 
 -- Shows or hides the whole HUD (the world map hides it while open).
@@ -206,6 +228,37 @@ local function disableCoreGui()
 	end)
 end
 
+-- The hotbar's bar at (x, y): translucent black, a dark outline, and each cell's light and dark rim.
+local function drawBar(parent: Instance, x: number, y: number): Frame
+	local bar = Style.frame(parent, x, y, WIDTH, 22, Color3.new(0, 0, 0), 1)
+	bar.BackgroundTransparency = 0.55
+	Style.border(bar, 0, 0, WIDTH, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	for i = 1, HOTBAR do
+		local cellX = 1 + (i - 1) * 20
+		-- Each cell has a light rim top-left and a darker one bottom-right.
+		local rim = Style.border(bar, cellX, 1, 20, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+		rim[2].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
+		rim[4].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
+		for _, frame in rim do
+			frame.BackgroundTransparency = 0.15
+		end
+	end
+	return bar
+end
+
+-- The selection frame, 24 x 24 around a cell (placed by the caller).
+local function drawSelection(parent: Instance): Frame
+	local selection = Instance.new("Frame")
+	selection.BackgroundTransparency = 1
+	selection.Size = UDim2.fromOffset(24, 24)
+	selection.ZIndex = 6
+	selection.Parent = parent
+	Style.border(selection, 0, 0, 24, 24, 1, Color3.new(0, 0, 0), 1)
+	Style.border(selection, 1, 1, 22, 22, 2, Color3.new(1, 1, 1), 2)
+	Style.border(selection, 3, 3, 18, 18, 1, Color3.fromRGB(40, 40, 40), 2)
+	return selection
+end
+
 local function newIcon(parent: Instance, x: number, art: { string }): Icon
 	local frame = Instance.new("Frame")
 	frame.BackgroundTransparency = 1
@@ -254,22 +307,17 @@ function Hud.start()
 	local scale = Instance.new("UIScale")
 	scale.Parent = canvas
 
-	--[[ Hotbar ]]
+	--[[ Hotbar (hidden for spectators, who get the spectator menu in its place) ]]
 
-	local bar = Style.frame(canvas, 0, BAR_Y, WIDTH, 22, Color3.new(0, 0, 0), 1)
-	bar.BackgroundTransparency = 0.55
+	local hotbar = Instance.new("Frame")
+	hotbar.Name = "Hotbar"
+	hotbar.BackgroundTransparency = 1
+	hotbar.Size = UDim2.fromScale(1, 1)
+	hotbar.Parent = canvas
+	local bar = drawBar(hotbar, 0, BAR_Y)
 	table.insert(coverage, bar)
-	Style.border(bar, 0, 0, WIDTH, 22, 1, Color3.fromRGB(20, 20, 20), 2)
 	for i = 1, HOTBAR do
 		local x = 1 + (i - 1) * 20
-		-- Each cell has a light rim top-left and a darker one bottom-right.
-		local rim = Style.border(bar, x, 1, 20, 20, 2, Color3.fromRGB(150, 150, 150), 3)
-		rim[2].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
-		rim[4].BackgroundColor3 = Color3.fromRGB(96, 96, 96)
-		for _, frame in rim do
-			frame.BackgroundTransparency = 0.15
-		end
-
 		local cell = Instance.new("TextButton")
 		cell.Name = `Slot{i}`
 		cell.Text = ""
@@ -279,26 +327,22 @@ function Hud.start()
 		cell.Size = UDim2.fromOffset(20, 20)
 		cell.ZIndex = 4
 		cell.Selectable = false
-		cell.Parent = canvas
+		cell.Parent = hotbar
 		cell.Activated:Connect(function()
 			if mode == "play" then
 				ClientInventory.select(i)
 			end
 		end)
 		cells[i] = cell
-		icons[i] = ItemIcon.new(canvas, x + 2, BAR_Y + 3, 5)
-		hovers[i] = Style.hover(canvas, x + 2, BAR_Y + 3, 7)
+		icons[i] = ItemIcon.new(hotbar, x + 2, BAR_Y + 3, 5)
+		hovers[i] = Style.hover(hotbar, x + 2, BAR_Y + 3, 7)
 	end
 
 	-- The selection frame, 24 x 24 around the selected cell.
-	local selection = Instance.new("Frame")
-	selection.BackgroundTransparency = 1
-	selection.Size = UDim2.fromOffset(24, 24)
-	selection.ZIndex = 6
-	selection.Parent = canvas
-	Style.border(selection, 0, 0, 24, 24, 1, Color3.new(0, 0, 0), 1)
-	Style.border(selection, 1, 1, 22, 22, 2, Color3.new(1, 1, 1), 2)
-	Style.border(selection, 3, 3, 18, 18, 1, Color3.fromRGB(40, 40, 40), 2)
+	local selection = drawSelection(hotbar)
+
+	-- The spectator menu, in the hotbar's place.
+	SpectatorGui.build(canvas, 0, BAR_Y, SPECTATOR_LABEL_Y, drawBar, drawSelection)
 
 	-- The touch "..." button opens the inventory.
 	local more = Style.frame(canvas, WIDTH + 2, BAR_Y, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
@@ -316,7 +360,10 @@ function Hud.start()
 	moreButton.ZIndex = 5
 	moreButton.Parent = more
 	moreButton.Activated:Connect(function()
-		if inventoryHandler then
+		if mode == "play" and GameMode.isSpectator(ClientInventory.mode()) then
+			-- (Spectators have no inventory: the button is their middle click.)
+			SpectatorGui.middleClick()
+		elseif inventoryHandler then
 			SoundPlayer.click()
 			inventoryHandler()
 		end
@@ -346,7 +393,7 @@ function Hud.start()
 	--[[ Held item name ]]
 
 	local name, nameShadow =
-		Style.shadowText(canvas, "", 0, NAME_Y_SURVIVAL, WIDTH, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Center)
+		Style.shadowText(hotbar, "", 0, NAME_Y_SURVIVAL, WIDTH, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Center)
 
 	local function updateScale()
 		local touch = UserInputService.TouchEnabled
@@ -380,12 +427,19 @@ function Hud.start()
 			shown = visible
 			canvas.Visible = visible
 		end
+		local gameMode = ClientInventory.mode()
+		SpectatorGui.render(now, visible and mode == "play" and GameMode.isSpectator(gameMode))
 		if not visible then
 			return
 		end
+		local showsHud = GameMode.showsHud(gameMode)
+		if hotbar.Visible ~= showsHud then
+			hotbar.Visible = showsHud
+		end
 		local window = previewWindow or ClientInventory.window()
 		local inventory = window.inventory
-		local survival = not ClientInventory.isCreative()
+		-- Hearts, armor and the higher item name: Minecraft's canHurtPlayer (survival, adventure).
+		local survival = GameMode.isSurvivalLike(gameMode)
 
 		if dirty then
 			dirty = false
@@ -479,16 +533,32 @@ function Hud.start()
 	end
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		if processed or mode ~= "play" then
+		if processed or mode ~= "play" or inputTaken then
 			return
 		end
 		local slot = NUMBER_KEYS[input.KeyCode]
+		local spectator = GameMode.isSpectator(ClientInventory.mode())
 		if slot then
-			ClientInventory.select(slot)
+			if spectator then
+				SpectatorGui.hotbarKey(slot)
+			else
+				ClientInventory.select(slot)
+			end
 		elseif input.KeyCode == Enum.KeyCode.ButtonR1 then
-			step(1)
+			if spectator then
+				SpectatorGui.step(1)
+			else
+				step(1)
+			end
 		elseif input.KeyCode == Enum.KeyCode.ButtonL1 then
-			step(-1)
+			if spectator then
+				SpectatorGui.step(-1)
+			else
+				step(-1)
+			end
+		elseif input.KeyCode == Enum.KeyCode.DPadUp and spectator then
+			-- (A gamepad's middle click: uses the selected slot.)
+			SpectatorGui.middleClick()
 		end
 	end)
 
@@ -499,10 +569,19 @@ function Hud.start()
 			return Enum.ContextActionResult.Pass
 		end
 		local delta = input.Position.Z
+		if inputTaken then
+			-- (Sunk all the same: the camera does not zoom either.)
+			return Enum.ContextActionResult.Sink
+		end
 		if mode ~= "play" then
 			if wheelHandler and delta ~= 0 then
 				wheelHandler(delta)
 			end
+			return Enum.ContextActionResult.Sink
+		end
+		if GameMode.isSpectator(ClientInventory.mode()) then
+			-- The spectator menu's selection, or the flying speed (MouseHandler.onScroll).
+			SpectatorGui.wheel(delta)
 			return Enum.ContextActionResult.Sink
 		end
 		if not Config.Interaction.ScrollWheelHotbar then

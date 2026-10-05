@@ -22,6 +22,17 @@
 	            numbers it, and the Edit carries the number.
 	  Creative  breaking is instant and repeats every Config.Interaction.BreakInterval while held;
 	            any block item places without being used up.
+	  Adventure (no mayBuild) nothing is broken, placed or used on blocks (no buckets, no
+	            Configurator, no shears): a click only swings the arm. Blocks with a menu still
+	            open. No block is outlined (Minecraft outlines blocks in adventure only for items
+	            with CanDestroy / CanPlaceOn tags, which the game has none of); WAILA still names
+	            them.
+	  Spectator only blocks with a menu are aimed at and outlined, and a right click opens them
+	            (read only: Inventory/ClientInventory refuses the clicks), without a swing. A left
+	            click on a player spectates them (Player/MovementController; sneak leaves), the
+	            middle click is the spectator menu's (Ui/SpectatorGui), and nothing is thrown.
+	            Game modes come from Shared/GameMode's abilities (mayBuild, instabuild...), never
+	            from comparing modes.
 
 	Right clicking a block with a menu (BlockList `menu`: a chest, crafting table or furnace) asks the
 	server to open it (ClientMessage.Use), unless the player sneaks with something in hand
@@ -91,6 +102,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Mining = require(Shared.Mining)
 local Protocol = require(Shared.Net.Protocol)
@@ -104,8 +116,12 @@ local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
+local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
+local WailaInfo = require(script.Parent.Parent.Ui.WailaInfo)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
+local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
@@ -194,6 +210,15 @@ type Touch = {
 	moved: boolean,
 	holding: boolean,
 }
+
+-- Does right clicking `block` open a menu for a player in game `mode`? (Creative only blocks'
+-- screens are for creative players; to others they are plain blocks.)
+local function opensMenu(block: number, mode: string): boolean
+	if Blocks.get(block).menu == nil then
+		return false
+	end
+	return not Blocks.isCreativeOnly(block) or GameMode.instabuild(mode)
+end
 
 local function material(name: string): Enum.Material
 	local ok, value = pcall(function()
@@ -364,9 +389,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				return true
 			end
 		end
+		-- (Spectators are in nobody's way.)
 		for _, other in Players:GetPlayers() do
 			local character = other.Character
-			if other ~= player and character then
+			if other ~= player and character and SpectatorRules.targetable(GameMode.of(other)) then
 				local min, max = Rig.hull(character)
 				if min and max and overlaps(min, max, x, y, z, cell) then
 					return true
@@ -477,9 +503,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 	end
 
-	-- Swings the held item (HeldItems), restarting a swing only once it is half done.
+	-- Swings the held item (HeldItems), restarting a swing only once it is half done. Spectators
+	-- have no arm to swing.
 	local lastSwing = -math.huge
 	local function swing()
+		if GameMode.isSpectator(ClientInventory.mode()) then
+			return
+		end
 		local now = os.clock()
 		if now - lastSwing >= SWING_RESTART then
 			lastSwing = now
@@ -547,10 +577,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		cracks:hide()
 	end
 
+	-- Does the player's game mode mine blocks over time (survival: mayBuild without instabuild)?
+	local function mines(): boolean
+		local mode = ClientInventory.mode()
+		return GameMode.mayBuild(mode) and not GameMode.instabuild(mode)
+	end
+
 	-- One survival mining tick (Minecraft's MultiPlayerGameMode.continueDestroyBlock).
 	local function miningTick()
 		local hit = target
-		if not anyHeld(attackHeld) or hit == nil or ClientInventory.isCreative() or Screens.isOpen() then
+		if not anyHeld(attackHeld) or hit == nil or not mines() or Screens.isOpen() then
 			stopMining()
 			return
 		end
@@ -750,22 +786,22 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if useSpent or Screens.isOpen() then
 			return
 		end
+		local mode = ClientInventory.mode()
 		local view = MovementController.current
 		local stack = ClientInventory.selectedStack()
-		-- Blocks with a menu open, unless sneaking with something in hand (Minecraft's secondary use).
+		-- Blocks with a menu open, unless sneaking with something in hand (Minecraft's secondary use;
+		-- spectators hold nothing).
 		local sneaking = view ~= nil and view.state.sneaking
-		-- (Creative only blocks' screens are for creative players; to others they are plain blocks.)
-		local menu = hit and Blocks.get(hit.block).menu
-		if hit and Blocks.isCreativeOnly(hit.block) and not ClientInventory.isCreative() then
-			menu = nil
-		end
-		if hit and menu ~= nil and not (sneaking and stack ~= nil) then
+		local secondary = sneaking and stack ~= nil and GameMode.canInteract(mode)
+		if hit and opensMenu(hit.block, mode) and not secondary then
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()
 			return
 		end
-		if stack == nil then
+		-- Adventure and spectator players may not build: nothing is used on blocks or placed
+		-- (ItemStack.useOn and BucketItem's mayUseItemAt want mayBuild).
+		if stack == nil or not GameMode.mayBuild(mode) then
 			return
 		end
 		local def = Items.get(stack.item)
@@ -782,7 +818,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		-- Creative only blocks are placed in creative only (the server refuses the rest).
-		if Blocks.isCreativeOnly(block) and not ClientInventory.isCreative() then
+		if Blocks.isCreativeOnly(block) and not GameMode.instabuild(mode) then
 			return
 		end
 		-- Into the clicked block if it can be replaced (not by its own item), else against the
@@ -833,24 +869,90 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 	end
 
-	-- Throws the held item (Q): one, or the whole stack.
+	-- Throws the held item (Q): one, or the whole stack (not spectators: ClientInventory).
 	local function drop(all: boolean)
-		if ClientInventory.selectedStack() ~= nil then
-			ClientInventory.dropSelected(all)
+		if ClientInventory.dropSelected(all) then
 			swing()
 		end
 	end
 
+	-- The middle click: pick block, or a spectator's menu (SpectatorGui.onMouseMiddleClick).
 	local function pickAt(hit: Hit?)
-		if hit and Items.ofBlock(hit.block) ~= nil then
+		if GameMode.isSpectator(ClientInventory.mode()) then
+			SpectatorGui.middleClick()
+		elseif hit and Items.ofBlock(hit.block) ~= nil then
 			ClientInventory.pickBlock(hit.block)
 		end
+	end
+
+	--[[ Spectating a player (a spectator's left click) ]]
+
+	--[[
+		The player on the aim `ray` (another player's standing hull, not a spectator's, nor the one
+		spectated, whose eyes the camera is in), in reach and not behind a block: what a spectator's
+		left click spectates (also while spectating someone, ServerPlayer.attack's setCamera).
+	]]
+	local function playerAt(ray: Ray): Player?
+		local root = rootPart()
+		if root == nil then
+			return nil
+		end
+		local origin, direction, maxDistance = ray.origin, ray.direction, ray.maxDistance
+		local body = root.Position / BLOCK
+		local wall = VoxelRaycast.cast(
+			origin.X,
+			origin.Y,
+			origin.Z,
+			direction.X,
+			direction.Y,
+			direction.Z,
+			maxDistance,
+			getBlock,
+			Blocks.isTargetable,
+			Blocks.outline
+		)
+		local best: Player? = nil
+		local nearest = if wall then wall.distance else maxDistance
+		local spectated = MovementController.spectating()
+		for _, other in Players:GetPlayers() do
+			local character = other.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if
+				other ~= player
+				and character
+				and humanoid
+				and humanoid.Health > 0
+				and SpectatorRules.aimable(GameMode.of(other), other == spectated)
+			then
+				local min, max = Rig.hull(character)
+				if min and max and ((min + max) / 2 - body).Magnitude <= REACH then
+					local t = WailaInfo.rayBox(
+						origin.X,
+						origin.Y,
+						origin.Z,
+						direction.X,
+						direction.Y,
+						direction.Z,
+						min.X,
+						min.Y,
+						min.Z,
+						max.X,
+						max.Y,
+						max.Z
+					)
+					if t and t < nearest then
+						best, nearest = other, t
+					end
+				end
+			end
+		end
+		return best
 	end
 
 	--[[ Buttons ]]
 
 	local function beginAttack(source: string)
-		if Screens.isOpen() then
+		if Screens.isOpen() or GameModeSwitcher.isOpen() then
 			return
 		end
 		local first = not anyHeld(attackHeld)
@@ -858,7 +960,20 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if not first then
 			return
 		end
-		if ClientInventory.isCreative() then
+		local mode = ClientInventory.mode()
+		if GameMode.isSpectator(mode) then
+			-- A spectator's attack spectates the player aimed at (ServerPlayer.attack: setCamera).
+			local ray = targetRay
+			local other = if ray then playerAt(ray) else nil
+			if other then
+				MovementController.spectate(other)
+			end
+			return
+		elseif not GameMode.mayBuild(mode) then
+			-- Adventure: the arm swings, nothing breaks (blockActionRestricted).
+			swing()
+			return
+		elseif GameMode.instabuild(mode) then
 			-- A press breaks at once (Minecraft's startDestroyBlock in creative).
 			lastCreativeBreak = -math.huge
 			creativeBreak(os.clock())
@@ -878,7 +993,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function beginUse(source: string, hit: Hit?, ray: Ray?)
-		if Screens.isOpen() then
+		if Screens.isOpen() or GameModeSwitcher.isOpen() then
 			return
 		end
 		local first = not anyHeld(useHeld)
@@ -936,7 +1051,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	RunService.RenderStepped:Connect(function(dt: number)
 		local now = os.clock()
-		local open = Screens.isOpen()
+		local open = Screens.isOpen() or GameModeSwitcher.isOpen()
 
 		-- A touch held still long enough starts breaking.
 		local t = touch
@@ -956,11 +1071,19 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		else
 			target, targetRay = targetAt(aim)
 		end
+		-- Spectators aim at blocks with a menu only (they pass through the rest), and only those are
+		-- outlined; adventure players outline nothing (GameRenderer.shouldRenderBlockOutline).
+		local mode = ClientInventory.mode()
+		local aimed = target
+		if aimed and GameMode.isSpectator(mode) and not opensMenu(aimed.block, mode) then
+			-- (The ray stays: it is what the spectator's click looks for players along.)
+			target = nil
+		end
 		if startHold then
 			beginAttack("touch")
 		end
 		local hit = target
-		if hit then
+		if hit and (GameMode.mayBuild(mode) or GameMode.isSpectator(mode)) then
 			if highlight.Parent ~= workspace.CurrentCamera then
 				highlight.Parent = workspace.CurrentCamera
 			end
@@ -986,13 +1109,17 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				releaseAll()
 			end
 		else
-			-- Breaking.
-			if ClientInventory.isCreative() then
+			-- Breaking: at once with instabuild, over time in survival, never without mayBuild.
+			if GameMode.instabuild(mode) then
 				if mining then
 					stopMining()
 				end
 				if anyHeld(attackHeld) then
 					creativeBreak(now)
+				end
+			elseif not GameMode.mayBuild(mode) then
+				if mining then
+					stopMining()
 				end
 			else
 				-- Right after a press, only the time since it counts (not the whole frame).
@@ -1021,7 +1148,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	--[[ Input ]]
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		if processed or Screens.isOpen() then
+		if processed or Screens.isOpen() or GameModeSwitcher.isOpen() then
 			return
 		end
 		local kind, key = input.UserInputType, input.KeyCode
@@ -1041,7 +1168,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 		elseif kind == Enum.UserInputType.MouseButton3 then
 			pickAt(target)
-		elseif key == Enum.KeyCode.Q then
+		elseif key == Enum.KeyCode.Q and not UserInputService:IsKeyDown(Enum.KeyCode.F3) then
+			-- (F3 + Q is the debug keys' list: Debug/DebugKeys.)
 			local all = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
 				or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
 			drop(all)

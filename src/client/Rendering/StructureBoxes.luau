@@ -15,7 +15,8 @@
 
 	The nearest LIMIT structure blocks within RANGE blocks of the camera are outlined, refreshed
 	every INTERVAL seconds and whenever the records or the open screen change. As Minecraft's
-	(drawn only for players who may use operator blocks), none of it shows outside creative.
+	(drawn for players who may use operator blocks, and for spectators), it shows only with the
+	instabuild ability (creative) or in spectator mode (Shared/GameMode).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,6 +25,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Settings = require(Shared.Structures.Settings)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
@@ -205,7 +207,8 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 	local wasCreative = false
 	RunService.Heartbeat:Connect(function()
 		local now = os.clock()
-		local creative = ClientInventory.isCreative()
+		local gameMode = ClientInventory.mode()
+		local creative = GameMode.instabuild(gameMode) or GameMode.isSpectator(gameMode)
 		if not creative then
 			if wasCreative then
 				wasCreative = false

@@ -3,6 +3,13 @@
 	The game rules ServerNet applies to block edits, kept free of Roblox APIs so the tests can run
 	them. (Rate limits, reach and finding the players' hulls stay in ServerNet.)
 
+	  Modes     who may edit at all goes by the game mode's abilities (Shared/GameMode): survival
+	            and creative players break and place (`mayEdit`: Abilities.mayBuild), adventure and
+	            spectator players never do (Minecraft's Player.blockActionRestricted, and
+	            ItemStack.useOn for placing), and only survival mines over time (`minesOverTime`:
+	            Mine messages from anyone else are ignored). Spectators never stand in the way of a
+	            placement (`blocksPlacing`). Every `creative` parameter below is the instabuild
+	            ability (GameMode.instabuild: creative mode).
 	  Breaking  any breakable block (hardness >= 0). Creative players break at once. Survival
 	            players must have started mining that very block (a Mine message) long enough
 	            ago, holding the tool they hold now: Mining.mayBreak, the server side of
@@ -53,6 +60,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
@@ -105,9 +113,40 @@ local function def(block: number): Blocks.BlockDef?
 	return if Blocks.isValid(block) then Blocks.get(block) else nil
 end
 
+--[[ Game modes ]]
+
+--[[
+	May a player in game mode `mode` break or place blocks at all? Survival and creative players may
+	(Abilities.mayBuild). Adventure players may not (Player.blockActionRestricted refuses breaking,
+	ItemStack.useOn placing), nor may spectators: ServerNet answers their edits with the real block.
+]]
+function EditRules.mayEdit(mode: string): boolean
+	return GameMode.mayBuild(mode)
+end
+
+--[[
+	Does a player in `mode` mine blocks over time (a Mine message starts the timer, and a break must
+	wait for it: `mayBreak`)? Survival only: creative players break at once (instabuild), adventure
+	and spectator players break nothing, so their Mine messages are ignored.
+]]
+function EditRules.minesOverTime(mode: string): boolean
+	return GameMode.mayBuild(mode) and not GameMode.instabuild(mode)
+end
+
+--[[
+	Does a player in `mode` keep blocks from being placed where they stand (`obstructs`)? Everyone
+	but spectators, whom Minecraft's Level.isUnobstructed skips (EntitySelector.NO_SPECTATORS).
+]]
+function EditRules.blocksPlacing(mode: string): boolean
+	return not GameMode.isSpectator(mode)
+end
+
+--[[ Breaking and placing ]]
+
 --[[
 	May a player break `block` at (x, y, z) at time `now`, having started mining `mine`, holding
-	`tool` (an item id, nil = bare hands) now?
+	`tool` (an item id, nil = bare hands) now? `creative`: the instabuild ability (breaks at once).
+	Players who may not edit at all (`mayEdit`) never get this far.
 ]]
 function EditRules.mayBreak(
 	block: number,
@@ -299,7 +338,8 @@ function EditRules.obstructs(
 		and minZ < z + box[6]
 end
 
--- What breaking `block` with `tool` drops as an item (nil = nothing; creative players get none).
+-- What breaking `block` with `tool` drops as an item (nil = nothing; creative players, with the
+-- instabuild ability, get none).
 function EditRules.drops(block: number, creative: boolean, tool: number?): Items.Stack?
 	if creative then
 		return nil
@@ -307,7 +347,8 @@ function EditRules.drops(block: number, creative: boolean, tool: number?): Items
 	return Items.drops(block, tool)
 end
 
--- Wear the held `tool` takes from breaking `block` (0: creative, not a tool, or an instant block).
+-- Wear the held `tool` takes from breaking `block` (0: creative (instabuild), not a tool, or an
+-- instant block).
 function EditRules.wear(block: number, creative: boolean, tool: number?): number
 	if creative or def(block) == nil then
 		return 0

@@ -5,8 +5,9 @@
 
 	  Blocks    `world:peekBlock`, which never generates chunks: an item in a chunk the server has
 	            not generated (or evicted) is frozen; unloaded neighbours count as solid.
-	  Pickups   living characters (Humanoid.Health > 0) pick items up at their feet (Rig.feet);
-	            the pickup handler (Players/Inventories) says how many fit in the inventory.
+	  Pickups   living characters (Humanoid.Health > 0) pick items up at their feet (Rig.feet),
+	            but not spectators' (Players/GameModeRules.picksUp); the pickup handler
+	            (Players/Inventories) says how many fit in the inventory.
 	            Everyone near hears it, the collector too (entity.item.pickup at the item,
 	            Audio/Sounds; Minecraft's clients play it on the take packet).
 	  Spawning  `dropBlock` is Minecraft's Block.popResource, `dropContents` its
@@ -31,6 +32,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local Rig = require(Shared.Movement.Rig)
@@ -39,6 +41,7 @@ local ItemPhysics = require(Shared.Entities.ItemPhysics)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EntityWorld = require(script.Parent.EntityWorld)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local GameModeRules = require(script.Parent.Parent.Players.GameModeRules)
 
 type Stack = Items.Stack
 type EntityOp = Protocol.EntityOp
@@ -255,7 +258,8 @@ local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: bool
 end
 
 local function step(net: Net, entities: EntityWorld.EntityWorld, tick: number)
-	-- Living players pick items up; everyone's position is remembered for tracking and throws.
+	-- Living players pick items up (not spectators); everyone's position is remembered for
+	-- tracking and throws.
 	local pickers: { EntityWorld.PlayerBox } = {}
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
@@ -263,7 +267,7 @@ local function step(net: Net, entities: EntityWorld.EntityWorld, tick: number)
 		if character and feet then
 			lastFeet[player] = feet
 			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
+			if humanoid and humanoid.Health > 0 and GameModeRules.picksUp(GameMode.of(player)) then
 				table.insert(pickers, { key = player, x = feet.X, y = feet.Y, z = feet.Z })
 			end
 		end

@@ -18,9 +18,10 @@
 	again creates it again, empty, which is the same thing, and keeps the table as small as the
 	number of containers in use. A machine's is never forgotten while its block stands (it holds
 	energy and its machine ticks it): only `take` removes it. A store's `onOpeners` hears when a
-	container gets its first viewer and loses its last (Minecraft's ContainerOpenersCounter: the
+	container gets its first opener and loses its last (Minecraft's ContainerOpenersCounter: the
 	chest lid sounds, set by Players/Inventories); a container taken away (its block broken)
-	closes silently.
+	closes silently. Every viewer is an opener but the quiet ones (`addViewer`'s `quiet`:
+	spectators, whom ChestBlockEntity.startOpen skips).
 
 	Furnaces cook whether anyone looks or not: `tickFurnaces` runs one Crafting/Smelting tick (20
 	per second, Minecraft's AbstractFurnaceBlockEntity.serverTick) on every active furnace and says
@@ -63,6 +64,9 @@ export type Entry = {
 	container: Container,
 	viewers: { [any]: boolean },
 	viewerCount: number,
+	-- Viewers that are openers (not quiet), and the quiet ones.
+	openers: number,
+	quiet: { [any]: boolean },
 }
 
 -- A furnace that changed in a tick: where, and whether its slots changed (else only its data:
@@ -85,7 +89,7 @@ export type Store = {
 	active: { [string]: boolean },
 	-- Keys of the furnaces whose output may hold results to push out (Transmitters/Eject).
 	ejecting: { [string]: boolean },
-	-- Called when a container gets its first viewer (opened = true) or loses its last (false).
+	-- Called when a container gets its first opener (opened = true) or loses its last (false).
 	onOpeners: ((x: number, y: number, z: number, container: Container, opened: boolean) -> ())?,
 	-- Generated containers' contents (nil: none), and the positions already asked about.
 	generated: Generated?,
@@ -95,7 +99,7 @@ export type Store = {
 	peek: (self: Store, x: number, y: number, z: number) -> Container?,
 	materialize: (self: Store, x: number, y: number, z: number, block: number) -> (),
 	take: (self: Store, x: number, y: number, z: number) -> (Container?, { any }),
-	addViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
+	addViewer: (self: Store, x: number, y: number, z: number, viewer: any, quiet: boolean?) -> (),
 	removeViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
 	viewers: (self: Store, x: number, y: number, z: number) -> { any },
 	markActive: (self: Store, x: number, y: number, z: number) -> (),
@@ -212,6 +216,8 @@ function Store.get(self: Store, x: number, y: number, z: number, block: number):
 			container = container,
 			viewers = {},
 			viewerCount = 0,
+			openers = 0,
+			quiet = {},
 		}
 		self.count += 1
 	end
@@ -285,14 +291,22 @@ function Store.take(self: Store, x: number, y: number, z: number): (Container?, 
 	return entry.container, viewers
 end
 
--- Records that `viewer` has the container at (x, y, z) open (it must exist: `get` first).
-function Store.addViewer(self: Store, x: number, y: number, z: number, viewer: any)
+--[[
+	Records that `viewer` has the container at (x, y, z) open (it must exist: `get` first). A
+	`quiet` viewer (a spectator) sees it without being an opener: no lid opens for it.
+]]
+function Store.addViewer(self: Store, x: number, y: number, z: number, viewer: any, quiet: boolean?)
 	local entry = self.entries[keyOf(x, y, z)]
 	if entry and not entry.viewers[viewer] then
 		entry.viewers[viewer] = true
 		entry.viewerCount += 1
+		if quiet then
+			entry.quiet[viewer] = true
+			return
+		end
+		entry.openers += 1
 		local onOpeners = self.onOpeners
-		if entry.viewerCount == 1 and onOpeners then
+		if entry.openers == 1 and onOpeners then
 			onOpeners(x, y, z, entry.container, true)
 		end
 	end
@@ -307,9 +321,14 @@ function Store.removeViewer(self: Store, x: number, y: number, z: number, viewer
 	end
 	entry.viewers[viewer] = nil
 	entry.viewerCount -= 1
-	local onOpeners = self.onOpeners
-	if entry.viewerCount == 0 and onOpeners then
-		onOpeners(x, y, z, entry.container, false)
+	if entry.quiet[viewer] then
+		entry.quiet[viewer] = nil
+	else
+		entry.openers -= 1
+		local onOpeners = self.onOpeners
+		if entry.openers == 0 and onOpeners then
+			onOpeners(x, y, z, entry.container, false)
+		end
 	end
 	if entry.viewerCount == 0 and isEmpty(entry.container) then
 		self.entries[key] = nil

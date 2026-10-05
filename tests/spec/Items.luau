@@ -146,7 +146,7 @@ return function(t, shared, require)
 		t.eq(GameMode.parse("1"), GameMode.CREATIVE)
 		t.eq(GameMode.parse("SURVIVAL"), GameMode.SURVIVAL)
 		t.eq(GameMode.parse("0"), GameMode.SURVIVAL)
-		t.eq(GameMode.parse("adventure"), nil)
+		t.eq(GameMode.parse("hardcore"), nil)
 	end)
 
 	t.test("protocol: edits carry the inventory action number; mine and use messages", function()

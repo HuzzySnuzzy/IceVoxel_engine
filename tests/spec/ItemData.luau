@@ -25,6 +25,8 @@ return function(t, shared, require, server, client)
 	local Prediction = require(client.Inventory.Prediction)
 	local SlotClicks = require(client.Ui.SlotClicks)
 	local JeiTransfer = require(client.Ui.Jei.JeiTransfer)
+	local GameMode = require(shared.GameMode)
+	local SURVIVAL, CREATIVE = GameMode.SURVIVAL, GameMode.CREATIVE
 
 	local B, I = Blocks.id, Items.id
 	local AIR = Blocks.AIR
@@ -640,7 +642,7 @@ return function(t, shared, require, server, client)
 		local function sync()
 			local snapshot = Protocol.decodeInventory(Protocol.encodeInventory(state:snapshot("p") :: any))
 			assert(snapshot, "decodes")
-			prediction:receive(snapshot, true)
+			prediction:receive(snapshot, CREATIVE)
 		end
 		sync()
 		local action = {
@@ -651,7 +653,7 @@ return function(t, shared, require, server, client)
 			count = 3,
 			data = water(900),
 		} :: any
-		local seq = prediction:push(action, true)
+		local seq = prediction:push(action, CREATIVE)
 		is(prediction:window().inventory.slots[5], TANK, 3, 900, "predicted")
 		local got, decoded = Protocol.decodeInventoryAction(Protocol.encodeInventoryAction(seq, action))
 		assert(got and decoded, "decodes")
@@ -665,14 +667,14 @@ return function(t, shared, require, server, client)
 		local tool =
 			{ kind = "creative", window = 0, slot = inv(prediction:window(), 6), item = PICKAXE, count = 1 } :: any
 		tool.damage, tool.data = 9, Items.cleanData({ name = "Old" })
-		local toolSeq = prediction:push(tool, true)
+		local toolSeq = prediction:push(tool, CREATIVE)
 		local _, toolAction = Protocol.decodeInventoryAction(Protocol.encodeInventoryAction(toolSeq, tool))
 		state:apply("p", toolSeq, toolAction :: any, true)
 		local held = state:window("p").inventory.slots[6] :: any
 		t.eq(held.damage, 9)
 		t.eq(held.data.name, "Old")
 		tool.damage = 60000
-		local wornSeq = prediction:push(tool, true)
+		local wornSeq = prediction:push(tool, CREATIVE)
 		local _, worn = Protocol.decodeInventoryAction(Protocol.encodeInventoryAction(wornSeq, tool))
 		state:apply("p", wornSeq, worn :: any, true)
 		t.eq((state:window("p").inventory.slots[6] :: any).damage, 9, "refused: the old stack stays")
@@ -1109,9 +1111,9 @@ return function(t, shared, require, server, client)
 		is(snapshot.inventory.slots[1], TANK, 1, 12000, "in the snapshot")
 		t.eq(Items.describe(snapshot.inventory.slots[1])[1], "Water: 12,000 mB")
 		local prediction = Prediction.new()
-		prediction:receive(snapshot, false)
+		prediction:receive(snapshot, SURVIVAL)
 		is(prediction:window().inventory.slots[1], TANK, 1, 12000, "predicted")
-		prediction:push({ kind = "place", item = TANK }, false)
+		prediction:push({ kind = "place", item = TANK }, SURVIVAL)
 		t.eq(prediction:window().inventory.slots[1], nil, "the client predicts it used up")
 
 		-- Placed again: the stack comes back from `place` before it is used up, and the hook

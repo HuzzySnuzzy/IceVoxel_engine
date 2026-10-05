@@ -53,6 +53,12 @@
 	                               the settings, then assemble from this jigsaw's pool here
 	  StructureData  a piece of structure text (below): text pasted into a LOAD screen, uploaded
 	                 before the load that names its transfer
+	  SetGameMode    u8 mode (Minecraft's GameType id: 0 survival, 1 creative, 2 adventure,
+	                 3 spectator): switch one's own game mode (the F3 + F4 switcher, F3 + N), with
+	                 the /gamemode command's permission and answers
+	  SpectatorTeleport f64 userId: a spectator teleports to that player (the spectator menu's
+	                 "Teleport to Player"); a whole number, finite (Studio's test players are
+	                 negative)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -144,6 +150,7 @@
 ]]
 
 local Config = require(script.Parent.Parent.Config)
+local GameMode = require(script.Parent.Parent.GameMode)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
 local Settings = require(script.Parent.Parent.Structures.Settings)
@@ -163,6 +170,8 @@ Protocol.ClientMessage = {
 	StructureBlock = 10,
 	Jigsaw = 11,
 	StructureData = 12,
+	SetGameMode = 13,
+	SpectatorTeleport = 14,
 }
 
 Protocol.ServerMessage = {
@@ -1390,6 +1399,43 @@ function Protocol.decodeTeleport(b: buffer): (number?, number)
 		return nil, 0
 	end
 	return x, z
+end
+
+--[[ Game modes ]]
+
+function Protocol.encodeSetGameMode(mode: string): buffer
+	local b = buffer.create(1)
+	buffer.writeu8(b, 0, GameMode.id(mode))
+	return b
+end
+
+-- The game mode asked for, or nil when the payload is malformed.
+function Protocol.decodeSetGameMode(b: buffer): string?
+	if buffer.len(b) ~= 1 then
+		return nil
+	end
+	return GameMode.fromId(buffer.readu8(b, 0))
+end
+
+-- Largest |user id| SpectatorTeleport carries (the integers a f64 holds exactly).
+local MAX_USER_ID = 2 ^ 53
+
+function Protocol.encodeSpectatorTeleport(userId: number): buffer
+	local b = buffer.create(8)
+	buffer.writef64(b, 0, userId)
+	return b
+end
+
+-- The target's user id, or nil when the payload is malformed (not a whole number).
+function Protocol.decodeSpectatorTeleport(b: buffer): number?
+	if buffer.len(b) ~= 8 then
+		return nil
+	end
+	local userId = buffer.readf64(b, 0)
+	if userId ~= userId or math.abs(userId) > MAX_USER_ID or userId ~= math.floor(userId) then
+		return nil
+	end
+	return userId
 end
 
 --[[ Fall damage ]]

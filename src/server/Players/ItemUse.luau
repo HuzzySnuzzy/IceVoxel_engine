@@ -6,10 +6,14 @@
 	not predict any of it: the inventory snapshot, the world's edits and the Transmitters / Tanks
 	records bring the results.
 
-	  Checks         a living player, the block within reach (Config.Interaction.Reach + 2 blocks,
-	                 as ServerNet checks edits) and loaded, at most USES_PER_SECOND uses a second
-	                 (Minecraft repeats a held right click every 4 ticks), and the item really in
-	                 their hand. The side comes checked from Protocol.decodeUseItem.
+	  Checks         a living player whose game mode may use items on blocks (survival and
+	                 creative: GameModeRules.mayUseItemOn, Minecraft's ItemStack.useOn without
+	                 mayBuild; adventure and spectator players use nothing), the block within reach
+	                 (Config.Interaction.Reach + 2 blocks, as ServerNet checks edits) and loaded, at
+	                 most USES_PER_SECOND uses a second (Minecraft repeats a held right click every 4
+	                 ticks), and the item really in their hand. The side comes checked from
+	                 Protocol.decodeUseItem. Creative players (instabuild) keep their buckets as
+	                 UseRules says.
 	  Configurator   on a transmitter: the clicked side's mode goes normal -> push -> pull -> none
 	                 (and a transmitter of the same kind beyond that side matches it); sneaking on a
 	                 transporter cycles its colour instead. The player gets Mekanism's message
@@ -44,6 +48,7 @@ local Inventories = require(script.Parent.Inventories)
 local TransmitterWorld = require(script.Parent.Parent.Transmitters.TransmitterWorld)
 local Transmitters = require(script.Parent.Parent.Transmitters.Transmitters)
 local UseRules = require(script.Parent.Parent.Transmitters.UseRules)
+local GameModeRules = require(script.Parent.GameModeRules)
 
 type Stack = Items.Stack
 
@@ -151,7 +156,7 @@ local function fill(
 	z: number,
 	sneaking: boolean
 )
-	local creative = GameMode.isCreative(player)
+	local creative = GameMode.instabuildOf(player)
 	if not sneaking and SharedTransmitters.isTank(block) then
 		local amount, fluid = TransmitterWorld.drainTank(simulation, x, y, z, BUCKET, true)
 		if amount < BUCKET or fluid ~= WATER then
@@ -185,7 +190,7 @@ local function empty(
 	side: number,
 	sneaking: boolean
 )
-	local creative = GameMode.isCreative(player)
+	local creative = GameMode.instabuildOf(player)
 	if not sneaking and SharedTransmitters.isTank(block) then
 		-- (A bucket empties whole or not at all; a tank without room for it takes nothing.)
 		if TransmitterWorld.fillTank(simulation, x, y, z, WATER, BUCKET, true) < BUCKET then
@@ -213,7 +218,14 @@ end
 
 local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, player: Player, payload: buffer)
 	local x, y, z, side, sneaking = Protocol.decodeUseItem(payload)
-	if x == nil or y >= HEIGHT or not isAlive(player) or not inReach(player, x, y, z) or not mayUse(player) then
+	if
+		x == nil
+		or y >= HEIGHT
+		or not GameModeRules.mayUseItemOn(GameMode.of(player))
+		or not isAlive(player)
+		or not inReach(player, x, y, z)
+		or not mayUse(player)
+	then
 		return
 	end
 	local simulation = Transmitters.world()

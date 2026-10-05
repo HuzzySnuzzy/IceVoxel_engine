@@ -17,13 +17,18 @@
 	goes through Menu.close (the cursor and a crafting grid go back into the inventory), and a
 	block's window then becomes the inventory screen's window again (window 0 with a fresh 2 x 2
 	grid, Types.newWindow), as the server does; window 0 keeps its own. Crafting results come from
-	Menu, the same way on both sides. Replays use the game mode the client has now; it only
-	matters for creative-only actions, and modes change rarely.
+	Menu, the same way on both sides.
+
+	Every action goes through the game mode's rules as on the server: an action the mode does not
+	allow (Menu.allows: a spectator only selects hotbar slots and closes windows) changes nothing,
+	and Menu.apply gets the mode's instabuild ability (creative slots, middle-click clones, placing
+	without using items up). Replays use the game mode the client has now; modes change rarely.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local GameMode = require(Shared.GameMode)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
@@ -47,19 +52,25 @@ export type Prediction = {
 	-- base + pending: what the player sees.
 	predicted: Window,
 
-	receive: (self: Prediction, snapshot: Types.Snapshot, creative: boolean) -> (),
-	push: (self: Prediction, action: Action, creative: boolean) -> number,
-	replay: (self: Prediction, creative: boolean) -> (),
+	receive: (self: Prediction, snapshot: Types.Snapshot, mode: string) -> (),
+	push: (self: Prediction, action: Action, mode: string) -> number,
+	replay: (self: Prediction, mode: string) -> (),
 	window: (self: Prediction) -> Window,
 }
 
 local Prediction = {}
 Prediction.__index = Prediction
 
--- Applies an action the way the server does (a close of a block's window resets it).
-local function applyLocal(window: Window, action: Action, creative: boolean)
+--[[
+	Applies an action the way the server does for a player in game `mode`: nothing when the mode
+	does not allow it, and a close of a block's window resets the window.
+]]
+local function applyLocal(window: Window, action: Action, mode: string)
+	if not Menu.allows(action, mode) then
+		return
+	end
 	local closes = action.kind == "close" and action.window == window.id
-	Menu.apply(window, action, creative)
+	Menu.apply(window, action, GameMode.instabuild(mode))
 	local container = window.container
 	if closes and (window.id ~= 0 or container == nil or container.kind ~= "inventory") then
 		window.id = 0
@@ -81,7 +92,7 @@ function Prediction.new(): Prediction
 end
 
 -- A server snapshot arrived: it replaces the base, and the actions it includes stop being pending.
-function Prediction.receive(self: Prediction, snapshot: Types.Snapshot, creative: boolean)
+function Prediction.receive(self: Prediction, snapshot: Types.Snapshot, mode: string)
 	self.base = { id = snapshot.window, inventory = snapshot.inventory, container = snapshot.container }
 	self.ack = snapshot.ack
 	-- (Never reuse a number the server has seen, whatever happened before.)
@@ -95,29 +106,33 @@ function Prediction.receive(self: Prediction, snapshot: Types.Snapshot, creative
 		end
 	end
 	self.pending = kept
-	self:replay(creative)
+	self:replay(mode)
 end
 
--- A local action: numbers it, keeps it until acknowledged and applies it to the prediction.
-function Prediction.push(self: Prediction, action: Action, creative: boolean): number
+--[[
+	A local action of a player in game `mode`: numbers it, keeps it until acknowledged and applies it
+	to the prediction (an action the mode does not allow is numbered but changes nothing; callers
+	need not send it: Menu.allows).
+]]
+function Prediction.push(self: Prediction, action: Action, mode: string): number
 	local seq = self.nextSeq
 	self.nextSeq += 1
 	table.insert(self.pending, { seq = seq, action = action })
 	if #self.pending > MAX_PENDING then
 		-- Long lost: forget the oldest and rebuild from the snapshot.
 		table.remove(self.pending, 1)
-		self:replay(creative)
+		self:replay(mode)
 	else
-		applyLocal(self.predicted, action, creative)
+		applyLocal(self.predicted, action, mode)
 	end
 	return seq
 end
 
 -- Rebuilds the prediction: a copy of the snapshot with every pending action applied again.
-function Prediction.replay(self: Prediction, creative: boolean)
+function Prediction.replay(self: Prediction, mode: string)
 	local window = Menu.copyWindow(self.base)
 	for _, entry in self.pending do
-		applyLocal(window, entry.action, creative)
+		applyLocal(window, entry.action, mode)
 	end
 	self.predicted = window
 end

@@ -18,15 +18,18 @@
 	    either half removes both, with one drop (the lower half's, with the breaker's tool), one
 	    sound and one wear. The client predicts only the half it touched; the other half comes as
 	    an ordinary replicated edit.
-	  * Applies the game modes' rules to edits (Network/EditRules):
-	      survival  a block breaks only once the player has mined it long enough with the tool in
-	                their hand when the break arrives (Mine messages say when they started;
-	                Mining.mayBreak), drops what that tool harvests (Items.drops: stone by hand
-	                drops nothing) and wears the tool (Mining.wear); placing uses up the held item
-	                (Players/Inventories.place, just before the block is set). A refused placement
-	                is still acknowledged, so the client's predicted use is undone.
-	      creative  instant breaking, no drops, nothing used up or worn.
-	    A broken container drops its contents in both modes, and any block with a window (chest,
+	  * Applies the game modes' rules to edits (Network/EditRules, Shared/GameMode's abilities):
+	      survival   a block breaks only once the player has mined it long enough with the tool in
+	                 their hand when the break arrives (Mine messages say when they started;
+	                 Mining.mayBreak), drops what that tool harvests (Items.drops: stone by hand
+	                 drops nothing) and wears the tool (Mining.wear); placing uses up the held item
+	                 (Players/Inventories.place, just before the block is set). A refused placement
+	                 is still acknowledged, so the client's predicted use is undone.
+	      creative   (instabuild) instant breaking, no drops, nothing used up or worn.
+	      adventure  no breaking or placing at all (EditRules.mayEdit: Minecraft's mayBuild): every
+	                 edit is answered with the real block, Mine messages are ignored.
+	      spectator  the same, and never in the way of a placement (EditRules.blocksPlacing).
+	    A broken container drops its contents in every mode, and any block with a window (chest,
 	    furnace, crafting table) closes it for everyone using it.
 	  * Sustained data (Mekanism): parts of the server that keep blocks' state (Transmitters: a
 	    Fluid Tank's water) register hooks with `addBlockData` (EditRules.newBlockData). A
@@ -99,10 +102,11 @@ local function rootOf(player: Player): BasePart?
 end
 
 -- Would `block` at (x, y, z) overlap any player's (standing) movement hull (EditRules.obstructs)?
+-- Spectators are never in the way (EditRules.blocksPlacing).
 local function intersectsCharacter(block: number, x: number, y: number, z: number): boolean
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
-		if character then
+		if character and EditRules.blocksPlacing(GameMode.of(player)) then
 			local min, max = Rig.hull(character)
 			if min and max and EditRules.obstructs(block, x, y, z, min.X, min.Y, min.Z, max.X, max.Y, max.Z) then
 				return true
@@ -145,7 +149,7 @@ export type Rules = {
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
 	-- May the player place and break creative only blocks (structure blocks, structure voids,
 	-- jigsaws; Structures/StructureBlocks.operator: creative, and Config.Structures.Permission,
-	-- Config.Gameplay.Admins, the owner or Studio)? Without it: creative players may.
+	-- Config.Gameplay.Admins, the owner or Studio)? Without it: creative (instabuild) players may.
 	operator: ((player: Player) -> boolean)?,
 }
 
@@ -169,7 +173,7 @@ function ServerNet.start(world: World): ServerNet
 	local remote = Remotes.net()
 	local editBuckets: { [Player]: Bucket } = {}
 	local chunkBuckets: { [Player]: Bucket } = {}
-	-- The block each survival player is mining (Mine messages).
+	-- The block each survival player is mining (Mine messages; EditRules.minesOverTime).
 	local mining: { [Player]: EditRules.Mine } = {}
 	-- A survival break that arrived before its time (network jitter): finished once the time has
 	-- passed, like Minecraft's delayed destroy (ServerPlayerGameMode.hasDelayedDestroy). `tool` is
@@ -244,7 +248,9 @@ function ServerNet.start(world: World): ServerNet
 	end
 
 	-- Mine messages: a survival player started (or stopped) mining a block. A start only counts for
-	-- a minable block in reach, so the timer can't be started early from afar.
+	-- a minable block in reach, so the timer can't be started early from afar, and only from a
+	-- player whose game mode mines over time (EditRules.minesOverTime: not creative, adventure or
+	-- spectator).
 	local function handleMine(player: Player, payload: buffer)
 		local started, x, y, z = Protocol.decodeMine(payload)
 		if started == nil then
@@ -258,7 +264,7 @@ function ServerNet.start(world: World): ServerNet
 				y >= HEIGHT
 				or math.abs(x) > Protocol.MAX_COORDINATE
 				or math.abs(z) > Protocol.MAX_COORDINATE
-				or GameMode.isCreative(player)
+				or not EditRules.minesOverTime(GameMode.of(player))
 				or not inReach(player, x, y, z)
 				or Mining.progressPerTick(world:getBlock(x, y, z), true, false, heldTool(player)) <= 0
 			then
@@ -327,13 +333,14 @@ function ServerNet.start(world: World): ServerNet
 		return true
 	end
 
-	-- Finishes (or gives up) the delayed breaks, every frame.
+	-- Finishes (or gives up) the delayed breaks, every frame. A player whose game mode changed to
+	-- one that does not mine over time (creative, adventure, spectator) gets the block back.
 	local function updateDelayed()
 		local now = os.clock()
 		for player, pending in delayed do
 			local current = world:peekBlock(pending.x, pending.y, pending.z)
 			local alive = player.Parent ~= nil and inReach(player, pending.x, pending.y, pending.z)
-			if current ~= pending.block or not alive or GameMode.isCreative(player) then
+			if current ~= pending.block or not alive or not EditRules.minesOverTime(GameMode.of(player)) then
 				delayed[player] = nil
 				if player.Parent then
 					sendBlock(player, pending.x, pending.y, pending.z)
@@ -399,7 +406,15 @@ function ServerNet.start(world: World): ServerNet
 			return
 		end
 
-		local creative = GameMode.isCreative(player)
+		-- Adventure and spectator players edit nothing (Minecraft's mayBuild).
+		local mode = GameMode.of(player)
+		if not EditRules.mayEdit(mode) then
+			mining[player] = nil
+			reject()
+			return
+		end
+
+		local creative = GameMode.instabuild(mode)
 		local current = world:getBlock(x, y, z)
 		-- Structure blocks, structure voids and jigsaws: only for players allowed to use them.
 		local operatorRule = rules.operator
