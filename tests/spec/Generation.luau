@@ -6,6 +6,7 @@ return function(t, shared, require)
 	local Relief = require(shared.Generation.Relief)
 	local Biomes = require(shared.Biomes)
 	local Hash = require(shared.Util.Hash)
+	local Ores = require(shared.Generation.Ores)
 
 	local SIZE = ChunkLayout.SIZE
 	local gen = TerrainGenerator.new(12345)
@@ -18,6 +19,7 @@ return function(t, shared, require)
 		[Blocks.id.GoldOre] = true,
 		[Blocks.id.DiamondOre] = true,
 		[Blocks.id.EmeraldOre] = true,
+		[Blocks.id.OsmiumOre] = true,
 		[Blocks.id.Diorite] = true,
 		[Blocks.id.Andesite] = true,
 		[Blocks.id.Granite] = true,
@@ -257,6 +259,212 @@ return function(t, shared, require)
 		for id in bands do
 			t.ok((seen[id] or 0) > 0, `no {Blocks.get(id).name}`)
 		end
+	end)
+
+	--[[ Mekanism's osmium (Ores.FEATURES osmium_small / osmium_middle / osmium_upper) ]]
+
+	t.test("ores: trapezoid heights follow Minecraft's TrapezoidHeight", function()
+		local rng = Hash.rng(77)
+		local thirds = { 0, 0, 0 }
+		local sum, n = 0, 30000
+		for _ = 1, n do
+			local y = Ores.trapezoid(rng, 5, 197)
+			t.ok(y >= 5 and y <= 197 and y == math.floor(y), `trapezoid height {y}`)
+			sum += y
+			local third = math.min(3, (y - 5) * 3 // 192 + 1)
+			thirds[third] += 1
+		end
+		-- A triangle: 2/9 of the heights in each outer third, 5/9 in the middle one.
+		t.near(sum / n, 101, 1.5, "centred")
+		t.near(thirds[2] / n, 5 / 9, 0.02, "middle third")
+		t.near(thirds[1] / n, 2 / 9, 0.02, "lower third")
+		t.near(thirds[3] / n, 2 / 9, 0.02, "upper third")
+		-- A plateau flattens the top; one as wide as the range is uniform.
+		local plateau = 0
+		for _ = 1, 10000 do
+			local y = Ores.trapezoid(rng, 72, 343, 8)
+			t.ok(y >= 72 and y <= 343, "plateau range")
+			if y >= 203 and y <= 211 then
+				plateau += 1
+			end
+		end
+		t.ok(plateau / 10000 > 0.06, `plateau share {plateau / 10000}`)
+		for _ = 1, 100 do
+			local y = Ores.trapezoid(rng, 10, 12, 5)
+			t.ok(y >= 10 and y <= 12, "uniform when the plateau covers the range")
+		end
+		-- An empty range gives its bottom and draws nothing (Minecraft's warning case).
+		local state = rng.state
+		t.eq(Ores.trapezoid(rng, 50, 40), 50, "empty range")
+		t.eq(rng.state, state, "no draws for an empty range")
+		t.eq(Ores.trapezoid(rng, 30, 30), 30, "a single height")
+		-- Mekanism's middle feature is the trapezoid one, and it draws 6 veins per chunk.
+		local middle
+		for _, ore in Ores.FEATURES do
+			if ore.name == "osmium_middle" then
+				middle = ore
+			end
+		end
+		assert(middle, "osmium_middle")
+		t.eq(middle.shape, "trapezoid")
+		t.eq(middle.veins * (middle.maxY - middle.minY) / 128, 6, "veins per chunk")
+		t.eq(middle.size, 9, "Mekanism's vein size")
+	end)
+
+	-- A chunk `height` cells tall: bedrock at 0, stone up to `top` with layers of dirt, water and
+	-- cave air in it, air above; the padding is stone too (where ores must never go).
+	local function testChunk(height: number, top: number): buffer
+		local data = ChunkLayout.create(height)
+		for y = 0, top do
+			local block = if y == 0
+				then Blocks.id.Bedrock
+				elseif y % 40 == 7 then Blocks.id.Dirt
+				elseif y % 40 == 19 then Blocks.fluidId("Water", 0)
+				elseif y % 40 == 31 then Blocks.CAVE_AIR
+				else Blocks.id.Stone
+			for i = 0, ChunkLayout.LAYER - 1 do
+				buffer.writeu16(data, (y * ChunkLayout.LAYER + i) * 2, block)
+			end
+		end
+		return data
+	end
+
+	t.test("ores: veins only turn stone in the chunk's core into ore, deterministically", function()
+		local isOre: { [number]: boolean } = {}
+		for _, ore in Ores.FEATURES do
+			isOre[ore.block] = true
+		end
+		local height, top = 448, 430
+		local before = testChunk(height, top)
+		local osmium = 0
+		for _, chunk in { { 0, 0 }, { 5, -9 }, { -300, 41 } } do
+			local data = testChunk(height, top)
+			Ores.place(data, 4242, chunk[1], chunk[2], height)
+			local again = testChunk(height, top)
+			Ores.place(again, 4242, chunk[1], chunk[2], height)
+			t.eq(buffer.tostring(data), buffer.tostring(again), "same seed and chunk, same ores")
+			local other = testChunk(height, top)
+			Ores.place(other, 4243, chunk[1], chunk[2], height)
+			t.ok(buffer.tostring(data) ~= buffer.tostring(other), "another seed, other ores")
+			for i = 0, buffer.len(data) // 2 - 1 do
+				local was, now = buffer.readu16(before, i * 2), buffer.readu16(data, i * 2)
+				if was ~= now then
+					t.ok(was == Blocks.id.Stone, "only stone is replaced")
+					t.ok(isOre[now] == true, "by an ore")
+					local index = i % ChunkLayout.LAYER
+					local px, pz = index % ChunkLayout.PADDED, index // ChunkLayout.PADDED
+					t.ok(px >= 1 and px <= SIZE and pz >= 1 and pz <= SIZE, "inside the core")
+					if now == Blocks.id.OsmiumOre then
+						osmium += 1
+					end
+				end
+			end
+		end
+		t.ok(osmium > 50, `osmium placed: {osmium}`)
+	end)
+
+	t.test("ores: adding osmium moved no earlier ore (saved worlds keep theirs)", function()
+		-- Checksums of every non-osmium ore cell in all-stone chunks, taken before osmium existed:
+		-- the features before it in Ores.FEATURES must keep drawing the same numbers.
+		local height = 700
+		local expected = { "922:1760838665", "921:2061121151", "914:384238489" }
+		for i, chunk in { { 0, 0 }, { 3, -2 }, { -57, 1201 } } do
+			local data = ChunkLayout.create(height)
+			for cell = ChunkLayout.LAYER, ChunkLayout.LAYER * height - 1 do
+				buffer.writeu16(data, cell * 2, Blocks.id.Stone)
+			end
+			Ores.place(data, 4242, chunk[1], chunk[2], height)
+			local sum, n = 0, 0
+			for cell = 0, buffer.len(data) // 2 - 1 do
+				local id = buffer.readu16(data, cell * 2)
+				if id ~= Blocks.id.Stone and id ~= Blocks.id.Air and id ~= Blocks.id.OsmiumOre then
+					sum = (sum * 31 + cell * 7 + id) % 2147483647
+					n += 1
+				end
+			end
+			t.eq(`{n}:{sum}`, expected[i], `chunk {chunk[1]}, {chunk[2]}`)
+		end
+	end)
+
+	t.test("ores: osmium is as common as iron low down, rarer higher up, densest around y 100", function()
+		-- All-stone chunks 448 tall (no caves or terrain in the way): ore cells per band.
+		local height = 448
+		local template = buffer.create(ChunkLayout.LAYER * height * 2)
+		for i = ChunkLayout.LAYER, ChunkLayout.LAYER * height - 1 do
+			buffer.writeu16(template, i * 2, Blocks.id.Stone)
+		end
+		local IRON, OSMIUM = Blocks.id.IronOre, Blocks.id.OsmiumOre
+		-- [band] = { iron, osmium }: low 5..196, high 197..447, deep 5..40, middle 70..130.
+		local counts = { low = { 0, 0 }, high = { 0, 0 }, deep = { 0, 0 }, middle = { 0, 0 } }
+		local data = buffer.create(buffer.len(template))
+		for chunk = 1, 48 do
+			buffer.copy(data, 0, template)
+			Ores.place(data, 12345, chunk * 7 - 100, chunk * 13 - 300, height)
+			for y = 5, height - 1 do
+				local iron, osmium = 0, 0
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local id = ChunkLayout.get(data, x, y, z)
+						if id == IRON then
+							iron += 1
+						elseif id == OSMIUM then
+							osmium += 1
+						end
+					end
+				end
+				local band = if y < 197 then counts.low else counts.high
+				band[1] += iron
+				band[2] += osmium
+				if y <= 40 then
+					counts.deep[1] += iron
+					counts.deep[2] += osmium
+				elseif y >= 70 and y <= 130 then
+					counts.middle[1] += iron
+					counts.middle[2] += osmium
+				end
+			end
+		end
+		local low = counts.low[2] / counts.low[1]
+		local high = counts.high[2] / counts.high[1]
+		t.ok(low > 0.7 and low < 1.35, `osmium / iron below y 197: {low}`)
+		t.ok(high > 0.3 and high < 0.8, `osmium / iron above: {high}`)
+		-- Per layer: the middle band (61 layers) against near bedrock (36 layers).
+		local middle, deep = counts.middle[2] / 61, counts.deep[2] / 36
+		t.ok(middle > 1.8 * deep, `osmium per layer around y 100 {middle}, near bedrock {deep}`)
+	end)
+
+	t.test("ores: generated chunks have osmium in their rock, lowlands and mountains alike", function()
+		local relief = Relief.new(12345)
+		local rng = Hash.rng(23)
+		local found = { low = 0, high = 0 }
+		local spots = {}
+		while #spots < 4 do
+			local x, z = rng:int(-40000, 40000), rng:int(-40000, 40000)
+			local y = relief.height(x, z, 0)
+			if (#spots < 2 and y > 90 and y < 160) or (#spots >= 2 and y > 500 and y < 700) then
+				table.insert(spots, { x // SIZE, z // SIZE })
+			end
+		end
+		for _, spot in spots do
+			local r = gen.generate(0, spot[1], spot[2])
+			for y = 0, r.height - 1 do
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						if ChunkLayout.get(r.data, x, y, z) == Blocks.id.OsmiumOre then
+							local surface = gen.column(spot[1] * SIZE + x, spot[2] * SIZE + z)
+							t.ok(y < surface, `osmium below the surface ({y} < {surface})`)
+							if y < 197 then
+								found.low += 1
+							else
+								found.high += 1
+							end
+						end
+					end
+				end
+			end
+		end
+		t.ok(found.low > 0, "osmium below y 197")
+		t.ok(found.high > 0, "osmium in the mountains")
 	end)
 
 	t.test("biomes follow altitude bands", function()

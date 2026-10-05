@@ -63,9 +63,20 @@ node key) and `posKey(x, y, z)` for block positions.
    every column is stone, so that part is written a whole layer at a time (`buffer.copy`).
 3. **Caves** (level 0 only, `Caves.luau`). See below. Caves are carved as **CaveAir** and stay
    `Caves.SurfaceMargin` blocks below the surface.
-4. **Ores** (level 0 only). Random-walk veins inside the chunk's own core, in altitude bands
-   (diorite, andesite and granite blobs low to high, emeralds only inside high mountains), with a
-   vein count proportional to the height range the column has.
+4. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
+   bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
+   Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
+   Uniform features start veins anywhere in the part of their range the chunk's buffer has (up to
+   its highest column plus the structure room), so ores are as common in a mountain as on a plain.
+   `shape = "trapezoid"` features start them at Minecraft's TrapezoidHeight over their whole range
+   (`Ores.trapezoid`: two uniform draws, densest in the middle), the same number in every chunk.
+   Mekanism's three osmium features (Minecraft 1.20.1: upper 65 x 7 at y 72..343 trapezoid with a
+   plateau of 8, middle 6 x 9 at y -32..56 trapezoid, small 8 x 4 uniform at y -64..64) are mapped
+   onto this world's bands: small veins of 4 in all rock from y 5 (3 per 128 blocks), 6 veins of 9
+   per chunk on a trapezoid over y 5..197 ("more in the middle", densest near y 100), and veins of
+   7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
+   as common above. Every feature draws from one random stream per chunk, in list order: new
+   features go at the end, so earlier ores never move (a Generation test pins them).
 5. **Structures** (up to `Config.StructureMaxLevel`). See below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
@@ -599,12 +610,12 @@ Lighting is left alone, because Roblox lights both by the sun and moon itself.
   `Net/Notices`. Inventories stay as they are when the mode changes, as in Minecraft.
 
 **Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
-the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets, gems, snowballs and the 25
+the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's osmium), gems, snowballs and the 25
 tools) have ids from 4096 up. A stack is `{ item, count, damage }`, at most `maxStack` (64; armor
 and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone 131, iron 250,
 diamond 1561, gold 32). Blocks say how long they take to mine (`hardness`), which tool harvests them
-(`tool`, and `toolLevel` when only that tool of that tier or better drops anything: iron ore needs
-stone, diamond, gold and emerald ore iron), what they drop (`drops`, `dropCount`: snow gives 4
+(`tool`, and `toolLevel` when only that tool of that tier or better drops anything: iron and osmium
+ore need stone, diamond, gold and emerald ore iron), what they drop (`drops`, `dropCount`: snow gives 4
 snowballs), what right click opens (`menu`) and how many slots they hold (`container`).
 
 **The inventory** (`Inventory/Types`, `Inventory/Menu`). It is Minecraft's: 36 slots (1–9 the
@@ -1295,5 +1306,7 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - Transmitters, fluid tanks, chests and furnaces only come from edits: the pipes read unloaded
   chunks' edit lists to find them. Generating any of them would need Transmitters/Transmitters to
   learn about it.
+- Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
+  append new ones, never reorder or change earlier ones, or every unedited world's ores move.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.

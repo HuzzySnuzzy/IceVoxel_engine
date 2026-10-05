@@ -22,7 +22,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   `/gm s` in the chat.
   - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
     go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
-    a pickaxe of the right tier to drop anything (iron ore a stone pickaxe, diamonds an iron one),
+    a pickaxe of the right tier to drop anything (iron and osmium ore a stone pickaxe, diamonds an iron one),
     and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor
     slots on the left and a 2 × 2 crafting grid at the top right; chests, crafting tables and
     furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
@@ -91,6 +91,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   show their water. The Configurator acts on the arm you point at (or the face of the core);
   WAILA names that side's mode, a transporter's colour and the items inside it, and the water in
   a pipe or tank.
+- **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
+  pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
+  Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
+  Osmium (both hardness 7.5, as in Mekanism), and each unpacks again. The ore generates in small
+  veins in all rock, plus Mekanism's "middle" veins concentrated around y 100: about as much as
+  iron below y 197 and about half as much in the mountains above.
 - **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
   named numbers, strings or flags. A Fluid Tank broken in survival keeps its water in its item
   ("Water: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
@@ -210,8 +216,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Transmitters/             Mekanism pipes: Tiers (Mekanism's numbers), sides, connection modes,
                             colours, the connection rule, route costs, Inventories (sided slots,
                             insert / extract)
-  Crafting/                 Recipes (Minecraft's recipes, smelting and fuel), Crafting (grid
-                            matching), Smelting (the furnace tick)
+  Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
+                            Crafting (grid matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
                             clicks, used by the server and for client prediction)
   Entities/ItemPhysics      dropped item movement (server and client)
@@ -224,7 +230,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
     Relief                  terrain heights (JJThunder To The Max style)
     Noise                   seeded noise on top of math.noise
-    Caves, Ores             full detail only
+    Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
   Meshing/GreedyMesher      blocks -> boxes (parts)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays

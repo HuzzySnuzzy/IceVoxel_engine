@@ -443,4 +443,20 @@ table.insert(list, {
 	}),
 })
 
+--[[
+	Mekanism's osmium: what Osmium Ore drops (Raw Osmium), the ingot it smelts into and the nugget,
+	drawn like their iron and gold counterparts in a bluish silver. Mekanism's later machines and
+	cables are made from the ingot. (The ore and the storage blocks are in BlockList.)
+]]
+local RAW_OSMIUM = { 132, 158, 190 }
+local OSMIUM = { 172, 192, 216 }
+table.insert(list, {
+	name = "RawOsmium",
+	color = RAW_OSMIUM,
+	material = "Rock",
+	model = lump(RAW_OSMIUM, { 200, 218, 238 }, { 84, 106, 136 }),
+})
+table.insert(list, { name = "OsmiumIngot", color = OSMIUM, material = "Metal", model = ingot(OSMIUM), tilt = 25 })
+table.insert(list, { name = "OsmiumNugget", color = OSMIUM, material = "Metal", model = nugget(OSMIUM) })
+
 return list

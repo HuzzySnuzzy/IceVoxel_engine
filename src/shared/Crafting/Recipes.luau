@@ -2,8 +2,9 @@
 --[[
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
-	out), and Mekanism's for its transmitters, fluid tanks and Configurator, adapted to the
-	game's materials (see "Mekanism pipes and buckets" below).
+	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
+	transmitters, fluid tanks and Configurator adapted to the game's materials (see "Mekanism
+	pipes and buckets" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -99,6 +100,10 @@ storage("RawIron", "RawIronBlock")
 storage("RawGold", "RawGoldBlock")
 storage("IronNugget", "IronIngot")
 storage("GoldNugget", "GoldIngot")
+-- Mekanism's osmium: 9 nuggets <-> an ingot, 9 ingots <-> a block, 9 raw <-> a raw block.
+storage("OsmiumNugget", "OsmiumIngot")
+storage("OsmiumIngot", "OsmiumBlock")
+storage("RawOsmium", "RawOsmiumBlock")
 
 --[[ Tools: wood, stone, iron, gold and diamond ]]
 
@@ -137,7 +142,8 @@ shape({ "##", "##" }, { ["#"] = "GlowstoneDust" }, "Glowstone")
 
 --[[
 	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
-	osmium, control circuits and alloys, which this game does not have, so they are adapted:
+	control circuits (osmium infused with redstone) and alloys, made in machines this game does not
+	have, so they are adapted:
 	  * Basic Logistical Transporter x 8: iron, glass, iron in a row (Mekanism: steel, a basic
 	    control circuit, steel).
 	  * Basic Mechanical Pipe x 8: iron, a bucket, iron (Mekanism: steel, a bucket, steel).
@@ -178,6 +184,8 @@ smelt("GoldOre", "GoldIngot")
 smelt("CoalOre", "Coal")
 smelt("DiamondOre", "Diamond")
 smelt("EmeraldOre", "Emerald")
+smelt("RawOsmium", "OsmiumIngot")
+smelt("OsmiumOre", "OsmiumIngot")
 smelt("Sand", "Glass")
 smelt("Cobblestone", "Stone")
 smelt("Stone", "SmoothStone")
