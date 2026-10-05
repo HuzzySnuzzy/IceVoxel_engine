@@ -779,7 +779,8 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		local planned, refused = 0, 0
-		for round = 1, 400 do
+		-- (Most rounds are refused: many recipes need the 3 x 3 grid, or 8 of a transmitter.)
+		for round = 1, 600 do
 			local recipe = Crafting.recipes[random(#Crafting.recipes)]
 			local stacks = {}
 			for _ = 1, random(20) do

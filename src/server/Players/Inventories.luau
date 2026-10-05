@@ -25,6 +25,11 @@
 	  Placing    ServerNet asks `place` before putting a block down: survival players use up the held
 	             item; refused edits are still acknowledged so the client's prediction is undone.
 	  Pickups    item entities that touch a player go into the inventory (Entities' pickup handler).
+	  Using      Players/ItemUse (buckets) reads the held stack (`heldStack`, `hasItem`), replaces it
+	             (`setHeld`) and hands stacks over (`give`: what does not fit is thrown).
+	  Pipes      Mekanism's transporters put items into chests and furnaces and take them out
+	             (Transmitters/Transport, through Containers); `containerChanged` then sends the
+	             viewers a snapshot and lets a furnace cook.
 	  Death      everything drops where the player died (scattered), unless
 	             Config.Gameplay.KeepInventory.
 	  Snapshots  a player whose inventory changed (their own actions, pickups, a viewer of the same
@@ -170,6 +175,41 @@ end
 function Inventories.heldTool(player: Player): number?
 	local held = state:heldStack(player)
 	return if held then held.item else nil
+end
+
+-- The stack in the player's hand (nil = empty hand). Read only.
+function Inventories.heldStack(player: Player): Stack?
+	return state:heldStack(player)
+end
+
+-- Replaces the stack in the player's hand (nil empties it); the player gets a snapshot.
+function Inventories.setHeld(player: Player, stack: Stack?)
+	state:setHeld(player, stack)
+end
+
+-- Puts `stack` into the player's inventory; what does not fit is thrown in front of them.
+function Inventories.give(player: Player, stack: Stack)
+	local left = state:give(player, stack)
+	if left then
+		Entities.throwFromPlayer(player, left, false)
+	end
+end
+
+-- Does the player have `item` in their inventory or armor (Minecraft's Inventory.contains)?
+function Inventories.hasItem(player: Player, item: number): boolean
+	return state:has(player, item)
+end
+
+--[[
+	Something other than a viewer changed the slots of the chest or furnace at (x, y, z) (a
+	transporter put items in or took them out): its viewers get a snapshot and a furnace is ticked
+	again (it may have something to cook now).
+]]
+function Inventories.containerChanged(x: number, y: number, z: number)
+	for _, viewer in Containers.default:viewers(x, y, z) do
+		state:markDirty(viewer)
+	end
+	Containers.default:markActive(x, y, z)
 end
 
 -- The tool in the player's hand was used `amount` times (ServerNet's breaks); at its durability it

@@ -4,7 +4,8 @@
 
 	  * Every placeable block (BlockList `placeable`) is an item whose id is the block's id, so a
 	    block item places `block = id`.
-	  * Other items (ItemList: crafting materials, tools, armor) have ids from ITEM_BASE up.
+	  * Other items (ItemList: crafting materials, tools, armor, the Configurator and buckets)
+	    have ids from ITEM_BASE up.
 	  * Block variants that are no item of their own (wall torches) name the item that places and
 	    drops them (BlockList `item`); `ofBlock` answers it.
 

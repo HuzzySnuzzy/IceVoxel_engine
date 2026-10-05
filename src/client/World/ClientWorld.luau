@@ -11,6 +11,17 @@
 	Block edits made by this player are applied immediately (prediction) and sent to the server.
 	If the server rejects one, it answers with the real block and the prediction is undone by the
 	normal edit path. A placement carries the inventory action number of the item it uses up.
+
+	Other modules can follow the world (Rendering/TransmitterRenderer does, for Mekanism's pipes):
+	  onBlockChanged(fn)  fn(x, y, z, block, previous, predicted) after an edit changed a cell of a
+	                      loaded chunk (its own cells, not a neighbour's padding); `predicted`: this
+	                      player's own break or placement, which the server may still undo (with
+	                      an ordinary edit back to the real block)
+	  onChunkLoaded(fn)   fn(cx, cz, loaded) after a full detail chunk's data is attached (again
+	                      when it is regenerated) or detached
+	  onEditList(fn)      fn(cx, cz, known) after a chunk's edit list arrived or was forgotten
+	  knownEdits(cx, cz)  that edit list (local index -> block, ChunkLayout.localIndex), read only
+	Each `on...` returns a function that removes the listener. Listeners must not edit the world.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -43,11 +54,20 @@ export type ChunkData = {
 	emptyAbove: number,
 }
 
+-- Listeners (see the header): a cell changed, a chunk was attached / detached, an edit list
+-- arrived / was forgotten.
+export type BlockListener = (x: number, y: number, z: number, block: number, previous: number, predicted: boolean) -> ()
+export type ChunkListener = (cx: number, cz: number, loaded: boolean) -> ()
+export type EditListListener = (cx: number, cz: number, known: boolean) -> ()
+
 export type ClientWorld = {
 	-- Edit lists: nil = unknown, false = requested, table = known.
 	edits: { [number]: { [number]: number } | false },
 	chunks: { [number]: ChunkData },
 	requestQueue: { { number } },
+	blockListeners: { BlockListener },
+	chunkListeners: { ChunkListener },
+	editListeners: { EditListListener },
 
 	-- Set by the streamer.
 	onSectionDirty: (cx: number, cz: number, section: number) -> (),
@@ -65,6 +85,10 @@ export type ClientWorld = {
 	breakBlock: (self: ClientWorld, x: number, y: number, z: number) -> (),
 	placeBlock: (self: ClientWorld, x: number, y: number, z: number, block: number, seq: number) -> (),
 	flush: (self: ClientWorld) -> (),
+	onBlockChanged: (self: ClientWorld, listener: BlockListener) -> () -> (),
+	onChunkLoaded: (self: ClientWorld, listener: ChunkListener) -> () -> (),
+	onEditList: (self: ClientWorld, listener: EditListListener) -> () -> (),
+	knownEdits: (self: ClientWorld, cx: number, cz: number) -> { [number]: number }?,
 }
 
 local ClientWorld = {}
@@ -76,6 +100,9 @@ function ClientWorld.new(): ClientWorld
 			edits = {},
 			chunks = {},
 			requestQueue = {},
+			blockListeners = {},
+			chunkListeners = {},
+			editListeners = {},
 			onSectionDirty = function() end,
 			onChunkTouched = function() end,
 		}, ClientWorld) :: any
@@ -87,6 +114,9 @@ function ClientWorld.new(): ClientWorld
 			-- Only accept lists we asked for (and still want).
 			if self.edits[key] == false then
 				self.edits[key] = list.edits
+				for _, listener in table.clone(self.editListeners) do
+					listener(list.cx, list.cz, true)
+				end
 			end
 		end
 	end)
@@ -97,6 +127,38 @@ function ClientWorld.new(): ClientWorld
 	end)
 
 	return self
+end
+
+--[[ Listeners ]]
+
+-- Adds `listener` to `list`; the function returned takes it out again.
+local function listen<T>(list: { T }, listener: T): () -> ()
+	table.insert(list, listener)
+	return function()
+		local index = table.find(list, listener)
+		if index then
+			table.remove(list, index)
+		end
+	end
+end
+
+function ClientWorld.onBlockChanged(self: ClientWorld, listener: BlockListener): () -> ()
+	return listen(self.blockListeners, listener)
+end
+
+function ClientWorld.onChunkLoaded(self: ClientWorld, listener: ChunkListener): () -> ()
+	return listen(self.chunkListeners, listener)
+end
+
+function ClientWorld.onEditList(self: ClientWorld, listener: EditListListener): () -> ()
+	return listen(self.editListeners, listener)
+end
+
+local function chunkLoaded(self: ClientWorld, cx: number, cz: number, loaded: boolean)
+	-- (A copy: a listener may remove itself.)
+	for _, listener in table.clone(self.chunkListeners) do
+		listener(cx, cz, loaded)
+	end
 end
 
 --[[ Edit lists ]]
@@ -115,11 +177,31 @@ end
 
 -- Drops edit lists that are no longer needed; they will be requested again if needed later.
 function ClientWorld.forgetEditsExcept(self: ClientWorld, keep: { [number]: boolean })
+	local forgotten: { number }? = nil
 	for key, list in self.edits do
 		if not keep[key] and list ~= false then
 			self.edits[key] = nil
+			if #self.editListeners > 0 then
+				forgotten = forgotten or {}
+				table.insert(forgotten :: { number }, key)
+			end
 		end
 	end
+	if forgotten then
+		for _, key in forgotten do
+			local cx, cz = Coords.decodeChunkKey(key)
+			for _, listener in table.clone(self.editListeners) do
+				listener(cx, cz, false)
+			end
+		end
+	end
+end
+
+-- The known edit list of chunk (cx, cz) (ChunkLayout.localIndex -> block), or nil while it is
+-- unknown. Read only: the world keeps it up to date.
+function ClientWorld.knownEdits(self: ClientWorld, cx: number, cz: number): { [number]: number }?
+	local list = self.edits[Coords.chunkKey(cx, cz)]
+	return if type(list) == "table" then list else nil
 end
 
 --[[
@@ -178,10 +260,15 @@ end
 
 function ClientWorld.attach(self: ClientWorld, cx: number, cz: number, chunk: ChunkData)
 	self.chunks[Coords.chunkKey(cx, cz)] = chunk
+	chunkLoaded(self, cx, cz, true)
 end
 
 function ClientWorld.detach(self: ClientWorld, cx: number, cz: number)
-	self.chunks[Coords.chunkKey(cx, cz)] = nil
+	local key = Coords.chunkKey(cx, cz)
+	if self.chunks[key] ~= nil then
+		self.chunks[key] = nil
+		chunkLoaded(self, cx, cz, false)
+	end
 end
 
 function ClientWorld.getBlock(self: ClientWorld, x: number, y: number, z: number): number?
@@ -286,8 +373,8 @@ local function writeCell(
 	return true
 end
 
--- Applies an edit from any source (server or prediction).
-function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: number, block: number)
+-- Applies an edit (`predicted`: this player's own, not yet confirmed by the server).
+local function apply(self: ClientWorld, x: number, y: number, z: number, block: number, predicted: boolean)
 	if y < 0 or y >= HEIGHT or not Blocks.isValid(block) then
 		return
 	end
@@ -298,7 +385,10 @@ function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: numbe
 	end
 
 	local section = y // SECTION
-	if writeCell(self, cx, cz, lx, y, lz, block, true) then
+	-- (Read before the write, for the listeners; nil when the chunk is not loaded.)
+	local previous = if #self.blockListeners > 0 then ClientWorld.getBlock(self, x, y, z) else nil
+	local changed = writeCell(self, cx, cz, lx, y, lz, block, true)
+	if changed then
 		self.onSectionDirty(cx, cz, section)
 		-- The block above / below in the neighbouring section can change visibility too.
 		if y % SECTION == 0 and section > 0 then
@@ -326,17 +416,29 @@ function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: numbe
 	elseif lz == SIZE - 1 then
 		neighbour(cx, cz + 1, lx, -1)
 	end
+
+	-- Last, so listeners see the whole edit (neighbours' padding included).
+	if changed and previous ~= nil then
+		for _, listener in table.clone(self.blockListeners) do
+			listener(x, y, z, block, previous, predicted)
+		end
+	end
+end
+
+-- Applies an edit from the server.
+function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: number, block: number)
+	apply(self, x, y, z, block, false)
 end
 
 function ClientWorld.breakBlock(self: ClientWorld, x: number, y: number, z: number)
-	ClientWorld.applyEdit(self, x, y, z, AIR)
+	apply(self, x, y, z, AIR, true)
 	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Break, x, y, z, AIR))
 end
 
 -- `seq` is the number of the inventory action that uses the item up (ClientInventory.place), so
 -- the server can acknowledge it even when it rejects the placement.
 function ClientWorld.placeBlock(self: ClientWorld, x: number, y: number, z: number, block: number, seq: number)
-	ClientWorld.applyEdit(self, x, y, z, block)
+	apply(self, x, y, z, block, true)
 	ClientNet.send(Protocol.ClientMessage.Edit, Protocol.encodeEdit(Protocol.EditAction.Place, x, y, z, block, seq))
 end
 

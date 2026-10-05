@@ -3,7 +3,9 @@
 	Server side of the protocol (see Shared/Net/Protocol).
 
 	  * Answers chunk edit requests (clients ask for the edit list of every full detail chunk they
-	    build; terrain itself is generated locally).
+	    build; terrain itself is generated locally). Right after the edit lists, the `chunksSent`
+	    rule sends what else those chunks hold (Mekanism transmitters' and fluid tanks' states:
+	    Transmitters/Transmitters), so a client always has a chunk's blocks before their state.
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
 	    block (torch, lantern) hangs on, not inside a player (solid blocks and lanterns, not
 	    torches: EditRules.obstructs). Rejected requests are answered with the real block so the
@@ -124,6 +126,9 @@ export type Rules = {
 	-- Wears the tool in the player's hand by `amount` (it breaks at its durability).
 	-- (Players/Inventories.wearTool)
 	wearTool: ((player: Player, amount: number) -> ())?,
+	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
+	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
+	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
 }
 
 export type ServerNet = {
@@ -196,6 +201,11 @@ function ServerNet.start(world: World): ServerNet
 			lists[i] = { cx = coord[1], cz = coord[2], edits = world:chunkEdits(coord[1], coord[2]) or EMPTY }
 		end
 		remote:FireClient(player, ServerMessage.ChunkEdits, Protocol.encodeChunkEdits(lists))
+		-- (After the edit lists, on the same ordered remote: the client knows the blocks first.)
+		local chunksSent = rules.chunksSent
+		if chunksSent then
+			chunksSent(player, coords)
+		end
 	end
 
 	-- The item in the player's hand (nil when empty or without inventories).

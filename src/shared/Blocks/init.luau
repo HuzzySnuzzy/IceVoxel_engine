@@ -14,7 +14,9 @@
 	    players (`obstruction`), following Minecraft's TorchBlock, WallTorchBlock, LanternBlock
 	    and StandingAndWallBlockItem,
 	  * sound types (`sound`, `soundLut`, `soundType`): what the block sounds like when it is
-	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`).
+	    broken, placed, hit, walked and fallen on (Shared/Sounds plays `block.<type>.<action>`),
+	  * Mekanism's transmitters and fluid tanks (`transmitter`, `tank`, `icon`), which
+	    Shared/Transmitters reads.
 ]]
 
 local BlockList = require(script.BlockList)
@@ -74,6 +76,11 @@ export type BlockDef = {
 	support: string?,
 	item: string?,
 	brokenByFluid: boolean,
+	-- Mekanism transmitters and fluid tanks (Shared/Transmitters), and the boxes of the item's
+	-- model when they differ from `shape` (a transmitter's core with two arms).
+	transmitter: TransmitterSpec?,
+	tank: TankSpec?,
+	icon: { ShapeBox }?,
 	appearance: number,
 }
 
@@ -100,6 +107,8 @@ export type Appearance = {
 
 export type ShapeBox = BlockList.ShapeBox
 export type Bounds = BlockList.Bounds
+export type TransmitterSpec = BlockList.TransmitterSpec
+export type TankSpec = BlockList.TankSpec
 
 local Blocks = {}
 
@@ -185,6 +194,11 @@ local function shapeBounds(shape: { ShapeBox }): Bounds
 	return { min = lo, max = hi }
 end
 
+-- Transmitter and tank tiers: 1 Basic .. 4 Ultimate (Transmitters/Tiers).
+local function isTier(tier: number): boolean
+	return tier == 1 or tier == 2 or tier == 3 or tier == 4
+end
+
 local defs: { [number]: BlockDef } = {}
 local ids: { [string]: number } = {}
 local appearances: { Appearance } = {}
@@ -213,7 +227,8 @@ for index, spec in BlockList do
 		transparency = spec.transparency or 0,
 		reflectance = spec.reflectance or 0,
 		solid = solid,
-		sturdy = solid and drawn and spec.shape == nil and spec.sturdy ~= false,
+		-- (Shaped blocks only when they say so: a fluid tank's glass and frame fill its cell.)
+		sturdy = solid and drawn and (if spec.sturdy ~= nil then spec.sturdy else spec.shape == nil),
 		replaceable = spec.replaceable or false,
 		breakable = breakable,
 		placeable = if spec.placeable ~= nil then spec.placeable else (drawn and solid),
@@ -245,10 +260,20 @@ for index, spec in BlockList do
 		support = spec.support,
 		item = spec.item,
 		brokenByFluid = spec.brokenByFluid == true,
+		transmitter = spec.transmitter,
+		tank = spec.tank,
+		icon = spec.icon,
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
 	assert(def.sound == nil or soundIndex[def.sound], `Block {spec.name} has unknown sound {def.sound}`)
+	local transmitter = spec.transmitter
+	assert(
+		transmitter == nil or ((transmitter.kind == "item" or transmitter.kind == "fluid") and isTier(transmitter.tier)),
+		`Block {spec.name} has a bad transmitter`
+	)
+	assert(spec.tank == nil or (isTier(spec.tank.tier) and spec.tank.capacity > 0), `Block {spec.name} has a bad tank`)
+	assert(transmitter == nil or spec.tank == nil, `Block {spec.name} is a transmitter and a tank`)
 
 	if drawn then
 		local c, t = def.color, def.tint
@@ -685,9 +710,18 @@ end
 	passes beside a torch to the wall behind it.
 ]]
 local outlines: { [number]: { number } } = {}
+-- (Bounds covering the whole cell are no outline: transmitters and fluid tanks.)
+local function wholeCell(b: Bounds): boolean
+	for k = 1, 3 do
+		if b.min[k] > 0 or b.max[k] < 16 then
+			return false
+		end
+	end
+	return true
+end
 for id, def in defs do
 	local b = def.bounds
-	if b ~= FULL_CELL then
+	if b ~= FULL_CELL and not wholeCell(b) then
 		outlines[id] = {
 			b.min[1] / 16,
 			b.min[2] / 16,

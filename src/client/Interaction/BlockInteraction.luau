@@ -29,6 +29,20 @@
 	Config.Interaction.RepeatInterval. A block is never placed where it would overlap a player's
 	standing hull (the server checks the same and would undo it).
 
+	Items that are no block act on what they point at (ClientMessage.UseItem, never predicted: the
+	server answers with world edits, records and the inventory snapshot), one use per press, and
+	only where the server would do something (Transmitters/UseRules):
+	  Configurator  on a Mekanism transmitter: the side it points at (TransmitterModel.pickSide,
+	                as Mekanism's: the arm hit, else the face of the core hit, else the cell's face
+	                the ray hit) and whether the player sneaks (sneaking: a transporter's colour;
+	                pipes have none).
+	  Bucket        Minecraft's BucketItem: its own ray, which also stops at water sources
+	                (ClipContext.Fluid.SOURCE_ONLY), picks up a source or takes from a fluid tank.
+	  Water Bucket  the ordinary aim (through water): into a fluid tank, else water is poured into
+	                the clicked block if it can be replaced, else in front of the clicked face.
+	A block with a menu still opens first, unless the player sneaks; a sneaking player's bucket
+	skips fluid tanks too (it acts on the world, as Minecraft skips a block's use).
+
 	Torches and lanterns go where something holds them (Blocks.placementFor, Minecraft's rules): a
 	torch on top of a block stands, on a side it is a wall torch facing away from it, under a
 	ceiling it goes on a wall or the floor next to the spot (by where the player looks) or nowhere;
@@ -42,8 +56,9 @@
 	screen is open (Ui/Screens). Broken blocks throw a few debris particles in their colour;
 	hitting, placing, using and dropping swing the held item (Player/HeldItems).
 
-	`target()` and `miningProgress()` let other modules (Ui/Waila) read what is aimed at and how far
-	mining has got, without changing anything.
+	`target()`, `targetSide()` (the transmitter side the Configurator would act on) and
+	`miningProgress()` let other modules (Ui/Waila) read what is aimed at and how far mining has
+	got, without changing anything.
 
 	Sounds (Audio/SoundPlayer), played here at once as Minecraft's client does (the server sends
 	them to everyone else): a block's break sound when it breaks, its place sound when placed (the
@@ -66,6 +81,7 @@ local VoxelRaycast = require(Shared.World.VoxelRaycast)
 local Hull = require(Shared.Movement.Hull)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
+local Transmitters = require(Shared.Transmitters)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -75,6 +91,8 @@ local MovementController = require(script.Parent.Parent.Player.MovementControlle
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
+local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
+local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 local CrackOverlay = require(script.Parent.CrackOverlay)
 
 local BLOCK = Config.BlockSize
@@ -98,10 +116,18 @@ local PARTICLE_GRAVITY = 45 -- studs / s^2
 local SWING_RESTART = 0.15
 -- A whole cell, as Blocks.outline gives boxes.
 local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
+-- Items used on blocks (UseItem) and the water source block buckets pick up.
+local CONFIGURATOR = Items.id.Configurator
+local BUCKET = Items.id.Bucket
+local WATER_BUCKET = Items.id.WaterBucket
+local WATER_SOURCE = Blocks.fluidId("Water", 0)
 
 local BlockInteraction = {}
 
 type Hit = VoxelRaycast.Hit
+
+-- The ray an aim was cast along (blocks; `direction` is a unit vector) and how far it went.
+type Ray = { origin: Vector3, direction: Vector3, maxDistance: number }
 
 -- A block being mined (survival), and the item in hand when it started (nil: bare hands).
 type MinedBlock = { x: number, y: number, z: number, block: number, tool: number?, progress: number }
@@ -113,6 +139,9 @@ end
 local readProgress: () -> number? = function()
 	return nil
 end
+local readSide: () -> number? = function()
+	return nil
+end
 
 -- The block the player aims at this frame (the highlighted one, in reach), or nil. Read only.
 function BlockInteraction.target(): Hit?
@@ -122,6 +151,11 @@ end
 -- Survival mining progress (0..1) of the aimed-at block while it is being mined, else nil.
 function BlockInteraction.miningProgress(): number?
 	return readProgress()
+end
+
+-- The side of the aimed-at transmitter the Configurator would act on, or nil. Read only.
+function BlockInteraction.targetSide(): number?
+	return readSide()
 end
 
 type Particle = {
@@ -203,28 +237,23 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return nil
 	end
 
-	-- Block under a viewport position (or a GUI position when `gui` is set), within reach.
-	local function targetAt(point: Vector2, gui: boolean?): Hit?
+	-- The first block `isTarget` accepts on `ray`, within reach of the character.
+	local function cast(ray: Ray, isTarget: (id: number) -> boolean): Hit?
 		local root = rootPart()
 		if root == nil then
 			return nil
 		end
-		local camera = workspace.CurrentCamera
-		local ray = if gui
-			then camera:ScreenPointToRay(point.X, point.Y)
-			else camera:ViewportPointToRay(point.X, point.Y)
-		local origin = ray.Origin / BLOCK
-		local maxDistance = (ray.Origin - root.Position).Magnitude / BLOCK + REACH
+		local origin, direction = ray.origin, ray.direction
 		local hit = VoxelRaycast.cast(
 			origin.X,
 			origin.Y,
 			origin.Z,
-			ray.Direction.X,
-			ray.Direction.Y,
-			ray.Direction.Z,
-			maxDistance,
+			direction.X,
+			direction.Y,
+			direction.Z,
+			ray.maxDistance,
 			getBlock,
-			Blocks.isTargetable,
+			isTarget,
 			Blocks.outline
 		)
 		if hit then
@@ -234,6 +263,27 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 		end
 		return hit
+	end
+
+	--[[
+		Block under a viewport position (or a GUI position when `gui` is set), within reach, and the
+		ray it was looked for along (nil without a character).
+	]]
+	local function targetAt(point: Vector2, gui: boolean?): (Hit?, Ray?)
+		local root = rootPart()
+		if root == nil then
+			return nil, nil
+		end
+		local camera = workspace.CurrentCamera
+		local ray = if gui
+			then camera:ScreenPointToRay(point.X, point.Y)
+			else camera:ViewportPointToRay(point.X, point.Y)
+		local aim: Ray = {
+			origin = ray.Origin / BLOCK,
+			direction = ray.Direction.Unit,
+			maxDistance = (ray.Origin - root.Position).Magnitude / BLOCK + REACH,
+		}
+		return cast(aim, Blocks.isTargetable), aim
 	end
 
 	-- Where the player aims, in viewport coordinates: the mouse while it is the active input and
@@ -412,6 +462,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local target: Hit? = nil
+	local targetRay: Ray? = nil
 	local mining: MinedBlock? = nil
 	readTarget = function()
 		return target
@@ -544,21 +595,124 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 	end
 
+	--[[ Using items on blocks (the Configurator, buckets) ]]
+
+	--[[
+		The side of the transmitter `hit` the Configurator acts on (TransmitterModel.pickSide): the
+		arm the ray hits, else the face of the core it hits, else the face of the cell it hit (the
+		axis on which the hit point is furthest from the cell's centre).
+	]]
+	local function transmitterSide(hit: Hit, ray: Ray): number
+		local linked, acceptors = TransmitterRenderer.connections(hit.x, hit.y, hit.z)
+		local o, d = ray.origin, ray.direction
+		local side = TransmitterModel.pickSide(o.X, o.Y, o.Z, d.X, d.Y, d.Z, hit.x, hit.y, hit.z, linked, acceptors)
+		if side == nil then
+			local t = hit.distance
+			side = TransmitterModel.sideFromPoint(
+				o.X + d.X * t - hit.x - 0.5,
+				o.Y + d.Y * t - hit.y - 0.5,
+				o.Z + d.Z * t - hit.z - 0.5
+			)
+		end
+		return side or Transmitters.sideOf(hit.nx, hit.ny, hit.nz) or Transmitters.UP
+	end
+
+	-- The clicked face of `hit` as a side (a ray starting inside the block: the face towards it).
+	local function faceSide(hit: Hit, ray: Ray): number
+		local d = ray.direction
+		return Transmitters.sideOf(hit.nx, hit.ny, hit.nz)
+			or TransmitterModel.sideFromPoint(-d.X, -d.Y, -d.Z)
+			or Transmitters.UP
+	end
+
+	readSide = function()
+		local hit, ray = target, targetRay
+		if hit and ray and Transmitters.isTransmitter(hit.block) then
+			return transmitterSide(hit, ray)
+		end
+		return nil
+	end
+
+	local function sendUseItem(x: number, y: number, z: number, side: number, sneaking: boolean): boolean
+		if
+			y < 0
+			or y >= Config.WorldHeight
+			or math.abs(x) > Protocol.MAX_COORDINATE
+			or math.abs(z) > Protocol.MAX_COORDINATE
+		then
+			return false
+		end
+		ClientNet.send(Protocol.ClientMessage.UseItem, Protocol.encodeUseItem(x, y, z, side, sneaking))
+		return true
+	end
+
+	-- Minecraft's empty bucket: its own ray, which stops at water sources as well as blocks.
+	local function bucketTarget(ray: Ray): Hit?
+		return cast(ray, function(id: number): boolean
+			return id == WATER_SOURCE or Blocks.isTargetable(id)
+		end)
+	end
+
+	--[[
+		Uses `item` (no block) on what the player points at: `hit` (the aimed-at block, nil when
+		none is in reach) along `ray`. True when something was sent to the server.
+	]]
+	local function useItem(item: number, hit: Hit?, ray: Ray?, sneaking: boolean): boolean
+		if ray == nil then
+			return false
+		end
+		if item == CONFIGURATOR then
+			if hit == nil or not Transmitters.isTransmitter(hit.block) then
+				return false
+			end
+			-- (Sneaking colours transporters; Mechanical Pipes have no colour.)
+			if sneaking and Transmitters.kindOf(hit.block) ~= "item" then
+				return false
+			end
+			return sendUseItem(hit.x, hit.y, hit.z, transmitterSide(hit, ray), sneaking)
+		elseif item == BUCKET then
+			local source = bucketTarget(ray)
+			if source and (source.block == WATER_SOURCE or (not sneaking and Transmitters.isTank(source.block))) then
+				return sendUseItem(source.x, source.y, source.z, faceSide(source, ray), sneaking)
+			end
+			return false
+		elseif item == WATER_BUCKET then
+			if hit == nil then
+				return false
+			end
+			if sneaking or not Transmitters.isTank(hit.block) then
+				-- Only where the server could pour it: the clicked block when it can be replaced,
+				-- else the one in front of the clicked face.
+				local x, y, z = hit.x, hit.y, hit.z
+				if not Blocks.isReplaceable(hit.block) then
+					x, y, z = x + hit.nx, y + hit.ny, z + hit.nz
+				end
+				local current = if y >= 0 and y < Config.WorldHeight then world:getBlock(x, y, z) else nil
+				if current == nil or not Blocks.isReplaceable(current) then
+					return false
+				end
+			end
+			return sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking)
+		end
+		return false
+	end
+
 	--[[ Using and placing ]]
 
-	-- After opening a block's menu, the held use button does nothing more until released.
+	-- After opening a block's menu or using an item on a block, the held use button does nothing
+	-- more until released.
 	local useSpent = false
 	local lastUse = -math.huge
 
-	local function useAt(hit: Hit?)
-		if hit == nil or useSpent or Screens.isOpen() then
+	local function useAt(hit: Hit?, ray: Ray?)
+		if useSpent or Screens.isOpen() then
 			return
 		end
 		local view = MovementController.current
 		local stack = ClientInventory.selectedStack()
 		-- Blocks with a menu open, unless sneaking with something in hand (Minecraft's secondary use).
 		local sneaking = view ~= nil and view.state.sneaking
-		if Blocks.get(hit.block).menu ~= nil and not (sneaking and stack ~= nil) then
+		if hit and Blocks.get(hit.block).menu ~= nil and not (sneaking and stack ~= nil) then
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()
@@ -568,8 +722,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local def = Items.get(stack.item)
+		if def and def.block == nil then
+			-- (Not predicted: the server's edits, records and snapshot bring the result.)
+			if useItem(stack.item, hit, ray, sneaking) then
+				useSpent = true
+				swing()
+			end
+			return
+		end
 		local block = def and def.block
-		if block == nil then
+		if hit == nil or block == nil then
 			return
 		end
 		-- Into the clicked block if it can be replaced, else against the clicked face.
@@ -612,9 +774,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	-- A single click / tap (not a held button).
-	local function useOnce(hit: Hit?)
+	local function useOnce(hit: Hit?, ray: Ray?)
 		if not anyHeld(useHeld) then
-			useAt(hit)
+			useAt(hit, ray)
 			useSpent = false
 		end
 	end
@@ -663,7 +825,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 	end
 
-	local function beginUse(source: string, hit: Hit?)
+	local function beginUse(source: string, hit: Hit?, ray: Ray?)
 		if Screens.isOpen() then
 			return
 		end
@@ -671,7 +833,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		useHeld[source] = true
 		if first then
 			lastUse = os.clock()
-			useAt(hit)
+			useAt(hit, ray)
 		end
 	end
 
@@ -736,11 +898,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- where a finger is).
 		local aim = pointer()
 		if t and t.holding then
-			target = targetAt(t.position, true)
+			target, targetRay = targetAt(t.position, true)
 		elseif UserInputService.PreferredInput == Enum.PreferredInput.Touch then
-			target = nil
+			target, targetRay = nil, nil
 		else
-			target = targetAt(aim)
+			target, targetRay = targetAt(aim)
 		end
 		if startHold then
 			beginAttack("touch")
@@ -797,7 +959,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			-- Using / placing, repeated while held.
 			if anyHeld(useHeld) and now - lastUse >= Config.Interaction.RepeatInterval then
 				lastUse = now
-				useAt(hit)
+				useAt(hit, targetRay)
 			end
 		end
 
@@ -816,11 +978,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		elseif key == Enum.KeyCode.ButtonR2 then
 			beginAttack("gamepad")
 		elseif key == Enum.KeyCode.ButtonL2 then
-			beginUse("gamepad", target)
+			beginUse("gamepad", target, targetRay)
 		elseif kind == Enum.UserInputType.MouseButton2 then
 			if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
 				-- First person / shift lock: right dragging does not turn the camera.
-				beginUse("mouse", target)
+				beginUse("mouse", target, targetRay)
 			else
 				rightDownAt = os.clock()
 				rightMoved = 0
@@ -883,7 +1045,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				local click = os.clock() - rightDownAt < CLICK_TIME and rightMoved < CLICK_MOVE
 				rightDownAt = nil
 				if click and not Screens.isOpen() then
-					useOnce(target)
+					useOnce(target, targetRay)
 				end
 			end
 		elseif kind == Enum.UserInputType.Touch then

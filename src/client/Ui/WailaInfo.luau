@@ -10,11 +10,19 @@
 	            red cross for whether the held item harvests them ("Requires Iron Pickaxe"), or
 	            the tool that mines them fastest when any hand will do ("Tool: Shovel"), or
 	            "Unbreakable"
+	  pipes     Mekanism's transmitters: the mode of the side the Configurator points at ("Side:
+	            Pull"); a transporter's colour ("Colour: Red") and the items inside it ("Items:
+	            12"); a Mechanical Pipe's water ("Water: ~4,000 / 8,000 mB": its network's fill
+	            byte times the capacity of the pipes the client sees connected, so approximate).
+	            Fluid Tanks: "Water: 12,000 / 32,000 mB" (Jade's Mekanism tank tooltip).
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
 	            held item and by hand, break time with the held item (Mining.ticks / 20, standing
-	            and dry), light, fluid level, render kind, solidity, friction and menu
+	            and dry), light, fluid level, render kind, solidity, friction and menu; for
+	            transmitters their tier's numbers, the packed side modes and each side's mode,
+	            colour and fill byte, the connected sides and the network the client sees; for
+	            tanks their tier's numbers and contents
 	  mod name  "IceVoxel" in blue italics, always last (Jade names the mod a thing comes from)
 
 	Survival mining progress travels in `Info.progress` (Ui/Waila draws it as Jade's line along
@@ -37,6 +45,7 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Mining = require(Shared.Mining)
+local Transmitters = require(Shared.Transmitters)
 
 export type Colour = "white" | "gray" | "darkGray" | "blue" | "green" | "red" | "yellow" | "gold"
 
@@ -55,12 +64,39 @@ export type Info = {
 	progress: number?,
 }
 
+-- What the client knows about a Mekanism transmitter (Rendering/TransmitterRenderer).
+export type TransmitterFacts = {
+	-- Packed side modes, colour (0..16) and fill byte (0..255), as the server sent them.
+	modes: number,
+	colour: number,
+	fluid: number,
+	-- The side the Configurator points at (BlockInteraction.targetSide); nil: none.
+	side: number?,
+	-- Items and stacks in transit inside it.
+	items: number,
+	stacks: number,
+	-- Connected sides (bit `side`): to transmitters, to acceptors.
+	transmitters: number,
+	acceptors: number,
+	-- The connected transmitters the client sees, their pipes' capacity (mB), and whether the
+	-- count is complete.
+	networkSize: number,
+	networkCapacity: number,
+	networkComplete: boolean,
+}
+
+-- A fluid tank's contents (fluid 0 none, 1 water; mB).
+export type TankFacts = { fluid: number, amount: number }
+
 -- Optional facts about a block's surroundings that only the client knows.
 export type BlockContext = {
 	-- Mining progress (BlockInteraction.miningProgress).
 	progress: number?,
 	-- The biome's name at the block's column (extended view).
 	biome: string?,
+	-- Mekanism transmitters and fluid tanks.
+	transmitter: TransmitterFacts?,
+	tank: TankFacts?,
 }
 
 local WailaInfo = {}
@@ -85,6 +121,16 @@ local function number(value: number): string
 		return string.format("%d", value)
 	end
 	return string.format("%g", value)
+end
+
+-- A whole number with thousands separators, as Mekanism writes amounts: 32000 -> "32,000".
+function WailaInfo.thousands(value: number): string
+	local text = string.format("%d", math.floor(math.abs(value) + 0.5))
+	local grouped = string.reverse((string.gsub(string.reverse(text), "(%d%d%d)", "%1,")))
+	if string.sub(grouped, 1, 1) == "," then
+		grouped = string.sub(grouped, 2)
+	end
+	return if value <= -0.5 then "-" .. grouped else grouped
 end
 
 -- Seconds with at most two decimals: 23 ticks -> "1.15 s".
@@ -230,6 +276,117 @@ function WailaInfo.chunkOf(x: number, z: number): (number, number, number, numbe
 	return x // CHUNK, z // CHUNK, x % CHUNK, z % CHUNK
 end
 
+--[[ Mekanism pipes ]]
+
+-- A gray label and a white value: "Side: " "Pull".
+local function labelled(label: string, value: string): Line
+	return { segment(label, "gray"), segment(value, "white") }
+end
+
+-- The sides in a mask, by their initials: "D, N, E"; "none".
+local function sideList(mask: number): string
+	local names = {}
+	for side = 0, 5 do
+		if bit32.band(mask, bit32.lshift(1, side)) ~= 0 then
+			table.insert(names, string.sub(Transmitters.sideName(side), 1, 1))
+		end
+	end
+	return if #names > 0 then table.concat(names, ", ") else "none"
+end
+
+-- "Water: 12,000 / 32,000 mB"; `approximate` adds "~" to an amount that is neither 0 nor full.
+local function fluidLine(fluid: number, amount: number, capacity: number, approximate: boolean): Line
+	local name = Transmitters.fluidName(if fluid ~= 0 then fluid else Transmitters.FLUIDS.WATER)
+	local about = if approximate and amount > 0 and amount < capacity then "~" else ""
+	return labelled(`{name}: `, `{about}{WailaInfo.thousands(amount)} / {WailaInfo.thousands(capacity)} mB`)
+end
+
+--[[
+	The lines of a transmitter: the Configurator's side and its mode, a transporter's colour and
+	items, a pipe's water (the network's fill byte over the capacity of the pipes connected to it,
+	this one's own when it is alone).
+]]
+function WailaInfo.transmitterLines(block: number, facts: TransmitterFacts): { Line }
+	local lines: { Line } = {}
+	local side = facts.side
+	if side ~= nil and Transmitters.isSide(side) then
+		table.insert(lines, labelled("Side: ", Transmitters.modeName(Transmitters.modeOf(facts.modes, side))))
+	end
+	local kind = Transmitters.kindOf(block)
+	if kind == "item" then
+		table.insert(lines, labelled("Colour: ", Transmitters.colourName(facts.colour)))
+		if facts.items > 0 then
+			table.insert(lines, labelled("Items: ", WailaInfo.thousands(facts.items)))
+		end
+	elseif kind == "fluid" then
+		local capacity = if facts.networkCapacity > 0 then facts.networkCapacity else Transmitters.pipeCapacity(block)
+		local amount = Transmitters.fillAmount(facts.fluid, capacity)
+		table.insert(lines, fluidLine(Transmitters.FLUIDS.WATER, amount, capacity, true))
+	end
+	return lines
+end
+
+-- The extended (F3) lines of a transmitter.
+function WailaInfo.transmitterDetails(block: number, facts: TransmitterFacts): { Line }
+	local lines: { Line } = {}
+	local tier = Transmitters.tier(block)
+	local tierIndex = Transmitters.tierOf(block) or 0
+	local tierName = if tier then tier.name else "?"
+	local kind = Transmitters.kindOf(block)
+	local pull = Transmitters.pullAmount(block)
+	if kind == "item" then
+		local restrictive = if Transmitters.isRestrictive(block) then ", restrictive" else ""
+		local speed, cost = Transmitters.speed(block), number(Transmitters.pathCost(block))
+		table.insert(
+			lines,
+			gray(`Transporter tier {tierIndex} ({tierName}{restrictive}), pull {pull}, speed {speed}, cost {cost}`)
+		)
+	else
+		local capacity = WailaInfo.thousands(Transmitters.pipeCapacity(block))
+		table.insert(
+			lines,
+			gray(`Pipe tier {tierIndex} ({tierName}), {capacity} mB, pull {WailaInfo.thousands(pull)} mB/t`)
+		)
+	end
+	local modes = {}
+	for side = 0, 5 do
+		local initial = string.sub(Transmitters.sideName(side), 1, 1)
+		table.insert(modes, `{initial} {Transmitters.modeName(Transmitters.modeOf(facts.modes, side))}`)
+	end
+	table.insert(lines, gray(string.format("Modes 0x%03X: %s", facts.modes, table.concat(modes, ", "))))
+	table.insert(lines, gray(`Colour {facts.colour}, fill {facts.fluid} / 255`))
+	local linked, accepting = sideList(facts.transmitters), sideList(facts.acceptors)
+	table.insert(lines, gray(`Connected: transmitters {linked}; acceptors {accepting}`))
+	local more = if facts.networkComplete then "" else "+"
+	local network = `Network {facts.networkSize}{more} transmitters`
+	if kind == "fluid" then
+		network ..= `, {WailaInfo.thousands(facts.networkCapacity)}{more} mB`
+	end
+	table.insert(lines, gray(network))
+	if kind == "item" then
+		table.insert(lines, gray(`In transit {facts.stacks} stacks, {facts.items} items`))
+	end
+	return lines
+end
+
+-- The lines of a fluid tank: "Water: 12,000 / 32,000 mB".
+function WailaInfo.tankLines(block: number, facts: TankFacts): { Line }
+	return { fluidLine(facts.fluid, facts.amount, Transmitters.tankCapacity(block), false) }
+end
+
+-- The extended (F3) lines of a fluid tank.
+function WailaInfo.tankDetails(block: number, facts: TankFacts): { Line }
+	local tier = Transmitters.tier(block)
+	local tierIndex = Transmitters.tierOf(block) or 0
+	local tierName = if tier then tier.name else "?"
+	local output = WailaInfo.thousands(Transmitters.tankOutput(block))
+	local fluid = Transmitters.fluidName(facts.fluid)
+	return {
+		gray(`Tank tier {tierIndex} ({tierName}), output {output} mB/t`),
+		gray(`Fluid {facts.fluid} ({fluid}), {WailaInfo.thousands(facts.amount)} mB`),
+	}
+end
+
 --[[ Blocks ]]
 
 --[[
@@ -341,9 +498,30 @@ function WailaInfo.block(
 	if harvest then
 		table.insert(lines, harvest)
 	end
+	-- Mekanism pipes and tanks: what the server says about them.
+	local transmitter = if context and Transmitters.isTransmitter(block) then context.transmitter else nil
+	local tank = if context and Transmitters.isTank(block) then context.tank else nil
+	if transmitter then
+		for _, line in WailaInfo.transmitterLines(block, transmitter) do
+			table.insert(lines, line)
+		end
+	elseif tank then
+		for _, line in WailaInfo.tankLines(block, tank) do
+			table.insert(lines, line)
+		end
+	end
 	if extended and def then
 		for _, line in blockDetails(block, held, x, y, z, context) do
 			table.insert(lines, line)
+		end
+		if transmitter then
+			for _, line in WailaInfo.transmitterDetails(block, transmitter) do
+				table.insert(lines, line)
+			end
+		elseif tank then
+			for _, line in WailaInfo.tankDetails(block, tank) do
+				table.insert(lines, line)
+			end
 		end
 	end
 	table.insert(lines, modLine())

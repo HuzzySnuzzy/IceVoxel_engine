@@ -17,7 +17,10 @@
 	            tool and tier a block needs, with a check or a cross for the held item), and
 	            "IceVoxel" in blue italics. With F3 (Debug/DebugOverlay.isOpen) the extended lines:
 	            id, position, chunk, biome (the generator's column), hardness, tool, drops, break
-	            time, light, fluid level, render kind, menu.
+	            time, light, fluid level, render kind, menu. Mekanism's transmitters and tanks add
+	            what Rendering/TransmitterRenderer knows (the side the Configurator points at,
+	            BlockInteraction.targetSide, and its mode; colour, items inside, water), and with
+	            F3 their packed modes, connections and network.
 	  Progress  survival mining progress (BlockInteraction.miningProgress) is Jade's white line
 	            along the panel's bottom edge.
 	  Look      Minecraft's tooltip, which is Jade's default theme: a dark translucent panel with cut
@@ -59,6 +62,8 @@ local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
+local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
+local Transmitters = require(Shared.Transmitters)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
 local WailaInfo = require(script.Parent.WailaInfo)
@@ -455,9 +460,49 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		return WailaInfo.biomeName(biome)
 	end
 
+	-- What the client knows about a transmitter or a tank, and a key that changes with it.
+	local function pipeFacts(
+		hit: VoxelRaycast.Hit,
+		extended: boolean
+	): (WailaInfo.TransmitterFacts?, WailaInfo.TankFacts?, string)
+		local x, y, z = hit.x, hit.y, hit.z
+		if Transmitters.isTransmitter(hit.block) then
+			local modes, colour, fluid = TransmitterRenderer.state(x, y, z)
+			local linked, acceptors = TransmitterRenderer.connections(x, y, z)
+			local items, stacks = TransmitterRenderer.itemsIn(x, y, z)
+			-- (The network walk only for what shows it: a pipe's water, the F3 lines.)
+			local size, capacity, complete = 0, 0, true
+			if extended or Transmitters.kindOf(hit.block) == "fluid" then
+				size, capacity, complete = TransmitterRenderer.network(x, y, z)
+			end
+			local side = BlockInteraction.targetSide()
+			local facts: WailaInfo.TransmitterFacts = {
+				modes = modes,
+				colour = colour,
+				fluid = fluid,
+				side = side,
+				items = items,
+				stacks = stacks,
+				transmitters = linked,
+				acceptors = acceptors,
+				networkSize = size,
+				networkCapacity = capacity,
+				networkComplete = complete,
+			}
+			local key =
+				`{modes} {colour} {fluid} {side or -1} {items} {stacks} {linked} {acceptors} {size} {capacity} {complete}`
+			return facts, nil, key
+		elseif Transmitters.isTank(hit.block) then
+			local fluid, amount = TransmitterRenderer.tank(x, y, z)
+			return nil, { fluid = fluid, amount = amount }, `{fluid} {amount}`
+		end
+		return nil, nil, ""
+	end
+
 	local function showBlock(hit: VoxelRaycast.Hit, progress: number?, extended: boolean)
 		local held = heldItem()
-		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended}`
+		local transmitter, tank, facts = pipeFacts(hit, extended)
+		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
 			return WailaInfo.block(
@@ -467,7 +512,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				hit.y,
 				hit.z,
 				extended,
-				{ progress = progress, biome = biome }
+				{ progress = progress, biome = biome, transmitter = transmitter, tank = tank }
 			)
 		end)
 		setProgress(progress)

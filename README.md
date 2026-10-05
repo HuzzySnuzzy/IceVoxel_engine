@@ -63,6 +63,34 @@ A fast, Minecraft-style voxel engine for Roblox.
   water washes torches away. Players walk through lanterns (in Minecraft they bump into them), but
   a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
   a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
+- **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
+  (Basic, Advanced, Elite, Ultimate) carry items between chests and furnaces, and you see them
+  move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half second,
+  which travel at 1 / 2 / 4 / 10 blocks a second along the cheapest route (faster transporters
+  cost less) to an inventory that takes them (a furnace by its sides, as Minecraft's hoppers see
+  it: ore in the top, fuel in the sides, results out of the bottom). Restrictive Transporters are
+  only used when there is no other way. Transporters coloured with the Configurator (Minecraft's
+  16 dyes) only join their own colour or uncoloured ones, and the items they pull keep their
+  colour: they travel through uncoloured transporters and ones of their colour only (items pulled
+  by an uncoloured transporter stay off coloured ones), to keep lines apart. Mechanical Pipes move
+  water between Fluid Tanks (32 000 to 256 000 mB) at Mekanism's rates, and Minecraft's Bucket and
+  Water Bucket carry it to and from tanks and the world. The Configurator cycles a side between
+  normal, push, pull and none (right click) and a transporter's colour (sneak + right click).
+  Recipes follow Mekanism's shapes with the game's materials (gold, diamond and emerald stand for
+  its alloys). Players walk through transmitters, as through lanterns; their state and the tanks'
+  water live in memory, like chests. Universal Cables, Pressurized Tubes and Thermodynamic
+  Conductors are not included: the game has no energy, gas or heat.
+  Items that no inventory takes go back to the one they came from, or wait in their transporter
+  until one turns up; a broken transporter drops what is in it. Pipes join into networks that share
+  their water (breaking a pipe loses its share), and both keep working where no player is, like
+  furnaces.
+  You see how they are set: transmitters grow arms towards what they connect to, ending in a
+  collar between two of them and in a plate on a chest, furnace or tank; where a side pulls from
+  or pushes into one of those the arm has a blue (pull) or orange (push) band, and coloured
+  transporters are tinted their colour. Items glide through the transporters; pipes and tanks
+  show their water. The Configurator acts on the arm you point at (or the face of the core);
+  WAILA names that side's mode, a transporter's colour and the items inside it, and the water in
+  a pipe or tank.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -141,6 +169,8 @@ Studio tips:
 | Place / use   | Right click (opens chests, crafting tables, furnaces) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel, or click a slot | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
+| Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none; `Shift` + right click a transporter: next colour | L2 | Tap |
+| Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
 | Pick block    | Middle click                |         |            |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker) | Y   | `…` button |
@@ -170,6 +200,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
                             drops, menus)
   Items/   ItemList         items: every placeable block, plus armor, tools and materials
+  Transmitters/             Mekanism pipes: Tiers (Mekanism's numbers), sides, connection modes,
+                            colours, the connection rule, route costs, Inventories (sided slots,
+                            insert / extract)
   Crafting/                 Recipes (Minecraft's recipes, smelting and fuel), Crafting (grid
                             matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
@@ -207,6 +240,10 @@ src/server   -> ServerScriptService.IceVoxel
                             replication
   Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
                             (spawning, replication)
+  Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
+                            pure), Transport (items in transporters), Fluids (water in pipes),
+                            UseRules (buckets, Configurator), Transmitters (ticks, replication)
+  Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
   Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
                             (/time, /gamerule), Inventories +
                             InventoryState (authoritative inventories), Containers (chests,
@@ -239,6 +276,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Net/ClientNet             routes server messages; Notices shows server messages in the chat
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
+  Rendering/TransmitterRenderer  Mekanism pipes: arms, water in pipes and tanks, items moving
+                            through transporters; TransmitterModel (their geometry, aiming,
+                            item paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables and furnaces)
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
@@ -381,6 +421,12 @@ SoundPlayer.click()                                -- ui.button.click
 Sounds are heard from the camera, but never more than 4 blocks from the player's eyes
 (`SoundRules.LISTENER_REACH`, Minecraft's third person distance), so zooming out does not
 silence the world; a Scriptable camera hears from where it is.
+
+**Pipes and tanks.** A transmitter is a block with `transmitter = { kind = "item" | "fluid", tier =
+1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` in BlockList; the
+per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
+`container` slots is an inventory transporters connect to (all slots from every side, unless it is
+a furnace, `menu = "Furnace"`).
 
 **A light or a shaped block.** `light = 0..15` gives a block one PointLight; `shape = { { size,
 offset, rotation?, color?, material?, glow? } }` (pixels from the cell's centre) draws it from
@@ -527,8 +573,11 @@ luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
 Natural next steps, roughly in order:
 
 - **Persistence.** Edits, inventories and chest contents live in memory (`WorldServer.edits`,
-  `Players/InventoryState`, `Players/Containers`); save them to DataStores (edits per region of
+  `Players/InventoryState`, `Players/Containers`), as do transmitter states, network water, tank
+  contents and items in transit (`Transmitters/TransmitterWorld`); save them to DataStores (edits per region of
   32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
+- **More of Mekanism.** Machines, energy (Universal Cables), gases (Pressurized Tubes), heat
+  (Thermodynamic Conductors) and the Logistical Sorter would build on the transmitter networks.
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling
   (`Items.damageAfterArmor` is ready for it).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on

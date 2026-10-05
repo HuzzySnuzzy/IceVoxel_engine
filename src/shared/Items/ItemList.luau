@@ -378,4 +378,69 @@ table.insert(list, {
 	},
 })
 
+--[[
+	Mekanism pipes (Shared/Transmitters) and Minecraft's buckets.
+
+	The Configurator (Mekanism's tool) sets how each side of a transmitter connects and colours
+	transporters: a wrench with a blue head and a small screen on its grip, modelled upright and
+	tilted like the tools. Buckets carry water to and from fluid tanks and the world (1000 mB, a
+	water source block); an empty one stacks to 16 as in Minecraft, a full one does not stack.
+]]
+local CONFIGURATOR_BLUE = { 44, 116, 214 }
+local CONFIGURATOR_GRIP = { 62, 64, 72 }
+table.insert(list, {
+	name = "Configurator",
+	maxStack = 1,
+	color = CONFIGURATOR_BLUE,
+	material = "Metal",
+	model = {
+		{ size = { 2, 11, 1.5 }, offset = { 0, -3.5, 0 }, color = CONFIGURATOR_GRIP },
+		{ size = { 2.4, 1, 1.8 }, offset = { 0, -8.25, 0 }, color = { 30, 30, 34 } },
+		{ size = { 1.2, 2, 0.4 }, offset = { 0, -1, 0.9 }, color = { 120, 230, 255 }, material = "Neon" },
+		{ size = { 6, 2, 1.5 }, offset = { 0, 3, 0 }, color = shade(CONFIGURATOR_BLUE, 0.8) },
+		{ size = { 2, 4, 1.5 }, offset = { -2, 6, 0 } },
+		{ size = { 2, 4, 1.5 }, offset = { 2, 6, 0 } },
+		{ size = { 1, 3, 1.6 }, offset = { -2.5, 6.5, 0 }, color = shade(CONFIGURATOR_BLUE, 1.2) },
+	},
+	tilt = -45,
+})
+
+-- Minecraft's iron bucket seen from the front: a rim, a body narrowing to its base, and a handle.
+local BUCKET_IRON = { 196, 198, 204 }
+local function bucket(top: { ModelBox }): { ModelBox }
+	local boxes: { ModelBox } = {
+		{ size = { 12, 1.5, 4.5 }, offset = { 0, 4.25, 0 }, color = shade(BUCKET_IRON, 1.1) },
+		{ size = { 11, 3, 4 }, offset = { 0, 2, 0 } },
+		{ size = { 9.5, 3, 4 }, offset = { 0, -1, 0 } },
+		{ size = { 8, 2, 4 }, offset = { 0, -3.5, 0 }, color = shade(BUCKET_IRON, 0.75) },
+		{ size = { 1, 3.5, 1 }, offset = { -5.25, 6.75, 0 }, color = shade(BUCKET_IRON, 0.5) },
+		{ size = { 1, 3.5, 1 }, offset = { 5.25, 6.75, 0 }, color = shade(BUCKET_IRON, 0.5) },
+		{ size = { 9.5, 1, 1 }, offset = { 0, 8, 0 }, color = shade(BUCKET_IRON, 0.5) },
+	}
+	for _, box in top do
+		table.insert(boxes, box)
+	end
+	return boxes
+end
+local WATER = { 52, 96, 220 }
+table.insert(list, {
+	name = "Bucket",
+	maxStack = 16,
+	color = BUCKET_IRON,
+	material = "Metal",
+	-- (Its dark inside, seen over the rim.)
+	model = bucket({ { size = { 10, 0.6, 3.5 }, offset = { 0, 5.1, 0 }, color = { 58, 58, 62 } } }),
+})
+table.insert(list, {
+	name = "WaterBucket",
+	maxStack = 1,
+	color = WATER,
+	material = "Metal",
+	-- (Water filling it to the rim, and a band of it showing over the rim's front.)
+	model = bucket({
+		{ size = { 10.5, 0.8, 3.8 }, offset = { 0, 5.2, 0 }, color = WATER, material = "SmoothPlastic" },
+		{ size = { 10.5, 1.2, 0.4 }, offset = { 0, 4.4, 2.45 }, color = WATER, material = "SmoothPlastic" },
+	}),
+})
+
 return list

@@ -24,6 +24,13 @@
 	                   5 creative  u8 window, i16 slot (-1 = cursor), u16 item, u8 count
 	                   6 close     u8 window
 	  Use            i32 x, u16 y, i32 z: right click on a usable block (opens a chest)
+	  UseItem        i32 x, u16 y, i32 z, u8 side (0..5), u8 flags (bit 0: sneaking): a right click
+	                 on block (x, y, z) with an item that is no block (the Configurator, buckets).
+	                 Sides are Shared/Transmitters' (0 Down, 1 Up, 2 North, 3 South, 4 West,
+	                 5 East). For the Configurator `side` is the transmitter's side picked from the
+	                 hit point; for a bucket the clicked face (water goes into (x, y, z) when it is
+	                 replaceable, else into (x, y, z) + offset(side)). An empty bucket aimed at a
+	                 water source sends the water's cell.
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -46,6 +53,27 @@
 	                 to play at (x, y, z) (blocks), `sound` an event number of Shared/Sounds,
 	                 volume and pitch in hundredths of the event's own (100 = as listed). The
 	                 sounds near the player this frame (server Audio/Sounds).
+	  Transmitters   u32 count, count x (i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fluid): the
+	                 state of Mekanism transmitters (Shared/Transmitters): the six side modes packed
+	                 2 bits a side (side 0 lowest, so at most 4095), the colour (0 none, 1..16 dyes;
+	                 a message with anything beyond either is malformed) and how full a
+	                 pipe's network is (0 empty .. 255 full, Transmitters.fillLevel). A record
+	                 replaces whatever the client knew about that position; transmitters in the
+	                 default state (all NORMAL, no colour, empty) need none, and the client forgets
+	                 positions that stop being transmitters. Sent with a chunk's edit list and to
+	                 the players near a change.
+	  Tanks          u32 count, count x (i32 x, u16 y, i32 z, u8 fluid (0 none, 1 water), u32 amount
+	                 (mB)): fluid tanks, the same way.
+	  Transport      u32 count, count x op (u8 op, u32 id, then by op): items in transporters.
+	                   1 add     u16 item, u8 count, i32 x, u16 y, i32 z (the transporter it is in),
+	                             u8 progress (0..100 through that block), u8 speed (progress per
+	                             tick), f64 startTime (workspace:GetServerTimeNow() when it was at
+	                             `progress` there), u8 n, n x u8 side (the sides it leaves each
+	                             block through, the first leaving (x, y, z)). An add with an id the
+	                             client knows replaces that item (it was re-routed).
+	                   2 remove  u8 reason (0 arrived, 1 dropped, 2 gone)
+	                 Clients move items along the path themselves at 20 ticks a second; nothing
+	                 is sent per block.
 
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
 	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
@@ -65,6 +93,7 @@ Protocol.ClientMessage = {
 	Mine = 6,
 	Inventory = 7,
 	Use = 8,
+	UseItem = 9,
 }
 
 Protocol.ServerMessage = {
@@ -75,6 +104,9 @@ Protocol.ServerMessage = {
 	Entities = 5,
 	Notice = 6,
 	Sound = 7,
+	Transmitters = 8,
+	Tanks = 9,
+	Transport = 10,
 }
 
 Protocol.EditAction = {
@@ -193,6 +225,34 @@ function Protocol.decodeUse(b: buffer): (number?, number, number)
 		return nil, 0, 0
 	end
 	return buffer.readi32(b, 0), buffer.readu16(b, 4), buffer.readi32(b, 6)
+end
+
+--[[ Using items on blocks (the Configurator, buckets) ]]
+
+Protocol.USE_ITEM_BYTES = 12
+
+function Protocol.encodeUseItem(x: number, y: number, z: number, side: number, sneaking: boolean): buffer
+	local b = buffer.create(Protocol.USE_ITEM_BYTES)
+	buffer.writei32(b, 0, x)
+	buffer.writeu16(b, 4, y)
+	buffer.writei32(b, 6, z)
+	buffer.writeu8(b, 10, side)
+	buffer.writeu8(b, 11, if sneaking then 1 else 0)
+	return b
+end
+
+-- x (nil when malformed: wrong length, a side beyond 5, unknown flags, too far out), y, z, side,
+-- sneaking.
+function Protocol.decodeUseItem(b: buffer): (number?, number, number, number, boolean)
+	if buffer.len(b) ~= Protocol.USE_ITEM_BYTES then
+		return nil, 0, 0, 0, false
+	end
+	local x, y, z = buffer.readi32(b, 0), buffer.readu16(b, 4), buffer.readi32(b, 6)
+	local side, flags = buffer.readu8(b, 10), buffer.readu8(b, 11)
+	if side > 5 or flags > 1 or math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
+		return nil, 0, 0, 0, false
+	end
+	return x, y, z, side, flags == 1
 end
 
 --[[ Inventory actions (client -> server) ]]
@@ -600,6 +660,238 @@ function Protocol.decodeSounds(b: buffer): { SoundCue }?
 		o += Protocol.SOUND_BYTES
 	end
 	return cues
+end
+
+--[[ Mekanism transmitters, fluid tanks and items in transit (server -> client) ]]
+
+-- A transmitter's state: packed side modes (u16), colour (0..16), fill (0..255).
+export type TransmitterRecord = { x: number, y: number, z: number, modes: number, colour: number, fluid: number }
+-- A fluid tank: fluid (0 none, 1 water) and amount in mB.
+export type TankRecord = { x: number, y: number, z: number, fluid: number, amount: number }
+-- An item entering a transporter or re-routed (`add`), or leaving the transporters (`remove`).
+export type TransportOp = {
+	op: "add",
+	id: number,
+	item: number,
+	count: number,
+	x: number,
+	y: number,
+	z: number,
+	progress: number,
+	speed: number,
+	startTime: number,
+	path: { number },
+} | { op: "remove", id: number, reason: number }
+
+Protocol.TRANSMITTER_BYTES = 14
+Protocol.TANK_BYTES = 15
+-- Most sides an `add` carries; a longer route is sent again on the way.
+Protocol.MAX_PATH = 255
+-- Why an item left the transporters (`remove`).
+Protocol.TransportRemoveReason = table.freeze({ Arrived = 0, Dropped = 1, Gone = 2 })
+
+-- Largest packed side modes (six sides, 2 bits each) and colour (Minecraft's 16 dyes) a
+-- Transmitters record may hold; anything above is malformed.
+local MAX_MODES = 4095
+local MAX_COLOUR = 16
+
+local TRANSPORT_ADD, TRANSPORT_REMOVE = 1, 2
+-- Bytes of an add before its path (op and id included), and of a remove.
+local TRANSPORT_ADD_BYTES = 29
+local TRANSPORT_REMOVE_BYTES = 6
+
+-- A whole number clamped to a field's range (NaN becomes the low end).
+local function clampInt(value: number, low: number, high: number): number
+	if value ~= value then
+		return low
+	end
+	return math.clamp(math.floor(value), low, high)
+end
+
+function Protocol.encodeTransmitters(records: { TransmitterRecord }): buffer
+	local b = buffer.create(4 + #records * Protocol.TRANSMITTER_BYTES)
+	buffer.writeu32(b, 0, #records)
+	local o = 4
+	for _, record in records do
+		buffer.writei32(b, o, record.x)
+		buffer.writeu16(b, o + 4, record.y)
+		buffer.writei32(b, o + 6, record.z)
+		buffer.writeu16(b, o + 10, clampInt(record.modes, 0, MAX_MODES))
+		buffer.writeu8(b, o + 12, clampInt(record.colour, 0, MAX_COLOUR))
+		buffer.writeu8(b, o + 13, clampInt(record.fluid, 0, 255))
+		o += Protocol.TRANSMITTER_BYTES
+	end
+	return b
+end
+
+-- The records of a Transmitters message, or nil when it is malformed (modes beyond the six sides'
+-- 12 bits or a colour beyond 16 included).
+function Protocol.decodeTransmitters(b: buffer): { TransmitterRecord }?
+	local len = buffer.len(b)
+	if len < 4 then
+		return nil
+	end
+	local count = buffer.readu32(b, 0)
+	if len ~= 4 + count * Protocol.TRANSMITTER_BYTES then
+		return nil
+	end
+	local records: { TransmitterRecord } = table.create(count)
+	local o = 4
+	for i = 1, count do
+		local modes, colour = buffer.readu16(b, o + 10), buffer.readu8(b, o + 12)
+		if modes > MAX_MODES or colour > MAX_COLOUR then
+			return nil
+		end
+		records[i] = {
+			x = buffer.readi32(b, o),
+			y = buffer.readu16(b, o + 4),
+			z = buffer.readi32(b, o + 6),
+			modes = modes,
+			colour = colour,
+			fluid = buffer.readu8(b, o + 13),
+		}
+		o += Protocol.TRANSMITTER_BYTES
+	end
+	return records
+end
+
+function Protocol.encodeTanks(records: { TankRecord }): buffer
+	local b = buffer.create(4 + #records * Protocol.TANK_BYTES)
+	buffer.writeu32(b, 0, #records)
+	local o = 4
+	for _, record in records do
+		buffer.writei32(b, o, record.x)
+		buffer.writeu16(b, o + 4, record.y)
+		buffer.writei32(b, o + 6, record.z)
+		buffer.writeu8(b, o + 10, clampInt(record.fluid, 0, 255))
+		buffer.writeu32(b, o + 11, clampInt(record.amount, 0, 4294967295))
+		o += Protocol.TANK_BYTES
+	end
+	return b
+end
+
+-- The records of a Tanks message, or nil when it is malformed.
+function Protocol.decodeTanks(b: buffer): { TankRecord }?
+	local len = buffer.len(b)
+	if len < 4 then
+		return nil
+	end
+	local count = buffer.readu32(b, 0)
+	if len ~= 4 + count * Protocol.TANK_BYTES then
+		return nil
+	end
+	local records: { TankRecord } = table.create(count)
+	local o = 4
+	for i = 1, count do
+		records[i] = {
+			x = buffer.readi32(b, o),
+			y = buffer.readu16(b, o + 4),
+			z = buffer.readi32(b, o + 6),
+			fluid = buffer.readu8(b, o + 10),
+			amount = buffer.readu32(b, o + 11),
+		}
+		o += Protocol.TANK_BYTES
+	end
+	return records
+end
+
+-- (A path longer than MAX_PATH sends its first MAX_PATH sides.)
+function Protocol.encodeTransport(ops: { TransportOp }): buffer
+	local size = 4
+	for _, op in ops do
+		if op.op == "add" then
+			size += TRANSPORT_ADD_BYTES + math.min(#op.path, Protocol.MAX_PATH)
+		else
+			size += TRANSPORT_REMOVE_BYTES
+		end
+	end
+	local b = buffer.create(size)
+	buffer.writeu32(b, 0, #ops)
+	local o = 4
+	for _, op in ops do
+		if op.op == "add" then
+			buffer.writeu8(b, o, TRANSPORT_ADD)
+			buffer.writeu32(b, o + 1, op.id)
+			buffer.writeu16(b, o + 5, op.item)
+			buffer.writeu8(b, o + 7, clampInt(op.count, 0, 255))
+			buffer.writei32(b, o + 8, op.x)
+			buffer.writeu16(b, o + 12, op.y)
+			buffer.writei32(b, o + 14, op.z)
+			buffer.writeu8(b, o + 18, clampInt(op.progress, 0, 255))
+			buffer.writeu8(b, o + 19, clampInt(op.speed, 0, 255))
+			buffer.writef64(b, o + 20, op.startTime)
+			local n = math.min(#op.path, Protocol.MAX_PATH)
+			buffer.writeu8(b, o + 28, n)
+			for i = 1, n do
+				buffer.writeu8(b, o + 28 + i, op.path[i])
+			end
+			o += TRANSPORT_ADD_BYTES + n
+		else
+			buffer.writeu8(b, o, TRANSPORT_REMOVE)
+			buffer.writeu32(b, o + 1, op.id)
+			buffer.writeu8(b, o + 5, clampInt(op.reason, 0, 255))
+			o += TRANSPORT_REMOVE_BYTES
+		end
+	end
+	return b
+end
+
+-- The ops of a Transport message, or nil when it is malformed (a side beyond 5 included).
+function Protocol.decodeTransport(b: buffer): { TransportOp }?
+	local len = buffer.len(b)
+	if len < 4 then
+		return nil
+	end
+	local count = buffer.readu32(b, 0)
+	local ops: { TransportOp } = {}
+	local o = 4
+	for _ = 1, count do
+		if o + TRANSPORT_REMOVE_BYTES > len then
+			return nil
+		end
+		local code = buffer.readu8(b, o)
+		local id = buffer.readu32(b, o + 1)
+		if code == TRANSPORT_ADD then
+			if o + TRANSPORT_ADD_BYTES > len then
+				return nil
+			end
+			local n = buffer.readu8(b, o + 28)
+			if o + TRANSPORT_ADD_BYTES + n > len then
+				return nil
+			end
+			local path = table.create(n)
+			for i = 1, n do
+				local side = buffer.readu8(b, o + 28 + i)
+				if side > 5 then
+					return nil
+				end
+				path[i] = side
+			end
+			table.insert(ops, {
+				op = "add",
+				id = id,
+				item = buffer.readu16(b, o + 5),
+				count = buffer.readu8(b, o + 7),
+				x = buffer.readi32(b, o + 8),
+				y = buffer.readu16(b, o + 12),
+				z = buffer.readi32(b, o + 14),
+				progress = buffer.readu8(b, o + 18),
+				speed = buffer.readu8(b, o + 19),
+				startTime = buffer.readf64(b, o + 20),
+				path = path,
+			})
+			o += TRANSPORT_ADD_BYTES + n
+		elseif code == TRANSPORT_REMOVE then
+			table.insert(ops, { op = "remove", id = id, reason = buffer.readu8(b, o + 5) })
+			o += TRANSPORT_REMOVE_BYTES
+		else
+			return nil
+		end
+	end
+	if o ~= len then
+		return nil
+	end
+	return ops
 end
 
 --[[ Server -> client ]]

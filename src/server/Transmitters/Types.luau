@@ -1,0 +1,163 @@
+--!strict
+--[[
+	The shapes the server's Mekanism pipes share (Transmitters/TransmitterWorld, Transport, Fluids),
+	in a module of their own so those can type each other without requiring each other.
+
+	  Node     one transmitter (a Logistical Transporter, the Restrictive Transporter or a
+	           Mechanical Pipe) at a block position: its side modes and colour, which of its
+	           sides join other transmitters (`links`) and acceptors (`acceptors`), a pipe's
+	           network, a transporter's pull timer, and what its last Transmitters record said
+	  Network  the pipes joined into one (a connected component): their shared water buffer
+	  Tank     a fluid tank's contents
+	  Item     a stack travelling through transporters: where it is, its route and why
+	  World    the whole state (TransmitterWorld.new); Env is what it needs from the game
+
+	Positions are Shared/World/Coords pos keys; sides are Shared/Transmitters' (0 Down .. 5 East).
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Items = require(Shared.Items)
+local Protocol = require(Shared.Net.Protocol)
+
+local Containers = require(script.Parent.Parent.Players.Containers)
+
+export type Stack = Items.Stack
+export type Kind = "item" | "fluid"
+
+export type Network = {
+	id: number,
+	nodes: { [number]: Node },
+	size: number,
+	-- mB: the sum of the member pipes' capacities.
+	capacity: number,
+	-- Shared/Transmitters.FLUIDS (0 none, 1 water) and mB in the buffer.
+	fluid: number,
+	amount: number,
+	-- Members with at least one side joined to a tank.
+	ports: { [number]: Node },
+	-- The fill byte last given to the members' records (-1: check now), and the tick of that
+	-- check (fills are sent at most every FILL_INTERVAL ticks).
+	sentFill: number,
+	checkedAt: number,
+}
+
+export type Node = {
+	key: number,
+	x: number,
+	y: number,
+	z: number,
+	block: number,
+	kind: Kind,
+	-- Packed side modes (Transmitters.packModes) and colour (0 none, 1..16).
+	modes: number,
+	colour: number,
+	-- Bit `side` set: that side joins a transmitter / an acceptor (Transmitters.connections).
+	links: number,
+	acceptors: number,
+	-- Mechanical pipes: the network they belong to (always one, a lone pipe's own).
+	network: Network?,
+	-- Transporters: ticks until the PULL sides pull again, and failed pulls in a row (backoff).
+	pullDelay: number,
+	pullFailures: number,
+	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0).
+	sentModes: number,
+	sentColour: number,
+	sentFluid: number,
+}
+
+export type Tank = {
+	key: number,
+	x: number,
+	y: number,
+	z: number,
+	block: number,
+	capacity: number,
+	fluid: number,
+	amount: number,
+	-- The record clients last got, and the tick it was sent (at most every FILL_INTERVAL ticks).
+	sentFluid: number,
+	sentAmount: number,
+	sentAt: number,
+}
+
+export type Item = {
+	id: number,
+	stack: Stack,
+	-- The colour of the transporter that pulled it (0 none): it only enters transporters that
+	-- carry it (Transmitters.carries).
+	colour: number,
+	-- Pos keys from where it started to where it goes: transporters, then the inventory last
+	-- (for a destination or home). `hop` is the index of the transporter it is in.
+	route: { number },
+	hop: number,
+	-- "dest" (an inventory that takes it), "home" (back where it came from) or nil: waiting in
+	-- place for somewhere to go (route is then just its transporter).
+	target: ("dest" | "home")?,
+	-- The inventory's side it enters by (opposite of the route's last step).
+	face: number,
+	-- 0..100 through the transporter it is in (Transmitters.BLOCK_PROGRESS).
+	progress: number,
+	-- Waiting: ticks until it looks for a way again.
+	wait: number,
+	-- The inventory it was pulled from (pos key).
+	home: number?,
+	-- The hop and speed of the last Transport add sent for it (a long route is sent again on the
+	-- way, and a change of speed is sent).
+	sentHop: number,
+	sentSpeed: number,
+}
+
+export type Env = {
+	-- The block at (x, y, z), nil when the server does not know it. Never generates terrain.
+	getBlock: (x: number, y: number, z: number) -> number?,
+	-- Chests and furnaces (Players/Containers).
+	containers: Containers.Store,
+	-- The slots of the inventory at (x, y, z) changed (its viewers need a snapshot, a furnace may
+	-- cook).
+	inventoryChanged: ((x: number, y: number, z: number) -> ())?,
+	-- Drops a stack as an item entity at block (x, y, z) (a broken transporter's items).
+	drop: ((x: number, y: number, z: number, stack: Stack) -> ())?,
+}
+
+export type TransportOp = Protocol.TransportOp
+export type TransmitterRecord = Protocol.TransmitterRecord
+export type TankRecord = Protocol.TankRecord
+
+export type World = {
+	env: Env,
+	-- Simulation ticks run so far.
+	tick: number,
+	nodes: { [number]: Node },
+	tanks: { [number]: Tank },
+	networks: { [Network]: boolean },
+	nextNetwork: number,
+	-- Pos keys of the transmitters and tanks in each chunk (Coords.chunkKey).
+	byChunk: { [number]: { [number]: boolean } },
+	-- Pipes whose network has to be worked out again (a queue with a set marking the live
+	-- entries), and the flood fill in progress, carried over between ticks.
+	seeds: { number },
+	seedSet: { [number]: boolean },
+	job: { visited: { [number]: boolean }, frontier: { number }, members: { Node } }?,
+	-- Transporters with a PULL side on an inventory.
+	pullers: { [number]: Node },
+	items: { [number]: Item },
+	itemCount: number,
+	nextItem: number,
+	-- Items on their way to each inventory (pos key), to predict what it will hold.
+	incoming: { [number]: { [number]: Item } },
+	-- Transporters the tick's route searches may still visit before waiting items and pulls stop
+	-- looking (Transmitters/Transport.SEARCH_BUDGET a tick).
+	searchBudget: number,
+	-- Transport ops since the last takeTransport (adds carry startTime 0: the caller sets it).
+	ops: { TransportOp },
+	-- Transmitters and tanks whose record may have changed.
+	dirtyNodes: { [number]: boolean },
+	dirtyTanks: { [number]: boolean },
+	-- mB of water lost with broken pipes and tanks (for conservation checks).
+	lost: number,
+}
+
+-- (Types only; a module must still return something.)
+return table.freeze({})

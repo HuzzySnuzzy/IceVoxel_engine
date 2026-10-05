@@ -2,7 +2,8 @@
 --[[
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
-	out).
+	out), and Mekanism's for its transmitters, fluid tanks and Configurator, adapted to the
+	game's materials (see "Mekanism pipes and buckets" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -133,6 +134,40 @@ end
 shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)
 shape({ "XXX", "X#X", "XXX" }, { X = "IronNugget", ["#"] = "Torch" }, "Lantern")
 shape({ "##", "##" }, { ["#"] = "GlowstoneDust" }, "Glowstone")
+
+--[[
+	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
+	osmium, control circuits and alloys, which this game does not have, so they are adapted:
+	  * Basic Logistical Transporter x 8: iron, glass, iron in a row (Mekanism: steel, a basic
+	    control circuit, steel).
+	  * Basic Mechanical Pipe x 8: iron, a bucket, iron (Mekanism: steel, a bucket, steel).
+	  * Restrictive Transporter x 2: a basic transporter between two iron ingots (Mekanism: between
+	    two iron bars).
+	  * Upgrades, Mekanism's shape: 8 transporters or pipes around an alloy make 8 of the next
+	    tier. A gold ingot stands for the infused alloy (Advanced), a diamond for the reinforced
+	    alloy (Elite) and an emerald for the atomic alloy (Ultimate).
+	  * Basic Fluid Tank: iron at the corners, glass at the sides and an empty middle (Mekanism's
+	    needs a control circuit and alloys). The next tiers put the tank below them in the middle
+	    of 4 gold ingots / diamonds / emeralds, standing for the alloys again.
+	  * Configurator: glowstone dust over a stick between two iron ingots, a stick below, after
+	    Mekanism's " L ", "AEA", " S " (lapis lazuli over an energy tablet between two infused
+	    alloys, a stick below).
+]]
+shape({ "I I", " I " }, { I = "IronIngot" }, "Bucket")
+shape({ "IGI" }, { I = "IronIngot", G = "Glass" }, "BasicLogisticalTransporter", 8)
+shape({ "IBI" }, { I = "IronIngot", B = "Bucket" }, "BasicMechanicalPipe", 8)
+shape({ "ITI" }, { I = "IronIngot", T = "BasicLogisticalTransporter" }, "RestrictiveTransporter", 2)
+shape({ "IGI", "G G", "IGI" }, { I = "IronIngot", G = "Glass" }, "BasicFluidTank")
+local TIER_NAMES = { "Basic", "Advanced", "Elite", "Ultimate" }
+local ALLOYS = { "GoldIngot", "Diamond", "Emerald" }
+for tier = 2, 4 do
+	local lower, name, alloy = TIER_NAMES[tier - 1], TIER_NAMES[tier], ALLOYS[tier - 1]
+	for _, kind in { "LogisticalTransporter", "MechanicalPipe" } do
+		shape({ "TTT", "TAT", "TTT" }, { T = lower .. kind, A = alloy }, name .. kind, 8)
+	end
+	shape({ " A ", "ATA", " A " }, { T = lower .. "FluidTank", A = alloy }, name .. "FluidTank")
+end
+shape({ " G ", "ISI", " S " }, { G = "GlowstoneDust", I = "IronIngot", S = "Stick" }, "Configurator")
 
 --[[ Smelting ]]
 

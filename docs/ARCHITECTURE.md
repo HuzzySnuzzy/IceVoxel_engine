@@ -826,6 +826,189 @@ recipe in the grid, its result in the result slot, nothing carried and every ite
 The client sends it through `ClientInventory.apply`, so the server checks it like any click, then
 closes the view. A fuzz test plans and applies hundreds of random transfers.
 
+## Mekanism pipes (`Transmitters/`)
+
+Mekanism 10's transmitters (Minecraft 1.20.1) for what the game has: Logistical Transporters and
+the Restrictive Transporter (items), Mechanical Pipes (water), Fluid Tanks, the Configurator and
+Minecraft's buckets. Universal Cables, Pressurized Tubes and Thermodynamic Conductors are out of
+scope: there is no energy, gas or heat.
+
+**Blocks and items.** BlockList gives transmitters `transmitter = { kind = "item" | "fluid", tier,
+restrictive? }` and tanks `tank = { tier, capacity }`; the numbers per tier are Mekanism's
+TransporterTier, PipeTier and FluidTankTier (`Transmitters/Tiers`):
+
+| Tier     | Transporter pull | Speed (progress / tick) | Route cost | Pipe capacity (mB) | Pipe pull (mB / tick) | Tank (mB) | Tank output (mB / tick) |
+| -------- | ---------------- | ----------------------- | ---------- | ------------------ | --------------------- | --------- | ----------------------- |
+| Basic    | 1                | 5                       | 10         | 2 000              | 250                   | 32 000    | 1 000                   |
+| Advanced | 16               | 10                      | 5          | 8 000              | 1 000                 | 64 000    | 4 000                   |
+| Elite    | 32               | 20                      | 2.5        | 32 000             | 8 000                 | 128 000   | 16 000                  |
+| Ultimate | 64               | 50                      | 1          | 128 000            | 32 000                | 256 000   | 64 000                  |
+
+100 progress is one block, transporters pull every 10 ticks, and a bucket is 1 000 mB. A route
+costs the sum of the transporters it enters (Mekanism's getCost: the Ultimate speed over the
+tier's, `Transmitters.pathCost`), and 1 000 for a Restrictive Transporter, so routes take faster
+transporters and avoid restrictive ones unless there is no other way.
+- Transmitters are shaped blocks. Their `shape` is Mekanism's 8-pixel core: a glass cube, then
+  twelve frame edges in the tier's colour (Basic dark grey, Advanced red, Elite dark aqua,
+  Ultimate purple; the Restrictive Transporter orange, pipes with bluish glass). Shape boxes may
+  have their own `transparency` (glass 0.5, frames 0). The arms depend on the neighbours and the
+  side modes, so the client draws them; `icon` (the core's boxes, then two arms) is the item model.
+- They are aimed at over the whole cell (bounds covering the cell give no outline), which makes
+  choosing a side easy. They are not `solid` (the hull only knows full cubes: players walk through
+  them, as through lanterns) but `obstruct`, so none is placed inside a player and falling sand
+  lands on them. Hardness 1, pickaxe, metal sounds; they drop themselves.
+- Fluid tanks are solid shaped cubes (steel plates, posts in the tier's colour, glass sides) and
+  sturdy (`sturdy = true` makes a solid shaped block hold torches). Breaking one loses its water.
+- Items: the Configurator (1 per slot), Bucket (16) and Water Bucket (1).
+
+**Sides and modes.** Sides are Minecraft's Direction ordinal: 0 Down, 1 Up, 2 North (-Z), 3 South
+(+Z), 4 West (-X), 5 East (+X); side s of a block at p faces p + offset(s), and opposite(s) is
+s xor 1. Each side of a transmitter has Mekanism's ConnectionType, which the Configurator cycles
+NORMAL -> PUSH -> PULL -> NONE: NORMAL and PUSH may hand items or water to an acceptor
+(`outputs`), PULL takes from it (`pulls`) and never gives, NONE cuts the side. The six modes pack
+into 16 bits, 2 a side, side 0 lowest (0 = all NORMAL, at most 4095), which is how they are stored
+and sent. Transporters may be coloured with Minecraft's 16 dyes (1..16, 0 none; sneaking with the
+Configurator steps through them and back to none).
+
+**Connections** (`Transmitters.connects`, `Transmitters.connections`: Mekanism's
+canConnectMutual), shared by the client's arms and the server's networks:
+- two transmitters connect when they are the same kind (any tiers), neither facing side is NONE
+  and, for transporters, their colours are compatible (either is uncoloured, or both are the
+  same; pipes have no colour);
+- a transmitter connects to an acceptor of its kind (a block with `container` slots for items, a
+  fluid tank for water) unless its side is NONE;
+- nothing else connects. `connections` answers all six sides of a position as two bit masks
+  (transmitters, acceptors) from block and state lookups, so both sides get the same answer.
+An item pulled into a transporter takes its colour and only enters transporters that are
+uncoloured or of that colour (`Transmitters.carries`, Mekanism's
+TransporterStack.canInsertToTransporter): an uncoloured item stays off coloured transporters even
+where they connect to uncoloured ones.
+
+**Sided inventories** (`Transmitters/Inventories`). An inventory is reached through its own side
+facing the transmitter (a transporter on a furnace reaches its face Up). A furnace is Minecraft's
+AbstractFurnaceBlockEntity: Up reaches the input, the sides the fuel, Down the output and then the
+fuel; the input takes anything, the fuel only fuel and the output nothing; anything may be taken
+out except the fuel through Down (only buckets). A chest gives every slot to every face. `insert`
+and `room` top up stacks of the same item and wear first, then fill empty slots, up to the item's
+max stack (Forge's insertItemStacked, as Mekanism inserts); `available` lists the item types a
+face gives with their totals (Mekanism's TransitRequest) and `extract` takes up to n of one type,
+a stack at most. They are pure (new slot tables out, inputs untouched), so the server simulates a
+delivery with the same calls it applies. A pipe's fill travels as a byte (`fillLevel`: 0 empty,
+at least 1 with anything in it, 255 full).
+
+### On the server (`server/Transmitters/`, `Players/ItemUse`)
+
+`Transmitters/TransmitterWorld` holds the pipes' state and is pure (the tests run it on a table of
+blocks); `Transmitters/Transmitters` runs it from the server script's Heartbeat, after ServerNet's
+flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
+- **State.** A node per transmitter (packed side modes, colour, a transporter's pull timer), a tank
+  record per fluid tank, and the items in transit; all in memory. The server script chains
+  `blockChanged` onto WorldServer.onChanged, so placements, breaks and Api changes all come
+  through. Each node keeps two masks, `links` (sides joined to transmitters) and `acceptors`
+  (sides joined to inventories or tanks), from `Transmitters.connections`, recomputed when it, its
+  modes or colour, or a neighbouring block change. Blocks are read with peekBlock, falling back to
+  the chunk's edit list: transmitters, tanks, chests and furnaces only come from edits, so pipes
+  work where no player is and never generate terrain.
+- **Networks** (pipes only). A pipe whose links change queues itself and the pipes it joined or
+  left; queued pipes are flood filled, at most 4096 visited per tick, the rest carried over while
+  the old networks keep working. A finished fill becomes one network that takes from each old
+  network the share of its buffer its pipes held (by capacity), so merging adds buffers and
+  splitting shares them; a broken pipe loses its share, a broken tank its water.
+- **Items** (`Transport`, Mekanism's LogisticalTransporterBase / TransporterPathfinder):
+  - Pulling: a transporter with PULL sides on inventories pulls through each, then waits 10 ticks
+    (3 when nothing was there, min(40, e^failures) when items found nowhere to go). The item types
+    the inventory's facing side gives (`Transmitters.available`) are tried in order; the first
+    with a destination sends up to the tier's pull amount, never more than fits there or a stack.
+    Destinations are found before anything is taken, and the item takes the puller's colour.
+  - Routes: Dijkstra from the item's transporter, adding `pathCost` for each transporter entered
+    and only entering ones that `carries` its colour. The cheapest inventory (then fewest steps)
+    on a NORMAL or PUSH side that takes at least one item wins. Room counts the items already on
+    their way there (Mekanism's TransporterManager). The source inventory is excluded except as
+    "home" (reachable through any joined side); with neither, the item waits in the middle of its
+    transporter and looks again every 20 ticks. A search visits at most 4096 transporters, and
+    once a tick's searches have visited 4096, waiting items and pulls carry on the next tick
+    (moving items always re-route), so big networks full of waiting items cannot stall the server.
+  - Moving: progress grows by the transporter's speed each tick (100 = a block). Halfway, the way
+    ahead is checked (and re-routed if closed); at 100 the item enters the next transporter, or the
+    inventory: what fits goes in (viewers get a snapshot, a furnace wakes) and the rest re-routes.
+    A broken transporter drops its items (Entities.dropBlock).
+- **Water** (`Fluids`): each tick, every PULL side on a tank takes up to the pipe's pull amount
+  into the buffer (one fluid, up to the pipes' capacity); then the buffer is split evenly over the
+  tanks on NORMAL / PUSH sides with room, each tank once, smallest room first.
+- **Replication.**
+  - Transmitters / Tanks records: a chunk's non-default ones go to a player right after its edit
+    list (ServerNet's `chunksSent` rule). Changes go each frame to players within 192 blocks
+    sideways (to every player not yet seen in the world), compared with what was last sent; pipe
+    fills and tank contents go at most every 5 ticks.
+  - Transport: items are tracked per player within 64 blocks (gone beyond 72, checked every
+    10 ticks). An `add` is sent when an item enters, is re-routed or waits, changes speed, or has
+    gone 128 blocks along a route longer than 255 sides; a `remove` when it arrives, drops or
+    leaves the player's range. `startTime` is the server time of the tick that produced it.
+- **Use** (`Players/ItemUse`, rules in `Transmitters/UseRules`). UseItem from a living player, in
+  reach, at most 10 a second, with the item in hand:
+  - Configurator: cycles the clicked side (a same-kind transmitter beyond it matches, so a cut
+    joint is joined again from either end; Mekanism changes only the clicked side), or sneaking on
+    a transporter its colour; Mekanism's message in the chat and a click sound.
+  - Bucket: a water source becomes air (Minecraft's createFilledResult: a stack keeps the rest and
+    the water bucket goes into the inventory, else is thrown; creative keeps its bucket and gets
+    one water bucket at most). A tank with 1000 mB loses it (creative gets nothing, as in
+    Mekanism).
+  - Water Bucket: a tank with room for 1000 mB, else a water source in the clicked block if
+    replaceable or the block beyond its side; survival gets the empty bucket back.
+  - Sneaking skips tanks. Nothing is predicted: the snapshot, edits and records bring the results.
+
+### Mekanism pipes on the client (`Rendering/TransmitterRenderer`, `Rendering/TransmitterModel`)
+
+The terrain draws each transmitter's core and each tank's frame (their `shape`; PartPool gives
+every shape box its own transparency). Everything that depends on neighbours or on the server is
+drawn by TransmitterRenderer within 64 blocks of the camera, from boxes TransmitterModel computes
+(pure, tested; pixels from the cell's centre):
+- arms on every side `Transmitters.connections` connects: glass from the core's frame (4 px)
+  out, ending in a 7 x 7 collar between transmitters (two collars make a joint) or a 10 x 10
+  plate on an acceptor; a Neon band on an acceptor's arm whose side is PUSH (orange) or PULL
+  (blue) (between transmitters those modes act as NORMAL and Mekanism draws them so); a coloured
+  transporter's tint cube and dyed arm glass;
+- water: a pipe's fill byte (its network's) as a level in the core and sideways arms, the arm
+  down full whenever there is water, the arm up only from 95 %; a tank's amount / capacity from
+  its bottom plate.
+Positions come from edits only: a chunk's transmitters and tanks are read from its edit list when
+its data is attached and followed through block changes (ClientWorld `onChunkLoaded`,
+`knownEdits`, `onBlockChanged`). Records are kept while a chunk's edit list is known or
+requested, or its data is loaded (the server sends changes to every player near, and the edit
+list's records again with it), and dropped when neither is; an all-zero record is the default
+state. Any change of a position's block resets its state (the server starts a new transmitter in
+the default state and sends no record); when this player's own predicted break took it
+(`onBlockChanged`'s `predicted`), it is kept 5 s and comes back if the server refuses the break.
+Cells are decorated only while their chunk is shown (the streamer's node), redrawn only when
+they, a neighbour or their state change (at most 64 a frame, and only when the boxes' signature
+changed), from pooled parts (a template per kind and colour; a redraw keeps the cell's parts of
+the same look, so a pipe's changing water level only resizes them), at most 4000 parts.
+
+Items in transit: `route` turns an Add (block, progress, speed, server start time, path) into
+per-block exit times, each block crossed at its transporter's speed; `position` follows it every
+frame from workspace:GetServerTimeNow() (progress 0 the entry face, 50 the centre, 100 the exit
+face; turns at centres). The way into the first block is not sent: an Add for a known item takes
+it from its previous route (`entryOf`), a newly pulled one from the transporter's one PULL side on
+an inventory (`pullEntry`), else it comes in straight. Models (ItemModels, 0.35 blocks, turning
+slowly on the client's clock) are pooled per item, at most 256, and moved with one BulkMoveTo per
+frame. Remove(arrived) lets an item finish its way (at most 1 s), dropped / gone remove it at
+once, an item whose way ended goes after 0.5 s, and one out of range for 60 s is forgotten.
+
+Interaction: items that are no block send `UseItem`, unpredicted, once per press, and only where
+the server would act. The Configurator (on transmitters; sneaking only on transporters) sends the
+side `TransmitterModel.pickSide` finds: the arm the ray hits, else the core face it enters, else
+the cell face it hit; sneaking is a flag. The empty Bucket casts its own ray that also stops at
+water sources (Minecraft's Fluid.SOURCE_ONLY) and sends that water cell or a tank (not when
+sneaking); the Water Bucket sends a tank (not when sneaking) or the clicked block when the cell
+the server would fill is replaceable. A block with a menu still opens first unless sneaking.
+
+WAILA asks TransmitterRenderer (`state`, `tank`, `connections`, `itemsIn`, `network`: a cached
+walk of the connected transmitters) and BlockInteraction.targetSide: "Side: Pull", a
+transporter's colour and items, "Water: ~n / m mB" for a pipe (its network's fill byte times the
+capacity of the pipes the client sees connected), "Water: n / m mB" for a tank; with F3 the
+tier's numbers, packed modes and each side's, colour and fill byte, connected sides and the
+network size. Item icons draw a block's `icon` (a transmitter's core and two arms) box by box.
+
 ## Item entities (`Entities/`)
 
 Dropped items are Minecraft's ItemEntity:
@@ -956,12 +1139,16 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Mine`          | started / stopped mining a block              |
 | client → server | `Inventory`     | a numbered inventory action                   |
 | client → server | `Use`           | right click on a block with a menu            |
+| client → server | `UseItem`       | right click on a block with the Configurator or a bucket: position, side, sneaking |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
 | server → client | `Inventory`     | inventory + window container after action `ack` |
 | server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
 | server → client | `Notice`        | a message for the chat                        |
+| server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill |
+| server → client | `Tanks`         | fluid tank contents (fluid, mB)               |
+| server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |
 | server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
@@ -1001,6 +1188,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   damage in survival (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
   `TakeDamage`; at most 4 reports a second). It also plays the hurt, death and hurting-landing
   sounds to everyone near (see Sounds).
+- `Transmitters/`: Mekanism pipes (see Mekanism pipes); `Players/ItemUse`: the Configurator and
+  buckets (UseItem).
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
@@ -1045,5 +1234,11 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   `ItemList` (ids from 4096).
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
   inventory action with them and must reach exactly the server's result.
+- Sides are Minecraft's Direction ordinal everywhere in the pipes (0 Down .. 5 East,
+  `Transmitters.SIDES`); transmitter modes, colours, network buffers and tank contents live in
+  memory, like chests.
+- Transmitters, fluid tanks, chests and furnaces only come from edits: the pipes read unloaded
+  chunks' edit lists to find them. Generating any of them would need Transmitters/Transmitters to
+  learn about it.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.

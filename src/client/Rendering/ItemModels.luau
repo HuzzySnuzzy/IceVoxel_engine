@@ -8,7 +8,9 @@
 	               ViewportFrames do not draw SurfaceGuis. Shaped blocks (torches, lanterns) are
 	               their shape's boxes, as the terrain draws them (glowing boxes Neon), centred on
 	               the shape; they count as items rather than blocks (`isBlock`), so icons show
-	               them from the front and they drop like items.
+	               them from the front and they drop like items. A block's `icon` boxes replace
+	               its shape when it has them (a Mekanism transmitter: its core and two arms),
+	               each in its own colour, material and transparency.
 	  other items  their ItemList boxes (pixels, 1/16 of the size), in the item's colour and material,
 	               turned by each box's `rotation`, as balls or cylinders by `shape`, and the whole
 	               model turned by the item's `tilt` (tools and sticks lie diagonally).
@@ -24,7 +26,8 @@
 	In a hand: `handSize` / `handPivot` place a model in a character's right hand (Player/HeldItems,
 	the inventory's character preview). Tools and sticks are held like Minecraft's "handheld" items:
 	upright (their tilt undone), held at the handle, pointing forward and up with the blade forward.
-	Torches are held the same way, by the stick, flame up. Everything else keeps the block pose.
+	Torches and the Configurator are held the same way, by the stick or the grip. Everything else
+	keeps the block pose.
 	`holdPivot` does the same for any pose (first person).
 ]]
 
@@ -52,7 +55,7 @@ local HANDHELD_PITCH = math.rad(45)
 -- Where the fist holds a handheld item: this many pixels above the bottom of its model.
 local GRIP_FROM_END = 3.5
 -- Non-tool items held like tools (by the end, pointing forward).
-local HANDHELD_NAMES: { [string]: boolean } = { Stick = true, Torch = true }
+local HANDHELD_NAMES: { [string]: boolean } = { Stick = true, Torch = true, Configurator = true }
 
 local ItemModels = {}
 
@@ -91,13 +94,25 @@ local function shapeCentre(block: number): Vector3
 	)
 end
 
--- A shaped block (torch, lantern): its boxes as the terrain draws them, centred on the shape.
+--[[
+	A shaped block (torch, lantern): its boxes as the terrain draws them, centred on the shape.
+	`shape` may be the block's `icon`, which starts with the shape's boxes and adds its own: every
+	box takes its own colour, material and transparency over its template's.
+]]
 local function shapePrototype(model: Model, block: number, shape: { Blocks.ShapeBox }, size: number)
-	local appearance = Blocks.get(block).appearance
+	local def = Blocks.get(block)
+	local appearance = def.appearance
+	local own = def.shape
+	local boxes = if own then #own else 1
 	local pixel = size / 16
 	local centre = shapeCentre(block)
 	for i, box in shape do
-		local part = PartPool.makeTemplate(appearance, i)
+		-- (Boxes past the shape's take the first box's template: no textures, no light.)
+		local part = PartPool.makeTemplate(appearance, if i <= boxes then i else 1)
+		part.Material = if box.glow then Enum.Material.Neon else material(box.material or def.material)
+		local c = box.color or def.color
+		part.Color = Color3.fromRGB(c[1], c[2], c[3])
+		part.Transparency = box.transparency or def.transparency
 		inert(part)
 		part.Name = `Box{i}`
 		part.Size = Vector3.new(box.size[1], box.size[2], box.size[3]) * pixel
@@ -175,7 +190,8 @@ local function prototype(item: number, size: number): Model
 	local model = Instance.new("Model")
 	model.Name = Items.displayName(item)
 	local def = Items.get(item)
-	local shape = if def and def.block then Blocks.get(def.block).shape else nil
+	local blockDef = if def and def.block then Blocks.get(def.block) else nil
+	local shape = if blockDef then blockDef.icon or blockDef.shape else nil
 	if def and def.block and shape then
 		shapePrototype(model, def.block, shape, size)
 	elseif def and def.block then

@@ -18,6 +18,9 @@
 	                   inventories, chests, furnaces and crafting tables, tools (mining speed, drops,
 	                   wear), safe spawning, map teleports, waypoints, keeping chunks around players
 	                   generated
+	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
+	                   transporters, water in pipes, replication), and the Configurator and buckets
+	                   (Players/ItemUse)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,6 +47,8 @@ local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
 local WaypointStore = require(Server.Players.WaypointStore)
+local Transmitters = require(Server.Transmitters.Transmitters)
+local ItemUse = require(Server.Players.ItemUse)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -56,6 +61,9 @@ world.onChanged = function(x, y, z, old, new)
 	-- A chest or furnace replaced by anything (breaking, the Api, block updates) drops what it
 	-- holds, and any block with a window closes it for its users.
 	Inventories.blockChanged(x, y, z, old, new)
+	-- Transmitters and fluid tanks come and go (a transporter's items drop), and pipes notice the
+	-- chests, furnaces and tanks around them.
+	Transmitters.blockChanged(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
@@ -75,14 +83,18 @@ net.setRules({
 	mayRemoveContainer = Inventories.mayRemoveContainer,
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
+	chunksSent = Transmitters.sendChunks,
 })
+-- Pipes after inventories and items (they fill chests and drop items); item use after the pipes.
+Transmitters.start(net, world)
+ItemUse.start(net, world)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
 Simulation.start(world)
 Api._ready(world, ticker)
 
--- Fixed rate block updates, then one replication message per frame.
+-- Fixed rate block updates, then one replication message per frame, then the pipes.
 local tickLength = 1 / Config.Server.TickRate
 local accumulator = 0
 RunService.Heartbeat:Connect(function(dt)
@@ -92,4 +104,6 @@ RunService.Heartbeat:Connect(function(dt)
 		ticker:step()
 	end
 	net.flush()
+	-- The pipes after the edits: a client knows a transmitter's block before its state.
+	Transmitters.update(dt)
 end)

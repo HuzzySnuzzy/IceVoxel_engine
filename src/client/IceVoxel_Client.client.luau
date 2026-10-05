@@ -13,6 +13,9 @@
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
 	  Entities/EntityRenderer    dropped items
+	  Rendering/TransmitterRenderer  Mekanism pipes: arms, water in pipes and tanks, items moving
+	                             through transporters (the server's Transmitters / Tanks /
+	                             Transport messages)
 	  Net/Notices                server messages in the chat (/gamemode answers)
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
@@ -31,6 +34,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local Coords = require(Shared.World.Coords)
 
 local Client = script.Parent
 local ClientWorld = require(Client.World.ClientWorld)
@@ -43,6 +47,7 @@ local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
+local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
 local Notices = require(Client.Net.Notices)
 local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
@@ -76,6 +81,11 @@ ClientInventory.start()
 Screens.start()
 Notices.start()
 EntityRenderer.start(world)
+-- (Pipes are decorated only where their chunk is on screen.)
+TransmitterRenderer.start(world, function(cx: number, cz: number): boolean
+	local node = streamer.nodes[Coords.chunkKey(cx, cz)]
+	return node ~= nil and node.shown
+end)
 MovementController.start(world, streamer)
 CharacterAnimator.start()
 HeldItems.start()

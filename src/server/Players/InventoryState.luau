@@ -21,6 +21,9 @@
 	(Menu.updateCraft), so every snapshot carries the right one.
 
 	Tools wear through `wearHeld` (the server's mining calls it); `heldStack` is what is in hand.
+	Using an item on a block (a bucket filling or emptying: Players/ItemUse) replaces what is in
+	hand with `setHeld` and hands stacks over with `give` (Inventory.add; the rest comes back);
+	`has` is Minecraft's Inventory.contains.
 
 	Functions that take stacks out of the world (throws, close leftovers, deaths) return them; the
 	caller turns them into item entities.
@@ -74,6 +77,9 @@ export type InventoryState = {
 	removeContainer: (self: InventoryState, x: number, y: number, z: number) -> ({ Stack }, { Leftovers }),
 	pickup: (self: InventoryState, key: any, stack: Stack) -> number,
 	heldStack: (self: InventoryState, key: any) -> Stack?,
+	setHeld: (self: InventoryState, key: any, stack: Stack?) -> (),
+	give: (self: InventoryState, key: any, stack: Stack) -> Stack?,
+	has: (self: InventoryState, key: any, item: number) -> boolean,
 	wearHeld: (self: InventoryState, key: any, amount: number) -> boolean,
 	die: (self: InventoryState, key: any, keepInventory: boolean) -> { Stack },
 	markDirty: (self: InventoryState, key: any) -> (),
@@ -359,6 +365,68 @@ function InventoryState.heldStack(self: InventoryState, key: any): Stack?
 		return nil
 	end
 	return held
+end
+
+--[[
+	Replaces the stack in the player's hand (the selected hotbar slot) with `stack` (nil or a
+	count below 1 empties it): a bucket filled or emptied (Players/ItemUse). A snapshot is due.
+]]
+function InventoryState.setHeld(self: InventoryState, key: any, stack: Stack?)
+	local player = self.players[key]
+	if player == nil then
+		return
+	end
+	local inventory = player.window.inventory
+	local count = if stack then stack.count else 0
+	if
+		stack
+		and type(count) == "number"
+		and count >= 1
+		and count == math.floor(count)
+		and Items.isValid(stack.item)
+	then
+		inventory.slots[inventory.selected] = { item = stack.item, count = count, damage = stack.damage }
+	else
+		inventory.slots[inventory.selected] = nil
+	end
+	player.dirty = true
+end
+
+--[[
+	Puts `stack` into the player's inventory (Minecraft's Inventory.add, Menu.add: the held slot,
+	then stacks of the same item, then empty slots) and returns what did not fit (nil: all of it
+	went in; the whole stack for a player who is not there). `stack` itself is not changed.
+]]
+function InventoryState.give(self: InventoryState, key: any, stack: Stack): Stack?
+	local player = self.players[key]
+	if player == nil then
+		return { item = stack.item, count = stack.count, damage = stack.damage }
+	end
+	local left = Menu.add(player.window.inventory, stack)
+	player.dirty = true
+	return left
+end
+
+-- Does the player have `item` in their inventory or armor (Minecraft's Inventory.contains)?
+function InventoryState.has(self: InventoryState, key: any, item: number): boolean
+	local player = self.players[key]
+	if player == nil then
+		return false
+	end
+	local inventory = player.window.inventory
+	for slot = 1, Types.INVENTORY_SIZE do
+		local stack = inventory.slots[slot]
+		if stack and stack.item == item and stack.count >= 1 then
+			return true
+		end
+	end
+	for slot = 1, Types.ARMOR_SIZE do
+		local stack = inventory.armor[slot]
+		if stack and stack.item == item and stack.count >= 1 then
+			return true
+		end
+	end
+	return false
 end
 
 --[[

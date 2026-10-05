@@ -391,6 +391,39 @@ SoundList.EVENTS = {
 		source = "ambient",
 		side = "client",
 	},
+
+	-- Buckets (BucketItem): filling one at the player (a players sound in Minecraft), emptying one
+	-- where the water goes (a blocks sound); with a fluid tank, at the tank. Both are splashes, a
+	-- light high one in, a heavier low one out.
+	{
+		name = "item.bucket.fill",
+		id = SPLASH,
+		volume = 0.5,
+		pitch = 1.35,
+		pitchVariance = 0.1,
+		source = "players",
+		side = "server",
+	},
+	{
+		name = "item.bucket.empty",
+		id = SPLASH,
+		volume = 0.6,
+		pitch = 0.8,
+		pitchVariance = 0.1,
+		source = "blocks",
+		side = "server",
+	},
+	-- The Configurator changing a transmitter's side or colour: a click.
+	{
+		name = "item.configurator.click",
+		id = TICK,
+		volume = 0.5,
+		pitch = 0.8,
+		pitchVariance = 0.05,
+		duration = 0.25,
+		source = "players",
+		side = "server",
+	},
 } :: { EventSpec }
 
 -- The lid sounds of blocks with a menu (Blocks `menu`). Furnaces and crafting tables have none.

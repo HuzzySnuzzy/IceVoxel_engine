@@ -20,8 +20,9 @@
 
 	Shaped blocks (BlockList `shape`: torches, lanterns) are drawn one part per shape box, box `i`
 	from its own template (`acquire(appearance, far, plain, i)`; box 0 is the whole cube). They take
-	the box's colour and material (glowing boxes are Neon), don't collide, can't be raycast (the
-	camera ignores them) and cast no shadow.
+	the box's colour, material (glowing boxes are Neon) and transparency (a transmitter's glass is
+	see-through, its frame is not), don't collide, can't be raycast (the camera ignores them) and
+	cast no shadow.
 
 	Light: the near template of a light source's glowing box (its cube for glowstone) carries one
 	PointLight: range `light` x LIGHT_RANGE blocks (at most 60 studs), a warm colour from the block
@@ -150,6 +151,7 @@ local function makeTemplate(
 		part.Name = `Voxel{box}`
 		part.Material = if shapeBox.glow then Enum.Material.Neon else material(shapeBox.material or info.material)
 		part.Color = colour(shapeBox.color or info.color)
+		part.Transparency = shapeBox.transparency or info.transparency
 	end
 
 	if plain then

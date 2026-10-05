@@ -17,7 +17,8 @@
 	  sturdy        false: torches and lanterns can't hang on it, though it is a solid cube
 	                (Minecraft's support shape: leaves have none, and a chest's and a cactus's
 	                faces stop short of the cell's). Default true for solid, drawn blocks without a
-	                `shape` (Blocks.isSturdy).
+	                `shape` (Blocks.isSturdy); `true` makes a solid shaped block sturdy (a fluid
+	                tank).
 	  replaceable   Placing a block may overwrite it (air, fluids). Default false.
 	  breakable     Players can break it. Default true.
 	  placeable     Is an item players can hold and place (creative inventory, drops). Default true
@@ -68,7 +69,8 @@
 	                otherwise. At most 15 boxes.
 	  bounds        { min = { x, y, z }, max = { x, y, z } } in pixels 0..16: the outline players
 	                aim at and see highlighted (Minecraft's VoxelShape). Default: the box around
-	                the shape, or the whole cell.
+	                the shape, or the whole cell. Bounds that cover the whole cell are aimed at as
+	                a full block (no outline: transmitters, fluid tanks).
 	  obstructs     Has a collision box in Minecraft though it is not `solid` (lanterns): its
 	                `bounds` keep it from being placed inside a player (Minecraft's
 	                BlockItem.canPlace) and falling sand lands on it (Blocks.obstruction). Players
@@ -86,6 +88,18 @@
 	  brokenByFluid Flowing water washes it away and it drops (torches: Minecraft's canHoldFluid).
 	                Players still can't place blocks into it.
 
+	Mekanism pipes (Shared/Transmitters):
+	  transmitter   { kind = "item" | "fluid", tier = 1..4, restrictive = true? }: a Logistical
+	                Transporter ("item"), the Restrictive Transporter (`restrictive`) or a Mechanical
+	                Pipe ("fluid") of that tier (1 Basic .. 4 Ultimate; the numbers are in
+	                Transmitters/Tiers). Its `shape` is the core; the client draws the arms towards
+	                what it connects to.
+	  tank          { tier = 1..4, capacity = mB }: a Fluid Tank (Transmitters.isTank).
+	  icon          Boxes the item's model shows instead of `shape` (same format), starting with
+	                the shape's own boxes in the same order: a transmitter's core plus two arms.
+	  Shape boxes may also have `transparency` (0..1, default the block's): a transmitter's glass
+	  is see-through, its frame is not.
+
 	Directions are Minecraft's: North = -Z, South = +Z, West = -X, East = +X.
 
 	Textures (optional, see "Block textures" in the README):
@@ -97,6 +111,9 @@
 	                detail parts, e.g. a grass top over a dirt texture. Costs one instance per face.
 ]]
 
+-- (Pure data that requires nothing, so Blocks never depends on the Transmitters logic.)
+local Tiers = require(script.Parent.Parent.Transmitters.Tiers)
+
 -- One box of a shaped block (see `shape` above).
 export type ShapeBox = {
 	size: { number },
@@ -105,9 +122,14 @@ export type ShapeBox = {
 	color: { number }?,
 	material: string?,
 	glow: boolean?,
+	transparency: number?,
 }
 
 export type Bounds = { min: { number }, max: { number } }
+
+-- A transmitter (`transmitter`) and a fluid tank (`tank`); see Shared/Transmitters.
+export type TransmitterSpec = { kind: string, tier: number, restrictive: boolean? }
+export type TankSpec = { tier: number, capacity: number }
 
 export type BlockSpec = {
 	name: string,
@@ -145,6 +167,9 @@ export type BlockSpec = {
 	support: string?,
 	item: string?,
 	brokenByFluid: boolean?,
+	transmitter: TransmitterSpec?,
+	tank: TankSpec?,
+	icon: { ShapeBox }?,
 }
 
 local list: { BlockSpec } = {
@@ -840,5 +865,138 @@ table.insert(list, {
 	item = "Lantern",
 	behaviour = "Attached",
 })
+
+--[[
+	Mekanism's transmitters and fluid tanks (Shared/Transmitters; the tier numbers are in
+	Transmitters/Tiers): Logistical Transporters (items), the Restrictive Transporter and
+	Mechanical Pipes (water), Basic to Ultimate, and Basic to Ultimate Fluid Tanks.
+
+	A transmitter's `shape` is Mekanism's 8 x 8 x 8 pixel core: a glass cube in a frame of twelve
+	edges in its tier's colour (Basic dark grey, Advanced red, Elite dark aqua, Ultimate purple;
+	the Restrictive Transporter orange; Mechanical Pipes have bluish grey glass). The arms towards
+	what it connects to depend on the neighbours and the configured sides, so the client draws
+	them over the block (Rendering/TransmitterRenderer), as it draws the items and water inside.
+	Transmitters are aimed at over their whole cell (`bounds`), which makes choosing a side with
+	the Configurator easy. They are not `solid`, as lanterns: the movement hull only knows full
+	cubes, so players walk through them (Mekanism's have a collision box), but they `obstruct`, so
+	none is placed inside a player and falling sand lands on them. They break fast (hardness 1,
+	Mekanism's) and drop themselves.
+
+	Fluid tanks are solid cubes: steel plates at the top and bottom, posts in the tier's colour at
+	the corners and glass sides, through which the client's water shows. What a tank holds is lost
+	when it is broken (items carry no data).
+]]
+local TIER_NAMES = { "Basic", "Advanced", "Elite", "Ultimate" }
+local FULL_BOUNDS: Bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } }
+-- Glass of transmitters and tanks: its see-through look (the frames are opaque).
+local GLASS_TRANSPARENCY = 0.5
+local TRANSPORTER_GLASS = { 206, 222, 230 }
+local PIPE_GLASS = { 124, 148, 172 }
+local TANK_GLASS = { 190, 214, 226 }
+local RESTRICTIVE = { 226, 128, 40 }
+local STEEL = { 112, 116, 124 }
+
+-- An opaque metal box in `colour` (frames).
+local function metal(size: { number }, offset: { number }, colour: { number }): ShapeBox
+	return { size = size, offset = offset, color = colour, material = "Metal", transparency = 0 }
+end
+
+local function glass(size: { number }, offset: { number }, colour: { number }): ShapeBox
+	return { size = size, offset = offset, color = colour, material = "Glass", transparency = GLASS_TRANSPARENCY }
+end
+
+--[[
+	A transmitter's core, 8 pixels wide: the glass cube first, then the twelve frame edges, a pixel
+	thick. The X edges run the whole length; the Y and Z edges fit between them, so no two boxes
+	share a face.
+]]
+local function transmitterCore(frame: { number }, glassColour: { number }): { ShapeBox }
+	local boxes: { ShapeBox } = { glass({ 7, 7, 7 }, { 0, 0, 0 }, glassColour) }
+	for _, a in { -3.5, 3.5 } do
+		for _, b in { -3.5, 3.5 } do
+			table.insert(boxes, metal({ 8, 1, 1 }, { 0, a, b }, frame))
+			table.insert(boxes, metal({ 1, 6, 1 }, { a, 0, b }, frame))
+			table.insert(boxes, metal({ 1, 1, 6 }, { a, b, 0 }, frame))
+		end
+	end
+	return boxes
+end
+
+-- The item's model: the core with an arm to the west and east, each ending in a collar.
+local function transmitterIcon(core: { ShapeBox }, frame: { number }, glassColour: { number }): { ShapeBox }
+	local boxes = table.clone(core)
+	for _, side in { -1, 1 } do
+		table.insert(boxes, glass({ 3.5, 6, 6 }, { side * 5.75, 0, 0 }, glassColour))
+		table.insert(boxes, metal({ 1, 7, 7 }, { side * 7.5, 0, 0 }, frame))
+	end
+	return boxes
+end
+
+local function transmitter(spec: BlockSpec, frame: { number }, glassColour: { number })
+	local core = transmitterCore(frame, glassColour)
+	spec.color = frame
+	spec.material = "Metal"
+	spec.transparency = GLASS_TRANSPARENCY
+	spec.sound = "metal"
+	spec.solid = false
+	spec.placeable = true
+	spec.obstructs = true
+	spec.hardness = 1
+	spec.tool = "pickaxe"
+	spec.shape = core
+	spec.icon = transmitterIcon(core, frame, glassColour)
+	spec.bounds = FULL_BOUNDS
+	table.insert(list, spec)
+end
+
+for tier, name in TIER_NAMES do
+	transmitter({
+		name = `{name}LogisticalTransporter`,
+		transmitter = { kind = "item", tier = tier },
+	}, Tiers.TIERS[tier].colour, TRANSPORTER_GLASS)
+end
+-- (Mekanism's Restrictive Transporter is a basic one that paths avoid.)
+transmitter({
+	name = "RestrictiveTransporter",
+	transmitter = { kind = "item", tier = 1, restrictive = true },
+}, RESTRICTIVE, TRANSPORTER_GLASS)
+for tier, name in TIER_NAMES do
+	transmitter({
+		name = `{name}MechanicalPipe`,
+		transmitter = { kind = "fluid", tier = tier },
+	}, Tiers.TIERS[tier].colour, PIPE_GLASS)
+end
+
+-- A fluid tank: glass sides inside steel plates and four posts in the tier's colour.
+local function tankShape(posts: { number }): { ShapeBox }
+	local boxes: { ShapeBox } = {
+		glass({ 14, 14, 14 }, { 0, 0, 0 }, TANK_GLASS),
+		metal({ 16, 2, 16 }, { 0, -7, 0 }, STEEL),
+		metal({ 16, 2, 16 }, { 0, 7, 0 }, STEEL),
+	}
+	for _, x in { -7, 7 } do
+		for _, z in { -7, 7 } do
+			table.insert(boxes, metal({ 2, 12, 2 }, { x, 0, z }, posts))
+		end
+	end
+	return boxes
+end
+
+for tier, name in TIER_NAMES do
+	table.insert(list, {
+		name = `{name}FluidTank`,
+		color = STEEL,
+		material = "Metal",
+		transparency = GLASS_TRANSPARENCY,
+		sound = "metal",
+		hardness = 2,
+		tool = "pickaxe",
+		-- (A solid cube, so torches may hang on it.)
+		sturdy = true,
+		shape = tankShape(Tiers.TIERS[tier].colour),
+		bounds = FULL_BOUNDS,
+		tank = { tier = tier, capacity = Tiers.TIERS[tier].tankCapacity },
+	})
+end
 
 return list
