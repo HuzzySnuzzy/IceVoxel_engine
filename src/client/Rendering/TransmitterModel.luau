@@ -43,9 +43,10 @@
 	the face it leaves by (Mekanism's TransporterStack: before 50 it moves along the way it came,
 	from 50 on along the way it goes). The way it came into the first block is not sent: the
 	renderer passes it when it knows it (`entryOf` the item's previous route, `pullEntry` for an
-	item just pulled out of an inventory), else the item comes in straight. The item crosses each
-	block at that block's speed (the transporter's tier, Transmitters.speed; the sent speed where
-	the block is unknown) and has arrived when it leaves the last one.
+	item just pulled out of an inventory or pushed out of a furnace or machine), else the item
+	comes in straight. The item crosses each block at that block's speed (the transporter's tier,
+	Transmitters.speed; the sent speed where the block is unknown) and has arrived when it leaves
+	the last one.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -125,7 +126,7 @@ local ARM = TransmitterModel.ARM
 local COLLAR = TransmitterModel.COLLAR
 local PLATE = TransmitterModel.PLATE
 local DOWN, UP = Transmitters.DOWN, Transmitters.UP
-local PULL, PUSH = Transmitters.MODES.PULL, Transmitters.MODES.PUSH
+local NORMAL, PULL, PUSH = Transmitters.MODES.NORMAL, Transmitters.MODES.PULL, Transmitters.MODES.PUSH
 
 -- A transmitter's sizes (pixels): half its core with the frame, and its arms' tube, collar and
 -- plate across.
@@ -608,20 +609,33 @@ end
 
 --[[
 	The way an item just pulled into a transporter moves (out of the inventory, towards the
-	centre), from the transporter's packed `modes` and the sides connected to acceptors: the
-	opposite of its one PULL side on an acceptor; nil when it has none or several (unknown).
+	centre), from the transporter's packed `modes`, the sides connected to acceptors and those of
+	them whose acceptor pushes its results out on its own (`ejectorMask`: furnaces and machines,
+	Transmitters.ejects; nil: none). The opposite of its one PULL side on an acceptor; without
+	PULL sides, of its one NORMAL side on such an acceptor (an item pushed out of it). nil when
+	that side is not the only one (unknown).
 ]]
-function TransmitterModel.pullEntry(modes: number, acceptorMask: number): number?
-	local found: number? = nil
+function TransmitterModel.pullEntry(modes: number, acceptorMask: number, ejectorMask: number?): number?
+	local pulls, pullSide, ejects, ejectSide = 0, 0, 0, 0
 	for side = 0, 5 do
-		if bit32.band(acceptorMask, bit32.lshift(1, side)) ~= 0 and Transmitters.modeOf(modes, side) == PULL then
-			if found ~= nil then
-				return nil
+		local bit = bit32.lshift(1, side)
+		if bit32.band(acceptorMask, bit) ~= 0 then
+			local mode = Transmitters.modeOf(modes, side)
+			if mode == PULL then
+				pulls += 1
+				pullSide = side
+			elseif mode == NORMAL and ejectorMask and bit32.band(ejectorMask, bit) ~= 0 then
+				ejects += 1
+				ejectSide = side
 			end
-			found = side
 		end
 	end
-	return if found ~= nil then Transmitters.opposite(found) else nil
+	if pulls == 1 then
+		return Transmitters.opposite(pullSide)
+	elseif pulls == 0 and ejects == 1 then
+		return Transmitters.opposite(ejectSide)
+	end
+	return nil
 end
 
 --[[

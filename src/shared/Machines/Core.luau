@@ -33,7 +33,9 @@
 	            of what they take (`accepts`), whether they are an output, a limit, the faces
 	            transporters use (default: inputs take items through every face, outputs give
 	            them through every face) and an outline shown while empty (`ghost`; upgrade
-	            slots: Machines/Upgrades.slots)
+	            slots: Machines/Upgrades.slots). A machine pushes what its outputs hold out on
+	            its own into the transporters and chests around it (Mekanism's ejector: server
+	            Transmitters/Transport and Eject)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
 	  keep      fields kept in the item when the machine is broken (energy always is)
 	  panel     PanelSpec: title, height, the energy bar, a progress arrow, a flame, a status line
@@ -73,7 +75,8 @@
 	                    state, MAX_STATE
 	  energy maths      QUANTUM, quantise, quantiseUp, produce, use, rates, share, tick
 	  slots             isOutput, mayPlace, slotLimit, quickMoveTargets (Inventory/Menu),
-	                    insertSlots, extractSlots (Transmitters/Inventories: transporters)
+	                    insertSlots, extractSlots, outputSlots (Transmitters/Inventories:
+	                    transporters and the ejector)
 	  what players see  view, status, lines, MAX_LINES, panel (Ui/MenuLayout, Ui/WailaInfo),
 	                    ENERGY_BAR, PANEL_HEIGHT, energyColour (the energy bar's colour, also on
 	                    items and batteries' gauges)
@@ -201,6 +204,8 @@ export type Kind = {
 	-- Slots transporters reach per face (0..5): insert / extract.
 	insertFaces: { [number]: { number } },
 	extractFaces: { [number]: { number } },
+	-- Its output slots, in order: what it pushes out on its own (Mekanism's ejector).
+	outputs: { number },
 }
 
 export type Role = "producer" | "consumer" | "storage"
@@ -361,6 +366,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 	)
 	local insertFaces: { [number]: { number } } = {}
 	local extractFaces: { [number]: { number } } = {}
+	local outputs: { number } = {}
 	for face = 0, SIDES - 1 do
 		insertFaces[face] = {}
 		extractFaces[face] = {}
@@ -378,6 +384,9 @@ function Machines.define(name: string, spec: KindSpec): Kind
 			end
 		end
 		local output = slotSpec.output == true
+		if output then
+			table.insert(outputs, slot)
+		end
 		local ins = faceSet(slotSpec.insert, not output)
 		local outs = faceSet(slotSpec.extract, output)
 		for face = 0, SIDES - 1 do
@@ -411,6 +420,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		state = if stateField then index[stateField] else nil,
 		insertFaces = table.freeze(insertFaces),
 		extractFaces = table.freeze(extractFaces),
+		outputs = table.freeze(outputs),
 	}
 	kinds[name] = table.freeze(kind)
 	return kind
@@ -791,6 +801,16 @@ function Machines.extractSlots(block: number, face: number): { number }
 		return NO_SLOTS
 	end
 	return binding.kind.extractFaces[face]
+end
+
+--[[
+	The output slots of the machine `block`, in order (empty for other blocks): the results it
+	pushes out on its own into the transporters and chests around it (Mekanism's ejector,
+	Transmitters/Inventories `ejectSlots`).
+]]
+function Machines.outputSlots(block: number): { number }
+	local binding = bindings[block]
+	return if binding then binding.kind.outputs else NO_SLOTS
 end
 
 --[[ What players see ]]

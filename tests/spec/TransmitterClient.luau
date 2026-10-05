@@ -431,6 +431,17 @@ return function(t, shared, require, _server, client)
 		t.eq(TransmitterModel.pullEntry(two, bit(DOWN) + bit(WEST)), nil, "two PULL sides: unknown")
 		t.eq(TransmitterModel.pullEntry(two, bit(WEST)), EAST, "the one on an inventory: from the west, east")
 		t.eq(TransmitterModel.pullEntry(0, 63), nil, "no PULL side")
+		-- Items a furnace or machine pushed out: from its NORMAL side when there is no PULL side.
+		t.eq(TransmitterModel.pullEntry(0, bit(WEST) + bit(EAST), bit(WEST)), EAST, "out of the furnace on the west")
+		t.eq(TransmitterModel.pullEntry(0, bit(WEST), 0), nil, "no furnace there")
+		t.eq(TransmitterModel.pullEntry(0, bit(WEST) + bit(EAST), bit(WEST) + bit(EAST)), nil, "two furnaces: unknown")
+		local pushWest = Transmitters.packModes({ M.NORMAL, M.NORMAL, M.NORMAL, M.NORMAL, M.PUSH, M.NORMAL })
+		t.eq(
+			TransmitterModel.pullEntry(pushWest, bit(WEST) + bit(UP), bit(WEST) + bit(UP)),
+			DOWN,
+			"PUSH sides take nothing"
+		)
+		t.eq(TransmitterModel.pullEntry(pullDown, bit(DOWN) + bit(WEST), bit(WEST)), UP, "a PULL side first")
 	end)
 
 	t.test("transmitter client: a route sent again goes on where the item was (fuzz)", function()

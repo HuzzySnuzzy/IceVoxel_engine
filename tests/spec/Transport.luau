@@ -2,7 +2,7 @@
 	Mekanism pipes on the server, items: Transmitters/TransmitterWorld and Transport on a fake world
 	(a table of blocks and a Containers store). Pulling from a chest into another, the speed and
 	pull amount of each tier, the nearest destination, route costs (restrictive and slow
-	transporters), colours, the furnace's sides, full destinations (re-routing, going home,
+	transporters), colours, feeding a furnace, full destinations (re-routing, going home,
 	waiting), broken transporters dropping their items, nothing pulled without a destination,
 	what is replicated, the Configurator's cycles, the bucket rules, and a conservation fuzz.
 ]]
@@ -294,7 +294,7 @@ return function(t, shared, require, server)
 		t.eq(v.world.itemCount, 0)
 	end)
 
-	t.test("transport: a furnace takes ore through its top and only fuel through its sides", function()
+	t.test("transport: a furnace fed from its side: ore into the input, fuel into the fuel", function()
 		local w = newWorld()
 		w.set(0, Y, 0, CHEST)
 		w.set(1, Y, 0, T[2])
@@ -304,24 +304,46 @@ return function(t, shared, require, server)
 		local source = w.slots(0, Y, 0)
 		source[1] = S(I.RawIron, 3)
 		source[2] = S(I.Coal, 5)
-		source[3] = S(COBBLE, 4)
+		source[3] = S(DIRT, 4)
+		source[4] = S(I.Diamond, 2)
 		w.step(200)
 		local furnace = w.slots(3, Y, 0)
-		t.eq(furnace[2] and furnace[2].item, I.Coal, "coal went into the fuel slot through the side")
-		t.eq(furnace[2] and furnace[2].count, 5)
-		t.eq(furnace[1], nil, "nothing into the input from the side")
-		t.eq(w.count(0, Y, 0, I.RawIron), 3, "the ore stays")
-		t.eq(w.count(0, Y, 0, COBBLE), 4, "cobblestone is no fuel: it stays")
-		t.eq(w.world.itemCount, 0)
-
-		-- A transporter on top reaches the input: the ore goes in (then the cobblestone has no room).
-		w.set(2, Y + 1, 0, T[2])
-		w.set(3, Y + 1, 0, T[2])
-		w.step(200)
-		t.eq(furnace[1] and furnace[1].item, I.RawIron, "ore into the input from the top")
+		t.eq(furnace[1] and furnace[1].item, I.RawIron, "ore into the input through the side")
 		t.eq(furnace[1] and furnace[1].count, 3)
-		t.eq(w.count(0, Y, 0, COBBLE), 4, "one input slot, taken")
+		t.eq(furnace[2] and furnace[2].item, I.Coal, "coal into the fuel slot through the same side")
+		t.eq(furnace[2] and furnace[2].count, 5)
 		t.eq(furnace[3], nil, "nothing into the output")
+		t.eq(w.count(0, Y, 0, DIRT), 4, "dirt neither smelts nor burns: it stays")
+		t.eq(w.count(0, Y, 0, I.Diamond), 2, "so do diamonds")
+		t.eq(w.world.itemCount, 0, "nothing was sent there")
+		-- The ore and coal stay: the furnace gives neither back (the line pulls nothing more).
+		w.step(200)
+		t.eq(furnace[1] and furnace[1].count, 3)
+		t.eq(furnace[2] and furnace[2].count, 5)
+	end)
+
+	t.test("transport: logs into a furnace's input first, then its fuel", function()
+		local w = newWorld()
+		w.set(0, Y, 0, CHEST)
+		w.set(1, Y, 0, T[4])
+		w.set(2, Y, 0, FURNACE)
+		TransmitterWorld.setMode(w.world, 1, Y, 0, WEST, M.PULL)
+		w.slots(0, Y, 0)[1] = S(I.OakLog, 64)
+		w.slots(0, Y, 0)[2] = S(I.OakLog, 30)
+		w.step(100)
+		local furnace = w.slots(2, Y, 0)
+		t.eq(furnace[1] and furnace[1].count, 64, "the input takes logs first")
+		t.eq(furnace[2] and furnace[2].item, I.OakLog, "then the fuel slot")
+		t.eq(furnace[2] and furnace[2].count, 30)
+		t.eq(w.count(0, Y, 0), 0)
+		-- Logs already in the fuel slot, the input empty: new logs still go into the input first.
+		furnace[1] = nil
+		furnace[2] = S(I.OakLog, 10)
+		w.slots(0, Y, 0)[1] = S(I.OakLog, 20)
+		w.step(100)
+		t.eq(furnace[1] and furnace[1].count, 20, "into the input, not on top of the fuel")
+		t.eq(furnace[2] and furnace[2].count, 10, "the fuel as it was")
+		t.eq(w.count(0, Y, 0), 0)
 	end)
 
 	t.test("transport: a full destination re-routes, then sends home, then waits", function()

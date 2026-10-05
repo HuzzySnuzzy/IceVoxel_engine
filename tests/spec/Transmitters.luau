@@ -1,9 +1,10 @@
 --[[
 	Mekanism pipes, the shared foundation: the tier numbers, the transmitter and tank blocks, the
 	Configurator and buckets, sides, connection modes and their packing, colours, the connection
-	rule both sides use (Transmitters.connects / connections), the furnace's and chest's sided
-	slots (Minecraft's AbstractFurnaceBlockEntity), the insert / extract maths, the recipes, the
-	sounds and the UseItem / Transmitters / Tanks / Transport messages.
+	rule both sides use (Transmitters.connects / connections), the furnace's slots (Mekanism's
+	machine rules on every face) and the chest's, what pushes its results out on its own, the
+	insert / extract maths, the recipes, the sounds and the UseItem / Transmitters / Tanks /
+	Transport messages.
 ]]
 
 return function(t, shared, require, _server, client)
@@ -416,40 +417,61 @@ return function(t, shared, require, _server, client)
 
 	--[[ Sided inventories ]]
 
-	t.test("inventories: the furnace's sides, as Minecraft's AbstractFurnaceBlockEntity", function()
+	t.test("inventories: a furnace's slots on every face, Mekanism's machine rules", function()
 		local function same(a: { number }, b: { number }, what: string)
 			t.eq(#a, #b, `{what}: count`)
 			for i = 1, #b do
 				t.eq(a[i], b[i], `{what}: [{i}]`)
 			end
 		end
-		-- getSlotsForFace: UP the input, DOWN the output then the fuel, the sides the fuel.
-		same(Transmitters.insertSlots(FURNACE, UP), { 1 }, "up")
-		same(Transmitters.insertSlots(FURNACE, DOWN), { 3, 2 }, "down")
-		for _, side in { NORTH, SOUTH, WEST, EAST } do
-			same(Transmitters.insertSlots(FURNACE, side), { 2 }, `side {side}`)
-			same(Transmitters.extractSlots(FURNACE, side), { 2 }, `side {side} out`)
+		-- Every face alike: in the input then the fuel, out the output then the fuel.
+		for side = 0, 5 do
+			same(Transmitters.insertSlots(FURNACE, side), { 1, 2 }, `side {side} in`)
+			same(Transmitters.extractSlots(FURNACE, side), { 3, 2 }, `side {side} out`)
 		end
-		same(Transmitters.extractSlots(FURNACE, DOWN), { 3, 2 }, "down out")
-		-- canPlaceItem: the input anything, the fuel only fuel, the output nothing.
-		t.ok(Transmitters.canInsert(FURNACE, UP, 1, I.RawIron), "ore on top")
-		t.ok(Transmitters.canInsert(FURNACE, UP, 1, I.Coal), "anything on top")
-		t.ok(not Transmitters.canInsert(FURNACE, UP, 2, I.Coal), "the top reaches only the input")
-		t.ok(Transmitters.canInsert(FURNACE, NORTH, 2, I.Coal), "coal in the side")
+		t.eq(#Transmitters.insertSlots(FURNACE, 6), 0, "a bad face")
+		t.eq(#Transmitters.extractSlots(FURNACE, -1), 0, "a bad face")
+		-- In: the input only what smelts, the fuel only what burns, the output nothing.
+		for side = 0, 5 do
+			t.ok(Transmitters.canInsert(FURNACE, side, 1, I.RawIron), `ore into the input (side {side})`)
+			t.ok(Transmitters.canInsert(FURNACE, side, 2, I.Coal), `coal into the fuel (side {side})`)
+		end
+		t.ok(not Transmitters.canInsert(FURNACE, UP, 1, I.Coal), "coal doesn't smelt")
+		t.ok(not Transmitters.canInsert(FURNACE, UP, 1, I.Stick), "nor do sticks")
+		t.ok(not Transmitters.canInsert(FURNACE, UP, 2, I.RawIron), "ore doesn't burn")
+		t.ok(Transmitters.canInsert(FURNACE, NORTH, 1, I.OakLog), "logs smelt")
+		t.ok(Transmitters.canInsert(FURNACE, NORTH, 2, I.OakLog), "and burn")
 		t.ok(Transmitters.canInsert(FURNACE, EAST, 2, I.Planks), "planks burn")
-		t.ok(not Transmitters.canInsert(FURNACE, NORTH, 2, I.Cobblestone), "cobblestone doesn't burn")
+		t.ok(not Transmitters.canInsert(FURNACE, EAST, 1, I.Planks), "but don't smelt")
 		t.ok(not Transmitters.canInsert(FURNACE, NORTH, 2, I.Bucket), "no lava here: buckets aren't fuel")
+		t.ok(not Transmitters.canInsert(FURNACE, NORTH, 1, I.Diamond), "diamonds go nowhere")
+		t.ok(not Transmitters.canInsert(FURNACE, NORTH, 2, I.Diamond))
 		t.ok(not Transmitters.canInsert(FURNACE, DOWN, 3, I.Coal), "never into the output")
-		t.ok(Transmitters.canInsert(FURNACE, DOWN, 2, I.Coal), "the bottom feeds the fuel")
+		t.ok(not Transmitters.canInsert(FURNACE, DOWN, 3, I.IronIngot), "not even results")
 		t.ok(not Transmitters.canInsert(FURNACE, UP, 1, 65000), "unknown items")
-		-- canTakeItemThroughFace: anything, but the fuel through the bottom only as buckets.
-		t.ok(Transmitters.canExtract(FURNACE, DOWN, 3, I.IronIngot), "output from below")
-		t.ok(not Transmitters.canExtract(FURNACE, DOWN, 2, I.Coal), "fuel stays")
-		t.ok(Transmitters.canExtract(FURNACE, DOWN, 2, I.Bucket), "buckets come out")
-		t.ok(Transmitters.canExtract(FURNACE, DOWN, 2, I.WaterBucket), "buckets come out")
-		t.ok(Transmitters.canExtract(FURNACE, WEST, 2, I.Coal), "fuel from the side")
-		t.ok(Transmitters.canExtract(FURNACE, UP, 1, I.RawIron), "input from the top")
-		t.ok(not Transmitters.canExtract(FURNACE, UP, 3, I.IronIngot), "the top doesn't reach the output")
+		-- Out: the results, and from the fuel only what no longer burns; never the input or fuel.
+		for side = 0, 5 do
+			t.ok(Transmitters.canExtract(FURNACE, side, 3, I.IronIngot), `results out (side {side})`)
+			t.ok(not Transmitters.canExtract(FURNACE, side, 2, I.Coal), `the fuel stays (side {side})`)
+			t.ok(not Transmitters.canExtract(FURNACE, side, 1, I.RawIron), `the input stays (side {side})`)
+			t.ok(Transmitters.canExtract(FURNACE, side, 2, I.Bucket), `an empty bucket comes out (side {side})`)
+		end
+		t.ok(not Transmitters.canExtract(FURNACE, WEST, 2, I.OakLog), "logs burn: they stay")
+		t.ok(Transmitters.canExtract(FURNACE, WEST, 2, I.WaterBucket), "a water bucket doesn't burn")
+		-- What pushes its results out on its own: a furnace's output; chests never; plain
+		-- inventories are where they go.
+		t.ok(Transmitters.ejects(FURNACE))
+		same(Transmitters.ejectSlots(FURNACE), { 3 }, "the furnace pushes its output")
+		t.ok(not Transmitters.ejects(CHEST), "a chest pushes nothing")
+		t.eq(#Transmitters.ejectSlots(CHEST), 0)
+		t.ok(not Transmitters.ejects(B.Stone))
+		t.ok(Transmitters.isPlain(CHEST), "a chest is a plain inventory")
+		t.ok(not Transmitters.isPlain(FURNACE), "a furnace is not")
+		t.ok(not Transmitters.isPlain(B.ElectricFurnace), "nor is a machine")
+		t.ok(not Transmitters.isPlain(B.Stone), "nor a block without slots")
+		-- Which transporter sides take what is pushed out: NORMAL and PULL (canReceiveFrom).
+		t.ok(Transmitters.receives(NORMAL) and Transmitters.receives(PULL))
+		t.ok(not Transmitters.receives(PUSH) and not Transmitters.receives(NONE))
 		-- Chests: every slot, every face, anything; blocks without slots: nothing.
 		for side = 0, 5 do
 			local slots = Transmitters.insertSlots(CHEST, side)
@@ -507,21 +529,52 @@ return function(t, shared, require, _server, client)
 		t.ok(unknown ~= nil and unknown.count == 2, "unknown item left over")
 	end)
 
-	t.test("inventories: insert into a furnace follows its sides", function()
+	t.test("inventories: insert into a furnace: what smelts into the input, fuel into the fuel", function()
 		local empty = {}
-		local top = Transmitters.insert(FURNACE, UP, empty, S(I.RawIron, 5))
-		t.eq(top[1].count, 5, "the top fills the input")
-		local _, cobble = Transmitters.insert(FURNACE, NORTH, empty, S(I.Cobblestone, 5))
-		t.ok(cobble ~= nil and cobble.count == 5, "no cobblestone in the fuel")
-		t.eq(Transmitters.room(FURNACE, NORTH, empty, S(I.Cobblestone, 5)), 0)
-		local side = Transmitters.insert(FURNACE, NORTH, empty, S(I.Coal, 5))
-		t.eq(side[2].count, 5, "coal into the fuel")
-		local bottom, left = Transmitters.insert(FURNACE, DOWN, { [3] = S(I.IronIngot, 1) }, S(I.Coal, 70))
-		t.eq(bottom[3].count, 1, "never into the output")
-		t.eq(bottom[3].item, I.IronIngot)
-		t.eq(bottom[2].count, 64, "the fuel fills")
-		t.ok(left ~= nil and left.count == 6)
+		for side = 0, 5 do
+			local ore = Transmitters.insert(FURNACE, side, empty, S(I.RawIron, 5))
+			t.eq(ore[1] and ore[1].count, 5, `ore fills the input (side {side})`)
+			t.eq(ore[2], nil)
+			local coal = Transmitters.insert(FURNACE, side, empty, S(I.Coal, 5))
+			t.eq(coal[2] and coal[2].count, 5, `coal fills the fuel (side {side})`)
+			t.eq(coal[1], nil)
+		end
+		local sticks, noSticks = Transmitters.insert(FURNACE, NORTH, empty, S(I.Stick, 5))
+		t.eq(noSticks, nil, "sticks burn")
+		t.eq(sticks[2] and sticks[2].item, I.Stick, "into the fuel slot")
+		local _, fullFuel = Transmitters.insert(FURNACE, NORTH, { [2] = S(I.Coal, 64) }, S(I.Stick, 5))
+		t.eq(fullFuel and fullFuel.count, 5, "not into a full fuel slot, nor the input")
+		local _, diamonds = Transmitters.insert(FURNACE, NORTH, empty, S(I.Diamond, 5))
+		t.ok(diamonds ~= nil and diamonds.count == 5, "diamonds neither smelt nor burn")
+		t.eq(Transmitters.room(FURNACE, NORTH, empty, S(I.Diamond, 5)), 0)
+		-- Logs smelt and burn: the input first, then the fuel when the input can't take them.
+		local logs = Transmitters.insert(FURNACE, WEST, empty, S(I.OakLog, 10))
+		t.eq(logs[1] and logs[1].count, 10, "logs into the input")
+		t.eq(logs[2], nil)
+		local more, left = Transmitters.insert(FURNACE, WEST, { [1] = S(I.OakLog, 60) }, S(I.OakLog, 70))
+		t.eq(more[1].count, 64, "the input fills up")
+		t.eq(more[2] and more[2].count, 64, "the rest burns")
+		t.ok(left ~= nil and left.count == 2)
+		-- Logs already burning in the fuel slot: new ones still go into the input first.
+		local burning = Transmitters.insert(FURNACE, WEST, { [2] = S(I.OakLog, 10) }, S(I.OakLog, 20))
+		t.eq(burning[1] and burning[1].count, 20, "the input before topping up the fuel")
+		t.eq(burning[2] and burning[2].count, 10, "the fuel untouched")
+		local spill, over = Transmitters.insert(FURNACE, WEST, { [2] = S(I.OakLog, 10) }, S(I.OakLog, 100))
+		t.eq(spill[1] and spill[1].count, 64, "the input fills")
+		t.eq(spill[2] and spill[2].count, 46, "then the fuel")
+		t.eq(over, nil)
+		t.eq(Transmitters.room(FURNACE, WEST, { [2] = S(I.OakLog, 10) }, S(I.OakLog, 200)), 118)
+		local busy = Transmitters.insert(FURNACE, WEST, { [1] = S(I.RawIron, 1) }, S(I.OakLog, 3))
+		t.eq(busy[1].item, I.RawIron, "the input holds ore")
+		t.eq(busy[2] and busy[2].item, I.OakLog, "so the logs go into the fuel")
+		-- Never into the output.
+		local full, rest = Transmitters.insert(FURNACE, DOWN, { [3] = S(I.IronIngot, 1) }, S(I.Coal, 70))
+		t.eq(full[3].count, 1, "never into the output")
+		t.eq(full[3].item, I.IronIngot)
+		t.eq(full[2].count, 64, "the fuel fills")
+		t.ok(rest ~= nil and rest.count == 6)
 		t.eq(Transmitters.room(FURNACE, DOWN, {}, S(I.Coal, 70)), 64)
+		t.eq(Transmitters.room(FURNACE, DOWN, {}, S(I.OakLog, 200)), 128, "logs: input and fuel")
 	end)
 
 	t.test("inventories: available and extract (Mekanism's TransitRequest)", function()
@@ -564,23 +617,46 @@ return function(t, shared, require, _server, client)
 		local nanSlots, nan = Transmitters.extract(CHEST, UP, slots, 0 / 0)
 		t.eq(nan, nil, "NaN takes nothing")
 		t.eq(nanSlots[2], slots[2], "and leaves the slots alone")
-		-- Furnaces: the bottom gives the output, never fuel; the side gives fuel; the top input.
+		-- Furnaces: every face gives the results, never the input or the fuel.
 		local furnace = { [1] = S(I.RawIron, 3), [2] = S(I.Coal, 7), [3] = S(I.IronIngot, 2) }
-		local below = Transmitters.available(FURNACE, DOWN, furnace)
-		t.eq(#below, 1, "only the output")
-		t.eq(below[1].item, I.IronIngot)
-		local _, ingots = Transmitters.extract(FURNACE, DOWN, furnace, 64)
+		for side = 0, 5 do
+			local out = Transmitters.available(FURNACE, side, furnace)
+			t.eq(#out, 1, `only the output (side {side})`)
+			t.eq(out[1].item, I.IronIngot)
+			local _, coal = Transmitters.extract(FURNACE, side, furnace, 64, S(I.Coal, 1))
+			t.eq(coal, nil, `the fuel stays (side {side})`)
+			local _, ore = Transmitters.extract(FURNACE, side, furnace, 64, S(I.RawIron, 1))
+			t.eq(ore, nil, `the input stays (side {side})`)
+		end
+		local after, ingots = Transmitters.extract(FURNACE, SOUTH, furnace, 64)
 		t.eq(ingots and ingots.count, 2)
-		local _, coal = Transmitters.extract(FURNACE, DOWN, furnace, 64, S(I.Coal, 1))
-		t.eq(coal, nil, "no fuel through the bottom")
-		local _, sideCoal = Transmitters.extract(FURNACE, SOUTH, furnace, 64)
-		t.eq(sideCoal and sideCoal.item, I.Coal, "fuel from the side")
-		local _, input = Transmitters.extract(FURNACE, UP, furnace, 1)
-		t.eq(input and input.item, I.RawIron, "input from the top")
-		t.eq(input and input.count, 1)
-		local bucketFuel = { [2] = S(I.Bucket, 1) }
-		local _, bucket = Transmitters.extract(FURNACE, DOWN, bucketFuel, 1)
-		t.eq(bucket and bucket.item, I.Bucket, "an empty bucket leaves through the bottom")
+		t.eq(after[3], nil)
+		t.eq(after[1].count, 3, "the input untouched")
+		t.eq(after[2].count, 7, "the fuel untouched")
+		t.eq(#Transmitters.available(FURNACE, UP, after), 0, "nothing else to take")
+		-- What no longer burns leaves the fuel slot (an empty bucket), after the results.
+		local bucketFuel = { [2] = S(I.Bucket, 1), [3] = S(I.Charcoal, 4) }
+		local order = Transmitters.available(FURNACE, UP, bucketFuel)
+		t.eq(#order, 2)
+		t.eq(order[1].item, I.Charcoal, "the results first")
+		t.eq(order[2].item, I.Bucket)
+		local _, bucket = Transmitters.extract(FURNACE, UP, bucketFuel, 1, S(I.Bucket, 1))
+		t.eq(bucket and bucket.item, I.Bucket, "an empty bucket comes out")
+		-- What it pushes out on its own: the output only (no bucket).
+		local results = Transmitters.results(FURNACE, bucketFuel)
+		t.eq(#results, 1)
+		t.eq(results[1].item, I.Charcoal)
+		t.eq(results[1].count, 4)
+		local rest, pushed = Transmitters.takeResults(FURNACE, bucketFuel, 3)
+		t.eq(pushed and pushed.count, 3)
+		t.eq(rest[3].count, 1)
+		t.eq(rest[2], bucketFuel[2], "the bucket stays")
+		t.eq(bucketFuel[3].count, 4, "pure: the input is untouched")
+		local _, nothing = Transmitters.takeResults(FURNACE, { [1] = S(I.RawIron, 1), [2] = S(I.Coal, 1) }, 64)
+		t.eq(nothing, nil, "neither the input nor the fuel is pushed out")
+		t.eq(#Transmitters.results(CHEST, slots), 0, "a chest pushes nothing out")
+		local _, none = Transmitters.takeResults(CHEST, slots, 64)
+		t.eq(none, nil)
 	end)
 
 	t.test("inventories: random inserts and extracts conserve items and respect stacks", function()

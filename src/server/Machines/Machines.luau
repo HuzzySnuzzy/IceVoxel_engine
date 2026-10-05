@@ -22,7 +22,8 @@
 	            `addBlockData`: Mekanism's sustained data).
 	  Viewers   players with a machine's window open get a snapshot (Players/Inventories) at once
 	            when its slots change, and every DATA_INTERVAL ticks while only its data (energy,
-	            gauges) moves, like furnaces.
+	            gauges) moves, like furnaces; a chest a machine pushed its results into
+	            (Transmitters/Eject) gets them through Inventories.containerChanged.
 	  Records   Machines records (energy, capacity, the network's input and output, the machine's
 	            rate, active, its kind's state code) for WAILA and the world: a chunk's non-default
 	            ones go to a player right after its edit list (`sendChunks`, from ServerNet's
@@ -179,6 +180,7 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 	local simulation = MachineWorld.new({
 		getBlock = knownBlock,
 		containers = Containers.default,
+		inventoryChanged = Inventories.containerChanged,
 		transmitters = Transmitters.world(),
 		dayTime = TimeOfDay.get,
 		sky = seesSky,

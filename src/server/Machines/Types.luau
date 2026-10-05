@@ -62,6 +62,9 @@ export type Env = {
 	getBlock: (x: number, y: number, z: number) -> number?,
 	-- Where machines keep their contents (Players/Containers).
 	containers: Containers.Store,
+	-- The slots of the chest at (x, y, z) changed (a machine pushed its results into it: its
+	-- viewers need a snapshot).
+	inventoryChanged: ((x: number, y: number, z: number) -> ())?,
 	-- The Universal Cables (Transmitters/TransmitterWorld's energy nodes), if any.
 	transmitters: TransmitterTypes.World?,
 	-- Minecraft's day time now (ticks 0..24000), for kinds that care (solar panels).

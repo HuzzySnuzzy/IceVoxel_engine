@@ -15,14 +15,19 @@
 	cache; Minecraft's furnace).
 
 	Slots (Mekanism's are input, output and an energy slot, with upgrades in a tab of their own):
-	  1 input   what smelts, put in by hand, shift-click (anything that smelts goes here) and
-	            transporters through the top and the four sides
-	  2 output  only taken from: by hand, shift-click and transporters through the bottom
-	            (Minecraft's furnace's faces: in at the top, out at the bottom; blocks have no
-	            facing, so Mekanism's configurable sides become fixed ones)
+	  1 input   what smelts (Mekanism's input slots take only valid recipe inputs), put in by
+	            hand, shift-click (anything that smelts goes here) and transporters through any
+	            face
+	  2 output  only taken from: by hand, shift-click and transporters through any face; and it
+	            pushes its results out on its own every 10 ticks into the transporters and chests
+	            around it (Mekanism's ejector; server Transmitters/Transport and Eject)
 	  3 speed   up to 8 Speed Upgrades, at (8, 53) on the panel's lower left
 	  4 energy  up to 8 Energy Upgrades, at (26, 53) next to it; both by hand and shift-click only
-	            (Machines/Upgrades), clear of the status line, the row and the energy bar
+	            (Machines/Upgrades: no transporter face reaches them), clear of the status line,
+	            the row and the energy bar
+	Blocks have no facing, so Mekanism's configurable sides become the same on every face: ore in,
+	results out (Core's defaults), the rules furnaces follow too (Transmitters/Inventories).
+
 	Every tick `settings` works out Mekanism's upgrade maths from the cards installed: the ticks an
 	item takes (200 x 10^(-speed/8), truncated: 149 with one card, 20 with 8), the energy a tick of
 	work uses (50 x 10^((2 speed - energy)/8)) and the capacity (20 000 x 10^(energy/8)). Taking
@@ -67,9 +72,6 @@ local BASE_ENERGY_PER_TICK = 50
 
 -- Slots.
 local INPUT, OUTPUT, SPEED, ENERGY = 1, 2, 3, 4
--- Faces (Transmitters.SIDES): Down, Up, North, South, West, East.
-local DOWN = 0
-local TOP_AND_SIDES = { 1, 2, 3, 4, 5 }
 
 -- State codes (the `state` field; Shared/Machines KindSpec `state`).
 local IDLE, NO_POWER, OUTPUT_FULL = 0, 1, 2
@@ -181,10 +183,11 @@ local function tick(container: Container, ctx: Core.TickContext)
 end
 
 -- The input, then the output in Minecraft's result frame, in a row with the arrow between them;
--- the upgrade slots below on the left.
+-- the upgrade slots below on the left. Transporters reach the input and the output through every
+-- face (Core's defaults: inputs take, outputs give).
 local SLOTS: { Core.SlotSpec } = {
-	{ x = 56, y = 35, accepts = smelts, insert = TOP_AND_SIDES },
-	{ x = 116, y = 35, output = true, big = true, extract = { DOWN } },
+	{ x = 56, y = 35, accepts = smelts },
+	{ x = 116, y = 35, output = true, big = true },
 }
 for _, slot in Upgrades.slots(8, 53) do
 	table.insert(SLOTS, slot)

@@ -702,7 +702,9 @@ next tier keeps its charge. Other results carry none.
   (coal 1600 ticks, planks and logs 300, sticks 100...) when there is something to smelt that fits
   the output, an item takes 200 ticks, progress falls back when the fire goes out. Only furnaces
   that are doing something are ticked (`Containers.tickFurnaces`). Viewers get a snapshot when the
-  slots change, and every other tick while only the gauges move.
+  slots change, and every other tick while only the gauges move. Every 10 ticks the furnaces whose
+  output holds something (`Containers.ejectingFurnaces`) push it into the chests next to them
+  (`Transmitters/Eject`, below).
 
 Death drops the whole inventory (unless `Gameplay.KeepInventory`). Inventories and chests live for
 the session.
@@ -940,13 +942,14 @@ transporters and avoid restrictive ones unless there is no other way.
 - Items: the Configurator (1 per slot), Bucket (16) and Water Bucket (1).
 
 **Sides and modes.** Sides are Minecraft's Direction ordinal: 0 Down, 1 Up, 2 North (-Z), 3 South
-(+Z), 4 West (-X), 5 East (+X); side s of a block at p faces p + offset(s), and opposite(s) is
-s xor 1. Each side of a transmitter has Mekanism's ConnectionType, which the Configurator cycles
-NORMAL -> PUSH -> PULL -> NONE: NORMAL and PUSH may hand items or water to an acceptor
-(`outputs`), PULL takes from it (`pulls`) and never gives, NONE cuts the side. The six modes pack
-into 16 bits, 2 a side, side 0 lowest (0 = all NORMAL, at most 4095), which is how they are stored
-and sent. Transporters may be coloured with Minecraft's 16 dyes (1..16, 0 none; sneaking with the
-Configurator steps through them and back to none).
+(+Z), 4 West (-X), 5 East (+X); side s of a block at p faces p + offset(s), and opposite(s) is s
+xor 1. Each side of a transmitter has Mekanism's ConnectionType, which the Configurator cycles
+NORMAL -> PUSH -> PULL -> NONE: NORMAL and PUSH may hand items or water to an acceptor (`outputs`),
+PULL takes from it (`pulls`) and never gives, NONE cuts the side; NORMAL and PULL transporter sides
+take what a furnace or machine pushes out (`receives`, Mekanism's canReceiveFrom). The six modes
+pack into 16 bits, 2 a side, side 0 lowest (0 = all NORMAL, at most 4095), which is how they are
+stored and sent. Transporters may be coloured with Minecraft's 16 dyes (1..16, 0 none; sneaking
+with the Configurator steps through them and back to none).
 
 **Connections** (`Transmitters.connects`, `Transmitters.connections`: Mekanism's
 canConnectMutual), shared by the client's arms and the server's networks:
@@ -963,21 +966,38 @@ TransporterStack.canInsertToTransporter): an uncoloured item stays off coloured 
 where they connect to uncoloured ones.
 
 **Sided inventories** (`Transmitters/Inventories`). An inventory is reached through its own side
-facing the transmitter (a transporter on a furnace reaches its face Up). A furnace is Minecraft's
-AbstractFurnaceBlockEntity: Up reaches the input, the sides the fuel, Down the output and then the
-fuel; the input takes anything, the fuel only fuel and the output nothing; anything may be taken
-out except the fuel through Down (only buckets). A chest gives every slot to every face. `insert`
+facing the transmitter (a transporter on a furnace reaches its face Up). Furnaces and machines
+follow Mekanism's machine rules, the same on every face. (Furnaces used to be Minecraft's
+WorldlyContainer, fuel through the sides, so a transporter pulling from a furnace's side took the
+fuel players put in straight back out; Mekanism's logic was chosen instead.) A furnace takes in
+through any face {input, fuel}: the input only what smelts (Mekanism's input slots take only valid
+recipe inputs), the fuel only fuel, so ore goes into the input, coal into the fuel and logs into
+the input first, then the fuel when the input can't take them (a furnace is filled slot by slot, as
+Mekanism fills a machine's slots); the output takes nothing. Through any face it gives {output,
+fuel}: the results, and from the fuel slot only what no longer burns (an empty bucket: Mekanism's
+FuelInventorySlot); never the input or the fuel. A chest gives every slot to every face. `insert`
 and `room` top up stacks of the same item and wear first, then fill empty slots, up to the item's
-max stack (Forge's insertItemStacked, as Mekanism inserts); `available` lists the item types a
-face gives with their totals (Mekanism's TransitRequest) and `extract` takes up to n of one type,
-a stack at most. They are pure (new slot tables out, inputs untouched), so the server simulates a
-delivery with the same calls it applies. A pipe's fill travels as a byte (`fillLevel`: 0 empty,
-at least 1 with anything in it, 255 full).
+max stack (Forge's insertItemStacked, as Mekanism inserts); `available` lists the item types a face
+gives with their totals (Mekanism's TransitRequest) and `extract` takes up to n of one type, a
+stack at most. They are pure (new slot tables out, inputs untouched), so the server simulates a
+delivery with the same calls it applies. A pipe's fill travels as a byte (`fillLevel`: 0 empty, at
+least 1 with anything in it, 255 full).
 A machine reaches the slots its kind gives each face (`Machines.insertSlots` / `extractSlots`):
 the Heat Generator takes fuel through every face and gives nothing; the Electric Furnace takes
-what smelts through Up and the sides and gives its results through Down.
+what smelts and gives its results through every face (Core's defaults).
 Upgrade slots (`Machines/Upgrades`) are reached through no face, so a machine with nothing else (the
 Solar Panel) is no inventory and transporters don't connect to it.
+
+**Pushing results out** (Mekanism's ejector: `Transmitters.ejects`, `ejectSlots`, `results`,
+`takeResults`, `isPlain`). A furnace (its output) and a machine with output slots
+(`Machines.outputSlots`: the Electric Furnace's; the Heat Generator and Solar Panel have none)
+push what those hold out on their own, a stack at most every 10 ticks:
+- into the transporters next to them whose side receives (`Transmitters.receives`: NORMAL or
+  PULL, Mekanism's canReceiveFrom; never PUSH or NONE), in the transporter's pull pass (below);
+- into the plain inventories next to them (chests and any other `container` block that is no
+  furnace and no machine), through their face towards it (`server/Transmitters/Eject`);
+- never straight into another furnace or machine (no surprise chains such as cobblestone to stone
+  to smooth stone); transporters still lead results into one when a line goes there.
 
 ### On the server (`server/Transmitters/`, `Players/ItemUse`)
 
@@ -998,23 +1018,35 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
   network the share of its buffer its pipes held (by capacity), so merging adds buffers and
   splitting shares them; a broken pipe loses its share, a broken tank its water.
 - **Items** (`Transport`, Mekanism's LogisticalTransporterBase / TransporterPathfinder):
-  - Pulling: a transporter with PULL sides on inventories pulls through each, then waits 10 ticks
-    (3 when nothing was there, min(40, e^failures) when items found nowhere to go). The item types
-    the inventory's facing side gives (`Transmitters.available`) are tried in order; the first
-    with a destination sends up to the tier's pull amount, never more than fits there or a stack.
+  - Pulling: a transporter with PULL sides on inventories, or NORMAL sides on furnaces and
+    machines that push their results out (`pullers`, worked out with its links), pulls through
+    each such side, one pass a side, then waits 10 ticks (3 when nothing was there,
+    min(40, e^failures) when items found nowhere to go). The item types the side may take are
+    tried in order: a PULL side what the inventory's facing side gives (`Transmitters.available`:
+    a furnace's or machine's results only), a NORMAL side what a furnace or machine pushes out
+    (`Transmitters.results`). The first with a destination sends up to the tier's pull amount (a
+    whole stack from a furnace or machine: the ejector's), never more than fits there or a stack.
     Destinations are found before anything is taken, and the item takes the puller's colour.
   - Routes: Dijkstra from the item's transporter, adding `pathCost` for each transporter entered
     and only entering ones that `carries` its colour. The cheapest inventory (then fewest steps)
     on a NORMAL or PUSH side that takes at least one item wins. Room counts the items already on
     their way there (Mekanism's TransporterManager). The source inventory is excluded except as
-    "home" (reachable through any joined side); with neither, the item waits in the middle of its
-    transporter and looks again every 20 ticks. A search visits at most 4096 transporters, and
+    "home" (reachable through any joined side; a furnace's or machine's results have no home, so
+    they never go back in); with neither, the item waits in the middle of its transporter and
+    looks again every 20 ticks. A search visits at most 4096 transporters, and
     once a tick's searches have visited 4096, waiting items and pulls carry on the next tick
     (moving items always re-route), so big networks full of waiting items cannot stall the server.
   - Moving: progress grows by the transporter's speed each tick (100 = a block). Halfway, the way
     ahead is checked (and re-routed if closed); at 100 the item enters the next transporter, or the
     inventory: what fits goes in (viewers get a snapshot, a furnace wakes) and the rest re-routes.
     A broken transporter drops its items (Entities.dropBlock).
+  - Chests next to a furnace or machine (`Eject`, pure): every 10 ticks the results go into them
+    in side order (Down .. East), the first item type that fits anywhere, up to a stack, as much
+    as fits; what goes in decides what comes out, so nothing is lost or made. Players/Inventories'
+    furnace loop runs it for the furnaces with results (Containers' `ejectingFurnaces`), and
+    MachineWorld's step for machines with output slots, after their tick. Both containers'
+    viewers get a snapshot (`containerChanged`) and the furnace is ticked again. Blocks are read as
+    the pipes read them (peekBlock, else the edit list), never generating terrain.
 - **Water** (`Fluids`): each tick, every PULL side on a tank takes up to the pipe's pull amount
   into the buffer (one fluid, up to the pipes' capacity); then the buffer is split evenly over the
   tanks on NORMAL / PUSH sides with room, each tank once, smallest room first.
@@ -1070,12 +1102,14 @@ the same look, so a pipe's changing water level only resizes them), at most 4000
 Items in transit: `route` turns an Add (block, progress, speed, server start time, path) into
 per-block exit times, each block crossed at its transporter's speed; `position` follows it every
 frame from workspace:GetServerTimeNow() (progress 0 the entry face, 50 the centre, 100 the exit
-face; turns at centres). The way into the first block is not sent: an Add for a known item takes
-it from its previous route (`entryOf`), a newly pulled one from the transporter's one PULL side on
-an inventory (`pullEntry`), else it comes in straight. Models (ItemModels, 0.35 blocks, turning
-slowly on the client's clock) are pooled per item, at most 256, and moved with one BulkMoveTo per
-frame. Remove(arrived) lets an item finish its way (at most 1 s), dropped / gone remove it at
-once, an item whose way ended goes after 0.5 s, and one out of range for 60 s is forgotten.
+face; turns at centres). The way into the first block is not sent: an Add for a known item takes it
+from its previous route (`entryOf`), a newly pulled one from the transporter's one PULL side on an
+inventory, else (no PULL side) its one NORMAL side on a furnace or machine that pushed it out
+(`pullEntry` with the acceptor sides whose block `ejects`), else it comes in straight. Models
+(ItemModels, 0.35 blocks, turning slowly on the client's clock) are pooled per item, at most 256,
+and moved with one BulkMoveTo per frame. Remove(arrived) lets an item finish its way (at most 1 s),
+dropped / gone remove it at once, an item whose way ended goes after 0.5 s, and one out of range
+for 60 s is forgotten.
 
 Interaction: items that are no block send `UseItem`, unpredicted, once per press, and only where
 the server would act. The Configurator (on transmitters; sneaking only on transporters) sends the
@@ -1125,7 +1159,9 @@ MekanismContainer; only when none takes anything does it move between the invent
 A machine with slots transporters reach is an inventory for them (Transmitters/Inventories), through
 the faces its kind gives each slot (by default inputs take items through every face and outputs give
 them out through every face); one whose slots no face reaches (the Solar Panel: upgrade slots only)
-is none. Energy is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact;
+is none. A machine with output slots pushes what they hold out on its own (Mekanism's ejector,
+every 10 ticks, into the transporters and chests next to it: Pushing results out, above). Energy
+is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact;
 `produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta: every
 recipient gets the same share, those that take less get all they take and the rest is shared again,
 smallest limits first.
@@ -1223,10 +1259,11 @@ burns directly. JEI lists it as a fuel catalyst.
 BlockList `ElectricFurnace` has `energy = { capacity = 20 000, input = 20 000 }`, a consumer; its
 `rates` override gives its capacity as its input rate (Mekanism's machine energy containers take any
 amount), so a network may fill it in one tick. Slot 1, the input, takes what `Smelting.result`
-smelts, through Up and the four sides; slot 2, the output (the furnace's result frame), gives
-through Down only (a furnace's faces without the fuel: blocks have no facing, so Mekanism's side
-configuration becomes fixed faces); slots 3 and 4 hold its Speed and Energy Upgrades
-(`Upgrades.slots(8, 53)`). Data 7 `progress`, 8 `ticksRequired` (200), 9 `energyPerTick` (50), 10
+smelts, through every face; slot 2, the output (the furnace's result frame), gives through every
+face and pushes its results into the transporters and chests next to it (blocks have no facing, so
+Mekanism's side configuration becomes the same on every face: Core's defaults, the rules furnaces
+follow too); slots 3 and 4 hold its Speed and Energy Upgrades (`Upgrades.slots(8, 53)`, reached
+through no face). Data 7 `progress`, 8 `ticksRequired` (200), 9 `energyPerTick` (50), 10
 `smelting` (the item in the input; another one starts over), 11 `state`, its state code (0 idle, 1
 no power, 2 output full), and 12 `activeDelay`; 4 values are spare. Each tick `settings` works out
 the ticks, the energy per tick and the capacity from the cards installed (Mekanism's maths, below;
@@ -1528,9 +1565,15 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - Sides are Minecraft's Direction ordinal everywhere in the pipes (0 Down .. 5 East,
   `Transmitters.SIDES`); transmitter modes, colours, network buffers and tank contents live in
   memory, like chests.
-- Transmitters, fluid tanks, chests and furnaces only come from edits: the pipes read unloaded
-  chunks' edit lists to find them. Generating any of them would need Transmitters/Transmitters to
-  learn about it.
+- Transmitters, fluid tanks, chests and furnaces only come from edits: the pipes (and furnaces
+  pushing their results into chests) read unloaded chunks' edit lists to find them. Generating any
+  of them would need Transmitters/Transmitters and Players/Inventories to learn about it.
+- Furnaces and machines follow Mekanism's machine rules for automation on every face: inputs only
+  take what they can use, transporters only ever take results (never the input or fuel), and
+  results are pushed out on their own into transporters (NORMAL / PULL sides) and plain
+  inventories, never straight into another furnace or machine. A new machine gets this from its
+  slots (`output = true` slots are pushed out); `Transmitters/Inventories` is the one place the
+  faces are decided.
 - Ore features (`Generation/Ores`) are placed in list order from one random stream per chunk:
   append new ones, never reorder or change earlier ones, or every unedited world's ores move.
 - Machine data starts with the shared header (energy always at 1); kinds append fields, at most

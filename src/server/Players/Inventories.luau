@@ -19,7 +19,9 @@
 	  Furnaces   cook 20 times a second whether anyone looks or not (Containers.tickFurnaces, on a
 	             fixed step that catches up at most a few ticks per frame). Any action in a furnace
 	             window marks that furnace active. Its viewers get a snapshot at once when its slots
-	             change, and every other tick when only the flame or the arrow moved.
+	             change, and every other tick when only the flame or the arrow moved. Every 10 ticks
+	             a furnace with results pushes them into the chests next to it (Transmitters/Eject,
+	             Mekanism's ejector; blocks read without generating terrain, as the pipes do).
 	  Tools      ServerNet times and harvests breaks with `heldTool` and wears the tool with
 	             `wearTool` (InventoryState.wearHeld: at its durability it breaks).
 	  Placing    ServerNet asks `place` before putting a block down: survival players use up the held
@@ -30,7 +32,8 @@
 	  Using      Players/ItemUse (buckets) reads the held stack (`heldStack`, `hasItem`), replaces it
 	             (`setHeld`) and hands stacks over (`give`: what does not fit is thrown).
 	  Pipes      Mekanism's transporters put items into chests and furnaces and take them out
-	             (Transmitters/Transport, through Containers); `containerChanged` then sends the
+	             (Transmitters/Transport, through Containers), and furnaces and machines push their
+	             results into chests (Transmitters/Eject); `containerChanged` then sends the
 	             viewers a snapshot and lets a furnace cook.
 	  Death      everything drops where the player died (scattered), unless
 	             Config.Gameplay.KeepInventory.
@@ -53,6 +56,8 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local ChunkLayout = require(Shared.World.ChunkLayout)
+local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local SharedSounds = require(Shared.Sounds)
@@ -64,6 +69,7 @@ local Entities = require(script.Parent.Parent.Entities.Entities)
 local Containers = require(script.Parent.Containers)
 local InventoryState = require(script.Parent.InventoryState)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local Eject = require(script.Parent.Parent.Transmitters.Eject)
 
 type Stack = Types.Stack
 
@@ -357,8 +363,13 @@ end
 --[[
 	One furnace tick for every active furnace. Viewers see changed slots at once; changes to the
 	flame and the arrow alone wait for every FURNACE_DATA_INTERVAL-th tick (`pending` keeps them).
+	Every Eject.INTERVAL-th tick the furnaces with results push them into the chests next to them
+	(`eject`: their viewers and the chests' get snapshots through containerChanged).
 ]]
-local function tickFurnaces(tick: number, pending: { [string]: Containers.FurnaceChange })
+local function tickFurnaces(tick: number, pending: { [string]: Containers.FurnaceChange }, eject: Eject.Env)
+	if tick % Eject.INTERVAL == 0 then
+		Eject.furnaces(eject)
+	end
 	for _, change in Containers.default:tickFurnaces() do
 		local key = `{change.x},{change.y},{change.z}`
 		if change.slots then
@@ -434,6 +445,25 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 		throwBudget[player] = nil
 	end)
 
+	-- Furnaces' results into the chests next to them. Blocks without generating terrain: chests
+	-- and furnaces only ever come from edits, so a chunk the server has not generated is read
+	-- from its edit list (nil: generated terrain, no chest), as the pipes read it.
+	local eject: Eject.Env = {
+		getBlock = function(x: number, y: number, z: number): number?
+			local block = world:peekBlock(x, y, z)
+			if block ~= nil then
+				return block
+			elseif y < 0 or y >= HEIGHT then
+				return nil
+			end
+			local cx, cz, lx, lz = Coords.blockToChunk(x, z)
+			local edits = world:chunkEdits(cx, cz)
+			return if edits then edits[ChunkLayout.localIndex(lx, y, lz)] else nil
+		end,
+		containers = Containers.default,
+		inventoryChanged = Inventories.containerChanged,
+	}
+
 	local sinceCheck = 0
 	local furnaceTime = 0
 	local furnaceTicks = 0
@@ -443,7 +473,7 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 		while furnaceTime >= FURNACE_TICK do
 			furnaceTime -= FURNACE_TICK
 			furnaceTicks += 1
-			tickFurnaces(furnaceTicks, furnacePending)
+			tickFurnaces(furnaceTicks, furnacePending, eject)
 		end
 		sinceCheck += dt
 		if sinceCheck >= CHECK_INTERVAL then

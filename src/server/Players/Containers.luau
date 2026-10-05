@@ -27,6 +27,9 @@
 	which ones changed. Only furnaces marked active (`markActive`, after a viewer changed one) are
 	ticked; one whose tick changes nothing stays that way until someone changes it again (the tick
 	only depends on the furnace), so it leaves the set and idle furnaces cost nothing.
+	Furnaces push their results out on their own (Mekanism's ejector, Transmitters/Eject): the
+	ones whose output holds something are kept in a set of their own (`ejectingFurnaces`), filled
+	when a tick or a change leaves results in the output and emptied as the outputs are.
 
 	Pure Luau (no Roblox APIs) so the tests can run it. `Containers.new()` makes a store; the
 	module's own functions (`Containers.get`, `Containers.take`...) use the server's store.
@@ -60,6 +63,8 @@ export type Store = {
 	count: number,
 	-- Keys of the furnaces to tick.
 	active: { [string]: boolean },
+	-- Keys of the furnaces whose output may hold results to push out (Transmitters/Eject).
+	ejecting: { [string]: boolean },
 	-- Called when a container gets its first viewer (opened = true) or loses its last (false).
 	onOpeners: ((x: number, y: number, z: number, container: Container, opened: boolean) -> ())?,
 
@@ -71,6 +76,7 @@ export type Store = {
 	viewers: (self: Store, x: number, y: number, z: number) -> { any },
 	markActive: (self: Store, x: number, y: number, z: number) -> (),
 	tickFurnaces: (self: Store) -> { FurnaceChange },
+	ejectingFurnaces: (self: Store) -> { Entry },
 }
 
 local Store = {}
@@ -78,6 +84,12 @@ Store.__index = Store
 
 local function keyOf(x: number, y: number, z: number): string
 	return `{x},{y},{z}`
+end
+
+-- Does a furnace's output hold anything (results to push out)?
+local function hasResults(container: Container): boolean
+	local output = container.slots[Types.FURNACE_OUTPUT]
+	return output ~= nil and output.count > 0
 end
 
 -- Nothing in it worth keeping: no items and, for a furnace, no fire or cooking progress. A
@@ -162,6 +174,7 @@ function Store.take(self: Store, x: number, y: number, z: number): (Container?, 
 	self.entries[key] = nil
 	self.count -= 1
 	self.active[key] = nil
+	self.ejecting[key] = nil
 	local viewers = {}
 	for viewer in entry.viewers do
 		table.insert(viewers, viewer)
@@ -199,6 +212,7 @@ function Store.removeViewer(self: Store, x: number, y: number, z: number, viewer
 		self.entries[key] = nil
 		self.count -= 1
 		self.active[key] = nil
+		self.ejecting[key] = nil
 	end
 end
 
@@ -215,14 +229,18 @@ function Store.viewers(self: Store, x: number, y: number, z: number): { any }
 end
 
 --[[
-	Something may have changed the furnace at (x, y, z) (a viewer's click): it is ticked from now
-	on until it settles. Does nothing where there is no furnace.
+	Something may have changed the furnace at (x, y, z) (a viewer's click, a transporter): it is
+	ticked from now on until it settles, and pushes out what its output holds. Does nothing where
+	there is no furnace.
 ]]
 function Store.markActive(self: Store, x: number, y: number, z: number)
 	local key = keyOf(x, y, z)
 	local entry = self.entries[key]
 	if entry and entry.container.kind == "furnace" then
 		self.active[key] = true
+		if hasResults(entry.container) then
+			self.ejecting[key] = true
+		end
 	end
 end
 
@@ -246,22 +264,43 @@ function Store.tickFurnaces(self: Store): { FurnaceChange }
 			-- (Smelting replaces stack tables rather than changing them.)
 			local slotsChanged = slots[1] ~= input or slots[2] ~= fuel or slots[3] ~= output
 			table.insert(changes, { x = entry.x, y = entry.y, z = entry.z, slots = slotsChanged })
+			if slots[3] ~= output and hasResults(furnace) then
+				self.ejecting[key] = true
+			end
 		else
 			self.active[key] = nil
 			if entry.viewerCount == 0 and isEmpty(furnace) then
 				self.entries[key] = nil
 				self.count -= 1
+				self.ejecting[key] = nil
 			end
 		end
 	end
 	return changes
 end
 
+--[[
+	The furnaces whose output holds results to push out (Transmitters/Eject runs them every 10
+	ticks); furnaces whose output is empty, or that are gone, leave the set.
+]]
+function Store.ejectingFurnaces(self: Store): { Entry }
+	local list: { Entry } = {}
+	for key in self.ejecting do
+		local entry = self.entries[key]
+		if entry and entry.container.kind == "furnace" and hasResults(entry.container) then
+			table.insert(list, entry)
+		else
+			self.ejecting[key] = nil
+		end
+	end
+	return list
+end
+
 local Containers = {}
 
 -- A new, empty store (the tests make their own; the game uses `Containers.default`).
 function Containers.new(): Store
-	return (setmetatable({ entries = {}, count = 0, active = {} }, Store) :: any) :: Store
+	return (setmetatable({ entries = {}, count = 0, active = {}, ejecting = {} }, Store) :: any) :: Store
 end
 
 -- The server's containers.

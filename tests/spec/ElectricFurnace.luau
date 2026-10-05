@@ -1,7 +1,7 @@
 --[[
 	Mekanism's Energized Smelter, named the Electric Furnace (Shared/Machines/Kinds/Smelter,
 	BlockList ElectricFurnace): the block and Mekanism's numbers, the recipe, the slots' rules
-	(hand, shift-click, transporters through their sides), smelting (200 ticks at 50 J a tick, an
+	(hand, shift-click, transporters through any face), smelting (200 ticks at 50 J a tick, an
 	item at a time), the power cut (the progress waits), a full output and another item, data
 	from elsewhere, the server's machines (a Heat Generator feeding it by cable, the creative cube
 	filling it in a tick, records with its state), sustained energy, the panel, the status line
@@ -208,33 +208,47 @@ return function(t, shared, require, server, client)
 		t.eq(ingots, 5, "shift-clicked into the inventory")
 	end)
 
-	t.test("electric furnace: transporters fill it from above and the sides, empty it below", function()
-		t.eq(#Machines.insertSlots(FURNACE, DOWN), 0, "nothing goes in through the bottom")
-		t.eq(table.concat(Machines.extractSlots(FURNACE, DOWN), ","), "2", "results come out of the bottom")
-		for face = 1, 5 do
+	t.test("electric furnace: transporters fill and empty it through any face, never its upgrades", function()
+		for face = 0, 5 do
 			t.eq(table.concat(Machines.insertSlots(FURNACE, face), ","), "1", `face {face} takes what smelts`)
-			t.eq(#Machines.extractSlots(FURNACE, face), 0, `face {face} gives nothing`)
+			t.eq(table.concat(Machines.extractSlots(FURNACE, face), ","), "2", `face {face} gives the results`)
 		end
+		t.eq(table.concat(Machines.outputSlots(FURNACE), ","), "2", "it pushes its results out")
+		t.ok(Transmitters.ejects(FURNACE))
 		-- Through Shared/Transmitters, as the server's transporters use it.
-		local after, left = Transmitters.insert(FURNACE, UP, {}, S(I.RawIron, 70))
-		t.eq(after[INPUT].count, 64)
-		t.eq(after[OUTPUT], nil)
-		t.eq(left and left.count, 6)
-		local _, refused = Transmitters.insert(FURNACE, DOWN, {}, S(I.RawIron, 5))
-		t.eq(refused and refused.count, 5, "the bottom takes nothing")
+		for face = 0, 5 do
+			local after, left = Transmitters.insert(FURNACE, face, {}, S(I.RawIron, 70))
+			t.eq(after[INPUT].count, 64, `ore in through face {face}`)
+			t.eq(after[OUTPUT], nil)
+			t.eq(left and left.count, 6)
+		end
 		t.eq(Transmitters.room(FURNACE, 4, {}, S(I.Cobblestone, 3)), 3, "a side takes cobblestone")
+		t.eq(Transmitters.room(FURNACE, DOWN, {}, S(I.Cobblestone, 3)), 3, "so does the bottom")
 		t.eq(Transmitters.room(FURNACE, 4, {}, S(I.Diamond, 3)), 0, "only what smelts")
+		t.eq(Transmitters.room(FURNACE, UP, {}, S(I.Coal, 3)), 0, "it burns no fuel")
 		local slots = { [INPUT] = S(I.RawIron, 9), [OUTPUT] = S(I.IronIngot, 4) }
-		t.eq(#Transmitters.available(FURNACE, UP, slots), 0, "the top gives nothing")
-		local below = Transmitters.available(FURNACE, DOWN, slots)
-		t.eq(#below, 1)
-		t.eq(below[1].item, I.IronIngot, "only the results come out")
-		local rest, taken = Transmitters.extract(FURNACE, DOWN, slots, 64)
+		for face = 0, 5 do
+			local out = Transmitters.available(FURNACE, face, slots)
+			t.eq(#out, 1, `face {face} gives only the results`)
+			t.eq(out[1].item, I.IronIngot)
+			t.ok(not Transmitters.canExtract(FURNACE, face, INPUT, I.RawIron), `the input stays (face {face})`)
+		end
+		local rest, taken = Transmitters.extract(FURNACE, UP, slots, 64)
 		t.eq(taken and taken.count, 4)
 		t.eq(rest[OUTPUT], nil)
 		t.eq(rest[INPUT].count, 9, "the input stays")
-		t.ok(not Transmitters.canExtract(FURNACE, DOWN, INPUT, I.RawIron))
 		t.ok(Transmitters.canInsert(FURNACE, 2, INPUT, I.Sand))
+		-- The upgrade cards: no face reaches them, in or out.
+		local cards = { [3] = S(I.SpeedUpgrade, 4), [4] = S(I.EnergyUpgrade, 2) }
+		for face = 0, 5 do
+			t.ok(not Transmitters.canInsert(FURNACE, face, 3, I.SpeedUpgrade), `no cards in (face {face})`)
+			t.ok(not Transmitters.canInsert(FURNACE, face, 4, I.EnergyUpgrade))
+			t.ok(not Transmitters.canExtract(FURNACE, face, 3, I.SpeedUpgrade), `no cards out (face {face})`)
+			t.eq(#Transmitters.available(FURNACE, face, cards), 0)
+			local _, card = Transmitters.insert(FURNACE, face, {}, S(I.SpeedUpgrade, 1))
+			t.eq(card and card.count, 1, "a card is refused")
+		end
+		t.eq(#Transmitters.results(FURNACE, cards), 0, "nor are they pushed out")
 	end)
 
 	--[[ Smelting ]]

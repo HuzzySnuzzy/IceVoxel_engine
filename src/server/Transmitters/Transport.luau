@@ -9,11 +9,22 @@
 	pulls through each of them, then waits PULL_DELAY (10) ticks; when nothing was there it looks
 	again after 3 ticks, and when items were there but could go nowhere it backs off
 	min(40, e^failures) ticks. A pull is Mekanism's TransitRequest: the item types the inventory
-	gives through its face towards the transporter (Transmitters.available: a furnace's output
-	and only buckets from its fuel through its bottom...), in order; the first type with a
-	destination sends up to the tier's pull amount (1 / 16 / 32 / 64, never more than a stack) or
-	as many as the destination takes. The destination is found before anything is taken, so items
-	are never pulled with nowhere to go. A pulled item takes the transporter's colour.
+	gives through its face towards the transporter (Transmitters.available: a chest's anything, a
+	furnace's or machine's results only, never its input or fuel), in order; the first type with
+	a destination sends up to the tier's pull amount (1 / 16 / 32 / 64, never more than a stack)
+	or as many as the destination takes. The destination is found before anything is taken, so
+	items are never pulled with nowhere to go. A pulled item takes the transporter's colour.
+
+	Ejected items (Mekanism's ejector: TileComponentEjector into canReceiveFrom sides). A furnace
+	or a machine with output slots (Transmitters.ejects) pushes its results out on its own into
+	the transporters whose side on it receives (NORMAL or PULL: Transmitters.receives; never PUSH
+	or NONE). Here that is the same pass as a pull, on the same timer, one pass per side: a NORMAL
+	side on such a block takes what its output slots hold (Transmitters.results), a PULL side what
+	its face gives (the results and a fuel slot's leftovers), and on either a whole stack may go
+	at once (the ejector's amount) rather than the tier's pull amount. Like pulled items they only
+	leave with a destination (never the furnace or machine they came from, which is no home for
+	them either: with nowhere left to go they wait) and take the transporter's colour. Chests next
+	to a furnace or machine get theirs from Transmitters/Eject.
 
 	Routes (TransporterPathfinder). From the transporter an item is in, a search over joined
 	transporters (Dijkstra) adds Mekanism's cost of every transporter entered
@@ -24,12 +35,13 @@
 	the face towards the transporter wins (Transmitters.room, after the items already on their way
 	there: Mekanism's TransporterManager predictions). Only NORMAL and PUSH sides give items to an
 	inventory (Transmitters.outputs), and the inventory the item came from is never a destination.
-	Failing that, the item goes home: back to that inventory through any side joined to it.
-	Failing that too, it waits where it is (in the middle of its transporter) and looks again
-	every RETRY_TICKS (20) ticks. (Mekanism's items wander along the transporters instead.) A
-	search visits MAX_SEARCH (4096) transporters at most, and once a tick's searches have visited
-	SEARCH_BUDGET (4096), waiting items and pulls wait for a later tick, so big networks full of
-	waiting items cannot stall the server.
+	Failing that, the item goes home: back to that inventory through any side joined to it (not
+	a furnace's or machine's results: they never go back in). Failing that too, it waits where it
+	is (in the middle of its transporter) and looks again every RETRY_TICKS (20) ticks.
+	(Mekanism's items wander along the transporters instead.) A search visits MAX_SEARCH (4096)
+	transporters at most, and once a tick's searches have visited SEARCH_BUDGET (4096), waiting
+	items and pulls wait for a later tick, so big networks full of waiting items cannot stall the
+	server.
 
 	Moving. Every tick an item's progress grows by its transporter's speed (5 / 10 / 20 / 50 a
 	tick, 100 = one block). Halfway through it checks the way ahead (the next transporter still
@@ -434,7 +446,7 @@ local function reroute(world: World, item: Item, node: Node, quiet: boolean?): b
 	untrack(world, item)
 	local candidates, back = search(world, node, item.colour)
 	local target: ("dest" | "home")? = "dest"
-	local candidate = choose(world, candidates, item.stack, item.home, nil, item)
+	local candidate = choose(world, candidates, item.stack, item.from, nil, item)
 	if candidate == nil and item.home then
 		target = "home"
 		candidate = choose(world, candidates, item.stack, nil, item.home, item)
@@ -572,13 +584,15 @@ end
 --[[
 	One pull of `node` through `side` (Mekanism's TransitRequest): "sent", "failed" (items there,
 	nowhere to send them) or "none" (nothing to take). `routes` gives the route search, which is
-	the same for every side of the transporter (it is only run when needed).
+	the same for every side of the transporter (it is only run when needed). `ejected`: a NORMAL
+	side taking what a furnace or machine pushes out (its output slots only), else a PULL side.
 ]]
 local function pullSide(
 	world: World,
 	node: Node,
 	side: number,
-	routes: () -> ({ Candidate }, { [number]: number })
+	routes: () -> ({ Candidate }, { [number]: number }),
+	ejected: boolean
 ): string
 	local inventory = Grid.neighbour(node.key, side)
 	if inventory == nil then
@@ -590,17 +604,29 @@ local function pullSide(
 		return "none"
 	end
 	local face = opposite(side)
-	local types = Transmitters.available(block, face, container.slots)
+	local types: { Stack } = if ejected
+		then Transmitters.results(block, container.slots)
+		else Transmitters.available(block, face, container.slots)
 	if #types == 0 then
 		return "none"
 	end
 	local candidates, back = routes()
+	-- A furnace or machine pushes a stack out at once (the ejector); other inventories give the
+	-- tier's pull amount.
+	local ejects = Transmitters.ejects(block)
 	local pull = Transmitters.pullAmount(node.block)
 	for _, kind in types do
-		local want = Items.withCount(kind, math.min(kind.count, pull)) :: Stack
+		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
+		local want = Items.withCount(kind, math.min(kind.count, most)) :: Stack
 		local candidate, room = choose(world, candidates, want, inventory, nil, nil)
 		if candidate then
-			local newSlots, taken = Transmitters.extract(block, face, container.slots, math.min(want.count, room), kind)
+			local count = math.min(want.count, room)
+			local newSlots: Slots, taken: Stack?
+			if ejected then
+				newSlots, taken = Transmitters.takeResults(block, container.slots, count, kind)
+			else
+				newSlots, taken = Transmitters.extract(block, face, container.slots, count, kind)
+			end
 			if taken then
 				store(world, x, y, z, block, newSlots)
 				local id = world.nextItem
@@ -615,7 +641,9 @@ local function pullSide(
 					face = candidate.face,
 					progress = 0,
 					wait = 0,
-					home = inventory,
+					from = inventory,
+					-- (A furnace's or machine's results never go back into it.)
+					home = if ejects then nil else inventory,
 					sentHop = 1,
 					sentSpeed = 0,
 				}
@@ -630,7 +658,8 @@ local function pullSide(
 	return "failed"
 end
 
--- The PULL sides of transporter `node`, when its pull timer is up.
+-- The PULL sides of transporter `node`, and its NORMAL sides on furnaces and machines that push
+-- their results out, when its pull timer is up.
 local function pull(world: World, node: Node)
 	if node.pullDelay > 0 then
 		node.pullDelay -= 1
@@ -649,8 +678,11 @@ local function pull(world: World, node: Node)
 		return candidates :: { Candidate }, back :: { [number]: number }
 	end
 	for side = 0, 5 do
-		if has(node.acceptors, side) and modeOf(node.modes, side) == PULL then
-			local result = pullSide(world, node, side, routes)
+		local mode = modeOf(node.modes, side)
+		if has(node.acceptors, side) and Transmitters.receives(mode) then
+			-- (A NORMAL side only takes what a furnace or machine pushes out: from anything else
+			-- there is nothing to take.)
+			local result = pullSide(world, node, side, routes, mode ~= PULL)
 			if result == "sent" then
 				sent = true
 			elseif result == "failed" then

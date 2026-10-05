@@ -16,8 +16,10 @@
 	Each `step` (20 a second, Shared/Machines' order): queued network work, then every machine's
 	kind tick (Machines.tick: its own work, energy kept within its capacity), then the energy
 	networks move energy (EnergyNet.solve). A kind whose tick errors is reported once and skipped.
-	Afterwards `takeChanges` says whose slots and whose data changed (their viewers need a
-	snapshot).
+	Every Eject.INTERVAL (10) ticks a machine with output slots also pushes its results into the
+	chests next to it after its tick (Transmitters/Eject, Mekanism's ejector; the transporters
+	around take theirs themselves). Afterwards `takeChanges` says whose slots and whose data
+	changed (their viewers need a snapshot).
 
 	The sky. Kinds ask whether a cell sees the sky straight up (TickContext `sky`: solar panels).
 	`seesSky` answers from a cache per cell, filled by the game's uncached look (Env `sky`:
@@ -49,6 +51,7 @@ local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 
 local EditRules = require(script.Parent.Parent.Network.EditRules)
+local Eject = require(script.Parent.Parent.Transmitters.Eject)
 local Grid = require(script.Parent.Parent.Transmitters.Grid)
 local EnergyNet = require(script.Parent.EnergyNet)
 local Types = require(script.Parent.Types)
@@ -395,6 +398,7 @@ function MachineWorld.step(world: World)
 	local dayTime = world.env.dayTime
 	ctx.tick = world.tick
 	ctx.dayTime = if dayTime then dayTime() else NOON
+	local eject = world.tick % Eject.INTERVAL == 0
 	for _, machine in world.machines do
 		local container = machine.container
 		local data = container.data :: { number }
@@ -408,6 +412,9 @@ function MachineWorld.step(world: World)
 		if not ok and not world.failed[machine.kind.name] then
 			world.failed[machine.kind.name] = true
 			warn(`[IceVoxel] machine kind {machine.kind.name} failed to tick: {err}`)
+		end
+		if eject and #machine.kind.outputs > 0 then
+			Eject.push(world.env, machine.x, machine.y, machine.z, container)
 		end
 		data = container.data :: { number }
 		data[INPUT], data[OUTPUT] = 0, 0

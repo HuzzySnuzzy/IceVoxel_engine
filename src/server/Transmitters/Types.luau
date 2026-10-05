@@ -59,7 +59,8 @@ export type Node = {
 	acceptors: number,
 	-- Mechanical pipes: the network they belong to (always one, a lone pipe's own).
 	network: Network?,
-	-- Transporters: ticks until the PULL sides pull again, and failed pulls in a row (backoff).
+	-- Transporters: ticks until the PULL sides pull again (and the NORMAL sides take what
+	-- furnaces and machines push out), and failed pulls in a row (backoff).
 	pullDelay: number,
 	pullFailures: number,
 	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0).
@@ -102,7 +103,10 @@ export type Item = {
 	progress: number,
 	-- Waiting: ticks until it looks for a way again.
 	wait: number,
-	-- The inventory it was pulled from (pos key).
+	-- The inventory it was taken from (pos key), never a destination for it, and the one it may
+	-- go back to when no destination takes it: the same, but nil for a furnace's or machine's
+	-- results, which never go back in.
+	from: number?,
 	home: number?,
 	-- The hop and speed of the last Transport add sent for it (a long route is sent again on the
 	-- way, and a change of speed is sent).
@@ -141,7 +145,8 @@ export type World = {
 	seeds: { number },
 	seedSet: { [number]: boolean },
 	job: { visited: { [number]: boolean }, frontier: { number }, members: { Node } }?,
-	-- Transporters with a PULL side on an inventory.
+	-- Transporters with a PULL side on an inventory, or a NORMAL side on a furnace or machine
+	-- that pushes its results out (Transmitters.ejects).
 	pullers: { [number]: Node },
 	items: { [number]: Item },
 	itemCount: number,

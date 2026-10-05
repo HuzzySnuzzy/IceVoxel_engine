@@ -39,12 +39,13 @@
 	                arrived goes after ARRIVAL_GRACE seconds if no Remove came; one removed as
 	                arrived first finishes its way (at most ARRIVED_WAIT seconds); dropped or gone
 	                ones go at once. The way an item came into its first block is not sent: it is
-                taken from its previous route (a re-route, a new speed) or, for an item just
-                pulled, from the transporter's one PULL side on an inventory
-                (TransmitterModel.entryOf, pullEntry); else it comes in straight. Items are not
-                drawn over chunks that are not loaded. The server
-	                only tells players near them, so items that stayed out of range for
-	                FORGET_AFTER seconds are forgotten (moving ones end with their way anyway).
+	                taken from its previous route (a re-route, a new speed) or, for an item just
+	                pulled, from the transporter's one PULL side on an inventory, else its one
+	                NORMAL side on a furnace or machine that pushed it out
+	                (TransmitterModel.entryOf, pullEntry); else it comes in straight. Items are
+	                not drawn over chunks that are not loaded. The server only tells players near
+	                them, so items that stayed out of range for FORGET_AFTER seconds are forgotten
+	                (moving ones end with their way anyway).
 
 	Which positions hold transmitters, tanks and machines: they only come from edits (never from
 	generation), so a chunk's are found in its edit list when its data is loaded (World/ClientWorld
@@ -819,20 +820,38 @@ local function connectionsAt(x: number, y: number, z: number): (number, number)
 	return Transmitters.connections(block, modes, colour, x, y, z, getBlock, getState)
 end
 
+-- Those of `acceptors` (sides of the transmitter at (x, y, z)) whose block pushes its results
+-- out on its own: furnaces and machines (Transmitters.ejects).
+local function ejectorsAt(x: number, y: number, z: number, acceptors: number): number
+	local mask = 0
+	for side = 0, 5 do
+		local bit = bit32.lshift(1, side)
+		if bit32.band(acceptors, bit) ~= 0 then
+			local dx, dy, dz = Transmitters.offset(side)
+			local block = getBlock(x + dx, y + dy, z + dz)
+			if block ~= nil and Transmitters.ejects(block) then
+				mask = bit32.bor(mask, bit)
+			end
+		end
+	end
+	return mask
+end
+
 local function onTransport(ops: { Protocol.TransportOp })
 	local clock = os.clock()
 	for _, op in ops do
 		if op.op == "add" then
 			local entry = transit[op.id]
 			-- The way it came into its block: from the way it was going (a re-route, a new
-			-- speed), else (just pulled) out of the inventory on the transporter's PULL side.
+			-- speed), else (just pulled) out of the inventory on the transporter's PULL side, or
+			-- out of the furnace or machine that pushed it out.
 			local way: number? = nil
 			if entry then
 				way = TransmitterModel.entryOf(entry.route, op.x, op.y, op.z)
 			elseif op.progress < 50 then
 				local modes = getState(op.x, op.y, op.z)
 				local _, acceptors = connectionsAt(op.x, op.y, op.z)
-				way = TransmitterModel.pullEntry(modes, acceptors)
+				way = TransmitterModel.pullEntry(modes, acceptors, ejectorsAt(op.x, op.y, op.z, acceptors))
 			end
 			local route = TransmitterModel.route(op.x, op.y, op.z, op.progress, op.speed, op.path, speedAt, way)
 			if entry then

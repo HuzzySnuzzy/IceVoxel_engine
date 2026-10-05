@@ -21,10 +21,11 @@
 
 	Each side of a transmitter has a connection mode (Mekanism's ConnectionType), which the
 	Configurator cycles NORMAL -> PUSH -> PULL -> NONE -> NORMAL (`nextMode`):
-	  NORMAL  connects; items and water may leave the network into an acceptor there
-	  PUSH    the same, but only out of the network (it never pulls)
+	  NORMAL  connects; items and water may leave the network into an acceptor there, and a
+	          transporter takes what a furnace or machine there pushes out (`receives`)
+	  PUSH    the same, but only out of the network (it never pulls nor receives)
 	  PULL    takes from the acceptor there (every PULL_DELAY ticks for transporters, every tick
-	          for pipes) and never gives to it
+	          for pipes; only the results of a furnace or machine) and never gives to it
 	  NONE    no connection at all
 	Universal Cables only know NONE: PUSH and PULL act as NORMAL there (an energy block's part in
 	its network is its own: Machines.role).
@@ -45,7 +46,8 @@
 	to Ultimate, 1000 for the Restrictive Transporter.
 
 	Sided inventories (insertSlots, extractSlots, canInsert, canExtract, room, insert, available,
-	extract) come from Transmitters/Inventories, see there.
+	extract) and what furnaces and machines push out on their own (isPlain, ejects, ejectSlots,
+	results, takeResults: Mekanism's ejector) come from Transmitters/Inventories, see there.
 
 	Pure: no Roblox APIs, so it runs in tests and on both sides.
 ]]
@@ -164,6 +166,14 @@ end
 -- Does a side in `mode` pull from the acceptor there (PULL)?
 function Transmitters.pulls(mode: number): boolean
 	return mode == PULL
+end
+
+--[[
+	Does a transporter side in `mode` take what the furnace or machine there pushes out on its own
+	(NORMAL, PULL: Mekanism's canReceiveFrom)? PUSH only gives and NONE is cut.
+]]
+function Transmitters.receives(mode: number): boolean
+	return mode == NORMAL or mode == PULL
 end
 
 --[[
@@ -531,5 +541,10 @@ Transmitters.room = Inventories.room
 Transmitters.insert = Inventories.insert
 Transmitters.available = Inventories.available
 Transmitters.extract = Inventories.extract
+Transmitters.isPlain = Inventories.isPlain
+Transmitters.ejects = Inventories.ejects
+Transmitters.ejectSlots = Inventories.ejectSlots
+Transmitters.results = Inventories.results
+Transmitters.takeResults = Inventories.takeResults
 
 return Transmitters

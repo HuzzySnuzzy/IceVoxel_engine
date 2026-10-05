@@ -31,7 +31,8 @@
 	  Items     stacks in Logistical Transporters (Transmitters/Transport).
 
 	Each `step` (20 a second): queued network work, then Transport.step (items move, transporters
-	pull), then Fluids.step (pipes pull from and push into tanks), then pipe fills.
+	pull, and take what furnaces and machines push out), then Fluids.step (pipes pull from and
+	push into tanks), then pipe fills.
 
 	Replication. `takeRecords` gives the Transmitters records (modes, colour, pipe fill) and Tanks
 	records that changed since the last call (compared with what was last sent, so nothing is sent
@@ -69,6 +70,7 @@ local MAX_REBUILD = 4096
 -- Ticks between two records of a network's fill or a tank's contents (4 a second).
 local FILL_INTERVAL = 5
 local NONE = Transmitters.FLUIDS.NONE
+local NORMAL = Transmitters.MODES.NORMAL
 local PULL = Transmitters.MODES.PULL
 
 local TransmitterWorld = {}
@@ -357,10 +359,29 @@ end
 --[[ Links ]]
 
 --[[
+	Does a NORMAL side of transporter `node` on an acceptor (`acceptors`) face a furnace or machine
+	that pushes its results out on its own (Transmitters.ejects)? Such a side takes them
+	(Transmitters/Transport), so the transporter pulls.
+]]
+local function receivesEjected(world: World, node: Node, acceptors: number): boolean
+	for side = 0, 5 do
+		if has(acceptors, side) and Transmitters.modeOf(node.modes, side) == NORMAL then
+			local dx, dy, dz = Transmitters.offset(side)
+			local block = blockAt(world, node.x + dx, node.y + dy, node.z + dz)
+			if block ~= nil and Transmitters.ejects(block) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[
 	Works out again which sides of `node` join transmitters and acceptors (Transmitters.connections)
 	and what follows: a pipe whose links changed is queued for its network with the pipes it
 	joined or left; a pipe's network knows its pipes on tanks; transporters with PULL sides on
-	inventories are the pullers.
+	inventories, or NORMAL sides on furnaces and machines that push their results out, are the
+	pullers.
 ]]
 local function relink(world: World, node: Node)
 	local function getBlock(x: number, y: number, z: number): number?
@@ -400,7 +421,7 @@ local function relink(world: World, node: Node)
 		elseif network then
 			network.ports[node.key] = nil
 		end
-	elseif bit32.band(acceptors, pullMask(node.modes)) ~= 0 then
+	elseif bit32.band(acceptors, pullMask(node.modes)) ~= 0 or receivesEjected(world, node, acceptors) then
 		world.pullers[node.key] = node
 	else
 		world.pullers[node.key] = nil

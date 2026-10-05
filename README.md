@@ -64,26 +64,33 @@ A fast, Minecraft-style voxel engine for Roblox.
   a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
   a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
-  (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see them
-  move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half second,
-  which travel at 1 / 2 / 4 / 10 blocks a second along the cheapest route (faster transporters
-  cost less) to an inventory that takes them (a furnace by its sides, as Minecraft's hoppers see
-  it: ore in the top, fuel in the sides, results out of the bottom; an Electric Furnace takes ore in the top and the sides and gives its results out of the bottom). Restrictive Transporters are
-  only used when there is no other way. Transporters coloured with the Configurator (Minecraft's
-  16 dyes) only join their own colour or uncoloured ones, and the items they pull keep their
-  colour: they travel through uncoloured transporters and ones of their colour only (items pulled
-  by an uncoloured transporter stay off coloured ones), to keep lines apart. Mechanical Pipes move
-  water between Fluid Tanks (32 000 to 256 000 mB) at Mekanism's rates, and Minecraft's Bucket and
-  Water Bucket carry it to and from tanks and the world. The Configurator cycles a side between
-  normal, push, pull and none (right click) and a transporter's colour (sneak + right click).
-  Recipes follow Mekanism's shapes with the game's materials (gold, diamond and emerald stand for
-  its alloys). Players walk through transmitters, as through lanterns; their state and the tanks'
-  water live in memory, like chests. Pressurized Tubes and Thermodynamic Conductors are not
-  included: the game has no gas or heat (Universal Cables: see Electricity).
-  Items that no inventory takes go back to the one they came from, or wait in their transporter
-  until one turns up; a broken transporter drops what is in it. Pipes join into networks that share
-  their water (breaking a pipe loses its share), and both keep working where no player is, like
-  furnaces.
+  (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
+  them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
+  second, which travel at 1 / 2 / 4 / 10 blocks a second along the cheapest route (faster
+  transporters cost less) to an inventory that takes them. Furnaces and machines follow Mekanism's
+  machine rules on every side: transporters put ore and fuel in through any side (what smelts into
+  the input, fuel into the fuel slot, logs into the input first and then the fuel; nothing else
+  goes in) and only ever take the results out (and an empty bucket left in a fuel slot), never the
+  ore or fuel you put in. Furnaces and machines push their results out on their own every half
+  second, a stack at a time (Mekanism's ejector): into a chest next to them, or into a transporter
+  next to them whose side is normal or pull (never push or none), which only takes them when they
+  have somewhere to go (never back in) and colours them; never straight into another furnace or
+  machine, though transporters can lead them there. Restrictive Transporters are only used when
+  there is no other way. Transporters coloured with the Configurator (Minecraft's 16 dyes) only
+  join their own colour or uncoloured ones, and the items they pull keep their colour: they travel
+  through uncoloured transporters and ones of their colour only (items pulled by an uncoloured
+  transporter stay off coloured ones), to keep lines apart. Mechanical Pipes move water between
+  Fluid Tanks (32 000 to 256 000 mB) at Mekanism's rates, and Minecraft's Bucket and Water Bucket
+  carry it to and from tanks and the world. The Configurator cycles a side between normal, push,
+  pull and none (right click) and a transporter's colour (sneak + right click). Recipes follow
+  Mekanism's shapes with the game's materials (gold, diamond and emerald stand for its alloys).
+  Players walk through transmitters, as through lanterns; their state and the tanks' water live in
+  memory, like chests. Pressurized Tubes and Thermodynamic Conductors are not included: the game
+  has no gas or heat (Universal Cables: see Electricity).
+  Items that no inventory takes go back to the one they came from (a furnace's or machine's results
+  never do), or wait in their transporter until one turns up; a broken transporter drops what is in
+  it. Pipes join into networks that share their water (breaking a pipe loses its share), and both
+  keep working where no player is, like furnaces.
   You see how they are set: transmitters grow arms towards what they connect to, ending in a
   collar between two of them and in a plate on a chest, furnace or tank; where a side pulls from
   or pushes into one of those the arm has a blue (pull) or orange (push) band, and coloured
@@ -110,18 +117,19 @@ A fast, Minecraft-style voxel engine for Roblox.
   row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
   make 8 of the next tier. Like chests, energy lives in memory.
 - **Heat Generator.** Mekanism Generators' Heat Generator burns furnace fuel for electricity: put
-  coal, charcoal, wood or anything else a furnace burns in its fuel slot (by hand, shift-click or
-  a transporter, through any side) and for as long as the item would burn in a furnace it makes
-  200 J a tick (Mekanism's numbers), so a coal is 320 kJ and a plank 60 kJ. It stores 160 kJ and
-  gives up to 400 J/t to the cables and machines around it. It burns only as much as it has room
-  for, so a machine using less than 200 J/t still gets all of each item's energy; full, it stops,
-  keeping what is left of the item, and goes on as soon as energy is taken. Its panel shows the
-  fuel slot under a flame (the burn time left), "Producing 200 J/t" or "Idle", and the energy
-  bar; WAILA says the same, and while it burns the window on its sides glows and it crackles like
-  a lit furnace. Broken with a pickaxe it keeps its energy and what is left burning in its item
-  ("Energy: 80 kJ", "Fuel: 60 s"). Recipe: Mekanism's with iron for its copper, three iron ingots
-  over planks, an osmium ingot and planks, over iron, a furnace and iron. JEI lists every fuel
-  under its uses. Mekanism's lava and nether bonuses don't apply.
+  coal, charcoal, wood or anything else a furnace burns in its fuel slot (by hand, shift-click or a
+  transporter, through any side; transporters never take it back out) and for as long as the item
+  would burn in a furnace it makes 200 J a tick (Mekanism's numbers), so a coal is 320 kJ and a
+  plank 60 kJ. It stores 160 kJ and gives up to 400 J/t to the cables and machines around it. It
+  burns only as much as it has room for, so a machine using less than 200 J/t still gets all of
+  each item's energy; full, it stops, keeping what is left of the item, and goes on as soon as
+  energy is taken. Its panel shows the fuel slot under a flame (the burn time left),
+  "Producing 200 J/t" or "Idle", and the energy bar; WAILA says the same, and while it burns the
+  window on its sides glows and it crackles like a lit furnace. Broken with a pickaxe it keeps its
+  energy and what is left burning in its item ("Energy: 80 kJ", "Fuel: 60 s"). Recipe: Mekanism's
+  with iron for its copper, three iron ingots over planks, an osmium ingot and planks, over iron, a
+  furnace and iron. JEI lists every fuel under its uses. Mekanism's lava and nether bonuses don't
+  apply.
 - **Electric Furnace.** Mekanism's Energized Smelter, named the Electric Furnace, smelts what a
   furnace smelts on electricity instead of fuel: 50 J a tick for 200 ticks an item (Mekanism's
   numbers), so an item takes a furnace's 10 seconds and costs 10 kJ, and a coal burnt in a Heat
@@ -129,9 +137,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   fast as the cables carry). It works only with a whole tick's energy: without power, or with no
   room in its output, it stops where it is and goes on when that changes; taking its input out,
   or putting something else in, starts the item over. What smelts goes into its input by hand,
-  shift-click or a transporter through the top or any side, and the results come out of its
-  output by hand, shift-click or a transporter pulling from the bottom (a furnace's faces without
-  the fuel). Its panel shows the input, the arrow, the output and the energy bar with "Using 50
+  shift-click or a transporter through any side, and the results come out of its output by hand,
+  shift-click or a transporter pulling from any side, and it pushes them out on its own into a
+  chest or transporter next to it (Mekanism's machine rules, as furnaces have them). Its panel
+  shows the input, the arrow, the output and the energy bar with "Using 50
   J/t", "No power", "Output full" or "Idle"; WAILA says the same. While it smelts the heating
   chamber on its sides glows, steadily even when too little power makes it stop and start
   (Mekanism's 3-second deactivation delay). Broken with a pickaxe it keeps its energy in its
@@ -311,7 +320,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Mekanism's energy and fluid formats); ItemList (items that are not blocks)
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
-                            Inventories (sided slots, insert / extract)
+                            Inventories (sided slots, insert / extract, what furnaces and
+                            machines push out)
   Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
                             slot rules, panels and their lines, energy maths and the even split,
                             state codes, sustained data), Upgrades (Mekanism's upgrade cards:
@@ -358,6 +368,7 @@ src/server   -> ServerScriptService.IceVoxel
                             (spawning, replication)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (water in pipes),
+                            Eject (furnaces and machines push their results into chests; pure),
                             UseRules (buckets, Configurator), Transmitters (ticks, replication)
   Machines/                 Mekanism machines and energy on the server: MachineWorld (machines,
                             their ticks, sustained data, records, the cached sky look; pure),
