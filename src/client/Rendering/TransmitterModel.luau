@@ -27,7 +27,8 @@
 	           as soon as there is any water, the arm up only when the pipe is (nearly) full.
 	  tanks    a Fluid Tank's water, from the bottom plate up to amount / capacity of the inside.
 	  machines what a Mekanism machine shows from its Machines record (`machineBoxes`): a burning
-	           Heat Generator's fuel window glows on its four sides.
+	           Heat Generator's fuel window and a smelting Electric Furnace's heating chamber glow
+	           on their four sides.
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -295,6 +296,7 @@ TransmitterModel.GLOW_DEPTH = 0.2
 -- (BlockDecor pixels, from the face's top left), the same rectangle their decor draws dark.
 local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
 	HeatGenerator = BlockDecor.GENERATOR_WINDOW,
+	ElectricFurnace = BlockDecor.ELECTRIC_FURNACE_WINDOW,
 }
 local SIDE_FACES = { "Front", "Back", "Left", "Right" }
 
@@ -314,8 +316,9 @@ end
 --[[
 	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
 	idle machine), and a signature of what they show (equal signatures, equal boxes). A Heat
-	Generator that burns (active) lights its fuel window on its four sides: a thin glowing pane
-	GLOW_DEPTH out of each face over the window its decor draws. Nothing for other blocks.
+	Generator that burns or an Electric Furnace that smelts (active) lights its window on its four
+	sides: a thin glowing pane GLOW_DEPTH out of each face over the window its decor draws.
+	Nothing for other blocks.
 ]]
 function TransmitterModel.machineBoxes(block: number, look: MachineLook?): ({ Box }, string)
 	local glow = glowOf(block)

@@ -4,7 +4,8 @@
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
 	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
 	transmitters, fluid tanks, Configurator, Universal Cables and machines adapted to the game's
-	materials (see "Mekanism pipes and buckets", "Universal Cables" and "Heat Generator" below).
+	materials (see "Mekanism pipes and buckets", "Universal Cables", "Heat Generator" and
+	"Electric Furnace" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -194,6 +195,19 @@ end
 	no copper, so iron ingots stand for it.
 ]]
 shape({ "III", "WOW", "IFI" }, { I = "IronIngot", W = "#planks", O = "OsmiumIngot", F = "Furnace" }, "HeatGenerator")
+
+--[[
+	Mekanism's Energized Smelter (the Electric Furnace), in Mekanism's shape: redstone, a basic
+	control circuit and redstone, over glass, a steel casing and glass, over redstone, a circuit
+	and redstone ("RCR", "GSG", "RCR"). Glowstone dust stands for the redstone (as in the cables),
+	osmium ingots for the circuits (Mekanism's are osmium and redstone) and a furnace for the
+	casing, the machine it builds on.
+]]
+shape(
+	{ "DOD", "GFG", "DOD" },
+	{ D = "GlowstoneDust", O = "OsmiumIngot", G = "Glass", F = "Furnace" },
+	"ElectricFurnace"
+)
 
 --[[ Smelting ]]
 

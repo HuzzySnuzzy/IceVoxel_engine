@@ -42,8 +42,8 @@
 	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid)
 	                or "Furnace".
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
-	                "CreativeEnergyCube", "HeatGenerator"; client Rendering/BlockDecor). Such blocks
-	                are drawn one part per block.
+	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace"; client
+	                Rendering/BlockDecor). Such blocks are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
 	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
 	                Shared/Sounds): "stone", "wood", "gravel", "grass", "sand", "glass", "snow",
@@ -1148,6 +1148,27 @@ table.insert(list, {
 	decor = "HeatGenerator",
 	machine = { kind = "generator" },
 	energy = { capacity = 160000, output = 400 },
+})
+
+--[[
+	Mekanism's Energized Smelter, named the Electric Furnace (Shared/Machines/Kinds/Smelter, kind
+	"smelter"): smelts what a furnace smelts on 50 J a tick of work, 200 ticks an item, from
+	Mekanism's 20 000 J store, which cables and machines touching it may fill in a single tick.
+	Mekanism's machine block: hardness 3.5, a pickaxe to drop anything. A light steel casing with
+	osmium bolts and a heating chamber window (BlockDecor "ElectricFurnace"; the client lights the
+	window while it smelts, Rendering/TransmitterModel.machineBoxes).
+]]
+table.insert(list, {
+	name = "ElectricFurnace",
+	color = { 150, 154, 162 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "ElectricFurnace",
+	machine = { kind = "smelter" },
+	energy = { capacity = 20000, input = 20000 },
 })
 
 return list

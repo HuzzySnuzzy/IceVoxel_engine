@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube and
-	Heat Generator drawn like Minecraft's pixel art.
+	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube,
+	Heat Generator and Electric Furnace drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -303,12 +303,69 @@ local HEAT_GENERATOR: Faces = {
 	Right = generatorSide(true),
 }
 
+--[[
+	Electric Furnace (Mekanism's Energized Smelter): a light steel casing with darker edges and
+	osmium bolts, the heating chamber's window high on each side with its coils showing dark while
+	it is off, a vent under it and a vent over the top. While it smelts the client lights the
+	chamber (Rendering/TransmitterModel.machineBoxes draws a glowing pane over
+	ELECTRIC_FURNACE_WINDOW from the machine's record). Item models show the window on the front
+	pair only, like the furnace's mouth.
+]]
+local SMELTER_EDGE = { 96, 100, 108 }
+local SMELTER_BOLT = { 104, 130, 168 }
+local CHAMBER_FRAME = { 58, 60, 66 }
+local CHAMBER = { 40, 30, 28 }
+local COIL = { 120, 64, 40 }
+local VENT = { 72, 74, 80 }
+local VENT_SLAT = { 120, 124, 132 }
+-- The heating chamber's window on every side (pixels from the face's top left; the glow covers
+-- exactly it).
+BlockDecor.ELECTRIC_FURNACE_WINDOW = table.freeze({ x = 4, y = 4, w = 8, h = 5 })
+local CHAMBER_WINDOW = BlockDecor.ELECTRIC_FURNACE_WINDOW
+
+local function smelterBolts(): { Rect }
+	return {
+		rect(1, 1, 1, 1, SMELTER_BOLT, true),
+		rect(14, 1, 1, 1, SMELTER_BOLT, true),
+		rect(1, 14, 1, 1, SMELTER_BOLT, true),
+		rect(14, 14, 1, 1, SMELTER_BOLT, true),
+	}
+end
+
+local function smelterSide(windowSurfaceOnly: boolean): { Rect }
+	local w = CHAMBER_WINDOW
+	return join(outline(SMELTER_EDGE, true), smelterBolts(), {
+		rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, CHAMBER_FRAME, windowSurfaceOnly),
+		rect(w.x, w.y, w.w, w.h, CHAMBER, windowSurfaceOnly),
+		-- The heating coils across the chamber.
+		rect(w.x, w.y + 1, w.w, 1, COIL, true),
+		rect(w.x, w.y + 3, w.w, 1, COIL, true),
+		-- A vent under the window.
+		rect(4, 11, 8, 3, VENT, windowSurfaceOnly),
+		rect(4, 12, 8, 1, VENT_SLAT, true),
+	})
+end
+
+local ELECTRIC_FURNACE: Faces = {
+	Top = join(outline(SMELTER_EDGE, true), smelterBolts(), {
+		rect(4, 4, 8, 8, VENT),
+		rect(4, 6, 8, 1, VENT_SLAT, true),
+		rect(4, 9, 8, 1, VENT_SLAT, true),
+	}),
+	Bottom = outline(SMELTER_EDGE, true),
+	Front = smelterSide(false),
+	Back = smelterSide(false),
+	Left = smelterSide(true),
+	Right = smelterSide(true),
+}
+
 local DECORS: { [string]: Faces } = {
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
 	Furnace = FURNACE,
 	CreativeEnergyCube = CREATIVE_ENERGY_CUBE,
 	HeatGenerator = HEAT_GENERATOR,
+	ElectricFurnace = ELECTRIC_FURNACE,
 }
 
 -- The faces of `decor` (BlockList `decor`), or nil when it is unknown.

@@ -61,7 +61,8 @@ JeiData.TAB_ITEMS = { crafting = "CraftingTable", smelting = "Furnace", fuel = "
 -- The items each category's recipes are made in (JEI's recipe catalysts), whose uses list them all.
 JeiData.CATALYSTS = {
 	crafting = { "CraftingTable" },
-	smelting = { "Furnace" },
+	-- (Mekanism's Energized Smelter, the Electric Furnace, smelts the same recipes.)
+	smelting = { "Furnace", "ElectricFurnace" },
 	-- (Mekanism Generators' Heat Generator burns the same fuel.)
 	fuel = { "Furnace", "HeatGenerator" },
 } :: { [Category]: { string } }

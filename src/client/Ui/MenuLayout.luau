@@ -410,6 +410,7 @@ function MenuLayout.statusText(container: Container?): string
 		output = value(data, Machines.OUTPUT),
 		rate = value(data, Machines.RATE),
 		active = value(data, Machines.ACTIVE) ~= 0,
+		state = Machines.state(container),
 	}
 	return Machines.status(container.block, view) or ""
 end

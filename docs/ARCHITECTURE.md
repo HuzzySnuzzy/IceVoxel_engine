@@ -722,7 +722,7 @@ dropped items and, in `Player/HeldItems`, the item in each character's hand (fro
 `IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
 diagonally in icons (`tilt`) and are held by the handle, pointing forward.
 
-**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube and the Heat Generator are drawn
+**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube, the Heat Generator and the Electric Furnace are drawn
 without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
 SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
 blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
@@ -845,7 +845,7 @@ on the input `Ui/Screens` hands it before anything else.
 
 `recipes(item)` are the entries that make the item, `uses(item)` those that take it (in any cell,
 as a smelting input, as a fuel). A catalyst, the block a category's recipes are made in
-(`CATALYSTS`: the crafting table for crafting, the furnace for smelting, the furnace and the Heat Generator for fuel), also uses every
+(`CATALYSTS`: the crafting table for crafting, the furnace and the Electric Furnace for smelting, the furnace and the Heat Generator for fuel), also uses every
 entry of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace
 lists them. Both come grouped by category in that order, without the empty ones.
 
@@ -962,6 +962,9 @@ face gives with their totals (Mekanism's TransitRequest) and `extract` takes up 
 a stack at most. They are pure (new slot tables out, inputs untouched), so the server simulates a
 delivery with the same calls it applies. A pipe's fill travels as a byte (`fillLevel`: 0 empty,
 at least 1 with anything in it, 255 full).
+A machine reaches the slots its kind gives each face (`Machines.insertSlots` / `extractSlots`):
+the Heat Generator takes fuel through every face and gives nothing; the Electric Furnace takes
+what smelts through Up and the sides and gives its results through Down.
 
 ### On the server (`server/Transmitters/`, `Players/ItemUse`)
 
@@ -1096,7 +1099,9 @@ blocks with `machine`). A machine block has `machine = { kind }` and `energy = {
 input?, output? }`; output only makes it a producer, input only a consumer, both storage
 (`Machines.role`). A kind (`Core.define`) gives its slots (panel position, what each takes,
 outputs, limits, transporter faces), data fields, fields kept in the item, its panel, its server
-tick, a status line and optional rate overrides. Its contents are a container of kind "machine"
+its server tick, a status line, optional rate overrides and an optional state field: a code
+(0..255, `Machines.state`) saying why it is not working, which Machines records carry and
+`status` gets as `view.state`. Its contents are a container of kind "machine"
 (Types.KINDS) with the kind's slots and f64 `data` (at most 16): a header every machine shares,
 1 energy, 2 capacity, 3 input and 4 output (what the network moved last tick), 5 rate (made +,
 used -), 6 active, then the kind's fields. Inventory/Menu asks Machines for a machine's slot
@@ -1129,10 +1134,8 @@ what consumers still need is covered by storage discharging up to its output rat
 throughput left. Storage never charges storage. What is taken is exactly what is given.
 
 Viewers of a machine's window get a snapshot at once when its slots change and every 2 ticks
-while only its data moves (as furnaces). `Machines` records (energy, capacity, input, output,
-rate, active) go to players within 192 blocks sideways when they change, at most 4 a second per
-machine, and with a chunk's edit list when not in the default state (empty, idle, the block's
-capacity). Mekanism's sustained data (`MachineWorld.blockDataHooks`): a survival break keeps the
+while only its data moves (as furnaces). `Machines` records (energy, capacity, input, output, rate, active, the kind's state code) go to players within 192 blocks sideways when they change, at most 4 a second per
+machine, and with a chunk's edit list when not in the default state (empty, idle, the block's capacity, state 0). Mekanism's sustained data (`MachineWorld.blockDataHooks`): a survival break keeps the
 energy and the kind's `keep` fields in the item's data (`Machines.save`; the creative cube keeps
 nothing), and placing that item puts them back (`Machines.restore`, at most the capacity).
 
@@ -1147,10 +1150,9 @@ from the bottom in whole rows rounded down, at least one while it holds any, red
 through yellow to green when full, "stored / capacity" on hover), and the arrow, flame and status
 line it asks for, read from the data fields it names. The panel reads the window's data without
 changing it and redraws only when a snapshot replaces it.
-Machines whose decor has a window (`TransmitterModel.hasMachineBoxes`: the Heat Generator) are
+Machines whose decor has a window (`TransmitterModel.hasMachineBoxes`: the Heat Generator and the Electric Furnace) are
 TransmitterRenderer cells like tanks, redrawn on each record: `machineBoxes` gives a working one
-a Neon pane over its window on each of its four sides (BlockDecor.GENERATOR_WINDOW, 0.2 px out of
-the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point from
+a Neon pane over its window on each of its four sides (BlockDecor.GENERATOR_WINDOW and ELECTRIC_FURNACE_WINDOW, 0.2 px out of the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point from
 their records (Audio/Ambience).
 
 **The Creative Energy Cube** (kind "creative"): infinite capacity and output, always full,
@@ -1173,6 +1175,28 @@ status line is "Producing 200 J/t" or "Idle". Its item keeps its energy and both
 (tooltip "Fuel: 60 s", a describer the kind adds). Mekanism's lava tank (which burns a whole
 tick's lava whenever there is any room), lava around it and the nether bonus are left out: fuel
 burns directly. JEI lists it as a fuel catalyst.
+
+**The Electric Furnace** (kind "smelter", `Machines/Kinds/Smelter`; Mekanism's Energized
+Smelter). BlockList `ElectricFurnace` has `energy = { capacity = 20 000, input = 20 000 }`, a
+consumer; its `rates` override gives its capacity as its input rate (Mekanism's machine energy
+containers take any amount), so a network may fill it in one tick. Slot 1, the input, takes what
+`Smelting.result` smelts, through Up and the four sides; slot 2, the output (the furnace's result
+frame), gives through Down only (a furnace's faces without the fuel: blocks have no facing, so
+Mekanism's side configuration becomes fixed faces). Data 7 `progress`, 8 `ticksRequired` (200),
+9 `energyPerTick` (50), 10 `smelting` (the item in the input; another one starts over), 11
+`state`, its state code (0 idle, 1 no power, 2 output full), and 12 `activeDelay`. Each tick
+`settings` sets the ticks, the energy per tick and the capacity (the base values; upgrade cards
+will change them there); with something to smelt and room for the result it `use`s a tick's
+energy, all or nothing, and moves the progress on, and at `ticksRequired` one input item becomes
+the result. Without the energy or the room the progress waits (Mekanism pauses on both); no
+input resets it. RATE is minus what it used this tick, and its status reads it with the state
+code ("Using 50 J/t", "No power", "Output full" or "Idle"), so WAILA has it without the window.
+ACTIVE is what the block shows, Mekanism's client active state (TileEntityMekanism.setActive):
+on at once, off at once unless it last stopped within 60 ticks (blockDeactivationDelay, counted
+down in `activeDelay`), so a furnace on too little power glows steadily. Its item keeps only its
+energy (its slots drop). Slots 3 and 4 (speed and energy upgrades), at (8, 53) and (26, 53), and
+4 spare data values are left for the upgrade cards. JEI lists it as a smelting catalyst; the
+client lights its heating chamber from ACTIVE.
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
@@ -1321,7 +1345,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill |
 | server → client | `Tanks`         | fluid tank contents (fluid, mB)               |
 | server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |
-| server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active |
+| server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active, state code |
 | server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first

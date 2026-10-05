@@ -64,6 +64,8 @@ return function(t, shared, require, _server, client)
 		t.ok(not pcall(Machines.define, "test_bad_field", { fields = { "bad key!" } }), "a field that is no data key")
 		t.ok(not pcall(Machines.define, "test_header", { fields = { "energy" } }), "a header name")
 		t.ok(not pcall(Machines.define, "test_keep", { fields = { "a" }, keep = { "b" } }), "keeping a non-field")
+		t.ok(not pcall(Machines.define, "test_state", { fields = { "a" }, state = "b" }), "a state that is no field")
+		t.ok(not pcall(Machines.define, "test_state_header", { state = "rate" }), "a state in the header")
 		local many = {}
 		for i = 1, Types.MAX_CONTAINER_DATA - Machines.HEADER + 1 do
 			table.insert(many, `f{i}`)
@@ -393,6 +395,54 @@ return function(t, shared, require, _server, client)
 		end)
 	end)
 
+	t.test("state codes: a kind's field reaches its status line, the panel and WAILA", function()
+		-- A kind that says why it is idle (Mekanism's recipe errors) in its field "why".
+		local name = "test_stateful"
+		local _ = Machines.kind(name)
+			or Machines.define(name, {
+				fields = { "spare", "why" },
+				state = "why",
+				status = function(view)
+					return `state {view.state}`
+				end,
+			})
+		t.eq((Machines.kind(name) :: any).state, Machines.HEADER + 2, "the field's data index")
+		t.eq(kinds.furnace.state, nil, "kinds without one")
+		FakeMachines.bind(Machines, {
+			{ B.IronBlock, name, { capacity = 100, input = 10 } },
+			{ PRODUCER_BLOCK, "test_producer", { capacity = 100, output = 10 } },
+		}, function()
+			local c: any = Machines.newContainer(B.IronBlock)
+			t.eq(Machines.state(c), 0)
+			Machines.set(c, "why", 3)
+			t.eq(Machines.state(c), 3)
+			t.eq(Machines.view(c).state, 3)
+			t.eq(Machines.status(B.IronBlock, Machines.view(c)), "state 3")
+			t.eq(MenuLayout.statusText(c), "state 3", "the panel")
+			local facts = WailaInfo.machineDefaults(B.IronBlock)
+			t.eq(facts.state, 0)
+			facts.state = 7
+			t.eq(WailaInfo.text(WailaInfo.machineLines(B.IronBlock, facts)[2]), "state 7", "WAILA")
+			-- Only whole numbers 0..MAX_STATE are states.
+			t.eq(Machines.MAX_STATE, 255)
+			for _, bad in { -1, 2.5, 256, 0 / 0, math.huge } do
+				Machines.set(c, "why", bad)
+				t.eq(Machines.state(c), 0, `{bad} is no state`)
+			end
+			Machines.set(c, "why", 255)
+			t.eq(Machines.state(c), 255)
+			-- Reading never makes data (a client's window may have none yet).
+			local bare: any = { kind = Machines.CONTAINER_KIND, block = B.IronBlock, size = 0, slots = {} }
+			t.eq(Machines.state(bare), 0)
+			t.eq(bare.data, nil)
+			-- A kind without one: 0, whatever its fields hold.
+			local producer: any = Machines.newContainer(PRODUCER_BLOCK)
+			Machines.set(producer, "power", 9)
+			t.eq(Machines.state(producer), 0)
+			t.eq(Machines.view(producer).state, 0)
+		end)
+	end)
+
 	t.test("sustained data: energy and kept fields into the item and back", function()
 		FakeMachines.bind(
 			Machines,
@@ -436,6 +486,7 @@ return function(t, shared, require, _server, client)
 				output = 0,
 				rate = -50,
 				active = true,
+				state = 3,
 			},
 			{
 				x = 3,
@@ -447,8 +498,10 @@ return function(t, shared, require, _server, client)
 				output = 8000,
 				rate = 0,
 				active = false,
+				state = 255,
 			},
 		}
+		t.eq(Protocol.MACHINE_BYTES, 40, "the state is the last byte")
 		local decoded = Protocol.decodeMachines(Protocol.encodeMachines(records)) :: any
 		t.eq(#decoded, 2)
 		for i, record in records do
@@ -472,6 +525,25 @@ return function(t, shared, require, _server, client)
 		})) :: any
 		t.eq(sent[1].energy, 0)
 		t.eq(sent[1].input, 0)
+		t.eq(sent[1].state, 0, "no state given: 0")
+		-- A state that is no byte goes as 0.
+		for _, bad in { 256, -1, 1.5, 0 / 0 } do
+			local one = Protocol.decodeMachines(Protocol.encodeMachines({
+				{
+					x = 0,
+					y = 0,
+					z = 0,
+					energy = 1,
+					capacity = 1,
+					input = 0,
+					output = 0,
+					rate = 0,
+					active = false,
+					state = bad,
+				},
+			})) :: any
+			t.eq(one[1].state, 0, `state {bad}`)
+		end
 		t.eq(Protocol.ServerMessage.Machines, 11)
 	end)
 

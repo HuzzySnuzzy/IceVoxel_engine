@@ -21,6 +21,10 @@
 	  machine  a Mekanism machine with slots (Shared/Machines): its kind says which slots each face
 	           reaches (by default every face puts items into its inputs and takes them out of its
 	           outputs), what each slot takes (Machines.mayPlace) and how many (Machines.slotLimit).
+	           The Heat Generator takes fuel through every face and gives nothing; the Electric
+	           Furnace (Machines/Kinds/Smelter) is sided like a furnace without fuel: what smelts
+	           goes into its input through Up and the four sides, and its results come out of its
+	           output through Down only.
 
 	Inserting (`insert`, `room`) follows Forge's ItemHandlerHelper.insertItemStacked, as Mekanism's
 	transporters insert: first it tops up stacks of the same item, wear and data (Menu.stacksMatch)

@@ -25,9 +25,10 @@
 	chests).
 
 	Replication. `takeRecords` gives the Machines records (energy, capacity, the network's input
-	and output, the machine's own rate, active) that changed since they were last sent, each at
-	most every RECORD_INTERVAL ticks (4 a second). `chunkRecords` gives a chunk's records that are
-	not in the default state (empty, idle, the block's capacity), to send with its edit list.
+	and output, the machine's own rate, active, its kind's state code) that changed since they
+	were last sent, each at most every RECORD_INTERVAL ticks (4 a second). `chunkRecords` gives a
+	chunk's records that are not in the default state (empty, idle, the block's capacity, state
+	0), to send with its edit list.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -119,6 +120,7 @@ local function defaultRecord(machine: Machine): MachineRecord
 		output = 0,
 		rate = 0,
 		active = false,
+		state = 0,
 	}
 end
 
@@ -135,6 +137,7 @@ function MachineWorld.record(machine: Machine): MachineRecord
 		output = data[OUTPUT],
 		rate = data[RATE],
 		active = data[ACTIVE] ~= 0,
+		state = Machines.state(machine.container),
 	}
 end
 
@@ -145,6 +148,7 @@ local function sameRecord(a: MachineRecord, b: MachineRecord): boolean
 		and a.output == b.output
 		and a.rate == b.rate
 		and a.active == b.active
+		and a.state == b.state
 end
 
 --[[ Block changes ]]

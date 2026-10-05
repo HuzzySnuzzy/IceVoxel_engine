@@ -40,7 +40,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
   see how it is made; right click or `U` shows what it is used for: crafting recipes on a 3 × 3
   grid (an ingredient any planks will do for cycles through them), smelting with its 10 seconds,
-  and fuels with how many items they smelt. On a crafting table or a furnace, `U` also lists every
+  and fuels with how many items they smelt. On a crafting table, a furnace, a Heat Generator or an Electric Furnace, `U` also lists every
   recipe made in it (JEI's catalysts). Items inside a recipe open their own recipes,
   `Backspace` goes back and `E` or `Escape` returns to the inventory. The `+` beside a crafting
   recipe moves its ingredients from the inventory into the open crafting grid (`Shift`: as many
@@ -64,11 +64,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
   a lantern from 8 iron nuggets around a torch, glowstone from 4 glowstone dust.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
-  (Basic, Advanced, Elite, Ultimate) carry items between chests and furnaces, and you see them
+  (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see them
   move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half second,
   which travel at 1 / 2 / 4 / 10 blocks a second along the cheapest route (faster transporters
   cost less) to an inventory that takes them (a furnace by its sides, as Minecraft's hoppers see
-  it: ore in the top, fuel in the sides, results out of the bottom). Restrictive Transporters are
+  it: ore in the top, fuel in the sides, results out of the bottom; an Electric Furnace takes ore in the top and the sides and gives its results out of the bottom). Restrictive Transporters are
   only used when there is no other way. Transporters coloured with the Configurator (Minecraft's
   16 dyes) only join their own colour or uncoloured ones, and the items they pull keep their
   colour: they travel through uncoloured transporters and ones of their colour only (items pulled
@@ -102,7 +102,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   pull act as normal (WAILA says "Push (as Normal)"). Right click opens a machine's panel with
   Mekanism's energy bar (red when empty to green when full, full only when it is, "stored /
   capacity" on hover); WAILA shows a machine's energy and what it is doing ("Producing 200 J/t",
-  "Using 50 J/t") and a cable's capacity. A machine broken in survival keeps its energy in its
+  "Using 50 J/t", "No power") and a cable's capacity. A machine broken in survival keeps its energy in its
   item ("Energy: 1.2 MJ") and gets it back when placed; its slots drop like a chest's. The
   Creative Energy Cube (creative only, no recipe) gives infinite energy for trying machines out.
   Recipes: 8 Basic Universal Cables from an osmium ingot, glowstone dust and an osmium ingot in a
@@ -121,6 +121,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   ("Energy: 80 kJ", "Fuel: 60 s"). Recipe: Mekanism's with iron for its copper, three iron ingots
   over planks, an osmium ingot and planks, over iron, a furnace and iron. JEI lists every fuel
   under its uses. Mekanism's lava and nether bonuses don't apply.
+- **Electric Furnace.** Mekanism's Energized Smelter, named the Electric Furnace, smelts what a
+  furnace smelts on electricity instead of fuel: 50 J a tick for 200 ticks an item (Mekanism's
+  numbers), so an item takes a furnace's 10 seconds and costs 10 kJ, and a coal burnt in a Heat
+  Generator smelts 32. It stores 20 kJ and takes as much as its network gives it in a tick (as
+  fast as the cables carry). It works only with a whole tick's energy: without power, or with no
+  room in its output, it stops where it is and goes on when that changes; taking its input out,
+  or putting something else in, starts the item over. What smelts goes into its input by hand,
+  shift-click or a transporter through the top or any side, and the results come out of its
+  output by hand, shift-click or a transporter pulling from the bottom (a furnace's faces without
+  the fuel). Its panel shows the input, the arrow, the output and the energy bar with "Using 50
+  J/t", "No power", "Output full" or "Idle"; WAILA says the same. While it smelts the heating
+  chamber on its sides glows, steadily even when too little power makes it stop and start
+  (Mekanism's 3-second deactivation delay). Broken with a pickaxe it keeps its energy in its
+  item ("Energy: 12 kJ"); its slots drop. Recipe: Mekanism's shape with glowstone dust for the
+  redstone, osmium ingots for the control circuits and a furnace for the steel casing: glowstone
+  dust, an osmium ingot and glowstone dust, over glass, a furnace and glass, over the top row
+  again. JEI lists every smelting recipe under its uses. Mekanism's upgrade cards aren't in yet.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -246,10 +263,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract)
-  Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
-                            slot rules, panels, energy maths and the even split, sustained data),
-                            Kinds/ (a module per kind: Creative, the Creative Energy Cube;
-                            Generator, the Heat Generator)
+    Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
+                            slot rules, panels, energy maths and the even split, state codes,
+                            sustained data), Kinds/ (a module per kind: Creative, the Creative
+                            Energy Cube; Generator, the Heat Generator; Smelter, the Electric
+                            Furnace)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
                             Crafting (grid matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
@@ -330,9 +348,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
-                            tanks, items moving through transporters, a burning Heat Generator's
-                            window, machines' records (WAILA, Ambience); TransmitterModel (their
-                            geometry, aiming, item paths)
+                            tanks, items moving through transporters, the windows of a burning
+                            Heat Generator and a smelting Electric Furnace, machines' records
+                            (WAILA, Ambience); TransmitterModel (their geometry, aiming, item
+                            paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables, furnaces and Mekanism's machines)
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
@@ -499,7 +518,9 @@ The server ticks it 20 times a second, joins it to cables and touching machines,
 in its item and replicates it; the client draws its panel (slots, gauges, energy bar) and WAILA
 lines. Tests bind test-only kinds to spare blocks with `Machines.bind`.
 The Heat Generator (`src/shared/Machines/Kinds/Generator.luau`) is the complete version of this
-example.
+example; the Electric Furnace (`Kinds/Smelter.luau`) is a machine that uses energy, with a
+progress arrow, sided slots for transporters, a `rates` override and a `state` field: a code
+saying why it is idle ("No power") that Machines records carry to WAILA.
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make

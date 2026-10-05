@@ -28,9 +28,9 @@
 	                the same block and sends no record).
 	  Tanks         per position: fluid and amount (mB), the same way.
 	  Machines      per position: a Mekanism machine's energy, capacity, the network's input and
-	                output, its rate and whether it works (Protocol MachineRecord), the same way;
-	                no record: empty and idle (WAILA reads them: `machine`; Audio/Ambience:
-	                `activeMachines`).
+	                output, its rate, whether it works and its kind's state code (Protocol
+	                MachineRecord), the same way; no record: empty and idle (WAILA reads them:
+	                `machine`; Audio/Ambience: `activeMachines`).
 	  Transport     items entering or re-routed in the transporters (an id, the item, where it is,
 	                its progress, speed, the server time of that and its path) and leaving them.
 	                Items are moved here every frame from workspace:GetServerTimeNow(), 20 ticks a
@@ -619,7 +619,7 @@ local function onMachines(records: { Protocol.MachineRecord })
 			local key = posKey(x, y, z)
 			machineStates[key] = record
 			indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
-			-- (A Heat Generator's window lights or goes out.)
+			-- (A Heat Generator's or Electric Furnace's window lights or goes out.)
 			markDirty(key)
 		end
 	end

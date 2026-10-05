@@ -72,11 +72,12 @@
 	  Machines       u32 count, count x (i32 x, u16 y, i32 z, f64 energy, f64 capacity (J; math.huge
 	                 is the creative cube's infinity), f32 input, f32 output (J the energy network
 	                 put in / took out last tick), f32 rate (J/t the machine made, + or used, -),
-	                 u8 flags (bit 0: active)): Mekanism machines (Shared/Machines) for WAILA and
-	                 the world, the same way as Tanks (a record replaces what the client knew; a
-	                 machine without one is empty and idle at its block's capacity). NaN is
-	                 malformed. A viewer of the machine's window gets its whole data in Inventory
-	                 snapshots instead.
+	                 u8 flags (bit 0: active), u8 state (the kind's state code, Shared/Machines
+	                 KindSpec `state`: why it is not working)): Mekanism machines (Shared/Machines)
+	                 for WAILA and the world, the same way as Tanks (a record replaces what the
+	                 client knew; a machine without one is empty and idle at its block's
+	                 capacity, state 0). NaN is malformed. A viewer of the machine's window gets
+	                 its whole data in Inventory snapshots instead.
 	  Transport      u32 count, count x op (u8 op, u32 id, then by op): items in transporters.
 	                   1 add     u16 item, u8 count, i32 x, u16 y, i32 z (the transporter it is in),
 	                             u8 progress (0..100 through that block), u8 speed (progress per
@@ -935,7 +936,7 @@ export type TransmitterRecord = { x: number, y: number, z: number, modes: number
 -- A fluid tank: fluid (0 none, 1 water) and amount in mB.
 export type TankRecord = { x: number, y: number, z: number, fluid: number, amount: number }
 -- A Mekanism machine: energy and capacity (J), the network's input / output and its own rate (J
--- per tick, the last tick's) and whether it is working.
+-- per tick, the last tick's), whether it is working and its kind's state code (0..255).
 export type MachineRecord = {
 	x: number,
 	y: number,
@@ -946,6 +947,7 @@ export type MachineRecord = {
 	output: number,
 	rate: number,
 	active: boolean,
+	state: number,
 }
 -- An item entering a transporter or re-routed (`add`), or leaving the transporters (`remove`).
 export type TransportOp = {
@@ -964,7 +966,7 @@ export type TransportOp = {
 
 Protocol.TRANSMITTER_BYTES = 14
 Protocol.TANK_BYTES = 15
-Protocol.MACHINE_BYTES = 39
+Protocol.MACHINE_BYTES = 40
 -- Most sides an `add` carries; a longer route is sent again on the way.
 Protocol.MAX_PATH = 255
 -- Why an item left the transporters (`remove`).
@@ -1094,6 +1096,9 @@ function Protocol.encodeMachines(records: { MachineRecord }): buffer
 		buffer.writef32(b, o + 30, finiteOrInfinite(record.output))
 		buffer.writef32(b, o + 34, finiteOrInfinite(record.rate))
 		buffer.writeu8(b, o + 38, if record.active then 1 else 0)
+		-- (Anything but a whole number 0..255 goes as 0: no state.)
+		local state = record.state or 0
+		buffer.writeu8(b, o + 39, if state == math.floor(state) and state >= 0 and state <= 255 then state else 0)
 		o += Protocol.MACHINE_BYTES
 	end
 	return b
@@ -1135,6 +1140,7 @@ function Protocol.decodeMachines(b: buffer): { MachineRecord }?
 			output = output,
 			rate = rate,
 			active = flags == 1,
+			state = buffer.readu8(b, o + 39),
 		}
 		o += Protocol.MACHINE_BYTES
 	end

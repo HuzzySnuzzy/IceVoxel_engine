@@ -23,7 +23,9 @@
 	    3 INPUT     J the energy network put in during the last tick
 	    4 OUTPUT    J the network took out during the last tick
 	    5 RATE      J/t the machine itself made (+, generators) or used (-, machines) last tick
-	    6 ACTIVE    1 while it works (burning, smelting, producing), else 0
+	    6 ACTIVE    1 while it works (burning, smelting, producing), else 0: what the block shows (a
+	                kind may hold it on through short stops, as Mekanism's blockDeactivationDelay
+	                does: the Electric Furnace; RATE says whether it works this tick)
 	    7..         the kind's fields, in the order it lists them (`index[name]`, `get`, `set`)
 
 	Kinds (`define(name, spec)`): what a machine of a kind is, all optional:
@@ -41,6 +43,11 @@
 	            (TickContext) is lent for the call only.
 	  status    status(view) -> line: WAILA's and the panel's "Producing 200 J/t" (default from
 	            RATE: "Producing x/t", "Using x/t"; storage "Charging" / "Discharging")
+	  state     the name of one of its fields holding a state code, a whole number 0..MAX_STATE
+	            the kind sets in its tick to say why it is not working (Mekanism's recipe errors:
+	            the Electric Furnace's "No power"). It travels in Machines records with the header,
+	            so WAILA knows it without the window, and `status` gets it as `view.state` (0 for
+	            kinds without one)
 	  rates     rates(container, energy) -> (input, output): J/t the network may put in / take
 	            out now (default the block's `energy.input` / `output`)
 	  quickMove quickMove(item) -> { slot }: shift-click targets from the inventory (default the
@@ -58,7 +65,8 @@
 	The API, by use:
 	  kinds and blocks  define, kind, bind (tests bind test-only kinds to spare blocks), bindBlocks,
 	                    isMachine, kindOf, energyOf, hasEnergy, role, containerSize
-	  containers, data  newContainer, newData, isContainer, field, get, set, energy, capacity, room
+	  containers, data  newContainer, newData, isContainer, field, get, set, energy, capacity, room,
+	                    state, MAX_STATE
 	  energy maths      QUANTUM, quantise, quantiseUp, produce, use, rates, share, tick
 	  slots             isOutput, mayPlace, slotLimit, quickMoveTargets (Inventory/Menu),
 	                    insertSlots, extractSlots (Transmitters/Inventories: transporters)
@@ -119,6 +127,8 @@ export type View = {
 	output: number,
 	rate: number,
 	active: boolean,
+	-- Its kind's state code (KindSpec `state`; 0 without one).
+	state: number,
 }
 
 -- What a kind's tick gets besides its container (lent for the call: don't keep it).
@@ -148,6 +158,7 @@ export type KindSpec = {
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean?,
+	state: string?,
 }
 
 -- A defined kind (read only).
@@ -166,6 +177,8 @@ export type Kind = {
 	rates: ((container: Container, energy: EnergySpec) -> (number, number))?,
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean,
+	-- The data index of its state code field (nil: none).
+	state: number?,
 	-- Slots transporters reach per face (0..5): insert / extract.
 	insertFaces: { [number]: { number } },
 	extractFaces: { [number]: { number } },
@@ -192,6 +205,9 @@ local ENERGY, CAPACITY, INPUT, OUTPUT, RATE, ACTIVE = 1, 2, 3, 4, 5, 6
 -- The container kind of every machine (Types.KINDS).
 Machines.CONTAINER_KIND = "machine"
 assert(table.find(Types.KINDS, Machines.CONTAINER_KIND), "Types.KINDS must list machines")
+
+-- The largest state code (KindSpec `state`): one byte in Machines records.
+Machines.MAX_STATE = 255
 
 -- Mekanism's GuiVerticalPowerBar and the furnace panel's height (GUI pixels).
 Machines.ENERGY_BAR = table.freeze({ x = 164, y = 15, w = 6, h = 52 })
@@ -317,6 +333,11 @@ function Machines.define(name: string, spec: KindSpec): Kind
 	for _, field in keep do
 		assert(table.find(fields, field), `Machine kind {name} keeps {field}, which is no field`)
 	end
+	local stateField = spec.state
+	assert(
+		stateField == nil or table.find(fields, stateField),
+		`Machine kind {name}: its state {stateField} is no field`
+	)
 	local insertFaces: { [number]: { number } } = {}
 	local extractFaces: { [number]: { number } } = {}
 	for face = 0, SIDES - 1 do
@@ -358,6 +379,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		rates = spec.rates,
 		quickMove = spec.quickMove,
 		creative = spec.creative == true,
+		state = if stateField then index[stateField] else nil,
 		insertFaces = table.freeze(insertFaces),
 		extractFaces = table.freeze(extractFaces),
 	}
@@ -543,6 +565,25 @@ function Machines.room(container: Container): number
 		return if energy == math.huge then 0 else math.huge
 	end
 	return math.max(0, capacity - energy)
+end
+
+--[[
+	The kind's state code of a machine's container (KindSpec `state`): a whole number
+	0..MAX_STATE, 0 for kinds without one (and for anything else in the field). Only reads (a
+	client's window may have no data yet).
+]]
+function Machines.state(container: Container): number
+	local binding = bindings[container.block]
+	local index = if binding then binding.kind.state else nil
+	local data = container.data
+	if index == nil or data == nil then
+		return 0
+	end
+	local value = number(data[index])
+	if value < 0 or value > Machines.MAX_STATE or value ~= math.floor(value) then
+		return 0
+	end
+	return value
 end
 
 --[[
@@ -736,6 +777,7 @@ function Machines.view(container: Container): View
 		output = number(data[OUTPUT]),
 		rate = number(data[RATE]),
 		active = number(data[ACTIVE]) ~= 0,
+		state = Machines.state(container),
 	}
 end
 

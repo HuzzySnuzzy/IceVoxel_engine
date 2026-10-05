@@ -20,10 +20,10 @@
 	            when its slots change, and every DATA_INTERVAL ticks while only its data (energy,
 	            gauges) moves, like furnaces.
 	  Records   Machines records (energy, capacity, the network's input and output, the machine's
-	            rate, active) for WAILA and the world: a chunk's non-default ones go to a player
-	            right after its edit list (`sendChunks`, from ServerNet's `chunksSent` rule) and
-	            changes, at most 4 a second per machine, to every player within RECORD_RANGE
-	            blocks (sideways), as Tanks records do.
+	            rate, active, its kind's state code) for WAILA and the world: a chunk's non-default
+	            ones go to a player right after its edit list (`sendChunks`, from ServerNet's
+	            `chunksSent` rule) and changes, at most 4 a second per machine, to every player
+	            within RECORD_RANGE blocks (sideways), as Tanks records do.
 
 	Nothing is saved: machines' energy and contents last for the session, like chests.
 ]]

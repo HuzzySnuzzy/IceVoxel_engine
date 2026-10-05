@@ -19,7 +19,8 @@
 	            Fluid Tanks: "Water: 12,000 / 32,000 mB" (Jade's Mekanism tank tooltip).
 	  machines  Mekanism machines (Shared/Machines), from their Machines record: "Energy: 1.2 kJ /
 	            20 kJ" ("Energy: Infinite" for the creative cube) and the machine's status
-	            ("Producing 200 J/t", "Using 50 J/t", "Charging 4 kJ/t": Machines.status).
+	            ("Producing 200 J/t", "Using 50 J/t", "Charging 4 kJ/t", "No power":
+	            Machines.status, from the record's numbers and its kind's state code).
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
@@ -95,7 +96,8 @@ export type TransmitterFacts = {
 -- A fluid tank's contents (fluid 0 none, 1 water; mB).
 export type TankFacts = { fluid: number, amount: number }
 
--- A machine's state (its Machines record, Rendering/TransmitterRenderer.machine; J and J/t).
+-- A machine's state (its Machines record, Rendering/TransmitterRenderer.machine; J and J/t), with
+-- its kind's state code (Shared/Machines KindSpec `state`, 0 without one).
 export type MachineFacts = {
 	energy: number,
 	capacity: number,
@@ -103,6 +105,7 @@ export type MachineFacts = {
 	output: number,
 	rate: number,
 	active: boolean,
+	state: number,
 }
 
 -- Optional facts about a block's surroundings that only the client knows.
@@ -429,6 +432,7 @@ local function viewOf(block: number, facts: MachineFacts): Machines.View
 		output = facts.output,
 		rate = facts.rate,
 		active = facts.active,
+		state = facts.state,
 	}
 end
 
@@ -443,6 +447,7 @@ function WailaInfo.machineDefaults(block: number): MachineFacts
 		output = 0,
 		rate = 0,
 		active = false,
+		state = 0,
 	}
 end
 

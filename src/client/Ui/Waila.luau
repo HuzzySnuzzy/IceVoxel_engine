@@ -507,9 +507,11 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 					output = record.output,
 					rate = record.rate,
 					active = record.active,
+					state = record.state,
 				}
 				else WailaInfo.machineDefaults(hit.block)
-			local key = `{facts.energy} {facts.capacity} {facts.input} {facts.output} {facts.rate} {facts.active}`
+			local key =
+				`{facts.energy} {facts.capacity} {facts.input} {facts.output} {facts.rate} {facts.active} {facts.state}`
 			return nil, nil, facts, key
 		end
 		return nil, nil, nil, ""
