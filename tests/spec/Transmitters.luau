@@ -341,10 +341,24 @@ return function(t, shared, require, _server, client)
 		t.ok(Transmitters.isItemAcceptor(CHEST) and Transmitters.isItemAcceptor(FURNACE))
 		t.ok(not Transmitters.isItemAcceptor(B.CraftingTable) and not Transmitters.isItemAcceptor(B.Stone))
 		t.ok(Transmitters.isAcceptor("fluid", TANKS[3]) and not Transmitters.isAcceptor("item", TANKS[3]))
-		-- Every block with slots is an item acceptor (a machine's slots are its kind's).
-		for block = 0, Blocks.count - 1 do
-			t.eq(Transmitters.isItemAcceptor(block), Machines.containerSize(block) > 0, Blocks.get(block).name)
+		-- Every block with slots is an item acceptor (a machine's slots are its kind's), unless
+		-- transporters reach none of them (a Solar Panel's upgrade slots).
+		local function reached(block: number): boolean
+			for face = 0, 5 do
+				if #Machines.insertSlots(block, face) > 0 or #Machines.extractSlots(block, face) > 0 then
+					return true
+				end
+			end
+			return not Machines.isMachine(block)
 		end
+		for block = 0, Blocks.count - 1 do
+			t.eq(
+				Transmitters.isItemAcceptor(block),
+				Machines.containerSize(block) > 0 and reached(block),
+				Blocks.get(block).name
+			)
+		end
+		t.ok(not Transmitters.isItemAcceptor(B.SolarPanel), "only upgrade slots: no transporter connects")
 	end)
 
 	t.test("transmitters: connections gives the six sides as masks, from both sides' state", function()

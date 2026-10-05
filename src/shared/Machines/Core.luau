@@ -30,9 +30,10 @@
 
 	Kinds (`define(name, spec)`): what a machine of a kind is, all optional:
 	  slots     { SlotSpec }: the container's slots in order, with their panel position, the rule
-	            of what they take (`accepts`), whether they are an output, a limit, and the faces
+	            of what they take (`accepts`), whether they are an output, a limit, the faces
 	            transporters use (default: inputs take items through every face, outputs give
-	            them through every face)
+	            them through every face) and an outline shown while empty (`ghost`; upgrade
+	            slots: Machines/Upgrades.slots)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
 	  keep      fields kept in the item when the machine is broken (energy always is)
 	  panel     PanelSpec: title, height, the energy bar, a progress arrow, a flame, a status line
@@ -40,7 +41,8 @@
 	            move energy. Change data in place; replace slot stacks (Items.withCount ...),
 	            never change a stack table (viewers and prediction compare tables). Use
 	            `produce` / `use` for energy (they keep it a multiple of QUANTUM). `ctx`
-	            (TickContext) is lent for the call only.
+	            (TickContext: the block, its energy spec, the day time, blocks around, whether
+	            a cell sees the sky) is lent for the call only.
 	  status    status(view) -> line: WAILA's and the panel's "Producing 200 J/t" (default from
 	            RATE: "Producing x/t", "Using x/t"; storage "Charging" / "Discharging")
 	  state     the name of one of its fields holding a state code, a whole number 0..MAX_STATE
@@ -98,6 +100,9 @@ export type SlotSpec = {
 	-- them through every face and give none; outputs give through every face.
 	insert: { number }?,
 	extract: { number }?,
+	-- A faint outline drawn in the slot while it is empty (Minecraft's empty armor slots): 16 rows
+	-- of 16 characters, "G" a pixel of it, "." none (Upgrades.SPEED_GHOST ...).
+	ghost: { string }?,
 }
 
 -- A gauge filled from data: `value` over `total` (field names, or a number for a fixed total).
@@ -145,6 +150,11 @@ export type TickContext = {
 	dayTime: number,
 	-- Blocks around (nil: unknown); never generates terrain.
 	getBlock: (x: number, y: number, z: number) -> number?,
+	-- Is cell (x, y, z) open to the sky: nothing opaque (Blocks.isOpaque) in any cell straight
+	-- above it, Minecraft's canSeeSky as Mekanism's solar generators check it? The server caches
+	-- it per cell, looks again when a block above changes and never generates terrain for it
+	-- (server Machines/SkyCheck). nil (a test's context): treat the sky as open.
+	sky: ((x: number, y: number, z: number) -> boolean)?,
 }
 
 -- What `define` takes (see the header).
@@ -349,6 +359,13 @@ function Machines.define(name: string, spec: KindSpec): Kind
 			type(slotSpec.x) == "number" and type(slotSpec.y) == "number",
 			`Machine kind {name}: slot {slot} has no position`
 		)
+		local ghost = slotSpec.ghost
+		if ghost then
+			assert(#ghost <= 16, `Machine kind {name}: slot {slot}'s ghost is over 16 rows`)
+			for _, row in ghost do
+				assert(type(row) == "string" and #row <= 16, `Machine kind {name}: slot {slot}'s ghost is too wide`)
+			end
+		end
 		local output = slotSpec.output == true
 		local ins = faceSet(slotSpec.insert, not output)
 		local outs = faceSet(slotSpec.extract, output)

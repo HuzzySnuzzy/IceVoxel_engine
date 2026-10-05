@@ -3,9 +3,9 @@
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
 	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
 	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
-	transmitters, fluid tanks, Configurator, Universal Cables and machines adapted to the game's
-	materials (see "Mekanism pipes and buckets", "Universal Cables", "Heat Generator" and
-	"Electric Furnace" below).
+	transmitters, fluid tanks, Configurator, Universal Cables, machines and upgrade cards adapted
+	to the game's materials (see "Mekanism pipes and buckets", "Universal Cables", "Heat
+	Generator", "Electric Furnace", "upgrade cards" and "Solar Generator" below).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -207,6 +207,31 @@ shape(
 	{ "DOD", "GFG", "DOD" },
 	{ D = "GlowstoneDust", O = "OsmiumIngot", G = "Glass", F = "Furnace" },
 	"ElectricFurnace"
+)
+
+--[[
+	Mekanism's upgrade cards, in Mekanism's shape: glass over an alloy, a dust and an alloy, over
+	glass (" G ", "ADA", " G "), the dust osmium's for the Speed Upgrade and gold's for the Energy
+	Upgrade. The game has neither dusts nor Mekanism's infused alloy, so the ingots stand for the
+	dusts and gold ingots for the alloy (as in the transmitter upgrades): the Speed Upgrade is
+	glass over gold, osmium and gold over glass, the Energy Upgrade glass over three gold ingots
+	over glass.
+]]
+shape({ " G ", "AOA", " G " }, { G = "Glass", A = "GoldIngot", O = "OsmiumIngot" }, "SpeedUpgrade")
+shape({ " G ", "AUA", " G " }, { G = "Glass", A = "GoldIngot", U = "GoldIngot" }, "EnergyUpgrade")
+
+--[[
+	Mekanism Generators' Solar Generator (the Solar Panel), in Mekanism's shape: three solar panels
+	over an alloy, an iron ingot and an alloy, over osmium dust, an energy tablet and osmium dust
+	("SSS", "AIA", "PEP"). Glass stands for the solar panels (Mekanism's are glass panes over
+	redstone, alloy and osmium), gold ingots for the infused alloy, osmium ingots for the dust and
+	glowstone dust for the energy tablet (redstone, gold and alloy in Mekanism; glowstone dust
+	stands for redstone, as in the cables).
+]]
+shape(
+	{ "GGG", "AIA", "ODO" },
+	{ G = "Glass", A = "GoldIngot", I = "IronIngot", O = "OsmiumIngot", D = "GlowstoneDust" },
+	"SolarPanel"
 )
 
 --[[ Smelting ]]

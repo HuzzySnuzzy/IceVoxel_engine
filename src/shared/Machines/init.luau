@@ -4,7 +4,8 @@
 	whole API: kinds, containers, data layout, slot rules, panels, energy maths, sustained data).
 	Requiring this module loads every machine kind in Machines/Kinds and binds the BlockList
 	blocks with `machine` to their kinds, so every lookup by block works. Require this, never Core
-	(except from a kind module, which defines itself with it).
+	(except from a kind module, which defines itself with it). Machines/Upgrades holds Mekanism's
+	upgrade cards (their slots and maths), for kinds that take them.
 
 	A new machine:
 	  1. BlockList: a block with `machine = { kind = "name" }` and `energy = { capacity, input?,
@@ -32,6 +33,7 @@ export type Role = Core.Role
 require(script.Kinds.Creative)
 require(script.Kinds.Generator)
 require(script.Kinds.Smelter)
+require(script.Kinds.Solar)
 
 Core.bindBlocks()
 

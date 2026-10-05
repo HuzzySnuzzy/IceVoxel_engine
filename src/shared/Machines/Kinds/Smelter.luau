@@ -20,16 +20,19 @@
 	  2 output  only taken from: by hand, shift-click and transporters through the bottom
 	            (Minecraft's furnace's faces: in at the top, out at the bottom; blocks have no
 	            facing, so Mekanism's configurable sides become fixed ones)
-	Room is left for Mekanism's upgrade cards: slots 3 (speed) and 4 (energy), at (8, 53) and
-	(26, 53) on the panel's lower left, clear of the status line, the row and the energy bar; they
-	need no data beyond what is here. `settings` is where they will set the ticks an item takes,
-	the energy a tick uses and the capacity (Mekanism's upgrade maths); without upgrades it gives
-	the base values.
+	  3 speed   up to 8 Speed Upgrades, at (8, 53) on the panel's lower left
+	  4 energy  up to 8 Energy Upgrades, at (26, 53) next to it; both by hand and shift-click only
+	            (Machines/Upgrades), clear of the status line, the row and the energy bar
+	Every tick `settings` works out Mekanism's upgrade maths from the cards installed: the ticks an
+	item takes (200 x 10^(-speed/8), truncated: 149 with one card, 20 with 8), the energy a tick of
+	work uses (50 x 10^((2 speed - energy)/8)) and the capacity (20 000 x 10^(energy/8)). Taking
+	cards out applies at once: progress past the new ticks finishes on the next tick, and energy
+	over a smaller capacity is lost (Mekanism's setMaxEnergy).
 
 	Data after the header (Shared/Machines):
 	  progress       ticks worked on the item in the input (the arrow: progress / ticksRequired)
-	  ticksRequired  ticks an item takes (200)
-	  energyPerTick  J a tick of work uses (50)
+	  ticksRequired  ticks an item takes (200; fewer with Speed Upgrades)
+	  energyPerTick  J a tick of work uses (50; more with Speed, less with Energy Upgrades)
 	  smelting       the item being smelted (0: none): another item starts over
 	  state          why it is not working (the state code WAILA gets): IDLE (nothing to smelt),
 	                 NO_POWER (less than a tick's energy) or OUTPUT_FULL (no room for the result)
@@ -41,13 +44,16 @@
 	it stopped less than DEACTIVATION_DELAY ticks before, in which case it stays on until it has not
 	worked for that long. So a furnace on too little power (working every other tick) glows
 	steadily instead of blinking, and one that finishes goes dark at once.
-	Only its energy is kept in its item when broken; its slots drop, so the progress goes.
+	Only its energy is kept in its item when broken (placed again, it holds at most its capacity
+	without Energy Upgrades); its slots drop, upgrade cards included, so the progress goes.
 
 	Its panel: the input, Minecraft's arrow and the output in the furnace's result frame in a row,
-	the status line above them and the energy bar. JEI lists it as a smelting catalyst.
+	the status line above them, the upgrade slots below on the left and the energy bar. JEI lists
+	it as a smelting catalyst.
 ]]
 
 local Core = require(script.Parent.Parent.Core)
+local Upgrades = require(script.Parent.Parent.Upgrades)
 local Items = require(script.Parent.Parent.Parent.Items)
 local Smelting = require(script.Parent.Parent.Parent.Crafting.Smelting)
 local Types = require(script.Parent.Parent.Parent.Inventory.Types)
@@ -60,7 +66,7 @@ local BASE_TICKS = 200
 local BASE_ENERGY_PER_TICK = 50
 
 -- Slots.
-local INPUT, OUTPUT = 1, 2
+local INPUT, OUTPUT, SPEED, ENERGY = 1, 2, 3, 4
 -- Faces (Transmitters.SIDES): Down, Up, North, South, West, East.
 local DOWN = 0
 local TOP_AND_SIDES = { 1, 2, 3, 4, 5 }
@@ -77,11 +83,14 @@ local function smelts(item: number): boolean
 end
 
 --[[
-	Ticks an item takes, J a tick of work uses and the capacity, now. The base values; upgrade
-	cards (slots 3 and 4) will change them here with Mekanism's maths.
+	Ticks an item takes, J a tick of work uses and the capacity, now: the base values changed by
+	the upgrade cards in slots 3 and 4 (Mekanism's maths, Machines/Upgrades).
 ]]
-local function settings(_container: Container, ctx: Core.TickContext): (number, number, number)
-	return BASE_TICKS, BASE_ENERGY_PER_TICK, ctx.energy.capacity
+local function settings(container: Container, ctx: Core.TickContext): (number, number, number)
+	local speed, energy = Upgrades.counts(container, SPEED, ENERGY)
+	return Upgrades.ticks(BASE_TICKS, speed),
+		Upgrades.energyPerTick(BASE_ENERGY_PER_TICK, speed, energy),
+		Upgrades.capacity(ctx.energy.capacity, energy)
 end
 
 -- Is there room in the output for `result` (the same item, wear and data, within its limit)?
@@ -130,7 +139,7 @@ local function tick(container: Container, ctx: Core.TickContext)
 	local ticks, energyPerTick, capacity = settings(container, ctx)
 	Core.set(container, "ticksRequired", ticks)
 	Core.set(container, "energyPerTick", energyPerTick)
-	Core.set(container, "capacity", capacity)
+	Upgrades.setCapacity(container, capacity)
 
 	local slots = container.slots
 	local input = slots[INPUT]
@@ -171,11 +180,16 @@ local function tick(container: Container, ctx: Core.TickContext)
 	showActive(container, wasWorking, working)
 end
 
--- The input, then the output in Minecraft's result frame, in a row with the arrow between them.
+-- The input, then the output in Minecraft's result frame, in a row with the arrow between them;
+-- the upgrade slots below on the left.
 local SLOTS: { Core.SlotSpec } = {
 	{ x = 56, y = 35, accepts = smelts, insert = TOP_AND_SIDES },
 	{ x = 116, y = 35, output = true, big = true, extract = { DOWN } },
 }
+for _, slot in Upgrades.slots(8, 53) do
+	table.insert(SLOTS, slot)
+end
+assert(#SLOTS == ENERGY, "the Electric Furnace's upgrade slots are 3 and 4")
 
 return Core.define("smelter", {
 	slots = SLOTS,

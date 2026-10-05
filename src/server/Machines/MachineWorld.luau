@@ -19,6 +19,14 @@
 	Afterwards `takeChanges` says whose slots and whose data changed (their viewers need a
 	snapshot).
 
+	The sky. Kinds ask whether a cell sees the sky straight up (TickContext `sky`: solar panels).
+	`seesSky` answers from a cache per cell, filled by the game's uncached look (Env `sky`:
+	Machines/SkyCheck over the server's world, which never generates terrain; without one, the
+	cells above are read with `getBlock`). `blockChanged` keeps it true without looking again: an
+	opaque block put above a cell covers it at once, and a cell whose roof may have gone is looked
+	at again when next asked. A machine's own cell is forgotten when it goes; at most MAX_SKY_CELLS
+	answers are kept in all (then they start over).
+
 	Sustained data (Mekanism): a machine broken by a survival player keeps its energy (and its
 	kind's `keep` fields) in its item, and placing that item puts them back (`blockDataHooks`,
 	registered with ServerNet's `addBlockData`). Its slots drop as items (Players/Inventories, as
@@ -34,6 +42,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
+local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
@@ -58,9 +68,13 @@ local MachineWorld = {}
 MachineWorld.RECORD_INTERVAL = 5
 -- Day time used when the game gives none (noon).
 local NOON = 6000
+-- Sky answers kept at most (far more than the solar panels players build: a panel asks about its
+-- own cell only).
+MachineWorld.MAX_SKY_CELLS = 65536
+local HEIGHT = Config.WorldHeight
 
 function MachineWorld.new(env: Env): World
-	return {
+	local world: World = {
 		env = env,
 		tick = 0,
 		machines = {},
@@ -78,6 +92,8 @@ function MachineWorld.new(env: Env): World
 		dirtyRecords = {},
 		moved = 0,
 		failed = {},
+		sky = {},
+		skyCells = 0,
 		ctx = {
 			block = 0,
 			x = 0,
@@ -87,8 +103,13 @@ function MachineWorld.new(env: Env): World
 			tick = 0,
 			dayTime = NOON,
 			getBlock = env.getBlock,
+			sky = nil,
 		},
 	}
+	world.ctx.sky = function(x: number, y: number, z: number): boolean
+		return MachineWorld.seesSky(world, x, y, z)
+	end
+	return world
 end
 
 --[[ Lookups ]]
@@ -151,6 +172,102 @@ local function sameRecord(a: MachineRecord, b: MachineRecord): boolean
 		and a.state == b.state
 end
 
+--[[ The sky ]]
+
+-- The key of column (x, z) in the sky cache (nil outside the world).
+local function columnKey(x: number, z: number): number?
+	return Grid.key(x, 0, z)
+end
+
+-- The uncached look: the game's (SkyCheck), else the cells above read one by one.
+local function lookUp(env: Env, x: number, y: number, z: number): boolean
+	local sky = env.sky
+	if sky then
+		return sky(x, y, z)
+	end
+	local getBlock = env.getBlock
+	for cy = math.max(y + 1, 0), HEIGHT - 1 do
+		local block = getBlock(x, cy, z)
+		-- (Unknown cells count as air.)
+		if block and Blocks.isOpaque(block) then
+			return false
+		end
+	end
+	return true
+end
+
+--[[
+	Does cell (x, y, z) see the sky straight up: nothing opaque in any cell above it (Minecraft's
+	canSeeSky)? Kinds get it as TickContext `sky`. Cached per cell (see the header); never
+	generates terrain.
+]]
+function MachineWorld.seesSky(world: World, x: number, y: number, z: number): boolean
+	local key = columnKey(x, z)
+	if key == nil or y < 0 or y >= HEIGHT then
+		return lookUp(world.env, x, y, z)
+	end
+	local column: { [number]: boolean }? = world.sky[key]
+	local known = if column then column[y] else nil
+	if known ~= nil then
+		return known
+	end
+	local open = lookUp(world.env, x, y, z)
+	if world.skyCells >= MachineWorld.MAX_SKY_CELLS then
+		table.clear(world.sky)
+		world.skyCells = 0
+		column = nil
+	end
+	local cells: { [number]: boolean } = column or {}
+	world.sky[key] = cells
+	cells[y] = open
+	world.skyCells += 1
+	return open
+end
+
+--[[
+	Block (x, y, z) went from `old` to `new`: the sky answers of the cells below it in its column
+	follow. An opaque block covers them; one that was opaque may have uncovered the covered ones,
+	which are looked at again when next asked.
+]]
+local function skyChanged(world: World, x: number, y: number, z: number, old: number, new: number)
+	local key = columnKey(x, z)
+	local column = if key then world.sky[key] else nil
+	if key == nil or column == nil then
+		return
+	end
+	local covers = Blocks.isValid(new) and Blocks.isOpaque(new)
+	local uncovers = not covers and Blocks.isValid(old) and Blocks.isOpaque(old)
+	if not (covers or uncovers) then
+		return
+	end
+	for cy, open in column do
+		if cy < y then
+			if covers then
+				column[cy] = false
+			elseif not open then
+				column[cy] = nil
+				world.skyCells -= 1
+			end
+		end
+	end
+	if next(column) == nil then
+		world.sky[key] = nil
+	end
+end
+
+-- Forgets the sky answer of cell (x, y, z) (a machine that went).
+local function forgetSky(world: World, x: number, y: number, z: number)
+	local key = columnKey(x, z)
+	local column = if key then world.sky[key] else nil
+	if key and column and column[y] ~= nil then
+		column[y] = nil
+		world.skyCells -= 1
+		if next(column) == nil then
+			world.sky[key] = nil
+		end
+	end
+end
+
 --[[ Block changes ]]
 
 local function index(world: World, key: number, x: number, z: number)
@@ -183,6 +300,7 @@ local function removeMachine(world: World, machine: Machine)
 	world.dirtyRecords[key] = nil
 	world.dirty[key] = true
 	unindex(world, key, machine.x, machine.z)
+	forgetSky(world, machine.x, machine.y, machine.z)
 	-- (Players/Inventories took it already in the game, dropping its slots: this only tidies.)
 	local containers = world.env.containers
 	local stored = containers:peek(machine.x, machine.y, machine.z)
@@ -223,10 +341,14 @@ end
 	Block (x, y, z) changed from `old` to `new` (WorldServer.onChanged): a machine that went is
 	dropped (its container too, if nothing took it yet), a new one starts empty (placing it from
 	an item with data fills it after this: `blockDataHooks`), and the energy networks around are
-	worked out again.
+	worked out again. Every change also keeps the sky answers of the cells below it true.
 ]]
 function MachineWorld.blockChanged(world: World, x: number, y: number, z: number, old: number, new: number)
-	if old == new or not (Machines.isMachine(old) or Machines.isMachine(new)) then
+	if old == new then
+		return
+	end
+	skyChanged(world, x, y, z, old, new)
+	if not (Machines.isMachine(old) or Machines.isMachine(new)) then
 		return
 	end
 	local key = Grid.key(x, y, z)

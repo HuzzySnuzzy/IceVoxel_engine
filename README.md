@@ -102,9 +102,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   pull act as normal (WAILA says "Push (as Normal)"). Right click opens a machine's panel with
   Mekanism's energy bar (red when empty to green when full, full only when it is, "stored /
   capacity" on hover); WAILA shows a machine's energy and what it is doing ("Producing 200 J/t",
-  "Using 50 J/t", "No power") and a cable's capacity. A machine broken in survival keeps its energy in its
-  item ("Energy: 1.2 MJ") and gets it back when placed; its slots drop like a chest's. The
-  Creative Energy Cube (creative only, no recipe) gives infinite energy for trying machines out.
+  "Using 50 J/t", "No power", "Night") and a cable's capacity. A machine broken in survival keeps
+  its energy in its item ("Energy: 1.2 MJ") and gets it back when placed; its slots drop like a
+  chest's. The Creative Energy Cube (creative only, no recipe) gives infinite energy for trying
+  machines out.
   Recipes: 8 Basic Universal Cables from an osmium ingot, glowstone dust and an osmium ingot in a
   row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
   make 8 of the next tier. Like chests, energy lives in memory.
@@ -137,7 +138,34 @@ A fast, Minecraft-style voxel engine for Roblox.
   item ("Energy: 12 kJ"); its slots drop. Recipe: Mekanism's shape with glowstone dust for the
   redstone, osmium ingots for the control circuits and a furnace for the steel casing: glowstone
   dust, an osmium ingot and glowstone dust, over glass, a furnace and glass, over the top row
-  again. JEI lists every smelting recipe under its uses. Mekanism's upgrade cards aren't in yet.
+  again. JEI lists every smelting recipe under its uses. It takes Speed and Energy Upgrades (below).
+- **Solar Panel.** Mekanism Generators' Solar Generator, named the Solar Panel: a thin panel of four
+  dark blue cells on a short post (no full cube, as Mekanism's; players walk through it, as through
+  a cable). While nothing opaque stands anywhere above it (glass, torches, cables, other panels and,
+  unlike Minecraft, water let the sun through; leaves and ice don't) and it is day on the server's
+  clock (Minecraft's isDay: from a little after sunrise to a little before sunset), it makes up to
+  50 J a tick, scaled by how high the sun stands (Mekanism's sun brightness: all of it from mid
+  morning to mid afternoon, a little under half just before night), about 620 kJ a day. It stores
+  96 kJ and gives up to 100 J/t to the cables and machines around it. Its panel and WAILA say
+  "Producing 50 J/t", "Full", "Night" or "No sky"; its panel also has its upgrade slots. Broken
+  with a pickaxe it keeps its energy in its item. Recipe: Mekanism's shape with glass for the
+  solar cells, gold ingots for the alloy, osmium ingots for the osmium dust and glowstone dust for
+  the energy tablet: three glass, over a gold ingot, an iron ingot and a gold ingot, over an osmium
+  ingot, glowstone dust and an osmium ingot. Mekanism's biome and rain factors don't apply (the
+  game has no weather).
+- **Upgrade cards.** Mekanism's Speed Upgrade and Energy Upgrade, which stack to 8 here (the most a
+  machine takes of each; Mekanism's stack to 64). Recipes: Mekanism's shape with the ingots for its
+  dusts and gold for its alloy: glass, over a gold ingot, an osmium ingot (speed) or a gold ingot
+  (energy) and a gold ingot, over glass. The Electric Furnace and the Solar Panel take up to 8 of
+  each in two slots at the lower left of their panels, by hand or shift-click (transporters never
+  touch them); an empty slot shows the card's outline. Mekanism's maths: with n Speed and e Energy
+  Upgrades an Electric Furnace takes 200 x 10^(-n/8) ticks an item (149 with one card, 20 with 8)
+  at 50 x 10^((2n - e)/8) J a tick and stores 20 kJ x 10^(e/8), so 8 Speed Upgrades smelt ten
+  times as fast for ten times the energy an item, and 8 of each ten times as fast for the usual
+  10 kJ. A Solar Panel (Mekanism's take none) makes and gives out 10^(n/8) times as much (8 cards:
+  500 J/t in full sun) and stores 96 kJ x 10^(e/8) (8 cards: 960 kJ). Taking cards out applies at
+  once: energy over a smaller store is lost. The cards drop when the machine is broken (Mekanism
+  keeps them in its item), so a machine placed again holds at most its base store.
 - **Osmium.** Mekanism's metal: Osmium Ore (blue-grey speckled stone, hardness 3) needs a stone
   pickaxe or better and drops Raw Osmium, which smelts into an Osmium Ingot (the ore smelts too).
   Nine nuggets make an ingot, nine ingots a Block of Osmium and nine raw osmium a Block of Raw
@@ -265,9 +293,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Inventories (sided slots, insert / extract)
   Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
                             slot rules, panels, energy maths and the even split, state codes,
-                            sustained data), Kinds/ (a module per kind: Creative, the Creative
-                            Energy Cube; Generator, the Heat Generator; Smelter, the Electric
-                            Furnace)
+                            sustained data), Upgrades (Mekanism's upgrade cards: their slots and
+                            maths), Kinds/ (a module per kind: Creative, the Creative Energy
+                            Cube; Generator, the Heat Generator; Smelter, the Electric Furnace;
+                            Solar, the Solar Panel)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel),
                             Crafting (grid matching), Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
@@ -275,8 +304,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Entities/ItemPhysics      dropped item movement (server and client)
   GameMode, Mining          survival / creative, mining times by hand and with tools
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
-  DayCycle                  Minecraft's day: celestial angle, sky light, /time arguments, lighting
-                            blends
+  DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
+                            brightness (solar panels), /time arguments, lighting blends
   Biomes/  BiomeList        biome definitions and altitude bands
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
@@ -309,9 +338,11 @@ src/server   -> ServerScriptService.IceVoxel
                             pure), Transport (items in transporters), Fluids (water in pipes),
                             UseRules (buckets, Configurator), Transmitters (ticks, replication)
   Machines/                 Mekanism machines and energy on the server: MachineWorld (machines,
-                            their ticks, sustained data, records; pure), EnergyNet (energy
-                            networks over Universal Cables and touching machines; pure), Machines
-                            (20 Hz ticks, viewers' snapshots, replication)
+                            their ticks, sustained data, records, the cached sky look; pure),
+                            EnergyNet (energy networks over Universal Cables and touching
+                            machines; pure), SkyCheck (does a cell see the sky: loaded chunks,
+                            else edits over the generator's ground, never generating; pure),
+                            Machines (20 Hz ticks, viewers' snapshots, replication)
   Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
   Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
                             (/time, /gamerule), Inventories +
@@ -333,7 +364,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
-                            energy bar), CreativeScreen,
+                            energy bar, empty armor and upgrade slots' outlines), CreativeScreen,
                             ItemIcon (viewport icons, durability bars), SlotClicks (Minecraft
                             clicks), Style, Waila + WailaInfo (what the crosshair points at),
                             Jei/ (Just Enough Items: item list, recipe view, recipe transfer)
@@ -521,6 +552,10 @@ The Heat Generator (`src/shared/Machines/Kinds/Generator.luau`) is the complete 
 example; the Electric Furnace (`Kinds/Smelter.luau`) is a machine that uses energy, with a
 progress arrow, sided slots for transporters, a `rates` override and a `state` field: a code
 saying why it is idle ("No power") that Machines records carry to WAILA.
+The Solar Panel (`Kinds/Solar.luau`) reads the server's day time and whether its cell sees the sky
+from its tick context (`ctx.dayTime`, `ctx.sky(x, y, z)`: cached, never generating terrain), and
+`Machines/Upgrades` gives any kind Mekanism's upgrade slots (`Upgrades.slots(x, y)`) and maths
+(`ticks`, `energyPerTick`, `capacity`, `production`, `setCapacity`).
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make

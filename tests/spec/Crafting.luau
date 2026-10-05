@@ -169,8 +169,8 @@ return function(t, shared, require)
 			local made = result(cells, 3)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
-		-- (99 before the four Universal Cables.)
-		t.eq(#Crafting.recipes, 105, "recipes compiled")
+		-- (99 before the four Universal Cables; 105 before the upgrade cards and the Solar Panel.)
+		t.eq(#Crafting.recipes, 108, "recipes compiled")
 	end)
 
 	t.test("smelting: recipes and fuel follow Minecraft", function()

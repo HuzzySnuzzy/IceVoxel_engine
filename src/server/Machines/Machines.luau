@@ -13,6 +13,10 @@
 	            and cables only come from edits, so they keep working wherever no player is.
 	  Cables    are Transmitters/TransmitterWorld's nodes (side modes, the Configurator, records);
 	            MachineWorld reads them for its energy networks.
+	  Sun       solar panels run on the server's clock (World/TimeOfDay) and ask whether they see
+	            the sky (Machines/SkyCheck: the loaded chunk, else the edits over the generator's
+	            ground height, never generating terrain; MachineWorld caches the answers and drops
+	            them when a block above changes).
 	  Energy    a machine broken by a survival player keeps its energy in its item, and placing
 	            that item puts it back (MachineWorld.blockDataHooks, registered with ServerNet's
 	            `addBlockData`: Mekanism's sustained data).
@@ -45,6 +49,7 @@ local Inventories = require(script.Parent.Parent.Players.Inventories)
 local Transmitters = require(script.Parent.Parent.Transmitters.Transmitters)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
 local MachineWorld = require(script.Parent.MachineWorld)
+local SkyCheck = require(script.Parent.SkyCheck)
 
 type MachineRecord = Protocol.MachineRecord
 
@@ -165,11 +170,18 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		return if edits then edits[ChunkLayout.localIndex(lx, y, lz)] else nil
 	end
 
+	-- Whether a cell sees the sky (solar panels): the chunk if the server has it, else its edits
+	-- over the generator's ground height; MachineWorld caches it.
+	local function seesSky(x: number, y: number, z: number): boolean
+		return SkyCheck.open(world, x, y, z)
+	end
+
 	local simulation = MachineWorld.new({
 		getBlock = knownBlock,
 		containers = Containers.default,
 		transmitters = Transmitters.world(),
 		dayTime = TimeOfDay.get,
+		sky = seesSky,
 	})
 	state = simulation
 	-- A machine's energy stays in its item (Mekanism's sustained data).

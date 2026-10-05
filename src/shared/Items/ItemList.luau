@@ -459,4 +459,63 @@ table.insert(list, {
 table.insert(list, { name = "OsmiumIngot", color = OSMIUM, material = "Metal", model = ingot(OSMIUM), tilt = 25 })
 table.insert(list, { name = "OsmiumNugget", color = OSMIUM, material = "Metal", model = nugget(OSMIUM) })
 
+--[[
+	Mekanism's upgrade cards (Shared/Machines/Upgrades): the Speed Upgrade and the Energy Upgrade,
+	which the Electric Furnace and the Solar Panel take in their upgrade slots, 8 of each at most
+	(Mekanism's Upgrade.getMax); they stack to that 8 too (Mekanism's own stack to 64). A small
+	circuit card with gold contacts and the upgrade's symbol in its colour (Mekanism's EnumColor:
+	red for speed, bright green for energy): two chevrons, a bolt.
+]]
+local CARD = { 58, 62, 70 }
+local CONTACT = shade(GOLD, 0.9)
+local SPEED_RED = { 226, 64, 60 }
+local ENERGY_GREEN = { 96, 226, 92 }
+
+-- The card: a dark board, a lighter face, four gold contacts along its foot, then `symbol`.
+local function upgradeCard(symbol: { ModelBox }): { ModelBox }
+	local boxes: { ModelBox } = {
+		{ size = { 12, 13, 1 }, offset = { 0, 0.5, 0 }, color = CARD },
+		{ size = { 10, 9, 0.4 }, offset = { 0, 1.5, 0.6 }, color = shade(CARD, 1.35) },
+	}
+	for i = 0, 3 do
+		table.insert(boxes, { size = { 1.5, 2, 1.2 }, offset = { -3.75 + i * 2.5, -5.5, 0 }, color = CONTACT })
+	end
+	for _, box in symbol do
+		table.insert(boxes, box)
+	end
+	return boxes
+end
+
+-- A ">" chevron with its tip at (x, y): two bars meeting at a right angle (on the card's face).
+local function chevron(x: number, y: number): { ModelBox }
+	return {
+		{ size = { 4, 1.3, 0.4 }, offset = { x - 1.4, y + 1.4, 1 }, rotation = -45, material = "Neon" },
+		{ size = { 4, 1.3, 0.4 }, offset = { x - 1.4, y - 1.4, 1 }, rotation = 45, material = "Neon" },
+	}
+end
+
+local speedSymbol = chevron(0, 1.5)
+for _, box in chevron(3.5, 1.5) do
+	table.insert(speedSymbol, box)
+end
+table.insert(list, {
+	name = "SpeedUpgrade",
+	maxStack = 8,
+	color = SPEED_RED,
+	material = "Metal",
+	model = upgradeCard(speedSymbol),
+})
+table.insert(list, {
+	name = "EnergyUpgrade",
+	maxStack = 8,
+	color = ENERGY_GREEN,
+	material = "Metal",
+	-- (A bolt: a stroke down to the left end of a bar, the bar, a stroke down from its right end.)
+	model = upgradeCard({
+		{ size = { 1.4, 4.5, 0.4 }, offset = { -0.55, 3.55, 1 }, rotation = -25, material = "Neon" },
+		{ size = { 4, 1.3, 0.4 }, offset = { 0, 1.5, 1 }, material = "Neon" },
+		{ size = { 1.4, 4.5, 0.4 }, offset = { 0.55, -0.55, 1 }, rotation = -25, material = "Neon" },
+	}),
+})
+
 return list

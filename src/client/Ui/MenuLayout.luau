@@ -13,8 +13,9 @@
 	                  furnace   AbstractFurnaceScreen: the input (1) over the flame over the fuel
 	                            (2), the progress arrow and the output (3) in a large frame
 	                  machine   a Mekanism machine's (Shared/Machines.panel): its kind's slots where
-	                            it puts them, Mekanism's vertical energy bar (GuiVerticalPowerBar,
-	                            right edge), optionally an arrow, a flame and a status line
+	                            it puts them (with the outline of what goes in while empty: upgrade
+	                            cards), Mekanism's vertical energy bar (GuiVerticalPowerBar, right
+	                            edge), optionally an arrow, a flame and a status line
 	  gauges        the furnace's flame and arrow (AbstractFurnaceMenu.getLitProgress /
 	                getBurnProgress), a machine's (from the data fields its panel names), the
 	                energy bar (stored over capacity, red when empty to green when full, "x / y"
@@ -35,8 +36,9 @@ local Types = require(Shared.Inventory.Types)
 
 type Container = Types.Container
 
--- A slot: container slot `slot` with its item at (x, y); `big` draws Minecraft's 26 x 26 result frame.
-export type Spot = { slot: number, x: number, y: number, big: boolean }
+-- A slot: container slot `slot` with its item at (x, y); `big` draws Minecraft's 26 x 26 result frame,
+-- and `ghost` (16 x 16 pixel art, "G" pixels) an outline while the slot is empty (machines' slots).
+export type Spot = { slot: number, x: number, y: number, big: boolean, ghost: { string }? }
 export type Rect = { x: number, y: number, w: number, h: number }
 -- Where a machine's gauge reads its data: `value` over `total` (data indices) or over `fixed`.
 export type Source = { value: number, total: number?, fixed: number? }
@@ -230,7 +232,10 @@ local function machinePanel(container: Container): Panel
 	if kind then
 		for slot, slotSpec in kind.slots do
 			if slot <= container.size then
-				table.insert(slots, { slot = slot, x = slotSpec.x, y = slotSpec.y, big = slotSpec.big == true })
+				table.insert(
+					slots,
+					{ slot = slot, x = slotSpec.x, y = slotSpec.y, big = slotSpec.big == true, ghost = slotSpec.ghost }
+				)
 			end
 		end
 	end

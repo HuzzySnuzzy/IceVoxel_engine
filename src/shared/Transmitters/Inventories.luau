@@ -24,7 +24,9 @@
 	           The Heat Generator takes fuel through every face and gives nothing; the Electric
 	           Furnace (Machines/Kinds/Smelter) is sided like a furnace without fuel: what smelts
 	           goes into its input through Up and the four sides, and its results come out of its
-	           output through Down only.
+	           output through Down only. Upgrade slots are out of reach (Machines/Upgrades), so a
+	           machine with nothing else (the Solar Panel) is no inventory at all: no transporter
+	           connects to it.
 
 	Inserting (`insert`, `room`) follows Forge's ItemHandlerHelper.insertItemStacked, as Mekanism's
 	transporters insert: first it tops up stacks of the same item, wear and data (Menu.stacksMatch)
@@ -114,9 +116,21 @@ local function slotMax(item: number): number
 	return math.min(Items.maxStack(item), Items.MAX_STACK)
 end
 
--- Is `block` a machine with item slots? (Asked each time: tests bind machines at run time.)
+--[[
+	Is `block` a machine with item slots transporters reach through some face? (A Solar Panel's
+	only slots are its upgrade slots, which they never reach: no transporter connects to it. Asked
+	each time: tests bind machines at run time.)
+]]
 local function isMachine(block: number): boolean
-	return Machines.isMachine(block) and Machines.containerSize(block) > 0
+	if not Machines.isMachine(block) or Machines.containerSize(block) <= 0 then
+		return false
+	end
+	for face = 0, 5 do
+		if #Machines.insertSlots(block, face) > 0 or #Machines.extractSlots(block, face) > 0 then
+			return true
+		end
+	end
+	return false
 end
 
 -- The most of `item` `slot` of `block` holds (a machine's slot may hold fewer).
@@ -127,7 +141,7 @@ local function slotLimit(block: number, slot: number, item: number): number
 	return slotMax(item)
 end
 
--- Does `block` keep items (a chest, a furnace, a machine with slots: BlockList `container`)?
+-- Does `block` keep items transporters reach (a chest, a furnace, a machine with such slots)?
 function Inventories.isInventory(block: number): boolean
 	return kinds[block] ~= nil or isMachine(block)
 end

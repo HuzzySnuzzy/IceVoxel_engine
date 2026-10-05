@@ -16,9 +16,10 @@
 	  crafting  "Crafting": the 3 x 3 grid, an arrow and the result in a large frame
 	  furnace   "Furnace": the input over the flame over the fuel, the progress arrow and the output;
 	            the flame burns down and the arrow fills from the container's `data`
-	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots, gauges and status
-	            line, and Mekanism's vertical energy bar filling from the bottom, red when nearly
-	            empty to green when full; hovering it shows "stored / capacity" (`tooltipAt`)
+	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots (an empty upgrade
+	            slot shows a faint outline of its card), gauges and status line, and Mekanism's
+	            vertical energy bar filling from the bottom, red when nearly empty to green when
+	            full; hovering it shows "stored / capacity" (`tooltipAt`)
 	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
 	grid. In creative mode (with no block open) two tabs above the panel switch between the item
 	selection and this screen.
@@ -238,6 +239,18 @@ local function newSlot(
 	return widget
 end
 
+-- Gives a slot the faint outline `art` (16 x 16 pixel art) shown while it is empty (render()).
+local function addGhost(widget: SlotWidget, art: { string })
+	local ghost = Instance.new("Frame")
+	ghost.BackgroundTransparency = 1
+	ghost.Position = UDim2.fromOffset(1, 1)
+	ghost.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
+	ghost.ZIndex = 3
+	ghost.Parent = widget.view.button
+	Style.pixelArt(ghost, 0, 0, art, { G = Style.Colour.SlotGhost }, 1)
+	widget.ghost = ghost
+end
+
 function InventoryScreen.new(parent: Instance): InventoryScreen
 	local root = Instance.new("Frame")
 	root.Name = "Inventory"
@@ -296,14 +309,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 	-- Armor column.
 	for slot = 1, Types.ARMOR_SIZE do
 		local widget = newSlot(self, panel, self.playerSlots, 8, 8 + (slot - 1) * 18, "armor", slot)
-		local ghost = Instance.new("Frame")
-		ghost.BackgroundTransparency = 1
-		ghost.Position = UDim2.fromOffset(1, 1)
-		ghost.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
-		ghost.ZIndex = 3
-		ghost.Parent = widget.view.button
-		Style.pixelArt(ghost, 0, 0, ARMOR_GHOSTS[slot], { G = Style.Colour.SlotGhost }, 1)
-		widget.ghost = ghost
+		addGhost(widget, ARMOR_GHOSTS[slot])
 	end
 
 	-- The player, in a black box.
@@ -411,7 +417,12 @@ local function buildPanel(self: Self, container: Types.Container)
 		Style.text(panel, layout.title, layout.titleX, layout.titleY, 140, 8, Style.Colour.Title, 5)
 	end
 	for _, spot in layout.slots do
-		newSlot(self, panel, self.containerSlots, spot.x, spot.y, "container", spot.slot, spot.big)
+		local widget = newSlot(self, panel, self.containerSlots, spot.x, spot.y, "container", spot.slot, spot.big)
+		-- (A machine's upgrade slots show the card's outline while empty.)
+		local ghost = spot.ghost
+		if ghost then
+			addGhost(widget, ghost)
+		end
 	end
 	local arrow = layout.arrow
 	if arrow then

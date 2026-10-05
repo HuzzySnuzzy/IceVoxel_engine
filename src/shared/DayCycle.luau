@@ -12,7 +12,8 @@
 	  Sky light  Level.getSkyDarken (0 by day to 11 at night, so the night sky light is 4 of 15),
 	             and the client's smooth 0..1 version (skyBrightness), used to blend lighting.
 	             Both, and the sunrise glow, only depend on how high the sun stands (sunHeight), so
-	             the client can blend by the sun Roblox really draws (`environment`).
+	             the client can blend by the sun Roblox really draws (`environment`). The server's
+	             solar panels use Level.isDay and the sun's brightness (`isDay`, `sunBrightness`).
 
 	Replication: the server publishes the day time at one moment (ATTRIBUTE_TIME), that moment as
 	workspace:GetServerTimeNow() (ATTRIBUTE_SYNC) and the speed in ticks a second (ATTRIBUTE_RATE,
@@ -116,6 +117,15 @@ function DayCycle.skyLight(dayTime: number): number
 end
 
 --[[
+	Minecraft's Level.isDay (clear weather): the sky darkens by less than 4, so from a little after
+	sunrise (the sun about 4 degrees up) to a little before sunset. Mekanism's solar generators
+	only work then (WorldUtils.canSeeSun).
+]]
+function DayCycle.isDay(dayTime: number): boolean
+	return DayCycle.skyDarken(dayTime) < 4
+end
+
+--[[
 	A smooth daylight factor for a sun `height` (sunHeight), 1 by day and 0 at night
 	(ClientLevel.getSkyDarken before it is mapped to 0.2..1 for the light map): it falls while the
 	sun goes from about 24 degrees above the horizon to 6 below.
@@ -127,6 +137,16 @@ end
 -- `daylight` of Minecraft's sun at `dayTime`.
 function DayCycle.skyBrightness(dayTime: number): number
 	return DayCycle.daylight(DayCycle.sunHeight(dayTime))
+end
+
+--[[
+	How bright the sun is at `dayTime`, 0.2 at night to 1 while it stands more than about 24 degrees
+	high: `skyBrightness` mapped to 0.2..1, Minecraft's ClientLevel.getSkyDarken(partialTick)
+	in clear weather, which Mekanism copies for the server (WorldUtils.getSunBrightness) to scale
+	what its solar generators make.
+]]
+function DayCycle.sunBrightness(dayTime: number): number
+	return DayCycle.skyBrightness(dayTime) * 0.8 + 0.2
 end
 
 --[[

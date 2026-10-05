@@ -1171,4 +1171,44 @@ table.insert(list, {
 	energy = { capacity = 20000, input = 20000 },
 })
 
+--[[
+	Mekanism Generators' Solar Generator, named the Solar Panel (Shared/Machines/Kinds/Solar, kind
+	"solar"): makes up to 50 J a tick while the sky straight above it is open and it is day (more
+	with Speed Upgrades), into Mekanism's 96 000 J store (more with Energy Upgrades), given out at
+	up to 100 J/t (twice what it makes) to cables and machines touching it. Mekanism's model is no
+	full cube either: a thin panel of four dark blue cells in a steel frame on a short post over a
+	foot, 9 pixels tall. Like a lantern it is not solid but obstructs (the movement hull only knows
+	full cubes); it is no opaque block, so the panels of a stack all see the sky. Mekanism's
+	machine block: hardness 3.5, a pickaxe to drop anything.
+]]
+local SOLAR_CELL = { 28, 46, 104 }
+local SOLAR_SHAPE: { ShapeBox } = {
+	metal({ 6, 1, 6 }, { 0, -7.5, 0 }, STEEL),
+	metal({ 2, 6, 2 }, { 0, -4, 0 }, STEEL),
+	metal({ 16, 1, 16 }, { 0, -0.5, 0 }, { 84, 88, 96 }),
+}
+for _, x in { -3.75, 3.75 } do
+	for _, z in { -3.75, 3.75 } do
+		table.insert(
+			SOLAR_SHAPE,
+			{ size = { 7, 1, 7 }, offset = { x, 0.5, z }, color = SOLAR_CELL, material = "Glass", transparency = 0 }
+		)
+	end
+end
+table.insert(list, {
+	name = "SolarPanel",
+	color = SOLAR_CELL,
+	material = "Metal",
+	sound = "metal",
+	solid = false,
+	placeable = true,
+	obstructs = true,
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	shape = SOLAR_SHAPE,
+	machine = { kind = "solar" },
+	energy = { capacity = 96000, output = 100 },
+})
+
 return list

@@ -546,6 +546,12 @@ the 24000 ticks, and at tick 0 it is already 12Â° up. `clockTime = (12 + angle Ã
 Roblox's sun at that angle. Roblox then tilts the sun's path by `GeographicLatitude` and its Earth
 tilt.
 
+**Solar panels** (server). `DayCycle.isDay` is Minecraft's Level.isDay in clear weather, the sky
+darkening by less than 4 (`skyDarken`): from tick 23 460 (the sun about 4 degrees up) to 12 540.
+`DayCycle.sunBrightness` is Mekanism's getSunBrightness, a copy of ClientLevel.getSkyDarken:
+`skyBrightness x 0.8 + 0.2`. The Solar Panel reads both on the server's clock (`TimeOfDay.get`,
+MachineWorld's `dayTime`).
+
 **Commands.** `/time set|add|query` and `/gamerule doDaylightCycle` are TextChatCommands, with
 `Player.Chatted` for the legacy chat. Parsing and permissions are in `Players/TimeCommand`, pure
 and tested:
@@ -965,6 +971,8 @@ at least 1 with anything in it, 255 full).
 A machine reaches the slots its kind gives each face (`Machines.insertSlots` / `extractSlots`):
 the Heat Generator takes fuel through every face and gives nothing; the Electric Furnace takes
 what smelts through Up and the sides and gives its results through Down.
+Upgrade slots (`Machines/Upgrades`) are reached through no face, so a machine with nothing else (the
+Solar Panel) is no inventory and transporters don't connect to it.
 
 ### On the server (`server/Transmitters/`, `Players/ItemUse`)
 
@@ -1095,24 +1103,27 @@ the Configurator, Transmitters records) without a network there: a cable that co
 changes links is flagged in `energyDirty` for the energy networks.
 
 **Machines** (`Shared/Machines`: init loads Core and every kind in `Kinds/`, then binds BlockList
-blocks with `machine`). A machine block has `machine = { kind }` and `energy = { capacity,
-input?, output? }`; output only makes it a producer, input only a consumer, both storage
-(`Machines.role`). A kind (`Core.define`) gives its slots (panel position, what each takes,
-outputs, limits, transporter faces), data fields, fields kept in the item, its panel, its server
-its server tick, a status line, optional rate overrides and an optional state field: a code
-(0..255, `Machines.state`) saying why it is not working, which Machines records carry and
-`status` gets as `view.state`. Its contents are a container of kind "machine"
-(Types.KINDS) with the kind's slots and f64 `data` (at most 16): a header every machine shares,
-1 energy, 2 capacity, 3 input and 4 output (what the network moved last tick), 5 rate (made +,
-used -), 6 active, then the kind's fields. Inventory/Menu asks Machines for a machine's slot
-rules, limits and outputs, and shift-clicks from the inventory into the slots that take the
-item in one pass (Mekanism's MekanismContainer; only when none takes anything does it move
-between the inventory and the hotbar). A machine with slots is an inventory for transporters
-(Transmitters/Inventories), through the faces its kind gives each slot (by default inputs take
-items through every face and outputs give them out through every face). Energy is kept in
-multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact; `produce` and `use` keep
-it so, and `share` is Mekanism's even split in whole quanta: every recipient gets the same share,
-those that take less get all they take and the rest is shared again, smallest limits first.
+blocks with `machine`). A machine block has `machine = { kind }` and `energy = { capacity, input?,
+output? }`; output only makes it a producer, input only a consumer, both storage (`Machines.role`).
+A kind (`Core.define`) gives its slots (panel position, what each takes, outputs, limits,
+transporter faces and an outline shown while empty, `ghost`), data fields, fields kept in the item,
+its panel, its server tick, a status line, optional rate overrides and an optional state field: a
+code (0..255, `Machines.state`) saying why it is not working, which Machines records carry and
+`status` gets as `view.state`. Its tick gets a context (`TickContext`): the block, its energy spec
+and position, the server's day time (`dayTime`, World/TimeOfDay) and whether a cell sees the sky
+(`sky(x, y, z)`, below). Its contents are a container of kind "machine" (Types.KINDS) with the
+kind's slots and f64 `data` (at most 16): a header every machine shares, 1 energy, 2 capacity, 3
+input and 4 output (what the network moved last tick), 5 rate (made +, used -), 6 active, then the
+kind's fields. Inventory/Menu asks Machines for a machine's slot rules, limits and outputs, and
+shift-clicks from the inventory into the slots that take the item in one pass (Mekanism's
+MekanismContainer; only when none takes anything does it move between the inventory and the hotbar).
+A machine with slots transporters reach is an inventory for them (Transmitters/Inventories), through
+the faces its kind gives each slot (by default inputs take items through every face and outputs give
+them out through every face); one whose slots no face reaches (the Solar Panel: upgrade slots only)
+is none. Energy is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact;
+`produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta: every
+recipient gets the same share, those that take less get all they take and the rest is shared again,
+smallest limits first.
 
 **On the server** (`server/Machines/`). `MachineWorld` (pure) keeps a machine per machine block
 (`blockChanged`, chained onto WorldServer.onChanged after Inventories and Transmitters) and
@@ -1139,13 +1150,28 @@ machine, and with a chunk's edit list when not in the default state (empty, idle
 energy and the kind's `keep` fields in the item's data (`Machines.save`; the creative cube keeps
 nothing), and placing that item puts them back (`Machines.restore`, at most the capacity).
 
+**The sky** (`MachineWorld.seesSky`, `Machines/SkyCheck`). A kind asks whether a cell sees the sky
+straight up with its context's `sky(x, y, z)`: nothing opaque (`Blocks.isOpaque`: full cubes,
+leaves, ice; glass, water and shaped blocks let the light through) in any cell above it, Mekanism's
+solar generators' check (Minecraft's canSeeSky, which wants the full sky light, so water blocks it
+there). `SkyCheck.open` (pure, tested) never generates a chunk: a chunk the server holds is read as
+it is (terrain, trees, edits; everything from its crop height up is air), and any other column is
+its edit list over the generator's ground height for that one column (`TerrainGenerator.column`):
+unedited cells below the ground count as ground (a natural cave a dug shaft passes through too) and
+unedited cells above it as air, so trees and sea ice are only seen in loaded chunks. MachineWorld
+caches the answers per cell (at most 65 536, then they start over) and keeps them true from
+`blockChanged`, which every block change reaches: an opaque block covers the cells below it at
+once, and a covered cell whose roof may have gone (an opaque block replaced by anything else) is
+looked at again when next asked, a tick later, with its chunk just loaded by that change. A
+machine's own cell is forgotten when it goes. Without a game look (tests) the cells above are read
+with `getBlock`.
+
 **On the client.** TransmitterRenderer keeps Machines records like Tanks records
 (`machine(x, y, z)`); WAILA shows "Energy: 1.2 kJ / 20 kJ" and the status (`Machines.status`:
 the kind's, else "Producing x/t", "Using x/t", "Charging" / "Discharging"), and for cables
 "Capacity: 8 kJ/t" (a side set to push or pull reads "Push (as Normal)"), with F3 details (a
 cable's network line counts the cables linked to it as the client sees them; the server's network
-may also join cables through machines). A machine's panel (MenuLayout) is its kind's: slots where
-it puts them, the title centred, Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling
+may also join cables through machines). A machine's panel (MenuLayout) is its kind's: slots where it puts them (a slot with a `ghost` shows that outline while empty, as empty armor slots do: the upgrade cards'), the title centred, Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling
 from the bottom in whole rows rounded down, at least one while it holds any, red when empty
 through yellow to green when full, "stored / capacity" on hover), and the arrow, flame and status
 line it asks for, read from the data fields it names. The panel reads the window's data without
@@ -1176,27 +1202,59 @@ status line is "Producing 200 J/t" or "Idle". Its item keeps its energy and both
 tick's lava whenever there is any room), lava around it and the nether bonus are left out: fuel
 burns directly. JEI lists it as a fuel catalyst.
 
-**The Electric Furnace** (kind "smelter", `Machines/Kinds/Smelter`; Mekanism's Energized
-Smelter). BlockList `ElectricFurnace` has `energy = { capacity = 20 000, input = 20 000 }`, a
-consumer; its `rates` override gives its capacity as its input rate (Mekanism's machine energy
-containers take any amount), so a network may fill it in one tick. Slot 1, the input, takes what
-`Smelting.result` smelts, through Up and the four sides; slot 2, the output (the furnace's result
-frame), gives through Down only (a furnace's faces without the fuel: blocks have no facing, so
-Mekanism's side configuration becomes fixed faces). Data 7 `progress`, 8 `ticksRequired` (200),
-9 `energyPerTick` (50), 10 `smelting` (the item in the input; another one starts over), 11
-`state`, its state code (0 idle, 1 no power, 2 output full), and 12 `activeDelay`. Each tick
-`settings` sets the ticks, the energy per tick and the capacity (the base values; upgrade cards
-will change them there); with something to smelt and room for the result it `use`s a tick's
-energy, all or nothing, and moves the progress on, and at `ticksRequired` one input item becomes
-the result. Without the energy or the room the progress waits (Mekanism pauses on both); no
-input resets it. RATE is minus what it used this tick, and its status reads it with the state
-code ("Using 50 J/t", "No power", "Output full" or "Idle"), so WAILA has it without the window.
-ACTIVE is what the block shows, Mekanism's client active state (TileEntityMekanism.setActive):
-on at once, off at once unless it last stopped within 60 ticks (blockDeactivationDelay, counted
-down in `activeDelay`), so a furnace on too little power glows steadily. Its item keeps only its
-energy (its slots drop). Slots 3 and 4 (speed and energy upgrades), at (8, 53) and (26, 53), and
-4 spare data values are left for the upgrade cards. JEI lists it as a smelting catalyst; the
-client lights its heating chamber from ACTIVE.
+**The Electric Furnace** (kind "smelter", `Machines/Kinds/Smelter`; Mekanism's Energized Smelter).
+BlockList `ElectricFurnace` has `energy = { capacity = 20 000, input = 20 000 }`, a consumer; its
+`rates` override gives its capacity as its input rate (Mekanism's machine energy containers take any
+amount), so a network may fill it in one tick. Slot 1, the input, takes what `Smelting.result`
+smelts, through Up and the four sides; slot 2, the output (the furnace's result frame), gives
+through Down only (a furnace's faces without the fuel: blocks have no facing, so Mekanism's side
+configuration becomes fixed faces); slots 3 and 4 hold its Speed and Energy Upgrades
+(`Upgrades.slots(8, 53)`). Data 7 `progress`, 8 `ticksRequired` (200), 9 `energyPerTick` (50), 10
+`smelting` (the item in the input; another one starts over), 11 `state`, its state code (0 idle, 1
+no power, 2 output full), and 12 `activeDelay`; 4 values are spare. Each tick `settings` works out
+the ticks, the energy per tick and the capacity from the cards installed (Mekanism's maths, below;
+`Upgrades.setCapacity` cuts the energy to a smaller capacity at once, as Mekanism's setMaxEnergy
+does); with something to smelt and room for the result it `use`s a tick's energy, all or nothing,
+and moves the progress on, and at `ticksRequired` one input item becomes the result (a progress
+already past fewer ticks finishes on the next tick). Without the energy or the room the progress
+waits (Mekanism pauses on both); no input resets it. RATE is minus what it used this tick, and its
+status reads it with the state code ("Using 50 J/t", "No power", "Output full" or "Idle"), so WAILA
+has it without the window. ACTIVE is what the block shows, Mekanism's client active state
+(TileEntityMekanism.setActive): on at once, off at once unless it last stopped within 60 ticks
+(blockDeactivationDelay, counted down in `activeDelay`), so a furnace on too little power glows
+steadily. Its item keeps only its energy (its slots drop, upgrade cards included). JEI lists it as a
+smelting catalyst; the client lights its heating chamber from ACTIVE.
+
+**Upgrade cards** (`Machines/Upgrades`; Mekanism's Upgrade and MekanismUtils). ItemList
+`SpeedUpgrade` and `EnergyUpgrade` stack to 8, the most a machine takes of each (Upgrade.getMax;
+Mekanism's own cards stack to 64). `Upgrades.slots(x, y)` gives a kind a slot for each, at (x, y)
+and (x + 18, y): only its own card, at most 8, by hand or shift-click, through no transporter face
+(`insert = {}`: Mekanism's upgrades are out of its side configuration), with the card's outline
+while empty (`SPEED_GHOST`, `ENERGY_GHOST`; `define` refuses one over 16 x 16). `counts` reads the
+cards installed (the slot's own card only, whole, 0..8, whatever a stack says), and the maths is
+Mekanism's with its maxUpgradeMultiplier 10, for n speed and e energy cards: `ticks` = base x
+10^(-n/8), truncated (getTicks: 200 becomes 149 with one card and 20 with 8; at least 1),
+`energyPerTick` = base x 10^((2n - e)/8), `capacity` = base x 10^(e/8), and `production` = base x
+10^(n/8), the Solar Panel's (Mekanism's solar generators take no upgrades). The cards are slot
+contents like any other: they drop when the machine is broken (Mekanism keeps them in its item).
+
+**The Solar Panel** (kind "solar", `Machines/Kinds/Solar`; Mekanism Generators' Solar Generator).
+BlockList `SolarPanel` has `energy = { capacity = 96 000, output = 100 }`, a producer, and
+Mekanism's shape: no full cube but a thin panel of four cells on a post, 9 pixels tall (not solid
+but obstructing, as a lantern; not opaque, so the panels of a stack all see the sky). Slots 1 and 2
+hold its Speed and Energy Upgrades (`Upgrades.slots(8, 53)`), which no transporter reaches, so it is
+no item inventory. Data 7 is `state`, its state code: 0 producing (also a panel not ticked yet), 1
+night, 2 no sky, 3 full. Each tick it sets its capacity (96 000 x 10^(e/8)); a cell without the sky
+(`ctx.sky` on its own cell) makes it "No sky", a time outside Minecraft's day (`DayCycle.isDay`,
+ticks 23 460 to 12 540) "Night", and otherwise it `produce`s 50 x 10^(n/8) J x the sun's brightness
+(`DayCycle.sunBrightness`: 1 from about tick 730 to 11 270, 0.47 at the ends of the day), at most
+its room ("Full" when there is none). Its `rates` override gives out twice its noon production (100
+x 10^(n/8) J/t). RATE is what it made and ACTIVE whether it made anything (Mekanism's active: it
+sees the sun and has room); its status is "Producing x/t", "Full", "Night", "No sky" or "Idle", and
+the state code carries it to WAILA. A day without cards makes about 621 kJ (13 081 ticks of
+daylight). Its item keeps its energy, at most 96 kJ when placed again (the cards drop). Mekanism's
+biome factor (SolarCheck's peak multiplier from temperature and rainfall: about 0.65 in a desert
+to 1.2 on frozen peaks) and rain don't apply.
 
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
@@ -1443,7 +1501,7 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   16 values in all. Kind ticks replace slot stacks (never change a stack table) and add or use
   energy through `Machines.produce` / `use`, so energy stays exact.
 - Machines and cables only come from edits, like pipes.
-- Kind modules require Machines/Core and plain shared modules (Items, Crafting/Smelting), never
+- Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items, Crafting/Smelting, DayCycle), never
   Shared/Machines, Inventory/Menu or Shared/Transmitters (those require Machines: a cycle). A
   kind keeps per-machine state in its data fields, not in module tables.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,

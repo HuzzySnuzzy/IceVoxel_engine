@@ -66,6 +66,9 @@ export type Env = {
 	transmitters: TransmitterTypes.World?,
 	-- Minecraft's day time now (ticks 0..24000), for kinds that care (solar panels).
 	dayTime: (() -> number)?,
+	-- Does cell (x, y, z) see the sky straight up (Machines/SkyCheck over the server's world)?
+	-- Uncached; never generates terrain. nil: the cells above are read with `getBlock`.
+	sky: ((x: number, y: number, z: number) -> boolean)?,
 }
 
 export type World = {
@@ -95,6 +98,10 @@ export type World = {
 	moved: number,
 	-- Kinds whose tick failed (reported once each).
 	failed: { [string]: boolean },
+	-- Whether cells see the sky (TickContext `sky`), by column (the pos key of (x, 0, z)) and y,
+	-- and how many cells that is; an answer goes when a block above its cell changes.
+	sky: { [number]: { [number]: boolean } },
+	skyCells: number,
 	-- The tick context lent to kinds (one table, refilled per machine).
 	ctx: Machines.TickContext,
 }
