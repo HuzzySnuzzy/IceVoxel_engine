@@ -17,6 +17,13 @@
 	pixels, 1/16 of a cell) and turned by the box's rotation. PartPool keeps a template per box,
 	the glowing one carrying the block's PointLight.
 
+	Sparse lights (glow lichen: GreedyMesher.sparseLightLut) carry their PointLight only where the
+	mesher marked the cell (surface field 1, one per GreedyMesher.LIGHT_BOX box); the other cells
+	get PartPool's dark template for the light's box. Even so a revealed cavern holds hundreds, so
+	only those within Caves.LichenLightDistance of the camera are on (ViewSettings; switched every
+	SPARSE_SWEEP seconds, off again SPARSE_HYSTERESIS blocks further): a few dozen. Lichen
+	further away still glows: its speck is Neon.
+
 	Plants (Blocks.appearances `scatter`, `tinted`) are shaped blocks too:
 	  * scattered ones are drawn off their cell's centre and turned about its vertical axis
 	    (Meshing/Scatter.at, from the world block position: the node's origin plus the cell); each
@@ -38,12 +45,17 @@ local Blocks = require(Shared.Blocks)
 
 local PartPool = require(script.Parent.PartPool)
 local MeshOverlay = require(script.Parent.MeshOverlay)
+local ViewSettings = require(script.Parent.ViewSettings)
 
 local BOX = GreedyMesher.BOX_BYTES
 local FLUID_FULL = Blocks.FLUID_FULL
 local readu16 = buffer.readu16
 -- Longest side of a part in studs (engine limit).
 local MAX_PART = 2048
+-- Sparse lights (glow lichen) near the camera are on: checked this often (seconds), and one that
+-- is on goes off this many blocks beyond the distance.
+local SPARSE_SWEEP = 0.25
+local SPARSE_HYSTERESIS = 8
 
 -- The boxes of shaped appearances, in pixels: size, centre from the cell's centre, rotation.
 type ShapePart = { size: Vector3, offset: Vector3, rotation: CFrame }
@@ -118,8 +130,15 @@ export type ChunkRenderer = {
 	root: Folder,
 	pool: PartPool.PartPool,
 	overlay: MeshOverlay.MeshOverlay,
-	-- Parts currently owned by sections (including ones not shown yet).
+	-- Parts currently owned by sections (including ones not shown yet), and those with a light.
 	partCount: number,
+	lightCount: number,
+	-- The PointLights of sparse lights (glow lichen) by their part, with where they are (studs);
+	-- how many there are and how many are on (near the camera).
+	sparseLights: { [BasePart]: { light: PointLight, position: Vector3 } },
+	sparseCount: number,
+	sparseOn: number,
+	nextSparseSweep: number,
 	urgent: { Task },
 	normal: { Task },
 
@@ -152,6 +171,11 @@ function ChunkRenderer.new(): ChunkRenderer
 		pool = PartPool.new(Config.Render.PoolLimit),
 		overlay = MeshOverlay.new(root),
 		partCount = 0,
+		lightCount = 0,
+		sparseLights = {},
+		sparseCount = 0,
+		sparseOn = 0,
+		nextSparseSweep = 0,
 		urgent = {},
 		normal = {},
 	}
@@ -173,8 +197,22 @@ local function releaseFolder(self: ChunkRenderer, folder: Folder)
 	folder.Parent = nil
 	local children = folder:GetChildren()
 	self.partCount -= #children
+	local pool = self.pool
+	local sparse = self.sparseLights
 	for _, child in children do
-		self.pool:release(child :: BasePart)
+		local part = child :: BasePart
+		if pool:hasLight(part) then
+			self.lightCount -= 1
+			local entry = sparse[part]
+			if entry then
+				sparse[part] = nil
+				self.sparseCount -= 1
+				if entry.light.Enabled then
+					self.sparseOn -= 1
+				end
+			end
+		end
+		pool:release(part)
 	end
 end
 
@@ -216,6 +254,46 @@ function ChunkRenderer.clear(self: ChunkRenderer, node: RenderNode)
 		releaseFolder(self, folder)
 		node.sections[section] = nil
 	end
+end
+
+-- Is a sparse light `distance` studs from the camera on (`on`: it is now)?
+local function sparseWanted(distance: number, on: boolean): boolean
+	local reach = (ViewSettings.lichenLightDistance() + (if on then SPARSE_HYSTERESIS else 0)) * Config.BlockSize
+	return distance < reach
+end
+
+-- Registers the PointLight of a sparse light's part (placed already), on when near the camera.
+local function addSparse(self: ChunkRenderer, part: BasePart)
+	local light = part:FindFirstChildOfClass("PointLight")
+	if light == nil then
+		return
+	end
+	local position = part.Position
+	local on = sparseWanted((position - workspace.CurrentCamera.CFrame.Position).Magnitude, false)
+	light.Enabled = on
+	self.sparseLights[part] = { light = light, position = position }
+	self.sparseCount += 1
+	if on then
+		self.sparseOn += 1
+	end
+end
+
+-- Switches sparse lights on near the camera and off far from it.
+local function sweepSparse(self: ChunkRenderer)
+	local camera = workspace.CurrentCamera.CFrame.Position
+	local count = 0
+	for _, entry in self.sparseLights do
+		local light = entry.light
+		local was = light.Enabled
+		local on = sparseWanted((entry.position - camera).Magnitude, was)
+		if on ~= was then
+			light.Enabled = on
+		end
+		if on then
+			count += 1
+		end
+	end
+	self.sparseOn = count
 end
 
 -- Builds part of a task; returns true when the task is finished.
@@ -262,6 +340,9 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 				-- (For tinted plants the surface field is the soil's tint; see GreedyMesher.)
 				local tints = tintColours[appearance]
 				local tint = if tints then math.min(surface, #Blocks.FOLIAGE_TINTS) + 1 else 1
+				-- (For sparse lights it says whether this cell carries the light.)
+				local sparseLight = buffer.readu8(GreedyMesher.sparseLightLut, appearance) == 1
+				local dark = sparseLight and surface == 0
 				for cy = y, y + sy - 1 do
 					for cz = z, z + sz - 1 do
 						for cx = x, x + sx - 1 do
@@ -283,13 +364,19 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 									* CFrame.Angles(0, yaw, 0)
 							end
 							for i, box in shape do
-								local part = pool:acquire(appearance, far, plain, i)
+								local part = pool:acquire(appearance, far, plain, i, dark)
 								part.Size = box.size * pixel
 								part.CFrame = if cell
 									then cell * CFrame.new(box.offset * pixel) * box.rotation
 									else CFrame.new(centre + box.offset * pixel) * box.rotation
 								if tints then
 									part.Color = tints[i][tint]
+								end
+								if pool:hasLight(part) then
+									self.lightCount += 1
+									if sparseLight then
+										addSparse(self, part)
+									end
 								end
 								part.Parent = folder
 								self.partCount += 1
@@ -314,6 +401,9 @@ local function work(self: ChunkRenderer, t: Task, deadline: number): boolean
 					for pz = z, z + sz - 1, maxCells do
 						local wz = math.min(maxCells, z + sz - pz)
 						local part = pool:acquire(appearance, far, plain)
+						if pool:hasLight(part) then
+							self.lightCount += 1
+						end
 						part.Size = Vector3.new(wx * scale, height, wz * scale)
 						part.CFrame =
 							CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
@@ -361,6 +451,11 @@ end
 -- Runs queued builds until the frame budget is used. Call once per frame.
 function ChunkRenderer.step(self: ChunkRenderer)
 	self.overlay:step()
+	local now = os.clock()
+	if now >= self.nextSparseSweep then
+		self.nextSparseSweep = now + SPARSE_SWEEP
+		sweepSparse(self)
+	end
 	local deadline = os.clock() + Config.Render.BuildBudgetMs / 1000
 	for _, queue in { self.urgent, self.normal } do
 		while #queue > 0 do

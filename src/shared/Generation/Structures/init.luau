@@ -12,8 +12,9 @@
 	  2. register it in `Structures.registry` with the surface blocks it may grow on,
 	  3. reference it by name from a biome's `features` list in Biomes/BiomeList.luau.
 
-	Large structures (villages, dungeons...) can use the same idea with a bigger spacing: add another
-	layer with its own SPACING / RADIUS and pick pieces from the spot's RNG.
+	Large structures (villages, outposts...) use the same idea with a bigger spacing: the structure
+	library's jigsaw structures are placed by Generation/StructureGen (Minecraft's random_spread
+	regions), and trees keep clear of their pieces through `accept`.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)

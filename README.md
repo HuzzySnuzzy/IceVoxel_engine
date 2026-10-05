@@ -16,8 +16,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   meadow, alpine, snowy slopes, peaks), then by climate.
 - **Caves, ores and structures.** Dry caves that grow with depth, from tunnels to huge stratified
   caverns, and the Underlands: a cavern hundreds of blocks tall under the highest mountains. Ores and
-  stone varieties by altitude, and a deterministic structure system (trees and cacti today) that
-  lets anything cross chunk borders.
+  stone varieties by altitude, and a deterministic structure system (trees and cacti, and jigsaw
+  structures from the structure library: see Generated structures) that lets anything cross chunk
+  borders.
 - **Survival and creative.** Minecraft's two game modes, switched with `/gamemode creative` or
   `/gm s` in the chat.
   - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
@@ -89,6 +90,90 @@ A fast, Minecraft-style voxel engine for Roblox.
   at and break. Left out: Minecraft's light check for mushrooms, seeds from grass (there is no
   wheat) and the plants the game has no blocks for (saplings, sugar cane, berry bushes, lily pads,
   vines, seagrass); plants are sparser than in Minecraft, to keep the part count down.
+- **Structure blocks.** Minecraft 1.20.1's structure blocks, to save what you build as text and
+  place it again. They, structure voids and jigsaw blocks are operator blocks: only creative players
+  may place, use and break them, and only the game's owner, `Gameplay.Admins`, Studio sessions and
+  the user ids in `Config.Structures.Permission` (none by default); survival players can't mine them
+  and they never drop. Right click opens Minecraft's screen, whose mode button cycles Save, Load,
+  Corner and Data; the block is its mode (its faces show the mode's sigil), so everyone sees it.
+  **Save** has a name (`mything/houses/hut`: letters, digits and `_ . / : -`), a relative position
+  (-48..48 from the block, default 0, 1, 0), a size (up to 48 × 48 × 48) and "Show Invisible Blocks"
+  (blue markers on the region's air); the region is outlined, with the name over the block. DETECT
+  fits the region between two Corner blocks of the same name within 80 blocks (the inside of their
+  box); SAVE captures it: air is saved as air (it clears the world where the structure goes), a
+  **structure void** (a small translucent cube, not solid, saved as "keep") leaves whatever is
+  there, Data blocks become data markers with their string, jigsaws keep their settings, blocks with
+  slots their items (item data, such as a tank's water, is not kept), and cave air and generated
+  glow lichen are saved as their surface forms. **Load** places a structure by name (saved this
+  session, or in the structure library) or from data pasted into its screen, with a rotation (0, 90,
+  180, 270), a mirror, an integrity (the share of blocks placed, drawn from a seed; 0 picks one) and
+  "Show Bounding Box". As in Minecraft the first LOAD of a template of another size only sets the
+  size ("position prepared": the outline shows where it goes) and the next places it, a couple of
+  thousand blocks a frame, turning torches, lichen and jigsaws with it. **Corner** is a name,
+  **Data** a marker string. Unlike Minecraft the screen stays open after DETECT, SAVE and LOAD and
+  repeats the answer on its status line; Done keeps the fields and closes, Cancel, `Escape` and `E`
+  drop them. Outlines and labels show only in creative. WAILA names a structure block's mode and
+  name.
+- **Structure data.** SAVE turns a structure into compact text, "IVS1:" and base64url (letters,
+  digits, `-` and `_`), which pastes into chat and into a Luau string as it is: the palette by block
+  name (so it survives new blocks; an unknown name loads as air, with a warning), the cells as runs
+  or bit-packed, jigsaws, data markers, container items and a checksum, so a cut or damaged paste
+  says so ("The structure data is cut off: ... Copy all of it"). A 7 × 5 × 7 hut is about 250
+  characters, a 16 × 10 × 16 house about 1,150, and any 48 × 48 × 48 structure fits a StringValue
+  (~150,000 at most; `Structures.MaxDataChars`). The chat says "Saved structure '<name>' (N blocks,
+  M characters)" and the text appears in a read only box in the Save screen: click it and press
+  `Ctrl` + `C` (`Cmd` + `C`) to copy it (Roblox scripts can't write the clipboard). Long data comes
+  in parts of 16,000 characters ("part 2 of 9"), copied in order. Each save is also kept for the
+  session by name (256 saves, 32 MB at most) and, while kept, as a StringValue named after it in
+  `ServerStorage.IceVoxelSavedStructures`, to copy during a Studio playtest. Text pasted into a Load
+  screen is checked as you paste (its name, size and block count, or what is wrong with it) and
+  uploaded in pieces. `lune run tests/structure decode` prints any data as ASCII layers (see
+  Extending).
+- **Jigsaw blocks.** Minecraft's jigsaw blocks join structure pieces. One faces out of the clicked
+  face (a jigsaw facing up or down has its top towards the player); its front shows the puzzle piece
+  with its knob towards the top, the face towards the top a bar (the lock) and the other three faces
+  around the front arrows pointing at it, so the orientation reads from any side. Its screen sets
+  the target pool (where the pieces attached here come from), its name, the target name (the jigsaw
+  of a piece that attaches here), "Turns into" (the block it becomes once generated, default air)
+  and, for vertical fronts, the joint (rollable or aligned). Generate builds from the pool right
+  there, Minecraft's JigsawPlacement up to Levels (0..7) deep, and Keep Jigsaws (on by default, as
+  in Minecraft) leaves the jigsaws in place; pieces saved minutes ago are already in their pools.
+  Pools need no code: pieces named `mything/houses/a` and `mything/houses/b` make the pool
+  `mything/houses`. Data made to waste time stops with "the structure is too big". WAILA names a
+  jigsaw's name, target and pool.
+- **Generated structures.** Templates in the structure library (`src/shared/StructureLibrary/`, or
+  StringValues in the place's `ReplicatedStorage.IceVoxelStructures` folder) generate in the world
+  as Minecraft's jigsaw structures do: one start per region of `spacing` × `spacing` chunks, at
+  least `separation` apart (random_spread), kept when the start piece's centre is in one of the
+  structure's biomes and on dry land that is not bare rock, then assembled from its pools: the start
+  piece stands on the ground at its centre, rigid pieces line up with the jigsaw they attach to,
+  terrain matching ones (paths) follow the ground column by column, and air or water under a rigid
+  piece's floor becomes a foundation of the ground's filler (12 blocks at most). Like trees they are
+  stateless and cross chunk borders, show from afar up to `Config.StructureMaxLevel`, keep trees out
+  of their way, clear the ground with their air and leave it where they hold structure voids; their
+  chests start with the template's items (filled the first time they are opened, read by a pipe or
+  broken). The example **outpost** is a watchtower plaza (or its overgrown ruin, with a forgotten
+  chest) with lantern posts, paths that follow the ground and end in a lamp post or fade out, and
+  along them a hut, a storehouse with a chest of supplies, an open forge and a woodpile: at most one
+  per 896 × 896 blocks, in plains, savannas, meadows and forests. With `Config.Structures.Generate`
+  false none generate.
+- **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
+  more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
+  Each is a thin plate on its face with a glowing Neon speck: 2 parts. Only one lichen per 8 × 8 × 8
+  blocks carries a PointLight, and only those within 32 blocks of the camera (24 on phones) are on,
+  so a cave is dotted with a few dozen dim glows instead of hundreds of lights; farther lichen still
+  glows. Shears harvest it (by hand or any other tool it drops nothing; an axe breaks it fastest);
+  it is replaceable, washes away in flowing water, and placed by hand it lies on the floor or hangs
+  on a ceiling or wall like a torch (one face per block). Generated lichen counts as cave air while
+  caves are hidden, so a cave's lichen costs nothing until you are in it.
+- **Seeing caves further.** Underground, caves are revealed 64 blocks around the camera and up to
+  128 in big caverns such as the Underlands (was 48 to 96), and full detail chunks, the only ones
+  with caves, reach about 128 blocks instead of 96 while the camera is below the surface and for 5
+  seconds after it comes up (`Lod.UndergroundSplitDistanceL1`), so walking in and out of a cave
+  mouth doesn't rebuild the chunks around it. Phones reveal 48 to 96 blocks, with full detail to
+  about 96. In a cave near the spawn that is 268 full detail chunks instead of 164, and about 57,000
+  parts instead of 47,000 before far meshes. F3 shows how far caves are revealed and how many lichen
+  lights are on.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -315,6 +400,8 @@ Studio tips:
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
 | Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
+| Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
+| Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
 | Pick block    | Middle click                |         |            |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker) | Y   | `…` button |
@@ -360,6 +447,13 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             Smelting (the furnace tick)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
                             clicks, used by the server and for client prediction)
+  Structures/               structure blocks' data and jigsaw structures: Template (the IVS1
+                            text, SAVE's capture, ASCII tables), Settings (structure block and
+                            jigsaw fields, ranges, wire format), Transform (rotation and mirror),
+                            Jigsaw (Minecraft's JigsawPlacement), Library (templates, pools and
+                            generated structures from the modules below and the place)
+  StructureLibrary/         the structure library: Templates/ (IVS1 modules; Outpost, the
+                            example), Pools (explicit template pools), Structures (what generates)
   Entities/ItemPhysics      dropped item movement (server and client)
   GameMode, Mining          survival / creative, mining times by hand and with tools
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
@@ -372,6 +466,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Noise                   seeded noise on top of math.noise
     Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
+    StructureGen            library structures in chunks (random_spread starts, assembly cache,
+                            pieces, foundations, generated chests)
+    CaveDecor               glow lichen on cave walls (full detail only)
     Foliage                 ground plants by biome (full detail only)
   Meshing/GreedyMesher      blocks -> boxes (parts)
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
@@ -406,11 +503,15 @@ src/server   -> ServerScriptService.IceVoxel
                             machines; pure), SkyCheck (does a cell see the sky: loaded chunks,
                             else edits over the generator's ground, never generating; pure),
                             Machines (20 Hz ticks, viewers' snapshots, replication)
+  Structures/               structure blocks and jigsaws: StructureBlocks (messages, rate limits,
+                            replication, ServerStorage), StructureServer (SAVE, LOAD, DETECT,
+                            Generate; pure), StructureStore (their settings), Placement (LOAD and
+                            Generate plans, placed over frames), Permission (who may use them)
   Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
   Players/                  GameModes + GameModeCommand (/gamemode), TimeCommands + TimeCommand
                             (/time, /gamerule), Inventories +
                             InventoryState (authoritative inventories), Containers (chests,
-                            furnaces),
+                            furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage), Spawning, SafeSpot + SpawnUnsafeBlocks (safety rules),
                             Teleport (map), WaypointStore (DataStore)
@@ -418,7 +519,10 @@ src/server   -> ServerScriptService.IceVoxel
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
   World/ClientWorld         nearby block data, edit lists, prediction
-  Streaming/                ChunkStreamer (LOD + scheduling), WorkerPool, ChunkWorker (actor)
+  World/StructureRecords    structure blocks' and jigsaws' settings, their regions, pasted data
+                            going out and SAVE's data coming back
+  Streaming/                ChunkStreamer (LOD + scheduling, the cave view), WorkerPool,
+                            ChunkWorker (actor), CaveReach (how far caves are revealed, caps)
   Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
                             LightingController (day, night and cave lighting), SkyExposure (how
                             much sky light reaches the camera), MeshOverlay + MeshRegions (far
@@ -431,7 +535,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             ItemIcon (viewport icons, durability and energy bars), SlotClicks
                             (Minecraft clicks), Style, Waila + WailaInfo (what the crosshair
                             points at), Jei/ (Just Enough Items: item list, recipe view, recipe
-                            transfer)
+                            transfer), StructureScreen + StructureForm (the structure block and
+                            jigsaw screens and their model), FormWidgets (Minecraft's fields and
+                            buttons)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces and Heat Generators crackling, caves), SoundRules (the pure
@@ -439,7 +545,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
-  Net/ClientNet             routes server messages; Notices shows server messages in the chat
+  Net/ClientNet             routes server messages; Notices shows server messages in the chat;
+                            StructureNet (structure blocks' and jigsaws' messages and screens)
   Player/                   MovementController (the hull, input, the cosmetic character),
                             CharacterAnimator (avatar animations from the hull), HeldItems
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
@@ -448,10 +555,13 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             gauges, machines' records (WAILA, Ambience); TransmitterModel (their
                             geometry, aiming, item paths)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
-                            chests, crafting tables, furnaces and Mekanism's machines)
+                            chests, crafting tables, furnaces, Mekanism's machines, structure
+                            blocks and jigsaws)
+  Rendering/StructureBoxes  structure blocks' outlines, names and air markers
   Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view)
 
-tests/       Lune scripts: unit tests, benchmark, terrain preview
+tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
+             command line), build_structures (the example outpost's builder)
 docs/        ARCHITECTURE.md (how everything fits together)
 ```
 
@@ -464,9 +574,11 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | Setting                   | Default | Effect                                                              |
 | ------------------------- | ------- | ------------------------------------------------------------------- |
 | `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks).                                  |
-| `Lod.Mobile`              | 512 / 2 / 24 | View / split / foliage distance on phones and tablets.         |
+| `Lod.Mobile`              | 512 / 2 / 24 / 3 | View / split / foliage / underground split distance on phones and tablets. |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
 | `Lod.SplitDistanceL1`     | 3       | Same for full detail only; 2 = ~12% fewer parts in mountains.       |
+| `Lod.UndergroundSplitDistanceL1` | 4 | `SplitDistanceL1` while the camera is underground (phones 3): full detail, and so caves, reach ~128 blocks. |
+| `Lod.UndergroundSeconds`  | 5       | How long that lasts after the camera comes up (no rebuilding at cave mouths). |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
 | `Lod.FoliageDistance`     | 40      | How far plants are drawn (blocks; every box of a plant is a part).  |
@@ -474,9 +586,17 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
 | `Render.Shadows`          | true    | Shadows on full detail chunks and of torch and lantern light (far chunks never cast shadows). |
 | `Render.Foliage`          | true    | Draw plants (up to 4 parts each); false saves those parts, plants can still be aimed at and broken. |
-| `Caves.RevealRadius`      | 48      | How far around an underground camera caves are meshed.              |
-| `Caves.RevealRadiusMax`   | 96      | Same in big caverns (the radius follows the open space around you). |
-| `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees.                           |
+| `Caves.RevealRadius`      | 64      | How far around an underground camera caves are meshed (phones 48: `Caves.Mobile`). |
+| `Caves.RevealRadiusMax`   | 128     | Same in big caverns (the radius follows the open space around you; phones 96). |
+| `Caves.LichenLightDistance` | 32    | Glow lichen's lights are on this close to the camera (phones 24); farther lichen still glows. |
+| `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
+| `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
+| `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
+| `Structures.DetectRange`  | 80      | How far DETECT looks for Corner blocks of the same name.            |
+| `Structures.LoadBlocksPerFrame` | 2000 | Blocks LOAD and Generate place per frame (and at most 6 ms of it). |
+| `Structures.MaxDataChars` | 200000  | Longest structure text saved or pasted (what a StringValue holds).  |
+| `Structures.DataPieceChars` | 16000 | Structure text travels in pieces of this many characters, `DataPiecesPerSecond` (20) a second. |
+| `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
 | `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
@@ -763,9 +883,98 @@ average `density`, the share of the ground in patches (`cover`), weighted `plant
 `flowers` (see the BiomeList header); keep within the parts budget tests/spec/FoliageGeneration
 checks.
 
-**A structure.** Write a builder in `Generation/Structures/` (see `Trees.luau`), register it in
-`Structures.registry` with the blocks it may grow on, and list it in a biome's `features`. Builders
-write in world coordinates; chunk clipping, cross-chunk consistency and LOD are handled for you.
+**A tree or another small feature.** Write a builder in `Generation/Structures/` (see
+`Trees.luau`), register it in `Structures.registry` with the blocks it may grow on, and list it in
+a biome's `features`. Builders write in world coordinates; chunk clipping, cross-chunk consistency
+and LOD are handled for you.
+
+**A structure**, from building it to seeing it generate. Structure blocks and jigsaws need
+creative and permission: the game's owner, Studio, `Gameplay.Admins` or a user id in
+`Config.Structures.Permission`.
+
+1. **Build it** in creative. Air you leave inside the region is saved as air and clears whatever
+   is there when the structure is placed; put a Structure Void (creative picker) where the world
+   should stay as it is instead (around a ruin, under a path). For a piece of a bigger structure,
+   put Jigsaw blocks where other pieces attach (step 5).
+2. **Mark the region.** Place a Structure Block (it starts in Save mode) and right click it. Give
+   it a name with slashes, Minecraft style: `mything/houses/hut` (the part before the last slash
+   is its pool, step 5). Set the relative position (from the block to the region's lowest
+   north-west corner, default one block above it) and the size; the outline shows the box. Or put
+   two Corner structure blocks named alike at opposite corners just outside the region and press
+   DETECT.
+3. **Save** (SAVE). The chat says `Saved structure 'mything/houses/hut' (N blocks, M characters)`
+   and the data, `IVS1:...`, appears in the box under the size: click it and press `Ctrl` + `C`
+   (`Cmd` + `C`). Long data comes in parts of 16,000 characters ("part 2 of 9"): copy every part in
+   order and put them together.
+4. **Keep it**, any of these ways:
+   - **Send it to Claude** in a chat message (words around it are fine): it goes into
+     `src/shared/StructureLibrary/Templates/` as a module.
+   - **Put it in the repo yourself**: a ModuleScript (any name, any folder depth) in
+     `src/shared/StructureLibrary/Templates/` returning the text, or a list of texts:
+     ```lua
+     return "IVS1:..."
+     ```
+     A `.txt` file holding the text works too (Rojo makes it a StringValue). The name inside the
+     data counts, not the module's.
+   - **Keep it in the place**: during a Studio playtest every save is a StringValue named after the
+     structure in `ServerStorage.IceVoxelSavedStructures`. Copy it, stop the playtest and paste it
+     into a Folder named `IceVoxelStructures` in ReplicatedStorage (make it; Folders inside are
+     fine). Saves only last for the session: nothing is written anywhere else.
+
+   To place it again by hand, use a Structure Block in Load mode with its name (this session's
+   saves and the library), or paste the data into Paste Data: a LOAD whose size differs from the
+   structure's only sets the size (the outline shows where it goes), the next places it, turned
+   and mirrored as set. The library is read once when the server and each client start (every
+   machine must generate the same structures), so new templates are seen from the next start or
+   playtest on.
+5. **Join pieces with jigsaws** for a structure like a Minecraft village:
+   - Name the pieces by pool: `mything/centres/plaza`, `mything/houses/a`, `mything/houses/b`,
+     `mything/streets/straight`... A pool needs no code: `mything/houses` is every template named
+     `mything/houses/...` (weight 1, rigid), and a pool named like one template is that template.
+   - On a piece, a jigsaw whose front faces out of it marks where a child attaches: its **target
+     pool** is where the child comes from, its **target name** the name of the child's jigsaw that
+     attaches here, and **Turns into** what it becomes once generated (air, or `Planks` to close a
+     wall). On the child, a jigsaw facing out with that **name**. Two jigsaws attach when they face
+     each other, the names match and, for jigsaws facing up or down, their tops match unless the
+     source's joint is rollable. Each child must fit beside what is already there.
+   - Try it at once: a jigsaw's Generate builds from its pool right there, Levels deep, and this
+     session's saves are already in their pools (Keep Jigsaws leaves the jigsaws to look at).
+   - `src/shared/StructureLibrary/Pools.luau` adds weights (1..150), empty elements (a plot left
+     empty), a fallback pool (tried after the elements, and alone at the last level: end caps) and
+     terrain matching pieces, which follow the ground column by column (paths). In the place, the
+     attribute `TerrainMatching = true` on a StringValue makes its templates terrain matching in
+     the pools made from their names.
+6. **Make it generate.** In the repo, add an entry to `src/shared/StructureLibrary/Structures.luau`
+   (its header lists the fields: `name`, `startPool`, `size` (jigsaw depth 0..7), `maxDistance`,
+   `biomes`, `spacing` / `separation`, `salt`, `startHeight`, `projectToHeightmap`, `onLand`,
+   `foundation`). In the place, set the attribute `Generate = true` on the StringValue whose
+   (first) template is the start, and optionally `Biomes` (`"plains, forest"`: BiomeList names;
+   case, spaces, underscores and `minecraft:` are ignored), `Spacing` and `Separation` (one start
+   per Spacing × Spacing chunks, at least Separation apart; default 34 / 8, Minecraft's villages),
+   `Size`, `Foundation`, `OnLand`, `StartHeight` and `MaxDistance`. Problems (an unknown pool,
+   biome or block, a bad attribute) are warned in the output as `[Structures] ...` and skipped;
+   nothing errors.
+7. **See it.** Structures generate in terrain nobody has edited, wherever a start lands: while
+   testing, a small spacing (`Spacing = 4`: one start per 64 × 64 blocks) finds one quickly. From a
+   server script, every generated structure with a piece in a rectangle:
+   ```lua
+   local IceVoxel = require(game.ServerScriptService.IceVoxel.Api)
+   local world = IceVoxel.waitForWorld()
+   for _, s in world.generator.structures(-1000, -1000, 1000, 1000) do
+       print(s.name, s.x, s.z) -- the start position (blocks)
+   end
+   ```
+8. **Look inside the data** without the game:
+   `lune run tests/structure decode <file | IVS1:... | ->` prints every structure in a file (a
+   pasted chat message, a library module) or the text given: name, size, palette, every y layer as
+   ASCII, jigsaws, data markers, containers. `--lua hut.luau` writes an editable table ("." air,
+   " " keep), and `lune run tests/structure encode hut.luau --module` turns it back into a library
+   module.
+
+The example outpost is a complete jigsaw structure to copy: its pieces are built in code by
+`tests/build_structures.luau` into `Templates/Outpost.luau` (`lune run tests/build_structures`;
+`--check` tells whether that file is up to date, `--print` shows every piece), its pools are in
+`Pools.luau` and its entry in `Structures.luau`.
 
 **A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
 `onTick(world, ticker, x, y, z, block)` and set `behaviour = "YourModule"` on the block.
@@ -790,6 +999,9 @@ The engine's core is pure Luau, so most of it runs and is tested outside Roblox 
 lune run tests/run                    # unit tests (generation, meshing, LOD, protocol, block updates)
 lune run tests/bench [seed]           # generation / meshing speed and part count estimate
 lune run tests/preview [seed] [blocksPerPixel] [pixels]   # top-down map in tests/out/preview.ppm
+lune run tests/structure decode <file | IVS1:... | -> [--lua t.luau]   # structure data, as ASCII
+lune run tests/structure encode t.luau [--out file] [--module]        # an edited table to IVS1
+lune run tests/build_structures [--check] [--print]   # rebuild (or check) the example outpost
 ```
 
 Formatting, linting and type checking:
@@ -810,8 +1022,10 @@ Natural next steps, roughly in order:
 
 - **Persistence.** Edits, inventories and chest contents live in memory (`WorldServer.edits`,
   `Players/InventoryState`, `Players/Containers`), as do transmitter states, network water, tank
-  contents and items in transit (`Transmitters/TransmitterWorld`); save them to DataStores (edits per region of
-  32 × 32 chunks, see "regions" in docs/ARCHITECTURE.md).
+  contents and items in transit (`Transmitters/TransmitterWorld`), structure blocks' and jigsaws'
+  settings and the session's saved structures (`Structures/StructureStore`, `StructureServer`);
+  save them to DataStores (edits per region of 32 × 32 chunks, see "regions" in
+  docs/ARCHITECTURE.md).
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
@@ -828,10 +1042,13 @@ Natural next steps, roughly in order:
 - **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
   connectivity (docs/ARCHITECTURE.md, "Hidden caves, octrees and regions").
 - **The Underlands at a distance.** Caves only exist in full detail chunks, so a big cavern ends
-  where they do (~96 blocks). Carving the Underlands (mostly an analytic interval per column, cheap
-  at any level) into far chunks and meshing those with caves visible while the camera is inside
-  would show them whole.
-- **Bigger structures.** Villages / dungeons using the same stateless placement with a larger grid.
+  where they do (~128 blocks underground, `Lod.UndergroundSplitDistanceL1`). Carving the
+  Underlands (mostly an analytic interval per column, cheap at any level) into far chunks and
+  meshing those with caves visible while the camera is inside would show them whole.
+- **More structures.** Villages and dungeons for the structure library; loot tables for generated
+  chests (they hold their template's items); Minecraft's beard terrain adaptation instead of the
+  foundations; structure sets and exclusion zones, so different structures keep apart; glow
+  lichen on several faces of a block, as Minecraft's multiface block.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result.
 - **Floating origin** for play far beyond ±16k studs, where float precision starts to show.

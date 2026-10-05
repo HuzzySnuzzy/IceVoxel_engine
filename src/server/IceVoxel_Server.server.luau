@@ -23,6 +23,9 @@
 	                   (Players/ItemUse)
 	  8. machines   -> Mekanism's machines and energy (Machines/Machines: machine ticks, energy
 	                   networks through Universal Cables, energy kept in items, replication)
+	  9. structures -> structure blocks and jigsaw blocks (Structures/StructureBlocks: their
+	                   settings and replication, SAVE / LOAD / DETECT, a jigsaw's Generate, who may
+	                   use them), and generated structures' chests filled on first use
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,6 +55,8 @@ local WaypointStore = require(Server.Players.WaypointStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
 local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
+local Containers = require(Server.Players.Containers)
+local StructureBlocks = require(Server.Structures.StructureBlocks)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -60,6 +65,9 @@ print(`[IceVoxel] world seed {seed}`)
 local world = WorldServer.new(TerrainGenerator.new(seed))
 local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
 world.onChanged = function(x, y, z, old, new)
+	-- A generated structure's chest gets its contents before anything hears it change, so one
+	-- broken or replaced unopened still drops them.
+	Containers.materialize(x, y, z, old)
 	ticker:blockChanged(x, y, z)
 	-- A chest or furnace replaced by anything (breaking, the Api, block updates) drops what it
 	-- holds, and any block with a window closes it for its users.
@@ -69,6 +77,8 @@ world.onChanged = function(x, y, z, old, new)
 	Transmitters.blockChanged(x, y, z, old, new)
 	-- Machines come and go, and energy networks are worked out again around them.
 	Machines.blockChanged(x, y, z, old, new)
+	-- Structure blocks and jigsaws keep their settings while they stand.
+	StructureBlocks.blockChanged(x, y, z, old, new)
 end
 
 local net = ServerNet.start(world)
@@ -91,20 +101,25 @@ net.setRules({
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)
+		StructureBlocks.sendChunks(player, coords)
 	end,
+	operator = StructureBlocks.operator,
 })
 -- Pipes after inventories and items (they fill chests and drop items); item use after the pipes;
 -- machines after the pipes (their cables are the pipes' nodes).
 Transmitters.start(net, world)
 ItemUse.start(net, world)
 Machines.start(net, world)
+-- Structure blocks after inventories (containers, the Use hook).
+StructureBlocks.start(net, world)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
 Simulation.start(world)
 Api._ready(world, ticker)
 
--- Fixed rate block updates, then one replication message per frame, then the pipes and machines.
+-- Fixed rate block updates, then the frame's share of structures being placed, then one
+-- replication message per frame, then the pipes, machines and structure blocks.
 local tickLength = 1 / Config.Server.TickRate
 local accumulator = 0
 RunService.Heartbeat:Connect(function(dt)
@@ -113,8 +128,10 @@ RunService.Heartbeat:Connect(function(dt)
 		accumulator -= tickLength
 		ticker:step()
 	end
+	StructureBlocks.place()
 	net.flush()
 	-- The pipes after the edits: a client knows a transmitter's block before its state.
 	Transmitters.update(dt)
 	Machines.update(dt)
+	StructureBlocks.update(dt)
 end)

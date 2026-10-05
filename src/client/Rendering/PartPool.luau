@@ -36,6 +36,12 @@
 	    within its range. (Lights just outside each face would need up to six shadowed lights per
 	    block, placed by its neighbours, which the shared templates can't do.)
 	Far and plain templates and item models get no light.
+
+	Sparse lights (glow lichen, GreedyMesher.sparseLightLut): the mesher marks the one cell per box
+	that carries the light, and every other cell's light box comes from a "dark" template, the same
+	part without its PointLight (`acquire`'s `dark`), so lit and unlit lichen look alike. Their
+	lights have no shadows: they are dim, short and many, and lichen grows only deep underground,
+	so a glow reaching through a thin cave wall shows nowhere it shouldn't.
 ]]
 
 local MaterialService = game:GetService("MaterialService")
@@ -44,6 +50,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local GreedyMesher = require(Shared.Meshing.GreedyMesher)
 
 local BlockDecor = require(script.Parent.BlockDecor)
 
@@ -63,11 +70,21 @@ export type PartPool = {
 	templates: { [number]: BasePart },
 	free: { [number]: { BasePart } },
 	keyOf: { [BasePart]: number },
+	-- Template keys whose parts carry a PointLight.
+	litKeys: { [number]: boolean },
 	freeCount: number,
 	limit: number,
 
-	acquire: (self: PartPool, appearance: number, far: boolean, plain: boolean?, box: number?) -> BasePart,
+	acquire: (
+		self: PartPool,
+		appearance: number,
+		far: boolean,
+		plain: boolean?,
+		box: number?,
+		dark: boolean?
+	) -> BasePart,
 	release: (self: PartPool, part: BasePart) -> (),
+	hasLight: (self: PartPool, part: BasePart) -> boolean,
 }
 
 local function material(name: string): Enum.Material
@@ -108,8 +125,10 @@ local function addLight(part: BasePart, info: Blocks.Appearance)
 	light.Range = math.min(MAX_LIGHT_RANGE, info.light * LIGHT_RANGE * Config.BlockSize)
 	light.Brightness = LIGHT_BRIGHTNESS * info.light / 15
 	light.Color = colour(info.lightColor)
-	-- Inside a part that casts a shadow (glowstone's cube) shadows would hide the light itself.
-	light.Shadows = LIGHT_SHADOWS and Config.Render.Shadows and not part.CastShadow
+	-- Inside a part that casts a shadow (glowstone's cube) shadows would hide the light itself;
+	-- sparse lights (glow lichen) go without, see above.
+	local sparse = buffer.readu8(GreedyMesher.sparseLightLut, info.id) == 1
+	light.Shadows = LIGHT_SHADOWS and Config.Render.Shadows and not part.CastShadow and not sparse
 	light.Parent = part
 end
 
@@ -211,16 +230,43 @@ function PartPool.new(limit: number): PartPool
 		templates = {},
 		free = {},
 		keyOf = {},
+		litKeys = {},
 		freeCount = 0,
 		limit = limit,
 	}
 	return (setmetatable(self, PartPool) :: any) :: PartPool
 end
 
--- A part of `appearance` (box `box` of its shape; 0 or nil: the cube) for a near / far / plain node.
-function PartPool.acquire(self: PartPool, appearance: number, far: boolean, plain: boolean?, box: number?): BasePart
+-- The box carrying each appearance's light (lightBox), filled as asked.
+local lightBoxes: { [number]: number } = {}
+
+--[[
+	A part of `appearance` (box `box` of its shape; 0 or nil: the cube) for a near / far / plain
+	node. `dark`: a sparse light's cell that does not carry the light (GreedyMesher), drawn without
+	it (only the light's own box differs).
+]]
+function PartPool.acquire(
+	self: PartPool,
+	appearance: number,
+	far: boolean,
+	plain: boolean?,
+	box: number?,
+	dark: boolean?
+): BasePart
 	local index = box or 0
-	local key = (appearance * BOX_KEYS + index) * 4 + (if far then 1 else 0) + (if plain then 2 else 0)
+	local unlit = false
+	if dark and not far then
+		local carrier = lightBoxes[appearance]
+		if carrier == nil then
+			carrier = lightBox(Blocks.appearances[appearance])
+			lightBoxes[appearance] = carrier
+		end
+		unlit = index == carrier
+	end
+	local key = (appearance * BOX_KEYS + index) * 8
+		+ (if far then 1 else 0)
+		+ (if plain then 2 else 0)
+		+ (if unlit then 4 else 0)
 	local list = self.free[key]
 	if list then
 		local part = table.remove(list)
@@ -232,13 +278,22 @@ function PartPool.acquire(self: PartPool, appearance: number, far: boolean, plai
 
 	local template = self.templates[key] :: BasePart?
 	if template == nil then
-		local created = makeTemplate(appearance, far, plain == true, true, index, true)
+		local created = makeTemplate(appearance, far, plain == true, true, index, not unlit)
 		self.templates[key] = created
+		if created:FindFirstChildOfClass("PointLight") then
+			self.litKeys[key] = true
+		end
 		template = created
 	end
 	local part = (template :: BasePart):Clone()
 	self.keyOf[part] = key
 	return part
+end
+
+-- Does a part from `acquire` carry a light (for counting them: F3)?
+function PartPool.hasLight(self: PartPool, part: BasePart): boolean
+	local key = self.keyOf[part]
+	return key ~= nil and self.litKeys[key] == true
 end
 
 -- The part must already be out of the workspace (e.g. its folder was unparented).

@@ -1,7 +1,8 @@
 --!strict
 --[[
-	Decorated block faces: chests, crafting tables, furnaces and Mekanism's Creative Energy Cube,
-	Heat Generator, Electric Furnace and Batteries (Energy Cubes) drawn like Minecraft's pixel art.
+	Decorated block faces: chests, crafting tables, furnaces, Mekanism's Creative Energy Cube,
+	Heat Generator, Electric Furnace and Batteries (Energy Cubes), and Minecraft's structure blocks
+	and jigsaw blocks, drawn like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -18,8 +19,16 @@
 	                and shows the front on its left face, as Minecraft's icons do.
 
 	Pixel coordinates are seen from outside the face: x to the right, y down, from the top left
-	corner. Side faces are upright (+Y up). Faces are named like Enum.NormalId: Front is -Z, Back +Z,
-	Left -X, Right +X. `faces`, `basis` and `layers` are pure data, so tests can check them.
+	corner. Side faces are upright (+Y up). Faces are named like Enum.NormalId: Front is -Z (North),
+	Back +Z (South), Left -X (West), Right +X (East). `faces`, `basis` and `layers` are pure data, so
+	tests can check them.
+
+	Jigsaw blocks face a way (one block per orientation, "Jigsaw<Front><Top>"), so their pictures
+	are turned on each face towards the block's front or top with `basis`. Side faces are upright
+	in SurfaceGuis whatever the block; on the top and bottom faces the pictures assume a SurfaceGui
+	is drawn with `basis`'s right and up (item models are, by construction). The front, the face
+	towards the top and the four sides all show the orientation, so it reads on upright faces
+	alone.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -414,6 +423,102 @@ local function batteryFaces(tier: { number }): Faces
 	}
 end
 
+--[[
+	Structure blocks (Minecraft 1.20.1's structure_block_<mode> textures, the same on every face):
+	the block's dark purple black rim around a black field, light purple arcs in the corners and
+	notches in the middle of each edge, and the mode's sigil in the middle: SAVE a filled rounded
+	diamond, LOAD a hollow ring, CORNER a twisted square, DATA four petals. Item models keep the
+	field and the sigil's main shapes.
+]]
+local SB_FIELD = { 16, 16, 16 }
+local SB_DARK = { 38, 29, 42 }
+local SB_MID = { 112, 94, 112 }
+local SB_LIGHT = { 150, 120, 150 }
+local SB_BRIGHT = { 190, 156, 190 }
+local SB_WHITE = { 215, 186, 215 }
+
+-- `r` mirrored left to right, and top to bottom.
+local function flipX(r: Rect): Rect
+	return rect(16 - r.x - r.w, r.y, r.w, r.h, r.colour, r.surfaceOnly)
+end
+
+local function flipY(r: Rect): Rect
+	return rect(r.x, 16 - r.y - r.h, r.w, r.h, r.colour, r.surfaceOnly)
+end
+
+-- `rects` drawn in the top left quarter, and their mirror images in the other three.
+local function fourWays(rects: { Rect }): { Rect }
+	local all = {}
+	for _, r in rects do
+		table.insert(all, r)
+		table.insert(all, flipX(r))
+		table.insert(all, flipY(r))
+		table.insert(all, flipX(flipY(r)))
+	end
+	return all
+end
+
+local function structureFrame(): { Rect }
+	return join(
+		{ rect(1, 1, 14, 14, SB_FIELD) },
+		{
+			rect(6, 1, 4, 1, SB_BRIGHT, true),
+			rect(6, 14, 4, 1, SB_BRIGHT, true),
+			rect(1, 6, 1, 4, SB_BRIGHT, true),
+			rect(14, 6, 1, 4, SB_BRIGHT, true),
+		},
+		fourWays({
+			rect(4, 2, 2, 1, SB_LIGHT, true),
+			rect(3, 3, 1, 1, SB_LIGHT, true),
+			rect(2, 4, 1, 2, SB_LIGHT, true),
+		})
+	)
+end
+
+-- The light dots around SAVE's and LOAD's sigils.
+local function sigilDots(): { Rect }
+	return {
+		rect(7, 3, 2, 1, SB_LIGHT, true),
+		rect(7, 12, 2, 1, SB_LIGHT, true),
+		rect(3, 7, 1, 2, SB_LIGHT, true),
+		rect(12, 7, 1, 2, SB_LIGHT, true),
+	}
+end
+
+local SIGILS: { [string]: { Rect } } = {
+	Save = join(sigilDots(), {
+		rect(6, 4, 4, 8, SB_BRIGHT),
+		rect(5, 5, 6, 6, SB_BRIGHT),
+		rect(4, 6, 8, 4, SB_BRIGHT),
+		rect(7, 6, 2, 4, SB_WHITE),
+		rect(6, 7, 4, 2, SB_WHITE),
+	}),
+	Load = join(sigilDots(), {
+		rect(7, 4, 2, 1, SB_WHITE),
+		rect(7, 11, 2, 1, SB_WHITE),
+		rect(4, 7, 1, 2, SB_BRIGHT),
+		rect(11, 7, 1, 2, SB_BRIGHT),
+	}, fourWays({ rect(6, 5, 1, 1, SB_WHITE, true), rect(5, 6, 1, 1, SB_WHITE, true) })),
+	Corner = {
+		rect(5, 4, 8, 1, SB_MID, true),
+		rect(11, 3, 1, 1, SB_MID, true),
+		rect(11, 5, 1, 6, SB_MID, true),
+		rect(4, 5, 1, 7, SB_MID, true),
+		rect(5, 11, 6, 1, SB_MID, true),
+		rect(6, 5, 5, 1, SB_WHITE),
+		rect(10, 6, 1, 4, SB_WHITE),
+		rect(5, 10, 5, 1, SB_WHITE),
+		rect(5, 6, 1, 4, SB_WHITE),
+		rect(5, 5, 1, 1, SB_LIGHT, true),
+		rect(10, 10, 1, 1, SB_LIGHT, true),
+	},
+	Data = fourWays({
+		rect(3, 4, 4, 2, SB_BRIGHT),
+		rect(4, 3, 2, 4, SB_BRIGHT, true),
+		rect(4, 4, 2, 2, SB_WHITE, true),
+	}),
+}
+
 local DECORS: { [string]: Faces } = {
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
@@ -424,6 +529,10 @@ local DECORS: { [string]: Faces } = {
 }
 for _, tier in Tiers.TIERS do
 	DECORS[`{tier.name}Battery`] = batteryFaces(tier.colour)
+end
+for mode, sigil in SIGILS do
+	local face = join(structureFrame(), sigil)
+	DECORS[`StructureBlock{mode}`] = { Top = face, Bottom = face, Front = face, Back = face, Left = face, Right = face }
 end
 
 -- The faces of `decor` (BlockList `decor`), or nil when it is unknown.
@@ -450,6 +559,136 @@ local BASIS: { [string]: { { number } } } = {
 function BlockDecor.basis(face: string): ({ number }, { number }, { number })
 	local b = BASIS[face]
 	return b[1], b[2], b[3]
+end
+
+--[[
+	Jigsaw blocks (Minecraft 1.20.1's jigsaw model): drawn pointing up, then turned on each face.
+	  front  the puzzle piece (jigsaw_top), its knob towards the block's top;
+	  back   plain (jigsaw_bottom);
+	  top    the face towards the block's top: the lock (jigsaw_lock), a bar from the edge next
+	         to the front into the middle;
+	  sides  the other three: an arrow pointing at the front (jigsaw_side).
+	Item models show the front's piece, the lock's bar and the sides' arrows.
+]]
+local JIGSAW_FRONT: { Rect } = {
+	rect(1, 1, 14, 14, SB_FIELD),
+	rect(4, 1, 6, 1, SB_DARK, true),
+	rect(14, 6, 1, 6, SB_DARK, true),
+	rect(1, 8, 1, 5, SB_DARK, true),
+	rect(3, 14, 5, 1, SB_DARK, true),
+	rect(3, 5, 8, 8, SB_WHITE),
+	rect(6, 3, 2, 2, SB_WHITE),
+	rect(11, 8, 2, 2, SB_WHITE),
+	rect(3, 8, 2, 2, SB_FIELD),
+	rect(6, 11, 2, 2, SB_FIELD),
+}
+local JIGSAW_BACK: { Rect } = {
+	rect(1, 1, 14, 1, SB_FIELD, true),
+	rect(1, 14, 14, 1, SB_FIELD, true),
+	rect(1, 2, 1, 12, SB_FIELD, true),
+	rect(14, 2, 1, 12, SB_FIELD, true),
+}
+local JIGSAW_LOCK: { Rect } = join(JIGSAW_BACK, {
+	rect(6, 1, 4, 8, SB_FIELD),
+	rect(7, 0, 2, 8, SB_WHITE),
+})
+local JIGSAW_SIDE: { Rect } = {
+	rect(1, 1, 14, 14, SB_FIELD),
+	rect(7, 0, 2, 1, SB_MID, true),
+	rect(2, 10, 2, 3, SB_DARK, true),
+	rect(12, 10, 2, 3, SB_DARK, true),
+	rect(7, 2, 2, 12, SB_LIGHT),
+	rect(6, 3, 4, 1, SB_LIGHT, true),
+	rect(5, 4, 6, 1, SB_LIGHT),
+	rect(4, 5, 8, 1, SB_LIGHT),
+	rect(3, 6, 10, 1, SB_LIGHT),
+	rect(7, 3, 2, 10, SB_WHITE, true),
+	rect(6, 4, 4, 1, SB_WHITE, true),
+	rect(5, 5, 6, 1, SB_WHITE, true),
+}
+
+-- The four pictures as drawn pointing up (read only; for tests).
+BlockDecor.JIGSAW_PICTURES =
+	table.freeze({ front = JIGSAW_FRONT, back = JIGSAW_BACK, lock = JIGSAW_LOCK, side = JIGSAW_SIDE })
+
+-- Unit offsets of the faces and of Minecraft's directions (North = -Z).
+local FACE_VECTOR: { [string]: { number } } = {
+	Front = { 0, 0, -1 },
+	Back = { 0, 0, 1 },
+	Left = { -1, 0, 0 },
+	Right = { 1, 0, 0 },
+	Top = { 0, 1, 0 },
+	Bottom = { 0, -1, 0 },
+}
+local DIRECTION_VECTOR: { [string]: { number } } = {
+	North = { 0, 0, -1 },
+	South = { 0, 0, 1 },
+	West = { -1, 0, 0 },
+	East = { 1, 0, 0 },
+	Up = { 0, 1, 0 },
+	Down = { 0, -1, 0 },
+}
+
+local function dot(a: { number }, b: { number }): number
+	return a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+end
+
+-- `rects` turned `turns` quarter turns clockwise (as seen) on the face.
+local function turned(rects: { Rect }, turns: number): { Rect }
+	local out = table.create(#rects)
+	for i, r in rects do
+		local x, y, w, h = r.x, r.y, r.w, r.h
+		for _ = 1, turns % 4 do
+			x, y, w, h = 16 - y - h, x, h, w
+		end
+		out[i] = rect(x, y, w, h, r.colour, r.surfaceOnly)
+	end
+	return out
+end
+
+-- Quarter turns clockwise taking a picture's up (towards y = 0) to world direction `towards`,
+-- which lies in `face`.
+local function turnsTowards(face: string, towards: { number }): number
+	local _, right, up = BlockDecor.basis(face)
+	local across, down = dot(towards, right), -dot(towards, up)
+	if down < 0 then
+		return 0
+	elseif across > 0 then
+		return 1
+	elseif down > 0 then
+		return 2
+	end
+	return 3
+end
+
+-- The faces of the jigsaw facing `front` with `top` up.
+local function jigsawFaces(front: string, top: string): Faces
+	local f, t = DIRECTION_VECTOR[front], DIRECTION_VECTOR[top]
+	local faces: Faces = {}
+	for _, face in BlockDecor.FACES do
+		local normal = FACE_VECTOR[face]
+		local along = dot(normal, f)
+		if along > 0 then
+			faces[face] = turned(JIGSAW_FRONT, turnsTowards(face, t))
+		elseif along < 0 then
+			faces[face] = JIGSAW_BACK
+		elseif dot(normal, t) > 0 then
+			faces[face] = turned(JIGSAW_LOCK, turnsTowards(face, f))
+		else
+			faces[face] = turned(JIGSAW_SIDE, turnsTowards(face, f))
+		end
+	end
+	return faces
+end
+
+-- Minecraft's twelve FrontAndTop orientations (as BlockList's jigsaws).
+for _, front in { "North", "South", "West", "East" } do
+	DECORS[`Jigsaw{front}Up`] = jigsawFaces(front, "Up")
+end
+for _, front in { "Up", "Down" } do
+	for _, top in { "North", "South", "West", "East" } do
+		DECORS[`Jigsaw{front}{top}`] = jigsawFaces(front, top)
+	end
 end
 
 local function overlaps(a: Rect, b: Rect): boolean

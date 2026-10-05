@@ -88,6 +88,9 @@ export type SurfaceSampler = (x: number, z: number) -> number
 	`heights[pz * P + px + 1]` is the terrain height of every padded column, `cells` the chunk's
 	buffer height (cells above it are air anyway). `yield` is called regularly (carving a chunk over
 	the Underlands is a lot of blocks) so callers can spread the work over several frames.
+
+	Returns where the chunk may hold cave air (Carved), nil when nowhere: cave decoration
+	(CaveDecor) only looks there.
 ]]
 export type Carver = (
 	data: buffer,
@@ -96,9 +99,30 @@ export type Carver = (
 	heights: { number },
 	cells: number,
 	yield: (() -> ())?
-) -> ()
+) -> Carved?
+
+--[[
+	The lattice cells (CELL_XZ x CELL_Y x CELL_XZ blocks, world aligned) the carver carved in: a
+	superset of the cells holding cave air. Cell (lx, ly, lz) starts at world block
+	(x + lx * CELL_XZ, y + ly * CELL_Y, z + lz * CELL_XZ); `flags` holds a u8 per cell at index
+	(ly * nz + lz) * nx + lx: 0 not carved, 1 carved in, 2 cave air throughout (as far as the
+	chunk's padded box goes).
+]]
+export type Carved = {
+	x: number,
+	y: number,
+	z: number,
+	nx: number,
+	ny: number,
+	nz: number,
+	flags: buffer,
+}
 
 local Caves = {}
+
+-- Size of the lattice cells in Carved (blocks).
+Caves.CELL_XZ = GRID_XZ
+Caves.CELL_Y = GRID_Y
 
 -- One cave set: noises in our blocks.
 type CaveSet = {
@@ -227,7 +251,7 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 		heights: { number },
 		cells: number,
 		yield: (() -> ())?
-	)
+	): Carved?
 		-- Highest block any cave may reach in this chunk.
 		local maxTop = -huge
 		for i = 1, P * P do
@@ -238,7 +262,7 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 		end
 		maxTop = math.min(maxTop, cells)
 		if maxTop <= minY then
-			return
+			return nil
 		end
 
 		-- Lattice covering the padded chunk.
@@ -271,7 +295,7 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 		local gy0 = minY // GRID_Y
 		local gy1 = math.min(floor(math.min(highestCave, maxTop) / GRID_Y) + 1, (cells - 1) // GRID_Y + 1)
 		if gy1 <= gy0 then
-			return
+			return nil
 		end
 		local nyg = gy1 - gy0 + 1
 		local layer = nxg * nzg
@@ -295,6 +319,7 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 
 		-- Carve every lattice cell that is not solid at all eight corners.
 		local stride = LAYER * 2
+		local carved: Carved? = nil
 		for ly = 0, nyg - 2 do
 			if yield then
 				yield()
@@ -310,6 +335,21 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 					local f001, f101 = field[i001], field[i001 + 1]
 					local f011, f111 = field[i001 + nxg], field[i001 + nxg + 1]
 					if f000 < 0 or f100 < 0 or f010 < 0 or f110 < 0 or f001 < 0 or f101 < 0 or f011 < 0 or f111 < 0 then
+						local map: Carved
+						if carved then
+							map = carved
+						else
+							map = {
+								x = gx0 * GRID_XZ,
+								y = gy0 * GRID_Y,
+								z = gz0 * GRID_XZ,
+								nx = nxg - 1,
+								ny = nyg - 1,
+								nz = nzg - 1,
+								flags = buffer.create((nxg - 1) * (nyg - 1) * (nzg - 1)),
+							}
+							carved = map
+						end
 						-- Air at every corner is air throughout (below the fade-in).
 						local open = f000 < 0
 							and f100 < 0
@@ -327,6 +367,8 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 						local pz1 = math.min(cellZ + GRID_XZ - 1 - originZ + 1, P - 1)
 						local y0 = math.max(cellY, minY)
 						local y1 = math.min(cellY + GRID_Y - 1, cells - 1)
+						-- Whether every block of the cell in the chunk becomes cave air.
+						local full = open and y0 == cellY and y1 == cellY + GRID_Y - 1
 						for pz = pz0, pz1 do
 							local tz = (originZ + pz - 1 - cellZ) / GRID_XZ
 							for px = px0, px1 do
@@ -339,8 +381,12 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 									for y = y0, last do
 										writeu16(data, base + y * stride, caveAir)
 									end
+									if last < y1 then
+										full = false
+									end
 									continue
 								end
+								full = false
 								-- Bilinear in x / z at the cell's bottom and top.
 								local b0 = f000 + (f100 - f000) * tx
 								local b1 = f010 + (f110 - f010) * tx
@@ -363,10 +409,12 @@ function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
 								end
 							end
 						end
+						buffer.writeu8(map.flags, (ly * (nzg - 1) + lz) * (nxg - 1) + lx, if full then 2 else 1)
 					end
 				end
 			end
 		end
+		return carved
 	end
 end
 

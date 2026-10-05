@@ -536,7 +536,9 @@ return function(t, shared, require, server)
 			if def.item then
 				local item = Items.ofBlock(block)
 				t.ok(item ~= nil and Items.get(item :: number).block ~= nil, `{def.name} is placed by {def.item}`)
-				t.ok(table.find(Blocks.variants(Items.get(item :: number).block :: number), block) ~= nil)
+				-- (Cave twins name their twin's item but are no variant: nothing places them.)
+				local variant = table.find(Blocks.variants(Items.get(item :: number).block :: number), block) ~= nil
+				t.eq(variant, not Blocks.isCaveTwin(block), `{def.name} is a variant of {def.item}`)
 			end
 		end
 	end)

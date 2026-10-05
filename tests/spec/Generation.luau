@@ -12,7 +12,9 @@ return function(t, shared, require)
 	local gen = TerrainGenerator.new(12345)
 
 	-- Ores (and stone varieties) only exist in a chunk's own core, so treat them as stone when
-	-- comparing borders.
+	-- comparing borders. Glow lichen in the outermost padding ring may differ from the neighbour's
+	-- core (it can't see past the padding), so treat it as the cave air it grows in
+	-- (tests/spec/CaveLichen checks those cells and that the difference is harmless).
 	local ORE = {
 		[Blocks.id.CoalOre] = true,
 		[Blocks.id.IronOre] = true,
@@ -25,6 +27,9 @@ return function(t, shared, require)
 		[Blocks.id.Granite] = true,
 	}
 	local function norm(id: number): number
+		if Blocks.isCaveTwin(id) then
+			return Blocks.CAVE_AIR
+		end
 		return if ORE[id] then Blocks.id.Stone else id
 	end
 

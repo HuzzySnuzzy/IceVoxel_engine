@@ -41,12 +41,14 @@
 	                (Batteries) stack to 1, as their charge is in each item.
 	  container     Number of item slots the block keeps (a chest's 27, a furnace's 3); breaking it
 	                drops what is inside.
-	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid)
-	                or "Furnace".
+	  menu          What right clicking opens: "Chest", "Crafting" (a crafting table's 3 x 3 grid),
+	                "Furnace", "StructureBlock" or "Jigsaw" (their settings screens).
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
 	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
-	                "AdvancedBattery", "EliteBattery", "UltimateBattery"; client
-	                Rendering/BlockDecor). Such blocks are drawn one part per block.
+	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "StructureBlockSave",
+	                "StructureBlockLoad", "StructureBlockCorner", "StructureBlockData" and
+	                "Jigsaw<Front><Top>", e.g. "JigsawNorthUp"; client Rendering/BlockDecor). Such
+	                blocks are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
 	                (Minecraft's SoundType; the events are `block.<sound>.break` and so on, see
 	                Shared/Sounds): "stone", "wood", "gravel", "grass", "sand", "glass", "snow",
@@ -121,7 +123,26 @@
 	                (Minecraft's loot tables' `match_tool shears`: leaves, grass, ferns, dead
 	                bushes). Anything else held gets the usual drops (Items.drops).
 	  shearCount    How many of `shearDrops` (default 1): tall grass gives 2 short grass.
+	  shearSpeed    How fast Shears mine it (default the Shears' 15, Minecraft's on leaves): 2 on
+	                glow lichen (ShearsItem.getDestroySpeed).
 	A plant's `shape` has at most 4 boxes: each is a Part per plant in the world.
+
+	Structures (structure blocks, jigsaw blocks, glow lichen in caves; Shared/Structures):
+	  creativeOnly  Minecraft's operator blocks (structure blocks, structure voids, jigsaws): only
+	                creative players place, use and break them (at once, like every block in
+	                creative); survival players can't mine them (Mining.progressPerTick is 0,
+	                Minecraft's hardness -1) and they never drop (Items.drops, Items.blockDrops).
+	                They are in the creative inventory and JEI.
+	  structureMode The structure block mode this block shows: "save", "load", "corner" or "data"
+	                (one block per mode, so everyone sees the mode; Blocks.structureMode).
+	  jigsaw        { front, top }: a jigsaw block's orientation (Minecraft's FrontAndTop: front
+	                Up or Down with a horizontal top, or a horizontal front with top Up; one block
+	                per orientation, Blocks.jigsawOrientation / Blocks.jigsawBlock).
+	  caveTwin      Name of the block this one is the cave twin of (CaveGlowLichen* of GlowLichen*):
+	                it looks, drops and behaves exactly like it, but generation places it in caves
+	                and the mesher treats it like cave air while caves are hidden
+	                (Blocks.cullLutHiddenCaves, Blocks.caveTwinLut), as CaveAir is to Air. Players
+	                never place twins; their `item` is the twin's.
 
 	Mekanism pipes (Shared/Transmitters):
 	  transmitter   { kind = "item" | "fluid" | "energy", tier = 1..4, restrictive = true? }: a
@@ -181,6 +202,8 @@ export type MachineSpec = { kind: string }
 export type EnergySpec = { capacity: number, input: number?, output: number? }
 -- A plant (`plant`): its soil set, and the names of its other half.
 export type PlantSpec = { soil: string?, top: string?, bottom: string? }
+-- A jigsaw block's orientation (`jigsaw`): the direction its front faces and its top.
+export type JigsawSpec = { front: string, top: string }
 
 export type BlockSpec = {
 	name: string,
@@ -230,6 +253,11 @@ export type BlockSpec = {
 	scatter: boolean?,
 	shearDrops: (string | boolean)?,
 	shearCount: number?,
+	shearSpeed: number?,
+	creativeOnly: boolean?,
+	structureMode: string?,
+	jigsaw: JigsawSpec?,
+	caveTwin: string?,
 }
 
 local list: { BlockSpec } = {
@@ -1923,5 +1951,208 @@ mushroom("RedMushroom", RED_CAP, {
 	lump({ 2.8, 1.2, 2.8 }, { 0, -3.1, 0 }, RED_CAP),
 	lump({ 0.9, 0.3, 0.9 }, { 0.5, -2.4, -0.4 }, { 246, 240, 232 }),
 }, "Red Mushroom")
+
+--[[
+	Structures (Shared/Structures; server Structures, client screens): Minecraft 1.20.1's structure
+	block, structure void and jigsaw block, creative only (`creativeOnly`).
+
+	A structure block's mode is its block: StructureBlock (SAVE, the item), StructureBlockLoad,
+	StructureBlockCorner and StructureBlockData, so the server swaps the block when the mode changes
+	and everyone sees the mode's icon (BlockDecor "StructureBlock<Mode>": Minecraft's dark purple
+	grey block with the mode's sigil on every face). Minecraft places a new one in DATA mode
+	(StructureBlock.getStateForPlacement); here it is placed in SAVE mode, which is what a builder
+	wants first. Right clicking opens its screen (`menu`).
+
+	The structure void is Minecraft's: not solid, replaceable, saved as "keep" (whatever is in the
+	world stays there when the structure is placed). Minecraft draws nothing; here it is a small
+	translucent box (6 pixels, its outline too) so builders see where they put one.
+
+	A jigsaw block's orientation is its block (Minecraft's FrontAndTop, 12 states): Jigsaw (front
+	North, top Up; the item) and Jigsaw<Front><Top> for the other eleven. Its faces are Minecraft's
+	(BlockDecor "Jigsaw<Front><Top>"): the front shows the puzzle piece with its knob towards the
+	top, the face towards the top a bar from the front's edge (the "lock"), the back is plain and
+	the other three faces have arrows pointing at the front. Placing one picks the orientation from
+	the clicked face and the way the player looks (Blocks.placementFor).
+]]
+local STRUCTURE_COLOUR = { 38, 29, 42 }
+for _, mode in { "Save", "Load", "Corner", "Data" } do
+	local item = mode == "Save"
+	table.insert(list, {
+		name = if item then "StructureBlock" else `StructureBlock{mode}`,
+		displayName = "Structure Block",
+		color = STRUCTURE_COLOUR,
+		material = "SmoothPlastic",
+		sound = "stone",
+		creativeOnly = true,
+		placeable = item,
+		item = if item then nil else "StructureBlock",
+		drops = false,
+		menu = "StructureBlock",
+		decor = `StructureBlock{mode}`,
+		structureMode = string.lower(mode),
+	})
+end
+
+table.insert(list, {
+	name = "StructureVoid",
+	displayName = "Structure Void",
+	color = { 52, 156, 168 },
+	material = "SmoothPlastic",
+	transparency = 0.45,
+	sound = "stone",
+	solid = false,
+	replaceable = true,
+	placeable = true,
+	creativeOnly = true,
+	drops = false,
+	shape = { { size = { 6, 6, 6 }, offset = { 0, 0, 0 } } },
+	bounds = { min = { 5, 5, 5 }, max = { 11, 11, 11 } },
+})
+
+-- Minecraft's FrontAndTop: the four horizontal fronts (top Up), then front Up and front Down with
+-- each horizontal top. The first is the item.
+local JIGSAW_ORIENTATIONS = {
+	{ "North", "Up" },
+	{ "South", "Up" },
+	{ "West", "Up" },
+	{ "East", "Up" },
+	{ "Up", "North" },
+	{ "Up", "South" },
+	{ "Up", "West" },
+	{ "Up", "East" },
+	{ "Down", "North" },
+	{ "Down", "South" },
+	{ "Down", "West" },
+	{ "Down", "East" },
+}
+for index, orientation in JIGSAW_ORIENTATIONS do
+	local front, top = orientation[1], orientation[2]
+	local item = index == 1
+	table.insert(list, {
+		name = if item then "Jigsaw" else `Jigsaw{front}{top}`,
+		displayName = "Jigsaw Block",
+		color = STRUCTURE_COLOUR,
+		material = "SmoothPlastic",
+		sound = "stone",
+		creativeOnly = true,
+		placeable = item,
+		item = if item then nil else "Jigsaw",
+		drops = false,
+		menu = "Jigsaw",
+		decor = `Jigsaw{front}{top}`,
+		jigsaw = { front = front, top = top },
+	})
+end
+
+--[[
+	Glow lichen (Minecraft 1.20.1's GlowLichenBlock, a multiface block; here one face per block):
+	GlowLichen lies on the block below (the item), GlowLichenUp hangs under the one above and
+	GlowLichenNorth / South / West / East cover the wall on that side (`support`, kept up by the
+	Attached behaviour like torches). Light 7 in a cool yellow green, hardness 0.2, mined fastest
+	with an axe; it drops only with Shears (2 x slower with them than on leaves: `shearSpeed`), is
+	replaceable and is washed away by flowing water.
+
+	Each is a very thin plate a tenth of a pixel off its face, with a small Neon speck that carries
+	the light (`glow`; the client gives only some lichen a PointLight, chosen by position, and lit
+	and unlit lichen look alike). Two boxes, so two Parts a lichen: caves hold thousands of them
+	(1,000-3,000 revealed around a player), and a third box cost as many Parts again as all their
+	lights. The outline is Minecraft's: a pixel thick plate over the whole face.
+
+	CaveGlowLichen and its Up / North / South / West / East forms are the cave twins generation
+	places on cave walls (`caveTwin`): they look, drop and behave exactly like their twin, but count
+	as cave air while caves are hidden, so a whole cave's lichen costs nothing until the player is
+	in it, and the stone behind it stays hidden.
+]]
+local LICHEN = { 106, 128, 118 }
+local LICHEN_GLOW = { 210, 220, 158 }
+local LICHEN_LIGHT = { 190, 232, 168 }
+
+-- The floor model: { size, offset } of each box with the face at y = -8 (support Down), as
+-- { across, height above the face, along }.
+local LICHEN_BOXES: { { size: { number }, at: { number }, colour: { number }, glow: boolean? } } = {
+	{ size = { 13, 0.3, 13 }, at = { -0.5, 0.25, 0.5 }, colour = LICHEN },
+	{ size = { 3, 0.6, 3 }, at = { -2.5, 0.4, -2 }, colour = LICHEN_GLOW, glow = true },
+}
+
+-- The lichen's boxes on the face towards `support`: the floor model turned onto that face.
+local function lichenShape(support: string): { ShapeBox }
+	local boxes: { ShapeBox } = {}
+	for _, box in LICHEN_BOXES do
+		local a, h, b = box.at[1], box.at[2], box.at[3]
+		local sa, sh, sb = box.size[1], box.size[2], box.size[3]
+		local size, offset
+		if support == "Down" then
+			size, offset = { sa, sh, sb }, { a, -8 + h, b }
+		elseif support == "Up" then
+			size, offset = { sa, sh, sb }, { a, 8 - h, -b }
+		elseif support == "North" then
+			size, offset = { sa, sb, sh }, { a, b, -8 + h }
+		elseif support == "South" then
+			size, offset = { sa, sb, sh }, { -a, b, 8 - h }
+		elseif support == "West" then
+			size, offset = { sh, sb, sa }, { -8 + h, b, -a }
+		else
+			size, offset = { sh, sb, sa }, { 8 - h, b, a }
+		end
+		table.insert(boxes, {
+			size = size,
+			offset = offset,
+			color = box.colour,
+			material = if box.glow then "Neon" else "SmoothPlastic",
+			glow = box.glow,
+		})
+	end
+	return boxes
+end
+
+-- Minecraft's outline: a pixel thick plate over the face it covers.
+local function lichenBounds(support: string): Bounds
+	local lo, hi = { 0, 0, 0 }, { 16, 16, 16 }
+	local d = if support == "Down"
+		then { 0, -1, 0 }
+		elseif support == "Up" then { 0, 1, 0 }
+		else table.clone(DIRECTIONS[support])
+	for k = 1, 3 do
+		if d[k] < 0 then
+			hi[k] = 1
+		elseif d[k] > 0 then
+			lo[k] = 15
+		end
+	end
+	return { min = lo, max = hi }
+end
+
+local LICHEN_SIDES = { "Down", "Up", "North", "South", "West", "East" }
+for _, cave in { false, true } do
+	for _, support in LICHEN_SIDES do
+		local suffix = if support == "Down" then "" else support
+		local twin = "GlowLichen" .. suffix
+		local item = not cave and support == "Down"
+		table.insert(list, {
+			name = if cave then "CaveGlowLichen" .. suffix else twin,
+			displayName = "Glow Lichen",
+			color = LICHEN,
+			material = "SmoothPlastic",
+			sound = "grass",
+			solid = false,
+			replaceable = true,
+			placeable = item,
+			item = if item then nil else "GlowLichen",
+			hardness = 0.2,
+			tool = "axe",
+			drops = false,
+			shearDrops = true,
+			shearSpeed = 2,
+			light = 7,
+			lightColor = LICHEN_LIGHT,
+			shape = lichenShape(support),
+			bounds = lichenBounds(support),
+			support = support,
+			brokenByFluid = true,
+			behaviour = "Attached",
+			caveTwin = if cave then twin else nil,
+		})
+	end
+end
 
 return list

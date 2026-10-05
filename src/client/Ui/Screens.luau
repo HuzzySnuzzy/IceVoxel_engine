@@ -34,6 +34,13 @@
 	Drags show their result as they grow: the screen draws a copy of the window with the drag
 	applied.
 
+	Panels: another module's screen (Ui/StructureScreen: the structure block and jigsaw screens)
+	is shown with `showPanel`, in the screens' GUI and with everything that comes with an open
+	screen (the darkened world, the free mouse, the controls off, `isOpen()`), but none of the
+	inventory's input: its own buttons and text fields take the clicks. E, Escape, gamepad B and
+	death close it like any screen (its `closed` is called; Minecraft's Escape cancels such a
+	screen), and so does a block's window the server opens.
+
 	JEI (Ui/Jei) comes with every open screen: the item list at the right of the screen and,
 	opened from it, the recipe view, which takes the inventory panel's place (no slot clicks while
 	it is shown). Clicks on the list or the view go to JEI before anything else; R and U over any
@@ -67,8 +74,20 @@ local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
 
 type Target = SlotClicks.Target
-type Kind = "inventory" | "creative"
+type Kind = "inventory" | "creative" | "panel"
 type Line = { text: string, colour: Color3 }
+
+--[[
+	A screen of another module shown by Screens (showPanel). Its `root` is parented into the
+	screens' GUI and shown centred, scaled like the inventory for content of `size()` GUI pixels.
+	`closed` is called when Screens closes it (not when the panel closes itself with closePanel).
+]]
+export type Panel = {
+	root: GuiObject,
+	size: () -> Vector2,
+	closed: () -> (),
+	firstSelectable: () -> GuiObject?,
+}
 
 -- Touch: a long press is a right click; a finger moving this far (pixels) drags or scrolls.
 local LONG_PRESS = 0.4
@@ -166,6 +185,8 @@ Screens.changed = changedEvent.Event
 
 local current: Kind? = nil
 local started = false
+-- The panel shown while `current` is "panel" (and the one showPanel asked for).
+local panel: Panel? = nil
 
 function Screens.isOpen(): boolean
 	return current ~= nil
@@ -175,6 +196,39 @@ end
 local open: (kind: Kind) -> () = function() end
 local close: () -> () = function() end
 local escape: () -> () = function() end
+local hidePanel: () -> () = function() end
+
+--[[
+	Shows `p` (see Panel) instead of whatever screen is open, opening the screens if none is. Call
+	after Screens.start.
+]]
+function Screens.showPanel(p: Panel)
+	if current == "panel" and panel ~= p then
+		-- Another panel goes the way Escape would take it.
+		local previous = panel
+		hidePanel()
+		if previous then
+			previous.closed()
+		end
+	end
+	panel = p
+	open("panel")
+end
+
+-- Closes `p` if it is shown (its `closed` is not called: the panel closes itself).
+function Screens.closePanel(p: Panel)
+	if current == "panel" and panel == p then
+		-- (Off the screen first: `close` hides only a panel it still knows, and calls its `closed`.)
+		hidePanel()
+		panel = nil
+		close()
+	end
+end
+
+-- Is `p` the panel shown?
+function Screens.panelShown(p: Panel): boolean
+	return current == "panel" and panel == p
+end
 
 -- Opens the inventory (creative item selection in creative), or closes the open screen.
 function Screens.toggle()
@@ -299,6 +353,8 @@ function Screens.start()
 	inventoryScale.Parent = inventory.root
 	local creativeScale = Instance.new("UIScale")
 	creativeScale.Parent = creative.root
+	-- The shown panel's scale (moved into each panel's root as it is shown).
+	local panelScale = Instance.new("UIScale")
 
 	-- The carried stack and the tooltip, above everything (also the HUD).
 	local top = Instance.new("ScreenGui")
@@ -467,7 +523,12 @@ function Screens.start()
 		-- Where JEI's list may reach down to: above the creative screen's hotbar row (also while the
 		-- recipe view hides it, so the list keeps its cells instead of rebuilding them).
 		local listBottom = viewport.Y
-		if current == "creative" then
+		local shownPanel = panel
+		if current == "panel" and shownPanel then
+			local size = shownPanel.size()
+			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen)
+			setScale(panelScale, scale)
+		elseif current == "creative" then
 			-- Centred in the space above the HUD's hotbar (the screen's hotbar row).
 			local cell = Hud.hotbarCell(1)
 			local bottom = viewport.Y - 30
@@ -511,7 +572,10 @@ function Screens.start()
 			return
 		end
 		local first
-		if jei:viewOpen() then
+		local shownPanel = panel
+		if current == "panel" and shownPanel then
+			first = shownPanel.firstSelectable()
+		elseif jei:viewOpen() then
 			first = jei:firstSelectable()
 		elseif current == "creative" then
 			first = creative:firstSelectable()
@@ -543,9 +607,27 @@ function Screens.start()
 		local viewing = jei:viewOpen()
 		inventory.root.Visible = current == "inventory" and not viewing
 		creative.root.Visible = current == "creative" and not viewing
+		local shownPanel = panel
+		if shownPanel then
+			shownPanel.root.Visible = current == "panel"
+		end
 		if current then
 			Hud.setMode(if current == "creative" and not viewing then "creative" else "hidden")
 		end
+	end
+
+	-- Takes the shown panel off the screen (its `closed` is the caller's business).
+	hidePanel = function()
+		local shownPanel = panel
+		if shownPanel then
+			-- (A hidden box keeping the focus would keep taking the keys.)
+			local focused = UserInputService:GetFocusedTextBox()
+			if focused and focused:IsDescendantOf(shownPanel.root) then
+				focused:ReleaseFocus()
+			end
+			shownPanel.root.Visible = false
+		end
+		panelScale.Parent = nil
 	end
 
 	local function showPage(kind: Kind)
@@ -566,17 +648,43 @@ function Screens.start()
 
 	open = function(kind: Kind)
 		if current == kind then
+			if kind == "panel" then
+				-- (Another panel: showPanel took the old one away.)
+				local shownPanel = panel
+				if shownPanel then
+					shownPanel.root.Parent = gui
+					panelScale.Parent = shownPanel.root
+					applyVisibility()
+					layout()
+					selectFirst()
+				end
+			end
 			return
 		end
 		local wasOpen = current ~= nil
+		if current == "panel" then
+			-- A block's window replaces the panel: it goes as with Escape.
+			local previous = panel
+			hidePanel()
+			panel = nil
+			if previous then
+				previous.closed()
+			end
+		end
 		current = kind
 		resetPointer()
+		local shownPanel = panel
+		if kind == "panel" and shownPanel then
+			shownPanel.root.Parent = gui
+			panelScale.Parent = shownPanel.root
+		end
 		showPage(kind)
 		layout()
+		-- (JEI's list comes with the inventory screens, not with panels.)
+		jei:setVisible(kind ~= "panel")
 		if not wasOpen then
 			gui.Enabled = true
 			top.Enabled = true
-			jei:setVisible(true)
 			setControls(false)
 			mouseIconWas = UserInputService.MouseIconEnabled
 			RunService:BindToRenderStep(MOUSE_STEP, Enum.RenderPriority.Camera.Value + 1, function()
@@ -603,14 +711,25 @@ function Screens.start()
 		if current == nil then
 			return
 		end
+		local wasPanel = current == "panel"
 		current = nil
 		resetPointer()
 		creative:releaseFocus()
 		-- (Also closes the recipe view and drops the search field's focus.)
 		jei:setVisible(false)
 		inventory:closed()
-		-- The carried stack and a crafting grid go back into the inventory; a block's window closes.
-		ClientInventory.apply({ kind = "close", window = ClientInventory.window().id })
+		if wasPanel then
+			local previous = panel
+			hidePanel()
+			panel = nil
+			if previous then
+				previous.closed()
+			end
+		else
+			-- The carried stack and a crafting grid go back into the inventory; a block's window
+			-- closes.
+			ClientInventory.apply({ kind = "close", window = ClientInventory.window().id })
+		end
 		lastWindowId = ClientInventory.window().id
 		gui.Enabled = false
 		top.Enabled = false
@@ -853,6 +972,28 @@ function Screens.start()
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		local kind, key = input.UserInputType, input.KeyCode
+		if current == "panel" then
+			-- A panel's own buttons and fields take the pointer; E, Escape and B close it, unless
+			-- the player is typing (a read only box, focused to copy its text, takes no typing).
+			local focused = UserInputService:GetFocusedTextBox()
+			if focused and not focused.TextEditable then
+				focused = nil
+			end
+			local bar = TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
+			if focused ~= nil or (bar ~= nil and bar.IsFocused) then
+				return
+			end
+			if kind == Enum.UserInputType.Keyboard then
+				if key == Enum.KeyCode.E then
+					close()
+				elseif key == Enum.KeyCode.Escape and not GuiService.MenuIsOpen then
+					escape()
+				end
+			elseif key == Enum.KeyCode.ButtonB then
+				close()
+			end
+			return
+		end
 		if (kind == Enum.UserInputType.Keyboard or kind == Enum.UserInputType.Gamepad1) and typing() then
 			-- Keys go to the chat (or another text box), not to the screens.
 			return
@@ -1010,6 +1151,12 @@ function Screens.start()
 		end
 		local now = os.clock()
 		local scale = layout()
+		if current == "panel" then
+			-- (No slots, carried stack or tooltips on a panel.)
+			tooltip.Visible = false
+			carried.Visible = false
+			return
+		end
 
 		-- A touch held still is a right click (on a JEI item: its uses).
 		local t = touch

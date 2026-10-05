@@ -21,6 +21,10 @@
 	            20 kJ" ("Energy: Infinite" for the creative cube) and the machine's status
 	            ("Producing 200 J/t", "Using 50 J/t", "Charging 4 kJ/t", "No power":
 	            Machines.status, from the record's numbers and its kind's state code).
+	  structures  structure blocks: their mode and structure name ("Mode: Save", "Name: hut");
+	            jigsaws: name, target and pool (their records, Net/StructureNet). Creative only
+	            blocks (structure blocks, structure voids, jigsaws) say "Creative only" where
+	            the harvest line goes: survival players can't break them.
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
@@ -54,6 +58,7 @@ local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
+local Settings = require(Shared.Structures.Settings)
 local Transmitters = require(Shared.Transmitters)
 
 export type Colour = "white" | "gray" | "darkGray" | "blue" | "green" | "red" | "yellow" | "gold"
@@ -119,6 +124,9 @@ export type BlockContext = {
 	transmitter: TransmitterFacts?,
 	tank: TankFacts?,
 	machine: MachineFacts?,
+	-- A structure block's or jigsaw's settings, as the server sent them (nil: not known yet).
+	structure: Settings.StructureSettings?,
+	jigsaw: Settings.JigsawSettings?,
 }
 
 local WailaInfo = {}
@@ -502,6 +510,10 @@ function WailaInfo.harvest(block: number, held: number?): Line?
 	if def == nil or def.fluid then
 		return nil
 	end
+	if def.creativeOnly then
+		-- (Minecraft's hardness -1 for survival; creative breaks them at once.)
+		return { segment("Creative only", "gold") }
+	end
 	if not def.breakable or def.hardness < 0 then
 		return { segment("Unbreakable", "red") }
 	end
@@ -559,7 +571,9 @@ local function blockDetails(
 				)
 			end
 			table.insert(lines, gray(`Drops by hand: {stackText(Items.drops(harvested, nil))}`))
-			if def.hardness == 0 then
+			if def.creativeOnly then
+				table.insert(lines, gray("Breaks in creative only (at once)"))
+			elseif def.hardness == 0 then
 				table.insert(lines, gray("Breaks at once"))
 			else
 				local ticks = Mining.ticks(block, true, false, held)
@@ -574,6 +588,90 @@ local function blockDetails(
 		-- (A machine's slots are its kind's, not BlockList's `container`.)
 		local slots = Machines.containerSize(block)
 		table.insert(lines, gray(if slots > 0 then `Menu {def.menu}, {slots} slots` else `Menu {def.menu}`))
+	end
+	return lines
+end
+
+--[[ Structure blocks and jigsaws ]]
+
+-- "Save" for "save".
+local function capitalised(text: string): string
+	return string.upper(string.sub(text, 1, 1)) .. string.sub(text, 2)
+end
+
+--[[
+	The lines of a structure block (its mode from the block, the rest from its settings when the
+	client has them): "Mode: Save", "Name: hut" (a DATA block shows its marker instead).
+]]
+function WailaInfo.structureLines(block: number, settings: Settings.StructureSettings?): { Line }
+	local mode = Blocks.structureMode(block)
+	if mode == nil then
+		return {}
+	end
+	local lines: { Line } = { labelled("Mode: ", capitalised(mode)) }
+	if settings then
+		if mode == "data" then
+			table.insert(lines, labelled("Data: ", if settings.metadata ~= "" then settings.metadata else "(none)"))
+		else
+			table.insert(lines, labelled("Name: ", if settings.name ~= "" then settings.name else "(none)"))
+		end
+	end
+	return lines
+end
+
+-- The F3 lines of a structure block: its region and, in LOAD mode, how it places.
+function WailaInfo.structureDetails(block: number, settings: Settings.StructureSettings): { Line }
+	local mode = Blocks.structureMode(block)
+	if mode ~= "save" and mode ~= "load" then
+		return {}
+	end
+	local o, size = settings.offset, settings.size
+	local lines: { Line } = {
+		gray(`Offset {o[1]}, {o[2]}, {o[3]}, size {size[1]} x {size[2]} x {size[3]}`),
+	}
+	if mode == "load" then
+		table.insert(
+			lines,
+			gray(
+				`Rotation {settings.rotation * 90}, mirror {settings.mirror}, integrity {number(settings.integrity)}, seed {string.format(
+					"%d",
+					settings.seed
+				)}`
+			)
+		)
+	end
+	table.insert(
+		lines,
+		gray(
+			`Bounding box {if settings.showBoundingBox then "on" else "off"}, invisible blocks {if settings.showInvisible
+				then "on"
+				else "off"}`
+		)
+	)
+	return lines
+end
+
+-- The lines of a jigsaw: "Name: ", "Target: ", "Pool: " (from its settings, when known).
+function WailaInfo.jigsawLines(settings: Settings.JigsawSettings?): { Line }
+	if settings == nil then
+		return {}
+	end
+	return {
+		labelled("Name: ", settings.name),
+		labelled("Target: ", settings.target),
+		labelled("Pool: ", settings.pool),
+	}
+end
+
+-- The F3 lines of a jigsaw: its orientation, final state and joint.
+function WailaInfo.jigsawDetails(block: number, settings: Settings.JigsawSettings?): { Line }
+	local front, top = Blocks.jigsawOrientation(block)
+	local lines: { Line } = {}
+	if front and top then
+		table.insert(lines, gray(`Front {front}, top {top}`))
+	end
+	if settings then
+		table.insert(lines, gray(`Turns into {settings.finalState}, joint {settings.joint}`))
 	end
 	return lines
 end
@@ -618,6 +716,14 @@ function WailaInfo.block(
 		for _, line in WailaInfo.machineLines(block, machine) do
 			table.insert(lines, line)
 		end
+	elseif Blocks.isStructureBlock(block) then
+		for _, line in WailaInfo.structureLines(block, context and context.structure) do
+			table.insert(lines, line)
+		end
+	elseif Blocks.isJigsaw(block) then
+		for _, line in WailaInfo.jigsawLines(context and context.jigsaw) do
+			table.insert(lines, line)
+		end
 	end
 	if extended and def then
 		for _, line in blockDetails(block, held, x, y, z, context) do
@@ -633,6 +739,14 @@ function WailaInfo.block(
 			end
 		elseif machine then
 			for _, line in WailaInfo.machineDetails(block, machine) do
+				table.insert(lines, line)
+			end
+		elseif Blocks.isStructureBlock(block) and context and context.structure then
+			for _, line in WailaInfo.structureDetails(block, context.structure) do
+				table.insert(lines, line)
+			end
+		elseif Blocks.isJigsaw(block) then
+			for _, line in WailaInfo.jigsawDetails(block, context and context.jigsaw) do
 				table.insert(lines, line)
 			end
 		end

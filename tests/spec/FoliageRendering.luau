@@ -181,7 +181,8 @@ return function(t, shared, require)
 		local cull = if hideCaves then Blocks.cullLutHiddenCaves else Blocks.cullLut
 		local id = ChunkLayout.get(data, x, y, z)
 		local app = Blocks.get(id).appearance
-		if app == 0 then
+		-- (Cave twins, the glow lichen of caves, are cave air while caves are hidden.)
+		if app == 0 or (hideCaves and Blocks.isCaveTwin(id)) then
 			return 0, false
 		end
 		local info = Blocks.appearances[app]
@@ -240,6 +241,35 @@ return function(t, shared, require)
 		hideFoliage: boolean
 	): (number, number)
 		local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hideCaves, nil, hideFoliage)
+		-- Sparse lights (glow lichen): the cell of each LIGHT_BOX box nearest its centre carries the
+		-- light (surface field 1; the first in y, z, x order on a tie), see GreedyMesher.
+		local light = GreedyMesher.LIGHT_BOX
+		local best: { [string]: { number } } = {}
+		for y = y0, y1 - 1 do
+			for z = 0, SIZE - 1 do
+				for x = 0, SIZE - 1 do
+					local need = classify(data, height, x, y, z, hideCaves, hideFoliage)
+					if need ~= 0 and need < STRIDE and buffer.readu8(GreedyMesher.sparseLightLut, need) == 1 then
+						local key = `{x // light},{y // light},{z // light}`
+						local score = GreedyMesher.lightScore(x, y, z)
+						if best[key] == nil or score < best[key][1] then
+							best[key] = { score, (y * SIZE + z) * SIZE + x }
+						end
+					end
+				end
+			end
+		end
+		local lit: { [number]: boolean } = {}
+		for _, chosen in best do
+			lit[chosen[2]] = true
+		end
+		local function expected(x: number, y: number, z: number): (number, boolean)
+			local need, wild = classify(data, height, x, y, z, hideCaves, hideFoliage)
+			if lit[(y * SIZE + z) * SIZE + x] then
+				need += STRIDE
+			end
+			return need, wild
+		end
 		local coverage: { [number]: number } = {}
 		local plantBoxes = 0
 		for b = 0, count - 1 do
@@ -256,7 +286,7 @@ return function(t, shared, require)
 			for y = by, by + sy - 1 do
 				for z = bz, bz + sz - 1 do
 					for x = bx, bx + sx - 1 do
-						local need, wild = classify(data, height, x, y, z, hideCaves, hideFoliage)
+						local need, wild = expected(x, y, z)
 						if need == key then
 							local cell = (y * SIZE + z) * SIZE + x
 							coverage[cell] = (coverage[cell] or 0) + 1
@@ -270,7 +300,7 @@ return function(t, shared, require)
 		for y = y0, y1 - 1 do
 			for z = 0, SIZE - 1 do
 				for x = 0, SIZE - 1 do
-					if classify(data, height, x, y, z, hideCaves, hideFoliage) ~= 0 then
+					if expected(x, y, z) ~= 0 then
 						local n = coverage[(y * SIZE + z) * SIZE + x] or 0
 						assert(n == 1, `visible cell ({x},{y},{z}) covered {n} times`)
 					end

@@ -33,6 +33,26 @@
 	                 hit point; for a bucket the clicked face (water goes into (x, y, z) when it is
 	                 replaceable, else into (x, y, z) + offset(side)). An empty bucket aimed at a
 	                 water source sends the water's cell.
+	  StructureBlock i32 x, u16 y, i32 z, u8 op, then by op (Minecraft's
+	                 ServerboundSetStructureBlockPacket and its update types):
+	                   1 open     nothing: the player right clicked the block; the server answers
+	                              with a StructureBlocks message with the open flag (or a Notice)
+	                   2 update   structure settings (below): the screen's fields (UPDATE_DATA;
+	                              the mode also swaps the block, Blocks.structureBlock)
+	                   3 save     settings: save the region (SAVE_AREA)
+	                   4 load     settings, u32 transfer: place the structure (LOAD_AREA) named in
+	                              the settings (transfer 0) or the text this player uploaded as
+	                              StructureData `transfer` (the screen's "Paste data" box)
+	                   5 detect   settings: fit the region between the CORNER blocks of the same
+	                              name (SCAN_AREA)
+	  Jigsaw         i32 x, u16 y, i32 z, u8 op, then by op (Minecraft's
+	                 ServerboundSetJigsawBlockPacket and ServerboundJigsawGeneratePacket):
+	                   1 open      nothing (answered like StructureBlock's)
+	                   2 update    jigsaw settings (below)
+	                   3 generate  jigsaw settings, u8 levels (0..7), u8 keepJigsaws (0 / 1): apply
+	                               the settings, then assemble from this jigsaw's pool here
+	  StructureData  a piece of structure text (below): text pasted into a LOAD screen, uploaded
+	                 before the load that names its transfer
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -69,6 +89,16 @@
 	                 the players near a change.
 	  Tanks          u32 count, count x (i32 x, u16 y, i32 z, u8 fluid (0 none, 1 water), u32 amount
 	                 (mB)): fluid tanks, the same way.
+	  StructureBlocks u8 flags (bit 0: open, the answer to this player's open request: show the
+	                 screen of the record's block), u32 count, count x (i32 x, u16 y, i32 z,
+	                 u8 present, then when present is 1 the structure settings): structure blocks'
+	                 settings, for their screens, bounding boxes and WAILA. A record replaces what
+	                 the client knew about that position; present 0 means there is no structure
+	                 block there any more (forget it). Sent with a chunk's edit list and to the
+	                 players near a change, as Transmitters.
+	  Jigsaws        the same with jigsaw settings
+	  StructureData  a piece of structure text (below): the text a SAVE made, for the player who
+	                 saved (the screen shows it to copy)
 	  Machines       u32 count, count x (i32 x, u16 y, i32 z, f64 energy, f64 capacity (J; math.huge
 	                 is the creative cube's infinity), f32 input, f32 output (J the energy network
 	                 put in / took out last tick), f32 rate (J/t the machine made, + or used, -),
@@ -96,13 +126,27 @@
 	  malformed. Item entities and items in transporters carry no data on the wire (clients only
 	  draw them).
 
+	Structure settings and jigsaw settings: Structures/Settings' wire format (mode, name, offset,
+	  size, rotation, mirror, integrity, seed, flags, metadata; name, target, pool, final state,
+	  joint). Unknown codes, NaN and strings over 128 bytes are malformed; numbers out of range are
+	  clamped into Minecraft's ranges (as its block entities clamp what they load).
+
+	StructureData pieces (both ways): u32 transfer, u16 index, u16 count, u16 length + text (UTF-8
+	  bytes, at most STRUCTURE_PIECE): piece `index` (0-based) of `count` (1..MAX_STRUCTURE_PIECES)
+	  of one text, numbered `transfer` by its sender (0 is no transfer). A text is
+	  Config.Structures.DataPieceChars characters a piece, at most Config.Structures.MaxDataChars in
+	  all (the 200,000 characters a StringValue holds); `splitStructureData` cuts one and
+	  `joinStructureData` puts the pieces back together, refusing pieces that don't fit.
+
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
 	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
 	  list loaded on join), so neither side ever applies an older list over a newer one.
 ]]
 
+local Config = require(script.Parent.Parent.Config)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
+local Settings = require(script.Parent.Parent.Structures.Settings)
 
 local Protocol = {}
 
@@ -116,6 +160,9 @@ Protocol.ClientMessage = {
 	Inventory = 7,
 	Use = 8,
 	UseItem = 9,
+	StructureBlock = 10,
+	Jigsaw = 11,
+	StructureData = 12,
 }
 
 Protocol.ServerMessage = {
@@ -130,6 +177,9 @@ Protocol.ServerMessage = {
 	Tanks = 9,
 	Transport = 10,
 	Machines = 11,
+	StructureBlocks = 12,
+	Jigsaws = 13,
+	StructureData = 14,
 }
 
 Protocol.EditAction = {
@@ -1445,6 +1495,398 @@ function Protocol.decodeWaypoints(b: buffer): ({ Waypoint }?, number)
 		return nil, 0
 	end
 	return list, revision
+end
+
+--[[ Structure blocks and jigsaw blocks ]]
+
+-- What a StructureBlock message asks (client -> server). `settings` for every op but "open",
+-- `transfer` for "load" (0: by name).
+export type StructureBlockRequest = {
+	x: number,
+	y: number,
+	z: number,
+	op: string, -- "open" | "update" | "save" | "load" | "detect"
+	settings: Settings.StructureSettings?,
+	transfer: number,
+}
+-- What a Jigsaw message asks (client -> server): `settings` for "update" and "generate", `levels`
+-- (0..7) and `keepJigsaws` for "generate".
+export type JigsawRequest = {
+	x: number,
+	y: number,
+	z: number,
+	op: string, -- "open" | "update" | "generate"
+	settings: Settings.JigsawSettings?,
+	levels: number,
+	keepJigsaws: boolean,
+}
+-- A structure block's or jigsaw's state (server -> client); settings nil: it is gone.
+export type StructureBlockRecord = { x: number, y: number, z: number, settings: Settings.StructureSettings? }
+export type JigsawRecord = { x: number, y: number, z: number, settings: Settings.JigsawSettings? }
+
+Protocol.StructureOp = table.freeze({ "open", "update", "save", "load", "detect" })
+Protocol.JigsawOp = table.freeze({ "open", "update", "generate" })
+
+local STRUCTURE_OP_CODE: { [string]: number } = {}
+for code, op in Protocol.StructureOp do
+	STRUCTURE_OP_CODE[op] = code
+end
+local JIGSAW_OP_CODE: { [string]: number } = {}
+for code, op in Protocol.JigsawOp do
+	JIGSAW_OP_CODE[op] = code
+end
+
+-- Bytes of a position (i32 x, u16 y, i32 z).
+local POSITION_BYTES = 10
+
+local function writePosition(b: buffer, o: number, x: number, y: number, z: number)
+	buffer.writei32(b, o, x)
+	buffer.writeu16(b, o + 4, y)
+	buffer.writei32(b, o + 6, z)
+end
+
+-- A position read at `o`, nil when it is beyond MAX_COORDINATE.
+local function readPosition(b: buffer, o: number): (number?, number, number)
+	local x, y, z = buffer.readi32(b, o), buffer.readu16(b, o + 4), buffer.readi32(b, o + 6)
+	if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
+		return nil, 0, 0
+	end
+	return x, y, z
+end
+
+function Protocol.encodeStructureBlock(request: StructureBlockRequest): buffer
+	local code = STRUCTURE_OP_CODE[request.op]
+	assert(code, `Unknown structure block op {request.op}`)
+	local settings = request.settings
+	local size = POSITION_BYTES + 1
+	if code ~= 1 then
+		size += Settings.structureBytes(settings or Settings.defaultStructure())
+	end
+	if request.op == "load" then
+		size += 4
+	end
+	local b = buffer.create(size)
+	writePosition(b, 0, request.x, request.y, request.z)
+	buffer.writeu8(b, POSITION_BYTES, code)
+	local o = POSITION_BYTES + 1
+	if code ~= 1 then
+		o = Settings.writeStructure(b, o, settings or Settings.defaultStructure())
+	end
+	if request.op == "load" then
+		buffer.writeu32(b, o, clampInt(request.transfer, 0, 4294967295))
+	end
+	return b
+end
+
+-- The request in a StructureBlock message, or nil when it is malformed (wrong length, unknown op,
+-- bad settings, a position beyond MAX_COORDINATE).
+function Protocol.decodeStructureBlock(b: buffer): StructureBlockRequest?
+	local len = buffer.len(b)
+	if len < POSITION_BYTES + 1 then
+		return nil
+	end
+	local x, y, z = readPosition(b, 0)
+	local op = Protocol.StructureOp[buffer.readu8(b, POSITION_BYTES)]
+	if x == nil or op == nil then
+		return nil
+	end
+	local o = POSITION_BYTES + 1
+	local settings: Settings.StructureSettings? = nil
+	if op ~= "open" then
+		local ok, read, after = Settings.readStructure(b, o, len)
+		if not ok then
+			return nil
+		end
+		settings, o = read, after
+	end
+	local transfer = 0
+	if op == "load" then
+		if o + 4 > len then
+			return nil
+		end
+		transfer = buffer.readu32(b, o)
+		o += 4
+	end
+	if o ~= len then
+		return nil
+	end
+	return { x = x, y = y, z = z, op = op, settings = settings, transfer = transfer }
+end
+
+function Protocol.encodeJigsaw(request: JigsawRequest): buffer
+	local code = JIGSAW_OP_CODE[request.op]
+	assert(code, `Unknown jigsaw op {request.op}`)
+	local settings = request.settings or Settings.defaultJigsaw()
+	local size = POSITION_BYTES + 1
+	if code ~= 1 then
+		size += Settings.jigsawBytes(settings)
+	end
+	if request.op == "generate" then
+		size += 2
+	end
+	local b = buffer.create(size)
+	writePosition(b, 0, request.x, request.y, request.z)
+	buffer.writeu8(b, POSITION_BYTES, code)
+	local o = POSITION_BYTES + 1
+	if code ~= 1 then
+		o = Settings.writeJigsaw(b, o, settings)
+	end
+	if request.op == "generate" then
+		buffer.writeu8(b, o, clampInt(request.levels, 0, Settings.MAX_LEVELS))
+		buffer.writeu8(b, o + 1, if request.keepJigsaws then 1 else 0)
+	end
+	return b
+end
+
+-- The request in a Jigsaw message, or nil when it is malformed (wrong length, unknown op, bad
+-- settings, levels beyond 7, a flag beyond 1, a position beyond MAX_COORDINATE).
+function Protocol.decodeJigsaw(b: buffer): JigsawRequest?
+	local len = buffer.len(b)
+	if len < POSITION_BYTES + 1 then
+		return nil
+	end
+	local x, y, z = readPosition(b, 0)
+	local op = Protocol.JigsawOp[buffer.readu8(b, POSITION_BYTES)]
+	if x == nil or op == nil then
+		return nil
+	end
+	local o = POSITION_BYTES + 1
+	local settings: Settings.JigsawSettings? = nil
+	if op ~= "open" then
+		local ok, read, after = Settings.readJigsaw(b, o, len)
+		if not ok then
+			return nil
+		end
+		settings, o = read, after
+	end
+	local levels, keep = 0, false
+	if op == "generate" then
+		if o + 2 > len then
+			return nil
+		end
+		levels = buffer.readu8(b, o)
+		local flag = buffer.readu8(b, o + 1)
+		if levels > Settings.MAX_LEVELS or flag > 1 then
+			return nil
+		end
+		keep = flag == 1
+		o += 2
+	end
+	if o ~= len then
+		return nil
+	end
+	return { x = x, y = y, z = z, op = op, settings = settings, levels = levels, keepJigsaws = keep }
+end
+
+-- Writes records (position, u8 present, settings) after a u8 flags and u32 count.
+local function encodeRecords<T>(
+	records: { { x: number, y: number, z: number, settings: T? } },
+	open: boolean?,
+	bytes: (T) -> number,
+	write: (buffer, number, T) -> number
+): buffer
+	local size = 5
+	for _, record in records do
+		size += POSITION_BYTES + 1
+		local settings = record.settings
+		if settings ~= nil then
+			size += bytes(settings)
+		end
+	end
+	local b = buffer.create(size)
+	buffer.writeu8(b, 0, if open then 1 else 0)
+	buffer.writeu32(b, 1, #records)
+	local o = 5
+	for _, record in records do
+		writePosition(b, o, record.x, record.y, record.z)
+		local settings = record.settings
+		buffer.writeu8(b, o + POSITION_BYTES, if settings ~= nil then 1 else 0)
+		o += POSITION_BYTES + 1
+		if settings ~= nil then
+			o = write(b, o, settings)
+		end
+	end
+	return b
+end
+
+-- Reads what `encodeRecords` wrote: the records (nil when malformed) and the open flag.
+local function decodeRecords<T>(
+	b: buffer,
+	read: (buffer, number, number) -> (boolean, T?, number)
+): ({ { x: number, y: number, z: number, settings: T? } }?, boolean)
+	local len = buffer.len(b)
+	if len < 5 then
+		return nil, false
+	end
+	local flags = buffer.readu8(b, 0)
+	local count = buffer.readu32(b, 1)
+	-- (Every record takes at least a position and its present byte.)
+	if flags > 1 or count > (len - 5) // (POSITION_BYTES + 1) then
+		return nil, false
+	end
+	local records = table.create(count)
+	local o = 5
+	for i = 1, count do
+		if o + POSITION_BYTES + 1 > len then
+			return nil, false
+		end
+		local x, y, z = readPosition(b, o)
+		local present = buffer.readu8(b, o + POSITION_BYTES)
+		if x == nil or present > 1 then
+			return nil, false
+		end
+		o += POSITION_BYTES + 1
+		local settings: T? = nil
+		if present == 1 then
+			local ok, value, after = read(b, o, len)
+			if not ok then
+				return nil, false
+			end
+			settings, o = value, after
+		end
+		records[i] = { x = x, y = y, z = z, settings = settings }
+	end
+	if o ~= len then
+		return nil, false
+	end
+	return records, flags == 1
+end
+
+-- A StructureBlocks message: `records` (settings nil: the block is gone); `open` answers the
+-- player's open request (show the first record's screen).
+function Protocol.encodeStructureBlocks(records: { StructureBlockRecord }, open: boolean?): buffer
+	return encodeRecords(records, open, Settings.structureBytes, Settings.writeStructure)
+end
+
+-- The records of a StructureBlocks message (nil when malformed) and its open flag.
+function Protocol.decodeStructureBlocks(b: buffer): ({ StructureBlockRecord }?, boolean)
+	return decodeRecords(b, Settings.readStructure)
+end
+
+-- A Jigsaws message, the same way.
+function Protocol.encodeJigsaws(records: { JigsawRecord }, open: boolean?): buffer
+	return encodeRecords(records, open, Settings.jigsawBytes, Settings.writeJigsaw)
+end
+
+-- The records of a Jigsaws message (nil when malformed) and its open flag.
+function Protocol.decodeJigsaws(b: buffer): ({ JigsawRecord }?, boolean)
+	return decodeRecords(b, Settings.readJigsaw)
+end
+
+--[[ Structure text in pieces (both ways) ]]
+
+export type StructureDataPiece = { transfer: number, index: number, count: number, text: string }
+-- A text being received: its pieces so far (`joinStructureData`).
+export type StructureDataAssembly = { count: number, received: number, bytes: number, pieces: { [number]: string } }
+
+-- Bytes of text in one piece, the most pieces of one text, and the longest text (bytes).
+Protocol.STRUCTURE_PIECE = math.clamp(math.floor(Config.Structures.DataPieceChars), 1, 60000)
+Protocol.MAX_STRUCTURE_TEXT = math.max(1, math.floor(Config.Structures.MaxDataChars))
+Protocol.MAX_STRUCTURE_PIECES = math.min(65535, math.ceil(Protocol.MAX_STRUCTURE_TEXT / Protocol.STRUCTURE_PIECE))
+-- Texts one sender may have half received at once: a new one beyond this drops the others
+-- (abandoned uploads), so a client can't keep the server holding many.
+Protocol.MAX_OPEN_TRANSFERS = 2
+local PIECE_HEADER = 10
+
+function Protocol.encodeStructureData(piece: StructureDataPiece): buffer
+	local text = string.sub(piece.text, 1, Protocol.STRUCTURE_PIECE)
+	local b = buffer.create(PIECE_HEADER + #text)
+	buffer.writeu32(b, 0, clampInt(piece.transfer, 0, 4294967295))
+	buffer.writeu16(b, 4, clampInt(piece.index, 0, 65535))
+	buffer.writeu16(b, 6, clampInt(piece.count, 0, 65535))
+	buffer.writeu16(b, 8, #text)
+	buffer.writestring(b, PIECE_HEADER, text)
+	return b
+end
+
+-- The piece in a StructureData message, or nil when it is malformed (wrong length, transfer 0,
+-- no pieces or more than MAX_STRUCTURE_PIECES, an index beyond the count, a piece longer than
+-- STRUCTURE_PIECE).
+function Protocol.decodeStructureData(b: buffer): StructureDataPiece?
+	local len = buffer.len(b)
+	if len < PIECE_HEADER then
+		return nil
+	end
+	local transfer = buffer.readu32(b, 0)
+	local index, count, length = buffer.readu16(b, 4), buffer.readu16(b, 6), buffer.readu16(b, 8)
+	if
+		transfer == 0
+		or count < 1
+		or count > Protocol.MAX_STRUCTURE_PIECES
+		or index >= count
+		or length > Protocol.STRUCTURE_PIECE
+		or len ~= PIECE_HEADER + length
+	then
+		return nil
+	end
+	return { transfer = transfer, index = index, count = count, text = buffer.readstring(b, PIECE_HEADER, length) }
+end
+
+--[[
+	`text` (cut to MAX_STRUCTURE_TEXT bytes) as the pieces of transfer `transfer`, STRUCTURE_PIECE
+	bytes each (an empty text is one empty piece). Send each with encodeStructureData.
+]]
+function Protocol.splitStructureData(transfer: number, text: string): { StructureDataPiece }
+	local all = string.sub(text, 1, Protocol.MAX_STRUCTURE_TEXT)
+	local size = Protocol.STRUCTURE_PIECE
+	local count = math.max(1, math.ceil(#all / size))
+	local pieces: { StructureDataPiece } = table.create(count)
+	for i = 1, count do
+		pieces[i] = {
+			transfer = transfer,
+			index = i - 1,
+			count = count,
+			text = string.sub(all, (i - 1) * size + 1, i * size),
+		}
+	end
+	return pieces
+end
+
+--[[
+	Adds `piece` to the texts being received (`assemblies`, by transfer, kept by the caller per
+	sender) and returns the whole text once its last piece arrived (and forgets the transfer).
+	Returns nil and a message when the piece doesn't fit what came before (another count, an index
+	received twice) or the text grows beyond MAX_STRUCTURE_TEXT; the transfer is dropped then.
+	Pieces may arrive in any order. A sender starting a transfer again under a number already in
+	progress should pick a new number: its old pieces would be mixed in. A new transfer while
+	MAX_OPEN_TRANSFERS are half received drops those.
+]]
+function Protocol.joinStructureData(
+	assemblies: { [number]: StructureDataAssembly },
+	piece: StructureDataPiece
+): (string?, string?)
+	local assembly = assemblies[piece.transfer]
+	if assembly == nil then
+		local open = 0
+		for _ in assemblies do
+			open += 1
+		end
+		if open >= Protocol.MAX_OPEN_TRANSFERS then
+			table.clear(assemblies)
+		end
+		assembly = { count = piece.count, received = 0, bytes = 0, pieces = {} }
+		assemblies[piece.transfer] = assembly
+	end
+	if assembly.count ~= piece.count or assembly.pieces[piece.index] ~= nil or piece.index >= piece.count then
+		assemblies[piece.transfer] = nil
+		return nil, "The structure data arrived mixed up: paste it again"
+	end
+	assembly.bytes += #piece.text
+	if assembly.bytes > Protocol.MAX_STRUCTURE_TEXT then
+		assemblies[piece.transfer] = nil
+		return nil, `The structure data is too long (at most {Protocol.MAX_STRUCTURE_TEXT} characters)`
+	end
+	assembly.pieces[piece.index] = piece.text
+	assembly.received += 1
+	if assembly.received < assembly.count then
+		return nil, nil
+	end
+	assemblies[piece.transfer] = nil
+	local parts = table.create(assembly.count)
+	for i = 0, assembly.count - 1 do
+		parts[i + 1] = assembly.pieces[i]
+	end
+	return table.concat(parts), nil
 end
 
 return Protocol

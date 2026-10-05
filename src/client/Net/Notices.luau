@@ -7,6 +7,9 @@
 	                   so messages wait for it (in order) instead of being lost.
 	  Legacy chat      StarterGui:SetCore("ChatMakeSystemMessage"), retried until the chat has
 	                   registered it.
+
+	`listen` lets a screen show them too (the structure block screen repeats the answers to its
+	buttons on its status line, where the player is looking).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -87,8 +90,18 @@ local function findChannel()
 	end)
 end
 
+local listeners: { (text: string) -> () } = {}
+
+-- Calls `listener` with every notice shown from now on.
+function Notices.listen(listener: (text: string) -> ())
+	table.insert(listeners, listener)
+end
+
 -- Shows `text` in this player's chat.
 function Notices.show(text: string)
+	for _, listener in listeners do
+		task.spawn(listener, text)
+	end
 	if TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService then
 		showLegacy(text)
 		return

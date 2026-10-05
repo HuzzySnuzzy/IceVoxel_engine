@@ -29,6 +29,12 @@
 	Config.Interaction.RepeatInterval. A block is never placed where it would overlap a player's
 	standing hull (the server checks the same and would undo it).
 
+	Creative only blocks (structure blocks, structure voids, jigsaws: BlockList `creativeOnly`) are
+	Minecraft's operator blocks: only creative players open their screens (the server answers the
+	Use with the screen, or says they may not: Structures/Permission) and place them; for survival
+	players a structure block is an ordinary block to build against. Jigsaws face the way
+	Minecraft's placement gives them (Blocks.placementFor: the clicked face, then the look).
+
 	Items that are no block act on what they point at (ClientMessage.UseItem, never predicted: the
 	server answers with world edits, records and the inventory snapshot), one use per press, and
 	only where the server would do something (Transmitters/UseRules):
@@ -748,7 +754,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local stack = ClientInventory.selectedStack()
 		-- Blocks with a menu open, unless sneaking with something in hand (Minecraft's secondary use).
 		local sneaking = view ~= nil and view.state.sneaking
-		if hit and Blocks.get(hit.block).menu ~= nil and not (sneaking and stack ~= nil) then
+		-- (Creative only blocks' screens are for creative players; to others they are plain blocks.)
+		local menu = hit and Blocks.get(hit.block).menu
+		if hit and Blocks.isCreativeOnly(hit.block) and not ClientInventory.isCreative() then
+			menu = nil
+		end
+		if hit and menu ~= nil and not (sneaking and stack ~= nil) then
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()
@@ -768,6 +779,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 		local block = def and def.block
 		if hit == nil or block == nil then
+			return
+		end
+		-- Creative only blocks are placed in creative only (the server refuses the rest).
+		if Blocks.isCreativeOnly(block) and not ClientInventory.isCreative() then
 			return
 		end
 		-- Into the clicked block if it can be replaced (not by its own item), else against the

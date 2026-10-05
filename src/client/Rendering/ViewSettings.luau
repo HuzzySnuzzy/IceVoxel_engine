@@ -4,7 +4,8 @@
 
 	  * Phones and tablets (touch screen, no keyboard) use Config.Lod.Mobile: they draw parts much
 	    less far than computers anyway, and have less memory. That includes a shorter distance
-	    for plants (LodTree.setFoliageDistance), whose every box is a part.
+	    for plants (LodTree.setFoliageDistance), whose every box is a part, and a shorter cave view
+	    (Lod.Mobile.UndergroundSplitDistanceL1, Config.Caves.Mobile's reveal radii).
 	  * Lighting.PrioritizeLightingQuality = false: when the engine has to lower quality it keeps the
 	    draw distance and gives up lighting detail first.
 	  * Fog fades the edge of the view distance (skipped when the place has an Atmosphere, which
@@ -35,10 +36,23 @@ function ViewSettings.usesFog(): boolean
 	return Config.Render.Fog and Lighting:FindFirstChildOfClass("Atmosphere") == nil
 end
 
+-- How far caves are revealed around an underground camera on this device (blocks): in tunnels
+-- and at most, in big caverns (Streaming/CaveReach).
+function ViewSettings.revealRadii(): (number, number)
+	local caves = if ViewSettings.isMobile() then Config.Caves.Mobile else Config.Caves
+	return caves.RevealRadius, math.max(caves.RevealRadius, caves.RevealRadiusMax)
+end
+
+-- How far from the camera glow lichen's lights are on, on this device (blocks).
+function ViewSettings.lichenLightDistance(): number
+	return (if ViewSettings.isMobile() then Config.Caves.Mobile else Config.Caves).LichenLightDistance
+end
+
 function ViewSettings.apply()
 	if ViewSettings.isMobile() then
-		LodTree.configure(Config.Lod.Mobile.ViewDistance, Config.Lod.Mobile.SplitDistance)
-		LodTree.setFoliageDistance(Config.Lod.Mobile.FoliageDistance)
+		local mobile = Config.Lod.Mobile
+		LodTree.configure(mobile.ViewDistance, mobile.SplitDistance, nil, mobile.UndergroundSplitDistanceL1)
+		LodTree.setFoliageDistance(mobile.FoliageDistance)
 	end
 
 	local ok, err = pcall(function()

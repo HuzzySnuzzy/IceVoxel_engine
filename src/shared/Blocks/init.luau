@@ -33,6 +33,19 @@
 	        appearance `tinted`, `scatter`, `upperHalf` and `foliage` (also as `tintedLut` and
 	        `foliageLut`). Plants never share an appearance with anything else;
 	      - what Shears harvest (`shearDrops`, `shearCount`; Items.drops, Shared/Mining).
+	  * structures (Shared/Structures):
+	      - creative only blocks (`creativeOnly`, `isCreativeOnly`): structure blocks, structure
+	        voids and jigsaws, which survival players can't mine and which never drop;
+	      - structure block modes (`structureMode`, `structureBlock`): one block per mode;
+	      - jigsaw orientations (`jigsawOrientation`, `jigsawBlock`; Minecraft's FrontAndTop),
+	        placed from the clicked face and the look (`jigsawPlacement`, through `placementFor`);
+	      - turning blocks with a structure (`rotate`, `rotateLut`, `turnDirection`): wall
+	        torches, glow lichen and jigsaws face the turned way;
+	      - cave twins (`caveTwin`: CaveGlowLichen*): the same look and behaviour as their twin, but
+	        cave air while caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`), never part of
+	        their item's variants (`placementFor` never picks one), and turned back into their twin
+	        by `surfaceForm` (with CaveAir into Air) when a structure is saved;
+	      - `find(name)`: a block's id by name, nil when there is none (names from data).
 ]]
 
 local BlockList = require(script.BlockList)
@@ -111,9 +124,17 @@ export type BlockDef = {
 	foliageColor: { number }?,
 	scatter: boolean,
 	-- What Shears harvest from it (true: itself, else an item's name) and how many; see
-	-- Items.drops.
+	-- Items.drops. `shearSpeed`: how fast Shears mine it (nil: the Shears' own speed).
 	shearDrops: (string | boolean)?,
 	shearCount: number,
+	shearSpeed: number?,
+	-- Only creative players place, use and break it (structure blocks, structure voids, jigsaws).
+	creativeOnly: boolean,
+	-- A structure block's mode ("save", "load", "corner", "data"), a jigsaw's orientation and a
+	-- cave twin's twin (its name); see BlockList.
+	structureMode: string?,
+	jigsaw: JigsawSpec?,
+	caveTwin: string?,
 	appearance: number,
 }
 
@@ -153,6 +174,7 @@ export type TankSpec = BlockList.TankSpec
 export type MachineSpec = BlockList.MachineSpec
 export type EnergySpec = BlockList.EnergySpec
 export type PlantSpec = BlockList.PlantSpec
+export type JigsawSpec = BlockList.JigsawSpec
 
 local Blocks = {}
 
@@ -243,6 +265,20 @@ local function isTier(tier: number): boolean
 	return tier == 1 or tier == 2 or tier == 3 or tier == 4
 end
 
+-- Structure block modes (BlockList `structureMode`).
+local STRUCTURE_MODES = { "save", "load", "corner", "data" }
+Blocks.STRUCTURE_MODES = table.freeze(table.clone(STRUCTURE_MODES))
+
+local HORIZONTAL: { [string]: boolean } = { North = true, South = true, West = true, East = true }
+
+-- Minecraft's FrontAndTop: a horizontal front with top Up, or front Up / Down with a horizontal top.
+local function validOrientation(front: string, top: string): boolean
+	if HORIZONTAL[front] then
+		return top == "Up"
+	end
+	return (front == "Up" or front == "Down") and HORIZONTAL[top] == true
+end
+
 local defs: { [number]: BlockDef } = {}
 local ids: { [string]: number } = {}
 local appearances: { Appearance } = {}
@@ -316,6 +352,11 @@ for index, spec in BlockList do
 		scatter = spec.scatter == true,
 		shearDrops = spec.shearDrops,
 		shearCount = spec.shearCount or 1,
+		shearSpeed = spec.shearSpeed,
+		creativeOnly = spec.creativeOnly == true,
+		structureMode = spec.structureMode,
+		jigsaw = spec.jigsaw,
+		caveTwin = spec.caveTwin,
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
@@ -359,6 +400,22 @@ for index, spec in BlockList do
 		def.shearCount >= 1 and def.shearCount <= 64 and def.shearCount == math.floor(def.shearCount),
 		`Block {spec.name} has a bad shearCount`
 	)
+	assert(spec.shearSpeed == nil or spec.shearSpeed > 0, `Block {spec.name} has a bad shearSpeed`)
+	assert(
+		spec.structureMode == nil or table.find(STRUCTURE_MODES, spec.structureMode) ~= nil,
+		`Block {spec.name} has unknown structure mode {spec.structureMode}`
+	)
+	assert(
+		spec.jigsaw == nil or validOrientation(spec.jigsaw.front, spec.jigsaw.top),
+		`Block {spec.name} has a bad jigsaw orientation`
+	)
+	assert(
+		not def.creativeOnly or (breakable and def.drops == false),
+		`Creative only {spec.name} must break and drop nothing`
+	)
+	-- (A twin comes after the block it twins, and looks exactly like it: see below.)
+	local twin = if spec.caveTwin then defs[ids[spec.caveTwin] or -1] else nil
+	assert(spec.caveTwin == nil or twin ~= nil, `Block {spec.name} twins unknown or later block {spec.caveTwin}`)
 
 	if drawn then
 		local c, t = def.color, def.tint
@@ -372,7 +429,7 @@ for index, spec in BlockList do
 		local texture = `{def.texture or ""}|{t[1]},{t[2]},{t[3]}|{table.concat(faces, ";")}`
 		local lc = def.lightColor
 		-- (Shaped blocks get an appearance each: their boxes are their look.)
-		local glow = `{def.light}|{lc[1]},{lc[2]},{lc[3]}|{if def.shape then def.name else ""}`
+		local glow = `{def.light}|{lc[1]},{lc[2]},{lc[3]}|{if def.shape then spec.caveTwin or def.name else ""}`
 		-- (Plants never share one with anything else: the mesher and renderer treat them apart.)
 		local upperHalf = spec.plant ~= nil and spec.plant.bottom ~= nil
 		local foliage = `{spec.plant ~= nil},{def.tinted},{def.scatter},{upperHalf}`
@@ -423,6 +480,30 @@ assert(ids.Air == Blocks.AIR and ids.CaveAir == Blocks.CAVE_AIR, "Air and CaveAi
 -- The mesher packs a fluid height next to the appearance id in 16 bits (see GreedyMesher).
 assert(#appearances < 1024, "At most 1023 distinct block appearances are supported")
 
+-- Cave twins look and behave exactly like their twin (BlockList `caveTwin`).
+for _, def in defs do
+	local name = def.caveTwin
+	if name then
+		local twin = defs[ids[name]]
+		assert(twin.caveTwin == nil, `Block {def.name} twins another twin`)
+		assert(
+			def.appearance == twin.appearance
+				and def.item == (twin.item or twin.name)
+				and def.support == twin.support
+				and def.light == twin.light
+				and def.solid == twin.solid
+				and def.replaceable == twin.replaceable
+				and def.hardness == twin.hardness
+				and def.tool == twin.tool
+				and def.drops == twin.drops
+				and def.shearDrops == twin.shearDrops
+				and def.behaviour == twin.behaviour
+				and not def.placeable,
+			`Cave twin {def.name} differs from {name}`
+		)
+	end
+end
+
 Blocks.count = #BlockList
 Blocks.defs = defs
 Blocks.appearances = appearances
@@ -472,9 +553,21 @@ Blocks.cullLut = u8Lut(function(def)
 	return def.kind == Blocks.KIND_OPAQUE
 end)
 
--- Same, but cave air also counts as solid rock (used for sections far away from the camera).
+-- 1 for cave twins (BlockList `caveTwin`: the glow lichen generation puts on cave walls).
+Blocks.caveTwinLut = u8Lut(function(def)
+	return def.caveTwin ~= nil
+end)
+
+-- Same as cullLut, but cave air and cave twins also count as solid rock (used for sections far
+-- away from the camera): the mesher doesn't draw twins there either, so a cave's lichen costs
+-- nothing and hides nothing until its cave is revealed.
 Blocks.cullLutHiddenCaves = u8Lut(function(def)
-	return def.kind == Blocks.KIND_OPAQUE or def.id == Blocks.CAVE_AIR
+	return def.kind == Blocks.KIND_OPAQUE or def.id == Blocks.CAVE_AIR or def.caveTwin ~= nil
+end)
+
+-- 1 for creative only blocks (BlockList `creativeOnly`).
+Blocks.creativeOnlyLut = u8Lut(function(def)
+	return def.creativeOnly
 end)
 
 Blocks.solidLut = u8Lut(function(def)
@@ -637,7 +730,9 @@ end
 
 --[[
 	Variants: a block and the blocks whose `item` names it (Torch and the four wall torches,
-	Lantern and HangingLantern). Placing the item picks one of them; they all drop it.
+	Lantern and HangingLantern, the glow lichen's six sides, the structure block's four modes, the
+	jigsaw's twelve orientations). Placing the item picks one of them; they all drop it. Cave twins
+	name their twin's item too, but are no variant: nothing places them.
 ]]
 local variants: { [number]: { number } } = {}
 -- Per variant group (keyed by its first block): the variant that hangs on each direction.
@@ -647,7 +742,7 @@ for id = 0, Blocks.count - 1 do
 	local base = if def.item then rawget(ids :: any, def.item) else nil
 	-- (A typo would otherwise leave the variant silently unplaceable.)
 	assert(def.item == nil or base ~= nil, `Block {def.name} names unknown block {def.item} as its item`)
-	if base ~= nil then
+	if base ~= nil and def.caveTwin == nil then
 		assert(base ~= id, `Block {def.name} names itself as its item`)
 		local group = variants[base]
 		if group == nil then
@@ -673,7 +768,7 @@ for _, group in variants do
 	end
 end
 for id, def in defs do
-	if def.support and variants[id] == nil then
+	if def.support and variants[id] == nil and def.caveTwin == nil then
 		-- An attached block without variants (a lone support) is its own group.
 		variants[id] = { id }
 		bySupport[id] = { [def.support] = id }
@@ -878,18 +973,31 @@ function Blocks.lookOrder(lx: number, ly: number, lz: number): { string }
 	return { a, b, c, OPPOSITE[c], OPPOSITE[b], OPPOSITE[a] }
 end
 
+-- Is the variant group starting with `base` one of jigsaws (orientations, no supports)?
+local function jigsawGroup(base: number): boolean
+	return defs[base].jigsaw ~= nil
+end
+
 --[[
 	The variant of `block`'s item hanging on the face that was clicked, whose normal is
 	(nx, ny, nz): the block the face belongs to is the support. nil when no variant hangs that way
-	(a torch under a ceiling). Blocks without supports are their own answer.
+	(a torch under a ceiling). Blocks without supports are their own answer; a group whose
+	variants hang on nothing (the structure block's modes) gives the item's own block, and a
+	jigsaw the orientation `jigsawPlacement` picks for a player looking into the face.
 ]]
 function Blocks.variantFor(block: number, nx: number, ny: number, nz: number): number?
 	local group = variants[block]
 	if group == nil then
 		return block
 	end
+	local base = group[1]
+	if jigsawGroup(base) then
+		return Blocks.jigsawPlacement(nx, ny, nz, -nx, -ny, -nz)
+	elseif next(bySupport[base]) == nil then
+		return base
+	end
 	local direction = Blocks.direction(-nx, -ny, -nz)
-	return if direction then bySupport[group[1]][direction] else nil
+	return if direction then bySupport[base][direction] else nil
 end
 
 -- The torch for a clicked face: a standing torch on top, a wall torch facing away from a side,
@@ -897,8 +1005,6 @@ end
 function Blocks.torchFor(nx: number, ny: number, nz: number): number?
 	return Blocks.variantFor(rawget(ids :: any, "Torch") :: number, nx, ny, nz)
 end
-
-local HORIZONTAL: { [string]: boolean } = { North = true, South = true, West = true, East = true }
 
 --[[
 	The block placing `block`'s item at (x, y, z) makes: Minecraft's BlockPlaceContext order (the
@@ -912,7 +1018,10 @@ local HORIZONTAL: { [string]: boolean } = { North = true, South = true, West = t
 	The first answer wins. A torch clicked under a ceiling still goes on a wall or the floor next
 	to it when there is one. nil: nothing can hold it. (nx, ny, nz) = (0, 0, 0) uses the look order
 	alone. Blocks without supports place as they are. A plant gives itself or nil, never the upper
-	half of a tall one (it hangs on nothing, so no direction picks it).
+	half of a tall one (it hangs on nothing, so no direction picks it). A group whose variants
+	hang on nothing places the item's own block (a structure block in SAVE mode), and a jigsaw
+	takes its orientation from the clicked face and the look (`jigsawPlacement`). Cave twins are
+	never placed.
 ]]
 function Blocks.placementFor(
 	block: number,
@@ -929,9 +1038,16 @@ function Blocks.placementFor(
 ): number?
 	local group = variants[block]
 	if group == nil then
-		return block
+		return if defs[block] and defs[block].caveTwin then nil else block
 	end
-	local hanging = bySupport[group[1]]
+	local base = group[1]
+	if jigsawGroup(base) then
+		return Blocks.jigsawPlacement(nx, ny, nz, lx, ly, lz)
+	end
+	local hanging = bySupport[base]
+	if next(hanging) == nil then
+		return base
+	end
 	local order = Blocks.lookOrder(lx, ly, lz)
 	local first = Blocks.direction(-nx, -ny, -nz)
 	if first then
@@ -1015,6 +1131,249 @@ end
 
 function Blocks.obstruction(id: number): { number }?
 	return obstructions[id]
+end
+
+--[[ Structures: creative only blocks, structure block modes, jigsaws, turning, cave twins ]]
+
+-- The id of the block named `name`, or nil when there is none: for names that come from data
+-- (structure palettes, jigsaw final states), where `Blocks.id` would error.
+function Blocks.find(name: string): number?
+	if type(name) ~= "string" then
+		return nil
+	end
+	return rawget(ids :: any, name)
+end
+
+-- Is the block creative only (structure blocks, structure voids, jigsaws; BlockList
+-- `creativeOnly`)? Survival players can't mine them, and they never drop.
+function Blocks.isCreativeOnly(id: number): boolean
+	local def = defs[id]
+	return def ~= nil and def.creativeOnly
+end
+
+-- The structure block of each mode.
+local structureBlocks: { [string]: number } = {}
+for id, def in defs do
+	local mode = def.structureMode
+	if mode then
+		assert(structureBlocks[mode] == nil, `Two structure blocks in mode {mode}`)
+		structureBlocks[mode] = id
+	end
+end
+for _, mode in STRUCTURE_MODES do
+	assert(structureBlocks[mode], `No structure block in mode {mode}`)
+end
+
+-- The mode a structure block shows ("save", "load", "corner", "data"), nil for other blocks.
+function Blocks.structureMode(id: number): string?
+	local def = defs[id]
+	return if def then def.structureMode else nil
+end
+
+-- The structure block showing `mode`, nil for an unknown mode.
+function Blocks.structureBlock(mode: string): number?
+	return structureBlocks[mode]
+end
+
+function Blocks.isStructureBlock(id: number): boolean
+	return Blocks.structureMode(id) ~= nil
+end
+
+-- The jigsaw of each orientation, keyed "<front>|<top>".
+local jigsaws: { [string]: number } = {}
+for id, def in defs do
+	local orientation = def.jigsaw
+	if orientation then
+		local key = `{orientation.front}|{orientation.top}`
+		assert(jigsaws[key] == nil, `Two jigsaws face {key}`)
+		jigsaws[key] = id
+	end
+end
+
+-- A jigsaw's front and top directions (Minecraft's FrontAndTop), nil for other blocks.
+function Blocks.jigsawOrientation(id: number): (string?, string?)
+	local def = defs[id]
+	local orientation = def and def.jigsaw
+	if orientation == nil then
+		return nil, nil
+	end
+	return orientation.front, orientation.top
+end
+
+-- The jigsaw facing `front` with `top` up, nil when that is not one of the twelve orientations
+-- (a horizontal front needs top Up, a vertical one a horizontal top).
+function Blocks.jigsawBlock(front: string, top: string): number?
+	return jigsaws[`{front}|{top}`]
+end
+
+function Blocks.isJigsaw(id: number): boolean
+	local def = defs[id]
+	return def ~= nil and def.jigsaw ~= nil
+end
+
+local OPPOSITE_DIRECTION = table.freeze(table.clone(OPPOSITE))
+
+-- The opposite of a direction ("North" -> "South").
+function Blocks.opposite(direction: string): string
+	return OPPOSITE_DIRECTION[direction]
+end
+
+-- Minecraft's Direction.fromYRot: the horizontal direction a player looking along (lx, ly, lz)
+-- faces, from the yaw rounded to a quarter turn (straight up or down faces South).
+local FACINGS = { "South", "West", "North", "East" }
+function Blocks.horizontalFacing(lx: number, lz: number): string
+	-- (atan2 tells -0 from 0: straight down along -0 would face North.)
+	if lx == 0 and lz == 0 then
+		return "South"
+	end
+	local yaw = math.deg(math.atan2(-lx, lz))
+	if yaw ~= yaw then
+		yaw = 0
+	end
+	return FACINGS[math.floor(yaw / 90 + 0.5) % 4 + 1]
+end
+
+--[[
+	The jigsaw a player places by clicking a face whose normal (pointing out of the clicked block)
+	is (nx, ny, nz) while looking along (lx, ly, lz): Minecraft's JigsawBlock.getStateForPlacement.
+	The front faces out of the clicked face (towards the player); a horizontal front has its top
+	Up, a vertical one the opposite of the way the player faces. Without a face ((0, 0, 0)) the
+	front faces back along the look (the nearest look direction's opposite).
+]]
+function Blocks.jigsawPlacement(nx: number, ny: number, nz: number, lx: number, ly: number, lz: number): number
+	local front = Blocks.direction(nx, ny, nz) or OPPOSITE[Blocks.lookOrder(lx, ly, lz)[1]]
+	local top = if HORIZONTAL[front] then "Up" else OPPOSITE[Blocks.horizontalFacing(lx, lz)]
+	return jigsaws[`{front}|{top}`]
+end
+
+--[[
+	Turning a structure (Minecraft's Rotation and Mirror, as structure blocks and jigsaw assembly
+	use them): `rotation` is 0..3 quarter turns clockwise seen from above (North -> East -> South
+	-> West), `mirror` "none", "leftRight" (Z flips: North <-> South) or "frontBack" (X flips:
+	East <-> West), applied before the rotation. Up and Down never change.
+]]
+Blocks.MIRRORS = table.freeze({ "none", "leftRight", "frontBack" })
+local CLOCKWISE: { [string]: string } =
+	{ North = "East", East = "South", South = "West", West = "North", Up = "Up", Down = "Down" }
+local MIRRORED: { [string]: { [string]: string } } = {
+	none = {},
+	leftRight = { North = "South", South = "North" },
+	frontBack = { West = "East", East = "West" },
+}
+
+-- `direction` (one of the six) after mirroring by `mirror` and turning `rotation` quarter turns
+-- clockwise. An unknown mirror counts as "none"; any whole rotation works (it is taken mod 4).
+function Blocks.turnDirection(direction: string, rotation: number, mirror: string?): string
+	local mirrored = MIRRORED[mirror or "none"] or MIRRORED.none
+	local d = mirrored[direction] or direction
+	for _ = 1, (math.floor(rotation) % 4) do
+		d = CLOCKWISE[d] or d
+	end
+	return d
+end
+
+-- Cave twins and their twins, both ways, and per variant group the twins hanging on each side.
+local twinOf: { [number]: number } = {}
+local twinFor: { [number]: number } = {}
+local twinsBySupport: { [number]: { [string]: number } } = {}
+for id, def in defs do
+	if def.caveTwin then
+		local twin = ids[def.caveTwin]
+		twinOf[id] = twin
+		twinFor[twin] = id
+		local base = (variants[twin] or { twin })[1]
+		local map = twinsBySupport[base] or {}
+		twinsBySupport[base] = map
+		if def.support then
+			assert(map[def.support] == nil, `Two cave twins of {defs[base].name} hang on {def.support}`)
+			map[def.support] = id
+		end
+	end
+end
+
+-- The block `id` becomes when its structure is turned: its variant (or twin) hanging on the turned
+-- side, a jigsaw's turned orientation, else itself.
+local function turned(id: number, rotation: number, mirror: string): number
+	local def = defs[id]
+	local orientation = def.jigsaw
+	if orientation then
+		local front = Blocks.turnDirection(orientation.front, rotation, mirror)
+		local top = Blocks.turnDirection(orientation.top, rotation, mirror)
+		return jigsaws[`{front}|{top}`] or id
+	end
+	local support = def.support
+	if support == nil or support == "Up" or support == "Down" then
+		return id
+	end
+	local side = Blocks.turnDirection(support, rotation, mirror)
+	local family
+	if def.caveTwin then
+		local twin = twinOf[id]
+		family = twinsBySupport[(variants[twin] or { twin })[1]]
+	else
+		family = bySupport[(variants[id] or { id })[1]]
+	end
+	return (family and family[side]) or id
+end
+
+-- Per mirror, per rotation (index rotation + 1): the turned block of each block (u16 per id).
+local rotateLuts: { [string]: { buffer } } = {}
+for _, mirror in Blocks.MIRRORS do
+	local luts = {}
+	for rotation = 0, 3 do
+		local lut = buffer.create(Blocks.count * 2)
+		for id = 0, Blocks.count - 1 do
+			buffer.writeu16(lut, id * 2, turned(id, rotation, mirror))
+		end
+		luts[rotation + 1] = lut
+	end
+	rotateLuts[mirror] = luts
+end
+
+--[[
+	The lookup table turning blocks by `rotation` and `mirror` (see above): u16 per block id, read
+	with buffer.readu16(lut, id * 2). For hot loops writing a structure's cells. Read only.
+]]
+function Blocks.rotateLut(rotation: number, mirror: string?): buffer
+	local luts = rotateLuts[mirror or "none"] or rotateLuts.none
+	return luts[math.floor(rotation) % 4 + 1]
+end
+
+-- The block `id` becomes when its structure is turned by `rotation` and `mirror`: wall torches,
+-- glow lichen (cave twins stay twins) and jigsaws face the turned way; everything else is
+-- unchanged. Unknown ids come back as they are.
+function Blocks.rotate(id: number, rotation: number, mirror: string?): number
+	if defs[id] == nil then
+		return id
+	end
+	return buffer.readu16(Blocks.rotateLut(rotation, mirror), id * 2)
+end
+
+-- Is the block a cave twin (BlockList `caveTwin`)?
+function Blocks.isCaveTwin(id: number): boolean
+	return twinOf[id] ~= nil
+end
+
+-- The block a cave twin twins (CaveGlowLichenNorth -> GlowLichenNorth), nil for other blocks.
+function Blocks.caveTwinOf(id: number): number?
+	return twinOf[id]
+end
+
+-- The cave twin of a block (GlowLichenNorth -> CaveGlowLichenNorth), nil when it has none.
+function Blocks.caveTwinFor(id: number): number?
+	return twinFor[id]
+end
+
+--[[
+	The block as a saved structure keeps it: cave air becomes air and a cave twin its twin, so a
+	structure saved in a cave and placed in the open has nothing the mesher hides with caves.
+	Everything else is itself.
+]]
+function Blocks.surfaceForm(id: number): number
+	if id == Blocks.CAVE_AIR then
+		return Blocks.AIR
+	end
+	return twinOf[id] or id
 end
 
 return Blocks

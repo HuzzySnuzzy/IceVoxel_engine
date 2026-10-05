@@ -9,13 +9,14 @@
 	             throws are rate limited (the extra ones vanish).
 	  Windows    a Use message on a block with a menu (Blocks `menu`: a chest, a furnace, a crafting
 	             table) within reach opens it in a new window (one at a time; opening another closes
-	             the first). It closes when the player walks away (more than
-	             Config.Interaction.Reach + 2 blocks, checked a few times a second), when the block
-	             stops being that block, when they die and when they leave. When the block goes, a
-	             container's contents drop (Entities.dropContents) and every user's window closes
-	             (`removeContainer`, called by ServerNet when a player breaks it and by
-	             `blockChanged` for any other change); a crafting table's grid goes back into its
-	             user's inventory.
+	             the first); menus with a handler of their own (`onMenu`: structure blocks and
+	             jigsaws, Structures/StructureBlocks) go there instead. A window closes when the
+	             player walks away (more than Config.Interaction.Reach + 2 blocks, checked a few
+	             times a second), when the block stops being that block, when they die and when
+	             they leave. When the block goes, a container's contents drop
+	             (Entities.dropContents) and every user's window closes (`removeContainer`, called
+	             by ServerNet when a player breaks it and by `blockChanged` for any other change);
+	             a crafting table's grid goes back into its user's inventory.
 	  Furnaces   cook 20 times a second whether anyone looks or not (Containers.tickFurnaces, on a
 	             fixed step that catches up at most a few ticks per frame). Any action in a furnace
 	             window marks that furnace active. Its viewers get a snapshot at once when its slots
@@ -297,6 +298,20 @@ local function checkOpenContainers(world: WorldServer.World)
 	end
 end
 
+-- Screens other parts of the server open (Blocks `menu` -> handler): structure blocks and jigsaws.
+local menuHandlers: { [string]: (player: Player, x: number, y: number, z: number, block: number) -> () } = {}
+
+--[[
+	A Use on a block whose `menu` is `menu` (one with no window: "StructureBlock", "Jigsaw") goes
+	to `handler` instead (Structures/StructureBlocks answers it like an open request).
+]]
+function Inventories.onMenu(
+	menu: string,
+	handler: (player: Player, x: number, y: number, z: number, block: number) -> ()
+)
+	menuHandlers[menu] = handler
+end
+
 local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 	local x, y, z = Protocol.decodeUse(payload)
 	if
@@ -312,6 +327,11 @@ local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 	-- Within reach, so the chunk is around the player already.
 	local block = world:getBlock(x, y, z)
 	if not Blocks.isValid(block) or Blocks.get(block).menu == nil then
+		return
+	end
+	local handler = menuHandlers[Blocks.get(block).menu :: string]
+	if handler then
+		handler(player, x, y, z, block)
 		return
 	end
 	actor = player

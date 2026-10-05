@@ -22,6 +22,9 @@
 	            points at, BlockInteraction.targetSide, and its mode; colour, items inside, water,
 	            a cable's capacity; a machine's energy and status from its Machines record), and
 	            with F3 their packed modes, connections and network, a machine's energy numbers.
+	            Structure blocks add their mode and name, jigsaws their name, target and pool,
+	            from Net/StructureNet's records (with F3 a structure block's region and LOAD
+	            settings); operator blocks say "Creative only" where the harvest line goes.
 	  Progress  survival mining progress (BlockInteraction.miningProgress) is Jade's white line
 	            along the panel's bottom edge.
 	  Look      Minecraft's tooltip, which is Jade's default theme: a dark translucent panel with cut
@@ -64,6 +67,9 @@ local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
+local StructureNet = require(script.Parent.Parent.Net.StructureNet)
+local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
+local Settings = require(Shared.Structures.Settings)
 local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
 local Screens = require(script.Parent.Screens)
@@ -89,7 +95,7 @@ local TOP_GAP = 4
 local SCREEN_MARGIN = 8
 -- With F3 open the panel keeps right of the debug text (screen pixels from the left edge), as
 -- long as it still fits on the screen.
-local DEBUG_TEXT_RIGHT = 400
+local DEBUG_TEXT_RIGHT = 440
 -- Screen pixels at the right the panel keeps out of: the minimap (Map/Minimap: MinimapSize
 -- pixels, 16 from the edge, a 2 pixel outline) and a gap.
 local MINIMAP_RESERVE = if Config.Map.Enabled then Config.Map.MinimapSize + 16 + 2 + 6 else 0
@@ -517,21 +523,37 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		return nil, nil, nil, ""
 	end
 
+	-- A structure block's or jigsaw's settings (the server's records), and a key that changes with them.
+	local function structureFacts(
+		hit: VoxelRaycast.Hit
+	): (Settings.StructureSettings?, Settings.JigsawSettings?, string)
+		local records = StructureNet.records()
+		if Blocks.isStructureBlock(hit.block) then
+			local settings = StructureRecords.structure(records, hit.x, hit.y, hit.z)
+			return settings, nil, `s{records.version}`
+		elseif Blocks.isJigsaw(hit.block) then
+			local settings = StructureRecords.jigsaw(records, hit.x, hit.y, hit.z)
+			return nil, settings, `j{records.version}`
+		end
+		return nil, nil, ""
+	end
+
 	local function showBlock(hit: VoxelRaycast.Hit, progress: number?, extended: boolean)
 		local held = heldItem()
 		local transmitter, tank, machine, facts = pipeFacts(hit, extended)
-		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts}`
+		local structure, jigsaw, structureKey = structureFacts(hit)
+		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
-			return WailaInfo.block(
-				hit.block,
-				held,
-				hit.x,
-				hit.y,
-				hit.z,
-				extended,
-				{ progress = progress, biome = biome, transmitter = transmitter, tank = tank, machine = machine }
-			)
+			return WailaInfo.block(hit.block, held, hit.x, hit.y, hit.z, extended, {
+				progress = progress,
+				biome = biome,
+				transmitter = transmitter,
+				tank = tank,
+				machine = machine,
+				structure = structure,
+				jigsaw = jigsaw,
+			})
 		end)
 		setProgress(progress)
 	end

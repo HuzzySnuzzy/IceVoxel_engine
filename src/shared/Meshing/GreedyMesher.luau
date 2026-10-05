@@ -25,7 +25,15 @@
 	    giving off light (glowstone: one PointLight per block). Shaped blocks render like glass, so
 	    they never hide a neighbour and no opaque box runs through them.
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
-	    the camera is not close to.
+	    the camera is not close to. Cave twins (Blocks.caveTwinLut: the glow lichen generation
+	    puts on cave walls) count as cave air then: not drawn, and rock to their neighbours
+	    (Blocks.cullLutHiddenCaves), so a hidden cave's lichen costs nothing.
+	  * Sparse lights (`sparseLightLut`: glow lichen): every lichen cell is drawn, but only one per
+	    LIGHT_BOX^3 block box (world aligned, so inside one section of one chunk) carries the light:
+	    the one nearest the box's centre (on a tie the lowest, then northmost, then westmost). Its
+	    key's surface field is 1 (`decodeKey`), the others' 0. The choice depends only on the
+	    cells in the box, so the same blocks always light the same cell: no lights jumping around
+	    on a remesh.
 	  * Plants (Blocks.foliageLut: grass, ferns, flowers, mushrooms) are shaped blocks like torches.
 	    With `hideFoliage` (Config.Render.Foliage off, or a chunk too far: LodTree.drawsFoliage)
 	    they are not drawn at all; they hide nothing, so that changes no other box. `mesh` counts
@@ -43,11 +51,13 @@
 	Output: a buffer of boxes, BOX_BYTES each, as u16 values
 	  x, y, z      first cell (x / z local to the chunk core, y absolute cell index),
 	  sx, sy, sz   size in cells,
-	  key          appearance id + surface * KEY_STRIDE (see `decodeKey`). The surface field has two
-	               uses, told apart by the appearance: a fluid's height (0 for full cells, otherwise
-	               the height of the top cell in ninths of a block), and a tinted plant's foliage
-	               tint (0 = none, t = Blocks.FOLIAGE_TINTS[t]). Shaped blocks never use the first,
-	               so the field is free for the second. At most 63 either way (u16 keys).
+	  key          appearance id + surface * KEY_STRIDE (see `decodeKey`). The surface field has
+	               three uses, told apart by the appearance: a fluid's height (0 for full cells,
+	               otherwise the height of the top cell in ninths of a block), a tinted plant's
+	               foliage tint (0 = none, t = Blocks.FOLIAGE_TINTS[t]), and whether a sparse light
+	               (glow lichen) carries its light (1) or not (0). Shaped blocks never use the
+	               first, and no tinted plant gives light, so they never clash. At most 63 (u16
+	               keys).
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -81,6 +91,34 @@ local writeu16 = buffer.writeu16
 
 local CAVE_AIR = Blocks.CAVE_AIR
 local STONE = Blocks.id.Stone
+local caveTwinLut = Blocks.caveTwinLut
+
+-- The appearance of each block while caves are hidden (u16 per block id): cave twins have none,
+-- like cave air.
+local appearanceHiddenCaves = buffer.create(Blocks.count * 2)
+buffer.copy(appearanceHiddenCaves, 0, appearanceLut)
+for id = 0, Blocks.count - 1 do
+	if readu8(caveTwinLut, id) == 1 then
+		writeu16(appearanceHiddenCaves, id * 2, 0)
+	end
+end
+
+-- Blocks (by their item, or their name when they are an item) whose light only some cells carry:
+-- glow lichen covers whole cave walls, and a PointLight per cell would be hundreds of lights.
+local SPARSE_LIGHT_ITEMS: { [string]: boolean } = { GlowLichen = true }
+-- Blocks per side of the boxes sparse lights are thinned in (one light per box). A power of two
+-- dividing Config.SectionHeight and the chunk size, so a box never crosses a section or a chunk.
+local LIGHT_BOX = 8
+assert(SIZE % LIGHT_BOX == 0, "LIGHT_BOX must divide the chunk size")
+
+-- 1 per *appearance* id whose light is sparse.
+local sparseLightLut = buffer.create(#Blocks.appearances + 1)
+for id = 0, Blocks.count - 1 do
+	local def = Blocks.get(id)
+	if def.appearance ~= 0 and def.light > 0 and SPARSE_LIGHT_ITEMS[def.item or def.name] then
+		writeu8(sparseLightLut, def.appearance, 1)
+	end
+end
 
 --[[
 	open     4 * SIZE u16 values (sides -X, +X, -Z, +Z, then position along the side): padding
@@ -100,6 +138,20 @@ GreedyMesher.KEY_STRIDE = KEY_STRIDE
 GreedyMesher.NOT_OPEN = 0xFFFF
 GreedyMesher.HIDDEN_BELOW = 16
 GreedyMesher.HIDDEN_ABOVE = 32
+GreedyMesher.LIGHT_BOX = LIGHT_BOX
+GreedyMesher.sparseLightLut = sparseLightLut
+
+--[[
+	How far cell (x, y, z) (chunk-local x and z, absolute y) is from the centre of its LIGHT_BOX
+	box, squared and doubled per axis (whole numbers): the sparse light of a box goes to its cell
+	with the lowest score.
+]]
+function GreedyMesher.lightScore(x: number, y: number, z: number): number
+	local dx = 2 * (x % LIGHT_BOX) - (LIGHT_BOX - 1)
+	local dy = 2 * (y % LIGHT_BOX) - (LIGHT_BOX - 1)
+	local dz = 2 * (z % LIGHT_BOX) - (LIGHT_BOX - 1)
+	return dx * dx + dy * dy + dz * dz
+end
 
 --[[
 	Splits a box key into its appearance id and its surface field: for fluids the surface height
@@ -247,14 +299,15 @@ local function applyBorder(
 	if hidden ~= 0 and not hideCaves then
 		-- `own` is a cell being meshed, `beyond` its neighbour in hidden space (byte offsets).
 		-- Hidden cave air counts as rock, and our own cave air touching hidden rock becomes a
-		-- stone cap (the hidden side never draws its rock there).
+		-- stone cap (the hidden side never draws its rock there). Cave twins are cave air.
 		local function cap(own: number, beyond: number)
 			local b = readu16(d, beyond)
 			if readu8(cullHiddenCaves, b) == 1 then
-				if b == CAVE_AIR then
+				if b == CAVE_AIR or readu8(caveTwinLut, b) == 1 then
 					writeu16(d, beyond, STONE)
 				end
-				if readu16(d, own) == CAVE_AIR then
+				local o = readu16(d, own)
+				if o == CAVE_AIR or readu8(caveTwinLut, o) == 1 then
 					writeu16(d, own, STONE)
 				end
 			end
@@ -312,11 +365,16 @@ function GreedyMesher.mesh(
 		data = applyBorder(data, height, y0, y1, hideCaves, border)
 	end
 	local cull = if hideCaves then cullHiddenCaves else cullVisibleCaves
+	-- (Cave twins are cave air while caves are hidden: no appearance.)
+	local drawnLut = if hideCaves then appearanceHiddenCaves else appearanceLut
 	local noFoliage = hideFoliage == true
 	local sh = y1 - y0
 	local cells = SIZE * SIZE * sh
 	ensureScratch(cells)
 	buffer.fill(done, 0, 0, cells)
+	-- Sparse lights: per LIGHT_BOX box (by its index), the best cell so far and its score.
+	local lightCell: { [number]: number }? = nil
+	local lightScore: { [number]: number } = {}
 
 	-- Pass 1: classify every cell.
 	local anyNeeded = false
@@ -327,9 +385,9 @@ function GreedyMesher.mesh(
 		for z = 0, SIZE - 1 do
 			local idx = (y * P + z + 1) * P + 1
 			local c = ((y - y0) * SIZE + z) * SIZE
-			for _ = 0, SIZE - 1 do
+			for x = 0, SIZE - 1 do
 				local block = readu16(data, idx * 2)
-				local app = readu16(appearanceLut, block * 2)
+				local app = readu16(drawnLut, block * 2)
 				local needed, hidden = 0, 0
 				if app ~= 0 then
 					local kind = readu8(kindLut, app)
@@ -394,6 +452,19 @@ function GreedyMesher.mesh(
 						end
 					else
 						needed = app
+						if readu8(sparseLightLut, app) == 1 then
+							-- A candidate for its box's light (the surface field is set below).
+							local box = ((y // LIGHT_BOX) * (SIZE // LIGHT_BOX) + z // LIGHT_BOX) * (SIZE // LIGHT_BOX)
+								+ x // LIGHT_BOX
+							local score = GreedyMesher.lightScore(x, y, z)
+							local best = lightScore[box]
+							if best == nil or score < best then
+								lightScore[box] = score
+								local chosen = lightCell or {}
+								lightCell = chosen
+								chosen[box] = c
+							end
+						end
 					end
 				end
 				if needed ~= 0 then
@@ -409,6 +480,13 @@ function GreedyMesher.mesh(
 
 	if not anyNeeded then
 		return buffer.create(0), 0, plants
+	end
+
+	-- The sparse light of each box goes to its chosen cell.
+	if lightCell then
+		for _, c in lightCell do
+			writeu16(need, c * 2, readu16(need, c * 2) + KEY_STRIDE)
+		end
 	end
 
 	-- Pass 2: grow boxes along X, then Z, then Y.

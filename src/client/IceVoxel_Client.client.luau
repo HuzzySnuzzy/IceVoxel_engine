@@ -18,6 +18,9 @@
 	                             Generator and a smelting Electric Furnace (the server's
 	                             Transmitters / Tanks / Machines / Transport messages)
 	  Net/Notices                server messages in the chat (/gamemode answers)
+	  Net/StructureNet           structure blocks and jigsaws: their records, their screens
+	                             (Ui/StructureScreen), SAVE's data and pasted data in pieces
+	  Rendering/StructureBoxes   structure blocks' outlines and names
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
@@ -51,6 +54,8 @@ local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
 local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
 local Notices = require(Client.Net.Notices)
+local StructureNet = require(Client.Net.StructureNet)
+local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
@@ -82,6 +87,8 @@ LightingController.start(generator, world)
 ClientInventory.start()
 Screens.start()
 Notices.start()
+StructureNet.start(world)
+StructureBoxes.start(world, StructureNet.records)
 EntityRenderer.start(world)
 -- (Pipes are decorated only where their chunk is on screen.)
 TransmitterRenderer.start(world, function(cx: number, cz: number): boolean

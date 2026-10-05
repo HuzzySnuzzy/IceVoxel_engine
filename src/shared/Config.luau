@@ -38,10 +38,23 @@ local Config = {
 		MinY = 4,
 		-- While the camera is below the surface, cave walls are meshed in sections within this many
 		-- blocks of it. Otherwise caves are treated as solid rock, which keeps the part count low.
-		RevealRadius = 48,
+		RevealRadius = 64,
 		-- In big caverns (the Underlands) the radius grows with the open space around the camera, up
-		-- to this. Caves only exist in full detail chunks, so more than their reach does nothing.
-		RevealRadiusMax = 96,
+		-- to this. Caves only exist in full detail chunks, so more than their reach does nothing:
+		-- underground they reach about Lod.UndergroundSplitDistanceL1 x 32 blocks (up to 15% less
+		-- ahead of a moving camera: LodTree's hysteresis).
+		RevealRadiusMax = 128,
+		-- Glow lichen carries one PointLight per 8 x 8 x 8 blocks (Meshing/GreedyMesher), and only
+		-- lights within this many blocks of the camera are on (Rendering/ChunkRenderer): about
+		-- 25-50 in a cave, instead of every lichen of the revealed caves (1,000-3,000). Farther
+		-- lichen still glows (its speck is Neon).
+		LichenLightDistance = 32,
+		-- Used instead on phones and tablets (Rendering/ViewSettings).
+		Mobile = {
+			RevealRadius = 48,
+			RevealRadiusMax = 96,
+			LichenLightDistance = 24,
+		},
 	},
 
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).
@@ -61,6 +74,16 @@ local Config = {
 		-- 2 x this, in chunks). Full detail chunks are the most expensive (collision, caves, textures):
 		-- 2 removes about 12% of all parts in mountains, at the cost of full detail ending sooner.
 		SplitDistanceL1 = 3,
+		-- SplitDistanceL1 while the camera is underground (the cave view: below the terrain surface,
+		-- and for UndergroundSeconds after coming up, so walking in and out of a cave mouth does not
+		-- rebuild chunks back and forth). Caves only exist in full detail chunks, so this is how far
+		-- they can be seen: about 2 x this chunks (4: ~128 blocks, ~110 ahead of a moving camera;
+		-- 3: ~96), from the first selection underground on (LodTree.select). Measured with a
+		-- camera in a cave near the spawn (seed 12345), with Caves' radii: 268 full detail chunks
+		-- instead of 164, ~57,000 parts instead of ~47,000 (under the highest mountains, in the
+		-- Underlands: ~139,000 instead of ~110,000, before far meshes).
+		UndergroundSplitDistanceL1 = 4,
+		UndergroundSeconds = 5,
 		-- Nothing is rendered further away than this (blocks).
 		ViewDistance = 2048,
 		-- Plants (Render.Foliage) are drawn in full detail chunks closer than this (blocks from the
@@ -74,6 +97,7 @@ local Config = {
 		Mobile = {
 			ViewDistance = 512,
 			SplitDistance = 2,
+			UndergroundSplitDistanceL1 = 3,
 			FoliageDistance = 24,
 		},
 	},
@@ -323,6 +347,44 @@ local Config = {
 		Admins = {} :: { number },
 		-- Keep the inventory when dying (Minecraft's keepInventory rule); otherwise it drops.
 		KeepInventory = false,
+	},
+
+	-- Structures -------------------------------------------------------------------------------------
+
+	--[[
+		Structure blocks and jigsaw blocks (Minecraft's, creative only) and the structures generated
+		in the world from the structure library (Shared/Structures, StructureLibrary). A structure
+		block saves a region as compact text ("IVS1:...", Structures/Template) that can be pasted
+		into the library, into a StringValue of the place's ReplicatedStorage.IceVoxelStructures
+		folder, or back into a structure block in LOAD mode.
+	]]
+	Structures = {
+		-- Who may use structure blocks and jigsaw blocks (creative players only; Minecraft's
+		-- operators): a list of user ids, true = every creative player, false = nobody. The game's
+		-- owner, Gameplay.Admins and Studio sessions always may. true lets anyone who can enter
+		-- creative (Gameplay.GameModeCommand is everyone by default) upload, save and load
+		-- structures of up to 48 x 48 x 48 blocks and generate whole jigsaw structures.
+		Permission = {} :: boolean | { number },
+		-- Largest structure size and relative position a structure block takes, per axis
+		-- (Minecraft's 48 and -48..48).
+		MaxSize = 48,
+		MaxOffset = 48,
+		-- How far DETECT looks for CORNER blocks of the same name (Minecraft's 80).
+		DetectRange = 80,
+		-- Blocks LOAD and a jigsaw's Generate place per frame (the rest wait for the next frames).
+		LoadBlocksPerFrame = 2000,
+		-- Longest structure text (characters) the server saves or accepts pasted. A StringValue
+		-- holds at most 200,000 characters (IceVoxelSavedStructures, IceVoxelStructures).
+		MaxDataChars = 200000,
+		-- Structure text travels in pieces of this many characters (Protocol StructureData, both
+		-- ways), at most DataPiecesPerSecond pieces a second each way: a 200,000 character text
+		-- is 13 pieces. Reliable RemoteEvents name no size limit but share about 500 requests a
+		-- second per client among all remotes; pieces keep each message small.
+		DataPieceChars = 16000,
+		DataPiecesPerSecond = 20,
+		-- Library structures generate in the world (StructureLibrary/Structures and the
+		-- IceVoxelStructures folder's `Generate` attributes). false: none do.
+		Generate = true,
 	},
 
 	Entities = {

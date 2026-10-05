@@ -23,6 +23,13 @@
 	neighbours, so those chunks are remeshed when their neighbourhood changes. Far nodes use
 	borders that hold for any neighbours and never change once built.
 
+	Cave view: underground, caves are revealed around the camera (`caveView`, the radius from
+	CaveReach between Caves.RevealRadius and RevealRadiusMax, Caves.Mobile on phones), and since
+	caves only exist in full detail chunks, full detail reaches further too: LodTree.select runs
+	with `underground` (Lod.UndergroundSplitDistanceL1) while the cave view is active and for
+	Lod.UndergroundSeconds after it ends, so stepping in and out of a cave mouth does not rebuild
+	the chunks around it back and forth.
+
 	Plants: every box of a plant is a part, so only full detail chunks near the viewer draw them
 	(LodTree.drawsFoliage: Config.Lod.FoliageDistance, Config.Render.Foliage). Each job says
 	whether its chunk does (`foliage`), and the worker says which sections hold plants; when a
@@ -43,6 +50,7 @@ local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local WorkerPool = require(script.Parent.WorkerPool)
 local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
+local ViewSettings = require(script.Parent.Parent.Rendering.ViewSettings)
 local CaveReach = require(script.Parent.CaveReach)
 
 local SIZE = Config.ChunkSize
@@ -104,6 +112,10 @@ export type Stats = {
 	working: number,
 	building: number,
 	busyWorkers: number,
+	-- The cave view: how far caves are revealed (blocks, 0 above ground) and whether full detail
+	-- reaches further (Lod.UndergroundSplitDistanceL1).
+	revealRadius: number,
+	underground: boolean,
 }
 
 export type ChunkStreamer = {
@@ -120,8 +132,14 @@ export type ChunkStreamer = {
 	unshown: { [Node]: boolean },
 	sinceRefresh: number,
 	caveReach: CaveReach.Tracker,
+	-- The largest reveal radius (blocks; Caves.RevealRadiusMax, or Caves.Mobile's).
+	revealMax: number,
 	-- Updated every refresh; nil while the camera is above the terrain.
 	caveView: CaveView?,
+	-- Keeps LodTree's underground split a few seconds after the cave view ended, and whether the
+	-- last selection used it.
+	undergroundHold: CaveReach.Hold,
+	underground: boolean,
 	-- The viewer's position (blocks) at the last refresh.
 	viewer: Vector3,
 
@@ -167,10 +185,9 @@ local function updateCaveView(self: ChunkStreamer)
 		self.caveView = nil
 		return
 	end
-	local caves = Config.Caves
 	local open = CaveReach.probe(function(x, y, z)
 		return self.world:getBlock(x, y, z)
-	end, camera.X, camera.Y, camera.Z, caves.RevealRadiusMax)
+	end, camera.X, camera.Y, camera.Z, self.revealMax)
 	local radius = self.caveReach:update(open, now)
 	self.caveView = { position = camera, reach = radius + SECTION }
 end
@@ -181,11 +198,7 @@ local function wantsRevealAt(cx: number, cz: number, s: number, view: CaveView?)
 		return false
 	end
 	local camera = view.position
-	local dx = (cx + 0.5) * SIZE - camera.X
-	local dz = (cz + 0.5) * SIZE - camera.Z
-	local dy = (s + 0.5) * SECTION - camera.Y
-	local reach = view.reach
-	return dx * dx + dy * dy + dz * dz < reach * reach
+	return CaveReach.reveals(cx, cz, s, camera.X, camera.Y, camera.Z, view.reach)
 end
 
 local function wantsReveal(node: Node, s: number, camera: CaveView?): boolean
@@ -252,20 +265,11 @@ end
 -- GreedyMesher.Border hidden mask of revealed section `s` of chunk (cx, cz): the sides beyond
 -- which caves are hidden (neighbours that are not revealed full detail chunks / sections).
 local function capMask(desired: { [number]: number }, cx: number, cz: number, s: number, camera: CaveView?): number
-	local mask = 0
-	for i, side in SIDES do
-		local x, z = cx + side[1], cz + side[2]
-		if desired[Coords.chunkKey(x, z)] == nil or not wantsRevealAt(x, z, s, camera) then
-			mask += bit32.lshift(1, i - 1)
-		end
+	if camera == nil then
+		return 0
 	end
-	if s > 0 and not wantsRevealAt(cx, cz, s - 1, camera) then
-		mask += GreedyMesher.HIDDEN_BELOW
-	end
-	if s < SECTIONS - 1 and not wantsRevealAt(cx, cz, s + 1, camera) then
-		mask += GreedyMesher.HIDDEN_ABOVE
-	end
-	return mask
+	local p = camera.position
+	return CaveReach.capMask(desired, cx, cz, s, p.X, p.Y, p.Z, camera.reach)
 end
 
 -- Cap masks for the revealed sections in `reveal`, recorded on the node. Returned as a flat
@@ -298,6 +302,7 @@ function ChunkStreamer.new(
 	pool: WorkerPool.WorkerPool,
 	renderer: ChunkRenderer.ChunkRenderer
 ): ChunkStreamer
+	local revealMin, revealMax = ViewSettings.revealRadii()
 	local self = (
 		setmetatable({
 			generator = generator,
@@ -311,13 +316,11 @@ function ChunkStreamer.new(
 			dirtyNodes = {},
 			unshown = {},
 			sinceRefresh = math.huge,
-			caveReach = CaveReach.tracker(
-				Config.Caves.RevealRadius,
-				math.max(Config.Caves.RevealRadius, Config.Caves.RevealRadiusMax),
-				SECTION,
-				2
-			),
+			caveReach = CaveReach.tracker(revealMin, revealMax, SECTION, 2),
+			revealMax = revealMax,
 			caveView = nil,
+			undergroundHold = CaveReach.hold(Config.Lod.UndergroundSeconds),
+			underground = false,
 			viewer = Vector3.zero,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer
@@ -771,7 +774,11 @@ local function refresh(self: ChunkStreamer)
 	local look = Vector3.new(lookVector.X, 0, lookVector.Z)
 	look = if look.Magnitude > 1e-3 then look.Unit else Vector3.new(0, 0, -1)
 
-	local desired = LodTree.select(pos.X, pos.Z, self.desired)
+	-- The cave view first: underground, full detail reaches further (see the header).
+	updateCaveView(self)
+	local underground = self.undergroundHold:update(self.caveView ~= nil, os.clock())
+	local desired = LodTree.select(pos.X, pos.Z, self.desired, underground, self.underground)
+	self.underground = underground
 	self.desired = desired
 
 	local keepEdits: { [number]: boolean } = {}
@@ -832,7 +839,6 @@ local function refresh(self: ChunkStreamer)
 	end)
 	self.queue = queue
 
-	updateCaveView(self)
 	updateReveal(self)
 	updateFoliage(self)
 	retire(self)
@@ -893,6 +899,8 @@ function ChunkStreamer.stats(self: ChunkStreamer): Stats
 		working = 0,
 		building = self.renderer:pending(),
 		busyWorkers = self.pool:busy(),
+		revealRadius = if self.caveView then self.caveReach.radius else 0,
+		underground = self.underground,
 	}
 	for _, node in self.nodes do
 		stats.nodes[node.level] = (stats.nodes[node.level] or 0) + 1

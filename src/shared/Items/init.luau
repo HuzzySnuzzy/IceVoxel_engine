@@ -12,7 +12,9 @@
 	    (`isReplacedBy`: Short Grass clicked on short grass goes against the clicked face).
 	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
-	    of it: grass, ferns, dead bushes and leaves) and `blockDrops` (breaking by itself, no tool).
+	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
+	    itself, no tool). Creative only blocks (structure blocks, structure voids, jigsaws;
+	    `isCreativeOnly`) never drop.
 
 	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
@@ -260,7 +262,7 @@ end
 ]]
 function Items.blockDrops(block: number): Stack?
 	local def = if Blocks.isValid(block) then Blocks.get(block) else nil
-	if def == nil or def.drops == false then
+	if def == nil or def.drops == false or def.creativeOnly then
 		return nil
 	end
 	local item = if type(def.drops) == "string" then rawget(ids :: any, def.drops) else Items.ofBlock(block)
@@ -268,6 +270,16 @@ function Items.blockDrops(block: number): Stack?
 		return nil
 	end
 	return { item = item, count = def.dropCount }
+end
+
+--[[
+	Is `item` a creative only block's item (a structure block, structure void or jigsaw; BlockList
+	`creativeOnly`)? Only creative players place and use them.
+]]
+function Items.isCreativeOnly(item: number?): boolean
+	local def = if item then defs[item] else nil
+	local block = def and def.block
+	return block ~= nil and Blocks.isCreativeOnly(block)
 end
 
 -- Is `item` Shears (a tool of kind "shears")?
@@ -283,7 +295,7 @@ end
 	gives 2 short grass, leaves themselves); otherwise its `blockDrops`.
 ]]
 function Items.drops(block: number, tool: number?): Stack?
-	if not Blocks.isValid(block) or not Items.canHarvest(block, tool) then
+	if not Blocks.isValid(block) or Blocks.isCreativeOnly(block) or not Items.canHarvest(block, tool) then
 		return nil
 	end
 	local def = Blocks.get(block)

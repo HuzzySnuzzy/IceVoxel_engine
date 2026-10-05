@@ -9,6 +9,10 @@
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
 	    block (torch, lantern) hangs on or a plant stands on, room for a tall plant's top, not
 	    inside a player (solid blocks and lanterns, not torches or plants: EditRules.obstructs).
+	    Creative only blocks (structure blocks, structure voids, jigsaws) are placed and broken
+	    only by players the `operator` rule allows (Structures/Permission: creative, and
+	    Config.Structures.Permission, Config.Gameplay.Admins, the owner or Studio;
+	    EditRules.mayUseCreativeOnly), and nobody places a cave twin (generation's glow lichen).
 	    Rejected requests are answered with the real block so the client undoes its prediction.
 	  * Tall plants (EditRules): placing the lower half also sets the upper half, and breaking
 	    either half removes both, with one drop (the lower half's, with the breaker's tool), one
@@ -139,6 +143,10 @@ export type Rules = {
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
+	-- May the player place and break creative only blocks (structure blocks, structure voids,
+	-- jigsaws; Structures/StructureBlocks.operator: creative, and Config.Structures.Permission,
+	-- Config.Gameplay.Admins, the owner or Studio)? Without it: creative players may.
+	operator: ((player: Player) -> boolean)?,
 }
 
 export type ServerNet = {
@@ -393,6 +401,13 @@ function ServerNet.start(world: World): ServerNet
 
 		local creative = GameMode.isCreative(player)
 		local current = world:getBlock(x, y, z)
+		-- Structure blocks, structure voids and jigsaws: only for players allowed to use them.
+		local operatorRule = rules.operator
+		local operator = if operatorRule then operatorRule(player) else creative
+		if not EditRules.mayUseCreativeOnly(if action == EditAction.Place then block else current, operator) then
+			reject()
+			return
+		end
 		if action == EditAction.Break then
 			local mine = mining[player]
 			local now = os.clock()

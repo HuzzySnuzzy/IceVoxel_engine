@@ -13,7 +13,8 @@ return function(t, shared, require, _server, client)
 		local cull = if hideCaves then Blocks.cullLutHiddenCaves else Blocks.cullLut
 		local id = ChunkLayout.get(data, x, y, z)
 		local app = Blocks.get(id).appearance
-		if app == 0 then
+		-- (Cave twins are cave air while caves are hidden.)
+		if app == 0 or (hideCaves and buffer.readu8(Blocks.caveTwinLut, id) == 1) then
 			return 0, false
 		end
 		local kind = Blocks.appearances[app].kind
@@ -61,8 +62,50 @@ return function(t, shared, require, _server, client)
 		return app, false
 	end
 
+	--[[
+		The cells of y0 .. y1 - 1 carrying a sparse light (glow lichen), by local index: per
+		LIGHT_BOX box, the drawn lichen nearest its centre, the first in y, z, x order on a tie.
+	]]
+	local function sparseLights(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean)
+		local box = GreedyMesher.LIGHT_BOX
+		local best: { [string]: { score: number, index: number } } = {}
+		for y = y0, y1 - 1 do
+			for z = 0, SIZE - 1 do
+				for x = 0, SIZE - 1 do
+					local need = classify(data, height, x, y, z, hideCaves)
+					-- (Only shaped blocks are sparse lights; their keys carry nothing else.)
+					if
+						need ~= 0
+						and need < GreedyMesher.KEY_STRIDE
+						and buffer.readu8(GreedyMesher.sparseLightLut, need) == 1
+					then
+						local key = `{x // box},{y // box},{z // box}`
+						local score = GreedyMesher.lightScore(x, y, z)
+						if best[key] == nil or score < best[key].score then
+							best[key] = { score = score, index = (y * SIZE + z) * SIZE + x }
+						end
+					end
+				end
+			end
+		end
+		local lit: { [number]: boolean } = {}
+		for _, chosen in best do
+			lit[chosen.index] = true
+		end
+		return lit
+	end
+
 	local function verify(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean): number
 		local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hideCaves)
+		local lit = sparseLights(data, height, y0, y1, hideCaves)
+		-- What a cell must be covered by: its appearance, plus the light flag of a sparse light.
+		local function expected(x: number, y: number, z: number): (number, boolean)
+			local need, wild = classify(data, height, x, y, z, hideCaves)
+			if lit[(y * SIZE + z) * SIZE + x] then
+				need += GreedyMesher.KEY_STRIDE
+			end
+			return need, wild
+		end
 		local coverage: { [number]: number } = {}
 		for b = 0, count - 1 do
 			local o = b * GreedyMesher.BOX_BYTES
@@ -77,7 +120,7 @@ return function(t, shared, require, _server, client)
 			for y = by, by + sy - 1 do
 				for z = bz, bz + sz - 1 do
 					for x = bx, bx + sx - 1 do
-						local need, wild = classify(data, height, x, y, z, hideCaves)
+						local need, wild = expected(x, y, z)
 						if need == app then
 							local key = (y * SIZE + z) * SIZE + x
 							coverage[key] = (coverage[key] or 0) + 1
@@ -91,7 +134,7 @@ return function(t, shared, require, _server, client)
 		for y = y0, y1 - 1 do
 			for z = 0, SIZE - 1 do
 				for x = 0, SIZE - 1 do
-					local need = classify(data, height, x, y, z, hideCaves)
+					local need = expected(x, y, z)
 					if need ~= 0 then
 						local n = coverage[(y * SIZE + z) * SIZE + x] or 0
 						if n ~= 1 then
@@ -314,6 +357,116 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(covered, "the stone under the torch is drawn")
+	end)
+
+	t.test("glow lichen: one light per box; cave twins vanish with hidden caves and count as rock", function()
+		local box = GreedyMesher.LIGHT_BOX
+		local lichen = Blocks.get(Blocks.id.GlowLichen).appearance
+		local twin = Blocks.id.CaveGlowLichen
+		t.eq(Blocks.get(twin).appearance, lichen, "a twin looks like its lichen")
+		for _, name in { "GlowLichen", "GlowLichenUp", "GlowLichenNorth", "CaveGlowLichenEast" } do
+			t.eq(buffer.readu8(GreedyMesher.sparseLightLut, Blocks.get(Blocks.id[name]).appearance), 1, name)
+		end
+		for _, name in { "Torch", "Lantern", "Glowstone", "Stone" } do
+			t.eq(buffer.readu8(GreedyMesher.sparseLightLut, Blocks.get(Blocks.id[name]).appearance), 0, name)
+		end
+
+		-- A carpet of lichen on a stone floor: every cell drawn, one light per LIGHT_BOX box.
+		local data = stoneFloor(4)
+		for z = 0, SIZE - 1 do
+			for x = 0, SIZE - 1 do
+				ChunkLayout.set(data, x, 1, z, Blocks.id.GlowLichen)
+			end
+		end
+		verify(data, 4, 0, 4, false)
+		local lit, drawn = 0, 0
+		local litAt: { [string]: { number } } = {}
+		for _, b in boxList(data, 4) do
+			local app, surface = GreedyMesher.decodeKey(b[7])
+			if app == lichen then
+				drawn += 1
+				if surface == 1 then
+					lit += 1
+					local key = `{b[1] // box},{b[3] // box}`
+					t.ok(litAt[key] == nil, "one light per box")
+					litAt[key] = { b[1], b[2], b[3] }
+				end
+			end
+		end
+		t.eq(drawn, SIZE * SIZE, "every lichen is drawn")
+		t.eq(lit, (SIZE // box) ^ 2, "one light per box")
+		-- (Nearest the box's centre: the middle of the box, rows 3..4.)
+		for _, at in litAt do
+			t.ok(at[1] % box == box // 2 - 1 and at[3] % box == box // 2 - 1, "the light is near the centre")
+		end
+		-- The same blocks always light the same cells (meshing twice changes nothing), and removing
+		-- an unlit lichen moves no light.
+		local again: { [string]: boolean } = {}
+		for _, b in boxList(data, 4) do
+			local app, surface = GreedyMesher.decodeKey(b[7])
+			if app == lichen and surface == 1 then
+				again[`{b[1]},{b[3]}`] = true
+			end
+		end
+		ChunkLayout.set(data, 0, 1, 0, Blocks.AIR)
+		for _, at in litAt do
+			t.ok(again[`{at[1]},{at[3]}`], "lit again")
+		end
+		for _, b in boxList(data, 4) do
+			local app, surface = GreedyMesher.decodeKey(b[7])
+			if app == lichen and surface == 1 then
+				t.ok(again[`{b[1]},{b[3]}`], "no light moved")
+			end
+		end
+
+		-- A cave: stone around a tunnel of cave air with twins on its floor and walls.
+		local cave = ChunkLayout.create(12)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				for y = 0, 11 do
+					ChunkLayout.setPadded(cave, x, y, z, Blocks.id.Stone)
+				end
+			end
+		end
+		for x = 2, 12 do
+			for y = 4, 6 do
+				ChunkLayout.set(cave, x, y, 7, Blocks.CAVE_AIR)
+			end
+			ChunkLayout.set(cave, x, 4, 7, Blocks.id.CaveGlowLichen)
+		end
+		ChunkLayout.set(cave, 5, 5, 7, Blocks.id.CaveGlowLichenNorth)
+		ChunkLayout.set(cave, 9, 6, 7, Blocks.id.CaveGlowLichenUp)
+		verify(cave, 12, 0, 12, false)
+		verify(cave, 12, 0, 12, true)
+		local hidden, hiddenCount = GreedyMesher.mesh(cave, 12, 0, 12, true)
+		-- (Only the top of the stone, open to the sky, is drawn.)
+		t.eq(hiddenCount, 1, "a hidden cave draws neither its lichen nor its walls")
+		t.eq(buffer.readu16(hidden, 2), 11, "the top")
+		local visibleLichen = 0
+		local shown, shownCount = GreedyMesher.mesh(cave, 12, 0, 12, false)
+		for b = 0, shownCount - 1 do
+			local app = GreedyMesher.decodeKey(buffer.readu16(shown, b * GreedyMesher.BOX_BYTES + 12))
+			if buffer.readu8(GreedyMesher.sparseLightLut, app) == 1 then
+				visibleLichen += 1
+			end
+		end
+		t.eq(visibleLichen, 13, "a revealed cave draws every lichen")
+		-- The same tunnel with plain cave air instead of lichen gives the same walls.
+		local plain = buffer.create(buffer.len(cave))
+		buffer.copy(plain, 0, cave)
+		for i = 0, buffer.len(plain) // 2 - 1 do
+			if Blocks.isCaveTwin(buffer.readu16(plain, i * 2)) then
+				buffer.writeu16(plain, i * 2, Blocks.CAVE_AIR)
+			end
+		end
+		local _, plainCount = GreedyMesher.mesh(plain, 12, 0, 12, false)
+		t.eq(shownCount - visibleLichen, plainCount, "twins hide nothing when caves are shown")
+
+		-- Capped: a twin in the boundary layer next to hidden space becomes stone, like cave air.
+		local capped =
+			GreedyMesher.applyBorder(cave, 12, 5, 12, false, { open = nil, hidden = GreedyMesher.HIDDEN_BELOW })
+		t.eq(ChunkLayout.get(capped, 5, 5, 7), Blocks.id.Stone, "own twin capped")
+		t.eq(ChunkLayout.get(capped, 4, 4, 7), Blocks.id.Stone, "twin beyond counts as rock")
 	end)
 
 	t.test("decorated faces: every decor draws all six faces inside the 16 x 16 grid", function()

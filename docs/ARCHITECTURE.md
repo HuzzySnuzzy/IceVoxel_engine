@@ -25,8 +25,9 @@ border copied from its neighbours ("padding", 18 × 18 cells per layer), so mesh
 look at another chunk. Y is the outermost axis, so a vertical section is a contiguous slice.
 
 **Cropping.** A full 1024-tall column would be 648 KB, almost all of it air. So the buffer ends a
-little above the chunk's highest block (generated chunks keep 32 blocks of room for trees, rounded
-up to whole sections, `ChunkLayout.croppedHeight`), and everything above it is air. The chunk's
+little above the chunk's highest block (generated chunks keep 32 blocks of room for trees, or room
+for the tallest library structure reaching into them, rounded up to whole sections,
+`ChunkLayout.croppedHeight`), and everything above it is air. The chunk's
 `height` says where it ends; `getBlock` answers air above it. Placing a block above the crop grows
 the buffer (`ChunkLayout.grow`) on the server, on the client (which also copies the neighbours'
 border columns into the new rows' padding) and in workers applying edits; air above the crop needs
@@ -81,12 +82,21 @@ node key) and `posKey(x, y, z)` for block positions.
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
-5. **Structures** (up to `Config.StructureMaxLevel`). See below.
-6. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
-   trunk or leaves. See Foliage below.
+5. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
+   the structure library's jigsaw structures (`StructureGen.luau`), whose air clears trees and
+   whose structure voids keep them. See below.
+6. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
+   that is still there. See below.
+7. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+   trunk, leaves or a building. See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
-rock or cave air) and `emptyAbove` (everything above is air; raised over the plants).
+rock or cave air; lowered under a structure's cells that are neither) and `emptyAbove` (everything
+above is air; raised over trees, structures and plants). `TerrainGenerator.new(seed, options?)`
+takes the structure library to generate (`options.library`, default `Library.load()` while
+`Config.Structures.Generate` is on; `structures = false` for none);
+`generator.structures(minX, minZ, maxX, maxZ)` lists the generated structures with a piece in a
+rectangle and `generator.structureContainer(x, y, z)` the items a generated chest starts with.
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -147,7 +157,9 @@ the depths scale with the terrain. 3D noise per block would be far too slow, so 
 a world-aligned 4 × 8 × 4 lattice and interpolated. Lattice points where `barrier2` rules caves out
 cost one noise call, cells positive at all eight corners are skipped, and the near-surface fade
 uses each block's own depth (lattice depths are off on steep slopes); cells that are air at all
-eight corners are carved without interpolating. In Lune, caves cost ~5–7 ms per chunk under most
+eight corners are carved without interpolating. The carver returns the lattice cells it carved
+(`Caves.Carved`: per 4 × 8 × 4 cell, not carved, carved in, or cave air throughout), so glow lichen
+only looks where caves are. In Lune, caves cost ~5–7 ms per chunk under most
 terrain and ~16–20 ms (worst ~40) over the Underlands, where a chunk has 100k+ blocks of air; the
 carver calls the generator's `yield` per lattice layer so workers keep to their time slice.
 
@@ -178,7 +190,82 @@ to the chunk, so a tree crossing a border is written partially by each chunk, an
 up. Builders must draw random numbers the same way regardless of which chunk runs them.
 
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
-their real size from far away.
+their real size from far away. A spot is refused near a library structure's piece (`accept`, see
+below), so no canopy is cut by a hut and no trunk stands in a path.
+
+### Library structures (`StructureGen.luau`)
+
+The structure library's jigsaw structures (Structures/Library and Structures/Jigsaw, see
+Structure blocks and jigsaw structures), Minecraft 1.20.1's JigsawStructure with its
+RandomSpreadStructurePlacement, written right after the trees at levels up to
+`Config.StructureMaxLevel`.
+
+- **Starts.** Each structure cuts the world into regions of `spacing` × `spacing` chunks; region
+  (rx, rz) has one start chunk at `region * spacing + rand(spacing - separation)` per axis, from a
+  Hash rng of (seed, region, salt) (`StructureGen.startChunk`), and the start position is that
+  chunk's minimum corner. The start piece alone is assembled first (`Jigsaw.assemble` at depth 0,
+  the same draws the full assembly begins with): its box centre's column must be in one of the
+  structure's biomes and, with `onLand`, dry and not bare rock (the generator's steep rule). Only
+  then is the whole structure assembled, `size` levels deep. Every check reads full detail terrain
+  through the generator's `firstFreeHeight` (Minecraft's WORLD_SURFACE_WG: the ground, or the
+  sea's surface over water), `biome` and `land`, so every chunk and level agrees. Assembled starts,
+  and rejected ones, stay in an LRU per generator of `CACHE_PER_STRUCTURE` (8) per structure, at
+  least `CACHE_SIZE` (48), so the dozens of chunks a structure covers assemble it once per worker
+  and a library of many structures doesn't thrash it.
+- **Which starts.** Stateless, like trees: a chunk asks `starts` for every structure whose start
+  position is within its `reach` (Library: every block within that many blocks of the start) of
+  the padded box grown by twice the tree radius, and keeps those whose pieces' bounds touch it.
+  Their highest block raises the chunk's crop (`top`); `treeAllowed` refuses vegetation spots
+  within `TREE_CLEARANCE` (5) blocks of a rigid piece or `PATH_CLEARANCE` (1) of a terrain
+  matching one.
+- **Writing** (`write`), clipped to the padded box, in a fixed order (structure, region, assembly
+  order), so where pieces overlap every chunk agrees on the result. `Jigsaw.writeTables` gives a
+  piece's palette turned by its rotation (Blocks.rotate) and its jigsaws' final states; "keep"
+  cells (structure voids, a final state of StructureVoid) are skipped, air clears terrain and
+  trees, DATA markers are air in the template already. Rigid pieces sit at their box's y; a
+  terrain matching piece puts each column's layer 0 on that column's top cell (the chunk's own
+  heights, which are the full detail heights at level 0; at LOD its coarse, skirted top cell; over
+  water the water's top). With `foundation`, air and water under a rigid piece's solid bottom
+  cells down to the ground (at most `FOUNDATION_DEPTH`, 12 blocks) become the column's biome
+  filler, a simple stand-in for Minecraft's beard terrain adaptation. LOD chunks point-sample like
+  the tree writer: a cell takes the block the structure puts at its sample point, so buildings keep
+  their size from afar. `write` returns one above the highest non-air cell it wrote (`emptyAbove`)
+  and the lowest cell it wrote with a block that is not opaque, cave air or a cave twin
+  (`solidBelow`).
+- **Chests.** `container(x, y, z)` (the generator's `structureContainer`) looks up the template's
+  container record at a world cell, a fresh copy of its items; the last piece writing there
+  decides, and nil means no generated container. The server fills a generated chest from it the
+  first time its contents are needed (see Server).
+
+In a normal Luau VM a chunk under the example outpost costs within a few percent of plain terrain,
+an outpost's assembly (~30 pieces) about 0.5 ms, and chunks with no start near them the same as
+before.
+
+### Glow lichen (`CaveDecor.luau`)
+
+Minecraft 1.20.1's `glow_lichen` feature (104-157 tries a chunk on stone-type faces 13+ blocks
+below the surface, ceilings and walls, spreading half the time) as patches decided per cell, in
+full detail chunks after the structures:
+1. Patches: one per 8³ block grid cell with chance 0.33, at a hashed centre with a hashed radius
+   of 2..4. A chunk visits the patches whose sphere reaches its padded box, and in them only the
+   cave lattice cells the carver carved (`Caves.Carved`), skipping those that are cave air
+   throughout with cave air all round (no cell there touches rock): the work follows cave walls
+   near patches, not the rock or the cave volume (an Underlands chunk has 100k+ cave air cells).
+2. A cell must be CaveAir at least 13 blocks below its column's surface.
+3. A face is a candidate when the block above, or north, south, west or east, is rock: Stone,
+   Andesite, Diorite, Granite, Calcite and every block Ores places (ores are only in each chunk's
+   own core, so counting them keeps a cell next to one deciding alike in every chunk). No floors,
+   as Minecraft's feature.
+4. A per-cell hash is rolled against 0.9 fading linearly to 0 at the sphere's edge (overlapping
+   patches test the same roll against their own fade, so the order doesn't matter), and the cell
+   becomes the cave twin (CaveGlowLichenUp, ...North...) on the first candidate face of a hashed
+   rotation of Up, North, East, South, West: one face per cell.
+
+Every cell is decided by the seed, its position and its in-buffer neighbourhood, so the padding
+grows what the neighbouring core grows, except where the face is past the buffer (unknown, never
+rock): harmless, as cave air and cave twins cull alike in both modes (tests/spec/CaveLichen meshes
+both). About 3% of cave walls and ceilings get lichen (~20 a chunk, ~2 per 1000 cave cells, about
+Minecraft's), 95% of it in patches, for ~0.2 ms a chunk (~5% of generation).
 
 ### Foliage (`Foliage.luau`)
 
@@ -237,15 +324,26 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   (`Blocks.fluidHeightLut`, in ninths of a block: sources 8, flowing levels 7..1, falling full).
   The height is packed next to the appearance id in the box key (`GreedyMesher.decodeKey`), so only
   cells of the same height merge and flowing water visibly steps down;
-- with `hideCaves`, cave air counts as rock and every cave wall disappears;
+- with `hideCaves`, cave air counts as rock and every cave wall disappears. **Cave twins**
+  (`Blocks.caveTwinLut`: the CaveGlowLichen* generation puts on cave walls) count as cave air
+  then: they have no appearance (`appearanceHiddenCaves`), are rock to their neighbours
+  (`Blocks.cullLutHiddenCaves`) and are cave air to the stone caps at a revealed section's hidden
+  sides (see Streaming), so a hidden cave's lichen costs nothing and hides nothing;
+- **sparse lights** (`sparseLightLut`, per appearance: glow lichen) are drawn in every cell, but
+  only one cell per `LIGHT_BOX`³ (8³) block box carries the light: the one nearest the box's
+  centre (`lightScore`; on a tie the lowest, then northmost, then westmost). Boxes are world
+  aligned and divide sections and chunks, and the choice depends only on the cells in the box, so
+  the same blocks always light the same cell and lights never jump on a remesh. The chosen cell's
+  key has surface field 1 (`decodeKey`), the others 0;
 - **plants** (`Blocks.foliageLut`) are shaped single cells like torches. With `hideFoliage`
   (`Config.Render.Foliage` off, or a chunk beyond `LodTree.drawsFoliage`; see Streaming) they are
   not meshed; they hide nothing, so every other box stays the same. `mesh` also returns how many
   plant cells the range holds, drawn or not. A **tinted** plant's key (`Blocks.tintedLut`: grass
   and ferns) carries its soil's foliage tint, `Blocks.tintLut` of the block below (below its lower
   half for a tall plant's top), in the surface field fluids use for their height; `decodeKey`
-  returns it and the appearance tells the two uses apart (a shaped block is never a fluid). Border
-  copies (`applyBorder`) keep two layers below the range for it.
+  returns it and the appearance tells the uses apart (a shaped block is never a fluid, and no
+  tinted plant gives light, so the sparse light flag never clashes with a tint). Border copies
+  (`applyBorder`) keep two layers below the range for it.
 
 Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box (position, size, key). Tests check the
 invariants (every visible block covered once, nothing visible covered by a wrong box) on generated
@@ -300,14 +398,31 @@ is regenerated.
 meshed with caves visible; everywhere else cave air counts as rock. Sections are remeshed as they
 enter or leave that radius. The radius follows the open space around the camera
 (`Streaming/CaveReach`): rays are cast sideways and upwards through the loaded blocks and their
-median distance, plus a section, sets the radius between `Caves.RevealRadius` (tunnels) and
-`Caves.RevealRadiusMax` (big caverns such as the Underlands). It grows at once and shrinks only
+median distance, plus a section, sets the radius between `Caves.RevealRadius` (64 blocks,
+tunnels) and `Caves.RevealRadiusMax` (128, big caverns such as the Underlands); phones use
+`Caves.Mobile` (48 and 96: `ViewSettings.revealRadii`). It grows at once and shrinks only
 after two seconds, so the revealed sections do not churn. Caves only exist in full detail chunks,
 so a cavern ends where they do. Where a revealed tunnel runs into hidden space (a hidden section above
 or below, a neighbour chunk whose section is hidden, or a coarser node), nobody would draw its walls
 there and you would look into the void. A revealed section is therefore meshed with a mask of those
 sides (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock, and its own cave
-air touching that rock becomes a stone cap. It is remeshed when the mask changes.
+air touching that rock becomes a stone cap. It is remeshed when the mask changes. Which sections
+are revealed and their masks are pure (`CaveReach.reveals`, `CaveReach.capMask`;
+tests/spec/CaveView).
+
+**The underground split.** Full detail chunks are the only ones with caves, so above ground's
+full detail range (~96 blocks) would end every cave there. While the cave view is active (the
+camera below its column's surface) and for `Lod.UndergroundSeconds` (5) after it ends
+(`CaveReach.hold`, so walking in and out of a cave mouth does not rebuild the chunks around it
+back and forth), `LodTree.select` runs with `underground`: level 1 nodes split at
+`Lod.UndergroundSplitDistanceL1` (4, phones 3) instead of `SplitDistanceL1`, so full detail and
+caves reach ~128 blocks; coarser levels are unchanged. Level 1's hysteresis holds within one mode
+only (`previousUnderground`): the first selection after going underground splits every level 1
+node within the new distance, as a fresh selection would, instead of keeping the leaves of the
+selection above ground. Walking keeps full detail up to ~15% short ahead of the camera, as the
+hysteresis does above ground. Measured in a cave near the spawn (seed 12345): 268 full detail
+chunks instead of 164 and ~57,000 parts instead of ~47,000 (~139,000 instead of ~110,000 in the
+Underlands, before far meshes). F3 shows how far caves are revealed and the split in use.
 
 **Plants.** Every box of a plant is a part, and all ~180 full detail chunks would hold
 10,000-20,000 of them. So only full detail chunks within `Lod.FoliageDistance` of the viewer (40
@@ -347,6 +462,19 @@ each channel clamped, with the tint from the box key; their parts' colour is set
 a pooled part may come from a cell with another tint. An edit that changes a soil's tint two cells
 below a section's bottom also remeshes that section (`ClientWorld`): a tall plant's top there
 reads its tint from it.
+
+**Glow lichen's lights.** A revealed cave can hold 1,000-3,000 lichen, and a PointLight each
+would be far too many. The mesher marks one lit cell per 8³ box (sparse lights, see Meshing); for
+the others PartPool's `acquire(..., dark)` gives the light's box from a "dark" template, the same
+part without its PointLight, so lit and unlit lichen look alike (a Neon speck). Even so a revealed
+cavern holds hundreds, so ChunkRenderer keeps every lichen light's part and position and switches
+on only those within `Caves.LichenLightDistance` of the camera (32 blocks, 24 on phones:
+`ViewSettings.lichenLightDistance`), every 0.25 s, turning them off again 8 blocks further: a few
+dozen in a cave (in the CaveView test scene 1,272 lichen, 343 lit cells, ~56 on). Lichen lights
+cast no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
+reaching through a thin cave wall shows nowhere it shouldn't. Each lichen is two parts, its plate
+and the Neon speck that carries the light. The renderer counts parts with a light (`lightCount`)
+and lichen lights (`sparseCount`, `sparseOn`) for F3.
 
 ### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
 
@@ -470,6 +598,15 @@ prediction.
   action number, so nothing needs reconciling; a placement's `seq` still settles the item). Until
   it arrives the other half stands alone, and breaking it meanwhile is answered with air. Debris
   of grass and ferns takes the soil's tint.
+- **Operator blocks** (`Blocks.isCreativeOnly`: structure blocks, structure voids, jigsaws). In
+  creative a right click on a structure block or jigsaw sends a Use, which the server answers with
+  its screen (Structure blocks and jigsaw structures, below) or a refusal; in survival they are
+  plain blocks to build against, and their items are not placed. A jigsaw's orientation comes from
+  `Blocks.placementFor` (Minecraft's JigsawBlock.getStateForPlacement, `Blocks.jigsawPlacement`):
+  the front faces out of the clicked face; a horizontal front has its top Up, a vertical one the
+  opposite of the player's horizontal facing (`Blocks.horizontalFacing`, Direction.fromYRot). The
+  structure block's item places SAVE mode (Minecraft places DATA), and glow lichen, like a torch,
+  the variant on the clicked face's side.
 - Middle click picks the block (Minecraft's pick block), `Q` drops the held item (`Ctrl`: the
   stack). On touch screens a tap uses or places and holding breaks.
 
@@ -492,7 +629,11 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   of coloured segments:
   - the name (a chest adds "(27 slots)"; contents are only known while it is open);
   - the harvest line from `Items.canHarvest` and the block's `tool` / `toolLevel`:
-    "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable";
+    "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable"; operator blocks say
+    "Creative only" instead (F3: "Breaks in creative only (at once)");
+  - a structure block's mode and name ("Mode: Save", "Name: hut"; a DATA block its marker) and a
+    jigsaw's name, target and pool, from the records Net/StructureNet keeps (F3 adds a structure
+    block's region and, in LOAD mode, its rotation, mirror, integrity and seed);
   - while the F3 overlay is open (`DebugOverlay.isOpen()`), gray lines: `Stone #3`, position,
     chunk (floored, with the local column), biome (`generator.column`), hardness, tool kind and
     level, drops with the held item and by hand (`Items.drops`; a tall plant's top shows its lower
@@ -516,7 +657,8 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   a screen is open, while the HUD is hidden (the world map) and with nothing aimed at.
 
 The F3 overlay also shows the time: clock, day number, tick, sky light and how much of it reaches
-the camera (`LightingController.dayTime`, `skyExposure`).
+the camera (`LightingController.dayTime`, `skyExposure`); the PointLights in the world (lichen
+lights: on of all); and the cave view (how far caves are revealed, the level 1 split in use).
 
 ### Movement (`Shared/Movement`, `Player/MovementController`, `Player/CharacterAnimator`)
 
@@ -812,7 +954,9 @@ the Arcade pixel font):
   gives a full stack; dropping a stack on the grid deletes it.
 - `SlotClicks` turns mouse, keys, touch and gamepad into Minecraft's click actions (pure, tested).
 - `Screens` opens and closes them, frees the mouse (in first person too) and stops the character
-  while one is open.
+  while one is open. Other modules' screens (the structure block and jigsaw screens) are shown as
+  panels (`showPanel`, `closePanel`) with the same darkened world and free mouse but none of the
+  inventory's input.
 
 **Item icons and models** (`Rendering/ItemModels`, `Ui/ItemIcon`). An item's model is a cube with the
 block's look (the terrain's part template: material, colour, texture, face images), or the item's
@@ -825,10 +969,13 @@ items: icons from the front, held upright like blocks, dropped like items, drawn
 Grass block's green); a tall plant shows its `icon`, the lower half plus the top's look in one
 cell. Shears are a tool: diagonal in icons, held by the handles.
 
-**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative Energy Cube, the Heat Generator, the Electric Furnace and the Batteries are drawn
-without image assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as
-SurfaceGuis on their parts' templates (recycled parts keep them; they stop drawing beyond 96
-blocks), and on item models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
+**Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative
+Energy Cube, the Heat Generator, the Electric Furnace, the Batteries, structure blocks (Minecraft's
+dark purple block with the mode's sigil on every face) and jigsaws (the puzzle piece on the front,
+the lock towards the top, arrows on the other sides, turned per orientation) are drawn without image
+assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as SurfaceGuis on
+their parts' templates (recycled parts keep them; they stop drawing beyond 96 blocks), and on item
+models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
 
 **Light sources and shaped blocks** (`Blocks`, `Rendering/PartPool`, `Behaviours/Attached`).
 Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and glowstone 15;
@@ -846,7 +993,9 @@ gives way:
   just outside each face would need up to six per block, placed by its neighbours, which shared
   templates can't do).
 
-There is no light field in the block data; Roblox's lighting engine does the rest.
+There is no light field in the block data; Roblox's lighting engine does the rest. Glow lichen
+(light 7) is the exception to one light per block: only some of its cells carry one (see Meshing
+and Rendering).
 
 Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there
 (`Blocks.canSurvive`, `Blocks.isSturdy`): solid, drawn and unshaped, unless BlockList says
@@ -914,6 +1063,44 @@ grass, are `brokenByFluid` and stand through the attached-block machinery:
 - Server: `Behaviours/Plant` re-checks a plant when a neighbour changes (`Plant.stays`: soil or own
   lower half below, own top above a lower half; unloaded blocks are waited for) and breaks it with
   its no-tool drop and a sound; players' tall plant edits are EditRules' (see Server).
+
+**Operator blocks** (BlockList `creativeOnly`; Minecraft's GameMasterBlock): the four structure
+block modes, the structure void and the twelve jigsaws. Survival players can't mine them
+(`Mining.progressPerTick` is 0, Minecraft's hardness -1); creative players break them at once like
+any block, and they never drop (`Items.drops`, `Items.blockDrops`); placing, breaking and using them
+needs the server's `operator` rule (see Server). They are in the creative picker and JEI
+(`Items.isCreativeOnly` tells their items).
+- A structure block's mode is its block (`structureMode`: StructureBlock is SAVE and the item,
+  then StructureBlockLoad, ...Corner, ...Data; `Blocks.structureMode`, `structureBlock`), so the
+  server swaps the block when the mode changes and everyone sees the mode's sigil (BlockDecor
+  "StructureBlock<Mode>"). A variant group without supports places the item's own block.
+- A jigsaw's orientation is its block (`jigsaw = { front, top }`, Minecraft's FrontAndTop: a
+  horizontal front with top Up, or front Up / Down with a horizontal top; Jigsaw is North / Up and
+  the item, then `Jigsaw<Front><Top>`; `Blocks.jigsawOrientation`, `jigsawBlock`,
+  `jigsawPlacement`). BlockDecor turns its pictures towards the front and top on each face.
+- The structure void is not solid and replaceable but holds no fluid (Behaviours/Fluid), drawn as
+  a 6 pixel translucent cube with that outline (Minecraft draws nothing).
+- `Blocks.rotate(id, rotation, mirror)` (and `rotateLut` for hot loops) is the block after its
+  structure is turned: mirror first ("leftRight" flips Z, "frontBack" X), then quarter turns
+  clockwise from above (`turnDirection`); wall torches and glow lichen become the variant hanging
+  on the turned side, jigsaws the turned orientation, everything else stays. `Blocks.find(name)`
+  gives an id or nil, for names that come from data.
+
+**Glow lichen** (Minecraft's GlowLichenBlock, one face per block): GlowLichen on the floor (the
+item), GlowLichenUp on a ceiling and GlowLichenNorth / South / West / East on walls, through the
+torch machinery (`support`, `Attached`, `placementFor`). Light 7 in a cool yellow green, hardness
+0.2, mined fastest with an axe, drops only with Shears (`shearDrops`; Shears mine it at 2,
+`shearSpeed`, Minecraft's ShearsItem.getDestroySpeed), replaceable and `brokenByFluid`. Its shape is
+a 13 × 13 pixel plate a tenth of a pixel off its face and a 3 × 3 pixel Neon speck, the `glow` box
+that carries the light: two boxes, two parts. Its outline is a pixel thick plate over the face.
+
+**Cave twins** (BlockList `caveTwin`): CaveGlowLichen and its five sides, the lichen generation
+puts in caves. A twin looks, drops and behaves exactly like its twin (same appearance, item,
+support, light, hardness, drops and behaviour; checked at load), but counts as cave air while
+caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`; see Meshing), as CaveAir is to Air. Players
+never place one: twins are no variants of their item (`placementFor` never returns one, EditRules
+refuses them), `Blocks.rotate` keeps a twin a twin, and `Blocks.surfaceForm` turns a twin into
+its twin and CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`, `isCaveTwin`).
 
 ## Item data (`Items`, Mekanism's sustained data)
 
@@ -1468,6 +1655,262 @@ two networks) and its unlimited insert rate from cables (the cube only limits it
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
 `Machines/init`. Tests bind test-only kinds to spare blocks (`Machines.bind`).
 
+## Structure blocks and jigsaw structures (`Structures/`, `StructureLibrary/`, server `Structures/`)
+
+Minecraft 1.20.1's structure blocks, structure voids and jigsaw blocks, and the jigsaw structures
+the terrain generator places from the structure library (see Library structures under
+Generation). The shared modules are pure; the server and client parts are below.
+
+### Structure data (`Structures/Template`, `Structures/Settings`)
+
+**In memory** a template is `{ name, size, palette, cells, jigsaws, markers, containers }`: a
+Minecraft-style name (1..128 letters, digits and `_ . / : -`, slashes for pools:
+"outpost/houses/hut"), a size of 1..48 per axis (`Config.Structures.MaxSize`), a palette of block
+ids, a buffer of u16 palette indices per cell (x fastest, then z, then y:
+`(y * sizeZ + z) * sizeX + x`; 0 is "keep", a structure void, never in the palette), jigsaw records
+(position, front, top, name, target, pool, final state, joint; their cells hold the Jigsaw* block
+too), data markers (position and string; their cells are air) and container records (position,
+1-based slots with item name, count and wear; item data is not kept). Positions are local from the
+minimum corner.
+
+**As text** ("IVS1"): `"IVS1:"` and the payload in base64url (A-Z a-z 0-9 - _, no padding), so it
+pastes into chat and into a Luau string literal as it is. The payload is LEB128 varints and
+length-prefixed UTF-8 strings: version (1), the body's length (so a cut paste says how much is
+missing), the name, the size, the palette as block names (names survive id changes; an unknown name
+decodes to air with a warning), the cells as runs of (index, length) or bit-packed at 1..16 bits a
+cell, whichever is smaller, the jigsaws (orientation as front × 6 + top, joint as a byte), the
+markers and the containers, and a CRC-32 of everything before it. Records are sorted, so equal
+templates give equal text. `Template.decode` never errors: it ignores whitespace anywhere (wrapped
+pastes) and quotes around the text (trailing ones cut with a backward scan, so decoding stays linear
+in the length however the text is spaced), caps every count and string (the text at 3 million
+characters, the payload at 2 MiB, 1024 palette entries, jigsaws, markers and containers, 4096 items)
+and returns nil and a message for the player for anything malformed: not IVS1, a character outside
+the alphabet, cut off, damaged (checksum), from a newer version, a position outside the box,
+duplicates. A 7 × 5 × 7 hut is ~250 characters, a 16 × 10 × 16 house ~1,150, a 48 × 48 × 48 build of
+100 kinds of block in noise ~130,000 (encoded in ~160 ms, decoded in ~120 ms in Lune); any 48³
+structure stays under ~150,000, inside `Config.Structures.MaxDataChars` (200,000, what a StringValue
+holds).
+
+`Template.capture` builds a template from the world with Minecraft's SAVE rules: air is air (it
+clears the world where the structure is placed), a structure void is "keep", a DATA structure
+block becomes a marker with its string and air, other structure blocks air, jigsaws keep their
+block and get a record with their settings, blocks with slots a container record, and cave air
+and cave twins are saved as their surface forms (`Blocks.surfaceForm`), so a structure saved in a
+cave has nothing the mesher hides with caves. `toTable` / `fromTable` convert to and from an
+editable table of ASCII layers (one character per palette entry, "." air, " " keep), which
+`tests/structure.luau` uses: `decode` prints every IVS1 text in a file, a pasted chat message, a
+library module or standard input (`tests/lib/StructureText` finds them and decodes data with
+chat words after it), `--lua` writes the table, `encode` turns one back into text or a module.
+
+`Structures/Settings` holds the screens' fields, their defaults and ranges, and their wire format. A
+structure block has a mode, a name, an offset (-48..48, default 0, 1, 0), a size (0..48, default 5
+on every side), a rotation (0..3 quarter turns clockwise from above), a mirror ("none", "leftRight":
+Z flips, "frontBack": X flips), an integrity (0..1), a seed (0: random), showBoundingBox,
+showInvisible and metadata (DATA's string, 128 bytes); a jigsaw a name, a target, a pool (default
+"empty"), a finalState (a block name, default "Air") and a joint (aligned for horizontal fronts,
+rollable for vertical ones). `clampStructure` / `clampJigsaw` bring any table into range as
+Minecraft's block entities do when they load; `checkStructure` / `checkJigsaw` say in words what is
+still wrong (a bad name, a final state that is no block).
+
+### Turning (`Structures/Transform`)
+
+Minecraft's StructureTemplate.transform in a box whose minimum corner stays 0: the mirror first,
+then `rotation` quarter turns clockwise from above, one turn mapping (x, z) to (sz - 1 - z, x) in
+a box sz wide and sx deep; directions turn the same way, Up and Down stay. Minecraft turns around
+a pivot instead, so its box can reach to negative x or z; `anchor` gives the offset between the
+two, for LOAD to place a template exactly where Minecraft's would. `inverse` maps back, for writers
+that go cell by cell through the world.
+
+### Jigsaw assembly (`Structures/Jigsaw`)
+
+Minecraft 1.20.1's JigsawPlacement, pure and deterministic (Util/Hash rngs from the options' seed),
+so every client and the server assemble the same structure:
+- **Start** (addPieces): a random rotation and a weighted random element of the start pool (an
+  empty element gives no structure); with `startJigsawName` that jigsaw sits on the start
+  position. The piece then moves so its layer 0 is the ground's top layer: minY + 1 =
+  startHeight + firstFreeHeight at its box's centre with `projectToHeightmap` (Java's
+  round-towards-zero midpoint), else its unprojected y.
+- **Free space:** the box centre ± maxDistance (80, at most 128) in every axis, minus the start
+  piece's box, shared by the structure. A jigsaw whose target cell (one step in front of it) lies
+  inside its own piece uses that piece's box minus the children already in it. A child fits when
+  every cell of its box is free (Minecraft: the box shrunk by 0.25 inside the free shape); the
+  placed box is then taken out. Holes are filed in a 16 block grid.
+- **Children** (Placer.tryPlacingChildren), breadth first up to `maxDepth` (0..7): every jigsaw of
+  a piece in shuffled order; candidates are its pool's elements in weighted random order (only
+  below maxDepth), then its fallback pool's, so pieces at the last level still get end caps; an
+  empty element stops the jigsaw. For each candidate, each rotation (shuffled) and each of its
+  jigsaws that `canAttach` (facing each other, the source's target is the candidate jigsaw's name,
+  and the same top unless the source is rollable; shuffled), the child's y lines its jigsaw up with
+  the source when both pieces are rigid, else puts it at firstFreeHeight of the source's column
+  (read once per source jigsaw). The first child that fits is kept. Missing pools are skipped with
+  a warning; "empty", "minecraft:empty" and "" are the silent empty pool.
+- **Draws:** Minecraft shuffles a list holding each element `weight` times. An element that failed
+  can only fail again for the same jigsaw, so drawing distinct elements with probability
+  proportional to weight, without replacement (O(log n) a draw), has the same outcomes and costs far
+  less with large weights. Jigsaws whose target cell is taken are skipped untried.
+- **Caps:** an assembly stops with "Assembly stopped at N pieces: the structure is too big" after
+  `MAX_PIECES` (4096) pieces or `MAX_WORK` (400,000) units of work, charged for every step whether
+  it leads anywhere or not: each source jigsaw, candidate drawn, rotation, candidate jigsaw tested,
+  placed box a fit test compares, and `HEIGHT_WORK` (64) per ground read. Data made to waste time
+  stops within ~25-35 ms in Lune; a dense 7 deep village of up to 280 pieces needs under 100,000
+  and takes a few milliseconds.
+- **Not ported:** the expansion hack (legacy villages) and junctions (beard terrain adaptation;
+  the generator's foundation stands in).
+- **Generate** (`generateFrom`, the jigsaw block's button): the first piece comes from the source
+  jigsaw's pool (then its fallback) and attaches to the source like a child (facing it, its jigsaw
+  named the source's target); then `levels` levels grow from it inside its centre ± 128, with the
+  source's own cell taken, so nothing grows back over the build it stands in.
+- **Writing:** `writeTables` (a piece's palette turned by its rotation through Blocks.rotate, and
+  its jigsaw cells' final states, -1 for keep), `localColumn`, `baseY` (a terrain matching piece's
+  layer 0 at firstFreeHeight - 1, Minecraft's GravityProcessor), `cellBlock`, `blockAt` and
+  `eachBlock`. Final state names match loosely (`nameKey`: case, underscores, spaces and
+  "minecraft:" ignored, so "minecraft:oak_planks" finds nothing here but "planks" finds Planks);
+  StructureVoid means keep, unknown names air.
+
+Templates are cached by table identity: never change one after it was assembled.
+
+### The library (`Structures/Library`, `StructureLibrary/`)
+
+`Library.load()` reads, once per Luau VM (the server, each client, each worker actor):
+1. the repo's `StructureLibrary/`: `Templates/` (ModuleScripts at any depth returning an IVS1
+   string or a list, or StringValues; `Outpost.luau` is the example, written by
+   `tests/build_structures.luau`), `Pools.luau` (explicit pools: a fallback, a projection and
+   elements, each a template or empty with a weight of 1..150 and maybe its own projection) and
+   `Structures.luau` (the generated structures);
+2. the place's optional `ReplicatedStorage.IceVoxelStructures` folder: StringValues at any depth
+   holding one or more IVS1 strings. Attributes make a StringValue's first template a generated
+   structure with no code (`Generate`, `Biomes`, `Spacing`, `Separation`, `Size`, `Foundation`,
+   `OnLand`, `StartHeight`, `MaxDistance`), and `TerrainMatching` makes its templates terrain
+   matching in implicit pools. The folder's templates and structures replace the repo's of the
+   same name.
+
+Both are read in path order (then class, data and attributes), so every machine resolves a
+template defined twice alike, whatever order the children replicated in. Every machine must load
+the same library, so the server never writes into the folder at runtime (saves go to
+ServerStorage). `Library.new` (pure, what tests use) validates everything and never errors: bad
+entries are warned (`[Structures] ...`, and `library.warnings`) and skipped.
+
+A pool name resolves (`library.pool`, cached) to an explicit pool, else the template with exactly
+that name alone, else the implicit pool: every template named "<pool>/..." (sorted, weight 1, rigid
+unless marked terrain matching). A structure has a name, a startPool, maybe a startJigsawName, a
+size (jigsaw depth, default 7), a maxDistance (80), biomes (default all; matched with
+Jigsaw.nameKey, an unknown one warned with the list of valid ones), a spacing and separation (34 and
+8, Minecraft's villages), a salt (default a hash of the name), a startHeight (0) and the flags
+projectToHeightmap, onLand and foundation (true), plus the computed `reach`: every block of it lies
+within ± reach blocks of its start (the start piece's widest side, plus maxDistance when it has
+levels).
+
+### On the server (`server/Structures/`)
+
+- **`Permission`** (pure): Minecraft's canUseGameMasterBlocks. Creative players only, and of them
+  the game's owner, `Config.Gameplay.Admins` and Studio sessions always, else
+  `Config.Structures.Permission` (a list of user ids, by default none; true for every creative
+  player, false for nobody). `StructureBlocks.operator(player)` asks it (the owner looked up once
+  per player); it is ServerNet's `operator` rule for placing and breaking operator blocks
+  (`EditRules.mayUseCreativeOnly`) and gates every request and upload.
+- **`StructureStore`** (pure): every structure block's and jigsaw's settings by position, for the
+  session, like chests. `blockChanged` (chained onto WorldServer.onChanged) gives a new block its
+  mode's or front's defaults, keeps the settings when one structure block or jigsaw becomes
+  another (a mode change swaps the block), and forgets them for anything else. These blocks only
+  come from edits (generation writes jigsaws as their final state and markers as air). Records go
+  with a chunk's edit list and, when changed, to players within 192 blocks sideways; a removed
+  block's record has no settings.
+- **`StructureServer`** (pure; Minecraft's handleSetStructureBlock / handleSetJigsawBlock /
+  handleJigsawGenerate): a request must name a loaded structure block or jigsaw within reach + 2
+  (open) or 32 blocks (the rest; a screen stays open where its block was clicked). Every action
+  first stores the screen's fields (names checked; a new mode swaps the block). SAVE captures the
+  region (terrain generated where needed, as edits do; the store's jigsaw and DATA settings,
+  Containers' items), encodes it, refuses one over `MaxDataChars`, keeps it by name for the
+  session (at most `MAX_SAVED` 256 saves and `MAX_SAVED_BYTES` 32 MB, the oldest dropped first),
+  sends the text to the player and answers "Saved structure '<name>' (N blocks, M characters)".
+  LOAD takes this session's save, else the library's template, else the player's upload: a
+  template of another size first only sets the size ("position prepared"), the next LOAD places
+  it (`Placement.loadPlan`; seed 0 draws one). DETECT is StructureBlockEntity.detectSize over the
+  CORNER blocks with the name within `Config.Structures.DetectRange` (the inside of their box, at
+  most 48 a side). Generate runs `Jigsaw.generateFrom` from the jigsaw with a random seed over
+  `lookups` (the session's saves over the library, so a piece saved a minute ago joins its pool),
+  terrain matching pieces on `surfaceHeight` (the live world's highest sturdy block or fluid where
+  loaded, else the generator's height, never generating), then `Placement.piecesPlan`. Plans wait
+  in one queue: a LOAD or Generate that would take it beyond `MAX_QUEUED` (3 million) cells is
+  refused until it drains, a Generate of more than `MAX_GENERATE` (2 million) cells outright.
+  Uploads are put together per player (`Protocol.joinStructureData`); the last two finished ones
+  are kept by transfer number, so LOAD can name one twice.
+- **`Placement`** (pure): a plan is the cells to set in order, with what each gets once its block
+  is there (a jigsaw's settings, a DATA block's, a container's items, replacing what it held, as
+  Minecraft clears a container it places over). A LOAD (at most 48³ cells) is planned at once:
+  turned around Minecraft's pivot (`Transform.anchor`), blocks turned (`Blocks.rotateLut`),
+  integrity drawn per cell from the seed (BlockRotProcessor), keep cells skipped, markers back as
+  DATA structure blocks. A Generate's plan is streamed (`refill`, batches of `Placement.BATCH`, 256
+  cells, about 4,096 template cells of work each), so building it costs nothing up front and its
+  memory doesn't grow with its size: the terrain matching pieces' ground heights, then the solid
+  blocks layer by layer over every piece, then the late blocks piece by piece; where pieces
+  overlap the later piece's cell wins and the earlier one is never set (a 16 block grid finds the
+  overlaps). Solid blocks go first, bottom up, then what hangs on, stands on or flows from them
+  (torches, lanterns, lichen, plants, fluids), so what holds them is there first. The queue sets at
+  most `Config.Structures.LoadBlocksPerFrame` (2000) cells, 2 chunk generations and 6 ms a frame
+  (it looks at the clock every 64 cells and after every batch) and never stops between a tall
+  plant's halves; a 1-million-cell Generate costs its request ~1 ms.
+- **`StructureBlocks`**, the glue: decodes the StructureBlock, Jigsaw and StructureData messages,
+  rate limits them per player (20 a second; save, load, detect and generate 1 a second with a
+  burst of 3; uploaded pieces 1.5 × `DataPiecesPerSecond`), answers a Use on these blocks like an
+  open request (`Inventories.onMenu`), places the queue's share each frame before ServerNet's
+  flush (so its edits go out that frame, before the records they make) and sends changed records
+  after it. Each save is
+  also a StringValue named after it in `ServerStorage.IceVoxelSavedStructures` while the session
+  keeps it (`Env.stored`, `Env.forget`), and its text goes to the player in StructureData pieces
+  at `DataPiecesPerSecond`.
+- **Generated chests** (`Players/Containers`): a store may have `generated` (the generator's
+  `structureContainer`, and the block without generating terrain). A container there gets its
+  contents the first time it is needed: opened, read (`get`, `peek`: windows, pipes, a SAVE), or
+  just before its block changes (`materialize`, first in the server's onChanged, so one broken
+  unopened drops what it held). Each position is asked once per session (`sourced`), so an emptied
+  chest never refills and a chest placed there later starts empty. Machines are never sourced.
+- **Rules elsewhere:** EditRules refuses cave twins and needs `operator` for operator blocks
+  (survival players can't mine them anyway: Mining); Fluid never flows into a structure void
+  (Minecraft's canHoldFluid), though it is replaceable.
+
+### On the client (`Net/StructureNet`, `World/StructureRecords`, `Ui/`, `Rendering/StructureBoxes`)
+
+- **`World/StructureRecords`** (pure): the server's StructureBlocks and Jigsaws records (a record
+  replaces what was known, one without settings forgets it; `prune` drops records whose loaded
+  block is no longer one, every few seconds); `region`, the box a structure block outlines as
+  Minecraft's StructureBlockRenderer does (SAVE always, LOAD with "Show Bounding Box" as the
+  template's turned box at `Transform.anchor`, nothing for CORNER, DATA or a side of 0); an
+  `Outbox` that paces pasted text out as StructureData pieces at `DataPiecesPerSecond`, then the
+  LOAD naming its transfer; and `Downloads`, which keeps the texts SAVEs bring back. Pieces don't
+  name their block, so each SAVE is expected with its name and size (at most 8, for 30 s) and a
+  finished text goes to the oldest SAVE expected with the name and size its first bytes give (the
+  server answers SAVEs in order, so expected ones before it were refused and are dropped).
+- **`Net/StructureNet`** routes the messages: an `open` record opens the block's screen (the
+  answer to a Use, as for chests), StructureData pieces fill Downloads, and the screens' buttons
+  become StructureBlock and Jigsaw requests; pasted text goes first in pieces of a new transfer
+  number, and the same text loaded again (the LOAD after "position prepared") reuses a transfer the
+  server still keeps.
+- **`Ui/StructureForm`** (pure) is both screens' model, Minecraft's StructureBlockEditScreen and
+  JigsawBlockEditScreen as data: the fields as typed, filtered as Minecraft's fields are and read
+  as Minecraft reads them (a number that doesn't parse is 0, or 1 for the integrity), the layout
+  per mode at Minecraft's GUI positions plus two rows for the data (SAVE's text in parts of 16,000
+  characters to copy, LOAD's Paste Data box, checked with `pasteSummary`), and `merge`, which takes
+  a server update into a field only where it changed on the server and differs from what this
+  screen last sent, so typing is kept but a prepared size shows. After DETECT and LOAD the actions
+  wait for the block's next record (`await`, at most 1 s), so a SAVE pressed right after a DETECT
+  can't resend the old region. A jigsaw form starts with Keep Jigsaws on, as Minecraft's.
+- **`Ui/StructureScreen`** draws them in this game's style with `Ui/FormWidgets` (Minecraft's
+  EditBox, buttons, labels and slider; a read only box can still be focused and selected, which
+  is how its text is copied: Roblox scripts can't write the clipboard, but a TextBox with
+  TextEditable off keeps Ctrl+C). It is a `Screens` panel (`showPanel`, `closePanel`): the
+  darkened world, the free mouse and the controls off like any screen, but none of the inventory's
+  input; E, Escape, gamepad B and death close it as Cancel, and `E` still closes it while the read
+  only box has the focus. Unlike Minecraft it stays open after DETECT, SAVE and LOAD, repeating
+  the answer on its status line (`Notices.listen`); Done and Generate close it. Each opening
+  starts with an empty Paste Data box. While it is open the block's outline follows the fields
+  (`preview`).
+- **`Rendering/StructureBoxes`** outlines the regions of the nearest 24 structure blocks within
+  128 blocks (a SelectionBox on an invisible, non-colliding, non-queried part), labels their
+  blocks with the name within 48 blocks, and for "Show Invisible Blocks" marks the region's air
+  (at most 2,048 markers, in regions of at most 16,384 cells). Like Minecraft's, none of it shows
+  outside creative.
+
 ## Item entities (`Entities/`)
 
 Dropped items are Minecraft's ItemEntity:
@@ -1602,6 +2045,9 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Inventory`     | a numbered inventory action                   |
 | client → server | `Use`           | right click on a block with a menu            |
 | client → server | `UseItem`       | right click on a block with the Configurator or a bucket: position, side, sneaking |
+| client → server | `StructureBlock` | position, op (open, update, save, load, detect), the screen's settings; load: an upload's transfer number (0: by name) |
+| client → server | `Jigsaw`        | position, op (open, update, generate), the jigsaw's settings; generate: levels (0..7), keep jigsaws |
+| client → server | `StructureData` | a piece of pasted structure text: transfer, index, count, text (16,000 characters) |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -1613,6 +2059,18 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |
 | server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active, state code |
 | server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
+| server → client | `StructureBlocks` | structure blocks' settings per position (none: gone); open flag (show the screen) |
+| server → client | `Jigsaws`       | jigsaws' settings per position (none: gone); open flag            |
+| server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
+
+Structure settings travel in `Structures/Settings`' format (Net/Protocol uses its `write*` /
+`read*`): unknown codes, NaN and strings over 128 bytes are malformed, numbers out of range are
+clamped. Structure text goes in pieces of `Config.Structures.DataPieceChars` (16,000) characters,
+at most `MaxDataChars` (200,000, 13 pieces) a text and `DataPiecesPerSecond` a second each way:
+reliable RemoteEvents name no size limit but share about 500 requests a second per client, so
+pieces keep each message small. `Protocol.joinStructureData` puts pieces back together in any
+order, refuses ones that don't fit (another count, an index twice, too long) and drops older
+half-received texts beyond 2 per sender.
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
 listener that connects) and routes messages by type, keeping early messages until a handler exists.
@@ -1668,6 +2126,11 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   damage in survival (`ceil(distance − 3)` of 20 half hearts, scaled to `MaxHealth`, through
   `TakeDamage`; at most 4 reports a second). It also plays the hurt, death and hurting-landing
   sounds to everyone near (see Sounds).
+- `Structures/`: structure blocks, jigsaws and their Generate, and who may use them (see
+  Structure blocks and jigsaw structures). `Players/Containers` fills a generated structure's chest
+  from the generator the first time its contents are needed; ServerNet's `operator` rule
+  (`EditRules.mayUseCreativeOnly`) keeps operator blocks to players allowed to use them, and
+  EditRules refuses cave twins; `Fluid` never flows into a structure void.
 - `Transmitters/`: Mekanism pipes (see Mekanism pipes); `Players/ItemUse`: the Configurator and
   buckets (UseItem). A water bucket that replaces a plant (`UseRules.pour`) drops it, as
   Minecraft's BucketItem.emptyContents destroys the block with drops.
@@ -1683,7 +2146,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 ## Hidden caves, octrees and regions
 
 **How caves are hidden today.** Caves are carved as `CaveAir` and never reach the surface. The
-mesher can treat cave air as rock (`hideCaves`), which removes every cave wall; sections are meshed
+mesher can treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
+(`hideCaves`), which removes every cave wall; sections are meshed
 with caves visible only while the camera is below the terrain surface and within the reveal radius
 (see Streaming above). That is a cheap form of occlusion culling that needs no extra data structure.
 
@@ -1718,9 +2182,12 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - Sides are Minecraft's Direction ordinal everywhere in the pipes (0 Down .. 5 East,
   `Transmitters.SIDES`); transmitter modes, colours, network buffers and tank contents live in
   memory, like chests.
-- Transmitters, fluid tanks, chests and furnaces only come from edits: the pipes (and furnaces
-  pushing their results into chests) read unloaded chunks' edit lists to find them. Generating any
-  of them would need Transmitters/Transmitters and Players/Inventories to learn about it.
+- Transmitters, fluid tanks, chests and furnaces come from edits: the pipes (and furnaces pushing
+  their results into chests) read unloaded chunks' edit lists to find them. The one exception is a
+  library structure's chests and furnaces, which Players/Containers fills from the generator
+  (`structureContainer`) when first needed and the pipes only see in loaded chunks. Keep
+  transmitters, tanks and machines out of library templates: nothing on the server knows a
+  generated one (a LOAD or Generate places them as edits, which is fine).
 - Furnaces and machines follow Mekanism's machine rules for automation on every face: inputs only
   take what they can use, transporters only ever take results (never the input or fuel), and
   results are pushed out on their own into transporters (NORMAL / PULL sides) and plain
@@ -1742,3 +2209,17 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   kind keeps per-machine state in its data fields, not in module tables.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
+- The structure library is part of world generation: the server, every client and every worker
+  must load the same one (StructureLibrary modules plus ReplicatedStorage.IceVoxelStructures as
+  published, read once, in path order). Never write into that folder at runtime; saves go to
+  ServerStorage. Templates are immutable once loaded (Jigsaw caches by table identity), and
+  structure placement (StructureGen) must stay stateless and written in its fixed order.
+- IVS1 text is what users keep: palettes name blocks, so renaming a block turns it into air in
+  every saved structure (add, don't rename), and a format change needs a new version number
+  (`Template.VERSION`; decode refuses newer ones) and must keep reading version 1.
+- Cave twins must look, drop and behave exactly like their twin (Blocks checks it at load), and
+  glow lichen generation (`Generation/CaveDecor`) decides each cell from the seed, its position and
+  its in-buffer neighbourhood only, like foliage. A lichen is 2 parts: caves hold thousands.
+- Operator blocks (`creativeOnly`) break and drop nothing for survival players, and only players
+  `Structures/Permission` allows place, break or use them; a new one needs `drops = false`
+  (checked at load).

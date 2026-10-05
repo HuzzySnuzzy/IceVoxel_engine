@@ -7,12 +7,15 @@
 
 	where `speed` is the held tool's speed when it is the block's kind of tool (BlockList `tool`;
 	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves; Shears 15
-	on blocks they harvest, BlockList `shearDrops`: leaves, and plants that break at once), else 1,
+	on blocks they harvest, BlockList `shearDrops`: leaves, and plants that break at once, but 2 on
+	glow lichen, its `shearSpeed`), else 1,
 	divided by 5 under water and by 5 while not standing on the ground. `canHarvest`: the block drops
 	anything with that tool (Items.canHarvest: blocks with a `toolLevel` need a good enough tool, so
 	stone by hand takes 7.5 s and drops nothing). The block breaks when the progress reaches 1:
 	stone with a wooden pickaxe (hardness 1.5, speed 2) takes 23 ticks. Hardness 0 breaks at once,
-	unbreakable blocks (hardness < 0) never.
+	unbreakable blocks (hardness < 0) never, and neither do creative only blocks (structure blocks,
+	structure voids, jigsaws: Minecraft's hardness -1), which only creative players break, at
+	once like every block (the server's EditRules, the client's creative breaking).
 
 	The server accepts a break once `TOLERANCE` of the time has passed since the player started
 	(Minecraft's ServerPlayerGameMode does the same), which covers network delay. A break arriving
@@ -43,16 +46,18 @@ function Mining.toolSpeed(block: number, tool: number?): number
 	if data.kind == "sword" then
 		return if kind == "hoe" then SWORD_SPEED else 1
 	elseif data.kind == "shears" then
-		-- (Minecraft's ShearsItem.getDestroySpeed: 15 on leaves and cobwebs, which they harvest.)
-		return if def.shearDrops ~= nil then data.speed else 1
+		-- (Minecraft's ShearsItem.getDestroySpeed: 15 on leaves and cobwebs, which they harvest; 2 on
+		-- vines and glow lichen.)
+		return if def.shearDrops ~= nil then def.shearSpeed or data.speed else 1
 	end
 	return if kind ~= nil and data.kind == kind then data.speed else 1
 end
 
--- Progress per tick of mining `block` holding `tool` (0 = can't be mined).
+-- Progress per tick of a survival player mining `block` holding `tool` (0 = can't be mined:
+-- unbreakable and creative only blocks).
 function Mining.progressPerTick(block: number, onGround: boolean?, underwater: boolean?, tool: number?): number
 	local def = Blocks.get(block)
-	if def == nil or not def.breakable or def.hardness < 0 then
+	if def == nil or not def.breakable or def.hardness < 0 or def.creativeOnly then
 		return 0
 	end
 	if def.hardness == 0 then

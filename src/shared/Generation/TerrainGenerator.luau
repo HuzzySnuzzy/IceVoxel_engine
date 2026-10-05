@@ -33,8 +33,11 @@ local Relief = require(script.Parent.Relief)
 local Caves = require(script.Parent.Caves)
 local Ores = require(script.Parent.Ores)
 local Foliage = require(script.Parent.Foliage)
+local CaveDecor = require(script.Parent.CaveDecor)
+local StructureGen = require(script.Parent.StructureGen)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
+local Library = require(script.Parent.Parent.Structures.Library)
 
 local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
@@ -106,6 +109,14 @@ export type Generator = {
 	]]
 	seamLimits: (level: number, nx: number, nz: number, coarser: { number }) -> buffer?,
 	--[[
+		Items a generated container (a chest in a library structure) at world (x, y, z) starts
+		with, nil when the generator put none there: the server fills a generated chest from it the
+		first time its contents are needed. A fresh copy each call.
+	]]
+	structureContainer: (x: number, y: number, z: number) -> { StructureGen.ContainerItem }?,
+	-- Every generated structure with a piece in the block rectangle (inclusive), in write order.
+	structures: (minX: number, minZ: number, maxX: number, maxZ: number) -> { StructureGen.Start },
+	--[[
 		Seam limits of a far node (level >= 1) that hold whatever its neighbours are: the LOD tree
 		only ever puts a node next to nodes at most one level coarser, so opening the padding for a
 		one and a two levels coarser neighbour on every side (the lower of the two) covers every
@@ -115,9 +126,18 @@ export type Generator = {
 	farSeamLimits: (level: number, nx: number, nz: number) -> buffer?,
 }
 
+--[[
+	`library`: the structure library to generate (default: Library.load() when
+	Config.Structures.Generate); `structures = false`: no library structures at all.
+]]
+export type Options = {
+	library: Library.Library?,
+	structures: boolean?,
+}
+
 local TerrainGenerator = {}
 
-function TerrainGenerator.new(seed: number): Generator
+function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local relief = Relief.new(seed)
 	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / 5900, 3)
 	local humidity = Noise.fbm2(seed, "climate.humidity", 1 / 1500, 3)
@@ -130,6 +150,7 @@ function TerrainGenerator.new(seed: number): Generator
 		return (relief.height(x, z, 0))
 	end)
 	local growFoliage = Foliage.new(seed)
+	local growLichen = CaveDecor.new(seed)
 
 	-- Terrain height (first air block) of a relief height: whole blocks, with room for structures.
 	local function clampHeight(y: number): number
@@ -203,6 +224,32 @@ function TerrainGenerator.new(seed: number): Generator
 			and math.abs(column(x, z + 1) - h) < limit
 	end
 
+	-- Library structures (nil: none to place).
+	local opts: Options = options or {}
+	local library = opts.library
+	if library == nil and opts.structures ~= false and Config.Structures.Generate then
+		library = Library.load()
+	end
+	local placer: StructureGen.Placer? = nil
+	if library and opts.structures ~= false and #library.structures > 0 then
+		local function firstFreeHeight(x: number, z: number): number
+			-- Minecraft's WORLD_SURFACE_WG: the sea's surface counts as ground.
+			return math.max(outsideHeight(x, z), SEA)
+		end
+		placer = StructureGen.new(seed, library, {
+			firstFreeHeight = firstFreeHeight,
+			biome = function(x: number, z: number): number
+				local _, biome = sample(x, z, 0)
+				return biome
+			end,
+			-- Dry land that `generate` doesn't turn into bare rock.
+			land = function(x: number, z: number): boolean
+				local h, biome = column(x, z)
+				return h > SEA and gentle(x, z, biome)
+			end,
+		})
+	end
+
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
 	local biomes: { number } = table.create(P * P, 1)
@@ -231,8 +278,26 @@ function TerrainGenerator.new(seed: number): Generator
 			end
 		end
 
+		-- Library structures reaching the padded chunk, or a vegetation spot near it (see
+		-- StructureGen: trees keep clear of their pieces).
+		local span = SIZE * step
+		local starts: { StructureGen.Start }? = nil
+		local needed = (highest + STRUCTURE_ROOM + stepY - 1) // stepY
+		if placer and level <= Config.StructureMaxLevel then
+			local reach = 2 * Structures.RADIUS
+			local x0, z0 = originX - step, originZ - step
+			local x1, z1 = originX + span + step - 1, originZ + span + step - 1
+			local found = placer.starts(x0 - reach, z0 - reach, x1 + reach, z1 + reach)
+			if #found > 0 then
+				starts = found
+				-- Room for their highest block, plus a cell of air on top.
+				local top = placer.top(found, x0, z0, x1, z1, math.max(highest, SEA))
+				needed = math.max(needed, top // stepY + 2)
+			end
+		end
+
 		-- The column buffer ends a little above the highest terrain (room for structures).
-		local cells = ChunkLayout.croppedHeight((highest + STRUCTURE_ROOM + stepY - 1) // stepY, stepY)
+		local cells = ChunkLayout.croppedHeight(needed, stepY)
 		local data = ChunkLayout.create(cells)
 
 		-- 2. Fill the columns. Highest cell of each column (border columns of LOD chunks one lower,
@@ -345,9 +410,10 @@ function TerrainGenerator.new(seed: number): Generator
 		end
 
 		-- 3. Caves and ores only exist in full detail chunks.
+		local carved: Caves.Carved? = nil
 		if level == 0 then
 			if Config.Caves.Enabled then
-				carveCaves(data, originX, originZ, heights, cells, yield)
+				carved = carveCaves(data, originX, originZ, heights, cells, yield)
 				if yield then
 					yield()
 				end
@@ -359,13 +425,19 @@ function TerrainGenerator.new(seed: number): Generator
 		-- terrain: the height of the cell their root is in, sampled like `generate` does.
 		if level <= Config.StructureMaxLevel then
 			local w = Writer.new(data, originX, originZ, step, stepY, cells)
-			local span = SIZE * step
 			local structureColumn = column
 			if level > 0 then
 				structureColumn = function(x: number, z: number): (number, number, number, number)
 					local _, biome, vegetation, surface = column(x, z)
 					local h = sample(x // step * step + half, z // step * step + half, level)
 					return h, biome, vegetation, surface
+				end
+			end
+			local accept = gentle
+			if placer and starts then
+				local p, list = placer, starts
+				accept = function(x: number, z: number, biome: number): boolean
+					return gentle(x, z, biome) and p.treeAllowed(list, x, z)
 				end
 			end
 			Structures.populate(
@@ -376,14 +448,38 @@ function TerrainGenerator.new(seed: number): Generator
 				originZ - step,
 				originX + span + step - 1,
 				originZ + span + step - 1,
-				gentle
+				accept
 			)
 			if w.top() > emptyAbove then
 				emptyAbove = w.top()
 			end
+
+			-- Library structures, after the trees: their air clears trees, their voids keep them.
+			if placer and starts then
+				local top, lowest = placer.write(starts, {
+					data = data,
+					cells = cells,
+					level = level,
+					originX = originX,
+					originZ = originZ,
+					biomes = biomes,
+					topCells = topCells,
+				})
+				if top > emptyAbove then
+					emptyAbove = top
+				end
+				if lowest < solidBelow then
+					solidBelow = lowest
+				end
+			end
 		end
 
-		-- 5. Ground plants (full detail only: LOD cells would lose them, and each box is a Part).
+		-- 5. Glow lichen on cave walls (full detail only, like the caves).
+		if carved then
+			growLichen(data, cells, originX, originZ, heights, carved)
+		end
+
+		-- 6. Ground plants (full detail only: LOD cells would lose them, and each box is a Part).
 		if level == 0 then
 			local top = growFoliage(data, cells, originX, originZ, biomes, topCells)
 			if top > emptyAbove then
@@ -511,6 +607,20 @@ function TerrainGenerator.new(seed: number): Generator
 		return 0, h, 0
 	end
 
+	local function structureContainer(x: number, y: number, z: number): { StructureGen.ContainerItem }?
+		if placer == nil then
+			return nil
+		end
+		return placer.container(x, y, z)
+	end
+
+	local function structuresIn(minX: number, minZ: number, maxX: number, maxZ: number): { StructureGen.Start }
+		if placer == nil then
+			return {}
+		end
+		return placer.starts(minX, minZ, maxX, maxZ)
+	end
+
 	return {
 		seed = seed,
 		column = column,
@@ -518,6 +628,8 @@ function TerrainGenerator.new(seed: number): Generator
 		findSpawn = findSpawn,
 		seamLimits = seamLimits,
 		farSeamLimits = farSeamLimits,
+		structureContainer = structureContainer,
+		structures = structuresIn,
 	}
 end
 

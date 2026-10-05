@@ -30,8 +30,10 @@
 	Block updates never generate chunks. A fluid whose neighbours or whose slope search reach a
 	chunk that is not loaded waits and retries later instead of guessing what is there.
 
-	Fluids flow into replaceable blocks (air) and wash away blocks marked `brokenByFluid` (torches),
-	which drop their item (Behaviours/Drops), like Minecraft's canHoldFluid / beforeDestroyingBlock.
+	Fluids flow into replaceable blocks (air; not the structure void) and wash away blocks marked
+	`brokenByFluid` (torches, glow lichen), which drop what they drop by themselves
+	(Behaviours/Drops: a torch its item, glow lichen nothing), like Minecraft's canHoldFluid /
+	beforeDestroyingBlock.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -76,11 +78,15 @@ local function levelOf(block: number?, group: string): number?
 	return nil
 end
 
--- Does `block` make way for any fluid: air and other replaceable non-fluids, and blocks the flow
--- washes away (torches)?
+-- The structure void holds no fluid (Minecraft's FlowingFluid.canHoldFluid), though it is
+-- replaceable: water never flows into the cells a structure's builder marked "keep".
+local STRUCTURE_VOID = Blocks.find("StructureVoid")
+
+-- Does `block` make way for any fluid: air and other replaceable non-fluids (not the structure
+-- void), and blocks the flow washes away (torches)?
 local function yields(block: number): boolean
 	local def = Blocks.get(block)
-	return def.fluid == nil and (def.replaceable or def.brokenByFluid)
+	return def.fluid == nil and (def.replaceable or def.brokenByFluid) and block ~= STRUCTURE_VOID
 end
 
 -- Puts `fluid` at (x, y, z), where `old` was; a washed away block drops its item.

@@ -68,6 +68,10 @@ local function isOwner(player: Player): boolean
 	return groupOwner ~= 0 and player.UserId == groupOwner
 end
 
+-- Does `player` own this game (the user, or a group game's group owner)? May yield the first time
+-- (a web call for group games); Structures/StructureBlocks asks once per player.
+GameModes.isOwner = isOwner
+
 -- A player's game mode.
 function GameModes.get(player: Player): string
 	return GameMode.of(player)

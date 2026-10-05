@@ -9,10 +9,20 @@
 	view distance are left out (the area they cover is simply not drawn).
 
 	Hysteresis: a node that was a leaf in the previous selection needs the viewer a bit closer
-	before it splits, so standing on a boundary does not rebuild chunks back and forth.
+	before it splits, so standing on a boundary does not rebuild chunks back and forth. (So full
+	detail ends up to 15% short of the split distance ahead of a moving viewer.)
 
 	View and split distance come from Config.Lod; `configure` changes them (the client uses this
 	for its device preset).
+
+	Caves only exist in full detail chunks, so underground the full detail range is what limits how
+	far caves are seen. While the client's cave view is active (`select`'s `underground`: the
+	camera is below the terrain surface, plus a few seconds after leaving it, which the streamer
+	decides), level 1 nodes split with Config.Lod.UndergroundSplitDistanceL1 instead of
+	SplitDistanceL1, so full detail reaches further out (radius about 2 x that, in chunks). Coarser
+	levels are unchanged. Level 1's hysteresis holds within one mode only: the first selection
+	after the cave view starts splits every level 1 node within the new distance, instead of
+	keeping the leaves of the selection above ground short of it.
 
 	Plants (`drawsFoliage`): every box of a plant is a part, so full detail chunks draw theirs only
 	within Config.Lod.FoliageDistance (`setFoliageDistance` for the device preset), and only while
@@ -32,18 +42,33 @@ local FOLIAGE_HYSTERESIS = SIZE / 2
 local view = Config.Lod.ViewDistance
 local split = Config.Lod.SplitDistance
 local splitL1 = Config.Lod.SplitDistanceL1 or split
+local undergroundL1 = math.max(splitL1, Config.Lod.UndergroundSplitDistanceL1 or splitL1)
 local foliage = Config.Lod.FoliageDistance
 
 local LodTree = {}
 
 LodTree.MAX_LEVEL = MAX_LEVEL
 
--- Sets the view distance (blocks) and split distances (node sizes; level 1 may differ) used by `select`.
-function LodTree.configure(viewDistance: number, splitDistance: number, splitDistanceL1: number?)
+--[[
+	Sets the view distance (blocks) and split distances (node sizes; level 1 may differ, and differ
+	again while the cave view is active: never less than `splitDistanceL1`) used by `select`.
+]]
+function LodTree.configure(
+	viewDistance: number,
+	splitDistance: number,
+	splitDistanceL1: number?,
+	undergroundSplitDistanceL1: number?
+)
 	assert(viewDistance > 0 and splitDistance >= 1, "invalid LOD distances")
 	view, split = viewDistance, splitDistance
 	splitL1 = splitDistanceL1 or splitDistance
 	assert(splitL1 >= 1, "invalid LOD distances")
+	undergroundL1 = math.max(splitL1, undergroundSplitDistanceL1 or splitL1)
+end
+
+-- The level 1 split distance `select` uses (node sizes), with the cave view active or not.
+function LodTree.splitDistanceL1(underground: boolean?): number
+	return if underground then undergroundL1 else splitL1
 end
 
 function LodTree.viewDistance(): number
@@ -90,11 +115,21 @@ end
 
 --[[
 	Returns { [nodeKey] = level } for the viewer at block coordinates (x, z).
-	`previous` is the result of the last call (optional, enables hysteresis).
+	`previous` is the result of the last call (optional, enables hysteresis). `underground`: the
+	cave view is active, so full detail reaches further (UndergroundSplitDistanceL1);
+	`previousUnderground`: it was for `previous` (level 1 keeps no hysteresis across a change).
 ]]
-function LodTree.select(x: number, z: number, previous: { [number]: number }?): { [number]: number }
+function LodTree.select(
+	x: number,
+	z: number,
+	previous: { [number]: number }?,
+	underground: boolean?,
+	previousUnderground: boolean?
+): { [number]: number }
 	local out: { [number]: number } = {}
 	local distance = LodTree.distance
+	local l1 = if underground then undergroundL1 else splitL1
+	local l1Hysteresis = (underground == true) == (previousUnderground == true)
 
 	local function visit(level: number, nx: number, nz: number)
 		local d = distance(level, nx, nz, x, z)
@@ -102,8 +137,8 @@ function LodTree.select(x: number, z: number, previous: { [number]: number }?): 
 			return
 		end
 		if level > 0 then
-			local threshold = (if level == 1 then splitL1 else split) * SIZE * bit32.lshift(1, level)
-			if previous and previous[Coords.nodeKey(level, nx, nz)] then
+			local threshold = (if level == 1 then l1 else split) * SIZE * bit32.lshift(1, level)
+			if previous and previous[Coords.nodeKey(level, nx, nz)] and (level ~= 1 or l1Hysteresis) then
 				threshold *= HYSTERESIS
 			end
 			if d < threshold then

@@ -1,7 +1,8 @@
 --!strict
 --[[
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
-	builds pending, parts in the world, far mesh status (MeshOverlay), the frame rate, and the
+	builds pending, parts and PointLights in the world, the cave view (how far caves are revealed,
+	the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
 	player's movement hull (position, speed, ground / water / sprint / flying / pose, game mode;
 	MovementController), the dropped items the client knows about (EntityRenderer) and the time
 	of day (the clock, day number, Minecraft's sky light outdoors and how much of it reaches the
@@ -16,6 +17,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
+local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
@@ -25,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
+local LodTree = require(Shared.World.LodTree)
 
 local DebugOverlay = {}
 
@@ -103,6 +106,21 @@ local function meshLine(stats: MeshOverlay.Stats): string
 	)
 end
 
+-- Parts, pooled parts and PointLights (glow lichen's: how many are on, near the camera).
+local function partsLine(renderer: ChunkRenderer.ChunkRenderer): string
+	local lights = renderer.lightCount - renderer.sparseCount + renderer.sparseOn
+	return `parts   {renderer.partCount}  pooled {renderer.pool.freeCount}  lights {lights} (lichen {renderer.sparseOn} of {renderer.sparseCount})`
+end
+
+-- The cave view: how far caves are revealed and whether full detail reaches further.
+local function caveLine(stats: ChunkStreamer.Stats): string
+	if stats.revealRadius <= 0 and not stats.underground then
+		return "caves   hidden"
+	end
+	local reveal = if stats.revealRadius > 0 then `revealed to {stats.revealRadius}` else "hidden"
+	return `caves   {reveal}  full detail split {LodTree.splitDistanceL1(stats.underground)}`
+end
+
 function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "IceVoxelDebug"
@@ -111,7 +129,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
-	label.Size = UDim2.fromOffset(380, 226)
+	label.Size = UDim2.fromOffset(420, 244)
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.BackgroundTransparency = 0.5
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -161,7 +179,8 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			`chunks  {table.concat(levels, " ")}`,
 			`waiting {stats.waiting}  queued {stats.queued}  working {stats.working}`,
 			`workers busy {stats.busyWorkers}  builds pending {stats.building}`,
-			`parts   {streamer.renderer.partCount}  pooled {streamer.renderer.pool.freeCount}`,
+			partsLine(streamer.renderer),
+			caveLine(stats),
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
 			timeLine(),

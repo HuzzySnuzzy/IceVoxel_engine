@@ -7,11 +7,17 @@
 	            players must have started mining that very block (a Mine message) long enough
 	            ago, holding the tool they hold now: Mining.mayBreak, the server side of
 	            Minecraft's ServerPlayerGameMode check, which allows for network delay.
+	  Operator  creative only blocks (structure blocks, structure voids, jigsaws: Minecraft's
+	            GameMasterBlock) are placed and broken only by players allowed to use them
+	            (`mayUseCreativeOnly`, Structures/Permission: creative, and
+	            Config.Structures.Permission, Config.Gameplay.Admins, the owner or Studio);
+	            survival players can't mine them at all (Mining) and they never drop (Items).
 	  Placing   a placeable block into a replaceable one (air, water, short grass, ...), never
 	            the same block; what it replaces goes without a drop (Minecraft). Variants placed
 	            by another block's item (wall torches by the Torch, a hanging lantern by the
 	            Lantern: BlockList `item`) count as placeable, but a tall plant's upper half never
-	            does: the server sets it itself (`setPlaced`). Blocks that hang on another one
+	            does: the server sets it itself (`setPlaced`), and neither does a cave twin
+	            (generation's CaveGlowLichen*). Blocks that hang on another one
 	            (`support`: torches, lanterns) need it to be sturdy, plants their soil, and a tall
 	            plant room for its top (`supported`, Blocks.canPlace). Nothing is placed where it
 	            would overlap a player (`obstructs`: a solid block's cell, a lantern's outline;
@@ -130,15 +136,34 @@ end
 
 --[[
 	May `block` be placed where `current` is (ignoring what it hangs on, players in the way and the
-	inventory)? Placeable blocks and the variants their items place, but no tall plant's upper half:
-	placing the lower half sets it (`setPlaced`).
+	inventory)? Placeable blocks and the variants their items place, but no tall plant's upper half
+	(placing the lower half sets it: `setPlaced`) and no cave twin (CaveGlowLichen*: only generation
+	puts them in caves; players place GlowLichen*). Creative only blocks need `mayUseCreativeOnly`
+	too.
 ]]
 function EditRules.mayPlace(block: number, current: number): boolean
 	local d = def(block)
-	if d == nil or block == current or not Blocks.isReplaceable(current) or Blocks.plantBottom(block) ~= nil then
+	if
+		d == nil
+		or block == current
+		or not Blocks.isReplaceable(current)
+		or Blocks.plantBottom(block) ~= nil
+		or Blocks.isCaveTwin(block)
+	then
 		return false
 	end
 	return d.placeable or (d.item ~= nil and Items.ofBlock(block) ~= nil)
+end
+
+--[[
+	May a player place or break `block`, given whether they may use creative only blocks
+	(`operator`: Structures/Permission, Minecraft's canUseGameMasterBlocks: creative, and allowed by
+	Config.Structures.Permission or one of Config.Gameplay.Admins, the owner or Studio)? Structure
+	blocks, structure voids and jigsaws need it; every other block may. (Survival players can't
+	mine creative only blocks anyway: Mining.)
+]]
+function EditRules.mayUseCreativeOnly(block: number, operator: boolean): boolean
+	return operator or not Blocks.isCreativeOnly(block)
 end
 
 --[[

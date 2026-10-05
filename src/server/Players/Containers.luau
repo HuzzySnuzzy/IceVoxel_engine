@@ -31,6 +31,16 @@
 	ones whose output holds something are kept in a set of their own (`ejectingFurnaces`), filled
 	when a tick or a change leaves results in the output and emptied as the outputs are.
 
+	Generated structures' chests (Structures, Generation): a store may be given `generated`, the
+	contents the world generator put in a container. A container there gets them the first time
+	it is needed: opened or read (`get`, `peek`: windows, pipes, a structure block's SAVE), or just
+	before its block changes (`materialize`, called by the server script before anything else
+	hears of the change, so a generated chest broken unopened drops what it held). Each position
+	is asked once per session (`sourced`): emptied, broken or replaced, a generated chest never
+	fills again, and a chest placed there later starts empty. Chests only ever came from edits
+	before; generated ones are read without generating terrain, so the pipes see them where the
+	chunk is loaded.
+
 	Pure Luau (no Roblox APIs) so the tests can run it. `Containers.new()` makes a store; the
 	module's own functions (`Containers.get`, `Containers.take`...) use the server's store.
 ]]
@@ -39,6 +49,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Types = require(Shared.Inventory.Types)
 local Smelting = require(Shared.Crafting.Smelting)
@@ -58,6 +69,15 @@ export type Entry = {
 -- the flame and the progress arrow).
 export type FurnaceChange = { x: number, y: number, z: number, slots: boolean }
 
+-- What the world generator put in containers (generated structures' chests).
+export type Generated = {
+	-- The block at (x, y, z) without generating terrain (nil: its chunk is not loaded).
+	blockAt: (x: number, y: number, z: number) -> number?,
+	-- What the container block `block` at (x, y, z) held when it was generated (slot -> stack;
+	-- nil or empty: nothing, or no generated container there).
+	contents: (x: number, y: number, z: number, block: number) -> { [number]: Types.Stack }?,
+}
+
 export type Store = {
 	entries: { [string]: Entry },
 	count: number,
@@ -67,9 +87,13 @@ export type Store = {
 	ejecting: { [string]: boolean },
 	-- Called when a container gets its first viewer (opened = true) or loses its last (false).
 	onOpeners: ((x: number, y: number, z: number, container: Container, opened: boolean) -> ())?,
+	-- Generated containers' contents (nil: none), and the positions already asked about.
+	generated: Generated?,
+	sourced: { [string]: boolean },
 
 	get: (self: Store, x: number, y: number, z: number, block: number) -> Container,
 	peek: (self: Store, x: number, y: number, z: number) -> Container?,
+	materialize: (self: Store, x: number, y: number, z: number, block: number) -> (),
 	take: (self: Store, x: number, y: number, z: number) -> (Container?, { any }),
 	addViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
 	removeViewer: (self: Store, x: number, y: number, z: number, viewer: any) -> (),
@@ -114,6 +138,40 @@ local function sizeOf(block: number): number
 end
 
 --[[
+	What the generator put in the container block `block` at (x, y, z), asked once per position
+	(chests and furnaces only: machines come from edits). nil when there is nothing, it was asked
+	before, or the store has no generator.
+]]
+local function source(
+	self: Store,
+	key: string,
+	x: number,
+	y: number,
+	z: number,
+	block: number
+): { [number]: Types.Stack }?
+	local generated = self.generated
+	if generated == nil or self.sourced[key] or Machines.isMachine(block) then
+		return nil
+	end
+	self.sourced[key] = true
+	local ok, contents = pcall(generated.contents, x, y, z, block)
+	if not ok or type(contents) ~= "table" then
+		return nil
+	end
+	return contents
+end
+
+-- Puts `contents` (slot -> stack) into a fresh container, slots within its size only.
+local function fill(container: Container, contents: { [number]: Types.Stack })
+	for slot, stack in contents do
+		if type(slot) == "number" and slot >= 1 and slot <= container.size and slot == math.floor(slot) then
+			container.slots[slot] = Items.copyStack(stack)
+		end
+	end
+end
+
+--[[
 	The container at block (x, y, z), created empty if there is none. `block` is the container
 	block there (its slot count and name). A stored container of a different block is stale (its
 	block was replaced without `take`) and starts afresh.
@@ -142,6 +200,11 @@ function Store.get(self: Store, x: number, y: number, z: number, block: number):
 	if entry then
 		entry.container = container
 	else
+		-- (A fresh container where a generated one stood gets what the generator put there.)
+		local contents = source(self, key, x, y, z, block)
+		if contents then
+			fill(container, contents)
+		end
 		self.entries[key] = {
 			x = x,
 			y = y,
@@ -155,10 +218,50 @@ function Store.get(self: Store, x: number, y: number, z: number, block: number):
 	return container
 end
 
--- The container at (x, y, z) if one is stored (never creates one).
+--[[
+	The container at (x, y, z) if one is stored. It never creates an empty one, but a generated
+	container not yet asked about gets its contents now (when its chunk is loaded).
+]]
 function Store.peek(self: Store, x: number, y: number, z: number): Container?
-	local entry = self.entries[keyOf(x, y, z)]
-	return if entry then entry.container else nil
+	local key = keyOf(x, y, z)
+	local entry = self.entries[key]
+	if entry then
+		return entry.container
+	end
+	local generated = self.generated
+	if generated == nil or self.sourced[key] then
+		return nil
+	end
+	local block = generated.blockAt(x, y, z)
+	if block ~= nil and sizeOf(block) > 0 and not Machines.isMachine(block) then
+		Store.materialize(self, x, y, z, block)
+		local made = self.entries[key]
+		return if made then made.container else nil
+	end
+	return nil
+end
+
+--[[
+	The container block `block` is (or was, just now) at (x, y, z): if the generator put contents
+	there that nobody has asked for yet, the container is created with them. The server script
+	calls it with the old block before anything else hears of a block change, so a generated chest
+	broken or replaced unopened still drops what it held.
+]]
+function Store.materialize(self: Store, x: number, y: number, z: number, block: number)
+	-- (Every block change in the world comes through: most are no container.)
+	if self.generated == nil or sizeOf(block) <= 0 or Machines.isMachine(block) then
+		return
+	end
+	local key = keyOf(x, y, z)
+	if self.entries[key] or self.sourced[key] then
+		return
+	end
+	local contents = source(self, key, x, y, z, block)
+	if contents and next(contents) ~= nil then
+		-- (`get` would ask again: the position is marked asked, so it makes it empty, then fills it.)
+		local container = Store.get(self, x, y, z, block)
+		fill(container, contents)
+	end
 end
 
 --[[
@@ -300,7 +403,7 @@ local Containers = {}
 
 -- A new, empty store (the tests make their own; the game uses `Containers.default`).
 function Containers.new(): Store
-	return (setmetatable({ entries = {}, count = 0, active = {}, ejecting = {} }, Store) :: any) :: Store
+	return (setmetatable({ entries = {}, count = 0, active = {}, ejecting = {}, sourced = {} }, Store) :: any) :: Store
 end
 
 -- The server's containers.
@@ -316,6 +419,10 @@ end
 
 function Containers.take(x: number, y: number, z: number): (Container?, { any })
 	return Containers.default:take(x, y, z)
+end
+
+function Containers.materialize(x: number, y: number, z: number, block: number)
+	Containers.default:materialize(x, y, z, block)
 end
 
 function Containers.viewers(x: number, y: number, z: number): { any }
