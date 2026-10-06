@@ -13,6 +13,7 @@ return function(t, shared, require)
 	local ChunkLayout = require(shared.World.ChunkLayout)
 	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
 	local StructureGen = require(shared.Generation.StructureGen)
+	local Lakes = require(shared.Generation.Lakes)
 	local Jigsaw = require(shared.Structures.Jigsaw)
 	local Library = require(shared.Structures.Library)
 	local Template = require(shared.Structures.Template)
@@ -274,9 +275,15 @@ return function(t, shared, require)
 					for z = box[3], box[6] do
 						local h = gen.column(x, z)
 						-- The terrain below a piece's cells that nothing wrote (structure void,
-						-- the ground under a rigid floor) is what the plain generator has.
+						-- the ground under a rigid floor) is what the plain generator has, but for
+						-- the water lakes and puddles that keep away from pieces (Generation/Lakes):
+						-- the plain generator, with no pieces, may put one there.
+						local plainWater = #plain.waterLakes(x, z, x, z) > 0
+						for _, puddle in plain.puddles(x, z, x, z) do
+							plainWater = plainWater or Lakes.inPuddle(puddle, x, z)
+						end
 						for y = math.max(box[2] - 3, h - 6), h - 1 do
-							if e.blocks[key(x, y, z)] == nil then
+							if e.blocks[key(x, y, z)] == nil and not plainWater then
 								checked += 1
 								if norm(blockAt(gen, 0, x, y, z)) ~= norm(blockAt(plain, 0, x, y, z)) then
 									wrong += 1
