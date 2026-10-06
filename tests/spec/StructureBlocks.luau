@@ -58,7 +58,8 @@ return function(t, shared, require, _server, client)
 		for i, name in names do
 			t.eq(find(name), first + i - 1, name)
 		end
-		t.eq(Blocks.count, first + #names, "nothing after them")
+		-- (Then lava, oil and fuel: tests/spec/LavaOil.)
+		t.eq(find("Lava"), first + #names, "the fluids come next")
 		t.eq(Blocks.find("NoSuchBlock"), nil)
 		t.eq(Blocks.find(42 :: any), nil)
 	end)
@@ -305,7 +306,7 @@ return function(t, shared, require, _server, client)
 	end)
 
 	t.test("cave twins: look and drop like their twin, are cave air for hidden caves, never placed", function()
-		local twins = 0
+		local twins, fluids = 0, 0
 		for block = 0, Blocks.count - 1 do
 			local twin = Blocks.caveTwinOf(block)
 			t.eq(buffer.readu8(Blocks.caveTwinLut, block), if twin then 1 else 0)
@@ -323,11 +324,18 @@ return function(t, shared, require, _server, client)
 				t.eq(buffer.readu8(Blocks.cullLutHiddenCaves, twin), 0, "its twin is no cave air")
 				t.eq(table.find(Blocks.variants(Items.ofBlock(block) :: number), block), nil, "no variant")
 				t.eq(Blocks.placementFor(block, 0, 1, 0, 0, -1, 0, world(), 0, 10, 0), nil, "nothing places it")
-				local sheared = Items.drops(block, Items.id.Shears)
-				t.ok(sheared and sheared.item == Items.id.GlowLichen)
+				if def.fluid then
+					-- (CaveLava, CaveOil: tests/spec/LavaOil.)
+					fluids += 1
+					t.eq(Items.drops(block, Items.id.Shears), nil, "fluids drop nothing")
+				else
+					local sheared = Items.drops(block, Items.id.Shears)
+					t.ok(sheared and sheared.item == Items.id.GlowLichen)
+				end
 			end
 		end
-		t.eq(twins, 6)
+		t.eq(twins, 8, "six glow lichen sides, lava and oil")
+		t.eq(fluids, 2)
 		t.eq(Blocks.surfaceForm(Blocks.CAVE_AIR), AIR)
 		t.eq(Blocks.surfaceForm(STONE), STONE)
 		t.eq(Blocks.caveTwinFor(STONE), nil)

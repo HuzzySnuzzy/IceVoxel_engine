@@ -4,7 +4,7 @@
 	what it uses, for the recipe view (Ui/Jei/RecipeView). Pure: no Roblox APIs, so the tests check
 	it.
 
-	Entries come in three categories, in this order (JEI's tabs):
+	Entries come in six categories, in this order (JEI's tabs):
 
 	  crafting  Crafting.recipes (the same compiled recipes the grids match): `inputs` is the 3 x 3
 	            display, cells 1..9 row by row, laid out like JEI's CraftingGridHelper (a recipe one
@@ -12,13 +12,23 @@
 	            1 x 1, 2 x 2 or 3 x 3 square), each cell the items it accepts in creative order;
 	  smelting  Smelting.recipes(): `inputs[1]` the items it smelts (a tag's items cycle), `ticks`
 	            the cooking time (200);
-	  fuel      Smelting.fuels(): `inputs[1]` the fuel, `ticks` its burn time.
+	  fuel      Smelting.fuels(): `inputs[1]` the fuel, `ticks` its burn time;
+	  refining  the Oil Refinery (Machines.info): a bucket of oil (`fluidInputs`, a fluid stack:
+	            Shared/Fluids id and mB) into a bucket of fuel (`fluidOutput`), `ticks` it takes
+	            and the `energy` (J) it uses at `power` J/t;
+	  heating   the Heat Generator's lava (Machines.info: a mB burns 20 ticks, so a bucket burns
+	            20 000 ticks at 200 J/t, 4 MJ: the Lava Bucket's furnace burn time);
+	  combustion  the Combustion Generator's fuel (a mB burns 4 ticks, so a bucket burns 4 000 ticks
+	            at 2.5 kJ/t, 10 MJ).
+	The last three show fluids as fluid stacks (JEI's fluid ingredients). Lookups go by item, so a
+	fluid stands for its bucket and its block (`fluidItems`): "Show uses" of an Oil Bucket or of Oil
+	lists refining, "Show recipes" of a Fuel Bucket too.
 
-	`recipes(item)` lists the entries that make an item (crafting and smelting), `uses(item)` those
-	that take it: as an ingredient (tags included), as a smelting input or as a fuel. A catalyst
-	(CATALYSTS: the block a category's recipes are made in) also uses every entry of its
-	categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists them.
-	Both return groups by category, only the categories that have entries.
+	`recipes(item)` lists the entries that make an item (crafting, smelting, refining), `uses(item)`
+	those that take it: as an ingredient (tags included), as a smelting input, as a fuel or as a
+	fluid. A catalyst (CATALYSTS: the block a category's recipes are made in) also uses every entry
+	of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists
+	them. Both return groups by category, only the categories that have entries.
 
 	The index is built once, on first use.
 ]]
@@ -26,15 +36,21 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
 local Crafting = require(Shared.Crafting)
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Recipes = require(Shared.Crafting.Recipes)
 local Smelting = require(Shared.Crafting.Smelting)
 
 type Stack = Items.Stack
 
-export type Category = "crafting" | "smelting" | "fuel"
+export type Category = "crafting" | "smelting" | "fuel" | "refining" | "heating" | "combustion"
 export type Mode = "recipes" | "uses"
+
+-- A fluid stack (JEI's fluid ingredient): a Shared/Fluids id and mB.
+export type FluidStack = { fluid: number, amount: number }
 
 export type Entry = {
 	category: Category,
@@ -46,18 +62,39 @@ export type Entry = {
 	-- What it makes (nil for fuel).
 	output: Stack?,
 	shapeless: boolean,
-	-- Smelting: ticks to cook one; fuel: burn ticks; crafting: 0.
+	-- Smelting: ticks to cook one; fuel: burn ticks; refining: ticks a bucket takes; the
+	-- generators: ticks a bucket burns; crafting: 0.
 	ticks: number,
+	-- The fluids it takes and makes (refining and the generators).
+	fluidInputs: { FluidStack }?,
+	fluidOutput: FluidStack?,
+	-- Refining: J it uses; the generators: J they make. And J a tick.
+	energy: number?,
+	power: number?,
 }
 
 export type Group = { category: Category, entries: { Entry } }
 
 local JeiData = {}
 
-JeiData.CATEGORIES = { "crafting", "smelting", "fuel" } :: { Category }
-JeiData.TITLES = { crafting = "Crafting", smelting = "Smelting", fuel = "Fuel" } :: { [Category]: string }
+JeiData.CATEGORIES = { "crafting", "smelting", "fuel", "refining", "heating", "combustion" } :: { Category }
+JeiData.TITLES = {
+	crafting = "Crafting",
+	smelting = "Smelting",
+	fuel = "Fuel",
+	refining = "Refining",
+	heating = "Heat Generator",
+	combustion = "Combustion Generator",
+} :: { [Category]: string }
 -- The item each category's tab shows (Minecraft's catalysts).
-JeiData.TAB_ITEMS = { crafting = "CraftingTable", smelting = "Furnace", fuel = "Coal" } :: { [Category]: string }
+JeiData.TAB_ITEMS = {
+	crafting = "CraftingTable",
+	smelting = "Furnace",
+	fuel = "Coal",
+	refining = "OilRefinery",
+	heating = "HeatGenerator",
+	combustion = "CombustionGenerator",
+} :: { [Category]: string }
 -- The items each category's recipes are made in (JEI's recipe catalysts), whose uses list them all.
 JeiData.CATALYSTS = {
 	crafting = { "CraftingTable" },
@@ -65,6 +102,9 @@ JeiData.CATALYSTS = {
 	smelting = { "Furnace", "ElectricFurnace" },
 	-- (Mekanism Generators' Heat Generator burns the same fuel.)
 	fuel = { "Furnace", "HeatGenerator" },
+	refining = { "OilRefinery" },
+	heating = { "HeatGenerator" },
+	combustion = { "CombustionGenerator" },
 } :: { [Category]: { string } }
 -- JEI's ingredient cycle: one item per second.
 JeiData.CYCLE_SECONDS = 1
@@ -142,6 +182,86 @@ function JeiData.craftingGrid(recipe: Crafting.Recipe): { [number]: { number } }
 	return grid
 end
 
+--[[ Fluids ]]
+
+--[[
+	The items a fluid stands for in lookups: its full bucket, then its source block's item (Lava
+	Bucket, Lava). Empty for none.
+]]
+function JeiData.fluidItems(fluid: number): { number }
+	local record = Fluids.get(fluid)
+	if record == nil then
+		return {}
+	end
+	local items = { record.bucket }
+	local block = Items.ofBlock(record.source)
+	if block and block ~= record.bucket then
+		table.insert(items, block)
+	end
+	return items
+end
+
+-- The machine `name`'s numbers (Machines.info of its BlockList block; empty when it is missing).
+local function infoOf(name: string): { [string]: number }
+	local block = Blocks.find(name)
+	return if block then Machines.info(block) else {}
+end
+
+-- The fluid entries: the Oil Refinery's bucket of oil, and a bucket burnt in each generator.
+local function fluidEntries(): { Entry }
+	local entries: { Entry } = {}
+	local bucket = Fluids.BUCKET
+	local refinery = infoOf("OilRefinery")
+	if refinery.ticksPerBucket and refinery.energyPerTick then
+		local ticks = refinery.ticksPerBucket
+		table.insert(entries, {
+			category = "refining",
+			recipe = nil,
+			inputs = {},
+			output = nil,
+			shapeless = false,
+			ticks = ticks,
+			fluidInputs = { { fluid = Fluids.OIL, amount = bucket } },
+			fluidOutput = { fluid = Fluids.FUEL, amount = math.floor(bucket * (refinery.fuelPerOil or 1)) },
+			energy = refinery.energyPerTick * ticks,
+			power = refinery.energyPerTick,
+		})
+	end
+	local heat = infoOf("HeatGenerator")
+	if heat.lavaPerTick and heat.heatGeneration and heat.lavaPerTick > 0 then
+		local ticks = bucket / heat.lavaPerTick
+		table.insert(entries, {
+			category = "heating",
+			recipe = nil,
+			inputs = {},
+			output = nil,
+			shapeless = false,
+			ticks = ticks,
+			fluidInputs = { { fluid = Fluids.LAVA, amount = bucket } },
+			fluidOutput = nil,
+			energy = heat.heatGeneration * ticks,
+			power = heat.heatGeneration,
+		})
+	end
+	local combustion = infoOf("CombustionGenerator")
+	if combustion.fuelPerTick and combustion.energyPerMb and combustion.fuelPerTick > 0 then
+		local ticks = bucket / combustion.fuelPerTick
+		table.insert(entries, {
+			category = "combustion",
+			recipe = nil,
+			inputs = {},
+			output = nil,
+			shapeless = false,
+			ticks = ticks,
+			fluidInputs = { { fluid = Fluids.FUEL, amount = bucket } },
+			fluidOutput = nil,
+			energy = combustion.energyPerMb * bucket,
+			power = combustion.energyPerMb * combustion.fuelPerTick,
+		})
+	end
+	return entries
+end
+
 --[[ The index ]]
 
 local built = false
@@ -178,11 +298,28 @@ local function add(entry: Entry)
 	if output then
 		index(byOutput, output.item, entry)
 	end
+	local fluidOutput = entry.fluidOutput
+	if fluidOutput then
+		for _, item in JeiData.fluidItems(fluidOutput.fluid) do
+			index(byOutput, item, entry)
+		end
+	end
 	local seen: { [number]: boolean } = {}
 	for cell = 1, 9 do
 		local items = entry.inputs[cell]
 		if items then
 			for _, item in items do
+				if not seen[item] then
+					seen[item] = true
+					index(byInput, item, entry)
+				end
+			end
+		end
+	end
+	local fluidInputs = entry.fluidInputs
+	if fluidInputs then
+		for _, stack in fluidInputs do
+			for _, item in JeiData.fluidItems(stack.fluid) do
 				if not seen[item] then
 					seen[item] = true
 					index(byInput, item, entry)
@@ -228,6 +365,9 @@ local function build()
 			shapeless = false,
 			ticks = fuel.ticks,
 		})
+	end
+	for _, entry in fluidEntries() do
+		add(entry)
 	end
 	for name, members in Recipes.tags :: { [string]: { string } } do
 		local ids: { number } = {}
@@ -353,6 +493,23 @@ end
 -- A smelting recipe's time: "10 s" (ticks at 20 per second).
 function JeiData.smeltText(ticks: number): string
 	return `{amount(ticks / 20)} s`
+end
+
+-- A fluid stack's amount: "1,000 mB".
+function JeiData.fluidAmount(stack: FluidStack): string
+	return Items.formatFluid(stack.amount)
+end
+
+--[[
+	The text lines of a fluid entry: refining "5 s, 20 kJ" and "200 J/t"; a generator "Makes
+	4 MJ" and "200 J/t for 1000 s" (a bucket of lava; of fuel "Makes 10 MJ", "2.5 kJ/t for 200 s").
+]]
+function JeiData.fluidTexts(entry: Entry): { string }
+	local energy, power = entry.energy or 0, entry.power or 0
+	if entry.category == "refining" then
+		return { `{JeiData.smeltText(entry.ticks)}, {Items.formatEnergy(energy)}`, `{Items.formatEnergy(power)}/t` }
+	end
+	return { `Makes {Items.formatEnergy(energy)}`, `{Items.formatEnergy(power)}/t for {JeiData.smeltText(entry.ticks)}` }
 end
 
 -- A fuel's worth: "Burns 8 items", "Burns 1.5 items", "Burns 1 item" (burn ticks / 200).

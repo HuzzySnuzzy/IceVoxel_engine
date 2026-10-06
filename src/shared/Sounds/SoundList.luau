@@ -424,6 +424,94 @@ SoundList.EVENTS = {
 		source = "players",
 		side = "server",
 	},
+
+	--[[
+		Lava (Minecraft 1.20.1). LavaFluid.animateTick: lava open to the air above pops now and
+		then (block.lava.pop, cue volume 0.2..0.4, pitch 0.9..1.05) and bubbles (block.lava.ambient,
+		the same), each client by itself (Audio/Ambience). LiquidBlock.fizz: lava hardening against
+		water and lava turning water to stone hiss (block.lava.extinguish, volume 0.5, pitch
+		2.6 +- 0.8; server Behaviours/Fluid). A bucket filled with lava or oil, or emptied, sounds
+		thicker than water (item.bucket.fill_lava, item.bucket.empty_lava; Fluids `fillSound`,
+		`emptySound`). Burning: a hurt by lava sizzles (entity.generic.burn, volume 0.4, pitch
+		2..2.4: Entity.lavaHurt, a player's or an item's), water putting a burning player out hisses
+		(entity.generic.extinguish_fire, volume 0.7, pitch 1.6 +- 0.4, a triangle here flattened to
+		+- 0.25). These carry Minecraft's numbers themselves: the server plays them with no cue
+		volume or pitch on top. Stand-ins: the splash pitched down for the pop and the buckets, the
+		falling wind pitched up into a hiss or down into a rumble.
+	]]
+	{
+		name = "block.lava.pop",
+		id = SPLASH,
+		volume = 0.7,
+		pitch = 2.2,
+		pitchVariance = 0.08,
+		duration = 0.2,
+		source = "blocks",
+		side = "client",
+	},
+	{
+		name = "block.lava.ambient",
+		id = FALLING,
+		volume = 0.6,
+		pitch = 0.45,
+		pitchVariance = 0.08,
+		duration = 1.5,
+		source = "blocks",
+		side = "client",
+	},
+	{
+		name = "block.lava.extinguish",
+		id = FALLING,
+		volume = 0.5,
+		pitch = 2.6,
+		pitchVariance = 0.3,
+		duration = 0.6,
+		fallback = { id = SPLASH, pitch = 2.2 },
+		source = "blocks",
+		side = "server",
+	},
+	{
+		name = "item.bucket.fill_lava",
+		category = "item.bucket.fill",
+		id = SPLASH,
+		volume = 0.5,
+		pitch = 0.7,
+		pitchVariance = 0.1,
+		source = "players",
+		side = "server",
+	},
+	{
+		name = "item.bucket.empty_lava",
+		category = "item.bucket.empty",
+		id = SPLASH,
+		volume = 0.6,
+		pitch = 0.5,
+		pitchVariance = 0.1,
+		source = "blocks",
+		side = "server",
+	},
+	{
+		name = "entity.generic.burn",
+		id = FALLING,
+		volume = 0.4,
+		pitch = 2.2,
+		pitchVariance = 0.2,
+		duration = 0.35,
+		fallback = { id = SPLASH, pitch = 2.5 },
+		source = "players",
+		side = "server",
+	},
+	{
+		name = "entity.generic.extinguish_fire",
+		id = FALLING,
+		volume = 0.7,
+		pitch = 1.6,
+		pitchVariance = 0.25,
+		duration = 0.5,
+		fallback = { id = SPLASH, pitch = 1.8 },
+		source = "players",
+		side = "server",
+	},
 } :: { EventSpec }
 
 -- The lid sounds of blocks with a menu (Blocks `menu`). Furnaces and crafting tables have none.

@@ -170,8 +170,23 @@ return function(t, shared, require)
 			t.ok(made ~= nil and made.item == recipe.result, `{Items.get(recipe.result).name} is craftable`)
 		end
 		-- (99 before the four Universal Cables; 105 before the upgrade cards and the Solar Panel;
-		-- 108 before the four Batteries; 112 before Shears.)
-		t.eq(#Crafting.recipes, 113, "recipes compiled")
+		-- 108 before the four Batteries; 112 before Shears; 113 before the Oil Refinery and the
+		-- Combustion Generator.)
+		t.eq(#Crafting.recipes, 115, "recipes compiled")
+	end)
+
+	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()
+		local I, G, O, F, B, D = id.IronIngot, id.Glass, id.OsmiumIngot, id.Furnace, id.Bucket, id.GlowDust
+		local refinery = result({ I, G, I, O, F, O, I, B, I }, 3)
+		t.eq(refinery and refinery.item, id.OilRefinery, "iron and glass, osmium and a furnace, a bucket")
+		t.eq(refinery and refinery.count, 1)
+		t.eq(refinery and refinery.data, nil, "a crafted machine carries no data")
+		t.eq(result({ I, G, I, O, F, O, I, I, I }, 3), nil, "the bucket is its outlet")
+		local generator = result({ O, B, O, I, F, I, O, D, O }, 3)
+		t.eq(generator and generator.item, id.CombustionGenerator, "a bucket, a furnace, glow dust")
+		t.eq(generator and generator.count, 1)
+		t.eq(result({ O, B, O, I, F, I, O, O, O }, 3), nil, "glow dust for the power out")
+		t.eq(result({ O, id.WaterBucket, O, I, F, I, O, D, O }, 3), nil, "an empty bucket")
 	end)
 
 	t.test("smelting: recipes and fuel follow Minecraft", function()

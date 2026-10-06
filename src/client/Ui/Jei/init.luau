@@ -26,6 +26,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Types = require(Shared.Inventory.Types)
 
@@ -341,6 +342,15 @@ end
 	says which tag), or lines of their own (the view's "+", shapeless mark and tabs).
 ]]
 function Jei.tooltipAt(self: Self, point: Vector2): (number?, { Line }?)
+	-- A fluid stack: its fluid and amount (JEI's fluid tooltip), not its bucket's.
+	local fluid = self.view:fluidAt(point)
+	if fluid then
+		return nil,
+			{
+				{ text = Fluids.name(fluid.fluid), colour = Style.Colour.Text },
+				{ text = JeiData.fluidAmount(fluid), colour = Style.Colour.Gray },
+			}
+	end
 	local item, items = self.view:itemAt(point)
 	if item then
 		local tag = JeiData.tagOf(items)

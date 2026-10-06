@@ -18,8 +18,11 @@
 	networks move energy (EnergyNet.solve). A kind whose tick errors is reported once and skipped.
 	Every Eject.INTERVAL (10) ticks a machine with output slots also pushes its results into the
 	chests next to it after its tick (Transmitters/Eject, Mekanism's ejector; the transporters
-	around take theirs themselves). Afterwards `takeChanges` says whose slots and whose data
-	changed (their viewers need a snapshot).
+	around take theirs themselves), and every tick a machine with output tanks pushes them into
+	the pipes and Fluid Tanks next to it (TransmitterWorld.ejectFluid, Mekanism's ejector at
+	fluidAutoEjectRate). Afterwards `takeChanges` says whose slots and whose data changed since
+	the last step (their viewers need a snapshot): the data is compared with what it was after the
+	last step, so what pipes and buckets put into a machine's tanks between two steps counts too.
 
 	The sky. Kinds ask whether a cell sees the sky straight up (TickContext `sky`: solar panels).
 	`seesSky` answers from a cache per cell, filled by the game's uncached look (Env `sky`:
@@ -35,10 +38,10 @@
 	chests).
 
 	Replication. `takeRecords` gives the Machines records (energy, capacity, the network's input
-	and output, the machine's own rate, active, its kind's state code) that changed since they
-	were last sent, each at most every RECORD_INTERVAL ticks (4 a second). `chunkRecords` gives a
-	chunk's records that are not in the default state (empty, idle, the block's capacity, state
-	0), to send with its edit list.
+	and output, the machine's own rate, active, its kind's state code, its tanks' contents for
+	WAILA) that changed since they were last sent, each at most every RECORD_INTERVAL ticks (4 a
+	second). `chunkRecords` gives a chunk's records that are not in the default state (empty,
+	idle, the block's capacity, state 0, empty tanks), to send with its edit list.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -53,6 +56,7 @@ local Machines = require(Shared.Machines)
 local EditRules = require(script.Parent.Parent.Network.EditRules)
 local Eject = require(script.Parent.Parent.Transmitters.Eject)
 local Grid = require(script.Parent.Parent.Transmitters.Grid)
+local TransmitterWorld = require(script.Parent.Parent.Transmitters.TransmitterWorld)
 local EnergyNet = require(script.Parent.EnergyNet)
 local Types = require(script.Parent.Types)
 
@@ -61,6 +65,7 @@ export type Machine = Types.Machine
 export type Component = Types.Component
 export type Env = Types.Env
 type MachineRecord = Types.MachineRecord
+type MachineTank = Types.MachineTank
 
 local ENERGY, CAPACITY, INPUT, OUTPUT, RATE, ACTIVE =
 	Machines.ENERGY, Machines.CAPACITY, Machines.INPUT, Machines.OUTPUT, Machines.RATE, Machines.ACTIVE
@@ -132,7 +137,23 @@ function MachineWorld.network(world: World, x: number, y: number, z: number): Co
 	return if key then world.componentOf[key] else nil
 end
 
--- The record a machine's clients see by default (none sent): empty, idle, the block's capacity.
+-- A machine's tanks as records carry them (Machines.tankContents), nil for a kind without tanks;
+-- `empty` gives them all empty (the default record's).
+local function recordTanks(machine: Machine, empty: boolean): { MachineTank }?
+	if not Machines.hasTanks(machine.block) then
+		return nil
+	end
+	local tanks: { MachineTank } = {}
+	for i, tank in Machines.tankContents(machine.container) do
+		tanks[i] = if empty
+			then { fluid = 0, amount = 0, capacity = tank.capacity }
+			else { fluid = tank.fluid, amount = tank.amount, capacity = tank.capacity }
+	end
+	return tanks
+end
+
+-- The record a machine's clients see by default (none sent): empty, idle, the block's capacity,
+-- its tanks empty.
 local function defaultRecord(machine: Machine): MachineRecord
 	return {
 		x = machine.x,
@@ -145,6 +166,7 @@ local function defaultRecord(machine: Machine): MachineRecord
 		rate = 0,
 		active = false,
 		state = 0,
+		tanks = recordTanks(machine, true),
 	}
 end
 
@@ -162,7 +184,25 @@ function MachineWorld.record(machine: Machine): MachineRecord
 		rate = data[RATE],
 		active = data[ACTIVE] ~= 0,
 		state = Machines.state(machine.container),
+		tanks = recordTanks(machine, false),
 	}
+end
+
+-- (A change in a tank alone resends the record: WAILA shows the tanks.)
+local function sameTanks(a: { MachineTank }?, b: { MachineTank }?): boolean
+	if a == nil or b == nil then
+		return a == b
+	end
+	if #a ~= #b then
+		return false
+	end
+	for i, tank in a do
+		local other = b[i]
+		if tank.fluid ~= other.fluid or tank.amount ~= other.amount or tank.capacity ~= other.capacity then
+			return false
+		end
+	end
+	return true
 end
 
 local function sameRecord(a: MachineRecord, b: MachineRecord): boolean
@@ -173,6 +213,7 @@ local function sameRecord(a: MachineRecord, b: MachineRecord): boolean
 		and a.rate == b.rate
 		and a.active == b.active
 		and a.state == b.state
+		and sameTanks(a.tanks, b.tanks)
 end
 
 --[[ The sky ]]
@@ -399,10 +440,10 @@ function MachineWorld.step(world: World)
 	ctx.tick = world.tick
 	ctx.dayTime = if dayTime then dayTime() else NOON
 	local eject = world.tick % Eject.INTERVAL == 0
+	local pipes = world.env.transmitters
 	for _, machine in world.machines do
 		local container = machine.container
 		local data = container.data :: { number }
-		remember(machine.previous, data)
 		local slots, previousSlots = container.slots, machine.previousSlots
 		for slot = 1, container.size do
 			previousSlots[slot] = slots[slot]
@@ -415,6 +456,9 @@ function MachineWorld.step(world: World)
 		end
 		if eject and #machine.kind.outputs > 0 then
 			Eject.push(world.env, machine.x, machine.y, machine.z, container)
+		end
+		if pipes and #machine.kind.outputTanks > 0 then
+			TransmitterWorld.ejectFluid(pipes, machine.x, machine.y, machine.z, container)
 		end
 		data = container.data :: { number }
 		data[INPUT], data[OUTPUT] = 0, 0
@@ -429,10 +473,12 @@ function MachineWorld.step(world: World)
 	end
 	world.moved = EnergyNet.solve(world)
 	for key, machine in world.machines do
-		if changedFrom(machine.previous, machine.container.data :: { number }) then
+		local data = machine.container.data :: { number }
+		if changedFrom(machine.previous, data) then
 			world.dataChanged[key] = machine
 			world.dirtyRecords[key] = true
 		end
+		remember(machine.previous, data)
 	end
 end
 

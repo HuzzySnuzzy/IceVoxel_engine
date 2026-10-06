@@ -210,7 +210,9 @@ return function(t, shared, require)
 		elseif info.kind == FLUID then
 			for _, d in dirs do
 				local n = neighbour(d[1], d[2], d[3])
-				if n ~= nil and buffer.readu8(cull, n) == 0 and n ~= id then
+				-- (A cave twin is its source: CaveLava next to Lava is the same fluid.)
+				local same = n ~= nil and Blocks.get(n).fluid ~= nil and Blocks.surfaceForm(n) == Blocks.surfaceForm(id)
+				if n ~= nil and buffer.readu8(cull, n) == 0 and not same then
 					local above = neighbour(0, 1, 0)
 					local surface = buffer.readu8(Blocks.fluidHeightLut, id)
 					if surface < Blocks.FLUID_FULL and Blocks.get(above :: number).appearance ~= app then
@@ -241,32 +243,37 @@ return function(t, shared, require)
 		hideFoliage: boolean
 	): (number, number)
 		local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hideCaves, nil, hideFoliage)
-		-- Sparse lights (glow lichen): the cell of each LIGHT_BOX box nearest its centre carries the
-		-- light (surface field 1; the first in y, z, x order on a tie), see GreedyMesher.
-		local light = GreedyMesher.LIGHT_BOX
+		-- Sparse lights: the cell of each light box nearest its centre carries the light (the first
+		-- in y, z, x order on a tie), see GreedyMesher: glow lichen per LIGHT_BOX box (surface field
+		-- 1), lava per FLUID_LIGHT_BOX box (FLUID_LIT on its height).
 		local best: { [string]: { number } } = {}
 		for y = y0, y1 - 1 do
 			for z = 0, SIZE - 1 do
 				for x = 0, SIZE - 1 do
 					local need = classify(data, height, x, y, z, hideCaves, hideFoliage)
-					if need ~= 0 and need < STRIDE and buffer.readu8(GreedyMesher.sparseLightLut, need) == 1 then
-						local key = `{x // light},{y // light},{z // light}`
-						local score = GreedyMesher.lightScore(x, y, z)
+					local app = need % STRIDE
+					if need ~= 0 and buffer.readu8(GreedyMesher.sparseLightLut, app) == 1 then
+						local fluid = Blocks.appearances[app].kind == FLUID
+						local light = if fluid then GreedyMesher.FLUID_LIGHT_BOX else GreedyMesher.LIGHT_BOX
+						local key = `{fluid} {x // light},{y // light},{z // light}`
+						local score = GreedyMesher.lightScore(x, y, z, light)
 						if best[key] == nil or score < best[key][1] then
-							best[key] = { score, (y * SIZE + z) * SIZE + x }
+							best[key] =
+								{ score, (y * SIZE + z) * SIZE + x, if fluid then GreedyMesher.FLUID_LIT else 1 }
 						end
 					end
 				end
 			end
 		end
-		local lit: { [number]: boolean } = {}
+		local lit: { [number]: number } = {}
 		for _, chosen in best do
-			lit[chosen[2]] = true
+			lit[chosen[2]] = chosen[3]
 		end
 		local function expected(x: number, y: number, z: number): (number, boolean)
 			local need, wild = classify(data, height, x, y, z, hideCaves, hideFoliage)
-			if lit[(y * SIZE + z) * SIZE + x] then
-				need += STRIDE
+			local gain = lit[(y * SIZE + z) * SIZE + x]
+			if gain then
+				need += gain * STRIDE
 			end
 			return need, wild
 		end

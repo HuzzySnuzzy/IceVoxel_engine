@@ -22,11 +22,15 @@ return function(t, shared, require)
 	local SEED = 12345
 	local gen = TerrainGenerator.new(SEED, { structures = false })
 
+	-- (`isTwin`: glow lichen's cave twins. The generated lava and oil have their own, CaveLava and
+	-- CaveOil: tests/spec/LavaGeneration and OilWells.)
 	local isTwin: { [number]: boolean } = {}
 	local isLichen: { [number]: boolean } = {}
+	local anyTwin: { [number]: boolean } = {}
 	for id = 0, Blocks.count - 1 do
-		isTwin[id] = Blocks.isCaveTwin(id)
 		isLichen[id] = string.find(Blocks.get(id).name, "GlowLichen") ~= nil
+		anyTwin[id] = Blocks.isCaveTwin(id)
+		isTwin[id] = anyTwin[id] and isLichen[id]
 	end
 	local generatedTwins: { [number]: boolean } = {}
 	for _, id in CaveDecor.TWINS do
@@ -58,7 +62,7 @@ return function(t, shared, require)
 		local n = 0
 		for i = 0, buffer.len(r.data) // 2 - 1 do
 			local id = buffer.readu16(r.data, i * 2)
-			if id == CAVE or isTwin[id] then
+			if id == CAVE or anyTwin[id] then
 				n += 1
 			end
 		end
@@ -393,10 +397,14 @@ return function(t, shared, require)
 	t.test("lichen: costs little generation time", function()
 		-- Each chunk generated without caves, then carved and decorated as `generate` does (the
 		-- carver's own map of carved cells), timing both: the result must be the generated chunk.
-		-- (Without surface caves, which `generate` carves in between.)
+		-- (Without surface caves, which `generate` carves in between, and without the lava and oil
+		-- that follow the caves: Generation/Lava and OilWells.)
 		local entrances, ravines = Config.Caves.Entrances, Config.Caves.Ravines
 		local wereOn = { entrances.Enabled, ravines.Enabled }
 		entrances.Enabled, ravines.Enabled = false, false
+		local lakes, wells = Config.Caves.LavaLakes, Config.Caves.OilWells
+		local lavaWas = { Config.Caves.LavaLevel, lakes.Underground.Enabled, lakes.Surface.Enabled, wells.Enabled }
+		Config.Caves.LavaLevel, lakes.Underground.Enabled, lakes.Surface.Enabled, wells.Enabled = 0, false, false, false
 		local Relief = require(shared.Generation.Relief)
 		local relief = Relief.new(SEED)
 		local carve = Caves.new(SEED, function(x: number, z: number): number
@@ -446,6 +454,8 @@ return function(t, shared, require)
 		-- slows buffer-heavy code like this most: in a normal VM, as in Roblox, lichen is ~5% of a
 		-- chunk with caves.)
 		entrances.Enabled, ravines.Enabled = wereOn[1], wereOn[2]
+		Config.Caves.LavaLevel, lakes.Underground.Enabled, lakes.Surface.Enabled, wells.Enabled =
+			lavaWas[1], lavaWas[2], lavaWas[3], lavaWas[4]
 		t.ok(decorTime < 0.2 * generateTime, "lichen costs less than a fifth of generation")
 	end)
 end

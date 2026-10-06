@@ -42,7 +42,8 @@
 	        placed from the clicked face and the look (`jigsawPlacement`, through `placementFor`);
 	      - turning blocks with a structure (`rotate`, `rotateLut`, `turnDirection`): wall
 	        torches, glow lichen and jigsaws face the turned way;
-	      - cave twins (`caveTwin`: CaveGlowLichen*): the same look and behaviour as their twin, but
+	      - cave twins (`caveTwin`: CaveGlowLichen*, CaveLava, CaveOil): the same look and behaviour
+	        as their twin (a fluid twin is a source of its group, but never `fluidId`'s answer), but
 	        cave air while caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`), never part of
 	        their item's variants (`placementFor` never picks one), and turned back into their twin
 	        by `surfaceForm` (with CaveAir into Air) when a structure is saved;
@@ -463,9 +464,11 @@ for index, spec in BlockList do
 		def.appearance = appearance
 	end
 
-	if def.fluid then
+	-- (A cave twin of a source is no level of its group: `fluidId` answers the ordinary source.)
+	if def.fluid and spec.caveTwin == nil then
 		local group = def.fluid.group
 		fluidIds[group] = fluidIds[group] or {}
+		assert(fluidIds[group][def.fluid.level] == nil, `Two blocks are {group} level {def.fluid.level}`)
 		fluidIds[group][def.fluid.level] = id
 	end
 
@@ -481,7 +484,15 @@ assert(ids.Air == Blocks.AIR and ids.CaveAir == Blocks.CAVE_AIR, "Air and CaveAi
 -- The mesher packs a fluid height next to the appearance id in 16 bits (see GreedyMesher).
 assert(#appearances < 1024, "At most 1023 distinct block appearances are supported")
 
--- Cave twins look and behave exactly like their twin (BlockList `caveTwin`).
+-- Cave twins look and behave exactly like their twin (BlockList `caveTwin`): a fluid's twin is a
+-- source of the same group too.
+local function sameFluid(a: BlockDef, b: BlockDef): boolean
+	local x, y = a.fluid, b.fluid
+	if x == nil or y == nil then
+		return x == y
+	end
+	return x.group == y.group and x.level == y.level and x.tickDelay == y.tickDelay
+end
 for _, def in defs do
 	local name = def.caveTwin
 	if name then
@@ -489,6 +500,7 @@ for _, def in defs do
 		assert(twin.caveTwin == nil, `Block {def.name} twins another twin`)
 		assert(
 			def.appearance == twin.appearance
+				and sameFluid(def, twin)
 				and def.item == (twin.item or twin.name)
 				and def.support == twin.support
 				and def.light == twin.light
@@ -536,10 +548,14 @@ for id, def in defs do
 end
 
 -- 1 per *appearance* id when its blocks are meshed one box per block: decorated faces, shapes
--- (drawn box by box in every cell) and light sources (one light per block).
+-- (drawn box by box in every cell) and light sources (one light per block). Never a fluid: a
+-- lava sea is a surface of merged boxes, and only some of its cells carry a light (sparse lights,
+-- like glow lichen's; see GreedyMesher).
 Blocks.singleLut = buffer.create(#appearances + 1)
 for _, appearance in appearances do
-	local single = appearance.decor ~= nil or appearance.shape ~= nil or appearance.light > 0
+	local single = appearance.decor ~= nil
+		or appearance.shape ~= nil
+		or (appearance.light > 0 and appearance.kind ~= Blocks.KIND_FLUID)
 	buffer.writeu8(Blocks.singleLut, appearance.id, if single then 1 else 0)
 end
 
@@ -668,7 +684,9 @@ function Blocks.isOpaque(id: number): boolean
 	return buffer.readu8(Blocks.cullLut, id) == 1
 end
 
--- Block id of `group` (e.g. "Water") at `level` (0 = source, 1-7 = flowing, 8 = falling).
+-- Block id of `group` (e.g. "Water") at `level` (0 = source, 1-7 = flowing, 8 = falling). Never a
+-- cave twin (CaveLava): flowing out of one makes ordinary fluid. Shared/Fluids has the fluid of
+-- any block (`Fluids.ofBlock`, twins included).
 function Blocks.fluidId(group: string, level: number): number
 	local levels = fluidIds[group]
 	assert(levels and levels[level], `Unknown fluid {group} level {level}`)

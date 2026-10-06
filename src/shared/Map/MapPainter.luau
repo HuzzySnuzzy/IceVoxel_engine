@@ -10,7 +10,10 @@
 
 	Colouring: the surface block's colour, darkened where trees are dense, lit from the north-west
 	using the slope towards the neighbouring pixel (hill shading) and a little brighter higher up;
-	water is tinted by depth and frozen seas are drawn as ice.
+	water is tinted by depth and frozen seas are drawn as ice. Oil wells' geysers are painted over
+	it as black dots in the oil's colour: the pixel holding the spout, and every pixel whose centre
+	lies within the lake's radius (Generation/OilWells; the wells are decided from the seed and the
+	terrain alone, a few per tile at most).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -20,6 +23,7 @@ local TerrainGenerator = require(script.Parent.Parent.Generation.TerrainGenerato
 
 local SEA = Config.SeaLevel
 local ICE = Blocks.get(Blocks.id.Ice).color
+local OIL = Blocks.get(Blocks.id.Oil).color
 
 local writeu32 = buffer.writeu32
 local floor = math.floor
@@ -69,6 +73,36 @@ local function shade(
 	return pack(c[1] * k, c[2] * k, c[3] * k)
 end
 
+-- Paints the geysers of the wells near the tile (see the header).
+local function paintWells(
+	generator: TerrainGenerator.Generator,
+	pixels: buffer,
+	originX: number,
+	originZ: number,
+	scale: number,
+	size: number
+)
+	local span = size * scale
+	local oil = pack(OIL[1], OIL[2], OIL[3])
+	for _, well in generator.oilWells(originX, originZ, originX + span - 1, originZ + span - 1) do
+		if not well.geyser then
+			continue
+		end
+		-- The well's position in pixels (a block's centre), and the lake's radius.
+		local cx, cz = (well.x + 0.5 - originX) / scale, (well.z + 0.5 - originZ) / scale
+		local r = well.lakeRadius / scale
+		local spoutX, spoutZ = floor(cx), floor(cz)
+		for py = math.max(floor(cz - r), 0), math.min(floor(cz + r), size - 1) do
+			for px = math.max(floor(cx - r), 0), math.min(floor(cx + r), size - 1) do
+				local dx, dz = px + 0.5 - cx, py + 0.5 - cz
+				if (px == spoutX and py == spoutZ) or dx * dx + dz * dz <= r * r then
+					writeu32(pixels, (py * size + px) * 4, oil)
+				end
+			end
+		end
+	end
+end
+
 function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 	local column = generator.column
 	local heights: { number } = {}
@@ -99,6 +133,7 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 				yield()
 			end
 		end
+		paintWells(generator, pixels, originX, originZ, scale, size)
 		return pixels
 	end
 end

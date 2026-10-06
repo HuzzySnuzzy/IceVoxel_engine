@@ -46,6 +46,42 @@ A fast, Minecraft-style voxel engine for Roblox.
   by a river or within 2 blocks of a library structure, no tree stands over one and no spawn lands
   in one; grass and snow grow back on a pit's floor. Far ravines and pits show as cuts up to about
   400 blocks away (LOD levels 1-2).
+- **Lava.** Minecraft 1.20.1's lava. Every cave below y 11 (`Caves.LavaLevel`) is flooded, so the
+  deepest caves and the Underlands' floor under the highest mountains are lava seas (a cave
+  entrance or ravine cut that deep ends in lava too); one in 3-6 cave-rich chunks has a lava lake
+  with a stone rim sunk into a cave floor 30 or more blocks down; and rare lava lakes lie on the
+  surface (Minecraft's lake_lava_surface, about 0.7-1.6 per km²) on dry land, never in snowy or wet
+  biomes, by water, a structure, an oil lake or the spawn. Generated lava lies still until
+  something next to it changes. It flows 3 blocks, a block every 1.5 s (no infinite sources),
+  gives light 15 and glows, and hardens where water touches it, with a hiss: a source into
+  **obsidian** (hardness 50: only a diamond pickaxe gets it, in 9.4 s), flowing lava into
+  cobblestone, and lava pouring down into water turns the water into stone. Torches and plants it
+  flows over burn without a drop. It hurts: 4 half hearts every half second in it (armor softens
+  that), then burning for 15 s after you leave it, half a heart a second, unless water puts you
+  out; burning players show flames, and in first person you see fire at the bottom of the screen.
+  Creative and spectator players never burn. Dropped items burn up in it. You wade through it with
+  Minecraft's lava physics (0.78 blocks a second, 40% of water's, sinking slowly, jump to rise; a
+  fall into it hurts less), and with your eyes in it the view closes in to a block of orange fog.
+  Lava open to the air pops and bubbles. A Lava Bucket picks it up and burns 20,000 ticks in a
+  furnace (100 items; the empty bucket stays in the fuel slot). One PointLight per 16 × 16 × 16
+  blocks of its drawn surface lights its surroundings (about one a chunk on a lava sea; those more
+  than 96 blocks away, `Caves.LavaLightDistance`, 48 on phones, switch off but still glow), and the
+  lava of hidden caves costs nothing until you go in.
+- **Oil wells, oil and fuel.** BuildCraft's oil wells: one candidate per 512 × 512 blocks, about
+  one well per km² of desert, savanna and plains (0.9-1.1), a quarter of that on other land, and
+  small pockets under the sea floor (about 0.3 per km² of sea). A well is a buried sphere of oil
+  20-40 blocks down (radius 8-12, 5-7 or 3-4 for large, medium and small wells: some 4,800, 900 or
+  190 buckets), kept out of the caves. Large and medium wells on land have a geyser: a column of
+  oil from the deposit up through a black oil lake (radius up to 10, 1-3 deep; smaller and ragged on
+  rough ground or near water) to 16 or 6 blocks into the air, seen from afar and on the map as a
+  black dot (0.2-0.3 geysers per km²). Generated oil lies still until something next to it changes:
+  break into a geyser and it pours out. **Oil** is black, glossy and thick: it flows 7 blocks, a
+  block a second, heading for a drop only up to 3 blocks away; you wade through it as through lava,
+  but it doesn't hurt, and it is no furnace fuel. The Oil Refinery turns it into **fuel**, amber and
+  thin: it flows like water (without infinite sources), you swim in it, and the Combustion Generator
+  burns it. With your eyes in oil you see 2 blocks, in fuel 32 (and under water the view now fogs
+  over too, 96 blocks once your eyes are used to it). Oil and Fuel Buckets carry them. A buried
+  deposit costs nothing to draw while caves are hidden.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -89,12 +125,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
   see how it is made; right click or `U` shows what it is used for: crafting recipes on a 3 × 3
   grid (an ingredient any planks will do for cycles through them), smelting with its 10 seconds,
-  and fuels with how many items they smelt. On a crafting table, a furnace, a Heat Generator or an Electric Furnace, `U` also lists every
-  recipe made in it (JEI's catalysts). Items inside a recipe open their own recipes,
-  `Backspace` goes back and `E` or `Escape` returns to the inventory. The `+` beside a crafting
-  recipe moves its ingredients from the inventory into the open crafting grid (`Shift`: as many
-  sets as you have); when it is greyed out, hovering it says why and shows what is missing. In
-  creative, `Shift` + click gives a full stack.
+  and fuels with how many items they smelt. On a crafting table, a furnace, a Heat Generator or an
+  Electric Furnace, `U` also lists every recipe made in it (JEI's catalysts). Items inside a recipe
+  open their own recipes, `Backspace` goes back and `E` or `Escape` returns to the inventory. The
+  `+` beside a crafting recipe moves its ingredients from the inventory into the open crafting grid
+  (`Shift`: as many sets as you have); when it is greyed out, hovering it says why and shows what is
+  missing. In creative, `Shift` + click gives a full stack. Three more categories show fluids as
+  fluid stacks (a slot in the fluid's colour, "Oil" and "1,000 mB" on hover), standing for their
+  bucket and block in lookups: refining (a bucket of oil into fuel in 5 s for 20 kJ), the Heat
+  Generator's lava ("Makes 4 MJ", "200 J/t for 1000 s") and the Combustion Generator's fuel ("Makes
+  10 MJ", "2.5 kJ/t for 200 s"); `U` on an Oil Refinery or a Combustion Generator lists theirs.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
   sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
@@ -110,11 +150,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   out), so its own light has none and reaches
   through a wall within its range. Torches and lanterns need a sturdy block to hang on, as in
   Minecraft (not leaves, a chest or a cactus), pop off and drop when that block goes, and flowing
-  water washes torches away. Players walk through lanterns (in Minecraft they bump into them), but
-  a lantern can't be placed inside a player. Recipes: 4 torches from coal or charcoal over a stick,
-  a lantern from 8 iron nuggets around a torch, a Glow Block from 4 Glow Dust (it breaks into 4
-  again). **Glow Dust** is the game's blue glowing dust, in place of Minecraft's glowstone dust (the
-  game has no Nether): glow lichen in caves drops it.
+  water washes torches away (flowing lava burns them). Players walk through lanterns (in
+  Minecraft they bump into them), but a lantern can't be placed inside a player. Recipes: 4
+  torches from coal or charcoal over a stick, a lantern from 8 iron nuggets around a torch, a Glow
+  Block from 4 Glow Dust (it breaks into 4 again). **Glow Dust** is the game's blue glowing dust, in
+  place of Minecraft's glowstone dust (the game has no Nether): glow lichen in caves drops it.
 - **Foliage.** Minecraft 1.20.1's ground plants: short grass, ferns, tall grass and large ferns,
   dead bushes, twelve flowers (dandelion, poppy, blue orchid, allium, azure bluet, four tulips,
   oxeye daisy, cornflower, lily of the valley), four two-block tall flowers (sunflower, lilac,
@@ -155,16 +195,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   box); SAVE captures it: air is saved as air (it clears the world where the structure goes), a
   **structure void** (a small translucent cube, not solid, saved as "keep") leaves whatever is
   there, Data blocks become data markers with their string, jigsaws keep their settings, blocks with
-  slots their items (item data, such as a tank's water, is not kept), and cave air and generated
-  glow lichen are saved as their surface forms. **Load** places a structure by name (saved this
-  session, or in the structure library) or from data pasted into its screen, with a rotation (0, 90,
-  180, 270), a mirror, an integrity (the share of blocks placed, drawn from a seed; 0 picks one) and
-  "Show Bounding Box". As in Minecraft the first LOAD of a template of another size only sets the
-  size ("position prepared": the outline shows where it goes) and the next places it, a couple of
-  thousand blocks a frame, turning torches, lichen and jigsaws with it. **Corner** is a name,
-  **Data** a marker string. Unlike Minecraft the screen stays open after DETECT, SAVE and LOAD and
-  repeats the answer on its status line; Done keeps the fields and closes, Cancel, `Escape` and `E`
-  drop them. Outlines and labels show only in creative. WAILA names a structure block's mode and
+  slots their items (item data, such as a tank's fluid, is not kept), and cave air and generated
+  glow lichen, lava and oil are saved as their surface forms. **Load** places a structure by name
+  (saved this session, or in the structure library) or from data pasted into its screen, with a
+  rotation (0, 90, 180, 270), a mirror, an integrity (the share of blocks placed, drawn from a seed;
+  0 picks one) and "Show Bounding Box". As in Minecraft the first LOAD of a template of another size
+  only sets the size ("position prepared": the outline shows where it goes) and the next places it,
+  a couple of thousand blocks a frame, turning torches, lichen and jigsaws with it. **Corner** is a
+  name, **Data** a marker string. Unlike Minecraft the screen stays open after DETECT, SAVE and LOAD
+  and repeats the answer on its status line; Done keeps the fields and closes, Cancel, `Escape` and
+  `E` drop them. Outlines and labels show only in creative. WAILA names a structure block's mode and
   name.
 - **Structure data.** SAVE turns a structure into compact text, "IVS1:" and base64url (letters,
   digits, `-` and `_`), which pastes into chat and into a Luau string as it is: the palette by block
@@ -229,7 +269,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   of a pit or a ravine) and for 5 seconds after (`Lod.UndergroundSplitDistanceL1`), so walking in
   and out of a cave mouth doesn't rebuild the chunks around it. The Cave View setting scales all of
   it (phones, on the Low preset: tunnels 64 blocks, caverns 112, full detail about 96). F3 shows
-  how far caves are revealed and how many lichen lights there are.
+  how far caves are revealed and how many lichen and lava lights there are.
 - **From the surface into the caves.** Cave entrances and ravines are surface terrain: drawn from
   above like any hillside and lit by the sky (an entrance is lit at its mouth and dark about 30
   blocks in, a ravine's floor is under the open sky, the caves beyond stay dark). Where one runs
@@ -268,25 +308,34 @@ A fast, Minecraft-style voxel engine for Roblox.
   there is no other way. Transporters coloured with the Configurator (Minecraft's 16 dyes) only
   join their own colour or uncoloured ones, and the items they pull keep their colour: they travel
   through uncoloured transporters and ones of their colour only (items pulled by an uncoloured
-  transporter stay off coloured ones), to keep lines apart. Mechanical Pipes move water between
-  Fluid Tanks (32 000 to 256 000 mB) at Mekanism's rates, and Minecraft's Bucket and Water Bucket
-  carry it to and from tanks and the world. The Configurator cycles a side between normal, push,
+  transporter stay off coloured ones), to keep lines apart. Mechanical Pipes move water, lava, oil
+  and fuel between Fluid Tanks (32 000 to 256 000 mB) and machines' fluid tanks at Mekanism's
+  rates, one fluid per network (pipes holding different fluids stay apart, so fluids never mix),
+  and Minecraft's buckets (the Bucket and the Water, Lava, Oil and Fuel Buckets) carry each of
+  them to and from tanks, machines and the world. Machines with fluid tanks (the Heat Generator's
+  lava, the Oil Refinery's oil and fuel, the Combustion Generator's fuel) take pipes on every
+  side: pipes fill their input tanks, a pull side drains their output tanks, and they push their
+  outputs out on their own into the Fluid Tanks next to them and into pipes that lead somewhere
+  for them (never back into the pipe or tank that feeds them). A full bucket pours into a
+  machine's input tank with room for all of it, an empty one takes 1000 mB from an output tank,
+  else from an input tank; when it can do neither, the machine's screen opens instead. The
+  Configurator cycles a side between normal, push,
   pull and none (right click) and a transporter's colour (sneak + right click). Recipes follow
   Mekanism's shapes with the game's materials (gold, diamond and emerald stand for its alloys).
-  Players walk through transmitters, as through lanterns; their state and the tanks' water live in
+  Players walk through transmitters, as through lanterns; their state and the tanks' fluids live in
   memory, like chests. Pressurized Tubes and Thermodynamic Conductors are not included: the game
   has no gas or heat (Universal Cables: see Electricity).
   Items that no inventory takes go back to the one they came from (a furnace's or machine's results
   never do), or wait in their transporter until one turns up; a broken transporter drops what is in
-  it. Pipes join into networks that share their water (breaking a pipe loses its share), and both
+  it. Pipes join into networks that share their fluid (breaking a pipe loses its share), and both
   keep working where no player is, like furnaces.
   You see how they are set: transmitters grow arms towards what they connect to, ending in a
-  collar between two of them and in a plate on a chest, furnace or tank; where a side pulls from
-  or pushes into one of those the arm has a blue (pull) or orange (push) band, and coloured
-  transporters are tinted their colour. Items glide through the transporters; pipes and tanks
-  show their water. The Configurator acts on the arm you point at (or the face of the core);
-  WAILA names that side's mode, a transporter's colour and the items inside it, and the water in
-  a pipe or tank.
+  collar between two of them and in a plate on a chest, furnace, tank or machine; where a side
+  pulls from or pushes into one of those the arm has a blue (pull) or orange (push) band, and
+  coloured transporters are tinted their colour. Items glide through the transporters; pipes and
+  tanks show their fluid in its colour (lava glowing). The Configurator acts on the arm you point
+  at (or the face of the core); WAILA names that side's mode, a transporter's colour and the items
+  inside it, and the fluid in a pipe or tank ("Lava: ~4,000 / 8,000 mB").
 - **Electricity.** Mekanism's energy, counted in joules (J, kJ, MJ, GJ). Universal Cables (Basic,
   Advanced, Elite, Ultimate) join machines into energy networks; a network moves at most the sum
   of its cables' capacities a tick (8 kJ, 128 kJ, 1.02 MJ and 8.19 MJ per cable, Mekanism's
@@ -305,20 +354,26 @@ A fast, Minecraft-style voxel engine for Roblox.
   Recipes: 8 Basic Universal Cables from an osmium ingot, glow dust and an osmium ingot in a
   row (Mekanism: steel, redstone, steel); 8 cables around a gold ingot, a diamond or an emerald
   make 8 of the next tier. Like chests, energy lives in memory.
-- **Heat Generator.** Mekanism Generators' Heat Generator burns furnace fuel for electricity: put
-  coal, charcoal, wood or anything else a furnace burns in its fuel slot (by hand, shift-click or a
-  transporter, through any side; transporters never take it back out) and for as long as the item
-  would burn in a furnace it makes 200 J a tick (Mekanism's numbers), so a coal is 320 kJ and a
-  plank 60 kJ. It stores 160 kJ and gives up to 400 J/t to the cables and machines around it. It
-  burns only as much as it has room for, so a machine using less than 200 J/t still gets all of
-  each item's energy; full, it stops, keeping what is left of the item, and goes on as soon as
-  energy is taken. Its panel shows the fuel slot under a flame (the burn time left),
-  "Producing 200 J/t" or "Idle", and the energy bar; WAILA says the same, and while it burns the
-  window on its sides glows and it crackles like a lit furnace. Broken with a pickaxe it keeps its
-  energy and what is left burning in its item ("Energy: 80 kJ", "Fuel: 60 s"). Recipe: Mekanism's
-  with iron for its copper, three iron ingots over planks, an osmium ingot and planks, over iron, a
-  furnace and iron. JEI lists every fuel under its uses. Mekanism's lava and nether bonuses don't
-  apply.
+- **Heat Generator.** Mekanism Generators' Heat Generator burns furnace fuel and lava for
+  electricity: put coal, charcoal, wood or anything else a furnace burns in its fuel slot (by hand,
+  shift-click or a transporter, through any side) and for as long as the item would burn in a
+  furnace it makes 200 J a tick (Mekanism's numbers), so a coal is 320 kJ and a plank 60 kJ. Lava
+  goes into its 24,000 mB lava tank (Mekanism's) from pipes and buckets, or from Lava Buckets put
+  in the fuel slot, poured in once all 1000 mB fit (the empty bucket stays in the slot, where a
+  transporter may take it out; transporters never take fuel out). A mB of lava burns for 20 ticks
+  at 200 J/t, so a Lava Bucket is 4 MJ, 12.5 coal, as in a furnace (Mekanism's own ratio of lava
+  to coal); the tank's lava burns before the next item lights. Every side touching lava adds
+  30 J/t, with fuel or without (Mekanism's bonus: up to 180 J/t, so 380 J/t in all). It stores
+  160 kJ and gives up to 400 J/t to the cables and machines around it. It burns only as much as it
+  has room for, so a machine using less than 200 J/t still gets all of each item's energy; full,
+  it stops, keeping what is left burning, and goes on as soon as energy is taken. Its panel shows
+  the lava gauge, the fuel slot under a flame (the burn time left), "Producing 200 J/t" or
+  "Idle", and the energy bar; WAILA says the same and shows its lava, and while it burns the window
+  on its sides glows and it crackles like a lit furnace. Broken with a pickaxe it keeps its energy,
+  what is left burning and its lava in its item ("Energy: 80 kJ", "Fuel: 60 s", "Lava: 5,000 mB").
+  Recipe: Mekanism's with iron for its copper, three iron ingots over planks, an osmium ingot and
+  planks, over iron, a furnace and iron. JEI lists every fuel under its uses, and its lava.
+  Mekanism's nether bonus and heat model (heat capacity, losses) don't apply.
 - **Electric Furnace.** Mekanism's Energized Smelter, named the Electric Furnace, smelts what a
   furnace smelts on electricity instead of fuel: 50 J a tick for 200 ticks an item (Mekanism's
   numbers), so an item takes a furnace's 10 seconds and costs 10 kJ, and a coal burnt in a Heat
@@ -337,6 +392,31 @@ A fast, Minecraft-style voxel engine for Roblox.
   redstone, osmium ingots for the control circuits and a furnace for the steel casing: glow
   dust, an osmium ingot and glow dust, over glass, a furnace and glass, over the top row
   again. JEI lists every smelting recipe under its uses. It takes Speed and Energy Upgrades (below).
+- **Oil Refinery.** BuildCraft's refinery on Mekanism's electricity turns oil into fuel, 1 mB into
+  1 mB, 10 mB a tick for 200 J a tick: a bucket in 5 s for 20 kJ. Oil goes into its 10,000 mB oil
+  tank by pipe or Oil Bucket, and fuel comes out of its 10,000 mB fuel tank by pipe or empty
+  bucket; it also pushes its fuel out on its own into the Fluid Tanks and pipes next to it that
+  lead somewhere that takes fuel, so the line bringing its oil never fills up with fuel. Short of
+  oil or room for fuel it refines what it can, for that share of the energy. It stores 40 kJ
+  (cables may fill it in a tick) and takes Speed and Energy Upgrades with Mekanism's maths: a
+  bucket takes 100 x 10^(-n/8) ticks (74 with one Speed Upgrade, 10 with 8: 100 mB a tick for
+  20 kJ/t). Its panel shows the oil gauge, an arrow (the bucket's progress), the fuel gauge, "Using
+  200 J/t", "No power", "Output full" or "Idle", the upgrade slots and the energy bar; WAILA says
+  the same and shows both tanks, and its heater window glows while it works. Broken with a pickaxe
+  it keeps its energy and both tanks in its item. Recipe: iron, glass and iron, over an osmium
+  ingot, a furnace and an osmium ingot, over iron, a bucket and iron (BuildCraft's gears and
+  engine parts aren't in the game).
+- **Combustion Generator.** BuildCraft's combustion engine as a Mekanism generator: it burns fuel
+  for 2,500 J a tick, a mB every 4 ticks, so a Fuel Bucket burns for 200 s and makes 10 MJ, the
+  strongest fuel there is: 2.5 Lava Buckets or about 31 coal in a Heat Generator, and 500 times
+  the 20 kJ refining it cost (one refinery keeps 40 of them going). Its fuel tank holds 10,000 mB
+  (pipes and Fuel Buckets fill it; nothing takes fuel back out of it but an empty bucket); it
+  stores 1 MJ and gives up to 5 kJ/t to the cables and machines around it. Like the Heat
+  Generator it burns only what it has room for, keeping what is left of a mB burning. Its panel
+  shows the fuel gauge, "Producing 2.5 kJ/t" or "Idle" and the energy bar; WAILA says the same and
+  shows its fuel, and while it burns its chamber glows and crackles. Broken with a pickaxe it keeps
+  its energy and fuel. Recipe: an osmium ingot, a bucket and an osmium ingot, over iron, a furnace
+  and iron, over an osmium ingot, glow dust and an osmium ingot.
 - **Solar Panel.** Mekanism Generators' Solar Generator, named the Solar Panel: a thin panel of four
   dark blue cells on a short post (no full cube, as Mekanism's; players walk through it, as through
   a cable). While nothing opaque stands anywhere above it (glass, torches, cables, other panels and,
@@ -355,15 +435,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   machine takes of each; Mekanism's stack to 64). Recipes: Mekanism's shape with the ingots for its
   dusts and gold for its alloy: glass, over a gold ingot, an osmium ingot (speed) or a gold ingot
   (energy) and a gold ingot, over glass. The Electric Furnace and the Solar Panel take up to 8 of
-  each in two slots at the lower left of their panels, by hand or shift-click (transporters never
-  touch them); an empty slot shows the card's outline. Mekanism's maths: with n Speed and e Energy
-  Upgrades an Electric Furnace takes 200 x 10^(-n/8) ticks an item (149 with one card, 20 with 8)
-  at 50 x 10^((2n - e)/8) J a tick and stores 20 kJ x 10^(e/8), so 8 Speed Upgrades smelt ten
-  times as fast for ten times the energy an item, and 8 of each ten times as fast for the usual
-  10 kJ. A Solar Panel (Mekanism's take none) makes and gives out 10^(n/8) times as much (8 cards:
-  500 J/t in full sun) and stores 96 kJ x 10^(e/8) (8 cards: 960 kJ). Taking cards out applies at
-  once: energy over a smaller store is lost. The cards drop when the machine is broken (Mekanism
-  keeps them in its item), so a machine placed again holds at most its base store.
+  each in two slots at the lower left of their panels (the Oil Refinery at the lower right), by
+  hand or shift-click (transporters never touch them); an empty slot shows the card's outline. The
+  Oil Refinery's maths is the Electric Furnace's with a bucket of oil for an item (above).
+  Mekanism's maths: with n Speed and e Energy Upgrades an Electric Furnace takes 200 x 10^(-n/8)
+  ticks an item (149 with one card, 20 with 8) at 50 x 10^((2n - e)/8) J a tick and stores 20 kJ x
+  10^(e/8), so 8 Speed Upgrades smelt ten times as fast for ten times the energy an item, and 8 of
+  each ten times as fast for the usual 10 kJ. A Solar Panel (Mekanism's take none) makes and gives
+  out 10^(n/8) times as much (8 cards: 500 J/t in full sun) and stores 96 kJ x 10^(e/8) (8 cards:
+  960 kJ). Taking cards out applies at once: energy over a smaller store is lost. The cards drop
+  when the machine is broken (Mekanism keeps them in its item), so a machine placed again holds at
+  most its base store.
 - **Batteries.** Mekanism's Energy Cubes, named Batteries: Basic, Advanced, Elite and Ultimate
   store 4, 16, 64 and 256 MJ and take in and give out up to 4, 16, 64 and 256 kJ a tick
   (Mekanism's numbers). They are the backup power: every tick, what the generators have left after
@@ -392,11 +474,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   veins in all rock, plus Mekanism's "middle" veins concentrated around y 100: about as much as
   iron below y 197 and about half as much in the mountains above.
 - **Item data.** Items carry a little data of their own, Minecraft's item NBT kept flat: up to 16
-  named numbers, strings or flags. A Fluid Tank broken in survival keeps its water in its item
-  ("Water: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
-  Mekanism; in creative, placing a tank item that holds water fills the new tank too. Items with
-  different data never stack, and wherever a stack goes (clicks, chests, furnaces, transporters,
-  the ground, death drops) its data goes with it.
+  named numbers, strings or flags. A Fluid Tank broken in survival keeps its fluid in its item
+  ("Lava: 12,000 mB" under its name in the inventory) and gets it back when placed again, as in
+  Mekanism, and so do machines their energy and their fluid tanks; in creative, placing a tank item
+  that holds a fluid fills the new tank too. Items with different data never stack, and wherever a
+  stack goes (clicks, chests, furnaces, transporters, the ground, death drops) its data goes with
+  it.
 - **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
   ViewportFrame with the same look as the block in the world. Dropped items and the item in a
   character's hand are drawn the same way.
@@ -404,42 +487,47 @@ A fast, Minecraft-style voxel engine for Roblox.
   points at, like the Jade mod: the block's icon and name, the tool and tier it needs with a
   green check or red cross for the item in hand ("Requires Iron Pickaxe"), the mining progress
   as a line along its bottom edge, and "IceVoxel" as the mod name. It also names dropped items,
-  other players (health, game mode) and water when no block is in reach. While `F3` is open it
-  shows everything the game knows about the block: id, position and chunk, biome, hardness,
-  tool, drops with the held item and by hand, break time, light, fluid level, render kind,
-  friction and menu.
+  other players (health, game mode) and fluids when no block is in reach (lava says "Light 15"),
+  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). While `F3` is open it shows everything
+  the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
+  item and by hand, break time, light, fluid level, render kind, friction and menu.
 - **Sounds.** Minecraft's sound events for everything that should make a sound: breaking, placing
   and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
   water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
   swimming, chest lids, the furnace you are using crackling while it burns, items picked up, tools
-  breaking, armor put on, getting hurt and dying, interface clicks and a rare rumble deep in caves.
-  They are stand-ins made from the sounds every Roblox client ships, told apart by pitch, so
-  nothing has to be uploaded, and players hear what others do within 16 blocks. Each one can be
-  replaced by your own sound (see Extending).
+  breaking, armor put on, getting hurt and dying, interface clicks and a rare rumble deep in caves;
+  lava popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss
+  when water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
+  crackling. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
+  sounds every Roblox client ships, told apart by pitch, so nothing has to be uploaded, and players
+  hear what others do within 16 blocks. Each one can be replaced by your own sound (see
+  Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
-  trick), flowing water (Minecraft rules, including infinite sources), grass turning into dirt and
-  plants popping off when their soil goes.
+  trick), flowing water, lava, oil and fuel (Minecraft rules, including water's infinite sources
+  and lava hardening against water), lava and burning, grass turning into dirt and plants popping
+  off when their soil goes.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
   Minecraft's widening field of view (FOV and FOV Effects are settings), sneaking that never walks
   off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint jumping, slippery
-  ice, swimming (sprint under water, steered by the view), currents, hopping out of water and fall
-  damage. Steps up to just over a block are walked up without jumping, so the
-  steep terrain is walkable (`Config.Movement.StepHeight`; Minecraft's is 0.6). The Roblox
-  character is purely cosmetic: it is drawn on the hull (interpolated) and never collides with
-  anything.
+  ice, swimming (sprint under water or fuel, steered by the view), currents, wading through lava
+  and oil (Minecraft's lava physics), hopping out of a fluid and fall damage. Steps up to just over
+  a block are walked up without jumping, so the steep terrain is walkable
+  (`Config.Movement.StepHeight`; Minecraft's is 0.6). The Roblox character is purely cosmetic: it is
+  drawn on the hull (interpolated) and never collides with anything.
 - **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
-  up to 5 blocks away, so it runs down slopes instead of flooding the ground around it. Flowing water
-  steps down level by level, and its current pushes the player downstream.
-- **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
-  Right click the map to add waypoints (saved between sessions), teleport, or center the view.
-  The Minimap setting hides the minimap, which then costs nothing (on touch screens a small "Map"
-  button takes its corner, to open the world map).
-- **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
-  live in `SpawnUnsafeBlocks`.
+  up to 5 blocks away, so it runs down slopes instead of flooding the ground around it. Flowing
+  water steps down level by level, and its current pushes the player downstream. Lava and oil head
+  for a drop only up to 3 blocks away, fuel as far as water.
+- **Minimap and world map.** Painted straight from the generator, so the map shows the whole world,
+  oil geysers as black dots. Right click the map to add waypoints (saved between sessions),
+  teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
+  touch screens a small "Map" button takes its corner, to open the world map).
+- **Safe spawns.** Spawns and teleports never land in water, lava, oil or fuel, on leaves or next to
+  cacti or lava; the rules live in `SpawnUnsafeBlocks`.
 - **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
@@ -483,7 +571,7 @@ Studio tips:
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
-| Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
+| Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
@@ -498,9 +586,9 @@ Studio tips:
 | Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
 | Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
-| Swim up / down | Hold `Space` / `Shift` in water | A / B | Jump / Sneak |
-| Swim fast     | Sprint under water; look where to go | L3 | Sprint button |
-| Climb out     | Swim at a ledge just above the water | stick | move |
+| Swim up / down | Hold `Space` / `Shift` in water or fuel (in lava and oil `Space` rises slowly; there is no swimming) | A / B | Jump / Sneak |
+| Swim fast     | Sprint under water or fuel; look where to go | L3 | Sprint button |
+| Climb out     | Swim (or wade) at a ledge just above the surface | stick | move |
 | In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the hotbar, `Q` drop, double click to collect, drag to spread | A / X / Y, B closes | tap / long press |
 | Recipes / uses (JEI) | Click / right click an item in the list, or `R` / `U` over any item; `Backspace` back, `E` / `Escape` back to the inventory | A / X on a list item, B leaves the recipes | Tap / long press |
 | Move a recipe (JEI) | `+` beside a crafting recipe (`Shift`: as many as possible) | A | Tap |
@@ -573,20 +661,26 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
                             drops, menus), plants (soil sets, tall halves, foliage tints)
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
-                            Mekanism's energy and fluid formats); ItemList (items that are not blocks)
+                            Mekanism's energy and fluid formats, what a full bucket leaves);
+                            ItemList (items that are not blocks)
+  Fluids/  FluidList        the fluid registry: water, lava, oil and fuel by id (0 none .. 4 fuel),
+                            their blocks and cave twins, buckets, colour, light, movement, harm,
+                            furnace fuel, fog and bucket sounds
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract, what furnaces and
                             machines push out)
   Machines/                 Mekanism machines: Core (kinds, the machine container and its data,
                             slot rules, panels and their lines, energy maths and the even split,
-                            state codes, sustained data), Upgrades (Mekanism's upgrade cards:
-                            their slots and maths), Kinds/ (a module per kind: Creative, the
-                            Creative Energy Cube; Generator, the Heat Generator; Smelter, the
-                            Electric Furnace; Solar, the Solar Panel; Battery, the Batteries)
+                            state codes, sustained data, fluid tanks and their gauges),
+                            Upgrades (Mekanism's upgrade cards: their slots and maths), Kinds/ (a
+                            module per kind: Creative, the Creative Energy Cube; Generator, the
+                            Heat Generator; Smelter, the Electric Furnace; Solar, the Solar
+                            Panel; Battery, the Batteries; Refinery, the Oil Refinery;
+                            Combustion, the Combustion Generator)
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
                             recipe may keep an ingredient's data), Crafting (grid matching),
-                            Smelting (the furnace tick)
+                            Smelting (the furnace tick; the Lava Bucket's burn time)
   Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
                             clicks, used by the server and for client prediction)
   Structures/               structure blocks' data and jigsaw structures: Template (the IVS1
@@ -596,7 +690,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             generated structures from the modules below and the place)
   StructureLibrary/         the structure library: Templates/ (IVS1 modules; Outpost, the
                             example), Pools (explicit template pools), Structures (what generates)
-  Entities/ItemPhysics      dropped item movement (server and client)
+  Entities/ItemPhysics      dropped item movement (server and client; floating in water and fuel,
+                            in lava and oil)
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
@@ -610,6 +705,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
     SurfaceCaves            cave entrances and ravines (worms carved as air; full detail and LOD
                             levels 1-2)
+    Lava                    lava below LavaLevel (levels 0-2), Minecraft's lava lakes
+                            (underground: full detail; surface: point-sampled up to
+                            StructureMaxLevel)
+    OilWells                BuildCraft's oil wells: deposits, geysers and their lakes, undersea
+                            pockets (point-sampled up to StructureMaxLevel; the map's dots)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
     StructureGen            library structures in chunks (random_spread starts, assembly cache,
                             pieces, foundations, generated chests)
@@ -618,7 +718,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Meshing/GreedyMesher      blocks -> boxes (parts)
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
-  Map/MapPainter            map tile colours from the generator (runs in the workers)
+  Map/MapPainter            map tile colours from the generator, oil geysers' dots (runs in the
+                            workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow, SectionGraph
                             (cave visibility: which sections connect, the search from the
                             camera), Horizon (far terrain hidden behind nearer terrain)
@@ -635,16 +736,18 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, Simulation, TimeOfDay (the
                             day clock, published as workspace attributes)
-  Behaviours/               Gravity, Fluid, Grass, Attached (torches and lanterns need support),
+  Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
+                            water), Grass, Attached (torches and lanterns need support),
                             Plant (plants need their soil and their other half), Drops (block
                             update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication
-  Entities/                 EntityWorld (item rules: pickup, merging, despawn), Entities
-                            (spawning, replication)
+  Entities/                 EntityWorld (item rules: pickup, merging, despawn, burning in lava),
+                            Entities (spawning, replication)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
-                            pure), Transport (items in transporters), Fluids (water in pipes),
+                            pure), Transport (items in transporters), Fluids (every fluid in
+                            pipes, machines' fluid tanks, the fluid ejector),
                             Eject (furnaces and machines push their results into chests; pure),
                             UseRules (buckets, Configurator), Transmitters (ticks, replication)
   Machines/                 Mekanism machines and energy on the server: MachineWorld (machines,
@@ -664,8 +767,10 @@ src/server   -> ServerScriptService.IceVoxel
                             /gamerule), Inventories + InventoryState (authoritative inventories),
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
-                            damage, invulnerability, suffocation), Spawning, SafeSpot +
-                            SpawnUnsafeBlocks (safety rules), Teleport (map, spectators),
+                            damage, invulnerability, suffocation, lava and burning), Burning
+                            (lava hurting and burning players and items; pure), Spawning,
+                            SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
+                            spectators),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
                             settings)
 
@@ -684,15 +789,18 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             groups), SectionDiff (in-place remesh), FrameBudget (adaptive build
                             budget), PartPool, ViewSettings (the view from the player's
                             settings), LightingController (day, night and cave lighting),
-                            SkyExposure (how much sky light reaches the camera), MeshOverlay +
-                            MeshRegions (far meshes)
+                            SkyExposure (how much sky light reaches the camera), FluidFog (the
+                            view from inside a fluid: fog and tint), MeshOverlay + MeshRegions
+                            (far meshes)
   Settings/                 the player's settings: State (values and choices), Schedule (when
                             changes apply), Pages (the menu's layout), saving them on the server
-  Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
+  Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
+                            (does a bucket on a machine act on its tanks or open its screen)
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
-                            energy bar, empty armor and upgrade slots' outlines), CreativeScreen,
+                            energy bar and fluid gauges, empty armor and upgrade slots'
+                            outlines), CreativeScreen,
                             ItemIcon (viewport icons, durability and energy bars), SlotClicks
                             (Minecraft clicks), Style, Waila + WailaInfo (what the crosshair
                             points at), Jei/ (Just Enough Items: item list, recipe view, recipe
@@ -703,8 +811,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             model), SettingsScreen (the Options menu)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
-                            (furnaces and Heat Generators crackling, caves), SoundRules (the pure
-                            rules)
+                            (furnaces, Heat and Combustion Generators crackling, lava, caves),
+                            SoundRules (the pure rules)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
@@ -713,12 +821,13 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Player/                   MovementController (the hull, input, the cosmetic character,
                             spectating a player), CharacterAnimator (avatar animations from the
                             hull), HeldItems, SpectatorView + SpectatorRules (who sees, hears and
-                            aims at spectators)
-  Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, water in pipes and
-                            tanks, items moving through transporters, the windows of a burning
-                            Heat Generator and a smelting Electric Furnace, Batteries' charge
-                            gauges, machines' records (WAILA, Ambience); TransmitterModel (their
-                            geometry, aiming, item paths)
+                            aims at spectators), BurningView (flames on burning players, the fire
+                            overlay in first person)
+  Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
+                            tanks, items moving through transporters, the windows of working
+                            generators, Electric Furnaces and Oil Refineries, Batteries' charge
+                            gauges, machines' records (WAILA, Ambience, buckets); TransmitterModel
+                            (their geometry, aiming, item paths, fluid colours)
   Rendering/ItemModels      3D models of items (icons, drops, hands); BlockDecor (the faces of
                             chests, crafting tables, furnaces, Mekanism's machines, structure
                             blocks and jigsaws)
@@ -774,6 +883,10 @@ for performance:
 | `Caves.LichenLightDistance` | math.huge | Glow lichen's lights shine at any distance; a number switches off those farther from the camera (the lichen still glows). |
 | `Caves.Entrances`         | Spacing 96, Chance 0.6 | Cave entrances: one candidate per 96 × 96 blocks, taken with `Chance`; `Radius` 1.5-3.5 blocks, `Length` 48-140 steps of a block, `Depth` 15-60 blocks below the surface, `Branch` 0.35 (the chance of a side tunnel); `Enabled = false`: none. |
 | `Caves.Ravines`           | Spacing 384, Chance 0.5 | Ravines: one candidate per 384 × 384 blocks; half width `Radius` 1.5 at the ends to up to 6 in the middle, `Length` 60-160 steps, `Depth` 20-45 blocks in the middle (8 at the ends). |
+| `Caves.LavaLevel`         | 11      | Cave air below this y is lava (CaveLava; surface caves cut that deep get Lava; Minecraft: below y -54, 10 above its floor); 0: none. |
+| `Caves.LavaLakes`         | Underground Rarity 1, Tries 8, Depth 30; Surface Rarity 200 | Lava lakes sunk into cave floors (one chunk in `Rarity` of those with caves tries `Tries` spots, at least `Depth` blocks below the surface) and on the surface (one candidate per `Rarity` chunks of area), none within `SpawnClearance` (128) blocks of the spawn; `Enabled = false`: none of that kind. |
+| `Caves.OilWells`          | Spacing 512, Chance 0.12 | Oil wells: one candidate per 512 × 512 blocks, a well with `Chance`, its biome's chance in `Biomes` (Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45) or `Sea` (0.15) under the sea (pockets of `SeaSize`, Small, no geyser); `Sizes` (share, deposit radius, lake radius, spout height: Large 25%, 8-12, 7-10, 16; Medium 50%, 5-7, 4-7, 6; Small 25%, 3-4, no geyser), `Depth` 20-40, `LakeDepth` 1-3, none within `SpawnClearance` (256) blocks of the spawn; `Enabled = false`: none. |
+| `Caves.LavaLightDistance` | 96      | Lava's lights within this many blocks of the camera are on (phones 48: `Caves.Mobile`); the lava still glows. |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
@@ -909,7 +1022,19 @@ silence the world; a Scriptable camera hears from where it is.
 1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` in BlockList; the
 per-tier numbers are Mekanism's, in `src/shared/Transmitters/Tiers.luau`. Any block with
 `container` slots is an inventory transporters connect to (all slots from every side, unless it is
-a furnace, `menu = "Furnace"`).
+a furnace, `menu = "Furnace"`). Pipes and tanks carry every fluid of `Shared/Fluids` whose record
+says `carriable`.
+
+**A fluid.** Append it to `src/shared/Fluids/FluidList.luau` (ids are list positions, sent and
+saved in items: at the end, and at most 255), its blocks with `fluid("<Name>", { color, material,
+... }, tickDelay)` at the end of BlockList (the same colour and light as its record), its full
+bucket at the end of ItemList, and its flow rules to `RULES` in `src/server/Behaviours/Fluid.luau`
+(slope distance, drop off, infinite sources, whether what it washes away burns). The registry and
+the flow rules check they agree when the game loads. Its record decides the rest: `color` (pipes,
+tanks, gauges, JEI), `light` (a lit fluid gets sparse lights and glows in pipes), `physics` /
+`drag` / `push` / `swim` (players and dropped items), `damage` / `burnSeconds` / `extinguishes`
+(lava's hurt and burning), `furnaceFuel` (its bucket's burn time), `fogColor` / `fogStart` /
+`fogEnd` (the view from inside it) and its bucket sounds.
 
 **A machine.** A machine is a block with `machine = { kind = "name" }` and `energy = { capacity =
 J, input = J/t?, output = J/t? }` in BlockList (output only: a generator; input only: a machine
@@ -936,9 +1061,15 @@ from its tick context (`ctx.dayTime`, `ctx.sky(x, y, z)`: cached, never generati
 `Machines/Upgrades` gives any kind Mekanism's upgrade slots (`Upgrades.slots(x, y)`) and maths
 (`ticks`, `energyPerTick`, `capacity`, `production`, `setCapacity`).
 Batteries (`Kinds/Battery.luau`) are storage: the same `input` and `output`, no slots and no tick;
-EnergyNet does the rest. A kind's `lines(view)` adds lines under its status line (`panel.lines =
-{ x, y }`), and a shaped recipe's `keep` (a key character used once) makes its result take that
-ingredient's item data, as a battery's tier upgrade keeps its charge.
+EnergyNet does the rest. A kind with fluid tanks gives `tanks = { { name = "oil", capacity = mB,
+fluids = { Fluids.OIL }, role = "input" | "output", gauge = { x, y } } }`: the amounts live in its
+data after its fields, and pipes, buckets, the ejector, the panel's gauges, WAILA and its item
+follow from the role (`insertFluid` / `extractFluid`, `pourBucket` / `fillBucket`, `gauges`,
+`tankContents`, `save` / `restore`); its tick uses `tankInsert` / `tankExtract`, and `info` gives
+JEI its numbers. The Oil Refinery (`Kinds/Refinery.luau`) and the Combustion Generator
+(`Kinds/Combustion.luau`) are the examples. A kind's `lines(view)` adds lines under its status
+line (`panel.lines = { x, y }`), and a shaped recipe's `keep` (a key character used once) makes its
+result take that ingredient's item data, as a battery's tier upgrade keeps its charge.
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make
@@ -1209,6 +1340,9 @@ lune run tests/structure encode t.luau [--out file] [--module]        # an edite
 lune run tests/build_structures [--check] [--print]   # rebuild (or check) the example outpost
 ```
 
+`lune run tests/run` runs the whole suite: 1,135 tests, all passing (lava and oil have LavaOil,
+LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion).
+
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
 timings match Roblox's (they were 1.3-2.6 × slow before). Modules run with native code by default;
@@ -1238,7 +1372,7 @@ luau-lsp analyze --platform=roblox --sourcemap=sourcemap.json \
 Natural next steps, roughly in order:
 
 - **Persistence.** Edits, inventories and chest contents live in memory (`WorldServer.edits`,
-  `Players/InventoryState`, `Players/Containers`), as do transmitter states, network water, tank
+  `Players/InventoryState`, `Players/Containers`), as do transmitter states, network fluids, tank
   contents and items in transit (`Transmitters/TransmitterWorld`), structure blocks' and jigsaws'
   settings and the session's saved structures (`Structures/StructureStore`, `StructureServer`);
   save them to DataStores (edits per region of 32 × 32 chunks, see "regions" in
@@ -1246,8 +1380,11 @@ Natural next steps, roughly in order:
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
-- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling and
-  suffocating inside a block (`Items.damageAfterArmor` is ready for it).
+- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling,
+  suffocating inside a block and lava (`Items.damageAfterArmor`, which lava already uses).
+- **More of lava and oil.** Fire blocks (lava sets nothing alight), basalt, water aquifers,
+  BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
+  particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on
   every side and furnaces don't light up while burning.
 - **More plants.** Saplings (dropped by leaves, growing into the existing tree builders), bone

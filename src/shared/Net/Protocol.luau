@@ -30,9 +30,9 @@
 	                 on block (x, y, z) with an item that is no block (the Configurator, buckets).
 	                 Sides are Shared/Transmitters' (0 Down, 1 Up, 2 North, 3 South, 4 West,
 	                 5 East). For the Configurator `side` is the transmitter's side picked from the
-	                 hit point; for a bucket the clicked face (water goes into (x, y, z) when it is
-	                 replaceable, else into (x, y, z) + offset(side)). An empty bucket aimed at a
-	                 water source sends the water's cell.
+	                 hit point; for a bucket the clicked face (the fluid goes into (x, y, z) when it
+	                 is replaceable, else into (x, y, z) + offset(side)). An empty bucket aimed at a
+	                 fluid's source (Shared/Fluids.isSource) sends the source's cell.
 	  StructureBlock i32 x, u16 y, i32 z, u8 op, then by op (Minecraft's
 	                 ServerboundSetStructureBlockPacket and its update types):
 	                   1 open     nothing: the player right clicked the block; the server answers
@@ -87,17 +87,19 @@
 	                 to play at (x, y, z) (blocks), `sound` an event number of Shared/Sounds,
 	                 volume and pitch in hundredths of the event's own (100 = as listed). The
 	                 sounds near the player this frame (server Audio/Sounds).
-	  Transmitters   u32 count, count x (i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fluid): the
-	                 state of Mekanism transmitters (Shared/Transmitters): the six side modes packed
-	                 2 bits a side (side 0 lowest, so at most 4095), the colour (0 none, 1..16 dyes;
-	                 a message with anything beyond either is malformed) and how full a
-	                 pipe's network is (0 empty .. 255 full, Transmitters.fillLevel). A record
-	                 replaces whatever the client knew about that position; transmitters in the
-	                 default state (all NORMAL, no colour, empty) need none, and the client forgets
-	                 positions that stop being transmitters. Sent with a chunk's edit list and to
-	                 the players near a change.
-	  Tanks          u32 count, count x (i32 x, u16 y, i32 z, u8 fluid (0 none, 1 water), u32 amount
-	                 (mB)): fluid tanks, the same way.
+	  Transmitters   u32 count, count x (i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fluid,
+	                 u8 fluidId): the state of Mekanism transmitters (Shared/Transmitters): the six
+	                 side modes packed 2 bits a side (side 0 lowest, so at most 4095), the colour
+	                 (0 none, 1..16 dyes), how full a pipe's network is (`fluid`: 0 empty .. 255
+	                 full, Transmitters.fillLevel) and what it holds (`fluidId`: a Shared/Fluids id,
+	                 0 none, 1 water, 2 lava, 3 oil, 4 fuel); a message with modes, a colour or a
+	                 fluid id beyond those is malformed. A record replaces whatever the client knew
+	                 about that position; transmitters in the default state (all NORMAL, no
+	                 colour, empty) need none, and the client forgets positions that stop being
+	                 transmitters. Sent with a chunk's edit list and to the players near a change.
+	  Tanks          u32 count, count x (i32 x, u16 y, i32 z, u8 fluid (a Shared/Fluids id: 0 none,
+	                 1 water, 2 lava, 3 oil, 4 fuel; beyond them is malformed), u32 amount (mB)):
+	                 fluid tanks, the same way.
 	  StructureBlocks u8 flags (bit 0: open, the answer to this player's open request: show the
 	                 screen of the record's block), u32 count, count x (i32 x, u16 y, i32 z,
 	                 u8 present, then when present is 1 the structure settings): structure blocks'
@@ -112,10 +114,13 @@
 	                 is the creative cube's infinity), f32 input, f32 output (J the energy network
 	                 put in / took out last tick), f32 rate (J/t the machine made, + or used, -),
 	                 u8 flags (bit 0: active), u8 state (the kind's state code, Shared/Machines
-	                 KindSpec `state`: why it is not working)): Mekanism machines (Shared/Machines)
-	                 for WAILA and the world, the same way as Tanks (a record replaces what the
-	                 client knew; a machine without one is empty and idle at its block's
-	                 capacity, state 0). NaN is malformed. A viewer of the machine's window gets
+	                 KindSpec `state`: why it is not working), u8 tanks (0 for a kind without
+	                 any), tanks x (u8 fluid (a Shared/Fluids id, 0 empty; beyond them is
+	                 malformed), u32 amount, u32 capacity (mB)): the machine's fluid tanks in its
+	                 kind's order, Machines.tankContents): Mekanism machines (Shared/Machines) for
+	                 WAILA and the world, the same way as Tanks (a record replaces what the client
+	                 knew; a machine without one is empty and idle at its block's capacity, state
+	                 0, its tanks empty). NaN is malformed. A viewer of the machine's window gets
 	                 its whole data in Inventory snapshots instead.
 	  Transport      u32 count, count x op (u8 op, u32 id, then by op): items in transporters.
 	                   1 add     u16 item, u8 count, i32 x, u16 y, i32 z (the transporter it is in),
@@ -161,6 +166,7 @@
 ]]
 
 local Config = require(script.Parent.Parent.Config)
+local Fluids = require(script.Parent.Parent.Fluids)
 local GameMode = require(script.Parent.Parent.GameMode)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
@@ -1004,12 +1010,26 @@ end
 
 --[[ Mekanism transmitters, fluid tanks, machines and items in transit (server -> client) ]]
 
--- A transmitter's state: packed side modes (u16), colour (0..16), fill (0..255).
-export type TransmitterRecord = { x: number, y: number, z: number, modes: number, colour: number, fluid: number }
--- A fluid tank: fluid (0 none, 1 water) and amount in mB.
+-- A transmitter's state: packed side modes (u16), colour (0..16), fill (`fluid`, 0..255) and the
+-- fluid a pipe's network holds (`fluidId`, Shared/Fluids: 0 none; nil writes 0, decoded records
+-- always have it).
+export type TransmitterRecord = {
+	x: number,
+	y: number,
+	z: number,
+	modes: number,
+	colour: number,
+	fluid: number,
+	fluidId: number?,
+}
+-- A fluid tank: fluid (Shared/Fluids id: 0 none, 1 water, 2 lava, 3 oil, 4 fuel) and amount in mB.
 export type TankRecord = { x: number, y: number, z: number, fluid: number, amount: number }
+-- One of a machine's fluid tanks: its fluid (Shared/Fluids id, 0 empty), amount and capacity in mB.
+export type MachineTank = { fluid: number, amount: number, capacity: number }
 -- A Mekanism machine: energy and capacity (J), the network's input / output and its own rate (J
--- per tick, the last tick's), whether it is working and its kind's state code (0..255).
+-- per tick, the last tick's), whether it is working, its kind's state code (0..255) and its
+-- tanks in order (Machines.tankContents; nil or empty for a kind without any, and decoded
+-- records without tanks have nil).
 export type MachineRecord = {
 	x: number,
 	y: number,
@@ -1021,6 +1041,7 @@ export type MachineRecord = {
 	rate: number,
 	active: boolean,
 	state: number,
+	tanks: { MachineTank }?,
 }
 -- An item entering a transporter or re-routed (`add`), or leaving the transporters (`remove`).
 export type TransportOp = {
@@ -1037,9 +1058,13 @@ export type TransportOp = {
 	path: { number },
 } | { op: "remove", id: number, reason: number }
 
-Protocol.TRANSMITTER_BYTES = 14
+Protocol.TRANSMITTER_BYTES = 15
 Protocol.TANK_BYTES = 15
+-- A Machines record's fixed part (up to its state), then its tank count byte and its tanks.
 Protocol.MACHINE_BYTES = 40
+Protocol.MACHINE_TANK_BYTES = 9
+-- Most tanks a Machines record carries (a u8 count).
+Protocol.MAX_MACHINE_TANKS = 255
 -- Most sides an `add` carries; a longer route is sent again on the way.
 Protocol.MAX_PATH = 255
 -- Why an item left the transporters (`remove`).
@@ -1063,6 +1088,11 @@ local function clampInt(value: number, low: number, high: number): number
 	return math.clamp(math.floor(value), low, high)
 end
 
+-- A fluid id as sent: a Shared/Fluids id, anything else (nil, unknown, NaN) none.
+local function fluidIdOf(value: number?): number
+	return if value and Fluids.isValid(value) then value else Fluids.NONE
+end
+
 function Protocol.encodeTransmitters(records: { TransmitterRecord }): buffer
 	local b = buffer.create(4 + #records * Protocol.TRANSMITTER_BYTES)
 	buffer.writeu32(b, 0, #records)
@@ -1074,13 +1104,14 @@ function Protocol.encodeTransmitters(records: { TransmitterRecord }): buffer
 		buffer.writeu16(b, o + 10, clampInt(record.modes, 0, MAX_MODES))
 		buffer.writeu8(b, o + 12, clampInt(record.colour, 0, MAX_COLOUR))
 		buffer.writeu8(b, o + 13, clampInt(record.fluid, 0, 255))
+		buffer.writeu8(b, o + 14, fluidIdOf(record.fluidId))
 		o += Protocol.TRANSMITTER_BYTES
 	end
 	return b
 end
 
 -- The records of a Transmitters message, or nil when it is malformed (modes beyond the six sides'
--- 12 bits or a colour beyond 16 included).
+-- 12 bits, a colour beyond 16 or an unknown fluid id included).
 function Protocol.decodeTransmitters(b: buffer): { TransmitterRecord }?
 	local len = buffer.len(b)
 	if len < 4 then
@@ -1094,7 +1125,8 @@ function Protocol.decodeTransmitters(b: buffer): { TransmitterRecord }?
 	local o = 4
 	for i = 1, count do
 		local modes, colour = buffer.readu16(b, o + 10), buffer.readu8(b, o + 12)
-		if modes > MAX_MODES or colour > MAX_COLOUR then
+		local fluidId = buffer.readu8(b, o + 14)
+		if modes > MAX_MODES or colour > MAX_COLOUR or fluidId > Fluids.COUNT then
 			return nil
 		end
 		records[i] = {
@@ -1104,6 +1136,7 @@ function Protocol.decodeTransmitters(b: buffer): { TransmitterRecord }?
 			modes = modes,
 			colour = colour,
 			fluid = buffer.readu8(b, o + 13),
+			fluidId = fluidId,
 		}
 		o += Protocol.TRANSMITTER_BYTES
 	end
@@ -1118,14 +1151,14 @@ function Protocol.encodeTanks(records: { TankRecord }): buffer
 		buffer.writei32(b, o, record.x)
 		buffer.writeu16(b, o + 4, record.y)
 		buffer.writei32(b, o + 6, record.z)
-		buffer.writeu8(b, o + 10, clampInt(record.fluid, 0, 255))
+		buffer.writeu8(b, o + 10, fluidIdOf(record.fluid))
 		buffer.writeu32(b, o + 11, clampInt(record.amount, 0, 4294967295))
 		o += Protocol.TANK_BYTES
 	end
 	return b
 end
 
--- The records of a Tanks message, or nil when it is malformed.
+-- The records of a Tanks message, or nil when it is malformed (an unknown fluid id included).
 function Protocol.decodeTanks(b: buffer): { TankRecord }?
 	local len = buffer.len(b)
 	if len < 4 then
@@ -1138,11 +1171,15 @@ function Protocol.decodeTanks(b: buffer): { TankRecord }?
 	local records: { TankRecord } = table.create(count)
 	local o = 4
 	for i = 1, count do
+		local fluid = buffer.readu8(b, o + 10)
+		if fluid > Fluids.COUNT then
+			return nil
+		end
 		records[i] = {
 			x = buffer.readi32(b, o),
 			y = buffer.readu16(b, o + 4),
 			z = buffer.readi32(b, o + 6),
-			fluid = buffer.readu8(b, o + 10),
+			fluid = fluid,
 			amount = buffer.readu32(b, o + 11),
 		}
 		o += Protocol.TANK_BYTES
@@ -1155,8 +1192,18 @@ local function finiteOrInfinite(value: number): number
 	return if value ~= value then 0 else value
 end
 
+-- Tanks a record sends (at most MAX_MACHINE_TANKS: a longer list sends its first ones).
+local function tankCount(record: MachineRecord): number
+	local tanks = record.tanks
+	return if tanks then math.min(#tanks, Protocol.MAX_MACHINE_TANKS) else 0
+end
+
 function Protocol.encodeMachines(records: { MachineRecord }): buffer
-	local b = buffer.create(4 + #records * Protocol.MACHINE_BYTES)
+	local size = 4
+	for _, record in records do
+		size += Protocol.MACHINE_BYTES + 1 + tankCount(record) * Protocol.MACHINE_TANK_BYTES
+	end
+	local b = buffer.create(size)
 	buffer.writeu32(b, 0, #records)
 	local o = 4
 	for _, record in records do
@@ -1173,23 +1220,45 @@ function Protocol.encodeMachines(records: { MachineRecord }): buffer
 		local state = record.state or 0
 		buffer.writeu8(b, o + 39, if state == math.floor(state) and state >= 0 and state <= 255 then state else 0)
 		o += Protocol.MACHINE_BYTES
+		local count = tankCount(record)
+		buffer.writeu8(b, o, count)
+		o += 1
+		local tanks = record.tanks
+		if tanks then
+			for i = 1, count do
+				local tank = tanks[i]
+				buffer.writeu8(b, o, fluidIdOf(tank.fluid))
+				buffer.writeu32(b, o + 1, clampInt(tank.amount, 0, 4294967295))
+				buffer.writeu32(b, o + 5, clampInt(tank.capacity, 0, 4294967295))
+				o += Protocol.MACHINE_TANK_BYTES
+			end
+		end
 	end
 	return b
 end
 
--- The records of a Machines message, or nil when it is malformed (NaN, flags beyond bit 0).
+--[[
+	The records of a Machines message, or nil when it is malformed (NaN, flags beyond bit 0, an
+	unknown fluid id, a length that is not what the counts say). Records without tanks have none
+	(`tanks` nil).
+]]
 function Protocol.decodeMachines(b: buffer): { MachineRecord }?
 	local len = buffer.len(b)
 	if len < 4 then
 		return nil
 	end
 	local count = buffer.readu32(b, 0)
-	if len ~= 4 + count * Protocol.MACHINE_BYTES then
+	-- (Each record takes at least its fixed part and its tank count: a count that can't fit is
+	-- refused before anything is made for it.)
+	if 4 + count * (Protocol.MACHINE_BYTES + 1) > len then
 		return nil
 	end
 	local records: { MachineRecord } = table.create(count)
 	local o = 4
 	for i = 1, count do
+		if o + Protocol.MACHINE_BYTES + 1 > len then
+			return nil
+		end
 		local energy, capacity = buffer.readf64(b, o + 10), buffer.readf64(b, o + 18)
 		local input, output, rate = buffer.readf32(b, o + 26), buffer.readf32(b, o + 30), buffer.readf32(b, o + 34)
 		local flags = buffer.readu8(b, o + 38)
@@ -1203,6 +1272,25 @@ function Protocol.decodeMachines(b: buffer): { MachineRecord }?
 		then
 			return nil
 		end
+		local at = o + Protocol.MACHINE_BYTES
+		local tankTotal = buffer.readu8(b, at)
+		at += 1
+		if at + tankTotal * Protocol.MACHINE_TANK_BYTES > len then
+			return nil
+		end
+		local tanks: { MachineTank }? = nil
+		if tankTotal > 0 then
+			local list: { MachineTank } = table.create(tankTotal)
+			for j = 1, tankTotal do
+				local fluid = buffer.readu8(b, at)
+				if fluid > Fluids.COUNT then
+					return nil
+				end
+				list[j] = { fluid = fluid, amount = buffer.readu32(b, at + 1), capacity = buffer.readu32(b, at + 5) }
+				at += Protocol.MACHINE_TANK_BYTES
+			end
+			tanks = list
+		end
 		records[i] = {
 			x = buffer.readi32(b, o),
 			y = buffer.readu16(b, o + 4),
@@ -1214,8 +1302,12 @@ function Protocol.decodeMachines(b: buffer): { MachineRecord }?
 			rate = rate,
 			active = flags == 1,
 			state = buffer.readu8(b, o + 39),
+			tanks = tanks,
 		}
-		o += Protocol.MACHINE_BYTES
+		o = at
+	end
+	if o ~= len then
+		return nil
 	end
 	return records
 end

@@ -21,6 +21,14 @@
 	    character, against the server's blocks): IN_WALL_DAMAGE half hearts every
 	    IN_WALL_INTERVAL, until they get out or die, so one who leaves spectator inside rock
 	    isn't walled in for good (Minecraft's in-wall damage).
+	  * lava hurts and burns (Players/Burning, 20 ticks a second on the standing box at the feet,
+	    against the server's loaded blocks): 4 half hearts every 10 ticks in it, softened by the
+	    armor worn (Players/Inventories), then burning for 15 s after (1 every 20 ticks, through
+	    armor) unless water puts it out. Each lava hurt that lands sizzles (entity.generic.burn,
+	    Entity.lavaHurt) and water putting the fire out hisses (entity.generic.extinguish_fire),
+	    at the feet, each at its Shared/Sounds volume and pitch (once Shared/Sounds has them).
+	    Creative and spectator players never burn. A burning character carries the attribute
+	    ON_FIRE (true) for clients to show it; a new character starts out of the fire.
 	  * sounds (Audio/Sounds), heard by everyone near: losing health (entity.player.hurt, at most
 	    every half second like Minecraft's invulnerability time) and dying (entity.player.death),
 	    from any cause; and a hurting landing's small or big fall with the fall sound of the block
@@ -35,6 +43,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
+local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
@@ -43,7 +52,9 @@ local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SharedSounds = require(Shared.Sounds)
+local Burning = require(script.Parent.Burning)
 local GameModeRules = require(script.Parent.GameModeRules)
+local Inventories = require(script.Parent.Inventories)
 
 local BLOCK = Config.BlockSize
 -- Minecraft players have 20 health points (half hearts).
@@ -54,8 +65,23 @@ local INVULNERABLE = "IceVoxelInvulnerable"
 local MAX_LANDINGS_PER_SECOND = 4
 -- Seconds between hurt sounds of one character (Minecraft's 10 ticks of invulnerability).
 local HURT_SOUND_INTERVAL = 0.5
+-- Lava and burning run at Minecraft's 20 ticks a second, catching up at most a few per frame.
+local BURN_TICK = 1 / 20
+local MAX_BURN_TICKS_PER_FRAME = 4
+-- The body lava and water are looked for in: the standing box (the server can't tell the pose).
+local BODY = PlayerPhysics.dimensions("standing")
+-- Minecraft's Entity.playEntityOnFireExtinguishedSound and Entity.lavaHurt's sizzle (nil until
+-- Shared/Sounds has them).
+local EXTINGUISH = SharedSounds.find("entity.generic.extinguish_fire")
+local BURN = SharedSounds.find("entity.generic.burn")
 
 local Characters = {}
+
+-- The character attribute that says a player is burning (true while burning, else absent).
+Characters.ON_FIRE = "IceVoxelOnFire"
+
+-- Each player's burning (Players/Burning), started over with every character.
+local burning: { [Player]: Burning.PlayerState } = {}
 
 local function setGroup(part: Instance, group: string)
 	if part:IsA("BasePart") then
@@ -117,10 +143,66 @@ local function suffocate(blocks: PlayerPhysics.World)
 	end
 end
 
+local function setOnFire(character: Model, onFire: boolean)
+	if (character:GetAttribute(Characters.ON_FIRE) == true) ~= onFire then
+		character:SetAttribute(Characters.ON_FIRE, if onFire then true else nil)
+	end
+end
+
+--[[
+	One tick of lava and burning for every living player (Players/Burning): the half hearts it
+	costs, the burn and extinguish sounds, and the ON_FIRE attribute.
+]]
+local function burnTick(getBlock: Burning.GetBlock)
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		local feet = if character then Rig.feet(character) else nil
+		if
+			character == nil
+			or humanoid == nil
+			or humanoid.Health <= 0
+			or feet == nil
+			or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+		then
+			continue
+		end
+		local state = burning[player]
+		if state == nil then
+			state = Burning.newPlayer()
+			burning[player] = state
+		end
+		local mode = GameMode.of(player)
+		local touching = Burning.touchingAt(getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		local window = Inventories.get(player)
+		local armor, toughness = 0, 0
+		if window then
+			armor, toughness = Items.armorPoints(window.inventory.armor)
+		end
+		local damage, extinguished, hurt = Burning.tickPlayer(state, mode, touching, armor, toughness)
+		-- (The events carry Minecraft's volume and pitch already: no cue on top.)
+		if GameModeRules.makesSounds(mode) then
+			if extinguished and EXTINGUISH then
+				Sounds.play(EXTINGUISH, feet.X, feet.Y, feet.Z)
+			end
+			if hurt and BURN then
+				Sounds.play(BURN, feet.X, feet.Y, feet.Z)
+			end
+		end
+		setOnFire(character, Burning.onFire(state))
+		if damage > 0 then
+			-- (TakeDamage respects the ForceField of players who can't be hurt.)
+			humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
+		end
+	end
+end
+
 --[[
 	Starts handling characters. `world` (optional) gives the block a hurting landing sounds like
-	and the blocks players suffocate in; without it only the player's fall sound plays, and nobody
-	suffocates.
+	and the blocks players suffocate in and burn in; without it only the player's fall sound plays,
+	nobody suffocates and nothing burns.
 ]]
 function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 	if not workspace:IsCollisionGroupRegistered(Rig.COLLISION_GROUP) then
@@ -133,6 +215,8 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 	end
 
 	local function onCharacter(player: Player, character: Model)
+		-- (A new character is out of the fire, as Minecraft's respawned player.)
+		burning[player] = nil
 		updateInvulnerable(player, character)
 		for _, part in character:GetDescendants() do
 			setGroup(part, Rig.COLLISION_GROUP)
@@ -242,6 +326,7 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		landings[player] = nil
+		burning[player] = nil
 	end)
 
 	-- Suffocation, checked every IN_WALL_INTERVAL against generated blocks only.
@@ -252,11 +337,18 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 			end,
 		}
 		local untilCheck = GameModeRules.IN_WALL_INTERVAL
+		local burnAccumulator = 0
 		RunService.Heartbeat:Connect(function(dt: number)
 			untilCheck -= dt
 			if untilCheck <= 0 then
 				untilCheck = GameModeRules.IN_WALL_INTERVAL
 				suffocate(blocks)
+			end
+			-- Lava and burning, at 20 ticks a second.
+			burnAccumulator = math.min(burnAccumulator + dt, BURN_TICK * MAX_BURN_TICKS_PER_FRAME)
+			while burnAccumulator >= BURN_TICK do
+				burnAccumulator -= BURN_TICK
+				burnTick(blocks.getBlock)
 			end
 		end)
 	end

@@ -196,7 +196,15 @@ function CharacterAnimator.start()
 				and tracks.swimidle
 			then
 				nextMode = "swimidle"
-			elseif state.onGround or state.flying or view.frozen or view.tilt > 0.5 or state.inWater then
+			elseif
+				state.onGround
+				or state.flying
+				or view.frozen
+				or view.tilt > 0.5
+				or state.inWater
+				or state.inLava
+			then
+				-- (Wading through lava or oil walks: Minecraft has no swimming there.)
 				nextMode = if moving then "walk" else "idle"
 			else
 				nextMode = if os.clock() - view.jumpedAt < JUMP_TIME then "jump" else "fall"

@@ -26,7 +26,8 @@
 	  behaviour     Name of a server block behaviour (see ServerScriptService.IceVoxel.Behaviours).
 	  friction      How slippery the block is to walk on (Minecraft's block friction): 0.6 by
 	                default, 0.98 for ice. Higher keeps more of the speed from tick to tick.
-	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below).
+	  fluid         { group, level, tickDelay } for fluids (filled in by `fluid()` below; every
+	                group is a fluid of Shared/Fluids).
 	  displayName   Shown in the inventory (default: the name with spaces, "OakLog" -> "Oak Log").
 	  hardness      Minecraft's destroy time (0 = breaks at once). Default 1. See Shared/Mining.
 	  tool          The tool that mines it fast: "pickaxe", "axe", "shovel" or "hoe" (Minecraft's
@@ -45,8 +46,9 @@
 	                "Furnace", "StructureBlock" or "Jigsaw" (their settings screens).
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
 	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
-	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "StructureBlockSave",
-	                "StructureBlockLoad", "StructureBlockCorner", "StructureBlockData" and
+	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "OilRefinery",
+	                "CombustionGenerator", "StructureBlockSave", "StructureBlockLoad",
+	                "StructureBlockCorner", "StructureBlockData" and
 	                "Jigsaw<Front><Top>", e.g. "JigsawNorthUp"; client Rendering/BlockDecor). Such
 	                blocks are drawn one part per block.
 	  sound         What breaking, placing, hitting, walking and falling on it sounds like
@@ -138,8 +140,9 @@
 	  jigsaw        { front, top }: a jigsaw block's orientation (Minecraft's FrontAndTop: front
 	                Up or Down with a horizontal top, or a horizontal front with top Up; one block
 	                per orientation, Blocks.jigsawOrientation / Blocks.jigsawBlock).
-	  caveTwin      Name of the block this one is the cave twin of (CaveGlowLichen* of GlowLichen*):
-	                it looks, drops and behaves exactly like it, but generation places it in caves
+	  caveTwin      Name of the block this one is the cave twin of (CaveGlowLichen* of GlowLichen*,
+	                CaveLava of Lava, CaveOil of Oil): it looks, drops and behaves exactly like it
+	                (a fluid twin is a source of the same group), but generation places it in caves
 	                and the mesher treats it like cave air while caves are hidden
 	                (Blocks.cullLutHiddenCaves, Blocks.caveTwinLut), as CaveAir is to Air. Players
 	                never place twins; their `item` is the twin's.
@@ -482,6 +485,8 @@ local list: { BlockSpec } = {
 --[[
 	Fluids get one block per level: level 0 is a source block, 1-7 are flowing blocks getting weaker,
 	and 8 is "falling" fluid fed from above. They share one appearance so the mesher merges them.
+	Every group is a fluid of Shared/Fluids (FluidList: its id, bucket, colour and light; checked at
+	load), and its flow rules are server Behaviours/Fluid's RULES.
 ]]
 local function fluid(group: string, spec: BlockSpec, tickDelay: number)
 	for level = 0, 8 do
@@ -493,6 +498,8 @@ local function fluid(group: string, spec: BlockSpec, tickDelay: number)
 			material = spec.material,
 			transparency = spec.transparency,
 			reflectance = spec.reflectance,
+			light = spec.light,
+			lightColor = spec.lightColor,
 			solid = false,
 			replaceable = true,
 			placeable = level == 0,
@@ -2160,5 +2167,119 @@ for _, cave in { false, true } do
 		})
 	end
 end
+
+--[[
+	Lava (Minecraft 1.20.1's, in the overworld), and BuildCraft's oil and the fuel the Oil Refinery
+	makes of it: fluid groups like water (Shared/Fluids ids 2, 3 and 4; their flow rules are server
+	Behaviours/Fluid's RULES).
+	  * Lava: light 15 in every level, a Neon orange surface (its light is sparse: the client
+	    lights only some of its cells, as glow lichen's), tick delay 30.
+	  * Oil: nearly black glass that barely shows through and shines, tick delay 20 (viscous).
+	  * Fuel: translucent amber, tick delay 5 like water.
+]]
+local LAVA = { 212, 90, 20 }
+local LAVA_LIGHT = { 255, 140, 60 }
+fluid("Lava", {
+	name = "Lava",
+	color = LAVA,
+	material = "Neon",
+	light = 15,
+	lightColor = LAVA_LIGHT,
+}, 30)
+fluid("Oil", {
+	name = "Oil",
+	color = { 24, 22, 26 },
+	material = "Glass",
+	transparency = 0.1,
+	reflectance = 0.2,
+}, 20)
+fluid("Fuel", {
+	name = "Fuel",
+	color = { 232, 172, 44 },
+	material = "Glass",
+	transparency = 0.4,
+	reflectance = 0.05,
+}, 5)
+
+--[[
+	Cave twins of the lava and oil sources (`caveTwin`): CaveLava fills the caves' lava seas and
+	underground lava lakes, CaveOil the oil deposits buried in rock. They are their source in
+	every way (same look, light, fluid group and level, behaviour; `Blocks.fluidId` never answers
+	one, so a twin that flows makes ordinary flowing lava or oil, and a bucket pours an ordinary
+	source), but count as cave air while caves are hidden, so a hidden cave's lava and a buried
+	deposit cost nothing to draw. Players never place them.
+]]
+local function caveFluid(group: string)
+	for _, spec in list do
+		if spec.name == group then
+			local twin = table.clone(spec)
+			twin.name = "Cave" .. group
+			twin.displayName = spec.displayName or group
+			twin.placeable = false
+			twin.item = group
+			twin.caveTwin = group
+			table.insert(list, twin)
+			return
+		end
+	end
+	error(`No fluid source {group} to twin`)
+end
+caveFluid("Lava")
+caveFluid("Oil")
+
+-- Obsidian (Minecraft's): what water makes of a lava source. Hardness 50, only a diamond pickaxe
+-- gets it (9.4 s; by hand 250 s and nothing), drops itself.
+table.insert(list, {
+	name = "Obsidian",
+	color = { 30, 22, 44 },
+	material = "Basalt",
+	hardness = 50,
+	tool = "pickaxe",
+	toolLevel = 3,
+})
+
+--[[
+	The Oil Refinery (Shared/Machines/Kinds/Refinery, kind "refinery"): BuildCraft's refinery on
+	electricity, turning oil into fuel 1:1 at 10 mB a tick for 200 J a tick (a bucket in 100 ticks
+	for 20 kJ; Speed and Energy Upgrades with Mekanism's maths), from Mekanism-sized tanks of
+	10 000 mB each and a 40 000 J store, which cables and machines touching it may fill in a single
+	tick. Mekanism's machine block: hardness 3.5, a pickaxe to drop anything. A light steel casing
+	with an oil and a fuel sight glass on each side and two tank caps on top (BlockDecor
+	"OilRefinery"; the client may light its heater window while it works, REFINERY_WINDOW).
+]]
+table.insert(list, {
+	name = "OilRefinery",
+	color = { 140, 144, 152 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "OilRefinery",
+	machine = { kind = "refinery" },
+	energy = { capacity = 40000, input = 40000 },
+})
+
+--[[
+	The Combustion Generator (Shared/Machines/Kinds/Combustion, kind "combustion"): burns the
+	refinery's fuel at 2 500 J a tick, a mB every 4 ticks (a bucket is 4 000 ticks, 10 MJ), from a
+	10 000 mB fuel tank into a 1 MJ store, given out at up to 5 kJ/t (twice what it makes) to
+	cables and machines touching it. Mekanism's machine block: hardness 3.5, a pickaxe to drop
+	anything. A dark steel casing with amber fuel stripes, a combustion chamber window low on each
+	side and an exhaust on top (BlockDecor "CombustionGenerator"; the client may light the window
+	while it burns, COMBUSTION_WINDOW).
+]]
+table.insert(list, {
+	name = "CombustionGenerator",
+	color = { 56, 58, 64 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 3.5,
+	tool = "pickaxe",
+	toolLevel = 0,
+	decor = "CombustionGenerator",
+	machine = { kind = "combustion" },
+	energy = { capacity = 1000000, output = 5000 },
+})
 
 return list

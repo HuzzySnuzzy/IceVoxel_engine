@@ -165,9 +165,12 @@ return function(t, shared, require, server)
 
 	t.test("surface caves: Air below the surface, never at water, bedrock or cave air", function()
 		local carved, junctions, regrown = 0, 0, 0
+		-- (Water and ice: below Config.Caves.LavaLevel a surface cave's air becomes lava,
+		-- Generation/Lava, as Minecraft's carvers carve lava there.)
 		local WATER_SET: { [number]: boolean } = {}
 		for id = 0, Blocks.count - 1 do
-			if Blocks.get(id).fluid or id == Blocks.id.Ice then
+			local fluid = Blocks.get(id).fluid
+			if (fluid and fluid.group == "Water") or id == Blocks.id.Ice then
 				WATER_SET[id] = true
 			end
 		end
@@ -245,9 +248,11 @@ return function(t, shared, require, server)
 	local WATCH = 20 -- steps this close to water (blocks beyond their radius) are looked at
 	local SEARCH = DRY_MARGIN + RIVER_MARGIN + 4 -- how far `nearestWet` looks (blocks)
 	local WATER = Blocks.fluidId("Water", 0)
+	-- Water and ice (lava fills a surface cave's air below LavaLevel: Generation/Lava).
 	local WATERY: { [number]: boolean } = {}
 	for id = 0, Blocks.count - 1 do
-		if Blocks.get(id).fluid or id == Blocks.id.Ice then
+		local fluid = Blocks.get(id).fluid
+		if (fluid and fluid.group == "Water") or id == Blocks.id.Ice then
 			WATERY[id] = true
 		end
 	end

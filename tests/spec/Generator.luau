@@ -15,6 +15,7 @@ return function(t, shared, require, server, client)
 	local Blocks = require(shared.Blocks)
 	local Coords = require(shared.World.Coords)
 	local Crafting = require(shared.Crafting)
+	local Fluids = require(shared.Fluids)
 	local Items = require(shared.Items)
 	local Machines = require(shared.Machines)
 	local Menu = require(shared.Inventory.Menu)
@@ -39,6 +40,9 @@ return function(t, shared, require, server, client)
 	local ENERGY = Machines.ENERGY
 	-- Mekanism's numbers: heatGeneration, the storage and the output (twice what it makes).
 	local MAKES, CAPACITY, OUTPUT = 200, 160000, 400
+	-- Lava: Mekanism Generators 10's tank (mB), the ticks a mB burns for (a bucket is its furnace
+	-- burn time, 20 000 ticks) and Mekanism's J/t a lava side adds.
+	local LAVA_TANK, LAVA_TICKS, LAVA_PER_SIDE = 24000, 20, 30
 	FakeMachines.define(Machines, Items, Smelting)
 
 	local function S(item: number, count: number)
@@ -175,17 +179,31 @@ return function(t, shared, require, server, client)
 		t.eq(container.slots[1], nil)
 	end)
 
-	t.test("heat generator: transporters put fuel in through every face and take nothing out", function()
+	t.test("heat generator: transporters put fuel in through every face, take out only the empty Bucket", function()
 		for face = 0, 5 do
 			t.eq(table.concat(Machines.insertSlots(GENERATOR, face), ","), "1", `face {face} takes fuel`)
-			t.eq(#Machines.extractSlots(GENERATOR, face), 0, `face {face} gives nothing`)
+			t.eq(table.concat(Machines.extractSlots(GENERATOR, face), ","), "1", `face {face} reaches the fuel`)
+			t.ok(not Transmitters.canExtract(GENERATOR, face, 1, I.Coal), `face {face} never gives fuel`)
+			t.ok(not Transmitters.canExtract(GENERATOR, face, 1, I.LavaBucket), `nor a Lava Bucket ({face})`)
+			t.ok(Transmitters.canExtract(GENERATOR, face, 1, I.Bucket), `the empty Bucket comes out ({face})`)
 		end
 		local slots = {}
 		local after, left = Transmitters.insert(GENERATOR, 3, slots, S(I.Coal, 70))
 		t.eq(after[1].count, 64)
 		t.eq(left and left.count, 6)
 		t.eq(Transmitters.room(GENERATOR, 1, {}, S(I.Cobblestone, 5)), 0, "only fuel")
-		t.eq(#Transmitters.available(GENERATOR, 0, { [1] = S(I.Coal, 3) }), 0, "nothing to pull")
+		t.eq(#Transmitters.available(GENERATOR, 0, { [1] = S(I.Coal, 3) }), 0, "no fuel to pull")
+		t.eq(#Transmitters.available(GENERATOR, 0, { [1] = S(I.LavaBucket, 1) }), 0, "nor lava")
+		-- (Mekanism's FluidFuelInventorySlot.forFuel: automation takes what holds no lava and burns
+		-- no more.)
+		local types = Transmitters.available(GENERATOR, 4, { [1] = S(I.Bucket, 1) })
+		t.eq(#types, 1, "the Bucket a Lava Bucket left")
+		t.eq(types[1] and types[1].item, I.Bucket)
+		local emptied, taken = Transmitters.extract(GENERATOR, 4, { [1] = S(I.Bucket, 1) }, 64)
+		t.eq(taken and taken.item, I.Bucket)
+		t.eq(emptied[1], nil, "the slot is free for fuel again")
+		t.eq(Machines.mayTake(GENERATOR, 1, I.Bucket), true)
+		t.eq(Machines.mayTake(GENERATOR, 1, I.Coal), false)
 	end)
 
 	--[[ Burning ]]
@@ -336,10 +354,15 @@ return function(t, shared, require, server, client)
 
 	t.test("heat generator: burn fields from an item's data are kept sane", function()
 		-- Item data comes from anywhere a stack can (creative's slot packet): clamp it.
+		-- (The longest solid fuel: a Lava Bucket's 20 000 ticks go into the lava tank instead.)
 		local longest = 0
 		for _, fuel in Smelting.fuels() do
-			longest = math.max(longest, fuel.ticks)
+			if Items.craftingRemainder(fuel.item) == nil then
+				longest = math.max(longest, fuel.ticks)
+			end
 		end
+		t.eq(longest, Smelting.fuel(I.CoalBlock), "a block of coal")
+		t.eq(Machines.info(GENERATOR).maxBurn, longest)
 		local forged: any = Machines.newContainer(GENERATOR)
 		t.ok(Machines.restore(forged, { burnTime = 1e300, burnTotal = 5 }))
 		tick(forged)
@@ -359,6 +382,271 @@ return function(t, shared, require, server, client)
 		t.eq(crumb.slots[1], nil)
 		t.eq(field(crumb, "burnTime"), 99)
 		t.eq(field(crumb, "rate"), MAKES)
+	end)
+
+	--[[ Lava (Mekanism Generators 10: TileEntityHeatGenerator, GeneratorsConfig) ]]
+
+	-- A context whose neighbours are `around` (by offset key "dx,dy,dz"), unknown elsewhere.
+	local function ctxAround(around: { [string]: number }): any
+		local c = ctx()
+		c.getBlock = function(x: number, y: number, z: number): number?
+			return around[`{x},{y - Y},{z}`]
+		end
+		return c
+	end
+
+	t.test("heat generator: Mekanism's lava tank, 24 000 mB of lava, filled by pipes and buckets", function()
+		t.ok(Machines.hasTanks(GENERATOR))
+		local tanks = Machines.tanks(GENERATOR)
+		t.eq(#tanks, 1)
+		t.eq(tanks[1].name, "lava")
+		t.eq(tanks[1].capacity, LAVA_TANK)
+		t.eq(tanks[1].role, "input")
+		t.eq(table.concat(tanks[1].fluids, ","), tostring(Fluids.LAVA))
+		t.eq(table.concat(Machines.inputTanks(GENERATOR), ","), "1")
+		t.eq(#Machines.outputTanks(GENERATOR), 0)
+		t.ok(Machines.takesFluid(GENERATOR, Fluids.LAVA), "pipes carrying lava deliver")
+		for _, other in { Fluids.WATER, Fluids.OIL, Fluids.FUEL, 0 } do
+			t.ok(not Machines.takesFluid(GENERATOR, other), `not {Fluids.name(other)}`)
+		end
+		t.ok(not Machines.givesFluid(GENERATOR), "nothing comes out of it")
+		local c: any = Machines.newContainer(GENERATOR)
+		t.eq(Machines.tankAmount(c, "lava"), 0)
+		t.eq(Machines.tankFluid(c, 1), 0, "empty")
+		-- Pipes: lava only, up to the capacity; simulating changes nothing.
+		t.eq(Machines.insertFluid(c, Fluids.WATER, 500), 0)
+		t.eq(Machines.insertFluid(c, Fluids.LAVA, 30000, true), LAVA_TANK)
+		t.eq(Machines.tankAmount(c, 1), 0, "only simulated")
+		t.eq(Machines.insertFluid(c, Fluids.LAVA, 1500.7), 1500, "whole mB")
+		t.eq(Machines.tankAmount(c, 1), 1500)
+		t.eq(Machines.tankFluid(c, "lava"), Fluids.LAVA)
+		t.eq(Machines.fluidRoom(c, Fluids.LAVA), LAVA_TANK - 1500)
+		t.eq(Machines.fluidRoom(c, Fluids.WATER), 0)
+		local fluid, amount = Machines.extractFluid(c, 100)
+		t.eq(fluid, 0, "an input tank gives pipes nothing")
+		t.eq(amount, 0)
+		-- Buckets: a full one pours its 1000 mB; an empty one takes a whole bucket back.
+		t.ok(Machines.pourBucket(c, Fluids.LAVA))
+		t.eq(Machines.tankAmount(c, 1), 2500)
+		t.ok(not Machines.pourBucket(c, Fluids.WATER), "no water")
+		t.eq(Machines.fillBucket(c), Fluids.LAVA, "a player takes lava back")
+		t.eq(Machines.tankAmount(c, 1), 1500)
+		t.eq(Machines.fillBucket(c), Fluids.LAVA)
+		t.eq(Machines.fillBucket(c, true), 0, "500 mB is no bucket")
+		t.eq(Machines.fillBucket(c), 0)
+		t.eq(Machines.tankAmount(c, 1), 500)
+		-- A bucket pours only when all of it fits.
+		Machines.tankInsert(c, 1, Fluids.LAVA, LAVA_TANK)
+		t.eq(Machines.tankAmount(c, 1), LAVA_TANK)
+		Machines.tankExtract(c, 1, 500)
+		t.ok(not Machines.pourBucket(c, Fluids.LAVA), "500 mB of room")
+		t.eq(Machines.tankAmount(c, 1), LAVA_TANK - 500)
+	end)
+
+	t.test("heat generator: a Lava Bucket in the fuel slot goes into the tank, the empty Bucket stays", function()
+		t.ok(Machines.mayPlace(GENERATOR, 1, I.LavaBucket), "Mekanism's fuel slot takes lava buckets")
+		t.eq(table.concat(Machines.quickMoveTargets(GENERATOR, I.LavaBucket), ","), "1")
+		t.eq(
+			Machines.bucketTank(GENERATOR, I.LavaBucket) and (Machines.bucketTank(GENERATOR, I.LavaBucket) :: any).name,
+			"lava"
+		)
+		for _, item in { I.WaterBucket, I.OilBucket, I.FuelBucket, I.Bucket } do
+			t.ok(not Machines.mayPlace(GENERATOR, 1, item), `not a {Items.displayName(item)}`)
+			t.eq(Machines.bucketTank(GENERATOR, item), nil)
+		end
+		local c: any = Machines.newContainer(GENERATOR)
+		c.slots[1] = S(I.LavaBucket, 1)
+		tick(c)
+		t.eq(c.slots[1] and c.slots[1].item, I.Bucket, "the empty bucket is left")
+		t.eq(c.slots[1] and c.slots[1].count, 1)
+		-- (Poured, then a mB lit and a tick of it burnt.)
+		t.eq(Machines.tankAmount(c, "lava"), 1000 - 1)
+		t.eq(Machines.energy(c), MAKES, "it burns at once")
+		t.eq(field(c, "burnTime"), LAVA_TICKS - 1, "a mB of lava burning")
+		t.eq(field(c, "burnTotal"), LAVA_TICKS)
+		tick(c, 5)
+		t.eq(c.slots[1] and c.slots[1].item, I.Bucket, "the bucket never burns")
+		-- No room for all of a bucket: it waits in the slot until there is.
+		local full: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(full, 1, Fluids.LAVA, LAVA_TANK - 500)
+		full.slots[1] = S(I.LavaBucket, 1)
+		local waited = 0
+		while full.slots[1].item == I.LavaBucket and waited < 20000 do
+			tick(full)
+			full.data[ENERGY] = 0
+			waited += 1
+			t.ok(Machines.tankAmount(full, 1) <= LAVA_TANK, "never over the capacity")
+		end
+		-- (A mB lit at once and the next at the end of every 20th tick: 500 mB burnt by tick 9 980.)
+		t.eq(waited, 9981, "until 1000 mB of room were burnt free")
+		t.eq(Machines.tankAmount(full, 1), LAVA_TANK, "poured; the mB lit before burns on")
+		-- A Water Bucket that got in somehow stays as it is.
+		local water: any = Machines.newContainer(GENERATOR)
+		water.slots[1] = S(I.WaterBucket, 1)
+		tick(water, 3)
+		t.eq(water.slots[1].item, I.WaterBucket)
+		t.eq(Machines.tankAmount(water, 1), 0)
+		t.eq(Machines.energy(water), 0)
+	end)
+
+	t.test("heat generator: a mB of lava burns 20 ticks at 200 J/t, a bucket 20 000 ticks for 4 MJ", function()
+		local c: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(c, 1, Fluids.LAVA, 1000)
+		local made, ticks = 0, 0
+		repeat
+			tick(c)
+			made += Machines.energy(c)
+			c.data[ENERGY] = 0
+			ticks += 1
+			if field(c, "rate") > 0 then
+				t.eq(field(c, "rate"), MAKES, `tick {ticks}`)
+				t.eq(field(c, "active"), 1)
+				t.eq(Machines.status(GENERATOR, Machines.view(c)), "Producing 200 J/t")
+			end
+		until field(c, "rate") == 0 or ticks > 30000
+		t.eq(ticks - 1, 20000, "20 000 ticks of burning")
+		t.eq(ticks - 1, Smelting.fuel(I.LavaBucket), "a Lava Bucket's furnace burn time")
+		t.eq(made, 1000 * LAVA_TICKS * MAKES, "4 MJ a bucket")
+		t.eq(made / (Smelting.fuel(I.Coal) * MAKES), 12.5, "12.5 coal, as in a furnace")
+		t.eq(Machines.tankAmount(c, 1), 0)
+		t.eq(field(c, "active"), 0)
+		t.eq(Machines.status(GENERATOR, Machines.view(c)), "Idle")
+		-- A single mB burns for its 20 ticks.
+		local one: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(one, 1, Fluids.LAVA, 1)
+		tick(one, 3)
+		t.eq(Machines.tankAmount(one, 1), 0)
+		t.eq(Machines.energy(one), 3 * MAKES)
+		t.eq(field(one, "burnTime"), LAVA_TICKS - 3)
+		tick(one, LAVA_TICKS)
+		t.eq(Machines.energy(one), LAVA_TICKS * MAKES, "a mB is 4 kJ")
+		t.eq(field(one, "burnTime"), 0)
+		-- Nearly full: a part of a tick of the mB burns, the rest waits; nothing is wasted.
+		local nearly: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(nearly, 1, Fluids.LAVA, 100)
+		nearly.data[ENERGY] = CAPACITY - 50
+		tick(nearly)
+		t.eq(Machines.energy(nearly), CAPACITY)
+		t.eq(field(nearly, "burnTime"), LAVA_TICKS - 0.25, "a quarter of a tick of the mB burnt")
+		t.eq(Machines.tankAmount(nearly, 1), 99, "one mB lit")
+		tick(nearly, 40)
+		t.eq(Machines.tankAmount(nearly, 1), 99, "full: nothing more lights")
+		t.eq(field(nearly, "burnTime"), LAVA_TICKS - 0.25)
+		local total = 50
+		repeat
+			nearly.data[ENERGY] = 0
+			tick(nearly)
+			total += Machines.energy(nearly)
+		until field(nearly, "rate") == 0
+		t.eq(total, 100 * LAVA_TICKS * MAKES, "100 mB made 400 kJ, exactly")
+	end)
+
+	t.test("heat generator: the tank's lava burns before a new item lights", function()
+		local c: any = Machines.newContainer(GENERATOR)
+		c.slots[1] = S(I.Coal, 1)
+		Machines.tankInsert(c, 1, Fluids.LAVA, 2)
+		for i = 1, 2 * LAVA_TICKS do
+			tick(c)
+			t.eq(Machines.energy(c), MAKES, `tick {i}`)
+			c.data[ENERGY] = 0
+			if i < 2 * LAVA_TICKS then
+				t.eq(c.slots[1] and c.slots[1].count, 1, `tick {i}: the coal waits`)
+			end
+		end
+		t.eq(Machines.tankAmount(c, 1), 0)
+		t.eq(c.slots[1], nil, "the coal lit when the lava ran out")
+		t.eq(field(c, "burnTotal"), Smelting.fuel(I.Coal))
+		-- An item already burning burns out first.
+		local burning: any = Machines.newContainer(GENERATOR)
+		Machines.restore(burning, { burnTime = 50, burnTotal = 100 })
+		Machines.tankInsert(burning, 1, Fluids.LAVA, 1000)
+		tick(burning, 49)
+		t.eq(Machines.tankAmount(burning, 1), 1000, "the item's 50 ticks first")
+		t.eq(field(burning, "burnTotal"), 100)
+		tick(burning)
+		t.eq(Machines.tankAmount(burning, 1), 1000 - 1, "then lava")
+		t.eq(field(burning, "burnTotal"), LAVA_TICKS)
+	end)
+
+	t.test("heat generator: every side touching lava adds 30 J/t, with no fuel at all", function()
+		local lava, flowing, cave = B.Lava, Blocks.fluidId("Lava", 3), B.CaveLava
+		local around = {
+			["1,0,0"] = lava,
+			["0,1,0"] = flowing,
+			["0,-1,0"] = cave,
+			["-1,0,0"] = B.Water,
+			["0,0,1"] = B.Oil,
+			["0,0,-1"] = B.Stone,
+		}
+		local c: any = Machines.newContainer(GENERATOR)
+		Machines.tick(c, ctxAround(around))
+		t.eq(field(c, "rate"), 3 * LAVA_PER_SIDE, "a source, flowing lava and cave lava; not water or oil")
+		t.eq(field(c, "active"), 0, "it burns nothing")
+		t.eq(field(c, "burnTime"), 0)
+		t.eq(Machines.status(GENERATOR, Machines.view(c)), "Producing 90 J/t")
+		-- With fuel too, and with lava on all six sides: at most 380 J/t, within its 400 J/t out.
+		c.slots[1] = S(I.Coal, 1)
+		Machines.tick(c, ctxAround(around))
+		t.eq(field(c, "rate"), MAKES + 3 * LAVA_PER_SIDE)
+		t.eq(field(c, "active"), 1)
+		local sea = {}
+		for _, key in { "1,0,0", "-1,0,0", "0,1,0", "0,-1,0", "0,0,1", "0,0,-1" } do
+			sea[key] = lava
+		end
+		local hot: any = Machines.newContainer(GENERATOR)
+		hot.slots[1] = S(I.Coal, 1)
+		Machines.tick(hot, ctxAround(sea))
+		t.eq(field(hot, "rate"), MAKES + 6 * LAVA_PER_SIDE)
+		t.ok(field(hot, "rate") <= OUTPUT, "a network takes all of it")
+		-- The free heat comes first: nearly full, the fuel waits.
+		local nearly: any = Machines.newContainer(GENERATOR)
+		nearly.slots[1] = S(I.Coal, 1)
+		nearly.data[ENERGY] = CAPACITY - 60
+		Machines.tick(nearly, ctxAround(sea))
+		t.eq(Machines.energy(nearly), CAPACITY)
+		t.eq(field(nearly, "rate"), 60)
+		t.eq(nearly.slots[1].count, 1, "no room left to light the coal")
+		t.eq(field(nearly, "active"), 0)
+		-- Unknown neighbours (unloaded) count as none.
+		local alone: any = Machines.newContainer(GENERATOR)
+		tick(alone)
+		t.eq(field(alone, "rate"), 0)
+	end)
+
+	t.test("heat generator: its item keeps its lava, and says so", function()
+		local c: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(c, 1, Fluids.LAVA, 5000)
+		Machines.produce(c, 1200)
+		local data = Machines.save(c) :: any
+		t.eq(data.lava, 5000)
+		t.eq(data.energy, 1200)
+		t.eq(data.lavaFluid, nil, "a tank of one fluid needs no id")
+		local lines = Items.describe({ item = GENERATOR, count = 1, data = data })
+		t.eq(lines[1], "Energy: 1.2 kJ")
+		t.eq(lines[2], "Lava: 5,000 mB")
+		local placed: any = Machines.newContainer(GENERATOR)
+		t.ok(Machines.restore(placed, data))
+		t.eq(Machines.tankAmount(placed, 1), 5000)
+		-- Too much is cut to the tank; nonsense is refused.
+		local forged: any = Machines.newContainer(GENERATOR)
+		t.ok(Machines.restore(forged, { lava = 1e9 }))
+		t.eq(Machines.tankAmount(forged, 1), LAVA_TANK)
+		t.ok(Machines.restore(forged, { lava = 12.9 }))
+		t.eq(Machines.tankAmount(forged, 1), 12, "whole mB")
+		local junk: any = Machines.newContainer(GENERATOR)
+		t.ok(not Machines.restore(junk, { lava = -5 }))
+		t.ok(not Machines.restore(junk, { lava = 0.5 }))
+		t.eq(Machines.tankAmount(junk, 1), 0)
+		-- A mB of lava burning is a second of fuel.
+		local lit: any = Machines.newContainer(GENERATOR)
+		Machines.tankInsert(lit, 1, Fluids.LAVA, 100)
+		lit.data[ENERGY] = CAPACITY - 50
+		tick(lit)
+		local kept = Machines.save(lit) :: any
+		t.eq(kept.burnTime, LAVA_TICKS - 0.25)
+		t.eq(kept.burnTotal, LAVA_TICKS)
+		local described = Items.describe({ item = GENERATOR, count = 1, data = kept })
+		t.ok(table.find(described, "Fuel: 1 s") ~= nil, "a mB of lava burning")
 	end)
 
 	--[[ On the server ]]
@@ -535,9 +823,23 @@ return function(t, shared, require, server, client)
 		local energy = panel.energy :: any
 		t.eq(energy.x, 164, "Mekanism's power bar")
 		local status = panel.status :: any
-		t.eq(status.x, 8)
+		t.eq(status.x, 30, "right of the lava gauge")
 		t.eq(status.y, 20)
 		t.ok(status.y + 8 <= flame.y, "the status line clears the flame")
+		-- The lava gauge: Mekanism's standard gauge on the left, reading the tank's data.
+		local gauges = Machines.gauges(GENERATOR)
+		t.eq(#gauges, 1)
+		local gauge = gauges[1]
+		t.eq(gauge.name, "lava")
+		t.eq(gauge.x, 7)
+		t.eq(gauge.y, 13)
+		t.eq(gauge.w, 18)
+		t.eq(gauge.h, 60)
+		t.ok(gauge.y + gauge.h <= panel.height - 4, "inside the panel")
+		t.ok(gauge.x + gauge.w < status.x, "clear of the status line")
+		t.eq(gauge.fluid, Fluids.LAVA)
+		t.eq(gauge.capacity, LAVA_TANK)
+		t.eq(gauge.amount, Machines.field(GENERATOR, "lava"), "its data index")
 		-- The flame shows the burn time left.
 		t.eq(MenuLayout.machineFlameRows(container.data, panel.flameSource), 0, "out")
 		container.slots[1] = S(I.Coal, 1)

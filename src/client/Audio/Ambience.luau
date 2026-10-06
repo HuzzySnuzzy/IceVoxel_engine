@@ -7,10 +7,13 @@
 	           client only knows while the window shows it), it crackles at random
 	           (block.furnace.fire_crackle, SoundRules.CRACKLE_CHANCE per tick) at the furnace:
 	           the block aimed at when the window opened, else the player.
-	  Machines every burning Heat Generator within SoundRules.CRACKLE_RANGE blocks of the
+	  Machines every burning Heat or Combustion Generator within SoundRules.CRACKLE_RANGE blocks of the
 	           listener (its Machines record says it works: Rendering/TransmitterRenderer
 	           .activeMachines; the client knows these without opening them) crackles the same
 	           way, at the generator.
+	  Lava     lava with air above it within 32 blocks of the listener pops and bubbles now and
+	           then (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
+	           ticks, sampled), at the lava.
 	  Caves    deep underground (the sky light reaching the camera below SoundRules.CAVE_EXPOSURE,
 	           Rendering/LightingController.skyExposure), a low rumble (ambient.cave) every few
 	           minutes spent there, somewhere near the listener. Config.Sounds.Ambient (and the
@@ -39,7 +42,8 @@ local CAVE_SPREAD = 8
 
 local Ambience = {}
 
-function Ambience.start()
+-- `getBlock`: the client's blocks (nil where none are loaded), for lava's sounds.
+function Ambience.start(getBlock: SoundRules.GetBlock?)
 	-- The open furnace window's block (blocks, its centre) and the window it belongs to.
 	local furnaceWindow = -1
 	local furnaceAt: Vector3? = nil
@@ -100,6 +104,12 @@ function Ambience.start()
 				for _, record in burning do
 					if math.random() < SoundRules.CRACKLE_CHANCE then
 						SoundPlayer.play("block.furnace.fire_crackle", record.x + 0.5, record.y + 0.5, record.z + 0.5)
+					end
+				end
+				if getBlock then
+					local x, y, z = math.floor(listener.X), math.floor(listener.Y), math.floor(listener.Z)
+					for _, sound in SoundRules.lavaTick(getBlock, x, y, z, math.random) do
+						SoundPlayer.play(sound.sound, sound.x, sound.y, sound.z, sound.volume, sound.pitch)
 					end
 				end
 			end

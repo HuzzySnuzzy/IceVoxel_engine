@@ -21,6 +21,9 @@
 	                           time) and the output in a large frame, the time under them
 	                 fuel      150 x 36: a flame burning down over the fuel's burn time over the
 	                           fuel, two lines of text beside them
+	                 refining  150 x 36: the oil (a fluid stack), an arrow filling over the time a
+	                           bucket takes, the fuel, two lines of text right of them
+	                 heating, combustion  150 x 36: as fuel, with the fluid stack under the flame
 
 	A slot's (x, y) is its item's top left corner, as in MenuLayout (the frame is one pixel up and
 	left, a large frame five).
@@ -38,6 +41,9 @@ export type EntryLayout = {
 	-- Ingredient cells: crafting 1..9 (row by row), smelting and fuel 1.
 	inputs: { Spot },
 	output: Spot?,
+	-- Fluid stacks (JEI's fluid ingredients, an 18 x 18 cell like a slot): taken, then made.
+	fluidInputs: { Spot },
+	fluidOutput: Spot?,
 	arrow: Rect?,
 	flame: Rect?,
 	plus: Rect?,
@@ -103,6 +109,8 @@ local CRAFTING: EntryLayout = (function()
 		h = 54,
 		inputs = inputs,
 		output = { x = 95, y = 19, big = true },
+		fluidInputs = {},
+		fluidOutput = nil,
 		arrow = rect(62, 20, 22, 15),
 		flame = nil,
 		plus = rect(104, 42, 12, 12),
@@ -116,6 +124,8 @@ local SMELTING: EntryLayout = {
 	h = 54,
 	inputs = { { x = 1, y = 1, big = false } },
 	output = { x = 61, y = 19, big = true },
+	fluidInputs = {},
+	fluidOutput = nil,
 	arrow = rect(24, 18, 24, 16),
 	flame = rect(2, 21, 14, 14),
 	plus = nil,
@@ -128,6 +138,8 @@ local FUEL: EntryLayout = {
 	h = 36,
 	inputs = { { x = 1, y = 19, big = false } },
 	output = nil,
+	fluidInputs = {},
+	fluidOutput = nil,
 	arrow = nil,
 	flame = rect(2, 2, 14, 14),
 	plus = nil,
@@ -135,7 +147,43 @@ local FUEL: EntryLayout = {
 	texts = { rect(24, 9, 126, 8), rect(24, 21, 126, 8) },
 }
 
-JeiLayout.ENTRIES = { crafting = CRAFTING, smelting = SMELTING, fuel = FUEL } :: { [string]: EntryLayout }
+local REFINING: EntryLayout = {
+	w = 150,
+	h = 36,
+	inputs = {},
+	output = nil,
+	fluidInputs = { { x = 1, y = 10, big = false } },
+	fluidOutput = { x = 55, y = 10, big = false },
+	arrow = rect(24, 10, 24, 16),
+	flame = nil,
+	plus = nil,
+	shapeless = nil,
+	texts = { rect(78, 9, 72, 8), rect(78, 21, 72, 8) },
+}
+
+-- The generators burning a fluid: the fuel's layout with a fluid stack where its item goes.
+local GENERATOR: EntryLayout = {
+	w = 150,
+	h = 36,
+	inputs = {},
+	output = nil,
+	fluidInputs = { { x = 1, y = 19, big = false } },
+	fluidOutput = nil,
+	arrow = nil,
+	flame = rect(2, 2, 14, 14),
+	plus = nil,
+	shapeless = nil,
+	texts = { rect(24, 9, 126, 8), rect(24, 21, 126, 8) },
+}
+
+JeiLayout.ENTRIES = {
+	crafting = CRAFTING,
+	smelting = SMELTING,
+	fuel = FUEL,
+	refining = REFINING,
+	heating = GENERATOR,
+	combustion = GENERATOR,
+} :: { [string]: EntryLayout }
 
 function JeiLayout.entry(category: string): EntryLayout
 	return JeiLayout.ENTRIES[category] or CRAFTING

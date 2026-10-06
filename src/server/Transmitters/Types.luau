@@ -8,8 +8,8 @@
 	           colour, which of its sides join other transmitters (`links`) and acceptors
 	           (`acceptors`), a pipe's network, a transporter's pull timer, and what its last
 	           Transmitters record said
-	  Network  the pipes joined into one (a connected component): their shared water buffer
-	  Tank     a fluid tank's contents
+	  Network  the pipes joined into one (a connected component): their shared fluid buffer
+	  Tank     a Fluid Tank's contents
 	  Item     a stack travelling through transporters: where it is, its route and why
 	  World    the whole state (TransmitterWorld.new); Env is what it needs from the game
 
@@ -33,15 +33,21 @@ export type Network = {
 	size: number,
 	-- mB: the sum of the member pipes' capacities.
 	capacity: number,
-	-- Shared/Transmitters.FLUIDS (0 none, 1 water) and mB in the buffer.
+	-- The fluid in the buffer (Shared/Fluids id: 0 none, 1 water, 2 lava, 3 oil, 4 fuel; one at a
+	-- time) and mB of it.
 	fluid: number,
 	amount: number,
-	-- Members with at least one side joined to a tank.
+	-- Members with at least one side joined to an acceptor (a Fluid Tank, a machine with tanks).
 	ports: { [number]: Node },
-	-- The fill byte last given to the members' records (-1: check now), and the tick of that
-	-- check (fills are sent at most every FILL_INTERVAL ticks).
+	-- The fill byte and fluid id last given to the members' records (-1: check now), and the tick
+	-- of that check (fills are sent at most every FILL_INTERVAL ticks).
 	sentFill: number,
+	sentFluid: number,
 	checkedAt: number,
+	-- Whether it leads each fluid somewhere (Transmitters/Fluids: the machines' ejector asks),
+	-- worked out once in the tick `leadsTick`.
+	leads: { [number]: boolean },
+	leadsTick: number,
 }
 
 export type Node = {
@@ -63,10 +69,12 @@ export type Node = {
 	-- furnaces and machines push out), and failed pulls in a row (backoff).
 	pullDelay: number,
 	pullFailures: number,
-	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0).
+	-- The record clients last got (a new transmitter is in the default state: 0, 0, 0, 0): modes,
+	-- colour, a pipe's fill byte and its fluid id.
 	sentModes: number,
 	sentColour: number,
 	sentFluid: number,
+	sentFluidId: number,
 }
 
 export type Tank = {
@@ -117,7 +125,8 @@ export type Item = {
 export type Env = {
 	-- The block at (x, y, z), nil when the server does not know it. Never generates terrain.
 	getBlock: (x: number, y: number, z: number) -> number?,
-	-- Chests and furnaces (Players/Containers).
+	-- Chests, furnaces and machines (Players/Containers): pipes reach a machine's fluid tanks
+	-- through its container.
 	containers: Containers.Store,
 	-- The slots of the inventory at (x, y, z) changed (its viewers need a snapshot, a furnace may
 	-- cook).
@@ -141,10 +150,11 @@ export type World = {
 	-- Pos keys of the transmitters and tanks in each chunk (Coords.chunkKey).
 	byChunk: { [number]: { [number]: boolean } },
 	-- Pipes whose network has to be worked out again (a queue with a set marking the live
-	-- entries), and the flood fill in progress, carried over between ticks.
+	-- entries), and the flood fill in progress, carried over between ticks (with the fluid its
+	-- pipes hold so far: 0 none; a pipe holding another stays out).
 	seeds: { number },
 	seedSet: { [number]: boolean },
-	job: { visited: { [number]: boolean }, frontier: { number }, members: { Node } }?,
+	job: { visited: { [number]: boolean }, frontier: { number }, members: { Node }, fluid: number }?,
 	-- Transporters with a PULL side on an inventory, or a NORMAL side on a furnace or machine
 	-- that pushes its results out (Transmitters.ejects).
 	pullers: { [number]: Node },
@@ -164,7 +174,7 @@ export type World = {
 	-- Universal Cables that came, went or joined something new: the energy networks
 	-- (server/Machines/EnergyNet) work out their part again and clear this.
 	energyDirty: { [number]: boolean },
-	-- mB of water lost with broken pipes and tanks (for conservation checks).
+	-- mB of fluid lost with broken pipes and tanks (for conservation checks).
 	lost: number,
 }
 

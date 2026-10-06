@@ -655,7 +655,7 @@ return function(t, shared, require, _server, client)
 	t.test("transmitter client: WAILA shows a pipe's water and a tank's", function()
 		local pipe = B.BasicMechanicalPipe
 		local empty = texts(WailaInfo.block(pipe, nil, 0, 64, 0, false, { transmitter = facts({ side = UP }) }))
-		has(empty, "Water: 0 / 2,000 mB", "a lone empty pipe: its own capacity")
+		has(empty, "Empty: 0 / 2,000 mB", "a lone empty pipe: its own capacity")
 		hasNo(empty, "Colour", "pipes have no colour")
 		local full = texts(WailaInfo.block(pipe, nil, 0, 64, 0, false, {
 			transmitter = facts({ fluid = 255, networkSize = 8, networkCapacity = 16000 }),
@@ -671,7 +671,7 @@ return function(t, shared, require, _server, client)
 		has(lines, "Water: 12,000 / 32,000 mB", "tank contents")
 		has(
 			texts(WailaInfo.block(B.UltimateFluidTank, nil, 0, 64, 0, false, { tank = { fluid = 0, amount = 0 } })),
-			"Water: 0 / 256,000 mB",
+			"Empty: 0 / 256,000 mB",
 			"an empty tank"
 		)
 		-- Tank facts on a transmitter (or the other way round) are ignored.

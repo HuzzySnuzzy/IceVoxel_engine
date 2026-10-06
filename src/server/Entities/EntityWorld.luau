@@ -14,7 +14,11 @@
 	             item checking merges into the other), which keeps the longer pickup delay and the
 	             younger age (ItemEntity.mergeWithNeighbours / tryToMerge). Merging runs after
 	             every item has moved, rather than in the middle of the tick as in Minecraft;
-	  despawn    after `lifetimeTicks` of age (Minecraft: 6000, 5 minutes).
+	  despawn    after `lifetimeTicks` of age (Minecraft: 6000, 5 minutes);
+	  burning    an item touching lava burns (Players/Burning.tickItem: ItemEntity's 5 health, lava
+	             takes 4 a tick and sets it burning for 15 s, burning 1 every 20 ticks, water puts
+	             it out), so one tick in lava and it is gone the next (Minecraft's
+	             Entity.lavaHurt). Each lava hurt is in `takeChanges().burnt` (the burn sound).
 	Then players pick items up: a player's box (0.6 x 1.8 at the feet) grown by (1, 0.5, 1)
 	touching an item whose pickup delay is over (Player.aiStep / ItemEntity.playerTouch).
 	`tryPickup` answers how many it took; the item keeps the rest.
@@ -38,6 +42,8 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
 
+local Burning = require(script.Parent.Parent.Players.Burning)
+
 type Body = ItemPhysics.Body
 
 export type Entity = {
@@ -53,6 +59,9 @@ export type Entity = {
 	pickupDelay: number,
 	-- Ticks towards despawning (Minecraft's ItemEntity.age; merging keeps the younger one's).
 	age: number,
+	-- ItemEntity's health (5) and ticks left burning (Players/Burning).
+	health: number,
+	fire: number,
 	-- Bookkeeping: removed from the world, ticks since the last sync, moved since the last sync,
 	-- ticks without moving.
 	removed: boolean,
@@ -83,6 +92,8 @@ export type Changes = {
 	removed: { { id: number, collector: any } },
 	-- Partial pickups: `count` items of entity `id` went to `collector` (the entity keeps the rest).
 	taken: { { id: number, count: number, collector: any } },
+	-- Where lava hurt an item this tick (blocks: the centre of its box), for the burn sound.
+	burnt: { { x: number, y: number, z: number } },
 }
 
 export type Options = {
@@ -107,6 +118,7 @@ export type EntityWorld = {
 	countSet: { [number]: boolean },
 	removedList: { { id: number, collector: any } },
 	takenList: { { id: number, count: number, collector: any } },
+	burntList: { { x: number, y: number, z: number } },
 
 	spawnItem: (
 		self: EntityWorld,
@@ -169,6 +181,7 @@ function EntityWorld.new(getBlock: ItemPhysics.GetBlock, options: Options): Enti
 		countSet = {},
 		removedList = {},
 		takenList = {},
+		burntList = {},
 	}
 	return (setmetatable(self, EntityWorld) :: any) :: EntityWorld
 end
@@ -221,6 +234,8 @@ function EntityWorld.spawnItem(
 		body = body,
 		pickupDelay = pickupDelay or EntityWorld.DEFAULT_PICKUP_DELAY,
 		age = 0,
+		health = Burning.ITEM_HEALTH,
+		fire = 0,
 		removed = false,
 		sinceSync = 0,
 		unsynced = false,
@@ -437,6 +452,23 @@ function EntityWorld.tick(self: EntityWorld, players: { PlayerBox }, tryPickup: 
 		end
 	end
 
+	-- Lava burns items (and water puts them out), where they are after moving.
+	for _, entity in entities do
+		if ticked[entity] and not entity.removed then
+			local body = entity.body
+			local touching = Burning.touchingAt(getBlock, body.x, body.y, body.z, WIDTH, HEIGHT)
+			if touching ~= 0 or entity.fire > 0 then
+				local gone, hurt = Burning.tickItem(entity, touching)
+				if hurt then
+					table.insert(self.burntList, { x = body.x, y = body.y + HEIGHT / 2, z = body.z })
+				end
+				if gone then
+					removeEntity(self, entity, nil)
+				end
+			end
+		end
+	end
+
 	-- Pickups.
 	for _, player in players do
 		local half = PLAYER_WIDTH / 2 + PICKUP_REACH_XZ
@@ -512,12 +544,14 @@ function EntityWorld.takeChanges(self: EntityWorld): Changes
 		counts = sortedLive(self, self.countSet),
 		removed = self.removedList,
 		taken = self.takenList,
+		burnt = self.burntList,
 	}
 	self.spawnedSet = {}
 	self.movedSet = {}
 	self.countSet = {}
 	self.removedList = {}
 	self.takenList = {}
+	self.burntList = {}
 	return changes
 end
 

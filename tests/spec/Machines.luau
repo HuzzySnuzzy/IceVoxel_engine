@@ -676,4 +676,357 @@ return function(t, shared, require, _server, client)
 		}))
 		t.eq(table.find(stone, "Energy: Infinite"), nil)
 	end)
+
+	--[[ Fluid tanks (Mekanism's machine fluid tanks) ]]
+
+	-- A test kind with tanks: two input tanks (water only; water or lava) and an output (oil).
+	local Fluids = require(shared.Fluids)
+	local TANKS_BLOCK = B.GoldBlock
+	local tankKind = Machines.kind("test_tanks")
+		or Machines.define("test_tanks", {
+			fields = { "work", "activeDelay" },
+			tanks = {
+				{
+					name = "small",
+					capacity = 100,
+					fluids = { Fluids.WATER },
+					role = "input",
+					gauge = { x = 7, y = 13 },
+				},
+				{
+					name = "mix",
+					capacity = 1000,
+					fluids = { Fluids.WATER, Fluids.LAVA },
+					role = "input",
+					gauge = { x = 30, y = 18, w = 66, h = 50 },
+				},
+				{ name = "out", capacity = 2000, fluids = { Fluids.OIL }, role = "output" },
+			},
+			info = { answer = 42 },
+		})
+
+	local function withTanks(fn: () -> ())
+		FakeMachines.bind(Machines, { { TANKS_BLOCK, "test_tanks", { capacity = 1000, input = 1000 } } }, fn)
+	end
+
+	t.test("tanks: the data layout, after the kind's fields; checks on define", function()
+		local tanks = tankKind.tanks
+		t.eq(#tanks, 3)
+		t.eq(tankKind.index.work, 7)
+		t.eq(tankKind.index.activeDelay, 8)
+		t.eq(tanks[1].amountIndex, 9, "the first tank after the fields")
+		t.eq(tanks[1].fluidIndex, nil, "a tank of one fluid needs no id")
+		t.eq(tanks[1].fluid, Fluids.WATER)
+		t.eq(tanks[2].amountIndex, 10)
+		t.eq(tanks[2].fluidIndex, 11, "a tank of several fluids keeps its fluid's id")
+		t.eq(tanks[2].fluid, nil)
+		t.eq(tankKind.index.mixFluid, 11)
+		t.eq(tanks[3].amountIndex, 12)
+		t.eq(tankKind.size, 12)
+		t.eq(table.concat(tankKind.inputTanks, ","), "1,2")
+		t.eq(table.concat(tankKind.outputTanks, ","), "3")
+		t.eq(tankKind.tankNamed.mix, tanks[2])
+		t.eq(tankKind.info.answer, 42)
+		t.ok(table.isfrozen(tanks) and table.isfrozen(tanks[1]) and table.isfrozen(tankKind.info))
+		local function bad(label: string, tank: any, fields: { string }?)
+			t.ok(not pcall(Machines.define, `test_bad_tank_{label}`, { fields = fields, tanks = { tank } }), label)
+		end
+		local good = { name = "a", capacity = 10, fluids = { Fluids.WATER }, role = "input" }
+		local function with(key: string, value: any): any
+			local spec = table.clone(good) :: any
+			spec[key] = value
+			return spec
+		end
+		bad("name", with("name", "bad name"))
+		bad("header", with("name", "energy"))
+		bad("field", good, { "a" })
+		bad("capacity", with("capacity", 0))
+		bad("fraction", with("capacity", 10.5))
+		bad("role", with("role", "both"))
+		bad("nofluid", with("fluids", {}))
+		bad("none", with("fluids", { 0 }))
+		bad("unknown", with("fluids", { Fluids.COUNT + 1 }))
+		bad("twice", with("fluids", { Fluids.WATER, Fluids.WATER }))
+		bad("gauge", with("gauge", { y = 3 }))
+		local many = {}
+		for i = 1, Types.MAX_CONTAINER_DATA - Machines.HEADER do
+			table.insert(many, `f{i}`)
+		end
+		t.ok(not pcall(Machines.define, "test_bad_tank_room", { fields = many, tanks = { good } }), "no data left")
+		t.ok(not pcall(Machines.define, "test_bad_tank_dup", {
+			tanks = { good, with("fluids", { Fluids.OIL }) },
+		}), "two tanks of one name")
+		-- Other blocks have none.
+		t.eq(#Machines.tanks(B.Stone), 0)
+		t.ok(not Machines.hasTanks(B.CreativeEnergyCube))
+		t.eq(Machines.tank(B.Stone, 1), nil)
+		t.eq(next(Machines.info(B.Stone)), nil)
+	end)
+
+	t.test("tanks: one fluid at a time, whole mB within the capacity, simulated or not", function()
+		withTanks(function()
+			t.ok(Machines.hasTanks(TANKS_BLOCK))
+			t.eq((Machines.tank(TANKS_BLOCK, "mix") :: any).id, 2)
+			t.eq(Machines.tank(TANKS_BLOCK, 4), nil)
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			t.eq(#c.data, 12, "room for the tanks in the data")
+			t.eq(Machines.tankRoom(c, "mix", Fluids.WATER), 1000)
+			t.eq(Machines.tankRoom(c, "mix", Fluids.OIL), 0, "not a fluid it takes")
+			t.eq(Machines.tankInsert(c, "mix", Fluids.WATER, 250, true), 250)
+			t.eq(Machines.tankAmount(c, "mix"), 0, "simulated")
+			t.eq(Machines.tankInsert(c, "mix", Fluids.WATER, 250.9), 250, "whole mB")
+			t.eq(Machines.tankFluid(c, "mix"), Fluids.WATER)
+			t.eq(c.data[11], Fluids.WATER, "its fluid id in the data")
+			t.eq(Machines.tankRoom(c, "mix", Fluids.LAVA), 0, "holding water, it takes no lava")
+			t.eq(Machines.tankInsert(c, "mix", Fluids.LAVA, 100), 0)
+			t.eq(Machines.tankInsert(c, "mix", Fluids.WATER, 5000), 750, "up to its capacity")
+			t.eq(Machines.tankAmount(c, 2), 1000)
+			t.eq(Machines.tankInsert(c, 2, Fluids.WATER, 0 / 0), 0, "NaN puts nothing")
+			local fluid, amount = Machines.tankExtract(c, "mix", 400, true)
+			t.eq(fluid, Fluids.WATER)
+			t.eq(amount, 400)
+			t.eq(Machines.tankAmount(c, 2), 1000, "simulated")
+			fluid, amount = Machines.tankExtract(c, "mix", 5000)
+			t.eq(fluid, Fluids.WATER)
+			t.eq(amount, 1000, "what there is")
+			t.eq(Machines.tankFluid(c, 2), 0, "empty")
+			t.eq(c.data[11], 0, "its fluid id goes with the last mB")
+			t.eq(Machines.tankInsert(c, "mix", Fluids.LAVA, 300), 300, "empty, it takes lava")
+			t.eq(Machines.tankFluid(c, 2), Fluids.LAVA)
+			fluid, amount = Machines.tankExtract(c, 1, 10)
+			t.eq(fluid, 0, "nothing in the small tank")
+			t.eq(amount, 0)
+			-- The kind's tick may fill its output tank; Machines.get reads amounts by name.
+			t.eq(Machines.tankInsert(c, "out", Fluids.OIL, 120), 120)
+			t.eq(Machines.get(c, "out"), 120)
+			t.eq(Machines.tankAmount(c, "nope"), 0)
+			-- What each tank holds (records, WAILA).
+			local contents = Machines.tankContents(c)
+			t.eq(#contents, 3)
+			t.eq(contents[1].fluid, 0)
+			t.eq(contents[2].name, "mix")
+			t.eq(contents[2].fluid, Fluids.LAVA)
+			t.eq(contents[2].amount, 300)
+			t.eq(contents[2].capacity, 1000)
+			t.eq(contents[3].amount, 120)
+		end)
+	end)
+
+	t.test("tanks: a tick keeps them whole, in range and of a fluid they take", function()
+		withTanks(function()
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			local ctx: any = {
+				block = TANKS_BLOCK,
+				x = 0,
+				y = 0,
+				z = 0,
+				energy = { capacity = 1000, input = 1000 },
+				tick = 1,
+				dayTime = 0,
+				getBlock = function()
+					return nil
+				end,
+			}
+			c.data[9], c.data[10], c.data[11], c.data[12] = 0 / 0, 1e9, Fluids.WATER, -40
+			Machines.tick(c, ctx)
+			t.eq(c.data[9], 0, "NaN")
+			t.eq(c.data[10], 1000, "at most the capacity")
+			t.eq(c.data[12], 0, "never below empty")
+			c.data[9], c.data[10], c.data[11] = 55.7, 300, Fluids.OIL
+			Machines.tick(c, ctx)
+			t.eq(c.data[9], 55, "whole mB")
+			t.eq(c.data[10], 0, "a fluid the tank doesn't take is gone")
+			t.eq(c.data[11], 0)
+			c.data[10], c.data[11] = 0, Fluids.LAVA
+			Machines.tick(c, ctx)
+			t.eq(c.data[11], 0, "an empty tank holds no fluid")
+			-- Reading never trusts the data either.
+			c.data[10], c.data[11] = 500, Fluids.OIL
+			t.eq(Machines.tankAmount(c, 2), 0)
+			t.eq(Machines.tankFluid(c, 2), 0)
+			local window: any = { kind = "machine", block = TANKS_BLOCK, size = 0, slots = {} }
+			t.eq(Machines.tankAmount(window, 1), 0, "a window without data yet")
+			t.eq(window.data, nil, "reading made none")
+		end)
+	end)
+
+	t.test("tanks: pipes fill inputs that take the fluid and drain outputs (Mekanism's EXTERNAL)", function()
+		withTanks(function()
+			t.ok(Machines.takesFluid(TANKS_BLOCK, Fluids.WATER))
+			t.ok(Machines.takesFluid(TANKS_BLOCK, Fluids.LAVA))
+			t.ok(not Machines.takesFluid(TANKS_BLOCK, Fluids.OIL), "oil only comes out")
+			t.ok(Machines.givesFluid(TANKS_BLOCK))
+			t.ok(not Machines.takesFluid(B.Stone, Fluids.WATER))
+			t.ok(not Machines.givesFluid(B.Stone))
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			t.eq(Machines.fluidRoom(c, Fluids.WATER), 1100, "both input tanks")
+			t.eq(Machines.fluidRoom(c, Fluids.OIL), 0, "outputs take nothing from pipes")
+			t.eq(Machines.insertFluid(c, Fluids.WATER, 300, true), 300)
+			t.eq(Machines.tankAmount(c, 1) + Machines.tankAmount(c, 2), 0, "simulated")
+			t.eq(Machines.insertFluid(c, Fluids.WATER, 300), 300)
+			t.eq(Machines.tankAmount(c, 1), 100, "the first input tank first")
+			t.eq(Machines.tankAmount(c, 2), 200, "then the next")
+			t.eq(Machines.insertFluid(c, Fluids.LAVA, 50), 0, "the tank that takes lava holds water")
+			t.eq(Machines.insertFluid(c, Fluids.OIL, 50), 0)
+			t.eq(Machines.insertFluid(c, Fluids.WATER, 5000), 800, "until both are full")
+			local fluid, amount = Machines.extractFluid(c, 100)
+			t.eq(fluid, 0, "inputs never give to pipes; the output is empty")
+			t.eq(amount, 0)
+			Machines.tankInsert(c, "out", Fluids.OIL, 150)
+			fluid, amount = Machines.extractFluid(c, 100, Fluids.WATER)
+			t.eq(amount, 0, "a pipe of water takes no oil")
+			fluid, amount = Machines.extractFluid(c, 100, Fluids.OIL, true)
+			t.eq(fluid, Fluids.OIL)
+			t.eq(amount, 100)
+			t.eq(Machines.tankAmount(c, 3), 150, "simulated")
+			fluid, amount = Machines.extractFluid(c, 500)
+			t.eq(fluid, Fluids.OIL)
+			t.eq(amount, 150, "what there is")
+			t.eq(Machines.tankAmount(c, 3), 0)
+		end)
+	end)
+
+	t.test("tanks: buckets pour into an input whole and fill from an output first (MANUAL)", function()
+		withTanks(function()
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			t.ok(Machines.pourBucket(c, Fluids.WATER, true), "simulated")
+			t.eq(Machines.tankAmount(c, 2), 0)
+			t.ok(Machines.pourBucket(c, Fluids.WATER), "the small tank has no room for 1000 mB")
+			t.eq(Machines.tankAmount(c, 1), 0)
+			t.eq(Machines.tankAmount(c, 2), 1000, "the first with room for all of it")
+			t.ok(not Machines.pourBucket(c, Fluids.WATER), "no room for another")
+			t.ok(not Machines.pourBucket(c, Fluids.OIL), "no input takes oil")
+			t.eq(Machines.bucketTank(TANKS_BLOCK, I.LavaBucket), tankKind.tanks[2])
+			t.eq(Machines.bucketTank(TANKS_BLOCK, I.WaterBucket), tankKind.tanks[1], "the first that takes it")
+			t.eq(Machines.bucketTank(TANKS_BLOCK, I.OilBucket), nil, "an output takes no bucket")
+			t.eq(Machines.bucketTank(TANKS_BLOCK, I.Bucket), nil)
+			t.eq(Machines.bucketTank(B.Stone, I.WaterBucket), nil)
+			-- An empty bucket: from an output holding a whole bucket first, else from an input.
+			Machines.tankInsert(c, "out", Fluids.OIL, 1500)
+			t.eq(Machines.fillBucket(c, true), Fluids.OIL)
+			t.eq(Machines.tankAmount(c, 3), 1500, "simulated")
+			t.eq(Machines.fillBucket(c), Fluids.OIL, "the output first")
+			t.eq(Machines.tankAmount(c, 3), 500)
+			t.eq(Machines.fillBucket(c), Fluids.WATER, "500 mB of oil is no bucket: the input's water")
+			t.eq(Machines.tankAmount(c, 2), 0)
+			t.eq(Machines.tankFluid(c, 2), 0)
+			t.eq(Machines.fillBucket(c), 0, "nothing holds a bucket")
+			t.ok(not Machines.pourBucket({ kind = "machine", block = B.Stone, size = 0, slots = {} } :: any, 1))
+		end)
+	end)
+
+	t.test("tanks: the item keeps them (with the fluid of a mixed tank) and its tooltip shows them", function()
+		withTanks(function()
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			Machines.tankInsert(c, "small", Fluids.WATER, 60)
+			Machines.tankInsert(c, "mix", Fluids.LAVA, 700)
+			local data = Machines.save(c) :: any
+			t.eq(data.small, 60)
+			t.eq(data.smallFluid, nil)
+			t.eq(data.mix, 700)
+			t.eq(data.mixFluid, Fluids.LAVA)
+			t.eq(data.out, nil, "an empty tank keeps nothing")
+			t.eq(data.energy, nil)
+			local lines = Items.describe({ item = TANKS_BLOCK, count = 1, data = data })
+			t.ok(table.find(lines, "Water: 60 mB") ~= nil, "the tank of one fluid")
+			t.ok(table.find(lines, "Lava: 700 mB") ~= nil, "the mixed tank's fluid")
+			local placed: any = Machines.newContainer(TANKS_BLOCK)
+			t.ok(Machines.restore(placed, data))
+			t.eq(Machines.tankAmount(placed, 1), 60)
+			t.eq(Machines.tankAmount(placed, 2), 700)
+			t.eq(Machines.tankFluid(placed, 2), Fluids.LAVA)
+			-- Junk: a fluid the tank doesn't take, none, too much.
+			local junk: any = Machines.newContainer(TANKS_BLOCK)
+			t.ok(not Machines.restore(junk, { mix = 500, mixFluid = Fluids.OIL }))
+			t.ok(not Machines.restore(junk, { mix = 500 }), "a mixed tank needs its fluid")
+			t.ok(Machines.restore(junk, { out = 1e6 }))
+			t.eq(Machines.tankAmount(junk, 3), 2000)
+			t.eq(Machines.tankAmount(junk, 2), 0)
+			-- Empty: a plain item.
+			t.eq(Machines.save(Machines.newContainer(TANKS_BLOCK)), nil)
+		end)
+	end)
+
+	t.test("tanks: panel gauges (Mekanism's GuiFluidGauge), their fill and their text", function()
+		withTanks(function()
+			local gauges = Machines.gauges(TANKS_BLOCK)
+			t.eq(#gauges, 2, "a tank without a gauge shows none")
+			t.eq(gauges[1].name, "small")
+			t.eq(gauges[1].x, 7)
+			t.eq(gauges[1].w, Machines.TANK_GAUGE.w, "Mekanism's standard gauge")
+			t.eq(gauges[1].h, 60)
+			t.eq(gauges[1].fluid, Fluids.WATER)
+			t.eq(gauges[1].fluidIndex, nil)
+			t.eq(gauges[1].amount, 9)
+			t.eq(gauges[1].capacity, 100)
+			t.eq(gauges[1].role, "input")
+			t.eq(gauges[2].w, 66, "a wide one")
+			t.eq(gauges[2].fluid, 0, "read from the data")
+			t.eq(gauges[2].fluidIndex, 11)
+			t.ok(table.isfrozen(gauges))
+			t.eq(#Machines.gauges(B.Stone), 0)
+		end)
+		-- Mekanism's getScaledLevel: round(amount / capacity x the inside's height).
+		t.eq(Machines.gaugeLevel(0, 1000, 58), 0)
+		t.eq(Machines.gaugeLevel(1000, 1000, 58), 58)
+		t.eq(Machines.gaugeLevel(500, 1000, 58), 29)
+		t.eq(Machines.gaugeLevel(8, 1000, 58), 0, "rounds to nothing, as Mekanism's")
+		t.eq(Machines.gaugeLevel(9, 1000, 58), 1)
+		t.eq(Machines.gaugeLevel(5000, 1000, 58), 58)
+		t.eq(Machines.gaugeLevel(0 / 0, 1000, 58), 0)
+		t.eq(Machines.gaugeLevel(5, 0, 58), 0)
+		t.eq(Machines.tankLine(Fluids.LAVA, 12000), "Lava: 12,000 mB")
+		t.eq(Machines.tankLine(Fluids.FUEL, 5), "Fuel: 5 mB")
+		t.eq(Machines.tankLine(0, 0), "Empty")
+		t.eq(Machines.tankLine(Fluids.OIL, 0), "Empty")
+		t.eq(Machines.tankLine(99, 5), "Empty")
+	end)
+
+	t.test("tanks: a machine's window travels with its tanks' data", function()
+		withTanks(function()
+			local container: any = Machines.newContainer(TANKS_BLOCK)
+			Machines.tankInsert(container, "mix", Fluids.LAVA, 640)
+			Machines.tankInsert(container, "out", Fluids.OIL, 2000)
+			local snapshot = { ack = 4, inventory = Types.newInventory(), window = 2, container = container }
+			local decoded = Protocol.decodeInventory(Protocol.encodeInventory(snapshot :: any)) :: any
+			t.eq(#decoded.container.data, 12)
+			t.eq(Machines.tankAmount(decoded.container, "mix"), 640)
+			t.eq(Machines.tankFluid(decoded.container, "mix"), Fluids.LAVA)
+			t.eq(Machines.tankAmount(decoded.container, "out"), 2000)
+		end)
+	end)
+
+	t.test("working: Mekanism's 60 tick deactivation delay holds ACTIVE through short stops", function()
+		withTanks(function()
+			local c: any = Machines.newContainer(TANKS_BLOCK)
+			t.eq(Machines.DEACTIVATION_DELAY, 60)
+			Machines.showActive(c, false, true)
+			t.eq(Machines.get(c, "active"), 1, "on at once")
+			Machines.showActive(c, true, false)
+			t.eq(Machines.get(c, "active"), 0, "off at once the first time")
+			t.eq(Machines.get(c, "activeDelay"), 60)
+			Machines.showActive(c, false, true)
+			t.eq(Machines.get(c, "active"), 1)
+			Machines.showActive(c, true, false)
+			t.eq(Machines.get(c, "active"), 1, "a stop within the delay stays on")
+			for _ = 1, 59 do
+				Machines.showActive(c, false, false)
+			end
+			t.eq(Machines.get(c, "active"), 1, "59 ticks stopped")
+			Machines.showActive(c, false, false)
+			t.eq(Machines.get(c, "active"), 0, "off when the delay runs out, 60 ticks after the stop")
+		end)
+		-- A kind without the field shows what it does.
+		FakeMachines.bind(
+			Machines,
+			{ { PRODUCER_BLOCK, "test_producer", { capacity = 5000, output = 100 } } },
+			function()
+				local c: any = Machines.newContainer(PRODUCER_BLOCK)
+				Machines.showActive(c, false, true)
+				t.eq(Machines.get(c, "active"), 1)
+				Machines.showActive(c, true, false)
+				t.eq(Machines.get(c, "active"), 0)
+			end
+		)
+	end)
 end

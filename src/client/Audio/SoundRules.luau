@@ -33,13 +33,18 @@
 	             ticks on one block, from its first (`hitTick`).
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
 	             (CRACKLE_CHANCE per tick), and so does a burning Heat Generator within
-	             CRACKLE_RANGE blocks (`crackles`); caves rumble now and then (`caveDelay`).
+	             CRACKLE_RANGE blocks (`crackles`); caves rumble now and then (`caveDelay`); lava
+	             open to the air pops and bubbles (`lavaTick`: Minecraft's random display ticks,
+	             sampled).
+	  fluids     only fluids one swims in (Fluids `swim`: water, fuel) splash and make swim
+	             sounds; lava and oil are silent to move through, as Minecraft's lava.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Fluids = require(Shared.Fluids)
 local Sounds = require(Shared.Sounds)
 
 type Event = Sounds.Event
@@ -341,6 +346,12 @@ local function fluid(block: number?): boolean
 	return kindOf(block) == Blocks.KIND_FLUID
 end
 
+-- A fluid one swims in (Fluids `swim`: water, fuel): it splashes and makes swim sounds.
+local function swimmable(block: number?): boolean
+	local record = if fluid(block) then Fluids.get(Fluids.ofBlock(block :: number)) else nil
+	return record ~= nil and record.swim
+end
+
 local function weightedSpeed(motion: Motion): number
 	local ticks = math.max(motion.ticks, 1e-3)
 	local vx, vy, vz = motion.dx / ticks, motion.dy / ticks, motion.dz / ticks
@@ -390,8 +401,9 @@ export type GetBlock = (x: number, y: number, z: number) -> number?
 
 --[[
 	Another character's surroundings from its feet (blocks): whether it stands on something (feet
-	at the top of a solid block under its hull), whether it is in water (at the feet or the middle
-	of the body) and the block it would step on (under the feet, or the solid block under its
+	at the top of a solid block under its hull), whether it is in water or fuel (a fluid one swims
+	in, at the feet or the middle of the body) and the block it would step on (under the feet, or
+	the solid block under its
 	hull it stands on at an edge).
 ]]
 function SoundRules.observe(getBlock: GetBlock, x: number, y: number, z: number): (boolean, boolean, number?)
@@ -413,8 +425,8 @@ function SoundRules.observe(getBlock: GetBlock, x: number, y: number, z: number)
 			end
 		end
 	end
-	local inWater = fluid(getBlock(floor(x), floor(y + 0.1), floor(z)))
-		or fluid(getBlock(floor(x), floor(y + 0.9), floor(z)))
+	local inWater = swimmable(getBlock(floor(x), floor(y + 0.1), floor(z)))
+		or swimmable(getBlock(floor(x), floor(y + 0.9), floor(z)))
 	return onGround, inWater, below
 end
 
@@ -458,8 +470,10 @@ SoundRules.CRACKLE_CHANCE = 0.012
 SoundRules.CRACKLE_RANGE = 16
 -- Machines that crackle like a lit furnace while they work (their Machines record says active).
 local CRACKLING: { [string]: boolean } = {
-	-- Mekanism Generators' Heat Generator, burning furnace fuel.
+	-- Mekanism Generators' Heat Generator, burning furnace fuel or lava.
 	HeatGenerator = true,
+	-- The Combustion Generator, burning fuel.
+	CombustionGenerator = true,
 }
 
 -- Does the machine `block` crackle like a lit furnace while it works?
@@ -475,6 +489,64 @@ SoundRules.CAVE_MIN, SoundRules.CAVE_MAX = 90, 300
 -- Seconds underground before the next cave rumble, for a random roll in [0, 1).
 function SoundRules.caveDelay(roll: number): number
 	return SoundRules.CAVE_MIN + (SoundRules.CAVE_MAX - SoundRules.CAVE_MIN) * roll
+end
+
+--[[
+	Lava's sounds (LavaFluid.animateTick): Minecraft's client picks 667 random blocks a tick within
+	16 blocks of the player (each axis nextInt(16) - nextInt(16)) and 667 within 32; lava with air
+	above pops (block.lava.pop) one time in 100 and bubbles (block.lava.ambient) one in 200. Here
+	LAVA_SAMPLES of each a tick stand for those 667, with the odds scaled to match: the same sounds
+	on average for a twenty-eighth of the block reads.
+]]
+SoundRules.LAVA_SAMPLES = 24
+SoundRules.LAVA_RANGES = table.freeze({ 16, 32 })
+SoundRules.LAVA_POP = 1 / 100 * 667 / SoundRules.LAVA_SAMPLES
+SoundRules.LAVA_AMBIENT = 1 / 200 * 667 / SoundRules.LAVA_SAMPLES
+
+export type LavaSound = { sound: string, x: number, y: number, z: number, volume: number, pitch: number }
+
+--[[
+	One tick of lava sounds around block (x, y, z) (the listener's), with `random` rolls in [0, 1):
+	the sounds due (positions in blocks; volume and pitch multiply the event's: Minecraft's
+	0.2 + 0.2r and 0.9 + 0.15r). Lava (any level, CaveLava too) must have air above it.
+]]
+function SoundRules.lavaTick(getBlock: GetBlock, x: number, y: number, z: number, random: () -> number): { LavaSound }
+	local found: { LavaSound } = {}
+	local floor = math.floor
+	for _, range in SoundRules.LAVA_RANGES do
+		for _ = 1, SoundRules.LAVA_SAMPLES do
+			local bx = x + floor(random() * range) - floor(random() * range)
+			local by = y + floor(random() * range) - floor(random() * range)
+			local bz = z + floor(random() * range) - floor(random() * range)
+			local block = getBlock(bx, by, bz)
+			if block and Fluids.ofBlock(block) == Fluids.LAVA then
+				local above = getBlock(bx, by + 1, bz)
+				if above == Blocks.AIR or above == Blocks.CAVE_AIR then
+					if random() < SoundRules.LAVA_POP then
+						table.insert(found, {
+							sound = "block.lava.pop",
+							x = bx + random(),
+							y = by + 1,
+							z = bz + random(),
+							volume = 0.2 + random() * 0.2,
+							pitch = 0.9 + random() * 0.15,
+						})
+					end
+					if random() < SoundRules.LAVA_AMBIENT then
+						table.insert(found, {
+							sound = "block.lava.ambient",
+							x = bx + 0.5,
+							y = by + 0.5,
+							z = bz + 0.5,
+							volume = 0.2 + random() * 0.2,
+							pitch = 0.9 + random() * 0.15,
+						})
+					end
+				end
+			end
+		end
+	end
+	return found
 end
 
 return SoundRules

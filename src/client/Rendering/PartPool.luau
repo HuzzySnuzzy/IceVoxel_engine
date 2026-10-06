@@ -39,11 +39,12 @@
 	Far and plain templates and item models get no light. `light(part)` finds a part's PointLight
 	without a search (ChunkRenderer switches lights off the moment a part is retired).
 
-	Sparse lights (glow lichen, GreedyMesher.sparseLightLut): the mesher marks the one cell per box
-	that carries the light, and every other cell's light box comes from a "dark" template, the same
-	part without its PointLight (`acquire`'s `dark`), so lit and unlit lichen look alike. Their
-	lights have no shadows: they are dim, short and many, and lichen grows only deep underground,
-	so a glow reaching through a thin cave wall shows nowhere it shouldn't.
+	Sparse lights (glow lichen and lava, GreedyMesher.sparseLightLut): the mesher marks the one cell
+	per box that carries the light, and every other cell's light box (a lava box: its part) comes
+	from a "dark" template, the same part without its PointLight (`acquire`'s `dark`), so lit and
+	unlit cells look alike. Their lights have no shadows: they are many, and lichen grows only deep
+	underground, so a glow reaching through a thin cave wall shows nowhere it shouldn't. Lava's
+	light 15 reaches 13.5 blocks (40.5 studs), lichen's 7 a little over 6.
 
 	Quarantine: a released part waits in `recent` until the next frame (`beginFrame`), so a part
 	that was on screen at the start of a frame is never moved and shown elsewhere in that same frame

@@ -47,9 +47,12 @@ return function(t, shared, require, _server, client)
 			end
 			return 0, true
 		elseif kind == FLUID then
+			-- (A cave twin is its source: CaveLava next to Lava is the same fluid.)
+			local form = Blocks.surfaceForm(id)
 			for _, d in dirs do
 				local n = neighbour(d[1], d[2], d[3])
-				if n ~= nil and buffer.readu8(cull, n) == 0 and n ~= id then
+				local nForm = if n ~= nil and Blocks.get(n).fluid then Blocks.surfaceForm(n) else n
+				if n ~= nil and buffer.readu8(cull, n) == 0 and nForm ~= form then
 					-- Visible; lowered to its level unless the same fluid continues above.
 					local above = neighbour(0, 1, 0)
 					local surface = buffer.readu8(Blocks.fluidHeightLut, id)
@@ -73,34 +76,34 @@ return function(t, shared, require, _server, client)
 	end
 
 	--[[
-		The cells of y0 .. y1 - 1 carrying a sparse light (glow lichen), by local index: per
-		LIGHT_BOX box, the drawn lichen nearest its centre, the first in y, z, x order on a tie.
+		The cells of y0 .. y1 - 1 carrying a sparse light, by local index, with what their key gains:
+		per LIGHT_BOX box the drawn glow lichen nearest its centre (surface field 1), and per
+		FLUID_LIGHT_BOX box apart from those the drawn lava (FLUID_LIT on its height); the first in
+		y, z, x order on a tie.
 	]]
 	local function sparseLights(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean)
-		local box = GreedyMesher.LIGHT_BOX
-		local best: { [string]: { score: number, index: number } } = {}
+		local best: { [string]: { score: number, index: number, gain: number } } = {}
 		for y = y0, y1 - 1 do
 			for z = 0, SIZE - 1 do
 				for x = 0, SIZE - 1 do
 					local need = classify(data, height, x, y, z, hideCaves)
-					-- (Only shaped blocks are sparse lights; their keys carry nothing else.)
-					if
-						need ~= 0
-						and need < GreedyMesher.KEY_STRIDE
-						and buffer.readu8(GreedyMesher.sparseLightLut, need) == 1
-					then
-						local key = `{x // box},{y // box},{z // box}`
-						local score = GreedyMesher.lightScore(x, y, z)
+					local app = need % GreedyMesher.KEY_STRIDE
+					if need ~= 0 and buffer.readu8(GreedyMesher.sparseLightLut, app) == 1 then
+						local fluid = Blocks.appearances[app].kind == FLUID
+						local box = if fluid then GreedyMesher.FLUID_LIGHT_BOX else GreedyMesher.LIGHT_BOX
+						local key = `{if fluid then "fluid" else "lichen"} {x // box},{y // box},{z // box}`
+						local score = GreedyMesher.lightScore(x, y, z, box)
 						if best[key] == nil or score < best[key].score then
-							best[key] = { score = score, index = (y * SIZE + z) * SIZE + x }
+							local gain = if fluid then GreedyMesher.FLUID_LIT else 1
+							best[key] = { score = score, index = (y * SIZE + z) * SIZE + x, gain = gain }
 						end
 					end
 				end
 			end
 		end
-		local lit: { [number]: boolean } = {}
+		local lit: { [number]: number } = {}
 		for _, chosen in best do
-			lit[chosen.index] = true
+			lit[chosen.index] = chosen.gain
 		end
 		return lit
 	end
@@ -111,8 +114,9 @@ return function(t, shared, require, _server, client)
 		-- What a cell must be covered by: its appearance, plus the light flag of a sparse light.
 		local function expected(x: number, y: number, z: number): (number, boolean)
 			local need, wild = classify(data, height, x, y, z, hideCaves)
-			if lit[(y * SIZE + z) * SIZE + x] then
-				need += GreedyMesher.KEY_STRIDE
+			local gain = lit[(y * SIZE + z) * SIZE + x]
+			if gain then
+				need += gain * GreedyMesher.KEY_STRIDE
 			end
 			return need, wild
 		end

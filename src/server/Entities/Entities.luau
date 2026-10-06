@@ -13,6 +13,9 @@
 	  Spawning  `dropBlock` is Minecraft's Block.popResource, `dropContents` its
 	            Containers.dropItemStack (chest contents, in random handfuls), `throwFromPlayer`
 	            its Player.drop (thrown forwards from the eyes, or scattered around on death).
+	  Lava      items touching lava burn away (EntityWorld, Players/Burning), each lava hurt with
+	            Minecraft's entity.generic.burn at the item (at the event's own volume 0.4 and
+	            pitch 2 to 2.4) once Shared/Sounds has the event.
 	  Damage    items keep their stack's `damage` and item data (a worn tool stays worn, a Fluid
 	            Tank keeps its water, when thrown, dropped from a chest, broken or scattered on
 	            death, and is picked up as it was; only equal data merges). Clients do not need
@@ -37,6 +40,7 @@ local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local Rig = require(Shared.Movement.Rig)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
+local SharedSounds = require(Shared.Sounds)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EntityWorld = require(script.Parent.EntityWorld)
@@ -60,6 +64,8 @@ local MAX_SPAWNS_PER_MESSAGE = 256
 -- Minecraft: thrown items leave 0.3 below the eyes (eye height 1.62).
 local THROW_HEIGHT = 1.62 - 0.3
 local MAX_COUNT = 255
+-- Minecraft's Entity.lavaHurt sound (nil until Shared/Sounds has it).
+local BURN = SharedSounds.find("entity.generic.burn")
 
 local Entities = {}
 
@@ -153,6 +159,12 @@ end
 
 local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: boolean)
 	local changes = entities:takeChanges()
+	if BURN then
+		for _, at in changes.burnt do
+			-- (The event carries Minecraft's volume and pitch already: no cue on top.)
+			Sounds.play(BURN, at.x, at.y, at.z)
+		end
+	end
 	local range = Config.Entities.TrackingDistance
 	local rangeSq = range * range
 	local all = if scan then entities:each() else nil

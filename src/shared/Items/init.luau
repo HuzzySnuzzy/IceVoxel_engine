@@ -40,9 +40,15 @@
 	  * Tooltips show `describe(stack)`: one line per data key that has a describer, in the order
 	    they were added (`addDescriber`; "fluid" and "energy" are built in), with the formatting
 	    helpers `formatEnergy` (Mekanism's J / kJ / MJ / GJ) and `formatFluid` (mB).
+
+	What an item leaves behind when a recipe or a furnace uses it up is its `craftingRemainder`
+	(Minecraft's Item.getCraftingRemainingItem): a full bucket (Shared/Fluids' buckets) leaves the
+	empty Bucket.
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+-- (The fluids' data only: Shared/Fluids requires Items.)
+local FluidList = require(script.Parent.Fluids.FluidList)
 local ItemList = require(script.ItemList)
 
 export type ModelBox = ItemList.ModelBox
@@ -177,6 +183,14 @@ end
 -- Every item, in creative inventory order.
 Items.list = list
 
+-- What a full bucket leaves when it is used up (Minecraft's craftRemainder(BUCKET)): the Bucket.
+local remainders: { [number]: number } = {}
+for _, fluid in FluidList do
+	local bucket = ids[fluid.bucket]
+	assert(bucket ~= nil and defs[bucket].block == nil, `Fluid {fluid.name}'s bucket {fluid.bucket} is no item`)
+	remainders[bucket] = ids.Bucket
+end
+
 -- `Items.id.Stone`, `Items.id.IronHelmet`. Unknown names error instead of returning nil.
 Items.id = (
 	setmetatable(ids, {
@@ -242,6 +256,15 @@ end
 ]]
 function Items.isReplacedBy(block: number, item: number?): boolean
 	return Blocks.isValid(block) and Blocks.isReplaceable(block) and (item == nil or Items.ofBlock(block) ~= item)
+end
+
+--[[
+	What is left of `item` when a recipe or a furnace's fuel slot uses one up (Minecraft's
+	Item.getCraftingRemainingItem): the empty Bucket for a full bucket (water, lava, oil, fuel), nil
+	for everything else.
+]]
+function Items.craftingRemainder(item: number?): number?
+	return if item then remainders[item] else nil
 end
 
 -- Armor slot (1 head .. 4 feet) an item is worn in, if it is armor.
@@ -532,8 +555,11 @@ end
 
 --[[ Tooltips ]]
 
--- Fluid names by tank fluid id (Shared/Transmitters.FLUID_NAMES; a test checks they agree).
-local FLUID_NAMES: { string } = { "Water" }
+-- Fluid names by fluid id (Shared/Fluids: 1 water, 2 lava, 3 oil, 4 fuel).
+local FLUID_NAMES: { string } = {}
+for id, fluid in FluidList do
+	FLUID_NAMES[id] = fluid.displayName or fluid.name
+end
 -- Energy units (Mekanism's MeasurementUnit prefixes) from the largest.
 local ENERGY_UNITS: { { scale: number, suffix: string } } = {
 	{ scale = 1e9, suffix = "GJ" },
@@ -629,7 +655,7 @@ function Items.describe(stack: Stack?): { string }
 	return lines
 end
 
--- A Fluid Tank's contents (`fluid` id, `amount` mB): "Water: 12,000 mB".
+-- A Fluid Tank's contents (`fluid` id, Shared/Fluids; `amount` mB): "Lava: 12,000 mB".
 Items.addDescriber("fluid", function(data: Data): string?
 	local fluid, amount = Items.dataNumber(data, "fluid"), Items.dataNumber(data, "amount")
 	local name = if fluid then FLUID_NAMES[fluid] else nil
@@ -648,7 +674,7 @@ Items.addDescriber("energy", function(data: Data): string?
 	return `Energy: {Items.formatEnergy(energy)}`
 end)
 
--- The fluid names `describe` uses, by tank fluid id (read only).
+-- The fluid names `describe` uses, by fluid id (Shared/Fluids; read only).
 Items.FLUID_NAMES = table.freeze(table.clone(FLUID_NAMES))
 
 return Items

@@ -32,12 +32,18 @@
 	  slots     { SlotSpec }: the container's slots in order, with their panel position, the rule
 	            of what they take (`accepts`), whether they are an output, a limit, the faces
 	            transporters use (default: inputs take items through every face, outputs give
-	            them through every face) and an outline shown while empty (`ghost`; upgrade
-	            slots: Machines/Upgrades.slots). A machine pushes what its outputs hold out on
+	            them through every face), what transporters may take out (`takes`) and an
+	            outline shown while empty (`ghost`; upgrade slots: Machines/Upgrades.slots). A machine pushes what its outputs hold out on
 	            its own into the transporters and chests around it (Mekanism's ejector: server
 	            Transmitters/Transport and Eject)
 	  fields    data names after the header (letters, digits, "_": they double as item data keys)
-	  keep      fields kept in the item when the machine is broken (energy always is)
+	  keep      fields kept in the item when the machine is broken (energy and tanks always are)
+	  tanks     { TankSpec }: fluid tanks (Mekanism's machine fluid tanks), each with a `name`, a
+	            `capacity` (mB), the `fluids` it takes (Shared/Fluids ids) and a `role`: "input"
+	            (pipes and full buckets fill it; the kind's tick drains it) or "output" (the tick
+	            fills it; pipes and empty buckets drain it). Its amount lives in the data (below),
+	            its panel gauge goes where `gauge` says (Mekanism's GuiFluidGauge), and the item
+	            keeps it
 	  panel     PanelSpec: title, height, the energy bar, a progress arrow, a flame, a status line
 	  tick      tick(container, ctx): one server tick (20 a second), before the energy networks
 	            move energy. Change data in place; replace slot stacks (Items.withCount ...),
@@ -59,10 +65,29 @@
 	  quickMove quickMove(item) -> { slot }: shift-click targets from the inventory (default the
 	            kind's non-output slots that accept the item, in order)
 	  creative  infinite energy (the Creative Energy Cube): never drains, keeps nothing
+	  info      numbers recipe browsers and tooltips show about the kind (JEI: a refinery's ticks
+	            per bucket, a generator's J per mB), read with `info(block)`
 
 	Energy is kept in multiples of QUANTUM (1/1024 J), so the networks' sums and differences are
 	exact (doubles hold every such value below 2^43 J): energy is never made or lost by rounding.
 	`share` is Mekanism's even split, in whole quanta.
+
+	Tanks (Mekanism's BasicFluidTank.input / output). A kind's tanks follow its fields in the data:
+	each holds its amount (whole mB, 0..capacity) under its name, and a tank that takes more than
+	one fluid also its fluid id under "<name>Fluid" (0 while empty; a tank of one fluid holds only
+	that one, so it needs no id). `tick` keeps them so (whole, in range, a fluid the tank takes).
+	The rules are Mekanism's, the same through every side (blocks have no facing):
+	  pipes    (Mekanism's EXTERNAL automation) put fluid into input tanks that take it
+	           (`insertFluid`) and take it out of output tanks (`extractFluid`); a machine pushes
+	           its output tanks into the pipes and Fluid Tanks around it (the server's ejector)
+	  buckets  (Mekanism's MANUAL interaction) a full bucket pours its 1000 mB into the first input
+	           tank with room for all of it (`pourBucket`); an empty bucket takes 1000 mB from the
+	           first output tank holding that much, else from the first input tank that does
+	           (`fillBucket`)
+	  the kind its tick uses `tankInsert` / `tankExtract` on any of its tanks
+	The item keeps every tank's contents (`save`, under the tank's name, like energy), and its
+	tooltip shows them ("Lava: 5,000 mB"). The panel draws a gauge for each tank with a `gauge`
+	(`gauges`: where, and which data it reads; Mekanism's GaugeType.STANDARD is 18 x 60).
 
 	A tick's order on the server (server/Machines/MachineWorld): every machine's `tick`, then the
 	energy networks (server/Machines/EnergyNet) move energy between machines through Universal
@@ -74,16 +99,25 @@
 	  containers, data  newContainer, newData, isContainer, field, get, set, energy, capacity, room,
 	                    state, MAX_STATE
 	  energy maths      QUANTUM, quantise, quantiseUp, produce, use, rates, share, tick
+	  working           showActive, DEACTIVATION_DELAY (Mekanism's blockDeactivationDelay)
 	  slots             isOutput, mayPlace, slotLimit, quickMoveTargets (Inventory/Menu),
-	                    insertSlots, extractSlots, outputSlots (Transmitters/Inventories:
+	                    insertSlots, extractSlots, mayTake, outputSlots (Transmitters/Inventories:
 	                    transporters and the ejector)
-	  what players see  view, status, lines, MAX_LINES, panel (Ui/MenuLayout, Ui/WailaInfo),
-	                    ENERGY_BAR, PANEL_HEIGHT, energyColour (the energy bar's colour, also on
-	                    items and batteries' gauges)
+	  tanks             tanks, tank, hasTanks, inputTanks, outputTanks, tankAmount, tankFluid,
+	                    tankRoom, tankInsert, tankExtract (a kind's tick); takesFluid,
+	                    givesFluid, fluidRoom, insertFluid, extractFluid, FLUID_EJECT_RATE (pipes,
+	                    the ejector);
+	                    bucketTank, pourBucket, fillBucket (buckets); tankContents (records,
+	                    WAILA)
+	  what players see  view, status, lines, MAX_LINES, panel, gauges, gaugeLevel, tankLine,
+	                    TANK_GAUGE (Ui/MenuLayout, Ui/WailaInfo), ENERGY_BAR, PANEL_HEIGHT,
+	                    energyColour (the energy bar's colour, also on items and batteries'
+	                    gauges), info (JEI)
 	  sustained data    save, restore (server MachineWorld.blockDataHooks)
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
 local Types = require(script.Parent.Parent.Inventory.Types)
 
@@ -107,6 +141,9 @@ export type SlotSpec = {
 	-- them through every face and give none; outputs give through every face.
 	insert: { number }?,
 	extract: { number }?,
+	-- What transporters may take out of it through those faces (Mekanism's canExtract, which
+	-- only automation obeys: a player's hand takes anything); nil: anything.
+	takes: ((item: number) -> boolean)?,
 	-- A faint outline drawn in the slot while it is empty (Minecraft's empty armor slots): 16 rows
 	-- of 16 characters, "G" a pixel of it, "." none (Upgrades.SPEED_GHOST ...).
 	ghost: { string }?,
@@ -114,6 +151,59 @@ export type SlotSpec = {
 
 -- A gauge filled from data: `value` over `total` (field names, or a number for a fixed total).
 export type Gauge = { x: number, y: number, value: string, total: string | number }
+
+-- One fluid tank of a kind (see the header).
+export type TankSpec = {
+	-- Its data field and item data key (letters, digits, "_"), e.g. "oil".
+	name: string,
+	-- mB it holds (a whole number).
+	capacity: number,
+	-- The fluids it takes (Shared/Fluids ids, at least one; carriable ones only).
+	fluids: { number },
+	-- "input": pipes and full buckets fill it, the kind's tick drains it. "output": the tick
+	-- fills it, pipes and empty buckets drain it.
+	role: string,
+	-- Its panel gauge's top left in GUI pixels (Mekanism's GuiFluidGauge), and its size (default
+	-- TANK_GAUGE, GaugeType.STANDARD: 18 x 60, a 1 pixel frame around the fluid); nil: none.
+	gauge: { x: number, y: number, w: number?, h: number? }?,
+}
+
+-- A defined tank (read only; `tanks(block)`).
+export type Tank = {
+	name: string,
+	-- Its place among the kind's tanks (1..), what the tank functions take besides its name.
+	id: number,
+	capacity: number,
+	fluids: { number },
+	-- "input" or "output".
+	role: string,
+	-- Data indices of its amount (mB) and, for a tank taking several fluids, of its fluid id.
+	amountIndex: number,
+	fluidIndex: number?,
+	-- The one fluid it takes (nil: several, read from `fluidIndex`).
+	fluid: number?,
+	gauge: { x: number, y: number, w: number, h: number }?,
+}
+
+-- Where the panel draws a tank's gauge and what it reads (`gauges`): the amount at data index
+-- `amount` (mB) over `capacity`, of fluid `fluid`, or of the fluid id at data index
+-- `fluidIndex` when that is set (a tank taking several fluids).
+export type TankGauge = {
+	tank: number,
+	name: string,
+	role: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	amount: number,
+	capacity: number,
+	fluid: number,
+	fluidIndex: number?,
+}
+
+-- A tank's contents (`tankContents`: Machines records, WAILA).
+export type TankContents = { name: string, fluid: number, amount: number, capacity: number }
 
 -- The panel above the player's inventory (client Ui/MenuLayout draws it, 176 GUI pixels wide).
 export type PanelSpec = {
@@ -180,6 +270,8 @@ export type KindSpec = {
 	quickMove: ((item: number) -> { number })?,
 	creative: boolean?,
 	state: string?,
+	tanks: { TankSpec }?,
+	info: { [string]: number }?,
 }
 
 -- A defined kind (read only).
@@ -206,6 +298,13 @@ export type Kind = {
 	extractFaces: { [number]: { number } },
 	-- Its output slots, in order: what it pushes out on its own (Mekanism's ejector).
 	outputs: { number },
+	-- Its fluid tanks in order, by name, and the ids of its input and output tanks.
+	tanks: { Tank },
+	tankNamed: { [string]: Tank },
+	inputTanks: { number },
+	outputTanks: { number },
+	-- Numbers recipe browsers show (KindSpec `info`; empty without).
+	info: { [string]: number },
 }
 
 export type Role = "producer" | "consumer" | "storage"
@@ -238,6 +337,14 @@ Machines.ENERGY_BAR = table.freeze({ x = 164, y = 15, w = 6, h = 52 })
 Machines.PANEL_HEIGHT = 78
 -- The most lines a kind's `lines` gives its panel.
 Machines.MAX_LINES = 4
+-- A tank's panel gauge (Mekanism's GaugeType.STANDARD: a 16 x 58 fluid area in a 1 pixel frame).
+Machines.TANK_GAUGE = table.freeze({ w = 18, h = 60 })
+-- Ticks a machine that stopped keeps showing it works (Mekanism's blockDeactivationDelay;
+-- `showActive`).
+Machines.DEACTIVATION_DELAY = 60
+-- mB a tick a machine pushes out of its output tanks into the pipes and Fluid Tanks around it,
+-- at most (Mekanism's fluidAutoEjectRate; the server's ejector).
+Machines.FLUID_EJECT_RATE = 1024
 
 --[[ Energy maths ]]
 
@@ -334,10 +441,109 @@ local function faceSet(list: { number }?, default: boolean): { [number]: boolean
 	return set
 end
 
+local NO_TANKS: { Tank } = table.freeze({})
+local NO_IDS: { number } = table.freeze({})
+
+-- The tooltip line of a tank kept in a machine's item (`save`): "Lava: 5,000 mB". One describer
+-- per tank name, shared by every kind with a tank of that name (the stack's kind says which
+-- fluid a tank of one fluid holds).
+local describedTanks: { [string]: boolean } = {}
+local function describeTank(tankName: string)
+	if describedTanks[tankName] then
+		return
+	end
+	describedTanks[tankName] = true
+	Items.addDescriber(tankName, function(data: Items.Data, stack: Items.Stack): string?
+		local amount = Items.dataNumber(data, tankName)
+		local def = Items.get(stack.item)
+		local binding = if def and def.block then bindings[def.block] else nil
+		local tank = if binding then binding.kind.tankNamed[tankName] else nil
+		if amount == nil or amount <= 0 or tank == nil then
+			return nil
+		end
+		local fluid = tank.fluid or Items.dataNumber(data, `{tankName}Fluid`) or 0
+		if not Fluids.isValid(fluid) then
+			return nil
+		end
+		return `{Fluids.name(fluid)}: {Items.formatFluid(amount)}`
+	end)
+end
+
+--[[
+	The tanks of a kind from its specs, after its fields in the data (`index` gets each tank's
+	name, and "<name>Fluid" for a tank taking several fluids). Checks every spec.
+]]
+local function defineTanks(
+	name: string,
+	specs: { TankSpec },
+	index: { [string]: number },
+	first: number
+): ({ Tank }, number)
+	local tanks: { Tank } = {}
+	local cursor = first
+	for id, spec in specs do
+		local tankName = spec.name
+		assert(Items.validDataKey(tankName), `Machine kind {name}: bad tank name {tankName}`)
+		assert(index[tankName] == nil, `Machine kind {name}: tank {tankName} is taken`)
+		local capacity = spec.capacity
+		assert(
+			type(capacity) == "number" and capacity >= 1 and capacity == math.floor(capacity) and capacity < 2 ^ 31,
+			`Machine kind {name}: tank {tankName} needs a whole capacity in mB`
+		)
+		local role: string = spec.role
+		assert(role == "input" or role == "output", `Machine kind {name}: tank {tankName}'s role`)
+		local fluids = spec.fluids
+		assert(type(fluids) == "table" and #fluids >= 1, `Machine kind {name}: tank {tankName} takes no fluid`)
+		for i, fluid in fluids do
+			assert(Fluids.carriable(fluid), `Machine kind {name}: tank {tankName} takes no fluid {fluid}`)
+			assert(table.find(fluids, fluid) == i, `Machine kind {name}: tank {tankName} lists {fluid} twice`)
+		end
+		local amountIndex = cursor
+		index[tankName] = amountIndex
+		cursor += 1
+		local fluidIndex: number? = nil
+		if #fluids > 1 then
+			local fluidName = `{tankName}Fluid`
+			assert(Items.validDataKey(fluidName), `Machine kind {name}: tank name {tankName} is too long`)
+			assert(index[fluidName] == nil, `Machine kind {name}: {fluidName} is taken`)
+			fluidIndex = cursor
+			index[fluidName] = cursor
+			cursor += 1
+		end
+		local gaugeSpec = spec.gauge
+		local gauge = nil
+		if gaugeSpec then
+			assert(
+				type(gaugeSpec.x) == "number" and type(gaugeSpec.y) == "number",
+				`Machine kind {name}: tank {tankName}'s gauge has no position`
+			)
+			gauge = table.freeze({
+				x = gaugeSpec.x,
+				y = gaugeSpec.y,
+				w = gaugeSpec.w or Machines.TANK_GAUGE.w,
+				h = gaugeSpec.h or Machines.TANK_GAUGE.h,
+			})
+		end
+		tanks[id] = table.freeze({
+			name = tankName,
+			id = id,
+			capacity = capacity,
+			fluids = table.freeze(table.clone(fluids)),
+			role = role :: string,
+			amountIndex = amountIndex,
+			fluidIndex = fluidIndex,
+			fluid = if #fluids == 1 then fluids[1] else nil,
+			gauge = gauge,
+		})
+	end
+	return tanks, cursor - first
+end
+
 --[[
 	Defines the machine kind `name` from `spec` (see the header) and returns it. Names are unique;
-	BlockList's `machine.kind` names one. Errors on a bad spec: too many slots or fields, a field
-	that is no data key or repeats a header name, a kept field that is no field.
+	BlockList's `machine.kind` names one. Errors on a bad spec: too many slots or fields (tanks
+	count), a field or tank name that is no data key or repeats a header name or another field, a
+	kept field that is no field, a tank without a whole capacity, a role or a carriable fluid.
 ]]
 function Machines.define(name: string, spec: KindSpec): Kind
 	assert(type(name) == "string" and name ~= "", "a kind needs a name")
@@ -346,7 +552,6 @@ function Machines.define(name: string, spec: KindSpec): Kind
 	local fields: { string } = spec.fields or {}
 	local keep: { string } = spec.keep or {}
 	assert(#slots <= Types.MAX_CONTAINER, `Machine kind {name} has too many slots`)
-	assert(Machines.HEADER + #fields <= Types.MAX_CONTAINER_DATA, `Machine kind {name} has too many fields`)
 	local index: { [string]: number } = {}
 	for i, header in HEADER_NAMES do
 		index[header] = i
@@ -355,6 +560,24 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		assert(Items.validDataKey(field), `Machine kind {name}: bad field {field}`)
 		assert(index[field] == nil, `Machine kind {name}: field {field} is taken`)
 		index[field] = Machines.HEADER + i
+	end
+	local tanks, tankFields = defineTanks(name, spec.tanks or {}, index, Machines.HEADER + #fields + 1)
+	assert(
+		Machines.HEADER + #fields + tankFields <= Types.MAX_CONTAINER_DATA,
+		`Machine kind {name} has too many fields`
+	)
+	local tankNamed: { [string]: Tank } = {}
+	local inputTanks: { number } = {}
+	local outputTanks: { number } = {}
+	for id, tank in tanks do
+		tankNamed[tank.name] = tank
+		table.insert(if tank.role == "input" then inputTanks else outputTanks, id)
+	end
+	local info: { [string]: number } = {}
+	local specInfo: { [string]: number } = spec.info or {}
+	for key, value in specInfo do
+		assert(type(key) == "string" and type(value) == "number", `Machine kind {name}: bad info {key}`)
+		info[key] = value
 	end
 	for _, field in keep do
 		assert(table.find(fields, field), `Machine kind {name} keeps {field}, which is no field`)
@@ -410,7 +633,7 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		keep = table.freeze(table.clone(keep)),
 		panel = table.freeze(table.clone(panel)),
 		index = table.freeze(index),
-		size = Machines.HEADER + #fields,
+		size = Machines.HEADER + #fields + tankFields,
 		tick = spec.tick,
 		status = spec.status,
 		lines = spec.lines,
@@ -421,7 +644,15 @@ function Machines.define(name: string, spec: KindSpec): Kind
 		insertFaces = table.freeze(insertFaces),
 		extractFaces = table.freeze(extractFaces),
 		outputs = table.freeze(outputs),
+		tanks = if #tanks > 0 then table.freeze(tanks) else NO_TANKS,
+		tankNamed = table.freeze(tankNamed),
+		inputTanks = if #inputTanks > 0 then table.freeze(inputTanks) else NO_IDS,
+		outputTanks = if #outputTanks > 0 then table.freeze(outputTanks) else NO_IDS,
+		info = table.freeze(info),
 	}
+	for _, tank in tanks do
+		describeTank(tank.name)
+	end
 	kinds[name] = table.freeze(kind)
 	return kind
 end
@@ -715,10 +946,61 @@ function Machines.tick(container: Container, ctx: TickContext): boolean
 		data[CAPACITY] = capacity
 	end
 	data[ENERGY] = Machines.quantise(math.min(number(data[ENERGY]), capacity))
+	-- (Tanks: whole mB in range, of a fluid they take; an empty tank holds no fluid.)
+	for _, tank in kind.tanks do
+		local amount = math.clamp(math.floor(number(data[tank.amountIndex])), 0, tank.capacity)
+		local fluidIndex = tank.fluidIndex
+		if fluidIndex then
+			local fluid = number(data[fluidIndex])
+			if amount <= 0 or not table.find(tank.fluids, fluid) then
+				amount, fluid = 0, 0
+			end
+			data[fluidIndex] = fluid
+		end
+		data[tank.amountIndex] = amount
+	end
 	if not ok then
 		error(err, 0)
 	end
 	return true
+end
+
+--[[
+	Sets what a machine's block shows (ACTIVE) from whether it works this tick (`working`) and
+	worked last tick (`wasWorking`): Mekanism's TileEntityMekanism.setActive with its updateDelay
+	countdown, in the kind's `activeDelay` field. On at once; off at once unless the delay (started
+	by every stop) is still running, then off when it runs out with the machine still stopped. So a
+	machine on too little power (working every other tick) shows it works steadily instead of
+	blinking, and one that finishes goes dark at once. A kind without an `activeDelay` field shows
+	`working` as it is.
+]]
+function Machines.showActive(container: Container, wasWorking: boolean, working: boolean)
+	local delayIndex = Machines.field(container.block, "activeDelay")
+	if delayIndex == nil then
+		Machines.set(container, "active", if working then 1 else 0)
+		return
+	end
+	local shown = Machines.get(container, "active") ~= 0
+	-- (Data from elsewhere: a whole number of ticks, at most the delay.)
+	local delay = math.clamp(math.floor(Machines.get(container, "activeDelay")), 0, Machines.DEACTIVATION_DELAY)
+	if delay > 0 then
+		delay -= 1
+		if delay == 0 then
+			shown = wasWorking
+		end
+	end
+	if working ~= wasWorking and shown ~= working then
+		if working then
+			shown = true
+		else
+			if delay == 0 then
+				shown = false
+			end
+			delay = Machines.DEACTIVATION_DELAY
+		end
+	end
+	Machines.set(container, "active", if shown then 1 else 0)
+	Machines.set(container, "activeDelay", delay)
 end
 
 --[[ Slots ]]
@@ -742,6 +1024,19 @@ function Machines.mayPlace(block: number, slot: number, item: number): boolean
 	end
 	local accepts = spec.accepts
 	return accepts == nil or accepts(item) == true
+end
+
+--[[
+	May transporters take `item` out of `slot` of the machine `block` (Mekanism's canExtract, through
+	a face that reaches it: `extractSlots`)? Its kind's `takes` rule; anything without one.
+]]
+function Machines.mayTake(block: number, slot: number, item: number): boolean
+	local spec = slotOf(block, slot)
+	if spec == nil then
+		return false
+	end
+	local takes = spec.takes
+	return takes == nil or takes(item) == true
 end
 
 -- The most of `item` `slot` of the machine `block` holds (its limit, the item's max stack, 64).
@@ -813,7 +1108,380 @@ function Machines.outputSlots(block: number): { number }
 	return if binding then binding.kind.outputs else NO_SLOTS
 end
 
+--[[ Tanks ]]
+
+-- The tank `tank` (its id or name) of the machine `block`, nil for anything else.
+local function tankSpec(block: number, tank: number | string): Tank?
+	local binding = bindings[block]
+	if binding == nil then
+		return nil
+	end
+	local kind = binding.kind
+	if type(tank) == "number" then
+		return kind.tanks[tank]
+	elseif type(tank) == "string" then
+		return kind.tankNamed[tank]
+	end
+	return nil
+end
+
+--[[
+	What a tank holds: its fluid and amount (whole mB, 0..capacity), (0, 0) while empty and for a
+	tank whose fluid id is none it takes. Only reads (a client's window may have no data yet).
+]]
+local function holds(container: Container, tank: Tank): (number, number)
+	local data = container.data
+	if data == nil then
+		return 0, 0
+	end
+	local amount = math.clamp(math.floor(number(data[tank.amountIndex])), 0, tank.capacity)
+	if amount <= 0 then
+		return 0, 0
+	end
+	local fluid = tank.fluid
+	if fluid == nil then
+		local held = number(data[tank.fluidIndex :: number])
+		if not table.find(tank.fluids, held) then
+			return 0, 0
+		end
+		fluid = held
+	end
+	return fluid :: number, amount
+end
+
+-- The tanks of the machine `block` in order (empty for other blocks and kinds without any).
+function Machines.tanks(block: number): { Tank }
+	local binding = bindings[block]
+	return if binding then binding.kind.tanks else NO_TANKS
+end
+
+-- The tank `tank` (its id, 1.., or its name) of the machine `block`; nil when there is none.
+function Machines.tank(block: number, tank: number | string): Tank?
+	return tankSpec(block, tank)
+end
+
+-- Does the machine `block` have fluid tanks (Mechanical Pipes connect to it)?
+function Machines.hasTanks(block: number): boolean
+	local binding = bindings[block]
+	return binding ~= nil and #binding.kind.tanks > 0
+end
+
+-- The ids of the machine `block`'s input tanks (pipes and full buckets fill them), in order.
+function Machines.inputTanks(block: number): { number }
+	local binding = bindings[block]
+	return if binding then binding.kind.inputTanks else NO_IDS
+end
+
+-- The ids of its output tanks (pipes and empty buckets drain them; it pushes them out), in order.
+function Machines.outputTanks(block: number): { number }
+	local binding = bindings[block]
+	return if binding then binding.kind.outputTanks else NO_IDS
+end
+
+-- mB in a machine's tank `tank` (id or name): a whole number, 0 for none.
+function Machines.tankAmount(container: Container, tank: number | string): number
+	local spec = tankSpec(container.block, tank)
+	if spec == nil then
+		return 0
+	end
+	local _, amount = holds(container, spec)
+	return amount
+end
+
+-- The fluid in a machine's tank `tank` (Shared/Fluids id), 0 while it is empty.
+function Machines.tankFluid(container: Container, tank: number | string): number
+	local spec = tankSpec(container.block, tank)
+	if spec == nil then
+		return 0
+	end
+	local fluid = holds(container, spec)
+	return fluid
+end
+
+--[[
+	mB of `fluid` a machine's tank `tank` has room for: 0 when it doesn't take that fluid or holds
+	another (Mekanism's tanks hold one fluid at a time).
+]]
+function Machines.tankRoom(container: Container, tank: number | string, fluid: number): number
+	local spec = tankSpec(container.block, tank)
+	if spec == nil or not table.find(spec.fluids, fluid) then
+		return 0
+	end
+	local held, amount = holds(container, spec)
+	if amount > 0 and held ~= fluid then
+		return 0
+	end
+	return spec.capacity - amount
+end
+
+--[[
+	Puts up to `amount` mB (whole) of `fluid` into a machine's tank `tank` (any role: a kind's
+	tick fills its outputs this way), as much as there is room for. Returns how much went in;
+	`simulate` only works it out.
+]]
+function Machines.tankInsert(
+	container: Container,
+	tank: number | string,
+	fluid: number,
+	amount: number,
+	simulate: boolean?
+): number
+	local spec = tankSpec(container.block, tank)
+	if spec == nil or amount ~= amount then
+		return 0
+	end
+	local put = math.clamp(math.floor(amount), 0, Machines.tankRoom(container, spec.id, fluid))
+	if put > 0 and not simulate then
+		local _, held = holds(container, spec)
+		local data = dataOf(container)
+		data[spec.amountIndex] = held + put
+		if spec.fluidIndex then
+			data[spec.fluidIndex] = fluid
+		end
+	end
+	return put
+end
+
+--[[
+	Takes up to `amount` mB (whole) out of a machine's tank `tank` (any role: a kind's tick drains
+	its inputs this way). Returns the fluid and how much came out ((0, 0): nothing); `simulate`
+	only works it out.
+]]
+function Machines.tankExtract(
+	container: Container,
+	tank: number | string,
+	amount: number,
+	simulate: boolean?
+): (number, number)
+	local spec = tankSpec(container.block, tank)
+	if spec == nil or amount ~= amount then
+		return 0, 0
+	end
+	local fluid, held = holds(container, spec)
+	local take = math.clamp(math.floor(amount), 0, held)
+	if take <= 0 then
+		return 0, 0
+	end
+	if not simulate then
+		local data = dataOf(container)
+		data[spec.amountIndex] = held - take
+		if spec.fluidIndex and held == take then
+			data[spec.fluidIndex] = 0
+		end
+	end
+	return fluid, take
+end
+
+-- Does an input tank of the machine `block` take `fluid` (pipes carrying it deliver here)?
+function Machines.takesFluid(block: number, fluid: number): boolean
+	local binding = bindings[block]
+	if binding == nil then
+		return false
+	end
+	local kind = binding.kind
+	for _, id in kind.inputTanks do
+		if table.find(kind.tanks[id].fluids, fluid) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Does the machine `block` have output tanks (pipes take from them; it pushes them out)?
+function Machines.givesFluid(block: number): boolean
+	local binding = bindings[block]
+	return binding ~= nil and #binding.kind.outputTanks > 0
+end
+
+-- mB of `fluid` a machine's input tanks have room for, together (what a pipe may deliver).
+function Machines.fluidRoom(container: Container, fluid: number): number
+	local room = 0
+	for _, id in Machines.inputTanks(container.block) do
+		room += Machines.tankRoom(container, id, fluid)
+	end
+	return room
+end
+
+--[[
+	A pipe delivering up to `amount` mB of `fluid` into a machine (Mekanism's EXTERNAL insert,
+	through any side): its input tanks that take the fluid fill in order, the first as far as it
+	goes, then the next. Returns how much went in; `simulate` only works it out.
+]]
+function Machines.insertFluid(container: Container, fluid: number, amount: number, simulate: boolean?): number
+	if amount ~= amount then
+		return 0
+	end
+	local left = math.max(0, math.floor(amount))
+	local put = 0
+	for _, id in Machines.inputTanks(container.block) do
+		if left <= 0 then
+			break
+		end
+		local went = Machines.tankInsert(container, id, fluid, left, simulate)
+		put += went
+		left -= went
+	end
+	return put
+end
+
+--[[
+	A pipe taking up to `amount` mB out of a machine (Mekanism's EXTERNAL extract, through any
+	side): from its first output tank that holds something (of `fluid`, when given and not 0: a
+	pipe network already carrying a fluid). Returns the fluid and how much came out ((0, 0):
+	nothing); `simulate` only works it out. Input tanks never give to pipes.
+]]
+function Machines.extractFluid(
+	container: Container,
+	amount: number,
+	fluid: number?,
+	simulate: boolean?
+): (number, number)
+	for _, id in Machines.outputTanks(container.block) do
+		local held = Machines.tankFluid(container, id)
+		if held ~= 0 and (fluid == nil or fluid == 0 or held == fluid) then
+			return Machines.tankExtract(container, id, amount, simulate)
+		end
+	end
+	return 0, 0
+end
+
+--[[
+	The input tank of the machine `block` that the full bucket `item` pours into (the first that
+	takes its fluid), nil for other items and machines without one: what a fuel slot that turns
+	buckets into tank contents takes (the Heat Generator's lava).
+]]
+function Machines.bucketTank(block: number, item: number): Tank?
+	local fluid = Fluids.ofBucket(item)
+	local binding = bindings[block]
+	if fluid == 0 or binding == nil then
+		return nil
+	end
+	local kind = binding.kind
+	for _, id in kind.inputTanks do
+		if table.find(kind.tanks[id].fluids, fluid) then
+			return kind.tanks[id]
+		end
+	end
+	return nil
+end
+
+--[[
+	A full bucket of `fluid` used on a machine (Mekanism's MANUAL fill): its 1000 mB go into the
+	first input tank with room for all of them, all or nothing. Returns whether they went in (the
+	player then keeps the empty bucket); `simulate` only works it out.
+]]
+function Machines.pourBucket(container: Container, fluid: number, simulate: boolean?): boolean
+	for _, id in Machines.inputTanks(container.block) do
+		if Machines.tankRoom(container, id, fluid) >= Fluids.BUCKET then
+			Machines.tankInsert(container, id, fluid, Fluids.BUCKET, simulate)
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	An empty bucket used on a machine (Mekanism's MANUAL drain): 1000 mB out of its first output
+	tank holding that much, else out of its first input tank that does (a player may take back what
+	they poured in). Returns the fluid taken (the bucket becomes Fluids.bucketOf of it), 0 when no
+	tank holds a whole bucket; `simulate` only works it out.
+]]
+function Machines.fillBucket(container: Container, simulate: boolean?): number
+	local block = container.block
+	for _, list in { Machines.outputTanks(block), Machines.inputTanks(block) } do
+		for _, id in list do
+			local fluid = Machines.tankFluid(container, id)
+			if Fluids.carriable(fluid) and Machines.tankAmount(container, id) >= Fluids.BUCKET then
+				Machines.tankExtract(container, id, Fluids.BUCKET, simulate)
+				return fluid
+			end
+		end
+	end
+	return 0
+end
+
+-- What each of a machine's tanks holds, in order (Machines records, WAILA; only reads).
+function Machines.tankContents(container: Container): { TankContents }
+	local contents: { TankContents } = {}
+	for _, tank in Machines.tanks(container.block) do
+		local fluid, amount = holds(container, tank)
+		table.insert(contents, { name = tank.name, fluid = fluid, amount = amount, capacity = tank.capacity })
+	end
+	return contents
+end
+
 --[[ What players see ]]
+
+local gaugeCache: { [string]: { TankGauge } } = {}
+
+--[[
+	The tank gauges of the machine `block`'s panel (Mekanism's GuiFluidGauge), one per tank with a
+	`gauge`, in tank order: where (x, y, w, h: the frame; the fluid fills the inside from the
+	bottom, `gaugeLevel`) and what it reads from the window's data (`amount` index over
+	`capacity`; the fluid `fluid`, or the id at `fluidIndex` for a tank taking several). Empty for
+	other blocks.
+]]
+function Machines.gauges(block: number): { TankGauge }
+	local binding = bindings[block]
+	if binding == nil then
+		return {}
+	end
+	local kind = binding.kind
+	local cached = gaugeCache[kind.name]
+	if cached then
+		return cached
+	end
+	local list: { TankGauge } = {}
+	for _, tank in kind.tanks do
+		local gauge = tank.gauge
+		if gauge then
+			table.insert(
+				list,
+				table.freeze({
+					tank = tank.id,
+					name = tank.name,
+					role = tank.role,
+					x = gauge.x,
+					y = gauge.y,
+					w = gauge.w,
+					h = gauge.h,
+					amount = tank.amountIndex,
+					capacity = tank.capacity,
+					fluid = tank.fluid or 0,
+					fluidIndex = tank.fluidIndex,
+				})
+			)
+		end
+	end
+	local frozen = table.freeze(list)
+	gaugeCache[kind.name] = frozen
+	return frozen
+end
+
+--[[
+	Rows of fluid a gauge with `inner` rows inside its frame shows for `amount` mB of `capacity`:
+	Mekanism's GuiFluidGauge.getScaledLevel, round(amount / capacity x inner); 0 when empty.
+]]
+function Machines.gaugeLevel(amount: number, capacity: number, inner: number): number
+	if amount ~= amount or capacity ~= capacity or amount <= 0 or capacity <= 0 then
+		return 0
+	end
+	return math.clamp(math.floor(amount / capacity * inner + 0.5), 0, inner)
+end
+
+-- A tank's contents as Mekanism's gauges and WAILA write them: "Lava: 5,000 mB", or "Empty".
+function Machines.tankLine(fluid: number, amount: number): string
+	if not Fluids.isValid(fluid) or amount ~= amount or amount <= 0 then
+		return "Empty"
+	end
+	return `{Fluids.name(fluid)}: {Items.formatFluid(amount)}`
+end
+
+-- The numbers the machine `block`'s kind shows recipe browsers (KindSpec `info`; empty for none).
+function Machines.info(block: number): { [string]: number }
+	local binding = bindings[block]
+	return if binding then binding.kind.info else {}
+end
 
 -- The header of a machine's container as a View.
 function Machines.view(container: Container): View
@@ -907,9 +1575,11 @@ end
 --[[ Sustained data (Mekanism keeps a machine's energy in its item) ]]
 
 --[[
-	The item data a broken machine keeps: `energy` (J, while it holds any) and its kind's `keep`
-	fields that are not 0. nil when there is nothing (its item stacks with new ones), for the
-	creative cube and for containers that are no machine's.
+	The item data a broken machine keeps: `energy` (J, while it holds any), what its tanks hold
+	(mB under each tank's name, and "<name>Fluid" for a tank taking several fluids; Mekanism keeps
+	a machine's fluids in its item) and its kind's `keep` fields that are not 0. nil when there is
+	nothing (its item stacks with new ones), for the creative cube and for containers that are no
+	machine's.
 ]]
 function Machines.save(container: Container): Items.Data?
 	local binding = bindings[container.block]
@@ -922,6 +1592,15 @@ function Machines.save(container: Container): Items.Data?
 	if energy > 0 and energy < math.huge then
 		kept.energy = energy
 	end
+	for _, tank in binding.kind.tanks do
+		local fluid, amount = holds(container, tank)
+		if amount > 0 then
+			kept[tank.name] = amount
+			if tank.fluidIndex then
+				kept[`{tank.name}Fluid`] = fluid
+			end
+		end
+	end
 	for _, field in binding.kind.keep do
 		local value = number(data[binding.kind.index[field]])
 		if value ~= 0 and value > -math.huge and value < math.huge then
@@ -933,8 +1612,9 @@ end
 
 --[[
 	Puts a machine item's data (`save`) back into the freshly placed machine's container: the
-	energy (at most its capacity, quantised down) and its kind's kept fields. Returns whether
-	anything was taken (false: no data of this machine's, a creative cube, no machine).
+	energy (at most its capacity, quantised down), its tanks' contents (whole mB, at most each
+	capacity, of a fluid the tank takes) and its kind's kept fields. Returns whether anything was
+	taken (false: no data of this machine's, a creative cube, no machine).
 ]]
 function Machines.restore(container: Container, data: Items.Data?): boolean
 	local binding = bindings[container.block]
@@ -947,6 +1627,17 @@ function Machines.restore(container: Container, data: Items.Data?): boolean
 	if energy and energy > 0 and energy < math.huge then
 		values[ENERGY] = Machines.quantise(math.min(energy, number(values[CAPACITY])))
 		restored = true
+	end
+	for _, tank in binding.kind.tanks do
+		local amount = Items.dataNumber(data, tank.name)
+		local fluid = tank.fluid or Items.dataNumber(data, `{tank.name}Fluid`)
+		if amount and amount >= 1 and fluid and table.find(tank.fluids, fluid) then
+			values[tank.amountIndex] = math.min(math.floor(amount), tank.capacity)
+			if tank.fluidIndex then
+				values[tank.fluidIndex] = fluid
+			end
+			restored = true
+		end
 	end
 	for _, field in binding.kind.keep do
 		local value = Items.dataNumber(data, field)

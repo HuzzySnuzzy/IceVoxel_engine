@@ -24,8 +24,26 @@
 	    instead of flooding the plateau above it. Block lookups are cached during one search, as
 	    Minecraft does.
 
-	Any fluid group registered in BlockList works; its rules (slope distance, drop off, infinite
-	sources) come from RULES (Minecraft's lava: 2, 2, no).
+	Every fluid group of BlockList (Shared/Fluids: water, lava, oil, fuel) has its RULES: slope
+	distance, drop off, infinite sources, and whether what it washes away burns (the tick delay is
+	BlockList's):
+	  Water  4, 1, yes, tick 5    Minecraft's WaterFluid
+	  Lava   2, 2, no,  tick 30   Minecraft 1.20.1's LavaFluid in the overworld: flows 3 blocks
+	  Oil    2, 1, no,  tick 20   BuildCraft-like: viscous, slow, flows 7 but looks only 2 for a hole
+	  Fuel   4, 1, no,  tick 5    thin like water, but no infinite sources
+	Different fluids never flow into each other; only lava and water meet (below).
+
+	Cave twins of sources (CaveLava, CaveOil: generated underground) are sources of their group
+	here in every way; what flows out of them is ordinary fluid (Blocks.fluidId).
+
+	Lava meets water as in Minecraft (LiquidBlock.shouldSpreadLiquid, LavaFluid.spreadTo), each with
+	the fizz (LiquidBlock.fizz: block.lava.extinguish, when Shared/Sounds has it):
+	  * lava with water above it or beside it (not below) hardens: a source (its cave twin too)
+	    into obsidian, flowing or falling lava into cobblestone. Minecraft does it when the water
+	    arrives (neighborChanged, onPlace); here the lava's next tick, one tick later;
+	  * lava pouring down into water (any level) turns that water into stone.
+	Lava burns what it washes away (torches, plants): no drop, a fizz (LavaFluid.beforeDestroying-
+	Block); water, oil and fuel drop it.
 
 	Block updates never generate chunks. A fluid whose neighbours or whose slope search reach a
 	chunk that is not loaded waits and retries later instead of guessing what is there.
@@ -40,7 +58,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local SharedSounds = require(Shared.Sounds)
 
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Drops = require(script.Parent.Drops)
 
 local FALLING = 8
@@ -48,24 +68,32 @@ local MAX_FLOW = 7
 local RETRY_TICKS = 40
 local SIDES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 -- Per fluid group: how far sideways spreading looks for a way down, how much weaker each step
--- sideways gets and whether two sources make a third (Minecraft: water 4 / 1 / yes, lava in the
--- overworld 2 / 2 / no).
-type Rules = { slopeDistance: number, dropOff: number, infinite: boolean }
+-- sideways gets, whether two sources make a third and whether what it washes away burns
+-- (Minecraft: water 4 / 1 / yes, lava in the overworld 2 / 2 / no; see the header).
+type Rules = { slopeDistance: number, dropOff: number, infinite: boolean, burns: boolean }
 local RULES: { [string]: Rules } = {
-	Water = { slopeDistance = 4, dropOff = 1, infinite = true },
+	Water = { slopeDistance = 4, dropOff = 1, infinite = true, burns = false },
+	Lava = { slopeDistance = 2, dropOff = 2, infinite = false, burns = true },
+	Oil = { slopeDistance = 2, dropOff = 1, infinite = false, burns = false },
+	Fuel = { slopeDistance = 4, dropOff = 1, infinite = false, burns = false },
 }
-local DEFAULT_RULES: Rules = { slopeDistance = 4, dropOff = 1, infinite = false }
+-- (Every fluid needs its rules: a new group without them fails here, not quietly flows like water.)
+for _, def in Blocks.defs do
+	assert(def.fluid == nil or RULES[def.fluid.group], `No flow rules for fluid {def.fluid and def.fluid.group}`)
+end
 local NO_HOLE = 1000
 -- A slope search reached an unloaded block.
 local UNKNOWN = -1
 
-local Fluid = {}
+local LAVA, WATER = "Lava", "Water"
+local OBSIDIAN, COBBLESTONE, STONE = Blocks.id.Obsidian, Blocks.id.Cobblestone, Blocks.id.Stone
+-- Where water hardens lava from: above and the four sides (LiquidBlock.POSSIBLE_FLOW_DIRECTIONS'
+-- opposites; water below is poured into instead).
+local QUENCH = { { 0, 1, 0 }, { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+-- Minecraft's LiquidBlock.fizz (level event 1501): nil until Shared/Sounds has the event.
+local FIZZ = SharedSounds.find("block.lava.extinguish")
 
--- Ticks between updates come from the block's `fluid.tickDelay`.
-function Fluid.onNeighborChanged(_world: any, ticker: any, x: number, y: number, z: number, block: number)
-	local fluid = Blocks.get(block).fluid
-	ticker:schedule(x, y, z, if fluid then fluid.tickDelay else 5)
-end
+local Fluid = {}
 
 local function levelOf(block: number?, group: string): number?
 	if block == nil then
@@ -76,6 +104,34 @@ local function levelOf(block: number?, group: string): number?
 		return fluid.level
 	end
 	return nil
+end
+
+local function fizz(x: number, y: number, z: number)
+	Sounds.play(FIZZ, x + 0.5, y + 0.5, z + 0.5)
+end
+
+-- Is there water above or beside the lava at (x, y, z)?
+local function quenched(world: any, x: number, y: number, z: number): boolean
+	for _, d in QUENCH do
+		if levelOf(world:peekBlock(x + d[1], y + d[2], z + d[3]), WATER) ~= nil then
+			return true
+		end
+	end
+	return false
+end
+
+--[[
+	Ticks between updates come from the block's `fluid.tickDelay`; lava that water touches hardens
+	on the next tick instead (Minecraft hardens it the moment the water arrives, long before the
+	water's own next tick).
+]]
+function Fluid.onNeighborChanged(world: any, ticker: any, x: number, y: number, z: number, block: number)
+	local fluid = Blocks.get(block).fluid
+	if fluid and fluid.group == LAVA and quenched(world, x, y, z) then
+		ticker:schedule(x, y, z, 1)
+		return
+	end
+	ticker:schedule(x, y, z, if fluid then fluid.tickDelay else 5)
 end
 
 -- The structure void holds no fluid (Minecraft's FlowingFluid.canHoldFluid), though it is
@@ -89,10 +145,16 @@ local function yields(block: number): boolean
 	return def.fluid == nil and (def.replaceable or def.brokenByFluid) and block ~= STRUCTURE_VOID
 end
 
--- Puts `fluid` at (x, y, z), where `old` was; a washed away block drops its item.
+-- Puts `fluid` at (x, y, z), where `old` was; a washed away block drops its item, or burns with a
+-- fizz in lava.
 local function flowInto(world: any, x: number, y: number, z: number, old: number, fluid: number)
 	if world:setBlock(x, y, z, fluid) and Blocks.get(old).brokenByFluid then
-		Drops.block(x, y, z, old)
+		local def = Blocks.get(fluid).fluid
+		if def and RULES[def.group].burns then
+			fizz(x, y, z)
+		else
+			Drops.block(x, y, z, old)
+		end
 	end
 end
 
@@ -110,7 +172,7 @@ local function canFlowInto(block: number, group: string, level: number): boolean
 end
 
 local function rulesOf(group: string): Rules
-	return RULES[group] or DEFAULT_RULES
+	return RULES[group]
 end
 
 local function expectedLevel(world: any, x: number, y: number, z: number, group: string): number?
@@ -314,6 +376,13 @@ function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, 
 	local group = fluid.group
 	local level = fluid.level
 
+	-- Water above or beside lava hardens it: a source into obsidian, the rest into cobblestone.
+	if group == LAVA and quenched(world, x, y, z) then
+		world:setBlock(x, y, z, if level == 0 then OBSIDIAN else COBBLESTONE)
+		fizz(x, y, z)
+		return
+	end
+
 	if level ~= 0 then
 		local expected = expectedLevel(world, x, y, z, group)
 		if expected == nil then
@@ -329,8 +398,15 @@ function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, 
 	if below == nil or y <= 0 then
 		return
 	end
-	if canFlowInto(below, group, FALLING) then
-		flowInto(world, x, y - 1, z, below, Blocks.fluidId(group, FALLING))
+	local pours = canFlowInto(below, group, FALLING)
+	if pours or (group == LAVA and levelOf(below, WATER) ~= nil) then
+		if pours then
+			flowInto(world, x, y - 1, z, below, Blocks.fluidId(group, FALLING))
+		else
+			-- Lava pouring into water turns the water into stone (LavaFluid.spreadTo, down).
+			world:setBlock(x, y - 1, z, STONE)
+			fizz(x, y - 1, z)
+		end
 		-- The edge of a pool of sources keeps spreading while it pours down.
 		if level == 0 then
 			local sources = 0

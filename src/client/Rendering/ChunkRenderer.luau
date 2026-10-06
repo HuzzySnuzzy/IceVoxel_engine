@@ -57,12 +57,14 @@
 	pixels, 1/16 of a cell) and turned by the box's rotation. PartPool keeps a template per box,
 	the glowing one carrying the block's PointLight.
 
-	Sparse lights (glow lichen: GreedyMesher.sparseLightLut) carry their PointLight only where the
-	mesher marked the cell (surface field 1, one per GreedyMesher.LIGHT_BOX box); the other cells
-	get PartPool's dark template for the light's box. A revealed cavern holds a few hundred, all on
-	by default; a finite Caves.LichenLightDistance switches off those farther from the camera
+	Sparse lights (glow lichen and lava: GreedyMesher.sparseLightLut) carry their PointLight only
+	where the mesher marked the cell (lichen: surface field 1, one per GreedyMesher.LIGHT_BOX box;
+	lava: FLUID_LIT on its height, one per FLUID_LIGHT_BOX box, GreedyMesher.fluidSurface); the
+	other cells get PartPool's dark template for the light's box (a lava box: its whole part). A
+	revealed cavern holds a few hundred, all on by default; a finite Caves.LichenLightDistance
+	(lichen) or Caves.LavaLightDistance (lava) switches off those farther from the camera
 	(ViewSettings; every SPARSE_SWEEP seconds, off again SPARSE_HYSTERESIS blocks further). Lichen
-	whose light is off still glows: its speck is Neon.
+	and lava whose light is off still glow: both are Neon.
 
 	Plants (Blocks.appearances `scatter`, `tinted`) are shaped blocks too:
 	  * scattered ones are drawn off their cell's centre and turned about its vertical axis
@@ -99,8 +101,8 @@ local readu16 = buffer.readu16
 local Render = Config.Render
 -- Longest side of a part in studs (engine limit).
 local MAX_PART = 2048
--- Sparse lights (glow lichen) near the camera are on: checked this often (seconds), and one that
--- is on goes off this many blocks beyond the distance.
+-- Sparse lights (glow lichen, lava) near the camera are on: checked this often (seconds), and one
+-- that is on goes off this many blocks beyond the distance.
 local SPARSE_SWEEP = 0.25
 local SPARSE_HYSTERESIS = 8
 -- A commit group open longer than this (seconds) stops waiting for its missing tasks.
@@ -288,7 +290,8 @@ type Release = {
 	keep: number,
 }
 
-type SparseEntry = { light: PointLight, position: Vector3, on: boolean }
+-- (`lava`: a lit fluid's, which follows the lava light distance.)
+type SparseEntry = { light: PointLight, position: Vector3, on: boolean, lava: boolean }
 
 type WalkEntry = { node: RenderNode, section: number }
 
@@ -336,11 +339,13 @@ export type ChunkRenderer = {
 	-- Parts currently owned by sections (including ones not shown yet), and those with a light.
 	partCount: number,
 	lightCount: number,
-	-- The PointLights of sparse lights (glow lichen) by their part, with where they are (studs);
-	-- how many there are and how many are on (near the camera).
+	-- The PointLights of sparse lights (glow lichen, lava) by their part, with where they are
+	-- (studs); how many there are and how many are on (near the camera), and of those lava's.
 	sparseLights: { [BasePart]: SparseEntry },
 	sparseCount: number,
 	sparseOn: number,
+	lavaCount: number,
+	lavaOn: number,
 	nextSparseSweep: number,
 	-- Tasks to put live at the next step (their group completed outside it).
 	ready: { Task },
@@ -420,6 +425,8 @@ function ChunkRenderer.new(): ChunkRenderer
 		sparseLights = {},
 		sparseCount = 0,
 		sparseOn = 0,
+		lavaCount = 0,
+		lavaOn = 0,
 		nextSparseSweep = 0,
 		ready = {},
 		retiring = {},
@@ -476,14 +483,16 @@ end
 
 --[[ Lights ]]
 
--- Is a sparse light `distance` studs from the camera on (`on`: it is now)?
-local function sparseWanted(distance: number, on: boolean): boolean
-	local reach = (ViewSettings.lichenLightDistance() + (if on then SPARSE_HYSTERESIS else 0)) * Config.BlockSize
+-- Is a sparse light `distance` studs from the camera on (`on`: it is now; `lava`: a lit fluid's)?
+local function sparseWanted(distance: number, on: boolean, lava: boolean): boolean
+	local limit = if lava then ViewSettings.lavaLightDistance() else ViewSettings.lichenLightDistance()
+	local reach = (limit + (if on then SPARSE_HYSTERESIS else 0)) * Config.BlockSize
 	return distance < reach
 end
 
--- A part with a light was built: its light on (sparse lights: when near the camera).
-local function lightOn(self: ChunkRenderer, part: BasePart, sparse: boolean)
+-- A part with a light was built: its light on (sparse lights: when near the camera; `lava`: a
+-- lit fluid's).
+local function lightOn(self: ChunkRenderer, part: BasePart, sparse: boolean, lava: boolean)
 	self.lightCount += 1
 	local light = self.pool:light(part)
 	if light == nil then
@@ -494,12 +503,18 @@ local function lightOn(self: ChunkRenderer, part: BasePart, sparse: boolean)
 		return
 	end
 	local position = part.Position
-	local on = sparseWanted((position - workspace.CurrentCamera.CFrame.Position).Magnitude, false)
+	local on = sparseWanted((position - workspace.CurrentCamera.CFrame.Position).Magnitude, false, lava)
 	light.Enabled = on
-	self.sparseLights[part] = { light = light, position = position, on = on }
+	self.sparseLights[part] = { light = light, position = position, on = on, lava = lava }
 	self.sparseCount += 1
+	if lava then
+		self.lavaCount += 1
+	end
 	if on then
 		self.sparseOn += 1
+		if lava then
+			self.lavaOn += 1
+		end
 	end
 end
 
@@ -514,8 +529,14 @@ local function lightOff(self: ChunkRenderer, part: BasePart)
 	if entry then
 		self.sparseLights[part] = nil
 		self.sparseCount -= 1
+		if entry.lava then
+			self.lavaCount -= 1
+		end
 		if entry.on then
 			self.sparseOn -= 1
+			if entry.lava then
+				self.lavaOn -= 1
+			end
 		end
 	end
 end
@@ -523,19 +544,23 @@ end
 -- Switches sparse lights on near the camera and off far from it.
 local function sweepSparse(self: ChunkRenderer)
 	local camera = workspace.CurrentCamera.CFrame.Position
-	local count = 0
+	local count, lava = 0, 0
 	for _, entry in self.sparseLights do
 		local was = entry.on
-		local on = sparseWanted((entry.position - camera).Magnitude, was)
+		local on = sparseWanted((entry.position - camera).Magnitude, was, entry.lava)
 		if on ~= was then
 			entry.on = on
 			entry.light.Enabled = on
 		end
 		if on then
 			count += 1
+			if entry.lava then
+				lava += 1
+			end
 		end
 	end
 	self.sparseOn = count
+	self.lavaOn = lava
 end
 
 --[[ Taking things away ]]
@@ -663,8 +688,8 @@ end
 
 --[[ Building ]]
 
--- Adds a part just built to the task.
-local function addPart(self: ChunkRenderer, b: Build, part: BasePart, sparse: boolean)
+-- Adds a part just built to the task (`sparse`: a sparse light's, `lava` a lit fluid's).
+local function addPart(self: ChunkRenderer, b: Build, part: BasePart, sparse: boolean, lava: boolean?)
 	table.insert(b.parts, part)
 	local folder = b.folder
 	if folder then
@@ -674,7 +699,7 @@ local function addPart(self: ChunkRenderer, b: Build, part: BasePart, sparse: bo
 	end
 	if self.pool:hasLight(part) then
 		table.insert(b.lights, part)
-		lightOn(self, part, sparse)
+		lightOn(self, part, sparse, lava == true)
 	end
 	self.partCount += 1
 	self.windowBuilt += 1
@@ -755,7 +780,15 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 	end
 	-- Fluid surface below the top of its cell (flowing water steps down). Parts are at most
 	-- MAX_PART studs long: wide boxes of coarse levels and tall boxes in high terrain are split.
-	local lower = if surface > 0 then (FLUID_FULL - surface) / FLUID_FULL * Config.BlockSize else 0
+	-- A lit fluid (lava) carries its light only in the cell the mesher marked: every other box of
+	-- it is dark (GreedyMesher.fluidSurface).
+	local lit = buffer.readu8(GreedyMesher.sparseLightLut, appearance) == 1
+	local fluidHeight, carries = surface, false
+	if lit then
+		fluidHeight, carries = GreedyMesher.fluidSurface(surface)
+	end
+	local dark = lit and not carries
+	local lower = if fluidHeight > 0 then (FLUID_FULL - fluidHeight) / FLUID_FULL * Config.BlockSize else 0
 	local maxCells, maxCellsY = b.maxCells, b.maxCellsY
 	for py = y, y + sy - 1, maxCellsY do
 		local wy = math.min(maxCellsY, y + sy - py)
@@ -773,10 +806,10 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 					return false
 				end
 				local wz = math.min(maxCells, z + sz - pz)
-				local part = pool:acquire(appearance, far, plain)
+				local part = pool:acquire(appearance, far, plain, 0, dark)
 				part.Size = Vector3.new(wx * scale, height, wz * scale)
 				part.CFrame = CFrame.new(originX + (px + wx * 0.5) * scale, cy, originZ + (pz + wz * 0.5) * scale)
-				addPart(self, b, part, false)
+				addPart(self, b, part, lit, lit)
 				k += 1
 			end
 		end

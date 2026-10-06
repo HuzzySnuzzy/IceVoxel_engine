@@ -388,8 +388,9 @@ table.insert(list, {
 
 	The Configurator (Mekanism's tool) sets how each side of a transmitter connects and colours
 	transporters: a wrench with a blue head and a small screen on its grip, modelled upright and
-	tilted like the tools. Buckets carry water to and from fluid tanks and the world (1000 mB, a
-	water source block); an empty one stacks to 16 as in Minecraft, a full one does not stack.
+	tilted like the tools. Buckets carry fluids (Shared/Fluids) to and from fluid tanks and the world
+	(1000 mB, a source block); an empty one stacks to 16 as in Minecraft, a full one does not stack.
+	(The Lava, Oil and Fuel Buckets are further down.)
 ]]
 local CONFIGURATOR_BLUE = { 44, 116, 214 }
 local CONFIGURATOR_GRIP = { 62, 64, 72 }
@@ -569,6 +570,43 @@ table.insert(list, {
 	material = "Metal",
 	model = shearsModel,
 	tilt = -45,
+})
+
+--[[
+	Buckets of lava (Minecraft's), oil and fuel (BuildCraft's): the Water Bucket's model with the
+	fluid's colour to the rim (Shared/Fluids' colours; lava glowing Neon, oil glossy). Full ones don't
+	stack, and each leaves the empty Bucket when used up (Items.craftingRemainder); a Lava Bucket
+	burns 20 000 ticks in a furnace (Crafting/Smelting).
+]]
+local function filledBucket(colour: { number }, material: string): { ModelBox }
+	return bucket({
+		{ size = { 10.5, 0.8, 3.8 }, offset = { 0, 5.2, 0 }, color = colour, material = material },
+		{ size = { 10.5, 1.2, 0.4 }, offset = { 0, 4.4, 2.45 }, color = colour, material = material },
+	})
+end
+local LAVA = { 212, 90, 20 }
+local OIL = { 24, 22, 26 }
+local FUEL = { 232, 172, 44 }
+table.insert(list, {
+	name = "LavaBucket",
+	maxStack = 1,
+	color = LAVA,
+	material = "Metal",
+	model = filledBucket(LAVA, "Neon"),
+})
+table.insert(list, {
+	name = "OilBucket",
+	maxStack = 1,
+	color = OIL,
+	material = "Metal",
+	model = filledBucket(OIL, "Glass"),
+})
+table.insert(list, {
+	name = "FuelBucket",
+	maxStack = 1,
+	color = FUEL,
+	material = "Metal",
+	model = filledBucket(FUEL, "SmoothPlastic"),
 })
 
 return list

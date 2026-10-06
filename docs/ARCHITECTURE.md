@@ -72,7 +72,13 @@ node key) and `posKey(x, y, z)` for block positions.
    (part of the surface: drawn from above, lit by the sky) after the caves, which they open up:
    the cave air they run into stays cave air. `solidBelow` drops to the lowest carved cell, and
    ores only replace stone, so they never fill it.
-5. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
+5. **Lava and oil** (`Lava.luau`, `OilWells.luau`; see below). Right after the surface caves
+   (levels 0-2), cave air below `Caves.LavaLevel` becomes CaveLava and surface caves' air there
+   Lava (`Lava.aquifer`). Then surface lava lakes and oil wells (deposits and geysers;
+   point-sampled up to `Config.StructureMaxLevel`) are written, before the ores, so a deposit takes
+   the same rock in a chunk's padding as in its neighbour's core. After the ores (step 6) a full
+   detail chunk with caves may sink an underground lava lake into a cave floor.
+6. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
    Uniform features start veins anywhere in the part of their range the chunk's buffer has (up to
@@ -86,25 +92,32 @@ node key) and `posKey(x, y, z)` for block positions.
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
-6. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
+7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
    the structure library's jigsaw structures (`StructureGen.luau`), whose air clears trees and
    whose structure voids keep them. See below.
-7. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
+8. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
    that is still there; it grows only in cave air, so surface caves get none. See below.
-8. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+9. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
    trunk, leaves or a building, nor in or over a pit (the column's generated top must be ground
    with air above). See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
-rock or cave air; lowered under a structure's cells that are neither and under surface caves' air)
-and `emptyAbove` (everything above is air; raised over trees, structures and plants).
+rock or cave air; lowered under a structure's cells that are neither, under surface caves' air
+and under ordinary Lava and Oil) and `emptyAbove` (everything above is air; raised over trees,
+structures, plants and geysers' spouts). A dug lake (a geyser's oil lake) lowers its columns'
+`topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
+cave cells into rock (deposits, the spout below a lake, underground lava lakes) marks the cave
+lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads those cells
+instead of assuming rock.
 `TerrainGenerator.new(seed, options?)` takes the structure library to generate (`options.library`,
 default `Library.load()` while `Config.Structures.Generate` is on; `structures = false` for none);
 `generator.structures(minX, minZ, maxX, maxZ)` lists the generated structures with a piece in a
 rectangle, `generator.structureContainer(x, y, z)` the items a generated chest starts with and
 `generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds
 them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one
-opens.
+opens. `generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the
+map paints their geysers), `oilLake(well)` a geyser's lake columns and `lavaLakes(...)` the
+surface lava lakes.
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -162,6 +175,9 @@ below the column's surface in H (`d = depth / 450`), and rock is carved where F 
   as the surface rises. It appears under surfaces above ~540, reaches down to `Caves.MinY` under
   surfaces above ~700, and is up to ~600 blocks tall under the highest (~930) peaks. The datapack
   blends the same way.
+- **Lava.** Cave air below `Caves.LavaLevel` (y 11) becomes lava after the carving (see Lava
+  below), so the deepest caves and the Underlands' floor where it reaches `Caves.MinY` (4) are lava
+  seas.
 
 Cave and strata sizes are 0.75 of the datapack's (the player is not scaled down with the terrain);
 the depths scale with the terrain. 3D noise per block would be far too slow, so F is evaluated on
@@ -240,7 +256,9 @@ after the caves.
   valley), sampled on a 4-block grid, or the worm stops there; one stopped (by water, or an
   entrance out of the ground) within 16 entrance / 30 ravine carved steps is dropped, so there are
   no stubs by the shore. Columns within 2 blocks of a library structure's piece are left alone
-  (`protectedColumns`): no foundation fills a pit and no path floats over a ravine. An entrance
+  (`protectedColumns`): no foundation fills a pit and no path floats over a ravine. So are surface
+  lava lakes' boxes and 2 blocks around them, and geysers' lake squares and 2 blocks around them
+  (`protectedColumns`' `boxes`): a cut there would open the lake's side. An entrance
   step that reaches a column's top, or leaves it a roof of one block, opens the column to its top,
   and a single block left with air or cave air on all six sides is cleared (full detail chunks,
   off the core's edge columns, so the padding stays the neighbour's core). Where a worm carves a
@@ -276,10 +294,104 @@ after the caves.
   sideways branch while the tunnel goes on (Minecraft forks both ways and ends the parent); a
   chamber at the end instead of rooms at the start. Ravines follow the surface, so they are always
   open (Minecraft's sit at y 10-67 and are often buried), and are rarer (~3 per km² against
-  Minecraft's 0.01 per chunk, ~39 per km² buried ones included). No lava or aquifers, and a dry
-  margin instead of only skipping fluid blocks; nothing carved next to structures (Minecraft
-  carves under villages). Surface caves don't show on the map (it paints the generator's column
-  data). Single blocks between a tunnel and a cave can still float in a chunk's edge columns.
+  Minecraft's 0.01 per chunk, ~39 per km² buried ones included). No water aquifers (lava below
+  `Caves.LavaLevel` fills what they cut that deep: see Lava), and a dry margin instead of only
+  skipping fluid blocks; nothing carved next to structures (Minecraft carves under villages).
+  Surface caves don't show on the map (it paints the generator's column data). Single blocks between
+  a tunnel and a cave can still float in a chunk's edge columns.
+
+### Lava (`Lava.luau`)
+
+Minecraft 1.20.1's overworld lava in three parts, all of it sources (level 0) at rest: nothing
+flows until something next to it changes (server Behaviours/Fluid).
+
+- **Below `Caves.LavaLevel`** (11; levels 0-2, `Lava.aquifer`, right after the surface caves).
+  Minecraft fills every cave below y -54 (its surface 10 blocks above the world's floor:
+  NoiseBasedChunkGenerator's fluid picker) and its carvers carve lava at aboveBottom(8) and below.
+  Here every cave air cell below y 11 becomes CaveLava (cave air while caves are hidden: see
+  Meshing) and every Air cell there (a surface cave cut that deep) ordinary Lava: the deepest caves
+  and the Underlands' floor under the highest mountains are lava seas (420-460 cells per chunk with
+  caves, ~2,300 in a chunk of Underlands floor), meshed hidden to exactly the boxes of cave air.
+  LOD levels 1-2 have no caves, so there only a ravine cut that deep fills.
+- **Lakes**: LakeFeature with lake_lava's configuration (`shapeOf`, Minecraft's draws): a 16 × 8 ×
+  16 box of 4-7 overlapping ellipsoid blobs (3-9 wide, 2-6 tall) inside its cells 1..14 / 1..6 /
+  1..14, lava in the lower four layers and air (the bowl) above. A lake is refused where a shell
+  cell (next to the blobs) is liquid from layer 4 up or not solid below it, so lava never spills;
+  then solid shell cells become stone below layer 4, and half of them (a draw each) from layer 4
+  up.
+  - **Underground** (`underground`; level 0, after the ores; lake_lava_underground adapted to cave
+    floors). One chunk in `Underground.Rarity` (1) of those with caves tries `Tries` (8) random
+    core columns at random heights for a cave floor (cave air over rock, within 32 blocks down) at
+    least `Depth` (30) blocks below the surface, and sinks a box on the chunk's core into it with
+    the floor block in layer 4. CaveLava and a cave air bowl: nothing to draw while caves are
+    hidden. Decided from the chunk's own blocks (rock below the lava, no liquid by the bowl, no
+    surface cave air or fluid in it, the caves' margin under every column, no structure piece);
+    the blobs never reach the core's outer columns, so no neighbour's padding holds them (only the
+    stone barrier may sit in a core edge column, where it replaces rock: it culls alike). One in
+    3-6 chunks with 2,000 or more cave cells gets one (seeds 12345 / 777: 1 in 3.3 / 5.5).
+  - **Surface** (`surfaceLakes`, `writeSurface`; levels up to `StructureMaxLevel`;
+    lake_lava_surface). One candidate per 16 × 16 cell with chance 1 / `Surface.Rarity` (200), its
+    layer 4 at the full detail height of the box's centre (Minecraft: its corner). Decided from the
+    full detail heights alone (ground below a column's height, air above it, water below the sea),
+    so every chunk and level agrees: refused in snowy or wet biomes (frozen, snow-topped, humidity
+    0.45 or more), next to water, where a cell could meet a deep cave (any cell less than the
+    caves' 9 cave-free blocks below its column's surface), within 2 blocks (PROTECT) of a structure
+    piece or a geyser's lake, and within `SpawnClearance` (128) blocks of the spawn. Ordinary Lava,
+    0.7-1.6 lakes per km². Surface caves leave the box and 2 blocks around it alone and trees keep
+    out; LOD chunks put lava in the top cell of a column whose sample block lies over the lake's
+    lava.
+
+### Oil wells (`OilWells.luau`)
+
+BuildCraft 7.1's OilPopulate on this world's terms, decided from the seed, its grid cell and the
+full detail terrain only (`find`, cached per generator), so every chunk and level agrees.
+
+- **Placement.** One candidate per `Spacing` (512) square cell, at a hashed column INSET (32)
+  blocks from the cell's sides (a well never reaches past its cell). It is a well with its biome's
+  chance in `Biomes` (Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45: BuildCraft's oil
+  biomes), `Chance` (0.12) on other land and `Sea` (0.15) under the sea; never within
+  `SpawnClearance` (256) blocks of the spawn, nor where a library structure's piece comes within
+  MARGIN (2) of it. Sizes by share (`Sizes`): large 25% (deposit radius 8-12, lake radius 7-10,
+  spout 16), medium 50% (5-7, 4-7, 6), small 25% (3-4, no geyser); undersea pockets are all of
+  `SeaSize` (small), which leaves the draws of land wells as they were.
+- **Deposit.** A sphere (distance² ≤ r²) centred `Depth` (20-40) blocks down, kept COVER (6)
+  blocks under the lowest ground above it and off the bedrock (a deposit under a shallow sea floor
+  shrinks to fit, or there is none), and moved up or down in steps of 4 within its depth range
+  out of the deep caves' regions (`Caves.regions` at most 0.05 at its centre and 14 points of its
+  surface), else no well: deposits are buried in rock, not hollowed out by a cave. Its rock
+  (opaque, not bedrock) becomes CaveOil, so a buried deposit meshes hidden like plain rock. Cave
+  entrances and ravines are carved before it: where one cuts near the sphere, the deposit keeps
+  CLEAR (2) below the lowest carved cell of that column and its 4 neighbours (`Terrain.carved`,
+  asked of the worms, `SurfaceCaves.mayCarve` and `lowestCarved`, so padding agrees; the well's
+  own lake square is skipped, as TerrainGenerator protects it), so no CaveOil faces open-sky air.
+  About 190, 900 and 4,800 cells (buckets) for small, medium and large wells.
+- **Geyser** (large and medium wells on land more than 2 above the sea). The lake (`lakeOf`,
+  BuildCraft's generateSurfaceDeposit: tendrils from the centre with its falling chance
+  `(radius - w + 4) / (radius + 4)`, holes filled; `LakeDepth` 1-3 deep, its top one below the
+  ground, the block over it dug away) covers columns no higher than the centre's and at most one
+  lower, so rough ground gives a smaller, ragged lake, as BuildCraft's setOilColumnForLake does
+  (median 36 columns; about 12% have fewer than 10); a column whose neighbour outside the lake is
+  lower than the oil's top is left out (no open side), but never the centre, which is the spout's.
+  Its radius shrinks until the ground on two rings around it is dry (above sea level + 1); only a
+  spout within 2 blocks of water or a beach loses its geyser (none did over 1,568 km²). The spout, a
+  1-wide column of sources, rises from the deposit through the lake to `Spout` (16 large, 6 medium)
+  blocks over the ground: CaveOil below the lake (replacing rock, cave air and lava alike, so it
+  runs on through a cave as a pillar), ordinary Oil in and above the lake. Surface caves leave the
+  lake's square and MARGIN around it alone, and trees keep out. LOD chunks up to `StructureMaxLevel`
+  put oil in the top cell of columns whose sample block lies in the lake and draw the spout in the
+  cell holding its column, so geysers show from afar; the map paints them as black dots.
+- **Undersea pockets.** Wells under the sea are small deposits without a geyser.
+
+Generated oil is sources at rest: a broken block beside the spout makes it pour out
+(Behaviours/Fluid), as BuildCraft's does. Seeds 12345 / 777 over 784 km² each: 379 / 302 wells
+(0.48 / 0.39 per km²): 1.1 / 0.9 per km² of oil biomes, 0.26 / 0.27 of other land and 0.30 / 0.33
+of sea; 254 / 151 geysers (0.32 / 0.19 per km²), nearly every large and medium well on land.
+Undersea pockets hold 1-4% of the oil, oil biomes 55-59%.
+
+Cost per chunk (native / interpreted): lookups 0.005 / 0.013 ms, lava below LavaLevel 0.02 /
+0.14 ms, underground lakes 0.05 / 0.36 ms, writing a surface lake or a geyser 0.05 / 0.23 ms (a
+whole chunk: 9.3 / 21.8 ms); deciding a lake or a geyser's lake costs 0.5-2 ms once per
+generator, and `findSpawn` (for the spawn clearances) 3-7 ms once.
 
 ### Structures
 
@@ -294,9 +406,10 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away. A spot is refused near a library structure's piece (`accept`, see
-below), so no canopy is cut by a hut and no trunk stands in a path, and where a cave entrance or
-ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms, never the
-chunk's data, so every chunk and level agrees on every tree).
+below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava lake's
+box or a geyser's lake square (with their margins: TerrainGenerator's `keepOut`), and where a cave
+entrance or ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms,
+never the chunk's data, so every chunk and level agrees on every tree).
 
 ### Library structures (`StructureGen.luau`)
 
@@ -426,16 +539,21 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   box of their own, one block in size, so their faces can be drawn per block. Other opaque boxes may
   still run through them where they are hidden;
 - glass is covered exactly; **fluids** only where they touch a non-opaque block other than
-  themselves, so oceans become thin sheets instead of tall transparent boxes;
+  themselves, so oceans become thin sheets instead of tall transparent boxes. Fluids compare by
+  their surface form (`fluidFormLut`: a cave twin is its source), so where CaveLava meets Lava (a
+  twin flowed, or a bucket was poured into a lava sea) no wall is drawn between them;
 - a fluid cell without the same fluid above it is **lowered to its level** like Minecraft
   (`Blocks.fluidHeightLut`, in ninths of a block: sources 8, flowing levels 7..1, falling full).
   The height is packed next to the appearance id in the box key (`GreedyMesher.decodeKey`), so only
   cells of the same height merge and flowing water visibly steps down;
 - with `hideCaves`, cave air counts as rock and every cave wall disappears. **Cave twins**
-  (`Blocks.caveTwinLut`: the CaveGlowLichen* generation puts on cave walls) count as cave air
-  then: they have no appearance (`appearanceHiddenCaves`), are rock to their neighbours
-  (`Blocks.cullLutHiddenCaves`) and are cave air to the stone caps at a revealed section's hidden
-  sides (see Streaming), so a hidden cave's lichen costs nothing and hides nothing. A hidden cave
+  (`Blocks.caveTwinLut`: the CaveGlowLichen* generation puts on cave walls, the CaveLava of lava
+  seas and underground lakes, the CaveOil of oil deposits) count as cave air then: they have no
+  appearance (`appearanceHiddenCaves`), are rock to their neighbours (`Blocks.cullLutHiddenCaves`)
+  and are cave air to the stone caps at a revealed section's hidden sides (see Streaming), so a
+  hidden cave's lichen and lava and a buried deposit cost nothing and hide nothing (64 chunks with
+  every cave cell below y 15 turned to lava mesh hidden to exactly the boxes of empty caves, 2,672,
+  against 3,728 (+39.5%) with ordinary lava; revealed, both mesh alike). A hidden cave
   cell (`caveCellLut`: cave air or a twin) that touches a cell that is neither opaque nor a cave
   cell (air, water, glass, a torch: where a cave entrance, a ravine or a shaft dug from the
   surface runs into a hidden cave) is drawn as a **stone cap** (`STONE_APPEARANCE`), so that air
@@ -445,12 +563,20 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   QuadMesher draws the same caps face by face. Over six areas of 12 × 12 chunks: +0.7%
   hidden-mode parts (+2.7% where entrances are densest, -0.3% with no surface caves; +1.5% without
   the new wildcards), meshing +5-10% interpreted;
-- **sparse lights** (`sparseLightLut`, per appearance: glow lichen) are drawn in every cell, but
-  only one cell per `LIGHT_BOX`³ (8³) block box carries the light: the one nearest the box's
-  centre (`lightScore`; on a tie the lowest, then northmost, then westmost). Boxes are world
-  aligned and divide sections and chunks, and the choice depends only on the cells in the box, so
-  the same blocks always light the same cell and lights never jump on a remesh. The chosen cell's
-  key has surface field 1 (`decodeKey`), the others 0;
+- **sparse lights** (`sparseLightLut`, per appearance: glow lichen and every fluid giving light,
+  lava) are drawn in every cell, but only one cell per light box carries the light
+  (`sparseBoxLut`: `LIGHT_BOX`³, 8³ blocks, for lichen; `FLUID_LIGHT_BOX`³, 16³, for lava, whose
+  light reaches twice as far): among the box's drawn cells, the one nearest its centre
+  (`lightScore`; on a tie the lowest, then northmost, then westmost). Boxes are world aligned and
+  divide sections and chunks, and the choice depends only on the cells in the box, so the same
+  blocks always light the same cell and lights never jump on a remesh. A lichen's chosen cell has
+  surface field 1 (`decodeKey`), the others 0; a lava cell's key adds `FLUID_LIT` (16) to its
+  height (`fluidSurface` splits them), so the lit cell is a box of its own and a lava sea's sheet
+  splits into about five boxes per 16 × 16 surface. Lichen and lava choose apart (a box may light
+  one of each). `noLights` (far nodes, whose parts carry no light: ChunkWorker passes it) marks
+  nothing, so a far lava lake stays one box. An Underlands lava sea revealed (seed 12345, 197
+  chunks, 51,235 lava cells drawn) gets 209 lights for +0.58% boxes (8³ boxes would be 824,
+  +1.58%); hidden, it has neither;
 - **plants** (`Blocks.foliageLut`) are shaped single cells like torches. With `hideFoliage`
   (`Config.Render.Foliage` off, or a chunk beyond `LodTree.drawsFoliage`; see Streaming) they are
   not meshed; they hide nothing, so every other box stays the same. `mesh` also returns how many
@@ -878,7 +1004,41 @@ camera on slow devices, every 0.25 s, turning them off again 8 blocks further. L
 no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
 reaching through a thin cave wall shows nowhere it shouldn't. Each lichen is two parts, its plate
 and the Neon speck that carries the light. The renderer counts parts with a light (`lightCount`)
-and lichen lights (`sparseCount`, `sparseOn`) for F3.
+and sparse lights (`sparseCount`, `sparseOn`; of them lava's, `lavaCount`, `lavaOn`) for F3
+("lichen a of b, lava c of d").
+
+**Lava's lights.** Lava (light 15: 13.5 blocks, 40.5 studs of PointLight range, no shadows) is a
+sparse light too: a lava box the mesher did not mark (`GreedyMesher.fluidSurface`) comes from
+PartPool's dark template, the same Neon part without its PointLight, so lit and unlit lava look
+alike. ChunkRenderer keeps lava's lights apart from lichen's and switches off those beyond
+`Caves.LavaLightDistance` (96 blocks, phones 48; `ViewSettings.lavaLightDistance`, no player
+setting yet) the same way: in the revealed Underlands sea above, ~110 of its 209 lights are on
+(~30 at 48 blocks). Far nodes carry none (`noLights`): a far lava lake is unlit Neon.
+
+**The view from inside a fluid** (`Rendering/FluidFog`; pure but for `start`, tested in
+tests/spec/LavaOilClient). Every frame after the camera, `cameraFluid` finds the fluid at the
+camera (the block's fluid, any level or cave twin, when the camera is below its surface:
+FluidState.getHeight, Camera.getFluidInCamera; third person counts where the camera is) and sets
+Minecraft's FogRenderer fog in blocks from each fluid's record: lava 0.25..1 (spectators -8..half
+the view distance), oil 0..2, fuel -8..32, water -8..96 times the water vision (`vision`: at least
+0.25, building up over 600 ticks under water and dropping 10 a tick out of it, `stepVision`;
+LocalPlayer.getWaterVision), never past the view distance (Roblox fog starts at 0 at the
+nearest). It goes through `ViewSettings.setFluidFog` and `LightingController.setFogColour`, which
+put the view distance's fog (or the place's own) back once the camera leaves the fluid. The colour
+is the fluid's `fogColor` (water's brightened towards its brightest hue with the vision); fluids
+giving no light darken with the light around the camera (the sun's brightness times the sky light
+reaching it, `light`), lava glows anyway. A ColorCorrectionEffect ("IceVoxelFluidView" in
+Lighting) tints the view towards the fluid's colour (`TINT`: water 0.12, lava 0.55, oil 0.5, fuel
+0.3), so it shows even with an Atmosphere, which replaces Lighting's fog. Each fluid's tint and
+Color3 are made once; a frame compares the fluid, the fog to a tenth of a block and the colour with
+what it last wrote, in locals, and writes only changes, so a frame in an unchanging fluid makes no
+garbage.
+
+**Burning players** (`Player/BurningView`; `onFire` pure). The server marks a burning character
+with the attribute `IceVoxelOnFire` (Players/Characters); polled ten times a second, every
+burning character gets flames (a Fire on its root part), and the local player in first person a
+fire overlay at the bottom of the screen (Minecraft's renderFlame and ScreenEffectRenderer's fire,
+which in third person the body's flames replace).
 
 ### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
 
@@ -953,6 +1113,10 @@ Map tiles are painted from the generator, not from loaded chunks, so the map sho
 (infinite) world. `Map/MapPainter` (shared, pure) runs inside the worker actors as a `map` job and
 returns RGBA pixels: surface colour, hill shading from the neighbouring heights, tree density,
 water depth and sea ice. It paints from column data, so cave entrances and ravines don't show.
+Oil wells' geysers are painted over it as black dots in the oil's colour (`paintWells`, from
+`generator.oilWells`: the pixel holding the spout and every pixel whose centre lies within the
+lake's radius, not the lake's exact shape); a tile has a few wells at most, and the dots add
+nothing measurable.
 
 Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
 EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
@@ -1045,17 +1209,20 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   its bobbing model) or another player (their standing hull) nearer on the same aim and in reach
   wins, except while mining (`BlockInteraction.miningProgress()`), so the progress stays on
   screen; an entity behind a block is never named, even when that block is too far to target
-  (WAILA casts BlockInteraction's ray without its reach check). Water shows only when no block is
-  in reach: BlockInteraction aims and mines through water, so WAILA must not hide the highlighted
-  block. The water ray skips the water the camera starts in. The rule is `WailaInfo.choose`
-  (tested). Items, players, water and the hiding block are looked for every 0.05 s; touch
-  screens aim with a finger only while breaking, so they show blocks only. Spectators are never
-  named, nor the player being spectated; a spectator sees blocks with a menu and players only
-  (see Game modes: On the client).
+  (WAILA casts BlockInteraction's ray without its reach check). A fluid (water, lava, oil, fuel)
+  shows only when no block is in reach: BlockInteraction aims and mines through fluids, so WAILA
+  must not hide the highlighted block. The fluid ray skips the fluid the camera starts in. The rule
+  is `WailaInfo.choose` (tested). Items, players, fluids and the hiding block are looked for every
+  0.05 s; touch screens aim with a finger only while breaking, so they show blocks only. Spectators
+  are never named, nor the player being spectated; a spectator sees blocks with a menu and players
+  only (see Game modes: On the client).
 - **Content.** `WailaInfo` (pure, tested) turns (block, held item, x, y, z, extended) into an icon
   (the item's 3D icon; a colour box for blocks that are no item; a player's head shot) and lines
   of coloured segments:
-  - the name (a chest adds "(27 slots)"; contents are only known while it is open);
+  - the name (a chest adds "(27 slots)"; contents are only known while it is open; a fluid is
+    named by its fluid, "Lava" for every level and for CaveLava);
+  - "Light 15" for a fluid that gives light (`fluidLight`: lava lights its surroundings, though
+    only some of its cells carry a light);
   - the harvest line from `Items.canHarvest` and the block's `tool` / `toolLevel`:
     "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable"; operator blocks say
     "Creative only" instead (F3: "Breaks in creative only (at once)");
@@ -1088,7 +1255,8 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
 
 The F3 overlay also shows the time: clock, day number, tick, sky light and how much of it reaches
 the camera (`LightingController.dayTime`, `skyExposure`); the PointLights in the world (lichen
-lights: on of all); and the cave view (how far caves are revealed, the level 1 split in use).
+and lava lights: on of all); the cave view (how far caves are revealed, the level 1 split in
+use); and the hull's flags, `lava` among them.
 
 ### Movement (`Shared/Movement`, `Player/MovementController`, `Player/CharacterAnimator`)
 
@@ -1194,14 +1362,27 @@ server uses for suffocation (see Game modes: On the server).
 
 **Fluids and the player.**
 - `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
-  treats an open side with the same fluid below it as a drop, and makes falling fluid next to a solid
-  face push almost straight down. `PlayerPhysics` pushes the hull along it at 0.014 per tick.
+  treats an open side with the same fluid below it as a drop, and makes falling fluid next to a
+  solid face push almost straight down. `PlayerPhysics` pushes the hull along it at the fluid's
+  `push` per tick (Shared/Fluids: water and fuel 0.014, lava and oil 0.0023333).
+- Each fluid moves the player by its record (`physics`, `drag`, `push`, `swim`), in Minecraft's
+  two tags: "water" (water, fuel: the water branch of LivingEntity.travel, `inWater`, swimming)
+  and "lava" (lava, oil: `inLava`, `lavaHeight`). The lava branch: acceleration 0.02, then drag 0.5
+  every way while the fluid is deeper than 0.4 (the jump threshold), else 0.5 sideways and 0.8 up
+  and down with water's slow sinking; gravity / 4 on top; jumping rises 0.04 a tick
+  (jumpInLiquid), the same hop out onto a ledge, no swimming and no sinking by sneaking, and the
+  fall distance halves every tick in it (Entity.baseTick). That is 0.78 blocks a second walking,
+  40% of water's; a 25-block fall into 2-deep lava costs 9 half hearts against 21 on stone. The
+  water tag is looked at first, as in Minecraft, when the player touches both. `eyeFluid` is the
+  fluid at the eyes (Entity.updateFluidOnEyes). CharacterAnimator walks (it doesn't swim) while
+  the hull wades through lava or oil.
 - Water spreads like Minecraft's `FlowingFluid.getSpread` (`Behaviours/Fluid`): sideways only
   towards the side(s) with the shortest way to a hole. The search follows open blocks for up to 4
   blocks past the neighbour, so holes up to 5 blocks away count; it is a breadth-first search with
   each block read once. A search that reaches an unloaded chunk waits for it. A pool of sources
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
-  Minecraft instead of flooding the ground around it.
+  Minecraft instead of flooding the ground around it. Lava, oil and fuel spread the same way with
+  their own slope distance (see Fluids: lava and oil look for holes up to 3 blocks away).
 
 ## Player settings (`PlayerSettings`, client `Settings/`, `Ui/SettingsScreen`, server `Players/SettingsStore`)
 
@@ -1457,10 +1638,13 @@ Code never compares modes: it asks what one allows, `GameMode.<ability>(mode)` o
   eyes of all three poses (standing, crouching, crawling) must be in a wall: crouching or crawling
   under blocks never hurts. The feet come from the character (`Rig.feet`), the blocks from the
   server's generated chunks only; not creative or spectator players. So a player who leaves
-  spectator inside rock (or is buried in sand) isn't walled in for good.
+  spectator inside rock (or is buried in sand) isn't walled in for good. Lava hurts and burns
+  survival and adventure players only (`Players/Burning`: creative and spectator players' burning
+  is put out at once; see Fluids).
 - **Death**: spectators drop nothing and keep their inventory (`keepsInventory`,
   ServerPlayer.die); everyone does with `Gameplay.KeepInventory`.
-- **Sounds**: spectators make no hurt or death sound and open no chest lid (`makesSounds`).
+- **Sounds**: spectators make no hurt, death, burn or extinguish sound and open no chest lid
+  (`makesSounds`).
 - **Spectator teleport** (`Players/Teleport`). `SpectatorTeleport` (the spectator menu's
   "Teleport to Player", Minecraft's handleTeleportToEntityPacket) moves a living spectator's feet
   to another player's exactly (`spectatorTeleport`: only a spectator, not to themselves, the
@@ -1561,7 +1745,7 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
   spectator's click never aim at a spectator or at the player being spectated
   (`SpectatorRules.aimable`).
 - **WAILA** for a spectator: blocks with a menu (all BlockInteraction aims at) and players; no
-  dropped items or water.
+  dropped items or fluids.
 - **Structure outlines** (`Rendering/StructureBoxes`) show with instabuild and to spectators, as
   in Minecraft.
 
@@ -1570,8 +1754,11 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
 What each game mode may do with items and inventories is in Game modes, above.
 
 **Items** (`Items`). Every placeable block is an item with the block's id. Other items (`ItemList`:
-the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's osmium), gems, snowballs, the 25
-tools and Shears) have ids from 4096 up. A stack is `{ item, count, damage }`, at most `maxStack`
+the 20 Minecraft armor pieces, sticks, coal, raw ores, ingots, nuggets (Minecraft's and Mekanism's
+osmium), gems, snowballs, the 25 tools and Shears, buckets) have ids from 4096 up. What an item
+leaves behind when a recipe or a furnace uses it up is `Items.craftingRemainder` (Minecraft's
+getCraftingRemainingItem): the empty Bucket for each full bucket (Water, Lava, Oil, Fuel; one per
+fluid of Shared/Fluids, checked at load). A stack is `{ item, count, damage }`, at most `maxStack`
 (64; armor and tools 1, snowballs 16); `damage` is a tool's wear (`durability`: wood 59, stone
 131, iron 250, diamond 1561, gold 32, shears 238). Blocks say how long they take to mine
 (`hardness`), which tool harvests them (`tool`, and `toolLevel` when only that tool of that tier
@@ -1656,11 +1843,13 @@ next tier keeps its charge. Other results carry none.
 - Breaking or replacing the block drops what it holds (`world.onChanged`).
 - Furnaces (`Crafting/Smelting`, Minecraft's AbstractFurnaceBlockEntity tick) run at 20 Hz on the
   server, whether or not anyone is watching: a fuel item lights the furnace for its burn time
-  (coal 1600 ticks, planks and logs 300, sticks 100...) when there is something to smelt that fits
-  the output, an item takes 200 ticks, progress falls back when the fire goes out. Only furnaces
-  that are doing something are ticked (`Containers.tickFurnaces`). Viewers get a snapshot when the
-  slots change, and every other tick while only the gauges move. Every 10 ticks the furnaces whose
-  output holds something (`Containers.ejectingFurnaces`) push it into the chests next to them
+  (coal 1600 ticks, planks and logs 300, sticks 100, a Lava Bucket 20 000, the fluids' records'
+  `furnaceFuel`, which leaves the empty Bucket in the fuel slot; oil and fuel are no furnace fuel,
+  as furnaces burn solid fuels only) when there is something to smelt that fits the output, an item
+  takes 200 ticks, progress falls back when the fire goes out. Only furnaces that are doing
+  something are ticked (`Containers.tickFurnaces`). Viewers get a snapshot when the slots change,
+  and every other tick while only the gauges move. Every 10 ticks the furnaces whose output holds
+  something (`Containers.ejectingFurnaces`) push it into the chests next to them
   (`Transmitters/Eject`, below).
 
 Death drops the whole inventory (unless `Gameplay.KeepInventory`, or the player was spectating).
@@ -1702,22 +1891,25 @@ Grass block's green); a tall plant shows its `icon`, the lower half plus the top
 cell. Shears are a tool: diagonal in icons, held by the handles.
 
 **Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative
-Energy Cube, the Heat Generator, the Electric Furnace, the Batteries, structure blocks (Minecraft's
-dark purple block with the mode's sigil on every face) and jigsaws (the puzzle piece on the front,
-the lock towards the top, arrows on the other sides, turned per orientation) are drawn without image
-assets from pure face data (rectangles on a 16 × 16 grid per face): in the world as SurfaceGuis on
-their parts' templates (recycled parts keep them; they stop drawing beyond 96 blocks), and on item
-models as thin raised slabs, since ViewportFrames don't draw SurfaceGuis.
+Energy Cube, the Heat Generator, the Electric Furnace, the Batteries, the Oil Refinery (a light
+steel casing with an oil and a fuel sight glass on each side and two tank caps on top), the
+Combustion Generator (dark steel, amber fuel stripes, a chamber window low on each side and an
+exhaust on top), structure blocks (Minecraft's dark purple block with the mode's sigil on every
+face) and jigsaws (the puzzle piece on the front, the lock towards the top, arrows on the other
+sides, turned per orientation) are drawn without image assets from pure face data (rectangles on a
+16 × 16 grid per face): in the world as SurfaceGuis on their parts' templates (recycled parts keep
+them; they stop drawing beyond 96 blocks), and on item models as thin raised slabs, since
+ViewportFrames don't draw SurfaceGuis.
 
 **Light sources and shaped blocks** (`Blocks`, `Rendering/PartPool`, `Behaviours/Attached`).
 Blocks may give off light (`light`, Minecraft's 0..15: torches 14, lanterns and the Glow Block 15;
 `Blocks.lightLut`) and may be drawn from boxes instead of a cube (`shape`: pixels from the cell's
 centre, turned with CFrame.Angles). Shaped blocks render like glass (they hide no neighbour and no
 opaque box runs through them). Shaped and lit blocks are meshed one box per block
-(`Blocks.singleLut`). The renderer draws one part per shape box, each from its own template. The
-glowing box's near template (the Glow Block's cube) carries one PointLight: range light × 0.9 blocks,
-warm colour. A light inside a part that casts a shadow is hidden by that part, so one of the two
-gives way:
+(`Blocks.singleLut`), lit fluids excepted: a lava sea is a sheet of merged boxes with sparse
+lights. The renderer draws one part per shape box, each from its own template. The glowing box's
+near template (the Glow Block's cube) carries one PointLight: range light × 0.9 blocks, warm colour.
+A light inside a part that casts a shadow is hidden by that part, so one of the two gives way:
 - torches' and lanterns' boxes cast no shadow (they are small, so it hardly shows), and their
   light has shadows when `Render.Shadows` is on, so it stops at walls;
 - the Glow Block's cube casts one like any opaque cube, so a roof of them keeps the sun out; its
@@ -1726,8 +1918,8 @@ gives way:
   templates can't do).
 
 There is no light field in the block data; Roblox's lighting engine does the rest. Glow lichen
-(light 7) is the exception to one light per block: only some of its cells carry one (see Meshing
-and Rendering).
+(light 7) and lava (light 15, in every level) are the exceptions to one light per block: only
+some of their cells carry one (see Meshing and Rendering).
 
 Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there
 (`Blocks.canSurvive`, `Blocks.isSturdy`): solid, drawn and unshaped, unless BlockList says
@@ -1832,12 +2024,18 @@ a 13 × 13 pixel plate a tenth of a pixel off its face and a 3 × 3 pixel Neon s
 that carries the light: two boxes, two parts. Its outline is a pixel thick plate over the face.
 
 **Cave twins** (BlockList `caveTwin`): CaveGlowLichen and its five sides, the lichen generation
-puts in caves. A twin looks, drops and behaves exactly like its twin (same appearance, item,
-support, light, hardness, drops and behaviour; checked at load), but counts as cave air while
-caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`; see Meshing), as CaveAir is to Air. Players
-never place one: twins are no variants of their item (`placementFor` never returns one, EditRules
-refuses them), `Blocks.rotate` keeps a twin a twin, and `Blocks.surfaceForm` turns a twin into
-its twin and CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`, `isCaveTwin`).
+puts in caves, and CaveLava and CaveOil, the lava of the caves' lava seas and underground lakes
+and the oil of buried deposits (see Fluids). A twin looks, drops and behaves exactly like its twin
+(same appearance, item, support, light, hardness, drops and behaviour; a fluid twin is a source of
+the same group, level and tick delay; checked at load), but counts as cave air while caves are
+hidden (`cullLutHiddenCaves`, `caveTwinLut`; see Meshing), as CaveAir is to Air. Players never
+place one: twins are no variants of their item (`placementFor` never returns one, EditRules
+refuses them, `Blocks.fluidId` never answers one, so a bucket pours an ordinary source),
+`Blocks.rotate` keeps a twin a twin, and `Blocks.surfaceForm` turns a twin into its twin and
+CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`, `isCaveTwin`).
+
+**Obsidian** (Minecraft's): what water makes of a lava source (see Fluids). Hardness 50, a diamond
+pickaxe or nothing (`toolLevel` 3: 9.4 s; 250 s by hand, for no drop); it drops itself.
 
 ## Item data (`Items`, Mekanism's sustained data)
 
@@ -1855,7 +2053,7 @@ strings of at most 64 bytes or booleans. No data is nil, never an empty table.
   entity merging and JEI's transfer, which uses plain stacks before ones with data. Pick block
   takes plain stacks only (the picked stack has no tags).
 - **Where data comes from.** Crafting results have none (a repaired tool is a fresh stack, and so
-  is an Advanced Fluid Tank made from a tank holding water), except a recipe's kept ingredient's
+  is an Advanced Fluid Tank made from a tank holding a fluid), except a recipe's kept ingredient's
   (Recipes `keep`: a Battery crafted into the next tier keeps its charge); what stays in the grid
   keeps its own.
   Creative middle-click clone copies the whole stack, and the `creative` action carries wear and
@@ -1873,9 +2071,10 @@ container's `data` (Minecraft's ContainerData) is u8 n + n x f64 (at most
 furnace keeps indices 1..5. A container whose kind is not in `Types.KINDS` travels as none.
 
 **Tooltips.** `Items.describe(stack)` gives a line for each data key with a describer, in the order
-they were added; other keys show nothing (Minecraft hides NBT). "fluid" ("Water: 12,000 mB", with
-`amount`) and "energy" ("Energy: 1.2 MJ") are built in; `Items.addDescriber(key, fn)` adds or
-replaces one (a failing one is skipped). `formatEnergy` is Mekanism's short form (J, kJ, MJ, GJ,
+they were added; other keys show nothing (Minecraft hides NBT). "fluid" ("Lava: 12,000 mB", with
+`amount`; names from Shared/Fluids) and "energy" ("Energy: 1.2 MJ") are built in, and each
+machine tank's name gets one (Shared/Machines: "Oil: 3,000 mB"); `Items.addDescriber(key, fn)` adds
+or replaces one (a failing one is skipped). `formatEnergy` is Mekanism's short form (J, kJ, MJ, GJ,
 two decimals cut, so nothing short of full reads full; "Infinite"); `formatFluid` and `thousands`
 write "12,000". `Ui/Screens` shows the lines in grey under a hovered slot's item name.
 
@@ -1893,8 +2092,102 @@ its item when it is broken. Parts of the server that keep block state register h
 - a hook that errors is reported and skipped; it never stops a break or a placement.
 The first user is the Fluid Tank (`TransmitterWorld.blockDataHooks`): `tankData` is `{ fluid,
 amount }` while it holds anything (an empty tank drops a plain item that stacks with new ones);
-`restoreTank` fills the placed tank (whole mB, at most its capacity, known fluids only) and marks
-it dirty, so its Tanks record follows the edit to clients.
+`restoreTank` fills the placed tank (whole mB, at most its capacity, fluids tanks carry only:
+`Fluids.carriable`) and marks it dirty, so its Tanks record follows the edit to clients. Machines
+keep their energy, their kind's `keep` fields and every fluid tank the same way
+(`MachineWorld.blockDataHooks`, `Machines.save` / `restore`).
+
+## Fluids (`Fluids/`, server `Behaviours/Fluid`, `Players/Burning`)
+
+Water, lava, oil and fuel. Everything that holds or tells fluids apart asks Shared/Fluids instead
+of naming water: blocks, buckets, Fluid Tanks and pipes, machines' tanks, the protocol, movement,
+item physics, burning, the view from inside a fluid, sounds, WAILA and JEI.
+
+**The registry** (`Fluids`, its data in `Fluids/FluidList`). Fluid ids are u8 list positions and
+append only (they are sent and saved in items): 0 none, 1 water, 2 lava, 3 oil, 4 fuel (`COUNT`).
+A record holds its BlockList group (`name`: the blocks <name>, <name>Flow1..7 and <name>Falling),
+its blocks (`source`, `caveSource`), full bucket (`bucket`), `color`, `light`, movement (`physics`
+"water" or "lava": the branch of Minecraft's LivingEntity.travel and the fluid tag it belongs to;
+`drag`, `push`, `swim`), harm (`damage` every `damageInterval` ticks, `burnSeconds`,
+`extinguishes`), `furnaceFuel`, `carriable` (all four), fog (`fogColor`, `fogStart`, `fogEnd`) and
+bucket sounds (`fillSound`, `emptySound`). Lookups: `get`, `name` ("Empty" for 0), `find`,
+`isValid`, `ofBlock` and `blockLut` (u8 per block, every level and the cave twins: ~7 ns read
+directly, ~90 ns through `ofBlock`, interpreted), `isSource` (what an empty bucket takes, twins
+included), `sourceOf` (what a bucket pours: never a twin), `caveSourceOf`, `bucketOf`, `ofBucket`
+(0 for the empty Bucket) and `carriable`. FluidList is plain data that Items and
+Crafting/Smelting read; the registry requires Blocks and Items and checks at load that every
+fluid group of BlockList is a fluid here, with this colour and light, and that every fluid has a
+bucket item of its own.
+
+| Fluid | Slope, drop off, infinite, tick | Light | Moves like (drag, push)   | Harm                         | Fog (blocks)    | Furnace       |
+| ----- | ------------------------------- | ----- | ------------------------- | ---------------------------- | --------------- | ------------- |
+| Water | 4, 1, yes, 5                    | 0     | water (0.8, 0.014), swims | puts burning out             | -8..96 x vision | -             |
+| Lava  | 2, 2, no, 30 (flows 3)          | 15    | lava (0.5, 0.0023)        | 4 every 10 ticks, burns 15 s | 0.25..1         | bucket 20 000 |
+| Oil   | 2, 1, no, 20 (flows 7)          | 0     | lava (0.5, 0.0023)        | -                            | 0..2            | -             |
+| Fuel  | 4, 1, no, 5 (flows 7)           | 0     | water (0.8, 0.014), swims | -                            | -8..32          | -             |
+
+**Blocks.** BlockList's `fluid(group, spec, tickDelay)` makes a group's nine blocks with one
+appearance: lava Neon orange, light 15 in every level; oil nearly black glass that barely shows
+through and shines; fuel translucent amber. Then `caveFluid` adds the cave twins CaveLava and
+CaveOil (see Items and inventories: Cave twins), and Obsidian follows. The fluid blocks are 167 to
+195 and Obsidian 196 (ids are list positions: append only).
+
+**Flow** (`Behaviours/Fluid`; `RULES` per group: slope distance, drop off, infinite sources and
+whether what it washes away burns; the tick delay is BlockList's). Every group runs water's
+machinery (FlowingFluid.getSpread with its own slope distance, see Movement: Fluids and the
+player) and must have rules (a group without them fails at load). Different fluids never flow into
+each other; only lava and water meet, as in Minecraft 1.20.1 (LiquidBlock.shouldSpreadLiquid,
+LavaFluid.spreadTo):
+- lava with water above it or beside it (not below) hardens: a source (its cave twin too) into
+  obsidian, flowing or falling lava into cobblestone. Minecraft does it the moment the water
+  arrives; here the neighbour change schedules the lava's tick 1 tick later instead of 30;
+- lava pouring down into water (any level) turns that water into stone;
+- each hisses (LiquidBlock.fizz: `block.lava.extinguish`, played by the server).
+
+Lava burns what it washes away (torches and plants: no drop, a hiss;
+LavaFluid.beforeDestroyingBlock); water, oil and fuel drop it. A cave twin is a source of its group
+in every way, and what flows out of one is ordinary fluid. Generated lava and oil are sources at
+rest until something next to them changes. From one source on flat ground (interpreted): water
+covers 113 cells and settles in 2 s, lava 25 in 6 s, oil 113 in 8 s. Left out: lava's random
+slower spread, lava looking through water for its way down, fire and basalt.
+
+**Burning** (`Players/Burning`, pure, tested in LavaOilServer): Minecraft 1.20.1's Entity.baseTick
+(burning, lavaHurt), LivingEntity.hurt's cooldown and ItemEntity's health, with each fluid's
+record.
+- `touching(getBlock, box)`: a bit per fluid id reaching into a box (deflated by 0.001, as
+  Minecraft does): a fluid cell overlapping it whose surface (the whole cell when the same fluid is
+  above, else its level's height) is at or above the box's bottom. Unloaded cells touch nothing.
+- Players (`tickPlayer`; Players/Characters runs it at 20 Hz on the standing box at the feet, as the
+  server can't see the pose, against loaded blocks): a fluid that `extinguishes` (water) puts
+  burning out (entity.generic.extinguish_fire); burning costs Fluids.BURN_DAMAGE (1) every
+  BURN_INTERVAL (20) ticks, not while in lava, through armor; a fluid that hurts (lava) sets
+  burning for its `burnSeconds` (15 s, 300 ticks) and takes its `damage` (4), softened by armor
+  (Items.damageAfterArmor: lava's damage type doesn't bypass armor, so full diamond takes the 4
+  down to 0.96). Hurts follow LivingEntity.hurt's cooldown (10 ticks: only a bigger hurt lands,
+  and only by the difference), so lava takes 4 every 10 ticks, and a player who leaves it burns 1
+  every 20 ticks for 15 s (the first under lava's cooldown) unless water puts it out. It also
+  says whether a lava hurt landed (before armor: not under the cooldown, not in creative or
+  spectator), when Characters plays the sizzle (entity.generic.burn, Entity.lavaHurt), each sound
+  with its own volume and pitch. Creative and spectator players (GameMode.invulnerable) never
+  burn: their burning is put out at once. Characters sets the character attribute
+  `IceVoxelOnFire` while a player burns (client Player/BurningView), and a new character starts
+  out of the fire.
+- Items (`tickItem`; server Entities/EntityWorld): ItemEntity's 5 health with no cooldown. Lava
+  takes 4 a tick and sets burning, so an item touching lava for a tick is gone the next, with
+  entity.generic.burn at each lava hurt (EntityWorld's `burnt`, played by Entities). Nothing is
+  fire resistant (there is no netherite).
+
+**Buckets.** The Lava, Oil and Fuel Buckets (ItemList; full buckets stack to 1, the Water Bucket's
+model in the fluid's colour) carry their fluids as the Water Bucket does: an empty Bucket takes any
+carriable source, twins included (`Fluids.isSource`), a full one pours the ordinary source
+(`Fluids.sourceOf`), and both work on Fluid Tanks and machines' tanks (see Mekanism pipes: On the
+server). Each fluid's bucket sounds are its record's (lava and oil the thicker
+item.bucket.fill_lava and empty_lava, water and fuel the plain ones). A Lava Bucket burns 20 000
+ticks in a furnace and leaves the Bucket in the fuel slot (`Items.craftingRemainder`); oil and
+fuel are no furnace fuel.
+
+Nobody spawns in lava, oil or fuel or next to lava (`SpawnUnsafeBlocks`: `Body` names the four
+fluids, which covers their levels and twins; `Hazards` lava).
 
 ## Just Enough Items (`Ui/Jei/`)
 
@@ -1911,13 +2204,29 @@ on the input `Ui/Screens` hands it before anything else.
   put;
 - smelting: `Smelting.recipes()`, one per line of `Recipes.smelting` (a tag stays one recipe),
   200 ticks each;
-- fuel: `Smelting.fuels()`, the burn time shown as "Burns N items" (ticks / 200).
+- fuel: `Smelting.fuels()`, the burn time shown as "Burns N items" (ticks / 200; a Lava Bucket
+  100);
+- refining, heating and combustion, from the machines' numbers (`Machines.info`): the Oil
+  Refinery's bucket of oil into a bucket of fuel (100 ticks, 20 kJ at 200 J/t: "5 s, 20 kJ",
+  "200 J/t"), and a bucket burnt in the Heat Generator (a mB of lava 20 ticks: 20 000 ticks at
+  200 J/t, "Makes 4 MJ", "200 J/t for 1000 s") and in the Combustion Generator (a mB of fuel 4
+  ticks: 4 000 ticks at 2.5 kJ/t, "Makes 10 MJ", "2.5 kJ/t for 200 s"). Their entries carry
+  `fluidInputs`, `fluidOutput` (fluid stacks: a Shared/Fluids id and mB), `energy` and `power`
+  (`fluidTexts`). A fluid stack is drawn as a slot of the fluid's colour, its name and "1,000 mB"
+  on hover (`RecipeView.fluidAt`); JeiLayout draws refining as the oil, an arrow filling over the
+  bucket's time, the fuel and two lines of text, and the generators like a fuel, the fluid stack
+  under the flame (150 x 36 each). The item list shows items only; in lookups a fluid stands for
+  its bucket and its block (`fluidItems`), so "Show uses" of an Oil Bucket or of Oil lists
+  refining, and "Show recipes" of a Fuel Bucket too.
 
-`recipes(item)` are the entries that make the item, `uses(item)` those that take it (in any cell,
-as a smelting input, as a fuel). A catalyst, the block a category's recipes are made in
-(`CATALYSTS`: the crafting table for crafting, the furnace and the Electric Furnace for smelting, the furnace and the Heat Generator for fuel), also uses every
-entry of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace
-lists them. Both come grouped by category in that order, without the empty ones.
+`recipes(item)` are the entries that make the item (crafting, smelting, refining), `uses(item)`
+those that take it (in any cell, as a smelting input, as a fuel, as a fluid). A catalyst, the
+block a category's recipes are made in (`CATALYSTS`: the crafting table for crafting, the furnace
+and the Electric Furnace for smelting, the furnace and the Heat Generator for fuel, the Oil
+Refinery for refining, the Heat Generator for heating, the Combustion Generator for combustion),
+also uses every entry of its categories, after its own uses, as JEI's "Show uses" on a crafting
+table or furnace lists them. Both come grouped by category in that order (crafting, smelting,
+fuel, refining, heating, combustion), without the empty ones.
 
 **Screens.** While an inventory screen is open:
 - The list sits right of the 176 px panels at their GUI scale (`JeiLayout.list`): up to 9 columns
@@ -1966,9 +2275,10 @@ closes the view. A fuzz test plans and applies hundreds of random transfers.
 ## Mekanism pipes (`Transmitters/`)
 
 Mekanism 10's transmitters (Minecraft 1.20.1) for what the game has: Logistical Transporters and
-the Restrictive Transporter (items), Mechanical Pipes (water), Fluid Tanks, the Configurator and
-Minecraft's buckets. Universal Cables are described in Electricity and machines; Pressurized Tubes
-and Thermodynamic Conductors are out of scope: there is no gas or heat.
+the Restrictive Transporter (items), Mechanical Pipes (every fluid of Shared/Fluids: water, lava,
+oil and fuel), Fluid Tanks, the Configurator and Minecraft's buckets. Universal Cables are described
+in Electricity and machines; Pressurized Tubes and Thermodynamic Conductors are out of scope: there
+is no gas or heat.
 
 **Blocks and items.** BlockList gives transmitters `transmitter = { kind = "item" | "fluid", tier,
 restrictive? }` and tanks `tank = { tier, capacity }`; the numbers per tier are Mekanism's
@@ -1995,13 +2305,14 @@ transporters and avoid restrictive ones unless there is no other way.
   them, as through lanterns) but `obstruct`, so none is placed inside a player and falling sand
   lands on them. Hardness 1, pickaxe, metal sounds; they drop themselves.
 - Fluid tanks are solid shaped cubes (steel plates, posts in the tier's colour, glass sides) and
-  sturdy (`sturdy = true` makes a solid shaped block hold torches). Breaking one loses its water.
-- Items: the Configurator (1 per slot), Bucket (16) and Water Bucket (1).
+  sturdy (`sturdy = true` makes a solid shaped block hold torches). Breaking one in creative loses
+  its fluid; a survival break keeps it in the item (see Item data).
+- Items: the Configurator (1 per slot), Bucket (16) and the Water, Lava, Oil and Fuel Buckets (1).
 
 **Sides and modes.** Sides are Minecraft's Direction ordinal: 0 Down, 1 Up, 2 North (-Z), 3 South
 (+Z), 4 West (-X), 5 East (+X); side s of a block at p faces p + offset(s), and opposite(s) is s
 xor 1. Each side of a transmitter has Mekanism's ConnectionType, which the Configurator cycles
-NORMAL -> PUSH -> PULL -> NONE: NORMAL and PUSH may hand items or water to an acceptor (`outputs`),
+NORMAL -> PUSH -> PULL -> NONE: NORMAL and PUSH may hand items or fluid to an acceptor (`outputs`),
 PULL takes from it (`pulls`) and never gives, NONE cuts the side; NORMAL and PULL transporter sides
 take what a furnace or machine pushes out (`receives`, Mekanism's canReceiveFrom). The six modes
 pack into 16 bits, 2 a side, side 0 lowest (0 = all NORMAL, at most 4095), which is how they are
@@ -2014,7 +2325,9 @@ canConnectMutual), shared by the client's arms and the server's networks:
   and, for transporters, their colours are compatible (either is uncoloured, or both are the
   same; pipes have no colour);
 - a transmitter connects to an acceptor of its kind (a block with `container` slots for items, a
-  fluid tank for water) unless its side is NONE;
+  Fluid Tank or a machine with fluid tanks (`Machines.hasTanks`) for pipes, an energy block for
+  cables) unless its side is NONE. The rule knows no fluids: two pipes holding different fluids
+  still connect (and draw a joint), but their networks stay apart (On the server, below);
 - nothing else connects. `connections` answers all six sides of a position as two bit masks
   (transmitters, acceptors) from block and state lookups, so both sides get the same answer.
 An item pulled into a transporter takes its colour and only enters transporters that are
@@ -2039,9 +2352,13 @@ gives with their totals (Mekanism's TransitRequest) and `extract` takes up to n 
 stack at most. They are pure (new slot tables out, inputs untouched), so the server simulates a
 delivery with the same calls it applies. A pipe's fill travels as a byte (`fillLevel`: 0 empty, at
 least 1 with anything in it, 255 full).
-A machine reaches the slots its kind gives each face (`Machines.insertSlots` / `extractSlots`):
-the Heat Generator takes fuel through every face and gives nothing; the Electric Furnace takes
-what smelts and gives its results through every face (Core's defaults).
+A machine reaches the slots its kind gives each face (`Machines.insertSlots` / `extractSlots`),
+and a slot may give only some items (its `takes`, `Machines.mayTake`: Mekanism's canExtract, which
+only automation obeys; the hand takes anything): the Heat Generator takes fuel through every face
+and gives only what its fuel slot would not take in, the empty Bucket a poured Lava Bucket leaves
+(Mekanism's FluidFuelInventorySlot.forFuel), so a line feeding it Lava Buckets, or coal after one,
+never jams on the bucket and never pulls fuel back out; the Electric Furnace takes what smelts and
+gives its results through every face (Core's defaults).
 Upgrade slots (`Machines/Upgrades`) are reached through no face, so a machine with nothing else (the
 Solar Panel) is no inventory and transporters don't connect to it.
 
@@ -2073,7 +2390,11 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
   left; queued pipes are flood filled, at most 4096 visited per tick, the rest carried over while
   the old networks keep working. A finished fill becomes one network that takes from each old
   network the share of its buffer its pipes held (by capacity), so merging adds buffers and
-  splitting shares them; a broken pipe loses its share, a broken tank its water.
+  splitting shares them; a broken pipe loses its share, a broken tank its fluid. A buffer holds one
+  fluid: a fill never takes in pipes whose network holds another fluid than the pipes it has
+  taken in (Mekanism's MechanicalPipe.isValidTransmitter), so fluids never mix, and such networks
+  stay apart until one is empty and a later fill joins them (a fill carried over between ticks
+  that meets two anyway keeps the largest share's fluid; the rest is lost).
 - **Items** (`Transport`, Mekanism's LogisticalTransporterBase / TransporterPathfinder):
   - Pulling: a transporter with PULL sides on inventories, or NORMAL sides on furnaces and
     machines that push their results out (`pullers`, worked out with its links), pulls through
@@ -2104,12 +2425,30 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
     MachineWorld's step for machines with output slots, after their tick. Both containers'
     viewers get a snapshot (`containerChanged`) and the furnace is ticked again. Blocks are read as
     the pipes read them (peekBlock, else the edit list), never generating terrain.
-- **Water** (`Fluids`): each tick, every PULL side on a tank takes up to the pipe's pull amount
-  into the buffer (one fluid, up to the pipes' capacity); then the buffer is split evenly over the
-  tanks on NORMAL / PUSH sides with room, each tank once, smallest room first.
+- **Fluids** (`Fluids`; water, lava, oil and fuel). Each tick every PULL side takes up to the pipe's
+  pull amount (only the buffer's fluid while it holds any, up to the pipes' capacity) from a Fluid
+  Tank, or from a machine's output tanks (`Machines.extractFluid`; input tanks never give to pipes);
+  then the buffer is split evenly over the acceptors on NORMAL / PUSH sides with room for its fluid
+  (Fluid Tanks empty or holding it, machines whose input tanks take it: `fluidRoom` / `insertFluid`,
+  the first input tank taking it first), each once, smallest room first; the whole mB left over by
+  rounding go to the last ones, and what nobody takes stays. Machines with output tanks push them
+  out every tick after their tick (`TransmitterWorld.ejectFluid`, run by MachineWorld; Mekanism's
+  ejector at `Machines.FLUID_EJECT_RATE`, 1 024 mB/t), split evenly the same way over the Fluid
+  Tanks next to them that take it and the pipes next to them whose side receives (NORMAL, PULL),
+  whose buffer is empty or holds that fluid and whose network leads it somewhere (`leadsSomewhere`:
+  an acceptor on a NORMAL or PUSH side that takes it; cached per network and tick). Without that the
+  pipe feeding a machine would fill with what the machine makes and stop feeding it (the refinery's
+  fuel in its oil line): Mekanism avoids it with per-side configuration, which blocks here lack,
+  having no facing. For the same reason the ejector skips a Fluid Tank next to it that a pipe PULLs
+  from into a network leading that fluid nowhere, or into one not built yet (`suppliesElsewhere`:
+  the oil tank right next to the refinery, which, once empty, would take fuel that its oil line then
+  pulls and never delivers, and the oil would never move again). Never straight into another
+  machine. The pull phase is Mekanism's MechanicalPipe.pullFromAcceptors as it is: it pulls whatever
+  a tank holds into an empty buffer, which then waits in the pipe.
 - **Replication.**
-  - Transmitters / Tanks records: a chunk's non-default ones go to a player right after its edit
-    list (ServerNet's `chunksSent` rule). Changes go each frame to players within 192 blocks
+  - Transmitters / Tanks records (a pipe's fill byte and the fluid id its network holds; a tank's
+    fluid id and mB): a chunk's non-default ones go to a player right after its edit list
+    (ServerNet's `chunksSent` rule). Changes go each frame to players within 192 blocks
     sideways (to every player not yet seen in the world), compared with what was last sent; pipe
     fills and tank contents go at most every 5 ticks.
   - Transport: items are tracked per player within 64 blocks (gone beyond 72, checked every
@@ -2122,15 +2461,24 @@ flush, at 20 ticks a second (a fixed step catching up at most 4 ticks a frame).
   - Configurator: cycles the clicked side (a same-kind transmitter beyond it matches, so a cut
     joint is joined again from either end; Mekanism changes only the clicked side), or sneaking on
     a transporter its colour; Mekanism's message in the chat and a click sound.
-  - Bucket: a water source becomes air (Minecraft's createFilledResult: a stack keeps the rest and
-    the water bucket goes into the inventory, else is thrown; creative keeps its bucket and gets
-    one water bucket at most). A tank with 1000 mB loses it (creative gets nothing, as in
-    Mekanism).
-  - Water Bucket: a tank with room for 1000 mB, else a water source in the clicked block if
-    replaceable or the block beyond its side; what the water replaces drops what it drops by
-    itself (`UseRules.pour`: short grass nothing, a dead bush a stick); survival gets the empty
-    bucket back.
-  - Sneaking skips tanks. Nothing is predicted: the snapshot, edits and records bring the results.
+  - Bucket: a carriable fluid's source, its cave twin too (`Fluids.isSource`), becomes air and the
+    bucket that fluid's (Minecraft's createFilledResult: a stack keeps the rest and the full bucket
+    goes into the inventory, else is thrown; creative keeps its bucket and gets one of that fluid at
+    most). Not sneaking: a Fluid Tank holding 1000 mB, or a machine with an output tank, else an
+    input tank, holding that much (`Machines.fillBucket`), loses it (creative gets nothing, as in
+    Mekanism). The fluid's own fill sound (item.bucket.fill_lava for lava and oil), else the plain
+    one.
+  - Full buckets (Water, Lava, Oil, Fuel): not sneaking, a Fluid Tank with room for 1000 mB of that
+    fluid, or a machine's first input tank taking it with room for all of it
+    (`Machines.pourBucket`); all or nothing. Else the fluid's source (never a twin) in the clicked
+    block if replaceable or the block beyond its side; what it replaces drops what it drops by
+    itself, lava too (`UseRules.pour`: short grass nothing, a dead bush a stick;
+    BucketItem.emptyContents); survival gets the empty bucket back. Block updates take it from
+    there (lava meeting water hardens).
+  - Sneaking skips tanks and machines. `UseRules.fillBucket` / `emptyBucket` work a use out
+    against a BucketEnv (the world, the pipes' tanks, the machines' containers; pure, tested) and
+    ItemUse applies it. Nothing is predicted: the snapshot, edits and records bring the results;
+    what a machine's tank gained or lost reaches its viewers with the next machine step.
 
 ### Mekanism pipes on the client (`Rendering/TransmitterRenderer`, `Rendering/TransmitterModel`)
 
@@ -2143,9 +2491,12 @@ drawn by TransmitterRenderer within 64 blocks of the camera, from boxes Transmit
   plate on an acceptor; a Neon band on an acceptor's arm whose side is PUSH (orange) or PULL
   (blue) (between transmitters those modes act as NORMAL and Mekanism draws them so); a coloured
   transporter's tint cube and dyed arm glass;
-- water: a pipe's fill byte (its network's) as a level in the core and sideways arms, the arm
-  down full whenever there is water, the arm up only from 95 %; a tank's amount / capacity from
-  its bottom plate.
+- fluid: a pipe's fill byte (its network's) as a level in the core and sideways arms, the arm
+  down full whenever there is any, the arm up only from 95 %; a tank's amount / capacity from
+  its bottom plate. Each fluid in its colour (`fluidColour`: the record's `color`, from the
+  Transmitters record's `fluidId` or the Tanks record's fluid; water's for a record without one),
+  water, oil and fuel as translucent "water" boxes, lava as glowing "molten" (Neon) ones
+  (`fluidKind`: a fluid that gives light).
 Positions come from edits only: a chunk's transmitters and tanks are read from its edit list when
 its data is attached and followed through block changes (ClientWorld `onChunkLoaded`,
 `knownEdits`, `onBlockChanged`). Records are kept while a chunk's edit list is known or
@@ -2157,7 +2508,7 @@ the default state and sends no record); when this player's own predicted break t
 Cells are decorated only while their chunk is shown (the streamer's node), redrawn only when
 they, a neighbour or their state change (at most 64 a frame, and only when the boxes' signature
 changed), from pooled parts (a template per kind and colour; a redraw keeps the cell's parts of
-the same look, so a pipe's changing water level only resizes them), at most 4000 parts.
+the same look, so a pipe's changing fluid level only resizes them), at most 4000 parts.
 
 Items in transit: `route` turns an Add (block, progress, speed, server start time, path) into
 per-block exit times, each block crossed at its transporter's speed; `position` follows it every
@@ -2175,14 +2526,24 @@ Interaction: items that are no block send `UseItem`, unpredicted, once per press
 the server would act. The Configurator (on transmitters; sneaking only on transporters) sends the
 side `TransmitterModel.pickSide` finds: the arm the ray hits, else the core face it enters, else
 the cell face it hit; sneaking is a flag. The empty Bucket casts its own ray that also stops at
-water sources (Minecraft's Fluid.SOURCE_ONLY) and sends that water cell or a tank (not when
-sneaking); the Water Bucket sends a tank (not when sneaking) or the clicked block when the cell
-the server would fill is replaceable. A block with a menu still opens first unless sneaking.
+the sources of every carriable fluid, cave twins too (`Fluids.isSource`, Minecraft's
+Fluid.SOURCE_ONLY), and sends that cell, or a Fluid Tank or a machine with tanks (not when
+sneaking); a full bucket (`Fluids.ofBucket`) sends a tank or machine (not when sneaking) or the
+clicked block when the cell the server would fill is replaceable. A block with a menu still opens
+first unless sneaking, but for a machine with fluid tanks clicked with a bucket that would act on
+them (`Interaction/TankUse.acts`, pure, tested): it asks the server's question of the machine's
+kind and of the tanks in its last Machines record (`TransmitterRenderer.machine`; without a
+record, the server's default: every tank empty). A full bucket acts when an input tank takes its
+fluid (`Machines.bucketTank`) and has room for all 1000 mB (empty or holding that fluid); an
+empty Bucket when some tank holds 1000 mB of a carriable fluid. Otherwise the screen opens, as
+Mekanism's BlockFluidTank opens its GUI when handleTankInteraction moves nothing, so a Fuel
+Bucket on a full Combustion Generator, or an empty Bucket on a fresh machine, opens it.
 
 WAILA asks TransmitterRenderer (`state`, `tank`, `connections`, `itemsIn`, `network`: a cached
 walk of the connected transmitters) and BlockInteraction.targetSide: "Side: Pull", a
-transporter's colour and items, "Water: ~n / m mB" for a pipe (its network's fill byte times the
-capacity of the pipes the client sees connected), "Water: n / m mB" for a tank; with F3 the
+transporter's colour and items, "Lava: ~n / m mB" for a pipe (the fluid its network holds; its
+fill byte times the capacity of the pipes the client sees connected; "Empty: 0 / m mB"),
+"Lava: n / m mB" for a tank; with F3 the
 tier's numbers, packed modes and each side's, colour and fill byte, connected sides and the
 network size. Item icons draw a block's `icon` (a transmitter's core and two arms) box by box.
 
@@ -2205,54 +2566,88 @@ changes links is flagged in `energyDirty` for the energy networks.
 blocks with `machine`). A machine block has `machine = { kind }` and `energy = { capacity, input?,
 output? }`; output only makes it a producer, input only a consumer, both storage (`Machines.role`).
 A kind (`Core.define`) gives its slots (panel position, what each takes, outputs, limits,
-transporter faces and an outline shown while empty, `ghost`), data fields, fields kept in the item,
-its panel, its server tick, a status line, optional rate overrides and an optional state field: a
-code (0..255, `Machines.state`) saying why it is not working, which Machines records carry and
-`status` gets as `view.state`. Its tick gets a context (`TickContext`): the block, its energy spec
-and position, the server's day time (`dayTime`, World/TimeOfDay) and whether a cell sees the sky
-(`sky(x, y, z)`, below). Its contents are a container of kind "machine" (Types.KINDS) with the
-kind's slots and f64 `data` (at most 16): a header every machine shares, 1 energy, 2 capacity, 3
-input and 4 output (what the network moved last tick), 5 rate (made +, used -), 6 active, then the
-kind's fields. Inventory/Menu asks Machines for a machine's slot rules, limits and outputs, and
-shift-clicks from the inventory into the slots that take the item in one pass (Mekanism's
-MekanismContainer; only when none takes anything does it move between the inventory and the hotbar).
-A machine with slots transporters reach is an inventory for them (Transmitters/Inventories), through
-the faces its kind gives each slot (by default inputs take items through every face and outputs give
-them out through every face); one whose slots no face reaches (the Solar Panel: upgrade slots only)
-is none. A machine with output slots pushes what they hold out on its own (Mekanism's ejector,
-every 10 ticks, into the transporters and chests next to it: Pushing results out, above). Energy
-is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences are exact;
-`produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta: every
-recipient gets the same share, those that take less get all they take and the rest is shared again,
-smallest limits first.
-A kind's `lines(view)` gives up to `MAX_LINES` (4) more panel lines under its status line, where
-its panel's `lines = { x, y }` puts the first (`Machines.lines`; one every 12 pixels,
-`MenuLayout.LINE_HEIGHT`, as many as fit the panel).
+transporter faces, what transporters may take out, `takes`, and an outline shown while empty,
+`ghost`), data fields, fields kept in the item, fluid tanks (`tanks`, below), its panel, its server
+tick, a status line, optional rate overrides, numbers for JEI (`info`, `Machines.info`) and an
+optional state field: a code (0..255, `Machines.state`) saying why it is not working, which Machines
+records carry and `status` gets as `view.state`. Its tick gets a context (`TickContext`): the block,
+its energy spec and position, the server's day time (`dayTime`, World/TimeOfDay) and whether a cell
+sees the sky (`sky(x, y, z)`, below). Its contents are a container of kind "machine" (Types.KINDS)
+with the kind's slots and f64 `data` (at most 16): a header every machine shares, 1 energy, 2
+capacity, 3 input and 4 output (what the network moved last tick), 5 rate (made +, used -), 6
+active, then the kind's fields, then its tanks. Inventory/Menu asks Machines for a machine's slot
+rules, limits and outputs, and shift-clicks from the inventory into the slots that take the item in
+one pass (Mekanism's MekanismContainer; only when none takes anything does it move between the
+inventory and the hotbar). A machine with slots transporters reach is an inventory for them
+(Transmitters/Inventories), through the faces its kind gives each slot (by default inputs take items
+through every face and outputs give them out through every face); one whose slots no face reaches
+(the Solar Panel: upgrade slots only) is none. A machine with output slots pushes what they hold out
+on its own (Mekanism's ejector, every 10 ticks, into the transporters and chests next to it: Pushing
+results out, above). Energy is kept in multiples of 1/1024 J (`QUANTUM`), so sums and differences
+are exact; `produce` and `use` keep it so, and `share` is Mekanism's even split in whole quanta:
+every recipient gets the same share, those that take less get all they take and the rest is shared
+again, smallest limits first. A kind's `lines(view)` gives up to `MAX_LINES` (4) more panel lines
+under its status line, where its panel's `lines = { x, y }` puts the first (`Machines.lines`; one
+every 12 pixels, `MenuLayout.LINE_HEIGHT`, as many as fit the panel).
+
+**Fluid tanks** (`Machines/Core`; Mekanism's BasicFluidTank.input / output). A kind's `tanks` each
+have a `name` (a data key), a whole `capacity` (mB), the `fluids` they take (Shared/Fluids ids,
+carriable ones) and a `role`, "input" (pipes and full buckets fill it, the kind's tick drains it)
+or "output" (the tick fills it, pipes and empty buckets drain it); `define` refuses a bad name or
+one taken, a capacity that is not whole, a bad role, a fluid that is not carriable or listed
+twice, and data past 16 values. Their amounts follow the kind's fields in the data, under each
+tank's name (whole mB); a tank taking several fluids also keeps its fluid id under "<name>Fluid"
+(0 while empty). `tick` keeps them whole, in range and of a fluid they take, and `save` /
+`restore` keep them in the item like energy (the tooltip reads "Lava: 5,000 mB"). The rules are
+Mekanism's, the same through every side (blocks have no facing): pipes fill input tanks that take
+their fluid (`insertFluid`, in tank order) and drain output tanks (`extractFluid`; inputs never
+give to pipes), and a machine pushes its outputs into the pipes and Fluid Tanks around it (the
+server's ejector, up to `FLUID_EJECT_RATE`, 1 024 mB/t, Mekanism's fluidAutoEjectRate); a full
+bucket pours its 1000 mB into the first input tank with room for all of it (`pourBucket`;
+`bucketTank` names it), and an empty one takes 1000 mB from the first output tank holding that
+much, else from the first input tank that does (`fillBucket`, Mekanism's MANUAL access). A kind's
+tick uses `tankAmount`, `tankRoom`, `tankInsert` and `tankExtract`; `takesFluid`, `givesFluid`,
+`fluidRoom`, `hasTanks`, `inputTanks` and `outputTanks` answer for the pipes, and `tankContents`
+lists what each holds (Machines records, WAILA). Panels draw a gauge per tank with a `gauge`
+(`gauges`: an 18 x 60 frame by default, Mekanism's GaugeType.STANDARD, the fluid filling the
+inside's 58 rows to round(amount / capacity x rows), `gaugeLevel`; `tankLine` the text).
+`showActive` is Mekanism's setActive with its 60 tick blockDeactivationDelay
+(`DEACTIVATION_DELAY`), for kinds with an `activeDelay` field (the Electric Furnace, the Oil
+Refinery): on at once, off only after 60 ticks stopped, so a machine on too little power glows
+steadily.
 
 **On the server** (`server/Machines/`). `MachineWorld` (pure) keeps a machine per machine block
 (`blockChanged`, chained onto WorldServer.onChanged after Inventories and Transmitters) and
 creates its container in Players/Containers at once, so a machine works before anyone opens it;
 machine containers are never forgotten while their block stands, and a broken machine's slots
-drop through Inventories like a chest's. Each `step` (20 a second, Machines.update right after the pipes): queued network work, every
-machine's kind tick (`Machines.tick`: afterwards, even when the kind's tick errors, which is reported
-once per kind, the data holds no NaN and energy is within 0..capacity in whole quanta), then
-`EnergyNet.solve` (a kind whose `rates` override errors moves nothing). `EnergyNet` (pure) joins
-cables (`links`), cables and machines (`acceptors`) and directly adjacent machines into networks;
-positions whose links changed dissolve their network and their neighbours' and are flood filled
-again, at most 4096 a tick (the rest carries over and waiting positions move nothing meanwhile). A
-change at or next to a position the fill in progress has visited starts it over; one elsewhere
-leaves it going, so players building elsewhere never starve a big network's fill. Per network and tick: producers' supply
-(their energy, at most their output rate) goes to consumers' demand (their room, at most their
-input rate), at most the throughput (the cables' capacities summed, unlimited without cables),
-split evenly both ways; what producers still have charges storage up to its input rates, and
-what consumers still need is covered by storage discharging up to its output rates, within the
-throughput left. Storage never charges storage. What is taken is exactly what is given.
+drop through Inventories like a chest's. Each `step` (20 a second, Machines.update right after the
+pipes): queued network work, every machine's kind tick (`Machines.tick`: afterwards, even when the
+kind's tick errors, which is reported once per kind, the data holds no NaN and energy is within
+0..capacity in whole quanta), a machine with output tanks pushing them out after its tick
+(`TransmitterWorld.ejectFluid`, see Mekanism pipes: Fluids), then `EnergyNet.solve` (a kind whose
+`rates` override errors moves nothing). `EnergyNet` (pure) joins cables (`links`), cables and
+machines (`acceptors`) and directly adjacent machines into networks; positions whose links changed
+dissolve their network and their neighbours' and are flood filled again, at most 4096 a tick (the
+rest carries over and waiting positions move nothing meanwhile). A change at or next to a position
+the fill in progress has visited starts it over; one elsewhere leaves it going, so players building
+elsewhere never starve a big network's fill. Per network and tick: producers' supply (their energy,
+at most their output rate) goes to consumers' demand (their room, at most their input rate), at most
+the throughput (the cables' capacities summed, unlimited without cables), split evenly both ways;
+what producers still have charges storage up to its input rates, and what consumers still need is
+covered by storage discharging up to its output rates, within the throughput left. Storage never
+charges storage. What is taken is exactly what is given.
 
 Viewers of a machine's window get a snapshot at once when its slots change and every 2 ticks
-while only its data moves (as furnaces). `Machines` records (energy, capacity, input, output, rate, active, the kind's state code) go to players within 192 blocks sideways when they change, at most 4 a second per
-machine, and with a chunk's edit list when not in the default state (empty, idle, the block's capacity, state 0). Mekanism's sustained data (`MachineWorld.blockDataHooks`): a survival break keeps the
-energy and the kind's `keep` fields in the item's data (`Machines.save`; the creative cube keeps
-nothing), and placing that item puts them back (`Machines.restore`, at most the capacity).
+while only its data moves (as furnaces); the data is compared with what it was after the last
+step, so fluid that pipes or buckets put into a machine's tanks between two steps counts too.
+`Machines` records (energy, capacity, input, output, rate, active, the kind's state code and its
+tanks' contents, `Machines.tankContents`) go to players within 192 blocks sideways when they
+change (a tank alone changing too), at most 4 a second per machine, and with a chunk's edit list
+when not in the default state (empty, idle, the block's capacity, state 0, every tank empty), so
+a machine holding only fluid is sent. Mekanism's sustained data (`MachineWorld.blockDataHooks`): a
+survival break keeps the energy and the kind's `keep` fields in the item's data (`Machines.save`;
+the creative cube keeps nothing), and placing that item puts them back (`Machines.restore`, at most
+the capacity).
 
 **The sky** (`MachineWorld.seesSky`, `Machines/SkyCheck`). A kind asks whether a cell sees the sky
 straight up with its context's `sky(x, y, z)`: nothing opaque (`Blocks.isOpaque`: full cubes,
@@ -2275,23 +2670,33 @@ with `getBlock`.
 the kind's, else "Producing x/t", "Using x/t", "Charging" / "Discharging"), and for cables
 "Capacity: 8 kJ/t" (a side set to push or pull reads "Push (as Normal)"), with F3 details (a
 cable's network line counts the cables linked to it as the client sees them; the server's network
-may also join cables through machines). A machine's panel (MenuLayout) is its kind's: slots where it puts them (a slot with a `ghost` shows that outline while empty, as empty armor slots do: the upgrade cards'), the title centred, Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling
-from the bottom in whole rows rounded down, at least one while it holds any, red when empty
-through yellow to green when full, "stored / capacity" on hover), and the arrow, flame, status line and lines it asks for, read from the data fields it names. The panel reads the window's data without
-changing it and redraws only when a snapshot replaces it.
-Machines whose decor has a window (`TransmitterModel.hasMachineBoxes`: the Heat Generator and the Electric Furnace) are
-TransmitterRenderer cells like tanks, redrawn on each record: `machineBoxes` gives a working one
-a Neon pane over its window on each of its four sides (BlockDecor.GENERATOR_WINDOW and ELECTRIC_FURNACE_WINDOW, 0.2 px out of the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point from
-their records (Audio/Ambience).
-Batteries (`hasMachineBoxes`) are cells too: `machineBoxes` fills each side's gauge
-(BlockDecor.BATTERY_GAUGE) from the bottom with `chargeRows` of its 10 rows (the record's energy
-over capacity, rounded down, at least one while it holds any, as the panels' bar), a Neon pane
-in `Machines.energyColour` of that fill (red when nearly empty, yellow, green when full; the
-panels' energy bar and items' energy bars use the same function); the signature names the rows,
-so a battery is redrawn only when a whole row changes. A machine's item whose data holds energy
-shows an energy bar where the durability bar goes (`MenuLayout.energyItemBar`: 13 pixels x energy
-over the block's capacity, rounded down, at least 1; Mekanism rounds to the nearest pixel, uses
-0x3CFE9A and draws it on Energy Cubes only, empty ones too; `ItemIcon:set(item, count, damage,
+may also join cables through machines), and then each of a machine's tanks from its record
+("Oil: 3,000 / 10,000 mB", "Empty: 0 / 10,000 mB"; without a record, every tank empty). A
+machine's panel (MenuLayout) is its kind's: slots where it puts them (a slot with a `ghost` shows
+that outline while empty, as empty armor slots do: the upgrade cards'), the title centred,
+Mekanism's GuiVerticalPowerBar (6 x 52 at (164, 15), filling from the bottom in whole rows rounded
+down, at least one while it holds any, red when empty through yellow to green when full, "stored /
+capacity" on hover), a fluid gauge per tank with a `gauge` (Mekanism's 18 x 60 GuiFluidGauge,
+`MenuLayout.tanks`: a sunken frame, the fluid's colour filling `tankRows` of its 58 rows from the
+bottom, `Machines.gaugeLevel`, under scale marks, a long one every quarter and short ones between;
+water and fuel show a little of the frame's back through them; "Lava: 5,000 mB" and "Capacity:
+24,000 mB" on hover, `tankTooltip`), and the arrow, flame, status line and lines it asks for, read
+from the data fields it names. The panel reads the window's data without changing it and redraws
+only when a snapshot replaces it. Machines whose decor has a window
+(`TransmitterModel.hasMachineBoxes`: the Heat Generator, the Electric Furnace, the Oil Refinery and
+the Combustion Generator) are TransmitterRenderer cells like tanks, redrawn on each record:
+`machineBoxes` gives a working one a Neon pane over its window on each of its four sides
+(BlockDecor.GENERATOR_WINDOW, ELECTRIC_FURNACE_WINDOW, REFINERY_WINDOW and COMBUSTION_WINDOW, 0.2 px
+out of the face). `activeMachines(x, y, z, radius, filter)` lists the working machines near a point
+from their records (Audio/Ambience). Batteries (`hasMachineBoxes`) are cells too: `machineBoxes`
+fills each side's gauge (BlockDecor.BATTERY_GAUGE) from the bottom with `chargeRows` of its 10 rows
+(the record's energy over capacity, rounded down, at least one while it holds any, as the panels'
+bar), a Neon pane in `Machines.energyColour` of that fill (red when nearly empty, yellow, green when
+full; the panels' energy bar and items' energy bars use the same function); the signature names the
+rows, so a battery is redrawn only when a whole row changes. A machine's item whose data holds
+energy shows an energy bar where the durability bar goes (`MenuLayout.energyItemBar`: 13 pixels x
+energy over the block's capacity, rounded down, at least 1; Mekanism rounds to the nearest pixel,
+uses 0x3CFE9A and draws it on Energy Cubes only, empty ones too; `ItemIcon:set(item, count, damage,
 data)`, which Hud, InventoryScreen and the carried stack pass the stack's data to).
 
 **The Creative Energy Cube** (kind "creative"): infinite capacity and output, always full,
@@ -2299,21 +2704,43 @@ gives whatever its network takes; creative only (no recipe).
 
 **The Heat Generator** (kind "generator", `Machines/Kinds/Generator`; Mekanism Generators').
 BlockList `HeatGenerator` has `energy = { capacity = 160 000, output = 400 }`: a producer whose
-output is twice what it makes, so a network takes all of it. One fuel slot takes what
-`Smelting.fuel` burns, from every face, and gives nothing to transporters; data 7 is `burnTime`
-(ticks left of the item burning, a fraction after a part tick) and 8 `burnTotal` (its burn time,
-0 while out), both clamped to the longest fuel's burn time. Each tick it makes up to 200 J
-(Mekanism's heatGeneration; `produce`, so at most its room) and burns that share of a tick: what
-is left of the item is counted in whole energy quanta (`TICK_QUANTA` = 200 J / QUANTUM a tick),
-so a nearly full generator burns part ticks and no energy is made or lost. An item lights only
-when there is room (it is used up, both fields its furnace burn time); one that runs out partway
-through a tick lights the next, which makes the rest of the tick, and one out at the end of a
-tick lights the next at once, so neither the flame nor the output dips between items. Full, it
-keeps its item and lights nothing new. RATE is what it made, ACTIVE whether it made anything; its
-status line is "Producing 200 J/t" or "Idle". Its item keeps its energy and both burn fields
-(tooltip "Fuel: 60 s", a describer the kind adds). Mekanism's lava tank (which burns a whole
-tick's lava whenever there is any room), lava around it and the nether bonus are left out: fuel
-burns directly. JEI lists it as a fuel catalyst.
+output is above the most it makes, so a network takes all of it. One burner makes 200 J a tick
+(Mekanism's heatGeneration) while it burns, fed two ways:
+- solid fuel in its fuel slot: what `Smelting.fuel` burns and leaves nothing behind, from every
+  face, burning for its furnace burn time (a coal 320 kJ);
+- lava in its lava tank (Mekanism's TileEntityHeatGenerator lavaTank: input, 24 000 mB, its gauge
+  at (7, 13); MekanismGenerators 10.4's tankCapacity), filled by pipes and buckets (Fluid tanks,
+  above), and by Lava Buckets put in the fuel slot, poured in once all 1000 mB fit, leaving the
+  empty Bucket in the slot (Mekanism's FluidFuelInventorySlot.fillOrBurn, which gives up on a
+  stack of more than one). A mB of lava burns for LAVA_TICKS_PER_MB (20) ticks, so a bucket is
+  20 000 ticks, 4 MJ: the Lava Bucket's furnace burn time, 12.5 coal, Mekanism's own ratio (it
+  turns a solid fuel into burn time / 20 mB of lava). Its heatGenerationFluidRate (10 mB a tick, a
+  bucket in 100 ticks for 20 kJ, a sixteenth of a coal) is left out, because solid fuels here burn
+  their whole furnace time.
+What lights next: an item already burning burns out first, then a mB from the tank, then the next
+solid item (Mekanism turns items into lava only while its tank has room, so piped lava keeps it
+busy too). Transporters take out of the fuel slot, through every face, only what it would not
+take in (`takes`: the empty Bucket; never coal or a Lava Bucket), so a line feeding it never jams
+on the bucket; the hand takes anything. Every side touching lava (any level, CaveLava too:
+`Fluids.ofBlock`) adds LAVA_PER_SIDE (30) J/t (Mekanism's getBoost, heatGenerationLava), burning
+or not and with no fuel at all, and that free heat counts first: up to 180 J/t, 380 J/t in all,
+within its output. Data 7 is `burnTime` (ticks left of what is burning, a fraction after a part
+tick), 8 `burnTotal` (its burn time, 20 for a mB of lava, 0 while out), both clamped to the
+longest solid fuel's burn time (`MAX_BURN`), and 9 the tank's `lava`. It burns only what it has
+room for (`produce`, so at most its room): what is left burning is counted in whole energy quanta
+(`TICK_QUANTA` = 200 J / QUANTUM a tick), so a nearly full generator burns part ticks and no
+energy is made or lost. Fuel lights only when there is room (an item, or a mB, is used up then,
+both fields its burn time); one that runs out partway through a tick lights the next, which makes
+the rest of the tick, and one out at the end of a tick lights the next at once, so neither the
+flame nor the output dips between items. Full, it keeps what is burning and lights nothing new.
+RATE is what it made (the burner and the lava around it), ACTIVE whether the burner made anything
+(Mekanism's active: burning); its status line ((30, 20), right of the lava gauge) is
+"Producing 200 J/t" or "Idle". Its item keeps its energy, both burn fields and its lava (tooltips
+"Fuel: 60 s", a describer the kind adds, and "Lava: 5,000 mB"). Left out: Mekanism's heat model
+(heat capacitor, losses to the air and below, Carnot efficiency), the nether bonus, the
+lava-logged seventh side and turning solid fuels into lava (they burn as they are, for the same
+energy). JEI lists it as a fuel catalyst and the heating category's (`info`: heatGeneration,
+lavaPerTick 1/20, lavaPerSide, maxBurn).
 
 **The Electric Furnace** (kind "smelter", `Machines/Kinds/Smelter`; Mekanism's Energized Smelter).
 BlockList `ElectricFurnace` has `energy = { capacity = 20 000, input = 20 000 }`, a consumer; its
@@ -2389,9 +2816,50 @@ from its record (below). Left out: Mekanism's charge and discharge slots, side c
 battery, like any machine, joins the networks on its sides into one, so it cannot buffer between
 two networks) and its unlimited insert rate from cables (the cube only limits its own output).
 
+**The Oil Refinery** (kind "refinery", `Machines/Kinds/Refinery`; BuildCraft's refinery on
+Mekanism's electricity). BlockList `OilRefinery`, `energy = { capacity = 40 000, input = 40 000 }`
+(its `rates` take up to its capacity a tick, as Mekanism's machine energy containers take any
+amount). Tanks: oil (input, 10 000 mB, gauge (7, 13)) and fuel (output, 10 000 mB, gauge (57, 13));
+slots: its Speed and Energy Upgrades only (`Upgrades.slots(82, 53)`, no transporter reaches them,
+so it is no item inventory). It turns oil into fuel 1:1 (BuildCraft's recipe, without its heat
+and gas by-product): a bucket is its operation (as Mekanism's Electric Pump's), taking
+`Upgrades.ticks(100, speed)` ticks (74 with one Speed Upgrade, 10 with 8), so 10 mB a tick, moved
+in whole mB with the fraction carried in `progress` (mB of the bucket refined, the arrow's fill),
+at `Upgrades.energyPerTick(200, speed, energy)` J a tick, all or nothing, from a store of
+`Upgrades.capacity(40 000, energy)`: 200 J/t and 20 kJ a bucket, 100 mB/t at 20 kJ/t with 8 Speed
+Upgrades. Short of oil or fuel room it refines what it can for that share of the tick's energy, so
+no oil is ever stuck; no oil is idle (the bucket starts over), no fuel room "Output full", too
+little energy "No power" (state codes 0, 1, 2; Mekanism pauses on all three). Data: 7 progress, 8
+ticksRequired, 9 energyPerTick, 10 state, 11 activeDelay, 12 oil, 13 fuel. RATE is minus what it
+used, which its status reads ("Using 200 J/t"); ACTIVE is `showActive`'s. Its panel: the oil gauge,
+Minecraft's arrow at (29, 35) and the fuel gauge in a row, the status at (82, 20) and the upgrade
+slots at (82, 53) and (100, 53). Its fuel goes out on its own through the ejector (Mekanism pipes:
+Fluids). Its item keeps its energy and both tanks; the cards drop. Recipe: "IGI", "OFO", "IBI"
+(iron, glass; osmium, a furnace; a bucket): Mekanism's machine shape around BuildCraft's
+refinery, osmium standing for Mekanism's steel and circuits.
+
+**The Combustion Generator** (kind "combustion", `Machines/Kinds/Combustion`; BuildCraft's
+combustion engine as a Mekanism generator). BlockList `CombustionGenerator`, `energy = { capacity
+= 1 000 000, output = 5 000 }`: a producer whose output is twice what it makes. One input tank,
+fuel (10 000 mB: 100 MJ, gauge (7, 13)), no slots. It makes PRODUCTION (2 500) J a tick and a mB
+burns for TICKS_PER_MB (4) ticks (ENERGY_PER_MB, 10 kJ), so a bucket burns 4 000 ticks (200 s) and
+makes 10 MJ, the strongest fuel: 2.5 Lava Buckets or about 31 coal in a Heat Generator, 500 times
+the 20 kJ refining it costs, and one refinery's 10 mB/t keeps 40 of them burning. Like the Heat
+Generator it makes only what it has room for: a mB is taken from the tank when it lights (only
+with room) and burns over the next ticks, and with less room than a tick's 2 500 J it makes what
+fits and keeps the rest of its mB burning (`burning`, data 7, 0..1 mB counted in energy quanta,
+kept in the item), so no fuel is wasted and no energy made or lost by rounding; data 8 is the
+tank's `fuel`. RATE is what it made, ACTIVE whether it made anything; status "Producing 2.5 kJ/t"
+or "Idle" at (30, 20), right of the gauge. Its item keeps its energy, fuel and `burning`. `info`:
+fuelPerTick 1/4, energyPerMb 10 000. Recipe: "OBO", "IFI", "ODO" (osmium, a bucket; iron, a
+furnace; glow dust): Mekanism's generator shape around BuildCraft's engine, glow dust standing
+for redstone as in the cables. Left out: BuildCraft's coolant and heat.
+
 **A new machine:** a BlockList block with `machine` and `energy`, a module in
 `Machines/Kinds/` returning `Core.define(name, spec)`, and a line requiring it in
-`Machines/init`. Tests bind test-only kinds to spare blocks (`Machines.bind`).
+`Machines/init`. A kind with fluid tanks gives `tanks`; pipes, buckets, the ejector, gauges,
+records and the item follow from their roles. Tests bind test-only kinds to spare blocks
+(`Machines.bind`).
 
 ## Structure blocks and jigsaw structures (`Structures/`, `StructureLibrary/`, server `Structures/`)
 
@@ -2654,13 +3122,26 @@ levels).
 Dropped items are Minecraft's ItemEntity:
 - `Entities/ItemPhysics` (shared) is its movement, one 20 Hz tick on a 0.25 block box:
   - gravity 0.04 and drag 0.98, ground friction (ice slides);
-  - floating up in water; pushed out of blocks placed on it;
+  - fluids in Minecraft's two tags by their record's `physics` (Shared/Fluids `blockLut`, twins
+    included): "water" (water, fuel) and "lava" (lava, oil), water's first. Touching one pushes the
+    item along its flow, normalised, times the deepest fluid's `push` (water and fuel 0.014, lava
+    and oil 0.0023333), at least 0.0045 while it is nearly still sideways
+    (Entity.updateFluidHeightAndDoFluidPushing); deeper than 0.1014 above the box's bottom, the item
+    floats (+0.0005 while slower than 0.06 up) with its horizontal speed x 0.99 in water's tag
+    (setUnderwaterMovement) or x 0.95 in lava's (setUnderLavaMovement), water winning where both
+    are deep enough. The check runs again at the end of the tick, as ItemEntity.tick does. Water
+    behaves as before; a floating item costs about 3 µs a tick in Lune;
+  - pushed out of blocks placed on it;
   - collision through `Hull`.
 - `EntityWorld` (server, pure, tested) holds the rules:
   - pickup delay 10 ticks (40 when thrown);
   - pickup by a player box grown by (1, 0.5, 1), living players only, never spectators;
   - merging of equal items (the smaller into the larger, every 2 ticks while moving, 40 at rest);
-  - despawn after `Entities.ItemLifetime`; at most `Entities.MaxItems`.
+  - despawn after `Entities.ItemLifetime`; at most `Entities.MaxItems`;
+  - burning (`Players/Burning.tickItem`, after the move): lava takes 4 of an item's 5 health a tick
+    and sets it burning (water puts it out), so an item touching lava is gone the tick after
+    (Minecraft's Entity.lavaHurt); each lava hurt is in `takeChanges().burnt`, where Entities plays
+    entity.generic.burn. Over 1000 resting items the check is ~6% of the tick (9% interpreted).
 - `Entities` replicates the items within `Entities.TrackingDistance` of each player: spawns, a
   sync every 20 ticks while moving, count changes, and removals naming who picked them up.
 - Clients run the same `ItemPhysics` between syncs, ease corrections in, and draw items bobbing and
@@ -2691,14 +3172,24 @@ carries (16 blocks), the volume setting it follows (`source`), and who plays it 
   fails to load.
 - Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
   (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
+- Lava (appended at the end of the list): `block.lava.pop` and `block.lava.ambient` (lava open to
+  the air, each client by itself), `block.lava.extinguish` (LiquidBlock.fizz: lava hardening and
+  lava turning water into stone; volume 0.5, pitch 2.6), `item.bucket.fill_lava` and
+  `item.bucket.empty_lava` (lava's and oil's buckets: Fluids `fillSound`, `emptySound`; their
+  categories are the plain bucket sounds), `entity.generic.burn` (a lava hurt, a player's or an
+  item's: volume 0.4, pitch 2..2.4) and `entity.generic.extinguish_fire` (water putting a burning
+  player out: volume 0.7, pitch 1.6 ± 0.25, Minecraft's ± 0.4 triangle flattened). They carry
+  Minecraft's numbers themselves, so the server plays them with no cue volume or pitch on top
+  (`SoundRules.playback` multiplies the two). Stand-ins: the splash pitched down for the pop and
+  the buckets, the falling wind pitched up into a hiss or down into a bubbling rumble.
 
 **Who plays what** (Minecraft's split between server and client):
 
 | Side        | Events                                                     | How                              |
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
 | `predicted` | block break / place / fall, player small / big fall        | the acting client at once; the server sends everyone else |
-| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip | the server sends everyone near, the player included |
-| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave ambience | clients only, never sent |
+| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish | the server sends everyone near, the player included |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave ambience, lava pop and ambient | clients only, never sent |
 
 **The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
 within the event's distance (times a volume above 1, at most 2.55) plus `Sounds.BroadcastSlack`
@@ -2709,9 +3200,10 @@ inventory or Use messages can't stream sounds to everyone near. Hooks: ServerNet
 and placements), Behaviours/Attached (torches popping off; water washing one away is silent, as in
 Minecraft), Behaviours/Plant (plants popping off), Containers' `onOpeners` (first opener in, last
 out; spectators look in without opening the lid; a broken chest closes silently), Inventories
-(armor put on by any action, a tool breaking), Entities (pickups, at the item), Characters (health
-lost, at most every 0.5 s; death; a hurting landing's fall and the fall sound of the block below
-the feet; none for spectators).
+(armor put on by any action, a tool breaking), Entities (pickups, at the item; an item burning in
+lava), Characters (health lost, at most every 0.5 s; death; a hurting landing's fall and the fall
+sound of the block below the feet; a lava hurt that lands, water putting burning out; none for
+spectators), Behaviours/Fluid (lava's fizz) and Players/ItemUse (each fluid's bucket sounds).
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
@@ -2755,7 +3247,9 @@ What the client plays itself:
     number (every 1.67 blocks), on the block the hull stands on (else `floor(y - 0.2)`);
   - fluids make no step; flying and sneaking on the ground are silent; in the air the step waits
     for the landing; spectators (`state.noClip`) make no sound at all;
-  - in water off the ground: swim sounds; entering water: a splash; both scaled by speed;
+  - in water or fuel off the ground (a fluid one swims in, Fluids `swim`): swim sounds; entering
+    it: a splash; both scaled by speed. Lava and oil are silent to move through, as Minecraft's
+    lava;
   - a landing that hurts: `Sounds.fall` and the block's fall sound.
 - Other players' characters within 24 blocks of the listener, followed per player (a new
   character starts over; spectators are not followed): the same rules every frame, from their
@@ -2765,9 +3259,14 @@ What the client plays itself:
 - `Ambience`:
   - the open furnace window, while burning: crackles with Minecraft's odds for a furnace a block
     or two away (about every 4 s);
-  - every Heat Generator whose record says it burns, within 16 blocks of the listener
-    (`SoundRules.crackles`, `TransmitterRenderer.activeMachines`): the same crackle, at the
-    generator;
+  - every Heat or Combustion Generator whose record says it burns, within 16 blocks of the
+    listener (`SoundRules.crackles`, `TransmitterRenderer.activeMachines`): the same crackle, at
+    the generator;
+  - lava with air (or cave air) above it pops and bubbles (`SoundRules.lavaTick`, LavaFluid
+    .animateTick): Minecraft's client picks 667 random blocks a tick within 16 blocks of the player
+    and 667 within 32, and lava pops one time in 100 and bubbles one in 200; here LAVA_SAMPLES (24)
+    of each a tick stand for those 667, with the odds scaled to match: the same sounds on average
+    for 48 block reads a tick instead of 1,334 (volume x 0.2-0.4, pitch x 0.9-1.05);
   - under `skyExposure` 0.2: `ambient.cave` every 90 to 300 seconds spent there, from up to 8
     blocks each way around the listener.
 
@@ -2800,15 +3299,25 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Inventory`     | inventory + window container after action `ack` |
 | server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
 | server → client | `Notice`        | a message for the chat                        |
-| server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill |
-| server → client | `Tanks`         | fluid tank contents (fluid, mB)               |
+| server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill, the fluid id its network holds |
+| server → client | `Tanks`         | fluid tank contents (fluid id, mB)            |
 | server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |
-| server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active, state code |
+| server → client | `Machines`      | machines' energy, capacity, network input / output, rate, active, state code, tanks (fluid id, mB, capacity) |
 | server → client | `Sound`         | sound events near the player (event, position, volume, pitch) |
 | server → client | `StructureBlocks` | structure blocks' settings per position (none: gone); open flag (show the screen) |
 | server → client | `Jigsaws`       | jigsaws' settings per position (none: gone); open flag            |
 | server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
+
+Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
+an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
+is 15 bytes (`TRANSMITTER_BYTES`: i32 x, u16 y, i32 z, u16 modes, u8 colour, u8 fill, u8 fluid
+id). A Machines record is its 40-byte fixed part (`MACHINE_BYTES`, up to the state code), then a u8
+tank count (0 for a kind without tanks) and per tank a u8 fluid id, u32 amount and u32 capacity
+(`MACHINE_TANK_BYTES` 9, at most `MAX_MACHINE_TANKS` 255), in the kind's tank order
+(`Machines.tankContents`); `decodeMachines` refuses an unknown fluid id, a tank count longer than
+the bytes left, leftover bytes and a record count that cannot fit (checked before anything is
+made for it), and a record with no tanks decodes with `tanks` nil.
 
 Structure settings travel in `Structures/Settings`' format (Net/Protocol uses its `write*` /
 `read*`): unknown codes, NaN and strings over 128 bytes are malformed, numbers out of range are
@@ -2836,13 +3345,15 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 - `World/BlockTicker`: scheduled block updates at `Server.TickRate`. A change notifies the block and
   its six neighbours; blocks with a behaviour schedule ticks. Overflow beyond
   `MaxUpdatesPerTick` moves to the next tick. Updates never generate chunks.
-- `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling, infinite
-  sources, spreading only towards the nearest way down; waits at unloaded chunks; washes away
-  `brokenByFluid` blocks), `Grass` (turns to dirt when covered), `Attached` (torches and lanterns
-  break and drop when what they hang on stops being sturdy), `Plant` (a plant whose soil or other
-  half is gone breaks and drops what it drops by itself, in every game mode: a tall plant's lower
-  half drops, its top never does, so a tall plant drops once). They drop items through `Drops`,
-  which ServerNet wires to `Entities.dropBlock` (Transmitters/UseRules uses it too).
+- `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling,
+  infinite water sources, spreading only towards the nearest way down; waits at unloaded chunks;
+  washes away `brokenByFluid` blocks, which lava burns; water, lava, oil and fuel with their own
+  rules, and lava hardening against water: see Fluids), `Grass` (turns to dirt when covered),
+  `Attached` (torches and lanterns break and drop when what they hang on stops being sturdy),
+  `Plant` (a plant whose soil or other half is gone breaks and drops what it drops by itself, in
+  every game mode: a tall plant's lower half drops, its top never does, so a tall plant drops once).
+  They drop items through `Drops`, which ServerNet wires to `Entities.dropBlock`
+  (Transmitters/UseRules uses it too).
   - In `Gravity`, as in Minecraft, a falling block passes through blocks without a collision box
     (torches) and lands on those with one (`Blocks.obstruction`). Coming to rest in a torch's cell
     (a solid block under the torch) or on a lantern, it breaks into an item and the torch or
@@ -2850,9 +3361,9 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
     them it keeps falling, and a block placed on a torch stays where it is.
   - Plants in `Gravity` and `Fluid`: falling sand replaces the replaceable plants (no drop) and
     breaks into an item on flowers, tall flowers and mushrooms, which are not replaceable and have
-    no collision box, as on a torch; flowing water washes every plant away with its drop. Plants are
-    not opaque, so the grass under them stays grass and the sun reaches through them (`SkyCheck`),
-    and a spawn may stand in one (`SafeSpot`).
+    no collision box, as on a torch; flowing water washes every plant away with its drop (flowing
+    lava burns it, with no drop). Plants are not opaque, so the grass under them stays grass and the
+    sun reaches through them (`SkyCheck`), and a spawn may stand in one (`SafeSpot`).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, the game mode (`EditRules.mayEdit`: survival and
   creative edit, adventure and spectator edits are answered with the real block;
@@ -2884,8 +3395,11 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   fly, scaled to `MaxHealth`, through `TakeDamage`; landings that do no damage are ignored, the
   others at most 4 a second). Creative and spectator characters hold an invisible ForceField
   (`IceVoxelInvulnerable`), so `TakeDamage` can't hurt them. Players in a wall suffocate
-  (`GameModeRules.inWall`): half a heart every 0.5 s. It also plays the hurt, death and
-  hurting-landing sounds to everyone near (see Sounds), never a spectator's.
+  (`GameModeRules.inWall`): half a heart every 0.5 s. Lava hurts and burns (`Players/Burning`, at
+  20 ticks a second, catching up at most 4 a frame, on the standing box at the feet against the
+  server's loaded blocks, with the armor worn from `Inventories`; see Fluids), and a burning
+  character carries `IceVoxelOnFire`. It also plays the hurt, death, hurting-landing, burn and
+  extinguish sounds to everyone near (see Sounds), never a spectator's.
 - `Players/Teleport`: map teleports (see Map), and spectators' `SpectatorTeleport` (see Game
   modes: On the server).
 - `Players/SettingsStore`: players' settings, one profile per kind of device, in a DataStore (see
@@ -2896,28 +3410,28 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   (`EditRules.mayUseCreativeOnly`) keeps operator blocks to players allowed to use them, and
   EditRules refuses cave twins; `Fluid` never flows into a structure void.
 - `Transmitters/`: Mekanism pipes (see Mekanism pipes); `Players/ItemUse`: the Configurator and
-  buckets (UseItem). A water bucket that replaces a plant (`UseRules.pour`) drops it, as
+  buckets (UseItem). A full bucket that replaces a plant (`UseRules.pour`) drops it, lava's too, as
   Minecraft's BucketItem.emptyContents destroys the block with drops.
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
-  listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
-  in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
-  spawns; in a pit's or a ravine's column the floor at the natural surface is air, so none there
-  either, and the generator's `findSpawn` already skips them). The search checks the target
-  column, then rings around it. In chunks nobody edited the terrain is exactly what the generator
-  makes, so open water is skipped from the generator's height alone and columns are scanned from
-  just above the tallest structure. Spawning re-checks the spawn spot on every respawn, since
-  players may have built or poured water there; when no safe spot exists it waits 30 s before
-  searching again.
+  listed (`Floor`), the body's blocks are free and not listed (`Body`: water, lava, oil and fuel,
+  each name covering its levels and cave twin), nothing listed in `Hazards` (cactus, lava) touches
+  the body, and the feet are not below the natural surface (no cave spawns; in a pit's or a ravine's
+  column the floor at the natural surface is air, so none there either, and the generator's
+  `findSpawn` already skips them). The search checks the target column, then rings around it. In
+  chunks nobody edited the terrain is exactly what the generator makes, so open water is skipped
+  from the generator's height alone and columns are scanned from just above the tallest structure.
+  Spawning re-checks the spawn spot on every respawn, since players may have built or poured water
+  there; when no safe spot exists it waits 30 s before searching again.
 
 ## Hidden caves, octrees and regions
 
 **How caves are hidden.** Caves are carved as `CaveAir` and never reach the surface on their own;
 cave entrances and ravines (`SurfaceCaves`) are carved as Air and run into them. The mesher can
-treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
-(`hideCaves`), which removes every cave wall, and draws the hidden side of a junction with open
-air as stone caps; sections are meshed with caves visible only while the camera is below the
-terrain surface, and only those its section visibility search reaches (see Meshing, Streaming and
-Cave visibility above).
+treat cave air (and the cave twins: the glow lichen generated on cave walls, the lava of the
+caves' lava seas and lakes, the oil of buried deposits) as rock (`hideCaves`), which removes every
+cave wall, and draws the hidden side of a junction with open air as stone caps; sections are meshed
+with caves visible only while the camera is below the terrain surface, and only those its section
+visibility search reaches (see Meshing, Streaming and Cave visibility above).
 
 **Octrees** are a storage / search structure: a cube split into 8 children until regions are
 uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD
@@ -2975,13 +3489,14 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   blocks only, so a chunk's padding grows what its neighbour's core grows; keep it so. A plant's
   shape has at most 4 boxes (each is a part per plant in the world), and a tall plant is placed
   through `EditRules.setPlaced` (both halves), never one half alone (it would pop).
-- Machine data starts with the shared header (energy always at 1); kinds append fields, at most
-  16 values in all. Kind ticks replace slot stacks (never change a stack table) and add or use
-  energy through `Machines.produce` / `use`, so energy stays exact.
+- Machine data starts with the shared header (energy always at 1); kinds append fields, then their
+  tanks, at most 16 values in all. Kind ticks replace slot stacks (never change a stack table) and
+  add or use energy through `Machines.produce` / `use`, so energy stays exact.
 - Machines and cables only come from edits, like pipes.
-- Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items, Crafting/Smelting, DayCycle), never
-  Shared/Machines, Inventory/Menu or Shared/Transmitters (those require Machines: a cycle). A
-  kind keeps per-machine state in its data fields, not in module tables.
+- Kind modules require Machines/Core, Machines/Upgrades and plain shared modules (Items,
+  Crafting/Smelting, DayCycle, Fluids), never Shared/Machines, Inventory/Menu or Shared/Transmitters
+  (those require Machines: a cycle). A kind keeps per-machine state in its data fields, not in
+  module tables.
 - Anything crossing actor boundaries (jobs, results) may only contain numbers, strings, buffers,
   dense arrays and string-keyed tables.
 - The structure library is part of world generation: the server, every client and every worker
@@ -2992,9 +3507,27 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - IVS1 text is what users keep: palettes name blocks, so renaming a block turns it into air in
   every saved structure (add, don't rename), and a format change needs a new version number
   (`Template.VERSION`; decode refuses newer ones) and must keep reading version 1.
-- Cave twins must look, drop and behave exactly like their twin (Blocks checks it at load), and
-  glow lichen generation (`Generation/CaveDecor`) decides each cell from the seed, its position and
-  its in-buffer neighbourhood only, like foliage. A lichen is 2 parts: caves hold thousands.
+- Cave twins must look, drop and behave exactly like their twin (Blocks checks it at load; a fluid
+  twin is a source of its group, and `Blocks.fluidId` never answers one), and glow lichen
+  generation (`Generation/CaveDecor`) decides each cell from the seed, its position and its
+  in-buffer neighbourhood only, like foliage. A lichen is 2 parts: caves hold thousands.
+- Fluid ids (`Fluids/FluidList` positions) are sent and saved in items: append a fluid, never
+  reorder (at most 255). Code that holds or tells fluids apart asks Shared/Fluids (`blockLut`,
+  `ofBucket`, the record), never names water; every fluid group needs its flow `RULES`
+  (Behaviours/Fluid) and its own bucket item, and the registry checks BlockList and ItemList
+  against it at load.
+- Surface lava lakes and oil wells are decided from the seed and the full detail terrain only
+  (heights, biome, structure pieces, the spawn, the surface caves' worms), never from a chunk's
+  blocks; underground lava lakes from the chunk's own blocks, but their lava and bowl stay in the
+  core's cells 1..14, so no padding holds them. What puts cave cells into rock marks the cave
+  lattice (`Caves.mark`), and what digs below the ground lowers `topCells`. Generated lava and oil
+  open to the sky (surface lava lakes, surface caves' lava, a geyser's lake and its spout from the
+  lake up) are ordinary blocks; inside rock and caves they are cave twins, so hidden caves and
+  buried deposits stay free.
+- A pipe network's buffer holds one fluid: fills keep pipes of other fluids out. A kind's tick
+  changes its tanks only through `tankInsert` / `tankExtract`. The fluid ejector pushes only into
+  pipes that lead the fluid somewhere and never into another line's supply tank
+  (Transmitters/Fluids); keep it so, or a machine's output clogs the pipe feeding it.
 - Operator blocks (`creativeOnly`) break and drop nothing for survival players, and only players
   `Structures/Permission` allows place, break or use them; a new one needs `drops = false`
   (checked at load).

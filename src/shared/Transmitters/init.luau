@@ -6,7 +6,8 @@
 	  * Logistical Transporters ("item" transmitters, Basic to Ultimate) move items between
 	    inventories (chests, furnaces); the Restrictive Transporter is a basic one that routes
 	    avoid (path cost 1000 instead of a basic one's 10).
-	  * Mechanical Pipes ("fluid" transmitters, Basic to Ultimate) move water between Fluid Tanks.
+	  * Mechanical Pipes ("fluid" transmitters, Basic to Ultimate) move fluids (Shared/Fluids: water,
+	    lava, oil, fuel) between Fluid Tanks and the fluid tanks of machines (Shared/Machines).
 	  * Universal Cables ("energy" transmitters, Basic to Ultimate) join energy blocks (Mekanism
 	    machines, Shared/Machines) into energy networks; a network moves at most the sum of its
 	    cables' capacities per tick (Mekanism's CableTier: 8 000 to 8 192 000 J/t).
@@ -36,11 +37,10 @@
 	is the Configurator's sneak click). Two transmitters connect when they are the same kind,
 	neither side is NONE and, for transporters, their colours are compatible (either is
 	uncoloured or both are the same); a transmitter connects to an acceptor of its kind (a block
-	with item slots, a fluid tank, an energy block) unless its side is NONE. That rule is
-	`connects`, used by the
-	client to draw arms and by the server to build networks. An item takes the colour of the
-	transporter that pulled it and only enters uncoloured transporters or ones of its colour
-	(`carries`).
+	with item slots, a Fluid Tank or a machine with fluid tanks, an energy block) unless its side
+	is NONE. That rule is `connects`, used by the client to draw arms and by the server to build
+	networks. An item takes the colour of the transporter that pulled it and only enters
+	uncoloured transporters or ones of its colour (`carries`).
 
 	Routes cost Mekanism's getCost per transporter passed (`pathCost`): 10 / 5 / 2.5 / 1 from Basic
 	to Ultimate, 1000 for the Restrictive Transporter.
@@ -53,6 +53,7 @@
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Fluids = require(script.Parent.Fluids)
 local Machines = require(script.Parent.Machines)
 local Inventories = require(script.Inventories)
 local Tiers = require(script.Tiers)
@@ -397,9 +398,10 @@ function Transmitters.isItemAcceptor(block: number): boolean
 	return Inventories.isInventory(block)
 end
 
--- Does the block hold fluid pipes connect to (a fluid tank)?
+-- Does the block hold fluid pipes connect to (a Fluid Tank, or a machine with fluid tanks:
+-- Machines.hasTanks)?
 function Transmitters.isFluidAcceptor(block: number): boolean
-	return tanks[block] == true
+	return tanks[block] == true or Machines.hasTanks(block)
 end
 
 -- Does the block hold energy Universal Cables connect to (a Mekanism machine, Shared/Machines)?
@@ -414,7 +416,7 @@ function Transmitters.isAcceptor(kind: Kind, block: number): boolean
 	elseif kind == "energy" then
 		return Machines.hasEnergy(block)
 	end
-	return tanks[block] == true
+	return tanks[block] == true or Machines.hasTanks(block)
 end
 
 --[[
@@ -424,8 +426,8 @@ end
 	NORMAL and none).
 	  "transmitter"  the same kind of transmitter (any tier), neither side NONE, colours compatible
 	                 (transporters only: Mekanism's pipes have no colour, so theirs is ignored)
-	  "acceptor"     an inventory (item), a fluid tank (fluid) or an energy block (energy), and
-	                 the side is not NONE
+	  "acceptor"     an inventory (item), a Fluid Tank or a machine with fluid tanks (fluid) or an
+	                 energy block (energy), and the side is not NONE
 	  nil            anything else, and every side of a block that is no transmitter
 ]]
 function Transmitters.connects(
@@ -504,14 +506,24 @@ end
 
 --[[ Fluids ]]
 
--- Fluid types (Protocol `Tanks` / the server's buffers): 0 none, 1 water.
-Transmitters.FLUIDS = table.freeze({ NONE = 0, WATER = 1 })
-Transmitters.FLUID_NAMES = table.freeze({ "Water" })
-
--- "Water"; "Empty" for none.
-function Transmitters.fluidName(fluid: number): string
-	return Transmitters.FLUID_NAMES[fluid] or "Empty"
+-- Fluid ids (Protocol `Tanks` / `Transmitters`, the server's buffers): Shared/Fluids' (0 none,
+-- 1 water, 2 lava, 3 oil, 4 fuel), here for the code that knew only water.
+Transmitters.FLUIDS = table.freeze({
+	NONE = Fluids.NONE,
+	WATER = Fluids.WATER,
+	LAVA = Fluids.LAVA,
+	OIL = Fluids.OIL,
+	FUEL = Fluids.FUEL,
+})
+local fluidNames: { string } = {}
+for id, fluid in Fluids.list do
+	fluidNames[id] = fluid.displayName
 end
+-- FLUID_NAMES[id]: "Water", "Lava", "Oil", "Fuel" (Fluids.name).
+Transmitters.FLUID_NAMES = table.freeze(fluidNames)
+
+-- "Lava"; "Empty" for none and unknown ids (Fluids.name).
+Transmitters.fluidName = Fluids.name
 
 --[[
 	How full something is, as a byte (Protocol `Transmitters.fluid`): 0 empty, 255 full, and at

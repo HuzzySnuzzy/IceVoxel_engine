@@ -10,14 +10,16 @@
 	           blocks, both sides' modes, transporters' colours), collars between transmitters,
 	           connector plates on acceptors, PUSH / PULL bands, a coloured transporter's tint;
 	           Universal Cables' thinner arms reach the energy blocks around them;
-	  water    in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity);
+	  fluids   in Mechanical Pipes (their network's fill) and in Fluid Tanks (amount / capacity),
+	           in each fluid's colour (lava glowing);
 	  items    moving through Logistical Transporters, small models of the item along their path;
 	  machines what their Machines record shows (TransmitterModel.machineBoxes): a burning Heat
-	           Generator's glowing fuel window, a smelting Electric Furnace's heating chamber and
-	           a Battery's charge in its gauges.
+	           or Combustion Generator's glowing window, a smelting Electric Furnace's heating
+	           chamber, a working Oil Refinery's heater and a Battery's charge in its gauges.
 
 	State, as the server sends it (Shared/Net/Protocol):
-	  Transmitters  per position: packed side modes, colour, pipe fill. A record replaces what was
+	  Transmitters  per position: packed side modes, colour, pipe fill and fluid (Shared/Fluids
+	                id). A record replaces what was
 	                known; positions without one are in the default state (all NORMAL, no colour,
 	                empty). Records come with a chunk's edit list and when something changes (to
 	                every player near), so they are kept for chunks whose edit list is known or
@@ -128,6 +130,7 @@ local LOOKS: { [string]: { material: Enum.Material, transparency: number } } = {
 	band = { material = Enum.Material.Neon, transparency = 0 },
 	tint = { material = Enum.Material.SmoothPlastic, transparency = 0.45 },
 	water = { material = Enum.Material.Glass, transparency = 0.3 },
+	molten = { material = Enum.Material.Neon, transparency = 0 },
 	cable = { material = Enum.Material.SmoothPlastic, transparency = 0 },
 	glow = { material = Enum.Material.Neon, transparency = 0 },
 }
@@ -146,7 +149,7 @@ type Cell = {
 	signature: string?,
 }
 
-type TransmitterState = { modes: number, colour: number, fluid: number }
+type TransmitterState = { modes: number, colour: number, fluid: number, fluidId: number }
 type TankState = { fluid: number, amount: number }
 type MachineState = Protocol.MachineRecord
 
@@ -581,10 +584,12 @@ local function onTransmitters(records: { Protocol.TransmitterRecord })
 			-- Only modes and colours change what is connected (a pipe's fill changes often).
 			local linksChanged = (if old then old.modes else 0) ~= record.modes
 				or (if old then old.colour else 0) ~= record.colour
-			if record.modes == 0 and record.colour == 0 and record.fluid == 0 then
+			local fluidId = record.fluidId or 0
+			if record.modes == 0 and record.colour == 0 and record.fluid == 0 and fluidId == 0 then
 				transmitterStates[key] = nil
 			else
-				transmitterStates[key] = { modes = record.modes, colour = record.colour, fluid = record.fluid }
+				transmitterStates[key] =
+					{ modes = record.modes, colour = record.colour, fluid = record.fluid, fluidId = fluidId }
 				indexState(key, Coords.chunkKey(x // SIZE, z // SIZE))
 			end
 			if linksChanged then
@@ -646,10 +651,11 @@ local function design(cell: Cell): ({ TransmitterModel.Box }, string)
 	local modes = if state then state.modes else 0
 	local colour = if state then state.colour else 0
 	local fluid = if state then state.fluid else 0
+	local fluidId = if state then state.fluidId else 0
 	local transmitters, acceptors =
 		Transmitters.connections(block, modes, colour, cell.x, cell.y, cell.z, getBlock, getState)
-	local boxes = TransmitterModel.transmitterBoxes(block, modes, colour, fluid, transmitters, acceptors)
-	return boxes, `p{block} {modes} {colour} {fluid} {transmitters} {acceptors}`
+	local boxes = TransmitterModel.transmitterBoxes(block, modes, colour, fluid, transmitters, acceptors, fluidId)
+	return boxes, `p{block} {modes} {colour} {fluid} {fluidId} {transmitters} {acceptors}`
 end
 
 local function redraw(key: number)
@@ -960,13 +966,14 @@ end
 
 --[[ Queries ]]
 
--- The replicated state of a transmitter: packed side modes, colour (0..16) and fill (0..255).
-function TransmitterRenderer.state(x: number, y: number, z: number): (number, number, number)
+-- The replicated state of a transmitter: packed side modes, colour (0..16), fill (0..255) and
+-- the fluid its network holds (Shared/Fluids id, 0 none).
+function TransmitterRenderer.state(x: number, y: number, z: number): (number, number, number, number)
 	local state = transmitterStates[posKey(x, y, z)]
 	if state then
-		return state.modes, state.colour, state.fluid
+		return state.modes, state.colour, state.fluid, state.fluidId
 	end
-	return 0, 0, 0
+	return 0, 0, 0, 0
 end
 
 --[[
@@ -1005,7 +1012,7 @@ function TransmitterRenderer.activeMachines(
 	return found
 end
 
--- The replicated contents of a fluid tank: fluid (0 none, 1 water) and amount (mB).
+-- The replicated contents of a fluid tank: fluid (Shared/Fluids id, 0 none) and amount (mB).
 function TransmitterRenderer.tank(x: number, y: number, z: number): (number, number)
 	local state = tankStates[posKey(x, y, z)]
 	if state then

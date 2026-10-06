@@ -25,6 +25,7 @@ local TransmitterTypes = require(script.Parent.Parent.Transmitters.Types)
 
 export type Container = InventoryTypes.Container
 export type MachineRecord = Protocol.MachineRecord
+export type MachineTank = Protocol.MachineTank
 
 export type Machine = {
 	key: number,
@@ -38,7 +39,8 @@ export type Machine = {
 	container: Container,
 	-- The energy network it belongs to (nil while the networks around it are worked out again).
 	component: Component?,
-	-- Its data and slot stacks as they were before this tick (to tell viewers what changed).
+	-- Its data as it was after the last step, and its slot stacks before this tick (to tell
+	-- viewers what changed: pipes and buckets change tanks between steps).
 	previous: { number },
 	previousSlots: { [number]: any },
 	-- The record clients last got (a new machine's is the default one) and the tick it went.

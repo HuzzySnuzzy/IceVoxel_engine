@@ -21,7 +21,8 @@
 	             few blocks away (a tunnel into a hillside, a quarry under an overhang; the fade
 	             then follows the distance to it). See Rendering/SkyExposure.
 	  Fog        its colour follows the time while IceVoxel's fog is in use (ViewSettings.usesFog);
-	             its distance is ViewSettings'.
+	             its distance is ViewSettings'. While the camera is in a fluid, the fluid's colour
+	             replaces it (`setFogColour`, Rendering/FluidFog), whatever the fog setting.
 
 	An Atmosphere or Sky in Lighting is left alone: Roblox lights both by the sun and moon itself.
 	Config.Lighting.Enabled = false leaves everything but ClockTime to the place (the exposure is
@@ -64,6 +65,11 @@ local grounds: { [number]: number } = {}
 local groundCount = 0
 -- Lighting property -> the value written last.
 local written: { [string]: any } = {}
+-- The fog colour of the fluid the camera is in (nil: none), the place's own fog colour (captured
+-- before a fluid first changes it) and the time of day's last one.
+local fogOverride: Color3? = nil
+local placeFogColour: Color3? = nil
+local dayFogColour: Color3? = nil
 local lighting: any = Lighting
 
 local function attribute(name: string, fallback: number): number
@@ -131,8 +137,29 @@ local function update(dt: number)
 	write("ColorShift_Top", colour(environment.colorShiftTop))
 	write("EnvironmentDiffuseScale", environment.environmentDiffuse)
 	write("EnvironmentSpecularScale", environment.environmentSpecular)
-	if ViewSettings.usesFog() then
-		write("FogColor", colour(environment.fogColor))
+	dayFogColour = colour(environment.fogColor)
+	if fogOverride then
+		write("FogColor", fogOverride)
+	elseif ViewSettings.usesFog() then
+		write("FogColor", dayFogColour)
+	end
+end
+
+--[[
+	The fog colour of the fluid the camera is in (Rendering/FluidFog), or with nil the normal one
+	again (the time of day's while IceVoxel's fog is in use, else the place's own); written at once.
+]]
+function LightingController.setFogColour(fog: Color3?)
+	if fog and placeFogColour == nil then
+		placeFogColour = Lighting.FogColor
+	end
+	fogOverride = fog
+	if fog then
+		write("FogColor", fog)
+	elseif ViewSettings.usesFog() and dayFogColour then
+		write("FogColor", dayFogColour)
+	elseif placeFogColour then
+		write("FogColor", placeFogColour)
 	end
 end
 

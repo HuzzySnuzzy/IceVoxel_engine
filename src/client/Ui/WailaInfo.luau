@@ -10,17 +10,23 @@
 	            red cross for whether the held item harvests them ("Requires Iron Pickaxe"), or
 	            the tool that mines them fastest when any hand will do ("Tool: Shovel"), or
 	            "Unbreakable"
+	  fluids    a fluid block is named by its fluid ("Lava" for every level and for CaveLava), and
+	            one that gives light says so ("Light 15": lava lights its surroundings, which the
+	            client draws with only some of its cells' lights)
 	  pipes     Mekanism's transmitters: the mode of the side the Configurator points at ("Side:
 	            Pull"); a transporter's colour ("Colour: Red") and the items inside it ("Items:
-	            12"); a Mechanical Pipe's water ("Water: ~4,000 / 8,000 mB": its network's fill
-	            byte times the capacity of the pipes the client sees connected, so approximate);
-	            a Universal Cable's capacity ("Capacity: 8 kJ/t", Mekanism's tooltip; its sides
-	            set to push or pull read "Side: Push (as Normal)": that is how they act).
+	            12"); a Mechanical Pipe's fluid ("Lava: ~4,000 / 8,000 mB": the fluid its network
+	            holds, its fill byte times the capacity of the pipes the client sees connected, so
+	            approximate; "Empty: 0 / 2,000 mB"); a Universal Cable's capacity ("Capacity: 8
+	            kJ/t", Mekanism's tooltip; its sides set to push or pull read "Side: Push (as
+	            Normal)": that is how they act).
 	            Fluid Tanks: "Water: 12,000 / 32,000 mB" (Jade's Mekanism tank tooltip).
 	  machines  Mekanism machines (Shared/Machines), from their Machines record: "Energy: 1.2 kJ /
 	            20 kJ" ("Energy: Infinite" for the creative cube) and the machine's status
 	            ("Producing 200 J/t", "Using 50 J/t", "Charging 4 kJ/t", "No power":
-	            Machines.status, from the record's numbers and its kind's state code).
+	            Machines.status, from the record's numbers and its kind's state code), then its
+	            tanks ("Oil: 3,000 / 10,000 mB", `MachineFacts.tanks`: the record's, Protocol's
+	            MachineRecord `tanks` from Machines.tankContents; empty without a record).
 	  structures  structure blocks: their mode and structure name ("Mode: Save", "Name: hut");
 	            jigsaws: name, target and pool (their records, Net/StructureNet). Creative only
 	            blocks (structure blocks, structure voids, jigsaws) say "Creative only" where
@@ -84,6 +90,8 @@ export type TransmitterFacts = {
 	modes: number,
 	colour: number,
 	fluid: number,
+	-- The fluid a pipe's network holds (Shared/Fluids id; nil or 0: none known, water when full).
+	fluidId: number?,
 	-- The side the Configurator points at (BlockInteraction.targetSide); nil: none.
 	side: number?,
 	-- Items and stacks in transit inside it.
@@ -99,8 +107,10 @@ export type TransmitterFacts = {
 	networkComplete: boolean,
 }
 
--- A fluid tank's contents (fluid 0 none, 1 water; mB).
+-- A fluid tank's contents (fluid: Shared/Fluids id, 0 none; mB).
 export type TankFacts = { fluid: number, amount: number }
+-- One of a machine's tanks (Protocol's MachineTank): its fluid (0 empty), amount and capacity (mB).
+export type MachineTankFacts = { fluid: number, amount: number, capacity: number }
 
 -- A machine's state (its Machines record, Rendering/TransmitterRenderer.machine; J and J/t), with
 -- its kind's state code (Shared/Machines KindSpec `state`, 0 without one).
@@ -112,6 +122,9 @@ export type MachineFacts = {
 	rate: number,
 	active: boolean,
 	state: number,
+	-- Its tanks' contents in tank order (the record's, Machines.tankContents; nil for a kind
+	-- without tanks).
+	tanks: { MachineTankFacts }?,
 }
 
 -- Optional facts about a block's surroundings that only the client knows.
@@ -324,9 +337,10 @@ local function sideList(mask: number): string
 	return if #names > 0 then table.concat(names, ", ") else "none"
 end
 
--- "Water: 12,000 / 32,000 mB"; `approximate` adds "~" to an amount that is neither 0 nor full.
+-- "Water: 12,000 / 32,000 mB" ("Empty: 0 / ..." without a fluid); `approximate` adds "~" to an
+-- amount that is neither 0 nor full.
 local function fluidLine(fluid: number, amount: number, capacity: number, approximate: boolean): Line
-	local name = Transmitters.fluidName(if fluid ~= 0 then fluid else Transmitters.FLUIDS.WATER)
+	local name = Transmitters.fluidName(fluid)
 	local about = if approximate and amount > 0 and amount < capacity then "~" else ""
 	return labelled(`{name}: `, `{about}{WailaInfo.thousands(amount)} / {WailaInfo.thousands(capacity)} mB`)
 end
@@ -359,7 +373,12 @@ function WailaInfo.transmitterLines(block: number, facts: TransmitterFacts): { L
 	elseif kind == "fluid" then
 		local capacity = if facts.networkCapacity > 0 then facts.networkCapacity else Transmitters.pipeCapacity(block)
 		local amount = Transmitters.fillAmount(facts.fluid, capacity)
-		table.insert(lines, fluidLine(Transmitters.FLUIDS.WATER, amount, capacity, true))
+		-- (A record without the fluid, from before pipes carried more than water: water.)
+		local fluid = facts.fluidId or 0
+		if fluid == 0 and amount > 0 then
+			fluid = Transmitters.FLUIDS.WATER
+		end
+		table.insert(lines, fluidLine(if amount > 0 then fluid else 0, amount, capacity, true))
 	end
 	return lines
 end
@@ -445,10 +464,19 @@ local function viewOf(block: number, facts: MachineFacts): Machines.View
 	}
 end
 
--- What WAILA knows of a machine without a record: empty and idle at its block's capacity.
+-- What WAILA knows of a machine without a record: empty and idle at its block's capacity, its
+-- tanks empty (the server's default record).
 function WailaInfo.machineDefaults(block: number): MachineFacts
 	local energy = Machines.energyOf(block)
 	local capacity = if energy then energy.capacity else 0
+	local tanks: { MachineTankFacts }? = nil
+	if Machines.hasTanks(block) then
+		local empty: { MachineTankFacts } = {}
+		for i, tank in Machines.tanks(block) do
+			empty[i] = { fluid = 0, amount = 0, capacity = tank.capacity }
+		end
+		tanks = empty
+	end
 	return {
 		energy = if capacity == math.huge then math.huge else 0,
 		capacity = capacity,
@@ -457,6 +485,7 @@ function WailaInfo.machineDefaults(block: number): MachineFacts
 		rate = 0,
 		active = false,
 		state = 0,
+		tanks = tanks,
 	}
 end
 
@@ -468,14 +497,33 @@ function WailaInfo.energyText(energy: number, capacity: number): string
 	return `{Items.formatEnergy(energy)} / {Items.formatEnergy(capacity)}`
 end
 
--- The lines of a machine: its energy, then its status (Machines.status) when it has one.
+--[[
+	The lines of a machine: its energy, then its status (Machines.status) when it has one, then
+	each tank's contents when the facts carry them ("Lava: 5,000 / 24,000 mB").
+]]
 function WailaInfo.machineLines(block: number, facts: MachineFacts): { Line }
 	local lines: { Line } = { labelled("Energy: ", WailaInfo.energyText(facts.energy, facts.capacity)) }
 	local status = Machines.status(block, viewOf(block, facts))
 	if status then
 		table.insert(lines, { segment(status, "white") })
 	end
+	local tanks = facts.tanks
+	if tanks then
+		for _, tank in tanks do
+			local amount = if tank.fluid ~= 0 then tank.amount else 0
+			table.insert(lines, fluidLine(tank.fluid, amount, tank.capacity, false))
+		end
+	end
 	return lines
+end
+
+-- "Light 15" for a fluid that gives light (lava), nil for any other block.
+function WailaInfo.fluidLight(block: number): Line?
+	local def = Blocks.get(block)
+	if def == nil or def.fluid == nil or def.light <= 0 then
+		return nil
+	end
+	return { segment(`Light {def.light}`, "gold") }
 end
 
 -- The extended (F3) lines of a machine.
@@ -699,6 +747,11 @@ function WailaInfo.block(
 	local harvest = WailaInfo.harvest(block, held)
 	if harvest then
 		table.insert(lines, harvest)
+	end
+	-- (F3's details say the light of every block.)
+	local light = if extended then nil else WailaInfo.fluidLight(block)
+	if light then
+		table.insert(lines, light)
 	end
 	-- Mekanism pipes, tanks and machines: what the server says about them.
 	local transmitter = if context and Transmitters.isTransmitter(block) then context.transmitter else nil

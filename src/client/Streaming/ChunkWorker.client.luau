@@ -327,7 +327,8 @@ local function generate(job: Job): Job
 			preemptible = false
 			local border = borderOf(open, nil, 0)
 			local meshData = if border then GreedyMesher.applyBorder(data, height, y0, y1, true, border) else data
-			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true, nil, hideFoliage)
+			-- (No sparse lights: far parts carry none, and marking them would only split boxes.)
+			local boxes, count = GreedyMesher.mesh(meshData, height, y0, y1, true, nil, hideFoliage, true)
 			if count > 0 then
 				table.insert(indices, 0)
 				table.insert(meshes, boxes)

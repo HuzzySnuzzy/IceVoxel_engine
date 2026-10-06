@@ -15,10 +15,10 @@
 	            hold); Players/Inventories.containerChanged sends viewers a snapshot and wakes a
 	            furnace after a transporter put something in or took something out.
 	  Drops     a broken transporter's items drop where it was (Entities.dropBlock).
-	  Tanks     a Fluid Tank broken by a survival player keeps its water in its item, and placing
+	  Tanks     a Fluid Tank broken by a survival player keeps its fluid in its item, and placing
 	            that item puts it back (TransmitterWorld.blockDataHooks, registered with
 	            ServerNet's `addBlockData`: Mekanism's sustained data).
-	  Records   Transmitters (side modes, colour, pipe fill) and Tanks records: a chunk's
+	  Records   Transmitters (side modes, colour, pipe fill and fluid id) and Tanks records: a chunk's
 	            non-default ones go to a player right after its edit list (ServerNet's
 	            `chunksSent` rule calls `sendChunks`), and changes go once per frame to every
 	            player within RECORD_RANGE blocks (sideways) of them, which covers the chunks a
@@ -29,7 +29,7 @@
 	            sent with their current state and those beyond UNTRACK_RANGE removed. An add's
 	            startTime is workspace:GetServerTimeNow() of the tick that produced it.
 
-	Nothing is saved: transmitter states, network water, tank contents and items in transit last
+	Nothing is saved: transmitter states, network fluids, tank contents and items in transit last
 	for the session, like chests.
 ]]
 
@@ -269,7 +269,7 @@ function Transmitters.start(serverNet: Net, world: WorldServer.World)
 		drop = Entities.dropBlock,
 	})
 	state = simulation
-	-- A tank's water stays in its item (Mekanism's sustained data).
+	-- A tank's fluid stays in its item (Mekanism's sustained data).
 	serverNet.addBlockData(TransmitterWorld.blockDataHooks(simulation))
 
 	Players.PlayerRemoving:Connect(function(player)

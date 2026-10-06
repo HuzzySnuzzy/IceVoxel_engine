@@ -1,8 +1,9 @@
 --!strict
 --[[
 	Decorated block faces: chests, crafting tables, furnaces, Mekanism's Creative Energy Cube,
-	Heat Generator, Electric Furnace and Batteries (Energy Cubes), and Minecraft's structure blocks
-	and jigsaw blocks, drawn like Minecraft's pixel art.
+	Heat Generator, Electric Furnace and Batteries (Energy Cubes), the Oil Refinery and the
+	Combustion Generator, and Minecraft's structure blocks and jigsaw blocks, drawn like
+	Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -424,6 +425,100 @@ local function batteryFaces(tier: { number }): Faces
 end
 
 --[[
+	Oil Refinery (BuildCraft's refinery as a Mekanism machine): a light steel casing with osmium
+	bolts, two sight glasses on each side (the oil tank's nearly black, the fuel tank's amber) and
+	the heater's window under them, dark while it is off, and a round tank cap on top. While it
+	works the client may light the heater (a glowing pane over REFINERY_WINDOW from the machine's
+	record, as the Electric Furnace's chamber). Item models show the glasses and the window on the
+	front pair only, like the furnace's mouth.
+]]
+local REFINERY_EDGE = { 84, 88, 96 }
+local GLASS_FRAME = { 58, 60, 66 }
+local OIL_GLASS = { 24, 22, 26 }
+local FUEL_GLASS = { 232, 172, 44 }
+local GLASS_SHINE = { 150, 154, 162 }
+local HEATER = { 46, 32, 28 }
+local CAP = { 98, 102, 110 }
+local CAP_TOP = { 150, 154, 162 }
+-- The heater's window on every side (pixels from the face's top left; the glow covers exactly it).
+BlockDecor.REFINERY_WINDOW = table.freeze({ x = 4, y = 12, w = 8, h = 2 })
+local HEATER_WINDOW = BlockDecor.REFINERY_WINDOW
+
+local function refinerySide(glassSurfaceOnly: boolean): { Rect }
+	local w = HEATER_WINDOW
+	return join(outline(REFINERY_EDGE, true), smelterBolts(), {
+		-- The oil and fuel sight glasses, with a glint on each.
+		rect(2, 2, 5, 9, GLASS_FRAME, glassSurfaceOnly),
+		rect(3, 3, 3, 7, OIL_GLASS, glassSurfaceOnly),
+		rect(9, 2, 5, 9, GLASS_FRAME, glassSurfaceOnly),
+		rect(10, 3, 3, 7, FUEL_GLASS, glassSurfaceOnly),
+		rect(3, 3, 1, 2, GLASS_SHINE, true),
+		rect(10, 3, 1, 2, GLASS_SHINE, true),
+		-- The heater's window under them.
+		rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, GLASS_FRAME, glassSurfaceOnly),
+		rect(w.x, w.y, w.w, w.h, HEATER, glassSurfaceOnly),
+	})
+end
+
+local OIL_REFINERY: Faces = {
+	-- (Centred, so item models look the same however the top is turned.)
+	Top = join(outline(REFINERY_EDGE, true), smelterBolts(), {
+		rect(4, 4, 8, 8, CAP),
+		rect(6, 6, 4, 4, CAP_TOP),
+	}),
+	Bottom = outline(REFINERY_EDGE, true),
+	Front = refinerySide(false),
+	Back = refinerySide(false),
+	Left = refinerySide(true),
+	Right = refinerySide(true),
+}
+
+--[[
+	Combustion Generator (BuildCraft's combustion engine as a Mekanism generator): a dark steel
+	casing with osmium bolts, an amber band (its fuel's colour) across each side, the combustion
+	chamber's window under it, dark while it is out, and an exhaust on top between amber corners.
+	While it burns the client may light the chamber (a glowing pane over COMBUSTION_WINDOW from the
+	machine's record, as the Heat Generator's). Item models show the window on the front pair only.
+]]
+local COMBUSTION_EDGE = { 28, 29, 34 }
+local FUEL_BAND = { 214, 150, 36 }
+local CHAMBER_DARK = { 52, 30, 18 }
+local EXHAUST_RIM = { 84, 88, 96 }
+local EXHAUST = { 16, 16, 18 }
+-- The combustion chamber's window on every side (pixels from the face's top left; the glow covers
+-- exactly it).
+BlockDecor.COMBUSTION_WINDOW = table.freeze({ x = 5, y = 9, w = 6, h = 4 })
+local COMBUSTION = BlockDecor.COMBUSTION_WINDOW
+
+local function combustionSide(windowSurfaceOnly: boolean): { Rect }
+	local w = COMBUSTION
+	return join(outline(COMBUSTION_EDGE, true), bolts(), {
+		rect(1, 3, 14, 2, FUEL_BAND),
+		rect(w.x - 1, w.y - 1, w.w + 2, w.h + 2, WINDOW_FRAME, windowSurfaceOnly),
+		rect(w.x, w.y, w.w, w.h, CHAMBER_DARK, windowSurfaceOnly),
+		-- Slats over the window.
+		rect(w.x, w.y + 1, w.w, 1, GRILLE_DARK, true),
+	})
+end
+
+local COMBUSTION_GENERATOR: Faces = {
+	-- (Four amber corners and a centred exhaust: the same turned by a quarter.)
+	Top = join(outline(COMBUSTION_EDGE, true), {
+		rect(1, 1, 3, 3, FUEL_BAND),
+		rect(12, 1, 3, 3, FUEL_BAND),
+		rect(1, 12, 3, 3, FUEL_BAND),
+		rect(12, 12, 3, 3, FUEL_BAND),
+		rect(5, 5, 6, 6, EXHAUST_RIM),
+		rect(6, 6, 4, 4, EXHAUST),
+	}),
+	Bottom = outline(COMBUSTION_EDGE, true),
+	Front = combustionSide(false),
+	Back = combustionSide(false),
+	Left = combustionSide(true),
+	Right = combustionSide(true),
+}
+
+--[[
 	Structure blocks (Minecraft 1.20.1's structure_block_<mode> textures, the same on every face):
 	the block's dark purple black rim around a black field, light purple arcs in the corners and
 	notches in the middle of each edge, and the mode's sigil in the middle: SAVE a filled rounded
@@ -526,6 +621,8 @@ local DECORS: { [string]: Faces } = {
 	CreativeEnergyCube = CREATIVE_ENERGY_CUBE,
 	HeatGenerator = HEAT_GENERATOR,
 	ElectricFurnace = ELECTRIC_FURNACE,
+	OilRefinery = OIL_REFINERY,
+	CombustionGenerator = COMBUSTION_GENERATOR,
 }
 for _, tier in Tiers.TIERS do
 	DECORS[`{tier.name}Battery`] = batteryFaces(tier.colour)

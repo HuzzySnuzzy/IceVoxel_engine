@@ -502,7 +502,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	): (WailaInfo.TransmitterFacts?, WailaInfo.TankFacts?, WailaInfo.MachineFacts?, string)
 		local x, y, z = hit.x, hit.y, hit.z
 		if Transmitters.isTransmitter(hit.block) then
-			local modes, colour, fluid = TransmitterRenderer.state(x, y, z)
+			local modes, colour, fluid, fluidId = TransmitterRenderer.state(x, y, z)
 			local linked, acceptors = TransmitterRenderer.connections(x, y, z)
 			local items, stacks = TransmitterRenderer.itemsIn(x, y, z)
 			-- (The network walk only for what shows it: a pipe's water, the F3 lines.)
@@ -515,6 +515,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				modes = modes,
 				colour = colour,
 				fluid = fluid,
+				fluidId = fluidId,
 				side = side,
 				items = items,
 				stacks = stacks,
@@ -525,7 +526,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				networkComplete = complete,
 			}
 			local key =
-				`{modes} {colour} {fluid} {side or -1} {items} {stacks} {linked} {acceptors} {size} {capacity} {complete}`
+				`{modes} {colour} {fluid} {fluidId} {side or -1} {items} {stacks} {linked} {acceptors} {size} {capacity} {complete}`
 			return facts, nil, nil, key
 		elseif Transmitters.isTank(hit.block) then
 			local fluid, amount = TransmitterRenderer.tank(x, y, z)
@@ -541,10 +542,19 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 					rate = record.rate,
 					active = record.active,
 					state = record.state,
+					-- (The record's tanks in order, Machines.tankContents; nil for a kind without.)
+					tanks = record.tanks,
 				}
 				else WailaInfo.machineDefaults(hit.block)
+			local tankKey = ""
+			local tanks = facts.tanks
+			if tanks then
+				for _, tank in tanks do
+					tankKey ..= ` {tank.fluid}:{tank.amount}`
+				end
+			end
 			local key =
-				`{facts.energy} {facts.capacity} {facts.input} {facts.output} {facts.rate} {facts.active} {facts.state}`
+				`{facts.energy} {facts.capacity} {facts.input} {facts.output} {facts.rate} {facts.active} {facts.state}{tankKey}`
 			return nil, nil, facts, key
 		end
 		return nil, nil, nil, ""

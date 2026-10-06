@@ -15,12 +15,17 @@
 	                  machine   a Mekanism machine's (Shared/Machines.panel): its kind's slots where
 	                            it puts them (with the outline of what goes in while empty: upgrade
 	                            cards), Mekanism's vertical energy bar (GuiVerticalPowerBar, right
-	                            edge), optionally an arrow, a flame, a status line and more lines
-	                            under it (a battery's input and output)
+	                            edge), a fluid gauge per tank (GuiFluidGauge: Machines.gauges, the
+	                            Heat Generator's lava, the Oil Refinery's oil and fuel, the
+	                            Combustion Generator's fuel), optionally an arrow, a flame, a status
+	                            line and more lines under it (a battery's input and output)
 	  gauges        the furnace's flame and arrow (AbstractFurnaceMenu.getLitProgress /
 	                getBurnProgress), a machine's (from the data fields its panel names), the
 	                energy bar (stored over capacity, red when empty to green when full, "x / y"
-	                on hover), the durability bar under worn tools (ItemStack.getBarWidth /
+	                on hover), a tank gauge (its fluid's colour filling round(amount / capacity x
+	                rows) of its inside from the bottom, Machines.gaugeLevel; "Lava: 5,000 mB"
+	                on hover, Machines.tankLine), the durability bar under worn tools
+	                (ItemStack.getBarWidth /
 	                getBarColor) and Mekanism's energy bar in its place on items that hold energy
 	                (batteries)
 
@@ -32,6 +37,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Types = require(Shared.Inventory.Types)
@@ -44,6 +50,19 @@ export type Spot = { slot: number, x: number, y: number, big: boolean, ghost: { 
 export type Rect = { x: number, y: number, w: number, h: number }
 -- Where a machine's gauge reads its data: `value` over `total` (data indices) or over `fixed`.
 export type Source = { value: number, total: number?, fixed: number? }
+--[[
+	A machine's tank gauge (Machines.gauges): its frame and the inside the fluid fills, the data
+	index of its amount (mB) over its capacity, and its fluid (`fluid`, or the id at data index
+	`fluidIndex` for a tank taking several).
+]]
+export type TankSpot = {
+	frame: Rect,
+	inner: Rect,
+	amount: number,
+	capacity: number,
+	fluid: number,
+	fluidIndex: number?,
+}
 
 -- The player panel's crafting area (window 0 only).
 export type Grid = {
@@ -77,6 +96,8 @@ export type Panel = {
 	status: { x: number, y: number }?,
 	-- Where the machine's extra lines go (Machines.lines), one position per line that fits.
 	lines: { { x: number, y: number } },
+	-- Its tanks' gauges (none for other panels).
+	tanks: { TankSpot },
 }
 
 local MenuLayout = {}
@@ -160,6 +181,7 @@ local function chestPanel(container: Container): Panel
 		energy = nil,
 		status = nil,
 		lines = {},
+		tanks = {},
 	}
 end
 
@@ -188,6 +210,7 @@ local function craftingPanel(container: Container): Panel
 		energy = nil,
 		status = nil,
 		lines = {},
+		tanks = {},
 	}
 end
 
@@ -214,6 +237,7 @@ local function furnacePanel(container: Container): Panel
 		energy = nil,
 		status = nil,
 		lines = {},
+		tanks = {},
 	}
 end
 
@@ -231,10 +255,26 @@ local function sourceOf(block: number, gauge: Machines.Gauge): Source?
 	return if index then { value = value, total = index, fixed = nil } else nil
 end
 
+-- The tank gauges of machine `block` (Machines.gauges): a 1 pixel frame around the fluid.
+local function tankSpots(block: number): { TankSpot }
+	local spots: { TankSpot } = {}
+	for _, gauge in Machines.gauges(block) do
+		table.insert(spots, {
+			frame = { x = gauge.x, y = gauge.y, w = gauge.w, h = gauge.h },
+			inner = { x = gauge.x + 1, y = gauge.y + 1, w = gauge.w - 2, h = gauge.h - 2 },
+			amount = gauge.amount,
+			capacity = gauge.capacity,
+			fluid = gauge.fluid,
+			fluidIndex = gauge.fluidIndex,
+		})
+	end
+	return spots
+end
+
 --[[
 	A Mekanism machine's panel (Shared/Machines.panel): its kind's slots at their places, the
 	title centred, the energy bar (Mekanism's GuiVerticalPowerBar at (164, 15) unless the kind puts
-	it elsewhere), the arrow, flame and status line the kind asks for.
+	it elsewhere), a gauge per tank, the arrow, flame and status line the kind asks for.
 ]]
 local function machinePanel(container: Container): Panel
 	local block = container.block
@@ -288,6 +328,7 @@ local function machinePanel(container: Container): Panel
 		energy = { x = if at then at.x else bar.x, y = if at then at.y else bar.y, w = bar.w, h = bar.h },
 		status = spec.status,
 		lines = lines,
+		tanks = tankSpots(block),
 	}
 end
 
@@ -404,6 +445,43 @@ function MenuLayout.energyRows(data: { number }?, height: number): number
 		return 0
 	end
 	return math.clamp(math.floor(fraction * height), 1, height)
+end
+
+--[[ Tank gauges (Mekanism's GuiFluidGauge) ]]
+
+-- The fluid a tank gauge shows (Shared/Fluids id, 0: none), from the window's `data`.
+function MenuLayout.tankFluid(data: { number }?, tank: TankSpot): number
+	local index = tank.fluidIndex
+	local fluid = if index then value(data, index) else tank.fluid
+	return if Fluids.isValid(fluid) then fluid else 0
+end
+
+-- How many mB a tank gauge's tank holds, from the window's `data` (whole, 0..capacity).
+function MenuLayout.tankAmount(data: { number }?, tank: TankSpot): number
+	return math.clamp(math.floor(value(data, tank.amount)), 0, tank.capacity)
+end
+
+-- Rows of a tank gauge's inside its fluid fills, from the bottom (Machines.gaugeLevel).
+function MenuLayout.tankRows(data: { number }?, tank: TankSpot): number
+	if MenuLayout.tankFluid(data, tank) == 0 then
+		return 0
+	end
+	return Machines.gaugeLevel(MenuLayout.tankAmount(data, tank), tank.capacity, tank.inner.h)
+end
+
+-- The colour a tank gauge fills with (the fluid's: Fluids `color`), grey for none.
+function MenuLayout.tankColour(fluid: number): { number }
+	local record = Fluids.get(fluid)
+	return if record then record.color else { 139, 139, 139 }
+end
+
+-- A tank gauge's tooltip: "Lava: 5,000 mB" or "Empty" (Machines.tankLine), then its capacity.
+function MenuLayout.tankTooltip(data: { number }?, tank: TankSpot): { string }
+	local fluid = MenuLayout.tankFluid(data, tank)
+	return {
+		Machines.tankLine(fluid, if fluid ~= 0 then MenuLayout.tankAmount(data, tank) else 0),
+		`Capacity: {Items.formatFluid(tank.capacity)}`,
+	}
 end
 
 -- The bar's colour for a fill of `fraction`: red when empty, through yellow, to green when full

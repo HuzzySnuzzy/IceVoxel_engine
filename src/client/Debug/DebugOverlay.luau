@@ -83,6 +83,7 @@ local function movementLine(): string
 	end
 	flag(s.onGround, "ground")
 	flag(s.inWater, "water")
+	flag(s.inLava, "lava")
 	flag(s.sprinting, "sprint")
 	flag(s.sneaking, "sneak")
 	flag(s.flying, "flying")
@@ -122,10 +123,11 @@ local function meshLine(stats: MeshOverlay.Stats): string
 	)
 end
 
--- Parts, pooled parts and PointLights (glow lichen's: how many are on, near the camera).
+-- Parts, pooled parts and PointLights (glow lichen's and lava's: how many are on, near the camera).
 local function partsLine(renderer: ChunkRenderer.ChunkRenderer): string
 	local lights = renderer.lightCount - renderer.sparseCount + renderer.sparseOn
-	return `parts   {renderer.partCount}  pooled {renderer.pool.freeCount}  lights {lights} (lichen {renderer.sparseOn} of {renderer.sparseCount})`
+	local lichenOn, lichen = renderer.sparseOn - renderer.lavaOn, renderer.sparseCount - renderer.lavaCount
+	return `parts   {renderer.partCount}  pooled {renderer.pool.freeCount}  lights {lights} (lichen {lichenOn} of {lichen}, lava {renderer.lavaOn} of {renderer.lavaCount})`
 end
 
 -- The cave view: how far caves are revealed and whether full detail reaches further.

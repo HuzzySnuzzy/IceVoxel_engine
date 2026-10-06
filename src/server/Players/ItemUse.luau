@@ -1,7 +1,8 @@
 --!strict
 --[[
 	Right clicks on blocks with items that are no block (UseItem messages): Mekanism's Configurator
-	on transmitters and Minecraft's buckets on water and fluid tanks. The rules are
+	on transmitters and Minecraft's buckets on fluid sources, Fluid Tanks and machines' fluid tanks,
+	for every fluid pipes carry (Shared/Fluids: water, lava, oil, fuel). The rules are
 	Transmitters/UseRules (pure, tested); this checks the request and plays them out. Clients do
 	not predict any of it: the inventory snapshot, the world's edits and the Transmitters / Tanks
 	records bring the results.
@@ -19,13 +20,18 @@
 	                 transporter cycles its colour instead. The player gets Mekanism's message
 	                 ("Connection type changed to pull", "Colour bumped to: red") and everyone near
 	                 hears a click (item.configurator.click).
-	  Bucket         on a water source: takes it (air) and fills (item.bucket.fill at the player);
-	                 on a fluid tank holding a bucket's worth of water, not sneaking: drains 1000 mB
-	                 (the sound at the tank).
-	  Water Bucket   on a fluid tank with room for 1000 mB, not sneaking: fills it; elsewhere:
-	                 places a water source in the block, or beyond the clicked side
-	                 (item.bucket.empty where the water goes); a plant it replaces drops
-	                 (UseRules.pour). Block updates take it from there.
+	  Bucket         on a fluid's source (its cave twin too): takes it (air) and becomes that
+	                 fluid's bucket (the fluid's fill sound, item.bucket.fill_lava ..., at the
+	                 player); not sneaking, on a Fluid Tank holding a bucket's worth: drains
+	                 1000 mB; on a machine with fluid tanks: 1000 mB out of an output tank, else an
+	                 input tank, holding that much (Machines.fillBucket; the sound at the block).
+	  Full buckets   (Water, Lava, Oil, Fuel) not sneaking, on a Fluid Tank with room for 1000 mB
+	                 of that fluid: fills it; on a machine with an input tank taking the fluid and
+	                 room for all of it: pours into it (Machines.pourBucket). Elsewhere: places the
+	                 fluid's source in the block, or beyond the clicked side (its empty sound where
+	                 it goes); a plant it replaces drops (UseRules.pour). Block updates take it from
+	                 there (lava meeting water hardens). What a machine's tank gained or lost
+	                 reaches its viewers with server/Machines' next step.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
 	thrown).
 ]]
@@ -34,7 +40,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -44,6 +49,7 @@ local SharedTransmitters = require(Shared.Transmitters)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local Containers = require(script.Parent.Containers)
 local Inventories = require(script.Parent.Inventories)
 local TransmitterWorld = require(script.Parent.Parent.Transmitters.TransmitterWorld)
 local Transmitters = require(script.Parent.Parent.Transmitters.Transmitters)
@@ -54,8 +60,6 @@ type Stack = Items.Stack
 
 local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
-local BUCKET = SharedTransmitters.BUCKET
-local WATER = SharedTransmitters.FLUIDS.WATER
 -- Uses a player may make per second (bursts of twice that).
 local USES_PER_SECOND = 10
 
@@ -144,76 +148,36 @@ local function configure(
 	end
 end
 
--- An empty bucket on (x, y, z): a fluid tank's water or a water source.
-local function fill(
+-- What a bucket use needs from the game, for `player`.
+local function bucketEnv(
 	world: WorldServer.World,
 	simulation: TransmitterWorld.World,
-	player: Player,
-	held: Stack,
-	block: number,
-	x: number,
-	y: number,
-	z: number,
-	sneaking: boolean
-)
-	local creative = GameMode.instabuildOf(player)
-	if not sneaking and SharedTransmitters.isTank(block) then
-		local amount, fluid = TransmitterWorld.drainTank(simulation, x, y, z, BUCKET, true)
-		if amount < BUCKET or fluid ~= WATER then
-			return
-		end
-		TransmitterWorld.drainTank(simulation, x, y, z, BUCKET)
-		apply(player, UseRules.fillFromTank(held, creative))
-		play(player, "item.bucket.fill", x + 0.5, y + 0.5, z + 0.5)
-	elseif UseRules.isWaterSource(block) then
-		if not world:setBlock(x, y, z, Blocks.AIR) then
-			return
-		end
-		apply(player, UseRules.fillFromWorld(held, creative, Inventories.hasItem(player, UseRules.WATER_BUCKET)))
-		-- (At the player, as Minecraft's Player.playSound.)
-		if Sounds.allow(player) then
-			Sounds.playAt(player, "item.bucket.fill")
-		end
-	end
+	player: Player
+): UseRules.BucketEnv
+	return {
+		world = world,
+		pipes = simulation,
+		containers = Containers.default,
+		creative = GameMode.instabuildOf(player),
+		hasItem = function(item: number): boolean
+			return Inventories.hasItem(player, item)
+		end,
+	}
 end
 
--- A water bucket on (x, y, z): into a fluid tank, or a water source into the world.
-local function empty(
-	world: WorldServer.World,
-	simulation: TransmitterWorld.World,
-	player: Player,
-	held: Stack,
-	block: number,
-	x: number,
-	y: number,
-	z: number,
-	side: number,
-	sneaking: boolean
-)
-	local creative = GameMode.instabuildOf(player)
-	if not sneaking and SharedTransmitters.isTank(block) then
-		-- (A bucket empties whole or not at all; a tank without room for it takes nothing.)
-		if TransmitterWorld.fillTank(simulation, x, y, z, WATER, BUCKET, true) < BUCKET then
-			return
+-- Plays out a bucket use: the player's new stacks and the sound.
+local function bucketDone(player: Player, done: UseRules.BucketResult?)
+	if done == nil then
+		return
+	end
+	apply(player, done.held, done.give)
+	if done.sound and Sounds.allow(player) then
+		if done.atPlayer then
+			Sounds.playAt(player, done.sound)
+		else
+			Sounds.play(done.sound, done.x, done.y, done.z)
 		end
-		TransmitterWorld.fillTank(simulation, x, y, z, WATER, BUCKET)
-		apply(player, UseRules.emptied(held, creative))
-		play(player, "item.bucket.empty", x + 0.5, y + 0.5, z + 0.5)
-		return
 	end
-	local tx, ty, tz = UseRules.waterTarget(function(bx: number, by: number, bz: number): number?
-		return world:peekBlock(bx, by, bz)
-	end, x, y, z, side)
-	if tx == nil then
-		return
-	end
-	-- (Pouring into a water source changes nothing but still empties the bucket, as in Minecraft;
-	-- a plant there drops.)
-	if not UseRules.pour(world, tx, ty, tz) then
-		return
-	end
-	apply(player, UseRules.emptied(held, creative))
-	play(player, "item.bucket.empty", tx + 0.5, ty + 0.5, tz + 0.5)
 end
 
 local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, player: Player, payload: buffer)
@@ -238,9 +202,12 @@ local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, pla
 	if held.item == UseRules.CONFIGURATOR then
 		configure(net, simulation, player, block, x, y, z, side, sneaking)
 	elseif held.item == UseRules.BUCKET then
-		fill(world, simulation, player, held, block, x, y, z, sneaking)
-	elseif held.item == UseRules.WATER_BUCKET then
-		empty(world, simulation, player, held, block, x, y, z, side, sneaking)
+		bucketDone(player, UseRules.fillBucket(bucketEnv(world, simulation, player), held, block, x, y, z, sneaking))
+	elseif UseRules.bucketFluid(held.item) ~= 0 then
+		bucketDone(
+			player,
+			UseRules.emptyBucket(bucketEnv(world, simulation, player), held, block, x, y, z, side, sneaking)
+		)
 	end
 end
 

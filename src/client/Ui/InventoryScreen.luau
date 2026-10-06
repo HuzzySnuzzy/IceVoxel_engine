@@ -18,9 +18,12 @@
 	            the flame burns down and the arrow fills from the container's `data`
 	  machine   a Mekanism machine (Shared/Machines): its name, its kind's slots (an empty upgrade
 	            slot shows a faint outline of its card), gauges, status line and the lines under it
-	            (a battery's input and output), and Mekanism's vertical energy bar filling from the
-	            bottom, red when nearly empty to green when full; hovering it shows "stored /
-	            capacity" (`tooltipAt`)
+	            (a battery's input and output), Mekanism's vertical energy bar filling from the
+	            bottom, red when nearly empty to green when full, and a fluid gauge per tank (the
+	            Heat Generator's lava, the Oil Refinery's oil and fuel, the Combustion Generator's
+	            fuel: Mekanism's 18 x 60 GuiFluidGauge, the fluid's colour filling it from the bottom
+	            under the gauge's scale marks); hovering the bar shows "stored / capacity", a gauge
+	            "Lava: 5,000 mB" and its capacity (`tooltipAt`)
 	Machines' items that hold energy (charged batteries, machines broken with energy in them) show
 	Mekanism's energy bar where a worn tool's durability bar goes (Ui/ItemIcon).
 	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
@@ -39,6 +42,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
@@ -66,6 +70,13 @@ local PREVIEW_FOV = 30
 local ARROW_COLOUR = Style.Colour.Slot
 local PROGRESS_COLOUR = Color3.new(1, 1, 1)
 local PROGRESS_ARROW_W, PROGRESS_ARROW_H = 22, 15
+-- A tank gauge's empty inside, and its scale: TANK_MARKS parts, marked over the fluid from the
+-- right edge (Mekanism's gauge overlay), dark and see-through.
+local TANK_BACK = Color3.fromRGB(64, 64, 64)
+local TANK_MARKS = 8
+local TANK_MARK_LONG, TANK_MARK_SHORT = 8, 4
+local TANK_MARK_COLOUR = Color3.new(0, 0, 0)
+local TANK_MARK_TRANSPARENCY = 0.45
 local FIRE_PALETTE = Style.FirePalette
 local UNLIT_PALETTE: { [string]: Color3 } = { R = ARROW_COLOUR, O = ARROW_COLOUR, Y = ARROW_COLOUR, W = ARROW_COLOUR }
 
@@ -164,6 +175,8 @@ type Gauge = { clip: Frame, holder: Frame, rect: MenuLayout.Rect, shown: number 
 
 -- A machine's energy bar: its sunken frame and the fill (rows shown, colour key).
 type EnergyBar = { frame: Frame, fill: Frame, rect: MenuLayout.Rect, shown: number, colour: string }
+-- A machine's tank gauge: its sunken frame, the fluid filling it (rows and fluid shown).
+type TankGauge = { frame: Frame, fill: Frame, spot: MenuLayout.TankSpot, shown: number, fluid: number }
 
 type Self = InventoryScreen & {
 	playerPanel: Frame,
@@ -188,6 +201,7 @@ type Self = InventoryScreen & {
 	statusLabel: TextLabel?,
 	-- Its extra lines under the status line (a battery's input and output), one label each.
 	lineLabels: { TextLabel },
+	tankGauges: { TankGauge },
 	machineData: { number }?,
 	machineShown: boolean,
 	byButton: { [GuiObject]: SlotWidget },
@@ -288,6 +302,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			energyBar = nil,
 			statusLabel = nil,
 			lineLabels = {},
+			tankGauges = {},
 			machineData = nil,
 			machineShown = false,
 			byButton = {},
@@ -481,6 +496,22 @@ local function buildPanel(self: Self, container: Types.Container)
 		label.TextTruncate = Enum.TextTruncate.AtEnd
 		table.insert(self.lineLabels, label)
 	end
+	for _, spot in layout.tanks do
+		-- Mekanism's GuiFluidGauge: a sunken frame, the fluid filling it from the bottom, the
+		-- scale's marks over it (a long one every quarter, short ones between).
+		local rect = spot.frame
+		local frame = Style.inset(panel, rect.x, rect.y, rect.w, rect.h, 5, TANK_BACK)
+		local inner = spot.inner
+		local fill = Style.frame(frame, 1, 1 + inner.h, inner.w, 0, TANK_BACK, 3)
+		for mark = 1, TANK_MARKS - 1 do
+			local long = mark % 2 == 0
+			local y = 1 + math.floor(inner.h * mark / TANK_MARKS)
+			local w = if long then TANK_MARK_LONG else TANK_MARK_SHORT
+			local line = Style.frame(frame, 1 + inner.w - w, y, w, 1, TANK_MARK_COLOUR, 4)
+			line.BackgroundTransparency = TANK_MARK_TRANSPARENCY
+		end
+		table.insert(self.tankGauges, { frame = frame, fill = fill, spot = spot, shown = -1, fluid = -1 })
+	end
 	self.layout = layout
 	closeButton(self, panel)
 	self.containerPanel = panel
@@ -528,6 +559,7 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 		self.energyBar = nil
 		self.statusLabel = nil
 		self.lineLabels = {}
+		self.tankGauges = {}
 		self.machineData = nil
 		self.machineShown = false
 		if panelContainer then
@@ -559,6 +591,28 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 	self.root.Size = UDim2.fromOffset(WIDTH, self.height)
 	-- Window slots for this layout (only the container's size matters).
 	assignIndices(self, { id = 0, inventory = Types.newInventory(), container = container })
+end
+
+-- A machine's tank gauges from its `data` (MenuLayout.tankRows / tankFluid / tankColour).
+local function renderTanks(self: Self, data: { number }?)
+	for _, gauge in self.tankGauges do
+		local spot = gauge.spot
+		local rows = MenuLayout.tankRows(data, spot)
+		local fluid = MenuLayout.tankFluid(data, spot)
+		if rows ~= gauge.shown then
+			gauge.shown = rows
+			gauge.fill.Position = UDim2.fromOffset(1, 1 + spot.inner.h - rows)
+			gauge.fill.Size = UDim2.fromOffset(spot.inner.w, rows)
+		end
+		if fluid ~= gauge.fluid then
+			gauge.fluid = fluid
+			local rgb = MenuLayout.tankColour(fluid)
+			gauge.fill.BackgroundColor3 = Color3.fromRGB(rgb[1], rgb[2], rgb[3])
+			-- (Water and fuel show a little of the gauge's back through them; lava and oil none.)
+			local record = Fluids.get(fluid)
+			gauge.fill.BackgroundTransparency = if record and record.light == 0 and fluid ~= Fluids.OIL then 0.1 else 0
+		end
+	end
 end
 
 -- A machine's energy bar from its `data` (MenuLayout.energyRows / energyColour).
@@ -602,6 +656,7 @@ local function renderGauges(self: Self, window: Window)
 		local columns = MenuLayout.machineArrowColumns(data, layout.progressSource)
 		setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
 		renderEnergy(self, data)
+		renderTanks(self, data)
 		local label = self.statusLabel
 		if label then
 			local text = MenuLayout.statusText(container)
@@ -708,12 +763,22 @@ function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
 	return { kind = "outside" }
 end
 
--- A tooltip for what is under `point` besides items: a machine's energy bar ("1.2 kJ / 20 kJ").
+--[[
+	A tooltip for what is under `point` besides items: a machine's energy bar ("1.2 kJ / 20 kJ"), a
+	tank gauge ("Lava: 5,000 mB", "Capacity: 24,000 mB").
+]]
 function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): { string }?
 	local bar = self.energyBar
 	local container = window.container
 	if bar and container and Style.contains(bar.frame, point) then
 		return { MenuLayout.energyTooltip(container.data) }
+	end
+	if container then
+		for _, gauge in self.tankGauges do
+			if Style.contains(gauge.frame, point) then
+				return MenuLayout.tankTooltip(container.data, gauge.spot)
+			end
+		end
 	end
 	return nil
 end

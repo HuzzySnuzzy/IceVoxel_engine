@@ -24,14 +24,18 @@ return {
 		"JungleLeaves",
 	},
 
-	-- Never stand inside these.
+	-- Never stand inside these (a fluid's name covers its cave twin too: CaveLava, CaveOil).
 	Body = {
 		"Water",
+		"Lava",
+		"Oil",
+		"Fuel",
 	},
 
-	-- Never stand next to these.
+	-- Never stand next to these (lava burns a player whose box reaches into it).
 	Hazards = {
 		"Cactus",
+		"Lava",
 	},
 
 	-- Free blocks needed above the floor (the default character is ~1.7 blocks tall).

@@ -15,14 +15,15 @@
 	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
 	  6. players    -> game modes (/gamemode, the F3 + F4 switcher and F3 + N), the time (/time,
 	                   /gamerule doDaylightCycle), cosmetic characters (collision group, teleports,
-	                   fall damage, invulnerability), item entities (drops), inventories, chests,
+	                   fall damage, invulnerability, lava and burning), item entities (drops,
+	                   burning in lava), inventories, chests,
 	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
 	                   spawning, map and spectator teleports, waypoints, player settings (the
 	                   Options menu's choices, Players/SettingsStore), keeping chunks around
 	                   players generated
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
-	                   transporters, water in pipes, replication), and the Configurator and buckets
-	                   (Players/ItemUse)
+	                   transporters, fluids in pipes, Fluid Tanks and machines' tanks, replication),
+	                   and the Configurator and buckets (Players/ItemUse)
 	  8. machines   -> Mekanism's machines and energy (Machines/Machines: machine ticks, energy
 	                   networks through Universal Cables, energy kept in items, replication)
 	  9. structures -> structure blocks and jigsaw blocks (Structures/StructureBlocks: their

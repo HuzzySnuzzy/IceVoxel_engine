@@ -12,16 +12,19 @@
 	                             values, saving them on the server, and the effects registered
 	                             below that apply them live
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
+	  Rendering/FluidFog         the view from inside water, lava, oil or fuel: Minecraft's fluid
+	                             fog in the fluid's colour and a tint
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
 	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons,
 	                             the spectator menu (SpectatorGui), the game mode switcher
 	                             (GameModeSwitcher: F3 + F4)
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
-	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay)
+	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay,
+	                             TankUse: buckets on machines)
 	  Entities/EntityRenderer    dropped items
-	  Rendering/TransmitterRenderer  Mekanism pipes and machines: arms, water in pipes and tanks,
-	                             items moving through transporters, the windows of a burning Heat
-	                             Generator and a smelting Electric Furnace (the server's
+	  Rendering/TransmitterRenderer  Mekanism pipes and machines: arms, fluids in pipes and tanks,
+	                             items moving through transporters, the windows of working
+	                             generators, furnaces and refineries (the server's
 	                             Transmitters / Tanks / Machines / Transport messages)
 	  Net/Notices                server messages in the chat (/gamemode answers)
 	  Net/StructureNet           structure blocks and jigsaws: their records, their screens
@@ -31,13 +34,14 @@
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
-	                             swimming, landings), Ambience (a lit furnace or Heat
-	                             Generator, caves)
+	                             swimming, landings), Ambience (a lit furnace, Heat or
+	                             Combustion Generator, lava, caves)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Player/HeldItems           the item in every character's hand, and in first person
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
+	  Player/BurningView         flames on burning players (lava), the fire overlay in first person
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
 ]]
 
@@ -57,6 +61,7 @@ local WorkerPool = require(Client.Streaming.WorkerPool)
 local ChunkRenderer = require(Client.Rendering.ChunkRenderer)
 local ViewSettings = require(Client.Rendering.ViewSettings)
 local LightingController = require(Client.Rendering.LightingController)
+local FluidFog = require(Client.Rendering.FluidFog)
 local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
@@ -69,6 +74,7 @@ local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local SpectatorView = require(Client.Player.SpectatorView)
+local BurningView = require(Client.Player.BurningView)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -216,16 +222,37 @@ TransmitterRenderer.start(world, function(cx: number, cz: number): boolean
 	return node ~= nil and node.shown
 end)
 MovementController.start(world, streamer)
+-- (After the camera: the fluid at the camera, its fog and tint.)
+FluidFog.start(
+	function(x: number, y: number, z: number): number?
+		return world:getBlock(x, y, z)
+	end,
+	function(): boolean
+		local view = MovementController.current
+		return view ~= nil and view.state.noClip
+	end,
+	function(): number
+		return FluidFog.light(LightingController.dayTime(), LightingController.skyExposure())
+	end,
+	ViewSettings.setFluidFog,
+	LightingController.setFogColour,
+	function(): number
+		return (ViewSettings.lod())
+	end
+)
 CharacterAnimator.start()
 HeldItems.start()
 SpectatorView.start()
+BurningView.start()
 BlockInteraction.start(world)
 GameModeSwitcher.start()
 DebugOverlay.start(streamer)
 Waila.start(world, generator)
 Map.start(pool, generator)
 MovementSounds.start(world)
-Ambience.start()
+Ambience.start(function(x: number, y: number, z: number): number?
+	return world:getBlock(x, y, z)
+end)
 
 RunService.Heartbeat:Connect(function(dt)
 	-- While the player waits for the ground, the renderer may build longer per frame.

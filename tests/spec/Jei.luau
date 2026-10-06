@@ -123,7 +123,7 @@ return function(t, shared, require, _server, client)
 	t.test("jei: every recipe, smelting recipe and fuel is an entry", function()
 		local counts = { crafting = 0, smelting = 0, fuel = 0 }
 		for _, entry in JeiData.entries() do
-			counts[entry.category] += 1
+			counts[entry.category] = (counts[entry.category] or 0) + 1
 		end
 		t.eq(counts.crafting, #Crafting.recipes, "crafting")
 		t.eq(counts.smelting, #Smelting.recipes(), "smelting")
@@ -201,11 +201,15 @@ return function(t, shared, require, _server, client)
 		t.eq(#JeiData.recipes(id.Dirt), 0, "dirt has no recipe")
 		t.ok(not JeiData.has("recipes", id.Dirt), "has: dirt")
 		t.ok(JeiData.has("recipes", id.Torch), "has: torch")
-		-- Every result of a lookup makes that item.
+		-- Every result of a lookup makes that item (a fluid entry: the fluid it stands for).
 		for _, def in Items.list do
 			for _, group in JeiData.recipes(def.id) do
 				for _, entry in group.entries do
-					t.eq(entry.output.item, def.id, `{def.name}: entry makes it`)
+					local output = entry.output
+					local fluid = entry.fluidOutput
+					local made = (output ~= nil and output.item == def.id)
+						or (fluid ~= nil and table.find(JeiData.fluidItems(fluid.fluid), def.id) ~= nil)
+					t.ok(made, `{def.name}: entry makes it`)
 				end
 			end
 		end
@@ -247,6 +251,12 @@ return function(t, shared, require, _server, client)
 							takes = true
 						end
 					end
+					-- (A fluid stack takes its bucket and its block.)
+					for _, stack in entry.fluidInputs or {} do
+						if table.find(JeiData.fluidItems(stack.fluid), def.id) then
+							takes = true
+						end
+					end
 					t.ok(takes or catalyst, `{def.name}: the entry takes it`)
 				end
 			end
@@ -269,10 +279,11 @@ return function(t, shared, require, _server, client)
 		t.eq(#furnace[3].entries, counts.fuel, "furnace: every fuel")
 		t.ok(find(furnace, "smelting", makes(id.IronIngot)), "furnace: iron ore -> ingot")
 		t.ok(JeiData.has("uses", id.Furnace), "has: furnace")
-		-- Mekanism Generators' Heat Generator burns the same fuel.
+		-- Mekanism Generators' Heat Generator burns the same fuel, and lava.
 		local generator = JeiData.uses(id.HeatGenerator)
-		same(categories(generator) :: any, { "fuel" } :: any, "heat generator categories")
+		same(categories(generator) :: any, { "fuel", "heating" } :: any, "heat generator categories")
 		t.eq(#generator[1].entries, counts.fuel, "heat generator: every fuel")
+		t.eq(#generator[2].entries, 1, "heat generator: lava")
 
 		local workbench = JeiData.uses(id.CraftingTable)
 		same(categories(workbench) :: any, { "crafting", "fuel" } :: any, "crafting table categories")
@@ -354,6 +365,14 @@ return function(t, shared, require, _server, client)
 			local inset = if out.big then 5 else 1
 			local size = if out.big then 26 else 18
 			add({ x = out.x - inset, y = out.y - inset, w = size, h = size }, "output")
+		end
+		-- (Fluid stacks are drawn in a slot's 18 x 18 frame.)
+		for i, spot in layout.fluidInputs do
+			add({ x = spot.x - 1, y = spot.y - 1, w = 18, h = 18 }, `fluid input {i}`)
+		end
+		local fluidOut = layout.fluidOutput
+		if fluidOut then
+			add({ x = fluidOut.x - 1, y = fluidOut.y - 1, w = 18, h = 18 }, "fluid output")
 		end
 		for _, name in { "arrow", "flame", "plus", "shapeless" } do
 			local r = (layout :: any)[name]

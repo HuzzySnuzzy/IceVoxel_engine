@@ -35,12 +35,19 @@
 	    never the void. Elsewhere a hidden cave cell is enclosed by rock and other hidden cave
 	    cells, nobody can see it, and it is a wildcard like enclosed rock: not drawn, but an opaque
 	    box may run through it (the caps merge into the rock around them).
-	  * Sparse lights (`sparseLightLut`: glow lichen): every lichen cell is drawn, but only one per
-	    LIGHT_BOX^3 block box (world aligned, so inside one section of one chunk) carries the light:
-	    the one nearest the box's centre (on a tie the lowest, then northmost, then westmost). Its
-	    key's surface field is 1 (`decodeKey`), the others' 0. The choice depends only on the
-	    cells in the box, so the same blocks always light the same cell: no lights jumping around
-	    on a remesh.
+	  * Sparse lights (`sparseLightLut`: glow lichen and lava): every cell is drawn, but only one
+	    per light box (`sparseBoxLut`: LIGHT_BOX^3 blocks for lichen, FLUID_LIGHT_BOX^3 for a fluid
+	    giving off light; world aligned, so inside one section of one chunk) carries the light:
+	    among the drawn cells of the box, the one nearest its centre (on a tie the lowest, then
+	    northmost, then westmost). A lichen's key then has surface field 1, the others' 0; a
+	    fluid's has FLUID_LIT added to its height (`fluidSurface` splits them). The choice depends
+	    only on the cells in the box, so the same blocks always light the same cell: no lights
+	    jumping around on a remesh. Lichen and lava choose apart (a box may light one of each).
+	    `noLights` (far LOD nodes, whose parts carry no light) chooses none, so a lava lake there
+	    stays one box.
+	  * Fluids compare by their surface form (`Blocks.surfaceForm`): a cave twin (CaveLava) and its
+	    ordinary source are the same fluid, so a lava sea half twin, half lava (where a twin
+	    flowed, or a bucket was poured into it) draws no wall between them.
 	  * Plants (Blocks.foliageLut: grass, ferns, flowers, mushrooms) are shaped blocks like torches.
 	    With `hideFoliage` (Config.Render.Foliage off, or a chunk too far: LodTree.drawsFoliage)
 	    they are not drawn at all; they hide nothing, so that changes no other box. `mesh` counts
@@ -60,15 +67,16 @@
 	  sx, sy, sz   size in cells,
 	  key          appearance id + surface * KEY_STRIDE (see `decodeKey`). The surface field has
 	               three uses, told apart by the appearance: a fluid's height (0 for full cells,
-	               otherwise the height of the top cell in ninths of a block), a tinted plant's
-	               foliage tint (0 = none, t = Blocks.FOLIAGE_TINTS[t]), and whether a sparse light
-	               (glow lichen) carries its light (1) or not (0). Shaped blocks never use the
-	               first, and no tinted plant gives light, so they never clash. At most 63 (u16
-	               keys).
+	               otherwise the height of the top cell in ninths of a block; plus FLUID_LIT on the
+	               cell carrying a lit fluid's light: `fluidSurface`), a tinted plant's foliage tint
+	               (0 = none, t = Blocks.FOLIAGE_TINTS[t]), and whether a sparse light (glow lichen)
+	               carries its light (1) or not (0). Shaped blocks are never fluids, and no tinted
+	               plant gives light, so they never clash. At most 63 (u16 keys).
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
+local Config = require(script.Parent.Parent.Config)
 
 local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
@@ -120,19 +128,40 @@ assert(readu8(kindLut, STONE_APPEARANCE) == OPAQUE, "stone caps must be opaque")
 
 -- Blocks (by their item, or their name when they are an item) whose light only some cells carry:
 -- glow lichen covers whole cave walls, and a PointLight per cell would be hundreds of lights.
+-- Every fluid giving off light (lava) is one too: a lava sea is thousands of cells.
 local SPARSE_LIGHT_ITEMS: { [string]: boolean } = { GlowLichen = true }
--- Blocks per side of the boxes sparse lights are thinned in (one light per box). A power of two
+-- Blocks per side of the boxes sparse lights are thinned in (one light per box). Powers of two
 -- dividing Config.SectionHeight and the chunk size, so a box never crosses a section or a chunk.
+-- Lit fluids get the bigger box: lava's light reaches twice as far as lichen's (15 against 7,
+-- PartPool), and a light splits a lava sea's surface sheet into about five boxes.
 local LIGHT_BOX = 8
-assert(SIZE % LIGHT_BOX == 0, "LIGHT_BOX must divide the chunk size")
+local FLUID_LIGHT_BOX = 16
+assert(SIZE % LIGHT_BOX == 0 and SIZE % FLUID_LIGHT_BOX == 0, "light boxes must divide the chunk size")
+assert(Config.SectionHeight % FLUID_LIGHT_BOX == 0, "light boxes must divide the section height")
+-- Added to a lit fluid cell's height in its key's surface field (heights are 0..8).
+local FLUID_LIT = 16
 
--- 1 per *appearance* id whose light is sparse.
+-- 1 per *appearance* id whose light is sparse, and the side of its light boxes (u8, 0: none).
 local sparseLightLut = buffer.create(#Blocks.appearances + 1)
+local sparseBoxLut = buffer.create(#Blocks.appearances + 1)
 for id = 0, Blocks.count - 1 do
 	local def = Blocks.get(id)
-	if def.appearance ~= 0 and def.light > 0 and SPARSE_LIGHT_ITEMS[def.item or def.name] then
-		writeu8(sparseLightLut, def.appearance, 1)
+	if def.appearance ~= 0 and def.light > 0 then
+		local size = if def.kind == FLUID
+			then FLUID_LIGHT_BOX
+			elseif SPARSE_LIGHT_ITEMS[def.item or def.name] then LIGHT_BOX
+			else 0
+		if size > 0 then
+			writeu8(sparseLightLut, def.appearance, 1)
+			writeu8(sparseBoxLut, def.appearance, size)
+		end
 	end
+end
+
+-- Each block as fluids compare it (u16 per block id): a cave twin is its source (CaveLava is Lava).
+local fluidFormLut = buffer.create(Blocks.count * 2)
+for id = 0, Blocks.count - 1 do
+	writeu16(fluidFormLut, id * 2, if Blocks.get(id).fluid then Blocks.surfaceForm(id) else id)
 end
 
 --[[
@@ -154,20 +183,62 @@ GreedyMesher.NOT_OPEN = 0xFFFF
 GreedyMesher.HIDDEN_BELOW = 16
 GreedyMesher.HIDDEN_ABOVE = 32
 GreedyMesher.LIGHT_BOX = LIGHT_BOX
+GreedyMesher.FLUID_LIGHT_BOX = FLUID_LIGHT_BOX
+GreedyMesher.FLUID_LIT = FLUID_LIT
 GreedyMesher.sparseLightLut = sparseLightLut
+GreedyMesher.sparseBoxLut = sparseBoxLut
+GreedyMesher.fluidFormLut = fluidFormLut
 GreedyMesher.caveCellLut = caveCellLut
 GreedyMesher.STONE_APPEARANCE = STONE_APPEARANCE
 
 --[[
-	How far cell (x, y, z) (chunk-local x and z, absolute y) is from the centre of its LIGHT_BOX
-	box, squared and doubled per axis (whole numbers): the sparse light of a box goes to its cell
-	with the lowest score.
+	How far cell (x, y, z) (chunk-local x and z, absolute y) is from the centre of its light box
+	(`size` blocks a side; default LIGHT_BOX), squared and doubled per axis (whole numbers): the
+	sparse light of a box goes to its cell with the lowest score.
 ]]
-function GreedyMesher.lightScore(x: number, y: number, z: number): number
-	local dx = 2 * (x % LIGHT_BOX) - (LIGHT_BOX - 1)
-	local dy = 2 * (y % LIGHT_BOX) - (LIGHT_BOX - 1)
-	local dz = 2 * (z % LIGHT_BOX) - (LIGHT_BOX - 1)
+function GreedyMesher.lightScore(x: number, y: number, z: number, size: number?): number
+	local box = size or LIGHT_BOX
+	local dx = 2 * (x % box) - (box - 1)
+	local dy = 2 * (y % box) - (box - 1)
+	local dz = 2 * (z % box) - (box - 1)
 	return dx * dx + dy * dy + dz * dz
+end
+local lightScoreOf = GreedyMesher.lightScore
+
+--[[
+	A fluid box's surface field (`decodeKey`) as its height (0: full, else ninths of a block) and
+	whether it carries its fluid's light (lava's sparse light).
+]]
+function GreedyMesher.fluidSurface(surface: number): (number, boolean)
+	return surface % FLUID_LIT, surface >= FLUID_LIT
+end
+
+--[[
+	Offers cell `c` (local index; at x, y, z) of sparse light appearance `app` as its light box's
+	light: kept when nearer the box's centre than the best so far (`best` scores and `cells` by
+	box). Lichen's boxes and lit fluids' are numbered apart, so each chooses its own.
+]]
+local function offerLight(
+	best: { [number]: number },
+	cells: { [number]: number },
+	app: number,
+	x: number,
+	y: number,
+	z: number,
+	c: number
+)
+	local size = readu8(sparseBoxLut, app)
+	local per = SIZE // size
+	local box = ((y // size) * per + z // size) * per + x // size
+	if size ~= LIGHT_BOX then
+		box = -1 - box
+	end
+	local score = lightScoreOf(x, y, z, size)
+	local prior = best[box]
+	if prior == nil or score < prior then
+		best[box] = score
+		cells[box] = c
+	end
 end
 
 --[[
@@ -365,9 +436,10 @@ GreedyMesher.applyBorder = applyBorder
 --[[
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.
 	`hideFoliage`: leave plants out (Config.Render.Foliage off, or a chunk beyond
-	LodTree.drawsFoliage). Returns a new buffer of boxes, the box count and the number of plant
-	cells in the range, drawn or not (the streamer remeshes those sections when its chunk starts or
-	stops drawing plants).
+	LodTree.drawsFoliage). `noLights`: mark no sparse light (far LOD nodes, whose parts carry
+	none). Returns a new buffer of boxes, the box count and the number of plant cells in the range,
+	drawn or not (the streamer remeshes those sections when its chunk starts or stops drawing
+	plants).
 ]]
 function GreedyMesher.mesh(
 	data: buffer,
@@ -376,7 +448,8 @@ function GreedyMesher.mesh(
 	y1: number,
 	hideCaves: boolean,
 	border: Border?,
-	hideFoliage: boolean?
+	hideFoliage: boolean?,
+	noLights: boolean?
 ): (buffer, number, number)
 	if border and (border.open or border.hidden ~= 0) then
 		data = applyBorder(data, height, y0, y1, hideCaves, border)
@@ -385,13 +458,15 @@ function GreedyMesher.mesh(
 	-- (Cave twins are cave air while caves are hidden: no appearance.)
 	local drawnLut = if hideCaves then appearanceHiddenCaves else appearanceLut
 	local noFoliage = hideFoliage == true
+	local lights = noLights ~= true
 	local sh = y1 - y0
 	local cells = SIZE * SIZE * sh
 	ensureScratch(cells)
 	buffer.fill(done, 0, 0, cells)
-	-- Sparse lights: per LIGHT_BOX box (by its index), the best cell so far and its score.
-	local lightCell: { [number]: number }? = nil
+	-- Sparse lights: per light box (numbered by offerLight), the best cell so far and its score.
+	local lightCell: { [number]: number } = {}
 	local lightScore: { [number]: number } = {}
+	local anyLight = false
 
 	-- Pass 1: classify every cell.
 	local anyNeeded = false
@@ -423,28 +498,31 @@ function GreedyMesher.mesh(
 						end
 					elseif kind == FLUID then
 						-- Surface only: a neighbour that is neither opaque nor this exact block (a
-						-- different level of the same fluid counts, so steps between levels are closed).
+						-- different level of the same fluid counts, so steps between levels are closed;
+						-- a cave twin is its source: fluidFormLut).
+						local form = readu16(fluidFormLut, block * 2)
 						local above = if hasAbove then readu16(data, (idx + LAYER) * 2) else AIR
-						local visible = not hasAbove or (readu8(cull, above) == 0 and above ~= block)
+						local visible = not hasAbove
+							or (readu8(cull, above) == 0 and readu16(fluidFormLut, above * 2) ~= form)
 						if not visible then
 							local n = readu16(data, (idx - 1) * 2)
-							visible = readu8(cull, n) == 0 and n ~= block
+							visible = readu8(cull, n) == 0 and readu16(fluidFormLut, n * 2) ~= form
 						end
 						if not visible then
 							local n = readu16(data, (idx + 1) * 2)
-							visible = readu8(cull, n) == 0 and n ~= block
+							visible = readu8(cull, n) == 0 and readu16(fluidFormLut, n * 2) ~= form
 						end
 						if not visible then
 							local n = readu16(data, (idx - P) * 2)
-							visible = readu8(cull, n) == 0 and n ~= block
+							visible = readu8(cull, n) == 0 and readu16(fluidFormLut, n * 2) ~= form
 						end
 						if not visible then
 							local n = readu16(data, (idx + P) * 2)
-							visible = readu8(cull, n) == 0 and n ~= block
+							visible = readu8(cull, n) == 0 and readu16(fluidFormLut, n * 2) ~= form
 						end
 						if not visible and hasBelow then
 							local n = readu16(data, (idx - LAYER) * 2)
-							visible = readu8(cull, n) == 0 and n ~= block
+							visible = readu8(cull, n) == 0 and readu16(fluidFormLut, n * 2) ~= form
 						end
 						if visible then
 							-- Lower the surface unless the same fluid continues above.
@@ -453,6 +531,11 @@ function GreedyMesher.mesh(
 								needed = app + surface * KEY_STRIDE
 							else
 								needed = app
+							end
+							if lights and readu8(sparseLightLut, app) == 1 then
+								-- Lava: a candidate for its box's light (FLUID_LIT is added below).
+								offerLight(lightScore, lightCell, app, x, y, z, c)
+								anyLight = true
 							end
 						end
 					elseif readu8(foliageLut, app) == 1 then
@@ -469,18 +552,10 @@ function GreedyMesher.mesh(
 						end
 					else
 						needed = app
-						if readu8(sparseLightLut, app) == 1 then
+						if lights and readu8(sparseLightLut, app) == 1 then
 							-- A candidate for its box's light (the surface field is set below).
-							local box = ((y // LIGHT_BOX) * (SIZE // LIGHT_BOX) + z // LIGHT_BOX) * (SIZE // LIGHT_BOX)
-								+ x // LIGHT_BOX
-							local score = GreedyMesher.lightScore(x, y, z)
-							local best = lightScore[box]
-							if best == nil or score < best then
-								lightScore[box] = score
-								local chosen = lightCell or {}
-								lightCell = chosen
-								chosen[box] = c
-							end
+							offerLight(lightScore, lightCell, app, x, y, z, c)
+							anyLight = true
 						end
 					end
 				elseif hideCaves and block ~= AIR and readu8(caveCellLut, block) == 1 then
@@ -517,10 +592,13 @@ function GreedyMesher.mesh(
 		return buffer.create(0), 0, plants
 	end
 
-	-- The sparse light of each box goes to its chosen cell.
-	if lightCell then
+	-- The sparse light of each box goes to its chosen cell: lichen's surface field 1, a fluid's
+	-- height plus FLUID_LIT.
+	if anyLight then
 		for _, c in lightCell do
-			writeu16(need, c * 2, readu16(need, c * 2) + KEY_STRIDE)
+			local key = readu16(need, c * 2)
+			local lit = if readu8(kindLut, key % KEY_STRIDE) == FLUID then FLUID_LIT else 1
+			writeu16(need, c * 2, key + lit * KEY_STRIDE)
 		end
 	end
 

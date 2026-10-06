@@ -36,7 +36,7 @@ return function(t, shared, require)
 		end), "unknown names error")
 		-- Creative order: blocks first, then armor, materials and tools.
 		t.eq(Items.list[1].name, "Stone")
-		t.eq(Items.list[#Items.list].name, "Shears")
+		t.eq(Items.list[#Items.list].name, "FuelBucket", "the last item added (the fluids' buckets)")
 		t.eq(Items.get(Items.id.Planks).displayName, "Oak Planks", "a block's own display name")
 		t.eq(Items.maxStack(Items.id.IronPickaxe), 1, "tools don't stack")
 		t.eq(Items.get(Items.id.IronPickaxe).durability, 250)

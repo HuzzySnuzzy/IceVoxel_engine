@@ -11,6 +11,7 @@ return function(t, shared, require, server, client)
 	local Blocks = require(shared.Blocks)
 	local Coords = require(shared.World.Coords)
 	local Crafting = require(shared.Crafting)
+	local Fluids = require(shared.Fluids)
 	local Items = require(shared.Items)
 	local Menu = require(shared.Inventory.Menu)
 	local Protocol = require(shared.Net.Protocol)
@@ -959,11 +960,16 @@ return function(t, shared, require, server, client)
 		t.ok(not pcall(Items.addDescriber, "bad key", function()
 			return nil
 		end), "keys are data keys")
-		-- Items' fluid names are the pipes'.
-		t.eq(#Items.FLUID_NAMES, #Transmitters.FLUID_NAMES)
+		-- Items' fluid names are the registry's (Shared/Fluids), and the pipes' agree with them.
+		t.eq(#Items.FLUID_NAMES, Fluids.COUNT)
+		for i, fluid in Fluids.list do
+			t.eq(Items.FLUID_NAMES[i], fluid.displayName)
+		end
 		for i, name in Transmitters.FLUID_NAMES do
 			t.eq(Items.FLUID_NAMES[i], name)
 		end
+		t.eq(Items.describe(S(TANK, 1, { fluid = Fluids.LAVA, amount = 1000 }))[1], "Lava: 1,000 mB")
+		t.eq(#Items.describe(S(TANK, 1, { fluid = Fluids.COUNT + 1, amount = 1000 })), 0, "unknown fluid")
 	end)
 
 	--[[ JEI ]]

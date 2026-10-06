@@ -1,15 +1,22 @@
 --!strict
 --[[
 	Movement of dropped items, one 20 Hz tick at a time: Minecraft Java Edition 1.20.1's
-	ItemEntity.tick with Entity.baseTick's water handling and Entity.move.
+	ItemEntity.tick with Entity.baseTick's fluid handling and Entity.move.
 
-	An item is a 0.25 x 0.25 block box (Hull); its position is the bottom centre. Every tick:
+	An item is a 0.25 x 0.25 block box (Hull); its position is the bottom centre. Fluids come in
+	Minecraft's two tags by their record's `physics` (Shared/Fluids): "water" (water, fuel) and
+	"lava" (lava, oil), cave twins with their source. Every tick:
 
-	  water     touching water pushes the item along the current (0.014 per tick, the flow
-	            direction normalised, as for every entity that is not a player);
-	  gravity   0.04 down, unless water reaches more than eye height - 1/9 (0.1014) above the box
-	            bottom: then the item floats (horizontal speed x 0.99, 0.0005 up while slower than
-	            0.06), which makes items rise to the surface and bob there;
+	  fluids    touching a fluid pushes the item along its current, water's tag first, then
+	            lava's: the flow direction normalised (as for every entity that is not a player)
+	            times the fluid's `push` (water and fuel 0.014, lava and oil 0.0023333), at least
+	            0.0045 while the item is nearly still sideways (Entity.updateFluidHeightAndDo-
+	            FluidPushing);
+	  gravity   0.04 down, unless a fluid reaches more than eye height - 1/9 (0.1014) above the box
+	            bottom: then the item floats, 0.0005 up while slower than 0.06, its horizontal speed
+	            x 0.99 in water's tag (setUnderwaterMovement; Forge's FluidType.setItemMovement for
+	            modded fluids) or x 0.95 in lava's (setUnderLavaMovement), water winning when both
+	            are deep enough. Items rise to the surface and bob there;
 	  stuck     an item inside a block (one was placed on it, sand fell on it) moves out towards the
 	            nearest open side (north, south, west, east or up), through the blocks;
 	  move      only while in the air, sliding (horizontal speed^2 > 1e-5) or every fourth tick
@@ -18,7 +25,7 @@
 	            (Block.updateEntityAfterFallOn), so items do not bounce off plain blocks;
 	  friction  x 0.98 in the air and vertically; on the ground the supporting block's friction
 	            x 0.98 horizontally (0.588 on stone, 0.96 on ice, so items slide far on ice);
-	  water     the water check and current push run a second time at the end, as ItemEntity.tick
+	  fluids    the fluid check and current push run a second time at the end, as ItemEntity.tick
 	            does, so currents carry items twice as fast as other entities.
 
 	Minecraft picks the push-out speed at random (0.1..0.3); here it is always 0.2, so the client
@@ -30,6 +37,7 @@
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Fluids = require(script.Parent.Parent.Fluids)
 local FluidFlow = require(script.Parent.Parent.World.FluidFlow)
 local Hull = require(script.Parent.Parent.Movement.Hull)
 
@@ -62,12 +70,15 @@ local DRAG = 0.9800000190734863 -- 0.98F
 local VERTICAL_DRAG = 0.98
 local BOUNCE = -0.5
 local WATER_DRAG = 0.9900000095367432 -- 0.99F
+local LAVA_DRAG = 0.949999988079071 -- 0.95F
 local BUOYANCY = 0.0005000000237487257 -- 5.0E-4F
 local BUOYANCY_LIMIT = 0.05999999865889549 -- 0.06F
--- Water must reach above eye height (0.85 x 0.25) - 0.11111111 for the item to float.
+-- A fluid must reach above eye height (0.85 x 0.25) - 0.11111111 for the item to float.
 local FLOAT_DEPTH = 0.2125 - 0.1111111119389534
 local RESTING_SPEED_SQ = 9.999999747378752e-6 -- 1.0E-5F
-local FLUID_PUSH = 0.014
+-- A current pushes a nearly still item (sideways speed under 0.003) at least this hard.
+local MIN_PUSH = 0.0045000000000000005
+local STILL_SPEED = 0.003
 local PUSH_OUT_SPEED = 0.2
 local MOVE_EPSILON_SQ = 1.0e-7
 -- Mth.equal: how much an axis may be cut short before it counts as a collision.
@@ -77,6 +88,7 @@ local SUPPORT_OFFSET = 0.500001
 local floor = math.floor
 local ceil = math.ceil
 local sqrt = math.sqrt
+local abs = math.abs
 
 -- The block getter of the tick in progress, so collision callbacks need no closure per call.
 local current: GetBlock = function(_x: number, _y: number, _z: number): number?
@@ -88,14 +100,24 @@ local function solidAt(x: number, y: number, z: number): boolean
 	return block == nil or Blocks.isSolid(block)
 end
 
-local function isWater(block: number?): boolean
-	local fluid = if block then Blocks.get(block).fluid else nil
-	return fluid ~= nil and fluid.group == "Water"
+-- The fluid of each block (Shared/Fluids id, 0 none; every level and cave twin), and per fluid
+-- id whether it is in lava's tag (`physics` "lava": lava, oil) and its current's push.
+local fluidLut = Fluids.blockLut
+local LAVA_LIKE: { [number]: boolean } = {}
+local PUSH: { [number]: number } = {}
+for id, fluid in Fluids.list do
+	LAVA_LIKE[id] = fluid.physics == "lava"
+	PUSH[id] = fluid.push
 end
 
--- Height of the water surface in block (x, y, z) above its bottom (FluidState.getHeight).
-local function waterHeight(x: number, y: number, z: number, block: number): number
-	if isWater(current(x, y + 1, z)) then
+local function fluidOf(block: number?): number
+	return if block then buffer.readu8(fluidLut, block) else 0
+end
+
+-- Height of the surface of fluid `fluid` in block (x, y, z) above its bottom (FluidState.getHeight:
+-- the whole block when the same fluid is above).
+local function fluidHeight(x: number, y: number, z: number, block: number, fluid: number): number
+	if fluidOf(current(x, y + 1, z)) == fluid then
 		return 1
 	end
 	return buffer.readu8(Blocks.fluidHeightLut, block) / Blocks.FLUID_FULL
@@ -110,22 +132,29 @@ function ItemPhysics.box(body: Body): Box
 end
 
 --[[
-	Entity.updateFluidHeightAndDoFluidPushing for water: how high water reaches above the bottom of
-	the box (0 when it touches none), after adding the current's push to the velocity.
+	Entity.updateFluidHeightAndDoFluidPushing for one tag (`lava` false: water and fuel; true: lava
+	and oil): how high its fluids reach above the bottom of the box (0 when it touches none), after
+	adding their current's push to the velocity.
 ]]
-local function updateWater(body: Body): number
+local function updateFluid(body: Body, lava: boolean): number
 	local half = ItemPhysics.WIDTH / 2
 	local minX, minY, minZ = body.x - half + 0.001, body.y + 0.001, body.z - half + 0.001
 	local maxX, maxY, maxZ = body.x + half - 0.001, body.y + ItemPhysics.HEIGHT - 0.001, body.z + half - 0.001
 	local depth = 0
-	local px, py, pz, cells = 0, 0, 0, 0
+	local push = 0
+	local px, py, pz = 0, 0, 0
 	for x = floor(minX), ceil(maxX) - 1 do
 		for y = floor(minY), ceil(maxY) - 1 do
 			for z = floor(minZ), ceil(maxZ) - 1 do
 				local block = current(x, y, z)
-				if block and isWater(block) then
-					local surface = y + waterHeight(x, y, z, block)
+				local fluid = fluidOf(block)
+				if fluid ~= 0 and LAVA_LIKE[fluid] == lava then
+					local surface = y + fluidHeight(x, y, z, block :: number, fluid)
 					if surface >= minY then
+						-- (The deepest fluid's push: one tag's fluids share Minecraft's.)
+						if surface - minY >= depth then
+							push = PUSH[fluid]
+						end
 						depth = math.max(surface - minY, depth)
 						local fx, fy, fz = FluidFlow.at(current, x, y, z)
 						-- (`depth` is the deepest so far, not this cell's: Minecraft's quirk.)
@@ -133,7 +162,6 @@ local function updateWater(body: Body): number
 							fx, fy, fz = fx * depth, fy * depth, fz * depth
 						end
 						px, py, pz = px + fx, py + fy, pz + fz
-						cells += 1
 					end
 				end
 			end
@@ -141,8 +169,12 @@ local function updateWater(body: Body): number
 	end
 	local length = sqrt(px * px + py * py + pz * pz)
 	if length > 0 then
-		-- Averaged, then normalised (only players keep the length), so the push is always 0.014.
-		local scale = FLUID_PUSH / length
+		-- Averaged, then normalised (only players keep the length), so the push is always the
+		-- fluid's, or the least push a nearly still item gets.
+		if abs(body.vx) < STILL_SPEED and abs(body.vz) < STILL_SPEED and push < MIN_PUSH then
+			push = MIN_PUSH
+		end
+		local scale = push / length
 		body.vx += px * scale
 		body.vy += py * scale
 		body.vz += pz * scale
@@ -247,13 +279,15 @@ function ItemPhysics.tick(body: Body, id: number, getBlock: GetBlock): boolean
 	current = getBlock
 	body.age += 1
 
-	-- Entity.baseTick: water and its current.
-	local depth = updateWater(body)
+	-- Entity.baseTick: the fluids and their currents, water's tag first.
+	local waterDepth = updateFluid(body, false)
+	local lavaDepth = updateFluid(body, true)
 
 	-- Floating, or gravity.
-	if depth > FLOAT_DEPTH then
-		body.vx *= WATER_DRAG
-		body.vz *= WATER_DRAG
+	if waterDepth > FLOAT_DEPTH or lavaDepth > FLOAT_DEPTH then
+		local drag = if waterDepth > FLOAT_DEPTH then WATER_DRAG else LAVA_DRAG
+		body.vx *= drag
+		body.vz *= drag
 		if body.vy < BUOYANCY_LIMIT then
 			body.vy += BUOYANCY
 		end
@@ -290,8 +324,9 @@ function ItemPhysics.tick(body: Body, id: number, getBlock: GetBlock): boolean
 		end
 	end
 
-	-- ItemEntity.tick checks the water (and pushes) once more.
-	updateWater(body)
+	-- ItemEntity.tick checks the fluids (and pushes) once more.
+	updateFluid(body, false)
+	updateFluid(body, true)
 
 	current = previous
 	return true

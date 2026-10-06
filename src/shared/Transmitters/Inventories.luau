@@ -28,9 +28,11 @@
 	  machine  a Mekanism machine with slots (Shared/Machines): its kind says which slots each face
 	           reaches (by default every face puts items into its inputs and takes them out of its
 	           outputs), what each slot takes (Machines.mayPlace) and how many (Machines.slotLimit),
-	           and its output slots are ejected (Machines.outputSlots). The Heat Generator takes
-	           fuel through every face and gives nothing; the Electric Furnace
-	           (Machines/Kinds/Smelter) takes what smelts and gives its results through every face.
+	           and its output slots are ejected (Machines.outputSlots); a slot may give only some
+	           items (Machines.mayTake). The Heat Generator takes fuel through every face and gives
+	           only what no longer burns (the empty Bucket a Lava Bucket leaves, as the furnace's
+	           fuel slot does); the Electric Furnace (Machines/Kinds/Smelter) takes what smelts
+	           and gives its results through every face.
 	           Upgrade slots are out of reach (Machines/Upgrades), so a machine with nothing else
 	           (the Solar Panel) is no inventory at all: no transporter connects to it.
 	  chest    a plain Container: every slot, through every face, anything. So is any other block
@@ -215,7 +217,8 @@ end
 
 -- The item rules of a slot the face reaches (canPlaceItem / canTakeItemThroughFace), for the
 -- loops below, which only visit such slots. A furnace's: Mekanism's machine slots (the input
--- only what smelts, the fuel only what burns; out of the fuel only what no longer burns).
+-- only what smelts, the fuel only what burns; out of the fuel only what no longer burns). A
+-- machine's: its kind's (Machines.mayPlace, Machines.mayTake).
 local function mayPlace(block: number, slot: number, item: number): boolean
 	if Machines.isMachine(block) then
 		return Machines.mayPlace(block, slot, item)
@@ -231,7 +234,9 @@ local function mayPlace(block: number, slot: number, item: number): boolean
 end
 
 local function mayTake(block: number, slot: number, item: number): boolean
-	if slot == FUEL and kinds[block] == "furnace" and not Machines.isMachine(block) then
+	if Machines.isMachine(block) then
+		return Machines.mayTake(block, slot, item)
+	elseif slot == FUEL and kinds[block] == "furnace" then
 		return Smelting.fuel(item) <= 0
 	end
 	return true

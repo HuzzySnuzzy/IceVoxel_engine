@@ -1,8 +1,8 @@
 --!strict
 --[[
 	The server's Mekanism pipes, pure (no Roblox APIs, so the tests run it): every transmitter's
-	state, the pipes' networks and their water, the fluid tanks, the items in transporters, and
-	what has to be replicated. Transmitters/Transmitters runs it in the game. Universal Cables are
+	state, the pipes' networks and their fluids (Shared/Fluids: water, lava, oil, fuel), the Fluid
+	Tanks, the items in transporters, and what has to be replicated. Transmitters/Transmitters runs it in the game. Universal Cables are
 	nodes too (their side modes, links to cables and energy blocks); their energy networks are
 	server/Machines/EnergyNet's, which reads the nodes and `energyDirty` (cables that came, went
 	or changed links).
@@ -17,14 +17,19 @@
 	            or a neighbouring block changes. Neighbours come from the nodes and tanks
 	            themselves and otherwise from Env.getBlock, which never generates terrain.
 	  Networks  Mechanical Pipes joined into one (connected components over `links`) share a
-	            water buffer of up to the sum of their capacities. A pipe that changes links
+	            buffer of one fluid, up to the sum of their capacities. A pipe that changes links
 	            queues itself and the pipes it joined or left; queued pipes are flood filled,
 	            MAX_REBUILD pipes per tick at most and the rest carried over, while the old
 	            networks keep working. A finished fill becomes one network and takes from each
 	            old network the share of its buffer that its pipes held (by capacity): merging
 	            adds buffers up, splitting shares one out. A broken pipe takes its share with it
-	            (lost, counted in `lost`), as in Mekanism.
-	  Tanks     a fluid tank's fluid and mB. Breaking one loses what it held, unless a survival
+	            (lost, counted in `lost`), as in Mekanism. A fill never crosses into pipes whose
+	            network holds another fluid than the pipes it has taken in (Mekanism's
+	            MechanicalPipe.isValidTransmitter: pipes holding different fluids don't join), so
+	            fluids never mix; they stay separate networks until a later fill finds one empty.
+	            (If a fill carried over between ticks meets that anyway, the fluid of the largest
+	            share wins and the others' shares are lost.)
+	  Tanks     a Fluid Tank's fluid and mB. Breaking one loses what it held, unless a survival
 	            player broke it: then its item keeps it (Mekanism's sustained data, `tankData`,
 	            through ServerNet's hooks, `blockDataHooks`) and placing that item puts it back
 	            (`restoreTank`).
@@ -32,9 +37,12 @@
 
 	Each `step` (20 a second): queued network work, then Transport.step (items move, transporters
 	pull, and take what furnaces and machines push out), then Fluids.step (pipes pull from and
-	push into tanks), then pipe fills.
+	push into Fluid Tanks and machines' fluid tanks: Transmitters/Fluids), then pipe fills.
+	Machines push their output tanks into the pipes and Fluid Tanks around them on their own
+	(`ejectFluid`, run by server/Machines/MachineWorld after their tick).
 
-	Replication. `takeRecords` gives the Transmitters records (modes, colour, pipe fill) and Tanks
+	Replication. `takeRecords` gives the Transmitters records (modes, colour, a pipe's fill byte and
+	the fluid id its network holds) and Tanks
 	records that changed since the last call (compared with what was last sent, so nothing is sent
 	twice); a network's fill and a tank's contents go at most every FILL_INTERVAL ticks (4 a
 	second). `chunkRecords` gives a chunk's records that are not in the default state, to send
@@ -45,12 +53,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Coords = require(Shared.World.Coords)
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Transmitters = require(Shared.Transmitters)
+local InventoryTypes = require(Shared.Inventory.Types)
 
 local EditRules = require(script.Parent.Parent.Network.EditRules)
 
-local Fluids = require(script.Parent.Fluids)
+local PipeFluids = require(script.Parent.Fluids)
 local Grid = require(script.Parent.Grid)
 local Transport = require(script.Parent.Transport)
 local Types = require(script.Parent.Types)
@@ -69,7 +79,7 @@ type TransportOp = Types.TransportOp
 local MAX_REBUILD = 4096
 -- Ticks between two records of a network's fill or a tank's contents (4 a second).
 local FILL_INTERVAL = 5
-local NONE = Transmitters.FLUIDS.NONE
+local NONE = Fluids.NONE
 local NORMAL = Transmitters.MODES.NORMAL
 local PULL = Transmitters.MODES.PULL
 
@@ -203,7 +213,10 @@ local function newNetwork(world: World): Network
 		amount = 0,
 		ports = {},
 		sentFill = -1,
+		sentFluid = -1,
 		checkedAt = world.tick,
+		leads = {},
+		leadsTick = -1,
 	}
 	world.networks[network] = true
 	return network
@@ -237,6 +250,7 @@ local function leave(world: World, node: Node, share: boolean): number
 	network.size -= 1
 	network.capacity -= capacity
 	network.sentFill = -1
+	network.sentFluid = -1
 	if network.amount <= 0 then
 		network.amount = 0
 		network.fluid = NONE
@@ -271,22 +285,48 @@ local function finish(world: World, members: { Node })
 	if same then
 		return
 	end
-	-- (Shares are worked out before anyone leaves: the capacity each old network gives up.)
+	-- (Shares are worked out before anyone leaves: the capacity each old network gives up, in the
+	-- order the fill met them, so a tie between fluids is decided the same way every time.)
 	local moving: { [Network]: number } = {}
+	local olds: { Network } = {}
 	for _, node in alive do
 		local old = node.network
 		if old then
+			if moving[old] == nil then
+				table.insert(olds, old)
+			end
 			moving[old] = (moving[old] or 0) + Transmitters.pipeCapacity(node.block)
 		end
 	end
 	local network = newNetwork(world)
-	for old, capacity in moving do
+	local portions: { { network: Network, amount: number } } = {}
+	for _, old in olds do
+		local capacity = moving[old]
 		local portion = if capacity >= old.capacity then old.amount else (old.amount * capacity) // old.capacity
 		if portion > 0 then
-			network.fluid = old.fluid
-			network.amount += portion
-			old.amount -= portion
+			table.insert(portions, { network = old, amount = portion })
 		end
+	end
+	-- One fluid per buffer: the fill keeps pipes of other fluids out, so there is normally one;
+	-- otherwise the largest share's fluid stays and the rest is lost.
+	local totals: { [number]: number } = {}
+	local kept, keptTotal = NONE, 0
+	for _, portion in portions do
+		local fluid = portion.network.fluid
+		totals[fluid] = (totals[fluid] or 0) + portion.amount
+		if totals[fluid] > keptTotal then
+			kept, keptTotal = fluid, totals[fluid]
+		end
+	end
+	for _, portion in portions do
+		local old = portion.network
+		if old.fluid == kept then
+			network.fluid = kept
+			network.amount += portion.amount
+		else
+			world.lost += portion.amount
+		end
+		old.amount -= portion.amount
 	end
 	for _, node in alive do
 		leave(world, node, false)
@@ -294,10 +334,17 @@ local function finish(world: World, members: { Node })
 	end
 end
 
+-- The fluid the network of pipe `node` holds (NONE while it is empty).
+local function heldFluid(node: Node): number
+	local network = node.network
+	return if network and network.amount > 0 then network.fluid else NONE
+end
+
 --[[
 	Flood fills queued pipes into networks, visiting at most `budget` pipes (a fill in progress
 	carries over to the next call). A pipe visited by a fill needs no fill of its own, unless it
-	changes again afterwards.
+	changes again afterwards. A fill takes in no pipe whose network holds another fluid than the
+	pipes it has taken in so far.
 ]]
 function TransmitterWorld.rebuild(world: World, budget: number)
 	while budget > 0 do
@@ -312,7 +359,7 @@ function TransmitterWorld.rebuild(world: World, budget: number)
 				world.seedSet[key] = nil
 				continue
 			end
-			job = { visited = { [key] = true }, frontier = { key }, members = {} }
+			job = { visited = { [key] = true }, frontier = { key }, members = {}, fluid = heldFluid(node) }
 			world.job = job
 		end
 		assert(job, "rebuild job")
@@ -332,7 +379,16 @@ function TransmitterWorld.rebuild(world: World, budget: number)
 					local neighbour = Grid.neighbour(key, side)
 					if neighbour and not job.visited[neighbour] then
 						local other = world.nodes[neighbour]
-						if other and other.kind == "fluid" then
+						local fluid = if other and other.kind == "fluid" then heldFluid(other) else NONE
+						-- (A pipe holding another fluid stays out: fluids never mix.)
+						if
+							other
+							and other.kind == "fluid"
+							and (fluid == NONE or job.fluid == NONE or fluid == job.fluid)
+						then
+							if job.fluid == NONE then
+								job.fluid = fluid
+							end
 							job.visited[neighbour] = true
 							table.insert(job.frontier, neighbour)
 						end
@@ -460,6 +516,7 @@ local function addNode(world: World, key: number, x: number, y: number, z: numbe
 		sentModes = 0,
 		sentColour = 0,
 		sentFluid = 0,
+		sentFluidId = 0,
 	}
 	world.nodes[key] = node
 	index(world, key, x, z)
@@ -519,7 +576,7 @@ end
 
 --[[
 	Block (x, y, z) changed from `old` to `new` (WorldServer.onChanged): a transmitter or tank that
-	went is dropped (a transporter's items drop there, a pipe's share of its network's water and a
+	went is dropped (a transporter's items drop there, a pipe's share of its network's fluid and a
 	tank's contents are lost), a new one starts in the default state, and the transmitters around
 	work out their sides again (an inventory or tank appearing or going there too).
 ]]
@@ -638,8 +695,9 @@ end
 --[[ Tanks (buckets) ]]
 
 --[[
-	Puts up to `amount` mB of `fluid` into the tank at (x, y, z); returns how much it took (0: no
-	tank, another fluid, full). `simulate` changes nothing.
+	Puts up to `amount` mB of `fluid` (a fluid pipes and tanks carry: Fluids.carriable) into the
+	tank at (x, y, z); returns how much it took (0: no tank, no such fluid, another fluid, full).
+	`simulate` changes nothing.
 ]]
 function TransmitterWorld.fillTank(
 	world: World,
@@ -651,7 +709,7 @@ function TransmitterWorld.fillTank(
 	simulate: boolean?
 ): number
 	local tank = TransmitterWorld.tank(world, x, y, z)
-	if tank == nil or fluid == NONE or not (amount > 0) or (tank.amount > 0 and tank.fluid ~= fluid) then
+	if tank == nil or not Fluids.carriable(fluid) or not (amount > 0) or (tank.amount > 0 and tank.fluid ~= fluid) then
 		return 0
 	end
 	local taken = math.min(math.floor(amount), tank.capacity - tank.amount)
@@ -710,7 +768,7 @@ end
 
 --[[
 	Puts a tank item's data (`tankData`) into the tank at (x, y, z), which was just placed: what it
-	held is replaced. `fluid` must be a known fluid (Transmitters.FLUID_NAMES) and `amount` at
+	held is replaced. `fluid` must be a fluid tanks carry (Fluids.carriable) and `amount` at
 	least 1 mB (whole mB; more than the tank holds is cut to its capacity). Returns whether the
 	tank took anything (false: no tank, no data or data of something else).
 ]]
@@ -720,13 +778,7 @@ function TransmitterWorld.restoreTank(world: World, x: number, y: number, z: num
 		return false
 	end
 	local fluid, amount = Items.dataNumber(data, "fluid"), Items.dataNumber(data, "amount")
-	if
-		fluid == nil
-		or Transmitters.FLUID_NAMES[fluid] == nil
-		or amount == nil
-		or not (amount >= 1)
-		or amount == math.huge
-	then
+	if fluid == nil or not Fluids.carriable(fluid) or amount == nil or not (amount >= 1) or amount == math.huge then
 		return false
 	end
 	tank.fluid = fluid
@@ -737,7 +789,7 @@ end
 
 --[[
 	The tanks' sustained data hooks, for ServerNet.addBlockData: a broken tank's item keeps its
-	water (`tankData`), and a tank placed from such an item gets it back (`restoreTank`), in
+	fluid (`tankData`), and a tank placed from such an item gets it back (`restoreTank`), in
 	creative too.
 ]]
 function TransmitterWorld.blockDataHooks(world: World): EditRules.BlockDataHooks
@@ -758,15 +810,16 @@ end
 
 --[[ Ticking ]]
 
--- Networks whose fill byte changed get their pipes' records re-sent (at most every
+-- Networks whose fill byte or fluid changed get their pipes' records re-sent (at most every
 -- FILL_INTERVAL ticks).
 local function checkFills(world: World)
 	for network in world.networks do
-		if network.sentFill < 0 or world.tick - network.checkedAt >= FILL_INTERVAL then
+		if network.sentFill < 0 or network.sentFluid < 0 or world.tick - network.checkedAt >= FILL_INTERVAL then
 			network.checkedAt = world.tick
 			local fill = Transmitters.fillLevel(network.amount, network.capacity)
-			if fill ~= network.sentFill then
-				network.sentFill = fill
+			local fluid = if fill > 0 then network.fluid else NONE
+			if fill ~= network.sentFill or fluid ~= network.sentFluid then
+				network.sentFill, network.sentFluid = fill, fluid
 				for key in network.nodes do
 					world.dirtyNodes[key] = true
 				end
@@ -780,20 +833,48 @@ function TransmitterWorld.step(world: World)
 	world.tick += 1
 	TransmitterWorld.rebuild(world, MAX_REBUILD)
 	Transport.step(world)
-	Fluids.step(world)
+	PipeFluids.step(world)
 	checkFills(world)
+end
+
+--[[
+	The machine with fluid tanks at (x, y, z) (its `container`, Players/Containers') pushes its
+	output tanks into the pipes and Fluid Tanks next to it (Transmitters/Fluids.eject: Mekanism's
+	ejector, Machines.FLUID_EJECT_RATE mB a tick). server/Machines/MachineWorld runs it after the
+	machine's tick. Returns the mB that went out.
+]]
+function TransmitterWorld.ejectFluid(
+	world: World,
+	x: number,
+	y: number,
+	z: number,
+	container: InventoryTypes.Container
+): number
+	return PipeFluids.eject(world, x, y, z, container)
 end
 
 --[[ Replication ]]
 
--- The fill byte a pipe's record shows (its network's, as last checked); 0 for transporters.
-local function fillOf(node: Node): number
+-- The fill byte and fluid id a pipe's record shows (its network's, as last checked); 0, 0 for
+-- transporters and cables.
+local function fillOf(node: Node): (number, number)
 	local network = node.network
-	return if network then math.max(network.sentFill, 0) else 0
+	if network == nil then
+		return 0, NONE
+	end
+	return math.max(network.sentFill, 0), math.max(network.sentFluid, NONE)
 end
 
-local function nodeRecord(node: Node, fluid: number): TransmitterRecord
-	return { x = node.x, y = node.y, z = node.z, modes = node.modes, colour = node.colour, fluid = fluid }
+local function nodeRecord(node: Node, fill: number, fluidId: number): TransmitterRecord
+	return {
+		x = node.x,
+		y = node.y,
+		z = node.z,
+		modes = node.modes,
+		colour = node.colour,
+		fluid = fill,
+		fluidId = fluidId,
+	}
 end
 
 local function tankRecord(tank: Tank): TankRecord
@@ -810,10 +891,16 @@ function TransmitterWorld.takeRecords(world: World): ({ TransmitterRecord }, { T
 	for key in world.dirtyNodes do
 		local node = world.nodes[key]
 		if node then
-			local fluid = fillOf(node)
-			if node.modes ~= node.sentModes or node.colour ~= node.sentColour or fluid ~= node.sentFluid then
-				node.sentModes, node.sentColour, node.sentFluid = node.modes, node.colour, fluid
-				table.insert(records, nodeRecord(node, fluid))
+			local fill, fluidId = fillOf(node)
+			if
+				node.modes ~= node.sentModes
+				or node.colour ~= node.sentColour
+				or fill ~= node.sentFluid
+				or fluidId ~= node.sentFluidId
+			then
+				node.sentModes, node.sentColour, node.sentFluid, node.sentFluidId =
+					node.modes, node.colour, fill, fluidId
+				table.insert(records, nodeRecord(node, fill, fluidId))
 			end
 		end
 	end
@@ -844,9 +931,9 @@ function TransmitterWorld.chunkRecords(world: World, cx: number, cz: number): ({
 			local node = world.nodes[key]
 			local tank = world.tanks[key]
 			if node then
-				local fluid = fillOf(node)
-				if node.modes ~= 0 or node.colour ~= 0 or fluid ~= 0 then
-					table.insert(records, nodeRecord(node, fluid))
+				local fill, fluidId = fillOf(node)
+				if node.modes ~= 0 or node.colour ~= 0 or fill ~= 0 or fluidId ~= 0 then
+					table.insert(records, nodeRecord(node, fill, fluidId))
 				end
 			elseif tank and tank.amount > 0 then
 				table.insert(tanks, tankRecord(tank))

@@ -19,9 +19,10 @@
 	  * `applyFog`: fog fades the edge of the view distance, FogEnd = view x BlockSize and FogStart
 	    55% of that (skipped when the place has an Atmosphere, which replaces fog); with the fog
 	    setting off the place's own FogEnd / FogStart come back. Its colour follows the time of day
-	    (Rendering/LightingController, while `usesFog` says this fog is in use).
+	    (Rendering/LightingController, while `usesFog` says this fog is in use). While the camera
+	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog).
 	  * Getters for the streamer and renderer, read live: `revealReach` / `revealRadii` (caves),
-	    `lichenLightDistance`, `foliageDistance`, `lod`, `get`.
+	    `lichenLightDistance`, `lavaLightDistance` (Config only), `foliageDistance`, `lod`, `get`.
 
 	How far parts are really drawn is decided by the engine from the graphics quality level and how
 	many objects are visible; scripts can not raise it. Studio ignores that limit, so check long
@@ -49,6 +50,8 @@ local values: PlayerSettings.Values? = nil
 local fallback: PlayerSettings.Values? = nil
 -- The place's own fog, captured before IceVoxel first sets it.
 local placeFog: { finish: number, start: number }? = nil
+-- The fog of the fluid the camera is in (studs; Rendering/FluidFog), nil while it is in none.
+local fluidFog: { finish: number, start: number }? = nil
 
 function ViewSettings.isMobile(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -131,6 +134,12 @@ function ViewSettings.lichenLightDistance(): number
 	return PlayerSettings.lichenLightDistance(bound)
 end
 
+-- How far from the camera lava's lights are on (blocks): Config.Caves.LavaLightDistance, or its
+-- Mobile value on phones (no player setting yet).
+function ViewSettings.lavaLightDistance(): number
+	return configCaves().LavaLightDistance or Config.Caves.LavaLightDistance or math.huge
+end
+
 -- LodTree's distances and plants from the settings (the streamer selects again at its next refresh).
 function ViewSettings.applyLod()
 	local view, split, splitL1, underground = ViewSettings.lod()
@@ -152,7 +161,8 @@ function ViewSettings.applyLighting()
 	Config.Lighting.CaveAmbient = PlayerSettings.caveAmbient(settings, CONFIG_CAVE_AMBIENT)
 end
 
--- The fog for the view distance, or the place's own with the fog setting off.
+-- The fog for the view distance, or the place's own with the fog setting off; a fluid's while the
+-- camera is in one.
 function ViewSettings.applyFog()
 	if ViewSettings.hasAtmosphere() then
 		return
@@ -160,7 +170,11 @@ function ViewSettings.applyFog()
 	if placeFog == nil then
 		placeFog = { finish = Lighting.FogEnd, start = Lighting.FogStart }
 	end
-	if ViewSettings.usesFog() then
+	local fluid = fluidFog
+	if fluid then
+		Lighting.FogEnd = fluid.finish
+		Lighting.FogStart = fluid.start
+	elseif ViewSettings.usesFog() then
 		local view = ViewSettings.lod()
 		Lighting.FogEnd = view * Config.BlockSize
 		Lighting.FogStart = Lighting.FogEnd * 0.55
@@ -169,6 +183,15 @@ function ViewSettings.applyFog()
 		Lighting.FogEnd = own.finish
 		Lighting.FogStart = own.start
 	end
+end
+
+--[[
+	The fog of the fluid the camera is in, `start` to `finish` studs (Rendering/FluidFog), or with
+	nil the normal fog again; applied at once.
+]]
+function ViewSettings.setFluidFog(start: number?, finish: number?)
+	fluidFog = if start and finish then { start = start, finish = finish } else nil
+	ViewSettings.applyFog()
 end
 
 -- Everything above, at start (before the streamer is created).

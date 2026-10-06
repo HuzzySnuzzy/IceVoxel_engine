@@ -371,6 +371,129 @@ return function(t, shared, require)
 		t.ok(swimmer.x > 3 and swimmer.y >= 4 - 1e-6, `climbed out onto the ledge: {swimmer.x}, {swimmer.y}`)
 	end)
 
+	t.test("physics: lava's travel branch, tick by tick (LivingEntity.travel, jumpInLiquid)", function()
+		local Fluids = require(shared.Fluids)
+		local LAVA = Blocks.fluidId("Lava", 0)
+		local deep = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 20 then LAVA else nil
+		end)
+		-- Sinking from rest: drag 0.5 every way (deeper than 0.4), gravity / 4.
+		local state = PlayerPhysics.new(0.5, 10, 0.5)
+		for _, want in { -0.02, -0.03, -0.035, -0.0375 } do
+			PlayerPhysics.tick(state, input(0, 0), deep)
+			t.ok(near(state.vy, want, 1e-9), `sinks {state.vy} vs {want}`)
+		end
+		t.ok(state.inLava and not state.inWater, "in lava, not water")
+		t.eq(state.eyeFluid, Fluids.LAVA, "the eyes are in lava")
+		t.ok(not state.eyeInWater and not state.underWater and not state.swimming, "nothing of water")
+		for _ = 1, 60 do
+			PlayerPhysics.tick(state, input(0, 0), deep)
+		end
+		t.ok(near(state.vy, -0.04, 1e-6), `sinks 0.04 a tick at most: {state.vy}`)
+		-- Holding jump rises exactly 0.04 a tick (0.8 blocks a second).
+		local diver = PlayerPhysics.new(0.5, 3, 0.5)
+		for _ = 1, 30 do
+			PlayerPhysics.tick(diver, input(0, 0, { jump = true }), deep)
+		end
+		t.ok(near(diver.y, 3 + 30 * 0.04, 1e-6), `rises 0.04 a tick: {diver.y}`)
+		-- Walking on the bottom: 0.0196 a tick of input, halved every tick: 0.784 blocks a second,
+		-- 40% of water's.
+		local walk = speedOver(deep, input(1, 0), 40, 100)
+		t.ok(near(walk, 0.784, 1e-3), `walks {walk} m/s in lava`)
+		local water = speedOver(
+			physicsWorld(function(_x, y, _z)
+				return if y >= 1 and y <= 20 then WATER else nil
+			end),
+			input(1, 0),
+			40,
+			100
+		)
+		t.ok(near(walk / water, 0.4, 0.01), `{walk / water} of water's {water}`)
+		-- Shallow lava (a flowing level up to the knees, 0.33 deep): 0.5 sideways, 0.8 up and down
+		-- with water's slow sinking, gravity / 4: a hop lands like on the ground.
+		local shallow = physicsWorld(function(_x, y, _z)
+			return if y == 1 then Blocks.fluidId("Lava", 5) else nil
+		end)
+		-- (Two ticks to settle: standing still finds no ground, the next fall lands.)
+		local wader = PlayerPhysics.new(0.5, 1, 0.5)
+		PlayerPhysics.tick(wader, input(0, 0), shallow)
+		PlayerPhysics.tick(wader, input(0, 0), shallow)
+		t.ok(wader.onGround and wader.inLava and wader.lavaHeight <= 0.4, `ankle deep: {wader.lavaHeight}`)
+		PlayerPhysics.tick(wader, input(0, 0, { jump = true }), shallow)
+		t.ok(near(wader.vy, (0.42 * 0.8 - 0.08 / 16) - 0.02, 1e-6), `a jump in shallow lava: {wader.vy}`)
+		-- Against a ledge just above the lava: hops out, as from water.
+		local shore = physicsWorld(function(x, y, _z)
+			if x >= 3 then
+				return if y <= 3 then STONE else AIR
+			end
+			return if y >= 1 and y <= 3 then LAVA else nil
+		end)
+		local climber = PlayerPhysics.new(1.5, 3.4, 0.5)
+		for _ = 1, 200 do
+			PlayerPhysics.tick(climber, input(1, 0, { jump = true }), shore)
+		end
+		t.ok(climber.x > 3 and climber.y >= 4 - 1e-6, `climbed out onto the ledge: {climber.x}, {climber.y}`)
+		-- Spectators: untouched.
+		local ghost = PlayerPhysics.new(0.5, 10, 0.5)
+		PlayerPhysics.setGameMode(ghost, require(shared.GameMode).SPECTATOR)
+		PlayerPhysics.tick(ghost, input(0, 0), deep)
+		t.ok(not ghost.inLava and ghost.eyeFluid == 0, "spectators are never in lava")
+	end)
+
+	t.test("physics: lava halves the fall distance every tick; oil moves like lava, fuel like water", function()
+		local Fluids = require(shared.Fluids)
+		local LAVA, OIL, FUEL = Blocks.fluidId("Lava", 0), Blocks.fluidId("Oil", 0), Blocks.fluidId("Fuel", 0)
+		local function drop(block: number?): number
+			local pool = physicsWorld(function(_x, y, _z)
+				return if block and y >= 1 and y <= 2 then block else nil
+			end)
+			local faller = PlayerPhysics.new(0.5, 26, 0.5)
+			for _ = 1, 100 do
+				local events = PlayerPhysics.tick(faller, input(0, 0), pool)
+				if events.landed then
+					return events.damage
+				end
+			end
+			return -1
+		end
+		local hard, soft = drop(nil), drop(LAVA)
+		t.ok(hard >= 20, `onto stone: {hard} half hearts`)
+		t.ok(soft >= 0 and soft < hard / 2, `into lava two deep: {soft} (stone {hard})`)
+		t.eq(drop(Blocks.fluidId("Water", 0)), -1, "water stops the fall altogether")
+
+		local function sea(block: number): PlayerPhysics.World
+			return physicsWorld(function(_x, y, _z)
+				return if y >= 1 and y <= 20 then block else nil
+			end)
+		end
+		local lavaWalk = speedOver(sea(LAVA), input(1, 0), 40, 100)
+		local oilWalk = speedOver(sea(OIL), input(1, 0), 40, 100)
+		t.ok(near(oilWalk, lavaWalk, 1e-9), `oil is thick like lava: {oilWalk}`)
+		local oily = PlayerPhysics.new(0.5, 10, 0.5)
+		PlayerPhysics.tick(oily, input(0, 0), sea(OIL))
+		t.ok(oily.inLava and not oily.inWater and oily.eyeFluid == Fluids.OIL, "oil: the lava branch")
+		local waterWalk = speedOver(sea(WATER), input(1, 0), 40, 100)
+		local fuelWalk = speedOver(sea(FUEL), input(1, 0), 40, 100)
+		t.ok(near(fuelWalk, waterWalk, 1e-9), `fuel moves like water: {fuelWalk}`)
+		-- Sprinting under fuel swims, as under water.
+		local swimmer = PlayerPhysics.new(0.5, 10, 0.5)
+		for _ = 1, 10 do
+			PlayerPhysics.tick(swimmer, input(1, 0, { sprint = true }), sea(FUEL))
+		end
+		t.ok(swimmer.inWater and swimmer.underWater and swimmer.swimming, "swims in fuel")
+		t.eq(swimmer.eyeFluid, Fluids.FUEL)
+		-- Lava never swims.
+		local paddler = PlayerPhysics.new(0.5, 10, 0.5)
+		for _ = 1, 10 do
+			PlayerPhysics.tick(paddler, input(1, 0, { sprint = true }), sea(LAVA))
+		end
+		t.ok(not paddler.swimming and paddler.pose == "standing", "no swimming in lava")
+		-- A cave twin (CaveLava) is lava.
+		local twin = PlayerPhysics.new(0.5, 10, 0.5)
+		PlayerPhysics.tick(twin, input(0, 0), sea(Blocks.id.CaveLava))
+		t.ok(twin.inLava and twin.eyeFluid == Fluids.LAVA, "CaveLava is lava")
+	end)
+
 	t.test("physics: poses crouch when sneaking and crawl under a 1 block ceiling", function()
 		local tunnel = physicsWorld(function(x, y, _z)
 			return if y == 2 and x >= 3 then STONE else nil

@@ -7,14 +7,19 @@
 	(except from a kind module, which defines itself with it). Machines/Upgrades holds Mekanism's
 	upgrade cards (their slots and maths), for kinds that take them.
 
+	The kinds: Creative (the Creative Energy Cube), Generator (the Heat Generator: furnace fuel and
+	lava), Smelter (the Electric Furnace), Solar (the Solar Panel), Battery (the Energy Cubes),
+	Refinery (the Oil Refinery: oil into fuel) and Combustion (the Combustion Generator: fuel).
+
 	A new machine:
 	  1. BlockList: a block with `machine = { kind = "name" }` and `energy = { capacity, input?,
 	     output? }` (appended at the end).
-	  2. Machines/Kinds/<Name>.luau: `return Core.define("name", { slots, fields, keep, panel,
-	     tick, status, ... })`.
+	  2. Machines/Kinds/<Name>.luau: `return Core.define("name", { slots, fields, keep, tanks,
+	     panel, tick, status, ... })`.
 	  3. One line below requiring it.
-	The server ticks it, connects it to energy networks, keeps its energy in its item and
-	replicates it; the client draws its panel, energy bar and WAILA lines. Nothing else to wire.
+	The server ticks it, connects it to energy networks (and its tanks to Mechanical Pipes), keeps
+	its energy and fluids in its item and replicates it; the client draws its panel, energy bar,
+	tank gauges and WAILA lines. Nothing else to wire.
 ]]
 
 local Core = require(script.Core)
@@ -28,6 +33,10 @@ export type View = Core.View
 export type TickContext = Core.TickContext
 export type EnergySpec = Core.EnergySpec
 export type Role = Core.Role
+export type TankSpec = Core.TankSpec
+export type Tank = Core.Tank
+export type TankGauge = Core.TankGauge
+export type TankContents = Core.TankContents
 
 -- Every machine kind (append one line per kind module).
 require(script.Kinds.Creative)
@@ -35,6 +44,8 @@ require(script.Kinds.Generator)
 require(script.Kinds.Smelter)
 require(script.Kinds.Solar)
 require(script.Kinds.Battery)
+require(script.Kinds.Refinery)
+require(script.Kinds.Combustion)
 
 Core.bindBlocks()
 

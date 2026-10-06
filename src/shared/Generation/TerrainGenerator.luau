@@ -15,9 +15,11 @@
 	the biomes of that band. Islands far out in some seas are mushroom fields.
 
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
-	(SurfaceCaves.luau, air open to the surface), ores, trees and library structures, glow lichen,
-	ground plants. Trees ask the worms (not the chunk) whether a surface cave opens under them, so
-	every chunk agrees on every tree; no surface cave is carved next to a structure's piece.
+	(SurfaceCaves.luau, air open to the surface), lava below LavaLevel, surface lava lakes and oil
+	wells (Lava.luau, OilWells.luau), ores, underground lava lakes, trees and library structures,
+	glow lichen, ground plants. Trees ask the worms (not the chunk) whether a surface cave opens
+	under them, so every chunk agrees on every tree; no surface cave is carved next to a
+	structure's piece, a surface lava lake or a geyser's oil lake, and no tree grows in one.
 
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
@@ -46,6 +48,8 @@ local SurfaceCaves = require(script.Parent.SurfaceCaves)
 local Ores = require(script.Parent.Ores)
 local Foliage = require(script.Parent.Foliage)
 local CaveDecor = require(script.Parent.CaveDecor)
+local Lava = require(script.Parent.Lava)
+local OilWells = require(script.Parent.OilWells)
 local StructureGen = require(script.Parent.StructureGen)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
@@ -154,6 +158,13 @@ export type Generator = {
 	-- The cave entrances and ravines `generate` carves (Generation/SurfaceCaves): `worms` finds
 	-- them, `carvesTop` says whether one opens at a column.
 	surfaceCaves: SurfaceCaves.SurfaceCaves,
+	-- The oil wells (Generation/OilWells) with a block within OilWells.MARGIN of the block
+	-- rectangle (inclusive), deposits and geysers, and a geyser's lake columns (OilWells.lakeOf).
+	oilWells: (minX: number, minZ: number, maxX: number, maxZ: number) -> { OilWells.Well },
+	oilLake: (well: OilWells.Well) -> buffer,
+	-- The surface lava lakes (Generation/Lava) whose box comes within Lava.PROTECT blocks of the
+	-- block rectangle (inclusive).
+	lavaLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lava.Lake },
 }
 
 --[[
@@ -286,6 +297,72 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		})
 	end
 
+	-- Does a library structure's piece reach the block rectangle (inclusive)?
+	local function piecesIn(minX: number, minZ: number, maxX: number, maxZ: number): boolean
+		if placer == nil then
+			return false
+		end
+		for _, start in placer.starts(minX, minZ, maxX, maxZ) do
+			for _, piece in start.pieces do
+				local box = piece.box
+				if box[1] <= maxX and box[4] >= minX and box[3] <= maxZ and box[6] >= minZ then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	-- The spawn column (findSpawn's, worked out once): lava lakes and oil wells keep clear of it.
+	local findSpawn: () -> (number, number, number)
+	local spawnX: number?, spawnZ: number? = nil, nil
+	local function spawnColumn(): (number, number)
+		if spawnX == nil or spawnZ == nil then
+			local x, _, z = findSpawn()
+			spawnX, spawnZ = x, z
+			return x, z
+		end
+		return spawnX, spawnZ
+	end
+	local function biomeAt(x: number, z: number): number
+		local _, biome = sample(x, z, 0)
+		return biome
+	end
+
+	-- Oil wells and surface lava lakes, decided from the full detail terrain (every chunk and
+	-- level agrees). A lava lake also keeps clear of a geyser's oil lake.
+	local wells = OilWells.new(seed, {
+		height = outsideHeight,
+		biome = biomeAt,
+		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
+			return not piecesIn(minX, minZ, maxX, maxZ)
+		end,
+		spawn = spawnColumn,
+		regions = if Config.Caves.Enabled then Caves.regions(seed) else nil,
+		-- (Deposits keep under the surface caves, carved before them.)
+		carved = function(x: number, z: number): number?
+			if not surfaceCaves.mayCarve(x, z) then
+				return nil
+			end
+			local h = outsideHeight(x, z)
+			return surfaceCaves.lowestCarved(0, x, z, h, h - 1)
+		end,
+	})
+	local lava = Lava.new(seed, {
+		height = outsideHeight,
+		biome = biomeAt,
+		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
+			for _, well in wells.find(minX, minZ, maxX, maxZ) do
+				local x0, z0, x1, z1 = wells.lakeBox(well)
+				if x0 and z0 and x1 and z1 and x0 <= maxX and x1 >= minX and z0 <= maxZ and z1 >= minZ then
+					return false
+				end
+			end
+			return not piecesIn(minX, minZ, maxX, maxZ)
+		end,
+		spawn = spawnColumn,
+	})
+
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
 	local biomes: { number } = table.create(P * P, 1)
@@ -314,38 +391,52 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	--[[
 		Padded columns no surface cave may carve: within STRUCTURE_MARGIN blocks of a library
 		structure piece (its foundation would fill a pit under it and a path would float over a
-		ravine). nil when there are none. Pieces are world boxes, so every chunk agrees.
+		ravine), and in `boxes` (x0, z0, x1, z1 per box, inclusive: surface lava lakes and geysers'
+		oil lakes with their margins; a surface cave there would open the lake's side). nil when
+		there are none. Pieces and boxes are world boxes, so every chunk agrees.
 	]]
 	local function protectedColumns(
 		starts: { StructureGen.Start }?,
+		boxes: { number },
 		level: number,
 		originX: number,
 		originZ: number
 	): { boolean }?
-		if starts == nil then
+		if starts == nil and #boxes == 0 then
 			return nil
 		end
 		local step = ChunkLayout.steps(level)
 		local half = step // 2
 		local any = false
 		table.clear(protected)
-		for _, start in starts do
-			for _, piece in start.pieces do
-				local box = piece.box
-				local bx0, bz0 = box[1] - STRUCTURE_MARGIN, box[3] - STRUCTURE_MARGIN
-				local bx1, bz1 = box[4] + STRUCTURE_MARGIN, box[6] + STRUCTURE_MARGIN
-				-- Padded columns whose sample block is in the grown box.
-				local px0 = math.max(-((originX - step + half - bx0) // step), 0)
-				local px1 = math.min((bx1 - (originX - step + half)) // step, P - 1)
-				local pz0 = math.max(-((originZ - step + half - bz0) // step), 0)
-				local pz1 = math.min((bz1 - (originZ - step + half)) // step, P - 1)
-				for pz = pz0, pz1 do
-					for px = px0, px1 do
-						protected[pz * P + px + 1] = true
-						any = true
-					end
+		local function protect(bx0: number, bz0: number, bx1: number, bz1: number)
+			-- Padded columns whose sample block is in the box.
+			local px0 = math.max(-((originX - step + half - bx0) // step), 0)
+			local px1 = math.min((bx1 - (originX - step + half)) // step, P - 1)
+			local pz0 = math.max(-((originZ - step + half - bz0) // step), 0)
+			local pz1 = math.min((bz1 - (originZ - step + half)) // step, P - 1)
+			for pz = pz0, pz1 do
+				for px = px0, px1 do
+					protected[pz * P + px + 1] = true
+					any = true
 				end
 			end
+		end
+		if starts then
+			for _, start in starts do
+				for _, piece in start.pieces do
+					local box = piece.box
+					protect(
+						box[1] - STRUCTURE_MARGIN,
+						box[3] - STRUCTURE_MARGIN,
+						box[4] + STRUCTURE_MARGIN,
+						box[6] + STRUCTURE_MARGIN
+					)
+				end
+			end
+		end
+		for i = 1, #boxes, 4 do
+			protect(boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3])
 		end
 		return if any then protected else nil
 	end
@@ -388,6 +479,37 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				local top = placer.top(found, x0, z0, x1, z1, math.max(highest, SEA))
 				needed = math.max(needed, top // stepY + 2)
 			end
+		end
+
+		-- Surface lava lakes and oil wells near the padded chunk (as far as tree spots that must
+		-- keep out of their lakes), and the squares around their lakes (`keepOut`, x0, z0, x1, z1
+		-- per lake): no surface cave carves there and no tree grows there.
+		local lakes: { Lava.Lake }? = nil
+		local nearWells: { OilWells.Well }? = nil
+		local keepOut: { number } = {}
+		if level <= Config.StructureMaxLevel then
+			local reach = Structures.RADIUS + 1
+			local x0, z0 = originX - step - reach, originZ - step - reach
+			local x1, z1 = originX + span + step - 1 + reach, originZ + span + step - 1 + reach
+			lakes = lava.surfaceLakes(x0, z0, x1, z1)
+			for _, lake in lakes :: { Lava.Lake } do
+				local m = Lava.PROTECT
+				table.insert(keepOut, lake.x - m)
+				table.insert(keepOut, lake.z - m)
+				table.insert(keepOut, lake.x + Lava.BOX - 1 + m)
+				table.insert(keepOut, lake.z + Lava.BOX - 1 + m)
+			end
+			nearWells = wells.find(x0, z0, x1, z1)
+			for _, well in nearWells :: { OilWells.Well } do
+				local bx0, bz0, bx1, bz1 = wells.lakeBox(well)
+				if bx0 and bz0 and bx1 and bz1 then
+					table.insert(keepOut, bx0)
+					table.insert(keepOut, bz0)
+					table.insert(keepOut, bx1)
+					table.insert(keepOut, bz1)
+				end
+			end
+			-- (A spout rises at most 16 blocks over its own column: within STRUCTURE_ROOM.)
 		end
 
 		-- The column buffer ends a little above the highest terrain (room for structures).
@@ -504,8 +626,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		end
 
 		-- 3. Caves (full detail only), then cave entrances and ravines (point-sampled up to
-		-- SurfaceCaves.MAX_LEVEL: far ravines show as cuts), then ores (full detail only; they only
-		-- replace stone, so they never fill carved air).
+		-- SurfaceCaves.MAX_LEVEL: far ravines show as cuts), lava below LavaLevel, surface lava
+		-- lakes and oil wells (point-sampled up to StructureMaxLevel), then ores (full detail only;
+		-- they only replace stone, so they never fill carved air) and an underground lava lake.
 		local carved: Caves.Carved? = nil
 		if level == 0 and Config.Caves.Enabled then
 			carved = carveCaves(data, originX, originZ, heights, cells, yield)
@@ -514,15 +637,66 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 		if level <= SurfaceCaves.MAX_LEVEL then
-			local protectedCells = protectedColumns(starts, level, originX, originZ)
+			local protectedCells = protectedColumns(starts, keepOut, level, originX, originZ)
 			local lowest =
 				surfaceCaves.carve(data, level, originX, originZ, heights, topCells, cells, protectedCells, yield)
 			if lowest < solidBelow then
 				solidBelow = lowest
 			end
+			-- Lava below LavaLevel: cave air into CaveLava, surface caves' air into Lava.
+			lowest = Lava.aquifer(data, cells, level)
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+		end
+		-- Surface lava lakes and oil wells (deposits, geysers), before the ores so a deposit takes
+		-- the same rock in a chunk's padding as in its neighbour's core.
+		if lakes and #lakes > 0 then
+			local lowest = lava.writeSurface(lakes, data, level, originX, originZ, cells, topCells)
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+		end
+		if nearWells and #nearWells > 0 then
+			local lowest, top, map = wells.write(nearWells, data, level, originX, originZ, cells, topCells, carved)
+			carved = map
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+			if top > emptyAbove then
+				emptyAbove = top
+			end
 		end
 		if level == 0 then
 			Ores.place(data, seed, nx, nz, cells)
+			-- An underground lava lake, sunk into a cave floor (decided from this chunk's blocks; it
+			-- never reaches the neighbours' padding), not into a library structure's piece.
+			if carved then
+				local blocked: ((number, number, number, number, number, number) -> boolean)? = nil
+				if starts then
+					local list = starts
+					blocked = function(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): boolean
+						for _, start in list do
+							for _, piece in start.pieces do
+								local b = piece.box
+								if
+									b[1] <= x1
+									and b[4] >= x0
+									and b[2] <= y1
+									and b[5] >= y0
+									and b[3] <= z1
+									and b[6] >= z0
+								then
+									return true
+								end
+							end
+						end
+						return false
+					end
+				end
+				local _, map = lava.underground(data, cells, nx, nz, heights, carved, blocked)
+				carved = map
+			end
 		end
 
 		local structureSpan: { number }? = nil
@@ -539,15 +713,27 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					return h, biome, vegetation, surface
 				end
 			end
-			-- Not on bare rock, near a library structure's piece or over a surface cave (decided
-			-- from the worms, so every chunk and level agrees).
+			-- Not on bare rock, near a library structure's piece, in a surface lava lake's or a
+			-- geyser's square or over a surface cave (decided from the worms, so every chunk and
+			-- level agrees).
+			local function dry(x: number, z: number): boolean
+				for i = 1, #keepOut, 4 do
+					if x >= keepOut[i] and z >= keepOut[i + 1] and x <= keepOut[i + 2] and z <= keepOut[i + 3] then
+						return false
+					end
+				end
+				return true
+			end
 			local accept = function(x: number, z: number, biome: number): boolean
-				return gentle(x, z, biome) and not surfaceCaves.carvesTop(x, z)
+				return gentle(x, z, biome) and dry(x, z) and not surfaceCaves.carvesTop(x, z)
 			end
 			if placer and starts then
 				local p, list = placer, starts
 				accept = function(x: number, z: number, biome: number): boolean
-					return gentle(x, z, biome) and p.treeAllowed(list, x, z) and not surfaceCaves.carvesTop(x, z)
+					return gentle(x, z, biome)
+						and p.treeAllowed(list, x, z)
+						and dry(x, z)
+						and not surfaceCaves.carvesTop(x, z)
 				end
 			end
 			Structures.populate(
@@ -769,7 +955,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		return limits
 	end
 
-	local function findSpawn(): (number, number, number)
+	function findSpawn(): (number, number, number)
 		--[[
 			Walk an outward square spiral (every SPAWN_STEP blocks) for the first gentle, dry,
 			unfrozen column in the hills or plains next to the mountains: a view of the ranges without
@@ -845,6 +1031,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		structureContainer = structureContainer,
 		structures = structuresIn,
 		surfaceCaves = surfaceCaves,
+		oilWells = wells.find,
+		oilLake = wells.lakeOf,
+		lavaLakes = lava.surfaceLakes,
 	}
 end
 

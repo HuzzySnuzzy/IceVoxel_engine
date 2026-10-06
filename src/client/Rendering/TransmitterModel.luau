@@ -22,13 +22,17 @@
 	           whose PUSH and PULL act as NORMAL everywhere (server Machines/EnergyNet).
 	  colour   a coloured transporter (dye 1..16) gets a translucent cube of its colour around the
 	           core's glass, and its arms' glass in that colour (Mekanism tints the transporter).
-	  water    a Mechanical Pipe's fill (Protocol `Transmitters.fluid`, 0..255): a water box in the
-	           core and in each sideways arm, its height the fill; the arm down is a full column
-	           as soon as there is any water, the arm up only when the pipe is (nearly) full.
-	  tanks    a Fluid Tank's water, from the bottom plate up to amount / capacity of the inside.
+	  fluid    a Mechanical Pipe's fill (Protocol `Transmitters.fluid`, 0..255) of its fluid
+	           (`fluidId`, Shared/Fluids): a box in the core and in each sideways arm, its height
+	           the fill; the arm down is a full column as soon as there is any, the arm up only
+	           when the pipe is (nearly) full.
+	  tanks    a Fluid Tank's fluid, from the bottom plate up to amount / capacity of the inside.
+	           Fluids are drawn in their colour (Fluids `color`, `fluidColour`): water, oil and
+	           fuel as "water" boxes (translucent), lava as "molten" ones (glowing: `fluidKind`).
 	  machines what a Mekanism machine shows from its Machines record (`machineBoxes`): a burning
-	           Heat Generator's fuel window and a smelting Electric Furnace's heating chamber glow
-	           on their four sides, and a Battery's gauges fill with its charge.
+	           Heat Generator's fuel window, a smelting Electric Furnace's heating chamber, a
+	           working Oil Refinery's heater and a burning Combustion Generator's chamber glow on
+	           their four sides, and a Battery's gauges fill with its charge.
 
 	Aiming (`pickSide`): the Configurator acts on the side it points at, as in Mekanism: an arm's
 	side when the ray hits that arm (aimed at as wide as its collar, or its plate into an
@@ -53,12 +57,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Fluids = require(Shared.Fluids)
 local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
 
 local BlockDecor = require(script.Parent.BlockDecor)
 
-export type BoxKind = "glass" | "frame" | "band" | "tint" | "water" | "cable" | "glow"
+export type BoxKind = "glass" | "frame" | "band" | "tint" | "water" | "molten" | "cable" | "glow"
 
 -- One box: its look (`kind`, `colour`), size and centre in pixels from the cell's centre.
 export type Box = { kind: BoxKind, size: { number }, offset: { number }, colour: { number } }
@@ -120,6 +125,21 @@ TransmitterModel.PULL_COLOUR = table.freeze({ 64, 160, 255 })
 TransmitterModel.PUSH_COLOUR = table.freeze({ 255, 140, 40 })
 -- Water as the world draws it (BlockList "Water").
 TransmitterModel.WATER_COLOUR = table.freeze({ 44, 106, 196 })
+
+-- The colour fluid `fluid` (Shared/Fluids id) is drawn in, in pipes and tanks: its blocks'.
+-- Water's for none and unknown ids (an old record before the fluid is known).
+function TransmitterModel.fluidColour(fluid: number?): { number }
+	local record = if fluid then Fluids.get(fluid) else nil
+	return if record then record.color else TransmitterModel.WATER_COLOUR
+end
+
+-- The kind of box fluid `fluid` is drawn as: "molten" (glowing) for one giving off light (lava),
+-- else "water" (translucent).
+function TransmitterModel.fluidKind(fluid: number?): BoxKind
+	local record = if fluid then Fluids.get(fluid) else nil
+	local kind: BoxKind = if record and record.light > 0 then "molten" else "water"
+	return kind
+end
 
 local CORE = TransmitterModel.CORE
 local ARM = TransmitterModel.ARM
@@ -195,9 +215,10 @@ end
 
 --[[
 	The boxes drawn over the transmitter `block` (on top of its core) with packed `modes`, dye
-	`colour` (transporters only) and fill byte `fluid` (pipes only), connected to transmitters on
-	the sides in `transmitterMask` and to acceptors on those in `acceptorMask` (bit `side`, as
-	Transmitters.connections gives them). Empty for blocks that are no transmitter.
+	`colour` (transporters only) and fill byte `fluid` (pipes only) of fluid `fluidId` (Shared/
+	Fluids; nil or 0: drawn as water), connected to transmitters on the sides in `transmitterMask`
+	and to acceptors on those in `acceptorMask` (bit `side`, as Transmitters.connections gives
+	them). Empty for blocks that are no transmitter.
 ]]
 function TransmitterModel.transmitterBoxes(
 	block: number,
@@ -205,7 +226,8 @@ function TransmitterModel.transmitterBoxes(
 	colour: number,
 	fluid: number,
 	transmitterMask: number,
-	acceptorMask: number
+	acceptorMask: number,
+	fluidId: number?
 ): { Box }
 	local boxes: { Box } = {}
 	local kind = Transmitters.kindOf(block)
@@ -221,12 +243,13 @@ function TransmitterModel.transmitterBoxes(
 		table.insert(boxes, box("tint", { TINT, TINT, TINT }, { 0, 0, 0 }, dye))
 	end
 	local fill = fillOf(block, fluid)
-	local water = TransmitterModel.WATER_COLOUR
+	local water = TransmitterModel.fluidColour(fluidId)
+	local waterKind: BoxKind = TransmitterModel.fluidKind(fluidId)
 	if fill > 0 then
 		local height = math.max(CORE_WATER * fill, MIN_WATER)
 		table.insert(
 			boxes,
-			box("water", { CORE_WATER, height, CORE_WATER }, { 0, -CORE_WATER / 2 + height / 2, 0 }, water)
+			box(waterKind, { CORE_WATER, height, CORE_WATER }, { 0, -CORE_WATER / 2 + height / 2, 0 }, water)
 		)
 	end
 	for side = 0, 5 do
@@ -250,11 +273,11 @@ function TransmitterModel.transmitterBoxes(
 				if side == DOWN or (side == UP and fill >= TransmitterModel.UP_FULL) then
 					-- (Water runs down a pipe whatever its level; it only stands up to the top when
 					-- the pipe is full.)
-					table.insert(boxes, along("water", side, ARM_WATER_FROM, waterTo, ARM_WATER, ARM_WATER, 0, water))
+					table.insert(boxes, along(waterKind, side, ARM_WATER_FROM, waterTo, ARM_WATER, ARM_WATER, 0, water))
 				elseif side ~= UP then
 					local height = math.max(ARM_WATER * fill, MIN_WATER)
 					local lift = -ARM_WATER / 2 + height / 2
-					table.insert(boxes, along("water", side, ARM_WATER_FROM, waterTo, ARM_WATER, height, lift, water))
+					table.insert(boxes, along(waterKind, side, ARM_WATER_FROM, waterTo, ARM_WATER, height, lift, water))
 				end
 			end
 		end
@@ -263,23 +286,23 @@ function TransmitterModel.transmitterBoxes(
 end
 
 --[[
-	The water inside the fluid tank `block` holding `amount` mB of `fluid`: one box from the bottom
-	up to amount / capacity of the inside, or none when it is empty or no tank.
+	The fluid inside the fluid tank `block` holding `amount` mB of `fluid` (Shared/Fluids id): one
+	box in its colour from the bottom up to amount / capacity of the inside, or none when it is
+	empty or no tank.
 ]]
-function TransmitterModel.tankBoxes(block: number, _fluid: number, amount: number): { Box }
+function TransmitterModel.tankBoxes(block: number, fluid: number, amount: number): { Box }
 	local capacity = Transmitters.tankCapacity(block)
 	if capacity <= 0 or amount ~= amount or amount <= 0 then
 		return {}
 	end
-	-- (The fluid: water is the only one; anything else is drawn like it.)
 	local fill = math.clamp(amount / capacity, 0, 1)
 	local height = math.max(TANK_HEIGHT * fill, MIN_WATER)
 	return {
 		box(
-			"water",
+			TransmitterModel.fluidKind(fluid),
 			{ TANK_WATER, height, TANK_WATER },
 			{ 0, TANK_BOTTOM + height / 2, 0 },
-			TransmitterModel.WATER_COLOUR
+			TransmitterModel.fluidColour(fluid)
 		),
 	}
 end
@@ -298,6 +321,9 @@ TransmitterModel.GLOW_DEPTH = 0.2
 local GLOWS: { [string]: { x: number, y: number, w: number, h: number } } = {
 	HeatGenerator = BlockDecor.GENERATOR_WINDOW,
 	ElectricFurnace = BlockDecor.ELECTRIC_FURNACE_WINDOW,
+	-- The Oil Refinery's heater and the Combustion Generator's chamber.
+	OilRefinery = BlockDecor.REFINERY_WINDOW,
+	CombustionGenerator = BlockDecor.COMBUSTION_WINDOW,
 }
 local SIDE_FACES = { "Front", "Back", "Left", "Right" }
 
@@ -369,9 +395,9 @@ end
 --[[
 	The boxes drawn over the machine `block` from what its record says (`look`, nil: none came, an
 	idle, empty machine), and a signature of what they show (equal signatures, equal boxes):
-	  * a Heat Generator that burns or an Electric Furnace that smelts (active) lights its window on
-	    its four sides: a thin glowing pane GLOW_DEPTH out of each face over the window its decor
-	    draws;
+	  * a Heat Generator or Combustion Generator that burns, an Electric Furnace that smelts or an
+	    Oil Refinery that refines (active) lights its window on its four sides: a thin glowing pane
+	    GLOW_DEPTH out of each face over the window its decor draws;
 	  * a Battery fills each side's gauge from the bottom with its charge (`chargeRows` of the
 	    gauge's height), glowing in the energy bar's colour for that fill (Machines.energyColour:
 	    red when nearly empty to green when full), so the boxes only change when a whole row does.

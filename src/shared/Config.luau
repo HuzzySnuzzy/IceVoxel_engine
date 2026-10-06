@@ -67,6 +67,53 @@ local Config = {
 			Length = { 60, 160 },
 			Depth = { 20, 45 },
 		},
+		-- Lava (Generation/Lava). Cave air below LavaLevel (absolute y: blocks 1..LavaLevel - 1)
+		-- is lava, as Minecraft's aquifers fill everything below y -54 (its surface 10 blocks above
+		-- the world's floor) and its carvers below aboveBottom(8): the lava seas of the deepest
+		-- caves and of the Underlands' floor under the highest mountains. It is CaveLava, the cave
+		-- twin (nothing to draw while caves are hidden); surface caves dug that deep get Lava.
+		LavaLevel = 11,
+		LavaLakes = {
+			-- Minecraft's lake_lava_underground (one try in 9 chunks, mostly ending inside rock):
+			-- here one chunk in Rarity of those with caves tries Tries random spots for a cave floor
+			-- at least Depth blocks below the surface and sinks a lake into it (CaveLava, a stone
+			-- barrier around it): about one in 3-5 chunks with 2,000+ cells of caves gets one.
+			Underground = { Enabled = true, Rarity = 1, Tries = 8, Depth = 30 },
+			-- Minecraft's lake_lava_surface: one candidate per Rarity chunks of area (16 x 16 block
+			-- cells), never in snowy or wet biomes, next to water or a deep cave (ordinary Lava).
+			Surface = { Enabled = true, Rarity = 200 },
+			-- No surface lake this close to the spawn (blocks).
+			SpawnClearance = 128,
+		},
+		-- Oil wells (Generation/OilWells, BuildCraft's OilPopulate): one candidate per Spacing x
+		-- Spacing blocks, a well with Chance, or the chance of its biome in Biomes, or Sea under
+		-- the sea (undersea pockets: all of SeaSize, no geyser), never within SpawnClearance blocks
+		-- of the spawn or next to a library structure. A deposit is a sphere of oil (CaveOil, the
+		-- cave twin) of Radius centred Depth blocks down; large and medium wells on land get a
+		-- geyser: a lake of Lake radius (less by the shore) and LakeDepth, and a spout Spout blocks
+		-- into the air (BuildCraft's 16 and 6; 0: no geyser).
+		OilWells = {
+			Enabled = true,
+			Spacing = 512,
+			Chance = 0.12,
+			Biomes = ({
+				Desert = 0.6,
+				Savanna = 0.5,
+				WindsweptSavanna = 0.5,
+				Plains = 0.45,
+			} :: any) :: { [string]: number },
+			Sea = 0.15,
+			SeaSize = "Small",
+			SpawnClearance = 256,
+			Depth = { 20, 40 },
+			-- (Spout 0: no geyser.)
+			Sizes = {
+				{ Name = "Large", Share = 0.25, Radius = { 8, 12 }, Lake = { 7, 10 }, Spout = 16 },
+				{ Name = "Medium", Share = 0.5, Radius = { 5, 7 }, Lake = { 4, 7 }, Spout = 6 },
+				{ Name = "Small", Share = 0.25, Radius = { 3, 4 }, Lake = { 0, 0 }, Spout = 0 },
+			},
+			LakeDepth = { 1, 3 },
+		},
 		-- While the camera is below the surface, the cave walls it can see into are meshed (in 16^3
 		-- sections: World/SectionGraph's search through connected cave air, Streaming/CaveReach).
 		-- Otherwise caves are treated as solid rock, which keeps the part count low.
@@ -91,11 +138,18 @@ local Config = {
 		-- switches off the lights farther than that many blocks from the camera (Rendering/
 		-- ChunkRenderer) on slow devices; the lichen still glows there (its speck is Neon).
 		LichenLightDistance = math.huge,
+		-- Lava carries one PointLight per 16 x 16 x 16 blocks of its drawn surface (Meshing/
+		-- GreedyMesher; a light 15's 13.5 block reach, PartPool), about one a chunk on a lava sea:
+		-- an Underlands sea revealed 128 blocks around the camera holds some 210. Only those within
+		-- this many blocks of the camera are on (Rendering/ChunkRenderer; ~110 there at 96, ~30 at
+		-- 48); the rest still glows (lava is Neon).
+		LavaLightDistance = 96,
 		-- Used instead on phones and tablets (Rendering/ViewSettings).
 		Mobile = {
 			RevealRadius = 48,
 			RevealRadiusMax = 96,
 			LichenLightDistance = math.huge,
+			LavaLightDistance = 48,
 		},
 	},
 

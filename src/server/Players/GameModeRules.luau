@@ -21,6 +21,8 @@
 	                 (`fallDamage`: Player.causeFallDamage returns early with Abilities.mayfly).
 	                 Players in a wall (left spectator in rock, buried in sand) suffocate
 	                 (`inWall`: LivingEntity.baseTick's in-wall damage), so nobody stays walled in.
+	                 Lava hurts and sets burning only players who can be hurt (Players/Burning:
+	                 creative and spectator players never burn).
 	  Death          a spectator who dies anyway (a game script setting Health) drops nothing and
 	                 keeps everything (`keepsInventory`: ServerPlayer.die skips dropAllDeathLoot
 	                 for spectators, restoreFrom keeps their inventory).

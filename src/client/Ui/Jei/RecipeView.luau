@@ -21,6 +21,13 @@
 	                        the output, "10 s"
 	              fuel      a flame burning down over the fuel's burn time, the fuel,
 	                        "Burns 8 items" and the burn time
+	              refining  the oil as a fluid stack (its colour in a slot, "Oil" and "1,000 mB"
+	                        on hover), an arrow filling over the 5 s a bucket takes, the fuel,
+	                        "5 s, 20 kJ" and "200 J/t"
+	              heating, combustion  a flame burning down over a bucket's burn time, the lava
+	                        or fuel as a fluid stack, "Makes 4 MJ" and "200 J/t for 1000 s"
+	                        (fuel: "Makes 10 MJ" and "2.5 kJ/t for 200 s")
+	            A fluid stack stands for its bucket in navigation (clicks, R / U, gamepad).
 
 	Navigation (clicking items in it, R / U, Back, history) is the controller's (Ui/Jei): this
 	module draws one state and hit-tests (screen pixels, the InputObject.Position space).
@@ -31,6 +38,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 
 local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
@@ -40,6 +48,7 @@ local Style = require(script.Parent.Parent.Style)
 local JeiData = require(script.Parent.JeiData)
 local JeiLayout = require(script.Parent.JeiLayout)
 local JeiTransfer = require(script.Parent.JeiTransfer)
+local TransmitterModel = require(script.Parent.Parent.Parent.Rendering.TransmitterModel)
 
 type Entry = JeiData.Entry
 type Group = JeiData.Group
@@ -81,6 +90,8 @@ local SHAPELESS_ART = {
 }
 
 type CellWidget = { slot: ItemIcon.Slot, items: { number }?, cell: number, missing: Frame }
+-- A fluid stack: a slot holding a square of the fluid's colour.
+type FluidWidget = { slot: ItemIcon.Slot, stack: JeiData.FluidStack }
 
 -- An animated sprite: grey art, with the lit art in a clipping frame that grows (Ui/InventoryScreen).
 type Gauge = { clip: Frame, holder: Frame, rect: Rect, shown: number, vertical: boolean }
@@ -89,6 +100,7 @@ type EntryWidget = {
 	entry: Entry,
 	frame: Frame,
 	cells: { CellWidget },
+	fluids: { FluidWidget },
 	output: ItemIcon.Slot?,
 	plus: TextButton?,
 	setPlus: ((enabled: boolean) -> ())?,
@@ -124,6 +136,7 @@ export type RecipeView = {
 	refreshTransfer: (self: RecipeView) -> (),
 	render: (self: RecipeView, now: number, point: Vector2?) -> (),
 	itemAt: (self: RecipeView, point: Vector2) -> (number?, { number }?),
+	fluidAt: (self: RecipeView, point: Vector2) -> JeiData.FluidStack?,
 	itemOf: (self: RecipeView, object: GuiObject) -> number?,
 	infoAt: (self: RecipeView, point: Vector2) -> { Line }?,
 	covers: (self: RecipeView, point: Vector2) -> boolean,
@@ -140,8 +153,9 @@ type Self = RecipeView & {
 	tabs: { Tab },
 	current: State?,
 	widgets: { EntryWidget },
-	-- Every slot button of the page -> its icon (gamepad selection).
+	-- Every slot button of the page -> its icon (gamepad selection); a fluid stack's -> its bucket.
 	byButton: { [GuiObject]: ItemIcon.ItemIcon },
+	fluidButtons: { [GuiObject]: number },
 	statusOf: ((entry: Entry) -> JeiTransfer.Status?)?,
 }
 
@@ -216,6 +230,7 @@ function RecipeView.new(parent: Instance): RecipeView
 			current = nil,
 			widgets = {},
 			byButton = {},
+			fluidButtons = {},
 			statusOf = nil,
 		}, RecipeView) :: any
 	) :: Self
@@ -334,6 +349,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		entry = entry,
 		frame = frame,
 		cells = {},
+		fluids = {},
 		output = nil,
 		plus = nil,
 		setPlus = nil,
@@ -352,6 +368,29 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		table.insert(widget.cells, cell)
 		self.byButton[slot.button] = slot.icon
 	end
+	-- Fluid stacks: what it takes, then what it makes.
+	local function addFluid(spot: JeiLayout.Spot?, stack: JeiData.FluidStack?)
+		if spot == nil or stack == nil then
+			return
+		end
+		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, false)
+		local rgb = TransmitterModel.fluidColour(stack.fluid)
+		local fill = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Color3.fromRGB(rgb[1], rgb[2], rgb[3]), 5)
+		fill.Name = "Fluid"
+		table.insert(widget.fluids, { slot = slot, stack = stack })
+		self.byButton[slot.button] = slot.icon
+		local bucket = Fluids.bucketOf(stack.fluid)
+		if bucket then
+			self.fluidButtons[slot.button] = bucket
+		end
+	end
+	local fluidInputs = entry.fluidInputs
+	if fluidInputs then
+		for i, stack in fluidInputs do
+			addFluid(layout.fluidInputs[i], stack)
+		end
+	end
+	addFluid(layout.fluidOutput, entry.fluidOutput)
 	local out = layout.output
 	local output = entry.output
 	if out and output then
@@ -362,7 +401,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	end
 	local arrow = layout.arrow
 	if arrow then
-		if entry.category == "smelting" then
+		if entry.category == "smelting" or entry.category == "refining" then
 			widget.arrow = newGauge(frame, arrow, false, arrowArt(arrow))
 		else
 			Style.pixelArt(
@@ -377,7 +416,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	end
 	local flame = layout.flame
 	if flame then
-		if entry.category == "fuel" then
+		if entry.category == "fuel" or entry.category == "heating" or entry.category == "combustion" then
 			widget.flame = newGauge(frame, flame, true, flameArt(flame))
 		else
 			-- Smelting: the furnace is lit.
@@ -415,6 +454,8 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		lines = { JeiData.smeltText(entry.ticks) }
 	elseif entry.category == "fuel" then
 		lines = { JeiData.fuelText(entry.ticks), JeiData.smeltText(entry.ticks) }
+	elseif entry.fluidInputs then
+		lines = JeiData.fluidTexts(entry)
 	end
 	for i, text in lines do
 		local r = layout.texts[i]
@@ -431,6 +472,9 @@ local function clearPage(self: Self)
 		for _, cell in widget.cells do
 			cell.slot.icon:destroy()
 		end
+		for _, fluid in widget.fluids do
+			fluid.slot.icon:destroy()
+		end
 		local output = widget.output
 		if output then
 			output.icon:destroy()
@@ -439,6 +483,7 @@ local function clearPage(self: Self)
 	end
 	self.widgets = {}
 	self.byButton = {}
+	self.fluidButtons = {}
 end
 
 local function applyTransfer(self: Self)
@@ -580,6 +625,12 @@ function RecipeView.render(self: Self, now: number, point: Vector2?)
 			cell.slot.icon:set(JeiData.shown(cell.items, now, focus), 1)
 			light(cell.slot)
 		end
+		for _, fluid in widget.fluids do
+			local lit = selected == fluid.slot.button or (point ~= nil and Style.contains(fluid.slot.button, point))
+			if fluid.slot.hover.Visible ~= lit then
+				fluid.slot.hover.Visible = lit
+			end
+		end
 		local output = widget.output
 		if output then
 			light(output)
@@ -607,12 +658,35 @@ function RecipeView.render(self: Self, now: number, point: Vector2?)
 	end
 end
 
--- The item shown under `point` (a recipe's ingredient or result), and the cell's items.
+-- The fluid stack under `point` (a refining or generator entry's), nil for none.
+function RecipeView.fluidAt(self: Self, point: Vector2): JeiData.FluidStack?
+	if not self.root.Visible then
+		return nil
+	end
+	for _, widget in self.widgets do
+		for _, fluid in widget.fluids do
+			if Style.contains(fluid.slot.button, point) then
+				return fluid.stack
+			end
+		end
+	end
+	return nil
+end
+
+--[[
+	The item shown under `point` (a recipe's ingredient or result; a fluid stack: its bucket, which
+	stands for it in lookups), and the cell's items.
+]]
 function RecipeView.itemAt(self: Self, point: Vector2): (number?, { number }?)
 	if not self.root.Visible then
 		return nil, nil
 	end
 	for _, widget in self.widgets do
+		for _, fluid in widget.fluids do
+			if Style.contains(fluid.slot.button, point) then
+				return Fluids.bucketOf(fluid.stack.fluid), nil
+			end
+		end
 		for _, cell in widget.cells do
 			if cell.slot.icon.item and Style.contains(cell.slot.button, point) then
 				return cell.slot.icon.item, cell.items
@@ -626,8 +700,12 @@ function RecipeView.itemAt(self: Self, point: Vector2): (number?, { number }?)
 	return nil, nil
 end
 
--- The item of a (gamepad) selected slot of the view.
+-- The item of a (gamepad) selected slot of the view (a fluid stack's: its bucket).
 function RecipeView.itemOf(self: Self, object: GuiObject): number?
+	local bucket = self.fluidButtons[object]
+	if bucket then
+		return bucket
+	end
 	local icon = self.byButton[object]
 	return if icon then icon.item else nil
 end

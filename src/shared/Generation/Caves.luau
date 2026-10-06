@@ -135,6 +135,77 @@ type CaveSet = {
 	half: number,
 }
 
+--[[
+	Marks the lattice cells holding any block of the box (x0..x1, y0..y1, z0..z1, world blocks) as
+	carved in (flag 0 becomes 1; 2 stays), for what later passes put into the rock as cave cells
+	(Generation/Lava's underground lakes, Generation/OilWells' deposits: cave twins and cave air
+	where the carver left rock). `carved` is the chunk's lattice (nil: none yet) for the padded
+	chunk whose first core column is (originX, originZ); it is created or grown upwards as needed
+	(the same world-aligned cells the carver uses) and returned. The box may reach past the padded
+	chunk: only its part inside is marked. Marking a cell that holds no cave cell only costs a read
+	(World/SectionGraph reads marked cells instead of assuming rock).
+]]
+function Caves.mark(
+	carved: Carved?,
+	originX: number,
+	originZ: number,
+	x0: number,
+	y0: number,
+	z0: number,
+	x1: number,
+	y1: number,
+	z1: number
+): Carved?
+	-- The carver's lattice over the padded chunk.
+	local gx0 = (originX - 1) // GRID_XZ
+	local gz0 = (originZ - 1) // GRID_XZ
+	local nx = (originX + SIZE) // GRID_XZ + 1 - gx0
+	local nz = (originZ + SIZE) // GRID_XZ + 1 - gz0
+	x0, z0 = math.max(x0, originX - 1), math.max(z0, originZ - 1)
+	x1, z1 = math.min(x1, originX + SIZE), math.min(z1, originZ + SIZE)
+	y0 = math.max(y0, 0)
+	if x0 > x1 or z0 > z1 or y0 > y1 then
+		return carved
+	end
+	local ly1 = y1 // GRID_Y
+	local map: Carved
+	if carved == nil then
+		local gy0 = math.min(Config.Caves.MinY // GRID_Y, y0 // GRID_Y)
+		map = {
+			x = gx0 * GRID_XZ,
+			y = gy0 * GRID_Y,
+			z = gz0 * GRID_XZ,
+			nx = nx,
+			ny = ly1 - gy0 + 1,
+			nz = nz,
+			flags = buffer.create(nx * nz * (ly1 - gy0 + 1)),
+		}
+	else
+		map = carved
+		local gy0 = map.y // GRID_Y
+		if ly1 - gy0 + 1 > map.ny then
+			-- Grow upwards: the layers are the outermost index, so the old ones keep their place.
+			local ny = ly1 - gy0 + 1
+			local flags = buffer.create(map.nx * map.nz * ny)
+			buffer.copy(flags, 0, map.flags)
+			map = { x = map.x, y = map.y, z = map.z, nx = map.nx, ny = ny, nz = map.nz, flags = flags }
+		end
+		y0 = math.max(y0, map.y)
+	end
+	local flags, mnx, mnz = map.flags, map.nx, map.nz
+	for ly = (y0 - map.y) // GRID_Y, (y1 - map.y) // GRID_Y do
+		for lz = (z0 - map.z) // GRID_XZ, (z1 - map.z) // GRID_XZ do
+			local row = (ly * mnz + lz) * mnx
+			for lx = (x0 - map.x) // GRID_XZ, (x1 - map.x) // GRID_XZ do
+				if buffer.readu8(flags, row + lx) == 0 then
+					buffer.writeu8(flags, row + lx, 1)
+				end
+			end
+		end
+	end
+	return map
+end
+
 -- 3D cave noise with the datapack's spread (Noise.noise3 has a standard deviation of 1/3).
 local function caveNoise3(seed: number, salt: string, wavelength: number, wavelengthY: number?): Noise.Sampler3
 	local n = Noise.noise3(seed, salt, 1 / (wavelength * CAVE_SCALE), wavelength / (wavelengthY or wavelength))

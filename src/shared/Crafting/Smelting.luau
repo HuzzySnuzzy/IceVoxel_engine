@@ -7,15 +7,21 @@
 	`data = { litTime, litDuration, cookingProgress, cookingTotalTime, cookingItem }`:
 	  * while lit (litTime > 0) it burns down one tick at a time;
 	  * when it is out and there is something to smelt that fits the output, it lights by using one
-	    fuel item (litTime = that fuel's burn time);
+	    fuel item (litTime = that fuel's burn time); a used up fuel that leaves something behind
+	    leaves it in the fuel slot (Items.craftingRemainder: a Lava Bucket the empty Bucket);
 	  * while lit with something to smelt, the progress counts up to 200 ticks, then one input item
 	    becomes the recipe's result in the output;
 	  * with nothing to smelt the progress resets; going out, it falls back 2 per tick;
 	  * a different item in the input starts its progress over (`cookingItem`).
 
 	`recipes()` and `fuels()` list the same recipes and fuels for recipe browsers (Ui/Jei).
+
+	Fuels are Recipes.fuel's, plus the buckets of the fluids that burn (Shared/Fluids `furnaceFuel`:
+	Minecraft's Lava Bucket, 20 000 ticks). Oil and fuel are no furnace fuel: furnaces burn solid
+	fuels only, as in Minecraft.
 ]]
 
+local FluidList = require(script.Parent.Parent.Fluids.FluidList)
 local Items = require(script.Parent.Parent.Items)
 local Recipes = require(script.Parent.Recipes)
 
@@ -64,6 +70,11 @@ end
 for name, ticks in Recipes.fuel :: { [string]: number } do
 	for _, id in namesOf(name) do
 		fuels[id] = ticks
+	end
+end
+for _, fluid in FluidList do
+	if fluid.furnaceFuel > 0 then
+		fuels[namesOf(fluid.bucket)[1]] = fluid.furnaceFuel
 	end
 end
 for item, ticks in fuels do
@@ -165,8 +176,11 @@ function Smelting.tick(furnace: { slots: { [number]: Stack? }, data: { number }?
 			local burn = Smelting.fuel(fuel.item)
 			if burn > 0 then
 				data[1], data[2] = burn, burn
-				-- (What is left keeps its wear and item data, as Minecraft's shrink(1) does.)
-				slots[2] = Items.withCount(fuel, fuel.count - 1)
+				-- (What is left keeps its wear and item data, as Minecraft's shrink(1) does; the last
+				-- one leaves its remainder, a Lava Bucket the empty Bucket.)
+				local left = Items.withCount(fuel, fuel.count - 1)
+				local remainder = Items.craftingRemainder(fuel.item)
+				slots[2] = if left == nil and remainder then { item = remainder, count = 1 } else left
 				changed = true
 			end
 		end
@@ -192,14 +206,16 @@ function Smelting.tick(furnace: { slots: { [number]: Stack? }, data: { number }?
 	return changed
 end
 
--- Is the furnace doing anything (worth ticking)?
+-- Is the furnace doing anything (worth ticking)? (An empty bucket left in the fuel slot burns
+-- nothing.)
 function Smelting.active(furnace: { slots: { [number]: Stack? }, data: { number }? }): boolean
 	local data = furnace.data
 	if data and (data[1] > 0 or data[3] > 0) then
 		return true
 	end
 	local slots = furnace.slots
-	return slots[1] ~= nil and slots[2] ~= nil
+	local fuel = slots[2]
+	return slots[1] ~= nil and fuel ~= nil and Smelting.fuel(fuel.item) > 0
 end
 
 return Smelting

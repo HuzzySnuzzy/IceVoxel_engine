@@ -6,7 +6,7 @@
 	transmitters, fluid tanks, Configurator, Universal Cables, machines, upgrade cards and energy
 	cubes adapted to the game's materials (see "Mekanism pipes and buckets", "Universal Cables",
 	"Heat Generator", "Electric Furnace", "upgrade cards", "Solar Generator" and "Energy Cubes"
-	below).
+	below), and the Oil Refinery and Combustion Generator (BuildCraft's machines made Mekanism's).
 
 	  shaped     `pattern` rows of single characters (" " = empty), `key` maps each character to an
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
@@ -264,6 +264,32 @@ for tier = 2, 4 do
 		"B"
 	)
 end
+
+--[[
+	The Oil Refinery, Mekanism's machine shape around BuildCraft's refinery: iron, glass and iron
+	(its sight glass) over osmium, a furnace and osmium (the heater in a casing: osmium stands for
+	Mekanism's steel and circuits, as in the Electric Furnace) over iron, a bucket and iron (its
+	fluid outlet) ("IGI", "OFO", "IBI"). BuildCraft's own refinery is tanks and gears around a
+	redstone engine's parts, which the game has none of.
+]]
+shape(
+	{ "IGI", "OFO", "IBI" },
+	{ I = "IronIngot", G = "Glass", O = "OsmiumIngot", F = "Furnace", B = "Bucket" },
+	"OilRefinery"
+)
+
+--[[
+	The Combustion Generator, Mekanism's generator shape around BuildCraft's combustion engine:
+	osmium, a bucket (the fuel inlet) and osmium, over iron, a furnace (the combustion chamber) and
+	iron, over osmium, glow dust and osmium (the power out: glow dust stands for redstone, as in
+	the cables, osmium for Mekanism's steel) ("OBO", "IFI", "ODO"). BuildCraft's engine needs
+	pistons and gears, which the game has none of.
+]]
+shape(
+	{ "OBO", "IFI", "ODO" },
+	{ I = "IronIngot", B = "Bucket", O = "OsmiumIngot", F = "Furnace", D = "GlowDust" },
+	"CombustionGenerator"
+)
 
 --[[ Smelting ]]
 

@@ -53,12 +53,18 @@
 	                as Mekanism's: the arm hit, else the face of the core hit, else the cell's face
 	                the ray hit) and whether the player sneaks (sneaking: a transporter's colour;
 	                pipes have none).
-	  Bucket        Minecraft's BucketItem: its own ray, which also stops at water sources
-	                (ClipContext.Fluid.SOURCE_ONLY), picks up a source or takes from a fluid tank.
-	  Water Bucket  the ordinary aim (through water): into a fluid tank, else water is poured into
-	                the clicked block if it can be replaced, else in front of the clicked face.
-	A block with a menu still opens first, unless the player sneaks; a sneaking player's bucket
-	skips fluid tanks too (it acts on the world, as Minecraft skips a block's use).
+	  Bucket        Minecraft's BucketItem: its own ray, which also stops at the sources of every
+	                fluid a bucket carries (water, lava, oil, fuel and the cave twins: Fluids
+	                .isSource, ClipContext.Fluid.SOURCE_ONLY), picks up a source or takes from a
+	                Fluid Tank or a machine's fluid tanks.
+	  Full buckets  (Water, Lava, Oil, Fuel Bucket: Fluids.ofBucket) the ordinary aim (through
+	                fluids): into a Fluid Tank or a machine's fluid tanks, else the fluid is poured
+	                into the clicked block if it can be replaced, else in front of the clicked face.
+	A block with a menu still opens first, unless the player sneaks, except a machine with fluid
+	tanks clicked with a bucket that fills or empties one of them as far as its Machines record
+	shows (TankUse): the bucket goes to its tanks, else the screen opens (Mekanism's BlockFluidTank:
+	handleTankInteraction first, the GUI when it moves nothing). A sneaking player's bucket skips
+	tanks and machines (it acts on the world, as Minecraft skips a block's use).
 
 	Torches and lanterns go where something holds them (Blocks.placementFor, Minecraft's rules): a
 	torch on top of a block stands, on a side it is a wall torch facing away from it, under a
@@ -102,8 +108,10 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
+local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
 local Protocol = require(Shared.Net.Protocol)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
@@ -127,6 +135,7 @@ local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 local CrackOverlay = require(script.Parent.CrackOverlay)
+local TankUse = require(script.Parent.TankUse)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -149,11 +158,25 @@ local PARTICLE_GRAVITY = 45 -- studs / s^2
 local SWING_RESTART = 0.15
 -- A whole cell, as Blocks.outline gives boxes.
 local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
--- Items used on blocks (UseItem) and the water source block buckets pick up.
+-- Items used on blocks (UseItem): the Configurator and the empty Bucket (full buckets: Fluids).
 local CONFIGURATOR = Items.id.Configurator
 local BUCKET = Items.id.Bucket
-local WATER_BUCKET = Items.id.WaterBucket
-local WATER_SOURCE = Blocks.fluidId("Water", 0)
+
+-- The fluid a full bucket pours (a carriable fluid's: Fluids.ofBucket), 0 for any other item.
+local function bucketFluid(item: number): number
+	local fluid = Fluids.ofBucket(item)
+	return if Fluids.carriable(fluid) then fluid else 0
+end
+
+-- Does an empty bucket take `block` (a carriable fluid's source or cave twin)?
+local function bucketTakes(block: number): boolean
+	return Fluids.isSource(block) and Fluids.carriable(Fluids.ofBlock(block))
+end
+
+-- Does `block` hold fluid a bucket fills from or pours into (a Fluid Tank, a machine with tanks)?
+local function holdsFluid(block: number): boolean
+	return Transmitters.isTank(block) or Machines.hasTanks(block)
+end
 
 local BlockInteraction = {}
 
@@ -724,10 +747,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return true
 	end
 
-	-- Minecraft's empty bucket: its own ray, which stops at water sources as well as blocks.
+	-- Minecraft's empty bucket: its own ray, which stops at fluid sources as well as blocks.
 	local function bucketTarget(ray: Ray): Hit?
 		return cast(ray, function(id: number): boolean
-			return id == WATER_SOURCE or Blocks.isTargetable(id)
+			return bucketTakes(id) or Blocks.isTargetable(id)
 		end)
 	end
 
@@ -750,15 +773,15 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return sendUseItem(hit.x, hit.y, hit.z, transmitterSide(hit, ray), sneaking)
 		elseif item == BUCKET then
 			local source = bucketTarget(ray)
-			if source and (source.block == WATER_SOURCE or (not sneaking and Transmitters.isTank(source.block))) then
+			if source and (bucketTakes(source.block) or (not sneaking and holdsFluid(source.block))) then
 				return sendUseItem(source.x, source.y, source.z, faceSide(source, ray), sneaking)
 			end
 			return false
-		elseif item == WATER_BUCKET then
+		elseif bucketFluid(item) ~= 0 then
 			if hit == nil then
 				return false
 			end
-			if sneaking or not Transmitters.isTank(hit.block) then
+			if sneaking or not holdsFluid(hit.block) then
 				-- Only where the server could pour it: the clicked block when it can be replaced,
 				-- else the one in front of the clicked face.
 				local x, y, z = hit.x, hit.y, hit.z
@@ -793,7 +816,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- spectators hold nothing).
 		local sneaking = view ~= nil and view.state.sneaking
 		local secondary = sneaking and stack ~= nil and GameMode.canInteract(mode)
-		if hit and opensMenu(hit.block, mode) and not secondary then
+		-- (A bucket on a machine with fluid tanks fills or empties them instead of opening it, when
+		-- it can: else nothing would happen, and the screen opens.)
+		local tankUse = stack ~= nil
+			and hit ~= nil
+			and Machines.hasTanks(hit.block)
+			and GameMode.mayBuild(mode)
+			and TankUse.acts(hit.block, stack.item, TransmitterRenderer.machine(hit.x, hit.y, hit.z))
+		if hit and opensMenu(hit.block, mode) and not secondary and not tankUse then
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()

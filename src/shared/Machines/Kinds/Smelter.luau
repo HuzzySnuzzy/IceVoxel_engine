@@ -45,10 +45,11 @@
 	RATE is minus the energy it used this tick (-50 while working, else 0): whether it works now,
 	which its status reads (WAILA, the panel): "Using 50 J/t", "No power", "Output full" or "Idle".
 	ACTIVE is what the block shows (its glowing chamber, WAILA's F3 line), Mekanism's client active
-	state (TileEntityMekanism.setActive): on as soon as it works; off at once when it stops, unless
-	it stopped less than DEACTIVATION_DELAY ticks before, in which case it stays on until it has not
-	worked for that long. So a furnace on too little power (working every other tick) glows
-	steadily instead of blinking, and one that finishes goes dark at once.
+	state (TileEntityMekanism.setActive; Shared/Machines.showActive): on as soon as it works; off at
+	once when it stops, unless it stopped less than DEACTIVATION_DELAY (60) ticks before, in which
+	case it stays on until it has not worked for that long. So a furnace on too little power
+	(working every other tick) glows steadily instead of blinking, and one that finishes goes dark
+	at once.
 	Only its energy is kept in its item when broken (placed again, it holds at most its capacity
 	without Energy Upgrades); its slots drop, upgrade cards included, so the progress goes.
 
@@ -76,10 +77,6 @@ local INPUT, OUTPUT, SPEED, ENERGY = 1, 2, 3, 4
 -- State codes (the `state` field; Shared/Machines KindSpec `state`).
 local IDLE, NO_POWER, OUTPUT_FULL = 0, 1, 2
 
--- Ticks a stopped machine keeps showing it works after its last stop (Mekanism's
--- blockDeactivationDelay, 60).
-local DEACTIVATION_DELAY = 60
-
 local function smelts(item: number): boolean
 	return Smelting.result(item) ~= nil
 end
@@ -103,36 +100,6 @@ local function fits(container: Container, result: Stack): boolean
 		return result.count <= limit
 	end
 	return Items.stacksMatch(output, result) and output.count + result.count <= limit
-end
-
---[[
-	Sets what the block shows (ACTIVE) from whether it works this tick (`working`) and worked last
-	tick (`wasWorking`): Mekanism's TileEntityMekanism.setActive and its updateDelay countdown. On
-	at once; off at once unless the delay (started by every stop) is still running, then off when
-	it runs out with the machine still stopped.
-]]
-local function showActive(container: Container, wasWorking: boolean, working: boolean)
-	local shown = Core.get(container, "active") ~= 0
-	-- (Data from elsewhere: a whole number of ticks, at most the delay.)
-	local delay = math.clamp(math.floor(Core.get(container, "activeDelay")), 0, DEACTIVATION_DELAY)
-	if delay > 0 then
-		delay -= 1
-		if delay == 0 then
-			shown = wasWorking
-		end
-	end
-	if working ~= wasWorking and shown ~= working then
-		if working then
-			shown = true
-		else
-			if delay == 0 then
-				shown = false
-			end
-			delay = DEACTIVATION_DELAY
-		end
-	end
-	Core.set(container, "active", if shown then 1 else 0)
-	Core.set(container, "activeDelay", delay)
 end
 
 local function tick(container: Container, ctx: Core.TickContext)
@@ -179,7 +146,8 @@ local function tick(container: Container, ctx: Core.TickContext)
 	Core.set(container, "progress", progress)
 	Core.set(container, "state", state)
 	Core.set(container, "rate", if working then -Core.quantiseUp(energyPerTick) else 0)
-	showActive(container, wasWorking, working)
+	-- (Held on through short stops: Mekanism's blockDeactivationDelay, Shared/Machines.)
+	Core.showActive(container, wasWorking, working)
 end
 
 -- The input, then the output in Minecraft's result frame, in a row with the arrow between them;

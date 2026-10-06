@@ -23,6 +23,16 @@
 	           jump swims up and sneak down (0.04 per tick), the current pushes (0.014), and swimming
 	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
 	           tall, no sinking, up and down where the view points);
+	  lava     (LivingEntity.travel's lava branch) acceleration 0.02, then drag 0.5 every way while
+	           it is deeper than 0.4 (FLUID_JUMP_THRESHOLD), else 0.5 sideways and 0.8 up and down
+	           with water's slow sinking; gravity / 4 on top; jump rises 0.04 a tick (jumpInLiquid),
+	           the flow pushes 0.0023, the same hop out onto a ledge; the fall distance halves every
+	           tick in it (Entity.baseTick). No swimming, no sinking by sneaking;
+	  fluids   each fluid moves the player by its record (Shared/Fluids): `physics` "water" (water,
+	           fuel: the water branch, `drag` its 0.8, `swim`) or "lava" (lava, oil: the lava
+	           branch, `drag` its 0.5), its `push` on the flow. Minecraft's tags: the water branch
+	           comes first when the player touches both. `inWater` / `inLava` say which touch, and
+	           `eyeFluid` which fluid the eyes are in (Entity.updateFluidOnEyes);
 	  falling  the fall distance is counted while airborne and turned into damage on landing
 	           (ceil(distance - 3) half hearts); water resets it. Players who may fly (creative,
 	           spectator) never take fall damage;
@@ -49,6 +59,7 @@
 
 local Blocks = require(script.Parent.Parent.Blocks)
 local Config = require(script.Parent.Parent.Config)
+local Fluids = require(script.Parent.Parent.Fluids)
 local GameMode = require(script.Parent.Parent.GameMode)
 local FluidFlow = require(script.Parent.Parent.World.FluidFlow)
 local Hull = require(script.Parent.Hull)
@@ -84,13 +95,33 @@ local MINOR_COLLISION_ANGLE = 0.13962634 -- 8 degrees
 
 local WATER_ACCELERATION = 0.019999999552965164 -- 0.02F
 local WATER_DRAG = 0.800000011920929 -- 0.8F
+local LAVA_DRAG = 0.5
 local WATER_SPRINT_DRAG = 0.8999999761581421 -- 0.9F
 local WATER_VERTICAL_DRAG = 0.800000011920929
 local WATER_JUMP = 0.03999999910593033 -- 0.04F
 local WATER_EXIT_HOP = 0.30000001192092896 -- 0.3F
 local WATER_EXIT_RISE = 0.6000000238418579 -- 0.6F
-local FLUID_PUSH = 0.014
 local FLUID_JUMP_THRESHOLD = 0.4
+-- Lava's travel branch (LivingEntity.travel): its vertical drag over shallow lava, and gravity / 4.
+local LAVA_VERTICAL_DRAG = 0.800000011920929
+local LAVA_GRAVITY = GRAVITY / 4
+-- Entity.baseTick: in lava the fall distance halves every tick (0.5F).
+local LAVA_FALL_FACTOR = 0.5
+
+-- The fluid of each block (Shared/Fluids id per block id, 0 none: every level and cave twin).
+local fluidLut = Fluids.blockLut
+-- Per fluid id: moves the player like lava (LivingEntity.travel's isInLava branch) rather than
+-- like water, its drag, push and whether the player swims in it (FluidList).
+local LAVA_LIKE: { [number]: boolean } = {}
+local DRAG: { [number]: number } = {}
+local PUSH: { [number]: number } = {}
+local SWIM: { [number]: boolean } = {}
+for id, fluid in Fluids.list do
+	LAVA_LIKE[id] = fluid.physics == "lava"
+	DRAG[id] = fluid.drag
+	PUSH[id] = fluid.push
+	SWIM[id] = fluid.swim
+end
 
 local FALL_SAFE = 3
 
@@ -162,14 +193,19 @@ export type State = {
 	sprintTriggerTime: number,
 	-- Had enough forward input to sprint last tick (for the double tap).
 	hadSprintImpulse: boolean,
-	-- Touching water, how high it reaches above the feet (blocks), whether the eyes are in it (and
-	-- were last tick: under water), and swimming (sprinting under water: 0.6 tall, steered by the
-	-- view's pitch).
+	-- Touching water (a fluid moving the player like water: water, fuel), how high it reaches above
+	-- the feet (blocks), whether the eyes are in it (and were last tick: under water), and
+	-- swimming (sprinting under water: 0.6 tall, steered by the view's pitch).
 	inWater: boolean,
 	waterHeight: number,
 	eyeInWater: boolean,
 	underWater: boolean,
 	swimming: boolean,
+	-- Touching lava (a fluid moving the player like lava: lava, oil) and how high it reaches.
+	inLava: boolean,
+	lavaHeight: number,
+	-- The fluid the eyes are in (Shared/Fluids id, 0 none; Entity.updateFluidOnEyes).
+	eyeFluid: number,
 	-- Flight: allowed (creative, spectator), flying now, ticks left to double tap jump
 	-- (Player.jumpTriggerTime) and whether jump was held last tick. setGameMode sets these.
 	mayFly: boolean,
@@ -246,6 +282,9 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		eyeInWater = false,
 		underWater = false,
 		swimming = false,
+		inLava = false,
+		lavaHeight = 0,
+		eyeFluid = 0,
 		mayFly = false,
 		flying = false,
 		jumpTriggerTime = 0,
@@ -391,26 +430,31 @@ local function moveTowardsClosestSpace(world: World, state: State, x: number, z:
 	end
 end
 
-local function isWater(block: number?): boolean
-	local fluid = if block then Blocks.get(block).fluid else nil
-	return fluid ~= nil and fluid.group == "Water"
+-- The fluid of a block (Shared/Fluids id, 0: none or unloaded).
+local function fluidOf(block: number?): number
+	return if block then buffer.readu8(fluidLut, block) else 0
 end
 
--- Height of the fluid surface in block (x, y, z) above its bottom (FluidState.getHeight): full when
--- the same fluid is above, else its level's height.
-local function fluidHeight(world: World, x: number, y: number, z: number, block: number): number
-	if isWater(world.getBlock(x, y + 1, z)) then
+-- Can the player swim in `block` (Fluids `swim`: water, fuel)?
+local function isSwimmable(block: number?): boolean
+	return SWIM[fluidOf(block)] == true
+end
+
+-- Height of the surface of fluid `fluid` in block (x, y, z) above its bottom (FluidState.getHeight):
+-- full when the same fluid is above, else its level's height.
+local function fluidHeight(world: World, x: number, y: number, z: number, block: number, fluid: number): number
+	if fluidOf(world.getBlock(x, y + 1, z)) == fluid then
 		return 1
 	end
 	return buffer.readu8(Blocks.fluidHeightLut, block) / Blocks.FLUID_FULL
 end
 
--- Any water overlapping the box?
-local function containsWater(world: World, box: Box): boolean
+-- Any fluid overlapping the box (Level.containsAnyLiquid)?
+local function containsFluid(world: World, box: Box): boolean
 	for x = floor(box.minX), math.ceil(box.maxX) - 1 do
 		for y = floor(box.minY), math.ceil(box.maxY) - 1 do
 			for z = floor(box.minZ), math.ceil(box.maxZ) - 1 do
-				if isWater(world.getBlock(x, y, z)) then
+				if fluidOf(world.getBlock(x, y, z)) ~= 0 then
 					return true
 				end
 			end
@@ -419,7 +463,7 @@ local function containsWater(world: World, box: Box): boolean
 	return false
 end
 
--- Does any water reach into the box (deflated by 0.001)?
+-- Does any water (a fluid moving the player like water) reach into the box (deflated by 0.001)?
 local function touchesWater(state: State, world: World): boolean
 	local box = PlayerPhysics.box(state)
 	local minY = box.minY + 0.001
@@ -427,7 +471,12 @@ local function touchesWater(state: State, world: World): boolean
 		for y = floor(minY), math.ceil(box.maxY - 0.001) - 1 do
 			for z = floor(box.minZ + 0.001), math.ceil(box.maxZ - 0.001) - 1 do
 				local block = world.getBlock(x, y, z)
-				if block and isWater(block) and y + fluidHeight(world, x, y, z, block) >= minY then
+				local fluid = fluidOf(block)
+				if
+					fluid ~= 0
+					and not LAVA_LIKE[fluid]
+					and y + fluidHeight(world, x, y, z, block :: number, fluid) >= minY
+				then
 					return true
 				end
 			end
@@ -437,31 +486,39 @@ local function touchesWater(state: State, world: World): boolean
 end
 
 --[[
-	Water around the player (Entity.updateFluidHeightAndDoFluidPushing): whether it touches water,
-	how high the water reaches above the box bottom, and the current's push added to the velocity.
+	The fluids of one kind around the player (Entity.updateFluidHeightAndDoFluidPushing for one
+	tag: `lava` false, water and fuel; true, lava and oil): whether any touches the box, how high
+	it reaches above the box bottom, the drag of the deepest (Fluids `drag`), and the flow's push
+	added to the velocity (each cell's flow times its fluid's `push`).
 ]]
-local function updateWater(state: State, world: World)
+local function updateFluid(state: State, world: World, lava: boolean): (boolean, number, number)
 	local box = PlayerPhysics.box(state)
 	local minX, minY, minZ = box.minX + 0.001, box.minY + 0.001, box.minZ + 0.001
 	local maxX, maxY, maxZ = box.maxX - 0.001, box.maxY - 0.001, box.maxZ - 0.001
 	local height = 0
 	local touching = false
+	local drag = if lava then LAVA_DRAG else WATER_DRAG
 	local px, py, pz, cells = 0, 0, 0, 0
 	for x = floor(minX), math.ceil(maxX) - 1 do
 		for y = floor(minY), math.ceil(maxY) - 1 do
 			for z = floor(minZ), math.ceil(maxZ) - 1 do
 				local block = world.getBlock(x, y, z)
-				if block and isWater(block) then
-					local surface = y + fluidHeight(world, x, y, z, block)
+				local fluid = fluidOf(block)
+				if fluid ~= 0 and LAVA_LIKE[fluid] == lava then
+					local surface = y + fluidHeight(world, x, y, z, block :: number, fluid)
 					if surface >= minY then
 						touching = true
+						if surface - minY >= height then
+							drag = DRAG[fluid]
+						end
 						height = math.max(surface - minY, height)
 						local fx, fy, fz = FluidFlow.at(world.getBlock, x, y, z)
 						-- (`height` is the deepest so far, not this cell's: Minecraft's quirk.)
 						if height < 0.4 then
 							fx, fy, fz = fx * height, fy * height, fz * height
 						end
-						px, py, pz = px + fx, py + fy, pz + fz
+						local push = PUSH[fluid]
+						px, py, pz = px + fx * push, py + fy * push, pz + fz * push
 						cells += 1
 					end
 				end
@@ -471,8 +528,8 @@ local function updateWater(state: State, world: World)
 	local length = sqrt(px * px + py * py + pz * pz)
 	-- A flying player is not pushed by currents (Player.isPushedByFluid).
 	if length > 0 and not state.flying then
-		px, py, pz = px / cells * FLUID_PUSH, py / cells * FLUID_PUSH, pz / cells * FLUID_PUSH
-		length = length / cells * FLUID_PUSH
+		px, py, pz = px / cells, py / cells, pz / cells
+		length = length / cells
 		if abs(state.vx) < MIN_VELOCITY and abs(state.vz) < MIN_VELOCITY and length < 0.0045 then
 			px, py, pz = px / length * 0.0045, py / length * 0.0045, pz / length * 0.0045
 		end
@@ -480,29 +537,50 @@ local function updateWater(state: State, world: World)
 		state.vy += py
 		state.vz += pz
 	end
+	return touching, height, drag
+end
+
+--[[
+	Fluids around the player (Entity.updateInWaterStateAndDoFluidPushing, then updateFluidOnEyes
+	and updateSwimming): water first (it resets the fall distance), then lava; the fluid at the
+	eyes; swimming. Returns the drag of the deepest water and of the deepest lava touched (Fluids
+	`drag`; Minecraft's 0.8 and 0.5 when none).
+]]
+local function updateFluids(state: State, world: World): (number, number)
+	local touching, height, waterDrag = updateFluid(state, world, false)
 	state.inWater = touching
 	state.waterHeight = height
 	if touching then
 		state.fallDistance = 0
 	end
+	local inLava, lavaHeight, lavaDrag = updateFluid(state, world, true)
+	state.inLava = inLava
+	state.lavaHeight = lavaHeight
 
-	-- Eyes under water (Entity.updateFluidOnEyes); "under water" uses last tick's eyes.
+	-- The fluid at the eyes (Entity.updateFluidOnEyes); "under water" uses last tick's eyes.
 	local eyeY = state.y + PlayerPhysics.eyeHeight(state) - 0.1111111119389534
 	local bx, by, bz = floor(state.x), floor(eyeY), floor(state.z)
 	local block = world.getBlock(bx, by, bz)
+	local eyeFluid = fluidOf(block)
+	if eyeFluid ~= 0 and by + fluidHeight(world, bx, by, bz, block :: number, eyeFluid) <= eyeY then
+		eyeFluid = 0
+	end
 	state.underWater = state.eyeInWater and touching
-	state.eyeInWater = block ~= nil and isWater(block) and by + fluidHeight(world, bx, by, bz, block) > eyeY
+	state.eyeFluid = eyeFluid
+	state.eyeInWater = eyeFluid ~= 0 and not LAVA_LIKE[eyeFluid]
 
 	-- Swimming (Entity.updateSwimming): sprinting under water, until sprinting stops or the water
-	-- ends. Never while flying (Player.updateSwimming).
+	-- ends. Never while flying (Player.updateSwimming), only in a fluid one swims in (Fluids
+	-- `swim`: the water tag).
 	if state.flying then
 		state.swimming = false
 	elseif state.swimming then
 		state.swimming = state.sprinting and touching
 	else
 		local feet = world.getBlock(floor(state.x), floor(state.y), floor(state.z))
-		state.swimming = state.sprinting and state.underWater and isWater(feet)
+		state.swimming = state.sprinting and state.underWater and isSwimmable(feet)
 	end
+	return waterDrag, lavaDrag
 end
 
 -- Friction of the block the player walks on (getBlockPosBelowThatAffectsMyMovement): below the
@@ -665,12 +743,18 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		state.flying = false
 	end
 
-	-- Entity.baseTick: water and its current. Spectators ignore fluids altogether.
+	-- Entity.baseTick: water, lava and their currents; in lava the fall distance halves.
+	-- Spectators ignore fluids altogether.
+	local waterDrag, lavaDrag = WATER_DRAG, LAVA_DRAG
 	if noClip then
 		state.inWater, state.waterHeight, state.eyeInWater, state.underWater = false, 0, false, false
+		state.inLava, state.lavaHeight, state.eyeFluid = false, 0, 0
 		state.swimming = false
 	else
-		updateWater(state, world)
+		waterDrag, lavaDrag = updateFluids(state, world)
+		if state.inLava then
+			state.fallDistance *= LAVA_FALL_FACTOR
+		end
 	end
 
 	-- LocalPlayer.aiStep: crouching, input, sprinting. (Shift is read as it was last tick until the
@@ -782,9 +866,14 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		state.vz = 0
 	end
 	if input.jump and not state.flying then
-		local height = if state.inWater then state.waterHeight else 0
+		-- (Minecraft reads the lava's height when in lava, else the water's.)
+		local height = if state.inLava then state.lavaHeight elseif state.inWater then state.waterHeight else 0
 		local swimming = state.inWater and height > 0
-		if swimming and (not state.onGround or height > FLUID_JUMP_THRESHOLD) then
+		local deep = not state.onGround or height > FLUID_JUMP_THRESHOLD
+		if swimming and deep then
+			state.vy += WATER_JUMP
+		elseif state.inLava and deep then
+			-- jumpInLiquid(LAVA): the same 0.04 a tick.
 			state.vy += WATER_JUMP
 		elseif (state.onGround or (swimming and height <= FLUID_JUMP_THRESHOLD)) and state.noJumpDelay == 0 then
 			state.vy = JUMP_POWER
@@ -805,7 +894,11 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if state.swimming then
 		local look = input.lookY
 		local rate = if look < -0.2 then 0.085 else 0.06
-		if look <= 0 or input.jump or isWater(world.getBlock(floor(state.x), floor(state.y + 0.9), floor(state.z))) then
+		if
+			look <= 0
+			or input.jump
+			or fluidOf(world.getBlock(floor(state.x), floor(state.y + 0.9), floor(state.z))) ~= 0
+		then
 			state.vy += (look - state.vy) * rate
 		end
 	end
@@ -814,7 +907,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	local flyingVy = state.vy
 	if state.inWater and not state.flying then
 		local startY = state.y
-		local drag = if state.sprinting then WATER_SPRINT_DRAG else WATER_DRAG
+		local drag = if state.sprinting then WATER_SPRINT_DRAG else waterDrag
 		accelerate(state, WATER_ACCELERATION, inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		state.vx *= drag
@@ -829,7 +922,35 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		if state.horizontalCollision then
 			local box =
 				Hull.offset(PlayerPhysics.box(state), state.vx, state.vy + WATER_EXIT_RISE - state.y + startY, state.vz)
-			if Hull.noCollision(solidAt, box) and not containsWater(world, box) then
+			if Hull.noCollision(solidAt, box) and not containsFluid(world, box) then
+				state.vy = WATER_EXIT_HOP
+			end
+		end
+	elseif state.inLava and not state.flying then
+		-- LivingEntity.travel's lava branch (oil too: Fluids `physics` "lava", its `drag`).
+		local startY = state.y
+		accelerate(state, WATER_ACCELERATION, inputX, inputZ)
+		move(state, solidAt, world, inputX, inputZ, events)
+		if state.lavaHeight <= FLUID_JUMP_THRESHOLD then
+			-- Shallow: dragged sideways, and up and down like water, with its slow sinking
+			-- (getFluidFallingAdjustedMovement: none while sprinting).
+			state.vx *= lavaDrag
+			state.vy *= LAVA_VERTICAL_DRAG
+			state.vz *= lavaDrag
+			if not state.sprinting then
+				state.vy -= GRAVITY / 16
+			end
+		else
+			state.vx *= lavaDrag
+			state.vy *= lavaDrag
+			state.vz *= lavaDrag
+		end
+		state.vy -= LAVA_GRAVITY
+		-- Against a ledge just above the lava: hop out (as in water).
+		if state.horizontalCollision then
+			local box =
+				Hull.offset(PlayerPhysics.box(state), state.vx, state.vy + WATER_EXIT_RISE - state.y + startY, state.vz)
+			if Hull.noCollision(solidAt, box) and not containsFluid(world, box) then
 				state.vy = WATER_EXIT_HOP
 			end
 		end
