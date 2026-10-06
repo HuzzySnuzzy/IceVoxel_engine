@@ -35,6 +35,13 @@
 	  toolLevel     Set when the block only drops with that tool, of at least this tier (0 wood /
 	                gold, 1 stone, 2 iron, 3 diamond): Minecraft's requiresCorrectToolForDrops. It
 	                also mines 3.3 times slower without it. nil: drops by hand.
+	  blastResistance  Minecraft's explosion resistance (Shared/World/Explosion: each step of an
+	                explosion's ray through the block costs (resistance + 0.3) x 0.3). Default
+	                its hardness (Minecraft's Properties.strength(f) sets both), 3 600 000 for
+	                unbreakable and creative only blocks (bedrock, structure blocks), none at all
+	                for air and cave air; fluids 100 (their hardness), so an explosion in water
+	                breaks nothing, but fuel 0 (it is the explosive). Minecraft's values that
+	                differ from the hardness are in BLAST_RESISTANCE at the end of the list.
 	  drops         Name of the item a survival player gets for breaking it (default: the block
 	                itself), or false for nothing (e.g. glass, leaves).
 	  dropCount     How many of `drops` (default 1).
@@ -224,6 +231,7 @@ export type BlockSpec = {
 	hardness: number?,
 	tool: string?,
 	toolLevel: number?,
+	blastResistance: number?,
 	drops: (string | false)?,
 	dropCount: number?,
 	maxStack: number?,
@@ -504,6 +512,7 @@ local function fluid(group: string, spec: BlockSpec, tickDelay: number)
 			replaceable = true,
 			placeable = level == 0,
 			hardness = 100,
+			blastResistance = spec.blastResistance,
 			drops = false,
 			behaviour = "Fluid",
 			fluid = { group = group, level = level, tickDelay = tickDelay },
@@ -2201,6 +2210,8 @@ fluid("Fuel", {
 	material = "Glass",
 	transparency = 0.4,
 	reflectance = 0.05,
+	-- The explosive itself: explosions run through it (server World/Explosions sets it off).
+	blastResistance = 0,
 }, 5)
 
 --[[
@@ -2333,5 +2344,57 @@ table.insert(list, {
 	shape = { { size = { 14, 1, 14 }, offset = { 0, -7.5, 0 }, glow = true } },
 	brokenByFluid = true,
 })
+
+--[[
+	Blast resistance (`blastResistance`, Minecraft 1.20.1's explosion resistance) of the blocks
+	whose value differs from their hardness: the stone family, bricks and smooth stone 6 (a TNT
+	blast barely scratches them), planks 3, metal and gem blocks 6, packed mud 3, obsidian 1200.
+	Everything else keeps its hardness (dirt 0.5, logs 2, glass 0.3...), as Minecraft's
+	Properties.strength(f) gives both.
+]]
+local BLAST_RESISTANCE: { [string]: number } = {
+	Stone = 6,
+	Cobblestone = 6,
+	Andesite = 6,
+	Diorite = 6,
+	Granite = 6,
+	PolishedAndesite = 6,
+	PolishedDiorite = 6,
+	PolishedGranite = 6,
+	StoneBricks = 6,
+	CrackedStoneBricks = 6,
+	SmoothStone = 6,
+	SmoothSandstone = 6,
+	Brick = 6,
+	Planks = 3,
+	BirchPlanks = 3,
+	SprucePlanks = 3,
+	AcaciaPlanks = 3,
+	JunglePlanks = 3,
+	CoalBlock = 6,
+	IronBlock = 6,
+	GoldBlock = 6,
+	DiamondBlock = 6,
+	EmeraldBlock = 6,
+	RawIronBlock = 6,
+	RawGoldBlock = 6,
+	PackedMud = 3,
+	Obsidian = 1200,
+}
+do
+	local found = 0
+	for _, spec in list do
+		local resistance = BLAST_RESISTANCE[spec.name]
+		if resistance then
+			spec.blastResistance = resistance
+			found += 1
+		end
+	end
+	local named = 0
+	for _ in BLAST_RESISTANCE do
+		named += 1
+	end
+	assert(found == named, "BLAST_RESISTANCE names a block that does not exist")
+end
 
 return list

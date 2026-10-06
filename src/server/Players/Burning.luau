@@ -32,6 +32,7 @@
 	            down to 0.96) but not burning's (on_fire bypasses armor).
 	            Creative and spectator players (GameMode.invulnerable) never burn nor are hurt: their
 	            burning is put out at once.
+	            Explosions hurt through the same cooldown (`hurtPlayer`).
 
 	  Items     one tick (`tickItem`, server Entities/EntityWorld): ItemEntity's 5 health with no
 	            cooldown (items have no invulnerable time). Water puts burning out; burning takes
@@ -246,6 +247,31 @@ function Burning.tickPlayer(
 		damage += landed
 	end
 	return damage, extinguished, hurtNow
+end
+
+--[[
+	A hurt of `amount` half hearts from outside the fluids (an explosion: Shared/World/Explosion,
+	server World/Explosions) on a player in game mode `mode` wearing `armor` points with
+	`toughness`. It goes through the same LivingEntity.hurt cooldown as lava and burning, so
+	blasts going off within 10 ticks of each other land only their biggest (a bigger one only by
+	the difference), as a pile of TNT does in Minecraft, and armor softens it (explosions don't
+	bypass armor). Creative and spectator players take nothing. Returns the half hearts it costs.
+]]
+function Burning.hurtPlayer(
+	state: PlayerState,
+	mode: string,
+	amount: number,
+	armor: number?,
+	toughness: number?
+): number
+	if GameMode.invulnerable(mode) or not (amount > 0) then
+		return 0
+	end
+	local landed = hurt(state, amount, Burning.HURT_COOLDOWN)
+	if landed > 0 and (armor or 0) > 0 then
+		landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+	end
+	return landed
 end
 
 --[[
