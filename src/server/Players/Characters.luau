@@ -33,7 +33,8 @@
 	    player within 2 x power of a blast takes Minecraft's damage for how close and how much
 	    in the open they are, through the hurt cooldown lava and burning use and softened by
 	    armor (Players/Burning.hurtPlayer; never in creative or spectator), and every player
-	    within Config.Explosions.EffectDistance gets an Explosion message: the client draws the
+	    within Config.Explosions.EffectDistance (the Nuke's: Config.Nuke.EffectDistance) gets an
+	    Explosion message: the client draws the
 	    blast and adds the knockback to its movement (none for spectators, as Minecraft leaves
 	    them out of the explosion packet's knockback; the client leaves out creative flight).
 	  * sounds (Audio/Sounds), heard by everyone near: losing health (entity.player.hurt, at most
@@ -212,15 +213,23 @@ local started: ServerNet.ServerNet? = nil
 
 --[[
 	An explosion of `power` at (x, y, z) (blocks), with the loaded blocks `getBlock` (see the
-	header): hurts the players it reaches and sends every player within EffectDistance its effect
-	and their knockback.
+	header): hurts the players it reaches and sends every player within `range` blocks (default
+	Config.Explosions.EffectDistance; the Nuke's Config.Nuke.EffectDistance) its effect and their
+	knockback.
 ]]
-function Characters.explosion(x: number, y: number, z: number, power: number, getBlock: Explosion.GetBlock)
+function Characters.explosion(
+	x: number,
+	y: number,
+	z: number,
+	power: number,
+	getBlock: Explosion.GetBlock,
+	range: number?
+)
 	local net = started
 	if net == nil then
 		return
 	end
-	local range = Config.Explosions.EffectDistance
+	local reach = range or Config.Explosions.EffectDistance
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
@@ -231,13 +240,15 @@ function Characters.explosion(x: number, y: number, z: number, power: number, ge
 			or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
 			or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
 			or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
-			or (feet - Vector3.new(x, y, z)).Magnitude > range
+			or (feet - Vector3.new(x, y, z)).Magnitude > reach
 		then
 			continue
 		end
 		local mode = GameMode.of(player)
 		local kx, ky, kz = 0, 0, 0
-		if humanoid.Health > 0 and not GameMode.isSpectator(mode) then
+		-- (Only those in reach are hurt: no rays for the Nuke's far audience.)
+		local inReach = (feet - Vector3.new(x, y, z)).Magnitude <= Explosion.REACH * power
+		if inReach and humanoid.Health > 0 and not GameMode.isSpectator(mode) then
 			local half = BODY.width / 2
 			local seen = Explosion.seenPercent(
 				getBlock,

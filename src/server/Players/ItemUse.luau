@@ -35,7 +35,9 @@
 	                 reaches its viewers with server/Machines' next step.
 	  Flint and      (FlintAndSteelItem.useOn) fire in front of the clicked side where fire may
 	  Steel          burn (Behaviours/Fire.light, Fire.canPlaceAt), with item.flintandsteel.use
-	                 there; it wears by 1 (64 uses), never in creative.
+	                 there; it wears by 1 (64 uses), never in creative. On TNT or a Nuke
+	                 (TntBlock.use, whatever the side) it lights it instead (Behaviours/Tnt.prime,
+	                 with its hiss) and wears the same.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
 	thrown).
 ]]
@@ -52,6 +54,7 @@ local SharedTransmitters = require(Shared.Transmitters)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Fire = require(script.Parent.Parent.Behaviours.Fire)
+local Tnt = require(script.Parent.Parent.Behaviours.Tnt)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Containers = require(script.Parent.Containers)
@@ -188,6 +191,13 @@ end
 
 -- Flint and steel on side `side` of block (x, y, z): fire in front of it, the strike, the wear.
 local function strike(world: WorldServer.World, player: Player, x: number, y: number, z: number, side: number)
+	if Tnt.isExplosive(world:peekBlock(x, y, z)) then
+		-- (TntBlock.use: lit, with the hiss rather than the strike.)
+		if Tnt.prime(world, x, y, z) and not GameMode.instabuildOf(player) then
+			Inventories.wearTool(player, 1)
+		end
+		return
+	end
 	local dx, dy, dz = SharedTransmitters.offset(side)
 	local fx, fy, fz = Fire.light(world, x, y, z, dx, dy, dz)
 	if fx == nil or fy == nil or fz == nil then

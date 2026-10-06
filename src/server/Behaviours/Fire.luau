@@ -26,7 +26,9 @@
 	             4. each neighbour burns away by its burn odds (checkBurnOut: rand(300) sideways,
 	                rand(250) above and below, < odds), into fire one time in (age + 10) / 5
 	                (rand(age + 10) < 5, with the age plus rand(5) / 4), else into air, with no
-	                drop (Minecraft's removeBlock); a tall plant's other half goes with it;
+	                drop (Minecraft's removeBlock); a tall plant's other half goes with it. TNT and
+	                the Nuke are lit instead (checkBurnOut's TntBlock.explode; Behaviours/Tnt):
+	                the lit block takes the cell, so no fire is left there;
 	             5. it spreads into the air around it, 1 block sideways, 1 below and up to 4 above:
 	                each empty cell with a flammable neighbour (Fire.igniteOddsAt) catches when
 	                rand(100 + 100 x (dy - 1) above 1) <= (odds + 40 + difficulty x 7) / (age + 30),
@@ -58,6 +60,8 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local SharedFire = require(Shared.Fire)
+
+local Tnt = require(script.Parent.Tnt)
 
 local FIRE = SharedFire.BLOCK
 local AIR = Blocks.AIR
@@ -231,6 +235,12 @@ local function checkBurnOut(world: any, x: number, y: number, z: number, chance:
 	local block = world:peekBlock(x, y, z)
 	local odds = if block == nil then 0 else Blocks.burnOdds(block)
 	if nextInt(random, chance) < odds then
+		if Tnt.isExplosive(block) then
+			-- (Minecraft rolls for fire in its place first; the lit block takes the cell.)
+			nextInt(random, age + 10)
+			Tnt.prime(world, x, y, z)
+			return
+		end
 		local half = otherHalf(world, block :: number, x, y, z)
 		if nextInt(random, age + 10) < 5 then
 			Fire.ignite(world, x, y, z, math.min(age + nextInt(random, 5) // 4, MAX_AGE))

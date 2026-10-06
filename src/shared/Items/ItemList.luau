@@ -725,4 +725,27 @@ table.insert(list, {
 	},
 })
 
+--[[
+	Gunpowder (Minecraft's, which creepers drop: this game has no creepers). Black powder is
+	charcoal and saltpetre; here a coal or charcoal and a flint make two (Shared/Crafting/Recipes),
+	and five of them with four sand make TNT (BlockList Tnt, server Behaviours/Tnt). A dark grey
+	heap of grains with a few lighter specks, as Minecraft's icon.
+]]
+local GUNPOWDER = { 78, 78, 80 }
+table.insert(list, {
+	name = "Gunpowder",
+	color = GUNPOWDER,
+	material = "Sand",
+	model = {
+		{ size = { 12, 3, 4 }, offset = { 0, -4.5, 0 } },
+		{ size = { 9, 3, 4 }, offset = { -0.5, -1.5, 0 } },
+		{ size = { 5, 3, 4 }, offset = { 0.5, 1.5, 0 } },
+		{ size = { 2, 2, 4 }, offset = { 0, 4, 0 } },
+		{ size = { 1.5, 1.5, 0.4 }, offset = { -3, -3.5, 2.1 }, color = shade(GUNPOWDER, 1.8) },
+		{ size = { 1.5, 1.5, 0.4 }, offset = { 2.5, -1, 2.1 }, color = shade(GUNPOWDER, 1.6) },
+		{ size = { 1.5, 1.5, 0.4 }, offset = { 3.5, -4.5, 2.1 }, color = shade(GUNPOWDER, 0.6) },
+		{ size = { 1.5, 1.5, 0.4 }, offset = { -0.5, 2, 2.1 }, color = shade(GUNPOWDER, 0.6) },
+	},
+})
+
 return list

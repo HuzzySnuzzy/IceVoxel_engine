@@ -1425,7 +1425,10 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
     only some of its cells carry a light);
   - the harvest line from `Items.canHarvest` and the block's `tool` / `toolLevel`:
     "✔ Requires Stone Pickaxe", "✘ ...", "✔ Tool: Axe" or "Unbreakable"; operator blocks say
-    "Creative only" instead (F3: "Breaks in creative only (at once)");
+    "Creative only" instead (F3: "Breaks in creative only (at once)"); lit TNT and Nukes (which
+    can't be broken) "Lit: stand back!" in red instead;
+  - explosives: "Explosive: power 4" (TNT), "Explosive: 24 block crater" (the Nuke), in gold
+    (`explosiveLine`);
   - a structure block's mode and name ("Mode: Save", "Name: hut"; a DATA block its marker) and a
     jigsaw's name, target and pool, from the records Net/StructureNet keeps (F3 adds a structure
     block's region and, in LOAD mode, its rotation, mirror, integrity and seed);
@@ -2652,7 +2655,8 @@ burns away.
   are spared; the sound (`entity.generic.explode`, Audio/Sounds); every affected non-air block
   becomes air, dropping its items (`Items.leafDrop` or `Items.blockDrops`) with `dropChance`
   through `Behaviours/Drops` (containers spill as for any change); unclaimed fuel among them is
-  ignited instead (like TNT primed by a blast); and a fiery blast (every fuel blast) sets Fire on
+  ignited instead, and explosive blocks go to the primer (`setPrimer`: Behaviours/Tnt lights TNT
+  and Nukes with a short fuse, leaves lit ones be); and a fiery blast (every fuel blast) sets Fire on
   its `fireSpots`. Fire next to fuel the plan did not reach (beyond MaxCells, or flowing in later)
   lights it in turn, so huge bodies burn on in chains. A flash consumes its cells and sets fire on
   the same rule. Unloaded chunks stop everything and are never generated.
@@ -2674,6 +2678,89 @@ burns away.
   knockback to `MovementController.knockback`, and a camera shake (this game's): strength
   (1 − distance / (`ShakeDistance` × power)) × min(1, power / 4), fading over 0.45 s, turning the
   camera by up to 1.6° after Roblox's camera updates.
+
+## TNT and the Nuke (server `Behaviours/Tnt`, `World/Nuke`, client `Rendering/FuseView`)
+
+Minecraft 1.20.1's TntBlock and PrimedTnt, and a mod-style Nuke lit the same way. Tested in
+`tests/spec/Tnt`.
+
+**Blocks** (BlockList, at the end): `Tnt` (hardness 0, blast resistance 0, flammable 15 / 100,
+BlockDecor "Tnt": red with the sticks' seams, a white band with TNT; texture pack "tnt side / top /
+bottom", blank) and `Nuke` (the same numbers, BlockDecor "Nuke": dark steel, hazard stripes, the
+radiation sign; "nuke side / top", blank), and their lit blocks `LitTnt` and `LitNuke`: not
+placeable, unbreakable (Minecraft's primed TNT is an entity no player breaks), blast resistance 0
+(rays pass, as they pass entities), no drops, `item` the unlit block (WAILA's icon, pick block),
+glowing (`light` 9 white, 12 red: drawn one part per block with its PointLight), behaviour "Tnt".
+Gunpowder (ItemList, last) is two per coal or charcoal and flint; TNT is Minecraft's recipe (5
+gunpowder in an X, 4 sand); the Nuke is eight TNT around a diamond block.
+
+**Lit blocks, not entities.** PrimedTnt falls, flashes and explodes where it is. The engine's
+entities are items only (EntityWorld, its own protocol and renderer), so a lit explosive is a
+block: the world's edits replicate it, the client meshes it like any block, and the server keeps
+its state by position (`Behaviours/Tnt`, per world, never sent): the tick its fuse runs out, its
+fall speed and part cell, and what it fell into. Every lit block has its next block tick waiting;
+each tick is PrimedTnt.tick:
+- the fuse (`Config.Tnt.FuseTicks` 80, `Config.Nuke.FuseTicks` 200): when it runs out the cell
+  goes back to what it fell into and TNT explodes there (`Explosions.explode`, power
+  `Config.Tnt.Power` 4, no fire, at y + 0.0625: PrimedTnt's getY(0.0625)), a Nuke calls
+  `Nuke.detonate`;
+- a Nuke beeps every `AlarmTicks` (entity.nuke.alarm);
+- gravity while the cell below is loaded and replaceable (air, fire, plants, fluids): speed += 0.04
+  then × 0.98 (Minecraft's), the block moving a whole cell when the fall passes one, giving back
+  what it passed through (a water source stays: TNT that sinks into water explodes in it and
+  breaks nothing, as in Minecraft). Minecraft's hop on lighting (0.2 up) is left out.
+A lit block is registered when it is placed (`onNeighborChanged` with nothing on record, or what
+`prime` or the fall hands over); a record not run for 20 ticks belongs to a lit block replaced
+by other means and is replaced. A random tick restarts a lit block whose tick was lost.
+
+**Lighting** (`Tnt.prime(world, x, y, z, fuse?, quiet?)`, entity.tnt.primed): flint and steel
+(`Players/ItemUse`, TntBlock.use: any side, wears 1, not in creative; the client sends it for TNT
+and Nukes whatever is in front), fire (`Behaviours/Fire`'s checkBurnOut lights it where it would
+burn it away; lava lights fire next to flammable blocks, so lava lights it too) and blasts:
+`World/Explosions` hands every non-air block a blast reaches to the primer (`setPrimer`; this
+module sets `Tnt.blasted` when it loads) before breaking it: TNT and Nukes are lit quietly with
+TntBlock.wasExploded's fuse rand(fuse / 4) + fuse / 8 (TNT 10..29 ticks, a Nuke 25..74), lit ones
+stay. A pile of TNT goes off in a ripple, each lit by the last.
+
+**The Nuke's crater** (`World/Nuke`, pure on WorldServer; `Config.Nuke`). Minecraft's 1352 rays
+thin out at huge powers (gaps between rays far out) and still read tens of thousands of blocks in
+a tick, so the crater is dug cell by cell instead:
+- `detonate(world, x, y, z)`: at once the handler (`Explosions.effects`: items and players with
+  Minecraft's damage and push at `Power` 28, reach 56, deadly in the open within about 50 blocks,
+  shielded by what is between; the Explosion message to players within `EffectDistance` 256), the
+  boom (entity.nuke.explode, heard 256 blocks away); then a job.
+- The crater (`crater`, `radiusAt`, `fate`): seeded by the Nuke's cell (Hash), so the same place
+  digs the same crater. A cell's radius is `Radius` × (1 + `Ragged` × w) + c, w smooth 3D noise
+  (wavelength `RaggedScale`, scaled ×2 and clamped to ±1), c a hashed crumble of ±0.5: 18.7..29.3
+  blocks. Inside, a block becomes air (no drops) when its blast resistance is under `Strength` ×
+  (1 − d / r): dirt (0.5) to the rim, stone (6) to 0.9 r, obsidian (1200), bedrock and fluids (100)
+  never: water pours in afterwards, a bunker of obsidian stands. Fuel inside is vaporised.
+- Scorching, in the ellipsoid of `ScorchRadius` (40) sideways and the largest crater radius up and
+  down: grass, dry grass, podzol and mycelium become dirt (coarse dirt one time in three, hashed),
+  blocks resisting less than `ScorchResistance` (leaves, plants, glass, snow, torches) are blown
+  away, logs stand, fuel there catches (`Explosions.ignite`). One air cell in `FireOdds` (hashed)
+  over an opaque block that stays catches fire, inside the crater and around it.
+- Explosives it reaches go to the primer (`Explosions.reached`): chain reactions, Nukes too.
+- Costs: the cells (about 200,000: the ellipsoid) are visited nearest first from a list of i8
+  offsets built once (`offsets`, a bucket sort by half blocks, 30 ms in Lune), so the crater grows
+  outwards. `step` (the boot script, after `Explosions.step`) works the jobs oldest first within
+  `EditsPerTick` (500; lighting an explosive counts) and `ReadsPerTick` (16,000) together; a cell
+  is at most one edit. Each edit is 12 bytes to every client (`Edits`), so 6 KB a tick at most.
+  Measured in Lune on the spawn of seed 12345: 32,700 edits and 224,000 reads over 66 ticks
+  (3.3 s), 3 ms a tick on average and 8-12 ms at worst (the read-only ticks of open sky at the
+  end), the block ticker's reaction to it 6-10 ms in all. Unloaded chunks are skipped, never
+  generated.
+
+**The client.** `Rendering/FuseView` flashes lit blocks: a Neon box a little over the block
+(white over TNT, red over a Nuke) shown 5 ticks, hidden 5 (TntRenderer's (fuse / 5) % 2, from the
+clock so all flash in step), for the nearest 48 within 64 blocks, found from chunk edits and block
+changes as FireRenderer finds fires. `Rendering/ExplosionView` draws a blast of
+`Config.Nuke.LookPower` or more (`isNuke`) as the Nuke's: a white flash over the screen
+(`flash`: full within 64 blocks, nothing at 256), a Roblox Explosion up to 24 blocks, a fireball
+swelling to the crater's size, a shock ring along the ground and a mushroom cloud (a stem and
+three caps) rising 60 blocks over 9 s from fire to smoke, six anchored inert parts gone after
+14 s, and a 2.5 s shake of up to 4°. WAILA says "Explosive: power 4", "Explosive: 24 block
+crater" and, on lit ones, "Lit: stand back!".
 
 ## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/SurvivalHud`)
 
@@ -3800,7 +3887,10 @@ sound of the block below the feet; a lava hurt that lands, water putting burning
 spectators), Behaviours/Fluid (lava's fizz), Players/ItemUse (each fluid's bucket sounds, flint
 and steel striking) and
 World/Explosions (`entity.generic.explode`: appended after the lava's events, Minecraft's volume
-4 as a 64 block reach, pitch 0.7 ± 0.1, the built-in boom whole at volume 1).
+4 as a 64 block reach, pitch 0.7 ± 0.1, the built-in boom whole at volume 1), Behaviours/Tnt
+(`entity.tnt.primed` when TNT or a Nuke is lit, the wind pitched up into a fizz; a lit Nuke's
+`entity.nuke.alarm` every second, the volume tick pitched up, heard 64 blocks away) and World/Nuke
+(`entity.nuke.explode`, the boom pitched down to 0.35, heard 256 blocks away).
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
@@ -4051,7 +4141,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
       can't survive, age by rand(3) / 2, off a flammable neighbour out unless on a sturdy block
       and at most 3 old, at 15 out one time in 4 unless the block below burns, then checkBurnOut
       on the six neighbours (rand(300) sideways, rand(250) up and down, < burn odds: into fire one
-      time in (age + 10) / 5, else air, no drop; a tall plant's other half goes with it), then
+      time in (age + 10) / 5, else air, no drop; a tall plant's other half goes with it; TNT and
+      Nukes are lit instead, `Behaviours/Tnt.prime`, Minecraft's TntBlock.explode), then
       spreading into the empty cells 1 sideways, 1 below and up to 4 above with a flammable
       neighbour: rand(100 + 100 (dy - 1)) <= (ignite + 40 + 7 x `Config.Server.Fire.Difficulty`)
       / (age + 30). No rain, humid biomes or infiniburn blocks here.
@@ -4061,12 +4152,14 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
       the empty cell above each flammable one. Minecraft's ignitedByLava is `flammable` here.
     - `light` (Players/ItemUse, flint and steel: FlintAndSteelItem.useOn): fire in front of the
       clicked side where `Fire.canPlaceAt` (empty, and it survives), item.flintandsteel.use, one
-      wear (64 uses), none in creative. The client sends the use only where the same check
-      passes. Players put fires out by breaking them (hardness 0: at once, no drop, the
+      wear (64 uses), none in creative; on TNT or a Nuke (any side) it lights it instead
+      (TntBlock.use). The client sends the use only where the same checks pass. Players put fires out by breaking them (hardness 0: at once, no drop, the
       extinguish hiss), water washes them away (`brokenByFluid`, no drop; lava fizzes), and a
       block placed into one replaces it (`replaceable`).
 - `World/Explosions` + `World/FuelBlast`: blasts and fuel going off, stepped after the block
   ticker every tick (see Explosions). `Behaviours/Fluid` hands fuel touching fire or lava to it.
+- `Behaviours/Tnt` + `World/Nuke`: lit TNT and Nukes (block ticks) and the Nuke's crater, stepped
+  after the explosions every tick (see TNT and the Nuke).
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, the game mode (`EditRules.mayEdit`: survival and
   creative edit, adventure and spectator edits are answered with the real block;

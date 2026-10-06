@@ -344,6 +344,12 @@ local Textures: { [string]: Texture } = {
 	["crafting table side"] = { Color = "", Material = "WoodPlanks" },
 	["furnace top"] = { Color = "", Material = "Cobblestone" },
 	["furnace side"] = { Color = "", Material = "Cobblestone" },
+	-- (TNT and the Nuke keep their decorated faces too; lit, they share their unlit textures.)
+	["tnt side"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["tnt top"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["tnt bottom"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["nuke side"] = { Color = "", Material = "Metal", Tint = false },
+	["nuke top"] = { Color = "", Material = "Metal", Tint = false },
 	-- Plant sprites. Grass and ferns take their soil's foliage colour (Tint = true); flowers,
 	-- dead bushes and mushrooms keep the picture's colours.
 	["fern"] = { Color = "", Material = "SmoothPlastic", Tint = true },
@@ -461,6 +467,8 @@ local Blocks: { [string]: Faces } = {
 	-- crafting table's colour; a bottom shows near you only with Config.Textures.BottomFaces.)
 	CraftingTable = { Top = "crafting table top", Sides = "crafting table side" },
 	Furnace = { Top = "furnace top", Sides = "furnace side", Bottom = "furnace top" },
+	Tnt = { Top = "tnt top", Sides = "tnt side", Bottom = "tnt bottom" },
+	Nuke = { Top = "nuke top", Sides = "nuke side", Bottom = "nuke top" },
 
 	-- Glow lichen (all six sides, and their cave twins)
 	GlowLichen = { Front = "glow lichen" },

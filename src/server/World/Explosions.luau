@@ -24,7 +24,10 @@
 	               4. every affected non-air block becomes air, dropping its items (leaves their
 	                  sapling or sticks, Items.leafDrop) with chance 1 / power (Behaviours/Drops;
 	                  containers drop their contents through Inventories as for any change);
-	                  unclaimed fuel among them is ignited instead (it is the explosive);
+	                  unclaimed fuel among them is ignited instead (it is the explosive), and
+	                  explosive blocks are handed to the primer (`setPrimer`, Behaviours/Tnt:
+	                  TNT and the Nuke are lit with a short fuse, lit ones stay, as Minecraft's
+	                  TntBlock.wasExploded and its PrimedTnt entity, which no blast removes);
 	               5. a fiery blast (every fuel blast) sets Fire on one in three of its air
 	                  cells over an opaque block (Explosion.fireSpots), which lights the fuel
 	                  next to it in turn: bodies larger than FuelBlast's cap burn on in chains.
@@ -57,8 +60,20 @@ local WorldServer = require(script.Parent.WorldServer)
 type World = WorldServer.World
 
 -- What a blast does beyond blocks (entities, players, the clients' effects): its centre (blocks)
--- and power, with the world's loaded blocks.
-export type Handler = (x: number, y: number, z: number, power: number, getBlock: Explosion.GetBlock) -> ()
+-- and power, with the world's loaded blocks; `range`: players this far away see it (nil:
+-- Config.Explosions.EffectDistance; the Nuke's is larger).
+export type Handler = (
+	x: number,
+	y: number,
+	z: number,
+	power: number,
+	getBlock: Explosion.GetBlock,
+	range: number?
+) -> ()
+
+-- What a blast does to an explosive block it reaches (`block` at (x, y, z)): true when the
+-- block was dealt with (lit, or left standing), false to break it like any other.
+export type Primer = (world: any, x: number, y: number, z: number, block: number, random: () -> number) -> boolean
 
 -- A blast waiting for its tick (`cells`: the fuel it consumes, claimed until then).
 type Pending = {
@@ -97,6 +112,7 @@ local Explosions = {}
 
 local states: { [World]: State } = setmetatable({}, { __mode = "k" }) :: any
 local handler: Handler? = nil
+local primer: Primer? = nil
 
 local function stateOf(world: World): State
 	local state = states[world]
@@ -124,6 +140,31 @@ end
 -- Sets (or clears) what blasts do to entities and players and how clients see them.
 function Explosions.setHandler(fn: Handler?)
 	handler = fn
+end
+
+--[[
+	Runs the handler for a blast of `power` at (x, y, z) (blocks) that is no ray explosion
+	(World/Nuke's crater), seen within `range` blocks.
+]]
+function Explosions.effects(world: World, x: number, y: number, z: number, power: number, range: number?)
+	local onBlast = handler
+	if onBlast then
+		onBlast(x, y, z, power, stateOf(world).getBlock, range)
+	end
+end
+
+-- Sets (or clears) what blasts do to explosive blocks (Behaviours/Tnt sets it when it loads).
+function Explosions.setPrimer(fn: Primer?)
+	primer = fn
+end
+
+--[[
+	A blast (or the Nuke's crater) reached `block` at (x, y, z): true when the primer dealt with
+	it (an explosive lit, or a lit one left be), false when it breaks like any block.
+]]
+function Explosions.reached(world: World, x: number, y: number, z: number, block: number): boolean
+	local prime = primer
+	return prime ~= nil and prime(world, x, y, z, block, stateOf(world).random)
 end
 
 -- Sets the world's random (rolls in [0, 1); default math.random): the tests' fixed rolls.
@@ -272,6 +313,9 @@ local function detonate(world: World, state: State, pending: Pending): number
 			if state.claimed[key] == nil then
 				Explosions.ignite(world, bx, by, bz)
 			end
+			continue
+		end
+		if Explosions.reached(world, bx, by, bz, block) then
 			continue
 		end
 		if world:setBlock(bx, by, bz, AIR) and random() < chance then

@@ -230,6 +230,11 @@ local BLANKS = {
 	{ "raw gold block", { "RawGoldBlock" } },
 	{ "osmium block", { "OsmiumBlock" } },
 	{ "raw osmium block", { "RawOsmiumBlock" } },
+	{ "tnt side", { "Tnt", "LitTnt" } },
+	{ "tnt top", { "Tnt", "LitTnt" } },
+	{ "tnt bottom", { "Tnt", "LitTnt" } },
+	{ "nuke side", { "Nuke", "LitNuke" } },
+	{ "nuke top", { "Nuke", "LitNuke" } },
 	{ "blue ice", { "BlueIce" } },
 	{ "cut sandstone", { "CutSandstone" } },
 	{ "sandstone bottom", { "Sandstone" } },
@@ -560,7 +565,11 @@ return function(t, shared, require)
 	end)
 
 	t.test("texture pack: appearances are keyed by textures", function()
-		t.eq(#Blocks.appearances, 163, "no appearance split or merged (157, the 5 saplings and fire)")
+		t.eq(
+			#Blocks.appearances,
+			167,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not)"
+		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}
 		for id, def in Blocks.defs do

@@ -612,6 +612,47 @@ SoundList.EVENTS = {
 		source = "blocks",
 		side = "server",
 	},
+
+	--[[
+		TNT and the Nuke (server Behaviours/Tnt, World/Nuke). Lighting TNT hisses
+		(entity.tnt.primed: PrimedTnt's constructor plays it at volume 1, pitch 1, from the server):
+		the falling wind pitched up into a fizz, cut short. The Nuke (no Minecraft sound; this
+		game's): every second while it is lit an alarm beeps (entity.nuke.alarm: the volume tick
+		pitched up, loud, heard 64 blocks away), and it goes off with a deep, long boom
+		(entity.nuke.explode: the explosion pitched far down, heard 256 blocks away). Stand-ins;
+		give a Sound of the event's name to use a real one (README, "Sounds").
+	]]
+	{
+		name = "entity.tnt.primed",
+		id = FALLING,
+		volume = 0.7,
+		pitch = 2.2,
+		duration = 1.5,
+		fallback = { id = SPLASH, pitch = 2.6 },
+		source = "blocks",
+		side = "server",
+	},
+	{
+		name = "entity.nuke.alarm",
+		id = TICK,
+		volume = 1,
+		pitch = 1.6,
+		duration = 0.4,
+		fallback = { id = LAND, pitch = 3 },
+		maxDistance = 64,
+		source = "blocks",
+		side = "server",
+	},
+	{
+		name = "entity.nuke.explode",
+		id = EXPLOSION,
+		volume = 1,
+		pitch = 0.35,
+		pitchVariance = 0.05,
+		maxDistance = 256,
+		source = "blocks",
+		side = "server",
+	},
 } :: { EventSpec }
 
 --[[

@@ -159,6 +159,17 @@ shape({ "##", "##" }, { ["#"] = "GlowDust" }, "GlowBlock")
 mix({ "IronIngot", "Flint" }, "FlintAndSteel")
 
 --[[
+	Explosives. Gunpowder has no creeper to drop it here: a coal or charcoal and a flint in any
+	slots make two (black powder is charcoal and saltpetre; flint stands in). TNT is Minecraft's:
+	gunpowder in an X with sand between (5 gunpowder, 4 sand). The Nuke (this game's, a mod's
+	toy): eight TNT around a block of diamond, so a crater costs 40 gunpowder, 32 sand and nine
+	diamonds.
+]]
+mix({ "#coals", "Flint" }, "Gunpowder", 2)
+shape({ "X#X", "#X#", "X#X" }, { X = "Gunpowder", ["#"] = "Sand" }, "Tnt")
+shape({ "TTT", "TDT", "TTT" }, { T = "Tnt", D = "DiamondBlock" }, "Nuke")
+
+--[[
 	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
 	control circuits (osmium infused with redstone) and alloys, made in machines this game does not
 	have, so they are adapted:

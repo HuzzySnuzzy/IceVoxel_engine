@@ -31,6 +31,9 @@
 	            jigsaws: name, target and pool (their records, Net/StructureNet). Creative only
 	            blocks (structure blocks, structure voids, jigsaws) say "Creative only" where
 	            the harvest line goes: survival players can't break them.
+	  explosives  TNT: "Explosive: power 4" in gold; the Nuke: "Explosive: 24 block crater"; lit
+	            ones (which can't be broken) "Lit: stand back!" in red where the harvest line goes
+	            (`explosiveLine`)
 	  light     blocks and fluids: "Light level 7", the light where a mob would stand: the cell on
 	            top of an opaque block, a see-through block's own cell (`lightLine`). It is the
 	            larger of the cell's block light and sky light, as Minecraft's light level, from the
@@ -606,6 +609,20 @@ function WailaInfo.harvest(block: number, held: number?): Line?
 	return { marked(`Tool: {kindName(tool)}`, true) }
 end
 
+local LIT: { [number]: boolean } = { [Blocks.id.LitTnt] = true, [Blocks.id.LitNuke] = true }
+
+-- What an explosive says (see the header), nil for other blocks.
+function WailaInfo.explosiveLine(block: number): Line?
+	if LIT[block] then
+		return { segment("Lit: stand back!", "red") }
+	elseif block == Blocks.id.Tnt then
+		return { segment(`Explosive: power {Config.Tnt.Power}`, "gold") }
+	elseif block == Blocks.id.Nuke then
+		return { segment(`Explosive: {Config.Nuke.Radius} block crater`, "gold") }
+	end
+	return nil
+end
+
 -- The extended (F3) lines of a block.
 local function blockDetails(
 	block: number,
@@ -774,9 +791,13 @@ function WailaInfo.block(
 		table.insert(name, segment(` ({def.container} slots)`, "gray"))
 	end
 	local lines: { Line } = { name }
-	local harvest = WailaInfo.harvest(block, held)
+	local harvest = if LIT[block] then nil else WailaInfo.harvest(block, held)
 	if harvest then
 		table.insert(lines, harvest)
+	end
+	local explosive = WailaInfo.explosiveLine(block)
+	if explosive then
+		table.insert(lines, explosive)
 	end
 	-- (F3's details say the light of every block.)
 	local light = if extended then nil else WailaInfo.fluidLight(block)

@@ -54,7 +54,7 @@
 	  decor         Faces drawn on the block's parts ("Chest", "CraftingTable", "Furnace",
 	                "CreativeEnergyCube", "HeatGenerator", "ElectricFurnace", "BasicBattery",
 	                "AdvancedBattery", "EliteBattery", "UltimateBattery", "OilRefinery",
-	                "CombustionGenerator", "StructureBlockSave", "StructureBlockLoad",
+	                "CombustionGenerator", "Tnt", "Nuke", "StructureBlockSave", "StructureBlockLoad",
 	                "StructureBlockCorner", "StructureBlockData" and
 	                "Jigsaw<Front><Top>", e.g. "JigsawNorthUp"; client Rendering/BlockDecor). Such
 	                blocks are drawn one part per block.
@@ -2423,8 +2423,9 @@ end
 	What burns: Minecraft 1.20.1's FireBlock.bootStrap for the blocks this game has, as `flammable`
 	{ ignite, burn } (see the fields at the top). Minecraft lists every grass, fern, dead bush and
 	flower (both halves of the tall ones), but no sapling and no mushroom; the game has no slabs,
-	stairs, fences, wool, bookshelves, hay or TNT yet (give such blocks `flammable` where they are
-	added). Glow lichen is Minecraft's 15 / 100, and its cave twins burn like it.
+	stairs, fences, wool, bookshelves or hay yet (give such blocks `flammable` where they are
+	added, as TNT and the Nuke below have it). Glow lichen is Minecraft's 15 / 100, and its cave
+	twins burn like it.
 ]]
 local function fireOdds(spec: BlockSpec): FlammableSpec?
 	local name = spec.name
@@ -2450,5 +2451,74 @@ end
 for _, spec in list do
 	spec.flammable = spec.flammable or fireOdds(spec)
 end
+
+--[[
+	TNT (Minecraft 1.20.1's TntBlock): breaks at once, no blast resistance, flammable 15 / 100
+	(FireBlock.bootStrap), red with a white band (BlockDecor "Tnt"; texture pack "tnt side", "tnt
+	top", "tnt bottom", blank until made). Flint and steel, fire burning it (lava lights the fire)
+	and a blast reaching it light it: it turns into Lit TNT, Minecraft's PrimedTnt as a block
+	(server Behaviours/Tnt): it falls while its 80 tick fuse burns, then explodes with power 4.
+	Lit TNT glows and flashes (client Rendering/FuseView), can't be broken (an entity in
+	Minecraft) and drops nothing; blasts leave it be. Its `item` is TNT (WAILA's icon, pick block).
+
+	The Nuke (this game's, a mod's nuke): a dark steel casing with hazard stripes and the
+	radiation sign (BlockDecor "Nuke"; "nuke side", "nuke top", blank), lit the same ways. Lit,
+	it glows red, flashes and wails for 10 s, then digs a crater (server World/Nuke; Config.Nuke).
+]]
+local TNT = { 204, 52, 40 }
+table.insert(list, {
+	name = "Tnt",
+	displayName = "TNT",
+	color = TNT,
+	material = "SmoothPlastic",
+	sound = "grass",
+	hardness = 0,
+	decor = "Tnt",
+	flammable = { ignite = 15, burn = 100 },
+})
+table.insert(list, {
+	name = "LitTnt",
+	displayName = "Lit TNT",
+	color = { 236, 120, 100 },
+	material = "SmoothPlastic",
+	sound = "grass",
+	hardness = 0,
+	breakable = false,
+	placeable = false,
+	blastResistance = 0,
+	drops = false,
+	item = "Tnt",
+	decor = "Tnt",
+	light = 9,
+	lightColor = { 255, 226, 190 },
+	behaviour = "Tnt",
+})
+local NUKE = { 46, 50, 48 }
+table.insert(list, {
+	name = "Nuke",
+	color = NUKE,
+	material = "Metal",
+	sound = "metal",
+	hardness = 0,
+	decor = "Nuke",
+	flammable = { ignite = 15, burn = 100 },
+})
+table.insert(list, {
+	name = "LitNuke",
+	displayName = "Lit Nuke",
+	color = { 96, 52, 48 },
+	material = "Metal",
+	sound = "metal",
+	hardness = 0,
+	breakable = false,
+	placeable = false,
+	blastResistance = 0,
+	drops = false,
+	item = "Nuke",
+	decor = "Nuke",
+	light = 12,
+	lightColor = { 255, 70, 50 },
+	behaviour = "Tnt",
+})
 
 return list

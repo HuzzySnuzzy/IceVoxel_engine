@@ -2,8 +2,8 @@
 --[[
 	Decorated block faces: chests, crafting tables, furnaces, Mekanism's Creative Energy Cube,
 	Heat Generator, Electric Furnace and Batteries (Energy Cubes), the Oil Refinery and the
-	Combustion Generator, and Minecraft's structure blocks and jigsaw blocks, drawn like
-	Minecraft's pixel art.
+	Combustion Generator, Minecraft's structure blocks, jigsaw blocks and TNT, and the Nuke, drawn
+	like Minecraft's pixel art.
 
 	No image assets are needed. Each face is a 16 x 16 "pixel" picture made of coloured rectangles,
 	painted in order over the block's own part (its material and colour show wherever no rectangle
@@ -614,7 +614,106 @@ local SIGILS: { [string]: { Rect } } = {
 	}),
 }
 
+--[[
+	TNT (Minecraft's tnt_side, tnt_top, tnt_bottom): the block's red (Lit TNT's paler red shows
+	through the same way) with the darker seams of the sticks, a white paper band across each
+	side with TNT in black, and on top the paper with the charge and its fuse in the middle. Item
+	models show the letters on the front pair only.
+]]
+local TNT_SEAM = { 150, 34, 26 }
+local TNT_PAPER = { 236, 232, 222 }
+local TNT_PAPER_SHADE = { 196, 190, 178 }
+local TNT_INK = { 24, 22, 22 }
+local TNT_CHARGE = { 120, 36, 28 }
+
+local function tntSide(lettersSurfaceOnly: boolean): { Rect }
+	return {
+		rect(3, 0, 1, 16, TNT_SEAM, true),
+		rect(7, 0, 1, 16, TNT_SEAM, true),
+		rect(11, 0, 1, 16, TNT_SEAM, true),
+		rect(0, 5, 16, 6, TNT_PAPER),
+		rect(0, 10, 16, 1, TNT_PAPER_SHADE, true),
+		-- T
+		rect(1, 6, 3, 1, TNT_INK, lettersSurfaceOnly),
+		rect(2, 7, 1, 3, TNT_INK, lettersSurfaceOnly),
+		-- N
+		rect(6, 6, 1, 4, TNT_INK, lettersSurfaceOnly),
+		rect(9, 6, 1, 4, TNT_INK, lettersSurfaceOnly),
+		rect(7, 7, 1, 1, TNT_INK, lettersSurfaceOnly),
+		rect(8, 8, 1, 1, TNT_INK, lettersSurfaceOnly),
+		-- T
+		rect(12, 6, 3, 1, TNT_INK, lettersSurfaceOnly),
+		rect(13, 7, 1, 3, TNT_INK, lettersSurfaceOnly),
+	}
+end
+
+local TNT_FACES: Faces = {
+	Top = join(outline(TNT_SEAM, true), {
+		rect(1, 1, 14, 14, TNT_PAPER_SHADE),
+		rect(5, 5, 6, 6, TNT_CHARGE),
+		rect(7, 7, 2, 2, TNT_INK),
+	}),
+	Bottom = { rect(1, 1, 14, 14, TNT_PAPER_SHADE) },
+	Front = tntSide(false),
+	Back = tntSide(false),
+	Left = tntSide(true),
+	Right = tntSide(true),
+}
+
+--[[
+	The Nuke (this game's): the block's dark steel (Lit Nuke's red-brown shows the same way),
+	black and yellow hazard stripes along the top and bottom of each side, and the radiation sign
+	(a yellow disc, a black trefoil) in the middle of the sides and the top. Item models show the
+	sign on the front pair and the top only; the stripes' black slants are world faces only.
+]]
+local HAZARD = { 236, 196, 32 }
+local HAZARD_INK = { 20, 20, 22 }
+local NUKE_EDGE = { 26, 28, 28 }
+
+-- The radiation sign: a yellow disc and a black trefoil.
+local function radiation(surfaceOnly: boolean): { Rect }
+	return {
+		rect(5, 4, 6, 8, HAZARD, surfaceOnly),
+		rect(4, 5, 8, 6, HAZARD, surfaceOnly),
+		rect(7, 7, 2, 2, HAZARD_INK, surfaceOnly),
+		rect(6, 5, 4, 1, HAZARD_INK, surfaceOnly),
+		rect(7, 6, 2, 1, HAZARD_INK, true),
+		rect(5, 9, 2, 2, HAZARD_INK, surfaceOnly),
+		rect(9, 9, 2, 2, HAZARD_INK, surfaceOnly),
+	}
+end
+
+-- A band of hazard stripes, `y` its top row (3 rows), slanting one pixel a row.
+local function hazardBand(y: number): { Rect }
+	local band = { rect(0, y, 16, 3, HAZARD) }
+	for row = 0, 2 do
+		for x = -2, 15, 4 do
+			local left = math.max(0, x + row)
+			local right = math.min(16, x + row + 2)
+			if right > left then
+				table.insert(band, rect(left, y + row, right - left, 1, HAZARD_INK, true))
+			end
+		end
+	end
+	return band
+end
+
+local function nukeSide(signSurfaceOnly: boolean): { Rect }
+	return join(hazardBand(0), hazardBand(13), radiation(signSurfaceOnly))
+end
+
+local NUKE_FACES: Faces = {
+	Top = join(outline(NUKE_EDGE, true), radiation(false)),
+	Bottom = outline(NUKE_EDGE, true),
+	Front = nukeSide(false),
+	Back = nukeSide(false),
+	Left = nukeSide(true),
+	Right = nukeSide(true),
+}
+
 local DECORS: { [string]: Faces } = {
+	Tnt = TNT_FACES,
+	Nuke = NUKE_FACES,
 	Chest = CHEST,
 	CraftingTable = CRAFTING_TABLE,
 	Furnace = FURNACE,

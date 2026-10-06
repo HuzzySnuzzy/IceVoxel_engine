@@ -857,6 +857,51 @@ local Config = {
 		EffectDistance = 64,
 		ShakeDistance = 4,
 	},
+	-- TNT (Minecraft 1.20.1's TntBlock and PrimedTnt; server Behaviours/Tnt): lit by flint and
+	-- steel, fire (lava lights the fire) or a blast, it falls while its fuse burns, then explodes.
+	Tnt = {
+		-- Ticks from lighting to the blast (PrimedTnt's 80: 4 s). A blast lights TNT with a short
+		-- fuse instead: rand(FuseTicks / 4) + FuseTicks / 8 (10..29 ticks), so chains ripple.
+		FuseTicks = 80,
+		-- Minecraft's TNT: power 4, no fire.
+		Power = 4,
+	},
+	-- The Nuke (this game's, mod style; server Behaviours/Tnt and World/Nuke): lit like TNT, it
+	-- wails for FuseTicks, then digs a crater no ray explosion could (Minecraft's rays thin out and
+	-- cost too much at such powers).
+	Nuke = {
+		-- Ticks from lighting to the blast (10 s); a blast lights it with the short fuse rule.
+		FuseTicks = 200,
+		-- Ticks between the alarm's beeps while it is lit.
+		AlarmTicks = 20,
+		-- The crater: a sphere of this radius (blocks) where a block goes when its blast resistance
+		-- is below Strength x (1 - distance / radius): dirt to the rim, stone to 0.9 of it,
+		-- obsidian, bedrock and fluids (100) never. The radius wanders by up to Ragged of itself
+		-- with 3D noise of wavelength RaggedScale (blocks), plus a block of crumble, so the rim is
+		-- ragged.
+		Radius = 24,
+		Strength = 60,
+		Ragged = 0.2,
+		RaggedScale = 9,
+		-- Scorched around the crater, out to ScorchRadius blocks sideways (and the crater's radius
+		-- up and down): grass turns to dirt or coarse dirt, leaves, plants, glass and snow (blast
+		-- resistance below ScorchResistance) are blown away, and one air cell over an opaque block
+		-- in FireOdds catches fire.
+		ScorchRadius = 40,
+		ScorchResistance = 0.45,
+		FireOdds = 6,
+		-- Cost bounds per server tick: block edits (each one replicated: 12 bytes to every client)
+		-- and block reads. The crater grows outwards from the centre as the work goes.
+		EditsPerTick = 500,
+		ReadsPerTick = 16000,
+		-- Players and items: Minecraft's explosion damage and push with this power (reach 2 x
+		-- power), so the open within about 50 blocks is deadly; players within EffectDistance see
+		-- the flash, the fireball and the mushroom cloud (blasts of LookPower and more look like
+		-- this), and feel it within Explosions.ShakeDistance x power.
+		Power = 28,
+		EffectDistance = 256,
+		LookPower = 16,
+	},
 }
 
 return Config

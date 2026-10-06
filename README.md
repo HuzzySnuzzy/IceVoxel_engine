@@ -99,6 +99,26 @@ A fast, Minecraft-style voxel engine for Roblox.
   that throws you (not in spectator or creative flight), items blown away or destroyed, the boom
   (`entity.generic.explode`, heard 64 blocks away), a flash and a short camera shake. Crude oil
   is no explosive.
+- **TNT.** Minecraft 1.20.1's TNT: red with a white band, breaks at once, burns like it (15 / 100).
+  Light it with flint and steel (on any face; the tool wears), by fire burning it (lava lights
+  that fire), or with a blast: then it lights with a short fuse of 10-29 ticks, so a pile goes off
+  in a ripple. Lit, it glows, flashes white, hisses (`entity.tnt.primed`), falls as Minecraft's
+  primed TNT does (speeding up, through air, fire, plants and fluids, which it gives back), can't
+  be broken, and 4 s later explodes with power 4 and no fire (in water it breaks nothing).
+  **Gunpowder** (no creepers here): a coal or charcoal and a flint make two; TNT is Minecraft's
+  recipe (5 gunpowder in an X, 4 sand).
+- **The Nuke** (for fun, a mod's nuke). A dark casing with hazard stripes and the radiation sign,
+  lit like TNT: it glows red, flashes and beeps every second for 10 s, then digs a crater no ray
+  explosion could: a ragged sphere of radius 24 (± 20%, smooth noise and a block of crumble; the
+  same place digs the same crater) where a block goes if its blast resistance is under 60 × (1 −
+  distance / radius) (dirt to the rim, stone to 0.9 of it, obsidian, bedrock and fluids never: the
+  sea pours in, an obsidian bunker stands), with no drops; around it to 40 blocks grass scorches to
+  dirt and coarse dirt, leaves, plants, glass and snow are blown away and one spot in six catches
+  fire; TNT and Nukes it reaches are lit. It grows outwards from the centre at 500 edits a tick
+  (about 33,000 edits over 3-4 s on open ground), never into unloaded chunks. Players: Minecraft's
+  explosion damage at power 28, deadly in the open within about 50 blocks, walls and hills
+  shielding; everyone within 256 blocks sees a white flash, a fireball, a shock ring and a rising
+  mushroom cloud, hears the boom and feels a long shake. Eight TNT around a block of diamond.
 - **Fire.** Minecraft 1.20.1's fire. It burns on top of a block, or clings to the sides of
   flammable blocks when there is no floor, and spreads: every 1.5-2 s (30 + rand(10) ticks) it may
   burn a neighbour away (Minecraft's burn odds: leaves and plants fast, logs and coal blocks
@@ -871,14 +891,16 @@ src/server   -> ServerScriptService.IceVoxel
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
                             Simulation, TimeOfDay (the day clock, published as workspace attributes),
                             Explosions (blasts in the world, fuel going off, per-tick cost
-                            bounds), FuelBlast (fuel catching, measuring a body, power, chained
-                            blasts; pure)
+                            bounds, the primer hook for explosive blocks), FuelBlast (fuel
+                            catching, measuring a body, power, chained blasts; pure), Nuke (the
+                            Nuke's crater: ragged sphere, scorching, fire, a budget a tick)
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
                             water), Grass (dying and spreading), Leaves (decay), Sapling,
                             Attached (torches and lanterns need support),
                             Plant (plants need their soil and their other half), Fire
                             (spreading, burning blocks away, burning out, ages; lava lighting
-                            fires; flint and steel), Drops (block update logic)
+                            fires; flint and steel), Tnt (lit TNT and Nukes: lighting, the fuse,
+                            falling, blowing up), Drops (block update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication
@@ -975,6 +997,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             the server), Exertion (reports sprinting, swimming and jumps)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/FireRenderer    fire's animated flames (SurfaceGui planes, one shared animation step)
+  Rendering/FuseView        lit TNT and Nukes flashing
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
                             tanks, items moving through transporters, the windows of working
                             generators, Electric Furnaces and Oil Refineries, Batteries' charge
@@ -1083,6 +1106,12 @@ for performance:
 | `Explosions.FuseTicks` | 4 | Flowing fuel burns like a fuse: ticks before a touched cell turns to fire and lights the next. |
 | `Explosions.MaxIgnitionsPerTick` / `MaxBlastsPerTick` / `RayBudget` | 4 / 8 / 60000 | Cost bounds per server tick (a power 12 blast reads about 26,000 blocks; the first blast always goes). |
 | `Explosions.EffectDistance` / `ShakeDistance` | 64 / 4 | Players this close see and feel a blast; the camera shakes within ShakeDistance × power. |
+| `Tnt.FuseTicks` / `Power` | 80 / 4 | Lit TNT's fuse (a blast lights it with rand(fuse / 4) + fuse / 8) and its blast. |
+| `Nuke.FuseTicks` / `AlarmTicks` | 200 / 20 | The lit Nuke's fuse (the same short fuse rule when a blast lights it) and its beeps. |
+| `Nuke.Radius` / `Strength` / `Ragged` / `RaggedScale` | 24 / 60 / 0.2 / 9 | The crater: a block goes where its blast resistance is under Strength × (1 − distance / radius); the radius wanders by Ragged of itself (noise of this wavelength). |
+| `Nuke.ScorchRadius` / `ScorchResistance` / `FireOdds` | 40 / 0.45 / 6 | Around it: grass to dirt, blocks resisting less than this blown away; one air spot over an opaque block in FireOdds catches fire. |
+| `Nuke.EditsPerTick` / `ReadsPerTick` | 500 / 16000 | Cost bounds per server tick (each edit is 12 bytes to every client). |
+| `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
 | `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
@@ -1743,6 +1772,12 @@ that differ from the hardness are in `BLAST_RESISTANCE` at the end of BlockList.
 than fuel resists 100, so blasts in it break nothing. What else sets fuel off is
 `World/FuelBlast.isHot` (fire and lava).
 
+**Explosive blocks.** What a blast does to a block it reaches goes through
+`Explosions.setPrimer` (`Behaviours/Tnt` sets it: TNT and Nukes are lit with a short fuse, lit ones
+stay). A new explosive adds its unlit and lit ids to `LIT_OF` and `FUSE_OF` there and says what it
+does when its fuse runs out in `detonate`; `Tnt.prime(world, x, y, z)` lights one from a server
+script, and `Nuke.detonate(world, x, y, z)` (`World/Nuke`) sets off a crater anywhere.
+
 ## Development
 
 The engine's core is pure Luau, so most of it runs and is tested outside Roblox with
@@ -1802,7 +1837,7 @@ Natural next steps, roughly in order:
   Conductors) and the Logistical Sorter.
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling,
   suffocating inside a block, lava and explosions (`Items.damageAfterArmor`, which both use).
-  TNT, creepers and Blast Protection would sit on `World/Explosions` (`Api.explode`).
+  Creepers and Blast Protection would sit on `World/Explosions` (`Api.explode`), as TNT does.
 - **More of lava and oil.** Basalt, water aquifers,
   BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
   particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).

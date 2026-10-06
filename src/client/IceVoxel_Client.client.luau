@@ -34,6 +34,7 @@
 	                             (Ui/StructureScreen), SAVE's data and pasted data in pieces
 	  Rendering/StructureBoxes   structure blocks' outlines and names
 	  Rendering/FireRenderer     fire's animated flames on the floor and on burning walls
+	  Rendering/FuseView         lit TNT and Nukes flashing
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
@@ -50,7 +51,8 @@
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
 	  Player/BurningView         flames on burning players (lava), the fire overlay in first person
 	  Rendering/ExplosionView    explosions (the server's Explosion messages): the blast drawn, its
-	                             knockback on the movement, a short camera shake
+	                             knockback on the movement, a short camera shake; the Nuke's
+	                             flash, fireball and mushroom cloud
 	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature from
 	                             the server, which Ui/SurvivalHud draws (droplets, the gauge, frost
 	                             and heat at the edges); Interaction/Drinking drinks and fills
@@ -82,6 +84,7 @@ local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
 local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
 local FireRenderer = require(Client.Rendering.FireRenderer)
+local FuseView = require(Client.Rendering.FuseView)
 local Notices = require(Client.Net.Notices)
 local StructureNet = require(Client.Net.StructureNet)
 local StructureBoxes = require(Client.Rendering.StructureBoxes)
@@ -254,6 +257,7 @@ FireRenderer.start(world, function(cx: number, cz: number): boolean
 	local node = streamer.nodes[Coords.chunkKey(cx, cz)]
 	return node ~= nil and node.shown
 end)
+FuseView.start(world)
 MovementController.start(world, streamer)
 -- (After the camera: the fluid at the camera, its fog and tint.)
 FluidFog.start(

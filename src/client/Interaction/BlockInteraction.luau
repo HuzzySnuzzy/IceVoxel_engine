@@ -62,7 +62,8 @@
 	                into the clicked block if it can be replaced, else in front of the clicked face.
 	  Flint and     Minecraft's FlintAndSteelItem: fire in front of the clicked face, where fire
 	  Steel         may burn (Fire.canPlaceAt: an empty cell on a sturdy block or next to a
-	                flammable one). Breaking a fire puts it out (it breaks at once).
+	                flammable one). Breaking a fire puts it out (it breaks at once). On TNT or a
+	                Nuke, any face: the server lights it (TntBlock.use).
 	Tough As Nails' water (Interaction/Drinking), after a block's menu and before anything else, in
 	adventure too: a Glass Bottle or a canteen fills at the water source its own ray (stopping at
 	water sources, as a bucket's) finds, an empty hand sips from it, and a filled bottle or canteen
@@ -819,10 +820,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			if hit == nil then
 				return false
 			end
-			-- Only where the server would light it: in front of the clicked face (Fire.canPlaceAt).
+			-- Only where the server would light it: TNT and Nukes on any face, else in front of
+			-- the clicked face (Fire.canPlaceAt).
 			local side = faceSide(hit, ray)
 			local dx, dy, dz = Transmitters.offset(side)
-			if not Fire.canPlaceAt(getBlock, hit.x + dx, hit.y + dy, hit.z + dz) then
+			local explosive = hit.block == Blocks.id.Tnt or hit.block == Blocks.id.Nuke
+			if not explosive and not Fire.canPlaceAt(getBlock, hit.x + dx, hit.y + dy, hit.z + dz) then
 				return false
 			end
 			return sendUseItem(hit.x, hit.y, hit.z, side, sneaking)
