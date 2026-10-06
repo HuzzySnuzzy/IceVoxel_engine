@@ -1,37 +1,50 @@
 --!strict
 --[[
-	Burning fuel, pure (no Roblox APIs, so the tests run it): when BuildCraft's fuel meets fire or
-	something hot it goes off, and how a body of it explodes. World/Explosions runs the plans.
+	Burning fuel, pure (no Roblox APIs, so the tests run it): what happens when BuildCraft's fuel
+	(petrol: a block is 1 000 litres, a cubic metre) meets fire or something hot, as real petrol
+	behaves. World/Explosions runs the plans.
+
+	Real petrol does not detonate. Its liquid only burns at its surface, where it evaporates: a
+	flame touching it lights the vapour layer over the pool, a flame front runs across the surface
+	at a few metres a second and the pool burns on as a pool fire (a cubic metre would take hours;
+	here the flames eat a block in about a minute: BlockList's `flammable` odds for fuel and
+	Behaviours/Fire). Petrol explodes only as vapour mixed with air (1.4-7.6 % by volume), and only
+	builds real pressure where that mix is closed in: a garage, a cellar, a sealed tank room, a
+	cave pocket. Then it goes off as a gas explosion: its energy is the mix's (about 3.5 MJ a cubic
+	metre), a fifth of it blast, and the pressure throws out the walls that can't hold it. Out in
+	the open the vapour drifts off and there is no blast, only fire. (The energy in the liquid,
+	34 GJ a block, seven tonnes of TNT, never comes out as a blast: it burns.)
 
 	  Catching  `exposed`: a fuel cell (any level, falling too) with Fire or lava (any level, the
 	            cave twin too) on one of its six sides. Behaviours/Fluid asks whenever the fuel
 	            or a neighbour changes, so fuel catches when fire or lava comes next to it and when
-	            it flows next to them. (Crude oil does not: it is not explosive.)
+	            it flows next to them. (Crude oil does not: it is far less volatile.)
 	  Measuring `measure`: a flood fill through the six sides from the cell that caught, over
 	            every connected fuel cell, at most Config.Explosions.MaxCells (4096), never into
-	            cells another plan already holds (`claimed`) or chunks that are not loaded. A
-	            source counts a bucket; a flowing cell its fill ((8 - level) / 8, falling fuel
-	            8 / 8) times FlowingShare (1/16): flowing fluid is a thin sheet Minecraft makes
-	            out of nothing, so a puddle spread from one bucket (a source and 112 flowing
-	            cells) counts about 3.6 buckets instead of 43. Each cell keeps its distance
+	            cells left out (`skip`) or chunks that are not loaded. Each cell keeps its distance
 	            (steps through the fuel) from where it caught.
-	  Power     `power(v)`: BucketPower (4) x cube root of v buckets, between MinPower (1) and
-	            MaxPower (12). A blast's reach grows with the cube root of its charge (the
-	            Hopkinson-Cranz scaling of explosives), and Minecraft's power is its reach (an
-	            entity is hit within 2 x power, a ray runs out after 1.73 x power blocks of air).
-	            So a bucket is TNT (4), a 2 x 2 puddle of sources (4 buckets) is a charged creeper
-	            (6.3), 8 buckets 8, 27 buckets (a 3 x 3 x 3 tank's worth) 12.
-	  Chaining  `plan`: the body is cut into cubes ClusterSize (4) wide (centred on the cell that
-	            caught), and each cube goes off as its own blast: the power of the fuel in it, at
-	            the fuel's centre (weighted by what each cell counts), when the flame front
-	            reaches its nearest cell (ChainBlocksPerTick: 1.5 blocks a tick, so the near end
-	            of a 16 block pool goes at once and the far end about half a second later).
-	            Cubes with less than MinBlastVolume (half a bucket: the thin edge of a puddle)
-	            flash into fire instead (power 0). So one bucket on the ground is one TNT
-	            blast with a ring of fire around it, and a 16 x 16 x 4 refinery pool of 1024
-	            buckets is a few dozen blasts of power 6 to 12 rippling across it over a second
-	            or two (World/Explosions spreads them over ticks to bound the cost). All of them
-	            are fiery, and each consumes the fuel of its cube.
+	  Surface   `surface`: the body's cells with open air above them (air, cave air or a cell that
+	            is not solid and no fluid: a plant, a torch, fire): where it evaporates and where
+	            its flames stand.
+	  Space     `pocket`: the air over the surface, flood filled through cells that are not solid
+	            and hold no fluid, at most PocketCells (4096). It is closed (`sealed`) when the
+	            fill ends before that, without meeting an unloaded chunk or the world's top; its
+	            walls are the solid cells around it.
+	  Vapour    `vapour(surface, volume)`: a closed space fills with an explosive mix up to
+	            VapourPerSurface (16) m3 for each square metre of surface (an hour and a half of
+	            evaporation), at most the space itself. Its blast: MixEnergy (3.5 MJ/m3) x Yield
+	            (0.2) / TntEnergy (4.6 MJ/kg) = 0.15 kg of TNT a cubic metre of mix, and Minecraft's
+	            power from that: 4 x (kg / MinecraftTnt)^(1/3) x Scale (Minecraft's TNT taken as
+	            250 kg of real TNT, by its crater; a blast's reach grows with the cube root of its
+	            charge), at most MaxPower. A 4 x 4 x 3 room full of vapour (48 m3, 7 kg) is power
+	            1.2; a 16 x 16 x 16 hall (4096 m3, 620 kg) 5.4, a strong TNT blast.
+	  Plan      `plan`: flames over every surface cell, each when the flame front (FlameSpeed,
+	            0.15 blocks a tick: 3 m/s) reaches it through the fuel; and, when the space over
+	            it is closed and holds vapour, one blast at the space's centre a tick after
+	            catching (a deflagration fills a room in a fraction of a second), which also
+	            throws out every wall of the space whose blast resistance is at most WallStrength
+	            (3) x the share of the space the vapour fills: glass, dirt, sand, logs and planks
+	            give, stone holds. The fuel itself is not used up by the blast: it burns on.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,25 +57,38 @@ local Fluids = require(Shared.Fluids)
 
 export type GetBlock = (x: number, y: number, z: number) -> number?
 
--- A connected body of fuel: its cells (Coords.posKey, flood fill order: the first caught), the
--- buckets each counts and its distance (steps) from the first, and the buckets in all.
+-- A connected body of fuel: its cells (Coords.posKey, flood fill order: the first caught) and
+-- each one's distance (steps through the fuel) from the first.
 export type Body = {
 	cells: { number },
-	weights: { number },
 	distances: { number },
-	volume: number,
 }
 
--- One blast of a plan (`power` 0: a flash into fire): where, when (ticks after catching), the
--- fuel cells it consumes and the buckets they count.
+-- The air over a body: its cells, whether it is closed, and the solid cells around it.
+export type Pocket = {
+	cells: { number },
+	sealed: boolean,
+	walls: { number },
+}
+
+-- A closed space's vapour blast: where (blocks), its power, the TNT it is worth (kg), the share
+-- of the space the vapour fills, the walls it throws out and the space's cells.
 export type Blast = {
 	x: number,
 	y: number,
 	z: number,
 	power: number,
-	volume: number,
-	delay: number,
-	cells: { number },
+	tnt: number,
+	fill: number,
+	walls: { number },
+	pocket: { number },
+}
+
+-- What a body that caught does: flames on its surface (the air cells over it, Coords.posKey,
+-- each `delay` ticks after catching), and the blast of its closed space's vapour, if any.
+export type Plan = {
+	flames: { { key: number, delay: number } },
+	blast: Blast?,
 }
 
 local Settings = Config.Explosions
@@ -73,7 +99,7 @@ local FUEL = Fluids.FUEL
 local LAVA = Fluids.LAVA
 local FLUID_LUT = Fluids.blockLut
 local FIRE = Blocks.find("Fire")
-local FALLING = 8
+local TOP = Config.WorldHeight - 1
 local SIDES = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 
 local function fluidOf(block: number): number
@@ -93,6 +119,11 @@ function FuelBlast.isHot(block: number?): boolean
 	return block ~= nil and (block == FIRE or fluidOf(block) == LAVA)
 end
 
+-- Can vapour pass `block` (not solid, no fluid: air, plants, torches, fire)?
+function FuelBlast.isOpen(block: number): boolean
+	return not Blocks.isSolid(block) and fluidOf(block) == 0
+end
+
 -- Is the fuel at (x, y, z) touching something hot on one of its six sides?
 function FuelBlast.exposed(getBlock: GetBlock, x: number, y: number, z: number): boolean
 	for _, side in SIDES do
@@ -103,52 +134,29 @@ function FuelBlast.exposed(getBlock: GetBlock, x: number, y: number, z: number):
 	return false
 end
 
--- Buckets a fuel block counts (see the header); 0 for anything else.
-function FuelBlast.weight(block: number): number
-	if not FuelBlast.isFuel(block) then
-		return 0
-	end
-	local fluid = Blocks.get(block).fluid
-	local level = if fluid then fluid.level else 0
-	if level == 0 then
-		return 1
-	end
-	local fill = if level == FALLING then 1 else (8 - level) / 8
-	return fill * Settings.FlowingShare
-end
-
--- The power of a blast of `volume` buckets of fuel (see the header).
-function FuelBlast.power(volume: number): number
-	if not (volume > 0) then
-		return 0
-	end
-	return math.clamp(Settings.BucketPower * volume ^ (1 / 3), Settings.MinPower, Settings.MaxPower)
-end
-
 --[[
-	The fuel connected to (x, y, z) (see the header), leaving out `claimed` cells (Coords.posKey);
+	The fuel connected to (x, y, z) (see the header), leaving out `skip` cells (Coords.posKey);
 	at most `maxCells` (default Config.Explosions.MaxCells). Empty when (x, y, z) is no fuel or
-	is claimed.
+	is skipped.
 ]]
 function FuelBlast.measure(
 	getBlock: GetBlock,
 	x: number,
 	y: number,
 	z: number,
-	claimed: { [number]: any }?,
+	skip: { [number]: any }?,
 	maxCells: number?
 ): Body
 	local limit = maxCells or Settings.MaxCells
-	local body: Body = { cells = {}, weights = {}, distances = {}, volume = 0 }
+	local body: Body = { cells = {}, distances = {} }
 	local start = Coords.posKey(x, y, z)
-	local block = getBlock(x, y, z)
-	if not FuelBlast.isFuel(block) or (claimed and claimed[start]) or limit < 1 then
+	if not FuelBlast.isFuel(getBlock(x, y, z)) or (skip and skip[start]) or limit < 1 then
 		return body
 	end
 	local visited: { [number]: boolean } = { [start] = true }
 	local queueX, queueY, queueZ = { x }, { y }, { z }
-	local cells, weights, distances = body.cells, body.weights, body.distances
-	cells[1], weights[1], distances[1] = start, FuelBlast.weight(block :: number), 0
+	local cells, distances = body.cells, body.distances
+	cells[1], distances[1] = start, 0
 	local head = 1
 	while head <= #cells do
 		local cx, cy, cz, distance = queueX[head], queueY[head], queueZ[head], distances[head]
@@ -158,109 +166,162 @@ function FuelBlast.measure(
 				break
 			end
 			local nx, ny, nz = cx + side[1], cy + side[2], cz + side[3]
+			if ny < 0 or ny > TOP then
+				continue
+			end
 			local key = Coords.posKey(nx, ny, nz)
 			if not visited[key] then
 				visited[key] = true
-				local neighbour = getBlock(nx, ny, nz)
-				if FuelBlast.isFuel(neighbour) and not (claimed and claimed[key]) then
+				if FuelBlast.isFuel(getBlock(nx, ny, nz)) and not (skip and skip[key]) then
 					local n = #cells + 1
-					cells[n], weights[n], distances[n] = key, FuelBlast.weight(neighbour :: number), distance + 1
+					cells[n], distances[n] = key, distance + 1
 					queueX[n], queueY[n], queueZ[n] = nx, ny, nz
 				end
 			end
 		end
 	end
-	local volume = 0
-	for _, weight in weights do
-		volume += weight
-	end
-	body.volume = volume
 	return body
 end
 
 --[[
-	The blasts a body of fuel that caught at (x, y, z) goes off as (see the header), in the order
-	they go (delay, then the flood fill's order). Every cell of `body` is in exactly one of them.
+	The open air cells over `body`'s surface (Coords.posKey; see the header), each with the
+	distance of the fuel cell under it, in the body's order.
 ]]
-function FuelBlast.plan(body: Body, x: number, y: number, z: number): { Blast }
-	local size = math.max(1, math.floor(Settings.ClusterSize))
-	local half = size // 2
-	local speed = math.max(Settings.ChainBlocksPerTick, 1e-3)
-	type Cluster = {
-		first: number,
-		near: number,
-		volume: number,
-		sx: number,
-		sy: number,
-		sz: number,
-		mx: number,
-		my: number,
-		mz: number,
-		cells: { number },
-	}
-	local byCube: { [number]: Cluster } = {}
-	local clusters: { Cluster } = {}
+function FuelBlast.surface(getBlock: GetBlock, body: Body): ({ number }, { number })
+	local above, distances = {}, {}
 	for i, key in body.cells do
-		local cx, cy, cz = Coords.decodePosKey(key)
-		local cube = Coords.posKey((cx - x + half) // size, (cy - y + half) // size + 512, (cz - z + half) // size)
-		local cluster = byCube[cube]
-		if cluster == nil then
-			cluster = {
-				first = i,
-				near = body.distances[i],
-				volume = 0,
-				sx = 0,
-				sy = 0,
-				sz = 0,
-				mx = 0,
-				my = 0,
-				mz = 0,
-				cells = {},
-			}
-			byCube[cube] = cluster
-			table.insert(clusters, cluster)
+		local x, y, z = Coords.decodePosKey(key)
+		if y < TOP then
+			local block = getBlock(x, y + 1, z)
+			if block ~= nil and FuelBlast.isOpen(block) then
+				table.insert(above, Coords.posKey(x, y + 1, z))
+				table.insert(distances, body.distances[i])
+			end
 		end
-		local weight = body.weights[i]
-		local px, py, pz = cx + 0.5, cy + 0.5, cz + 0.5
-		cluster.volume += weight
-		cluster.sx += px * weight
-		cluster.sy += py * weight
-		cluster.sz += pz * weight
-		cluster.mx += px
-		cluster.my += py
-		cluster.mz += pz
-		cluster.near = math.min(cluster.near, body.distances[i])
-		table.insert(cluster.cells, key)
 	end
-	local blasts: { Blast } = {}
-	local order: { [Blast]: number } = {}
-	for _, cluster in clusters do
-		local n = #cluster.cells
-		local bx, by, bz
-		if cluster.volume > 0 then
-			bx, by, bz = cluster.sx / cluster.volume, cluster.sy / cluster.volume, cluster.sz / cluster.volume
-		else
-			bx, by, bz = cluster.mx / n, cluster.my / n, cluster.mz / n
+	return above, distances
+end
+
+--[[
+	The air connected to `starts` (Coords.posKey of open cells) through open cells (see the
+	header), at most `maxCells` (default Config.Explosions.PocketCells): its cells, whether it is
+	closed, and the solid cells around it (only when closed).
+]]
+function FuelBlast.pocket(getBlock: GetBlock, starts: { number }, maxCells: number?): Pocket
+	local limit = maxCells or Settings.PocketCells
+	local pocket: Pocket = { cells = {}, sealed = false, walls = {} }
+	local cells = pocket.cells
+	local seen: { [number]: boolean } = {}
+	local walls: { number } = {}
+	for _, key in starts do
+		if not seen[key] then
+			seen[key] = true
+			table.insert(cells, key)
 		end
-		local blast: Blast = {
-			x = bx,
-			y = by,
-			z = bz,
-			power = if cluster.volume >= Settings.MinBlastVolume then FuelBlast.power(cluster.volume) else 0,
-			volume = cluster.volume,
-			delay = math.floor(cluster.near / speed),
-			cells = cluster.cells,
-		}
-		order[blast] = cluster.first
-		table.insert(blasts, blast)
 	end
-	table.sort(blasts, function(a, b)
-		if a.delay ~= b.delay then
-			return a.delay < b.delay
+	if #cells == 0 or #cells > limit then
+		return pocket
+	end
+	local head = 1
+	while head <= #cells do
+		local cx, cy, cz = Coords.decodePosKey(cells[head])
+		head += 1
+		for _, side in SIDES do
+			local nx, ny, nz = cx + side[1], cy + side[2], cz + side[3]
+			if ny < 0 or ny > TOP then
+				-- (Out of the world: the vapour has room to go.)
+				return pocket
+			end
+			local key = Coords.posKey(nx, ny, nz)
+			if not seen[key] then
+				seen[key] = true
+				local block = getBlock(nx, ny, nz)
+				if block == nil then
+					-- (Unloaded: unknown, so not closed.)
+					return pocket
+				elseif FuelBlast.isOpen(block) then
+					if #cells >= limit then
+						return pocket
+					end
+					table.insert(cells, key)
+				elseif Blocks.isSolid(block) then
+					table.insert(walls, key)
+				end
+			end
 		end
-		return order[a] < order[b]
-	end)
-	return blasts
+	end
+	pocket.sealed = true
+	pocket.walls = walls
+	return pocket
+end
+
+--[[
+	The vapour a closed space of `volume` cells fills over `surface` square metres of fuel (m3),
+	and its blast: Minecraft's power, the kilos of TNT it is worth, and the share of the space it
+	fills (see the header).
+]]
+function FuelBlast.vapour(surface: number, volume: number): (number, number, number, number)
+	if not (surface > 0 and volume > 0) then
+		return 0, 0, 0, 0
+	end
+	local mix = math.min(volume, surface * Settings.VapourPerSurface)
+	local tnt = mix * Settings.MixEnergy * Settings.Yield / Settings.TntEnergy
+	local power = math.min(Settings.MaxPower, 4 * (tnt / Settings.MinecraftTnt) ^ (1 / 3) * Settings.Scale)
+	return mix, power, tnt, mix / volume
+end
+
+--[[
+	What a body of fuel does once it caught (see the header): flames on its surface as the front
+	reaches them, and the blast of its closed space's vapour, unless `burning` (the space already
+	holds fire: the vapour burns off as it rises).
+]]
+function FuelBlast.plan(getBlock: GetBlock, body: Body, burning: boolean?): Plan
+	local speed = math.max(Settings.FlameSpeed, 1e-3)
+	local above, distances = FuelBlast.surface(getBlock, body)
+	local plan: Plan = { flames = {} }
+	for i, key in above do
+		table.insert(plan.flames, { key = key, delay = math.floor(distances[i] / speed) })
+	end
+	if burning or #above == 0 then
+		return plan
+	end
+	local pocket = FuelBlast.pocket(getBlock, above)
+	if not pocket.sealed then
+		return plan
+	end
+	local _, power, tnt, fill = FuelBlast.vapour(#above, #pocket.cells)
+	if power <= 0 then
+		return plan
+	end
+	-- The space's centre, and the walls its pressure throws out.
+	local sx, sy, sz = 0, 0, 0
+	for _, key in pocket.cells do
+		local x, y, z = Coords.decodePosKey(key)
+		sx += x + 0.5
+		sy += y + 0.5
+		sz += z + 0.5
+	end
+	local n = #pocket.cells
+	local strength = Settings.WallStrength * fill
+	local walls = {}
+	for _, key in pocket.walls do
+		local x, y, z = Coords.decodePosKey(key)
+		local block = getBlock(x, y, z)
+		if block ~= nil and Blocks.get(block).blastResistance <= strength then
+			table.insert(walls, key)
+		end
+	end
+	plan.blast = {
+		x = sx / n,
+		y = sy / n,
+		z = sz / n,
+		power = power,
+		tnt = tnt,
+		fill = fill,
+		walls = walls,
+		pocket = pocket.cells,
+	}
+	return plan
 end
 
 return FuelBlast

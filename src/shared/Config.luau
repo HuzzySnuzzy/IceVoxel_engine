@@ -816,31 +816,48 @@ local Config = {
 		Fire = { Tick = true, Difficulty = 2 },
 	},
 	-- Explosions (Shared/World/Explosion, Minecraft's) and burning fuel setting them off (server
-	-- World/FuelBlast, World/Explosions): fuel touching fire or lava explodes, harder the more of
-	-- it is connected.
+	-- World/FuelBlast, World/Explosions): fuel touching fire or lava burns, and its vapour explodes
+	-- where it is closed in.
 	Explosions = {
-		-- Power of a blast of `v` buckets of fuel: BucketPower x cube root of v (the cube root
-		-- scaling of blast radius with charge), so one bucket is TNT (4), 8 buckets 8, 27 buckets
-		-- 12. Between MinPower and MaxPower (a charged creeper is 6, Minecraft's biggest
-		-- vanilla blasts 7-8).
-		BucketPower = 4,
-		MinPower = 1,
-		MaxPower = 12,
-		-- What a flowing (or falling) fuel cell counts as: its fill (8 - level) / 8 of a bucket
-		-- times this. Flowing fluid is a thin sheet Minecraft makes out of nothing, so a puddle
-		-- spread from one bucket (113 cells) counts about 3.6 buckets, not 43.
-		FlowingShare = 1 / 16,
+		--[[
+			Burning fuel, as real petrol behaves (server World/FuelBlast; a block is 1 000 litres,
+			a cubic metre). Liquid petrol does not detonate: a flame or lava touching it lights the
+			vapour over it, a flame front runs across the surface and the pool burns (a pool fire).
+			Only vapour that has gathered in an enclosed space explodes, as a gas explosion does.
+		]]
+		-- The flame front across the surface, blocks a tick (3 m/s: flames run over petrol at a
+		-- few metres a second).
+		FlameSpeed = 0.15,
+		-- Air (m3) one square metre of open petrol surface fills with an explosive mix, in a
+		-- closed space (petrol evaporates about a kilo an hour per square metre at room
+		-- temperature, and a stoichiometric mix holds 0.08 kg a cubic metre: 16 m3 is an hour
+		-- and a half of standing).
+		VapourPerSurface = 16,
+		-- The space over the fuel is closed if its air (flood filled through cells that are not
+		-- solid) ends within this many cells (a 16 x 16 x 16 hall); larger, open to the sky or at
+		-- unloaded chunks, the vapour drifts away and the fuel only burns.
+		PocketCells = 4096,
+		-- The blast of a closed space's vapour: MixEnergy MJ a cubic metre of stoichiometric
+		-- petrol and air, TntEnergy MJ a kilo of TNT, and Yield of the energy as blast (a confined
+		-- deflagration; open vapour clouds give a few percent). Minecraft's TNT (power 4) is taken
+		-- as MinecraftTnt kilos of real TNT (its crater, cube root scaling), so power =
+		-- 4 x (kilos / MinecraftTnt)^(1/3) x Scale, at most MaxPower.
+		MixEnergy = 3.5,
+		TntEnergy = 4.6,
+		Yield = 0.2,
+		MinecraftTnt = 250,
+		Scale = 1,
+		MaxPower = 8,
+		-- The pressure of a closed space's blast throws out its walls: every solid block bounding
+		-- the space with a blast resistance up to WallStrength x the share of the space the vapour
+		-- fills (glass 0.3, dirt 0.5, logs 2, planks 3; stone 6 holds).
+		WallStrength = 3,
+		-- Ticks fuel stays "burning" after it caught (refreshed while fire or lava keeps touching
+		-- it): vapour over a burning pool burns off as it rises, so it never gathers to explode.
+		BurningMemory = 600,
 		-- Fuel cells one ignition measures at most (a flood fill through the connected fuel);
-		-- fuel beyond them catches from the fire the blasts leave.
+		-- fuel beyond them catches from the flames.
 		MaxCells = 4096,
-		-- A connected body goes off as one blast per ClusterSize-wide cube of it, each with the
-		-- power of the fuel in that cube, ...
-		ClusterSize = 4,
-		-- ... cubes holding less than this many buckets just flash into fire, ...
-		MinBlastVolume = 0.5,
-		-- ... staggered by the distance (through the fuel) from where it caught: a flame front of
-		-- this many blocks per tick.
-		ChainBlocksPerTick = 1.5,
 		-- Cost bounds per server tick: ignitions measured, blasts set off, and block reads of
 		-- their rays (at least one blast a tick always goes; TNT in open air reads about 9 000
 		-- blocks, a power 12 blast about 26 000, some 7 ms interpreted). What doesn't fit waits

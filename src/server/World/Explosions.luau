@@ -4,12 +4,17 @@
 	server, with World/FuelBlast's plans). Pure Luau on WorldServer, so the tests run it.
 
 	  Ignitions  `ignite(world, x, y, z)` (Behaviours/Fluid, when fuel touches fire or lava; or
-	             a blast reaching fuel no plan holds yet, as TNT hit by a blast is primed)
-	             queues the cell; `step` measures and plans its body (FuelBlast.measure / plan)
-	             and claims every cell of it for the blast it belongs to, so fire and blasts
-	             reaching claimed fuel change nothing: it goes off on its own schedule.
-	  Blasts     `explode(world, x, y, z, power, fiery)` queues one directly (Api, tests). At its
-	             tick a fuel blast first consumes its cells (air, released), then
+	             a blast reaching fuel) queues the cell; `step` measures its body and plans what
+	             it does (FuelBlast.measure / plan: flames over its surface as the front reaches
+	             them, and the blast of the vapour in a closed space over it). Every cell of the
+	             body is then "burning" for Config.Explosions.BurningMemory ticks, refreshed each
+	             time fire or lava touches it again: a burning body catches nothing more (its
+	             flames are already on it), and its vapour burns off as it rises, so it never
+	             explodes again while it burns (FuelBlast.plan's `burning`).
+	  Flames     at their tick, Fire on every planned cell still empty (air or cave air): the
+	             pool fire, which Behaviours/Fire keeps burning (fuel is flammable: BlockList).
+	  Blasts     `explode(world, x, y, z, power, fiery)` queues one directly (Api, tests); a
+	             closed space's vapour blast is queued a tick after catching. At its tick:
 	               1. Explosion.affected: the cells its 1352 rays reach;
 	               2. the handler (`setHandler`, the boot script: item entities, players' damage
 	                  and knockback, the clients' effects) before any block goes, as Minecraft
@@ -18,17 +23,19 @@
 	               4. every affected non-air block becomes air, dropping its items (leaves their
 	                  sapling or sticks, Items.leafDrop) with chance 1 / power (Behaviours/Drops;
 	                  containers drop their contents through Inventories as for any change);
-	                  unclaimed fuel among them is ignited instead (it is the explosive);
-	               5. a fiery blast (every fuel blast) sets Fire on one in three of its air
-	                  cells over an opaque block (Explosion.fireSpots), which lights the fuel
-	                  next to it in turn: bodies larger than FuelBlast's cap burn on in chains.
-	             A flash (a plan's blast with power 0: thin fuel) just consumes its cells and
-	             sets fire to them the same way.
+	                  fuel among them (fluids resist blasts, so only at the very edge) catches
+	                  instead;
+	               5. a vapour blast throws out the walls its pressure beats (FuelBlast.plan),
+	                  with the same drops;
+	               6. a fiery blast (every vapour blast) sets Fire on one in three of its air
+	                  cells over an opaque block (Explosion.fireSpots), the space's included: the
+	                  room is a fireball.
 	  Costs      per `step` (one server tick): at most Config.Explosions.MaxIgnitionsPerTick
-	             ignitions planned (each a flood fill of at most MaxCells), at most
-	             MaxBlastsPerTick blasts, and no new blast once their rays have read RayBudget
-	             blocks (the first always goes); the rest wait for the next tick. Unloaded chunks
-	             stop rays and flood fills, and are never generated.
+	             ignitions planned (a flood fill of at most MaxCells fuel cells and one of at
+	             most PocketCells air cells each), at most MaxBlastsPerTick blasts, and no new
+	             blast once their rays have read RayBudget blocks (the first always goes); the
+	             rest wait for the next tick. Unloaded chunks stop rays and flood fills, and are
+	             never generated.
 
 	State is kept per world (weakly), so tests with worlds of their own never share it.
 ]]
@@ -54,7 +61,8 @@ type World = WorldServer.World
 -- and power, with the world's loaded blocks.
 export type Handler = (x: number, y: number, z: number, power: number, getBlock: Explosion.GetBlock) -> ()
 
--- A blast waiting for its tick (`cells`: the fuel it consumes, claimed until then).
+-- A blast or flames waiting for their tick: a blast (`power` > 0) at (x, y, z), with the walls
+-- its pressure throws out and the space its fire fills; flames (`power` 0): Fire on `flames`.
 type Pending = {
 	due: number,
 	order: number,
@@ -63,7 +71,9 @@ type Pending = {
 	z: number,
 	power: number,
 	fiery: boolean,
-	cells: { number }?,
+	walls: { number }?,
+	pocket: { number }?,
+	flames: { number }?,
 }
 
 type State = {
@@ -73,7 +83,9 @@ type State = {
 	queued: { [number]: boolean },
 	blasts: { Pending },
 	sorted: boolean,
-	claimed: { [number]: Pending },
+	-- Fuel cells (Coords.posKey) burning, until the tick given.
+	burning: { [number]: number },
+	burningCount: number,
 	random: () -> number,
 	getBlock: Explosion.GetBlock,
 }
@@ -83,6 +95,8 @@ local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 local FIRE = Blocks.find("Fire")
 -- Minecraft's explosion sound (nil until Shared/Sounds has it).
 local EXPLODE = SharedSounds.find("entity.generic.explode")
+-- Burning marks kept per world beyond which the stale ones are swept out.
+local SWEEP_AT = 16384
 
 local Explosions = {}
 
@@ -99,7 +113,8 @@ local function stateOf(world: World): State
 			queued = {},
 			blasts = {},
 			sorted = true,
-			claimed = {},
+			burning = {},
+			burningCount = 0,
 			random = math.random,
 			getBlock = function(x: number, y: number, z: number): number?
 				return world:peekBlock(x, y, z)
@@ -120,12 +135,43 @@ function Explosions.setRandom(world: World, random: () -> number)
 	stateOf(world).random = random
 end
 
--- Queues the fuel at (x, y, z) to go off (nothing happens if it is no fuel by then or a plan
--- already holds it).
+local function isBurning(state: State, key: number): boolean
+	local until_ = state.burning[key]
+	return until_ ~= nil and until_ > state.tick
+end
+
+local function markBurning(state: State, key: number)
+	if state.burning[key] == nil then
+		state.burningCount += 1
+	end
+	state.burning[key] = state.tick + Settings.BurningMemory
+end
+
+-- Drops the burning marks that ran out, once there are many.
+local function sweep(state: State)
+	if state.burningCount < SWEEP_AT then
+		return
+	end
+	local kept = 0
+	for key, until_ in state.burning do
+		if until_ <= state.tick then
+			state.burning[key] = nil
+		else
+			kept += 1
+		end
+	end
+	state.burningCount = kept
+end
+
+-- Queues the fuel at (x, y, z) to catch (a burning cell only stays burning longer).
 function Explosions.ignite(world: World, x: number, y: number, z: number)
 	local state = stateOf(world)
 	local key = Coords.posKey(x, y, z)
-	if state.queued[key] or state.claimed[key] then
+	if isBurning(state, key) then
+		markBurning(state, key)
+		return
+	end
+	if state.queued[key] then
 		return
 	end
 	state.queued[key] = true
@@ -145,81 +191,115 @@ function Explosions.explode(world: World, x: number, y: number, z: number, power
 	enqueue(state, { due = state.tick + 1, order = 0, x = x, y = y, z = z, power = power, fiery = fiery == true })
 end
 
--- Is the fuel at (x, y, z) part of a blast waiting to go off?
-function Explosions.isClaimed(world: World, x: number, y: number, z: number): boolean
-	return stateOf(world).claimed[Coords.posKey(x, y, z)] ~= nil
+-- Is the fuel at (x, y, z) burning (it caught within Config.Explosions.BurningMemory ticks)?
+function Explosions.isBurning(world: World, x: number, y: number, z: number): boolean
+	return isBurning(stateOf(world), Coords.posKey(x, y, z))
 end
 
--- Ignitions and blasts waiting.
+-- Ignitions, blasts and flames waiting.
 function Explosions.pending(world: World): number
 	local state = stateOf(world)
 	return #state.ignitions + #state.blasts
 end
 
--- Measures and plans the body of fuel at `key`, claiming its cells.
+-- Measures the body of fuel at `key` and plans what it does (see the header).
 local function plan(state: State, key: number)
 	state.queued[key] = nil
-	if state.claimed[key] then
+	if isBurning(state, key) then
 		return
 	end
 	local x, y, z = Coords.decodePosKey(key)
-	local body = FuelBlast.measure(state.getBlock, x, y, z, state.claimed)
+	local body = FuelBlast.measure(state.getBlock, x, y, z)
 	if #body.cells == 0 then
 		return
 	end
-	for _, blast in FuelBlast.plan(body, x, y, z) do
-		local pending: Pending = {
-			due = state.tick + blast.delay,
+	local burning = false
+	for _, cell in body.cells do
+		if isBurning(state, cell) then
+			burning = true
+		end
+		markBurning(state, cell)
+	end
+	local result = FuelBlast.plan(state.getBlock, body, burning)
+	-- Flames, a batch per tick of the front.
+	local byDelay: { [number]: { number } } = {}
+	local delays: { number } = {}
+	for _, flame in result.flames do
+		local batch = byDelay[flame.delay]
+		if batch == nil then
+			batch = {}
+			byDelay[flame.delay] = batch
+			table.insert(delays, flame.delay)
+		end
+		table.insert(batch, flame.key)
+	end
+	table.sort(delays)
+	for _, delay in delays do
+		enqueue(state, {
+			due = state.tick + delay,
+			order = 0,
+			x = 0,
+			y = 0,
+			z = 0,
+			power = 0,
+			fiery = true,
+			flames = byDelay[delay],
+		})
+	end
+	local blast = result.blast
+	if blast then
+		enqueue(state, {
+			due = state.tick + 1,
 			order = 0,
 			x = blast.x,
 			y = blast.y,
 			z = blast.z,
 			power = blast.power,
 			fiery = true,
-			cells = blast.cells,
-		}
-		for _, cell in blast.cells do
-			state.claimed[cell] = pending
-		end
-		enqueue(state, pending)
+			walls = blast.walls,
+			pocket = blast.pocket,
+		})
 	end
 end
 
--- Sets fire on `spots` (Coords.posKey).
+-- Sets fire on `spots` (Coords.posKey) that are still empty.
 local function setFire(world: World, spots: { number })
 	if FIRE == nil then
 		return
 	end
 	for _, key in spots do
 		local x, y, z = Coords.decodePosKey(key)
-		world:setBlock(x, y, z, FIRE)
+		local block = world:peekBlock(x, y, z)
+		if block == AIR or block == CAVE_AIR then
+			world:setBlock(x, y, z, FIRE)
+		end
 	end
 end
 
--- Sets one blast off; returns the block reads its rays took.
+-- Breaks the block at `key` (not air, not fuel) with the blast's drop chance.
+local function shatter(world: World, key: number, chance: number, random: () -> number)
+	local x, y, z = Coords.decodePosKey(key)
+	local block = world:peekBlock(x, y, z)
+	if block == nil or block == AIR or block == CAVE_AIR then
+		return
+	end
+	if world:setBlock(x, y, z, AIR) and random() < chance then
+		local stack = Items.leafDrop(block, random) or Items.blockDrops(block)
+		if stack then
+			Drops.stack(x, y, z, stack)
+		end
+	end
+end
+
+-- Sets one blast (or flames) off; returns the block reads its rays took.
 local function detonate(world: World, state: State, pending: Pending): number
 	local random = state.random
-	local cells = pending.cells
-	if cells then
-		-- The fuel burns up (only what still is fuel: it may have flowed away meanwhile).
-		for _, key in cells do
-			if state.claimed[key] == pending then
-				state.claimed[key] = nil
-			end
-		end
-		for _, key in cells do
-			local x, y, z = Coords.decodePosKey(key)
-			if FuelBlast.isFuel(world:peekBlock(x, y, z)) then
-				world:setBlock(x, y, z, AIR)
-			end
-		end
+	if pending.flames then
+		setFire(world, pending.flames)
+		return 0
 	end
 	local x, y, z, power = pending.x, pending.y, pending.z, pending.power
 	if power <= 0 then
-		-- A flash: thin fuel burns away into fire.
-		if cells and pending.fiery then
-			setFire(world, Explosion.fireSpots(state.getBlock, cells, random))
-		end
 		return 0
 	end
 
@@ -236,33 +316,30 @@ local function detonate(world: World, state: State, pending: Pending): number
 	for _, key in affected do
 		local bx, by, bz = Coords.decodePosKey(key)
 		local block = world:peekBlock(bx, by, bz)
-		if block == nil or block == AIR or block == CAVE_AIR then
-			continue
-		end
 		if FuelBlast.isFuel(block) then
-			-- Fuel is the explosive: it goes off (later, from where the blast reached it)
-			-- instead of just vanishing; claimed fuel goes off with its own blast.
-			if state.claimed[key] == nil then
-				Explosions.ignite(world, bx, by, bz)
-			end
-			continue
+			-- (Fuel is a liquid: a blast lights it rather than blowing it away.)
+			Explosions.ignite(world, bx, by, bz)
+		else
+			shatter(world, key, chance, random)
 		end
-		if world:setBlock(bx, by, bz, AIR) and random() < chance then
-			local stack = Items.leafDrop(block, random) or Items.blockDrops(block)
-			if stack then
-				Drops.stack(bx, by, bz, stack)
-			end
+	end
+	if pending.walls then
+		for _, key in pending.walls do
+			shatter(world, key, chance, random)
 		end
 	end
 	if pending.fiery then
 		setFire(world, Explosion.fireSpots(state.getBlock, affected, random))
+		if pending.pocket then
+			setFire(world, Explosion.fireSpots(state.getBlock, pending.pocket, random))
+		end
 	end
 	return reads
 end
 
 --[[
 	One server tick (after the block ticker's): plans queued ignitions and sets off the blasts
-	that are due, within the cost bounds (see the header). Returns the blasts set off (flashes
+	that are due, within the cost bounds (see the header). Returns the blasts set off (flames
 	included).
 ]]
 function Explosions.step(world: World): number
@@ -271,6 +348,7 @@ function Explosions.step(world: World): number
 		return 0
 	end
 	state.tick += 1
+	sweep(state)
 
 	local ignitions = state.ignitions
 	local planned = math.min(#ignitions, Settings.MaxIgnitionsPerTick)
