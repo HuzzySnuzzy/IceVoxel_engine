@@ -15,7 +15,7 @@
 	         use animation) and the player moves at full speed: only the sounds tell.
 	Nothing is predicted: the server's inventory snapshot brings the emptied bottle or the worn
 	canteen, and its Survival message the thirst. Spectators do none of it, and drinks need
-	SurvivalState.canDrink (thirsty, or creative).
+	SurvivalState.canDrink (thirsty, or creative; a tea whenever temperature is on).
 ]]
 
 local Players = game:GetService("Players")
@@ -94,7 +94,10 @@ function Drinking.use(stack: Items.Stack?, mode: string, waterAt: () -> Source?)
 		return nil
 	end
 	local source = waterAt()
-	local action = Drinks.action(stack, source ~= nil, SurvivalState.canDrink(mode), SurvivalState.handDrinking())
+	-- (What would be drunk: the held drink, or a sip from the water with an empty hand.)
+	local drink = if stack then Drinks.of(stack.item) else Drinks.HAND
+	local action =
+		Drinks.action(stack, source ~= nil, SurvivalState.canDrink(mode, drink), SurvivalState.handDrinking())
 	if (action == "fill" or action == "hand") and source then
 		local kind = if action == "fill" then Protocol.DrinkAction.Fill else Protocol.DrinkAction.Hand
 		ClientNet.send(Protocol.ClientMessage.Drink, Protocol.encodeDrink(kind, source.x, source.y, source.z))

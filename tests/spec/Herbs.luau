@@ -35,6 +35,7 @@ return function(t, shared, require, server, client)
 	local Thirst = ToughAsNails.Thirst
 	local Temperature = ToughAsNails.Temperature
 	local Drinks = ToughAsNails.Drinks
+	local Boiling = ToughAsNails.Boiling
 	local B, I = Blocks.id, Items.id
 	local AIR, STONE, GRASS = Blocks.AIR, B.Stone, B.Grass
 	local MINT, GINGER = B.Mint, B.WildGinger
@@ -495,6 +496,33 @@ return function(t, shared, require, server, client)
 			t.eq((Smelting.result(dirty) :: Items.Stack).item, purified, "and smelting")
 		end
 		t.eq(craft({ [1] = I.DirtyWaterBottle, [2] = I.GingerRoot }, 2), nil, "ginger cures nothing")
+		-- A part-drunk canteen keeps its sips (as boiled on a campfire): mint cures water, it never
+		-- makes more of it.
+		for _, at in { { 1, 4 }, { 4, 1 } } do
+			local grid = {
+				[at[1]] = { item = I.DirtyWaterCanteen, count = 1, damage = 2 },
+				[at[2]] = { item = I.MintLeaves, count = 1 },
+			}
+			local cured = Crafting.match(grid, 2) :: Items.Stack
+			t.eq(cured.item, I.PurifiedWaterCanteen)
+			t.eq(cured.damage, 2, "one sip left, as before")
+			t.eq(Drinks.sips(cured), 1)
+		end
+		local fresh = craft({ [1] = I.DirtyWaterCanteen, [2] = I.MintLeaves }, 2) :: Items.Stack
+		t.eq(fresh.damage, nil, "a full one stays full")
+		t.eq(Drinks.sips(fresh), 3)
+		t.eq(
+			Boiling.boil({ item = I.DirtyWaterCanteen, count = 1, damage = 2 }, false, function()
+				return false
+			end).damage,
+			2,
+			"the campfire's rule"
+		)
+		local leaves = Crafting.match({
+			{ item = I.DirtyWaterBottle, count = 1, damage = 5 },
+			{ item = I.MintLeaves, count = 1 },
+		}, 2) :: Items.Stack
+		t.eq(leaves.damage, nil, "wear only where the result wears (a bottle doesn't)")
 		t.eq(Drinks.purifiedOf(I.DirtyWaterBowl), I.PurifiedWaterBowl)
 		t.ok(Drinks.isDirty(I.DirtyWaterBowl) and not Drinks.isDirty(I.PurifiedWaterBowl))
 		-- A furnace with coal purifies a stack of dirty bowls one by one.
@@ -554,6 +582,36 @@ return function(t, shared, require, server, client)
 		t.eq(thirst.thirst, 12)
 		t.eq(Temperature.zone(Temperature.adjusted(body, -10)), Temperature.COLD, "no icy")
 		t.eq(Temperature.zone(Temperature.adjusted(body, 10)), Temperature.WARM, "no hot")
+
+		-- A tea is drunk for its warmth or chill whenever temperature is on: not thirsty (a full
+		-- respawn), or with thirst off (Drinks.drinkable: thirsty, thirst on, temperature on).
+		for _, tea in { I.MintTea, I.GingerTea, I.HerbalTea } do
+			local name, it = Items.displayName(tea), Drinks.of(tea)
+			t.ok(Drinks.tempers(it), `{name} tempers`)
+			t.ok(Drinks.drinkable(it, false, true, true), `{name}: drunk with full thirst`)
+			t.ok(Drinks.drinkable(it, false, false, true), `{name}: drunk with thirst off`)
+			t.ok(not Drinks.drinkable(it, false, true, false), `{name}: not with full thirst and temperature off`)
+			t.ok(Drinks.drinkable(it, true, true, false), `{name}: as water with temperature off`)
+			t.eq(
+				Drinks.action({ item = tea, count = 1 }, false, Drinks.drinkable(it, false, true, true), true),
+				"drink",
+				`{name}: a right click with full thirst drinks it`
+			)
+		end
+		for _, water in { I.PurifiedWaterBowl, I.DirtyWaterBottle, I.PurifiedWaterCanteen } do
+			local name, it = Items.displayName(water), Drinks.of(water)
+			t.ok(not Drinks.tempers(it), `{name} doesn't temper`)
+			t.ok(not Drinks.drinkable(it, false, true, true), `{name}: only while thirsty`)
+			t.ok(not Drinks.drinkable(it, true, false, true), `{name}: never with thirst off`)
+			t.ok(Drinks.drinkable(it, true, true, false))
+		end
+		t.ok(not Drinks.drinkable(Drinks.HAND, false, true, true), "a sip from the water: only while thirsty")
+		t.ok(not Drinks.drinkable(nil, true, true, true), "no drink")
+		-- With thirst off, a tea gives only its warmth or chill (no thirst state).
+		local warmOnly = Temperature.new()
+		t.ok(not Drinks.apply(nil, Drinks.of(I.GingerTea) :: any, rolls({ 0 }), warmOnly))
+		t.eq(warmOnly.warmth, 2400, "warmth without thirst")
+		t.ok(not Drinks.apply(nil, Drinks.DIRTY, rolls({ 0 })), "no Thirst effect without thirst")
 	end)
 
 	--[[ What the screens show ]]

@@ -209,6 +209,16 @@ return function(t, shared, require, server)
 			end
 			t.eq(got, 0, "turned off")
 		end)
+		-- Fully frozen or overheated (Temperature.stopsRegeneration): none, and the timer waits
+		-- at 0.
+		local frozen = Thirst.new()
+		local held = 0
+		for _ = 1, 200 do
+			held += select(2, Thirst.tick(frozen, SURVIVAL, 10, 20, 0, false, true))
+		end
+		t.eq(held, 0, "stopped: no regeneration")
+		t.eq(frozen.timer, 0)
+		t.eq(frozen.exhaustion, 0, "and none of its exhaustion")
 	end)
 
 	t.test("thirst: creative and spectator players stand still", function()
@@ -550,6 +560,19 @@ return function(t, shared, require, server)
 		t.eq(target({ climate = climate("Desert") }), 9, "desert by day: hot")
 		t.eq(target({ climate = climate("Desert"), night = true }), 4, "desert at night: warm")
 		t.eq(target({ climate = climate("Desert"), skyOpen = false }), 7, "a desert house: warm")
+		t.eq(target({ climate = climate("Taiga"), skyOpen = false }), -2, "a taiga house: neutral")
+		t.eq(target({ climate = climate("Taiga"), skyOpen = false, night = true }), -2, "by night too")
+		t.eq(target({ climate = climate("OldGrowthTaiga"), skyOpen = false }), -3, "an old growth taiga house: cold")
+		t.eq(target({ climate = climate("Tundra"), skyOpen = false }), -8, "a tundra house: the edge of icy")
+		t.eq(target({ climate = climate("Plains"), skyOpen = false }), 0, "never past NEUTRAL's middle")
+		-- A roof moves the climate towards neutral, never past it nor away: never colder in the
+		-- cold, nor warmer in the heat, than outdoors by day (it used to chill every house).
+		for _, biome in Biomes.list do
+			local day = target({ climate = biome.temperature })
+			local house = target({ climate = biome.temperature, skyOpen = false })
+			t.ok(math.abs(house) <= math.abs(day), `{biome.name}: a house {house}, outdoors {day}`)
+			t.ok(house * day >= 0, `{biome.name}: never past neutral`)
+		end
 		t.eq(target({ climate = climate("Tundra"), skyOpen = false, y = 40, surface = 80 }), 0, "underground: neutral")
 		t.eq(
 			Temperature.zone(target({ climate = climate("Tundra"), skyOpen = false, y = 70, surface = 80 })),
@@ -748,12 +771,14 @@ return function(t, shared, require, server)
 				t.eq(cold.frozen, full - 1, "a tick at a time")
 			end
 		end
+		t.ok(Temperature.stopsRegeneration(cold), "frozen through: no health comes back")
 		t.eq(hurts[1], full + interval - 1, "the first hurt 5 s after freezing through")
 		t.eq(hurts[2], full + 2 * interval - 1, "then every 5 s")
 		t.eq(#hurts, 3)
 		cold.value, cold.target = -7, -7
 		Temperature.tick(cold, SURVIVAL)
 		t.eq(cold.frozen, full - Temperature.THAW, "thaws 4 a tick out of ICY")
+		t.ok(not Temperature.stopsRegeneration(cold), "thawing: health comes back again")
 		for _ = 1, full // Temperature.THAW - 1 do
 			Temperature.tick(cold, SURVIVAL)
 		end
@@ -783,6 +808,8 @@ return function(t, shared, require, server)
 		end
 		t.eq(hot.heat, full)
 		t.eq(damage, 1, "hyperthermia hurts the same way, freeze immune or not")
+		t.ok(Temperature.stopsRegeneration(hot), "and stops regeneration the same way")
+		t.ok(not Temperature.stopsRegeneration(Temperature.new()))
 		local frost, heat = Temperature.extremes(hot)
 		t.eq(frost, 0)
 		t.eq(heat, 1)
@@ -794,9 +821,11 @@ return function(t, shared, require, server)
 		The harshest place, played out as the server does: from neutral and full health, nothing
 		worn, the clemency over (or not), the surroundings sampled once a second, a tick at a time
 		until health runs out; with thirst (full, its regeneration fighting back, the HOT zone's
-		sweating) or the temperature alone. Returns the ticks it took.
+		sweating, no regeneration while fully frozen or overheated) or the temperature alone, and
+		`drinking`: a Purified Water Bowl whenever thirst drops below 18 (so its regeneration never
+		runs dry). Returns the ticks it took.
 	]]
-	local function timeToDeath(where, withThirst: boolean, clemency: number?): number
+	local function timeToDeath(where, withThirst: boolean, clemency: number?, drinking: boolean?): number
 		local body, thirst = Temperature.new(clemency), Thirst.new()
 		local health = 20
 		for tick = 1, 20 * 60 * 30 do
@@ -812,10 +841,14 @@ return function(t, shared, require, server)
 					health,
 					20,
 					if hot then settings.HotExhaustion else 0,
-					Temperature.clement(body)
+					Temperature.clement(body),
+					Temperature.stopsRegeneration(body)
 				)
 				damage += lost
 				health = math.min(20, health + gained)
+				if drinking and thirst.thirst < Thirst.REGEN_THIRST then
+					Drinks.apply(thirst, Drinks.PURIFIED_BOWL, rolls({}))
+				end
 			end
 			health -= damage
 			if health <= 0 then
@@ -829,7 +862,7 @@ return function(t, shared, require, server)
 		return string.format("%d:%02d", seconds // 60, seconds % 60)
 	end
 
-	t.test("temperature: the harshest cold or heat takes about 3 minutes to kill", function()
+	t.test("temperature: the harshest cold or heat takes about 3 minutes to kill, whatever is drunk", function()
 		local tundra = env({ climate = climate("Tundra"), night = true })
 		local desert = env({ climate = climate("Desert"), sprinting = true })
 		t.eq(Temperature.target(tundra), Temperature.MIN, "the coldest")
@@ -837,6 +870,8 @@ return function(t, shared, require, server)
 		local alone = timeToDeath(tundra, false)
 		local cold = timeToDeath(tundra, true)
 		local hot = timeToDeath(desert, true)
+		local watered = timeToDeath(tundra, true, nil, true)
+		local wateredHot = timeToDeath(desert, true, nil, true)
 		local joined = timeToDeath(tundra, true, settings.ClemencyTicks)
 		print(
 			`         (to death from neutral: cold {clock(cold)} ({cold / 20} s), hot {clock(hot)} ({hot / 20} s),`
@@ -845,8 +880,12 @@ return function(t, shared, require, server)
 		local full, interval = Temperature.EXTREME_TICKS, Temperature.HURT_INTERVAL
 		t.eq(alone, 8 * settings.ChangeTicks + full + 20 * interval - 2, "icy, frozen through, 20 hurts")
 		t.ok(alone >= 170 * 20, `temperature alone: nearly 3 minutes ({clock(alone)})`)
-		t.ok(cold >= 180 * 20, `with thirst's regeneration: 3 minutes or more ({clock(cold)})`)
-		t.ok(hot >= 180 * 20, `the heat the same ({clock(hot)})`)
+		-- (Regeneration, a half heart every 80 ticks, would outlast hurts every 100: it waits.)
+		t.ok(interval > Thirst.INTERVAL, "the extremes hurt slower than thirst's regeneration heals")
+		t.eq(cold, alone, "thirst's regeneration waits while frozen through")
+		t.eq(hot, alone, "the heat the same")
+		t.eq(watered, alone, "drinking whenever thirsty doesn't hold the cold off")
+		t.eq(wateredHot, alone, "nor the heat")
 		-- (Held at NEUTRAL's edge, -2, through the clemency: 6 steps to icy after it, not 8.)
 		t.ok(joined >= settings.ClemencyTicks + 160 * 20, "the clemency's 5 minutes come first")
 		-- Before: two levels at 200 ticks each, frozen in 140, then a hurt every 40: 67 s.

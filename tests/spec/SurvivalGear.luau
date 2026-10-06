@@ -298,6 +298,29 @@ return function(t, shared, require, server)
 		t.eq(give, nil)
 	end)
 
+	t.test("boiling: the water takes its time, one container every 3 s per player", function()
+		local interval = Boiling.INTERVAL / 20
+		t.eq(Boiling.INTERVAL, 60, "3 s")
+		t.ok(Boiling.ready(nil), "the first at once")
+		t.ok(not Boiling.ready(0), "not again at once (a free campfire boiled a stack in a second)")
+		t.ok(not Boiling.ready(interval - 0.05), "nor a tick early")
+		t.ok(Boiling.ready(interval), "after the interval")
+		t.ok(Boiling.ready(interval - Boiling.LEEWAY / 20, Boiling.LEEWAY), "the server allows the leeway")
+		t.ok(not Boiling.ready(interval - (Boiling.LEEWAY + 1) / 20, Boiling.LEEWAY), "and no more")
+		-- Clicking as fast as ItemUse allows (10 a second) for a minute boils 20, not 600: a stack
+		-- of 16 bottles takes 45 s, where mint cures it at once (a leaf each) in a crafting grid.
+		local boiled, last = 0, nil
+		for click = 0, 599 do
+			local now = click / 10
+			if Boiling.ready(if last then now - last else nil, Boiling.LEEWAY) then
+				boiled += 1
+				last = now
+			end
+		end
+		t.ok(boiled <= 60 / (interval - Boiling.LEEWAY / 20) + 1, `{boiled} boiled in a minute`)
+		t.ok(boiled >= 19, "but steadily")
+	end)
+
 	--[[ Straw ]]
 
 	t.test("straw: grass broken without Shears gives Straw now and then; Shears the grass", function()

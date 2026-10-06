@@ -164,13 +164,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   number from -10 to 10 in five zones (icy -10..-8, cold, neutral -2..2, warm, hot 8..10) that
   steps towards what the place says, a step every 7 s (3.5 s back towards neutral): the biome
   (tundra -10, taiga -4, plains 0, jungle 7, desert 9), colder high up and outdoors at night,
-  milder under a roof, neutral deep underground; being wet cools 3 steps, sprinting warms 2,
+  milder under a roof (towards neutral, day and night: a taiga house is -2), neutral deep
+  underground; being wet cools 3 steps, sprinting warms 2,
   lava, fire, a campfire, a lit furnace or a working generator within 5 blocks warm 3 (5 within
   2 blocks), ice and snow cool 3 (not that close to a fire), and armor insulates (leather and
   straw warm a step a piece towards neutral, leather stops freezing too; leaves cool a step).
-  Icy for 20 s freezes you (half a heart every 5 s), hot overheats you the same way and makes
-  you sweat, so the harshest cold takes over 3 minutes to kill from neutral; a drink can give
-  Internal Warmth or Chill, which hold the cold or the heat off. Joining gives 5 minutes of
+  Icy for 20 s freezes you (half a heart every 5 s, and no health comes back meanwhile, whatever
+  you drink), hot overheats you the same way and makes you sweat, so the harshest cold takes
+  about 3 minutes to kill from neutral; a drink can give Internal Warmth or Chill, which hold
+  the cold or the heat off. Joining gives 5 minutes of
   Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at half the rate
   and doesn't hurt. Frost or heat closes in from the screen's edges, and a thermometer over the
   droplets shows the temperature, coloured by zone, with an arrow for where it is going, the
@@ -185,20 +187,22 @@ A fast, Minecraft-style voxel engine for Roblox.
   **Bowls** (Minecraft's: three planks in a V make four) fill at water like bottles: a Dirty Water
   Bowl gives 4 thirst (the same 50% risk of the Thirst effect), a Purified Water Bowl 7, and
   drinking gives the bowl back. **Mint cures dirty water** without a furnace: a dirty bottle, bowl
-  or canteen with Mint Leaves in a crafting grid (the inventory's 2 × 2 too) makes purified water;
-  the furnace purifies bowls as well. **Teas** are a Purified Water Bowl with a herb (stack 1, like
-  stews): Mint Tea (7 thirst, more hydration, 2 minutes of Internal Chill: a desert's heat stays
-  warm, never hot), Ginger Tea (2 minutes of Internal Warmth: a tundra's cold stays cold, never
-  icy) and Herbal Tea with both herbs (8 thirst, a minute of each). Everything shows in JEI, WAILA
-  and the creative inventory.
+  or canteen with Mint Leaves in a crafting grid (the inventory's 2 × 2 too) makes purified water
+  (a canteen keeps its sips); the furnace purifies bowls as well. **Teas** are a Purified Water
+  Bowl with a herb (stack 1, like stews): Mint Tea (7 thirst, more hydration, 2 minutes of
+  Internal Chill: a desert's heat stays warm, never hot), Ginger Tea (2 minutes of Internal
+  Warmth: a tundra's cold stays cold, never icy) and Herbal Tea with both herbs (8 thirst, a
+  minute of each). A tea can be drunk when you aren't thirsty, and with thirst turned off, for its
+  warmth or chill. Everything shows in JEI, WAILA and the creative inventory.
 - **Gear for the cold and the heat (Tough As Nails).** The **Campfire** (Minecraft's: three sticks
   round a coal or charcoal over three logs) is always lit: light 15, glowing embers under fire's
   animated flames, crackling. It warms 3 steps within 5 blocks and 5 within 2, and that close it
   outweighs the snow and ice around (a tundra's -10 is -5 by the fire, cold but safe); walking
   into it costs half a heart every half second (armor softens it) without setting you alight. It
   drops itself (no Silk Touch here), so it can be moved. Right click it with dirty water to boil
-  it clean, a bottle, bowl or canteen a click (a canteen keeps its sips; JEI lists it as
-  "Campfire").
+  it clean, a bottle, bowl or canteen a click and one every 3 s (it burns no fuel, so the water
+  takes its time: hold the button to boil the next when it is ready; mint is the quick cure; a
+  canteen keeps its sips; JEI lists it as "Campfire").
   **Straw** comes from grass broken without Shears (short grass half the time, tall grass always)
   and makes **Straw armor** in the armor shapes (24 for a set), a step of warmth a piece: a full
   set holds a tundra at -6 by day and by night, out of the ice (three pieces just about). **Leaf
@@ -1135,7 +1139,7 @@ for performance:
 | `Gameplay.Admins`         | {}      | User ids who may change other players' game modes (and their own) and the time (`/time set\|add`, `/gamerule`). |
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
 | `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
-| `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. |
+| `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. Neither heals while fully frozen or overheated. |
 | `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |
 | `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.005 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
 | `ToughAsNails.ChangeTicks` / `RecoverTicks` | 140 / 70 | Ticks per step of the body temperature (-10..10) away from neutral / back towards it (neutral to icy: 56 s in the coldest place). |
@@ -1366,7 +1370,9 @@ follow from the role (`insertFluid` / `extractFluid`, `pourBucket` / `fillBucket
 JEI its numbers. The Oil Refinery (`Kinds/Refinery.luau`) and the Combustion Generator
 (`Kinds/Combustion.luau`) are the examples. A kind's `lines(view)` adds lines under its status
 line (`panel.lines = { x, y }`), and a shaped recipe's `keep` (a key character used once) makes its
-result take that ingredient's item data, as a battery's tier upgrade keeps its charge.
+result take that ingredient's item data, as a battery's tier upgrade keeps its charge (a shapeless
+recipe's `keep` names an ingredient listed once; a result that wears takes its wear too, as the
+mint cure keeps a canteen's sips).
 
 **Item data.** A stack may carry `data`, a flat table: at most 16 keys (letters, digits, `_`), values
 numbers, strings up to 64 bytes or booleans. Data tables are frozen and shared by copies, so make

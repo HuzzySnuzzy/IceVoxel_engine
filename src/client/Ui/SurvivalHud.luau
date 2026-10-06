@@ -19,10 +19,12 @@
 	               zone, with a dark tick through it at each zone border, and a pin in the zone's
 	               colour on the body temperature. A small arrow beside the pin says where it is
 	               going (right, orange: warming; left, pale blue: cooling; none: on target).
-	  status       the row above the gauge, right-aligned: TAN's Climate Clemency while it lasts
-	               (a gold shield and the minutes and seconds left, with thirst or temperature
-	               on), then Internal Warmth (a flame) and Internal Chill (a snowflake) while they
-	               do (with temperature on).
+	  status       a row above the held item name's row (which is over the gauge's: Ui/Hud's
+	               name is centred, and a long one such as "Purified Water Canteen" reaches the
+	               right side), right-aligned: TAN's Climate Clemency while it lasts (a gold
+	               shield and the minutes and seconds left, with thirst or temperature on), then
+	               Internal Warmth (a flame) and Internal Chill (a snowflake) while they do (with
+	               temperature on).
 	  reading      while a Thermometer (ItemList, TAN's) is the held item, with temperature on: the
 	               row above the status row reads out the body temperature and its target as
 	               numbers ("-3", "+5"), each in its zone's colour, with an arrow between them in
@@ -47,8 +49,8 @@ local Style = require(script.Parent.Style)
 -- Where Ui/Hud puts things (GUI pixels in its canvas).
 export type Layout = {
 	-- The canvas' width (the hotbar's), the droplets' row, and the tops of the gauge's row and of
-	-- the status row above it (both right-aligned with the droplets; the thermometer's reading
-	-- goes a row above the status row).
+	-- the status row above it, clear of the held item name's row (both right-aligned with the
+	-- droplets; the thermometer's reading goes a row above the status row).
 	width: number,
 	rowY: number,
 	gaugeY: number,

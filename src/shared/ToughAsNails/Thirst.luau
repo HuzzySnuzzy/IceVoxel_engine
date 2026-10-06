@@ -26,7 +26,9 @@
 	  regeneration  (Config.ToughAsNails.ThirstRegeneration) hurt, with thirst REGEN_THIRST (18) or
 	                more: half a heart every INTERVAL (80) ticks, for REGEN_COST (6) exhaustion
 	                (FoodData's slow branch; its fast branch spends food's saturation, and
-	                hydration is no food, so it is left out);
+	                hydration is no food, so it is left out); never while `stopped` (fully frozen
+	                or overheated, Temperature.stopsRegeneration: the extremes hurt every 100
+	                ticks, which this would outlast for anyone with water);
 	  dehydration   at thirst 0: half a heart every DEHYDRATION_INTERVAL (120, gentler than
 	                starvation's 80) ticks while health is above Config.ToughAsNails
 	                .DehydrationFloor half hearts (FoodData's starvation on normal difficulty:
@@ -127,8 +129,9 @@ end
 --[[
 	One tick of a player in game `mode` with `health` half hearts (of `maxHealth`, Minecraft's 20)
 	and `extra` exhaustion besides the Thirst effect's (HOT's sweating), `clement` under Climate
-	Clemency. Returns the half hearts it costs them (dehydration) and the half hearts they get
-	back (regeneration). See the header.
+	Clemency, `stopped` while regeneration waits (Temperature.stopsRegeneration). Returns the half
+	hearts it costs them (dehydration) and the half hearts they get back (regeneration). See the
+	header.
 ]]
 function Thirst.tick(
 	state: State,
@@ -136,7 +139,8 @@ function Thirst.tick(
 	health: number,
 	maxHealth: number,
 	extra: number?,
-	clement: boolean?
+	clement: boolean?,
+	stopped: boolean?
 ): (number, number)
 	if GameMode.invulnerable(mode) then
 		state.timer = 0
@@ -160,7 +164,7 @@ function Thirst.tick(
 	end
 
 	local hurt = health > 0 and health < maxHealth
-	if settings.ThirstRegeneration and hurt and state.thirst >= Thirst.REGEN_THIRST then
+	if settings.ThirstRegeneration and hurt and not stopped and state.thirst >= Thirst.REGEN_THIRST then
 		state.timer += 1
 		if state.timer >= Thirst.INTERVAL then
 			state.timer = 0

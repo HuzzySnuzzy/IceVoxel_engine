@@ -12,11 +12,13 @@
 	                         taken), returning the grid's new contents. (No recipe here leaves
 	                         anything behind, like Minecraft's empty buckets.)
 
-	Ingredients match by item whatever their data (Items `data`); results carry none, a repaired
-	tool's included (Minecraft's RepairItemRecipe makes a fresh stack), except where a shaped
-	recipe keeps an ingredient's (Recipes `keep`: a Battery crafted into the next tier keeps its
-	charge, as Mekanism's MekDataShapedRecipe does): that ingredient's data, as it is. What stays
-	in the grid after a craft keeps its wear and data.
+	Ingredients match by item whatever their data (Items `data`) and wear; results carry none, a
+	repaired tool's included (Minecraft's RepairItemRecipe makes a fresh stack), except where a
+	recipe keeps an ingredient's (Recipes `keep`, shaped or shapeless: a Battery crafted into the
+	next tier keeps its charge, as Mekanism's MekDataShapedRecipe does; a part-drunk canteen
+	cured with mint its sips): that ingredient's data, as it is, and its wear when the result
+	wears too (Items `durability`). What stays in the grid after a craft keeps its wear and
+	data.
 
 	Pure and deterministic: the server crafts with it and clients predict with it.
 ]]
@@ -36,7 +38,7 @@ export type Recipe = {
 	cells: { Ingredient | false },
 	result: number,
 	count: number,
-	-- Shaped: the cell (an index into `cells`) whose stack's data the result takes (Recipes
+	-- The cell (an index into `cells`) whose stack's data and wear the result takes (Recipes
 	-- `keep`).
 	keep: number?,
 }
@@ -108,9 +110,18 @@ for _, spec in Recipes.shaped do
 end
 for _, spec in Recipes.shapeless do
 	local cells: { Ingredient | false } = {}
-	for _, name in spec.ingredients do
+	local keep: number? = nil
+	for i, name in spec.ingredients do
 		table.insert(cells, ingredient(name))
+		if name == spec.keep then
+			assert(keep == nil, `Crafting: the {spec.result} recipe keeps '{name}', which it lists twice`)
+			keep = i
+		end
 	end
+	assert(
+		spec.keep == nil or keep ~= nil,
+		`Crafting: the {spec.result} recipe keeps '{spec.keep}', which it never lists`
+	)
 	table.insert(recipes, {
 		kind = "shapeless",
 		width = #cells,
@@ -118,7 +129,7 @@ for _, spec in Recipes.shapeless do
 		cells = cells,
 		result = itemId(spec.result),
 		count = spec.count or 1,
-		keep = nil,
+		keep = keep,
 	})
 end
 
@@ -213,18 +224,22 @@ local function augment(
 	return false
 end
 
--- Can every stack take a different ingredient (a perfect matching)?
-local function matchesShapeless(recipe: Recipe, stacks: { Stack }): boolean
+--[[
+	Can every stack take a different ingredient (a perfect matching)? Also returns the stack that
+	took the ingredient the recipe keeps the data and wear of (Recipes `keep`), if any.
+]]
+local function matchesShapeless(recipe: Recipe, stacks: { Stack }): (boolean, Stack?)
 	if #stacks ~= #recipe.cells then
-		return false
+		return false, nil
 	end
 	local owner: { [number]: number } = {}
 	for i = 1, #stacks do
 		if not augment(stacks, recipe.cells, i, {}, owner) then
-			return false
+			return false, nil
 		end
 	end
-	return true
+	local keep = recipe.keep
+	return true, if keep then stacks[owner[keep]] else nil
 end
 
 -- Minecraft's tool repair: exactly two of the same wearing item, durability left added + 5% (a
@@ -258,17 +273,21 @@ function Crafting.match(grid: { [number]: Stack? }, width: number): Stack?
 		return nil
 	end
 	for _, recipe in recipes do
-		local ok, kept = false, nil
+		local ok, from = false, nil
 		if recipe.kind == "shaped" then
+			local kept
 			ok, kept = matchesShaped(recipe, grid, width)
+			from = if kept then grid[kept] else nil
 		else
-			ok = matchesShapeless(recipe, stacks)
+			ok, from = matchesShapeless(recipe, stacks)
 		end
 		if ok then
-			local from = if kept then grid[kept] else nil
-			-- (A result keeps an ingredient's data only where its recipe says: Recipes `keep`.)
+			-- (A result keeps an ingredient's data and wear only where its recipe says: Recipes
+			-- `keep`; the wear only when the result wears too.)
 			local data = if from then Items.cleanData(from.data) else nil
-			return { item = recipe.result, count = recipe.count, data = data }
+			local def = Items.get(recipe.result)
+			local damage = if from and def and def.durability then Items.cleanDamage(from.damage) else nil
+			return { item = recipe.result, count = recipe.count, data = data, damage = damage }
 		end
 	end
 	return repair(stacks)

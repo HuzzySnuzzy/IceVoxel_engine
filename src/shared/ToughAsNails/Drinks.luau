@@ -64,7 +64,11 @@
 	  empty hand                   at a water source: a sip (instant, at most one per
 	                               HAND_INTERVAL)
 	Drinking an item takes USE_TICKS (32, PotionItem.getUseDuration) of holding the button, and
-	only while thirsty (creative: always, Thirst.canDrink). Then (`afterDrinking`):
+	(`drinkable`) only while thirsty with thirst on (creative: always, Thirst.canDrink), except a
+	drink that tempers (`tempers`: Internal Warmth or Chill, the teas), which is drunk for that
+	whenever temperature is on, thirsty or not, thirst on or off (as Minecraft's potions and
+	honey, drunk whatever the hunger: ItemUtils.startUsingInstantly); with thirst off it gives
+	only its warmth or chill (`apply` without a thirst state). Then (`afterDrinking`):
 	  one drink   one is used up and its empty container comes back (PotionItem.finishUsingItem:
 	              it replaces the stack when it was the last, else it goes into the inventory);
 	  sips        a sip wears it (its `damage`); the last sip leaves the empty container.
@@ -206,6 +210,22 @@ function Drinks.emptyOf(item: number?): number?
 	return if entry then entry.empty else nil
 end
 
+-- Does `drink` temper the body (Internal Warmth or Chill: the teas)?
+function Drinks.tempers(drink: Drink?): boolean
+	return drink ~= nil and ((drink.warmth or 0) > 0 or (drink.chill or 0) > 0)
+end
+
+--[[
+	May `drink` be drunk now (see the header)? `thirsty`: Thirst.canDrink (thirsty, or
+	invulnerable); `thirstOn` / `temperatureOn`: Config.ToughAsNails' switches.
+]]
+function Drinks.drinkable(drink: Drink?, thirsty: boolean, thirstOn: boolean, temperatureOn: boolean): boolean
+	if drink == nil then
+		return false
+	end
+	return (thirstOn and thirsty) or (temperatureOn and Drinks.tempers(drink))
+end
+
 -- Is `item` an empty container that fills at water?
 function Drinks.isContainer(item: number?): boolean
 	return item ~= nil and Drinks.FILLS[item] ~= nil
@@ -331,17 +351,19 @@ function Drinks.sips(stack: Stack?): number
 end
 
 --[[
-	Drinks `drink` into a thirst state (ToughAsNails/Thirst) with `random` (0..1, the effect's
-	roll), and with the body's `temperature` state its Internal Warmth or Chill: returns whether
-	the Thirst effect was given.
+	Drinks `drink` into a thirst state (ToughAsNails/Thirst; nil while thirst is off: no water,
+	no Thirst effect) with `random` (0..1, the effect's roll), and with the body's `temperature`
+	state its Internal Warmth or Chill: returns whether the Thirst effect was given.
 ]]
 function Drinks.apply(
-	thirst: Thirst.State,
+	thirst: Thirst.State?,
 	drink: Drink,
 	random: () -> number,
 	temperature: Temperature.State?
 ): boolean
-	Thirst.drink(thirst, drink.thirst, drink.hydration)
+	if thirst then
+		Thirst.drink(thirst, drink.thirst, drink.hydration)
+	end
 	if temperature then
 		if drink.warmth and drink.warmth > 0 then
 			Temperature.giveWarmth(temperature, drink.warmth)
@@ -350,7 +372,7 @@ function Drinks.apply(
 			Temperature.giveChill(temperature, drink.chill)
 		end
 	end
-	if drink.chance > 0 and random() < drink.chance then
+	if thirst and drink.chance > 0 and random() < drink.chance then
 		Thirst.giveEffect(thirst, drink.effectTicks)
 		return true
 	end

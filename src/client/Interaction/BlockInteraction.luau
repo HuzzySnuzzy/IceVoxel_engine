@@ -65,8 +65,9 @@
 	                flammable one). Breaking a fire puts it out (it breaks at once). On TNT or a
 	                Nuke, any face: the server lights it (TntBlock.use).
 	Tough As Nails' campfire, after a block's menu: dirty water (a bottle, a canteen) clicked on a
-	Campfire boils clean, one a click (Shared/ToughAsNails/Boiling, the campfire's own use: in
-	adventure too, not sneaking; sent as a UseItem, not predicted).
+	Campfire boils clean, one a click and at most one every Boiling.INTERVAL ticks (a click too
+	soon sends nothing; held, it boils when the water is ready) (Shared/ToughAsNails/Boiling, the
+	campfire's own use: in adventure too, not sneaking; sent as a UseItem, not predicted).
 	Tough As Nails' water (Interaction/Drinking), after a block's menu and before anything else, in
 	adventure too: a Glass Bottle or a canteen fills at the water source its own ray (stopping at
 	water sources, as a bucket's) finds, an empty hand sips from it, and a filled bottle or canteen
@@ -843,6 +844,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- more until released.
 	local useSpent = false
 	local lastUse = -math.huge
+	-- When (os.clock()) this player last boiled water on a campfire (Boiling.ready).
+	local lastBoil: number? = nil
 
 	local function useAt(hit: Hit?, ray: Ray?)
 		if useSpent or Screens.isOpen() then
@@ -870,9 +873,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 		-- Tough As Nails: dirty water on a campfire boils clean (Shared/ToughAsNails/Boiling: the
 		-- campfire's own use, so in adventure too, not sneaking), before drinking would take the
-		-- click. Not predicted: the inventory snapshot brings the purified water.
+		-- click. Not predicted: the inventory snapshot brings the purified water. Too soon after
+		-- the last, nothing goes and the use stays unspent, so a held button boils the next one
+		-- when the water is ready.
 		if hit and ray and Boiling.applies(hit.block, stack, mode, sneaking) then
-			if sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking) then
+			local now = os.clock()
+			if
+				Boiling.ready(if lastBoil then now - lastBoil else nil)
+				and sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking)
+			then
+				lastBoil = now
 				useSpent = true
 				swing()
 			end

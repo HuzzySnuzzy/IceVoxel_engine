@@ -241,15 +241,20 @@ return function(t, shared, require, server, client)
 		}, 3) :: any
 		t.eq(generator.item, B.HeatGenerator)
 		t.eq(generator.data, nil, "no keep: no data")
-		-- Recipes compile with the kept cell where the pattern has it.
-		local kept = 0
+		-- Recipes compile with the kept cell where the pattern has it (shapeless: where the
+		-- ingredient is listed, Tough As Nails' mint cures keeping the dirty water's wear).
+		local kept, mixed = 0, 0
 		for _, recipe in Crafting.recipes do
-			if recipe.keep then
+			if recipe.keep and recipe.kind == "shaped" then
 				kept += 1
 				t.eq(recipe.keep, 5, "the centre")
+			elseif recipe.keep then
+				mixed += 1
+				t.eq(recipe.keep, 1, "the dirty water, listed first")
 			end
 		end
 		t.eq(kept, 3, "the three tier upgrades")
+		t.eq(mixed, 3, "the three mint cures (bottle, bowl, canteen)")
 	end)
 
 	t.test("battery: a tier upgrade keeps the charge however the result is taken", function()

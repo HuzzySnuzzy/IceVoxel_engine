@@ -13,6 +13,7 @@ local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local ToughAsNails = require(Shared.ToughAsNails)
+local Drinks = require(Shared.ToughAsNails.Drinks)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 
@@ -28,13 +29,17 @@ function SurvivalState.get(): Protocol.SurvivalStatus?
 	return current
 end
 
--- May this player drink now, in game `mode` (Thirst.canDrink: thirsty, or invulnerable)?
-function SurvivalState.canDrink(mode: string): boolean
+--[[
+	May this player drink `drink` now, in game `mode` (Drinks.drinkable: thirsty or invulnerable
+	with thirst on, Thirst.canDrink's rule; a tea whenever temperature is on)?
+]]
+function SurvivalState.canDrink(mode: string, drink: Drinks.Drink?): boolean
 	local status = current
-	if status == nil or not status.thirstOn or GameMode.isSpectator(mode) then
+	if status == nil or GameMode.isSpectator(mode) then
 		return false
 	end
-	return GameMode.invulnerable(mode) or status.thirst < ToughAsNails.Thirst.MAX
+	local thirsty = GameMode.invulnerable(mode) or status.thirst < ToughAsNails.Thirst.MAX
+	return Drinks.drinkable(drink, thirsty, status.thirstOn, status.temperatureOn)
 end
 
 -- Is hand drinking on (Config.ToughAsNails.HandDrinking)?

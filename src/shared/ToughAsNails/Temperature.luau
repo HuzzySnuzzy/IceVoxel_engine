@@ -18,7 +18,9 @@
 	     0.8 desert), ALTITUDE_LAPSE (0.001) colder per block above ALTITUDE_START (256: TAN takes
 	     Minecraft's biome temperature at the player's height, which falls with altitude), then
 	       outdoors (nothing opaque above the head) at night: NIGHT (0.3) colder;
-	       under a roof: SHELTER (0.15) colder (out of the sun by day, out of the wind by night);
+	       under a roof, day and night: SHELTER (0.15) towards NEUTRAL's middle
+	       (UNDERGROUND_CLIMATE), never past it: out of the sun in the heat, out of the wind in
+	       the cold (a roof never makes it colder, so a house is a refuge in a taiga);
 	       underground (under a roof and UNDERGROUND_DEPTH (16) blocks or more below the column's
 	       terrain): NEUTRAL's middle whatever the biome (UNDERGROUND_CLIMATE, 0.075: 0 on the
 	       scale), as TAN's deep underground;
@@ -26,8 +28,9 @@
 	     0.4, 0.7), which land on SCALE (-7.5, -2.5, 2.5, 7.5), the zones' borders, so the zones
 	     fall where the five levels were cut; beyond the outer borders the nearest segment's slope
 	     goes on. Rounded half up (a border belongs to the warmer side) and kept within -10..10:
-	     a tundra -10 (icy), a taiga -4 (cold; -9 at night), plains 0, a savanna 4, a jungle 7, a
-	     desert 9 (hot; 4 at night, 7 in a house), the highest peaks cold or icy;
+	     a tundra -10 (icy; -8 in a house), a taiga -4 (cold; -9 at night, -2 in a house),
+	     plains 0, a savanna 4, a jungle 7, a desert 9 (hot; 4 at night, 7 in a house), the
+	     highest peaks cold or icy;
 	  2. TAN's modifiers, in steps (MODIFIERS, each kept within -10..10):
 	       wet (in water, or out of it for less than Config.ToughAsNails.WetTicks)           -3
 	       sprinting (the client's sprint flag)                                             +2
@@ -61,11 +64,13 @@
 	                    (Minecraft's freeze_immune_wearables: leather; ItemList `tan.freezeImmune`);
 	      hyperthermia  in the HOT zone `heat` the same way (Climate Clemency stops it too);
 	      fully frozen or overheated: EXTREME_DAMAGE (1) half heart every HURT_INTERVAL (100:
-	      5 s, Minecraft's 2) ticks, through armor (Minecraft's freeze damage bypasses it).
+	      5 s, Minecraft's 2) ticks, through armor (Minecraft's freeze damage bypasses it), and
+	      no health comes back meanwhile (`stopsRegeneration`: thirst's regeneration, a half
+	      heart every 80 ticks, and Roblox's, one every 100, both wait; either would match or
+	      outlast hurts this slow, and the extremes would only cost water).
 	So from neutral, full health and nothing worn, in the coldest place once the clemency is over:
-	icy after 56 s, frozen through 20 s later, then half a heart every 5 s; death comes after
-	176 s of temperature alone, and after about 3 1/2 minutes with thirst's regeneration
-	fighting back while thirst lasts (205 s; the hottest place 200 s, sweating; on joining the 5
+	icy after 56 s, frozen through 20 s later, then half a heart every 5 s: death comes after
+	176 s, whatever is drunk (the hottest place the same, sweating besides; on joining the 5
 	minutes of clemency come first). tests/spec/ToughAsNails simulates it tick by tick. (Before:
 	two levels of 10 s, frozen in 7 s, a hurt every 2 s: 67 s.)
 	Creative and spectator players (GameMode.invulnerable): the temperature stands still, both
@@ -214,7 +219,9 @@ function Temperature.climateValue(env: Environment): number
 			value -= Temperature.NIGHT
 		end
 	else
-		value -= Temperature.SHELTER
+		-- (Towards NEUTRAL's middle, never past it.)
+		local middle, shelter = Temperature.UNDERGROUND_CLIMATE, Temperature.SHELTER
+		value = if value > middle then math.max(middle, value - shelter) else math.min(middle, value + shelter)
 	end
 	return value
 end
@@ -354,6 +361,12 @@ end
 -- How far the extremes have got (0..1): hypothermia, hyperthermia.
 function Temperature.extremes(state: State): (number, number)
 	return state.frozen / Temperature.EXTREME_TICKS, state.heat / Temperature.EXTREME_TICKS
+end
+
+-- Is the body fully frozen or overheated, so that the extremes hurt and no health comes back
+-- (Thirst.tick's `stopped`, and Roblox's regeneration paused: see the header)?
+function Temperature.stopsRegeneration(state: State): boolean
+	return state.frozen >= Temperature.EXTREME_TICKS or state.heat >= Temperature.EXTREME_TICKS
 end
 
 -- The countdowns of a tick in game `mode` (see the header): wet, the effects, the clemency.

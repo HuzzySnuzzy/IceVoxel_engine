@@ -603,15 +603,16 @@ local Config = {
 		Temperature = true,
 		-- With Thirst on, health comes back only while thirst is 18 or more: half a heart every 80
 		-- ticks for 6 exhaustion (Minecraft's natural regeneration, thirst for food). This replaces
-		-- Roblox's own regeneration (the character's Health script). false keeps Roblox's.
+		-- Roblox's own regeneration (the character's Health script). false keeps Roblox's. With
+		-- Temperature on, neither heals while the body is fully frozen or overheated.
 		ThirstRegeneration = true,
 		-- Dehydration (thirst 0) takes half a heart every 120 ticks while health is above this many
 		-- half hearts (Minecraft's starvation on normal difficulty: 1; 0 = to death, hard).
 		DehydrationFloor = 1,
 		-- Right clicking a water source with an empty hand drinks from it (TAN's hand drinking).
 		HandDrinking = true,
-		-- Thirst exhaustion each tick in the HOT zone (sweating): 0.005 is a droplet every 40 s
-		-- once the hydration is gone.
+		-- Thirst exhaustion each tick in the HOT zone (sweating): 0.005 is a thirst point (half a
+		-- droplet) every 40 s once the hydration is gone, a whole droplet every 80 s.
 		HotExhaustion = 0.005,
 		-- Ticks between two steps of the body temperature (-10..10) away from neutral (0) towards
 		-- its target: 140 is 7 s a step, so from neutral the icy edge (-8) takes 56 s in the

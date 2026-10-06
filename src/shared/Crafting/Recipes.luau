@@ -12,8 +12,10 @@
 	             ingredient; it may sit anywhere in a big enough grid, and mirrored (Minecraft's
 	             ShapedRecipe). `keep`, a key character used once in the pattern: the result takes
 	             that ingredient's item data (Mekanism's MekDataShapedRecipe: a Battery crafted into
-	             the next tier keeps its charge); other results carry none.
-	  shapeless  `ingredients` in any slots.
+	             the next tier keeps its charge), and its wear when the result wears too (Items
+	             `durability`); other results carry none.
+	  shapeless  `ingredients` in any slots. `keep`, an ingredient listed once: the result takes
+	             its data and wear the same way (mint curing a part-drunk canteen).
 	  smelting   furnace recipes: one `input` cooks into `result` (200 ticks).
 	  fuel       burn time in ticks of furnace fuel.
 
@@ -28,7 +30,7 @@ export type Shaped = {
 	count: number?,
 	keep: string?,
 }
-export type Shapeless = { ingredients: { string }, result: string, count: number? }
+export type Shapeless = { ingredients: { string }, result: string, count: number?, keep: string? }
 export type Smelting = { input: string, result: string, count: number? }
 
 local Recipes = {}
@@ -49,8 +51,8 @@ local smelting: { Smelting } = {}
 local function shape(pattern: { string }, key: { [string]: string }, result: string, count: number?, keep: string?)
 	table.insert(shaped, { pattern = pattern, key = key, result = result, count = count, keep = keep })
 end
-local function mix(ingredients: { string }, result: string, count: number?)
-	table.insert(shapeless, { ingredients = ingredients, result = result, count = count })
+local function mix(ingredients: { string }, result: string, count: number?, keep: string?)
+	table.insert(shapeless, { ingredients = ingredients, result = result, count = count, keep = keep })
 end
 local function smelt(input: string, result: string)
 	table.insert(smelting, { input = input, result = result })
@@ -355,15 +357,16 @@ smelt("DirtyWaterCanteen", "PurifiedWaterCanteen")
 	Minecraft's: three planks of any wood in a V make four. A Dirty Water Bowl smelts into a
 	Purified Water Bowl like the bottle. Mint cures dirty water without a fire: a dirty bottle,
 	bowl or canteen with Mint Leaves in any slots (shapeless) makes its purified twin, in the
-	inventory's own 2 x 2 grid too (a part-drunk dirty canteen comes out full, as from the
-	furnace, which filling at water would do anyway). A Purified Water Bowl brews a tea with a
-	herb: Mint Leaves make Mint Tea (Internal Chill), Ginger Root Ginger Tea (Internal Warmth),
-	both Herbal Tea. A bowl burns 100 ticks as fuel (Minecraft's).
+	inventory's own 2 x 2 grid too. The water keeps its wear (`keep`): a part-drunk dirty
+	canteen comes out with the sips it had, as from a campfire (ToughAsNails/Boiling), so a mint
+	leaf cures water and never makes more of it far from any. A Purified Water Bowl brews a tea
+	with a herb: Mint Leaves make Mint Tea (Internal Chill), Ginger Root Ginger Tea (Internal
+	Warmth), both Herbal Tea. A bowl burns 100 ticks as fuel (Minecraft's).
 ]]
 shape({ "# #", " # " }, { ["#"] = "#planks" }, "Bowl", 4)
 smelt("DirtyWaterBowl", "PurifiedWaterBowl")
 for _, water in { "Bottle", "Bowl", "Canteen" } do
-	mix({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water)
+	mix({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water, nil, "DirtyWater" .. water)
 end
 mix({ "PurifiedWaterBowl", "MintLeaves" }, "MintTea")
 mix({ "PurifiedWaterBowl", "GingerRoot" }, "GingerTea")

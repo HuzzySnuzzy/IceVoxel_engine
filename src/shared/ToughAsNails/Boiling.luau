@@ -5,13 +5,21 @@
 	by its own campfire; here a right click with dirty water on the Campfire (BlockList, always
 	lit) does it at once, one container a click: whatever Drinks names as dirty (`Drinks.isDirty`:
 	a Dirty Water Bottle, a Dirty Water Canteen, and any container added to Drinks.PURIFIED_OF
-	later) becomes its purified twin (`Drinks.purifiedOf`).
+	later) becomes its purified twin (`Drinks.purifiedOf`). The campfire burns no fuel and moves
+	with its owner (it drops itself), so the time the water takes is the price: one container
+	every INTERVAL ticks (60: 3 s) per player, as Minecraft's campfire cooks free but slowly
+	(600 ticks for food, where a furnace burns fuel). Mint stays the quick cure, a stack at a
+	time in any crafting grid for a leaf each (Crafting/Recipes), the furnace the unattended one.
 
 	  Who      the campfire's own use (Minecraft's CampfireBlock.use, which places food on it):
 	           survival, adventure and creative players, not spectators, and not while sneaking
 	           with something in hand (Minecraft's secondary use skips a block's use; `applies`).
 	           It comes before drinking: a dirty bottle aimed at a campfire boils, elsewhere it
 	           is drunk (client Interaction/BlockInteraction, then Interaction/Drinking).
+	  When     `ready`: INTERVAL ticks after the player's last boil, the server allowing LEEWAY
+	           (4) ticks short (the client's clock and the network's jitter). The client counts
+	           too: a click too soon sends nothing, and held through the wait it boils the next
+	           container as soon as the water is ready (BlockInteraction repeats a held use).
 	  What     `boil` is ItemUtils.createFilledResult, as filling at water (Drinks.fill): one
 	           dirty container is used up and the purified one replaces the stack when it was the
 	           last, else goes into the inventory (Players/Inventories.give: thrown when there is
@@ -36,6 +44,15 @@ local Boiling = {}
 -- The block that boils water, and the sound it makes (Sounds/SoundList).
 Boiling.CAMPFIRE = Blocks.id.Campfire
 Boiling.SOUND = "block.campfire.boil"
+-- Ticks between two boils by one player, and the ticks short of them the server allows.
+Boiling.INTERVAL = 60
+Boiling.LEEWAY = 4
+
+-- Has the water had time to boil `elapsed` seconds after the player's last boil (nil: none yet),
+-- `leeway` ticks short of INTERVAL allowed (see the header)?
+function Boiling.ready(elapsed: number?, leeway: number?): boolean
+	return elapsed == nil or elapsed >= (Boiling.INTERVAL - (leeway or 0)) / 20
+end
 
 -- Does `stack` boil clean (dirty water, `Drinks.isDirty`)?
 function Boiling.boils(stack: Stack?): boolean

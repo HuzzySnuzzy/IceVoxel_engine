@@ -2236,7 +2236,10 @@ worn tools of a kind repair into one with 5% extra (RepairItemRecipe). It is pur
 crafts and the client predicts with the same code.
 A shaped recipe with `keep` (a key character it uses once) gives its result that ingredient's item
 data as it is (`Recipe.keep`, the cell; Mekanism's MekDataShapedRecipe): a Battery crafted into the
-next tier keeps its charge. Other results carry none.
+next tier keeps its charge. A shapeless recipe's `keep` names an ingredient it lists once (the
+matching tells which stack took it). A result that wears (Items `durability`) takes the kept
+stack's wear too: a part-drunk Dirty Water Canteen cured with Mint Leaves keeps its sips. Other
+results carry none.
 
 **Chests, crafting tables and furnaces** (`Players/Containers`, `InventoryState`):
 - `Use` on a block with a `menu` (reach-checked) opens it as window 1–255, in every game mode
@@ -2817,13 +2820,15 @@ still, the extremes clear and nothing hurts; the HUD shows with the hearts.
 - a tick in Minecraft's order: the effect counts down and adds its exhaustion, the exhaustion
   turns into lost points, then with `ThirstRegeneration` and thirst 18+ a hurt player gets half a
   heart back every 80 ticks for 6 exhaustion (FoodData's slow branch; the fast saturation branch
-  is food's and left out), or at 0 thirst half a heart is lost every 120 ticks
+  is food's and left out; never while fully frozen or overheated, `tick`'s `stopped`: see
+  Temperature), or at 0 thirst half a heart is lost every 120 ticks
   (`DEHYDRATION_INTERVAL`, starvation's 80 made gentler) while health is above
   `DehydrationFloor` (1: normal difficulty), through armor;
 - under Climate Clemency (below) a point goes for every 8 exhaustion instead of 4 (half the
   drain, `CLEMENCY_RATE`) and dehydration doesn't hurt;
 - with `ThirstRegeneration` the character's Roblox `Health` script is removed, so health only
-  comes back by thirst's rule.
+  comes back by thirst's rule; otherwise it stays, disabled while the body is fully frozen or
+  overheated (`Temperature.stopsRegeneration`).
 
 **Drinks** (`ToughAsNails/Drinks`): drinking is FoodData.eat (thirst + n up to 20, hydration +
 n × modifier × 2 up to the new thirst), and a dirty drink rolls TAN's Thirst effect (a longer one
@@ -2862,7 +2867,8 @@ inventory; creative keeps the empty one); smelting purifies (TAN's original way)
 an Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
 counts 32 ticks while the button stays down (gulps every 4 ticks from the 7th), then finish; the
 server drinks it only if the same item is still in the same slot 28+ ticks after start and the
-player may drink (thirsty, or creative), then uses it up (one drink gives its empty container
+player may drink it (`Drinks.drinkable`: thirsty or creative with thirst on; a drink that tempers,
+a tea, whenever temperature is on, thirsty or not, its water only with thirst on), then uses it up (one drink gives its empty container
 back) and plays the last gulp to everyone else. A sip from a water source with an empty hand is
 instant, at most every 10 ticks (`HandDrinking`). Nothing is predicted: the inventory snapshot and
 the Survival message bring the results.
@@ -2878,10 +2884,12 @@ in 9 x 3 x 9). The Bowl is Minecraft's (three planks of any wood in a V make fou
 fuel). It is a third container through the tables alone: it fills at water into a Dirty Water Bowl
 (stack 16), which a furnace purifies (a campfire boils it, as any dirty water: Gear, below), and
 drinking a bowl gives the Bowl back. Mint purifies without a fire: a dirty bottle, bowl or canteen
-with Mint Leaves (shapeless, the inventory's 2 x 2 grid too) makes its purified twin. A Purified
+with Mint Leaves (shapeless, the inventory's 2 x 2 grid too) makes its purified twin, a canteen
+keeping its sips (the shapeless `keep`, see Crafting: a cure never makes water). A Purified
 Water Bowl with a herb brews a tea (stack 1, like stews): Mint Tea gives Internal Chill for 2
 minutes, Ginger Tea Internal Warmth for 2 minutes, Herbal Tea (both herbs) both for 1; a tea keeps
-its water's thirst and adds hydration. So under ginger tea the tundra's -10 is held at -5 (COLD:
+its water's thirst and adds hydration, and is drunk for its effect whenever temperature is on,
+thirsty or not, thirst on or off (`Drinks.tempers`, `drinkable`). So under ginger tea the tundra's -10 is held at -5 (COLD:
 no freezing), under mint tea the desert's 9 at 4 (WARM). Drinking a bowl uses the drink and fill
 sounds of the bottles. tests/spec/Herbs covers it all.
 
@@ -2897,8 +2905,10 @@ scale) in TAN 1.18+'s five zones, whose ids (`zone`, ICY -2 .. HOT 2) are the le
 ICY -10..-8, COLD -7..-3, NEUTRAL -2..2, WARM 3..7, HOT 8..10. The target, worked out once a
 second per player from `Players/Climate`:
 1. the climate: the column's surface biome temperature (BiomeList, -0.75 tundra .. 0.8 desert),
-   0.001 colder per block above 256, then outdoors at night 0.3 colder, under a roof 0.15 colder,
-   and underground (under a roof, 16+ blocks below the column's terrain) NEUTRAL's middle; put on
+   0.001 colder per block above 256, then outdoors at night 0.3 colder, under a roof (day and
+   night) 0.15 towards NEUTRAL's middle but never past it (out of the sun in the heat, out of the
+   wind in the cold: a roof never chills, so a taiga house is -2 and a desert one 7), and
+   underground (under a roof, 16+ blocks below the column's terrain) NEUTRAL's middle; put on
    the scale piecewise linearly (`scaleOf`) through the old cuts -0.55, -0.25, 0.4 and 0.7, which
    land on the zone borders -7.5, -2.5, 2.5 and 7.5 (beyond them the nearest segment's slope goes
    on), rounded half up, within -10..10. So tundra -10, taiga -4 (-9 at night), plains 0 (-2 at
@@ -2922,8 +2932,11 @@ freeze immune (`tan.freezeImmune`, Minecraft's freeze_immune_wearables: leather)
 Clemency is on; otherwise it thaws 4 a tick (5 s from full). In the HOT zone `heat` does the same
 (hyperthermia). Full: half a heart every 100 ticks (5 s), through armor (Minecraft's freeze
 hurt). The hurts don't go through Burning's shared hurt cooldown. From neutral and full health,
-nothing worn, in the coldest place, death takes 176 s by temperature alone and about 205 s with
-thirst's regeneration fighting back (simulated tick by tick in the spec; before: 67 s).
+nothing worn, in the coldest place, death takes 176 s, whatever is drunk: while fully frozen or
+overheated no health comes back (`stopsRegeneration`: thirst's regeneration, a half heart every
+80 ticks, waits, and the server disables Roblox's Health script where it is kept), as either
+would outlast hurts every 100 ticks (simulated tick by tick in the spec, drinking a bowl
+whenever thirst drops below 18 too; before: 67 s).
 
 **Climate Clemency** (TAN's grace effect): the first character since joining gets `ClemencyTicks`
 (6000: 5 minutes) of it, a respawn `RespawnClemencyTicks` (1200: a minute); nothing is saved
@@ -2958,10 +2971,15 @@ with a check.
   one goes into the inventory; a canteen keeps its wear, so its sips; creative keeps the dirty one
   and gets a purified one only without one). It is the campfire's own use (CampfireBlock.use):
   survival, adventure and creative, not spectators, not while sneaking (`Boiling.applies`). The
-  client (Interaction/BlockInteraction) sends it as a UseItem after a block's menu and before
-  Drinking (so a dirty bottle aimed at a campfire boils, elsewhere it is drunk), not predicted;
-  Players/ItemUse checks it before the game mode's mayUseItemOn (adventure players fail that),
-  plays `block.campfire.boil` and hands the stacks over. JEI shows it as a seventh category,
+  water takes its time: one container every `Boiling.INTERVAL` (60 ticks, 3 s) per player
+  (`Boiling.ready`), as the campfire burns no fuel and moves with its owner (Minecraft's campfire
+  cooks free but slowly too), so mint stays the quick cure and the furnace the unattended one.
+  The client (Interaction/BlockInteraction) sends it as a UseItem after a block's menu and before
+  Drinking (so a dirty bottle aimed at a campfire boils, elsewhere it is drunk), not predicted, and
+  not sooner than the interval (a click too soon sends nothing and stays unspent, so a held
+  button boils the next one when ready); Players/ItemUse checks it before the game mode's
+  mayUseItemOn (adventure players fail that) and the interval again (`Boiling.LEEWAY`, 4 ticks
+  short allowed), plays `block.campfire.boil` and hands the stacks over. JEI shows it as a seventh category,
   "Campfire" (Ui/Jei/JeiData `boiling`: one entry per PURIFIED_OF pair, drawn as smelting with
   "Right click" under it; the Campfire is its catalyst);
 - **Straw** (ItemList): `Items.strawDrop`, which EditRules.drops asks after `leafDrop` when no
@@ -2990,8 +3008,9 @@ filled from the right, half droplets their right half; green under the Thirst ef
 with no hydration, Minecraft's hunger rule); above them, level with the armor, a 75 × 9
 thermometer (a bulb in the zone's colour: pale blue, blue, green, orange, red; a tube of 21 cells
 tinted by zone with ticks at the zone borders; a pin on the temperature and an arrow beside it for
-the trend); above that, right-aligned, Climate Clemency's shield and time left (m:ss) and the
-Internal Warmth (flame) and Chill (snowflake) icons; and the frost or heat closing in from the
+the trend); a row higher, above the held item name's row (the centred name, long for most of the
+Tough As Nails items, reaches the right side), right-aligned, Climate Clemency's shield and time
+left (m:ss) and the Internal Warmth (flame) and Chill (snowflake) icons; and the frost or heat closing in from the
 screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the HUD). F3 prints a
 `survival` line with all the numbers.
 

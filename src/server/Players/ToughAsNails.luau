@@ -15,7 +15,8 @@
 	               * Temperature.tick (the countdowns, the drift, hypothermia, hyperthermia; with
 	                 temperature off only its countdowns, Temperature.tickEffects, for the
 	                 clemency's sake), then Thirst.tick (with the HOT zone's sweating:
-	                 Config.ToughAsNails.HotExhaustion; at half the drain under the clemency) and
+	                 Config.ToughAsNails.HotExhaustion; at half the drain under the clemency;
+	                 no regeneration while fully frozen or overheated) and
 	                 what they cost or give back: Humanoid:TakeDamage (half hearts scaled to
 	                 MaxHealth, as Players/Characters does; it respects the ForceField of creative
 	                 players, who are spared anyway) and regeneration;
@@ -23,7 +24,10 @@
 	                 SEND_TICKS ticks (and at once for a new character).
 	  Health     with thirst on and Config.ToughAsNails.ThirstRegeneration, health comes back only
 	             by thirst's rule: the character's Roblox "Health" script (its regeneration) is
-	             removed as it appears.
+	             removed as it appears. Otherwise that script stays, but is disabled while the
+	             body is fully frozen or overheated, as thirst's regeneration waits then
+	             (Temperature.stopsRegeneration: its half heart every 5 s would undo the
+	             extremes' hurts).
 	  Clemency   TAN's Climate Clemency: a player's first character since joining gets
 	             Config.ToughAsNails.ClemencyTicks of it (5 minutes), every later one (a respawn)
 	             RespawnClemencyTicks (a minute). Nothing is saved between visits, so every visit
@@ -37,7 +41,9 @@
 	             spectator, the item really in their hand.
 	               start / finish  a bottle or canteen held from `start` to `finish` for at
 	                               least Drinks.USE_TICKS - FINISH_LEEWAY ticks, the same item in
-	                               the same slot, while they may drink (Thirst.canDrink): drunk,
+	                               the same slot, while they may drink it (Drinks.drinkable:
+	                               thirsty with thirst on, Thirst.canDrink; a tea whenever
+	                               temperature is on): drunk (its water only with thirst on),
 	                               the Thirst effect rolled, Internal Warmth or Chill given (a
 	                               drink's `warmth` / `chill`), the bottle or sip used up
 	                               (Drinks.afterDrinking); everyone else hears the last gulp
@@ -122,6 +128,8 @@ type Record = {
 	-- The last Survival payload sent and the ticks until another may go.
 	sent: string?,
 	wait: number,
+	-- The character's Roblox Health script while this module keeps it disabled (the extremes).
+	paused: BaseScript?,
 }
 
 local ToughAsNailsServer = {}
@@ -146,6 +154,7 @@ local function newRecord(clemency: number): Record
 		health = nil,
 		sent = nil,
 		wait = 0,
+		paused = nil,
 	}
 end
 
@@ -175,6 +184,12 @@ local function inReach(player: Player, x: number, y: number, z: number): boolean
 	end
 	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
 	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+end
+
+-- May the player drink `item` now (Drinks.drinkable: thirsty with thirst on, or a tea with
+-- temperature on)?
+local function mayDrink(record: Record, item: number?, mode: string): boolean
+	return Drinks.drinkable(Drinks.of(item), Thirst.canDrink(record.thirst, mode), thirstOn(), temperatureOn())
 end
 
 -- The selected hotbar slot (nil without an inventory).
@@ -231,6 +246,22 @@ local function stopRobloxRegeneration(character: Model)
 	character.ChildAdded:Connect(check)
 end
 
+-- Pauses the character's Roblox regeneration (its "Health" script, where it is kept and
+-- running) while `paused`, and lets the script it paused run again after (see the header).
+local function pauseRobloxRegeneration(record: Record, character: Model, paused: boolean)
+	local held = record.paused
+	if paused and held == nil then
+		local health = character:FindFirstChild("Health")
+		if health and health:IsA("BaseScript") and health.Enabled then
+			health.Enabled = false
+			record.paused = health
+		end
+	elseif not paused and held then
+		held.Enabled = true
+		record.paused = nil
+	end
+end
+
 --[[ Ticking ]]
 
 -- One tick of one player (see the header). `sample`: look at the surroundings this tick.
@@ -284,6 +315,9 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 	else
 		Temperature.tickEffects(temperature, mode)
 	end
+	-- (Fully frozen or overheated: no health comes back, by thirst's rule or Roblox's.)
+	local stopped = temperatureOn() and Temperature.stopsRegeneration(temperature)
+	pauseRobloxRegeneration(record, character, stopped)
 	if thirstOn() then
 		local hot = temperatureOn() and Temperature.zone(temperature.value) == Temperature.HOT
 		local lost, gained = Thirst.tick(
@@ -292,7 +326,8 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			health,
 			HEALTH,
 			if hot then Config.ToughAsNails.HotExhaustion else 0,
-			Temperature.clement(temperature)
+			Temperature.clement(temperature),
+			stopped
 		)
 		damage += lost
 		heal += gained
@@ -355,7 +390,7 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 	elseif action == actions.Start then
 		record.drinking = nil
 		local slot = selectedSlot(player)
-		if held and slot and Drinks.isDrink(held.item) and thirstOn() and Thirst.canDrink(record.thirst, mode) then
+		if held and slot and mayDrink(record, held.item, mode) then
 			record.drinking = { started = now, slot = slot, item = held.item }
 		end
 	elseif action == actions.Finish then
@@ -369,12 +404,11 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 			or held.item ~= drinking.item
 			or selectedSlot(player) ~= drinking.slot
 			or now - drinking.started < (Drinks.USE_TICKS - FINISH_LEEWAY) * TICK
-			or not thirstOn()
-			or not Thirst.canDrink(record.thirst, mode)
+			or not mayDrink(record, held.item, mode)
 		then
 			return
 		end
-		Drinks.apply(record.thirst, drink, function(): number
+		Drinks.apply(if thirstOn() then record.thirst else nil, drink, function(): number
 			return random:NextNumber()
 		end, if temperatureOn() then record.temperature else nil)
 		local newHeld, give = Drinks.afterDrinking(held, GameMode.instabuild(mode))

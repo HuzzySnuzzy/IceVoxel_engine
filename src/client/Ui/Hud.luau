@@ -18,8 +18,9 @@
 	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
 	             droplets on the right level with the hearts, the temperature thermometer above
 	             them (level with the armor), Climate Clemency's time left and the warmth and
-	             chill effects above that, the numbers a held Thermometer reads above those, and
-	             frost or heat closing in from the screen's edges.
+	             chill effects a row above the item name's (a long centred name reaches the
+	             right side, where they are), the numbers a held Thermometer reads above those,
+	             and frost or heat closing in from the screen's edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu
 
@@ -431,8 +432,9 @@ function Hud.start()
 		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
 	end
 	-- Thirst and temperature (the droplets level with the hearts, the thermometer level with the
-	-- armor and the clemency and effects above it, all on the right).
-	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeY = ARMOR_Y, statusY = ARMOR_Y - 10 })
+	-- armor, the clemency and effects above the item name's row, which long names fill across,
+	-- all on the right).
+	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeY = ARMOR_Y, statusY = NAME_Y_SURVIVAL - 10 })
 
 	--[[ Held item name ]]
 

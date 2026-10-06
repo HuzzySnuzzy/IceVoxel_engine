@@ -40,9 +40,10 @@
 	                 with its hiss) and wears the same.
 	  Dirty water    (Tough As Nails: Shared/ToughAsNails/Boiling) on a Campfire, not sneaking:
 	                 one bottle, bowl or canteen boils into its purified twin (a canteen keeps its
-	                 sips), with block.campfire.boil at the campfire. It is the campfire's own use
-	                 (Minecraft's CampfireBlock.use), so adventure players boil too (spectators
-	                 never); it is checked before the game mode's mayUseItemOn.
+	                 sips), with block.campfire.boil at the campfire, at most one every
+	                 Boiling.INTERVAL ticks per player (Boiling.ready, with its LEEWAY). It is the
+	                 campfire's own use (Minecraft's CampfireBlock.use), so adventure players boil
+	                 too (spectators never); it is checked before the game mode's mayUseItemOn.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
 	thrown).
 ]]
@@ -81,6 +82,8 @@ local FLINT_AND_STEEL = Items.id.FlintAndSteel
 local ItemUse = {}
 
 local budgets: { [Player]: { tokens: number, last: number } } = {}
+-- When (os.clock()) each player last boiled water on a campfire.
+local lastBoil: { [Player]: number } = {}
 local started = false
 
 local function mayUse(player: Player): boolean
@@ -244,7 +247,11 @@ local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, pla
 		return
 	end
 	if boiling and held then
-		boil(player, held, x, y, z)
+		local now, last = os.clock(), lastBoil[player]
+		if Boiling.ready(if last then now - last else nil, Boiling.LEEWAY) then
+			lastBoil[player] = now
+			boil(player, held, x, y, z)
+		end
 		return
 	end
 	local simulation = Transmitters.world()
@@ -276,6 +283,7 @@ function ItemUse.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		budgets[player] = nil
+		lastBoil[player] = nil
 	end)
 end
 
