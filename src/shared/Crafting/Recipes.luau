@@ -154,6 +154,10 @@ shape({ "X", "#" }, { X = "#coals", ["#"] = "Stick" }, "Torch", 4)
 shape({ "XXX", "X#X", "XXX" }, { X = "IronNugget", ["#"] = "Torch" }, "Lantern")
 shape({ "##", "##" }, { ["#"] = "GlowDust" }, "GlowBlock")
 
+--[[ Fire: Flint and Steel, an iron ingot and flint in any slots (Minecraft's) ]]
+
+mix({ "IronIngot", "Flint" }, "FlintAndSteel")
+
 --[[
 	Mekanism pipes and buckets. The bucket is Minecraft's. Mekanism's own recipes need steel,
 	control circuits (osmium infused with redstone) and alloys, made in machines this game does not

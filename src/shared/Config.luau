@@ -721,6 +721,11 @@ local Config = {
 		CacheSize = 192,
 		-- Max chunks the server generates per frame while preloading around players.
 		GenerationsPerFrame = 1,
+		-- Fire (Behaviours/Fire, Minecraft's FireBlock): `Tick` is the doFireTick game rule (off:
+		-- fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing);
+		-- `Difficulty` is the world's (0 peaceful, 1 easy, 2 normal, 3 hard), which makes fire
+		-- spread a little faster (FireBlock.tick: + difficulty x 7 on the ignite odds).
+		Fire = { Tick = true, Difficulty = 2 },
 	},
 }
 

@@ -60,6 +60,9 @@
 	  Full buckets  (Water, Lava, Oil, Fuel Bucket: Fluids.ofBucket) the ordinary aim (through
 	                fluids): into a Fluid Tank or a machine's fluid tanks, else the fluid is poured
 	                into the clicked block if it can be replaced, else in front of the clicked face.
+	  Flint and     Minecraft's FlintAndSteelItem: fire in front of the clicked face, where fire
+	  Steel         may burn (Fire.canPlaceAt: an empty cell on a sturdy block or next to a
+	                flammable one). Breaking a fire puts it out (it breaks at once).
 	A block with a menu still opens first, unless the player sneaks, except a machine with fluid
 	tanks clicked with a bucket that fills or empties one of them as far as its Machines record
 	shows (TankUse): the bucket goes to its tanks, else the screen opens (Mekanism's BlockFluidTank:
@@ -108,6 +111,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local Fire = require(Shared.Fire)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -161,6 +165,7 @@ local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
 -- Items used on blocks (UseItem): the Configurator and the empty Bucket (full buckets: Fluids).
 local CONFIGURATOR = Items.id.Configurator
 local BUCKET = Items.id.Bucket
+local FLINT_AND_STEEL = Items.id.FlintAndSteel
 
 -- The fluid a full bucket pours (a carriable fluid's: Fluids.ofBucket), 0 for any other item.
 local function bucketFluid(item: number): number
@@ -292,6 +297,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
 	end
+	-- Each block's outline where it is (Blocks.outline; a fire's from the walls it clings to).
+	local outlineAt = Fire.outlineAt(getBlock)
 
 	local function rootPart(): BasePart?
 		local character = player.Character
@@ -319,7 +326,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			ray.maxDistance,
 			getBlock,
 			isTarget,
-			Blocks.outline
+			outlineAt
 		)
 		if hit then
 			local center = Vector3.new(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5) * BLOCK
@@ -673,7 +680,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		else
 			-- Minecraft's destroy stage (MultiPlayerGameMode.getDestroyStage): 0..9 once started,
 			-- on the block's outline like the highlight (a lantern's box, not its cell).
-			cracks:show(hit.x, hit.y, hit.z, math.floor(current.progress * 10), Blocks.outline(hit.block))
+			cracks:show(
+				hit.x,
+				hit.y,
+				hit.z,
+				math.floor(current.progress * 10),
+				outlineAt(hit.block, hit.x, hit.y, hit.z)
+			)
 		end
 	end
 
@@ -794,6 +807,17 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				end
 			end
 			return sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking)
+		elseif item == FLINT_AND_STEEL then
+			if hit == nil then
+				return false
+			end
+			-- Only where the server would light it: in front of the clicked face (Fire.canPlaceAt).
+			local side = faceSide(hit, ray)
+			local dx, dy, dz = Transmitters.offset(side)
+			if not Fire.canPlaceAt(getBlock, hit.x + dx, hit.y + dy, hit.z + dz) then
+				return false
+			end
+			return sendUseItem(hit.x, hit.y, hit.z, side, sneaking)
 		end
 		return false
 	end
@@ -939,7 +963,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			maxDistance,
 			getBlock,
 			Blocks.isTargetable,
-			Blocks.outline
+			outlineAt
 		)
 		local best: Player? = nil
 		local nearest = if wall then wall.distance else maxDistance
@@ -1117,8 +1141,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			if highlight.Parent ~= workspace.CurrentCamera then
 				highlight.Parent = workspace.CurrentCamera
 			end
-			-- The block's outline: its cell, or the box of a torch or lantern.
-			local box = Blocks.outline(hit.block) or FULL_OUTLINE
+			-- The block's outline: its cell, or the box of a torch, lantern or fire.
+			local box = outlineAt(hit.block, hit.x, hit.y, hit.z) or FULL_OUTLINE
 			if box ~= outlined then
 				outlined = box
 				highlight.Size = Vector3.new(box[4] - box[1], box[5] - box[2], box[6] - box[3]) * BLOCK

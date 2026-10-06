@@ -34,8 +34,9 @@
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
 	             (CRACKLE_CHANCE per tick), and so does a burning Heat Generator within
 	             CRACKLE_RANGE blocks (`crackles`); lava open to the air pops and bubbles
-	             (`lavaTick`: Minecraft's random display ticks, sampled). The cave mood is
-	             Audio/CaveMood's.
+	             (`lavaTick`: Minecraft's random display ticks, sampled); fire crackles with the
+	             odds Minecraft's display ticks give a block at its distance (`fireCrackle`). The
+	             cave mood is Audio/CaveMood's.
 	  fluids     only fluids one swims in (Fluids `swim`: water, fuel) splash and make swim
 	             sounds; lava and oil are silent to move through, as Minecraft's lava.
 ]]
@@ -213,6 +214,8 @@ SoundRules.CAPS = table.freeze({
 	["block.step"] = 6,
 	["entity.generic.swim"] = 3,
 	["block.furnace.fire_crackle"] = 2,
+	-- (A forest fire crackles all around, as in Minecraft, but a few at a time.)
+	["block.fire.ambient"] = 4,
 	["ambient.cave"] = 1,
 }) :: { [string]: number }
 SoundRules.DEFAULT_CAP = 8
@@ -537,6 +540,38 @@ function SoundRules.lavaTick(getBlock: GetBlock, x: number, y: number, z: number
 		end
 	end
 	return found
+end
+
+--[[
+	Fire's crackle (BaseFireBlock.animateTick: block.fire.ambient one time in 24 that a display
+	tick picks the fire, cue volume 1 + r, pitch 0.3 + 0.7 r). Minecraft's client picks 667 blocks
+	a tick at offsets nextInt(16) - nextInt(16) on each axis and 667 at nextInt(32) - nextInt(32),
+	so a block (dx, dy, dz) from the player is picked with odds 667 x the product over the axes of
+	(16 - |d|) / 256, plus the same for 32 (0 beyond). Fires are few next to the 667 samples lava
+	needs, so each fire the client knows within 32 blocks rolls these odds itself every tick
+	(Audio/Ambience, Rendering/FireRenderer.firesNear): the same crackles on average. A fire a
+	block away crackles about every 7 s, one 8 blocks away every 20 s.
+]]
+SoundRules.FIRE_AMBIENT = 1 / 24
+SoundRules.FIRE_RANGE = 32
+local DISPLAY_PICKS = 667
+
+-- Odds that Minecraft's display ticks pick a block (dx, dy, dz) from the player in one tick.
+function SoundRules.displayOdds(dx: number, dy: number, dz: number): number
+	local odds = 0
+	for _, range in SoundRules.LAVA_RANGES do
+		local share = 1
+		for _, d in { dx, dy, dz } do
+			share *= math.max(0, range - math.abs(d)) / (range * range)
+		end
+		odds += DISPLAY_PICKS * share
+	end
+	return odds
+end
+
+-- Chance per tick that a fire (dx, dy, dz) from the listener crackles.
+function SoundRules.fireCrackle(dx: number, dy: number, dz: number): number
+	return math.min(1, SoundRules.displayOdds(dx, dy, dz)) * SoundRules.FIRE_AMBIENT
 end
 
 return SoundRules

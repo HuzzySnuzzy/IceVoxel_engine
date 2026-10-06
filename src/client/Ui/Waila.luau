@@ -61,6 +61,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local Fire = require(Shared.Fire)
 local GameMode = require(Shared.GameMode)
 local Rig = require(Shared.Movement.Rig)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
@@ -644,6 +645,8 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
 	end
+	-- (Aimed at like BlockInteraction does: a fire by the slabs of the walls it clings to.)
+	local outlineAt = Fire.outlineAt(getBlock)
 
 	local function isFluid(id: number): boolean
 		return buffer.readu8(Blocks.fluidHeightLut, id) > 0
@@ -754,7 +757,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				outside = true
 				return Blocks.isTargetable(id)
 			end,
-			Blocks.outline
+			outlineAt
 		)
 		if hit == nil or not isFluid(hit.block) then
 			return nil
@@ -802,7 +805,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				maxDistance,
 				getBlock,
 				Blocks.isTargetable,
-				Blocks.outline
+				outlineAt
 			)
 			pickedWall = if wall then wall.distance else nil
 			pickedEntity = pickEntity(origin, direction, maxDistance, body, spectating)

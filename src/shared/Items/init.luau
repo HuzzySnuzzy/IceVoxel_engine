@@ -13,8 +13,9 @@
 	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
 	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
-	    itself, no tool). Creative only blocks (structure blocks, structure voids, jigsaws;
-	    `isCreativeOnly`) never drop.
+	    itself, no tool), and now and then something else when a player breaks it (`randomDrop`:
+	    gravel's flint; `leafDrop`: leaves' saplings and sticks). Creative only blocks (structure
+	    blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
 
 	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
@@ -368,6 +369,19 @@ function Items.leafDrop(block: number, random: () -> number): Stack?
 	end
 	if random() < 1 / 50 then
 		return { item = ids.Stick, count = if random() < 0.5 then 1 else 2 }
+	end
+	return nil
+end
+
+--[[
+	What a block drops now and then in place of its usual drop when a player breaks it (`random`
+	rolls in [0, 1)): Gravel gives Flint one time in 10 (Minecraft's gravel loot table without
+	Fortune; there is no Silk Touch). nil: the usual drop (Items.drops). Gravel that falls onto a
+	torch drops itself, as Minecraft's falling block does.
+]]
+function Items.randomDrop(block: number, random: () -> number): Stack?
+	if block == Blocks.id.Gravel and random() < 0.1 then
+		return { item = ids.Flint, count = 1 }
 	end
 	return nil
 end

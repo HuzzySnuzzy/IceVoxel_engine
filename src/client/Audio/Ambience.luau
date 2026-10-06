@@ -14,6 +14,9 @@
 	  Lava     lava with air above it within 32 blocks of the listener pops and bubbles now and
 	           then (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
 	           ticks, sampled), at the lava.
+	  Fire     every fire within 32 blocks of the listener (Rendering/FireRenderer.firesNear)
+	           crackles with the odds Minecraft's display ticks give it (SoundRules.fireCrackle:
+	           BaseFireBlock.animateTick), at the fire, cue volume 1..2 and pitch 0.3..1.
 	  Moods    Minecraft's cave mood (Audio/CaveMood): every tick a random block within 8 blocks of
 	           the player's eyes raises the mood when it is dark and lowers it in daylight or near
 	           torches; at 100% one of the cave mood sounds (Sounds.MOODS, from
@@ -36,6 +39,7 @@ local Sounds = require(Shared.Sounds)
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
 local CaveMood = require(script.Parent.CaveMood)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local FireRenderer = require(script.Parent.Parent.Rendering.FireRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local SoundPlayer = require(script.Parent.SoundPlayer)
@@ -150,6 +154,13 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 					local x, y, z = math.floor(listener.X), math.floor(listener.Y), math.floor(listener.Z)
 					for _, sound in SoundRules.lavaTick(getBlock, x, y, z, math.random) do
 						SoundPlayer.play(sound.sound, sound.x, sound.y, sound.z, sound.volume, sound.pitch)
+					end
+				end
+				local lx, ly, lz = listener.X, listener.Y, listener.Z
+				for _, fire in FireRenderer.firesNear(lx, ly, lz, SoundRules.FIRE_RANGE) do
+					local fx, fy, fz = fire.x + 0.5, fire.y + 0.5, fire.z + 0.5
+					if math.random() < SoundRules.fireCrackle(fx - lx, fy - ly, fz - lz) then
+						SoundPlayer.play("block.fire.ambient", fx, fy, fz, 1 + math.random(), 0.3 + math.random() * 0.7)
 					end
 				end
 			end

@@ -30,12 +30,14 @@ return {
 		"Lava",
 		"Oil",
 		"Fuel",
+		"Fire",
 	},
 
-	-- Never stand next to these (lava burns a player whose box reaches into it).
+	-- Never stand next to these (lava and fire burn a player whose box reaches into them).
 	Hazards = {
 		"Cactus",
 		"Lava",
+		"Fire",
 	},
 
 	-- Free blocks needed above the floor (the default character is ~1.7 blocks tall).

@@ -33,6 +33,9 @@
 	        appearance `tinted`, `scatter`, `upperHalf` and `foliage` (also as `tintedLut` and
 	        `foliageLut`). Plants never share an appearance with anything else;
 	      - what Shears harvest (`shearDrops`, `shearCount`; Items.drops, Shared/Mining).
+  * fire (BlockList `flammable`, Minecraft's FireBlock odds): `igniteOdds`, `burnOdds` and
+    `isFlammable` (FireBlock.canBurn), also as `igniteLut` and `burnLut`, which Shared/Fire and
+    server Behaviours/Fire read;
 	  * textures (Shared/TexturePack, the texture pack): each block's texture per face
 	    (`textures` on defs and appearances, resolved from the pack's All / Sides / Top / Bottom /
 	    Front / Sprite; a cave twin takes its twin's, a variant its group's), whether an
@@ -148,6 +151,10 @@ export type BlockDef = {
 	structureMode: string?,
 	jigsaw: JigsawSpec?,
 	caveTwin: string?,
+	-- Minecraft's fire odds (BlockList `flammable`): how readily fire spreads next to it and how
+	-- readily it burns away, 0 for blocks that never burn. See Shared/Fire.
+	ignite: number,
+	burn: number,
 	appearance: number,
 }
 
@@ -190,6 +197,7 @@ export type MachineSpec = BlockList.MachineSpec
 export type EnergySpec = BlockList.EnergySpec
 export type PlantSpec = BlockList.PlantSpec
 export type JigsawSpec = BlockList.JigsawSpec
+export type FlammableSpec = BlockList.FlammableSpec
 export type Texture = TexturePack.Texture
 
 -- A block's texture per face, resolved from its texture pack entry (texture names; see
@@ -554,6 +562,8 @@ for index, spec in BlockList do
 		structureMode = spec.structureMode,
 		jigsaw = spec.jigsaw,
 		caveTwin = spec.caveTwin,
+		ignite = if spec.flammable then spec.flammable.ignite else 0,
+		burn = if spec.flammable then spec.flammable.burn else 0,
 		appearance = 0,
 	}
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
@@ -598,6 +608,15 @@ for index, spec in BlockList do
 		`Block {spec.name} has a bad shearCount`
 	)
 	assert(spec.shearSpeed == nil or spec.shearSpeed > 0, `Block {spec.name} has a bad shearSpeed`)
+	assert(
+		def.ignite >= 0
+			and def.ignite <= 255
+			and def.ignite == math.floor(def.ignite)
+			and def.burn >= 0
+			and def.burn <= 255
+			and def.burn == math.floor(def.burn),
+		`Block {spec.name} has bad fire odds`
+	)
 	assert(
 		spec.structureMode == nil or table.find(STRUCTURE_MODES, spec.structureMode) ~= nil,
 		`Block {spec.name} has unknown structure mode {spec.structureMode}`
@@ -707,6 +726,8 @@ for _, def in defs do
 				and def.drops == twin.drops
 				and def.shearDrops == twin.shearDrops
 				and def.behaviour == twin.behaviour
+				and def.ignite == twin.ignite
+				and def.burn == twin.burn
 				and not def.placeable,
 			`Cave twin {def.name} differs from {name}`
 		)
@@ -1047,6 +1068,35 @@ end
 -- Light given off by a block (0..15).
 function Blocks.light(id: number): number
 	return if id >= 0 and id < Blocks.count then buffer.readu8(Blocks.lightLut, id) else 0
+end
+
+--[[
+	Fire (Shared/Fire, server Behaviours/Fire): Minecraft's FireBlock odds per block (BlockList
+	`flammable`, u8; 0: never burns). `igniteLut` is how readily fire spreads into the air next to
+	a block (FireBlock.getIgniteOdds), `burnLut` how readily a fire next to it burns it away
+	(getBurnOdds).
+]]
+Blocks.igniteLut = buffer.create(Blocks.count)
+Blocks.burnLut = buffer.create(Blocks.count)
+for id, def in defs do
+	buffer.writeu8(Blocks.igniteLut, id, def.ignite)
+	buffer.writeu8(Blocks.burnLut, id, def.burn)
+end
+
+-- Minecraft's ignite odds of a block (0 for blocks that never burn and unknown ids).
+function Blocks.igniteOdds(id: number): number
+	return if id >= 0 and id < Blocks.count then buffer.readu8(Blocks.igniteLut, id) else 0
+end
+
+-- Minecraft's burn odds of a block (0 for blocks that never burn and unknown ids).
+function Blocks.burnOdds(id: number): number
+	return if id >= 0 and id < Blocks.count then buffer.readu8(Blocks.burnLut, id) else 0
+end
+
+-- Does fire catch on the block (FireBlock.canBurn: ignite odds above 0)? Fire clings to its
+-- sides and lava sets the air next to it alight.
+function Blocks.isFlammable(id: number): boolean
+	return id >= 0 and id < Blocks.count and buffer.readu8(Blocks.igniteLut, id) > 0
 end
 
 --[[

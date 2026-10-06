@@ -90,8 +90,9 @@ end
 --[[
 	`getBlock(x, y, z)` returns a block id or nil (unloaded = passes through).
 	`isTarget(id)` decides which blocks stop the ray.
-	`outline(id)` (optional): the part of the cell a block fills, { minX, minY, minZ, maxX, maxY,
-	maxZ } in 0..1, or nil for the whole cell.
+	`outline(id, x, y, z)` (optional): the part of the cell a block fills, { minX, minY, minZ,
+	maxX, maxY, maxZ } in 0..1, or nil for the whole cell (Blocks.outline, or Fire.outlineAt for a
+	fire's, which depends on its neighbours).
 ]]
 function VoxelRaycast.cast(
 	ox: number,
@@ -103,7 +104,7 @@ function VoxelRaycast.cast(
 	maxDistance: number,
 	getBlock: (x: number, y: number, z: number) -> number?,
 	isTarget: (id: number) -> boolean,
-	outline: ((id: number) -> { number }?)?
+	outline: ((id: number, x: number, y: number, z: number) -> { number }?)?
 ): Hit?
 	local length = math.sqrt(dx * dx + dy * dy + dz * dz)
 	if length < 1e-9 then
@@ -134,7 +135,7 @@ function VoxelRaycast.cast(
 	while t <= maxDistance do
 		local block = getBlock(x, y, z)
 		if block ~= nil and isTarget(block) then
-			local box = if outline then outline(block) else nil
+			local box = if outline then outline(block, x, y, z) else nil
 			if box == nil then
 				return { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = t }
 			end

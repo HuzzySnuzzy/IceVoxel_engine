@@ -6,7 +6,8 @@
 	  * `Sounds.id["block.stone.break"]` -> event number (errors on unknown names, so typos fail
 	    loudly), `find(name)` (nil instead), `get(number or name)` -> Event, `events` (by number).
 	  * `block(block, action)`: the event of a block's sound type (Blocks `sound`) for "break",
-	    "place", "hit", "step" or "fall".
+	    "place", "hit", "step" or "fall", or the block's own (SoundList.BLOCK_SOUNDS: punching fire
+	    out hisses).
 	  * `container(block, opened)`: a chest's lid; `equip(old, new)` / `armorEquip(item)`: armor
 	    put on; `fall(halfHearts)`: Minecraft's small or big fall.
 	  * `lookupNames(sound)`: the names a developer's Sound may have to replace an event, most
@@ -202,14 +203,32 @@ end
 
 --[[ Lookups ]]
 
+-- Blocks' own action sounds (SoundList.BLOCK_SOUNDS), by block id and action.
+local ownSounds: { [number]: { [string]: number } } = {}
+for name, actions in SoundList.BLOCK_SOUNDS do
+	local block = Blocks.find(name)
+	assert(block ~= nil, `SoundList.BLOCK_SOUNDS names unknown block {name}`)
+	local map: { [string]: number } = {}
+	for action, event in actions do
+		assert(byAction[action] ~= nil, `SoundList.BLOCK_SOUNDS has unknown action {action} for {name}`)
+		map[action] = Sounds.id[event]
+	end
+	ownSounds[block] = map
+end
+
 --[[
-	The event a block makes for `action` ("break", "place", "hit", "step" or "fall"): its sound
-	type's (Blocks `sound`). nil for silent blocks (air), unknown ids and unknown actions.
+	The event a block makes for `action` ("break", "place", "hit", "step" or "fall"): its own
+	(SoundList.BLOCK_SOUNDS: fire's extinguish hiss), else its sound type's (Blocks `sound`). nil
+	for silent blocks (air), unknown ids and unknown actions.
 ]]
 function Sounds.block(block: number, action: string): number?
 	local map = byAction[action]
 	if map == nil or not Blocks.isValid(block) then
 		return nil
+	end
+	local own = ownSounds[block]
+	if own and own[action] then
+		return own[action]
 	end
 	local typeIndex = buffer.readu8(Blocks.soundLut, block)
 	return if typeIndex > 0 then map[typeIndex] else nil

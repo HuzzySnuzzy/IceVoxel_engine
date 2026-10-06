@@ -609,4 +609,41 @@ table.insert(list, {
 	model = filledBucket(FUEL, "SmoothPlastic"),
 })
 
+--[[
+	Fire (Shared/Fire, server Behaviours/Fire). Flint: Minecraft's, which gravel drops one time in
+	10 (Items.randomDrop): a dark chipped shard with a pale glint. Flint and Steel: Minecraft's
+	(shapeless: an iron ingot and flint), 64 uses, each lighting a fire in front of the clicked
+	face where fire can burn (Players/ItemUse); a steel striker's ring at the bottom left, the
+	flint at the top right, as its inventory icon.
+]]
+local FLINT = { 62, 62, 68 }
+local STEEL = { 168, 170, 176 }
+table.insert(list, {
+	name = "Flint",
+	color = FLINT,
+	material = "Slate",
+	model = {
+		{ size = { 6, 8, 3 }, offset = { 0, -0.5, 0 } },
+		{ size = { 4, 3, 2.6 }, offset = { -1, 4.5, 0 }, rotation = 20 },
+		{ size = { 3.5, 3, 2.6 }, offset = { 1.2, -5.2, 0 }, rotation = -15 },
+		{ size = { 2, 2.5, 0.4 }, offset = { -1, 1.5, 1.6 }, color = shade(FLINT, 1.9) },
+		{ size = { 1.5, 3, 0.4 }, offset = { 1.5, -2, 1.6 }, color = shade(FLINT, 0.7) },
+	},
+})
+table.insert(list, {
+	name = "FlintAndSteel",
+	displayName = "Flint and Steel",
+	durability = 64,
+	color = STEEL,
+	material = "Metal",
+	model = {
+		-- (The ring opens to the right: its bottom, back and shorter top bar.)
+		{ size = { 7, 1.6, 1.5 }, offset = { -2.5, -6.2, 0 } },
+		{ size = { 1.6, 6, 1.5 }, offset = { -6, -4, 0 } },
+		{ size = { 5, 1.6, 1.5 }, offset = { -3.5, -1.8, 0 }, color = shade(STEEL, 1.15) },
+		{ size = { 5, 6, 2.5 }, offset = { 3, 3.5, 0 }, rotation = 25, color = FLINT, material = "Slate" },
+		{ size = { 1.8, 2.2, 0.4 }, offset = { 2.4, 4.4, 1.4 }, rotation = 25, color = shade(FLINT, 1.9) },
+	},
+})
+
 return list

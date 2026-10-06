@@ -516,7 +516,65 @@ SoundList.EVENTS = {
 		source = "players",
 		side = "server",
 	},
+
+	--[[
+		Fire (Minecraft 1.20.1). BaseFireBlock.animateTick: a fire crackles one time in 24 that the
+		client's random display tick picks it (block.fire.ambient, cue volume 1..2, pitch 0.3..1;
+		Audio/Ambience, SoundRules.fireTick), each client by itself. Punching a fire out sounds like
+		level event 1009 (block.fire.extinguish, volume 0.5, pitch 2.6 +- 0.8, as lava's fizz): it
+		is the Fire block's break sound (BLOCK_SOUNDS below), so the player who breaks it hears it
+		at once and the server sends it to everyone else. Flint and steel striking
+		(item.flintandsteel.use, FlintAndSteelItem.useOn: volume 1, pitch 0.8..1.2), from the
+		server (Players/ItemUse). Stand-ins: the falling wind pitched down into a low roar for the
+		crackle and up into a hiss for the extinguish, the volume slider's tick pitched down for
+		the strike. No asset of Minecraft's: give a Sound of the event's name to use a real one
+		(README, "Sounds").
+	]]
+	{
+		name = "block.fire.ambient",
+		id = FALLING,
+		volume = 0.3,
+		pitch = 0.9,
+		pitchVariance = 0.1,
+		duration = 1.2,
+		fallback = { id = STEPS, volume = 0.6, pitch = 0.5, duration = ONE_STEP },
+		source = "blocks",
+		side = "client",
+	},
+	{
+		name = "block.fire.extinguish",
+		-- (Fire's break sound: a developer's block.break Sound replaces it too.)
+		category = "block.break",
+		id = FALLING,
+		volume = 0.5,
+		pitch = 2.6,
+		pitchVariance = 0.3,
+		duration = 0.6,
+		fallback = { id = SPLASH, pitch = 2.2 },
+		source = "blocks",
+		side = "predicted",
+	},
+	{
+		name = "item.flintandsteel.use",
+		id = TICK,
+		volume = 0.8,
+		pitch = 0.7,
+		pitchVariance = 0.2,
+		duration = 0.25,
+		fallback = { id = LAND, volume = 0.5, pitch = 2.4 },
+		source = "blocks",
+		side = "server",
+	},
 } :: { EventSpec }
+
+--[[
+	Blocks whose action sounds are their own rather than their sound type's (Sounds.block): by
+	block name, action -> event. Punching fire out is Minecraft's level event 1009 (the
+	extinguish hiss), not a wool block's break.
+]]
+SoundList.BLOCK_SOUNDS = {
+	Fire = { ["break"] = "block.fire.extinguish" },
+} :: { [string]: { [string]: string } }
 
 --[[
 	The cave moods (Sounds/MusicList.Moods): ambient.cave.mood1, ambient.cave.mood2, ... in the

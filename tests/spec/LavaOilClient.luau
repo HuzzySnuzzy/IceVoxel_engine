@@ -634,8 +634,8 @@ return function(t, shared, require, _server, client)
 		-- (The cave moods follow, built from MusicList.)
 		t.eq(
 			SoundList.EVENTS[#SoundList.EVENTS - #SoundList.MOODS].name,
-			"entity.generic.extinguish_fire",
-			"appended at the end"
+			"item.flintandsteel.use",
+			"appended at the end (fire's sounds after lava's)"
 		)
 
 		-- A lava sea at y 10 under air, and a random that always rolls 0: every sample lands on the

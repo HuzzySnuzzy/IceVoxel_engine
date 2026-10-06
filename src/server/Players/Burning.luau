@@ -1,15 +1,18 @@
 --!strict
 --[[
-	Lava hurting and burning players and dropped items, pure (no Roblox APIs, so the tests run it):
-	Minecraft 1.20.1's Entity.baseTick (burning: remainingFireTicks, lavaHurt), its
-	updateFluidHeightAndDoFluidPushing (what touches a body), LivingEntity.hurt's cooldown and
-	ItemEntity's health, with the numbers of each fluid's record (Shared/Fluids: lava hurts 4
-	every 10 ticks and sets burning for 15 s; water puts burning out).
+	Lava and fire hurting and burning players and dropped items, pure (no Roblox APIs, so the tests
+	run it): Minecraft 1.20.1's Entity.baseTick (burning: remainingFireTicks, lavaHurt), its
+	updateFluidHeightAndDoFluidPushing (what touches a body), BaseFireBlock.entityInside (fire
+	blocks), LivingEntity.hurt's cooldown and ItemEntity's health, with the numbers of each fluid's
+	record (Shared/Fluids: lava hurts 4 every 10 ticks and sets burning for 15 s; water puts
+	burning out).
 
 	  Touching  `touching(getBlock, box)`: the fluids reaching into a box (a bit per Shared/Fluids
 	            id, `has`), deflated by 0.001 as Minecraft does: a fluid cell overlapping it whose
 	            surface (Blocks.fluidHeightLut; the whole cell when the same fluid is above: the
-	            FluidState.getHeight Minecraft compares) is at or above the box's bottom. Unknown
+	            FluidState.getHeight Minecraft compares) is at or above the box's bottom; and the
+	            FIRE bit when a fire block's cell overlaps it (Minecraft's checkInsideBlocks runs
+	            entityInside for every cell the box is in, whatever the fire's outline). Unknown
 	            (unloaded) cells touch nothing, so nothing hurts at a chunk that is not loaded.
 
 	  Players   one tick (20 a second, `tickPlayer`, Players/Characters runs it on the standing box
@@ -21,7 +24,14 @@
 	                 one tick of it burns away;
 	              3. in a fluid that hurts (lava, `damage` > 0): burning for at least its
 	                 `burnSeconds` (setSecondsOnFire(15): 300 ticks) and its `damage` (4) half hearts
-	                 (lavaHurt; a hurt that lands sizzles: entity.generic.burn).
+	                 (lavaHurt; a hurt that lands sizzles: entity.generic.burn);
+	              4. in a fire block (BaseFireBlock.entityInside, after the move): burning goes on
+	                 (a tick more, so it never runs down while in the fire), or, not burning yet,
+	                 the player catches fire after PLAYER_FIRE_IMMUNE (20) ticks in it
+	                 (remainingFireTicks counting up from -getFireImmuneTicks to 0) for
+	                 IN_FIRE_SECONDS (8 s); and IN_FIRE_DAMAGE (1) half heart (inFire, softened by
+	                 armor, under the cooldown; no sizzle). Out of fire and lava, not burning, the
+	                 count starts over (Entity.move).
 	            Hurts follow LivingEntity.hurt's cooldown: after a hurt lands, for its `damageInterval`
 	            (lava: 10 ticks, half of Minecraft's 20 invulnerable ticks; burning: HURT_COOLDOWN, the
 	            same 10) only a bigger hurt lands, and only by the difference. So lava takes 4 every
@@ -37,8 +47,9 @@
 	            cooldown (items have no invulnerable time). Water puts burning out; burning takes
 	            1 every 20 ticks of it left, not in lava; lava sets it burning and takes 4 a tick.
 	            So an item touching lava for one tick is gone the next (5 - 4, then - 1 or - 4),
-	            with Minecraft's entity.generic.burn on each lava hurt. (Nothing is fire resistant:
-	            the game has no netherite.)
+	            with Minecraft's entity.generic.burn on each lava hurt. A fire block sets it burning
+	            at once (an item's getFireImmuneTicks is 1) and takes 1 a tick, silently: gone in a
+	            few ticks. (Nothing is fire resistant: the game has no netherite.)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -55,6 +66,9 @@ export type GetBlock = (x: number, y: number, z: number) -> number?
 export type PlayerState = {
 	-- Ticks left burning (Minecraft's remainingFireTicks; 0: not burning).
 	fire: number,
+	-- Ticks spent in a fire block before catching fire (Minecraft's remainingFireTicks below 0,
+	-- counting up from -PLAYER_FIRE_IMMUNE).
+	heat: number,
 	-- Ticks of the hurt cooldown left (while above 0 only a hurt bigger than `lastHurt` lands,
 	-- by the difference) and that last hurt (half hearts).
 	cooldown: number,
@@ -73,11 +87,22 @@ Burning.ITEM_HEALTH = 5
 -- How far boxes are deflated before looking (Entity.updateFluidHeightAndDoFluidPushing).
 local DEFLATE = 0.001
 local TICKS_PER_SECOND = 20
+-- The bit `touching` sets for a fire block (above every fluid's).
+Burning.FIRE = bit32.lshift(1, 30)
+-- Fire blocks (BaseFireBlock.entityInside, FireBlock's fireDamage): the half hearts a tick in one
+-- costs, the burning it sets and the ticks a player stands in it before catching fire
+-- (Player.getFireImmuneTicks).
+Burning.IN_FIRE_DAMAGE = 1
+Burning.IN_FIRE_SECONDS = 8
+Burning.PLAYER_FIRE_IMMUNE = 20
+local FIRE_BLOCK = Blocks.id.Fire
 
 local fluidHeightLut = Blocks.fluidHeightLut
 local FULL = Blocks.FLUID_FULL
 local blockLut = Fluids.blockLut
 local floor = math.floor
+
+assert(#Fluids.list < 30, "fluid bits must stay below Burning.FIRE")
 
 -- Per fluid id: does it put burning out, and does it hurt (its record)?
 local EXTINGUISHES = 0
@@ -135,6 +160,9 @@ function Burning.touching(
 		for z = floor(minZ), math.ceil(maxZ) - 1 do
 			for y = floor(minY), math.ceil(maxY) - 1 do
 				local block = getBlock(x, y, z)
+				if block == FIRE_BLOCK then
+					mask = bit32.bor(mask, Burning.FIRE)
+				end
 				local fluid = fluidOf(block)
 				if fluid ~= 0 and not Burning.has(mask, fluid) then
 					local height = if fluidOf(getBlock(x, y + 1, z)) == fluid
@@ -171,7 +199,7 @@ local function harmful(touching: number): Fluids.Fluid?
 end
 
 function Burning.newPlayer(): PlayerState
-	return { fire = 0, cooldown = 0, lastHurt = 0 }
+	return { fire = 0, heat = 0, cooldown = 0, lastHurt = 0 }
 end
 
 function Burning.newItem(): ItemState
@@ -219,13 +247,16 @@ function Burning.tickPlayer(
 		state.cooldown -= 1
 	end
 	if GameMode.invulnerable(mode) then
-		state.fire = 0
+		state.fire, state.heat = 0, 0
 		return 0, false, false
 	end
 	local extinguished = false
-	if bit32.band(touching, EXTINGUISHES) ~= 0 and state.fire > 0 then
-		state.fire = 0
-		extinguished = true
+	if bit32.band(touching, EXTINGUISHES) ~= 0 then
+		state.heat = 0
+		if state.fire > 0 then
+			state.fire = 0
+			extinguished = true
+		end
 	end
 	local fluid = harmful(touching)
 	local damage = 0
@@ -244,6 +275,25 @@ function Burning.tickPlayer(
 			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
 		end
 		damage += landed
+	end
+	if bit32.btest(touching, Burning.FIRE) then
+		-- (BaseFireBlock.entityInside: remainingFireTicks + 1, 8 s once it reaches 0.)
+		if state.fire > 0 then
+			state.fire += 1
+		else
+			state.heat += 1
+			if state.heat >= Burning.PLAYER_FIRE_IMMUNE then
+				state.heat = 0
+				state.fire = Burning.IN_FIRE_SECONDS * TICKS_PER_SECOND
+			end
+		end
+		local landed = hurt(state, Burning.IN_FIRE_DAMAGE, Burning.HURT_COOLDOWN)
+		if landed > 0 and (armor or 0) > 0 then
+			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+		end
+		damage += landed
+	elseif fluid == nil and state.fire <= 0 then
+		state.heat = 0
 	end
 	return damage, extinguished, hurtNow
 end
@@ -268,6 +318,11 @@ function Burning.tickItem(state: ItemState, touching: number): (boolean, boolean
 		state.fire = math.max(state.fire, fluid.burnSeconds * TICKS_PER_SECOND)
 		state.health -= fluid.damage
 		hurtNow = true
+	end
+	if bit32.btest(touching, Burning.FIRE) then
+		-- (An item's fire immunity is a single tick: it catches fire at once.)
+		state.fire = if state.fire > 0 then state.fire + 1 else Burning.IN_FIRE_SECONDS * TICKS_PER_SECOND
+		state.health -= Burning.IN_FIRE_DAMAGE
 	end
 	return state.health <= 0, hurtNow
 end

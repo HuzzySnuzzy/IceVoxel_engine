@@ -49,9 +49,14 @@
 	chunk that is not loaded waits and retries later instead of guessing what is there.
 
 	Fluids flow into replaceable blocks (air; not the structure void) and wash away blocks marked
-	`brokenByFluid` (torches, glow lichen), which drop what they drop by themselves
-	(Behaviours/Drops: a torch its item, glow lichen nothing), like Minecraft's canHoldFluid /
-	beforeDestroyingBlock.
+	`brokenByFluid` (torches, glow lichen, fire), which drop what they drop by themselves
+	(Behaviours/Drops: a torch its item, glow lichen and fire nothing), like Minecraft's
+	canHoldFluid / beforeDestroyingBlock.
+
+	Lava sets things alight on its random ticks (World/RandomTicker; LavaFluid.randomTick: the
+	empty cells next to flammable blocks a step or two above it, or above flammable blocks
+	beside it), any level and its cave twin: Behaviours/Fire.lavaTick. Other fluids' random ticks
+	do nothing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -62,6 +67,7 @@ local SharedSounds = require(Shared.Sounds)
 
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Drops = require(script.Parent.Drops)
+local Fire = require(script.Parent.Fire)
 
 local FALLING = 8
 local MAX_FLOW = 7
@@ -360,6 +366,22 @@ local function spreadToSides(world: any, x: number, y: number, z: number, group:
 		end
 	end
 	return true
+end
+
+-- Lava's random tick lights fires around it (Behaviours/Fire.lavaTick); other fluids do nothing.
+function Fluid.onRandomTick(
+	world: any,
+	_ticker: any,
+	x: number,
+	y: number,
+	z: number,
+	block: number,
+	random: () -> number
+)
+	local fluid = Blocks.get(block).fluid
+	if fluid and fluid.group == LAVA then
+		Fire.lavaTick(world, x, y, z, random)
+	end
 end
 
 function Fluid.onTick(world: any, ticker: any, x: number, y: number, z: number, block: number)

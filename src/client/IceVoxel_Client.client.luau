@@ -33,12 +33,14 @@
 	  Net/StructureNet           structure blocks and jigsaws: their records, their screens
 	                             (Ui/StructureScreen), SAVE's data and pasted data in pieces
 	  Rendering/StructureBoxes   structure blocks' outlines and names
+	  Rendering/FireRenderer     fire's animated flames on the floor and on burning walls
 	  Map/                       minimap, world map (M), waypoints, teleporting
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
 	                             swimming, landings), Ambience (a lit furnace, Heat or
-	                             Combustion Generator, lava, Minecraft's cave mood: CaveMood),
+	                             Combustion Generator, lava, fire, Minecraft's cave mood:
+	                             CaveMood),
 	                             Music (surface and cave tracks, Minecraft's timing: MusicRules)
 	  Ui/MusicToast              the "Now Playing" toast in the top right corner
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
@@ -73,6 +75,7 @@ local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
 local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
+local FireRenderer = require(Client.Rendering.FireRenderer)
 local Notices = require(Client.Net.Notices)
 local StructureNet = require(Client.Net.StructureNet)
 local StructureBoxes = require(Client.Rendering.StructureBoxes)
@@ -234,6 +237,11 @@ StructureBoxes.start(world, StructureNet.records)
 EntityRenderer.start(world)
 -- (Pipes are decorated only where their chunk is on screen.)
 TransmitterRenderer.start(world, function(cx: number, cz: number): boolean
+	local node = streamer.nodes[Coords.chunkKey(cx, cz)]
+	return node ~= nil and node.shown
+end)
+-- (Flames too: never over coarse terrain still being built.)
+FireRenderer.start(world, function(cx: number, cz: number): boolean
 	local node = streamer.nodes[Coords.chunkKey(cx, cz)]
 	return node ~= nil and node.shown
 end)

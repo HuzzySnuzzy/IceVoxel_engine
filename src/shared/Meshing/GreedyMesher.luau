@@ -35,8 +35,9 @@
 	    never the void. Elsewhere a hidden cave cell is enclosed by rock and other hidden cave
 	    cells, nobody can see it, and it is a wildcard like enclosed rock: not drawn, but an opaque
 	    box may run through it (the caps merge into the rock around them).
-	  * Sparse lights (`sparseLightLut`: glow lichen and lava): every cell is drawn, but only one
-	    per light box (`sparseBoxLut`: LIGHT_BOX^3 blocks for lichen, FLUID_LIGHT_BOX^3 for a fluid
+	  * Sparse lights (`sparseLightLut`: glow lichen, fire and lava): every cell is drawn, but only
+	    one per light box (`sparseBoxLut`: LIGHT_BOX^3 blocks for lichen and fire, together,
+	    FLUID_LIGHT_BOX^3 for a fluid
 	    giving off light; world aligned, so inside one section of one chunk) carries the light:
 	    among the drawn cells of the box, the one nearest its centre (on a tie the lowest, then
 	    northmost, then westmost). A lichen's key then has surface field 1, the others' 0; a
@@ -136,9 +137,10 @@ end
 assert(readu8(kindLut, STONE_APPEARANCE) == OPAQUE, "stone caps must be opaque")
 
 -- Blocks (by their item, or their name when they are an item) whose light only some cells carry:
--- glow lichen covers whole cave walls, and a PointLight per cell would be hundreds of lights.
--- Every fluid giving off light (lava) is one too: a lava sea is thousands of cells.
-local SPARSE_LIGHT_ITEMS: { [string]: boolean } = { GlowLichen = true }
+-- glow lichen covers whole cave walls, and a PointLight per cell would be hundreds of lights; a
+-- forest fire is hundreds of fire blocks (they share lichen's light boxes: one light per box for
+-- both). Every fluid giving off light (lava) is one too: a lava sea is thousands of cells.
+local SPARSE_LIGHT_ITEMS: { [string]: boolean } = { GlowLichen = true, Fire = true }
 -- Blocks per side of the boxes sparse lights are thinned in (one light per box). Powers of two
 -- dividing Config.SectionHeight and the chunk size, so a box never crosses a section or a chunk.
 -- Lit fluids get the bigger box: lava's light reaches twice as far as lichen's (15 against 7,

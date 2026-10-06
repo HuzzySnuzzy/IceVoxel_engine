@@ -95,6 +95,12 @@
 	                placing picks the one whose support holds (Blocks.placementFor).
 	  brokenByFluid Flowing water washes it away and it drops (torches: Minecraft's canHoldFluid).
 	                Players still can't place blocks into it.
+	  flammable     { ignite, burn }: Minecraft's FireBlock odds (FireBlock.setFlammable). `ignite`:
+	                how readily fire spreads into air next to it (0..100; > 0 also means fire
+	                clings to it and lava sets it alight); `burn`: how readily a fire next to it
+	                destroys it (0..100). Set by the fire bootstrap at the end of this list
+	                (Minecraft's FireBlock.bootStrap: planks 5 / 20, logs 5 / 5, leaves 30 / 60,
+	                plants 60 / 100...) or on the block itself. See server Behaviours/Fire.
 
 	Plants (grass, ferns, flowers, mushrooms; Minecraft's BushBlock family, see "Plants" below):
 	  plant         { soil = "dirt" | "deadbush" | "mushroom"?, top = "<Name>"?, bottom = "<Name>"? }.
@@ -204,6 +210,8 @@ export type EnergySpec = { capacity: number, input: number?, output: number? }
 export type PlantSpec = { soil: string?, top: string?, bottom: string? }
 -- A jigsaw block's orientation (`jigsaw`): the direction its front faces and its top.
 export type JigsawSpec = { front: string, top: string }
+-- How a block burns (`flammable`): Minecraft's ignite and burn odds.
+export type FlammableSpec = { ignite: number, burn: number }
 
 export type BlockSpec = {
 	name: string,
@@ -255,6 +263,7 @@ export type BlockSpec = {
 	structureMode: string?,
 	jigsaw: JigsawSpec?,
 	caveTwin: string?,
+	flammable: FlammableSpec?,
 }
 
 local list: { BlockSpec } = {
@@ -2316,8 +2325,18 @@ sapling("JungleSapling", { 46, 124, 36 }, "Jungle Sapling")
 
 --[[
 	Fire (Minecraft's FireBlock): burns on top of a block or clings to the sides of flammable
-	ones, spreads, burns out and lights what it touches (server Behaviours/Fire). No item: lit by
-	flint and steel, lava and burning fuel. Light 15, no collision, replaceable, broken at once.
+	ones, spreads, burns out and lights what it touches (server Behaviours/Fire, rules in
+	Shared/Fire). No item: lit by flint and steel, lava and burning fuel. Light 15, no collision,
+	replaceable (a block placed into it puts it out), broken at once with no drop (punching it out
+	sounds like block.fire.extinguish: SoundList.BLOCK_SOUNDS), washed away by water.
+
+	Its one shape box is only the carrier of its light: an invisible speck (Neon, see-through),
+	sparse like glow lichen's (GreedyMesher: one PointLight per 8 x 8 x 8 blocks), so a forest
+	fire is not hundreds of lights. The flames are drawn by client Rendering/FireRenderer: the
+	user's animated sheet on Minecraft's fire_floor and fire_side planes, which depend on the
+	neighbours (Fire.sides). Its outline is Minecraft's: a pixel thick slab on the floor
+	(BaseFireBlock.DOWN_AABB); the client aims at a fire clinging to walls by the slabs on those
+	walls instead (Fire.outlineAt).
 ]]
 table.insert(list, {
 	name = "Fire",
@@ -2328,10 +2347,41 @@ table.insert(list, {
 	placeable = false,
 	replaceable = true,
 	hardness = 0,
+	drops = false,
 	light = 15,
 	lightColor = { 255, 170, 90 },
-	shape = { { size = { 14, 1, 14 }, offset = { 0, -7.5, 0 }, glow = true } },
+	shape = { { size = { 2, 2, 2 }, offset = { 0, -4, 0 }, glow = true, transparency = 1 } },
+	bounds = { min = { 0, 0, 0 }, max = { 16, 1, 16 } },
 	brokenByFluid = true,
+	behaviour = "Fire",
 })
+
+--[[
+	What burns: Minecraft 1.20.1's FireBlock.bootStrap for the blocks this game has, as `flammable`
+	{ ignite, burn } (see the fields at the top). Minecraft lists every grass, fern, dead bush and
+	flower (both halves of the tall ones), but no sapling and no mushroom; the game has no slabs,
+	stairs, fences, wool, bookshelves, hay or TNT yet (give such blocks `flammable` where they are
+	added). Glow lichen is Minecraft's 15 / 100, and its cave twins burn like it.
+]]
+local function fireOdds(spec: BlockSpec): FlammableSpec?
+	local name = spec.name
+	if string.sub(name, -6) == "Planks" then
+		return { ignite = 5, burn = 20 }
+	elseif string.sub(name, -3) == "Log" then
+		return { ignite = 5, burn = 5 }
+	elseif string.sub(name, -6) == "Leaves" then
+		return { ignite = 30, burn = 60 }
+	elseif string.find(name, "GlowLichen", 1, true) then
+		return { ignite = 15, burn = 100 }
+	elseif name == "CoalBlock" then
+		return { ignite = 5, burn = 5 }
+	elseif spec.plant and spec.behaviour ~= "Sapling" and spec.plant.soil ~= "mushroom" then
+		return { ignite = 60, burn = 100 }
+	end
+	return nil
+end
+for _, spec in list do
+	spec.flammable = spec.flammable or fireOdds(spec)
+end
 
 return list
