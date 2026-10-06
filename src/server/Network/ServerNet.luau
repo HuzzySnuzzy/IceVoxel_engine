@@ -144,6 +144,9 @@ export type Rules = {
 	-- Wears the tool in the player's hand by `amount` (it breaks at its durability).
 	-- (Players/Inventories.wearTool)
 	wearTool: ((player: Player, amount: number) -> ())?,
+	-- A player who is no instabuilder broke `block` (Tough As Nails' thirst: Minecraft's
+	-- EXHAUSTION_MINE). (Players/ToughAsNails.blockBroken)
+	broke: ((player: Player, block: number) -> ())?,
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
@@ -329,6 +332,10 @@ function ServerNet.start(world: World): ServerNet
 		local wearTool = rules.wearTool
 		if wearer and wear > 0 and wearTool then
 			wearTool(wearer, wear)
+		end
+		local broke = rules.broke
+		if broke and not creative then
+			broke(breaker, current)
 		end
 		return true
 	end

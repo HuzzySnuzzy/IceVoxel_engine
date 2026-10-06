@@ -15,6 +15,10 @@
 	             10 hearts (the Humanoid's health as 20 half hearts) and, above them, 10 armor icons
 	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
 	             makes them shake; damage makes their outline blink.
+	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
+	             droplets on the right level with the hearts, the temperature gauge centred
+	             between them over the hotbar, and frost or heat closing in from the screen's
+	             edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu
 
@@ -50,6 +54,7 @@ local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SpectatorGui = require(script.Parent.SpectatorGui)
+local SurvivalHud = require(script.Parent.SurvivalHud)
 local Style = require(script.Parent.Style)
 
 export type Mode = "play" | "creative" | "hidden"
@@ -424,6 +429,8 @@ function Hud.start()
 		hearts[i] = newIcon(heartRow, (i - 1) * 8, HEART)
 		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
 	end
+	-- Thirst and temperature (TAN's gauge 30 pixels above the hotbar, centred).
+	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeX = WIDTH / 2 - 8, gaugeY = BAR_Y - 30 })
 
 	--[[ Held item name ]]
 
@@ -521,6 +528,7 @@ function Hud.start()
 		if armorRow.Visible ~= (points > 0) then
 			armorRow.Visible = points > 0
 		end
+		SurvivalHud.render(now, survival)
 		if not survival then
 			return
 		end

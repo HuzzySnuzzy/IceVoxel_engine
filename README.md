@@ -126,6 +126,26 @@ A fast, Minecraft-style voxel engine for Roblox.
   until you dig next to them; no tree or plant stands in them and no cave entrance opens under
   them. Far terrain shows the lakes (LOD levels 1-2) and the map paints both (lakes up to 8
   blocks a pixel, puddles up to 2); puddles are drawn near the player only.
+- **Thirst and body temperature (Tough As Nails).** The Tough As Nails mod's survival, after its
+  1.20 version. Thirst is Minecraft's hunger with water: 20 points (10 droplets on the right above
+  the hotbar) and hydration that goes first, drained by exhaustion (sprinting 0.1 a metre,
+  swimming 0.01, a jump 0.05, a sprint jump 0.2, a block broken 0.005, a hurt 0.1, sweating while
+  hot). At 0 you lose half a heart every 4 s down to half a heart, and health only comes back
+  with 18 or more (half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration is off).
+  Drink from a water source with an empty hand (1 point), fill a Glass Bottle (three glass in a
+  V make three) or a Canteen (an iron nugget over three iron ingots in a cup; three sips) at a
+  water source, and hold use 1.6 s to drink: dirty water gives 4 points with a 75% chance of the
+  Thirst effect (30 s of extra exhaustion, the droplets turn green), purified water (smelt the
+  dirty bottle or canteen in a furnace) 6 and hydration with no risk. Body temperature drifts a
+  level every 10 s between icy, cold, neutral, warm and hot towards what the place says: the
+  biome (tundra icy, taiga cold, plains neutral, jungle warm, desert hot), colder high up and
+  outdoors at night, milder under a roof, neutral deep underground; being wet cools a level,
+  sprinting warms one, lava, fire, a lit furnace or a working generator within 5 blocks warm
+  one, ice and snow cool one, and two leather pieces keep the cold off by one. Icy for 7 s
+  freezes you (half a heart every 2 s; any leather prevents it), hot overheats you the same way
+  and makes you sweat; frost or heat closes in from the screen's edges, and a gauge over the
+  hotbar shows the level with an arrow for where it is going. Creative and spectator players
+  are untouched. `Config.ToughAsNails` turns thirst or temperature off.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -658,6 +678,7 @@ Studio tips:
 | Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
+| Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle or a canteen: fill it; hold right click with a filled bottle or canteen for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker; spectator: none) | Y   | `…` button |
@@ -789,6 +810,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             in lava and oil)
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools
+  ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
+                            dehydration, regeneration, the Thirst effect), Temperature (levels,
+                            the target, the drift, hypothermia and hyperthermia), Drinks (water
+                            sources, bottles, canteens), Exertion (movement that costs thirst)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
@@ -880,7 +905,10 @@ src/server   -> ServerScriptService.IceVoxel
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage, invulnerability, suffocation, lava and burning, explosions),
                             Burning (lava hurting and burning players and items, the hurt
-                            cooldown explosions share; pure), Spawning,
+                            cooldown explosions share; pure), ToughAsNails (thirst and body
+                            temperature: ticks, drinking, exertion, the HUD's state) + Climate
+                            (the surroundings: biome, roof, heat and cold sources; pure),
+                            Spawning,
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
@@ -909,9 +937,11 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Settings/                 the player's settings: State (values and choices), Schedule (when
                             changes apply), Pages (the menu's layout), saving them on the server
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
-                            (does a bucket on a machine act on its tanks or open its screen)
+                            (does a bucket on a machine act on its tanks or open its screen),
+                            Drinking (Tough As Nails: filling, sipping, holding a drink)
   Inventory/                ClientInventory + Prediction (predicted inventory)
-  Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
+  Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: thirst droplets, the
+                            temperature gauge, frost and heat at the edges), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
                             energy bar and fluid gauges, empty armor and upgrade slots'
                             outlines), CreativeScreen,
@@ -937,7 +967,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             spectating a player), CharacterAnimator (avatar animations from the
                             hull), HeldItems, SpectatorView + SpectatorRules (who sees, hears and
                             aims at spectators), BurningView (flames on burning players, the fire
-                            overlay in first person)
+                            overlay in first person), SurvivalState (Tough As Nails' state from
+                            the server), Exertion (reports sprinting, swimming and jumps)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/FireRenderer    fire's animated flames (SurfaceGui planes, one shared animation step)
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
@@ -1033,6 +1064,12 @@ for performance:
 | `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (`Gameplay.Admins`, the owner and Studio always may). |
 | `Gameplay.Admins`         | {}      | User ids who may change other players' game modes (and their own) and the time (`/time set\|add`, `/gamerule`). |
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
+| `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
+| `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. |
+| `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration stops at (Minecraft's normal difficulty; 0: to death). |
+| `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.01 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
+| `ToughAsNails.ChangeTicks` / `WetTicks` | 200 / 100 | Ticks per temperature level step; ticks a player stays wet out of water. |
+| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire / ice, snow | Heat and cold sources within that many blocks change the temperature by a level (fluid or block names). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
@@ -1678,6 +1715,22 @@ world:setBlock(10, 80, 10, Blocks.id.Stone) -- replicated to every client, trigg
 print(world:getBlock(10, 80, 10))
 IceVoxel.explode(10.5, 82, 10.5, 4) -- a TNT-sized blast on the next tick (true as a fifth argument sets fire)
 ```
+
+**A heat or cold source (Tough As Nails).** Name a block or fluid in
+`Config.ToughAsNails.HeatingBlocks` / `CoolingBlocks`, or, for one that warms only in some state,
+register it from a server script with a check (lit furnaces and working generators are done this
+way in `Players/ToughAsNails`):
+
+```lua
+local Climate = require(game.ServerScriptService.IceVoxel.Players.Climate)
+Climate.addHeatSource("Campfire", function(x, y, z, block)
+	return isLit(x, y, z)
+end)
+Climate.addColdSource("PowderSnow")
+```
+
+A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
+second, and warms (or cools) by one level however many there are.
 
 **Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
 leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values

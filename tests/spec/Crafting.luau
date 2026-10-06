@@ -171,8 +171,9 @@ return function(t, shared, require)
 		end
 		-- (99 before the four Universal Cables; 105 before the upgrade cards and the Solar Panel;
 		-- 108 before the four Batteries; 112 before Shears; 113 before the Oil Refinery and the
-		-- Combustion Generator; 115 before Flint and Steel.)
-		t.eq(#Crafting.recipes, 116, "recipes compiled")
+		-- Combustion Generator; 115 before the Glass Bottle and the Canteen, Tough As Nails; 117 before
+		-- Flint and Steel.)
+		t.eq(#Crafting.recipes, 118, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

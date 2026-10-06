@@ -1,0 +1,505 @@
+--!strict
+--[[
+	Tough As Nails on the server: every player's thirst and body temperature (the rules are
+	Shared/ToughAsNails, pure and tested; this plays them out). Config.ToughAsNails turns each on
+	and off; with both off nothing here runs.
+
+	  Ticks      20 a second (catching up a few per frame), for every living player:
+	               * a hurt that landed since the last tick (health went down, not by this
+	                 module) costs Thirst.EXHAUSTION.hurt;
+	               * water touching the standing box (Players/Burning.touching) makes them wet;
+	               * once a second (players spread over the second) the surroundings
+	                 (Players/Climate) set the temperature's target;
+	               * Temperature.tick (the drift, hypothermia, hyperthermia), then Thirst.tick
+	                 (with HOT's sweating: Config.ToughAsNails.HotExhaustion) and what they cost
+	                 or give back: Humanoid:TakeDamage (half hearts scaled to MaxHealth, as
+	                 Players/Characters does; it respects the ForceField of creative players, who
+	                 are spared anyway) and regeneration;
+	               * the player's Survival message when what it says changed, at most every
+	                 SEND_TICKS ticks (and at once for a new character).
+	  Health     with thirst on and Config.ToughAsNails.ThirstRegeneration, health comes back only
+	             by thirst's rule: the character's Roblox "Health" script (its regeneration) is
+	             removed as it appears.
+	  Death      a new character starts over (full thirst, neutral, dry), as TAN resets on respawn.
+	  Exertion   the client's movement reports (Protocol Exertion, ToughAsNails/Exertion), bounded
+	             by the time since the last one, cost exhaustion; their sprint flag counts as
+	             sprinting for SPRINT_HOLD seconds. Breaking a block costs Thirst.EXHAUSTION.mine
+	             (ServerNet's `broke` rule, `blockBroken`).
+	  Drinking   Protocol Drink (Shared/ToughAsNails/Drinks): a living player who is not a
+	             spectator, the item really in their hand.
+	               start / finish  a bottle or canteen held from `start` to `finish` for at
+	                               least Drinks.USE_TICKS - FINISH_LEEWAY ticks, the same item in
+	                               the same slot, while they may drink (Thirst.canDrink): drunk,
+	                               the Thirst effect rolled, the bottle or sip used up
+	                               (Drinks.afterDrinking); everyone else hears the last gulp
+	                               (entity.generic.drink: the drinker's client plays its own);
+	               hand            an empty hand at a water source within reach
+	                               (Config.Interaction.Reach + 2 blocks, as ItemUse), at most
+	                               every Drinks.HAND_INTERVAL ticks: a sip (with
+	                               Config.ToughAsNails.HandDrinking);
+	               fill            a Glass Bottle or canteen at a water source within reach:
+	                               filled (Drinks.fill), item.bottle.fill for everyone near.
+	             Sounds a player's requests cause use their budget (Audio/Sounds.allow).
+	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
+	             Combustion Generators (their machine's active flag) are heat sources
+	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks.
+]]
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
+local Config = require(Shared.Config)
+local Fluids = require(Shared.Fluids)
+local GameMode = require(Shared.GameMode)
+local Protocol = require(Shared.Net.Protocol)
+local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
+local Rig = require(Shared.Movement.Rig)
+local SharedMachines = require(Shared.Machines)
+local ToughAsNails = require(Shared.ToughAsNails)
+
+local ServerNet = require(script.Parent.Parent.Network.ServerNet)
+local WorldServer = require(script.Parent.Parent.World.WorldServer)
+local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local SkyCheck = require(script.Parent.Parent.Machines.SkyCheck)
+local MachineWorld = require(script.Parent.Parent.Machines.MachineWorld)
+local Machines = require(script.Parent.Parent.Machines.Machines)
+local Burning = require(script.Parent.Burning)
+local Characters = require(script.Parent.Characters)
+local Climate = require(script.Parent.Climate)
+local Containers = require(script.Parent.Containers)
+local Inventories = require(script.Parent.Inventories)
+
+local Thirst = require(Shared.ToughAsNails.Thirst)
+local Temperature = require(Shared.ToughAsNails.Temperature)
+local Drinks = require(Shared.ToughAsNails.Drinks)
+local Exertion = require(Shared.ToughAsNails.Exertion)
+
+local BLOCK = Config.BlockSize
+-- Minecraft players have 20 health points (half hearts).
+local HEALTH = 20
+local TICK = 1 / 20
+local MAX_TICKS_PER_FRAME = 4
+-- Ticks between two Survival messages to one player.
+local SEND_TICKS = 4
+-- Seconds a report's sprint flag counts.
+local SPRINT_HOLD = 2
+-- Ticks a drink may finish early (the client's clock and the network's jitter).
+local FINISH_LEEWAY = 4
+-- Exertion reports a player may send per second.
+local REPORTS_PER_SECOND = 4
+-- The body water is looked for in: the standing box (the server can't tell the pose).
+local BODY = PlayerPhysics.dimensions("standing")
+local DRINK = "entity.generic.drink"
+local FILL = "item.bottle.fill"
+
+type Record = {
+	thirst: Thirst.State,
+	temperature: Temperature.State,
+	-- os.clock() until which the player counts as sprinting.
+	sprintingUntil: number,
+	-- The last Exertion report (os.clock()) and how many came this second.
+	lastReport: number,
+	reports: number,
+	reportSecond: number,
+	-- A drink being held: since when (os.clock()), the hotbar slot and the item.
+	drinking: { started: number, slot: number, item: number }?,
+	lastHand: number,
+	-- Health (half hearts) after the last tick, to spot hurts.
+	health: number?,
+	-- The last Survival payload sent and the ticks until another may go.
+	sent: string?,
+	wait: number,
+}
+
+local ToughAsNailsServer = {}
+
+local records: { [Player]: Record } = {}
+local started = false
+local random = Random.new()
+
+local function newRecord(): Record
+	return {
+		thirst = Thirst.new(),
+		temperature = Temperature.new(),
+		sprintingUntil = 0,
+		lastReport = os.clock(),
+		reports = 0,
+		reportSecond = 0,
+		drinking = nil,
+		lastHand = -math.huge,
+		health = nil,
+		sent = nil,
+		wait = 0,
+	}
+end
+
+-- Is thirst / temperature on?
+local function thirstOn(): boolean
+	return ToughAsNails.thirstOn()
+end
+local function temperatureOn(): boolean
+	return ToughAsNails.temperatureOn()
+end
+
+local function humanoidOf(player: Player): Humanoid?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		return humanoid
+	end
+	return nil
+end
+
+-- Is block (x, y, z) within the player's reach (as ItemUse checks)?
+local function inReach(player: Player, x: number, y: number, z: number): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root == nil or not root:IsA("BasePart") then
+		return false
+	end
+	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
+	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+end
+
+-- The selected hotbar slot (nil without an inventory).
+local function selectedSlot(player: Player): number?
+	local window = Inventories.get(player)
+	return if window then window.inventory.selected else nil
+end
+
+-- The player's Survival message as of now.
+local function status(record: Record): Protocol.SurvivalStatus
+	local thirst, temperature = record.thirst, record.temperature
+	return {
+		thirstOn = thirstOn(),
+		temperatureOn = temperatureOn(),
+		wet = Temperature.isWet(temperature),
+		thirst = thirst.thirst,
+		hydration = thirst.hydration,
+		exhaustion = thirst.exhaustion,
+		level = temperature.level,
+		target = temperature.target,
+		frozen = temperature.frozen,
+		heat = temperature.heat,
+		effect = thirst.effect,
+	}
+end
+
+local function send(net: ServerNet.ServerNet, player: Player, record: Record)
+	if record.wait > 0 then
+		record.wait -= 1
+	end
+	local payload = Protocol.encodeSurvival(status(record))
+	local text = buffer.tostring(payload)
+	if text ~= record.sent and record.wait <= 0 then
+		record.sent = text
+		record.wait = SEND_TICKS
+		net.send(player, Protocol.ServerMessage.Survival, payload)
+	end
+end
+
+-- Removes the character's Roblox regeneration (its "Health" script), now and when it appears.
+local function stopRobloxRegeneration(character: Model)
+	local function check(child: Instance)
+		if child.Name == "Health" and child:IsA("BaseScript") then
+			child:Destroy()
+		end
+	end
+	for _, child in character:GetChildren() do
+		check(child)
+	end
+	character.ChildAdded:Connect(check)
+end
+
+--[[ Ticking ]]
+
+-- One tick of one player (see the header). `sample`: look at the surroundings this tick.
+local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: Player, record: Record, sample: boolean)
+	local character = player.Character
+	local humanoid = humanoidOf(player)
+	local feet = if character then Rig.feet(character) else nil
+	if
+		character == nil
+		or humanoid == nil
+		or feet == nil
+		or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+	then
+		return
+	end
+	local mode = GameMode.of(player)
+	local maxHealth = humanoid.MaxHealth
+	if maxHealth <= 0 then
+		return
+	end
+	local health = humanoid.Health / maxHealth * HEALTH
+	local thirst, temperature = record.thirst, record.temperature
+	if thirstOn() and record.health and health < record.health - 1e-3 and ToughAsNails.affects(mode) then
+		Thirst.addExhaustion(thirst, Thirst.EXHAUSTION.hurt)
+	end
+
+	local damage, heal = 0, 0
+	if temperatureOn() then
+		local touching = Burning.touchingAt(view.getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		if Burning.has(touching, Fluids.WATER) then
+			Temperature.soak(temperature)
+		end
+		local window = Inventories.get(player)
+		local leather = if window then Climate.leatherPieces(window.inventory.armor) else 0
+		if sample then
+			local env = Climate.environment(view, feet.X, feet.Y, feet.Z, TimeOfDay.get(), {
+				wet = Temperature.isWet(temperature),
+				sprinting = os.clock() < record.sprintingUntil,
+				burning = character:GetAttribute(Characters.ON_FIRE) == true,
+				leather = leather,
+			})
+			temperature.target = Temperature.target(env)
+		end
+		damage += Temperature.tick(temperature, mode, leather > 0)
+	end
+	if thirstOn() then
+		local hot = temperatureOn() and temperature.level >= Temperature.HOT
+		local lost, gained =
+			Thirst.tick(thirst, mode, health, HEALTH, if hot then Config.ToughAsNails.HotExhaustion else 0)
+		damage += lost
+		heal += gained
+	end
+	if damage > 0 then
+		humanoid:TakeDamage(damage / HEALTH * maxHealth)
+	end
+	if heal > 0 and humanoid.Health > 0 then
+		humanoid.Health = math.min(maxHealth, humanoid.Health + heal / HEALTH * maxHealth)
+	end
+	-- (Read after this tick's own hurts and healing, which cost no exhaustion of their own.)
+	record.health = humanoid.Health / maxHealth * HEALTH
+	send(net, player, record)
+end
+
+--[[ Requests ]]
+
+local function onExertion(player: Player, payload: buffer)
+	local report = Protocol.decodeExertion(payload)
+	local record = records[player]
+	if report == nil or record == nil then
+		return
+	end
+	local now = os.clock()
+	local second = math.floor(now)
+	if second ~= record.reportSecond then
+		record.reportSecond, record.reports = second, 0
+	end
+	record.reports += 1
+	if record.reports > REPORTS_PER_SECOND then
+		return
+	end
+	local seconds = math.min(now - record.lastReport, 2) + 0.25
+	record.lastReport = now
+	record.sprintingUntil = if report.sprinting then now + SPRINT_HOLD else 0
+	if thirstOn() and humanoidOf(player) and ToughAsNails.affects(GameMode.of(player)) then
+		Thirst.addExhaustion(record.thirst, Exertion.exhaustion(Exertion.clamp(report, seconds)))
+	end
+end
+
+-- Plays the drinking gulp for everyone near but the drinker (whose client played it).
+local function gulp(player: Player)
+	if Sounds.allow(player) then
+		Sounds.playAt(player, DRINK, player)
+	end
+end
+
+local function onDrink(world: WorldServer.World, player: Player, payload: buffer)
+	local action, x, y, z = Protocol.decodeDrink(payload)
+	local record = records[player]
+	local mode = GameMode.of(player)
+	if action == nil or record == nil or humanoidOf(player) == nil or GameMode.isSpectator(mode) then
+		return
+	end
+	local actions = Protocol.DrinkAction
+	local held = Inventories.heldStack(player)
+	local now = os.clock()
+	if action == actions.Cancel then
+		record.drinking = nil
+	elseif action == actions.Start then
+		record.drinking = nil
+		local slot = selectedSlot(player)
+		if held and slot and Drinks.isDrink(held.item) and thirstOn() and Thirst.canDrink(record.thirst, mode) then
+			record.drinking = { started = now, slot = slot, item = held.item }
+		end
+	elseif action == actions.Finish then
+		local drinking = record.drinking
+		record.drinking = nil
+		local drink = Drinks.of(held and held.item)
+		if
+			drinking == nil
+			or held == nil
+			or drink == nil
+			or held.item ~= drinking.item
+			or selectedSlot(player) ~= drinking.slot
+			or now - drinking.started < (Drinks.USE_TICKS - FINISH_LEEWAY) * TICK
+			or not thirstOn()
+			or not Thirst.canDrink(record.thirst, mode)
+		then
+			return
+		end
+		Drinks.apply(record.thirst, drink, function(): number
+			return random:NextNumber()
+		end)
+		local newHeld, give = Drinks.afterDrinking(held, GameMode.instabuild(mode))
+		if newHeld ~= held then
+			Inventories.setHeld(player, newHeld)
+		end
+		if give then
+			Inventories.give(player, give)
+		end
+		gulp(player)
+	elseif action == actions.Hand or action == actions.Fill then
+		if
+			y >= Config.WorldHeight
+			or not inReach(player, x, y, z)
+			or not Drinks.isWaterSource(world:peekBlock(x, y, z))
+		then
+			return
+		end
+		if action == actions.Hand then
+			if
+				held ~= nil
+				or not Config.ToughAsNails.HandDrinking
+				or not thirstOn()
+				or not Thirst.canDrink(record.thirst, mode)
+				or now - record.lastHand < Drinks.HAND_INTERVAL * TICK
+			then
+				return
+			end
+			record.lastHand = now
+			Drinks.apply(record.thirst, Drinks.HAND, function(): number
+				return random:NextNumber()
+			end)
+			gulp(player)
+		elseif held and Drinks.fills(held) then
+			local newHeld, give = Drinks.fill(held, GameMode.instabuild(mode), function(item: number): boolean
+				return Inventories.hasItem(player, item)
+			end)
+			if newHeld ~= held then
+				Inventories.setHeld(player, newHeld)
+			end
+			if give then
+				Inventories.give(player, give)
+			end
+			if Sounds.allow(player) then
+				Sounds.playAt(player, FILL)
+			end
+		end
+	end
+end
+
+--[[ API ]]
+
+-- ServerNet's `broke` rule: `player` broke `block` in survival (Minecraft's EXHAUSTION_MINE).
+function ToughAsNailsServer.blockBroken(player: Player, _block: number)
+	local record = records[player]
+	if record and thirstOn() and ToughAsNails.affects(GameMode.of(player)) then
+		Thirst.addExhaustion(record.thirst, Thirst.EXHAUSTION.mine)
+	end
+end
+
+-- A player's thirst and temperature (nil before their first character), read only.
+function ToughAsNailsServer.state(player: Player): (Thirst.State?, Temperature.State?)
+	local record = records[player]
+	if record == nil then
+		return nil, nil
+	end
+	return record.thirst, record.temperature
+end
+
+-- The heat sources that warm only while they burn or work (see the header).
+local function registerHeatSources()
+	Climate.addHeatSource(Blocks.id.Furnace, function(x: number, y: number, z: number): boolean
+		local container = Containers.peek(x, y, z)
+		local data = container and container.data
+		return data ~= nil and (data[1] or 0) > 0
+	end)
+	local function working(x: number, y: number, z: number): boolean
+		local machines = Machines.world()
+		local machine = if machines then MachineWorld.machine(machines, x, y, z) else nil
+		local data = if machine then machine.container.data else nil
+		return data ~= nil and (data[SharedMachines.ACTIVE] or 0) ~= 0
+	end
+	Climate.addHeatSource(Blocks.id.HeatGenerator, working)
+	Climate.addHeatSource(Blocks.id.CombustionGenerator, working)
+end
+
+--[[
+	Starts thirst and temperature (nothing when Config.ToughAsNails turns both off). Players/
+	Inventories and Machines must have started.
+]]
+function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.World)
+	assert(not started, "ToughAsNails.start was already called")
+	started = true
+	if not thirstOn() and not temperatureOn() then
+		return
+	end
+	registerHeatSources()
+
+	local view: Climate.View = {
+		getBlock = function(x: number, y: number, z: number): number?
+			return world:peekBlock(x, y, z)
+		end,
+		column = function(x: number, z: number): (number, number)
+			local height, biome = world.generator.column(x, z)
+			return height, biome
+		end,
+		skyOpen = function(x: number, y: number, z: number): boolean
+			return SkyCheck.open(world, x, y, z)
+		end,
+	}
+
+	local function onCharacter(player: Player, character: Model)
+		-- (A new character starts over, as TAN's respawned player.)
+		records[player] = newRecord()
+		if thirstOn() and Config.ToughAsNails.ThirstRegeneration then
+			stopRobloxRegeneration(character)
+		end
+	end
+	local function onPlayer(player: Player)
+		player.CharacterAdded:Connect(function(character)
+			onCharacter(player, character)
+		end)
+		if player.Character then
+			onCharacter(player, player.Character)
+		end
+	end
+	Players.PlayerAdded:Connect(onPlayer)
+	for _, player in Players:GetPlayers() do
+		onPlayer(player)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		records[player] = nil
+	end)
+
+	net.on(Protocol.ClientMessage.Exertion, onExertion)
+	net.on(Protocol.ClientMessage.Drink, function(player: Player, payload: buffer)
+		onDrink(world, player, payload)
+	end)
+
+	local accumulator = 0
+	local tick = 0
+	RunService.Heartbeat:Connect(function(dt: number)
+		accumulator = math.min(accumulator + dt, TICK * MAX_TICKS_PER_FRAME)
+		while accumulator >= TICK do
+			accumulator -= TICK
+			tick += 1
+			for player, record in records do
+				-- (Each player looks around once a second, on a tick of their own.)
+				local sample = (tick + player.UserId) % 20 == 0
+				tickPlayer(net, view, player, record, sample)
+			end
+		end
+	end)
+end
+
+return ToughAsNailsServer

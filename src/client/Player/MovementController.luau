@@ -76,6 +76,7 @@ local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
+local Exertion = require(script.Parent.Exertion)
 
 local BLOCK = Config.BlockSize
 local Movement = Config.Movement
@@ -766,6 +767,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					previous = Vector3.new(state.x, state.y, state.z)
 					local events = PlayerPhysics.tick(state, frameInput, physicsWorld)
 					MovementSounds.tick(state, events, previous, physicsWorld.getBlock)
+					-- (Thirst: sprinting, swimming and jumps, Tough As Nails.)
+					Exertion.tick(state, events, previous)
 					frameInput.jump = jumpHeld()
 					jumpLatched = false
 					view.speed = math.sqrt((state.x - previous.X) ^ 2 + (state.z - previous.Z) ^ 2) * TICK_RATE

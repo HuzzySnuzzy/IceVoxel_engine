@@ -324,6 +324,20 @@ for _, piece in { "Helmet", "Chestplate", "Leggings", "Boots" } do
 end
 
 -- Burn time (ticks) of furnace fuel (Minecraft's AbstractFurnaceBlockEntity.getFuel).
+--[[
+	Tough As Nails' water (Shared/ToughAsNails/Drinks). The Glass Bottle is Minecraft's (three glass
+	in a V make three). TAN's leather canteen is made of iron here, as the game has no leather: an
+	iron nugget for the stopper over three iron ingots in a cup (the Bucket's shape, which the
+	nugget's row keeps apart from it). Dirty water is purified by smelting it, TAN's original way
+	(its later Water Purifier is a machine of its own): a Dirty Water Bottle into a Purified Water
+	Bottle, a Dirty Water Canteen into a full Purified Water Canteen (filling a canteen at water
+	fills it anyway, so nothing is gained).
+]]
+shape({ "G G", " G " }, { G = "Glass" }, "GlassBottle", 3)
+shape({ " N ", "I I", " I " }, { N = "IronNugget", I = "IronIngot" }, "Canteen")
+smelt("DirtyWaterBottle", "PurifiedWaterBottle")
+smelt("DirtyWaterCanteen", "PurifiedWaterCanteen")
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,

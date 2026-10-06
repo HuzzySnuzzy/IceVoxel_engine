@@ -535,9 +535,39 @@ SoundList.EVENTS = {
 	},
 
 	--[[
+		Tough As Nails' drinking (Shared/ToughAsNails). Drinking from a bottle or a canteen is
+		Minecraft's 32 tick use: entity.generic.drink (volume 0.5, pitch 0.9..1.0,
+		LivingEntity.triggerItemUseEffects) every 4 ticks from the 7th and once more at the end,
+		which the drinker's client plays itself while the server plays the last one to everyone
+		else; a sip from a water source with an empty hand (TAN's hand drinking) plays it once. A
+		Glass Bottle or a canteen filled at water: item.bottle.fill (BottleItem, volume 1). Stand-ins:
+		a short swim stroke pitched up into a gulp, and the splash pitched high.
+	]]
+	{
+		name = "entity.generic.drink",
+		id = SWIM,
+		volume = 0.5,
+		pitch = 1.5,
+		pitchVariance = 0.05,
+		duration = 0.25,
+		source = "players",
+		side = "predicted",
+	},
+	{
+		name = "item.bottle.fill",
+		id = SPLASH,
+		volume = 0.6,
+		pitch = 1.7,
+		pitchVariance = 0.05,
+		duration = 0.5,
+		source = "players",
+		side = "server",
+	},
+
+	--[[
 		Fire (Minecraft 1.20.1). BaseFireBlock.animateTick: a fire crackles one time in 24 that the
 		client's random display tick picks it (block.fire.ambient, cue volume 1..2, pitch 0.3..1;
-		Audio/Ambience, SoundRules.fireTick), each client by itself. Punching a fire out sounds like
+		Audio/Ambience, SoundRules.fireCrackle), each client by itself. Punching a fire out sounds like
 		level event 1009 (block.fire.extinguish, volume 0.5, pitch 2.6 +- 0.8, as lava's fizz): it
 		is the Fire block's break sound (BLOCK_SOUNDS below), so the player who breaks it hears it
 		at once and the server sends it to everyone else. Flint and steel striking
