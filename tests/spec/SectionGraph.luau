@@ -1,8 +1,9 @@
 --[[
 	The cave visibility graph (World/SectionGraph): per-section face connectivity against a plain
-	per-cell flood fill (random sections and generated chunks), the section value, the search from
-	the camera (tunnels, the never-step-back rule, reach, budget, pending chunks, no leaks into the
-	sky, dug tunnels), cap masks and the hysteresis tracker.
+	per-cell flood fill (random sections and generated chunks, with and without a sky line), the
+	section value, the search from the camera (tunnels, the never-step-back rule, reach, budget,
+	pending chunks, no leaks into the sky, dug tunnels, from a surface cave's entrance down into
+	the caves), cap masks and the hysteresis tracker.
 ]]
 
 return function(t, shared, require)
@@ -47,7 +48,12 @@ return function(t, shared, require)
 		return bit32.bor(m, bit32.lshift(faces, 15))
 	end
 
-	local function reference(data: buffer, height: number, s: number): (number, number, number, boolean)
+	local function reference(
+		data: buffer,
+		height: number,
+		s: number,
+		sky: buffer?
+	): (number, number, number, boolean, number)
 		local function cell(x: number, y: number, z: number): number
 			local yy = s * SECTION + y
 			if yy >= height then
@@ -56,7 +62,7 @@ return function(t, shared, require)
 			return ChunkLayout.get(data, x, yy, z)
 		end
 		local seen = {}
-		local cave, open, sealed, anyCave = 0, 0, 0, false
+		local cave, open, sealed, anyCave, under = 0, 0, 0, false, 0
 		for y = 0, 15 do
 			for z = 0, 15 do
 				for x = 0, 15 do
@@ -67,13 +73,17 @@ return function(t, shared, require)
 					end
 					seen[i] = true
 					local stack = { { x, y, z } }
-					local faces, hasCave = 0, false
+					local faces, hasCave, hasSky = 0, false, false
 					while #stack > 0 do
 						local c = table.remove(stack) :: { number }
 						local cx, cy, cz = c[1], c[2], c[3]
 						local b = cell(cx, cy, cz)
 						if b == CAVE_AIR or buffer.readu8(Blocks.caveTwinLut, b) == 1 then
 							hasCave = true
+						end
+						-- At or above its column's sky line (every cell without one).
+						if sky == nil or s * SECTION + cy >= buffer.readu16(sky, (cz * 16 + cx) * 2) then
+							hasSky = true
 						end
 						if cx == 0 then
 							faces = bit32.bor(faces, 1)
@@ -113,20 +123,24 @@ return function(t, shared, require)
 						if not bit32.btest(faces, 32) then
 							sealed = bit32.bor(sealed, m)
 						end
+						if not hasSky then
+							under = bit32.bor(under, m)
+						end
 					end
 				end
 			end
 		end
-		return cave, open, sealed, anyCave
+		return cave, open, sealed, anyCave, under
 	end
 
-	local function same(data: buffer, height: number, s: number, label: string)
-		local c1, o1, s1, h1 = SectionGraph.masks(data, height, s)
-		local c2, o2, s2, h2 = reference(data, height, s)
+	local function same(data: buffer, height: number, s: number, label: string, sky: buffer?)
+		local c1, o1, s1, h1, u1 = SectionGraph.masks(data, height, s, sky)
+		local c2, o2, s2, h2, u2 = reference(data, height, s, sky)
 		t.eq(c1, c2, `{label}: cave mask`)
 		t.eq(o1, o2, `{label}: open mask`)
 		t.eq(s1, s2, `{label}: sealed mask`)
 		t.eq(h1, h2, `{label}: holds caves`)
+		t.eq(u1, u2, `{label}: underground mask`)
 	end
 
 	-- A deterministic pseudo-random sequence (no math.random state shared with other specs).
@@ -156,20 +170,38 @@ return function(t, shared, require)
 				end
 				buffer.writeu16(data, i * 2, id)
 			end
+			-- A sky line crossing the sections, from below the chunk to above its crop.
+			local sky = buffer.create(512)
+			for i = 0, 255 do
+				buffer.writeu16(sky, i * 2, math.floor(random() * 52))
+			end
 			for s = 0, 2 do
 				same(data, height, s, `random {round} section {s}`)
+				same(data, height, s, `random {round} section {s}, sky line`, sky)
 			end
 		end
+		-- All air: underground only where every cell is below the sky line.
+		local air = ChunkLayout.create(32)
+		local sky = buffer.create(512)
+		for i = 0, 255 do
+			buffer.writeu16(sky, i * 2, if i == 77 then 20 else 40)
+		end
+		for s = 0, 1 do
+			same(air, 32, s, `all air section {s}, sky line`, sky)
+		end
+		t.eq(select(5, SectionGraph.masks(air, 32, 0, sky)), SectionGraph.FULL, "all air below the sky line")
+		t.eq(select(5, SectionGraph.masks(air, 32, 1, sky)), 0, "one cell of sky")
 	end)
 
 	t.test("section graph: masks match a per-cell flood fill on generated chunks", function()
 		local gen = TerrainGenerator.new(12345)
 		local checked, withCaves = 0, 0
 		for _, c in { { 30, -10 }, { 31, -10 }, { 200, -913 }, { -4, 6 } } do
-			local r = gen.generate(0, c[1], c[2])
+			local r = gen.generate(0, c[1], c[2], nil, true)
 			for s = 0, (r.height - 1) // SECTION do
 				local _, _, _, hasCave = SectionGraph.masks(r.data, r.height, s)
 				same(r.data, r.height, s, `chunk {c[1]},{c[2]} section {s}`)
+				same(r.data, r.height, s, `chunk {c[1]},{c[2]} section {s}, sky line`, r.surface)
 				checked += 1
 				if hasCave then
 					withCaves += 1
@@ -191,6 +223,9 @@ return function(t, shared, require)
 		t.ok(not bit32.btest(v, SectionGraph.BURIED), "not buried")
 		local b = SectionGraph.value(0, open, 0, false, true)
 		t.eq(bit32.band(b, SectionGraph.MASK), open, "buried: open air is followed too")
+		local under = bit32.lshift(2, 15) -- touches +X
+		local u = SectionGraph.value(cave, bit32.bor(open, sealed, under), sealed, true, false, under)
+		t.eq(bit32.band(u, SectionGraph.MASK), bit32.bor(cave, sealed, under), "underground pockets are followed")
 		t.ok(bit32.btest(b, SectionGraph.BURIED) and not bit32.btest(b, SectionGraph.CAVES), "flags")
 		-- Above the crop: one pocket of air touching every face, the sky: not followed.
 		local c, o, sl, h = SectionGraph.masks(ChunkLayout.create(16), 16, 3)
@@ -251,6 +286,49 @@ return function(t, shared, require)
 		t.ok(bit32.btest(bit32.rshift(v2, SectionGraph.PASSABLE_SHIFT), 4), "but it is passable")
 	end)
 
+	t.test("section graph: the sky line is kept in the graph; refresh follows dug air below it", function()
+		local height = 80
+		local data = ChunkLayout.create(height)
+		for y = 0, 63 do
+			for i = 0, ChunkLayout.LAYER - 1 do
+				buffer.writeu16(data, (y * ChunkLayout.LAYER + i) * 2, STONE)
+			end
+		end
+		-- Ground at 64, the sky line there; nothing buried (the bury line at 0).
+		local sky = buffer.create(512)
+		for i = 0, 255 do
+			buffer.writeu16(sky, i * 2, 64)
+		end
+		local graph = SectionGraph.build(data, height, 0, { 2, 3 }, nil, nil, sky)
+		t.eq(buffer.len(graph), SectionGraph.BYTES, "section values and the sky line")
+		t.eq(buffer.readu16(graph, SectionGraph.SKY_OFFSET + 77 * 2), 64, "the sky line is kept")
+		-- A shaft dug from y 34 up to 63 (just under the ground) and a tunnel along Z at its
+		-- bottom: open at the top of sections 2 and 3, but under the sky line: followed.
+		for y = 34, 63 do
+			ChunkLayout.set(data, 3, y, 4, AIR)
+		end
+		for z = 0, 15 do
+			ChunkLayout.set(data, 3, 34, z, AIR)
+		end
+		SectionGraph.refresh(graph, data, height, { 2, 3 })
+		local v2 = SectionGraph.get(graph, 2)
+		t.ok(SectionGraph.connected(v2, 2, 3) and SectionGraph.connected(v2, 2, 5), "followed up the shaft")
+		t.ok(SectionGraph.connected(SectionGraph.get(graph, 3), 4, 5), "and on to the ground's section")
+		-- Opened to the sky: the top section's pocket holds sky cells and is no longer followed;
+		-- below it the shaft still is.
+		ChunkLayout.set(data, 3, 63, 4, AIR)
+		for y = 64, height - 1 do
+			ChunkLayout.set(data, 3, y, 4, AIR)
+		end
+		SectionGraph.refresh(graph, data, height, { 2, 3, 4 })
+		t.ok(SectionGraph.connected(SectionGraph.get(graph, 2), 2, 5), "below the mouth: still followed")
+		t.ok(not SectionGraph.connected(SectionGraph.get(graph, 4), 4, 5), "the open shaft's mouth: not")
+		-- Without a sky line (an old graph) the same shaft is only followed where it is sealed.
+		local plain = SectionGraph.create()
+		SectionGraph.refresh(plain, data, height, { 2 })
+		t.ok(not SectionGraph.connected(SectionGraph.get(plain, 2), 2, 5), "no sky line: open air is sky")
+	end)
+
 	t.test("section graph: carved sections hold every cave cell", function()
 		local gen = TerrainGenerator.new(12345)
 		for _, c in { { 30, -10 }, { 200, -913 } } do
@@ -276,14 +354,18 @@ return function(t, shared, require)
 	end)
 
 	-- The graph a worker builds for a fresh chunk: the generator's lattice as a hint.
-	local function workerGraph(r: any, cx: number, cz: number, hinted: boolean): buffer
+	local function workerGraph(r: any, cx: number, cz: number, hinted: boolean): (buffer, { number })
 		local exact: { [number]: boolean } = {}
 		local extra = {}
 		if r.structureSpan then
 			for s = r.structureSpan[1] // SECTION, r.structureSpan[2] // SECTION do
 				exact[s] = true
-				table.insert(extra, s)
 			end
+		end
+		-- (Air carved below the surface: surface caves, cellars.)
+		SectionGraph.dugSections(r.data, r.height, r.surface, r.solidBelow, exact)
+		for s in exact do
+			table.insert(extra, s)
 		end
 		local list = SectionGraph.carvedSections(r.carved, Caves.CELL_Y, extra)
 		local hint: SectionGraph.Hint? = if hinted
@@ -297,11 +379,11 @@ return function(t, shared, require)
 				exact = exact,
 			}
 			else nil
-		return SectionGraph.build(r.data, r.height, r.solidBelow, list, hint)
+		return SectionGraph.build(r.data, r.height, r.solidBelow, list, hint, nil, r.surface), list
 	end
 
 	t.test("section graph: the generator's lattice gives the same graph as reading every cell", function()
-		local checked = 0
+		local checked, carved = 0, 0
 		for _, seed in { 12345, 777 } do
 			local gen = TerrainGenerator.new(seed)
 			-- Hills, mountains (caves under steep ground), the Underlands, and chunks with structures.
@@ -309,10 +391,16 @@ return function(t, shared, require)
 			for i = 1, 40 do
 				table.insert(chunks, { (i * 37) % 97 - 48, (i * 53) % 89 - 44 })
 			end
+			if seed == 12345 then
+				-- Cave entrances meeting caves, and a ravine.
+				for _, c in { { -1, 5 }, { 0, 6 }, { -3, 5 }, { -5, 4 }, { 36, -28 }, { 32, -26 } } do
+					table.insert(chunks, c)
+				end
+			end
 			for _, c in chunks do
 				local r = gen.generate(0, c[1], c[2], nil, true)
 				t.ok(r.surface ~= nil, "surface heights")
-				local fast = workerGraph(r, c[1], c[2], true)
+				local fast, list = workerGraph(r, c[1], c[2], true)
 				local slow = workerGraph(r, c[1], c[2], false)
 				for s = 0, SECTIONS - 1 do
 					t.eq(
@@ -321,10 +409,30 @@ return function(t, shared, require)
 						`seed {seed} chunk {c[1]},{c[2]} section {s}`
 					)
 				end
+				-- Every section holding cave air or air carved below the surface is in the graph.
+				local listed: { [number]: boolean } = {}
+				for _, s in list do
+					listed[s] = true
+				end
+				local any = false
+				for s = 0, (r.height - 1) // SECTION do
+					local cave, _, _, _, under = SectionGraph.masks(r.data, r.height, s, r.surface)
+					if under ~= 0 then
+						any = true
+					end
+					if not listed[s] then
+						t.eq(cave, 0, `seed {seed} chunk {c[1]},{c[2]}: cave air in section {s} left out`)
+						t.eq(under, 0, `seed {seed} chunk {c[1]},{c[2]}: carved air in section {s} left out`)
+					end
+				end
+				if any then
+					carved += 1
+				end
 				checked += 1
 			end
 		end
 		t.ok(checked >= 80, "chunks checked")
+		t.ok(carved >= 4, `chunks with air carved below the surface ({carved})`)
 	end)
 
 	t.test("section graph: section keys", function()
@@ -349,8 +457,12 @@ return function(t, shared, require)
 		pending: { [number]: boolean },
 	}
 
-	-- Chunks -r..r around the origin, rock up to `ground` (cells), air above; buried below `bury`.
-	local function world(r: number, height: number, ground: number, bury: number): World
+	--[[
+		Chunks -r..r around the origin, rock up to `ground` (cells), air above; buried below `bury`;
+		with `sky`, every column's sky line there (the generated surface: graphs follow air dug or
+		carved below it).
+	]]
+	local function world(r: number, height: number, ground: number, bury: number, sky: number?): World
 		local chunks = {}
 		for cz = -r, r do
 			for cx = -r, r do
@@ -398,7 +510,14 @@ return function(t, shared, require)
 				for s = 0, c.height // SECTION - 1 do
 					table.insert(all, s)
 				end
-				g = SectionGraph.build(c.data, c.height, c.bury, all)
+				local line: buffer? = nil
+				if sky then
+					line = buffer.create(512)
+					for i = 0, 255 do
+						buffer.writeu16(line :: buffer, i * 2, sky)
+					end
+				end
+				g = SectionGraph.build(c.data, c.height, c.bury, all, nil, nil, line)
 				w.graphs[key] = g
 			end
 			return g
@@ -494,6 +613,57 @@ return function(t, shared, require)
 		w.graphs = {}
 		local d = SectionGraph.search(w.lookup, 8.5, 20.6, 8.5)
 		t.ok(reached(d, 3, 0, 1), "the far cave through the dug tunnel")
+	end)
+
+	--[[
+		A surface cave's entrance in the synthetic world: ground at 64 over a cave tunnel at y 20-23
+		along +X (chunks 0-3), and an entrance carved as air from a pit at (72, 64, 40) down a
+		winding slope (-X, then -Z, then straight down) into the cave's ceiling at x 40.
+	]]
+	local function entranceWorld(sky: boolean): World
+		local w = world(4, 112, 64, 16, if sky then 64 else nil)
+		w.box(4, 20, 6, 4 * SIZE + 10, 23, 10, CAVE_AIR)
+		-- The pit and the first slope: 2 wide, 3 tall, down a block every block along -X.
+		for i = 0, 24 do
+			w.box(72 - i, 61 - i, 39, 73 - i, 63 - i + (if i == 0 then 1 else 0), 41, AIR)
+		end
+		-- Along -Z at y 37-39, then straight down into the cave.
+		w.box(46, 37, 9, 48, 39, 41, AIR)
+		w.box(46, 24, 9, 48, 36, 11, AIR)
+		return w
+	end
+
+	t.test("section graph search: from a surface cave's entrance down into the caves", function()
+		local w = entranceWorld(true)
+		-- The camera stands in the pit, just under the surface (the cave view's switch).
+		local r = SectionGraph.search(w.lookup, 72.5, 62.6, 40.5)
+		t.ok(reached(r, 2, 0, 1), "the cave under the entrance")
+		t.ok(reached(r, 0, 0, 1) and reached(r, 4, 0, 1), "and along it both ways")
+		-- The sky is not followed: nothing above ground level but the camera's own neighbours,
+		-- and nothing beside the entrance at ground level.
+		for key in r.reached do
+			local cx, cz, s = SectionGraph.decode(key)
+			t.ok(s <= 4, `section {cx},{cz},{s} above ground reached`)
+			if s == 4 then
+				t.ok(cx == 4 and cz == 2, `sky section {cx},{cz},{s} reached`)
+			end
+		end
+		t.ok(r.count < 40, `{r.count} sections`)
+		-- From the cave, the search climbs the entrance to its mouth and stops there.
+		local up = SectionGraph.search(w.lookup, 20.5, 20.6, 8.5)
+		t.ok(reached(up, 4, 2, 3), "up the entrance")
+		t.ok(reached(up, 4, 2, 4), "to the section where it meets the sky")
+		t.ok(not reached(up, 4, 2, 5) and not reached(up, 5, 2, 4) and not reached(up, 3, 2, 4), "not out into the sky")
+		-- Without the sky line (the old rules) the open entrance is not followed: no cave.
+		local old = entranceWorld(false)
+		local o = SectionGraph.search(old.lookup, 72.5, 62.6, 40.5)
+		t.ok(not reached(o, 2, 0, 1), "old rules: the cave stays hidden")
+		-- Following every pocket of air instead leaks into the sky: far more sections.
+		local leaky = world(4, 112, 64, 1000)
+		leaky.box(4, 20, 6, 4 * SIZE + 10, 23, 10, CAVE_AIR)
+		local l = SectionGraph.search(leaky.lookup, 72.5, 62.6, 40.5)
+		print(`    entrance: {r.count} sections reached ({o.count} with the old rules, {l.count} following all air)`)
+		t.ok(l.count > 4 * r.count, "following all air floods the sky")
 	end)
 
 	t.test("section graph search: a camera by a section corner sees into its neighbours", function()

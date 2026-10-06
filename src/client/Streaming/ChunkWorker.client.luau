@@ -14,16 +14,18 @@
 	             section meshes (+ the node's quads for Rendering/MeshOverlay when `quads`),
 	             `plants` the sections holding plants, `summary` the node's Shared/World/Horizon
 	             summary (every level; with the `edits` in it). Full detail chunks also get `graph`, their
-	             Shared/World/SectionGraph (unless `graph` is false), `bury` (the generated
-	             solidBelow, before edits: below it sections are BURIED) and `caveSections`
-	             (the sections that may hold cave cells), which a later `graph` job needs.
+	             Shared/World/SectionGraph (unless `graph` is false; with the generated surface
+	             as its sky line), `bury` (the generated solidBelow, before edits: below it
+	             sections are BURIED) and `caveSections` (the sections that may hold cave cells or
+	             air carved below the surface), which a later `graph` job needs.
 	  mesh       { nx, nz, coarser, data, height, solidBelow, emptyAbove, sections, reveal, caps?,
 	             foliage?, graph?, graphSections? } -> { sections, meshes, plants, graph? }
 	             section meshes + `plants`, those of `sections` holding plants (full detail
 	             chunks only). With `graph` (the chunk's SectionGraph), the sections in
 	             `graphSections` (default: `sections`) are recomputed in it (edits can open or
 	             seal caves) and it comes back as `graph`.
-	  graph      { data, height, bury, sections } -> { graph }   a chunk's SectionGraph, later
+	  graph      { data, height, bury, sections, sky? } -> { graph }   a chunk's SectionGraph, later
+	             (`sky`: its sky line, TerrainGenerator's `surface`)
 	  horizon    { records, count, x, y, z, raise?, spread?, keep?, bins? } -> { hidden }
 	             the node keys of Horizon.evaluate (far nodes hidden behind terrain)
 	  map        { x, z, scale, size } -> { pixels }   RGBA pixels of a map tile (Map/MapPainter)
@@ -263,6 +265,13 @@ local function generate(job: Job): Job
 				exact[s] = true
 			end
 		end
+		-- Air carved below the generated surface (surface caves: entrances and ravines; cellars):
+		-- the cave lattice knows nothing of it, so those sections are read cell by cell, and the
+		-- surface heights become the graph's sky line (air below it is followed underground).
+		local surface = r.surface
+		if surface then
+			SectionGraph.dugSections(data, height, surface, solidBelow, exact)
+		end
 		local extra = {}
 		for s in exact do
 			table.insert(extra, s)
@@ -390,7 +399,7 @@ end
 local function graphJob(job: Job): Job
 	return {
 		id = job.id,
-		graph = SectionGraph.build(job.data, job.height, job.bury, job.sections, nil, yieldIfNeeded),
+		graph = SectionGraph.build(job.data, job.height, job.bury, job.sections, nil, yieldIfNeeded, job.sky),
 	}
 end
 

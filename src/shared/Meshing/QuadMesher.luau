@@ -13,7 +13,10 @@
 	  * transparent blocks (glass): where the neighbour is see-through and a different block,
 	  * fluids: where the neighbour is see-through and not the same fluid. A fluid cell without the same
 	    fluid above is lowered to its level's height (Blocks.fluidHeightLut), like GreedyMesher; only
-	    faces of the same height merge.
+	    faces of the same height merge,
+	  * with `hideCaves`, cave cells (cave air, cave twins) are rock that is not drawn, except for
+	    their faces towards a cell that is neither opaque nor a cave cell (a surface cave's entrance,
+	    a dug shaft): those are stone caps, like GreedyMesher's.
 	Below the world counts as solid, above it as air.
 
 	Output: a buffer of quads, QUAD_BYTES each, as u16 values
@@ -50,6 +53,17 @@ local readu8 = buffer.readu8
 local readu16 = buffer.readu16
 local writeu8 = buffer.writeu8
 local writeu16 = buffer.writeu16
+
+-- Hidden caves: the appearance of each block (u16; cave cells: CAVE_CELL), and the stone caps'.
+local CAVE_CELL = 0xFFFF
+local appearanceHiddenCaves = buffer.create(Blocks.count * 2)
+buffer.copy(appearanceHiddenCaves, 0, appearanceLut)
+for id = 0, Blocks.count - 1 do
+	if id == Blocks.CAVE_AIR or readu8(Blocks.caveTwinLut, id) == 1 then
+		writeu16(appearanceHiddenCaves, id * 2, CAVE_CELL)
+	end
+end
+local STONE_APPEARANCE = readu16(appearanceLut, Blocks.id.Stone * 2)
 
 local QuadMesher = {}
 
@@ -104,11 +118,25 @@ local function pushQuad(
 	writeu16(quads, offset + 14, 0)
 end
 
--- Key of the face of `block` (at byte offset `o`) towards neighbour `n`, or 0 when it is not drawn.
-local function faceKey(data: buffer, o: number, block: number, n: number, cull: buffer, hasAbove: boolean): number
-	local app = readu16(appearanceLut, block * 2)
+--[[
+	Key of the face of `block` (at byte offset `o`) towards neighbour `n`, or 0 when it is not drawn.
+	`drawn` is the appearance lookup (appearanceHiddenCaves while caves are hidden).
+]]
+local function faceKey(
+	data: buffer,
+	o: number,
+	block: number,
+	n: number,
+	cull: buffer,
+	drawn: buffer,
+	hasAbove: boolean
+): number
+	local app = readu16(drawn, block * 2)
 	if app == 0 then
 		return 0
+	elseif app == CAVE_CELL then
+		-- A hidden cave cell: rock, drawn as a stone cap towards open space that is not cave.
+		return if readu8(cull, n) == 0 then STONE_APPEARANCE else 0
 	end
 	local kind = readu8(kindLut, app)
 	if kind == OPAQUE then
@@ -196,6 +224,7 @@ end
 ]]
 function QuadMesher.mesh(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean): (buffer, number)
 	local cull = if hideCaves then cullHiddenCaves else cullVisibleCaves
+	local drawn = if hideCaves then appearanceHiddenCaves else appearanceLut
 	local sh = y1 - y0
 	if sh <= 0 then
 		return buffer.create(0), 0
@@ -218,9 +247,9 @@ function QuadMesher.mesh(data: buffer, height: number, y0: number, y1: number, h
 					if block ~= AIR then
 						if neighbourExists then
 							local n = readu16(data, if up then o + LAYER * 2 else o - LAYER * 2)
-							key = faceKey(data, o, block, n, cull, hasAbove)
+							key = faceKey(data, o, block, n, cull, drawn, hasAbove)
 						elseif up then
-							key = faceKey(data, o, block, AIR, cull, false)
+							key = faceKey(data, o, block, AIR, cull, drawn, false)
 						end
 					end
 					writeu16(mask, (z * SIZE + x) * 2, key)
@@ -249,7 +278,7 @@ function QuadMesher.mesh(data: buffer, height: number, y0: number, y1: number, h
 					local block = readu16(data, o)
 					local key = 0
 					if block ~= AIR then
-						key = faceKey(data, o, block, readu16(data, o + step), cull, hasAbove)
+						key = faceKey(data, o, block, readu16(data, o + step), cull, drawn, hasAbove)
 					end
 					writeu16(mask, ((y - y0) * SIZE + z) * 2, key)
 					any = any or key ~= 0
@@ -276,7 +305,7 @@ function QuadMesher.mesh(data: buffer, height: number, y0: number, y1: number, h
 					local block = readu16(data, o)
 					local key = 0
 					if block ~= AIR then
-						key = faceKey(data, o, block, readu16(data, o + step), cull, hasAbove)
+						key = faceKey(data, o, block, readu16(data, o + step), cull, drawn, hasAbove)
 					end
 					writeu16(mask, ((y - y0) * SIZE + x) * 2, key)
 					any = any or key ~= 0

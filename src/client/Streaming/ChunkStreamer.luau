@@ -62,31 +62,35 @@
 	changes (only chunks next to a coarse node that changed are looked at: LodTree.seamsAffected).
 	Far nodes use borders that hold for any neighbours and never change once built.
 
-	Cave view (CaveReach.view, World/SectionGraph): underground, the sections the camera can see
-	into through connected cave air are revealed (meshed with their cave walls), out to the cave
-	view's tunnel reach (ViewSettings.revealReach) or, in big caverns, the open space around the
-	camera (CaveReach's probe and tracker, ViewSettings.revealRadii) plus a section, within
-	Caves.RevealBudget sections. Workers return each full detail chunk's graph (one u32 per
-	section) with its generation and recompute it for the sections an edit job remeshes (an edit
-	can open or seal a cave); the search runs again when the camera changes section, the reach
-	changes, or a graph or a full detail chunk near the camera changed. A section stays revealed
+	Cave view (CaveReach.view, World/SectionGraph): underground (the camera below its column's
+	generated surface: in a cave, a dug shaft, a surface cave's entrance or a ravine), the sections
+	the camera can see into through connected cave air (and air carved or dug below the surface,
+	such as an entrance leading down to the caves) are revealed (meshed with their cave walls), out
+	to the cave view's tunnel reach (ViewSettings.revealReach) or, in big caverns, the open space
+	around the camera (CaveReach's probe and tracker, ViewSettings.revealRadii) plus a section,
+	within Caves.RevealBudget sections. Workers return each full detail chunk's graph (one u32 per
+	section) with its generation and recompute it for the sections an edit job remeshes (an edit can
+	open or seal a cave); the search runs again when the camera changes section, the reach changes,
+	or a graph or a full detail chunk near the camera changed. A section stays revealed
 	Caves.RevealHold seconds after the search stopped reaching it; sections of chunks not generated
 	yet that the search would enter count as revealed, so the chunk is generated with them revealed.
 	Each revealed section is capped (GreedyMesher.Border) where it meets hidden space, and towards
 	chunks that are not full detail on screen (a coarser node draws nothing underground). A tunnel
-	never opens onto the void: what is on screen is tracked per section (`live`, `liveCaps`, set
-	as each mesh goes live: `wentLive`), and a face opens only towards a section whose revealed
-	mesh is live or goes live in the same commit group (`drawsCaves`); a section goes hidden only
-	together with the caps closing towards it (`canHideNow`, `mayHide`); a full detail chunk
-	leaves the screen only once no tunnel next door is open towards it (`swap`). A cap closed
-	meanwhile opens once the section beyond is live (`liveCheck`). Only the sections whose reveal
-	flag or caps may have changed (the changed keys and their neighbours, chunks next to full
-	detail chunks that came, went or were shown, nodes that became ready, meshes that went live)
-	are checked (`updateReveal`, `checkPass`); a reveal pass goes live in commit groups of at most
+	never opens onto the void: what is on screen is tracked per section (`live`, `liveCaps`, set as
+	each mesh goes live: `wentLive`), and a face opens only towards a section whose revealed mesh is
+	live or goes live in the same commit group (`drawsCaves`); a section goes hidden only together
+	with the caps closing towards it (`canHideNow`, `mayHide`); a full detail chunk leaves the
+	screen only once no tunnel next door is open towards it (`swap`). A cap closed meanwhile opens
+	once the section beyond is live (`liveCheck`). Only the sections whose reveal flag or caps may
+	have changed (the changed keys and their neighbours, chunks next to full detail chunks that
+	came, went or were shown, nodes that became ready, meshes that went live) are checked
+	(`updateReveal`, `checkPass`); a reveal pass goes live in commit groups of at most
 	Streaming.RevealGroupSections sections, nearest first (a cap opening and the tunnel behind it
-	together), and what it hides in one group of its own. Caves only exist in full detail chunks,
-	so full detail reaches further too: LodTree.select runs with `underground` (the underground
-	split distance) while the cave view is active and for Lod.UndergroundSeconds after it ends.
+	together), and what it hides in one group of its own. Caves only exist in full detail chunks, so
+	full detail reaches further too: LodTree.select runs with `underground` (the underground split
+	distance) while the cave view is active with the camera shut in (CaveReach.enclosed: in a cave
+	cell or under rock, not at the open bottom of a pit, a ravine or a dug shaft, where the sky and
+	the surface are what is seen) and for Lod.UndergroundSeconds after that ends.
 
 	Hidden terrain (HiddenTerrain, World/Horizon): every generated node carries a summary (lowest
 	ground and highest top of 4 x 4 tiles; edits of full detail chunks update theirs:
@@ -235,9 +239,14 @@ export type Node = {
 
 type Meshes = { sections: { number }, meshes: { buffer } }
 
--- The underground camera (blocks) and how far the search reveals caves (blocks, to section
--- centres).
-type CaveView = { position: Vector3, reach: number }
+-- A remesh batch's commit group (RemeshQueue's jobs carry it): the renderer's group, once the
+-- batch's first job went out.
+type CommitGroup = { commit: ChunkRenderer.Group? }
+
+-- The underground camera (blocks), how far the search reveals caves (blocks, to section
+-- centres), and whether the camera is shut in (CaveReach.enclosed: not under the open sky of a
+-- pit, a ravine or a dug shaft), which the underground split needs.
+type CaveView = { position: Vector3, reach: number, enclosed: boolean }
 
 export type Stats = {
 	nodes: { [number]: number },
@@ -396,7 +405,7 @@ end
 	Underground (the camera, `eye`, below its column's terrain surface), the cave view is on: the
 	search reaches the tunnel reach, or in big caverns the open space around the camera
 	(CaveReach) plus a section. Above ground the revealed sections go after Caves.RevealHold
-	seconds.
+	seconds. Whether the camera is shut in (`enclosed`) decides the underground split.
 ]]
 local function updateCaveView(self: ChunkStreamer, now: number)
 	local camera = self.eye
@@ -406,11 +415,16 @@ local function updateCaveView(self: ChunkStreamer, now: number)
 		self.caveView = nil
 		return
 	end
-	local open = CaveReach.probe(function(x, y, z)
+	local function getBlock(x: number, y: number, z: number): number?
 		return self.world:getBlock(x, y, z)
-	end, camera.X, camera.Y, camera.Z, self.revealMax)
+	end
+	local open = CaveReach.probe(getBlock, camera.X, camera.Y, camera.Z, self.revealMax)
 	local radius = self.caveReach:update(open, now)
-	self.caveView = { position = camera, reach = CaveReach.searchReach(self.tunnelReach, radius) }
+	self.caveView = {
+		position = camera,
+		reach = CaveReach.searchReach(self.tunnelReach, radius),
+		enclosed = CaveReach.enclosed(getBlock, camera.X, camera.Y, camera.Z, surface),
+	}
 end
 
 -- Is section `s` of the full detail chunk `node` meshed with caves visible (revealed)?
@@ -446,7 +460,8 @@ end
 local FACES = { { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 } }
 
 -- Can the cave air of section `s` of `node` reach its face `f` (0-based, FACES order)? Its graph
--- says whether a followed pocket touches it (every cave pocket is followed); true without one.
+-- says whether a followed pocket touches it (every cave pocket is followed; so is air carved or
+-- dug below the surface, which only costs a remesh more); true without one.
 local function touches(node: Node, s: number, f: number): boolean
 	local graph = node.graph
 	return graph == nil or bit32.btest(buffer.readu32(graph, s * 4), bit32.lshift(1, SectionGraph.FACES_SHIFT + f))
@@ -1412,13 +1427,14 @@ local function onRemeshed(
 	local priority = if job.edit then nil else LodTree.distance(0, node.nx, node.nz, self.viewer.X, self.viewer.Z)
 	local meshes = result.meshes :: { buffer }
 	local group = job.group
+	local commit = if group then (group :: CommitGroup).commit else nil
 	for i, section in result.sections :: { number } do
 		if remesh:current(node, section, job.token) then
 			node.plants[section] = nil
 			local on, mask = told[section] == true, caps[section]
 			self.renderer:build(node, section, meshes[i], {
 				lane = lane,
-				group = group,
+				group = commit,
 				priority = priority,
 				onDone = function()
 					wentLive(self, node, section, on, mask, group)
@@ -2272,7 +2288,9 @@ local function refresh(self: ChunkStreamer, now: number)
 		self.caveReach:reset()
 	end
 	updateCaveView(self, now)
-	local underground = self.undergroundHold:update(self.caveView ~= nil, now)
+	-- (Only shut in: the open bottom of a pit or a ravine is the surface's view.)
+	local caveView = self.caveView
+	local underground = self.undergroundHold:update(caveView ~= nil and caveView.enclosed, now)
 	local selectedAt = self.selectedAt
 	local version = LodTree.version()
 	local reselect = teleport
@@ -2378,14 +2396,22 @@ function ChunkStreamer.new(
 			shownBelow = {},
 			counts = {},
 			remesh = RemeshQueue.new({
-				open = function()
-					return renderer:openGroup()
+				-- A batch's group: the renderer's commit group opens with the batch's first job,
+				-- so its timeout (ChunkRenderer) counts how long the jobs take, not how long the
+				-- batch waited for a worker (it would go live member by member otherwise).
+				open = function(): CommitGroup
+					return { commit = nil }
 				end,
-				hold = function(group)
-					renderer:holdGroup(group)
+				hold = function(group: CommitGroup)
+					local commit = group.commit or renderer:openGroup()
+					group.commit = commit
+					renderer:holdGroup(commit)
 				end,
-				close = function(group)
-					renderer:closeGroup(group)
+				close = function(group: CommitGroup)
+					local commit = group.commit
+					if commit then
+						renderer:closeGroup(commit)
+					end
 				end,
 			}),
 			sinceRefresh = math.huge,

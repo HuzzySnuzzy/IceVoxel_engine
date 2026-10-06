@@ -12,17 +12,24 @@
 	Per section (worker side, `compute` / `build` / `refresh`): a flood fill over the passable cells
 	(not opaque: Blocks.cullLut 0), done on 16-bit rows (row y * 16 + z, bit x) instead of cells,
 	finds the connected pockets of air. For each pocket it records the faces of the section it
-	touches; every pair of faces touched by one pocket is connected. Pockets come in three classes:
+	touches; every pair of faces touched by one pocket is connected. Pockets come in these classes:
 	  * cave pockets: they hold cave cells (cave air, cave twins);
+	  * underground pockets: no cave cells, and no cell at or above its column's generated surface
+	    (the chunk's sky line: TerrainGenerator's `surface`, the terrain height before any carving).
+	    That is air carved or dug into the ground: surface caves (entrances, ravines) below their
+	    mouths, dug tunnels and shafts, library structures' cellars;
 	  * sealed pockets: no cave cells and not touching the section's top face (dug tunnels, rooms);
-	  * the rest: open air, usually the sky.
-	The search follows cave and sealed pockets only, and in buried sections (entirely below the
-	chunk's lowest generated surface, where all open air was dug) every pocket. Following all air
-	would leak out of a cave mouth into the sky and visit thousands of sections; sky air always
-	reaches the top of its section (the terrain is a height field), so a pocket that doesn't is
-	underground.
+	  * the rest: open air, the sky and what is open to it in the same section.
+	The search follows cave, underground and sealed pockets, and in buried sections (entirely below
+	the chunk's lowest generated surface, where all open air was dug) every pocket. Following all
+	air would leak out of a cave mouth into the sky and visit thousands of sections. Sky air is at
+	or above the sky line, and always reaches the top of its section (the terrain is a height
+	field): neither rule ever follows it. So the search runs from a cave up an entrance (or from a
+	camera in an entrance down into the caves) through the underground pockets, and stops in the
+	section where the entrance meets the sky: it is reached (revealed) but not left. Without a sky
+	line (a graph built without one, `create`) every cell counts as sky: no underground pockets.
 
-	Section value (u32, `value`; a graph is one per section, BYTES per chunk):
+	Section value (u32, `value`; a graph is one per section, then the sky line, BYTES per chunk):
 	  bits 0-14   pairs of faces connected by a followed pocket (PAIR order: (0,1), (0,2) ... (4,5))
 	  bits 15-20  faces touched by a followed pocket
 	  bits 21-26  faces touched by any passable cell (where a camera in the section can look out)
@@ -46,6 +53,9 @@
 	Then (`tracker`): sections stay revealed until they were unreachable for a while (hysteresis),
 	and `capMask` closes the tunnels of a revealed section in stone where they run into hidden
 	space. A section the search misses shows such a stone cap, never the void.
+
+	The graph buffer ends with the chunk's sky line (u16 cells per core column at SKY_OFFSET +
+	(z * 16 + x) * 2), so `refresh` classifies dug air the same way the generation's `build` did.
 
 	Pure Luau (buffers, bit32), tested in tests/spec/SectionGraph against a per-cell flood fill.
 ]]
@@ -81,7 +91,11 @@ SectionGraph.PASSABLE_SHIFT = 21
 SectionGraph.CAVES = 0x8000000
 SectionGraph.BURIED = 0x10000000
 SectionGraph.SECTIONS = SECTIONS
-SectionGraph.BYTES = SECTIONS * 4
+-- The sky line follows the section values (u16 per core column).
+SectionGraph.SKY_OFFSET = SECTIONS * 4
+SectionGraph.BYTES = SECTIONS * 4 + SIZE * SIZE * 2
+local SKY_OFFSET = SectionGraph.SKY_OFFSET
+local BYTES = SectionGraph.BYTES
 
 local MASK = SectionGraph.MASK
 local CAVES = SectionGraph.CAVES
@@ -135,17 +149,68 @@ for id = 0, Blocks.count - 1 do
 	end
 end
 
--- Scratch: passable / cave cells per row, rows already filled, the fill's queue of row runs.
+-- Scratch: passable / cave / sky cells per row, rows already filled, the fill's queue of row runs.
 local openRows = buffer.create(512)
 local caveRows = buffer.create(512)
+local skyRows = buffer.create(512)
 local seen = buffer.create(512)
 local qRow = buffer.create(4096 * 2)
 local qRun = buffer.create(4096 * 2)
 
--- Flood fill of the rows in openRows / caveRows: cave, open and sealed masks.
-local function flood(): (number, number, number)
+--[[
+	Fills skyRows for cells y0 .. y0 + 15: the cells at or above their column's sky line (`sky` at
+	byte `offset`, u16 per core column), every cell when there is none. Only rows holding passable
+	cells matter (fill openRows first). Returns whether any passable cell is sky.
+]]
+local function skyRowsOf(sky: buffer?, offset: number, y0: number): boolean
+	if sky == nil then
+		buffer.fill(skyRows, 0, 0xFF, 512)
+		return true
+	end
+	local any = false
+	for z = 0, 15 do
+		local base = offset + z * 32
+		-- The lowest and highest sky line of the row's 16 columns.
+		local lo, hi = 0xFFFF, 0
+		for x = 0, 15 do
+			local h = readu16(sky, base + x * 2)
+			if h < lo then
+				lo = h
+			end
+			if h > hi then
+				hi = h
+			end
+		end
+		for y = 0, 15 do
+			local r = y * 16 + z
+			local o = readu16(openRows, r * 2)
+			local bits = 0
+			if o ~= 0 then
+				local yy = y0 + y
+				if yy >= hi then
+					bits = 0xFFFF
+				elseif yy >= lo then
+					for x = 0, 15 do
+						if yy >= readu16(sky, base + x * 2) then
+							bits += lshift(1, x)
+						end
+					end
+				end
+				if btest(bits, o) then
+					any = true
+				end
+			end
+			writeu16(skyRows, r * 2, bits)
+		end
+	end
+	return any
+end
+
+-- Flood fill of the rows in openRows / caveRows / skyRows: cave, open, sealed and underground
+-- masks.
+local function flood(): (number, number, number, number)
 	buffer.fill(seen, 0, 0, 512)
-	local cave, open, sealed = 0, 0, 0
+	local cave, open, sealed, under = 0, 0, 0, 0
 	for r0 = 0, 255 do
 		local rem = band(readu16(openRows, r0 * 2), bnot(readu16(seen, r0 * 2)))
 		while rem ~= 0 do
@@ -161,7 +226,7 @@ local function flood(): (number, number, number)
 			writeu16(qRow, 0, r0)
 			writeu16(qRun, 0, run)
 			local head, tail = 0, 1
-			local faces, hasCave = 0, false
+			local faces, hasCave, hasSky = 0, false, false
 			while head < tail do
 				local r = readu16(qRow, head * 2)
 				local span = readu16(qRun, head * 2)
@@ -186,6 +251,9 @@ local function flood(): (number, number, number)
 				end
 				if not hasCave and btest(span, readu16(caveRows, r * 2)) then
 					hasCave = true
+				end
+				if not hasSky and btest(span, readu16(skyRows, r * 2)) then
+					hasSky = true
 				end
 				-- Runs of the four neighbouring rows (z - 1, z + 1, y - 1, y + 1) overlapping this run.
 				for k = 1, 4 do
@@ -237,10 +305,13 @@ local function flood(): (number, number, number)
 				if not btest(faces, UP) then
 					sealed = bor(sealed, m)
 				end
+				if not hasSky then
+					under = bor(under, m)
+				end
 			end
 		end
 	end
-	return cave, open, sealed
+	return cave, open, sealed, under
 end
 
 --[[
@@ -363,17 +434,22 @@ local function hintRows(data: buffer, height: number, y0: number, hint: Hint, gr
 	return passable, caves
 end
 
--- See SectionGraph.masks; `hint` / `groupGround` from `build` (nil: read every cell).
+--[[
+	See SectionGraph.masks; `hint` / `groupGround` from `build` (nil: read every cell), the sky line
+	`sky` at byte `skyOffset` (nil: none, every cell is sky).
+]]
 local function sectionMasks(
 	data: buffer,
 	height: number,
 	s: number,
 	hint: Hint?,
-	groupGround: { number }?
-): (number, number, number, boolean)
+	groupGround: { number }?,
+	sky: buffer?,
+	skyOffset: number
+): (number, number, number, boolean, number)
 	local y0 = s * SECTION
 	if y0 >= height then
-		return 0, FULL, 0, false
+		return 0, FULL, 0, false, 0
 	end
 	local passable, caves
 	if hint and groupGround and not (hint.exact and hint.exact[s]) then
@@ -382,32 +458,49 @@ local function sectionMasks(
 		passable, caves = readRows(data, height, y0)
 	end
 	if passable == 0 then
-		return 0, 0, 0, false
+		return 0, 0, 0, false, 0
 	end
+	local anySky = skyRowsOf(sky, skyOffset, y0)
 	if passable == 256 * 0xFFFF then
 		-- All air (the Underlands are mostly that): one pocket touching every face.
 		if caves > 0 then
-			return FULL, 0, 0, true
+			return FULL, 0, 0, true, 0
 		end
-		return 0, FULL, 0, false
+		return 0, FULL, 0, false, if anySky then 0 else FULL
 	end
-	local cave, open, sealed = flood()
-	return cave, open, sealed, caves > 0
+	local cave, open, sealed, under = flood()
+	return cave, open, sealed, caves > 0, under
 end
 
 --[[
 	Connectivity of section `s` of a full detail chunk's padded column `data` (`height` cells per
 	column; air above): the cave, open and sealed masks (bits 0-14 pairs, 15-20 faces, see the
-	header; sealed pockets are open pockets not touching the top face), and whether it holds cave
-	cells.
+	header; sealed pockets are open pockets not touching the top face), whether it holds cave
+	cells, and the underground mask (open pockets with no cell at or above the sky line `sky`: u16
+	cells per core column at (z * 16 + x) * 2, like TerrainGenerator's `surface`; without one, 0).
 ]]
-function SectionGraph.masks(data: buffer, height: number, s: number): (number, number, number, boolean)
-	return sectionMasks(data, height, s, nil, nil)
+function SectionGraph.masks(
+	data: buffer,
+	height: number,
+	s: number,
+	sky: buffer?
+): (number, number, number, boolean, number)
+	return sectionMasks(data, height, s, nil, nil, sky, 0)
 end
 
--- The section value (see the header) of masks from `masks`.
-function SectionGraph.value(cave: number, open: number, sealed: number, hasCave: boolean, buried: boolean): number
-	local follow = bor(cave, if buried then open else sealed)
+--[[
+	The section value (see the header) of masks from `masks` (`under`: the underground mask, 0 when
+	missing).
+]]
+function SectionGraph.value(
+	cave: number,
+	open: number,
+	sealed: number,
+	hasCave: boolean,
+	buried: boolean,
+	under: number?
+): number
+	local follow = bor(cave, if buried then open else bor(sealed, under or 0))
 	local passable = rshift(bor(cave, open), 15)
 	local v = bor(follow, lshift(passable, 21))
 	if hasCave then
@@ -425,20 +518,25 @@ local function sectionValue(
 	s: number,
 	buried: boolean,
 	hint: Hint?,
-	groupGround: { number }?
+	groupGround: { number }?,
+	sky: buffer?,
+	skyOffset: number
 ): number
-	local cave, open, sealed, hasCave = sectionMasks(data, height, s, hint, groupGround)
-	return SectionGraph.value(cave, open, sealed, hasCave, buried)
+	local cave, open, sealed, hasCave, under = sectionMasks(data, height, s, hint, groupGround, sky, skyOffset)
+	return SectionGraph.value(cave, open, sealed, hasCave, buried, under)
 end
 
--- The value of section `s` (see `masks`; `buried`: below the chunk's lowest generated surface).
-function SectionGraph.compute(data: buffer, height: number, s: number, buried: boolean): number
-	return sectionValue(data, height, s, buried, nil, nil)
+--[[
+	The value of section `s` (see `masks`; `buried`: below the chunk's lowest generated surface;
+	`sky`: the sky line, as for `masks`).
+]]
+function SectionGraph.compute(data: buffer, height: number, s: number, buried: boolean, sky: buffer?): number
+	return sectionValue(data, height, s, buried, nil, nil, sky, 0)
 end
 
--- An empty graph (every section all rock, nothing buried).
+-- An empty graph (every section all rock, nothing buried, no sky line).
 function SectionGraph.create(): buffer
-	return buffer.create(SectionGraph.BYTES)
+	return buffer.create(BYTES)
 end
 
 function SectionGraph.get(graph: buffer, s: number): number
@@ -448,10 +546,11 @@ end
 --[[
 	The graph of a freshly generated full detail chunk. `buryLine`: the chunk's lowest generated
 	surface (cells; TerrainGenerator's solidBelow before any edit): sections below it are BURIED.
-	Only `sections` are filled in (those that may hold cave cells or player edits: see
+	Only `sections` are filled in (those that may hold cave cells, carved or dug air: see
 	`carvedSections`); every other section is rock or untouched surface, which nothing follows.
 	`hint` (optional) saves reading most cells; the result is the same. `yield` (optional) is
-	called between sections.
+	called between sections. The sky line is `sky`, else the hint's `surface` (none without
+	either: no underground pockets); it is kept at the end of the graph for `refresh`.
 ]]
 function SectionGraph.build(
 	data: buffer,
@@ -459,7 +558,8 @@ function SectionGraph.build(
 	buryLine: number,
 	sections: { number },
 	hint: Hint?,
-	yield: (() -> ())?
+	yield: (() -> ())?,
+	sky: buffer?
 ): buffer
 	-- Lowest terrain height of each 4 x 4 group of core columns (index gz * 4 + gx + 1).
 	local groupGround: { number }? = nil
@@ -480,7 +580,11 @@ function SectionGraph.build(
 			end
 		end
 	end
-	local graph = buffer.create(SectionGraph.BYTES)
+	local graph = buffer.create(BYTES)
+	local line = sky or (if hint then hint.surface else nil)
+	if line then
+		buffer.copy(graph, SKY_OFFSET, line, 0, SIZE * SIZE * 2)
+	end
 	for s = 0, SECTIONS - 1 do
 		if (s + 1) * SECTION <= buryLine then
 			writeu32(graph, s * 4, BURIED)
@@ -489,7 +593,7 @@ function SectionGraph.build(
 	for _, s in sections do
 		if s >= 0 and s < SECTIONS then
 			local buried = (s + 1) * SECTION <= buryLine
-			writeu32(graph, s * 4, sectionValue(data, height, s, buried, hint, groupGround))
+			writeu32(graph, s * 4, sectionValue(data, height, s, buried, hint, groupGround, line, 0))
 			if yield then
 				yield()
 			end
@@ -500,13 +604,14 @@ end
 
 --[[
 	Recomputes `sections` of `graph` in place after edits (an edit can open or seal a cave, or dig
-	a tunnel). The BURIED bits stay as generated.
+	a tunnel). The BURIED bits and the sky line stay as generated.
 ]]
 function SectionGraph.refresh(graph: buffer, data: buffer, height: number, sections: { number }, yield: (() -> ())?)
+	local sky = if buffer.len(graph) >= BYTES then graph else nil
 	for _, s in sections do
 		if s >= 0 and s < SECTIONS then
 			local buried = btest(readu32(graph, s * 4), BURIED)
-			writeu32(graph, s * 4, SectionGraph.compute(data, height, s, buried))
+			writeu32(graph, s * 4, sectionValue(data, height, s, buried, nil, nil, sky, SKY_OFFSET))
 			if yield then
 				yield()
 			end
@@ -555,6 +660,40 @@ function SectionGraph.carvedSections(
 	end
 	table.sort(list)
 	return list
+end
+
+--[[
+	Adds to `into` (section -> true) the sections of a full detail chunk holding passable cells
+	that are not cave cells below their column's sky line (`sky`, as for `masks`): air that surface
+	caves carved, a library structure's cellar, or edits. Each core column is read from cell `from`
+	(TerrainGenerator's solidBelow: no open cell lies below it) up to its sky line; the lattice
+	hint knows nothing of such air, so these sections must be read cell by cell (Hint.exact).
+]]
+function SectionGraph.dugSections(
+	data: buffer,
+	height: number,
+	sky: buffer,
+	from: number,
+	into: { [number]: boolean }
+): { [number]: boolean }
+	local y0 = math.max(from, 0)
+	for z = 0, 15 do
+		for x = 0, 15 do
+			local top = math.min(readu16(sky, (z * 16 + x) * 2), height) - 1
+			local base = ((z + 1) * P + x + 1) * 2
+			local y = y0
+			while y <= top do
+				if readu8(classLut, readu16(data, base + y * LAYER * 2)) == 1 then
+					local s = y // SECTION
+					into[s] = true
+					y = (s + 1) * SECTION
+				else
+					y += 1
+				end
+			end
+		end
+	end
+	return into
 end
 
 --[[ Section keys ]]

@@ -29,8 +29,10 @@
 	(one noise call). Chunks agree on their borders because the lattice is aligned to the world.
 
 	Caves are carved as CaveAir and never come within Config.Caves.SurfaceMargin blocks of the
-	surface, so they are invisible from above ground and the client only meshes cave walls close to
-	the camera (see Blocks.cullLutHiddenCaves).
+	surface on their own, so the client only meshes cave walls close to the camera (see
+	Blocks.cullLutHiddenCaves). What opens them up is SurfaceCaves.luau: cave entrances and ravines,
+	carved as Air after this carver (the cave air they run into stays cave air). `Caves.regions`
+	gives it barrier2 (the same values), so its entrances can head for the cave regions.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -133,14 +135,27 @@ type CaveSet = {
 	half: number,
 }
 
+-- 3D cave noise with the datapack's spread (Noise.noise3 has a standard deviation of 1/3).
+local function caveNoise3(seed: number, salt: string, wavelength: number, wavelengthY: number?): Noise.Sampler3
+	local n = Noise.noise3(seed, salt, 1 / (wavelength * CAVE_SCALE), wavelength / (wavelengthY or wavelength))
+	local k = STD_CL * 3
+	return function(x: number, y: number, z: number): number
+		return n(x, y, z) * k
+	end
+end
+
+--[[
+	The cave regions: the carver's `barrier2` gate (one 3D noise, ~190 blocks). Below 0 there are
+	no caves, from 0.5 on the cave sets are at full strength. Surface caves (SurfaceCaves) steer
+	their entrances towards it, so most lead into the cave network.
+]]
+function Caves.regions(seed: number): Noise.Sampler3
+	return caveNoise3(seed, "caves.barrier2", 256)
+end
+
 function Caves.new(seed: number, surfaceAt: SurfaceSampler): Carver
-	-- 3D noise with the datapack's spread (Noise.noise3 has a standard deviation of 1/3).
 	local function noise3(salt: string, wavelength: number, wavelengthY: number?): Noise.Sampler3
-		local n = Noise.noise3(seed, salt, 1 / (wavelength * CAVE_SCALE), wavelength / (wavelengthY or wavelength))
-		local k = STD_CL * 3
-		return function(x: number, y: number, z: number): number
-			return n(x, y, z) * k
-		end
+		return caveNoise3(seed, salt, wavelength, wavelengthY)
 	end
 	local function set(name: string, old: number, newXZ: number, newY: number, jagged: number, period: number): CaveSet
 		return {

@@ -13,11 +13,6 @@ return function(t, shared, require, _server, client)
 		local cull = if hideCaves then Blocks.cullLutHiddenCaves else Blocks.cullLut
 		local id = ChunkLayout.get(data, x, y, z)
 		local app = Blocks.get(id).appearance
-		-- (Cave twins are cave air while caves are hidden.)
-		if app == 0 or (hideCaves and buffer.readu8(Blocks.caveTwinLut, id) == 1) then
-			return 0, false
-		end
-		local kind = Blocks.appearances[app].kind
 		local function neighbour(dx: number, dy: number, dz: number): number?
 			local ny = y + dy
 			if ny < 0 then
@@ -28,6 +23,21 @@ return function(t, shared, require, _server, client)
 			return ChunkLayout.getPadded(data, x + dx, ny, z + dz)
 		end
 		local dirs = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+		-- (Cave twins are cave air while caves are hidden; a cave cell touching open space that is
+		-- not cave is a stone cap then, any other is rock nobody sees: a wildcard.)
+		if hideCaves and (id == Blocks.CAVE_AIR or buffer.readu8(Blocks.caveTwinLut, id) == 1) then
+			for _, d in dirs do
+				local n = neighbour(d[1], d[2], d[3])
+				if n ~= nil and buffer.readu8(cull, n) == 0 then
+					return Blocks.get(Blocks.id.Stone).appearance, false
+				end
+			end
+			return 0, true
+		end
+		if app == 0 then
+			return 0, false
+		end
+		local kind = Blocks.appearances[app].kind
 		if kind == OPAQUE then
 			for _, d in dirs do
 				local n = neighbour(d[1], d[2], d[3])
@@ -792,6 +802,82 @@ return function(t, shared, require, _server, client)
 		t.ok(checked > 100, `enough exposed border cells checked ({checked})`)
 	end)
 
+	t.test("LOD seams: border cells facing a coarser node's ravine are drawn", function()
+		local gen = TerrainGenerator.new(12345)
+		-- The deepest open cut (a ravine: carved air open to the sky) in chunks along a stretch.
+		local deepest, rx, rz = 0, 0, 0
+		for cz = -30, -24, 2 do
+			for cx = 30, 38, 2 do
+				local c = gen.generate(0, cx, cz, nil, true)
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local top = buffer.readu16(c.surface, (z * SIZE + x) * 2)
+						local y = top - 1
+						while y > 0 and ChunkLayout.get(c.data, x, y, z) == Blocks.AIR do
+							y -= 1
+						end
+						if top - 1 - y > deepest then
+							deepest, rx, rz = top - 1 - y, cx * SIZE + x, cz * SIZE + z
+						end
+					end
+				end
+			end
+		end
+		assert(deepest >= 15, `a ravine near 540, -420 ({deepest} deep)`)
+		-- Nodes around it at levels 0 and 1, each side next to a coarser node: every opaque border
+		-- cell whose coarser neighbour is not terrain there (the cut) must be drawn.
+		local holes, facing = 0, 0
+		local coarseNodes: { [string]: any } = {}
+		for level = 0, 1 do
+			local step, stepY = ChunkLayout.steps(level)
+			local cs, csY = ChunkLayout.steps(level + 1)
+			local span = SIZE * step
+			for dz = -1, 1 do
+				for dx = -1, 1 do
+					local nx, nz = rx // span + dx, rz // span + dz
+					local r = gen.generate(level, nx, nz)
+					for side = 1, 4 do
+						local coarser = { 0, 0, 0, 0 }
+						coarser[side] = level + 1
+						local open = gen.seamLimits(level, nx, nz, coarser) :: buffer
+						local covered = coverage(meshNode(level, r, { open = open, hidden = 0 }))
+						for i = 0, SIZE - 1 do
+							local lx = if side == 1 then 0 elseif side == 2 then SIZE - 1 else i
+							local lz = if side == 3 then 0 elseif side == 4 then SIZE - 1 else i
+							local px = nx * span + (lx + (if side == 1 then -1 elseif side == 2 then 1 else 0)) * step
+							local pz = nz * span + (lz + (if side == 3 then -1 elseif side == 4 then 1 else 0)) * step
+							local cnx, cnz = px // (SIZE * cs), pz // (SIZE * cs)
+							local key = `{level + 1},{cnx},{cnz}`
+							local coarse = coarseNodes[key] or gen.generate(level + 1, cnx, cnz)
+							coarseNodes[key] = coarse
+							local clx, clz = (px - cnx * SIZE * cs) // cs, (pz - cnz * SIZE * cs) // cs
+							-- (Up to the coarse column's terrain height: above it the plain seam rule holds.)
+							local h = gen.column(px, pz)
+							for y = 1, math.min(r.height, h // stepY) - 1 do
+								local cy = (y * stepY) // csY
+								if
+									cy < coarse.height
+									and not isTerrain(ChunkLayout.get(coarse.data, clx, cy, clz))
+									and Blocks.isOpaque(ChunkLayout.get(r.data, lx, y, lz))
+								then
+									facing += 1
+									if not covered[ChunkLayout.localIndex(lx, y, lz)] then
+										holes += 1
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		print(
+			`    ravine {deepest} deep at {rx}, {rz}: {facing} border cells face a coarser node's cut, {holes} not drawn`
+		)
+		t.ok(facing > 0, "border cells face the ravine across a seam")
+		t.eq(holes, 0, "border cells facing a coarser node's ravine are drawn (TerrainGenerator.seamLimits)")
+	end)
+
 	t.test("cave caps: tunnels running into a hidden section end in stone, not the void", function()
 		local gen = TerrainGenerator.new(12345)
 		local section = Config.SectionHeight
@@ -880,5 +966,260 @@ return function(t, shared, require, _server, client)
 		end
 		t.eq(tested, 3, "chunks with a tunnel crossing a section boundary")
 		t.ok(before > 0, "without caps the tunnels would end in the void")
+	end)
+
+	--[[
+		Void faces of a full detail chunk meshed section by section, revealed where `reveal` says
+		(caps towards every hidden section and the neighbouring chunks, as the streamer does):
+		a cell that is open where it is meshed (not opaque, and not cave air in a hidden section)
+		next to one that is solid where *that* one is meshed, but drawn by no opaque box. Looking
+		from the first at the second shows the void. Returns the count and the meshes.
+	]]
+	local function voids(r: any, reveal: { [number]: boolean }): (number, { { any } })
+		local section = Config.SectionHeight
+		local sections = math.ceil(r.height / section)
+		local meshes = {}
+		-- The cells as each revealed section meshes them: its caps are stone.
+		local seen = buffer.create(buffer.len(r.data))
+		buffer.copy(seen, 0, r.data)
+		for s = 0, sections - 1 do
+			local y0, y1 = s * section, math.min((s + 1) * section, r.height)
+			local hide = not reveal[s]
+			local border: GreedyMesher.Border? = nil
+			if not hide then
+				local hidden = 1 + 2 + 4 + 8
+				if s > 0 and not reveal[s - 1] then
+					hidden += GreedyMesher.HIDDEN_BELOW
+				end
+				if not reveal[s + 1] then
+					hidden += GreedyMesher.HIDDEN_ABOVE
+				end
+				border = { open = nil, hidden = hidden }
+				local copy = GreedyMesher.applyBorder(r.data, r.height, y0, y1, false, border :: any)
+				local from, bytes = y0 * ChunkLayout.LAYER * 2, (y1 - y0) * ChunkLayout.LAYER * 2
+				buffer.copy(seen, from, copy, from, bytes)
+			end
+			if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, hide) then
+				table.insert(meshes, { GreedyMesher.mesh(r.data, r.height, y0, y1, hide, border, true) })
+			end
+		end
+		local covered = coverage(meshes)
+		local function open(x: number, y: number, z: number): boolean
+			if covered[ChunkLayout.localIndex(x, y, z)] then
+				return false
+			end
+			local cull = if reveal[y // section] then Blocks.cullLut else Blocks.cullLutHiddenCaves
+			return buffer.readu8(cull, ChunkLayout.get(seen, x, y, z)) == 0
+		end
+		local found = 0
+		for y = 0, r.height - 1 do
+			for z = 0, SIZE - 1 do
+				for x = 0, SIZE - 1 do
+					if open(x, y, z) then
+						for _, d in { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } } do
+							local nx, ny, nz = x + d[1], y + d[2], z + d[3]
+							if
+								nx >= 0
+								and nx < SIZE
+								and nz >= 0
+								and nz < SIZE
+								and ny >= 0
+								and ny < r.height
+								and not open(nx, ny, nz)
+								and not covered[ChunkLayout.localIndex(nx, ny, nz)]
+							then
+								found += 1
+							end
+						end
+					end
+				end
+			end
+		end
+		return found, meshes
+	end
+
+	-- Every reveal pattern of sections 0 .. n - 1 (bit s: section s revealed).
+	local function patterns(n: number): { { [number]: boolean } }
+		local list = {}
+		for bits = 0, bit32.lshift(1, n) - 1 do
+			local reveal = {}
+			for s = 0, n - 1 do
+				reveal[s] = bit32.btest(bits, bit32.lshift(1, s))
+			end
+			table.insert(list, reveal)
+		end
+		return list
+	end
+
+	t.test("hidden caves: a shaft dug into a cave ends in a stone cap, not the void", function()
+		local height = 64
+		local data = ChunkLayout.create(height)
+		local stone, air, caveAir = Blocks.id.Stone, Blocks.AIR, Blocks.CAVE_AIR
+		local twin = -1
+		for id = 0, Blocks.count - 1 do
+			if buffer.readu8(Blocks.caveTwinLut, id) == 1 then
+				twin = id
+				break
+			end
+		end
+		-- Rock up to the surface at 48 (padding too), a cave in sections 1 and 2 with lichen
+		-- (cave twins) on its floor, a shaft dug from the surface into its ceiling, a tunnel dug
+		-- into its side across the section boundary at 32, and the neighbouring chunk's own shaft
+		-- (in the padding) beside its -X end.
+		for y = 0, 47 do
+			for z = -1, SIZE do
+				for x = -1, SIZE do
+					ChunkLayout.setPadded(data, x, y, z, stone)
+				end
+			end
+		end
+		for y = 20, 35 do
+			for z = 2, 12 do
+				for x = 0, 12 do
+					ChunkLayout.set(data, x, y, z, caveAir)
+				end
+			end
+		end
+		for z = 3, 11 do
+			ChunkLayout.set(data, 6, 20, z, twin)
+		end
+		ChunkLayout.set(data, 7, 36, 7, twin) -- lichen on the shaft's rim, under the shaft
+		for y = 37, 47 do
+			ChunkLayout.set(data, 7, y, 7, air)
+		end
+		for x = 13, 15 do
+			ChunkLayout.set(data, x, 31, 7, air)
+			ChunkLayout.set(data, x, 32, 7, air)
+		end
+		for y = 22, 47 do
+			ChunkLayout.setPadded(data, -1, y, 7, air)
+		end
+		local r = { data = data, height = height, solidBelow = 20, emptyAbove = 48 }
+
+		-- Every section hidden (the camera above ground): the shaft, the tunnel and the
+		-- neighbour's shaft look at stone where they meet the cave.
+		local found, meshes = voids(r, {})
+		t.eq(found, 0, "no void anywhere with every section hidden")
+		local covered = coverage(meshes)
+		t.ok(covered[ChunkLayout.localIndex(7, 36, 7)], "the shaft's floor (a cave twin) is a stone cap")
+		t.ok(covered[ChunkLayout.localIndex(12, 31, 7)], "the dug tunnel's end is a stone cap")
+		t.ok(covered[ChunkLayout.localIndex(0, 30, 7)], "the cave beside the neighbour's shaft is capped")
+		-- What the caps are: stone, exactly the cave cells next to the dug air.
+		local stoneApp = Blocks.get(stone).appearance
+		for _, m in meshes do
+			local boxes, n = m[1] :: buffer, m[2] :: number
+			for b = 0, n - 1 do
+				local o = b * GreedyMesher.BOX_BYTES
+				local app = GreedyMesher.decodeKey(buffer.readu16(boxes, o + 12))
+				local x, y, z = buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
+				local id = ChunkLayout.get(data, x, y, z)
+				if id == caveAir or id == twin then
+					t.eq(app, stoneApp, "a cap is stone")
+				end
+			end
+		end
+		-- The mesher's invariants hold section by section, with the caps (and revealed).
+		for y0 = 16, 32, 16 do
+			verify(data, height, y0, y0 + 16, true)
+			verify(data, height, y0, y0 + 16, false)
+		end
+		-- Every mix of revealed and hidden sections (the cave view's caps between them).
+		for _, reveal in patterns(4) do
+			t.eq((voids(r, reveal)), 0, "no void with a mix of revealed and hidden sections")
+		end
+	end)
+
+	t.test("hidden caves: real surface caves meet hidden caves in stone; invariants hold", function()
+		local gen = TerrainGenerator.new(12345)
+		-- Chunks around (0, 6) where air carved below the surface (cave entrances) touches cave air.
+		local found = 0
+		for ring = 0, 4 do
+			for dz = -ring, ring do
+				for dx = -ring, ring do
+					if found >= 2 or (math.abs(dx) ~= ring and math.abs(dz) ~= ring) then
+						continue
+					end
+					local cx, cz = dx + 0, 6 + dz
+					local r = gen.generate(0, cx, cz, nil, true)
+					local junctions = 0
+					for z = 0, SIZE - 1 do
+						for x = 0, SIZE - 1 do
+							local top = buffer.readu16(r.surface, (z * SIZE + x) * 2)
+							for y = math.max(r.solidBelow, 1), top - 1 do
+								if ChunkLayout.get(r.data, x, y, z) == Blocks.AIR then
+									for _, d in
+										{
+											{ 1, 0, 0 },
+											{ -1, 0, 0 },
+											{ 0, 1, 0 },
+											{ 0, -1, 0 },
+											{ 0, 0, 1 },
+											{ 0, 0, -1 },
+										}
+									do
+										local id = ChunkLayout.getPadded(r.data, x + d[1], y + d[2], z + d[3])
+										if id == Blocks.CAVE_AIR then
+											junctions += 1
+										end
+									end
+								end
+							end
+						end
+					end
+					if junctions == 0 then
+						continue
+					end
+					found += 1
+					-- Caves hidden everywhere (the camera above ground): every junction is capped.
+					local holes, meshes = voids(r, {})
+					t.eq(holes, 0, `chunk {cx},{cz}: no void where the entrance meets the cave`)
+					-- Every cave cell next to open space that is not cave is a cap, drawn.
+					local covered = coverage(meshes)
+					local capped = 0
+					for z = 0, SIZE - 1 do
+						for x = 0, SIZE - 1 do
+							for y = 1, r.height - 2 do
+								if ChunkLayout.get(r.data, x, y, z) ~= Blocks.CAVE_AIR then
+									continue
+								end
+								for _, d in
+									{ { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+								do
+									local id = ChunkLayout.getPadded(r.data, x + d[1], y + d[2], z + d[3])
+									if buffer.readu8(Blocks.cullLutHiddenCaves, id) == 0 then
+										capped += 1
+										t.ok(covered[ChunkLayout.localIndex(x, y, z)], `cap ({x},{y},{z}) drawn`)
+										break
+									end
+								end
+							end
+						end
+					end
+					t.ok(capped > 0, "stone caps drawn")
+					-- The invariants, section by section, hidden and revealed.
+					local sections = math.ceil(r.height / Config.SectionHeight)
+					for s = 0, sections - 1 do
+						local y0, y1 = s * Config.SectionHeight, math.min((s + 1) * Config.SectionHeight, r.height)
+						for _, hide in { true, false } do
+							if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, hide) then
+								verify(r.data, r.height, y0, y1, hide)
+							end
+						end
+					end
+					-- Mixes of revealed and hidden sections (the cave view's caps between them).
+					local all, even, odd = {}, {}, {}
+					for s = 0, sections - 1 do
+						all[s] = true
+						even[s] = s % 2 == 0
+						odd[s] = s % 2 == 1
+					end
+					for _, reveal in { all, even, odd } do
+						t.eq((voids(r, reveal)), 0, `chunk {cx},{cz}: no void with revealed sections`)
+					end
+					print(`    chunk {cx},{cz}: {junctions} junction faces, {capped} stone caps`)
+				end
+			end
+		end
+		t.eq(found, 2, "chunks where a surface cave meets a cave")
 	end)
 end

@@ -26,7 +26,10 @@
 
 	Also a `hold` that keeps the cave view's extended full detail range
 	(Lod.UndergroundSplitDistanceL1) for a few seconds after the camera comes up (not after a
-	teleport: `reset`).
+	teleport: `reset`). Only a camera shut in underground (`enclosed`) starts it: at the open
+	bottom of a pit, a ravine or a shaft dug from the surface what is seen is the sky and the
+	surface, and stepping into any of the many cave entrances would otherwise load 70-90% more
+	full detail chunks for nothing.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -80,6 +83,34 @@ function CaveReach.probe(
 	end
 	table.sort(distances)
 	return distances[math.max(1, math.floor(#distances * (1 - PERCENTILE)) + 1)]
+end
+
+--[[
+	Is a camera at (x, y, z) below its column's generated surface (`surface`, the first cell above
+	the uncarved ground) shut in: in a cave cell (cave air or a cave twin: a cavern under a
+	ravine's cut too), or under an opaque block below the surface? Not at the open bottom of a pit,
+	a ravine or a shaft dug from the surface. Cells not loaded (`getBlock` returns nil) count as
+	shut in: generated ground is.
+]]
+function CaveReach.enclosed(
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number,
+	surface: number
+): boolean
+	local bx, by, bz = math.floor(x), math.floor(y), math.floor(z)
+	local here = getBlock(bx, by, bz)
+	if here == nil or here == Blocks.CAVE_AIR or buffer.readu8(Blocks.caveTwinLut, here) == 1 then
+		return true
+	end
+	for cy = by + 1, surface - 1 do
+		local id = getBlock(bx, cy, bz)
+		if id == nil or Blocks.isOpaque(id) then
+			return true
+		end
+	end
+	return false
 end
 
 export type Tracker = {
@@ -290,13 +321,14 @@ end
 export type Hold = {
 	-- Until when (the `now` clock) the hold lasts.
 	untilTime: number,
-	-- Feed whether the cave view is active now; returns whether the underground split applies.
+	-- Feed whether the cave view is active now with the camera shut in (`enclosed`); returns
+	-- whether the underground split applies.
 	update: (self: Hold, active: boolean, now: number) -> boolean,
 	-- Ends the hold at once (a teleport: the place it was for is gone).
 	reset: (self: Hold) -> (),
 }
 
--- True while the cave view is active and for `seconds` after it ended.
+-- True while the cave view is active (shut in) and for `seconds` after it ended.
 function CaveReach.hold(seconds: number): Hold
 	local hold = { untilTime = -math.huge }
 	function hold.update(self: Hold, active: boolean, now: number): boolean

@@ -1,12 +1,14 @@
 --[[
 	The cave view: how far caves are seen from underground. Full detail reaches further while the
-	camera is in a cave (LodTree's underground split, held a few seconds after coming up); the
+	camera is shut in underground (CaveReach.enclosed: in a cave or under rock, not at the open
+	bottom of a pit or a ravine; LodTree's underground split, held a few seconds after that); the
 	revealed sections are the ones SectionGraph's search reaches (CaveReach.view: reach, hold,
 	pending chunks, caps where they meet hidden space, searching only when something changed), as
 	far as Config.Caves and the cave view setting say; on real caves that costs about the old
-	reveal sphere's parts while tunnels are seen further; and glow lichen's lights stay few
-	(GreedyMesher's sparse lights: one per LIGHT_BOX box, all on: Config.Caves.LichenLightDistance
-	is math.huge).
+	reveal sphere's parts while tunnels are seen further; walking down a real cave entrance turns
+	the view on and reveals the cave beyond, and in a real ravine the search stays out of the sky;
+	and glow lichen's lights stay few (GreedyMesher's sparse lights: one per LIGHT_BOX box, all on:
+	Config.Caves.LichenLightDistance is math.huge).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -196,6 +198,53 @@ return function(t, shared, require, _server, client)
 		t.eq(hold:update(true, 20), true)
 		t.eq(hold:update(false, 24.9), true, "held from the last moment underground")
 		t.eq(hold:update(false, 25.1), false)
+	end)
+
+	t.test("cave view: only a camera shut in underground starts the underground split", function()
+		-- Rock up to the surface (cell 100), air above; columns x 0..4 dug in different ways,
+		-- column 9 not loaded.
+		local SURFACE = 100
+		local cells: { [string]: number } = {}
+		local function getBlock(x: number, y: number, z: number): number?
+			if x == 9 then
+				return nil -- not loaded
+			end
+			return cells[`{x},{y},{z}`] or if y < SURFACE then Blocks.id.Stone else Blocks.AIR
+		end
+		local function dig(x: number, y0: number, y1: number, id: number)
+			for y = y0, y1 do
+				cells[`{x},{y},0`] = id
+			end
+		end
+		local function shut(x: number, y: number): boolean
+			return CaveReach.enclosed(getBlock, x + 0.5, y + 0.6, 0.5, SURFACE)
+		end
+		dig(0, 60, 99, Blocks.AIR)
+		t.eq(shut(0, 60), false, "the bottom of a shaft open to the sky (a pit, a ravine)")
+		t.eq(shut(0, 97), false, "just under the surface")
+		dig(1, 60, 70, Blocks.AIR)
+		t.eq(shut(1, 60), true, "under rock")
+		dig(2, 40, 99, Blocks.AIR)
+		dig(2, 40, 50, Blocks.CAVE_AIR)
+		t.eq(shut(2, 41), true, "in a cave under a ravine's cut")
+		local twin
+		for id = 0, Blocks.count - 1 do
+			if buffer.readu8(Blocks.caveTwinLut, id) == 1 then
+				twin = id
+				break
+			end
+		end
+		assert(twin, "a cave twin")
+		dig(3, 40, 99, Blocks.AIR)
+		cells["3,40,0"] = twin
+		t.eq(shut(3, 40), true, "in a cave twin's cell")
+		dig(4, 40, 99, Blocks.AIR)
+		cells["4,90,0"] = Blocks.id.Glass
+		cells["4,91,0"] = Blocks.id.Water
+		t.eq(shut(4, 40), false, "glass and water let the sky in")
+		cells["4,95,0"] = Blocks.id.Stone
+		t.eq(shut(4, 40), true, "a block of rock overhead")
+		t.eq(shut(9, 40), true, "not loaded: generated ground")
 	end)
 
 	--[[ The revealed set (CaveReach.view) on a synthetic world ]]
@@ -574,5 +623,291 @@ return function(t, shared, require, _server, client)
 		-- keeps a revealed cave to a few hundred PointLights.)
 		t.eq(Config.Caves.LichenLightDistance, math.huge, "lichen lights on at any distance")
 		t.ok(marked <= 600, `lichen lights in the revealed caves: {marked}`)
+	end)
+
+	--[[ Surface caves: real entrances and ravines ]]
+
+	local DIRS = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+
+	--[[
+		Generated full detail chunks with the graphs ChunkWorker builds (the lattice hint, the
+		sections holding air carved below the surface, the surface as the sky line); `old`: the
+		graph without a sky line (the rules before surface caves).
+	]]
+	local function realWorld(gen: any)
+		local chunks: { [number]: any } = {}
+		local w = {}
+		function w.chunk(cx: number, cz: number): any
+			local key = Coords.chunkKey(cx, cz)
+			local r = chunks[key]
+			if r == nil then
+				r = gen.generate(0, cx, cz, nil, true)
+				local exact: { [number]: boolean } = {}
+				if r.structureSpan then
+					for s = r.structureSpan[1] // SECTION, r.structureSpan[2] // SECTION do
+						exact[s] = true
+					end
+				end
+				SectionGraph.dugSections(r.data, r.height, r.surface, r.solidBelow, exact)
+				local extra = {}
+				for s in exact do
+					table.insert(extra, s)
+				end
+				local list = SectionGraph.carvedSections(r.carved, Caves.CELL_Y, extra)
+				r.graph = SectionGraph.build(r.data, r.height, r.solidBelow, list, {
+					carved = r.carved,
+					cellXZ = Caves.CELL_XZ,
+					cellY = Caves.CELL_Y,
+					originX = cx * SIZE,
+					originZ = cz * SIZE,
+					surface = r.surface,
+					exact = exact,
+				})
+				r.old = SectionGraph.build(r.data, r.height, r.solidBelow, list)
+				chunks[key] = r
+			end
+			return r
+		end
+		function w.block(x: number, y: number, z: number): number?
+			if y < 0 then
+				return nil
+			end
+			local r = w.chunk(x // SIZE, z // SIZE)
+			if y >= r.height then
+				return Blocks.AIR
+			end
+			return ChunkLayout.get(r.data, x % SIZE, y, z % SIZE)
+		end
+		-- The generated surface (first air block before any carving) of column (x, z).
+		function w.surface(x: number, z: number): number
+			local r = w.chunk(x // SIZE, z // SIZE)
+			return buffer.readu16(r.surface, ((z % SIZE) * SIZE + x % SIZE) * 2)
+		end
+		return w
+	end
+
+	--[[
+		Air carved below the surface (a surface cave) that touches cave air and has a way out to
+		the open sky through carved air, scanning the chunks around (cx, cz) outwards: { x, y, z }
+		of that air and of the cave air, and the way out (mouth first).
+	]]
+	local function findEntrance(w: any, cx: number, cz: number, r: number): ({ number }?, { { number } }?)
+		local function key(x: number, y: number, z: number): string
+			return `{x},{y},{z}`
+		end
+		-- Breadth first from `junction` through carved air to a cell under the open sky.
+		local tried: { [string]: boolean } = {}
+		local function wayOut(junction: { number }): { { number } }?
+			local from: { [string]: { number } | false } = { [key(junction[1], junction[2], junction[3])] = false }
+			local queue = { { junction[1], junction[2], junction[3] } }
+			local head, mouth = 1, nil
+			while head <= #queue do
+				local p = queue[head]
+				head += 1
+				if p[2] + 1 >= w.surface(p[1], p[3]) then
+					mouth = p
+					break
+				end
+				for _, d in DIRS do
+					local x, y, z = p[1] + d[1], p[2] + d[2], p[3] + d[3]
+					local k = key(x, y, z)
+					if from[k] == nil and w.block(x, y, z) == Blocks.AIR and y < w.surface(x, z) then
+						from[k] = p
+						tried[k] = true
+						table.insert(queue, { x, y, z })
+					end
+				end
+			end
+			if mouth == nil then
+				return nil
+			end
+			local path = {}
+			local p: { number }? = mouth
+			while p do
+				table.insert(path, p)
+				p = from[key(p[1], p[2], p[3])] or nil
+			end
+			return path
+		end
+		for ring = 0, r do
+			for dz = -ring, ring do
+				for dx = -ring, ring do
+					if math.abs(dx) ~= ring and math.abs(dz) ~= ring then
+						continue
+					end
+					local c = w.chunk(cx + dx, cz + dz)
+					for z = 0, SIZE - 1 do
+						for x = 0, SIZE - 1 do
+							local top = buffer.readu16(c.surface, (z * SIZE + x) * 2)
+							for y = math.max(c.solidBelow, 1), top - 1 do
+								local wx, wz = (cx + dx) * SIZE + x, (cz + dz) * SIZE + z
+								if ChunkLayout.get(c.data, x, y, z) ~= Blocks.AIR or tried[key(wx, y, wz)] then
+									continue
+								end
+								for _, d in DIRS do
+									if w.block(wx + d[1], y + d[2], wz + d[3]) == Blocks.CAVE_AIR then
+										local junction = { wx, y, wz, wx + d[1], y + d[2], wz + d[3] }
+										local path = wayOut(junction)
+										if path then
+											return junction, path
+										end
+										break
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		return nil, nil
+	end
+
+	t.test("cave view: walking down a real cave entrance turns it on and reveals the cave beyond", function()
+		local gen = TerrainGenerator.new(12345)
+		local w = realWorld(gen)
+		local junction, path = findEntrance(w, 0, 6, 5)
+		assert(junction and path, "a surface cave meeting a cave near chunk 0, 6")
+		local caveKey = SectionGraph.key(junction[4] // SIZE, junction[6] // SIZE, junction[5] // SECTION)
+		local ccx, ccz = junction[1] // SIZE, junction[3] // SIZE
+		local function lookupOf(field: string): SectionGraph.Lookup
+			return function(cx: number, cz: number): (buffer | false)?
+				if math.abs(cx - ccx) > 9 or math.abs(cz - ccz) > 9 then
+					return nil
+				end
+				return w.chunk(cx, cz)[field]
+			end
+		end
+		local lookup = lookupOf("graph")
+		local reach = CaveReach.searchReach(Config.Caves.RevealReach, Config.Caves.RevealRadius)
+		local view = CaveReach.view(Config.Caves.RevealHold, Config.Caves.RevealBudget)
+		local switched, revealed, most, shutAt = nil, nil, 0, nil
+		for i, c in path do
+			local x, y, z = c[1] + 0.5, c[2] + 0.6, c[3] + 0.5
+			-- The streamer's switch: the camera below its column's generated surface.
+			local surface = gen.column(c[1], c[3])
+			local under = y < surface - 1
+			if under then
+				switched = switched or i
+				-- The underground split: only once shut in under rock.
+				if shutAt == nil and CaveReach.enclosed(w.block, x, y, z, surface) then
+					shutAt = i
+				end
+				view:update(lookup, x, y, z, reach, i * 0.25, false)
+				most = math.max(most, view.reached)
+				t.ok(not view.truncated, "within the budget")
+			else
+				t.eq(switched, nil, "once underground, the way down stays underground")
+				view:update(lookup, nil, nil, nil, 0, i * 0.25, false)
+			end
+			if revealed == nil and view.revealed[caveKey] then
+				revealed = i
+			end
+		end
+		assert(switched and revealed, "the cave view came on and revealed the cave")
+		t.ok(switched > 1, "off at the mouth, under the open sky")
+		t.ok(switched <= 4, `on a few blocks into the entrance (step {switched})`)
+		t.ok(shutAt ~= nil and shutAt > switched, `the underground split after the open mouth (step {shutAt})`)
+		local j = junction
+		t.ok(
+			CaveReach.enclosed(w.block, j[4] + 0.5, j[5] + 0.6, j[6] + 0.5, gen.column(j[4], j[6])),
+			"shut in, in the cave"
+		)
+		t.ok(revealed < #path, "the cave is revealed before the camera reaches it")
+		-- As soon as the junction's section is within the search's reach.
+		local c = path[switched]
+		local dx = (junction[4] // SIZE + 0.5) * SIZE - c[1]
+		local dy = (junction[5] // SECTION + 0.5) * SECTION - c[2]
+		local dz = (junction[6] // SIZE + 0.5) * SIZE - c[3]
+		if math.sqrt(dx * dx + dy * dy + dz * dz) < reach - SECTION then
+			t.eq(revealed, switched, "the cave beyond the entrance shows as the view comes on")
+		end
+		-- The rules before: the open entrance is not followed from its mouth.
+		local old = SectionGraph.search(lookupOf("old"), c[1] + 0.5, c[2] + 0.6, c[3] + 0.5, { reach = reach })
+		local new = SectionGraph.search(lookup, c[1] + 0.5, c[2] + 0.6, c[3] + 0.5, { reach = reach })
+		print(
+			string.format(
+				"    entrance %d,%d,%d -> cave %d,%d,%d (%d blocks): on at step %d, shut in at %d, cave revealed at %d; %d sections reached at the mouth (old rules %d, cave %s), at most %d",
+				path[1][1],
+				path[1][2],
+				path[1][3],
+				junction[4],
+				junction[5],
+				junction[6],
+				#path,
+				switched,
+				shutAt or 0,
+				revealed,
+				new.count,
+				old.count,
+				if old.reached[caveKey] then "reached" else "not reached",
+				most
+			)
+		)
+		t.ok(most < 600, `no sky in the search ({most} sections)`)
+	end)
+
+	t.test("cave view: in a real ravine the view comes on and the search stays out of the sky", function()
+		local gen = TerrainGenerator.new(12345)
+		local w = realWorld(gen)
+		-- The deepest open cut (carved air open to the sky) in chunks every 2 along a stretch.
+		local best, camera = 0, nil
+		for cz = -30, -24, 2 do
+			for cx = 30, 38, 2 do
+				local c = w.chunk(cx, cz)
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local top = buffer.readu16(c.surface, (z * SIZE + x) * 2)
+						local y = top - 1
+						while y > 0 and ChunkLayout.get(c.data, x, y, z) == Blocks.AIR do
+							y -= 1
+						end
+						if top - 1 - y > best then
+							best, camera = top - 1 - y, { cx * SIZE + x, y + 1, cz * SIZE + z }
+						end
+					end
+				end
+			end
+		end
+		assert(camera and best >= 15, `a ravine near 540, -420 (deepest cut {best})`)
+		local x, y, z = camera[1] + 0.5, camera[2] + 0.6, camera[3] + 0.5
+		t.ok(y < gen.column(camera[1], camera[3]) - 1, "a camera at the bottom of a ravine is underground")
+		t.ok(
+			not CaveReach.enclosed(w.block, x, y, z, gen.column(camera[1], camera[3])),
+			"under the open sky: no underground split"
+		)
+		local ccx, ccz = camera[1] // SIZE, camera[3] // SIZE
+		local result = SectionGraph.search(function(cx: number, cz: number): (buffer | false)?
+			if math.abs(cx - ccx) > 8 or math.abs(cz - ccz) > 8 then
+				return nil
+			end
+			return w.chunk(cx, cz).graph
+		end, x, y, z, { reach = Config.Caves.RevealReach })
+		-- Sky air is never followed: nothing well above the ground is reached.
+		local above = 0
+		for key in result.reached do
+			local cx, cz, s = SectionGraph.decode(key)
+			local c = w.chunk(cx, cz)
+			local high = 0
+			for i = 0, SIZE * SIZE - 1 do
+				high = math.max(high, buffer.readu16(c.surface, i * 2))
+			end
+			if s * SECTION >= high + SECTION then
+				above += 1
+			end
+		end
+		print(
+			string.format(
+				"    ravine %d deep at %d,%d,%d: %d sections reached, %d above the ground",
+				best,
+				camera[1],
+				camera[2],
+				camera[3],
+				result.count,
+				above
+			)
+		)
+		t.eq(above, 0, "no section above the ground beyond the camera's neighbours")
+		t.ok(result.count < 400 and not result.truncated, `a few hundred sections at most ({result.count})`)
 	end)
 end

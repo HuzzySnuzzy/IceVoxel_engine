@@ -393,6 +393,10 @@ return function(t, shared, require)
 	t.test("lichen: costs little generation time", function()
 		-- Each chunk generated without caves, then carved and decorated as `generate` does (the
 		-- carver's own map of carved cells), timing both: the result must be the generated chunk.
+		-- (Without surface caves, which `generate` carves in between.)
+		local entrances, ravines = Config.Caves.Entrances, Config.Caves.Ravines
+		local wereOn = { entrances.Enabled, ravines.Enabled }
+		entrances.Enabled, ravines.Enabled = false, false
 		local Relief = require(shared.Generation.Relief)
 		local relief = Relief.new(SEED)
 		local carve = Caves.new(SEED, function(x: number, z: number): number
@@ -441,6 +445,7 @@ return function(t, shared, require)
 		-- (This harness runs modules in a custom environment, without Luau's fast builtins, which
 		-- slows buffer-heavy code like this most: in a normal VM, as in Roblox, lichen is ~5% of a
 		-- chunk with caves.)
+		entrances.Enabled, ravines.Enabled = wereOn[1], wereOn[2]
 		t.ok(decorTime < 0.2 * generateTime, "lichen costs less than a fifth of generation")
 	end)
 end

@@ -22,7 +22,8 @@ return function(t, shared, require)
 		local cull = if hide then Blocks.cullLutHiddenCaves else Blocks.cullLut
 		local id = ChunkLayout.get(data, x, y, z)
 		local app = Blocks.get(id).appearance
-		if app == 0 then
+		local caveCell = id == Blocks.CAVE_AIR or buffer.readu8(Blocks.caveTwinLut, id) == 1
+		if app == 0 and not (hide and caveCell) then
 			return 0
 		end
 		local d = NORMALS[dir + 1]
@@ -35,8 +36,12 @@ return function(t, shared, require)
 		else
 			n = ChunkLayout.getPadded(data, x + d[1], ny, z + d[3])
 		end
-		local kind = Blocks.appearances[app].kind
 		local seeThrough = buffer.readu8(cull, n) == 0
+		if hide and caveCell then
+			-- Hidden caves: rock, with a stone cap towards open space that is not cave.
+			return if seeThrough then Blocks.get(Blocks.id.Stone).appearance else 0
+		end
+		local kind = Blocks.appearances[app].kind
 		if kind == Blocks.KIND_OPAQUE then
 			return if seeThrough then app else 0
 		elseif kind == Blocks.KIND_TRANSPARENT then
@@ -155,6 +160,43 @@ return function(t, shared, require)
 		end
 		local r = gen.generate(0, -12, -11)
 		verify(r.data, r.height, 0, r.height, false)
+	end)
+
+	t.test("quads: with caves hidden, a surface cave meets the caves in stone caps", function()
+		local gen = TerrainGenerator.new(12345)
+		local stone = Blocks.get(Blocks.id.Stone).appearance
+		-- The first chunk around (0, 6) where air carved below the surface touches cave air.
+		for ring = 0, 4 do
+			for dz = -ring, ring do
+				for dx = -ring, ring do
+					if math.abs(dx) ~= ring and math.abs(dz) ~= ring then
+						continue
+					end
+					local r = gen.generate(0, dx, 6 + dz, nil, true)
+					local caps = 0
+					for z = 0, SIZE - 1 do
+						for x = 0, SIZE - 1 do
+							local top = buffer.readu16(r.surface, (z * SIZE + x) * 2)
+							for y = math.max(r.solidBelow, 1), top - 1 do
+								if ChunkLayout.get(r.data, x, y, z) == Blocks.CAVE_AIR then
+									for dir = 0, 5 do
+										if referenceKey(r.data, r.height, x, y, z, dir, true) == stone then
+											caps += 1
+										end
+									end
+								end
+							end
+						end
+					end
+					if caps > 0 then
+						local y0, y1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
+						verify(r.data, r.height, y0, y1, true)
+						return
+					end
+				end
+			end
+		end
+		error("no surface cave meets a cave around chunk 0, 6")
 	end)
 
 	t.test("quad corners wind counter-clockwise around the outward normal", function()

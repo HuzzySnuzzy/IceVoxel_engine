@@ -35,9 +35,38 @@ local Config = {
 
 	Caves = {
 		Enabled = true,
-		-- Caves never come closer to the surface than this, so they are invisible from above ground.
+		-- The deep caves (Generation/Caves) never come closer to the surface than this on their own;
+		-- only the surface caves below (entrances, ravines) open them up.
 		SurfaceMargin = 5,
 		MinY = 4,
+		-- Surface caves (Generation/SurfaceCaves): worms carved as Air, after the caves, that open at
+		-- the surface. Never under water, near a river bed or into a library structure. Ranges are
+		-- { lowest, highest }; lengths are in steps of about a block.
+		-- Cave entrances (Minecraft's cave carver, adapted): one candidate per Spacing x Spacing
+		-- blocks, taken with Chance, starting on the surface at a hashed spot. A tunnel of Radius
+		-- (varying smoothly along it) winds down to Depth blocks below the surface, levels off there
+		-- and ends in a small chamber; Branch is the chance of a side tunnel. On steep slopes it
+		-- heads into the slope, so mountains get mouths and flat ground gets pits.
+		Entrances = {
+			Enabled = true,
+			Spacing = 96,
+			Chance = 0.6,
+			Radius = { 1.5, 3.5 },
+			Length = { 48, 140 },
+			Depth = { 15, 60 },
+			Branch = 0.35,
+		},
+		-- Ravines (Minecraft's canyon carver): rarer, long and narrow cuts open at the top, widest
+		-- and deepest in the middle of their length (Radius: half width at the ends .. at the middle;
+		-- Depth: below the surface in the middle, ~8 blocks at the ends).
+		Ravines = {
+			Enabled = true,
+			Spacing = 384,
+			Chance = 0.5,
+			Radius = { 1.5, 6 },
+			Length = { 60, 160 },
+			Depth = { 20, 45 },
+		},
 		-- While the camera is below the surface, the cave walls it can see into are meshed (in 16^3
 		-- sections: World/SectionGraph's search through connected cave air, Streaming/CaveReach).
 		-- Otherwise caves are treated as solid rock, which keeps the part count low.
@@ -87,14 +116,15 @@ local Config = {
 		-- 2 x this, in chunks). Full detail chunks are the most expensive (collision, caves, textures):
 		-- 2 removes about 12% of all parts in mountains, at the cost of full detail ending sooner.
 		SplitDistanceL1 = 3,
-		-- SplitDistanceL1 while the camera is underground (the cave view: below the terrain surface,
-		-- and for UndergroundSeconds after coming up, so walking in and out of a cave mouth does not
-		-- rebuild chunks back and forth). Caves only exist in full detail chunks, so this is how far
-		-- they can be seen: about 2 x this chunks (4: ~128 blocks, ~110 ahead of a moving camera;
-		-- 3: ~96), from the first selection underground on (LodTree.select). Measured with a
-		-- camera in a cave near the spawn (seed 12345), with Caves' radii: 268 full detail chunks
-		-- instead of 164, ~57,000 parts instead of ~47,000 (under the highest mountains, in the
-		-- Underlands: ~139,000 instead of ~110,000, before far meshes).
+		-- SplitDistanceL1 while the camera is shut in underground (the cave view with
+		-- Streaming/CaveReach.enclosed: below the terrain surface in a cave or under rock, not at the
+		-- open bottom of a pit or a ravine), and for UndergroundSeconds after that, so walking in and
+		-- out of a cave mouth does not rebuild chunks back and forth. Caves only exist in full detail
+		-- chunks, so this is how far they can be seen: about 2 x this chunks (4: ~128 blocks, ~110
+		-- ahead of a moving camera; 3: ~96), from the first selection underground on (LodTree.select).
+		-- Measured with a camera in a cave near the spawn (seed 12345), with Caves' radii: 268 full
+		-- detail chunks instead of 164, ~57,000 parts instead of ~47,000 (under the highest
+		-- mountains, in the Underlands: ~139,000 instead of ~110,000, before far meshes).
 		UndergroundSplitDistanceL1 = 4,
 		UndergroundSeconds = 5,
 		-- Nothing is rendered further away than this (blocks).

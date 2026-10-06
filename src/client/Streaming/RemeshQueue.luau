@@ -25,9 +25,9 @@
 
 	Commit groups (batches): every node one batch of edits dirtied (the edited chunk, and the
 	neighbours whose padding changed) goes live in the same frame. A batch opens a renderer group
-	holding it once itself; each of its jobs holds it too, and that hold is closed (`done`) once
-	the job's builds were queued, or when it failed. When no member is left waiting for its job,
-	the batch closes its own hold. New edits join the open batch. A cave reveal pass
+	holding it once itself; each of its jobs, once sent, holds it too, and that hold is closed
+	(`done`) once the job's builds were queued, or when it failed. When no member is left waiting
+	for its job, the batch closes its own hold. New edits join the open batch. A cave reveal pass
 	(`beginPass` / `endPass`) is a batch too when it changed at most `limit` sections, so a
 	section whose cave cap opens and the neighbour it opens onto go live together; a bigger pass
 	(entering a cave changes hundreds of sections) is cut into batches of at most `limit`
@@ -364,15 +364,12 @@ local function try(self: RemeshQueue, node: any, state: State, lane: number, sub
 		leave(state, node, lane)
 		return true
 	end
-	-- Held before submitting: a callback may come back at once.
+	if not submit(job) then
+		return false
+	end
+	-- (Only once sent: a group may start with its first job. Its callback comes later.)
 	if group ~= nil then
 		self.groups.hold(group)
-	end
-	if not submit(job) then
-		if group ~= nil then
-			self.groups.close(group)
-		end
-		return false
 	end
 	if batch and not batch.sent then
 		-- (Its other members move to the front: `buildNearOrder`.)

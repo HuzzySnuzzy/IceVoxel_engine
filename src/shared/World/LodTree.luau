@@ -16,10 +16,12 @@
 	for its device preset).
 
 	Caves only exist in full detail chunks, so underground the full detail range is what limits how
-	far caves are seen. While the client's cave view is active (`select`'s `underground`: the
-	camera is below the terrain surface, plus a few seconds after leaving it, which the streamer
-	decides), level 1 nodes split with Config.Lod.UndergroundSplitDistanceL1 instead of
-	SplitDistanceL1, so full detail reaches further out (radius about 2 x that, in chunks). Coarser
+	far caves are seen. While the client's cave view is active with the camera shut in
+	(`select`'s `underground`: below the terrain surface in a cave or under rock, not at the open
+	bottom of a pit or a ravine: Streaming/CaveReach.enclosed; plus a few seconds after that
+	ends, which the streamer decides), level 1 nodes split with
+	Config.Lod.UndergroundSplitDistanceL1 instead of SplitDistanceL1, so full detail reaches
+	further out (radius about 2 x that, in chunks). Coarser
 	levels are unchanged. Level 1's hysteresis holds within one mode only: the first selection
 	after the cave view starts splits every level 1 node within the new distance, instead of
 	keeping the leaves of the selection above ground short of it.
@@ -186,8 +188,9 @@ end
 --[[
 	Returns { [nodeKey] = level } for the viewer at block coordinates (x, z).
 	`previous` is the result of the last call (optional, enables hysteresis). `underground`: the
-	cave view is active, so full detail reaches further (UndergroundSplitDistanceL1);
-	`previousUnderground`: it was for `previous` (level 1 keeps no hysteresis across a change).
+	cave view is active with the camera shut in, so full detail reaches further
+	(UndergroundSplitDistanceL1); `previousUnderground`: it was for `previous` (level 1 keeps no
+	hysteresis across a change).
 ]]
 function LodTree.select(
 	x: number,

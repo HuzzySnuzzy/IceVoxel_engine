@@ -17,9 +17,12 @@
 	             get the full light itself), or open to the sky, gives 1 - distance / End. So a
 	             tunnel darkens with the distance from its mouth, not the depth of the hill above.
 
-	Generated caves never open to the surface, so they still go dark. Cheap enough for the
-	controller's 10 updates a second: the rays stop at the first wall, at an unloaded cell and once
-	they can't beat the best so far, and the sideways looks up for the sky share a budget.
+	Surface caves (Generation/SurfaceCaves) are air below the natural ground like dug tunnels: a
+	cave entrance is lit at its mouth and darkens with the distance from it (half light ~17 blocks
+	in, dark from ~30 on a generated one), a ravine's floor is under the open sky (full light), and
+	the deep caves beyond stay dark. Cheap enough for the controller's 10 updates a second: the
+	rays stop at the first wall, at an unloaded cell and once they can't beat the best so far, and
+	the sideways looks up for the sky share a budget.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

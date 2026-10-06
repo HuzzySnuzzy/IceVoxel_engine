@@ -68,7 +68,11 @@ node key) and `posKey(x, y, z)` for block positions.
    time (`buffer.copy`).
 3. **Caves** (level 0 only, `Caves.luau`). See below. Caves are carved as **CaveAir** and stay
    `Caves.SurfaceMargin` blocks below the surface.
-4. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
+4. **Cave entrances and ravines** (levels 0-2, `SurfaceCaves.luau`). See below. Carved as **Air**
+   (part of the surface: drawn from above, lit by the sky) after the caves, which they open up:
+   the cave air they run into stays cave air. `solidBelow` drops to the lowest carved cell, and
+   ores only replace stone, so they never fill it.
+5. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
    Uniform features start veins anywhere in the part of their range the chunk's buffer has (up to
@@ -82,21 +86,25 @@ node key) and `posKey(x, y, z)` for block positions.
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
-5. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
+6. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
    the structure library's jigsaw structures (`StructureGen.luau`), whose air clears trees and
    whose structure voids keep them. See below.
-6. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
-   that is still there. See below.
-7. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
-   trunk, leaves or a building. See Foliage below.
+7. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
+   that is still there; it grows only in cave air, so surface caves get none. See below.
+8. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+   trunk, leaves or a building, nor in or over a pit (the column's generated top must be ground
+   with air above). See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
-rock or cave air; lowered under a structure's cells that are neither) and `emptyAbove` (everything
-above is air; raised over trees, structures and plants). `TerrainGenerator.new(seed, options?)`
-takes the structure library to generate (`options.library`, default `Library.load()` while
-`Config.Structures.Generate` is on; `structures = false` for none);
+rock or cave air; lowered under a structure's cells that are neither and under surface caves' air)
+and `emptyAbove` (everything above is air; raised over trees, structures and plants).
+`TerrainGenerator.new(seed, options?)` takes the structure library to generate (`options.library`,
+default `Library.load()` while `Config.Structures.Generate` is on; `structures = false` for none);
 `generator.structures(minX, minZ, maxX, maxZ)` lists the generated structures with a piece in a
-rectangle and `generator.structureContainer(x, y, z)` the items a generated chest starts with.
+rectangle, `generator.structureContainer(x, y, z)` the items a generated chest starts with and
+`generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds
+them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one
+opens.
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -136,14 +144,17 @@ every 256 units anyway): larger offsets turned kilometre-wide noise into steps s
 Also after the datapack: caves are dry and grow with depth. A density F is computed from the depth
 below the column's surface in H (`d = depth / 450`), and rock is carved where F < 0.
 
-- No caves within ~9 blocks of the surface (`d` < 0.02); between ~9 and ~22 blocks (`d` = 0.05)
-  they fade in, so the first ones appear ~11 blocks down.
+- No caves within ~9 blocks of the surface (`d` < 0.02, and never within `Caves.SurfaceMargin`,
+  5); between ~9 and ~22 blocks (`d` = 0.05) they fade in, so the first ones appear ~11 blocks
+  down. That holds for these deep caves only: what opens them to the surface are the cave
+  entrances and ravines (below), a separate carver.
 - Three cave sets take over at ~45, ~158 and ~315 blocks deep (small, medium, large), blended with
   smoothsteps. Each mixes *blob* caves (one 3D noise) with *strata*, a smooth sawtooth over height
   tilted by a kilometre-scale noise plus 3D and jagged noise, by a very wide `barrier1` noise.
 - `barrier2` (3D, ~190 blocks) gates the three sets: below 0 there are no caves, from 0.5 on the
   sets are at full strength. So caves come in regions, and ~14% of the rock between 22 and 316
-  blocks deep is air (the datapack: 8–16%).
+  blocks deep is air (the datapack: 8–16%). `Caves.regions(seed)` gives the same noise to the
+  cave entrances, which head for these regions.
 - **The Underlands.** From ~315 blocks deep (`d` = 0.7) the large set blends into the datapack's
   analytic `ygrad - 1.6 H` (no noise, not gated by `barrier2`), which takes over completely at
   `d` = 1. Under high ground that term is already strongly negative early in the blend, so the
@@ -177,7 +188,98 @@ node on each side: `generator.seamLimits` computes, per padding column, how high
 really goes (with `generate`'s own rounding), and the mesher treats padding above it as air
 (`GreedyMesher.Border.open`). This adds well under 1% parts and leaves no holes at any level pair
 (`tests/spec/Meshing` checks the limits against the coarse node's generated data). The streamer
-remeshes a node when a side gets a coarser neighbour.
+remeshes a node when a side gets a coarser neighbour. Where the coarser node carved a cave entrance
+or a ravine (levels 1-2), the limit drops to the lowest carved cell of that column
+(`SurfaceCaves.lowestCarved`, from the worms; columns next to a structure's piece are left out, as
+`generate` leaves them alone), so the finer side draws the walls that face the cut. The other way
+round, a far node's limits (`farSeamLimits`, which hold for any neighbours) are also opened down
+to where a finer neighbour's surface caves cut its border columns (`openToFinerCuts`), since the
+far node's padding there is its own coarser, uncarved terrain and neither side would draw the
+rock facing the cut: a see-through slit at a ravine's end. From level 3 on (nodes that carve
+nothing and build no entrance worms) and towards a node two levels finer, only ravines count.
+
+### Cave entrances and ravines (`SurfaceCaves.luau`)
+
+Minecraft 1.20.1's two overworld carvers, CaveWorldCarver and CanyonWorldCarver, adapted to a world
+whose deep caves never come near the surface: worms of steps a block long, carved as **Air** right
+after the caves.
+
+- **Entrances** (`Caves.Entrances`). One candidate per `Spacing` (96) square cell, taken with
+  `Chance` (0.6), at a hashed column; it needs land more than 4 blocks above sea level and a river
+  strength below 0.3. Where the ground slopes 0.6 or more (over 8 blocks) the tunnel heads uphill
+  nearly level into the slope (a mouth); otherwise it slopes down 0.45-0.8 rad (a pit), along the
+  one of four right angles to its hashed heading whose point at its depth lies deepest in the deep
+  caves' regions (`Caves.regions`). Yaw and pitch wander like Minecraft's (`f = 0.75 f + noise`,
+  pitch relaxing by 0.7 a step), pitch towards a target: down until the hashed `Depth` (15-60)
+  below the surface, levelling off over its last 8 blocks; every 4 steps a tunnel outside a full
+  strength region turns towards the side where the regions are stronger. The radius varies
+  smoothly within `Radius` (1.5-3.5, knots every 12 steps), the vertical one is 0.85-1.15 of it,
+  and each ellipsoid has a flat floor (cut at a hashed -0.85..-0.5 of its height; Minecraft's
+  -1..-0.4). A quarter of the steps is skipped as in Minecraft, but never two in a row (a thin,
+  steep tunnel would be pinched shut). Past its first 6 steps a tunnel goes into the ground: while
+  its centre is less than its vertical radius + 2 below the lowest surface around it (the downhill
+  side of a slope), it dives at 0.7 rad or more and its pitch noise only pushes it down; one not
+  under the ground by step 16, or out of it again for more than 4 steps, ends there without a
+  chamber, so there are no long open ditches. `Branch` (0.35) of them fork once, 30-60% along,
+  sideways (a right angle and a third of the pitch), thinner, 16-40 steps long and a little
+  deeper. After `Length` (48-140) steps a tunnel ends in a small chamber (0.8-1.3 × the largest
+  radius). One that runs into cave air on the way is joined to the cave network there.
+- **Ravines** (`Caves.Ravines`). One candidate per `Spacing` (384) square cell, with `Chance`
+  (0.5). A gently curving cut (`yaw += f × 0.05`, `f = 0.5 f + noise`) of `Length` (60-160)
+  steps. Its half width is Minecraft's width curve, `r0 + sin(π i / n) × thickness` times 0.75-1
+  per step (`Radius`: 1.5 at the ends, up to 6 in the middle), and its floor follows the same
+  curve, from 8 blocks at the ends to a hashed `Depth` (20-45) in the middle, below a moving
+  average of the surface along it (so the floor is smooth). The floor is rounded over at most 5
+  blocks and the walls are jagged by Minecraft's width factor per block of height, `(1 + r1 r2)²`,
+  redrawn on a third of the levels. Each column is cut from its lowest carved cell up to its top:
+  always open to the sky, with no overhangs.
+- **Rules.** Only opaque rock and soil is carved: never bedrock, water, ice or cave air (the cave
+  air a worm runs into stays cave air, the junction), and nothing below `Caves.MinY`. Columns at
+  or below sea level + 2 are never carved. A step that may reach below sea level + 1, or lies in a
+  river valley, needs dry land (above that) within its radius + 3 blocks (+ 3 more in a river
+  valley), sampled on a 4-block grid, or the worm stops there; one stopped (by water, or an
+  entrance out of the ground) within 16 entrance / 30 ravine carved steps is dropped, so there are
+  no stubs by the shore. Columns within 2 blocks of a library structure's piece are left alone
+  (`protectedColumns`): no foundation fills a pit and no path floats over a ravine. An entrance
+  step that reaches a column's top, or leaves it a roof of one block, opens the column to its top,
+  and a single block left with air or cave air on all six sides is cleared (full detail chunks,
+  off the core's edge columns, so the padding stays the neighbour's core). Where a worm carves a
+  top of grass, dry grass, podzol, mycelium or snow, the dirt it uncovers becomes that block again.
+- **Determinism.** A worm depends only on the seed, its grid cell, the full detail surface
+  (heights and river strength) and the seed-only cave regions. A chunk visits every cell whose
+  start lies within the kind's reach (its longest worm) of its padded box and clips its writes to
+  that box, so its padding equals the neighbouring core (a test checks every side). Each block is
+  decided alone, so the worms' order doesn't matter. Cells and their built worms sit in an LRU per
+  generator (384 entrance and 48 ravine cells); the first chunk in a new area builds ~25 worms
+  (~0.7 ms each, interpreted), and `generate`'s `yield` is called after each one built.
+- **Trees and spawns.** `carvesTop(x, z)` says, from the worms alone (never the chunk's data),
+  whether a surface cave may carve the top of column (x, z) or of one within 1.5 blocks: trees are
+  refused there (see Structures) and `findSpawn` skips it. It keeps the worms of its last 16 tiles
+  of 32 × 32 blocks, so a tree spot costs some 10-30 µs.
+- **Levels.** LOD levels 1-2 (`SurfaceCaves.MAX_LEVEL`) point-sample the worms like the
+  structure writer (a cell is carved when its sample block is), but only the ravines and the
+  entrance steps that open a column (pits and mouths): tunnels under an intact roof can't be seen
+  from afar and would only cost parts. Far ravines show as cuts out to ~400 blocks instead of
+  appearing at the full detail edge; see Seams for both sides of a border.
+- **Numbers** (Lune, seeds 12345 and 777, four areas of 32 × 32 chunks per terrain type): 50-72
+  entrances per km² of land (no mouths on plains, half to three quarters of them mouths in
+  mountains), 55-66% of them meeting cave air in most areas (53-80% in all), and 1-6 ravines;
+  65-120 openings per km² (8-connected groups of columns whose top was carved), median 17-37
+  columns. Interpreted, carving costs 0.26 ms per full detail chunk (1-4% of generation),
+  0.32 / 0.84 ms at levels 1 / 2; level 1 nodes get ~6-7% more boxes, level 2 ~1-2%.
+  tests/spec/SurfaceCaves checks determinism and seams, the cell rules, ores, trees, plants,
+  spawns and structures, the LOD sampling and seams, that tunnels are continuous and walkable,
+  that there are no long open ditches or floating blocks, the regrown tops and the cost (the dry
+  land rule has no test of its own yet).
+- **Not Minecraft.** Entrances always start on the surface and steer towards the caves
+  (Minecraft's tunnels start anywhere from y 8 to 180, so its openings are incidental); one
+  sideways branch while the tunnel goes on (Minecraft forks both ways and ends the parent); a
+  chamber at the end instead of rooms at the start. Ravines follow the surface, so they are always
+  open (Minecraft's sit at y 10-67 and are often buried), and are rarer (~3 per km² against
+  Minecraft's 0.01 per chunk, ~39 per km² buried ones included). No lava or aquifers, and a dry
+  margin instead of only skipping fluid blocks; nothing carved next to structures (Minecraft
+  carves under villages). Surface caves don't show on the map (it paints the generator's column
+  data). Single blocks between a tunnel and a cave can still float in a chunk's edge columns.
 
 ### Structures
 
@@ -192,7 +294,9 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away. A spot is refused near a library structure's piece (`accept`, see
-below), so no canopy is cut by a hut and no trunk stands in a path.
+below), so no canopy is cut by a hut and no trunk stands in a path, and where a cave entrance or
+ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms, never the
+chunk's data, so every chunk and level agrees on every tree).
 
 ### Library structures (`StructureGen.luau`)
 
@@ -232,7 +336,9 @@ RandomSpreadStructurePlacement, written right after the trees at levels up to
   the tree writer: a cell takes the block the structure puts at its sample point, so buildings keep
   their size from afar. `write` returns one above the highest non-air cell it wrote (`emptyAbove`)
   and the lowest cell it wrote with a block that is not opaque, cave air or a cave twin
-  (`solidBelow`).
+  (`solidBelow`). Cave entrances and ravines leave every column within 2 blocks of a piece alone
+  (TerrainGenerator's `protectedColumns`, from the pieces' world boxes), so foundations never fill
+  a pit and paths never float over a ravine.
 - **Chests.** `container(x, y, z)` (the generator's `structureContainer`) looks up the template's
   container record at a world cell, a fresh copy of its items; the last piece writing there
   decides, and nil means no generated container. The server fills a generated chest from it the
@@ -329,7 +435,16 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   (`Blocks.caveTwinLut`: the CaveGlowLichen* generation puts on cave walls) count as cave air
   then: they have no appearance (`appearanceHiddenCaves`), are rock to their neighbours
   (`Blocks.cullLutHiddenCaves`) and are cave air to the stone caps at a revealed section's hidden
-  sides (see Streaming), so a hidden cave's lichen costs nothing and hides nothing;
+  sides (see Streaming), so a hidden cave's lichen costs nothing and hides nothing. A hidden cave
+  cell (`caveCellLut`: cave air or a twin) that touches a cell that is neither opaque nor a cave
+  cell (air, water, glass, a torch: where a cave entrance, a ravine or a shaft dug from the
+  surface runs into a hidden cave) is drawn as a **stone cap** (`STONE_APPEARANCE`), so that air
+  looks at rock, never the void (above the buffer counts as air, below the world as solid). Every
+  other hidden cave cell is enclosed by rock and hidden cave, and is a wildcard like enclosed rock:
+  not drawn, but a box may run through it, so the caps merge into the rock around them.
+  QuadMesher draws the same caps face by face. Over six areas of 12 × 12 chunks: +0.7%
+  hidden-mode parts (+2.7% where entrances are densest, -0.3% with no surface caves; +1.5% without
+  the new wildcards), meshing +5-10% interpreted;
 - **sparse lights** (`sparseLightLut`, per appearance: glow lichen) are drawn in every cell, but
   only one cell per `LIGHT_BOX`³ (8³) block box carries the light: the one nearest the box's
   centre (`lightScore`; on a tie the lowest, then northmost, then westmost). Boxes are world
@@ -453,23 +568,25 @@ changed (below). In Lune (interpreted) a refresh costs 0.04 ms standing above gr
 0.09 ms standing in a cave (12), and ~0.9 ms walking above ground (2.5) or ~1.7 ms in a cave (14).
 
 **Caves** (`CaveReach.view`, `World/SectionGraph`: see Cave visibility below). While the camera is
-below the terrain surface, the sections it can see into through connected cave air are revealed
-(meshed with their cave walls); everywhere else cave air counts as rock. Workers return each full
-detail chunk's graph (one u32 per section) with its generation and recompute it for the sections
-an edit job remeshes (an edit can open or seal a cave); results merge per section, so an older
-job's answer never overwrites a newer one's. The search runs from the camera when it changes
-section, the reach changes, or a graph or a full detail chunk near it changed (median 0.6 ms, at
-most ~3.6 ms where the Underlands hit `Caves.RevealBudget` sections). It reaches
-`Caves.RevealReach` (88 blocks, scaled by the Cave View setting: `PlayerSettings.revealReach`)
-along tunnels, and in big caverns the open space around the camera plus a section, so caverns are
-seen as far as before: `CaveReach.probe` casts rays sideways and upwards through the loaded blocks
-and their median distance sets a radius between `Caves.RevealRadius` (64) and `RevealRadiusMax`
-(128; the cave view sets both: `revealRadii`), growing at once and shrinking only after two
-seconds. A section stays revealed `Caves.RevealHold` (2) seconds after the search stopped reaching
-it; sections of chunks not generated yet that the search would enter count as revealed, so they
-are generated revealed. Over 29 caves on three seeds this costs 0.96 × the parts of the 80-block
-sphere it replaced (median; at most 1.12 ×), sees tunnels 88 blocks away, and walking remeshes
-about half as many sections.
+more than a block below its column's terrain surface (the generator's uncarved height: in a cave, a
+dug shaft, a cave entrance or a ravine), the sections it can see into through connected cave air,
+and air carved or dug below the surface such as an entrance leading down to the caves, are revealed
+(meshed with their cave walls); everywhere else cave air counts as rock (and is capped in stone
+where open air meets it: see Meshing). Workers return each full detail chunk's graph (one u32 per
+section) with its generation and recompute it for the sections an edit job remeshes (an edit can
+open or seal a cave); results merge per section, so an older job's answer never overwrites a newer
+one's. The search runs from the camera when it changes section, the reach changes, or a graph or a
+full detail chunk near it changed (median 0.6 ms, at most ~3.6 ms where the Underlands hit
+`Caves.RevealBudget` sections). It reaches `Caves.RevealReach` (88 blocks, scaled by the Cave View
+setting: `PlayerSettings.revealReach`) along tunnels, and in big caverns the open space around the
+camera plus a section, so caverns are seen as far as before: `CaveReach.probe` casts rays sideways
+and upwards through the loaded blocks and their median distance sets a radius between
+`Caves.RevealRadius` (64) and `RevealRadiusMax` (128; the cave view sets both: `revealRadii`),
+growing at once and shrinking only after two seconds. A section stays revealed `Caves.RevealHold`
+(2) seconds after the search stopped reaching it; sections of chunks not generated yet that the
+search would enter count as revealed, so they are generated revealed. Over 29 caves on three seeds
+this costs 0.96 × the parts of the 80-block sphere it replaced (median; at most 1.12 ×), sees
+tunnels 88 blocks away, and walking remeshes about half as many sections.
 
 *Caps.* Where a revealed tunnel runs into hidden space nobody would draw its walls, and you would
 look into the void. A revealed section is therefore meshed with a mask of the sides where its
@@ -496,21 +613,28 @@ caps closing towards them are one group of their own whatever its size. Thin cra
 at a tunnel's rim for a few frames while a side switches between open and capped across two
 groups; the void across a whole tunnel cannot.
 
-**The underground split.** Full detail chunks are the only ones with caves, so above ground's
-full detail range (~96 blocks) would end every cave there. While the cave view is active (the
-camera below its column's surface) and for `Lod.UndergroundSeconds` (5) after it ends
-(`CaveReach.hold`, so walking in and out of a cave mouth does not rebuild the chunks around it
-back and forth; a teleport ends it), `LodTree.select` runs with `underground`: level 1 nodes split
-at the underground split distance (`Lod.UndergroundSplitDistanceL1`, 4, phones 3; with settings:
-from the cave view, `PlayerSettings.lod`) instead of `SplitDistanceL1`, so full detail and caves
-reach ~128 blocks; coarser levels are unchanged. Level 1's hysteresis holds within one mode only
+**The underground split.** Full detail chunks are the only ones with caves, so above ground's full
+detail range (~96 blocks) would end every cave there. While the cave view is active with the camera
+shut in (`CaveReach.enclosed`: its cell is cave air or a cave twin, a cavern under a ravine's cut
+too, or an opaque block lies between it and its column's generated surface; cells not loaded count
+as shut in) and for `Lod.UndergroundSeconds` (5) after that ends (`CaveReach.hold`, so walking in
+and out of a cave mouth does not rebuild the chunks around it back and forth; a teleport ends it),
+`LodTree.select` runs with `underground`: level 1 nodes split at the underground split distance
+(`Lod.UndergroundSplitDistanceL1`, 4, phones 3; with settings: from the cave view,
+`PlayerSettings.lod`) instead of `SplitDistanceL1`, so full detail and caves reach ~128 blocks;
+coarser levels are unchanged. Level 1's hysteresis holds within one mode only
 (`previousUnderground`): the first selection after going underground splits every level 1 node
-within the new distance, as a fresh selection would, instead of keeping the leaves of the
-selection above ground. Walking keeps full detail up to ~15% short ahead of the camera, as the
-hysteresis does above ground. Measured in a cave near the spawn (seed 12345, with the reveal
-sphere the search replaced): 268 full detail chunks instead of 164 and ~57,000 parts instead of
-~47,000 (~139,000 instead of ~110,000 in the Underlands, before far meshes). F3 shows how far
-caves are revealed and the split in use.
+within the new distance, as a fresh selection would, instead of keeping the leaves of the selection
+above ground. Walking keeps full detail up to ~15% short ahead of the camera, as the hysteresis does
+above ground. Measured in a cave near the spawn (seed 12345, with the reveal sphere the search
+replaced): 268 full detail chunks instead of 164 and ~57,000 parts instead of ~47,000 (~139,000
+instead of ~110,000 in the Underlands, before far meshes). F3 shows how far caves are revealed and
+the split in use. At the open bottom of a pit, a ravine or a shaft dug from the surface the camera
+is not shut in: what it sees is the sky and the surface, and the split would load 70-100% more full
+detail chunks for nothing (in the streamer simulation 88 full detail chunks stay in a pit instead of
+168, 80 in a ravine instead of 160). Walking down entrances, the camera is shut in about 3 steps
+after the eye goes under; where an entrance passes under open sky again on the way down, the hold
+covers it.
 
 **Hidden terrain** (`HiddenTerrain`, `World/Horizon`: see Far nodes behind terrain below). Every
 generated node carries a summary (lowest ground and highest top of 4 × 4 tiles); edits update
@@ -550,8 +674,9 @@ refresh.
 ### Workers (`Streaming/ChunkWorker`, `Streaming/WorkerPool`)
 
 Every Actor runs ChunkWorker. Jobs: `generate` (a node's blocks and section meshes, its quads for
-far meshes, its Horizon summary and, for full detail chunks, its cave graph), `mesh` (sections of
-a full detail chunk again, recomputing their graph), `graph`, `horizon` (the hidden node sweep)
+far meshes, its Horizon summary and, for full detail chunks, its cave graph with the generated
+surface as its sky line), `mesh` (sections of a full detail chunk again, recomputing their graph),
+`graph` (`sky`: the sky line), `horizon` (the hidden node sweep)
 and `map` (tiles). Long jobs yield every `Workers.SliceBudgetMs` so actors never stall a frame,
 and run one at a time per worker (the generator and mesher reuse scratch memory). Worker actors
 keep their own Config, so what the player's settings change travels in each job (`foliage`,
@@ -574,15 +699,28 @@ Minecraft's advanced cave culling, adapted to hidden caves. Workers record, per 
 full detail chunk, which faces its air pockets connect: a flood fill over the passable cells, done
 on 16-bit rows (row y × 16 + z, bit x) instead of cells, finds the pockets, and every pair of faces
 one pocket touches is connected. Only some pockets are followed: cave pockets (cave air, cave
-twins), sealed pockets that don't reach the section's top (dug tunnels and rooms), and in buried
-sections (entirely below the chunk's lowest generated surface) all air. Sky air always reaches the
-top of its section (the terrain is a height field), so a cave mouth never leaks the search into
-the sky. A section is one u32: the 15 pairs of faces connected by a followed pocket, the 6 faces a
-followed pocket touches, the 6 faces any air touches (where a camera there can look out), and the
-CAVES and BURIED flags. Faces are numbered like `GreedyMesher.Border`'s hidden bits (0 −X, 1 +X,
-2 −Z, 3 +Z, 4 −Y, 5 +Y), so a cap mask is a set of face bits. Graphs are only computed for the
-sections that may hold cave cells, from the carver's lattice where it is conclusive: 1.5-2.3 ms a
-chunk in Lune (interpreted) under hills and mountains, ~7 ms in deep caves and the Underlands.
+twins); underground pockets, with no cave cell and no cell at or above its column's generated
+surface (the chunk's *sky line*): air carved or dug into the ground, such as a cave entrance or a
+ravine below their mouths, a dug shaft or tunnel, a cellar; sealed pockets that don't reach the
+section's top (dug rooms); and in buried sections (entirely below the chunk's lowest generated
+surface) all air. Sky air is at or above the sky line and always reaches the top of its section
+(the terrain is a height field), so no rule follows it: the search climbs from a cave up an
+entrance to the section where it meets the sky (revealed, not left), and runs from a camera in an
+entrance down into the caves, but never leaks out into the sky. A section is one u32: the 15
+pairs of faces connected by a followed pocket, the 6 faces a followed pocket touches, the 6 faces
+any air touches (where a camera there can look out), and the CAVES and BURIED flags. Faces are
+numbered like `GreedyMesher.Border`'s hidden bits (0 −X, 1 +X, 2 −Z, 3 +Z, 4 −Y, 5 +Y), so a cap
+mask is a set of face bits. Graphs are only computed for the sections that may hold cave cells,
+from the carver's lattice where it is conclusive: 1.5-2.3 ms a chunk in Lune (interpreted) under
+hills and mountains, ~7 ms in deep caves and the Underlands.
+A graph ends with its sky line (the generator's `surface`, u16 per core column: 768 bytes a chunk
+in all), so `refresh` classifies dug air as the generation did. The lattice knows nothing of
+surface caves, so the worker also scans each core column from `solidBelow` up to its sky line
+(`dugSections`, ~0.1 ms a chunk) and reads the sections holding such air cell by cell (+0.1-0.3 ms
+a chunk in all). From an entrance's mouth the search reaches 23-34 sections (9-10 with pockets
+below the sky line not followed: it never left the mouth), at most ~200 walking down to the cave
+(0.03-0.26 ms a search), 16-163 from ravine floors; following all air would reach 180-560 from the
+same cameras.
 
 The search (main thread, `search`): from the camera's section and the neighbours its air touches
 (left through any face, for a camera next to a section corner), each section is visited once and
@@ -597,18 +735,21 @@ Underlands, where the 1,500-section budget cuts them (13-18 ms uncapped). `CaveR
 the revealed set with its hold and answers `reveals` / `capMask`; tests/spec/SectionGraph checks
 the fill against a per-cell flood fill, tests/spec/CaveView the reveal and caps.
 
-The bury line is per chunk: above it, dug air is only followed where it doesn't reach its
-section's top, so an open shaft dug down from the surface is not.
+The bury line is per chunk, the sky line per column: above the bury line, dug air is followed
+where it lies below the sky line or doesn't reach its section's top, so a shaft dug down from the
+surface is followed up to the section where it meets the sky, and no further.
 
 ### Far nodes behind terrain (`World/Horizon`)
 
-Every generated node carries 64 bytes (`summarise`, made by the generator): per 4 × 4 tile of its
-16 × 16 cells, the lowest terrain top (the tile is solid up to there: an occluder; terrain only)
-and the highest top with trees, water and structures (an occludee). Edits update full detail
-chunks' (`applyEdits`): dug ground lowers a tile's ground where nothing solid is left above it (a
-quarry, a levelled hill; a tunnel under the ground leaves it, like the generated caves), and a
-placed block raises its top; ground never rises again, so an occluder is never overstated. A node
-not generated yet gets an occludee-only estimate from a generated ancestor or descendants
+Every generated node carries 64 bytes (`summarise`, made by the generator): per 4 × 4 tile of its 16
+× 16 cells, the lowest terrain top (the tile is solid up to there: an occluder; terrain only) and
+the highest top with trees, water and structures (an occludee). Edits update full detail chunks'
+(`applyEdits`): dug ground lowers a tile's ground where nothing solid is left above it (a quarry, a
+levelled hill; a tunnel under the ground leaves it, like the generated caves), and a placed block
+raises its top; ground never rises again, so an occluder is never overstated (with one exception:
+the summary is made from the heights before surface caves, so a pit or a ravine does not lower its
+tile's ground; only sight lines along a cut's floor could be blocked wrongly, judged negligible). A
+node not generated yet gets an occludee-only estimate from a generated ancestor or descendants
 (`estimate`); one with neither is left out and never counts as hidden.
 
 `evaluate` (in a worker, yielding): a front-to-back sweep from the eye over 512 compass bins, each
@@ -811,7 +952,7 @@ counters.
 Map tiles are painted from the generator, not from loaded chunks, so the map shows the whole
 (infinite) world. `Map/MapPainter` (shared, pure) runs inside the worker actors as a `map` job and
 returns RGBA pixels: surface colour, hill shading from the neighbouring heights, tree density,
-water depth and sea ice.
+water depth and sea ice. It paints from column data, so cave entrances and ravines don't show.
 
 Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
 EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
@@ -1213,7 +1354,9 @@ looks at the loaded blocks around the camera:
   looks up for the sky share a budget of 2048 blocks, and the controller caches ground heights
   per column, so this fits the 10 Hz update.
 
-Generated caves never open to the surface, so they still go dark.
+A cave entrance darkens like a dug tunnel (half light ~17 blocks in, dark from ~30), a ravine's
+floor is under the open sky (nothing opaque above it: full light), and the deep caves beyond stay
+dark (tests/spec/SkyExposure checks real ones).
 
 Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
 Lighting is left alone, because Roblox lights both by the sun and moon itself.
@@ -2758,19 +2901,23 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 - `Players/SafeSpot` + `Players/SpawnUnsafeBlocks`: a spot is safe when the floor is solid and not
   listed (`Floor`), the body's blocks are free and not listed (`Body`, e.g. water), nothing listed
   in `Hazards` (cactus) touches the body, and the feet are not below the natural surface (no cave
-  spawns). The search checks the target column, then rings around it. In chunks nobody edited
-  the terrain is exactly what the generator makes, so open water is skipped from the generator's
-  height alone and columns are scanned from just above the tallest structure. Spawning re-checks the
-  spawn spot on every respawn, since players may have built or poured water there; when no safe
-  spot exists it waits 30 s before searching again.
+  spawns; in a pit's or a ravine's column the floor at the natural surface is air, so none there
+  either, and the generator's `findSpawn` already skips them). The search checks the target
+  column, then rings around it. In chunks nobody edited the terrain is exactly what the generator
+  makes, so open water is skipped from the generator's height alone and columns are scanned from
+  just above the tallest structure. Spawning re-checks the spawn spot on every respawn, since
+  players may have built or poured water there; when no safe spot exists it waits 30 s before
+  searching again.
 
 ## Hidden caves, octrees and regions
 
-**How caves are hidden.** Caves are carved as `CaveAir` and never reach the surface. The mesher
-can treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
-(`hideCaves`), which removes every cave wall; sections are meshed with caves visible only while
-the camera is below the terrain surface, and only those its section visibility search reaches
-(see Streaming and Cave visibility above).
+**How caves are hidden.** Caves are carved as `CaveAir` and never reach the surface on their own;
+cave entrances and ravines (`SurfaceCaves`) are carved as Air and run into them. The mesher can
+treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
+(`hideCaves`), which removes every cave wall, and draws the hidden side of a junction with open
+air as stone caps; sections are meshed with caves visible only while the camera is below the
+terrain surface, and only those its section visibility search reaches (see Meshing, Streaming and
+Cave visibility above).
 
 **Octrees** are a storage / search structure: a cube split into 8 children until regions are
 uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD
@@ -2863,7 +3010,12 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   (0 −X, 1 +X, 2 −Z, 3 +Z, 4 −Y, 5 +Y; the opposite face is f xor 1): keep them the same.
 - A Horizon summary must never overstate an occluder: ground only ever drops (edits), estimates
   never occlude, and a node is hidden only when hidden from every eye. A wrong "hidden" skips
-  parts the player can see.
+  parts the player can see. (Surface caves are the one known, small exception: see Far nodes
+  behind terrain.)
+- Surface caves (`Generation/SurfaceCaves`) decide every block from the worms, and a worm from the
+  seed, its grid cell, the full detail surface and the seed-only cave regions; whether one opens
+  under a tree (`carvesTop`) or where it cuts a seam (`lowestCarved`, `mayCarve`) is answered from
+  the worms too, never from a chunk's data, so every chunk and level agrees. Keep it so.
 - Player setting ids (`PlayerSettings` entries) are saved and sent: append, never reorder or
   reuse one. A setting's effect key needs a function registered in the client script
   (`Settings.missing()` lists those without), and anything a worker needs travels in its jobs:

@@ -12,7 +12,10 @@
 	and a teleport drops the old area at once, cancels its jobs and unfreezes quickly. The fake pool
 	returns real SectionGraphs and horizon verdicts, so the cave view (no revealed section on screen
 	ever opens onto one that does not draw its caves) and hidden terrain (held nodes, giving parts
-	back and building them again, the setting switched mid-session) run in the same simulation.
+	back and building them again, the setting switched mid-session) run in the same simulation. It
+	can also run on the real generator: walking down a real cave entrance reveals the cave beyond
+	within frames, and under the open sky of a pit or a ravine full detail keeps its range (the
+	underground split only once shut in).
 ]]
 
 local fs = require("@lune/fs")
@@ -32,12 +35,17 @@ return function(t, shared, require, _server, client)
 	local PlayerSettings = require(shared.PlayerSettings)
 	local SectionGraph = require(shared.World.SectionGraph)
 	local Horizon = require(shared.World.Horizon)
+	local Caves = require(shared.Generation.Caves)
+	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
 	local LoadPriority = require(client.Streaming.LoadPriority)
 	local RemeshQueue = require(client.Streaming.RemeshQueue)
 	local SwapUnits = require(client.Streaming.SwapUnits)
 	local TeleportMode = require(client.Streaming.TeleportMode)
+	local CaveReach = require(client.Streaming.CaveReach)
+	local RenderSchedule = require(client.Rendering.RenderSchedule)
 
 	local SIZE = Config.ChunkSize
+	local SECTION = Config.SectionHeight
 	local P = ChunkLayout.PADDED
 	local MAX_LEVEL = LodTree.MAX_LEVEL
 	local STONE = Blocks.id.Stone
@@ -116,7 +124,7 @@ return function(t, shared, require, _server, client)
 
 	-- Commit groups as ChunkRenderer keeps them: holds, and when the last one closed.
 	local function fakeGroups()
-		local log = { opened = 0, completed = 0 }
+		local log = { opened = 0, completed = 0, held = 0 }
 		local groups = {
 			open = function()
 				log.opened += 1
@@ -125,6 +133,7 @@ return function(t, shared, require, _server, client)
 			hold = function(group)
 				assert(group.holds > 0, "hold on a completed group")
 				group.holds += 1
+				log.held += 1
 			end,
 			close = function(group)
 				group.holds -= 1
@@ -194,6 +203,8 @@ return function(t, shared, require, _server, client)
 		t.eq(#jobs, 1)
 		local group = jobs[1].group
 		t.eq(group.holds, 2, "own hold kept: a member still waits")
+		-- (Only a job sent holds it: ChunkStreamer opens the renderer's group with the first.)
+		t.eq(log.held, 1, "the member the pool had no room for did not hold it")
 		q:done(jobs[1], false)
 		t.eq(log.completed, 0, "not complete while a member waits")
 		-- A new edit in the meantime joins the same batch.
@@ -840,14 +851,32 @@ return function(t, shared, require, _server, client)
 	--[[ The streamer, simulated ]]
 
 	--[[
-		ChunkRenderer's API: builds finish `buildFrames` frames after they were queued (in their
-		lane), commit groups go live together once every hold closed and every task is built;
-		`shown` is what is on screen.
+		ChunkRenderer's API on the real RenderSchedule, so builds go live in ChunkRenderer's order:
+		a section's meshes go live oldest first (one uncommitted task per section: a newer one
+		waits for it, or replaces one not started yet, taking over its callbacks, theirs first; a
+		newer one of the same commit group drops it), commit groups go live together once every
+		hold closed and every task is built, and a group open longer than GROUP_TIMEOUT seconds
+		stops waiting. Each lane builds its most urgent task first, `buildFrames` frames from the
+		frame it started in. `shown` is what is on screen, `live` the section meshes on screen per
+		node (what the last build to go live had), `built` the builds queued per node.
 	]]
+	-- ChunkRenderer's GROUP_TIMEOUT (seconds).
+	local GROUP_TIMEOUT = 2
+	local LANES = {
+		edit = RenderSchedule.EDIT,
+		near = RenderSchedule.NEAR,
+		normal = RenderSchedule.NORMAL,
+		background = RenderSchedule.BACKGROUND,
+	}
 	local function fakeRenderer(sim: any): any
+		local schedule = RenderSchedule.new(function(task: any): boolean
+			return task.data.started
+		end)
 		local r: any = {
 			frame = 0,
-			tasks = {},
+			schedule = schedule,
+			-- Tasks whose group completed outside a step (they go live at the next).
+			ready = {},
 			shown = {},
 			commits = {},
 			trashed = {},
@@ -855,8 +884,6 @@ return function(t, shared, require, _server, client)
 			frozen = false,
 			partsPerNode = 100,
 			buildFrames = 1,
-			-- Section meshes on screen per node (what the last committed build of each had), and
-			-- builds queued per node.
 			live = {},
 			built = {},
 		}
@@ -873,77 +900,89 @@ return function(t, shared, require, _server, client)
 				self.busy = busy
 			end,
 		}
+		local function now(): number
+			return sim.frame / 60
+		end
 		local function commit(task)
+			schedule:committed(task)
+			local node = task.node
+			if node.removed then
+				return
+			end
 			table.insert(r.commits, {
 				frame = r.frame,
-				node = task.node,
+				node = node,
 				section = task.section,
-				lane = task.lane,
+				lane = task.data.lane,
 				group = task.group,
 			})
-			local live = r.live[task.node]
+			local live = r.live[node]
 			if live == nil then
 				live = {}
-				r.live[task.node] = live
+				r.live[node] = live
 			end
-			live[task.section] = if buffer.len(task.boxes) > 0 then task.boxes else nil
-			if task.onDone then
-				task.onDone()
+			live[task.section] = if buffer.len(task.data.boxes) > 0 then task.data.boxes else nil
+			for _, callback in task.data.callbacks do
+				callback()
 			end
 		end
-		local function tryGroup(group)
-			if group.holds == 0 and group.pending == 0 and not group.done then
-				group.done = true
-				for _, task in group.staged do
-					commit(task)
-				end
+		local function commitAll(tasks)
+			for _, task in tasks or {} do
+				commit(task)
 			end
 		end
 		function r.build(self, node, section, boxes, options)
 			assert(type(options) == "table", "builds use BuildOptions")
 			assert(not node.removed, "built for a removed node")
 			local lane = options.lane or "normal"
-			assert(lane == "edit" or lane == "near" or lane == "normal" or lane == "background", "known lane")
+			assert(LANES[lane] ~= nil, "known lane")
+			-- (Only a group that timed out goes live before the jobs holding it added their tasks.)
+			local group = options.group
+			assert(group == nil or not group.done or group.forced, "a task added to a group that went live")
 			r.built[node] = (r.built[node] or 0) + 1
 			local task = {
 				node = node,
 				section = section,
-				boxes = boxes,
-				lane = lane,
-				group = options.group,
-				onDone = options.onDone,
-				due = r.frame + r.buildFrames,
+				lane = LANES[lane],
+				priority = options.priority,
+				group = group,
+				state = 0,
+				seq = 0,
+				data = {
+					boxes = boxes,
+					lane = lane,
+					callbacks = { options.onDone },
+					started = false,
+					due = nil,
+				},
 			}
-			if task.group then
-				assert(not task.group.done, "a task added to a group that went live")
-				task.group.pending += 1
+			local replaced = schedule:add(task)
+			if replaced then
+				local callbacks = {}
+				for _, old in replaced do
+					table.move(old.data.callbacks, 1, #old.data.callbacks, #callbacks + 1, callbacks)
+				end
+				table.move(task.data.callbacks, 1, #task.data.callbacks, #callbacks + 1, callbacks)
+				task.data.callbacks = callbacks
 			end
-			table.insert(r.tasks, task)
 		end
 		function r.openGroup(self)
-			return { holds = 1, pending = 0, staged = {}, done = false }
+			return schedule:openGroup(now())
 		end
 		function r.holdGroup(self, group)
-			group.holds += 1
+			schedule:hold(group)
 		end
 		function r.closeGroup(self, group)
-			group.holds -= 1
-			assert(group.holds >= 0, "group closed more often than held")
-			tryGroup(group)
+			assert(group.holds > 0, "group closed more often than held")
+			for _, task in schedule:close(group) or {} do
+				table.insert(r.ready, task)
+			end
 		end
 		local function drop(node)
-			local keep = {}
-			for _, task in r.tasks do
-				if task.node == node then
-					if task.group then
-						task.group.pending -= 1
-						tryGroup(task.group)
-					end
-				else
-					table.insert(keep, task)
-				end
+			local _, live = schedule:drop(node)
+			for _, task in live do
+				table.insert(r.ready, task)
 			end
-			r.tasks = keep
 		end
 		function r.show(self, node)
 			assert(not node.removed, "showing a removed node")
@@ -970,7 +1009,9 @@ return function(t, shared, require, _server, client)
 		function r.trashParts(self)
 			return 0
 		end
-		function r.reprioritise(self) end
+		function r.reprioritise(self)
+			schedule:reprioritise()
+		end
 		function r.setFrozen(self, frozen)
 			r.frozen = frozen
 		end
@@ -980,32 +1021,37 @@ return function(t, shared, require, _server, client)
 		function r.setQuads(self) end
 		function r.step(self, dt)
 			r.frame += 1
-			local due = {}
-			local keep = {}
-			for _, task in r.tasks do
-				if task.due <= r.frame then
-					table.insert(due, task)
-				else
-					table.insert(keep, task)
-				end
-			end
-			r.tasks = keep
-			for _, task in due do
-				local group = task.group
-				if group and not group.done then
-					group.pending -= 1
-					table.insert(group.staged, task)
-					tryGroup(group)
-				else
-					commit(task)
+			-- Groups that completed outside a step, and those that waited too long.
+			local ready = r.ready
+			r.ready = {}
+			commitAll(ready)
+			commitAll(schedule:expire(now(), GROUP_TIMEOUT))
+			-- Each lane's next task starts (it is done `buildFrames` frames after the frame it
+			-- started in) and goes on to the next once built, most urgent first.
+			for lane = RenderSchedule.EDIT, RenderSchedule.BACKGROUND do
+				while true do
+					local task = schedule:peek(lane)
+					if task == nil then
+						break
+					end
+					local data = task.data
+					if not data.started then
+						data.started = true
+						data.due = r.frame - 1 + r.buildFrames
+					end
+					if data.due > r.frame then
+						break
+					end
+					schedule:pop(lane)
+					commitAll(schedule:stage(task))
 				end
 			end
 		end
 		function r.pending(self)
-			return #r.tasks
+			return schedule:count()
 		end
 		function r.busy(self)
-			return #r.tasks > 0
+			return r:pending() > 0 or #r.ready > 0
 		end
 		return r
 	end
@@ -1066,6 +1112,70 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		return data
+	end
+
+	--[[
+		A real full detail chunk (sim.real: a TerrainGenerator), as ChunkWorker answers its
+		generation job: the generated blocks with the job's edits, and the cave graph built the
+		worker's way (the lattice hint, the sections holding air carved below the surface read cell
+		by cell, the surface as the sky line); every section's mesh is a fakeBox.
+	]]
+	local function realChunk(gen: any, job: any, reveal: { [number]: boolean }, caps: { [number]: number }): any
+		local r = gen.generate(0, job.nx, job.nz, nil, true)
+		local data, height = r.data, r.height
+		local solidBelow, emptyAbove = r.solidBelow, r.emptyAbove
+		local exact: { [number]: boolean } = {}
+		local edits = job.edits or {}
+		for i = 1, #edits, 2 do
+			local index, block = edits[i], edits[i + 1]
+			local y = index // ChunkLayout.LAYER
+			if y < height then
+				buffer.writeu16(data, index * 2, block)
+				exact[y // SECTION] = true
+				if buffer.readu8(Blocks.cullLutHiddenCaves, block) == 0 then
+					solidBelow = math.min(solidBelow, y)
+				end
+			end
+		end
+		if r.structureSpan then
+			for s = r.structureSpan[1] // SECTION, r.structureSpan[2] // SECTION do
+				exact[s] = true
+			end
+		end
+		SectionGraph.dugSections(data, height, r.surface, solidBelow, exact)
+		local extra = {}
+		for s in exact do
+			table.insert(extra, s)
+		end
+		local caveSections = SectionGraph.carvedSections(r.carved, Caves.CELL_Y, extra)
+		local graph = SectionGraph.build(data, height, r.solidBelow, caveSections, {
+			carved = r.carved,
+			cellXZ = Caves.CELL_XZ,
+			cellY = Caves.CELL_Y,
+			originX = job.nx * SIZE,
+			originZ = job.nz * SIZE,
+			surface = r.surface,
+			exact = exact,
+		})
+		local sections, meshes = {}, {}
+		for s = 0, math.ceil(height / SECTION) - 1 do
+			table.insert(sections, s)
+			table.insert(meshes, fakeBox(reveal[s] == true, caps[s] or 0))
+		end
+		return {
+			id = job.id,
+			data = data,
+			height = height,
+			solidBelow = solidBelow,
+			emptyAbove = emptyAbove,
+			sections = sections,
+			meshes = meshes,
+			plants = {},
+			summary = r.summary,
+			graph = graph,
+			bury = r.solidBelow,
+			caveSections = caveSections,
+		}
 	end
 
 	--[[
@@ -1148,6 +1258,9 @@ return function(t, shared, require, _server, client)
 				return { id = job.id, sections = job.sections, meshes = meshes, plants = {}, graph = graph }
 			end
 			local summary = buffer.create(Horizon.SUMMARY_BYTES)
+			if job.level == 0 and sim.real then
+				return realChunk(sim.real, job, reveal, caps)
+			end
 			if job.level == 0 and sim.cave then
 				local data = caveData(job.nx, job.nz, sim.cavern)
 				for i = 1, #(job.edits or {}), 2 do
@@ -1232,14 +1345,15 @@ return function(t, shared, require, _server, client)
 		(256 blocks, falloff 2) bound through ViewSettings and `applyView`. `cave`: the camera is in
 		the cave world's tunnel (caveData, surface at 100), cave view 128.
 	]]
-	local function newSim(x: number, z: number, view: number?, cave: boolean?): any
+	local function newSim(x: number, z: number, view: number?, cave: boolean?, real: any?): any
 		local sim: any = {
 			frame = 0,
 			serverEdits = {},
 			gaps = 0,
 			overlaps = 0,
 			checkGaps = true,
-			cave = cave == true,
+			cave = cave == true or real ~= nil,
+			real = real,
 			surface = if cave then 100 else 0,
 			eyeY = if cave then 20.6 else 30,
 			voids = 0,
@@ -1267,7 +1381,7 @@ return function(t, shared, require, _server, client)
 		local world = ClientWorld.new()
 		local renderer = fakeRenderer(sim)
 		local pool = fakePool(sim)
-		local generator = {
+		local generator = real or {
 			column = function()
 				return sim.surface
 			end,
@@ -1301,6 +1415,14 @@ return function(t, shared, require, _server, client)
 		end
 		sim.coverOf = coverOf
 		local covered: { [number]: boolean } = {}
+
+		-- Does a followed pocket of section `s` of `node` touch its face `f` (0-based, -X +X -Z +Z
+		-- -Y +Y)? True without a graph.
+		local function touchesFace(node: any, s: number, f: number): boolean
+			local graph = node.graph
+			return graph == nil
+				or bit32.btest(buffer.readu32(graph, s * 4), bit32.lshift(1, SectionGraph.FACES_SHIFT + f))
+		end
 
 		function sim.step(self)
 			self.frame += 1
@@ -1374,6 +1496,19 @@ return function(t, shared, require, _server, client)
 								continue
 							end
 							local other = streamer.nodes[Coords.chunkKey(node.nx + side[1], node.nz + side[2])]
+							-- (Only where cave air meets the face on either side, as the graphs say:
+							-- elsewhere a cap changes nothing and the streamer leaves it, see its
+							-- capFaces. Real chunks have many such faces.)
+							if
+								not touchesFace(node, s, d - 1)
+								and not (
+									other
+									and other.graph
+									and touchesFace(other, s + side[3], bit32.bxor(d - 1, 1))
+								)
+							then
+								continue
+							end
 							local otherLive = if other and renderer.shown[other] then renderer.live[other] else nil
 							local mesh = if otherLive then otherLive[s + side[3]] else nil
 							if mesh == nil or buffer.readu8(mesh, 0) ~= 1 then
@@ -1429,12 +1564,12 @@ return function(t, shared, require, _server, client)
 	end
 
 	-- Runs `fn(sim)` with a fresh simulation, restoring the shared state afterwards.
-	local function simulate(x: number, z: number, fn: (any) -> (), view: number?, cave: boolean?)
+	local function simulate(x: number, z: number, fn: (any) -> (), view: number?, cave: boolean?, real: any?)
 		local foliage = Config.Render.Foliage
 		local swapParts = Config.Render.SwapPartsPerFrame
 		local sim
 		local ok, err = pcall(function()
-			sim = newSim(x, z, view, cave)
+			sim = newSim(x, z, view, cave, real)
 			sim.foliage = foliage
 			fn(sim)
 		end)
@@ -2590,5 +2725,282 @@ return function(t, shared, require, _server, client)
 			end
 			t.eq(cancelled, 1, "the job in flight was cancelled")
 		end)
+	end)
+
+	--[[ Surface caves: a real cave entrance in the streamer ]]
+
+	--[[
+		The way down a real cave entrance (seed `gen`): air carved below the surface that touches
+		cave air, found in the chunks around (cx, cz), and the way out from it through carved air
+		to the open sky, mouth first; and the cave air it meets ({ x, y, z }).
+	]]
+	local function entranceWay(gen: any, cx: number, cz: number, r: number): ({ { number } }?, { number }?)
+		local chunks: { [number]: any } = {}
+		local function chunk(x: number, z: number): any
+			local key = Coords.chunkKey(x, z)
+			local c = chunks[key]
+			if c == nil then
+				c = gen.generate(0, x, z, nil, true)
+				chunks[key] = c
+			end
+			return c
+		end
+		local function block(x: number, y: number, z: number): number
+			local c = chunk(x // SIZE, z // SIZE)
+			return if y >= c.height then Blocks.AIR else ChunkLayout.get(c.data, x % SIZE, y, z % SIZE)
+		end
+		local function surface(x: number, z: number): number
+			local c = chunk(x // SIZE, z // SIZE)
+			return buffer.readu16(c.surface, ((z % SIZE) * SIZE + x % SIZE) * 2)
+		end
+		local dirs = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
+		local tried: { [string]: boolean } = {}
+		local function wayOut(x0: number, y0: number, z0: number): { { number } }?
+			local from: { [string]: { number } | false } = { [`{x0},{y0},{z0}`] = false }
+			local queue = { { x0, y0, z0 } }
+			local head = 1
+			while head <= #queue do
+				local p = queue[head]
+				head += 1
+				if p[2] + 1 >= surface(p[1], p[3]) then
+					local path = {}
+					local q: { number }? = p
+					while q do
+						table.insert(path, q)
+						q = from[`{q[1]},{q[2]},{q[3]}`] or nil
+					end
+					return path
+				end
+				for _, d in dirs do
+					local x, y, z = p[1] + d[1], p[2] + d[2], p[3] + d[3]
+					local k = `{x},{y},{z}`
+					if from[k] == nil and block(x, y, z) == Blocks.AIR and y < surface(x, z) then
+						from[k] = p
+						tried[k] = true
+						table.insert(queue, { x, y, z })
+					end
+				end
+			end
+			return nil
+		end
+		for ring = 0, r do
+			for dz = -ring, ring do
+				for dx = -ring, ring do
+					if math.abs(dx) ~= ring and math.abs(dz) ~= ring then
+						continue
+					end
+					local c = chunk(cx + dx, cz + dz)
+					for z = 0, SIZE - 1 do
+						for x = 0, SIZE - 1 do
+							local top = buffer.readu16(c.surface, (z * SIZE + x) * 2)
+							for y = math.max(c.solidBelow, 1), top - 1 do
+								local wx, wz = (cx + dx) * SIZE + x, (cz + dz) * SIZE + z
+								if ChunkLayout.get(c.data, x, y, z) ~= Blocks.AIR or tried[`{wx},{y},{wz}`] then
+									continue
+								end
+								for _, d in dirs do
+									if block(wx + d[1], y + d[2], wz + d[3]) == Blocks.CAVE_AIR then
+										local path = wayOut(wx, y, wz)
+										if path then
+											return path, { wx + d[1], y + d[2], wz + d[3] }
+										end
+										break
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		return nil, nil
+	end
+
+	t.test("streamer: walking down a real cave entrance reveals the cave beyond within frames", function()
+		local gen = TerrainGenerator.new(12345)
+		local path, cave = entranceWay(gen, 0, 6, 5)
+		assert(path and cave, "a cave entrance near chunk 0, 6")
+		local mouth = path[1]
+		local caveX, caveZ, caveS = cave[1] // SIZE, cave[3] // SIZE, cave[2] // SECTION
+		simulate(mouth[1] + 0.5, mouth[3] + 0.5, function(sim)
+			-- Standing at the mouth: above ground, nothing revealed, the cave drawn as rock.
+			sim.eyeY = gen.column(mouth[1], mouth[3]) + 1.6
+			sim:place(mouth[1] + 0.5, mouth[3] + 0.5)
+			t.ok(settle(sim, true), "settles above ground")
+			local streamer = sim.streamer
+			t.eq(streamer.caveView, nil, "above ground")
+			t.eq(streamer.cave.count, 0, "nothing revealed")
+			-- Down the entrance at a run (a block every 4 frames), to where it meets the cave.
+			local on, shown, most, under = nil, nil, 0, nil
+			for _, c in path do
+				sim.eyeY = c[2] + 0.6
+				sim:place(c[1] + 0.5, c[3] + 0.5)
+				if under == nil and sim.eyeY < gen.column(c[1], c[3]) - 1 then
+					-- (The eye is below its column's surface from the next frame on.)
+					under = sim.frame + 1
+				end
+				for _ = 1, 4 do
+					sim:step()
+					if on == nil and streamer.caveView ~= nil then
+						on = sim.frame
+					end
+					if shown == nil and (liveReveal(sim, caveX, caveZ, caveS)) then
+						shown = sim.frame
+					end
+					most = math.max(most, streamer:stats().reached)
+				end
+			end
+			assert(on and under, "the cave view came on in the entrance")
+			t.ok(shown ~= nil, "the cave beyond is revealed on screen")
+			print(
+				string.format(
+					"    entrance %d,%d,%d (%d blocks): cave view on %d frames after the eye went under, the cave on screen %d frames later; at most %d sections reached",
+					mouth[1],
+					mouth[2],
+					mouth[3],
+					#path,
+					on - under,
+					(shown or 0) - on,
+					most
+				)
+			)
+			-- (The cave view is judged every refresh: Streaming.UpdateInterval.)
+			local refresh = math.ceil(Config.Streaming.UpdateInterval * 60) + 1
+			t.ok(on >= under and on - under <= refresh, "on as the eye goes below the surface")
+			t.ok(shown ~= nil and shown - on <= 30, "the cave beyond on screen within half a second")
+			t.ok(most < 600, "the search stays out of the sky")
+			t.ok(settle(sim), "settles")
+			t.eq(sim.voids, 0, "never open onto the void")
+			t.eq(sim.gaps, 0, "no gaps")
+			t.eq(sim.overlaps, 0, "no overlaps")
+		end, 256, nil, gen)
+	end)
+
+	-- Full detail chunks in a selection (node key -> level).
+	local function fullDetailCount(nodes: { [number]: number }): number
+		local n = 0
+		for _, level in nodes do
+			if level == 0 then
+				n += 1
+			end
+		end
+		return n
+	end
+
+	--[[
+		Steps from above ground at (x, z) down to an eye at `eyeY` under the open sky (a pit's open
+		mouth, a ravine's floor) in a settled streamer on the real generator: the cave view comes on
+		but full detail stays as above ground (the underground split needs the camera shut in:
+		CaveReach.enclosed). The cave view setting is 128 blocks, so the underground split is wider.
+	]]
+	local function stepUnderOpenSky(sim: any, gen: any, x: number, z: number, eyeY: number, label: string)
+		local streamer = sim.streamer
+		local plain = fullDetailCount(LodTree.select(x, z, nil, false))
+		local wider = fullDetailCount(LodTree.select(x, z, nil, true))
+		t.ok(wider > plain, `{label}: the underground split is wider`)
+		sim.eyeY = eyeY
+		sim:place(x, z)
+		local on, split = false, false
+		for _ = 1, 60 do
+			sim:step()
+			on = on or streamer.caveView ~= nil
+			split = split or streamer.underground
+		end
+		t.ok(eyeY < gen.column(math.floor(x), math.floor(z)) - 1 and on, `{label}: the cave view comes on`)
+		t.ok(not CaveReach.enclosed(function(bx, by, bz)
+			return sim.world:getBlock(bx, by, bz)
+		end, x, eyeY, z, gen.column(math.floor(x), math.floor(z))), `{label}: under the open sky`)
+		print(
+			string.format(
+				"    %s, eye %.1f under the surface: %d full detail chunks (above ground %d, underground split %d)",
+				label,
+				gen.column(math.floor(x), math.floor(z)) - eyeY,
+				fullDetailCount(streamer.desired),
+				plain,
+				wider
+			)
+		)
+		t.ok(not split, `{label}: no underground split`)
+		t.ok(fullDetailCount(streamer.desired) <= plain, `{label}: full detail as above ground`)
+	end
+
+	t.test("streamer: under the open sky of a pit or a ravine full detail stays; shut in it reaches further", function()
+		local gen = TerrainGenerator.new(12345)
+		-- A pit: the way down a real cave entrance, its mouth open to the sky.
+		local path, cave = entranceWay(gen, 0, 6, 5)
+		assert(path and cave, "a cave entrance near chunk 0, 6")
+		local mouth = path[1]
+		simulate(mouth[1] + 0.5, mouth[3] + 0.5, function(sim)
+			sim.values.caveView = 128
+			sim.streamer:applyView()
+			sim.eyeY = gen.column(mouth[1], mouth[3]) + 1.6
+			sim:place(mouth[1] + 0.5, mouth[3] + 0.5)
+			t.ok(settle(sim, true), "settles above ground")
+			local function getBlock(bx: number, by: number, bz: number): number?
+				return sim.world:getBlock(bx, by, bz)
+			end
+			-- The first step of the way down under the generated surface but open to the sky.
+			local open = nil
+			for i, c in path do
+				local surface = gen.column(c[1], c[3])
+				local eye = c[2] + 0.6
+				if eye < surface - 1 and not CaveReach.enclosed(getBlock, c[1] + 0.5, eye, c[3] + 0.5, surface) then
+					open = i
+					break
+				end
+			end
+			assert(open, "the entrance's mouth is open to the sky below the surface")
+			local c = path[open]
+			stepUnderOpenSky(sim, gen, c[1] + 0.5, c[3] + 0.5, c[2] + 0.6, "pit")
+			-- On down the entrance into the cave: shut in, full detail reaches further.
+			for i = open + 1, #path do
+				c = path[i]
+				sim.eyeY = c[2] + 0.6
+				sim:place(c[1] + 0.5, c[3] + 0.5)
+				sim:run(4)
+			end
+			sim.eyeY = cave[2] + 0.6
+			sim:place(cave[1] + 0.5, cave[3] + 0.5)
+			sim:run(30)
+			local streamer = sim.streamer
+			t.ok(streamer.caveView ~= nil and streamer.caveView.enclosed, "in the cave: shut in")
+			t.ok(streamer.underground, "the underground split")
+			local plain = fullDetailCount(LodTree.select(cave[1] + 0.5, cave[3] + 0.5, nil, false))
+			t.ok(fullDetailCount(streamer.desired) > plain, "full detail reaches further")
+			t.ok(settle(sim), "settles")
+			t.eq(sim.voids, 0, "never open onto the void")
+			t.eq(sim.overlaps, 0, "no overlaps")
+		end, 256, nil, gen)
+
+		-- A ravine: the deepest cut open to the sky in chunks every 2 near 540, -420.
+		local best, camera = 0, nil
+		for cz = -30, -24, 2 do
+			for cx = 30, 38, 2 do
+				local r = gen.generate(0, cx, cz, nil, true)
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						local top = buffer.readu16(r.surface, (z * SIZE + x) * 2)
+						local y = top - 1
+						while y > 0 and ChunkLayout.get(r.data, x, y, z) == Blocks.AIR do
+							y -= 1
+						end
+						if top - 1 - y > best then
+							best, camera = top - 1 - y, { cx * SIZE + x, y + 1, cz * SIZE + z }
+						end
+					end
+				end
+			end
+		end
+		assert(camera and best >= 15, `a ravine near 540, -420 (deepest cut {best})`)
+		local x, z = camera[1] + 0.5, camera[3] + 0.5
+		simulate(x, z, function(sim)
+			sim.values.caveView = 128
+			sim.streamer:applyView()
+			sim.eyeY = gen.column(camera[1], camera[3]) + 1.6
+			sim:place(x, z)
+			t.ok(settle(sim, true), "settles above the ravine")
+			stepUnderOpenSky(sim, gen, x, z, camera[2] + 0.6, "ravine")
+			t.eq(sim.overlaps, 0, "no overlaps")
+		end, 256, nil, gen)
 	end)
 end

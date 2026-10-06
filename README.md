@@ -35,6 +35,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   stone varieties by altitude, and a deterministic structure system (trees and cacti, and jigsaw
   structures from the structure library: see Generated structures) that lets anything cross chunk
   borders.
+- **Cave entrances and ravines.** Minecraft's cave and canyon carvers, adapted: air carved into
+  the surface after the caves. Entrances are winding tunnels 3-7 blocks wide that open as pits on
+  flat ground and as mouths in steep mountain flanks, lead 15-60 blocks down and end in a small
+  chamber; a third of them fork once, and they steer towards the deep caves, so most (55-65%) run
+  into the cave network. Ravines are rarer cuts 60-160 blocks long, up to about 12 blocks wide and
+  20-45 deep in the middle, with jagged walls and always open to the sky, often down into a
+  cavern. About 50-70 entrances and 1-6 ravines per km² of land: walking with ~30 blocks of view
+  to either side you pass an entrance every 200-250 blocks. None opens under water, at the shore,
+  by a river or within 2 blocks of a library structure, no tree stands over one and no spawn lands
+  in one; grass and snow grow back on a pit's floor. Far ravines and pits show as cuts up to about
+  400 blocks away (LOD levels 1-2).
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -214,11 +225,22 @@ A fast, Minecraft-style voxel engine for Roblox.
   Underlands up to 144, for about the parts the sphere cost (0.96 × over 29 caves, median), and
   caves behind rock cost nothing. A tunnel running out of what is revealed ends in a stone cap,
   never in the void. Full detail chunks, the only ones with caves, reach about 128 blocks instead of
-  96 while the camera is below the surface and for 5 seconds after it comes up
-  (`Lod.UndergroundSplitDistanceL1`), so walking in and out of a cave mouth doesn't rebuild the
-  chunks around it. The Cave View setting scales all of it (phones, on the Low preset: tunnels 64
-  blocks, caverns 112, full detail about 96). F3 shows how far caves are revealed and how many
-  lichen lights there are.
+  96 while the camera is shut in below the surface (in a cave or under rock, not at the open bottom
+  of a pit or a ravine) and for 5 seconds after (`Lod.UndergroundSplitDistanceL1`), so walking in
+  and out of a cave mouth doesn't rebuild the chunks around it. The Cave View setting scales all of
+  it (phones, on the Low preset: tunnels 64 blocks, caverns 112, full detail about 96). F3 shows
+  how far caves are revealed and how many lichen lights there are.
+- **From the surface into the caves.** Cave entrances and ravines are surface terrain: drawn from
+  above like any hillside and lit by the sky (an entrance is lit at its mouth and dark about 30
+  blocks in, a ravine's floor is under the open sky, the caves beyond stay dark). Where one runs
+  into a cave you are not in, the cave is drawn as a stone cap (so is the bottom of a shaft dug
+  into a cave), never the void. Walk down an entrance or into a ravine and the cave view comes on
+  as soon as your eyes are more than a block below the ground: its search follows the entrance
+  down into the caves it leads to but never out into the sky (23-34 sections from a mouth, at most
+  ~200 on the way down, where following every pocket of air would visit 180-560), and the cave
+  beyond shows a few frames later. Full detail only reaches further once you are shut in (in the
+  cave or under rock), not at the open bottom of a pit or a ravine, where it would load 70-100%
+  more full detail chunks for a view of the surface.
 - **Terrain behind mountains.** Every generated chunk carries a small summary of its lowest ground
   and highest top (kept up to date as players dig and build), and about once a second while you
   move a worker works out which far chunks nearer terrain hides from the camera, with a margin
@@ -586,6 +608,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Relief                  terrain heights (JJThunder To The Max style)
     Noise                   seeded noise on top of math.noise
     Caves, Ores             full detail only (Ores: every ore feature, Mekanism's osmium included)
+    SurfaceCaves            cave entrances and ravines (worms carved as air; full detail and LOD
+                            levels 1-2)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
     StructureGen            library structures in chunks (random_spread starts, assembly cache,
                             pieces, foundations, generated chests)
@@ -722,7 +746,7 @@ for performance:
 | `Lod.Mobile`              | 512 / 2 / 24 / 3 | View / split / foliage / underground split distance of the Low preset, which phones and tablets start on. |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
 | `Lod.SplitDistanceL1`     | 3       | Same for full detail only; 2 = ~12% fewer parts in mountains.       |
-| `Lod.UndergroundSplitDistanceL1` | 4 | `SplitDistanceL1` while the camera is underground (phones 3): full detail, and so caves, reach ~128 blocks. |
+| `Lod.UndergroundSplitDistanceL1` | 4 | `SplitDistanceL1` while the camera is shut in underground (in a cave or under rock, not at the open bottom of a pit or a ravine; phones 3): full detail, and so caves, reach ~128 blocks. |
 | `Lod.UndergroundSeconds`  | 5       | How long that lasts after the camera comes up (no rebuilding at cave mouths). |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
@@ -748,6 +772,8 @@ for performance:
 | `Caves.RevealBudget`      | 1500    | Sections revealed at most, nearest first (the Underlands' giant caverns). |
 | `Caves.RevealHold`        | 2       | Seconds a section stays revealed after the camera stopped seeing into it. |
 | `Caves.LichenLightDistance` | math.huge | Glow lichen's lights shine at any distance; a number switches off those farther from the camera (the lichen still glows). |
+| `Caves.Entrances`         | Spacing 96, Chance 0.6 | Cave entrances: one candidate per 96 × 96 blocks, taken with `Chance`; `Radius` 1.5-3.5 blocks, `Length` 48-140 steps of a block, `Depth` 15-60 blocks below the surface, `Branch` 0.35 (the chance of a side tunnel); `Enabled = false`: none. |
+| `Caves.Ravines`           | Spacing 384, Chance 0.5 | Ravines: one candidate per 384 × 384 blocks; half width `Radius` 1.5 at the ends to up to 6 in the middle, `Length` 60-160 steps, `Depth` 20-45 blocks in the middle (8 at the ends). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
@@ -1009,7 +1035,9 @@ identical tiles.
 **Spawn safety.** `src/server/Players/SpawnUnsafeBlocks.luau` lists what a player must not stand on
 (`Floor`), stand in (`Body`, fluids by name) or touch (`Hazards`), plus the headroom and search
 radius. Spawns and map teleports search outward for the closest spot that passes, and never put
-players below the natural surface (caves).
+players below the natural surface (caves), nor at the bottom of a pit or a ravine (the floor at
+the natural surface must be solid); the generator's spawn also skips columns a surface cave
+opens.
 
 **The map.** The minimap and world map draw terrain with EditableImage. That API works in Studio
 right away, but **published games** need the experience owner to be 13+ and ID verified and to turn
@@ -1234,6 +1262,11 @@ Natural next steps, roughly in order:
 - **Measure on real clients.** The flicker, teleport and frame budget numbers come from Lune with
   fake instances; whether the engine draws new parts a frame late, what parenting and building
   really cost and how far it then draws need checking with the MicroProfiler in a published place.
+- **Surface caves from afar.** From above ground an entrance ends in a stone cap where it meets a
+  cave (Minecraft lets you look in; here the cave shows once your eyes are below the surface).
+  Ravines don't show on the map (it paints the generator's column heights) or beyond LOD level 2
+  (~400 blocks), and the far terrain culling's summaries leave pits and ravines out (they never
+  lower a tile's ground).
 - **The Underlands at a distance.** Caves only exist in full detail chunks, so a big cavern ends
   where they do (~128 blocks underground, `Lod.UndergroundSplitDistanceL1`). Carving the
   Underlands (mostly an analytic interval per column, cheap at any level) into far chunks and

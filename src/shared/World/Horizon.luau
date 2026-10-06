@@ -8,7 +8,9 @@
 	Summary (`summarise`, SUMMARY_BYTES per node, made by the generator for every node): the node's
 	16 x 16 cells in 4 x 4 tiles of 4 x 4 cells, per tile
 	  ground  the lowest drawn terrain top (blocks): the tile is solid from 0 up to there, an
-	          occluder (terrain only: no trees, water or structures);
+	          occluder (terrain only: no trees, water or structures). These are the heights
+	          before surface caves (Generation/SurfaceCaves): a pit or a ravine does not lower
+	          its tile, an overstatement judged negligible (sight lines along a cut's floor);
 	  top     the highest drawn cell top (blocks), trees, water and structures included: the tile
 	          lies below it, an occludee.
 	Layout: u16 ground of tile tz * 4 + tx at byte 2 * t, u16 top at 32 + 2 * t. A top of UNKNOWN

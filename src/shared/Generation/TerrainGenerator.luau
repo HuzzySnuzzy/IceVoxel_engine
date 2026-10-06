@@ -14,6 +14,11 @@
 	meadow, alpine, snowy slopes, peaks), then by climate (temperature and humidity noise) among
 	the biomes of that band. Islands far out in some seas are mushroom fields.
 
+	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
+	(SurfaceCaves.luau, air open to the surface), ores, trees and library structures, glow lichen,
+	ground plants. Trees ask the worms (not the chunk) whether a surface cave opens under them, so
+	every chunk agrees on every tree; no surface cave is carved next to a structure's piece.
+
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
 	  same terrain every 2^L blocks horizontally (and every min(2^L, Lod.MaxVerticalStep) blocks
@@ -37,6 +42,7 @@ local Horizon = require(script.Parent.Parent.World.Horizon)
 local Noise = require(script.Parent.Noise)
 local Relief = require(script.Parent.Relief)
 local Caves = require(script.Parent.Caves)
+local SurfaceCaves = require(script.Parent.SurfaceCaves)
 local Ores = require(script.Parent.Ores)
 local Foliage = require(script.Parent.Foliage)
 local CaveDecor = require(script.Parent.CaveDecor)
@@ -61,6 +67,7 @@ local CLIFF_SLOPE = 1.6 -- slope (blocks per block) above which the surface is b
 local MUSHROOM_SELECTOR = -0.475 -- selector below which islands are mushroom fields
 local RIVER_MUD = 0.3 -- river strength (Relief) from which a river bed is packed mud
 local DEEP_WATER = 14 -- sea floor deeper than this is gravel
+local STRUCTURE_MARGIN = 2 -- no surface cave within this many blocks of a library structure piece
 
 local floor = math.floor
 local huge = math.huge
@@ -117,11 +124,14 @@ export type Generator = {
 	-- `yield` is called regularly so callers can spread the work over several frames. `extras`:
 	-- also return what the client's culling needs (ChunkResult `summary`, `surface`, ...).
 	generate: (level: number, nx: number, nz: number, yield: (() -> ())?, extras: boolean?) -> ChunkResult,
-	-- A spawn column: low, dry, gentle land near the hills. x, height, z.
+	-- A spawn column: low, dry, gentle land near the hills, where no cave entrance or ravine opens
+	-- (SurfaceCaves.carvesTop). x, height, z.
 	findSpawn: () -> (number, number, number),
 	--[[
 		Seam limits for the mesher (GreedyMesher.Border.open) of node (level, nx, nz), given the
-		level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none). nil when no side has one.
+		level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none): how high that node's
+		terrain goes, or down to where its surface caves cut the column (levels up to
+		SurfaceCaves.MAX_LEVEL, SurfaceCaves.lowestCarved). nil when no side has one.
 	]]
 	seamLimits: (level: number, nx: number, nz: number, coarser: { number }) -> buffer?,
 	--[[
@@ -136,10 +146,14 @@ export type Generator = {
 		Seam limits of a far node (level >= 1) that hold whatever its neighbours are: the LOD tree
 		only ever puts a node next to nodes at most one level coarser, so opening the padding for a
 		one and a two levels coarser neighbour on every side (the lower of the two) covers every
-		case. Far nodes then never need to be rebuilt when their neighbours change. nil for the
-		coarsest level.
+		case; the padding is also opened down to where a finer neighbour's surface caves cut its
+		border (see openToFinerCuts). Far nodes then never need to be rebuilt when their
+		neighbours change. nil for the coarsest level.
 	]]
 	farSeamLimits: (level: number, nx: number, nz: number) -> buffer?,
+	-- The cave entrances and ravines `generate` carves (Generation/SurfaceCaves): `worms` finds
+	-- them, `carvesTop` says whether one opens at a column.
+	surfaceCaves: SurfaceCaves.SurfaceCaves,
 }
 
 --[[
@@ -178,6 +192,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		end
 		return h
 	end
+
+	-- Cave entrances and ravines, from the full detail surface (heights as `generate` fills them).
+	local surfaceCaves = SurfaceCaves.new(seed, function(x: number, z: number): (number, number)
+		local y, _, _, river = relief.height(x, z, 0)
+		return clampHeight(y), river
+	end, if Config.Caves.Enabled then Caves.regions(seed) else nil)
 
 	--[[
 		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
@@ -271,6 +291,64 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local biomes: { number } = table.create(P * P, 1)
 	local surfaces: { number } = table.create(P * P, 0)
 	local topCells: { number } = table.create(P * P, 0)
+	local protected: { boolean } = table.create(P * P, false)
+
+	-- Is column (x, z) within STRUCTURE_MARGIN blocks of a piece of `starts`?
+	local function nearPiece(starts: { StructureGen.Start }, x: number, z: number): boolean
+		for _, start in starts do
+			for _, piece in start.pieces do
+				local box = piece.box
+				if
+					x >= box[1] - STRUCTURE_MARGIN
+					and x <= box[4] + STRUCTURE_MARGIN
+					and z >= box[3] - STRUCTURE_MARGIN
+					and z <= box[6] + STRUCTURE_MARGIN
+				then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	--[[
+		Padded columns no surface cave may carve: within STRUCTURE_MARGIN blocks of a library
+		structure piece (its foundation would fill a pit under it and a path would float over a
+		ravine). nil when there are none. Pieces are world boxes, so every chunk agrees.
+	]]
+	local function protectedColumns(
+		starts: { StructureGen.Start }?,
+		level: number,
+		originX: number,
+		originZ: number
+	): { boolean }?
+		if starts == nil then
+			return nil
+		end
+		local step = ChunkLayout.steps(level)
+		local half = step // 2
+		local any = false
+		table.clear(protected)
+		for _, start in starts do
+			for _, piece in start.pieces do
+				local box = piece.box
+				local bx0, bz0 = box[1] - STRUCTURE_MARGIN, box[3] - STRUCTURE_MARGIN
+				local bx1, bz1 = box[4] + STRUCTURE_MARGIN, box[6] + STRUCTURE_MARGIN
+				-- Padded columns whose sample block is in the grown box.
+				local px0 = math.max(-((originX - step + half - bx0) // step), 0)
+				local px1 = math.min((bx1 - (originX - step + half)) // step, P - 1)
+				local pz0 = math.max(-((originZ - step + half - bz0) // step), 0)
+				local pz1 = math.min((bz1 - (originZ - step + half)) // step, P - 1)
+				for pz = pz0, pz1 do
+					for px = px0, px1 do
+						protected[pz * P + px + 1] = true
+						any = true
+					end
+				end
+			end
+		end
+		return if any then protected else nil
+	end
 
 	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?, extras: boolean?): ChunkResult
 		local step, stepY = ChunkLayout.steps(level)
@@ -425,15 +503,25 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			yield()
 		end
 
-		-- 3. Caves and ores only exist in full detail chunks.
+		-- 3. Caves (full detail only), then cave entrances and ravines (point-sampled up to
+		-- SurfaceCaves.MAX_LEVEL: far ravines show as cuts), then ores (full detail only; they only
+		-- replace stone, so they never fill carved air).
 		local carved: Caves.Carved? = nil
-		if level == 0 then
-			if Config.Caves.Enabled then
-				carved = carveCaves(data, originX, originZ, heights, cells, yield)
-				if yield then
-					yield()
-				end
+		if level == 0 and Config.Caves.Enabled then
+			carved = carveCaves(data, originX, originZ, heights, cells, yield)
+			if yield then
+				yield()
 			end
+		end
+		if level <= SurfaceCaves.MAX_LEVEL then
+			local protectedCells = protectedColumns(starts, level, originX, originZ)
+			local lowest =
+				surfaceCaves.carve(data, level, originX, originZ, heights, topCells, cells, protectedCells, yield)
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+		end
+		if level == 0 then
 			Ores.place(data, seed, nx, nz, cells)
 		end
 
@@ -451,11 +539,15 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					return h, biome, vegetation, surface
 				end
 			end
-			local accept = gentle
+			-- Not on bare rock, near a library structure's piece or over a surface cave (decided
+			-- from the worms, so every chunk and level agrees).
+			local accept = function(x: number, z: number, biome: number): boolean
+				return gentle(x, z, biome) and not surfaceCaves.carvesTop(x, z)
+			end
 			if placer and starts then
 				local p, list = placer, starts
 				accept = function(x: number, z: number, biome: number): boolean
-					return gentle(x, z, biome) and p.treeAllowed(list, x, z)
+					return gentle(x, z, biome) and p.treeAllowed(list, x, z) and not surfaceCaves.carvesTop(x, z)
 				end
 			end
 			Structures.populate(
@@ -554,6 +646,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 				local cs, csY = ChunkLayout.steps(coarse)
 				local halfC, halfCY = cs // 2, csY // 2
+				-- The coarse node carves surface caves there (except next to structure pieces).
+				local carves = coarse <= SurfaceCaves.MAX_LEVEL
+				local pieces: { StructureGen.Start }? = nil
 				for i = 0, SIZE - 1 do
 					-- Sample point of the padding column, then the coarse cell containing it.
 					local along = i * step + half
@@ -567,14 +662,90 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					else
 						x, z = originX + along, originZ + SIZE * step + half
 					end
-					local h = sample((x // cs) * cs + halfC, (z // cs) * cs + halfC, coarse)
+					local cx, cz = (x // cs) * cs + halfC, (z // cs) * cs + halfC
+					local h = sample(cx, cz, coarse)
 					-- Same rounding as `generate` at the coarse level: blocks below `solidTop` are drawn.
 					local solidTop = ((h - halfCY + csY - 1) // csY) * csY
-					writeu16(limits, ((side - 1) * SIZE + i) * 2, math.max(solidTop // stepY, 1))
+					local open = solidTop
+					if carves then
+						if placer and coarse <= Config.StructureMaxLevel and pieces == nil then
+							-- The pieces along this side (`generate` leaves columns near them alone).
+							local reach = SIZE * step + 2 * cs + STRUCTURE_MARGIN
+							pieces = placer.starts(x - reach, z - reach, x + reach, z + reach)
+						end
+						if not (pieces and nearPiece(pieces, cx, cz)) then
+							-- Down to the coarse column's cut, where its terrain ends.
+							local cut = surfaceCaves.lowestCarved(coarse, cx, cz, h, solidTop // csY - 1)
+							if cut and cut * csY < open then
+								open = cut * csY
+							end
+						end
+					end
+					writeu16(limits, ((side - 1) * SIZE + i) * 2, math.max(open // stepY, 1))
 				end
 			end
 		end
 		return out
+	end
+
+	--[[
+		Opens a far node's seam `limits` down to where a finer neighbour (one or two levels finer,
+		up to SurfaceCaves.MAX_LEVEL) cuts its border columns with a surface cave. This node's
+		padding there is its own coarser (or uncarved) terrain, so without it neither side would
+		draw the rock facing the cut: a see-through slit at a ravine's or a pit's end. Where the
+		neighbour is not that finer node, the opened cells only add faces inside the terrain.
+	]]
+	local function openToFinerCuts(level: number, nx: number, nz: number, limits: buffer)
+		local step, stepY = ChunkLayout.steps(level)
+		local span = SIZE * step
+		local originX, originZ = nx * span, nz * span
+		local pieces: { StructureGen.Start }? = nil
+		for fine = math.max(level - 2, 0), math.min(level - 1, SurfaceCaves.MAX_LEVEL) do
+			-- Only towards ravines from a node that carves nothing itself (it builds no worms and has
+			-- no trees: an entrance's opening there is a few blocks some 400 blocks away, within the
+			-- skirt), and towards a node two levels finer (rare: full detail chunks next to a level
+			-- 2 node while the camera is underground). Every opened cell costs parts.
+			local ravinesOnly = level > SurfaceCaves.MAX_LEVEL or fine < level - 1
+			local fs, fsY = ChunkLayout.steps(fine)
+			local halfF, halfFY = fs // 2, fsY // 2
+			for side = 1, 4 do
+				for i = 0, SIZE - 1 do
+					local o = ((side - 1) * SIZE + i) * 2
+					local open = buffer.readu16(limits, o)
+					-- The finer node's border columns next to padding column i.
+					for along = i * step + halfF, (i + 1) * step - 1, fs do
+						local x, z
+						if side == 1 then
+							x, z = originX - fs + halfF, originZ + along
+						elseif side == 2 then
+							x, z = originX + span + halfF, originZ + along
+						elseif side == 3 then
+							x, z = originX + along, originZ - fs + halfF
+						else
+							x, z = originX + along, originZ + span + halfF
+						end
+						if not surfaceCaves.mayCarve(x, z, ravinesOnly) then
+							continue
+						end
+						local h = clampHeight((relief.height(x, z, fine)))
+						local cut =
+							surfaceCaves.lowestCarved(fine, x, z, h, (h - halfFY + fsY - 1) // fsY - 1, ravinesOnly)
+						if cut == nil or cut * fsY // stepY >= open then
+							continue
+						end
+						-- (`generate` leaves the columns next to a structure's piece alone.)
+						if placer and fine <= Config.StructureMaxLevel and pieces == nil then
+							local m = step + STRUCTURE_MARGIN
+							pieces = placer.starts(originX - m, originZ - m, originX + span + m, originZ + span + m)
+						end
+						if not (pieces and nearPiece(pieces, x, z)) then
+							open = cut * fsY // stepY
+						end
+					end
+					buffer.writeu16(limits, o, math.max(open, 1))
+				end
+			end
+		end
 	end
 
 	local function farSeamLimits(level: number, nx: number, nz: number): buffer?
@@ -594,6 +765,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 			end
 		end
+		openToFinerCuts(level, nx, nz, limits)
 		return limits
 	end
 
@@ -633,7 +805,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 								break
 							end
 						end
-						if ok then
+						-- Not where a cave entrance or ravine opens (last: it builds the worms around).
+						if ok and not surfaceCaves.carvesTop(wx, wz) then
 							return wx, h, wz
 						end
 					end
@@ -671,6 +844,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		farSeamLimits = farSeamLimits,
 		structureContainer = structureContainer,
 		structures = structuresIn,
+		surfaceCaves = surfaceCaves,
 	}
 end
 

@@ -12,7 +12,8 @@
 	  * Opaque blocks that are completely enclosed by opaque blocks can never be seen. They are
 	    wildcards: any opaque box may extend through them (whatever their material) or skip them.
 	    This is what lets a grass box continue under a one block step, or a stone box swallow a
-	    whole hillside, and keeps part counts low.
+	    whole hillside, and keeps part counts low. (With `hideCaves`, cave cells are rock here too:
+	    see below.)
 	  * Transparent blocks (glass) are covered exactly; fluids only where they touch a non-opaque
 	    block other than themselves (their surface), so oceans become thin sheets instead of tall
 	    boxes. A fluid cell without the same fluid above is lowered to its level's height
@@ -27,7 +28,13 @@
 	  * Cave air can be treated as rock (`hideCaves`), which removes every cave wall from sections
 	    the camera is not close to. Cave twins (Blocks.caveTwinLut: the glow lichen generation
 	    puts on cave walls) count as cave air then: not drawn, and rock to their neighbours
-	    (Blocks.cullLutHiddenCaves), so a hidden cave's lichen costs nothing.
+	    (Blocks.cullLutHiddenCaves), so a hidden cave's lichen costs nothing. A cave cell (cave
+	    air or a twin) that touches a cell that is neither opaque nor a cave cell (air, water,
+	    glass, a torch: where a surface cave's entrance or a dug shaft runs into a hidden cave) is
+	    drawn as a stone cap instead, so looking out of that air into hidden cave space shows rock,
+	    never the void. Elsewhere a hidden cave cell is enclosed by rock and other hidden cave
+	    cells, nobody can see it, and it is a wildcard like enclosed rock: not drawn, but an opaque
+	    box may run through it (the caps merge into the rock around them).
 	  * Sparse lights (`sparseLightLut`: glow lichen): every lichen cell is drawn, but only one per
 	    LIGHT_BOX^3 block box (world aligned, so inside one section of one chunk) carries the light:
 	    the one nearest the box's centre (on a tie the lowest, then northmost, then westmost). Its
@@ -92,16 +99,24 @@ local writeu16 = buffer.writeu16
 local CAVE_AIR = Blocks.CAVE_AIR
 local STONE = Blocks.id.Stone
 local caveTwinLut = Blocks.caveTwinLut
+-- The appearance hidden cave cells next to open space are capped with (see the header).
+local STONE_APPEARANCE = readu16(appearanceLut, STONE * 2)
 
 -- The appearance of each block while caves are hidden (u16 per block id): cave twins have none,
 -- like cave air.
 local appearanceHiddenCaves = buffer.create(Blocks.count * 2)
 buffer.copy(appearanceHiddenCaves, 0, appearanceLut)
+-- 1 for cave cells: cave air and cave twins (rock while caves are hidden, air otherwise).
+local caveCellLut = buffer.create(Blocks.count)
 for id = 0, Blocks.count - 1 do
 	if readu8(caveTwinLut, id) == 1 then
 		writeu16(appearanceHiddenCaves, id * 2, 0)
 	end
+	if id == CAVE_AIR or readu8(caveTwinLut, id) == 1 then
+		writeu8(caveCellLut, id, 1)
+	end
 end
+assert(readu8(kindLut, STONE_APPEARANCE) == OPAQUE, "stone caps must be opaque")
 
 -- Blocks (by their item, or their name when they are an item) whose light only some cells carry:
 -- glow lichen covers whole cave walls, and a PointLight per cell would be hundreds of lights.
@@ -140,6 +155,8 @@ GreedyMesher.HIDDEN_BELOW = 16
 GreedyMesher.HIDDEN_ABOVE = 32
 GreedyMesher.LIGHT_BOX = LIGHT_BOX
 GreedyMesher.sparseLightLut = sparseLightLut
+GreedyMesher.caveCellLut = caveCellLut
+GreedyMesher.STONE_APPEARANCE = STONE_APPEARANCE
 
 --[[
 	How far cell (x, y, z) (chunk-local x and z, absolute y) is from the centre of its LIGHT_BOX
@@ -465,6 +482,24 @@ function GreedyMesher.mesh(
 								chosen[box] = c
 							end
 						end
+					end
+				elseif hideCaves and block ~= AIR and readu8(caveCellLut, block) == 1 then
+					-- A hidden cave cell is rock to everything around it; next to open space that
+					-- is not cave (a surface cave's entrance, a dug shaft) it is drawn as a stone
+					-- cap, so that space never looks into the void.
+					if
+						(not hasAbove or readu8(cull, readu16(data, (idx + LAYER) * 2)) == 0)
+						or readu8(cull, readu16(data, (idx - 1) * 2)) == 0
+						or readu8(cull, readu16(data, (idx + 1) * 2)) == 0
+						or readu8(cull, readu16(data, (idx - P) * 2)) == 0
+						or readu8(cull, readu16(data, (idx + P) * 2)) == 0
+						or (hasBelow and readu8(cull, readu16(data, (idx - LAYER) * 2)) == 0)
+					then
+						needed = STONE_APPEARANCE
+					else
+						-- Enclosed by rock and hidden cave cells: nobody sees it, so like buried rock
+						-- an opaque box may run through it (the caps merge into the rock around).
+						hidden = 1
 					end
 				end
 				if needed ~= 0 then
