@@ -8,7 +8,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   (128 chunks). Far chunks use cells up to 64 blocks wide (but at most 16 tall, so mountains keep
   their shape). LOD changes swap in place without holes or flicker.
 - **Greedy box meshing.** Blocks become as few Parts as possible; blocks you can never see are
-  merged into neighbouring boxes for free, and caves are only meshed when the camera is underground.
+  merged into neighbouring boxes for free, and caves are only meshed where an underground camera
+  can see into them.
+- **No flicker on edits.** Placing or breaking a block swaps only the parts that changed (a median
+  of 1 part built, where ~300 were rebuilt before), every section the edit touches (in both
+  chunks of a border too) goes live in the same frame, and the old geometry stays two frames under
+  the new one (`Render.SwapFrames`; water and glass too), so an edit never shows the sky through
+  the terrain. Edits have their own lane in the workers and the renderer and never wait behind
+  loading.
+- **Loading what you see first.** Terrain loads in the order you need it: the ground under you,
+  then what is in front of the camera, then what is just behind, then the rest, and terrain hidden
+  behind mountains last; after a teleport 90% of the view is there 15-40% sooner. A teleport drops
+  the old area at once instead of keeping it until the new one is built: you can move 16-31 frames
+  after landing instead of 33-274, no frame puts more than ~700 parts into the workspace (it was up
+  to 22,600), and the old area leaves at most 3,000 parts a frame (a far teleport used to destroy
+  25,000-131,000 in one frame). Part building adapts to the frame time (2-8 ms a frame, 12 ms while
+  you wait for the ground), and far meshes are not built while you move or terrain loads. (Measured
+  in Lune with the real streamer and renderer on fake instances.)
 - **Terrain like JJThunder To The Max.** A 1024 block tall world in the style of the Minecraft
   datapack: mountain ranges up to ~900 blocks high with snowy peaks, eroded flanks and plateau
   hills, plains, wide river valleys and enclosed seas with islands. Its height functions are ported
@@ -109,11 +125,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   grass. Plants are drawn a few pixels off their cell's centre and turned, by a hash of their
   position, so fields don't look like grids (both halves of a tall plant alike; the sunflower
   always faces east); the outline stays on the cell. Every box is a part, so plants are drawn
-  within 40 blocks (24 on phones): about 1,000-3,000 parts on grassland, at most 6,000.
-  `Config.Render.Foliage = false` stops drawing them on slow devices; they are still there to aim
-  at and break. Left out: Minecraft's light check for mushrooms, seeds from grass (there is no
-  wheat) and the plants the game has no blocks for (saplings, sugar cane, berry bushes, lily pads,
-  vines, seagrass); plants are sparser than in Minecraft, to keep the part count down.
+  within 40 blocks (24 on phones; the Plant Distance setting): about 1,000-3,000 parts on
+  grassland, at most 6,000. `Config.Render.Foliage = false` (or the setting at OFF) stops drawing
+  them on slow devices; they are still there to aim at and break. Left out: Minecraft's light
+  check for mushrooms, seeds from grass (there is no wheat) and the plants the game has no blocks
+  for (saplings, sugar cane, berry bushes, lily pads, vines, seagrass); plants are sparser than in
+  Minecraft, to keep the part count down.
 - **Structure blocks.** Minecraft 1.20.1's structure blocks, to save what you build as text and
   place it again. They, structure voids and jigsaw blocks are operator blocks: only creative players
   may place, use and break them, and only the game's owner, `Gameplay.Admins`, Studio sessions and
@@ -185,19 +202,34 @@ A fast, Minecraft-style voxel engine for Roblox.
   more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
   Each is a thin plate on its face with a glowing Neon speck: 2 parts. One lichen per 8 × 8 × 8
   blocks carries a PointLight, which shines at any distance, so a revealed cave holds a few hundred
-  lights instead of thousands (`Caves.LichenLightDistance` can switch far ones off on slow devices).
+  lights instead of thousands (the Lichen Lights setting, or `Caves.LichenLightDistance`, can switch
+  far ones off on slow devices).
   It drops 2 Glow Dust (by hand or with any tool; an axe breaks it fastest), or itself with Shears;
   it is replaceable, washes away in flowing water, and placed by hand it lies on the floor or hangs
   on a ceiling or wall like a torch (one face per block). Generated lichen counts as cave air while
   caves are hidden, so a cave's lichen costs nothing until you are in it.
-- **Seeing caves further.** Underground, caves are revealed 64 blocks around the camera and up to
-  128 in big caverns such as the Underlands (was 48 to 96), and full detail chunks, the only ones
-  with caves, reach about 128 blocks instead of 96 while the camera is below the surface and for 5
-  seconds after it comes up (`Lod.UndergroundSplitDistanceL1`), so walking in and out of a cave
-  mouth doesn't rebuild the chunks around it. Phones reveal 48 to 96 blocks, with full detail to
-  about 96. In a cave near the spawn that is 268 full detail chunks instead of 164, and about 57,000
-  parts instead of 47,000 before far meshes. F3 shows how far caves are revealed and how many lichen
-  lights there are.
+- **Seeing caves further.** Underground, caves are drawn where you can see into them: a search
+  through connected cave air from the camera's 16 × 16 × 16 section (Minecraft's advanced cave
+  culling) reveals tunnels 88 blocks away (the old reveal sphere: 80) and big caverns such as the
+  Underlands up to 144, for about the parts the sphere cost (0.96 × over 29 caves, median), and
+  caves behind rock cost nothing. A tunnel running out of what is revealed ends in a stone cap,
+  never in the void. Full detail chunks, the only ones with caves, reach about 128 blocks instead of
+  96 while the camera is below the surface and for 5 seconds after it comes up
+  (`Lod.UndergroundSplitDistanceL1`), so walking in and out of a cave mouth doesn't rebuild the
+  chunks around it. The Cave View setting scales all of it (phones, on the Low preset: tunnels 64
+  blocks, caverns 112, full detail about 96). F3 shows how far caves are revealed and how many
+  lichen lights there are.
+- **Terrain behind mountains.** Every generated chunk carries a small summary of its lowest ground
+  and highest top (kept up to date as players dig and build), and about once a second while you
+  move a worker works out which far chunks nearer terrain hides from the camera, with a margin
+  (16 blocks higher and to every side). Those load last, and with Skip hidden terrain (the Hidden
+  Terrain setting; on in the Low preset) they draw no parts until you could see them. In the
+  mountains 45% of the parts on screen are hidden; skipping them keeps a third fewer parts while
+  walking (84k parts become 49k after loading, at the default view with far meshes off).
+- **Settings menu.** Minecraft's Options screen (`P`, gamepad D-pad right, or the gear at the left
+  end of the hotbar on touch screens): a graphics preset (Low, Medium, High, Ultra) and every view,
+  performance, sound, control and HUD setting, applied while you play and saved per player and
+  kind of device. See [Settings menu](#settings-menu).
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -369,10 +401,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   plants popping off when their soil goes.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
-  (Ctrl toggles it, or double tap forward) with Minecraft's widening field of view, sneaking that
-  never walks off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint
-  jumping, slippery ice, swimming (sprint under water, steered by the view), currents, hopping out
-  of water and fall damage. Steps up to just over a block are walked up without jumping, so the
+  (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
+  Minecraft's widening field of view (FOV and FOV Effects are settings), sneaking that never walks
+  off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint jumping, slippery
+  ice, swimming (sprint under water, steered by the view), currents, hopping out of water and fall
+  damage. Steps up to just over a block are walked up without jumping, so the
   steep terrain is walkable (`Config.Movement.StepHeight`; Minecraft's is 0.6). The Roblox
   character is purely cosmetic: it is drawn on the hull (interpolated) and never collides with
   anything.
@@ -381,13 +414,18 @@ A fast, Minecraft-style voxel engine for Roblox.
   steps down level by level, and its current pushes the player downstream.
 - **Minimap and world map.** Painted straight from the generator, so the map shows the whole world.
   Right click the map to add waypoints (saved between sessions), teleport, or center the view.
+  The Minimap setting hides the minimap, which then costs nothing (on touch screens a small "Map"
+  button takes its corner, to open the world map).
 - **Safe spawns.** Spawns and teleports never land in water, on leaves or next to cacti; the rules
   live in `SpawnUnsafeBlocks`.
 - **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
   81k parts become 35k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
-  where the Mesh APIs are unavailable.
+  where the Mesh APIs are unavailable. Meshes are not built while the camera moves faster than 2
+  blocks a second (averaged over 2 s), while terrain loads or after a teleport; parts draw
+  meanwhile. The Far Meshes setting switches them off; on again, they are rebuilt from what was
+  kept, with nothing generated again.
 
 ## Getting started
 
@@ -412,7 +450,7 @@ Studio tips:
 - How far parts are drawn is up to the engine, not the script: it depends on the graphics quality
   level and how many objects are on screen. Studio ignores that limit, so judge long views in the
   Roblox player with a high graphics level. Phones draw far less (a few hundred studs), which is why
-  they get a shorter view distance (`Lod.Mobile`).
+  they start on the Low preset, with a shorter view distance (`Lod.Mobile`).
 
 ## Controls
 
@@ -420,7 +458,7 @@ Studio tips:
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
-| Select slot   | `1`–`9`, mouse wheel, or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
+| Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
 | Buckets       | Right click water or a fluid tank with a bucket to fill it; right click a block or tank with a water bucket to empty it | L2 | Tap |
@@ -435,7 +473,7 @@ Studio tips:
 | Spectate a player (spectator) | Left click them; `Shift` leaves | R2; B leaves | Hold on them; Sneak button leaves |
 | Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
 | Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
-| Sprint        | `Ctrl` turns it on / off, or double tap `W` | L3 (stick press) | Sprint button (toggle) |
+| Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
 | Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
 | Swim up / down | Hold `Space` / `Shift` in water | A / B | Jump / Sneak |
@@ -445,12 +483,65 @@ Studio tips:
 | Recipes / uses (JEI) | Click / right click an item in the list, or `R` / `U` over any item; `Backspace` back, `E` / `Escape` back to the inventory | A / X on a list item, B leaves the recipes | Tap / long press |
 | Move a recipe (JEI) | `+` beside a crafting recipe (`Shift`: as many as possible) | A | Tap |
 | Full stack (JEI, creative) | `Shift` + click or middle click an item in the list | Y | |
-| World map     | `M`, or click the minimap   |         | Tap minimap |
+| World map     | `M`, or click the minimap   |         | Tap minimap (or the Map button while the Minimap setting is off) |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
+| Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory | D-pad right; B closes | Gear at the left end of the hotbar |
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
+
+## Settings menu
+
+`P` opens Minecraft's Options screen (gamepad: D-pad right; touch: the gear at the left end of the
+hotbar; anywhere: the gear in the inventory, where Minecraft's recipe book button is). Changes
+apply while you play: cheap ones at the next frame, costly ones (view, caves, plants, shadows,
+textures, far meshes) 0.4 s after a slider stops (`Settings.ApplyDelay`), so dragging a slider
+rebuilds the world once. Sliders move by dragging, clicking, the D-pad (left / right) or A; buttons
+cycle their values. Done (on a sub-page: back to Options), `P`, `E`, `Escape` or gamepad B close
+it, which applies whatever still waits and saves.
+
+| Page            | Settings |
+| --------------- | -------- |
+| Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults) |
+| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (only when a block has one), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
+| Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
+| Music & Sounds  | Master Volume, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Rumble |
+| Controls        | FOV Effects (0-100%), Sprint (Toggle / Hold), Scroll Wheel (Hotbar / Zoom), Touch Buttons (touch screens; after rejoining) |
+| HUD             | Minimap, WAILA, GUI Scale (Auto, 1-3) |
+
+Status lines say what the terrain is doing ("Updating terrain: 120 queued, 34 building") and, on
+the Performance page, the far meshes' state. A few notes on what the settings do:
+- Full Detail is held at most at the detail falloff plus one (96 blocks with a falloff of 2, 128
+  with 3), so the levels of detail stay 2:1 balanced; lowering the falloff pulls it down.
+- Cave View is how far big caverns are seen; tunnels follow in proportion (88 blocks at 128, 64
+  at 96, 96 at 144), and so does full detail underground (about the cave view, at most what the
+  falloff allows).
+- Build Budget: Auto adapts the milliseconds a frame spends building parts to the frame time
+  (`Render.AutoBudget`); a number fixes them.
+- Prefer Distance tells Roblox to lower lighting quality before draw distance
+  (`Lighting.PrioritizeLightingQuality`); Brightness lightens caves from Config's darkness
+  (Moody) towards Minecraft's Bright (`Lighting.CaveAmbient`).
+- Far Meshes off puts every merged region back to parts; on again, the meshes are rebuilt from
+  what was kept, with nothing generated again. Where meshes are off from the start of the session
+  (phones, a failed probe, `Render.FarMeshes`) they can't be switched on, and the status says why.
+
+Presets (seed 12345, parts at the spawn / in the mountains, with far meshes in brackets; without
+skipping hidden terrain):
+
+| Preset | View / falloff / full detail    | Cave view | Also                                          | Spawn                    | Mountains           |
+| ------ | ------------------------------- | --------- | --------------------------------------------- | ------------------------ | ------------------- |
+| Low    | 512 / 2 / 64 blocks             | 96        | plants 24, no shadows, hidden terrain skipped | 13.8k (9.1k + 14 meshes) | 29.0k (16.6k + 16)  |
+| Medium | 1024 / 2 / 96 blocks            | 96        | plants 24                                     | 18.2k (11.5k + 29)       | 43.2k (23.5k + 37)  |
+| High   | 2048 / 3 / 96 blocks (Config's) | 128       | plants 40                                     | 33.5k (16.7k + 88)       | 81.5k (34.8k + 90)  |
+| Ultra  | 4096 / 3 / 96 blocks            | 144       | plants 64, far shadows                        | 45.6k (20.6k + 187)      | 97.5k (39.5k + 191) |
+
+Phones and tablets start on Low (Config's `Lod.Mobile` and `Caves.Mobile` values, now without
+shadows); other devices by Roblox's graphics quality: 1-3 Low, 4-6 Medium, 7-10 or Automatic
+High. Only what a player changed is saved, so everything else keeps following the preset (and
+Roblox's quality level), one profile per kind of device (desktop, touch, console), in the
+DataStore "IceVoxelSettings_v1" (`Settings.Save`). A joining client waits up to a second
+(`Settings.LoadWait`) for them, so the first terrain it loads is already the player's view.
 
 ## Project layout
 
@@ -504,7 +595,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
   Map/MapPainter            map tile colours from the generator (runs in the workers)
-  World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow
+  World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow, SectionGraph
+                            (cave visibility: which sections connect, the search from the
+                            camera), Horizon (far terrain hidden behind nearer terrain)
+  PlayerSettings            the Options menu's settings: ids, ranges, presets, the LOD balance
+                            rule, the wire and DataStore formats
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
                             character)
@@ -547,19 +642,28 @@ src/server   -> ServerScriptService.IceVoxel
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage, invulnerability, suffocation), Spawning, SafeSpot +
                             SpawnUnsafeBlocks (safety rules), Teleport (map, spectators),
-                            WaypointStore (DataStore)
+                            WaypointStore and SettingsStore (DataStores: waypoints, player
+                            settings)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
   World/ClientWorld         nearby block data, edit lists, prediction
   World/StructureRecords    structure blocks' and jigsaws' settings, their regions, pasted data
                             going out and SAVE's data coming back
-  Streaming/                ChunkStreamer (LOD + scheduling, the cave view), WorkerPool,
-                            ChunkWorker (actor), CaveReach (how far caves are revealed, caps)
-  Rendering/                ChunkRenderer (boxes -> parts), PartPool, ViewSettings,
-                            LightingController (day, night and cave lighting), SkyExposure (how
-                            much sky light reaches the camera), MeshOverlay + MeshRegions (far
-                            meshes)
+  Streaming/                ChunkStreamer (LOD + scheduling, the cave view, teleports),
+                            WorkerPool, ChunkWorker (actor: generation, meshing, cave graphs,
+                            horizon verdicts, map tiles), CaveReach (revealed sections, caps),
+                            LoadPriority (load order), RemeshQueue (remeshes and their commit
+                            groups), SwapUnits (LOD swaps), TeleportMode, HiddenTerrain (horizon
+                            jobs and verdicts)
+  Rendering/                ChunkRenderer (boxes -> parts), RenderSchedule (build lanes, commit
+                            groups), SectionDiff (in-place remesh), FrameBudget (adaptive build
+                            budget), PartPool, ViewSettings (the view from the player's
+                            settings), LightingController (day, night and cave lighting),
+                            SkyExposure (how much sky light reaches the camera), MeshOverlay +
+                            MeshRegions (far meshes)
+  Settings/                 the player's settings: State (values and choices), Schedule (when
+                            changes apply), Pages (the menu's layout), saving them on the server
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts), InventoryScreen (with the crafting,
@@ -572,7 +676,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
                             buttons), SpectatorGui + SpectatorMenu (the spectator menu and its
                             model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
-                            model)
+                            model), SettingsScreen (the Options menu)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces and Heat Generators crackling, caves), SoundRules (the pure
@@ -607,12 +711,15 @@ How the pieces work together is described in [docs/ARCHITECTURE.md](docs/ARCHITE
 
 ## Configuration
 
-Everything lives in `src/shared/Config.luau`. The settings that matter most for performance:
+Everything lives in `src/shared/Config.luau`. Players change the view and performance settings for
+themselves in the Options menu (see [Settings menu](#settings-menu)); Config gives the defaults and
+the presets (High is Config's own view, Low its `Mobile` values). The settings that matter most
+for performance:
 
 | Setting                   | Default | Effect                                                              |
 | ------------------------- | ------- | ------------------------------------------------------------------- |
-| `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks).                                  |
-| `Lod.Mobile`              | 512 / 2 / 24 / 3 | View / split / foliage / underground split distance on phones and tablets. |
+| `Lod.ViewDistance`        | 2048    | How far terrain is drawn (blocks; the High preset).                 |
+| `Lod.Mobile`              | 512 / 2 / 24 / 3 | View / split / foliage / underground split distance of the Low preset, which phones and tablets start on. |
 | `Lod.SplitDistance`       | 3       | Detail falloff. LOD 0 radius is roughly `2 × SplitDistance` chunks. |
 | `Lod.SplitDistanceL1`     | 3       | Same for full detail only; 2 = ~12% fewer parts in mountains.       |
 | `Lod.UndergroundSplitDistanceL1` | 4 | `SplitDistanceL1` while the camera is underground (phones 3): full detail, and so caves, reach ~128 blocks. |
@@ -621,11 +728,25 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
 | `Lod.FoliageDistance`     | 40      | How far plants are drawn (blocks; every box of a plant is a part).  |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
-| `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts.                    |
+| `Streaming.TeleportDistance` | 128  | A jump this far (blocks) drops the old area at once (teleport mode). |
+| `Streaming.TeleportTimeout` / `TeleportSettle` | 10 / 16 | Teleport mode (and the first load: far meshes and map tiles wait) ends once the 3 × 3 chunks under the player are shown and at most this many nodes and builds are left, or after this many seconds. |
+| `Streaming.RemeshJobs`    | 4       | Cave, seam and plant remeshes in flight while terrain loads (edits are never limited). |
+| `Streaming.RevealGroupSections` | 96 | A cave reveal pass goes live in groups of at most this many sections, nearest first (a cap opening and the tunnel behind it together). |
+| `Streaming.RetryDelay` / `RetryMax` | 0.5 / 8 | Seconds before a failed chunk is generated again (doubling); the old terrain stays meanwhile. |
+| `Streaming.BusyJobs` / `BusyBuilds` | 8 / 24 | Far meshes wait while more chunks than this wait for generation / sections for the renderer. |
+| `Render.BuildBudgetMs`    | 4       | Main thread time per frame spent creating parts; with `AutoBudget` the base of an adaptive budget. |
+| `Render.AutoBudget`       | true    | Adapt the build budget to the frame time: lower when frames run long, up to 8 ms while work waits and frames have room, 12 ms while the player waits for the ground. |
+| `Render.EditBudgetMs`     | 2       | Main thread time per frame for edits, ahead of everything else.     |
+| `Render.SwapFrames`       | 2       | Frames old geometry stays under its replacement (edits, LOD swaps, far meshes; 0: same frame). |
+| `Render.UnparentPartsPerFrame` | 3000 | Parts taken out of the workspace per frame (old nodes, teleports). |
+| `Render.SwapPartsPerFrame` | 6000   | Parts per frame put in or taken out by LOD swaps and far meshes together. |
+| `Render.ReleaseBudgetMs`  | 1.5     | Main thread time per frame giving parts back to the pool (or destroying them once it is full). |
 | `Render.Shadows`          | true    | Shadows on full detail chunks and of torch and lantern light (far chunks never cast shadows). |
 | `Render.Foliage`          | true    | Draw plants (up to 4 parts each); false saves those parts, plants can still be aimed at and broken. |
-| `Caves.RevealRadius`      | 64      | How far around an underground camera caves are meshed (phones 48: `Caves.Mobile`). |
-| `Caves.RevealRadiusMax`   | 128     | Same in big caverns (the radius follows the open space around you; phones 96). |
+| `Caves.RevealReach`       | 88      | How far along tunnels an underground camera sees caves (blocks; the Cave View setting scales it). |
+| `Caves.RevealRadius` / `RevealRadiusMax` | 64 / 128 | Big caverns: the open space around the camera sets a radius between these, and caves show to it plus 16 (phones 48 / 96: `Caves.Mobile`). |
+| `Caves.RevealBudget`      | 1500    | Sections revealed at most, nearest first (the Underlands' giant caverns). |
+| `Caves.RevealHold`        | 2       | Seconds a section stays revealed after the camera stopped seeing into it. |
 | `Caves.LichenLightDistance` | math.huge | Glow lichen's lights shine at any distance; a number switches off those farther from the camera (the lichen still glows). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
@@ -637,6 +758,7 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
 | `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
+| `Render.FarMeshes.MaxBuildSpeed` / `SpeedWindow` | 2 / 2 | No mesh builds while the camera moved faster than this many blocks a second, averaged over this many seconds. |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
@@ -658,6 +780,10 @@ Everything lives in `src/shared/Config.luau`. The settings that matter most for 
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the cave rumble still plays). |
+| `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
+| `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu.                 |
+| `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
+| `Settings.SaveDelay` / `LoadWait` | 1.5 / 1 | Seconds before changes are sent to the server; seconds a joining client waits for its saved settings. |
 
 Lighting comes from `default.project.json`: Future technology, shadows and a dark ambient light. With
 `rojo serve` into an existing place, check that `Lighting.Technology` is Future (or LightingStyle
@@ -908,10 +1034,23 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
 - Merged levels use a plain look for their parts too (SmoothPlastic in the block colour, opaque
   water), so swapping between parts and a mesh is invisible.
 - Phones keep parts by default (`FarMeshes.Mobile`).
+- Builds wait while the camera moves (`MaxBuildSpeed` blocks a second over `SpeedWindow`
+  seconds: walking, 70 builds a minute became ~3), while the streamer has much to do and after
+  teleports; a build already running stops between MeshParts. Players can switch meshes off in the
+  Options menu (Performance).
 - Not yet measured on live servers: how long builds take on real clients, whether baked content
   is reclaimed over long sessions (a bake that hits the engine's storage limit switches meshes
   off; meshes in the world are capped at `MaxLiveTriangles`), and how far the engine then
   actually draws. Check F3 and the MicroProfiler in a published test place before relying on it.
+
+**A player setting.** Append an entry to `ENTRIES` in `src/shared/PlayerSettings.luau` with the
+next id (ids are saved and sent: never reuse or renumber one), its kind, range, step, default,
+page and the effect key that applies it; put it on its page in `src/client/Settings/Pages.luau`;
+and register what the effect does in the client script (`Settings.register("myEffect", fn)`, `fn`
+taking the values table). Costly effects also go in `PlayerSettings.EXPENSIVE` (they wait until a
+slider stops), and `EFFECT_ORDER` says in which order effects run. Settings marked `preset` take
+their value from each of the `PRESETS`. Worker actors keep their own Config, so anything a worker
+needs travels in its jobs.
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another
@@ -1034,13 +1173,25 @@ The engine's core is pure Luau, so most of it runs and is tested outside Roblox 
 [Lune](https://github.com/lune-org/lune):
 
 ```sh
-lune run tests/run                    # unit tests (generation, meshing, LOD, protocol, block updates)
+lune run tests/run [Spec]             # unit tests and simulations (Spec: only specs with it in their name)
 lune run tests/bench [seed]           # generation / meshing speed and part count estimate
 lune run tests/preview [seed] [blocksPerPixel] [pixels]   # top-down map in tests/out/preview.ppm
 lune run tests/structure decode <file | IVS1:... | -> [--lua t.luau]   # structure data, as ASCII
 lune run tests/structure encode t.luau [--out file] [--module]        # an edited table to IVS1
 lune run tests/build_structures [--check] [--print]   # rebuild (or check) the example outpost
 ```
+
+The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
+arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
+timings match Roblox's (they were 1.3-2.6 × slow before). Modules run with native code by default;
+`NOCODEGEN=1` measures the interpreter, which Roblox clients may be limited to (generation is
+about 2.5-4 × slower there). The client's streaming and rendering run in Lune too:
+`tests/spec/RenderPipeline` drives the real ChunkRenderer, PartPool and MeshOverlay against fake
+instances (checking every frame for gaps, doubled lights and parts reused in the frame they were
+released), and `tests/spec/Streaming` the real ChunkStreamer and ClientWorld with a fake worker
+pool, renderer and network (checking every frame that no ground goes uncovered, no two levels
+overlap and no tunnel opens onto the void, through loading, edits, teleports, caves and hidden
+terrain).
 
 Formatting, linting and type checking:
 
@@ -1077,8 +1228,12 @@ Natural next steps, roughly in order:
   render distance, which would need them merged into far fewer parts or meshes.
 - **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
   builds appear once in full detail range.
-- **Exact cave culling.** Replace the "camera below the surface" rule with Minecraft-style section
-  connectivity (docs/ARCHITECTURE.md, "Hidden caves, octrees and regions").
+- **Cave caps without cracks.** While the side between two sections switches between open and
+  capped across two commit groups, thin see-through cracks can show at a tunnel's rim for a few
+  frames. The mesher could stop a cap from turning the cave air beyond it into stone.
+- **Measure on real clients.** The flicker, teleport and frame budget numbers come from Lune with
+  fake instances; whether the engine draws new parts a frame late, what parenting and building
+  really cost and how far it then draws need checking with the MicroProfiler in a published place.
 - **The Underlands at a distance.** Caves only exist in full detail chunks, so a big cavern ends
   where they do (~128 blocks underground, `Lod.UndergroundSplitDistanceL1`). Carving the
   Underlands (mostly an analytic interval per column, cheap at any level) into far chunks and
@@ -1088,5 +1243,7 @@ Natural next steps, roughly in order:
   foundations; structure sets and exclusion zones, so different structures keep apart; glow
   lichen on several faces of a block, as Minecraft's multiface block.
 - **Parallel server generation.** The server generates chunks on its main thread (one per frame).
-- **Mesher.** Try both X-first and Z-first growth and keep the smaller result.
+- **Mesher.** Try both X-first and Z-first growth and keep the smaller result; cap the size of
+  water and glass boxes, so an edit in a lake replaces less of its surface (while old and new
+  surfaces overlap for `Render.SwapFrames` frames, the water looks darker there).
 - **Floating origin** for play far beyond ±16k studs, where float precision starts to show.

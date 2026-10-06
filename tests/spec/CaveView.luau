@@ -1,9 +1,12 @@
 --[[
 	The cave view: how far caves are seen from underground. Full detail reaches further while the
-	camera is in a cave (LodTree's underground split, held a few seconds after coming up), caves are
-	revealed further (Config.Caves), revealed sections next to hidden space get their caps at the
-	new edges (CaveReach.capMask), and glow lichen's lights stay few (GreedyMesher's sparse lights:
-	one per LIGHT_BOX box, all on: Config.Caves.LichenLightDistance is math.huge).
+	camera is in a cave (LodTree's underground split, held a few seconds after coming up); the
+	revealed sections are the ones SectionGraph's search reaches (CaveReach.view: reach, hold,
+	pending chunks, caps where they meet hidden space, searching only when something changed), as
+	far as Config.Caves and the cave view setting say; on real caves that costs about the old
+	reveal sphere's parts while tunnels are seen further; and glow lichen's lights stay few
+	(GreedyMesher's sparse lights: one per LIGHT_BOX box, all on: Config.Caves.LichenLightDistance
+	is math.huge).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -13,7 +16,10 @@ return function(t, shared, require, _server, client)
 	local Coords = require(shared.World.Coords)
 	local GreedyMesher = require(shared.Meshing.GreedyMesher)
 	local LodTree = require(shared.World.LodTree)
+	local SectionGraph = require(shared.World.SectionGraph)
+	local PlayerSettings = require(shared.PlayerSettings)
 	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
+	local Caves = require(shared.Generation.Caves)
 	local CaveReach = require(client.Streaming.CaveReach)
 
 	local SIZE = Config.ChunkSize
@@ -60,9 +66,23 @@ return function(t, shared, require, _server, client)
 		return best
 	end
 
+	-- Is section `s` of chunk (cx, cz) within `reach` of (x, y, z) (section centres): the old sphere.
+	local function inSphere(cx: number, cz: number, s: number, x: number, y: number, z: number, reach: number): boolean
+		local dx = (cx + 0.5) * SIZE - x
+		local dz = (cz + 0.5) * SIZE - z
+		local dy = (s + 0.5) * SECTION - y
+		return dx * dx + dy * dy + dz * dz < reach * reach
+	end
+
 	t.test("cave view: settings reach further than before and fit the full detail range", function()
 		t.ok(lod.UndergroundSplitDistanceL1 > lod.SplitDistanceL1, "underground, full detail reaches further")
 		t.ok(Config.Caves.RevealRadius > 48 and Config.Caves.RevealRadiusMax > 96, "caves are revealed further")
+		t.ok(
+			Config.Caves.RevealReach > Config.Caves.RevealRadius + SECTION,
+			"tunnels are seen further than the sphere did"
+		)
+		t.ok(Config.Caves.RevealReach <= Config.Caves.RevealRadiusMax + SECTION, "caverns still see furthest")
+		t.ok(Config.Caves.RevealBudget >= 1000 and Config.Caves.RevealHold > 0)
 		-- Revealing beyond full detail does nothing (caves only exist there); the radius plus a
 		-- section (section centres) fits what the underground split keeps full detail.
 		t.ok(
@@ -178,46 +198,287 @@ return function(t, shared, require, _server, client)
 		t.eq(hold:update(false, 25.1), false)
 	end)
 
-	t.test("cave view: revealed sections are capped at the new edges", function()
-		restore()
-		local x, y, z = 8.5, 200.5, 8.5
-		local radius = Config.Caves.RevealRadiusMax
-		local reach = radius + SECTION
-		local desired = fullDetail(LodTree.select(x, z, nil, true))
-		local revealed, edge, inner = 0, 0, 0
-		for key in desired do
-			local cx, cz = Coords.decodeChunkKey(key)
-			for s = 0, Config.WorldHeight // SECTION - 1 do
-				if CaveReach.reveals(cx, cz, s, x, y, z, reach) then
-					revealed += 1
-					local mask = CaveReach.capMask(desired, cx, cz, s, x, y, z, reach)
-					for i, side in { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } } do
-						local nx, nz = cx + side[1], cz + side[2]
-						local open = desired[Coords.chunkKey(nx, nz)] ~= nil
-							and CaveReach.reveals(nx, nz, s, x, y, z, reach)
-						t.eq(bit32.btest(mask, bit32.lshift(1, i - 1)), not open, "a side is capped unless revealed")
-						if not desired[Coords.chunkKey(nx, nz)] then
-							edge += 1
-						elseif open then
-							inner += 1
-						end
+	--[[ The revealed set (CaveReach.view) on a synthetic world ]]
+
+	type World = {
+		set: (x: number, y: number, z: number, id: number) -> (),
+		box: (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number) -> (),
+		lookup: SectionGraph.Lookup,
+		full: { [number]: boolean },
+		pending: { [number]: boolean },
+		graphs: { [number]: buffer },
+	}
+
+	-- Chunks -r..r around the origin, rock up to `ground` (cells), air above, all of it buried.
+	local function world(r: number, height: number, ground: number): World
+		local chunks: { [number]: buffer } = {}
+		local w = { full = {}, pending = {}, graphs = {} } :: World
+		for cz = -r, r do
+			for cx = -r, r do
+				local data = ChunkLayout.create(height)
+				for y = 0, ground - 1 do
+					for i = 0, ChunkLayout.LAYER - 1 do
+						buffer.writeu16(data, (y * ChunkLayout.LAYER + i) * 2, Blocks.id.Stone)
 					end
-					t.eq(
-						bit32.btest(mask, GreedyMesher.HIDDEN_BELOW),
-						s > 0 and not CaveReach.reveals(cx, cz, s - 1, x, y, z, reach)
-					)
-					t.eq(
-						bit32.btest(mask, GreedyMesher.HIDDEN_ABOVE),
-						not CaveReach.reveals(cx, cz, s + 1, x, y, z, reach)
-					)
+				end
+				chunks[Coords.chunkKey(cx, cz)] = data
+				w.full[Coords.chunkKey(cx, cz)] = true
+			end
+		end
+		function w.set(x: number, y: number, z: number, id: number)
+			local data = chunks[Coords.chunkKey(x // SIZE, z // SIZE)]
+			if data then
+				ChunkLayout.set(data, x % SIZE, y, z % SIZE, id)
+				w.graphs[Coords.chunkKey(x // SIZE, z // SIZE)] = nil
+			end
+		end
+		function w.box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number)
+			for y = y0, y1 do
+				for z = z0, z1 do
+					for x = x0, x1 do
+						w.set(x, y, z, id)
+					end
 				end
 			end
 		end
-		t.ok(revealed > 0 and inner > 0, "sections revealed")
-		-- The revealed sphere fits the underground full detail range: hardly any revealed section
-		-- touches a chunk without caves (those sides are capped all the same).
-		t.ok(edge < revealed * 0.1, `revealed sides next to coarser nodes: {edge} of {revealed} sections`)
-		print(`    {revealed} sections revealed at radius {radius}, {edge} sides next to coarser nodes`)
+		function w.lookup(cx: number, cz: number): (buffer | false)?
+			local key = Coords.chunkKey(cx, cz)
+			if not w.full[key] then
+				return nil
+			end
+			if w.pending[key] then
+				return false
+			end
+			local g = w.graphs[key]
+			if g == nil then
+				local all = {}
+				for s = 0, height // SECTION - 1 do
+					table.insert(all, s)
+				end
+				g = SectionGraph.build(chunks[key], height, ground, all)
+				w.graphs[key] = g
+			end
+			return g
+		end
+		return w
+	end
+
+	local function setOf(list: { number }): { [number]: boolean }
+		local set = {}
+		for _, v in list do
+			set[v] = true
+		end
+		return set
+	end
+
+	t.test("cave view: reveals what the search reaches, holds it, pending chunks, searches only on change", function()
+		local w = world(6, 64, 60)
+		-- A cave tunnel along +X at y 20, z 8 from x 4 to 6 chunks on; a cave behind rock beside it.
+		w.box(4, 20, 8, 6 * SIZE + 15, 21, 8, Blocks.CAVE_AIR)
+		w.box(4, 20, 2 * SIZE + 4, 10, 25, 2 * SIZE + 10, Blocks.CAVE_AIR)
+		local view = CaveReach.view(2, 1500)
+		local added, removed = view:update(w.lookup, 8.5, 20.6, 8.5, 88, 0, false)
+		local key = SectionGraph.key
+		t.eq(#removed, 0)
+		t.eq(view.count, #added, "count")
+		for cx = 0, 5 do
+			t.ok(view:reveals(cx, 0, 1), `tunnel chunk {cx} revealed`)
+		end
+		t.ok(not view:reveals(6, 0, 1), "beyond the reach (section centre 96.5 blocks away)")
+		t.ok(not view:reveals(0, 2, 1), "a cave behind rock stays hidden")
+		t.eq(view.searches, 1)
+
+		-- Caps: tunnel ends and sides face hidden space, the tunnel's own direction does not.
+		local function full(cx: number, cz: number): boolean
+			return w.full[Coords.chunkKey(cx, cz)] == true
+		end
+		local mask = view:capMask(2, 0, 1, full)
+		t.ok(not bit32.btest(mask, 1) and not bit32.btest(mask, 2), "open along the tunnel")
+		t.ok(bit32.btest(mask, 4) and bit32.btest(mask, 8), "capped beside it")
+		t.ok(bit32.btest(mask, GreedyMesher.HIDDEN_BELOW) and bit32.btest(mask, GreedyMesher.HIDDEN_ABOVE))
+		t.ok(bit32.btest(view:capMask(5, 0, 1, full), 2), "capped where the reach ends")
+		w.full[Coords.chunkKey(3, 0)] = nil
+		t.ok(bit32.btest(view:capMask(2, 0, 1, full), 2), "capped against a chunk that is not full detail")
+		w.full[Coords.chunkKey(3, 0)] = true
+
+		-- Same section, nothing changed: no search.
+		view:update(w.lookup, 9.5, 21.6, 9.5, 88, 0.5, false)
+		t.eq(view.searches, 1, "same camera section: no search")
+		view:update(w.lookup, 9.5, 21.6, 9.5, 88, 0.6, true)
+		t.eq(view.searches, 2, "dirty: searched again")
+		view:update(w.lookup, 9.5, 21.6, 9.5, 104, 0.7, false)
+		t.eq(view.searches, 3, "the reach changed: searched again")
+		t.ok(view:reveals(6, 0, 1), "a longer reach sees further")
+
+		-- The camera walks back along the tunnel: the far end drops out but stays `hold` seconds.
+		added, removed = view:update(w.lookup, 8.5 - 3 * SIZE + 4, 20.6, 8.5, 88, 1, false)
+		t.eq(#removed, 0, "nothing hidden at once")
+		t.ok(view:reveals(6, 0, 1), "held")
+		added, removed = view:update(w.lookup, 8.5 - 3 * SIZE + 4, 20.6, 8.5, 88, 2.5, false)
+		t.eq(#removed, 0, "no search and before the hold ran out: nothing")
+		added, removed = view:update(w.lookup, 8.5 - 3 * SIZE + 4, 20.6, 8.5, 88, 3.05, false)
+		t.ok(setOf(removed)[key(6, 0, 1)], "hidden once unreachable for the hold")
+		t.ok(not view:reveals(6, 0, 1))
+
+		-- A chunk not generated yet: the sections the search would enter count as revealed.
+		w.pending[Coords.chunkKey(1, 0)] = true
+		view:update(w.lookup, 8.5, 20.6, 8.5, 88, 4, true)
+		t.ok(view:reveals(1, 0, 1), "pending section revealed")
+		w.pending[Coords.chunkKey(1, 0)] = nil
+
+		-- Above ground: everything goes after the hold.
+		local before = view.count
+		added, removed = view:update(w.lookup, nil, nil, nil, 0, 5, false)
+		t.eq(#removed, 0, "kept a while")
+		t.eq(view.count, before)
+		added, removed = view:update(w.lookup, nil, nil, nil, 0, 7.1, false)
+		t.eq(#removed, before, "all hidden after the hold")
+		t.eq(view.count, 0)
+		t.eq(next(view.revealed), nil)
+	end)
+
+	t.test("cave view: an edit that opens a wall reveals the cave behind it", function()
+		local w = world(4, 64, 60)
+		-- A cave into chunk 2, a wall of rock at x 41..43, a second cave beyond it into chunk 3.
+		-- (Not next to the camera's section: the search leaves those through any face.)
+		w.box(4, 20, 8, 40, 21, 8, Blocks.CAVE_AIR)
+		w.box(44, 20, 8, 3 * SIZE + 12, 21, 8, Blocks.CAVE_AIR)
+		local view = CaveReach.view(2, 1500)
+		view:update(w.lookup, 8.5, 20.6, 8.5, 88, 0, false)
+		t.ok(view:reveals(2, 0, 1), "the wall's section")
+		t.ok(not view:reveals(3, 0, 1), "behind the wall: hidden")
+		w.box(41, 20, 8, 43, 21, 8, Blocks.AIR)
+		local added = view:update(w.lookup, 8.5, 20.6, 8.5, 88, 0.2, true)
+		t.ok(setOf(added)[SectionGraph.key(3, 0, 1)], "dug through: revealed")
+	end)
+
+	t.test("cave view: tunnels reach further than the old sphere, caverns as far as the probe", function()
+		t.eq(CaveReach.searchReach(88, 64), 88, "a tunnel: the tunnel reach")
+		t.eq(CaveReach.searchReach(88, 128), 144, "a big cavern: the radius plus a section")
+		local high = PlayerSettings.defaults(false, 0, PlayerSettings.HIGH)
+		t.eq(PlayerSettings.revealReach(high), Config.Caves.RevealReach, "High: Config's tunnel reach")
+		local tunnels, caverns = PlayerSettings.revealRadii(high)
+		t.eq(tunnels, Config.Caves.RevealRadius)
+		t.eq(caverns, Config.Caves.RevealRadiusMax)
+		local low = PlayerSettings.defaults(true, 0)
+		local lowTunnels = PlayerSettings.revealRadii(low)
+		t.ok(PlayerSettings.revealReach(low) >= lowTunnels + SECTION, "phones: never less than the old sphere")
+		local cave = PlayerSettings.byKey.caveView
+		local last = 0
+		for v = cave.min, cave.max, cave.step do
+			high.caveView = v
+			local reach = PlayerSettings.revealReach(high)
+			local min = PlayerSettings.revealRadii(high)
+			t.ok(reach >= last, "grows with the slider")
+			t.eq(reach % SectionGraph.BAND, 0, "whole bands")
+			t.ok(reach >= min + SECTION - SectionGraph.BAND, `cave view {v}: about the sphere's tunnels or more`)
+			last = reach
+		end
+	end)
+
+	--[[ Real caves ]]
+
+	t.test("cave view: on a real cave the search sees tunnels further for about the sphere's parts", function()
+		-- Cave A near the spawn (seed 12345, the research's scene): full detail chunks within 7
+		-- chunks of the camera (the reach is 88 blocks, the old sphere's 80).
+		local gen = TerrainGenerator.new(12345)
+		local chunks: { [number]: any } = {}
+		local function chunk(cx: number, cz: number): any
+			local key = Coords.chunkKey(cx, cz)
+			local r = chunks[key]
+			if r == nil then
+				r = gen.generate(0, cx, cz)
+				r.graph = SectionGraph.build(
+					r.data,
+					r.height,
+					r.solidBelow,
+					SectionGraph.carvedSections(r.carved, Caves.CELL_Y)
+				)
+				chunks[key] = r
+			end
+			return r
+		end
+		local x, y, z = 512.5, 13.6, -159.5
+		local ccx, ccz = math.floor(x) // SIZE, math.floor(z) // SIZE
+		local R = 7
+		local function inArea(cx: number, cz: number): boolean
+			return math.abs(cx - ccx) <= R and math.abs(cz - ccz) <= R
+		end
+		local function lookup(cx: number, cz: number): (buffer | false)?
+			if not inArea(cx, cz) then
+				return nil
+			end
+			return chunk(cx, cz).graph
+		end
+		local function full(cx: number, cz: number): boolean
+			return inArea(cx, cz)
+		end
+		local t0 = os.clock()
+		for cz = ccz - R, ccz + R do
+			for cx = ccx - R, ccx + R do
+				chunk(cx, cz)
+			end
+		end
+		local view = CaveReach.view(2, Config.Caves.RevealBudget)
+		view:update(
+			lookup,
+			x,
+			y,
+			z,
+			CaveReach.searchReach(Config.Caves.RevealReach, Config.Caves.RevealRadius),
+			0,
+			false
+		)
+		local searchMs = view.searchMs
+		-- Parts each set adds over hidden caves (caps from the set), and the farthest cave section.
+		local function cost(set: { [number]: boolean }): (number, number)
+			local added, farthest = 0, 0
+			for key in set do
+				local cx, cz, s = SectionGraph.decode(key)
+				if inArea(cx, cz) then
+					local r = chunk(cx, cz)
+					local y0, y1 = s * SECTION, math.min((s + 1) * SECTION, r.height)
+					if y0 < r.height then
+						local mask = SectionGraph.capMask(set, cx, cz, s, full)
+						local _, shown = GreedyMesher.mesh(r.data, r.height, y0, y1, false, { hidden = mask }, true)
+						local _, hidden = GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, true)
+						added += shown - hidden
+						if bit32.btest(SectionGraph.get(r.graph, s), SectionGraph.CAVES) then
+							local dx, dy, dz = (cx + 0.5) * SIZE - x, (s + 0.5) * SECTION - y, (cz + 0.5) * SIZE - z
+							farthest = math.max(farthest, math.sqrt(dx * dx + dy * dy + dz * dz))
+						end
+					end
+				end
+			end
+			return added, farthest
+		end
+		local sphere: { [number]: boolean } = {}
+		for cz = ccz - R, ccz + R do
+			for cx = ccx - R, ccx + R do
+				for s = 0, 10 do
+					if inSphere(cx, cz, s, x, y, z, Config.Caves.RevealRadius + SECTION) then
+						sphere[SectionGraph.key(cx, cz, s)] = true
+					end
+				end
+			end
+		end
+		local graphParts, graphFar = cost(view.revealed)
+		local sphereParts, sphereFar = cost(sphere)
+		print(
+			string.format(
+				"    cave A: search %.2f ms, %d sections revealed: +%d parts, caves seen %.0f blocks away; old sphere: +%d parts, %.0f blocks (%.1f s)",
+				searchMs,
+				view.count,
+				graphParts,
+				graphFar,
+				sphereParts,
+				sphereFar,
+				os.clock() - t0
+			)
+		)
+		t.ok(graphFar > sphereFar + 4, "tunnels are seen further")
+		t.ok(graphParts <= sphereParts * 1.3, "for about the sphere's parts")
+		t.ok(view.count < Config.Caves.RevealBudget and not view.truncated)
 	end)
 
 	t.test("cave view: lichen light is sparse and steady: a few hundred lights in a revealed cave", function()
@@ -259,11 +520,12 @@ return function(t, shared, require, _server, client)
 		assert(camera, "a cave under the hills")
 		local reach = Config.Caves.RevealRadius + SECTION
 		local lichen, marked, boxesLit = 0, 0, 0
+		local reveals = inSphere
 		for cx = (camera[1] - reach) // SIZE, (camera[1] + reach) // SIZE do
 			for cz = (camera[3] - reach) // SIZE, (camera[3] + reach) // SIZE do
 				local r = chunk(cx, cz)
 				for s = 0, (r.height - 1) // SECTION do
-					if CaveReach.reveals(cx, cz, s, camera[1], camera[2], camera[3], reach) then
+					if reveals(cx, cz, s, camera[1], camera[2], camera[3], reach) then
 						local y0, y1 = s * SECTION, math.min((s + 1) * SECTION, r.height)
 						local boxes, n = GreedyMesher.mesh(r.data, r.height, y0, y1, false, nil, true)
 						local again, m = GreedyMesher.mesh(r.data, r.height, y0, y1, false, nil, true)

@@ -6,7 +6,11 @@
 	  Streaming/ChunkStreamer    which chunks (and LOD levels) exist, job scheduling
 	  Streaming/WorkerPool       Actors running Streaming/ChunkWorker (parallel generation + meshing)
 	  Rendering/ChunkRenderer    mesh boxes -> parts, within a per-frame budget
-	  Rendering/ViewSettings     view distance per device, lighting quality and fog
+	  Rendering/ViewSettings     the view from the player's settings: distances, caves, plants,
+	                             lights, lighting quality and fog
+	  Settings/                  the player's settings (the Options menu, Ui/SettingsScreen: P):
+	                             values, saving them on the server, and the effects registered
+	                             below that apply them live
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
 	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons,
@@ -41,8 +45,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local Coords = require(Shared.World.Coords)
+local PlayerSettings = require(Shared.PlayerSettings)
 
 local Client = script.Parent
 local ClientWorld = require(Client.World.ClientWorld)
@@ -70,9 +76,15 @@ local Map = require(Client.Map)
 local SoundPlayer = require(Client.Audio.SoundPlayer)
 local MovementSounds = require(Client.Audio.MovementSounds)
 local Ambience = require(Client.Audio.Ambience)
+local Settings = require(Client.Settings)
+local SettingsScreen = require(Client.Ui.SettingsScreen)
+local Hud = require(Client.Ui.Hud)
+local Style = require(Client.Ui.Style)
 
 -- First, so the server's sounds play from the start instead of piling up.
 SoundPlayer.start()
+-- Listens for the player's saved settings (the terrain below waits a moment for them).
+Settings.start()
 
 local seed = Shared:GetAttribute("Seed")
 while type(seed) ~= "number" do
@@ -80,7 +92,61 @@ while type(seed) ~= "number" do
 	seed = Shared:GetAttribute("Seed")
 end
 
+-- Up to Config.Settings.LoadWait seconds, so the first terrain is already the player's view.
+Settings.waitForSaved()
 ViewSettings.apply()
+
+--[[
+	What changing a setting takes (Settings.register; each runs once now, then after changes:
+	Settings/ batches them once per frame and holds the costly ones until a slider stops).
+	Registered before the modules they set up start where that matters (touch buttons are bound
+	once, in MovementController.start).
+]]
+local on = PlayerSettings.on
+Settings.register("controls", function(values)
+	Config.Movement.ToggleSprint = on(values, "toggleSprint")
+	-- (Bound once a session: a change applies after rejoining.)
+	Config.Movement.TouchButtons = on(values, "touchButtons")
+	Hud.setWheelSelects(on(values, "scrollHotbar"))
+end)
+Settings.register("camera", function(values)
+	MovementController.setFieldOfView(values.fov)
+	MovementController.setFovEffects(values.fovEffects / 100)
+end)
+Settings.register("audio", function(values)
+	local volume = PlayerSettings.volume
+	SoundPlayer.setPlayerSettings(volume(values, "masterVolume"), {
+		blocks = volume(values, "blocksVolume"),
+		players = volume(values, "playersVolume"),
+		ambient = volume(values, "ambientVolume"),
+		ui = volume(values, "uiVolume"),
+	}, {
+		footsteps = on(values, "footsteps"),
+		interface = on(values, "interfaceClicks"),
+		ambient = on(values, "caveRumble"),
+	})
+end)
+Settings.register("hud", function(values)
+	local minimap = on(values, "minimap")
+	Map.setMinimapVisible(minimap)
+	Waila.setMinimapShown(minimap)
+	Waila.setEnabled(on(values, "waila"))
+	Style.setScaleOverride(values.guiScale)
+end)
+Settings.register("lighting", function()
+	ViewSettings.applyLighting()
+end)
+Settings.register("fog", function()
+	ViewSettings.applyFog()
+end)
+-- (Read live: ChunkRenderer's light sweep asks ViewSettings.lichenLightDistance.)
+Settings.register("lichen", function() end)
+-- (Read live: the streamer checks "skipHidden" at every refresh.)
+Settings.register("skipHidden", function() end)
+Settings.register("swapFrames", function(values)
+	-- (Read live by the renderer and the far meshes.)
+	Config.Render.SwapFrames = values.swapFrames
+end)
 
 local world = ClientWorld.new()
 local renderer = ChunkRenderer.new()
@@ -89,8 +155,57 @@ local generator = TerrainGenerator.new(seed :: number)
 local streamer = ChunkStreamer.new(generator, world, pool, renderer)
 LightingController.start(generator, world)
 
+-- The view: LodTree's four distances, plants and the cave view's radii, then the streamer selects
+-- again at once (one call a frame whichever of them changed). Hidden terrain ("skipHidden") is
+-- a slot for the horizon culling to fill.
+local function applyView()
+	streamer:applyView()
+end
+Settings.register("lod", applyView)
+Settings.register("caves", applyView)
+Settings.register("foliage", applyView)
+-- Teleports (and the first load): map tiles wait until the new area is there.
+streamer.onTeleportMode = function(active: boolean)
+	Map.setPaused(active)
+end
+-- Shadows, far shadows and textures restyle live parts (ChunkRenderer.restyle).
+local function restyle(values: PlayerSettings.Values)
+	renderer:restyle({
+		shadows = on(values, "shadows"),
+		farShadows = on(values, "farShadows"),
+		textures = on(values, "textures"),
+	})
+end
+Settings.register("shadows", restyle)
+Settings.register("farShadows", restyle)
+Settings.register("textures", restyle)
+Settings.register("overlay", function(values)
+	renderer.overlay:setUserEnabled(on(values, "farMeshes"))
+end)
+Settings.register("budget", function(values)
+	renderer:setBuildBudget(PlayerSettings.buildBudget(values))
+end)
+-- The menu's status lines.
+Settings.setStatus("terrain", function(): string?
+	local stats = streamer:stats()
+	local queued = stats.waiting + stats.queued
+	local building = stats.working + stats.building
+	if queued + building == 0 then
+		return "Terrain up to date"
+	end
+	return `Updating terrain: {queued} queued, {building} building`
+end)
+Settings.setStatus("farMeshes", function(): string?
+	local stats = renderer.overlay:getStats()
+	return `Far meshes: {stats.status}, {stats.meshParts} meshes`
+end)
+Settings.setStatus("controls", function(): string?
+	return if Settings.shown("touchButtons") then "Touch buttons change after rejoining" else nil
+end)
+
 ClientInventory.start()
 Screens.start()
+SettingsScreen.start()
 Notices.start()
 StructureNet.start(world)
 StructureBoxes.start(world, StructureNet.records)
@@ -113,5 +228,8 @@ MovementSounds.start(world)
 Ambience.start()
 
 RunService.Heartbeat:Connect(function(dt)
+	-- While the player waits for the ground, the renderer may build longer per frame.
+	local view = MovementController.current
+	streamer:setFrozen(view ~= nil and view.frozen)
 	streamer:update(dt)
 end)

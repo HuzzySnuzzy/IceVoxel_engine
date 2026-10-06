@@ -28,6 +28,13 @@
 	within Config.Lod.FoliageDistance (`setFoliageDistance` for the device preset), and only while
 	Config.Render.Foliage is on. A chunk drawing them keeps them until it is half a chunk further
 	(hysteresis again: walking along the edge does not remesh chunks back and forth).
+
+	`version` changes with every `configure` / `setFoliageDistance` (the settings menu), so the
+	streamer knows to select again even if the viewer did not move.
+
+	Seams (`coarserSides`): a full detail chunk is meshed knowing the level of the coarser node on
+	each side, if any. When the selection changes, only chunks next to a coarse node that appeared
+	or went away can see a different answer (`seamsAffected`).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -44,10 +51,16 @@ local split = Config.Lod.SplitDistance
 local splitL1 = Config.Lod.SplitDistanceL1 or split
 local undergroundL1 = math.max(splitL1, Config.Lod.UndergroundSplitDistanceL1 or splitL1)
 local foliage = Config.Lod.FoliageDistance
+local version = 0
 
 local LodTree = {}
 
 LodTree.MAX_LEVEL = MAX_LEVEL
+
+-- Border sides in GreedyMesher order: -X, +X, -Z, +Z.
+local SIDES = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } }
+local NO_COARSER = table.freeze({ 0, 0, 0, 0 })
+LodTree.NO_COARSER = NO_COARSER
 
 --[[
 	Sets the view distance (blocks) and split distances (node sizes; level 1 may differ, and differ
@@ -64,6 +77,12 @@ function LodTree.configure(
 	splitL1 = splitDistanceL1 or splitDistance
 	assert(splitL1 >= 1, "invalid LOD distances")
 	undergroundL1 = math.max(splitL1, undergroundSplitDistanceL1 or splitL1)
+	version += 1
+end
+
+-- Changes whenever the distances or the foliage distance are set.
+function LodTree.version(): number
+	return version
 end
 
 -- The level 1 split distance `select` uses (node sizes), with the cave view active or not.
@@ -80,7 +99,10 @@ LodTree.FOLIAGE_HYSTERESIS = FOLIAGE_HYSTERESIS
 -- Sets how far full detail chunks draw their plants (blocks; Config.Lod.FoliageDistance).
 function LodTree.setFoliageDistance(distance: number)
 	assert(distance >= 0, "invalid foliage distance")
-	foliage = distance
+	if distance ~= foliage then
+		foliage = distance
+		version += 1
+	end
 end
 
 function LodTree.foliageDistance(): number
@@ -111,6 +133,54 @@ function LodTree.drawsFoliage(level: number, nx: number, nz: number, x: number, 
 	end
 	local reach = if drawn then foliage + FOLIAGE_HYSTERESIS else foliage
 	return LodTree.distance(level, nx, nz, x, z) < reach
+end
+
+--[[ Seams ]]
+
+-- Levels of the coarser nodes next to each side of node (level, nx, nz) in `desired` (0: same or
+-- finer). NO_COARSER (frozen) when there are none.
+function LodTree.coarserSides(desired: { [number]: number }, level: number, nx: number, nz: number): { number }
+	local out: { number }? = nil
+	for i, side in SIDES do
+		local x, z = nx + side[1], nz + side[2]
+		for coarse = level + 1, MAX_LEVEL do
+			local f = bit32.lshift(1, coarse - level)
+			if desired[Coords.nodeKey(coarse, x // f, z // f)] then
+				if out == nil then
+					out = { 0, 0, 0, 0 }
+				end
+				(out :: { number })[i] = coarse
+				break
+			end
+		end
+	end
+	return out or NO_COARSER
+end
+
+--[[
+	Full detail chunks of `desired` whose `coarserSides` may have changed because the coarser nodes
+	in `changed` (key -> level; appeared or went away) did: the chunks just outside each one's
+	square, on its four sides. (Chunks inside such a square are new to the selection.)
+]]
+function LodTree.seamsAffected(changed: { [number]: number }, desired: { [number]: number }): { [number]: boolean }
+	local out: { [number]: boolean } = {}
+	for key, level in changed do
+		if level >= 1 then
+			local _, nx, nz = Coords.decodeNodeKey(key)
+			local n = bit32.lshift(1, level)
+			local x0, z0 = nx * n, nz * n
+			local x1, z1 = x0 + n - 1, z0 + n - 1
+			for i = 0, n - 1 do
+				for _, cell in { { x0 - 1, z0 + i }, { x1 + 1, z0 + i }, { x0 + i, z0 - 1 }, { x0 + i, z1 + 1 } } do
+					local chunk = Coords.chunkKey(cell[1], cell[2])
+					if desired[chunk] == 0 then
+						out[chunk] = true
+					end
+				end
+			end
+		end
+	end
+	return out
 end
 
 --[[

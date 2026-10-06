@@ -14,8 +14,9 @@
 	long they have waited, so no region waits forever.
 
 	A mesh only ever shows nodes that are members: when a node it contains is removed or changes, the
-	region is demoted (mesh destroyed, parts shown again) in the same frame. Nodes added to a meshed
-	region simply stay parts until the region is rebuilt.
+	region is demoted (its parts are shown again and then the mesh goes: MeshOverlay). Nodes added to
+	a meshed region simply stay parts until the region is rebuilt. A build stopped on purpose
+	(`abort`: a teleport paused far meshes) is not a failure and is tried again normally.
 ]]
 
 export type Node = any
@@ -76,6 +77,8 @@ export type MeshRegions = {
 	candidate: (self: MeshRegions, now: number, ready: (node: Node) -> boolean) -> Region?,
 	begin: (self: MeshRegions, region: Region) -> Job,
 	finish: (self: MeshRegions, job: Job, ok: boolean, now: number) -> boolean,
+	abort: (self: MeshRegions, job: Job) -> (),
+	regionOfNode: (self: MeshRegions, node: Node) -> Region?,
 	demoted: (self: MeshRegions, region: Region, now: number) -> (),
 	meshedRegions: (self: MeshRegions) -> { Region },
 	stats: (self: MeshRegions) -> Stats,
@@ -280,6 +283,22 @@ function MeshRegions.finish(self: MeshRegions, job: Job, ok: boolean, now: numbe
 	region.meshVersion = job.version
 	region.failures = 0
 	return true
+end
+
+-- A build was stopped before it finished (not a failure: no back-off).
+function MeshRegions.abort(self: MeshRegions, job: Job)
+	local region = job.region
+	if region.building == job then
+		region.building = nil
+	end
+	if region.count == 0 and region.meshed == nil then
+		self.regions[region.key] = nil
+	end
+end
+
+-- The region a shown node is a member of (nil for nodes of levels that are not merged).
+function MeshRegions.regionOfNode(self: MeshRegions, node: Node): Region?
+	return self.regionOf[node]
 end
 
 -- The caller destroyed the region's mesh and shows its members as parts again.

@@ -25,7 +25,8 @@
 	Mekanism's energy bar where a worn tool's durability bar goes (Ui/ItemIcon).
 	The player panel then shows the player's name where the 2 x 2 grid was: that window has no 2 x 2
 	grid. In creative mode (with no block open) two tabs above the panel switch between the item
-	selection and this screen.
+	selection and this screen. A gear button where Minecraft's recipe book button is (20 x 18 at
+	104, 61) opens the Options menu (`onSettings`, Ui/Screens).
 
 	This module only draws and hit-tests (in screen pixels, the InputObject.Position space): the
 	clicks themselves are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules
@@ -145,6 +146,8 @@ export type InventoryScreen = {
 	-- Called when the "Item selection" tab is clicked (creative), and the touch close button.
 	onTab: () -> (),
 	onClose: () -> (),
+	-- Called when the gear button is clicked (the Options menu).
+	onSettings: () -> (),
 	size: (self: InventoryScreen) -> Vector2,
 	setLayout: (self: InventoryScreen, container: Types.Container?, tabs: boolean) -> (),
 	render: (self: InventoryScreen, window: Window, hover: Target?, dragged: { [number]: boolean }) -> (),
@@ -271,6 +274,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			root = root,
 			onTab = function() end,
 			onClose = function() end,
+			onSettings = function() end,
 			containerPanel = nil,
 			containerKey = "",
 			tabsShown = false,
@@ -311,6 +315,15 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 	panel.Name = "Player"
 	self.playerPanel = panel
 	self.playerClose = closeButton(self, panel)
+
+	-- The Options menu's gear, where Minecraft's recipe book button is (this game has JEI).
+	local gear = Style.button(panel, "", 104, 61, 20, 18, 6)
+	gear.Name = "Settings"
+	Style.gear(gear, 4, 3, 5)
+	gear.Activated:Connect(function()
+		SoundPlayer.click()
+		self.onSettings()
+	end)
 
 	-- Armor column.
 	for slot = 1, Types.ARMOR_SIZE do

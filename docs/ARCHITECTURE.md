@@ -159,8 +159,9 @@ cost one noise call, cells positive at all eight corners are skipped, and the ne
 uses each block's own depth (lattice depths are off on steep slopes); cells that are air at all
 eight corners are carved without interpolating. The carver returns the lattice cells it carved
 (`Caves.Carved`: per 4 × 8 × 4 cell, not carved, carved in, or cave air throughout), so glow lichen
-only looks where caves are. In Lune, caves cost ~5–7 ms per chunk under most
-terrain and ~16–20 ms (worst ~40) over the Underlands, where a chunk has 100k+ blocks of air; the
+only looks where caves are. In Lune, interpreted (`NOCODEGEN=1`, as on a Roblox client without
+native code), caves cost ~1–5 ms per chunk under most terrain and ~14–21 ms (worst ~27) over the
+Underlands, where a chunk has 100k+ blocks of air; with native code about a quarter of that. The
 carver calls the generator's `yield` per lattice layer so workers keep to their time slice.
 
 **LOD sampling.** A level `L` chunk samples each cell at its center, so it costs about the same as a
@@ -303,8 +304,8 @@ meadows, 0.45 on plains and savannas and 0.35 elsewhere (measured on generated t
 client draws them only near the viewer (see Streaming). Patches are noise thresholds (blobs and
 winding bands) rather than Minecraft's clusters of tries, and the density is lower than
 Minecraft's. tests/spec/FoliageGeneration checks the budget, determinism across borders (every
-side and corner, next to trees), the placement rules and the cost (plants about 0.2-0.35 ms per
-chunk in Lune; the edge columns' extra heights about 0.4 ms more).
+side and corner, next to trees), the placement rules and the cost (plants about 0.1-0.2 ms per
+chunk in Lune, interpreted; the edge columns' extra heights about 0.4 ms more).
 
 ## Meshing (`Meshing/GreedyMesher`)
 
@@ -349,7 +350,8 @@ Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box (posi
 invariants (every visible block covered once, nothing visible covered by a wrong box) on generated
 chunks of every LOD.
 
-Full detail chunks are meshed in 16-block vertical sections, so an edit only rebuilds one section.
+Full detail chunks are meshed in 16-block vertical sections, so an edit only remeshes one section
+(and the renderer only swaps the boxes that changed: see Rendering).
 LOD chunks are meshed as one range between `solidBelow - 1` and `emptyAbove`.
 
 ## Client
@@ -359,87 +361,347 @@ LOD chunks are meshed as one range between `solidBelow - 1` and `emptyAbove`.
 `LodTree.select` tiles the world with root nodes of the coarsest level and splits a node into four
 children while the viewer is closer than `SplitDistance × nodeSize`. The leaves are the chunks to
 show. They never overlap and leave no gaps. Hysteresis prevents flapping at split boundaries.
-View and split distance come from `Config.Lod`; on phones and tablets `Rendering/ViewSettings`
-switches to `Lod.Mobile`, because the engine draws parts only a few hundred studs far there anyway.
-It also sets `Lighting.PrioritizeLightingQuality = false`, so that when the engine has to lower
-quality it keeps draw distance and gives up lighting detail first. How far parts are actually drawn
-is the engine's decision (graphics level and visible object count); scripts cannot raise it.
+View and split distances come from the player's settings (`Rendering/ViewSettings`, see Player
+settings): Config's `Lod` is the High preset, and phones and tablets start on the Low preset
+(`Lod.Mobile`), because the engine draws parts only a few hundred studs far there anyway. With
+"Prefer: Distance" (the default) ViewSettings sets `Lighting.PrioritizeLightingQuality = false`, so
+that when the engine has to lower quality it keeps draw distance and gives up lighting detail
+first. How far parts are actually drawn is the engine's decision (graphics level and visible
+object count); scripts cannot raise it.
 
 Each node goes through states:
 
 ```
 waiting ──► queued ──► working ──► built ──► ready
-(edit lists)  (priority)  (actor)   (parts)   (visible)
+(edit lists)  (score)    (actor)   (parts)   (shown in the next swap)
 ```
 
 - **waiting**: full detail chunks need the server's edit lists for themselves and their four
-  neighbours (neighbour edits on the shared border live in the padding).
-- **queued**: sorted by distance, stretched for nodes behind the camera.
-- **working**: a `ChunkWorker` actor generates, applies the edits and meshes. Long jobs yield every
-  `Workers.SliceBudgetMs` so actors never stall a frame. Jobs on one actor run one at a time.
-- **built**: the renderer creates parts within `Render.BuildBudgetMs` per frame, outside the
-  workspace.
-- **ready**: the node's folder is parented in one step.
+  neighbours (neighbour edits on the shared border live in the padding; `ClientWorld` keeps each
+  list's border columns ready, so a job never reads a neighbour's whole list).
+- **queued**: sorted by score (below), most urgent last; nodes leaving `waiting` are inserted by
+  binary search.
+- **working**: a `ChunkWorker` actor generates, applies the edits and meshes (see Workers).
+- **built**: the renderer builds its sections in its normal lane, by the node's score.
+- **ready**: shown by the next swap pass, once nothing covers its area.
+- **failed**: whatever covers the area stays; generated again after `Streaming.RetryDelay`
+  (0.5 s), doubling up to `RetryMax` (8 s).
+- **meshing**: a generation result that came back after an edit touched the chunk (or a coarser
+  neighbour changed) is kept: the chunk's current edits are written into it on the main thread
+  (`ClientWorld.applyJobEdits`) and only a mesh job is sent, so continuous edits never starve it.
 
-**Seamless LOD changes.** A node that is no longer wanted stays visible until every wanted node
-covering its area is ready (an ancestor, or all of its descendants). It is removed in the same frame
-the last replacement appears. Replacements that finish earlier wait unshown, so two levels of
-detail are never drawn over each other. `Streaming.ReplaceTimeout` is a safety net. Since a chunk
-can wait unshown for its whole old ancestor, the movement controller keeps the hull frozen until
-the chunk under it and the eight around it are shown (`isReady`).
+**Load order** (`LoadPriority`, pure). Every refresh scores the nodes not ready yet, lower first:
+the ring under the player (closer than 32 blocks) by distance; nodes in the view wedge (the
+camera's horizontal field of view plus 15 degrees each side) and not hidden behind terrain by
+distance; nodes behind closer than 128 blocks by twice their distance; then the rest out of view,
+then what is hidden (`streamer.hidden`, see Hidden terrain). All the wanted nodes under one shown
+node being replaced share their best score, because it only goes when all of them are ready, so a
+visible sibling never waits for a hidden one. The renderer re-reads the scores (`reprioritise`).
+After a teleport, 90% of the view is shown 15-40% sooner.
 
-**Edits.** Full detail chunks keep their block data on the main thread (`World/ClientWorld`). Edits
-(local predictions and server messages) update the data and the neighbours' padding, and mark the
-affected mesh sections dirty. Dirty sections are remeshed by workers before any new generation.
-If an edit arrives while a chunk is being generated, the outdated result is discarded and the chunk
-is regenerated.
+**Seamless LOD changes** (`SwapUnits`, pure). A node that is no longer wanted stays visible until
+every wanted node covering its area is ready (`covered` only visits areas that hold wanted nodes).
+Once a frame, when a node became ready or the selection changed, the swap pass groups the nodes
+that may go and the ready nodes waiting to be shown into swap units, connected through the LOD
+tree. A unit is done whole: its old nodes are cleared and its new ones shown in the same frame,
+so two levels never overlap and never leave a gap (and `ChunkRenderer.clear` keeps the old model
+`Render.SwapFrames` frames under the new one). Units go nearest first until
+`Render.SwapPartsPerFrame` parts went out and in (at least one a frame; in teleport mode units that
+only show nodes don't count; the far meshes get what is left of the allowance); the rest wait a
+frame. A full detail chunk that a revealed tunnel next
+door is open towards waits until that tunnel is closed (see Caves). `Streaming.ReplaceTimeout` is
+a safety net. The movement controller keeps the hull frozen until the chunk under it and the eight
+around it are shown (`isReady`); meanwhile the renderer may build up to 12 ms a frame
+(`setFrozen`).
 
-**Caves.** While the camera is below the terrain surface, sections within a reveal radius are
-meshed with caves visible; everywhere else cave air counts as rock. Sections are remeshed as they
-enter or leave that radius. The radius follows the open space around the camera
-(`Streaming/CaveReach`): rays are cast sideways and upwards through the loaded blocks and their
-median distance, plus a section, sets the radius between `Caves.RevealRadius` (64 blocks,
-tunnels) and `Caves.RevealRadiusMax` (128, big caverns such as the Underlands); phones use
-`Caves.Mobile` (48 and 96: `ViewSettings.revealRadii`). It grows at once and shrinks only
-after two seconds, so the revealed sections do not churn. Caves only exist in full detail chunks,
-so a cavern ends where they do. Where a revealed tunnel runs into hidden space (a hidden section above
-or below, a neighbour chunk whose section is hidden, or a coarser node), nobody would draw its walls
-there and you would look into the void. A revealed section is therefore meshed with a mask of those
-sides (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock, and its own cave
-air touching that rock becomes a stone cap. It is remeshed when the mask changes. Which sections
-are revealed and their masks are pure (`CaveReach.reveals`, `CaveReach.capMask`;
-tests/spec/CaveView).
+**Edits** (`RemeshQueue`, pure). Full detail chunks keep their block data on the main thread
+(`World/ClientWorld`). Edits (local predictions and server messages) update the data and the
+neighbours' padding and mark sections dirty, with a reason: edit, cave reveal, seam or plants (a
+section keeps its most urgent one). Every section one batch of edits dirtied (the edited chunk and
+the neighbours whose padding changed) is one renderer commit group: each chunk gets an edit job
+(the worker runs it at the running job's next slice boundary; the renderer builds it in its edit
+lane), and the group goes live in one frame. Each job holds the group until its builds are queued,
+or it failed (its sections are marked again and the chunk waits 0.5 s, doubling up to 8 s). Other
+remeshes go by reason, then distance, one job per chunk at a time, at most `Streaming.RemeshJobs`
+(4) in flight while generation has work; once one member of a batch was sent, the others go next
+and past that cap, so a batch is never left waiting on the cap. A chunk may have several jobs in
+flight; a result only counts for the sections no newer job took. While loading, edits go live in
+2 frames instead of a median of 6.
+
+**Teleports** (`TeleportMode`, pure). `MovementController`'s teleport handler tells the streamer
+the destination (`teleported`); a jump of more than `Streaming.TeleportDistance` (128 blocks)
+between refreshes counts too. The streamer selects there in that frame, without hysteresis, and
+drops every node no longer wanted in one pass: no `covered()` work, builds and worker jobs
+cancelled (`WorkerPool.cancel`), models trashed (`ChunkRenderer.trashNode`: within 1.5 × the full
+detail radius of the destination they leave at once, the rest nearest first within
+`Render.UnparentPartsPerFrame`). Shown models that overlap nothing wanted are handed over 64 a
+frame. The camera follows the character a frame late, so the cave view is judged from the eye
+above the destination's feet (the standing eye height), and a teleport ends the underground hold,
+so the destination is selected with the right full detail range at once. Until the 3 × 3 chunks
+under the player are shown and at most `Streaming.TeleportSettle` nodes and builds are left, or
+`TeleportTimeout` (10 s), far meshes, horizon jobs and map tiles wait. The first load works the
+same way. The player unfreezes after 16-31 frames instead of 33-274, and no frame puts more than
+~700 parts into the workspace (before: up to 22,600).
+
+Far meshes also wait while more than `Streaming.BusyJobs` nodes or `BusyBuilds` builds are pending
+(`MeshOverlay.setStreamerBusy`).
+
+**Per refresh**: `LodTree.select` is skipped while the viewer moved less than a block and
+`underground` and `LodTree.version()` are unchanged; seams are recomputed only next to coarse nodes
+that changed (`LodTree.seamsAffected`); the cave view is checked again only where it may have
+changed (below). In Lune (interpreted) a refresh costs 0.04 ms standing above ground (it was 2.2),
+0.09 ms standing in a cave (12), and ~0.9 ms walking above ground (2.5) or ~1.7 ms in a cave (14).
+
+**Caves** (`CaveReach.view`, `World/SectionGraph`: see Cave visibility below). While the camera is
+below the terrain surface, the sections it can see into through connected cave air are revealed
+(meshed with their cave walls); everywhere else cave air counts as rock. Workers return each full
+detail chunk's graph (one u32 per section) with its generation and recompute it for the sections
+an edit job remeshes (an edit can open or seal a cave); results merge per section, so an older
+job's answer never overwrites a newer one's. The search runs from the camera when it changes
+section, the reach changes, or a graph or a full detail chunk near it changed (median 0.6 ms, at
+most ~3.6 ms where the Underlands hit `Caves.RevealBudget` sections). It reaches
+`Caves.RevealReach` (88 blocks, scaled by the Cave View setting: `PlayerSettings.revealReach`)
+along tunnels, and in big caverns the open space around the camera plus a section, so caverns are
+seen as far as before: `CaveReach.probe` casts rays sideways and upwards through the loaded blocks
+and their median distance sets a radius between `Caves.RevealRadius` (64) and `RevealRadiusMax`
+(128; the cave view sets both: `revealRadii`), growing at once and shrinking only after two
+seconds. A section stays revealed `Caves.RevealHold` (2) seconds after the search stopped reaching
+it; sections of chunks not generated yet that the search would enter count as revealed, so they
+are generated revealed. Over 29 caves on three seeds this costs 0.96 × the parts of the 80-block
+sphere it replaced (median; at most 1.12 ×), sees tunnels 88 blocks away, and walking remeshes
+about half as many sections.
+
+*Caps.* Where a revealed tunnel runs into hidden space nobody would draw its walls, and you would
+look into the void. A revealed section is therefore meshed with a mask of the sides where its
+tunnels end in stone (`GreedyMesher.Border.hidden`): hidden cave air beyond them counts as rock,
+and its own cave air touching that rock becomes a stone cap. A side is open only towards a section
+that draws its caves on screen whenever this mesh does (`drawsCaves`): one in a full detail chunk
+on screen whose revealed mesh is live, or goes live in the same commit group. A hidden section
+draws no wall there and a coarser node nothing underground; a section the search misses shows a
+cap, never the void. So what is on screen is tracked per section as each mesh goes live (`live`,
+`liveCaps`, `wentLive`): a section that is only dirty or in flight never counts, and a cap closed
+meanwhile opens once the section beyond is live (`liveCheck`). It holds the other way round too: a
+section goes hidden only together with the caps closing towards it (`canHideNow`, checked again
+when the job is sent: `mayHide`), and a full detail chunk leaves the screen only once no tunnel
+next door is open towards it (`swap`). A change of caps only remeshes a section where cave air
+reaches that side on either side of it (`capFaces`).
+
+*Passes.* After a refresh only the sections whose reveal flag or caps may differ are checked
+(`updateReveal`): the sections revealed or hidden and their neighbours, those of chunks next to
+full detail chunks that came, went or were shown, nodes that became ready and meshes that went
+live. One pass (`checkPass`) checks reveal flags first, then caps, so a cap opening and the section
+behind it are marked together, and goes live in commit groups of at most
+`Streaming.RevealGroupSections` (96) sections, nearest first; the sections being hidden and the
+caps closing towards them are one group of their own whatever its size. Thin cracks can still show
+at a tunnel's rim for a few frames while a side switches between open and capped across two
+groups; the void across a whole tunnel cannot.
 
 **The underground split.** Full detail chunks are the only ones with caves, so above ground's
 full detail range (~96 blocks) would end every cave there. While the cave view is active (the
 camera below its column's surface) and for `Lod.UndergroundSeconds` (5) after it ends
 (`CaveReach.hold`, so walking in and out of a cave mouth does not rebuild the chunks around it
-back and forth), `LodTree.select` runs with `underground`: level 1 nodes split at
-`Lod.UndergroundSplitDistanceL1` (4, phones 3) instead of `SplitDistanceL1`, so full detail and
-caves reach ~128 blocks; coarser levels are unchanged. Level 1's hysteresis holds within one mode
-only (`previousUnderground`): the first selection after going underground splits every level 1
-node within the new distance, as a fresh selection would, instead of keeping the leaves of the
+back and forth; a teleport ends it), `LodTree.select` runs with `underground`: level 1 nodes split
+at the underground split distance (`Lod.UndergroundSplitDistanceL1`, 4, phones 3; with settings:
+from the cave view, `PlayerSettings.lod`) instead of `SplitDistanceL1`, so full detail and caves
+reach ~128 blocks; coarser levels are unchanged. Level 1's hysteresis holds within one mode only
+(`previousUnderground`): the first selection after going underground splits every level 1 node
+within the new distance, as a fresh selection would, instead of keeping the leaves of the
 selection above ground. Walking keeps full detail up to ~15% short ahead of the camera, as the
-hysteresis does above ground. Measured in a cave near the spawn (seed 12345): 268 full detail
-chunks instead of 164 and ~57,000 parts instead of ~47,000 (~139,000 instead of ~110,000 in the
-Underlands, before far meshes). F3 shows how far caves are revealed and the split in use.
+hysteresis does above ground. Measured in a cave near the spawn (seed 12345, with the reveal
+sphere the search replaced): 268 full detail chunks instead of 164 and ~57,000 parts instead of
+~47,000 (~139,000 instead of ~110,000 in the Underlands, before far meshes). F3 shows how far
+caves are revealed and the split in use.
+
+**Hidden terrain** (`HiddenTerrain`, `World/Horizon`: see Far nodes behind terrain below). Every
+generated node carries a summary (lowest ground and highest top of 4 × 4 tiles); edits update
+those of full detail chunks (`Horizon.applyEdits`: in the worker, for late results and for every
+block change). About once a second while the camera moves or new summaries came in, or after 8
+blocks of movement (never in teleport mode, when nothing new has a summary yet), a worker sweeps
+the wanted nodes front to back from the camera (90-160 ms in the worker; the job may use the
+pool's overflow slot) and returns the far nodes hidden behind nearer terrain: they load last
+(LoadPriority's hidden tier; a node not generated yet is judged from the nodes it replaces). Nodes
+within 64 blocks are never hidden. With "Skip hidden terrain" (the Hidden Terrain setting, read
+every refresh; on in the Low preset) a hidden far node shows no parts (`held`): one generated
+hidden is never built, and a built one hidden in 2 verdicts in a row gives its parts back (only
+while the camera moves at most 6 blocks a second, and not the levels far meshes merge while they
+are on). Both
+count as ready, so swaps go on. They build again as soon as a verdict sees them or the camera
+leaves the eyes the verdict was made from. Every far node keeps its meshes (`kept`: the buffers its
+sections show, so they cost no memory of their own), so switching the setting on later applies to
+what was built while it was off too. In the mountains 45% of the parts on screen are hidden; with
+far meshes off at the default view, skipping keeps 41% fewer parts after loading and 34% fewer
+while walking (valleys 30%, the spawn hills 1%). With far meshes on only level 1 qualifies (4%).
 
 **Plants.** Every box of a plant is a part, and all ~180 full detail chunks would hold
-10,000-20,000 of them. So only full detail chunks within `Lod.FoliageDistance` of the viewer (40
-blocks to the chunk's square, 24 on phones through `ViewSettings`; one already drawing them keeps
-them up to half a chunk further) draw their plants, while `Render.Foliage` is on
-(`LodTree.drawsFoliage`): about 1,000-3,000 parts on grassland, at most 6,000. Jobs carry the
-node's `foliage` and workers report which sections hold plants (drawn or not); when a chunk
-starts or stops drawing them (the viewer moved, `Render.Foliage` changed), each refresh remeshes
-only those sections, like edited ones. A node with a generation job queued or running is left to
+10,000-20,000 of them. So only full detail chunks within the plant distance of the viewer
+(`Lod.FoliageDistance`, 40 blocks to the chunk's square, 24 on phones; the Plant Distance
+setting; one already drawing them keeps them up to half a chunk further) draw their plants, while
+`Render.Foliage` is on (`LodTree.drawsFoliage`): about 1,000-3,000 parts on grassland, at most
+6,000. Jobs carry the node's `foliage` and workers report which sections hold plants (drawn or
+not); when a chunk starts or stops drawing them (the viewer moved, the setting changed), only those
+sections are remeshed, like edited ones. A node with a generation job queued or running is left to
 that job, which takes the current answer.
+
+**Settings**: `streamer:applyView()` (effects "lod", "caves", "foliage") sets LodTree's four
+distances and plants from `ViewSettings`, a new cave reach tracker from its radii and the tunnel
+reach, and selects again in that frame. "Skip hidden terrain" needs no call: it is read every
+refresh.
+
+### Workers (`Streaming/ChunkWorker`, `Streaming/WorkerPool`)
+
+Every Actor runs ChunkWorker. Jobs: `generate` (a node's blocks and section meshes, its quads for
+far meshes, its Horizon summary and, for full detail chunks, its cave graph), `mesh` (sections of
+a full detail chunk again, recomputing their graph), `graph`, `horizon` (the hidden node sweep)
+and `map` (tiles). Long jobs yield every `Workers.SliceBudgetMs` so actors never stall a frame,
+and run one at a time per worker (the generator and mesher reuse scratch memory). Worker actors
+keep their own Config, so what the player's settings change travels in each job (`foliage`,
+`slice`, the reveal flags and caps).
+- **Edit lane.** Jobs flagged `edit` run before every other queued job, and an edit mesh job does
+  not even wait for the running job: that one lets it run at its next slice boundary (never while
+  it holds the mesher's scratch memory across a slice), so an edit takes about a frame, never a
+  whole generation job. `WorkerPool` sends edit jobs to the worker with the fewest edit jobs and
+  gives them 2 slots beyond `Workers.JobsPerWorker`, so loading never fills them up; map tiles and
+  horizon jobs may use one extra slot (`overflow`).
+- **Cancelling.** `WorkerPool:cancel(ids)` (teleports, removed nodes) drops the callbacks at once;
+  the worker drops a queued job and stops a running one at its next slice boundary, and answers
+  `cancelled` (the slot frees then).
+- **Failures** answer `failed`: a failed generation keeps the old terrain and retries, a failed
+  remesh marks its sections dirty again.
+
+### Cave visibility (`World/SectionGraph`)
+
+Minecraft's advanced cave culling, adapted to hidden caves. Workers record, per 16³ section of a
+full detail chunk, which faces its air pockets connect: a flood fill over the passable cells, done
+on 16-bit rows (row y × 16 + z, bit x) instead of cells, finds the pockets, and every pair of faces
+one pocket touches is connected. Only some pockets are followed: cave pockets (cave air, cave
+twins), sealed pockets that don't reach the section's top (dug tunnels and rooms), and in buried
+sections (entirely below the chunk's lowest generated surface) all air. Sky air always reaches the
+top of its section (the terrain is a height field), so a cave mouth never leaks the search into
+the sky. A section is one u32: the 15 pairs of faces connected by a followed pocket, the 6 faces a
+followed pocket touches, the 6 faces any air touches (where a camera there can look out), and the
+CAVES and BURIED flags. Faces are numbered like `GreedyMesher.Border`'s hidden bits (0 −X, 1 +X,
+2 −Z, 3 +Z, 4 −Y, 5 +Y), so a cap mask is a set of face bits. Graphs are only computed for the
+sections that may hold cave cells, from the carver's lattice where it is conclusive: 1.5-2.3 ms a
+chunk in Lune (interpreted) under hills and mountains, ~7 ms in deep caves and the Underlands.
+
+The search (main thread, `search`): from the camera's section and the neighbours its air touches
+(left through any face, for a camera next to a section corner), each section is visited once and
+left only through a face connected to the one it was entered by, never stepping back against a
+direction already taken on the path, so it doesn't wrap around behind rock. It works outwards in
+8-block distance bands, nearest first, up to `reach` blocks (to section centres); past the section
+`budget` the whole band where that happened is dropped, so the cut behaves like a distance and
+moves little with the camera. Every section reached is revealed: one entered only through rock
+still has to draw its walls facing the cave next door. Sections of full detail chunks not generated
+yet come back as `pending`. Searches take a median 0.6 ms (p90 1.2 ms), at most ~3.6 ms in the
+Underlands, where the 1,500-section budget cuts them (13-18 ms uncapped). `CaveReach.view` keeps
+the revealed set with its hold and answers `reveals` / `capMask`; tests/spec/SectionGraph checks
+the fill against a per-cell flood fill, tests/spec/CaveView the reveal and caps.
+
+The bury line is per chunk: above it, dug air is only followed where it doesn't reach its
+section's top, so an open shaft dug down from the surface is not.
+
+### Far nodes behind terrain (`World/Horizon`)
+
+Every generated node carries 64 bytes (`summarise`, made by the generator): per 4 × 4 tile of its
+16 × 16 cells, the lowest terrain top (the tile is solid up to there: an occluder; terrain only)
+and the highest top with trees, water and structures (an occludee). Edits update full detail
+chunks' (`applyEdits`): dug ground lowers a tile's ground where nothing solid is left above it (a
+quarry, a levelled hill; a tunnel under the ground leaves it, like the generated caves), and a
+placed block raises its top; ground never rises again, so an occluder is never overstated. A node
+not generated yet gets an occludee-only estimate from a generated ancestor or descendants
+(`estimate`); one with neither is left out and never counts as hidden.
+
+`evaluate` (in a worker, yielding): a front-to-back sweep from the eye over 512 compass bins, each
+holding the steepest slope known to be blocked in every direction of the bin. Tiles are taken in
+8-block rings: those whose nearest point lies in a ring are tested first, then those whose
+farthest point lies in it raise the horizon, so an occluder always lies entirely in front of what
+it hides. A tile is hidden when every bin it touches is steeper than its own steepest point, a node
+when all its tiles are. The camera moves between evaluations, so a node only counts as hidden when
+it is hidden from all five eyes: the camera raised 16 blocks, and four more 16 blocks to its sides;
+nodes within 64 blocks never are. A test casts rays from every eye over random terrain and checks
+that every hidden node really is blocked. An evaluation takes 85-180 ms in a worker; the main
+thread only packs the records (0.3-0.75 ms, about once a second). Hidden shares with the default
+margins: 2-7% of the parts at the spawn, 17-47% on mountain slopes, 27-35% in valleys.
 
 ### Rendering (`Rendering/`)
 
-Every node is a Folder of section Folders. A section is built outside the workspace and swapped in
-whole. Parts come from `PartPool`: one template per appearance, shape box and near / far / plain
-variant, so a recycled part only needs a new size and position. Near parts collide and can be
-raycast; far parts do neither and never cast shadows.
+Every node is a Folder of section Folders. Parts come from `PartPool`: one template per
+appearance, shape box and near / far / plain variant, so a recycled part only needs a new size
+and position. Near parts collide and can be raycast; far parts do neither and never cast shadows.
+No terrain part takes part in audio collisions (`AudioCanCollide`, set under pcall).
+
+**Builds** (`ChunkRenderer`, `RenderSchedule`). Every section build is a task in one of four
+lanes: `edit` (player and server edits, first in first out, with its own `Render.EditBudgetMs`
+each frame, so an edit never waits behind loading), `near` (cave reveal, plants and seams, by
+priority), `normal` (generation, by node priority: the streamer's score, lower first, re-read by
+`reprioritise` after each refresh) and `background` (texture restyles, skip hidden terrain giving
+parts back). Parts are built out of the workspace and the budget is checked before every part.
+With `Render.AutoBudget` the budget adapts (`FrameBudget`): `usual` is the shortest of the last 90
+frames; a frame longer than 1.1 × that cuts the budget, which then recovers only to 90% of the
+budget that overran for 120 frames; while builds wait and frames have room it grows, between 2 and
+8 ms (12 ms while the player is frozen waiting for terrain); with nothing to build it drifts back
+to `Render.BuildBudgetMs`. On a frame model (600 ms of building after a teleport, vsync at 60 Hz)
+a fast device loads in 1.4 s instead of 2.5 s, a device with ~4 ms to spare misses 5 frames
+instead of 28, and one already at 30 fps loads twice as fast at the same frame rate. The Build
+Budget setting fixes it instead (`setBuildBudget`).
+
+**In-place remesh** (`SectionDiff`). A section keeps its boxes and the parts of each box. A new
+mesh is matched against the live one by the boxes' 14 bytes (position, size, look, fluid level,
+tint, sparse light): identical boxes keep their parts untouched, only new boxes are built and only
+removed ones go. An edit builds a median of 1 part (p90 5-8) instead of rebuilding ~300, with 2
+property writes instead of ~1,000. A section with nothing on screen yet, or built for an older
+texture style, is built whole into a new folder.
+
+**One build in waiting per section.** A section has at most one build that is not live yet, so
+every build diffs against what is on screen; a newer one waits ("parked") and joins its lane when
+that one goes live. A newer mesh makes an older one that has not started out of date, so when
+neither has a commit group the newer one replaces it (a parked one, or the queued one while the
+renderer has not started it), in the more urgent of the two lanes. A build in the same commit group
+as an older one of its section drops that one (waiting behind it would deadlock the group);
+meshes still go live oldest first. Restyle builds never replace a build and give way to any newer
+one.
+
+**Going live without gaps.** New parts are parented; removed parts and replaced folders, see-through
+ones included, stay `Render.SwapFrames` (2) frames longer, so a part the engine draws a frame late
+never shows the sky behind it. (The mesher draws a lake surface as one box, so an edit in a lake
+replaces the whole surface: for those frames the old and new surfaces overlap and the water looks
+darker where boxes changed.) Their PointLights go off at once, so lights never double. `clear` (a
+node replaced by other levels of detail) keeps the old model the same way, and MeshOverlay keeps a
+demoted mesh until the parts under it are back. Released parts are quarantined: PartPool hands
+them out from the next frame on, so a part on screen at the start of a frame is never moved
+elsewhere in it.
+
+**Commit groups.** The streamer opens a group for one batch of edits (or cave sections whose caps
+change together), holds it for every job that will add sections to it and releases each hold when
+the job's sections were queued or the job failed. The sections are built and held ("staged") until
+all are, then go live in the same frame, so an edit on a section or chunk border never shows the
+old neighbour next to the new section. A group open longer than 2 s stops waiting: its staged
+builds go live at once and later ones as they are staged, so a lost job can never freeze a section.
+
+**Taking things away is budgeted.** Models and parts leave the workspace at most
+`Render.UnparentPartsPerFrame` parts a frame; their parts go back to the pool or, once it is full,
+a whole folder is destroyed in one call, within `Render.ReleaseBudgetMs` a frame. The pool trims
+parts beyond `Render.PoolLimit` and kinds unused for 30 s the same way. `trashNode` (teleports)
+drops a node without the swap delay, nearest to the destination first, and `show` never puts a
+node on screen while a trashed model above or below it is still there. A far teleport that
+removed 33,000-139,000 parts in one frame now takes 36-158 frames of at most 3,000 parts.
+`Render.SwapPartsPerFrame` is one allowance a frame for the streamer's level of detail swaps and
+the far meshes together: `show` counts the parts it puts into the workspace, and the overlay gets
+what is left at the next step (it still moves its first node every frame).
+
+**Restyle** (the settings menu). Shadow changes update PartPool's templates at once, live parts
+within the build budget and pooled ones when handed out. A texture change (offered only if a block
+has a texture) rebuilds sections off-screen in the background lane and swaps them like any other
+build: only those where no build waits to start (it uses the new look anyway), never the plain far
+levels (no textures), and also first builds that started with the old look. Any newer build
+replaces a restyle, so an edit never waits behind one.
+
+`tests/spec/RenderPipeline` runs ChunkRenderer, PartPool and MeshOverlay against fake instances
+whose clock advances with every operation, with an engine drawing new parts up to `SwapFrames`
+late, and checks every frame for gaps (opaque and see-through boxes, lowered water surfaces
+included), doubled lights and parts reused in the frame they were released, and that any sequence
+of edits ends with exactly the parts of a fresh build. Nothing of this ran in Roblox: whether the
+engine really draws new parts a frame late, and what instances cost, are its assumptions.
 
 **Textures.** A block's `texture` names a MaterialVariant in MaterialService; templates set
 `Material` to the block's material (it must be the variant's BaseMaterial) and `MaterialVariant` to
@@ -469,10 +731,10 @@ the others PartPool's `acquire(..., dark)` gives the light's box from a "dark" t
 part without its PointLight, so lit and unlit lichen look alike (a Neon speck). A revealed
 cavern holds a few hundred lit cells (in the CaveView test scene 1,272 lichen, 343 lit), all on:
 lichen should light a cave at any distance. ChunkRenderer keeps every lichen light's part and
-position, so a finite `Caves.LichenLightDistance` (`ViewSettings.lichenLightDistance`; default
-math.huge) switches off those farther from the camera on slow devices, every 0.25 s, turning them
-off again 8 blocks further. Lichen lights
-cast no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
+position, so a finite `Caves.LichenLightDistance` or Lichen Lights setting
+(`ViewSettings.lichenLightDistance`; default math.huge, "All") switches off those farther from the
+camera on slow devices, every 0.25 s, turning them off again 8 blocks further. Lichen lights cast
+no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
 reaching through a thin cave wall shows nowhere it shouldn't. Each lichen is two parts, its plate
 and the Neon speck that carries the light. The renderer counts parts with a light (`lightCount`)
 and lichen lights (`sparseCount`, `sparseOn`) for F3.
@@ -499,22 +761,38 @@ built and shown as parts exactly as before; the streamer's protocol is unchanged
    members have not changed for `StableSeconds` is a candidate (a meshed region that gained members,
    drawn as parts meanwhile, waits `RebuildSeconds`). Candidates are ranked by the parts a build
    saves times how long they have waited.
-2. **Build** (builder thread, one region at a time, at most one every `BuildInterval` and never
-   right after a hitch, i.e. a frame much longer than usual): the members' quads (snapshotted when
-   the build starts) (`Meshing/QuadMesher`, made by the workers next to
+2. **Build** (builder thread, one region at a time, when the gate below allows): the members'
+   quads (snapshotted when the build starts) (`Meshing/QuadMesher`, made by the workers next to
    the boxes) become mesh arrays (`Meshing/MeshGeometry`: centred, split at `MaxTriangles`, a tiny
    anchor quad when a mesh would be flat), written into the session's single scratch EditableMesh
    with the batch APIs (vertex colours via the automatically created colour ids; with unshared
    vertices the automatic normals are the face normals), baked, cleared, and turned into a
    MeshPart (Box collision, no collision/queries/touch, Precise render fidelity so the engine does
    not decimate it into cracks). Its size is checked before it is trusted.
-3. **Swap**: if the members are unchanged, the MeshParts are parented, and two frames later the
-   members' part folders are unparented (kept). Parts of merged levels use a plain look
-   (SmoothPlastic, block colour, opaque water), so both look the same.
-4. **Demote**: when a member of a mesh is removed or rebuilt, the mesh is destroyed and the parts are
-   parented again in the same frame. Members added to a meshed region stay parts until it is
-   rebuilt. A failed build leaves the parts; failures back off per region, three in a row pause
-   building for a minute, and StorageLimitExceeded / PermissionDenied switch meshes off.
+3. **Swap**: if the members are unchanged, the MeshParts are parented, and `Render.SwapFrames`
+   frames later (at least one) the members' part folders are unparented (kept). Parts of merged
+   levels use a plain look (SmoothPlastic, block colour, opaque water), so both look the same.
+4. **Demote**: when a member of a mesh is removed or rebuilt, the members' parts are parented
+   again and the mesh is destroyed `Render.SwapFrames` frames after the last of them, so the two
+   never leave a gap. Members added to a meshed region stay parts until it is rebuilt. A failed
+   build leaves the parts; failures back off per region, three in a row pause building for a
+   minute, and StorageLimitExceeded / PermissionDenied switch meshes off.
+
+**The gate.** At most one build every `BuildInterval`, never right after a hitch (a frame much
+longer than usual), never while the camera's average speed over the last `SpeedWindow` (2 s) is
+above `MaxBuildSpeed` (2 blocks/s: regions keep changing while it moves, and every MeshPart costs
+a long frame), never while the streamer is busy and never while paused (teleport mode: a running
+build stops between MeshParts, which is not a failure). Parts keep drawing meanwhile. Walking,
+builds drop from ~70 to ~3 a minute (flying: 125 to 3); at the end of a 10 s stop 2% of the
+regions still wait for a mesh, which is why `MinLevel` stays 2 (level 1: 20%).
+
+Hiding and showing members count their parts against `Render.SwapPartsPerFrame`, the allowance
+the streamer's swaps share (`step(allowance, used)`): a node that would go over it waits a frame,
+except the first one the overlay moves in a frame, so meshes never wait forever behind the swaps.
+The Far Meshes setting (`setUserEnabled`) demotes everything but keeps the quads, so switching
+back on rebuilds the meshes without generating anything; it cannot switch on meshes that were off
+from the start (configuration, phones, a failed probe), and the status then still gives the real
+reason ("off (settings)" only while the player switched them off).
 
 Far nodes never change once built because their borders do not depend on their neighbours
 (`generator.farSeamLimits`): the LOD tree is 2:1 balanced, so a node is meshed as if every side had
@@ -542,6 +820,11 @@ painted closest-first. `Map/MapView` shows a window of the ring with up to four 
 wrapped piece) sharing the same image. The minimap uses a 256² image, the world map an 832² one
 (~3 MB together). Creating an EditableImage throws when the experience has not enabled the API and
 returns nil when the memory budget is used up; the maps then show markers only.
+
+Tile jobs share the workers with terrain: they may use the pool's overflow slot, and wait while
+teleport mode lasts (the first load too: `Map.setPaused`). While the Minimap setting hides the
+minimap (`Map.setMinimapVisible`) it neither draws nor asks for tiles; on touch screens a small
+"Map" button then takes its corner, as tapping the minimap is the only way to the world map there.
 
 Waypoints live on the client (`Map/Waypoints`) and are saved by the server per player in a
 DataStore (`Players/WaypointStore`, names text-filtered). Every client change bumps a revision
@@ -654,7 +937,9 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   and, with F3 open, right of the debug text when the screen allows (screen edges first, then the
   minimap, then the F3 text); drawn smaller when it doesn't fit (whole scales on desktops,
   eighths on touch, at least half size). Where the room left of the minimap is too narrow to read
-  it, it goes over the minimap's corner, as far left as it can.
+  it, it goes over the minimap's corner, as far left as it can. It keeps clear of that corner only
+  while the minimap shows (`setMinimapShown`, the Minimap setting).
+- **Setting.** With the WAILA setting off (`setEnabled`) the panel is hidden and nothing is picked.
 - **Updates.** Every frame builds a short key (target, held item, F3) and rebuilds the text only
   when it changes, at most once a tick (0.05 s); hiding keeps the text, so a target flickering on
   and off is shown again without a rebuild. Progress only resizes its line. The panel hides while
@@ -713,15 +998,20 @@ hull is.
     part's space, so the offset is computed through the root's CFrame. The eye height eases like
     Minecraft's, half the remaining way per tick.
   - Scales the camera's field of view by `SprintFov` (1.15) while sprinting, eased the same way, on
-    top of whatever the field of view is set to.
+    top of the FOV setting (`setFieldOfView`; without one, whatever the field of view is set to),
+    the modifier scaled towards 1 by the FOV Effects setting (`setFovEffects`).
 
   Other duties:
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
-    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint`, the
-    sprint key turns sprinting on and off; turning it off also stops a sprint started by double
-    tapping. While a screen (inventory) or the game mode switcher is open, the input is neutral.
+    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint` (the
+    Sprint setting), the sprint key turns sprinting on and off; turning it off also stops a sprint
+    started by double tapping. Switching the setting between toggle and hold lets go of whatever
+    the old mode latched (`followSprintMode`), so a sprint can always be stopped. While a screen
+    (inventory) or the game mode switcher is open, the input is neutral.
   - The hull stays frozen until the chunk under it and the eight around it are shown, and after
-    teleports. Server teleports arrive as attributes; other scripts moving the character far are
+    teleports (meanwhile the renderer may build longer per frame: `ChunkStreamer.setFrozen`).
+    Server teleports arrive as attributes and are passed on to the streamer at once
+    (`ChunkStreamer.teleported`, teleport mode); other scripts moving the character far are
     detected and followed.
   - The `Physics` state never dies by itself, so health ≤ 0 puts the Humanoid into `Dead`. On death
     the rig is released: its parts go back to Default, the forces and the camera offset are removed.
@@ -771,6 +1061,82 @@ server uses for suffocation (see Game modes: On the server).
   each block read once. A search that reaches an unloaded chunk waits for it. A pool of sources
   pouring into a hole keeps spreading at its edge. So water runs down slopes the way it does in
   Minecraft instead of flooding the ground around it.
+
+## Player settings (`PlayerSettings`, client `Settings/`, `Ui/SettingsScreen`, server `Players/SettingsStore`)
+
+Players tune the view, performance, sounds, controls and HUD for themselves in Minecraft's Options
+screen; Config gives every default and the presets.
+
+- **The schema** (`Shared/PlayerSettings`, pure, tested in tests/spec/PlayerSettings). Every
+  setting is one number (toggles 0 / 1, choices an index) with an append-only u8 id, a key, kind
+  (slider, toggle, choice), range and step, desktop and phone defaults (and a phone maximum: the
+  view stops at 1024 there), its page, the effect that applies it, and whether presets set it. It
+  also holds the presets (High is Config's own view, Low its `Mobile` values with shadows off and
+  hidden terrain skipped), the default preset per device (phones Low; others by Roblox's saved
+  graphics quality: 1-3 Low, 4-6 Medium, 7-10 or Automatic High), the LOD balance rule (split
+  distance at least 2, full detail at most split + 1, the underground split from the cave view
+  between the two; checked against real `LodTree` selections for every slider combination), what
+  values mean (`lod`, `revealReach`, `revealRadii`, `lichenLightDistance`, `buildBudget`,
+  `caveAmbient`, `fovModifier`, `volume`), the wire format and the DataStore record.
+- **State** (`Settings/State`, pure). One values table for the session, changed in place
+  (`Rendering/ViewSettings` reads the same table), and which settings the player chose. Only
+  chosen settings are saved, so everything else keeps following the preset and Roblox's quality
+  level. Picking a preset chooses `preset` and lets the settings it sets follow it again; Reset
+  does the same for the current preset; Defaults forgets every choice. A saved profile arriving
+  after the player made choices is merged under them (`receive`: what Defaults or a preset dropped
+  since stays dropped).
+- **When effects run** (`Settings/Schedule`, pure). Cheap effects run at the next frame, once
+  however many changes asked for them; costly ones (`EXPENSIVE`: lod, caves, foliage, shadows,
+  farShadows, textures, overlay) `Config.Settings.ApplyDelay` (0.4 s) after the last change, so a
+  dragged slider rebuilds the world once; all in `EFFECT_ORDER` (the view before the fog that
+  follows it). `flush` (the menu closing) runs everything waiting at once. An 8-step drag of the
+  render distance applies the view once instead of 8 times while the fog follows every step.
+- **Effects** (the client script, `Settings.register`; each runs once when registered, and a
+  function registered under several keys runs once a frame):
+
+  | Effect                       | What it calls                                                       |
+  | ---------------------------- | ------------------------------------------------------------------- |
+  | lod, caves, foliage          | `ChunkStreamer:applyView()` (see Streaming)                         |
+  | fog, lighting                | `ViewSettings.applyFog` / `applyLighting` (Prefer, Brightness)      |
+  | shadows, farShadows, textures | `ChunkRenderer:restyle` (see Rendering)                            |
+  | overlay                      | `MeshOverlay:setUserEnabled` (see Far meshes)                       |
+  | budget                       | `ChunkRenderer:setBuildBudget(ms?)`, nil for Auto                   |
+  | swapFrames                   | writes `Config.Render.SwapFrames`, which the renderer reads every frame |
+  | lichen, skipHidden           | nothing: read live (the lichen light sweep; the streamer's refresh) |
+  | audio                        | `SoundPlayer.setPlayerSettings` (see Sounds)                        |
+  | camera                       | `MovementController.setFieldOfView` / `setFovEffects`               |
+  | controls                     | `Config.Movement.ToggleSprint` and `TouchButtons` (bound once: after rejoining), `Hud.setWheelSelects` |
+  | hud                          | `Map.setMinimapVisible`, `Waila.setEnabled` / `setMinimapShown`, `Style.setScaleOverride` |
+
+  Worker actors keep their own Config, so what a worker needs travels in its jobs (see Workers).
+- **Start-up.** The client listens for its saved profile first and waits up to
+  `Config.Settings.LoadWait` (1 s) for it before it creates the streamer, so the first terrain is
+  already the player's view. One arriving later applies then.
+- **The menu** (`Ui/SettingsScreen`, a `Screens` panel built with `FormWidgets`; the layout comes
+  from `Settings/Pages`: Minecraft's 150 × 20 buttons in two columns, settings a device doesn't
+  offer left out and the rest closing up). `Config.Settings.Key` (P) or `GamepadButton` (D-pad
+  right) open it while no screen is open (`Screens.onSettings`), as do the HUD's touch gear and the
+  inventory's gear; P, E, Escape, gamepad B and Done close it and flush. Gamepad: D-pad left /
+  right step a slider (`FormWidgets`' `stepSelected` keeps the selection on it), down / up move
+  through the widgets in reading order. Status lines come from providers the client script sets
+  (`Settings.setStatus`: "terrain", "farMeshes", "controls").
+- **Persistence** (`Players/SettingsStore`, like WaypointStore). One profile per kind of device
+  (desktop, touch: `ViewSettings.isMobile`, console: `GuiService:IsTenFootInterface`), so a phone
+  never loads a computer's view. DataStore "IceVoxelSettings_v1", key `player_<UserId>`, a record
+  `{ v = 1, desktop = {...}, touch = {...}, console = {...} }` of `{ [id] = value }`. Loaded on
+  join with retries; if loading fails nothing is saved that session, so an outage never overwrites
+  saved settings. Once loaded the server sends one `Settings` message per profile (count 0 when
+  nothing is saved) and the client takes its own. The client sends its profile (`SaveSettings`)
+  `Config.Settings.SaveDelay` (1.5 s) after the last change, when the menu closes, and at once
+  when the saved profile arrived after it had made choices (the merged result). The server decodes
+  it with PlayerSettings (unknown ids and NaN dropped, values clamped, a touch profile to the
+  phone limits) and keeps the newest per profile, whole. One that arrives before loading finished
+  replaces the loaded one too, but the client is still sent the loaded one, merges it under its
+  choices and sends the result back (a key-by-key merge on the server would bring back saved
+  choices the player had undone; only a player leaving within that round trip keeps just the
+  early profile). Saved on leave and in `BindToClose` (which waits for saves in flight, up to
+  25 s), only when something changed. tests/spec/SettingsStore runs the real store against a fake
+  DataStore with delays and failures, wired to the real client controller.
 
 ## Day and night (`DayCycle`, server `World/TimeOfDay`, client `Rendering/LightingController`)
 
@@ -823,7 +1189,9 @@ global shadows (Technology cannot be set from scripts). Near opaque parts cast s
 - `Dusk` colours are mixed in by `glow(h)`, the alpha of Minecraft's sunrise colour, times
   `Dusk.Strength`.
 - `Ambient` is always `CaveAmbient`. It is the only light the engine gives places closed to the
-  sky, so caves are equally dark at noon and at midnight, as in Minecraft.
+  sky, so caves are equally dark at noon and at midnight, as in Minecraft. The Brightness setting
+  raises it towards Minecraft's Bright (`ViewSettings.applyLighting` writes `CaveAmbient`; 0% is
+  Config's own).
 
 With `Lighting.Enabled = false` it writes only `ClockTime`, but still works out the sky exposure
 below: the cave rumble (`Audio/Ambience`) and F3 read it.
@@ -1157,23 +1525,27 @@ Inventories and chests live for the session.
 
 **Screens** (`Ui/`), old-school Minecraft styled from Frames only (gray beveled panels, inset slots,
 the Arcade pixel font):
-- `Hud`: the hotbar (1–9, the wheel, L1 / R1, taps), the held item's name, and hearts and armor in
-  survival and adventure; spectators get the spectator menu in the hotbar's place (see Game
-  modes). Roblox's health bar and backpack are turned off.
+- `Hud`: the hotbar (1–9, the wheel unless the Scroll Wheel setting makes it zoom, L1 / R1, taps;
+  on touch screens the "…" inventory button at its end and the Options gear at its start), the
+  held item's name, and hearts and armor in survival and adventure; spectators get the spectator
+  menu in the hotbar's place (see Game modes). Roblox's health bar and backpack are turned off.
+  The GUI Scale setting caps Minecraft's automatic scale (`Style.setScaleOverride`; scaled GUIs lay
+  out again on `Style.scaleChanged`).
 - `InventoryScreen` (`E`; spectators have none): the armor column on the left with a character
   preview, the 2 × 2 crafting grid and its result at the top right, the 27 slots and the hotbar. An
   open block's panel sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a
   crafting table's 3 × 3 grid and result, or a furnace's input, fuel and output with the flame and
   arrow gauges from the furnace's `data`. Worn tools show Minecraft's durability bar, and machines'
-  items that hold energy an energy bar in its place.
+  items that hold energy an energy bar in its place. A gear where Minecraft's recipe book button
+  is opens the Options menu.
 - `CreativeScreen` (`E` with instabuild, in creative): the "Item selection" picker, a search box
   that filters `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it.
   Clicking an item gives a full stack; dropping a stack on the grid deletes it.
 - `SlotClicks` turns mouse, keys, touch and gamepad into Minecraft's click actions (pure, tested).
 - `Screens` opens and closes them, frees the mouse (in first person too) and stops the character
-  while one is open. Other modules' screens (the structure block and jigsaw screens) are shown as
-  panels (`showPanel`, `closePanel`) with the same darkened world and free mouse but none of the
-  inventory's input.
+  while one is open. Other modules' screens (the structure block and jigsaw screens, the Options
+  menu) are shown as panels (`showPanel`, `closePanel`) with the same darkened world and free mouse
+  but none of the inventory's input.
 
 **Item icons and models** (`Rendering/ItemModels`, `Ui/ItemIcon`). An item's model is a cube with the
 block's look (the terrain's part template: material, colour, texture, face images), or the item's
@@ -1910,9 +2282,9 @@ characters, the payload at 2 MiB, 1024 palette entries, jigsaws, markers and con
 and returns nil and a message for the player for anything malformed: not IVS1, a character outside
 the alphabet, cut off, damaged (checksum), from a newer version, a position outside the box,
 duplicates. A 7 × 5 × 7 hut is ~250 characters, a 16 × 10 × 16 house ~1,150, a 48 × 48 × 48 build of
-100 kinds of block in noise ~130,000 (encoded in ~160 ms, decoded in ~120 ms in Lune); any 48³
-structure stays under ~150,000, inside `Config.Structures.MaxDataChars` (200,000, what a StringValue
-holds).
+100 kinds of block in noise ~130,000 (encoded in ~15 ms, decoded in ~10 ms in Lune; ~50 and ~30 ms
+interpreted); any 48³ structure stays under ~150,000, inside `Config.Structures.MaxDataChars`
+(200,000, what a StringValue holds).
 
 `Template.capture` builds a template from the world with Minecraft's SAVE rules: air is air (it
 clears the world where the structure is placed), a structure void is "keep", a DATA structure
@@ -2217,7 +2589,10 @@ client's own sounds, which play at once as Minecraft's client does.
   128 studs, where everything near the player would fade out, and the server only sends sounds
   near the character. A Scriptable camera keeps Roblox's camera listener.
 - Playback (`SoundRules.playback`):
-  - Volume: the event's (or the override's) x the cue's x `Sounds.Volume` x the source's.
+  - Volume: the event's (or the override's) x the cue's x `Sounds.Volume` x the source's, the last
+    two each times the player's Music & Sounds volume (`setPlayerSettings`). The player's
+    Footsteps, Interface Clicks and Cave Rumble switches only turn off what `Config.Sounds` has on
+    (`SoundPlayer.allows`).
   - Pitch: the event's pitch (or the override's PlaybackSpeed), varied by the event's variance,
     x the cue's.
   - Linear rolloff from `MinDistance` to `maxDistance x max(1, cue volume)` blocks.
@@ -2275,6 +2650,7 @@ live edits after it must arrive in the order they were sent.
 | client → server | `StructureData` | a piece of pasted structure text: transfer, index, count, text (16,000 characters) |
 | client → server | `SetGameMode`   | a GameType id (u8: 0 survival … 3 spectator): switch one's own game mode (the switcher, `F3` + `N`) |
 | client → server | `SpectatorTeleport` | a player's user id (f64, whole and finite): a spectator teleports to them |
+| client → server | `SaveSettings`  | the chosen settings of the client's device profile (below), after changes and when the menu closes |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -2289,6 +2665,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `StructureBlocks` | structure blocks' settings per position (none: gone); open flag (show the screen) |
 | server → client | `Jigsaws`       | jigsaws' settings per position (none: gone); open flag            |
 | server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
+| server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 
 Structure settings travel in `Structures/Settings`' format (Net/Protocol uses its `write*` /
 `read*`): unknown codes, NaN and strings over 128 bytes are malformed, numbers out of range are
@@ -2298,6 +2675,12 @@ reliable RemoteEvents name no size limit but share about 500 requests a second p
 pieces keep each message small. `Protocol.joinStructureData` puts pieces back together in any
 order, refuses ones that don't fit (another count, an index twice, too long) and drops older
 half-received texts beyond 2 per sender.
+
+Player settings travel in PlayerSettings' format: u8 version, u8 profile (1 desktop, 2 touch,
+3 console), u8 count, count × (u8 id, f32 value), only the settings the player chose, by their
+append-only ids. Another version, profile or length is malformed; unknown ids and NaN are dropped
+and values clamped (a touch profile's to the phone limits). A full profile is 168 bytes, a typical
+one 23.
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
 listener that connects) and routes messages by type, keeping early messages until a handler exists.
@@ -2362,6 +2745,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   hurting-landing sounds to everyone near (see Sounds), never a spectator's.
 - `Players/Teleport`: map teleports (see Map), and spectators' `SpectatorTeleport` (see Game
   modes: On the server).
+- `Players/SettingsStore`: players' settings, one profile per kind of device, in a DataStore (see
+  Player settings).
 - `Structures/`: structure blocks, jigsaws and their Generate, and who may use them (see
   Structure blocks and jigsaw structures). `Players/Containers` fills a generated structure's chest
   from the generator the first time its contents are needed; ServerNet's `operator` rule
@@ -2381,11 +2766,11 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 
 ## Hidden caves, octrees and regions
 
-**How caves are hidden today.** Caves are carved as `CaveAir` and never reach the surface. The
-mesher can treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
-(`hideCaves`), which removes every cave wall; sections are meshed
-with caves visible only while the camera is below the terrain surface and within the reveal radius
-(see Streaming above). That is a cheap form of occlusion culling that needs no extra data structure.
+**How caves are hidden.** Caves are carved as `CaveAir` and never reach the surface. The mesher
+can treat cave air (and the glow lichen generated on cave walls, its cave twins) as rock
+(`hideCaves`), which removes every cave wall; sections are meshed with caves visible only while
+the camera is below the terrain surface, and only those its section visibility search reaches
+(see Streaming and Cave visibility above).
 
 **Octrees** are a storage / search structure: a cube split into 8 children until regions are
 uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD
@@ -2397,10 +2782,14 @@ storage format.
 **What Minecraft does for caves.** Minecraft splits chunks into 16³ sections and, for each section,
 flood-fills its air to record which of the six faces connect to each other ("advanced cave
 culling", 2014). At render time it walks from the camera's section through connected faces;
-sections it never reaches are not drawn. The IceVoxel equivalent would compute that face
-connectivity in the worker after meshing a section and parent / unparent section folders as the
-camera moves. It would replace the "camera below the surface" rule with an exact answer (for
-example, caves seen through a hole a player dug), at the cost of extra bookkeeping per section.
+sections it never reaches are not drawn. IceVoxel does the same for its hidden caves
+(`World/SectionGraph`, see Cave visibility): workers record the face connectivity of every section
+that may hold caves with its generation and its edits, and the main thread's search decides which
+sections are meshed with their cave walls, instead of a sphere around the camera. Unlike
+Minecraft, a section the search misses is not left out but drawn as rock with stone caps, so a
+miss never shows the void. The "camera below the surface" switch stays: above ground no cave is
+revealed. Far terrain gets a coarser kind of occlusion culling, by horizon (see Far nodes behind
+terrain).
 
 **Regions** in Minecraft are a *storage* format: the save file groups 32 × 32 chunks into one
 `.mca` file so disks do not juggle millions of tiny files. They have nothing to do with rendering.
@@ -2462,3 +2851,20 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
 - Operator blocks (`creativeOnly`) break and drop nothing for survival players, and only players
   `Structures/Permission` allows place, break or use them; a new one needs `drops = false`
   (checked at load).
+- Terrain geometry goes in and out of the workspace only through ChunkRenderer and MeshOverlay:
+  the new before the old leaves, the old `Render.SwapFrames` frames later with its lights off at
+  once, and every removal within the frame budgets (`UnparentPartsPerFrame`, `SwapPartsPerFrame`,
+  `ReleaseBudgetMs`). A section has at most one build that is not live yet; sections that must
+  change together share a commit group.
+- A revealed section's side may only open towards a section that draws its caves on screen
+  whenever this mesh does (its revealed mesh live, or going live in the same commit group), and a
+  section goes hidden only together with the caps closing towards it; anything looser shows the
+  void through a tunnel. `World/SectionGraph`'s faces are `GreedyMesher.Border`'s hidden bits
+  (0 −X, 1 +X, 2 −Z, 3 +Z, 4 −Y, 5 +Y; the opposite face is f xor 1): keep them the same.
+- A Horizon summary must never overstate an occluder: ground only ever drops (edits), estimates
+  never occlude, and a node is hidden only when hidden from every eye. A wrong "hidden" skips
+  parts the player can see.
+- Player setting ids (`PlayerSettings` entries) are saved and sent: append, never reorder or
+  reuse one. A setting's effect key needs a function registered in the client script
+  (`Settings.missing()` lists those without), and anything a worker needs travels in its jobs:
+  worker actors keep their own Config.

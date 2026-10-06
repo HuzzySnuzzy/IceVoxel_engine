@@ -22,6 +22,12 @@
 	  onEditList(fn)      fn(cx, cz, known) after a chunk's edit list arrived or was forgotten
 	  knownEdits(cx, cz)  that edit list (local index -> block, ChunkLayout.localIndex), read only
 	Each `on...` returns a function that removes the listener. Listeners must not edit the world.
+
+	`collectJobEdits` (every generation job of a full detail chunk) needs the chunk's own edits and
+	its four neighbours' edits on the shared border. The border columns of each list are kept ready
+	(`borders`, dropped when that list changes), so the neighbours' whole lists are not read again
+	for every job. `applyJobEdits` writes such a list into chunk data on the main thread (a
+	generation result that came back after an edit is kept and patched, not generated again).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -61,9 +67,16 @@ export type BlockListener = (x: number, y: number, z: number, block: number, pre
 export type ChunkListener = (cx: number, cz: number, loaded: boolean) -> ()
 export type EditListListener = (cx: number, cz: number, known: boolean) -> ()
 
+-- A known edit list's border columns, as (padded index, block) pairs in the padding of the
+-- neighbour that uses them: `west` (local x 0) for the chunk at -X, `east` for +X, `north` (local
+-- z 0) for -Z, `south` for +Z.
+type Borders = { west: { number }, east: { number }, north: { number }, south: { number } }
+
 export type ClientWorld = {
 	-- Edit lists: nil = unknown, false = requested, table = known.
 	edits: { [number]: { [number]: number } | false },
+	-- Border columns of known edit lists (built when first needed, dropped when a list changes).
+	borders: { [number]: Borders },
 	chunks: { [number]: ChunkData },
 	requestQueue: { { number } },
 	blockListeners: { BlockListener },
@@ -78,6 +91,7 @@ export type ClientWorld = {
 	editsKnown: (self: ClientWorld, cx: number, cz: number) -> boolean,
 	forgetEditsExcept: (self: ClientWorld, keep: { [number]: boolean }) -> (),
 	collectJobEdits: (self: ClientWorld, cx: number, cz: number) -> { number },
+	applyJobEdits: (chunk: ChunkData, edits: { number }) -> (),
 	attach: (self: ClientWorld, cx: number, cz: number, chunk: ChunkData) -> (),
 	detach: (self: ClientWorld, cx: number, cz: number) -> (),
 	getBlock: (self: ClientWorld, x: number, y: number, z: number) -> number?,
@@ -99,6 +113,7 @@ function ClientWorld.new(): ClientWorld
 	local self = (
 		setmetatable({
 			edits = {},
+			borders = {},
 			chunks = {},
 			requestQueue = {},
 			blockListeners = {},
@@ -115,6 +130,7 @@ function ClientWorld.new(): ClientWorld
 			-- Only accept lists we asked for (and still want).
 			if self.edits[key] == false then
 				self.edits[key] = list.edits
+				self.borders[key] = nil
 				for _, listener in table.clone(self.editListeners) do
 					listener(list.cx, list.cz, true)
 				end
@@ -182,6 +198,7 @@ function ClientWorld.forgetEditsExcept(self: ClientWorld, keep: { [number]: bool
 	for key, list in self.edits do
 		if not keep[key] and list ~= false then
 			self.edits[key] = nil
+			self.borders[key] = nil
 			if #self.editListeners > 0 then
 				forgotten = forgotten or {}
 				table.insert(forgotten :: { number }, key)
@@ -205,42 +222,106 @@ function ClientWorld.knownEdits(self: ClientWorld, cx: number, cz: number): { [n
 	return if type(list) == "table" then list else nil
 end
 
+-- The border columns of a known edit list (see Borders), built once per version of the list.
+local function bordersOf(self: ClientWorld, key: number): Borders?
+	local cached = self.borders[key]
+	if cached then
+		return cached
+	end
+	local list = self.edits[key]
+	if type(list) ~= "table" then
+		return nil
+	end
+	local borders: Borders = { west = {}, east = {}, north = {}, south = {} }
+	for index, block in list do
+		local lx, y, lz = ChunkLayout.fromLocalIndex(index)
+		if lx == 0 then
+			-- In the -X neighbour's padding at px = P - 1.
+			table.insert(borders.west, (y * P + lz + 1) * P + P - 1)
+			table.insert(borders.west, block)
+		elseif lx == SIZE - 1 then
+			table.insert(borders.east, (y * P + lz + 1) * P)
+			table.insert(borders.east, block)
+		end
+		if lz == 0 then
+			table.insert(borders.north, (y * P + P - 1) * P + lx + 1)
+			table.insert(borders.north, block)
+		elseif lz == SIZE - 1 then
+			table.insert(borders.south, (y * P) * P + lx + 1)
+			table.insert(borders.south, block)
+		end
+	end
+	self.borders[key] = borders
+	return borders
+end
+
+local function append(out: { number }, pairs: { number })
+	table.move(pairs, 1, #pairs, #out + 1, out)
+end
+
 --[[
 	Flat list of (padded cell index, block) pairs to apply to a freshly generated chunk: the
 	chunk's own edits plus the neighbours' edits on the shared border (they live in our padding).
 ]]
 function ClientWorld.collectJobEdits(self: ClientWorld, cx: number, cz: number): { number }
 	local out: { number } = {}
-	local function add(list: { [number]: number } | false | nil, filter: (lx: number, lz: number) -> (number?, number?))
-		if type(list) ~= "table" then
-			return
-		end
-		for index, block in list do
+	local own = self.edits[Coords.chunkKey(cx, cz)]
+	if type(own) == "table" then
+		for index, block in own do
 			local lx, y, lz = ChunkLayout.fromLocalIndex(index)
-			local px, pz = filter(lx, lz)
-			if px and pz then
-				table.insert(out, (y * P + pz) * P + px)
-				table.insert(out, block)
+			table.insert(out, (y * P + lz + 1) * P + lx + 1)
+			table.insert(out, block)
+		end
+	end
+	local west = bordersOf(self, Coords.chunkKey(cx - 1, cz))
+	if west then
+		append(out, west.east)
+	end
+	local east = bordersOf(self, Coords.chunkKey(cx + 1, cz))
+	if east then
+		append(out, east.west)
+	end
+	local north = bordersOf(self, Coords.chunkKey(cx, cz - 1))
+	if north then
+		append(out, north.south)
+	end
+	local south = bordersOf(self, Coords.chunkKey(cx, cz + 1))
+	if south then
+		append(out, south.north)
+	end
+	return out
+end
+
+--[[
+	Writes a collectJobEdits list into chunk data, as the worker does with a generation job's
+	edits: grows the buffer for blocks above its crop and keeps solidBelow / emptyAbove right.
+]]
+function ClientWorld.applyJobEdits(chunk: ChunkData, edits: { number })
+	local top = 0
+	for i = 1, #edits, 2 do
+		if edits[i + 1] ~= AIR then
+			top = math.max(top, edits[i] // ChunkLayout.LAYER + 1)
+		end
+	end
+	if top > chunk.height then
+		local height = ChunkLayout.croppedHeight(top, 1)
+		chunk.data = ChunkLayout.grow(chunk.data, height)
+		chunk.height = height
+	end
+	local data, height = chunk.data, chunk.height
+	for i = 1, #edits, 2 do
+		local index, block = edits[i], edits[i + 1]
+		local y = index // ChunkLayout.LAYER
+		if y < height then
+			writeu16(data, index * 2, block)
+			if block ~= AIR and y + 1 > chunk.emptyAbove then
+				chunk.emptyAbove = y + 1
+			end
+			if buffer.readu8(cullHidden, block) == 0 and y < chunk.solidBelow then
+				chunk.solidBelow = y
 			end
 		end
 	end
-	local edits = self.edits
-	add(edits[Coords.chunkKey(cx, cz)], function(lx, lz)
-		return lx + 1, lz + 1
-	end)
-	add(edits[Coords.chunkKey(cx - 1, cz)], function(lx, lz)
-		return if lx == SIZE - 1 then 0 else nil, lz + 1
-	end)
-	add(edits[Coords.chunkKey(cx + 1, cz)], function(lx, lz)
-		return if lx == 0 then P - 1 else nil, lz + 1
-	end)
-	add(edits[Coords.chunkKey(cx, cz - 1)], function(lx, lz)
-		return lx + 1, if lz == SIZE - 1 then 0 else nil
-	end)
-	add(edits[Coords.chunkKey(cx, cz + 1)], function(lx, lz)
-		return lx + 1, if lz == 0 then P - 1 else nil
-	end)
-	return out
 end
 
 -- Sends queued edit list requests. Called once per frame.
@@ -380,9 +461,13 @@ local function apply(self: ClientWorld, x: number, y: number, z: number, block: 
 		return
 	end
 	local cx, cz, lx, lz = Coords.blockToChunk(x, z)
-	local list = self.edits[Coords.chunkKey(cx, cz)]
+	local key = Coords.chunkKey(cx, cz)
+	local list = self.edits[key]
 	if type(list) == "table" then
 		list[ChunkLayout.localIndex(lx, y, lz)] = block
+		if lx == 0 or lx == SIZE - 1 or lz == 0 or lz == SIZE - 1 then
+			self.borders[key] = nil
+		end
 	end
 
 	local section = y // SECTION

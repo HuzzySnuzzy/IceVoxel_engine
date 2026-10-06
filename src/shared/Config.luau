@@ -4,8 +4,10 @@
 
 	Shared by the server, the client and the worker actors. Anything that affects what the world *is*
 	(seed handling, world shape, generation) must be identical on every machine, which is why it lives
-	in ReplicatedStorage. Purely visual / performance settings live under `Lod`, `Render` and `Workers`
-	and only affect the client.
+	in ReplicatedStorage. Purely visual / performance settings live under `Lod`, `Streaming`, `Render`
+	and `Workers` (and the cave view's part of `Caves`) and only affect the client. Players change many
+	of them for themselves in the Options menu (`Settings`, Shared/PlayerSettings): these are the
+	defaults and the presets (High is this file's view, Low its Mobile values).
 ]]
 
 local Config = {
@@ -36,14 +38,25 @@ local Config = {
 		-- Caves never come closer to the surface than this, so they are invisible from above ground.
 		SurfaceMargin = 5,
 		MinY = 4,
-		-- While the camera is below the surface, cave walls are meshed in sections within this many
-		-- blocks of it. Otherwise caves are treated as solid rock, which keeps the part count low.
-		RevealRadius = 64,
-		-- In big caverns (the Underlands) the radius grows with the open space around the camera, up
-		-- to this. Caves only exist in full detail chunks, so more than their reach does nothing:
+		-- While the camera is below the surface, the cave walls it can see into are meshed (in 16^3
+		-- sections: World/SectionGraph's search through connected cave air, Streaming/CaveReach).
+		-- Otherwise caves are treated as solid rock, which keeps the part count low.
+		-- The search reaches RevealReach blocks along tunnels (to section centres; the cave view
+		-- setting scales it, this is its value at RevealRadiusMax). 88 costs about what the old
+		-- reveal sphere (80 blocks in tunnels) did: median 0.96x its parts over 29 caves on three
+		-- seeds, at most 1.12x; 96 would cost 1.02x (at most 1.28x), 112 1.11x.
+		RevealReach = 88,
+		-- In big caverns (the Underlands) it reaches further: the open space around the camera
+		-- (CaveReach.probe) gives a radius between these two, and the search reaches that plus a
+		-- section. Caves only exist in full detail chunks, so more than their reach does nothing:
 		-- underground they reach about Lod.UndergroundSplitDistanceL1 x 32 blocks (up to 15% less
 		-- ahead of a moving camera: LodTree's hysteresis).
+		RevealRadius = 64,
 		RevealRadiusMax = 128,
+		-- Sections the search reveals at most (the nearest; the Underlands' giant caverns).
+		RevealBudget = 1500,
+		-- Seconds a section stays revealed after the search stopped reaching it.
+		RevealHold = 2,
 		-- Glow lichen carries one PointLight per 8 x 8 x 8 blocks (Meshing/GreedyMesher), on in
 		-- every revealed cave (a few hundred, instead of one per lichen: 1,000-3,000). A number
 		-- switches off the lights farther than that many blocks from the camera (Rendering/
@@ -111,6 +124,28 @@ local Config = {
 		ReplaceTimeout = 8,
 		-- Max chunk diff requests sent to the server per message.
 		DiffRequestBatch = 64,
+		-- A jump of more than this (blocks) between two refreshes, or a teleport this far, drops
+		-- the old area at once (teleport mode) instead of keeping it until the new one is ready.
+		TeleportDistance = 128,
+		-- Teleport mode (also the first load) ends once the 3x3 chunks under the player are shown
+		-- and at most TeleportSettle nodes and builds are left, or after TeleportTimeout seconds.
+		-- Far meshes and map tiles wait meanwhile.
+		TeleportTimeout = 10,
+		TeleportSettle = 16,
+		-- Cave reveal, seam and plant remesh jobs in flight while generation has work (edits are
+		-- never limited), so generation keeps the other workers.
+		RemeshJobs = 4,
+		-- A cave reveal pass changing at most this many sections goes live in one frame (a cave
+		-- cap opening and the tunnel behind it together); bigger ones (entering a cave) as they come.
+		RevealGroupSections = 96,
+		-- A failed generation keeps the old terrain and is retried after this many seconds,
+		-- doubling per failure up to RetryMax.
+		RetryDelay = 0.5,
+		RetryMax = 8,
+		-- Far meshes are not built while more nodes than this wait for generation, or more
+		-- section builds than BusyBuilds wait for the renderer.
+		BusyJobs = 8,
+		BusyBuilds = 24,
 	},
 
 	Workers = {
@@ -125,8 +160,27 @@ local Config = {
 	-- Rendering (client) -----------------------------------------------------------------------------
 
 	Render = {
-		-- Milliseconds per frame spent creating / recycling parts.
+		-- Milliseconds per frame spent creating / recycling parts. With AutoBudget this is the
+		-- base of an adaptive budget (Rendering/FrameBudget): lower while frames run longer than
+		-- usual, up to 8 ms while work waits and frames have room, 12 ms while the player is
+		-- frozen waiting for terrain.
 		BuildBudgetMs = 4,
+		AutoBudget = true,
+		-- Edits (placing and breaking blocks) get their own milliseconds per frame, so they never
+		-- wait behind loading.
+		EditBudgetMs = 2,
+		-- Frames old geometry stays in the workspace after its replacement went in (remeshed
+		-- sections, water and glass too, LOD swaps, far meshes; lights go off at once). A part the
+		-- engine draws a frame late would otherwise show the sky behind it for that frame. 0 swaps
+		-- in one frame.
+		SwapFrames = 2,
+		-- Parts taken out of the workspace per frame (old nodes, teleports), parts per frame put in
+		-- or taken out by swaps (one allowance for the streamer's LOD swap units and far meshes
+		-- hiding or showing parts, which still move one node a frame), and milliseconds per frame
+		-- giving parts back to the pool (or destroying them once it is full).
+		UnparentPartsPerFrame = 3000,
+		SwapPartsPerFrame = 6000,
+		ReleaseBudgetMs = 1.5,
 		-- Shadows on full detail chunks / on LOD chunks. Shadows also gives torches' and
 		-- lanterns' light shadows, so it stops at walls (Rendering/PartPool; glowstone's cube
 		-- casts one instead).
@@ -171,6 +225,11 @@ local Config = {
 			-- 1.5 x the average frame and MaxFrameTime seconds.
 			BuildInterval = 0.35,
 			MaxFrameTime = 1 / 40,
+			-- No builds while the camera moved faster than this on average (blocks per second) over
+			-- the last SpeedWindow seconds: regions keep changing while it moves, and every
+			-- MeshPart costs a long frame. Parts keep drawing meanwhile.
+			MaxBuildSpeed = 2,
+			SpeedWindow = 2,
 			-- Studs each quad overlaps its neighbours (hides cracks where quads meet).
 			Overlap = 0.05,
 			-- Meshes stay off when, in the startup probe, building a full-size mesh makes frames this
@@ -445,6 +504,29 @@ local Config = {
 		Footsteps = true,
 		Interface = true,
 		Ambient = true,
+	},
+
+	-- Player settings (client menu, server store) ----------------------------------------------------
+
+	--[[
+		The Options menu (Ui/SettingsScreen; what it holds: Shared/PlayerSettings). Its presets and
+		defaults come from the settings above (High is this file's view, Low its Mobile values), and
+		a player's choices apply on top of them on that player's client only.
+	]]
+	Settings = {
+		-- Keep each player's choices between sessions in a DataStore, one profile per kind of
+		-- device (desktop, touch, console). In Studio this needs API access, as SaveWaypoints.
+		Save = true,
+		-- Opens and closes the menu (Enum.KeyCode names; touch: the gear beside the hotbar, and
+		-- the gear in the inventory).
+		Key = "P",
+		GamepadButton = "DPadRight",
+		-- Seconds after the last change before the costly ones apply (view distance, caves,
+		-- plants, shadows, textures, far meshes), and before the choices are sent to the server.
+		ApplyDelay = 0.4,
+		SaveDelay = 1.5,
+		-- Seconds a joining client waits for its saved choices before it starts loading terrain.
+		LoadWait = 1,
 	},
 
 	-- Server -----------------------------------------------------------------------------------------

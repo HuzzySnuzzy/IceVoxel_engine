@@ -13,14 +13,14 @@
 	           way, at the generator.
 	  Caves    deep underground (the sky light reaching the camera below SoundRules.CAVE_EXPOSURE,
 	           Rendering/LightingController.skyExposure), a low rumble (ambient.cave) every few
-	           minutes spent there, somewhere near the listener. Config.Sounds.Ambient turns it off.
+	           minutes spent there, somewhere near the listener. Config.Sounds.Ambient (and the
+	           player's Cave Rumble setting, SoundPlayer.allows) turns it off.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 local Mining = require(Shared.Mining)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
@@ -106,7 +106,7 @@ function Ambience.start()
 		end
 
 		-- Caves: time spent in the dark brings the rumble closer; time in daylight takes it back.
-		if Config.Sounds.Ambient and LightingController.skyExposure() < SoundRules.CAVE_EXPOSURE then
+		if SoundPlayer.allows("ambient") and LightingController.skyExposure() < SoundRules.CAVE_EXPOSURE then
 			caveTime += dt
 			local listener = SoundPlayer.listener()
 			if caveTime >= caveDelay and listener then

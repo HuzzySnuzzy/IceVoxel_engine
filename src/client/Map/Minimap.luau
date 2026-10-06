@@ -3,7 +3,9 @@
 	Minimap in the top right corner: terrain around the player (north up), the player's heading,
 	waypoints (pinned to the edge when off the map) and other players (not spectators, unless this
 	player spectates too: Player/SpectatorRules). Click it to open the world map; `-` / `=` zoom
-	out / in.
+	out / in. `setVisible` (the Minimap setting) hides it with its coordinates line; Map/init then
+	stops updating it and painting its tiles. Hidden on a touch screen, a small "Map" button takes
+	its corner: tapping the minimap is the only way to the world map there (M is a key).
 ]]
 
 local Players = game:GetService("Players")
@@ -25,6 +27,7 @@ local MAX_ZOOM = 16
 export type Minimap = {
 	view: MapView.MapView,
 	update: () -> (),
+	setVisible: (visible: boolean) -> (),
 }
 
 local Minimap = {}
@@ -121,11 +124,33 @@ function Minimap.new(
 	open.Activated:Connect(openMap)
 	open.Parent = holder
 
+	-- The world map's way in on touch screens while the minimap is hidden.
+	local mapButton = Instance.new("TextButton")
+	mapButton.Name = "MapButton"
+	mapButton.AnchorPoint = Vector2.new(1, 0)
+	mapButton.Position = UDim2.new(1, -16, 0, 16)
+	mapButton.Size = UDim2.fromOffset(52, 32)
+	mapButton.BackgroundColor3 = Color3.fromRGB(24, 28, 34)
+	mapButton.BackgroundTransparency = 0.2
+	mapButton.BorderSizePixel = 0
+	mapButton.Font = Enum.Font.GothamBold
+	mapButton.TextSize = 14
+	mapButton.TextColor3 = Color3.new(1, 1, 1)
+	mapButton.Text = "Map"
+	mapButton.Visible = false
+	local buttonStroke = Instance.new("UIStroke")
+	buttonStroke.Thickness = 2
+	buttonStroke.Color = Color3.fromRGB(12, 14, 18)
+	buttonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	buttonStroke.Parent = mapButton
+	mapButton.Activated:Connect(openMap)
+	mapButton.Parent = gui
+
 	local waypointDots: { Frame } = {}
 	local playerDots: { [Player]: Frame } = {}
 
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if processed then
+		if processed or not holder.Visible then
 			return
 		end
 		if input.KeyCode == Enum.KeyCode.Minus and layer.scale < MAX_ZOOM then
@@ -190,7 +215,13 @@ function Minimap.new(
 		end
 	end
 
-	return { view = view, update = update }
+	local function setVisible(visible: boolean)
+		holder.Visible = visible
+		info.Visible = visible
+		mapButton.Visible = not visible and UserInputService.TouchEnabled
+	end
+
+	return { view = view, update = update, setVisible = setVisible }
 end
 
 return Minimap

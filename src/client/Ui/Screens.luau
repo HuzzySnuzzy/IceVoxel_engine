@@ -45,6 +45,11 @@
 	death close it like any screen (its `closed` is called; Minecraft's Escape cancels such a
 	screen), and so does a block's window the server opens.
 
+	Settings: the Options menu (Ui/SettingsScreen, a panel, which requires this module and so
+	registers itself with `onSettings`) opens with Config.Settings.Key (P) or GamepadButton
+	(D-pad right) while no screen is open, the HUD's touch gear and the inventory's gear (which
+	closes the inventory first); the key closes it again.
+
 	JEI (Ui/Jei) comes with every open screen: the item list at the right of the screen and,
 	opened from it, the recipe view, which takes the inventory panel's place (no slot clicks while
 	it is shown). Clicks on the list or the view go to JEI before anything else; R and U over any
@@ -63,6 +68,7 @@ local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
@@ -107,6 +113,18 @@ local TOOLTIP_OFFSET = 12
 local ESCAPE_REPEAT = 0.3
 local MOUSE_STEP = "IceVoxelScreensMouse"
 local STICK_ACTION = "IceVoxelScreensStick"
+
+-- An Enum.KeyCode by name (Config), nil when there is none.
+local function keyCode(name: string): Enum.KeyCode?
+	local ok, code = pcall(function()
+		return (Enum.KeyCode :: any)[name]
+	end)
+	return if ok then code else nil
+end
+
+-- The Options menu's key and gamepad button (Ui/SettingsScreen).
+local SETTINGS_KEY = keyCode(Config.Settings.Key)
+local SETTINGS_BUTTON = keyCode(Config.Settings.GamepadButton)
 
 local NUMBER_KEYS: { [Enum.KeyCode]: number } = {
 	[Enum.KeyCode.One] = 1,
@@ -192,6 +210,8 @@ local current: Kind? = nil
 local started = false
 -- The panel shown while `current` is "panel" (and the one showPanel asked for).
 local panel: Panel? = nil
+-- Opens or closes the Options menu (Ui/SettingsScreen.toggle).
+local settingsHandler: (() -> ())? = nil
 
 function Screens.isOpen(): boolean
 	return current ~= nil
@@ -233,6 +253,22 @@ end
 -- Is `p` the panel shown?
 function Screens.panelShown(p: Panel): boolean
 	return current == "panel" and panel == p
+end
+
+--[[
+	The Options menu's toggle (Ui/SettingsScreen, which can't be required here: it requires this
+	module): called for Config.Settings.Key / GamepadButton with no screen open, the key while a
+	panel is shown, and the HUD's and the inventory's gear buttons.
+]]
+function Screens.onSettings(handler: () -> ())
+	settingsHandler = handler
+end
+
+local function openSettings()
+	local handler = settingsHandler
+	if handler then
+		handler()
+	end
 end
 
 --[[
@@ -760,6 +796,12 @@ function Screens.start()
 	end
 
 	Hud.onInventoryButton(Screens.toggle)
+	Hud.onSettingsButton(openSettings)
+	-- The inventory's gear: the inventory closes (its window too), then the menu opens.
+	inventory.onSettings = function()
+		close()
+		openSettings()
+	end
 	Hud.onScreenWheel(function(delta: number)
 		if jei:wheel(mousePoint(), delta) then
 			return
@@ -1002,6 +1044,9 @@ function Screens.start()
 					close()
 				elseif key == Enum.KeyCode.Escape and not GuiService.MenuIsOpen then
 					escape()
+				elseif key == SETTINGS_KEY then
+					-- (Closes the Options menu; other panels ignore it.)
+					openSettings()
 				end
 			elseif key == Enum.KeyCode.ButtonB then
 				close()
@@ -1015,6 +1060,8 @@ function Screens.start()
 		if current == nil then
 			if not processed and (key == Enum.KeyCode.E or key == Enum.KeyCode.ButtonY) then
 				Screens.toggle()
+			elseif not processed and (key == SETTINGS_KEY or key == SETTINGS_BUTTON) then
+				openSettings()
 			end
 			return
 		end

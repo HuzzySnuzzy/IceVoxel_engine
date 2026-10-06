@@ -16,8 +16,9 @@
 	               make footsteps. The server never sends footsteps, so every client makes
 	               everyone's.
 
-	Footsteps follow Config.Sounds.Footsteps; swimming and splashes always play. Spectators make no
-	sound at all (Player/SpectatorRules: no physics in Minecraft), this player included.
+	Footsteps follow Config.Sounds.Footsteps and the player's Footsteps setting (SoundPlayer.
+	allows); swimming and splashes always play. Spectators make no sound at all (Player/
+	SpectatorRules: no physics in Minecraft), this player included.
 ]]
 
 local Players = game:GetService("Players")
@@ -54,7 +55,7 @@ local walker = SoundRules.newWalker()
 local walkerState: PlayerPhysics.State? = nil
 
 local function playSounds(x: number, y: number, z: number, step: number?, swim: number?, splash: number?)
-	if step and Config.Sounds.Footsteps then
+	if step and SoundPlayer.allows("footsteps") then
 		SoundPlayer.play(Sounds.block(step, "step"), x, y, z)
 	end
 	if swim then

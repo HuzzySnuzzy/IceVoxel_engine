@@ -5,7 +5,8 @@
 	  hotbar     9 slots at the bottom centre with the selection frame, item icons, counts and the
 	             durability bars of worn tools.
 	             Click or tap a slot to select it; keys 1-9, the mouse wheel (down = next slot,
-	             when Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The
+	             with the Scroll Wheel setting on Hotbar: `setWheelSelects`, by default
+	             Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The
 	             wheel is bound through ContextActionService at High priority and sunk, so the
 	             camera does not zoom.
 	  item name  the held item's name above the hotbar for 2 s after the selection changes,
@@ -15,7 +16,7 @@
 	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
 	             makes them shake; damage makes their outline blink.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
-	             the spectator menu's middle click)
+	             the spectator menu's middle click), a gear at its start the Options menu
 
 	Game modes (Shared/GameMode): creative has no hearts and its item name sits lower. Spectators
 	(no showsHud) get neither the hotbar nor its item name, hearts or armor: their number keys,
@@ -133,6 +134,9 @@ local wheelHandler: ((delta: number) -> ())? = nil
 -- Something over the game that is not a screen has the keys (the game mode switcher).
 local inputTaken = false
 local inventoryHandler: (() -> ())? = nil
+local settingsHandler: (() -> ())? = nil
+-- The wheel selects hotbar slots (else it zooms the camera).
+local wheelSelects = Config.Interaction.ScrollWheelHotbar
 local previewWindow: Types.Window? = nil
 local dirty = true
 
@@ -180,6 +184,16 @@ end
 -- The touch "..." button calls `handler` (the screens open the inventory).
 function Hud.onInventoryButton(handler: () -> ())
 	inventoryHandler = handler
+end
+
+-- The touch gear button calls `handler` (the Options menu).
+function Hud.onSettingsButton(handler: () -> ())
+	settingsHandler = handler
+end
+
+-- The Scroll Wheel setting: the wheel selects hotbar slots (true) or zooms the camera.
+function Hud.setWheelSelects(value: boolean)
+	wheelSelects = value
 end
 
 -- The on-screen area of hotbar slot 1..9 (the creative screen clicks it like a window slot).
@@ -369,6 +383,27 @@ function Hud.start()
 		end
 	end)
 
+	-- The touch gear at the hotbar's other end opens the Options menu (the space both buttons
+	-- take is kept free on touch screens, so the hotbar stays centred).
+	local gear = Style.frame(canvas, -(TOUCH_BUTTON + 2), BAR_Y, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
+	gear.BackgroundTransparency = 0.55
+	table.insert(coverage, gear)
+	Style.border(gear, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	Style.border(gear, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+	Style.gear(gear, 5, 5, 4)
+	local gearButton = Instance.new("TextButton")
+	gearButton.Text = ""
+	gearButton.BackgroundTransparency = 1
+	gearButton.Size = UDim2.fromScale(1, 1)
+	gearButton.ZIndex = 6
+	gearButton.Parent = gear
+	gearButton.Activated:Connect(function()
+		if settingsHandler then
+			SoundPlayer.click()
+			settingsHandler()
+		end
+	end)
+
 	--[[ Hearts and armor ]]
 
 	local hearts: { Icon } = {}
@@ -398,10 +433,12 @@ function Hud.start()
 	local function updateScale()
 		local touch = UserInputService.TouchEnabled
 		more.Visible = touch
+		gear.Visible = touch
 		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
 		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
 	end
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
+	Style.scaleChanged:Connect(updateScale)
 	gui.Parent = player:WaitForChild("PlayerGui")
 	updateScale()
 
@@ -584,7 +621,7 @@ function Hud.start()
 			SpectatorGui.wheel(delta)
 			return Enum.ContextActionResult.Sink
 		end
-		if not Config.Interaction.ScrollWheelHotbar then
+		if not wheelSelects then
 			return Enum.ContextActionResult.Pass
 		end
 		if delta ~= 0 then

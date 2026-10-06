@@ -8,7 +8,8 @@
 	            Humanoid.MoveDirection if a game replaces them), turned by the camera like the
 	            default controls do, and Humanoid.Jump. Sprint and sneak keys / touch buttons
 	            (Config.Movement): the sprint key toggles sprinting (or is held, ToggleSprint =
-	            false); double tapping forward sprints too.
+	            false: the Sprint setting; switching it lets go of whatever the old mode latched,
+	            `followSprintMode`); double tapping forward sprints too.
 	  Ticks     fixed 50 ms steps like Minecraft; the character is drawn interpolated between the
 	            last two ticks (as Minecraft does), before the camera updates each frame. Steps up
 	            (Config.Movement.StepHeight, just over a block) are drawn as a quick climb.
@@ -22,8 +23,9 @@
 	            with shift lock.
 	  Camera    at the hull's eye height (eased like Minecraft's when crouching / crawling); the
 	            field of view widens while flying (x 1.1) and sprinting (Config.Movement.SprintFov),
-	            eased like Minecraft's FOV modifier, on top of whatever the camera's field of view
-	            is.
+	            eased like Minecraft's FOV modifier, on top of the FOV setting (`setFieldOfView`;
+	            without one, whatever the camera's field of view is), scaled by the FOV Effects
+	            setting (`setFovEffects`, Minecraft's: 0 keeps the field of view still).
 	  Modes     the game mode attribute (Shared/GameMode) gives the hull its abilities
 	            (PlayerPhysics.setGameMode): creative may fly (double tap jump); spectators always
 	            fly, through everything (noClip), and their mouse wheel changes the flying speed
@@ -42,7 +44,8 @@
 	            on stays on), as Minecraft releases every key mapping when a screen opens.
 	  Waiting   until the full detail chunks under the hull are visible (after spawning and
 	            teleports), it stays frozen in place.
-	  Teleports the server sets the feet position as attributes (Rig); other scripts moving the
+	  Teleports the server sets the feet position as attributes (Rig), and the streamer is told the
+	            destination at once (`teleported`: teleport mode); other scripts moving the
 	            character far are noticed too, and the hull follows.
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
 	            does not die on its own, so the controller puts the Humanoid into Dead itself.
@@ -105,7 +108,13 @@ local FLYING_FOV = 1.1
 local STANDING_EYE = PlayerPhysics.dimensions("standing").eye
 local LYING_EYE = PlayerPhysics.dimensions("crawling").eye
 
-type Streamer = { isReady: (self: any, x: number, z: number) -> boolean }
+-- The terrain streamer: whether the ground under (x, z) is shown, and (optional) a teleport's
+-- destination (feet, blocks), so it selects there at once (teleport mode beyond
+-- Streaming.TeleportDistance).
+type Streamer = {
+	isReady: (self: any, x: number, z: number) -> boolean,
+	teleported: ((self: any, feet: Vector3) -> ())?,
+}
 
 export type View = {
 	-- Hull state (blocks), updated every tick; also the game mode's abilities: whether the player
@@ -131,6 +140,11 @@ local MovementController = {}
 -- The local player's movement while a character exists (BlockInteraction, the F3 overlay, the
 -- animator read it).
 MovementController.current = nil :: View?
+
+-- The FOV settings (Settings/): the field of view (nil: the camera's own) and how much of the
+-- flying / sprinting widening shows (0..1).
+local fovSetting: number? = nil
+local fovEffects = 1
 
 -- The player a spectator spectates (nil: none), and the camera mode to go back to afterwards.
 local spectated: Player? = nil
@@ -274,6 +288,32 @@ local function aimAtEyes(humanoid: Humanoid, feet: Vector3)
 	end
 end
 
+--[[
+	The FOV setting (degrees, Minecraft's 30..110; nil: leave the camera's own). Applies at once,
+	also with no character (the camera keeps it, and gets it again when it is replaced).
+]]
+local cameraWatched = false
+function MovementController.setFieldOfView(fov: number?)
+	fovSetting = fov
+	local function apply()
+		local camera = workspace.CurrentCamera
+		local value = fovSetting
+		if camera and value and MovementController.current == nil then
+			camera.FieldOfView = math.clamp(value, 1, MAX_FOV)
+		end
+	end
+	apply()
+	if not cameraWatched then
+		cameraWatched = true
+		workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(apply)
+	end
+end
+
+-- The FOV Effects setting: how much of the flying and sprinting widening shows (0..1).
+function MovementController.setFovEffects(scale: number)
+	fovEffects = math.clamp(scale, 0, 1)
+end
+
 function MovementController.start(world: ClientWorld.ClientWorld, streamer: Streamer)
 	local player = Players.LocalPlayer
 	local physicsWorld: PlayerPhysics.World = {
@@ -338,7 +378,18 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			ContextActionService:SetTitle(name, title)
 		end
 	end
+	-- The Sprint setting can switch between Toggle and Hold at any time (Settings "controls"):
+	-- what the old mode latched lets go, or nothing could stop the sprint any more.
+	local sprintToggles = Movement.ToggleSprint
+	local function followSprintMode()
+		if Movement.ToggleSprint ~= sprintToggles then
+			sprintToggles = Movement.ToggleSprint
+			sprintHeld, sprintOn = false, false
+			setTitle("IceVoxelSprint", "Sprint")
+		end
+	end
 	bind("IceVoxelSprint", Movement.SprintKeys, "Sprint", function(held, touch)
+		followSprintMode()
 		if touch or Movement.ToggleSprint then
 			-- (Ctrl+Q in an inventory screen must not toggle sprinting.)
 			if held and not inputTaken() then
@@ -381,6 +432,11 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			fovCamera = camera
 			baseFov = camera.FieldOfView
 		end
+		local setting = fovSetting
+		if setting then
+			baseFov = setting
+		end
+		target = 1 + (target - 1) * fovEffects
 		fovModifier += (target - fovModifier) * ease(dt)
 		if math.abs(target - fovModifier) < 1e-4 then
 			fovModifier = target
@@ -509,6 +565,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				MovementController.spectate(nil)
 				settled = true
 				snap(target)
+				local teleported = streamer.teleported
+				if teleported then
+					teleported(streamer, target)
+				end
 			end
 		end
 		table.insert(connections, character:GetAttributeChangedSignal(Rig.TELEPORT_FEET):Connect(onTeleport))
@@ -598,6 +658,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			end
 
 			jumpLatched = jumpLatched or jumpHeld()
+			followSprintMode()
 			return {
 				moveX = moveX,
 				moveZ = moveZ,

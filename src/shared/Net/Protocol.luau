@@ -59,6 +59,9 @@
 	  SpectatorTeleport f64 userId: a spectator teleports to that player (the spectator menu's
 	                 "Teleport to Player"); a whole number, finite (Studio's test players are
 	                 negative)
+	  SaveSettings   player settings (below): the choices of the client's device profile, sent
+	                 about Config.Settings.SaveDelay seconds after the last change and when the
+	                 menu closes (the server keeps them and saves them on leave)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -124,6 +127,9 @@
 	                   2 remove  u8 reason (0 arrived, 1 dropped, 2 gone)
 	                 Clients move items along the path themselves at 20 ticks a second; nothing
 	                 is sent per block.
+	  Settings       player settings (below): the saved choices of one device profile, one message
+	                 for each of the three profiles once the server loaded them on join (a profile
+	                 with nothing saved has count 0)
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -147,12 +153,18 @@
 	Waypoint list: u32 revision, u8 count, count x (i32 x, i32 y, i32 z, u8 r, u8 g, u8 b, u8 nameLength, name)
 	  The client numbers its changes (revision); the server echoes the revision it answers (0 = the
 	  list loaded on join), so neither side ever applies an older list over a newer one.
+
+	Player settings (Shared/PlayerSettings): u8 version (1), u8 profile (1 desktop, 2 touch,
+	  3 console), u8 count, count x (u8 id, f32 value): only the settings the player chose, by
+	  their append-only ids. Another version, profile or length is malformed; unknown ids and NaN
+	  are dropped and values are clamped into their ranges (a touch profile's to the phone limits).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
 local GameMode = require(script.Parent.Parent.GameMode)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
+local PlayerSettings = require(script.Parent.Parent.PlayerSettings)
 local Settings = require(script.Parent.Parent.Structures.Settings)
 
 local Protocol = {}
@@ -172,6 +184,7 @@ Protocol.ClientMessage = {
 	StructureData = 12,
 	SetGameMode = 13,
 	SpectatorTeleport = 14,
+	SaveSettings = 15,
 }
 
 Protocol.ServerMessage = {
@@ -189,6 +202,7 @@ Protocol.ServerMessage = {
 	StructureBlocks = 12,
 	Jigsaws = 13,
 	StructureData = 14,
+	Settings = 15,
 }
 
 Protocol.EditAction = {
@@ -1933,6 +1947,18 @@ function Protocol.joinStructureData(
 		parts[i + 1] = assembly.pieces[i]
 	end
 	return table.concat(parts), nil
+end
+
+--[[ Player settings ]]
+
+-- A device profile's chosen settings (SaveSettings and Settings; PlayerSettings.encode).
+function Protocol.encodeSettings(profile: number, values: PlayerSettings.Values): buffer
+	return PlayerSettings.encode(profile, values)
+end
+
+-- The profile and its settings, clamped; nil when malformed (PlayerSettings.decode).
+function Protocol.decodeSettings(b: buffer): (number?, PlayerSettings.Values?)
+	return PlayerSettings.decode(b)
 end
 
 return Protocol

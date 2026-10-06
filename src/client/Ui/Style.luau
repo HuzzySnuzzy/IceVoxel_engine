@@ -6,7 +6,9 @@
 	Everything is laid out in Minecraft GUI pixels (the inventory is 176 x 166 of them) and blown
 	up by a UIScale with `guiScale`, Minecraft's automatic GUI scale: the largest whole number that
 	still shows 320 x 240 GUI pixels (at most MAX_SCALE), never more than what fits the content.
-	Touch screens get in-between scales too, so the UI is as big as fits.
+	Touch screens get in-between scales too, so the UI is as big as fits. The player's GUI Scale
+	setting (`setScaleOverride`: 1, 2 or 3, as Minecraft's) lowers that maximum; GUIs scaled once
+	(the HUD, WAILA) lay out again on `scaleChanged`.
 
 	  panel   #C6C6C6 face, 2 px white bevel top-left and #555555 bottom-right, black outline with
 	          slightly rounded corners
@@ -83,24 +85,46 @@ local MAX_SCALE = 3
 -- Screen pixels kept free around scaled content.
 local MARGIN = 8
 
+-- The player's GUI Scale setting (1..MAX_SCALE; nil: automatic), and its change signal.
+local scaleOverride: number? = nil
+local scaleChangedEvent = Instance.new("BindableEvent")
+-- Fires when the GUI Scale setting changes (scaled GUIs lay out again).
+Style.scaleChanged = scaleChangedEvent.Event
+
+--[[
+	Sets the GUI Scale setting: a whole scale (Minecraft's 1, 2, 3), still never more than the
+	automatic scale allows on this screen nor more than fits; nil or 0 is automatic.
+]]
+function Style.setScaleOverride(scale: number?)
+	local value = if scale and scale >= 1 then math.min(math.floor(scale), MAX_SCALE) else nil
+	if value ~= scaleOverride then
+		scaleOverride = value
+		scaleChangedEvent:Fire()
+	end
+end
+
 --[[
 	The UIScale for content of `width` x `height` GUI pixels on a `viewport`-sized screen:
-	Minecraft's automatic scale (a whole number, at most MAX_SCALE), shrunk to fit the content into
-	`area` (default: the whole viewport; the automatic scale always comes from the viewport, so
-	content fitted into part of the screen matches the rest). Touch screens may use fractions (in
-	eighths), so they get as big as fits.
+	Minecraft's automatic scale (a whole number, at most MAX_SCALE; lower with the GUI Scale
+	setting), shrunk to fit the content into `area` (default: the whole viewport; the automatic
+	scale always comes from the viewport, so content fitted into part of the screen matches the
+	rest). Touch screens may use fractions (in eighths), so they get as big as fits.
 ]]
 function Style.guiScale(viewport: Vector2, width: number, height: number, touch: boolean, area: Vector2?): number
 	local space = area or viewport
 	local fit = math.min((space.X - 2 * MARGIN) / width, (space.Y - 2 * MARGIN) / height)
+	local override = scaleOverride
 	local scale
 	if touch then
-		scale = math.min(viewport.X / BASE_WIDTH, viewport.Y / BASE_HEIGHT, MAX_SCALE, fit)
+		scale = math.min(viewport.X / BASE_WIDTH, viewport.Y / BASE_HEIGHT, override or MAX_SCALE, fit)
 		scale = math.floor(scale * 8) / 8
 	else
 		local auto = 1
 		while auto < MAX_SCALE and viewport.X / (auto + 1) >= BASE_WIDTH and viewport.Y / (auto + 1) >= BASE_HEIGHT do
 			auto += 1
+		end
+		if override then
+			auto = math.min(auto, override)
 		end
 		scale = math.min(auto, fit)
 		if scale >= 1 then
@@ -333,6 +357,27 @@ function Style.pixelArt(
 		end
 	end
 	return groups
+end
+
+-- The settings gear (11 x 11 pixel art, "#"), for the buttons that open the Options menu.
+Style.GEAR_ART = table.freeze({
+	"....###....",
+	".##.###.##.",
+	".#########.",
+	"..##...##..",
+	"###.....###",
+	"###.....###",
+	"###.....###",
+	"..##...##..",
+	".#########.",
+	".##.###.##.",
+	"....###....",
+})
+
+-- The gear in white with Minecraft's text shadow, its top left at (x, y) of `parent`.
+function Style.gear(parent: Instance, x: number, y: number, z: number)
+	Style.pixelArt(parent, x + 1, y + 1, Style.GEAR_ART, { ["#"] = Style.shadowOf(Style.Colour.Text) }, z)
+	Style.pixelArt(parent, x, y, Style.GEAR_ART, { ["#"] = Style.Colour.Text }, z + 1)
 end
 
 -- Recolours every frame of a pixel art group.

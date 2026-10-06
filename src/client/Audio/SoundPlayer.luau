@@ -24,8 +24,10 @@
 	             SoundRules.CAPS). At most MAX_PER_FRAME sounds start per frame. Nothing is created
 	             per sound.
 	  Volume     the event's Volume (or the replacement's) x the cue's x Config.Sounds.Volume x
-	             Config.Sounds.Sources[event.source]; the pitch varies randomly by the event's
-	             pitchVariance (SoundRules.playback).
+	             Config.Sounds.Sources[event.source], each of those two times the player's Music &
+	             Sounds setting (`setPlayerSettings`); the pitch varies randomly by the event's
+	             pitchVariance (SoundRules.playback). The player's footsteps, interface clicks and
+	             cave rumble switches can only turn off what Config.Sounds has on (`allows`).
 	  Files      every file the catalogue uses is preloaded (ContentProvider). One whose Sound has
 	             not loaded after SoundRules.LOAD_TIMEOUT seconds (FAILED_GRACE once the preload
 	             reported it failed) is replaced by its events' `fallback` from then on, with a
@@ -97,6 +99,12 @@ local playedThisFrame = 0
 local failed: { [string]: boolean } = {}
 -- Where the player hears from (studs; SoundRules.listenerAt), nil before the first frame.
 local listenerPosition: Vector3? = nil
+-- The player's settings (Settings/: Music & Sounds), on top of Config.Sounds.
+local playerVolume = 1
+local playerSources: { [string]: number } = {}
+local playerToggles: { [string]: boolean } = {}
+-- Config.Sounds with the player's volumes multiplied in (refilled for every sound).
+local mixed: SoundRules.Settings = { Volume = 1, Sources = {} }
 -- Replacement Sounds by name; nil when they need indexing again.
 local overrideIndex: { [string]: { Sound } }? = nil
 local preloadedOverrides: { [Sound]: boolean } = setmetatable({}, { __mode = "k" }) :: any
@@ -354,16 +362,13 @@ local function start(bank: Bank, event: Event, position: Vector3?, cueVolume: nu
 		return false
 	end
 	local replacement = SoundRules.chooseOverride(overrides(), Sounds.lookupNames(event.index), math.random())
+	-- (Config.Sounds is read live: a developer may change it during the game.)
 	local settings = Config.Sounds :: any
-	local playback = SoundRules.playback(
-		event,
-		overrideOf(replacement),
-		failed,
-		cueVolume,
-		cuePitch,
-		math.random(),
-		settings :: SoundRules.Settings
-	)
+	mixed.Volume = settings.Volume * playerVolume
+	local source = event.source
+	mixed.Sources[source] = (settings.Sources[source] or 1) * (playerSources[source] or 1)
+	local playback =
+		SoundRules.playback(event, overrideOf(replacement), failed, cueVolume, cuePitch, math.random(), mixed)
 	if playback.volume <= 0 then
 		return false
 	end
@@ -419,6 +424,30 @@ local function playEvent(event: Event, position: Vector3?, volume: number?, pitc
 end
 
 --[[ API ]]
+
+--[[
+	The player's Music & Sounds settings: the master volume and one per source (blocks, players,
+	ambient, ui; 0..1, multiplying Config.Sounds' own), and the switches "footsteps", "interface"
+	and "ambient" (the cave rumble).
+]]
+function SoundPlayer.setPlayerSettings(volume: number, sources: { [string]: number }, toggles: { [string]: boolean })
+	playerVolume = volume
+	playerSources = table.clone(sources)
+	playerToggles = table.clone(toggles)
+end
+
+--[[
+	Do footsteps ("footsteps"), interface clicks ("interface") or the cave rumble ("ambient")
+	play: on in Config.Sounds (Footsteps, Interface, Ambient) and not switched off by the player.
+]]
+function SoundPlayer.allows(kind: string): boolean
+	local configured = if kind == "footsteps"
+		then Config.Sounds.Footsteps
+		elseif kind == "interface" then Config.Sounds.Interface
+		elseif kind == "ambient" then Config.Sounds.Ambient
+		else true
+	return configured and playerToggles[kind] ~= false
+end
 
 -- Whether sounds play (started, and Config.Sounds.Enabled).
 function SoundPlayer.isEnabled(): boolean
@@ -478,7 +507,7 @@ end
 
 -- An interface button or tab was clicked (ui.button.click; Config.Sounds.Interface).
 function SoundPlayer.click()
-	if Config.Sounds.Interface then
+	if SoundPlayer.allows("interface") then
 		SoundPlayer.playFlat("ui.button.click")
 	end
 end

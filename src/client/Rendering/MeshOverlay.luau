@@ -14,10 +14,23 @@
 	       memory budget), scratch:Clear()
 	    -> AssetService:CreateMeshPartAsync -> MeshPart placed at the mesh's centre.
 
-	When it is done and the members are unchanged, the MeshParts are parented and, two frames later,
-	the members' part folders are unparented (kept, not released). Any change to a member of the mesh
-	(removed, or rebuilt) demotes the region in the same frame: parts back, mesh destroyed. A failed
-	build just leaves the parts. So the screen never waits for a mesh.
+	When it is done and the members are unchanged, the MeshParts are parented and, Render.SwapFrames
+	frames later (at least one), the members' part folders are unparented (kept, not released). Any
+	change to a member of the mesh (removed, or rebuilt) demotes the region: the members' parts go
+	back into the workspace and the mesh is destroyed Render.SwapFrames frames after the last of
+	them, so the two never leave a gap. Hiding and showing members both count their parts against
+	Render.SwapPartsPerFrame, shared with the frame's level of detail swaps (`step`'s allowance and
+	what the swaps used; ChunkRenderer counts the parts): a node that would go over it waits for the
+	next frame, except the first one the overlay moves in a frame (so meshes never wait forever
+	behind the swaps). A failed build just leaves the parts. So the screen never waits for a mesh.
+
+	When builds run: one at a time, at most one every BuildInterval, never right after a hitch,
+	never while the camera moved faster than MaxBuildSpeed blocks/s on average over the last
+	SpeedWindow seconds (regions keep changing while it moves, and every MeshPart costs a 20-30 ms
+	frame), never while the streamer is busy (`setStreamerBusy`), and never while paused (`pause`,
+	teleports; the builder also stops a running build between MeshParts). Parts keep drawing
+	meanwhile. `setUserEnabled(false)` (settings) demotes everything but keeps the quads, so
+	switching back on is instant; it cannot switch on meshes that were off from the start.
 
 	Why one scratch mesh: the client budget charges every growable EditableMesh a flat 10 MiB of
 	80 MiB on PC (the "8 EditableMesh limit"), and memory of destroyed meshes reportedly comes back
@@ -44,6 +57,7 @@ local QuadMesher = require(Shared.Meshing.QuadMesher)
 
 local MeshRegions = require(script.Parent.MeshRegions)
 local ViewSettings = require(script.Parent.ViewSettings)
+local FrameBudget = require(script.Parent.FrameBudget)
 
 local Settings = Config.Render.FarMeshes
 local BLOCK = Config.BlockSize
@@ -52,9 +66,12 @@ local SIZE = Config.ChunkSize
 local BATCH = 16000
 -- Seconds of array preparation per frame on the builder thread.
 local SLICE = 0.003
--- Frames between showing a new mesh and hiding the parts under it (a new mesh may need a frame
--- before it is drawn; the overlap is invisible, both look the same).
-local SWAP_FRAMES = 2
+-- Frames between showing a new mesh and hiding the parts under it, and between showing parts
+-- again and destroying the mesh (something new may need a frame before it is drawn; the overlap
+-- is invisible, both look the same): Render.SwapFrames, at least one.
+local function swapFrames(): number
+	return math.max(1, Config.Render.SwapFrames)
+end
 -- Seconds after startup before the probe runs.
 local PROBE_DELAY = 5
 local FIDELITY = {
@@ -67,13 +84,23 @@ type Node = any
 type RegionParts = {
 	parts: { MeshPart },
 	triangles: number,
-	-- Previous mesh, destroyed once the new one has been shown for SWAP_FRAMES.
+	-- Previous mesh, destroyed once the new one hid its members.
 	retiring: { MeshPart },
 	retiringTriangles: number,
 	-- Members whose part folders are unparented.
 	hidden: { [Node]: boolean },
+	-- Members to hide (from hideFrame on, from hideIndex on, within the allowance).
 	pendingHide: { Node }?,
 	hideFrame: number,
+	hideIndex: number,
+}
+
+-- A demoted mesh: destroyed SwapFrames frames after its members are all parts again.
+type Dying = {
+	parts: { MeshPart },
+	triangles: number,
+	waiting: number,
+	due: number?,
 }
 
 type Done = {
@@ -87,6 +114,8 @@ type QuadsEntry = { buffer: buffer, count: number }
 
 export type Stats = {
 	status: string,
+	-- Why no build starts now ("" when one may): "off", "paused", "moving", "busy".
+	gate: string,
 	regions: number,
 	meshedRegions: number,
 	nodes: number,
@@ -125,6 +154,23 @@ export type MeshOverlay = {
 	liveTriangles: number,
 	baked: number,
 	stats: Stats,
+	-- Switched off in the settings (quads kept), paused (teleports), streamer busy, stop the build
+	-- running now (checked between MeshParts).
+	userOff: boolean,
+	paused: boolean,
+	streamerBusy: boolean,
+	abort: boolean,
+	-- The camera's average speed (studs/s) and shadows of new meshes.
+	motion: FrameBudget.Motion,
+	farShadows: boolean,
+	-- Members to put back into the workspace (FIFO from unhideHead), and the dying mesh each one
+	-- belongs to (nil: cancelled).
+	unhide: { Node },
+	unhideHead: number,
+	unhiding: { [Node]: Dying },
+	dying: { Dying },
+	-- Parts in a node's model (set by ChunkRenderer; 0 without it).
+	countParts: (node: Node) -> number,
 
 	plainLevel: (self: MeshOverlay, level: number) -> boolean,
 	wantsQuads: (self: MeshOverlay, level: number) -> boolean,
@@ -132,9 +178,15 @@ export type MeshOverlay = {
 	onShow: (self: MeshOverlay, node: Node) -> (),
 	onClear: (self: MeshOverlay, node: Node) -> (),
 	onChanged: (self: MeshOverlay, node: Node) -> (),
-	step: (self: MeshOverlay) -> (),
+	step: (self: MeshOverlay, allowance: number?, used: number?) -> number,
 	demoteAll: (self: MeshOverlay) -> (),
 	getStats: (self: MeshOverlay) -> Stats,
+	setUserEnabled: (self: MeshOverlay, on: boolean) -> boolean,
+	pause: (self: MeshOverlay) -> (),
+	resume: (self: MeshOverlay) -> (),
+	setStreamerBusy: (self: MeshOverlay, busy: boolean) -> (),
+	restyle: (self: MeshOverlay, farShadows: boolean) -> (),
+	gate: (self: MeshOverlay, now: number) -> string,
 }
 
 local MeshOverlay = {}
@@ -178,7 +230,7 @@ local function batchAdd(em: EditableMesh, attr: Enum.MeshAttribute, data: { any 
 end
 
 -- Builds one MeshPart from MeshGeometry arrays using the scratch mesh. Returns the part or an error.
-local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh): (MeshPart?, string?)
+local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh, castShadow: boolean): (MeshPart?, string?)
 	em:Clear()
 	local positions = mesh.positions
 	local vertexCount = #positions // 3
@@ -240,7 +292,7 @@ local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh): (MeshPart?,
 	part.CanCollide = false
 	part.CanQuery = false
 	part.CanTouch = false
-	part.CastShadow = Config.Render.FarShadows
+	part.CastShadow = castShadow
 	part.EnableFluidForces = false
 	part.Material = Enum.Material.SmoothPlastic
 	part.Color = Color3.new(1, 1, 1)
@@ -287,7 +339,12 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 	local parts: { MeshPart } = {}
 	local triangles = 0
 	for _, mesh in builder:finish() do
-		local ok, part, err = pcall(buildMesh, em, mesh)
+		-- Paused (a teleport): stop between MeshParts, each costs a long frame.
+		if self.abort then
+			destroyAll(parts)
+			return nil, 0, "aborted"
+		end
+		local ok, part, err = pcall(buildMesh, em, mesh, self.farShadows)
 		if not ok or part == nil then
 			destroyAll(parts)
 			return nil, 0, if ok then err else tostring(part)
@@ -307,7 +364,7 @@ local function probeMesh(
 	local builder = MeshGeometry.builder(BLOCK, 0, 20000)
 	fill(builder)
 	local mesh = builder:finish()[1]
-	local ok, part, err = pcall(buildMesh, em, mesh)
+	local ok, part, err = pcall(buildMesh, em, mesh, false)
 	if not ok then
 		return nil, tostring(part), mesh
 	end
@@ -434,6 +491,8 @@ local function builderLoop(self: MeshOverlay)
 			continue
 		end
 		slowest = 0
+		-- (A pause or the settings switch may come before the build starts.)
+		self.abort = self.paused or self.userOff
 		connection = RunService.Heartbeat:Connect(function(dt)
 			slowest = math.max(slowest, dt)
 		end)
@@ -469,24 +528,52 @@ local function partsOf(self: MeshOverlay, region: MeshRegions.Region): RegionPar
 			hidden = {},
 			pendingHide = nil,
 			hideFrame = 0,
+			hideIndex = 1,
 		}
 		self.instances[region] = entry
 	end
 	return entry :: RegionParts
 end
 
--- Mesh gone, every member drawn by its parts again.
+-- A node waiting to be put back for a dying mesh no longer needs it (hidden again, or removed).
+local function cancelUnhide(self: MeshOverlay, node: Node)
+	local dying = self.unhiding[node]
+	if dying then
+		self.unhiding[node] = nil
+		dying.waiting -= 1
+		if dying.waiting <= 0 then
+			dying.due = self.frame + swapFrames()
+		end
+	end
+end
+
+--[[
+	Mesh going: every member is drawn by its parts again (put back within the allowance, see
+	step), then the mesh is destroyed SwapFrames frames after the last one.
+]]
 local function demote(self: MeshOverlay, region: MeshRegions.Region)
 	local entry = self.instances[region]
 	if entry then
+		local parts = table.clone(entry.parts)
+		table.move(entry.retiring, 1, #entry.retiring, #parts + 1, parts)
+		local dying: Dying = {
+			parts = parts,
+			triangles = entry.triangles + entry.retiringTriangles,
+			waiting = 0,
+			due = nil,
+		}
 		for node in entry.hidden do
 			if not node.removed and node.model then
-				node.model.Parent = self.partsRoot
+				cancelUnhide(self, node)
+				self.unhiding[node] = dying
+				dying.waiting += 1
+				table.insert(self.unhide, node)
 			end
 		end
-		destroyAll(entry.parts)
-		destroyAll(entry.retiring)
-		self.liveTriangles -= entry.triangles + entry.retiringTriangles
+		if dying.waiting == 0 then
+			dying.due = self.frame + swapFrames()
+		end
+		table.insert(self.dying, dying)
 		self.instances[region] = nil
 	end
 	self.regions:demoted(region, os.clock())
@@ -495,6 +582,14 @@ end
 local function apply(self: MeshOverlay, finished: Done)
 	local job = finished.job
 	local now = os.clock()
+	if finished.err == "aborted" or (self.userOff and finished.parts) then
+		-- Stopped, or finished just after meshes were switched off in the settings.
+		if finished.parts then
+			destroyAll(finished.parts :: { MeshPart })
+		end
+		self.regions:abort(job)
+		return
+	end
 	if finished.parts == nil then
 		self.regions:finish(job, false, now)
 		self.stats.failures += 1
@@ -527,28 +622,110 @@ local function apply(self: MeshOverlay, finished: Done)
 	entry.parts, entry.triangles = parts, finished.triangles
 	self.liveTriangles += finished.triangles
 	for _, part in parts do
+		if part.CastShadow ~= self.farShadows then
+			part.CastShadow = self.farShadows
+		end
 		part.Parent = self.root
 	end
 	entry.pendingHide = job.members
-	entry.hideFrame = self.frame + SWAP_FRAMES
+	entry.hideFrame = self.frame + swapFrames()
+	entry.hideIndex = 1
 end
 
--- After SWAP_FRAMES: hide the parts the new mesh draws, drop the previous mesh.
-local function finishSwaps(self: MeshOverlay)
+--[[
+	Puts back members of demoted meshes while they fit in the allowance (`used`: parts moved this
+	frame so far; `moved`: the overlay moved a node this frame, else the next one goes anyway).
+	Returns both again.
+]]
+local function unhideStep(self: MeshOverlay, allowance: number, used: number, moved: boolean): (number, boolean)
+	local list = self.unhide
+	local head = self.unhideHead
+	while head <= #list do
+		local node = list[head]
+		local dying = self.unhiding[node]
+		local back = dying ~= nil and not node.removed and node.model ~= nil
+		local cost = if back then self.countParts(node) else 0
+		if moved and used + cost > allowance then
+			break
+		end
+		head += 1
+		if dying then
+			self.unhiding[node] = nil
+			if back then
+				node.model.Parent = self.partsRoot
+				used += cost
+				moved = true
+			end
+			dying.waiting -= 1
+			if dying.waiting <= 0 then
+				dying.due = self.frame + swapFrames()
+			end
+		end
+	end
+	if head > #list then
+		table.clear(list)
+		head = 1
+	end
+	self.unhideHead = head
+	return used, moved
+end
+
+-- After the swap delay: hide the parts the new meshes draw (within the allowance, as unhideStep),
+-- then drop the previous mesh.
+local function finishSwaps(self: MeshOverlay, allowance: number, used: number, moved: boolean): (number, boolean)
 	for region, entry in self.instances do
 		local nodes = entry.pendingHide
 		if nodes and self.frame >= entry.hideFrame then
-			entry.pendingHide = nil
 			local meshed = region.meshed
-			for _, node in nodes do
-				if meshed and meshed[node] and not node.removed and node.model then
-					node.model.Parent = nil
+			local i = entry.hideIndex
+			while i <= #nodes do
+				local node = nodes[i]
+				local model = node.model
+				local hides = meshed ~= nil and meshed[node] ~= nil and not node.removed and model ~= nil
+				local leaves = hides and self.unhiding[node] == nil and model.Parent ~= nil
+				local cost = if leaves then self.countParts(node) else 0
+				if moved and used + cost > allowance then
+					break
+				end
+				i += 1
+				if hides then
+					if self.unhiding[node] then
+						-- Still out of the workspace for a dying mesh: stays out.
+						cancelUnhide(self, node)
+					elseif leaves then
+						model.Parent = nil
+						used += cost
+						moved = true
+					end
 					entry.hidden[node] = true
 				end
 			end
-			destroyAll(entry.retiring)
-			self.liveTriangles -= entry.retiringTriangles
-			entry.retiring, entry.retiringTriangles = {}, 0
+			entry.hideIndex = i
+			if i > #nodes then
+				entry.pendingHide = nil
+				destroyAll(entry.retiring)
+				self.liveTriangles -= entry.retiringTriangles
+				entry.retiring, entry.retiringTriangles = {}, 0
+			end
+		end
+	end
+	return used, moved
+end
+
+-- Destroys demoted meshes whose members have been parts for the swap delay.
+local function buryDying(self: MeshOverlay)
+	local list = self.dying
+	local i = 1
+	while i <= #list do
+		local dying = list[i]
+		local due = dying.due
+		if due and self.frame >= due then
+			destroyAll(dying.parts)
+			self.liveTriangles -= dying.triangles
+			list[i] = list[#list]
+			list[#list] = nil
+		else
+			i += 1
 		end
 	end
 end
@@ -587,8 +764,22 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 		pausedUntil = 0,
 		liveTriangles = 0,
 		baked = 0,
+		userOff = false,
+		paused = false,
+		streamerBusy = false,
+		abort = false,
+		motion = FrameBudget.motion(Settings.SpeedWindow),
+		farShadows = Config.Render.FarShadows,
+		unhide = {},
+		unhideHead = 1,
+		unhiding = {},
+		dying = {},
+		countParts = function(_node: Node): number
+			return 0
+		end,
 		stats = {
 			status = "",
+			gate = "",
 			regions = 0,
 			meshedRegions = 0,
 			nodes = 0,
@@ -638,12 +829,18 @@ end
 -- The node is going away (call before its parts are released).
 function MeshOverlay.onClear(self: MeshOverlay, node: Node)
 	self.quads[node] = nil
+	cancelUnhide(self, node)
+	-- Only its own region can hide it (node -> region index, not a loop over every region).
+	local member = self.regions:regionOfNode(node)
 	local region = self.regions:remove(node, os.clock())
 	if region then
 		demote(self, region)
 	end
-	for _, entry in self.instances do
-		entry.hidden[node] = nil
+	if member then
+		local entry = self.instances[member]
+		if entry then
+			entry.hidden[node] = nil
+		end
 	end
 end
 
@@ -662,21 +859,49 @@ function MeshOverlay.demoteAll(self: MeshOverlay)
 	end
 end
 
--- Once per frame: apply finished builds, finish swaps, start the next build.
-function MeshOverlay.step(self: MeshOverlay)
+-- Why no build may start now ("" when one may).
+function MeshOverlay.gate(self: MeshOverlay, _now: number): string
+	if not self.active or self.userOff then
+		return "off"
+	elseif self.paused then
+		return "paused"
+	elseif self.motion:speed() > Settings.MaxBuildSpeed * BLOCK then
+		return "moving"
+	elseif self.streamerBusy then
+		return "busy"
+	end
+	return ""
+end
+
+--[[
+	Once per frame: apply finished builds, put back members of demoted meshes and hide members of
+	new ones (at most `allowance` parts this frame, counting the `used` ones the frame's swaps
+	moved already; at least one node), destroy meshes that are done, start the next build. Returns
+	the parts the overlay moved in or out of the workspace.
+]]
+function MeshOverlay.step(self: MeshOverlay, allowance: number?, used: number?): number
 	self.frame += 1
+	local now = os.clock()
+	local camera = workspace.CurrentCamera
+	if camera then
+		local p = camera.CFrame.Position
+		self.motion:update(p.X, p.Y, p.Z, now)
+	end
 	while #self.done > 0 do
 		apply(self, table.remove(self.done, 1) :: Done)
 	end
-	finishSwaps(self)
+	local limit = allowance or math.huge
+	local before = used or 0
+	local total, moved = unhideStep(self, limit, before, false)
+	total = finishSwaps(self, limit, total, moved)
+	buryDying(self)
 
-	local now = os.clock()
 	if not self.active and next(self.quads) then
 		-- Meshes are off: quads are no longer needed.
 		table.clear(self.quads)
 	end
 	if
-		self.active
+		self:gate(now) == ""
 		and self.status ~= "probing"
 		and self.status ~= "starting"
 		and self.pending == nil
@@ -703,12 +928,70 @@ function MeshOverlay.step(self: MeshOverlay)
 			self.pending = job
 		end
 	end
+	return total - before
+end
+
+--[[
+	The settings switch. Off: every region goes back to parts, no builds, quads kept (switching on
+	again needs no regeneration). On: returns false when meshes were off from the start of the
+	session (configuration, phone, or the probe failed): that applies on rejoin.
+]]
+function MeshOverlay.setUserEnabled(self: MeshOverlay, on: boolean): boolean
+	if not on then
+		if not self.userOff then
+			self.userOff = true
+			self.abort = self.pending ~= nil
+			self:demoteAll()
+		end
+		return true
+	end
+	-- (Cleared even when meshes cannot come on, so the status gives the real reason.)
+	self.userOff = false
+	return self.configured
+end
+
+-- No builds (a teleport); a build running now stops before its next MeshPart.
+function MeshOverlay.pause(self: MeshOverlay)
+	self.paused = true
+	if self.pending ~= nil then
+		self.abort = true
+	end
+end
+
+function MeshOverlay.resume(self: MeshOverlay)
+	self.paused = false
+end
+
+-- The streamer has a lot queued or building: no new builds until it settles.
+function MeshOverlay.setStreamerBusy(self: MeshOverlay, busy: boolean)
+	self.streamerBusy = busy
+end
+
+-- Far shadows on or off: the meshes now and the ones built later.
+function MeshOverlay.restyle(self: MeshOverlay, farShadows: boolean)
+	if farShadows == self.farShadows then
+		return
+	end
+	self.farShadows = farShadows
+	local function set(parts: { MeshPart })
+		for _, part in parts do
+			part.CastShadow = farShadows
+		end
+	end
+	for _, entry in self.instances do
+		set(entry.parts)
+		set(entry.retiring)
+	end
+	for _, dying in self.dying do
+		set(dying.parts)
+	end
 end
 
 function MeshOverlay.getStats(self: MeshOverlay): Stats
 	local s = self.regions:stats()
 	local stats = self.stats
-	stats.status = self.status
+	stats.status = if self.userOff then "off (settings)" else self.status
+	stats.gate = self:gate(os.clock())
 	stats.regions = s.regions
 	stats.meshedRegions = s.meshed
 	stats.nodes = s.nodes
@@ -716,6 +999,9 @@ function MeshOverlay.getStats(self: MeshOverlay): Stats
 	local parts = 0
 	for _, entry in self.instances do
 		parts += #entry.parts
+	end
+	for _, dying in self.dying do
+		parts += #dying.parts
 	end
 	stats.meshParts = parts
 	stats.triangles = self.liveTriangles

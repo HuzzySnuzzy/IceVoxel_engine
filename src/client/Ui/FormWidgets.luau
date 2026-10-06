@@ -11,14 +11,20 @@
 	             TextBox.TextEditable, "copy and paste text within a TextBox"). Focusing one
 	             selects everything (SelectionStart / CursorPosition).
 	  button     Minecraft's button with a label that can change (cycle buttons, "ON" / "OFF")
-	             and an inactive look; Activated covers mouse, touch and gamepad A.
+	             and an inactive look; Activated covers mouse, touch and gamepad A. A label wider
+	             than the button shrinks to fit (the pixel font is wider than Minecraft's).
 	  label      text with Minecraft's shadow, left aligned, centred or ending at its right edge;
-	             a right aligned label shrinks its text to fit (the pixel font is wider than
-	             Minecraft's, and these labels share their row with another).
+	             a right aligned or centred label shrinks its text to fit (the pixel font is wider
+	             than Minecraft's, and right aligned labels share their row with another).
 	  slider     Minecraft's slider (AbstractSliderButton): a button whose handle is dragged,
-	             clicked or (gamepad A) stepped; whole values only.
+	             clicked or stepped with the gamepad: D-pad left / right one step down / up
+	             (clamped; the D-pad doesn't move the gamepad selection off a slider, see
+	             `stepSelected`), A one step up, wrapping. Whole values only (callers map
+	             fractional steps to indexes, Ui/SettingsScreen).
 ]]
 
+local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
 local UserInputService = game:GetService("UserInputService")
 
 local Style = require(script.Parent.Style)
@@ -185,6 +191,22 @@ function FormWidgets.button(
 	button.SelectionImageObject = Style.selectionImage
 	button.Parent = parent
 
+	-- A label too wide for the button gets smaller, down to 5 pixels.
+	local function fit(value: string)
+		local size = Style.TEXT_SIZE
+		while size > 5 and Style.textWidth(value, size) > w - 4 do
+			size -= 1
+		end
+		if label.TextSize ~= size then
+			label.TextSize = size
+			shadow.TextSize = size
+			local y = math.floor((h - size) / 2)
+			label.Position = UDim2.fromOffset(0, y)
+			shadow.Position = UDim2.fromOffset(1, y + 1)
+		end
+	end
+	fit(text)
+
 	local self = { button = button, enabled = true, clicked = nil }
 	local hovered = false
 	local function paint()
@@ -223,8 +245,11 @@ function FormWidgets.button(
 	end)
 
 	function self.setText(_: Button, value: string)
-		label.Text = value
-		shadow.Text = value
+		if label.Text ~= value then
+			label.Text = value
+			shadow.Text = value
+			fit(value)
+		end
 	end
 	function self.setEnabled(_: Button, value: boolean)
 		if (self :: any).enabled ~= value then
@@ -272,7 +297,7 @@ function FormWidgets.label(
 	local label, shadow = Style.shadowText(frame, text, 0, 0, w, Style.TEXT_SIZE, colour, 1, alignment)
 	local function fit(value: string)
 		local size = Style.TEXT_SIZE
-		if align == "right" then
+		if align == "right" or align == "centre" then
 			while size > 5 and Style.textWidth(value, size) > w do
 				size -= 1
 			end
@@ -304,9 +329,48 @@ export type Slider = {
 	value: number,
 	setValue: (self: Slider, value: number) -> (),
 	setVisible: (self: Slider, visible: boolean) -> (),
+	-- One step up (+1) or down (-1), as the player (clamped).
+	step: (self: Slider, delta: number) -> (),
 	-- Called with the new value when the player moves it.
 	changed: ((value: number) -> ())?,
 }
+
+-- Sliders by their button: the D-pad steps the gamepad-selected one.
+local slidersByButton: { [GuiObject]: Slider } = setmetatable({}, { __mode = "k" }) :: any
+local STEP_ACTION = "IceVoxelSliderStep"
+local dpadListening = false
+-- The slider button the sinking binding is for (selection events may come in either order).
+local sinkingFor: GuiObject? = nil
+
+--[[
+	D-pad left / right over a selected slider steps it. The same press would also move Roblox's
+	gamepad selection sideways: while a slider is selected a ContextActionService binding above
+	the default priority sinks those two buttons, and should the selection move anyway it is put
+	back on the slider the next frame.
+]]
+local function listenDpad()
+	if dpadListening then
+		return
+	end
+	dpadListening = true
+	UserInputService.InputBegan:Connect(function(input: InputObject)
+		local key = input.KeyCode
+		if key ~= Enum.KeyCode.DPadLeft and key ~= Enum.KeyCode.DPadRight then
+			return
+		end
+		local selected = GuiService.SelectedObject
+		local slider = if selected then slidersByButton[selected] else nil
+		if selected == nil or slider == nil then
+			return
+		end
+		slider:step(if key == Enum.KeyCode.DPadRight then 1 else -1)
+		task.defer(function()
+			if GuiService.SelectedObject ~= selected and selected.Visible and selected.Parent ~= nil then
+				GuiService.SelectedObject = selected
+			end
+		end)
+	end)
+end
 
 -- Minecraft's slider of whole values `low`..`high`, labelled by `text(value)`.
 function FormWidgets.slider(
@@ -395,7 +459,28 @@ function FormWidgets.slider(
 	function self.setVisible(_: Slider, visible: boolean)
 		button:setVisible(visible)
 	end
-	return (self :: any) :: Slider
+	function self.step(_: Slider, delta: number)
+		set((self :: any).value + delta, true)
+	end
+
+	-- The D-pad steps it while it is the gamepad selection (see listenDpad).
+	local slider = (self :: any) :: Slider
+	slidersByButton[button.button] = slider
+	listenDpad()
+	local object = button.button
+	object.SelectionGained:Connect(function()
+		sinkingFor = object
+		ContextActionService:BindActionAtPriority(STEP_ACTION, function(): Enum.ContextActionResult
+			return Enum.ContextActionResult.Sink
+		end, false, Enum.ContextActionPriority.High.Value + 1, Enum.KeyCode.DPadLeft, Enum.KeyCode.DPadRight)
+	end)
+	object.SelectionLost:Connect(function()
+		if sinkingFor == object then
+			sinkingFor = nil
+			ContextActionService:UnbindAction(STEP_ACTION)
+		end
+	end)
+	return slider
 end
 
 return FormWidgets

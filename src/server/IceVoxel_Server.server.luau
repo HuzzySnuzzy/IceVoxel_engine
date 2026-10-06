@@ -17,7 +17,8 @@
 	                   /gamerule doDaylightCycle), cosmetic characters (collision group, teleports,
 	                   fall damage, invulnerability), item entities (drops), inventories, chests,
 	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
-	                   spawning, map and spectator teleports, waypoints, keeping chunks around
+	                   spawning, map and spectator teleports, waypoints, player settings (the
+	                   Options menu's choices, Players/SettingsStore), keeping chunks around
 	                   players generated
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
 	                   transporters, water in pipes, replication), and the Configurator and buckets
@@ -53,6 +54,7 @@ local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
 local WaypointStore = require(Server.Players.WaypointStore)
+local SettingsStore = require(Server.Players.SettingsStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
 local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
@@ -116,6 +118,7 @@ StructureBlocks.start(net, world)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
+SettingsStore.start(net)
 Simulation.start(world)
 Api._ready(world, ticker)
 

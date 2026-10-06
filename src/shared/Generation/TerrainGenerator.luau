@@ -22,12 +22,18 @@
 	  LOD chunks lower their border (padding) columns by one cell. A coarse chunk next to a finer
 	  one would otherwise hide border cells the finer neighbour leaves exposed, which shows up as
 	  thin cracks at LOD boundaries; this "skirt" makes those cells visible.
+
+	  For the client's culling, `generate` also hands back what it knows anyway (`extras`): the
+	  cave lattice (where caves may be), each column's terrain height and where library
+	  structures wrote (World/SectionGraph reads fewer cells with them), and a per-tile summary of
+	  the node's heights (World/Horizon). None of it changes the blocks.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
 local Blocks = require(script.Parent.Parent.Blocks)
 local Biomes = require(script.Parent.Parent.Biomes)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
+local Horizon = require(script.Parent.Parent.World.Horizon)
 local Noise = require(script.Parent.Noise)
 local Relief = require(script.Parent.Relief)
 local Caves = require(script.Parent.Caves)
@@ -93,14 +99,24 @@ export type ChunkResult = {
 	solidBelow: number,
 	-- Every cell at or above this is air.
 	emptyAbove: number,
+	-- Where the chunk may hold cave air (full detail only; nil: no caves), see Caves.Carved.
+	carved: Caves.Carved?,
+	-- With `extras` (the client's culling, Shared/World/Horizon and SectionGraph): the node's
+	-- Horizon summary; for full detail chunks the terrain height of each core column (u16 cells at
+	-- (z * SIZE + x) * 2, before structures and caves), and the cells library structures wrote
+	-- something other than rock or cave air into ({ lowest, highest }; nil: none).
+	summary: buffer?,
+	surface: buffer?,
+	structureSpan: { number }?,
 }
 
 export type Generator = {
 	seed: number,
 	-- Terrain height (first air block), surface biome index, vegetation chance, surface block.
 	column: (x: number, z: number) -> (number, number, number, number),
-	-- `yield` is called regularly so callers can spread the work over several frames.
-	generate: (level: number, nx: number, nz: number, yield: (() -> ())?) -> ChunkResult,
+	-- `yield` is called regularly so callers can spread the work over several frames. `extras`:
+	-- also return what the client's culling needs (ChunkResult `summary`, `surface`, ...).
+	generate: (level: number, nx: number, nz: number, yield: (() -> ())?, extras: boolean?) -> ChunkResult,
 	-- A spawn column: low, dry, gentle land near the hills. x, height, z.
 	findSpawn: () -> (number, number, number),
 	--[[
@@ -256,7 +272,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local surfaces: { number } = table.create(P * P, 0)
 	local topCells: { number } = table.create(P * P, 0)
 
-	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?): ChunkResult
+	local function generate(level: number, nx: number, nz: number, yield: (() -> ())?, extras: boolean?): ChunkResult
 		local step, stepY = ChunkLayout.steps(level)
 		local half, halfY = step // 2, stepY // 2
 		local originX, originZ = nx * SIZE * step, nz * SIZE * step
@@ -421,6 +437,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			Ores.place(data, seed, nx, nz, cells)
 		end
 
+		local structureSpan: { number }? = nil
+
 		-- 4. Trees and other structures. On LOD chunks they are rooted on the chunk's own (coarser)
 		-- terrain: the height of the cell their root is in, sampled like `generate` does.
 		if level <= Config.StructureMaxLevel then
@@ -471,6 +489,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				if lowest < solidBelow then
 					solidBelow = lowest
 				end
+				if lowest < huge then
+					structureSpan = { lowest, top - 1 }
+				end
 			end
 		end
 
@@ -487,6 +508,22 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 
+		-- 7. For the client's culling: the Horizon summary (per 4 x 4 cell tile, the lowest terrain
+		-- top and the highest top) and the terrain height of every core column.
+		local summary, surface = nil, nil
+		if extras then
+			summary = Horizon.summarise(data, cells, emptyAbove, topCells, stepY)
+			if level == 0 then
+				local heightsOut = buffer.create(SIZE * SIZE * 2)
+				for z = 0, SIZE - 1 do
+					for x = 0, SIZE - 1 do
+						writeu16(heightsOut, (z * SIZE + x) * 2, math.max(topCells[(z + 1) * P + x + 2] + 1, 0))
+					end
+				end
+				surface = heightsOut
+			end
+		end
+
 		return {
 			data = data,
 			level = level,
@@ -495,6 +532,10 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			height = cells,
 			solidBelow = solidBelow,
 			emptyAbove = emptyAbove,
+			carved = carved,
+			summary = summary,
+			surface = surface,
+			structureSpan = if extras then structureSpan else nil,
 		}
 	end
 

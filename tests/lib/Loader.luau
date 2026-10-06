@@ -3,7 +3,8 @@
 
 	Builds a fake instance tree from source folders, mirroring Rojo's rules (`init.luau` turns a
 	folder into a module, `X.luau` is a module named X), then runs every module with its own
-	`script` global and a `require` that accepts those fake instances. Shared modules and the
+	`script` and a `require` that accepts those fake instances (passed in as arguments, so Luau's
+	fast builtin calls stay on, as in Roblox: see `withArguments`). Shared modules and the
 	server's world logic only use pure Luau (buffer, bit32, math.noise...), so they behave exactly
 	as in Roblox. `game:GetService(name)` returns the fake service folders mounted with `mount`.
 ]]
@@ -94,6 +95,28 @@ local function scan(dir: string, node: Node)
 	end
 end
 
+--[[
+	A module's source with `script`, `require` and `game` declared as locals taken from the chunk's
+	arguments. A custom environment table (luau.load's `environment`) would be simpler, but it
+	turns off Luau's fast builtin calls (buffer.*, bit32.*, math.*) for the whole module, which made
+	every Lune timing 1.3-2.6x slower than the same code in Roblox. The declaration goes on the
+	first line after the `--!` directives (which must stay first), so error line numbers don't move.
+]]
+local function withArguments(source: string): string
+	local lines = string.split(source, "\n")
+	local i = 1
+	while lines[i] and string.sub(lines[i], 1, 3) == "--!" do
+		i += 1
+	end
+	local declare = "local script, require, game = ...; "
+	if lines[i] == nil then
+		lines[i] = declare
+	else
+		lines[i] = declare .. lines[i]
+	end
+	return table.concat(lines, "\n")
+end
+
 export type Environment = {
 	-- Mounts `dir` as `serviceName.folderName`, e.g. ("src/shared", "ReplicatedStorage", "IceVoxel").
 	mount: (dir: string, serviceName: string, folderName: string) -> Node,
@@ -125,13 +148,12 @@ function Loader.new(): Environment
 		assert(not loading[node], `Cyclic require of {path}`)
 		loading[node] = true
 
-		local chunk = luau.load(fs.readFile(path), {
+		local chunk = luau.load(withArguments(fs.readFile(path)), {
 			debugName = path,
-			environment = { script = node, require = requireNode, game = game },
 			-- Set NOCODEGEN=1 to measure interpreter-only speed (Roblox clients may not use native code).
 			codegenEnabled = process.env.NOCODEGEN == nil,
 		})
-		local result = chunk()
+		local result = chunk(node, requireNode, game)
 		cache[node] = result
 		loading[node] = nil
 		return result

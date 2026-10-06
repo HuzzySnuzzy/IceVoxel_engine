@@ -39,8 +39,10 @@
 	  Place     the top centre, kept out of the minimap's corner (when that leaves room to read it)
 	            and, while F3 is open, right of the debug text when the screen allows; drawn
 	            smaller when it doesn't fit (WailaInfo.placement, tested).
-	  Hidden    while a screen is open (Ui/Screens), while the HUD is hidden (the world map), and with
-	            nothing aimed at.
+	  Hidden    while a screen is open (Ui/Screens), while the HUD is hidden (the world map), with
+	            nothing aimed at, and with the WAILA setting off (`setEnabled`: then nothing is
+	            picked either). It keeps out of the minimap's corner only while the minimap shows
+	            (`setMinimapShown`, the Minimap setting).
 
 	Updates are cheap: every frame builds a short key of what would be shown (the target, the held
 	item, F3) and rebuilds the text only when the key changes, at most every REBUILD_INTERVAL (also
@@ -102,9 +104,9 @@ local SCREEN_MARGIN = 8
 -- With F3 open the panel keeps right of the debug text (screen pixels from the left edge), as
 -- long as it still fits on the screen.
 local DEBUG_TEXT_RIGHT = 440
--- Screen pixels at the right the panel keeps out of: the minimap (Map/Minimap: MinimapSize
--- pixels, 16 from the edge, a 2 pixel outline) and a gap.
-local MINIMAP_RESERVE = if Config.Map.Enabled then Config.Map.MinimapSize + 16 + 2 + 6 else 0
+-- Screen pixels at the right the panel keeps out of while the minimap shows (Map/Minimap:
+-- MinimapSize pixels, 16 from the edge, a 2 pixel outline) and a gap.
+local MINIMAP_RESERVE = Config.Map.MinimapSize + 16 + 2 + 6
 -- Minecraft's tooltip colours (Jade's default theme). The background is a little more
 -- see-through than a tooltip's; the border is Minecraft's 0x50 alpha.
 local BACKGROUND = Color3.fromRGB(16, 0, 16)
@@ -169,6 +171,25 @@ type Entity = { distance: number, item: EntityRenderer.ItemView?, player: Player
 local Waila = {}
 
 local started = false
+-- The WAILA setting, and whether the minimap shows (the Minimap setting and Config.Map.Enabled).
+local enabled = true
+local minimapShown = Config.Map.Enabled
+-- Set by start: lays the panel out again.
+local relayout: () -> () = function() end
+
+-- The WAILA setting: off hides the panel and stops looking for what is aimed at.
+function Waila.setEnabled(value: boolean)
+	enabled = value
+end
+
+-- Whether the minimap shows in the top right corner (the panel keeps out of it).
+function Waila.setMinimapShown(value: boolean)
+	local shown = value and Config.Map.Enabled
+	if shown ~= minimapShown then
+		minimapShown = shown
+		relayout()
+	end
+end
 
 --[[
 	Starts the panel. `world` gives the blocks water is looked for in, `generator` (optional) the
@@ -280,7 +301,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			touch = touch,
 			top = TOP_GAP,
 			margin = SCREEN_MARGIN,
-			rightReserve = MINIMAP_RESERVE,
+			rightReserve = if minimapShown then MINIMAP_RESERVE else 0,
 			avoidLeft = if extendedShown then DEBUG_TEXT_RIGHT else nil,
 		}, panelWidth, panelHeight)
 		if scale.Scale ~= value then
@@ -786,6 +807,8 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	-- (The GUI's size follows the viewport's.)
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
 	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(layout)
+	Style.scaleChanged:Connect(layout)
+	relayout = layout
 
 	-- The world map hides the HUD (Hud.setVisible); WAILA is part of the HUD, so it hides with it.
 	local function hudShown(): boolean
@@ -794,7 +817,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	end
 
 	RunService.RenderStepped:Connect(function()
-		if Screens.isOpen() or not hudShown() then
+		if not enabled or Screens.isOpen() or not hudShown() then
 			hide()
 			return
 		end
