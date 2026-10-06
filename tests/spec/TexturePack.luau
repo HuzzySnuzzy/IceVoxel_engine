@@ -446,12 +446,21 @@ return function(t, shared, require)
 			t.ok(Pack.Textures[name], `{name} is in the pack`)
 			t.ok(sameSet(Blocks.textureUsers(name), users), `{name} is used by {table.concat(users, ", ")}`)
 		end
-		-- Plant sprites keep their pictures' colours, except grass and ferns (their soil's foliage).
+		-- Plant sprites keep their pictures' colours, except grass and ferns (their soil's foliage)
+		-- and saplings (one black and white picture in each sapling's own colour).
 		for id, def in Blocks.defs do
 			local sprite = def.textures and def.textures.sprite
 			if sprite then
 				t.ok(def.plant ~= nil, `{def.name}: only plants have sprites`)
-				t.eq(Pack.Textures[sprite].Tint ~= false, def.tinted, `{def.name}: sprite tinted like the plant`)
+				local sapling = string.sub(def.name, -7) == "Sapling"
+				t.eq(
+					Pack.Textures[sprite].Tint ~= false,
+					def.tinted or sapling,
+					`{def.name}: sprite tinted like the plant`
+				)
+				if sapling then
+					t.ok(not def.tinted, `{def.name}: its own green, not its soil's`)
+				end
 				t.eq(Pack.Textures[sprite].Material, "SmoothPlastic", `{def.name}: sprite material`)
 			end
 			if def.plant then
@@ -550,7 +559,7 @@ return function(t, shared, require)
 	end)
 
 	t.test("texture pack: appearances are keyed by textures", function()
-		t.eq(#Blocks.appearances, 157, "no appearance split or merged")
+		t.eq(#Blocks.appearances, 162, "no appearance split or merged (157 and the 5 saplings)")
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}
 		for id, def in Blocks.defs do

@@ -346,10 +346,12 @@ local list: { BlockSpec } = {
 		tool = "pickaxe",
 	},
 	{ name = "OakLog", color = { 106, 82, 52 }, material = "Wood", hardness = 2, tool = "axe" },
-	-- (Leaves hold up no torches or lanterns: Minecraft's LeavesBlock has no support shape. They drop
-	-- nothing, but Shears harvest them, as in Minecraft.)
+	-- (Leaves hold up no torches or lanterns: Minecraft's LeavesBlock has no support shape. Shears
+	-- harvest them, as in Minecraft; otherwise they drop a sapling or sticks now and then
+	-- (Items.leafDrop), and they decay once their tree has no log left (server Behaviours/Leaves).)
 	{
 		name = "OakLeaves",
+		behaviour = "Leaves",
 		color = { 68, 128, 46 },
 		material = "LeafyGrass",
 		hardness = 0.2,
@@ -361,6 +363,7 @@ local list: { BlockSpec } = {
 	{ name = "BirchLog", color = { 216, 212, 198 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
 		name = "BirchLeaves",
+		behaviour = "Leaves",
 		color = { 112, 150, 68 },
 		material = "LeafyGrass",
 		hardness = 0.2,
@@ -372,6 +375,7 @@ local list: { BlockSpec } = {
 	{ name = "SpruceLog", color = { 74, 54, 34 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
 		name = "SpruceLeaves",
+		behaviour = "Leaves",
 		color = { 44, 88, 56 },
 		material = "LeafyGrass",
 		hardness = 0.2,
@@ -383,6 +387,7 @@ local list: { BlockSpec } = {
 	{ name = "AcaciaLog", color = { 118, 108, 98 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
 		name = "AcaciaLeaves",
+		behaviour = "Leaves",
 		color = { 108, 138, 40 },
 		material = "LeafyGrass",
 		hardness = 0.2,
@@ -394,6 +399,7 @@ local list: { BlockSpec } = {
 	{ name = "JungleLog", color = { 96, 76, 44 }, material = "Wood", hardness = 2, tool = "axe" },
 	{
 		name = "JungleLeaves",
+		behaviour = "Leaves",
 		color = { 40, 120, 30 },
 		material = "LeafyGrass",
 		hardness = 0.2,
@@ -1444,7 +1450,7 @@ local function plant(spec: BlockSpec)
 	spec.hardness = 0
 	spec.sound = "grass"
 	spec.brokenByFluid = true
-	spec.behaviour = "Plant"
+	spec.behaviour = spec.behaviour or "Plant"
 	spec.scatter = true
 	if upper then
 		spec.item = info.bottom
@@ -2277,5 +2283,35 @@ table.insert(list, {
 	machine = { kind = "combustion" },
 	energy = { capacity = 1000000, output = 5000 },
 })
+
+--[[
+	Saplings, one per wood (Minecraft's SaplingBlock): plants on dirt-type soil (`plant`, the Plant
+	rules keep them up), dropped by their leaves now and then (Items.leafDrop). Under the open sky
+	a random tick grows one into its tree (server Behaviours/Sapling, World/RandomTicker; about 16
+	minutes on average) when the tree has room. Drawn as their texture pack sprite ("sapling": a
+	black and white picture, tinted with each sapling's colour), else as a stem with leaf lumps.
+	Minecraft's outline: 2..14 across, 12 high.
+]]
+local SAPLING_BOUNDS: Bounds = { min = { 2, 0, 2 }, max = { 14, 12, 14 } }
+local function sapling(name: string, colour: { number }, displayName: string)
+	plant({
+		name = name,
+		displayName = displayName,
+		color = colour,
+		behaviour = "Sapling",
+		plant = { soil = "dirt" },
+		shape = {
+			stem(6),
+			lump({ 4.5, 3, 4.5 }, { 0, -2.5, 0 }, colour),
+			lump({ 3, 2.5, 3 }, { 0, -0.5, 0 }, colour, { 0, 45, 0 }),
+		},
+		bounds = SAPLING_BOUNDS,
+	})
+end
+sapling("OakSapling", { 72, 124, 44 }, "Oak Sapling")
+sapling("BirchSapling", { 116, 152, 72 }, "Birch Sapling")
+sapling("SpruceSapling", { 50, 92, 58 }, "Spruce Sapling")
+sapling("AcaciaSapling", { 112, 140, 44 }, "Acacia Sapling")
+sapling("JungleSapling", { 46, 124, 36 }, "Jungle Sapling")
 
 return list

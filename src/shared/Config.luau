@@ -705,6 +705,18 @@ local Config = {
 		EditsPerSecond = 25,
 		-- Chunks (in chunk units) kept generated around every player for block updates / validation.
 		SimulationRadius = 3,
+		-- Minecraft's randomTickSpeed: blocks picked at random per 16 x 16 x 16 section of every
+		-- chunk within SimulationRadius of a player, each tick (World/RandomTicker): grass spreads,
+		-- leaves cut off from their logs decay, saplings grow. 0 turns random ticks off.
+		RandomTickSpeed = 3,
+		-- Fast leaf decay: a leaf whose tree lost its logs (no log within 6 blocks through leaves)
+		-- decays MinDelay..MaxDelay ticks after a neighbour changed, so a felled tree's canopy
+		-- falls apart in a few seconds instead of Minecraft's minutes. Leaves players placed never
+		-- decay.
+		LeafDecay = { MinDelay = 4, MaxDelay = 12 },
+		-- Chance per random tick that a sapling with daylight grows into its tree (Minecraft:
+		-- 1/7 a stage, two stages): about 16 minutes on average.
+		SaplingGrowth = 1 / 14,
 		-- Generated chunks the server keeps in memory beyond the ones near players.
 		CacheSize = 192,
 		-- Max chunks the server generates per frame while preloading around players.

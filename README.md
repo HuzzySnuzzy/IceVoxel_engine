@@ -182,8 +182,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   grassland, at most 6,000. `Config.Render.Foliage = false` (or the setting at OFF) stops drawing
   them on slow devices; they are still there to aim at and break. Left out: Minecraft's light
   check for mushrooms, seeds from grass (there is no wheat) and the plants the game has no blocks
-  for (saplings, sugar cane, berry bushes, lily pads, vines, seagrass); plants are sparser than in
+  for (sugar cane, berry bushes, lily pads, vines, seagrass); plants are sparser than in
   Minecraft, to keep the part count down.
+- **Random ticks, grass, leaves and saplings.** Minecraft's random ticks: each tick 3 random
+  blocks of every 16-block section of the chunks within 3 of a player get a tick
+  (`Config.Server.RandomTickSpeed`, 0 turns them off). Grass, dry grass and mycelium under the open
+  sky spread onto dirt next to them (one block sideways, three down, one up) that has the open sky
+  above it; podzol doesn't spread, and grass under an opaque block turns to dirt. Leaves with no
+  log within 6 blocks through other leaves decay fast (0.2-0.6 s after their neighbour changes,
+  `Config.Server.LeafDecay`): fell a trunk and its canopy falls within seconds. Leaves you placed
+  never decay. Leaves drop their sapling one time in 20 (jungle 40) or 1-2 sticks one in 50, when
+  they decay and when broken without shears. The five saplings (oak, birch, spruce, acacia,
+  jungle) are drawn as a crossed sprite tinted their wood's green, need dirt or grass under them
+  and grow into their tree under the open sky (about one random tick in 14, a few minutes) when
+  the trunk has room.
 - **Structure blocks.** Minecraft 1.20.1's structure blocks, to save what you build as text and
   place it again. They, structure voids and jigsaw blocks are operator blocks: only creative players
   may place, use and break them, and only the game's owner, `Gameplay.Admins`, Studio sessions and
@@ -519,7 +531,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
   trick), flowing water, lava, oil and fuel (Minecraft rules, including water's infinite sources
   and lava hardening against water), lava and burning, grass turning into dirt and plants popping
-  off when their soil goes.
+  off when their soil goes; random ticks spread grass, decay leaves and grow saplings.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
@@ -770,10 +782,11 @@ src/textures -> generated from the texture pack by tests/build_textures (never e
 src/server   -> ServerScriptService.IceVoxel
   IceVoxel_Server           boot: seed, world, ticker, network, players
   Api                       require this from your own server scripts
-  World/                    WorldServer (chunks + edits), BlockTicker, Simulation, TimeOfDay (the
-                            day clock, published as workspace attributes)
+  World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
+                            Simulation, TimeOfDay (the day clock, published as workspace attributes)
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
-                            water), Grass, Attached (torches and lanterns need support),
+                            water), Grass (dying and spreading), Leaves (decay), Sapling,
+                            Attached (torches and lanterns need support),
                             Plant (plants need their soil and their other half), Drops (block
                             update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
@@ -1567,7 +1580,9 @@ The example outpost is a complete jigsaw structure to copy: its pieces are built
 `Pools.luau` and its entry in `Structures.luau`.
 
 **A block behaviour.** Create a module in `src/server/Behaviours/` (see `Grass.luau`) with
-`onTick(world, ticker, x, y, z, block)` and set `behaviour = "YourModule"` on the block.
+`onTick(world, ticker, x, y, z, block)` (scheduled after a neighbour changes, `tickDelay` ticks
+later) and/or `onRandomTick(world, ticker, x, y, z, block, random)` (random ticks) and set
+`behaviour = "YourModule"` on the block.
 
 **Server-side world access** from your own scripts:
 

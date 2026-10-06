@@ -265,6 +265,15 @@
 			}
 		},
 		{
+			"name": "IV_sapling",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://127390623075923"
+			}
+		},
+		{
 			"name": "IV_short_grass",
 			"className": "Texture",
 			"properties": {

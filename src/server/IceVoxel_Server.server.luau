@@ -9,7 +9,8 @@
 	Boot order:
 	  1. seed       -> published as an attribute on ReplicatedStorage.IceVoxel
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
-	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/)
+	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/), and random ticks
+	                   near players (World/RandomTicker: grass spreading, leaf decay, saplings)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
 	                   the sounds players should hear (Audio/Sounds)
 	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
@@ -43,6 +44,7 @@ local Api = require(Server.Api)
 local WorldServer = require(Server.World.WorldServer)
 local BlockTicker = require(Server.World.BlockTicker)
 local Simulation = require(Server.World.Simulation)
+local RandomTicker = require(Server.World.RandomTicker)
 local TimeOfDay = require(Server.World.TimeOfDay)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
@@ -125,6 +127,7 @@ Api._ready(world, ticker)
 
 -- Fixed rate block updates, then the frame's share of structures being placed, then one
 -- replication message per frame, then the pipes, machines and structure blocks.
+local randomTicker = RandomTicker.new(world, ticker)
 local tickLength = 1 / Config.Server.TickRate
 local accumulator = 0
 RunService.Heartbeat:Connect(function(dt)
@@ -132,6 +135,7 @@ RunService.Heartbeat:Connect(function(dt)
 	while accumulator >= tickLength do
 		accumulator -= tickLength
 		ticker:step()
+		RandomTicker.step(randomTicker, Simulation.activeChunks(world), Config.Server.RandomTickSpeed, math.random)
 	end
 	StructureBlocks.place()
 	net.flush()

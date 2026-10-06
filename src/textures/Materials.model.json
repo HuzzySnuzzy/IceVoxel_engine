@@ -292,6 +292,16 @@
 			}
 		},
 		{
+			"name": "IV_sapling",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://127390623075923",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
 			"name": "IV_short_grass",
 			"className": "MaterialVariant",
 			"properties": {

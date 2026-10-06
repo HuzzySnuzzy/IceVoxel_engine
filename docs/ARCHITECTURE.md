@@ -3643,10 +3643,25 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
 - `World/BlockTicker`: scheduled block updates at `Server.TickRate`. A change notifies the block and
   its six neighbours; blocks with a behaviour schedule ticks. Overflow beyond
   `MaxUpdatesPerTick` moves to the next tick. Updates never generate chunks.
+- `World/RandomTicker`: Minecraft's random ticks. After each BlockTicker step, every 16-block
+  section of the chunks within `SimulationRadius` of a player (`Simulation.activeChunks`) gets
+  `Server.RandomTickSpeed` (3) random picks read straight from the chunk buffer; a block whose
+  behaviour has `onRandomTick(world, ticker, x, y, z, block, random)` runs it.
+  `World/Skylight.open` stands in for Minecraft's light levels on the server (it has no light
+  map): nothing opaque between a cell and the top of its chunk.
 - `Behaviours/`: `Gravity` (sand, gravel), `Fluid` (Minecraft-style levels 0–7 plus falling,
   infinite water sources, spreading only towards the nearest way down; waits at unloaded chunks;
   washes away `brokenByFluid` blocks, which lava burns; water, lava, oil and fuel with their own
-  rules, and lava hardening against water: see Fluids), `Grass` (turns to dirt when covered),
+  rules, and lava hardening against water: see Fluids), `Grass` (turns to dirt when covered; on a
+  random tick grass, dry grass and mycelium under the sky try 4 times to spread onto dirt within
+  1 sideways, 3 down, 1 up whose top is open to the sky and free of opaque blocks and fluids;
+  podzol never spreads), `Leaves` (decay: a neighbour change schedules a check after
+  `Server.LeafDecay` 4-12 ticks, a random tick checks too; leaves with no log within 6 steps
+  through leaves, unloaded blocks counting as a log, break with `Items.leafDrop`; leaves in the
+  chunk's edit list as leaves were placed by a player and never decay), `Sapling` (stays up like
+  a plant; on a random tick under the sky, chance `Server.SaplingGrowth` 1/14, runs its wood's
+  Trees builder through a recording writer and places it only if every forced cell but its own is
+  air, a plant or leaves; leaves only go into air),
   `Attached` (torches and lanterns break and drop when what they hang on stops being sturdy),
   `Plant` (a plant whose soil or other half is gone breaks and drops what it drops by itself, in
   every game mode: a tall plant's lower half drops, its top never does, so a tall plant drops once).

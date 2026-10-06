@@ -26,6 +26,17 @@ export type Behaviour = {
 	onNeighborChanged: ((world: World, ticker: Ticker, x: number, y: number, z: number, block: number) -> ())?,
 	-- Called on a scheduled tick.
 	onTick: ((world: World, ticker: Ticker, x: number, y: number, z: number, block: number) -> ())?,
+	-- Called when a random tick lands on the block (World/RandomTicker: grass spreading, leaves
+	-- decaying, saplings growing); `random` rolls in [0, 1).
+	onRandomTick: ((
+		world: World,
+		ticker: Ticker,
+		x: number,
+		y: number,
+		z: number,
+		block: number,
+		random: () -> number
+	) -> ())?,
 }
 
 export type Ticker = {

@@ -371,6 +371,12 @@ local Textures: { [string]: Texture } = {
 	["peony bottom"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	["peony top"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	["brown mushroom"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	-- (One black and white picture for every sapling, tinted with each one's colour.)
+	["sapling"] = {
+		Color = "rbxassetid://127390623075923",
+		Material = "SmoothPlastic",
+		Tint = true,
+	},
 	["red mushroom"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 }
 
@@ -488,6 +494,11 @@ local Blocks: { [string]: Faces } = {
 	Peony = { Sprite = "peony bottom" },
 	PeonyTop = { Sprite = "peony top" },
 	BrownMushroom = { Sprite = "brown mushroom" },
+	OakSapling = { Sprite = "sapling" },
+	BirchSapling = { Sprite = "sapling" },
+	SpruceSapling = { Sprite = "sapling" },
+	AcaciaSapling = { Sprite = "sapling" },
+	JungleSapling = { Sprite = "sapling" },
 	RedMushroom = { Sprite = "red mushroom" },
 }
 

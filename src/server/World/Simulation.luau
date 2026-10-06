@@ -1,7 +1,8 @@
 --!strict
 --[[
 	Keeps the chunks around every player generated on the server (so block updates can run there and
-	edit requests validate instantly) and evicts chunks nobody is near anymore.
+	edit requests validate instantly) and evicts chunks nobody is near anymore. `activeChunks` lists
+	the loaded ones within SimulationRadius of a player, where random ticks run (World/RandomTicker).
 ]]
 
 local Players = game:GetService("Players")
@@ -28,6 +29,21 @@ end
 
 local Simulation = {}
 
+-- Keys of the chunks within SimulationRadius of a player (refreshed with every scan).
+local active: { number } = {}
+
+-- The loaded chunks within SimulationRadius of a player.
+function Simulation.activeChunks(world: WorldServer.World): { WorldServer.Chunk }
+	local chunks = {}
+	for _, key in active do
+		local chunk = world.chunks[key]
+		if chunk then
+			table.insert(chunks, chunk)
+		end
+	end
+	return chunks
+end
+
 function Simulation.start(world: WorldServer.World)
 	local radius = Config.Server.SimulationRadius
 	local wanted: { [number]: boolean } = {}
@@ -36,6 +52,7 @@ function Simulation.start(world: WorldServer.World)
 	local function scan()
 		wanted = {}
 		queue = {}
+		local near: { [number]: boolean } = {}
 		for _, player in Players:GetPlayers() do
 			local character = player.Character
 			local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -46,12 +63,19 @@ function Simulation.start(world: WorldServer.World)
 					for dx = -radius - 1, radius + 1 do
 						local cx, cz = pcx + dx, pcz + dz
 						wanted[Coords.chunkKey(cx, cz)] = true
+						if math.abs(dx) <= radius and math.abs(dz) <= radius then
+							near[Coords.chunkKey(cx, cz)] = true
+						end
 						if math.abs(dx) <= radius and math.abs(dz) <= radius and not world:peekChunk(cx, cz) then
 							table.insert(queue, { cx, cz, dx * dx + dz * dz })
 						end
 					end
 				end
 			end
+		end
+		active = {}
+		for key in near do
+			table.insert(active, key)
 		end
 		-- Closest first; pop from the end.
 		table.sort(queue, function(a, b)

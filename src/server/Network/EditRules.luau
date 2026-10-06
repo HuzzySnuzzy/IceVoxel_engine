@@ -344,7 +344,12 @@ function EditRules.drops(block: number, creative: boolean, tool: number?): Items
 	if creative then
 		return nil
 	end
-	return Items.drops(block, tool)
+	local stack = Items.drops(block, tool)
+	if stack == nil and not Items.isShears(tool) then
+		-- (Leaves by hand or with a tool: now and then a sapling or sticks, Items.leafDrop.)
+		return Items.leafDrop(block, math.random)
+	end
+	return stack
 end
 
 -- Wear the held `tool` takes from breaking `block` (0: creative (instabuild), not a tool, or an

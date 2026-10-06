@@ -33,4 +33,12 @@ function Drops.block(x: number, y: number, z: number, block: number)
 	end
 end
 
+-- Drops `stack` at block (x, y, z) (leaves' saplings and sticks: Behaviours/Leaves).
+function Drops.stack(x: number, y: number, z: number, stack: Items.Stack)
+	local spawn = spawner
+	if spawn then
+		spawn(x, y, z, stack)
+	end
+end
+
 return Drops

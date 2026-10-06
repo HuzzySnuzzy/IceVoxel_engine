@@ -347,6 +347,31 @@ function Items.drops(block: number, tool: number?): Stack?
 	return Items.blockDrops(block)
 end
 
+--[[
+	What leaves drop by themselves: when they decay (server Behaviours/Leaves) or a player breaks
+	them without Shears. Minecraft's leaves loot table: its sapling one time in 20 (jungle: 40),
+	else 1 or 2 sticks one time in 50; nothing otherwise. `random` rolls in [0, 1). nil for
+	blocks that aren't leaves with a sapling.
+]]
+function Items.leafDrop(block: number, random: () -> number): Stack?
+	if not Blocks.isValid(block) then
+		return nil
+	end
+	local name = Blocks.get(block).name
+	if string.sub(name, -6) ~= "Leaves" then
+		return nil
+	end
+	local sapling = rawget(ids :: any, string.sub(name, 1, -7) .. "Sapling")
+	local chance = if name == "JungleLeaves" then 1 / 40 else 1 / 20
+	if sapling and random() < chance then
+		return { item = sapling, count = 1 }
+	end
+	if random() < 1 / 50 then
+		return { item = ids.Stick, count = if random() < 0.5 then 1 else 2 }
+	end
+	return nil
+end
+
 -- Items whose name or display name contains `query` (any case), in creative order.
 function Items.search(query: string): { ItemDef }
 	local needle = string.lower((string.gsub(query, "^%s+", ""):gsub("%s+$", "")))

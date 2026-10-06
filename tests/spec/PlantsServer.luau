@@ -136,10 +136,16 @@ return function(t, shared, require, server)
 		for block = 0, Blocks.count - 1 do
 			if Blocks.isPlant(block) then
 				plants += 1
-				t.eq(Behaviours.byId[block], Plant, `{Blocks.get(block).name} runs the Plant behaviour`)
+				local behaviour = Behaviours.byId[block]
+				if string.sub(Blocks.get(block).name, -7) == "Sapling" then
+					-- (Saplings also grow: Behaviours/Sapling keeps them up with Plant's tick.)
+					t.eq((behaviour :: any).onTick, Plant.onTick, `{Blocks.get(block).name} stays up like a plant`)
+				else
+					t.eq(behaviour, Plant, `{Blocks.get(block).name} runs the Plant behaviour`)
+				end
 			end
 		end
-		t.eq(plants, 29)
+		t.eq(plants, 34, "29 plants and the 5 saplings")
 		t.eq(Plant.tickDelay, 1)
 
 		local function stays(block: number, blocks: { [string]: number | false }): boolean?
