@@ -1184,6 +1184,14 @@ TransmitterRenderer draws pipe arms:
   `bounds`), else one box around the slabs on the walls it clings to (`Fire.outline`), which
   BlockInteraction and WAILA pass to VoxelRaycast as `Fire.outlineAt(getBlock)` (the raycast's
   `outline` gets the cell's position now); the highlight and the cracks use it too.
+- Campfires (BlockList Campfire, always lit): the terrain draws the logs and the embers (a `glow`
+  box carrying its own light 15, one PointLight a campfire like a lantern's), and FireRenderer
+  their flames, a record like a fire's (`Fire.isFlame`): `Fire.lookAt` gives a campfire
+  `CAMPFIRE_LOOK` (32, past the side flags), whose `Fire.planes` are campfire.json's two planes
+  crossing diagonally (14.4 pixels rescaled by 1 / cos 45, 16 tall from a pixel up, both sides
+  seen): 2 parts and 4 images on the same animated sheet. A fire turning into a campfire (one
+  placed into it) keeps its record and is rebuilt with the new look. `firesNear` lists campfires
+  too, so they crackle like fire (Audio/Ambience).
 
 ### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
 
@@ -2571,6 +2579,11 @@ record.
   from -getFireImmuneTicks: 20) and catches fire for 8 s after 20 ticks in it; out of fire and
   lava, not burning, the count starts over (Entity.move), as water does. Items catch at once (their
   immunity is a tick) and lose 1 a tick: gone in a few ticks.
+- Campfires (CampfireBlock.entityInside, lit): `touching` sets `Burning.CAMPFIRE` (bit 29; fluids
+  must stay below it) for a Campfire cell in the box. A player in one takes `CAMPFIRE_DAMAGE` (1,
+  its fireDamage) under the same hurt cooldown, softened by armor, and nothing else: a campfire
+  sets nobody alight and doesn't count towards catching fire (it is not in BlockTags.FIRE).
+  Items lie in it unharmed (it hurts living entities only).
 
 **Buckets.** The Lava, Oil and Fuel Buckets (ItemList; full buckets stack to 1, the Water Bucket's
 model in the fluid's colour) carry their fluids as the Water Bucket does: an empty Bucket takes any
@@ -2851,7 +2864,9 @@ second per player from `Players/Climate`:
    night), savanna 4, jungle 7, desert 9 (4 at night, 7 in a house), the frozen peaks -10;
 2. steps, each kept within -10..10: wet (in water or out of it for less than `WetTicks`) -3,
    sprinting +2, a heating block within `ProximityRadius` (5, a cube around the feet) +3 or within
-   2 blocks +5, burning +5 (not on top of a heat source's: the larger), a cooling block -3;
+   2 blocks +5, burning +5 (not on top of a heat source's: the larger), a cooling block -3 but not
+   within 2 blocks of a heat source (a tundra's snow is a cooling block all around: by a campfire
+   the fire wins, so the coldest place is -5 there, not -8);
 3. armor insulation (ItemList `tan` summed by `Climate.insulation`): `warmth` steps pull a target
    below 0 up towards 0 and `cooling` steps pull one above 0 down, never past 0 (leather: warmth 1
    a piece);
@@ -2884,8 +2899,45 @@ is skipped with a warning, so a block can be listed before it exists), plus sour
 cover): the server module registers the Furnace (while its container's litTime > 0) and the Heat
 and Combustion Generators (while their machine is active). `Climate.sources` gives the distance of
 the nearest heat and cold source (along the farthest axis); a check only runs for a block of its
-kind within range that would be nearer than the nearest found so far. Anything new that should warm
-(a campfire, burning blocks) registers the same way.
+kind within range that would be nearer than the nearest found so far. The Campfire, always lit, is
+a plain `HeatingBlocks` name; anything new that warms only sometimes (burning blocks) registers
+with a check.
+
+**Gear** (the climate's tools; tested in `tests/spec/SurvivalGear`):
+- the **Campfire** (BlockList, appended; Minecraft's CampfireBlock, always lit): Minecraft's recipe
+  (" S ", "SCS", "LLL": sticks, a coal or charcoal, any logs) and model (four logs, the glowing bed
+  of embers that carries its light 15, the 7 pixel outline), not solid (the hull has no 7 pixel
+  step) but `obstructs`, strength 2 with an axe, dropping itself (Minecraft drops 2 charcoal
+  without Silk Touch, which the game has no way to get, so it could never be moved). A
+  `HeatingBlocks` heat source; standing in it hurts (Players/Burning, above in Fluids); spawns
+  avoid it (SpawnUnsafeBlocks Body and Hazards); its flames and crackle are fire's (Rendering);
+- **boiling** (`ToughAsNails/Boiling`, pure): a right click on a campfire with dirty water
+  (`Drinks.isDirty`: anything in PURIFIED_OF, so later containers boil with no code) turns one
+  into its purified twin, createFilledResult-style (the last one is replaced, else the purified
+  one goes into the inventory; a canteen keeps its wear, so its sips; creative keeps the dirty one
+  and gets a purified one only without one). It is the campfire's own use (CampfireBlock.use):
+  survival, adventure and creative, not spectators, not while sneaking (`Boiling.applies`). The
+  client (Interaction/BlockInteraction) sends it as a UseItem after a block's menu and before
+  Drinking (so a dirty bottle aimed at a campfire boils, elsewhere it is drunk), not predicted;
+  Players/ItemUse checks it before the game mode's mayUseItemOn (adventure players fail that),
+  plays `block.campfire.boil` and hands the stacks over. JEI shows it as a seventh category,
+  "Campfire" (Ui/Jei/JeiData `boiling`: one entry per PURIFIED_OF pair, drawn as smelting with
+  "Right click" under it; the Campfire is its catalyst);
+- **Straw** (ItemList): `Items.strawDrop`, which EditRules.drops asks after `leafDrop` when no
+  Shears are held: Short Grass gives one half the time, Tall Grass (its lower half answers for a
+  break of either) always, where Minecraft's grass gives wheat seeds one time in 8; Shears still
+  harvest the grass itself; grass gone by itself (water, fire, a blast) gives nothing;
+- **Straw and Leaf armor** (ItemList `INSULATING_ARMOR`, appended after everything: the `ARMOR`
+  table at the top must not grow, its ids would shift): leather's points (1 / 3 / 2 / 1, no
+  toughness; armor doesn't wear in this game, so no durability), `tan = { warmth = 1 }` from
+  Straw and `tan = { cooling = 1 }` from any leaves (Recipes' `#leaves` tag), the armor shapes.
+  The coldest target is -10 day and night (the scale's clamp at each step), so a full straw set
+  holds -6 (COLD) anywhere, three pieces -7, two -8 (ICY); a taiga's night (-9) is -5. A full leaf
+  set turns a desert's 9 into 5 (WARM) and the hottest 10 into 6; one piece leaves 8 (HOT);
+- the **Thermometer** (ItemList; an iron nugget over glass over glow dust): while it is the held
+  item, Ui/SurvivalHud reads the temperature and the target out as numbers ("-3", "+5" in their
+  zones' colours, the trend's arrow between) a row above the status row (Ui/Hud passes the held
+  item to `SurvivalHud.render`).
 
 **Sync and HUD.** The server sends `Survival` (14 bytes: flags with wet, Internal Warmth and Chill,
 thirst, hydration, exhaustion, the temperature and its target as -10..10, frozen and heat, the
@@ -2919,6 +2971,9 @@ on the input `Ui/Screens` hands it before anything else.
   200 ticks each;
 - fuel: `Smelting.fuels()`, the burn time shown as "Burns N items" (ticks / 200; a Lava Bucket
   100);
+- boiling (Tough As Nails): dirty water boiled clean on a Campfire, one entry per
+  `Drinks.PURIFIED_OF` pair (input, output), drawn with smelting's layout and "Right click" for a
+  time; the Campfire is its catalyst and its tab;
 - refining, heating and combustion, from the machines' numbers (`Machines.info`): the Oil
   Refinery's bucket of oil into a bucket of fuel (100 ticks, 20 kJ at 200 J/t: "5 s, 20 kJ",
   "200 J/t"), and a bucket burnt in the Heat Generator (a mB of lava 20 ticks: 20 000 ticks at
@@ -2936,10 +2991,10 @@ on the input `Ui/Screens` hands it before anything else.
 those that take it (in any cell, as a smelting input, as a fuel, as a fluid). A catalyst, the
 block a category's recipes are made in (`CATALYSTS`: the crafting table for crafting, the furnace
 and the Electric Furnace for smelting, the furnace and the Heat Generator for fuel, the Oil
-Refinery for refining, the Heat Generator for heating, the Combustion Generator for combustion),
-also uses every entry of its categories, after its own uses, as JEI's "Show uses" on a crafting
-table or furnace lists them. Both come grouped by category in that order (crafting, smelting,
-fuel, refining, heating, combustion), without the empty ones.
+Refinery for refining, the Heat Generator for heating, the Combustion Generator for combustion,
+the Campfire for boiling), also uses every entry of its categories, after its own uses, as JEI's
+"Show uses" on a crafting table or furnace lists them. Both come grouped by category in that order
+(crafting, smelting, fuel, refining, heating, combustion, boiling), without the empty ones.
 
 **Screens.** While an inventory screen is open:
 - The list sits right of the 176 px panels at their GUI scale (`JeiLayout.list`): up to 9 columns
@@ -3909,6 +3964,11 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   (`SoundList.BLOCK_SOUNDS`, read by `Sounds.block`): Fire's break is the extinguish hiss, so the
   client's playBlock and ServerNet's break sound need nothing new. Stand-ins: the falling wind
   pitched down into a roar and up into a hiss, the volume slider's tick for the strike.
+- The campfire (appended after the cave moods, at the very end of the events): campfires crackle
+  with `block.fire.ambient` (they are FireRenderer's records too), and dirty water boiled on one
+  bubbles with `block.campfire.boil` (this game's; the server, at the campfire: Players/ItemUse;
+  the splash pitched up). Straw and leaf armor go on with `item.armor.equip_leather`
+  (`SoundList.ARMOR` prefixes "Straw" and "Leaf").
 
 **Who plays what** (Minecraft's split between server and client):
 

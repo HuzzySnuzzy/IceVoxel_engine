@@ -12,8 +12,9 @@
 	            surface (Blocks.fluidHeightLut; the whole cell when the same fluid is above: the
 	            FluidState.getHeight Minecraft compares) is at or above the box's bottom; and the
 	            FIRE bit when a fire block's cell overlaps it (Minecraft's checkInsideBlocks runs
-	            entityInside for every cell the box is in, whatever the fire's outline). Unknown
-	            (unloaded) cells touch nothing, so nothing hurts at a chunk that is not loaded.
+	            entityInside for every cell the box is in, whatever the fire's outline), the
+	            CAMPFIRE bit for a campfire's. Unknown (unloaded) cells touch nothing, so nothing
+	            hurts at a chunk that is not loaded.
 
 	  Players   one tick (20 a second, `tickPlayer`, Players/Characters runs it on the standing box
 	            at the feet: the server can't tell a player's pose), in Entity.baseTick's order:
@@ -31,7 +32,11 @@
 	                 (remainingFireTicks counting up from -getFireImmuneTicks to 0) for
 	                 IN_FIRE_SECONDS (8 s); and IN_FIRE_DAMAGE (1) half heart (inFire, softened by
 	                 armor, under the cooldown; no sizzle). Out of fire and lava, not burning, the
-	                 count starts over (Entity.move).
+	                 count starts over (Entity.move);
+	              5. in a campfire (CampfireBlock.entityInside, always lit here): CAMPFIRE_DAMAGE
+	                 (its fireDamage, 1) half heart, inFire, softened by armor, under the
+	                 cooldown, and nothing more: a campfire sets nobody alight (nor is it in
+	                 BlockTags.FIRE, so it doesn't keep the count above going either).
 	            Hurts follow LivingEntity.hurt's cooldown: after a hurt lands, for its `damageInterval`
 	            (lava: 10 ticks, half of Minecraft's 20 invulnerable ticks; burning: HURT_COOLDOWN, the
 	            same 10) only a bigger hurt lands, and only by the difference. So lava takes 4 every
@@ -50,7 +55,8 @@
 	            So an item touching lava for one tick is gone the next (5 - 4, then - 1 or - 4),
 	            with Minecraft's entity.generic.burn on each lava hurt. A fire block sets it burning
 	            at once (an item's getFireImmuneTicks is 1) and takes 1 a tick, silently: gone in a
-	            few ticks. (Nothing is fire resistant: the game has no netherite.)
+	            few ticks. (Nothing is fire resistant: the game has no netherite.) A campfire leaves
+	            items be (its entityInside hurts living entities only).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -97,13 +103,18 @@ Burning.IN_FIRE_DAMAGE = 1
 Burning.IN_FIRE_SECONDS = 8
 Burning.PLAYER_FIRE_IMMUNE = 20
 local FIRE_BLOCK = Blocks.id.Fire
+-- The bit `touching` sets for a campfire (BlockList Campfire), and the half hearts a tick in one
+-- costs (CampfireBlock's fireDamage).
+Burning.CAMPFIRE = bit32.lshift(1, 29)
+Burning.CAMPFIRE_DAMAGE = 1
+local CAMPFIRE_BLOCK = Blocks.id.Campfire
 
 local fluidHeightLut = Blocks.fluidHeightLut
 local FULL = Blocks.FLUID_FULL
 local blockLut = Fluids.blockLut
 local floor = math.floor
 
-assert(#Fluids.list < 30, "fluid bits must stay below Burning.FIRE")
+assert(#Fluids.list < 29, "fluid bits must stay below Burning.CAMPFIRE and Burning.FIRE")
 
 -- Per fluid id: does it put burning out, and does it hurt (its record)?
 local EXTINGUISHES = 0
@@ -163,6 +174,8 @@ function Burning.touching(
 				local block = getBlock(x, y, z)
 				if block == FIRE_BLOCK then
 					mask = bit32.bor(mask, Burning.FIRE)
+				elseif block == CAMPFIRE_BLOCK then
+					mask = bit32.bor(mask, Burning.CAMPFIRE)
 				end
 				local fluid = fluidOf(block)
 				if fluid ~= 0 and not Burning.has(mask, fluid) then
@@ -295,6 +308,14 @@ function Burning.tickPlayer(
 		damage += landed
 	elseif fluid == nil and state.fire <= 0 then
 		state.heat = 0
+	end
+	if bit32.btest(touching, Burning.CAMPFIRE) then
+		-- (CampfireBlock.entityInside: hurt(inFire, fireDamage), no burning.)
+		local landed = hurt(state, Burning.CAMPFIRE_DAMAGE, Burning.HURT_COOLDOWN)
+		if landed > 0 and (armor or 0) > 0 then
+			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+		end
+		damage += landed
 	end
 	return damage, extinguished, hurtNow
 end

@@ -39,8 +39,9 @@
 	            tables' half = lower).
 	  Drops     survival breaks drop Items.drops(block, tool): blocks that need a tool (stone,
 	            ores) drop nothing without a good enough one, Shears harvest what a block's
-	            `shearDrops` names, gravel gives flint one time in 10 (Items.randomDrop). A container's contents drop in both modes (Minecraft's
-	            Containers.dropContents runs whatever the game mode).
+	            `shearDrops` names, gravel gives flint one time in 10 (Items.randomDrop), grass
+	            without Shears Straw now and then (Items.strawDrop). A container's contents drop
+	            in both modes (Minecraft's Containers.dropContents runs whatever the game mode).
 	  Wear      a survival break wears the tool in hand (Mining.wear: 1, 2 for swords, nothing on
 	            blocks that break at once, but Shears 1 on every block); creative players never
 	            wear their tools.
@@ -346,8 +347,9 @@ function EditRules.drops(block: number, creative: boolean, tool: number?): Items
 	end
 	local stack = Items.drops(block, tool)
 	if stack == nil and not Items.isShears(tool) then
-		-- (Leaves by hand or with a tool: now and then a sapling or sticks, Items.leafDrop.)
-		return Items.leafDrop(block, math.random)
+		-- (Leaves by hand or with a tool: now and then a sapling or sticks, Items.leafDrop; grass:
+		-- Straw, Items.strawDrop.)
+		return Items.leafDrop(block, math.random) or Items.strawDrop(block, math.random)
 	end
 	-- (Gravel: Flint one time in 10.)
 	return if stack then Items.randomDrop(block, math.random) or stack else nil

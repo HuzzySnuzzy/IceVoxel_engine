@@ -14,8 +14,9 @@
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
 	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
 	    itself, no tool), and now and then something else when a player breaks it (`randomDrop`:
-	    gravel's flint; `leafDrop`: leaves' saplings and sticks). Creative only blocks (structure
-	    blocks, structure voids, jigsaws; `isCreativeOnly`) never drop.
+	    gravel's flint; `leafDrop`: leaves' saplings and sticks; `strawDrop`: grass's Straw).
+	    Creative only blocks (structure blocks, structure voids, jigsaws; `isCreativeOnly`) never
+	    drop.
 
 	Ids are stable as long as both lists only grow at the end, so they can be sent over the network
 	and saved. `Items.list` is the creative inventory's order: blocks in BlockList order, then the
@@ -399,6 +400,29 @@ end
 function Items.randomDrop(block: number, random: () -> number): Stack?
 	if block == Blocks.id.Gravel and random() < 0.1 then
 		return { item = ids.Flint, count = 1 }
+	end
+	return nil
+end
+
+-- The chance (0..1) that grass broken without Shears gives Straw (`strawDrop`), by block.
+Items.STRAW_CHANCE = table.freeze({
+	[Blocks.id.ShortGrass] = 0.5,
+	[Blocks.id.TallGrass] = 1,
+} :: { [number]: number })
+
+--[[
+	What grass gives when a player breaks it without Shears (`random` rolls in [0, 1)): one Straw
+	(Tough As Nails' warm armor is made of it) half the time from Short Grass, always from Tall
+	Grass (a player breaking either half breaks its lower half: server Network/EditRules), where
+	Minecraft's grass drops wheat seeds one time in 8 (this game has no wheat, and 24 straw make
+	a set of armor). nil: nothing (ferns, everything else, an unlucky roll). Shears harvest the
+	grass itself instead (Items.drops), and grass broken by itself (washed away, burnt, blown up)
+	gives nothing.
+]]
+function Items.strawDrop(block: number, random: () -> number): Stack?
+	local chance = Items.STRAW_CHANCE[block]
+	if chance and random() < chance then
+		return { item = ids.Straw, count = 1 }
 	end
 	return nil
 end

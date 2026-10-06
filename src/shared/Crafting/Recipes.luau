@@ -39,6 +39,7 @@ Recipes.tags = {
 	stone_tool_materials = { "Cobblestone" },
 	stone_crafting_materials = { "Cobblestone" },
 	coals = { "Coal", "Charcoal" },
+	leaves = { "OakLeaves", "BirchLeaves", "SpruceLeaves", "AcaciaLeaves", "JungleLeaves" },
 }
 
 local shaped: { Shaped } = {}
@@ -348,6 +349,23 @@ shape({ "G G", " G " }, { G = "Glass" }, "GlassBottle", 3)
 shape({ " N ", "I I", " I " }, { N = "IronNugget", I = "IronIngot" }, "Canteen")
 smelt("DirtyWaterBottle", "PurifiedWaterBottle")
 smelt("DirtyWaterCanteen", "PurifiedWaterCanteen")
+
+--[[
+	Tough As Nails' gear for the cold and the heat. The Campfire is Minecraft's: a stick on top and
+	one each side of a coal or charcoal, over three logs of any wood (" S ", "SCS", "LLL"). Straw
+	and Leaf armor take the armor shapes with Straw (grass broken by hand gives it) or any leaves
+	(Shears harvest them): 24 for a set, as leather. The Thermometer (TAN's) is an iron nugget over
+	glass over glow dust, the game's redstone (TAN's own uses copper and redstone).
+]]
+shape({ " S ", "SCS", "LLL" }, { S = "Stick", C = "#coals", L = "#logs" }, "Campfire")
+for _, material in { { "Straw", "Straw" }, { "Leaf", "#leaves" } } do
+	local key = { X = material[2] }
+	shape({ "XXX", "X X" }, key, material[1] .. "Helmet")
+	shape({ "X X", "XXX", "XXX" }, key, material[1] .. "Chestplate")
+	shape({ "XXX", "X X", "X X" }, key, material[1] .. "Leggings")
+	shape({ "X X", "X X" }, key, material[1] .. "Boots")
+end
+shape({ "N", "G", "D" }, { N = "IronNugget", G = "Glass", D = "GlowDust" }, "Thermometer")
 
 Recipes.fuel = {
 	Coal = 1600,

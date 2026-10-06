@@ -38,6 +38,11 @@
 	                 there; it wears by 1 (64 uses), never in creative. On TNT or a Nuke
 	                 (TntBlock.use, whatever the side) it lights it instead (Behaviours/Tnt.prime,
 	                 with its hiss) and wears the same.
+	  Dirty water    (Tough As Nails: Shared/ToughAsNails/Boiling) on a Campfire, not sneaking:
+	                 one bottle or canteen boils into its purified twin (a canteen keeps its
+	                 sips), with block.campfire.boil at the campfire. It is the campfire's own use
+	                 (Minecraft's CampfireBlock.use), so adventure players boil too (spectators
+	                 never); it is checked before the game mode's mayUseItemOn.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
 	thrown).
 ]]
@@ -51,6 +56,7 @@ local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local SharedTransmitters = require(Shared.Transmitters)
+local Boiling = require(Shared.ToughAsNails.Boiling)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Fire = require(script.Parent.Parent.Behaviours.Fire)
@@ -209,22 +215,39 @@ local function strike(world: WorldServer.World, player: Player, x: number, y: nu
 	end
 end
 
+-- Dirty water held over a campfire at (x, y, z): one container boiled clean (see the header).
+local function boil(player: Player, held: Stack, x: number, y: number, z: number)
+	local newHeld, give = Boiling.boil(held, GameMode.instabuildOf(player), function(item: number): boolean
+		return Inventories.hasItem(player, item)
+	end)
+	if newHeld ~= held then
+		Inventories.setHeld(player, newHeld)
+	end
+	if give then
+		Inventories.give(player, give)
+	end
+	play(player, Boiling.SOUND, x + 0.5, y + 0.5, z + 0.5)
+end
+
 local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, player: Player, payload: buffer)
 	local x, y, z, side, sneaking = Protocol.decodeUseItem(payload)
-	if
-		x == nil
-		or y >= HEIGHT
-		or not GameModeRules.mayUseItemOn(GameMode.of(player))
-		or not isAlive(player)
-		or not inReach(player, x, y, z)
-		or not mayUse(player)
-	then
+	if x == nil or y >= HEIGHT or not isAlive(player) or not inReach(player, x, y, z) then
 		return
 	end
-	local simulation = Transmitters.world()
+	local mode = GameMode.of(player)
 	local held = Inventories.heldStack(player)
 	-- (Within reach, so loaded; peek anyway: a request never generates terrain.)
 	local block = world:peekBlock(x, y, z)
+	-- (The campfire's own use: before mayUseItemOn, which adventure players fail.)
+	local boiling = Boiling.applies(block, held, mode, sneaking)
+	if not (boiling or GameModeRules.mayUseItemOn(mode)) or not mayUse(player) then
+		return
+	end
+	if boiling and held then
+		boil(player, held, x, y, z)
+		return
+	end
+	local simulation = Transmitters.world()
 	if held and block and held.item == FLINT_AND_STEEL then
 		strike(world, player, x, y, z, side)
 		return

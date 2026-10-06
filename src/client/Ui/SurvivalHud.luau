@@ -23,6 +23,11 @@
 	               (a gold shield and the minutes and seconds left, with thirst or temperature
 	               on), then Internal Warmth (a flame) and Internal Chill (a snowflake) while they
 	               do (with temperature on).
+	  reading      while a Thermometer (ItemList, TAN's) is the held item, with temperature on: the
+	               row above the status row reads out the body temperature and its target as
+	               numbers ("-3", "+5"), each in its zone's colour, with an arrow between them in
+	               the trend's colour (orange warming, pale blue cooling, white on target),
+	               right-aligned like the rows below it.
 	  edges        hypothermia and hyperthermia close in from the screen's edges, frost white-blue
 	               or heat orange-red, as strong as they have got (Minecraft's powder snow outline,
 	               alpha = the share of Temperature.EXTREME_TICKS frozen; TAN's heat overlay the
@@ -33,6 +38,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Items = require(Shared.Items)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
@@ -41,7 +47,8 @@ local Style = require(script.Parent.Style)
 -- Where Ui/Hud puts things (GUI pixels in its canvas).
 export type Layout = {
 	-- The canvas' width (the hotbar's), the droplets' row, and the tops of the gauge's row and of
-	-- the status row above it (both right-aligned with the droplets).
+	-- the status row above it (both right-aligned with the droplets; the thermometer's reading
+	-- goes a row above the status row).
 	width: number,
 	rowY: number,
 	gaugeY: number,
@@ -60,6 +67,8 @@ local CELL = 3
 local TUBE_X = 7
 -- The rows' width (the droplets').
 local ROW_WIDTH = 81
+-- The item whose holder sees the reading.
+local THERMOMETER = Items.id.Thermometer
 
 -- 9 x 9: K outline, L / R the left / right half, H a highlight (with the left half).
 local DROPLET = {
@@ -168,6 +177,14 @@ local clemencyText: TextLabel? = nil
 local clemencyShadow: TextLabel? = nil
 local warmthIcon: Frame? = nil
 local chillIcon: Frame? = nil
+local readingRow: Frame? = nil
+local readingValue: TextLabel? = nil
+local readingValueShadow: TextLabel? = nil
+local readingTarget: TextLabel? = nil
+local readingTargetShadow: TextLabel? = nil
+local readingArrow: Frame? = nil
+local readingArt: { [string]: { Frame } } = {}
+local lastReading = ""
 local edgesGui: ScreenGui? = nil
 local edges: { Frame } = {}
 local lastZone = math.huge
@@ -198,6 +215,12 @@ function SurvivalHud.cellX(value: number): number
 		end
 	end
 	return TUBE_X + (v - Temperature.MIN) * CELL + borders
+end
+
+-- A temperature as the reading writes it: "0", "-3", "+5".
+function SurvivalHud.signed(value: number): string
+	local whole = math.round(value)
+	return if whole == 0 then "0" else string.format("%+d", whole)
 end
 
 -- "m:ss" of `seconds`.
@@ -315,6 +338,19 @@ function SurvivalHud.build(canvas: Frame, layout: Layout)
 	Style.pixelArt(snowflake, 0, 0, SNOWFLAKE, { B = Color3.fromRGB(150, 210, 255), W = TEXT }, 2)
 	chillIcon = snowflake
 
+	local readingFrame = holder(canvas, "Thermometer", layout.width - ROW_WIDTH, layout.statusY - 10, ROW_WIDTH, 9, 2)
+	readingFrame.Visible = false
+	readingRow = readingFrame
+	local value, valueShadow =
+		Style.shadowText(readingFrame, "", 0, 1, ROW_WIDTH, 8, TEXT, 2, Enum.TextXAlignment.Left, Style.TEXT_SIZE)
+	local target, targetShadow =
+		Style.shadowText(readingFrame, "", 0, 1, ROW_WIDTH, 8, TEXT, 2, Enum.TextXAlignment.Left, Style.TEXT_SIZE)
+	readingValue, readingValueShadow = value, valueShadow
+	readingTarget, readingTargetShadow = target, targetShadow
+	local arrow = holder(readingFrame, "Trend", 0, 2, 3, 5, 3)
+	readingArt = Style.pixelArt(arrow, 0, 0, RIGHT, { A = TEXT }, 3)
+	readingArrow = arrow
+
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "IceVoxelTemperatureOverlay"
 	gui.IgnoreGuiInset = true
@@ -422,17 +458,47 @@ local function renderStatus(clemency: number, warmth: boolean, chill: boolean)
 	end
 end
 
+-- Writes `text` in `colour` into a label and its shadow at x.
+local function setText(label: TextLabel?, shadow: TextLabel?, text: string, colour: Color3, x: number)
+	if not label or not shadow then
+		return
+	end
+	label.Text, shadow.Text = text, text
+	label.TextColor3, shadow.TextColor3 = colour, Style.shadowOf(colour)
+	label.Position, shadow.Position = UDim2.fromOffset(x, 1), UDim2.fromOffset(x + 1, 2)
+end
+
+-- The thermometer's reading (see the header): body temperature `value` going to `target`.
+local function renderReading(value: number, target: number)
+	local key = `{value} {target}`
+	if key == lastReading then
+		return
+	end
+	lastReading = key
+	local valueText, targetText = SurvivalHud.signed(value), SurvivalHud.signed(target)
+	-- (Right-aligned: the target ends at the row's right, the arrow 2 pixels before it, the
+	-- body temperature 2 before the arrow.)
+	local x = math.floor(ROW_WIDTH - Style.textWidth(targetText, Style.TEXT_SIZE))
+	setText(readingTarget, readingTargetShadow, targetText, ZONE_COLOURS[Temperature.zone(target)][1], x)
+	x -= 5
+	place(readingArrow, x, 2)
+	Style.paint(readingArt.A, if target > value then WARMING elseif target < value then COOLING else TEXT)
+	x = math.floor(x - 2 - Style.textWidth(valueText, Style.TEXT_SIZE))
+	setText(readingValue, readingValueShadow, valueText, ZONE_COLOURS[Temperature.zone(value)][1], x)
+end
+
 --[[
 	Draws this frame (Ui/Hud's RenderStepped): `survival` when the hearts show (survival,
-	adventure, the HUD in play).
+	adventure, the HUD in play), `held` the held item (the Thermometer shows its reading).
 ]]
-function SurvivalHud.render(now: number, survival: boolean)
+function SurvivalHud.render(now: number, survival: boolean, held: number?)
 	local status = SurvivalState.get()
 	local thirstShown = survival and status ~= nil and status.thirstOn
 	local temperatureShown = survival and status ~= nil and status.temperatureOn
 	setVisible(row, thirstShown)
 	setVisible(gauge, temperatureShown)
 	setVisible(statusRow, thirstShown or temperatureShown)
+	setVisible(readingRow, temperatureShown and held == THERMOMETER)
 	if status == nil or not temperatureShown then
 		renderEdges(FROST, 0)
 	end
@@ -467,6 +533,9 @@ function SurvivalHud.render(now: number, survival: boolean)
 	if temperatureShown then
 		local value = math.clamp(status.temperature, Temperature.MIN, Temperature.MAX)
 		renderGauge(value, status.target)
+		if held == THERMOMETER then
+			renderReading(value, math.clamp(status.target, Temperature.MIN, Temperature.MAX))
+		end
 		local frost, heat = status.frozen / Temperature.EXTREME_TICKS, status.heat / Temperature.EXTREME_TICKS
 		if frost >= heat then
 			renderEdges(FROST, frost)

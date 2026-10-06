@@ -635,7 +635,8 @@ local Config = {
 		-- names (every level and the cave twin) or block names. A name no block has is skipped
 		-- with a warning, so a block may be listed here before it exists. Lit furnaces and working
 		-- Heat and Combustion Generators warm too (server Players/ToughAsNails registers them).
-		HeatingBlocks = { "Lava", "Fire" },
+		-- Within 2 blocks of one, cold sources no longer cool (a fire beats the snow around it).
+		HeatingBlocks = { "Lava", "Fire", "Campfire" },
 		-- Blocks that cool the player by 3 steps within ProximityRadius.
 		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
 	},
