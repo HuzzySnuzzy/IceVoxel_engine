@@ -13,15 +13,18 @@
 	             fire on the floor, 1 part and 1 image a side clinging. Parts are thin (THICKNESS),
 	             see-through (Transparency 1), never collide, never take queries, touches or audio
 	             collisions and cast no shadow: aiming goes by the voxel ray (Fire.outlineAt).
-	  Images     each face a SurfaceGui with one ImageLabel of the user's sheet (Fire.TEXTURE, 8
-	             frames of 256 x 256 stacked vertically): ImageRectSize one frame, ImageRectOffset the
-	             frame shown, Pixelated like Minecraft's 16 x 16 texture stretched over the plane. The
+	  Images     each face a SurfaceGui (clipping) with one ImageLabel of the user's whole sheet
+	             (Fire.TEXTURE, 8 square frames stacked vertically), as wide as the face and 8 faces
+	             tall, so the face shows one frame; its Position (Fire.sheetPosition) picks which.
+	             Not ImageRectOffset: Roblox shrinks images taller than 1024 pixels, so the sheet's
+	             pixels in game are not the uploaded ones (a 256 x 2048 sheet is 128 x 1024).
+	             Pixelated like Minecraft's 16 x 16 texture stretched over the plane. The
 	             SurfaceGuis ignore the lighting (LightInfluence 0, Brightness BRIGHTNESS): fire
 	             glows by night as by day, as Minecraft's fire is drawn at full brightness. Beyond
 	             RADIUS blocks they stop drawing (MaxDistance) and the parts go back to the pool.
 	  Animation  one shared step: every frame the frame index comes from the clock (Fire.frameAt,
 	             FRAME_TICKS game ticks a frame); when it changes, one loop writes the new
-	             ImageRectOffset into every live label (a dense list; no loop per fire, no tween).
+	             Position into every live label (a dense list; no loop per fire, no tween).
 	             About 10 steps a second; 100 fires on the floor are 1 200 writes a step.
 	  Pooling    one template per kind of plane ("double", "front", "box"), its SurfaceGuis inside,
 	             cloned once and reused: a fire going out returns its parts (at most MAX_SPARE
@@ -115,7 +118,7 @@ local spare: { [string]: { BasePart } } = { double = {}, front = {}, box = {} }
 local spareCount = 0
 local partCount = 0
 local frame = 0
-local offset = Vector2.zero
+local offset = UDim2.fromScale(0, 0)
 
 --[[ Parts ]]
 
@@ -153,9 +156,8 @@ local function template(kind: string): BasePart
 		image.Name = "Flames"
 		image.BackgroundTransparency = 1
 		image.BorderSizePixel = 0
-		image.Size = UDim2.fromScale(1, 1)
+		image.Size = UDim2.fromScale(1, Fire.FRAMES)
 		image.Image = Fire.TEXTURE
-		image.ImageRectSize = Vector2.new(Fire.FRAME_PIXELS, Fire.FRAME_PIXELS)
 		image.ScaleType = Enum.ScaleType.Stretch
 		image.ResampleMode = Enum.ResamplerMode.Pixelated
 		image.Parent = gui
@@ -183,7 +185,7 @@ local function acquire(kind: string): BasePart
 		kindOf[part] = kind
 	end
 	for _, label in labelsOf[part] do
-		label.ImageRectOffset = offset
+		label.Position = offset
 		table.insert(labels, label)
 		labelIndex[label] = #labels
 	end
@@ -436,11 +438,10 @@ local function animate()
 		return
 	end
 	frame = now
-	local _, y = Fire.rectOffset(now)
-	offset = Vector2.new(0, y)
+	offset = UDim2.fromScale(0, Fire.sheetPosition(now))
 	local value = offset
 	for i = 1, #labels do
-		labels[i].ImageRectOffset = value
+		labels[i].Position = value
 	end
 end
 

@@ -258,11 +258,11 @@ return function(t, shared, require, server)
 		t.eq(SharedFire.frameAt(0.8), 0, "loops every 0.8 s")
 		t.eq(SharedFire.frameAt(1234.56), math.floor(1234.56 * 10) % 8)
 		t.ok(SharedFire.frameAt(-0.05) >= 0, "never negative")
-		local x, y = SharedFire.rectOffset(3)
-		t.eq(x, 0)
-		t.eq(y, 768, "frames go down the 256 x 2048 sheet")
-		t.eq(select(2, SharedFire.rectOffset(7)), 2048 - 256)
-		t.eq(SharedFire.FRAME_PIXELS * SharedFire.FRAMES, 2048, "the whole sheet, one frame at a time")
+		-- The sheet moves up a plane height a frame (resolution free: Roblox shrinks the sheet).
+		t.eq(SharedFire.sheetPosition(0), 0, "the top frame")
+		t.eq(SharedFire.sheetPosition(3), -3)
+		t.eq(SharedFire.sheetPosition(7), -7, "the last frame: the sheet's bottom fills the plane")
+		t.eq(SharedFire.sheetPosition(8), 0, "wraps")
 	end)
 
 	--[[ The server's behaviour ]]

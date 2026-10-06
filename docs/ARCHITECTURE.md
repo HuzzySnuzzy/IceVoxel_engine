@@ -1167,12 +1167,14 @@ TransmitterRenderer draws pipe arms:
 - Images: each face is a SurfaceGui (LightInfluence 0, Brightness 1.4: fire glows by night as
   Minecraft draws it at full brightness, which a Texture on the part, lit by the scene, would not;
   MaxDistance 48 blocks; 16 pixels a stud) holding one ImageLabel of the user's sheet
-  (rbxassetid://124923986221566: 8 frames of 256 × 256 stacked down a 256 × 2048 image),
-  ImageRectSize one frame, Pixelated. Parts are thin (0.05 studs), see-through, never collide or
+  (rbxassetid://124923986221566: 8 square frames stacked down one image, uploaded 256 × 2048),
+  as wide as the face and 8 faces tall, clipped by the SurfaceGui so one frame shows, Pixelated.
+  Frames are picked by position, not ImageRectOffset: Roblox shrinks images over 1024 pixels (this
+  sheet is 128 × 1024 in game), so pixel rectangles from the upload's size show four frames. Parts are thin (0.05 studs), see-through, never collide or
   take queries, touches or audio collisions, cast no shadow; aiming goes by the voxel ray.
 - Animation: one shared step. Every frame `Fire.frameAt(os.clock())` (2 game ticks a frame: an
   0.8 s loop; every fire in step, as Minecraft animates the one fire texture); when it changes, a
-  single loop writes the new ImageRectOffset (`Fire.rectOffset`: 256 × frame down the sheet) into
+  single loop writes the new Position (`Fire.sheetPosition`: up one face height a frame) into
   every live label, a dense list kept as parts are taken and given back. 100 fires on the floor are
   1,200 writes about 10 times a second; nothing runs per fire.
 - Pooling: one template per kind of plane ("double", "front", "box"), SurfaceGuis inside, cloned

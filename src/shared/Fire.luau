@@ -39,11 +39,13 @@
 	              `offset`, an `orientation` (degrees, Roblox's YXZ order: CFrame.fromOrientation)
 	              and its `faces`: "double" (Front and Back), "front" (Front only, the face along
 	              the part's look vector) or "box" (the four sides of a box, outwards).
-	  Animation   the user's texture `TEXTURE`: FRAMES (8) frames of FRAME_PIXELS (256) square,
-	              stacked from top to bottom in one 256 x 2048 sheet. Every fire shows the same
-	              frame (Minecraft animates the fire texture once for every fire), FRAME_TICKS (2)
-	              game ticks each, so the flames loop every 0.8 s: `frameAt(seconds)` and its
-	              `rectOffset` (ImageRectOffset's pixels).
+	  Animation   the user's texture `TEXTURE`: FRAMES (8) square frames stacked from top to
+	              bottom in one sheet (uploaded 256 x 2048; Roblox shrinks images over 1024 pixels,
+	              so in game it is 128 x 1024: the frames are never cut by pixels). Every fire shows
+	              the same frame (Minecraft animates the fire texture once for every fire),
+	              FRAME_TICKS (2) game ticks each, so the flames loop every 0.8 s: `frameAt(seconds)`,
+	              and `sheetPosition(frame)`: the sheet is drawn FRAMES planes tall behind each
+	              plane, which shows (clips) one of them, moved up a plane per frame.
 ]]
 
 local Blocks = require(script.Parent.Blocks)
@@ -89,10 +91,9 @@ local NEIGHBOURS: { { number } } = {
 }
 Fire.NEIGHBOURS = NEIGHBOURS
 
--- The user's fire texture: 8 frames of 256 x 256 stacked in a 256 x 2048 sheet, top first.
+-- The user's fire texture: 8 square frames stacked in one sheet, top first (any resolution).
 Fire.TEXTURE = "rbxassetid://124923986221566"
 Fire.FRAMES = 8
-Fire.FRAME_PIXELS = 256
 -- Game ticks each frame shows (Minecraft's fire texture steps every tick through 32 frames; 8
 -- frames at 2 ticks keep it as lively without looping too fast).
 Fire.FRAME_TICKS = 2
@@ -316,9 +317,14 @@ function Fire.frameAt(seconds: number): number
 	return math.floor(seconds * Fire.TICK_RATE / Fire.FRAME_TICKS) % Fire.FRAMES
 end
 
--- Where `frame` is in the sheet (ImageRectOffset, pixels): frames go down from the top.
-function Fire.rectOffset(frame: number): (number, number)
-	return 0, (frame % Fire.FRAMES) * Fire.FRAME_PIXELS
+--[[
+	Where the sheet goes behind a plane to show `frame`: its top, in plane heights (the Y scale of
+	the ImageLabel's Position; the label is 1 wide and FRAMES tall). Frames go down from the top,
+	so frame f moves the sheet up f planes. In heights, not pixels: whatever size Roblox keeps the
+	image at, a plane shows exactly one frame.
+]]
+function Fire.sheetPosition(frame: number): number
+	return -(frame % Fire.FRAMES)
 end
 
 return Fire
