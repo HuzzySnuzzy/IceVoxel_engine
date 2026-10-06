@@ -276,8 +276,10 @@ return function(t, shared, require, server)
 		-- Placed by a spreading fire: its age.
 		t.ok(Fire.ignite(world, 2, FLOOR, 0, 7))
 		t.eq(Fire.age(world, 2, FLOOR, 0), 7)
-		-- In the air with nothing to burn: out at once (BaseFireBlock.onPlace).
+		-- In the air with nothing to burn: out on the next tick (BaseFireBlock.onPlace).
 		world:setBlock(0, FLOOR + 5, 0, FIRE)
+		t.eq(world:peekBlock(0, FLOOR + 5, 0), FIRE, "its neighbours see it for a tick")
+		run(ticker, 1)
 		t.eq(world:peekBlock(0, FLOOR + 5, 0), AIR, "nothing holds it")
 		-- Clinging to a log, then the log goes: out (FireBlock.updateShape).
 		world:setBlock(5, FLOOR + 3, 5, B.OakLog)
@@ -328,6 +330,7 @@ return function(t, shared, require, server)
 		t.eq(world:peekBlock(1, FLOOR, 0), FIRE, "the log into fire")
 		t.eq(world:peekBlock(-1, FLOOR, 0), FIRE, "the leaves into fire")
 		-- (The leaves above burnt into fire too, but that fire has nothing to hold it: out.)
+		run(ticker, 1)
 		t.eq(world:peekBlock(0, FLOOR + 1, 0), AIR, "above: burnt, and the fire there went out")
 		-- Rolls near 1: nothing burns (rand(300) 299 >= any odds).
 		local world2, ticker2 = newWorld()

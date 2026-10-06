@@ -96,6 +96,24 @@ A fast, Minecraft-style voxel engine for Roblox.
   that throws you (not in spectator or creative flight), items blown away or destroyed, the boom
   (`entity.generic.explode`, heard 64 blocks away), a flash and a short camera shake. Crude oil
   is no explosive.
+- **Fire.** Minecraft 1.20.1's fire. It burns on top of a block, or clings to the sides of
+  flammable blocks when there is no floor, and spreads: every 1.5-2 s (30 + rand(10) ticks) it may
+  burn a neighbour away (Minecraft's burn odds: leaves and plants fast, logs and coal blocks
+  slowly), sometimes leaving fire in its place, and catch the air around it (1 block sideways, 1
+  below, up to 4 above) next to anything flammable, with Minecraft's ignite odds (planks 5 / 20,
+  logs 5 / 5, leaves 30 / 60, grass, ferns and flowers 60 / 100, glow lichen 15 / 100, blocks of
+  coal 5 / 5; not saplings, mushrooms or stone). It ages and burns out: on stone or with nothing
+  left to burn it goes out within seconds. Light it with **Flint and Steel** (an iron ingot and
+  flint; 64 uses; gravel drops flint one time in 10) on any face where fire can burn; lava sets
+  flammable blocks near it alight on its random ticks; burning fuel leaves it behind. Put it out
+  by punching it (it breaks at once, with a hiss), with water, or by placing a block into it.
+  Standing in it costs half a heart every half second (armor softens it) and sets you burning for
+  8 s after a second in it; dropped items burn up in it. Spawns avoid it. The flames are the
+  animated fire texture (8 frames, 0.8 s a loop, all fires in step) on Minecraft's planes: four
+  leaning planes and the four sides of the cell on the floor, a plane on each burning wall
+  otherwise, glowing at night as by day, drawn within 48 blocks; one light per 8 × 8 × 8 blocks of
+  fire (like glow lichen) keeps a forest fire to a few lights. It crackles. Its age stays on the
+  server (`Config.Server.Fire`: the doFireTick rule and the difficulty).
 - **Lakes and puddles.** Minecraft's water lakes (lake_water, from before 1.18): the lava lakes'
   irregular basin of blobs, water 1-3 deep in its lower half and the bowl above it dug out, on
   dry land, never by the sea, a river, a structure, an oil well or a lava lake (0.3-0.6 per km²,
@@ -553,7 +571,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   breaking, armor put on, getting hurt and dying, interface clicks and Minecraft's cave moods;
   lava popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss
   when water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
-  crackling. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
+  crackling; fire crackling, hissing when punched out, and flint and steel striking. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
   sounds every Roblox client ships, told apart by pitch, so nothing has to be uploaded, and players
   hear what others do within 16 blocks. Each one can be replaced by your own sound (see
   Extending).
@@ -561,8 +579,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
   trick), flowing water, lava, oil and fuel (Minecraft rules, including water's infinite sources
-  and lava hardening against water), lava and burning, grass turning into dirt and plants popping
-  off when their soil goes; random ticks spread grass, decay leaves and grow saplings.
+  and lava hardening against water), lava and burning, fire spreading and burning out, grass turning
+  into dirt and plants popping off when their soil goes; random ticks spread grass, decay leaves,
+  grow saplings and let lava light fires.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
@@ -581,8 +600,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   oil geysers as black dots. Right click the map to add waypoints (saved between sessions),
   teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
   touch screens a small "Map" button takes its corner, to open the world map).
-- **Safe spawns.** Spawns and teleports never land in water, lava, oil or fuel, on leaves or next to
-  cacti or lava; the rules live in `SpawnUnsafeBlocks`.
+- **Safe spawns.** Spawns and teleports never land in water, lava, oil, fuel or fire, on leaves or
+  next to cacti, lava or fire; the rules live in `SpawnUnsafeBlocks`.
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
   Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
   and face images that take each block's own colour (one bark image for every log, each in its
@@ -635,6 +654,7 @@ Studio tips:
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
+| Flint and Steel | Right click a face: fire in front of it where fire can burn; break a fire (left click) to put it out | L2 | Tap |
 | Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
@@ -739,6 +759,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Fluids/  FluidList        the fluid registry: water, lava, oil and fuel by id (0 none .. 4 fuel),
                             their blocks and cave twins, buckets, colour, light, movement, harm,
                             furnace fuel, fog and bucket sounds
+  Fire                      fire's shared rules (Minecraft's FireBlock): survival, ignite odds,
+                            the sides it clings to, its outline and planes, the animation frames
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract, what furnaces and
@@ -825,8 +847,9 @@ src/server   -> ServerScriptService.IceVoxel
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
                             water), Grass (dying and spreading), Leaves (decay), Sapling,
                             Attached (torches and lanterns need support),
-                            Plant (plants need their soil and their other half), Drops (block
-                            update logic)
+                            Plant (plants need their soil and their other half), Fire
+                            (spreading, burning blocks away, burning out, ages; lava lighting
+                            fires; flint and steel), Drops (block update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication
@@ -916,6 +939,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             aims at spectators), BurningView (flames on burning players, the fire
                             overlay in first person)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
+  Rendering/FireRenderer    fire's animated flames (SurfaceGui planes, one shared animation step)
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
                             tanks, items moving through transporters, the windows of working
                             generators, Electric Furnaces and Oil Refineries, Batteries' charge
@@ -1017,6 +1041,8 @@ for performance:
 | `Explosions.ChainBlocksPerTick` | 1.5 | How fast the chain runs through a body of fuel (blocks a tick). |
 | `Explosions.MaxIgnitionsPerTick` / `MaxBlastsPerTick` / `RayBudget` | 4 / 8 / 60000 | Cost bounds per server tick (a power 12 blast reads about 26,000 blocks; the first blast always goes). |
 | `Explosions.EffectDistance` / `ShakeDistance` | 64 / 4 | Players this close see and feel a blast; the camera shakes within ShakeDistance × power. |
+| `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
+| `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
 | `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui, music). |
 | `Sounds.PlayerRate`       | 8       | Sounds a player's inventory clicks and chest opening may cause per second (anti-spam). |
@@ -1634,6 +1660,13 @@ The example outpost is a complete jigsaw structure to copy: its pieces are built
 later) and/or `onRandomTick(world, ticker, x, y, z, block, random)` (random ticks) and set
 `behaviour = "YourModule"` on the block.
 
+**A flammable block.** Give it `flammable = { ignite = 5, burn = 20 }` in BlockList (Minecraft's
+FireBlock odds: wooden blocks 5 / 20, wool 30 / 60, plants 60 / 100); fire then clings to it,
+spreads next to it, burns it away and lava sets it alight. From a server script, `Fire.ignite(world,
+x, y, z)` (`ServerScriptService.IceVoxel.Behaviours.Fire`) lights a fire anywhere, and
+`world:setBlock(x, y, z, Blocks.id.Fire)` does the same (it goes out the next tick where nothing holds
+it: `Shared/Fire.canSurvive`).
+
 **Server-side world access** from your own scripts:
 
 ```lua
@@ -1712,7 +1745,7 @@ Natural next steps, roughly in order:
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling,
   suffocating inside a block, lava and explosions (`Items.damageAfterArmor`, which both use).
   TNT, creepers and Blast Protection would sit on `World/Explosions` (`Api.explode`).
-- **More of lava and oil.** Fire blocks (lava sets nothing alight), basalt, water aquifers,
+- **More of lava and oil.** Basalt, water aquifers,
   BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
   particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).
 - **Block orientation.** Blocks have no facing yet, so furnaces and chests show their fronts on

@@ -1138,6 +1138,46 @@ burning character gets flames (a Fire on its root part), and the local player in
 fire overlay at the bottom of the screen (Minecraft's renderFlame and ScreenEffectRenderer's fire,
 which in third person the body's flames replace).
 
+**Fire** (`Rendering/FireRenderer`; the shapes and frames pure in Shared/Fire, tested in
+tests/spec/Fire). The terrain draws a fire block as one invisible speck (its only shape box: Neon,
+Transparency 1), which carries its light 15 as a sparse light: Fire is in GreedyMesher's
+SPARSE_LIGHT_ITEMS, sharing glow lichen's 8 × 8 × 8 light boxes (one PointLight per box for both;
+F3 counts them with the lichen's), so a forest fire of 300 blocks is a handful of lights. The
+flames depend on the neighbours, so FireRenderer draws them apart from the mesher, the way
+TransmitterRenderer draws pipe arms:
+- Which fires: they only come from edits, so a chunk's are found in its edit list when its data is
+  attached (ClientWorld `onChunkLoaded`, `knownEdits`) and followed through `onBlockChanged`
+  (predicted breaks included), which also marks the fires next to any changed block for a new look.
+  Every 0.25 s the nearest 192 within 48 blocks of the camera whose chunk is shown (the streamer's
+  `shown`, as for pipes) are drawn, at most 24 (re)built a frame.
+- Shapes: Minecraft's blockstates/fire.json, from `Fire.sides` (FireBlock.getStateForPlacement
+  worked out on the client: 0 on the floor, else the flags of the flammable neighbours), as
+  `Fire.planes`: on the floor, template_fire_floor's four planes (16 × 22.4 pixels rescaled by
+  1 / cos 22.5, two pairs 0.8 pixels off the middle leaning ±22.5° across it) seen from both sides,
+  plus template_fire_side's four sides as one box of the cell's size, 22.4 pixels tall, with the
+  flames on its outer faces only (Minecraft's planes are seen from both sides; the far ones seen
+  from inside are left out, a part and four images fewer); clinging, one plane per flammable wall
+  0.01 pixels off it facing into the cell, and one under a flammable ceiling facing down. 5 parts
+  and 12 images a fire on the floor, 1 and 1 per side clinging.
+- Images: each face is a SurfaceGui (LightInfluence 0, Brightness 1.4: fire glows by night as
+  Minecraft draws it at full brightness, which a Texture on the part, lit by the scene, would not;
+  MaxDistance 48 blocks; 16 pixels a stud) holding one ImageLabel of the user's sheet
+  (rbxassetid://124923986221566: 8 frames of 512 × 512 stacked down a 512 × 4096 image),
+  ImageRectSize one frame, Pixelated. Parts are thin (0.05 studs), see-through, never collide or
+  take queries, touches or audio collisions, cast no shadow; aiming goes by the voxel ray.
+- Animation: one shared step. Every frame `Fire.frameAt(os.clock())` (2 game ticks a frame: an
+  0.8 s loop; every fire in step, as Minecraft animates the one fire texture); when it changes, a
+  single loop writes the new ImageRectOffset (`Fire.rectOffset`: 512 × frame down the sheet) into
+  every live label, a dense list kept as parts are taken and given back. 100 fires on the floor are
+  1,200 writes about 10 times a second; nothing runs per fire.
+- Pooling: one template per kind of plane ("double", "front", "box"), SurfaceGuis inside, cloned
+  once; a fire that goes out returns its parts (600 spare at most), a new one resizes and moves
+  them.
+- Aim: a fire's outline is Minecraft's shape: the floor slab (BaseFireBlock.DOWN_AABB, BlockList
+  `bounds`), else one box around the slabs on the walls it clings to (`Fire.outline`), which
+  BlockInteraction and WAILA pass to VoxelRaycast as `Fire.outlineAt(getBlock)` (the raycast's
+  `outline` gets the cell's position now); the highlight and the cracks use it too.
+
 ### Far meshes (`Rendering/MeshOverlay`, `Rendering/MeshRegions`)
 
 Thousands of far parts can be replaced by a few MeshParts built at runtime with EditableMesh. The
@@ -1359,7 +1399,8 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   F3 adds "(block b, sky s)". Meant for mob spawning later, which should use the same estimate.
 
 - **Target.** `BlockInteraction.target()`: the highlighted block, with the same reach and rules
-  (outlines included). A dropped item (`EntityRenderer.itemsNear`, a 0.5 × 0.8 block box around
+  (outlines included; a fire's from the walls it clings to, `Fire.outlineAt`; it is named "Fire"
+  with a colour box for an icon, as it is no item). A dropped item (`EntityRenderer.itemsNear`, a 0.5 × 0.8 block box around
   its bobbing model) or another player (their standing hull) nearer on the same aim and in reach
   wins, except while mining (`BlockInteraction.miningProgress()`), so the progress stays on
   screen; an entity behind a block is never named, even when that block is too far to target
@@ -2253,8 +2294,8 @@ A light inside a part that casts a shadow is hidden by that part, so one of the 
   templates can't do).
 
 There is no light field in the block data; Roblox's lighting engine does the rest. Glow lichen
-(light 7) and lava (light 15, in every level) are the exceptions to one light per block: only
-some of their cells carry one (see Meshing and Rendering).
+(light 7), fire (light 15) and lava (light 15, in every level) are the exceptions to one light per
+block: only some of their cells carry one (see Meshing and Rendering).
 
 Blocks that hang on another (`support`: "Down", "Up" or a side) need a sturdy one there
 (`Blocks.canSurvive`, `Blocks.isSturdy`): solid, drawn and unshaped, unless BlockList says
@@ -2511,6 +2552,15 @@ record.
   takes 4 a tick and sets burning, so an item touching lava for a tick is gone the next, with
   entity.generic.burn at each lava hurt (EntityWorld's `burnt`, played by Entities). Nothing is
   fire resistant (there is no netherite).
+- Fire blocks (BaseFireBlock.entityInside): `touching` also sets `Burning.FIRE` (bit 30, above
+  every fluid's) when a Fire cell overlaps the box, whatever the fire's outline (Minecraft's
+  checkInsideBlocks), so Characters and EntityWorld need nothing new. A player in one takes
+  `IN_FIRE_DAMAGE` (1) under the hurt cooldown (every 10 ticks; the in_fire damage type doesn't
+  bypass armor) with no sizzle; burning goes on a tick more each tick (it never runs down in the
+  fire), and a player not burning yet counts up (`heat`, Minecraft's remainingFireTicks below 0
+  from -getFireImmuneTicks: 20) and catches fire for 8 s after 20 ticks in it; out of fire and
+  lava, not burning, the count starts over (Entity.move), as water does. Items catch at once (their
+  immunity is a tick) and lose 1 a tick: gone in a few ticks.
 
 **Buckets.** The Lava, Oil and Fuel Buckets (ItemList; full buckets stack to 1, the Water Bucket's
 model in the fluid's colour) carry their fluids as the Water Bucket does: an empty Bucket takes any
@@ -3609,14 +3659,24 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
   Minecraft's numbers themselves, so the server plays them with no cue volume or pitch on top
   (`SoundRules.playback` multiplies the two). Stand-ins: the splash pitched down for the pop and
   the buckets, the falling wind pitched up into a hiss or down into a bubbling rumble.
+- Fire (appended after the explosion): `block.fire.ambient` (BaseFireBlock.animateTick, each
+  client by itself: every fire within 32 blocks the client knows, `FireRenderer.firesNear`, rolls
+  each tick the odds Minecraft's display ticks give a block at its distance, 667 × the product of
+  (16 - |d|) / 256 over the axes plus the same for 32, times 1 / 24, `SoundRules.fireCrackle`; cue
+  volume 1..2, pitch 0.3..1; at most 4 at once), `block.fire.extinguish` (level event 1009,
+  punching a fire out: volume 0.5, pitch 2.6; category block.break, side predicted) and
+  `item.flintandsteel.use` (the server, at the new fire). A block may have its own action sounds
+  (`SoundList.BLOCK_SOUNDS`, read by `Sounds.block`): Fire's break is the extinguish hiss, so the
+  client's playBlock and ServerNet's break sound need nothing new. Stand-ins: the falling wind
+  pitched down into a roar and up into a hiss, the volume slider's tick for the strike.
 
 **Who plays what** (Minecraft's split between server and client):
 
 | Side        | Events                                                     | How                              |
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
-| `predicted` | block break / place / fall, player small / big fall        | the acting client at once; the server sends everyone else |
+| `predicted` | block break / place / fall (fire's break: its hiss), player small / big fall | the acting client at once; the server sends everyone else |
 | `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish, explosions | the server sends everyone near, the player included |
-| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient | clients only, never sent |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient, fire crackle | clients only, never sent |
 
 **The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
 within the event's distance (times a volume above 1, at most 2.55) plus `Sounds.BroadcastSlack`
@@ -3630,7 +3690,8 @@ out; spectators look in without opening the lid; a broken chest closes silently)
 (armor put on by any action, a tool breaking), Entities (pickups, at the item; an item burning in
 lava), Characters (health lost, at most every 0.5 s; death; a hurting landing's fall and the fall
 sound of the block below the feet; a lava hurt that lands, water putting burning out; none for
-spectators), Behaviours/Fluid (lava's fizz), Players/ItemUse (each fluid's bucket sounds) and
+spectators), Behaviours/Fluid (lava's fizz), Players/ItemUse (each fluid's bucket sounds, flint
+and steel striking) and
 World/Explosions (`entity.generic.explode`: appended after the lava's events, Minecraft's volume
 4 as a 64 block reach, pitch 0.7 ± 0.1, the built-in boom whole at volume 1).
 
@@ -3844,7 +3905,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   air, a plant or leaves; leaves only go into air),
   `Attached` (torches and lanterns break and drop when what they hang on stops being sturdy),
   `Plant` (a plant whose soil or other half is gone breaks and drops what it drops by itself, in
-  every game mode: a tall plant's lower half drops, its top never does, so a tall plant drops once).
+  every game mode: a tall plant's lower half drops, its top never does, so a tall plant drops once),
+  `Fire` (Minecraft's FireBlock, below).
   They drop items through `Drops`, which ServerNet wires to `Entities.dropBlock`
   (Transmitters/UseRules uses it too).
   - In `Gravity`, as in Minecraft, a falling block passes through blocks without a collision box
@@ -3857,6 +3919,42 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
     no collision box, as on a torch; flowing water washes every plant away with its drop (flowing
     lava burns it, with no drop). Plants are not opaque, so the grass under them stays grass and the
     sun reaches through them (`SkyCheck`), and a spawn may stand in one (`SafeSpot`).
+  - `Fire` (Minecraft 1.20.1's FireBlock; the shared rules in Shared/Fire, each block's odds in
+    BlockList `flammable`, Blocks `igniteOdds` / `burnOdds` / `isFlammable`, set by the bootstrap
+    pass at the end of BlockList: planks 5 / 20, logs 5 / 5, leaves 30 / 60, grass, ferns, dead
+    bushes and flowers (both halves of tall ones) 60 / 100, glow lichen 15 / 100, coal blocks
+    5 / 5; no saplings or mushrooms, as in Minecraft). Tested in tests/spec/Fire.
+    - Age 0..15 lives in a table by position per world, never in the block: the block stays the
+      one Fire id (which other modules compare with: FuelBlast.isHot, ToughAsNails' heating
+      blocks), and an age change costs no edit, no replication and no remesh (Minecraft sets it
+      with flag 4 for the same reason). Variant blocks were not used: 16 ages (times the 32 shapes
+      Minecraft keeps in the state) would be hundreds of ids for something only the server reads.
+      Ages of fires that went out some other way are swept once the table passes 4,096.
+    - A new fire is told apart from a neighbour change by its scheduled tick (a burning fire
+      always has one): `ignite(world, x, y, z, age)` hands it its spreader's age, anything else
+      (world:setBlock by flint and steel, lava or a blast) starts at 0. It schedules its first
+      tick in 30 + rand(10) ticks, or goes out on the next tick where it can't survive (Minecraft:
+      at once; a tick later the fuel under a fiery blast's fire has seen it). A neighbour change
+      that leaves it unable to survive puts it out at once (updateShape); an unloaded neighbour
+      leaves it be. A random tick restarts a fire whose tick was lost with its chunk.
+    - `tick` is FireBlock.tick (with `Config.Server.Fire.Tick`, doFireTick): reschedule, out if it
+      can't survive, age by rand(3) / 2, off a flammable neighbour out unless on a sturdy block
+      and at most 3 old, at 15 out one time in 4 unless the block below burns, then checkBurnOut
+      on the six neighbours (rand(300) sideways, rand(250) up and down, < burn odds: into fire one
+      time in (age + 10) / 5, else air, no drop; a tall plant's other half goes with it), then
+      spreading into the empty cells 1 sideways, 1 below and up to 4 above with a flammable
+      neighbour: rand(100 + 100 (dy - 1)) <= (ignite + 40 + 7 x `Config.Server.Fire.Difficulty`)
+      / (age + 30). No rain, humid biomes or infiniburn blocks here.
+    - `lavaTick` (Behaviours/Fluid's `onRandomTick` for lava, cave lava too; LavaFluid.randomTick):
+      two times in three 1-2 steps up (each up to 1 sideways), lighting the first empty cell
+      next to a flammable block and stopping at a solid one; else 3 cells at its level, lighting
+      the empty cell above each flammable one. Minecraft's ignitedByLava is `flammable` here.
+    - `light` (Players/ItemUse, flint and steel: FlintAndSteelItem.useOn): fire in front of the
+      clicked side where `Fire.canPlaceAt` (empty, and it survives), item.flintandsteel.use, one
+      wear (64 uses), none in creative. The client sends the use only where the same check
+      passes. Players put fires out by breaking them (hardness 0: at once, no drop, the
+      extinguish hiss), water washes them away (`brokenByFluid`, no drop; lava fizzes), and a
+      block placed into one replaces it (`replaceable`).
 - `World/Explosions` + `World/FuelBlast`: blasts and fuel going off, stepped after the block
   ticker every tick (see Explosions). `Behaviours/Fluid` hands fuel touching fire or lava to it.
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.

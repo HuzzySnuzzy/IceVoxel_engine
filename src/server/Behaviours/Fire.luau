@@ -10,8 +10,10 @@
 	           when anything else placed it (flint and steel, lava, explosions: world:setBlock).
 	           New fires are told apart from neighbour changes by their first scheduled tick: a
 	           burning fire always has one waiting (Minecraft's onPlace schedules it).
-	  Placed   (BaseFireBlock.onPlace) out at once where it can't survive (Fire.canSurvive), else
-	           its first tick in 30 + rand(10) ticks (FireBlock.getFireTickDelay).
+	  Placed   (BaseFireBlock.onPlace) out where it can't survive (Fire.canSurvive), on the next
+	           tick (Minecraft: at once; a tick later its neighbours have seen it, so fuel a
+	           fiery blast puts fire on still catches: World/FuelBlast), else its first tick in
+	           30 + rand(10) ticks (FireBlock.getFireTickDelay).
 	  Shape    (FireBlock.updateShape) a neighbour change that leaves it unable to survive puts it
 	           out at once; one that can't be told (an unloaded neighbour) leaves it be.
 	  Tick     (FireBlock.tick, with doFireTick: Config.Server.Fire.Tick) the next tick is
@@ -152,7 +154,7 @@ end
 
 --[[
 	Puts fire at (x, y, z) now with `age` (default 0; Minecraft's getStateWithAge and setBlock),
-	whatever is there. Like any new fire it goes out at once where it can't survive. Returns
+	whatever is there. Like any new fire it goes out on the next tick where it can't survive. Returns
 	whether the block changed.
 ]]
 function Fire.ignite(world: any, x: number, y: number, z: number, age: number?): boolean
@@ -188,10 +190,13 @@ function Fire.onNeighborChanged(world: any, ticker: any, x: number, y: number, z
 		state.placing[key] = nil
 		setAge(world, state, key, placed or 0)
 	end
-	if SharedFire.canSurvive(getter(world), x, y, z) == false then
+	local survives = SharedFire.canSurvive(getter(world), x, y, z)
+	if new then
+		-- (A new fire that can't stay goes out on the next tick rather than inside its own
+		-- placement, so what it touched still saw it: fuel under a blast's fire catches.)
+		ticker:schedule(x, y, z, if survives == false then 1 else Fire.tickDelay(math.random))
+	elseif survives == false then
 		remove(world, x, y, z)
-	elseif new then
-		ticker:schedule(x, y, z, Fire.tickDelay(math.random))
 	end
 end
 
