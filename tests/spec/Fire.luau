@@ -260,8 +260,9 @@ return function(t, shared, require, server)
 		t.ok(SharedFire.frameAt(-0.05) >= 0, "never negative")
 		local x, y = SharedFire.rectOffset(3)
 		t.eq(x, 0)
-		t.eq(y, 1536, "frames go down the 512 x 4096 sheet")
-		t.eq(select(2, SharedFire.rectOffset(7)), 4096 - 512)
+		t.eq(y, 768, "frames go down the 256 x 2048 sheet")
+		t.eq(select(2, SharedFire.rectOffset(7)), 2048 - 256)
+		t.eq(SharedFire.FRAME_PIXELS * SharedFire.FRAMES, 2048, "the whole sheet, one frame at a time")
 	end)
 
 	--[[ The server's behaviour ]]

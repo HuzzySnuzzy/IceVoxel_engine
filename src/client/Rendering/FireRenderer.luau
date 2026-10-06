@@ -14,7 +14,7 @@
 	             see-through (Transparency 1), never collide, never take queries, touches or audio
 	             collisions and cast no shadow: aiming goes by the voxel ray (Fire.outlineAt).
 	  Images     each face a SurfaceGui with one ImageLabel of the user's sheet (Fire.TEXTURE, 8
-	             frames of 512 x 512 stacked vertically): ImageRectSize one frame, ImageRectOffset the
+	             frames of 256 x 256 stacked vertically): ImageRectSize one frame, ImageRectOffset the
 	             frame shown, Pixelated like Minecraft's 16 x 16 texture stretched over the plane. The
 	             SurfaceGuis ignore the lighting (LightInfluence 0, Brightness BRIGHTNESS): fire
 	             glows by night as by day, as Minecraft's fire is drawn at full brightness. Beyond

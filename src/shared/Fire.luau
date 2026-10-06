@@ -39,8 +39,8 @@
 	              `offset`, an `orientation` (degrees, Roblox's YXZ order: CFrame.fromOrientation)
 	              and its `faces`: "double" (Front and Back), "front" (Front only, the face along
 	              the part's look vector) or "box" (the four sides of a box, outwards).
-	  Animation   the user's texture `TEXTURE`: FRAMES (8) frames of FRAME_PIXELS (512) square,
-	              stacked from top to bottom in one 512 x 4096 sheet. Every fire shows the same
+	  Animation   the user's texture `TEXTURE`: FRAMES (8) frames of FRAME_PIXELS (256) square,
+	              stacked from top to bottom in one 256 x 2048 sheet. Every fire shows the same
 	              frame (Minecraft animates the fire texture once for every fire), FRAME_TICKS (2)
 	              game ticks each, so the flames loop every 0.8 s: `frameAt(seconds)` and its
 	              `rectOffset` (ImageRectOffset's pixels).
@@ -89,10 +89,10 @@ local NEIGHBOURS: { { number } } = {
 }
 Fire.NEIGHBOURS = NEIGHBOURS
 
--- The user's fire texture: 8 frames of 512 x 512 stacked in a 512 x 4096 sheet, top first.
+-- The user's fire texture: 8 frames of 256 x 256 stacked in a 256 x 2048 sheet, top first.
 Fire.TEXTURE = "rbxassetid://124923986221566"
 Fire.FRAMES = 8
-Fire.FRAME_PIXELS = 512
+Fire.FRAME_PIXELS = 256
 -- Game ticks each frame shows (Minecraft's fire texture steps every tick through 32 frames; 8
 -- frames at 2 ticks keep it as lively without looping too fast).
 Fire.FRAME_TICKS = 2
