@@ -76,8 +76,10 @@ node key) and `posKey(x, y, z)` for block positions.
    (levels 0-2), cave air below `Caves.LavaLevel` becomes CaveLava and surface caves' air there
    Lava (`Lava.aquifer`). Then surface lava lakes and oil wells (deposits and geysers;
    point-sampled up to `Config.StructureMaxLevel`) are written, before the ores, so a deposit takes
-   the same rock in a chunk's padding as in its neighbour's core. After the ores (step 6) a full
-   detail chunk with caves may sink an underground lava lake into a cave floor.
+   the same rock in a chunk's padding as in its neighbour's core; then water lakes (point-sampled
+   up to `Config.StructureMaxLevel`) and puddles (full detail only; `Lakes.luau`, see Lakes and
+   puddles). After the ores (step 6) a full detail chunk with caves may sink an underground lava
+   lake into a cave floor.
 6. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
@@ -104,8 +106,8 @@ node key) and `posKey(x, y, z)` for block positions.
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
 rock or cave air; lowered under a structure's cells that are neither, under surface caves' air
 and under ordinary Lava and Oil) and `emptyAbove` (everything above is air; raised over trees,
-structures, plants and geysers' spouts). A dug lake (a geyser's oil lake) lowers its columns'
-`topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
+structures, plants and geysers' spouts). A dug lake (a geyser's oil lake, a water lake or a
+puddle) lowers its columns' `topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
 cave cells into rock (deposits, the spout below a lake, underground lava lakes) marks the cave
 lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads those cells
 instead of assuming rock.
@@ -116,8 +118,8 @@ rectangle, `generator.structureContainer(x, y, z)` the items a generated chest s
 `generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds
 them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one
 opens. `generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the
-map paints their geysers), `oilLake(well)` a geyser's lake columns and `lavaLakes(...)` the
-surface lava lakes.
+map paints their geysers), `oilLake(well)` a geyser's lake columns, `lavaLakes(...)` the
+surface lava lakes and `waterLakes(...)` / `puddles(...)` the water lakes and puddles.
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -257,7 +259,8 @@ after the caves.
   entrance out of the ground) within 16 entrance / 30 ravine carved steps is dropped, so there are
   no stubs by the shore. Columns within 2 blocks of a library structure's piece are left alone
   (`protectedColumns`): no foundation fills a pit and no path floats over a ravine. So are surface
-  lava lakes' boxes and 2 blocks around them, and geysers' lake squares and 2 blocks around them
+  lava lakes' boxes and 2 blocks around them, geysers' lake squares and 2 blocks around them, water
+  lakes' boxes and 2 blocks around them and puddles' bounds and a block around them
   (`protectedColumns`' `boxes`): a cut there would open the lake's side. An entrance
   step that reaches a column's top, or leaves it a roof of one block, opens the column to its top,
   and a single block left with air or cave air on all six sides is cleared (full detail chunks,
@@ -393,6 +396,73 @@ Cost per chunk (native / interpreted): lookups 0.005 / 0.013 ms, lava below Lava
 whole chunk: 9.3 / 21.8 ms); deciding a lake or a geyser's lake costs 0.5-2 ms once per
 generator, and `findSpawn` (for the spawn clearances) 3-7 ms once.
 
+### Lakes and puddles (`Lakes.luau`)
+
+Surface water, decided like the surface lava lakes from the seed and the full detail heights
+alone (`Lakes.Terrain`: a cell below a column's height is ground, at or above it air, or water
+below the sea), cached per generator, so every chunk and level agrees. All of it is water sources
+(level 0) held in on every side and below: nothing flows until something next to it changes.
+
+- **Lakes** (`lakes`, `write`; Minecraft's lake_water, the overworld's LakeFeature for water
+  before 1.18 replaced it with aquifers). The lava lakes' shape (`Lava.shapeOf`, the same draws:
+  4-7 ellipsoid blobs in a 16 × 8 × 16 box), water in its lower four layers, the bowl above dug
+  out as air; the shell's barrier draws are made and unused (lake_water has no barrier). One
+  candidate per 16 × 16 cell with chance 1 / `Lakes.Water.Rarity` (600; lava's is 200), times the
+  biome's weight in `Lakes.Water.Biomes` (deserts 0.3, savannas 0.5-0.6), its layer 4 at the
+  full detail height of the box's centre, more than `SHORE` (2) blocks above the sea. Minecraft's
+  shell rule keeps the water in: refused where a shell cell is liquid from layer 4 up or not
+  ground below it. Also refused where a cell could meet a deep cave (the caves' 9 cave-free
+  blocks), within `PROTECT` (2) blocks of a library structure's piece, an oil well (deposits too)
+  or a surface lava lake, within `SpawnClearance` (24) blocks of the spawn, and when a candidate
+  in a neighbouring cell also passed its roll (two overlapping lakes, each decided alone, could
+  spill into each other's bowl; about 1 in 60 lakes is lost). Written at full detail as:
+  - water, and Ice in the top layer where water freezes (a frozen or snow-topped biome);
+  - air in the bowl (bedrock stays);
+  - the lake's floor (`floor`) in soil (dirt, grass, podzol, mycelium, coarse dirt, snow) under
+    or beside the water: the biome's underwater block (sand, gravel), or for biomes with a dirt
+    floor a draw per lake (dirt 50%, sand 30%, gravel 20%: Minecraft's disk features; there is
+    no clay block), dirt where water lies under the cell too (no sand that could fall). A grassy
+    top beside the water with the sky above it stays (grass at the water's edge);
+  - the dirt the bowl uncovers above the water grows the column's top back (Minecraft turns it
+    into grass or mycelium; here also dry grass, podzol and snow).
+  `topCells` drop below the lowest written cell, so plants never grow in the water (Foliage needs
+  air above the ground) and the sky line describes the ground. LOD chunks up to
+  `StructureMaxLevel` put water (or ice) into the top cell of a column whose sample block lies
+  over the lake's water, as the lava lakes do. Surface caves leave the box and 2 blocks around it
+  alone and no tree grows there (`keepOut`). The map paints the lakes' water at up to 8 blocks a
+  pixel (`MapPainter.paintLakes`). Seeds 12345 / 777: 0.30 / 0.58 lakes per km² over 67 km² (lava
+  lakes 1.55 / 0.69), one in 10-20 frozen.
+- **Puddles** (`puddles`, `write`; not a Minecraft feature). One candidate per
+  `Lakes.Puddles.Spacing` (32) square cell at a hashed spot, kept with its biome's chance
+  (`Lakes.Puddles.Biomes`, else `Chance`: jungles 0.14, mushroom fields 0.12, forests 0.08-0.1,
+  plains and meadows 0.05-0.06, windswept hills 0.03, savannas, stony peaks and deserts
+  0.005-0.012; frozen and snowy biomes none). From the spot it runs downhill, steepest first, up
+  to `DRAIN` (12) steps to a column no 4-neighbour is lower than, the bottom of a dip at height
+  L (still going after 12 steps: a long slope, no puddle). From there it floods outwards over
+  columns of height L, within a wobbly radius (`Radius` 1.5-3.5 blocks, two harmonics of up to
+  30% each) and up to `Size[2]` (20) columns, but only onto columns with no lower 4-neighbour,
+  so every water cell (y L - 1, in place of the top block) has ground or water beside it and
+  ground below. Fewer than `Size[1]` (3) columns, L within 2 blocks of the sea, a column a cave
+  entrance or ravine may open (`SurfaceCaves.carvesTop`), a frozen or snowy biome on or next to
+  it, a structure's piece, an oil well or a lava or water lake within `PUDDLE_MARGIN` (1), or the
+  spawn within 24 blocks: no puddle. Two candidates draining into the same dip overlap at the
+  same water level, which holds as well. Full detail chunks only: a puddle is a few blocks
+  across, under a far node's cell, and puddles cost nothing at LOD but the decisions (far nodes
+  still keep trees and surface caves out of them, so trees agree at every level); the map paints
+  them at 1-2 blocks a pixel. Seeds 12345 / 777 over 16.8 km²: 22 / 14 per km² (37 / 92 per km²
+  of land), 3-20 columns (median 12-15); per km² of each biome: jungles 111-123, mushroom fields
+  114, forests 74-106, birch forests 61-71, taiga 58-65, old growth taiga 51-68, plains 47-53,
+  meadows 44, windswept hills 16, savannas 4-24, deserts 2-4, frozen biomes 0. (Puddles are
+  counted by the biome at the dip's bottom, which a spot in a wetter neighbour can drain into:
+  savannas next to plains get more than their own chance.)
+
+Cost: deciding a km² of puddles takes ~35 ms (native code, once per generator), more than half of
+it building the surface caves' worms (`carvesTop`, last), which the chunks there build anyway, and
+lakes ~6 ms; chunks around lakes and puddles generate within a few percent of the time without them
+(tests/spec/LakeGeneration, which also checks the shapes, that no water cell has an open side or
+bottom, determinism and the seams, trees and plants, far nodes, solidBelow / emptyAbove, the
+cave visibility graphs and the map).
+
 ### Structures
 
 `Structures.populate` divides the world into 5 × 5 cells with one candidate spot per cell at a hashed
@@ -406,8 +476,10 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away. A spot is refused near a library structure's piece (`accept`, see
-below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava lake's
-box or a geyser's lake square (with their margins: TerrainGenerator's `keepOut`), and where a cave
+below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava or
+water lake's box, a puddle's bounds or a geyser's lake square (with their margins:
+TerrainGenerator's `keepOut`; far nodes keep trees out of puddles too, though they don't draw
+them, so every level agrees on every tree), and where a cave
 entrance or ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms,
 never the chunk's data, so every chunk and level agrees on every tree).
 
@@ -1187,7 +1259,9 @@ water depth and sea ice. It paints from column data, so cave entrances and ravin
 Oil wells' geysers are painted over it as black dots in the oil's colour (`paintWells`, from
 `generator.oilWells`: the pixel holding the spout and every pixel whose centre lies within the
 lake's radius, not the lake's exact shape); a tile has a few wells at most, and the dots add
-nothing measurable.
+nothing measurable. Water lakes (at up to 8 blocks a pixel) and puddles (up to 2) are painted as
+water where a pixel's centre column holds theirs (`paintLakes`, from `generator.waterLakes` and
+`generator.puddles`); further out they would be a pixel or less.
 
 Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
 EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
@@ -1274,6 +1348,15 @@ prediction.
 ### WAILA (`Ui/Waila`, `Ui/WailaInfo`)
 
 A panel at the top centre names what the crosshair points at, like the Jade mod.
+
+- **Light level.** Blocks and fluids carry a "Light level N" line (`WailaInfo.lightLine`, context
+  `light`): the light of the cell a mob would stand in (above an opaque block, else the block's
+  own cell), the larger of its block light (`CaveMood.blockLight`: sources less one per open cell
+  they travel, budgeted) and sky light (`LightingController.skyLight`, SkyExposure's estimate),
+  since the engine keeps no light map. It is worked out at every pick (0.05 s) and is part of the
+  panel's key, so a torch placed nearby updates it. Coloured for Minecraft 1.18+'s monster
+  spawning (block light 0): red with sky light at most 7, yellow above (night only), green lit;
+  F3 adds "(block b, sky s)". Meant for mob spawning later, which should use the same estimate.
 
 - **Target.** `BlockInteraction.target()`: the highlighted block, with the same reach and rules
   (outlines included). A dropped item (`EntityRenderer.itemsNear`, a 0.5 × 0.8 block box around
@@ -1395,6 +1478,11 @@ hull is.
     detected and followed.
   - The `Physics` state never dies by itself, so health ≤ 0 puts the Humanoid into `Dead`. On death
     the rig is released: its parts go back to Default, the forces and the camera offset are removed.
+  - Explosions push the hull: `knockback(kx, ky, kz)` (the server's Explosion message, through
+    `Rendering/ExplosionView`) adds the push to the hull's velocity with
+    `PlayerPhysics.knockback`, as Minecraft's client adds the explosion packet's knockback; not
+    while frozen or following someone, nor for spectators (`noClip`) or a player in flight who may
+    fly (Minecraft's server leaves creative flight out of the packet's knockback).
 - **`Player/CharacterAnimator`** replaces the `Animate` script, which needs Humanoid states the
   character never enters. It loads the avatar's own animation ids from `Animate`, falling back to
   Roblox's defaults. It uses the script's rules:
@@ -2436,6 +2524,94 @@ fuel are no furnace fuel.
 Nobody spawns in lava, oil or fuel or next to lava (`SpawnUnsafeBlocks`: `Body` names the four
 fluids, which covers their levels and twins; `Hazards` lava).
 
+## Explosions (`World/Explosion`, server `World/FuelBlast`, `World/Explosions`)
+
+Minecraft 1.20.1's explosions, set off by burning fuel (and `Api.explode`). Tested in
+`tests/spec/Explosions`.
+
+**The maths** (`Shared/World/Explosion`, pure; Minecraft's Explosion.explode, finalizeExplosion and
+getSeenPercent):
+- Blocks (`affected(getBlock, x, y, z, power, random)`): the 1352 points on the surface of a
+  16 × 16 × 16 cube give the rays' directions (`RAYS`, in Minecraft's loop order). Each ray starts
+  with power × (0.7 + random × 0.6) and steps 0.3 blocks; every step costs 0.22500001, plus
+  (resistance + 0.3) × 0.3 in any cell but air. A cell reached with intensity left is affected,
+  air included (fire lands there). Rays stop at the world's floor and ceiling and at unloaded
+  blocks. Each cell is read once per ray however many steps it holds (the cost is still per step):
+  TNT in open air reads about 9,000 blocks (1.7 ms interpreted), power 12 about 26,000 (7 ms).
+- Blast resistance is BlockList's `blastResistance` (Blocks `blastResistance`, f32
+  `blastResistanceLut`): the hardness unless given (Minecraft's `strength(f)` sets both),
+  3,600,000 for unbreakable and creative only blocks, 0 for air, Minecraft's values where they
+  differ (`BLAST_RESISTANCE` at the end of BlockList: the stone family and bricks 6, planks 3,
+  metal and gem blocks 6, packed mud 3, obsidian 1200). Fluids resist 100 (their hardness), so TNT
+  in water breaks nothing (the first step costs 30); fuel 0: it is the explosive.
+- Entities (`hit`): within 2 × power of the centre (measured to the feet), impact =
+  (1 − distance / (2 × power)) × seen, damage = ⌊(impact² + impact) / 2 × 7 × 2 × power + 1⌋ half
+  hearts (TNT point blank 57, half its reach away 22, behind a wall 1), and a push of `impact`
+  blocks per tick away from the centre towards the eyes (Blast Protection would soften it;
+  nothing is enchanted). `seenPercent` samples the body box every 1 / (2 × size + 1) of it on
+  each axis (a player 3 × 5 × 3 points, an item 2 × 2 × 2), shifted to centre them across, and
+  counts the points with no solid block on the line to the centre (`VoxelRaycast`).
+- `dropChance(power)`: 1 / power (the survives_explosion loot condition). `fireSpots`: one in
+  three affected cells (a roll per cell, nextInt(3) == 0) that are air after the blast with an
+  opaque block below.
+
+**Fuel catching** (`World/FuelBlast`, pure): fuel (any level, falling too) catches when one of its
+six sides is Fire or lava of any level (the cave twin too: `isHot`). `Behaviours/Fluid` asks in
+its `onNeighborChanged`, which runs for the fuel itself and for every neighbour's change: so fuel
+catches when fire or lava arrives next to it and when it flows next to them. Crude oil does not.
+- `measure`: a breadth-first fill through the six sides over the connected fuel, at most
+  `Explosions.MaxCells` (4096) cells, never into claimed cells or unloaded chunks. A source counts
+  a bucket, a flowing cell its fill ((8 − level) / 8; falling 1) × `FlowingShare` (1/16): flowing
+  fluid is a thin sheet Minecraft makes out of nothing, so a bucket's puddle (a source and 112
+  flowing cells) counts 3.6 buckets, not 43.
+- `power(v)` = `BucketPower` (4) × ∛v within `MinPower`..`MaxPower` (1..12): blast reach scales with
+  the cube root of the charge (Hopkinson–Cranz), and Minecraft's power is a reach (entities within
+  2 × power, rays through 1.73 × power blocks of air). A bucket is TNT, 4 buckets 6.3 (a charged
+  creeper), 8 buckets 8, 27 buckets 12.
+- `plan`: the body is cut into `ClusterSize` (4) wide cubes centred on the cell that caught; each
+  cube is one blast, at its fuel's weighted centre, with the power of its buckets, `delay` ticks
+  after catching: the flood fill distance of its nearest cell / `ChainBlocksPerTick` (1.5). Cubes
+  under `MinBlastVolume` (half a bucket) are flashes (power 0). A bucket on the ground: one TNT
+  blast, its puddle's thin edge flashing; a 12 × 12 × 2 pool: 16 blasts of power 8 to 12 over 14
+  ticks; a 16 × 16 × 4 pool of 1024 buckets: 50 blasts of power 6.3 to 12 over 20 ticks (more
+  under the cost bounds).
+
+**In the world** (`World/Explosions`, on WorldServer; state per world, weakly kept):
+- `ignite(world, x, y, z)` queues a cell. `step(world)` (the boot script, every server tick after
+  the block ticker) plans at most `MaxIgnitionsPerTick` (4) queued cells, claiming every cell of a
+  plan for its blast; claimed cells are skipped by later fills and ignitions, and blasts reaching
+  them leave them, so each part of a body goes off once, on its own schedule.
+- Then it sets off the blasts that are due, in order: at most `MaxBlastsPerTick` (8), and no new
+  one once this tick's rays read `RayBudget` (60,000) blocks; the first always goes, the rest
+  wait. A fuel blast first consumes its cube's cells that are still fuel (air; released). Then,
+  as Minecraft: the affected cells; the handler (`setHandler`: the boot script's
+  `Entities.explode` and `Characters.explosion`) before any block goes, so the blast's own drops
+  are spared; the sound (`entity.generic.explode`, Audio/Sounds); every affected non-air block
+  becomes air, dropping its items (`Items.leafDrop` or `Items.blockDrops`) with `dropChance`
+  through `Behaviours/Drops` (containers spill as for any change); unclaimed fuel among them is
+  ignited instead (like TNT primed by a blast); and a fiery blast (every fuel blast) sets Fire on
+  its `fireSpots`. Fire next to fuel the plan did not reach (beyond MaxCells, or flowing in later)
+  lights it in turn, so huge bodies burn on in chains. A flash consumes its cells and sets fire on
+  the same rule. Unloaded chunks stop everything and are never generated.
+- `explode(world, x, y, z, power, fiery)` queues a single blast for the next step (`Api.explode`).
+
+**Entities**:
+- Items (`EntityWorld.explode`, through `Entities.explode`): an item takes the damage off its 5
+  health (gone at 0: any impact over 0.126, so within 7 blocks of TNT in the open); the rest are
+  pushed (aimed at 0.85 of their height, Minecraft's eye height) and resynced at once.
+- Players (`Characters.explosion`): a living player in reach takes the damage through
+  `Burning.hurtPlayer`: the same LivingEntity.hurt cooldown as lava and burning (10 ticks: blasts
+  together land only the biggest, a bigger one by the difference, as a pile of TNT does), softened
+  by armor (explosions don't bypass it), none in creative or spectator (also their ForceField).
+  The box is the standing one at the feet (`Rig.feet`), eyes at 1.62. Every player within
+  `EffectDistance` (64) gets an `Explosion` message with the centre, the power and their own
+  knockback (zero if out of reach or a spectator).
+- The client (`Rendering/ExplosionView`): a Roblox `Explosion` at the centre (radius 0.75 × power
+  blocks, at most 8; BlastPressure 0, DestroyJointRadiusPercent 0, no craters: it only draws), the
+  knockback to `MovementController.knockback`, and a camera shake (this game's): strength
+  (1 − distance / (`ShakeDistance` × power)) × min(1, power / 4), fading over 0.45 s, turning the
+  camera by up to 1.6° after Roblox's camera updates.
+
 ## Just Enough Items (`Ui/Jei/`)
 
 JEI's three parts, simplified: an item list beside every inventory screen, a recipe view with an
@@ -3385,6 +3561,7 @@ Dropped items are Minecraft's ItemEntity:
   - pickup by a player box grown by (1, 0.5, 1), living players only, never spectators;
   - merging of equal items (the smaller into the larger, every 2 ticks while moving, 40 at rest);
   - despawn after `Entities.ItemLifetime`; at most `Entities.MaxItems`;
+  - explosions (`explode`): see Explosions;
   - burning (`Players/Burning.tickItem`, after the move): lava takes 4 of an item's 5 health a tick
     and sets it burning (water puts it out), so an item touching lava is gone the tick after
     (Minecraft's Entity.lavaHurt); each lava hurt is in `takeChanges().burnt`, where Entities plays
@@ -3438,7 +3615,7 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
 | Side        | Events                                                     | How                              |
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
 | `predicted` | block break / place / fall, player small / big fall        | the acting client at once; the server sends everyone else |
-| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish | the server sends everyone near, the player included |
+| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish, explosions | the server sends everyone near, the player included |
 | `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient | clients only, never sent |
 
 **The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
@@ -3453,7 +3630,9 @@ out; spectators look in without opening the lid; a broken chest closes silently)
 (armor put on by any action, a tool breaking), Entities (pickups, at the item; an item burning in
 lava), Characters (health lost, at most every 0.5 s; death; a hurting landing's fall and the fall
 sound of the block below the feet; a lava hurt that lands, water putting burning out; none for
-spectators), Behaviours/Fluid (lava's fizz) and Players/ItemUse (each fluid's bucket sounds).
+spectators), Behaviours/Fluid (lava's fizz), Players/ItemUse (each fluid's bucket sounds) and
+World/Explosions (`entity.generic.explode`: appended after the lava's events, Minecraft's volume
+4 as a 64 block reach, pitch 0.7 ± 0.1, the built-in boom whole at volume 1).
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
@@ -3606,6 +3785,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Jigsaws`       | jigsaws' settings per position (none: gone); open flag            |
 | server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
+| server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
@@ -3677,6 +3857,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
     no collision box, as on a torch; flowing water washes every plant away with its drop (flowing
     lava burns it, with no drop). Plants are not opaque, so the grass under them stays grass and the
     sun reaches through them (`SkyCheck`), and a spawn may stand in one (`SafeSpot`).
+- `World/Explosions` + `World/FuelBlast`: blasts and fuel going off, stepped after the block
+  ticker every tick (see Explosions). `Behaviours/Fluid` hands fuel touching fire or lava to it.
 - `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
 - `Network/ServerNet`: rate limits, reach checks, the game mode (`EditRules.mayEdit`: survival and
   creative edit, adventure and spectator edits are answered with the real block;
@@ -3712,7 +3894,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   20 ticks a second, catching up at most 4 a frame, on the standing box at the feet against the
   server's loaded blocks, with the armor worn from `Inventories`; see Fluids), and a burning
   character carries `IceVoxelOnFire`. It also plays the hurt, death, hurting-landing, burn and
-  extinguish sounds to everyone near (see Sounds), never a spectator's.
+  extinguish sounds to everyone near (see Sounds), never a spectator's. Explosions hurt and push
+  players through `Characters.explosion` (see Explosions).
 - `Players/Teleport`: map teleports (see Map), and spectators' `SpectatorTeleport` (see Game
   modes: On the server).
 - `Players/SettingsStore`: players' settings, one profile per kind of device, in a DataStore (see

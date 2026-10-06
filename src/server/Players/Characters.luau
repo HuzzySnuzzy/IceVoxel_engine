@@ -29,6 +29,13 @@
 	    at the feet, each at its Shared/Sounds volume and pitch (once Shared/Sounds has them).
 	    Creative and spectator players never burn. A burning character carries the attribute
 	    ON_FIRE (true) for clients to show it; a new character starts out of the fire.
+	  * explosions (`explosion`, World/Explosions' handler; Shared/World/Explosion): a living
+	    player within 2 x power of a blast takes Minecraft's damage for how close and how much
+	    in the open they are, through the hurt cooldown lava and burning use and softened by
+	    armor (Players/Burning.hurtPlayer; never in creative or spectator), and every player
+	    within Config.Explosions.EffectDistance gets an Explosion message: the client draws the
+	    blast and adds the knockback to its movement (none for spectators, as Minecraft leaves
+	    them out of the explosion packet's knockback; the client leaves out creative flight).
 	  * sounds (Audio/Sounds), heard by everyone near: losing health (entity.player.hurt, at most
 	    every half second like Minecraft's invulnerability time) and dying (entity.player.death),
 	    from any cause; and a hurting landing's small or big fall with the fall sound of the block
@@ -47,6 +54,7 @@ local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
+local Explosion = require(Shared.World.Explosion)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
@@ -199,12 +207,85 @@ local function burnTick(getBlock: Burning.GetBlock)
 	end
 end
 
+-- The network, once started (explosion messages).
+local started: ServerNet.ServerNet? = nil
+
+--[[
+	An explosion of `power` at (x, y, z) (blocks), with the loaded blocks `getBlock` (see the
+	header): hurts the players it reaches and sends every player within EffectDistance its effect
+	and their knockback.
+]]
+function Characters.explosion(x: number, y: number, z: number, power: number, getBlock: Explosion.GetBlock)
+	local net = started
+	if net == nil then
+		return
+	end
+	local range = Config.Explosions.EffectDistance
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		local feet = if character then Rig.feet(character) else nil
+		if
+			humanoid == nil
+			or feet == nil
+			or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+			or (feet - Vector3.new(x, y, z)).Magnitude > range
+		then
+			continue
+		end
+		local mode = GameMode.of(player)
+		local kx, ky, kz = 0, 0, 0
+		if humanoid.Health > 0 and not GameMode.isSpectator(mode) then
+			local half = BODY.width / 2
+			local seen = Explosion.seenPercent(
+				getBlock,
+				x,
+				y,
+				z,
+				feet.X - half,
+				feet.Y,
+				feet.Z - half,
+				feet.X + half,
+				feet.Y + BODY.height,
+				feet.Z + half
+			)
+			local damage, px, py, pz = Explosion.hit(x, y, z, power, feet.X, feet.Y, feet.Z, feet.Y + BODY.eye, seen)
+			if damage then
+				kx, ky, kz = px, py, pz
+				local state = burning[player]
+				if state == nil then
+					state = Burning.newPlayer()
+					burning[player] = state
+				end
+				local window = Inventories.get(player)
+				local armor, toughness = 0, 0
+				if window then
+					armor, toughness = Items.armorPoints(window.inventory.armor)
+				end
+				local landed = Burning.hurtPlayer(state, mode, damage, armor, toughness)
+				if landed > 0 then
+					-- (TakeDamage respects the ForceField of players who can't be hurt.)
+					humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
+				end
+			end
+		end
+		net.send(
+			player,
+			Protocol.ServerMessage.Explosion,
+			Protocol.encodeExplosion({ x = x, y = y, z = z, power = power, kx = kx, ky = ky, kz = kz })
+		)
+	end
+end
+
 --[[
 	Starts handling characters. `world` (optional) gives the block a hurting landing sounds like
 	and the blocks players suffocate in and burn in; without it only the player's fall sound plays,
 	nobody suffocates and nothing burns.
 ]]
 function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
+	started = net
 	if not workspace:IsCollisionGroupRegistered(Rig.COLLISION_GROUP) then
 		workspace:RegisterCollisionGroup(Rig.COLLISION_GROUP)
 	end

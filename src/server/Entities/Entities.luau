@@ -16,6 +16,8 @@
 	  Lava      items touching lava burn away (EntityWorld, Players/Burning), each lava hurt with
 	            Minecraft's entity.generic.burn at the item (at the event's own volume 0.4 and
 	            pitch 2 to 2.4) once Shared/Sounds has the event.
+	  Blasts    `explode` (World/Explosions' handler, the boot script): items near an explosion
+	            are destroyed or pushed away (EntityWorld.explode), and pushed ones resync at once.
 	  Damage    items keep their stack's `damage` and item data (a worn tool stays worn, a Fluid
 	            Tank keeps its water, when thrown, dropped from a chest, broken or scattered on
 	            death, and is picked up as it was; only equal data merges). Clients do not need
@@ -445,6 +447,13 @@ function Entities.throwFromPlayer(player: Player, stack: Stack, scatter: boolean
 		vz = flat.Z * 0.3 + math.sin(angle) * jitter
 	end
 	return Entities.spawnItem(stack, feet.X, feet.Y + THROW_HEIGHT, feet.Z, vx, vy, vz, EntityWorld.THROWN_PICKUP_DELAY)
+end
+
+-- An explosion of `power` at (x, y, z) (blocks): items near it are destroyed or pushed away
+-- (EntityWorld.explode). Returns how many were destroyed.
+function Entities.explode(x: number, y: number, z: number, power: number): number
+	local entities = entityWorld
+	return if entities then entities:explode(x, y, z, power) else 0
 end
 
 -- Number of dropped items in the world.

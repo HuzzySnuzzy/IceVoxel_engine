@@ -202,7 +202,8 @@ return function(t, shared, require, server)
 		local F = SharedFire
 		t.eq(F.sides(sparse({ ["0,-1,0"] = STONE, ["1,0,0"] = B.OakLog }), 0, 0, 0), 0, "on stone: the floor")
 		t.eq(F.sides(sparse({ ["0,-1,0"] = B.Planks }), 0, 0, 0), 0, "on planks: the floor")
-		local walls = sparse({ ["1,0,0"] = B.OakLog, ["0,0,-1"] = B.OakLeaves, ["0,1,0"] = B.Planks, ["-1,0,0"] = STONE })
+		local walls =
+			sparse({ ["1,0,0"] = B.OakLog, ["0,0,-1"] = B.OakLeaves, ["0,1,0"] = B.Planks, ["-1,0,0"] = STONE })
 		t.eq(F.sides(walls, 0, 0, 0), F.EAST + F.NORTH + F.UP, "the flammable sides only")
 		-- Outlines: Minecraft's slabs.
 		local floor = F.outline(0)

@@ -82,6 +82,32 @@ A fast, Minecraft-style voxel engine for Roblox.
   burns it. With your eyes in oil you see 2 blocks, in fuel 32 (and under water the view now fogs
   over too, 96 blocks once your eyes are used to it). Oil and Fuel Buckets carry them. A buried
   deposit costs nothing to draw while caves are hidden.
+- **Fuel explodes.** Fuel that touches fire or lava (any level, flowing or poured, the cave lava
+  too) blows up, the harder the more of it is connected: the whole connected body (up to 4,096
+  cells) goes off, a bucket as hard as TNT, 8 buckets twice that, 27 at the cap of power 12 (blast
+  reach grows with the cube root of the charge; the thin film of a spread puddle counts little).
+  A big pool is not one blast but a chain: one per 4 × 4 × 4 cube of it, rippling out from where
+  it caught at 1.5 blocks a tick, and every blast is fiery, so a 16 × 16 × 4 tank's worth is a few
+  dozen blasts of power 6 to 12 over a second or two that leave the crater burning. Explosions are
+  Minecraft 1.20.1's: 1352 rays losing strength to each block's blast resistance (stone 6, dirt
+  0.5, obsidian 1200, water and lava 100: a blast in water breaks nothing), a block's drop with
+  chance 1 / power, damage by distance and how much of you is in the open (TNT at point blank:
+  57 half hearts, through armor and the hurt cooldown, none in creative and spectator), knockback
+  that throws you (not in spectator or creative flight), items blown away or destroyed, the boom
+  (`entity.generic.explode`, heard 64 blocks away), a flash and a short camera shake. Crude oil
+  is no explosive.
+- **Lakes and puddles.** Minecraft's water lakes (lake_water, from before 1.18): the lava lakes'
+  irregular basin of blobs, water 1-3 deep in its lower half and the bowl above it dug out, on
+  dry land, never by the sea, a river, a structure, an oil well or a lava lake (0.3-0.6 per km²,
+  rarer than lava lakes); frozen over with ice in snowy biomes, with a sand or gravel floor where
+  the biome's water has one (or a draw per lake: dirt, sand or gravel), and the grass around the
+  rim stays grass. Puddles lie in natural dips: water in place of the top block of 3-20 columns
+  (median 10-15) at the bottom of a hollow, most in jungles, mushroom fields and forests (50-120
+  per km²), fewer on plains and meadows (45-55), rare in savannas and deserts (2-25) and none in
+  frozen biomes. Both are still water sources held in on every side and below, so nothing flows
+  until you dig next to them; no tree or plant stands in them and no cave entrance opens under
+  them. Far terrain shows the lakes (LOD levels 1-2) and the map paints both (lakes up to 8
+  blocks a pixel, puddles up to 2); puddles are drawn near the player only.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -502,7 +528,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   green check or red cross for the item in hand ("Requires Iron Pickaxe"), the mining progress
   as a line along its bottom edge, and "IceVoxel" as the mod name. It also names dropped items,
   other players (health, game mode) and fluids when no block is in reach (lava says "Light 15"),
-  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). While `F3` is open it shows everything
+  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). Blocks and fluids show a "Light level"
+  line: Minecraft's 0-15 light where a mob would stand on the block (on top of it, or in the cell
+  of a see-through block), the larger of the block light from torches, lava, glow lichen and the
+  like and the sky light, estimated from the loaded blocks. Red: no block light and little sky
+  (monsters could spawn there at any time); yellow: no block light under the sky (at night); green:
+  lit. While `F3` is open it adds both parts, and shows everything
   the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
   item and by hand, break time, light, fluid level, render kind, friction and menu.
 - **Music.** Minecraft's background music: a track now and then (the first a few seconds after
@@ -753,6 +784,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             StructureMaxLevel)
     OilWells                BuildCraft's oil wells: deposits, geysers and their lakes, undersea
                             pockets (point-sampled up to StructureMaxLevel; the map's dots)
+    Lakes                   water lakes (Minecraft's lake_water; point-sampled up to
+                            StructureMaxLevel) and puddles in dips (full detail only)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
     StructureGen            library structures in chunks (random_spread starts, assembly cache,
                             pieces, foundations, generated chests)
@@ -766,7 +799,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow, SectionGraph
                             (cave visibility: which sections connect, the search from the
-                            camera), Horizon (far terrain hidden behind nearer terrain)
+                            camera), Horizon (far terrain hidden behind nearer terrain),
+                            Explosion (Minecraft's explosion: rays, blast resistance, seen
+                            percent, damage, knockback, fire)
   PlayerSettings            the Options menu's settings: ids, ranges, presets, the LOD balance
                             rule, the wire and DataStore formats
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
@@ -783,7 +818,10 @@ src/server   -> ServerScriptService.IceVoxel
   IceVoxel_Server           boot: seed, world, ticker, network, players
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
-                            Simulation, TimeOfDay (the day clock, published as workspace attributes)
+                            Simulation, TimeOfDay (the day clock, published as workspace attributes),
+                            Explosions (blasts in the world, fuel going off, per-tick cost
+                            bounds), FuelBlast (fuel catching, measuring a body, power, chained
+                            blasts; pure)
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
                             water), Grass (dying and spreading), Leaves (decay), Sapling,
                             Attached (torches and lanterns need support),
@@ -792,7 +830,8 @@ src/server   -> ServerScriptService.IceVoxel
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication
-  Entities/                 EntityWorld (item rules: pickup, merging, despawn, burning in lava),
+  Entities/                 EntityWorld (item rules: pickup, merging, despawn, burning in lava,
+                            blasts),
                             Entities (spawning, replication)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (every fluid in
@@ -816,8 +855,9 @@ src/server   -> ServerScriptService.IceVoxel
                             /gamerule), Inventories + InventoryState (authoritative inventories),
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
-                            damage, invulnerability, suffocation, lava and burning), Burning
-                            (lava hurting and burning players and items; pure), Spawning,
+                            damage, invulnerability, suffocation, lava and burning, explosions),
+                            Burning (lava hurting and burning players and items, the hurt
+                            cooldown explosions share; pure), Spawning,
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
@@ -875,6 +915,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             hull), HeldItems, SpectatorView + SpectatorRules (who sees, hears and
                             aims at spectators), BurningView (flames on burning players, the fire
                             overlay in first person)
+  Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
                             tanks, items moving through transporters, the windows of working
                             generators, Electric Furnaces and Oil Refineries, Batteries' charge
@@ -940,6 +981,9 @@ for performance:
 | `Caves.LavaLakes`         | Underground Rarity 1, Tries 8, Depth 30; Surface Rarity 200 | Lava lakes sunk into cave floors (one chunk in `Rarity` of those with caves tries `Tries` spots, at least `Depth` blocks below the surface) and on the surface (one candidate per `Rarity` chunks of area), none within `SpawnClearance` (128) blocks of the spawn; `Enabled = false`: none of that kind. |
 | `Caves.OilWells`          | Spacing 512, Chance 0.12 | Oil wells: one candidate per 512 × 512 blocks, a well with `Chance`, its biome's chance in `Biomes` (Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45) or `Sea` (0.15) under the sea (pockets of `SeaSize`, Small, no geyser); `Sizes` (share, deposit radius, lake radius, spout height: Large 25%, 8-12, 7-10, 16; Medium 50%, 5-7, 4-7, 6; Small 25%, 3-4, no geyser), `Depth` 20-40, `LakeDepth` 1-3, none within `SpawnClearance` (256) blocks of the spawn; `Enabled = false`: none. |
 | `Caves.LavaLightDistance` | 96      | Lava's lights within this many blocks of the camera are on (phones 48: `Caves.Mobile`); the lava still glows. |
+| `Lakes.Water`             | Rarity 600 | Water lakes: one candidate per `Rarity` chunks of area, kept with its biome's weight in `Biomes` (Desert 0.3, Savanna 0.6, Windswept Savanna 0.5; others 1); `Enabled = false`: none. |
+| `Lakes.Puddles`           | Spacing 32, Chance 0.05 | Puddles: one candidate per 32 × 32 blocks, a puddle with its biome's chance in `Biomes` (Jungle 0.14 ... Desert 0.005) or `Chance`, none in frozen or snowy biomes; `Size` 3-20 columns, `Radius` 1.5-3.5 blocks; `Enabled = false`: none. |
+| `Lakes.SpawnClearance`    | 24      | No water lake or puddle this close to the spawn (blocks). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
@@ -967,6 +1011,12 @@ for performance:
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
+| `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
+| `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
+| `Explosions.MaxCells` / `ClusterSize` / `MinBlastVolume` | 4096 / 4 / 0.5 | Fuel one ignition sets off at most; a blast per cube this wide; cubes with less fuel (buckets) just flash into fire. |
+| `Explosions.ChainBlocksPerTick` | 1.5 | How fast the chain runs through a body of fuel (blocks a tick). |
+| `Explosions.MaxIgnitionsPerTick` / `MaxBlastsPerTick` / `RayBudget` | 4 / 8 / 60000 | Cost bounds per server tick (a power 12 blast reads about 26,000 blocks; the first blast always goes). |
+| `Explosions.EffectDistance` / `ShakeDistance` | 64 / 4 | Players this close see and feel a blast; the camera shakes within ShakeDistance × power. |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
 | `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui, music). |
 | `Sounds.PlayerRate`       | 8       | Sounds a player's inventory clicks and chest opening may cause per second (anti-spam). |
@@ -1593,7 +1643,14 @@ local Blocks = require(game.ReplicatedStorage.IceVoxel.Blocks)
 local world = IceVoxel.waitForWorld()
 world:setBlock(10, 80, 10, Blocks.id.Stone) -- replicated to every client, triggers block updates
 print(world:getBlock(10, 80, 10))
+IceVoxel.explode(10.5, 82, 10.5, 4) -- a TNT-sized blast on the next tick (true as a fifth argument sets fire)
 ```
+
+**Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
+leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values
+that differ from the hardness are in `BLAST_RESISTANCE` at the end of BlockList. A fluid other
+than fuel resists 100, so blasts in it break nothing. What else sets fuel off is
+`World/FuelBlast.isHot` (fire and lava).
 
 ## Development
 
@@ -1653,7 +1710,8 @@ Natural next steps, roughly in order:
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
 - **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling,
-  suffocating inside a block and lava (`Items.damageAfterArmor`, which lava already uses).
+  suffocating inside a block, lava and explosions (`Items.damageAfterArmor`, which both use).
+  TNT, creepers and Blast Protection would sit on `World/Explosions` (`Api.explode`).
 - **More of lava and oil.** Fire blocks (lava sets nothing alight), basalt, water aquifers,
   BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
   particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).

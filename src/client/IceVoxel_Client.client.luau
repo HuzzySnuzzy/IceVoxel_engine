@@ -49,6 +49,8 @@
 	  Player/HeldItems           the item in every character's hand, and in first person
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
 	  Player/BurningView         flames on burning players (lava), the fire overlay in first person
+	  Rendering/ExplosionView    explosions (the server's Explosion messages): the blast drawn, its
+	                             knockback on the movement, a short camera shake
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
 ]]
 
@@ -84,6 +86,7 @@ local MovementController = require(Client.Player.MovementController)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local SpectatorView = require(Client.Player.SpectatorView)
 local BurningView = require(Client.Player.BurningView)
+local ExplosionView = require(Client.Rendering.ExplosionView)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -268,6 +271,7 @@ CharacterAnimator.start()
 HeldItems.start()
 SpectatorView.start()
 BurningView.start()
+ExplosionView.start()
 BlockInteraction.start(world)
 GameModeSwitcher.start()
 DebugOverlay.start(streamer)

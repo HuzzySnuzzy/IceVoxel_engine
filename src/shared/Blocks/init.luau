@@ -89,6 +89,9 @@ export type BlockDef = {
 	displayName: string?,
 	-- Minecraft destroy time (see Shared/Mining); < 0 = unbreakable.
 	hardness: number,
+	-- Minecraft's explosion resistance (Shared/World/Explosion; BlockList `blastResistance`): 0 for
+	-- air, which explosions pass at no cost.
+	blastResistance: number,
 	-- The tool that mines it fast ("pickaxe", "axe", "shovel", "hoe"), and the tier it needs to
 	-- drop anything (nil: drops by hand).
 	tool: string?,
@@ -234,6 +237,8 @@ Blocks.CAVE_AIR = 1
 -- Lit blocks without a colour of their own: a warm white.
 local DEFAULT_LIGHT_COLOR = { 255, 220, 170 }
 local FULL_CELL: Bounds = table.freeze({ min = table.freeze({ 0, 0, 0 }), max = table.freeze({ 16, 16, 16 }) })
+-- Minecraft's explosion resistance of unbreakable blocks (bedrock, structure blocks).
+local UNBREAKABLE_RESISTANCE = 3600000
 -- Boxes a shaped block may have (the renderer keys part templates by box index).
 Blocks.MAX_SHAPE_BOXES = 15
 
@@ -524,6 +529,11 @@ for index, spec in BlockList do
 		fluid = spec.fluid,
 		displayName = spec.displayName,
 		hardness = if breakable then spec.hardness or 1 else -1,
+		blastResistance = if spec.blastResistance
+			then spec.blastResistance
+			elseif kind == Blocks.KIND_NONE then 0
+			elseif not breakable or spec.creativeOnly then UNBREAKABLE_RESISTANCE
+			else spec.hardness or 1,
 		tool = spec.tool,
 		toolLevel = spec.toolLevel,
 		drops = spec.drops,
@@ -811,6 +821,12 @@ end)
 Blocks.replaceableLut = u8Lut(function(def)
 	return def.replaceable
 end)
+
+-- Explosion resistance per block (f32; Shared/World/Explosion reads it for every step of a ray).
+Blocks.blastResistanceLut = buffer.create(Blocks.count * 4)
+for id, def in defs do
+	buffer.writef32(Blocks.blastResistanceLut, id * 4, def.blastResistance)
+end
 
 --[[
 	Foliage tints: every block with a `foliageColor` (DryGrass), numbered from 1 in id order.

@@ -57,6 +57,10 @@
 	empty cells next to flammable blocks a step or two above it, or above flammable blocks
 	beside it), any level and its cave twin: Behaviours/Fire.lavaTick. Other fluids' random ticks
 	do nothing.
+
+	Fuel touching Fire or lava (World/FuelBlast.isHot) catches: whenever the fuel or one of its
+	neighbours changes (fire or lava arriving next to it, the fuel flowing next to them), the
+	fuel's cell is handed to World/Explosions, which blows up the whole connected body.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -68,6 +72,8 @@ local SharedSounds = require(Shared.Sounds)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Drops = require(script.Parent.Drops)
 local Fire = require(script.Parent.Fire)
+local Explosions = require(script.Parent.Parent.World.Explosions)
+local FuelBlast = require(script.Parent.Parent.World.FuelBlast)
 
 local FALLING = 8
 local MAX_FLOW = 7
@@ -91,7 +97,9 @@ local NO_HOLE = 1000
 -- A slope search reached an unloaded block.
 local UNKNOWN = -1
 
-local LAVA, WATER = "Lava", "Water"
+local LAVA, WATER, FUEL = "Lava", "Water", "Fuel"
+-- Where fuel catches from: its six sides.
+local TOUCHING = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } }
 local OBSIDIAN, COBBLESTONE, STONE = Blocks.id.Obsidian, Blocks.id.Cobblestone, Blocks.id.Stone
 -- Where water hardens lava from: above and the four sides (LiquidBlock.POSSIBLE_FLOW_DIRECTIONS'
 -- opposites; water below is poured into instead).
@@ -129,10 +137,18 @@ end
 --[[
 	Ticks between updates come from the block's `fluid.tickDelay`; lava that water touches hardens
 	on the next tick instead (Minecraft hardens it the moment the water arrives, long before the
-	water's own next tick).
+	water's own next tick). Fuel touching fire or lava catches (World/Explosions.ignite).
 ]]
 function Fluid.onNeighborChanged(world: any, ticker: any, x: number, y: number, z: number, block: number)
 	local fluid = Blocks.get(block).fluid
+	if fluid and fluid.group == FUEL then
+		for _, side in TOUCHING do
+			if FuelBlast.isHot(world:peekBlock(x + side[1], y + side[2], z + side[3])) then
+				Explosions.ignite(world, x, y, z)
+				break
+			end
+		end
+	end
 	if fluid and fluid.group == LAVA and quenched(world, x, y, z) then
 		ticker:schedule(x, y, z, 1)
 		return

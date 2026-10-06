@@ -153,6 +153,53 @@ local Config = {
 		},
 	},
 
+	-- Water lakes and puddles on the surface (Generation/Lakes). Water sources at rest, always held
+	-- in beside and below, so nothing flows until a player changes something next to them.
+	Lakes = {
+		-- Minecraft's lake_water (LakeFeature before 1.18): the lava lakes' box of blobs, water in
+		-- its lower half, the bowl above it dug out, ice on top in frozen and snowy biomes. One
+		-- candidate per Rarity chunks of area (16 x 16 block cells) on dry land, kept with its
+		-- biome's weight in Biomes (others 1); never by water, a deep cave, a structure, an oil
+		-- well or a lava lake (about 0.3-0.6 lakes per km²: rarer than lava lakes).
+		Water = {
+			Enabled = true,
+			Rarity = 600,
+			Biomes = ({
+				Desert = 0.3,
+				Savanna = 0.6,
+				WindsweptSavanna = 0.5,
+			} :: any) :: { [string]: number },
+		},
+		-- Puddles: water in place of the top block of Size columns (fewest, most) at the bottom of
+		-- a dip, flooding out to a radius of Radius blocks (smallest, largest). One candidate per
+		-- Spacing x Spacing blocks, a puddle with its biome's chance in Biomes or Chance (frozen and
+		-- snowy biomes none). Full detail chunks only.
+		Puddles = {
+			Enabled = true,
+			Spacing = 32,
+			Chance = 0.05,
+			Biomes = ({
+				Jungle = 0.14,
+				MushroomFields = 0.12,
+				BirchForest = 0.1,
+				Forest = 0.1,
+				OldGrowthTaiga = 0.1,
+				Taiga = 0.08,
+				Plains = 0.05,
+				Meadow = 0.06,
+				WindsweptHills = 0.03,
+				Savanna = 0.012,
+				WindsweptSavanna = 0.008,
+				StonyPeaks = 0.008,
+				Desert = 0.005,
+			} :: any) :: { [string]: number },
+			Size = { 3, 20 },
+			Radius = { 1.5, 3.5 },
+		},
+		-- No lake or puddle this close to the spawn (blocks).
+		SpawnClearance = 24,
+	},
+
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).
 	StructureMaxLevel = 2,
 
@@ -726,6 +773,44 @@ local Config = {
 		-- `Difficulty` is the world's (0 peaceful, 1 easy, 2 normal, 3 hard), which makes fire
 		-- spread a little faster (FireBlock.tick: + difficulty x 7 on the ignite odds).
 		Fire = { Tick = true, Difficulty = 2 },
+	},
+	-- Explosions (Shared/World/Explosion, Minecraft's) and burning fuel setting them off (server
+	-- World/FuelBlast, World/Explosions): fuel touching fire or lava explodes, harder the more of
+	-- it is connected.
+	Explosions = {
+		-- Power of a blast of `v` buckets of fuel: BucketPower x cube root of v (the cube root
+		-- scaling of blast radius with charge), so one bucket is TNT (4), 8 buckets 8, 27 buckets
+		-- 12. Between MinPower and MaxPower (a charged creeper is 6, Minecraft's biggest
+		-- vanilla blasts 7-8).
+		BucketPower = 4,
+		MinPower = 1,
+		MaxPower = 12,
+		-- What a flowing (or falling) fuel cell counts as: its fill (8 - level) / 8 of a bucket
+		-- times this. Flowing fluid is a thin sheet Minecraft makes out of nothing, so a puddle
+		-- spread from one bucket (113 cells) counts about 3.6 buckets, not 43.
+		FlowingShare = 1 / 16,
+		-- Fuel cells one ignition measures at most (a flood fill through the connected fuel);
+		-- fuel beyond them catches from the fire the blasts leave.
+		MaxCells = 4096,
+		-- A connected body goes off as one blast per ClusterSize-wide cube of it, each with the
+		-- power of the fuel in that cube, ...
+		ClusterSize = 4,
+		-- ... cubes holding less than this many buckets just flash into fire, ...
+		MinBlastVolume = 0.5,
+		-- ... staggered by the distance (through the fuel) from where it caught: a flame front of
+		-- this many blocks per tick.
+		ChainBlocksPerTick = 1.5,
+		-- Cost bounds per server tick: ignitions measured, blasts set off, and block reads of
+		-- their rays (at least one blast a tick always goes; TNT in open air reads about 9 000
+		-- blocks, a power 12 blast about 26 000, some 7 ms interpreted). What doesn't fit waits
+		-- for the next tick.
+		MaxIgnitionsPerTick = 4,
+		MaxBlastsPerTick = 8,
+		RayBudget = 60000,
+		-- Players this close (blocks) see and feel a blast (Minecraft sends its explosion packet
+		-- within 64 blocks); clients shake the camera within ShakeDistance x power.
+		EffectDistance = 64,
+		ShakeDistance = 4,
 	},
 }
 
