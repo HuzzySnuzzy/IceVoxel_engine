@@ -60,6 +60,11 @@
 	  Full buckets  (Water, Lava, Oil, Fuel Bucket: Fluids.ofBucket) the ordinary aim (through
 	                fluids): into a Fluid Tank or a machine's fluid tanks, else the fluid is poured
 	                into the clicked block if it can be replaced, else in front of the clicked face.
+	Tough As Nails' water (Interaction/Drinking), after a block's menu and before anything else, in
+	adventure too: a Glass Bottle or a canteen fills at the water source its own ray (stopping at
+	water sources, as a bucket's) finds, an empty hand sips from it, and a filled bottle or canteen
+	is drunk by holding the use button 32 ticks (letting go cancels; a tap or a free mouse's short
+	click, which has no hold, drinks it all).
 	A block with a menu still opens first, unless the player sneaks, except a machine with fluid
 	tanks clicked with a bucket that fills or empties one of them as far as its Machines record
 	shows (TankUse): the bucket goes to its tanks, else the screen opens (Mekanism's BlockFluidTank:
@@ -119,6 +124,7 @@ local Hull = require(Shared.Movement.Hull)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
 local Transmitters = require(Shared.Transmitters)
+local Drinks = require(Shared.ToughAsNails.Drinks)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -136,6 +142,7 @@ local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
+local Drinking = require(script.Parent.Drinking)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -252,6 +259,7 @@ end
 
 function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local player = Players.LocalPlayer
+	Drinking.start()
 
 	local highlight = Instance.new("Part")
 	highlight.Name = "IceVoxelSelection"
@@ -829,6 +837,24 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			swing()
 			return
 		end
+		-- Tough As Nails (Interaction/Drinking): drinking a bottle or canteen (held), filling one or
+		-- a sip with an empty hand at a water source, along a ray that stops at water sources as a
+		-- bucket's does (Minecraft's BottleItem); in adventure too (no mayBuild needed).
+		if ray and Drinking.handles(stack) then
+			local action = Drinking.use(stack, mode, function(): Drinking.Source?
+				local source = cast(ray, function(id: number): boolean
+					return Drinks.isWaterSource(id) or Blocks.isTargetable(id)
+				end)
+				return if source and Drinks.isWaterSource(source.block) then source else nil
+			end)
+			if action then
+				useSpent = true
+				if action ~= "drink" then
+					swing()
+				end
+				return
+			end
+		end
 		-- Adventure and spectator players may not build: nothing is used on blocks or placed
 		-- (ItemStack.useOn and BucketItem's mayUseItemAt want mayBuild).
 		if stack == nil or not GameMode.mayBuild(mode) then
@@ -1038,6 +1064,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		useHeld[source] = nil
 		if not anyHeld(useHeld) then
 			useSpent = false
+			Drinking.stop()
 		end
 	end
 
@@ -1054,6 +1081,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		touch = nil
 		rightDownAt = nil
 		stopMining()
+		Drinking.stop()
 	end
 
 	Screens.changed:Connect(function(open: boolean)

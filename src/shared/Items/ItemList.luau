@@ -609,4 +609,83 @@ table.insert(list, {
 	model = filledBucket(FUEL, "SmoothPlastic"),
 })
 
+--[[
+	Tough As Nails' water (Shared/ToughAsNails/Drinks): Minecraft's Glass Bottle, filled at a water
+	source into TAN's Dirty Water Bottle, which a furnace purifies (the Purified Water Bottle);
+	and the Canteen, TAN's leather canteen made of iron here (the game has no leather), filled at
+	water with three sips of dirty water (its `durability`: each sip wears it, the last one leaves
+	the empty Canteen), purified the same way. The water shows through the front of the glass and
+	in the canteen's round window, murky green-brown when dirty, clear blue when purified. Filled
+	bottles stack to 16 (Minecraft's honey bottles), so a furnace purifies a stack in one go.
+]]
+local GLASS = { 214, 230, 240 }
+local DIRTY_WATER = { 98, 116, 74 }
+local PURIFIED_WATER = { 64, 140, 236 }
+local function bottle(water: { number }?): { ModelBox }
+	local boxes: { ModelBox } = {
+		{ size = { 8, 7, 6 }, offset = { 0, -3.5, 0 } },
+		{ size = { 6, 1.5, 5 }, offset = { 0, 0.75, 0 } },
+		{ size = { 3, 3, 3 }, offset = { 0, 3, 0 } },
+		{ size = { 4, 1, 4 }, offset = { 0, 5, 0 }, color = shade(GLASS, 0.85) },
+		{ size = { 1.2, 4, 0.4 }, offset = { -2.6, -3, 3.1 }, color = { 255, 255, 255 } },
+	}
+	if water then
+		table.insert(boxes, { size = { 6.8, 5, 0.4 }, offset = { 0.4, -4.2, 3.1 }, color = water })
+	end
+	return boxes
+end
+table.insert(list, {
+	name = "GlassBottle",
+	color = GLASS,
+	material = "Glass",
+	model = bottle(nil),
+})
+table.insert(list, {
+	name = "DirtyWaterBottle",
+	maxStack = 16,
+	color = DIRTY_WATER,
+	material = "Glass",
+	model = bottle(DIRTY_WATER),
+})
+table.insert(list, {
+	name = "PurifiedWaterBottle",
+	maxStack = 16,
+	color = PURIFIED_WATER,
+	material = "Glass",
+	model = bottle(PURIFIED_WATER),
+})
+local CANTEEN = { 172, 176, 184 }
+local function canteen(window: { number }): { ModelBox }
+	return {
+		{ size = { 11, 11, 3 }, offset = { 0, -1.5, -0.5 }, color = shade(CANTEEN, 0.7), shape = "Cylinder" },
+		{ size = { 10, 10, 4 }, offset = { 0, -1.5, 0 }, shape = "Cylinder" },
+		{ size = { 5.5, 5.5, 0.5 }, offset = { 0, -1.5, 2.1 }, color = window, shape = "Cylinder" },
+		{ size = { 3, 2, 3 }, offset = { 0, 4.5, 0 } },
+		{ size = { 4, 1.5, 4 }, offset = { 0, 6.25, 0 }, color = { 70, 52, 36 }, material = "Wood" },
+		{ size = { 1, 4, 1 }, offset = { -5.5, 3, 0 }, color = { 120, 84, 52 }, material = "Fabric" },
+		{ size = { 1, 4, 1 }, offset = { 5.5, 3, 0 }, color = { 120, 84, 52 }, material = "Fabric" },
+	}
+end
+table.insert(list, {
+	name = "Canteen",
+	maxStack = 1,
+	color = CANTEEN,
+	material = "Metal",
+	model = canteen({ 58, 58, 62 }),
+})
+table.insert(list, {
+	name = "DirtyWaterCanteen",
+	durability = 3,
+	color = DIRTY_WATER,
+	material = "Metal",
+	model = canteen(DIRTY_WATER),
+})
+table.insert(list, {
+	name = "PurifiedWaterCanteen",
+	durability = 3,
+	color = PURIFIED_WATER,
+	material = "Metal",
+	model = canteen(PURIFIED_WATER),
+})
+
 return list

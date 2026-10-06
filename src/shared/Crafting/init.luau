@@ -228,14 +228,15 @@ local function matchesShapeless(recipe: Recipe, stacks: { Stack }): boolean
 end
 
 -- Minecraft's tool repair: exactly two of the same wearing item, durability left added + 5% (a
--- fresh stack: no data).
+-- fresh stack: no data). Tools only: a canteen's wear is the sips it has left (Tough As Nails),
+-- which no recipe pours together.
 local function repair(stacks: { Stack }): Stack?
 	if #stacks ~= 2 then
 		return nil
 	end
 	local a, b = stacks[1], stacks[2]
 	local def = Items.get(a.item)
-	if a.item ~= b.item or def == nil or def.durability == nil or a.count ~= 1 or b.count ~= 1 then
+	if a.item ~= b.item or def == nil or def.durability == nil or def.tool == nil or a.count ~= 1 or b.count ~= 1 then
 		return nil
 	end
 	local max = def.durability

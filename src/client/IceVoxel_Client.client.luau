@@ -49,6 +49,10 @@
 	  Player/BurningView         flames on burning players (lava), the fire overlay in first person
 	  Rendering/ExplosionView    explosions (the server's Explosion messages): the blast drawn, its
 	                             knockback on the movement, a short camera shake
+	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature from
+	                             the server, which Ui/SurvivalHud draws (droplets, the gauge, frost
+	                             and heat at the edges); Interaction/Drinking drinks and fills
+	                             bottles and canteens, Player/Exertion reports sprinting and jumps
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
 ]]
 
@@ -84,6 +88,7 @@ local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local SpectatorView = require(Client.Player.SpectatorView)
 local BurningView = require(Client.Player.BurningView)
 local ExplosionView = require(Client.Rendering.ExplosionView)
+local SurvivalState = require(Client.Player.SurvivalState)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -229,6 +234,7 @@ Settings.setStatus("controls", function(): string?
 end)
 
 ClientInventory.start()
+SurvivalState.start()
 Screens.start()
 SettingsScreen.start()
 Notices.start()

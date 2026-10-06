@@ -539,6 +539,47 @@ local Config = {
 		KeepInventory = false,
 	},
 
+	-- Thirst and body temperature (Tough As Nails) ---------------------------------------------------
+
+	--[[
+		The Tough As Nails mod's survival mechanics (TAN for Minecraft 1.20; Shared/ToughAsNails,
+		server Players/ToughAsNails): thirst (0..20 with hydration and exhaustion, Minecraft's
+		FoodData in water's place) and body temperature (ICY, COLD, NEUTRAL, WARM, HOT, drifting a
+		level at a time towards what the surroundings say). Survival and adventure players only:
+		creative and spectator players' stats stand still and never hurt.
+	]]
+	ToughAsNails = {
+		-- Thirst: drinking, dehydration at 0 and the droplets over the hotbar.
+		Thirst = true,
+		-- Body temperature: the gauge over the hotbar, hypothermia and hyperthermia.
+		Temperature = true,
+		-- With Thirst on, health comes back only while thirst is 18 or more: half a heart every 80
+		-- ticks for 6 exhaustion (Minecraft's natural regeneration, thirst for food). This replaces
+		-- Roblox's own regeneration (the character's Health script). false keeps Roblox's.
+		ThirstRegeneration = true,
+		-- Dehydration (thirst 0) takes half a heart every 80 ticks while health is above this many
+		-- half hearts (Minecraft's starvation on normal difficulty: 1; 0 = to death, hard).
+		DehydrationFloor = 1,
+		-- Right clicking a water source with an empty hand drinks from it (TAN's hand drinking).
+		HandDrinking = true,
+		-- Thirst exhaustion each tick at HOT (sweating): 0.01 is a droplet every 20 s once the
+		-- hydration is gone.
+		HotExhaustion = 0.01,
+		-- Ticks between two steps of the body temperature towards its target (one level a step).
+		ChangeTicks = 200,
+		-- Ticks the player stays wet after leaving water (being wet cools by a level).
+		WetTicks = 100,
+		-- Blocks around the player (a cube this many blocks out each way) searched for heat and
+		-- cold sources, once a second.
+		ProximityRadius = 5,
+		-- Blocks that warm the player by a level within ProximityRadius: fluid names (every level
+		-- and the cave twin) or block names. Lit furnaces and working Heat and Combustion Generators
+		-- warm too (server Players/ToughAsNails registers them).
+		HeatingBlocks = { "Lava", "Fire" },
+		-- Blocks that cool the player by a level within ProximityRadius.
+		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
+	},
+
 	-- Structures -------------------------------------------------------------------------------------
 
 	--[[

@@ -2538,6 +2538,100 @@ catches when fire or lava arrives next to it and when it flows next to them. Cru
   (1 − distance / (`ShakeDistance` × power)) × min(1, power / 4), fading over 0.45 s, turning the
   camera by up to 1.6° after Roblox's camera updates.
 
+## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/SurvivalHud`)
+
+The Tough As Nails mod's survival mechanics, after its 1.20 version: thirst and body temperature.
+The rules are pure shared modules (tested in `tests/spec/ToughAsNails`); the server plays them out
+at 20 ticks a second and sends each player their own state; the client draws it and reports its
+movement. `Config.ToughAsNails` turns thirst and temperature on and off (with both off the server
+module does nothing and no message is sent). Survival and adventure players only
+(`ToughAsNails.affects`: not GameMode.invulnerable): creative and spectator players' stats stand
+still, the extremes clear and nothing hurts; the HUD shows with the hearts.
+
+**Thirst** (`ToughAsNails/Thirst`, TAN's ThirstData = Minecraft 1.20.1's FoodData with water):
+- thirst 0..20 (starts 20), hydration 0..thirst (starts 5, food's saturation), exhaustion 0..40;
+  above 4, 4 is taken off and a point of hydration goes, or of thirst when none is left (one step
+  a tick, Minecraft's `> 4`);
+- exhaustion, Minecraft's FoodConstants: sprinting 0.1 a metre on the ground, swimming, walking
+  under water or wading 0.01 a metre, a jump 0.05, a sprint jump 0.2 (the client's `Exertion`
+  reports, below), a block broken 0.005 (ServerNet's `broke` rule), a hurt that landed 0.1 (the
+  server sees health drop outside its own damage), 6 a regenerated half heart, TAN's Thirst
+  effect 0.025 a tick, `HotExhaustion` (0.01) a tick while HOT;
+- a tick in Minecraft's order: the effect counts down and adds its exhaustion, the exhaustion
+  turns into lost points, then with `ThirstRegeneration` and thirst 18+ a hurt player gets half a
+  heart back every 80 ticks for 6 exhaustion (FoodData's slow branch; the fast saturation branch
+  is food's and left out), or at 0 thirst half a heart is lost every 80 ticks while health is
+  above `DehydrationFloor` (1: normal difficulty), through armor;
+- with `ThirstRegeneration` the character's Roblox `Health` script is removed, so health only
+  comes back by thirst's rule.
+
+**Drinks** (`ToughAsNails/Drinks`): drinking is FoodData.eat (thirst + n up to 20, hydration +
+n × modifier × 2 up to the new thirst), and a dirty drink rolls TAN's Thirst effect (a longer one
+running stays):
+
+| Drink                        | Thirst | Hydration | Thirst effect |
+| ---------------------------- | ------ | --------- | ------------- |
+| a water source, empty hand   | 1      | 0.1       | 75%, 600 ticks |
+| Dirty Water Bottle / Canteen | 4      | 0.25      | 75%, 600 ticks |
+| Purified Water Bottle / Canteen | 6   | 0.4       | -             |
+
+Items (appended to ItemList): Glass Bottle (Minecraft's; three glass in a V make three), Dirty and
+Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget over three
+ingots in a cup), Dirty and Purified Water Canteen (durability 3: a sip wears it, the last leaves
+the empty Canteen; the tool repair recipe skips them). A Glass Bottle or Canteen used at a water
+source (Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty water
+(ItemUtils.createFilledResult: one used, the full one replaces the stack or goes into the
+inventory; creative keeps the empty one); smelting purifies (TAN's original way), in a furnace or
+an Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
+counts 32 ticks while the button stays down (gulps every 4 ticks from the 7th), then finish; the
+server drinks it only if the same item is still in the same slot 28+ ticks after start and the
+player may drink (thirsty, or creative), then uses it up (a bottle gives its Glass Bottle back)
+and plays the last gulp to everyone else. A sip from a water source with an empty hand is
+instant, at most every 10 ticks (`HandDrinking`). Nothing is predicted: the inventory snapshot and
+the Survival message bring the results.
+
+**Movement** (`ToughAsNails/Exertion`): Minecraft's server takes the client's sprint flag and
+positions, so the client measures (MovementController hands each tick to `Player/Exertion`):
+centimetres sprinted on the ground, swum or moved in water (Player.checkMovementStatistics's
+branches; flying and walking cost nothing), jumps and sprint jumps, and sends them about once a
+second, and at once when sprinting starts or stops. The server allows at most 10 m and 3 jumps per
+second since the last report (`clamp`; 4 reports a second) and holds the sprint flag for 2 s.
+
+**Temperature** (`ToughAsNails/Temperature`, TAN 1.18+'s five levels ICY -2, COLD, NEUTRAL, WARM,
+HOT 2). The target, worked out once a second per player from `Players/Climate`:
+1. the climate: the column's surface biome temperature (BiomeList, -0.75 tundra .. 0.8 desert),
+   0.001 colder per block above 256, then outdoors at night 0.3 colder, under a roof 0.15 colder,
+   and underground (under a roof, 16+ blocks below the column's terrain) 0; cut at -0.55, -0.25,
+   0.4 and 0.7. So tundra is icy, taiga cold (icy at night), plains and forests neutral, jungles
+   and savannas warm, a desert hot by day and warm at night or in a house, the frozen peaks icy;
+2. a level each, kept within ICY..HOT: wet (in water or out of it for less than `WetTicks`) -1,
+   sprinting +1, a heating block within `ProximityRadius` (5, a cube around the feet) or burning
+   +1, a cooling block -1, and two leather pieces +1 while below NEUTRAL.
+The level steps once towards the target every `ChangeTicks` (200; the count restarts whenever
+it is on target). At ICY `frozen` rises a tick at a time to 140 (Minecraft's
+getTicksRequiredToFreeze; any leather piece stops it, freeze_immune_wearables), otherwise it
+thaws 2 a tick; at HOT `heat` does the same (hyperthermia). Full: half a heart every 40 ticks,
+through armor (Minecraft's freeze hurt). The hurts don't go through Burning's shared hurt
+cooldown (they come every 40 or 80 ticks, past any 10 tick cooldown anyway).
+
+**Surroundings** (`Players/Climate`, pure over a view: loaded blocks, the generator's column, and
+SkyCheck for the roof above the eyes). Heat and cold sources are block ids: `HeatingBlocks` and
+`CoolingBlocks` names (a fluid name is every level and the cave twin: "Lava"), plus sources
+registered with `Climate.addHeatSource(block, check?)` / `addColdSource(block)`: the server module
+registers the Furnace (while its container's litTime > 0) and the Heat and Combustion Generators
+(while their machine is active). A check only runs for a block of its kind within range. Anything
+new that should warm (a campfire, burning blocks) registers the same way.
+
+**Sync and HUD.** The server sends `Survival` to the player alone when its bytes change, at most
+every 4 ticks and at once for a new character (a respawn starts over: full thirst, neutral, dry).
+`Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's canvas (so the GUI
+scale is the hotbar's): 10 droplets right-aligned level with the hearts (hunger's place, filled
+from the right, half droplets their right half; green under the Thirst effect; jittering with no
+hydration, Minecraft's hunger rule), TAN's 13-pixel temperature orb centred 30 pixels above the
+hotbar (pale blue, blue, green, orange, red) with an arrow for the trend, and the frost or heat
+closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the
+HUD). F3 prints a `survival` line.
+
 ## Just Enough Items (`Ui/Jei/`)
 
 JEI's three parts, simplified: an item list beside every inventory screen, a recipe view with an
@@ -3696,6 +3790,8 @@ live edits after it must arrive in the order they were sent.
 | client → server | `SetGameMode`   | a GameType id (u8: 0 survival … 3 spectator): switch one's own game mode (the switcher, `F3` + `N`) |
 | client → server | `SpectatorTeleport` | a player's user id (f64, whole and finite): a spectator teleports to them |
 | client → server | `SaveSettings`  | the chosen settings of the client's device profile (below), after changes and when the menu closes |
+| client → server | `Exertion`      | movement that costs thirst since the last report: cm sprinted and in water, jumps, sprint jumps, sprinting now (7 bytes, about once a second) |
+| client → server | `Drink`         | u8 action: start / finish / cancel holding a drink; hand (a sip) / fill (a bottle or canteen) at a water source's cell |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -3712,6 +3808,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
+| server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record

@@ -32,6 +32,8 @@
 	  9. structures -> structure blocks and jigsaw blocks (Structures/StructureBlocks: their
 	                   settings and replication, SAVE / LOAD / DETECT, a jigsaw's Generate, who may
 	                   use them), and generated structures' chests filled on first use
+	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
+	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -66,6 +68,7 @@ local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
+local ToughAsNails = require(Server.Players.ToughAsNails)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -107,6 +110,7 @@ net.setRules({
 	mayRemoveContainer = Inventories.mayRemoveContainer,
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
+	broke = ToughAsNails.blockBroken,
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)
@@ -121,6 +125,8 @@ ItemUse.start(net, world)
 Machines.start(net, world)
 -- Structure blocks after inventories (containers, the Use hook).
 StructureBlocks.start(net, world)
+-- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
+ToughAsNails.start(net, world)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)

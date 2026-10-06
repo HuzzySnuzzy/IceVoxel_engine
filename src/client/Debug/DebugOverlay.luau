@@ -8,7 +8,9 @@
 	knows about (EntityRenderer), the time of day (the clock, day number, Minecraft's sky light
 	outdoors and how much of it reaches the camera; Rendering/LightingController) and the music
 	(surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
-	mood (Audio/Ambience), as Minecraft's "Mood N%".
+	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
+	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds; the temperature
+	level and its target, hypothermia and hyperthermia ticks of 140, wet).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -29,6 +31,7 @@ local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
 local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
+local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
@@ -45,6 +48,7 @@ local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
 local Protocol = require(Shared.Net.Protocol)
+local Temperature = require(Shared.ToughAsNails.Temperature)
 
 local DebugOverlay = {}
 
@@ -78,6 +82,34 @@ local function musicLine(): string
 	local seconds = math.floor(wait)
 	local playing = if title then `"{title}"` else string.format("next in %d:%02d", seconds // 60, seconds % 60)
 	return string.format("music   %s  %s  mood %d%%", place, playing, math.floor(Ambience.mood() * 100))
+end
+
+-- Tough As Nails: thirst and body temperature, as the server last sent them.
+local function survivalLine(): string
+	local status = SurvivalState.get()
+	if status == nil then
+		return "survival -"
+	end
+	local thirst = if status.thirstOn
+		then string.format(
+			"thirst %d  hydration %.1f  exhaustion %.2f  effect %ds",
+			status.thirst,
+			status.hydration,
+			status.exhaustion,
+			math.ceil(status.effect / 20)
+		)
+		else "thirst off"
+	local temperature = if status.temperatureOn
+		then string.format(
+			"temp %s -> %s  frozen %d  heat %d%s",
+			Temperature.name(status.level),
+			Temperature.name(status.target),
+			status.frozen,
+			status.heat,
+			if status.wet then "  wet" else ""
+		)
+		else "temp off"
+	return `survival {thirst}\n        {temperature}`
 end
 
 -- Movement hull line (blocks; speeds in blocks per second).
@@ -163,7 +195,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
-	label.Size = UDim2.fromOffset(420, 244)
+	label.Size = UDim2.fromOffset(420, 280)
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.BackgroundTransparency = 0.5
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -284,6 +316,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			movementLine(),
 			timeLine(),
 			musicLine(),
+			survivalLine(),
 		}, "\n")
 	end)
 end

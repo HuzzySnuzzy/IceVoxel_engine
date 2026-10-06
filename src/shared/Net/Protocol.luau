@@ -62,6 +62,19 @@
 	  SaveSettings   player settings (below): the choices of the client's device profile, sent
 	                 about Config.Settings.SaveDelay seconds after the last change and when the
 	                 menu closes (the server keeps them and saves them on leave)
+	  Exertion       u16 sprintCm, u16 waterCm, u8 jumps, u8 sprintJumps, u8 flags (bit 0:
+	                 sprinting now): the movement that costs thirst since the last report
+	                 (Shared/ToughAsNails/Exertion: centimetres sprinted on the ground and moved in
+	                 water, jumps not sprinting and sprinting), about once a second; the server
+	                 bounds it by the time since the last one
+	  Drink          u8 action, then for 4 and 5: i32 x, u16 y, i32 z (a water source)
+	                 (Shared/ToughAsNails/Drinks):
+	                   1 start   began drinking the held bottle or canteen (holding use)
+	                   2 finish  held it Drinks.USE_TICKS: drink it (the server checks the time
+	                             since start, and that the same item is still in the same slot)
+	                   3 cancel  let go early
+	                   4 hand    a sip from the water source with an empty hand
+	                   5 fill    fill the held Glass Bottle or canteen at the water source
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -141,6 +154,13 @@
 	                 velocity; 0 when it doesn't reach them): Minecraft's ClientboundExplodePacket
 	                 without the block list (blocks come as edits). Non-finite numbers, a power
 	                 outside 0..MAX_EXPLOSION_POWER or a push over MAX_KNOCKBACK are malformed.
+	  Survival       u8 flags (bit 0 thirst on, 1 temperature on, 2 wet), u8 thirst (0..20),
+	                 u8 hydration x 10, u8 exhaustion x 50 (clamped to 255), u8 level + 2 and
+	                 u8 target + 2 (Temperature levels -2..2), u8 frozen, u8 heat (0..140),
+	                 u16 Thirst effect ticks: the player's own thirst and body temperature
+	                 (Shared/ToughAsNails), sent to them alone when it changes (at most every few
+	                 ticks, and at once on joining and respawning); out of range values are
+	                 malformed
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -178,6 +198,7 @@ local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
 local PlayerSettings = require(script.Parent.Parent.PlayerSettings)
 local Settings = require(script.Parent.Parent.Structures.Settings)
+local Exertion = require(script.Parent.Parent.ToughAsNails.Exertion)
 
 local Protocol = {}
 
@@ -197,6 +218,8 @@ Protocol.ClientMessage = {
 	SetGameMode = 13,
 	SpectatorTeleport = 14,
 	SaveSettings = 15,
+	Exertion = 16,
+	Drink = 17,
 }
 
 Protocol.ServerMessage = {
@@ -216,6 +239,7 @@ Protocol.ServerMessage = {
 	StructureData = 14,
 	Settings = 15,
 	Explosion = 16,
+	Survival = 17,
 }
 
 Protocol.EditAction = {
@@ -2105,6 +2129,148 @@ function Protocol.decodeExplosion(b: buffer): ExplosionEffect?
 		return nil
 	end
 	return { x = values[1], y = values[2], z = values[3], power = power, kx = kx, ky = ky, kz = kz }
+end
+
+--[[ Thirst and temperature (Tough As Nails) ]]
+
+Protocol.EXERTION_BYTES = 7
+
+-- Movement that costs thirst (Shared/ToughAsNails/Exertion's report).
+function Protocol.encodeExertion(report: Exertion.Report): buffer
+	local b = buffer.create(Protocol.EXERTION_BYTES)
+	buffer.writeu16(b, 0, math.clamp(report.sprintCm, 0, 65535))
+	buffer.writeu16(b, 2, math.clamp(report.waterCm, 0, 65535))
+	buffer.writeu8(b, 4, math.clamp(report.jumps, 0, 255))
+	buffer.writeu8(b, 5, math.clamp(report.sprintJumps, 0, 255))
+	buffer.writeu8(b, 6, if report.sprinting then 1 else 0)
+	return b
+end
+
+-- The report, nil when malformed (wrong length, unknown flags).
+function Protocol.decodeExertion(b: buffer): Exertion.Report?
+	if buffer.len(b) ~= Protocol.EXERTION_BYTES then
+		return nil
+	end
+	local flags = buffer.readu8(b, 6)
+	if flags > 1 then
+		return nil
+	end
+	return {
+		sprintCm = buffer.readu16(b, 0),
+		waterCm = buffer.readu16(b, 2),
+		jumps = buffer.readu8(b, 4),
+		sprintJumps = buffer.readu8(b, 5),
+		sprinting = flags == 1,
+	}
+end
+
+-- Drink actions (see the header).
+Protocol.DrinkAction = table.freeze({
+	Start = 1,
+	Finish = 2,
+	Cancel = 3,
+	Hand = 4,
+	Fill = 5,
+})
+
+-- A drink action; Hand and Fill carry the water source's cell.
+function Protocol.encodeDrink(action: number, x: number?, y: number?, z: number?): buffer
+	if action == Protocol.DrinkAction.Hand or action == Protocol.DrinkAction.Fill then
+		local b = buffer.create(11)
+		buffer.writeu8(b, 0, action)
+		buffer.writei32(b, 1, x or 0)
+		buffer.writeu16(b, 5, y or 0)
+		buffer.writei32(b, 7, z or 0)
+		return b
+	end
+	local b = buffer.create(1)
+	buffer.writeu8(b, 0, action)
+	return b
+end
+
+-- action (nil when malformed: unknown, wrong length, too far out), x, y, z (0 when none).
+function Protocol.decodeDrink(b: buffer): (number?, number, number, number)
+	local len = buffer.len(b)
+	if len < 1 then
+		return nil, 0, 0, 0
+	end
+	local action = buffer.readu8(b, 0)
+	local actions = Protocol.DrinkAction
+	if action == actions.Hand or action == actions.Fill then
+		if len ~= 11 then
+			return nil, 0, 0, 0
+		end
+		local x, y, z = buffer.readi32(b, 1), buffer.readu16(b, 5), buffer.readi32(b, 7)
+		if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
+			return nil, 0, 0, 0
+		end
+		return action, x, y, z
+	end
+	if len ~= 1 or action < actions.Start or action > actions.Cancel then
+		return nil, 0, 0, 0
+	end
+	return action, 0, 0, 0
+end
+
+-- A player's thirst and temperature as their HUD shows them (Survival).
+export type SurvivalStatus = {
+	thirstOn: boolean,
+	temperatureOn: boolean,
+	wet: boolean,
+	thirst: number,
+	hydration: number,
+	exhaustion: number,
+	level: number,
+	target: number,
+	frozen: number,
+	heat: number,
+	effect: number,
+}
+
+Protocol.SURVIVAL_BYTES = 10
+
+function Protocol.encodeSurvival(status: SurvivalStatus): buffer
+	local b = buffer.create(Protocol.SURVIVAL_BYTES)
+	local flags = (if status.thirstOn then 1 else 0)
+		+ (if status.temperatureOn then 2 else 0)
+		+ (if status.wet then 4 else 0)
+	buffer.writeu8(b, 0, flags)
+	buffer.writeu8(b, 1, math.clamp(math.round(status.thirst), 0, 20))
+	buffer.writeu8(b, 2, math.clamp(math.round(status.hydration * 10), 0, 200))
+	buffer.writeu8(b, 3, math.clamp(math.round(status.exhaustion * 50), 0, 255))
+	buffer.writeu8(b, 4, math.clamp(status.level, -2, 2) + 2)
+	buffer.writeu8(b, 5, math.clamp(status.target, -2, 2) + 2)
+	buffer.writeu8(b, 6, math.clamp(status.frozen, 0, 140))
+	buffer.writeu8(b, 7, math.clamp(status.heat, 0, 140))
+	buffer.writeu16(b, 8, math.clamp(status.effect, 0, 65535))
+	return b
+end
+
+-- The status, nil when malformed.
+function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
+	if buffer.len(b) ~= Protocol.SURVIVAL_BYTES then
+		return nil
+	end
+	local flags = buffer.readu8(b, 0)
+	local thirst, hydration = buffer.readu8(b, 1), buffer.readu8(b, 2)
+	local level, target = buffer.readu8(b, 4), buffer.readu8(b, 5)
+	local frozen, heat = buffer.readu8(b, 6), buffer.readu8(b, 7)
+	if flags > 7 or thirst > 20 or hydration > 200 or level > 4 or target > 4 or frozen > 140 or heat > 140 then
+		return nil
+	end
+	return {
+		thirstOn = bit32.btest(flags, 1),
+		temperatureOn = bit32.btest(flags, 2),
+		wet = bit32.btest(flags, 4),
+		thirst = thirst,
+		hydration = hydration / 10,
+		exhaustion = buffer.readu8(b, 3) / 50,
+		level = level - 2,
+		target = target - 2,
+		frozen = frozen,
+		heat = heat,
+		effect = buffer.readu16(b, 8),
+	}
 end
 
 return Protocol
