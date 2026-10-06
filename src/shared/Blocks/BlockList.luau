@@ -2314,4 +2314,24 @@ sapling("SpruceSapling", { 50, 92, 58 }, "Spruce Sapling")
 sapling("AcaciaSapling", { 112, 140, 44 }, "Acacia Sapling")
 sapling("JungleSapling", { 46, 124, 36 }, "Jungle Sapling")
 
+--[[
+	Fire (Minecraft's FireBlock): burns on top of a block or clings to the sides of flammable
+	ones, spreads, burns out and lights what it touches (server Behaviours/Fire). No item: lit by
+	flint and steel, lava and burning fuel. Light 15, no collision, replaceable, broken at once.
+]]
+table.insert(list, {
+	name = "Fire",
+	color = { 232, 132, 36 },
+	material = "Neon",
+	sound = "wool",
+	solid = false,
+	placeable = false,
+	replaceable = true,
+	hardness = 0,
+	light = 15,
+	lightColor = { 255, 170, 90 },
+	shape = { { size = { 14, 1, 14 }, offset = { 0, -7.5, 0 }, glow = true } },
+	brokenByFluid = true,
+})
+
 return list
