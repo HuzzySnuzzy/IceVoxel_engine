@@ -19,6 +19,8 @@
 	             takes 4 a tick and sets it burning for 15 s, burning 1 every 20 ticks, water puts
 	             it out), so one tick in lava and it is gone the next (Minecraft's
 	             Entity.lavaHurt). Each lava hurt is in `takeChanges().burnt` (the burn sound).
+	Explosions (`explode`, World/Explosions through Entities) hurt items like any entity: most
+	near a blast are destroyed, the rest pushed away.
 	Then players pick items up: a player's box (0.6 x 1.8 at the feet) grown by (1, 0.5, 1)
 	touching an item whose pickup delay is over (Player.aiStep / ItemEntity.playerTouch).
 	`tryPickup` answers how many it took; the item keeps the rest.
@@ -41,6 +43,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
+local Explosion = require(Shared.World.Explosion)
 
 local Burning = require(script.Parent.Parent.Players.Burning)
 
@@ -140,6 +143,7 @@ export type EntityWorld = {
 	count: (self: EntityWorld) -> number,
 	remove: (self: EntityWorld, id: number) -> (),
 	each: (self: EntityWorld) -> { Entity },
+	explode: (self: EntityWorld, x: number, y: number, z: number, power: number) -> number,
 }
 
 local EntityWorld = {}
@@ -164,6 +168,8 @@ local PLAYER_HEIGHT = 1.8
 local WIDTH = ItemPhysics.WIDTH
 local HEIGHT = ItemPhysics.HEIGHT
 local HALF = WIDTH / 2
+-- An item's eyes, as a share of its height (Minecraft's default eye height).
+local ITEM_EYE = 0.85
 
 local floor = math.floor
 
@@ -284,6 +290,56 @@ function EntityWorld.each(self: EntityWorld): { Entity }
 		end
 	end
 	return list
+end
+
+--[[
+	An explosion of `power` at (x, y, z) (blocks; Shared/World/Explosion, server World/Explosions):
+	every item within its reach takes the blast's damage off ItemEntity's 5 health and is gone at
+	0 (any item that gets an impact over 0.126: within 7 blocks of a TNT blast in the open), the
+	rest are pushed away by it and resynced at once. Minecraft aims at an item's eyes (0.85 of its
+	height). Items the blast's own blocks drop come after it and are spared. Returns how many
+	were destroyed.
+]]
+function EntityWorld.explode(self: EntityWorld, x: number, y: number, z: number, power: number): number
+	local reach = Explosion.REACH * power
+	local destroyed = 0
+	for _, entity in EntityWorld.each(self) do
+		local body = entity.body
+		local distance = math.sqrt((body.x - x) ^ 2 + (body.y - y) ^ 2 + (body.z - z) ^ 2)
+		if distance <= reach then
+			local seen = Explosion.seenPercent(
+				self.getBlock,
+				x,
+				y,
+				z,
+				body.x - HALF,
+				body.y,
+				body.z - HALF,
+				body.x + HALF,
+				body.y + HEIGHT,
+				body.z + HALF
+			)
+			local damage, px, py, pz =
+				Explosion.hit(x, y, z, power, body.x, body.y, body.z, body.y + HEIGHT * ITEM_EYE, seen)
+			if damage then
+				entity.health -= damage
+				if entity.health <= 0 then
+					removeEntity(self, entity, nil)
+					destroyed += 1
+				else
+					body.vx += px
+					body.vy += py
+					body.vz += pz
+					body.onGround = false
+					self.movedSet[entity.id] = true
+					entity.sinceSync = 0
+					entity.unsynced = false
+					entity.still = 0
+				end
+			end
+		end
+	end
+	return destroyed
 end
 
 --[[ Spatial lookup: entities by block column, rebuilt every tick ]]

@@ -47,6 +47,8 @@
 	  Teleports the server sets the feet position as attributes (Rig), and the streamer is told the
 	            destination at once (`teleported`: teleport mode); other scripts moving the
 	            character far are noticed too, and the hull follows.
+	  Knockback explosions push the hull (`knockback`: the server's Explosion message adds to its
+	            velocity, as Minecraft's client does).
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
 	            does not die on its own, so the controller puts the Humanoid into Dead itself.
 	  Sounds    after every tick, Audio/MovementSounds plays the footsteps, swimming, splashes and
@@ -196,6 +198,19 @@ end
 -- The player being spectated, or nil.
 function MovementController.spectating(): Player?
 	return spectated
+end
+
+--[[
+	An explosion's knockback (blocks per tick, the server's Explosion message through
+	Rendering/ExplosionView): added to the hull's velocity (PlayerPhysics.knockback: not for
+	spectators nor creative flight), unless the player waits for the ground or follows someone.
+]]
+function MovementController.knockback(kx: number, ky: number, kz: number)
+	local view = MovementController.current
+	if view == nil or view.frozen or spectated ~= nil then
+		return
+	end
+	PlayerPhysics.knockback(view.state, kx, ky, kz)
 end
 
 local function keyCodes(names: { string }): { Enum.KeyCode }
