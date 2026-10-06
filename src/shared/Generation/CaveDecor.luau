@@ -59,11 +59,12 @@ local CAVE_AIR = Blocks.CAVE_AIR
 -- Blocks below the column's surface height (first air) a lichen must be: Minecraft's -13.
 local DEPTH = 13
 -- Patch grid (blocks), the chance a grid cell holds a patch, and the patches' radii (blocks).
+-- (One patch in about 30 grid cells: lichen is a find in a cave, not every corner of it.)
 local GRID = 8
-local PATCH_CHANCE = 0.33
+local PATCH_CHANCE = 0.08
 local MIN_RADIUS, MAX_RADIUS = 2, 4
 -- Chance of a candidate cell at a patch's centre (fading to 0 at its edge).
-local PEAK = 0.9
+local PEAK = 0.6
 
 local CELL_XZ, CELL_Y = Caves.CELL_XZ, Caves.CELL_Y
 

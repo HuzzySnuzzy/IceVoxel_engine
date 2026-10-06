@@ -110,7 +110,7 @@ return function(t, shared, require)
 				end
 			end
 		end
-		t.ok(count > 100, `lichen checked: {count}`)
+		t.ok(count > 30, `lichen checked: {count}`)
 		t.eq(surfaceLichen, 0, "generated lichen that is not a cave twin")
 	end)
 
@@ -241,7 +241,7 @@ return function(t, shared, require)
 		t.ok(boxes > 0)
 	end)
 
-	t.test("lichen: patches on a few percent of the cave walls", function()
+	t.test("lichen: rare patches on under one percent of the cave walls", function()
 		local total, cave, walls, chunks = 0, 0, 0, 0
 		local perChunk: { number } = {}
 		local clustered = 0
@@ -314,8 +314,8 @@ return function(t, shared, require)
 				clustered / math.max(total, 1) * 100
 			)
 		)
-		-- Dotted, not covered: a few percent of the walls.
-		t.ok(share > 0.015 and share < 0.06, `share of wall and ceiling cells with lichen: {share}`)
+		-- Rare patches, not every corner: under one percent of the walls.
+		t.ok(share > 0.002 and share < 0.015, `share of wall and ceiling cells with lichen: {share}`)
 		t.ok(clustered / total > 0.7, `share of lichen in patches: {clustered / total}`)
 	end)
 

@@ -28,6 +28,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
 local Mining = require(Shared.Mining)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Sounds = require(Shared.Sounds)
@@ -97,13 +98,16 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 	local function nextInt(n: number): number
 		return random:NextInteger(0, n - 1)
 	end
-	-- The light at a cell for the mood: the sky's, else the block light (only searched in the dark).
-	local function light(x: number, y: number, z: number): (number?, number)
+	-- The light at a cell for the mood: the sky's, else the block light (only searched in the
+	-- dark), and whether the cell is open cave (bigger caves bring the mood sooner).
+	local function light(x: number, y: number, z: number): (number?, number, boolean?)
 		local sky = LightingController.skyLight(x, y, z)
 		if sky == nil or sky > 0 or getBlock == nil then
-			return sky, 0
+			return sky, 0, nil
 		end
-		return 0, CaveMood.blockLight(getBlock, x, y, z)
+		local block = getBlock(x, y, z)
+		local open = block ~= nil and not Blocks.isOpaque(block)
+		return 0, CaveMood.blockLight(getBlock, x, y, z), open
 	end
 	local function moodTick()
 		local view = MovementController.current

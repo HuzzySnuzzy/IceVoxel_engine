@@ -208,6 +208,31 @@ return function(t, shared, require, _server, client)
 		t.near(z :: number, 0.5, 1e-9)
 	end)
 
+	t.test("cave mood: bigger caves bring it sooner (dark open cells count OPEN_WEIGHT times)", function()
+		local nextInt = cycling({ 16, 8, 8 })
+		local function ticksTo(openShare: number): number
+			local state = CaveMood.new()
+			local n = 0
+			local function light(_x: number, _y: number, _z: number): (number?, number, boolean?)
+				return 0, 0, (n % 100) < openShare * 100
+			end
+			repeat
+				n += 1
+			until CaveMood.tick(state, 0.5, 64.5, 0.5, light, nextInt) or n > 10000
+			return n
+		end
+		local rock, cavern, vast = ticksTo(0), ticksTo(0.3), ticksTo(0.8)
+		t.ok(rock >= 6000 and rock <= 6001, `all rock: Minecraft's 6000 ticks ({rock})`)
+		t.near(cavern, 6000 / (1 + 3 * 0.3), 40, "a big cavern")
+		t.near(vast, 6000 / (1 + 3 * 0.8), 40, "the Underlands")
+		-- Light still holds it: an open cell at block light 1 adds nothing.
+		local state = CaveMood.new()
+		CaveMood.tick(state, 0, 64, 0, function()
+			return 0, 1, true
+		end, nextInt)
+		t.eq(state.mood, 0)
+	end)
+
 	t.test("cave mood: daylight takes it back, a torch's light holds it, unloaded blocks count for nothing", function()
 		local function light(sky: number?, block: number)
 			return function(_x: number, _y: number, _z: number): (number?, number)

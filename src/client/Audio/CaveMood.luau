@@ -13,9 +13,13 @@
 	                    (block light 0), not at all at 1, down near torches
 	The mood never goes below 0. Once it reaches 1 (100%), a mood sound plays in the direction of
 	that block, 2 blocks beyond it (its centre's distance from the eyes + 2), and the mood starts
-	over at 0. So in complete darkness, with every block around dark (rock counts: light inside
-	an opaque block is 0), it takes 6000 ticks, five minutes; with half the blocks around open to
-	daylight it never comes. F3 shows it as "mood N%", as Minecraft's debug screen does.
+	over at 0. F3 shows it as "mood N%", as Minecraft's debug screen does.
+
+	One change from Minecraft: the bigger the cave, the sooner it comes. A dark block that is open
+	(cave air, not rock) counts OPEN_WEIGHT times (`Light`'s third value), so the mood grows with
+	the share f of open cave among the blocks within 8 of the player (5 minutes / (1 + 3f)): about
+	5 minutes in a narrow tunnel, 2 1/2 in a big cavern (f ~ 0.3), 1 1/2 in the vast caves of the
+	Underlands (f ~ 0.8); Minecraft takes 5 wherever it's dark. Daylight still wins it back.
 
 	The light is the game's estimate (`Light`): Rendering/SkyExposure.skyLight for the sky (no
 	dimming by leaves or water), and `blockLight` below for light sources (a search through the
@@ -28,8 +32,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 
--- (sky, block) light at a cell (0..15 each); nil sky: the cell isn't loaded.
-export type Light = (x: number, y: number, z: number) -> (number?, number)
+-- (sky, block) light at a cell (0..15 each) and whether it is open (not opaque); nil sky: the
+-- cell isn't loaded.
+export type Light = (x: number, y: number, z: number) -> (number?, number, boolean?)
 -- The block at a cell, nil where it isn't loaded.
 export type GetBlock = (x: number, y: number, z: number) -> number?
 -- A random integer in [0, n).
@@ -45,6 +50,8 @@ CaveMood.SEARCH_EXTENT = 8
 CaveMood.SOUND_OFFSET = 2
 -- The sky light's pull (per tick, at sky light 15).
 CaveMood.SKY_PULL = 0.001
+-- How much more a dark open block counts than dark rock (bigger caves, sooner moods).
+CaveMood.OPEN_WEIGHT = 4
 -- Open cells the block light search may visit: a tunnel's light reaches its full 14 blocks, a big
 -- cavern's is searched a few blocks around (missing torches farther off). Measured on generated
 -- caves (interpreted Luau): a mood tick costs ~0.2 ms on average, one every 50 ms.
@@ -73,12 +80,15 @@ function CaveMood.tick(
 	local bx = math.floor(ex + nextInt(span) - extent)
 	local by = math.floor(ey + nextInt(span) - extent)
 	local bz = math.floor(ez + nextInt(span) - extent)
-	local sky, block = light(bx, by, bz)
+	local sky, block, open = light(bx, by, bz)
 	if sky == nil then
 		return nil
 	end
 	if sky > 0 then
 		state.mood -= sky / MAX_LIGHT * CaveMood.SKY_PULL
+	elseif block < 1 and open then
+		-- (Dark open cave: the bigger the cave around, the more of these.)
+		state.mood += (1 - block) * CaveMood.OPEN_WEIGHT / CaveMood.TICK_DELAY
 	else
 		state.mood -= (block - 1) / CaveMood.TICK_DELAY
 	end

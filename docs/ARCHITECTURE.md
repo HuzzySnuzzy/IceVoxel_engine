@@ -466,7 +466,7 @@ before.
 Minecraft 1.20.1's `glow_lichen` feature (104-157 tries a chunk on stone-type faces 13+ blocks
 below the surface, ceilings and walls, spreading half the time) as patches decided per cell, in
 full detail chunks after the structures:
-1. Patches: one per 8³ block grid cell with chance 0.33, at a hashed centre with a hashed radius
+1. Patches: one per 8³ block grid cell with chance 0.08 (rare finds, not every corner), at a hashed centre with a hashed radius
    of 2..4. A chunk visits the patches whose sphere reaches its padded box, and in them only the
    cave lattice cells the carver carved (`Caves.Carved`), skipping those that are cave air
    throughout with cave air all round (no cell there touches rock): the work follows cave walls
@@ -476,7 +476,7 @@ full detail chunks after the structures:
    Andesite, Diorite, Granite, Calcite and every block Ores places (ores are only in each chunk's
    own core, so counting them keeps a cell next to one deciding alike in every chunk). No floors,
    as Minecraft's feature.
-4. A per-cell hash is rolled against 0.9 fading linearly to 0 at the sphere's edge (overlapping
+4. A per-cell hash is rolled against 0.6 fading linearly to 0 at the sphere's edge (overlapping
    patches test the same roll against their own fade, so the order doesn't matter), and the cell
    becomes the cave twin (CaveGlowLichenUp, ...North...) on the first candidate face of a hashed
    rotation of Up, North, East, South, West: one face per cell.
@@ -3522,7 +3522,9 @@ What the client plays itself:
     overworld's `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`: ambient.cave, tick delay 6000, search
     extent 8, sound offset 2), every game tick:
     - one block is picked at `floor(eyes + nextInt(17) - 8)` on each axis;
-    - its sky light s > 0: mood −= s / 15 × 0.001; else mood −= (block light − 1) / 6000;
+    - its sky light s > 0: mood −= s / 15 × 0.001; else mood −= (block light − 1) / 6000, except
+      a dark open block (not opaque, block light 0), which adds OPEN_WEIGHT (4) / 6000: this
+      game's change, so a bigger cave brings the mood sooner (5 min / (1 + 3 × open share));
     - at mood ≥ 1: a random `Sounds.MOODS` event (`ambient.cave.mood<N>`, from MusicList.Moods;
       the stand-in `ambient.cave` while there are none) plays at the eyes + the direction to the
       block's centre × (its distance + 2), and the mood is 0 again; else it stays ≥ 0.

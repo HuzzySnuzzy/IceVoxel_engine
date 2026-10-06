@@ -498,10 +498,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   underground fades a surface track out and a cave track follows (and the other way back up), so
   surface music never plays underground. A "Now Playing" toast slides in at the top right with the
   track's title for five seconds. The tracks are in `src/shared/Sounds/MusicList.luau`.
-- **Cave moods.** Minecraft's cave mood, exactly: every tick a random block within 8 blocks of you
-  makes the mood grow in the dark (1/6000) and shrink in daylight or by torches; at 100% one of the
-  cave mood sounds plays a couple of blocks beyond a dark spot and it starts over: about five
-  minutes deep in a dark cave, never in daylight (F3 shows "mood N%").
+- **Cave moods.** Minecraft's cave mood: every tick a random block within 8 blocks of you makes
+  the mood grow in the dark (1/6000; dark open cave counts 4 times, so bigger caves bring it
+  sooner) and shrink in daylight or by torches; at 100% one of the cave mood sounds plays a couple
+  of blocks beyond a dark spot and it starts over: about five minutes in a narrow tunnel, two and a
+  half in a big cavern, one and a half in the Underlands, never in daylight (F3 shows "mood N%").
 - **Sounds.** Minecraft's sound events for everything that should make a sound: breaking, placing
   and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
   water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
@@ -1096,7 +1097,9 @@ Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambi
   (`BiomeAmbientSoundsHandler`, `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`):
   - every game tick one block within 8 blocks of the eyes (each axis) is picked;
   - with sky light s > 0 the mood drops s/15 × 0.001;
-  - in the dark it changes by (1 − block light) / 6000;
+  - in the dark it changes by (1 − block light) / 6000, and a dark open (cave air) block counts
+    4 times (`CaveMood.OPEN_WEIGHT`), so bigger caves fill it sooner: 5 minutes / (1 + 3 × the
+    share of open cave around you) — this game's own addition;
   - at 1 a mood sound plays 2 blocks beyond that block and the mood starts over.
 
   The light is estimated from the blocks, since the engine has no light map: sky light 15 under
@@ -1592,7 +1595,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,197 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,198 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks).
 
