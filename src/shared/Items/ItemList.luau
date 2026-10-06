@@ -38,6 +38,11 @@
 	               sticks are modelled upright (handle down, head up) and tilted -45 so they lie
 	               diagonally, head at the top right, as in Minecraft's inventory; held in a hand they
 	               are drawn upright again (client Rendering/ItemModels).
+	  places       Name of a block the item places (Minecraft's ItemNameBlockItem: sweet berries
+	               plant their bush): a block that is no item of its own (BlockList `placeable`
+	               false, no `item`), which then drops it, is picked as it and is placed by it
+	               (Items.ofBlock). Mint Leaves plant Mint, Ginger Root Wild Ginger. The item keeps
+	               its own `model`.
 ]]
 
 export type ModelBox = {
@@ -61,6 +66,7 @@ export type ItemSpec = {
 	material: string?,
 	model: { ModelBox },
 	tilt: number?,
+	places: string?,
 }
 
 -- Armor shapes (pixels), shared by every material.
@@ -772,6 +778,123 @@ table.insert(list, {
 		{ size = { 1.5, 1.5, 0.4 }, offset = { 3.5, -4.5, 2.1 }, color = shade(GUNPOWDER, 0.6) },
 		{ size = { 1.5, 1.5, 0.4 }, offset = { -0.5, 2, 2.1 }, color = shade(GUNPOWDER, 0.6) },
 	},
+})
+
+--[[
+	Herbs (Tough As Nails' water and teas, Shared/ToughAsNails/Drinks). Mint Leaves, what a Mint
+	plant drops: a sprig of three bright leaves on a pale stem; they cure dirty water in a crafting
+	grid and brew Mint Tea. Ginger Root, what Wild Ginger drops: a knobbly tan root with a pink
+	bud; it brews Ginger Tea. Each plants its herb back on dirt or grass (`places`, BlockList Mint
+	and WildGinger).
+]]
+local MINT = { 92, 176, 84 }
+local MINT_DARK = { 62, 140, 62 }
+local MINT_LIGHT = { 150, 210, 128 }
+local GINGER = { 206, 168, 112 }
+table.insert(list, {
+	name = "MintLeaves",
+	color = MINT,
+	material = "SmoothPlastic",
+	places = "Mint",
+	model = {
+		{ size = { 1, 9, 1 }, offset = { 0.5, -3.5, -0.2 }, rotation = -10, color = { 84, 124, 60 } },
+		{ size = { 5.5, 3, 1 }, offset = { -2.6, 0.5, 0 }, rotation = 28, color = MINT_DARK },
+		{ size = { 5.5, 3, 1 }, offset = { 3, 2, 0 }, rotation = -28 },
+		{ size = { 3, 5, 1 }, offset = { 0, 4.8, 0.2 }, rotation = -8, color = MINT_LIGHT },
+		{ size = { 3.8, 0.4, 0.3 }, offset = { -2.6, 0.5, 0.6 }, rotation = 28, color = shade(MINT_DARK, 1.35) },
+		{ size = { 3.8, 0.4, 0.3 }, offset = { 3, 2, 0.6 }, rotation = -28, color = MINT_LIGHT },
+	},
+})
+table.insert(list, {
+	name = "GingerRoot",
+	color = GINGER,
+	material = "SmoothPlastic",
+	places = "WildGinger",
+	model = {
+		{ size = { 9, 3.5, 3.5 }, offset = { -0.5, -1, 0 }, rotation = 12 },
+		{ size = { 3, 4, 3 }, offset = { 2.4, 2, 0 }, rotation = -18 },
+		{ size = { 3.5, 3, 3 }, offset = { -4.6, 1.2, 0 }, rotation = 30 },
+		{ size = { 2.5, 2, 2.5 }, offset = { 4.6, -2.4, 0 }, color = shade(GINGER, 0.85) },
+		{ size = { 0.5, 3, 0.4 }, offset = { -1.5, -1.3, 1.9 }, rotation = 12, color = shade(GINGER, 0.7) },
+		{ size = { 0.5, 2.6, 0.4 }, offset = { 1.2, -0.6, 1.9 }, rotation = 12, color = shade(GINGER, 0.7) },
+		{ size = { 1.6, 1.6, 1.6 }, offset = { 3, 4.4, 0 }, color = { 214, 140, 120 } },
+	},
+})
+
+--[[
+	Bowls (Minecraft's wooden Bowl: three planks in a V make four) as Tough As Nails water
+	containers (Shared/ToughAsNails/Drinks): filled at a water source into a Dirty Water Bowl,
+	purified in a furnace or with Mint Leaves into a Purified Water Bowl, and brewed with a herb
+	into a tea (Mint Tea, Ginger Tea, Herbal Tea with both). Drinking one gives the Bowl back.
+	Filled bowls stack to 16 like the filled bottles; teas to 1, like Minecraft's stews. A brown
+	bowl with a darker foot; filled, the drink's top over its rim (murky, clear blue, the teas'
+	pale green, amber and gold), with a leaf or a slice of root floating on a tea.
+]]
+local BOWL = { 150, 104, 60 }
+local MINT_TEA = { 150, 198, 116 }
+local GINGER_TEA = { 214, 158, 70 }
+local HERBAL_TEA = { 186, 168, 82 }
+local function bowl(drink: { number }?, floating: { ModelBox }?): { ModelBox }
+	local boxes: { ModelBox } = {
+		{ size = { 14, 2, 6 }, offset = { 0, 1, 0 }, color = shade(BOWL, 1.1) },
+		{ size = { 12, 3, 5.6 }, offset = { 0, -1.5, 0 } },
+		{ size = { 8.5, 2, 5 }, offset = { 0, -4, 0 }, color = shade(BOWL, 0.85) },
+		{ size = { 5, 1, 4 }, offset = { 0, -5.5, 0 }, color = shade(BOWL, 0.65) },
+	}
+	if drink then
+		-- (The drink filling it to the rim.)
+		table.insert(
+			boxes,
+			{ size = { 12, 1.4, 5.4 }, offset = { 0, 2.6, 0 }, color = drink, material = "SmoothPlastic" }
+		)
+	else
+		-- (Its dark inside, seen over the rim.)
+		table.insert(boxes, { size = { 12, 0.6, 5 }, offset = { 0, 2.1, 0 }, color = shade(BOWL, 0.55) })
+	end
+	if floating then
+		for _, box in floating do
+			table.insert(boxes, box)
+		end
+	end
+	return boxes
+end
+local MINT_FLOAT: ModelBox = { size = { 3, 0.6, 1.6 }, offset = { -2.5, 3.4, 1.2 }, rotation = 10, color = MINT }
+local GINGER_FLOAT: ModelBox = { size = { 2.2, 0.6, 2.2 }, offset = { 2.5, 3.4, 1.2 }, color = GINGER }
+table.insert(list, { name = "Bowl", color = BOWL, material = "Wood", model = bowl(nil) })
+table.insert(list, {
+	name = "DirtyWaterBowl",
+	maxStack = 16,
+	color = DIRTY_WATER,
+	material = "Wood",
+	model = bowl(DIRTY_WATER),
+})
+table.insert(list, {
+	name = "PurifiedWaterBowl",
+	maxStack = 16,
+	color = PURIFIED_WATER,
+	material = "Wood",
+	model = bowl(PURIFIED_WATER),
+})
+table.insert(list, {
+	name = "MintTea",
+	maxStack = 1,
+	color = MINT_TEA,
+	material = "Wood",
+	model = bowl(MINT_TEA, { MINT_FLOAT }),
+})
+table.insert(list, {
+	name = "GingerTea",
+	maxStack = 1,
+	color = GINGER_TEA,
+	material = "Wood",
+	model = bowl(GINGER_TEA, { GINGER_FLOAT }),
+})
+table.insert(list, {
+	name = "HerbalTea",
+	maxStack = 1,
+	color = HERBAL_TEA,
+	material = "Wood",
+	model = bowl(HERBAL_TEA, { MINT_FLOAT, GINGER_FLOAT }),
 })
 
 return list

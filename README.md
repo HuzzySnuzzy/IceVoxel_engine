@@ -175,6 +175,21 @@ A fast, Minecraft-style voxel engine for Roblox.
   thermometer over the droplets shows the temperature, coloured by zone, with an arrow for
   where it is going, the clemency's time left and the effects above it. Creative and spectator
   players are untouched. `Config.ToughAsNails` turns thirst or temperature off.
+- **Herbs, bowls and teas (Tough As Nails).** Two herbs grow wild in rare small patches (about 4
+  plants, some 30 blocks apart on open ground): **Mint** on plains, in meadows and jungles, and
+  **Wild Ginger** under the trees of forests, birch forests and taigas, so the cold biomes have a
+  warming herb. Breaking one gives Mint Leaves or Ginger Root, which plant it back on grass or dirt
+  (one for one); left alone, a herb spreads to a spot next to it every 9 minutes or so, up to 5 in
+  a 9 × 3 × 9 area (Minecraft's mushroom spreading), so a few planted together make a garden.
+  **Bowls** (Minecraft's: three planks in a V make four) fill at water like bottles: a Dirty Water
+  Bowl gives 4 thirst (the same 50% risk of the Thirst effect), a Purified Water Bowl 7, and
+  drinking gives the bowl back. **Mint cures dirty water** without a furnace: a dirty bottle, bowl
+  or canteen with Mint Leaves in a crafting grid (the inventory's 2 × 2 too) makes purified water;
+  the furnace purifies bowls as well. **Teas** are a Purified Water Bowl with a herb (stack 1, like
+  stews): Mint Tea (7 thirst, more hydration, 2 minutes of Internal Chill: a desert's heat stays
+  warm, never hot), Ginger Tea (2 minutes of Internal Warmth: a tundra's cold stays cold, never
+  icy) and Herbal Tea with both herbs (8 thirst, a minute of each). Everything shows in JEI, WAILA
+  and the creative inventory.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -707,7 +722,7 @@ Studio tips:
 | Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
-| Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle or a canteen: fill it; hold right click with a filled bottle or canteen for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
+| Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle, a Bowl or a canteen: fill it; hold right click with a filled bottle, bowl or canteen or a tea for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker; spectator: none) | Y   | `…` button |
@@ -843,8 +858,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             dehydration, regeneration, the Thirst effect), Temperature (-10..10
                             in five zones, the target, the drift, hypothermia and hyperthermia,
                             Internal Warmth and Chill, Climate Clemency), Drinks (water sources,
-                            the container tables: bottles, canteens), Exertion (movement that
-                            costs thirst)
+                            the container tables: bottles, canteens, bowls; the teas), Exertion
+                            (movement that costs thirst)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
@@ -902,8 +917,9 @@ src/server   -> ServerScriptService.IceVoxel
                             catching, measuring a body, power, chained blasts; pure), Nuke (the
                             Nuke's crater: ragged sphere, scorching, fire, a budget a tick)
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
-                            water), Grass (dying and spreading), Leaves (decay), Sapling,
-                            Attached (torches and lanterns need support),
+                            water), Grass (dying and spreading), Leaves (decay), Sapling, Herb
+                            (mint and wild ginger spreading), Attached (torches and lanterns need
+                            support),
                             Plant (plants need their soil and their other half), Fire
                             (spreading, burning blocks away, burning out, ages; lava lighting
                             fires; flint and steel), Tnt (lit TNT and Nukes: lighting, the fuse,
@@ -1123,6 +1139,7 @@ for performance:
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
 | `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
+| `Server.HerbSpread` | 1/8 | Chance per random tick that a herb (mint, wild ginger) spreads next to it while fewer than 5 grow within 4 blocks: a try every 9 minutes or so (Minecraft's mushrooms: 1/25). |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
 | `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui, music). |
 | `Sounds.PlayerRate`       | 8       | Sounds a player's inventory clicks and chest opening may cause per second (anti-spam). |
@@ -1373,7 +1390,14 @@ to 4 boxes inside the outline whichever way it turns: tests/spec/Plants checks i
 `Sprite` in the texture pack (each half of a tall plant its own) and, once filled, it is drawn as
 two crossed images instead of its boxes. From your own
 server scripts place a tall plant with `EditRules.setPlaced(world, x, y, z, block)`:
-`world:setBlock` sets only the half you give it, and a half alone pops on the next tick.
+`world:setBlock` sets only the half you give it, and a half alone pops on the next tick. A plant
+planted by an item that is not itself (seeds, berries, the herbs' leaves and roots) is
+`placeable = false` in BlockList and named by that item's `places` in ItemList (Minecraft's
+ItemNameBlockItem): the item places it, is its drop and is what pick block takes, and keeps its
+own model (BlockList Mint and ItemList MintLeaves). A plant that spreads by itself gets a
+behaviour of its own that keeps Plant's `onTick` and adds `onRandomTick` (`Behaviours/Herb`).
+Generation grows it from a biome's `foliage` lists (`plants`, `flowers`, or `herbs` for rare
+patches of their own; BiomeList).
 
 **An item.** Items that are not blocks (armor, tools, materials) live in
 `src/shared/Items/ItemList.luau` (again appended at the end). They are drawn from boxes measured
@@ -1780,23 +1804,26 @@ before the block exists.
 **Drinks and containers (Tough As Nails).** `Shared/ToughAsNails/Drinks` reads three tables:
 `ITEMS` (a full item: its drink, the empty container it leaves, `sips` for a canteen), `FILLS` (an
 empty container and the dirty water it fills with at a water source) and `PURIFIED_OF` (dirty
-water and its purified twin). A new container is four entries there and a recipe, e.g. bowls:
+water and its purified twin). A new container is four entries there and its recipes, as the
+bowls are:
 
 ```lua
 -- Drinks.ITEMS
-[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY, empty = I.Bowl }),
-[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED, empty = I.Bowl }),
+[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY_BOWL, empty = I.Bowl }),
+[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED_BOWL, empty = I.Bowl }),
 -- Drinks.FILLS
 [I.Bowl] = I.DirtyWaterBowl,
 -- Drinks.PURIFIED_OF
 [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
--- Crafting/Recipes
+-- Crafting/Recipes: the furnace and mint
 smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+mix({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl")
 ```
 
-A drink of its own (a juice, a hot tea) is an `ITEMS` entry with a `Drink`; `warmth` / `chill`
-ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5 steps
-towards neutral without pushing it past neutral.
+A drink of its own (the teas, a juice) is an `ITEMS` entry with a `Drink` and the container it
+leaves (`[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl })`); `warmth` /
+`chill` ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5
+steps towards neutral without pushing it past neutral (`Drinks.MINT_TEA` has `chill = 2400`).
 
 **Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
 freezeImmune = true }` in ItemList: `warmth` steps pull a cold target up towards 0, `cooling`

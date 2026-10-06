@@ -2,19 +2,31 @@
 --[[
 	What there is to drink and how containers fill (Tough As Nails), pure (no Roblox APIs, so the
 	tests run it). The items are ItemList's (Glass Bottle, Dirty / Purified Water Bottle, Canteen,
-	Dirty / Purified Water Canteen); dirty water is purified in a furnace (Crafting/Recipes).
+	Dirty / Purified Water Canteen, Bowl, Dirty / Purified Water Bowl, Mint / Ginger / Herbal Tea);
+	dirty water is purified in a furnace or with a mint leaf in a crafting grid, and a purified
+	water bowl brews a tea with a herb (Crafting/Recipes).
 
-	  Drink                 thirst  hydration  Thirst effect
-	  a water source, hand    1       0.1      50%, 15 s    TAN's hand drinking (Config
-	                                                        .ToughAsNails.HandDrinking)
-	  dirty water             4       0.25     50%, 15 s    bottle or canteen sip
-	  purified water          6       0.4        -          bottle or canteen sip
+	  Drink                 thirst  hydration  Thirst effect  warmth / chill
+	  a water source, hand    1       0.1      50%, 15 s        -            TAN's hand drinking
+	                                                                         (Config.ToughAsNails
+	                                                                         .HandDrinking)
+	  dirty water             4       0.25     50%, 15 s        -            bottle, canteen sip
+	  purified water          6       0.4        -              -            bottle, canteen sip
+	  dirty water bowl        4       0.3      50%, 15 s        -            a bowl holds more
+	  purified water bowl     7       0.45       -              -
+	  mint tea                7       0.6        -          chill 2 min      a mint leaf brewed
+	  ginger tea              7       0.6        -          warmth 2 min     a ginger root
+	  herbal tea              8       0.65       -          both 1 min       both herbs
 	(hydration is the modifier: Thirst.drink adds thirst x modifier x 2; the Thirst effect costs
 	0.015 exhaustion a tick, so 15 s of it is 4.5 exhaustion, about a point of hydration or
 	thirst; a longer one already running stays, so sips in a row cost one effect. TAN's own 75%
 	and 30 s at 0.025 were too harsh for this game.) A drink may also give TAN's Internal Warmth
 	or Internal Chill (`warmth` / `chill` ticks, Temperature.giveWarmth / giveChill): `apply`
-	gives them when it is handed the temperature state.
+	gives them when it is handed the temperature state. A bowl is cheap (three planks make four)
+	and holds a little more than a bottle; a tea keeps its water's thirst, adds hydration and its
+	effect, so brewing never wastes water: ginger tea keeps a cold biome's chill off (Internal
+	Warmth: the target 5 steps warmer, though not past NEUTRAL's top by it), mint tea a hot one's
+	heat (Internal Chill), herbal tea both, for half as long.
 
 	The items are data, three tables below, and everything here reads them:
 	  ITEMS        a full item -> { drink, empty?, sips? }: what drinking it gives, the empty
@@ -30,18 +42,19 @@
 	               Purifying itself is a recipe's (Crafting/Recipes: smelting, or anything else
 	               that turns one into the other).
 	Both sides read this module, so entries go into the tables here (they are frozen), never at
-	run time. A new container, e.g. wooden bowls (ItemList Bowl, DirtyWaterBowl,
-	PurifiedWaterBowl), is four entries and a recipe:
-	    ITEMS        [I.DirtyWaterBowl] = { drink = Drinks.DIRTY, empty = I.Bowl },
-	                 [I.PurifiedWaterBowl] = { drink = Drinks.PURIFIED, empty = I.Bowl },
+	run time. A new container is four entries and its recipes, as the wooden bowls (ItemList Bowl,
+	DirtyWaterBowl, PurifiedWaterBowl) are:
+	    ITEMS        [I.DirtyWaterBowl] = { drink = Drinks.DIRTY_BOWL, empty = I.Bowl },
+	                 [I.PurifiedWaterBowl] = { drink = Drinks.PURIFIED_BOWL, empty = I.Bowl },
 	    FILLS        [I.Bowl] = I.DirtyWaterBowl,
 	    PURIFIED_OF  [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
-	    Recipes      smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+	    Recipes      smelt("DirtyWaterBowl", "PurifiedWaterBowl") and the mint cure
+	                 (mix({ "DirtyWaterBowl", "MintLeaves" }, "PurifiedWaterBowl"))
 	and a bowl then fills at water, is drunk by holding the use button, gives its Bowl back, and
-	purifies in a furnace, as a bottle does. A drink that is no water (a juice, a hot tea) is an
-	ITEMS entry with a Drink of its own, e.g. { drink = { thirst = 6, hydration = 0.6, chance = 0,
-	effectTicks = 0, warmth = 1200 }, empty = I.GlassBottle }. The load checks below assert that
-	every named item is a drink where it must be one.
+	purifies in a furnace or with mint, as a bottle does. A drink that is no water (the teas) is
+	an ITEMS entry with a Drink of its own and the container it leaves: Mint Tea is { drink =
+	Drinks.MINT_TEA, empty = I.Bowl }, MINT_TEA carrying `chill = 2400`. The load checks below
+	assert that every named item is a drink where it must be one.
 
 	Using an item (`action`, right click; Minecraft's Item.use after a block's own use):
 	  an empty container (FILLS)   at a water source: fill (BottleItem: a ray that stops at
@@ -98,6 +111,19 @@ local Drinks = {}
 Drinks.HAND = table.freeze({ thirst = 1, hydration = 0.1, chance = 0.5, effectTicks = 300 }) :: Drink
 Drinks.DIRTY = table.freeze({ thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300 }) :: Drink
 Drinks.PURIFIED = table.freeze({ thirst = 6, hydration = 0.4, chance = 0, effectTicks = 0 }) :: Drink
+Drinks.DIRTY_BOWL = table.freeze({ thirst = 4, hydration = 0.3, chance = 0.5, effectTicks = 300 }) :: Drink
+Drinks.PURIFIED_BOWL = table.freeze({ thirst = 7, hydration = 0.45, chance = 0, effectTicks = 0 }) :: Drink
+-- The teas (a purified water bowl brewed with a herb): Internal Chill, Internal Warmth or both.
+Drinks.MINT_TEA = table.freeze({ thirst = 7, hydration = 0.6, chance = 0, effectTicks = 0, chill = 2400 }) :: Drink
+Drinks.GINGER_TEA = table.freeze({ thirst = 7, hydration = 0.6, chance = 0, effectTicks = 0, warmth = 2400 }) :: Drink
+Drinks.HERBAL_TEA = table.freeze({
+	thirst = 8,
+	hydration = 0.65,
+	chance = 0,
+	effectTicks = 0,
+	warmth = 1200,
+	chill = 1200,
+}) :: Drink
 
 -- Ticks of holding the use button to drink an item (Minecraft's potions and TAN's drinks).
 Drinks.USE_TICKS = 32
@@ -118,18 +144,25 @@ Drinks.ITEMS = table.freeze({
 	[I.PurifiedWaterBottle] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
 	[I.DirtyWaterCanteen] = table.freeze({ drink = Drinks.DIRTY, empty = I.Canteen, sips = true }),
 	[I.PurifiedWaterCanteen] = table.freeze({ drink = Drinks.PURIFIED, empty = I.Canteen, sips = true }),
+	[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY_BOWL, empty = I.Bowl }),
+	[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED_BOWL, empty = I.Bowl }),
+	[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl }),
+	[I.GingerTea] = table.freeze({ drink = Drinks.GINGER_TEA, empty = I.Bowl }),
+	[I.HerbalTea] = table.freeze({ drink = Drinks.HERBAL_TEA, empty = I.Bowl }),
 } :: { [number]: DrinkItem })
 
 -- Empty containers and the full item each becomes at a water source.
 Drinks.FILLS = table.freeze({
 	[I.GlassBottle] = I.DirtyWaterBottle,
 	[I.Canteen] = I.DirtyWaterCanteen,
+	[I.Bowl] = I.DirtyWaterBowl,
 } :: { [number]: number })
 
 -- Dirty water and its purified twin.
 Drinks.PURIFIED_OF = table.freeze({
 	[I.DirtyWaterBottle] = I.PurifiedWaterBottle,
 	[I.DirtyWaterCanteen] = I.PurifiedWaterCanteen,
+	[I.DirtyWaterBowl] = I.PurifiedWaterBowl,
 } :: { [number]: number })
 
 -- (Mistakes in the tables would only show as items that do nothing: catch them at load.)

@@ -259,14 +259,15 @@ local function prototype(item: number, size: number): Model
 	local blockDef = if def and def.block then Blocks.get(def.block) else nil
 	local shape = if blockDef then blockDef.icon or blockDef.shape else nil
 	local sprite = if def and def.block and blockDef and blockDef.plant then itemSprite(def.block) else nil
-	if sprite then
+	if def and def.model then
+		-- (Items of ItemList, also those that place a block: Mint Leaves look like leaves.)
+		boxesPrototype(model, def, def.model, size)
+	elseif sprite then
 		spritePrototype(model, sprite, size)
 	elseif def and def.block and shape then
 		shapePrototype(model, def.block, shape, size)
 	elseif def and def.block then
 		blockPrototype(model, def.block, size)
-	elseif def and def.model then
-		boxesPrototype(model, def, def.model, size)
 	else
 		-- Unknown item: a magenta cube.
 		local part = Instance.new("Part")
@@ -295,7 +296,7 @@ end
 -- Is the item drawn as a block (a cube), rather than from boxes (items, shaped blocks)?
 function ItemModels.isBlock(item: number): boolean
 	local def = Items.get(item)
-	return def ~= nil and def.block ~= nil and Blocks.get(def.block).shape == nil
+	return def ~= nil and def.model == nil and def.block ~= nil and Blocks.get(def.block).shape == nil
 end
 
 -- Is the item held like a tool (Minecraft's "handheld" models: tools and sticks; and torches)?
@@ -314,16 +315,16 @@ local function gripHeight(item: number): number
 	local def = Items.get(item)
 	local bottom = 0
 	local shape = if def and def.block then Blocks.get(def.block).shape else nil
-	if def and def.block and shape then
-		-- Shaped blocks are built around their outline's centre.
-		local bounds = Blocks.get(def.block).bounds
-		bottom = (bounds.min[2] - bounds.max[2]) / 2 + GRIP_FROM_END
-	elseif def and def.model then
+	if def and def.model then
 		bottom = math.huge
 		for _, box in def.model do
 			bottom = math.min(bottom, box.offset[2] - box.size[2] / 2)
 		end
 		bottom += GRIP_FROM_END
+	elseif def and def.block and shape then
+		-- Shaped blocks are built around their outline's centre.
+		local bounds = Blocks.get(def.block).bounds
+		bottom = (bounds.min[2] - bounds.max[2]) / 2 + GRIP_FROM_END
 	end
 	grips[item] = bottom
 	return bottom

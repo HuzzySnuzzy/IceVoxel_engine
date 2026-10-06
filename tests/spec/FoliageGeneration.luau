@@ -380,6 +380,10 @@ return function(t, shared, require)
 		if flowers then
 			expected += foliage.flowerChance * average(flowers)
 		end
+		local herbs = foliage.herbs
+		if herbs then
+			expected += foliage.herbChance * average(herbs)
+		end
 		return expected
 	end
 

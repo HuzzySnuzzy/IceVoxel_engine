@@ -36,6 +36,11 @@
 	                             flowers in their own patches (`chance` and `cover` as density and
 	                             cover above, cover default 0.3). The species follows another
 	                             low-frequency noise, so a patch is one or two species.
+	                   herbs     Optional { chance =, cover =, species = { { blockName, weight } } }:
+	                             Tough As Nails' herbs (BlockList Mint, WildGinger), in rare small
+	                             patches of their own (`chance` and `cover` as above, cover default
+	                             0.04: about 4 herbs a patch), only on columns that grow nothing
+	                             else, so the grass and flowers stay where they were.
 	                 Every box of a plant is a Part: tests/spec/FoliageGeneration keeps the Parts per
 	                 soil column within budget (0.6 in jungles and meadows, 0.45 on plains and
 	                 savannas, 0.35 elsewhere).
@@ -66,6 +71,7 @@ export type FoliageSpec = {
 	cover: number?,
 	plants: { { any } },
 	flowers: { chance: number, cover: number?, species: { { any } } }?,
+	herbs: { chance: number, cover: number?, species: { { any } } }?,
 }
 
 export type Band = { name: string, from: number }
@@ -83,6 +89,17 @@ local BANDS: { Band } = {
 	{ name = "Slopes", from = 639 },
 	{ name = "Peaks", from = 725 },
 }
+
+--[[
+	Herbs (Tough As Nails' water and teas): mint, the cooling herb that also purifies water, on the
+	plains, in meadows and jungles (the warm and temperate grass; the game has no swamps or river
+	biomes for it); wild ginger, the warming one, under the trees of forests and taigas, so the
+	colder biomes have theirs. Rare small patches: 0.4% of the open ground, in patches of 4 or so
+	herbs about 30 blocks apart on open ground (fewer under trees; tests/spec/Herbs counts them).
+]]
+type Herbs = { chance: number, cover: number?, species: { { any } } }
+local MINT: Herbs = { chance = 0.004, cover = 0.04, species = { { "Mint", 1 } } }
+local GINGER: Herbs = { chance = 0.004, cover = 0.04, species = { { "WildGinger", 1 } } }
 
 -- Forest flowers (Minecraft's forest: dandelions and poppies, lilies of the valley and the tall
 -- forest flowers).
@@ -134,6 +151,7 @@ local list: { BiomeSpec } = {
 				{ "RedMushroom", 0.06 },
 			},
 			flowers = { chance = 0.002, species = { { "Dandelion", 1 }, { "Poppy", 1 } } },
+			herbs = GINGER,
 		},
 	},
 	{
@@ -169,6 +187,7 @@ local list: { BiomeSpec } = {
 					{ "Sunflower", 0.4 },
 				},
 			},
+			herbs = MINT,
 		},
 	},
 	{
@@ -188,6 +207,7 @@ local list: { BiomeSpec } = {
 			density = 0.07,
 			plants = { { "ShortGrass", 1 } },
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
+			herbs = GINGER,
 		},
 	},
 	{
@@ -206,6 +226,7 @@ local list: { BiomeSpec } = {
 			density = 0.07,
 			plants = { { "ShortGrass", 1 } },
 			flowers = { chance = 0.014, species = FOREST_FLOWERS },
+			herbs = GINGER,
 		},
 	},
 	{
@@ -262,6 +283,7 @@ local list: { BiomeSpec } = {
 			cover = 0.8,
 			plants = { { "ShortGrass", 6 }, { "Fern", 3 }, { "TallGrass", 1 }, { "LargeFern", 1 } },
 			flowers = { chance = 0.008, species = { { "Dandelion", 2 }, { "Poppy", 2 }, { "BlueOrchid", 1 } } },
+			herbs = MINT,
 		},
 	},
 	{
@@ -308,6 +330,7 @@ local list: { BiomeSpec } = {
 				{ "BrownMushroom", 0.5 },
 				{ "RedMushroom", 0.3 },
 			},
+			herbs = GINGER,
 		},
 	},
 	{
@@ -359,6 +382,7 @@ local list: { BiomeSpec } = {
 					{ "Poppy", 1 },
 				},
 			},
+			herbs = MINT,
 		},
 	},
 	{

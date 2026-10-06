@@ -14,7 +14,8 @@ export type Feature = { structure: string, weight: number }
 export type PlantList = { blocks: { number }, weights: { number }, total: number }
 
 -- Ground plants (BiomeList `foliage`): average chance per soil column and share of the ground in
--- patches, for grass-like plants and for flowers (`flowers` nil: none).
+-- patches, for grass-like plants, for flowers (`flowers` nil: none) and for herbs (`herbs` nil:
+-- none).
 export type Foliage = {
 	density: number,
 	cover: number,
@@ -22,6 +23,9 @@ export type Foliage = {
 	flowerChance: number,
 	flowerCover: number,
 	flowers: PlantList?,
+	herbChance: number,
+	herbCover: number,
+	herbs: PlantList?,
 }
 
 export type Biome = {
@@ -119,6 +123,7 @@ for index, spec in BiomeList.list do
 	local foliageSpec = spec.foliage
 	if foliageSpec then
 		local flowers = foliageSpec.flowers
+		local herbs = foliageSpec.herbs
 		foliage = {
 			density = share(spec.name, "density", foliageSpec.density),
 			cover = share(spec.name, "cover", foliageSpec.cover or 0.5),
@@ -126,6 +131,9 @@ for index, spec in BiomeList.list do
 			flowerChance = if flowers then share(spec.name, "flower chance", flowers.chance) else 0,
 			flowerCover = if flowers then share(spec.name, "flower cover", flowers.cover or 0.3) else 0.3,
 			flowers = if flowers then plantList(spec.name, flowers.species) else nil,
+			herbChance = if herbs then share(spec.name, "herb chance", herbs.chance) else 0,
+			herbCover = if herbs then share(spec.name, "herb cover", herbs.cover or 0.04) else 0.04,
+			herbs = if herbs then plantList(spec.name, herbs.species) else nil,
 		}
 	end
 	local biome: Biome = {

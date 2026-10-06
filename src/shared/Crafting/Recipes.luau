@@ -349,6 +349,25 @@ shape({ " N ", "I I", " I " }, { N = "IronNugget", I = "IronIngot" }, "Canteen")
 smelt("DirtyWaterBottle", "PurifiedWaterBottle")
 smelt("DirtyWaterCanteen", "PurifiedWaterCanteen")
 
+--[[
+	Herbs, bowls and teas (Tough As Nails' water, Shared/ToughAsNails/Drinks). The Bowl is
+	Minecraft's: three planks of any wood in a V make four. A Dirty Water Bowl smelts into a
+	Purified Water Bowl like the bottle. Mint cures dirty water without a fire: a dirty bottle,
+	bowl or canteen with Mint Leaves in any slots (shapeless) makes its purified twin, in the
+	inventory's own 2 x 2 grid too (a part-drunk dirty canteen comes out full, as from the
+	furnace, which filling at water would do anyway). A Purified Water Bowl brews a tea with a
+	herb: Mint Leaves make Mint Tea (Internal Chill), Ginger Root Ginger Tea (Internal Warmth),
+	both Herbal Tea. A bowl burns 100 ticks as fuel (Minecraft's).
+]]
+shape({ "# #", " # " }, { ["#"] = "#planks" }, "Bowl", 4)
+smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+for _, water in { "Bottle", "Bowl", "Canteen" } do
+	mix({ "DirtyWater" .. water, "MintLeaves" }, "PurifiedWater" .. water)
+end
+mix({ "PurifiedWaterBowl", "MintLeaves" }, "MintTea")
+mix({ "PurifiedWaterBowl", "GingerRoot" }, "GingerTea")
+mix({ "PurifiedWaterBowl", "MintLeaves", "GingerRoot" }, "HerbalTea")
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,
@@ -363,6 +382,7 @@ Recipes.fuel = {
 	WoodenShovel = 200,
 	WoodenHoe = 200,
 	WoodenSword = 200,
+	Bowl = 100,
 }
 
 Recipes.shaped = shaped

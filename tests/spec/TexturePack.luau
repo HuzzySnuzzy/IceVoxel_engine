@@ -271,6 +271,8 @@ local BLANKS = {
 	{ "peony top", { "PeonyTop" } },
 	{ "brown mushroom", { "BrownMushroom" } },
 	{ "red mushroom", { "RedMushroom" } },
+	{ "mint", { "Mint" } },
+	{ "wild ginger", { "WildGinger" } },
 }
 
 return function(t, shared, require)
@@ -567,8 +569,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			167,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not)"
+			169,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}

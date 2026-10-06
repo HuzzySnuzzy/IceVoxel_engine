@@ -567,7 +567,8 @@ Minecraft's), 95% of it in patches, for ~0.2 ms a chunk (~5% of generation).
 ### Foliage (`Foliage.luau`)
 
 Minecraft 1.20.1's vegetal decoration from each biome's `foliage` (BiomeList): grass, ferns and
-their tall forms, dead bushes, flowers, tall flowers and mushrooms. It runs after structures, in
+their tall forms, dead bushes, flowers, tall flowers and mushrooms, and Tough As Nails' herbs
+(`foliage.herbs`: mint, wild ginger). It runs after structures, in
 full detail chunks only: LOD cells are 2+ blocks wide, and every box of a plant is a part.
 
 Every padded column is decided alone, from the seed, its world (x, z) and its own blocks, so a
@@ -584,6 +585,11 @@ chunk's padding grows exactly what its neighbour's core grows:
   below a threshold (clearings), 1 above it (patches), fading in between. The threshold leaves
   `cover` of the ground in patches (0.5 by default, 0.3 for flowers), so `density` stays the
   average share of soil columns with a plant. Flowers have their own patch noise (~20 blocks);
+- herbs take the part of the roll's range above the other plants (`herbs.chance`, 0.004 a soil
+  column), so they only grow where nothing grew before (adding them moved no grass or flower),
+  with a patch noise of their own (~16 blocks) and a small `cover` (0.04): rare patches of about
+  4 herbs some 30 blocks apart on open ground (tests/spec/Herbs measures them on the seed); mint
+  on plains, meadows and in jungles, wild ginger in forests, birch forests and both taigas;
 - other plants are picked by weight from the same hash; a flower's species follows a wider noise
   (~128 blocks) made uniform, with a little per-column jitter, so neighbouring flowers are mostly
   the same species (Minecraft's noise-based flower providers);
@@ -2149,6 +2155,13 @@ fluid of Shared/Fluids, checked at load). A stack is `{ item, count, damage }`, 
 or better drops anything: iron and osmium ore need stone, diamond, gold and emerald ore iron),
 what they drop (`drops`, `dropCount`: snow gives 4 snowballs; `shearDrops`, `shearCount`: what
 Shears get instead), what right click opens (`menu`) and how many slots they hold (`container`).
+An item of ItemList may place a block that is no item of its own (`places`, Minecraft's
+ItemNameBlockItem: Mint Leaves plant Mint, Ginger Root Wild Ginger): its `block` is that block,
+so the client places it as a block item (with the item's own model in hand and in slots), and
+`Items.ofBlock` answers the item for the block, so the block drops it, pick block takes it and
+the server's placement uses it up (`EditRules.mayPlace` takes any block `ofBlock` answers).
+Asserted at load: the block exists, is not `placeable`, has no `item` and only one item places
+it.
 
 **The inventory** (`Inventory/Types`, `Inventory/Menu`). It is Minecraft's: 36 slots (1–9 the
 hotbar), 4 armor slots, the stack carried by the mouse, and the selected hotbar slot. A *window*
@@ -2347,6 +2360,10 @@ grass, are `brokenByFluid` and stand through the attached-block machinery:
   adds room for a tall plant's top (y + 1 below `Config.WorldHeight` and replaceable), and
   `placementFor` and `EditRules.supported` use it. Upper halves have no `support`, so
   `placementFor` never returns one.
+- Herbs (Tough As Nails' Mint and Wild Ginger, appended after the TNT and the Nuke) are plants
+  on the dirt set like the flowers, but `placeable = false`: no item of their own. The herb item
+  places them (ItemList `places`, Minecraft's ItemNameBlockItem, below) and is their drop, and
+  they spread (`Behaviours/Herb`).
 - Halves: `plantTop`, `plantBottom`, `otherHalf` (the partner's dy). Upper halves name the lower
   half as their `item`, so `Items.ofBlock` gives the plant's item (WAILA, pick block, placing) and
   they are its variants; they are no item of their own and drop nothing. Each half of a tall plant
@@ -2799,11 +2816,16 @@ still, the extremes clear and nothing hurts; the HUD shows with the hearts.
 n × modifier × 2 up to the new thirst), and a dirty drink rolls TAN's Thirst effect (a longer one
 running stays):
 
-| Drink                        | Thirst | Hydration | Thirst effect |
-| ---------------------------- | ------ | --------- | ------------- |
-| a water source, empty hand   | 1      | 0.1       | 50%, 300 ticks |
-| Dirty Water Bottle / Canteen | 4      | 0.25      | 50%, 300 ticks |
-| Purified Water Bottle / Canteen | 6   | 0.4       | -             |
+| Drink                        | Thirst | Hydration | Thirst effect | Warmth / chill |
+| ---------------------------- | ------ | --------- | ------------- | -------------- |
+| a water source, empty hand   | 1      | 0.1       | 50%, 300 ticks | -             |
+| Dirty Water Bottle / Canteen | 4      | 0.25      | 50%, 300 ticks | -             |
+| Purified Water Bottle / Canteen | 6   | 0.4       | -             | -              |
+| Dirty Water Bowl             | 4      | 0.3       | 50%, 300 ticks | -             |
+| Purified Water Bowl          | 7      | 0.45      | -             | -              |
+| Mint Tea                     | 7      | 0.6       | -             | chill 2400 ticks |
+| Ginger Tea                   | 7      | 0.6       | -             | warmth 2400 ticks |
+| Herbal Tea                   | 8      | 0.65      | -             | both 1200 ticks |
 
 A `Drink` may also carry `warmth` / `chill` ticks: `Drinks.apply(thirst, drink, random,
 temperature?)` gives TAN's Internal Warmth / Internal Chill to the temperature state it is handed
@@ -2812,9 +2834,10 @@ module that both sides read: `ITEMS` (full item -> `{ drink, empty?, sips? }`: w
 empty container drinking it leaves, `sips` for a canteen whose `durability` is its sips), `FILLS`
 (empty container -> the dirty water it becomes at a water source; a dirty `sips` item of its own
 container is topped up there while it has sips missing) and `PURIFIED_OF` (dirty -> purified;
-`purifiedOf`, `isDirty`). A new container (wooden bowls) is two `ITEMS` entries, a `FILLS` entry, a
-`PURIFIED_OF` entry and a smelting recipe; load-time asserts catch entries that name no item or no
-drink.
+`purifiedOf`, `isDirty`). A new container is two `ITEMS` entries, a `FILLS` entry, a
+`PURIFIED_OF` entry and its recipes, as the wooden bowls are; a drink that is no water (the teas)
+is an `ITEMS` entry with a `Drink` of its own and the container it leaves; load-time asserts catch
+entries that name no item or no drink.
 
 Items (appended to ItemList): Glass Bottle (Minecraft's; three glass in a V make three), Dirty and
 Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget over three
@@ -2823,7 +2846,25 @@ the empty Canteen; the tool repair recipe skips them). An empty container used a
 (Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty water
 (ItemUtils.createFilledResult: one used, the full one replaces the stack or goes into the
 inventory; creative keeps the empty one); smelting purifies (TAN's original way), in a furnace or
-an Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
+an Electric Furnace.
+
+**Herbs, bowls and teas** (BlockList Mint and WildGinger, ItemList MintLeaves, GingerRoot, Bowl,
+DirtyWaterBowl, PurifiedWaterBowl, MintTea, GingerTea, HerbalTea; Crafting/Recipes). Mint and
+Wild Ginger are plants (see Plants) that generation grows in rare patches (see Foliage: mint on
+plains, meadows and in jungles, wild ginger in forests and taigas); breaking one drops one Mint
+Leaves / Ginger Root (Shears too: no shear drop), which plants it back on the dirt set (ItemList
+`places`, see Items), one for one, so replanting gains nothing; they spread instead
+(`Behaviours/Herb`, Minecraft's mushrooms: `Server.HerbSpread` 1/8 a random tick, a try every 9
+minutes or so, up to 5 in 9 x 3 x 9). The Bowl is Minecraft's (three planks of any wood in a V
+make four; 100 ticks of fuel). It is a third container through the tables alone: it fills at
+water into a Dirty Water Bowl (stack 16), which a furnace purifies, and drinking a bowl gives the
+Bowl back. Mint purifies without a fire: a dirty bottle, bowl or canteen with Mint Leaves
+(shapeless, the inventory's 2 x 2 grid too) makes its purified twin. A Purified Water Bowl with
+a herb brews a tea (stack 1, like stews): Mint Tea gives Internal Chill for 2 minutes, Ginger Tea
+Internal Warmth for 2 minutes, Herbal Tea (both herbs) both for 1; a tea keeps its water's thirst
+and adds hydration. So under ginger tea the tundra's -10 is held at -5 (COLD: no freezing),
+under mint tea the desert's 9 at 4 (WARM). Drinking a bowl uses the drink and fill sounds of the
+bottles. tests/spec/Herbs covers it all. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
 counts 32 ticks while the button stays down (gulps every 4 ticks from the 7th), then finish; the
 server drinks it only if the same item is still in the same slot 28+ ticks after start and the
 player may drink (thirsty, or creative), then uses it up (one drink gives its empty container back)
@@ -4148,7 +4189,11 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   chunk's edit list as leaves were placed by a player and never decay), `Sapling` (stays up like
   a plant; on a random tick under the sky, chance `Server.SaplingGrowth` 1/14, runs its wood's
   Trees builder through a recording writer and places it only if every forced cell but its own is
-  air, a plant or leaves; leaves only go into air),
+  air, a plant or leaves; leaves only go into air), `Herb` (Mint and Wild Ginger: stay up like a
+  plant; on a random tick, chance `Server.HerbSpread` 1/8, Minecraft's MushroomBlock.randomTick:
+  unless 5 of the same herb are in the 9 x 3 x 9 blocks around, a walk of up to four random steps
+  (-1..1 on each axis) onto air the herb survives in, and a new one where it ends if it may stand
+  there; unloaded blocks are no room),
   `Attached` (torches and lanterns break and drop when what they hang on stops being sturdy),
   `Plant` (a plant whose soil or other half is gone breaks and drops what it drops by itself, in
   every game mode: a tall plant's lower half drops, its top never does, so a tall plant drops once),

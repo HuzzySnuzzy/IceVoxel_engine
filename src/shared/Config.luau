@@ -808,7 +808,8 @@ local Config = {
 		SimulationRadius = 3,
 		-- Minecraft's randomTickSpeed: blocks picked at random per 16 x 16 x 16 section of every
 		-- chunk within SimulationRadius of a player, each tick (World/RandomTicker): grass spreads,
-		-- leaves cut off from their logs decay, saplings grow. 0 turns random ticks off.
+		-- leaves cut off from their logs decay, saplings grow, herbs spread. 0 turns random ticks
+		-- off.
 		RandomTickSpeed = 3,
 		-- Fast leaf decay: a leaf whose tree lost its logs (no log within 6 blocks through leaves)
 		-- decays MinDelay..MaxDelay ticks after a neighbour changed, so a felled tree's canopy
@@ -818,6 +819,10 @@ local Config = {
 		-- Chance per random tick that a sapling with daylight grows into its tree (Minecraft:
 		-- 1/7 a stage, two stages): about 16 minutes on average.
 		SaplingGrowth = 1 / 14,
+		-- Chance per random tick that a herb (Mint, Wild Ginger) spreads to a free spot next to it
+		-- while fewer than 5 of it grow within 4 blocks (Behaviours/Herb, Minecraft's mushroom
+		-- spreading at 1/25): a try about every 9 minutes from each.
+		HerbSpread = 1 / 8,
 		-- Generated chunks the server keeps in memory beyond the ones near players.
 		CacheSize = 192,
 		-- Max chunks the server generates per frame while preloading around players.

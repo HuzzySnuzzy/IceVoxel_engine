@@ -629,7 +629,8 @@ return function(t, shared, require, _server, client)
 		local Items = require(shared.Items)
 		local models = 0
 		for _, def in Items.list do
-			if def.block == nil then
+			-- (Items drawn from boxes: those of ItemList, the herbs that place a plant too.)
+			if def.block == nil or def.model ~= nil then
 				local boxes = def.model
 				t.ok(boxes ~= nil and #boxes > 0, `{def.name} has a model`)
 				assert(boxes)

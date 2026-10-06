@@ -688,7 +688,12 @@ return function(t, shared, require)
 			local def = Blocks.get(id)
 			local item = Items.ofBlock(id)
 			t.ok(item ~= nil, `{def.name} has an item`)
-			if Blocks.plantBottom(id) == nil then
+			local placer = if item then Items.get(item) else nil
+			if placer and placer.model ~= nil then
+				-- A herb: an item of ItemList places it (`places`) and is drawn from its own boxes
+				-- (tests/spec/Meshing checks those fit).
+				t.eq(placer.block, id, `{def.name} is placed by {placer.name}`)
+			elseif Blocks.plantBottom(id) == nil then
 				t.eq(item, id, `{def.name} is its own item`)
 				-- ItemModels draws `icon` (else `shape`) around the outline's centre, in a cube of
 				-- 16 pixels (a leaning blade's foot may poke a little below the ground: allow a

@@ -15,11 +15,13 @@
 	     ice there means no plant. (Mushrooms, which may stand on any sturdy block, therefore only
 	     grow on that ground too: none on beach gravel or bare rock.)
 	  2. a per-column hash (`columnHash`) is rolled against the biome's chances. Flowers take the
-	     bottom of the roll's range and other plants the part above it, so a column grows one or
-	     the other. Each chance is the biome's average divided by the share of the ground in
-	     patches, times a patch noise ramp: low-frequency noise (Noise.fbm2) above a threshold
-	     makes patches, below it clearings, and the ramp between fades their edges, like
-	     Minecraft's random patch features. Flowers have their own patch noise.
+	     bottom of the roll's range, other plants the part above it and herbs (Tough As Nails'
+	     mint and wild ginger) the part above that, so a column grows one of them at most (and a
+	     biome given herbs keeps its grass and flowers where they were). Each chance is the
+	     biome's average divided by the share of the ground in patches, times a patch noise ramp:
+	     low-frequency noise (Noise.fbm2) above a threshold makes patches, below it clearings,
+	     and the ramp between fades their edges, like Minecraft's random patch features. Flowers
+	     and herbs have their own patch noises (the herbs' smaller and rarer).
 	  3. other plants are picked by weight from the same hash; a flower's species follows a third,
 	     lower-frequency noise (made uniform, with a little per-column jitter), so a flower patch
 	     is one or two species, like Minecraft's noise-based flower providers.
@@ -42,6 +44,7 @@ local AIR = Blocks.AIR
 -- Tuning --------------------------------------------------------------------------------------------
 local PATCH_FREQUENCY = 1 / 24 -- grass and fern patches and the clearings between them
 local FLOWER_FREQUENCY = 1 / 20 -- flower patches
+local HERB_FREQUENCY = 1 / 16 -- herb patches (small)
 local SPECIES_FREQUENCY = 1 / 128 -- which flower grows where (wider than a patch)
 local EDGE = 0.25 -- noise width over which a patch fades into a clearing
 local SPECIES_JITTER = 0.02 -- per-column noise in the species pick (ragged borders between species)
@@ -111,14 +114,15 @@ end
 
 -- Is `soil` ground that some plant of the biome could grow on? (The soil columns of its budget.)
 local soilOf: { { [number]: boolean } } = {}
--- Per biome: peak chances (in patches) and patch thresholds of plants and flowers.
+-- Per biome: peak chances (in patches) and patch thresholds of plants, flowers and herbs.
 local plantPeak: { number }, plantThreshold: { number? } = {}, {}
 local flowerPeak: { number }, flowerThreshold: { number? } = {}, {}
+local herbPeak: { number }, herbThreshold: { number? } = {}, {}
 for index, biome in Biomes.list do
 	local foliage = biome.foliage
 	local soil: { [number]: boolean } = {}
 	soilOf[index] = soil
-	plantPeak[index], flowerPeak[index] = 0, 0
+	plantPeak[index], flowerPeak[index], herbPeak[index] = 0, 0, 0
 	if foliage then
 		for ground in GROUND do
 			for _, plant in foliage.plants.blocks do
@@ -129,6 +133,11 @@ for index, biome in Biomes.list do
 					soil[ground] = soil[ground] or mayPlaceOn(flower, ground)
 				end
 			end
+			if foliage.herbs then
+				for _, herb in foliage.herbs.blocks do
+					soil[ground] = soil[ground] or mayPlaceOn(herb, ground)
+				end
+			end
 		end
 		local t = thresholdFor(foliage.cover)
 		plantThreshold[index] = t
@@ -136,7 +145,13 @@ for index, biome in Biomes.list do
 		local tf = thresholdFor(foliage.flowerCover)
 		flowerThreshold[index] = tf
 		flowerPeak[index] = if foliage.flowers then math.min(1, foliage.flowerChance / meanRamp(tf)) else 0
-		assert(plantPeak[index] + flowerPeak[index] <= 1, `Biome {biome.name}'s foliage is too dense for its patches`)
+		local th = thresholdFor(foliage.herbCover)
+		herbThreshold[index] = th
+		herbPeak[index] = if foliage.herbs then math.min(1, foliage.herbChance / meanRamp(th)) else 0
+		assert(
+			plantPeak[index] + flowerPeak[index] + herbPeak[index] <= 1,
+			`Biome {biome.name}'s foliage is too dense for its patches`
+		)
 	end
 end
 
@@ -190,6 +205,7 @@ function Foliage.new(seed: number): Placer
 	local patches = Noise.fbm2(seed, "foliage.patches", PATCH_FREQUENCY, 2)
 	local flowerPatches = Noise.fbm2(seed, "foliage.flowerPatches", FLOWER_FREQUENCY, 2)
 	local species = Noise.fbm2(seed, "foliage.species", SPECIES_FREQUENCY, 2)
+	local herbPatches = Noise.fbm2(seed, "foliage.herbPatches", HERB_FREQUENCY, 2)
 	local salt = Hash.hash2(seed, Hash.string("foliage.columns"), 0xF01A)
 	local list = Biomes.list
 
@@ -236,6 +252,13 @@ function Foliage.new(seed: number): Placer
 					local t = plantThreshold[b]
 					if roll - fPeak < plantPeak[b] * (if t then ramp(patches(wx, wz), t) else 1) then
 						block = pick(foliage.plants, (h // 65536) / 65536)
+					end
+				elseif roll < fPeak + plantPeak[b] + herbPeak[b] then
+					local t = herbThreshold[b]
+					local herbs = foliage.herbs
+					local above = roll - fPeak - plantPeak[b]
+					if herbs and above < herbPeak[b] * (if t then ramp(herbPatches(wx, wz), t) else 1) then
+						block = pick(herbs, (h // 65536) / 65536)
 					end
 				end
 				if block == nil or not mayPlaceOn(block, surface) then

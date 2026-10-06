@@ -7,9 +7,12 @@
 	  * Other items (ItemList: crafting materials, tools, armor, the Configurator and buckets)
 	    have ids from ITEM_BASE up.
 	  * Block variants that are no item of their own (wall torches, the upper halves of tall plants)
-	    name the item that places and drops them (BlockList `item`); `ofBlock` answers it. A
-	    replaceable block is replaced by what is placed into it, but not by its own item
-	    (`isReplacedBy`: Short Grass clicked on short grass goes against the clicked face).
+	    name the item that places and drops them (BlockList `item`); `ofBlock` answers it. An item
+	    of ItemList may place a block that is no item of its own (ItemList `places`, Minecraft's
+	    ItemNameBlockItem: Mint Leaves plant Mint); its `block` is that block, and `ofBlock`
+	    answers the item for it too. A replaceable block is replaced by what is placed into it,
+	    but not by its own item (`isReplacedBy`: Short Grass clicked on short grass goes against
+	    the clicked face).
 	  * What breaking a block gives: `drops` (by a survival player, with the tool in hand: nothing
 	    without a good enough tool; Shears harvest what BlockList's `shearDrops` says, `shearCount`
 	    of it: grass, ferns, dead bushes, leaves and glow lichen) and `blockDrops` (breaking by
@@ -61,7 +64,7 @@ export type ItemDef = {
 	id: number,
 	name: string,
 	displayName: string,
-	-- The block this item places (block items only).
+	-- The block this item places (block items, and ItemList items with `places`).
 	block: number?,
 	maxStack: number,
 	-- Armor: worn in armor slot `slot` (1 head, 2 chest, 3 legs, 4 feet).
@@ -139,10 +142,24 @@ for id = 0, Blocks.count - 1 do
 	end
 end
 
+-- Blocks placed by an item of ItemList (`places`, Minecraft's ItemNameBlockItem) -> that item.
+local placedBy: { [number]: number } = {}
+
 for index, spec in ItemList do
 	assert(not pcall(function()
 		return Blocks.id[spec.name]
 	end), `Item {spec.name} has the name of a block`)
+	local places: number? = nil
+	if spec.places then
+		places = Blocks.find(spec.places)
+		assert(places, `Item {spec.name} places unknown block {spec.places}`)
+		local block = Blocks.get(places)
+		assert(
+			not block.placeable and block.item == nil and placedBy[places] == nil,
+			`Item {spec.name} places {spec.places}, which is an item of its own or another's`
+		)
+		placedBy[places] = Items.ITEM_BASE + index - 1
+	end
 	local armor = nil
 	if spec.armor then
 		local slot = ARMOR_SLOT[spec.armor.slot]
@@ -162,7 +179,7 @@ for index, spec in ItemList do
 		id = Items.ITEM_BASE + index - 1,
 		name = spec.name,
 		displayName = spec.displayName or spaced(spec.name),
-		block = nil,
+		block = places,
 		maxStack = if spec.durability then 1 else spec.maxStack or Items.MAX_STACK,
 		armor = armor,
 		tan = tan,
@@ -253,8 +270,8 @@ end
 
 --[[
 	The item of a block: the block itself when it is an item, else the item its `item` field names
-	(a wall torch's is the Torch: what placing uses up, pick block selects and breaking drops).
-	nil when it is neither.
+	(a wall torch's is the Torch: what placing uses up, pick block selects and breaking drops), or
+	the item of ItemList that places it (`places`: Mint's Mint Leaves). nil when it is none of them.
 ]]
 function Items.ofBlock(block: number): number?
 	local def = defs[block]
@@ -263,7 +280,10 @@ function Items.ofBlock(block: number): number?
 	end
 	local blockDef = if Blocks.isValid(block) then Blocks.get(block) else nil
 	local name = blockDef and blockDef.item
-	return if name then rawget(ids :: any, name) else nil
+	if name then
+		return rawget(ids :: any, name)
+	end
+	return placedBy[block]
 end
 
 --[[

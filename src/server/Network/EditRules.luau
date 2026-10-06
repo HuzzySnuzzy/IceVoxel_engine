@@ -22,7 +22,8 @@
 	  Placing   a placeable block into a replaceable one (air, water, short grass, ...), never
 	            the same block; what it replaces goes without a drop (Minecraft). Variants placed
 	            by another block's item (wall torches by the Torch, a hanging lantern by the
-	            Lantern: BlockList `item`) count as placeable, but a tall plant's upper half never
+	            Lantern: BlockList `item`) and blocks an item places (ItemList `places`: Mint by
+	            Mint Leaves) count as placeable, but a tall plant's upper half never
 	            does: the server sets it itself (`setPlaced`), and neither does a cave twin
 	            (generation's CaveGlowLichen*). Blocks that hang on another one
 	            (`support`: torches, lanterns) need it to be sturdy, plants their soil, and a tall
@@ -191,7 +192,8 @@ function EditRules.mayPlace(block: number, current: number): boolean
 	then
 		return false
 	end
-	return d.placeable or (d.item ~= nil and Items.ofBlock(block) ~= nil)
+	-- (Or an item of ItemList places it: ItemList `places`, Mint Leaves' Mint.)
+	return d.placeable or Items.ofBlock(block) ~= nil
 end
 
 --[[
