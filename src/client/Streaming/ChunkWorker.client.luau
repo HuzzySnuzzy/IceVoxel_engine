@@ -89,6 +89,8 @@ local paintMap = MapPainter.new(generator)
 type Job = { [string]: any }
 
 local SECTION = Config.SectionHeight
+-- Odd boxes for textured blocks at full detail (GreedyMesher's `align`; never for LOD nodes).
+local ALIGN = Config.Textures.OddBoxes
 local SIZE = ChunkLayout.SIZE
 local LAYER = ChunkLayout.LAYER
 local AIR = Blocks.AIR
@@ -307,8 +309,17 @@ local function generate(job: Job): Job
 			local y0, y1 = section * SECTION, (section + 1) * SECTION
 			local hide = not reveal[section]
 			if not GreedyMesher.isTrivial(y0, y1, meshBelow, emptyAbove, hide) then
-				local boxes, count, plantCells =
-					GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section), hideFoliage)
+				local boxes, count, plantCells = GreedyMesher.mesh(
+					data,
+					height,
+					y0,
+					y1,
+					hide,
+					borderOf(open, caps, section),
+					hideFoliage,
+					nil,
+					ALIGN
+				)
 				if count > 0 then
 					table.insert(indices, section)
 					table.insert(meshes, boxes)
@@ -376,7 +387,7 @@ local function remesh(job: Job): Job
 		local boxes = buffer.create(0)
 		if not GreedyMesher.isTrivial(y0, y1, meshBelow, job.emptyAbove, hide) then
 			local meshed, _, plantCells =
-				GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section), hideFoliage)
+				GreedyMesher.mesh(data, height, y0, y1, hide, borderOf(open, caps, section), hideFoliage, nil, ALIGN)
 			boxes = meshed
 			if plantCells > 0 then
 				table.insert(plants, section)

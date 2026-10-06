@@ -108,18 +108,22 @@ end
 
 local function meshLine(stats: MeshOverlay.Stats): string
 	return string.format(
-		"meshes  %s\n        %d/%d regions, %d/%d chunks, %d parts, %dk tris\n        %d built, %d failed, last %.0f ms, frames +%.0f ms",
+		"meshes  %s\n        %d/%d regions, %d/%d chunks, %d parts%s, %dk tris\n        %d built, %d failed, last %.0f ms, frames +%.0f ms, tiny mesh +%.0f ms",
 		stats.status,
 		stats.meshedRegions,
 		stats.regions,
 		stats.meshedNodes,
 		stats.nodes,
 		stats.meshParts,
+		-- (Far Materials: MeshParts in a material or texture, not plain.)
+		if stats.looks then ` ({stats.lookParts} with materials)` else "",
 		stats.triangles // 1000,
 		stats.builds,
 		stats.failures,
 		stats.lastBuildMs,
-		stats.slowestFrameMs
+		stats.slowestFrameMs,
+		-- (The startup probe's one-block mesh: does a tiny MeshPart cost a long frame too?)
+		stats.tinyFrameMs
 	)
 end
 

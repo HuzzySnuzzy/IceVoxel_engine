@@ -6,6 +6,9 @@
 	  Streaming/ChunkStreamer    which chunks (and LOD levels) exist, job scheduling
 	  Streaming/WorkerPool       Actors running Streaming/ChunkWorker (parallel generation + meshing)
 	  Rendering/ChunkRenderer    mesh boxes -> parts, within a per-frame budget
+	  Rendering/TextureLooks     how blocks look with the texture pack (Shared/TexturePack):
+	                             variants, tints, images, sprites, far looks; checks the ids
+	                             and measures the textures' averages in the background
 	  Rendering/ViewSettings     the view from the player's settings: distances, caves, plants,
 	                             lights, lighting quality and fog
 	  Settings/                  the player's settings (the Options menu, Ui/SettingsScreen: P):
@@ -59,6 +62,7 @@ local ClientWorld = require(Client.World.ClientWorld)
 local ChunkStreamer = require(Client.Streaming.ChunkStreamer)
 local WorkerPool = require(Client.Streaming.WorkerPool)
 local ChunkRenderer = require(Client.Rendering.ChunkRenderer)
+local TextureLooks = require(Client.Rendering.TextureLooks)
 local ViewSettings = require(Client.Rendering.ViewSettings)
 local LightingController = require(Client.Rendering.LightingController)
 local FluidFog = require(Client.Rendering.FluidFog)
@@ -155,6 +159,9 @@ Settings.register("swapFrames", function(values)
 end)
 
 local world = ClientWorld.new()
+-- Texture ids are checked and averages measured in the background from now on; the renderer
+-- follows TextureLooks' looks (its parts, and the far meshes through MeshOverlay:setLooks).
+TextureLooks.start()
 local renderer = ChunkRenderer.new()
 local pool = WorkerPool.new(Client.Streaming.ChunkWorker :: LocalScript)
 local generator = TerrainGenerator.new(seed :: number)
@@ -174,12 +181,14 @@ Settings.register("foliage", applyView)
 streamer.onTeleportMode = function(active: boolean)
 	Map.setPaused(active)
 end
--- Shadows, far shadows and textures restyle live parts (ChunkRenderer.restyle).
+-- Shadows, far shadows, textures and far materials restyle live parts (ChunkRenderer.restyle;
+-- "farMaterials" uses the "textures" effect).
 local function restyle(values: PlayerSettings.Values)
 	renderer:restyle({
 		shadows = on(values, "shadows"),
 		farShadows = on(values, "farShadows"),
 		textures = on(values, "textures"),
+		farMaterials = on(values, "farMaterials"),
 	})
 end
 Settings.register("shadows", restyle)

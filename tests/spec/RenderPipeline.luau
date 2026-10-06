@@ -21,9 +21,14 @@
 local fs = require("@lune/fs")
 local luau = require("@lune/luau")
 local roblox = require("@lune/roblox")
+local serde = require("@lune/serde")
+
+local Loader = require("../lib/Loader")
 
 local Vector3 = roblox.Vector3
 local CFrame = roblox.CFrame
+local Color3 = roblox.Color3
+local Enum = roblox.Enum
 
 --[[ FakeWorld: just enough of Roblox's instances for the renderer ]]
 
@@ -232,6 +237,18 @@ local function newWorld(shared: any): any
 		world.clock += costs.call
 		return table.clone(rawget(o, "__children"))
 	end
+	methods.GetDescendants = function(o: Fake): { Fake }
+		world.clock += costs.call
+		local list = {}
+		local function visit(p: Fake)
+			for _, child in rawget(p, "__children") do
+				table.insert(list, child)
+				visit(child)
+			end
+		end
+		visit(o)
+		return list
+	end
 	methods.FindFirstChildOfClass = function(o: Fake, class: string): Fake?
 		world.clock += costs.call
 		for _, child in rawget(o, "__children") do
@@ -278,11 +295,19 @@ local function newWorld(shared: any): any
 	rawget(workspace, "__props").CurrentCamera = camera
 	world.camera = camera
 
+	-- MaterialVariants present in the fake MaterialService (by name: true, or the name of the
+	-- BaseMaterial it is on, which the lookup must ask for as in Roblox; `world.variants = true`:
+	-- all of them), and the edit-time Texture prototypes (ReplicatedStorage.IceVoxelTextures).
+	world.variants = {}
+	world.prototypes = nil
 	local services: { [string]: any } = {
 		ReplicatedStorage = {
 			WaitForChild = function(_, name: string)
 				assert(name == "IceVoxel")
 				return shared
+			end,
+			FindFirstChild = function(_, name: string)
+				return if name == "IceVoxelTextures" then world.prototypes else nil
 			end,
 		},
 		RunService = {
@@ -293,7 +318,12 @@ local function newWorld(shared: any): any
 			},
 		},
 		MaterialService = {
-			GetMaterialVariant = function()
+			GetMaterialVariant = function(_, material: any, name: string)
+				local variants = world.variants
+				local base = if variants == true then true else variants[name]
+				if base == true or (base ~= nil and base == material.Name) then
+					return { Name = name, BaseMaterial = material }
+				end
 				return nil
 			end,
 		},
@@ -417,7 +447,12 @@ local function rendering(world: any, shared: any, sharedRequire: (any) -> any): 
 				roblox.Color3,
 				roblox.UDim2,
 				roblox.Enum,
-				{ fromObject = function() end },
+				{
+					fromObject = function() end,
+					fromUri = function(uri: string): string
+						return uri
+					end,
+				},
 				world.os,
 				world.task,
 				world.warn
@@ -1025,11 +1060,13 @@ return function(t, shared, require, _server, client)
 
 	--[[
 		A renderer in a fake world. `sim.step(n)` runs frames and checks the invariants after each:
-		gaps (for every latency up to `sim.latency`), lights, quarantine (in acquire).
+		gaps (for every latency up to `sim.latency`), lights, quarantine (in acquire). The shared
+		modules are the runner's, or another environment's (`root`, `sharedRequire`).
 	]]
-	local function newSim(): Sim
-		local world = newWorld(shared)
-		local load = rendering(world, shared, require)
+	local function newSim(root: any?, sharedRequire: ((any) -> any)?): Sim
+		-- (`root`, `sharedRequire`: shared modules of another Loader environment.)
+		local world = newWorld(root or shared)
+		local load = rendering(world, root or shared, sharedRequire or require)
 		local ChunkRenderer = load("ChunkRenderer")
 		local renderer = ChunkRenderer.new()
 		local sim: Sim = {
@@ -2115,8 +2152,8 @@ return function(t, shared, require, _server, client)
 	--[[ MeshOverlay ]]
 
 	-- A renderer whose overlay merges level 2 regions, with the builder replaced by `finish`.
-	local function overlaySim(): Sim
-		local sim = newSim()
+	local function overlaySim(root: any?, sharedRequire: ((any) -> any)?): Sim
+		local sim = newSim(root, sharedRequire)
 		local overlay = sim.renderer.overlay
 		overlay.status = "on"
 		overlay.active = true
@@ -2375,5 +2412,870 @@ return function(t, shared, require, _server, client)
 			t.ok(most <= 600 + 256, `parts moved in one frame: {most}`)
 			t.ok(frames >= math.ceil(15 * 256 / 600), `members put back over {frames} frames`)
 		end)
+	end)
+
+	--[[ Textures (Rendering/TextureLooks through PartPool) ]]
+
+	-- The children of a part of a class.
+	local function childrenOf(part: any, class: string): { any }
+		local list = {}
+		for _, child in part:GetChildren() do
+			if child.ClassName == class then
+				table.insert(list, child)
+			end
+		end
+		return list
+	end
+
+	local function nearColour(a: any, b: any): boolean
+		return math.abs(a.R - b.R) < 1e-6 and math.abs(a.G - b.G) < 1e-6 and math.abs(a.B - b.B) < 1e-6
+	end
+
+	--[[
+		Shared modules loaded afresh (their own Loader environment) with the pack made neutral:
+		ShowMissing off, no Average, `blanks` blank. Tests that pin looks use it, so filling the
+		pack's blank entries or pasting averages never breaks them.
+	]]
+	local function neutralEnv(blanks: { string }?): (any, (any) -> any)
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		local pack = env.require(root.TexturePack)
+		pack.ShowMissing = false
+		for _, texture in pack.Textures do
+			texture.Average = nil
+		end
+		for _, name in blanks or {} do
+			pack.Textures[name].Color = ""
+		end
+		return root, env.require
+	end
+
+	t.test("textures: near, far and plain templates; sprites; glow lichen's plate", function()
+		local sim = overlaySim(neutralEnv())
+		sim.world.variants = true
+		local renderer = sim.renderer
+		local Looks = sim.load("TextureLooks")
+		local STRIDE = GreedyMesher.KEY_STRIDE
+		local grassApp = Blocks.get(B.Grass).appearance
+		local shortApp = Blocks.get(B.ShortGrass).appearance
+		local lichenApp = Blocks.get(B.GlowLichen).appearance
+		local dry = buffer.readu8(Blocks.tintLut, B.DryGrass)
+		local near = newNode(0, 0, 0)
+		renderer:build(
+			near,
+			0,
+			boxesOf({
+				{ 0, 0, 0, 2, 1, 1, grassApp },
+				{ 0, 1, 0, 1, 1, 1, shortApp + dry * STRIDE },
+				{ 1, 1, 0, 1, 1, 1, shortApp },
+				{ 3, 0, 0, 1, 1, 1, lichenApp + STRIDE },
+			})
+		)
+		local far = newNode(1, 0, 0)
+		renderer:build(far, 0, boxesOf({ { 0, 0, 0, 2, 1, 1, grassApp } }))
+		local plain = newNode(2, 0, 0)
+		renderer:build(plain, 0, boxesOf({ { 0, 0, 0, 2, 1, 1, grassApp } }))
+		sim.settle(nil, false)
+		local function parts(node: any): { any }
+			return renderer.states[node].records[0].parts
+		end
+
+		-- Near grass: the grass side variant everywhere, the grass top image on top.
+		local grass = parts(near)[1]
+		t.eq(grass.Material, Enum.Material.Ground)
+		t.eq(grass.MaterialVariant, "IV_grass_side")
+		local images = childrenOf(grass, "Texture")
+		t.eq(#images, 1)
+		t.eq(images[1].Face, Enum.NormalId.Top)
+		t.eq(images[1].StudsPerTileU, 3)
+		t.ok(nearColour(images[1].Color3, Looks.nearLook(grassApp).images[1].color), "tinted like the look")
+
+		-- Sprites: two crossed see-through planes per plant, Decals on both sides, the soil's tint.
+		local sprite = Looks.spriteOf(shortApp)
+		local planes = {}
+		for _, part in parts(near) do
+			if part.Name == "Sprite" then
+				table.insert(planes, part)
+			end
+		end
+		t.eq(#planes, 4, "two planes per plant")
+		for i, plane in planes do
+			t.eq(plane.Transparency, 1)
+			t.eq(plane.CanQuery, false)
+			t.eq(plane.CastShadow, false)
+			t.near(plane.Size.X, BLOCK * math.sqrt(2), 1e-6, "a diagonal wide")
+			t.near(plane.Size.Y, BLOCK, 1e-6, "a cell tall")
+			local decals = childrenOf(plane, "Decal")
+			t.eq(#decals, 2)
+			t.ok(decals[1].Face ~= decals[2].Face, "both sides")
+			local want = if i <= 2 then sprite.tints[dry + 1] else sprite.tints[1]
+			t.ok(nearColour(decals[1].Color3, want), `plane {i}: its soil's tint`)
+		end
+		-- (Along the cell's diagonals, turned with the plant's scatter yaw like its boxes.)
+		local look1, look2 = planes[1].CFrame.LookVector, planes[2].CFrame.LookVector
+		t.near(math.abs(look1:Dot(look2)), 0, 1e-6, "the planes cross at right angles")
+		t.near(look1.Y, 0, 1e-6, "upright")
+		t.ok((planes[1].Position - planes[2].Position).Magnitude < 1e-6, "about the same point")
+
+		-- Glow lichen: the plate goes see-through with its image away from the floor.
+		local plate = parts(near)[#parts(near) - 1]
+		t.eq(plate.Transparency, 1)
+		local decal = childrenOf(plate, "Decal")[1]
+		t.eq(decal.Face, Enum.NormalId.Top)
+		t.eq(parts(near)[#parts(near)].Material, Enum.Material.Neon, "the glow speck as before")
+
+		-- Far: the top's variant, no images; plain: SmoothPlastic in what the block averages to.
+		local farGrass = parts(far)[1]
+		t.eq(farGrass.MaterialVariant, "IV_grass_top")
+		t.eq(farGrass.Material, Enum.Material.Grass)
+		t.eq(#childrenOf(farGrass, "Texture"), 0)
+		t.ok(renderer.overlay:plainLevel(2), "level 2 is plain")
+		local plainGrass = parts(plain)[1]
+		t.eq(plainGrass.Material, Enum.Material.SmoothPlastic)
+		t.ok(plainGrass.MaterialVariant == nil or plainGrass.MaterialVariant == "")
+		t.ok(nearColour(plainGrass.Color, Looks.plainColour(grassApp)))
+
+		-- A pooled sprite plane taken for another soil gets that soil's tint.
+		renderer:build(near, 0, boxesOf({ { 0, 0, 0, 2, 1, 1, grassApp } }))
+		sim.settle(nil, false)
+		renderer:build(near, 0, boxesOf({ { 0, 0, 0, 2, 1, 1, grassApp }, { 0, 1, 0, 1, 1, 1, shortApp } }))
+		sim.settle(nil, false)
+		for _, part in parts(near) do
+			if part.Name == "Sprite" then
+				t.ok(nearColour(childrenOf(part, "Decal")[1].Color3, sprite.tints[1]), "untinted again")
+			end
+		end
+		t.ok(renderer.pool.reused > 0, "planes came from the pool")
+	end)
+
+	t.test("textures: a change of looks rebuilds only what it touches; Far Materials flips plain levels", function()
+		local sim = overlaySim(neutralEnv())
+		sim.world.variants = true
+		local renderer = sim.renderer
+		local Looks = sim.load("TextureLooks")
+		local grassApp = Blocks.get(B.Grass).appearance
+		local oreApp = Blocks.get(B.CoalOre).appearance
+		local rows = { { 0, 0, 0, 16, 1, 16, grassApp }, { 0, 1, 0, 1, 1, 1, oreApp } }
+		local near = newNode(0, 0, 0)
+		renderer:build(near, 0, boxesOf(rows))
+		local merged = {}
+		for i = 0, 1 do
+			local node = newNode(2, i, 0)
+			renderer:build(node, 0, boxesOf(rows))
+			renderer:setQuads(node, buffer.create(16), 1)
+			table.insert(merged, node)
+		end
+		sim.settle(nil, false)
+		sim.show(near)
+		for _, node in merged do
+			sim.show(node)
+		end
+		sim.step(2)
+		local function folder(node: any): any
+			return renderer.states[node].records[0].folder
+		end
+		local nearFolder, plainFolder = folder(near), folder(merged[1])
+		t.ok(renderer.states[merged[1]].records[0].plain, "drawn plain")
+		t.ok(renderer.overlay.isCurrent(merged[1]), "current")
+
+		-- A Tint true average: near parts rebuilt, the plain ones keep theirs.
+		local changes = Looks.applyAverages({ ["grass top"] = { 140, 190, 110 } })
+		t.ok(changes.parts and not changes.plain)
+		t.eq(renderer.pool.textureGen, Looks.partGeneration(), "the pool follows")
+		t.eq(renderer.overlay.isCurrent(near), false, "the near node is stale until rebuilt")
+		sim.settle()
+		t.ok(folder(near) ~= nearFolder, "near rebuilt")
+		t.eq(folder(merged[1]), plainFolder, "plain kept")
+		t.ok(renderer.overlay.isCurrent(near))
+
+		-- The coal ore's own average changes its plain colour: the plain levels are rebuilt.
+		changes = Looks.applyAverages({ ["coal ore"] = { 50, 50, 50 } })
+		t.ok(changes.plain and not changes.parts)
+		nearFolder = folder(near)
+		sim.settle()
+		t.ok(folder(merged[1]) ~= plainFolder, "plain rebuilt")
+		t.eq(folder(near), nearFolder, "near kept")
+		local ore = renderer.states[merged[1]].records[0].parts[2]
+		t.ok(nearColour(ore.Color, Color3.fromRGB(50, 50, 50)), "the ore's measured average")
+
+		-- Far Materials: merged levels take the far look (not plain); near sections are untouched.
+		nearFolder, plainFolder = folder(near), folder(merged[1])
+		local styled = renderer:restyle({ shadows = true, farShadows = false, textures = true, farMaterials = true })
+		t.ok(styled.farMaterials and not styled.textures)
+		t.eq(renderer.overlay:plainLevel(2), false, "merged levels are not plain with Far Materials")
+		sim.settle()
+		local record = renderer.states[merged[1]].records[0]
+		t.eq(record.plain, false)
+		t.ok(record.folder ~= plainFolder, "rebuilt in the far look")
+		t.eq(record.parts[1].MaterialVariant, "IV_grass_top")
+		t.eq(folder(near), nearFolder, "near kept")
+		t.ok(renderer.overlay.isCurrent(merged[1]))
+		local _, look = Looks.lookOf(grassApp, 2)
+		t.ok(look ~= nil)
+		t.ok(Looks.lookInfo((Looks.lookOf(grassApp, 2))).textured, "the meshes' looks follow")
+		-- And back.
+		renderer:restyle({ shadows = true, farShadows = false, textures = true, farMaterials = false })
+		sim.settle()
+		t.ok(renderer.states[merged[1]].records[0].plain, "plain again")
+		t.eq(sim.gaps, 0, sim.gapDetail or "gaps")
+		t.eq(sim.handedEarly, 0, "quarantine")
+	end)
+
+	t.test("textures: Far Materials dropped by the overlay (its probe failed) makes merged levels plain", function()
+		local sim = overlaySim(neutralEnv())
+		sim.world.variants = true
+		local renderer = sim.renderer
+		local rows = { { 0, 0, 0, 16, 1, 16, Blocks.get(B.Grass).appearance } }
+		local merged = newNode(2, 0, 0)
+		renderer:build(merged, 0, boxesOf(rows))
+		renderer:setQuads(merged, buffer.create(16), 1)
+		sim.settle(nil, false)
+		sim.show(merged)
+		sim.step(2)
+		renderer:restyle({ shadows = true, farShadows = false, textures = true, farMaterials = true })
+		sim.settle()
+		t.eq(renderer.states[merged].records[0].plain, false, "drawn in the far look")
+		-- The startup probe could not build a mesh in a look.
+		renderer.overlay:dropLooks("a mesh in a material failed")
+		t.ok(renderer.overlay:plainLevel(2), "merged levels plain whatever the setting")
+		t.eq(renderer.overlay.isCurrent(merged), false, "stale until rebuilt")
+		sim.settle()
+		t.eq(renderer.states[merged].records[0].plain, true, "rebuilt plain")
+		t.ok(renderer.overlay.isCurrent(merged), "so the region can be merged")
+		t.eq(sim.gaps, 0, sim.gapDetail or "gaps")
+	end)
+
+	t.test("textures: item cubes take one image per face; sprite items; lichen; new looks rebuild", function()
+		local root, sharedRequire = neutralEnv({ "log top", "fern" })
+		local world = newWorld(root)
+		world.variants = true
+		local load = rendering(world, root, sharedRequire)
+		local ItemModels = load("ItemModels")
+		local Looks = load("TextureLooks")
+		local Items = require(shared.Items)
+		local function item(name: string): number
+			return Items.ofBlock(B[name]) :: number
+		end
+		local function partNamed(model: any, name: string): any
+			for _, child in model:GetChildren() do
+				if child.Name == name then
+					return child
+				end
+			end
+			return nil
+		end
+		-- Grass: white SmoothPlastic under six images, one tile across each face.
+		local grass = partNamed(ItemModels.build(item("Grass"), 3), "Block")
+		t.eq(grass.Material, Enum.Material.SmoothPlastic)
+		t.ok(nearColour(grass.Color, Color3.new(1, 1, 1)))
+		t.eq(grass.MaterialVariant, nil, "no variant: it would tile every 3 studs")
+		local images = childrenOf(grass, "Texture")
+		t.eq(#images, 6)
+		local small = childrenOf(partNamed(ItemModels.build(item("Grass"), 1.2), "Block"), "Texture")
+		t.eq(small[1].StudsPerTileU, 1.2, "one tile per face at any size")
+		t.eq(small[1].StudsPerTileV, 1.2)
+		-- A log: its blank ends keep the wood in its colour, the bark on the sides.
+		local log = partNamed(ItemModels.build(item("OakLog"), 3), "Block")
+		t.eq(#childrenOf(log, "Texture"), 4)
+		t.eq(log.Material, Enum.Material[Blocks.get(B.OakLog).material])
+		t.ok(nearColour(log.Color, Color3.fromRGB(table.unpack(Blocks.get(B.OakLog).color))))
+		-- Plants with a sprite: one plane, both sides; a tall plant shows its top half's.
+		local short = ItemModels.build(item("ShortGrass"), 3)
+		local plane = partNamed(short, "Sprite")
+		-- (The fake Clone keeps references as they were: compare names.)
+		t.ok(plane ~= nil and short.PrimaryPart.Name == "Sprite")
+		t.eq(plane.Transparency, 1)
+		t.eq(#childrenOf(plane, "Decal"), 2)
+		local tall = partNamed(ItemModels.build(item("TallGrass"), 3), "Sprite")
+		t.eq(childrenOf(tall, "Decal")[1].Name, "IV_tall_grass_top")
+		t.ok(partNamed(ItemModels.build(item("Fern"), 3), "Box1") ~= nil, "blank sprite: its boxes")
+		-- Glow lichen's plate shows only its image.
+		local lichen = ItemModels.build(item("GlowLichen"), 3)
+		local plate = partNamed(lichen, "Box1")
+		t.eq(plate.Transparency, 1)
+		t.eq(#childrenOf(plate, "Decal"), 1)
+		-- Far Materials alone changes no item look: nothing is announced, models are kept.
+		local announced = 0
+		ItemModels.changed:Connect(function()
+			announced += 1
+		end)
+		local before = ItemModels.build(item("Grass"), 3)
+		Looks.setStyle(true, true)
+		t.eq(announced, 0, "Far Materials: item looks unchanged")
+		local clones = world.count.clones
+		ItemModels.build(item("Grass"), 3)
+		t.eq(world.count.clones, clones + 1, "the cached prototype is kept")
+		t.eq(#childrenOf(partNamed(before, "Block"), "Texture"), 6)
+		-- Textures off: models built after it are plain; the change is announced.
+		local generation = ItemModels.generation()
+		Looks.setStyle(false, true)
+		t.eq(announced, 1)
+		t.eq(ItemModels.generation(), generation + 1, "keepers can tell their models are old")
+		local plain = partNamed(ItemModels.build(item("Grass"), 3), "Block")
+		t.eq(#childrenOf(plain, "Texture"), 0)
+		t.eq(plain.Material, Enum.Material[Blocks.get(B.Grass).material])
+		t.ok(partNamed(ItemModels.build(item("ShortGrass"), 3), "Box1") ~= nil, "plants as boxes")
+	end)
+
+	t.test("textures: a texture too dark for its block: images on every face near, the plain colour far", function()
+		local sim = overlaySim(neutralEnv({ "log top" }))
+		sim.world.variants = true
+		local renderer = sim.renderer
+		local Looks = sim.load("TextureLooks")
+		-- A bark-coloured log texture: birch is far lighter than it.
+		Looks.applyAverages({ log = { 109, 85, 51 } })
+		local birchApp = Blocks.get(B.BirchLog).appearance
+		local near, far = newNode(0, 0, 0), newNode(1, 0, 0)
+		for _, node in { near, far } do
+			renderer:build(node, 0, boxesOf({ { 0, 0, 0, 1, 1, 1, birchApp } }))
+		end
+		sim.settle(nil, false)
+		local look = Looks.nearLook(birchApp)
+		local part = renderer.states[near].records[0].parts[1]
+		t.eq(part.MaterialVariant, "IV_log")
+		local images = childrenOf(part, "Texture")
+		t.eq(#images, 6, "an image on every face")
+		local faces = {}
+		for _, image in images do
+			t.eq(image.Name, "IV_log")
+			t.ok(nearColour(image.Color3, look.images[1].color), "the unclamped tint")
+			faces[image.Face] = true
+		end
+		t.ok(look.images[1].color.R > 1, "brighter than a part can be")
+		local count = 0
+		for _ in faces do
+			count += 1
+		end
+		t.eq(count, 6, "six different faces")
+		local farPart = renderer.states[far].records[0].parts[1]
+		t.eq(farPart.Material, Enum.Material.SmoothPlastic)
+		t.ok(farPart.MaterialVariant == nil or farPart.MaterialVariant == "", "no variant far away")
+		t.ok(nearColour(farPart.Color, Color3.fromRGB(table.unpack(Blocks.get(B.BirchLog).color))), "birch's colour")
+		t.eq(#childrenOf(farPart, "Texture"), 0)
+	end)
+
+	t.test("textures: a change of looks destroys the old look's templates", function()
+		local sim = overlaySim(neutralEnv())
+		sim.world.variants = true
+		local renderer = sim.renderer
+		local pool = renderer.pool
+		local Looks = sim.load("TextureLooks")
+		local grassApp = Blocks.get(B.Grass).appearance
+		local glowApp = Blocks.get(B.GlowBlock).appearance
+		local near = newNode(0, 0, 0)
+		renderer:build(near, 0, boxesOf({ { 0, 0, 0, 2, 1, 1, grassApp }, { 0, 1, 0, 1, 1, 1, glowApp } }))
+		sim.settle(nil, false)
+		sim.show(near)
+		sim.step(2)
+		local old: { [number]: any } = {}
+		for key, template in pool.templates do
+			old[key] = template
+		end
+		t.ok(next(old) ~= nil, "templates made")
+		local lit = nil
+		for _, part in renderer.states[near].records[0].parts do
+			if pool:hasLight(part) then
+				lit = part
+			end
+		end
+		t.ok(lit ~= nil, "the glow block's light")
+		-- A new part generation: the old templates go at once; shown parts keep their rules.
+		Looks.applyAverages({ ["grass top"] = { 140, 190, 110 } })
+		t.eq(pool.textureGen, Looks.partGeneration())
+		for key, template in old do
+			t.ok(rawget(template, "__destroyed"), "old template destroyed")
+			t.eq(pool.templates[key], nil)
+		end
+		t.ok(pool:hasLight(lit), "a shown part of the old look keeps its light rule")
+		sim.settle()
+		local span = (#Blocks.appearances + 1) * (sim.PartPool.SPRITE_BOX + 1) * 8
+		for key in pool.templates do
+			t.eq(key // span, pool.textureGen, "only templates of the new look")
+		end
+		t.eq(sim.gaps, 0, sim.gapDetail or "gaps")
+		t.eq(sim.doubled, 0, "lights")
+	end)
+
+	-- Loads Ui/ItemIcon into `world` (Style stubbed: no TextService under Lune).
+	local function itemIconIn(world: any, load: (string) -> any, sharedRequire: (any) -> any): any
+		local MenuLayout = require(client.Ui.MenuLayout)
+		local Style = {
+			ITEM = 16,
+			COUNT_SIZE = 8,
+			Colour = { Text = Color3.new(1, 1, 1) },
+			shadowText = function(parent: any): (any, any)
+				local label, shadow = world.new("TextLabel"), world.new("TextLabel")
+				label.Parent = parent
+				shadow.Parent = parent
+				return label, shadow
+			end,
+			shadowOf = function(c: any): any
+				return c
+			end,
+		}
+		local ui: any = { MenuLayout = { __ui = "MenuLayout" }, Style = { __ui = "Style" } }
+		ui.Parent = { Rendering = { ItemModels = { __ui = "ItemModels" } } }
+		local function req(node: any): any
+			local name = if type(node) == "table" then rawget(node, "__ui") else nil
+			if name == "ItemModels" then
+				return load("ItemModels")
+			elseif name == "Style" then
+				return Style
+			elseif name == "MenuLayout" then
+				return MenuLayout
+			end
+			return sharedRequire(node)
+		end
+		local path = "src/client/Ui/ItemIcon.luau"
+		local chunk = luau.load(withHeader(fs.readFile(path)), { debugName = path })
+		return chunk(
+			{ Parent = ui },
+			req,
+			world.game,
+			world.workspace,
+			world.Instance,
+			Vector3,
+			roblox.Vector2,
+			CFrame,
+			Color3,
+			roblox.UDim2,
+			Enum,
+			{},
+			world.os,
+			world.task,
+			world.warn
+		)
+	end
+
+	t.test("textures: item icons build their models again a few per frame after a change of item looks", function()
+		local root, sharedRequire = neutralEnv()
+		local world = newWorld(root)
+		world.variants = true
+		-- RunService.Heartbeat: the connected callbacks, called by hand one frame at a time.
+		local beats: { () -> () } = {}
+		local game = world.game
+		world.game = {
+			GetService = function(_, name: string): any
+				if name == "RunService" then
+					return {
+						Heartbeat = {
+							Connect = function(_, fn: () -> ())
+								table.insert(beats, fn)
+								return {
+									Disconnect = function()
+										table.remove(beats, table.find(beats, fn) :: number)
+									end,
+								}
+							end,
+						},
+					}
+				end
+				return game:GetService(name)
+			end,
+		}
+		local load = rendering(world, root, sharedRequire)
+		local Looks = load("TextureLooks")
+		local ItemModels = load("ItemModels")
+		local ItemIcon = itemIconIn(world, load, sharedRequire)
+		local Items = require(shared.Items)
+		local builds = 0
+		local build = ItemModels.build
+		ItemModels.build = function(...)
+			builds += 1
+			return build(...)
+		end
+		local screen = world.new("Frame")
+		local names = { "Grass", "Dirt", "Stone", "OakLog", "Planks", "Sand", "Cobblestone", "Snow", "Gravel" }
+		local icons = {}
+		for i = 1, 60 do
+			local icon = ItemIcon.new(screen, 0, 0)
+			icon:set(Items.ofBlock(B[names[(i - 1) % #names + 1]]), 1)
+			table.insert(icons, icon)
+		end
+		local function textures(icon: any): number
+			return #childrenOf(icon.model:FindFirstChild("Block"), "Texture")
+		end
+		t.eq(textures(icons[1]), 6, "a textured grass icon")
+		-- Far Materials alone changes no item: nothing to do.
+		Looks.setStyle(true, true)
+		t.eq(#beats, 0, "Far Materials: no rebuild")
+		-- Textures off: nothing is built in the change itself, a few icons per frame after it.
+		builds = 0
+		local olds = {}
+		for i, icon in icons do
+			olds[i] = icon.model
+		end
+		Looks.setStyle(false, true)
+		t.eq(builds, 0, "nothing built at once")
+		t.eq(#beats, 1, "rebuilt over the next frames")
+		-- An icon given another item meanwhile: its old look's model is destroyed, never pooled.
+		icons[1]:set(Items.ofBlock(B.Planks), 1)
+		t.ok(rawget(olds[1], "__destroyed"), "the old look's model is destroyed")
+		local frames, most = 0, 0
+		while #beats > 0 and frames < 1000 do
+			local before = builds
+			beats[1]()
+			frames += 1
+			most = math.max(most, builds - before)
+		end
+		t.eq(#beats, 0, "stops when done")
+		t.ok(frames > 1 and most < #icons - 1, `{most} at most per frame, over {frames} frames`)
+		for i, icon in icons do
+			t.ok(icon.model ~= olds[i] and rawget(olds[i], "__destroyed"), `icon {i} rebuilt`)
+			t.eq(textures(icon), 0, `icon {i}: plain`)
+		end
+	end)
+
+	--[[
+		Integration: generated terrain with a player's edits, meshed as the workers mesh it, drawn
+		through ChunkRenderer and PartPool with the pack in a place as Rojo builds it from the
+		generated files (src/textures): MaterialService knows only the MaterialVariants of
+		Materials.model.json, each on its BaseMaterial, and ReplicatedStorage.IceVoxelTextures
+		holds the Texture prototypes of Images.model.json.
+	]]
+
+	-- Puts the generated files in `world`. Returns the variants (name -> BaseMaterial) and the
+	-- prototypes' properties (name -> properties).
+	local function generatedPlace(world: any): ({ [string]: string }, { [string]: { [string]: any } })
+		local variants: { [string]: string } = {}
+		for _, item in serde.decode("json", fs.readFile("src/textures/Materials.model.json")).children do
+			variants[item.name] = item.properties.BaseMaterial
+		end
+		world.variants = variants
+		local folder = world.new("Folder")
+		local protos: { [string]: { [string]: any } } = {}
+		for _, item in serde.decode("json", fs.readFile("src/textures/Images.model.json")).children do
+			local proto = world.new(item.className)
+			proto.Name = item.name
+			for key, value in item.properties do
+				proto[key] = value
+			end
+			proto.Parent = folder
+			protos[item.name] = item.properties
+		end
+		world.prototypes = folder
+		return variants, protos
+	end
+
+	-- Shared modules loaded afresh (their own Loader environment) after `edit` changed their pack.
+	local function packEnv(edit: (pack: any) -> ()): (any, (any) -> any)
+		local env = Loader.new()
+		local root = env.mount("src/shared", "ReplicatedStorage", "IceVoxel")
+		edit(env.require(root.TexturePack))
+		return root, env.require
+	end
+
+	--[[
+		The full detail chunk at the spawn with a player's edits: a pit dug through the grass (its
+		walls show the dirt) and blocks set on the ground, one per column: `names`.
+	]]
+	local function editedChunk(names: { string }): any
+		local chunk = terrain(spawnX // SIZE, spawnZ // SIZE)
+		local data, height = chunk.data, chunk.height
+		-- The grass under column (x, z) (the top block that is no plant), or nil.
+		local function grass(x: number, z: number): number?
+			for y = height - 1, 0, -1 do
+				local id = ChunkLayout.get(data, x, y, z)
+				if id ~= Blocks.AIR and Blocks.get(id).plant == nil then
+					return if id == B.Grass then y else nil
+				end
+			end
+			return nil
+		end
+		local used: { [number]: boolean } = {}
+		local dug = false
+		for z = 2, SIZE - 4 do
+			for x = 2, SIZE - 4 do
+				local y = grass(x, z)
+				if not dug and y and grass(x + 1, z) == y and grass(x, z + 1) == y and grass(x + 1, z + 1) == y then
+					dug = true
+					for dz = -1, 2 do
+						for dx = -1, 2 do
+							used[(x + dx) * SIZE + z + dz] = true
+						end
+					end
+					for dz = 0, 1 do
+						for dx = 0, 1 do
+							for dy = -2, 2 do
+								ChunkLayout.set(data, x + dx, y + dy, z + dz, Blocks.AIR)
+							end
+						end
+					end
+				end
+			end
+		end
+		chunk.dug = dug
+		local placed = 0
+		for z = 1, SIZE - 2, 2 do
+			for x = 1, SIZE - 2, 2 do
+				local y = grass(x, z)
+				if placed < #names and y and y + 2 < height and not used[x * SIZE + z] then
+					placed += 1
+					ChunkLayout.set(data, x, y + 1, z, B[names[placed]])
+					ChunkLayout.set(data, x, y + 2, z, Blocks.AIR)
+				end
+			end
+		end
+		chunk.placed = placed
+		return chunk
+	end
+
+	--[[
+		Draws a chunk in `sim`'s renderer. Returns its parts per appearance: cubes (box 0) and
+		sprite planes.
+	]]
+	local function drawChunk(sim: Sim, chunk: any): ({ [number]: { any } }, { [number]: { any } })
+		local renderer = sim.renderer
+		local node = newNode(0, chunk.cx, chunk.cz)
+		for s = 0, sectionsOf(chunk) - 1 do
+			renderer:build(node, s, meshSection(chunk, s))
+		end
+		sim.settle(nil, false)
+		local spriteBox = sim.PartPool.SPRITE_BOX
+		local boxKeys = spriteBox + 1
+		local span = (#Blocks.appearances + 1) * boxKeys * 8
+		local cubes: { [number]: { any } }, sprites: { [number]: { any } } = {}, {}
+		for _, record in renderer.states[node].records do
+			for _, part in record.parts do
+				-- (PartPool's template keys: (appearance * box keys + box) * 8 + flags, per look.)
+				local slot = (renderer.pool.keyOf[part] % span) // 8
+				local appearance, box = slot // boxKeys, slot % boxKeys
+				local into = if box == 0 then cubes elseif box == spriteBox then sprites else nil
+				if into then
+					into[appearance] = into[appearance] or {}
+					table.insert(into[appearance], part)
+				end
+			end
+		end
+		return cubes, sprites
+	end
+
+	local LOGS = { "OakLog", "BirchLog", "SpruceLog", "AcaciaLog", "JungleLog" }
+
+	t.test("textures: generated terrain drawn with the pack and the generated Rojo files", function()
+		local Pack = require(shared.TexturePack)
+		local blanks = { "Granite", "OsmiumOre" }
+		local names = table.clone(LOGS)
+		for _, name in { "DryGrass", "Granite", "OsmiumOre" } do
+			table.insert(names, name)
+		end
+		local chunk = editedChunk(names)
+		t.ok(chunk.dug, "a pit dug")
+		t.eq(chunk.placed, #names, "every block set on the ground")
+		local function app(name: string): number
+			return Blocks.get(B[name]).appearance
+		end
+		local function colour(name: string): { number }
+			return Blocks.get(B[name]).color
+		end
+		-- The tint the pack asks for: none for Tint false, the named block's colour, else the drawn
+		-- block's; divided by the average when known (TextureLooks.tintOf: the pure maths).
+		local function tint(Looks: any, texture: string, drawn: string, part: boolean): Color3
+			local mode = Pack.Textures[texture].Tint
+			local target = if mode == false then nil elseif type(mode) == "string" then colour(mode) else colour(drawn)
+			local raw, clamped = Looks.tintOf(target, Pack.Textures[texture].Average)
+			local c = if part then clamped else raw
+			return Color3.new(c[1], c[2], c[3])
+		end
+
+		-- 1. The pack as it is.
+		local sim = newSim()
+		local variants, protos = generatedPlace(sim.world)
+		local Looks = sim.load("TextureLooks")
+		local cubes, sprites = drawChunk(sim, chunk)
+
+		-- Every textured cube: its look's variant, which the generated file has on the part's
+		-- material, and its images; every image a clone of its generated prototype (normal map
+		-- included). (These checks follow the pack: filled blanks or pasted averages change looks.)
+		local textured = 0
+		for appearance, parts in cubes do
+			local look = Looks.nearLook(appearance)
+			for _, part in parts do
+				if look then
+					textured += 1
+					t.eq(part.MaterialVariant or "", look.variant)
+					-- (A look without a variant: images over the block's own material.)
+					if look.variant ~= "" then
+						t.eq(variants[look.variant], part.Material.Name, `{look.variant} is on the part's material`)
+					end
+					t.ok(nearColour(part.Color, look.color))
+					t.eq(#childrenOf(part, "Texture"), #look.images, "its look's images")
+				end
+				for _, image in childrenOf(part, "Texture") do
+					local proto = protos[image.Name]
+					t.ok(proto ~= nil, `{image.Name} has a prototype`)
+					t.eq(image.TextureContent, proto.TextureContent, "cloned from its prototype")
+					t.eq(image.NormalMapContent, proto.NormalMapContent, "normal map kept")
+				end
+			end
+		end
+		t.ok(textured > 50, `textured parts: {textured}`)
+
+		-- Grass: the grass side's variant in its own colours, the top an image tinted green; dry
+		-- grass the same top in its own colour, over sides of its own (while blank, its plain look).
+		for _, name in { "Grass", "DryGrass" } do
+			local parts = cubes[app(name)]
+			t.ok(parts and #parts > 0, `{name} drawn`)
+			local side = Blocks.get(B[name]).textures.north
+			for _, part in parts do
+				if Blocks.textureFilled(side) then
+					t.eq(part.Material, Enum.Material[Pack.Textures[side].Material])
+					t.eq(part.MaterialVariant, Blocks.variantName(side))
+					t.ok(nearColour(part.Color, tint(Looks, side, name, true)), "the side's own colours")
+				else
+					local def = Blocks.get(B[name])
+					t.eq(part.Material, Enum.Material[def.material], `{name}: its own material`)
+					t.ok(part.MaterialVariant == nil or part.MaterialVariant == "", `{name}: no variant`)
+					t.ok(nearColour(part.Color, Color3.fromRGB(def.color[1], def.color[2], def.color[3])))
+				end
+				local images = childrenOf(part, "Texture")
+				t.eq(#images, 1, "the top image")
+				local top = images[1]
+				t.eq(top.Face, Enum.NormalId.Top)
+				t.eq(top.Name, "IV_grass_top")
+				t.eq(top.StudsPerTileU, Pack.StudsPerTile)
+				t.ok(nearColour(top.Color3, tint(Looks, "grass top", name, false)), `{name}'s colour`)
+				if name == "Grass" then
+					-- (What the top shows: its image's average, white when unknown, times the tint.)
+					local c = top.Color3
+					local shown =
+						Looks.shownOf(Pack.Textures["grass top"].Average or { 255, 255, 255 }, { c.R, c.G, c.B })
+					t.ok(shown[2] > shown[1] and shown[2] > shown[3], "green")
+				end
+			end
+		end
+		-- Dirt (the pit's walls): the dirt variant in the dirt colour.
+		local dirt = cubes[app("Dirt")]
+		t.ok(dirt and #dirt > 0, "dirt drawn")
+		for _, part in dirt do
+			t.eq(part.Material, Enum.Material[Pack.Textures.dirt.Material])
+			t.eq(part.MaterialVariant, "IV_dirt")
+			t.ok(nearColour(part.Color, tint(Looks, "dirt", "Dirt", true)))
+		end
+		-- Logs: one bark texture, each wood in its own voxel colour.
+		local seen: { [string]: boolean } = {}
+		for _, name in LOGS do
+			local parts = cubes[app(name)]
+			t.ok(parts and #parts >= 1, `{name} drawn`)
+			for _, part in parts do
+				t.eq(part.Material, Enum.Material[Pack.Textures.log.Material])
+				t.eq(part.MaterialVariant, "IV_log")
+				t.ok(nearColour(part.Color, tint(Looks, "log", name, true)), `{name} in its colour`)
+				-- (A wood too light for the bark's part tint shows it as images, unclamped.)
+				local shown = part.Color
+				for _, image in childrenOf(part, "Texture") do
+					if image.Face == Enum.NormalId.Front then
+						shown = image.Color3
+					end
+				end
+				seen[tostring(shown)] = true
+			end
+		end
+		local woods = 0
+		for _ in seen do
+			woods += 1
+		end
+		t.eq(woods, #LOGS, "every wood its own colour")
+		-- Plants: a filled sprite gives crossed planes carrying the generated image.
+		local planes = sprites[app("ShortGrass")]
+		t.ok(planes and #planes >= 2, "short grass as sprites")
+		for _, plane in planes do
+			local decals = childrenOf(plane, "Decal")
+			t.eq(#decals, 2)
+			t.eq(decals[1].Name, "IV_short_grass")
+			t.eq(decals[1].TextureContent, protos.IV_short_grass.TextureContent)
+		end
+		-- Every look of every appearance (near, far, sprites, lichen, items, far meshes) names a
+		-- MaterialVariant on its material, or a prototype, that the generated files have.
+		local function hasVariant(look: any)
+			if look and look.variant ~= "" then
+				t.eq(variants[look.variant], look.material.Name, `{look.variant} on {look.material.Name}`)
+			end
+		end
+		local function hasImage(texture: string)
+			t.ok(protos[Blocks.variantName(texture)] ~= nil, `a prototype for "{texture}"`)
+		end
+		local function allLooks()
+			for appearance = 1, #Blocks.appearances do
+				local near = Looks.nearLook(appearance)
+				hasVariant(near)
+				for _, image in if near then near.images else {} do
+					hasImage(image.texture)
+				end
+				hasVariant(Looks.farLook(appearance))
+				local sprite, front = Looks.spriteOf(appearance), Looks.frontOf(appearance)
+				if sprite then
+					hasImage(sprite.texture)
+				end
+				if front then
+					hasImage(front.texture)
+				end
+				for _, image in Looks.itemFaces(appearance) or {} do
+					hasImage(image.texture)
+				end
+				hasVariant(Looks.lookInfo((Looks.lookOf(appearance, 2))))
+			end
+		end
+		allLooks()
+		Looks.setStyle(true, true)
+		allLooks()
+		Looks.setStyle(true, false)
+		-- (Pasted averages may name textures darker than their blocks: a summary, not a fault.)
+		local faults = {}
+		for _, warning in sim.world.warnings do
+			if not string.find(warning, "textures darker than the blocks they tint", 1, true) then
+				table.insert(faults, warning)
+			end
+		end
+		t.eq(#faults, 0, table.concat(faults, "; "))
+
+		-- 2. Blank textures (made blank here, whatever the pack holds by then) keep today's look.
+		-- (No averages either: a pasted one could turn a log's faces into images.)
+		local function blanked(showMissing: boolean): ({ [number]: { any } }, { [number]: { any } })
+			local root, sharedRequire = packEnv(function(pack: any)
+				for _, texture in { "granite", "osmium ore", "log top", "fern" } do
+					pack.Textures[texture].Color = ""
+				end
+				for _, texture in pack.Textures do
+					texture.Average = nil
+				end
+				pack.ShowMissing = showMissing
+			end)
+			local other = newSim(root, sharedRequire)
+			generatedPlace(other.world)
+			return drawChunk(other, chunk)
+		end
+		local plainCubes, plainSprites = blanked(false)
+		for _, name in blanks do
+			local def = Blocks.get(B[name])
+			for _, part in plainCubes[app(name)] do
+				t.eq(part.Material, Enum.Material[def.material], `{name}: its own material`)
+				t.ok(part.MaterialVariant == nil or part.MaterialVariant == "", `{name}: no variant`)
+				t.ok(nearColour(part.Color, Color3.fromRGB(def.color[1], def.color[2], def.color[3])))
+				t.eq(#childrenOf(part, "Texture"), 0)
+			end
+		end
+		t.eq(#childrenOf(plainCubes[app("OakLog")][1], "Texture"), 0, "blank log ends: nothing on top")
+		t.eq(plainSprites[app("Fern")], nil, "a blank sprite: the fern's boxes")
+
+		-- 3. ShowMissing: every blank face draws the missing texture.
+		local missingCubes, missingSprites = blanked(true)
+		local missing = Pack.Textures[Pack.Missing]
+		for _, name in blanks do
+			for _, part in missingCubes[app(name)] do
+				t.eq(part.MaterialVariant, "IV_missing_texture")
+				t.eq(part.Material, Enum.Material[missing.Material])
+				t.ok(nearColour(part.Color, Color3.new(1, 1, 1)), "the missing texture's own colours")
+			end
+		end
+		local log = missingCubes[app("OakLog")][1]
+		t.eq(log.MaterialVariant, "IV_log", "filled sides keep their texture")
+		local ends = childrenOf(log, "Texture")
+		t.eq(#ends, 1)
+		t.eq(ends[1].Name, "IV_missing_texture", "the blank top")
+		t.eq(missingCubes[app("Grass")][1].MaterialVariant, "IV_grass_side")
+		local ferns = missingSprites[app("Fern")]
+		t.ok(ferns and #ferns >= 2, "ferns as missing sprites")
+		t.eq(childrenOf(ferns[1], "Decal")[1].Name, "IV_missing_texture")
 	end)
 end

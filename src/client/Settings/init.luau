@@ -87,15 +87,19 @@ Settings.changed = changedEvent.Event
 Settings.values = state.values
 ViewSettings.bind(state.values)
 
--- Does any block use a texture (MaterialVariant or face images)? Else the Textures button is hidden.
+-- Does any block draw a texture of the pack (TexturePack)? Else the Textures button is hidden.
 local texturesUsed = false
 for _, appearance in Blocks.appearances do
-	local look = appearance :: any
-	if look.texture ~= nil or look.faces ~= nil then
+	if appearance.textured then
 		texturesUsed = true
 		break
 	end
 end
+
+-- Can far meshes run on this device (as MeshOverlay decides)? Else Far Materials changes nothing:
+-- far chunks are parts in their full look already.
+local farMeshes = Config.Render.FarMeshes
+local farMeshesRun = farMeshes.Enabled and (farMeshes.Mobile or not mobile)
 
 --[[ Applying ]]
 
@@ -276,7 +280,10 @@ function Settings.isMobile(): boolean
 	return state.mobile
 end
 
--- Is setting `key` offered on this device (touch buttons on touch screens, textures when used)?
+--[[
+	Is setting `key` offered on this device (touch buttons on touch screens, textures when some
+	block has one, far materials where far meshes can run)?
+]]
 function Settings.shown(key: string): boolean
 	local entry = PlayerSettings.entry(key)
 	if entry.touchOnly and not UserInputService.TouchEnabled then
@@ -284,6 +291,8 @@ function Settings.shown(key: string): boolean
 	end
 	if key == "textures" then
 		return texturesUsed
+	elseif key == "farMaterials" then
+		return farMeshesRun
 	end
 	return true
 end

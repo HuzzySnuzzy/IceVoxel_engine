@@ -97,6 +97,14 @@ return function(t, shared, require)
 			t.ok(keys[key], `setting {key}`)
 		end
 		t.ok(not pcall(PlayerSettings.entry, "nope"), "unknown keys error")
+		-- Far Materials: id 34 (the next free one), a Video toggle restyled like Textures.
+		local far = PlayerSettings.entry("farMaterials")
+		t.eq(far.id, 34)
+		t.eq(far.kind, "toggle")
+		t.eq(far.page, "video")
+		t.eq(far.effect, "textures")
+		t.eq(far.default, if Config.Render.FarMaterials then 1 else 0)
+		t.eq(far.preset, false)
 	end)
 
 	t.test("player settings: clamp snaps to the step, clamps to the range and the phone limit", function()

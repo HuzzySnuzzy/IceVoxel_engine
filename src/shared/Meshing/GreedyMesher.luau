@@ -54,6 +54,14 @@
 	    them either way. A `tinted` plant (Blocks.tintedLut: grass and ferns) takes the
 	    foliage colour of the soil it grows on: the soil's Blocks.tintLut entry is packed into its
 	    key (the block below; for the top of a tall plant, the block below its lower half).
+	  * Odd boxes (`align`: Config.Textures.OddBoxes, full detail only): the boxes of an appearance
+	    in Blocks.alignLut (opaque cubes whose parts take a texture's MaterialVariant) are an odd
+	    number of blocks along all three axes, so a variant that tiles from the centre of each face
+	    still shows one whole tile per block face. After each axis grows (X, then Z, then Y), an
+	    even run first tries to start one cell earlier, when that whole slab is wildcards (hidden
+	    rock, which any opaque box may cover), else it stops one short. A box grows only over its
+	    own cells and wildcards, so no other appearance's boxes change. Far LOD nodes never ask for
+	    it: their cells are 2^level blocks, so every size is even whatever the count.
 	  * `border` (optional) describes what surrounds the meshed range (see `Border`):
 	      - seams: where a coarser LOD node is next to this one, it is drawn lower than the exact
 	        terrain in the padding says. Padding above what the neighbour really draws is opened,
@@ -96,6 +104,7 @@ local singleLut = Blocks.singleLut
 local tintLut = Blocks.tintLut
 local tintedLut = Blocks.tintedLut
 local foliageLut = Blocks.foliageLut
+local alignLut = Blocks.alignLut
 local cullVisibleCaves = Blocks.cullLut
 local cullHiddenCaves = Blocks.cullLutHiddenCaves
 
@@ -287,6 +296,21 @@ local function ensureScratch(cells: number)
 	end
 end
 
+-- True when every cell of the local range (inclusive) is a wildcard (hidden rock or cave cell).
+local function allWild(ly0: number, ly1: number, z0: number, z1: number, x0: number, x1: number): boolean
+	for yy = ly0, ly1 do
+		for zz = z0, z1 do
+			local row = (yy * SIZE + zz) * SIZE
+			for xx = x0, x1 do
+				if readu8(wild, row + xx) ~= 1 then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
 local function pushBox(count: number, x: number, y: number, z: number, sx: number, sy: number, sz: number, key: number)
 	local offset = count * 14
 	if offset + 14 > buffer.len(boxes) then
@@ -437,9 +461,10 @@ GreedyMesher.applyBorder = applyBorder
 	Meshes cells y0 .. y1-1 of a padded chunk column `data` with `height` cells per column.
 	`hideFoliage`: leave plants out (Config.Render.Foliage off, or a chunk beyond
 	LodTree.drawsFoliage). `noLights`: mark no sparse light (far LOD nodes, whose parts carry
-	none). Returns a new buffer of boxes, the box count and the number of plant cells in the range,
-	drawn or not (the streamer remeshes those sections when its chunk starts or stops drawing
-	plants).
+	none). `align`: odd boxes for Blocks.alignLut appearances (see the header; full detail
+	sections only, when Config.Textures.OddBoxes is on). Returns a new buffer of boxes, the box
+	count and the number of plant cells in the range, drawn or not (the streamer remeshes those
+	sections when its chunk starts or stops drawing plants).
 ]]
 function GreedyMesher.mesh(
 	data: buffer,
@@ -449,7 +474,8 @@ function GreedyMesher.mesh(
 	hideCaves: boolean,
 	border: Border?,
 	hideFoliage: boolean?,
-	noLights: boolean?
+	noLights: boolean?,
+	align: boolean?
 ): (buffer, number, number)
 	if border and (border.open or border.hidden ~= 0) then
 		data = applyBorder(data, height, y0, y1, hideCaves, border)
@@ -459,6 +485,7 @@ function GreedyMesher.mesh(
 	local drawnLut = if hideCaves then appearanceHiddenCaves else appearanceLut
 	local noFoliage = hideFoliage == true
 	local lights = noLights ~= true
+	local aligned = align == true
 	local sh = y1 - y0
 	local cells = SIZE * SIZE * sh
 	ensureScratch(cells)
@@ -602,7 +629,7 @@ function GreedyMesher.mesh(
 		end
 	end
 
-	-- Pass 2: grow boxes along X, then Z, then Y.
+	-- Pass 2: grow boxes along X, then Z, then Y (odd sizes with `align`, see the header).
 	local count = 0
 	for ly = 0, sh - 1 do
 		for z = 0, SIZE - 1 do
@@ -617,6 +644,10 @@ function GreedyMesher.mesh(
 					local maxX = if single then x + 1 else SIZE
 					local maxZ = if single then z + 1 else SIZE
 					local maxY = if single then ly + 1 else sh
+					-- (Never for a single box: it is one cell, already odd.)
+					local odd = aligned and opaque and not single and readu8(alignLut, app) == 1
+					-- The box's first cell; odd boxes may start before (x, z, ly), in wildcards.
+					local x0, z0, ly0 = x, z, ly
 
 					local x1 = x
 					while x1 + 1 < maxX do
@@ -628,12 +659,19 @@ function GreedyMesher.mesh(
 							break
 						end
 					end
+					if odd and (x1 - x0) % 2 == 1 then
+						if x0 > 0 and readu8(wild, c - 1) == 1 then
+							x0 -= 1
+						else
+							x1 -= 1
+						end
+					end
 
 					local z1 = z
 					while z1 + 1 < maxZ do
 						local row = (ly * SIZE + z1 + 1) * SIZE
 						local ok = true
-						for xx = x, x1 do
+						for xx = x0, x1 do
 							local c2 = row + xx
 							local a2 = readu16(need, c2 * 2)
 							if not ((a2 == key and readu8(done, c2) == 0) or (opaque and readu8(wild, c2) == 1)) then
@@ -646,13 +684,20 @@ function GreedyMesher.mesh(
 						end
 						z1 += 1
 					end
+					if odd and (z1 - z0) % 2 == 1 then
+						if z0 > 0 and allWild(ly, ly, z0 - 1, z0 - 1, x0, x1) then
+							z0 -= 1
+						else
+							z1 -= 1
+						end
+					end
 
 					local ly1 = ly
 					while ly1 + 1 < maxY do
 						local ok = true
-						for zz = z, z1 do
+						for zz = z0, z1 do
 							local row = ((ly1 + 1) * SIZE + zz) * SIZE
-							for xx = x, x1 do
+							for xx = x0, x1 do
 								local c2 = row + xx
 								local a2 = readu16(need, c2 * 2)
 								if
@@ -671,11 +716,18 @@ function GreedyMesher.mesh(
 						end
 						ly1 += 1
 					end
+					if odd and (ly1 - ly0) % 2 == 1 then
+						if ly0 > 0 and allWild(ly0 - 1, ly0 - 1, z0, z1, x0, x1) then
+							ly0 -= 1
+						else
+							ly1 -= 1
+						end
+					end
 
-					for yy = ly, ly1 do
-						for zz = z, z1 do
+					for yy = ly0, ly1 do
+						for zz = z0, z1 do
 							local row = (yy * SIZE + zz) * SIZE
-							for xx = x, x1 do
+							for xx = x0, x1 do
 								local c2 = row + xx
 								if readu16(need, c2 * 2) == key then
 									writeu8(done, c2, 1)
@@ -684,7 +736,7 @@ function GreedyMesher.mesh(
 						end
 					end
 
-					pushBox(count, x, ly + y0, z, x1 - x + 1, ly1 - ly + 1, z1 - z + 1, key)
+					pushBox(count, x0, ly0 + y0, z0, x1 - x0 + 1, ly1 - ly0 + 1, z1 - z0 + 1, key)
 					count += 1
 				end
 			end

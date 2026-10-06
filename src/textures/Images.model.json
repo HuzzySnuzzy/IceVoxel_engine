@@ -1,0 +1,315 @@
+{
+	"className": "Folder",
+	"children": [
+		{
+			"name": "IV_bricks",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://126476239211015",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://78619102429227"
+			}
+		},
+		{
+			"name": "IV_cactus_side",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://108038569607208"
+			}
+		},
+		{
+			"name": "IV_cactus_top",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://107644713378212"
+			}
+		},
+		{
+			"name": "IV_calcite",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://99380706817425",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://127261168995224"
+			}
+		},
+		{
+			"name": "IV_coal_ore",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://126178156614120",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://123190628695822"
+			}
+		},
+		{
+			"name": "IV_cobblestone",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://84237009727338",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://75251272775135"
+			}
+		},
+		{
+			"name": "IV_cracked_stone_bricks",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://121416480343872",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://102677558753560"
+			}
+		},
+		{
+			"name": "IV_diamond_ore",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://112898008799573",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://118816817484302"
+			}
+		},
+		{
+			"name": "IV_diorite",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://125518917530320",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://136661436562468"
+			}
+		},
+		{
+			"name": "IV_dirt",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://72051511434165",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://124863036266976"
+			}
+		},
+		{
+			"name": "IV_glow_lichen",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://81026875222604"
+			}
+		},
+		{
+			"name": "IV_gold_ore",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://84056217279698",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://120488738320366"
+			}
+		},
+		{
+			"name": "IV_grass_side",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://73522726802574",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://86851679897399"
+			}
+		},
+		{
+			"name": "IV_grass_top",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://99507506732683",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://108277463750403"
+			}
+		},
+		{
+			"name": "IV_gravel",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://81186281605960",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://80041848472885"
+			}
+		},
+		{
+			"name": "IV_ice",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://108401137755740"
+			}
+		},
+		{
+			"name": "IV_iron_ore",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://78336303508336",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://105117991053609"
+			}
+		},
+		{
+			"name": "IV_leaves",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://17327831454"
+			}
+		},
+		{
+			"name": "IV_log",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://109169967309613",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://120423551204729"
+			}
+		},
+		{
+			"name": "IV_missing_texture",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://925810526"
+			}
+		},
+		{
+			"name": "IV_obsidian",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://82694772111598",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://124134462736797"
+			}
+		},
+		{
+			"name": "IV_packed_ice",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://95721302530570"
+			}
+		},
+		{
+			"name": "IV_packed_mud",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://72051511434165",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://124863036266976"
+			}
+		},
+		{
+			"name": "IV_planks",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://129159801834926",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://118497034160890"
+			}
+		},
+		{
+			"name": "IV_sand",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://128379135184493",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://71309589762284"
+			}
+		},
+		{
+			"name": "IV_sandstone_side",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://140637300323961",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://100157928191004"
+			}
+		},
+		{
+			"name": "IV_sandstone_top",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://140637300323961",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://127212881957834"
+			}
+		},
+		{
+			"name": "IV_short_grass",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://113127329313443"
+			}
+		},
+		{
+			"name": "IV_snow",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://105336294076212",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://93188919600084"
+			}
+		},
+		{
+			"name": "IV_stone",
+			"className": "Texture",
+			"properties": {
+				"NormalMapContent": "rbxassetid://99380706817425",
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://140181032881606"
+			}
+		},
+		{
+			"name": "IV_tall_grass_bottom",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://100266742601250"
+			}
+		},
+		{
+			"name": "IV_tall_grass_top",
+			"className": "Texture",
+			"properties": {
+				"StudsPerTileU": 3,
+				"StudsPerTileV": 3,
+				"TextureContent": "rbxassetid://104285260856645"
+			}
+		}
+	]
+}

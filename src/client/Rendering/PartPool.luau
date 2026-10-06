@@ -7,13 +7,17 @@
 	collide and can be raycast; far parts (LOD chunks) do neither and skip shadows. No terrain part
 	takes part in audio collisions (AudioCanCollide, set under pcall: it may be missing).
 
-	Textures: a block with `texture` uses that MaterialVariant (it must exist in MaterialService with
-	the block's material as BaseMaterial, otherwise the plain colour is used and a warning printed).
-	`faces` images become Texture children of near templates, tiled once per block, so recycled parts
-	keep them for free.
+	Textures (the texture pack, through Rendering/TextureLooks, which decides every look): a cube
+	takes its look's MaterialVariant, material and colour (the tint); near templates also carry its
+	Texture images (a grass top over the grass side variant), tiled once per block, so recycled
+	parts keep them for free; far templates only the variant (the top's). Glow lichen's plate goes
+	see-through and carries its image as a Decal. Plants with a sprite are drawn as two crossed
+	planes (`SPRITE_BOX`, ChunkRenderer): see-through thin parts with the sprite as a Decal on both
+	sides (`images(part)`: ChunkRenderer tints them per soil).
 
 	"Plain" templates (far levels merged into meshes, see MeshOverlay) look like those meshes:
-	SmoothPlastic in the block's colour, no textures, fluids opaque.
+	SmoothPlastic in the colour the block averages to (TextureLooks.plainColour), no textures,
+	fluids opaque.
 
 	Decorated blocks (appearances with `decor`: chests, crafting tables, furnaces): near templates
 	carry the faces as SurfaceGuis (Rendering/BlockDecor), which every recycled part keeps. The
@@ -54,12 +58,15 @@
 
 	Style (`setStyle`, from the settings menu; starts from Config.Render): shadows and far shadows
 	change templates at once and every other part when it is next handed out or `refresh`ed
-	(ChunkRenderer walks the live parts within its budget); a texture change starts a new set of
-	template keys, so parts of the old look are never handed out again (ChunkRenderer rebuilds
-	sections, and `trim` destroys the old ones).
+	(ChunkRenderer walks the live parts within its budget); Textures and Far Materials go to
+	TextureLooks. A change of looks (TextureLooks' part and plain generations, taken by
+	`syncLooks`) starts a new set of template keys, so parts of the old look are never handed out
+	again (ChunkRenderer rebuilds sections, and `trim` destroys the old ones), and destroys the old
+	templates (their parts keep their keys' shadow and light rules until they go). Plain templates
+	follow the plain generation and the rest the part generation, so a change that leaves the
+	plain colours alone keeps the plain parts.
 ]]
 
-local MaterialService = game:GetService("MaterialService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -68,6 +75,7 @@ local Blocks = require(Shared.Blocks)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
 
 local BlockDecor = require(script.Parent.BlockDecor)
+local TextureLooks = require(script.Parent.TextureLooks)
 
 -- A light's reach per light level, in blocks (Minecraft's light fades 1 level per block; Roblox's
 -- falls off smoothly, so a little less looks alike), and the engine's longest range (studs).
@@ -78,10 +86,14 @@ local LIGHT_BRIGHTNESS = 1.6
 -- Light sources cast shadows (only when terrain shadows are on). Each shadowed light costs more,
 -- but without shadows a torch lights the cave on the other side of the wall too.
 local LIGHT_SHADOWS = true
--- Shape box templates per appearance (Blocks.MAX_SHAPE_BOXES, plus box 0: the cube).
-local BOX_KEYS = Blocks.MAX_SHAPE_BOXES + 1
--- Keys of one texture generation: (appearance * BOX_KEYS + box) * 8 + flags.
+-- The box index of a plant's sprite plane (after its shape's boxes).
+local SPRITE_BOX = Blocks.MAX_SHAPE_BOXES + 1
+-- Box templates per appearance (box 0: the cube, Blocks.MAX_SHAPE_BOXES, the sprite plane).
+local BOX_KEYS = SPRITE_BOX + 1
+-- Keys of one look generation: (appearance * BOX_KEYS + box) * 8 + flags.
 local TEXTURE_SPAN = (#Blocks.appearances + 1) * BOX_KEYS * 8
+-- Thickness of a sprite plane (studs).
+local SPRITE_THICKNESS = 0.05
 -- Kinds of parts not handed out for this long lose their pooled parts (seconds), and how often
 -- `trim` looks for them and for parts beyond the limit.
 local IDLE_SECONDS = 30
@@ -92,16 +104,19 @@ local CAST_NEVER = 0
 local CAST_NEAR = 1
 local CAST_FAR = 2
 
+-- (`farMaterials` nil: unchanged.)
 export type Style = {
 	shadows: boolean,
 	farShadows: boolean,
 	textures: boolean,
+	farMaterials: boolean?,
 }
 
 export type StyleChanges = {
 	shadows: boolean,
 	farShadows: boolean,
 	textures: boolean,
+	farMaterials: boolean,
 }
 
 export type PartPool = {
@@ -117,6 +132,9 @@ export type PartPool = {
 	litKeys: { [number]: boolean },
 	castRule: { [number]: number },
 	sparseKeys: { [number]: boolean },
+	-- Template keys whose parts carry Decals (sprite planes), and each such part's Decals.
+	imageKeys: { [number]: boolean },
+	imagesOf: { [BasePart]: { Decal } },
 	-- Last time (os.clock) a part of each key was handed out.
 	usedAt: { [number]: number },
 	-- Pooled parts (free and recent).
@@ -124,7 +142,9 @@ export type PartPool = {
 	limit: number,
 	style: Style,
 	shadowGen: number,
+	-- Look generations of the parts handed out now (TextureLooks: parts, plain).
 	textureGen: number,
+	plainGen: number,
 	-- Parts taken out of the pool to be destroyed by `trim`.
 	trimList: { BasePart },
 	trimHead: number,
@@ -151,6 +171,9 @@ export type PartPool = {
 	trimming: (self: PartPool) -> number,
 	setLimit: (self: PartPool, limit: number) -> (),
 	setStyle: (self: PartPool, style: Style) -> StyleChanges,
+	syncLooks: (self: PartPool) -> (),
+	generationOf: (self: PartPool, plain: boolean) -> number,
+	images: (self: PartPool, part: BasePart) -> { Decal }?,
 	refresh: (self: PartPool, part: BasePart) -> (),
 	isCurrent: (self: PartPool, part: BasePart) -> boolean,
 }
@@ -170,15 +193,8 @@ local function colour(c: { number }): Color3
 	return Color3.fromRGB(c[1], c[2], c[3])
 end
 
-local warned: { [string]: boolean } = {}
-
--- Does any block use textures or face images (otherwise the Textures setting changes nothing)?
-local texturesMatter = false
-for _, appearance in Blocks.appearances do
-	if appearance.texture or appearance.faces then
-		texturesMatter = true
-	end
-end
+-- Does any block draw a texture of the pack (otherwise the Textures setting changes nothing)?
+local texturesMatter = TextureLooks.used
 
 -- The box of a shaped appearance that carries its light: the first glowing one, else the first.
 local function lightBox(info: Blocks.Appearance): number
@@ -228,9 +244,50 @@ local function addLight(part: BasePart, info: Blocks.Appearance, style: Style)
 	light.Parent = part
 end
 
+-- The box of a shape that carries glow lichen's image: its first box that does not glow (the plate).
+local function plateBox(info: Blocks.Appearance): number
+	local shape = info.shape
+	if shape then
+		for i, box in shape do
+			if not box.glow then
+				return i
+			end
+		end
+	end
+	return 0
+end
+
+-- A plant's sprite plane: a see-through thin part with the sprite on both sides (sized by the caller).
+local function spriteTemplate(appearance: number): BasePart
+	local part = Instance.new("Part")
+	part.Name = "Sprite"
+	part.Anchored = true
+	part.Locked = true
+	part.CanTouch = false
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.EnableFluidForces = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Material = Enum.Material.SmoothPlastic
+	part.Transparency = 1
+	pcall(function()
+		part.AudioCanCollide = false
+	end)
+	local sprite = TextureLooks.spriteOf(appearance)
+	if sprite then
+		for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+			TextureLooks.newDecal(sprite.texture, face, sprite.tints[1]).Parent = part
+		end
+	end
+	return part
+end
+
 --[[
-	A template for `appearance` (`box` 0: the block's cube; i > 0: box i of its shape). `decor`:
-	draw decorated faces; `lit`: carry the light of a light source.
+	A template for `appearance` (`box` 0: the block's cube; i > 0: box i of its shape; SPRITE_BOX:
+	a sprite plane). `decor`: draw decorated faces; `lit`: carry the light of a light source;
+	`bare`: a cube without its textures (item models draw their own).
 ]]
 local function makeTemplate(
 	appearance: number,
@@ -239,8 +296,12 @@ local function makeTemplate(
 	decor: boolean,
 	box: number,
 	lit: boolean,
-	style: Style
+	style: Style,
+	bare: boolean?
 ): BasePart
+	if box == SPRITE_BOX then
+		return spriteTemplate(appearance)
+	end
 	local info = Blocks.appearances[appearance]
 	local shapeBox = if box > 0 and info.shape then info.shape[box] else nil
 	local glowing = info.light > 0
@@ -277,31 +338,31 @@ local function makeTemplate(
 		part.Material = Enum.Material.SmoothPlastic
 		part.Transparency = 0
 		part.Reflectance = 0
+		if shapeBox == nil then
+			-- What the block averages to (its textures' colours), like the far meshes.
+			part.Color = TextureLooks.plainColour(appearance)
+		end
 		return part
 	end
 
-	if style.textures and shapeBox == nil then
-		local texture = info.texture
-		if texture then
-			if MaterialService:GetMaterialVariant(part.Material, texture) then
-				part.MaterialVariant = texture
-				part.Color = colour(info.tint)
-			elseif not warned[texture] then
-				warned[texture] = true
-				warn(
-					`[IceVoxel] MaterialVariant '{texture}' with BaseMaterial {info.material} not found in MaterialService`
-				)
+	if shapeBox == nil and not bare then
+		local look = if far then TextureLooks.farLook(appearance) else TextureLooks.nearLook(appearance)
+		if look then
+			part.Material = look.material
+			part.MaterialVariant = look.variant
+			part.Color = look.color
+			if not far then
+				for _, image in look.images do
+					TextureLooks.newImage(image.texture, image.face, image.color).Parent = part
+				end
 			end
 		end
-		if info.faces and not far then
-			for face, image in info.faces do
-				local overlay = Instance.new("Texture")
-				overlay.Face = (Enum.NormalId :: any)[face]
-				overlay.Texture = image
-				overlay.StudsPerTileU = Config.BlockSize
-				overlay.StudsPerTileV = Config.BlockSize
-				overlay.Parent = part
-			end
+	elseif shapeBox and box == plateBox(info) then
+		-- Glow lichen: the plate shows its image only.
+		local front = TextureLooks.frontOf(appearance)
+		if front then
+			part.Transparency = 1
+			TextureLooks.newDecal(front.texture, front.face, front.color).Parent = part
 		end
 	end
 	if decor and info.decor and not far and shapeBox == nil then
@@ -317,7 +378,8 @@ local function configStyle(): Style
 	return {
 		shadows = Config.Render.Shadows,
 		farShadows = Config.Render.FarShadows,
-		textures = Config.Render.Textures,
+		textures = TextureLooks.enabled(),
+		farMaterials = TextureLooks.farMaterials(),
 	}
 end
 
@@ -328,17 +390,22 @@ end
 local PartPool = {}
 PartPool.__index = PartPool
 
--- Does the Textures style change anything (some block has a texture or face images)? Tests may
--- set it to check the rebuild path.
+-- Does the Textures style change anything (some block draws a texture)? Tests may set it to
+-- check the rebuild path.
 PartPool.texturesMatter = texturesMatter
 
+-- The box index of a plant's sprite planes (`acquire`; ChunkRenderer sizes and places them).
+PartPool.SPRITE_BOX = SPRITE_BOX
+PartPool.SPRITE_THICKNESS = SPRITE_THICKNESS
+
 --[[
-	A new part with the look of `appearance` (full detail: textures and face images), e.g. for items;
-	`box` > 0: that box of its shape (size and position are left to the caller). Decorated faces are
-	left out (item models draw them with parts: BlockDecor.buildParts), and so are lights.
+	A new part with the look of `appearance` (full detail: textures and images), e.g. for items;
+	`box` > 0: that box of its shape (size and position are left to the caller); `bare`: a cube
+	in its BlockList material and colour, without textures. Decorated faces are left out (item
+	models draw them with parts: BlockDecor.buildParts), and so are lights.
 ]]
-function PartPool.makeTemplate(appearance: number, box: number?): BasePart
-	return makeTemplate(appearance, false, false, false, box or 0, false, configStyle())
+function PartPool.makeTemplate(appearance: number, box: number?, bare: boolean?): BasePart
+	return makeTemplate(appearance, false, false, false, box or 0, false, configStyle(), bare)
 end
 
 function PartPool.new(limit: number): PartPool
@@ -352,12 +419,15 @@ function PartPool.new(limit: number): PartPool
 		litKeys = {},
 		castRule = {},
 		sparseKeys = {},
+		imageKeys = {},
+		imagesOf = weak(),
 		usedAt = {},
 		freeCount = 0,
 		limit = limit,
 		style = configStyle(),
 		shadowGen = 0,
-		textureGen = 0,
+		textureGen = TextureLooks.partGeneration(),
+		plainGen = TextureLooks.plainGeneration(),
 		trimList = {},
 		trimHead = 1,
 		nextScan = 0,
@@ -372,10 +442,10 @@ end
 local lightBoxes: { [number]: number } = {}
 
 --[[
-	A part of `appearance` (box `box` of its shape; 0 or nil: the cube) for a near / far / plain
-	node. `dark`: a sparse light's cell that does not carry the light (GreedyMesher), drawn without
-	it (only the light's own box differs). The part is out of the workspace; its light (if any) is
-	in whatever state it was left in.
+	A part of `appearance` (box `box` of its shape; 0 or nil: the cube; SPRITE_BOX: a sprite plane)
+	for a near / far / plain node. `dark`: a sparse light's cell that does not carry the light
+	(GreedyMesher), drawn without it (only the light's own box differs). The part is out of the
+	workspace; its light (if any) is in whatever state it was left in.
 ]]
 function PartPool.acquire(
 	self: PartPool,
@@ -395,7 +465,7 @@ function PartPool.acquire(
 		end
 		unlit = index == carrier
 	end
-	local key = self.textureGen * TEXTURE_SPAN
+	local key = (if plain then self.plainGen else self.textureGen) * TEXTURE_SPAN
 		+ (appearance * BOX_KEYS + index) * 8
 		+ (if far then 1 else 0)
 		+ (if plain then 2 else 0)
@@ -425,6 +495,9 @@ function PartPool.acquire(
 			self.litKeys[key] = true
 			self.sparseKeys[key] = isSparse(appearance)
 		end
+		if index == SPRITE_BOX and created:FindFirstChildOfClass("Decal") then
+			self.imageKeys[key] = true
+		end
 		template = created
 	end
 	local part = (template :: BasePart):Clone()
@@ -436,6 +509,15 @@ function PartPool.acquire(
 		if light then
 			self.lightOf[part] = light
 		end
+	end
+	if self.imageKeys[key] then
+		local decals: { Decal } = {}
+		for _, child in part:GetChildren() do
+			if child:IsA("Decal") then
+				table.insert(decals, child)
+			end
+		end
+		self.imagesOf[part] = decals
 	end
 	return part
 end
@@ -449,6 +531,11 @@ end
 -- The PointLight of a part from `acquire`, if it carries one.
 function PartPool.light(self: PartPool, part: BasePart): PointLight?
 	return self.lightOf[part]
+end
+
+-- The Decals of a sprite plane from `acquire` (to tint them), if it carries any.
+function PartPool.images(self: PartPool, part: BasePart): { Decal }?
+	return self.imagesOf[part]
 end
 
 --[[
@@ -511,14 +598,20 @@ local function takeFree(self: PartPool, key: number, n: number)
 	end
 end
 
--- Chooses what to destroy: parts beyond the limit, idle kinds, old texture generations.
+-- Is a key of an older look: the plain generation for plain templates (flag 2), else the part one?
+local function isOld(self: PartPool, key: number): boolean
+	local plain = ((key % 8) // 2) % 2 == 1
+	return key // TEXTURE_SPAN ~= (if plain then self.plainGen else self.textureGen)
+end
+
+-- Chooses what to destroy: parts beyond the limit, idle kinds, old look generations.
 local function scan(self: PartPool, now: number)
 	local over = self.freeCount - self.limit
 	local keys: { number } = {}
 	for key, list in self.free do
 		if #list > 0 then
 			local idle = now - (self.usedAt[key] or 0) > IDLE_SECONDS
-			if idle or key // TEXTURE_SPAN ~= self.textureGen then
+			if idle or isOld(self, key) then
 				over -= #list
 				takeFree(self, key, #list)
 			else
@@ -610,17 +703,28 @@ end
 
 --[[
 	A new style. Shadow changes update the templates now and other parts as they are handed out or
-	refreshed; a texture change (only when some block has textures) starts new template keys.
-	Returns what changed.
+	refreshed; a texture change (only when some block has textures) or a Far Materials change goes
+	to TextureLooks, whose new generations start new template keys (`syncLooks`). Returns what
+	changed.
 ]]
 function PartPool.setStyle(self: PartPool, style: Style): StyleChanges
 	local old = self.style
+	local textures = if PartPool.texturesMatter then style.textures else old.textures
+	local farMaterials: boolean = if style.farMaterials == nil
+		then old.farMaterials == true
+		else style.farMaterials == true
 	local changes: StyleChanges = {
 		shadows = style.shadows ~= old.shadows,
 		farShadows = style.farShadows ~= old.farShadows,
-		textures = PartPool.texturesMatter and style.textures ~= old.textures,
+		textures = textures ~= old.textures,
+		farMaterials = farMaterials ~= (old.farMaterials == true),
 	}
-	self.style = { shadows = style.shadows, farShadows = style.farShadows, textures = style.textures }
+	self.style = {
+		shadows = style.shadows,
+		farShadows = style.farShadows,
+		textures = textures,
+		farMaterials = farMaterials,
+	}
 	if changes.shadows or changes.farShadows then
 		self.shadowGen += 1
 		for key, template in self.templates do
@@ -632,12 +736,39 @@ function PartPool.setStyle(self: PartPool, style: Style): StyleChanges
 			end
 		end
 	end
-	if changes.textures then
-		self.textureGen += 1
-		-- Old looks are never handed out again; trim destroys them.
-		self.nextScan = 0
+	if changes.textures or changes.farMaterials then
+		TextureLooks.setStyle(textures, farMaterials)
+		self:syncLooks()
 	end
 	return changes
+end
+
+--[[
+	Takes TextureLooks' current generations: parts of older looks are never handed out again (trim
+	destroys them) and their templates are destroyed now. ChunkRenderer calls it whenever
+	TextureLooks' looks change.
+]]
+function PartPool.syncLooks(self: PartPool)
+	local parts, plain = TextureLooks.partGeneration(), TextureLooks.plainGeneration()
+	if parts ~= self.textureGen or plain ~= self.plainGen then
+		self.textureGen, self.plainGen = parts, plain
+		self.nextScan = 0
+		-- (Generations only grow, so these keys are never asked for again. castRule, litKeys and
+		-- sparseKeys stay: parts of these keys may still be shown, and refresh and release use them.)
+		for key, template in self.templates do
+			if isOld(self, key) then
+				template:Destroy()
+				self.templates[key] = nil
+				self.imageKeys[key] = nil
+				self.usedAt[key] = nil
+			end
+		end
+	end
+end
+
+-- The look generation parts of a plain (or other) template are made with now.
+function PartPool.generationOf(self: PartPool, plain: boolean): number
+	return if plain then self.plainGen else self.textureGen
 end
 
 return PartPool

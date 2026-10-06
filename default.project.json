@@ -17,9 +17,17 @@
 				"FogColor": [0.753, 0.847, 1]
 			}
 		},
+		"MaterialService": {
+			"IceVoxel": {
+				"$path": "src/textures/Materials.model.json"
+			}
+		},
 		"ReplicatedStorage": {
 			"IceVoxel": {
 				"$path": "src/shared"
+			},
+			"IceVoxelTextures": {
+				"$path": "src/textures/Images.model.json"
 			}
 		},
 		"ServerScriptService": {

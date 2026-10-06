@@ -213,9 +213,11 @@ type Self = InventoryScreen & {
 	world: WorldModel,
 	clone: Model?,
 	cloneYaw: number,
-	-- Item drawn in the preview's hand (false: not drawn yet) and its model.
+	-- Item drawn in the preview's hand (false: not drawn yet), its model and the item look
+	-- generation it was built with (ItemModels.generation).
 	heldItem: number | false | nil,
 	heldModel: Model?,
+	heldLook: number,
 }
 
 local InventoryScreen = {}
@@ -311,6 +313,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			cloneYaw = math.huge,
 			heldItem = false,
 			heldModel = nil,
+			heldLook = 0,
 		}, InventoryScreen) :: any
 	) :: Self
 
@@ -686,15 +689,17 @@ local function renderGauges(self: Self, window: Window)
 	setGauge(self.progress, if columns > 0 then columns + 1 else 0, false)
 end
 
--- Puts the selected item in the preview's hand (rebuilt only when it changes).
+-- Puts the selected item in the preview's hand (rebuilt only when it or item looks change).
 local function updateHeld(self: Self, window: Window)
 	local inventory = window.inventory
 	local stack = inventory.slots[inventory.selected]
 	local item = if stack and stack.count > 0 then stack.item else nil
-	if item == self.heldItem then
+	local look = ItemModels.generation()
+	if item == self.heldItem and look == self.heldLook then
 		return
 	end
 	self.heldItem = item
+	self.heldLook = look
 	local old = self.heldModel
 	if old then
 		old:Destroy()

@@ -1,0 +1,347 @@
+{
+	"className": "Folder",
+	"children": [
+		{
+			"name": "IV_bricks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Brick",
+				"ColorMapContent": "rbxassetid://78619102429227",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://126476239211015",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cactus_side",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Grass",
+				"ColorMapContent": "rbxassetid://108038569607208",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cactus_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Grass",
+				"ColorMapContent": "rbxassetid://107644713378212",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_calcite",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Marble",
+				"ColorMapContent": "rbxassetid://127261168995224",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://99380706817425",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_coal_ore",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Rock",
+				"ColorMapContent": "rbxassetid://123190628695822",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://126178156614120",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cobblestone",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Cobblestone",
+				"ColorMapContent": "rbxassetid://75251272775135",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84237009727338",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cracked_stone_bricks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Brick",
+				"ColorMapContent": "rbxassetid://102677558753560",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://121416480343872",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_diamond_ore",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Rock",
+				"ColorMapContent": "rbxassetid://118816817484302",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://112898008799573",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_diorite",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Limestone",
+				"ColorMapContent": "rbxassetid://136661436562468",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://125518917530320",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_dirt",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Ground",
+				"ColorMapContent": "rbxassetid://124863036266976",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://72051511434165",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_glow_lichen",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://81026875222604",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_gold_ore",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Rock",
+				"ColorMapContent": "rbxassetid://120488738320366",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84056217279698",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_grass_side",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Ground",
+				"ColorMapContent": "rbxassetid://86851679897399",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://73522726802574",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_grass_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Grass",
+				"ColorMapContent": "rbxassetid://108277463750403",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://99507506732683",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_gravel",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Pebble",
+				"ColorMapContent": "rbxassetid://80041848472885",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://81186281605960",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_ice",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Glacier",
+				"ColorMapContent": "rbxassetid://108401137755740",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_iron_ore",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Rock",
+				"ColorMapContent": "rbxassetid://105117991053609",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://78336303508336",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_leaves",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "LeafyGrass",
+				"ColorMapContent": "rbxassetid://17327831454",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_log",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Wood",
+				"ColorMapContent": "rbxassetid://120423551204729",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://109169967309613",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_missing_texture",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://925810526",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_obsidian",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Basalt",
+				"ColorMapContent": "rbxassetid://124134462736797",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://82694772111598",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_packed_ice",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Ice",
+				"ColorMapContent": "rbxassetid://95721302530570",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_packed_mud",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Mud",
+				"ColorMapContent": "rbxassetid://124863036266976",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://72051511434165",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_planks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "WoodPlanks",
+				"ColorMapContent": "rbxassetid://118497034160890",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://129159801834926",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_sand",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Sand",
+				"ColorMapContent": "rbxassetid://71309589762284",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://128379135184493",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_sandstone_side",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Sandstone",
+				"ColorMapContent": "rbxassetid://100157928191004",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://140637300323961",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_sandstone_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Sandstone",
+				"ColorMapContent": "rbxassetid://127212881957834",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://140637300323961",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_short_grass",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://113127329313443",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_snow",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Snow",
+				"ColorMapContent": "rbxassetid://93188919600084",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://105336294076212",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_stone",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Slate",
+				"ColorMapContent": "rbxassetid://140181032881606",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://99380706817425",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_tall_grass_bottom",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://100266742601250",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_tall_grass_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://104285260856645",
+				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		}
+	]
+}

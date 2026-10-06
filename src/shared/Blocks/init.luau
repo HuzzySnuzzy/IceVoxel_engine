@@ -33,6 +33,16 @@
 	        appearance `tinted`, `scatter`, `upperHalf` and `foliage` (also as `tintedLut` and
 	        `foliageLut`). Plants never share an appearance with anything else;
 	      - what Shears harvest (`shearDrops`, `shearCount`; Items.drops, Shared/Mining).
+	  * textures (Shared/TexturePack, the texture pack): each block's texture per face
+	    (`textures` on defs and appearances, resolved from the pack's All / Sides / Top / Bottom /
+	    Front / Sprite; a cave twin takes its twin's, a variant its group's), whether an
+	    appearance draws any (`textured`), the texture its parts take as a MaterialVariant
+	    (`variantTexture`), which appearances want odd box sizes (`alignLut`, for
+	    Config.Textures.OddBoxes) and the pack lookups the client and the generator
+	    (tests/build_textures) use: `textureFaces`, `textureOf`, `textureFilled`, `variantName`,
+	    `texturesUsed`, `textureUsers`. The pack is checked when this module loads (unknown blocks,
+	    textures or face names, materials that cannot take a MaterialVariant), so a typo fails
+	    loudly everywhere;
 	  * structures (Shared/Structures):
 	      - creative only blocks (`creativeOnly`, `isCreativeOnly`): structure blocks, structure
 	        voids and jigsaws, which only creative players break (survival players can't mine
@@ -52,6 +62,7 @@
 
 local BlockList = require(script.BlockList)
 local Config = require(script.Parent.Config)
+local TexturePack = require(script.Parent.TexturePack)
 
 export type BlockDef = {
 	id: number,
@@ -93,9 +104,9 @@ export type BlockDef = {
 	decor: string?,
 	-- Sound type (one of Blocks.SOUND_TYPES; Shared/Sounds), nil for silent blocks (air).
 	sound: string?,
-	texture: string?,
-	tint: { number },
-	faces: { [string]: string }?,
+	-- The texture pack's texture names per face (blank ones too); nil for blocks that are never
+	-- textured. See Shared/TexturePack.
+	textures: TextureFaces?,
 	-- Light given off (0..15) and its colour; see BlockList.
 	light: number,
 	lightColor: { number },
@@ -148,10 +159,12 @@ export type Appearance = {
 	transparency: number,
 	reflectance: number,
 	solid: boolean,
-	-- MaterialVariant name, tint applied with it and per-face images (see BlockList).
-	texture: string?,
-	tint: { number },
-	faces: { [string]: string }?,
+	-- Its blocks' texture names per face (the same table as theirs; nil: never textured), whether
+	-- any of them is filled in (or the pack shows missing textures: TexturePack.ShowMissing), and
+	-- the plant sprite's.
+	textures: TextureFaces?,
+	textured: boolean,
+	sprite: string?,
 	-- Faces drawn on its parts (Rendering/BlockDecor); such blocks are meshed one box per block.
 	decor: string?,
 	-- Light given off (0..15; > 0 puts a PointLight on its parts) and its colour.
@@ -177,6 +190,20 @@ export type MachineSpec = BlockList.MachineSpec
 export type EnergySpec = BlockList.EnergySpec
 export type PlantSpec = BlockList.PlantSpec
 export type JigsawSpec = BlockList.JigsawSpec
+export type Texture = TexturePack.Texture
+
+-- A block's texture per face, resolved from its texture pack entry (texture names; see
+-- Shared/TexturePack): the six faces of its cube, glow lichen's `front` and a plant's `sprite`.
+export type TextureFaces = {
+	top: string?,
+	bottom: string?,
+	north: string?,
+	south: string?,
+	east: string?,
+	west: string?,
+	front: string?,
+	sprite: string?,
+}
 
 local Blocks = {}
 
@@ -281,6 +308,176 @@ local function validOrientation(front: string, top: string): boolean
 	return (front == "Up" or front == "Down") and HORIZONTAL[top] == true
 end
 
+--[[
+	The texture pack (Shared/TexturePack), checked here so a mistake fails loudly wherever Blocks
+	loads (server, client, workers, Lune), naming what is wrong: every entry's block exists, is
+	drawn, is no fluid and no cave twin (twins take their twin's textures), every face name is
+	known and names a texture, every texture's Material can take a MaterialVariant and every Tint
+	naming a block names one. (Ids are checked by tests/build_textures, which turns the pack into
+	the MaterialVariants.)
+]]
+
+-- Enum.Material names a MaterialVariant can be based on (every one but Neon, Glass, ForceField,
+-- Air and the terrain-only Water). A list, since Lune has no Enum.
+Blocks.VARIANT_MATERIALS = table.freeze({
+	"Plastic",
+	"SmoothPlastic",
+	"Wood",
+	"WoodPlanks",
+	"Marble",
+	"Basalt",
+	"Slate",
+	"CrackedLava",
+	"Concrete",
+	"Limestone",
+	"Granite",
+	"Pavement",
+	"Brick",
+	"Pebble",
+	"Cobblestone",
+	"Rock",
+	"Sandstone",
+	"CorrodedMetal",
+	"DiamondPlate",
+	"Foil",
+	"Metal",
+	"Grass",
+	"LeafyGrass",
+	"Sand",
+	"Fabric",
+	"Snow",
+	"Mud",
+	"Ground",
+	"Asphalt",
+	"Salt",
+	"Ice",
+	"Glacier",
+	"Cardboard",
+	"Carpet",
+	"CeramicTiles",
+	"ClayRoofTiles",
+	"RoofShingles",
+	"Leather",
+	"Plaster",
+	"Rubber",
+})
+local variantMaterials: { [string]: boolean } = {}
+for _, name in Blocks.VARIANT_MATERIALS do
+	variantMaterials[name] = true
+end
+
+-- The resolved faces (TextureFaces), in the order the appearance key lists them.
+Blocks.TEXTURE_FACES = table.freeze({ "top", "bottom", "north", "south", "east", "west", "front", "sprite" })
+local PACK_FACES: { [string]: boolean } =
+	{ All = true, Sides = true, Top = true, Bottom = true, Front = true, Sprite = true }
+
+local packTextures = TexturePack.Textures
+local packBlocks = TexturePack.Blocks
+do
+	local specs: { [string]: BlockList.BlockSpec } = {}
+	for _, spec in BlockList do
+		specs[spec.name] = spec
+	end
+	for name, texture in packTextures do
+		assert(
+			variantMaterials[texture.Material],
+			`TexturePack: texture "{name}" has Material {texture.Material}, which cannot take a MaterialVariant`
+		)
+		local tint = texture.Tint
+		assert(
+			type(tint) ~= "string" or specs[tint] ~= nil,
+			`TexturePack: texture "{name}" is tinted like unknown block {tint}`
+		)
+	end
+	assert(
+		packTextures[TexturePack.Missing],
+		`TexturePack: the Missing texture "{TexturePack.Missing}" is not in Textures`
+	)
+	for name, faces in packBlocks do
+		local spec = specs[name]
+		assert(spec, `TexturePack: there is no block named {name}`)
+		assert(spec.caveTwin == nil, `TexturePack: {name} is a cave twin, which takes {spec.caveTwin}'s textures`)
+		assert(
+			spec.render ~= "None" and spec.render ~= "Fluid",
+			`TexturePack: {name} is never textured ({if spec.render == "None" then "not drawn" else "a fluid"})`
+		)
+		assert(next(faces) ~= nil, `TexturePack: {name} has an empty entry`)
+		for face, texture in faces :: { [string]: string } do
+			assert(
+				PACK_FACES[face],
+				`TexturePack: {name} has unknown face {face} (All, Sides, Top, Bottom, Front or Sprite)`
+			)
+			assert(packTextures[texture], `TexturePack: {name}'s {face} uses unknown texture "{texture}"`)
+		end
+	end
+end
+
+-- Is the texture filled in (a colour map, not "")? false for unknown names and nil.
+local function filled(name: string?): boolean
+	local texture = if name then packTextures[name] else nil
+	return texture ~= nil and texture.Color ~= ""
+end
+
+-- An entry's texture per face: All sets every face of the cube, Sides the four sides, Top and
+-- Bottom their own; a face given nothing falls back to All, then to Sides.
+local function resolveFaces(entry: TexturePack.Faces): TextureFaces
+	local all, sides = entry.All, entry.Sides
+	local side = sides or all
+	return table.freeze({
+		top = entry.Top or all or sides,
+		bottom = entry.Bottom or all or sides,
+		north = side,
+		south = side,
+		east = side,
+		west = side,
+		front = entry.Front,
+		sprite = entry.Sprite,
+	})
+end
+
+-- Per variant group (keyed by the name its blocks' `item` gives, the group's first block): the
+-- entry covering the group's blocks without one of their own: the first block's, else the first
+-- one listed. (Cave twins are no variants: they take their twin's textures.)
+local groupEntries: { [string]: TexturePack.Faces } = {}
+for _, spec in BlockList do
+	local entry = packBlocks[spec.name]
+	if entry and spec.caveTwin == nil then
+		local base = spec.item or spec.name
+		if groupEntries[base] == nil or spec.item == nil then
+			groupEntries[base] = entry
+		end
+	end
+end
+
+-- The appearance key's part for textures: the texture name on each face.
+local function texturesKey(faces: TextureFaces?): string
+	if faces == nil then
+		return ""
+	end
+	local names = {}
+	for index, face in Blocks.TEXTURE_FACES do
+		names[index] = (faces :: any)[face] or ""
+	end
+	return table.concat(names, ";")
+end
+
+-- Does an appearance with these faces draw a texture: a filled one, or blank ones shown as
+-- missing (TexturePack.ShowMissing)?
+local function texturedOf(faces: TextureFaces?): boolean
+	if faces == nil then
+		return false
+	end
+	if TexturePack.ShowMissing and filled(TexturePack.Missing) then
+		return true
+	end
+	for _, face in Blocks.TEXTURE_FACES do
+		if filled((faces :: any)[face]) then
+			return true
+		end
+	end
+	return false
+end
+
 local defs: { [number]: BlockDef } = {}
 local ids: { [string]: number } = {}
 local appearances: { Appearance } = {}
@@ -332,9 +529,7 @@ for index, spec in BlockList do
 			elseif kind == Blocks.KIND_NONE then nil
 			elseif kind == Blocks.KIND_FLUID then "water"
 			else SOUND_BY_MATERIAL[spec.material or "SmoothPlastic"] or "stone",
-		texture = spec.texture,
-		tint = spec.tint or { 255, 255, 255 },
-		faces = spec.faces,
+		textures = nil,
 		light = math.clamp(spec.light or 0, 0, 15),
 		lightColor = spec.lightColor or DEFAULT_LIGHT_COLOR,
 		shape = spec.shape,
@@ -418,17 +613,18 @@ for index, spec in BlockList do
 	-- (A twin comes after the block it twins, and looks exactly like it: see below.)
 	local twin = if spec.caveTwin then defs[ids[spec.caveTwin] or -1] else nil
 	assert(spec.caveTwin == nil or twin ~= nil, `Block {spec.name} twins unknown or later block {spec.caveTwin}`)
+	-- Its texture pack entry, else its variant group's; a twin shares its twin's textures.
+	if twin then
+		def.textures = twin.textures
+	else
+		local entry = packBlocks[spec.name] or groupEntries[spec.item or spec.name]
+		def.textures = if entry then resolveFaces(entry) else nil
+	end
 
 	if drawn then
-		local c, t = def.color, def.tint
-		local faces = {}
-		local faceImages: { [string]: string } = def.faces or {}
-		for face, image in faceImages do
-			table.insert(faces, `{face}={image}`)
-		end
-		table.sort(faces)
+		local c = def.color
 		local look = `{kind}|{def.material}|{c[1]},{c[2]},{c[3]}|{def.transparency}|{def.reflectance}`
-		local texture = `{def.texture or ""}|{t[1]},{t[2]},{t[3]}|{table.concat(faces, ";")}`
+		local texture = texturesKey(def.textures)
 		local lc = def.lightColor
 		-- (Shaped blocks get an appearance each: their boxes are their look.)
 		local glow = `{def.light}|{lc[1]},{lc[2]},{lc[3]}|{if def.shape then spec.caveTwin or def.name else ""}`
@@ -448,9 +644,9 @@ for index, spec in BlockList do
 				transparency = def.transparency,
 				reflectance = def.reflectance,
 				solid = solid,
-				texture = def.texture,
-				tint = def.tint,
-				faces = def.faces,
+				textures = def.textures,
+				textured = texturedOf(def.textures),
+				sprite = if def.textures then def.textures.sprite else nil,
 				decor = def.decor,
 				light = def.light,
 				lightColor = def.lightColor,
@@ -657,6 +853,112 @@ end
 Blocks.targetLut = u8Lut(function(def)
 	return def.kind == Blocks.KIND_OPAQUE or def.kind == Blocks.KIND_TRANSPARENT
 end)
+
+--[[ Textures (Shared/TexturePack) ]]
+
+-- An appearance's texture per face (the table its blocks' defs share), nil when its blocks are
+-- never textured. Takes the appearance or its id. Read only.
+function Blocks.textureFaces(appearance: number | Appearance): TextureFaces?
+	local info = if type(appearance) == "number" then appearances[appearance] else appearance
+	return if info then info.textures else nil
+end
+
+-- The pack's texture of that name, nil for unknown names. Read only.
+function Blocks.textureOf(name: string): Texture?
+	return packTextures[name]
+end
+
+-- Is the texture filled in (it has a colour map, not "")? false for unknown names and nil.
+Blocks.textureFilled = filled
+
+-- The name of a texture's MaterialVariant and Texture prototype (tests/build_textures makes
+-- them): "IV_" and the name with its spaces as "_" ("grass top" -> "IV_grass_top").
+function Blocks.variantName(name: string): string
+	return "IV_" .. (string.gsub(name, " ", "_"))
+end
+
+--[[
+	The texture whose MaterialVariant a cube's parts take at full detail (the client's near look,
+	Rendering/TextureLooks), nil for none (the parts keep their plain material):
+	  * the sides' texture when it is filled;
+	  * else the top's, when no other face has a different filled texture;
+	  * else the missing texture when the pack shows missing ones (TexturePack.ShowMissing).
+	With Config.Textures.SideImages the sides are drawn as images, so a filled top that differs
+	from the sides comes first. Plants and glow lichen (Sprite, Front) draw images, never a variant.
+]]
+local function variantOf(faces: TextureFaces?): string?
+	if faces == nil or (faces.north == nil and faces.top == nil) then
+		return nil
+	end
+	local side, top = faces.north, faces.top
+	if Config.Textures.SideImages and filled(top) and top ~= side then
+		return top
+	elseif filled(side) then
+		return side
+	elseif filled(top) and (faces.bottom == top or not filled(faces.bottom)) then
+		return top
+	elseif TexturePack.ShowMissing and filled(TexturePack.Missing) then
+		return TexturePack.Missing
+	end
+	return nil
+end
+
+function Blocks.variantTexture(appearance: number | Appearance): string?
+	return variantOf(Blocks.textureFaces(appearance))
+end
+
+--[[
+	1 per *appearance* id whose boxes Config.Textures.OddBoxes makes odd sized (GreedyMesher, full
+	detail only): an opaque cube meshed in merged boxes (not `single`, no shape) whose parts take
+	a texture's MaterialVariant (`variantTexture`) that lines up with the block grid (its Align is
+	not false). Images tile from a face's corner, so they need nothing.
+]]
+Blocks.alignLut = buffer.create(#appearances + 1)
+for _, appearance in appearances do
+	local texture = variantOf(appearance.textures)
+	local align = appearance.kind == Blocks.KIND_OPAQUE
+		and appearance.shape == nil
+		and buffer.readu8(Blocks.singleLut, appearance.id) == 0
+		and texture ~= nil
+		and packTextures[texture].Align ~= false
+	buffer.writeu8(Blocks.alignLut, appearance.id, if align then 1 else 0)
+end
+
+-- Per texture name, the blocks whose faces use it (names, in id order; twins and variants too).
+local textureUsers: { [string]: { string } } = {}
+for id = 0, Blocks.count - 1 do
+	local def = defs[id]
+	local faces = def.textures
+	if faces then
+		local seen: { [string]: boolean } = {}
+		for _, face in Blocks.TEXTURE_FACES do
+			local name = (faces :: any)[face]
+			if name and not seen[name] then
+				seen[name] = true
+				local list = textureUsers[name] or {}
+				textureUsers[name] = list
+				table.insert(list, def.name)
+			end
+		end
+	end
+end
+local texturesUsed: { string } = {}
+for name, list in textureUsers do
+	table.freeze(list)
+	table.insert(texturesUsed, name)
+end
+table.sort(texturesUsed)
+
+-- Every texture name a block uses (blank ones too), sorted. Read only.
+Blocks.texturesUsed = table.freeze(texturesUsed)
+
+local NO_USERS: { string } = table.freeze({})
+
+-- The blocks using a texture (names, in id order; cave twins and variants too), for the
+-- generator's list of what waits on each blank texture. Read only.
+function Blocks.textureUsers(name: string): { string }
+	return textureUsers[name] or NO_USERS
+end
 
 --[[ Helpers ]]
 

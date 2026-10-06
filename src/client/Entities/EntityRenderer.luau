@@ -20,7 +20,9 @@
 	              nobody collected (despawned, merged, out of range) disappear at once.
 
 	The models (ItemModels: anchored, nothing collides, touches or is queried) live in a Folder in
-	the workspace and are moved together with one BulkMoveTo per frame, after the camera.
+	the workspace and are moved together with one BulkMoveTo per frame, after the camera. When item
+	looks change (ItemModels.generation: the Textures setting, texture averages measured) items
+	build their copies again, LOOK_REBUILDS_PER_FRAME items a frame.
 	`itemsNear` lists the items around a point, read only (WAILA aims at them, Ui/Waila).
 ]]
 
@@ -57,6 +59,8 @@ local FLOAT_HEIGHT = 0.25
 local BLOCK_SCATTER = 0.15
 local FLAT_STEP = 0.09375 * 0.5
 local FLAT_JITTER = 0.15 * 0.5
+-- Items whose copies are built again per frame after a change of item looks.
+local LOOK_REBUILDS_PER_FRAME = 16
 -- The pickup flight: ticks, and where it ends above the collector's feet (blocks).
 local PICKUP_TICKS = 3
 local PICKUP_HEIGHT = 1.62 / 2
@@ -89,6 +93,8 @@ type Item = {
 	bobOffset: number,
 	model: Model,
 	copies: { Copy },
+	-- The item look generation its copies were built with (ItemModels.generation).
+	look: number,
 }
 
 -- What a spawn op carries (Protocol.EntityOp).
@@ -171,6 +177,7 @@ local function buildCopies(entity: Item)
 	for _, copy in entity.copies do
 		copy.model:Destroy()
 	end
+	entity.look = ItemModels.generation()
 	local amount = renderAmount(entity.count)
 	local size = (if ItemModels.isBlock(entity.item) then BLOCK_ITEM_SIZE else FLAT_ITEM_SIZE) * BLOCK
 	local copies = table.create(amount)
@@ -223,6 +230,7 @@ local function spawn(op: SpawnOp)
 		bobOffset = random:NextNumber() * math.pi * 2,
 		model = model,
 		copies = {},
+		look = 0,
 	}
 	buildCopies(entity)
 	model.Parent = folder
@@ -319,6 +327,22 @@ local function tick(getBlock: ItemPhysics.GetBlock)
 	end
 end
 
+-- Builds again the copies of up to LOOK_REBUILDS_PER_FRAME items of an older item look (flights
+-- end within a few ticks and keep theirs).
+local function refreshLooks()
+	local look = ItemModels.generation()
+	local budget = LOOK_REBUILDS_PER_FRAME
+	for _, entity in items do
+		if entity.look ~= look then
+			if budget == 0 then
+				return
+			end
+			budget -= 1
+			buildCopies(entity)
+		end
+	end
+end
+
 local parts: { BasePart } = {}
 local cframes: { CFrame } = {}
 
@@ -410,6 +434,7 @@ function EntityRenderer.start(world: ClientWorld.ClientWorld)
 				tick(getBlock)
 			end
 		end
+		refreshLooks()
 		draw(accumulator / TICK)
 	end)
 end

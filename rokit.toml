@@ -1,6 +1,9 @@
 # Toolchain for IceVoxel. Install with `rokit install` (https://github.com/rojo-rbx/rokit).
 [tools]
-rojo = "rojo-rbx/rojo@7.4.4"
+# Rojo 7.7 or later: the texture pack's generated files (src/textures) use properties older
+# versions do not know (ColorMapContent, TextureContent...). Update the Studio plugin with it
+# (`rojo plugin install`): a 7.4 plugin cannot talk to a 7.7 server.
+rojo = "rojo-rbx/rojo@7.7.1"
 stylua = "JohnnyMorganz/StyLua@2.0.2"
 selene = "Kampfkarren/selene@0.27.1"
 lune = "lune-org/lune@0.10.4"

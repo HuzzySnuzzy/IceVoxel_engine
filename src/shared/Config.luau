@@ -274,8 +274,14 @@ local Config = {
 		PoolLimit = 8000,
 		-- Fades the edge of the view distance with Lighting fog (ignored if an Atmosphere exists).
 		Fog = true,
-		-- Use the blocks' MaterialVariant textures / face images (BlockList `texture`, `faces`).
+		-- Draw the texture pack's textures (Shared/TexturePack; see Config.Textures). false: every
+		-- block in its plain Roblox material and colour.
 		Textures = true,
+		-- Materials on distant chunks (the "Far Materials" setting): merged far levels keep their
+		-- materials and textures, one far mesh per look (FarMeshes.LookMinShare and below), instead
+		-- of plain SmoothPlastic in the colour each block averages to (its texture and tint). More
+		-- MeshParts to build; off by default.
+		FarMaterials = false,
 		-- Draw plants (grass, ferns, flowers, mushrooms: up to 4 parts each, in full detail chunks
 		-- within Lod.FoliageDistance only). false saves those parts on slow devices; plants are still
 		-- there, aimed at and broken as usual, only not drawn. Read by the streamer's refresh.
@@ -287,7 +293,8 @@ local Config = {
 			always built first and come back instantly when a region changes or a build fails.
 			Published games need the Mesh / Image APIs enabled (see README). Levels below MinLevel and
 			nodes wider than MaxRegionBlocks always stay parts; parts of merged levels use a plain
-			look (SmoothPlastic, block colour, opaque water) so the swap is invisible.
+			look (SmoothPlastic in the colour each block averages to, opaque water) so the swap is
+			invisible.
 		]]
 		FarMeshes = {
 			Enabled = true,
@@ -322,7 +329,44 @@ local Config = {
 			-- No new meshes while the shown ones hold this many triangles (a safety limit; the whole
 			-- default view needs ~100k on hills and ~300k in the mountains).
 			MaxLiveTriangles = 1000000,
+			-- With Render.FarMaterials: a look (material + texture) gets its own MeshParts in a
+			-- region when it covers at least LookMinShare of the region's drawn area, at most
+			-- MaxLooks of them (the largest); the rest is drawn as LookRemainder: "plain"
+			-- (SmoothPlastic in the colour it averages to) or "largest" (joined to the largest
+			-- opaque look: that look's texture, tinted towards the colour each face averages to).
+			-- UvStuds: studs per texture tile in the meshes' UVs (a block face).
+			LookMinShare = 0.05,
+			MaxLooks = 4,
+			LookRemainder = "plain",
+			UvStuds = 3,
 		},
+	},
+
+	-- Textures (client; the pack itself is Shared/TexturePack) ---------------------------------------
+
+	Textures = {
+		-- Give every box of a textured block an odd size (in blocks) along each axis at full
+		-- detail, so textures that tile from the centre of a face still show one whole tile per
+		-- block. Only needed if your Studio check shows tiles centred on part faces (see README,
+		-- "Block textures"): it costs about 20% more parts near the player.
+		OddBoxes = false,
+		-- Draw a block's own bottom texture (Grass: dirt) as an extra image on the bottom face of
+		-- its parts. Bottoms are rarely seen; each image is one more instance per part.
+		BottomFaces = false,
+		-- Draw the side textures of blocks whose sides differ from their top (grass, logs,
+		-- sandstone, cactus) as upright images instead of the MaterialVariant, in case the
+		-- variant's sides come out turned in your game. Four more instances per part.
+		SideImages = false,
+		-- Measure each colour map's average colour in the game (EditableImage) when the pack has no
+		-- Average for it; the game prints them, ready to paste into the pack.
+		MeasureAverages = true,
+		-- Check every image id (colour, normal, roughness and metalness maps) once at startup
+		-- (ContentProvider) and name each one that fails; a colour map that fails draws the pack's
+		-- missing texture instead.
+		ValidateIds = true,
+		-- Plants with a Sprite texture are drawn as two crossed images, as in Minecraft, instead of
+		-- their boxes.
+		Sprites = true,
 	},
 
 	-- Day cycle (server clock, shared maths) ---------------------------------------------------------

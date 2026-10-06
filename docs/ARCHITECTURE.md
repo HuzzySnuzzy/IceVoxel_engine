@@ -585,7 +585,17 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   half for a tall plant's top), in the surface field fluids use for their height; `decodeKey`
   returns it and the appearance tells the uses apart (a shaped block is never a fluid, and no
   tinted plant gives light, so the sparse light flag never clashes with a tint). Border copies
-  (`applyBorder`) keep two layers below the range for it.
+  (`applyBorder`) keep two layers below the range for it;
+- **odd boxes** (`align`: `Config.Textures.OddBoxes`, off by default; ChunkWorker passes it for
+  full detail sections only): every box of a `Blocks.alignLut` appearance (an opaque merged cube
+  whose parts take a texture's MaterialVariant, `Align` not false; see Texture pack) is an odd
+  number of blocks along each axis, for variants that tile from a face's centre. After each axis
+  grows (X, then Z, then Y), an even run first starts one cell earlier when that whole slab is
+  wildcards (hidden rock any opaque box may cover), else it stops one short. A box grows only over
+  its own cells and wildcards, so no other appearance's boxes change, and with the flag off the
+  boxes are byte for byte what they were (20,530 sample meshes, LOD nodes included). Cost: +14-18%
+  boxes at full detail (+49% on flat plains; leaving the leaves out saves 7 points), no measurable
+  mesh time. LOD nodes never use it: their cells are 2^level blocks, so every size is even anyway.
 
 Boxes grow along X, then Z, then Y. Output is a buffer of 7 × u16 per box (position, size, key). Tests check the
 invariants (every visible block covered once, nothing visible covered by a wrong box) on generated
@@ -782,8 +792,8 @@ what was built while it was off too. In the mountains 45% of the parts on screen
 far meshes off at the default view, skipping keeps 41% fewer parts after loading and 34% fewer
 while walking (valleys 30%, the spawn hills 1%). With far meshes on only level 1 qualifies (4%).
 
-**Plants.** Every box of a plant is a part, and all ~180 full detail chunks would hold
-10,000-20,000 of them. So only full detail chunks within the plant distance of the viewer
+**Plants.** Every box (or sprite plane) of a plant is a part, and all ~180 full detail chunks
+would hold 10,000-20,000 of them. So only full detail chunks within the plant distance of the viewer
 (`Lod.FoliageDistance`, 40 blocks to the chunk's square, 24 on phones; the Plant Distance
 setting; one already drawing them keeps them up to half a chunk further) draw their plants, while
 `Render.Foliage` is on (`LodTree.drawsFoliage`): about 1,000-3,000 parts on grassland, at most
@@ -893,8 +903,9 @@ margins: 2-7% of the parts at the spawn, 17-47% on mountain slopes, 27-35% in va
 ### Rendering (`Rendering/`)
 
 Every node is a Folder of section Folders. Parts come from `PartPool`: one template per
-appearance, shape box and near / far / plain variant, so a recycled part only needs a new size
-and position. Near parts collide and can be raycast; far parts do neither and never cast shadows.
+appearance, shape box (or sprite plane) and near / far / plain variant, in the look
+`Rendering/TextureLooks` gives (see Texture pack), so a recycled part only needs a new size and
+position. Near parts collide and can be raycast; far parts do neither and never cast shadows.
 No terrain part takes part in audio collisions (`AudioCanCollide`, set under pcall).
 
 **Builds** (`ChunkRenderer`, `RenderSchedule`). Every section build is a task in one of four
@@ -916,8 +927,8 @@ Budget setting fixes it instead (`setBuildBudget`).
 mesh is matched against the live one by the boxes' 14 bytes (position, size, look, fluid level,
 tint, sparse light): identical boxes keep their parts untouched, only new boxes are built and only
 removed ones go. An edit builds a median of 1 part (p90 5-8) instead of rebuilding ~300, with 2
-property writes instead of ~1,000. A section with nothing on screen yet, or built for an older
-texture style, is built whole into a new folder.
+property writes instead of ~1,000. A section with nothing on screen yet, or built in an older
+look (another look generation, or plain where it no longer is), is built whole into a new folder.
 
 **One build in waiting per section.** A section has at most one build that is not live yet, so
 every build diffs against what is on screen; a newer one waits ("parked") and joins its lane when
@@ -957,11 +968,16 @@ the far meshes together: `show` counts the parts it puts into the workspace, and
 what is left at the next step (it still moves its first node every frame).
 
 **Restyle** (the settings menu). Shadow changes update PartPool's templates at once, live parts
-within the build budget and pooled ones when handed out. A texture change (offered only if a block
-has a texture) rebuilds sections off-screen in the background lane and swaps them like any other
-build: only those where no build waits to start (it uses the new look anyway), never the plain far
-levels (no textures), and also first builds that started with the old look. Any newer build
-replaces a restyle, so an edit never waits behind one.
+within the build budget and pooled ones when handed out. Looks come from TextureLooks, whose
+`changed` signal fires whenever they change (the Textures or Far Materials setting, averages
+measured, ids that failed; see Texture pack). Each section's record keeps the look generation
+its parts were made with (`PartPool:generationOf`: the plain one in plain far levels, the part
+one elsewhere) and whether it was drawn plain (`Record.plain`). `looksChanged` rebuilds only the
+sections where either differs from now, off-screen in the background lane, swapped like any other
+build (a change of near looks alone keeps the plain levels' parts; Far Materials flips the merged
+levels between plain and their far look), and also first builds that started with the old look;
+only where no build waits to start (it uses the new look anyway). Any newer build replaces a
+restyle, so an edit never waits behind one.
 
 `tests/spec/RenderPipeline` runs ChunkRenderer, PartPool and MeshOverlay against fake instances
 whose clock advances with every operation, with an engine drawing new parts up to `SwapFrames`
@@ -970,13 +986,16 @@ included), doubled lights and parts reused in the frame they were released, and 
 of edits ends with exactly the parts of a fresh build. Nothing of this ran in Roblox: whether the
 engine really draws new parts a frame late, and what instances cost, are its assumptions.
 
-**Textures.** A block's `texture` names a MaterialVariant in MaterialService; templates set
-`Material` to the block's material (it must be the variant's BaseMaterial) and `MaterialVariant` to
-the name. Scripts cannot create textured variants at runtime (their maps are plugin-only), so they
-are authored in Studio or synced by Rojo. With `StudsPerTile = BlockSize` and the Regular pattern
-one tile covers one block face, and because box parts start and end on the block grid the tiles
-line up across boxes. `faces` images become `Texture` children of near templates (e.g. a grass top
-over a dirt texture), so pooled parts keep them without extra work.
+**Textures** (the texture pack, see Texture pack below). Templates take TextureLooks' look of
+their appearance: near templates its near look (the MaterialVariant in its texture's Material, the
+clamped tint as Color, and Texture images such as a grass top over the grass side variant), far
+templates its far look (one variant, no images), plain templates SmoothPlastic in its plain colour.
+Images are children of the templates, so pooled parts keep them without extra work. With
+`StudsPerTile` 3 (a block) and the Regular pattern one tile covers one block face, and since box
+parts start and end on the block grid the tiles line up across boxes (if they tile from a face's
+corner; `Config.Textures.OddBoxes` otherwise, see Meshing). Glow lichen's plate (its first box that
+does not glow) goes see-through and carries its Front image as a Decal; the speck keeps the light,
+so lit and dark templates work as before.
 
 **Plants.** A `scatter` appearance's boxes are drawn off the cell's centre and turned about its
 vertical axis: `Meshing/Scatter.at` hashes the world block position (the node's origin plus the
@@ -990,7 +1009,14 @@ does). Tinted boxes (grass and ferns) are coloured authored colour × `Blocks.FO
 each channel clamped, with the tint from the box key; their parts' colour is set every time, since
 a pooled part may come from a cell with another tint. An edit that changes a soil's tint two cells
 below a section's bottom also remeshes that section (`ClientWorld`): a tall plant's top there
-reads its tint from it.
+reads its tint from it. A plant with a sprite (`TextureLooks.spriteOf`: a filled Sprite texture,
+Textures and `Config.Textures.Sprites` on) is drawn in full detail as two crossed planes along its
+cell's diagonals instead of its boxes: `PartPool.SPRITE_BOX` templates (thin see-through parts,
+`SPRITE_THICKNESS` 0.05 studs, no collision, queries, touch or shadow, the sprite as a Decal on
+Front and Back), BlockSize × √2 wide and a cell tall, at the same offset and turn. Tinted ones
+get their soil's tint on the Decals (`PartPool:images`), written only when the part's tint differs
+(`spriteTints`). The mesher, the shapes and the Bounds that aim and outline plants are unchanged,
+so a sprite is purely a drawing: 2 parts a plant instead of up to 4 boxes.
 
 **Glow lichen's lights.** A revealed cave can hold 1,000-3,000 lichen, and a PointLight each
 would be far too many. The mesher marks one lit cell per 8³ box (sparse lights, see Meshing); for
@@ -1003,9 +1029,9 @@ position, so a finite `Caves.LichenLightDistance` or Lichen Lights setting
 camera on slow devices, every 0.25 s, turning them off again 8 blocks further. Lichen lights cast
 no shadows: they are dim, short and many, and lichen grows only deep underground, so a glow
 reaching through a thin cave wall shows nowhere it shouldn't. Each lichen is two parts, its plate
-and the Neon speck that carries the light. The renderer counts parts with a light (`lightCount`)
-and sparse lights (`sparseCount`, `sparseOn`; of them lava's, `lavaCount`, `lavaOn`) for F3
-("lichen a of b, lava c of d").
+(see-through with the pack's image, see Textures) and the Neon speck that carries the light. The
+renderer counts parts with a light (`lightCount`) and sparse lights (`sparseCount`, `sparseOn`; of
+them lava's, `lavaCount`, `lavaOn`) for F3 ("lichen a of b, lava c of d").
 
 **Lava's lights.** Lava (light 15: 13.5 blocks, 40.5 studs of PointLight range, no shadows) is a
 sparse light too: a lava box the mesher did not mark (`GreedyMesher.fluidSurface`) comes from
@@ -1072,7 +1098,8 @@ built and shown as parts exactly as before; the streamer's protocol is unchanged
    not decimate it into cracks). Its size is checked before it is trusted.
 3. **Swap**: if the members are unchanged, the MeshParts are parented, and `Render.SwapFrames`
    frames later (at least one) the members' part folders are unparented (kept). Parts of merged
-   levels use a plain look (SmoothPlastic, block colour, opaque water), so both look the same.
+   levels take the meshes' look, so both look the same: the plain look (SmoothPlastic in the
+   colour each block averages to on screen, opaque water) unless Far Materials is on (below).
 4. **Demote**: when a member of a mesh is removed or rebuilt, the members' parts are parented
    again and the mesh is destroyed `Render.SwapFrames` frames after the last of them, so the two
    never leave a gap. Members added to a meshed region stay parts until it is rebuilt. A failed
@@ -1102,10 +1129,54 @@ detail chunks keep exact seams (and are never merged: they need exact collision,
 
 A startup probe a few seconds after joining (an off-centre block, a flat sheet, and a full-size
 mesh timed against the usual frame time, up to three tries) decides whether meshes are used at
-all; when they are not, far parts keep their normal look. Meshes in the world are capped at
-`MaxLiveTriangles`. Far meshes keep the sea floor: near water is transparent, so looking through
-it across into a merged region must find the same ground the parts had. F3 shows the status and
-counters.
+all; when they are not, far parts keep their normal look. The block is timed the same way
+(`usualFrame`, the mean of 30 frames, and `timedMesh`, the slowest Heartbeat during the build
+over it: `tinyFrameMs`, what a region's small looks cost), then built again in a look (Slate,
+UVs, Material and MaterialVariant written, as Far Materials builds); when that fails, meshes
+stay on but plain (`dropLooks`, below). Meshes in the world are capped at `MaxLiveTriangles`. Far
+meshes keep the sea floor: near water is transparent, so looking through it across into a merged
+region must find the same ground the parts had. F3 shows the status and counters (with Far
+Materials, "N parts (M with materials)": MeshParts in a look other than plain).
+
+**Looks (Far Materials).** A MeshPart has one Material and one MaterialVariant, so materials need
+one MeshPart per look. ChunkRenderer gives the overlay TextureLooks' callbacks with
+`setLooks(enabled, lookOf, lookInfo, plainOf)`, at start and whenever `changed.meshes`:
+- `lookOf(appearance, face)`: a quad's look id (`MeshGeometry.PLAIN` = 0) and vertex colour;
+- `lookInfo(id)`: the look's material, variant, transparency, reflectance and its texture's
+  average (sRGB 0..1, when known);
+- `plainOf` (`TextureLooks.plainRgb`): what a face averages to on screen.
+
+Off (the default): `plainLevel` is true for merged levels and every mesh is one plain look in the
+plain colours, the meshes of before with calibrated colours. On (`looks`: the setting, unless the
+probe dropped them): `plainLevel` is false, the merged levels' parts take their far look, and
+MeshGeometry groups each region's quads by look (`Options`):
+- looks are ranked by the area they cover; those covering at least `LookMinShare` (5%) keep
+  meshes of their own, at most `MaxLooks` (4), the largest;
+- every other quad is recoloured to its plain colour: `LookRemainder = "plain"` draws it in the
+  plain look; `"largest"` adds it to the largest kept look that is opaque (plain when none is),
+  tinted so that look's texture averages to the plain colour (`MeshGeometry.tint`: plain colour /
+  look average per channel in linear light, at most 1; the plain colour itself when the average is
+  unknown). Its own vertex colour would be a tint meant for its own texture: a Tint false ore's
+  white, shown on stone's texture;
+- meshes go by look (ascending ids), then band, under the same triangle cap; with one look the
+  meshes are exactly those without looks, plus colours;
+- textured looks get box-mapped UVs from world studs, `UvStuds` per tile from a corner snapped to
+  a whole tile (u to the right and v down seen from outside the face; tops and bottoms on X and Z),
+  so tile edges fall on block edges at every level and across meshes;
+- each MeshPart takes its look's Material, MaterialVariant, Transparency and Reflectance, a white
+  Color (the vertex colours tint it) and no shadow when see-through.
+
+A change of looks bumps `lookGen`: the running build stops, a build that finishes in old looks is
+dropped (not a failure), every mesh is demoted, ChunkRenderer restyles the sections whose
+generation or plain flag is out of date, and a region is merged again only once every member's
+parts carry the current look (`isCurrent`, set by ChunkRenderer), so a mesh is never built from
+parts about to be restyled. `dropLooks` (the probe's mesh in a look failed) sets `lookable` false,
+warns once ("[IceVoxel] Far Materials off: ... (far meshes stay plain)"), applies `setLooks` again
+with Far Materials off whatever the setting, and when that changed `plainLevel`'s answer calls
+`onLooks`, which ChunkRenderer answers by restyling the merged levels. Cost: 2-5 meshes per region
+instead of 1-2; a 1,616-quad region builds in 4.0 ms instead of 2.9 (native; 6.7 instead of 5.9
+interpreted). Unchecked in Studio: whether a MeshPart's material follows the written UVs (and their
+scale and signs), and whether vertex colours tint it.
 
 ### Map (`Map/`)
 
@@ -1384,6 +1455,179 @@ server uses for suffocation (see Game modes: On the server).
   Minecraft instead of flooding the ground around it. Lava, oil and fuel spread the same way with
   their own slope distance (see Fluids: lava and oil look for holes up to 3 blocks away).
 
+## Texture pack (`TexturePack`, `Blocks`, `tests/build_textures`, client `Rendering/TextureLooks`)
+
+The user's textures go from one hand-edited module to every part, image and mesh:
+
+```
+Shared/TexturePack ─► Blocks (faces per block, appearances, variantTexture, alignLut)
+   │                  ├─► GreedyMesher (odd boxes)
+   │                  └─► Rendering/TextureLooks ─► PartPool, ChunkRenderer (parts, sprites)
+   │                                             ─► MeshOverlay (far mesh looks)
+   │                                             ─► ItemModels, ItemIcon (items)
+   ▼
+tests/build_textures ─► src/textures/*.model.json ─► Rojo 7.7.1 ─► MaterialService.IceVoxel,
+                                                                   ReplicatedStorage.IceVoxelTextures
+                                     (the variants and prototypes TextureLooks draws with)
+```
+
+**The pack** (`Shared/TexturePack`): pure data that requires nothing, so the server, clients,
+worker Actors and Lune all load it, and it is the only place textures are set (BlockList's old
+`texture`, `tint` and `faces` fields are gone). `Textures` maps a name (lower case with spaces, as
+Minecraft names them) to a colour map (`""` until made), optional normal, roughness and metalness
+maps, the `Material` its MaterialVariant is based on, `Tint` (true, the default: the drawn block's
+voxel colour; false: the image's own; a block name: that block's colour), `Average` and `Align`.
+`Blocks` maps a block name to its faces (`All`, `Sides`, `Top`, `Bottom`, `Front`, `Sprite`).
+`StudsPerTile` is 3 (a block face), `ShowMissing` swaps blank textures for `Missing`.
+
+**Resolution** (`Blocks`, when it loads). Every def gets `textures` (`TextureFaces`: `top`,
+`bottom`, `north`, `south`, `east`, `west`, `front`, `sprite`, texture names, blank ones too; nil
+for blocks never textured): a face given nothing falls back to All, then Sides. A cave twin shares
+its twin's table (twins must look alike, so they never have entries); a block without an entry
+takes its variant group's (the base's, else the first member listed with one: the six glow lichen
+sides, tall plants' tops). The eight names are part of the appearance key, so blocks with
+different textures never share an appearance (still 157 appearances, numbered as before). Each
+appearance gets `textures`, `textured` (a face is filled, or ShowMissing with a filled missing
+texture) and `sprite`. The pack is checked as Blocks loads, failing with a message that names the
+mistake (`TexturePack: ...`): unknown blocks, faces, textures or tint blocks; entries for twins,
+fluids or undrawn blocks; empty entries; materials that cannot take a variant
+(`VARIANT_MATERIALS`, a list because Lune has no Enum: all but Neon, Glass, ForceField, Air and
+Water). Lookups: `textureFaces`, `textureOf`, `textureFilled`, `variantName` (`"IV_"` and the name
+with spaces as `_`), `texturesUsed`, `textureUsers`, and two rules everything else follows:
+- `variantTexture(appearance)`: the texture whose MaterialVariant a cube's parts take at full
+  detail (a part has one variant on all six faces): the sides' when filled; else the top's when
+  the bottom has no other filled texture; else the missing texture with ShowMissing; none for
+  plants and lichen. With `Config.Textures.SideImages` a filled top that differs from the sides
+  comes first (the sides are images then).
+- `alignLut`: 1 per appearance that is an opaque, merged (not `single`), unshaped cube whose
+  `variantTexture` is filled and not `Align = false` (34 today: every textured opaque cube but the
+  leaves), the odd-box rule's input (see Meshing). Images tile from a face's corner, so they need
+  nothing.
+
+All of this adds about 1.5 ms to Blocks' load time (interpreted).
+
+**The generator** (`tests/build_textures`, its logic in `tests/lib/TextureBuild` so a spec can
+run it). Game scripts cannot set a MaterialVariant's maps or BaseMaterial, nor a Texture's normal,
+roughness and metalness maps (PluginSecurity), so they are made at edit time, as two committed Rojo
+model files:
+- `src/textures/Materials.model.json`, mapped to `MaterialService.IceVoxel`: a MaterialVariant
+  `IV_<name>` per filled texture with BaseMaterial, its maps (`ColorMapContent`...), StudsPerTile 3
+  and MaterialPattern Regular, never AlphaMode (MaterialVariant cut-outs are not live on clients,
+  so block textures are opaque);
+- `src/textures/Images.model.json`, mapped to `ReplicatedStorage.IceVoxelTextures`: a Texture
+  prototype of the same name with TextureContent, its maps and StudsPerTileU / V, which the client
+  clones for images, sprites and item cubes because a clone keeps the maps scripts cannot set.
+
+Content properties are plain strings and never `""` (Rojo would store an empty Uri), which needs
+Rojo 7.7 (7.4 knows none of them; `rokit.toml` pins 7.7.1). Rojo owns only the IceVoxel folder, so
+variants made by hand elsewhere in MaterialService stay. The output is deterministic (sorted names
+and keys, tabs, one property per line), so `--check` and the TexturePack spec compare text (CRLF
+read as LF). It refuses bad ids, unknown fields and bad averages; warns about a normal map equal
+to its colour map and filled textures no block uses; notes the filled textures without an Average
+(`unmeasured`, `--list`).
+
+**Looks** (`Rendering/TextureLooks`, the one place that decides them, so near, far, plain, meshed
+and item looks agree; its maths is pure, and Instances appear only in `newImage`, `newDecal`,
+`start` and the MaterialService lookup). A part shows `ColorMap × Color`, and `BasePart.Color` is
+8 bits a channel, so a part's tint can only darken; `Texture` and `Decal.Color3` are not clamped.
+In linear light:
+- `tintOf`: target / average per channel (the target is the Tint's colour; none for Tint false:
+  white), clamped to 1 on parts, not on images; with an unknown average the target itself (a
+  plain multiply);
+- `averageOf`: what a face shows on screen, average × tint where the average is known, else the
+  target (the voxel colour for Tint false or a face without a texture);
+- `shortfall`: how far below its target a part's clamped texture shows. Above `CLAMP_VISIBLE`
+  (4 of 255) an opaque block keeps the variant but adds the texture as images (unclamped tint) on
+  every face still showing it, and its far look becomes plain; a see-through block draws it darker
+  (images would hide what is behind). One sorted warning lists them whenever the list changes.
+
+Per appearance, cached until the next change:
+- near (full detail): `variantTexture`'s variant in its texture's Material, Color = its clamped
+  tint, plus a Texture image (3 studs a tile, unclamped tint) on the top when it draws another
+  texture, on the bottom with `BottomFaces`, on the sides with `SideImages`; nothing drawable: nil,
+  the BlockList look;
+- far (levels >= 1 not plain): one variant, no images: the top's texture, else the sides' (tops
+  dominate from afar); the plain look when too dark;
+- plain: SmoothPlastic in what the top averages to (`plainColour`);
+- sprite (`Config.Textures.Sprites`): the texture and its Decal colours per foliage tint (target
+  × `FOLIAGE_TINTS[t]`, clamped like the boxes' colours, / average);
+- front (glow lichen): one Decal on the plate's face away from the support (Down: Top, Up: Bottom,
+  North: Back, South: Front, West: Right, East: Left);
+- item cube faces: an image per face that draws a texture;
+- far mesh look (`lookOf`, `lookInfo`, `plainRgb`): with Far Materials the far look (material +
+  variant + transparency + reflectance; one per appearance, as a far part has one variant) and the
+  far part's Color as vertex colour, or the BlockList material in the voxel colour; without it the
+  plain look in the plain colour.
+
+`drawable` turns a blank texture (with ShowMissing), a failed id or a variant missing from
+MaterialService (`GetMaterialVariant`, warned once with the fix) into the missing texture, and that
+into nothing (the block's own look) when the missing texture cannot be drawn either. Images clone
+the prototypes, else are new Textures from the colour map.
+
+**Startup** (`start`, called before `ChunkRenderer.new`; in the background, never in the first
+frame). With `Config.Textures.ValidateIds` every filled id of every map is preloaded once through
+temporary Decals (`ContentProvider:PreloadAsync`; a MaterialVariant cannot be preloaded): a failed
+colour map marks its texture failed (`applyFailed`: drawn as the missing texture), and every
+failure is warned with the texture, the map and the likely cause (a Decal id), for a colour map
+also its blocks and the fallback drawn instead. With `MeasureAverages` every texture without an
+Average (the missing texture only when something draws it) is measured one image at a time:
+`CreateEditableImageAsync`, `ReadPixelsBuffer`, every 8th texel each way, the alpha-weighted mean
+in linear light (`averagePixels`), `Destroy`; up to 3 tries a second apart while the editable
+memory budget (shared with far meshes) is full, stopping after 3 failures in a row. The averages are printed ready to paste (`formatAverages`)
+and applied (`applyAverages`); failures are warned by cause (refused: the Mesh / Image APIs or
+ownership; the budget; a transparent image; not tried). Until then looks are provisional.
+
+**Generations and restyles.** `change` snapshots every appearance's look signatures around an
+edit of the state (`setStyle`: the Textures and Far Materials settings; `applyAverages`;
+`applyFailed`) and bumps only what differs: `partGeneration` (near and far looks, sprites,
+lichen), `plainGeneration` (plain colours) and `generation`. `changed` fires with `Changes`
+(`parts`, `plain`, `meshes`: plain colours changed, Far Materials toggled, or part looks changed
+with it on; `items`), and `itemsChanged` only when item looks changed, so Far Materials alone
+rebuilds no item.
+- PartPool keys templates by generation (plain templates by the plain one, the rest by the part
+  one), so parts of an old look are never handed out again; `syncLooks` takes the new generations
+  and destroys the old templates (castRule, litKeys and sparseKeys stay: parts of old keys may
+  still be on screen, and refresh and release read them), and `trim` the old pooled parts.
+- ChunkRenderer rebuilds what changed (see Rendering, Restyle), calls `MeshOverlay:setLooks` when
+  `meshes`, and answers `overlay.isCurrent` and `overlay.onLooks` (see Far meshes).
+- ItemModels drops its cached prototypes on `itemsChanged` and counts `generation()`; ItemIcon
+  drops its spare models and marks every live icon stale (hidden screens' too), building them
+  again within 1 ms a frame (`REBUILD_BUDGET`). Held, dropped and transported items keep their
+  model until their item changes.
+
+**Items** (`Rendering/ItemModels`). A cube with textures is a bare template (`PartPool.makeTemplate`
+with `bare`: the BlockList material and colour) with one Texture per face that draws one, its
+StudsPerTile the cube's size so one tile spans the face (a variant would tile every 3 studs
+whatever the size), in its unclamped tint; with all six textured the cube under them is white
+SmoothPlastic. A plant with a sprite (a tall plant's top half's, else its own) is the sprite on an
+upright plane filling the cube, both sides; glow lichen's plate shows its image only.
+
+**Specs.**
+- `tests/spec/TexturePack`: the pack's shape, an entry for every block that can carry a texture
+  and none for the rest, the sheet's ids with its two typo fixes, the blanks, face resolution
+  (twins, variant groups), appearances keyed by textures, `variantTexture` and `alignLut`, Blocks'
+  refusals, and the generator: its output, its refusals and the committed files up to date. Tests
+  that make up packs run on three bases (the pack as shipped, every blank filled, ShowMissing on),
+  so filling the pack never breaks them; replacing a sheet id means updating `SHEET`.
+- `tests/spec/TextureLooks`: TextureLooks under fake services: the tint maths, pixel averages and
+  the paste block, near, far and plain looks of grass, logs, sandstone, cactus, ores and blanks,
+  items, sprites and lichen, prototypes, the missing texture, ShowMissing, textures too dark,
+  far mesh looks, generations and signals, and `start`'s checks with every failure by cause. Each
+  test starts from a neutral pack (ShowMissing off, no Average) and blanks what it needs itself.
+- `tests/spec/FarLooks`: MeshGeometry's look grouping, share rule, remainder tint, UVs and bands;
+  MeshOverlay's `setLooks`, stale builds, `isCurrent`, a MeshPart per look, the probe and
+  `dropLooks`; and generated terrain meshed with TextureLooks' real looks, Far Materials on and off.
+- `tests/spec/Meshing`: odd boxes (off: unchanged; a flat layer; generated chunks: every textured
+  box odd, coverage exact, other appearances unchanged).
+- `tests/spec/RenderPipeline`: near, far and plain templates, sprites and lichen, restyles of only
+  what changed, old templates destroyed, item cubes and icons, textures too dark, and generated
+  terrain drawn through ChunkRenderer with MaterialService and the prototypes loaded from the
+  generated `src/textures` files (grass is `IV_grass_side` with a green `IV_grass_top` image, logs
+  `IV_log` each in its own colour, every look of all 157 appearances names something the files
+  hold, ShowMissing swaps in `IV_missing_texture`).
+- `tests/spec/PlayerSettings`, `SettingsClient`: the Far Materials setting (id 34) and when
+  Textures and Far Materials are offered.
+
 ## Player settings (`PlayerSettings`, client `Settings/`, `Ui/SettingsScreen`, server `Players/SettingsStore`)
 
 Players tune the view, performance, sounds, controls and HUD for themselves in Minecraft's Options
@@ -1420,7 +1664,7 @@ screen; Config gives every default and the presets.
   | ---------------------------- | ------------------------------------------------------------------- |
   | lod, caves, foliage          | `ChunkStreamer:applyView()` (see Streaming)                         |
   | fog, lighting                | `ViewSettings.applyFog` / `applyLighting` (Prefer, Brightness)      |
-  | shadows, farShadows, textures | `ChunkRenderer:restyle` (see Rendering)                            |
+  | shadows, farShadows, textures | `ChunkRenderer:restyle` (see Rendering; farMaterials uses textures) |
   | overlay                      | `MeshOverlay:setUserEnabled` (see Far meshes)                       |
   | budget                       | `ChunkRenderer:setBuildBudget(ms?)`, nil for Auto                   |
   | swapFrames                   | writes `Config.Render.SwapFrames`, which the renderer reads every frame |
@@ -1880,15 +2124,17 @@ the Arcade pixel font):
   but none of the inventory's input.
 
 **Item icons and models** (`Rendering/ItemModels`, `Ui/ItemIcon`). An item's model is a cube with the
-block's look (the terrain's part template: material, colour, texture, face images), or the item's
-boxes. Icons show it in a ViewportFrame, lit so the top is brightest, then the left face, then the
-right. They are built once per slot and only rebuilt when the item changes. The same models are
+block's look (the terrain's part template: material and colour, or with textures one image per
+textured face, see Texture pack), or the item's boxes. Icons show it in a ViewportFrame, lit so
+the top is brightest, then the left face, then the right. They are built once per slot and only
+rebuilt when the item changes, or a few a frame after item looks change. The same models are
 dropped items and, in `Player/HeldItems`, the item in each character's hand (from the
 `IceVoxelHeldItem` attribute the server sets) and in the first person corner. Tools and sticks lie
 diagonally in icons (`tilt`) and are held by the handle, pointing forward. Plants are shaped-block
 items: icons from the front, held upright like blocks, dropped like items, drawn untinted (the
 Grass block's green); a tall plant shows its `icon`, the lower half plus the top's look in one
-cell. Shears are a tool: diagonal in icons, held by the handles.
+cell, and a plant with a sprite shows the sprite on an upright plane instead. Shears are a tool:
+diagonal in icons, held by the handles.
 
 **Decorated blocks** (`Rendering/BlockDecor`). Chests, crafting tables, furnaces, the Creative
 Energy Cube, the Heat Generator, the Electric Furnace, the Batteries, the Oil Refinery (a light
@@ -3553,3 +3799,12 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   reuse one. A setting's effect key needs a function registered in the client script
   (`Settings.missing()` lists those without), and anything a worker needs travels in its jobs:
   worker actors keep their own Config.
+- Textures are set only in `Shared/TexturePack`, which stays pure data (every VM requires it).
+  After editing it run `lune run tests/build_textures`; `src/textures` is generated and never
+  edited by hand (`--check` and the TexturePack spec fail when it is stale). Cave twins never get
+  entries. `Blocks.variantTexture` is the one rule for a cube's MaterialVariant: TextureLooks and
+  `alignLut` both follow it.
+- Looks come only from `Rendering/TextureLooks`: PartPool, ChunkRenderer, MeshOverlay (through
+  `setLooks`) and ItemModels ask it, so near, far, plain, meshed and item looks agree. A change of
+  looks goes through its generations and `changed` / `itemsChanged`, and what it touches is
+  rebuilt in the background lane, never all at once.

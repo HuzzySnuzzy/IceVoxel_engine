@@ -15,6 +15,9 @@
 	person they rise from the bottom right corner towards the middle, leaning left, their face to
 	the camera, and chop forward when swinging.
 
+	Models are built again when item looks change (ItemModels.generation: the Textures setting,
+	texture averages measured a few seconds after joining).
+
 	Nothing is drawn for an empty hand or while a Tool is equipped, nor for spectators (Shared/
 	GameMode): their body is invisible or a floating head (Player/SpectatorRules), and in first
 	person they have no hand. A third person model hides with its character's head when the camera
@@ -48,8 +51,9 @@ function HeldItems.swing()
 	swingStart = os.clock()
 end
 
--- `parts` and `hidden` let the first person hiding write only when it changes.
-type Held = { item: number, model: Model, parts: { BasePart }, hidden: boolean }
+-- `parts` and `hidden` let the first person hiding write only when it changes; `look`: the item
+-- look generation the model was built with.
+type Held = { item: number, model: Model, parts: { BasePart }, hidden: boolean, look: number }
 
 -- First person pose of a block (or any item but tools): `dip` is the swing, 0..1..0.
 local function blockPose(dip: number): CFrame
@@ -122,6 +126,7 @@ function HeldItems.start()
 
 	local handItem = 0
 	local handModel: Model? = nil
+	local handLook = 0
 
 	RunService.RenderStepped:Connect(function()
 		-- Third person: every character's hand.
@@ -141,7 +146,8 @@ function HeldItems.start()
 				clear(player)
 			else
 				local current = held[player]
-				if current == nil or current.item ~= item then
+				local look = ItemModels.generation()
+				if current == nil or current.item ~= item or current.look ~= look then
 					clear(player)
 					local model = ItemModels.build(item, ItemModels.handSize(item))
 					model.Parent = folder
@@ -152,7 +158,7 @@ function HeldItems.start()
 						end
 					end
 					-- New parts are visible (LocalTransparencyModifier 0).
-					current = { item = item, model = model, parts = parts, hidden = false }
+					current = { item = item, model = model, parts = parts, hidden = false, look = look }
 					held[player] = current
 				end
 				assert(current, "held model")
@@ -189,7 +195,8 @@ function HeldItems.start()
 		if not show then
 			return
 		end
-		if handItem ~= item or handModel == nil then
+		local look = ItemModels.generation()
+		if handItem ~= item or handModel == nil or handLook ~= look then
 			if handModel then
 				handModel:Destroy()
 			end
@@ -197,6 +204,7 @@ function HeldItems.start()
 			model.Parent = viewport
 			handModel = model
 			handItem = item
+			handLook = look
 		end
 		-- Minecraft's swing: the item dips towards the centre and back.
 		local t = math.clamp((os.clock() - swingStart) / SWING_TIME, 0, 1)

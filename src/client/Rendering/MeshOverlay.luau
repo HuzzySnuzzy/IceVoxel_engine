@@ -40,7 +40,26 @@
 	and a flat sheet to check placement, and times a full-size mesh against the usual frame time
 	(up to three tries, a few seconds after joining); meshes stay off when anything fails or a build
 	makes frames more than MaxBlockingMs longer than usual. If meshes are off from the start, far
-	parts keep their normal look. Off on phones by default.
+	parts keep their normal look. Off on phones by default. The block is timed the same way
+	(`tinyFrameMs`: what a region's small looks cost), then built again in a look (UVs, Material
+	and MaterialVariant written, as Far Materials does): when that fails, meshes stay on but plain
+	(`dropLooks`: merged levels stay plain whatever the setting).
+
+	Looks (`setLooks`, from Rendering/TextureLooks through ChunkRenderer). A MeshPart has one
+	Material and one MaterialVariant. Far Materials off (as before): the parts of merged levels take
+	the plain look (`plainLevel`: SmoothPlastic, opaque, no images) and every mesh is plain too, its
+	vertices in the plain colours (`plainOf`: what each face averages to on screen, so near and far
+	match). Far Materials on: merged levels are not plain, their parts take the far look, and
+	MeshGeometry splits each region's quads by look (`lookOf(appearance, face)`: a whole number,
+	MeshGeometry.PLAIN = 0 for the plain look) with its LookMinShare / MaxLooks / LookRemainder
+	rule; a mesh of look L takes `lookInfo(L)`'s Material, MaterialVariant, Transparency and
+	Reflectance, box-mapped UVs (UvStuds per tile) when it is textured, white part colour (vertex
+	colours tint it), and casts no shadow when see-through. Any change bumps the look generation:
+	the running build stops and is dropped, every mesh is demoted (parts back first, as always),
+	and regions are built again once every member's parts carry the current look (`isCurrent`, set
+	by the renderer), so a mesh is never built from parts about to be restyled. When the overlay
+	changes `plainLevel`'s answer on its own (`dropLooks`), it calls `onLooks` (set by the
+	renderer) to restyle what was drawn in the old look.
 ]]
 
 local AssetService = game:GetService("AssetService")
@@ -112,6 +131,27 @@ type Done = {
 
 type QuadsEntry = { buffer: buffer, count: number }
 
+-- A look's MeshPart properties (Rendering/TextureLooks.lookInfo; `variant` "" for none), and the
+-- colour its texture averages to (r, g, b 0..1; nil: unknown) for the "largest" remainder's tint.
+export type LookInfo = {
+	material: Enum.Material,
+	variant: string,
+	transparency: number,
+	reflectance: number,
+	average: { number }?,
+}
+export type LookOf = MeshGeometry.LookOf
+export type PlainOf = MeshGeometry.PlainOf
+export type LookInfoOf = (look: number) -> LookInfo?
+
+-- What a build uses, fixed when it starts (MeshRegions.Job.payload).
+type Payload = {
+	quads: { QuadsEntry },
+	lookGen: number,
+	options: MeshGeometry.Options?,
+	lookInfo: LookInfoOf?,
+}
+
 export type Stats = {
 	status: string,
 	-- Why no build starts now ("" when one may): "off", "paused", "moving", "busy".
@@ -128,6 +168,11 @@ export type Stats = {
 	-- Triangles in shown meshes / baked this session.
 	triangles: number,
 	baked: number,
+	-- Far Materials on, MeshParts shown in a look other than plain, and how much longer than usual
+	-- the probe's one-block mesh made frames (ms, like slowestFrameMs).
+	looks: boolean,
+	lookParts: number,
+	tinyFrameMs: number,
 }
 
 export type MeshOverlay = {
@@ -171,8 +216,34 @@ export type MeshOverlay = {
 	dying: { Dying },
 	-- Parts in a node's model (set by ChunkRenderer; 0 without it).
 	countParts: (node: Node) -> number,
+	-- Far Materials (see the header): on now, asked for (the setting), possible here (false once
+	-- the probe could not build a mesh in a look); the look callbacks, the options builds use and
+	-- the look generation (bumped by every setLooks).
+	looks: boolean,
+	lookWanted: boolean,
+	lookable: boolean,
+	lookOf: LookOf?,
+	lookInfo: LookInfoOf?,
+	plainOf: PlainOf?,
+	lookOptions: MeshGeometry.Options?,
+	lookGen: number,
+	-- Do the node's parts carry the current look (set by ChunkRenderer; true without it)? Regions
+	-- are only built from members that do.
+	isCurrent: (node: Node) -> boolean,
+	-- `plainLevel`'s answer changed without a setLooks call (`dropLooks`): the renderer restyles
+	-- what it drew in the old look (set by ChunkRenderer; nothing without it).
+	onLooks: () -> (),
 
+	mergedLevel: (self: MeshOverlay, level: number) -> boolean,
 	plainLevel: (self: MeshOverlay, level: number) -> boolean,
+	setLooks: (
+		self: MeshOverlay,
+		enabled: boolean,
+		lookOf: LookOf?,
+		lookInfo: LookInfoOf?,
+		plainOf: PlainOf?
+	) -> boolean,
+	dropLooks: (self: MeshOverlay, reason: string) -> (),
 	wantsQuads: (self: MeshOverlay, level: number) -> boolean,
 	setQuads: (self: MeshOverlay, node: Node, quads: buffer, count: number) -> (),
 	onShow: (self: MeshOverlay, node: Node) -> (),
@@ -229,8 +300,21 @@ local function batchAdd(em: EditableMesh, attr: Enum.MeshAttribute, data: { any 
 	return ids
 end
 
--- Builds one MeshPart from MeshGeometry arrays using the scratch mesh. Returns the part or an error.
-local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh, castShadow: boolean): (MeshPart?, string?)
+-- Does a mesh of this look show a texture (so it needs UVs)?
+local function textured(info: LookInfo?): boolean
+	return info ~= nil and (info.material ~= Enum.Material.SmoothPlastic or info.variant ~= "")
+end
+
+--[[
+	Builds one MeshPart from MeshGeometry arrays using the scratch mesh, in look `info` (nil: the
+	plain look). Returns the part or an error.
+]]
+local function buildMesh(
+	em: EditableMesh,
+	mesh: MeshGeometry.Mesh,
+	castShadow: boolean,
+	info: LookInfo?
+): (MeshPart?, string?)
 	em:Clear()
 	local positions = mesh.positions
 	local vertexCount = #positions // 3
@@ -255,28 +339,49 @@ local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh, castShadow: 
 	end
 	batchAdd(em, Enum.MeshAttribute.Face, faces)
 
-	-- Every vertex got its own colour id when its first face was added (white); colour them.
-	local colorIds: { number } = table.create(vertexCount)
-	local colors: { Color3 } = table.create(vertexCount)
-	for first = 1, vertexCount, BATCH do
-		local last = math.min(first + BATCH - 1, vertexCount)
-		local nested = em:BatchGetVertexAttributes(Enum.MeshAttribute.Color, table.move(vertexIds, first, last, 1, {}))
-		if #nested ~= last - first + 1 then
-			error("BatchGetVertexAttributes returned too few vertices")
-		end
-		for k, ids in nested do
-			local i = first + k - 1
-			local id = (ids :: { number })[1]
-			if id == nil then
-				error("vertex without a colour id")
-			end
-			colorIds[i] = id
-			colors[i] = colorOf(mesh.appearances[(i - 1) // 4 + 1])
+	-- Every vertex got its own colour id (white) and UV id ((0, 0)) when its first face was added:
+	-- colour them (the look's colours, else the block colours), and give textured looks their UVs.
+	local quadColors: { Color3 } = table.create(mesh.quads)
+	local looked = mesh.colors
+	for q = 1, mesh.quads do
+		if looked then
+			quadColors[q] = Color3.new(looked[q * 3 - 2], looked[q * 3 - 1], looked[q * 3])
+		else
+			quadColors[q] = colorOf(mesh.appearances[q])
 		end
 	end
-	for first = 1, vertexCount, BATCH do
-		local last = math.min(first + BATCH - 1, vertexCount)
-		em:BatchSetValues(table.move(colorIds, first, last, 1, {}), table.move(colors, first, last, 1, {}))
+	local uvs = if textured(info) then mesh.uvs else nil
+	local function setAttribute(attribute: Enum.MeshAttribute, valueOf: (vertex: number) -> any)
+		local attributeIds: { number } = table.create(vertexCount)
+		local values: { any } = table.create(vertexCount)
+		for first = 1, vertexCount, BATCH do
+			local last = math.min(first + BATCH - 1, vertexCount)
+			local nested = em:BatchGetVertexAttributes(attribute, table.move(vertexIds, first, last, 1, {}))
+			if #nested ~= last - first + 1 then
+				error("BatchGetVertexAttributes returned too few vertices")
+			end
+			for k, ids in nested do
+				local i = first + k - 1
+				local id = (ids :: { number })[1]
+				if id == nil then
+					error(`vertex without a {attribute.Name} id`)
+				end
+				attributeIds[i] = id
+				values[i] = valueOf(i)
+			end
+		end
+		for first = 1, vertexCount, BATCH do
+			local last = math.min(first + BATCH - 1, vertexCount)
+			em:BatchSetValues(table.move(attributeIds, first, last, 1, {}), table.move(values, first, last, 1, {}))
+		end
+	end
+	setAttribute(Enum.MeshAttribute.Color, function(i: number): any
+		return quadColors[(i - 1) // 4 + 1]
+	end)
+	if uvs then
+		setAttribute(Enum.MeshAttribute.UV, function(i: number): any
+			return Vector2.new(uvs[i * 2 - 1], uvs[i * 2])
+		end)
 	end
 
 	local results = { AssetService:CreateDataModelContentAsync(Content.fromObject(em), FIDELITY) }
@@ -292,9 +397,17 @@ local function buildMesh(em: EditableMesh, mesh: MeshGeometry.Mesh, castShadow: 
 	part.CanCollide = false
 	part.CanQuery = false
 	part.CanTouch = false
-	part.CastShadow = castShadow
+	local transparency = if info then info.transparency else 0
+	-- (See-through looks never cast shadows, like PartPool's parts.)
+	part.CastShadow = castShadow and transparency == 0
 	part.EnableFluidForces = false
-	part.Material = Enum.Material.SmoothPlastic
+	part.Material = if info then info.material else Enum.Material.SmoothPlastic
+	if info then
+		part.MaterialVariant = info.variant
+	end
+	part.Transparency = transparency
+	part.Reflectance = if info then info.reflectance else 0
+	-- White: the vertex colours carry the colour (they multiply the material's texture).
 	part.Color = Color3.new(1, 1, 1)
 	pcall(function()
 		part.AudioCanCollide = false
@@ -323,9 +436,10 @@ end
 
 -- Builds every MeshPart of a region. Returns the parts and their triangles, or nil and an error.
 local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions.Job): ({ MeshPart }?, number, string?)
-	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles)
-	-- The members' quads as they were when the build started (see MeshOverlay.step).
-	local snapshot = job.payload :: { QuadsEntry }
+	-- The members' quads and the looks as they were when the build started (see MeshOverlay.step).
+	local payload = job.payload :: Payload
+	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles, payload.options)
+	local snapshot = payload.quads
 	for i, node in job.members do
 		local entry = snapshot[i]
 		if entry == nil then
@@ -344,7 +458,9 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 			destroyAll(parts)
 			return nil, 0, "aborted"
 		end
-		local ok, part, err = pcall(buildMesh, em, mesh, self.farShadows)
+		local lookInfo = payload.lookInfo
+		local info = if mesh.look ~= MeshGeometry.PLAIN and lookInfo then lookInfo(mesh.look) else nil
+		local ok, part, err = pcall(buildMesh, em, mesh, self.farShadows, info)
 		if not ok or part == nil then
 			destroyAll(parts)
 			return nil, 0, if ok then err else tostring(part)
@@ -356,20 +472,68 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 	return parts, triangles, nil
 end
 
--- A mesh made of `quads` (MeshGeometry builder input) for the probe.
+-- A mesh made of `quads` (MeshGeometry builder input) for the probe, plain or with `options`
+-- in look `info`.
 local function probeMesh(
 	em: EditableMesh,
-	fill: (builder: MeshGeometry.Builder) -> ()
+	fill: (builder: MeshGeometry.Builder) -> (),
+	options: MeshGeometry.Options?,
+	info: LookInfo?
 ): (MeshPart?, string?, MeshGeometry.Mesh?)
-	local builder = MeshGeometry.builder(BLOCK, 0, 20000)
+	local builder = MeshGeometry.builder(BLOCK, 0, 20000, options)
 	fill(builder)
 	local mesh = builder:finish()[1]
-	local ok, part, err = pcall(buildMesh, em, mesh, false)
+	local ok, part, err = pcall(buildMesh, em, mesh, false, info)
 	if not ok then
 		return nil, tostring(part), mesh
 	end
 	return part, err, mesh
 end
+
+-- The usual frame time just before a timed probe mesh (s): the mean of 30 frames.
+local function usualFrame(): number
+	local usual = 0
+	for _ = 1, 30 do
+		usual += task.wait()
+	end
+	return usual / 30
+end
+
+--[[
+	probeMesh, watching the frames meanwhile: also how much longer than `usual` the slowest frame
+	got (s; a build's cost is the long frame it causes, not its time across the yields) and the
+	time it took (s).
+]]
+local function timedMesh(
+	em: EditableMesh,
+	usual: number,
+	fill: (builder: MeshGeometry.Builder) -> ()
+): (MeshPart?, string?, number, number)
+	local slowest = 0
+	local connection = RunService.Heartbeat:Connect(function(dt)
+		slowest = math.max(slowest, dt)
+	end)
+	local started = os.clock()
+	local part, err = probeMesh(em, fill)
+	local elapsed = os.clock() - started
+	task.wait()
+	connection:Disconnect()
+	return part, err, math.max(slowest - usual, 0), elapsed
+end
+
+-- The look the probe builds a mesh in: a material, so UVs, Material and MaterialVariant are written.
+local PROBE_LOOK: LookInfo = {
+	material = Enum.Material.Slate,
+	variant = "",
+	transparency = 0,
+	reflectance = 0,
+}
+local PROBE_OPTIONS: MeshGeometry.Options = {
+	lookOf = function(_appearance: number, _face: number): (number, number, number, number)
+		return 1, 1, 1, 1
+	end,
+	uvStuds = Settings.UvStuds,
+}
 
 -- Quads of a flat test terrain: `cells` x `cells` blocks, every block a little step (many quads).
 local function testQuads(cells: number, flat: boolean): (buffer, number)
@@ -388,15 +552,25 @@ end
 
 -- Runs the startup probe. Returns nil when meshes can be used, else the reason.
 local function probe(self: MeshOverlay, em: EditableMesh): string?
-	-- 1. Placement: an off-centre single block far from the origin.
+	-- 1. Placement: an off-centre single block far from the origin, timed like the full-size mesh
+	-- below (a region's small looks make such tiny meshes: `tinyFrameMs`).
 	local quads, count = testQuads(1, true)
-	local placed, placedErr = probeMesh(em, function(builder)
+	local function block(builder: MeshGeometry.Builder)
 		builder:add(quads, count, 3000, -1500, BLOCK, BLOCK)
-	end)
+	end
+	local placed, placedErr, tinyExcess = timedMesh(em, usualFrame(), block)
+	self.stats.tinyFrameMs = tinyExcess * 1000
 	if not placed then
 		return `probe mesh failed: {placedErr}`
 	end
 	placed:Destroy()
+	-- The same in a look, as Far Materials builds them: without it meshes stay on, but plain.
+	local looked, lookedErr = probeMesh(em, block, PROBE_OPTIONS, PROBE_LOOK)
+	if looked then
+		looked:Destroy()
+	else
+		self:dropLooks(`a mesh in a material failed: {lookedErr}`)
+	end
 
 	-- 2. A flat sheet (its box gets an anchor quad).
 	local sheet = buffer.create(16)
@@ -420,29 +594,16 @@ local function probe(self: MeshOverlay, em: EditableMesh): string?
 	local nodes = math.max(1, Settings.MaxTriangles // math.max(perNode, 1))
 	local excess = math.huge
 	for attempt = 1, 3 do
-		local usual = 0
-		for _ = 1, 30 do
-			usual += task.wait()
-		end
-		usual /= 30
-		local slowest = 0
-		local connection = RunService.Heartbeat:Connect(function(dt)
-			slowest = math.max(slowest, dt)
-		end)
-		local started = os.clock()
-		local timed, timedErr = probeMesh(em, function(builder)
+		local timed, timedErr, slower, elapsed = timedMesh(em, usualFrame(), function(builder)
 			for i = 0, nodes - 1 do
 				builder:add(quads, count, (i % 8) * SIZE * BLOCK, (i // 8) * SIZE * BLOCK, BLOCK, BLOCK)
 			end
 		end)
-		local elapsed = os.clock() - started
-		task.wait()
-		connection:Disconnect()
 		if not timed then
 			return `timing mesh failed: {timedErr}`
 		end
 		timed:Destroy()
-		excess = math.min(excess, math.max(slowest - usual, 0))
+		excess = math.min(excess, slower)
 		self.stats.lastBuildMs = elapsed * 1000
 		self.stats.slowestFrameMs = excess * 1000
 		if excess * 1000 <= Settings.MaxBlockingMs then
@@ -491,8 +652,8 @@ local function builderLoop(self: MeshOverlay)
 			continue
 		end
 		slowest = 0
-		-- (A pause or the settings switch may come before the build starts.)
-		self.abort = self.paused or self.userOff
+		-- (A pause, the settings switch or new looks may come before the build starts.)
+		self.abort = self.paused or self.userOff or (job.payload :: Payload).lookGen ~= self.lookGen
 		connection = RunService.Heartbeat:Connect(function(dt)
 			slowest = math.max(slowest, dt)
 		end)
@@ -582,8 +743,11 @@ end
 local function apply(self: MeshOverlay, finished: Done)
 	local job = finished.job
 	local now = os.clock()
-	if finished.err == "aborted" or (self.userOff and finished.parts) then
-		-- Stopped, or finished just after meshes were switched off in the settings.
+	local payload = job.payload :: Payload?
+	local stale = payload ~= nil and payload.lookGen ~= self.lookGen
+	if finished.err == "aborted" or ((self.userOff or stale) and finished.parts) then
+		-- Stopped, or finished just after meshes were switched off in the settings or the looks
+		-- changed (built in the old ones).
 		if finished.parts then
 			destroyAll(finished.parts :: { MeshPart })
 		end
@@ -622,8 +786,9 @@ local function apply(self: MeshOverlay, finished: Done)
 	entry.parts, entry.triangles = parts, finished.triangles
 	self.liveTriangles += finished.triangles
 	for _, part in parts do
-		if part.CastShadow ~= self.farShadows then
-			part.CastShadow = self.farShadows
+		local cast = self.farShadows and part.Transparency == 0
+		if part.CastShadow ~= cast then
+			part.CastShadow = cast
 		end
 		part.Parent = self.root
 	end
@@ -777,6 +942,18 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 		countParts = function(_node: Node): number
 			return 0
 		end,
+		looks = false,
+		lookWanted = false,
+		lookable = true,
+		lookOf = nil,
+		lookInfo = nil,
+		plainOf = nil,
+		lookOptions = nil,
+		lookGen = 0,
+		isCurrent = function(_node: Node): boolean
+			return true
+		end,
+		onLooks = function() end,
 		stats = {
 			status = "",
 			gate = "",
@@ -791,6 +968,9 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 			slowestFrameMs = 0,
 			triangles = 0,
 			baked = 0,
+			looks = false,
+			lookParts = 0,
+			tinyFrameMs = 0,
 		},
 	}
 	setmetatable(self, MeshOverlay)
@@ -805,9 +985,117 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 	return overlay
 end
 
--- Do parts of this level take the plain look of the meshes (so swapping is invisible)?
-function MeshOverlay.plainLevel(self: MeshOverlay, level: number): boolean
+-- Are nodes of this level merged into meshes (when meshes are configured)?
+function MeshOverlay.mergedLevel(self: MeshOverlay, level: number): boolean
 	return self.configured and self.regions:keyOf(level, 0, 0) ~= nil
+end
+
+--[[
+	Do parts of this level take the plain look of the meshes (so swapping is invisible)? Merged
+	levels do, unless Far Materials is on: then their parts take the far look, like the meshes.
+]]
+function MeshOverlay.plainLevel(self: MeshOverlay, level: number): boolean
+	return not self.looks and self:mergedLevel(level)
+end
+
+--[[
+	MeshGeometry options for builds with these looks: Far Materials off, every quad plain in its
+	plain colour (`plainOf`, else lookOf's colour: one look, the meshes of before with calibrated
+	colours); on, the looks, their share rule (Config.Render.FarMeshes) and UVs. nil without
+	`lookOf` (block colours, as before).
+]]
+local function lookOptions(
+	enabled: boolean,
+	lookOf: LookOf?,
+	lookInfo: LookInfoOf?,
+	plainOf: PlainOf?
+): MeshGeometry.Options?
+	if lookOf == nil then
+		return nil
+	end
+	local PLAIN = MeshGeometry.PLAIN
+	if not enabled then
+		return {
+			lookOf = function(appearance: number, face: number): (number, number, number, number)
+				if plainOf then
+					local r, g, b = plainOf(appearance, face)
+					return PLAIN, r, g, b
+				end
+				local _, r, g, b = lookOf(appearance, face)
+				return PLAIN, r, g, b
+			end,
+		}
+	end
+	return {
+		lookOf = lookOf,
+		plainOf = plainOf,
+		minShare = Settings.LookMinShare,
+		maxLooks = Settings.MaxLooks,
+		remainder = Settings.LookRemainder,
+		-- (The remainder may only join a look that hides what is behind it.)
+		opaque = function(look: number): boolean
+			if look == PLAIN or lookInfo == nil then
+				return true
+			end
+			local info = lookInfo(look)
+			return info == nil or info.transparency == 0
+		end,
+		averageOf = function(look: number): { number }?
+			local info = if lookInfo then lookInfo(look) else nil
+			return if info then info.average else nil
+		end,
+		uvStuds = Settings.UvStuds,
+	}
+end
+
+--[[
+	New looks (see the header): Far Materials on or off (`enabled`: the setting), and the callbacks
+	(Rendering/TextureLooks): every quad's look and vertex colour (`lookOf(appearance, face)`, face
+	= QuadMesher direction), every look's MeshPart properties (`lookInfo`), and the plain look's
+	colours (`plainOf(appearance, face)`, for the plain remainder and Far Materials off; nil:
+	lookOf's colours). nil `lookOf`: block colours, as before there were looks. Call it at startup
+	and whenever the far looks change. Stops a running build, demotes every mesh (rebuilt later
+	with the new looks, once the members are current). Returns true when `plainLevel`'s answer
+	changed: the renderer must restyle the sections of merged levels. After `dropLooks`, Far
+	Materials stays off whatever `enabled` says.
+]]
+function MeshOverlay.setLooks(
+	self: MeshOverlay,
+	enabled: boolean,
+	lookOf: LookOf?,
+	lookInfo: LookInfoOf?,
+	plainOf: PlainOf?
+): boolean
+	local on = enabled and self.lookable
+	local changed = on ~= self.looks and self.configured
+	self.looks = on
+	self.lookWanted = enabled
+	self.lookOf = lookOf
+	self.lookInfo = lookInfo
+	self.plainOf = plainOf
+	self.lookOptions = lookOptions(on, lookOf, lookInfo, plainOf)
+	self.lookGen += 1
+	if self.pending ~= nil then
+		self.abort = true
+	end
+	self:demoteAll()
+	return changed
+end
+
+--[[
+	Far Materials cannot work here (the probe could not build a mesh in a look): meshes stay plain
+	and merged levels plain whatever the setting, said once with `reason`. When they were on, the
+	looks change (setLooks) and the renderer restyles the merged levels (`onLooks`).
+]]
+function MeshOverlay.dropLooks(self: MeshOverlay, reason: string)
+	if not self.lookable then
+		return
+	end
+	self.lookable = false
+	warn(`[IceVoxel] Far Materials off: {reason} (far meshes stay plain)`)
+	if self:setLooks(self.lookWanted, self.lookOf, self.lookInfo, self.plainOf) then
+		self.onLooks()
+	end
 end
 
 -- Should the workers make quads for nodes of this level?
@@ -913,18 +1201,26 @@ function MeshOverlay.step(self: MeshOverlay, allowance: number?, used: number?):
 		if self.status == "paused after failures" then
 			self.status = "on"
 		end
+		-- (Only members whose parts carry the current look: one being restyled would demote the
+		-- mesh again when it commits.)
 		local region = self.regions:candidate(now, function(node)
-			return self.quads[node] ~= nil
+			return self.quads[node] ~= nil and self.isCurrent(node)
 		end)
 		if region then
 			self.lastBuild = now
 			local job = self.regions:begin(region)
-			-- Quads as they are now: a member may be removed before the builder runs.
+			-- Quads and looks as they are now: a member may be removed before the builder runs.
 			local snapshot = table.create(#job.members)
 			for i, node in job.members do
 				snapshot[i] = self.quads[node]
 			end
-			job.payload = snapshot
+			local payload: Payload = {
+				quads = snapshot,
+				lookGen = self.lookGen,
+				options = self.lookOptions,
+				lookInfo = self.lookInfo,
+			}
+			job.payload = payload
 			self.pending = job
 		end
 	end
@@ -967,7 +1263,7 @@ function MeshOverlay.setStreamerBusy(self: MeshOverlay, busy: boolean)
 	self.streamerBusy = busy
 end
 
--- Far shadows on or off: the meshes now and the ones built later.
+-- Far shadows on or off: the meshes now and the ones built later (see-through looks never cast).
 function MeshOverlay.restyle(self: MeshOverlay, farShadows: boolean)
 	if farShadows == self.farShadows then
 		return
@@ -975,7 +1271,7 @@ function MeshOverlay.restyle(self: MeshOverlay, farShadows: boolean)
 	self.farShadows = farShadows
 	local function set(parts: { MeshPart })
 		for _, part in parts do
-			part.CastShadow = farShadows
+			part.CastShadow = farShadows and part.Transparency == 0
 		end
 	end
 	for _, entry in self.instances do
@@ -996,14 +1292,24 @@ function MeshOverlay.getStats(self: MeshOverlay): Stats
 	stats.meshedRegions = s.meshed
 	stats.nodes = s.nodes
 	stats.meshedNodes = s.meshedNodes
-	local parts = 0
+	local parts, lookParts = 0, 0
+	local function count(list: { MeshPart })
+		parts += #list
+		for _, part in list do
+			if part.Material ~= Enum.Material.SmoothPlastic or part.MaterialVariant ~= "" then
+				lookParts += 1
+			end
+		end
+	end
 	for _, entry in self.instances do
-		parts += #entry.parts
+		count(entry.parts)
 	end
 	for _, dying in self.dying do
-		parts += #dying.parts
+		count(dying.parts)
 	end
 	stats.meshParts = parts
+	stats.lookParts = lookParts
+	stats.looks = self.looks
 	stats.triangles = self.liveTriangles
 	stats.baked = self.baked
 	return stats

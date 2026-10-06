@@ -108,8 +108,21 @@ return function(t, shared, require, _server, client)
 		return lit
 	end
 
-	local function verify(data: buffer, height: number, y0: number, y1: number, hideCaves: boolean): number
-		local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hideCaves)
+	--[[
+		Meshes cells y0 .. y1 - 1 and checks every box against the reference: inside the section, a
+		decorated block one box each, every needed cell covered exactly once by a box of its own key,
+		opaque boxes over nothing else but wildcards. With `align` (odd boxes), every box of a
+		Blocks.alignLut appearance is an odd number of cells along all three axes. Returns the count.
+	]]
+	local function verify(
+		data: buffer,
+		height: number,
+		y0: number,
+		y1: number,
+		hideCaves: boolean,
+		align: boolean?
+	): number
+		local boxes, count = GreedyMesher.mesh(data, height, y0, y1, hideCaves, nil, nil, nil, align)
 		local lit = sparseLights(data, height, y0, y1, hideCaves)
 		-- What a cell must be covered by: its appearance, plus the light flag of a sparse light.
 		local function expected(x: number, y: number, z: number): (number, boolean)
@@ -130,6 +143,12 @@ return function(t, shared, require, _server, client)
 			assert(bx + sx <= SIZE and bz + sz <= SIZE and by >= y0 and by + sy <= y1, "box outside the section")
 			if buffer.readu8(Blocks.singleLut, app % GreedyMesher.KEY_STRIDE) == 1 then
 				assert(sx == 1 and sy == 1 and sz == 1, `decorated block box ({bx},{by},{bz}) is {sx}x{sy}x{sz}`)
+			end
+			if align and buffer.readu8(Blocks.alignLut, app % GreedyMesher.KEY_STRIDE) == 1 then
+				assert(
+					sx % 2 == 1 and sy % 2 == 1 and sz % 2 == 1,
+					`odd box ({bx},{by},{bz}) of appearance {app % GreedyMesher.KEY_STRIDE} is {sx}x{sy}x{sz}`
+				)
 			end
 			for y = by, by + sy - 1 do
 				for z = bz, bz + sz - 1 do
@@ -1225,5 +1244,180 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.eq(found, 2, "chunks where a surface cave meets a cave")
+	end)
+
+	--[[ Odd boxes (GreedyMesher's `align`: Config.Textures.OddBoxes, full detail only) ]]
+
+	local KEY_STRIDE = GreedyMesher.KEY_STRIDE
+
+	-- Every box of a mesh as "x,y,z,sx,sy,sz,key", by appearance, in order.
+	local function boxLists(boxes: buffer, count: number): { [number]: { string } }
+		local lists: { [number]: { string } } = {}
+		for b = 0, count - 1 do
+			local o = b * GreedyMesher.BOX_BYTES
+			local fields = {}
+			for k = 0, 6 do
+				fields[k + 1] = buffer.readu16(boxes, o + k * 2)
+			end
+			local app = fields[7] % KEY_STRIDE
+			local list = lists[app] or {}
+			lists[app] = list
+			table.insert(list, table.concat(fields, ","))
+		end
+		return lists
+	end
+
+	local function sameBuffers(a: buffer, b: buffer): boolean
+		return buffer.len(a) == buffer.len(b) and buffer.tostring(a) == buffer.tostring(b)
+	end
+
+	-- Sections of chunk `r` as the streamer meshes them, each (data, y0, y1, hideCaves) with its
+	-- border already applied (GreedyMesher.applyBorder's copy meshes like the original with the
+	-- border): caves hidden, caves revealed, the cave view (revealed, capped towards hidden space on
+	-- every side) and seams (every side next to a coarser node, caves hidden).
+	local function sectionCases(gen: any, r: any, each: (data: buffer, y0: number, y1: number, hide: boolean) -> ())
+		local open = gen.seamLimits(0, r.nx, r.nz, { 1, 1, 1, 1 })
+		local all = GreedyMesher.HIDDEN_BELOW + GreedyMesher.HIDDEN_ABOVE + 1 + 2 + 4 + 8
+		for y0 = 0, r.height - 1, Config.SectionHeight do
+			local y1 = math.min(y0 + Config.SectionHeight, r.height)
+			for _, case in { "hidden", "revealed", "caveview", "seams" } do
+				local hide = case == "hidden" or case == "seams"
+				local below = if case == "seams"
+					then math.min(r.solidBelow, GreedyMesher.lowestOpen(open))
+					else r.solidBelow
+				if GreedyMesher.isTrivial(y0, y1, below, r.emptyAbove, hide) then
+					continue
+				end
+				local data = r.data
+				if case == "caveview" then
+					data = GreedyMesher.applyBorder(r.data, r.height, y0, y1, false, { hidden = all })
+				elseif case == "seams" then
+					data = GreedyMesher.applyBorder(r.data, r.height, y0, y1, true, { open = open, hidden = 0 })
+				end
+				-- (The border copy is the mesher's scratch: copy it before meshing anything else.)
+				if data ~= r.data then
+					local copy = buffer.create(buffer.len(data))
+					buffer.copy(copy, 0, data)
+					data = copy
+				end
+				each(data, y0, y1, hide)
+			end
+		end
+	end
+
+	t.test("odd boxes: off, as by default, every box is what it always was", function()
+		local gen = TerrainGenerator.new(777)
+		local saved = buffer.create(buffer.len(Blocks.alignLut))
+		buffer.copy(saved, 0, Blocks.alignLut)
+		local sections = 0
+		for _, p in { { 0, 0 }, { -20, 11 }, { -1340, 20 } } do
+			local r = gen.generate(0, p[1], p[2])
+			sectionCases(gen, r, function(data, y0, y1, hide)
+				for _, foliage in { false, true } do
+					local today, n = GreedyMesher.mesh(data, r.height, y0, y1, hide, nil, foliage)
+					local off, nOff = GreedyMesher.mesh(data, r.height, y0, y1, hide, nil, foliage, nil, false)
+					t.ok(n == nOff and sameBuffers(today, off), "align false = no align")
+					-- The rule's code path itself changes nothing when no appearance asks for it.
+					buffer.fill(Blocks.alignLut, 0, 0)
+					local none, nNone = GreedyMesher.mesh(data, r.height, y0, y1, hide, nil, foliage, nil, true)
+					buffer.copy(Blocks.alignLut, 0, saved)
+					t.ok(n == nNone and sameBuffers(today, none), "align with an empty LUT = no align")
+				end
+				sections += 1
+			end)
+		end
+		t.ok(sections > 20, `sections compared: {sections}`)
+	end)
+
+	t.test("odd boxes: a flat layer takes four odd boxes; an even run extends into hidden rock", function()
+		local function stoneWorld(height: number, top: number): buffer
+			local data = ChunkLayout.create(height)
+			for z = -1, SIZE do
+				for x = -1, SIZE do
+					for y = 0, top do
+						ChunkLayout.setPadded(data, x, y, z, Blocks.id.Stone)
+					end
+				end
+			end
+			return data
+		end
+		-- A flat layer of grass: 16 is even on X and Z, so the fewest odd boxes is four.
+		local flat = stoneWorld(8, 3)
+		for z = -1, SIZE do
+			for x = -1, SIZE do
+				ChunkLayout.setPadded(flat, x, 4, z, Blocks.id.Grass)
+			end
+		end
+		t.eq(verify(flat, 8, 0, 8, false), 1, "one box without the rule")
+		t.eq(verify(flat, 8, 0, 8, false, true), 4, "four odd boxes with it")
+		local sizes = {}
+		for _, list in boxLists(GreedyMesher.mesh(flat, 8, 0, 8, false, nil, nil, nil, true)) do
+			for _, box in list do
+				local f = string.split(box, ",")
+				table.insert(sizes, `{f[4]}x{f[5]}x{f[6]}`)
+			end
+		end
+		table.sort(sizes)
+		t.eq(table.concat(sizes, " "), "15x1x1 15x1x15 1x1x1 1x1x15")
+
+		-- Stone under a stone roof with a 2-wide slot (x = 1, 2) open to the sky and a glass wall
+		-- at x = 3: the slot's floor is a 2-cell run, which starts one cell earlier, inside the
+		-- hidden rock at x = 0, instead of losing a cell.
+		local slot = stoneWorld(6, 3)
+		for z = -1, SIZE do
+			ChunkLayout.setPadded(slot, 1, 3, z, Blocks.AIR)
+			ChunkLayout.setPadded(slot, 2, 3, z, Blocks.AIR)
+			ChunkLayout.setPadded(slot, 3, 2, z, Blocks.id.Glass)
+		end
+		verify(slot, 6, 0, 6, false, true)
+		local plain = boxLists(GreedyMesher.mesh(slot, 6, 0, 6, false))
+		local odd = boxLists(GreedyMesher.mesh(slot, 6, 0, 6, false, nil, nil, nil, true))
+		local stone = Blocks.get(Blocks.id.Stone).appearance
+		t.ok(table.find(plain[stone], `1,2,0,2,1,16,{stone}`) ~= nil, "the slot floor is one 2 x 16 box today")
+		t.ok(table.find(odd[stone], `0,2,0,3,1,15,{stone}`) ~= nil, "extended into the rock, then 15 long")
+		t.ok(table.find(odd[stone], `0,2,15,3,1,1,{stone}`) ~= nil, "and the last row the same way")
+	end)
+
+	t.test("odd boxes: generated chunks, every textured box odd, coverage exact, others unchanged", function()
+		local aligned = 0
+		for app = 1, #Blocks.appearances do
+			aligned += buffer.readu8(Blocks.alignLut, app)
+		end
+		t.ok(aligned > 10, `appearances with odd boxes: {aligned}`)
+		local gen = TerrainGenerator.new(777)
+		local before, after, sections = 0, 0, 0
+		-- Plains, hills, a savanna, a jungle, and the chunk with the most caves in its region.
+		for _, p in { { 0, 0 }, { 3, -8 }, { -20, 11 }, { -1760, 24 }, { -1340, 20 }, { -30, 40 } } do
+			local r = gen.generate(0, p[1], p[2])
+			sectionCases(gen, r, function(data, y0, y1, hide)
+				local today, n = GreedyMesher.mesh(data, r.height, y0, y1, hide)
+				local count = verify(data, r.height, y0, y1, hide, true)
+				local odd = GreedyMesher.mesh(data, r.height, y0, y1, hide, nil, nil, nil, true)
+				-- Appearances without the rule: the same boxes in the same order.
+				local mine, theirs = boxLists(odd, count), boxLists(today, n)
+				for app, list in theirs do
+					if buffer.readu8(Blocks.alignLut, app) == 0 then
+						t.eq(table.concat(mine[app] or {}, ";"), table.concat(list, ";"), `appearance {app} unchanged`)
+					end
+				end
+				for app in mine do
+					t.ok(theirs[app] ~= nil, `appearance {app} only with the rule`)
+				end
+				before += n
+				after += count
+				sections += 1
+			end)
+		end
+		t.ok(after > before, "odd boxes cost boxes")
+		t.ok(after < before * 1.6, `but not too many ({before} -> {after})`)
+		print(
+			string.format(
+				"    odd boxes: %d -> %d boxes (%+.1f%%) over %d sections (hidden, revealed, cave view, seams)",
+				before,
+				after,
+				(after / before - 1) * 100,
+				sections
+			)
+		)
 	end)
 end

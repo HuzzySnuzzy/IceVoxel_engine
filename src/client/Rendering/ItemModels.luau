@@ -2,17 +2,23 @@
 --[[
 	3D models of items: inventory icons (ViewportFrames), dropped items and the item in hand.
 
-	  block items  a cube with the block's look, as the terrain draws it (material, colour,
-	               MaterialVariant texture, face images). Decorated blocks (chest, crafting table,
-	               furnace) get their faces as thin raised slabs (Rendering/BlockDecor), since
-	               ViewportFrames do not draw SurfaceGuis. Shaped blocks (torches, lanterns,
-	               plants) are their shape's boxes, as the terrain draws them (glowing boxes Neon),
-	               centred on the shape's outline; they count as items rather than blocks
-	               (`isBlock`), so icons show them from the front and they drop like items. A
-	               block's `icon` boxes replace its shape when it has them (a Mekanism transmitter:
-	               its core and two arms; a tall plant: its lower half and the top's look, in one
-	               cell), each in its own colour, material and transparency. Plants are drawn
-	               untinted (the Grass block's green) and held like blocks, upright.
+	  block items  a cube with the block's look. A textured block (Rendering/TextureLooks) is a cube
+	               with a Texture image on every face that has a texture, sized so one tile spans
+	               the face (a MaterialVariant tiles every 3 studs whatever the cube's size), each
+	               in its face's tint (unclamped); faces without one keep the block's material and
+	               colour (all six textured: white SmoothPlastic under them). Decorated blocks
+	               (chest, crafting table, furnace) get their faces as thin raised slabs
+	               (Rendering/BlockDecor), since ViewportFrames do not draw SurfaceGuis. Shaped
+	               blocks (torches, lanterns, plants) are their shape's boxes, as the terrain draws
+	               them (glowing boxes Neon, glow lichen's plate its image), centred on the shape's
+	               outline; they count as items rather than blocks (`isBlock`), so icons show them
+	               from the front and they drop like items. A block's `icon` boxes replace its shape
+	               when it has them (a Mekanism transmitter: its core and two arms; a tall plant: its
+	               lower half and the top's look, in one cell), each in its own colour, material and
+	               transparency. A plant with a sprite (TextureLooks.spriteOf; a tall plant's top
+	               half's, else its lower half's) is that sprite on a thin upright plane filling the
+	               cube instead, both sides. Plants are drawn untinted (the Grass block's green) and
+	               held like blocks, upright.
 	  other items  their ItemList boxes (pixels, 1/16 of the size), in the item's colour and material,
 	               turned by each box's `rotation`, as balls or cylinders by `shape`, and the whole
 	               model turned by the item's `tilt` (tools and sticks lie diagonally).
@@ -23,7 +29,10 @@
 
 	`build(item, size)` returns a new Model that fits a cube of `size` studs centred on its pivot
 	(CFrame.identity until moved with PivotTo). Its parts are anchored and touch, collide with and
-	cast nothing. The caller owns the Model.
+	cast nothing. The caller owns the Model. Models follow the Textures setting and TextureLooks'
+	item looks: the cached prototypes are dropped whenever those change (`changed`: not for changes
+	that leave items alone, such as Far Materials), so later builds take the new look, and whoever
+	keeps models builds them again.
 
 	In a hand: `handSize` / `handPivot` place a model in a character's right hand (Player/HeldItems,
 	the inventory's character preview). Tools and sticks are held like Minecraft's "handheld" items:
@@ -42,6 +51,7 @@ local Items = require(Shared.Items)
 
 local BlockDecor = require(script.Parent.BlockDecor)
 local PartPool = require(script.Parent.PartPool)
+local TextureLooks = require(script.Parent.TextureLooks)
 
 local BLOCK = Config.BlockSize
 -- View space -> model space.
@@ -84,6 +94,29 @@ local function viewFrame(def: Items.ItemDef?): CFrame
 end
 
 local prototypes: { [string]: Model } = {}
+-- Bumped with every change of item looks (`generation`).
+local generation = 0
+-- New item looks (the Textures setting, measured averages...): build the models again.
+TextureLooks.itemsChanged:Connect(function()
+	generation += 1
+	for _, model in prototypes do
+		model:Destroy()
+	end
+	table.clear(prototypes)
+end)
+
+--[[
+	Fires after item models change look (TextureLooks.itemsChanged), once the cached prototypes are
+	gone: models built before keep the old look, so whoever keeps models builds them again
+	(Ui/ItemIcon's icons; keepers that check each frame compare `generation` instead).
+]]
+ItemModels.changed = TextureLooks.itemsChanged
+
+-- The look generation models are built with now: a model built under an older one has an older
+-- look (for keepers that check each frame instead of listening to `changed`).
+function ItemModels.generation(): number
+	return generation
+end
 
 -- The centre of a shape's outline (pixels from the cell's centre): shaped models are built
 -- around it.
@@ -114,7 +147,8 @@ local function shapePrototype(model: Model, block: number, shape: { Blocks.Shape
 		part.Material = if box.glow then Enum.Material.Neon else material(box.material or def.material)
 		local c = box.color or def.color
 		part.Color = Color3.fromRGB(c[1], c[2], c[3])
-		part.Transparency = box.transparency or def.transparency
+		-- (A box carrying an image, glow lichen's plate, shows only the image.)
+		part.Transparency = if part:FindFirstChildOfClass("Decal") then 1 else box.transparency or def.transparency
 		inert(part)
 		part.Name = `Box{i}`
 		part.Size = Vector3.new(box.size[1], box.size[2], box.size[3]) * pixel
@@ -128,18 +162,48 @@ local function shapePrototype(model: Model, block: number, shape: { Blocks.Shape
 	end
 end
 
+-- The sprite an item of a plant shows: a tall plant's top half's, else its own (nil: none).
+local function itemSprite(block: number): TextureLooks.Sprite?
+	local top = Blocks.plantTop(block)
+	local sprite = if top then TextureLooks.spriteOf(Blocks.get(top).appearance) else nil
+	return sprite or TextureLooks.spriteOf(Blocks.get(block).appearance)
+end
+
+-- A plant with a sprite: the sprite on a thin upright plane filling the cube, seen from both sides.
+local function spritePrototype(model: Model, sprite: TextureLooks.Sprite, size: number)
+	local part = Instance.new("Part")
+	inert(part)
+	part.Name = "Sprite"
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Material = Enum.Material.SmoothPlastic
+	part.Transparency = 1
+	part.Size = Vector3.new(size, size, PartPool.SPRITE_THICKNESS)
+	part.CFrame = CFrame.identity
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		TextureLooks.newDecal(sprite.texture, face, sprite.tints[1]).Parent = part
+	end
+	part.Parent = model
+	model.PrimaryPart = part
+end
+
 local function blockPrototype(model: Model, block: number, size: number)
 	local appearance = Blocks.get(block).appearance
-	local part = PartPool.makeTemplate(appearance)
+	-- Textured faces: one image each, one tile across the face (a variant would tile every 3
+	-- studs whatever the cube's size); the rest keep the block's material and colour.
+	local images = TextureLooks.itemFaces(appearance)
+	local part = PartPool.makeTemplate(appearance, 0, images ~= nil)
 	inert(part)
 	part.Name = "Block"
 	part.Size = Vector3.one * size
 	part.CFrame = CFrame.identity
-	-- Face images are tiled once per block in the world; once per face here.
-	for _, child in part:GetChildren() do
-		if child:IsA("Texture") then
-			child.StudsPerTileU = size
-			child.StudsPerTileV = size
+	if images then
+		if #images == 6 then
+			part.Material = Enum.Material.SmoothPlastic
+			part.Color = Color3.new(1, 1, 1)
+		end
+		for _, image in images do
+			TextureLooks.newImage(image.texture, image.face, image.color, size).Parent = part
 		end
 	end
 	part.Parent = model
@@ -194,7 +258,10 @@ local function prototype(item: number, size: number): Model
 	local def = Items.get(item)
 	local blockDef = if def and def.block then Blocks.get(def.block) else nil
 	local shape = if blockDef then blockDef.icon or blockDef.shape else nil
-	if def and def.block and shape then
+	local sprite = if def and def.block and blockDef and blockDef.plant then itemSprite(def.block) else nil
+	if sprite then
+		spritePrototype(model, sprite, size)
+	elseif def and def.block and shape then
 		shapePrototype(model, def.block, shape, size)
 	elseif def and def.block then
 		blockPrototype(model, def.block, size)

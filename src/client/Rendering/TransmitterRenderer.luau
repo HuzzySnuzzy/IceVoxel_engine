@@ -900,11 +900,36 @@ end
 local moveParts: { BasePart } = {}
 local moveFrames: { CFrame } = {}
 
+-- The item look generation the models were built with (ItemModels.generation).
+local itemsLook = 0
+
+-- New item looks: models of the old one go (spares at once, shown ones are taken again below).
+local function dropOldModels()
+	itemsLook = ItemModels.generation()
+	for _, spare in spareModels do
+		for _, view in spare do
+			view.model:Destroy()
+		end
+	end
+	table.clear(spareModels)
+	for _, entry in transit do
+		local view = entry.view
+		if view then
+			entry.view = nil
+			drawnItems -= 1
+			view.model:Destroy()
+		end
+	end
+end
+
 local function moveItems()
 	table.clear(itemsAt)
 	table.clear(stacksAt)
 	table.clear(moveParts)
 	table.clear(moveFrames)
+	if itemsLook ~= ItemModels.generation() then
+		dropOldModels()
+	end
 	if transitCount == 0 then
 		return
 	end

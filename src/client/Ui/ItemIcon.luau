@@ -10,7 +10,10 @@
 	The camera is fitted to the model's projected bounds once per item and remembered. Icons are
 	cheap to keep: each one builds its ViewportFrame once, and `set` only swaps the model when the
 	item changes (models of items no longer shown go back to a pool, per item), so a screen of a
-	hundred icons does no work while nothing changes.
+	hundred icons does no work while nothing changes. When item looks change (ItemModels.changed:
+	the Textures setting, texture averages measured) the pool and the fitted views go, and the
+	icons showing an item build their models again a few at a time (REBUILD_BUDGET per frame,
+	hidden screens' icons too), never all in one frame.
 
 	A worn tool gets Minecraft's durability bar under it (Ui/MenuLayout.durabilityBar: up to 13
 	pixels at (2, 13) of the 16 x 16 item on a black 13 x 2 background, from green to red). A
@@ -25,6 +28,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
@@ -41,6 +45,8 @@ local FIELD_OF_VIEW = 14
 local FILL = 0.94
 -- Spare models kept per item.
 local POOL_PER_ITEM = 32
+-- Seconds per frame spent building icons' models again after a change of item looks.
+local REBUILD_BUDGET = 0.001
 
 -- Blocks: looking down 30° from the +X +Z corner, so +Z is the left face and +X the right one.
 local BLOCK_VIEW = CFrame.Angles(0, math.rad(45), 0) * CFrame.Angles(math.rad(-30), 0, 0)
@@ -95,6 +101,11 @@ ItemIcon.__index = ItemIcon
 
 local pool: { [number]: { Model } } = {}
 local views: { [number]: CFrame } = {}
+-- Icons not destroyed yet (weak).
+local live: { [any]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+-- Icons whose model has an older look, built again over the next frames (weak).
+local stale: { [any]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+local rebuilding: RBXScriptConnection? = nil
 
 local function takeModel(item: number): Model
 	local spare = pool[item]
@@ -220,6 +231,7 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 		bar = nil,
 		barFill = nil,
 	}
+	live[self] = true
 	return (setmetatable(self, ItemIcon) :: any) :: ItemIcon
 end
 
@@ -279,7 +291,13 @@ function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?
 	if itemChanged then
 		local old, model = self.item, self.model
 		if old and model then
-			returnModel(old, model)
+			-- (A model of an older look never goes back to the pool.)
+			if stale[self] then
+				stale[self] = nil
+				model:Destroy()
+			else
+				returnModel(old, model)
+			end
 		end
 		self.item = item
 		self.model = nil
@@ -325,14 +343,68 @@ function ItemIcon.setCountColour(self: Self, colour: Color3?)
 end
 
 function ItemIcon.destroy(self: Self)
+	live[self] = nil
 	local item, model = self.item, self.model
 	if item and model then
-		returnModel(item, model)
+		if stale[self] then
+			model:Destroy()
+		else
+			returnModel(item, model)
+		end
 	end
+	stale[self] = nil
 	self.item = nil
 	self.model = nil
 	self.root:Destroy()
 end
+
+-- Builds a stale icon's model again in the new look.
+local function rebuild(icon: Self)
+	stale[icon] = nil
+	local item, old = icon.item, icon.model
+	if item and old then
+		old:Destroy()
+		local new = takeModel(item)
+		icon.camera.CFrame = viewOf(item, new, icon.block == true)
+		new.Parent = icon.viewport
+		icon.model = new
+	end
+end
+
+-- Each frame: stale icons until the budget is spent (at least one), then stops when none is left.
+local function rebuildSome()
+	local deadline = os.clock() + REBUILD_BUDGET
+	repeat
+		local icon = next(stale)
+		if icon == nil then
+			if rebuilding then
+				rebuilding:Disconnect()
+				rebuilding = nil
+			end
+			return
+		end
+		rebuild(icon)
+	until os.clock() >= deadline
+end
+
+-- New item looks: spare models and fitted views go; shown icons build their models again.
+ItemModels.changed:Connect(function()
+	for _, spare in pool do
+		for _, model in spare do
+			model:Destroy()
+		end
+	end
+	table.clear(pool)
+	table.clear(views)
+	for icon: Self in live do
+		if icon.item and icon.model then
+			stale[icon] = true
+		end
+	end
+	if rebuilding == nil and next(stale) ~= nil then
+		rebuilding = RunService.Heartbeat:Connect(rebuildSome)
+	end
+end)
 
 --[[
 	An inventory slot in `parent` for the item at (x, y) (GUI pixels; the slot frame is one pixel up

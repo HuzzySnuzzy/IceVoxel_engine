@@ -11,7 +11,8 @@
 	  main          Graphics (the preset, cycled), FOV; the other pages; Reset (the current
 	                preset again) and Defaults (the device's defaults); Done closes the menu
 	  video         render distance, detail falloff, full detail, cave view, plants, lichen
-	                lights, shadows, far shadows, fog, textures, brightness, distance or lighting
+	                lights, shadows, far shadows, fog, textures, far materials, brightness,
+	                distance or lighting
 	  performance   far meshes, build budget, hidden terrain, swap frames
 	  sounds        Music & Sounds: the volumes and the three sound toggles
 	  controls      FOV effects, sprint, the scroll wheel, touch buttons
@@ -64,7 +65,7 @@ Pages.TITLE_Y = 6
 Pages.TOP = 22
 Pages.LINE = 11
 Pages.DONE_W = 200
--- Rows a page can hold above its status lines (the video page needs 6).
+-- Rows a page can hold above its status lines (the video page needs 7).
 Pages.MAX_ROWS = 7
 
 local function setting(key: string, wide: boolean?): Item
@@ -106,6 +107,7 @@ Pages.list = {
 			setting("farShadows"),
 			setting("fog"),
 			setting("textures"),
+			setting("farMaterials"),
 			setting("brightness"),
 			setting("preferDistance"),
 		},

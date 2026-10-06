@@ -171,11 +171,13 @@ A fast, Minecraft-style voxel engine for Roblox.
   drop themselves. Shears (2 iron ingots on a diagonal, 238 uses) harvest grass, ferns, dead
   bushes and leaves (tall grass gives 2 short grass, a large fern 2 ferns), cut leaves at once and
   wear on every block they break, once per tall plant.
-  Each plant is a few thin boxes (at most 4 parts): splayed blades and fronds in shades of green,
-  or a stem with a head in Minecraft's colours; grass and ferns take a savanna yellow-green on dry
-  grass. Plants are drawn a few pixels off their cell's centre and turned, by a hash of their
-  position, so fields don't look like grids (both halves of a tall plant alike; the sunflower
-  always faces east); the outline stays on the cell. Every box is a part, so plants are drawn
+  A plant whose sprite is in the texture pack (short grass and tall grass so far) is drawn as
+  Minecraft draws it, two crossed images (2 parts); the others are a few thin boxes (at most 4
+  parts): splayed blades and fronds in shades of green, or a stem with a head in Minecraft's
+  colours. Grass and ferns take a savanna yellow-green on dry grass, sprites too. Plants are drawn
+  a few pixels off their cell's centre and turned, by a hash of their position, so fields don't
+  look like grids (both halves of a tall plant alike; the sunflower always faces east); the
+  outline stays on the cell. Every box or image plane is a part, so plants are drawn
   within 40 blocks (24 on phones; the Plant Distance setting): about 1,000-3,000 parts on
   grassland, at most 6,000. `Config.Render.Foliage = false` (or the setting at OFF) stops drawing
   them on slow devices; they are still there to aim at and break. Left out: Minecraft's light
@@ -251,10 +253,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   false none generate.
 - **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
   more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
-  Each is a thin plate on its face with a glowing Neon speck: 2 parts. One lichen per 8 × 8 × 8
-  blocks carries a PointLight, which shines at any distance, so a revealed cave holds a few hundred
-  lights instead of thousands (the Lichen Lights setting, or `Caves.LichenLightDistance`, can switch
-  far ones off on slow devices).
+  Each is a thin plate on its face (showing the texture pack's glow lichen image) with a glowing
+  Neon speck: 2 parts. One lichen per 8 × 8 × 8 blocks carries a PointLight, which shines at any
+  distance, so a revealed cave holds a few hundred lights instead of thousands (the Lichen Lights
+  setting, or `Caves.LichenLightDistance`, can switch far ones off on slow devices).
   It drops 2 Glow Dust (by hand or with any tool; an axe breaks it fastest), or itself with Shears;
   it is replaceable, washes away in flowing water, and placed by hand it lies on the floor or hangs
   on a ceiling or wall like a torch (one face per block). Generated lichen counts as cave air while
@@ -528,20 +530,29 @@ A fast, Minecraft-style voxel engine for Roblox.
   touch screens a small "Map" button takes its corner, to open the world map).
 - **Safe spawns.** Spawns and teleports never land in water, lava, oil or fuel, on leaves or next to
   cacti or lava; the rules live in `SpawnUnsafeBlocks`.
-- **Textures.** Optional per-block textures through MaterialVariants, tiled once per block.
+- **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
+  Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
+  and face images that take each block's own colour (one bark image for every log, each in its
+  wood's colour), plants as crossed images. The 32 textures made so far are in, and 61 blank
+  entries wait for the rest. Distant chunks take the colour each block averages to on screen, so
+  they match the textured terrain near you, or keep their materials and textures with the Far
+  Materials setting. See Block textures.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
   81k parts become 35k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
   where the Mesh APIs are unavailable. Meshes are not built while the camera moves faster than 2
   blocks a second (averaged over 2 s), while terrain loads or after a teleport; parts draw
   meanwhile. The Far Meshes setting switches them off; on again, they are rebuilt from what was
-  kept, with nothing generated again.
+  kept, with nothing generated again. Far Materials splits them by look (a mesh per material).
 
 ## Getting started
 
-1. Install the toolchain with [Rokit](https://github.com/rojo-rbx/rokit):
+1. Install the toolchain with [Rokit](https://github.com/rojo-rbx/rokit) (Rojo 7.7.1, Lune,
+   StyLua, Selene), and the matching Rojo Studio plugin (a plugin older than 7.7 cannot connect to
+   this Rojo):
    ```sh
    rokit install
+   rojo plugin install
    ```
 2. Either live-sync into Studio:
    ```sh
@@ -606,15 +617,15 @@ Studio tips:
 `P` opens Minecraft's Options screen (gamepad: D-pad right; touch: the gear at the left end of the
 hotbar; anywhere: the gear in the inventory, where Minecraft's recipe book button is). Changes
 apply while you play: cheap ones at the next frame, costly ones (view, caves, plants, shadows,
-textures, far meshes) 0.4 s after a slider stops (`Settings.ApplyDelay`), so dragging a slider
-rebuilds the world once. Sliders move by dragging, clicking, the D-pad (left / right) or A; buttons
-cycle their values. Done (on a sub-page: back to Options), `P`, `E`, `Escape` or gamepad B close
-it, which applies whatever still waits and saves.
+textures, far materials, far meshes) 0.4 s after a slider stops (`Settings.ApplyDelay`), so
+dragging a slider rebuilds the world once. Sliders move by dragging, clicking, the D-pad (left /
+right) or A; buttons cycle their values. Done (on a sub-page: back to Options), `P`, `E`, `Escape`
+or gamepad B close it, which applies whatever still waits and saves.
 
 | Page            | Settings |
 | --------------- | -------- |
 | Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults) |
-| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (only when a block has one), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
+| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
 | Music & Sounds  | Master Volume, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Rumble |
 | Controls        | FOV Effects (0-100%), Sprint (Toggle / Hold), Scroll Wheel (Hotbar / Zoom), Touch Buttons (touch screens; after rejoining) |
@@ -635,6 +646,12 @@ the Performance page, the far meshes' state. A few notes on what the settings do
 - Far Meshes off puts every merged region back to parts; on again, the meshes are rebuilt from
   what was kept, with nothing generated again. Where meshes are off from the start of the session
   (phones, a failed probe, `Render.FarMeshes`) they can't be switched on, and the status says why.
+- Textures off draws every block in its plain Roblox material and colour, and plants as boxes.
+  Far Materials (off by default, `Render.FarMaterials`) keeps materials and textures on the
+  merged far chunks, about 200 blocks away and further, with a far mesh per look, instead of
+  plain colours (see Far meshes in Extending); without far meshes far chunks keep them anyway, so
+  it is offered only where far meshes run. Either one rebuilds the chunks it changes in the
+  background.
 
 Presets (seed 12345, parts at the spawn / in the mountains, with far meshes in brackets; without
 skipping hidden terrain):
@@ -659,7 +676,10 @@ DataStore "IceVoxelSettings_v1" (`Settings.Save`). A joining client waits up to 
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
-                            drops, menus), plants (soil sets, tall halves, foliage tints)
+                            drops, menus), plants (soil sets, tall halves, foliage tints), each
+                            block's textures per face from the pack (`variantTexture`, `alignLut`)
+  TexturePack               the texture pack: every block texture (maps, Material, Tint, Average)
+                            and the texture of each block's faces; hand-edited, pure data
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats, what a full bucket leaves);
                             ItemList (items that are not blocks)
@@ -715,9 +735,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             pieces, foundations, generated chests)
     CaveDecor               glow lichen on cave walls (full detail only)
     Foliage                 ground plants by biome (full detail only)
-  Meshing/GreedyMesher      blocks -> boxes (parts)
+  Meshing/GreedyMesher      blocks -> boxes (parts; odd boxes for textures with OddBoxes)
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
-  Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays
+  Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays (split by
+                            look, with UVs, for Far Materials)
   Map/MapPainter            map tile colours from the generator, oil geysers' dots (runs in the
                             workers)
   World/                    ChunkLayout, Coords, LodTree, VoxelRaycast, FluidFlow, SectionGraph
@@ -730,6 +751,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             character)
   Net/                      Protocol (buffer encoding), Remotes
   Util/Hash                 deterministic hashing and RNG
+
+src/textures -> generated from the texture pack by tests/build_textures (never edit by hand)
+  Materials.model.json      MaterialService.IceVoxel: a MaterialVariant IV_<name> per filled texture
+  Images.model.json         ReplicatedStorage.IceVoxelTextures: a Texture prototype of the same name
 
 src/server   -> ServerScriptService.IceVoxel
   IceVoxel_Server           boot: seed, world, ticker, network, players
@@ -791,7 +816,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             settings), LightingController (day, night and cave lighting),
                             SkyExposure (how much sky light reaches the camera), FluidFog (the
                             view from inside a fluid: fog and tint), MeshOverlay + MeshRegions
-                            (far meshes)
+                            (far meshes), TextureLooks (every look of the texture pack: variants,
+                            tints, images, sprites, far and plain looks, far mesh looks; checks
+                            the ids and measures averages)
   Settings/                 the player's settings: State (values and choices), Schedule (when
                             changes apply), Pages (the menu's layout), saving them on the server
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
@@ -836,7 +863,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             (Minecraft's debug keys: F3 when let go, F3 + N, F3 + F4, F3 + Q)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
-             command line), build_structures (the example outpost's builder)
+             command line), build_structures (the example outpost's builder), build_textures (the
+             texture pack -> src/textures; logic in lib/TextureBuild)
 docs/        ARCHITECTURE.md (how everything fits together)
 ```
 
@@ -859,7 +887,7 @@ for performance:
 | `Lod.UndergroundSeconds`  | 5       | How long that lasts after the camera comes up (no rebuilding at cave mouths). |
 | `Lod.Levels`              | 7       | Coarsest level covers `16 × 2^(Levels-1)` blocks per chunk.         |
 | `Lod.MaxVerticalStep`     | 16      | Tallest LOD cell in blocks (keeps far mountains shaped).            |
-| `Lod.FoliageDistance`     | 40      | How far plants are drawn (blocks; every box of a plant is a part).  |
+| `Lod.FoliageDistance`     | 40      | How far plants are drawn (blocks; every box or image plane of a plant is a part). |
 | `Workers.Count`           | 6       | Actors generating / meshing in parallel.                            |
 | `Streaming.TeleportDistance` | 128  | A jump this far (blocks) drops the old area at once (teleport mode). |
 | `Streaming.TeleportTimeout` / `TeleportSettle` | 10 / 16 | Teleport mode (and the first load: far meshes and map tiles wait) ends once the 3 × 3 chunks under the player are shown and at most this many nodes and builds are left, or after this many seconds. |
@@ -895,9 +923,17 @@ for performance:
 | `Structures.MaxDataChars` | 200000  | Longest structure text saved or pasted (what a StringValue holds).  |
 | `Structures.DataPieceChars` | 16000 | Structure text travels in pieces of this many characters, `DataPiecesPerSecond` (20) a second. |
 | `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
-| `Render.Textures`         | true    | Use block textures (MaterialVariants / face images) when defined.   |
+| `Render.Textures`         | true    | Draw the texture pack's textures (the Textures setting); false: every block in its plain material and colour. |
+| `Render.FarMaterials`     | false   | Materials and textures on merged far chunks, a far mesh per look (the Far Materials setting), instead of plain colours. |
+| `Textures.OddBoxes`       | false   | Odd-sized boxes (in blocks) for textured cubes at full detail, for variants that tile from a face's centre (see Block textures): 14-18% more parts near the player. |
+| `Textures.BottomFaces` / `SideImages` | false / false | Draw bottoms (grass's dirt) as images, one more instance per part / the sides as upright images over the top's variant, four more. |
+| `Textures.Sprites`        | true    | Plants with a filled `Sprite` are two crossed images instead of their boxes. |
+| `Textures.MeasureAverages` / `ValidateIds` | true / true | Measure the averages the pack lacks and print them to paste / check every image id once at startup and name each one that fails. |
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Render.FarMeshes.MaxBuildSpeed` / `SpeedWindow` | 2 / 2 | No mesh builds while the camera moved faster than this many blocks a second, averaged over this many seconds. |
+| `Render.FarMeshes.LookMinShare` / `MaxLooks` | 0.05 / 4 | With Far Materials: a look gets MeshParts of its own in a region when it covers this share of its area, at most this many looks (the largest). |
+| `Render.FarMeshes.LookRemainder` | "plain" | The other quads: "plain" (SmoothPlastic in the colour they average to) or "largest" (joined to the largest opaque look, tinted to that colour). |
+| `Render.FarMeshes.UvStuds` | 3      | Studs per texture tile in far mesh UVs (one block face).            |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
@@ -970,8 +1006,10 @@ table.insert(list, { name = "Marble", color = { 235, 235, 230 }, material = "Mar
 It is immediately an item: it shows up in the creative picker, and survival players get it by
 mining it (`hardness = 1.5` for stone-like mining time, `tool = "pickaxe"` and `toolLevel = 0` to
 need a pickaxe to drop anything, `drops = "Cobblestone"` or `false` to drop something else or
-nothing, `container = 27, menu = "Chest"` for a chest-like block, `maxStack = 1` for an item that doesn't stack). Blocks that look identical
-share one part template.
+nothing, `container = 27, menu = "Chest"` for a chest-like block, `maxStack = 1` for an item that
+doesn't stack). Blocks that look identical share one part template. `color` and `material` are
+its plain look (and the colour a tinted texture takes); its texture goes in the texture pack (see
+Block textures below).
 
 **Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
 `ui.button.click`...; the full list is `src/shared/Sounds/SoundList.luau`) played with one of the
@@ -1109,7 +1147,9 @@ top = "MyPlantTop" }`, the upper with `plant = { bottom = "MyPlant" }`, which th
 lower half's variant (no item, no drops, not placeable); give both halves full block `bounds`, as
 DoublePlantBlock has. `tinted = true` colours its boxes by the soil's `foliageColor`;
 `shearDrops = true` (or an item name, with `shearCount`) is what Shears harvest. Keep the shape
-to 4 boxes inside the outline whichever way it turns: tests/spec/Plants checks it. From your own
+to 4 boxes inside the outline whichever way it turns: tests/spec/Plants checks it. Give it a
+`Sprite` in the texture pack (each half of a tall plant its own) and, once filled, it is drawn as
+two crossed images instead of its boxes. From your own
 server scripts place a tall plant with `EditRules.setPlaced(world, x, y, z, block)`:
 `world:setBlock` sets only the half you give it, and a half alone pops on the next tick.
 
@@ -1126,42 +1166,184 @@ mix({ "Marble", "Coal" }, "DarkMarble")                       -- shapeless
 smelt("Marble", "SmoothMarble")                               -- furnace
 ```
 
-**Block textures.** Blocks already use Roblox materials (Slate, Grass, Sand...), which have
-built-in textures. For your own, per-block textures use a MaterialVariant per block:
+**Block textures (the texture pack).** Every block texture is in one hand-edited module,
+`src/shared/TexturePack.luau`, like a Minecraft resource pack. Its `Textures` table lists the
+images by name, lower case with spaces (`"grass top"`, `"log"`, `"packed mud"`...):
 
-1. In Studio open the Material Manager (Model tab) and create a variant, e.g. `IV_Stone`, with the
-   block's material as Base Material (Stone uses `Slate`), your uploaded images as Color (and
-   optionally Normal / Roughness) maps, **Studs Per Tile = 3** (the block size, so one tile covers
-   one block face) and **Pattern = Regular**. Scripts cannot create textured variants at runtime;
-   they have to be authored in Studio (or synced by Rojo, below).
-2. Point the block at it in `BlockList.luau`:
-   ```lua
-   { name = "Stone", color = { 125, 125, 128 }, material = "Slate", texture = "IV_Stone" },
-   ```
-   `color` still colours the map; the part is tinted with `tint` (default white, i.e. the
-   texture's own colours). A missing variant just prints a warning and keeps the plain material.
-3. Different faces, e.g. a grass top on a dirt-textured block: `faces = { Top = "rbxassetid://..." }`.
-   Each face image is one extra instance per part, so it is only drawn on full detail chunks.
-
-With Rojo the variants can live in the project instead:
-
-```json
-"MaterialService": {
-  "IV_Stone": {
-    "$className": "MaterialVariant",
-    "$properties": {
-      "BaseMaterial": "Slate",
-      "ColorMap": "rbxassetid://YOUR_IMAGE_ID",
-      "StudsPerTile": 3,
-      "MaterialPattern": "Regular"
-    }
-  }
-}
+```lua
+["log"] = {
+	Color = "rbxassetid://120423551204729",  -- the colour map ("" = not made yet)
+	Normal = "rbxassetid://109169967309613", -- optional, like Roughness and Metalness
+	Material = "Wood",                       -- the Roblox material the MaterialVariant is based on
+	Tint = true,                             -- take the voxel colour (below)
+	-- Average = { r, g, b },                -- the image's average colour (below)
+},
 ```
 
-(add it inside `"tree"` in `default.project.json`; Rojo 7.5+ also accepts `ColorMapContent`). Check
-the tile alignment once in Studio: a 9-stud and three 3-stud parts next to each other should show
-identical tiles.
+`Material` is what the textured parts take, so pick the material closest to the picture (a block
+keeps its own sounds); Neon, Glass, ForceField, Air and Water cannot take a MaterialVariant.
+`Align = false` marks a noisy texture (leaves) that never needs odd boxes (see the tiling check
+below). The pack's `Blocks` table says which texture each block shows on each face: `All`,
+`Sides`, `Top` and `Bottom` (a face given nothing falls back to All, then Sides), `Front` for glow
+lichen (the face looking away from what it hangs on) and `Sprite` for plants (two crossed images).
+An entry also covers the block's cave twin and the other blocks of its variant group (the six
+glow lichen sides, a tall plant's top half unless it has its own). Fluids, air, torches and
+lanterns, pipes, cables and tanks, machines and the solar panel, structure blocks and jigsaws and
+the Glow Block (Neon) are never textured. One tile covers one block face (`StudsPerTile = 3`): a
+512 × 512 image per 3-stud face. Blocks checks the pack when it loads and fails naming the mistake
+(an unknown block, face or texture, a material that cannot take a variant, an entry for a cave
+twin), so a typo fails loudly in Studio and in the tests.
+
+To fill in a texture:
+
+1. Upload the image and paste its **Image** id into the entry: `Color = "rbxassetid://<number>"`
+   (and `Normal`, `Roughness`, `Metalness`). A Decal id is a different number, which Studio
+   converts when you paste it into a property but nothing converts here (see the checks below).
+2. Run `lune run tests/build_textures`. It writes `src/textures/Materials.model.json` (a
+   MaterialVariant `IV_<name>` per filled texture, spaces as `_`, e.g. `IV_grass_top`, in
+   `MaterialService.IceVoxel`) and `src/textures/Images.model.json` (a Texture of the same name per
+   filled texture, in `ReplicatedStorage.IceVoxelTextures`: the game clones these for face images,
+   sprites and item cubes, since a clone keeps the normal, roughness and metalness maps that game
+   scripts cannot set). Game scripts cannot make MaterialVariants either, which is why they are
+   made here. Never edit the two files, nor the variants in the Material Manager: the next run and
+   sync overwrite them.
+3. Rojo syncs them into Studio while `rojo serve` runs (`rojo build` puts them in the place file).
+   Save or publish the place so they ship.
+
+`lune run tests/build_textures --list` prints the blank textures with the blocks waiting on each,
+then the filled ones still without an Average; `--check` exits 1 when the files are out of date
+(the TexturePack spec in the test suite fails then too). Every run ends with a note while filled
+textures have no Average. The generator writes nothing for a pack with errors (ids that are not
+`"rbxassetid://<number>"`, unknown fields, bad averages, and whatever Blocks refuses) and warns
+about a normal map that repeats its colour map and about filled textures no block uses.
+
+**Blank entries.** `Color = ""` means "not made yet": 60 entries wait for you (`--list` names
+them). While a block's sides and top are blank it keeps its plain Roblox material and colour, as
+without textures. A part takes one MaterialVariant on all six faces, so once its sides' texture is
+filled in (or its top's, when the bottom has no other filled texture) its blank faces show that
+one: a log's ends show the bark until `"log top"` is filled, cut sandstone's blank sides show the
+sandstone top. A filled top that differs from the sides is drawn over the top face as an image.
+`ShowMissing = true` draws the missing texture (`"missing texture"`) in place of blank textures, so
+you can see in game what is left to make: on every face of a block whose sides are blank (unless
+its filled top stands in for them), on blank tops, and on blank plant sprites and glow lichen. A
+blank bottom, or blank sides under a filled top, show the block's texture as above unless they are
+drawn as images of their own: bottoms with `Config.Textures.BottomFaces`, sides with `SideImages`.
+
+**Tint** makes a texture take the voxel colour (BlockList `color`):
+- `true` (the default): the colour of the block it is drawn on, so one light image serves every
+  wood: `"log"`, `"planks"` and `"leaves"` show oak, birch, spruce, acacia and jungle each in its
+  own colour, and dry grass shows the grass top in its own colour;
+- `false`: the image's own colours (ores, the grass side, glow lichen, flowers and mushrooms);
+- a block name: that block's colour wherever it is drawn (`"dirt"` is `Tint = "Dirt"`, so the dirt
+  under grass is dirt coloured, not grass coloured).
+
+A tint can only **darken**: a part shows its texture times its Color, which Roblox stores in 8 bits
+and stops at white. So a texture shared by tinted blocks should be light, ideally greyscale, and at
+least as light as the lightest block using it (birch logs are far lighter than spruce ones). Images
+(face images, sprites, item cubes) are not clamped and can also brighten. Once a texture's Average
+is known, a block it would leave more than 4 (of 255) too dark draws it as tinted images over the
+variant up close (more instances) and in its plain colour far away, so the block still takes its
+colour; see-through blocks just draw it darker. One warning lists them, worst first:
+`[IceVoxel] textures darker than the blocks they tint (by how much, 0-255): ...`. A lighter image
+keeps the plain variant.
+
+**Average** (`{ r, g, b }`, 0-255) is the image's average colour (the mean in linear light, written
+as sRGB). With it the tint is exact (voxel colour / average per channel, in linear light, so the
+block averages exactly its voxel colour), and distant chunks take the colour each block really
+shows on screen. Without it the colour is simply multiplied in and distant chunks guess (the
+voxel colour). No texture has one yet. With `Config.Textures.MeasureAverages` the game measures
+every texture without one shortly after joining, in the background, and prints a block to the
+output (Studio's Output, or F9 in game):
+
+```
+[IceVoxel] Texture averages (paste into TexturePack.Textures[...].Average):
+	Average = { 121, 85, 58 }, -- ["dirt"]
+```
+
+Paste each line into the entry the comment names, so it is never measured again (until then the
+world is restyled once per session when the averages come in). Textures it could not measure are
+named, with the reason.
+
+**How textures are drawn** (`Rendering/TextureLooks` decides every look; with the Textures
+setting off every block is drawn in its plain material and colour, plants as boxes):
+- **Near** (full detail): a cube's parts take one MaterialVariant on every face, in its texture's
+  Material and tint: the sides' texture, else the top's when it stands alone. A different filled
+  top (grass, sandstone, cactus) is a Texture image over the top face; `BottomFaces` adds the
+  bottom as an image, `SideImages` draws the sides as images over the top's variant. Chests,
+  crafting tables and furnaces keep their decorated faces over their texture.
+- **Far** (LOD levels the far meshes never merge: level 1 and the widest nodes; and the merged
+  ones while Far Materials is on or far meshes are off): one variant per part and no images: the
+  top's texture, which dominates from afar, else the sides'.
+- **Plain** (the merged levels 2-5, about 200 blocks away and further, while far meshes run and
+  Far Materials is off): SmoothPlastic in the colour the block's top averages to on screen,
+  texture and tint included. The far meshes take the same colours, so distant terrain keeps the
+  colours of the textured terrain near you (once the averages are known).
+- **Plants** with a filled `Sprite` (`Config.Textures.Sprites`): two crossed see-through planes
+  along the cell's diagonals carrying the image on both sides, offset and turned like the boxes;
+  grass and ferns take their soil's foliage colour. Blank sprites keep their boxes.
+- **Glow lichen** with its `Front` texture: the plate goes see-through and shows the image on its
+  face away from the wall; the glowing speck stays.
+- **Items**: a textured block's item is a cube with one image per textured face, one tile per
+  face, in its tint (untextured faces keep the block's material and colour); a plant's item is its
+  sprite on an upright plane. Item icons build their models again a few per frame when looks change.
+- **The missing texture** (`IV_missing_texture`) is drawn for blank textures with ShowMissing, for
+  a texture whose id failed to load, and for one whose MaterialVariant is not in MaterialService
+  (the generator was not run, or Rojo is older than 7.7; the output names it and the fix).
+
+Looks drawn before the startup checks finish are provisional: when averages come in, an id
+fails, or the Textures or Far Materials setting changes, only the chunks whose look changed are
+rebuilt, off-screen in the background within the frame budget, and swapped in.
+
+**Rojo 7.7.1.** The generated files use properties Rojo 7.4 does not know (`ColorMapContent`,
+`TextureContent`...), so `rokit.toml` now pins Rojo 7.7.1. Once:
+1. `rokit install`;
+2. `rojo plugin install` (or update the plugin from the Creator Store): a 7.4 Studio plugin cannot
+   talk to a 7.7 server;
+3. delete any `IV_...` MaterialVariants you made by hand in MaterialService (the old way to add
+   textures): one with the same name and base material as a generated one leaves Roblox to use
+   either. Rojo manages only `MaterialService.IceVoxel`, so other variants are left alone.
+
+**Check once in Studio:**
+- **Image ids.** Every id must be an Image id. To check one, paste it into a Decal's Texture
+  property: if Studio turns it into another number, that number is the Image id. With
+  `Config.Textures.ValidateIds` the game loads every id once at startup and names each one that
+  fails (`[IceVoxel] texture "..." (rbxassetid://..., used by ...) failed to load ... Most likely
+  it is a Decal id`): a failed colour map draws the missing texture, a failed normal, roughness or
+  metalness map leaves the texture without it. Check the missing texture's own id, `925810526`,
+  first: it is an old, short id that may be a Decal id, and if it fails, ShowMissing and failed
+  textures show the plain block instead.
+- **Tiling** (`Config.Textures.OddBoxes`). A part most likely tiles a MaterialVariant from a corner
+  of each face, so boxes of any size show whole tiles. Place parts 3, 6 and 9 studs long (3 × 3
+  across) side by side on the block grid, all in the same variant (e.g. Material Slate,
+  MaterialVariant `IV_stone`). If the tile lines on the 6-stud part fall in the middle of its
+  blocks, tiles are centred: set `OddBoxes = true`. Every box of a textured cube is then an odd
+  number of blocks along each axis at full detail (leaves are left out), for 14-18% more parts
+  near the player (up to 49% on flat plains) and no measurable meshing time. Far levels never use
+  it.
+- **Grass sides** (`Config.Textures.SideImages`). Look at a grass block from the side: the green
+  fringe of `"grass side"` must be along the top. If the variant's sides come out turned, set
+  `SideImages = true`: the four sides are then drawn as upright images over the top's variant
+  (four more instances per part).
+- **Averages.** Measuring needs "Enable Mesh / Image APIs" (Game Settings > Security, or the
+  Creator Dashboard) and images the place's owner owns; otherwise the output names the textures
+  it could not measure and why. Paste the printed averages, so players never need it.
+- **Far Materials**, if you use it: a far MeshPart should show one tile per block, sides upright,
+  tinted by the block colours; if not, adjust `Config.Render.FarMeshes.UvStuds`.
+
+**The sheet's oddities**, as transcribed:
+- leaves: the normal map repeated the colour map's id, so leaves have no normal map;
+- packed mud ("darker dirt"): dirt's colour map, and its normal map repeated that id too, so it
+  uses dirt's normal map (`72051511434165`). It is tinted with PackedMud's colour, now
+  `{ 97, 68, 46 }`, darker than Dirt in every channel (it was lighter), so river beds and the
+  outpost's paths are darker than before, textures on or off;
+- calcite uses stone's normal map, as the sheet gives it;
+- the missing texture's size is unknown, and its id may be a Decal id (above);
+- dry grass shares grass's top, in its own colour, but its sides are a blank `"dry grass side"`
+  of their own (the grass side's green fringe would not suit it): until you fill it they keep
+  dry grass's plain material and colour;
+- the crafting table's bottom falls back to its sides (Minecraft's is planks: `Bottom =
+  "planks"`, seen only with BottomFaces), and smooth sandstone is the sandstone top on every face,
+  as in Minecraft.
 
 **Spawn safety.** `src/server/Players/SpawnUnsafeBlocks.luau` lists what a player must not stand on
 (`Floor`), stand in (`Body`, fluids by name) or touch (`Hazards`), plus the headroom and search
@@ -1190,8 +1372,27 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
   frame time; press **F3** to see the status, how many regions and chunks are merged, and how long
   builds take. Meshes stay off (parts only, with their normal look) when the Mesh APIs are
   unavailable, the probe fails, or building makes frames more than `MaxBlockingMs` longer.
-- Merged levels use a plain look for their parts too (SmoothPlastic in the block colour, opaque
-  water), so swapping between parts and a mesh is invisible.
+- Merged levels use a plain look for their parts too: SmoothPlastic in the colour each block
+  averages to on screen (its texture and tint included), water opaque, so swapping between parts
+  and a mesh is invisible and distant terrain keeps the colours of the textured terrain near you.
+- **Far Materials** (Options, Video; `Config.Render.FarMaterials`, off by default) keeps materials
+  and textures on the merged levels instead. Their parts take the far look (one MaterialVariant
+  per block, the top's), and each region's mesh is split by look (material + variant +
+  transparency + reflectance), since a MeshPart has one material:
+  - a look covering at least `FarMeshes.LookMinShare` (5%) of the region gets MeshParts of its
+    own, at most `MaxLooks` (4) looks, the largest;
+  - the rest is drawn plain (`LookRemainder = "plain"`), or joins the largest opaque look
+    (`"largest"`), its vertex colour set so that look's texture averages to the colour it replaces;
+  - textured meshes get UVs from world positions, one tile per `UvStuds` (3) studs, so tiles line
+    up with the blocks at every level, and their vertex colours carry the tints.
+
+  That is about 2-5 MeshParts per region instead of 1-2, so meshes take longer to catch up;
+  switching rebuilds the merged levels in the background. F3's meshes line then counts the
+  MeshParts in a material: "N parts (M with materials)". The probe also builds a mesh in a
+  material; if that fails, the output says `[IceVoxel] Far Materials off: ...` and meshes stay
+  plain whatever the setting. Not checked in Studio yet: whether a far MeshPart's material follows
+  the written UVs (one tile per block, sides upright; adjust `UvStuds` if not) and whether vertex
+  colours tint it.
 - Phones keep parts by default (`FarMeshes.Mobile`).
 - Builds wait while the camera moves (`MaxBuildSpeed` blocks a second over `SpeedWindow`
   seconds: walking, 70 builds a minute became ~3), while the streamer has much to do and after
@@ -1338,10 +1539,12 @@ lune run tests/preview [seed] [blocksPerPixel] [pixels]   # top-down map in test
 lune run tests/structure decode <file | IVS1:... | -> [--lua t.luau]   # structure data, as ASCII
 lune run tests/structure encode t.luau [--out file] [--module]        # an edited table to IVS1
 lune run tests/build_structures [--check] [--print]   # rebuild (or check) the example outpost
+lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,135 tests, all passing (lava and oil have LavaOil,
-LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion).
+`lune run tests/run` runs the whole suite: 1,185 tests, all passing (lava and oil have LavaOil,
+LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
+has TexturePack, TextureLooks and FarLooks).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
@@ -1350,10 +1553,11 @@ timings match Roblox's (they were 1.3-2.6 × slow before). Modules run with nati
 about 2.5-4 × slower there). The client's streaming and rendering run in Lune too:
 `tests/spec/RenderPipeline` drives the real ChunkRenderer, PartPool and MeshOverlay against fake
 instances (checking every frame for gaps, doubled lights and parts reused in the frame they were
-released), and `tests/spec/Streaming` the real ChunkStreamer and ClientWorld with a fake worker
-pool, renderer and network (checking every frame that no ground goes uncovered, no two levels
-overlap and no tunnel opens onto the void, through loading, edits, teleports, caves and hidden
-terrain).
+released; textured terrain with MaterialService and the prototypes loaded from the generated
+`src/textures` files), and `tests/spec/Streaming` the real ChunkStreamer and ClientWorld with a
+fake worker pool, renderer and network (checking every frame that no ground goes uncovered, no
+two levels overlap and no tunnel opens onto the void, through loading, edits, teleports, caves
+and hidden terrain).
 
 Formatting, linting and type checking:
 
@@ -1391,6 +1595,10 @@ Natural next steps, roughly in order:
   meal, sugar cane, seagrass and kelp, lily pads, vines, sweet berry bushes, and wheat, so grass
   can drop seeds. Plants are drawn only within `Lod.FoliageDistance`; Minecraft draws them to the
   render distance, which would need them merged into far fewer parts or meshes.
+- **More of the texture pack.** The 61 blank textures and every texture's Average; see-through
+  leaves and glass once Roblox turns MaterialVariant cut-outs (`AlphaMode`) on for game clients
+  (off as of October 2026, so block textures are opaque, and sprites are Decals on thin parts);
+  the Studio checks above (tiling, grass sides, far mesh UVs).
 - **Edits in LOD chunks and on the map.** Far chunks and the map show generated terrain only; player
   builds appear once in full detail range.
 - **Cave caps without cracks.** While the side between two sections switches between open and

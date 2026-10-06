@@ -172,13 +172,10 @@
 
 	Directions are Minecraft's: North = -Z, South = +Z, West = -X, East = +X.
 
-	Textures (optional, see "Block textures" in the README):
-	  texture       Name of a MaterialVariant in MaterialService whose BaseMaterial is `material`
-	                (e.g. "IV_Stone" with BaseMaterial Slate, StudsPerTile = BlockSize, Pattern Regular).
-	                `color` stays the block's colour on the map; the part is tinted with `tint`.
-	  tint          { r, g, b } multiplied with the texture. Default white (the texture's own colours).
-	  faces         { Top = "rbxassetid://...", ... }: extra images drawn on single faces of full
-	                detail parts, e.g. a grass top over a dirt texture. Costs one instance per face.
+	Textures are not set here: every block's texture per face is in the texture pack
+	(Shared/TexturePack; Blocks resolves it). `color` and `material` stay the block's plain look
+	(drawn while its texture is blank or textures are off, and on the map) and the colour a tinted
+	texture takes.
 ]]
 
 -- (Pure data that requires nothing, so Blocks never depends on the Transmitters logic.)
@@ -234,9 +231,6 @@ export type BlockSpec = {
 	menu: string?,
 	decor: string?,
 	sound: string?,
-	texture: string?,
-	tint: { number }?,
-	faces: { [string]: string }?,
 	light: number?,
 	lightColor: { number }?,
 	shape: { ShapeBox }?,
@@ -539,7 +533,8 @@ table.insert(list, {
 	tool = "pickaxe",
 	toolLevel = 0,
 })
-table.insert(list, { name = "PackedMud", color = { 142, 106, 79 }, material = "Mud", hardness = 1, tool = "pickaxe" })
+-- (Darker than Dirt: the texture pack draws it as "darker dirt", dirt's image in this colour.)
+table.insert(list, { name = "PackedMud", color = { 97, 68, 46 }, material = "Mud", hardness = 1, tool = "pickaxe" })
 table.insert(list, {
 	name = "Mycelium",
 	tool = "shovel",
@@ -1341,16 +1336,17 @@ end
 	half names it (`item`) and drops nothing. Short grass, ferns, their tall forms and the dead bush
 	are replaceable, as in Minecraft 1.20; flowers and mushrooms are not.
 
-	Minecraft draws plants as crossed textured quads; there are no texture uploads here, so they
-	are a few thin boxes each (pixels from the cell's centre, the ground at y = -8), and every box
-	is one Part per plant in the world: at most 4, 3 on the common ones. Blades and fronds lean out
-	in different directions in a few shades of green; flowers are a thin stem with a head in
-	Minecraft's colours. Plants are drawn at a scattered offset and turn (`scatter`), so every box
-	stays inside 2..14 (grass, ferns, dead bushes and tall plants) or 5..11 (flowers and mushrooms)
-	whichever way it is turned, and at most a pixel out of its cell after the offset of up to 3
-	pixels (like a wall torch's foot). Those are Minecraft's outlines too, aimed at and highlighted,
-	except for tall plants: DoublePlantBlock keeps a block's default shape, so each half is aimed at
-	and outlined as a full block.
+	Minecraft draws plants as crossed textured quads. Here they are a few thin boxes each (pixels
+	from the cell's centre, the ground at y = -8) until their Sprite texture is filled in
+	(Shared/TexturePack: the client then draws two crossed images instead, with textures on), and
+	every box is one Part per plant in the world: at most 4, 3 on the common ones. Blades and
+	fronds lean out in different directions in a few shades of green; flowers are a thin stem
+	with a head in Minecraft's colours. Plants are drawn at a scattered offset and turn
+	(`scatter`), so every box stays inside 2..14 (grass, ferns, dead bushes and tall plants) or
+	5..11 (flowers and mushrooms) whichever way it is turned, and at most a pixel out of its cell
+	after the offset of up to 3 pixels (like a wall torch's foot). Those are Minecraft's outlines
+	too, aimed at and highlighted, except for tall plants: DoublePlantBlock keeps a block's default
+	shape, so each half is aimed at and outlined as a full block.
 
 	Tall grass gives 2 short grass with Shears and large ferns 2 ferns; short grass, ferns and dead
 	bushes give themselves, and nothing (a dead bush a stick) without. Flowers and mushrooms always

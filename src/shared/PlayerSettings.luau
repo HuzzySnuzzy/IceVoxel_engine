@@ -621,6 +621,22 @@ local ENTRIES: { Entry } = {
 		format = "plain",
 		labels = { [0] = "Auto" },
 	},
+	-- Materials and textures on merged far chunks (far meshes split by look) instead of plain
+	-- colours; restyled like Textures. Offered only where far meshes can run (Settings.shown).
+	{
+		id = 34,
+		key = "farMaterials",
+		name = "Far Materials",
+		kind = "toggle",
+		page = "video",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = bool(Config.Render.FarMaterials),
+		effect = "textures",
+		preset = false,
+		format = "plain",
+	},
 }
 
 local byKey: { [string]: Entry } = {}

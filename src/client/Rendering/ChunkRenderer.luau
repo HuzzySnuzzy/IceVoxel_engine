@@ -43,10 +43,18 @@
 	trashed model above or below it in the LOD tree is still there.
 
 	Restyle (`restyle`, the settings menu): shadow changes rewrite CastShadow on live parts within
-	the build budget; a texture change rebuilds every section off-screen in the background lane
-	and swaps it like any other build. Only where no build waits to start (which uses the new look
-	anyway), and never in plain far levels (no textures); any newer build replaces a restyle
-	(RenderSchedule), so an edit never waits behind one.
+	the build budget. Looks come from Rendering/TextureLooks; when they change (the Textures or Far
+	Materials setting, texture averages measured, ids that failed: its `changed` signal) every
+	section whose parts carry an older look is rebuilt off-screen in the background lane and
+	swapped like any other build: a record keeps the look generation its parts were made with
+	(PartPool: the plain one in plain far levels, the part one elsewhere) and whether it was drawn
+	plain, so a section is rebuilt only when either differs from now (plain levels keep their parts
+	when only the near looks changed; Far Materials flips merged levels between plain and full
+	look). Only where no build waits to start (which uses the new look anyway); any newer build
+	replaces a restyle (RenderSchedule), so an edit never waits behind one. The far meshes get the
+	new looks (MeshOverlay:setLooks) and merge a node only once its records are current
+	(`overlay.isCurrent`); when the overlay drops Far Materials on its own (its startup probe could
+	not build a mesh in a look: `overlay.onLooks`), the merged levels are rebuilt plain the same way.
 
 	Render.SwapPartsPerFrame is one allowance per frame for the streamer's level of detail swaps
 	and MeshOverlay's: `show` counts the parts it puts into the workspace, and the overlay gets
@@ -73,7 +81,13 @@
 	  * tinted ones (grass, ferns) take their soil's foliage colour, which the mesher packs into
 	    the box key (GreedyMesher.decodeKey's surface field): every box's colour times
 	    Blocks.FOLIAGE_TINTS[tint], clamped. Their parts' colour is always set, tint or none,
-	    because a pooled part may come back from a cell with another tint.
+	    because a pooled part may come back from a cell with another tint;
+	  * with a sprite (TextureLooks.spriteOf: a filled Sprite texture, Textures and Config.Textures.
+	    Sprites on) a plant's cell is drawn in full detail as two crossed planes along its
+	    diagonals instead of its boxes (BlockSize x sqrt 2 wide, a cell tall, PartPool.SPRITE_BOX),
+	    placed and turned like the boxes; tinted ones get their soil's tint on the planes' Decals
+	    (written only when the part's tint differs: `spriteTints`). Their Bounds still aim and
+	    outline them.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -89,6 +103,7 @@ local Blocks = require(Shared.Blocks)
 
 local PartPool = require(script.Parent.PartPool)
 local MeshOverlay = require(script.Parent.MeshOverlay)
+local TextureLooks = require(script.Parent.TextureLooks)
 local ViewSettings = require(script.Parent.ViewSettings)
 local SectionDiff = require(script.Parent.SectionDiff)
 local RenderSchedule = require(script.Parent.RenderSchedule)
@@ -107,6 +122,10 @@ local SPARSE_SWEEP = 0.25
 local SPARSE_HYSTERESIS = 8
 -- A commit group open longer than this (seconds) stops waiting for its missing tasks.
 local GROUP_TIMEOUT = 2
+-- Sprite planes: one along each diagonal of the cell.
+local SPRITE_BOX = PartPool.SPRITE_BOX
+local SPRITE_TURNS = { CFrame.Angles(0, math.pi / 4, 0), CFrame.Angles(0, -math.pi / 4, 0) }
+local SQRT2 = math.sqrt(2)
 
 local EDIT = RenderSchedule.EDIT
 local NEAR = RenderSchedule.NEAR
@@ -206,8 +225,10 @@ type Record = {
 	folder: Folder?,
 	-- Parts carrying a PointLight.
 	lights: { BasePart },
-	-- PartPool.textureGen the parts were made with.
+	-- The look generation the parts were made with (PartPool.generationOf), and whether they were
+	-- drawn plain (MeshOverlay.plainLevel).
 	texture: number,
+	plain: boolean,
 }
 
 type NodeState = {
@@ -367,6 +388,8 @@ export type ChunkRenderer = {
 	stepping: boolean,
 	-- Parts `show` put into the workspace since the last step (Render.SwapPartsPerFrame).
 	swapUsed: number,
+	-- The soil tint each tinted sprite plane's Decals carry (weak).
+	spriteTints: { [BasePart]: number },
 
 	build: (
 		self: ChunkRenderer,
@@ -399,6 +422,10 @@ export type ChunkRenderer = {
 
 local ChunkRenderer = {}
 ChunkRenderer.__index = ChunkRenderer
+
+-- (Below: the look of a node now, and what a change of looks rebuilds.)
+local isCurrent: (self: ChunkRenderer, node: RenderNode) -> boolean
+local looksChanged: (self: ChunkRenderer, changes: TextureLooks.Changes) -> ()
 
 function ChunkRenderer.new(): ChunkRenderer
 	local root = Instance.new("Folder")
@@ -442,12 +469,30 @@ function ChunkRenderer.new(): ChunkRenderer
 		walkPart = 1,
 		stepping = false,
 		swapUsed = 0,
+		spriteTints = setmetatable({}, { __mode = "k" }) :: any,
 	}
 	local renderer = (setmetatable(self, ChunkRenderer) :: any) :: ChunkRenderer
-	-- The overlay budgets hiding and showing nodes by their parts.
+	-- The overlay budgets hiding and showing nodes by their parts, and merges a node only once its
+	-- parts carry the current look.
 	renderer.overlay.countParts = function(node: any): number
 		return renderer:partsOf(node)
 	end
+	renderer.overlay.isCurrent = function(node: any): boolean
+		return isCurrent(renderer, node)
+	end
+	-- (The overlay dropped Far Materials on its own: merged levels are plain again.)
+	renderer.overlay.onLooks = function()
+		looksChanged(renderer, { parts = false, plain = false, meshes = false, items = false })
+	end
+	renderer.overlay:setLooks(
+		TextureLooks.farMaterials(),
+		TextureLooks.lookOf,
+		TextureLooks.lookInfo,
+		TextureLooks.plainRgb
+	)
+	TextureLooks.changed:Connect(function(changes: TextureLooks.Changes)
+		looksChanged(renderer, changes)
+	end)
 	return renderer
 end
 
@@ -723,7 +768,8 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 	local k = 0
 	local shape = shapes[appearance]
 	if shape then
-		-- One part per shape box in every cell (shaped boxes are single cells).
+		-- One part per shape box in every cell (shaped boxes are single cells), or two sprite
+		-- planes (plants with a sprite, full detail only).
 		local pixel = Vector3.new(scale, scaleY, scale) / 16
 		local scatter = scattered[appearance]
 		-- (For tinted plants the surface field is the soil's tint; see GreedyMesher.)
@@ -732,11 +778,13 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 		-- (For sparse lights it says whether this cell carries the light.)
 		local sparseLight = buffer.readu8(GreedyMesher.sparseLightLut, appearance) == 1
 		local dark = sparseLight and surface == 0
+		local sprite = if far then nil else TextureLooks.spriteOf(appearance)
+		local perCell = if sprite then #SPRITE_TURNS else #shape
 		for cy = y, y + sy - 1 do
 			for cz = z, z + sz - 1 do
 				for cx = x, x + sx - 1 do
-					if k + #shape <= skip then
-						k += #shape
+					if k + perCell <= skip then
+						k += perCell
 						continue
 					end
 					local centre =
@@ -752,6 +800,33 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 						)
 						cell = CFrame.new(centre + Vector3.new(dx * pixel.X, 0, dz * pixel.Z))
 							* CFrame.Angles(0, yaw, 0)
+					end
+					if sprite then
+						local frame = cell or CFrame.new(centre)
+						local colour = sprite.tints[tint] or sprite.tints[1]
+						for _, turn in SPRITE_TURNS do
+							if k < skip then
+								k += 1
+								continue
+							end
+							if self.windowBuilt > 0 and os.clock() > deadline then
+								b.sub = k
+								return false
+							end
+							local part = pool:acquire(appearance, far, plain, SPRITE_BOX)
+							part.Size = Vector3.new(scale * SQRT2, scaleY, PartPool.SPRITE_THICKNESS)
+							part.CFrame = frame * turn
+							local images = if sprite.tinted then pool:images(part) else nil
+							if images and self.spriteTints[part] ~= tint then
+								self.spriteTints[part] = tint
+								for _, decal in images do
+									decal.Color3 = colour
+								end
+							end
+							addPart(self, b, part, false)
+							k += 1
+						end
+						continue
 					end
 					for index, box in shape do
 						if k < skip then
@@ -824,17 +899,21 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	local base = stateOf(self, node).records[task.section]
 	b.started = true
 	b.base = base
-	b.texture = self.pool.textureGen
+	-- The look: merged far levels may be plain (MeshOverlay), each with its own generation.
+	b.far = node.level > 0
+	b.plain = b.far and self.overlay:plainLevel(node.level)
+	b.texture = self.pool:generationOf(b.plain)
+	local sameLook = base ~= nil and base.texture == b.texture and base.plain == b.plain
 	if b.restyle then
 		-- Rebuild what is live now, unless a newer build already used the current look.
-		if base == nil or base.texture == b.texture then
+		if base == nil or sameLook then
 			b.noop = true
 			return
 		end
 		b.boxes, b.count = base.boxes, base.count
 	end
 	b.first = table.create(b.count + 1)
-	if base and base.count > 0 and b.count > 0 and base.texture == b.texture and base.folder then
+	if base and base.count > 0 and b.count > 0 and sameLook and base.folder then
 		local matched, removed = SectionDiff.match(base.boxes, base.count, b.boxes, b.count)
 		b.matched, b.removed = matched, removed
 	elseif b.count > 0 then
@@ -848,8 +927,6 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	b.scaleY = stepY * Config.BlockSize
 	b.originX = node.nx * Config.ChunkSize * b.scale
 	b.originZ = node.nz * Config.ChunkSize * b.scale
-	b.far = node.level > 0
-	b.plain = b.far and self.overlay:plainLevel(node.level)
 	b.maxCells = math.max(1, MAX_PART // b.scale)
 	b.maxCellsY = math.max(1, MAX_PART // b.scaleY)
 end
@@ -965,6 +1042,7 @@ local function commit(self: ChunkRenderer, task: Task)
 				folder = folder,
 				lights = b.lights,
 				texture = b.texture,
+				plain = b.plain,
 			}
 		else
 			local live = (base :: Record).folder :: Folder
@@ -1021,6 +1099,7 @@ local function commit(self: ChunkRenderer, task: Task)
 				folder = live,
 				lights = lights,
 				texture = b.texture,
+				plain = b.plain,
 			}
 		end
 		state.parts += (if record then #record.parts else 0) - (if base then #base.parts else 0)
@@ -1336,8 +1415,9 @@ function ChunkRenderer.budgetMs(self: ChunkRenderer): number
 end
 
 --[[
-	Applies a new shadow / far shadow / texture style: PartPool templates now, live parts within
-	the build budget (shadows), sections rebuilt off-screen and swapped (textures). Returns what
+	Applies a new shadow / far shadow / texture / far materials style: PartPool templates now, live
+	parts within the build budget (shadows); Textures and Far Materials go through PartPool to
+	TextureLooks, whose change rebuilds the sections it touches (`looksChanged`). Returns what
 	changed.
 ]]
 function ChunkRenderer.restyle(self: ChunkRenderer, style: PartPool.Style): PartPool.StyleChanges
@@ -1353,37 +1433,72 @@ function ChunkRenderer.restyle(self: ChunkRenderer, style: PartPool.Style): Part
 			end
 		end
 	end
-	if changes.textures then
-		local schedule = self.schedule
-		-- Live sections, and first builds that may have started with the old look.
-		local sections: { WalkEntry } = {}
-		for node, state in self.states do
-			for section in state.records do
+	return changes
+end
+
+-- Whether a node's parts are drawn plain now, and the look generation they take.
+local function lookNow(self: ChunkRenderer, node: RenderNode): (boolean, number)
+	local plain = node.level > 0 and self.overlay:plainLevel(node.level)
+	return plain, self.pool:generationOf(plain)
+end
+
+-- Do all of a node's live sections carry the current look (MeshOverlay merges only those)?
+function isCurrent(self: ChunkRenderer, node: RenderNode): boolean
+	local state = self.states[node]
+	if state == nil then
+		return true
+	end
+	local plain, generation = lookNow(self, node)
+	for _, record in state.records do
+		if record.texture ~= generation or record.plain ~= plain then
+			return false
+		end
+	end
+	return true
+end
+
+--[[
+	TextureLooks' looks changed (or the overlay's plain levels, `changes` all false): PartPool takes
+	the new generations, the far meshes the new looks, and every live section with an older look
+	(or drawn plain when it no longer is, or the other way round) is rebuilt in the background lane,
+	as are first builds that may have started with the old look.
+]]
+function looksChanged(self: ChunkRenderer, changes: TextureLooks.Changes)
+	self.pool:syncLooks()
+	if changes.meshes then
+		self.overlay:setLooks(
+			TextureLooks.farMaterials(),
+			TextureLooks.lookOf,
+			TextureLooks.lookInfo,
+			TextureLooks.plainRgb
+		)
+	end
+	local schedule = self.schedule
+	local sections: { WalkEntry } = {}
+	for node, state in self.states do
+		local plain, generation = lookNow(self, node)
+		for section, record in state.records do
+			if record.texture ~= generation or record.plain ~= plain then
 				table.insert(sections, { node = node, section = section })
 			end
 		end
-		for node, slots in schedule.slots do
-			local state = self.states[node]
-			for section in slots do
-				if state == nil or state.records[section] == nil then
-					table.insert(sections, { node = node, section = section })
-				end
-			end
-		end
-		for _, entry in sections do
-			local node = entry.node
-			-- (Plain far levels have no textures; a build that starts later uses the new look.)
-			if
-				not (node.level > 0 and self.overlay:plainLevel(node.level))
-				and not schedule:startsLater(node, entry.section)
-			then
-				local task = newTask(node, entry.section, BACKGROUND, newBuild(buffer.create(0), true))
-				task.restyle = true
-				addTask(self, task)
+	end
+	for node, slots in schedule.slots do
+		local state = self.states[node]
+		for section in slots do
+			if state == nil or state.records[section] == nil then
+				table.insert(sections, { node = node, section = section })
 			end
 		end
 	end
-	return changes
+	for _, entry in sections do
+		-- (A build that starts later uses the new look.)
+		if not schedule:startsLater(entry.node, entry.section) then
+			local task = newTask(entry.node, entry.section, BACKGROUND, newBuild(buffer.create(0), true))
+			task.restyle = true
+			addTask(self, task)
+		end
+	end
 end
 
 -- Should the workers also make quads (for far meshes) for nodes of this level?

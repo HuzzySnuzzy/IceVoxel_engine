@@ -469,20 +469,27 @@ return function(t, shared, require, _server, client)
 		t.eq(sounds.widgets[2].x, 0)
 		t.eq(sounds.widgets[3].x, 160)
 		t.eq(sounds.widgets[3].y, sounds.widgets[2].y)
-		-- A hidden setting leaves no hole: without textures, brightness moves up beside fog.
-		local video = Pages.layout(Pages.byId.video, function(item)
-			return item.id ~= "textures"
-		end)
-		local fog, brightness
-		for _, placed in video.widgets do
-			if placed.item.id == "fog" then
-				fog = placed
-			elseif placed.item.id == "brightness" then
-				brightness = placed
+		-- A hidden setting leaves no hole: without textures, far materials moves up beside fog;
+		-- without far materials too (nothing textured, no far meshes), brightness does.
+		local function placedIn(hidden: { string }): { [string]: any }
+			local layout = Pages.layout(Pages.byId.video, function(item)
+				return not table.find(hidden, item.id)
+			end)
+			local at = {}
+			for _, placed in layout.widgets do
+				at[placed.item.id] = placed
 			end
+			return at
 		end
-		t.eq(brightness.y, fog.y, "same row")
-		t.eq(brightness.x, 160)
+		local video = placedIn({ "textures" })
+		t.eq(video.farMaterials.y, video.fog.y, "same row")
+		t.eq(video.farMaterials.x, 160)
+		video = placedIn({ "textures", "farMaterials" })
+		t.eq(video.brightness.y, video.fog.y, "same row")
+		t.eq(video.brightness.x, 160)
+		-- Every Video setting shown: seven rows, within the page.
+		video = placedIn({})
+		t.eq(video.preferDistance.y, Pages.TOP + 6 * Pages.ROW, "the seventh row")
 		-- Reset and Defaults start their own row on the main page.
 		local main = Pages.layout(Pages.byId.main)
 		local reset
@@ -577,6 +584,10 @@ return function(t, shared, require, _server, client)
 			end
 			t.eq(runs.camera - before, 10, "cheap: once each frame")
 			t.eq(world.warnings[1], nil, "no warnings")
+			-- Textures are offered (the pack has filled textures), Far Materials where far meshes
+			-- run (on a computer, by Config).
+			t.ok(Settings.shown("textures"), "textures shown")
+			t.eq(Settings.shown("farMaterials"), Config.Render.FarMeshes.Enabled, "far materials shown")
 			local missing = Settings.missing()
 			t.ok(table.find(missing, "skipHidden") and table.find(missing, "caves"), "unregistered slots listed")
 		end)
