@@ -8,16 +8,17 @@
 	  exhaustion  0..MAX_EXHAUSTION (40, FoodData.addExhaustion's cap): above STEP (4), 4 is
 	              taken off and a point of hydration goes, or a point of thirst when there is no
 	              hydration left (FoodData.tick).
-	  effect      ticks left of TAN's Thirst effect (dirty water): EFFECT_EXHAUSTION (0.025) more
-	              exhaustion every tick (ThirstEffect.applyEffectTick, amplifier 0). A new one
-	              replaces a shorter one (Minecraft's MobEffectInstance.update: the longer wins).
+	  effect      ticks left of TAN's Thirst effect (dirty water): EFFECT_EXHAUSTION (0.015, gentler
+	              than TAN's 0.025) more exhaustion every tick (ThirstEffect.applyEffectTick,
+	              amplifier 0). A new one replaces a shorter one (Minecraft's
+	              MobEffectInstance.update: the longer wins).
 	  timer       FoodData's tickTimer: ticks towards the next regeneration or dehydration hurt.
 
 	Exhaustion comes from Minecraft's FoodConstants, which TAN's thirst counts as well
 	(Player.causeFoodExhaustion): EXHAUSTION below. Movement is the client's to measure
 	(ToughAsNails/Exertion: Minecraft's server takes the client's sprint flag and positions too);
-	breaking blocks and hurts the server sees itself. Being HOT adds Config.ToughAsNails
-	.HotExhaustion every tick (sweating; `tick`'s `extra`).
+	breaking blocks and hurts the server sees itself. Being in the HOT zone adds
+	Config.ToughAsNails.HotExhaustion (0.005) every tick (sweating; `tick`'s `extra`).
 
 	One tick (`tick`, 20 a second, server Players/ToughAsNails), in Minecraft's order: the Thirst
 	effect counts down and adds its exhaustion (LivingEntity.tickEffects), plus `extra`; then
@@ -26,11 +27,14 @@
 	                more: half a heart every INTERVAL (80) ticks, for REGEN_COST (6) exhaustion
 	                (FoodData's slow branch; its fast branch spends food's saturation, and
 	                hydration is no food, so it is left out);
-	  dehydration   at thirst 0: half a heart every INTERVAL ticks while health is above
-	                Config.ToughAsNails.DehydrationFloor half hearts (FoodData's starvation on
-	                normal difficulty: health > 1; TAN's thirst damage, which goes through armor
-	                like starvation);
+	  dehydration   at thirst 0: half a heart every DEHYDRATION_INTERVAL (120, gentler than
+	                starvation's 80) ticks while health is above Config.ToughAsNails
+	                .DehydrationFloor half hearts (FoodData's starvation on normal difficulty:
+	                health > 1; TAN's thirst damage, which goes through armor like starvation);
 	  otherwise the timer stops at 0.
+	Under TAN's Climate Clemency (`tick`'s `clement`, ToughAsNails/Temperature.clement) thirst
+	drains at CLEMENCY_RATE (half) the rate (a point goes for every STEP / CLEMENCY_RATE
+	exhaustion) and dehydration doesn't hurt.
 	Creative and spectator players (GameMode.invulnerable, TAN's canHurtPlayer) are untouched:
 	nothing counts down, drains or hurts, and they may always drink (Player.canEat: invulnerable).
 
@@ -56,12 +60,16 @@ Thirst.MAX = 20
 Thirst.START_HYDRATION = 5
 Thirst.STEP = 4
 Thirst.MAX_EXHAUSTION = 40
--- FoodData's tickTimer period (regeneration and starvation) and the thirst regeneration needs.
+-- FoodData's tickTimer period (regeneration) and the thirst regeneration needs.
 Thirst.INTERVAL = 80
 Thirst.REGEN_THIRST = 18
 Thirst.REGEN_COST = 6
+-- Ticks between two dehydration hurts.
+Thirst.DEHYDRATION_INTERVAL = 120
 -- TAN's Thirst effect, per tick at amplifier 0.
-Thirst.EFFECT_EXHAUSTION = 0.025
+Thirst.EFFECT_EXHAUSTION = 0.015
+-- How fast thirst drains under Climate Clemency.
+Thirst.CLEMENCY_RATE = 0.5
 
 -- Minecraft's FoodConstants (exhaustion per cause).
 Thirst.EXHAUSTION = table.freeze({
@@ -118,10 +126,18 @@ end
 
 --[[
 	One tick of a player in game `mode` with `health` half hearts (of `maxHealth`, Minecraft's 20)
-	and `extra` exhaustion besides the Thirst effect's (HOT's sweating). Returns the half hearts it
-	costs them (dehydration) and the half hearts they get back (regeneration). See the header.
+	and `extra` exhaustion besides the Thirst effect's (HOT's sweating), `clement` under Climate
+	Clemency. Returns the half hearts it costs them (dehydration) and the half hearts they get
+	back (regeneration). See the header.
 ]]
-function Thirst.tick(state: State, mode: string, health: number, maxHealth: number, extra: number?): (number, number)
+function Thirst.tick(
+	state: State,
+	mode: string,
+	health: number,
+	maxHealth: number,
+	extra: number?,
+	clement: boolean?
+): (number, number)
 	if GameMode.invulnerable(mode) then
 		state.timer = 0
 		return 0, 0
@@ -133,8 +149,9 @@ function Thirst.tick(state: State, mode: string, health: number, maxHealth: numb
 	end
 	Thirst.addExhaustion(state, extra or 0)
 
-	if state.exhaustion > Thirst.STEP then
-		state.exhaustion -= Thirst.STEP
+	local step = if clement then Thirst.STEP / Thirst.CLEMENCY_RATE else Thirst.STEP
+	if state.exhaustion > step then
+		state.exhaustion -= step
 		if state.hydration > 0 then
 			state.hydration = math.max(state.hydration - 1, 0)
 		else
@@ -150,9 +167,9 @@ function Thirst.tick(state: State, mode: string, health: number, maxHealth: numb
 			Thirst.addExhaustion(state, Thirst.REGEN_COST)
 			return 0, 1
 		end
-	elseif state.thirst <= 0 then
+	elseif state.thirst <= 0 and not clement then
 		state.timer += 1
-		if state.timer >= Thirst.INTERVAL then
+		if state.timer >= Thirst.DEHYDRATION_INTERVAL then
 			state.timer = 0
 			if health > settings.DehydrationFloor then
 				return 1, 0

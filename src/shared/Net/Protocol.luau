@@ -154,13 +154,15 @@
 	                 velocity; 0 when it doesn't reach them): Minecraft's ClientboundExplodePacket
 	                 without the block list (blocks come as edits). Non-finite numbers, a power
 	                 outside 0..MAX_EXPLOSION_POWER or a push over MAX_KNOCKBACK are malformed.
-	  Survival       u8 flags (bit 0 thirst on, 1 temperature on, 2 wet), u8 thirst (0..20),
-	                 u8 hydration x 10, u8 exhaustion x 50 (clamped to 255), u8 level + 2 and
-	                 u8 target + 2 (Temperature levels -2..2), u8 frozen, u8 heat (0..140),
-	                 u16 Thirst effect ticks: the player's own thirst and body temperature
-	                 (Shared/ToughAsNails), sent to them alone when it changes (at most every few
-	                 ticks, and at once on joining and respawning); out of range values are
-	                 malformed
+	  Survival       u8 flags (bit 0 thirst on, 1 temperature on, 2 wet, 3 Internal Warmth,
+	                 4 Internal Chill), u8 thirst (0..20), u8 hydration x 10, u8 exhaustion x 50
+	                 (clamped to 255), u8 temperature + 10 and u8 target + 10 (the body
+	                 temperature -10..10 and where it is going), u16 frozen and u16 heat
+	                 (0..Temperature.EXTREME_TICKS), u16 Thirst effect ticks, u16 Climate
+	                 Clemency seconds left (rounded up): 14 bytes, the player's own thirst and
+	                 body temperature (Shared/ToughAsNails), sent to them alone when it changes
+	                 (at most every few ticks, and at once on joining and respawning); unknown
+	                 flags and out of range values are malformed
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -199,6 +201,7 @@ local Items = require(script.Parent.Parent.Items)
 local PlayerSettings = require(script.Parent.Parent.PlayerSettings)
 local Settings = require(script.Parent.Parent.Structures.Settings)
 local Exertion = require(script.Parent.Parent.ToughAsNails.Exertion)
+local Temperature = require(script.Parent.Parent.ToughAsNails.Temperature)
 
 local Protocol = {}
 
@@ -2217,32 +2220,44 @@ export type SurvivalStatus = {
 	thirstOn: boolean,
 	temperatureOn: boolean,
 	wet: boolean,
+	-- TAN's Internal Warmth and Internal Chill are on.
+	warmth: boolean,
+	chill: boolean,
 	thirst: number,
 	hydration: number,
 	exhaustion: number,
-	level: number,
+	-- The body temperature and its target (-10..10, Temperature's scale).
+	temperature: number,
 	target: number,
+	-- Hypothermia and hyperthermia (0..Temperature.EXTREME_TICKS).
 	frozen: number,
 	heat: number,
+	-- Ticks left of TAN's Thirst effect.
 	effect: number,
+	-- Seconds left of TAN's Climate Clemency.
+	clemency: number,
 }
 
-Protocol.SURVIVAL_BYTES = 10
+Protocol.SURVIVAL_BYTES = 14
 
 function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 	local b = buffer.create(Protocol.SURVIVAL_BYTES)
 	local flags = (if status.thirstOn then 1 else 0)
 		+ (if status.temperatureOn then 2 else 0)
 		+ (if status.wet then 4 else 0)
+		+ (if status.warmth then 8 else 0)
+		+ (if status.chill then 16 else 0)
+	local extreme = Temperature.EXTREME_TICKS
 	buffer.writeu8(b, 0, flags)
 	buffer.writeu8(b, 1, math.clamp(math.round(status.thirst), 0, 20))
 	buffer.writeu8(b, 2, math.clamp(math.round(status.hydration * 10), 0, 200))
 	buffer.writeu8(b, 3, math.clamp(math.round(status.exhaustion * 50), 0, 255))
-	buffer.writeu8(b, 4, math.clamp(status.level, -2, 2) + 2)
-	buffer.writeu8(b, 5, math.clamp(status.target, -2, 2) + 2)
-	buffer.writeu8(b, 6, math.clamp(status.frozen, 0, 140))
-	buffer.writeu8(b, 7, math.clamp(status.heat, 0, 140))
-	buffer.writeu16(b, 8, math.clamp(status.effect, 0, 65535))
+	buffer.writeu8(b, 4, math.clamp(math.round(status.temperature), Temperature.MIN, Temperature.MAX) - Temperature.MIN)
+	buffer.writeu8(b, 5, math.clamp(math.round(status.target), Temperature.MIN, Temperature.MAX) - Temperature.MIN)
+	buffer.writeu16(b, 6, math.clamp(math.round(status.frozen), 0, extreme))
+	buffer.writeu16(b, 8, math.clamp(math.round(status.heat), 0, extreme))
+	buffer.writeu16(b, 10, math.clamp(math.round(status.effect), 0, 65535))
+	buffer.writeu16(b, 12, math.clamp(math.ceil(status.clemency), 0, 65535))
 	return b
 end
 
@@ -2253,23 +2268,35 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 	end
 	local flags = buffer.readu8(b, 0)
 	local thirst, hydration = buffer.readu8(b, 1), buffer.readu8(b, 2)
-	local level, target = buffer.readu8(b, 4), buffer.readu8(b, 5)
-	local frozen, heat = buffer.readu8(b, 6), buffer.readu8(b, 7)
-	if flags > 7 or thirst > 20 or hydration > 200 or level > 4 or target > 4 or frozen > 140 or heat > 140 then
+	local temperature, target = buffer.readu8(b, 4), buffer.readu8(b, 5)
+	local frozen, heat = buffer.readu16(b, 6), buffer.readu16(b, 8)
+	local span, extreme = Temperature.MAX - Temperature.MIN, Temperature.EXTREME_TICKS
+	if
+		flags > 31
+		or thirst > 20
+		or hydration > 200
+		or temperature > span
+		or target > span
+		or frozen > extreme
+		or heat > extreme
+	then
 		return nil
 	end
 	return {
 		thirstOn = bit32.btest(flags, 1),
 		temperatureOn = bit32.btest(flags, 2),
 		wet = bit32.btest(flags, 4),
+		warmth = bit32.btest(flags, 8),
+		chill = bit32.btest(flags, 16),
 		thirst = thirst,
 		hydration = hydration / 10,
 		exhaustion = buffer.readu8(b, 3) / 50,
-		level = level - 2,
-		target = target - 2,
+		temperature = temperature + Temperature.MIN,
+		target = target + Temperature.MIN,
 		frozen = frozen,
 		heat = heat,
-		effect = buffer.readu16(b, 8),
+		effect = buffer.readu16(b, 10),
+		clemency = buffer.readu16(b, 12),
 	}
 end
 

@@ -9,17 +9,25 @@
 	                 module) costs Thirst.EXHAUSTION.hurt;
 	               * water touching the standing box (Players/Burning.touching) makes them wet;
 	               * once a second (players spread over the second) the surroundings
-	                 (Players/Climate) set the temperature's target;
-	               * Temperature.tick (the drift, hypothermia, hyperthermia), then Thirst.tick
-	                 (with HOT's sweating: Config.ToughAsNails.HotExhaustion) and what they cost
-	                 or give back: Humanoid:TakeDamage (half hearts scaled to MaxHealth, as
-	                 Players/Characters does; it respects the ForceField of creative players, who
-	                 are spared anyway) and regeneration;
+	                 (Players/Climate, with the armor's insulation: Climate.insulation) set the
+	                 temperature's target, with the player's effects and Climate Clemency
+	                 (Temperature.target(env, state));
+	               * Temperature.tick (the countdowns, the drift, hypothermia, hyperthermia; with
+	                 temperature off only its countdowns, Temperature.tickEffects, for the
+	                 clemency's sake), then Thirst.tick (with the HOT zone's sweating:
+	                 Config.ToughAsNails.HotExhaustion; at half the drain under the clemency) and
+	                 what they cost or give back: Humanoid:TakeDamage (half hearts scaled to
+	                 MaxHealth, as Players/Characters does; it respects the ForceField of creative
+	                 players, who are spared anyway) and regeneration;
 	               * the player's Survival message when what it says changed, at most every
 	                 SEND_TICKS ticks (and at once for a new character).
 	  Health     with thirst on and Config.ToughAsNails.ThirstRegeneration, health comes back only
 	             by thirst's rule: the character's Roblox "Health" script (its regeneration) is
 	             removed as it appears.
+	  Clemency   TAN's Climate Clemency: a player's first character since joining gets
+	             Config.ToughAsNails.ClemencyTicks of it (5 minutes), every later one (a respawn)
+	             RespawnClemencyTicks (a minute). Nothing is saved between visits, so every visit
+	             starts afresh and gets the long one.
 	  Death      a new character starts over (full thirst, neutral, dry), as TAN resets on respawn.
 	  Exertion   the client's movement reports (Protocol Exertion, ToughAsNails/Exertion), bounded
 	             by the time since the last one, cost exhaustion; their sprint flag counts as
@@ -30,7 +38,8 @@
 	               start / finish  a bottle or canteen held from `start` to `finish` for at
 	                               least Drinks.USE_TICKS - FINISH_LEEWAY ticks, the same item in
 	                               the same slot, while they may drink (Thirst.canDrink): drunk,
-	                               the Thirst effect rolled, the bottle or sip used up
+	                               the Thirst effect rolled, Internal Warmth or Chill given (a
+	                               drink's `warmth` / `chill`), the bottle or sip used up
 	                               (Drinks.afterDrinking); everyone else hears the last gulp
 	                               (entity.generic.drink: the drinker's client plays its own);
 	               hand            an empty hand at a water source within reach
@@ -118,13 +127,16 @@ type Record = {
 local ToughAsNailsServer = {}
 
 local records: { [Player]: Record } = {}
+-- Players whose first character since joining has come (their next ones are respawns).
+local joined: { [Player]: true } = {}
 local started = false
 local random = Random.new()
 
-local function newRecord(): Record
+-- A new character's record, with `clemency` ticks of Climate Clemency.
+local function newRecord(clemency: number): Record
 	return {
 		thirst = Thirst.new(),
-		temperature = Temperature.new(),
+		temperature = Temperature.new(clemency),
 		sprintingUntil = 0,
 		lastReport = os.clock(),
 		reports = 0,
@@ -178,14 +190,18 @@ local function status(record: Record): Protocol.SurvivalStatus
 		thirstOn = thirstOn(),
 		temperatureOn = temperatureOn(),
 		wet = Temperature.isWet(temperature),
+		warmth = temperature.warmth > 0,
+		chill = temperature.chill > 0,
 		thirst = thirst.thirst,
 		hydration = thirst.hydration,
 		exhaustion = thirst.exhaustion,
-		level = temperature.level,
+		temperature = temperature.value,
 		target = temperature.target,
 		frozen = temperature.frozen,
 		heat = temperature.heat,
 		effect = thirst.effect,
+		-- (Whole seconds, so it changes the message once a second.)
+		clemency = math.ceil(temperature.clemency / 20),
 	}
 end
 
@@ -250,22 +266,34 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			Temperature.soak(temperature)
 		end
 		local window = Inventories.get(player)
-		local leather = if window then Climate.leatherPieces(window.inventory.armor) else 0
+		local warmth, cooling, freezeImmune = 0, 0, false
+		if window then
+			warmth, cooling, freezeImmune = Climate.insulation(window.inventory.armor)
+		end
 		if sample then
 			local env = Climate.environment(view, feet.X, feet.Y, feet.Z, TimeOfDay.get(), {
 				wet = Temperature.isWet(temperature),
 				sprinting = os.clock() < record.sprintingUntil,
 				burning = character:GetAttribute(Characters.ON_FIRE) == true,
-				leather = leather,
+				armorWarmth = warmth,
+				armorCooling = cooling,
 			})
-			temperature.target = Temperature.target(env)
+			temperature.target = Temperature.target(env, temperature)
 		end
-		damage += Temperature.tick(temperature, mode, leather > 0)
+		damage += Temperature.tick(temperature, mode, freezeImmune)
+	else
+		Temperature.tickEffects(temperature, mode)
 	end
 	if thirstOn() then
-		local hot = temperatureOn() and temperature.level >= Temperature.HOT
-		local lost, gained =
-			Thirst.tick(thirst, mode, health, HEALTH, if hot then Config.ToughAsNails.HotExhaustion else 0)
+		local hot = temperatureOn() and Temperature.zone(temperature.value) == Temperature.HOT
+		local lost, gained = Thirst.tick(
+			thirst,
+			mode,
+			health,
+			HEALTH,
+			if hot then Config.ToughAsNails.HotExhaustion else 0,
+			Temperature.clement(temperature)
+		)
 		damage += lost
 		heal += gained
 	end
@@ -348,7 +376,7 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 		end
 		Drinks.apply(record.thirst, drink, function(): number
 			return random:NextNumber()
-		end)
+		end, if temperatureOn() then record.temperature else nil)
 		local newHeld, give = Drinks.afterDrinking(held, GameMode.instabuild(mode))
 		if newHeld ~= held then
 			Inventories.setHeld(player, newHeld)
@@ -378,7 +406,7 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 			record.lastHand = now
 			Drinks.apply(record.thirst, Drinks.HAND, function(): number
 				return random:NextNumber()
-			end)
+			end, if temperatureOn() then record.temperature else nil)
 			gulp(player)
 		elseif held and Drinks.fills(held) then
 			local newHeld, give = Drinks.fill(held, GameMode.instabuild(mode), function(item: number): boolean
@@ -459,8 +487,12 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	}
 
 	local function onCharacter(player: Player, character: Model)
-		-- (A new character starts over, as TAN's respawned player.)
-		records[player] = newRecord()
+		-- (A new character starts over, as TAN's respawned player, with Climate Clemency: the
+		-- long one for the first character since joining.)
+		local settings = Config.ToughAsNails
+		local clemency = if joined[player] then settings.RespawnClemencyTicks else settings.ClemencyTicks
+		joined[player] = true
+		records[player] = newRecord(clemency)
 		if thirstOn() and Config.ToughAsNails.ThirstRegeneration then
 			stopRobloxRegeneration(character)
 		end
@@ -479,6 +511,7 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		records[player] = nil
+		joined[player] = nil
 	end)
 
 	net.on(Protocol.ClientMessage.Exertion, onExertion)

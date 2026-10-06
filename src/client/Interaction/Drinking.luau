@@ -1,10 +1,10 @@
 --!strict
 --[[
 	Drinking and filling bottles and canteens (Tough As Nails) on this player's client, for
-	Interaction/BlockInteraction: a right click (`use`, after a block's own menu) with a Glass
-	Bottle, a canteen, a filled bottle or an empty hand does what Shared/ToughAsNails/Drinks
-	.action says, aiming at a water source along Minecraft's source-only ray (BlockInteraction's
-	`waterAt`):
+	Interaction/BlockInteraction: a right click (`use`, after a block's own menu) with an empty
+	container (a Glass Bottle, a Canteen: Drinks.FILLS), a drink (Drinks.ITEMS) or an empty hand
+	does what Shared/ToughAsNails/Drinks.action says, aiming at a water source along Minecraft's
+	source-only ray (BlockInteraction's `waterAt`):
 	  fill   Drink fill at the source (the server fills it and splashes)                swing
 	  hand   Drink hand at the source, and the gulp at once (TAN's hand drinking)       swing
 	  drink  Drink start, then while the use button stays down (`stop` when it is let go), the

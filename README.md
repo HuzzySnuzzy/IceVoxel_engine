@@ -154,22 +154,27 @@ A fast, Minecraft-style voxel engine for Roblox.
   1.20 version. Thirst is Minecraft's hunger with water: 20 points (10 droplets on the right above
   the hotbar) and hydration that goes first, drained by exhaustion (sprinting 0.1 a metre,
   swimming 0.01, a jump 0.05, a sprint jump 0.2, a block broken 0.005, a hurt 0.1, sweating while
-  hot). At 0 you lose half a heart every 4 s down to half a heart, and health only comes back
+  hot). At 0 you lose half a heart every 6 s down to half a heart, and health only comes back
   with 18 or more (half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration is off).
   Drink from a water source with an empty hand (1 point), fill a Glass Bottle (three glass in a
   V make three) or a Canteen (an iron nugget over three iron ingots in a cup; three sips) at a
-  water source, and hold use 1.6 s to drink: dirty water gives 4 points with a 75% chance of the
-  Thirst effect (30 s of extra exhaustion, the droplets turn green), purified water (smelt the
-  dirty bottle or canteen in a furnace) 6 and hydration with no risk. Body temperature drifts a
-  level every 10 s between icy, cold, neutral, warm and hot towards what the place says: the
-  biome (tundra icy, taiga cold, plains neutral, jungle warm, desert hot), colder high up and
-  outdoors at night, milder under a roof, neutral deep underground; being wet cools a level,
-  sprinting warms one, lava, fire, a lit furnace or a working generator within 5 blocks warm
-  one, ice and snow cool one, and two leather pieces keep the cold off by one. Icy for 7 s
-  freezes you (half a heart every 2 s; any leather prevents it), hot overheats you the same way
-  and makes you sweat; frost or heat closes in from the screen's edges, and a gauge over the
-  hotbar shows the level with an arrow for where it is going. Creative and spectator players
-  are untouched. `Config.ToughAsNails` turns thirst or temperature off.
+  water source, and hold use 1.6 s to drink: dirty water gives 4 points with a 50% chance of the
+  Thirst effect (15 s of extra exhaustion, the droplets turn green), purified water (smelt the
+  dirty bottle or canteen in a furnace) 6 and hydration with no risk. Body temperature is a
+  number from -10 to 10 in five zones (icy -10..-8, cold, neutral -2..2, warm, hot 8..10) that
+  steps towards what the place says, a step every 7 s (3.5 s back towards neutral): the biome
+  (tundra -10, taiga -4, plains 0, jungle 7, desert 9), colder high up and outdoors at night,
+  milder under a roof, neutral deep underground; being wet cools 3 steps, sprinting warms 2,
+  lava, fire, a lit furnace or a working generator within 5 blocks warm 3 (5 within 2 blocks),
+  ice and snow cool 3, and armor insulates (leather: a step a piece towards neutral, and no
+  freezing). Icy for 20 s freezes you (half a heart every 5 s), hot overheats you the same way
+  and makes you sweat, so the harshest cold takes over 3 minutes to kill from neutral; a
+  drink can give Internal Warmth or Chill, which hold the cold or the heat off. Joining gives
+  5 minutes of Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at
+  half the rate and doesn't hurt. Frost or heat closes in from the screen's edges, and a
+  thermometer over the droplets shows the temperature, coloured by zone, with an arrow for
+  where it is going, the clemency's time left and the effects above it. Creative and spectator
+  players are untouched. `Config.ToughAsNails` turns thirst or temperature off.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -835,9 +840,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools
   ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
-                            dehydration, regeneration, the Thirst effect), Temperature (levels,
-                            the target, the drift, hypothermia and hyperthermia), Drinks (water
-                            sources, bottles, canteens), Exertion (movement that costs thirst)
+                            dehydration, regeneration, the Thirst effect), Temperature (-10..10
+                            in five zones, the target, the drift, hypothermia and hyperthermia,
+                            Internal Warmth and Chill, Climate Clemency), Drinks (water sources,
+                            the container tables: bottles, canteens), Exertion (movement that
+                            costs thirst)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
@@ -1093,10 +1100,12 @@ for performance:
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
 | `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
 | `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. |
-| `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration stops at (Minecraft's normal difficulty; 0: to death). |
-| `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.01 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
-| `ToughAsNails.ChangeTicks` / `WetTicks` | 200 / 100 | Ticks per temperature level step; ticks a player stays wet out of water. |
-| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire / ice, snow | Heat and cold sources within that many blocks change the temperature by a level (fluid or block names). |
+| `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |
+| `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.005 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
+| `ToughAsNails.ChangeTicks` / `RecoverTicks` | 140 / 70 | Ticks per step of the body temperature (-10..10) away from neutral / back towards it (neutral to icy: 56 s in the coldest place). |
+| `ToughAsNails.ClemencyTicks` / `RespawnClemencyTicks` | 6000 / 1200 | Climate Clemency on joining / respawning: the temperature held neutral, half the thirst drain, no dehydration (0: none). |
+| `ToughAsNails.WetTicks` | 100 | Ticks a player stays wet out of water (3 steps colder). |
+| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
@@ -1764,7 +1773,35 @@ Climate.addColdSource("PowderSnow")
 ```
 
 A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
-second, and warms (or cools) by one level however many there are.
+second, and warms 3 steps (5 when one is within 2 blocks) or cools 3, however many there are. A
+name no block has yet is skipped with a warning, so `"Campfire"` can go into `HeatingBlocks`
+before the block exists.
+
+**Drinks and containers (Tough As Nails).** `Shared/ToughAsNails/Drinks` reads three tables:
+`ITEMS` (a full item: its drink, the empty container it leaves, `sips` for a canteen), `FILLS` (an
+empty container and the dirty water it fills with at a water source) and `PURIFIED_OF` (dirty
+water and its purified twin). A new container is four entries there and a recipe, e.g. bowls:
+
+```lua
+-- Drinks.ITEMS
+[I.DirtyWaterBowl] = table.freeze({ drink = Drinks.DIRTY, empty = I.Bowl }),
+[I.PurifiedWaterBowl] = table.freeze({ drink = Drinks.PURIFIED, empty = I.Bowl }),
+-- Drinks.FILLS
+[I.Bowl] = I.DirtyWaterBowl,
+-- Drinks.PURIFIED_OF
+[I.DirtyWaterBowl] = I.PurifiedWaterBowl,
+-- Crafting/Recipes
+smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+```
+
+A drink of its own (a juice, a hot tea) is an `ITEMS` entry with a `Drink`; `warmth` / `chill`
+ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5 steps
+towards neutral without pushing it past neutral.
+
+**Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
+freezeImmune = true }` in ItemList: `warmth` steps pull a cold target up towards 0, `cooling`
+steps pull a hot one down, never past it; `freezeImmune` stops hypothermia (leather has it). A
+full set at 2 a piece keeps a tundra (-10) neutral (-2).
 
 **Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
 leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values

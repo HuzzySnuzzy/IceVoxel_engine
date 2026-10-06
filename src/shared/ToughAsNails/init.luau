@@ -4,16 +4,18 @@
 
 	  Thirst        thirst, hydration and exhaustion (TAN's ThirstData, Minecraft's FoodData),
 	                dehydration, regeneration that needs thirst, TAN's Thirst effect
-	  Temperature   the five levels, the target the surroundings give, the drift towards it,
-	                hypothermia and hyperthermia
+	  Temperature   the body temperature (-10..10 in five zones), the target the surroundings
+	                give, the drift towards it, hypothermia and hyperthermia, Internal Warmth and
+	                Chill, Climate Clemency (the grace after joining and respawning)
 	  Drinks        what is drunk (water sources, dirty and purified bottles and canteens) and how
-	                bottles and canteens fill and empty
+	                containers fill and empty (data tables: new containers and drinks are entries)
 	  Exertion      movement measured by the client for thirst (sprinting, swimming, jumps)
 
 	The server runs them (Players/ToughAsNails, its surroundings from Players/Climate) and sends
 	each player their own state (Protocol Survival), which the HUD draws (client Ui/SurvivalHud:
-	the droplets, the temperature gauge, the frost and heat at the screen's edges) and F3 prints.
-	Config.ToughAsNails turns thirst and temperature on and off and tunes them.
+	the droplets, the thermometer, the clemency's time and the effects, the frost and heat at the
+	screen's edges) and F3 prints. Config.ToughAsNails turns thirst and temperature on and off and
+	tunes them.
 
 	Survival and adventure players are affected (`affects`); creative and spectator players are
 	not (GameMode.invulnerable, TAN's check): their stats stand still and never hurt.

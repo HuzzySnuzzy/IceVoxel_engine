@@ -11,14 +11,22 @@
 	               green, as hunger's shanks do under Hunger; with no hydration left they jitter
 	               like hunger without saturation (Gui.renderPlayerHealth: each droplet moves
 	               -1..1 pixel on ticks where tick % (thirst x 3 + 1) == 0).
-	  gauge        with temperature on: TAN's temperature orb, 13 pixels round, centred over the
-	               hotbar between the hearts and the droplets, 30 pixels above the hotbar's top
-	               (TAN's height - 52): pale blue icy, blue cold, green neutral, orange warm, red
-	               hot. A small arrow beside it says where the level is going (up, orange: warming;
-	               down, pale blue: cooling; none: on target).
+	  gauge        with temperature on: a thermometer in the row over the droplets (the armor
+	               row's mirror, where Minecraft draws the air bubbles), 75 x 9 pixels, right-
+	               aligned with them: a round bulb in the colour of the body's zone (pale blue
+	               icy, blue cold, green neutral, orange warm, red hot; TAN's orb colours), then a
+	               tube of 21 cells of 3 pixels, one per step of the -10..10 scale, tinted dimly by
+	               zone, with a dark tick through it at each zone border, and a pin in the zone's
+	               colour on the body temperature. A small arrow beside the pin says where it is
+	               going (right, orange: warming; left, pale blue: cooling; none: on target).
+	  status       the row above the gauge, right-aligned: TAN's Climate Clemency while it lasts
+	               (a gold shield and the minutes and seconds left, with thirst or temperature
+	               on), then Internal Warmth (a flame) and Internal Chill (a snowflake) while they
+	               do (with temperature on).
 	  edges        hypothermia and hyperthermia close in from the screen's edges, frost white-blue
 	               or heat orange-red, as strong as they have got (Minecraft's powder snow outline,
-	               alpha = the share of the 140 ticks frozen; TAN's heat overlay the same way).
+	               alpha = the share of Temperature.EXTREME_TICKS frozen; TAN's heat overlay the
+	               same way).
 ]]
 
 local Players = game:GetService("Players")
@@ -32,11 +40,12 @@ local Style = require(script.Parent.Style)
 
 -- Where Ui/Hud puts things (GUI pixels in its canvas).
 export type Layout = {
-	-- The canvas' width (the hotbar's), the droplets' row and the gauge's top left corner.
+	-- The canvas' width (the hotbar's), the droplets' row, and the tops of the gauge's row and of
+	-- the status row above it (both right-aligned with the droplets).
 	width: number,
 	rowY: number,
-	gaugeX: number,
 	gaugeY: number,
+	statusY: number,
 }
 
 local SurvivalHud = {}
@@ -45,6 +54,12 @@ local TICK = 0.05
 -- The edges reach this far into the screen (share of its height / width) at full strength.
 local EDGE = 0.3
 local EDGE_STRENGTH = 0.85
+-- The gauge: its width, a cell's width and where the first cell starts (after the bulb).
+local GAUGE_WIDTH = 75
+local CELL = 3
+local TUBE_X = 7
+-- The rows' width (the droplets').
+local ROW_WIDTH = 81
 
 -- 9 x 9: K outline, L / R the left / right half, H a highlight (with the left half).
 local DROPLET = {
@@ -58,24 +73,59 @@ local DROPLET = {
 	".KLLLRRK.",
 	"..KKKKK..",
 }
--- 13 x 13: K outline, F fill, H highlight, D shade.
-local ORB = {
-	"....KKKKK....",
-	"..KKFFFFFKK..",
-	".KFHHFFFFFFK.",
-	".KFHFFFFFFFK.",
-	"KFHFFFFFFFFFK",
-	"KFFFFFFFFFFFK",
-	"KFFFFFFFFFFFK",
-	"KFFFFFFFFFFDK",
-	"KFFFFFFFFFFDK",
-	".KFFFFFFFFDK.",
-	".KFFFFFFFDDK.",
-	"..KKDDDDDKK..",
-	"....KKKKK....",
+-- 7 x 7 (the gauge's rows 1..7): K outline, F fill, H highlight; its right column runs into the
+-- tube.
+local BULB = {
+	"..KKK..",
+	".KFFFKK",
+	"KFHFFFF",
+	"KFFFFFF",
+	"KFFFFFF",
+	".KFFFKK",
+	"..KKK..",
 }
-local UP = { "..A..", ".AAA.", "AAAAA", ".AAA.", ".AAA." }
-local DOWN = { ".AAA.", ".AAA.", "AAAAA", ".AAA.", "..A.." }
+-- 5 x 9 around a cell: K outline, P the zone's colour, H highlight, D shade.
+local PIN = {
+	"KKKKK",
+	"KHHHK",
+	"KPPPK",
+	"KPPPK",
+	"KPPPK",
+	"KPPPK",
+	"KPPPK",
+	"KDDDK",
+	"KKKKK",
+}
+local RIGHT = { "A..", "AA.", "AAA", "AA.", "A.." }
+local LEFT = { "..A", ".AA", "AAA", ".AA", "..A" }
+-- 7 x 7 icons: Climate Clemency's shield, Internal Warmth's flame, Internal Chill's snowflake.
+local SHIELD = {
+	"KKKKKKK",
+	"KGHGGGK",
+	"KGHGGGK",
+	"KGGGGGK",
+	".KGGGK.",
+	"..KGK..",
+	"...K...",
+}
+local FLAME = {
+	"...R...",
+	"..RR...",
+	"..RRR..",
+	".RROR.R",
+	".ROOORR",
+	"RROYORR",
+	".RRRRR.",
+}
+local SNOWFLAKE = {
+	"B..B..B",
+	".B.B.B.",
+	"..BBB..",
+	"BBBWBBB",
+	"..BBB..",
+	".B.B.B.",
+	"B..B..B",
+}
 
 local OUTLINE = Color3.fromRGB(16, 16, 16)
 local WATER = Color3.fromRGB(48, 118, 230)
@@ -88,26 +138,41 @@ local WARMING = Color3.fromRGB(255, 150, 40)
 local COOLING = Color3.fromRGB(150, 210, 255)
 local FROST = Color3.fromRGB(205, 235, 255)
 local HEAT = Color3.fromRGB(255, 96, 32)
+local CLEMENCY = Color3.fromRGB(236, 200, 92)
+local CLEMENCY_SHINE = Color3.fromRGB(255, 240, 178)
+local TEXT = Color3.fromRGB(255, 255, 255)
 
--- Orb colours by level: fill, highlight, shade.
-local LEVEL_COLOURS: { [number]: { Color3 } } = {
+-- Zone colours (TAN's orb): fill, highlight, shade.
+local ZONE_COLOURS: { [number]: { Color3 } } = {
 	[-2] = { Color3.fromRGB(180, 230, 255), Color3.fromRGB(240, 250, 255), Color3.fromRGB(120, 180, 220) },
 	[-1] = { Color3.fromRGB(70, 140, 230), Color3.fromRGB(150, 200, 255), Color3.fromRGB(40, 90, 170) },
 	[0] = { Color3.fromRGB(120, 200, 90), Color3.fromRGB(190, 240, 160), Color3.fromRGB(70, 140, 50) },
 	[1] = { Color3.fromRGB(245, 160, 40), Color3.fromRGB(255, 215, 130), Color3.fromRGB(190, 110, 20) },
 	[2] = { Color3.fromRGB(225, 45, 30), Color3.fromRGB(255, 140, 110), Color3.fromRGB(150, 20, 15) },
 }
+-- How much of a zone's colour the tube's cells keep (the rest is the empty colour).
+local TUBE_TINT = 0.45
 
 type Droplet = { frame: Frame, parts: { [string]: { Frame } }, key: string, x: number }
 
 local row: Frame? = nil
 local droplets: { Droplet } = {}
 local gauge: Frame? = nil
-local orb: { [string]: { Frame } } = {}
-local arrows: { up: Frame?, down: Frame? } = {}
+local bulb: { [string]: { Frame } } = {}
+local pin: Frame? = nil
+local pinArt: { [string]: { Frame } } = {}
+local arrows: { right: Frame?, left: Frame? } = {}
+local statusRow: Frame? = nil
+local clemencyIcon: Frame? = nil
+local clemencyText: TextLabel? = nil
+local clemencyShadow: TextLabel? = nil
+local warmthIcon: Frame? = nil
+local chillIcon: Frame? = nil
 local edgesGui: ScreenGui? = nil
 local edges: { Frame } = {}
-local lastLevel = math.huge
+local lastZone = math.huge
+local lastValue = math.huge
+local lastStatus = ""
 local lastEdge = ""
 local tickCount = 0
 local nextTick = 0
@@ -120,6 +185,25 @@ end
 -- Does droplet `i` jitter this tick (Minecraft's rule for hunger, see the header)?
 function SurvivalHud.jitters(hydration: number, thirst: number, tick: number): boolean
 	return hydration <= 0 and tick % (thirst * 3 + 1) == 0
+end
+
+-- The left x (gauge pixels) of body temperature `value`'s cell: three pixels a step, and one
+-- more for each zone border below it (the ticks).
+function SurvivalHud.cellX(value: number): number
+	local v = math.clamp(math.round(value), Temperature.MIN, Temperature.MAX)
+	local borders = 0
+	for zone = Temperature.COLD, Temperature.HOT do
+		if v >= Temperature.ZONES[zone][1] then
+			borders += 1
+		end
+	end
+	return TUBE_X + (v - Temperature.MIN) * CELL + borders
+end
+
+-- "m:ss" of `seconds`.
+function SurvivalHud.clock(seconds: number): string
+	local whole = math.max(0, math.ceil(seconds))
+	return string.format("%d:%02d", whole // 60, whole % 60)
 end
 
 local function paintDroplet(droplet: Droplet, state: number, sick: boolean)
@@ -149,50 +233,87 @@ local function newEdge(parent: Instance, anchor: Vector2, position: UDim2, size:
 	return frame
 end
 
--- Builds the droplets and the gauge into Ui/Hud's `canvas`, and the edges in a screen of their own.
+-- A transparent frame of `w` x `h` at (x, y) to hold pixel art.
+local function holder(parent: Instance, name: string, x: number, y: number, w: number, h: number, z: number): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundTransparency = 1
+	frame.Position = UDim2.fromOffset(x, y)
+	frame.Size = UDim2.fromOffset(w, h)
+	frame.ZIndex = z
+	frame.Parent = parent
+	return frame
+end
+
+-- The thermometer (see the header) at the top left of `parent`.
+local function buildGauge(parent: Frame)
+	local tubeEnd = SurvivalHud.cellX(Temperature.MAX) + CELL
+	-- The tube's outline (the bulb draws its left end).
+	Style.frame(parent, TUBE_X - 1, 2, tubeEnd - TUBE_X + 2, 1, OUTLINE, 2)
+	Style.frame(parent, TUBE_X - 1, 6, tubeEnd - TUBE_X + 2, 1, OUTLINE, 2)
+	Style.frame(parent, tubeEnd, 3, 1, 3, OUTLINE, 2)
+	-- The cells, tinted by zone, and a tick at each zone border.
+	for value = Temperature.MIN, Temperature.MAX do
+		local colour = ZONE_COLOURS[Temperature.zone(value)][1]
+		Style.frame(parent, SurvivalHud.cellX(value), 3, CELL, 3, EMPTY:Lerp(colour, TUBE_TINT), 2)
+	end
+	for zone = Temperature.COLD, Temperature.HOT do
+		Style.frame(parent, SurvivalHud.cellX(Temperature.ZONES[zone][1]) - 1, 1, 1, 7, OUTLINE, 2)
+	end
+	bulb = Style.pixelArt(parent, 0, 1, BULB, { K = OUTLINE }, 3)
+
+	local marker = holder(parent, "Pin", 0, 0, 5, 9, 4)
+	pinArt = Style.pixelArt(marker, 0, 0, PIN, { K = OUTLINE }, 4)
+	pin = marker
+	local right = holder(parent, "Warming", 0, 2, 3, 5, 4)
+	right.Visible = false
+	Style.pixelArt(right, 0, 0, RIGHT, { A = WARMING }, 4)
+	local left = holder(parent, "Cooling", 0, 2, 3, 5, 4)
+	left.Visible = false
+	Style.pixelArt(left, 0, 0, LEFT, { A = COOLING }, 4)
+	arrows.right, arrows.left = right, left
+end
+
+-- Builds the droplets, the gauge and the status row into Ui/Hud's `canvas`, and the edges in a
+-- screen of their own.
 function SurvivalHud.build(canvas: Frame, layout: Layout)
-	local thirstRow = Instance.new("Frame")
-	thirstRow.Name = "Thirst"
-	thirstRow.BackgroundTransparency = 1
-	thirstRow.Position = UDim2.fromOffset(layout.width - 81, layout.rowY)
-	thirstRow.Size = UDim2.fromOffset(81, 9)
-	thirstRow.ZIndex = 2
+	local thirstRow = holder(canvas, "Thirst", layout.width - ROW_WIDTH, layout.rowY, ROW_WIDTH, 9, 2)
 	thirstRow.Visible = false
-	thirstRow.Parent = canvas
 	row = thirstRow
 	for i = 1, 10 do
-		local frame = Instance.new("Frame")
-		frame.BackgroundTransparency = 1
-		frame.Size = UDim2.fromOffset(9, 9)
 		local x = 72 - (i - 1) * 8
-		frame.Position = UDim2.fromOffset(x, 0)
-		frame.Parent = thirstRow
+		local frame = holder(thirstRow, `Droplet{i}`, x, 0, 9, 9, 1)
 		local parts = Style.pixelArt(frame, 0, 0, DROPLET, { K = OUTLINE, L = EMPTY, R = EMPTY, H = EMPTY_SHINE }, 1)
 		droplets[i] = { frame = frame, parts = parts, key = "", x = x }
 	end
 
-	local orbFrame = Instance.new("Frame")
-	orbFrame.Name = "Temperature"
-	orbFrame.BackgroundTransparency = 1
-	orbFrame.Position = UDim2.fromOffset(layout.gaugeX, layout.gaugeY)
-	orbFrame.Size = UDim2.fromOffset(16, 16)
-	orbFrame.ZIndex = 2
-	orbFrame.Visible = false
-	orbFrame.Parent = canvas
-	gauge = orbFrame
-	orb = Style.pixelArt(orbFrame, 1, 1, ORB, { K = OUTLINE }, 2)
-	local up = Instance.new("Frame")
-	up.BackgroundTransparency = 1
-	up.Position = UDim2.fromOffset(16, 1)
-	up.Size = UDim2.fromOffset(5, 5)
-	up.Visible = false
-	up.Parent = orbFrame
-	Style.pixelArt(up, 0, 0, UP, { A = WARMING }, 2)
-	local down = up:Clone()
-	down:ClearAllChildren()
-	down.Parent = orbFrame
-	Style.pixelArt(down, 0, 0, DOWN, { A = COOLING }, 2)
-	arrows.up, arrows.down = up, down
+	local gaugeFrame = holder(canvas, "Temperature", layout.width - GAUGE_WIDTH, layout.gaugeY, GAUGE_WIDTH, 9, 2)
+	gaugeFrame.Visible = false
+	gauge = gaugeFrame
+	buildGauge(gaugeFrame)
+
+	local statusFrame = holder(canvas, "SurvivalStatus", layout.width - ROW_WIDTH, layout.statusY, ROW_WIDTH, 9, 2)
+	statusRow = statusFrame
+	local shield = holder(statusFrame, "Clemency", 0, 1, 7, 7, 2)
+	shield.Visible = false
+	Style.pixelArt(shield, 0, 0, SHIELD, { K = OUTLINE, G = CLEMENCY, H = CLEMENCY_SHINE }, 2)
+	clemencyIcon = shield
+	local text, shadow =
+		Style.shadowText(statusFrame, "", 0, 1, ROW_WIDTH, 8, TEXT, 2, Enum.TextXAlignment.Right, Style.TEXT_SIZE)
+	text.Visible, shadow.Visible = false, false
+	clemencyText, clemencyShadow = text, shadow
+	local flame = holder(statusFrame, "InternalWarmth", 0, 1, 7, 7, 2)
+	flame.Visible = false
+	Style.pixelArt(flame, 0, 0, FLAME, {
+		R = Color3.fromRGB(235, 88, 32),
+		O = Color3.fromRGB(255, 168, 40),
+		Y = Color3.fromRGB(255, 236, 130),
+	}, 2)
+	warmthIcon = flame
+	local snowflake = holder(statusFrame, "InternalChill", 0, 1, 7, 7, 2)
+	snowflake.Visible = false
+	Style.pixelArt(snowflake, 0, 0, SNOWFLAKE, { B = Color3.fromRGB(150, 210, 255), W = TEXT }, 2)
+	chillIcon = snowflake
 
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "IceVoxelTemperatureOverlay"
@@ -213,6 +334,12 @@ end
 local function setVisible(object: GuiObject?, visible: boolean)
 	if object and object.Visible ~= visible then
 		object.Visible = visible
+	end
+end
+
+local function place(object: GuiObject?, x: number, y: number)
+	if object and (object.Position.X.Offset ~= x or object.Position.Y.Offset ~= y) then
+		object.Position = UDim2.fromOffset(x, y)
 	end
 end
 
@@ -240,6 +367,61 @@ local function renderEdges(colour: Color3, strength: number)
 	end
 end
 
+-- The pin, the bulb and the arrow for body temperature `value` going to `target`.
+local function renderGauge(value: number, target: number)
+	local zone = Temperature.zone(value)
+	if zone ~= lastZone then
+		lastZone = zone
+		local colours = ZONE_COLOURS[zone]
+		Style.paint(bulb.F, colours[1])
+		Style.paint(bulb.H, colours[2])
+		Style.paint(pinArt.P, colours[1])
+		Style.paint(pinArt.H, colours[2])
+		Style.paint(pinArt.D, colours[3])
+	end
+	local x = SurvivalHud.cellX(value)
+	if value ~= lastValue then
+		lastValue = value
+		place(pin, x - 1, 0)
+		place(arrows.right, x + CELL + 2, 2)
+		place(arrows.left, x - CELL - 2, 2)
+	end
+	setVisible(arrows.right, target > value)
+	setVisible(arrows.left, target < value)
+end
+
+-- The status row (see the header): Climate Clemency's time left, the effects.
+local function renderStatus(clemency: number, warmth: boolean, chill: boolean)
+	local key = `{clemency} {warmth} {chill}`
+	if key == lastStatus then
+		return
+	end
+	lastStatus = key
+	local x = ROW_WIDTH
+	local text = if clemency > 0 then SurvivalHud.clock(clemency) else ""
+	setVisible(clemencyIcon, clemency > 0)
+	setVisible(clemencyText, clemency > 0)
+	setVisible(clemencyShadow, clemency > 0)
+	if clemency > 0 and clemencyText and clemencyShadow then
+		clemencyText.Text, clemencyShadow.Text = text, text
+		-- (The shield 2 pixels left of the text, which ends at the row's right.)
+		x = math.floor(x - Style.textWidth(text, Style.TEXT_SIZE) - 2) - 7
+		place(clemencyIcon, x, 1)
+		x -= 2
+	end
+	setVisible(chillIcon, chill)
+	if chill then
+		x -= 7
+		place(chillIcon, x, 1)
+		x -= 2
+	end
+	setVisible(warmthIcon, warmth)
+	if warmth then
+		x -= 7
+		place(warmthIcon, x, 1)
+	end
+end
+
 --[[
 	Draws this frame (Ui/Hud's RenderStepped): `survival` when the hearts show (survival,
 	adventure, the HUD in play).
@@ -250,6 +432,7 @@ function SurvivalHud.render(now: number, survival: boolean)
 	local temperatureShown = survival and status ~= nil and status.temperatureOn
 	setVisible(row, thirstShown)
 	setVisible(gauge, temperatureShown)
+	setVisible(statusRow, thirstShown or temperatureShown)
 	if status == nil or not temperatureShown then
 		renderEdges(FROST, 0)
 	end
@@ -277,18 +460,14 @@ function SurvivalHud.render(now: number, survival: boolean)
 		end
 	end
 
+	if thirstShown or temperatureShown then
+		renderStatus(status.clemency, temperatureShown and status.warmth, temperatureShown and status.chill)
+	end
+
 	if temperatureShown then
-		local level = math.clamp(status.level, Temperature.ICY, Temperature.HOT)
-		if level ~= lastLevel then
-			lastLevel = level
-			local colours = LEVEL_COLOURS[level]
-			Style.paint(orb.F, colours[1])
-			Style.paint(orb.H, colours[2])
-			Style.paint(orb.D, colours[3])
-		end
-		setVisible(arrows.up, status.target > status.level)
-		setVisible(arrows.down, status.target < status.level)
-		local frost, heat = status.frozen / Temperature.FREEZE_TICKS, status.heat / Temperature.FREEZE_TICKS
+		local value = math.clamp(status.temperature, Temperature.MIN, Temperature.MAX)
+		renderGauge(value, status.target)
+		local frost, heat = status.frozen / Temperature.EXTREME_TICKS, status.heat / Temperature.EXTREME_TICKS
 		if frost >= heat then
 			renderEdges(FROST, frost)
 		else

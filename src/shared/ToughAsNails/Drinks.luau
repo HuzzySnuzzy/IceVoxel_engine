@@ -5,25 +5,56 @@
 	Dirty / Purified Water Canteen); dirty water is purified in a furnace (Crafting/Recipes).
 
 	  Drink                 thirst  hydration  Thirst effect
-	  a water source, hand    1       0.1      75%, 30 s    TAN's hand drinking (Config
+	  a water source, hand    1       0.1      50%, 15 s    TAN's hand drinking (Config
 	                                                        .ToughAsNails.HandDrinking)
-	  dirty water             4       0.25     75%, 30 s    bottle or canteen sip
+	  dirty water             4       0.25     50%, 15 s    bottle or canteen sip
 	  purified water          6       0.4        -          bottle or canteen sip
 	(hydration is the modifier: Thirst.drink adds thirst x modifier x 2; the Thirst effect costs
-	0.025 exhaustion a tick, so 30 s of it is 3.75 points of hydration or thirst; a longer one
-	already running stays, so sips in a row cost one effect.)
+	0.015 exhaustion a tick, so 15 s of it is 4.5 exhaustion, about a point of hydration or
+	thirst; a longer one already running stays, so sips in a row cost one effect. TAN's own 75%
+	and 30 s at 0.025 were too harsh for this game.) A drink may also give TAN's Internal Warmth
+	or Internal Chill (`warmth` / `chill` ticks, Temperature.giveWarmth / giveChill): `apply`
+	gives them when it is handed the temperature state.
+
+	The items are data, three tables below, and everything here reads them:
+	  ITEMS        a full item -> { drink, empty?, sips? }: what drinking it gives, the empty
+	               container drinking it leaves (nil: nothing, it is used up), and `sips`: true for
+	               a canteen (the item's `durability` is its sips; each wears it, the last leaves
+	               `empty`), else one item is one drink (a bottle: the stack shrinks by one and
+	               `empty` comes back);
+	  FILLS        an empty container -> the full item it becomes at a water source (its dirty
+	               water). A `sips` item that is the dirty water of its own container (the Dirty
+	               Water Canteen) is topped up at water while it has sips missing; a purified one
+	               never is (it would be dirtied);
+	  PURIFIED_OF  dirty water -> its purified twin (`purifiedOf`; `isDirty` is being a key here).
+	               Purifying itself is a recipe's (Crafting/Recipes: smelting, or anything else
+	               that turns one into the other).
+	Both sides read this module, so entries go into the tables here (they are frozen), never at
+	run time. A new container, e.g. wooden bowls (ItemList Bowl, DirtyWaterBowl,
+	PurifiedWaterBowl), is four entries and a recipe:
+	    ITEMS        [I.DirtyWaterBowl] = { drink = Drinks.DIRTY, empty = I.Bowl },
+	                 [I.PurifiedWaterBowl] = { drink = Drinks.PURIFIED, empty = I.Bowl },
+	    FILLS        [I.Bowl] = I.DirtyWaterBowl,
+	    PURIFIED_OF  [I.DirtyWaterBowl] = I.PurifiedWaterBowl,
+	    Recipes      smelt("DirtyWaterBowl", "PurifiedWaterBowl")
+	and a bowl then fills at water, is drunk by holding the use button, gives its Bowl back, and
+	purifies in a furnace, as a bottle does. A drink that is no water (a juice, a hot tea) is an
+	ITEMS entry with a Drink of its own, e.g. { drink = { thirst = 6, hydration = 0.6, chance = 0,
+	effectTicks = 0, warmth = 1200 }, empty = I.GlassBottle }. The load checks below assert that
+	every named item is a drink where it must be one.
 
 	Using an item (`action`, right click; Minecraft's Item.use after a block's own use):
-	  Glass Bottle            at a water source: fill (BottleItem: a ray that stops at sources)
-	  Canteen                 at a water source: fill to 3 sips of dirty water
-	  Dirty Water Canteen     at a water source with sips missing: fill again; else drink
-	  bottles, other canteens drink (a purified canteen is never dirtied by accident)
-	  empty hand              at a water source: a sip (instant, at most one per HAND_INTERVAL)
+	  an empty container (FILLS)   at a water source: fill (BottleItem: a ray that stops at
+	                               sources)
+	  a dirty canteen              at a water source with sips missing: fill again; else drink
+	  a full item (ITEMS)          drink (a purified canteen is never dirtied by accident)
+	  empty hand                   at a water source: a sip (instant, at most one per
+	                               HAND_INTERVAL)
 	Drinking an item takes USE_TICKS (32, PotionItem.getUseDuration) of holding the button, and
 	only while thirsty (creative: always, Thirst.canDrink). Then (`afterDrinking`):
-	  a bottle    one is used up and a Glass Bottle comes back (PotionItem.finishUsingItem: the
-	              bottle replaces the stack when it was the last, else it goes into the inventory);
-	  a canteen   wears a sip (its `damage`; durability 3); the last sip leaves the empty Canteen.
+	  one drink   one is used up and its empty container comes back (PotionItem.finishUsingItem:
+	              it replaces the stack when it was the last, else it goes into the inventory);
+	  sips        a sip wears it (its `damage`); the last sip leaves the empty container.
 	Creative players (instabuild) drink without using anything up, as Minecraft's.
 	Filling (`fill`) is ItemUtils.createFilledResult: one empty container is used up and the full
 	one replaces the stack when it was the last, else goes into the inventory; creative players
@@ -33,6 +64,7 @@
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
 local Thirst = require(script.Parent.Thirst)
+local Temperature = require(script.Parent.Temperature)
 
 type Stack = Items.Stack
 
@@ -43,6 +75,19 @@ export type Drink = {
 	-- Chance (0..1) of TAN's Thirst effect, and its ticks.
 	chance: number,
 	effectTicks: number,
+	-- Ticks of TAN's Internal Warmth / Internal Chill it gives (Temperature.giveWarmth /
+	-- giveChill; nil: none).
+	warmth: number?,
+	chill: number?,
+}
+
+-- A full item (ITEMS, see the header).
+export type DrinkItem = {
+	drink: Drink,
+	-- The empty container drinking it leaves (nil: nothing).
+	empty: number?,
+	-- Drunk in sips, the item's `durability` many (a canteen).
+	sips: boolean?,
 }
 
 -- What a use does: "fill", "drink", "hand" (a sip from a water source) or nil (nothing).
@@ -50,8 +95,8 @@ export type Action = "fill" | "drink" | "hand"
 
 local Drinks = {}
 
-Drinks.HAND = table.freeze({ thirst = 1, hydration = 0.1, chance = 0.75, effectTicks = 600 }) :: Drink
-Drinks.DIRTY = table.freeze({ thirst = 4, hydration = 0.25, chance = 0.75, effectTicks = 600 }) :: Drink
+Drinks.HAND = table.freeze({ thirst = 1, hydration = 0.1, chance = 0.5, effectTicks = 300 }) :: Drink
+Drinks.DIRTY = table.freeze({ thirst = 4, hydration = 0.25, chance = 0.5, effectTicks = 300 }) :: Drink
 Drinks.PURIFIED = table.freeze({ thirst = 6, hydration = 0.4, chance = 0, effectTicks = 0 }) :: Drink
 
 -- Ticks of holding the use button to drink an item (Minecraft's potions and TAN's drinks).
@@ -67,31 +112,85 @@ Drinks.CANTEEN = I.Canteen
 Drinks.DIRTY_CANTEEN = I.DirtyWaterCanteen
 Drinks.PURIFIED_CANTEEN = I.PurifiedWaterCanteen
 
-local DRINKS: { [number]: Drink } = {
-	[Drinks.DIRTY_BOTTLE] = Drinks.DIRTY,
-	[Drinks.PURIFIED_BOTTLE] = Drinks.PURIFIED,
-	[Drinks.DIRTY_CANTEEN] = Drinks.DIRTY,
-	[Drinks.PURIFIED_CANTEEN] = Drinks.PURIFIED,
-}
--- Canteens: the empty one their last sip leaves.
-local CANTEENS: { [number]: boolean } = {
-	[Drinks.DIRTY_CANTEEN] = true,
-	[Drinks.PURIFIED_CANTEEN] = true,
-}
+-- The full items (see the header).
+Drinks.ITEMS = table.freeze({
+	[I.DirtyWaterBottle] = table.freeze({ drink = Drinks.DIRTY, empty = I.GlassBottle }),
+	[I.PurifiedWaterBottle] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
+	[I.DirtyWaterCanteen] = table.freeze({ drink = Drinks.DIRTY, empty = I.Canteen, sips = true }),
+	[I.PurifiedWaterCanteen] = table.freeze({ drink = Drinks.PURIFIED, empty = I.Canteen, sips = true }),
+} :: { [number]: DrinkItem })
+
+-- Empty containers and the full item each becomes at a water source.
+Drinks.FILLS = table.freeze({
+	[I.GlassBottle] = I.DirtyWaterBottle,
+	[I.Canteen] = I.DirtyWaterCanteen,
+} :: { [number]: number })
+
+-- Dirty water and its purified twin.
+Drinks.PURIFIED_OF = table.freeze({
+	[I.DirtyWaterBottle] = I.PurifiedWaterBottle,
+	[I.DirtyWaterCanteen] = I.PurifiedWaterCanteen,
+} :: { [number]: number })
+
+-- (Mistakes in the tables would only show as items that do nothing: catch them at load.)
+local function itemName(item: number): string
+	local def = Items.get(item)
+	return if def then def.name else tostring(item)
+end
+for item, entry in Drinks.ITEMS do
+	assert(Items.get(item), `Drinks.ITEMS has an unknown item {item}`)
+	assert(entry.empty == nil or Items.get(entry.empty), `{itemName(item)}'s empty container is no item`)
+	local def = Items.get(item)
+	assert(not entry.sips or (def and def.durability), `{itemName(item)} is drunk in sips but has no durability`)
+end
+for empty, full in Drinks.FILLS do
+	assert(Items.get(empty), `Drinks.FILLS has an unknown item {empty}`)
+	assert(Drinks.ITEMS[full], `{itemName(empty)} fills with {itemName(full)}, which is no drink`)
+end
+for dirty, purified in Drinks.PURIFIED_OF do
+	assert(Drinks.ITEMS[dirty] and Drinks.ITEMS[purified], `{itemName(dirty)} or its purified twin is no drink`)
+end
+
+-- The full item entry of `item` (nil: it is no drink).
+function Drinks.entry(item: number?): DrinkItem?
+	return if item then Drinks.ITEMS[item] else nil
+end
 
 -- What drinking `item` gives (nil: it is no drink).
 function Drinks.of(item: number?): Drink?
-	return if item then DRINKS[item] else nil
+	local entry = Drinks.entry(item)
+	return if entry then entry.drink else nil
 end
 
 -- Is `item` drunk by holding the use button (a filled bottle or canteen)?
 function Drinks.isDrink(item: number?): boolean
-	return Drinks.of(item) ~= nil
+	return Drinks.entry(item) ~= nil
+end
+
+-- The empty container drinking `item` leaves (nil: none, or no drink).
+function Drinks.emptyOf(item: number?): number?
+	local entry = Drinks.entry(item)
+	return if entry then entry.empty else nil
+end
+
+-- Is `item` an empty container that fills at water?
+function Drinks.isContainer(item: number?): boolean
+	return item ~= nil and Drinks.FILLS[item] ~= nil
+end
+
+-- Is `item` dirty water (it has a purified twin)?
+function Drinks.isDirty(item: number?): boolean
+	return item ~= nil and Drinks.PURIFIED_OF[item] ~= nil
+end
+
+-- The purified twin of dirty water `item` (nil: it is no dirty water).
+function Drinks.purifiedOf(item: number?): number?
+	return if item then Drinks.PURIFIED_OF[item] else nil
 end
 
 -- Does a right click with `item` do anything here (drink, or fill at water)?
 function Drinks.isWaterItem(item: number?): boolean
-	return item == Drinks.GLASS_BOTTLE or item == Drinks.CANTEEN or Drinks.isDrink(item)
+	return Drinks.isContainer(item) or Drinks.isDrink(item)
 end
 
 -- Is `block` a water source a bottle or a hand drinks from (Minecraft's ClipContext SOURCE_ONLY
@@ -100,15 +199,19 @@ function Drinks.isWaterSource(block: number?): boolean
 	return block ~= nil and Fluids.isSource(block) and Fluids.ofBlock(block) == Fluids.WATER
 end
 
+-- Is `item` drunk in sips and topped up at water (the dirty water of its own container)?
+local function refills(item: number): boolean
+	local entry = Drinks.ITEMS[item]
+	return entry ~= nil and entry.sips == true and entry.empty ~= nil and Drinks.FILLS[entry.empty] == item
+end
+
 -- Would `stack` be filled at a water source (see the header)?
 function Drinks.fills(stack: Stack?): boolean
 	if stack == nil then
 		return false
 	end
 	local item = stack.item
-	return item == Drinks.GLASS_BOTTLE
-		or item == Drinks.CANTEEN
-		or (item == Drinks.DIRTY_CANTEEN and (stack.damage or 0) > 0)
+	return Drinks.isContainer(item) or (refills(item) and (stack.damage or 0) > 0)
 end
 
 --[[
@@ -128,15 +231,14 @@ function Drinks.action(stack: Stack?, atWater: boolean, canDrink: boolean, handD
 	return nil
 end
 
--- The full container `stack` becomes at water (nil: it fills to nothing).
+-- The full item `stack` becomes at water (nil: it fills to nothing).
 function Drinks.filledOf(stack: Stack): number?
 	local item = stack.item
-	if item == Drinks.GLASS_BOTTLE then
-		return Drinks.DIRTY_BOTTLE
-	elseif item == Drinks.CANTEEN or item == Drinks.DIRTY_CANTEEN then
-		return Drinks.DIRTY_CANTEEN
+	local full = Drinks.FILLS[item]
+	if full then
+		return full
 	end
-	return nil
+	return if refills(item) then item else nil
 end
 
 --[[
@@ -161,32 +263,34 @@ function Drinks.fill(stack: Stack, creative: boolean, hasItem: (item: number) ->
 end
 
 --[[
-	The held stack after drinking it (see the header), and a stack to give besides (the Glass
-	Bottle of a bottle that was not the last).
+	The held stack after drinking it (see the header), and a stack to give besides (the empty
+	container of one drink that was not the last).
 ]]
 function Drinks.afterDrinking(stack: Stack, creative: boolean): (Stack?, Stack?)
-	if creative or not Drinks.isDrink(stack.item) then
+	local entry = Drinks.entry(stack.item)
+	if creative or entry == nil then
 		return stack, nil
 	end
-	if CANTEENS[stack.item] then
+	local empty: Stack? = if entry.empty then { item = entry.empty, count = 1 } else nil
+	if entry.sips then
 		local def = Items.get(stack.item)
 		local durability = if def then def.durability or 1 else 1
 		local damage = (stack.damage or 0) + 1
 		if damage >= durability then
-			return { item = Drinks.CANTEEN, count = 1 }, nil
+			return empty, nil
 		end
 		return { item = stack.item, count = 1, damage = damage }, nil
 	end
-	local glass = { item = Drinks.GLASS_BOTTLE, count = 1 }
 	if stack.count <= 1 then
-		return glass, nil
+		return empty, nil
 	end
-	return Items.withCount(stack, stack.count - 1), glass
+	return Items.withCount(stack, stack.count - 1), empty
 end
 
--- Sips left in a canteen stack (0 for anything else).
+-- Sips left in a stack drunk in sips (0 for anything else).
 function Drinks.sips(stack: Stack?): number
-	if stack == nil or not CANTEENS[stack.item] then
+	local entry = if stack then Drinks.entry(stack.item) else nil
+	if stack == nil or entry == nil or not entry.sips then
 		return 0
 	end
 	local def = Items.get(stack.item)
@@ -195,10 +299,24 @@ end
 
 --[[
 	Drinks `drink` into a thirst state (ToughAsNails/Thirst) with `random` (0..1, the effect's
-	roll): returns whether the Thirst effect was given.
+	roll), and with the body's `temperature` state its Internal Warmth or Chill: returns whether
+	the Thirst effect was given.
 ]]
-function Drinks.apply(thirst: Thirst.State, drink: Drink, random: () -> number): boolean
+function Drinks.apply(
+	thirst: Thirst.State,
+	drink: Drink,
+	random: () -> number,
+	temperature: Temperature.State?
+): boolean
 	Thirst.drink(thirst, drink.thirst, drink.hydration)
+	if temperature then
+		if drink.warmth and drink.warmth > 0 then
+			Temperature.giveWarmth(temperature, drink.warmth)
+		end
+		if drink.chill and drink.chill > 0 then
+			Temperature.giveChill(temperature, drink.chill)
+		end
+	end
 	if drink.chance > 0 and random() < drink.chance then
 		Thirst.giveEffect(thirst, drink.effectTicks)
 		return true

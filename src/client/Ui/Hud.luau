@@ -16,9 +16,9 @@
 	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
 	             makes them shake; damage makes their outline blink.
 	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
-	             droplets on the right level with the hearts, the temperature gauge centred
-	             between them over the hotbar, and frost or heat closing in from the screen's
-	             edges.
+	             droplets on the right level with the hearts, the temperature thermometer above
+	             them (level with the armor), Climate Clemency's time left and the warmth and
+	             chill effects above that, and frost or heat closing in from the screen's edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu
 
@@ -429,8 +429,9 @@ function Hud.start()
 		hearts[i] = newIcon(heartRow, (i - 1) * 8, HEART)
 		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
 	end
-	-- Thirst and temperature (TAN's gauge 30 pixels above the hotbar, centred).
-	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeX = WIDTH / 2 - 8, gaugeY = BAR_Y - 30 })
+	-- Thirst and temperature (the droplets level with the hearts, the thermometer level with the
+	-- armor and the clemency and effects above it, all on the right).
+	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeY = ARMOR_Y, statusY = ARMOR_Y - 10 })
 
 	--[[ Held item name ]]
 

@@ -2766,11 +2766,12 @@ crater" and, on lit ones, "Lit: stand back!".
 
 ## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/SurvivalHud`)
 
-The Tough As Nails mod's survival mechanics, after its 1.20 version: thirst and body temperature.
-The rules are pure shared modules (tested in `tests/spec/ToughAsNails`); the server plays them out
-at 20 ticks a second and sends each player their own state; the client draws it and reports its
-movement. `Config.ToughAsNails` turns thirst and temperature on and off (with both off the server
-module does nothing and no message is sent). Survival and adventure players only
+The Tough As Nails mod's survival mechanics, after its 1.20 version: thirst and body temperature,
+tuned gentler than the mod (a fine temperature scale that moves slowly, slow extremes, a grace
+period). The rules are pure shared modules (tested in `tests/spec/ToughAsNails`); the server plays
+them out at 20 ticks a second and sends each player their own state; the client draws it and
+reports its movement. `Config.ToughAsNails` turns thirst and temperature on and off (with both off
+the server module does nothing and no message is sent). Survival and adventure players only
 (`ToughAsNails.affects`: not GameMode.invulnerable): creative and spectator players' stats stand
 still, the extremes clear and nothing hurts; the HUD shows with the hearts.
 
@@ -2782,12 +2783,15 @@ still, the extremes clear and nothing hurts; the HUD shows with the hearts.
   under water or wading 0.01 a metre, a jump 0.05, a sprint jump 0.2 (the client's `Exertion`
   reports, below), a block broken 0.005 (ServerNet's `broke` rule), a hurt that landed 0.1 (the
   server sees health drop outside its own damage), 6 a regenerated half heart, TAN's Thirst
-  effect 0.025 a tick, `HotExhaustion` (0.01) a tick while HOT;
+  effect 0.015 a tick (TAN's 0.025 was too harsh), `HotExhaustion` (0.005) a tick in the HOT zone;
 - a tick in Minecraft's order: the effect counts down and adds its exhaustion, the exhaustion
   turns into lost points, then with `ThirstRegeneration` and thirst 18+ a hurt player gets half a
   heart back every 80 ticks for 6 exhaustion (FoodData's slow branch; the fast saturation branch
-  is food's and left out), or at 0 thirst half a heart is lost every 80 ticks while health is
-  above `DehydrationFloor` (1: normal difficulty), through armor;
+  is food's and left out), or at 0 thirst half a heart is lost every 120 ticks
+  (`DEHYDRATION_INTERVAL`, starvation's 80 made gentler) while health is above
+  `DehydrationFloor` (1: normal difficulty), through armor;
+- under Climate Clemency (below) a point goes for every 8 exhaustion instead of 4 (half the
+  drain, `CLEMENCY_RATE`) and dehydration doesn't hurt;
 - with `ThirstRegeneration` the character's Roblox `Health` script is removed, so health only
   comes back by thirst's rule.
 
@@ -2797,21 +2801,32 @@ running stays):
 
 | Drink                        | Thirst | Hydration | Thirst effect |
 | ---------------------------- | ------ | --------- | ------------- |
-| a water source, empty hand   | 1      | 0.1       | 75%, 600 ticks |
-| Dirty Water Bottle / Canteen | 4      | 0.25      | 75%, 600 ticks |
+| a water source, empty hand   | 1      | 0.1       | 50%, 300 ticks |
+| Dirty Water Bottle / Canteen | 4      | 0.25      | 50%, 300 ticks |
 | Purified Water Bottle / Canteen | 6   | 0.4       | -             |
+
+A `Drink` may also carry `warmth` / `chill` ticks: `Drinks.apply(thirst, drink, random,
+temperature?)` gives TAN's Internal Warmth / Internal Chill to the temperature state it is handed
+(the server hands it while temperature is on). Containers are data, three frozen tables in the
+module that both sides read: `ITEMS` (full item -> `{ drink, empty?, sips? }`: what it gives, the
+empty container drinking it leaves, `sips` for a canteen whose `durability` is its sips), `FILLS`
+(empty container -> the dirty water it becomes at a water source; a dirty `sips` item of its own
+container is topped up there while it has sips missing) and `PURIFIED_OF` (dirty -> purified;
+`purifiedOf`, `isDirty`). A new container (wooden bowls) is two `ITEMS` entries, a `FILLS` entry, a
+`PURIFIED_OF` entry and a smelting recipe; load-time asserts catch entries that name no item or no
+drink.
 
 Items (appended to ItemList): Glass Bottle (Minecraft's; three glass in a V make three), Dirty and
 Purified Water Bottle (stack 16), Canteen (TAN's leather canteen in iron: a nugget over three
 ingots in a cup), Dirty and Purified Water Canteen (durability 3: a sip wears it, the last leaves
-the empty Canteen; the tool repair recipe skips them). A Glass Bottle or Canteen used at a water
-source (Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty water
+the empty Canteen; the tool repair recipe skips them). An empty container used at a water source
+(Minecraft's source-only ray; a Dirty canteen with sips missing too) fills with dirty water
 (ItemUtils.createFilledResult: one used, the full one replaces the stack or goes into the
 inventory; creative keeps the empty one); smelting purifies (TAN's original way), in a furnace or
 an Electric Furnace. Drinking an item is Minecraft's 32 tick use: the client sends `Drink` start,
 counts 32 ticks while the button stays down (gulps every 4 ticks from the 7th), then finish; the
 server drinks it only if the same item is still in the same slot 28+ ticks after start and the
-player may drink (thirsty, or creative), then uses it up (a bottle gives its Glass Bottle back)
+player may drink (thirsty, or creative), then uses it up (one drink gives its empty container back)
 and plays the last gulp to everyone else. A sip from a water source with an empty hand is
 instant, at most every 10 ticks (`HandDrinking`). Nothing is predicted: the inventory snapshot and
 the Survival message bring the results.
@@ -2823,40 +2838,69 @@ branches; flying and walking cost nothing), jumps and sprint jumps, and sends th
 second, and at once when sprinting starts or stops. The server allows at most 10 m and 3 jumps per
 second since the last report (`clamp`; 4 reports a second) and holds the sprint flag for 2 s.
 
-**Temperature** (`ToughAsNails/Temperature`, TAN 1.18+'s five levels ICY -2, COLD, NEUTRAL, WARM,
-HOT 2). The target, worked out once a second per player from `Players/Climate`:
+**Temperature** (`ToughAsNails/Temperature`): an integer body temperature -10..10 (TAN 1.12's fine
+scale) in TAN 1.18+'s five zones, whose ids (`zone`, ICY -2 .. HOT 2) are the levels of before:
+ICY -10..-8, COLD -7..-3, NEUTRAL -2..2, WARM 3..7, HOT 8..10. The target, worked out once a
+second per player from `Players/Climate`:
 1. the climate: the column's surface biome temperature (BiomeList, -0.75 tundra .. 0.8 desert),
    0.001 colder per block above 256, then outdoors at night 0.3 colder, under a roof 0.15 colder,
-   and underground (under a roof, 16+ blocks below the column's terrain) 0; cut at -0.55, -0.25,
-   0.4 and 0.7. So tundra is icy, taiga cold (icy at night), plains and forests neutral, jungles
-   and savannas warm, a desert hot by day and warm at night or in a house, the frozen peaks icy;
-2. a level each, kept within ICY..HOT: wet (in water or out of it for less than `WetTicks`) -1,
-   sprinting +1, a heating block within `ProximityRadius` (5, a cube around the feet) or burning
-   +1, a cooling block -1, and two leather pieces +1 while below NEUTRAL.
-The level steps once towards the target every `ChangeTicks` (200; the count restarts whenever
-it is on target). At ICY `frozen` rises a tick at a time to 140 (Minecraft's
-getTicksRequiredToFreeze; any leather piece stops it, freeze_immune_wearables), otherwise it
-thaws 2 a tick; at HOT `heat` does the same (hyperthermia). Full: half a heart every 40 ticks,
-through armor (Minecraft's freeze hurt). The hurts don't go through Burning's shared hurt
-cooldown (they come every 40 or 80 ticks, past any 10 tick cooldown anyway).
+   and underground (under a roof, 16+ blocks below the column's terrain) NEUTRAL's middle; put on
+   the scale piecewise linearly (`scaleOf`) through the old cuts -0.55, -0.25, 0.4 and 0.7, which
+   land on the zone borders -7.5, -2.5, 2.5 and 7.5 (beyond them the nearest segment's slope goes
+   on), rounded half up, within -10..10. So tundra -10, taiga -4 (-9 at night), plains 0 (-2 at
+   night), savanna 4, jungle 7, desert 9 (4 at night, 7 in a house), the frozen peaks -10;
+2. steps, each kept within -10..10: wet (in water or out of it for less than `WetTicks`) -3,
+   sprinting +2, a heating block within `ProximityRadius` (5, a cube around the feet) +3 or within
+   2 blocks +5, burning +5 (not on top of a heat source's: the larger), a cooling block -3;
+3. armor insulation (ItemList `tan` summed by `Climate.insulation`): `warmth` steps pull a target
+   below 0 up towards 0 and `cooling` steps pull one above 0 down, never past 0 (leather: warmth 1
+   a piece);
+4. the player's own effects (`target(env, state)`): Internal Warmth +5 but never past +2 by it,
+   Internal Chill -5 but never past -2 (protection without the opposite extreme); then Climate
+   Clemency holds the target within -2..2.
+The temperature steps once towards the target every `ChangeTicks` (140: from neutral the icy edge
+takes 56 s in the coldest place) moving away from 0, or every `RecoverTicks` (70) moving back
+towards it (the count restarts on target and after each step). In the ICY zone `frozen` rises a
+tick at a time to `EXTREME_TICKS` (400: 20 s; Minecraft's freezing takes 7) unless a worn piece is
+freeze immune (`tan.freezeImmune`, Minecraft's freeze_immune_wearables: leather) or Climate
+Clemency is on; otherwise it thaws 4 a tick (5 s from full). In the HOT zone `heat` does the same
+(hyperthermia). Full: half a heart every 100 ticks (5 s), through armor (Minecraft's freeze
+hurt). The hurts don't go through Burning's shared hurt cooldown. From neutral and full health,
+nothing worn, in the coldest place, death takes 176 s by temperature alone and about 205 s with
+thirst's regeneration fighting back (simulated tick by tick in the spec; before: 67 s).
+
+**Climate Clemency** (TAN's grace effect): the first character since joining gets `ClemencyTicks`
+(6000: 5 minutes) of it, a respawn `RespawnClemencyTicks` (1200: a minute); nothing is saved
+between visits, so every visit starts afresh. It counts down only in survival and adventure
+(`Temperature.tickEffects`, which the server runs alone while temperature is off). While it lasts
+the target stays within NEUTRAL, no extreme builds, thirst drains at half the rate and
+dehydration doesn't hurt.
 
 **Surroundings** (`Players/Climate`, pure over a view: loaded blocks, the generator's column, and
 SkyCheck for the roof above the eyes). Heat and cold sources are block ids: `HeatingBlocks` and
-`CoolingBlocks` names (a fluid name is every level and the cave twin: "Lava"), plus sources
-registered with `Climate.addHeatSource(block, check?)` / `addColdSource(block)`: the server module
-registers the Furnace (while its container's litTime > 0) and the Heat and Combustion Generators
-(while their machine is active). A check only runs for a block of its kind within range. Anything
-new that should warm (a campfire, burning blocks) registers the same way.
+`CoolingBlocks` names (a fluid name is every level and the cave twin: "Lava"; a name no block has
+is skipped with a warning, so a block can be listed before it exists), plus sources registered with
+`Climate.addHeatSource(block, check?)` / `addColdSource(block)` (they return how many ids they
+cover): the server module registers the Furnace (while its container's litTime > 0) and the Heat
+and Combustion Generators (while their machine is active). `Climate.sources` gives the distance of
+the nearest heat and cold source (along the farthest axis); a check only runs for a block of its
+kind within range that would be nearer than the nearest found so far. Anything new that should warm
+(a campfire, burning blocks) registers the same way.
 
-**Sync and HUD.** The server sends `Survival` to the player alone when its bytes change, at most
-every 4 ticks and at once for a new character (a respawn starts over: full thirst, neutral, dry).
-`Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's canvas (so the GUI
-scale is the hotbar's): 10 droplets right-aligned level with the hearts (hunger's place, filled
-from the right, half droplets their right half; green under the Thirst effect; jittering with no
-hydration, Minecraft's hunger rule), TAN's 13-pixel temperature orb centred 30 pixels above the
-hotbar (pale blue, blue, green, orange, red) with an arrow for the trend, and the frost or heat
-closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the
-HUD). F3 prints a `survival` line.
+**Sync and HUD.** The server sends `Survival` (14 bytes: flags with wet, Internal Warmth and Chill,
+thirst, hydration, exhaustion, the temperature and its target as -10..10, frozen and heat, the
+Thirst effect's ticks, Climate Clemency's seconds) to the player alone when its bytes change, at
+most every 4 ticks and at once for a new character (a respawn starts over: full thirst, neutral,
+dry). `Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's canvas (so the
+GUI scale is the hotbar's): 10 droplets right-aligned level with the hearts (hunger's place,
+filled from the right, half droplets their right half; green under the Thirst effect; jittering
+with no hydration, Minecraft's hunger rule); above them, level with the armor, a 75 × 9
+thermometer (a bulb in the zone's colour: pale blue, blue, green, orange, red; a tube of 21 cells
+tinted by zone with ticks at the zone borders; a pin on the temperature and an arrow beside it for
+the trend); above that, right-aligned, Climate Clemency's shield and time left (m:ss) and the
+Internal Warmth (flame) and Chill (snowflake) icons; and the frost or heat closing in from the
+screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the HUD). F3 prints a
+`survival` line with all the numbers.
 
 ## Just Enough Items (`Ui/Jei/`)
 

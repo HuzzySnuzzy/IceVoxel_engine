@@ -9,8 +9,9 @@
 	outdoors and how much of it reaches the camera; Rendering/LightingController) and the music
 	(surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
 	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
-	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds; the temperature
-	level and its target, hypothermia and hyperthermia ticks of 140, wet).
+	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
+	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
+	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -99,17 +100,26 @@ local function survivalLine(): string
 			math.ceil(status.effect / 20)
 		)
 		else "thirst off"
+	local clemency = if status.clemency > 0
+		then string.format("  clemency %d:%02d", status.clemency // 60, status.clemency % 60)
+		else ""
 	local temperature = if status.temperatureOn
 		then string.format(
-			"temp %s -> %s  frozen %d  heat %d%s",
-			Temperature.name(status.level),
+			"temp %d %s -> %d %s  frozen %d/%d  heat %d/%d%s%s%s",
+			status.temperature,
+			Temperature.name(status.temperature),
+			status.target,
 			Temperature.name(status.target),
 			status.frozen,
+			Temperature.EXTREME_TICKS,
 			status.heat,
-			if status.wet then "  wet" else ""
+			Temperature.EXTREME_TICKS,
+			if status.wet then "  wet" else "",
+			if status.warmth then "  warmth" else "",
+			if status.chill then "  chill" else ""
 		)
 		else "temp off"
-	return `survival {thirst}\n        {temperature}`
+	return `survival {thirst}{clemency}\n        {temperature}`
 end
 
 -- Movement hull line (blocks; speeds in blocks per second).

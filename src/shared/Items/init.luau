@@ -54,6 +54,9 @@ local ItemList = require(script.ItemList)
 
 export type ModelBox = ItemList.ModelBox
 
+-- A worn piece's Tough As Nails insulation (ItemList `tan`, with the defaults filled in).
+export type TanInsulation = { warmth: number, cooling: number, freezeImmune: boolean }
+
 export type ItemDef = {
 	id: number,
 	name: string,
@@ -63,6 +66,9 @@ export type ItemDef = {
 	maxStack: number,
 	-- Armor: worn in armor slot `slot` (1 head, 2 chest, 3 legs, 4 feet).
 	armor: { slot: number, defense: number, toughness: number }?,
+	-- Tough As Nails insulation of a worn piece (ItemList `tan`): steps of warmth and cooling,
+	-- and freeze immunity (Shared/ToughAsNails/Temperature, server Players/Climate).
+	tan: TanInsulation?,
 	-- Tools: kind ("pickaxe", "axe", "shovel", "hoe", "sword"), mining speed and harvest level.
 	tool: { kind: string, speed: number, level: number }?,
 	-- Uses before a tool breaks (nil: does not wear).
@@ -122,6 +128,7 @@ for id = 0, Blocks.count - 1 do
 			-- (64 unless BlockList says less: a Battery's 1, its charge being in each item.)
 			maxStack = block.maxStack,
 			armor = nil,
+			tan = nil,
 			tool = nil,
 			durability = nil,
 			color = block.color,
@@ -142,6 +149,15 @@ for index, spec in ItemList do
 		assert(slot, `Item {spec.name} has unknown armor slot {spec.armor.slot}`)
 		armor = { slot = slot, defense = spec.armor.defense, toughness = spec.armor.toughness }
 	end
+	local tan: TanInsulation? = nil
+	if spec.tan then
+		assert(armor, `Item {spec.name} has Tough As Nails insulation but is no armor`)
+		tan = table.freeze({
+			warmth = spec.tan.warmth or 0,
+			cooling = spec.tan.cooling or 0,
+			freezeImmune = spec.tan.freezeImmune == true,
+		})
+	end
 	add({
 		id = Items.ITEM_BASE + index - 1,
 		name = spec.name,
@@ -149,6 +165,7 @@ for index, spec in ItemList do
 		block = nil,
 		maxStack = if spec.durability then 1 else spec.maxStack or Items.MAX_STACK,
 		armor = armor,
+		tan = tan,
 		tool = spec.tool,
 		durability = spec.durability,
 		color = spec.color or { 255, 0, 255 },

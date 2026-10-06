@@ -13,6 +13,14 @@
 	  maxStack     Most items of this kind in one slot. Default 64.
 	  armor        { slot = "Head" | "Chest" | "Legs" | "Feet", defense, toughness }: worn in that armor
 	               slot; Minecraft's armor points and toughness.
+	  tan          { warmth = n?, cooling = n?, freezeImmune = true? } (armor only): Tough As Nails
+	               insulation while worn (Shared/ToughAsNails/Temperature, server Players/Climate
+	               sums the pieces): `warmth` steps pull a body temperature target below 0 up
+	               towards 0, `cooling` steps pull one above 0 down towards 0, never past it (the
+	               scale is -10..10, a zone 5 steps wide); `freezeImmune` stops hypothermia
+	               (Minecraft's freeze_immune_wearables: leather). 1 or 2 a piece is about right:
+	               a full set at 2 keeps a tundra's -10 at -2, neutral. Warm armor (straw, wool)
+	               gives warmth, cool armor (leaves) cooling.
 	  tool         { kind = "pickaxe" | "axe" | "shovel" | "hoe" | "sword" | "shears", speed, level }:
 	               Minecraft's tool tiers (mining speed on blocks of its kind, harvest level; see
 	               Shared/Mining). Shears are no tier (level 0): fast on blocks with `shearDrops`
@@ -46,6 +54,7 @@ export type ItemSpec = {
 	displayName: string?,
 	maxStack: number?,
 	armor: { slot: string, defense: number, toughness: number }?,
+	tan: { warmth: number?, cooling: number?, freezeImmune: boolean? }?,
 	tool: { kind: string, speed: number, level: number }?,
 	durability: number?,
 	color: { number }?,
@@ -81,10 +90,26 @@ local BOOTS: { ModelBox } = {
 
 local list: { ItemSpec } = {}
 
--- Minecraft armor materials: armor points of the head / chest / legs / feet pieces and toughness.
-type ArmorMaterial = { name: string, color: { number }, material: string, points: { number }, toughness: number }
+-- Minecraft armor materials: armor points of the head / chest / legs / feet pieces and toughness,
+-- and each piece's Tough As Nails insulation (`tan`; leather warms a step a piece and is freeze
+-- immune, Minecraft's freeze_immune_wearables).
+type ArmorMaterial = {
+	name: string,
+	color: { number },
+	material: string,
+	points: { number },
+	toughness: number,
+	tan: { warmth: number?, cooling: number?, freezeImmune: boolean? }?,
+}
 local ARMOR: { ArmorMaterial } = {
-	{ name = "Leather", color = { 160, 101, 64 }, material = "Fabric", points = { 1, 3, 2, 1 }, toughness = 0 },
+	{
+		name = "Leather",
+		color = { 160, 101, 64 },
+		material = "Fabric",
+		points = { 1, 3, 2, 1 },
+		toughness = 0,
+		tan = { warmth = 1, freezeImmune = true },
+	},
 	{
 		name = "Chainmail",
 		color = { 150, 152, 156 },
@@ -109,6 +134,7 @@ for _, armor in ARMOR do
 			name = armor.name .. piece.name,
 			maxStack = 1,
 			armor = { slot = piece.slot, defense = armor.points[i], toughness = armor.toughness },
+			tan = armor.tan,
 			color = armor.color,
 			material = armor.material,
 			model = piece.model,

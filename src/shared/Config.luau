@@ -591,9 +591,10 @@ local Config = {
 	--[[
 		The Tough As Nails mod's survival mechanics (TAN for Minecraft 1.20; Shared/ToughAsNails,
 		server Players/ToughAsNails): thirst (0..20 with hydration and exhaustion, Minecraft's
-		FoodData in water's place) and body temperature (ICY, COLD, NEUTRAL, WARM, HOT, drifting a
-		level at a time towards what the surroundings say). Survival and adventure players only:
-		creative and spectator players' stats stand still and never hurt.
+		FoodData in water's place) and body temperature (-10..10 in five zones, ICY, COLD, NEUTRAL,
+		WARM, HOT, drifting a step at a time towards what the surroundings say), with TAN's Climate
+		Clemency for a gentle start. Survival and adventure players only: creative and spectator
+		players' stats stand still and never hurt.
 	]]
 	ToughAsNails = {
 		-- Thirst: drinking, dehydration at 0 and the droplets over the hotbar.
@@ -604,26 +605,38 @@ local Config = {
 		-- ticks for 6 exhaustion (Minecraft's natural regeneration, thirst for food). This replaces
 		-- Roblox's own regeneration (the character's Health script). false keeps Roblox's.
 		ThirstRegeneration = true,
-		-- Dehydration (thirst 0) takes half a heart every 80 ticks while health is above this many
+		-- Dehydration (thirst 0) takes half a heart every 120 ticks while health is above this many
 		-- half hearts (Minecraft's starvation on normal difficulty: 1; 0 = to death, hard).
 		DehydrationFloor = 1,
 		-- Right clicking a water source with an empty hand drinks from it (TAN's hand drinking).
 		HandDrinking = true,
-		-- Thirst exhaustion each tick at HOT (sweating): 0.01 is a droplet every 20 s once the
-		-- hydration is gone.
-		HotExhaustion = 0.01,
-		-- Ticks between two steps of the body temperature towards its target (one level a step).
-		ChangeTicks = 200,
-		-- Ticks the player stays wet after leaving water (being wet cools by a level).
+		-- Thirst exhaustion each tick in the HOT zone (sweating): 0.005 is a droplet every 40 s
+		-- once the hydration is gone.
+		HotExhaustion = 0.005,
+		-- Ticks between two steps of the body temperature (-10..10) away from neutral (0) towards
+		-- its target: 140 is 7 s a step, so from neutral the icy edge (-8) takes 56 s in the
+		-- coldest place, and the hot edge (8) as long in the hottest.
+		ChangeTicks = 140,
+		-- Ticks between two steps back towards neutral (warming up at a fire, cooling off in the
+		-- shade): from the coldest (-10) to NEUTRAL's edge (-2) at 70 is 28 s.
+		RecoverTicks = 70,
+		-- TAN's Climate Clemency, ticks of it on joining (6000: 5 minutes) and after respawning
+		-- (1200: a minute). While it lasts the temperature's target stays within NEUTRAL (no
+		-- hypothermia or hyperthermia), thirst drains at half the rate and dehydration doesn't
+		-- hurt. It counts down only in survival and adventure. 0 turns either off.
+		ClemencyTicks = 6000,
+		RespawnClemencyTicks = 1200,
+		-- Ticks the player stays wet after leaving water (being wet cools by 3 steps).
 		WetTicks = 100,
 		-- Blocks around the player (a cube this many blocks out each way) searched for heat and
 		-- cold sources, once a second.
 		ProximityRadius = 5,
-		-- Blocks that warm the player by a level within ProximityRadius: fluid names (every level
-		-- and the cave twin) or block names. Lit furnaces and working Heat and Combustion Generators
-		-- warm too (server Players/ToughAsNails registers them).
+		-- Blocks that warm the player within ProximityRadius (3 steps; 5 within 2 blocks): fluid
+		-- names (every level and the cave twin) or block names. A name no block has is skipped
+		-- with a warning, so a block may be listed here before it exists. Lit furnaces and working
+		-- Heat and Combustion Generators warm too (server Players/ToughAsNails registers them).
 		HeatingBlocks = { "Lava", "Fire" },
-		-- Blocks that cool the player by a level within ProximityRadius.
+		-- Blocks that cool the player by 3 steps within ProximityRadius.
 		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
 	},
 
