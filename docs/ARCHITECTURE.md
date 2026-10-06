@@ -1275,6 +1275,15 @@ prediction.
 
 A panel at the top centre names what the crosshair points at, like the Jade mod.
 
+- **Light level.** Blocks and fluids carry a "Light level N" line (`WailaInfo.lightLine`, context
+  `light`): the light of the cell a mob would stand in (above an opaque block, else the block's
+  own cell), the larger of its block light (`CaveMood.blockLight`: sources less one per open cell
+  they travel, budgeted) and sky light (`LightingController.skyLight`, SkyExposure's estimate),
+  since the engine keeps no light map. It is worked out at every pick (0.05 s) and is part of the
+  panel's key, so a torch placed nearby updates it. Coloured for Minecraft 1.18+'s monster
+  spawning (block light 0): red with sky light at most 7, yellow above (night only), green lit;
+  F3 adds "(block b, sky s)". Meant for mob spawning later, which should use the same estimate.
+
 - **Target.** `BlockInteraction.target()`: the highlighted block, with the same reach and rules
   (outlines included). A dropped item (`EntityRenderer.itemsNear`, a 0.5 × 0.8 block box around
   its bobbing model) or another player (their standing hull) nearer on the same aim and in reach

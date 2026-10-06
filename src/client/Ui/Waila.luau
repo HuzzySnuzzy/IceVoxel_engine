@@ -67,6 +67,8 @@ local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
+local CaveMood = require(script.Parent.Parent.Audio.CaveMood)
+local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
@@ -575,11 +577,28 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		return nil, nil, ""
 	end
 
+	local function blockAt(x: number, y: number, z: number): number?
+		return world:getBlock(x, y, z)
+	end
+
+	-- The light where a mob would stand on the block hit (WailaInfo.lightLine): on top of an opaque
+	-- block, else in its own cell. Nil where that cell isn't loaded.
+	local function lightFacts(hit: VoxelRaycast.Hit): (WailaInfo.LightFacts?, string)
+		local y = if Blocks.isOpaque(hit.block) then hit.y + 1 else hit.y
+		local sky = LightingController.skyLight(hit.x, y, hit.z)
+		if sky == nil or world:getBlock(hit.x, y, hit.z) == nil then
+			return nil, "-"
+		end
+		local block = CaveMood.blockLight(blockAt, hit.x, y, hit.z)
+		return { block = block, sky = sky }, `{block},{sky}`
+	end
+
 	local function showBlock(hit: VoxelRaycast.Hit, progress: number?, extended: boolean)
 		local held = heldItem()
 		local transmitter, tank, machine, facts = pipeFacts(hit, extended)
 		local structure, jigsaw, structureKey = structureFacts(hit)
-		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey}`
+		local light, lightKey = lightFacts(hit)
+		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
 			return WailaInfo.block(hit.block, held, hit.x, hit.y, hit.z, extended, {
@@ -590,6 +609,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				machine = machine,
 				structure = structure,
 				jigsaw = jigsaw,
+				light = light,
 			})
 		end)
 		setProgress(progress)
@@ -631,10 +651,11 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	end
 
 	local function showFluid(hit: VoxelRaycast.Hit, extended: boolean)
-		local key = `f {hit.x} {hit.y} {hit.z} {hit.block} {extended}`
+		local light, lightKey = lightFacts(hit)
+		local key = `f {hit.x} {hit.y} {hit.z} {hit.block} {extended} {lightKey}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
-			return WailaInfo.block(hit.block, nil, hit.x, hit.y, hit.z, extended, { biome = biome })
+			return WailaInfo.block(hit.block, nil, hit.x, hit.y, hit.z, extended, { biome = biome, light = light })
 		end)
 		setProgress(nil)
 	end

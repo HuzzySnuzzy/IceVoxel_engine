@@ -502,7 +502,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   green check or red cross for the item in hand ("Requires Iron Pickaxe"), the mining progress
   as a line along its bottom edge, and "IceVoxel" as the mod name. It also names dropped items,
   other players (health, game mode) and fluids when no block is in reach (lava says "Light 15"),
-  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). While `F3` is open it shows everything
+  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). Blocks and fluids show a "Light level"
+  line: Minecraft's 0-15 light where a mob would stand on the block (on top of it, or in the cell
+  of a see-through block), the larger of the block light from torches, lava, glow lichen and the
+  like and the sky light, estimated from the loaded blocks. Red: no block light and little sky
+  (monsters could spawn there at any time); yellow: no block light under the sky (at night); green:
+  lit. While `F3` is open it adds both parts, and shows everything
   the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
   item and by hand, break time, light, fluid level, render kind, friction and menu.
 - **Music.** Minecraft's background music: a track now and then (the first a few seconds after

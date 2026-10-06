@@ -355,6 +355,36 @@ return function(t, shared, require, _server, client)
 		end
 	end)
 
+	t.test("waila: the light level where a mob would stand, coloured for spawning", function()
+		local function text(line): string
+			local parts = {}
+			for _, segment in line do
+				table.insert(parts, segment.text)
+			end
+			return table.concat(parts)
+		end
+		local dark = WailaInfo.lightLine({ block = 0, sky = 0 }, false)
+		t.eq(text(dark), "Light level 0")
+		t.eq(dark[1].colour, "red", "monsters may spawn at any time")
+		local open = WailaInfo.lightLine({ block = 0, sky = 15 }, false)
+		t.eq(text(open), "Light level 15")
+		t.eq(open[1].colour, "yellow", "at night")
+		local torch = WailaInfo.lightLine({ block = 12, sky = 3 }, true)
+		t.eq(text(torch), "Light level 12 (block 12, sky 3)")
+		t.eq(torch[1].colour, "green")
+		-- In the panel after the harvest line; none without the facts (an unloaded cell).
+		local function has(info, wanted: string): boolean
+			for _, line in info.lines do
+				if text(line) == wanted then
+					return true
+				end
+			end
+			return false
+		end
+		t.ok(has(WailaInfo.block(B.Stone, nil, 0, 5, 0, false, { light = { block = 7, sky = 0 } }), "Light level 7"))
+		t.ok(not has(WailaInfo.block(B.Stone, nil, 0, 5, 0, false), "Light level 0"))
+	end)
+
 	t.test("waila: biome names", function()
 		for index, biome in Biomes.list do
 			t.ok(not string.find(WailaInfo.biomeName(index), "%l%u"), `{biome.name} spaced`)

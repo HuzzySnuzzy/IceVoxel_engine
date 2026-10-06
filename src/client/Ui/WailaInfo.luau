@@ -31,6 +31,14 @@
 	            jigsaws: name, target and pool (their records, Net/StructureNet). Creative only
 	            blocks (structure blocks, structure voids, jigsaws) say "Creative only" where
 	            the harvest line goes: survival players can't break them.
+	  light     blocks and fluids: "Light level 7", the light where a mob would stand: the cell on
+	            top of an opaque block, a see-through block's own cell (`lightLine`). It is the
+	            larger of the cell's block light and sky light, as Minecraft's light level, from the
+	            client's estimate (the engine keeps no light map: Ui/Waila asks Audio/CaveMood.
+	            blockLight and Rendering/LightingController.skyLight). Red where block light is 0
+	            and sky light at most 7 (Minecraft 1.18+'s monsters may spawn there at any time),
+	            yellow where block light is 0 under more sky (they may spawn at night), green where
+	            a light source reaches it. The F3 view adds both parts ("block 0, sky 15").
 	  details   players: health and game mode
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
@@ -140,7 +148,12 @@ export type BlockContext = {
 	-- A structure block's or jigsaw's settings, as the server sent them (nil: not known yet).
 	structure: Settings.StructureSettings?,
 	jigsaw: Settings.JigsawSettings?,
+	-- The light where a mob would stand on the block (`lightLine`); nil: not known (unloaded).
+	light: LightFacts?,
 }
+
+-- Minecraft's light parts at a cell, 0..15 each.
+export type LightFacts = { block: number, sky: number }
 
 local WailaInfo = {}
 
@@ -526,6 +539,23 @@ function WailaInfo.fluidLight(block: number): Line?
 	return { segment(`Light {def.light}`, "gold") }
 end
 
+--[[
+	"Light level N" for the light `facts` (N = the larger part, Minecraft's light level), coloured
+	for mob spawning: red with no block light and sky light at most 7 (monsters may spawn at any
+	time), yellow with no block light under more sky (at night), green when a light source reaches
+	it. `extended` (F3) adds the parts.
+]]
+function WailaInfo.lightLine(facts: LightFacts, extended: boolean): Line
+	local block = math.clamp(math.floor(facts.block), 0, 15)
+	local sky = math.clamp(math.floor(facts.sky), 0, 15)
+	local colour: Colour = if block > 0 then "green" elseif sky <= 7 then "red" else "yellow"
+	local line: Line = { segment(`Light level {math.max(block, sky)}`, colour) }
+	if extended then
+		table.insert(line, segment(` (block {block}, sky {sky})`, "gray"))
+	end
+	return line
+end
+
 -- The extended (F3) lines of a machine.
 function WailaInfo.machineDetails(block: number, facts: MachineFacts): { Line }
 	local kind = Machines.kindOf(block)
@@ -752,6 +782,9 @@ function WailaInfo.block(
 	local light = if extended then nil else WailaInfo.fluidLight(block)
 	if light then
 		table.insert(lines, light)
+	end
+	if context and context.light then
+		table.insert(lines, WailaInfo.lightLine(context.light, extended))
 	end
 	-- Mekanism pipes, tanks and machines: what the server says about them.
 	local transmitter = if context and Transmitters.isTransmitter(block) then context.transmitter else nil
