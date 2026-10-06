@@ -916,7 +916,8 @@ return function(t, shared, require, server)
 		t.ok(e.night, "18000 is midnight")
 		t.ok(e.heated and e.nearHeat and e.cooled and e.sprinting)
 		t.eq(e.armorWarmth, 2)
-		t.eq(Temperature.target(e), 2, "plains at night (-2), sprinting, a lit table at 1, ice at 4")
+		-- (The ice would cool 3, but not within NEAR of a heat source: a fire beats the cold around.)
+		t.eq(Temperature.target(e), 5, "plains at night (-2), sprinting, a lit table at 1, ice at 4")
 	end)
 
 	--[[ Protocol ]]

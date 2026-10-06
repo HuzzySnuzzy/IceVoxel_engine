@@ -4,7 +4,7 @@
 	what it uses, for the recipe view (Ui/Jei/RecipeView). Pure: no Roblox APIs, so the tests check
 	it.
 
-	Entries come in six categories, in this order (JEI's tabs):
+	Entries come in seven categories, in this order (JEI's tabs):
 
 	  crafting  Crafting.recipes (the same compiled recipes the grids match): `inputs` is the 3 x 3
 	            display, cells 1..9 row by row, laid out like JEI's CraftingGridHelper (a recipe one
@@ -19,14 +19,17 @@
 	  heating   the Heat Generator's lava (Machines.info: a mB burns 20 ticks, so a bucket burns
 	            20 000 ticks at 200 J/t, 4 MJ: the Lava Bucket's furnace burn time);
 	  combustion  the Combustion Generator's fuel (a mB burns 4 ticks, so a bucket burns 4 000 ticks
-	            at 2.5 kJ/t, 10 MJ).
-	The last three show fluids as fluid stacks (JEI's fluid ingredients). Lookups go by item, so a
+	            at 2.5 kJ/t, 10 MJ);
+	  boiling   Tough As Nails' dirty water boiled clean on a Campfire (ToughAsNails/Boiling, a
+	            right click: Drinks.PURIFIED_OF, `inputs[1]` the dirty water, `output` its purified
+	            twin, BOIL_TEXT under them).
+	Refining and the generators show fluids as fluid stacks (JEI's fluid ingredients). Lookups go by item, so a
 	fluid stands for its bucket and its block (`fluidItems`): "Show uses" of an Oil Bucket or of Oil
 	lists refining, "Show recipes" of a Fuel Bucket too.
 
-	`recipes(item)` lists the entries that make an item (crafting, smelting, refining), `uses(item)`
-	those that take it: as an ingredient (tags included), as a smelting input, as a fuel or as a
-	fluid. A catalyst (CATALYSTS: the block a category's recipes are made in) also uses every entry
+	`recipes(item)` lists the entries that make an item (crafting, smelting, refining, boiling),
+	`uses(item)` those that take it: as an ingredient (tags included), as a smelting or boiling
+	input, as a fuel or as a fluid. A catalyst (CATALYSTS: the block a category's recipes are made in) also uses every entry
 	of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists
 	them. Both return groups by category, only the categories that have entries.
 
@@ -43,10 +46,11 @@ local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Recipes = require(Shared.Crafting.Recipes)
 local Smelting = require(Shared.Crafting.Smelting)
+local Drinks = require(Shared.ToughAsNails.Drinks)
 
 type Stack = Items.Stack
 
-export type Category = "crafting" | "smelting" | "fuel" | "refining" | "heating" | "combustion"
+export type Category = "crafting" | "smelting" | "fuel" | "refining" | "heating" | "combustion" | "boiling"
 export type Mode = "recipes" | "uses"
 
 -- A fluid stack (JEI's fluid ingredient): a Shared/Fluids id and mB.
@@ -77,7 +81,7 @@ export type Group = { category: Category, entries: { Entry } }
 
 local JeiData = {}
 
-JeiData.CATEGORIES = { "crafting", "smelting", "fuel", "refining", "heating", "combustion" } :: { Category }
+JeiData.CATEGORIES = { "crafting", "smelting", "fuel", "refining", "heating", "combustion", "boiling" } :: { Category }
 JeiData.TITLES = {
 	crafting = "Crafting",
 	smelting = "Smelting",
@@ -85,6 +89,7 @@ JeiData.TITLES = {
 	refining = "Refining",
 	heating = "Heat Generator",
 	combustion = "Combustion Generator",
+	boiling = "Campfire",
 } :: { [Category]: string }
 -- The item each category's tab shows (Minecraft's catalysts).
 JeiData.TAB_ITEMS = {
@@ -94,6 +99,7 @@ JeiData.TAB_ITEMS = {
 	refining = "OilRefinery",
 	heating = "HeatGenerator",
 	combustion = "CombustionGenerator",
+	boiling = "Campfire",
 } :: { [Category]: string }
 -- The items each category's recipes are made in (JEI's recipe catalysts), whose uses list them all.
 JeiData.CATALYSTS = {
@@ -105,7 +111,10 @@ JeiData.CATALYSTS = {
 	refining = { "OilRefinery" },
 	heating = { "HeatGenerator" },
 	combustion = { "CombustionGenerator" },
+	boiling = { "Campfire" },
 } :: { [Category]: { string } }
+-- What a boiling entry says under it: how it is done.
+JeiData.BOIL_TEXT = "Right click"
 -- JEI's ingredient cycle: one item per second.
 JeiData.CYCLE_SECONDS = 1
 -- A furnace's smelting time in ticks (one item per 200 ticks: what "burns N items" counts in).
@@ -369,6 +378,22 @@ local function build()
 	for _, entry in fluidEntries() do
 		add(entry)
 	end
+	-- (In item order, so the view lists them the same every time.)
+	local dirty: { number } = {}
+	for item in Drinks.PURIFIED_OF do
+		table.insert(dirty, item)
+	end
+	table.sort(dirty)
+	for _, item in dirty do
+		add({
+			category = "boiling",
+			recipe = nil,
+			inputs = { { item } },
+			output = { item = Drinks.PURIFIED_OF[item], count = 1 },
+			shapeless = false,
+			ticks = 0,
+		})
+	end
 	for name, members in Recipes.tags :: { [string]: { string } } do
 		local ids: { number } = {}
 		for _, member in members do
@@ -401,7 +426,7 @@ local function build()
 	end
 end
 
--- Every entry: crafting recipes, then smelting, then fuels.
+-- Every entry: crafting recipes, then smelting, fuels, the machines' fluids and boiling.
 function JeiData.entries(): { Entry }
 	build()
 	return all
@@ -428,7 +453,7 @@ local function grouped(entries: { Entry }?): { Group }
 	return groups
 end
 
--- What makes `item`: crafting and smelting recipes (JEI's "Show recipes", R).
+-- What makes `item`: crafting, smelting, refining and boiling (JEI's "Show recipes", R).
 function JeiData.recipes(item: number): { Group }
 	build()
 	return grouped(byOutput[item])

@@ -1,16 +1,19 @@
 --!strict
 --[[
-	Fire's flames (BlockList Fire; the shared rules and shapes in Shared/Fire). The terrain draws
-	each fire as an invisible speck carrying its sparse light (ChunkRenderer, GreedyMesher: one
-	PointLight per 8 x 8 x 8 blocks for fire and glow lichen together); this module draws the
-	flames, which depend on the neighbours, within RADIUS blocks of the camera.
+	Fire's flames (BlockList Fire; the shared rules and shapes in Shared/Fire), and a campfire's
+	(BlockList Campfire, always lit). The terrain draws each fire as an invisible speck carrying
+	its sparse light (ChunkRenderer, GreedyMesher: one PointLight per 8 x 8 x 8 blocks for fire and
+	glow lichen together), and a campfire as its logs and glowing embers (its own light); this
+	module draws the flames, which depend on the neighbours, within RADIUS blocks of the camera.
 
 	  Shapes     Minecraft's (Fire.planes of Fire.sides: worked out from the client's blocks, as
 	             Minecraft's getStateForPlacement would): on the floor, template_fire_floor's four
 	             leaning planes, seen from both sides, and one box of the cell's size carrying the
 	             flames of template_fire_side on its four outer faces; clinging to flammable walls
 	             (and a ceiling), a plane on each, facing into the cell. 5 parts and 12 images a
-	             fire on the floor, 1 part and 1 image a side clinging. Parts are thin (THICKNESS),
+	             fire on the floor, 1 part and 1 image a side clinging. A campfire: its two crossed
+	             planes over the logs (Fire.lookAt, Fire.CAMPFIRE_LOOK), 2 parts and 4 images;
+	             both are records here alike (Fire.isFlame). Parts are thin (THICKNESS),
 	             see-through (Transparency 1), never collide, never take queries, touches or audio
 	             collisions and cast no shadow: aiming goes by the voxel ray (Fire.outlineAt).
 	  Images     each face a SurfaceGui (clipping) with one ImageLabel of the user's whole sheet
@@ -29,14 +32,16 @@
 	  Pooling    one template per kind of plane ("double", "front", "box"), its SurfaceGuis inside,
 	             cloned once and reused: a fire going out returns its parts (at most MAX_SPARE
 	             spare), a new one only resizes and moves them.
-	  Which      fires come only from edits (never generated): a chunk's are found in its edit list
+	  Which      fires (and campfires) come only from edits (never generated): a chunk's are found
+	             in its edit list
 	             when its data is loaded (World/ClientWorld onChunkLoaded, knownEdits) and followed
 	             through block changes (onBlockChanged), which also mark the fires next to a changed
 	             block for a new look (a log burnt away under a fire). Every REFRESH_INTERVAL the
 	             nearest MAX_FIRES within RADIUS whose chunk is shown (the streamer's) are drawn,
 	             at most BUILDS_PER_FRAME (re)built a frame.
 
-	Read-only queries: `firesNear` (Audio/Ambience's crackle) and `stats` (drawn fires, parts).
+	Read-only queries: `firesNear` (Audio/Ambience's crackle, campfires' too) and `stats` (drawn
+	fires, parts).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -53,7 +58,7 @@ local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local BLOCK = Config.BlockSize
 local PIXEL = BLOCK / 16
 local SIZE = ChunkLayout.SIZE
-local FIRE = Fire.BLOCK
+local isFlame = Fire.isFlame
 
 --[[ Tunables ]]
 
@@ -83,7 +88,7 @@ type Record = {
 	z: number,
 	key: number,
 	chunk: number,
-	-- Its parts while drawn, and the sides they show (nil: not drawn).
+	-- Its parts while drawn (nil: not drawn), and the look they show (Fire.lookAt).
 	parts: { BasePart }?,
 	sides: number,
 	-- Its neighbours changed since it was built.
@@ -230,9 +235,9 @@ local function getBlock(x: number, y: number, z: number): number?
 	return if w then w:getBlock(x, y, z) else nil
 end
 
--- (Re)draws a fire's flames from its sides now.
+-- (Re)draws a fire's flames from its look now (its sides, or a campfire's).
 local function build(record: Record)
-	local sides = Fire.sides(getBlock, record.x, record.y, record.z)
+	local sides = Fire.lookAt(getBlock, record.x, record.y, record.z)
 	record.dirty = false
 	if record.parts and record.sides == sides then
 		return
@@ -339,9 +344,9 @@ local function touch(x: number, y: number, z: number)
 end
 
 local function onBlockChanged(x: number, y: number, z: number, block: number, previous: number, _predicted: boolean)
-	if block == FIRE then
+	if isFlame(block) then
 		add(x, y, z)
-	elseif previous == FIRE then
+	elseif isFlame(previous) then
 		remove(Coords.posKey(x, y, z))
 	end
 	touch(x, y, z)
@@ -360,10 +365,10 @@ local function onChunkLoaded(cx: number, cz: number, loaded: boolean)
 		local list = w:knownEdits(cx, cz)
 		if list then
 			for index, block in list do
-				if block == FIRE then
+				if isFlame(block) then
 					local lx, y, lz = ChunkLayout.fromLocalIndex(index)
 					local x, z = cx * SIZE + lx, cz * SIZE + lz
-					if w:getBlock(x, y, z) == FIRE then
+					if w:getBlock(x, y, z) == block then
 						add(x, y, z)
 					end
 				end

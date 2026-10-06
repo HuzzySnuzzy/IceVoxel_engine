@@ -31,10 +31,11 @@
 	  2. TAN's modifiers, in steps (MODIFIERS, each kept within -10..10):
 	       wet (in water, or out of it for less than Config.ToughAsNails.WetTicks)           -3
 	       sprinting (the client's sprint flag)                                             +2
-	       a heating block within Config.ToughAsNails.ProximityRadius (lava, fire, a lit
-	       furnace: Players/Climate)                              +3, or +5 within NEAR (2) blocks
+	       a heating block within Config.ToughAsNails.ProximityRadius (lava, fire, a campfire, a
+	       lit furnace: Players/Climate)                          +3, or +5 within NEAR (2) blocks
 	       burning                             +5 (with a heat source too: the larger, not both)
-	       a cooling block in that range (ice, snow)                                         -3
+	       a cooling block in that range (ice, snow), unless a heat source is within NEAR:
+	       sitting by a fire (a campfire), the snow all around a tundra doesn't chill        -3
 	  3. armor insulation (ItemList `tan`, summed over the pieces worn by Players/Climate
 	     .insulation): `warmth` steps pull a target below 0 up towards 0, `cooling` steps pull one
 	     above 0 down towards 0, never past it (insulation keeps the weather out; it neither heats
@@ -258,7 +259,7 @@ function Temperature.target(env: Environment, state: State?): number
 	if heat > 0 then
 		value = clampValue(value + heat)
 	end
-	if env.cooled then
+	if env.cooled and not env.nearHeat then
 		value = clampValue(value + modifiers.cooled)
 	end
 	if value < 0 and env.armorWarmth > 0 then

@@ -64,6 +64,9 @@
 	  Steel         may burn (Fire.canPlaceAt: an empty cell on a sturdy block or next to a
 	                flammable one). Breaking a fire puts it out (it breaks at once). On TNT or a
 	                Nuke, any face: the server lights it (TntBlock.use).
+	Tough As Nails' campfire, after a block's menu: dirty water (a bottle, a canteen) clicked on a
+	Campfire boils clean, one a click (Shared/ToughAsNails/Boiling, the campfire's own use: in
+	adventure too, not sneaking; sent as a UseItem, not predicted).
 	Tough As Nails' water (Interaction/Drinking), after a block's menu and before anything else, in
 	adventure too: a Glass Bottle or a canteen fills at the water source its own ray (stopping at
 	water sources, as a bucket's) finds, an empty hand sips from it, and a filled bottle or canteen
@@ -130,6 +133,7 @@ local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
 local Transmitters = require(Shared.Transmitters)
 local Drinks = require(Shared.ToughAsNails.Drinks)
+local Boiling = require(Shared.ToughAsNails.Boiling)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -862,6 +866,16 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			useSpent = true
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()
+			return
+		end
+		-- Tough As Nails: dirty water on a campfire boils clean (Shared/ToughAsNails/Boiling: the
+		-- campfire's own use, so in adventure too, not sneaking), before drinking would take the
+		-- click. Not predicted: the inventory snapshot brings the purified water.
+		if hit and ray and Boiling.applies(hit.block, stack, mode, sneaking) then
+			if sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking) then
+				useSpent = true
+				swing()
+			end
 			return
 		end
 		-- Tough As Nails (Interaction/Drinking): drinking a bottle or canteen (held), filling one or

@@ -165,16 +165,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   steps towards what the place says, a step every 7 s (3.5 s back towards neutral): the biome
   (tundra -10, taiga -4, plains 0, jungle 7, desert 9), colder high up and outdoors at night,
   milder under a roof, neutral deep underground; being wet cools 3 steps, sprinting warms 2,
-  lava, fire, a lit furnace or a working generator within 5 blocks warm 3 (5 within 2 blocks),
-  ice and snow cool 3, and armor insulates (leather: a step a piece towards neutral, and no
-  freezing). Icy for 20 s freezes you (half a heart every 5 s), hot overheats you the same way
-  and makes you sweat, so the harshest cold takes over 3 minutes to kill from neutral; a
-  drink can give Internal Warmth or Chill, which hold the cold or the heat off. Joining gives
-  5 minutes of Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at
-  half the rate and doesn't hurt. Frost or heat closes in from the screen's edges, and a
-  thermometer over the droplets shows the temperature, coloured by zone, with an arrow for
-  where it is going, the clemency's time left and the effects above it. Creative and spectator
-  players are untouched. `Config.ToughAsNails` turns thirst or temperature off.
+  lava, fire, a campfire, a lit furnace or a working generator within 5 blocks warm 3 (5 within
+  2 blocks), ice and snow cool 3 (not that close to a fire), and armor insulates (leather and
+  straw warm a step a piece towards neutral, leather stops freezing too; leaves cool a step).
+  Icy for 20 s freezes you (half a heart every 5 s), hot overheats you the same way and makes
+  you sweat, so the harshest cold takes over 3 minutes to kill from neutral; a drink can give
+  Internal Warmth or Chill, which hold the cold or the heat off. Joining gives 5 minutes of
+  Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at half the rate
+  and doesn't hurt. Frost or heat closes in from the screen's edges, and a thermometer over the
+  droplets shows the temperature, coloured by zone, with an arrow for where it is going, the
+  clemency's time left and the effects above it. Creative and spectator players are untouched.
+  `Config.ToughAsNails` turns thirst or temperature off.
 - **Herbs, bowls and teas (Tough As Nails).** Two herbs grow wild in rare small patches (about 4
   plants, some 30 blocks apart on open ground): **Mint** on plains, in meadows and jungles, and
   **Wild Ginger** under the trees of forests, birch forests and taigas, so the cold biomes have a
@@ -190,6 +191,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   warm, never hot), Ginger Tea (2 minutes of Internal Warmth: a tundra's cold stays cold, never
   icy) and Herbal Tea with both herbs (8 thirst, a minute of each). Everything shows in JEI, WAILA
   and the creative inventory.
+- **Gear for the cold and the heat (Tough As Nails).** The **Campfire** (Minecraft's: three sticks
+  round a coal or charcoal over three logs) is always lit: light 15, glowing embers under fire's
+  animated flames, crackling. It warms 3 steps within 5 blocks and 5 within 2, and that close it
+  outweighs the snow and ice around (a tundra's -10 is -5 by the fire, cold but safe); walking
+  into it costs half a heart every half second (armor softens it) without setting you alight. It
+  drops itself (no Silk Touch here), so it can be moved. Right click it with dirty water to boil
+  it clean, a bottle, bowl or canteen a click (a canteen keeps its sips; JEI lists it as
+  "Campfire").
+  **Straw** comes from grass broken without Shears (short grass half the time, tall grass always)
+  and makes **Straw armor** in the armor shapes (24 for a set), a step of warmth a piece: a full
+  set holds a tundra at -6 by day and by night, out of the ice (three pieces just about). **Leaf
+  armor** (any leaves, which Shears harvest) cools a step a piece: a desert's 9 becomes 5. Both
+  have leather's armor points. A **Thermometer** (an iron nugget over glass over glow dust) held
+  in the hand reads the body temperature and where it is going as numbers over the gauge.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -723,6 +738,7 @@ Studio tips:
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
 | Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle, a Bowl or a canteen: fill it; hold right click with a filled bottle, bowl or canteen or a tea for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
+| Boil water    | Right click a Campfire with a dirty water bottle, bowl or canteen: one boils clean (not sneaking; Tough As Nails) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker; spectator: none) | Y   | `…` button |
@@ -859,7 +875,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             in five zones, the target, the drift, hypothermia and hyperthermia,
                             Internal Warmth and Chill, Climate Clemency), Drinks (water sources,
                             the container tables: bottles, canteens, bowls; the teas), Exertion
-                            (movement that costs thirst)
+                            (movement that costs thirst), Boiling (dirty water boiled clean on a
+                            campfire)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
@@ -945,7 +962,8 @@ src/server   -> ServerScriptService.IceVoxel
                             replication, ServerStorage), StructureServer (SAVE, LOAD, DETECT,
                             Generate; pure), StructureStore (their settings), Placement (LOAD and
                             Generate plans, placed over frames), Permission (who may use them)
-  Players/ItemUse           the Configurator and buckets used on blocks (UseItem)
+  Players/ItemUse           the Configurator, buckets, flint and steel and dirty water (on a
+                            campfire) used on blocks (UseItem)
   Players/                  GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
@@ -953,10 +971,11 @@ src/server   -> ServerScriptService.IceVoxel
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage, invulnerability, suffocation, lava and burning, explosions),
-                            Burning (lava hurting and burning players and items, the hurt
-                            cooldown explosions share; pure), ToughAsNails (thirst and body
-                            temperature: ticks, drinking, exertion, the HUD's state) + Climate
-                            (the surroundings: biome, roof, heat and cold sources; pure),
+                            Burning (lava, fire and campfires hurting and burning players and
+                            items, the hurt cooldown explosions share; pure), ToughAsNails
+                            (thirst and body temperature: ticks, drinking, exertion, the HUD's
+                            state) + Climate (the surroundings: biome, roof, heat and cold
+                            sources; pure),
                             Spawning,
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
@@ -1019,7 +1038,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             overlay in first person), SurvivalState (Tough As Nails' state from
                             the server), Exertion (reports sprinting, swimming and jumps)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
-  Rendering/FireRenderer    fire's animated flames (SurfaceGui planes, one shared animation step)
+  Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
+                            animation step)
   Rendering/FuseView        lit TNT and Nukes flashing
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
                             tanks, items moving through transporters, the windows of working
@@ -1121,7 +1141,7 @@ for performance:
 | `ToughAsNails.ChangeTicks` / `RecoverTicks` | 140 / 70 | Ticks per step of the body temperature (-10..10) away from neutral / back towards it (neutral to icy: 56 s in the coldest place). |
 | `ToughAsNails.ClemencyTicks` / `RespawnClemencyTicks` | 6000 / 1200 | Climate Clemency on joining / respawning: the temperature held neutral, half the thirst drain, no dehydration (0: none). |
 | `ToughAsNails.WetTicks` | 100 | Ticks a player stays wet out of water (3 steps colder). |
-| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
+| `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire, Campfire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
@@ -1790,16 +1810,16 @@ way in `Players/ToughAsNails`):
 
 ```lua
 local Climate = require(game.ServerScriptService.IceVoxel.Players.Climate)
-Climate.addHeatSource("Campfire", function(x, y, z, block)
+Climate.addHeatSource("Brazier", function(x, y, z, block)
 	return isLit(x, y, z)
 end)
 Climate.addColdSource("PowderSnow")
 ```
 
 A source counts within `ProximityRadius` blocks of the player's feet (a cube), checked once a
-second, and warms 3 steps (5 when one is within 2 blocks) or cools 3, however many there are. A
-name no block has yet is skipped with a warning, so `"Campfire"` can go into `HeatingBlocks`
-before the block exists.
+second, and warms 3 steps (5 when one is within 2 blocks, and then cold sources don't cool) or
+cools 3, however many there are. A name no block has yet is skipped with a warning, so a block
+can go into `HeatingBlocks` before it exists (the Campfire is listed there).
 
 **Drinks and containers (Tough As Nails).** `Shared/ToughAsNails/Drinks` reads three tables:
 `ITEMS` (a full item: its drink, the empty container it leaves, `sips` for a canteen), `FILLS` (an
@@ -1824,11 +1844,16 @@ A drink of its own (the teas, a juice) is an `ITEMS` entry with a `Drink` and th
 leaves (`[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl })`); `warmth` /
 `chill` ticks give TAN's Internal Warmth / Internal Chill, which move the temperature target 5
 steps towards neutral without pushing it past neutral (`Drinks.MINT_TEA` has `chill = 2400`).
+Every `PURIFIED_OF` pair also boils clean on a Campfire (`ToughAsNails/Boiling`) and shows in
+JEI's Campfire tab, with nothing more to add.
 
 **Insulating armor (Tough As Nails).** An armor piece's `tan = { warmth = n, cooling = n,
 freezeImmune = true }` in ItemList: `warmth` steps pull a cold target up towards 0, `cooling`
 steps pull a hot one down, never past it; `freezeImmune` stops hypothermia (leather has it). A
-full set at 2 a piece keeps a tundra (-10) neutral (-2).
+full set at 2 a piece keeps a tundra (-10) neutral (-2); straw (warmth 1) and leaf (cooling 1)
+sets are made the same way, from `INSULATING_ARMOR` at the end of ItemList (a material entry:
+name, colour, material, points, toughness and `tan`; new materials go there, never into the
+`ARMOR` table at the top, whose ids must not move).
 
 **Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
 leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values
@@ -1857,9 +1882,10 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,269 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,316 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
-has TexturePack, TextureLooks and FarLooks; fire has Fire).
+has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
+and SurvivalGear).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

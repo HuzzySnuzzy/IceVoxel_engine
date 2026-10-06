@@ -452,6 +452,8 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	local lines: { string } = {}
 	if entry.category == "smelting" then
 		lines = { JeiData.smeltText(entry.ticks) }
+	elseif entry.category == "boiling" then
+		lines = { JeiData.BOIL_TEXT }
 	elseif entry.category == "fuel" then
 		lines = { JeiData.fuelText(entry.ticks), JeiData.smeltText(entry.ticks) }
 	elseif entry.fluidInputs then
@@ -460,7 +462,9 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	for i, text in lines do
 		local r = layout.texts[i]
 		if r then
-			local align = if entry.category == "smelting" then Enum.TextXAlignment.Right else Enum.TextXAlignment.Left
+			local align = if entry.category == "smelting" or entry.category == "boiling"
+				then Enum.TextXAlignment.Right
+				else Enum.TextXAlignment.Left
 			Style.text(frame, text, r.x, r.y, r.w, r.h, Style.Colour.Title, 5, align)
 		end
 	end

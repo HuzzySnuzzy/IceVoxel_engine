@@ -35,6 +35,12 @@
 	                * clinging, template_fire_side's plane against each flammable wall (16 x
 	                  22.4, 0.01 pixels off it), facing into the cell, and template_fire_up's
 	                  under a flammable ceiling, facing down.
+	              A campfire (BlockList Campfire, always lit) has flames too: campfire.json's two
+	              planes, 16 pixels tall from a pixel above the floor, crossing diagonally through
+	              the middle (14.4 wide along a side, turned 45 degrees about the vertical and
+	              rescaled by 1 / cos 45, so 20.4 wide), seen from both sides. `isFlame` is fire
+	              or a campfire, `lookAt` the look of either (a campfire's is CAMPFIRE_LOOK, past
+	              the flags), and `planes(CAMPFIRE_LOOK)` its planes.
 	              Each plane has a `size` (width, height; the depth is the renderer's), an
 	              `offset`, an `orientation` (degrees, Roblox's YXZ order: CFrame.fromOrientation)
 	              and its `faces`: "double" (Front and Back), "front" (Front only, the face along
@@ -63,6 +69,8 @@ export type Plane = {
 local Fire = {}
 
 Fire.BLOCK = Blocks.id.Fire
+-- The campfire, whose flames are drawn like fire's (see the header).
+Fire.CAMPFIRE = Blocks.id.Campfire
 -- Minecraft's FireBlock.MAX_AGE.
 Fire.MAX_AGE = 15
 
@@ -72,6 +80,8 @@ Fire.EAST = 2
 Fire.SOUTH = 4
 Fire.WEST = 8
 Fire.UP = 16
+-- The look of a campfire's flames (`lookAt`, `planes`): past every combination of the flags.
+Fire.CAMPFIRE_LOOK = 32
 -- Each flag's neighbour, in Minecraft's Direction order (PROPERTY_BY_DIRECTION).
 local SIDES: { { number } } = {
 	{ Fire.NORTH, 0, 0, -1 },
@@ -101,6 +111,7 @@ Fire.TICK_RATE = 20
 
 local AIR, CAVE_AIR = Blocks.AIR, Blocks.CAVE_AIR
 local FIRE = Fire.BLOCK
+local CAMPFIRE = Fire.CAMPFIRE
 
 --[[ Burning ]]
 
@@ -305,9 +316,36 @@ for flags = 1, 31 do
 	planeLists[flags] = table.freeze(list)
 end
 
--- The planes a fire clinging to `sides` is drawn with (see the header). Read only.
+-- campfire.json's flames (see the header): two planes crossing diagonally, from a pixel above
+-- the floor to 17.
+local CAMPFIRE_WIDTH = 14.4 / math.cos(math.rad(45))
+planeLists[Fire.CAMPFIRE_LOOK] = table.freeze({
+	{ size = { CAMPFIRE_WIDTH, 16 }, offset = { 0, 1, 0 }, orientation = { 0, 45, 0 }, faces = "double" },
+	{ size = { CAMPFIRE_WIDTH, 16 }, offset = { 0, 1, 0 }, orientation = { 0, -45, 0 }, faces = "double" },
+} :: { Plane })
+
+--[[
+	The planes a fire clinging to `sides` is drawn with, or a campfire's for CAMPFIRE_LOOK (see
+	the header). Read only.
+]]
 function Fire.planes(sides: number): { Plane }
 	return planeLists[sides] or planeLists[0]
+end
+
+-- Does `block` show flames (fire or a campfire)?
+function Fire.isFlame(block: number?): boolean
+	return block == FIRE or block == CAMPFIRE
+end
+
+--[[
+	The look of the flames at (x, y, z), for `planes`: a campfire's CAMPFIRE_LOOK, else the sides
+	the fire there clings to (`sides`).
+]]
+function Fire.lookAt(getBlock: GetBlock, x: number, y: number, z: number): number
+	if getBlock(x, y, z) == CAMPFIRE then
+		return Fire.CAMPFIRE_LOOK
+	end
+	return Fire.sides(getBlock, x, y, z)
 end
 
 --[[ Animation ]]

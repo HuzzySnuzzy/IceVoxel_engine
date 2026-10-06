@@ -24,14 +24,14 @@
 
 	Heat and cold sources (TAN's heating_blocks and cooling_blocks tags): Config.ToughAsNails
 	.HeatingBlocks and .CoolingBlocks, by fluid name (every level of the fluid and its cave twin:
-	"Lava") or block name ("Fire", "Ice"). A name no block or fluid has is skipped with a warning,
-	so a block can be named before it exists (a "Campfire" in HeatingBlocks warms from the moment
-	BlockList has one). Blocks that warm only in some state register a check
-	(`addHeatSource(block, check)`: a furnace while lit, a generator while working;
-	Players/ToughAsNails registers those), and anything else may add its own the same way, e.g. a
-	campfire that is lit only sometimes: `Climate.addHeatSource("Campfire", isLit)`. A check runs
-	only for a block of its kind within range, once a second per player, and never for one
-	farther than the nearest source found so far.
+	"Lava") or block name ("Fire", "Campfire", "Ice"). A name no block or fluid has is skipped with
+	a warning, so a block can be named before it exists (it warms from the moment BlockList has
+	one). Blocks that warm only in some state register a check (`addHeatSource(block, check)`: a
+	furnace while lit, a generator while working; Players/ToughAsNails registers those), and
+	anything else may add its own the same way, e.g. a brazier that is lit only sometimes:
+	`Climate.addHeatSource("Brazier", isLit)`. A check runs only for a block of its kind within
+	range, once a second per player, and never for one farther than the nearest source found so
+	far. (Within Temperature.NEAR of a heat source, the cold sources around no longer cool.)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

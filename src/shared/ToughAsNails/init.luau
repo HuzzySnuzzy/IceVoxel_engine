@@ -10,6 +10,8 @@
 	  Drinks        what is drunk (water sources, dirty and purified bottles and canteens) and how
 	                containers fill and empty (data tables: new containers and drinks are entries)
 	  Exertion      movement measured by the client for thirst (sprinting, swimming, jumps)
+	  Boiling       dirty water boiled clean on a campfire (the gear for the climate: the
+	                Campfire, Straw and Leaf armor and the Thermometer are BlockList / ItemList's)
 
 	The server runs them (Players/ToughAsNails, its surroundings from Players/Climate) and sends
 	each player their own state (Protocol Survival), which the HUD draws (client Ui/SurvivalHud:
@@ -28,6 +30,7 @@ local Thirst = require(script.Thirst)
 local Temperature = require(script.Temperature)
 local Drinks = require(script.Drinks)
 local Exertion = require(script.Exertion)
+local Boiling = require(script.Boiling)
 
 local ToughAsNails = {}
 
@@ -35,6 +38,7 @@ ToughAsNails.Thirst = Thirst
 ToughAsNails.Temperature = Temperature
 ToughAsNails.Drinks = Drinks
 ToughAsNails.Exertion = Exertion
+ToughAsNails.Boiling = Boiling
 
 -- Do thirst and temperature run for a player in game `mode`?
 function ToughAsNails.affects(mode: string): boolean

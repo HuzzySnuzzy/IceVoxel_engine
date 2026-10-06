@@ -18,7 +18,8 @@
 	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
 	             droplets on the right level with the hearts, the temperature thermometer above
 	             them (level with the armor), Climate Clemency's time left and the warmth and
-	             chill effects above that, and frost or heat closing in from the screen's edges.
+	             chill effects above that, the numbers a held Thermometer reads above those, and
+	             frost or heat closing in from the screen's edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu
 
@@ -529,7 +530,7 @@ function Hud.start()
 		if armorRow.Visible ~= (points > 0) then
 			armorRow.Visible = points > 0
 		end
-		SurvivalHud.render(now, survival)
+		SurvivalHud.render(now, survival, if held then held.item else nil)
 		if not survival then
 			return
 		end

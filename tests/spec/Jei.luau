@@ -861,4 +861,38 @@ return function(t, shared, require, _server, client)
 		end
 		t.ok(planned > 100, `enough transfers tried ({planned} planned, {refused} refused)`)
 	end)
+
+	t.test("jei: boiling on the Campfire (Tough As Nails), its catalyst", function()
+		local Drinks = require(shared.ToughAsNails.Drinks)
+		local twins = 0
+		for _ in Drinks.PURIFIED_OF do
+			twins += 1
+		end
+		local count = 0
+		for _, entry in JeiData.entries() do
+			if entry.category == "boiling" then
+				count += 1
+				t.eq(#entry.inputs[1], 1, "one dirty water")
+				t.eq(entry.output and entry.output.item, Drinks.purifiedOf(entry.inputs[1][1]), "into its twin")
+			end
+		end
+		t.eq(count, twins, "one per Drinks.PURIFIED_OF pair")
+		same(
+			categories(JeiData.recipes(id.PurifiedWaterBottle)) :: any,
+			{ "crafting", "smelting", "boiling" } :: any,
+			"purified water: the mint cure, smelting and boiling"
+		)
+		local dirty = JeiData.uses(id.DirtyWaterCanteen)
+		t.ok(find(dirty, "boiling", makes(id.PurifiedWaterCanteen)), "a dirty canteen boils")
+		local campfire = JeiData.uses(id.Campfire)
+		same(categories(campfire) :: any, { "boiling" } :: any, "the campfire's uses: every boiling")
+		t.eq(#campfire[1].entries, twins)
+		same(
+			categories(JeiData.recipes(id.Campfire)) :: any,
+			{ "crafting" } :: any,
+			"the campfire is crafted (Minecraft's recipe)"
+		)
+		t.eq(JeiData.TITLES.boiling, "Campfire")
+		t.eq(JeiLayout.entry("boiling"), JeiLayout.entry("smelting"), "drawn as smelting")
+	end)
 end

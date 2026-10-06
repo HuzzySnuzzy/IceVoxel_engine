@@ -187,7 +187,8 @@ return function(t, shared, require, server, client)
 		local nuke = Crafting.match(grid({ T, T, T, T, D, T, T, T, T }), 3) :: any
 		t.ok(nuke ~= nil, "eight TNT around a diamond block")
 		t.eq(nuke.item, I.Nuke)
-		t.ok(I.Gunpowder > I.FlintAndSteel, "appended after Flint and Steel")
+		-- (Appended after Flint and Steel; the newest item is pinned in tests/spec/Items.)
+		t.ok(I.Gunpowder > I.FlintAndSteel, "gunpowder came after flint and steel")
 	end)
 
 	--[[ Lighting ]]

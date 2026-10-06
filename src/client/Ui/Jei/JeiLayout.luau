@@ -24,6 +24,8 @@
 	                 refining  150 x 36: the oil (a fluid stack), an arrow filling over the time a
 	                           bucket takes, the fuel, two lines of text right of them
 	                 heating, combustion  150 x 36: as fuel, with the fluid stack under the flame
+	                 boiling   as smelting (the dirty water over the campfire's flame, the arrow,
+	                           the purified water), "Right click" under them
 
 	A slot's (x, y) is its item's top left corner, as in MenuLayout (the frame is one pixel up and
 	left, a large frame five).
@@ -183,6 +185,7 @@ JeiLayout.ENTRIES = {
 	refining = REFINING,
 	heating = GENERATOR,
 	combustion = GENERATOR,
+	boiling = SMELTING,
 } :: { [string]: EntryLayout }
 
 function JeiLayout.entry(category: string): EntryLayout

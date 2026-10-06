@@ -288,8 +288,9 @@ return function(t, shared, require)
 	-- tanks, machines (the solar panel too), structure blocks, structure voids, jigsaws and the
 	-- Glow Block.
 	local never: { [number]: boolean } = {}
-	-- (Fire: its animated flames are drawn by its own renderer, not the pack.)
-	for _, base in { B.Torch, B.Lantern, B.Fire } do
+	-- (Fire: its animated flames are drawn by its own renderer, not the pack; the campfire is
+	-- shaped boxes like a lantern, its flames fire's.)
+	for _, base in { B.Torch, B.Lantern, B.Fire, B.Campfire } do
 		for _, id in Blocks.variants(base) do
 			never[id] = true
 		end
@@ -569,8 +570,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			169,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs)"
+			170,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}

@@ -700,10 +700,32 @@ SoundList.ARMOR = {
 	{ prefix = "Iron", sound = "item.armor.equip_iron" },
 	{ prefix = "Gold", sound = "item.armor.equip_gold" },
 	{ prefix = "Diamond", sound = "item.armor.equip_diamond" },
+	-- (Tough As Nails' straw and leaf armor: soft, like leather.)
+	{ prefix = "Straw", sound = "item.armor.equip_leather" },
+	{ prefix = "Leaf", sound = "item.armor.equip_leather" },
 } :: { { prefix: string, sound: string } }
 SoundList.ARMOR_DEFAULT = "item.armor.equip_generic"
 
 -- A hurting landing of more half hearts than this sounds big.
 SoundList.SMALL_FALL_MAX = 4
+
+--[[
+	Tough As Nails' campfire (BlockList Campfire, Shared/ToughAsNails/Boiling): dirty water held
+	over it boils clean with a bubbling hiss (block.campfire.boil, this game's: Minecraft's
+	campfire cooks food, it boils nothing), from the server (Players/ItemUse) at the campfire. The
+	campfire's crackle is fire's (block.fire.ambient, Audio/Ambience). Stand-in: the splash pitched
+	up and cut short; give a Sound of the event's name to use a real one (README, "Sounds").
+]]
+table.insert(SoundList.EVENTS, {
+	name = "block.campfire.boil",
+	id = SPLASH,
+	volume = 0.5,
+	pitch = 1.3,
+	pitchVariance = 0.1,
+	duration = 0.6,
+	fallback = { id = FALLING, pitch = 2.4 },
+	source = "blocks",
+	side = "server",
+})
 
 return SoundList

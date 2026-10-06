@@ -412,10 +412,11 @@ return function(t, shared, require, server)
 			t.eq(if drop then `{Items.get(drop.item).name} x{drop.count}` else nil, expected, `x = {x} drop`)
 			t.eq(worn, wear, `x = {x} wear`)
 		end
-		-- Tall grass: 2 short grass with Shears, from either half; nothing by hand; Shears wear 1.
+		-- Tall grass: 2 short grass with Shears, from either half; by hand a Straw (Items.strawDrop:
+		-- always from tall grass); Shears wear 1.
 		check(0, FLOOR + 1, false, SHEARS, "ShortGrass x2", 1)
 		check(2, FLOOR, false, SHEARS, "ShortGrass x2", 1)
-		check(4, FLOOR + 1, false, nil, nil, 0)
+		check(4, FLOOR + 1, false, nil, "Straw x1", 0)
 		check(6, FLOOR + 1, true, SHEARS, nil, 0)
 		-- A sunflower: itself from either half, whatever the tool; never in creative.
 		check(8, FLOOR + 1, false, nil, "Sunflower x1", 0)
