@@ -33,9 +33,9 @@
 	             ticks on one block, from its first (`hitTick`).
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
 	             (CRACKLE_CHANCE per tick), and so does a burning Heat Generator within
-	             CRACKLE_RANGE blocks (`crackles`); caves rumble now and then (`caveDelay`); lava
-	             open to the air pops and bubbles (`lavaTick`: Minecraft's random display ticks,
-	             sampled).
+	             CRACKLE_RANGE blocks (`crackles`); lava open to the air pops and bubbles
+	             (`lavaTick`: Minecraft's random display ticks, sampled). The cave mood is
+	             Audio/CaveMood's.
 	  fluids     only fluids one swims in (Fluids `swim`: water, fuel) splash and make swim
 	             sounds; lava and oil are silent to move through, as Minecraft's lava.
 ]]
@@ -479,16 +479,6 @@ local CRACKLING: { [string]: boolean } = {
 -- Does the machine `block` crackle like a lit furnace while it works?
 function SoundRules.crackles(block: number): boolean
 	return Blocks.isValid(block) and CRACKLING[Blocks.get(block).name] == true
-end
-
--- Caves: the rumble comes when the sky light reaching the camera is below CAVE_EXPOSURE, every
--- CAVE_MIN to CAVE_MAX seconds spent there (time above ground counts back down).
-SoundRules.CAVE_EXPOSURE = 0.2
-SoundRules.CAVE_MIN, SoundRules.CAVE_MAX = 90, 300
-
--- Seconds underground before the next cave rumble, for a random roll in [0, 1).
-function SoundRules.caveDelay(roll: number): number
-	return SoundRules.CAVE_MIN + (SoundRules.CAVE_MAX - SoundRules.CAVE_MIN) * roll
 end
 
 --[[

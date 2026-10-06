@@ -631,7 +631,12 @@ return function(t, shared, require, _server, client)
 		for _, fluid in Fluids.list do
 			t.ok(Sounds.find(fluid.fillSound) ~= nil and Sounds.find(fluid.emptySound) ~= nil, `{fluid.name}'s buckets`)
 		end
-		t.eq(SoundList.EVENTS[#SoundList.EVENTS].name, "entity.generic.extinguish_fire", "appended at the end")
+		-- (The cave moods follow, built from MusicList.)
+		t.eq(
+			SoundList.EVENTS[#SoundList.EVENTS - #SoundList.MOODS].name,
+			"entity.generic.extinguish_fire",
+			"appended at the end"
+		)
 
 		-- A lava sea at y 10 under air, and a random that always rolls 0: every sample lands on the
 		-- listener's block, so the sea pops and bubbles at the odds' first roll.

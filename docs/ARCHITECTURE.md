@@ -1760,7 +1760,8 @@ global shadows (Technology cannot be set from scripts). Near opaque parts cast s
   Config's own).
 
 With `Lighting.Enabled = false` it writes only `ClockTime`, but still works out the sky exposure
-below: the cave rumble (`Audio/Ambience`) and F3 read it.
+below: the music (`Audio/Music`: surface or cave), the cave mood's sky light (`skyLight`) and F3
+read it.
 
 **Underground.** Roblox's sky occlusion probably does not reach far enough for caves hundreds of
 blocks deep. So the sky's light (outdoor ambient, sun, sky box) also fades with the camera's depth
@@ -3401,7 +3402,10 @@ Sounds are Minecraft's sound events, played with files that ship with every Robl
 events first (`Blocks.SOUND_TYPES` x the five actions), then SoundList's list, in a fixed order,
 so the server and clients agree on the numbers without sending names. Each event has a file, a
 volume and pitch (final: Sound.Volume and PlaybackSpeed), a random pitch variance, the distance it
-carries (16 blocks), the volume setting it follows (`source`), and who plays it (`side`).
+carries (16 blocks), the volume setting it follows (`source`), and who plays it (`side`). The list
+ends with the cave moods, built from `Sounds/MusicList.Moods` (`ambient.cave.mood1`..., category
+`ambient.cave`, client side, volume 0.5, falling back on the stand-in wind; `Sounds.MOODS`); the
+music is not in the catalogue (Audio/Music plays it, following the `music` source volume).
 - Blocks have a sound type (`sound`, else by material: Wood wood, Ground gravel as Minecraft's
   dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type has a dig clip
   (break, place) and a step clip (step, hit, fall), scaled per action like Minecraft (break and
@@ -3435,7 +3439,7 @@ carries (16 blocks), the volume setting it follows (`source`), and who plays it 
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
 | `predicted` | block break / place / fall, player small / big fall        | the acting client at once; the server sends everyone else |
 | `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish | the server sends everyone near, the player included |
-| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave ambience, lava pop and ambient | clients only, never sent |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient | clients only, never sent |
 
 **The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
 within the event's distance (times a volume above 1, at most 2.55) plus `Sounds.BroadcastSlack`
@@ -3472,8 +3476,9 @@ client's own sounds, which play at once as Minecraft's client does.
 - Playback (`SoundRules.playback`):
   - Volume: the event's (or the override's) x the cue's x `Sounds.Volume` x the source's, the last
     two each times the player's Music & Sounds volume (`setPlayerSettings`). The player's
-    Footsteps, Interface Clicks and Cave Rumble switches only turn off what `Config.Sounds` has on
-    (`SoundPlayer.allows`).
+    Footsteps, Interface Clicks and Cave Moods switches only turn off what `Config.Sounds` has on
+    (`SoundPlayer.allows`). `sourceVolume(source)` gives that product for a source alone (the
+    music's).
   - Pitch: the event's pitch (or the override's PlaybackSpeed), varied by the event's variance,
     x the cue's.
   - Linear rolloff from `MinDistance` to `maxDistance x max(1, cue volume)` blocks.
@@ -3513,8 +3518,53 @@ What the client plays itself:
     and 667 within 32, and lava pops one time in 100 and bubbles one in 200; here LAVA_SAMPLES (24)
     of each a tick stand for those 667, with the odds scaled to match: the same sounds on average
     for 48 block reads a tick instead of 1,334 (volume x 0.2-0.4, pitch x 0.9-1.05);
-  - under `skyExposure` 0.2: `ambient.cave` every 90 to 300 seconds spent there, from up to 8
-    blocks each way around the listener.
+  - Minecraft's cave mood (`Audio/CaveMood`, pure; `BiomeAmbientSoundsHandler` with the
+    overworld's `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`: ambient.cave, tick delay 6000, search
+    extent 8, sound offset 2), every game tick:
+    - one block is picked at `floor(eyes + nextInt(17) - 8)` on each axis;
+    - its sky light s > 0: mood −= s / 15 × 0.001; else mood −= (block light − 1) / 6000;
+    - at mood ≥ 1: a random `Sounds.MOODS` event (`ambient.cave.mood<N>`, from MusicList.Moods;
+      the stand-in `ambient.cave` while there are none) plays at the eyes + the direction to the
+      block's centre × (its distance + 2), and the mood is 0 again; else it stays ≥ 0.
+    - The light is estimated, as the engine keeps no light map. Sky light
+      (`SkyExposure.skyLight`, through `LightingController.skyLight` with its cached natural
+      ground): 0 in an opaque block, 15 where nothing opaque is above, else 15 less the steps
+      (a block face each, a diagonal two) to the nearest cell open to the sky along the 16 rays,
+      within a 512-cell budget. Block light (`CaveMood.blockLight`): breadth first through open
+      cells from the block, a source's light less one a face, an opaque block its own light only,
+      at most 256 open cells (a whole tunnel, a few blocks around in a big cavern), with no
+      allocations (flat frontier lists and a stamped visit buffer). About 0.2 ms a tick
+      interpreted on generated caves.
+    - It counts whatever the switches say (F3's `mood N%`); Config.Sounds.Ambient and the Cave
+      Moods setting only keep it quiet.
+
+**Music** (`Audio/Music`, rules in `Audio/MusicRules`, tracks in `Sounds/MusicList`):
+- Minecraft's MusicManager with the surface and caves as its situations. `MusicRules.step`
+  (every frame) and `ended` (reported back) make a pure state machine:
+  - **place**: "cave" once `LightingController.skyExposure()` has been under `CaveExposure` (0.2)
+    for `SwitchSeconds` (5), "surface" once over `SurfaceExposure` (0.5) as long; between the two
+    it stays.
+  - **waits**: `FirstDelay` (5 s, Minecraft's 100 ticks) after joining, then `MinDelay` to
+    `MaxDelay` (600 to 1200 s, music.game's 12000 to 24000 ticks) after a track finishes, and at
+    most `SwitchDelay` (3 s) after one fades out or fails to load.
+  - **a place change**: a track of the other kind gets a `fade` action (Minecraft's
+    replaceCurrentMusic), and the wait drops to at most `SwitchDelay`.
+  - **starts**: a track of the place's kind, at random, never the last one of that kind (unless
+    it is the only one left) nor a failed one, and never while the exposure already says the
+    other place.
+- One Sound (SoundService.IceVoxelMusic), flat and not looped, plays it:
+  - its file is preloaded first; one that fails, or hasn't loaded after `LoadTimeout` (20 s), is
+    reported failed and skipped from then on;
+  - a fade takes `FadeSeconds` (4);
+  - its volume is `Music.Volume` (0.5) × `SoundPlayer.sourceVolume("music")` × the fade;
+  - nothing new starts while that volume is 0, so nothing downloads.
+- When a track starts, `Ui/MusicToast` shows its title: the MusicList `Title`, else the asset's
+  name from `MarketplaceService:GetProductInfo` (asked once a track), else "Unknown Track". The
+  toast is Minecraft's 160 × 32 panel (a music disc, "Now Playing" in yellow, the title cut with
+  "..." to fit), tweened in from the right edge and back out after `ToastSeconds` (5). It sits
+  under the minimap and its coordinates line while the minimap shows (`setMinimapShown`), and is
+  scaled by `Style.guiScale`. A newer toast replaces it.
+- Settings: Music (id 35, a source volume) and Music Toasts (id 36), both "audio" effects.
 
 ## Networking (`Net/Protocol`)
 

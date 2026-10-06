@@ -38,7 +38,9 @@
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
 	                             swimming, landings), Ambience (a lit furnace, Heat or
-	                             Combustion Generator, lava, caves)
+	                             Combustion Generator, lava, Minecraft's cave mood: CaveMood),
+	                             Music (surface and cave tracks, Minecraft's timing: MusicRules)
+	  Ui/MusicToast              the "Now Playing" toast in the top right corner
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
@@ -86,6 +88,8 @@ local Map = require(Client.Map)
 local SoundPlayer = require(Client.Audio.SoundPlayer)
 local MovementSounds = require(Client.Audio.MovementSounds)
 local Ambience = require(Client.Audio.Ambience)
+local Music = require(Client.Audio.Music)
+local MusicToast = require(Client.Ui.MusicToast)
 local Settings = require(Client.Settings)
 local SettingsScreen = require(Client.Ui.SettingsScreen)
 local Hud = require(Client.Ui.Hud)
@@ -130,16 +134,19 @@ Settings.register("audio", function(values)
 		players = volume(values, "playersVolume"),
 		ambient = volume(values, "ambientVolume"),
 		ui = volume(values, "uiVolume"),
+		music = volume(values, "musicVolume"),
 	}, {
 		footsteps = on(values, "footsteps"),
 		interface = on(values, "interfaceClicks"),
 		ambient = on(values, "caveRumble"),
 	})
+	Music.setToasts(on(values, "musicToasts"))
 end)
 Settings.register("hud", function(values)
 	local minimap = on(values, "minimap")
 	Map.setMinimapVisible(minimap)
 	Waila.setMinimapShown(minimap)
+	MusicToast.setMinimapShown(minimap)
 	Waila.setEnabled(on(values, "waila"))
 	Style.setScaleOverride(values.guiScale)
 end)
@@ -262,6 +269,8 @@ MovementSounds.start(world)
 Ambience.start(function(x: number, y: number, z: number): number?
 	return world:getBlock(x, y, z)
 end)
+MusicToast.start()
+Music.start()
 
 RunService.Heartbeat:Connect(function(dt)
 	-- While the player waits for the ground, the renderer may build longer per frame.

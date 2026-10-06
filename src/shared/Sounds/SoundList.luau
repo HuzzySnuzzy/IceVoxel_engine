@@ -109,6 +109,9 @@ export type Action = {
 	side: string,
 }
 
+-- The cave moods (and the music, played by Audio/Music, not through this catalogue).
+local MusicList = require(script.Parent.MusicList)
+
 -- The files every client ships (content/sounds); RbxCharacterSounds uses most of them.
 local LAND = "rbxasset://sounds/action_jump_land.mp3" -- a thud
 local STEPS = "rbxasset://sounds/action_footsteps_plastic.mp3" -- footsteps (the walking loop)
@@ -380,7 +383,8 @@ SoundList.EVENTS = {
 		side = "client",
 	},
 
-	-- A low rumble now and then deep underground (Minecraft's cave sounds).
+	-- Minecraft's cave mood (Audio/CaveMood): this stand-in rumble plays only while
+	-- Sounds/MusicList has no mood sounds; theirs are ambient.cave.mood1, ... (below).
 	{
 		name = "ambient.cave",
 		id = FALLING,
@@ -513,6 +517,29 @@ SoundList.EVENTS = {
 		side = "server",
 	},
 } :: { EventSpec }
+
+--[[
+	The cave moods (Sounds/MusicList.Moods): ambient.cave.mood1, ambient.cave.mood2, ... in the
+	category ambient.cave, so a developer's Sound named "ambient.cave" replaces them all, and one
+	plays at a time (SoundRules.CAPS). Minecraft plays a mood at volume 0.5
+	(SimpleSoundInstance.forAmbientMood), heard 16 blocks away with a linear fade; a mood whose file
+	fails to load plays the stand-in rumble.
+]]
+SoundList.MOODS = {} :: { string }
+for i, id in MusicList.Moods do
+	local name = `ambient.cave.mood{i}`
+	table.insert(SoundList.MOODS, name)
+	table.insert(SoundList.EVENTS, {
+		name = name,
+		category = "ambient.cave",
+		id = id,
+		volume = 0.5,
+		fallback = { id = FALLING, volume = 0.25, pitch = 0.35, duration = 6 },
+		source = "ambient",
+		side = "client",
+	})
+end
+table.freeze(SoundList.MOODS)
 
 -- The lid sounds of blocks with a menu (Blocks `menu`). Furnaces and crafting tables have none.
 SoundList.MENUS = {

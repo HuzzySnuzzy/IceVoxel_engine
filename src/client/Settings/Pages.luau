@@ -14,7 +14,8 @@
 	                lights, shadows, far shadows, fog, textures, far materials, brightness,
 	                distance or lighting
 	  performance   far meshes, build budget, hidden terrain, swap frames
-	  sounds        Music & Sounds: the volumes and the three sound toggles
+	  sounds        Music & Sounds: the volumes (master, music, blocks, players, ambient,
+	                interface), footsteps, interface clicks, cave moods and music toasts
 	  controls      FOV effects, sprint, the scroll wheel, touch buttons
 	  hud           minimap, WAILA, GUI scale
 	A sub-page's Done goes back to the main page. `status` lists the status lines a page shows
@@ -129,6 +130,7 @@ Pages.list = {
 		title = "Music & Sounds",
 		items = {
 			setting("masterVolume", true),
+			setting("musicVolume"),
 			setting("blocksVolume"),
 			setting("playersVolume"),
 			setting("ambientVolume"),
@@ -136,6 +138,7 @@ Pages.list = {
 			setting("footsteps"),
 			setting("interfaceClicks"),
 			setting("caveRumble"),
+			setting("musicToasts"),
 		},
 		status = {},
 	},

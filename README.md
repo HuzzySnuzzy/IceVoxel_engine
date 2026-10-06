@@ -493,11 +493,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). While `F3` is open it shows everything
   the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
   item and by hand, break time, light, fluid level, render kind, friction and menu.
+- **Music.** Minecraft's background music: a track now and then (the first a few seconds after
+  joining, then every 10 to 20 minutes), surface tracks above ground and cave tracks in caves; going
+  underground fades a surface track out and a cave track follows (and the other way back up), so
+  surface music never plays underground. A "Now Playing" toast slides in at the top right with the
+  track's title for five seconds. The tracks are in `src/shared/Sounds/MusicList.luau`.
+- **Cave moods.** Minecraft's cave mood, exactly: every tick a random block within 8 blocks of you
+  makes the mood grow in the dark (1/6000) and shrink in daylight or by torches; at 100% one of the
+  cave mood sounds plays a couple of blocks beyond a dark spot and it starts over: about five
+  minutes deep in a dark cave, never in daylight (F3 shows "mood N%").
 - **Sounds.** Minecraft's sound events for everything that should make a sound: breaking, placing
   and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
   water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
   swimming, chest lids, the furnace you are using crackling while it burns, items picked up, tools
-  breaking, armor put on, getting hurt and dying, interface clicks and a rare rumble deep in caves;
+  breaking, armor put on, getting hurt and dying, interface clicks and Minecraft's cave moods;
   lava popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss
   when water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
   crackling. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
@@ -627,7 +636,7 @@ or gamepad B close it, which applies whatever still waits and saves.
 | Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults) |
 | Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
-| Music & Sounds  | Master Volume, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Rumble |
+| Music & Sounds  | Master Volume, Music, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Moods, Music Toasts |
 | Controls        | FOV Effects (0-100%), Sprint (Toggle / Hold), Scroll Wheel (Hotbar / Zoom), Touch Buttons (touch screens; after rejoining) |
 | HUD             | Minimap, WAILA, GUI Scale (Auto, 1-3) |
 
@@ -715,6 +724,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
+           MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
   Biomes/  BiomeList        biome definitions and altitude bands
@@ -835,11 +845,12 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
                             buttons), SpectatorGui + SpectatorMenu (the spectator menu and its
                             model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
-                            model), SettingsScreen (the Options menu)
+                            model), SettingsScreen (the Options menu), MusicToast (Now Playing)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
-                            (furnaces, Heat and Combustion Generators crackling, lava, caves),
-                            SoundRules (the pure rules)
+                            (furnaces, Heat and Combustion Generators crackling, lava, the cave
+                            mood), CaveMood (Minecraft's mood, pure), Music + MusicRules (the
+                            background music; when and which, pure), SoundRules (the pure rules)
   Entities/EntityRenderer   dropped items
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
@@ -943,18 +954,24 @@ for performance:
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Sounds.Enabled`          | true    | false turns every sound off (server and clients).                   |
-| `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui). |
+| `Sounds.Volume`           | 1       | Master volume; `Sounds.Sources` per kind (blocks, players, ambient, ui, music). |
 | `Sounds.PlayerRate`       | 8       | Sounds a player's inventory clicks and chest opening may cause per second (anti-spam). |
 | `Sounds.OverrideFolder`   | IceVoxelSounds | Folder (SoundService / ReplicatedStorage) of replacement Sounds. |
-| `Sounds.Sources`          | 1 each  | Volume of blocks, players, ambient and ui sounds.                   |
+| `Sounds.Sources`          | 1 each  | Volume of blocks, players, ambient and ui sounds and the music.     |
 | `Sounds.Footsteps`        | true    | Footsteps of everyone (swimming and splashes still play).           |
 | `Sounds.Interface`        | true    | Clicks of buttons and tabs.                                         |
-| `Sounds.Ambient`          | true    | The rare cave rumble deep underground.                              |
+| `Sounds.Ambient`          | true    | Minecraft's cave moods.                                             |
+| `Music.Enabled`           | true    | The background music (tracks: `Sounds/MusicList`).                  |
+| `Music.Volume`            | 0.5     | A track's Sound.Volume, times the master and music volumes.         |
+| `Music.FirstDelay` / `MinDelay` / `MaxDelay` | 5 / 600 / 1200 | Seconds to the first track, and between tracks (Minecraft's 10 to 20 minutes). |
+| `Music.CaveExposure` / `SurfaceExposure` / `SwitchSeconds` | 0.2 / 0.5 / 5 | In a cave below this sky exposure (F3), on the surface again above the other, each for SwitchSeconds. |
+| `Music.FadeSeconds` / `SwitchDelay` | 4 / 3 | A track of the other kind fades out; the new kind's starts within SwitchDelay seconds. |
+| `Music.Toast` / `ToastSeconds` | true / 5 | The Now Playing toast and how long it stays.                    |
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
-| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the cave rumble still plays). |
+| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
 | `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu.                 |
 | `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
@@ -1014,7 +1031,7 @@ Block textures below).
 **Sounds.** Every sound is a Minecraft sound event (`block.stone.break`, `entity.item.pickup`,
 `ui.button.click`...; the full list is `src/shared/Sounds/SoundList.luau`) played with one of the
 sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, landing,
-get-up rustle (chest lids, armor), free-fall wind (the cave rumble), swimming and splash, the
+get-up rustle (chest lids, armor), free-fall wind (a cave mood that fails to load), swimming and splash, the
 explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
 told apart by pitch. To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
@@ -1055,6 +1072,39 @@ SoundPlayer.click()                                -- ui.button.click
 Sounds are heard from the camera, but never more than 4 blocks from the player's eyes
 (`SoundRules.LISTENER_REACH`, Minecraft's third person distance), so zooming out does not
 silence the world; a Scriptable camera hears from where it is.
+
+**Music and cave moods.** `src/shared/Sounds/MusicList.luau` holds the game's own audio, like the
+texture pack holds the textures:
+
+```lua
+Surface = { { Id = "rbxassetid://...", Title = "" }, ... },  -- above ground
+Cave = { { Id = "rbxassetid://...", Title = "" }, ... },     -- in caves
+Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambient.cave
+```
+
+- **Titles:** a track's `Title` is what the Now Playing toast shows; `""` uses the audio's own name
+  on Roblox (looked up once).
+- **Tracks:** Minecraft's MusicManager timing (Config.Music): the first about five seconds after
+  joining, then one at random every 10 to 20 minutes, never the same twice in a row.
+- **Surface or cave:** where the player is comes from the sky light reaching the camera (F3's
+  `exposure`): under 0.2 for 5 seconds is a cave, over 0.5 for 5 seconds the surface again. A track
+  of the wrong kind fades out over 4 seconds and one of the new kind starts within 3; nothing new
+  starts while the light says the other place. A track that fails to load is skipped with a warning.
+- **Moods:** each becomes the event `ambient.cave.mood<N>` (category `ambient.cave`, so a Sound named
+  `ambient.cave` in the override folder replaces them all), played at Minecraft's volume 0.5,
+  heard 16 blocks away. The mood itself is Minecraft's
+  (`BiomeAmbientSoundsHandler`, `AmbientMoodSettings.LEGACY_CAVE_SETTINGS`):
+  - every game tick one block within 8 blocks of the eyes (each axis) is picked;
+  - with sky light s > 0 the mood drops s/15 × 0.001;
+  - in the dark it changes by (1 − block light) / 6000;
+  - at 1 a mood sound plays 2 blocks beyond that block and the mood starts over.
+
+  The light is estimated from the blocks, since the engine has no light map: sky light 15 under
+  the open sky, one less per step from it along a few rays into tunnels; block light from the
+  light sources through open cells, one less per block (a few blocks around in big caverns).
+- **Settings:** Music & Sounds has the Music volume, Cave Moods and Music Toasts.
+- **F3:** a `music` line shows surface or cave, the track playing (or the time to the next) and
+  the mood.
 
 **Pipes and tanks.** A transmitter is a block with `transmitter = { kind = "item" | "fluid", tier =
 1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` in BlockList; the
@@ -1542,7 +1592,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,185 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,197 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks).
 

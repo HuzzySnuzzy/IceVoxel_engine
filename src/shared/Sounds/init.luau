@@ -13,6 +13,8 @@
 	    specific first (block.stone.break, then its category block.break).
 	  * `contentIds()`: every sound file the catalogue uses (fallbacks too), to preload;
 	    `pitch(event, roll)`: a pitch with the event's random variance.
+	  * `MOODS`: the names of the cave mood events (Sounds/MusicList.Moods), one picked at random
+	    each time the mood fills (Audio/Ambience); empty: the stand-in ambient.cave plays.
 
 	Event numbers are positions in the catalogue: the block events (SOUND_TYPES x ACTIONS, in
 	order), then SoundList.EVENTS. Every machine builds them in that fixed order, so Protocol
@@ -62,6 +64,8 @@ Sounds.DEFAULT_VOLUME = 0.5
 Sounds.ACTIONS = table.freeze({ "break", "place", "hit", "step", "fall" })
 Sounds.SOURCES = table.freeze({ "blocks", "players", "ambient", "ui" })
 Sounds.SIDES = table.freeze({ "server", "predicted", "client" })
+-- The cave mood events, in MusicList.Moods' order.
+Sounds.MOODS = SoundList.MOODS
 
 local events: { Event } = {}
 local ids: { [string]: number } = {}

@@ -14,10 +14,14 @@
 	  Lava     lava with air above it within 32 blocks of the listener pops and bubbles now and
 	           then (SoundRules.lavaTick: Minecraft's LavaFluid.animateTick on its random display
 	           ticks, sampled), at the lava.
-	  Caves    deep underground (the sky light reaching the camera below SoundRules.CAVE_EXPOSURE,
-	           Rendering/LightingController.skyExposure), a low rumble (ambient.cave) every few
-	           minutes spent there, somewhere near the listener. Config.Sounds.Ambient (and the
-	           player's Cave Rumble setting, SoundPlayer.allows) turns it off.
+	  Moods    Minecraft's cave mood (Audio/CaveMood): every tick a random block within 8 blocks of
+	           the player's eyes raises the mood when it is dark and lowers it in daylight or near
+	           torches; at 100% one of the cave mood sounds (Sounds.MOODS, from
+	           Sounds/MusicList.Moods; the stand-in ambient.cave while there are none) plays two
+	           blocks beyond that block, and the mood starts over. The light comes from
+	           Rendering/LightingController.skyLight and CaveMood.blockLight. Config.Sounds.Ambient
+	           (and the player's Cave Moods setting, SoundPlayer.allows) keeps it quiet; the mood
+	           still counts (F3 shows it, `mood`).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,8 +29,11 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Mining = require(Shared.Mining)
+local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
+local Sounds = require(Shared.Sounds)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
+local CaveMood = require(script.Parent.CaveMood)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
@@ -37,10 +44,17 @@ local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRe
 local TICK = 1 / Mining.TICK_RATE
 -- Ticks run at most per frame (a hitch does not make a burst of crackles).
 local MAX_TICKS_PER_FRAME = 5
--- The cave rumble comes from up to this many blocks around the listener (each way).
-local CAVE_SPREAD = 8
+-- The player's eyes above their feet (blocks), where Minecraft's mood looks from.
+local EYE = PlayerPhysics.dimensions("standing").eye
 
 local Ambience = {}
+
+local mood = CaveMood.new()
+
+-- The cave mood, 0..1 (F3 shows it as a percentage, as Minecraft's debug screen does).
+function Ambience.mood(): number
+	return mood.mood
+end
 
 -- `getBlock`: the client's blocks (nil where none are loaded), for lava's sounds.
 function Ambience.start(getBlock: SoundRules.GetBlock?)
@@ -79,8 +93,30 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 	end
 
 	local clock = 0
-	local caveTime = 0
-	local caveDelay = SoundRules.caveDelay(math.random())
+	local random = Random.new()
+	local function nextInt(n: number): number
+		return random:NextInteger(0, n - 1)
+	end
+	-- The light at a cell for the mood: the sky's, else the block light (only searched in the dark).
+	local function light(x: number, y: number, z: number): (number?, number)
+		local sky = LightingController.skyLight(x, y, z)
+		if sky == nil or sky > 0 or getBlock == nil then
+			return sky, 0
+		end
+		return 0, CaveMood.blockLight(getBlock, x, y, z)
+	end
+	local function moodTick()
+		local view = MovementController.current
+		if view == nil then
+			return
+		end
+		local feet = view.feet
+		local x, y, z = CaveMood.tick(mood, feet.X, feet.Y + EYE, feet.Z, light, nextInt)
+		if x and y and z and SoundPlayer.allows("ambient") then
+			local moods = Sounds.MOODS
+			SoundPlayer.play(if #moods > 0 then moods[random:NextInteger(1, #moods)] else "ambient.cave", x, y, z)
+		end
+	end
 
 	RunService.Heartbeat:Connect(function(dt: number)
 		if not SoundPlayer.isEnabled() then
@@ -113,21 +149,7 @@ function Ambience.start(getBlock: SoundRules.GetBlock?)
 					end
 				end
 			end
-		end
-
-		-- Caves: time spent in the dark brings the rumble closer; time in daylight takes it back.
-		if SoundPlayer.allows("ambient") and LightingController.skyExposure() < SoundRules.CAVE_EXPOSURE then
-			caveTime += dt
-			local listener = SoundPlayer.listener()
-			if caveTime >= caveDelay and listener then
-				caveTime = 0
-				caveDelay = SoundRules.caveDelay(math.random())
-				local at = listener
-					+ Vector3.new(math.random() * 2 - 1, math.random() * 2 - 1, math.random() * 2 - 1) * CAVE_SPREAD
-				SoundPlayer.play("ambient.cave", at.X, at.Y, at.Z)
-			end
-		else
-			caveTime = math.max(0, caveTime - dt)
+			moodTick()
 		end
 	end)
 end

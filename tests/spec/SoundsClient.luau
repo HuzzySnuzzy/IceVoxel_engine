@@ -357,9 +357,7 @@ return function(t, shared, require, _server, client)
 		t.ok(SoundRules.hitTick(clock, 1, 2, 4, B.Dirt), "after a reset")
 	end)
 
-	t.test("sounds client: cave rumbles every few minutes, furnaces crackle every few seconds", function()
-		t.eq(SoundRules.caveDelay(0), SoundRules.CAVE_MIN, "soonest")
-		t.near(SoundRules.caveDelay(0.999999), SoundRules.CAVE_MAX, 1e-3, "latest")
+	t.test("sounds client: furnaces crackle every few seconds", function()
 		local seconds = 1 / (SoundRules.CRACKLE_CHANCE * 20)
 		t.ok(seconds > 2 and seconds < 8, `a crackle every {seconds} s`)
 	end)
@@ -401,6 +399,9 @@ return function(t, shared, require, _server, client)
 				)
 			elseif sound.name == "entity.player.small_fall" or sound.name == "entity.player.big_fall" then
 				t.ok(uses("Sounds%.fall%("), "the client plays its hurting landings")
+			elseif sound.category == "ambient.cave" then
+				-- (The cave moods are picked from Sounds.MOODS.)
+				t.ok(uses("Sounds%.MOODS"), "the client plays the cave moods")
 			else
 				t.ok(string.find(source, quoted, 1, true), `the client plays {sound.name}`)
 			end

@@ -612,6 +612,8 @@ local Config = {
 			players = 1,
 			ambient = 1,
 			ui = 1,
+			-- The background music (Config.Music), which no event uses.
+			music = 1,
 		},
 		-- Sounds are heard within their event's maxDistance (blocks; Minecraft's 16) and fade out
 		-- linearly; closer than MinDistance they are at full volume (client).
@@ -627,11 +629,47 @@ local Config = {
 		PlayerRate = 8,
 		-- Where developers' replacement Sounds live (see above).
 		OverrideFolder = "IceVoxelSounds",
-		-- Footsteps (the player's and others'), interface clicks and the rare cave rumble
-		-- underground (client).
+		-- Footsteps (the player's and others'), interface clicks and the cave moods (client).
 		Footsteps = true,
 		Interface = true,
 		Ambient = true,
+	},
+
+	-- Music (client; the tracks are in Shared/Sounds/MusicList) --------------------------------------
+
+	--[[
+		Minecraft's background music (MusicManager): a track now and then, at random, never during
+		another. Surface tracks above ground, cave tracks in caves (the sky light reaching the
+		camera, Rendering/LightingController.skyExposure); a track of the other kind fades out when
+		the player goes underground or comes back up, and one of the new kind follows. A "Now
+		Playing" toast shows each track's title in the top right corner.
+	]]
+	Music = {
+		Enabled = true,
+		-- Sound.Volume of a track, times the master and music volumes (Config.Sounds and the
+		-- player's settings).
+		Volume = 0.5,
+		-- Seconds before the first track after joining (Minecraft: 100 ticks), and between the end
+		-- of one track and the next: a random wait from MinDelay to MaxDelay (Minecraft's music.game:
+		-- 12000 to 24000 ticks, 10 to 20 minutes).
+		FirstDelay = 5,
+		MinDelay = 600,
+		MaxDelay = 1200,
+		-- In a cave below this sky exposure, on the surface again above SurfaceExposure (a gap, so
+		-- the edge of a cave mouth doesn't flip it), each for SwitchSeconds in a row.
+		CaveExposure = 0.2,
+		SurfaceExposure = 0.5,
+		SwitchSeconds = 5,
+		-- A track of the other kind fades out over FadeSeconds; the new kind's starts after a
+		-- random wait up to SwitchDelay seconds (Minecraft waits up to half its MinDelay when music
+		-- has to change).
+		FadeSeconds = 4,
+		SwitchDelay = 3,
+		-- The Now Playing toast (and the player's Music Toasts setting): seconds it stays.
+		Toast = true,
+		ToastSeconds = 5,
+		-- Seconds a track may take to load before it is skipped (with a warning).
+		LoadTimeout = 20,
 	},
 
 	-- Player settings (client menu, server store) ----------------------------------------------------

@@ -174,9 +174,23 @@ function LightingController.dayTime(): number
 	)
 end
 
--- Sky light reaching the camera, 1 outdoors to 0 deep underground (smoothed), e.g. for F3.
+-- Sky light reaching the camera, 1 outdoors to 0 deep underground (smoothed), e.g. for F3 and the
+-- music (Audio/Music: surface or cave).
 function LightingController.skyExposure(): number
 	return exposure or 1
+end
+
+--[[
+	Minecraft's sky light (0..15) at block cell (x, y, z), estimated from the client's blocks
+	(SkyExposure.skyLight), for the cave mood (Audio/Ambience); nil where the cell isn't loaded or
+	before `start` was given a generator and a world.
+]]
+function LightingController.skyLight(x: number, y: number, z: number): number?
+	local blocks = getBlock
+	if generator == nil or blocks == nil then
+		return nil
+	end
+	return SkyExposure.skyLight(x, y, z, groundAt, blocks)
 end
 
 --[[

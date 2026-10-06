@@ -23,6 +23,12 @@
 	the deep caves beyond stay dark. Cheap enough for the controller's 10 updates a second: the
 	rays stop at the first wall, at an unloaded cell and once they can't beat the best so far, and
 	the sideways looks up for the sky share a budget.
+
+	`skyLight` estimates Minecraft's sky light at any cell (0..15) the same way, for the cave mood
+	(Audio/CaveMood): 0 in an opaque block, 15 under the open sky, else 15 less the steps to the
+	nearest cell open to the sky along the same rays, counted as Minecraft's light spreads (one a
+	block face, so a diagonal step costs two). Minecraft's leaves and water dim it too; here only
+	opaque blocks stop it.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,6 +43,8 @@ local ROOF_MARGIN = 64
 -- Cells the sideways looks for the sky may read in all (the tall ceilings of a closed cavern
 -- would cost the most); the camera's own look up has no limit.
 local SKY_BUDGET = 2048
+-- The same for `skyLight` (the cave mood asks it once a game tick).
+local SKY_LIGHT_BUDGET = 512
 
 -- The sideways rays: { x, y, z step, length of a step }, horizontal and rising.
 local RAYS: { { number } } = {}
@@ -162,6 +170,46 @@ function SkyExposure.target(
 		return 1
 	end
 	return sideways(getBlock, ground, bx, by, bz, underground, target)
+end
+
+--[[
+	Minecraft's sky light (0..15) at cell (x, y, z) (integers), from the blocks (see the header);
+	nil where the cell isn't loaded.
+]]
+function SkyExposure.skyLight(x: number, y: number, z: number, ground: Ground, getBlock: GetBlock): number?
+	local block = getBlock(x, y, z)
+	if block == nil then
+		return nil
+	end
+	if Blocks.isOpaque(block) then
+		return 0
+	end
+	local top = roofTop(math.max(ground(x, z), y))
+	if openToSky(getBlock, x, y, z, top, math.huge) then
+		return 15
+	end
+	-- The nearest cell open to the sky along the rays, by the steps light takes to get here.
+	local best = 0
+	local budget = SKY_LIGHT_BUDGET
+	for _, ray in RAYS do
+		local cost = math.abs(ray[1]) + math.abs(ray[2]) + math.abs(ray[3])
+		local n = 1
+		while 15 - n * cost > best do
+			local cx, cy, cz = x + ray[1] * n, y + ray[2] * n, z + ray[3] * n
+			local cell = getBlock(cx, cy, cz)
+			if cell == nil or Blocks.isOpaque(cell) then
+				break
+			end
+			local open
+			open, budget = openToSky(getBlock, cx, cy, cz, roofTop(math.max(ground(cx, cz), cy)), budget)
+			if open then
+				best = 15 - n * cost
+				break
+			end
+			n += 1
+		end
+	end
+	return best
 end
 
 return SkyExposure

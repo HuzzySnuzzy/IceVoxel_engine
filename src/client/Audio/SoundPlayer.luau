@@ -454,6 +454,19 @@ function SoundPlayer.isEnabled(): boolean
 	return enabled
 end
 
+--[[
+	What a sound of `source` is multiplied by before its own volume: Config.Sounds.Volume and its
+	Sources entry, each times the player's Music & Sounds setting. 0 while sounds are off. The
+	background music (Audio/Music, source "music") plays at its own volume times this.
+]]
+function SoundPlayer.sourceVolume(source: string): number
+	if not enabled then
+		return 0
+	end
+	local settings = Config.Sounds
+	return settings.Volume * playerVolume * (settings.Sources[source] or 1) * (playerSources[source] or 1)
+end
+
 -- Where the player hears from (blocks): the camera, at most SoundRules.LISTENER_REACH blocks
 -- from the eyes. nil without a camera.
 function SoundPlayer.listener(): Vector3?

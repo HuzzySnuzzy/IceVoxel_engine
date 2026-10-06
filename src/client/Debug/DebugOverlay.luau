@@ -5,8 +5,10 @@
 	the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
 	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
 	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
-	knows about (EntityRenderer) and the time of day (the clock, day number, Minecraft's sky light
-	outdoors and how much of it reaches the camera; Rendering/LightingController).
+	knows about (EntityRenderer), the time of day (the clock, day number, Minecraft's sky light
+	outdoors and how much of it reaches the camera; Rendering/LightingController) and the music
+	(surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
+	mood (Audio/Ambience), as Minecraft's "Mood N%".
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -29,6 +31,8 @@ local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
+local Ambience = require(script.Parent.Parent.Audio.Ambience)
+local Music = require(script.Parent.Parent.Audio.Music)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Notices = require(script.Parent.Parent.Net.Notices)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
@@ -66,6 +70,14 @@ local function timeLine(): string
 		DayCycle.skyLight(now),
 		LightingController.skyExposure()
 	)
+end
+
+-- The music (where the player is for it, what plays or how long until the next) and the mood.
+local function musicLine(): string
+	local place, title, wait = Music.status()
+	local seconds = math.floor(wait)
+	local playing = if title then `"{title}"` else string.format("next in %d:%02d", seconds // 60, seconds % 60)
+	return string.format("music   %s  %s  mood %d%%", place, playing, math.floor(Ambience.mood() * 100))
 end
 
 -- Movement hull line (blocks; speeds in blocks per second).
@@ -271,6 +283,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
 			timeLine(),
+			musicLine(),
 		}, "\n")
 	end)
 end

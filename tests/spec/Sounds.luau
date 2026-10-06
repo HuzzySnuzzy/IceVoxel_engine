@@ -12,6 +12,7 @@ return function(t, shared, require, server, _client)
 	local Protocol = require(shared.Net.Protocol)
 	local Sounds = require(shared.Sounds)
 	local SoundList = require(shared.Sounds.SoundList)
+	local MusicList = require(shared.Sounds.MusicList)
 	local ServerSounds = require(server.Audio.Sounds)
 	local Containers = require(server.Players.Containers)
 	local InventoryState = require(server.Players.InventoryState)
@@ -102,11 +103,18 @@ return function(t, shared, require, server, _client)
 			local file = string.match(id, "^rbxasset://sounds/([^/]+)$")
 			return file ~= nil and SHIPPED[file] == true
 		end
+		-- (The cave moods are the game's own uploads, MusicList.Moods; their fallback ships.)
+		local function mood(id: string): boolean
+			return table.find(MusicList.Moods, id) ~= nil and string.find(id, "^rbxassetid://%d+$") ~= nil
+		end
 		for _, id in Sounds.contentIds() do
-			t.ok(certain(id), `{id} ships with every client`)
+			t.ok(certain(id) or mood(id), `{id} ships with every client`)
 		end
 		for _, event in Sounds.events do
-			t.ok(string.find(event.id, "^rbxasset://sounds/") ~= nil, `{event.name} is a built-in sound`)
+			t.ok(
+				string.find(event.id, "^rbxasset://sounds/") ~= nil or mood(event.id),
+				`{event.name} is a built-in sound`
+			)
 			t.ok(event.volume > 0 and event.volume <= 2, `{event.name} volume {event.volume}`)
 			t.ok(event.pitch > 0.1 and event.pitch < 4, `{event.name} pitch {event.pitch}`)
 			t.ok(event.pitchVariance >= 0 and event.pitchVariance < event.pitch, `{event.name} variance`)
@@ -124,8 +132,48 @@ return function(t, shared, require, server, _client)
 			end
 		end
 		for _, event in Sounds.events do
-			t.ok(certain(event.id), `{event.name} ({event.id}) ships with every client`)
+			if mood(event.id) then
+				t.ok(event.fallback ~= nil, `{event.name} falls back on a sound every client ships`)
+			else
+				t.ok(certain(event.id), `{event.name} ({event.id}) ships with every client`)
+			end
 		end
+	end)
+
+	t.test("sounds: the cave moods, one event each in the category ambient.cave", function()
+		t.eq(#Sounds.MOODS, #MusicList.Moods, "one per mood sound")
+		for i, name in Sounds.MOODS do
+			local event = Sounds.get(name) :: any
+			t.eq(name, `ambient.cave.mood{i}`)
+			t.eq(event.id, MusicList.Moods[i])
+			t.eq(event.category, "ambient.cave", "a developer's ambient.cave replaces them all")
+			t.eq(event.source, "ambient")
+			t.eq(event.side, "client")
+			t.eq(event.volume, 0.5, "Minecraft's forAmbientMood volume")
+			t.eq(event.maxDistance, 16, "heard 16 blocks away, fading linearly")
+			t.eq(table.concat(Sounds.lookupNames(name), ","), `{name},ambient.cave`)
+		end
+		t.ok(Sounds.find("ambient.cave") ~= nil, "the stand-in stays for an empty list")
+	end)
+
+	t.test("sounds: the music list (MusicList): audio ids, surface and cave tracks", function()
+		t.ok(#MusicList.Surface > 0 and #MusicList.Cave > 0, "both kinds have tracks")
+		for kind, tracks in { Surface = MusicList.Surface, Cave = MusicList.Cave } do
+			local seen = {}
+			for i, track in tracks do
+				t.ok(string.find(track.Id, "^rbxassetid://%d+$") ~= nil, `{kind} {i}: {track.Id}`)
+				t.eq(type(track.Title), "string", `{kind} {i}: a title ("" for the audio's name)`)
+				t.ok(not seen[track.Id], `{kind} {i}: listed once`)
+				seen[track.Id] = true
+			end
+		end
+		-- The sheet's ids, written out in full (it stored them in scientific notation).
+		t.eq(MusicList.Surface[1].Id, "rbxassetid://113907623876478")
+		t.eq(MusicList.Cave[1].Id, "rbxassetid://273398061")
+		t.eq(MusicList.Moods[5], "rbxassetid://3231980820")
+		t.eq(#MusicList.Surface, 12, "the sheet's 13 rows, one of them a repeat")
+		t.eq(#MusicList.Cave, 2)
+		t.eq(#MusicList.Moods, 10)
 	end)
 
 	t.test("sounds: blocks sound like Minecraft's sound types, by material unless set", function()
