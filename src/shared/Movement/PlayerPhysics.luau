@@ -50,7 +50,8 @@
 	           hurts (the server's Players/GameModeRules.inWall), e.g. after leaving spectator in rock.
 
 	`setGameMode` gives a state the abilities of a game mode (Shared/GameMode), as Minecraft's
-	GameType.updatePlayerAbilities does.
+	GameType.updatePlayerAbilities does. `knockback` adds an explosion's push to the velocity
+	(not for spectators or creative flight).
 
 	Units are blocks and ticks: positions in blocks (feet centre), velocities in blocks per tick.
 	Speeds of Minecraft's Abilities are floats, so they are kept rounded to floats here too.
@@ -349,6 +350,25 @@ function PlayerPhysics.place(state: State, x: number, y: number, z: number)
 	state.fallDistance = 0
 	state.onGround = false
 	state.sprinting = false
+end
+
+--[[
+	An explosion's knockback (kx, ky, kz blocks per tick; the server's Explosion message, Shared/
+	World/Explosion.hit), added to the velocity as Minecraft's client does with the explosion
+	packet's. Not for spectators (noClip) nor a player flying who may fly (Minecraft's server
+	leaves creative flight out of the packet's knockback). Returns whether it was applied.
+]]
+function PlayerPhysics.knockback(state: State, kx: number, ky: number, kz: number): boolean
+	if state.noClip or (state.flying and state.mayFly) then
+		return false
+	end
+	if not (kx == kx and ky == ky and kz == kz) or (kx == 0 and ky == 0 and kz == 0) then
+		return false
+	end
+	state.vx += kx
+	state.vy += ky
+	state.vz += kz
+	return true
 end
 
 local function solidChecker(world: World): Hull.SolidAt

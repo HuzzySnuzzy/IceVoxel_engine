@@ -11,6 +11,8 @@
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/), and random ticks
 	                   near players (World/RandomTicker: grass spreading, leaf decay, saplings)
+	                   and explosions (World/Explosions: fuel that touches fire or lava blowing
+	                   up, hurting items and players through Entities and Characters)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
 	                   the sounds players should hear (Audio/Sounds)
 	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
@@ -45,6 +47,7 @@ local WorldServer = require(Server.World.WorldServer)
 local BlockTicker = require(Server.World.BlockTicker)
 local Simulation = require(Server.World.Simulation)
 local RandomTicker = require(Server.World.RandomTicker)
+local Explosions = require(Server.World.Explosions)
 local TimeOfDay = require(Server.World.TimeOfDay)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
@@ -123,6 +126,11 @@ Teleport.start(world, net)
 WaypointStore.start(net)
 SettingsStore.start(net)
 Simulation.start(world)
+-- What blasts do beyond blocks: items, players (damage, knockback) and the clients' effects.
+Explosions.setHandler(function(x: number, y: number, z: number, power: number, getBlock)
+	Entities.explode(x, y, z, power)
+	Characters.explosion(x, y, z, power, getBlock)
+end)
 Api._ready(world, ticker)
 
 -- Fixed rate block updates, then the frame's share of structures being placed, then one
@@ -135,6 +143,7 @@ RunService.Heartbeat:Connect(function(dt)
 	while accumulator >= tickLength do
 		accumulator -= tickLength
 		ticker:step()
+		Explosions.step(world)
 		RandomTicker.step(randomTicker, Simulation.activeChunks(world), Config.Server.RandomTickSpeed, math.random)
 	end
 	StructureBlocks.place()

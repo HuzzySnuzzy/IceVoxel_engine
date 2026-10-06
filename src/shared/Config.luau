@@ -722,6 +722,44 @@ local Config = {
 		-- Max chunks the server generates per frame while preloading around players.
 		GenerationsPerFrame = 1,
 	},
+	-- Explosions (Shared/World/Explosion, Minecraft's) and burning fuel setting them off (server
+	-- World/FuelBlast, World/Explosions): fuel touching fire or lava explodes, harder the more of
+	-- it is connected.
+	Explosions = {
+		-- Power of a blast of `v` buckets of fuel: BucketPower x cube root of v (the cube root
+		-- scaling of blast radius with charge), so one bucket is TNT (4), 8 buckets 8, 27 buckets
+		-- 12. Between MinPower and MaxPower (a charged creeper is 6, Minecraft's biggest
+		-- vanilla blasts 7-8).
+		BucketPower = 4,
+		MinPower = 1,
+		MaxPower = 12,
+		-- What a flowing (or falling) fuel cell counts as: its fill (8 - level) / 8 of a bucket
+		-- times this. Flowing fluid is a thin sheet Minecraft makes out of nothing, so a puddle
+		-- spread from one bucket (113 cells) counts about 3.6 buckets, not 43.
+		FlowingShare = 1 / 16,
+		-- Fuel cells one ignition measures at most (a flood fill through the connected fuel);
+		-- fuel beyond them catches from the fire the blasts leave.
+		MaxCells = 4096,
+		-- A connected body goes off as one blast per ClusterSize-wide cube of it, each with the
+		-- power of the fuel in that cube, ...
+		ClusterSize = 4,
+		-- ... cubes holding less than this many buckets just flash into fire, ...
+		MinBlastVolume = 0.5,
+		-- ... staggered by the distance (through the fuel) from where it caught: a flame front of
+		-- this many blocks per tick.
+		ChainBlocksPerTick = 1.5,
+		-- Cost bounds per server tick: ignitions measured, blasts set off, and block reads of
+		-- their rays (at least one blast a tick always goes; TNT in open air reads about 9 000
+		-- blocks, a power 12 blast about 26 000, some 7 ms interpreted). What doesn't fit waits
+		-- for the next tick.
+		MaxIgnitionsPerTick = 4,
+		MaxBlastsPerTick = 8,
+		RayBudget = 60000,
+		-- Players this close (blocks) see and feel a blast (Minecraft sends its explosion packet
+		-- within 64 blocks); clients shake the camera within ShakeDistance x power.
+		EffectDistance = 64,
+		ShakeDistance = 4,
+	},
 }
 
 return Config

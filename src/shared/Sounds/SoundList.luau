@@ -516,6 +516,23 @@ SoundList.EVENTS = {
 		source = "players",
 		side = "server",
 	},
+	--[[
+		Explosions (server World/Explosions: burning fuel): Minecraft's entity.generic.explode,
+		played at volume 4 (heard 64 blocks away, its attenuation distance 16 x 4) and pitch
+		(1 + (r1 - r2) x 0.2) x 0.7: 0.7 +- 0.14, a triangle here flattened to +- 0.1. The
+		built-in boom (impact_explosion_03), whole, at volume 1 like the loudest events here;
+		the server plays it with no cue on top.
+	]]
+	{
+		name = "entity.generic.explode",
+		id = EXPLOSION,
+		volume = 1,
+		pitch = 0.7,
+		pitchVariance = 0.1,
+		maxDistance = 64,
+		source = "blocks",
+		side = "server",
+	},
 } :: { EventSpec }
 
 --[[

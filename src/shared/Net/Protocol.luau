@@ -135,6 +135,12 @@
 	  Settings       player settings (below): the saved choices of one device profile, one message
 	                 for each of the three profiles once the server loaded them on join (a profile
 	                 with nothing saved has count 0)
+	  Explosion      f32 x, y, z, f32 power, f32 kx, ky, kz: an explosion (server World/Explosions)
+	                 within Config.Explosions.EffectDistance of the player, for its effect, and
+	                 the knockback it gives this player (blocks per tick, added to the movement's
+	                 velocity; 0 when it doesn't reach them): Minecraft's ClientboundExplodePacket
+	                 without the block list (blocks come as edits). Non-finite numbers, a power
+	                 outside 0..MAX_EXPLOSION_POWER or a push over MAX_KNOCKBACK are malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -209,6 +215,7 @@ Protocol.ServerMessage = {
 	Jigsaws = 13,
 	StructureData = 14,
 	Settings = 15,
+	Explosion = 16,
 }
 
 Protocol.EditAction = {
@@ -2051,6 +2058,53 @@ end
 -- The profile and its settings, clamped; nil when malformed (PlayerSettings.decode).
 function Protocol.decodeSettings(b: buffer): (number?, PlayerSettings.Values?)
 	return PlayerSettings.decode(b)
+end
+
+--[[ Explosions (server -> client) ]]
+
+-- An explosion at (x, y, z) (blocks) of `power`, and the knockback it gives the receiving player
+-- (blocks per tick).
+export type ExplosionEffect = { x: number, y: number, z: number, power: number, kx: number, ky: number, kz: number }
+
+Protocol.EXPLOSION_BYTES = 28
+-- Largest power and push an Explosion message may carry.
+Protocol.MAX_EXPLOSION_POWER = 64
+Protocol.MAX_KNOCKBACK = 10
+
+function Protocol.encodeExplosion(effect: ExplosionEffect): buffer
+	local b = buffer.create(Protocol.EXPLOSION_BYTES)
+	buffer.writef32(b, 0, effect.x)
+	buffer.writef32(b, 4, effect.y)
+	buffer.writef32(b, 8, effect.z)
+	buffer.writef32(b, 12, effect.power)
+	buffer.writef32(b, 16, effect.kx)
+	buffer.writef32(b, 20, effect.ky)
+	buffer.writef32(b, 24, effect.kz)
+	return b
+end
+
+-- The explosion of an Explosion message, or nil when it is malformed.
+function Protocol.decodeExplosion(b: buffer): ExplosionEffect?
+	if buffer.len(b) ~= Protocol.EXPLOSION_BYTES then
+		return nil
+	end
+	local values = table.create(7)
+	for i = 1, 7 do
+		local value = buffer.readf32(b, (i - 1) * 4)
+		if value ~= value or value == math.huge or value == -math.huge then
+			return nil
+		end
+		values[i] = value
+	end
+	local power, kx, ky, kz = values[4], values[5], values[6], values[7]
+	if
+		power < 0
+		or power > Protocol.MAX_EXPLOSION_POWER
+		or math.sqrt(kx * kx + ky * ky + kz * kz) > Protocol.MAX_KNOCKBACK
+	then
+		return nil
+	end
+	return { x = values[1], y = values[2], z = values[3], power = power, kx = kx, ky = ky, kz = kz }
 end
 
 return Protocol
