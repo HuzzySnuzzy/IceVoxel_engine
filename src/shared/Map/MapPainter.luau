@@ -13,17 +13,24 @@
 	water is tinted by depth and frozen seas are drawn as ice. Oil wells' geysers are painted over
 	it as black dots in the oil's colour: the pixel holding the spout, and every pixel whose centre
 	lies within the lake's radius (Generation/OilWells; the wells are decided from the seed and the
-	terrain alone, a few per tile at most).
+	terrain alone, a few per tile at most). Water lakes (Generation/Lakes) are painted as shallow
+	water (ice where frozen) at up to LAKE_SCALE blocks a pixel, and puddles at up to PUDDLE_SCALE:
+	a pixel whose centre column holds the water. (Farther out they would be a pixel or less, and
+	finding them for a whole tile would cost more than they show.)
 ]]
 
 local Config = require(script.Parent.Parent.Config)
 local Blocks = require(script.Parent.Parent.Blocks)
 local Biomes = require(script.Parent.Parent.Biomes)
 local TerrainGenerator = require(script.Parent.Parent.Generation.TerrainGenerator)
+local Lakes = require(script.Parent.Parent.Generation.Lakes)
 
 local SEA = Config.SeaLevel
 local ICE = Blocks.get(Blocks.id.Ice).color
 local OIL = Blocks.get(Blocks.id.Oil).color
+
+-- Coarsest zoom (blocks per pixel) that paints water lakes / puddles.
+local LAKE_SCALE, PUDDLE_SCALE = 8, 2
 
 local writeu32 = buffer.writeu32
 local floor = math.floor
@@ -103,6 +110,50 @@ local function paintWells(
 	end
 end
 
+-- Paints the water lakes and puddles near the tile (see the header).
+local function paintLakes(
+	generator: TerrainGenerator.Generator,
+	pixels: buffer,
+	originX: number,
+	originZ: number,
+	scale: number,
+	size: number
+)
+	if scale > LAKE_SCALE then
+		return
+	end
+	local span = size * scale
+	local half = scale // 2
+	-- A lake's water, about 3 blocks deep, in the sea's colours.
+	local t = 3 / 40
+	local wet = pack(64 - 46 * t, 138 - 90 * t, 214 - 94 * t)
+	local ice = pack(ICE[1], ICE[2], ICE[3])
+	local shallow = pack(64, 138, 214)
+	local x1, z1 = originX + span - 1, originZ + span - 1
+	for _, lake in generator.waterLakes(originX, originZ, x1, z1) do
+		local colour = if lake.frozen then ice else wet
+		for py = math.max((lake.z - originZ) // scale, 0), math.min((lake.z + Lakes.BOX - 1 - originZ) // scale, size - 1) do
+			for px = math.max((lake.x - originX) // scale, 0), math.min((lake.x + Lakes.BOX - 1 - originX) // scale, size - 1) do
+				if Lakes.wet(lake, originX + px * scale + half, originZ + py * scale + half) then
+					writeu32(pixels, (py * size + px) * 4, colour)
+				end
+			end
+		end
+	end
+	if scale > PUDDLE_SCALE then
+		return
+	end
+	for _, puddle in generator.puddles(originX, originZ, x1, z1) do
+		for py = math.max((puddle.z0 - originZ) // scale, 0), math.min((puddle.z1 - originZ) // scale, size - 1) do
+			for px = math.max((puddle.x0 - originX) // scale, 0), math.min((puddle.x1 - originX) // scale, size - 1) do
+				if Lakes.inPuddle(puddle, originX + px * scale + half, originZ + py * scale + half) then
+					writeu32(pixels, (py * size + px) * 4, shallow)
+				end
+			end
+		end
+	end
+end
+
 function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 	local column = generator.column
 	local heights: { number } = {}
@@ -133,6 +184,7 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 				yield()
 			end
 		end
+		paintLakes(generator, pixels, originX, originZ, scale, size)
 		paintWells(generator, pixels, originX, originZ, scale, size)
 		return pixels
 	end

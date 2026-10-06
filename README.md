@@ -82,6 +82,18 @@ A fast, Minecraft-style voxel engine for Roblox.
   burns it. With your eyes in oil you see 2 blocks, in fuel 32 (and under water the view now fogs
   over too, 96 blocks once your eyes are used to it). Oil and Fuel Buckets carry them. A buried
   deposit costs nothing to draw while caves are hidden.
+- **Lakes and puddles.** Minecraft's water lakes (lake_water, from before 1.18): the lava lakes'
+  irregular basin of blobs, water 1-3 deep in its lower half and the bowl above it dug out, on
+  dry land, never by the sea, a river, a structure, an oil well or a lava lake (0.3-0.6 per km²,
+  rarer than lava lakes); frozen over with ice in snowy biomes, with a sand or gravel floor where
+  the biome's water has one (or a draw per lake: dirt, sand or gravel), and the grass around the
+  rim stays grass. Puddles lie in natural dips: water in place of the top block of 3-20 columns
+  (median 10-15) at the bottom of a hollow, most in jungles, mushroom fields and forests (50-120
+  per km²), fewer on plains and meadows (45-55), rare in savannas and deserts (2-25) and none in
+  frozen biomes. Both are still water sources held in on every side and below, so nothing flows
+  until you dig next to them; no tree or plant stands in them and no cave entrance opens under
+  them. Far terrain shows the lakes (LOD levels 1-2) and the map paints both (lakes up to 8
+  blocks a pixel, puddles up to 2); puddles are drawn near the player only.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -753,6 +765,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             StructureMaxLevel)
     OilWells                BuildCraft's oil wells: deposits, geysers and their lakes, undersea
                             pockets (point-sampled up to StructureMaxLevel; the map's dots)
+    Lakes                   water lakes (Minecraft's lake_water; point-sampled up to
+                            StructureMaxLevel) and puddles in dips (full detail only)
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
     StructureGen            library structures in chunks (random_spread starts, assembly cache,
                             pieces, foundations, generated chests)
@@ -940,6 +954,9 @@ for performance:
 | `Caves.LavaLakes`         | Underground Rarity 1, Tries 8, Depth 30; Surface Rarity 200 | Lava lakes sunk into cave floors (one chunk in `Rarity` of those with caves tries `Tries` spots, at least `Depth` blocks below the surface) and on the surface (one candidate per `Rarity` chunks of area), none within `SpawnClearance` (128) blocks of the spawn; `Enabled = false`: none of that kind. |
 | `Caves.OilWells`          | Spacing 512, Chance 0.12 | Oil wells: one candidate per 512 × 512 blocks, a well with `Chance`, its biome's chance in `Biomes` (Desert 0.6, Savanna and Windswept Savanna 0.5, Plains 0.45) or `Sea` (0.15) under the sea (pockets of `SeaSize`, Small, no geyser); `Sizes` (share, deposit radius, lake radius, spout height: Large 25%, 8-12, 7-10, 16; Medium 50%, 5-7, 4-7, 6; Small 25%, 3-4, no geyser), `Depth` 20-40, `LakeDepth` 1-3, none within `SpawnClearance` (256) blocks of the spawn; `Enabled = false`: none. |
 | `Caves.LavaLightDistance` | 96      | Lava's lights within this many blocks of the camera are on (phones 48: `Caves.Mobile`); the lava still glows. |
+| `Lakes.Water`             | Rarity 600 | Water lakes: one candidate per `Rarity` chunks of area, kept with its biome's weight in `Biomes` (Desert 0.3, Savanna 0.6, Windswept Savanna 0.5; others 1); `Enabled = false`: none. |
+| `Lakes.Puddles`           | Spacing 32, Chance 0.05 | Puddles: one candidate per 32 × 32 blocks, a puddle with its biome's chance in `Biomes` (Jungle 0.14 ... Desert 0.005) or `Chance`, none in frozen or snowy biomes; `Size` 3-20 columns, `Radius` 1.5-3.5 blocks; `Enabled = false`: none. |
+| `Lakes.SpawnClearance`    | 24      | No water lake or puddle this close to the spawn (blocks). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |

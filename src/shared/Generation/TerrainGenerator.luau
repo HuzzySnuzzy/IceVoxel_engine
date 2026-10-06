@@ -16,10 +16,11 @@
 
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
 	(SurfaceCaves.luau, air open to the surface), lava below LavaLevel, surface lava lakes and oil
-	wells (Lava.luau, OilWells.luau), ores, underground lava lakes, trees and library structures,
-	glow lichen, ground plants. Trees ask the worms (not the chunk) whether a surface cave opens
-	under them, so every chunk agrees on every tree; no surface cave is carved next to a
-	structure's piece, a surface lava lake or a geyser's oil lake, and no tree grows in one.
+	wells (Lava.luau, OilWells.luau), water lakes and puddles (Lakes.luau), ores, underground lava
+	lakes, trees and library structures, glow lichen, ground plants. Trees ask the worms (not the
+	chunk) whether a surface cave opens under them, so every chunk agrees on every tree; no
+	surface cave is carved next to a structure's piece, a surface lava or water lake, a puddle or
+	a geyser's oil lake, and no tree grows in one.
 
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
@@ -50,6 +51,7 @@ local Foliage = require(script.Parent.Foliage)
 local CaveDecor = require(script.Parent.CaveDecor)
 local Lava = require(script.Parent.Lava)
 local OilWells = require(script.Parent.OilWells)
+local Lakes = require(script.Parent.Lakes)
 local StructureGen = require(script.Parent.StructureGen)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
@@ -165,6 +167,10 @@ export type Generator = {
 	-- The surface lava lakes (Generation/Lava) whose box comes within Lava.PROTECT blocks of the
 	-- block rectangle (inclusive).
 	lavaLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lava.Lake },
+	-- The water lakes (Generation/Lakes) whose box comes within Lakes.PROTECT blocks of the block
+	-- rectangle (inclusive), and the puddles whose columns come within Lakes.PUDDLE_MARGIN.
+	waterLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Lake },
+	puddles: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Puddle },
 }
 
 --[[
@@ -362,6 +368,19 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		end,
 		spawn = spawnColumn,
 	})
+	-- Water lakes and puddles, likewise; they keep clear of oil wells (deposits too), lava lakes
+	-- and structures, and puddles of the columns a surface cave may open.
+	local lakes = Lakes.new(seed, {
+		height = outsideHeight,
+		biome = biomeAt,
+		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
+			return #wells.find(minX, minZ, maxX, maxZ) == 0
+				and #lava.surfaceLakes(minX, minZ, maxX, maxZ) == 0
+				and not piecesIn(minX, minZ, maxX, maxZ)
+		end,
+		spawn = spawnColumn,
+		carvesTop = surfaceCaves.carvesTop,
+	})
 
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
@@ -481,18 +500,22 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 
-		-- Surface lava lakes and oil wells near the padded chunk (as far as tree spots that must
-		-- keep out of their lakes), and the squares around their lakes (`keepOut`, x0, z0, x1, z1
-		-- per lake): no surface cave carves there and no tree grows there.
-		local lakes: { Lava.Lake }? = nil
+		-- Surface lava lakes, oil wells, water lakes and puddles near the padded chunk (as far as
+		-- tree spots that must keep out of their lakes), and the squares around their lakes
+		-- (`keepOut`, x0, z0, x1, z1 per lake): no surface cave carves there and no tree grows there.
+		-- (Far nodes don't draw puddles, but keep trees and surface caves out of them all the same,
+		-- so every level agrees on every tree.)
+		local lavaLakes: { Lava.Lake }? = nil
 		local nearWells: { OilWells.Well }? = nil
+		local waterLakes: { Lakes.Lake }? = nil
+		local puddles: { Lakes.Puddle }? = nil
 		local keepOut: { number } = {}
 		if level <= Config.StructureMaxLevel then
 			local reach = Structures.RADIUS + 1
 			local x0, z0 = originX - step - reach, originZ - step - reach
 			local x1, z1 = originX + span + step - 1 + reach, originZ + span + step - 1 + reach
-			lakes = lava.surfaceLakes(x0, z0, x1, z1)
-			for _, lake in lakes :: { Lava.Lake } do
+			lavaLakes = lava.surfaceLakes(x0, z0, x1, z1)
+			for _, lake in lavaLakes :: { Lava.Lake } do
 				local m = Lava.PROTECT
 				table.insert(keepOut, lake.x - m)
 				table.insert(keepOut, lake.z - m)
@@ -510,6 +533,22 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 			end
 			-- (A spout rises at most 16 blocks over its own column: within STRUCTURE_ROOM.)
+			waterLakes = lakes.lakes(x0, z0, x1, z1)
+			for _, lake in waterLakes :: { Lakes.Lake } do
+				local m = Lakes.PROTECT
+				table.insert(keepOut, lake.x - m)
+				table.insert(keepOut, lake.z - m)
+				table.insert(keepOut, lake.x + Lakes.BOX - 1 + m)
+				table.insert(keepOut, lake.z + Lakes.BOX - 1 + m)
+			end
+			puddles = lakes.puddles(x0, z0, x1, z1)
+			for _, puddle in puddles :: { Lakes.Puddle } do
+				local m = Lakes.PUDDLE_MARGIN
+				table.insert(keepOut, puddle.x0 - m)
+				table.insert(keepOut, puddle.z0 - m)
+				table.insert(keepOut, puddle.x1 + m)
+				table.insert(keepOut, puddle.z1 + m)
+			end
 		end
 
 		-- The column buffer ends a little above the highest terrain (room for structures).
@@ -627,8 +666,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 		-- 3. Caves (full detail only), then cave entrances and ravines (point-sampled up to
 		-- SurfaceCaves.MAX_LEVEL: far ravines show as cuts), lava below LavaLevel, surface lava
-		-- lakes and oil wells (point-sampled up to StructureMaxLevel), then ores (full detail only;
-		-- they only replace stone, so they never fill carved air) and an underground lava lake.
+		-- lakes, oil wells and water lakes (point-sampled up to StructureMaxLevel) and puddles (full
+		-- detail only), then ores (full detail only; they only replace stone, so they never fill
+		-- carved air) and an underground lava lake.
 		local carved: Caves.Carved? = nil
 		if level == 0 and Config.Caves.Enabled then
 			carved = carveCaves(data, originX, originZ, heights, cells, yield)
@@ -651,8 +691,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		end
 		-- Surface lava lakes and oil wells (deposits, geysers), before the ores so a deposit takes
 		-- the same rock in a chunk's padding as in its neighbour's core.
-		if lakes and #lakes > 0 then
-			local lowest = lava.writeSurface(lakes, data, level, originX, originZ, cells, topCells)
+		if lavaLakes and #lavaLakes > 0 then
+			local lowest = lava.writeSurface(lavaLakes, data, level, originX, originZ, cells, topCells)
 			if lowest < solidBelow then
 				solidBelow = lowest
 			end
@@ -660,6 +700,17 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		if nearWells and #nearWells > 0 then
 			local lowest, top, map = wells.write(nearWells, data, level, originX, originZ, cells, topCells, carved)
 			carved = map
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+			if top > emptyAbove then
+				emptyAbove = top
+			end
+		end
+		-- Water lakes and puddles (puddles in full detail chunks only).
+		if (waterLakes and #waterLakes > 0) or (level == 0 and puddles and #puddles > 0) then
+			local lowest, top =
+				lakes.write(waterLakes or {}, puddles or {}, data, level, originX, originZ, cells, topCells)
 			if lowest < solidBelow then
 				solidBelow = lowest
 			end
@@ -713,8 +764,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					return h, biome, vegetation, surface
 				end
 			end
-			-- Not on bare rock, near a library structure's piece, in a surface lava lake's or a
-			-- geyser's square or over a surface cave (decided from the worms, so every chunk and
+			-- Not on bare rock, near a library structure's piece, in a surface lava or water lake's,
+			-- a puddle's or a geyser's square or over a surface cave (decided from the worms, so every chunk and
 			-- level agrees).
 			local function dry(x: number, z: number): boolean
 				for i = 1, #keepOut, 4 do
@@ -1034,6 +1085,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		oilWells = wells.find,
 		oilLake = wells.lakeOf,
 		lavaLakes = lava.surfaceLakes,
+		waterLakes = lakes.lakes,
+		puddles = lakes.puddles,
 	}
 end
 

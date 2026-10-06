@@ -76,8 +76,10 @@ node key) and `posKey(x, y, z)` for block positions.
    (levels 0-2), cave air below `Caves.LavaLevel` becomes CaveLava and surface caves' air there
    Lava (`Lava.aquifer`). Then surface lava lakes and oil wells (deposits and geysers;
    point-sampled up to `Config.StructureMaxLevel`) are written, before the ores, so a deposit takes
-   the same rock in a chunk's padding as in its neighbour's core. After the ores (step 6) a full
-   detail chunk with caves may sink an underground lava lake into a cave floor.
+   the same rock in a chunk's padding as in its neighbour's core; then water lakes (point-sampled
+   up to `Config.StructureMaxLevel`) and puddles (full detail only; `Lakes.luau`, see Lakes and
+   puddles). After the ores (step 6) a full detail chunk with caves may sink an underground lava
+   lake into a cave floor.
 6. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
@@ -104,8 +106,8 @@ node key) and `posKey(x, y, z)` for block positions.
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
 rock or cave air; lowered under a structure's cells that are neither, under surface caves' air
 and under ordinary Lava and Oil) and `emptyAbove` (everything above is air; raised over trees,
-structures, plants and geysers' spouts). A dug lake (a geyser's oil lake) lowers its columns'
-`topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
+structures, plants and geysers' spouts). A dug lake (a geyser's oil lake, a water lake or a
+puddle) lowers its columns' `topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
 cave cells into rock (deposits, the spout below a lake, underground lava lakes) marks the cave
 lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads those cells
 instead of assuming rock.
@@ -116,8 +118,8 @@ rectangle, `generator.structureContainer(x, y, z)` the items a generated chest s
 `generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds
 them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one
 opens. `generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the
-map paints their geysers), `oilLake(well)` a geyser's lake columns and `lavaLakes(...)` the
-surface lava lakes.
+map paints their geysers), `oilLake(well)` a geyser's lake columns, `lavaLakes(...)` the
+surface lava lakes and `waterLakes(...)` / `puddles(...)` the water lakes and puddles.
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -257,7 +259,8 @@ after the caves.
   entrance out of the ground) within 16 entrance / 30 ravine carved steps is dropped, so there are
   no stubs by the shore. Columns within 2 blocks of a library structure's piece are left alone
   (`protectedColumns`): no foundation fills a pit and no path floats over a ravine. So are surface
-  lava lakes' boxes and 2 blocks around them, and geysers' lake squares and 2 blocks around them
+  lava lakes' boxes and 2 blocks around them, geysers' lake squares and 2 blocks around them, water
+  lakes' boxes and 2 blocks around them and puddles' bounds and a block around them
   (`protectedColumns`' `boxes`): a cut there would open the lake's side. An entrance
   step that reaches a column's top, or leaves it a roof of one block, opens the column to its top,
   and a single block left with air or cave air on all six sides is cleared (full detail chunks,
@@ -393,6 +396,73 @@ Cost per chunk (native / interpreted): lookups 0.005 / 0.013 ms, lava below Lava
 whole chunk: 9.3 / 21.8 ms); deciding a lake or a geyser's lake costs 0.5-2 ms once per
 generator, and `findSpawn` (for the spawn clearances) 3-7 ms once.
 
+### Lakes and puddles (`Lakes.luau`)
+
+Surface water, decided like the surface lava lakes from the seed and the full detail heights
+alone (`Lakes.Terrain`: a cell below a column's height is ground, at or above it air, or water
+below the sea), cached per generator, so every chunk and level agrees. All of it is water sources
+(level 0) held in on every side and below: nothing flows until something next to it changes.
+
+- **Lakes** (`lakes`, `write`; Minecraft's lake_water, the overworld's LakeFeature for water
+  before 1.18 replaced it with aquifers). The lava lakes' shape (`Lava.shapeOf`, the same draws:
+  4-7 ellipsoid blobs in a 16 × 8 × 16 box), water in its lower four layers, the bowl above dug
+  out as air; the shell's barrier draws are made and unused (lake_water has no barrier). One
+  candidate per 16 × 16 cell with chance 1 / `Lakes.Water.Rarity` (600; lava's is 200), times the
+  biome's weight in `Lakes.Water.Biomes` (deserts 0.3, savannas 0.5-0.6), its layer 4 at the
+  full detail height of the box's centre, more than `SHORE` (2) blocks above the sea. Minecraft's
+  shell rule keeps the water in: refused where a shell cell is liquid from layer 4 up or not
+  ground below it. Also refused where a cell could meet a deep cave (the caves' 9 cave-free
+  blocks), within `PROTECT` (2) blocks of a library structure's piece, an oil well (deposits too)
+  or a surface lava lake, within `SpawnClearance` (24) blocks of the spawn, and when a candidate
+  in a neighbouring cell also passed its roll (two overlapping lakes, each decided alone, could
+  spill into each other's bowl; about 1 in 60 lakes is lost). Written at full detail as:
+  - water, and Ice in the top layer where water freezes (a frozen or snow-topped biome);
+  - air in the bowl (bedrock stays);
+  - the lake's floor (`floor`) in soil (dirt, grass, podzol, mycelium, coarse dirt, snow) under
+    or beside the water: the biome's underwater block (sand, gravel), or for biomes with a dirt
+    floor a draw per lake (dirt 50%, sand 30%, gravel 20%: Minecraft's disk features; there is
+    no clay block), dirt where water lies under the cell too (no sand that could fall). A grassy
+    top beside the water with the sky above it stays (grass at the water's edge);
+  - the dirt the bowl uncovers above the water grows the column's top back (Minecraft turns it
+    into grass or mycelium; here also dry grass, podzol and snow).
+  `topCells` drop below the lowest written cell, so plants never grow in the water (Foliage needs
+  air above the ground) and the sky line describes the ground. LOD chunks up to
+  `StructureMaxLevel` put water (or ice) into the top cell of a column whose sample block lies
+  over the lake's water, as the lava lakes do. Surface caves leave the box and 2 blocks around it
+  alone and no tree grows there (`keepOut`). The map paints the lakes' water at up to 8 blocks a
+  pixel (`MapPainter.paintLakes`). Seeds 12345 / 777: 0.30 / 0.58 lakes per km² over 67 km² (lava
+  lakes 1.55 / 0.69), one in 10-20 frozen.
+- **Puddles** (`puddles`, `write`; not a Minecraft feature). One candidate per
+  `Lakes.Puddles.Spacing` (32) square cell at a hashed spot, kept with its biome's chance
+  (`Lakes.Puddles.Biomes`, else `Chance`: jungles 0.14, mushroom fields 0.12, forests 0.08-0.1,
+  plains and meadows 0.05-0.06, windswept hills 0.03, savannas, stony peaks and deserts
+  0.005-0.012; frozen and snowy biomes none). From the spot it runs downhill, steepest first, up
+  to `DRAIN` (12) steps to a column no 4-neighbour is lower than, the bottom of a dip at height
+  L (still going after 12 steps: a long slope, no puddle). From there it floods outwards over
+  columns of height L, within a wobbly radius (`Radius` 1.5-3.5 blocks, two harmonics of up to
+  30% each) and up to `Size[2]` (20) columns, but only onto columns with no lower 4-neighbour,
+  so every water cell (y L - 1, in place of the top block) has ground or water beside it and
+  ground below. Fewer than `Size[1]` (3) columns, L within 2 blocks of the sea, a column a cave
+  entrance or ravine may open (`SurfaceCaves.carvesTop`), a frozen or snowy biome on or next to
+  it, a structure's piece, an oil well or a lava or water lake within `PUDDLE_MARGIN` (1), or the
+  spawn within 24 blocks: no puddle. Two candidates draining into the same dip overlap at the
+  same water level, which holds as well. Full detail chunks only: a puddle is a few blocks
+  across, under a far node's cell, and puddles cost nothing at LOD but the decisions (far nodes
+  still keep trees and surface caves out of them, so trees agree at every level); the map paints
+  them at 1-2 blocks a pixel. Seeds 12345 / 777 over 16.8 km²: 22 / 14 per km² (37 / 92 per km²
+  of land), 3-20 columns (median 12-15); per km² of each biome: jungles 111-123, mushroom fields
+  114, forests 74-106, birch forests 61-71, taiga 58-65, old growth taiga 51-68, plains 47-53,
+  meadows 44, windswept hills 16, savannas 4-24, deserts 2-4, frozen biomes 0. (Puddles are
+  counted by the biome at the dip's bottom, which a spot in a wetter neighbour can drain into:
+  savannas next to plains get more than their own chance.)
+
+Cost: deciding a km² of puddles takes ~35 ms (native code, once per generator), more than half of
+it building the surface caves' worms (`carvesTop`, last), which the chunks there build anyway, and
+lakes ~6 ms; chunks around lakes and puddles generate within a few percent of the time without them
+(tests/spec/LakeGeneration, which also checks the shapes, that no water cell has an open side or
+bottom, determinism and the seams, trees and plants, far nodes, solidBelow / emptyAbove, the
+cave visibility graphs and the map).
+
 ### Structures
 
 `Structures.populate` divides the world into 5 × 5 cells with one candidate spot per cell at a hashed
@@ -406,8 +476,10 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away. A spot is refused near a library structure's piece (`accept`, see
-below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava lake's
-box or a geyser's lake square (with their margins: TerrainGenerator's `keepOut`), and where a cave
+below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava or
+water lake's box, a puddle's bounds or a geyser's lake square (with their margins:
+TerrainGenerator's `keepOut`; far nodes keep trees out of puddles too, though they don't draw
+them, so every level agrees on every tree), and where a cave
 entrance or ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms,
 never the chunk's data, so every chunk and level agrees on every tree).
 
@@ -1187,7 +1259,9 @@ water depth and sea ice. It paints from column data, so cave entrances and ravin
 Oil wells' geysers are painted over it as black dots in the oil's colour (`paintWells`, from
 `generator.oilWells`: the pixel holding the spout and every pixel whose centre lies within the
 lake's radius, not the lake's exact shape); a tile has a few wells at most, and the dots add
-nothing measurable.
+nothing measurable. Water lakes (at up to 8 blocks a pixel) and puddles (up to 2) are painted as
+water where a pixel's centre column holds theirs (`paintLakes`, from `generator.waterLakes` and
+`generator.puddles`); further out they would be a pixel or less.
 
 Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
 EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
