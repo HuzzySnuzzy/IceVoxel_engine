@@ -264,6 +264,7 @@ return function(t, shared, require)
 	t.test("lakes: water below layer 4, ice on frozen ones, the bowl dug, the floor, grass on the rim", function()
 		t.ok(#sampleLakes >= 5, `sample lakes: {#sampleLakes}`)
 		local frozenChecked, regrown, floors = 0, 0, 0
+		local sandy, gravelly, shores = 0, 0, 0
 		for _, lake in sampleLakes do
 			local water, ice = 0, 0
 			for x = lake.x - 1, lake.x + Lakes.BOX do
@@ -295,8 +296,22 @@ return function(t, shared, require)
 									not GRASSY[n] or (d[2] == 0 and not isWater[over] and over ~= ICE),
 									`{Blocks.get(n).name} under or beside the water at {x},{y},{z}`
 								)
-								if n == lake.floor and lake.floor ~= B.Dirt then
+								if n == B.Sand or n == B.Gravel then
 									floors += 1
+									if n == B.Sand then
+										sandy += 1
+									else
+										gravelly += 1
+									end
+									if d[2] == 0 and over == AIR then
+										-- (A shore block at the water's edge, open to the sky.)
+										shores += 1
+										t.ok(
+											blockAt(x + d[1], y - 1, z + d[3]) ~= AIR
+												and not isWater[blockAt(x + d[1], y - 1, z + d[3])],
+											"shore sand lies on ground"
+										)
+									end
 								end
 							end
 						end
@@ -321,10 +336,11 @@ return function(t, shared, require)
 			end
 		end
 		print(
-			`    {#sampleLakes} lakes checked ({frozenChecked} frozen): {regrown} bowl columns grew their top back, {floors} faces of floor block by the water`
+			`    {#sampleLakes} lakes checked ({frozenChecked} frozen): {regrown} bowl columns grew their top back, {floors} faces of sand ({sandy}) or gravel ({gravelly}) by the water, {shores} on the shore`
 		)
 		t.ok(regrown > 0, "the rim's grass grows back")
-		t.ok(floors > 0, "sand or gravel floors")
+		t.ok(sandy > 0 and gravelly > 0, "sand and gravel floors")
+		t.ok(shores > 0, "sand and gravel on the shores")
 	end)
 
 	--[[ Puddles ]]

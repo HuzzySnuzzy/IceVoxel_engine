@@ -830,6 +830,10 @@ local Config = {
 		-- times this. Flowing fluid is a thin sheet Minecraft makes out of nothing, so a puddle
 		-- spread from one bucket (113 cells) counts about 3.6 buckets, not 43.
 		FlowingShare = 1 / 16,
+		-- Flowing fuel (not a source) burns like a fuse: touched by fire or lava it turns into fire
+		-- this many ticks later, lighting the next flowing cell (5 blocks a second), up the trail
+		-- to its source, which explodes.
+		FuseTicks = 4,
 		-- Fuel cells one ignition measures at most (a flood fill through the connected fuel);
 		-- fuel beyond them catches from the fire the blasts leave.
 		MaxCells = 4096,

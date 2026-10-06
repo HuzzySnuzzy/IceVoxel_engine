@@ -420,9 +420,14 @@ below the sea), cached per generator, so every chunk and level agrees. All of it
   - air in the bowl (bedrock stays);
   - the lake's floor (`floor`) in soil (dirt, grass, podzol, mycelium, coarse dirt, snow) under
     or beside the water: the biome's underwater block (sand, gravel), or for biomes with a dirt
-    floor a draw per lake (dirt 50%, sand 30%, gravel 20%: Minecraft's disk features; there is
-    no clay block), dirt where water lies under the cell too (no sand that could fall). A grassy
-    top beside the water with the sky above it stays (grass at the water's edge);
+    floor patches per column (`floorAt`: the mean of two hashes of the lake's `patch` seed on 3-
+    and 2-block grids; below 0.45 sand, below 0.62 gravel, else dirt: about 40 / 31 / 29 %, like
+    Minecraft's disk features; there is no clay block), dirt where water lies under the cell too
+    (no sand that could fall);
+  - the shore: a grassy top beside the water with the sky above it becomes sand or gravel in 2 x 2
+    patches (`shoreAt`: a hash below 0.4 sand, below 0.55 gravel; a sand- or gravel-floored
+    biome's own block below 0.55), only on an opaque block (never over air or water); else it
+    stays (grass at the water's edge). Frozen lakes keep their shores;
   - the dirt the bowl uncovers above the water grows the column's top back (Minecraft turns it
     into grass or mycelium; here also dry grass, podzol and snow).
   `topCells` drop below the lowest written cell, so plants never grow in the water (Foliage needs
@@ -2625,6 +2630,14 @@ catches when fire or lava arrives next to it and when it flows next to them. Cru
   blast, its puddle's thin edge flashing; a 12 × 12 × 2 pool: 16 blasts of power 8 to 12 over 14
   ticks; a 16 × 16 × 4 pool of 1024 buckets: 50 blasts of power 6.3 to 12 over 20 ticks (more
   under the cost bounds).
+
+**Fuses**: only a source that catches explodes (`ignite`). Flowing fuel (any level but 0, falling
+too) touching fire or lava is handed to `Explosions.fuse` instead, which turns it into Fire
+`FuseTicks` (4) ticks later if it is still flowing fuel no plan claims; that fire touches the
+next flowing cells, and so on: the flame runs up a trail of spilt fuel at 5 blocks a second to its
+source, which goes off with the whole connected body as above. Flowing fuel is also flammable
+(BlockList 100 / 100), so ordinary fire spreads over and eats it; a trail with no source left just
+burns away.
 
 **In the world** (`World/Explosions`, on WorldServer; state per world, weakly kept):
 - `ignite(world, x, y, z)` queues a cell. `step(world)` (the boot script, every server tick after

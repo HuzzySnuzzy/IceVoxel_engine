@@ -60,7 +60,9 @@
 
 	Fuel touching Fire or lava (World/FuelBlast.isHot) catches: whenever the fuel or one of its
 	neighbours changes (fire or lava arriving next to it, the fuel flowing next to them), the
-	fuel's cell is handed to World/Explosions, which blows up the whole connected body.
+	fuel's cell is handed to World/Explosions. Flowing fuel (any level but the source) burns like a
+	fuse: a few ticks later it turns into fire, which lights the next flowing cell, up the trail to
+	its source; a source that catches blows up the whole connected body.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -137,14 +139,19 @@ end
 --[[
 	Ticks between updates come from the block's `fluid.tickDelay`; lava that water touches hardens
 	on the next tick instead (Minecraft hardens it the moment the water arrives, long before the
-	water's own next tick). Fuel touching fire or lava catches (World/Explosions.ignite).
+	water's own next tick). Fuel touching fire or lava catches (World/Explosions: a source
+	explodes, `ignite`; flowing fuel burns like a fuse, `fuse`).
 ]]
 function Fluid.onNeighborChanged(world: any, ticker: any, x: number, y: number, z: number, block: number)
 	local fluid = Blocks.get(block).fluid
 	if fluid and fluid.group == FUEL then
 		for _, side in TOUCHING do
 			if FuelBlast.isHot(world:peekBlock(x + side[1], y + side[2], z + side[3])) then
-				Explosions.ignite(world, x, y, z)
+				if fluid.level == 0 then
+					Explosions.ignite(world, x, y, z)
+				else
+					Explosions.fuse(world, x, y, z)
+				end
 				break
 			end
 		end

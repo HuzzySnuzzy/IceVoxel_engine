@@ -2438,6 +2438,10 @@ local function fireOdds(spec: BlockSpec): FlammableSpec?
 		return { ignite = 15, burn = 100 }
 	elseif name == "CoalBlock" then
 		return { ignite = 5, burn = 5 }
+	elseif name == "FuelFalling" or string.sub(name, 1, 8) == "FuelFlow" then
+		-- Flowing fuel (not its source, which explodes: server World/Explosions) burns like a
+		-- fuse; fire spreads over it and eats it as readily as anything.
+		return { ignite = 100, burn = 100 }
 	elseif spec.plant and spec.behaviour ~= "Sapling" and spec.plant.soil ~= "mushroom" then
 		return { ignite = 60, burn = 100 }
 	end

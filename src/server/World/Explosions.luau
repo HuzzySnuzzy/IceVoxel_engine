@@ -8,6 +8,12 @@
 	             queues the cell; `step` measures and plans its body (FuelBlast.measure / plan)
 	             and claims every cell of it for the blast it belongs to, so fire and blasts
 	             reaching claimed fuel change nothing: it goes off on its own schedule.
+	  Fuses      `fuse(world, x, y, z)` (Behaviours/Fluid, when fire or lava touches flowing fuel:
+	             any level but the source) turns the cell into Fire Config.Explosions.FuseTicks
+	             (4) ticks later, if it is still flowing fuel no plan holds. That fire lights the
+	             flowing cells next to it in turn (BlockList makes them flammable too), so the
+	             flame runs up a trail of spilt fuel at 5 blocks a second to its source, which
+	             goes off (`ignite`): lay a trail and light its end.
 	  Blasts     `explode(world, x, y, z, power, fiery)` queues one directly (Api, tests). At its
 	             tick a fuel blast first consumes its cells (air, released), then
 	               1. Explosion.affected: the cells its 1352 rays reach;
@@ -74,6 +80,9 @@ type State = {
 	blasts: { Pending },
 	sorted: boolean,
 	claimed: { [number]: Pending },
+	-- Flowing fuel burning along like a fuse: its cells (Coords.posKey) and the tick each catches.
+	fuses: { { key: number, due: number } },
+	fusing: { [number]: boolean },
 	random: () -> number,
 	getBlock: Explosion.GetBlock,
 }
@@ -100,6 +109,8 @@ local function stateOf(world: World): State
 			blasts = {},
 			sorted = true,
 			claimed = {},
+			fuses = {},
+			fusing = {},
 			random = math.random,
 			getBlock = function(x: number, y: number, z: number): number?
 				return world:peekBlock(x, y, z)
@@ -132,6 +143,22 @@ function Explosions.ignite(world: World, x: number, y: number, z: number)
 	table.insert(state.ignitions, key)
 end
 
+--[[
+	Lights the flowing fuel at (x, y, z) like a fuse (Behaviours/Fluid, when fire or lava touches
+	it): Config.Explosions.FuseTicks later it turns into Fire, if it is still flowing fuel no blast
+	holds, which lights the flowing fuel next to it in turn, and so on up the trail to its source,
+	which explodes (`ignite`).
+]]
+function Explosions.fuse(world: World, x: number, y: number, z: number)
+	local state = stateOf(world)
+	local key = Coords.posKey(x, y, z)
+	if state.fusing[key] or state.claimed[key] then
+		return
+	end
+	state.fusing[key] = true
+	table.insert(state.fuses, { key = key, due = state.tick + Settings.FuseTicks })
+end
+
 local function enqueue(state: State, pending: Pending)
 	state.order += 1
 	pending.order = state.order
@@ -153,7 +180,7 @@ end
 -- Ignitions and blasts waiting.
 function Explosions.pending(world: World): number
 	local state = stateOf(world)
-	return #state.ignitions + #state.blasts
+	return #state.ignitions + #state.blasts + #state.fuses
 end
 
 -- Measures and plans the body of fuel at `key`, claiming its cells.
@@ -271,6 +298,23 @@ function Explosions.step(world: World): number
 		return 0
 	end
 	state.tick += 1
+
+	-- Fuses due (queued in order: every one waits the same FuseTicks).
+	local fuses = state.fuses
+	local burnt = 0
+	while burnt < #fuses and fuses[burnt + 1].due <= state.tick do
+		burnt += 1
+		local key = fuses[burnt].key
+		state.fusing[key] = nil
+		local bx, by, bz = Coords.decodePosKey(key)
+		local block = world:peekBlock(bx, by, bz)
+		if FIRE and state.claimed[key] == nil and FuelBlast.isFuel(block) and not FuelBlast.isSource(block) then
+			world:setBlock(bx, by, bz, FIRE)
+		end
+	end
+	if burnt > 0 then
+		state.fuses = table.move(fuses, burnt + 1, #fuses, 1, {})
+	end
 
 	local ignitions = state.ignitions
 	local planned = math.min(#ignitions, Settings.MaxIgnitionsPerTick)

@@ -88,7 +88,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   reach grows with the cube root of the charge; the thin film of a spread puddle counts little).
   A big pool is not one blast but a chain: one per 4 × 4 × 4 cube of it, rippling out from where
   it caught at 1.5 blocks a tick, and every blast is fiery, so a 16 × 16 × 4 tank's worth is a few
-  dozen blasts of power 6 to 12 over a second or two that leave the crater burning. Explosions are
+  dozen blasts of power 6 to 12 over a second or two that leave the crater burning. Only sources
+  explode: spilt, flowing fuel burns like a fuse, each cell turning to fire 4 ticks after flame
+  or lava reaches it (5 blocks a second), so a trail lit at its end burns back to its source,
+  which goes off. Explosions are
   Minecraft 1.20.1's: 1352 rays losing strength to each block's blast resistance (stone 6, dirt
   0.5, obsidian 1200, water and lava 100: a blast in water breaks nothing), a block's drop with
   chance 1 / power, damage by distance and how much of you is in the open (TNT at point blank:
@@ -118,8 +121,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   irregular basin of blobs, water 1-3 deep in its lower half and the bowl above it dug out, on
   dry land, never by the sea, a river, a structure, an oil well or a lava lake (0.3-0.6 per km²,
   rarer than lava lakes); frozen over with ice in snowy biomes, with a sand or gravel floor where
-  the biome's water has one (or a draw per lake: dirt, sand or gravel), and the grass around the
-  rim stays grass. Puddles lie in natural dips: water in place of the top block of 3-20 columns
+  the biome's water has one, else patches of sand, gravel and dirt (about 40 / 30 / 30 %), and
+  patches of sand and gravel along the water's edge (about half the shore; the rest of the rim
+  stays grass). Puddles lie in natural dips: water in place of the top block of 3-20 columns
   (median 10-15) at the bottom of a hollow, most in jungles, mushroom fields and forests (50-120
   per km²), fewer on plains and meadows (45-55), rare in savannas and deserts (2-25) and none in
   frozen biomes. Both are still water sources held in on every side and below, so nothing flows
@@ -1076,6 +1080,7 @@ for performance:
 | `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
 | `Explosions.MaxCells` / `ClusterSize` / `MinBlastVolume` | 4096 / 4 / 0.5 | Fuel one ignition sets off at most; a blast per cube this wide; cubes with less fuel (buckets) just flash into fire. |
 | `Explosions.ChainBlocksPerTick` | 1.5 | How fast the chain runs through a body of fuel (blocks a tick). |
+| `Explosions.FuseTicks` | 4 | Flowing fuel burns like a fuse: ticks before a touched cell turns to fire and lights the next. |
 | `Explosions.MaxIgnitionsPerTick` / `MaxBlastsPerTick` / `RayBudget` | 4 / 8 / 60000 | Cost bounds per server tick (a power 12 blast reads about 26,000 blocks; the first blast always goes). |
 | `Explosions.EffectDistance` / `ShakeDistance` | 64 / 4 | Players this close see and feel a blast; the camera shakes within ShakeDistance × power. |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
@@ -1753,7 +1758,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,268 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,269 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire).
 

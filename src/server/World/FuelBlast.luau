@@ -88,6 +88,15 @@ function FuelBlast.isFuel(block: number?): boolean
 	return block ~= nil and fluidOf(block) == FUEL
 end
 
+-- Is `block` a fuel source (level 0)? Only sources explode; flowing fuel burns like a fuse.
+function FuelBlast.isSource(block: number?): boolean
+	if not FuelBlast.isFuel(block) then
+		return false
+	end
+	local fluid = Blocks.get(block :: number).fluid
+	return fluid ~= nil and fluid.level == 0
+end
+
 -- Does `block` set fuel off: Fire, or lava of any level (the cave twin too)?
 function FuelBlast.isHot(block: number?): boolean
 	return block ~= nil and (block == FIRE or fluidOf(block) == LAVA)

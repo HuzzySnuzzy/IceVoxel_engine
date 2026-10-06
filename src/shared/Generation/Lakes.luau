@@ -16,11 +16,13 @@
 	    around the rim (Minecraft turns exposed dirt in the bowl into grass, mycelium in mushroom
 	    fields; here also podzol, dry grass and snow);
 	  * the soil under and beside the water (dirt, grass and the other tops) becomes the lake's
-	    floor block: the biome's underwater block (sand, gravel), or for biomes with a dirt floor
-	    a draw per lake, half dirt, 30% sand and 20% gravel (Minecraft's disk_sand, disk_clay and
-	    disk_gravel features; there is no clay block), and dirt where water lies below it too (no
-	    sand that would fall). A top beside the water with the sky above it stays: grass at the
-	    water's edge.
+	    floor: the biome's underwater block (sand, gravel), or for biomes with a dirt floor patches
+	    of sand, gravel and dirt (`floorAt`: about 40 / 30 / 30 %, in blotches 2-3 blocks across,
+	    like Minecraft's disk_sand, disk_clay and disk_gravel features; there is no clay block),
+	    and dirt where water lies below it too (no sand that would fall);
+	  * a top beside the water with the sky above it (the shore at the water's edge) becomes sand
+	    or gravel in patches (`shoreAt`: about 40 % sand, 15 % gravel, 2 x 2 blotches; on ground,
+	    never over air or water), else stays grass; frozen lakes keep their snowy shores.
 	One candidate per 16 x 16 block cell with chance 1 / Water.Rarity (rarer than lava lakes, which
 	are 1 / 200), times the biome's weight in Water.Biomes (deserts and savannas fewer); its layer
 	4 at the full detail height of the box's centre, on dry land more than 2 blocks above the sea
@@ -83,7 +85,12 @@ local PROTECT = 2 -- surface caves and trees keep this many blocks from a lake's
 local PUDDLE_MARGIN = 1 -- ... and this many from a puddle's columns' bounds
 local DRAIN = 12 -- a puddle's spot runs at most this many steps downhill to the bottom of its dip
 local WOBBLE = 0.3 -- amplitude of each of the two harmonics of a puddle's radius (share of it)
-local FLOOR_SAND, FLOOR_GRAVEL = 0.3, 0.2 -- a dirt-floored biome's lake: sand / gravel floor shares
+-- A dirt-floored biome's lake floor: the mean of two coarse hashes (2- and 3-block grids) below
+-- FLOOR_SAND is sand, below FLOOR_GRAVEL gravel, else dirt (a triangular spread: 40 / 31 / 29 %).
+local FLOOR_SAND, FLOOR_GRAVEL = 0.45, 0.62
+-- Its shore (tops at the water's edge): a 2-block grid hash below SHORE_SAND is sand, below
+-- SHORE_GRAVEL gravel, else the top stays.
+local SHORE_SAND, SHORE_GRAVEL = 0.4, 0.55
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
@@ -149,6 +156,8 @@ export type Lake = {
 	frozen: boolean,
 	floor: number,
 	biome: number,
+	-- Seed of its floor and shore patches.
+	patch: number,
 }
 
 --[[
@@ -224,6 +233,29 @@ function Lakes.inPuddle(puddle: Puddle, x: number, z: number): boolean
 end
 
 -- Does the lake hold water (or ice) in column (x, z)?
+--[[
+	The floor block under `lake`'s water at world column (wx, wz): the biome's underwater block, or
+	for a dirt-floored biome patches of sand, gravel and dirt (see the header).
+]]
+function Lakes.floorAt(lake: Lake, wx: number, wz: number): number
+	if lake.floor ~= DIRT then
+		return lake.floor
+	end
+	local v = (Hash.float3(lake.patch, wx // 3, 0, wz // 3) + Hash.float3(lake.patch, (wx + 1) // 2, 1, (wz + 1) // 2))
+		/ 2
+	return if v < FLOOR_SAND then SAND elseif v < FLOOR_GRAVEL then GRAVEL else DIRT
+end
+
+-- The shore block at the water's edge of `lake` at world column (wx, wz): sand, gravel, or nil
+-- (the top stays). A biome with a sand or gravel floor has a shore of it.
+function Lakes.shoreAt(lake: Lake, wx: number, wz: number): number?
+	local v = Hash.float3(lake.patch, wx // 2, 2, wz // 2)
+	if lake.floor ~= DIRT then
+		return if v < SHORE_GRAVEL then lake.floor else nil
+	end
+	return if v < SHORE_SAND then SAND elseif v < SHORE_GRAVEL then GRAVEL else nil
+end
+
 function Lakes.wet(lake: Lake, x: number, z: number): boolean
 	local lx, lz = x - lake.x, z - lake.z
 	if lx < 0 or lz < 0 or lx >= BOX or lz >= BOX then
@@ -302,7 +334,8 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 		local z0 = cz * BOX + rng:int(0, BOX - 1)
 		local shape, cells, ax, az, bx, bz = Lava.shapeOf(rng)
 		local keep = rng:float()
-		local floorRoll = rng:float()
+		-- (A draw no longer used, kept so the draws after it are unchanged.)
+		rng:float()
 		if cells == 0 then
 			return nil
 		end
@@ -356,12 +389,6 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 		end
 		local biome = Biomes.list[biomeIndex]
 		local floor = biome.underwater
-		if floor == DIRT then
-			floor = if floorRoll < FLOOR_SAND
-				then SAND
-				elseif floorRoll < FLOOR_SAND + FLOOR_GRAVEL then GRAVEL
-				else DIRT
-		end
 		return table.freeze({
 			x = x0,
 			y = base,
@@ -371,6 +398,7 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 			frozen = freezes[biomeIndex],
 			floor = floor,
 			biome = biomeIndex,
+			patch = rng:int(0, 2 ^ 30),
 		})
 	end
 	local lakeAt: (cx: number, cz: number) -> Lake? = cache(decideLake)
@@ -644,12 +672,26 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 								-- Soil under or beside the water: the lake's floor (dirt where water
 								-- lies under it too, so no sand or gravel would fall). A top beside
 								-- the water with the sky above it stays: grass by the water's edge.
-								local floor = lake.floor
+								local floor = Lakes.floorAt(lake, wx, wz)
 								if y > 0 and readu8(shape, cellIndex(lx, y - 1, lz)) == LAKE then
 									floor = DIRT
 								end
 								if block ~= floor then
 									writeu16(data, o, floor)
+								end
+							elseif
+								GRASSY[block]
+								and not lake.frozen
+								and wy > 1
+								and wetShell(shape, lx, y, lz)
+								and not wetCell(shape, lx, y + 1, lz)
+							then
+								-- The shore: a top at the water's edge, in sand or gravel patches,
+								-- on ground only (sand never hangs over air or water).
+								local shore = Lakes.shoreAt(lake, wx, wz)
+								local below = readu16(data, o - LAYER * 2)
+								if shore and below ~= AIR and Blocks.isOpaque(below) then
+									writeu16(data, o, shore)
 								end
 							end
 						end

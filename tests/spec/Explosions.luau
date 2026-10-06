@@ -420,6 +420,45 @@ return function(t, shared, require, server, client)
 		t.ok(world2:peekBlock(13, FLOOR, 8) ~= FUEL, "its source with it")
 	end)
 
+	t.test("world: flowing fuel is a fuse: the flame runs up the trail and the source explodes", function()
+		local world, _, calls, run = newWorld()
+		local y = FLOOR
+		-- A source with a trail of flowing fuel along a stone gutter (no flowing back sideways).
+		for x = 4, 14 do
+			world:setBlock(x, y, 7, STONE)
+			world:setBlock(x, y, 9, STONE)
+		end
+		world:setBlock(4, y, 8, STONE)
+		world:setBlock(5, y, 8, FUEL)
+		run(40)
+		t.eq(world:peekBlock(9, y, 8), B.FuelFlow4, "the trail spread")
+		t.ok(FuelBlast.isFuel(world:peekBlock(8, y, 8)), "flowing all along")
+		t.ok(Blocks.isFlammable(B.FuelFlow4) and Blocks.isFlammable(B.FuelFalling), "flowing fuel burns")
+		t.ok(not Blocks.isFlammable(FUEL), "the source explodes instead")
+		-- Light the end of the trail.
+		world:setBlock(10, y, 8, FIRE)
+		run(1)
+		t.eq(#calls, 0, "the trail doesn't blow up")
+		run(Settings.FuseTicks)
+		t.eq(world:peekBlock(9, y, 8), FIRE, "the end burns")
+		t.eq(#calls, 0)
+		local ticks = 0
+		repeat
+			run(1)
+			ticks += 1
+		until #calls > 0 or ticks > 100
+		t.eq(#calls, 1, "the source went off")
+		t.near(calls[1].x, 5.5, 1, "at the source")
+		t.ok(ticks >= Settings.FuseTicks, `after the flame ran up the trail ({ticks} ticks)`)
+		-- A trail with no source left just burns away.
+		local world2, _, calls2, run2 = newWorld()
+		world2:setBlock(8, FLOOR - 1, 8, B.FuelFlow3)
+		world2:setBlock(8, FLOOR, 8, FIRE)
+		run2(Settings.FuseTicks + 2)
+		t.eq(#calls2, 0, "no source: no blast")
+		t.ok(not FuelBlast.isFuel(world2:peekBlock(8, FLOOR - 1, 8)), "it burnt")
+	end)
+
 	t.test("world: a pool chains into staggered blasts that consume it all", function()
 		local world, _, calls, run = newWorld(11)
 		for x = 4, 15 do
