@@ -1753,9 +1753,9 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,198 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,268 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
-has TexturePack, TextureLooks and FarLooks).
+has TexturePack, TextureLooks and FarLooks; fire has Fire).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
