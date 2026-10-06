@@ -40,7 +40,7 @@
 	                its hardness (Minecraft's Properties.strength(f) sets both), 3 600 000 for
 	                unbreakable and creative only blocks (bedrock, structure blocks), none at all
 	                for air and cave air; fluids 100 (their hardness), so an explosion in water
-	                breaks nothing (fuel too: liquid petrol burns, it is no explosive). Minecraft's values that
+	                breaks nothing, but fuel 0 (it is the explosive). Minecraft's values that
 	                differ from the hardness are in BLAST_RESISTANCE at the end of the list.
 	  drops         Name of the item a survival player gets for breaking it (default: the block
 	                itself), or false for nothing (e.g. glass, leaves).
@@ -2219,6 +2219,8 @@ fluid("Fuel", {
 	material = "Glass",
 	transparency = 0.4,
 	reflectance = 0.05,
+	-- The explosive itself: explosions run through it (server World/Explosions sets it off).
+	blastResistance = 0,
 }, 5)
 
 --[[
@@ -2423,11 +2425,6 @@ end
 	flower (both halves of the tall ones), but no sapling and no mushroom; the game has no slabs,
 	stairs, fences, wool, bookshelves, hay or TNT yet (give such blocks `flammable` where they are
 	added). Glow lichen is Minecraft's 15 / 100, and its cave twins burn like it.
-
-	Fuel (petrol, every level) is not in Minecraft: it catches as readily as anything (100) so the
-	flames cover a burning pool, and burns away at 7: a fire on a block of it eats it in about a
-	minute (rand(250) < 7 every 1.75 s on average; a real cubic metre of petrol burns down at
-	some 4 mm a minute, for hours, which no game would wait for). See server World/FuelBlast.
 ]]
 local function fireOdds(spec: BlockSpec): FlammableSpec?
 	local name = spec.name
@@ -2441,8 +2438,6 @@ local function fireOdds(spec: BlockSpec): FlammableSpec?
 		return { ignite = 15, burn = 100 }
 	elseif name == "CoalBlock" then
 		return { ignite = 5, burn = 5 }
-	elseif name == "Fuel" or name == "FuelFalling" or string.sub(name, 1, 8) == "FuelFlow" then
-		return { ignite = 100, burn = 7 }
 	elseif spec.plant and spec.behaviour ~= "Sapling" and spec.plant.soil ~= "mushroom" then
 		return { ignite = 60, burn = 100 }
 	end

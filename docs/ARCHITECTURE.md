@@ -2576,7 +2576,7 @@ fluids, which covers their levels and twins; `Hazards` lava).
 
 ## Explosions (`World/Explosion`, server `World/FuelBlast`, `World/Explosions`)
 
-Minecraft 1.20.1's explosions, set off by fuel vapour closed in and catching (and `Api.explode`). Tested in
+Minecraft 1.20.1's explosions, set off by burning fuel (and `Api.explode`). Tested in
 `tests/spec/Explosions`.
 
 **The maths** (`Shared/World/Explosion`, pure; Minecraft's Explosion.explode, finalizeExplosion and
@@ -2593,7 +2593,7 @@ getSeenPercent):
   3,600,000 for unbreakable and creative only blocks, 0 for air, Minecraft's values where they
   differ (`BLAST_RESISTANCE` at the end of BlockList: the stone family and bricks 6, planks 3,
   metal and gem blocks 6, packed mud 3, obsidian 1200). Fluids resist 100 (their hardness), so TNT
-  in water breaks nothing (the first step costs 30); fuel too (liquid petrol is no explosive).
+  in water breaks nothing (the first step costs 30); fuel 0: it is the explosive.
 - Entities (`hit`): within 2 × power of the centre (measured to the feet), impact =
   (1 − distance / (2 × power)) × seen, damage = ⌊(impact² + impact) / 2 × 7 × 2 × power + 1⌋ half
   hearts (TNT point blank 57, half its reach away 22, behind a wall 1), and a push of `impact`
@@ -2605,52 +2605,44 @@ getSeenPercent):
   three affected cells (a roll per cell, nextInt(3) == 0) that are air after the blast with an
   opaque block below.
 
-**Burning fuel** (`World/FuelBlast`, pure), as real petrol behaves (a block is 1,000 litres):
-liquid petrol never detonates; it burns at its surface, and only its vapour, closed in with air,
-explodes (a gas explosion). The energy in the liquid (34 GJ a block, seven tonnes of TNT) never
-comes out as a blast.
-- Catching: fuel (any level, falling too) catches when one of its six sides is Fire or lava of any
-  level (the cave twin too: `isHot`). `Behaviours/Fluid` asks in its `onNeighborChanged`, which
-  runs for the fuel itself and for every neighbour's change: so fuel catches when fire or lava
-  arrives next to it and when it flows next to them. Crude oil does not.
+**Fuel catching** (`World/FuelBlast`, pure): fuel (any level, falling too) catches when one of its
+six sides is Fire or lava of any level (the cave twin too: `isHot`). `Behaviours/Fluid` asks in
+its `onNeighborChanged`, which runs for the fuel itself and for every neighbour's change: so fuel
+catches when fire or lava arrives next to it and when it flows next to them. Crude oil does not.
 - `measure`: a breadth-first fill through the six sides over the connected fuel, at most
-  `Explosions.MaxCells` (4096) cells, never into skipped cells or unloaded chunks, with each
-  cell's distance through the fuel.
-- `surface`: the open cells over the body (air, or not solid and no fluid: `isOpen`); `pocket`:
-  the open air connected to them, closed (`sealed`) if the fill ends within `PocketCells` (4096)
-  without meeting an unloaded block or the world's top, with the solid cells around it (`walls`).
-- `vapour(surface, volume)`: a closed space fills with stoichiometric mix up to `VapourPerSurface`
-  (16 m³) per square metre of surface (petrol evaporates about a kilo an hour per m² at room
-  temperature; a stoichiometric mix holds 0.08 kg/m³), at most its volume. Its TNT: mix ×
-  `MixEnergy` (3.5 MJ/m³) × `Yield` (0.2, a confined deflagration) / `TntEnergy` (4.6 MJ/kg) =
-  0.15 kg/m³; its power 4 × (kg / `MinecraftTnt` (250))^⅓ × `Scale`, at most `MaxPower` (8): a
-  4 × 4 × 3 room 1.2, a 16 × 16 × 16 hall over a 16 × 16 pool 5.4.
-- `plan`: Fire over every surface cell as the front reaches it (distance / `FlameSpeed`, 0.15
-  blocks a tick: 3 m/s, how fast flames run over petrol); and, if the space over it is closed and
-  not already burning, one blast at the space's centre a tick after catching, throwing out the
-  walls with blast resistance up to `WallStrength` (3) × the share of the space the vapour fills.
-- Fuel is flammable (BlockList `flammable` 100 / 7), so the flames stay on it and Behaviours/Fire
-  burns it away (about a block a minute under a fire; a real cubic metre burns down at ~4 mm a
-  minute, for hours); burnt sources fill with flowing fuel, which burns too.
+  `Explosions.MaxCells` (4096) cells, never into claimed cells or unloaded chunks. A source counts
+  a bucket, a flowing cell its fill ((8 − level) / 8; falling 1) × `FlowingShare` (1/16): flowing
+  fluid is a thin sheet Minecraft makes out of nothing, so a bucket's puddle (a source and 112
+  flowing cells) counts 3.6 buckets, not 43.
+- `power(v)` = `BucketPower` (4) × ∛v within `MinPower`..`MaxPower` (1..12): blast reach scales with
+  the cube root of the charge (Hopkinson–Cranz), and Minecraft's power is a reach (entities within
+  2 × power, rays through 1.73 × power blocks of air). A bucket is TNT, 4 buckets 6.3 (a charged
+  creeper), 8 buckets 8, 27 buckets 12.
+- `plan`: the body is cut into `ClusterSize` (4) wide cubes centred on the cell that caught; each
+  cube is one blast, at its fuel's weighted centre, with the power of its buckets, `delay` ticks
+  after catching: the flood fill distance of its nearest cell / `ChainBlocksPerTick` (1.5). Cubes
+  under `MinBlastVolume` (half a bucket) are flashes (power 0). A bucket on the ground: one TNT
+  blast, its puddle's thin edge flashing; a 12 × 12 × 2 pool: 16 blasts of power 8 to 12 over 14
+  ticks; a 16 × 16 × 4 pool of 1024 buckets: 50 blasts of power 6.3 to 12 over 20 ticks (more
+  under the cost bounds).
 
 **In the world** (`World/Explosions`, on WorldServer; state per world, weakly kept):
 - `ignite(world, x, y, z)` queues a cell. `step(world)` (the boot script, every server tick after
-  the block ticker) plans at most `MaxIgnitionsPerTick` (4) queued cells: measures the body, marks
-  every cell burning for `BurningMemory` (600) ticks and queues its flames (a batch per tick of the
-  front) and its blast. A burning cell that catches again only has its mark refreshed, so fire
-  and lava touching a burning pool cost nothing, and its vapour (burning off as it rises) never
-  gathers to explode again while it burns (`plan`'s `burning`).
-- Then it sets off what is due, in order: at most `MaxBlastsPerTick` (8), and no new blast once
-  this tick's rays read `RayBudget` (60,000) blocks; the first always goes, the rest wait.
-  Flames set Fire on their cells that are still empty. A blast, as Minecraft: the affected cells;
-  the handler (`setHandler`: the boot script's `Entities.explode` and `Characters.explosion`)
-  before any block goes, so the blast's own drops are spared; the sound
-  (`entity.generic.explode`, Audio/Sounds); every affected non-air block becomes air, dropping its
-  items (`Items.leafDrop` or `Items.blockDrops`) with `dropChance` through `Behaviours/Drops`
-  (containers spill as for any change), fuel among them catching instead (only at the edge of a
-  ray: fuel resists blasts like any fluid, 100); a vapour blast's walls go the same way; and a
-  fiery blast (every vapour blast) sets Fire on the `fireSpots` of its cells and its space's.
-  Unloaded chunks stop everything and are never generated.
+  the block ticker) plans at most `MaxIgnitionsPerTick` (4) queued cells, claiming every cell of a
+  plan for its blast; claimed cells are skipped by later fills and ignitions, and blasts reaching
+  them leave them, so each part of a body goes off once, on its own schedule.
+- Then it sets off the blasts that are due, in order: at most `MaxBlastsPerTick` (8), and no new
+  one once this tick's rays read `RayBudget` (60,000) blocks; the first always goes, the rest
+  wait. A fuel blast first consumes its cube's cells that are still fuel (air; released). Then,
+  as Minecraft: the affected cells; the handler (`setHandler`: the boot script's
+  `Entities.explode` and `Characters.explosion`) before any block goes, so the blast's own drops
+  are spared; the sound (`entity.generic.explode`, Audio/Sounds); every affected non-air block
+  becomes air, dropping its items (`Items.leafDrop` or `Items.blockDrops`) with `dropChance`
+  through `Behaviours/Drops` (containers spill as for any change); unclaimed fuel among them is
+  ignited instead (like TNT primed by a blast); and a fiery blast (every fuel blast) sets Fire on
+  its `fireSpots`. Fire next to fuel the plan did not reach (beyond MaxCells, or flowing in later)
+  lights it in turn, so huge bodies burn on in chains. A flash consumes its cells and sets fire on
+  the same rule. Unloaded chunks stop everything and are never generated.
 - `explode(world, x, y, z, power, fiery)` queues a single blast for the next step (`Api.explode`).
 
 **Entities**:

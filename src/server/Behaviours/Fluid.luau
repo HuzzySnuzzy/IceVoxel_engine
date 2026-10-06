@@ -60,8 +60,7 @@
 
 	Fuel touching Fire or lava (World/FuelBlast.isHot) catches: whenever the fuel or one of its
 	neighbours changes (fire or lava arriving next to it, the fuel flowing next to them), the
-	fuel's cell is handed to World/Explosions, which sets the whole connected body burning (and
-	blows up the vapour over it where that is closed in).
+	fuel's cell is handed to World/Explosions, which blows up the whole connected body.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

@@ -164,7 +164,7 @@ return function(t, shared, require, server, client)
 		t.near(Explosion.RAYS[1], -1 / math.sqrt(3), 1e-9, "Minecraft's order")
 	end)
 
-	t.test("blast resistance: Minecraft's numbers, hardness by default, fluids 100 (fuel too)", function()
+	t.test("blast resistance: Minecraft's numbers, hardness by default, fluids 100, fuel 0", function()
 		local function resistance(name: string): number
 			return Blocks.get(B[name]).blastResistance
 		end
@@ -182,9 +182,9 @@ return function(t, shared, require, server, client)
 		t.eq(resistance("Lava"), 100)
 		t.eq(resistance("CaveLava"), 100)
 		t.eq(resistance("Oil"), 100, "crude oil is no explosive")
-		t.eq(resistance("Fuel"), 100, "liquid petrol is no explosive")
-		t.eq(resistance("FuelFlow5"), 100)
-		t.eq(resistance("FuelFalling"), 100)
+		t.eq(resistance("Fuel"), 0)
+		t.eq(resistance("FuelFlow5"), 0)
+		t.eq(resistance("FuelFalling"), 0)
 		t.eq(resistance("Air"), 0)
 		t.eq(resistance("Fire"), 0)
 		t.eq(buffer.readf32(Blocks.blastResistanceLut, STONE * 4), 6, "the lookup table")
@@ -210,11 +210,11 @@ return function(t, shared, require, server, client)
 		t.ok(reads > 1352, "reads counted")
 	end)
 
-	t.test("explosion: in water (or fuel) nothing breaks; unloaded blocks stop rays", function()
+	t.test("explosion: in water nothing breaks; fuel does not shield; unloaded blocks stop rays", function()
 		local water = field({}, B.Water)
 		t.eq(#(Explosion.affected(water, 0.5, 64.5, 0.5, 4, constant(0.999))), 0, "water swallows TNT")
 		local fuel = field({}, FUEL)
-		t.eq(#(Explosion.affected(fuel, 0.5, 64.5, 0.5, 4, constant(0.999))), 0, "so does fuel")
+		t.ok(#(Explosion.affected(fuel, 0.5, 64.5, 0.5, 4, constant(0.5))) > 100, "fuel lets it through")
 		local edge = function(bx: number, _by: number, _bz: number): number?
 			return if bx >= 3 then nil else AIR
 		end
@@ -269,43 +269,59 @@ return function(t, shared, require, server, client)
 		t.near(half * 45, math.round(half * 45), 1e-9, "a share of 45 points")
 	end)
 
-	t.test("fuel: what catches it; it is flammable", function()
+	t.test("fuel: what catches it and what each cell counts", function()
 		t.ok(FuelBlast.isFuel(FUEL) and FuelBlast.isFuel(B.FuelFlow4) and FuelBlast.isFuel(B.FuelFalling), "fuel")
 		t.ok(not FuelBlast.isFuel(B.Oil) and not FuelBlast.isFuel(B.Water), "oil and water are not")
 		t.ok(FuelBlast.isHot(FIRE) and FuelBlast.isHot(LAVA), "fire and lava")
 		t.ok(FuelBlast.isHot(B.LavaFlow6) and FuelBlast.isHot(B.CaveLava), "flowing lava and the cave twin")
 		t.ok(not FuelBlast.isHot(B.Torch) and not FuelBlast.isHot(B.Oil) and not FuelBlast.isHot(nil), "not torches")
+		t.eq(FuelBlast.weight(FUEL), 1, "a source is a bucket")
+		t.eq(FuelBlast.weight(B.FuelFlow1), 7 / 8 * Settings.FlowingShare)
+		t.eq(FuelBlast.weight(B.FuelFlow7), 1 / 8 * Settings.FlowingShare)
+		t.eq(FuelBlast.weight(B.FuelFalling), Settings.FlowingShare)
+		t.eq(FuelBlast.weight(B.Water), 0)
 		local blocks = { [Coords.posKey(0, 10, 0)] = FUEL, [Coords.posKey(1, 10, 0)] = LAVA }
 		t.ok(FuelBlast.exposed(field(blocks, AIR), 0, 10, 0), "lava beside")
 		t.ok(not FuelBlast.exposed(field({ [Coords.posKey(0, 10, 0)] = FUEL }, AIR), 0, 10, 0), "nothing hot")
-		for _, name in { "Fuel", "FuelFlow3", "FuelFalling" } do
-			t.ok(Blocks.isFlammable(B[name]), `{name} burns`)
-			t.eq(Blocks.burnOdds(B[name]), 7, "about a minute a block under a fire")
+	end)
+
+	t.test("fuel: power grows with the cube root of the buckets (a bucket is TNT), capped", function()
+		t.near(FuelBlast.power(1), 4, 1e-9, "a bucket: TNT")
+		t.near(FuelBlast.power(8), 8, 1e-9)
+		t.near(FuelBlast.power(4), 4 * 4 ^ (1 / 3), 1e-9, "a 2 x 2 puddle: a charged creeper")
+		t.near(FuelBlast.power(27), 12, 1e-9)
+		t.eq(FuelBlast.power(1000), Settings.MaxPower, "capped")
+		t.eq(FuelBlast.power(1e-6), Settings.MinPower, "at least")
+		t.eq(FuelBlast.power(0), 0, "nothing")
+		-- A bucket poured on flat ground: a source and 112 flowing cells.
+		local puddle: { [number]: number } = {}
+		for dx = -7, 7 do
+			for dz = -7, 7 do
+				local d = math.abs(dx) + math.abs(dz)
+				if d <= 7 then
+					puddle[Coords.posKey(dx, 10, dz)] = if d == 0 then FUEL else B["FuelFlow" .. d]
+				end
+			end
 		end
-		t.ok(not Blocks.isFlammable(B.Oil), "crude oil doesn't")
-		t.ok(FuelBlast.isOpen(AIR) and FuelBlast.isOpen(FIRE) and FuelBlast.isOpen(B.Torch), "vapour passes")
-		t.ok(not FuelBlast.isOpen(STONE) and not FuelBlast.isOpen(FUEL) and not FuelBlast.isOpen(B.Water))
+		local body = FuelBlast.measure(field(puddle, AIR), 0, 10, 0)
+		t.eq(#body.cells, 113, "every cell")
+		t.near(body.volume, 1 + 42 * Settings.FlowingShare, 1e-9, "about 3.6 buckets")
+		local blasts = FuelBlast.plan(body, 0, 10, 0)
+		t.eq(blasts[1].delay, 0, "where it caught goes at once")
+		t.ok(blasts[1].power >= 4, "the source's blast")
+		local real, flashes = 0, 0
+		for _, blast in blasts do
+			if blast.power > 0 then
+				real += 1
+			else
+				flashes += 1
+			end
+		end
+		t.eq(real, 1, "one blast")
+		t.ok(flashes > 0, "the thin edge flashes into fire")
 	end)
 
-	t.test("fuel: a closed space's vapour blast from its energy (a room 1.2, a hall 5.4)", function()
-		-- 48 m3 of mix: 48 x 3.5 MJ x 0.2 / 4.6 MJ = 7.3 kg of TNT; 250 kg is Minecraft's TNT (4).
-		local mix, power, tnt, fill = FuelBlast.vapour(4, 48)
-		t.eq(mix, 48, "4 m2 fill up to 64 m3")
-		t.near(tnt, 48 * 3.5 * 0.2 / 4.6, 1e-9)
-		t.near(power, 4 * (tnt / 250) ^ (1 / 3), 1e-9)
-		t.ok(power > 1.1 and power < 1.4, `a room: a small blast ({power})`)
-		t.eq(fill, 1, "full")
-		local thin, _, _, part = FuelBlast.vapour(1, 48)
-		t.eq(thin, 16, "a square metre of puddle fills 16 m3")
-		t.near(part, 1 / 3, 1e-9)
-		local _, hall = FuelBlast.vapour(256, 4096)
-		t.ok(hall > 5.3 and hall < 5.5, `a 16 x 16 x 16 hall over a 16 x 16 pool: a big TNT blast ({hall})`)
-		t.ok(hall <= Settings.MaxPower)
-		t.eq(select(2, FuelBlast.vapour(0, 48)), 0, "no surface, no vapour")
-		t.eq(select(2, FuelBlast.vapour(4, 0)), 0)
-	end)
-
-	t.test("fuel: measuring follows connected fuel, at most MaxCells, never skipped or unloaded cells", function()
+	t.test("fuel: measuring follows connected fuel, at most MaxCells, never claimed or unloaded cells", function()
 		local line: { [number]: number } = {}
 		for x = 0, 99 do
 			line[Coords.posKey(x, 10, 0)] = FUEL
@@ -314,10 +330,11 @@ return function(t, shared, require, server, client)
 		t.eq(#FuelBlast.measure(get, 0, 10, 0, nil, 10).cells, 10, "capped")
 		local body = FuelBlast.measure(get, 50, 10, 0)
 		t.eq(#body.cells, 100, "both ways")
+		t.eq(body.volume, 100)
 		t.eq(body.distances[#body.distances], 50, "distance through the fuel")
-		local skip = { [Coords.posKey(60, 10, 0)] = true }
-		t.eq(#FuelBlast.measure(get, 50, 10, 0, skip).cells, 60, "stops at skipped fuel")
-		t.eq(#FuelBlast.measure(get, 60, 10, 0, skip).cells, 0, "skipped: nothing")
+		local claimed = { [Coords.posKey(60, 10, 0)] = true }
+		t.eq(#FuelBlast.measure(get, 50, 10, 0, claimed).cells, 60, "stops at claimed fuel")
+		t.eq(#FuelBlast.measure(get, 60, 10, 0, claimed).cells, 0, "claimed: nothing")
 		local cut = function(x: number, y: number, z: number): number?
 			if x >= 20 then
 				return nil
@@ -328,189 +345,116 @@ return function(t, shared, require, server, client)
 		t.eq(#FuelBlast.measure(get, 0, 11, 0).cells, 0, "no fuel there")
 	end)
 
-	-- A 4 x 4 room, 2 high, in stone, with a 2 x 2 pool of fuel in its floor and a glass east wall.
-	local function room(open: boolean?): { [number]: number }
-		local blocks: { [number]: number } = {}
-		for x = 0, 3 do
-			for z = 0, 3 do
-				for y = 11, 12 do
-					blocks[Coords.posKey(x, y, z)] = AIR
+	t.test("fuel: a big body is planned as several staggered blasts, each cell in one", function()
+		local pool: { [number]: number } = {}
+		for x = 0, 11 do
+			for z = 0, 11 do
+				for y = 10, 11 do
+					pool[Coords.posKey(x, y, z)] = FUEL
 				end
 			end
 		end
-		for x = 0, 1 do
-			for z = 0, 1 do
-				blocks[Coords.posKey(x, 10, z)] = FUEL
+		local body = FuelBlast.measure(field(pool, STONE), 0, 11, 0)
+		t.eq(#body.cells, 288)
+		t.eq(body.volume, 288)
+		local blasts = FuelBlast.plan(body, 0, 11, 0)
+		t.eq(#blasts, 16, "4 x 4 cubes")
+		local seen: { [number]: boolean } = {}
+		local last = -1
+		local delays: { [number]: boolean } = {}
+		for _, blast in blasts do
+			t.ok(blast.delay >= last, "in order")
+			last = blast.delay
+			delays[blast.delay] = true
+			t.ok(blast.power > 4 and blast.power <= Settings.MaxPower, "big blasts")
+			for _, key in blast.cells do
+				t.ok(not seen[key], "each cell once")
+				seen[key] = true
 			end
 		end
-		for z = 0, 3 do
-			for y = 11, 12 do
-				blocks[Coords.posKey(4, y, z)] = B.Glass
-			end
+		local distinct = 0
+		for _ in delays do
+			distinct += 1
 		end
-		if open then
-			-- A shaft up through the roof, out to the sky.
-			for y = 13, 40 do
-				blocks[Coords.posKey(3, y, 3)] = AIR
-			end
-		end
-		return blocks
-	end
-
-	-- Stone up to y 40 where `blocks` says nothing, the open sky above.
-	local function underSky(blocks: { [number]: number })
-		local get = field(blocks, STONE)
-		return function(x: number, y: number, z: number): number?
-			if y > 40 and blocks[Coords.posKey(x, y, z)] == nil then
-				return AIR
-			end
-			return get(x, y, z)
-		end
-	end
-
-	t.test("fuel: the space over it is closed by solid blocks, open through a shaft or past loaded blocks", function()
-		local get = field(room(), STONE)
-		local body = FuelBlast.measure(get, 0, 10, 0)
-		t.eq(#body.cells, 4)
-		local above = FuelBlast.surface(get, body)
-		t.eq(#above, 4, "the air over each cell")
-		local pocket = FuelBlast.pocket(get, above)
-		t.ok(pocket.sealed, "closed")
-		t.eq(#pocket.cells, 32, "the room's air")
-		local glass = 0
-		for _, key in pocket.walls do
-			if get(Coords.decodePosKey(key)) == B.Glass then
-				glass += 1
-			end
-		end
-		t.eq(glass, 8, "the glass wall bounds it")
-		local shaft = underSky(room(true))
-		local shaftAbove = FuelBlast.surface(shaft, FuelBlast.measure(shaft, 0, 10, 0))
-		t.ok(not FuelBlast.pocket(shaft, shaftAbove).sealed, "a shaft to the sky")
-		local edge = field(room(), nil)
-		t.ok(not FuelBlast.pocket(edge, above).sealed, "unloaded blocks around: not known closed")
-		t.ok(not FuelBlast.pocket(field({}, AIR), { Coords.posKey(0, 11, 0) }).sealed, "the open air: too big")
-		t.ok(not FuelBlast.pocket(field({}, STONE), {}).sealed, "nothing over it")
+		t.ok(distinct >= 5, `staggered over several ticks ({distinct})`)
+		t.eq(blasts[1].delay, 0)
+		t.ok(blasts[#blasts].delay >= 10, "the far corner a while later")
+		local one =
+			FuelBlast.plan(FuelBlast.measure(field({ [Coords.posKey(0, 10, 0)] = FUEL }, AIR), 0, 10, 0), 0, 10, 0)
+		t.eq(#one, 1, "a bucket: one blast")
+		t.near(one[1].power, 4, 1e-9)
+		t.eq(one[1].x, 0.5, "at the fuel's centre")
 	end)
 
-	t.test("fuel: flames run over the surface at 3 m/s; a blast only from vapour closed in", function()
-		local get = field(room(), STONE)
-		local plan = FuelBlast.plan(get, FuelBlast.measure(get, 0, 10, 0))
-		t.eq(#plan.flames, 4, "a flame over each cell")
-		local delays = {}
-		for _, flame in plan.flames do
-			delays[flame.delay] = (delays[flame.delay] or 0) + 1
-		end
-		t.eq(delays[0], 1, "where it caught at once")
-		t.eq(delays[math.floor(1 / Settings.FlameSpeed)], 2, "a block on, a third of a second later")
-		local blast = plan.blast :: FuelBlast.Blast
-		t.ok(blast ~= nil, "closed in: it explodes")
-		t.near(blast.power, select(2, FuelBlast.vapour(4, 32)), 1e-9)
-		t.eq(blast.fill, 1)
-		t.eq(#blast.walls, 8, "the glass gives, the stone holds")
-		t.near(blast.x, 2, 1e-9, "the room's centre")
-		t.eq(#blast.pocket, 32)
-		t.eq(FuelBlast.plan(get, FuelBlast.measure(get, 0, 10, 0), true).blast, nil, "burning: no blast")
-		local open = underSky(room(true))
-		local burn = FuelBlast.plan(open, FuelBlast.measure(open, 0, 10, 0))
-		t.eq(burn.blast, nil, "open: it only burns")
-		t.eq(#burn.flames, 4)
-	end)
-
-	t.test("world: a pool in the open catches from lava and burns, with no blast; the fire eats it", function()
+	t.test("world: fuel next to lava explodes like TNT, consumed, the lava stays", function()
 		local world, _, calls, run = newWorld()
 		local y = FLOOR - 1
-		for x = 6, 11 do
-			for z = 6, 11 do
-				world:setBlock(x, y, z, FUEL)
-			end
-		end
+		world:setBlock(8, y, 8, FUEL)
 		run(3)
-		t.eq(
-			countIn(world, function(b)
-				return b == FIRE
-			end, 0, 20, y, y + 2, 0, 20),
-			0,
-			"fuel alone is calm"
-		)
-		world:setBlock(5, y, 6, LAVA)
-		run(1)
-		t.ok(Explosions.isBurning(world, 6, y, 6), "it caught")
-		t.ok(Explosions.isBurning(world, 11, y, 11), "the whole pool")
+		t.eq(#calls, 0, "nothing hot yet")
+		world:setBlock(9, y, 8, LAVA)
 		run(2)
-		t.eq(world:peekBlock(6, y + 1, 6), FIRE, "flames where it caught")
-		t.ok(world:peekBlock(11, y + 1, 11) ~= FIRE, "not yet at the far corner")
-		run(80)
-		t.eq(#calls, 0, "no blast in the open")
-		local flames = countIn(world, function(b)
-			return b == FIRE
-		end, 6, 11, y + 1, y + 1, 6, 11)
-		t.ok(flames >= 30, `the surface burns ({flames} of 36)`)
-		run(3000)
-		-- (Burnt sources fill with flowing fuel from the rest, which burns too.)
-		local left = countIn(world, function(b)
-			return b == FUEL
-		end, 0, 20, y - 2, y + 2, 0, 20)
-		t.ok(left < 30, `the fire eats the fuel ({left} of 36 sources left after 150 s)`)
-		t.eq(#calls, 0, "and never explodes")
-	end)
-
-	t.test("world: fuel in a closed room explodes: glass and planks blown out, stone holds, fire inside", function()
-		local world, _, calls, run = newWorld(5)
-		local y = FLOOR
-		-- A 4 x 4 x 3 room on the stone floor: planks on two sides and the roof, stone on two.
-		for x = 7, 12 do
-			for z = 7, 12 do
-				for dy = 0, 4 do
-					local edge = x == 7 or x == 12 or z == 7 or z == 12 or dy == 4
-					if edge then
-						local wall = if dy == 4 or x == 12 or z == 12 then B.Planks else STONE
-						world:setBlock(x, y + dy, z, wall)
-					end
-				end
-			end
-		end
-		for x = 8, 9 do
-			for z = 8, 9 do
-				world:setBlock(x, y, z, FUEL)
-			end
-		end
-		run(3)
-		t.eq(#calls, 0, "calm")
-		world:setBlock(8, y - 1, 8, LAVA)
-		run(3)
 		t.eq(#calls, 1, "one blast")
-		local expected = select(2, FuelBlast.vapour(4, 4 * 4 * 4 - 4))
-		t.near(calls[1].power, expected, 1e-9, `the room's vapour ({expected})`)
-		t.ok(calls[1].power < 2, "a gas explosion, not a bomb")
-		t.eq(world:peekBlock(12, y + 2, 10), AIR, "the planks wall is gone")
-		t.eq(world:peekBlock(10, y + 4, 10), AIR, "the roof too")
-		t.eq(world:peekBlock(7, y + 2, 10), STONE, "the stone wall holds")
-		t.ok(countIn(world, FuelBlast.isFuel, 8, 9, y, y, 8, 9) == 4, "the fuel is still there: it burns")
-		run(40)
-		t.eq(#calls, 1, "a burning pool doesn't go off again")
-		t.ok(countIn(world, function(b)
-			return b == FIRE
-		end, 7, 12, y, y + 4, 7, 12) > 0, "fire in the room")
+		t.near(calls[1].power, 4, 1e-9, "a bucket's")
+		t.eq(calls[1].x, 8.5)
+		t.ok(world:peekBlock(8, y, 8) ~= FUEL, "the fuel burnt up")
+		t.eq(world:peekBlock(9, y, 8), LAVA, "lava resists")
+		t.eq(world:peekBlock(7, y, 8), AIR, "the stone beside it is gone")
+		t.eq(world:peekBlock(8, y - 6, 8), STONE, "deep stone stays")
+		t.eq(Explosions.pending(world), 0)
 	end)
 
-	t.test("world: fire over fuel catches it; fuel flowing next to lava catches; burning only refreshes", function()
+	t.test("world: fuel next to fire explodes; fuel flowing next to lava catches", function()
 		local world, _, calls, run = newWorld()
 		local y = FLOOR - 1
 		world:setBlock(8, y, 8, FUEL)
 		world:setBlock(8, y + 1, 8, FIRE)
 		run(2)
-		t.ok(Explosions.isBurning(world, 8, y, 8), "fire above")
-		t.eq(#calls, 0, "in the open: no blast")
+		t.eq(#calls, 1, "fire above")
 
 		local world2, _, calls2, run2 = newWorld()
 		world2:setBlock(8, y, 8, LAVA)
 		world2:setBlock(13, FLOOR, 8, FUEL)
 		run2(60)
-		t.ok(Explosions.isBurning(world2, 13, FLOOR, 8), "the flowing fuel reached the lava and its source caught")
-		t.eq(#calls2, 0)
-		run2(200)
-		t.eq(Explosions.pending(world2), 0, "the flame front is through, nothing piling up")
+		t.ok(#calls2 >= 1, "the flowing fuel reached the lava and went off")
+		t.ok(world2:peekBlock(13, FLOOR, 8) ~= FUEL, "its source with it")
+	end)
+
+	t.test("world: a pool chains into staggered blasts that consume it all", function()
+		local world, _, calls, run = newWorld(11)
+		for x = 4, 15 do
+			for z = 4, 15 do
+				for y = FLOOR - 2, FLOOR - 1 do
+					world:setBlock(x, y, z, FUEL)
+				end
+			end
+		end
+		run(2)
+		t.eq(#calls, 0, "fuel alone is calm")
+		world:setBlock(3, FLOOR - 1, 4, LAVA)
+		run(1)
+		t.ok(#calls >= 1, "the near corner goes at once")
+		t.ok(Explosions.isClaimed(world, 15, FLOOR - 1, 15), "the far corner is waiting")
+		t.eq(world:peekBlock(15, FLOOR - 1, 15), FUEL, "untouched by the first blasts")
+		run(60)
+		t.ok(#calls >= 16, `one blast per cube ({#calls})`)
+		local ticks: { [number]: number } = {}
+		local maxPower = 0
+		for _, call in calls do
+			ticks[call.tick] = (ticks[call.tick] or 0) + 1
+			maxPower = math.max(maxPower, call.power)
+		end
+		local distinct = 0
+		for _, n in ticks do
+			distinct += 1
+			t.ok(n <= Settings.MaxBlastsPerTick, "per tick bound")
+		end
+		t.ok(distinct >= 5, `spread over ticks ({distinct})`)
+		t.eq(maxPower, Settings.MaxPower, "the middle of the pool hits the cap")
+		run(200)
+		t.eq(countIn(world, FuelBlast.isFuel, -4, 24, FLOOR - 10, FLOOR + 4, -4, 24), 0, "no fuel left")
+		t.ok(not Explosions.isClaimed(world, 15, FLOOR - 1, 15), "claims released")
+		t.eq(Explosions.pending(world), 0, "nothing waiting")
 	end)
 
 	t.test("world: fiery blasts set fire over opaque blocks; plain ones don't; drops 1 / power", function()
