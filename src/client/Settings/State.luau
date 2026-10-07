@@ -7,7 +7,9 @@
 	  chosen    the settings the player picked (only those are saved: the rest follow the preset
 	            and Roblox's quality level, PlayerSettings.load). Picking a preset chooses
 	            `preset` and lets every setting it sets follow it again; "Reset" does the same
-	            for the current preset; "Defaults" forgets every choice.
+	            for the current preset; "Defaults" forgets every choice (key bindings too), and
+	            `unset` forgets some (the Key Binds screen's Reset and Reset Keys: a key on its
+	            default is not saved, as any other setting).
 	  revision  bumps with every change of what is saved, so the controller knows when to send.
 	  received  the server's saved profile arrived (`receive`: merged under the choices the
 	            player made this session before it came).
@@ -115,6 +117,33 @@ end
 -- "Reset": the current preset's values again.
 function State.reset(self: State): { string }
 	return State.setPreset(self, self.values.preset)
+end
+
+--[[
+	Forgets the choice of each of `keys` (not presets' settings): back to the device's default,
+	no longer saved. The Key Binds screen's Reset (one key) and Reset Keys (all of them).
+]]
+function State.unset(self: State, keys: { string }): { string }
+	local defaults = PlayerSettings.defaults(self.mobile, self.quality)
+	local changed = {}
+	local forgot = false
+	for _, key in keys do
+		local entry = PlayerSettings.entry(key)
+		assert(not entry.preset and key ~= "preset", `State.unset: {key} follows the preset`)
+		if self.chosen[key] then
+			self.chosen[key] = nil
+			forgot = true
+		end
+		local value = defaults[key]
+		if self.values[key] ~= value then
+			self.values[key] = value
+			table.insert(changed, key)
+		end
+	end
+	if forgot or #changed > 0 then
+		self.revision += 1
+	end
+	return changed
 end
 
 -- "Defaults": every setting back to the device's default (its preset by the quality level).

@@ -4,12 +4,18 @@
 	against the client's block data at 20 ticks per second. The Roblox character is purely
 	cosmetic: it is put where the hull is every frame and never touches anything itself.
 
-	  Input     the default control scripts' move vector (PlayerModule: keyboard, gamepad, touch;
-	            Humanoid.MoveDirection if a game replaces them), turned by the camera like the
-	            default controls do, and Humanoid.Jump. Sprint and sneak keys / touch buttons
-	            (Config.Movement): the sprint key toggles sprinting (or is held, ToggleSprint =
-	            false: the Sprint setting; switching it lets go of whatever the old mode latched,
-	            `followSprintMode`); double tapping forward sprints too.
+	  Input     on a keyboard and mouse (Settings/Keybinds.usingKeys: Roblox's last input) the key
+	            bindings (Options > Controls > Key Binds): Walk Forwards / Backwards, Strafe Left /
+	            Right and Jump held (Keybinds.isDown); otherwise the default control scripts' move
+	            vector (PlayerModule: gamepad, touch; Humanoid.MoveDirection if a game replaces
+	            them), turned by the camera like the default controls do, and Humanoid.Jump. (So the
+	            control scripts' own W A S D, arrows and Space move nothing once rebound.) Sprint
+	            and sneak: their key bindings plus Config.Movement's gamepad buttons, bound through
+	            ContextActionService (again when the bindings change), and the touch buttons. The
+	            sprint key toggles sprinting (or is held, ToggleSprint = false: the Sprint setting;
+	            switching it lets go of whatever the old mode latched, `followSprintMode`); double
+	            tapping forward sprints too. The sneak key is held (or toggles, ToggleSneak: the
+	            Sneak setting, likewise); the touch button always toggles.
 	  Ticks     fixed 50 ms steps like Minecraft; the character is drawn interpolated between the
 	            last two ticks (as Minecraft does), before the camera updates each frame. Steps up
 	            (Config.Movement.StepHeight, just over a block) are drawn as a quick climb.
@@ -25,7 +31,12 @@
 	            field of view widens while flying (x 1.1) and sprinting (Config.Movement.SprintFov),
 	            eased like Minecraft's FOV modifier, on top of the FOV setting (`setFieldOfView`;
 	            without one, whatever the camera's field of view is), scaled by the FOV Effects
-	            setting (`setFovEffects`, Minecraft's: 0 keeps the field of view still).
+	            setting (`setFovEffects`, Minecraft's: 0 keeps the field of view still). Minecraft's
+	            view bobbing while walking on the ground (`setViewBobbing`) and the hurt tilt when
+	            health drops (`setDamageTilt`'s share: Player/ViewBob): applied after Roblox's
+	            camera and the screen effects have moved it (VIEW_BOB_PRIORITY) and taken off
+	            again before the camera updates (`unbob`), so the camera's own turning never takes
+	            them in; none while frozen or spectating someone.
 	  Modes     the game mode attribute (Shared/GameMode) gives the hull its abilities
 	            (PlayerPhysics.setGameMode): creative may fly (double tap jump); spectators always
 	            fly, through everything (noClip), and their mouse wheel changes the flying speed
@@ -70,18 +81,21 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
+local KeyBindings = require(Shared.KeyBindings)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
 local EffectState = require(script.Parent.EffectState)
 local Exertion = require(script.Parent.Exertion)
+local ViewBob = require(script.Parent.ViewBob)
 
 local BLOCK = Config.BlockSize
 local Movement = Config.Movement
@@ -91,6 +105,9 @@ local TICK = 1 / TICK_RATE
 local MAX_TICKS_PER_FRAME = 5
 -- Runs right before the camera, so the camera follows this frame's position.
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value - 1
+-- The view bob and hurt tilt go on after the camera and the screen effects (Rendering/
+-- ExplosionView + 1, FluidFog + 2, EffectView + 3) have moved it.
+local VIEW_BOB_PRIORITY = Enum.RenderPriority.Camera.Value + 4
 -- The server moves new characters to the spawn first; don't trust their position before that.
 local SPAWN_SETTLE = 3
 -- A root part further than this (studs) from where the controller left it was moved by a script.
@@ -155,6 +172,14 @@ local fovSetting: number? = nil
 local fovEffects = 1
 -- A status effect's sway of the field of view (Nausea), a multiplier.
 local fovSway = 1
+-- The View Bobbing and Damage Tilt settings (Settings/: on, and the tilt's share 0..1).
+local viewBobbing = true
+local damageTilt = 1
+-- The camera moved by the view bob last frame: what it was before and what it was set to
+-- (read back, so an untouched camera compares equal), to put it back before the camera updates.
+local bobCamera: Camera? = nil
+local bobClean = CFrame.identity
+local bobSet = CFrame.identity
 
 -- The player a spectator spectates (nil: none), and the camera mode to go back to afterwards.
 local spectated: Player? = nil
@@ -221,19 +246,30 @@ function MovementController.knockback(kx: number, ky: number, kz: number)
 	PlayerPhysics.knockback(view.state, kx, ky, kz)
 end
 
-local function keyCodes(names: { string }): { Enum.KeyCode }
-	local codes = {}
+--[[
+	What ContextActionService binds for the sprint or sneak action: the key binding `action`
+	(Settings/Keybinds; a key or a mouse button, none when not bound) and Config's gamepad buttons
+	among `names` (Config's keyboard key is only the binding's default).
+]]
+local function actionInputs(action: string, names: { string }): { any }
+	local inputs: { any } = {}
+	local bound = Keybinds.input(action)
+	if bound then
+		table.insert(inputs, bound)
+	end
 	for _, name in names do
-		local ok, code = pcall(function()
-			return (Enum.KeyCode :: any)[name]
-		end)
-		if ok and code then
-			table.insert(codes, code)
-		else
-			warn(`[IceVoxel] Config.Movement: unknown key {name}`)
+		if KeyBindings.find(name) == nil then
+			local ok, code = pcall(function()
+				return (Enum.KeyCode :: any)[name]
+			end)
+			if ok and code then
+				table.insert(inputs, code)
+			else
+				warn(`[IceVoxel] Config.Movement: unknown key {name}`)
+			end
 		end
 	end
-	return codes
+	return inputs
 end
 
 local function setGroup(part: Instance, group: string)
@@ -337,7 +373,8 @@ function MovementController.setFovEffects(scale: number)
 	fovEffects = math.clamp(scale, 0, 1)
 end
 
--- The FOV Effects setting's share (0..1), for other screen effects (Nausea: Rendering/EffectView).
+-- The FOV Effects setting's share (0..1). (Nausea's wobble follows Distortion Effects instead:
+-- Rendering/EffectView.setDistortion.)
 function MovementController.fovEffects(): number
 	return fovEffects
 end
@@ -346,6 +383,27 @@ end
 -- applied every frame (1: none).
 function MovementController.setFovSway(multiplier: number)
 	fovSway = multiplier
+end
+
+-- The View Bobbing setting: the camera bobs while walking (Minecraft's bobView).
+function MovementController.setViewBobbing(on: boolean)
+	viewBobbing = on
+end
+
+-- The Damage Tilt setting: how far the camera tilts when hurt (0..1 of Minecraft's 14 degrees).
+function MovementController.setDamageTilt(share: number)
+	damageTilt = math.clamp(share, 0, 1)
+end
+
+-- Takes last frame's view bob off the camera (before the camera updates), if nothing else moved it.
+local function unbob()
+	local camera = bobCamera
+	if camera then
+		bobCamera = nil
+		if camera.CFrame == bobSet then
+			camera.CFrame = bobClean
+		end
+	end
 end
 
 function MovementController.start(world: ClientWorld.ClientWorld, streamer: Streamer)
@@ -387,11 +445,20 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	-- Sprint / sneak keys and touch toggles.
 	local sprintHeld, sprintOn = false, false
 	local sneakHeld, sneakOn = false, false
-	local function bind(name: string, keys: { string }, title: string, onChange: (held: boolean, touch: boolean) -> ())
+	-- The key binding each action is bound with now (to bind again when it changes).
+	local boundWith: { [string]: any } = {}
+	local function bind(
+		name: string,
+		action: string,
+		buttons: { string },
+		title: string,
+		onChange: (held: boolean, touch: boolean) -> ()
+	)
+		boundWith[name] = Keybinds.input(action) or false
 		ContextActionService:BindActionAtPriority(name, function(_, inputState: Enum.UserInputState, input: InputObject)
 			local touch = input.UserInputType == Enum.UserInputType.Touch
-			-- In an inventory screen, gamepad buttons (B closes it) and touches go on to the
-			-- screens; releases still count, so nothing stays held.
+			-- In an inventory screen, gamepad buttons (B closes it), mouse buttons and touches go
+			-- on to the screens; releases still count, so nothing stays held.
 			local pass = Screens.isOpen() and input.UserInputType ~= Enum.UserInputType.Keyboard
 			if inputState == Enum.UserInputState.Begin then
 				if not pass then
@@ -402,7 +469,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			end
 			-- Keep Shift from also toggling the shift lock.
 			return if pass then Enum.ContextActionResult.Pass else Enum.ContextActionResult.Sink
-		end, Movement.TouchButtons, Enum.ContextActionPriority.High.Value, table.unpack(keyCodes(keys)))
+		end, Movement.TouchButtons, Enum.ContextActionPriority.High.Value, table.unpack(actionInputs(action, buttons)))
 		if Movement.TouchButtons then
 			ContextActionService:SetTitle(name, title)
 		end
@@ -422,7 +489,16 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			setTitle("IceVoxelSprint", "Sprint")
 		end
 	end
-	bind("IceVoxelSprint", Movement.SprintKeys, "Sprint", function(held, touch)
+	-- The Sneak setting likewise (the touch button toggles either way).
+	local sneakToggles = Movement.ToggleSneak
+	local function followSneakMode()
+		if Movement.ToggleSneak ~= sneakToggles then
+			sneakToggles = Movement.ToggleSneak
+			sneakHeld, sneakOn = false, false
+			setTitle("IceVoxelSneak", "Sneak")
+		end
+	end
+	local function onSprint(held: boolean, touch: boolean)
 		followSprintMode()
 		if touch or Movement.ToggleSprint then
 			-- (Ctrl+Q in an inventory screen must not toggle sprinting.)
@@ -438,15 +514,39 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		else
 			sprintHeld = held
 		end
-	end)
-	bind("IceVoxelSneak", Movement.SneakKeys, "Sneak", function(held, touch)
-		if touch then
-			if held then
+	end
+	local function onSneak(held: boolean, touch: boolean)
+		followSneakMode()
+		if touch or Movement.ToggleSneak then
+			-- (A shift click in an inventory screen must not toggle sneaking.)
+			if held and (touch or not inputTaken()) then
 				sneakOn = not sneakOn
 				setTitle("IceVoxelSneak", if sneakOn then "Sneaking" else "Sneak")
 			end
 		else
 			sneakHeld = held
+		end
+	end
+	local function bindSprint()
+		bind("IceVoxelSprint", "sprint", Movement.SprintKeys, if sprintOn then "Sprinting" else "Sprint", onSprint)
+	end
+	local function bindSneak()
+		bind("IceVoxelSneak", "sneak", Movement.SneakKeys, if sneakOn then "Sneaking" else "Sneak", onSneak)
+	end
+	bindSprint()
+	bindSneak()
+	-- A key binding changed (Options > Controls > Key Binds): bound again with the new key; what
+	-- the old key held lets go.
+	Keybinds.changed:Connect(function()
+		if (Keybinds.input("sprint") or false) ~= boundWith.IceVoxelSprint then
+			ContextActionService:UnbindAction("IceVoxelSprint")
+			sprintHeld = false
+			bindSprint()
+		end
+		if (Keybinds.input("sneak") or false) ~= boundWith.IceVoxelSneak then
+			ContextActionService:UnbindAction("IceVoxelSneak")
+			sneakHeld = false
+			bindSneak()
 		end
 	end)
 
@@ -493,6 +593,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end
 		table.clear(connections)
 		RunService:UnbindFromRenderStep("IceVoxelMovement")
+		RunService:UnbindFromRenderStep("IceVoxelViewBob")
+		unbob()
 		MovementController.current = nil
 		MovementController.spectate(nil)
 		resetFov()
@@ -629,9 +731,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end
 		table.insert(connections, hum.HealthChanged:Connect(dieIfDead))
 
-		-- Jump held now (never while a screen is open).
+		-- Jump held now (never while a screen is open): the Jump key binding on a keyboard,
+		-- else the control scripts' (gamepad A, the touch jump button).
 		local function jumpHeld(): boolean
-			return hum.Jump and not inputTaken()
+			if inputTaken() then
+				return false
+			end
+			return if Keybinds.usingKeys() then Keybinds.isDown("jump") else hum.Jump
 		end
 
 		local function readInput(dt: number): PlayerPhysics.Input
@@ -657,10 +763,15 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			local rightX, rightZ = -headingZ, headingX
 
 			-- Input relative to the camera (keyboard diagonals are longer than 1, as in Minecraft;
-			-- the physics normalises them).
+			-- the physics normalises them): the movement key bindings on a keyboard, else the
+			-- control scripts' stick or thumbstick.
 			local strafe, ahead
-			local vector = controlMoveVector()
-			if vector then
+			local usingKeys = Keybinds.usingKeys()
+			local vector = if usingKeys then nil else controlMoveVector()
+			if usingKeys then
+				strafe = (if Keybinds.isDown("right") then 1 else 0) - (if Keybinds.isDown("left") then 1 else 0)
+				ahead = (if Keybinds.isDown("forward") then 1 else 0) - (if Keybinds.isDown("back") then 1 else 0)
+			elseif vector then
 				strafe, ahead = vector.X, -vector.Z
 			else
 				local move = hum.MoveDirection
@@ -693,6 +804,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 
 			jumpLatched = jumpLatched or jumpHeld()
 			followSprintMode()
+			followSneakMode()
 			return {
 				moveX = moveX,
 				moveZ = moveZ,
@@ -707,6 +819,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		end
 
 		RunService:BindToRenderStep("IceVoxelMovement", RENDER_PRIORITY, function(dt: number)
+			-- (Last frame's bob off first: the input reads the camera's own direction.)
+			unbob()
 			if rootPart.Parent == nil then
 				return
 			end
@@ -851,6 +965,46 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					* ((state.speedFactor + 1) / 2)
 			end
 			updateFov(dt, fov)
+		end)
+
+		-- Minecraft's view bobbing and hurt tilt (Player/ViewBob), after the camera and the screen
+		-- effects moved it; `unbob` takes them off before the camera updates again.
+		local walk, bob = 0, 0
+		local hurtAt = -math.huge
+		local lastHealth = hum.Health
+		table.insert(
+			connections,
+			hum.HealthChanged:Connect(function(health: number)
+				if health < lastHealth and health > 0 then
+					hurtAt = os.clock()
+				end
+				lastHealth = health
+			end)
+		)
+		RunService:BindToRenderStep("IceVoxelViewBob", VIEW_BOB_PRIORITY, function(dt: number)
+			local camera = workspace.CurrentCamera
+			if camera == nil or hum.Health <= 0 then
+				return
+			end
+			local state = view.state
+			local still = view.frozen or spectated ~= nil
+			local bobbing = not still and state.onGround and not state.swimming and not state.flying
+			walk, bob = ViewBob.advance(walk, bob, view.speed, bobbing, dt)
+			local x, y, roll, pitch = 0, 0, 0, 0
+			if viewBobbing and not still and bob > 0 then
+				x, y, roll, pitch = ViewBob.bobView(walk, bob)
+			end
+			roll += ViewBob.hurtRoll((os.clock() - hurtAt) * ViewBob.TICKS_PER_SECOND, damageTilt)
+			if x == 0 and y == 0 and roll == 0 and pitch == 0 then
+				return
+			end
+			-- The view moves by the bob, so the camera by its inverse.
+			local clean = camera.CFrame
+			local offset = CFrame.new(x * BLOCK, y * BLOCK, 0)
+				* CFrame.Angles(0, 0, math.rad(roll))
+				* CFrame.Angles(math.rad(pitch), 0, 0)
+			camera.CFrame = clean * offset:Inverse()
+			bobCamera, bobClean, bobSet = camera, clean, camera.CFrame
 		end)
 	end
 

@@ -4,7 +4,8 @@
 	Options menu (the darkened world, the free mouse, the controls off). Minecraft's advancement
 	screen in this game's UI style: a panel of WIDTH x HEIGHT GUI pixels.
 
-	  Opening   Config.Progression.Key (K) or GamepadButton (D-pad left) with no screen open, and
+	  Opening   the Skill Tree key binding (Settings/Keybinds; Config.Progression.Key, K, by default)
+	            or GamepadButton (D-pad left) with no screen open, and
 	            the HUD's touch button over the gear (Hud.onSkillsButton). K, E, Escape, gamepad B
 	            and Done close it (the D-pad moves the gamepad's selection while it is open).
 	  Header    "Skills", then the player's Age, knowledge level and skill points to spend.
@@ -38,6 +39,7 @@ local Progression = require(Shared.Progression)
 
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local FormWidgets = require(script.Parent.FormWidgets)
 local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
@@ -515,19 +517,18 @@ function SkillTreeScreen.start()
 	end)
 	Hud.onSkillsButton(SkillTreeScreen.toggle)
 
-	-- K (and the gamepad button) with no screen open; K again closes it (Screens closes panels
-	-- with E, Escape and B).
-	local key = Config.Progression.Key
+	-- K (the Skill Tree key binding, Settings/Keybinds) and the gamepad button with no screen
+	-- open; K again closes it (Screens closes panels with E, Escape and B).
 	local pad = Config.Progression.GamepadButton
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-		local code = input.KeyCode
+		local isKey = Keybinds.matches("skillTree", input)
 		-- (Not while typing: the chat and text boxes take the key.)
-		if (code.Name ~= key and code.Name ~= pad) or processed or UserInputService:GetFocusedTextBox() then
+		if (not isKey and input.KeyCode.Name ~= pad) or processed or UserInputService:GetFocusedTextBox() then
 			return
 		end
 		if SkillTreeScreen.isOpen() then
 			-- (The D-pad moves the gamepad's selection here: B closes, as Screens does.)
-			if code.Name == key then
+			if isKey then
 				close()
 			end
 		elseif not Screens.isOpen() and not GuiService.MenuIsOpen then

@@ -1485,6 +1485,13 @@ prediction.
   the variant on the clicked face's side.
 - Middle click picks the block (Minecraft's pick block), `Q` drops the held item (`Ctrl`: the
   stack). On touch screens a tap uses or places and holding breaks.
+- The mouse buttons and keys here are the key bindings Attack/Destroy, Use Item/Place Block,
+  Pick Block and Drop Selected Item (`Keybinds.matches`, each on its own, so an input bound to
+  two actions does both, as Minecraft's). A use bound to the right button with a free mouse keeps
+  the short-click rule (Roblox's camera turns on a right drag); bound to anything else it repeats
+  while held. The debug key held (the Debug Screen binding) keeps the drop key from dropping (its
+  `+ Q` is the debug list). Each attack sent starts the attack indicator's recovery
+  (`Ui/AttackIndicator.attacked`).
 
 ### WAILA (`Ui/Waila`, `Ui/WailaInfo`)
 
@@ -1586,10 +1593,14 @@ hull is.
   R15 / R6), the character collision group and the teleport attributes.
 - **`Player/MovementController`** runs at `RenderPriority.Camera − 1`, so the camera follows this
   frame's position. Each frame it:
-  - Reads input from the default control scripts' move vector (`PlayerModule` `GetMoveVector`). It
-    turns that by the camera the way the `ControlModule` does, and leaves keyboard diagonals longer
-    than 1 so diagonal sprinting works as in Minecraft. `Humanoid.MoveDirection` is the fallback.
-    Jump comes from `Humanoid.Jump`, latched between ticks so short taps count.
+  - Reads input: on a keyboard and mouse (`Keybinds.usingKeys`: a keyboard, and Roblox's last
+    input no gamepad or touch) the key bindings Walk Forwards / Backwards, Strafe Left / Right
+    and Jump held (`Keybinds.isDown`, nothing while typing), so the control scripts' own W A S D,
+    arrows and Space move nothing once rebound; otherwise the default control scripts' move
+    vector (`PlayerModule` `GetMoveVector`: gamepad sticks, the touch thumbstick) and
+    `Humanoid.Jump`. It turns that by the camera the way the `ControlModule` does, and leaves
+    keyboard diagonals longer than 1 so diagonal sprinting works as in Minecraft.
+    `Humanoid.MoveDirection` is the fallback. Jump is latched between ticks so short taps count.
   - Runs whole ticks, at most 5 per frame.
   - Draws the character interpolated between the last two ticks:
     - `root.CFrame` and `AssemblyLinearVelocity` are set; the client owns the character, so this
@@ -1613,11 +1624,22 @@ hull is.
 
   Other duties:
   - Sprint and sneak are `ContextActionService` actions at High priority that sink their keys, so
-    Left Shift no longer toggles shift lock (Right Shift still does). With `ToggleSprint` (the
-    Sprint setting), the sprint key turns sprinting on and off; turning it off also stops a sprint
-    started by double tapping. Switching the setting between toggle and hold lets go of whatever
-    the old mode latched (`followSprintMode`), so a sprint can always be stopped. While a screen
-    (inventory) or the game mode switcher is open, the input is neutral.
+    Left Shift no longer toggles shift lock (Right Shift still does). Their keys are the Sprint
+    and Sneak key bindings plus `Config.Movement`'s gamepad buttons; a changed binding binds the
+    action again (`Keybinds.changed`). With `ToggleSprint` (the Sprint setting), the sprint key
+    turns sprinting on and off; turning it off also stops a sprint started by double tapping.
+    `ToggleSneak` (the Sneak setting, Hold by default as Minecraft's) does the same for sneaking
+    (never from a shift click in a screen). Switching either setting lets go of whatever the old
+    mode latched (`followSprintMode`, `followSneakMode`), so a sprint can always be stopped.
+    While a screen (inventory) or the game mode switcher is open, the input is neutral.
+  - View bobbing and the hurt tilt (`Player/ViewBob`, pure, tested in tests/spec/Keybinds):
+    Minecraft's `GameRenderer.bobView` (walk distance 0.6 a block, the bob easing 0.4 a tick to
+    the speed a tick, at most 0.1, on the ground only: 0.05 blocks sideways, 0.1 down, 0.3° of
+    roll, 0.5° of pitch while walking) and `bobHurt` (−sin(t⁴π) × 14° over the 10 ticks after
+    health drops, times Damage Tilt). The camera moves by the view's inverse at
+    `Camera + 4` (after ExplosionView, FluidFog and EffectView) and the move comes off again
+    (`unbob`, only if nothing else moved the camera) at the start of the next frame's movement
+    step, before Roblox's camera reads its own look vector, so the pitch never accumulates.
   - The hull stays frozen until the chunk under it and the eight around it are shown, and after
     teleports (meanwhile the renderer may build longer per frame: `ChunkStreamer.setFrozen`).
     Server teleports arrive as attributes and are passed on to the streamer at once
@@ -1869,21 +1891,26 @@ Players tune the view, performance, sounds, controls and HUD for themselves in M
 screen; Config gives every default and the presets.
 
 - **The schema** (`Shared/PlayerSettings`, pure, tested in tests/spec/PlayerSettings). Every
-  setting is one number (toggles 0 / 1, choices an index) with an append-only u8 id, a key, kind
-  (slider, toggle, choice), range and step, desktop and phone defaults (and a phone maximum: the
-  view stops at 1024 there), its page, the effect that applies it, and whether presets set it. It
+  setting is one number (toggles 0 / 1, choices an index, key bindings a key's code) with an
+  append-only u8 id, a key, kind (slider, toggle, choice, key), range and step, desktop and phone
+  defaults (and a phone maximum: the view stops at 1024 there), its page, the effect that applies
+  it, and whether presets set it. Plain settings have ids 1, 2, 3... (their place in the list);
+  the key bindings are generated from Shared/KeyBindings' actions from id 128 on (`KEY_BASE`), so
+  both append without meeting. It
   also holds the presets (High is Config's own view, Low its `Mobile` values with shadows off and
   hidden terrain skipped), the default preset per device (phones Low; others by Roblox's saved
   graphics quality: 1-3 Low, 4-6 Medium, 7-10 or Automatic High), the LOD balance rule (split
   distance at least 2, full detail at most split + 1, the underground split from the cave view
   between the two; checked against real `LodTree` selections for every slider combination), what
   values mean (`lod`, `revealReach`, `revealRadii`, `lichenLightDistance`, `buildBudget`,
-  `caveAmbient`, `fovModifier`, `volume`), the wire format and the DataStore record.
+  `caveAmbient`, `fovModifier`, `volume`, `mouseSensitivity`, `scrollSensitivity`, `scroll`,
+  `distortion`), the wire format and the DataStore record.
 - **State** (`Settings/State`, pure). One values table for the session, changed in place
   (`Rendering/ViewSettings` reads the same table), and which settings the player chose. Only
   chosen settings are saved, so everything else keeps following the preset and Roblox's quality
   level. Picking a preset chooses `preset` and lets the settings it sets follow it again; Reset
-  does the same for the current preset; Defaults forgets every choice. A saved profile arriving
+  does the same for the current preset; Defaults forgets every choice (the key bindings too);
+  `unset` forgets some (the Key Binds screen's Reset and Reset Keys). A saved profile arriving
   after the player made choices is merged under them (`receive`: what Defaults or a preset dropped
   since stays dropped).
 - **When effects run** (`Settings/Schedule`, pure). Cheap effects run at the next frame, once
@@ -1905,9 +1932,11 @@ screen; Config gives every default and the presets.
   | swapFrames                   | writes `Config.Render.SwapFrames`, which the renderer reads every frame |
   | lichen, skipHidden           | nothing: read live (the lichen light sweep; the streamer's refresh) |
   | audio                        | `SoundPlayer.setPlayerSettings` (see Sounds)                        |
-  | camera                       | `MovementController.setFieldOfView` / `setFovEffects`               |
-  | controls                     | `Config.Movement.ToggleSprint` and `TouchButtons` (bound once: after rejoining), `Hud.setWheelSelects` |
-  | hud                          | `Map.setMinimapVisible`, `Waila.setEnabled` / `setMinimapShown`, `Style.setScaleOverride` |
+  | camera                       | `MovementController.setFieldOfView` / `setFovEffects` / `setViewBobbing` / `setDamageTilt`, `EffectView.setDistortion` |
+  | controls                     | `Config.Movement.ToggleSprint` / `ToggleSneak` and `TouchButtons` (bound once: after rejoining), `Hud.setWheelSelects` / `setScrolling` |
+  | mouse                        | `MouseLook.setSensitivity` (`UserInputService.MouseDeltaSensitivity`) / `setInverted` |
+  | keys                         | `Keybinds.refresh`: fires `Keybinds.changed` (the sprint and sneak actions bind their new keys); the bindings themselves are read live |
+  | hud                          | `Map.setMinimapVisible`, `Waila.setEnabled` / `setMinimapShown`, `Style.setScaleOverride`, `AttackIndicator.setMode` |
 
   Worker actors keep their own Config, so what a worker needs travels in its jobs (see Workers).
 - **Start-up.** The client listens for its saved profile first and waits up to
@@ -1915,12 +1944,34 @@ screen; Config gives every default and the presets.
   already the player's view. One arriving later applies then.
 - **The menu** (`Ui/SettingsScreen`, a `Screens` panel built with `FormWidgets`; the layout comes
   from `Settings/Pages`: Minecraft's 150 × 20 buttons in two columns, settings a device doesn't
-  offer left out and the rest closing up). `Config.Settings.Key` (P) or `GamepadButton` (D-pad
-  right) open it while no screen is open (`Screens.onSettings`), as do the HUD's touch gear and the
-  inventory's gear; P, E, Escape, gamepad B and Done close it and flush. Gamepad: D-pad left /
-  right step a slider (`FormWidgets`' `stepSelected` keeps the selection on it), down / up move
-  through the widgets in reading order. Status lines come from providers the client script sets
-  (`Settings.setStatus`: "terrain", "farMeshes", "controls").
+  offer left out and the rest closing up). The Options key binding (`Config.Settings.Key`, P) or
+  `GamepadButton` (D-pad right) open it while no screen is open (`Screens.onSettings`), as do the
+  HUD's touch gear and the inventory's gear; P, E, Escape, gamepad B and Done close it and flush
+  (a sub-page's Done goes back to its `parent`: Mouse Settings and Key Binds to Controls).
+  Gamepad: D-pad left / right step a slider (`FormWidgets`' `stepSelected` keeps the selection on
+  it), down / up move through the widgets in reading order. Status lines come from providers the
+  client script sets (`Settings.setStatus`: "terrain", "farMeshes", "controls", "mouse"). Key
+  Binds needs a keyboard and Mouse Settings a mouse (`Settings.pageShown`).
+- **Key bindings** (`Shared/KeyBindings`, pure; client `Settings/Keybinds`; tested in
+  tests/spec/Keybinds). Minecraft's KeyMapping: 32 actions in Minecraft's categories (Movement,
+  Gameplay, Inventory, Multiplayer, Miscellaneous) and this game's (Map, Just Enough Items), each a
+  setting "key.<action>" holding a code: Roblox's `Enum.KeyCode` value for a key, the mouse
+  KeyCodes' values (1018-1020) for the three mouse buttons, 0 for "Not Bound". The defaults are
+  the keys the game always had (Config's sprint, sneak, Options and skill tree keys among them).
+  Every input site asks `Keybinds.matches(action, input)` (InputBegan / Ended),
+  `Keybinds.isDown(action)` (held: the walk, jump, the debug key) or `Keybinds.hotbarSlot(input)`,
+  and `Keybinds.input(action)` gives ContextActionService its key (sprint, sneak); names for hints
+  come from `Keybinds.name(action)`. Conflicts follow Forge's KeyConflictContext: game keys only
+  meet game keys, screen keys (JEI's) only screen keys, universal ones (inventory, drop, hotbar,
+  Options, skill tree) both. Escape, Shift / Ctrl as click modifiers, the mouse on slots, the
+  debug combinations' second keys, gamepads and touch stay fixed, as in Minecraft.
+- **The Key Binds screen** (`SettingsScreen`'s list page: rows from `Pages.keyList`, scrolling
+  from `Pages.clampScroll` / `thumb` / `scrollAtThumb` / `scrollToShow`). Waiting for a key, a
+  cover takes the panel's clicks and Screens leaves every key to the panel (`Panel.capturing`;
+  Escape and the Roblox menu opening go to `Panel.escaped`: Not Bound); `CAPTURE_GRACE` (0.3 s)
+  after a key is taken the same press is still the panel's. The wheel reaches the list through
+  `Panel.wheel` (Hud sinks the wheel for screens). A binding set back to its default is forgotten
+  (`Settings.unset`), not saved.
 - **Persistence** (`Players/SettingsStore`, like WaypointStore). One profile per kind of device
   (desktop, touch: `ViewSettings.isMobile`, console: `GuiService:IsTenFootInterface`), so a phone
   never loads a computer's view. DataStore "IceVoxelSettings_v1", key `player_<UserId>`, a record
@@ -2154,7 +2205,9 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
   "... open game mode switcher; no permission"). The "[Debug]:" prefix is bold yellow
   (`Notices.debug`; white in the legacy chat). A key that ran a combination does nothing else:
   `F3` + `Q` throws nothing (BlockInteraction ignores `Q` while `F3` is down). Losing the window's
-  focus forgets that `F3` was held.
+  focus forgets that `F3` was held. `F3` is the Debug Screen key binding: DebugOverlay hands
+  DebugKeys whatever key it is bound to as "F3" (and F3 itself, rebound away, as nothing), so the
+  combinations become that key + `N` / `Q` / `F4`; the switcher closes when that key is let go.
 - **The switcher** (`Ui/GameModeSwitcher`; its model `Ui/ModeSwitch`, pure, tested): Minecraft's
   GameModeSwitcherScreen at its offsets from the screen's centre, scaled like the HUD. Four slots
   in `GameMode.ORDER` (a grass block and an iron sword from ItemIcon, a map and an ender eye in
@@ -3224,7 +3277,8 @@ BlockInteraction times mining with its levels (Mining.playerFactor, with the per
 `Rendering/EffectView` (after the camera) raises Lighting's ambients for Night Vision
 (LightingController.setNightVision), closes the fog in black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
 LightingController.setEffectFogColour) and rolls the camera and sways the field of view for
-Nausea (MovementController.setFovSway), with a ColorCorrectionEffect for the brightness, darkness
+Nausea (MovementController.setFovSway; the wobble times the Distortion Effects setting squared,
+Minecraft's screenEffectScale: `EffectView.setDistortion`), with a ColorCorrectionEffect for the brightness, darkness
 and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,
 9 × 9 glyphs from `Ui/EffectIcons` at 2 pixels, beneficial row over the rest, longest first,
 GroupTransparency for the last 10 s' blinking) below `MusicToast.bottom()`, the hovered or tapped

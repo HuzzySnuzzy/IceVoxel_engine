@@ -151,6 +151,9 @@ export type Button = {
 	setText: (self: Button, text: string) -> (),
 	setEnabled: (self: Button, enabled: boolean) -> (),
 	setVisible: (self: Button, visible: boolean) -> (),
+	-- The label's colour while enabled (nil: Minecraft's white; the Key Binds screen's red
+	-- conflicts and yellow "> key <").
+	setColour: (self: Button, colour: Color3?) -> (),
 	enabled: boolean,
 	-- Called on a click (mouse, touch, gamepad A) while enabled.
 	clicked: (() -> ())?,
@@ -209,6 +212,7 @@ function FormWidgets.button(
 
 	local self = { button = button, enabled = true, clicked = nil }
 	local hovered = false
+	local textColour: Color3? = nil
 	local function paint()
 		local enabled = (self :: any).enabled
 		face.BackgroundColor3 = if not enabled
@@ -217,7 +221,7 @@ function FormWidgets.button(
 			else Style.Colour.Button
 		light.BackgroundColor3 = if enabled then Style.Colour.ButtonLight else Style.Colour.ButtonDisabled
 		dark.BackgroundColor3 = if enabled then Style.Colour.ButtonDark else Style.Colour.ButtonDisabled
-		local colour = if enabled then Style.Colour.Text else Style.Colour.TextDisabled
+		local colour = if enabled then textColour or Style.Colour.Text else Style.Colour.TextDisabled
 		label.TextColor3 = colour
 		shadow.TextColor3 = Style.shadowOf(colour)
 	end
@@ -259,6 +263,12 @@ function FormWidgets.button(
 	end
 	function self.setVisible(_: Button, visible: boolean)
 		button.Visible = visible
+	end
+	function self.setColour(_: Button, colour: Color3?)
+		if textColour ~= colour then
+			textColour = colour
+			paint()
+		end
 	end
 	return (self :: any) :: Button
 end

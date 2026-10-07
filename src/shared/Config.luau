@@ -519,12 +519,17 @@ local Config = {
 		-- block makes the steep terrain walkable. Sneaking still stops at every block edge.
 		StepHeight = 1.0625,
 		-- Sprint (also: double tap forward) and sneak keys, as Enum.KeyCode names. Sneaking on Left
-		-- Shift takes that key away from Roblox's shift lock (Right Shift still toggles it).
+		-- Shift takes that key away from Roblox's shift lock (Right Shift still toggles it). The
+		-- keyboard key is the default of the Sprint / Sneak key bindings (Options > Controls > Key
+		-- Binds, Shared/KeyBindings), the gamepad buttons stay these.
 		SprintKeys = { "LeftControl", "ButtonL3" },
 		SneakKeys = { "LeftShift", "ButtonB" },
 		-- true: the sprint key turns sprinting on and off (Minecraft's "Sprint: Toggle"; while on,
 		-- moving forward sprints). false: hold the key.
 		ToggleSprint = true,
+		-- true: the sneak key turns sneaking on and off (Minecraft's "Sneak: Toggle"); false (its
+		-- default): hold it. The touch Sneak button always toggles.
+		ToggleSneak = false,
 		-- Field of view while sprinting, relative to normal (Minecraft: 1.15). 1 turns it off.
 		SprintFov = 1.15,
 		-- Sprint and sneak buttons on touch screens (toggles).
@@ -711,7 +716,8 @@ local Config = {
 		DeathLoss = 0,
 		-- Seconds between two looks at the biome a player stands in (a first visit is a discovery).
 		BiomeInterval = 2,
-		-- Opens and closes the skill tree (Enum.KeyCode names; touch: the button over the gear).
+		-- Opens and closes the skill tree (Enum.KeyCode names; touch: the button over the gear). The
+		-- key is the Skill Tree key binding's default (Options > Controls > Key Binds).
 		Key = "K",
 		GamepadButton = "DPadLeft",
 	},
@@ -895,7 +901,7 @@ local Config = {
 		-- device (desktop, touch, console). In Studio this needs API access, as SaveWaypoints.
 		Save = true,
 		-- Opens and closes the menu (Enum.KeyCode names; touch: the gear beside the hotbar, and
-		-- the gear in the inventory).
+		-- the gear in the inventory). The key is the Options key binding's default.
 		Key = "P",
 		GamepadButton = "DPadRight",
 		-- Seconds after the last change before the costly ones apply (view distance, caves,

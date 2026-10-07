@@ -3,7 +3,8 @@
 	Minimap in the top right corner: terrain around the player (north up), the player's heading,
 	waypoints (pinned to the edge when off the map) and other players (not spectators, unless this
 	player spectates too: Player/SpectatorRules). Click it to open the world map; `-` / `=` zoom
-	out / in. `setVisible` (the Minimap setting) hides it with its coordinates line; Map/init then
+	out / in (the Minimap Zoom Out / In key bindings, Settings/Keybinds). `setVisible` (the
+	Minimap setting) hides it with its coordinates line; Map/init then
 	stops updating it and painting its tiles. Hidden on a touch screen, a small "Map" button takes
 	its corner: tapping the minimap is the only way to the world map there (M is a key).
 ]]
@@ -17,6 +18,7 @@ local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
@@ -153,9 +155,9 @@ function Minimap.new(
 		if processed or not holder.Visible then
 			return
 		end
-		if input.KeyCode == Enum.KeyCode.Minus and layer.scale < MAX_ZOOM then
+		if Keybinds.matches("zoomOut", input) and layer.scale < MAX_ZOOM then
 			layer:setScale(layer.scale * 2)
-		elseif input.KeyCode == Enum.KeyCode.Equals and layer.scale > 1 then
+		elseif Keybinds.matches("zoomIn", input) and layer.scale > 1 then
 			layer:setScale(layer.scale // 2)
 		end
 	end)

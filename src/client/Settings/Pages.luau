@@ -8,18 +8,30 @@
 	`row` starts a new one. Settings a device doesn't offer (`shown`) are left out and the rest
 	close up, so no page has holes.
 
-	  main          Graphics (the preset, cycled), FOV; the other pages; Reset (the current
-	                preset again) and Defaults (the device's defaults); Done closes the menu
-	  video         render distance, detail falloff, full detail, cave view, plants, lichen
-	                lights, shadows, far shadows, fog, textures, far materials, brightness,
-	                distance or lighting
-	  performance   far meshes, build budget, hidden terrain, swap frames
-	  sounds        Music & Sounds: the volumes (master, music, blocks, players, ambient,
-	                interface), footsteps, interface clicks, cave moods and music toasts
-	  controls      FOV effects, sprint, the scroll wheel, touch buttons
-	  hud           minimap, WAILA, GUI scale
-	A sub-page's Done goes back to the main page. `status` lists the status lines a page shows
-	(the controller's Settings.setStatus kinds).
+	  main           Graphics (the preset, cycled), FOV; the other pages; Reset (the current
+	                 preset again) and Defaults (the device's defaults); Done closes the menu
+	  video          render distance, detail falloff, full detail, cave view, plants, lichen
+	                 lights, shadows, far shadows, fog, textures, far materials, brightness,
+	                 distance or lighting
+	  performance    far meshes, build budget, hidden terrain, swap frames
+	  sounds         Music & Sounds: the volumes (master, music, blocks, players, ambient,
+	                 interface), footsteps, interface clicks, cave moods and music toasts
+	  controls       Minecraft's ControlsScreen: Mouse Settings..., Key Binds..., Sneak and
+	                 Sprint (Hold / Toggle), touch buttons
+	    mouse        Minecraft's MouseSettingsScreen: sensitivity, scroll sensitivity, invert
+	                 mouse, discrete scrolling, and this game's scroll wheel (hotbar or zoom)
+	    keybinds     Minecraft's KeyBindsScreen: a scrolling list (`list = "keys"`, laid out by
+	                 `keyList`), Reset Keys and Done
+	  hud            minimap, WAILA, attack indicator, GUI scale
+	  accessibility  Minecraft's Accessibility Settings that apply here: view bobbing,
+	                 distortion effects, FOV effects, damage tilt
+	A sub-page's Done goes back to its `parent` (the main page when none). `status` lists the
+	status lines a page shows (the controller's Settings.setStatus kinds).
+
+	The Key Binds list (`keyList`): Minecraft's KeyBindsList, a row per category (its name
+	centred) and per action (KEY_ROW apart): the action's name, the key button (KEY_BUTTON_W:
+	wider than Minecraft's 75, for Roblox's pixel font) and Reset (KEY_RESET_W), in a scrolling
+	frame from TOP down to the bottom row: Reset Keys and Done side by side (Minecraft's 150 each).
 ]]
 
 export type Item = {
@@ -37,6 +49,10 @@ export type Page = {
 	title: string,
 	items: { Item },
 	status: { string },
+	-- The page Done goes back to (nil: the main page; the main page's Done closes the menu).
+	parent: string?,
+	-- A page drawn as a list instead of `items`: "keys", the Key Binds list.
+	list: string?,
 }
 
 export type Placed = {
@@ -54,6 +70,14 @@ export type Layout = {
 	done: Placed,
 }
 
+-- A row of the Key Binds list: a category's name or an action (`id`), `y` from the list's top.
+export type KeyRow = {
+	kind: "category" | "key",
+	id: string,
+	text: string,
+	y: number,
+}
+
 local Pages = {}
 
 Pages.WIDTH = 310
@@ -68,6 +92,16 @@ Pages.LINE = 11
 Pages.DONE_W = 200
 -- Rows a page can hold above its status lines (the video page needs 7).
 Pages.MAX_ROWS = 7
+
+-- The Key Binds list: rows, columns (name, key button, Reset), the scroll bar and the bottom row.
+Pages.KEY_ROW = 24
+Pages.KEY_NAME_W = 140
+Pages.KEY_BUTTON_X = 146
+Pages.KEY_BUTTON_W = 100
+Pages.KEY_RESET_X = 250
+Pages.KEY_RESET_W = 50
+Pages.SCROLL_BAR = 6
+Pages.LIST_BOTTOM = Pages.HEIGHT - Pages.BUTTON_H - 4
 
 local function setting(key: string, wide: boolean?): Item
 	return { kind = "setting", id = key, wide = wide }
@@ -89,6 +123,7 @@ Pages.list = {
 			page("sounds", "Music & Sounds..."),
 			page("controls", "Controls..."),
 			page("hud", "HUD..."),
+			page("accessibility", "Accessibility Settings..."),
 			{ kind = "action", id = "reset", text = "Reset", row = true },
 			{ kind = "action", id = "defaults", text = "Defaults" },
 		},
@@ -146,12 +181,34 @@ Pages.list = {
 		id = "controls",
 		title = "Controls",
 		items = {
-			setting("fovEffects"),
+			page("mouse", "Mouse Settings..."),
+			page("keybinds", "Key Binds..."),
+			setting("toggleSneak"),
 			setting("toggleSprint"),
-			setting("scrollHotbar"),
 			setting("touchButtons"),
 		},
 		status = { "controls" },
+	},
+	{
+		id = "mouse",
+		title = "Mouse Settings",
+		parent = "controls",
+		items = {
+			setting("sensitivity", true),
+			setting("scrollSensitivity", true),
+			setting("invertMouse"),
+			setting("discreteScrolling"),
+			setting("scrollHotbar"),
+		},
+		status = { "mouse" },
+	},
+	{
+		id = "keybinds",
+		title = "Key Binds",
+		parent = "controls",
+		list = "keys",
+		items = {},
+		status = {},
 	},
 	{
 		id = "hud",
@@ -159,7 +216,19 @@ Pages.list = {
 		items = {
 			setting("minimap"),
 			setting("waila"),
+			setting("attackIndicator", true),
 			setting("guiScale"),
+		},
+		status = {},
+	},
+	{
+		id = "accessibility",
+		title = "Accessibility Settings",
+		items = {
+			setting("viewBobbing"),
+			setting("distortionEffects"),
+			setting("fovEffects"),
+			setting("damageTilt"),
 		},
 		status = {},
 	},
@@ -170,6 +239,15 @@ for _, p in Pages.list do
 	byId[p.id] = p
 end
 Pages.byId = byId
+
+-- The page Done goes back to from `id` (nil from the main page: Done closes the menu).
+function Pages.back(id: string): string?
+	if id == "main" then
+		return nil
+	end
+	local p = byId[id]
+	return if p and p.parent then p.parent else "main"
+end
 
 --[[
 	Places page `p`'s items; `shown(item)` says whether an item is offered (default: all).
@@ -211,6 +289,94 @@ function Pages.layout(p: Page, shown: ((item: Item) -> boolean)?): Layout
 		h = Pages.BUTTON_H,
 	}
 	return { widgets = widgets, statusY = statusY, done = done }
+end
+
+--[[
+	The Key Binds list's rows from KeyBindings.ordered()'s groups ({ category = { name },
+	actions = { { id, name } } }): a category row, then its actions, KEY_ROW apart from y = 0.
+	Returns the rows and the list's whole height.
+]]
+function Pages.keyList(groups: { { category: any, actions: { any } } }): ({ KeyRow }, number)
+	local rows: { KeyRow } = {}
+	local y = 0
+	for _, group in groups do
+		table.insert(rows, { kind = "category", id = group.category.name, text = group.category.name, y = y })
+		y += Pages.KEY_ROW
+		for _, action in group.actions do
+			table.insert(rows, { kind = "key", id = action.id, text = action.name, y = y })
+			y += Pages.KEY_ROW
+		end
+	end
+	return rows, y
+end
+
+--[[ Scrolling the list (Minecraft's AbstractSelectionList) ]]
+
+-- The list's visible height, between the title and the bottom row.
+Pages.LIST_HEIGHT = Pages.LIST_BOTTOM - Pages.TOP
+-- A wheel step scrolls half a row (AbstractSelectionList.mouseScrolled: itemHeight / 2).
+Pages.WHEEL_STEP = Pages.KEY_ROW / 2
+-- The thumb is at least this tall (AbstractSelectionList: 32).
+Pages.MIN_THUMB = 32
+
+-- `scroll` (pixels from the list's top) kept within 0..content - view.
+function Pages.clampScroll(scroll: number, content: number, view: number): number
+	return math.clamp(scroll, 0, math.max(0, content - view))
+end
+
+--[[
+	The scroll bar's thumb: its top and height in a `view` tall bar for a `content` tall list
+	scrolled by `scroll` (Minecraft's: view^2 / content tall, at least MIN_THUMB, at most view -
+	8). A list that fits shows no thumb (height 0).
+]]
+function Pages.thumb(scroll: number, content: number, view: number): (number, number)
+	local most = content - view
+	if most <= 0 then
+		return 0, 0
+	end
+	local height = math.clamp(math.floor(view * view / content), Pages.MIN_THUMB, view - 8)
+	local top = math.floor(Pages.clampScroll(scroll, content, view) * (view - height) / most + 0.5)
+	return top, height
+end
+
+-- The scroll at which the thumb's top is at `top` (dragging it).
+function Pages.scrollAtThumb(top: number, content: number, view: number): number
+	local most = content - view
+	local _, height = Pages.thumb(0, content, view)
+	if most <= 0 or view - height <= 0 then
+		return 0
+	end
+	return Pages.clampScroll(top * most / (view - height), content, view)
+end
+
+-- The scroll that shows a row at `y` (`h` tall) whole, moving as little as possible.
+function Pages.scrollToShow(scroll: number, y: number, h: number, content: number, view: number): number
+	if y < scroll then
+		scroll = y
+	elseif y + h > scroll + view then
+		scroll = y + h - view
+	end
+	return Pages.clampScroll(scroll, content, view)
+end
+
+-- The Key Binds screen's bottom row: Reset Keys on the left, Done on the right (150 each).
+function Pages.keyButtons(): (Placed, Placed)
+	local y = Pages.HEIGHT - Pages.BUTTON_H
+	local reset: Placed = {
+		item = { kind = "action", id = "resetKeys", text = "Reset Keys" },
+		x = 0,
+		y = y,
+		w = Pages.BUTTON_W,
+		h = Pages.BUTTON_H,
+	}
+	local done: Placed = {
+		item = { kind = "action", id = "done", text = "Done" },
+		x = Pages.BUTTON_W + Pages.GAP,
+		y = y,
+		w = Pages.BUTTON_W,
+		h = Pages.BUTTON_H,
+	}
+	return reset, done
 end
 
 return Pages

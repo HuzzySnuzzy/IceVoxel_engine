@@ -4,11 +4,15 @@
 
 	  hotbar     9 slots at the bottom centre with the selection frame, item icons, counts and the
 	             durability bars of worn tools.
-	             Click or tap a slot to select it; keys 1-9, the mouse wheel (down = next slot,
-	             with the Scroll Wheel setting on Hotbar: `setWheelSelects`, by default
-	             Config.Interaction.ScrollWheelHotbar) and gamepad L1 / R1 select too. The
-	             wheel is bound through ContextActionService at High priority and sunk, so the
-	             camera does not zoom.
+	             Click or tap a slot to select it; the Hotbar Slot key bindings (1-9: Settings/
+	             Keybinds), the mouse wheel (down = next slot, with the Scroll Wheel setting on
+	             Hotbar: `setWheelSelects`, by default Config.Interaction.ScrollWheelHotbar) and
+	             gamepad L1 / R1 select too. The wheel is bound through ContextActionService at
+	             High priority and sunk, so the camera does not zoom; its turns add up as
+	             Minecraft's MouseHandler.onScroll does (Scroll Sensitivity, Discrete Scrolling:
+	             `setScrolling`, PlayerSettings.scroll), one slot a whole step, and open screens
+	             get the scaled turn. The attack indicator's square sits right of the hotbar
+	             (`setAttackIndicator`, Ui/AttackIndicator).
 	  item name  the held item's name above the hotbar for 2 s after the selection changes,
 	             fading over the last half second
 	  hearts     survival and adventure only (GameMode.isSurvivalLike, Minecraft's canHurtPlayer):
@@ -59,9 +63,11 @@ local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Knowledge = require(Shared.Progression.Knowledge)
+local PlayerSettings = require(Shared.PlayerSettings)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local ItemIcon = require(script.Parent.ItemIcon)
@@ -114,18 +120,6 @@ local BLINK_TIME = 1
 local SHAKE_AT = 4
 local TICK = 0.05
 
-local NUMBER_KEYS: { [Enum.KeyCode]: number } = {
-	[Enum.KeyCode.One] = 1,
-	[Enum.KeyCode.Two] = 2,
-	[Enum.KeyCode.Three] = 3,
-	[Enum.KeyCode.Four] = 4,
-	[Enum.KeyCode.Five] = 5,
-	[Enum.KeyCode.Six] = 6,
-	[Enum.KeyCode.Seven] = 7,
-	[Enum.KeyCode.Eight] = 8,
-	[Enum.KeyCode.Nine] = 9,
-}
-
 --[[
 	9 x 8 pixel art. K outline, L / R the left / right half of the fill, H a highlight (left half).
 	The half sprites show the left half filled, like Minecraft's.
@@ -177,6 +171,14 @@ local settingsHandler: (() -> ())? = nil
 local skillsHandler: (() -> ())? = nil
 -- The wheel selects hotbar slots (else it zooms the camera).
 local wheelSelects = Config.Interaction.ScrollWheelHotbar
+-- The Mouse Settings' scrolling (PlayerSettings.scroll): the settings values and the rest of the
+-- wheel's turns not yet a whole step.
+local scrollValues: PlayerSettings.Values? = nil
+local scrolled = 0
+-- The attack indicator beside the hotbar (Ui/AttackIndicator): its frame, fill and progress.
+local attackSlot: Frame? = nil
+local attackFill: Frame? = nil
+local attackProgress: number? = nil
 local previewWindow: Types.Window? = nil
 local dirty = true
 
@@ -239,6 +241,33 @@ end
 -- The Scroll Wheel setting: the wheel selects hotbar slots (true) or zooms the camera.
 function Hud.setWheelSelects(value: boolean)
 	wheelSelects = value
+end
+
+-- The settings values whose Scroll Sensitivity and Discrete Scrolling the wheel follows.
+function Hud.setScrolling(values: PlayerSettings.Values)
+	scrollValues = values
+	scrolled = 0
+end
+
+--[[
+	The hotbar attack indicator (Ui/AttackIndicator): the weapon's recovery 0..1 fills an 18 x 18
+	square right of the hotbar from the bottom (Minecraft's hotbar_attack_indicator); nil hides it.
+]]
+function Hud.setAttackIndicator(progress: number?)
+	-- (Filled pixels of the 16 inside the outline.)
+	local shown = if progress then math.clamp(math.floor(progress * 16), 0, 16) else nil
+	if shown == attackProgress then
+		return
+	end
+	attackProgress = shown
+	local slot, fill = attackSlot, attackFill
+	if slot and fill then
+		slot.Visible = shown ~= nil
+		if shown then
+			fill.Size = UDim2.fromOffset(16, shown)
+			fill.Position = UDim2.fromOffset(1, 17 - shown)
+		end
+	end
 end
 
 -- The on-screen area of hotbar slot 1..9 (the creative screen clicks it like a window slot).
@@ -400,6 +429,16 @@ function Hud.start()
 	-- The selection frame, 24 x 24 around the selected cell.
 	local selection = drawSelection(hotbar)
 
+	-- The attack indicator's square right of the hotbar (Ui/AttackIndicator; placed by
+	-- updateScale: beside the touch button on touch screens), hidden while the weapon is ready.
+	local attack = Style.frame(hotbar, WIDTH + 6, BAR_Y + 2, 18, 18, Color3.new(0, 0, 0), 1)
+	attack.Name = "AttackIndicator"
+	attack.BackgroundTransparency = 0.55
+	attack.Visible = false
+	Style.border(attack, 0, 0, 18, 18, 1, Color3.fromRGB(20, 20, 20), 2)
+	attackFill = Style.frame(attack, 1, 17, 16, 0, Color3.fromRGB(200, 200, 200), 3)
+	attackSlot = attack
+
 	-- The spectator menu, in the hotbar's place.
 	SpectatorGui.build(canvas, 0, BAR_Y, SPECTATOR_LABEL_Y, drawBar, drawSelection)
 
@@ -541,6 +580,7 @@ function Hud.start()
 		skills.Visible = touch and ProgressionState.enabled()
 		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
 		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
+		attack.Position = UDim2.fromOffset(WIDTH + 6 + (if touch then TOUCH_BUTTON + 2 else 0), BAR_Y + 2)
 	end
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
 	Style.scaleChanged:Connect(updateScale)
@@ -696,7 +736,8 @@ function Hud.start()
 		if processed or mode ~= "play" or inputTaken then
 			return
 		end
-		local slot = NUMBER_KEYS[input.KeyCode]
+		-- (The Hotbar Slot key bindings: 1-9 by default.)
+		local slot = Keybinds.hotbarSlot(input)
 		local spectator = GameMode.isSpectator(ClientInventory.mode())
 		if slot then
 			if spectator then
@@ -728,28 +769,41 @@ function Hud.start()
 		if state ~= Enum.UserInputState.Change then
 			return Enum.ContextActionResult.Pass
 		end
-		local delta = input.Position.Z
+		local raw = input.Position.Z
 		if inputTaken then
 			-- (Sunk all the same: the camera does not zoom either.)
 			return Enum.ContextActionResult.Sink
 		end
+		local spectator = mode == "play" and GameMode.isSpectator(ClientInventory.mode())
+		if mode == "play" and not spectator and not wheelSelects then
+			-- (The Scroll Wheel setting on Zoom: the camera's.)
+			return Enum.ContextActionResult.Pass
+		end
+		-- Minecraft's MouseHandler.onScroll: the Scroll Sensitivity and Discrete Scrolling
+		-- settings; an open screen gets the scaled turn, else whole steps come out of the turns
+		-- added up (PlayerSettings.scrollTurn / scroll).
+		local values = scrollValues
 		if mode ~= "play" then
-			if wheelHandler and delta ~= 0 then
-				wheelHandler(delta)
+			local turn = if values and raw ~= 0 then PlayerSettings.scrollTurn(raw, values) else raw
+			if wheelHandler and turn ~= 0 then
+				wheelHandler(turn)
 			end
 			return Enum.ContextActionResult.Sink
 		end
-		if GameMode.isSpectator(ClientInventory.mode()) then
-			-- The spectator menu's selection, or the flying speed (MouseHandler.onScroll).
-			SpectatorGui.wheel(delta)
+		local steps = raw
+		if values and raw ~= 0 then
+			steps, scrolled = PlayerSettings.scroll(scrolled, raw, values)
+		end
+		if steps == 0 then
 			return Enum.ContextActionResult.Sink
 		end
-		if not wheelSelects then
-			return Enum.ContextActionResult.Pass
+		if spectator then
+			-- The spectator menu's selection, or the flying speed (MouseHandler.onScroll).
+			SpectatorGui.wheel(steps)
+			return Enum.ContextActionResult.Sink
 		end
-		if delta ~= 0 then
-			step(if delta < 0 then 1 else -1)
-		end
+		-- (Inventory.swapPaint: one slot a step, whatever its size.)
+		step(if steps < 0 then 1 else -1)
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.ContextActionPriority.High.Value, Enum.UserInputType.MouseWheel)
 end

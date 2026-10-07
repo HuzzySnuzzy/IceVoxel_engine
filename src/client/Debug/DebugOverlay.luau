@@ -23,7 +23,9 @@
 	not pressed, unless a combination ran while it was held: F3 + N (spectator <-> the previous
 	game mode: Protocol SetGameMode), F3 + F4 (the game mode switcher, Ui/GameModeSwitcher, which
 	then gets F4 itself) and F3 + Q (the list, in the chat). Their "[Debug]:" lines go to the chat
-	through Net/Notices. No combination runs while a screen is open or the player types.
+	through Net/Notices. No combination runs while a screen is open or the player types. "F3" is
+	the Debug Screen key binding (Settings/Keybinds; F3 by default): rebound, its key does all of
+	this and the combinations become that key + N / Q / F4.
 ]]
 
 local Players = game:GetService("Players")
@@ -46,6 +48,7 @@ local Notices = require(script.Parent.Parent.Net.Notices)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local DebugKeys = require(script.Parent.DebugKeys)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -304,8 +307,21 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 		end
 	end
 
+	--[[
+		DebugKeys knows the debug key as "F3": the Debug Screen key binding (Settings/Keybinds, F3
+		by default; a mouse button too) reads as "F3", and F3 itself, rebound away, as nothing.
+		The combinations' second keys (N, Q, F4) stay fixed.
+	]]
+	local function keyName(input: InputObject): string?
+		if Keybinds.matches("debug", input) then
+			return "F3"
+		elseif input.UserInputType ~= Enum.UserInputType.Keyboard or input.KeyCode == Enum.KeyCode.F3 then
+			return nil
+		end
+		return input.KeyCode.Name
+	end
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if input.UserInputType ~= Enum.UserInputType.Keyboard or processed then
+		if processed then
 			return
 		end
 		-- The open switcher takes F4 itself (GameModeSwitcherScreen.keyPressed).
@@ -313,12 +329,15 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			GameModeSwitcher.next()
 			return
 		end
-		local action = DebugKeys.press(keys, input.KeyCode.Name, context())
-		perform(action)
+		local name = keyName(input)
+		if name then
+			perform((DebugKeys.press(keys, name, context())))
+		end
 	end)
 	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.Keyboard then
-			perform(DebugKeys.release(keys, input.KeyCode.Name, context()))
+		local name = keyName(input)
+		if name then
+			perform(DebugKeys.release(keys, name, context()))
 		end
 	end)
 	-- (Key releases are missed while the window has no focus.)

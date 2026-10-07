@@ -682,7 +682,10 @@ function MainMenu.run()
 		elseif page == "customize" then
 			showPage("create")
 		elseif page == "options" then
-			showPage("title")
+			-- (A sub-page goes back a page; Key Binds waiting for a key takes the press.)
+			if not SettingsScreen.back() then
+				showPage("title")
+			end
 		end
 	end
 

@@ -5,7 +5,10 @@
 	  Mouse    left (hold) = break; right click = open a chest, crafting table or furnace / place
 	           the held block (held down it repeats in first person and with shift lock; with a
 	           free mouse, right dragging turns the camera, so only a short click counts); middle
-	           click = pick block; Q = drop one of the held item, Ctrl+Q the whole stack
+	           click = pick block; Q = drop one of the held item, Ctrl+Q the whole stack. These
+	           are the key bindings Attack/Destroy, Use Item/Place Block, Pick Block and Drop
+	           Selected Item (Settings/Keybinds; any key or mouse button: a use bound to a key
+	           repeats while held, only the right button drags the camera)
 	  Gamepad  R2 = break, L2 = use / place (aiming at the screen centre, shown by a crosshair),
 	           DPad down = drop one
 	  Touch    (Bedrock's scheme) tap = use / place, hold still = break, aiming under the finger
@@ -171,6 +174,8 @@ local Drinking = require(script.Parent.Drinking)
 local Eating = require(script.Parent.Eating)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
+local AttackIndicator = require(script.Parent.Parent.Ui.AttackIndicator)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -1147,6 +1152,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- Hits `mob` (the server checks the reach, the sight and the game mode, then hurts it).
 	local function attack(mob: MobRenderer.MobView)
 		ClientNet.send(Protocol.ClientMessage.Attack, Protocol.encodeAttack(mob.id))
+		-- (The weapon starts recovering: the attack indicator, Ui/AttackIndicator.)
+		AttackIndicator.attacked()
 		swing()
 	end
 
@@ -1375,27 +1382,37 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local kind, key = input.UserInputType, input.KeyCode
-		if kind == Enum.UserInputType.MouseButton1 then
+		-- The key bindings (each on its own: one input bound to two actions does both, as in
+		-- Minecraft), then the gamepad and touch controls.
+		if Keybinds.matches("attack", input) then
 			beginAttack("mouse")
-		elseif key == Enum.KeyCode.ButtonR2 then
-			beginAttack("gamepad")
-		elseif key == Enum.KeyCode.ButtonL2 then
-			beginUse("gamepad", target, targetRay)
-		elseif kind == Enum.UserInputType.MouseButton2 then
-			if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
-				-- First person / shift lock: right dragging does not turn the camera.
-				beginUse("mouse", target, targetRay)
-			else
+		end
+		if Keybinds.matches("use", input) then
+			if
+				kind == Enum.UserInputType.MouseButton2
+				and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
+			then
+				-- A free mouse's right drag turns the camera: only a short click uses.
 				rightDownAt = os.clock()
 				rightMoved = 0
+			else
+				-- First person / shift lock, or another button or key: held, it repeats.
+				beginUse("mouse", target, targetRay)
 			end
-		elseif kind == Enum.UserInputType.MouseButton3 then
+		end
+		if Keybinds.matches("pickItem", input) then
 			pickAt(target)
-		elseif key == Enum.KeyCode.Q and not UserInputService:IsKeyDown(Enum.KeyCode.F3) then
-			-- (F3 + Q is the debug keys' list: Debug/DebugKeys.)
+		end
+		if Keybinds.matches("drop", input) and not Keybinds.isDown("debug") then
+			-- (The debug key + Q is the debug keys' list: Debug/DebugKeys.)
 			local all = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
 				or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
 			drop(all)
+		end
+		if key == Enum.KeyCode.ButtonR2 then
+			beginAttack("gamepad")
+		elseif key == Enum.KeyCode.ButtonL2 then
+			beginUse("gamepad", target, targetRay)
 		elseif key == Enum.KeyCode.DPadDown then
 			drop(false)
 		elseif kind == Enum.UserInputType.Touch then
@@ -1433,13 +1450,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- (Releases count even over GUI, so nothing stays held.)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		local kind, key = input.UserInputType, input.KeyCode
-		if kind == Enum.UserInputType.MouseButton1 then
+		if Keybinds.matches("attack", input) then
 			endAttack("mouse")
-		elseif key == Enum.KeyCode.ButtonR2 then
-			endAttack("gamepad")
-		elseif key == Enum.KeyCode.ButtonL2 then
-			endUse("gamepad")
-		elseif kind == Enum.UserInputType.MouseButton2 then
+		end
+		if Keybinds.matches("use", input) then
 			if useHeld.mouse then
 				endUse("mouse")
 			elseif rightDownAt then
@@ -1451,6 +1465,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					useOnce(target, targetRay)
 				end
 			end
+		end
+		if key == Enum.KeyCode.ButtonR2 then
+			endAttack("gamepad")
+		elseif key == Enum.KeyCode.ButtonL2 then
+			endUse("gamepad")
 		elseif kind == Enum.UserInputType.Touch then
 			local t = touch
 			if t and t.input == input then
