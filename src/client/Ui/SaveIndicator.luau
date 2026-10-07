@@ -14,11 +14,14 @@
 	          WorldListRules.MIN_SHOW seconds. On touch screens it sits higher, clear of the jump
 	          and action buttons. One position a frame while shown, nothing built.
 	  Toast   for operators (only they get the sizes): a toast as Ui/MusicToast's, in the top right
-	          corner (under the Now Playing toast while that one shows), sliding in with "World
-	          saved" and "1.4 MB of 64 MB (largest region 0.3 / 4 MB)", red when the save failed
-	          or the world nears its most; it stays TOAST_SECONDS and slides out, as wide as its
-	          line.
-	Scaled like the HUD (Style.guiScale, the GUI Scale setting).
+	          corner (under the Now Playing toast while that one shows, and dropping under one
+	          that comes in over it; the status effect icons then move under it too:
+	          MusicToast.setBelow), sliding in with "World saved" and "1.4 MB of 64 MB (largest
+	          region 0.3 / 4 MB)", red when the save failed or the world nears its most; it stays
+	          TOAST_SECONDS and slides out, as wide as its line.
+	Scaled like the HUD (Style.guiScale, the GUI Scale setting), and hidden with the HUD (the world
+	map hides it: on narrower screens the icon would cover its weather bar, the toast its buttons).
+	While the icon or the toast is up, one connection a frame does all of that; none otherwise.
 ]]
 
 local Players = game:GetService("Players")
@@ -177,6 +180,9 @@ function SaveIndicator.start()
 	local line, lineShadow = Style.shadowText(panel, "", TEXT_X, 18, 400, 10, Style.Colour.Text, 5)
 
 	local width = TOAST_MIN_WIDTH
+	-- Whether the toast sits under the Now Playing toast (it showed when this one came, or came in
+	-- over it); it never moves back up while it shows.
+	local underMusic = false
 	local function layout()
 		local camera = workspace.CurrentCamera
 		local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
@@ -186,11 +192,11 @@ function SaveIndicator.start()
 		holderScale.Scale = scale
 		corner.Position = UDim2.new(1, -MARGIN * scale, 1, -(MARGIN + (if touch then TOUCH_RAISE else 0)) * scale)
 		local top, toastScale = MusicToast.top()
-		if MusicToast.showing() then
-			top += (TOAST_HEIGHT + 4) * toastScale
-		end
-		holder.Position = UDim2.new(1, -RIGHT, 0, top)
+		local below = if underMusic then (TOAST_HEIGHT + 4) * toastScale else 0
+		holder.Position = UDim2.new(1, -RIGHT, 0, top + below)
 		holder.Size = UDim2.fromOffset(width, TOAST_HEIGHT)
+		-- (The status effect icons go under it: Ui/EffectHud.)
+		MusicToast.setBelow(if panel.Visible then below else 0)
 	end
 	layout()
 	local camera = workspace.CurrentCamera
@@ -199,21 +205,53 @@ function SaveIndicator.start()
 	end
 	Style.scaleChanged:Connect(layout)
 
+	-- One connection a frame while the icon or the toast is up (see the header): hidden with the
+	-- HUD, the icon bobbing, the toast dropping under a Now Playing toast that came in over it.
+	local shownAt = 0
+	local watching: RBXScriptConnection? = nil
+	local hud: ScreenGui? = nil
+	local function watch()
+		if watching then
+			return
+		end
+		watching = RunService.RenderStepped:Connect(function()
+			local hudGui = hud
+			if hudGui == nil or hudGui.Parent == nil then
+				local found = playerGui:FindFirstChild("IceVoxelHud")
+				hudGui = if found and found:IsA("ScreenGui") then found else nil
+				hud = hudGui
+			end
+			local shown = hudGui == nil or hudGui.Enabled
+			if gui.Enabled ~= shown then
+				gui.Enabled = shown
+			end
+			if corner.Visible then
+				icon.Position = UDim2.fromOffset(LABEL + 4, 2 - WorldListRules.bob(os.clock() - shownAt))
+			end
+			if panel.Visible and not underMusic and MusicToast.showing() then
+				underMusic = true
+				layout()
+			end
+		end)
+	end
+	local function unwatch()
+		local connection = watching
+		if connection == nil or corner.Visible or panel.Visible then
+			return
+		end
+		watching = nil
+		connection:Disconnect()
+	end
+
 	-- The icon: up while a save is in flight, and at least MIN_SHOW; bobbing meanwhile.
 	local inFlight = false
-	local shownAt = 0
-	local bobbing: RBXScriptConnection? = nil
 	onSaving = function()
 		inFlight = true
 		if not corner.Visible then
 			shownAt = os.clock()
 			corner.Visible = true
 		end
-		if bobbing == nil then
-			bobbing = RunService.RenderStepped:Connect(function()
-				icon.Position = UDim2.fromOffset(LABEL + 4, 2 - WorldListRules.bob(os.clock() - shownAt))
-			end)
-		end
+		watch()
 	end
 	local function hideIcon()
 		if inFlight then
@@ -225,11 +263,7 @@ function SaveIndicator.start()
 			return
 		end
 		corner.Visible = false
-		local connection = bobbing
-		bobbing = nil
-		if connection then
-			connection:Disconnect()
-		end
+		unwatch()
 	end
 
 	-- The toast.
@@ -259,11 +293,13 @@ function SaveIndicator.start()
 		local colour = if warn then Style.Colour.Red else Style.Colour.Yellow
 		title.TextColor3 = colour
 		titleShadow.TextColor3 = Style.shadowOf(colour)
-		layout()
 		if not panel.Visible then
+			underMusic = MusicToast.showing()
 			panel.Position = UDim2.fromOffset(width + RIGHT + 8, 0)
 			panel.Visible = true
 		end
+		layout()
+		watch()
 		slide(0, Enum.EasingDirection.Out)
 		task.delay(SLIDE + TOAST_SECONDS, function()
 			if generation == mine then
@@ -271,6 +307,8 @@ function SaveIndicator.start()
 				task.delay(SLIDE, function()
 					if generation == mine then
 						panel.Visible = false
+						MusicToast.setBelow(0)
+						unwatch()
 					end
 				end)
 			end

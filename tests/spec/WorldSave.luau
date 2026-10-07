@@ -1086,6 +1086,118 @@ return function(t, shared, require, server, client)
 		t.eq(none, nil, "a new player")
 	end)
 
+	t.test("world save: the weather goes on where it was saved; a world saved without it starts clear", function()
+		local Weather = require(shared.Weather)
+		local field = Weather.new(12345)
+		local tick = Weather.TICKS_PER_SECOND
+		-- A storm over spawn some way into the clock (a world played a while).
+		local stormy = 0
+		for clock = 200000, 4000000, 600 do
+			if field:at(0, 0, clock) > 0.6 then
+				stormy = clock
+				break
+			end
+		end
+		t.ok(stormy > 0, "a storm over spawn")
+		-- This server's weather: its clock running since server time 100 and reaching the storm at
+		-- 700, when it saves, with a thunder override from 400 for 15 minutes (10 of them left).
+		local savedAt = 700
+		local state = Weather.newState(stormy - (savedAt - 100) * tick, 100, true, true)
+		Weather.setOverride(state, Weather.THUNDER, 900, 400)
+		local saved = Weather.encodeState(state, savedAt)
+
+		-- Into the world's record (WorldSave's "weather" section: WeatherServer.encode) and back
+		-- out on another server.
+		local backend = newBackend()
+		local fake = fakeStore(backend)
+		local saves = WorldStore.new(fake.store, fake.env)
+		local game = newGame()
+		local world = WorldStore.create(saves, settings())
+		local withWeather = input(game)
+		withWeather.sections.weather = saved
+		t.eq(WorldStore.save(saves, world, withWeather).ok, true)
+		WorldStore.release(saves, world)
+		local other = fakeStore(backend, { job = "server-b", clock = fake.clock })
+		local loaded = WorldStore.load(WorldStore.new(other.store, other.env), world.id) :: any
+		t.ok(loaded ~= nil)
+		local value = loaded.world.meta.sections.weather
+		t.eq(value, saved, "the text as saved")
+		t.eq(string.find(value, '[%c"\\]'), nil, "nothing JSON escapes")
+		t.eq(loaded.world.meta.sections.time.dayTime, 6000, "beside the day clock")
+
+		-- The new server (its own server time) reads it back (WeatherServer.decode, once the
+		-- weather started): the clock where it was, the override blended in with its time left.
+		local loadedAt = 52.25
+		local restored = Weather.decodeState(value, loadedAt, true) :: Weather.State
+		t.ok(restored ~= nil)
+		t.eq(Weather.clock(restored, loadedAt), stormy, "the clock where it was saved")
+		t.ok(field:at(0, 0, Weather.clock(restored, loadedAt)) > 0.6, "the storm still over spawn")
+		t.eq(restored.cycle, true)
+		t.eq(Weather.overrideAt(restored, loadedAt), Weather.THUNDER)
+		-- The same weather from then on: the override, its blend out after 10 minutes and the storms
+		-- after it.
+		for _, after in { 0, 30, 300, 597.5, 600, 1200 } do
+			local a = Weather.momentAt(state, savedAt + after)
+			local b = Weather.momentAt(restored, loadedAt + after)
+			for _, place in { { 0, 0 }, { 700, -300 }, { -2500, 4100 } } do
+				local p1, th1, c1 = field:at(place[1], place[2], a)
+				local p2, th2, c2 = field:at(place[1], place[2], b)
+				t.ok(
+					math.abs(p1 - p2) < 1e-9 and math.abs(th1 - th2) < 1e-9 and math.abs(c1 - c2) < 1e-9,
+					`{after} s after loading at {place[1]}, {place[2]}`
+				)
+			end
+		end
+		-- doWeatherCycle off: the clock and the override's time left stay held.
+		local held = Weather.newState(stormy, 0, false, true)
+		Weather.setOverride(held, Weather.RAIN, 300, 10)
+		local back = Weather.decodeState(Weather.encodeState(held, 5000), 3, true) :: Weather.State
+		t.eq(back.cycle, false)
+		t.eq(Weather.clock(back, 100000), stormy, "a stopped clock stays stopped")
+		t.eq(back.left, 300, "the override's time held")
+		t.eq(Weather.overrideAt(back, 100000), Weather.RAIN)
+		-- A debug world stays clear; damaged text is refused (the clear start stays).
+		t.eq((Weather.decodeState(value, 0, false) :: Weather.State).enabled, false)
+		t.eq(Weather.decodeState(42, 0, true), nil)
+		t.eq(Weather.decodeState("w1;1;1;storm;5", 0, true), nil)
+
+		-- A world saved without it (before the weather, or a new one): no section, so the weather
+		-- server keeps a new world's start, dry at spawn for its first minutes.
+		local loads = WorldStore.new(other.store, other.env)
+		local plainWorld = WorldStore.create(loads, settings("Plain"))
+		other.advance(10)
+		t.eq(WorldStore.save(loads, plainWorld, input(game)).ok, true)
+		WorldStore.release(loads, plainWorld)
+		local plain = WorldStore.load(WorldStore.new(other.store, other.env), plainWorld.id) :: any
+		t.ok(plain ~= nil)
+		t.eq(plain.world.meta.sections.weather, nil)
+		local seconds = Config.Weather.ClearStartSeconds
+		local start = Weather.clearStart(field, 0, 0, seconds)
+		for clock = start, start + seconds * tick, 10 * tick do
+			t.eq(field:at(0, 0, clock), 0, "dry at spawn")
+		end
+	end)
+
+	t.test("world save: protocol ids stay unique and appended (saving's, then the weather's)", function()
+		local Protocol = require(shared.Net.Protocol)
+		for _, kinds in { Protocol.ClientMessage, Protocol.ServerMessage } do
+			local seen: { [number]: string } = {}
+			local count = 0
+			for name, value in kinds do
+				t.eq(seen[value], nil, `{name} shares id {value}`)
+				seen[value] = name
+				count += 1
+			end
+			for i = 1, count do
+				t.ok(seen[i] ~= nil, `no gap at {i}`)
+			end
+		end
+		t.eq(Protocol.ClientMessage.WorldAction, 23)
+		t.eq(Protocol.ServerMessage.WorldList, 23)
+		t.eq(Protocol.ServerMessage.WorldSave, 24)
+		t.eq(Protocol.ServerMessage.Lightning, 25)
+	end)
+
 	t.test("world save: one server per world; a stale lock is taken over, the old server stops saving", function()
 		local backend = newBackend()
 		local a = fakeStore(backend, { job = "a" })
@@ -1385,13 +1497,11 @@ return function(t, shared, require, server, client)
 		) :: any
 		t.eq(loading.done, 12)
 		t.eq(loading.total, 40)
-		local saveState = Protocol.decodeWorldSave(
-			Protocol.encodeWorldSave({
-				op = Protocol.SaveOp.State,
-				state = Protocol.SaveState.Unavailable,
-				text = "no API",
-			})
-		) :: any
+		local saveState = Protocol.decodeWorldSave(Protocol.encodeWorldSave({
+			op = Protocol.SaveOp.State,
+			state = Protocol.SaveState.Unavailable,
+			text = "no API",
+		})) :: any
 		t.eq(saveState.state, Protocol.SaveState.Unavailable)
 		t.eq(saveState.text, "no API")
 		t.eq(

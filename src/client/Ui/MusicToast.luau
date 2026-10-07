@@ -9,7 +9,9 @@
 	shows (`setMinimapShown`, the Minimap setting), else in the corner itself (below the Map
 	button on touch screens). Scaled like the rest of the HUD (Style.guiScale, the GUI Scale
 	setting). `setEnabled` (the player's Music Toasts setting) stops new toasts; one showing slides
-	out.
+	out. Other toasts share its place (`top`) or go under it while it shows (`showing`); one
+	under it says so (`setBelow`), and the status effect icons under the place (`bottom`) move
+	down while it is there.
 ]]
 
 local Players = game:GetService("Players")
@@ -77,6 +79,8 @@ local panel: Frame? = nil
 local nameLabel: TextLabel? = nil
 local nameShadow: TextLabel? = nil
 local uiScale: UIScale? = nil
+-- Screen pixels another toast takes under this one's place right now (`setBelow`).
+local below = 0
 -- Bumped by every show, so an older toast's timer never slides a newer one out.
 local generation = 0
 local tween: Tween? = nil
@@ -144,12 +148,21 @@ function MusicToast.showing(): boolean
 end
 
 --[[
-	Screen pixels (below the top bar) just under the toast's place in the corner, shown or not, and
-	the right margin: the status effect icons go there (Ui/EffectHud).
+	Screen pixels (below the top bar) just under the toast's place in the corner, shown or not (and
+	under another toast below it while that one shows: `setBelow`), and the right margin: the
+	status effect icons go there (Ui/EffectHud, which follows it every frame).
 ]]
 function MusicToast.bottom(): (number, number)
 	local top, scale = place()
-	return top + HEIGHT * scale, MARGIN
+	return top + HEIGHT * scale + below, MARGIN
+end
+
+--[[
+	Another toast takes `pixels` (screen pixels; 0 when gone) under this one's place now
+	(Ui/SaveIndicator's "World saved" while it sits under Now Playing): `bottom` moves down by them.
+]]
+function MusicToast.setBelow(pixels: number)
+	below = math.max(pixels, 0)
 end
 
 local function layout()

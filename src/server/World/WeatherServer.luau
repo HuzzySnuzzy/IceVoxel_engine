@@ -30,7 +30,8 @@
 	             Mobs/Mobs), and every player within Config.Weather.Lightning.Distance gets a
 	             Lightning message for the bolt, the flash and the thunder.
 	  Saving     `encode()` and `decode(text)` (Weather.encodeState: the clock, doWeatherCycle and
-	             the override with its time left) for the world's save.
+	             the override with its time left) for the world's save: World/WorldSave's
+	             "weather" section, decoded after `start` (startWorld starts the weather first).
 ]]
 
 local Players = game:GetService("Players")
@@ -229,8 +230,12 @@ end
 
 --[[ Saving ]]
 
--- The state for the world's save (Weather.encodeState).
+-- The state for the world's save (Weather.encodeState; before `start`, a saved state waiting for it).
 function WeatherServer.encode(): string
+	local waiting = pending
+	if not started and waiting then
+		return waiting
+	end
 	return Weather.encodeState(state, now())
 end
 

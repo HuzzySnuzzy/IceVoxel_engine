@@ -54,7 +54,9 @@
 	             goes in the world's record) at every save, `decode(value)` gets it back once
 	             when a saved world starts (after every part started, before the world is
 	             published), or at once when registered later. "time" is the day clock's (day
-	             time and doDaylightCycle).
+	             time and doDaylightCycle), "weather" the weather's (World/WeatherServer: its
+	             clock, doWeatherCycle and a /weather override with its time left, so storms go on
+	             where they were; a world saved without it starts clear at spawn, as a new one).
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
@@ -78,6 +80,7 @@ local Server = script.Parent.Parent
 local ServerNet = require(Server.Network.ServerNet)
 local WorldServer = require(script.Parent.WorldServer)
 local TimeOfDay = require(script.Parent.TimeOfDay)
+local WeatherServer = require(script.Parent.WeatherServer)
 local Characters = require(Server.Players.Characters)
 local Effects = require(Server.Players.Effects)
 local GameModes = require(Server.Players.GameModes)
@@ -659,6 +662,19 @@ end, function(value: any)
 	local dayTime = value.dayTime
 	if type(dayTime) == "number" and dayTime == dayTime and math.abs(dayTime) ~= math.huge then
 		TimeOfDay.set(dayTime)
+	end
+end)
+
+--[[
+	The weather (World/WeatherServer: Weather.encodeState's text). startWorld starts the weather
+	before `restore`, so a saved world's replaces the new world's clear start there; text that
+	can't be read leaves that clear start.
+]]
+WorldSave.registerSection("weather", function(): any
+	return WeatherServer.encode()
+end, function(value: any)
+	if type(value) ~= "string" or not WeatherServer.decode(value) then
+		warn("[IceVoxel] the saved weather could not be read back: it starts clear")
 	end
 end)
 

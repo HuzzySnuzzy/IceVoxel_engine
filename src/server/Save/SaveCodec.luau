@@ -302,8 +302,7 @@ function SaveCodec.toText(source: buffer, from: number?, count: number?): string
 	local i = start
 	for _ = 1, full do
 		local value = (
-			(buffer.readu8(source, i) * 256 + buffer.readu8(source, i + 1)) * 256
-			+ buffer.readu8(source, i + 2)
+			(buffer.readu8(source, i) * 256 + buffer.readu8(source, i + 1)) * 256 + buffer.readu8(source, i + 2)
 		)
 				* 256
 			+ buffer.readu8(source, i + 3)

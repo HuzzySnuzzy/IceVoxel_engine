@@ -2308,7 +2308,12 @@ override's weights, which `at`, `grid` and `forecastAt` take.
 - *Saving*: `WeatherServer.encode()` gives a short string (`Weather.encodeState`: the clock's
   value, doWeatherCycle, the override and its time left). `WeatherServer.decode(text)` restores
   it before or after the weather starts, with the override already blended in, so a world loads
-  as it was.
+  as it was. `World/WorldSave` keeps it as the world's "weather" section (in its record, beside
+  "time"): startWorld starts the weather (a new world's clear start at spawn) before
+  `WorldSave.restore` decodes a saved world's over it, so the clock goes on from the value it was
+  saved at (the time the server was down doesn't count, as Minecraft's level.dat), and a world
+  saved without one, or with text that can't be read, keeps the clear start. Before `start`,
+  `encode` gives back a decoded state still waiting for it.
 
 **On the client** (`Weather/`, started by the client boot after `Rendering/LightingController`;
 the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `setWeather`):
@@ -5336,15 +5341,20 @@ load before the record arrives) the standing character is moved and set.
 world, in its record: `encode()` returns a small JSON-able value at every save (in the save's
 frame), `decode(value)` runs once when a saved world starts (after every part started, before
 the world is published), or at once when registered later. "time" is the day clock's (day time
-and doDaylightCycle); the weather's clock and override belong here.
+and doDaylightCycle); "weather" the weather's (`WeatherServer.encode`'s text: its clock,
+doWeatherCycle and a `/weather` override with its time left; see Weather).
 
 **Feedback.** WorldSave messages (Protocol): "saving" and "saved" to everyone (Ui/SaveIndicator:
 Bedrock's saving icon, a grass block bobbing in the bottom right corner with "Saving...", while a
 save is in flight and at least 1.2 s; higher up on touch screens, clear of the buttons), the sizes
-to operators only (the toast, as Ui/MusicToast's and under it while that one shows: "World saved"
-over "1.4 MB of 64 MB (largest region 0.3 / 4 MB)", red when it failed or nears the most), the
+to operators only (the toast, as Ui/MusicToast's and under it while that one shows, or dropping
+under one that comes in over it: "World saved" over "1.4 MB of 64 MB (largest region 0.3 / 4 MB)",
+red when it failed or nears the most; while it sits under Now Playing, `MusicToast.setBelow`
+moves the status effect icons down under it too), the
 state (on, off, unavailable and why, session only) to every title screen and the loading progress.
-Operators read failures, refusals and the size warnings in the chat.
+Operators read failures, refusals and the size warnings in the chat. The icon and the toast hide
+with the HUD (the world map hides it: on 4:3 and squarer screens the icon would sit on the map's
+weather bar and legend, and without the minimap the toast on its buttons).
 
 **Title screen** (client `Ui/MainMenu`, rules in `Ui/WorldListRules`, `Ui/TitleRules`). Load World
 is enabled for an operator while no world exists where saving works (`TitleRules.buttons`'

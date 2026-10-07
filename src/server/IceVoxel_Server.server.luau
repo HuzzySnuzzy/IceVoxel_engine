@@ -278,7 +278,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		StructureBlocks.update(dt)
 	end)
 
-	-- A loaded world's state back in every part, before anyone enters.
+	-- A loaded world's state back in every part, before anyone enters (its sections too: the day
+	-- clock and the weather, started above, go on where they were saved).
 	WorldSave.restore({
 		world = world,
 		containers = Containers.default,

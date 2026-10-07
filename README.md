@@ -29,7 +29,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   furnaces still cooking, machines with their energy, tanks and slots, Mekanism pipes (side modes,
   colours, the fluid in them), Fluid Tanks, items in transporters, structure blocks and jigsaws,
   generated chests already looted, dropped items, farm animals, block updates still due (water
-  that was flowing flows on), the clock and doDaylightCycle, the world's operators, and each
+  that was flowing flows on), the clock and doDaylightCycle, the weather (its clock,
+  doWeatherCycle and a `/weather` override with its time left: storms go on where they were),
+  the world's operators, and each
   player's place, facing, health, game mode, inventory and armor, thirst and temperature and
   status effects (progress is kept per player for every world, as before). Autosave every 5
   minutes writes only what changed (a house and a tunnel, a chest, a furnace, a battery, pipes,
@@ -421,7 +423,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   under the heaviest), at the highest block or a living thing near it, setting fires (with
   doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, Minecraft's).
   `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s, and
-  `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft.
+  `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft. A saved world
+  keeps its weather: loaded again, the same storms are where they were and an override has the
+  time it had left; a new world starts with a clear sky over spawn.
 - **Rain, snow, clouds and lightning.** Rain and snow fall around you as Minecraft draws them: a
   streak in every block column within 10 blocks (5 on Fast), only above the highest block that
   stops rain, so never indoors, under a tree or in a cave, rain or snow by each column's biome and
@@ -2282,18 +2286,19 @@ With the legacy chat, read `Player.Chatted` instead (the game's chat needs TextC
 leaves Roblox's in place there).
 
 **State saved with the world.** Something of your own that a saved world should keep (a clock, a
-weather override, a score) registers a section with the server's `World/WorldSave`:
+round's scores) registers a section with the server's `World/WorldSave`:
 ```lua
-WorldSave.registerSection("weather", function()
-	return { clock = Weather.clock(), override = Weather.override() } -- small, JSON-able
+WorldSave.registerSection("arena", function()
+	return { round = Arena.round(), scores = Arena.scores() } -- small, JSON-able
 end, function(value)
-	Weather.restore(value) -- once, when a saved world with it starts
+	Arena.restore(value) -- once, when a saved world with it starts
 end)
 ```
 `encode` runs at every save (keep it cheap: it runs in the save's frame) and goes in the world's
 record; `decode` runs once when a saved world starts, after every part of the server started and
 before anyone is in, or at once if you register later. A section the world never saved gets no
-call. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
+call. Names are the world's: "time" (the day clock) and "weather" (`World/WeatherServer`'s
+`encode` / `decode`) are taken. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
 like a chest's (see `Save/WorldSnapshot` for what else regions carry).
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
