@@ -498,6 +498,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   along them a hut, a storehouse with a chest of supplies, an open forge and a woodpile: at most one
   per 896 × 896 blocks, in plains, savannas, meadows and forests. With `Config.Structures.Generate`
   false none generate.
+- **World types.** Minecraft's world presets, each with its own options: **Default**;
+  **Superflat**, layers from a preset line in this game's names (`Bedrock,2*Dirt,Grass;Plains`;
+  Minecraft's own strings such as `minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block` paste
+  too) or Minecraft's presets whose blocks exist (Classic Flat, Tunnelers' Dream, Water World,
+  Overworld, Snowy Kingdom, Bottomless Pit, Desert, Redstone Ready), trees and plants optional, a
+  bad preset falling back to Classic Flat with the reason; **The Void**, a 33 × 33 stone platform
+  at y 64 over nothing; **Single Biome**, the Default's mountains with one biome everywhere (sand
+  up the peaks of a desert world); **Large Biomes**, the Default with climate four times as wide;
+  and three debug worlds: **All Blocks** (Minecraft's Debug Mode: every block once, variants and
+  fluid levels included, at y 70 on a grid with a gap between, nothing ticks so nothing flows or
+  falls, spectator suggested), **All Structures** (every template of the structure library and
+  every generated structure on a grass floor, each with a structure block name tag that WAILA
+  reads and F3 outlines) and **All Biomes** (a 16 block strip of every biome's ground, trees and
+  plants). The void and the debug worlds spawn no mobs. The server publishes the type and its
+  options with the seed, so every client and worker builds the same world; the far terrain, the
+  map, WAILA's biome, Tough As Nails, safe spawning and sky checks all follow it.
+  `Config.WorldType` and `Config.WorldOptions` pick the world a server starts with.
 - **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
   more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
   Each is a thin plate on its face (showing the texture pack's glow lichen image) with a glowing
@@ -1037,6 +1054,12 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             pieces, foundations, generated chests)
     CaveDecor               glow lichen on cave walls (full detail only)
     Foliage                 ground plants by biome (full detail only)
+    WorldTypes              the world types (registry, options and settings, hints, the
+                            WorldType / WorldOptions / Seed attributes)
+    LayeredGenerator        a whole generator from layer stacks, placed blocks and a structure
+                            placer (flat, void and debug worlds; every LOD level)
+    Superflat               superflat preset lines, Minecraft's presets
+    DebugWorlds             the debug worlds' grids (all blocks, all structures, all biomes)
   Meshing/GreedyMesher      blocks -> boxes (parts; odd boxes for textures with OddBoxes)
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays (split by
@@ -1393,7 +1416,11 @@ at most 6,000 (half that on phones); `Render.Foliage = false` saves them.
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
 
-`Seed = nil` gives every server a random world; set a number for a fixed one.
+`Seed = nil` gives every server a random world; set a number for a fixed one. `WorldType` picks
+the world type (`"default"`, `"superflat"`, `"void"`, `"singleBiome"`, `"largeBiomes"`,
+`"debugBlocks"`, `"debugStructures"`, `"debugBiomes"`) and `WorldOptions` its options, e.g.
+`{ preset = "Bedrock,59*Stone,3*Dirt,Grass;Plains", decoration = true }` for superflat or
+`{ biome = "Desert" }` for a single biome.
 
 ## Extending
 
@@ -1917,6 +1944,18 @@ biome only decides what grows and what the ground is made of. Its ground plants 
 average `density`, the share of the ground in patches (`cover`), weighted `plants` and optional
 `flowers` (see the BiomeList header); keep within the parts budget tests/spec/FoliageGeneration
 checks.
+
+**A world type.** Register it in `src/shared/Generation/WorldTypes.luau` (or from your own module
+before the world is created) with an id, a name, a description and `create(seed, options)`
+returning a generator built only from the seed and the options (every client and worker builds it
+too). A flat or laid-out world is a few lines with `Generation/LayeredGenerator`: a stack of
+layers (`LayeredGenerator.stack({ { block = Blocks.id.Stone, count = 60 }, ... })`), one
+everywhere or per column, blocks laid over it and an optional structure placer; it answers
+everything the server, the streamer, the far terrain and the map ask, at every level. Declare
+its options in `settings` (toggles, choices, texts) for the Create World screen, and the hints
+`mobs = false`, `ticks = false` or `gameMode` when it needs them. To try one without the menu,
+set `Config.WorldType` and `Config.WorldOptions`. A new superflat preset is a line in
+`Superflat.PRESETS`.
 
 **A tree or another small feature.** Write a builder in `Generation/Structures/` (see
 `Trees.luau`), register it in `Structures.registry` with the blocks it may grow on, and list it in

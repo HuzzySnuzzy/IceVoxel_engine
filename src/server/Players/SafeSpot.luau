@@ -84,14 +84,16 @@ end
 -- Highest safe feet position in a column that is not below the natural surface, or nil.
 function SafeSpot.column(world: World, x: number, z: number): number?
 	local surface, biome = world.generator.column(x, z)
+	-- (The world type's sea: a superflat world's water layers, none in a void.)
+	local sea = world.generator.seaLevel or SEA
 	local top
 	if world:chunkEdits(x // CHUNK, z // CHUNK) then
 		top = world:topBlock(x, z) + 1
 	else
-		if surface < SEA and not Biomes.list[biome].frozen then
+		if surface < sea and not Biomes.list[biome].frozen then
 			return nil -- open water
 		end
-		top = math.min(math.max(surface, SEA) + STRUCTURE_CLEARANCE, HEIGHT - headroom)
+		top = math.min(math.max(surface, sea) + STRUCTURE_CLEARANCE, HEIGHT - headroom)
 	end
 	for y = top, math.max(surface, 1), -1 do
 		if SafeSpot.isSafe(world, x, y, z) then

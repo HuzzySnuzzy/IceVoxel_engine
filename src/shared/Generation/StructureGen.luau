@@ -53,6 +53,11 @@
 	with slots (a chest) at a world position, nil when no piece has one there (or a later piece
 	wrote over it): the server fills a generated chest from it the first time its contents are
 	needed.
+
+	Fixed layouts: `new`'s optional `layout` replaces the random spread: it lists the starts
+	reaching a block rectangle (in write order, the same for every rectangle that holds them),
+	and everything above (writing, trees, containers) works from it. The debug structures world
+	(Generation/DebugWorlds) lays out every template of the library that way.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -133,6 +138,9 @@ export type Chunk = {
 	topCells: { number },
 }
 
+-- A fixed layout (see the header): every start with a piece in the block rectangle (inclusive).
+export type Layout = (minX: number, minZ: number, maxX: number, maxZ: number) -> { Start }
+
 export type Placer = {
 	library: Library.Library,
 	-- Every assembled start with a piece in the block rectangle (inclusive), in write order.
@@ -180,7 +188,7 @@ function StructureGen.startChunk(seed: number, structure: Structure, rx: number,
 	return rx * spacing + rng:int(0, range - 1), rz * spacing + rng:int(0, range - 1)
 end
 
-function StructureGen.new(seed: number, library: Library.Library, terrain: Terrain): Placer
+function StructureGen.new(seed: number, library: Library.Library, terrain: Terrain, layout: Layout?): Placer
 	local structures = library.structures
 	local templateOf = library.template
 	local poolOf = library.pool
@@ -281,6 +289,9 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 	end
 
 	local function starts(minX: number, minZ: number, maxX: number, maxZ: number): { Start }
+		if layout then
+			return layout(minX, minZ, maxX, maxZ)
+		end
 		local list: { Start } = {}
 		for index, structure in structures do
 			local reach = structure.reach

@@ -17,6 +17,10 @@
 	water (ice where frozen) at up to LAKE_SCALE blocks a pixel, and puddles at up to PUDDLE_SCALE:
 	a pixel whose centre column holds the water. (Farther out they would be a pixel or less, and
 	finding them for a whole tile would cost more than they show.)
+
+	The sea is the generator's (`seaLevel`: a superflat world's water layers, none in a void), and
+	a column with nothing in it (`column`'s surface is air: the void, a debug world's gaps) is
+	painted VOID, a dark grey.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -28,6 +32,8 @@ local Lakes = require(script.Parent.Parent.Generation.Lakes)
 local SEA = Config.SeaLevel
 local ICE = Blocks.get(Blocks.id.Ice).color
 local OIL = Blocks.get(Blocks.id.Oil).color
+local AIR = Blocks.AIR
+local VOID = { 18, 18, 22 }
 
 -- Coarsest zoom (blocks per pixel) that paints water lakes / puddles.
 local LAKE_SCALE, PUDDLE_SCALE = 8, 2
@@ -53,7 +59,7 @@ local LIGHT = 0.3
 local ALTITUDE_GAIN, ALTITUDE_TOP = 0.25, 700
 
 -- Colour (packed RGBA) of one map pixel; `west` / `north` are the neighbouring pixels' heights,
--- `scale` blocks away.
+-- `scale` blocks away; `sea` the world's sea level.
 local function shade(
 	height: number,
 	west: number,
@@ -61,20 +67,23 @@ local function shade(
 	scale: number,
 	biome: number,
 	vegetation: number,
-	surface: number
+	surface: number,
+	sea: number
 ): number
-	if height < SEA then
+	if surface == AIR and height <= 0 then
+		return pack(VOID[1], VOID[2], VOID[3])
+	elseif height < sea then
 		if Biomes.list[biome].frozen then
 			return pack(ICE[1], ICE[2], ICE[3])
 		end
-		local t = math.min(1, (SEA - height) / 40)
+		local t = math.min(1, (sea - height) / 40)
 		return pack(64 - 46 * t, 138 - 90 * t, 214 - 94 * t)
 	end
 	local c = Blocks.get(surface).color
 	-- Light from the north-west: slopes facing it are brighter.
 	local light = 1 + ((height - west) + (height - north)) / scale * LIGHT
 	light = if light < 0.6 then 0.6 elseif light > 1.35 then 1.35 else light
-	local altitude = 0.92 + ALTITUDE_GAIN * math.min(1, (height - SEA) / ALTITUDE_TOP)
+	local altitude = 0.92 + ALTITUDE_GAIN * math.min(1, (height - sea) / ALTITUDE_TOP)
 	local forest = 1 - math.min(0.35, vegetation * 0.7)
 	local k = light * altitude * forest
 	return pack(c[1] * k, c[2] * k, c[3] * k)
@@ -156,6 +165,7 @@ end
 
 function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 	local column = generator.column
+	local sea = generator.seaLevel or SEA
 	local heights: { number } = {}
 
 	return function(originX: number, originZ: number, scale: number, size: number, yield: (() -> ())?): buffer
@@ -178,7 +188,7 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 				heights[row + i + 1] = h
 				local west = heights[row + i]
 				local north = heights[row - stride + i + 1]
-				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, scale, biome, vegetation, surface))
+				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, scale, biome, vegetation, surface, sea))
 			end
 			if yield then
 				yield()

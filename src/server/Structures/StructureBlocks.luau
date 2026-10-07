@@ -35,6 +35,10 @@
 	  Containers   generated structures' chests are filled from the generator's
 	               `structureContainer` the first time they are needed (Players/Containers'
 	               `generated`); LOAD and Generate fill their containers themselves.
+	  Labels       structure blocks the generator placed with settings of their own (its
+	               `labels`: the debug structures world's name tags, Generation/DebugWorlds) get
+	               their records at the start, as if placed and set up, so WAILA names them and
+	               F3 outlines their regions; breaking one forgets it like any other.
 ]]
 
 local Players = game:GetService("Players")
@@ -43,6 +47,7 @@ local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Library = require(Shared.Structures.Library)
@@ -380,8 +385,23 @@ function StructureBlocks.start(serverNet: Net, world: WorldServer.World)
 	})
 	core = server
 
-	-- Generated structures' chests: what the generator put there, the first time it is needed.
+	-- Generated structure blocks with settings (name tags): their records, as if placed.
 	local generator = world.generator
+	local labels = (generator :: any).labels
+	if type(labels) == "function" then
+		local store = StructureBlocks.store
+		local save = Blocks.structureBlock("save") :: number
+		for _, label in labels() do
+			store:blockChanged(label.x, label.y, label.z, Blocks.AIR, save)
+			local settings = Settings.defaultStructure("save")
+			settings.name = label.name
+			settings.offset = table.clone(label.offset)
+			settings.size = table.clone(label.size)
+			store:setStructure(label.x, label.y, label.z, settings)
+		end
+	end
+
+	-- Generated structures' chests: what the generator put there, the first time it is needed.
 	local lookup = (generator :: any).structureContainer
 	if type(lookup) == "function" then
 		Containers.default.generated = {

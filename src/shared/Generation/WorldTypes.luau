@@ -13,16 +13,52 @@
 	             superflat preset, a biome, structures on or off). `encodeOptions` writes it as one
 	             string ("key=value" pairs, values typed: s:text, n:12, b:1), `decodeOptions` reads
 	             it back; keys sorted, so equal options give equal strings.
+	  Settings   a world type's `settings` declares its options for the Create World screen, in
+	             order: { key (the Options key), name, kind ("toggle" | "choice" | "text"),
+	             default, choices + labels (a choice's values and what the menu shows for each),
+	             presets ({ name, value }: ready-made texts a menu may offer, Minecraft's flat
+	             presets), description }. A menu renders the list generically; anything it leaves
+	             out takes its default in `create`.
+	  Hints      what a world type asks of the rest of the game: `mobs = false` (no natural mob
+	             spawning: Mobs/Mobs), `ticks = false` (no block updates and no random ticks,
+	             Minecraft's debug world: the server script builds its BlockTicker without
+	             behaviours), `gameMode` (the game mode the type suggests: the Create World screen
+	             preselects it), `debug` (a debug world: the menu may set it apart, as Minecraft
+	             shows Debug Mode only with Alt held). `published` gives the type the attributes
+	             name, for those parts of the server.
 	  Replicated the server sets three attributes on ReplicatedStorage.IceVoxel, in this order:
 	             "WorldType" (the id), "WorldOptions" (the encoded options), then "Seed" (a number).
 	             Clients and chunk workers wait for "Seed" (it comes last, once the world exists:
 	             the main menu's world creation may hold it back) and then `fromAttributes` builds
 	             their generator. A world type or options unknown to a client build the Default.
+
+	The types (menu order): Default (TerrainGenerator), Superflat (Generation/Superflat), Void
+	(Minecraft's The Void: a stone platform over nothing), Single Biome and Large Biomes (the
+	Default's terrain with TerrainGenerator's `biome` / `climateScale`), and the debug worlds All
+	Blocks, All Structures and All Biomes (Generation/DebugWorlds).
 ]]
 
+local Biomes = require(script.Parent.Parent.Biomes)
+local Blocks = require(script.Parent.Parent.Blocks)
+local GameMode = require(script.Parent.Parent.GameMode)
 local TerrainGenerator = require(script.Parent.TerrainGenerator)
+local LayeredGenerator = require(script.Parent.LayeredGenerator)
+local Superflat = require(script.Parent.Superflat)
+local DebugWorlds = require(script.Parent.DebugWorlds)
 
 export type Options = { [string]: string | number | boolean }
+
+-- One option a world type declares for the menu (see the header).
+export type Setting = {
+	key: string,
+	name: string,
+	kind: string, -- "toggle" | "choice" | "text"
+	default: string | boolean,
+	choices: { string }?,
+	labels: { string }?,
+	presets: { { name: string, value: string } }?,
+	description: string?,
+}
 
 export type WorldType = {
 	id: string,
@@ -31,6 +67,14 @@ export type WorldType = {
 	create: (seed: number, options: Options) -> TerrainGenerator.Generator,
 	-- Hidden from the create-world menu (still buildable by id).
 	hidden: boolean?,
+	-- Its options, for the menu (see the header).
+	settings: { Setting }?,
+	-- Hints (see the header): false turns natural mob spawning / ticks off; the suggested game
+	-- mode (GameMode names); a debug world.
+	mobs: boolean?,
+	ticks: boolean?,
+	gameMode: string?,
+	debug: boolean?,
 }
 
 local WorldTypes = {}
@@ -143,6 +187,17 @@ function WorldTypes.fromAttributes(folder: Instance): (TerrainGenerator.Generato
 end
 
 --[[
+	The world type the attributes of `folder` name (the Default when none or unknown) and its
+	options, for the server's parts that follow a type's hints (Mobs, the block ticker). Read it
+	once the world is published.
+]]
+function WorldTypes.published(folder: Instance): (WorldType, Options)
+	local id = folder:GetAttribute("WorldType")
+	local worldType = WorldTypes.get(if type(id) == "string" then id else nil) or byId[WorldTypes.DEFAULT]
+	return worldType, WorldTypes.decodeOptions(folder:GetAttribute("WorldOptions") :: string?)
+end
+
+--[[
 	Publishes a world on `folder` for the clients: "WorldType", "WorldOptions", then "Seed" (see the
 	header).
 ]]
@@ -154,6 +209,59 @@ end
 
 --[[ The world types ]]
 
+-- Minecraft's "Generate Structures" (library structures: Structures/Library).
+local STRUCTURES: Setting = {
+	key = "structures",
+	name = "Generate Structures",
+	kind = "toggle",
+	default = true,
+	description = "Outposts and the other structures of the structure library",
+}
+
+-- "BirchForest" -> "Birch Forest".
+local function spaced(name: string): string
+	return (string.gsub(name, "(%l)(%u)", "%1 %2"))
+end
+
+local biomeNames: { string } = {}
+local biomeLabels: { string } = {}
+for _, biome in Biomes.list do
+	table.insert(biomeNames, biome.name)
+	table.insert(biomeLabels, spaced(biome.name))
+end
+
+-- Superflat's preset line (Generation/Superflat) and its trees and plants.
+local PRESET: Setting = {
+	key = "preset",
+	name = "Preset",
+	kind = "text",
+	default = Superflat.CLASSIC,
+	presets = Superflat.PRESETS :: any,
+	description = "The layers from the bottom up, then the biome: Bedrock,2*Dirt,Grass;Plains",
+}
+local DECORATION: Setting = {
+	key = "decoration",
+	name = "Trees and Plants",
+	kind = "toggle",
+	default = false,
+	description = "The biome's trees and ground plants on the top layer",
+}
+-- Single Biome's biome (BiomeList names).
+local BIOME: Setting = {
+	key = "biome",
+	name = "Biome",
+	kind = "choice",
+	default = "Plains",
+	choices = biomeNames,
+	labels = biomeLabels,
+}
+
+-- The biome index an option names (BiomeList name), `fallback` when none or unknown.
+local function biomeOption(value: any, fallback: string): number
+	local biome = if type(value) == "string" then Biomes.byName(value) else nil
+	return (biome or Biomes.byName(fallback) :: Biomes.Biome).index
+end
+
 WorldTypes.register({
 	id = WorldTypes.DEFAULT,
 	name = "Default",
@@ -161,6 +269,102 @@ WorldTypes.register({
 	create = function(seed: number, options: Options): TerrainGenerator.Generator
 		return TerrainGenerator.new(seed, { structures = options.structures ~= false })
 	end,
+	settings = { STRUCTURES },
+})
+
+WorldTypes.register({
+	id = "superflat",
+	name = "Superflat",
+	description = "Flat layers of blocks, Minecraft's presets or your own",
+	create = Superflat.create,
+	settings = { PRESET, DECORATION },
+})
+
+-- The Void's platform: VOID_RADIUS blocks around the origin at VOID_Y, cobblestone in the middle.
+WorldTypes.VOID_RADIUS = 16
+WorldTypes.VOID_Y = 64
+
+WorldTypes.register({
+	id = "void",
+	name = "The Void",
+	description = "Nothing at all but a small stone platform to start on",
+	create = function(seed: number): TerrainGenerator.Generator
+		local placed: { number } = {}
+		local r, y = WorldTypes.VOID_RADIUS, WorldTypes.VOID_Y
+		for x = -r, r do
+			for z = -r, r do
+				table.insert(placed, x)
+				table.insert(placed, y)
+				table.insert(placed, z)
+				table.insert(placed, if x == 0 and z == 0 then Blocks.id.Cobblestone else Blocks.id.Stone)
+			end
+		end
+		return LayeredGenerator.new({
+			seed = seed,
+			stack = LayeredGenerator.EMPTY,
+			biome = biomeOption(nil, "Plains"),
+			blocks = placed,
+		})
+	end,
+	-- (Minecraft's the_void biome spawns nothing.)
+	mobs = false,
+})
+
+WorldTypes.register({
+	id = "singleBiome",
+	name = "Single Biome",
+	description = "The Default terrain with one biome everywhere",
+	create = function(seed: number, options: Options): TerrainGenerator.Generator
+		return TerrainGenerator.new(seed, {
+			structures = options.structures ~= false,
+			biome = biomeOption(options.biome, "Plains"),
+		})
+	end,
+	settings = { BIOME, STRUCTURES },
+})
+
+WorldTypes.register({
+	id = "largeBiomes",
+	name = "Large Biomes",
+	description = "The Default terrain with biomes four times as wide",
+	create = function(seed: number, options: Options): TerrainGenerator.Generator
+		return TerrainGenerator.new(seed, { structures = options.structures ~= false, climateScale = 4 })
+	end,
+	settings = { STRUCTURES },
+})
+
+WorldTypes.register({
+	id = "debugBlocks",
+	name = "Debug: All Blocks",
+	description = "Every block in a grid over the void; nothing ticks",
+	create = DebugWorlds.allBlocks,
+	mobs = false,
+	ticks = false,
+	gameMode = GameMode.SPECTATOR,
+	debug = true,
+})
+
+WorldTypes.register({
+	id = "debugStructures",
+	name = "Debug: All Structures",
+	description = "Every structure of the library in a grid, each with its name tag",
+	create = function(seed: number): TerrainGenerator.Generator
+		return DebugWorlds.allStructures(seed)
+	end,
+	mobs = false,
+	ticks = false,
+	gameMode = GameMode.CREATIVE,
+	debug = true,
+})
+
+WorldTypes.register({
+	id = "debugBiomes",
+	name = "Debug: All Biomes",
+	description = "A strip of every biome's ground, trees and plants",
+	create = DebugWorlds.allBiomes,
+	mobs = false,
+	gameMode = GameMode.CREATIVE,
+	debug = true,
 })
 
 return WorldTypes

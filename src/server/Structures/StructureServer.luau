@@ -228,7 +228,7 @@ function StructureServer.surfaceHeight(world: WorldServer.World, x: number, z: n
 	local chunk = world:peekChunk(x // SIZE, z // SIZE)
 	if chunk == nil then
 		local height = world.generator.column(x, z)
-		return math.max(height, Config.SeaLevel)
+		return math.max(height, world.generator.seaLevel or Config.SeaLevel)
 	end
 	for y = chunk.height - 1, 0, -1 do
 		local block = world:peekBlock(x, y, z)

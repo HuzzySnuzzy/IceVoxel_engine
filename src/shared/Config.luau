@@ -16,6 +16,13 @@ local Config = {
 	-- nil picks a random seed for every server. Set a number for a fixed, reproducible world.
 	Seed = nil :: number?,
 
+	-- The world type the server starts (Generation/WorldTypes: "default", "superflat", "void",
+	-- "singleBiome", "largeBiomes", "debugBlocks", "debugStructures", "debugBiomes") and its options
+	-- (the type's `settings` keys, e.g. { preset = "Bedrock,2*Dirt,Grass;Plains" } for superflat or
+	-- { biome = "Desert" } for a single biome). Unknown types are the Default.
+	WorldType = "default",
+	WorldOptions = {} :: { [string]: string | number | boolean },
+
 	-- Size of one block in studs. 3 makes the default character ~1.7 blocks tall (Minecraft is 1.8).
 	BlockSize = 3,
 

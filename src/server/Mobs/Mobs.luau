@@ -31,7 +31,9 @@
 	             in one Mobs message with that period's arrows and the player's knockback.
 	  Commands   /summon <kind> [x y z] and /kill @e[type=<kind>] (Mobs/SummonCommand), for those
 	             who may change the time (Config.Gameplay.Admins, the owner, Studio).
-	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent.
+	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent; a world type
+	             with `mobs = false` (the void and the debug worlds: Generation/WorldTypes) has no
+	             natural spawning (/summon still works).
 
 	For other server scripts (the integration hooks):
 	  Mobs.died            Event (killer: Player?, kind: string, x, y, z, id): a mob died; the
@@ -63,6 +65,7 @@ local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
 local Rig = require(Shared.Movement.Rig)
+local WorldTypes = require(Shared.Generation.WorldTypes)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Simulation = require(script.Parent.Parent.World.Simulation)
@@ -524,6 +527,13 @@ function Mobs.start(net: Net, world: WorldServer.World)
 	})
 	mobWorld = mobs
 	local spawnState = MobSpawning.new()
+	-- The world type may turn natural spawning off (published before the world exists).
+	local spawnSettings: MobSpawning.Settings = Settings
+	if WorldTypes.published(Shared).mobs == false then
+		local off = table.clone(Settings)
+		off.Spawning = false
+		spawnSettings = off
+	end
 	local active: { [number]: boolean } = {}
 	local function isActive(cx: number, cz: number): boolean
 		return active[Coords.chunkKey(cx, cz)] == true
@@ -556,7 +566,7 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				active = isActive,
 			}
 			mobs:tick(context)
-			MobSpawning.step(mobs, spawnState, context, Settings)
+			MobSpawning.step(mobs, spawnState, context, spawnSettings)
 			apply(mobs, world)
 			if tickCount % math.max(1, Settings.SyncTicks) == 0 then
 				replicate(net, mobs)

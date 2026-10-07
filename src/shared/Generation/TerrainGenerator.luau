@@ -12,7 +12,11 @@
 
 	Biomes (Biomes/BiomeList.luau) are picked by altitude band first (lowland, forest, highland,
 	meadow, alpine, snowy slopes, peaks), then by climate (temperature and humidity noise) among
-	the biomes of that band. Islands far out in some seas are mushroom fields.
+	the biomes of that band. Islands far out in some seas are mushroom fields. Two options change
+	that (Generation/WorldTypes' Single Biome and Large Biomes; neither touches the terrain's
+	shape): `biome` puts one biome everywhere (Minecraft's single biome source: mountains of
+	desert sand, seas frozen in a tundra), `climateScale` stretches the climate noise (4: biomes
+	four times as wide, Minecraft's Large Biomes). Without them a world is exactly what it was.
 
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
 	(SurfaceCaves.luau, air open to the surface), lava below LavaLevel, surface lava lakes and oil
@@ -171,23 +175,55 @@ export type Generator = {
 	-- rectangle (inclusive), and the puddles whose columns come within Lakes.PUDDLE_MARGIN.
 	waterLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Lake },
 	puddles: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Puddle },
+	--[[
+		The sea's surface (blocks: the first air above the sea): a column whose height (`column`)
+		is lower lies under water up to it. Config.SeaLevel here; flat and debug worlds
+		(Generation/LayeredGenerator) have their own, 0 when they have no sea. nil (a test's
+		stand-in generator): Config.SeaLevel.
+	]]
+	seaLevel: number?,
+	--[[
+		Structure blocks the generator put in the world with settings of their own (the debug
+		structures world's name tags, Generation/DebugWorlds), for the server's structure block
+		records (Structures/StructureBlocks); nil or empty: none.
+	]]
+	labels: (() -> { Label })?,
+}
+
+-- A generated structure block with its settings (Generator `labels`): a SAVE block named `name`
+-- whose region is `offset` / `size` from it (Structures/Settings).
+export type Label = {
+	x: number,
+	y: number,
+	z: number,
+	name: string,
+	offset: { number },
+	size: { number },
 }
 
 --[[
 	`library`: the structure library to generate (default: Library.load() when
 	Config.Structures.Generate); `structures = false`: no library structures at all.
+	`biome`: a biome index (Biomes.list) every column gets, whatever its altitude and climate
+	(nil: the usual choice). `climateScale`: the climate noise is this many times as wide (nil or
+	1: the usual; 4: Minecraft's Large Biomes).
 ]]
 export type Options = {
 	library: Library.Library?,
 	structures: boolean?,
+	biome: number?,
+	climateScale: number?,
 }
 
 local TerrainGenerator = {}
 
 function TerrainGenerator.new(seed: number, options: Options?): Generator
+	local opts: Options = options or {}
 	local relief = Relief.new(seed)
-	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / 5900, 3)
-	local humidity = Noise.fbm2(seed, "climate.humidity", 1 / 1500, 3)
+	-- (Large Biomes: the climate's wavelengths times climateScale; the border jitter stays.)
+	local climateScale = opts.climateScale or 1
+	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / (5900 * climateScale), 3)
+	local humidity = Noise.fbm2(seed, "climate.humidity", 1 / (1500 * climateScale), 3)
 	local jitterT = Noise.fbm2(seed, "climate.jitterT", 1 / 24, 2)
 	local jitterH = Noise.fbm2(seed, "climate.jitterH", 1 / 24, 2)
 	local bandJitter = Noise.fbm2(seed, "climate.band", 1 / 24, 2)
@@ -220,12 +256,18 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
 		surface block, the relief's selector and river strength.
 	]]
+	-- Single Biome's biome (nil: chosen per column).
+	local forced = opts.biome
+	assert(forced == nil or Biomes.list[forced] ~= nil, "TerrainGenerator: unknown biome index")
+
 	local function sample(x: number, z: number, level: number): (number, number, number, number, number, number)
 		local y, unrivered, selector, river = relief.height(x, z, level)
 		local h = clampHeight(y)
 
 		local biome = MUSHROOM
-		if selector >= MUSHROOM_SELECTOR then
+		if forced then
+			biome = forced
+		elseif selector >= MUSHROOM_SELECTOR then
 			-- Altitude band, then the biome of that band nearest to a slightly jittered climate.
 			local band = Biomes.bandAt(unrivered + bandJitter(x, z) * BAND_JITTER)
 			local t = math.clamp(temperature(x, z) * CLIMATE_SPREAD, -1, 1) + jitterT(x, z) * BORDER_JITTER
@@ -278,7 +320,6 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	end
 
 	-- Library structures (nil: none to place).
-	local opts: Options = options or {}
 	local library = opts.library
 	if library == nil and opts.structures ~= false and Config.Structures.Generate then
 		library = Library.load()
@@ -1087,6 +1128,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		lavaLakes = lava.surfaceLakes,
 		waterLakes = lakes.lakes,
 		puddles = lakes.puddles,
+		seaLevel = SEA,
 	}
 end
 

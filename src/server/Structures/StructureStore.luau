@@ -13,7 +13,8 @@
 	    one turning into another keeps them;
 	  * any other block there forgets them (Minecraft's broken block entity).
 	These blocks only ever come from edits (generation writes jigsaws as their final state and
-	data markers as air), so every one in the world has an entry.
+	data markers as air), so every one in the world has an entry; the one exception, the debug
+	structures world's name tags, gets its entries from Structures/StructureBlocks at the start.
 
 	Replication: `chunkRecords` gives a chunk's entries (sent with its edit list), and every entry
 	created, changed or forgotten is marked dirty until `takeDirty` (a forgotten one is a record

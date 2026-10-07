@@ -7,7 +7,8 @@
 	change. Clients generate and render the terrain themselves from the seed.
 
 	Boot order:
-	  1. seed       -> published as an attribute on ReplicatedStorage.IceVoxel
+	  1. seed       -> published as an attribute on ReplicatedStorage.IceVoxel, after the world
+	                   type and its options (Generation/WorldTypes; Config.WorldType)
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/), and random ticks
 	                   near players (World/RandomTicker: grass spreading, leaf decay, saplings)
@@ -91,11 +92,14 @@ local Progression = require(Server.Players.Progression)
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 -- (The world type and its options go out before the seed: clients build their generator once
 -- the seed is there, Generation/WorldTypes.)
-WorldTypes.publish(Shared, WorldTypes.DEFAULT, seed, {})
-print(`[IceVoxel] world seed {seed}`)
+WorldTypes.publish(Shared, Config.WorldType, seed, Config.WorldOptions)
+print(`[IceVoxel] world seed {seed}, type {Config.WorldType}`)
 
-local world = WorldServer.new(WorldTypes.create(WorldTypes.DEFAULT, seed, {}))
-local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
+local world = WorldServer.new(WorldTypes.create(Config.WorldType, seed, Config.WorldOptions))
+-- A world type without ticks (the debug worlds) gets no block behaviours: no block updates and no
+-- random ticks, so nothing falls, flows, grows or burns (Minecraft's debug world).
+local ticking = WorldTypes.published(Shared).ticks ~= false
+local ticker = BlockTicker.new(world, if ticking then Behaviours.byId else {}, Config.Server.MaxUpdatesPerTick)
 world.onChanged = function(x, y, z, old, new)
 	-- A generated structure's chest gets its contents before anything hears it change, so one
 	-- broken or replaced unopened still drops them.

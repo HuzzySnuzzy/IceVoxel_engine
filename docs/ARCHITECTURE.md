@@ -120,6 +120,12 @@ them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips c
 opens. `generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the
 map paints their geysers), `oilLake(well)` a geyser's lake columns, `lavaLakes(...)` the
 surface lava lakes and `waterLakes(...)` / `puddles(...)` the water lakes and puddles.
+`options.biome` (a biome index) puts one biome on every column and `options.climateScale` widens
+the climate noise (World types below); without them a world is byte for byte what it was
+(tests/spec/WorldTypeGenerators pins digests of chunks, columns, the spawn and a map tile).
+`generator.seaLevel` is the sea's surface (`Config.SeaLevel` here; the map, safe spawning and
+structures' ground read it) and `generator.labels` (optional) lists generated structure blocks
+with settings of their own (the debug structures world's name tags).
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -608,6 +614,79 @@ winding bands) rather than Minecraft's clusters of tries, and the density is low
 Minecraft's. tests/spec/FoliageGeneration checks the budget, determinism across borders (every
 side and corner, next to trees), the placement rules and the cost (plants about 0.1-0.2 ms per
 chunk in Lune, interpreted; the edge columns' extra heights about 0.4 ms more).
+
+### World types (`WorldTypes.luau`, `LayeredGenerator.luau`, `Superflat.luau`, `DebugWorlds.luau`)
+
+Minecraft's world presets. `WorldTypes` is the registry: each type has an id, a name, a
+description, `create(seed, options) -> Generator`, the options it understands (`settings`, for
+the Create World screen: toggles, choices with labels, texts with ready-made presets) and hints
+for the rest of the game (`mobs = false`: no natural spawning, read by server `Mobs/Mobs`;
+`ticks = false`: the server script builds its BlockTicker without behaviours, so there are no
+block updates and no random ticks, as in Minecraft's debug world; `gameMode`: the mode the menu
+preselects; `debug`). The server publishes `WorldType`, `WorldOptions` (one string,
+`encodeOptions`) and then `Seed` on `ReplicatedStorage.IceVoxel`; the server, the client boot and
+every chunk worker build the same generator from them (`fromAttributes`), and server parts that
+follow a hint read it with `published`. `Config.WorldType` / `Config.WorldOptions` choose the
+world a server starts without the menu.
+
+| Type | Generator | Notes |
+| --- | --- | --- |
+| Default | TerrainGenerator | `structures` toggle |
+| Superflat | Superflat on LayeredGenerator | `preset` text (layers bottom up, then the biome), `decoration` toggle |
+| The Void | LayeredGenerator | 33 x 33 stone platform at y 64, cobblestone centre; no mobs |
+| Single Biome | TerrainGenerator `biome` | `biome` choice (BiomeList), `structures` |
+| Large Biomes | TerrainGenerator `climateScale = 4` | `structures` |
+| Debug: All Blocks | DebugWorlds on LayeredGenerator | every block id once; no ticks, no mobs, spectator |
+| Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, name tags; no ticks, no mobs |
+| Debug: All Biomes | DebugWorlds on LayeredGenerator | a 16 block strip per biome; no mobs |
+
+**LayeredGenerator** builds a whole Generator from a stack of layers per column (one stack
+everywhere or `columnAt(x, z)`), blocks laid over the stacks (`blocks`: x, y, z, block) and an
+optional StructureGen placer. Everything a consumer asks works at every level: a cell holds the
+stack's block at its sample height, the ground's top cell shows the surface block (grass stays
+green from afar), a stack thinner than a far level's cells still fills cell 0 (a 4 block classic
+flat world is drawn one 16 block cell tall at level 4 rather than vanishing), LOD border columns
+lower their ground a cell (the Default's skirt; water fills the freed cell) and the seam limits
+round the coarser node's ground the same way, so seams have no cracks. Placed blocks go into the
+cell that holds each, at every level (a lone debug block never falls between far sample points).
+Water layers on top of the stack are the world's sea: `column` reports the ground under them and
+`seaLevel` their top, as the Default reports its sea floor and sea level (spawning skips open
+water, the map draws depth). `column` also reports a column's highest placed block above its
+stack (map colour, spawn, sky checks). No caves (`carved` nil), surface caves that carve nothing,
+no wells or lakes: the culling gets an exact sky line (`surface`, the ground) and every query is
+cheap. Trees and plants (`decoration`) are the Default's Structures.populate and Foliage on the
+ground, never under water. Each stack's cells are worked out once per level; one stack everywhere
+is written a whole layer at a time (a layer like the one below is a `buffer.copy`) and then the
+border columns' differing cells, a stack per column cell by cell. In Lune a full detail chunk
+costs 0.02-0.06 ms (Classic Flat, Tunnelers' Dream, the void, all blocks, all structures) and
+0.2-0.4 ms with trees and plants (decorated superflat, all biomes), against the Default's ~1.3 ms.
+
+**Superflat** parses Minecraft's preset string in this game's names (`Bedrock,2*Dirt,Grass;Plains`;
+names match loosely, as structure final states do, and a few Minecraft names map onto this game's,
+so `minecraft:grass_block` works); `parse` explains what is wrong (unknown block or biome, a count
+out of 1..`MAX_HEIGHT`, the stack taller than the world less the trees' room) and a bad preset
+builds Classic Flat (`resolve`), so every machine agrees. The presets are Minecraft 1.20.1's whose
+blocks exist: Classic Flat, Tunnelers' Dream, Water World, Overworld, Snowy Kingdom, Bottomless
+Pit, Desert, Redstone Ready.
+
+**DebugWorlds.** All Blocks is Minecraft's DebugLevelSource: every block id but air and cave air
+(variants, both halves of tall plants, every fluid level, cave twins) at y 70, block k at
+x = 2 (k // W) + 1, z = 2 (k % W) + 1 with W = ceil(sqrt(n)) (211 blocks: a 30 x 30 square),
+nothing under them. Blocks that need support and fluids are shown alone, as they are: the type has
+no ticks, so nothing flows, falls or pops even next to an edit. All Structures lays out every
+template of the library (sorted, rotation 0) and every generated structure (assembled whole from
+a seed of its own on flat ground) by shelf packing (ceil(sqrt(n)) per row, 5 blocks apart, rows 8
+apart) on a grass floor whose first air is 65 (StructureGen's terrain matching pieces stay at sea
+level or above); StructureGen takes the layout instead of its random spread (`layout`), so pieces
+are written per chunk like any structure, far levels point sample them and chests hold their
+loot. Each has a SAVE structure block 3 blocks north of its corner, named after it with its box
+as the region; server `Structures/StructureBlocks` seeds those records from `generator.labels` at
+the start, so WAILA names them and F3 draws the outline. All Biomes repeats 16 block strips of
+every biome's ground (stone, filler, top) with its trees and plants.
+Single Biome changes only the biome pick (the terrain's height is the Default's everywhere: a
+desert's sand climbs the mountains, a tundra freezes the seas); Large Biomes only the climate's
+wavelengths (the altitude bands and their dither stay, so mountains change as before and the
+lowlands' climate patches grow).
 
 ## Meshing (`Meshing/GreedyMesher`)
 
