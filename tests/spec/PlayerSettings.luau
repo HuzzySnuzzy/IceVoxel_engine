@@ -359,6 +359,31 @@ return function(t, shared, require, _server, client)
 		t.ok(table.find(PlayerSettings.effectsOf("caveView"), "lod"), "the cave view moves full detail")
 	end)
 
+	t.test("player settings: Caves, hidden until seen by default, always shown with a warning", function()
+		local entry = PlayerSettings.entry("alwaysCaves")
+		t.eq(entry.kind, "toggle")
+		t.eq(entry.page, "video")
+		t.eq(entry.effect, "caves", "applied by the streamer's applyView")
+		t.ok(PlayerSettings.EXPENSIVE.caves, "a costly effect: after the change settles")
+		t.eq(entry.default, if Config.Caves.AlwaysShow then 1 else 0, "Config's default")
+		t.ok(not entry.preset, "no preset changes it")
+		t.eq(PlayerSettings.text("alwaysCaves", 0), "Caves: Hidden Until Seen")
+		t.eq(PlayerSettings.text("alwaysCaves", 1), "Caves: Always Shown")
+		t.ok(entry.tooltip ~= nil and string.find(entry.tooltip, "May lower performance", 1, true) ~= nil, "warned")
+		for _, mobile in { false, true } do
+			local values = PlayerSettings.defaults(mobile, 0)
+			t.eq(PlayerSettings.alwaysCaves(values), Config.Caves.AlwaysShow == true, "the default")
+			values.alwaysCaves = 1
+			for index in PlayerSettings.PRESETS do
+				PlayerSettings.applyPreset(values, index, mobile)
+				t.ok(PlayerSettings.alwaysCaves(values), "kept by every preset")
+			end
+			local profile, decoded = PlayerSettings.decode(PlayerSettings.encode(1, values))
+			t.eq(profile, 1)
+			t.eq((decoded :: any).alwaysCaves, 1, "sent and saved")
+		end
+	end)
+
 	t.test("player settings: button texts read like Minecraft's and fit a 150 pixel button", function()
 		t.eq(PlayerSettings.text("renderDistance", 2048), "Render Distance: 2048")
 		t.eq(PlayerSettings.text("fullDetail", 3), "Full Detail: 96")

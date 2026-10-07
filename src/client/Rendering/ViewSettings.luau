@@ -23,7 +23,8 @@
 	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog), and a status
 	    effect's (Blindness: `setEffectFog`, Rendering/EffectView) over the fluid's when nearer.
 	  * Getters for the streamer and renderer, read live: `revealReach` / `revealRadii` (caves),
-	    `lichenLightDistance`, `lavaLightDistance` (Config only), `foliageDistance`, `lod`, `get`.
+	    `alwaysCaves` (the Caves setting), `lichenLightDistance`, `lavaLightDistance` (Config
+	    only), `foliageDistance`, `lod`, `get`.
 
 	How far parts are really drawn is decided by the engine from the graphics quality level and how
 	many objects are visible; scripts can not raise it. Studio ignores that limit, so check long
@@ -126,6 +127,11 @@ function ViewSettings.revealRadii(): (number, number)
 		return caves.RevealRadius, math.max(caves.RevealRadius, caves.RevealRadiusMax)
 	end
 	return PlayerSettings.revealRadii(bound)
+end
+
+-- Are caves always shown (the Caves setting: "Always Shown"; unbound Config.Caves.AlwaysShow)?
+function ViewSettings.alwaysCaves(): boolean
+	return PlayerSettings.alwaysCaves(current())
 end
 
 -- How far from the camera glow lichen's lights are on (blocks; math.huge: all).

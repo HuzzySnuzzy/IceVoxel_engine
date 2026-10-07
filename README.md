@@ -546,6 +546,28 @@ A fast, Minecraft-style voxel engine for Roblox.
   and out of a cave mouth doesn't rebuild the chunks around it. The Cave View setting scales all of
   it (phones, on the Low preset: tunnels 64 blocks, caverns 112, full detail about 96). F3 shows
   how far caves are revealed and how many lichen and lava lights there are.
+- **Caves always shown.** The Caves video setting (Hidden Until Seen by default,
+  `Caves.AlwaysShow`) can draw every cave of every full detail chunk instead, wherever you are:
+  looking into an entrance or a ravine from above shows the caves it leads to instead of a stone
+  cap, with their lichen and lava lit as in a revealed cave (caves still end in stone where full
+  detail ends). It is heavy (its tooltip says so): about 4 × the parts of full detail terrain, and
+  a few hundred more PointLights (lichen and lava; the Lichen Lights setting limits the lichen's).
+  Seed 12345 at Config's view (`lune run tests/bench`), full detail terrain only:
+
+  | Where (full detail chunks)    | Hidden until seen | Always shown               | Lights |
+  | ----------------------------- | ----------------- | -------------------------- | ------ |
+  | spawn, hills (160)            | 9.5k parts        | 35.7k parts (3.8 ×, +26k)  | +226   |
+  | spawn, underground split (256) | 14.1k parts      | 49.2k parts (3.5 ×, +35k)  | +307   |
+  | mountains (164)               | 19.5k parts       | 82.3k parts (4.2 ×, +63k)  | +364   |
+  | mountains, underground (264)  | 31.9k parts       | 136.3k parts (4.3 ×, +104k) | +615  |
+
+  so a whole view (34k / 81k parts with far terrain) grows by about 75%. Far terrain has no caves
+  at either setting (entrances and ravines are cut into it as open air either way). Switching
+  generates nothing again and remeshes only the full detail sections that hold terrain, through
+  the workers like any cave reveal: on real terrain each once going back to hidden, 1.45 times on
+  average going to always shown (a cap reopens where two groups of sections met). The workers
+  skip buried rock with no cave in it, so meshing a view always shown costs 4-8 × the time of
+  hidden caves, not 15 × (the mountains: 2,161 sections meshed instead of 5,689).
 - **From the surface into the caves.** Cave entrances and ravines are surface terrain: drawn from
   above like any hillside and lit by the sky (an entrance is lit at its mouth and dark about 30
   blocks in, a ravine's floor is under the open sky, the caves beyond stay dark). Where one runs
@@ -954,7 +976,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Page            | Settings |
 | --------------- | -------- |
 | Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110, Minecraft's 70 "Normal" by default); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults, key bindings included) |
-| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
+| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting), Caves (Hidden Until Seen / Always Shown) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
 | Music & Sounds  | Master Volume, Music, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Moods, Music Toasts |
 | Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Touch Buttons (touch screens; after rejoining) |
@@ -1010,6 +1032,10 @@ the Performance page, the far meshes' state. A few notes on what the settings do
 - Cave View is how far big caverns are seen; tunnels follow in proportion (88 blocks at 128, 64
   at 96, 96 at 144), and so does full detail underground (about the cave view, at most what the
   falloff allows).
+- Caves: Hidden Until Seen draws a cave once you can see into it from underground (above);
+  Always Shown draws every cave within full detail, about 4 × the parts of nearby terrain (see
+  Caves always shown in Features). No preset changes it. Settings with a tooltip (Caves, so far)
+  show it while the pointer rests on them or the gamepad selects them, as Minecraft's options do.
 - Build Budget: Auto adapts the milliseconds a frame spends building parts to the frame time
   (`Render.AutoBudget`); a number fixes them.
 - Prefer Distance tells Roblox to lower lighting quality before draw distance
@@ -1407,6 +1433,7 @@ for performance:
 | `Caves.RevealRadius` / `RevealRadiusMax` | 64 / 128 | Big caverns: the open space around the camera sets a radius between these, and caves show to it plus 16 (phones 48 / 96: `Caves.Mobile`). |
 | `Caves.RevealBudget`      | 1500    | Sections revealed at most, nearest first (the Underlands' giant caverns). |
 | `Caves.RevealHold`        | 2       | Seconds a section stays revealed after the camera stopped seeing into it. |
+| `Caves.AlwaysShow`        | false   | The Caves setting's default: true draws every cave of every full detail chunk ("Always Shown", about 4 × their parts), false only those the camera can see into. |
 | `Caves.LichenLightDistance` | math.huge | Glow lichen's lights shine at any distance; a number switches off those farther from the camera (the lichen still glows). |
 | `Caves.Entrances`         | Spacing 96, Chance 0.6 | Cave entrances: one candidate per 96 × 96 blocks, taken with `Chance`; `Radius` 1.5-3.5 blocks, `Length` 48-140 steps of a block, `Depth` 15-60 blocks below the surface, `Branch` 0.35 (the chance of a side tunnel); `Enabled = false`: none. |
 | `Caves.Ravines`           | Spacing 384, Chance 0.5 | Ravines: one candidate per 384 × 384 blocks; half width `Radius` 1.5 at the ends to up to 6 in the middle, `Length` 60-160 steps, `Depth` 20-45 blocks in the middle (8 at the ends). |

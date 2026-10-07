@@ -341,6 +341,28 @@ function GreedyMesher.isTrivial(
 end
 
 --[[
+	Does a cave cell (cave air or a cave twin) lie in cells y0 .. y1-1 of the padded column `data`
+	or around them (the padding, the layer below and the layer above: every cell the mesh of that
+	range reads, borders included)? Without one, meshing the range with caves hidden or shown gives
+	the same boxes: the cave LUTs differ only for cave cells, and caps and seams only change cave
+	cells. So a section meant to show its caves may be meshed hidden instead, and one entirely
+	below `solidBelow` is then trivial (the "Always Shown" caves setting: the worker skips buried
+	rock that holds no cave). Reads at most 18 x 18 x (y1 - y0 + 2) cells; stops at the first.
+]]
+function GreedyMesher.touchesCaves(data: buffer, height: number, y0: number, y1: number): boolean
+	local lo, hi = math.max(y0 - 1, 0), math.min(y1, height - 1)
+	for y = lo, hi do
+		local base = y * LAYER
+		for i = base, base + LAYER - 1 do
+			if readu8(caveCellLut, readu16(data, i * 2)) == 1 then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[
 	The cell range of a column that can contain visible blocks when caves are hidden: everything
 	below `solidBelow - 1` is buried and everything from `emptyAbove` up is air.
 ]]

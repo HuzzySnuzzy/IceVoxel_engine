@@ -18,6 +18,8 @@
 	            "textures", "overlay", "budget", "skipHidden", "swapFrames", "audio", "camera",
 	            "controls", "hud", "keys", "mouse", "chat" (`also` names more). The costly ones
 	            (EXPENSIVE) wait until a slider has stopped moving (Config.Settings.ApplyDelay).
+	  tooltip   (optional) Minecraft's option tooltip, shown while the setting is hovered or
+	            selected: what it does, and a warning when it is heavy ("May lower performance").
 
 	Ids: the plain settings are 1, 2, 3... (id = place in the list); the key bindings are generated
 	from Shared/KeyBindings' actions from KeyBindings.KEY_BASE (128) on, one per action in its
@@ -79,6 +81,9 @@ export type Entry = {
 	labels: { [number]: string }?,
 	-- Only offered on touch screens.
 	touchOnly: boolean?,
+	-- What the menu shows while the pointer (or the gamepad selection) rests on the setting:
+	-- Minecraft's option tooltips (Ui/SettingsScreen, wrapped to Settings/Pages.TOOLTIP_W).
+	tooltip: string?,
 }
 
 local PlayerSettings = {}
@@ -970,6 +975,27 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 	},
+	-- Caves hidden until the camera can see into them (Streaming/CaveReach's search), or every
+	-- cave of every full detail chunk meshed with its walls: about 4x the parts of full detail
+	-- terrain (Config.Caves.AlwaysShow, the default). Not in the presets: it changes what is shown,
+	-- not only how well.
+	{
+		id = 56,
+		key = "alwaysCaves",
+		name = "Caves",
+		kind = "toggle",
+		page = "video",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = bool(caves.AlwaysShow),
+		effect = "caves",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "Hidden Until Seen", [1] = "Always Shown" },
+		tooltip = "Always Shown draws every cave near you, not only the ones you can see into. "
+			.. "May lower performance: about 4x the parts of nearby terrain.",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the
@@ -1289,6 +1315,11 @@ end
 function PlayerSettings.revealRadii(values: Values): (number, number)
 	local reach = values.caveView
 	return math.min(Config.Caves.RevealRadius, reach / 2), reach
+end
+
+-- Are caves always shown ("Caves: Always Shown"), not only once the camera can see into them?
+function PlayerSettings.alwaysCaves(values: Values): boolean
+	return PlayerSettings.on(values, "alwaysCaves")
 end
 
 -- How far from the camera glow lichen's lights are on (blocks; math.huge: all).

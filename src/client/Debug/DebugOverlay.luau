@@ -2,7 +2,7 @@
 --[[
 	F3 toggles a small overlay with streaming statistics: chunks per LOD level, jobs in flight,
 	builds pending, parts and PointLights in the world, the cave view (how far caves are revealed,
-	the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
+	or "always shown"; the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
 	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
 	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
 	knows about (EntityRenderer), the time of day (the clock, day number, Minecraft's sky light
@@ -225,6 +225,9 @@ end
 
 -- The cave view: how far caves are revealed and whether full detail reaches further.
 local function caveLine(stats: ChunkStreamer.Stats): string
+	if stats.alwaysCaves then
+		return `caves   always shown  full detail split {LodTree.splitDistanceL1(stats.underground)}`
+	end
 	if stats.revealRadius <= 0 and not stats.underground then
 		return "caves   hidden"
 	end
