@@ -77,7 +77,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local WorldTypes = require(Shared.Generation.WorldTypes)
 local Coords = require(Shared.World.Coords)
 local PlayerSettings = require(Shared.PlayerSettings)
 
@@ -204,7 +204,8 @@ local world = ClientWorld.new()
 TextureLooks.start()
 local renderer = ChunkRenderer.new()
 local pool = WorkerPool.new(Client.Streaming.ChunkWorker :: LocalScript)
-local generator = TerrainGenerator.new(seed :: number)
+-- (The world type and options the server published with the seed: Generation/WorldTypes.)
+local generator = WorldTypes.fromAttributes(Shared)
 local streamer = ChunkStreamer.new(generator, world, pool, renderer)
 LightingController.start(generator, world)
 

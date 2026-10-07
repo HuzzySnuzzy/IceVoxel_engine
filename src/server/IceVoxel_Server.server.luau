@@ -53,7 +53,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local WorldTypes = require(Shared.Generation.WorldTypes)
 local Mining = require(Shared.Mining)
 
 local Server = script.Parent
@@ -89,10 +89,12 @@ local Effects = require(Server.Players.Effects)
 local Progression = require(Server.Players.Progression)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
-Shared:SetAttribute("Seed", seed)
+-- (The world type and its options go out before the seed: clients build their generator once
+-- the seed is there, Generation/WorldTypes.)
+WorldTypes.publish(Shared, WorldTypes.DEFAULT, seed, {})
 print(`[IceVoxel] world seed {seed}`)
 
-local world = WorldServer.new(TerrainGenerator.new(seed))
+local world = WorldServer.new(WorldTypes.create(WorldTypes.DEFAULT, seed, {}))
 local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
 world.onChanged = function(x, y, z, old, new)
 	-- A generated structure's chest gets its contents before anything hears it change, so one

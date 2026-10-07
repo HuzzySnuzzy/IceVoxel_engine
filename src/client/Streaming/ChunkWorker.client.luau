@@ -70,7 +70,7 @@ local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local GreedyMesher = require(Shared.Meshing.GreedyMesher)
 local QuadMesher = require(Shared.Meshing.QuadMesher)
-local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local WorldTypes = require(Shared.Generation.WorldTypes)
 local Caves = require(Shared.Generation.Caves)
 local SectionGraph = require(Shared.World.SectionGraph)
 local Horizon = require(Shared.World.Horizon)
@@ -83,7 +83,7 @@ while type(seed) ~= "number" do
 	Shared:GetAttributeChangedSignal("Seed"):Wait()
 	seed = Shared:GetAttribute("Seed")
 end
-local generator = TerrainGenerator.new(seed :: number)
+local generator = WorldTypes.fromAttributes(Shared)
 local paintMap = MapPainter.new(generator)
 
 type Job = { [string]: any }
