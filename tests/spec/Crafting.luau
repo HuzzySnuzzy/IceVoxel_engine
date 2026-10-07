@@ -174,8 +174,8 @@ return function(t, shared, require)
 		-- Combustion Generator; 115 before the Glass Bottle and the Canteen, Tough As Nails; 117 before
 		-- Flint and Steel; 118 before Gunpowder, TNT and the Nuke; 121 before the Bowl, the three
 		-- mint cures and the three teas; 128 before the Campfire, Straw and Leaf armor and the
-		-- Thermometer, Tough As Nails' gear.)
-		t.eq(#Crafting.recipes, 138, "recipes compiled")
+		-- Thermometer, Tough As Nails' gear; 138 before the 29 potions, brewed in the grid.)
+		t.eq(#Crafting.recipes, 167, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

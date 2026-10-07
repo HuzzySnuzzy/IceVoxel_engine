@@ -68,7 +68,11 @@
 	drink that tempers (`tempers`: Internal Warmth or Chill, the teas), which is drunk for that
 	whenever temperature is on, thirsty or not, thirst on or off (as Minecraft's potions and
 	honey, drunk whatever the hunger: ItemUtils.startUsingInstantly); with thirst off it gives
-	only its warmth or chill (`apply` without a thirst state). Then (`afterDrinking`):
+	only its warmth or chill (`apply` without a thirst state). A potion (Shared/Effects/PotionList:
+	a Drink with `effects`, no water) is drunk any time, Tough As Nails on or off, and its status
+	effects are given when it finishes (server Players/ToughAsNails through Players/Effects:
+	Minecraft's PotionItem.finishUsingItem; an instant effect acts on the next tick). Then
+	(`afterDrinking`):
 	  one drink   one is used up and its empty container comes back (PotionItem.finishUsingItem:
 	              it replaces the stack when it was the last, else it goes into the inventory);
 	  sips        a sip wears it (its `damage`); the last sip leaves the empty container.
@@ -78,8 +82,10 @@
 	keep the empty one and get a full one only when they have none.
 ]]
 
+local Effects = require(script.Parent.Parent.Effects)
 local Fluids = require(script.Parent.Parent.Fluids)
 local Items = require(script.Parent.Parent.Items)
+local PotionList = require(script.Parent.Parent.Effects.PotionList)
 local Thirst = require(script.Parent.Thirst)
 local Temperature = require(script.Parent.Temperature)
 
@@ -96,7 +102,12 @@ export type Drink = {
 	-- giveChill; nil: none).
 	warmth: number?,
 	chill: number?,
+	-- Status effects it gives (Shared/Effects ids; a potion's: PotionList; nil: none).
+	effects: { PotionEffect }?,
 }
+
+-- A status effect a drink gives: an Effects id, its ticks and amplifier.
+export type PotionEffect = { effect: number, ticks: number, amplifier: number }
 
 -- A full item (ITEMS, see the header).
 export type DrinkItem = {
@@ -142,8 +153,8 @@ Drinks.CANTEEN = I.Canteen
 Drinks.DIRTY_CANTEEN = I.DirtyWaterCanteen
 Drinks.PURIFIED_CANTEEN = I.PurifiedWaterCanteen
 
--- The full items (see the header).
-Drinks.ITEMS = table.freeze({
+-- The full items (see the header), the potions (PotionList) after the water.
+local ITEMS: { [number]: DrinkItem } = {
 	[I.DirtyWaterBottle] = table.freeze({ drink = Drinks.DIRTY, empty = I.GlassBottle }),
 	[I.PurifiedWaterBottle] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
 	[I.DirtyWaterCanteen] = table.freeze({ drink = Drinks.DIRTY, empty = I.Canteen, sips = true }),
@@ -153,7 +164,22 @@ Drinks.ITEMS = table.freeze({
 	[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl }),
 	[I.GingerTea] = table.freeze({ drink = Drinks.GINGER_TEA, empty = I.Bowl }),
 	[I.HerbalTea] = table.freeze({ drink = Drinks.HERBAL_TEA, empty = I.Bowl }),
-} :: { [number]: DrinkItem })
+}
+for _, variant in PotionList.all() do
+	local effect = Effects.id[variant.effect]
+	assert(effect, `Potion {variant.item} gives an unknown effect {variant.effect}`)
+	local potion: Drink = {
+		thirst = 0,
+		hydration = 0,
+		chance = 0,
+		effectTicks = 0,
+		effects = table.freeze({
+			table.freeze({ effect = effect, ticks = variant.ticks, amplifier = variant.amplifier }),
+		}),
+	}
+	ITEMS[Items.id[variant.item]] = table.freeze({ drink = table.freeze(potion), empty = Items.id[PotionList.EMPTY] })
+end
+Drinks.ITEMS = table.freeze(ITEMS)
 
 -- Empty containers and the full item each becomes at a water source.
 Drinks.FILLS = table.freeze({
@@ -215,6 +241,12 @@ function Drinks.tempers(drink: Drink?): boolean
 	return drink ~= nil and ((drink.warmth or 0) > 0 or (drink.chill or 0) > 0)
 end
 
+-- Is `drink` a potion (it gives status effects: drunk any time, see the header)?
+function Drinks.isPotion(drink: Drink?): boolean
+	local effects = if drink then drink.effects else nil
+	return effects ~= nil and #effects > 0
+end
+
 --[[
 	May `drink` be drunk now (see the header)? `thirsty`: Thirst.canDrink (thirsty, or
 	invulnerable); `thirstOn` / `temperatureOn`: Config.ToughAsNails' switches.
@@ -223,7 +255,7 @@ function Drinks.drinkable(drink: Drink?, thirsty: boolean, thirstOn: boolean, te
 	if drink == nil then
 		return false
 	end
-	return (thirstOn and thirsty) or (temperatureOn and Drinks.tempers(drink))
+	return Drinks.isPotion(drink) or (thirstOn and thirsty) or (temperatureOn and Drinks.tempers(drink))
 end
 
 -- Is `item` an empty container that fills at water?
@@ -361,7 +393,7 @@ function Drinks.apply(
 	random: () -> number,
 	temperature: Temperature.State?
 ): boolean
-	if thirst then
+	if thirst and drink.thirst > 0 then
 		Thirst.drink(thirst, drink.thirst, drink.hydration)
 	end
 	if temperature then

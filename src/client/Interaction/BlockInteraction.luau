@@ -12,7 +12,8 @@
 	           (not in the movement thumbstick's corner)
 
 	  Survival  mining takes time: Shared/Mining's progress for the held tool (its speed on the
-	            block's kind, and whether it can harvest it) is added at a fixed 20 ticks per second
+	            block's kind, and whether it can harvest it, times the status effects' Haste and
+	            Mining Fatigue: Player/EffectState) is added at a fixed 20 ticks per second
 	            (slower in the air and with the eyes under water) and the block breaks at 1, then a
 	            Mining.DELAY_TICKS pause comes before the next one. Switching to another item starts
 	            the block over (Minecraft's sameDestroyTarget). The server is told when mining
@@ -153,6 +154,7 @@ local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRe
 local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
 local Drinking = require(script.Parent.Drinking)
+local EffectState = require(script.Parent.Parent.Player.EffectState)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -659,7 +661,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local view = MovementController.current
 		local onGround = if view then view.state.onGround else true
 		local underWater = if view then view.state.eyeInWater else false
-		local perTick = Mining.progressPerTick(hit.block, onGround, underWater, tool)
+		-- (Haste and Mining Fatigue: the server checks with the same factor.)
+		local perTick = Mining.progressPerTick(hit.block, onGround, underWater, tool, EffectState.miningFactor())
 		if perTick <= 0 then
 			-- Unbreakable: it only sounds hit.
 			if SoundRules.hitTick(hits, hit.x, hit.y, hit.z, hit.block) then

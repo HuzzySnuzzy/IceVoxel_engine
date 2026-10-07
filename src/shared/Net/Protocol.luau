@@ -163,6 +163,14 @@
 	                 body temperature (Shared/ToughAsNails), sent to them alone when it changes
 	                 (at most every few ticks, and at once on joining and respawning); unknown
 	                 flags and out of range values are malformed
+	  Effects        u8 count, count x (u8 effect, u8 amplifier, i32 ticks, u8 flags): every status
+	                 effect the player has (Shared/Effects: the running ones and Tough As Nails'
+	                 external ones), sent to them alone when the list changes, an effect ends
+	                 early or its time left drifts from the client's own countdown by more than a
+	                 second (server Players/EffectRules.needsSync), and at once for a new character
+	                 (empty). `ticks` left (-1: never ends, Effects.INFINITE), flags bit 0 ambient.
+	                 Unknown effects, the same effect twice, ticks below -1, other flags or more
+	                 entries than effects are malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -194,6 +202,7 @@
 ]]
 
 local Config = require(script.Parent.Parent.Config)
+local Effects = require(script.Parent.Parent.Effects)
 local Fluids = require(script.Parent.Parent.Fluids)
 local GameMode = require(script.Parent.Parent.GameMode)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
@@ -243,6 +252,7 @@ Protocol.ServerMessage = {
 	Settings = 15,
 	Explosion = 16,
 	Survival = 17,
+	Effects = 18,
 }
 
 Protocol.EditAction = {
@@ -2298,6 +2308,52 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		effect = buffer.readu16(b, 10),
 		clemency = buffer.readu16(b, 12),
 	}
+end
+
+--[[ Status effects (server -> client) ]]
+
+Protocol.EFFECT_BYTES = 7
+
+-- A player's status effects (Effects message).
+function Protocol.encodeEffects(entries: { Effects.Entry }): buffer
+	local count = math.min(#entries, Effects.COUNT)
+	local b = buffer.create(1 + count * Protocol.EFFECT_BYTES)
+	buffer.writeu8(b, 0, count)
+	for i = 1, count do
+		local entry = entries[i]
+		local o = 1 + (i - 1) * Protocol.EFFECT_BYTES
+		buffer.writeu8(b, o, entry.effect)
+		buffer.writeu8(b, o + 1, math.clamp(entry.amplifier, 0, Effects.MAX_AMPLIFIER))
+		buffer.writei32(b, o + 2, math.clamp(math.floor(entry.ticks), Effects.INFINITE, 2 ^ 31 - 1))
+		buffer.writeu8(b, o + 6, if entry.ambient then 1 else 0)
+	end
+	return b
+end
+
+-- The effects of an Effects message, nil when it is malformed.
+function Protocol.decodeEffects(b: buffer): { Effects.Entry }?
+	local len = buffer.len(b)
+	if len < 1 then
+		return nil
+	end
+	local count = buffer.readu8(b, 0)
+	if count > Effects.COUNT or len ~= 1 + count * Protocol.EFFECT_BYTES then
+		return nil
+	end
+	local entries: { Effects.Entry } = table.create(count)
+	local seen: { [number]: boolean } = {}
+	for i = 1, count do
+		local o = 1 + (i - 1) * Protocol.EFFECT_BYTES
+		local effect = buffer.readu8(b, o)
+		local ticks = buffer.readi32(b, o + 2)
+		local flags = buffer.readu8(b, o + 6)
+		if not Effects.isValid(effect) or seen[effect] or ticks < Effects.INFINITE or flags > 1 then
+			return nil
+		end
+		seen[effect] = true
+		entries[i] = { effect = effect, amplifier = buffer.readu8(b, o + 1), ticks = ticks, ambient = flags == 1 }
+	end
+	return entries
 end
 
 return Protocol

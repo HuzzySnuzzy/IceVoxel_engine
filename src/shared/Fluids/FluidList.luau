@@ -43,7 +43,21 @@
 	  fogEnd         ... and where it is thick (water 96, lava 1).
 	  fillSound      Sound event (Shared/Sounds) of a bucket taking it (Fluid.getPickupSound).
 	  emptySound     Sound event of a bucket pouring it (BucketItem.playEmptySound).
+	  effects        Status effects it gives a player touching it (optional; Shared/Effects, server
+	                 Players/EffectRules.touchFluids, every tick on the standing box as burning):
+	                 a list of { effect = EffectList name, seconds, amplifier = 0?, when, after? }:
+	                   when "in"    while the body touches it, refreshed to `seconds` every tick
+	                                (so it lasts `seconds` after leaving);
+	                        "head"  the same while the eyes are in it;
+	                        "left"  given for `seconds` when the body stops touching it;
+	                   after        only once the body has touched it this many seconds without a
+	                                break (then refreshed every tick like "in").
+	                 Effects that `washOff` (Oil Coated, Fuel Soaked) come off in a fluid that
+	                 `extinguishes` (water). Spectators get none.
 ]]
+
+-- A status effect a fluid gives (`effects`, see above).
+export type FluidEffect = { effect: string, seconds: number, amplifier: number?, when: string, after: number? }
 
 export type FluidSpec = {
 	name: string,
@@ -66,6 +80,7 @@ export type FluidSpec = {
 	fogEnd: number,
 	fillSound: string,
 	emptySound: string,
+	effects: { FluidEffect }?,
 }
 
 local list: { FluidSpec } = {
@@ -116,7 +131,9 @@ local list: { FluidSpec } = {
 	},
 	-- 3: BuildCraft's oil: black, glossy and thick. It moves players like lava (Movement) but does
 	-- not hurt, is no furnace fuel (the Oil Refinery makes fuel of it) and sounds thick like lava
-	-- in a bucket. Its fog: nearly black, as short as Minecraft's powder snow (0..2).
+	-- in a bucket. Its fog: nearly black, as short as Minecraft's powder snow (0..2). Wading in it
+	-- is Slowness II, and it leaves the skin Oil Coated for 30 s (slower still, burns twice as long
+	-- and harder) until water washes it off.
 	{
 		name = "Oil",
 		bucket = "OilBucket",
@@ -137,10 +154,17 @@ local list: { FluidSpec } = {
 		fogEnd = 2,
 		fillSound = "item.bucket.fill_lava",
 		emptySound = "item.bucket.empty_lava",
+		effects = {
+			{ effect = "Slowness", seconds = 1, amplifier = 1, when = "in" },
+			{ effect = "OilCoated", seconds = 30, amplifier = 0, when = "left" },
+		},
 	},
 	-- 4: BuildCraft's fuel, refined from oil: thin and amber. Players move and swim in it as in
 	-- water; it burns in the Combustion Generator, not in furnaces (they burn solid fuels only).
-	-- Its fog: amber, a third of water's.
+	-- Its fog: amber, a third of water's. Its fumes make you sick (Nausea, 8 s after the last
+	-- whiff) and poison you after 3 s in it (Poison I while in it, 5 s after), and it soaks the
+	-- skin (Fuel Soaked, 20 s after leaving: anything that sets you alight burns three times as
+	-- long, fire catches at once, a blast lights you) until water washes it off.
 	{
 		name = "Fuel",
 		bucket = "FuelBucket",
@@ -161,6 +185,11 @@ local list: { FluidSpec } = {
 		fogEnd = 32,
 		fillSound = "item.bucket.fill",
 		emptySound = "item.bucket.empty",
+		effects = {
+			{ effect = "Nausea", seconds = 8, amplifier = 0, when = "in" },
+			{ effect = "Poison", seconds = 5, amplifier = 0, when = "in", after = 3 },
+			{ effect = "FuelSoaked", seconds = 20, amplifier = 0, when = "in" },
+		},
 	},
 }
 

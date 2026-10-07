@@ -77,7 +77,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   black dot (0.2-0.3 geysers per km²). Generated oil lies still until something next to it changes:
   break into a geyser and it pours out. **Oil** is black, glossy and thick: it flows 7 blocks, a
   block a second, heading for a drop only up to 3 blocks away; you wade through it as through lava,
-  but it doesn't hurt, and it is no furnace fuel. The Oil Refinery turns it into **fuel**, amber and
+  but it doesn't hurt (it slows and coats you: see Oil and fuel on the skin), and it is no furnace
+  fuel. The Oil Refinery turns it into **fuel**, amber and
   thin: it flows like water (without infinite sources), you swim in it, and the Combustion Generator
   burns it. With your eyes in oil you see 2 blocks, in fuel 32 (and under water the view now fogs
   over too, 96 blocks once your eyes are used to it). Oil and Fuel Buckets carry them. A buried
@@ -209,6 +210,42 @@ A fast, Minecraft-style voxel engine for Roblox.
   armor** (any leaves, which Shears harvest) cools a step a piece: a desert's 9 becomes 5. Both
   have leather's armor points. A **Thermometer** (an iron nugget over glass over glow dust) held
   in the hand reads the body temperature and where it is going as numbers over the gauge.
+- **Status effects.** Minecraft 1.20.1's MobEffects with their numbers: Speed (+20% ground speed a
+  level) and Slowness (-15%), Haste (+20% mining speed a level) and Mining Fatigue (x 0.3, 0.09,
+  0.0027...), Strength (+3 melee a level) and Weakness (-4, for the combat to come), Jump Boost
+  (+0.1 jump and a block less fall damage a level), Regeneration (half a heart every 50 >> amp
+  ticks), Poison (every 25 >> amp, never the last half heart, through armor) and Wither (every
+  40 >> amp, and it kills), Fire Resistance (no fire, lava, campfire or burning hurts), Resistance
+  (20% of every hurt a level; V: nothing), Night Vision (caves and nights lit, flickering in its
+  last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
+  the view sways, building up over 8 s), Instant Health and Instant Damage (4 and 6 half hearts,
+  doubling a level) and Glowing (an outline everyone sees through walls). They stack and refresh
+  as Minecraft's (a stronger effect wins, a weaker longer one waits underneath and comes back), run
+  on the server, and the client's movement and mining prediction use the same numbers as the
+  server's checks. Creative and spectator players get them too, but nothing hurts them. Death
+  clears them; they are not saved. Icons in Minecraft's frames in the top right, under the minimap
+  and the music toast (beneficial in the top row, the rest below, longest first, blinking out over
+  their last 10 s; hover one, or tap it on a touch screen, for its name, level and time), and
+  Minecraft's list of names and times beside any open screen; F3 lists them too. Tough As Nails'
+  Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them. `/effect give
+  <player> <effect> [seconds | infinite] [amplifier]` and `/effect clear [player] [effect]` with
+  Minecraft's ids and wording (admins, the owner and Studio, as `/time`).
+- **Oil and fuel on the skin.** Wading in crude oil is Slowness II, and leaving it leaves you **Oil
+  Coated** for 30 s: still slower (Slowness I's -15%), and anything that sets you burning burns
+  twice as long and a half heart harder. Fuel's fumes make you sick (Nausea, 8 s after the last
+  whiff) and, after 3 s in it, poison you (Poison I while in it, 5 s after); it soaks you (**Fuel
+  Soaked**, 20 s after leaving): fire catches at once, burning lasts three times as long, and a
+  blast that reaches you sets you alight. A swim washes both off. The fluids' effects are data
+  (`FluidList` `effects`), and `Config.Effects.FluidEffects` turns them off.
+- **Potions.** Brewed in a crafting grid (the game has no brewing stand): a Purified Water Bottle
+  with an ingredient makes a potion, the potion with Glow Dust (the game's glowstone) its level II
+  and with a coal or charcoal its long variant, Minecraft's durations: Swiftness (Mint Leaves),
+  Leaping (Cornflower), Strength (Gunpowder), Healing (Gold Nugget), Harming (Red Mushroom), Poison
+  (Lily of the Valley), Regeneration (Oxeye Daisy), Fire Resistance (Ginger Root), Night Vision
+  (Glow Dust), Weakness (any tulip), and this game's Haste (Gold Ingot) and Resistance (Iron
+  Ingot): 29 potions. Bottles of the effect's colour, stacking to 1; hold use 1.6 s to drink one
+  (whatever your thirst, Tough As Nails on or off) and the Glass Bottle comes back. The tooltip
+  lists the effect, its level and time, blue or red.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -741,7 +778,7 @@ Studio tips:
 | Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
 | Structure / jigsaw block (creative) | Right click: its screen; `E` / `Escape` close it (Cancel), Done keeps the fields; click the saved data box, then `Ctrl` + `C` (`Cmd` + `C`) copies it | L2; B closes | Tap |
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
-| Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle, a Bowl or a canteen: fill it; hold right click with a filled bottle, bowl or canteen or a tea for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
+| Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle, a Bowl or a canteen: fill it; hold right click with a filled bottle, bowl or canteen, a tea or a potion for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
 | Boil water    | Right click a Campfire with a dirty water bottle, bowl or canteen: one boils clean (not sneaking; Tough As Nails) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
@@ -769,6 +806,7 @@ Studio tips:
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
+| Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (admins, the owner, Studio); hover or tap an effect icon for its name and time | | Tap an icon |
 
 ## Settings menu
 
@@ -873,7 +911,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Entities/ItemPhysics      dropped item movement (server and client; floating in water and fuel,
                             in lava and oil)
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
-                            with tools
+                            with tools (and status effects' Haste and Mining Fatigue)
+  Effects/  EffectList      status effects (Minecraft's MobEffects, Oil Coated, Fuel Soaked, Tough
+                            As Nails' four): the registry, the modifiers movement, mining, combat
+                            and burning read, ticking rules, the HUD's order and flashing;
+            PotionList      the potions (ingredients, levels, durations: items, recipes, drinks)
   ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
                             dehydration, regeneration, the Thirst effect), Temperature (-10..10
                             in five zones, the target, the drift, hypothermia and hyperthermia,
@@ -979,7 +1021,9 @@ src/server   -> ServerScriptService.IceVoxel
                             items, the hurt cooldown explosions share; pure), ToughAsNails
                             (thirst and body temperature: ticks, drinking, exertion, the HUD's
                             state) + Climate (the surroundings: biome, roof, heat and cold
-                            sources; pure),
+                            sources; pure), Effects (status effects: the API, sending, Glowing,
+                            /effect) + EffectRules (giving, ticking, the fluids' effects, the
+                            sync rule; pure) + EffectCommand (/effect; pure),
                             Spawning,
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
@@ -1024,7 +1068,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
                             buttons), SpectatorGui + SpectatorMenu (the spectator menu and its
                             model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
-                            model), SettingsScreen (the Options menu), MusicToast (Now Playing)
+                            model), SettingsScreen (the Options menu), MusicToast (Now Playing),
+                            EffectHud + EffectIcons (status effect icons in the top right, the
+                            list beside open screens, their glyphs)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -1040,8 +1086,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             hull), HeldItems, SpectatorView + SpectatorRules (who sees, hears and
                             aims at spectators), BurningView (flames on burning players, the fire
                             overlay in first person), SurvivalState (Tough As Nails' state from
-                            the server), Exertion (reports sprinting, swimming and jumps)
+                            the server), Exertion (reports sprinting, swimming and jumps),
+                            EffectState (status effects from the server, counted down)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
+  Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
                             animation step)
   Rendering/FuseView        lit TNT and Nukes flashing
@@ -1161,6 +1209,10 @@ for performance:
 | `Nuke.ScorchRadius` / `ScorchResistance` / `FireOdds` | 40 / 0.45 / 6 | Around it: grass to dirt, blocks resisting less than this blown away; one air spot over an opaque block in FireOdds catches fire. |
 | `Nuke.EditsPerTick` / `ReadsPerTick` | 500 / 16000 | Cost bounds per server tick (each edit is 12 bytes to every client). |
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
+| `Effects.FluidEffects` | true | Oil and fuel give their effects (Slowness II and Oil Coated; Nausea, Poison and Fuel Soaked); off, they leave players be (potions and `/effect` still work). |
+| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens. |
+| `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the FOV Effects setting. |
+| `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
 | `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
 | `Server.HerbSpread` | 1/8 | Chance per random tick that a herb (mint, wild ginger) spreads next to it while fewer than 5 grow within 4 blocks: a try every 9 minutes or so (Minecraft's mushrooms: 1/25). |
@@ -1861,6 +1913,41 @@ sets are made the same way, from `INSULATING_ARMOR` at the end of ItemList (a ma
 name, colour, material, points, toughness and `tan`; new materials go there, never into the
 `ARMOR` table at the top, whose ids must not move).
 
+**A status effect.** Append it to `src/shared/Effects/EffectList.luau` (ids are list positions,
+sent in the Effects message: at the end) with its name, `/effect` id, colour, category and HUD
+glyph (`icon`, one of `client/Ui/EffectIcons`' 9 × 9 glyphs; add one there for a new look), and
+what it does as data: `speed` / `mining` / `jump` / `melee` / `resistance` per level (the movement,
+mining, combat and hurt paths read them through `Shared/Effects`), `interval` with `heal` or
+`damage` (ticked on the server), `fireImmune`, `burnFactor`, `burnBonus`, `ignites`, `washOff`,
+`noSprint`, or a client `view`. It then works with `/effect`, potions, the HUD and F3:
+
+```lua
+{ name = "Haste", command = "haste", color = { 217, 192, 67 }, category = "beneficial", icon = "pickaxe", mining = 0.2 },
+```
+
+Server code gives and reads effects through `Players/Effects`: `Effects.give(player, "Speed",
+600, 1)` (ticks, amplifier; `Effects.INFINITE` for good), `giveAll`, `remove`, `clear`, `has`,
+`amplifier`, `levels`; combat calls `Effects.meleeDamage(player, base)` for a hit's half hearts
+with Strength and Weakness, and any hurt goes through `Effects.incomingDamage(player, amount)`
+(Resistance) before `TakeDamage` (Players/Characters does for lava, fire, blasts, falls, walls
+and the effects' own hurts). A mob could keep an `EffectRules` state of its own: `EffectRules.give`
+/ `tick` (the hurt and healing per tick) / `levels`, and `Shared/Effects`' modifiers on those
+levels. An effect kept elsewhere (Tough As Nails' four) is `external = true` and registered with
+`Effects.addExternal(id, { get, give, clear })`, so it is listed with the rest.
+
+**A potion.** Append it to `src/shared/Effects/PotionList.luau` (item ids follow its order: at the
+end): `{ name = "Swiftness", ingredient = "MintLeaves", effect = "Speed", seconds = 180, strong =
+90, long = 480 }` makes the items (`PotionOfSwiftness`, `StrongPotionOfSwiftness` "Potion of
+Swiftness II", `LongPotionOfSwiftness`), their recipes (a Purified Water Bottle with the
+ingredient; the potion with Glow Dust or a coal) and the drinks (`Drinks.ITEMS` with `effects`:
+the effect given when the 32 tick drink finishes, the Glass Bottle back), with nothing else to
+add. Leave `seconds` out for an instant effect (`strong = true` for its II).
+
+**A fluid's effects.** A fluid's `effects` in FluidList lists what touching it gives: `{ effect =
+"Slowness", seconds = 1, amplifier = 1, when = "in" }` (refreshed every tick while in it), `when =
+"head"` (the eyes in it), `when = "left"` (given on leaving it) and `after = 3` (only after 3 s in
+it without a break). Effects with `washOff` come off in a fluid that `extinguishes` (water).
+
 **Blast resistance.** A block's `blastResistance` in BlockList is Minecraft's explosion resistance;
 leave it out and it is the block's hardness (unbreakable blocks 3,600,000). Minecraft's values
 that differ from the hardness are in `BLAST_RESISTANCE` at the end of BlockList. A fluid other
@@ -1888,10 +1975,10 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,316 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,336 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
-and SurvivalGear).
+and SurvivalGear; status effects and potions have Effects).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

@@ -20,7 +20,8 @@
 	    55% of that (skipped when the place has an Atmosphere, which replaces fog); with the fog
 	    setting off the place's own FogEnd / FogStart come back. Its colour follows the time of day
 	    (Rendering/LightingController, while `usesFog` says this fog is in use). While the camera
-	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog).
+	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog), and a status
+	    effect's (Blindness: `setEffectFog`, Rendering/EffectView) over the fluid's when nearer.
 	  * Getters for the streamer and renderer, read live: `revealReach` / `revealRadii` (caves),
 	    `lichenLightDistance`, `lavaLightDistance` (Config only), `foliageDistance`, `lod`, `get`.
 
@@ -52,6 +53,8 @@ local fallback: PlayerSettings.Values? = nil
 local placeFog: { finish: number, start: number }? = nil
 -- The fog of the fluid the camera is in (studs; Rendering/FluidFog), nil while it is in none.
 local fluidFog: { finish: number, start: number }? = nil
+-- A status effect's fog (studs; Blindness), nil while there is none.
+local effectFog: { finish: number, start: number }? = nil
 
 function ViewSettings.isMobile(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -171,7 +174,11 @@ function ViewSettings.applyFog()
 		placeFog = { finish = Lighting.FogEnd, start = Lighting.FogStart }
 	end
 	local fluid = fluidFog
-	if fluid then
+	local effect = effectFog
+	if effect and (fluid == nil or effect.finish < fluid.finish) then
+		Lighting.FogEnd = effect.finish
+		Lighting.FogStart = effect.start
+	elseif fluid then
 		Lighting.FogEnd = fluid.finish
 		Lighting.FogStart = fluid.start
 	elseif ViewSettings.usesFog() then
@@ -191,6 +198,15 @@ end
 ]]
 function ViewSettings.setFluidFog(start: number?, finish: number?)
 	fluidFog = if start and finish then { start = start, finish = finish } else nil
+	ViewSettings.applyFog()
+end
+
+--[[
+	A status effect's fog, `start` to `finish` studs (Blindness, Rendering/EffectView), or with nil
+	none; applied at once.
+]]
+function ViewSettings.setEffectFog(start: number?, finish: number?)
+	effectFog = if start and finish then { start = start, finish = finish } else nil
 	ViewSettings.applyFog()
 end
 

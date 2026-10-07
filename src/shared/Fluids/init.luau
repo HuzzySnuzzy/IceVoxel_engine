@@ -8,8 +8,9 @@
 	fluid (`ofBlock`, `blockLut`, `isSource`, `sourceOf`, `caveSourceOf`), its bucket (`bucketOf`,
 	`ofBucket`), the ids Protocol's Tanks and Transmitters records and a Fluid Tank's sustained data
 	carry (`isValid`), and each fluid's record (`get`, `list`): colour, light, how it moves and
-	hurts players, its furnace fuel value, whether pipes and tanks carry it (all four do), its fog
-	and its bucket sounds (see FluidList for each field).
+	hurts players, its furnace fuel value, whether pipes and tanks carry it (all four do), its fog,
+	its bucket sounds and the status effects it gives (`effects`: Shared/Effects ids and ticks; see
+	FluidList for each field).
 
 	A fluid is a BlockList fluid group of the same name (Water, WaterFlow1..7, WaterFalling), plus
 	the cave twin of its source for lava and oil (CaveLava, CaveOil: generated underground, cave air
@@ -17,15 +18,20 @@
 	agree when the game loads: every fluid group of BlockList is a fluid here, with this colour and
 	light, and every fluid's bucket is an item of its own.
 
-	Requires Blocks and Items (both of which only read FluidList), so Protocol, Smelting, machine
-	kinds and Transmitters may require it.
+	Requires Blocks, Items (both of which only read FluidList) and Effects (which reads nothing of
+	it), so Protocol, Smelting, machine kinds and Transmitters may require it.
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Effects = require(script.Parent.Effects)
 local FluidList = require(script.FluidList)
 local Items = require(script.Parent.Items)
 
 export type FluidSpec = FluidList.FluidSpec
+
+-- A status effect a fluid gives (FluidList `effects`): the effect's id, its ticks and amplifier,
+-- when ("in", "head", "left") and after how many ticks of unbroken contact (0: at once).
+export type FluidEffect = { effect: number, ticks: number, amplifier: number, when: string, after: number }
 
 export type Fluid = {
 	id: number,
@@ -62,6 +68,8 @@ export type Fluid = {
 	-- Sound events of a bucket taking and pouring it (Shared/Sounds names).
 	fillSound: string,
 	emptySound: string,
+	-- Status effects it gives a player in it (none: empty).
+	effects: { FluidEffect },
 }
 
 local Fluids = {}
@@ -82,6 +90,7 @@ Fluids.BURN_INTERVAL = 20
 assert(Fluids.COUNT < 256, "Fluid ids must fit a u8")
 
 local PHYSICS: { [string]: boolean } = { water = true, lava = true }
+local WHEN: { [string]: boolean } = { ["in"] = true, head = true, left = true }
 
 local list: { Fluid } = {}
 local byName: { [string]: number } = {}
@@ -115,6 +124,27 @@ for id, spec in FluidList do
 		`Fluid {spec.name} has bad damage`
 	)
 	assert(spec.furnaceFuel >= 0 and spec.furnaceFuel == math.floor(spec.furnaceFuel), `Fluid {spec.name}: fuel`)
+	local effects: { FluidEffect } = {}
+	for _, given in (spec.effects or {}) :: { FluidList.FluidEffect } do
+		local effect = Effects.id[given.effect]
+		assert(effect ~= nil, `Fluid {spec.name} gives an unknown effect {given.effect}`)
+		assert(WHEN[given.when], `Fluid {spec.name}'s {given.effect} has an unknown when {given.when}`)
+		local amplifier = given.amplifier or 0
+		assert(
+			given.seconds > 0 and amplifier >= 0 and amplifier <= Effects.MAX_AMPLIFIER and (given.after or 0) >= 0,
+			`Fluid {spec.name}'s {given.effect} has bad numbers`
+		)
+		table.insert(
+			effects,
+			table.freeze({
+				effect = effect,
+				ticks = math.round(given.seconds * Effects.TICKS_PER_SECOND),
+				amplifier = amplifier,
+				when = given.when,
+				after = math.round((given.after or 0) * Effects.TICKS_PER_SECOND),
+			})
+		)
+	end
 	local record: Fluid = {
 		id = id,
 		name = spec.name,
@@ -139,6 +169,7 @@ for id, spec in FluidList do
 		fogEnd = spec.fogEnd,
 		fillSound = spec.fillSound,
 		emptySound = spec.emptySound,
+		effects = table.freeze(effects),
 	}
 	list[id] = table.freeze(record)
 	byName[spec.name] = id

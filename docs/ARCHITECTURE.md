@@ -2599,6 +2599,14 @@ record.
   from -getFireImmuneTicks: 20) and catches fire for 8 s after 20 ticks in it; out of fire and
   lava, not burning, the count starts over (Entity.move), as water does. Items catch at once (their
   immunity is a tick) and lose 1 a tick: gone in a few ticks.
+- Status effects (`fire`, Shared/Effects.fireRules, from Players/Effects): Fire Resistance makes
+  every fire hurt land as nothing (lava, fire, campfires, burning: no damage, no sizzle, no
+  cooldown; burning still counts down and shows), a burn `factor` stretches every burning lava and
+  fire set (Oil Coated 2, Fuel Soaked 3), a `bonus` adds to each burning hurt (Oil Coated 1) and
+  `ignites` catches fire in a fire block at once; `Burning.ignite(state, mode, seconds, fire)` sets
+  burning from outside (a blast reaching a Fuel Soaked player). A burning player does not light
+  fuel (only fire and lava blocks do: World/FuelBlast), so a soaked player in burning fuel is in
+  its blast, which lights them.
 - Campfires (CampfireBlock.entityInside, lit): `touching` sets `Burning.CAMPFIRE` (bit 29; fluids
   must stay below it) for a Campfire cell in the box. A player in one takes `CAMPFIRE_DAMAGE` (1,
   its fireDamage) under the same hurt cooldown, softened by armor, and nothing else: a campfire
@@ -3013,6 +3021,119 @@ Tough As Nails items, reaches the right side), right-aligned, Climate Clemency's
 left (m:ss) and the Internal Warmth (flame) and Chill (snowflake) icons; and the frost or heat closing in from the
 screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the HUD). F3 prints a
 `survival` line with all the numbers.
+
+## Status effects (`Effects/`, server `Players/Effects`, client `Player/EffectState`, `Ui/EffectHud`, `Rendering/EffectView`)
+
+Minecraft 1.20.1's MobEffect and MobEffectInstance, this game's two from the fluids and Tough As
+Nails' four, in one list. Tested in `tests/spec/Effects`.
+
+**The registry** (`Shared/Effects`, its data in `Effects/EffectList`; ids are u8 list positions,
+append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Mining Fatigue,
+5 Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration,
+11 Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison,
+17 Wither, 18 Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal
+Chill, 24 Climate Clemency. A record holds its name, `/effect` id (Minecraft's), colour (MobEffect's
+int), category (beneficial, harmful, neutral), HUD glyph and what it does as data. `find` takes a
+name, a display name or an `/effect` id with or without a namespace; `levelName` writes "Speed II"
+(roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
+
+| Effect | Per level (amplifier + 1) | Minecraft's code |
+| ------ | ------------------------- | ---------------- |
+| Speed / Slowness / Oil Coated | ground speed × (1 + 0.2 / −0.15 / −0.15 × level), multiplied together, ≥ 0 | MULTIPLY_TOTAL on movement_speed |
+| Haste / Mining Fatigue | mining × (1 + 0.2 × level) / × 0.3, 0.09, 0.0027, 0.00081 | Player.getDestroySpeed |
+| Jump Boost | jump + 0.1 × level, fall damage − level blocks | getJumpBoostPower, calculateFallDamage |
+| Strength / Weakness | melee + 3 / − 4 half hearts × level, ≥ 0 | attack_damage ADDITION |
+| Resistance | hurts × (25 − 5 × level) / 25, ≥ 0 | getDamageAfterMagicAbsorb |
+| Regeneration | heals 1 every 50 >> amp ticks below full health | RegenerationMobEffect |
+| Poison | hurts 1 every 25 >> amp ticks while health > 1 (magic: no armor) | PoisonMobEffect |
+| Wither | hurts 1 every 40 >> amp ticks, may kill | WitherMobEffect |
+| Instant Health / Damage | heals 4 << amp / hurts 6 << amp once (magic) | HealOrHarmMobEffect |
+| Fire Resistance | no fire hurt | LivingEntity.hurt (IS_FIRE) |
+| Oil Coated / Fuel Soaked | burning × 2 and + 1 a hurt / × 3, catches at once, lit by blasts; water washes off | this game's |
+| Night Vision, Blindness, Nausea, Glowing | the view (client), the outline (server Highlight) | GameRenderer, FogRenderer |
+| Thirst, Internal Warmth / Chill, Climate Clemency | kept by Tough As Nails (`external`) | TAN 1.20's effects |
+
+The modifiers read `Levels` (effect id → amplifier): `speedFactor`, `miningFactor`, `jumpBoost`,
+`meleeDamage`, `incomingDamage`, `fireRules` (nil when nothing changes: no allocation),
+`noSprint`; `isDurationTick` and `instantAmount` are the ticking; `nightVisionScale`,
+`blindnessFog`, `nauseaIntensity` / `nauseaSway`, `iconAlpha`, `hudOrder` and `tooltip` the
+client's.
+
+**Giving and ticking** (`Players/EffectRules`, pure): a State per character holds the running
+instances (effect, amplifier, ticks or INFINITE, ambient, the hidden one), their levels (kept in
+step, so the modifiers read a table and allocate nothing), the external effects, the fluids'
+contact counts and the player's age. `give` is MobEffectInstance.update: a higher amplifier wins
+(the old one hidden underneath when it would last longer, coming back when the stronger ends,
+having counted down meanwhile), the same amplifier only lengthens, a lower longer one goes under;
+external effects and nonsense change nothing. `tick` (20 a second) acts on isDurationEffectTick
+(an infinite effect by the age), sums the hurt (never for creative or spectator) and healing,
+counts down every instance and its hidden chain, and drops what ran out. Instant effects are
+instances of a tick (a potion's) or of `/effect`'s seconds as ticks, never shown.
+
+**The fluids' effects** (`touchFluids`, FluidList `effects`, resolved by Shared/Fluids to ids and
+ticks): each fluid's list of `{ effect, seconds, amplifier, when, after }`: "in" refreshes the
+effect every tick the body touches the fluid (once `after` seconds unbroken), "head" while the eyes
+are in it (Players/Characters looks at the eyes only when a fluid has such an effect), "left" gives
+it the tick the body stops touching it. Then a fluid that `extinguishes` washes off every `washOff`
+effect (after the giving: water and fuel together leave nothing to wash). Spectators touch
+nothing. Oil: Slowness II for 1 s while in it, Oil Coated for 30 s on leaving. Fuel: Nausea 8 s
+while in it, Poison I 5 s after 3 s in it, Fuel Soaked 20 s while in it.
+`Config.Effects.FluidEffects` turns it off.
+
+**In the world** (`Players/Effects`, the API): Players/Characters runs it in its 20 Hz body tick:
+the fluids' effects (`touchFluids`, with the masks Burning already made), the fire rules for
+Burning.tickPlayer, then `tick`, whose hurt goes through the same hurt cooldown as lava (no
+armor: magic) and whose healing raises the Humanoid's health; every hurt there (lava, fire,
+burning, the effects, blasts, falls, walls) is cut by Resistance after armor, a fall loses Jump
+Boost's levels first, and a blast that hurts a player whose effects `ignite` sets them burning.
+`tick` also reads the external effects from their adapters (`addExternal`: Tough As Nails
+registers Thirst, Internal Warmth and Chill with their switches, and Climate Clemency, each with
+`give` and `clear` for `/effect`), keeps the Glowing Highlight on the character and sends the
+Effects message when `needsSync` says the client's view is off. ServerNet's `miningFactor` rule
+(Effects.miningFactor) times survival mining (Mining's `factor`: the start check, the break check,
+a delayed break's time), so a Haste player's breaks are accepted when the client finishes them.
+Potions are given by Players/ToughAsNails when a drink with `effects` finishes (`giveAll`). A new
+character starts with none (the client is told at once); nothing is saved.
+
+**Sending** (`needsSync`, `markSent`): the client counts every effect down itself and keeps one at
+0 until told it went (as Minecraft's client keeps an effect until the remove packet), so the
+server sends the whole list (7 bytes an effect) when an effect comes or goes, its amplifier or
+ambience changes, or its ticks left differ from the client's countdown by more than 20: an effect
+refreshed every tick in a fluid costs a message about once a second, an untouched one nothing
+until it ends.
+
+**/effect** (`Players/EffectCommand`, pure; the glue in Players/Effects): `give <player> <effect>
+[seconds | infinite] [amplifier] [hideParticles]` (Minecraft's bounds 1..1000000 and 0..255,
+default 30 s, an instant effect's a tick and its seconds as ticks) and `clear [player] [effect]`,
+players as `/gamemode` finds them plus `@p`, the permission of `/time` (Config.Gameplay.Admins, the
+owner, Studio) and Minecraft's answers ("Applied effect Speed to Steve", "Removed every effect from
+2 targets", "Unable to apply this effect (...)", "Unknown effect: x", "Integer must not be more than
+255, found 256"). Dead players take nothing.
+
+**Potions** (`Effects/PotionList`, pure data): twelve potions, each a Purified Water Bottle brewed
+with an ingredient in a crafting grid, with a strong (Glow Dust: level II) and a long (a coal or
+charcoal) variant where Minecraft has them; 29 items (ItemList, stack 1, the effect's colour in a
+bottle), 29 shapeless recipes (Crafting/Recipes; the `tulips` tag) and 29 `Drinks.ITEMS` entries
+whose `Drink` carries `effects` (no water; `Drinks.isPotion`: drinkable any time, Tough As Nails on
+or off, so Players/ToughAsNails keeps its Drink listener and records with both switches off,
+without ticking, and bottles fill at water then too). The inventory tooltip lists the effect, its
+level and time (blue, harmful red).
+
+**The client.** `Player/EffectState` keeps the last Effects message and when it came, counts down
+(`list`, `get`) and keeps the modifiers worked out once per message: MovementController puts the
+speed factor, Jump Boost and Blindness onto the hull before every tick (PlayerPhysics' ground
+speed and, unlike Minecraft, a slowing factor in fluids too so oil's Slowness slows wading; jump
+velocity; the safe fall; no sprint start) and widens the field of view by (factor + 1) / 2;
+BlockInteraction times mining with its mining factor. `Rendering/EffectView` (after the camera)
+raises Lighting's ambients for Night Vision (LightingController.setNightVision), closes the fog in
+black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
+LightingController.setEffectFogColour) and rolls the camera and sways the field of view for
+Nausea (MovementController.setFovSway), with a ColorCorrectionEffect for the brightness, darkness
+and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,
+9 × 9 glyphs from `Ui/EffectIcons` at 2 pixels, beneficial row over the rest, longest first,
+GroupTransparency for the last 10 s' blinking) below `MusicToast.bottom()`, the hovered or tapped
+one's name and time under them, and Minecraft's 120 × 32 list on the left while a screen is open;
+it is rebuilt only when a message comes. F3 lists every effect.
 
 ## Just Enough Items (`Ui/Jei/`)
 
@@ -4213,6 +4334,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
 | server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
+| server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (ambient)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
@@ -4430,6 +4552,11 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   the seed and coordinates as inputs. Clients and server must agree on every unedited block.
 - Block ids are list positions in `BlockList`: append, never reorder. The same holds for items in
   `ItemList` (ids from 4096).
+- Status effect ids are list positions in `Effects/EffectList` (sent as a u8), and potion items
+  follow `Effects/PotionList`'s order (and each potion's base, strong, long): append, never
+  reorder. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
+  (Resistance), and the mining factor reaches both the client's progress and ServerNet's check
+  (`Mining`'s `factor`), or their timings drift apart.
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every
   inventory action with them and must reach exactly the server's result. Both sides check
   `Menu.allows(action, mode)` before `Menu.apply`, and pass the instabuild ability as `creative`.

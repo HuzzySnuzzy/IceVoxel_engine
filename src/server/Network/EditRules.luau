@@ -147,8 +147,9 @@ end
 
 --[[
 	May a player break `block` at (x, y, z) at time `now`, having started mining `mine`, holding
-	`tool` (an item id, nil = bare hands) now? `creative`: the instabuild ability (breaks at once).
-	Players who may not edit at all (`mayEdit`) never get this far.
+	`tool` (an item id, nil = bare hands) now, with the status effects' mining `factor` (Haste,
+	Mining Fatigue; default 1)? `creative`: the instabuild ability (breaks at once). Players who
+	may not edit at all (`mayEdit`) never get this far.
 ]]
 function EditRules.mayBreak(
 	block: number,
@@ -158,7 +159,8 @@ function EditRules.mayBreak(
 	y: number,
 	z: number,
 	now: number,
-	tool: number?
+	tool: number?,
+	factor: number?
 ): boolean
 	local d = def(block)
 	if d == nil or not d.breakable or d.hardness < 0 then
@@ -172,7 +174,7 @@ function EditRules.mayBreak(
 	if mine == nil or mine.x ~= x or mine.y ~= y or mine.z ~= z then
 		return false
 	end
-	return Mining.mayBreak(block, now - mine.startedAt, nil, tool)
+	return Mining.mayBreak(block, now - mine.startedAt, nil, tool, factor)
 end
 
 --[[

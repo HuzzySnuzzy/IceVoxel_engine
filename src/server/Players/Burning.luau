@@ -47,6 +47,13 @@
 	            down to 0.96) but not burning's (on_fire bypasses armor).
 	            Creative and spectator players (GameMode.invulnerable) never burn nor are hurt: their
 	            burning is put out at once.
+	            Status effects change it (`fire`, Shared/Effects.fireRules): Fire Resistance takes
+	            every fire hurt away (lava, fire, campfires, burning: LivingEntity.hurt refuses
+	            IS_FIRE damage; burning still counts down and shows, and no hurt means no sizzle
+	            and no cooldown), Oil Coated and Fuel Soaked make the burning lava and fire set
+	            last `factor` times longer (2, 3), Oil Coated makes each burning hurt `bonus` (1)
+	            more, and Fuel Soaked catches fire in a fire block at once (`ignites`, no 20 tick
+	            wait). `ignite` sets burning from elsewhere (a blast lighting a soaked player).
 	            Explosions hurt through the same cooldown (`hurtPlayer`).
 
 	  Items     one tick (`tickItem`, server Entities/EntityWorld): ItemEntity's 5 health with no
@@ -63,6 +70,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Effects = require(Shared.Effects)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -245,8 +253,9 @@ end
 
 --[[
 	One tick of a player in game mode `mode` touching the fluids `touching` (`touching`'s mask),
-	wearing `armor` points with `toughness` (Items.armorPoints; default none). Returns the half
-	hearts (of 20) it costs them this tick, whether burning was put out (by water: Minecraft's
+	wearing `armor` points with `toughness` (Items.armorPoints; default none), with the status
+	effects' `fire` rules (Shared/Effects.fireRules; nil: none). Returns the half hearts (of 20) it
+	costs them this tick, whether burning was put out (by water: Minecraft's
 	entity.generic.extinguish_fire) and whether the fluid's hurt landed (Entity.lavaHurt's hurt
 	returned true, however much armor took: Minecraft's entity.generic.burn).
 ]]
@@ -255,7 +264,8 @@ function Burning.tickPlayer(
 	mode: string,
 	touching: number,
 	armor: number?,
-	toughness: number?
+	toughness: number?,
+	fire: Effects.FireRules?
 ): (number, boolean, boolean)
 	if state.cooldown > 0 then
 		state.cooldown -= 1
@@ -264,6 +274,9 @@ function Burning.tickPlayer(
 		state.fire, state.heat = 0, 0
 		return 0, false, false
 	end
+	-- (Fire Resistance: no fire hurt lands at all.)
+	local immune = fire ~= nil and fire.immune
+	local factor = if fire then fire.factor else 1
 	local extinguished = false
 	if bit32.band(touching, EXTINGUISHES) ~= 0 then
 		state.heat = 0
@@ -275,41 +288,46 @@ function Burning.tickPlayer(
 	local fluid = harmful(touching)
 	local damage = 0
 	if state.fire > 0 then
-		if state.fire % Fluids.BURN_INTERVAL == 0 and fluid == nil then
-			damage += hurt(state, Fluids.BURN_DAMAGE, Burning.HURT_COOLDOWN)
+		if state.fire % Fluids.BURN_INTERVAL == 0 and fluid == nil and not immune then
+			damage += hurt(state, Fluids.BURN_DAMAGE + (if fire then fire.bonus else 0), Burning.HURT_COOLDOWN)
 		end
 		state.fire -= 1
 	end
 	local hurtNow = false
 	if fluid then
-		state.fire = math.max(state.fire, fluid.burnSeconds * TICKS_PER_SECOND)
-		local landed = hurt(state, fluid.damage, fluid.damageInterval)
-		hurtNow = landed > 0
-		if landed > 0 and (armor or 0) > 0 then
-			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+		state.fire = math.max(state.fire, math.floor(fluid.burnSeconds * TICKS_PER_SECOND * factor))
+		if not immune then
+			local landed = hurt(state, fluid.damage, fluid.damageInterval)
+			hurtNow = landed > 0
+			if landed > 0 and (armor or 0) > 0 then
+				landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+			end
+			damage += landed
 		end
-		damage += landed
 	end
 	if bit32.btest(touching, Burning.FIRE) then
-		-- (BaseFireBlock.entityInside: remainingFireTicks + 1, 8 s once it reaches 0.)
+		-- (BaseFireBlock.entityInside: remainingFireTicks + 1, 8 s once it reaches 0; at once
+		-- when the effects say it ignites.)
 		if state.fire > 0 then
 			state.fire += 1
 		else
 			state.heat += 1
-			if state.heat >= Burning.PLAYER_FIRE_IMMUNE then
+			if state.heat >= Burning.PLAYER_FIRE_IMMUNE or (fire ~= nil and fire.ignites) then
 				state.heat = 0
-				state.fire = Burning.IN_FIRE_SECONDS * TICKS_PER_SECOND
+				state.fire = math.floor(Burning.IN_FIRE_SECONDS * TICKS_PER_SECOND * factor)
 			end
 		end
-		local landed = hurt(state, Burning.IN_FIRE_DAMAGE, Burning.HURT_COOLDOWN)
-		if landed > 0 and (armor or 0) > 0 then
-			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+		if not immune then
+			local landed = hurt(state, Burning.IN_FIRE_DAMAGE, Burning.HURT_COOLDOWN)
+			if landed > 0 and (armor or 0) > 0 then
+				landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
+			end
+			damage += landed
 		end
-		damage += landed
 	elseif fluid == nil and state.fire <= 0 then
 		state.heat = 0
 	end
-	if bit32.btest(touching, Burning.CAMPFIRE) then
+	if bit32.btest(touching, Burning.CAMPFIRE) and not immune then
 		-- (CampfireBlock.entityInside: hurt(inFire, fireDamage), no burning.)
 		local landed = hurt(state, Burning.CAMPFIRE_DAMAGE, Burning.HURT_COOLDOWN)
 		if landed > 0 and (armor or 0) > 0 then
@@ -318,6 +336,19 @@ function Burning.tickPlayer(
 		damage += landed
 	end
 	return damage, extinguished, hurtNow
+end
+
+--[[
+	Sets a player in game mode `mode` burning for at least `seconds` (Entity.setSecondsOnFire),
+	times the effects' `fire` factor (a blast lighting a Fuel Soaked player: Players/Characters).
+	Creative and spectator players never burn.
+]]
+function Burning.ignite(state: PlayerState, mode: string, seconds: number, fire: Effects.FireRules?)
+	if GameMode.invulnerable(mode) or not (seconds > 0) then
+		return
+	end
+	local factor = if fire then fire.factor else 1
+	state.fire = math.max(state.fire, math.floor(seconds * TICKS_PER_SECOND * factor))
 end
 
 --[[

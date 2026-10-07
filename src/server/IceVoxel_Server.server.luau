@@ -35,6 +35,9 @@
 	                   use them), and generated structures' chests filled on first use
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
 	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state)
+	Status effects (Players/Effects: Minecraft's MobEffects, potions, oil and fuel on the skin,
+	/effect) start with the players, before the characters that tick them; Tough As Nails
+	registers its effects there when it starts.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -71,6 +74,7 @@ local ItemUse = require(Server.Players.ItemUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
+local Effects = require(Server.Players.Effects)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -100,6 +104,7 @@ Sounds.start(net)
 TimeOfDay.start()
 GameModes.start(net)
 TimeCommands.start(net)
+Effects.start(net)
 Characters.start(net, world)
 -- Items must exist before anything can drop them.
 Entities.start(net, world)
@@ -113,6 +118,7 @@ net.setRules({
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
 	broke = ToughAsNails.blockBroken,
+	miningFactor = Effects.miningFactor,
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)

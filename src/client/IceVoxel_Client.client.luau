@@ -56,7 +56,12 @@
 	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature from
 	                             the server, which Ui/SurvivalHud draws (droplets, the gauge, frost
 	                             and heat at the edges); Interaction/Drinking drinks and fills
-	                             bottles and canteens, Player/Exertion reports sprinting and jumps
+	                             bottles and canteens (and drinks potions), Player/Exertion
+	                             reports sprinting and jumps
+	  Player/EffectState         status effects from the server (Speed, Haste, Night Vision,
+	                             Oil Coated...): the movement and mining read them, Ui/EffectHud
+	                             draws them in the top right corner (a list beside open screens),
+	                             Rendering/EffectView does Night Vision, Blindness and Nausea
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
 ]]
 
@@ -95,6 +100,9 @@ local SpectatorView = require(Client.Player.SpectatorView)
 local BurningView = require(Client.Player.BurningView)
 local ExplosionView = require(Client.Rendering.ExplosionView)
 local SurvivalState = require(Client.Player.SurvivalState)
+local EffectState = require(Client.Player.EffectState)
+local EffectView = require(Client.Rendering.EffectView)
+local EffectHud = require(Client.Ui.EffectHud)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -241,6 +249,7 @@ end)
 
 ClientInventory.start()
 SurvivalState.start()
+EffectState.start()
 Screens.start()
 SettingsScreen.start()
 Notices.start()
@@ -293,6 +302,9 @@ Ambience.start(function(x: number, y: number, z: number): number?
 end)
 MusicToast.start()
 Music.start()
+-- (After the toast: the icons go under its place; after the camera and the fluid's fog.)
+EffectHud.start()
+EffectView.start()
 
 RunService.Heartbeat:Connect(function(dt)
 	-- While the player waits for the ground, the renderer may build longer per frame.

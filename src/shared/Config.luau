@@ -922,6 +922,24 @@ local Config = {
 		EffectDistance = 256,
 		LookPower = 16,
 	},
+	-- Status effects (Shared/Effects, server Players/Effects, client Player/EffectState): Minecraft
+	-- 1.20.1's MobEffects (Speed, Haste, Strength, Regeneration, Poison, Night Vision...), what
+	-- oil and fuel do to a player (Oil Coated, Fuel Soaked), the potions and /effect.
+	Effects = {
+		-- Oil and fuel give their effects (FluidList `effects`: Slowness II and Oil Coated, Nausea,
+		-- Poison and Fuel Soaked; water washes the coat off). Off, the fluids leave players be;
+		-- potions and /effect still work.
+		FluidEffects = true,
+		-- The effect icons in the top right corner (and the list beside open screens).
+		Hud = true,
+		-- Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's
+		-- sway (a share of it), times the FOV Effects setting (Minecraft's Distortion Effects).
+		NauseaRoll = 7,
+		NauseaFov = 0.1,
+		-- Night Vision lights places closed to the sky up to this grey (0..255, Lighting.Ambient):
+		-- the darkest cave reads like an overcast day.
+		NightVisionAmbient = 150,
+	},
 }
 
 return Config

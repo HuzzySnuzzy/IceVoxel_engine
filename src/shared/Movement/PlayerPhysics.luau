@@ -49,6 +49,14 @@
 	  in a wall  `isInWall` (Entity.isInWall): the eyes in a block the player suffocates in, which
 	           hurts (the server's Players/GameModeRules.inWall), e.g. after leaving spectator in rock.
 
+	  effects  status effects (Shared/Effects, set on the state by the client's controller):
+	           `speedFactor` multiplies the ground speed (Speed, Slowness, Oil Coated: Minecraft's
+	           movement speed attribute, sprinting's x 1.3 included), and here, unlike Minecraft,
+	           also slows (never speeds) the acceleration in fluids, so oil's Slowness slows wading;
+	           `jumpBoost` adds to the jump velocity and `fallReduction` blocks to the safe fall
+	           (Jump Boost: +0.1 and a block a level); `noSprint` keeps sprinting from starting
+	           (Blindness: LocalPlayer.canStartSprinting).
+
 	`setGameMode` gives a state the abilities of a game mode (Shared/GameMode), as Minecraft's
 	GameType.updatePlayerAbilities does. `knockback` adds an explosion's push to the velocity
 	(not for spectators or creative flight).
@@ -217,6 +225,13 @@ export type State = {
 	noClip: boolean,
 	-- Abilities.flyingSpeed (a float): flying acceleration, x 2 sprinting, x 3 up and down.
 	flyingSpeed: number,
+	-- Status effects (Shared/Effects): the ground speed's multiplier (1: none), the jump
+	-- velocity added (blocks a tick), the blocks of fall taken off before fall damage, and
+	-- whether sprinting may not start (Blindness).
+	speedFactor: number,
+	jumpBoost: number,
+	fallReduction: number,
+	noSprint: boolean,
 }
 
 export type Input = {
@@ -292,6 +307,10 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		wasJumping = false,
 		noClip = false,
 		flyingSpeed = FLYING_SPEED,
+		speedFactor = 1,
+		jumpBoost = 0,
+		fallReduction = 0,
+		noSprint = false,
 	}
 end
 
@@ -693,7 +712,9 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 		if state.fallDistance > 0 then
 			events.landed = true
 			events.fallDistance = state.fallDistance
-			events.damage = if state.mayFly then 0 else math.max(0, math.ceil(state.fallDistance - FALL_SAFE))
+			events.damage = if state.mayFly
+				then 0
+				else math.max(0, math.ceil(state.fallDistance - FALL_SAFE - state.fallReduction))
 		end
 		state.fallDistance = 0
 	elseif ry < 0 then
@@ -818,6 +839,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		and (state.onGround or state.underWater)
 		and not prevShift
 		and not prevImpulse
+		and not state.noSprint
 	then
 		if state.sprintTriggerTime <= 0 and not input.sprint then
 			state.sprintTriggerTime = DOUBLE_TAP_TICKS
@@ -825,7 +847,13 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			state.sprinting = true
 		end
 	end
-	if not state.sprinting and impulse and input.sprint and (not state.inWater or state.underWater) then
+	if
+		not state.sprinting
+		and impulse
+		and input.sprint
+		and (not state.inWater or state.underWater)
+		and not state.noSprint
+	then
 		state.sprinting = true
 	end
 	-- (Uses last tick's collision flags.)
@@ -896,7 +924,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			-- jumpInLiquid(LAVA): the same 0.04 a tick.
 			state.vy += WATER_JUMP
 		elseif (state.onGround or (swimming and height <= FLUID_JUMP_THRESHOLD)) and state.noJumpDelay == 0 then
-			state.vy = JUMP_POWER
+			state.vy = JUMP_POWER + state.jumpBoost
 			if state.sprinting then
 				state.vx += input.facingX * SPRINT_JUMP_BOOST
 				state.vz += input.facingZ * SPRINT_JUMP_BOOST
@@ -928,7 +956,8 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if state.inWater and not state.flying then
 		local startY = state.y
 		local drag = if state.sprinting then WATER_SPRINT_DRAG else waterDrag
-		accelerate(state, WATER_ACCELERATION, inputX, inputZ)
+		-- (Effects only slow it: see the header.)
+		accelerate(state, WATER_ACCELERATION * math.min(1, state.speedFactor), inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		state.vx *= drag
 		state.vy *= WATER_VERTICAL_DRAG
@@ -949,7 +978,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	elseif state.inLava and not state.flying then
 		-- LivingEntity.travel's lava branch (oil too: Fluids `physics` "lava", its `drag`).
 		local startY = state.y
-		accelerate(state, WATER_ACCELERATION, inputX, inputZ)
+		accelerate(state, WATER_ACCELERATION * math.min(1, state.speedFactor), inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		if state.lavaHeight <= FLUID_JUMP_THRESHOLD then
 			-- Shallow: dragged sideways, and up and down like water, with its slow sinking
@@ -983,7 +1012,9 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			then (if state.sprinting then state.flyingSpeed * 2 else state.flyingSpeed)
 			else (if state.sprinting then SPRINT_AIR_ACCELERATION else AIR_ACCELERATION)
 		local speed = if state.onGround
-			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED) * (GROUND_FACTOR / (friction * friction * friction))
+			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED)
+				* state.speedFactor
+				* (GROUND_FACTOR / (friction * friction * friction))
 			else airSpeed
 		accelerate(state, speed, inputX, inputZ)
 		if noClip then

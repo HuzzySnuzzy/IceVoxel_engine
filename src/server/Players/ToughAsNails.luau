@@ -2,7 +2,8 @@
 --[[
 	Tough As Nails on the server: every player's thirst and body temperature (the rules are
 	Shared/ToughAsNails, pure and tested; this plays them out). Config.ToughAsNails turns each on
-	and off; with both off nothing here runs.
+	and off; with both off nothing here ticks, but drinking still listens: potions are drunk
+	whatever TAN does, and bottles fill at water for brewing them.
 
 	  Ticks      20 a second (catching up a few per frame), for every living player:
 	               * a hurt that landed since the last tick (health went down, not by this
@@ -45,7 +46,8 @@
 	                               thirsty with thirst on, Thirst.canDrink; a tea whenever
 	                               temperature is on): drunk (its water only with thirst on),
 	                               the Thirst effect rolled, Internal Warmth or Chill given (a
-	                               drink's `warmth` / `chill`), the bottle or sip used up
+	                               drink's `warmth` / `chill`), a potion's status effects given
+	                               (Players/Effects.giveAll), the bottle or sip used up
 	                               (Drinks.afterDrinking); everyone else hears the last gulp
 	                               (entity.generic.drink: the drinker's client plays its own);
 	               hand            an empty hand at a water source within reach
@@ -58,6 +60,11 @@
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
 	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks.
+	  Effects    TAN's Thirst, Internal Warmth, Internal Chill and Climate Clemency are status
+	             effects in TAN 1.20, so they are listed with the others (Players/Effects
+	             `addExternal`: read from the states here every tick, Thirst with thirst on, the
+	             warmth and chill with temperature on; /effect gives them by the states' own
+	             rules, a longer one staying, and clears them).
 ]]
 
 local Players = game:GetService("Players")
@@ -67,6 +74,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local SharedEffects = require(Shared.Effects)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
@@ -84,6 +92,7 @@ local MachineWorld = require(script.Parent.Parent.Machines.MachineWorld)
 local Machines = require(script.Parent.Parent.Machines.Machines)
 local Burning = require(script.Parent.Burning)
 local Characters = require(script.Parent.Characters)
+local EffectsServer = require(script.Parent.Effects)
 local Climate = require(script.Parent.Climate)
 local Containers = require(script.Parent.Containers)
 local Inventories = require(script.Parent.Inventories)
@@ -411,6 +420,10 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 		Drinks.apply(if thirstOn() then record.thirst else nil, drink, function(): number
 			return random:NextNumber()
 		end, if temperatureOn() then record.temperature else nil)
+		if drink.effects then
+			-- (A potion: PotionItem.finishUsingItem.)
+			EffectsServer.giveAll(player, drink.effects)
+		end
 		local newHeld, give = Drinks.afterDrinking(held, GameMode.instabuild(mode))
 		if newHeld ~= held then
 			Inventories.setHeld(player, newHeld)
@@ -478,6 +491,95 @@ function ToughAsNailsServer.state(player: Player): (Thirst.State?, Temperature.S
 	return record.thirst, record.temperature
 end
 
+-- TAN's effects in the status effect list (see the header).
+local function registerEffects()
+	local id = SharedEffects.id
+	local function thirstOf(player: Player): Thirst.State?
+		local record = records[player]
+		return if record and thirstOn() then record.thirst else nil
+	end
+	local function temperatureOf(player: Player): Temperature.State?
+		local record = records[player]
+		return if record and temperatureOn() then record.temperature else nil
+	end
+	local function clemencyOf(player: Player): Temperature.State?
+		local record = records[player]
+		return if record then record.temperature else nil
+	end
+	EffectsServer.addExternal(id.Thirst, {
+		get = function(player: Player): number?
+			local thirst = thirstOf(player)
+			return if thirst then thirst.effect else nil
+		end,
+		give = function(player: Player, ticks: number)
+			local thirst = thirstOf(player)
+			if thirst then
+				Thirst.giveEffect(thirst, ticks)
+			end
+		end,
+		clear = function(player: Player)
+			local thirst = thirstOf(player)
+			if thirst then
+				thirst.effect = 0
+			end
+		end,
+	})
+	EffectsServer.addExternal(id.InternalWarmth, {
+		get = function(player: Player): number?
+			local temperature = temperatureOf(player)
+			return if temperature then temperature.warmth else nil
+		end,
+		give = function(player: Player, ticks: number)
+			local temperature = temperatureOf(player)
+			if temperature then
+				Temperature.giveWarmth(temperature, ticks)
+			end
+		end,
+		clear = function(player: Player)
+			local temperature = temperatureOf(player)
+			if temperature then
+				temperature.warmth = 0
+			end
+		end,
+	})
+	EffectsServer.addExternal(id.InternalChill, {
+		get = function(player: Player): number?
+			local temperature = temperatureOf(player)
+			return if temperature then temperature.chill else nil
+		end,
+		give = function(player: Player, ticks: number)
+			local temperature = temperatureOf(player)
+			if temperature then
+				Temperature.giveChill(temperature, ticks)
+			end
+		end,
+		clear = function(player: Player)
+			local temperature = temperatureOf(player)
+			if temperature then
+				temperature.chill = 0
+			end
+		end,
+	})
+	EffectsServer.addExternal(id.ClimateClemency, {
+		get = function(player: Player): number?
+			local temperature = clemencyOf(player)
+			return if temperature then temperature.clemency else nil
+		end,
+		give = function(player: Player, ticks: number)
+			local temperature = clemencyOf(player)
+			if temperature then
+				Temperature.grantClemency(temperature, ticks)
+			end
+		end,
+		clear = function(player: Player)
+			local temperature = clemencyOf(player)
+			if temperature then
+				temperature.clemency = 0
+			end
+		end,
+	})
+end
+
 -- The heat sources that warm only while they burn or work (see the header).
 local function registerHeatSources()
 	Climate.addHeatSource(Blocks.id.Furnace, function(x: number, y: number, z: number): boolean
@@ -502,10 +604,11 @@ end
 function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	assert(not started, "ToughAsNails.start was already called")
 	started = true
-	if not thirstOn() and not temperatureOn() then
-		return
+	local on = thirstOn() or temperatureOn()
+	if on then
+		registerHeatSources()
+		registerEffects()
 	end
-	registerHeatSources()
 
 	local view: Climate.View = {
 		getBlock = function(x: number, y: number, z: number): number?
@@ -552,6 +655,10 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	net.on(Protocol.ClientMessage.Drink, function(player: Player, payload: buffer)
 		onDrink(world, player, payload)
 	end)
+	-- (Both off: drinking potions and filling bottles only, nothing ticks.)
+	if not on then
+		return
+	end
 
 	local accumulator = 0
 	local tick = 0

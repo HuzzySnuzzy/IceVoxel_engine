@@ -22,7 +22,13 @@
 	             then follows the distance to it). See Rendering/SkyExposure.
 	  Fog        its colour follows the time while IceVoxel's fog is in use (ViewSettings.usesFog);
 	             its distance is ViewSettings'. While the camera is in a fluid, the fluid's colour
-	             replaces it (`setFogColour`, Rendering/FluidFog), whatever the fog setting.
+	             replaces it (`setFogColour`, Rendering/FluidFog), whatever the fog setting, and a
+	             status effect's (Blindness: black, `setEffectFogColour`, Rendering/EffectView)
+	             replaces both.
+	  Effects    Night Vision (`setNightVision`, Rendering/EffectView: its scale, 0..1, flickering
+	             in its last 10 s) raises the ambient and outdoor ambient towards
+	             Config.Effects.NightVisionAmbient's grey, so caves and nights read lit, as
+	             Minecraft's lightmap does; a change of scale writes at once.
 
 	An Atmosphere or Sky in Lighting is left alone: Roblox lights both by the sun and moon itself.
 	Config.Lighting.Enabled = false leaves everything but ClockTime to the place (the exposure is
@@ -68,6 +74,11 @@ local written: { [string]: any } = {}
 -- The fog colour of the fluid the camera is in (nil: none), the place's own fog colour (captured
 -- before a fluid first changes it) and the time of day's last one.
 local fogOverride: Color3? = nil
+-- A status effect's fog colour (Blindness), over the fluid's.
+local effectFog: Color3? = nil
+-- Night Vision's scale (0: none .. 1) and whether it changed since the last update.
+local nightVision = 0
+local nightVisionChanged = false
 local placeFogColour: Color3? = nil
 local dayFogColour: Color3? = nil
 local lighting: any = Lighting
@@ -131,14 +142,31 @@ local function update(dt: number)
 	-- Earth's tilt move it away from Minecraft's path, and the light should match the sky.
 	local sunHeight = Lighting:GetSunDirection().Y
 	local environment = DayCycle.environment(dayTime, current, settings, sunHeight)
-	write("Ambient", colour(environment.ambient))
-	write("OutdoorAmbient", colour(environment.outdoorAmbient))
+	if nightVision > 0 then
+		-- (Night Vision: the ambients raised towards its grey.)
+		local grey = Config.Effects.NightVisionAmbient
+		local function lift(rgb: { number }): Color3
+			local r, g, b = rgb[1], rgb[2], rgb[3]
+			return Color3.fromRGB(
+				r + math.max(0, grey - r) * nightVision,
+				g + math.max(0, grey - g) * nightVision,
+				b + math.max(0, grey - b) * nightVision
+			)
+		end
+		write("Ambient", lift(environment.ambient))
+		write("OutdoorAmbient", lift(environment.outdoorAmbient))
+	else
+		write("Ambient", colour(environment.ambient))
+		write("OutdoorAmbient", colour(environment.outdoorAmbient))
+	end
 	write("Brightness", environment.brightness)
 	write("ColorShift_Top", colour(environment.colorShiftTop))
 	write("EnvironmentDiffuseScale", environment.environmentDiffuse)
 	write("EnvironmentSpecularScale", environment.environmentSpecular)
 	dayFogColour = colour(environment.fogColor)
-	if fogOverride then
+	if effectFog then
+		write("FogColor", effectFog)
+	elseif fogOverride then
 		write("FogColor", fogOverride)
 	elseif ViewSettings.usesFog() then
 		write("FogColor", dayFogColour)
@@ -154,12 +182,40 @@ function LightingController.setFogColour(fog: Color3?)
 		placeFogColour = Lighting.FogColor
 	end
 	fogOverride = fog
-	if fog then
+	if effectFog then
+		-- (Blindness' black stays over the fluid's.)
+		return
+	elseif fog then
 		write("FogColor", fog)
 	elseif ViewSettings.usesFog() and dayFogColour then
 		write("FogColor", dayFogColour)
 	elseif placeFogColour then
 		write("FogColor", placeFogColour)
+	end
+end
+
+--[[
+	A status effect's fog colour (Blindness' black, Rendering/EffectView), or with nil the fluid's
+	or the normal one again; written at once.
+]]
+function LightingController.setEffectFogColour(fog: Color3?)
+	if fog and placeFogColour == nil then
+		placeFogColour = Lighting.FogColor
+	end
+	effectFog = fog
+	if fog then
+		write("FogColor", fog)
+	else
+		LightingController.setFogColour(fogOverride)
+	end
+end
+
+-- Night Vision's scale (0: none .. 1; see the header): the ambients follow at the next frame.
+function LightingController.setNightVision(scale: number)
+	scale = math.clamp(scale, 0, 1)
+	if math.abs(scale - nightVision) > 0.01 or (scale == 0) ~= (nightVision == 0) then
+		nightVision = scale
+		nightVisionChanged = true
 	end
 end
 
@@ -221,8 +277,9 @@ function LightingController.start(terrain: TerrainGenerator.Generator?, world: C
 	local elapsed = 0
 	RunService.Heartbeat:Connect(function(dt: number)
 		elapsed += dt
-		if changed or elapsed >= Config.Lighting.UpdateInterval then
+		if changed or nightVisionChanged or elapsed >= Config.Lighting.UpdateInterval then
 			changed = false
+			nightVisionChanged = false
 			update(elapsed)
 			elapsed = 0
 		end
