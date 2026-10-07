@@ -122,6 +122,8 @@ local function command(name: string, alias: string)
 	local instance = Instance.new("TextChatCommand")
 	instance.Name = name
 	instance.PrimaryAlias = alias
+	-- (Operators only: the chat suggests it to them alone.)
+	instance:SetAttribute(WorldSettings.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_OPERATOR)
 	instance.Triggered:Connect(function(source: TextSource, text: string)
 		local player = Players:GetPlayerByUserId(source.UserId)
 		if player then

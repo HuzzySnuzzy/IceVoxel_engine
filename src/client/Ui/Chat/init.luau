@@ -5,8 +5,10 @@
 	goes through TextChatService, so Roblox filters it: sent with TextChannel:SendAsync, shown from
 	TextChatService.MessageReceived (the text filtered for this player).
 
-	  Opening   KEYS below: T opens an empty box, "/" one with "/" typed (no screen, the game mode
-	            switcher or Roblox's menu open, no other text box focused); the HUD's touch chat
+	  Opening   the key bindings' "chat" and "command" (Settings/Keybinds, Minecraft's key.chat and
+	            key.command: T and / by default): "chat" opens an empty box, "command" one with "/"
+	            typed (no screen, the game mode switcher or Roblox's menu open, no other text box
+	            focused); the HUD's touch chat
 	            button (Hud.onChatButton) opens and closes it. With the Chat setting on Hidden it
 	            does not open: "Chat disabled in client options." shows above the hotbar instead
 	            (Minecraft's overlay message, 3 s).
@@ -22,7 +24,9 @@
 	            closes), Escape closes, Up / Down go through what was sent (Ui/Chat/ChatInput), Tab
 	            completes command names and players' names, and while a command's name is typed its
 	            suggestions show above the box (the Command Suggestions setting; Up / Down move
-	            the highlight, Tab uses it). Typed text never reaches the game's keys: every key
+	            the highlight, Tab uses it); both offer only the commands this player may use
+	            (WorldSettings.mayRun: operators, Allow Commands, the game mode permission, as
+	            the server marks its commands). Typed text never reaches the game's keys: every key
 	            handler ignores input a text box took (gameProcessedEvent, or GetFocusedTextBox),
 	            the player stands still (Player/MovementController), the hotbar's keys and wheel do
 	            nothing (Hud.setInputTaken), the mouse is free on computers and a click beside
@@ -54,11 +58,17 @@
 
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local GameMode = require(Shared.GameMode)
+local WorldSettings = require(Shared.WorldSettings)
+
 local Notices = require(script.Parent.Parent.Net.Notices)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local GameModeSwitcher = require(script.Parent.GameModeSwitcher)
 local Hud = require(script.Parent.Hud)
 local Screens = require(script.Parent.Screens)
@@ -68,15 +78,6 @@ local ChatInput = require(script.ChatInput)
 local ChatLog = require(script.ChatLog)
 
 type Message = ChatFormat.Message
-
---[[
-	THE CHAT'S KEYS (Minecraft's key.chat and key.command), kept in this one table: they are the
-	key bindings' "chat" and "command" actions.
-]]
-local KEYS = {
-	chat = Enum.KeyCode.T,
-	command = Enum.KeyCode.Slash,
-}
 
 -- Layout (GUI pixels): the lines' bottom above the screen's bottom (ChatComponent: height - 40),
 -- the box's strip (ChatScreen: a 12 pixel background 2 above the bottom, text 4 into it), the
@@ -231,24 +232,51 @@ local function canChat(channel: TextChannel): boolean
 	return true
 end
 
--- Every TextChatCommand's aliases (remembered until commands come or go).
+-- Every TextChatCommand's aliases, and who may use each (WorldSettings.COMMAND_ATTRIBUTE),
+-- remembered until commands come or go.
 local aliasCache: { string }? = nil
+local aliasLevels: { [string]: unknown } = {}
 local function commandAliases(): { string }
 	local cached = aliasCache
 	if cached then
 		return cached
 	end
 	local list: { string } = {}
+	table.clear(aliasLevels)
 	for _, instance in TextChatService:GetDescendants() do
 		if instance:IsA("TextChatCommand") and instance.Enabled then
+			local level = instance:GetAttribute(WorldSettings.COMMAND_ATTRIBUTE)
 			table.insert(list, instance.PrimaryAlias)
+			aliasLevels[instance.PrimaryAlias] = level
 			if instance.SecondaryAlias ~= "" then
 				table.insert(list, instance.SecondaryAlias)
+				aliasLevels[instance.SecondaryAlias] = level
 			end
 		end
 	end
 	aliasCache = list
 	return list
+end
+
+--[[
+	The aliases this player may use (WorldSettings.mayRun: operator, the world's Allow Commands,
+	their own game mode permission), for Tab and the suggestions: as Minecraft's client knows only
+	the commands its permission level allows. Sending still knows every command (the server
+	answers one the player may not use).
+]]
+local function usableAliases(): { string }
+	local access: WorldSettings.Access = {
+		operator = player:GetAttribute(WorldSettings.OPERATOR_ATTRIBUTE) == true,
+		allowCommands = Shared:GetAttribute("AllowCommands") == true,
+		gameMode = player:GetAttribute(GameMode.PERMISSION_ATTRIBUTE) == true,
+	}
+	local usable: { string } = {}
+	for _, alias in commandAliases() do
+		if WorldSettings.mayRun(aliasLevels[alias], access) then
+			table.insert(usable, alias)
+		end
+	end
+	return usable
 end
 
 -- Players' names and display names, for Tab.
@@ -634,9 +662,11 @@ function Chat.start()
 	local lastText = ""
 	local mouseIconWas = true
 	-- Right after opening, the opening key typed into the box is taken back (`guardText`: what
-	-- the box held, `guardUntil`: until when).
+	-- the box held, `guardUntil`: until when, `guardKey`: the character that key types, lower
+	-- case; "/" when unknown).
 	local guardText = ""
 	local guardUntil = 0
+	local guardKey = "/"
 
 	local function setText(text: string, cursor: number?)
 		applying = true
@@ -671,7 +701,7 @@ function Chat.start()
 		if metrics.suggestions then
 			local text = box.Text
 			local cursor = cursorOf(text)
-			local completion = ChatInput.complete(text, cursor, commandAliases(), {}, true)
+			local completion = ChatInput.complete(text, cursor, usableAliases(), {}, true)
 			if completion and not (#completion.candidates == 1 and completion.candidates[1] == completion.word) then
 				suggestions = ChatInput.suggest(text, cursor, completion)
 			end
@@ -786,7 +816,7 @@ function Chat.start()
 		if os.clock() < guardUntil then
 			guardUntil = 0
 			local typed = string.sub(clean, #guardText + 1)
-			if string.sub(clean, 1, #guardText) == guardText and (typed == "t" or typed == "T" or typed == "/") then
+			if string.sub(clean, 1, #guardText) == guardText and string.lower(typed) == guardKey then
 				setText(guardText)
 				return
 			end
@@ -805,7 +835,7 @@ function Chat.start()
 		if current == nil then
 			local text = box.Text
 			local cursor = cursorOf(text)
-			local completion = ChatInput.complete(text, cursor, commandAliases(), playerNames())
+			local completion = ChatInput.complete(text, cursor, usableAliases(), playerNames())
 			if completion == nil then
 				return
 			end
@@ -860,30 +890,33 @@ function Chat.start()
 		end
 	end
 
-	UserInputService.InputBegan:Connect(function(input: InputObject)
-		if input.UserInputType ~= Enum.UserInputType.Keyboard then
-			return
-		end
-		local key = input.KeyCode
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		local keyboard = input.UserInputType == Enum.UserInputType.Keyboard
 		if open then
-			if box:IsFocused() then
-				boxKey(key)
+			if keyboard and box:IsFocused() then
+				boxKey(input.KeyCode)
 			end
 			return
 		end
-		-- (Not `processed`: Roblox's own chat hotkey may claim "/". A focused text box is typing.)
-		if key ~= KEYS.chat and key ~= KEYS.command then
+		-- The key bindings' "chat" and "command". (Not `processed` for a key: Roblox's own chat
+		-- hotkey may claim "/". A focused text box is typing; a mouse button bound to them counts
+		-- only off the GUI.)
+		local command = Keybinds.matches("command", input)
+		if not command and not Keybinds.matches("chat", input) then
 			return
 		end
 		if
-			UserInputService:GetFocusedTextBox() ~= nil
+			not keyboard and processed
+			or Keybinds.typing()
 			or Screens.isOpen()
 			or GameModeSwitcher.isOpen()
 			or GuiService.MenuIsOpen
 		then
 			return
 		end
-		Chat.open(if key == KEYS.command then "/" else "")
+		local typed = if keyboard then UserInputService:GetStringForKeyCode(input.KeyCode) else ""
+		guardKey = if typed ~= "" then string.lower(typed) else "/"
+		Chat.open(if command then "/" else "")
 	end)
 
 	-- The wheel scrolls the open chat (Hud.setInputTaken keeps it from the hotbar and camera).

@@ -36,6 +36,14 @@
 	              last: clients start once it is there); `info` reads them back (F3).
 	  Operators   OPERATOR_ATTRIBUTE, a Player attribute the server's Players/Operators keeps (true
 	              for operators): the title screen offers Create World to them.
+	  Commands    COMMAND_ATTRIBUTE on a server TextChatCommand says who may use it: "operator"
+	              (/op, /deop: operators only), "commands" (/effect, /summon, /kill: the
+	              operators' permission, Players/Operators.permitted: operators, or everyone with
+	              Allow Commands), "gamemode" (/gamemode: the player's GameMode.PERMISSION_ATTRIBUTE),
+	              none (everyone: /time, /gamerule and /knowledge answer queries to all, Roblox's
+	              own commands). `mayRun` is the rule; the chat (client Ui/Chat) completes and
+	              suggests only what the player may run, as Minecraft's client knows only the
+	              commands its permission level allows. The server checks every command anyway.
 ]]
 
 local Config = require(script.Parent.Config)
@@ -70,6 +78,14 @@ export type Request = {
 }
 
 -- What the clients read back (`info`).
+-- What a player may do, as their client sees it (the attributes: OPERATOR_ATTRIBUTE, the world's
+-- "AllowCommands", GameMode.PERMISSION_ATTRIBUTE).
+export type Access = {
+	operator: boolean,
+	allowCommands: boolean,
+	gameMode: boolean,
+}
+
 export type Info = {
 	name: string,
 	difficulty: number,
@@ -83,6 +99,11 @@ local WorldSettings = {}
 WorldSettings.OPERATOR_ATTRIBUTE = "IceVoxelOperator"
 -- The option the Generate Structures toggle sets (a world type declares it to use it).
 WorldSettings.STRUCTURES = "structures"
+-- A TextChatCommand's attribute: who may use it (see the header), and its values.
+WorldSettings.COMMAND_ATTRIBUTE = "IceVoxelPermission"
+WorldSettings.COMMAND_OPERATOR = "operator"
+WorldSettings.COMMAND_PERMITTED = "commands"
+WorldSettings.COMMAND_GAMEMODE = "gamemode"
 
 WorldSettings.MAX_NAME = 32
 WorldSettings.MAX_SEED = 32
@@ -343,6 +364,20 @@ function WorldSettings.fromConfig(seed: number): Settings
 	local hint = configured and configured.gameMode
 	settings.gameMode = if hint and GameMode.isValid(hint) then hint else GameMode.default()
 	return settings
+end
+
+--[[ Commands ]]
+
+-- May a player with `access` run a command whose COMMAND_ATTRIBUTE is `level` (unknown: yes)?
+function WorldSettings.mayRun(level: unknown, access: Access): boolean
+	if level == WorldSettings.COMMAND_OPERATOR then
+		return access.operator
+	elseif level == WorldSettings.COMMAND_PERMITTED then
+		return access.operator or access.allowCommands
+	elseif level == WorldSettings.COMMAND_GAMEMODE then
+		return access.gameMode
+	end
+	return true
 end
 
 --[[ Attributes ]]

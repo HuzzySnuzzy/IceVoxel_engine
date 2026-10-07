@@ -593,9 +593,11 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Chat.** Minecraft 1.20.1's chat instead of Roblox's window and bar: lines at the bottom left
   above the hotbar in the pixel font with a shadow and a dark background, fading 10 s after they
   arrive (all of them back while the box is open), 100 kept and scrolled with the wheel. `T`
-  opens the box (`/` with "/" typed): `Enter` sends, `Escape` closes, `Up` / `Down` bring back what
-  you sent, `Tab` completes command names and players' names, and command names are suggested as
-  you type them. Players' messages read "<Name> message", joins and leaves are yellow ("Alex
+  opens the box (`/` with "/" typed; both are key bindings): `Enter` sends, `Escape` closes, `Up` /
+  `Down` bring back what you sent, `Tab` completes command names and players' names, and command
+  names are suggested as you type them (only the commands you may use: `/op` and `/deop` for
+  operators, `/effect`, `/summon` and `/kill` for operators or with Allow Commands, `/gamemode`
+  when you may change your own mode). Players' messages read "<Name> message", joins and leaves are yellow ("Alex
   joined the game"), command answers and the server's messages white, errors red. Everything
   players type goes through Roblox's TextChatService, so Roblox filters it (and an account that
   may not chat is told so). Commands (`/time`, `/gamemode`, `/summon`, `/effect`, `/knowledge`,
@@ -934,7 +936,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Fly (spectator) | Always, through blocks; `Space` / `Shift` up / down, sprinting (`Ctrl`) twice as fast; mouse wheel (spectator menu closed): flying speed | A / B | Jump / Sneak |
 | Spectator menu | `1`–`9` or middle click open it, then a number selects and the same number again (or middle click) uses; the wheel moves the selection | L1 / R1 open and move, D-pad up uses | `…` button; tap a slot |
 | Spectate a player (spectator) | Left click them; `Shift` leaves | R2; B leaves | Hold on them; Sneak button leaves |
-| Chat          | `T` opens the chat, `/` opens it with "/" typed; `Enter` sends, `Escape` closes, `Up` / `Down` what you sent (or the highlighted suggestion), `Tab` completes command names and players' names (`Shift` + `Tab` back), the wheel (`Shift`: a line at a time), `Page Up` / `Page Down` scroll | | Speech bubble over the `…` button |
+| Chat          | `T` opens the chat, `/` opens it with "/" typed (the Open Chat and Open Command key bindings); `Enter` sends, `Escape` closes, `Up` / `Down` what you sent (or the highlighted suggestion), `Tab` completes command names and players' names (`Shift` + `Tab` back), the wheel (`Shift`: a line at a time), `Page Up` / `Page Down` scroll | | Speech bubble over the `…` button |
 | Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
 | Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
 | Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
@@ -1081,10 +1083,15 @@ character before they enter the world.
   as Minecraft 1.20's: **Game** (World Name; Game Mode: Survival, Creative or Adventure, the mode
   new players get; Difficulty: Peaceful spawns no monsters, harder ones spread fire a little
   faster; Allow Commands: everyone may use the operators' commands, switched on with Creative
-  unless you set it yourself) and **World** (World Type, from the world types the game has, with
-  its description, and **Customize** when the type declares settings; the seed: a number is used
-  as it is, any other text becomes Minecraft's number for it (Java's `String.hashCode`, so
-  "glacier" is 108181935), blank is random; Generate Structures). **Create New World** sends it to
+  unless you set it yourself) and **World** (World Type: every world type the game has, the
+  debug worlds last, with its description, and **Customize** when the type declares settings:
+  Single Biome's biome, Superflat's preset with Minecraft's flat presets on a button and what is
+  wrong with a preset typed in shown in red, its Trees and Plants; the seed: a number is used as
+  it is, any other text becomes Minecraft's number for it (Java's `String.hashCode`, so "glacier"
+  is 108181935), blank is random; Generate Structures, greyed out for types without library
+  structures). Picking a debug world picks its game mode too (All Blocks: Spectator, as
+  Minecraft's debug world; All Structures and All Biomes: Creative), and the mode you had comes
+  back on the other types unless you chose one meanwhile. **Create New World** sends it to
   the server, which checks it again (only the operator, only once, known types and modes, at most
   32 characters of name and seed; the name goes through Roblox's text filter, as everyone sees
   it), creates the world and puts you in it.
@@ -1093,7 +1100,10 @@ character before they enter the world.
 - **Options...** opens the Options menu (the same as `P` in the game); Done comes back.
 
 The world's name, type, difficulty and seed show in `F3`. Without the title screen
-(`MainMenu.Enabled = false`) the server makes the world at once from `World` and `Seed`.
+(`MainMenu.Enabled = false`) the server makes the world at once from `World` and `Seed` (and the
+world type's own game mode, if it has one). The world type's hints apply when the world starts:
+the void and the debug worlds spawn no mobs, All Blocks and All Structures have no block updates
+or random ticks; Peaceful spawns no monsters in any world.
 
 ## Project layout
 
@@ -2112,8 +2122,13 @@ TextSource and the text) and parent it to TextChatService, as `Players/TimeComma
 with `Notice` messages (`Protocol.encodeNotice`), which show in the chat in white. The chat (client
 `Ui/Chat`) completes its name with `Tab`, suggests it while it is typed and sends it to
 TextChatService, which runs it and shows it to no one; a command no TextChatCommand has is never
-sent. Pure parsing (see `Players/TimeCommand`) keeps it testable. With the legacy chat, read
-`Player.Chatted` instead (the game's chat needs TextChatService and leaves Roblox's in place there).
+sent. Who may use it is yours to check on the server: the operators' permission is
+`Players/Operators.permitted(player)` (operators, or everyone with Allow Commands; `isOperator`
+for operators only). Mark the command with that rule (`instance:SetAttribute(WorldSettings
+.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)`, or `COMMAND_OPERATOR`) and the chat offers
+it only to players who may use it. Pure parsing (see `Players/TimeCommand`) keeps it testable.
+With the legacy chat, read `Player.Chatted` instead (the game's chat needs TextChatService and
+leaves Roblox's in place there).
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another

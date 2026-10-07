@@ -40,6 +40,7 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local WorldSettings = require(Shared.WorldSettings)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 
@@ -268,6 +269,8 @@ local function listenToTextChat()
 	command.Name = "IceVoxelGameMode"
 	command.PrimaryAlias = GameModeCommand.ALIASES[1]
 	command.SecondaryAlias = GameModeCommand.ALIASES[2]
+	-- (The chat suggests it to those who may change their own mode.)
+	command:SetAttribute(WorldSettings.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_GAMEMODE)
 	command.Triggered:Connect(function(source: TextSource, text: string)
 		local player = Players:GetPlayerByUserId(source.UserId)
 		if player then

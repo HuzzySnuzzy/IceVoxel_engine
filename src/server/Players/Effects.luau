@@ -44,6 +44,7 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local WorldSettings = require(Shared.WorldSettings)
 local Effects = require(Shared.Effects)
 local Protocol = require(Shared.Net.Protocol)
 
@@ -365,6 +366,8 @@ local function listen()
 	local command = Instance.new("TextChatCommand")
 	command.Name = "IceVoxelEffect"
 	command.PrimaryAlias = EffectCommand.ALIASES[1]
+	-- (The operators' permission: the chat suggests it to those who have it.)
+	command:SetAttribute(WorldSettings.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)
 	command.Triggered:Connect(function(source: TextSource, text: string)
 		local player = Players:GetPlayerByUserId(source.UserId)
 		if player then

@@ -4,7 +4,8 @@
 	world type's declared settings, the server's one creation (World/WorldInfo: the boot's
 	startWorld with Config.MainMenu.Enabled off, and from the menu), the protocol's messages, the
 	title screen's buttons and splash (client Ui/TitleRules) and the Create World form (client
-	Ui/CreateWorldForm).
+	Ui/CreateWorldForm) with the registered world types: their settings, superflat's presets and
+	checks, and the hints (game mode, no mobs) applied when the world starts.
 ]]
 
 return function(t, shared, require, server, client)
@@ -16,6 +17,7 @@ return function(t, shared, require, server, client)
 	local WorldInfo = require(server.World.WorldInfo)
 	local TitleRules = require(client.Ui.TitleRules)
 	local CreateWorldForm = require(client.Ui.CreateWorldForm)
+	local Superflat = require(shared.Generation.Superflat)
 
 	local function never(): number
 		error("no random seed expected")
@@ -202,10 +204,14 @@ return function(t, shared, require, server, client)
 		local mode = Config.Gameplay.DefaultGameMode
 		local fire = Config.Server.Fire.Difficulty
 		local cap, max = Config.Mobs.HostileCap, Config.Mobs.MaxHostile
+		local spawning = Config.Mobs.Spawning
+		local worldType, options = Config.World.Type, Config.World.Options
 		local ok, err = pcall(fn)
 		Config.Gameplay.DefaultGameMode = mode
 		Config.Server.Fire.Difficulty = fire
 		Config.Mobs.HostileCap, Config.Mobs.MaxHostile = cap, max
+		Config.Mobs.Spawning = spawning
+		Config.World.Type, Config.World.Options = worldType, options
 		WorldInfo._reset()
 		if not ok then
 			error(err, 0)
@@ -497,6 +503,177 @@ return function(t, shared, require, server, client)
 			}, never) :: any
 			t.eq(settingsBack.options.biome, "desert")
 			t.eq(settingsBack.seed, 108181935)
+		end)
+	end)
+
+	--[[ The world types on the screen and at the start ]]
+
+	local function fixedSeed(): number
+		return 12345
+	end
+
+	-- The server's view of what the Create World form sends (Protocol CreateWorld, decoded).
+	local function sentRequest(form: CreateWorldForm.Form): WorldSettings.Request
+		local sent = CreateWorldForm.request(form)
+		return {
+			name = sent.name,
+			gameMode = sent.gameMode,
+			difficulty = sent.difficulty,
+			allowCommands = sent.allowCommands,
+			worldType = sent.worldType,
+			options = WorldTypes.decodeOptions(sent.options),
+			structures = sent.structures,
+			seed = sent.seed,
+		}
+	end
+
+	-- Cycles `form` to world type `id`.
+	local function pick(form: CreateWorldForm.Form, id: string)
+		for _ = 1, #WorldTypes.list + 1 do
+			if form.worldType == id then
+				return
+			end
+			CreateWorldForm.cycleWorldType(form)
+		end
+		error(`{id} is not offered`)
+	end
+
+	t.test("world creation: every world type is offered with its settings; Structures is the tab's", function()
+		local form = CreateWorldForm.new()
+		local offered = {}
+		for _, worldType in CreateWorldForm.types() do
+			table.insert(offered, worldType.id)
+		end
+		local registered = {}
+		for _, worldType in WorldTypes.list do
+			if not worldType.hidden then
+				table.insert(registered, worldType.id)
+			end
+		end
+		t.eq(table.concat(offered, ","), table.concat(registered, ","), "the registry's order")
+		for _, id in { "default", "superflat", "void", "singleBiome", "largeBiomes" } do
+			t.ok(table.find(offered, id) ~= nil, id)
+		end
+		for _, id in { "debugBlocks", "debugStructures", "debugBiomes" } do
+			t.ok(table.find(offered, id) ~= nil, id)
+		end
+		for _, id in offered do
+			pick(form, id)
+			local declared = (WorldTypes.get(id) :: WorldTypes.WorldType).settings or {}
+			local structures = false
+			for _, setting in declared do
+				structures = structures or setting.key == WorldSettings.STRUCTURES
+			end
+			t.eq(CreateWorldForm.hasStructures(form), structures, `{id}: Generate Structures`)
+			for _, setting in CreateWorldForm.customSettings(form) do
+				t.ok(setting.key ~= WorldSettings.STRUCTURES, `{id}: not on Customize`)
+			end
+			t.eq(#CreateWorldForm.customSettings(form), #declared - (if structures then 1 else 0), id)
+		end
+		pick(form, "singleBiome")
+		local biome = CreateWorldForm.customSettings(form)[1]
+		t.eq(biome.key, "biome")
+		t.eq(CreateWorldForm.settingLabel(form, biome), "Biome: Plains")
+		CreateWorldForm.setSetting(form, biome, "BirchForest")
+		t.eq(CreateWorldForm.settingLabel(form, biome), "Biome: Birch Forest", "the label")
+		form.structures = false
+		local settings = WorldSettings.validate(sentRequest(form), fixedSeed) :: WorldSettings.Settings
+		t.eq(settings.options.biome, "BirchForest")
+		t.eq(settings.options.structures, false, "the World tab's toggle")
+	end)
+
+	t.test("world creation: a type's game mode is preselected, and the player's comes back", function()
+		local form = CreateWorldForm.new(request({ gameMode = GameMode.SURVIVAL, allowCommands = false }))
+		t.eq(form.gameMode, GameMode.SURVIVAL)
+		pick(form, "debugBlocks")
+		t.eq(form.gameMode, GameMode.SPECTATOR, "Minecraft's debug world: spectator")
+		t.eq(form.allowCommands, true)
+		t.ok(table.find(WorldSettings.modes(CreateWorldForm.worldType(form)), GameMode.SPECTATOR) ~= nil)
+		local sent = WorldSettings.validate(sentRequest(form), fixedSeed) :: WorldSettings.Settings
+		t.eq(sent.gameMode, GameMode.SPECTATOR, "the server takes the type's own mode")
+		CreateWorldForm.cycleWorldType(form)
+		t.eq(form.worldType, "debugStructures")
+		t.eq(form.gameMode, GameMode.CREATIVE)
+		pick(form, WorldTypes.DEFAULT)
+		t.eq(form.gameMode, GameMode.SURVIVAL, "back to the mode before the hints")
+		t.eq(form.allowCommands, false)
+		t.eq(table.find(WorldSettings.modes(CreateWorldForm.worldType(form)), GameMode.SPECTATOR), nil)
+		local refused, why = WorldSettings.validate(request({ gameMode = GameMode.SPECTATOR }), never)
+		t.eq(refused, nil, "Spectator only for a type that asks for it")
+		t.ok(why ~= nil)
+		-- A mode the player picks on a hinted type stays.
+		pick(form, "debugBiomes")
+		t.eq(form.gameMode, GameMode.CREATIVE)
+		CreateWorldForm.cycleGameMode(form)
+		t.eq(form.gameMode, GameMode.ADVENTURE)
+		pick(form, WorldTypes.DEFAULT)
+		t.eq(form.gameMode, GameMode.ADVENTURE, "the player's choice")
+	end)
+
+	t.test("world creation: superflat's preset: Minecraft's presets, its check, kept whole", function()
+		local form = CreateWorldForm.new()
+		pick(form, "superflat")
+		local preset = CreateWorldForm.customSettings(form)[1]
+		t.eq(preset.key, "preset")
+		t.eq(CreateWorldForm.presetLabel(form, preset), "Classic Flat")
+		CreateWorldForm.cyclePreset(form, preset)
+		t.eq(CreateWorldForm.presetLabel(form, preset), "Tunnelers' Dream")
+		t.eq(CreateWorldForm.settingValue(form, preset), Superflat.PRESETS[2].value)
+		CreateWorldForm.cyclePreset(form, preset, -1)
+		t.eq(CreateWorldForm.settingValue(form, preset), Superflat.CLASSIC)
+		t.eq(CreateWorldForm.problem(form), nil)
+		-- Minecraft's own string, pasted: the ";" and its 73 characters kept.
+		local pasted = "minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block;minecraft:plains"
+		CreateWorldForm.setSetting(form, preset, pasted)
+		t.eq(CreateWorldForm.settingValue(form, preset), pasted)
+		t.eq(CreateWorldForm.presetLabel(form, preset), "Custom")
+		t.eq(CreateWorldForm.problem(form), nil)
+		local settings = WorldSettings.validate(sentRequest(form), fixedSeed) :: WorldSettings.Settings
+		t.eq(settings.options.preset, pasted, "the server keeps it")
+		local _, fallback = Superflat.resolve(settings.options)
+		t.eq(fallback, nil, "a good preset: no Classic Flat fallback")
+		local gen = WorldTypes.create("superflat", settings.seed, settings.options)
+		t.eq(gen.column(5, 5), 4, "bedrock, two dirt, grass")
+		-- A bad one is said, and the screen does not send it.
+		CreateWorldForm.setSetting(form, preset, "Bedrock,2*Dirt,Unobtainium;Plains")
+		local problem = CreateWorldForm.problem(form)
+		t.ok(problem ~= nil and string.sub(problem, 1, 8) == "Preset: ", problem)
+		t.eq(
+			CreateWorldForm.settingProblem(form, preset),
+			select(2, Superflat.parse("Bedrock,2*Dirt,Unobtainium;Plains"))
+		)
+	end)
+
+	t.test("world creation: a type's hints apply when the world starts", function()
+		keepingConfig(function()
+			WorldInfo._reset()
+			Config.Mobs.Spawning = true
+			local settings = WorldSettings.fromConfig(7)
+			settings.worldType = "void"
+			t.ok(WorldInfo.create(settings, function()
+				t.eq(Config.Mobs.Spawning, false, "the void spawns no mobs")
+			end))
+		end)
+		keepingConfig(function()
+			WorldInfo._reset()
+			Config.Mobs.Spawning = true
+			t.ok(WorldInfo.create(WorldSettings.fromConfig(7), function() end))
+			t.eq(Config.Mobs.Spawning, true, "the Default keeps natural spawning")
+		end)
+		keepingConfig(function()
+			-- With the menu off: Config.World's type, its options and the type's game mode.
+			Config.World.Type = "debugBlocks"
+			Config.World.Options = {}
+			local debug = WorldSettings.fromConfig(7)
+			t.eq(debug.worldType, "debugBlocks")
+			t.eq(debug.gameMode, GameMode.SPECTATOR)
+			Config.World.Type = "superflat"
+			Config.World.Options = { preset = "Bedrock,3*Stone;Desert", decoration = true, junk = 1 }
+			local flat = WorldSettings.fromConfig(7)
+			t.eq(flat.options.preset, "Bedrock,3*Stone;Desert")
+			t.eq(flat.options.decoration, true)
+			t.eq(flat.options.junk, nil, "undeclared options dropped")
+			t.eq(flat.gameMode, GameMode.default(), "no hint: Config's")
 		end)
 	end)
 end

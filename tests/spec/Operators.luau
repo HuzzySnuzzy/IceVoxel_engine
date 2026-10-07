@@ -2,11 +2,12 @@
 	Server operators (Players/OperatorList, the rules Players/Operators plays out): the first player
 	becomes the operator, one of the players here always is one, rejoining keeps it, permanent
 	operators (Config.Gameplay.Admins, the owner, Studio), Allow Commands, and /op and /deop with
-	Minecraft's answers.
+	Minecraft's answers; which commands the chat offers a player (Shared/WorldSettings.mayRun).
 ]]
 
-return function(t, _shared, require, server)
+return function(t, shared, require, server)
 	local OperatorList = require(server.Players.OperatorList)
+	local WorldSettings = require(shared.WorldSettings)
 
 	local function member(id: number, name: string)
 		return { key = id, name = name, displayName = name }
@@ -160,5 +161,29 @@ return function(t, _shared, require, server)
 		local refused = OperatorList.run(alone, "/deop @s", 1) :: any
 		t.eq(refused.feedback[1], "Nothing changed. Steve is the only operator here: /op another player first")
 		t.ok(OperatorList.isOperator(alone, 1))
+	end)
+
+	t.test("operators: the chat offers each player only the commands they may run", function()
+		local function access(operator: boolean, allowCommands: boolean, gameMode: boolean): WorldSettings.Access
+			return { operator = operator, allowCommands = allowCommands, gameMode = gameMode }
+		end
+		local op = access(true, false, true)
+		local player = access(false, false, false)
+		local cheats = access(false, true, false)
+		local switcher = access(false, false, true)
+		-- /op and /deop: operators only, Allow Commands or not (Minecraft's level 3).
+		t.ok(WorldSettings.mayRun(WorldSettings.COMMAND_OPERATOR, op))
+		t.ok(not WorldSettings.mayRun(WorldSettings.COMMAND_OPERATOR, cheats), "not with Allow Commands")
+		t.ok(not WorldSettings.mayRun(WorldSettings.COMMAND_OPERATOR, player))
+		-- /effect, /summon, /kill: Operators.permitted.
+		t.ok(WorldSettings.mayRun(WorldSettings.COMMAND_PERMITTED, op))
+		t.ok(WorldSettings.mayRun(WorldSettings.COMMAND_PERMITTED, cheats), "Allow Commands")
+		t.ok(not WorldSettings.mayRun(WorldSettings.COMMAND_PERMITTED, player))
+		-- /gamemode: the player's own game mode permission.
+		t.ok(WorldSettings.mayRun(WorldSettings.COMMAND_GAMEMODE, switcher))
+		t.ok(not WorldSettings.mayRun(WorldSettings.COMMAND_GAMEMODE, player))
+		-- No mark (queries anyone may make: /time, /gamerule, /knowledge; Roblox's own): everyone.
+		t.ok(WorldSettings.mayRun(nil, player))
+		t.ok(WorldSettings.mayRun("something new", player), "an unknown mark hides nothing")
 	end)
 end

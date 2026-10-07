@@ -61,6 +61,7 @@ local TextChatService = game:GetService("TextChatService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local WorldSettings = require(Shared.WorldSettings)
 local Combat = require(Shared.Entities.Combat)
 local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
@@ -487,6 +488,8 @@ local function startCommands(net: Net)
 		local instance = Instance.new("TextChatCommand")
 		instance.Name = name
 		instance.PrimaryAlias = alias
+		-- (The operators' permission: the chat suggests them to those who have it.)
+		instance:SetAttribute(WorldSettings.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)
 		instance.Triggered:Connect(function(source: TextSource, text: string)
 			local player = Players:GetPlayerByUserId(source.UserId)
 			if player then

@@ -18,16 +18,18 @@
 	  Settings   a world type's `settings` declares its options for the Create World screen, in
 	             order: { key (the Options key), name, kind ("toggle" | "choice" | "text"),
 	             default, choices + labels (a choice's values and what the menu shows for each),
-	             presets ({ name, value }: ready-made texts a menu may offer, Minecraft's flat
-	             presets), description }. A menu renders the list generically; anything it leaves
-	             out takes its default in `create`.
+	             maxLength, presets ({ name, value }: ready-made texts a menu may offer, Minecraft's
+	             flat presets), check (what is wrong with a text), description }. A menu renders
+	             the list generically (client Ui/CreateWorldForm; "structures" is its own Generate
+	             Structures toggle); anything it leaves out takes its default in `create`.
 	  Hints      what a world type asks of the rest of the game: `mobs = false` (no natural mob
 	             spawning: Mobs/Mobs), `ticks = false` (no block updates and no random ticks,
 	             Minecraft's debug world: the server script builds its BlockTicker without
 	             behaviours), `gameMode` (the game mode the type suggests: the Create World screen
-	             preselects it), `debug` (a debug world: the menu may set it apart, as Minecraft
-	             shows Debug Mode only with Alt held). `published` gives the type the attributes
-	             name, for those parts of the server.
+	             preselects it, and a server without the menu gives it), `debug` (a debug world:
+	             listed last). The server applies the hints when the world starts (World/WorldInfo
+	             .apply, the boot's startWorld); `published` reads the type back from the
+	             attributes once the world exists.
 	  Replicated the server sets three attributes on ReplicatedStorage.IceVoxel, in this order:
 	             "WorldType" (the id), "WorldOptions" (the encoded options), then "Seed" (a number).
 	             Clients and chunk workers wait for "Seed" (it comes last, once the world exists:

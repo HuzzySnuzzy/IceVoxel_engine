@@ -514,7 +514,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				setTitle("IceVoxelSprint", if sprintOn then "Sprinting" else "Sprint")
 			end
 		else
-			sprintHeld = held
+			-- (Not while typing: Shift and Ctrl in the chat are text.)
+			sprintHeld = held and not Keybinds.typing()
 		end
 	end
 	local function onSneak(held: boolean, touch: boolean)
@@ -526,7 +527,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				setTitle("IceVoxelSneak", if sneakOn then "Sneaking" else "Sneak")
 			end
 		else
-			sneakHeld = held
+			sneakHeld = held and not Keybinds.typing()
 		end
 	end
 	local function bindSprint()

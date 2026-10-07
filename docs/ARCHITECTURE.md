@@ -2067,10 +2067,19 @@ player text through its own remotes. No server code and no Protocol message were
   first word, else players' names and display names (any case, all for an empty word); the first
   Tab uses the highlighted suggestion, further ones move on (SuggestionsList.tabCycles); while a
   command's name is typed its suggestions show by themselves (Command Suggestions), 10 rows at a
-  time, and Up / Down move the highlight instead of the history.
-- **Glue** (`Ui/Chat/init`). `KEYS` (T and "/") open the box when no screen, switcher, menu or
-  other text box is open; the focus is captured a frame later so the key is not typed (and taken
-  back if it was). While open: `Hud.setInputTaken` (no hotbar keys or wheel, the wheel scrolls the
+  time, and Up / Down move the highlight instead of the history. Tab and the suggestions offer only
+  the commands the player may use, as Minecraft's client knows only those of its permission
+  level: the server marks each of its commands with `WorldSettings.COMMAND_ATTRIBUTE` ("operator":
+  /op, /deop; "commands": /effect, /summon, /kill, the operators' permission; "gamemode":
+  /gamemode, the player's own mode permission; none: /time, /gamerule and /knowledge, whose
+  queries anyone may make) and `WorldSettings.mayRun` reads it with the player's attributes
+  (`IceVoxelOperator`, the world's `AllowCommands`, `IceVoxelGameModePermission`). Sending still
+  knows every command: the server answers one the player may not use.
+- **Glue** (`Ui/Chat/init`). The key bindings "chat" and "command" (`Settings/Keybinds`, T and "/"
+  by default; a mouse button bound to them counts off the GUI) open the box when no screen
+  (the Key Binds screen waiting for a key among them), switcher, menu or other text box is open;
+  the focus is captured a frame later so the key is not typed (and taken back if it was: the
+  character `GetStringForKeyCode` gives for the key). While open: `Hud.setInputTaken` (no hotbar keys or wheel, the wheel scrolls the
   chat), the mouse is freed after the camera every frame (computers), a full-screen button catches
   clicks beside the box (they never reach the world) and the box takes the focus back, as
   Minecraft's chat screen is modal; on touch a tap elsewhere closes it, and box and lines rise
@@ -2090,7 +2099,7 @@ player text through its own remotes. No server code and no Protocol message were
   and they become white lines (the debug ones with their bold yellow prefix) shown at once,
   instead of RBXSystem system messages. `Notices.listen` (the structure screen's status line)
   is unchanged.
-- **Settings** (`PlayerSettings` ids 37-46, page "chat", effect "chat"): chatVisibility,
+- **Settings** (`PlayerSettings` ids 46-55, page "chat", effect "chat"): chatVisibility,
   chatOpacity (10-100), chatBackground, chatScale, chatLineSpacing, chatDelay (half seconds:
   tenths are not exact in f32), chatWidth (40-320), chatHeightFocused / chatHeightUnfocused
   (20-180), commandSuggestions; `ChatLog.metrics` turns them into what the chat draws with.
@@ -4911,8 +4920,9 @@ off first of all). Everything else is the boot script's `startWorld(settings)`, 
 at once with the menu off (`WorldSettings.fromConfig`: `Config.World` and `Config.Seed`). Before it
 runs, `WorldInfo.apply` puts the settings into the server's Config (new players' game mode
 `Gameplay.DefaultGameMode`, the difficulty `Server.Fire.Difficulty`, and Peaceful's
-`Mobs.HostileCap` / `MaxHostile` 0: no monsters spawn; /summon still makes them), and `startWorld`
-hands Allow Commands to Operators. `startWorld` publishes last (`WorldSettings.publish`:
+`Mobs.HostileCap` / `MaxHostile` 0: no monsters spawn; /summon still makes them; a world type with
+`mobs = false`: `Mobs.Spawning` off), and `startWorld` hands Allow Commands to Operators and builds
+the block ticker without behaviours for a type with `ticks = false` (the debug worlds). `startWorld` publishes last (`WorldSettings.publish`:
 "WorldName", "Difficulty", "AllowCommands", then WorldTypes' "WorldType", "WorldOptions" and
 "Seed"), so every part is up before a client starts loading. A `startWorld` that throws leaves the
 state "failed" for good (half the parts may have started: the server needs a restart).
@@ -4931,7 +4941,8 @@ operators Minecraft's admin line ("[Alex: Made Steve a server operator]"). `Oper
 (player)` is the check every operators' command asks (`/time`, `/gamerule`, `/gamemode` for others
 and the switcher's permission, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure
 blocks): an operator, or anyone once the world allows commands. `isOperator` is the real thing
-(`/op`, `/deop`, Create World). The Player attribute `IceVoxelOperator`
+(`/op`, `/deop`, Create World). Each command's `TextChatCommand` carries who may use it
+(`WorldSettings.COMMAND_ATTRIBUTE`), so the chat offers a player only theirs (see Chat). The Player attribute `IceVoxelOperator`
 (`WorldSettings.OPERATOR_ATTRIBUTE`) tells clients; `Operators.changed` fires for each player whose
 status or permission changed.
 
@@ -4942,7 +4953,10 @@ handlers, so the menu needs no input blocking and the world costs nothing while 
 the world behind the menu would make Join instant, but every module's keys would then need a
 guard, and a player waiting for the operator has no world to load anyway; entering is a normal
 join, the movement waiting for the ground.) The Options menu is `SettingsScreen.showIn(host,
-onDone)`: the same panel, hosted by the title screen before Ui/Screens exists. The server's
+onDone)`: the same panel, hosted by the title screen before Ui/Screens exists, every page with it
+(Controls with Mouse Settings and Key Binds, Chat Settings, Video's Caves, Accessibility). Hosted
+there it takes the mouse wheel itself (the Key Binds list), and Escape / B go back a page
+(`SettingsScreen.back`, nothing while Key Binds waits for a key) before leaving to the title. The server's
 `MenuState` (waiting, creating, ready, failed; the operator's and the world's names) and the
 operator attribute decide what is enabled: Join World once ready, Create World for an operator
 while waiting, Load World never yet (saves are for later), Options always. The background is a
@@ -4964,7 +4978,15 @@ digits) is itself while |n| < 2^53, any other text is Java's `String.hashCode` o
 (Minecraft's `WorldOptions.parseSeed`). A world type's options are only those it declares in its
 optional `settings` (WorldTypes.Setting: toggle, choice or text; text is a code alphabet, never
 free text, so it needs no filter), each of its kind or its default, plus `structures` (Generate
-Structures).
+Structures). The form (`Ui/CreateWorldForm`) offers every registered type the menu may show (the
+debug worlds last, in the registry's order); Customize draws the type's settings but
+`structures`, which is the World tab's toggle (greyed for a type that doesn't declare it), a
+text setting with its `presets` on a button and its `check` (superflat: `Superflat.parse`) in red
+under the box, and Create New World refuses a text that fails it. A type's `gameMode` hint is
+preselected when the type is picked (and is a mode the screen and `validate` accept for it:
+Spectator for All Blocks), and the mode before the hint comes back on a type without one unless
+the player chose a mode meanwhile. With the menu off, `fromConfig` takes `Config.World.Options`
+(kept as a request's) and the type's game mode hint over `Gameplay.DefaultGameMode`.
 
 **Characters.** With the menu nobody has a character before entering the world (Roblox's
 auto-loading is off; one that slipped in before the boot turned it off is removed). `EnterWorld`
