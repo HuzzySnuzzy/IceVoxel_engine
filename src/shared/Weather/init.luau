@@ -197,13 +197,13 @@ end
 -- when given (the client's visuals ask every frame).
 function Weather.momentAt(state: State, now: number, into: Moment?): Moment
 	local weight, rampIn = weights(state, now)
-	local moment = into
+	local moment: Moment = into
 		or {
 			time = 0,
 			enabled = false,
-			override = Weather.NONE,
+			override = Weather.NONE :: Kind,
 			weight = 0,
-			previous = Weather.NONE,
+			previous = Weather.NONE :: Kind,
 			previousWeight = 0,
 		}
 	moment.time = Weather.clock(state, now)

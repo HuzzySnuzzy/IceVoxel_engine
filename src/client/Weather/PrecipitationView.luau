@@ -28,8 +28,9 @@
 	            tries columns with, as Minecraft's does).
 
 	Cost: on a cell change ~300 strips are checked (Fancy), with property writes only where a
-	strip changed; the roofs' scans run once per column until an edit. Nothing is allocated per
-	frame but the scan queue's entries.
+	strip changed; the roofs' scans run once per column until an edit, and only while something
+	falls at the camera (in clear weather the strips are hidden and nothing is looked up).
+	Nothing is allocated per frame but the scan queue's entries.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -208,7 +209,8 @@ end
 local function layout(intensity: number)
 	local part = anchor :: Part
 	local radius = Config.Weather.Precipitation.Radius[mode] or 0
-	local count = #columns
+	-- (Nothing falls here: no strip, and no roof is looked up.)
+	local count = if Precipitation.level(intensity, 1) == 0 then 0 else #columns
 	for i = 1, #strips do
 		local strip = strips[i]
 		if i > count then
@@ -238,8 +240,10 @@ local function layout(intensity: number)
 			local jitter = Hash.hash2(7, x, z)
 			local ox = 0.2 + (jitter % 1024) / 1024 * 0.6
 			local oz = 0.2 + (jitter // 1024 % 1024) / 1024 * 0.6
-			strip.top.Position = Vector3.new((column.dx + ox) * BLOCK, ((high :: number) - cellY) * BLOCK, (column.dz + oz) * BLOCK)
-			strip.bottom.Position = Vector3.new((column.dx + ox) * BLOCK, (low - cellY) * BLOCK, (column.dz + oz) * BLOCK)
+			strip.top.Position =
+				Vector3.new((column.dx + ox) * BLOCK, ((high :: number) - cellY) * BLOCK, (column.dz + oz) * BLOCK)
+			strip.bottom.Position =
+				Vector3.new((column.dx + ox) * BLOCK, (low - cellY) * BLOCK, (column.dz + oz) * BLOCK)
 			strip.low, strip.high, strip.x, strip.z = low, high :: number, x, z
 		end
 		if strip.level ~= level then

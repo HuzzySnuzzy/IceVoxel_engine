@@ -40,6 +40,8 @@ local ZOOMS = Config.Map.ZoomLevels
 -- Image pixels across the map at most (the layer must be at least this + one tile wide).
 local MAX_PIXELS = 768
 local MIN_PIXELS = 256
+-- The weather mode's wind arrow, by where the wind blows (north first, clockwise).
+local WIND_ARROWS = { "↑", "↗", "→", "↘", "↓", "↙", "←", "↖" }
 local ZOOM_ACTION = "IceVoxelMapZoom"
 
 export type WorldMap = {
@@ -117,13 +119,13 @@ function WorldMap.new(
 	for _, label in view.labels do
 		label.ZIndex = 22
 	end
-	-- The weather over the terrain (made after its pieces: drawn over them), under the markers.
-	local weather = WeatherLayer.new(view, Config.Weather.Map.WorldCells, 22)
+	-- The weather over the terrain, under the markers.
+	local weather = WeatherLayer.new(view, Config.Weather.Map.WorldCells, 23)
 
 	local markers = Instance.new("Frame")
 	markers.Size = UDim2.fromScale(1, 1)
 	markers.BackgroundTransparency = 1
-	markers.ZIndex = 23
+	markers.ZIndex = 24
 	markers.Parent = panel
 
 	local player = Instance.new("TextLabel")
@@ -175,66 +177,90 @@ function WorldMap.new(
 	end
 	cloud.Activated:Connect(WeatherLayer.toggle)
 
-	-- The weather mode's bar along the bottom of the map: the forecast steps, the wind and the
-	-- legend (over the input catcher, so its buttons get the clicks).
+	-- The weather mode's bar along the bottom of the map, two rows sized by the map's width (so it
+	-- fits a phone's): the forecast steps, then the wind and the legend (over the input catcher, so
+	-- its buttons get the clicks).
 	local weatherBar = Instance.new("Frame")
 	weatherBar.Name = "WeatherBar"
 	weatherBar.AnchorPoint = Vector2.new(0, 1)
 	weatherBar.Position = UDim2.new(0, 6, 1, -6)
-	weatherBar.Size = UDim2.new(1, -12, 0, 28)
+	weatherBar.Size = UDim2.new(1, -12, 0, 52)
 	weatherBar.BackgroundColor3 = Color3.fromRGB(24, 28, 34)
 	weatherBar.BackgroundTransparency = 0.25
 	weatherBar.BorderSizePixel = 0
 	weatherBar.ZIndex = 31
 	weatherBar.Visible = false
 	weatherBar.Parent = panel
-	local barLayout = Instance.new("UIListLayout")
-	barLayout.FillDirection = Enum.FillDirection.Horizontal
-	barLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	barLayout.Padding = UDim.new(0, 4)
-	barLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	barLayout.Parent = weatherBar
+	local function row(top: number): Frame
+		local frame = Instance.new("Frame")
+		frame.BackgroundTransparency = 1
+		frame.Position = UDim2.fromOffset(2, top)
+		frame.Size = UDim2.new(1, -4, 0, 22)
+		frame.ZIndex = 32
+		frame.Parent = weatherBar
+		local layout = Instance.new("UIListLayout")
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.Padding = UDim.new(0, 4)
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Parent = frame
+		return frame
+	end
+	local function fit(text: GuiObject, most: number)
+		(text :: any).TextScaled = true
+		local limit = Instance.new("UITextSizeConstraint")
+		limit.MaxTextSize = most
+		limit.Parent = text
+	end
+	local stepsRow = row(3)
+	local infoRow = row(27)
 	local stepButtons: { TextButton } = {}
+	local steps = #WeatherMap.LABELS
 	for index, text in WeatherMap.LABELS do
 		local stepButton = Instance.new("TextButton")
 		stepButton.LayoutOrder = index
-		stepButton.Size = UDim2.fromOffset(56, 22)
+		stepButton.Size = UDim2.new(1 / steps, -4, 1, 0)
 		stepButton.BackgroundColor3 = Color3.fromRGB(44, 48, 58)
 		stepButton.BorderSizePixel = 0
 		stepButton.Font = Enum.Font.GothamBold
-		stepButton.TextSize = 12
 		stepButton.TextColor3 = Color3.new(1, 1, 1)
 		stepButton.Text = text
-		stepButton.ZIndex = 32
+		stepButton.ZIndex = 33
+		fit(stepButton, 12)
 		stepButton.Activated:Connect(function()
 			WeatherLayer.setStep(index)
 		end)
-		stepButton.Parent = weatherBar
+		stepButton.Parent = stepsRow
 		stepButtons[index] = stepButton
 	end
 	local windLabel = Instance.new("TextLabel")
-	windLabel.LayoutOrder = #WeatherMap.LABELS + 1
-	windLabel.Size = UDim2.fromOffset(130, 22)
+	windLabel.LayoutOrder = 0
+	windLabel.Size = UDim2.new(0.32, -4, 1, 0)
 	windLabel.BackgroundTransparency = 1
 	windLabel.Font = Enum.Font.Code
-	windLabel.TextSize = 13
 	windLabel.TextColor3 = Color3.fromRGB(180, 220, 255)
-	windLabel.ZIndex = 32
-	windLabel.Parent = weatherBar
+	windLabel.TextXAlignment = Enum.TextXAlignment.Left
+	windLabel.ZIndex = 33
+	fit(windLabel, 13)
+	windLabel.Parent = infoRow
 	for index, entry in WeatherMap.LEGEND do
 		local swatch = Instance.new("TextLabel")
-		swatch.LayoutOrder = #WeatherMap.LABELS + 1 + index
-		swatch.Size = UDim2.fromOffset(62, 22)
+		swatch.LayoutOrder = index
+		swatch.Size = UDim2.new(0.68 / #WeatherMap.LEGEND, -4, 1, 0)
 		swatch.BackgroundTransparency = 1
 		swatch.Font = Enum.Font.Gotham
-		swatch.TextSize = 12
-		swatch.TextColor3 = Color3.fromRGB(entry[2][1], entry[2][2], entry[2][3])
+		swatch.TextColor3 = Color3.fromRGB(entry.colour[1], entry.colour[2], entry.colour[3])
 		swatch.TextStrokeTransparency = 0.4
-		swatch.Text = `■ {entry[1]}`
-		swatch.ZIndex = 32
-		swatch.Parent = weatherBar
+		swatch.Text = `■ {entry.name}`
+		swatch.ZIndex = 33
+		fit(swatch, 12)
+		swatch.Parent = infoRow
 	end
 	local captionAt = -math.huge
+	-- (A new step or the mode switched: the caption and the buttons follow at once.)
+	WeatherLayer.changed:Connect(function()
+		captionAt = -math.huge
+	end)
 
 	local waypointMarkers: { Frame } = {}
 
@@ -444,8 +470,7 @@ function WorldMap.new(
 		if weatherOn and os.clock() - captionAt >= 0.5 then
 			captionAt = os.clock()
 			local _, windText, angle = WeatherLayer.caption()
-			local arrows = { "↑", "↗", "→", "↘", "↓", "↙", "←", "↖" }
-			windLabel.Text = `{arrows[math.floor(angle / 45 + 0.5) % 8 + 1]} wind {windText}`
+			windLabel.Text = `{WIND_ARROWS[math.floor(angle / 45 + 0.5) % 8 + 1]} wind {windText}`
 			for index, stepButton in stepButtons do
 				stepButton.BackgroundColor3 = if index == WeatherLayer.step()
 					then Color3.fromRGB(60, 96, 160)

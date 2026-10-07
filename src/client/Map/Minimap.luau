@@ -200,6 +200,10 @@ function Minimap.new(
 	windArrow.Visible = false
 	windArrow.Parent = holder
 	local captionAt = -math.huge
+	-- (A new step or the mode switched: the caption and the buttons follow at once.)
+	WeatherLayer.changed:Connect(function()
+		captionAt = -math.huge
+	end)
 
 	local waypointDots: { Frame } = {}
 	local playerDots: { [Player]: Frame } = {}

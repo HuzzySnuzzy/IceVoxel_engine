@@ -39,6 +39,8 @@ local BLOCK = Config.BlockSize
 local MAX_BOLTS = 3
 -- How far from the listener the thunder plays (blocks), towards the strike.
 local THUNDER_OFFSET = 8
+-- The struck point's light while the sky flashes (PointLight brightness).
+local FLASH_LIGHT = 6
 
 type Bolt = {
 	x: number,
@@ -175,9 +177,7 @@ local function strike(message: Protocol.LightningBolt)
 			return
 		end
 		local direction = Vector3.new(x, y, z) - hear
-		local offset = if direction.Magnitude > THUNDER_OFFSET
-			then direction.Unit * THUNDER_OFFSET
-			else direction
+		local offset = if direction.Magnitude > THUNDER_OFFSET then direction.Unit * THUNDER_OFFSET else direction
 		local at = hear + offset
 		SoundPlayer.play("entity.lightning_bolt.thunder", at.X, at.Y, at.Z, volume)
 	end)
@@ -198,7 +198,10 @@ local function step()
 		if bolt.drawn ~= phase.seed then
 			draw(bolt, phase.seed)
 		end
-		bolt.light.Brightness = if flashing then 6 else 0
+		local brightness = if flashing then FLASH_LIGHT else 0
+		if bolt.light.Brightness ~= brightness then
+			bolt.light.Brightness = brightness
+		end
 		if flashing then
 			flash = math.max(flash, bolt.falloff)
 		end

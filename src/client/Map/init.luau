@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Map feature: minimap, world map (M), waypoints.
+	Map feature: minimap, world map (M), waypoints, the weather mode (B: Map/WeatherLayer).
 
 	Both maps paint terrain from the generator in the worker actors (Map/MapPainter) into
 	EditableImages (Map/MapLayer). Without EditableImage access (see README) the maps still show
@@ -9,21 +9,29 @@
 	The Minimap setting (`setMinimapVisible`) hides the minimap; while hidden it neither draws nor
 	asks the workers for tiles (the world map still does while open). `setPaused` holds every
 	tile job (both maps) while the terrain needs the workers more, e.g. right after a teleport.
+
+	The Weather Map key binding (B by default, Settings/Keybinds) switches both maps' weather
+	mode, as their cloud buttons do (the way in on touch screens): rain, snow, thunder and
+	clouds over the terrain, the wind, and forecasts on the world map.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 
 local WorkerPool = require(script.Parent.Streaming.WorkerPool)
+local Keybinds = require(script.Parent.Settings.Keybinds)
+local Screens = require(script.Parent.Ui.Screens)
 local MapLayer = require(script.MapLayer)
 local Minimap = require(script.Minimap)
 local WorldMap = require(script.WorldMap)
 local Waypoints = require(script.Waypoints)
+local WeatherLayer = require(script.WeatherLayer)
 
 local TILE = Config.Map.TileSize
 
@@ -72,6 +80,13 @@ function Map.start(pool: WorkerPool.WorkerPool, generator: TerrainGenerator.Gene
 	local mini = Minimap.new(gui, miniLayer, waypoints, worldMap.toggle)
 	minimap = mini
 	mini.setVisible(minimapVisible)
+
+	UserInputService.InputBegan:Connect(function(input, processed)
+		-- (The Weather Map key binding; with the world map open too, which is not a screen.)
+		if not processed and Keybinds.matches("weatherMap", input) and not Screens.isOpen() then
+			WeatherLayer.toggle()
+		end
+	end)
 
 	RunService.Heartbeat:Connect(function()
 		if minimapVisible then

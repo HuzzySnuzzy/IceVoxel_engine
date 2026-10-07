@@ -1444,6 +1444,9 @@ wrapped piece) sharing the same image. The minimap uses a 256² image, the world
 (~3 MB together). Creating an EditableImage throws when the experience has not enabled the API and
 returns nil when the memory budget is used up; the maps then show markers only.
 
+The weather mode (see Weather) lays a small EditableImage of its own over each map (48² and 96²,
+~45 KB together), painted rarely and a band a frame.
+
 Tile jobs share the workers with terrain: they may use the pool's overflow slot, and wait while
 teleport mode lasts (the first load too: `Map.setPaused`). While the Minimap setting hides the
 minimap (`Map.setMinimapVisible`) it neither draws nor asks for tiles; on touch screens a small
@@ -1969,6 +1972,7 @@ Options screen; Config gives every default and the presets.
   | mouse                        | `MouseLook.setSensitivity` (`UserInputService.MouseDeltaSensitivity`) / `setInverted` |
   | keys                         | `Keybinds.refresh`: fires `Keybinds.changed` (the sprint and sneak actions bind their new keys); the bindings themselves are read live |
   | hud                          | `Map.setMinimapVisible`, `Waila.setEnabled` / `setMinimapShown`, `Style.setScaleOverride`, `AttackIndicator.setMode` |
+  | clouds, weather              | `WeatherClient.setClouds` / `setWeather` (Off, Fast, Fancy: the cloud rings and the rain and snow strips; see Weather) |
 | chat                         | `Chat.applySettings` (see Chat)                                     |
 
   Worker actors keep their own Config, so what a worker needs travels in its jobs (see Workers).
@@ -2193,7 +2197,7 @@ dark (tests/spec/SkyExposure checks real ones).
 Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
 Lighting is left alone, because Roblox lights both by the sun and moon itself.
 
-## Weather (`Weather/`, server `World/WeatherServer`, `World/WeatherRules`, `World/Lightning`)
+## Weather (`Weather/`, server `World/WeatherServer`, `World/WeatherRules`, `World/Lightning`, client `Weather/`, `Map/WeatherLayer`)
 
 Minecraft's weather is one switch for the whole world. Here it is a field over the world and
 time, so storms can be seen coming, walked out of, and forecast. It is pure and deterministic:
@@ -2306,8 +2310,96 @@ override's weights, which `at`, `grid` and `forecastAt` take.
   it before or after the weather starts, with the override already blended in, so a world loads
   as it was.
 
+**On the client** (`Weather/`, started by the client boot after `Rendering/LightingController`;
+the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `setWeather`):
+- *State* (`Weather/WeatherState`): reads the attributes with `Weather.readState` (again only
+  when one changes, then fires `changed`), works the frame's Moment out once into one table
+  (`Weather.momentAt(state, now, into)`, in a RenderStep before the other weather work), and
+  samples the weather over the camera's column: as it is (F3, the rain's form) and smoothed in
+  time (`DayCycle.approach`: the light over Sky.Smoothing, the rain drawn over
+  Precipitation.Smoothing), so a teleport out of a storm brightens the sky over a few seconds.
+  Column biomes and ground heights come from the generator, cached per column (16384).
+- *Rain and snow* (`Weather/Precipitation`, pure; `PrecipitationView`): Minecraft's
+  renderSnowAndRain. Every block column within the radius (Fast 5: 69 columns, Fancy 10: 305)
+  is one camera-facing Beam between two Attachments of one invisible part at the camera's cell.
+  A column draws from max(cameraY − r, floor) to max(cameraY + r, floor), where the floor is
+  the cell above the highest block that stops rain (`Weather.blocksRain`), so nothing falls under
+  a roof, in a cave, or in a column whose roof is above the camera. Its form is the column's
+  (rain or snow by biome and landing height; nothing in dry biomes), its alpha the intensity at
+  the camera × Minecraft's edge fade ((1 − d²/r²) × 0.5 + 0.5), in 16 steps with one
+  NumberSequence per form and step made once. Floors are scanned from the loaded chunk buffers
+  (`floorOf`, against a lookup table of the blocks that stop rain), at most ScansPerFrame columns
+  a frame, cached per column and kept right by `ClientWorld:onBlockChanged` (a new blocking block
+  above the floor raises it; the floor's block going away rescans) and `onChunkLoaded`. The
+  strips are laid out again only when the camera changes cell, a floor is learned or the alpha
+  step changes, writing only what differs; in clear weather nothing is looked up. The pure work
+  of a layout is 0.06 ms for 305 columns (Lune).
+- *The rain's sound*: Minecraft's tickRain, 20 times a second: 100 × level² random columns
+  within 10 blocks (level halved on Fast), the last whose rain lands within 10 blocks of the
+  camera's height is where `weather.rain` (or `weather.rain.above`, quieter and lower, when it
+  lands more than a block above the camera and the camera's column is roofed) plays, when
+  nextInt(3) < the ticks since the last one. Volume and pitch from `Weather.rainSound`.
+- *Light and fog* (`Weather/WeatherSky`, pure): `Rendering/LightingController` passes
+  `DayCycle.environment`'s values through `WeatherSky.apply` every update: what the sky gives
+  (OutdoorAmbient, the sun's Brightness and ColorShift_Top, the sky box's diffuse and specular
+  light) times Minecraft's dimming, the sun also by `Sky.CoverSun` of the cloud cover, the fog's
+  colour by `Weather.fogColour`, all scaled by the sky exposure, so caves never change. At 10 Hz
+  a ColorCorrectionEffect (`IceVoxelWeatherView`) greys, flattens and cools the picture
+  (`WeatherSky.grading`), and the view distance's fog comes nearer by `Weather.fogFactor`
+  (`ViewSettings.setWeatherFog`; a fluid's or Blindness's fog still wins).
+- *Clouds* (`Weather/CloudLod`, pure; `CloudView`): flat boxes at `Clouds.Altitude` (320: above
+  9 in 10 of the land on seed 12345, under the great ranges' peaks) in the air's frame
+  ((x, z) − D(t)), so they drift with the storms. Rings of detail as a clipmap: ring L has cells
+  of 16 × 2^L blocks, 24 across, centred on the camera snapped to two of its cells, the next
+  ring's window cut out on its cell edges; rings are added until one reaches the view distance (5
+  at 2048, 6 at 4096). A cell is cloudy where a smooth, about uniform pattern (Perlin noise
+  through a logistic, wavelength at least 3 cells, so far rings keep whole clouds) is below
+  CoverBase + (1 − CoverBase) × cover. Its look comes from the precipitation and thunder there in
+  a few steps: the grey of `Weather.cloudColour` in 6 shades, the base lowered and the box
+  thickened by rain, a tower of up to 160 blocks over thunder; from ring 1 out, heavy rain gets a
+  see-through grey shaft from the ground to the cloud deck. Equal neighbours merge greedily into
+  rectangles (at most a part's 2048 studs a side). A ring is planned again when its window moved,
+  every RefreshSeconds × 2^ring, or when the mode or view changed: one ring a frame at most
+  (0.2-0.7 ms in Lune), keyed boxes diffed against the live ones so unchanged parts stay; at most
+  PartsPerFrame (48) parts are placed or removed a frame, new ones first (no holes), released ones
+  pooled. Each ring is one Model moved with PivotTo to the displacement now (every 0.1 s near,
+  less often far). Parts on seed 12345 (two in-game days, at the spawn and 3 km out): Fancy 2048
+  202 on average, 387 at most (122 shafts); Fancy 4096 325 / 496; Fancy 1024 140 / 238; Fast
+  2048 88 / 122; Fast 512 (Low, phones) 38 / 48.
+- *Lightning* (`Weather/LightningBolt`, pure; `LightningView`): the `Lightning` message's seed
+  gives Minecraft's bolt (8 sections of 16 blocks zigzagging by up to 5 blocks, two branches
+  zigzagging by up to 15, widening upwards) and its life (LightningBolt.tick: 2 ticks, then up to
+  `flashes` more shapes after random pauses); the sky flashes while its life is at least 0 (a
+  ColorCorrectionEffect's brightness, less with distance and indoors) and a PointLight lights the
+  struck point. Each segment is a Neon core and a see-through glow (pooled parts; three bolts at
+  once at most). The crack plays where it struck; the thunder after `Weather.thunderDelay`, a few
+  blocks from the listener towards the strike, fainter with distance.
+- *F3*: the weather at the camera (kind, precipitation, thunder, cover), the wind and where it
+  blows, the weather clock and an override's share; the cloud parts and rings (and parts still to
+  place), the strips drawn and the bolts showing.
+
+**The maps' weather mode** (`Map/WeatherMap`, pure; `Map/WeatherLayer`): one switch for both maps
+(the Weather Map key binding, B, or their cloud buttons) and one forecast step (Now, +2, +5, +10,
++20 minutes, the world map's buttons; the minimap shows the step chosen). The field is
+deterministic, so a forecast is just `Weather.momentAt(state, now + seconds)`, the override as it
+will be then included. Each map has a small EditableImage (48 or 96 cells square) stretched over
+the grid it was painted for, between the terrain and the markers. Cells are powers of two of
+blocks, so the view and 4 cells of margin fit; the grid's corner sits on multiples of the margin,
+so the map pans that far before it is painted again. A cell's colour: clouds a grey veil, rain
+blue, snow white (by the cell's biome and ground height, up to 96 new columns looked up a frame,
+rain until known), thunder purple with yellow speckles where it is over half; clear cells are
+see-through. A picture is painted a band of rows a frame (`Map.CellsPerFrame`, 1536 cells:
+~1.2 ms; the world map's 96 × 96 picture is 6.5 ms in all, 6 frames) at the moment it started,
+into a buffer of its own, and kept per step, so switching steps back costs nothing; it is painted
+again after `Map.RefreshSeconds`, when the map panned past its margin or zoomed, and when the
+server's weather changed. Until a new picture is done the last one stays, placed on its own grid.
+The wind (speed and compass point) and its arrow show with the step.
+
 Not done: snow layers piling up and cauldrons filling (the game has no snow layer or cauldron
-blocks), charged creepers and skeleton horse traps.
+blocks), charged creepers and skeleton horse traps; rain splashes (Minecraft's rain particles on
+the ground) and the sky box's own greying (Roblox's sky can't be tinted by a property, so the
+picture is graded instead); real rain, snow and thunder textures and sounds (stand-ins, set in
+Config and SoundList).
 
 ## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 

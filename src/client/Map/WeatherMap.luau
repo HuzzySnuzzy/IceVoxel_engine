@@ -11,7 +11,8 @@
 	            of blocks, at least MIN_CELL, so the view and a margin fit `maxCells` cells
 	            across), its corner on multiples of the margin (`grid`), so the map pans that far
 	            before it is sampled again, drawn as a small image stretched over the map
-	            (smoothed).
+	            (smoothed). `paint` can paint a band of rows of a picture at a time (Map/
+	            WeatherLayer spreads a picture over frames).
 	  Colours   `colour`: clouds a light grey veil (CLOUD) by the cover; where it rains RAIN blue,
 	            where it snows SNOW white (by the cell's biome and ground height, Weather.formAt),
 	            stronger with the precipitation, nothing over dry biomes but the clouds;
@@ -61,11 +62,11 @@ WeatherMap.LIGHTNING = table.freeze({ 255, 222, 64 })
 
 -- The legend: name and colour.
 WeatherMap.LEGEND = table.freeze({
-	{ "Clouds", WeatherMap.CLOUD },
-	{ "Rain", WeatherMap.RAIN },
-	{ "Snow", WeatherMap.SNOW },
-	{ "Thunder", WeatherMap.THUNDER },
-})
+	{ name = "Clouds", colour = WeatherMap.CLOUD },
+	{ name = "Rain", colour = WeatherMap.RAIN },
+	{ name = "Snow", colour = WeatherMap.SNOW },
+	{ name = "Thunder", colour = WeatherMap.THUNDER },
+}) :: { { name: string, colour: { number } } }
 
 -- The smallest power-of-two cell (blocks, >= MIN_CELL) with `view` blocks and `margin` cells on
 -- each side (default 1) at most `maxCells` cells across.
@@ -97,8 +98,8 @@ local function strength(value: number, from: number): number
 	return math.clamp((value - from) / (1 - from), 0, 1)
 end
 
-local function mix(a: { number }, b: { number }, t: number): (number, number, number)
-	return a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t
+local function mix(r: number, g: number, b: number, to: { number }, t: number): (number, number, number)
+	return r + (to[1] - r) * t, g + (to[2] - g) * t, b + (to[3] - b) * t
 end
 
 --[[
@@ -106,26 +107,35 @@ end
 	where `form` falls (Weather.formAt: "rain", "snow" or "" for nothing); `speckle` (0..1, a
 	fixed random of the cell) places the lightning.
 ]]
-function WeatherMap.colour(p: number, t: number, c: number, form: string, speckle: number): (number, number, number, number)
+function WeatherMap.colour(
+	p: number,
+	t: number,
+	c: number,
+	form: string,
+	speckle: number
+): (number, number, number, number)
 	local cloud = strength(c, 0.05)
 	local r, g, b = WeatherMap.CLOUD[1], WeatherMap.CLOUD[2], WeatherMap.CLOUD[3]
 	local alpha = 0.32 * cloud
 	local falling = if form == Weather.NONE then 0 else strength(p, 0.04)
 	if falling > 0 then
 		local colour = if form == Weather.SNOW then WeatherMap.SNOW else WeatherMap.RAIN
-		r, g, b = mix(WeatherMap.CLOUD, colour, math.min(1, 0.35 + falling))
+		r, g, b = mix(r, g, b, colour, math.min(1, 0.35 + falling))
 		alpha = math.max(alpha, 0.3 + 0.5 * falling)
 	end
 	local storm = strength(t, 0.05)
 	if storm > 0 then
-		r, g, b = mix({ r, g, b }, WeatherMap.THUNDER, 0.4 + 0.5 * storm)
+		r, g, b = mix(r, g, b, WeatherMap.THUNDER, 0.4 + 0.5 * storm)
 		alpha = math.max(alpha, 0.45 + 0.4 * storm)
 		if t > 0.5 and speckle < (t - 0.5) * 0.6 then
 			r, g, b = WeatherMap.LIGHTNING[1], WeatherMap.LIGHTNING[2], WeatherMap.LIGHTNING[3]
 			alpha = 0.95
 		end
 	end
-	return math.floor(r + 0.5), math.floor(g + 0.5), math.floor(b + 0.5), math.floor(math.clamp(alpha, 0, 1) * 255 + 0.5)
+	return math.floor(r + 0.5),
+		math.floor(g + 0.5),
+		math.floor(b + 0.5),
+		math.floor(math.clamp(alpha, 0, 1) * 255 + 0.5)
 end
 
 -- The fixed speckle (0..1) of the cell at (x, z) (blocks, its corner) of size `cell`.
@@ -136,7 +146,8 @@ end
 --[[
 	Paints `samples` (Shared/Weather's grid: 3 bytes a cell) of a `cols` x `rows` grid from
 	(x0, z0), `cell` blocks a cell, into `into` (RGBA, 4 bytes a pixel, a pixel a cell, row by
-	row; reused when big enough). `formAt(x, z)` gives what falls at a cell's centre.
+	row, from pixel `at` on (default 0): a band of a bigger picture; reused when big enough).
+	`formAt(x, z)` gives what falls at a cell's centre.
 ]]
 function WeatherMap.paint(
 	samples: buffer,
@@ -146,9 +157,11 @@ function WeatherMap.paint(
 	cols: number,
 	rows: number,
 	formAt: (x: number, z: number) -> string,
-	into: buffer?
+	into: buffer?,
+	at: number?
 ): buffer
-	local size = cols * rows * 4
+	local first = at or 0
+	local size = (first + cols * rows) * 4
 	local out = if into and buffer.len(into) >= size then into else buffer.create(size)
 	for row = 0, rows - 1 do
 		local z = z0 + row * cell
@@ -160,10 +173,11 @@ function WeatherMap.paint(
 			local c = buffer.readu8(samples, i * 3 + 2) / 255
 			local form = if p > 0.04 then formAt(x + cell / 2, z + cell / 2) else Weather.NONE
 			local r, g, b, a = WeatherMap.colour(p, t, c, form, WeatherMap.speckle(x, z, cell))
-			buffer.writeu8(out, i * 4, r)
-			buffer.writeu8(out, i * 4 + 1, g)
-			buffer.writeu8(out, i * 4 + 2, b)
-			buffer.writeu8(out, i * 4 + 3, a)
+			local o = (first + i) * 4
+			buffer.writeu8(out, o, r)
+			buffer.writeu8(out, o + 1, g)
+			buffer.writeu8(out, o + 2, b)
+			buffer.writeu8(out, o + 3, a)
 		end
 	end
 	return out

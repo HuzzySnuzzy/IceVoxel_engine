@@ -228,6 +228,7 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 				isOn = function()
 					return false
 				end,
+				changed = fakeSignal(),
 			}
 		end
 		if n.path == "src/client/Settings/Keybinds" then

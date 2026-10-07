@@ -5,7 +5,8 @@
 	tiling the view once, the pattern's calibration, merging, diffs, looks, and the part counts and
 	planning cost on a real seed), lightning (LightningBolt: Minecraft's shape and timing), the
 	light (WeatherSky), the maps' weather mode (WeatherMap: colours, grids, the forecast cache and
-	forecasts as the field later, the wind), and the settings, key binding and sounds they add.
+	forecasts as the field later, the wind, a picture painted in bands as one and its cost), and
+	the settings, key binding and sounds they add (the sounds appended at the list's end).
 ]]
 
 return function(t, shared, require, _server, client)
@@ -16,6 +17,7 @@ return function(t, shared, require, _server, client)
 	local KeyBindings = require(shared.KeyBindings)
 	local PlayerSettings = require(shared.PlayerSettings)
 	local Sounds = require(shared.Sounds)
+	local SoundList = require(shared.Sounds.SoundList)
 	local Weather = require(shared.Weather)
 	local Precipitation = require(client.Weather.Precipitation)
 	local CloudLod = require(client.Weather.CloudLod)
@@ -389,103 +391,110 @@ return function(t, shared, require, _server, client)
 		return levels, os.clock() - started
 	end
 
-	t.test("weather visuals: cloud plans: boxes inside their rings, storms dark and shafted, diffs keep parts", function()
-		local fancy = settings(CloudLod.FANCY, 2048)
-		-- Find a stormy moment over the spawn (the model is deterministic).
-		local clock = -1
-		for c = 0, 8000000, 400 do
-			local p, th = field:at(0, 0, c)
-			if p > 0.8 and th > 0.3 then
-				clock = c
-				break
-			end
-		end
-		t.ok(clock >= 0, "a thunderstorm over the spawn")
-		local levels = planAll(fancy, 0, 0, clock)
-		local dx, dz = field:displacement(clock)
-		local shafts, dark = 0, 0
-		for index, boxes in levels do
-			local window = CloudLod.window(fancy, index - 1, -dx, -dz)
-			local keys = {}
-			for _, box in boxes do
-				t.ok(keys[box.key] == nil, "keys are unique")
-				keys[box.key] = true
-				t.ok(box.x0 >= window.u0 and box.x1 <= window.u0 + window.cols * window.size, "in its window")
-				t.eq((box.x1 - box.x0) % window.size, 0, "whole cells")
-				t.ok(box.x1 - box.x0 <= fancy.maxPart and box.z1 - box.z0 <= fancy.maxPart, "a part's size at most")
-				if box.shaft then
-					shafts += 1
-					t.ok(index - 1 >= fancy.shaftLevel, "shafts only in far rings")
-				else
-					t.ok(box.top > box.base, "a cloud has height")
-					if box.shade >= 3 then
-						dark += 1
-					end
+	t.test(
+		"weather visuals: cloud plans: boxes inside their rings, storms dark and shafted, diffs keep parts",
+		function()
+			local fancy = settings(CloudLod.FANCY, 2048)
+			-- Find a stormy moment over the spawn (the model is deterministic).
+			local clock = -1
+			for c = 0, 8000000, 400 do
+				local p, th = field:at(0, 0, c)
+				if p > 0.8 and th > 0.3 then
+					clock = c
+					break
 				end
 			end
-		end
-		t.ok(dark > 0, "the storm's clouds are dark")
-		t.ok(shafts > 0, "rain shows from afar as shafts")
-		-- The same plan again: nothing to add or remove; a moved camera: only what changed.
-		local live = {}
-		for _, box in levels[2] do
-			live[box.key] = true
-		end
-		local added, removed = CloudLod.diff(live, levels[2])
-		t.eq(#added, 0)
-		t.eq(#removed, 0)
-		local later = planAll(fancy, 0, 0, clock + 20 * 30)
-		added, removed = CloudLod.diff(live, later[2])
-		t.ok(#added < #later[2], `30 s later most boxes stay ({#added} new of {#later[2]})`)
-		t.ok(#removed <= #levels[2])
-	end)
-
-	t.test("weather visuals: cloud part counts and planning cost (seed 12345, view 2048 Fancy, phones 512 Fast)", function()
-		local cases = {
-			{ "Fancy 2048", settings(CloudLod.FANCY, 2048), 500 },
-			{ "Fancy 1024", settings(CloudLod.FANCY, 1024), 350 },
-			{ "Fast 2048", settings(CloudLod.FAST, 2048), 160 },
-			{ "Fast 512 (phones)", settings(CloudLod.FAST, 512), 80 },
-		}
-		for _, case in cases do
-			local name, s, budget = case[1], case[2], case[3]
-			local worst, total, samples, slowest, shaftsMost = 0, 0, 0, 0, 0
-			local perLevel = {}
-			-- Every 25 minutes of weather over 2 in-game days, at the spawn and 3 km out.
-			for c = 0, 2 * 24000 * 2, 30000 do
-				for _, place in { { 0, 0 }, { 3000, -2000 } } do
-					local levels, seconds = planAll(s, place[1], place[2], c)
-					local count, shafts = 0, 0
-					for index, boxes in levels do
-						count += #boxes
-						perLevel[index] = math.max(perLevel[index] or 0, #boxes)
-						for _, box in boxes do
-							if box.shaft then
-								shafts += 1
-							end
+			t.ok(clock >= 0, "a thunderstorm over the spawn")
+			local levels = planAll(fancy, 0, 0, clock)
+			local dx, dz = field:displacement(clock)
+			local shafts, dark = 0, 0
+			for index, boxes in levels do
+				local window = CloudLod.window(fancy, index - 1, -dx, -dz)
+				local keys = {}
+				for _, box in boxes do
+					t.ok(keys[box.key] == nil, "keys are unique")
+					keys[box.key] = true
+					t.ok(box.x0 >= window.u0 and box.x1 <= window.u0 + window.cols * window.size, "in its window")
+					t.eq((box.x1 - box.x0) % window.size, 0, "whole cells")
+					t.ok(box.x1 - box.x0 <= fancy.maxPart and box.z1 - box.z0 <= fancy.maxPart, "a part's size at most")
+					if box.shaft then
+						shafts += 1
+						t.ok(index - 1 >= fancy.shaftLevel, "shafts only in far rings")
+					else
+						t.ok(box.top > box.base, "a cloud has height")
+						if box.shade >= 3 then
+							dark += 1
 						end
 					end
-					worst = math.max(worst, count)
-					shaftsMost = math.max(shaftsMost, shafts)
-					total += count
-					samples += 1
-					slowest = math.max(slowest, seconds / #levels)
 				end
 			end
-			print(
-				string.format(
-					"  clouds %-18s parts mean %d, most %d (shafts at most %d; per ring at most %s), plan %.2f ms a ring at most",
-					name,
-					total // samples,
-					worst,
-					shaftsMost,
-					table.concat(perLevel, "/"),
-					slowest * 1000
-				)
-			)
-			t.ok(worst <= budget, `{name}: at most {budget} parts ({worst})`)
+			t.ok(dark > 0, "the storm's clouds are dark")
+			t.ok(shafts > 0, "rain shows from afar as shafts")
+			-- The same plan again: nothing to add or remove; a moved camera: only what changed.
+			local live = {}
+			for _, box in levels[2] do
+				live[box.key] = true
+			end
+			local added, removed = CloudLod.diff(live, levels[2])
+			t.eq(#added, 0)
+			t.eq(#removed, 0)
+			local later = planAll(fancy, 0, 0, clock + 20 * 30)
+			added, removed = CloudLod.diff(live, later[2])
+			t.ok(#added < #later[2], `30 s later most boxes stay ({#added} new of {#later[2]})`)
+			t.ok(#removed <= #levels[2])
 		end
-	end)
+	)
+
+	t.test(
+		"weather visuals: cloud part counts and planning cost (seed 12345, view 2048 Fancy, phones 512 Fast)",
+		function()
+			local cases = {
+				{ "Fancy 4096 (Ultra)", settings(CloudLod.FANCY, 4096), 600 },
+				{ "Fancy 2048", settings(CloudLod.FANCY, 2048), 500 },
+				{ "Fancy 1024", settings(CloudLod.FANCY, 1024), 350 },
+				{ "Fast 2048", settings(CloudLod.FAST, 2048), 160 },
+				{ "Fast 512 (phones)", settings(CloudLod.FAST, 512), 80 },
+			}
+			for _, case in cases do
+				local name, s, budget = case[1], case[2], case[3]
+				local worst, total, samples, slowest, shaftsMost = 0, 0, 0, 0, 0
+				local perLevel = {}
+				-- Every 25 minutes of weather over 2 in-game days, at the spawn and 3 km out.
+				for c = 0, 2 * 24000 * 2, 30000 do
+					for _, place in { { 0, 0 }, { 3000, -2000 } } do
+						local levels, seconds = planAll(s, place[1], place[2], c)
+						local count, shafts = 0, 0
+						for index, boxes in levels do
+							count += #boxes
+							perLevel[index] = math.max(perLevel[index] or 0, #boxes)
+							for _, box in boxes do
+								if box.shaft then
+									shafts += 1
+								end
+							end
+						end
+						worst = math.max(worst, count)
+						shaftsMost = math.max(shaftsMost, shafts)
+						total += count
+						samples += 1
+						slowest = math.max(slowest, seconds / #levels)
+					end
+				end
+				print(
+					string.format(
+						"  clouds %-18s parts mean %d, most %d (shafts at most %d; per ring at most %s), plan %.2f ms a ring at most",
+						name,
+						total // samples,
+						worst,
+						shaftsMost,
+						table.concat(perLevel, "/"),
+						slowest * 1000
+					)
+				)
+				t.ok(worst <= budget, `{name}: at most {budget} parts ({worst})`)
+			end
+		end
+	)
 
 	--[[ Lightning ]]
 
@@ -527,7 +536,8 @@ return function(t, shared, require, _server, client)
 				if segment.branch and segment.y1 == segment.y0 + LightningBolt.SECTION then
 					-- (The first section of each branch starts at a joint of the main bolt.)
 					local starts = joints[`{segment.x1}:{segment.y1}:{segment.z1}`]
-					if segment.y1 == (LightningBolt.SECTIONS - 1) * LightningBolt.SECTION
+					if
+						segment.y1 == (LightningBolt.SECTIONS - 1) * LightningBolt.SECTION
 						or segment.y1 == (LightningBolt.SECTIONS - 2) * LightningBolt.SECTION
 					then
 						local first = true
@@ -636,6 +646,61 @@ return function(t, shared, require, _server, client)
 		t.eq(buffer.readu8(pixels, 7), 0, "clear cell")
 	end)
 
+	t.test("weather visuals: a map picture painted in bands is the picture painted at once; its cost", function()
+		-- A thunderstorm over the spawn (the field above).
+		local clock = -1
+		for c = 0, 8000000, 400 do
+			local p, th = field:at(0, 0, c)
+			if p > 0.8 and th > 0.3 then
+				clock = c
+				break
+			end
+		end
+		t.ok(clock >= 0, "a thunderstorm over the spawn")
+		local function formAt(x: number, _z: number): string
+			return if x < 0 then Weather.SNOW else Weather.RAIN
+		end
+		for _, cells in { Config.Weather.Map.MiniCells, Config.Weather.Map.WorldCells } do
+			local cell = 64
+			local x0, z0 = -cells * cell / 2, -cells * cell / 2
+			local started = os.clock()
+			local samples = field:grid(clock, x0 + cell / 2, z0 + cell / 2, cell, cells, cells)
+			local whole = WeatherMap.paint(samples, x0, z0, cell, cells, cells, formAt)
+			local seconds = os.clock() - started
+			-- In bands of Map.CellsPerFrame cells, as Map/WeatherLayer paints it.
+			local banded = buffer.create(cells * cells * 4)
+			local rowsPerFrame = math.max(1, Config.Weather.Map.CellsPerFrame // cells)
+			local row, frames, slowest = 0, 0, 0
+			while row < cells do
+				local rows = math.min(rowsPerFrame, cells - row)
+				local frameStart = os.clock()
+				local band = field:grid(clock, x0 + cell / 2, z0 + (row + 0.5) * cell, cell, cells, rows)
+				WeatherMap.paint(band, x0, z0 + row * cell, cell, cells, rows, formAt, banded, row * cells)
+				slowest = math.max(slowest, os.clock() - frameStart)
+				row += rows
+				frames += 1
+			end
+			t.eq(buffer.tostring(banded), buffer.tostring(whole), `{cells} cells: the same picture`)
+			local painted = 0
+			for i = 0, cells * cells - 1 do
+				if buffer.readu8(whole, i * 4 + 3) > 0 then
+					painted += 1
+				end
+			end
+			t.ok(painted > 0, "a storm shows")
+			print(
+				string.format(
+					"  map %d x %d cells: %.2f ms at once, %d frames of at most %.2f ms",
+					cells,
+					cells,
+					seconds * 1000,
+					frames,
+					slowest * 1000
+				)
+			)
+		end
+	end)
+
 	t.test("weather visuals: map grids, the forecast cache, forecasts as the field later, the wind", function()
 		t.eq(WeatherMap.cellFor(384, 48), 16, "minimap at 2 blocks a pixel")
 		t.eq(WeatherMap.cellFor(100, 48), WeatherMap.MIN_CELL)
@@ -665,7 +730,16 @@ return function(t, shared, require, _server, client)
 		-- Cache: a step's picture is reused for its grid while fresh.
 		local cache = WeatherMap.newCache()
 		local key = WeatherMap.key(x0, z0, 16, count, count)
-		local entry = { key = key, time = 100, pixels = buffer.create(4), x0 = x0, z0 = z0, cell = 16, cols = count, rows = count }
+		local entry = {
+			key = key,
+			time = 100,
+			pixels = buffer.create(4),
+			x0 = x0,
+			z0 = z0,
+			cell = 16,
+			cols = count,
+			rows = count,
+		}
 		WeatherMap.put(cache, 3, entry)
 		t.eq(WeatherMap.fresh(cache, 3, key, 101, 3), entry)
 		t.eq(WeatherMap.fresh(cache, 3, key, 104, 3), nil, "stale")
@@ -755,6 +829,11 @@ return function(t, shared, require, _server, client)
 			t.eq((event :: any).side, "client", "each client by itself")
 			t.eq((event :: any).source, "ambient", "Minecraft's WEATHER source: the ambient volume")
 		end
+		-- Appended at the end of the list (ids of the sounds before them unchanged).
+		local list = SoundList.EVENTS
+		t.eq(list[#list - 3].name, "weather.rain", "the four come last")
+		t.eq(list[#list].name, "entity.lightning_bolt.impact")
+		t.eq(Sounds.count, #Blocks.SOUND_TYPES * #Sounds.ACTIONS + #list)
 		local volume, pitch = Weather.rainSound(1, false)
 		t.near(volume, 0.2, 1e-9, "weather.rain at 0.2")
 		t.eq(pitch, 1)

@@ -24,8 +24,9 @@
 
 	Measured on seed 12345 (tests/spec/WeatherVisuals, two in-game days at the spawn and 3 km out):
 	Fancy at the default view (2048 blocks, 5 rings) 202 parts on average, 387 at most (122 of
-	them rain shafts); Fancy at 1024: 140, 238 at most; Fast at 2048: 88, 122; Fast at the phones'
-	512: 38, 48. Planning a ring takes 0.2-0.5 ms (Lune, native code).
+	them rain shafts); Fancy at Ultra's 4096 (6 rings): 325, 496; Fancy at 1024: 140, 238; Fast at
+	2048: 88, 122; Fast at the phones' 512 (Low): 38, 48. Planning a ring takes 0.2-0.7 ms (Lune,
+	native code), one ring a frame at most; with PartsPerFrame that bounds a frame's work.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -33,7 +34,6 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local Weather = require(Shared.Weather)
 
 local CloudLod = require(script.Parent.CloudLod)
 local WeatherState = require(script.Parent.WeatherState)
@@ -64,7 +64,8 @@ local viewDistance: () -> number = function()
 	return Config.Lod.ViewDistance
 end
 local settings: CloudLod.Settings? = nil
-local settingsKey = ""
+-- The mode and view distance `settings` were made for.
+local settingsMode, settingsView = -1, -1
 local pattern: CloudLod.Pattern? = nil
 local folder: Folder? = nil
 local rings: { Ring } = {}
@@ -232,9 +233,8 @@ local function step()
 		return
 	end
 	local view = viewDistance()
-	local key = `{mode}:{view}`
-	if key ~= settingsKey then
-		settingsKey = key
+	if mode ~= settingsMode or view ~= settingsView then
+		settingsMode, settingsView = mode, view
 		settings = if mode == CloudLod.OFF then nil else CloudLod.settings(mode, view)
 		for _, ring in rings do
 			ring.planned = -math.huge

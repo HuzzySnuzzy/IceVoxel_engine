@@ -17,7 +17,12 @@
 	            Map.LookupsPerFrame new columns a frame, rain until a column is known) and kept
 	            per step (WeatherMap's cache): it is painted again when the map panned past the
 	            grid's margin, zoomed, after Map.RefreshSeconds, or when the server's weather
-	            changed (an override), at most every REPAINT seconds.
+	            changed (an override).
+	  Spread    a picture is painted a band of rows a frame (Map.CellsPerFrame cells: the world
+	            map's 96 x 96 costs ~7 ms in all, ~1 ms a frame), into a buffer of its own, at the
+	            moment it started; until it is done the map keeps the last picture (placed on its
+	            own grid, so it stays right while the map pans). A picture is always finished,
+	            then the next is started for wherever the map is then.
 	  Off       without EditableImage access nothing is drawn; the wind and the step still show.
 ]]
 
@@ -32,10 +37,23 @@ local MapView = require(script.Parent.MapView)
 local WeatherMap = require(script.Parent.WeatherMap)
 local WeatherState = require(script.Parent.Parent.Weather.WeatherState)
 
--- Seconds between two paintings of one layer at least (dragging the world map).
-local REPAINT = 0.15
 -- Cells to spare around the view: panning that far keeps the picture.
 local MARGIN = 4
+
+-- A picture being painted, a band of rows a frame.
+type Job = {
+	step: number,
+	key: string,
+	x0: number,
+	z0: number,
+	cell: number,
+	count: number,
+	moment: Weather.Moment,
+	-- Rows painted so far, and whether any cell's form was guessed.
+	row: number,
+	guessed: boolean,
+	pixels: buffer,
+}
 
 export type Layer = {
 	view: MapView.MapView,
@@ -43,11 +61,16 @@ export type Layer = {
 	image: EditableImage?,
 	label: ImageLabel,
 	cache: WeatherMap.Cache,
-	-- The picture in the image now, and when the last was painted.
+	-- The picture in the image now.
 	shown: WeatherMap.Entry?,
-	paintedAt: number,
+	job: Job?,
+	-- A buffer to paint the next picture into (the one a finished picture replaced).
+	spare: buffer?,
 	moment: Weather.Moment?,
-	samples: buffer?,
+	band: buffer?,
+	-- The grid last asked for and its key (made again only when the grid changes).
+	grid: { x0: number, z0: number, cell: number, count: number },
+	gridKey: string,
 	update: (self: Layer) -> (),
 }
 
@@ -108,7 +131,54 @@ end
 local Layer = {}
 Layer.__index = Layer
 
--- Paints step `index`'s picture for the view now (or reuses a fresh one); nil when it can't.
+-- Starts painting step `index`'s picture for grid (x0, z0, cell, count) named `key`.
+local function begin(self: Layer, index: number, key: string, x0: number, z0: number, cell: number, count: number): Job
+	local size = count * count * 4
+	local spare = self.spare
+	local pixels = if spare and buffer.len(spare) == size then spare else buffer.create(size)
+	self.spare = nil
+	local moment = WeatherState.momentIn(WeatherMap.STEPS[index], self.moment)
+	self.moment = moment
+	return {
+		step = index,
+		key = key,
+		x0 = x0,
+		z0 = z0,
+		cell = cell,
+		count = count,
+		moment = moment,
+		row = 0,
+		guessed = false,
+		pixels = pixels,
+	}
+end
+
+-- Paints the next band of `job`'s rows (Map.CellsPerFrame cells). Returns whether it is done.
+local function advance(self: Layer, job: Job, field: Weather.Field): boolean
+	local settings = Config.Weather.Map
+	local count, cell = job.count, job.cell
+	local rows = math.clamp(math.floor(settings.CellsPerFrame / count), 1, count - job.row)
+	local z0 = job.z0 + job.row * cell
+	local band = field:grid(job.moment, job.x0 + cell / 2, z0 + cell / 2, cell, count, rows, self.band)
+	self.band = band
+	local budget = settings.LookupsPerFrame
+	local function formAt(x: number, z: number): string
+		if WeatherState.knows(x, z) then
+			return WeatherState.formAt(x, nil, z)
+		elseif budget > 0 then
+			budget -= 1
+			return WeatherState.formAt(x, nil, z)
+		end
+		job.guessed = true
+		return Weather.RAIN
+	end
+	WeatherMap.paint(band, job.x0, z0, cell, count, rows, formAt, job.pixels, job.row * count)
+	job.row += rows
+	return job.row >= count
+end
+
+-- Step `step`'s picture for the view now when one is fresh, else the best there is while the next
+-- is painted (nil when there is none).
 local function picture(self: Layer, now: number): WeatherMap.Entry?
 	local field = WeatherState.field()
 	if field == nil then
@@ -120,47 +190,44 @@ local function picture(self: Layer, now: number): WeatherMap.Entry?
 	local centreZ = (view.v0 + view.pixels / 2) * view.layer.scale
 	local cell = WeatherMap.cellFor(blocks, self.maxCells, MARGIN)
 	local x0, z0, count = WeatherMap.grid(centreX, centreZ, blocks, cell, MARGIN)
-	local key = WeatherMap.key(x0, z0, cell, count, count)
+	local grid = self.grid
+	if grid.x0 ~= x0 or grid.z0 ~= z0 or grid.cell ~= cell or grid.count ~= count then
+		grid.x0, grid.z0, grid.cell, grid.count = x0, z0, cell, count
+		self.gridKey = WeatherMap.key(x0, z0, cell, count, count)
+	end
+	local key = self.gridKey
 	local settings = Config.Weather.Map
 	local fresh = WeatherMap.fresh(self.cache, step, key, now, settings.RefreshSeconds)
-	if fresh or now - self.paintedAt < REPAINT then
-		return fresh or self.shown
+	if fresh then
+		self.job = nil
+		return fresh
 	end
-	self.paintedAt = now
-	local moment = WeatherState.momentIn(WeatherMap.STEPS[step], self.moment)
-	self.moment = moment
-	local samples = field:grid(moment, x0 + cell / 2, z0 + cell / 2, cell, count, count, self.samples)
-	self.samples = samples
-	local budget = settings.LookupsPerFrame
-	local guessed = false
-	local function formAt(x: number, z: number): string
-		if WeatherState.knows(x, z) then
-			return WeatherState.formAt(x, nil, z)
-		elseif budget > 0 then
-			budget -= 1
-			return WeatherState.formAt(x, nil, z)
-		end
-		guessed = true
-		return Weather.RAIN
+	local job = self.job
+	if job == nil or job.step ~= step then
+		job = begin(self, step, key, x0, z0, cell, count)
+		self.job = job
 	end
-	-- (A buffer of its own a step, of the exact length WritePixelsBuffer wants.)
-	local size = count * count * 4
-	local old = self.cache.entries[step]
-	local pixels = if old and buffer.len(old.pixels) == size then old.pixels else buffer.create(size)
-	WeatherMap.paint(samples, x0, z0, cell, count, count, formAt, pixels)
+	local current = job :: Job
+	if not advance(self, current, field) then
+		return self.cache.entries[step] or self.shown
+	end
+	self.job = nil
 	local entry: WeatherMap.Entry = {
-		key = key,
+		key = current.key,
 		-- (Painted with guesses: again soon, with more columns known.)
-		time = if guessed then now - settings.RefreshSeconds + 0.3 else now,
-		pixels = pixels,
-		x0 = x0,
-		z0 = z0,
-		cell = cell,
-		cols = count,
-		rows = count,
+		time = if current.guessed then now - settings.RefreshSeconds + 0.3 else now,
+		pixels = current.pixels,
+		x0 = current.x0,
+		z0 = current.z0,
+		cell = current.cell,
+		cols = current.count,
+		rows = current.count,
 	}
-	WeatherMap.put(self.cache, step, entry)
-	self.shown = nil
+	local old = self.cache.entries[current.step]
+	if old and old ~= self.shown then
+		self.spare = old.pixels
+	end
+	WeatherMap.put(self.cache, current.step, entry)
 	return entry
 end
 
@@ -177,6 +244,20 @@ function Layer.update(self: Layer)
 		return
 	end
 	if self.shown ~= entry then
+		-- (The picture shown before can be painted over next: the image has its own copy.)
+		local before = self.shown
+		if before and self.spare == nil and buffer.len(before.pixels) == buffer.len(entry.pixels) then
+			local kept = self.cache.entries
+			local cached = false
+			for _, other in kept do
+				if other == before then
+					cached = true
+				end
+			end
+			if not cached then
+				self.spare = before.pixels
+			end
+		end
 		self.shown = entry
 		image:WritePixelsBuffer(Vector2.zero, Vector2.new(entry.cols, entry.rows), entry.pixels)
 		label.ImageRectOffset = Vector2.zero
@@ -214,18 +295,18 @@ function WeatherLayer.new(view: MapView.MapView, maxCells: number, zIndex: numbe
 		label = label,
 		cache = WeatherMap.newCache(),
 		shown = nil,
-		paintedAt = -math.huge,
+		job = nil,
+		spare = nil,
 		moment = nil,
-		samples = nil,
+		band = nil,
+		grid = { x0 = math.huge, z0 = math.huge, cell = 0, count = 0 },
+		gridKey = "",
 	}
 	local layer = (setmetatable(self, Layer) :: any) :: Layer
 	-- An override or doWeatherCycle changes what is coming: paint again.
 	WeatherState.changed:Connect(function()
 		WeatherMap.clear(layer.cache)
-		layer.paintedAt = -math.huge
-	end)
-	changedEvent.Event:Connect(function()
-		layer.paintedAt = -math.huge
+		layer.job = nil
 	end)
 	return layer
 end

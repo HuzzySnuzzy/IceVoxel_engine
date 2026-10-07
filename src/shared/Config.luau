@@ -587,12 +587,14 @@ local Config = {
 			LightRange = 60,
 		},
 		-- The maps' weather mode (Map/WeatherLayer): grid cells across at most (minimap, world map),
-		-- seconds before a picture is drawn again, biome lookups for snow per frame.
+		-- seconds before a picture is drawn again, biome lookups for snow per frame, cells painted
+		-- per frame (a picture is spread over frames: ~0.7 us a cell, so ~1 ms a frame).
 		Map = {
 			MiniCells = 48,
 			WorldCells = 96,
 			RefreshSeconds = 3,
 			LookupsPerFrame = 96,
+			CellsPerFrame = 1536,
 		},
 	},
 

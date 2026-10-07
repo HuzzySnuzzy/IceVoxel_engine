@@ -211,7 +211,14 @@ function CloudLod.fraction(settings: Settings, cover: number): number
 end
 
 -- Is the cell at air-frame (u, w) (its centre) cloudy at cover `cover`?
-function CloudLod.cloudy(pattern: Pattern, settings: Settings, u: number, w: number, size: number, cover: number): boolean
+function CloudLod.cloudy(
+	pattern: Pattern,
+	settings: Settings,
+	u: number,
+	w: number,
+	size: number,
+	cover: number
+): boolean
 	if cover <= 0 and settings.coverBase <= 0 then
 		return false
 	end
@@ -371,7 +378,8 @@ function CloudLod.plan(
 			local base, top = CloudLod.heights(settings, p, t)
 			local shade = CloudLod.shadeOf(p, t)
 			local baseStep = (base // step) % HEIGHT_BITS
-			cloudCodes[row * cols + col + 1] = shade + SHADE_BITS * (baseStep + HEIGHT_BITS * ((top // step) % HEIGHT_BITS))
+			cloudCodes[row * cols + col + 1] = shade
+				+ SHADE_BITS * (baseStep + HEIGHT_BITS * ((top // step) % HEIGHT_BITS))
 			if shafts and p >= settings.shaftMin then
 				local heavy = if p >= (1 + settings.shaftMin) / 2 then 2 else 1
 				shaftCodes[row * cols + col + 1] = heavy

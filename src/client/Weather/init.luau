@@ -74,12 +74,13 @@ function WeatherClient.setWeather(mode: number)
 	PrecipitationView.setMode(mode)
 end
 
--- F3's weather lines.
+-- F3's weather lines (see Weather/WeatherState.describe), and what draws it: cloud parts, rings and
+-- parts still to place or remove, rain and snow strips shown of the setting's, bolts showing.
 function WeatherClient.describe(): string
 	local parts, rings, waiting = CloudView.stats()
 	local shown, columns = PrecipitationView.stats()
 	return string.format(
-		"%s\n        clouds %d parts in %d rings (%d to do)  rain strips %d of %d  bolts %d",
+		"%s\n        clouds %d parts %d rings (%d to do)  strips %d/%d  bolts %d",
 		WeatherState.describe(),
 		parts,
 		rings,

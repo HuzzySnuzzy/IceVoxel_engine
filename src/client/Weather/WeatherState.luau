@@ -37,6 +37,9 @@ local DayCycle = require(Shared.DayCycle)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local Weather = require(Shared.Weather)
 
+-- (Pure: the wind's words, as the maps write them.)
+local WeatherMap = require(script.Parent.Parent.Map.WeatherMap)
+
 local BLOCK = Config.BlockSize
 -- Columns whose biome temperature and ground height are kept (the cache starts over beyond).
 local COLUMNS = 16384
@@ -203,24 +206,27 @@ local function update(dt: number)
 	WeatherState.kind = Weather.kindOf(p, form)
 end
 
--- The weather's line for F3: what falls, how much, the wind, the clock and any override.
+--[[
+	The weather's lines for F3: what falls at the camera ("clear", "rain", "snow"), the
+	precipitation, thunder and cloud cover there (0..1), the wind (blocks a second and where it
+	blows to), the weather clock (ticks) and a /weather override with its share now.
+]]
 function WeatherState.describe(): string
 	if not WeatherState.enabled() then
 		return "weather off"
 	end
 	local vx, vz = WeatherState.wind()
-	local speed = math.sqrt(vx * vx + vz * vz)
 	local moment = WeatherState.moment
-	local override = if moment.weight > 0 then string.format("  /weather %s %.0f%%", moment.override, moment.weight * 100) else ""
+	local override = if moment.weight > 0
+		then string.format("  /weather %s %.0f%%", moment.override, moment.weight * 100)
+		else ""
 	return string.format(
-		"weather %s  precipitation %.2f  thunder %.2f  cover %.2f\n        wind %.1f b/s (%.2f, %.2f)  clock %d%s",
+		"weather %s  precip %.2f  thunder %.2f  cover %.2f\n        wind %s  clock %d%s",
 		WeatherState.kind,
 		WeatherState.precipitation,
 		WeatherState.thunder,
 		WeatherState.cover,
-		speed,
-		vx,
-		vz,
+		WeatherMap.windText(vx, vz),
 		math.floor(moment.time),
 		override
 	)
