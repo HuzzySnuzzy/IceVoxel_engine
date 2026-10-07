@@ -2086,7 +2086,7 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
   clicks, and it has the keys like a Minecraft Screen: the player stands still
   (MovementController), the hotbar's and spectator menu's keys and the wheel do nothing
   (`Hud.setInputTaken`), and neither do BlockInteraction's buttons.
-- **HUD** (`Ui/Hud`). Hearts and armour show in `isSurvivalLike` modes (survival, adventure), the
+- **HUD** (`Ui/Hud`). Hearts, armour and the knowledge bar show in `isSurvivalLike` modes (survival, adventure), the
   held item's name higher above them; without `showsHud` (spectators) there is no hotbar, item
   name, hearts or armour, and the spectator menu takes the hotbar's place.
 - **The spectator menu** (`Ui/SpectatorGui`; its model `Ui/SpectatorMenu`, pure, tested):
@@ -3134,6 +3134,146 @@ and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 
 GroupTransparency for the last 10 s' blinking) below `MusicToast.bottom()`, the hovered or tapped
 one's name and time under them, and Minecraft's 120 × 32 list on the left while a screen is open;
 it is rebuilt only when a message comes. F3 lists every effect.
+
+## Knowledge, Ages and skills (`Progression/`, server `Players/Progression`, client `Player/ProgressionState`)
+
+Progression is three things, pure and shared (`Shared/Progression`, tested in
+`tests/spec/Progression`), played out by the server and drawn by the client:
+
+- **Knowledge** (`Progression/Knowledge`): this game's experience. Points and levels are
+  Minecraft's exactly (`needed(L)`: 2L + 7 below 15, 5L - 38 below 30, 9L - 158 above; `total`
+  is a table of level starts, `levelOf` a binary search over it, `progress` the bar's fill), so
+  level 5 is 55 points, 15 is 315, 25 is 910, 40 is 2920. It is never spent.
+- **Ages** (`Progression/Ages`): Stone, Iron, Industrial, Electric, Atomic. Each names the result
+  items it opens (`recipes`), the knowledge level it needs and two milestones (discoveries: a key
+  of a category, or a count of one), and its reward. Every result no Age names is the Stone Age's,
+  so what other parts add later starts open.
+- **Skills** (`Progression/Skills`): 18 nodes, 3-4 per Age, costing the Age's number in skill
+  points (one per level; 51 for the whole tree), each needing its Age, its prerequisites and the
+  points, each with one perk kind (or recipes it unlocks besides their Age).
+
+A player's `State` is `{ points, age, skills, found }` (`found`: category -> key -> true, the
+discoveries). A `Session` (per server visit, never saved) holds the repeats' fatigue, the
+budget's bucket and the fraction of a point not yet given.
+
+**Earning** (`Progression.award / discover / mined / crafted / smelted / visited / killed`):
+
+| Source | First time (once ever) | Again |
+| ------ | ---------------------- | ----- |
+| a block broken | 5 (`mine`) | ores: coal 1, iron and osmium 2, gold 3, diamond and emerald 5 (`ORES`, source "ore"); logs 0.25 (`LOG`) |
+| a crafting result taken | 8 (`craft`) | 0.1 a craft (`CRAFT`) |
+| a smelted result taken out | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
+| a biome stood in | 20 (`biome`) | - |
+| a mob killed (the mobs' side calls `killed`) | 10 (`mob`) | animals 1, monsters 5, others 3 (`MOBS`) |
+| an Age reached | its reward: 50, 100, 150, 200 (`age`) | - |
+
+Repeats go through `Knowledge.repeatPoints(session, key, base, now, budget)`: each repeat of
+the same key gives `FATIGUE_FACTOR` (0.75) of the one before, one repeat of fatigue wearing off
+every `FATIGUE_SECONDS` (60), so mining one ore vein pays less and less while variety keeps
+paying; then all repeats together draw on a bucket of `Config.Progression.RepeatBudget` (20)
+points a minute that refills smoothly. Discoveries are finite, so not budgeted. Whatever comes
+out goes through `award`, which multiplies it by the knowledge perks for its source
+(`knowledgeFactor`: 1 + the bonuses, added) and carries the fraction (`Knowledge.carry`), so
+quarter points add up. A block placed after generation gives nothing at all, neither the
+discovery nor a repeat: ServerNet reads `EditRules.placed` (the chunk's edit list holds that
+block there, as Behaviours/Leaves tells placed leaves; a cobblestone generator's stone too) just
+before the break removes it and hands it to the `mined` rule. Creative and spectator players earn
+nothing (survival and adventure: Minecraft's hasExperience).
+
+**Ages** (`requirementsMet`, `advance`): after every change the server enters each next Age whose
+level and milestones are met, one after another (a reward can open the next), each a discovery
+of category "age" (its reward through `award`). `setAge` (the command) sets it either way;
+lowering it holds until the next knowledge the player gets, which checks again. With the
+milestones: Iron (5, a Furnace crafted, an Iron Ingot smelted), Industrial (15, an Osmium Ingot
+smelted, a Bucket crafted), Electric (25, a Heat Generator crafted, 6 biomes), Atomic (40, an
+Oil Refinery and a Basic Battery crafted). Iron smelting is the Stone Age's on purpose: smelting
+the first ingot is the way in; what is made of iron is the Iron Age's.
+
+**The recipe gate.** `Progression.allows(state, item)`: the item's Age reached and the node that
+names it (Demolition's gunpowder and TNT, Fission's Nuke) unlocked; a nil state allows
+everything. It plugs into the inventory logic as the window's `recipes` (Types.Window):
+
+- crafting: `Menu.updateCraft` leaves the result slot empty when the gate refuses the match
+  (Minecraft's doLimitedCrafting). Every way of taking a result (click, shift-click, number
+  key, Q) takes the result slot's stack, so a locked result can't be taken whatever the client
+  sends: the server's window simply never holds it. The match itself is unchanged, so JEI's
+  transfer still fills the grid, and the screens draw the locked result greyed;
+- furnaces and machines: they smelt for nobody in particular (a furnace is shared and keeps
+  cooking unwatched), so the gate is at the input: `Menu.mayPlace` refuses an item whose
+  smelting result is locked in a furnace's input or a machine's slot (`gated`), and so do the
+  merging passes of shift-clicks (which Minecraft runs without mayPlace). What comes out of a
+  furnace was put in by someone allowed; a pipe can't be had before the Industrial Age;
+- windows without a gate make everything: the tests' grids, `Config.Progression.Enabled` or
+  `GateRecipes` off, and creative players (the server's gate asks `GameMode.instabuildOf`; a
+  game mode switch works the open grid out again).
+
+The server sets the gate and `onTake` on each player's window once (InventoryState keeps one
+window table per player; the hook re-checks every frame for a new one). The client's
+Inventory/Prediction puts the same gate (`ProgressionState.allows`) on every window it makes,
+so a locked result is never predicted; `setRecipes` rebuilds the prediction when the status
+changes. `Menu.copyWindow` keeps the gate and drops `onTake`.
+
+**What is taken** (Types.Window `onTake`, server only): `Menu`'s `craft` (ResultSlot.onTake)
+tells it each craft's result, every round of a shift-click too; `Menu.apply` compares a
+furnace's or machine's output slots before and after the action and tells it what left them
+(FurnaceResultSlot.checkTakeAchievements). Pipes and Eject taking results out give nothing.
+
+**Perks** (`Progression.perk(state, id)` is one node; the aggregates are what the game asks):
+
+| Perk | Nodes | Where it plugs in |
+| ---- | ----- | ----------------- |
+| knowledge | Forager (+10% discoveries), Prospector (ores x2), Scholar (+10% all), Polymath (+15%), Enlightenment (+25%) | `knowledgeFactor(state, source)` inside `award` |
+| mining | Quarrying (stone tools x1.1), Ironworking (iron, golden), Diamond Cutting (diamond), Mastery (any tool) | `miningFactor(state, tool)` -> Shared/Mining's `factor` (`progressPerTick`, `ticks`, `mayBreak`): the client's mining (BlockInteraction, from ProgressionState) and the server's checks (ServerNet's `miningFactor` rule into EditRules.mayBreak, the delayed break's timing) |
+| wear | Smithing (15%), Tempering (15% more: 1 - 0.85²) | `wear(state, amount, random)`: each point skipped with `wearChance` (Unbreaking's way), from `Inventories.wearTool` (`setWearFilter`): mining, flint and steel, all tool wear |
+| thirst | Hardy (x0.9), Endurance (x0.9 more) | `thirstRate` -> `Thirst.tick`'s `rate` (a point costs 4 / rate exhaustion), server ToughAsNails (`setPerks`) |
+| insulation | Insulation, Thermoregulation (a step each) | `insulation` steps added to the armor's warmth and cooling before Climate's target (towards neutral either way), server ToughAsNails |
+| boiling | Firekeeper (x2) | `boilSpeed` -> `Boiling.ready`'s `speed` (INTERVAL / speed): the client's wait (BlockInteraction) and the server's check (ItemUse, `setBoilSpeed`) |
+
+**Death**: `Config.Progression.DeathLoss` (0) of the progress into the current level is lost
+(`die`); levels, the Age, skills and discoveries never are. Knowledge is learning; Minecraft's
+experience drops because it is a currency (enchanting), which knowledge isn't.
+
+**On the server** (`Players/Progression`): a fresh state at join, then the saved one
+(`Players/ProgressStore`: DataStore "IceVoxelProgress_v1", key player_<UserId>, the record
+`{ v = 1, points, age = id, skills = { ids }, found = { [category] = { keys } } }`, names and
+ids rather than numbers; loaded with three tries, and a player whose record could not be read is
+never saved that session; saved on leave, on shutdown and every `SaveInterval` seconds while
+changed). Until it is read the player has the Stone Age's gate and earns nothing (a first time
+missed meanwhile counts the next time). `fromRecord` reads
+anything safely: another version or garbage is a fresh start, unknown skills are dropped, an
+unknown Age reads as the Stone Age (and `advance` reaches it again), points are clamped and
+whole, keys checked (at most 64 bytes, 4096 a category). Biomes are looked at every
+`BiomeInterval` seconds (the generator's surface biome of the column; no chunk is generated).
+UnlockSkill messages (5 a second) go through `unlock` once loaded; a refusal is a Notice with the
+reason and the status sent again. A player whose state changed gets one Progress message a frame
+at most. An Age reached is told to everyone in the chat. Commands (`Players/ProgressionCommand`,
+pure): `/knowledge add|set|query` (also `/xp`, `/experience`; points or levels, Minecraft's /xp)
+and `/age set|query`, changing with the admins' rule (`GameModeCommand.isAdmin`: as /time).
+
+The API for other parts: `award(player, points, reason)` (direct: no fatigue or budget, the
+caller's own reasons), `discover(player, category, key)` (true when new), `killed(player,
+mobName)` (the mobs' death signal: a discovery and a repeat of `Knowledge.MOBS`), `state(player)`,
+`allows(player, item)`, and the perks' `miningFactor`, `wear`, `thirstRate`, `insulation`,
+`boilSpeed`.
+
+**On the client**: `Player/ProgressionState` keeps the last status (`Progression.status`: points,
+Age, skills, discovery counts by category, the milestones' bits) as a state for the shared rules
+(`fromStatus`: no discoveries), sets the prediction's gate, answers the perks the client predicts
+with, and plays the orb sound for points (at most every 0.08 s), the level-up for a level and the
+challenge fanfare for an Age (none for the first message). `Ui/Hud` draws Minecraft's experience
+bar where Minecraft's layout already leaves it room (182 x 5, 7 GUI pixels above the hotbar's
+top, under the hearts' and droplets' row, which stay where they were) and the level in green
+with a black outline over its middle (13 above the hotbar, between the hearts and the
+droplets), in survival and adventure. `Ui/AgeToast` fades a new Age's name in big (its colour,
+"A new Age begins", how many recipes it opens). `Ui/SkillTreeScreen` is a panel (K, D-pad left,
+the touch button over the gear): a column per Age, a row per node (Skills `row`: the knowledge,
+tools and survival branches), lines from prerequisites (along a row, else through the gap after
+the prerequisite's column), frames gold unlocked / white available / dark locked, an info area
+for the hovered or selected node or Age title (an Age's level and milestones, green when met),
+and Unlock. The inventory screen draws a locked crafting result greyed in the empty result slot
+with its requirement on hover (Crafting.match again only when a grid stack or the status
+changed); JEI's recipe view puts a padlock on a locked output, adds "Requires the Iron Age" to
+its tooltip and greys its "+" with that reason (`JeiData.lockText`).
 
 ## Just Enough Items (`Ui/Jei/`)
 
@@ -4469,6 +4609,7 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Drink`         | u8 action: start / finish / cancel holding a drink; hand (a sip) / fill (a bottle or canteen) at a water source's cell |
 | client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes) |
 | client → server | `Eat`           | u8 action: start / finish / cancel holding a food |
+| client → server | `UnlockSkill`   | u8: a skill tree node's place in Progression/Skills (the server checks the Age, prerequisites and points) |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -4488,6 +4629,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
 | server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state) / state (position in 1/32 block, yaw in 1/256 turn, health, flags, fuse: 21 bytes) / remove / arrow (from, to) / push (this player's knockback) |
 | server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (ambient)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
+| server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record

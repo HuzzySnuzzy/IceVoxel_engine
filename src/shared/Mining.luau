@@ -9,16 +9,21 @@
 	where `speed` is the held tool's speed when it is the block's kind of tool (BlockList `tool`;
 	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves; Shears 15
 	on blocks they harvest, BlockList `shearDrops`: leaves, and plants that break at once, but 2 on
-	glow lichen, its `shearSpeed`), else 1, times the status effects' `factor` (Shared/Effects.
-	miningFactor: Haste x (1 + 0.2 x level), Mining Fatigue x 0.3, 0.09, 0.0027, 0.00081; the
-	client's progress and the server's check both take it, so they agree), divided by 5 under
-	water and by 5 while not standing on the ground. `canHarvest`: the block drops anything with
+	glow lichen, its `shearSpeed`), else 1, times the player's own `factor` (below), divided by 5
+	under water and by 5 while not standing on the ground. `canHarvest`: the block drops anything with
 	that tool (Items.canHarvest: blocks with a `toolLevel` need a good enough tool, so stone by hand
 	takes 7.5 s and drops nothing). The block breaks when the progress reaches 1: stone with a
 	wooden pickaxe (hardness 1.5, speed 2) takes 23 ticks. Hardness 0 breaks at once,
 	unbreakable blocks (hardness < 0) never, and neither do creative only blocks (structure blocks,
 	structure voids, jigsaws: Minecraft's hardness -1), which only creative players break, at
 	once like every block (the server's EditRules, the client's creative breaking).
+
+	A player's own mining speed (`factor`, default 1) multiplies the speed after the tool's:
+	Mining.playerFactor, the status effects' (Shared/Effects.miningFactor: Haste x (1 + 0.2 x
+	level), Mining Fatigue x 0.3, 0.09, 0.0027, 0.00081) times Progression's mining perks (Shared/
+	Progression.miningFactor: Quarrying's 1.1 with stone tools). The client's mining (Interaction/
+	BlockInteraction) and the server's checks (ServerNet's `miningFactor` rule, EditRules) both
+	take it from there, so an effect or a perk is predicted and accepted alike.
 
 	The server accepts a break once `TOLERANCE` of the time has passed since the player started
 	(Minecraft's ServerPlayerGameMode does the same), which covers network delay. A break arriving
@@ -27,7 +32,9 @@
 ]]
 
 local Blocks = require(script.Parent.Blocks)
+local Effects = require(script.Parent.Effects)
 local Items = require(script.Parent.Items)
+local Progression = require(script.Parent.Progression)
 
 local Mining = {}
 
@@ -56,8 +63,19 @@ function Mining.toolSpeed(block: number, tool: number?): number
 	return if kind ~= nil and data.kind == kind then data.speed else 1
 end
 
--- Progress per tick of a survival player mining `block` holding `tool` with the effects' mining
--- `factor` (default 1) (0 = can't be mined: unbreakable and creative only blocks).
+--[[
+	A player's own mining speed with `tool` (`factor` below): their status effects' (`levels`,
+	Haste and Mining Fatigue) times their Progression perks (`progress`; nil: progression off).
+	The one place both are joined, for the client's prediction and the server's checks alike.
+]]
+function Mining.playerFactor(levels: Effects.Levels?, progress: Progression.State?, tool: number?): number
+	local effects = if levels then Effects.miningFactor(levels) else 1
+	return effects * (if progress then Progression.miningFactor(progress, tool) else 1)
+end
+
+-- Progress per tick of a survival player mining `block` holding `tool` (0 = can't be mined:
+-- unbreakable and creative only blocks), `factor` their own speed (Mining.playerFactor: status
+-- effects and perks; default 1).
 function Mining.progressPerTick(
 	block: number,
 	onGround: boolean?,
@@ -93,9 +111,9 @@ end
 
 --[[
 	Server check: may a player who started mining `block` `elapsed` seconds ago, holding `tool`
-	now, with the effects' mining `factor` now (default 1), break it? Uses the fastest possible
-	speed (on the ground, dry), like Minecraft's server, and accepts a break once `needed` of the
-	progress is done (default TOLERANCE; 1 for a delayed break finishing).
+	now, with their own mining `factor` now (Mining.playerFactor; default 1), break it? Uses the
+	fastest possible speed (on the ground, dry), like Minecraft's server, and accepts a break once
+	`needed` of the progress is done (default TOLERANCE; 1 for a delayed break finishing).
 ]]
 function Mining.mayBreak(block: number, elapsed: number, needed: number?, tool: number?, factor: number?): boolean
 	local progress = Mining.progressPerTick(block, true, false, tool, factor)

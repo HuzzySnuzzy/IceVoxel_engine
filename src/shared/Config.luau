@@ -642,6 +642,39 @@ local Config = {
 		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
 	},
 
+	-- Progression: knowledge, Ages and the skill tree -----------------------------------------------
+
+	--[[
+		Knowledge (this game's experience: Minecraft's curve, the green bar over the hotbar), the
+		Ages (Stone, Iron, Industrial, Electric, Atomic: each opens recipes) and the skill tree (a
+		point a level, small perks). Shared/Progression has the rules and numbers, server
+		Players/Progression plays them out. Survival and adventure players earn knowledge;
+		creative players have every recipe and earn nothing.
+	]]
+	Progression = {
+		-- Knowledge, Ages and skills at all (off: no bar, no gates, no perks, nothing saved).
+		Enabled = true,
+		-- Crafting and smelting results of a later Age (or of a skill not unlocked) are locked.
+		GateRecipes = true,
+		-- Keep each player's progress between sessions (DataStore "IceVoxelProgress_v1"). In
+		-- Studio this needs API access, as Settings.Save.
+		Save = true,
+		-- Seconds between saves of a player whose progress changed (and on leaving and shutdown).
+		SaveInterval = 120,
+		-- Points a minute at most from repeated actions together (ores, logs, smelting, crafting,
+		-- mobs), each also wearing off when repeated (Progression/Knowledge's fatigue).
+		-- Discoveries are not limited.
+		RepeatBudget = 20,
+		-- Share (0..1) of the progress into the current level lost on death. Levels, the Age,
+		-- skills and discoveries are never lost; 0 keeps everything (knowledge is learning).
+		DeathLoss = 0,
+		-- Seconds between two looks at the biome a player stands in (a first visit is a discovery).
+		BiomeInterval = 2,
+		-- Opens and closes the skill tree (Enum.KeyCode names; touch: the button over the gear).
+		Key = "K",
+		GamepadButton = "DPadLeft",
+	},
+
 	-- Structures -------------------------------------------------------------------------------------
 
 	--[[

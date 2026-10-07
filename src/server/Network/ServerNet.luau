@@ -20,12 +20,13 @@
 	    an ordinary replicated edit.
 	  * Applies the game modes' rules to edits (Network/EditRules, Shared/GameMode's abilities):
 	      survival   a block breaks only once the player has mined it long enough with the tool in
-	                 their hand when the break arrives, at the speed their status effects give
-	                 (Haste, Mining Fatigue: the `miningFactor` rule; Mine messages say when they
-	                 started; Mining.mayBreak), drops what that tool harvests (Items.drops: stone by hand
-	                 drops nothing) and wears the tool (Mining.wear); placing uses up the held item
-	                 (Players/Inventories.place, just before the block is set). A refused placement
-	                 is still acknowledged, so the client's predicted use is undone.
+	                 their hand when the break arrives, at the speed their status effects and perks
+	                 give (Haste, Mining Fatigue, Progression's mining perks: the `miningFactor`
+	                 rule; Mine messages say when they started; Mining.mayBreak), drops what that
+	                 tool harvests (Items.drops: stone by hand drops nothing) and wears the tool
+	                 (Mining.wear); placing uses up the held item (Players/Inventories.place, just
+	                 before the block is set). A refused placement is still acknowledged, so the
+	                 client's predicted use is undone.
 	      creative   (instabuild) instant breaking, no drops, nothing used up or worn.
 	      adventure  no breaking or placing at all (EditRules.mayEdit: Minecraft's mayBuild): every
 	                 edit is answered with the real block, Mine messages are ignored.
@@ -37,6 +38,10 @@
 	    survival break that drops the block's own item puts the data `save` read just before the
 	    block went on it; a placement hands the stack it came from (as `place` returned it, data
 	    intact, before the item was used up) to every `placed` hook right after setBlock.
+	  * Knowledge (Players/Progression, through `setRules`): a survival break's `mined` rule says
+	    whether the block had been placed (EditRules.placed, read before it goes), and every
+	    mining time check takes the player's own speed (`miningFactor`: the perks times the
+	    status effects'), as the client's mining does.
 	  * Broadcasts all world changes once per frame.
 	  * Plays the sounds of players' breaks and placements to everyone near but that player, whose
 	    client already played them (Audio/Sounds; Minecraft's levelEvent 2001 and place sound).
@@ -148,9 +153,13 @@ export type Rules = {
 	-- A player who is no instabuilder broke `block` (Tough As Nails' thirst: Minecraft's
 	-- EXHAUSTION_MINE). (Players/ToughAsNails.blockBroken)
 	broke: ((player: Player, block: number) -> ())?,
-	-- The player's mining speed multiplier from status effects (Haste, Mining Fatigue: Shared/
-	-- Mining's `factor`); without it 1. (Players/Effects.miningFactor)
-	miningFactor: ((player: Player) -> number)?,
+	-- A player who is no instabuilder broke `block` at (x, y, z); `placed`: it was put there after
+	-- generation (EditRules.placed, read before it went). (Players/Progression.mined: knowledge)
+	mined: ((player: Player, block: number, x: number, y: number, z: number, placed: boolean) -> ())?,
+	-- The player's own mining speed with `tool` in hand (1 without), for every timing check
+	-- (Mining's `factor`): the status effects' Haste and Mining Fatigue times Progression's perks
+	-- (Players/Effects.miningFactor x Players/Progression.miningFactor, joined in the boot script).
+	miningFactor: ((player: Player, tool: number?) -> number)?,
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
@@ -249,10 +258,10 @@ function ServerNet.start(world: World): ServerNet
 		return if rule then rule(player) else nil
 	end
 
-	-- The player's mining speed multiplier from status effects (1 without the rule).
-	local function miningFactor(player: Player): number
+	-- The player's own mining speed with `tool` (status effects and perks; 1 without the rule).
+	local function miningFactor(player: Player, tool: number?): number
 		local rule = rules.miningFactor
-		return if rule then rule(player) else 1
+		return if rule then rule(player, tool) else 1
 	end
 
 	-- Is block (x, y, z) within the player's reach (with some slack for movement and latency)?
@@ -275,19 +284,14 @@ function ServerNet.start(world: World): ServerNet
 		if started then
 			-- (Reach first: a block next to the player may be read even if its chunk has to be
 			-- generated.)
+			local tool = heldTool(player)
 			if
 				y >= HEIGHT
 				or math.abs(x) > Protocol.MAX_COORDINATE
 				or math.abs(z) > Protocol.MAX_COORDINATE
 				or not EditRules.minesOverTime(GameMode.of(player))
 				or not inReach(player, x, y, z)
-				or Mining.progressPerTick(
-						world:getBlock(x, y, z),
-						true,
-						false,
-						heldTool(player),
-						miningFactor(player)
-					)
+				or Mining.progressPerTick(world:getBlock(x, y, z), true, false, tool, miningFactor(player, tool))
 					<= 0
 			then
 				mining[player] = nil
@@ -336,6 +340,8 @@ function ServerNet.start(world: World): ServerNet
 		-- read while it is still there: setBlock tells its keepers it is gone.)
 		local harvested, harvestedY = EditRules.harvested(current, peekBlock, x, y, z)
 		local drop = EditRules.breakDrop(blockData, x, harvestedY, z, harvested, creative, tool)
+		local mined = if creative then nil else rules.mined
+		local placed = mined ~= nil and EditRules.placed(world, x, y, z, current)
 		if not EditRules.removeBroken(world, x, y, z, current) then
 			return false
 		end
@@ -357,6 +363,9 @@ function ServerNet.start(world: World): ServerNet
 		if broke and not creative then
 			broke(breaker, current)
 		end
+		if mined then
+			mined(breaker, current, x, y, z, placed)
+		end
 		return true
 	end
 
@@ -367,14 +376,13 @@ function ServerNet.start(world: World): ServerNet
 		for player, pending in delayed do
 			local current = world:peekBlock(pending.x, pending.y, pending.z)
 			local alive = player.Parent ~= nil and inReach(player, pending.x, pending.y, pending.z)
+			local held = heldTool(player)
 			if current ~= pending.block or not alive or not EditRules.minesOverTime(GameMode.of(player)) then
 				delayed[player] = nil
 				if player.Parent then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
-			elseif
-				Mining.mayBreak(pending.block, now - pending.startedAt, 1, heldTool(player), miningFactor(player))
-			then
+			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, held, miningFactor(player, held)) then
 				delayed[player] = nil
 				-- Like Minecraft's delayed destroy, the item in hand when it completes times, harvests
 				-- and wears (switching to a slower one just waits, until `expires` undoes it).
@@ -458,7 +466,7 @@ function ServerNet.start(world: World): ServerNet
 			-- Minecraft times (and harvests) a break with the item in hand when it arrives. (Creative
 			-- players need it too: they can't break with a sword.)
 			local tool = heldTool(player)
-			local factor = miningFactor(player)
+			local factor = miningFactor(player, tool)
 			if not EditRules.mayBreak(current, creative, mine, x, y, z, now, tool, factor) then
 				if
 					not creative

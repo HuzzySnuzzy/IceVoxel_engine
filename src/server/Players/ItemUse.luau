@@ -41,7 +41,8 @@
 	  Dirty water    (Tough As Nails: Shared/ToughAsNails/Boiling) on a Campfire, not sneaking:
 	                 one bottle, bowl or canteen boils into its purified twin (a canteen keeps its
 	                 sips), with block.campfire.boil at the campfire, at most one every
-	                 Boiling.INTERVAL ticks per player (Boiling.ready, with its LEEWAY). It is the
+	                 Boiling.INTERVAL ticks per player (Boiling.ready, with its LEEWAY; half that
+	                 with Progression's Firekeeper, `setBoilSpeed`). It is the
 	                 campfire's own use (Minecraft's CampfireBlock.use), so adventure players boil
 	                 too (spectators never); it is checked before the game mode's mayUseItemOn.
 	Inventory changes go through Players/Inventories (`setHeld`, `give`: what does not fit is
@@ -84,6 +85,9 @@ local ItemUse = {}
 local budgets: { [Player]: { tokens: number, last: number } } = {}
 -- When (os.clock()) each player last boiled water on a campfire.
 local lastBoil: { [Player]: number } = {}
+-- How many times as fast a player boils water (Progression's Firekeeper; set by the server
+-- script: Players/Progression.boilSpeed). nil: 1.
+local boilSpeed: ((player: Player) -> number)? = nil
 local started = false
 
 local function mayUse(player: Player): boolean
@@ -248,7 +252,8 @@ local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, pla
 	end
 	if boiling and held then
 		local now, last = os.clock(), lastBoil[player]
-		if Boiling.ready(if last then now - last else nil, Boiling.LEEWAY) then
+		local speed = if boilSpeed then boilSpeed(player) else nil
+		if Boiling.ready(if last then now - last else nil, Boiling.LEEWAY, speed) then
 			lastBoil[player] = now
 			boil(player, held, x, y, z)
 		end
@@ -272,6 +277,11 @@ local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, pla
 			UseRules.emptyBucket(bucketEnv(world, simulation, player), held, block, x, y, z, side, sneaking)
 		)
 	end
+end
+
+-- Sets how many times as fast a player boils water (Progression's perks; nil: 1).
+function ItemUse.setBoilSpeed(speed: ((player: Player) -> number)?)
+	boilSpeed = speed
 end
 
 -- Starts handling UseItem messages. Players/Inventories and Transmitters must have started.

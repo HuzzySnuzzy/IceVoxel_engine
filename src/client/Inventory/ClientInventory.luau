@@ -79,6 +79,15 @@ function ClientInventory.start()
 	end)
 end
 
+--[[
+	Progression's recipe gate for this player (Shared/Progression.allows; nil: everything), as the
+	server's window has it: locked crafting results are not predicted.
+]]
+function ClientInventory.setRecipes(recipes: ((item: number) -> boolean)?)
+	prediction:setRecipes(recipes, mode())
+	notify()
+end
+
 -- The predicted window (the inventory, plus its container: window 0's 2 x 2 grid or a block's).
 -- Read only.
 function ClientInventory.window(): Types.Window

@@ -38,9 +38,14 @@
 	 11. mobs       -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
 	                   blasts hurting them), and eating what they drop (Players/Eating)
+	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
+	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
+	                   on their windows, the perks the parts above ask for, saving, /knowledge and
+	                   /age)
 	Status effects (Players/Effects: Minecraft's MobEffects, potions, oil and fuel on the skin,
 	/effect) start with the players, before the characters that tick them; Tough As Nails
-	registers its effects there when it starts.
+	registers its effects there when it starts. A player's mining speed is their effects' times
+	their perks' (Shared/Mining.playerFactor, as the client's).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -49,6 +54,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local Mining = require(Shared.Mining)
 
 local Server = script.Parent
 local Api = require(Server.Api)
@@ -80,6 +86,7 @@ local ToughAsNails = require(Server.Players.ToughAsNails)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
+local Progression = require(Server.Players.Progression)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -123,7 +130,11 @@ net.setRules({
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
 	broke = ToughAsNails.blockBroken,
-	miningFactor = Effects.miningFactor,
+	mined = Progression.mined,
+	-- (Haste and Mining Fatigue times the mining perks: the client predicts with the same.)
+	miningFactor = function(player: Player, tool: number?): number
+		return Mining.playerFactor(Effects.levels(player), Progression.state(player), tool)
+	end,
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)
@@ -143,6 +154,12 @@ ToughAsNails.start(net, world)
 -- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
 Mobs.start(net, world)
 Eating.start(net)
+-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
+-- perks go to the parts that apply them.
+Progression.start(net, world)
+Inventories.setWearFilter(Progression.wear)
+ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
+ItemUse.setBoilSpeed(Progression.boilSpeed)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)

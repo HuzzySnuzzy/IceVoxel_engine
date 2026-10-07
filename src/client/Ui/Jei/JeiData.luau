@@ -33,6 +33,11 @@
 	of its categories, after its own uses, as JEI's "Show uses" on a crafting table or furnace lists
 	them. Both return groups by category, only the categories that have entries.
 
+	Progression (Shared/Progression) locks crafting and smelting results of a later Age, or of a
+	skill not unlocked: `lockText(entry, state)` says what such an entry needs ("Requires the Iron
+	Age"; nil when the player may make it, and for the other categories, whose machines a later
+	Age opens anyway), for the recipe view's lock mark and the "+" button.
+
 	The index is built once, on first use.
 ]]
 
@@ -44,6 +49,7 @@ local Crafting = require(Shared.Crafting)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
+local Progression = require(Shared.Progression)
 local Recipes = require(Shared.Crafting.Recipes)
 local Smelting = require(Shared.Crafting.Smelting)
 local Drinks = require(Shared.ToughAsNails.Drinks)
@@ -560,6 +566,21 @@ function JeiData.turn(page: number, delta: number, count: number): number
 		return 1
 	end
 	return (page - 1 + delta) % count + 1
+end
+
+--[[ Progression ]]
+
+--[[
+	What a player in `state` (nil: no gate, everything allowed) still needs to make `entry`'s
+	output: "Requires the Iron Age", "Requires Demolition"; nil when they may, and for entries that
+	are no crafting or smelting.
+]]
+function JeiData.lockText(entry: Entry, state: Progression.State?): string?
+	local output = entry.output
+	if output == nil or (entry.category ~= "crafting" and entry.category ~= "smelting") then
+		return nil
+	end
+	return Progression.lockText(state, output.item)
 end
 
 -- The items the item list shows for a search text: Items.search, in creative order.

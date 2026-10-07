@@ -129,9 +129,10 @@ end
 --[[
 	One tick of a player in game `mode` with `health` half hearts (of `maxHealth`, Minecraft's 20)
 	and `extra` exhaustion besides the Thirst effect's (HOT's sweating), `clement` under Climate
-	Clemency, `stopped` while regeneration waits (Temperature.stopsRegeneration). Returns the half
-	hearts it costs them (dehydration) and the half hearts they get back (regeneration). See the
-	header.
+	Clemency, `stopped` while regeneration waits (Temperature.stopsRegeneration), `rate` how fast
+	their thirst drains (default 1; Progression's Hardy 0.9: a point costs 1 / rate as much
+	exhaustion). Returns the half hearts it costs them (dehydration) and the half hearts they get
+	back (regeneration). See the header.
 ]]
 function Thirst.tick(
 	state: State,
@@ -140,7 +141,8 @@ function Thirst.tick(
 	maxHealth: number,
 	extra: number?,
 	clement: boolean?,
-	stopped: boolean?
+	stopped: boolean?,
+	rate: number?
 ): (number, number)
 	if GameMode.invulnerable(mode) then
 		state.timer = 0
@@ -153,7 +155,8 @@ function Thirst.tick(
 	end
 	Thirst.addExhaustion(state, extra or 0)
 
-	local step = if clement then Thirst.STEP / Thirst.CLEMENCY_RATE else Thirst.STEP
+	local step = (if clement then Thirst.STEP / Thirst.CLEMENCY_RATE else Thirst.STEP)
+		/ (if rate and rate > 0 then rate else 1)
 	if state.exhaustion > step then
 		state.exhaustion -= step
 		if state.hydration > 0 then

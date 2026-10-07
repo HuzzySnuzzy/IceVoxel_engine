@@ -19,6 +19,11 @@
 	               through the host (ClientInventory.apply: predicted, then checked by the server),
 	               then back to the inventory. Shift: as many sets as the inventory holds. It is lit
 	               only when JeiTransfer.status finds a plan (checked again on inventory changes)
+	               and the player may make the result
+	  locks        a crafting or smelting recipe of a later Age (Progression, JeiData.lockText for
+	               Player/ProgressionState.gate) shows its output greyed under a padlock, says what
+	               it needs on hover ("Requires the Iron Age") and greys its "+" with that reason;
+	               checked again when the player's progression changes
 
 	Lookups that find nothing do nothing, like JEI.
 ]]
@@ -30,6 +35,7 @@ local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Types = require(Shared.Inventory.Types)
 
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local Style = require(script.Parent.Style)
 
 local JeiData = require(script.JeiData)
@@ -148,7 +154,19 @@ function Jei.new(parent: Instance, host: Host): Jei
 		if JeiTransfer.gridWidth(window) == 0 then
 			return nil
 		end
+		-- (A result of a later Age would never come out of the grid.)
+		local lock = JeiData.lockText(entry, ProgressionState.gate())
+		if lock then
+			return { ok = false, reason = lock, missing = {} }
+		end
 		return JeiTransfer.status(window, recipe, host.creative())
+	end)
+	view:setLocks(function(entry: JeiData.Entry): string?
+		return JeiData.lockText(entry, ProgressionState.gate())
+	end)
+	ProgressionState.changed:Connect(function()
+		view:refreshLocks()
+		view:refreshTransfer()
 	end)
 	return self
 end
@@ -353,6 +371,11 @@ function Jei.tooltipAt(self: Self, point: Vector2): (number?, { Line }?)
 	end
 	local item, items = self.view:itemAt(point)
 	if item then
+		-- (A locked recipe's output: what it needs.)
+		local lock = self.view:lockAt(point)
+		if lock then
+			return item, { { text = lock, colour = Style.Colour.Red } }
+		end
 		local tag = JeiData.tagOf(items)
 		if tag then
 			return item, { { text = `Any {tag}`, colour = Style.Colour.Gray } }

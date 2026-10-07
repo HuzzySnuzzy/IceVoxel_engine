@@ -329,6 +329,35 @@ A fast, Minecraft-style voxel engine for Roblox.
   bucket and block in lookups: refining (a bucket of oil into fuel in 5 s for 20 kJ), the Heat
   Generator's lava ("Makes 4 MJ", "200 J/t for 1000 s") and the Combustion Generator's fuel ("Makes
   10 MJ", "2.5 kJ/t for 200 s"); `U` on an Oil Refinery or a Combustion Generator lists theirs.
+- **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve
+  (2L + 7 points a level to 15, 5L - 38 to 30, 9L - 158 above) and its green bar over the hotbar
+  with the level over it (survival and adventure). It comes from first times above all: a block
+  kind mined 5 points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind
+  killed 10, an Age reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5),
+  logs (0.25), each item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft
+  (0.1), each mob. Repeats wear off (a repeat of the same thing within a minute gives three
+  quarters of the last), all repeats give at most 20 points a minute, and blocks a player placed
+  give nothing at all, so farms dry up. Knowledge opens five **Ages**, each at a level and two
+  milestones: the **Stone Age** (where everyone starts: wood, stone tools, the crafting table,
+  furnace, chests, torches, glass, iron smelting, Tough As Nails' basics), the **Iron Age** (level
+  5, a Furnace crafted and an Iron Ingot smelted: iron and gold tools and armor, the Bucket,
+  Shears, Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting),
+  the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic
+  and advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and
+  TNT), the **Electric Age** (level 25, a Heat Generator and 6 biomes: cables, the Electric
+  Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite pipes) and
+  the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the ultimate tiers,
+  the Nuke). A later Age's crafting results stay out of the grid (shown greyed with "Requires the
+  Iron Age"; JEI puts a padlock on them) and furnaces take nothing that would smelt into one;
+  reaching an Age is automatic, with a banner, a fanfare and a line in everyone's chat. Each level
+  is a **skill point** for the skill tree (`K`): 18 small perks in three branches across the Ages,
+  1 to 5 points each: Forager (+10% knowledge from discoveries), Quarrying (stone tools mine 10%
+  faster), Hardy (thirst drains 10% slower), Firekeeper (campfires boil twice as fast),
+  Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation (a step
+  of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar, Tempering,
+  Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke), Mastery and
+  Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death.
+  Creative players have every recipe and earn nothing. `/knowledge` and `/age` set it for testing.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
   sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
@@ -838,11 +867,13 @@ Studio tips:
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
 | Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory | D-pad right; B closes | Gear at the left end of the hotbar |
+| Skill tree    | `K` (`K` again, `E`, `Escape` or Done close it): click a skill, then Unlock; hover an Age's name for what it takes | D-pad left; A selects, B closes | The button over the gear |
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (admins, the owner, Studio) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (admins, the owner, Studio); hover or tap an effect icon for its name and time | | Tap an icon |
+| Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs the admins' rule, as `/time` | | |
 
 ## Settings menu
 
@@ -965,6 +996,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             the container tables: bottles, canteens, bowls; the teas), Exertion
                             (movement that costs thirst), Boiling (dirty water boiled clean on a
                             campfire)
+  Progression/              knowledge, Ages and skills, pure: Knowledge (Minecraft's experience
+                            curve, the sources and their numbers, fatigue and the budget), Ages
+                            (what each opens and needs), Skills (the tree and its perks), init
+                            (the state: awards, discoveries, advancing, unlocking, the recipe
+                            gate, perks, death, the saved record, the client's status)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
@@ -1078,7 +1114,10 @@ src/server   -> ServerScriptService.IceVoxel
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
-                            settings), Eating (food held 32 ticks: healing, used up)
+                            settings), Eating (food held 32 ticks: healing, used up),
+                            Progression + ProgressionCommand + ProgressStore (knowledge, Ages and
+                            skills: earning, the windows' recipe gate, perks for the parts above,
+                            /knowledge and /age, the DataStore)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -1121,7 +1160,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
                             model), SettingsScreen (the Options menu), MusicToast (Now Playing),
                             EffectHud + EffectIcons (status effect icons in the top right, the
-                            list beside open screens, their glyphs)
+                            list beside open screens, their glyphs), SkillTreeScreen (the skill
+                            tree, K), AgeToast (a new Age's banner)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -1140,7 +1180,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             aims at spectators), BurningView (flames on burning players, the fire
                             overlay in first person), SurvivalState (Tough As Nails' state from
                             the server), Exertion (reports sprinting, swimming and jumps),
-                            EffectState (status effects from the server, counted down)
+                            EffectState (status effects from the server, counted down),
+                            ProgressionState (knowledge, the Age and skills from the server; the
+                            recipe gate and perks the client predicts with)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
@@ -1247,6 +1289,12 @@ for performance:
 | `ToughAsNails.ClemencyTicks` / `RespawnClemencyTicks` | 6000 / 1200 | Climate Clemency on joining / respawning: the temperature held neutral, half the thirst drain, no dehydration (0: none). |
 | `ToughAsNails.WetTicks` | 100 | Ticks a player stays wet out of water (3 steps colder). |
 | `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire, Campfire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
+| `Progression.Enabled` / `GateRecipes` | true / true | Knowledge, Ages and the skill tree at all (off: no bar, no gates, no perks); a later Age's (or a skill's) crafting and smelting results locked. |
+| `Progression.Save` / `SaveInterval` | true / 120 | Keep progress between sessions (DataStore "IceVoxelProgress_v1"; Studio needs API access); seconds between saves of changed progress (and on leaving and shutdown). |
+| `Progression.RepeatBudget` | 20 | Points a minute at most from repeated actions together (ores, logs, smelting, crafting, mobs); discoveries are not limited. |
+| `Progression.DeathLoss` | 0 | Share of the progress into the current level lost on death (levels, the Age and skills never are). |
+| `Progression.BiomeInterval` | 2 | Seconds between looks at the biome a player stands in (a first visit is a discovery). |
+| `Progression.Key` / `GamepadButton` | K / DPadLeft | Open and close the skill tree. |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Mobs.Enabled` / `Spawning` | true / true | Mobs at all (false: none spawn, tick or are sent) / natural spawning (`/summon` still works). |
@@ -1589,6 +1637,20 @@ end)
 **Food.** `src/shared/Items/Foods.luau` lists what eating an item does: `[Items.id.CookedBeef] =
 { heal = 4 }` (half hearts) with an optional `effect = { kind = "thirst", chance, ticks }`; any item
 in the table is eaten with the 32 tick hold, with no other change.
+
+**Ages, skills and knowledge.** A new result belongs to the Stone Age (open to everyone) unless
+an Age names it: add its name to that Age's `recipes` in `src/shared/Progression/Ages.luau` (a
+spec checks every name is an item a recipe makes). An Age is `{ id, name, level, milestones,
+reward, recipes, color }`; milestones are discoveries, `{ category = "craft", key = "Furnace",
+text = ... }` or `{ category = "biome", count = 6, text = ... }`; ids are what saves keep, so
+Ages may be renamed or inserted. A skill is an entry at the end of `SPECS` in
+`Progression/Skills.luau` (the protocol numbers them): `{ id, row, icon, name, description,
+age, requires, perk, recipes }`, its cost its Age's number, its `perk` one of the kinds there
+(knowledge, mining, wear, thirst, insulation, boiling), `recipes` results it unlocks besides
+their Age. Knowledge numbers are tables in `Progression/Knowledge.luau` (DISCOVERY, ORES,
+SMELTED, MOBS). From server code, `Players/Progression`: `award(player, points, reason)`,
+`discover(player, category, key)` (true when it was new), `killed(player, mobName)`, `state(player)`,
+`allows(player, item)`.
 
 **Block textures (the texture pack).** Every block texture is in one hand-edited module,
 `src/shared/TexturePack.luau`, like a Minecraft resource pack. Its `Textures` table lists the
@@ -2078,7 +2140,8 @@ lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo f
 `lune run tests/run` runs the whole suite: 1,344 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
-and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects).
+and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge, Ages and
+skills have Progression).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

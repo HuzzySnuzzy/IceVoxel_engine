@@ -31,6 +31,11 @@
 	selection and this screen. A gear button where Minecraft's recipe book button is (20 x 18 at
 	104, 61) opens the Options menu (`onSettings`, Ui/Screens).
 
+	A crafting result Progression keeps back (a later Age's, or a skill's not unlocked: the window's
+	recipe gate, Shared/Progression) is drawn greyed in the empty result slot, and hovering it
+	says what it needs ("Requires the Iron Age"): the grid still matches it (Crafting.match), but
+	the server never offers it, so it can't be taken.
+
 	This module only draws and hit-tests (in screen pixels, the InputObject.Position space): the
 	clicks themselves are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules
 	of each slot (results are only taken, crafting happens there). Slots map to window slots by the
@@ -42,12 +47,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Crafting = require(Shared.Crafting)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
@@ -205,6 +212,14 @@ type Self = InventoryScreen & {
 	machineData: { number }?,
 	machineShown: boolean,
 	byButton: { [GuiObject]: SlotWidget },
+	-- The crafting result the recipe gate keeps back (`lockedResult`): the grid's stacks it was
+	-- matched from (stacks are values: a change is a new table), the progression status it was
+	-- read with, the result (nil: none) and why.
+	lockedGrid: { Types.Stack | false },
+	lockedStatus: any,
+	lockedItem: number?,
+	lockedCount: number,
+	lockedText: string?,
 	height: number,
 	-- The player panel's touch close button (hidden under a container panel, which has its own).
 	playerClose: TextButton,
@@ -297,6 +312,11 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			playerSlots = {},
 			containerSlots = {},
 			gridSlots = {},
+			lockedGrid = {},
+			lockedStatus = nil,
+			lockedItem = nil,
+			lockedCount = 0,
+			lockedText = nil,
 			gridShown = false,
 			flame = nil,
 			progress = nil,
@@ -717,13 +737,71 @@ local function updateHeld(self: Self, window: Window)
 	end
 end
 
+--[[
+	The crafting result the recipe gate keeps back from `window`'s grid (Window `recipes`): what the
+	grid matches while the result slot is empty and the gate refuses it. Its item, count and why;
+	nil when there is none. Matched again only when a grid stack or the progression changed.
+]]
+local function lockedResult(self: Self, window: Window): (number?, number, string?)
+	local container = window.container
+	local width = Types.craftWidth(container)
+	if container == nil or width == 0 or window.recipes == nil or container.slots[Types.CRAFT_RESULT] ~= nil then
+		return nil, 0, nil
+	end
+	local cached = self.lockedGrid
+	local same = #cached == width * width and self.lockedStatus == ProgressionState.get()
+	for i = 1, width * width do
+		local stack = container.slots[Types.CRAFT_RESULT + i]
+		if (cached[i] or nil) ~= stack then
+			same = false
+			cached[i] = stack or false
+		end
+	end
+	for i = width * width + 1, #cached do
+		cached[i] = nil
+	end
+	if not same then
+		local grid: { [number]: Types.Stack? } = {}
+		for i = 1, width * width do
+			grid[i] = container.slots[Types.CRAFT_RESULT + i]
+		end
+		local result = Crafting.match(grid, width)
+		self.lockedStatus = ProgressionState.get()
+		self.lockedItem = if result then result.item else nil
+		self.lockedCount = if result then result.count else 0
+		self.lockedText = if result then ProgressionState.lockText(result.item) else nil
+	end
+	if self.lockedText == nil then
+		return nil, 0, nil
+	end
+	return self.lockedItem, self.lockedCount, self.lockedText
+end
+
+-- Is `widget` the open crafting grid's result slot?
+local function isResultWidget(widget: SlotWidget, window: Window): boolean
+	return widget.store == "container" and widget.index == Types.CRAFT_RESULT and Types.craftWidth(window.container) > 0
+end
+
 -- Draws `window`; `hover` gets the white overlay, so do the slots of a drag in progress.
 function InventoryScreen.render(self: Self, window: Window, hover: Target?, dragged: { [number]: boolean })
 	updateHeld(self, window)
 	local hovered = if hover and hover.kind == "slot" then hover.index else -1
 	local function draw(widget: SlotWidget)
 		local stack = Menu.get(window, widget.window)
-		widget.view.icon:set(stack and stack.item, stack and stack.count, stack and stack.damage, stack and stack.data)
+		if stack == nil and widget.window >= 0 and isResultWidget(widget, window) then
+			-- (A locked result: greyed, never taken.)
+			local item, count = lockedResult(self, window)
+			widget.view.icon:set(item, count)
+			widget.view.icon:setDimmed(item ~= nil)
+		else
+			widget.view.icon:set(
+				stack and stack.item,
+				stack and stack.count,
+				stack and stack.damage,
+				stack and stack.data
+			)
+			widget.view.icon:setDimmed(false)
+		end
 		local lit = widget.window == hovered or dragged[widget.window] == true
 		if widget.view.hover.Visible ~= lit then
 			widget.view.hover.Visible = lit
@@ -769,10 +847,22 @@ function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
 end
 
 --[[
-	A tooltip for what is under `point` besides items: a machine's energy bar ("1.2 kJ / 20 kJ"), a
-	tank gauge ("Lava: 5,000 mB", "Capacity: 24,000 mB").
+	A tooltip for what is under `point` besides items: a locked crafting result ("Iron Pickaxe",
+	"Requires the Iron Age"), a machine's energy bar ("1.2 kJ / 20 kJ"), a tank gauge ("Lava:
+	5,000 mB", "Capacity: 24,000 mB").
 ]]
 function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): { string }?
+	-- A locked crafting result: its name and what it needs.
+	for _, list in { self.containerSlots, self.gridSlots } do
+		for _, widget in list do
+			if widget.window >= 0 and isResultWidget(widget, window) and Style.contains(widget.view.button, point) then
+				local item, _, text = lockedResult(self, window)
+				if item and text then
+					return { Items.displayName(item), text }
+				end
+			end
+		end
+	end
 	local bar = self.energyBar
 	local container = window.container
 	if bar and container and Style.contains(bar.frame, point) then

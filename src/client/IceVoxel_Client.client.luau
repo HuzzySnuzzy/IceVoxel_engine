@@ -66,6 +66,10 @@
 	                             draws them in the top right corner (a list beside open screens),
 	                             Rendering/EffectView does Night Vision, Blindness and Nausea
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
+	  Player/ProgressionState    knowledge, the Age and skills from the server (the recipe gate on
+	                             the predicted inventory, mining and boiling perks), which Ui/Hud
+	                             draws as the knowledge bar; Ui/AgeToast shows a new Age's banner,
+	                             Ui/SkillTreeScreen the skill tree (K)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -107,6 +111,7 @@ local SurvivalState = require(Client.Player.SurvivalState)
 local EffectState = require(Client.Player.EffectState)
 local EffectView = require(Client.Rendering.EffectView)
 local EffectHud = require(Client.Ui.EffectHud)
+local ProgressionState = require(Client.Player.ProgressionState)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -118,6 +123,8 @@ local Music = require(Client.Audio.Music)
 local MusicToast = require(Client.Ui.MusicToast)
 local Settings = require(Client.Settings)
 local SettingsScreen = require(Client.Ui.SettingsScreen)
+local SkillTreeScreen = require(Client.Ui.SkillTreeScreen)
+local AgeToast = require(Client.Ui.AgeToast)
 local Hud = require(Client.Ui.Hud)
 local Style = require(Client.Ui.Style)
 
@@ -254,8 +261,12 @@ end)
 ClientInventory.start()
 SurvivalState.start()
 EffectState.start()
+-- (After the inventory: it sets the recipe gate on the prediction.)
+ProgressionState.start()
 Screens.start()
 SettingsScreen.start()
+SkillTreeScreen.start()
+AgeToast.start()
 Notices.start()
 StructureNet.start(world)
 StructureBoxes.start(world, StructureNet.records)
