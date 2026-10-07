@@ -11,8 +11,8 @@
 	            onSettings). The key closes it again. The title screen (Ui/MainMenu) shows it
 	            itself (`showIn`), before Ui/Screens starts: Done takes it back there.
 	  Pages     Options (Graphics preset, FOV, the pages, Reset, Defaults), Video Settings,
-	            Performance, Music & Sounds, Controls (Mouse Settings, Key Binds), HUD,
-	            Accessibility Settings. Sliders move by dragging, clicking, the D-pad (left /
+	            Performance, Music & Sounds, Controls (Mouse Settings, Key Binds), HUD, Chat
+	            Settings, Accessibility Settings. Sliders move by dragging, clicking, the D-pad (left /
 	            right) or A; buttons cycle their values. "Graphics" cycles the presets and reads
 	            "Custom" once a value it sets was changed; Reset puts the current preset's values
 	            back, Defaults every setting (the device's default preset; the key bindings too).

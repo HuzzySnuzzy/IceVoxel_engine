@@ -566,8 +566,22 @@ A fast, Minecraft-style voxel engine for Roblox.
   walking (84k parts become 49k after loading, at the default view with far meshes off).
 - **Settings menu.** Minecraft's Options screen (`P`, gamepad D-pad right, or the gear at the left
   end of the hotbar on touch screens): a graphics preset (Low, Medium, High, Ultra) and every view,
-  performance, sound, control and HUD setting, applied while you play and saved per player and
-  kind of device. See [Settings menu](#settings-menu).
+  performance, sound, control, HUD and chat setting, applied while you play and saved per player
+  and kind of device. See [Settings menu](#settings-menu).
+- **Chat.** Minecraft 1.20.1's chat instead of Roblox's window and bar: lines at the bottom left
+  above the hotbar in the pixel font with a shadow and a dark background, fading 10 s after they
+  arrive (all of them back while the box is open), 100 kept and scrolled with the wheel. `T`
+  opens the box (`/` with "/" typed): `Enter` sends, `Escape` closes, `Up` / `Down` bring back what
+  you sent, `Tab` completes command names and players' names, and command names are suggested as
+  you type them. Players' messages read "<Name> message", joins and leaves are yellow ("Alex
+  joined the game"), command answers and the server's messages white, errors red. Everything
+  players type goes through Roblox's TextChatService, so Roblox filters it (and an account that
+  may not chat is told so). Commands (`/time`, `/gamemode`, `/summon`, `/effect`, `/knowledge`,
+  `/age`, Roblox's `/whisper`, `/team`, `/e`...) run without being shown to anyone; a command
+  nobody knows is not sent but answered with Minecraft's red "Unknown or incomplete command, see
+  below for error". Chat Settings: Chat (Shown, Commands Only, Hidden), text and background
+  opacity, text size, line spacing, chat delay, width, focused and unfocused height, command
+  suggestions. On touch screens a speech bubble over the `…` button opens it.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -898,6 +912,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Fly (spectator) | Always, through blocks; `Space` / `Shift` up / down, sprinting (`Ctrl`) twice as fast; mouse wheel (spectator menu closed): flying speed | A / B | Jump / Sneak |
 | Spectator menu | `1`–`9` or middle click open it, then a number selects and the same number again (or middle click) uses; the wheel moves the selection | L1 / R1 open and move, D-pad up uses | `…` button; tap a slot |
 | Spectate a player (spectator) | Left click them; `Shift` leaves | R2; B leaves | Hold on them; Sneak button leaves |
+| Chat          | `T` opens the chat, `/` opens it with "/" typed; `Enter` sends, `Escape` closes, `Up` / `Down` what you sent (or the highlighted suggestion), `Tab` completes command names and players' names (`Shift` + `Tab` back), the wheel (`Shift`: a line at a time), `Page Up` / `Page Down` scroll | | Speech bubble over the `…` button |
 | Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
 | Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
 | Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
@@ -946,6 +961,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom); with a mouse |
 | Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
 | HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1-3) |
+| Chat Settings   | Chat (Shown / Commands Only: no players' messages, and none sent / Hidden: no chat at all), Chat Text Opacity (10-100%), Text Background (0-100%), Text Size (OFF, 1-100%), Line Spacing (0-100%), Chat Delay (None, 0.5-6 s: other players' messages come out one per delay), Width (40-320 GUI pixels), Focused Height and Unfocused Height (20-180), Command Suggestions |
 | Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
 
 Key Binds is Minecraft's list: a row per action under its category, the action's name, its key
@@ -1302,7 +1318,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
                             weapon's recovery under the crosshair or beside the hotbar), MainMenu
                             (the title screen and Create World) + TitleRules + CreateWorldForm
-                            (their rules; pure)
+                            (their rules; pure), Chat/ (the chat in place of Roblox's: ChatLog
+                            the lines, ChatInput the box's rules: sending, history, Tab;
+                            ChatFormat the messages' looks; all pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -2060,6 +2078,15 @@ inventory screens; "universal": both, which decides what conflicts). It shows on
 list by itself. Where the input is handled, ask `Keybinds.matches("myAction", input)` (a press or
 release) or `Keybinds.isDown("myAction")` (held), never a KeyCode; `Keybinds.name("myAction")`
 gives the key's name for hints.
+
+**A chat command.** Make a `TextChatCommand` on the server with its alias (`PrimaryAlias =
+"/mycommand"`, a `SecondaryAlias` too if you like), connect `Triggered` (it gets the sender's
+TextSource and the text) and parent it to TextChatService, as `Players/TimeCommands` does; answer
+with `Notice` messages (`Protocol.encodeNotice`), which show in the chat in white. The chat (client
+`Ui/Chat`) completes its name with `Tab`, suggests it while it is typed and sends it to
+TextChatService, which runs it and shows it to no one; a command no TextChatCommand has is never
+sent. Pure parsing (see `Players/TimeCommand`) keeps it testable. With the legacy chat, read
+`Player.Chatted` instead (the game's chat needs TextChatService and leaves Roblox's in place there).
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another

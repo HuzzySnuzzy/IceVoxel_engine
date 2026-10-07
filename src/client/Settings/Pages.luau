@@ -23,6 +23,9 @@
 	    keybinds     Minecraft's KeyBindsScreen: a scrolling list (`list = "keys"`, laid out by
 	                 `keyList`), Reset Keys and Done
 	  hud            minimap, WAILA, attack indicator, GUI scale
+	  chat           Chat Settings (Ui/Chat): Chat (shown, commands only, hidden), text opacity,
+	                 background opacity, text size, line spacing, chat delay, width, focused and
+	                 unfocused height, command suggestions
 	  accessibility  Minecraft's Accessibility Settings that apply here: view bobbing,
 	                 distortion effects, FOV effects, damage tilt
 	A sub-page's Done goes back to its `parent` (the main page when none). `status` lists the
@@ -123,6 +126,7 @@ Pages.list = {
 			page("sounds", "Music & Sounds..."),
 			page("controls", "Controls..."),
 			page("hud", "HUD..."),
+			page("chat", "Chat Settings..."),
 			page("accessibility", "Accessibility Settings..."),
 			{ kind = "action", id = "reset", text = "Reset", row = true },
 			{ kind = "action", id = "defaults", text = "Defaults" },
@@ -218,6 +222,23 @@ Pages.list = {
 			setting("waila"),
 			setting("attackIndicator", true),
 			setting("guiScale"),
+		},
+		status = {},
+	},
+	{
+		id = "chat",
+		title = "Chat Settings",
+		items = {
+			setting("chatVisibility"),
+			setting("commandSuggestions"),
+			setting("chatOpacity"),
+			setting("chatBackground"),
+			setting("chatScale"),
+			setting("chatLineSpacing"),
+			setting("chatDelay"),
+			setting("chatWidth"),
+			setting("chatHeightFocused"),
+			setting("chatHeightUnfocused"),
 		},
 		status = {},
 	},

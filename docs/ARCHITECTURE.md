@@ -1887,8 +1887,8 @@ upright plane filling the cube, both sides; glow lichen's plate shows its image 
 
 ## Player settings (`PlayerSettings`, client `Settings/`, `Ui/SettingsScreen`, server `Players/SettingsStore`)
 
-Players tune the view, performance, sounds, controls and HUD for themselves in Minecraft's Options
-screen; Config gives every default and the presets.
+Players tune the view, performance, sounds, controls, HUD and chat for themselves in Minecraft's
+Options screen; Config gives every default and the presets.
 
 - **The schema** (`Shared/PlayerSettings`, pure, tested in tests/spec/PlayerSettings). Every
   setting is one number (toggles 0 / 1, choices an index, key bindings a key's code) with an
@@ -1937,6 +1937,7 @@ screen; Config gives every default and the presets.
   | mouse                        | `MouseLook.setSensitivity` (`UserInputService.MouseDeltaSensitivity`) / `setInverted` |
   | keys                         | `Keybinds.refresh`: fires `Keybinds.changed` (the sprint and sneak actions bind their new keys); the bindings themselves are read live |
   | hud                          | `Map.setMinimapVisible`, `Waila.setEnabled` / `setMinimapShown`, `Style.setScaleOverride`, `AttackIndicator.setMode` |
+| chat                         | `Chat.applySettings` (see Chat)                                     |
 
   Worker actors keep their own Config, so what a worker needs travels in its jobs (see Workers).
 - **Start-up.** The client listens for its saved profile first and waits up to
@@ -1989,6 +1990,75 @@ screen; Config gives every default and the presets.
   early profile). Saved on leave and in `BindToClose` (which waits for saves in flight, up to
   25 s), only when something changed. tests/spec/SettingsStore runs the real store against a fake
   DataStore with delays and failures, wired to the real client controller.
+
+## Chat (client `Ui/Chat/`, `Net/Notices`)
+
+Minecraft 1.20.1's chat (ChatComponent, ChatScreen, CommandSuggestions, ChatListener) replaces
+Roblox's chat window and input bar, which the client turns off (`ChatWindowConfiguration`,
+`ChatInputBarConfiguration`, `ChannelTabsConfiguration` `.Enabled = false`). Roblox still carries
+every message: players' text is only ever sent with `TextChannel:SendAsync` and shown from
+`TextChatService.MessageReceived`, so Roblox filters it for each reader; the game never sends
+player text through its own remotes. No server code and no Protocol message were added.
+
+- **Lines** (`ChatLog`, pure, tested in tests/spec/Chat). The newest 100 messages are kept, each
+  wrapped (at spaces; long words by characters; never through a UTF-8 character) to the chat's
+  width in chat units (the Width setting divided by the Text Size), and the newest 100 lines,
+  newest first. A line shows for 10 s, fully for 9 and fading out over the last second with
+  Minecraft's squared curve; while the box is open every line shows. Rows: floor(height / line
+  height) with the focused or unfocused height; line height is floor(9 × (1 + spacing)) and the
+  text sits Minecraft's round(-8 × (1 + spacing) + 4 × spacing) above a row's bottom. Scrolling (7
+  lines a notch, 1 with Shift, Page Up / Down a page less one) only while open; a message arriving
+  while scrolled up moves the position with it and turns the scroll bar red; closing scrolls
+  back. Chat Delay queues other players' messages (`ChatFormat.isPlayerKind`) and lets one out
+  per delay ("[+N pending lines]"); everything else shows at once. Each line's rich text and its
+  shadow's are made once, when it is wrapped, and the labels change only when `version` does,
+  so drawing is a loop over at most 20 rows setting what changed, and nothing at all once every
+  line has faded.
+- **Looks** (`ChatFormat`, pure). Messages are coloured spans (hex colours, bold, italic,
+  underline): players' "<Name> message" white, Roblox's whisper channels as Minecraft's gray
+  italic private messages, team channels "[Team] <Name> ...", joins and leaves yellow, notices
+  white, the debug prefix bold yellow, the chat's own errors red, Roblox's system messages gray
+  (tags stripped). TextChatService delivers players' text escaped for rich text; it is unescaped
+  for the plain text (wrapping, searching) and escaped again for the labels. The Chat setting
+  decides what is kept at all: Commands Only drops players' messages, Hidden everything.
+- **The box** (`ChatInput`, pure). Sent text is trimmed, its runs of spaces collapsed and cut to
+  200 bytes (Roblox's limit; Minecraft's is 256). A command's first word is looked up in the
+  aliases of the `TextChatCommand`s under TextChatService (the server's commands replicate there,
+  and Roblox's own): found, the text goes to SendAsync with the word written as the alias is
+  (TextChatService runs the command, and shows it to no one); not found, nothing is sent and
+  Minecraft's two red lines answer ("Unknown or incomplete command, see below for error", then the
+  input underlined and "<--[HERE]"). History: 100 sent texts, a repeat of the last only once, Up /
+  Down with the draft kept. Tab: the word before the cursor, command aliases while in a command's
+  first word, else players' names and display names (any case, all for an empty word); the first
+  Tab uses the highlighted suggestion, further ones move on (SuggestionsList.tabCycles); while a
+  command's name is typed its suggestions show by themselves (Command Suggestions), 10 rows at a
+  time, and Up / Down move the highlight instead of the history.
+- **Glue** (`Ui/Chat/init`). `KEYS` (T and "/") open the box when no screen, switcher, menu or
+  other text box is open; the focus is captured a frame later so the key is not typed (and taken
+  back if it was). While open: `Hud.setInputTaken` (no hotbar keys or wheel, the wheel scrolls the
+  chat), the mouse is freed after the camera every frame (computers), a full-screen button catches
+  clicks beside the box (they never reach the world) and the box takes the focus back, as
+  Minecraft's chat screen is modal; on touch a tap elsewhere closes it, and box and lines rise
+  above the on-screen keyboard. Escape, Roblox's menu, or a screen opening (a block's window the
+  server opens) close it. Every key handler in the game already ignores input a text box took
+  (`gameProcessedEvent`, or `UserInputService:GetFocusedTextBox()` where processed input matters),
+  and `Player/MovementController` stands the player still while a text box has the keys, so typing
+  never moves, mines, drops or opens anything. Plain text is refused with Commands Only and when
+  the local TextSource may not send (Roblox's privacy settings); SendAsync's refusals are put in
+  words. Roblox's /whisper and /team may point `ChatInputBarConfiguration.TargetTextChannel`
+  elsewhere: the box then sends there, says so, and Backspace in an empty box goes back to
+  RBXGeneral. Joins and leaves come from `Players.PlayerAdded` / `PlayerRemoving` on each client
+  (the player's own join too). Roblox's /clear (`RBXClearCommand.Triggered`) clears the lines.
+  With the legacy chat nothing here starts.
+- **Notices.** The server's `Notice` messages (command feedback, Age announcements, structure
+  saves, F3 + Q) still arrive through `Net/Notices`; once the chat runs it sets `Notices.setSink`
+  and they become white lines (the debug ones with their bold yellow prefix) shown at once,
+  instead of RBXSystem system messages. `Notices.listen` (the structure screen's status line)
+  is unchanged.
+- **Settings** (`PlayerSettings` ids 37-46, page "chat", effect "chat"): chatVisibility,
+  chatOpacity (10-100), chatBackground, chatScale, chatLineSpacing, chatDelay (half seconds:
+  tenths are not exact in f32), chatWidth (40-320), chatHeightFocused / chatHeightUnfocused
+  (20-180), commandSuggestions; `ChatLog.metrics` turns them into what the chat draws with.
 
 ## Day and night (`DayCycle`, server `World/TimeOfDay`, client `Rendering/LightingController`)
 

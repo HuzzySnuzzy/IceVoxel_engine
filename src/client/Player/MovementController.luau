@@ -51,8 +51,9 @@
 	            them. Sneaking, a teleport, leaving spectator mode or the target dying or leaving
 	            stops it, where the target was (ServerPlayer.setCamera, wantsToStopRiding).
 	  Screens   while an inventory screen (Ui/Screens) or the game mode switcher (Ui/
-	            GameModeSwitcher) is open the input is neutral: the player stops (a sprint toggled
-	            on stays on), as Minecraft releases every key mapping when a screen opens.
+	            GameModeSwitcher) is open, or a text box has the keys (the chat, Ui/Chat), the
+	            input is neutral: the player stops (a sprint toggled on stays on), as Minecraft
+	            releases every key mapping when a screen opens.
 	  Waiting   until the full detail chunks under the hull are visible (after spawning and
 	            teleports), it stays frozen in place.
 	  Teleports the server sets the feet position as attributes (Rig), and the streamer is told the
@@ -437,9 +438,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		return if ok and typeof(vector) == "Vector3" then vector else nil
 	end
 
-	-- An inventory screen or the game mode switcher has the keys: the player stands still.
+	-- An inventory screen, the game mode switcher or a text box (the chat) has the keys: the
+	-- player stands still.
 	local function inputTaken(): boolean
-		return Screens.isOpen() or GameModeSwitcher.isOpen()
+		return Screens.isOpen() or GameModeSwitcher.isOpen() or UserInputService:GetFocusedTextBox() ~= nil
 	end
 
 	-- Sprint / sneak keys and touch toggles.

@@ -16,7 +16,7 @@
 	  effect    what applying it takes, a key of the client's effect registry (Settings.register):
 	            "lod", "caves", "foliage", "fog", "lighting", "lichen", "shadows", "farShadows",
 	            "textures", "overlay", "budget", "skipHidden", "swapFrames", "audio", "camera",
-	            "controls", "hud", "keys", "mouse" (`also` names more). The costly ones
+	            "controls", "hud", "keys", "mouse", "chat" (`also` names more). The costly ones
 	            (EXPENSIVE) wait until a slider has stopped moving (Config.Settings.ApplyDelay).
 
 	Ids: the plain settings are 1, 2, 3... (id = place in the list); the key bindings are generated
@@ -70,10 +70,11 @@ export type Entry = {
 	-- Set by presets.
 	preset: boolean,
 	-- How the value reads (`text`): "blocks" (a distance, the name says in what), "factor",
-	-- "percent", "ms", "plain", "fullDetail" (about 32 x the value: how far full detail reaches,
-	-- in blocks), "log" (10 ^ (value / 100) with two decimals: Minecraft's scroll sensitivity);
-	-- toggles read ON / OFF, key bindings the key's name; `labels` name special values. Kept
-	-- short: buttons are 150 GUI pixels wide and the pixel font is 8 pixels a character.
+	-- "percent", "ms", "seconds", "pixels" (GUI pixels), "plain", "fullDetail" (about 32 x the
+	-- value: how far full detail reaches, in blocks), "log" (10 ^ (value / 100) with two
+	-- decimals: Minecraft's scroll sensitivity); toggles read ON / OFF, key bindings the key's
+	-- name; `labels` name special values. Kept short: buttons are 150 GUI pixels wide and the
+	-- pixel font is 8 pixels a character.
 	format: string,
 	labels: { [number]: string }?,
 	-- Only offered on touch screens.
@@ -114,6 +115,7 @@ PlayerSettings.EFFECT_ORDER = table.freeze({
 	"camera",
 	"audio",
 	"hud",
+	"chat",
 	"budget",
 	"swapFrames",
 	"lighting",
@@ -820,6 +822,154 @@ local ENTRIES: { Entry } = {
 		format = "plain",
 		labels = { [0] = "OFF", [1] = "Crosshair", [2] = "Hotbar" },
 	},
+	-- Chat Settings (client Ui/Chat), Minecraft's ChatOptionsScreen: chatVisibility, chatOpacity
+	-- (shown 10-100%), textBackgroundOpacity ("Text Background": Minecraft's name is too long for
+	-- the button), chatScale, chatLineSpacing, chatDelay (in half seconds here: tenths are not
+	-- exact in f32), chatWidth (40-320 GUI pixels), chatHeightFocused / Unfocused (20-180) and
+	-- autoSuggestions, with Minecraft's defaults.
+	{
+		id = 46,
+		key = "chatVisibility",
+		name = "Chat",
+		kind = "choice",
+		page = "chat",
+		min = 1,
+		max = 3,
+		step = 1,
+		default = 1,
+		effect = "chat",
+		preset = false,
+		format = "plain",
+		labels = { [1] = "Shown", [2] = "Commands Only", [3] = "Hidden" },
+	},
+	{
+		id = 47,
+		key = "chatOpacity",
+		name = "Chat Text Opacity",
+		kind = "slider",
+		page = "chat",
+		min = 10,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 48,
+		key = "chatBackground",
+		name = "Text Background",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 50,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 49,
+		key = "chatScale",
+		name = "Text Size",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+		labels = { [0] = "OFF" },
+	},
+	{
+		id = 50,
+		key = "chatLineSpacing",
+		name = "Line Spacing",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 0,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 51,
+		key = "chatDelay",
+		name = "Chat Delay",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 6,
+		step = 0.5,
+		default = 0,
+		effect = "chat",
+		preset = false,
+		format = "seconds",
+		labels = { [0] = "None" },
+	},
+	{
+		id = 52,
+		key = "chatWidth",
+		name = "Width",
+		kind = "slider",
+		page = "chat",
+		min = 40,
+		max = 320,
+		step = 1,
+		default = 320,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 53,
+		key = "chatHeightFocused",
+		name = "Focused Height",
+		kind = "slider",
+		page = "chat",
+		min = 20,
+		max = 180,
+		step = 1,
+		default = 180,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 54,
+		key = "chatHeightUnfocused",
+		name = "Unfocused Height",
+		kind = "slider",
+		page = "chat",
+		min = 20,
+		max = 180,
+		step = 1,
+		default = 90,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 55,
+		key = "commandSuggestions",
+		name = "Command Suggestions",
+		kind = "toggle",
+		page = "chat",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 1,
+		effect = "chat",
+		preset = false,
+		format = "plain",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the
@@ -1263,6 +1413,10 @@ function PlayerSettings.valueText(key: string, value: number): string
 		return `{value} ms`
 	elseif format == "log" then
 		return string.format("%.2f", 10 ^ (value / 100))
+	elseif format == "seconds" then
+		return string.format("%.1f s", value)
+	elseif format == "pixels" then
+		return `{value} px`
 	end
 	return if value == math.floor(value) then tostring(math.floor(value)) else tostring(value)
 end

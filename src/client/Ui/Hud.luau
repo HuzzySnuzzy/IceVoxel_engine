@@ -32,9 +32,10 @@
 	             right side, where they are), the numbers a held Thermometer reads above those,
 	             and frost or heat closing in from the screen's edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
-	             the spectator menu's middle click), a gear at its start the Options menu, and a
+	             the spectator menu's middle click), a gear at its start the Options menu, a
 	             skill tree button over the gear the skill tree (Ui/SkillTreeScreen; with
-	             Config.Progression on)
+	             Config.Progression on), and a speech bubble over the "..." the chat (Ui/Chat,
+	             while it runs)
 
 	Game modes (Shared/GameMode): creative has no hearts and its item name sits lower. Spectators
 	(no showsHud) get neither the hotbar nor its item name, hearts or armor: their number keys,
@@ -110,6 +111,18 @@ local SKILLS_ART = {
 	".#.......#.",
 	"GGG.....GGG",
 }
+-- The touch chat button's art (11 x 9): a speech bubble, # its outline and dots.
+local CHAT_ART = {
+	".#########.",
+	"#.........#",
+	"#.........#",
+	"#..#.#.#..#",
+	"#.........#",
+	"#.........#",
+	".##.######.",
+	".#.#.......",
+	".##........",
+}
 -- The spectator menu's label: 35 pixels above the screen's bottom (SpectatorGui.renderTooltip).
 local SPECTATOR_LABEL_Y = HEIGHT - 35
 -- The name shows this long (Minecraft: 40 ticks), fading over the last part (10 ticks).
@@ -169,6 +182,9 @@ local inputTaken = false
 local inventoryHandler: (() -> ())? = nil
 local settingsHandler: (() -> ())? = nil
 local skillsHandler: (() -> ())? = nil
+local chatHandler: (() -> ())? = nil
+-- Shows the touch buttons that have something to do (set by start).
+local refreshButtons: () -> () = function() end
 -- The wheel selects hotbar slots (else it zooms the camera).
 local wheelSelects = Config.Interaction.ScrollWheelHotbar
 -- The Mouse Settings' scrolling (PlayerSettings.scroll): the settings values and the rest of the
@@ -236,6 +252,12 @@ end
 -- The touch skill tree button calls `handler` (Ui/SkillTreeScreen).
 function Hud.onSkillsButton(handler: () -> ())
 	skillsHandler = handler
+end
+
+-- The touch chat button calls `handler` (Ui/Chat); without one the button stays hidden.
+function Hud.onChatButton(handler: () -> ())
+	chatHandler = handler
+	refreshButtons()
 end
 
 -- The Scroll Wheel setting: the wheel selects hotbar slots (true) or zooms the camera.
@@ -508,6 +530,26 @@ function Hud.start()
 		end
 	end)
 
+	-- The touch chat button over the "..." button (Ui/Chat).
+	local chat = Style.frame(canvas, WIDTH + 2, BAR_Y - 24, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
+	chat.BackgroundTransparency = 0.55
+	table.insert(coverage, chat)
+	Style.border(chat, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	Style.border(chat, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+	Style.pixelArt(chat, 5, 6, CHAT_ART, { ["#"] = Style.Colour.Text }, 4)
+	local chatButton = Instance.new("TextButton")
+	chatButton.Text = ""
+	chatButton.BackgroundTransparency = 1
+	chatButton.Size = UDim2.fromScale(1, 1)
+	chatButton.ZIndex = 6
+	chatButton.Parent = chat
+	chatButton.Activated:Connect(function()
+		if chatHandler then
+			SoundPlayer.click()
+			chatHandler()
+		end
+	end)
+
 	--[[ Knowledge (Minecraft's experience bar) ]]
 
 	local knowledge = Instance.new("Frame")
@@ -578,10 +620,12 @@ function Hud.start()
 		more.Visible = touch
 		gear.Visible = touch
 		skills.Visible = touch and ProgressionState.enabled()
+		chat.Visible = touch and chatHandler ~= nil
 		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
 		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
 		attack.Position = UDim2.fromOffset(WIDTH + 6 + (if touch then TOUCH_BUTTON + 2 else 0), BAR_Y + 2)
 	end
+	refreshButtons = updateScale
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
 	Style.scaleChanged:Connect(updateScale)
 	gui.Parent = player:WaitForChild("PlayerGui")
