@@ -14,11 +14,13 @@
 	           end (Effects.iconAlpha). Hovering one with the mouse, or tapping it on a touch screen
 	           (tap again to hide), writes its name, level and time under the rows ("Speed II
 	           1:23", "**:**" for one that never ends).
-	  List     while a screen is open (the inventory, a chest, the creative picker: Ui/Screens) the
-	           icons give way to Minecraft's inventory list, on the left of the screen (where JEI
-	           moves it, its item list taking the right): a 120 x 32 panel per effect with the
-	           glyph, the name and level in white and the time in grey, 33 apart (closer when more
-	           than five need the room, as Minecraft squeezes them).
+	  List     while an inventory screen is open (the inventory, a chest, the creative picker:
+	           Ui/Screens) the icons give way to Minecraft's inventory list, on the left of the
+	           screen (where JEI moves it, its item list taking the right): a 120 x 32 panel per
+	           effect with the glyph, the name and level in white and the time in grey, 33 apart
+	           (closer when more than five need the room, as Minecraft squeezes them). A panel
+	           screen (the Options menu, the skill tree, a structure form: Screens.panelOpen) hides
+	           both, as Minecraft's menus show no effects.
 	Scaled like the toasts (Style.guiScale: the GUI Scale setting, touch screens), hidden with the
 	HUD (the world map hides it) and with Config.Effects.Hud off. Built again only when the server's
 	effects come in another set or order (a refresh only takes the new times); a frame only fades
@@ -117,6 +119,10 @@ function EffectHud.start()
 	gui.IgnoreGuiInset = false
 	-- (With the toasts: over the minimap, under WAILA, the HUD and the screens' tooltips.)
 	gui.DisplayOrder = 7
+	-- Children draw over their parents whatever their ZIndex (Style's rule: a list panel's face,
+	-- glyph and text sit inside its outline frame; with Global ordering the outline, at a higher
+	-- ZIndex, covered them all: an empty black box).
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 	local holder = Instance.new("Frame")
 	holder.Name = "Icons"
@@ -272,7 +278,7 @@ function EffectHud.start()
 	RunService.RenderStepped:Connect(function()
 		local hud = playerGui:FindFirstChild("IceVoxelHud")
 		local hudShown = hud == nil or not hud:IsA("ScreenGui") or hud.Enabled
-		local on = Config.Effects.Hud == true and hudShown and #icons + #rows > 0
+		local on = Config.Effects.Hud == true and hudShown and #icons + #rows > 0 and not Screens.panelOpen()
 		local screen = Screens.isOpen()
 		if gui.Enabled ~= on then
 			gui.Enabled = on

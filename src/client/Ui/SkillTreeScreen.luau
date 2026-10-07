@@ -17,7 +17,11 @@
 	            frame says its state: gold unlocked, white available (Progression.canUnlock),
 	            dark locked (the item dimmed); a line is gold when both ends are unlocked.
 	  Info      hovering or selecting a node shows its name, what it does, its cost and what it
-	            needs (the Age, the prerequisites, the points). Clicking a node selects it, and
+	            needs (the Age, the prerequisites, the points), in light text with Minecraft's shadow
+	            on the grid's dark backdrop (the Ages' colours and the red and green read there, not
+	            on the light panel), long lines wrapped at word breaks (Style.textWidth). The
+	            panel's own title and header are dark text without a shadow, as on the inventory.
+	            Clicking a node selects it, and
 	            Unlock sends it to the server (Protocol UnlockSkill), which checks it all again
 	            and answers with the new state (or a chat notice).
 	  Gamepad   the nodes, the titles and the buttons are selectable; A selects / presses.
@@ -58,12 +62,14 @@ local GRID_Y = 20
 local TITLE_H = 12
 local NODES_Y = GRID_Y + TITLE_H + 2
 local GRID_H = TITLE_H + 4 + ROW * Skills.ROWS
-local INFO_Y = GRID_Y + GRID_H + 4
+-- The info lines, on their own dark backdrop under the grid (the panel's whole width).
+local INFO_Y = GRID_Y + GRID_H + 8
 local LINE = 10
-local INFO_LINES = 4
+local INFO_LINES = 6
+local INFO_PAD = 3
 local BUTTON_W, BUTTON_H = 56, 18
--- The buttons' row, under the info lines (which get the panel's whole width).
-local BUTTONS_Y = INFO_Y + LINE * INFO_LINES + 2
+-- The buttons' row, under the info backdrop.
+local BUTTONS_Y = INFO_Y + LINE * INFO_LINES + INFO_PAD + 4
 local HEIGHT = BUTTONS_Y + BUTTON_H + 6
 local LINE_WIDTH = 2
 
@@ -75,10 +81,13 @@ local LOCKED = Color3.fromRGB(90, 90, 90)
 local LINE_DONE = Color3.fromRGB(240, 200, 60)
 local LINE_OPEN = Color3.fromRGB(170, 170, 170)
 local LINE_LOCKED = Color3.fromRGB(70, 70, 70)
+-- Text on the dark backdrops (with shadows): names white, the rest light grey, Ages not reached
+-- yet a dimmer grey that still reads.
 local GREEN = Color3.fromRGB(85, 255, 85)
 local WHITE = Color3.fromRGB(255, 255, 255)
-local GRAY = Color3.fromRGB(160, 160, 160)
-local DIM = Color3.fromRGB(110, 110, 110)
+local LIGHT = Color3.fromRGB(225, 225, 225)
+local GRAY = Color3.fromRGB(190, 190, 190)
+local DIM = Color3.fromRGB(145, 145, 145)
 
 type NodeView = {
 	skill: Skill,
@@ -205,7 +214,7 @@ local function skillLines(skill: Skill, state: Progression.State): { Line }
 	local lines: { Line } = {}
 	local unlocked = state.skills[skill.id] == true
 	table.insert(lines, { text = skill.name, colour = if unlocked then UNLOCKED else WHITE })
-	table.insert(lines, { text = skill.description, colour = GRAY })
+	table.insert(lines, { text = skill.description, colour = LIGHT })
 	local needs: { string } = {}
 	for _, id in skill.requires do
 		local before = Skills.byId(id)
@@ -214,11 +223,13 @@ local function skillLines(skill: Skill, state: Progression.State): { Line }
 		end
 	end
 	local age = Ages.get(skill.age) :: Age
-	local cost = `{skill.cost} skill point{if skill.cost == 1 then "" else "s"}, {age.name}`
+	table.insert(lines, {
+		text = `Costs {skill.cost} skill point{if skill.cost == 1 then "" else "s"}, in the {age.name}`,
+		colour = GRAY,
+	})
 	if #needs > 0 then
-		cost ..= `, after {table.concat(needs, ", ")}`
+		table.insert(lines, { text = `Needs {table.concat(needs, ", ")}`, colour = GRAY })
 	end
-	table.insert(lines, { text = cost, colour = GRAY })
 	if unlocked then
 		table.insert(lines, { text = "Unlocked", colour = UNLOCKED })
 	else
@@ -250,9 +261,19 @@ function SkillTreeScreen.start()
 	root.ZIndex = 2
 	Style.panel(root, 0, 0, WIDTH, HEIGHT)
 
-	FormWidgets.label(root, "Skills", MARGIN, HEADER_Y, 60, Style.Colour.Title)
-	local header =
-		FormWidgets.label(root, "", MARGIN + 50, HEADER_Y, WIDTH - MARGIN * 2 - 50, Style.Colour.Title, "right")
+	-- (Dark text on the light panel, without a shadow, as the inventory's titles.)
+	FormWidgets.label(root, "Skills", MARGIN, HEADER_Y, 60, Style.Colour.Title, nil, nil, true)
+	local header = FormWidgets.label(
+		root,
+		"",
+		MARGIN + 50,
+		HEADER_Y,
+		WIDTH - MARGIN * 2 - 50,
+		Style.Colour.Title,
+		"right",
+		nil,
+		true
+	)
 
 	-- The grid: a dark backdrop, the Age titles, the lines, the nodes.
 	Style.inset(root, MARGIN - 2, GRID_Y - 2, WIDTH - MARGIN * 2 + 4, GRID_H + 4, 2, BACKDROP)
@@ -290,10 +311,20 @@ function SkillTreeScreen.start()
 		end
 	end
 
-	-- The info lines and the buttons.
+	-- The info lines (on a dark backdrop like the grid's) and the buttons.
+	local infoWidth = WIDTH - MARGIN * 2 - 4
+	Style.inset(
+		root,
+		MARGIN - 2,
+		INFO_Y - INFO_PAD,
+		WIDTH - MARGIN * 2 + 4,
+		LINE * INFO_LINES + INFO_PAD * 2 - 1,
+		2,
+		BACKDROP
+	)
 	local info: { FormWidgets.Label } = {}
 	for i = 1, INFO_LINES do
-		info[i] = FormWidgets.label(root, "", MARGIN, INFO_Y + (i - 1) * LINE, WIDTH - MARGIN * 2, GRAY)
+		info[i] = FormWidgets.label(root, "", MARGIN + 2, INFO_Y + (i - 1) * LINE, infoWidth, GRAY)
 	end
 	local unlock = FormWidgets.button(root, "Unlock", WIDTH - MARGIN * 2 - BUTTON_W * 2, BUTTONS_Y, BUTTON_W, BUTTON_H)
 	local done = FormWidgets.button(root, "Done", WIDTH - MARGIN - BUTTON_W, BUTTONS_Y, BUTTON_W, BUTTON_H)
@@ -303,9 +334,24 @@ function SkillTreeScreen.start()
 	local hoveredSkill: Skill? = nil
 	local hoveredAge: Age? = nil
 
+	-- `lines`, each wrapped at word breaks to the info's width (Style.textWidth), as many as fit.
 	local function showLines(lines: { Line })
+		local rows: { Line } = {}
+		for _, entry in lines do
+			local current = ""
+			for word in string.gmatch(entry.text, "%S+") do
+				local candidate = if current == "" then word else current .. " " .. word
+				if current ~= "" and Style.textWidth(candidate) > infoWidth then
+					table.insert(rows, { text = current, colour = entry.colour })
+					current = word
+				else
+					current = candidate
+				end
+			end
+			table.insert(rows, { text = current, colour = entry.colour })
+		end
 		for i = 1, INFO_LINES do
-			local entry = lines[i]
+			local entry = rows[i]
 			info[i]:setText(if entry then entry.text else "", if entry then entry.colour else GRAY)
 		end
 	end

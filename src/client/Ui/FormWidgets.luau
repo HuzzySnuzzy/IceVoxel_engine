@@ -271,7 +271,8 @@ export type Label = {
 
 --[[
 	Text with Minecraft's shadow in a `w` wide row at (x, y): "left", "centre" or "right" aligned
-	(a right aligned one ends at x + w and shrinks its text to fit the row).
+	(a right aligned one ends at x + w and shrinks its text to fit the row). `plain`: no shadow,
+	Minecraft's dark titles on a light panel (a shadow under dark text only smudges it).
 ]]
 function FormWidgets.label(
 	parent: Instance,
@@ -281,7 +282,8 @@ function FormWidgets.label(
 	w: number,
 	colour: Color3,
 	align: string?,
-	z: number?
+	z: number?,
+	plain: boolean?
 ): Label
 	local frame = Instance.new("Frame")
 	frame.BackgroundTransparency = 1
@@ -295,6 +297,7 @@ function FormWidgets.label(
 		elseif align == "right" then Enum.TextXAlignment.Right
 		else Enum.TextXAlignment.Left
 	local label, shadow = Style.shadowText(frame, text, 0, 0, w, Style.TEXT_SIZE, colour, 1, alignment)
+	shadow.Visible = not plain
 	local function fit(value: string)
 		local size = Style.TEXT_SIZE
 		if align == "right" or align == "centre" then

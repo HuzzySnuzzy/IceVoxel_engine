@@ -219,6 +219,11 @@ function Screens.isOpen(): boolean
 	return current ~= nil
 end
 
+-- Is a panel open (the Options menu, the skill tree, a structure form: not an inventory screen)?
+function Screens.panelOpen(): boolean
+	return current == "panel"
+end
+
 -- Set by start.
 local open: (kind: Kind) -> () = function() end
 local close: () -> () = function() end
