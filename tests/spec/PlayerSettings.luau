@@ -5,7 +5,7 @@
 	FOV), the text on the buttons, the wire format and the saved record.
 ]]
 
-return function(t, shared, require)
+return function(t, shared, require, _server, client)
 	local Config = require(shared.Config)
 	local Coords = require(shared.World.Coords)
 	local LodTree = require(shared.World.LodTree)
@@ -23,16 +23,29 @@ return function(t, shared, require)
 	--[[ Schema ]]
 
 	t.test("player settings: ids are 1..n and unique, keys unique, defaults in range and on the step", function()
+		local KeyBindings = require(shared.KeyBindings)
 		local keys = {}
 		local order = {}
 		for _, effect in PlayerSettings.EFFECT_ORDER do
 			order[effect] = true
 		end
+		-- Plain settings 1..n, then the key bindings from KEY_BASE (128) in the actions' order.
+		local plain = PlayerSettings.PLAIN_COUNT
+		t.eq(#ENTRIES, plain + #KeyBindings.ACTIONS, "a setting per key binding")
+		t.ok(plain < KeyBindings.KEY_BASE, "plain ids stay below the key bindings'")
 		for i, entry in ENTRIES do
-			t.eq(entry.id, i, `id of {entry.key}`)
+			local id = if i <= plain then i else KeyBindings.KEY_BASE + i - plain - 1
+			t.eq(entry.id, id, `id of {entry.key}`)
+			t.eq(entry.kind == "key", i > plain, `{entry.key} in its block`)
+			if entry.kind == "key" then
+				local action = KeyBindings.ACTIONS[i - plain]
+				t.eq(entry.key, "key." .. action.id, "key bindings are key.<action>")
+				t.eq(entry.default, KeyBindings.defaultCode(action.id), `{entry.key}'s default`)
+				t.eq(entry.page, "keybinds")
+			end
 			t.ok(keys[entry.key] == nil, `duplicate {entry.key}`)
 			keys[entry.key] = true
-			t.eq(PlayerSettings.byId[i], entry, "byId")
+			t.eq(PlayerSettings.byId[id], entry, "byId")
 			t.eq(PlayerSettings.byKey[entry.key], entry, "byKey")
 			t.ok(entry.id >= 1 and entry.id <= 255, "ids fit a byte")
 			t.ok(entry.min < entry.max and entry.step > 0, `range of {entry.key}`)
@@ -363,19 +376,54 @@ return function(t, shared, require)
 		t.eq(PlayerSettings.text("skipHidden", 1), "Hidden Terrain: Skip")
 		t.eq(PlayerSettings.text("guiScale", 0), "GUI Scale: Auto")
 		t.eq(PlayerSettings.text("guiScale", 2), "GUI Scale: 2")
+		t.eq(PlayerSettings.text("toggleSneak", 0), "Sneak: Hold")
+		t.eq(PlayerSettings.text("sensitivity", 100), "Sensitivity: 100%")
+		t.eq(PlayerSettings.text("sensitivity", 0), "Sensitivity: *yawn*")
+		t.eq(PlayerSettings.text("scrollSensitivity", 0), "Scroll Sensitivity: 1.00")
+		t.eq(PlayerSettings.text("scrollSensitivity", -200), "Scroll Sensitivity: 0.01")
+		t.eq(PlayerSettings.text("scrollSensitivity", 100), "Scroll Sensitivity: 10.00")
+		t.eq(PlayerSettings.text("attackIndicator", 1), "Attack Indicator: Crosshair")
+		t.eq(PlayerSettings.text("damageTilt", 0), "Damage Tilt: OFF")
+		t.eq(PlayerSettings.valueText("key.forward", 119), "W")
+		t.eq(PlayerSettings.valueText("key.attack", 1018), "Left Button")
+		t.eq(PlayerSettings.valueText("key.attack", 0), "Not Bound")
 		-- The pixel font is 8 pixels a character; buttons shrink text down to 6 for 24 of them.
+		-- (Key bindings show their name and their key apart: the key on a 100 pixel button, at
+		-- most 15 characters at size 6, "[ ... ]" around it when it conflicts at size 5.)
 		local longest, which = 0, ""
+		local KeyBindings = require(shared.KeyBindings)
+		for _, key in KeyBindings.KEYS do
+			t.ok(#key.text <= 15, `{key.text} fits the key button`)
+		end
+		-- (Settings on a whole row, 310 pixels: Minecraft's longer texts, "Sensitivity:
+		-- HYPERSPEED!!!", "Attack Indicator: Crosshair", get 48.)
+		local Pages = require(client.Settings.Pages)
+		local wide: { [string]: boolean } = {}
+		for _, page in Pages.list do
+			for _, item in page.items do
+				if item.kind == "setting" and item.wide then
+					wide[item.id] = true
+				end
+			end
+		end
+		local longestWide = 0
 		for _, entry in ENTRIES do
+			if entry.kind == "key" then
+				continue
+			end
 			local value = entry.min
 			while value <= entry.max do
 				local text = PlayerSettings.text(entry.key, value)
-				if #text > longest then
+				if wide[entry.key] then
+					longestWide = math.max(longestWide, #text)
+				elseif #text > longest then
 					longest, which = #text, text
 				end
 				value += entry.step
 			end
 		end
 		t.ok(longest <= 24, `longest text "{which}" ({longest} characters)`)
+		t.ok(longestWide <= 48, "whole row texts")
 	end)
 
 	--[[ Wire and saving ]]

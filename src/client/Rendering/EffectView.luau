@@ -13,8 +13,9 @@
 	                which a Roblox camera can't do): Effects.nauseaIntensity builds up over about
 	                8 s once it has more than 3 s left and fades over 5 s after, and Effects.
 	                nauseaSway gives the wobble, at most Config.Effects.NauseaRoll degrees and
-	                NauseaFov of the field of view, times the FOV Effects setting (Minecraft's
-	                Distortion Effects). A faint purple tint goes with it.
+	                NauseaFov of the field of view, times the Distortion Effects setting squared
+	                (Minecraft's screenEffectScale: `setDistortion`, PlayerSettings.distortion; 0
+	                keeps the view still). A faint purple tint goes with it either way.
 	Glowing is the server's (a Highlight on the character, Players/Effects). Writes happen only when
 	something changed, so a frame with no effects costs a few comparisons.
 ]]
@@ -50,6 +51,13 @@ local BLINDNESS = Effects.id.Blindness
 local NAUSEA = Effects.id.Nausea
 
 local started = false
+-- The Distortion Effects setting's share of the Nausea wobble (0..1, already squared).
+local distortion = 1
+
+-- The Distortion Effects setting (PlayerSettings.distortion: the slider's share squared).
+function EffectView.setDistortion(share: number)
+	distortion = math.clamp(share, 0, 1)
+end
 
 function EffectView.start()
 	if started then
@@ -103,8 +111,7 @@ function EffectView.start()
 		local _, nauseaTicks = EffectState.get(NAUSEA)
 		local left = if EffectState.levels()[NAUSEA] ~= nil then nauseaTicks else 0
 		nausea = Effects.nauseaIntensity(nausea, left, dt * TICKS_PER_SECOND)
-		local scale = MovementController.fovEffects()
-		local roll, sway = Effects.nauseaSway(nausea * scale, now)
+		local roll, sway = Effects.nauseaSway(nausea * distortion, now)
 		MovementController.setFovSway(1 + sway * Config.Effects.NauseaFov)
 		local camera = workspace.CurrentCamera
 		if roll ~= 0 and camera then

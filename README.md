@@ -779,8 +779,8 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
-  Minecraft's widening field of view (FOV and FOV Effects are settings), sneaking that never walks
-  off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint jumping, slippery
+  Minecraft's widening field of view (FOV and FOV Effects are settings) and view bobbing, sneaking
+  (held, or toggled with the Sneak setting) that never walks off edges, crouching and crawling under low ceilings, 1.25-block jumps, sprint jumping, slippery
   ice, swimming (sprint under water or fuel, steered by the view), currents, wading through lava
   and oil (Minecraft's lava physics), hopping out of a fluid and fall damage. Steps up to just over
   a block are walked up without jumping, so the steep terrain is walkable
@@ -841,6 +841,11 @@ Studio tips:
 
 ## Controls
 
+Every key and mouse button in the "Mouse / keyboard" column is a key binding, as in Minecraft:
+Options (`P`) > Controls > Key Binds changes them (see Settings menu); the table shows the
+defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, the second key of the
+`F3` combinations and every gamepad and touch control are fixed.
+
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
@@ -866,7 +871,7 @@ Studio tips:
 | Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
 | Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
 | Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
-| Sneak         | Hold `Shift` (never walks off edges) | B | Sneak button (toggle) |
+| Sneak         | Hold `Shift` (never walks off edges; turned on / off instead with the Sneak setting on Toggle) | B | Sneak button (toggle) |
 | Jump          | `Space` (hold to keep jumping) | A    | Jump button |
 | Swim up / down | Hold `Space` / `Shift` in water or fuel (in lava and oil `Space` rises slowly; there is no swimming) | A / B | Jump / Sneak |
 | Swim fast     | Sprint under water or fuel; look where to go | L3 | Sprint button |
@@ -879,6 +884,8 @@ Studio tips:
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
 | Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory | D-pad right; B closes | Gear at the left end of the hotbar |
+| Walk          | `W` / `S` / `A` / `D` (Roblox's arrow keys no longer walk: bind them if you like) | left stick | thumbstick |
+| Chat / command | `T` / `/` (the Open Chat and Open Command bindings) | | |
 | Skill tree    | `K` (`K` again, `E`, `Escape` or Done close it): click a skill, then Unlock; hover an Age's name for what it takes | D-pad left; A selects, B closes | The button over the gear |
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
@@ -894,17 +901,59 @@ hotbar; anywhere: the gear in the inventory, where Minecraft's recipe book butto
 apply while you play: cheap ones at the next frame, costly ones (view, caves, plants, shadows,
 textures, far materials, far meshes) 0.4 s after a slider stops (`Settings.ApplyDelay`), so
 dragging a slider rebuilds the world once. Sliders move by dragging, clicking, the D-pad (left /
-right) or A; buttons cycle their values. Done (on a sub-page: back to Options), `P`, `E`, `Escape`
-or gamepad B close it, which applies whatever still waits and saves.
+right) or A; buttons cycle their values. Done (on a sub-page: back to the page it came from), `P`,
+`E`, `Escape` or gamepad B close it, which applies whatever still waits and saves.
 
 | Page            | Settings |
 | --------------- | -------- |
-| Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults) |
+| Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110, Minecraft's 70 "Normal" by default); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults, key bindings included) |
 | Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
 | Music & Sounds  | Master Volume, Music, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Moods, Music Toasts |
-| Controls        | FOV Effects (0-100%), Sprint (Toggle / Hold), Scroll Wheel (Hotbar / Zoom), Touch Buttons (touch screens; after rejoining) |
-| HUD             | Minimap, WAILA, GUI Scale (Auto, 1-3) |
+| Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Touch Buttons (touch screens; after rejoining) |
+| Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom); with a mouse |
+| Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
+| HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1-3) |
+| Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
+
+Key Binds is Minecraft's list: a row per action under its category, the action's name, its key
+and Reset (back to the default, greyed when it is). Clicking a key shows `> W <` in yellow and
+waits: the next key or mouse button pressed becomes the binding (clicking anywhere binds that
+mouse button, as in Minecraft); Escape makes it "Not Bound" (Minecraft's; Roblox opens its menu
+too, close it again); a gamepad's B leaves it as it was. A key used by two actions that can
+happen at the same time shows red in brackets (`[ Q ]`), and both still act on it; keys that
+only work in different places don't clash (JEI's keys work in the inventory, the movement keys
+outside it). The wheel or the bar on the right scrolls the list. Bindings are saved with the
+other settings (only those changed from their default).
+
+| Category | Key binding (default) |
+| -------- | --------------------- |
+| Movement | Jump (`Space`), Sneak (`Left Shift`), Sprint (`Left Control`), Strafe Left (`A`), Strafe Right (`D`), Walk Backwards (`S`), Walk Forwards (`W`) |
+| Gameplay | Attack/Destroy (left button), Pick Block (middle button), Use Item/Place Block (right button) |
+| Inventory | Drop Selected Item (`Q`), Hotbar Slot 1-9 (`1`-`9`), Open/Close Inventory (`E`) |
+| Multiplayer | Open Chat (`T`), Open Command (`/`) |
+| Miscellaneous | Debug Screen (`F3`; its combinations become that key + `N` / `Q` / `F4`), Options (`P`), Skill Tree (`K`) |
+| Map | Minimap Zoom In (`=`), Minimap Zoom Out (`-`), World Map (`M`) |
+| Just Enough Items | Recipe Back (`Backspace`), Show Recipe (`R`), Show Uses (`U`) |
+
+The other new options, each Minecraft's:
+- Sensitivity scales the mouse's turning with Minecraft's curve ((0.6 s + 0.2)³ × 8, so 100% is
+  Roblox's own speed, on top of Roblox's camera sensitivity). Invert Mouse turns the mouse's
+  vertical look round (not a gamepad's stick or a touch drag); it needs Roblox's camera scripts,
+  and the page says so when they are missing.
+- Scroll Sensitivity and Discrete Scrolling: the wheel's turns add up (scaled; Discrete: a notch
+  is a notch, however fine the wheel or trackpad) and each whole step moves the hotbar one slot
+  (also the spectator menu and flying speed); open screens scroll by the scaled turn.
+- View Bobbing: the camera sways and dips while walking on the ground (Minecraft's bob, about a
+  tenth of a block). Damage Tilt: the camera tilts up to 14° for half a second when hurt.
+  Distortion Effects: how much of Nausea's wobble shows (squared, as Minecraft's: 50% is a
+  quarter); FOV Effects now only scales the flying, sprinting and Speed widening.
+- Attack Indicator: while the held weapon recovers after a hit (its attack speed: a sword in 0.6
+  s, an axe in 1-1.25 s), a bar under the crosshair (or the mouse, while it is free) or a square
+  right of the hotbar fills up.
+- Sneak: Hold (Minecraft's default) or Toggle.
+- Not here: Auto-Jump (the 1 1/16-block step height already walks up blocks without jumping),
+  Toggle Perspective and Hide GUI (the game has no such keys), Show Subtitles.
 
 Status lines say what the terrain is doing ("Updating terrain: 120 queued, 34 building") and, on
 the Performance page, the far meshes' state. A few notes on what the settings do:
@@ -1051,7 +1100,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             from the blocks, Minecraft's monster and animal spawn light tests;
                             mob spawning, WAILA and the cave mood)
   PlayerSettings            the Options menu's settings: ids, ranges, presets, the LOD balance
-                            rule, the wire and DataStore formats
+                            rule, the wire and DataStore formats, the mouse and scroll math
+  KeyBindings               Minecraft's key mappings: every action, its default and category,
+                            the bindable keys (Roblox's KeyCode values), conflicts, the list order
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
                             character)
@@ -1152,7 +1203,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             tints, images, sprites, far and plain looks, far mesh looks; checks
                             the ids and measures averages)
   Settings/                 the player's settings: State (values and choices), Schedule (when
-                            changes apply), Pages (the menu's layout), saving them on the server
+                            changes apply), Pages (the menu's layout, the Key Binds list and its
+                            scrolling), saving them on the server; Keybinds (what every input
+                            site asks: matches, isDown, hotbar slots, key names)
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
                             (does a bucket on a machine act on its tanks or open its screen),
                             Drinking (Tough As Nails: filling, sipping, holding a drink), Eating
@@ -1173,7 +1226,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             model), SettingsScreen (the Options menu), MusicToast (Now Playing),
                             EffectHud + EffectIcons (status effect icons in the top right, the
                             list beside open screens, their glyphs), SkillTreeScreen (the skill
-                            tree, K), AgeToast (a new Age's banner)
+                            tree, K), AgeToast (a new Age's banner), AttackIndicator (the
+                            weapon's recovery under the crosshair or beside the hotbar)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -1194,7 +1248,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             the server), Exertion (reports sprinting, swimming and jumps),
                             EffectState (status effects from the server, counted down),
                             ProgressionState (knowledge, the Age and skills from the server; the
-                            recipe gate and perks the client predicts with)
+                            recipe gate and perks the client predicts with), ViewBob (Minecraft's
+                            view bobbing and hurt tilt, pure), MouseLook (mouse sensitivity and
+                            Invert Mouse on Roblox's camera)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
@@ -1306,7 +1362,7 @@ for performance:
 | `Progression.RepeatBudget` | 20 | Points a minute at most from repeated actions together (ores, logs, smelting, crafting, mobs; the knowledge perks included); discoveries are not limited. |
 | `Progression.DeathLoss` | 0 | Share of the progress into the current level lost on death (levels, the Age and skills never are). |
 | `Progression.BiomeInterval` | 2 | Seconds between looks at the biome a player stands in (a first visit is a discovery). |
-| `Progression.Key` / `GamepadButton` | K / DPadLeft | Open and close the skill tree. |
+| `Progression.Key` / `GamepadButton` | K / DPadLeft | Open and close the skill tree (the key: the Skill Tree key binding's default). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Mobs.Enabled` / `Spawning` | true / true | Mobs at all (false: none spawn, tick or are sent) / natural spawning (`/summon` still works). |
@@ -1332,7 +1388,7 @@ for performance:
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Effects.FluidEffects` | true | Oil and fuel give their effects (Slowness II and Oil Coated; Nausea, Poison and Fuel Soaked); off, they leave players be (potions and `/effect` still work). |
 | `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: Tough As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill). |
-| `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the FOV Effects setting. |
+| `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
 | `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
@@ -1357,7 +1413,7 @@ for performance:
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
-| `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu.                 |
+| `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu (the key: the Options key binding's default). |
 | `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
 | `Settings.SaveDelay` / `LoadWait` | 1.5 / 1 | Seconds before changes are sent to the server; seconds a joining client waits for its saved settings. |
 
@@ -1902,13 +1958,22 @@ and shown with `CreateMeshPartAsync`. So any number of regions can be merged.
   actually draws. Check F3 and the MicroProfiler in a published test place before relying on it.
 
 **A player setting.** Append an entry to `ENTRIES` in `src/shared/PlayerSettings.luau` with the
-next id (ids are saved and sent: never reuse or renumber one), its kind, range, step, default,
+next id (ids are saved and sent: never reuse or renumber one; plain settings stay below 128, where
+the key bindings' ids start), its kind, range, step, default,
 page and the effect key that applies it; put it on its page in `src/client/Settings/Pages.luau`;
 and register what the effect does in the client script (`Settings.register("myEffect", fn)`, `fn`
 taking the values table). Costly effects also go in `PlayerSettings.EXPENSIVE` (they wait until a
 slider stops), and `EFFECT_ORDER` says in which order effects run. Settings marked `preset` take
 their value from each of the `PRESETS`. Worker actors keep their own Config, so anything a worker
 needs travels in its jobs.
+
+**A key binding.** Append an action to `ACTIONS` in `src/shared/KeyBindings.luau` (its place is
+its settings id from 128: never reorder) with Minecraft's name, a category, its default (an
+`Enum.KeyCode` name or `MouseButton1`..`3`) and a context ("game": in the world; "screen": in the
+inventory screens; "universal": both, which decides what conflicts). It shows on the Key Binds
+list by itself. Where the input is handled, ask `Keybinds.matches("myAction", input)` (a press or
+release) or `Keybinds.isDown("myAction")` (held), never a KeyCode; `Keybinds.name("myAction")`
+gives the key's name for hints.
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another

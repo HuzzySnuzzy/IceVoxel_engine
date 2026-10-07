@@ -13,7 +13,9 @@
 	                             lights, lighting quality and fog
 	  Settings/                  the player's settings (the Options menu, Ui/SettingsScreen: P):
 	                             values, saving them on the server, and the effects registered
-	                             below that apply them live
+	                             below that apply them live; the key bindings every input site
+	                             reads (Settings/Keybinds), the mouse's sensitivity and inversion
+	                             (Player/MouseLook) and the attack indicator (Ui/AttackIndicator)
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
 	  Rendering/FluidFog         the view from inside water, lava, oil or fuel: Minecraft's fluid
 	                             fog in the fluid's colour and a tint
@@ -122,6 +124,9 @@ local Ambience = require(Client.Audio.Ambience)
 local Music = require(Client.Audio.Music)
 local MusicToast = require(Client.Ui.MusicToast)
 local Settings = require(Client.Settings)
+local Keybinds = require(Client.Settings.Keybinds)
+local MouseLook = require(Client.Player.MouseLook)
+local AttackIndicator = require(Client.Ui.AttackIndicator)
 local SettingsScreen = require(Client.Ui.SettingsScreen)
 local SkillTreeScreen = require(Client.Ui.SkillTreeScreen)
 local AgeToast = require(Client.Ui.AgeToast)
@@ -150,15 +155,27 @@ ViewSettings.apply()
 	once, in MovementController.start).
 ]]
 local on = PlayerSettings.on
+-- (Read live: Settings/Keybinds reads the session's values; listeners such as the sprint and sneak
+-- actions bind their new keys.)
+Settings.register("keys", Keybinds.refresh)
 Settings.register("controls", function(values)
 	Config.Movement.ToggleSprint = on(values, "toggleSprint")
+	Config.Movement.ToggleSneak = on(values, "toggleSneak")
 	-- (Bound once a session: a change applies after rejoining.)
 	Config.Movement.TouchButtons = on(values, "touchButtons")
 	Hud.setWheelSelects(on(values, "scrollHotbar"))
+	Hud.setScrolling(values)
+end)
+Settings.register("mouse", function(values)
+	MouseLook.setSensitivity(PlayerSettings.mouseSensitivity(values))
+	MouseLook.setInverted(on(values, "invertMouse"))
 end)
 Settings.register("camera", function(values)
 	MovementController.setFieldOfView(values.fov)
 	MovementController.setFovEffects(values.fovEffects / 100)
+	MovementController.setViewBobbing(on(values, "viewBobbing"))
+	MovementController.setDamageTilt(values.damageTilt / 100)
+	EffectView.setDistortion(PlayerSettings.distortion(values))
 end)
 Settings.register("audio", function(values)
 	local volume = PlayerSettings.volume
@@ -182,6 +199,7 @@ Settings.register("hud", function(values)
 	MusicToast.setMinimapShown(minimap)
 	Waila.setEnabled(on(values, "waila"))
 	Style.setScaleOverride(values.guiScale)
+	AttackIndicator.setMode(values.attackIndicator)
 end)
 Settings.register("lighting", function()
 	ViewSettings.applyLighting()
@@ -258,6 +276,9 @@ end)
 Settings.setStatus("controls", function(): string?
 	return if Settings.shown("touchButtons") then "Touch buttons change after rejoining" else nil
 end)
+Settings.setStatus("mouse", function(): string?
+	return if MouseLook.available() then nil else "Invert Mouse needs Roblox's camera scripts"
+end)
 
 ClientInventory.start()
 SurvivalState.start()
@@ -265,6 +286,8 @@ EffectState.start()
 -- (After the inventory: it sets the recipe gate on the prediction.)
 ProgressionState.start()
 Screens.start()
+-- (After the HUD: the hotbar's attack indicator square is the HUD's.)
+AttackIndicator.start()
 SettingsScreen.start()
 SkillTreeScreen.start()
 AgeToast.start()

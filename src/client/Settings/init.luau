@@ -23,7 +23,11 @@
 	            SaveDelay seconds after the last change, and at once on `flush` and when the saved
 	            profile arrives after choices were made (the merged result).
 	  Status    the menu's status lines come from providers the client script sets (`setStatus`:
-	            "terrain" -> "Updating terrain: N queued, M building", "farMeshes", "controls").
+	            "terrain" -> "Updating terrain: N queued, M building", "farMeshes", "controls",
+	            "mouse").
+	  Keys      the key bindings are settings too ("key.<action>", Shared/KeyBindings), read by
+	            every input site through Settings/Keybinds; `unset` forgets some choices (the Key
+	            Binds screen's Reset and Reset Keys).
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -191,7 +195,8 @@ end
 --[[
 	Registers what effect `effect` takes (PlayerSettings effect keys: "lod", "caves", "foliage",
 	"fog", "lighting", "lichen", "shadows", "farShadows", "textures", "overlay", "budget",
-	"skipHidden", "swapFrames", "audio", "camera", "controls", "hud") and runs it once now, so
+	"skipHidden", "swapFrames", "audio", "camera", "controls", "hud", "keys", "mouse") and runs it
+	once now, so
 	the current values apply (unless the same function was registered under another key before).
 	A later registration replaces an earlier one.
 ]]
@@ -256,6 +261,12 @@ function Settings.restoreDefaults()
 	changed(State.restoreDefaults(state))
 end
 
+-- Forgets the choice of `keys` (back to the device's defaults; the Key Binds screen's Reset and
+-- Reset Keys).
+function Settings.unset(keys: { string })
+	changed(State.unset(state, keys))
+end
+
 -- The preset the values match, or "Custom".
 function Settings.presetName(): string
 	return State.presetName(state)
@@ -297,7 +308,20 @@ function Settings.shown(key: string): boolean
 	return true
 end
 
--- A status line's provider (kinds: "terrain", "farMeshes", "controls").
+--[[
+	Is page `id` offered on this device: Key Binds with a keyboard, Mouse Settings with a mouse
+	(touch screens and consoles keep their own controls)?
+]]
+function Settings.pageShown(id: string): boolean
+	if id == "keybinds" then
+		return UserInputService.KeyboardEnabled
+	elseif id == "mouse" then
+		return UserInputService.MouseEnabled
+	end
+	return true
+end
+
+-- A status line's provider (kinds: "terrain", "farMeshes", "controls", "mouse").
 function Settings.setStatus(kind: string, fn: () -> string?)
 	statuses[kind] = fn
 end

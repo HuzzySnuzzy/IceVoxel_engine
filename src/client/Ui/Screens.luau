@@ -22,7 +22,10 @@
 	                camera, the mouse icon on), the default controls are disabled so the character
 	                stops, and `isOpen()` is true for the other client modules.
 
-	Input on an open screen (Minecraft's, see Ui/SlotClicks for what each click does):
+	Input on an open screen (Minecraft's, see Ui/SlotClicks for what each click does). The keys
+	named here are the defaults of the key bindings (Settings/Keybinds: Open/Close Inventory,
+	Hotbar Slot 1-9, Drop Selected Item, Options, JEI's Show Recipe / Show Uses / Recipe Back);
+	Escape, Shift, Ctrl and the mouse buttons on slots are fixed, as in Minecraft:
 
 	  mouse    left / right / middle click and drag on slots, shift click, double click, clicks
 	           outside the panels throw the carried stack; number keys over a slot swap it with
@@ -85,6 +88,7 @@ local Jei = require(script.Parent.Jei)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 type Target = SlotClicks.Target
 type Kind = "inventory" | "creative" | "panel"
@@ -94,12 +98,19 @@ type Line = { text: string, colour: Color3 }
 	A screen of another module shown by Screens (showPanel). Its `root` is parented into the
 	screens' GUI and shown centred, scaled like the inventory for content of `size()` GUI pixels.
 	`closed` is called when Screens closes it (not when the panel closes itself with closePanel).
+	While `capturing()` says so (the Key Binds screen waiting for a key), the panel takes every key
+	itself: E, Escape, the Options key and the Roblox menu opening close nothing, and Escape (the
+	key, or the menu it opens) goes to `escaped` instead. The mouse wheel goes to `wheel` (its turn,
+	+ up: the Key Binds list scrolls).
 ]]
 export type Panel = {
 	root: GuiObject,
 	size: () -> Vector2,
 	closed: () -> (),
 	firstSelectable: () -> GuiObject?,
+	capturing: (() -> boolean)?,
+	escaped: (() -> ())?,
+	wheel: ((delta: number) -> ())?,
 }
 
 -- Touch: a long press is a right click; a finger moving this far (pixels) drags or scrolls.
@@ -124,21 +135,8 @@ local function keyCode(name: string): Enum.KeyCode?
 	return if ok then code else nil
 end
 
--- The Options menu's key and gamepad button (Ui/SettingsScreen).
-local SETTINGS_KEY = keyCode(Config.Settings.Key)
+-- The Options menu's gamepad button (Ui/SettingsScreen; its key is the Options key binding).
 local SETTINGS_BUTTON = keyCode(Config.Settings.GamepadButton)
-
-local NUMBER_KEYS: { [Enum.KeyCode]: number } = {
-	[Enum.KeyCode.One] = 1,
-	[Enum.KeyCode.Two] = 2,
-	[Enum.KeyCode.Three] = 3,
-	[Enum.KeyCode.Four] = 4,
-	[Enum.KeyCode.Five] = 5,
-	[Enum.KeyCode.Six] = 6,
-	[Enum.KeyCode.Seven] = 7,
-	[Enum.KeyCode.Eight] = 8,
-	[Enum.KeyCode.Nine] = 9,
-}
 
 local MOUSE_BUTTONS: { [Enum.UserInputType]: number } = {
 	[Enum.UserInputType.MouseButton1] = SlotClicks.Button.Left,
@@ -831,6 +829,14 @@ function Screens.start()
 		openSettings()
 	end
 	Hud.onScreenWheel(function(delta: number)
+		if current == "panel" then
+			local shownPanel = panel
+			local wheel = shownPanel and shownPanel.wheel
+			if wheel then
+				wheel(delta)
+			end
+			return
+		end
 		if jei:wheel(mousePoint(), delta) then
 			return
 		end
@@ -903,7 +909,14 @@ function Screens.start()
 			return
 		end
 		lastEscape = now
-		if jei:viewOpen() then
+		local shownPanel = if current == "panel" then panel else nil
+		if shownPanel and shownPanel.capturing and shownPanel.capturing() then
+			-- (The Key Binds screen waiting for a key: Escape unbinds it, as Minecraft's.)
+			local escaped = shownPanel.escaped
+			if escaped then
+				escaped()
+			end
+		elseif jei:viewOpen() then
 			jei:closeView()
 		else
 			close()
@@ -1057,6 +1070,11 @@ function Screens.start()
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		local kind, key = input.UserInputType, input.KeyCode
 		if current == "panel" then
+			-- A panel waiting for a key (Key Binds) takes them all.
+			local shownPanel = panel
+			if shownPanel and shownPanel.capturing and shownPanel.capturing() then
+				return
+			end
 			-- A panel's own buttons and fields take the pointer; E, Escape and B close it, unless
 			-- the player is typing (a read only box, focused to copy its text, takes no typing).
 			local focused = UserInputService:GetFocusedTextBox()
@@ -1068,11 +1086,13 @@ function Screens.start()
 				return
 			end
 			if kind == Enum.UserInputType.Keyboard then
-				if key == Enum.KeyCode.E then
+				if key == Enum.KeyCode.Escape then
+					if not GuiService.MenuIsOpen then
+						escape()
+					end
+				elseif Keybinds.matches("inventory", input) then
 					close()
-				elseif key == Enum.KeyCode.Escape and not GuiService.MenuIsOpen then
-					escape()
-				elseif key == SETTINGS_KEY then
+				elseif Keybinds.matches("options", input) then
 					-- (Closes the Options menu; other panels ignore it.)
 					openSettings()
 				end
@@ -1086,9 +1106,10 @@ function Screens.start()
 			return
 		end
 		if current == nil then
-			if not processed and (key == Enum.KeyCode.E or key == Enum.KeyCode.ButtonY) then
+			-- (The Open/Close Inventory and Options key bindings, E and P by default.)
+			if not processed and (Keybinds.matches("inventory", input) or key == Enum.KeyCode.ButtonY) then
 				Screens.toggle()
-			elseif not processed and (key == SETTINGS_KEY or key == SETTINGS_BUTTON) then
+			elseif not processed and (Keybinds.matches("options", input) or key == SETTINGS_BUTTON) then
 				openSettings()
 			end
 			return
@@ -1099,31 +1120,35 @@ function Screens.start()
 			if UserInputService:GetFocusedTextBox() ~= nil then
 				return
 			end
-			local digit = NUMBER_KEYS[key]
+			-- (The key bindings: Open/Close Inventory, JEI's Recipe Back, Show Recipe and Show
+			-- Uses, the Hotbar Slots and Drop Selected Item; Escape is Minecraft's own.)
+			local digit = Keybinds.hotbarSlot(input)
 			local viewing = jei:viewOpen()
-			if key == Enum.KeyCode.E then
+			if key == Enum.KeyCode.Escape then
+				if not GuiService.MenuIsOpen then
+					escape()
+				end
+			elseif Keybinds.matches("inventory", input) then
 				-- The recipe view first, then the screen.
 				if viewing then
 					jei:closeView()
 				else
 					close()
 				end
-			elseif key == Enum.KeyCode.Escape then
-				if not GuiService.MenuIsOpen then
-					escape()
-				end
-			elseif key == Enum.KeyCode.Backspace then
+			elseif Keybinds.matches("jeiBack", input) then
 				if viewing then
 					jei:back()
 				end
-			elseif key == Enum.KeyCode.R or key == Enum.KeyCode.U then
-				jei:show(hoveredItem(), if key == Enum.KeyCode.R then "recipes" else "uses")
+			elseif Keybinds.matches("jeiRecipes", input) then
+				jei:show(hoveredItem(), "recipes")
+			elseif Keybinds.matches("jeiUses", input) then
+				jei:show(hoveredItem(), "uses")
 			elseif viewing then
 				-- (No slot keys: the slots are hidden behind the view.)
 				return
 			elseif digit then
 				clicks:hotbarKey(hoverTarget(), digit)
-			elseif key == Enum.KeyCode.Q then
+			elseif Keybinds.matches("drop", input) then
 				clicks:throwKey(hoverTarget(), controlDown())
 			end
 			return

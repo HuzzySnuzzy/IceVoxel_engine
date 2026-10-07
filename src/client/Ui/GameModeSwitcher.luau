@@ -35,6 +35,7 @@ local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
 local ModeSwitch = require(script.Parent.ModeSwitch)
@@ -264,8 +265,8 @@ function GameModeSwitcher.start()
 		if current == nil then
 			return
 		end
-		-- Minecraft's checkToClose: F3 let go switches and closes.
-		if not UserInputService:IsKeyDown(Enum.KeyCode.F3) then
+		-- Minecraft's checkToClose: F3 (the Debug Screen key binding) let go switches and closes.
+		if not Keybinds.isDown("debug") then
 			close(true)
 			return
 		end

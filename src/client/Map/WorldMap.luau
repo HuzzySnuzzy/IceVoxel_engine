@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Full screen world map (toggle with M or by clicking the minimap).
+	Full screen world map (toggle with M, the World Map key binding, or by clicking the minimap).
 
 	  drag            move the map            scroll / + -    zoom around the cursor
 	  right click     menu: add / remove waypoint, teleport here (if allowed), center here
@@ -28,6 +28,7 @@ local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local Hud = require(script.Parent.Parent.Ui.Hud)
+local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 local BLOCK = Config.BlockSize
 local ZOOMS = Config.Map.ZoomLevels
@@ -345,7 +346,8 @@ function WorldMap.new(
 	end)
 
 	UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == Enum.KeyCode.M and not Screens.isOpen() then
+		-- (The World Map key binding, M by default.)
+		if not processed and Keybinds.matches("worldMap", input) and not Screens.isOpen() then
 			setOpen(not open)
 		end
 	end)

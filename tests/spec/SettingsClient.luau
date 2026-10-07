@@ -218,6 +218,14 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 			-- (Types only here; the real ones need the worker pool and the network.)
 			return {}
 		end
+		if n.path == "src/client/Settings/Keybinds" then
+			-- (The zoom keys: no key is pressed here.)
+			return {
+				matches = function()
+					return false
+				end,
+			}
+		end
 		if cache[n] == nil then
 			local source = fs.readFile(`{n.path}.luau`)
 			local lines = string.split(source, "\n")
@@ -439,8 +447,32 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		for _, entry in PlayerSettings.ENTRIES do
-			t.ok(seen[entry.key] ~= nil, `{entry.key} is on a page`)
+			if entry.kind == "key" then
+				-- (Key bindings are rows of the Key Binds list, not page items.)
+				t.eq(Pages.byId[entry.page].list, "keys", `{entry.key} is on the Key Binds list`)
+			else
+				t.ok(seen[entry.key] ~= nil, `{entry.key} is on a page`)
+			end
 		end
+		-- Every page is reachable from the main page, and Done goes back where it came from.
+		local reached: { [string]: string } = { main = "main" }
+		local queue = { "main" }
+		while #queue > 0 do
+			local id = table.remove(queue, 1) :: string
+			for _, item in Pages.byId[id].items do
+				if item.kind == "page" and reached[item.id] == nil then
+					reached[item.id] = id
+					table.insert(queue, item.id)
+				end
+			end
+		end
+		for _, page in Pages.list do
+			t.ok(reached[page.id] ~= nil, `{page.id} is reachable`)
+			if page.id ~= "main" then
+				t.eq(Pages.back(page.id), reached[page.id], `{page.id}'s Done goes back to its parent`)
+			end
+		end
+		t.eq(Pages.back("main"), nil, "the main page's Done closes the menu")
 		for _, page in Pages.list do
 			local layout = Pages.layout(page)
 			local boxes = {}

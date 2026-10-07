@@ -8,14 +8,21 @@
 	and sent and saved by `id`: ids are append-only bytes like BlockList's (saved settings and the
 	wire use them), so a removed setting leaves its id unused. An entry says:
 
-	  kind      "slider" (min..max by step), "toggle" (0 / 1) or "choice" (min..max, labelled)
+	  kind      "slider" (min..max by step), "toggle" (0 / 1), "choice" (min..max, labelled) or
+	            "key" (a key binding: Shared/KeyBindings' code of a key or mouse button, 0 "Not
+	            Bound"; codes that can't be bound give the default)
 	  default   the desktop default (and `mobileDefault` on phones and tablets); for the settings a
 	            preset sets (`preset`), the preset decides instead
 	  effect    what applying it takes, a key of the client's effect registry (Settings.register):
 	            "lod", "caves", "foliage", "fog", "lighting", "lichen", "shadows", "farShadows",
 	            "textures", "overlay", "budget", "skipHidden", "swapFrames", "audio", "camera",
-	            "controls", "hud" (`also` names more). The costly ones (EXPENSIVE) wait until a
-	            slider has stopped moving (Config.Settings.ApplyDelay).
+	            "controls", "hud", "keys", "mouse" (`also` names more). The costly ones
+	            (EXPENSIVE) wait until a slider has stopped moving (Config.Settings.ApplyDelay).
+
+	Ids: the plain settings are 1, 2, 3... (id = place in the list); the key bindings are generated
+	from Shared/KeyBindings' actions from KeyBindings.KEY_BASE (128) on, one per action in its
+	order ("key.forward" 128, "key.back" 129...), so plain settings and actions both append
+	without meeting.
 
 	Presets (Low, Medium, High, Ultra; priced in parts in the README): High is Config's own view
 	(Lod, Caves, Render), Low its Mobile values (view, caves, plants, lichen lights: what phones
@@ -40,8 +47,9 @@
 ]]
 
 local Config = require(script.Parent.Config)
+local KeyBindings = require(script.Parent.KeyBindings)
 
-export type Kind = "slider" | "toggle" | "choice"
+export type Kind = "slider" | "toggle" | "choice" | "key"
 export type Values = { [string]: number }
 
 export type Entry = {
@@ -63,8 +71,9 @@ export type Entry = {
 	preset: boolean,
 	-- How the value reads (`text`): "blocks" (a distance, the name says in what), "factor",
 	-- "percent", "ms", "plain", "fullDetail" (about 32 x the value: how far full detail reaches,
-	-- in blocks); toggles read ON / OFF; `labels` name special values. Kept short: buttons are
-	-- 150 GUI pixels wide and the pixel font is 8 pixels a character.
+	-- in blocks), "log" (10 ^ (value / 100) with two decimals: Minecraft's scroll sensitivity);
+	-- toggles read ON / OFF, key bindings the key's name; `labels` name special values. Kept
+	-- short: buttons are 150 GUI pixels wide and the pixel font is 8 pixels a character.
 	format: string,
 	labels: { [number]: string }?,
 	-- Only offered on touch screens.
@@ -96,9 +105,12 @@ PlayerSettings.EXPENSIVE = table.freeze({
 	overlay = true,
 } :: { [string]: boolean })
 
--- The order effects run in within one frame (the view before the fog that follows it).
+-- The order effects run in within one frame (the view before the fog that follows it; the key
+-- bindings before the controls that bind them).
 PlayerSettings.EFFECT_ORDER = table.freeze({
+	"keys",
 	"controls",
+	"mouse",
 	"camera",
 	"audio",
 	"hud",
@@ -523,7 +535,7 @@ local ENTRIES: { Entry } = {
 		key = "fovEffects",
 		name = "FOV Effects",
 		kind = "slider",
-		page = "controls",
+		page = "accessibility",
 		min = 0,
 		max = 100,
 		step = 1,
@@ -553,7 +565,7 @@ local ENTRIES: { Entry } = {
 		key = "scrollHotbar",
 		name = "Scroll Wheel",
 		kind = "toggle",
-		page = "controls",
+		page = "mouse",
 		min = 0,
 		max = 1,
 		step = 1,
@@ -668,19 +680,188 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 	},
+	-- Mouse Settings (Minecraft's MouseSettingsScreen). Sensitivity: 0-200%, 100% is Roblox's own
+	-- feel (`mouseSensitivity`: Minecraft's (0.6 s + 0.2)^3 x 8 curve).
+	{
+		id = 37,
+		key = "sensitivity",
+		name = "Sensitivity",
+		kind = "slider",
+		page = "mouse",
+		min = 0,
+		max = 200,
+		step = 1,
+		default = 100,
+		effect = "mouse",
+		preset = false,
+		format = "percent",
+		labels = { [0] = "*yawn*", [200] = "HYPERSPEED!!!" },
+	},
+	{
+		id = 38,
+		key = "invertMouse",
+		name = "Invert Mouse",
+		kind = "toggle",
+		page = "mouse",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 0,
+		effect = "mouse",
+		preset = false,
+		format = "plain",
+	},
+	-- Minecraft's slider: -200..100 on a log scale, 10 ^ (value / 100) = 0.01..10, 1.00 by default
+	-- (`scroll`).
+	{
+		id = 39,
+		key = "scrollSensitivity",
+		name = "Scroll Sensitivity",
+		kind = "slider",
+		page = "mouse",
+		min = -200,
+		max = 100,
+		step = 1,
+		default = 0,
+		effect = "controls",
+		preset = false,
+		format = "log",
+	},
+	{
+		id = 40,
+		key = "discreteScrolling",
+		name = "Discrete Scrolling",
+		kind = "toggle",
+		page = "mouse",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 0,
+		effect = "controls",
+		preset = false,
+		format = "plain",
+	},
+	-- Minecraft's toggleCrouch (Hold by default; the touch Sneak button always toggles).
+	{
+		id = 41,
+		key = "toggleSneak",
+		name = "Sneak",
+		kind = "toggle",
+		page = "controls",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = bool(Config.Movement.ToggleSneak),
+		effect = "controls",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "Hold", [1] = "Toggle" },
+	},
+	-- Accessibility: the camera bobbing while walking, the Nausea wobble's share (squared, as
+	-- Minecraft's screenEffectScale), the hurt camera's tilt.
+	{
+		id = 42,
+		key = "viewBobbing",
+		name = "View Bobbing",
+		kind = "toggle",
+		page = "accessibility",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 1,
+		effect = "camera",
+		preset = false,
+		format = "plain",
+	},
+	{
+		id = 43,
+		key = "distortionEffects",
+		name = "Distortion Effects",
+		kind = "slider",
+		page = "accessibility",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "camera",
+		preset = false,
+		format = "percent",
+		labels = { [0] = "OFF" },
+	},
+	{
+		id = 44,
+		key = "damageTilt",
+		name = "Damage Tilt",
+		kind = "slider",
+		page = "accessibility",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "camera",
+		preset = false,
+		format = "percent",
+		labels = { [0] = "OFF" },
+	},
+	-- Minecraft's attack indicator: the weapon's recovery (Combat.strength) under the crosshair or
+	-- beside the hotbar.
+	{
+		id = 45,
+		key = "attackIndicator",
+		name = "Attack Indicator",
+		kind = "choice",
+		page = "hud",
+		min = 0,
+		max = 2,
+		step = 1,
+		default = 1,
+		effect = "hud",
+		preset = false,
+		format = "plain",
+		labels = { [0] = "OFF", [1] = "Crosshair", [2] = "Hotbar" },
+	},
 }
+
+-- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the
+-- actions' order, on the Key Binds list ("keybinds").
+local PLAIN_COUNT = #ENTRIES
+for i, action in KeyBindings.ACTIONS do
+	table.insert(
+		ENTRIES,
+		{
+			id = KeyBindings.KEY_BASE + i - 1,
+			key = KeyBindings.settingKey(action.id),
+			name = action.name,
+			kind = "key",
+			page = "keybinds",
+			min = 0,
+			max = KeyBindings.MAX_CODE,
+			step = 1,
+			default = KeyBindings.defaultCode(action.id),
+			effect = "keys",
+			preset = false,
+			format = "key",
+		} :: Entry
+	)
+end
 
 local byKey: { [string]: Entry } = {}
 local byId: { [number]: Entry } = {}
 for i, entry in ENTRIES do
-	assert(entry.id == i, `PlayerSettings: entry {entry.key} must have id {i}`)
+	local id = if i <= PLAIN_COUNT then i else KeyBindings.KEY_BASE + i - PLAIN_COUNT - 1
+	assert(entry.id == id, `PlayerSettings: entry {entry.key} must have id {id}`)
+	assert((i <= PLAIN_COUNT) == (entry.kind ~= "key"), `PlayerSettings: {entry.key} is in the wrong block`)
+	assert(id <= 255, `PlayerSettings: {entry.key}'s id must fit a byte`)
 	assert(byKey[entry.key] == nil, `PlayerSettings: duplicate key {entry.key}`)
 	byKey[entry.key] = entry
 	byId[entry.id] = entry
 	table.freeze(entry)
 end
 
+assert(PLAIN_COUNT < KeyBindings.KEY_BASE, "PlayerSettings: plain settings reached the key bindings' ids")
 PlayerSettings.ENTRIES = table.freeze(ENTRIES)
+-- How many plain settings come before the key bindings in ENTRIES.
+PlayerSettings.PLAIN_COUNT = PLAIN_COUNT
 PlayerSettings.byKey = table.freeze(byKey)
 PlayerSettings.byId = table.freeze(byId)
 
@@ -711,6 +892,11 @@ function PlayerSettings.clamp(key: string, value: number, isMobile: boolean?): n
 	local max = PlayerSettings.maxOf(entry, isMobile)
 	if value ~= value or value == math.huge or value == -math.huge then
 		value = if isMobile and entry.mobileDefault ~= nil then entry.mobileDefault else entry.default
+	end
+	if entry.kind == "key" then
+		-- (A code that can't be bound, from an old save or a bad message, is the default.)
+		local code = math.floor(value + 0.5)
+		return if KeyBindings.isCode(code) then code else entry.default
 	end
 	return math.clamp(snap(value, entry.min, entry.step), entry.min, max)
 end
@@ -990,6 +1176,58 @@ function PlayerSettings.volume(values: Values, key: string): number
 	return values[key] / 100
 end
 
+--[[
+	The mouse's turning speed as a multiplier of Roblox's own (UserInputService.
+	MouseDeltaSensitivity): Minecraft's MouseHandler.turnPlayer, f = 0.6 s + 0.2 and f^3 x 8 for
+	the sensitivity option s (0..1, the slider's 0-200%): 100% is exactly 1, 0% 0.064 ("*yawn*",
+	slow but never still), 200% 4.096.
+]]
+function PlayerSettings.mouseSensitivity(values: Values): number
+	local f = 0.6 * (values.sensitivity / 200) + 0.2
+	return f * f * f * 8
+end
+
+-- Minecraft's scroll sensitivity: 10 ^ (slider / 100), 0.01..10.
+function PlayerSettings.scrollSensitivity(values: Values): number
+	return 10 ^ (values.scrollSensitivity / 100)
+end
+
+--[[
+	A turn of the wheel (`delta`, Roblox's MouseWheel Position.Z: +1 a notch up) as Minecraft's
+	MouseHandler.onScroll scales it: by the scroll sensitivity, and only its sign with Discrete
+	Scrolling. What an open screen gets.
+]]
+function PlayerSettings.scrollTurn(delta: number, values: Values): number
+	local turn = if PlayerSettings.on(values, "discreteScrolling") then math.sign(delta) else delta
+	return turn * PlayerSettings.scrollSensitivity(values)
+end
+
+--[[
+	MouseHandler.onScroll with no screen open: the scaled turn (`scrollTurn`) adds to
+	`accumulated`, which starts over when the direction changes; whole steps come out (toward
+	zero, as Java's int cast) and the rest stays. Returns the whole steps (+ up), the new rest and
+	the scaled turn.
+]]
+function PlayerSettings.scroll(accumulated: number, delta: number, values: Values): (number, number, number)
+	local turn = PlayerSettings.scrollTurn(delta, values)
+	if accumulated ~= 0 and math.sign(turn) ~= math.sign(accumulated) then
+		accumulated = 0
+	end
+	accumulated += turn
+	-- (A hair of slack, so ten turns of 0.1 make a step despite the sum's 0.99999...)
+	local whole = if accumulated >= 0 then math.floor(accumulated + 1e-9) else -math.floor(-accumulated + 1e-9)
+	return whole, accumulated - whole, turn
+end
+
+--[[
+	Minecraft's Distortion Effects (screenEffectScale) as the share of the Nausea wobble: squared,
+	as GameRenderer scales the spinning effect (50%: a quarter).
+]]
+function PlayerSettings.distortion(values: Values): number
+	local share = values.distortionEffects / 100
+	return share * share
+end
+
 -- The effects a change of `key` needs: its own and `also`.
 function PlayerSettings.effectsOf(key: string): { string }
 	local entry = PlayerSettings.entry(key)
@@ -1011,6 +1249,8 @@ function PlayerSettings.valueText(key: string, value: number): string
 	end
 	if entry.kind == "toggle" then
 		return if value >= 0.5 then "ON" else "OFF"
+	elseif entry.kind == "key" then
+		return KeyBindings.text(value)
 	end
 	local format = entry.format
 	if format == "fullDetail" then
@@ -1021,6 +1261,8 @@ function PlayerSettings.valueText(key: string, value: number): string
 		return `{value}%`
 	elseif format == "ms" then
 		return `{value} ms`
+	elseif format == "log" then
+		return string.format("%.2f", 10 ^ (value / 100))
 	end
 	return if value == math.floor(value) then tostring(math.floor(value)) else tostring(value)
 end
