@@ -92,6 +92,20 @@
 	cell or under rock, not at the open bottom of a pit, a ravine or a dug shaft, where the sky and
 	the surface are what is seen) and for Lod.UndergroundSeconds after that ends.
 
+	Caves always shown (the Caves setting, ViewSettings.alwaysCaves: `alwaysCaves`): every section
+	of every full detail chunk is revealed (`wantsReveal`), wherever the camera is; the search does
+	not run (the probe neither: only `enclosed`, for the underground split). Everything above holds
+	as it is: caps close tunnels towards chunks that are not full detail on screen and towards
+	sections whose revealed mesh is not live yet, chunks leave once the tunnels next door closed.
+	Far nodes have no caves at any setting (cave entrances and ravines are cut into levels 1-2 as
+	open air, the same either way), so they stay as they are. Switching (`applyView`) remeshes, by
+	the passes above, only what changes: the next refresh checks every section of every ready full
+	detail chunk once (`caveFlip`); sections whose flag differs are remeshed (REVEAL: commit groups
+	of RevealGroupSections, nearest first; hiding is one group) or, with nothing to mesh, just
+	flagged. Workers mesh a revealed section without a cave cell in or around it as hidden
+	(GreedyMesher.touchesCaves: the same boxes), so buried rock stays free. Back to hidden, the
+	search starts afresh from the camera: what it reaches stays revealed, the rest hides.
+
 	Hidden terrain (HiddenTerrain, World/Horizon): every generated node carries a summary (lowest
 	ground and highest top of 4 x 4 tiles; edits of full detail chunks update theirs:
 	Horizon.applyEdits, in the worker and here). About once a second while the camera moves, or
@@ -260,6 +274,8 @@ export type Stats = {
 	-- reached by the last search, and how long it took (ms).
 	revealRadius: number,
 	underground: boolean,
+	-- Caves always shown (every full detail section revealed, no search).
+	alwaysCaves: boolean,
 	revealed: number,
 	reached: number,
 	searchMs: number,
@@ -309,6 +325,10 @@ export type ChunkStreamer = {
 	cave: CaveReach.View,
 	caveDirty: boolean,
 	graphLookup: SectionGraph.Lookup,
+	-- Caves always shown (the Caves setting), and whether the next refresh checks every section of
+	-- the ready full detail chunks (it changed).
+	alwaysCaves: boolean,
+	caveFlip: boolean,
 	-- Keeps LodTree's underground split a few seconds after the cave view ended, and whether the
 	-- last selection used it.
 	undergroundHold: CaveReach.Hold,
@@ -418,18 +438,23 @@ local function updateCaveView(self: ChunkStreamer, now: number)
 	local function getBlock(x: number, y: number, z: number): number?
 		return self.world:getBlock(x, y, z)
 	end
-	local open = CaveReach.probe(getBlock, camera.X, camera.Y, camera.Z, self.revealMax)
-	local radius = self.caveReach:update(open, now)
+	-- (Caves always shown: no search, so no reach; only `enclosed`, for the underground split.)
+	local reach = 0
+	if not self.alwaysCaves then
+		local open = CaveReach.probe(getBlock, camera.X, camera.Y, camera.Z, self.revealMax)
+		reach = CaveReach.searchReach(self.tunnelReach, self.caveReach:update(open, now))
+	end
 	self.caveView = {
 		position = camera,
-		reach = CaveReach.searchReach(self.tunnelReach, radius),
+		reach = reach,
 		enclosed = CaveReach.enclosed(getBlock, camera.X, camera.Y, camera.Z, surface),
 	}
 end
 
--- Is section `s` of the full detail chunk `node` meshed with caves visible (revealed)?
+-- Is section `s` of the full detail chunk `node` meshed with caves visible (revealed)? Every one
+-- while caves are always shown.
 local function wantsReveal(self: ChunkStreamer, node: Node, s: number): boolean
-	return self.cave:reveals(node.nx, node.nz, s)
+	return self.alwaysCaves or self.cave:reveals(node.nx, node.nz, s)
 end
 
 --[[
@@ -444,7 +469,7 @@ end
 	the pass marked counts: `checkCaps`.)
 ]]
 local function drawsCaves(self: ChunkStreamer, node: Node, s: number, group: any?, pass: boolean?): boolean
-	if not self.cave:reveals(node.nx, node.nz, s) then
+	if not wantsReveal(self, node, s) then
 		return false
 	end
 	local together = if pass
@@ -641,8 +666,9 @@ local function revealList(
 ): { number }
 	local list = {}
 	local job: { [number]: boolean }? = nil
+	local any = self.alwaysCaves or self.cave.count > 0
 	for _, s in sections do
-		if self.cave.count > 0 and wantsReveal(self, node, s) then
+		if any and wantsReveal(self, node, s) then
 			table.insert(list, s)
 		elseif remesh and node.live[s] then
 			if job == nil then
@@ -1686,11 +1712,16 @@ local function checkCaps(self: ChunkStreamer, node: Node, s: number, later: { an
 	if node.reveal[s] ~= true or not wantsReveal(self, node, s) or self.remesh:isDirty(node, s) then
 		return 0
 	end
+	-- (No cave air at any face, as the graphs say: caps change nothing. Most sections, with caves
+	-- always shown: the air above the terrain.)
+	local faces = capFaces(self, node, s)
+	if faces == 0 then
+		return 0
+	end
 	-- (As its job in flight, if any, saw them: a section of that job's group still counts.)
 	local group = node.sentGroup[s]
 	local caps = capsOf(self, node, s, nil, group)
 	local was = node.caps[s] or 0
-	local faces = capFaces(self, node, s)
 	if bit32.band(bit32.bxor(caps, was), faces) == 0 then
 		if later and bit32.band(bit32.bxor(capsOf(self, node, s, nil, group, true), was), faces) ~= 0 then
 			table.insert(later, node)
@@ -1711,8 +1742,57 @@ local function checkCaps(self: ChunkStreamer, node: Node, s: number, later: { an
 	return bit32.band(caps, bit32.bnot(was))
 end
 
--- The section keys of `node` that are revealed or meshed revealed, into `check`.
+--[[
+	Every section of ready full detail chunk `node`, for the cave view as it is now (the Caves
+	setting changed, or caves are always shown): the sections holding its terrain into `check`;
+	the air above it (from emptyAbove up: nothing to mesh either way, so checkFlag would only
+	change the flag) takes its flag here, without a pass and without `liveCheck`, and only the
+	sections of taller chunks next door that face it are checked (a cave opening in a cliff above
+	this chunk opens or closes towards it). About 60 of a chunk's 64 sections are such air: the
+	frame switching the setting stays short.
+]]
+local function allSections(self: ChunkStreamer, node: Node, check: { [number]: boolean })
+	local base = SectionGraph.key(node.nx, node.nz, 0)
+	local chunk = node.chunk :: ClientWorld.ChunkData
+	local first = math.min(math.ceil(chunk.emptyAbove / SECTION), SECTIONS)
+	for s = 0, first - 1 do
+		check[base + s] = true
+	end
+	local remesh = self.remesh
+	for s = first, SECTIONS - 1 do
+		local want = wantsReveal(self, node, s)
+		if want == (node.reveal[s] == true) or remesh:isDirty(node, s) then
+			continue
+		end
+		setReveal(self, node, s, want)
+		node.caps[s] = nil
+		if want then
+			node.live[s] = true
+			node.liveCaps[s] = 0
+		else
+			node.live[s] = nil
+			node.liveCaps[s] = nil
+		end
+		for d = 1, 4 do
+			local face = FACES[d]
+			local other = self.nodes[Coords.chunkKey(node.nx + face[1], node.nz + face[2])]
+			local otherChunk = if other then other.chunk else nil
+			if otherChunk and s * SECTION < otherChunk.emptyAbove then
+				check[SectionGraph.key(other.nx, other.nz, s)] = true
+			end
+		end
+	end
+end
+
+-- The section keys of `node` that are revealed or meshed revealed, into `check` (all of them while
+-- caves are always shown: a node generated hidden just before the switch is ready now).
 local function addSections(self: ChunkStreamer, node: Node, check: { [number]: boolean })
+	if self.alwaysCaves then
+		if node.chunk and node.ready and not node.removed then
+			allSections(self, node, check)
+		end
+		return
+	end
 	local base = SectionGraph.key(node.nx, node.nz, 0)
 	if node.revealCount > 0 then
 		for s, on in node.reveal do
@@ -1827,10 +1907,12 @@ end
 	changed): the search runs if needed (CaveReach.view), then only the sections whose reveal flag
 	or caps may differ are checked: the sections revealed or hidden and their neighbours, the
 	sections of chunks next to full detail chunks that came or went, and those of nodes that became
-	ready since. One pass's remeshes are one commit group when few (RemeshQueue.beginPass).
+	ready since. One pass's remeshes are one commit group when few (RemeshQueue.beginPass). With
+	caves always shown there is no search; after the Caves setting changed (`caveFlip`) every
+	section of every ready full detail chunk is checked once.
 ]]
 local function updateReveal(self: ChunkStreamer, changed: { [number]: number }?, now: number)
-	local view = self.caveView
+	local view = if self.alwaysCaves then nil else self.caveView
 	local dirty = self.caveDirty
 	self.caveDirty = false
 	if view and changed and not dirty then
@@ -1849,20 +1931,31 @@ local function updateReveal(self: ChunkStreamer, changed: { [number]: number }?,
 			end
 		end
 	end
-	local p = if view then view.position else nil
-	local added, removed = self.cave:update(
-		self.graphLookup,
-		if p then p.X else nil,
-		if p then p.Y else nil,
-		if p then p.Z else nil,
-		if view then view.reach else 0,
-		now,
-		dirty
-	)
 	local check: { [number]: boolean } = {}
-	if #added + #removed > 0 then
-		table.move(removed, 1, #removed, #added + 1, added)
-		check = SectionGraph.neighbourhood(added)
+	if not self.alwaysCaves then
+		local p = if view then view.position else nil
+		local added, removed = self.cave:update(
+			self.graphLookup,
+			if p then p.X else nil,
+			if p then p.Y else nil,
+			if p then p.Z else nil,
+			if view then view.reach else 0,
+			now,
+			dirty
+		)
+		if #added + #removed > 0 then
+			table.move(removed, 1, #removed, #added + 1, added)
+			check = SectionGraph.neighbourhood(added)
+		end
+	end
+	if self.caveFlip then
+		-- The Caves setting changed: every section of every ready full detail chunk, once.
+		self.caveFlip = false
+		for _, node in self.nodes do
+			if node.level == 0 and node.ready and node.chunk and not node.removed then
+				allSections(self, node, check)
+			end
+		end
 	end
 	-- Chunks next to full detail chunks that came, went or were shown.
 	local around = self.capCheck
@@ -2421,6 +2514,8 @@ function ChunkStreamer.new(
 			caveView = nil,
 			cave = CaveReach.view(Caves.RevealHold, Caves.RevealBudget),
 			caveDirty = false,
+			alwaysCaves = ViewSettings.alwaysCaves(),
+			caveFlip = false,
 			graphLookup = nil :: any,
 			undergroundHold = CaveReach.hold(Config.Lod.UndergroundSeconds),
 			underground = false,
@@ -2586,9 +2681,10 @@ end
 
 --[[
 	The view settings changed (Settings effects "lod", "caves", "foliage"): LodTree's four
-	distances, plants, the cave view's tunnel reach and open-space radii from ViewSettings, then a
-	refresh this frame (the search runs again). "Skip hidden terrain" needs no call: it is read at
-	every refresh.
+	distances, plants, the cave view's tunnel reach and open-space radii and whether caves are
+	always shown from ViewSettings, then a refresh this frame (the search runs again; after a
+	switch of the Caves setting every full detail section is checked). "Skip hidden terrain" needs
+	no call: it is read at every refresh.
 ]]
 function ChunkStreamer.applyView(self: ChunkStreamer)
 	ViewSettings.applyLod()
@@ -2597,6 +2693,14 @@ function ChunkStreamer.applyView(self: ChunkStreamer)
 	self.revealMax = revealMax
 	self.tunnelReach = ViewSettings.revealReach()
 	self.caveDirty = true
+	local always = ViewSettings.alwaysCaves()
+	if always ~= self.alwaysCaves then
+		-- The Caves setting: a fresh cave view (back to hidden, the search starts from the camera
+		-- at the next refresh; always shown, it is not used), and every section checked once then.
+		self.alwaysCaves = always
+		self.cave = CaveReach.view(Caves.RevealHold, Caves.RevealBudget)
+		self.caveFlip = true
+	end
 	self.forceSelect = true
 	self.sinceRefresh = math.huge
 end
@@ -2627,6 +2731,7 @@ function ChunkStreamer.stats(self: ChunkStreamer): Stats
 		busyWorkers = self.pool:busy(),
 		revealRadius = if self.caveView then (self.caveView :: CaveView).reach else 0,
 		underground = self.underground,
+		alwaysCaves = self.alwaysCaves,
 		revealed = self.cave.count,
 		reached = self.cave.reached,
 		searchMs = self.cave.searchMs,

@@ -6,6 +6,10 @@
 	Times generating and meshing chunks at every LOD level, then runs the real LOD selection around
 	the spawn point and meshes every selected node to estimate how many parts the client creates,
 	and how many remain when far meshes (Config.Render.FarMeshes) merge every eligible region.
+	Then what the Caves setting costs over the full detail range (above ground, and with the
+	underground split): parts, meshing time, the boxes' bytes and the sparse lights with caves
+	hidden (no camera underground) and always shown (every section revealed, capped towards the
+	coarser nodes around, a section with no cave cell near meshed hidden as the workers do).
 ]]
 
 local process = require("@lune/process")
@@ -25,7 +29,9 @@ local seed = tonumber(process.args[1]) or 12345
 LodTree.configure(
 	tonumber(process.args[2]) or Config.Lod.ViewDistance,
 	tonumber(process.args[3]) or Config.Lod.SplitDistance,
-	tonumber(process.args[4]) or tonumber(process.args[3]) or Config.Lod.SplitDistanceL1
+	tonumber(process.args[4]) or tonumber(process.args[3]) or Config.Lod.SplitDistanceL1,
+	-- (Full detail underground: the Caves setting's cost below.)
+	Config.Lod.UndergroundSplitDistanceL1
 )
 local gen = TerrainGenerator.new(seed)
 local sx, sh, sz = gen.findSpawn()
@@ -168,3 +174,81 @@ print(
 		triangles // 1000
 	)
 )
+
+-- The Caves setting over the full detail range: hidden (above ground, nothing revealed) against
+-- always shown (ChunkWorker's way: revealed sections without a cave cell near mesh hidden).
+local Blocks = require(shared.Blocks)
+local function lightsOf(boxes: buffer, count: number): number
+	local lights = 0
+	for i = 0, count - 1 do
+		local app, surface = GreedyMesher.decodeKey(buffer.readu16(boxes, i * GreedyMesher.BOX_BYTES + 12))
+		if buffer.readu8(GreedyMesher.sparseLightLut, app) == 1 then
+			local lit = if Blocks.appearances[app].shape
+				then surface == 1
+				else select(2, GreedyMesher.fluidSurface(surface))
+			if lit then
+				lights += 1
+			end
+		end
+	end
+	return lights
+end
+for _, underground in { false, true } do
+	local selected = LodTree.select(sx + 0.5, sz + 0.5, nil, underground)
+	local full: { [number]: boolean } = {}
+	local chunks = {}
+	for key, level in selected do
+		if level == 0 then
+			local _, nx, nz = Coords.decodeNodeKey(key)
+			full[Coords.chunkKey(nx, nz)] = true
+			table.insert(chunks, { nx, nz })
+		end
+	end
+	local cost = {
+		hidden = { parts = 0, ms = 0, sections = 0, lights = 0 },
+		always = { parts = 0, ms = 0, sections = 0, lights = 0 },
+	}
+	for _, c in chunks do
+		local r = gen.generate(0, c[1], c[2])
+		local caps = 0
+		for d, side in { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } } do
+			if not full[Coords.chunkKey(c[1] + side[1], c[2] + side[2])] then
+				caps += bit32.lshift(1, d - 1)
+			end
+		end
+		for y0 = 0, r.height - 1, Config.SectionHeight do
+			local y1 = math.min(y0 + Config.SectionHeight, r.height)
+			for mode, entry in cost do
+				local t0 = os.clock()
+				local hide = mode == "hidden" or not GreedyMesher.touchesCaves(r.data, r.height, y0, y1)
+				if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, hide) then
+					local border = if not hide and caps ~= 0 then { hidden = caps } else nil
+					local boxes, count = GreedyMesher.mesh(r.data, r.height, y0, y1, hide, border, true)
+					entry.parts += count
+					entry.sections += 1
+					entry.lights += lightsOf(boxes, count)
+				end
+				entry.ms += (os.clock() - t0) * 1000
+			end
+		end
+	end
+	local hidden, always = cost.hidden, cost.always
+	print(
+		string.format(
+			"\nFull detail caves%s, %d chunks (plants left out):\n  hidden until seen: %6d parts, %4d sections meshed in %5.0f ms, %5.0f KB of boxes, %d lights\n  always shown:      %6d parts (%.2fx), %4d sections meshed in %5.0f ms, %5.0f KB of boxes, %d lights",
+			if underground then " (underground split)" else "",
+			#chunks,
+			hidden.parts,
+			hidden.sections,
+			hidden.ms,
+			hidden.parts * GreedyMesher.BOX_BYTES / 1024,
+			hidden.lights,
+			always.parts,
+			always.parts / math.max(hidden.parts, 1),
+			always.sections,
+			always.ms,
+			always.parts * GreedyMesher.BOX_BYTES / 1024,
+			always.lights
+		)
+	)
+end

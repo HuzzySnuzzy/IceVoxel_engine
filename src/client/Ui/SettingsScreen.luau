@@ -19,6 +19,9 @@
 	            change applies at once and the settings are sent to the server (Settings.flush).
 	  Gamepad   A, B and the D-pad; Down / Up also step through the widgets in reading order, so
 	            every widget is reachable while left / right move the sliders.
+	  Tooltips  a setting with a PlayerSettings `tooltip` (Caves: what Always Shown costs) shows
+	            it in Minecraft's tooltip box while hovered or selected, below the widget or above
+	            it (Pages.tooltipAt), wrapped to Pages.TOOLTIP_W pixels (Ui/TextWrap).
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -34,12 +37,18 @@ local ViewSettings = require(script.Parent.Parent.Rendering.ViewSettings)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local FormWidgets = require(script.Parent.FormWidgets)
 local Screens = require(script.Parent.Screens)
+local Style = require(script.Parent.Style)
+local TextWrap = require(script.Parent.TextWrap)
 
 -- Minecraft's white title and gray status text.
 local WHITE = Color3.fromRGB(255, 255, 255)
 local GRAY = Color3.fromRGB(160, 160, 160)
 -- Seconds between status line updates while the menu is open.
 local STATUS_INTERVAL = 0.25
+-- The tooltip's border, blended over its background as Minecraft draws it (translucent), like
+-- Ui/Screens' item tooltips.
+local TOOLTIP_TOP = Color3.fromRGB(36, 0, 90)
+local TOOLTIP_BOTTOM = Color3.fromRGB(23, 0, 50)
 
 type Widget = {
 	button: FormWidgets.Button,
@@ -63,6 +72,9 @@ local views: { [string]: PageView } = {}
 local shownPage = "main"
 -- Set by start: applies what waits, saves and closes the menu.
 local finish: () -> () = function() end
+-- The tooltip (one for the menu) and the widget it is shown for.
+local tooltip: Frame? = nil
+local tooltipOwner: GuiObject? = nil
 
 function SettingsScreen.isOpen(): boolean
 	local p = panel
@@ -82,6 +94,73 @@ local function sliderRange(key: string): (number, (number) -> number, (number) -
 		return math.floor((value - entry.min) / entry.step + 0.5)
 	end
 	return steps, valueOf, indexOf
+end
+
+-- Hides the tooltip (`owner`: only when it is that widget's).
+local function hideTooltip(owner: GuiObject?)
+	local frame = tooltip
+	if frame and (owner == nil or owner == tooltipOwner) then
+		frame.Visible = false
+		tooltipOwner = nil
+	end
+end
+
+-- Shows `text` in Minecraft's tooltip box for the widget `owner` at `placed`.
+local function showTooltip(owner: GuiObject, placed: Pages.Placed, text: string)
+	local frame = tooltip
+	if frame == nil then
+		return
+	end
+	frame:ClearAllChildren()
+	local rows = TextWrap.wrap(text, Pages.TOOLTIP_W, function(row: string): number
+		return Style.textWidth(row)
+	end)
+	local width = 0
+	for _, row in rows do
+		width = math.max(width, Style.textWidth(row))
+	end
+	local pad = Pages.TOOLTIP_PAD
+	-- (Rows 10 pixels apart, as Minecraft's tooltip lines.)
+	local w, h = width + pad * 2, (#rows - 1) * 10 + Style.TEXT_SIZE + pad * 2
+	local back = Style.frame(frame, 0, 0, w, h, Style.Colour.TooltipBack, 1)
+	back.BackgroundTransparency = 0.06
+	for i, side in Style.border(back, 1, 1, w - 2, h - 2, 1, TOOLTIP_TOP, 2) do
+		side.BackgroundColor3 = if i == 2 then TOOLTIP_BOTTOM else TOOLTIP_TOP
+		if i >= 3 then
+			side.BackgroundColor3 = Color3.new(1, 1, 1)
+			local gradient = Instance.new("UIGradient")
+			gradient.Rotation = 90
+			gradient.Color = ColorSequence.new(TOOLTIP_TOP, TOOLTIP_BOTTOM)
+			gradient.Parent = side
+		end
+	end
+	for i, row in rows do
+		Style.shadowText(back, row, pad, pad + (i - 1) * 10, width + 2, Style.TEXT_SIZE, Style.Colour.Text, 5)
+	end
+	local x, y = Pages.tooltipAt(placed, w, h)
+	frame.Position = UDim2.fromOffset(x, y)
+	frame.Size = UDim2.fromOffset(w, h)
+	frame.Visible = true
+	tooltipOwner = owner
+end
+
+-- The setting's tooltip (if it has one) follows its widget's hover and gamepad selection.
+local function addTooltip(widget: Widget, placed: Pages.Placed)
+	local text = PlayerSettings.entry(placed.item.id).tooltip
+	if text == nil then
+		return
+	end
+	local object = widget.button.button
+	local function show()
+		showTooltip(object, placed, text)
+	end
+	local function hide()
+		hideTooltip(object)
+	end
+	object.MouseEnter:Connect(show)
+	object.MouseLeave:Connect(hide)
+	object.SelectionGained:Connect(show)
+	object.SelectionLost:Connect(hide)
 end
 
 local function settingWidget(parent: Frame, placed: Pages.Placed): Widget
@@ -152,6 +231,7 @@ local function buildPage(root: Frame, page: Pages.Page, show: (id: string) -> ()
 		local widget: Widget
 		if item.kind == "setting" then
 			widget = settingWidget(frame, placed)
+			addTooltip(widget, placed)
 		else
 			local button = FormWidgets.button(frame, item.text or item.id, placed.x, placed.y, placed.w, placed.h)
 			if item.kind == "page" then
@@ -236,7 +316,18 @@ function SettingsScreen.start()
 
 	local thePanel: Screens.Panel
 
+	-- (Above every page.)
+	local tip = Instance.new("Frame")
+	tip.Name = "Tooltip"
+	tip.BackgroundTransparency = 1
+	tip.Visible = false
+	tip.ZIndex = 10
+	tip.Parent = root
+	tooltip = tip
+
 	local function show(id: string)
+		-- (A page change or the menu closing: Done, P, E, Escape all come here.)
+		hideTooltip()
 		local previous = views[shownPage]
 		if previous then
 			previous.frame.Visible = false

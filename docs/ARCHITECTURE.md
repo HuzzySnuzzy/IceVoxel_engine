@@ -645,7 +645,11 @@ Roblox parts are boxes, so the mesher covers blocks with as few boxes as possibl
   not drawn, but a box may run through it, so the caps merge into the rock around them.
   QuadMesher draws the same caps face by face. Over six areas of 12 × 12 chunks: +0.7%
   hidden-mode parts (+2.7% where entrances are densest, -0.3% with no surface caves; +1.5% without
-  the new wildcards), meshing +5-10% interpreted;
+  the new wildcards), meshing +5-10% interpreted. A range with no cave cell in it or around it
+  (`touchesCaves`: the cells its mesh reads, padding and the layers above and below) meshes the
+  same with caves hidden or shown, so ChunkWorker meshes such a revealed section hidden, and
+  buried rock is trivial again (with caves always shown, 2,161 of 5,689 mountain sections are
+  meshed, in half the time; tests/spec/Meshing compares both on real chunks);
 - **sparse lights** (`sparseLightLut`, per appearance: glow lichen and every fluid giving light,
   lava) are drawn in every cell, but only one cell per light box carries the light
   (`sparseBoxLut`: `LIGHT_BOX`³, 8³ blocks, for lichen; `FLUID_LIGHT_BOX`³, 16³, for lava, whose
@@ -887,8 +891,31 @@ that job, which takes the current answer.
 
 **Settings**: `streamer:applyView()` (effects "lod", "caves", "foliage") sets LodTree's four
 distances and plants from `ViewSettings`, a new cave reach tracker from its radii and the tunnel
-reach, and selects again in that frame. "Skip hidden terrain" needs no call: it is read every
-refresh.
+reach, whether caves are always shown (below), and selects again in that frame. "Skip hidden
+terrain" needs no call: it is read every refresh.
+
+**Caves always shown** (the Caves setting, `ViewSettings.alwaysCaves`, default
+`Caves.AlwaysShow` false). The streamer's `alwaysCaves` makes every section of every full detail
+chunk revealed (`wantsReveal`), wherever the camera is; the search does not run, nor the probe
+(only `enclosed`, which the underground split still needs). Nothing else changes: jobs carry every
+section in `reveal`, caps close towards chunks that are not full detail on screen and towards
+sections whose revealed mesh is not live yet, a chunk leaves the screen once the tunnels next door
+closed, so the void rules above (*Caps*) hold as they are (tests/spec/Streaming runs the void check
+through both switches, in the cave world and on real terrain). Far nodes have no caves at either
+setting: levels 1-2 cut entrances and ravines as open air, the same both ways, so "revealed"
+means nothing for them and they stay as they are; full detail chunks are where every cave shows.
+Switching (`applyView` sees the setting change) starts a fresh cave view and sets `caveFlip`: the
+next refresh checks every section of every ready full detail chunk once (`allSections`). The air
+above a chunk's terrain (from `emptyAbove` up, about 60 of its 64 sections) just takes its flag
+there, and only taller neighbours' sections facing it are checked; the sections holding terrain
+go through the usual pass: REVEAL remeshes in commit groups of `RevealGroupSections`, nearest
+first, or all hides in one group. Back to hidden the fresh search runs from the camera in the same
+refresh, so what it reaches stays revealed. Nothing is generated again. Measured (real terrain at
+a cave entrance's mouth, 88 full detail chunks, 446 sections of terrain): to always shown 648
+sections remeshed (1.45 each: a cap closed where two commit groups met reopens once the other is
+live) in 152 jobs; back to hidden 446 in 88 jobs; the switching frame 10-14 ms in Lune (passing
+the air through `checkPass` too took 3-4 times that). Cost of the setting itself: about 4 × the
+parts of full detail terrain (README, `lune run tests/bench`), plus a few hundred sparse lights.
 
 ### Workers (`Streaming/ChunkWorker`, `Streaming/WorkerPool`)
 
@@ -957,6 +984,10 @@ the fill against a per-cell flood fill, tests/spec/CaveView the reveal and caps.
 The bury line is per chunk, the sky line per column: above the bury line, dug air is followed
 where it lies below the sky line or doesn't reach its section's top, so a shaft dug down from the
 surface is followed up to the section where it meets the sky, and no further.
+
+With caves always shown (the Caves setting, see Streaming) none of this runs: every full detail
+section counts as revealed, and only the caps (`capsOf`, towards what is not full detail on
+screen or not live yet) still close tunnels in stone.
 
 ### Far nodes behind terrain (`World/Horizon`)
 
@@ -1797,8 +1828,9 @@ screen; Config gives every default and the presets.
   graphics quality: 1-3 Low, 4-6 Medium, 7-10 or Automatic High), the LOD balance rule (split
   distance at least 2, full detail at most split + 1, the underground split from the cave view
   between the two; checked against real `LodTree` selections for every slider combination), what
-  values mean (`lod`, `revealReach`, `revealRadii`, `lichenLightDistance`, `buildBudget`,
-  `caveAmbient`, `fovModifier`, `volume`), the wire format and the DataStore record.
+  values mean (`lod`, `revealReach`, `revealRadii`, `alwaysCaves`, `lichenLightDistance`,
+  `buildBudget`, `caveAmbient`, `fovModifier`, `volume`), an optional `tooltip`, the wire format
+  and the DataStore record.
 - **State** (`Settings/State`, pure). One values table for the session, changed in place
   (`Rendering/ViewSettings` reads the same table), and which settings the player chose. Only
   chosen settings are saved, so everything else keeps following the preset and Roblox's quality
@@ -1817,7 +1849,7 @@ screen; Config gives every default and the presets.
 
   | Effect                       | What it calls                                                       |
   | ---------------------------- | ------------------------------------------------------------------- |
-  | lod, caves, foliage          | `ChunkStreamer:applyView()` (see Streaming)                         |
+  | lod, caves, foliage          | `ChunkStreamer:applyView()` (see Streaming; the Caves setting switches its `alwaysCaves`) |
   | fog, lighting                | `ViewSettings.applyFog` / `applyLighting` (Prefer, Brightness)      |
   | shadows, farShadows, textures | `ChunkRenderer:restyle` (see Rendering; farMaterials uses textures) |
   | overlay                      | `MeshOverlay:setUserEnabled` (see Far meshes)                       |
@@ -1840,7 +1872,11 @@ screen; Config gives every default and the presets.
   inventory's gear; P, E, Escape, gamepad B and Done close it and flush. Gamepad: D-pad left /
   right step a slider (`FormWidgets`' `stepSelected` keeps the selection on it), down / up move
   through the widgets in reading order. Status lines come from providers the client script sets
-  (`Settings.setStatus`: "terrain", "farMeshes", "controls").
+  (`Settings.setStatus`: "terrain", "farMeshes", "controls"). A setting with a `tooltip`
+  (PlayerSettings; Caves warns "May lower performance") shows it in Minecraft's tooltip box while
+  hovered or selected: wrapped to `Pages.TOOLTIP_W` (200) pixels (Ui/TextWrap), below the widget
+  or above it near the panel's bottom (`Pages.tooltipAt`, Minecraft's
+  BelowOrAboveWidgetTooltipPositioner).
 - **Persistence** (`Players/SettingsStore`, like WaypointStore). One profile per kind of device
   (desktop, touch: `ViewSettings.isMobile`, console: `GuiService:IsTenFootInterface`), so a phone
   never loads a computer's view. DataStore "IceVoxelSettings_v1", key `player_<UserId>`, a record
@@ -4894,7 +4930,8 @@ treat cave air (and the cave twins: the glow lichen generated on cave walls, the
 caves' lava seas and lakes, the oil of buried deposits) as rock (`hideCaves`), which removes every
 cave wall, and draws the hidden side of a junction with open air as stone caps; sections are meshed
 with caves visible only while the camera is below the terrain surface, and only those its section
-visibility search reaches (see Meshing, Streaming and Cave visibility above).
+visibility search reaches (see Meshing, Streaming and Cave visibility above); the Caves setting's
+Always Shown meshes every full detail section with its caves instead (about 4 × the parts).
 
 **Octrees** are a storage / search structure: a cube split into 8 children until regions are
 uniform. They compress big uniform volumes (air, solid rock) and speed up ray tracing and some LOD

@@ -205,6 +205,25 @@ local function borderOf(open: buffer?, caps: { [number]: number }?, section: num
 	return { open = open, hidden = hidden }
 end
 
+--[[
+	Is section `section` (cells y0 .. y1-1) meshed with caves hidden? Those the job does not reveal,
+	and revealed ones with no cave cell in or around them (GreedyMesher.touchesCaves): their boxes
+	are the same either way, and hidden, buried rock is trivial. With caves always shown (every
+	section revealed) that leaves out the solid rock under mountains: of the 164 full detail chunks
+	at Config's view there (tests/bench), 2,161 sections are meshed instead of 5,689 (1,927 of them
+	hold or touch caves), in half the time.
+]]
+local function hidesCaves(
+	reveal: { [number]: boolean },
+	data: buffer,
+	height: number,
+	y0: number,
+	y1: number,
+	section: number
+): boolean
+	return not reveal[section] or not GreedyMesher.touchesCaves(data, height, y0, y1)
+end
+
 local function generate(job: Job): Job
 	local level = job.level :: number
 	local r = generator.generate(level, job.nx, job.nz, yieldIfNeeded, true)
@@ -307,7 +326,7 @@ local function generate(job: Job): Job
 		local reveal = toSet(job.reveal)
 		for section = 0, height // SECTION - 1 do
 			local y0, y1 = section * SECTION, (section + 1) * SECTION
-			local hide = not reveal[section]
+			local hide = hidesCaves(reveal, data, height, y0, y1, section)
 			if not GreedyMesher.isTrivial(y0, y1, meshBelow, emptyAbove, hide) then
 				local boxes, count, plantCells = GreedyMesher.mesh(
 					data,
@@ -383,7 +402,7 @@ local function remesh(job: Job): Job
 	local plants: { number } = {}
 	for _, section in job.sections :: { number } do
 		local y0, y1 = section * SECTION, math.min((section + 1) * SECTION, height)
-		local hide = not reveal[section]
+		local hide = hidesCaves(reveal, data, height, y0, y1, section)
 		local boxes = buffer.create(0)
 		if not GreedyMesher.isTrivial(y0, y1, meshBelow, job.emptyAbove, hide) then
 			local meshed, _, plantCells =

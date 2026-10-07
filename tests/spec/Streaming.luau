@@ -2100,7 +2100,7 @@ return function(t, shared, require, _server, client)
 	end
 
 	-- The caps section `s` of chunk (cx, cz) should have once settled: open only towards revealed
-	-- sections on screen, drawing their caves.
+	-- sections on screen, drawing their caves (every one while caves are always shown).
 	local function wantedCaps(sim: any, cx: number, cz: number, s: number): number
 		local streamer = sim.streamer
 		local mask = 0
@@ -2111,7 +2111,7 @@ return function(t, shared, require, _server, client)
 				local open = node ~= nil
 					and node.shown
 					and streamer.desired[Coords.chunkKey(x, z)] ~= nil
-					and streamer.cave:reveals(x, z, ns)
+					and (streamer.alwaysCaves or streamer.cave:reveals(x, z, ns))
 					and (liveReveal(sim, x, z, ns))
 				if not open then
 					mask += bit32.lshift(1, d - 1)
@@ -2377,6 +2377,168 @@ return function(t, shared, require, _server, client)
 					t.eq(caps, wantedCaps(sim, cx, 0, s), `({cx}, 0, {s}) caps`)
 				end
 			end
+		end, 256, true)
+	end)
+
+	t.test(
+		"streamer: the Caves setting shows every full detail cave and hides them again, never onto the void",
+		function()
+			simulate(8.5, 8.5, function(sim)
+				sim.cavern = true
+				sim.surface = 0
+				t.ok(settle(sim, true), "settles above ground")
+				local streamer = sim.streamer
+				t.ok(not streamer.alwaysCaves, "hidden until seen by default (Config.Caves.AlwaysShow)")
+				t.eq(streamer.cave.count, 0, "nothing revealed above ground")
+				-- The cavern's sections (1 and 2) of the full detail chunks on screen: how many show
+				-- their caves, how many don't.
+				local function onScreen(): { any }
+					local list = {}
+					for _, node in streamer.nodes do
+						if node.level == 0 and node.shown then
+							table.insert(list, node)
+						end
+					end
+					return list
+				end
+				local function shown(): (number, number)
+					local on, off = 0, 0
+					for _, node in onScreen() do
+						for s = 1, 2 do
+							if liveReveal(sim, node.nx, node.nz, s) then
+								on += 1
+							else
+								off += 1
+							end
+						end
+					end
+					return on, off
+				end
+				local on, off = shown()
+				t.ok(on == 0 and off > 0, "every cave hidden")
+				-- Reveal remeshes come back after 2..26 frames, in no particular order.
+				sim.pool.latency = function(job)
+					if job.kind == "mesh" and not job.edit then
+						return 2 + (job.nx * 7 + job.nz * 13) % 25
+					end
+					return 2
+				end
+				-- Switches the setting as the Settings controller does (the "caves" effect); the frame
+				-- after it refreshes and checks every full detail section (`passMs`).
+				local passMs = 0
+				local function switch(value: number): (number, number, number, number)
+					local submitted, frame = #sim.pool.submitted, sim.frame
+					sim.values.alwaysCaves = value
+					streamer:applyView()
+					local t0 = os.clock()
+					sim:step()
+					passMs = (os.clock() - t0) * 1000
+					t.ok(settle(sim), "settles")
+					local jobs, sections, generated = 0, 0, 0
+					for i = submitted + 1, #sim.pool.submitted do
+						local job = sim.pool.submitted[i]
+						if job.kind == "mesh" then
+							jobs += 1
+							sections += #job.sections
+						elseif job.kind == "generate" then
+							generated += 1
+						end
+					end
+					return jobs, sections, generated, sim.frame - frame
+				end
+
+				local jobs, sections, generated, frames = switch(1)
+				t.ok(streamer.alwaysCaves and streamer:stats().alwaysCaves, "always shown")
+				t.eq(generated, 0, "nothing generated again")
+				local chunks = #onScreen()
+				on, off = shown()
+				t.eq(off, 0, `every cave of the {chunks} full detail chunks shown ({on} sections)`)
+				-- Sections 0..2 hold blocks: each is remeshed once, and again where a cap opened once the
+				-- section beyond it went live (another commit group).
+				t.ok(sections >= chunks * 3 and sections <= chunks * 3 * 2, `remeshed {sections} sections`)
+				print(
+					string.format(
+						"    hidden -> always shown: %d full detail chunks, %d mesh jobs, %d sections remeshed (%.2f per section with blocks), settled in %d frames; the switching frame %.1f ms",
+						chunks,
+						jobs,
+						sections,
+						sections / (chunks * 3),
+						frames,
+						passMs
+					)
+				)
+				-- Open between full detail chunks on screen, closed towards the coarser nodes around.
+				local closedOutside = 0
+				for _, node in onScreen() do
+					for s = 1, 2 do
+						local _, caps = liveReveal(sim, node.nx, node.nz, s)
+						local want = wantedCaps(sim, node.nx, node.nz, s)
+						t.eq(bit32.band(caps, 15), bit32.band(want, 15), `({node.nx}, {node.nz}, {s}) caps`)
+						if bit32.band(caps, 15) ~= 0 then
+							closedOutside += 1
+						end
+					end
+				end
+				t.ok(closedOutside > 0, "the edge of full detail is capped")
+				t.eq(streamer.cave.count, 0, "no search")
+				t.eq(sim.voids, 0, "never open onto the void")
+
+				-- Walking on, the chunks coming into full detail show their caves at once.
+				local x = 8.5
+				for _ = 1, 60 * 4 do
+					x += 4.3 / 60
+					sim:place(x, 8.5)
+					sim:step()
+				end
+				t.ok(settle(sim), "settles")
+				on, off = shown()
+				t.ok(on > 0 and off == 0, "every cave shown after walking")
+				t.eq(sim.voids, 0, "never open onto the void while walking")
+
+				jobs, sections, generated, frames = switch(0)
+				t.ok(not streamer.alwaysCaves, "hidden until seen")
+				t.eq(generated, 0, "nothing generated again")
+				on, off = shown()
+				t.ok(on == 0 and off > 0, "every cave hidden again")
+				print(
+					string.format(
+						"    always shown -> hidden: %d mesh jobs, %d sections remeshed, settled in %d frames; the switching frame %.1f ms",
+						jobs,
+						sections,
+						frames,
+						passMs
+					)
+				)
+				t.eq(sim.voids, 0, "never open onto the void")
+				t.eq(sim.gaps, 0, "no gaps")
+				t.eq(sim.overlaps, 0, "no overlaps")
+			end, 256, true)
+		end
+	)
+
+	t.test("streamer: underground with caves always shown, the camera still selects the underground split", function()
+		simulate(8.5, 8.5, function(sim)
+			sim.values.alwaysCaves = 1
+			sim.streamer:applyView()
+			t.ok(settle(sim, true), "settles")
+			local streamer = sim.streamer
+			local view = streamer.caveView
+			t.ok(view ~= nil and view.enclosed, "in the tunnel, shut in")
+			t.ok(streamer.underground, "the underground split")
+			t.eq(view.reach, 0, "no search reach")
+			t.eq(streamer.cave.count, 0, "no search")
+			t.ok((liveReveal(sim, 0, 1, 1)), "the cave behind rock is shown")
+			t.ok((liveReveal(sim, 0, 0, 2)), "and the rock around it is meshed shown")
+			t.eq(sim.voids, 0)
+			-- Back to hidden underground: the search starts from the camera at once; what it
+			-- reaches stays, the rest hides.
+			sim.values.alwaysCaves = 0
+			streamer:applyView()
+			t.ok(settle(sim), "settles")
+			t.ok(streamer.cave:reveals(0, 0, 1), "the tunnel is revealed by the search")
+			t.ok((liveReveal(sim, 0, 0, 1)), "and on screen")
+			t.ok(not (liveReveal(sim, 0, 1, 1)), "the cave behind rock is hidden again")
+			t.eq(sim.voids, 0)
 		end, 256, true)
 	end)
 
@@ -2871,6 +3033,70 @@ return function(t, shared, require, _server, client)
 			t.ok(most < 600, "the search stays out of the sky")
 			t.ok(settle(sim), "settles")
 			t.eq(sim.voids, 0, "never open onto the void")
+			t.eq(sim.gaps, 0, "no gaps")
+			t.eq(sim.overlaps, 0, "no overlaps")
+		end, 256, nil, gen)
+	end)
+
+	t.test("streamer: on real terrain the Caves setting switches both ways, generating nothing again", function()
+		local gen = TerrainGenerator.new(12345)
+		local path = entranceWay(gen, 0, 6, 5)
+		assert(path, "a cave entrance near chunk 0, 6")
+		local mouth = path[1]
+		simulate(mouth[1] + 0.5, mouth[3] + 0.5, function(sim)
+			-- Above ground at a cave entrance's mouth: nothing revealed, then every cave shown.
+			sim.eyeY = gen.column(mouth[1], mouth[3]) + 1.6
+			sim:place(mouth[1] + 0.5, mouth[3] + 0.5)
+			t.ok(settle(sim, true), "settles above ground")
+			local streamer = sim.streamer
+			for _, value in { 1, 0 } do
+				local submitted, frame = #sim.pool.submitted, sim.frame
+				sim.values.alwaysCaves = value
+				streamer:applyView()
+				local t0 = os.clock()
+				sim:step()
+				local ms = (os.clock() - t0) * 1000
+				t.ok(settle(sim), "settles")
+				local jobs, sections, generated = 0, 0, 0
+				for i = submitted + 1, #sim.pool.submitted do
+					local job = sim.pool.submitted[i]
+					if job.kind == "mesh" then
+						jobs += 1
+						sections += #job.sections
+					elseif job.kind == "generate" then
+						generated += 1
+					end
+				end
+				-- Sections holding terrain (below emptyAbove), and how many the jobs were told shown.
+				local chunks, terrain, wrong = 0, 0, 0
+				for _, node in streamer.nodes do
+					if node.level == 0 and node.shown then
+						chunks += 1
+						for s = 0, math.ceil(node.chunk.emptyAbove / SECTION) - 1 do
+							terrain += 1
+							if (node.reveal[s] == true) ~= (value == 1) then
+								wrong += 1
+							end
+						end
+					end
+				end
+				print(
+					string.format(
+						"    real terrain, to %s: %d chunks, %d sections of terrain, %d mesh jobs, %d sections remeshed, settled in %d frames; the switching frame %.1f ms",
+						if value == 1 then "always shown" else "hidden",
+						chunks,
+						terrain,
+						jobs,
+						sections,
+						sim.frame - frame,
+						ms
+					)
+				)
+				t.eq(generated, 0, "nothing generated again")
+				t.eq(wrong, 0, "every section of terrain meshed as the setting says")
+				t.ok(sections >= terrain and sections <= terrain * 2, "each remeshed once, or twice for a cap")
+				t.eq(sim.voids, 0, "never open onto the void")
+			end
 			t.eq(sim.gaps, 0, "no gaps")
 			t.eq(sim.overlaps, 0, "no overlaps")
 		end, 256, nil, gen)

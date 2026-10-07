@@ -715,6 +715,39 @@ return function(t, shared, require, _server, client)
 		end)
 	end)
 
+	t.test("settings client sim: the Caves setting reaches ViewSettings; its tooltip fits by its button", function()
+		restoring(function()
+			local world = fakeClient(shared, require, 0)
+			local Settings, ViewSettings = world.Settings, world.ViewSettings
+			t.eq(ViewSettings.alwaysCaves(), Config.Caves.AlwaysShow == true, "Config's default")
+			Settings.set("alwaysCaves", 1)
+			t.ok(ViewSettings.alwaysCaves(), "read live by the streamer's applyView")
+			Settings.set("alwaysCaves", 0)
+			t.ok(not ViewSettings.alwaysCaves())
+		end)
+		-- On the Video page; its tooltip goes below the button, or above it near the bottom.
+		local video = Pages.layout(Pages.byId.video)
+		local caves
+		for _, placed in video.widgets do
+			if placed.item.id == "alwaysCaves" then
+				caves = placed
+			end
+		end
+		t.ok(caves ~= nil, "on the Video page")
+		local w, h = Pages.TOOLTIP_W + 2 * Pages.TOOLTIP_PAD, 60
+		local x, y = Pages.tooltipAt(caves, w, h)
+		t.ok(x >= 0 and x + w <= Pages.WIDTH, "within the panel's width")
+		t.ok(y + h <= caves.y or y >= caves.y + caves.h, "never over its button")
+		local top = { item = caves.item, x = 0, y = Pages.TOP, w = 150, h = 20 }
+		local tx, ty = Pages.tooltipAt(top, w, h)
+		t.eq(ty, Pages.TOP + 20 + Pages.TOOLTIP_GAP, "below a button with room under it")
+		t.eq(tx, 0)
+		local bottom = { item = caves.item, x = 160, y = Pages.HEIGHT - 40, w = 150, h = 20 }
+		local bx, by = Pages.tooltipAt(bottom, w, h)
+		t.eq(by, Pages.HEIGHT - 40 - Pages.TOOLTIP_GAP - h, "above one near the bottom")
+		t.eq(bx, Pages.WIDTH - w, "moved left to end inside the panel")
+	end)
+
 	t.test("settings client: Minimap off on a touch screen leaves a Map button to the world map", function()
 		for _, touch in { true, false } do
 			local ui = fakeMinimap(shared, require, touch)

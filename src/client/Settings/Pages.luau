@@ -12,7 +12,7 @@
 	                preset again) and Defaults (the device's defaults); Done closes the menu
 	  video         render distance, detail falloff, full detail, cave view, plants, lichen
 	                lights, shadows, far shadows, fog, textures, far materials, brightness,
-	                distance or lighting
+	                distance or lighting, caves (hidden until seen or always shown)
 	  performance   far meshes, build budget, hidden terrain, swap frames
 	  sounds        Music & Sounds: the volumes (master, music, blocks, players, ambient,
 	                interface), footsteps, interface clicks, cave moods and music toasts
@@ -20,6 +20,10 @@
 	  hud           minimap, WAILA, GUI scale
 	A sub-page's Done goes back to the main page. `status` lists the status lines a page shows
 	(the controller's Settings.setStatus kinds).
+
+	Tooltips (`tooltipAt`): a setting with a PlayerSettings `tooltip` shows it while hovered or
+	selected, as Minecraft's options do: wrapped to TOOLTIP_W pixels, below the widget
+	(BelowOrAboveWidgetTooltipPositioner), or above it when the panel has no room below.
 ]]
 
 export type Item = {
@@ -68,6 +72,11 @@ Pages.LINE = 11
 Pages.DONE_W = 200
 -- Rows a page can hold above its status lines (the video page needs 7).
 Pages.MAX_ROWS = 7
+-- Tooltips: the width their text wraps at (Minecraft splits option tooltips at a fixed width; this
+-- pixel font is wider than Minecraft's), the padding around the text and the gap to the widget.
+Pages.TOOLTIP_W = 200
+Pages.TOOLTIP_PAD = 4
+Pages.TOOLTIP_GAP = 4
 
 local function setting(key: string, wide: boolean?): Item
 	return { kind = "setting", id = key, wide = wide }
@@ -111,6 +120,7 @@ Pages.list = {
 			setting("farMaterials"),
 			setting("brightness"),
 			setting("preferDistance"),
+			setting("alwaysCaves"),
 		},
 		status = { "terrain" },
 	},
@@ -211,6 +221,19 @@ function Pages.layout(p: Page, shown: ((item: Item) -> boolean)?): Layout
 		h = Pages.BUTTON_H,
 	}
 	return { widgets = widgets, statusY = statusY, done = done }
+end
+
+--[[
+	Where a `w` x `h` tooltip goes for the widget `placed` (panel GUI pixels): below it, or above
+	it when it would reach past the panel's bottom (and there is room above); its left edge at
+	the widget's, moved left so it ends inside the panel where it can.
+]]
+function Pages.tooltipAt(placed: Placed, w: number, h: number): (number, number)
+	local x = math.max(0, math.min(placed.x, Pages.WIDTH - w))
+	local below = placed.y + placed.h + Pages.TOOLTIP_GAP
+	local above = placed.y - Pages.TOOLTIP_GAP - h
+	local y = if below + h > Pages.HEIGHT and above >= 0 then above else below
+	return x, y
 end
 
 return Pages

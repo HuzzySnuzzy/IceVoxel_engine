@@ -131,6 +131,12 @@ local Config = {
 		RevealRadiusMax = 128,
 		-- Sections the search reveals at most (the nearest; the Underlands' giant caverns).
 		RevealBudget = 1500,
+		-- The default of the Caves video setting: false hides caves until the camera can see into
+		-- them (the search above); true ("Always Shown") meshes every cave of every full detail
+		-- chunk with its walls, wherever the camera is (Streaming/ChunkStreamer). That costs about
+		-- 4x the parts of full detail terrain (seed 12345, Config's view: +26k parts at the spawn,
+		-- +60k in the mountains, +100k there underground) and a few hundred more lights.
+		AlwaysShow = false,
 		-- Seconds a section stays revealed after the search stopped reaching it.
 		RevealHold = 2,
 		-- Glow lichen carries one PointLight per 8 x 8 x 8 blocks (Meshing/GreedyMesher), on in

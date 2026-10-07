@@ -1247,6 +1247,76 @@ return function(t, shared, require, _server, client)
 		t.eq(found, 2, "chunks where a surface cave meets a cave")
 	end)
 
+	t.test("caves always shown: cave sections draw their walls, no caps; the rest meshes as when hidden", function()
+		-- The "Caves: Always Shown" setting reveals every section of a full detail chunk, and the
+		-- worker meshes a revealed section with no cave cell in or around it (touchesCaves) as
+		-- hidden: the same boxes, and buried rock is trivial then.
+		local gen = TerrainGenerator.new(12345)
+		local P = ChunkLayout.PADDED
+		local LAYER = ChunkLayout.LAYER
+		local SECTION = Config.SectionHeight
+		local all = GreedyMesher.HIDDEN_BELOW + GreedyMesher.HIDDEN_ABOVE + 1 + 2 + 4 + 8
+		local same, caveSections, walls, skipped = 0, 0, 0, 0
+		-- Cave A near the spawn, a cave entrance meeting the caves, the Underlands under mountains.
+		for _, c in { { 32, -10 }, { 31, -9 }, { -1, 5 }, { 200, -913 } } do
+			local r = gen.generate(0, c[1], c[2])
+			for y0 = 0, r.height - 1, SECTION do
+				local y1 = math.min(y0 + SECTION, r.height)
+				-- Every cell the section's mesh reads: a cave cell among them?
+				local near = false
+				for y = math.max(y0 - 1, 0), math.min(y1, r.height - 1) do
+					for i = 0, LAYER - 1 do
+						if
+							buffer.readu8(GreedyMesher.caveCellLut, buffer.readu16(r.data, (y * LAYER + i) * 2)) == 1
+						then
+							near = true
+						end
+					end
+				end
+				t.eq(GreedyMesher.touchesCaves(r.data, r.height, y0, y1), near, `{c[1]},{c[2]} y {y0}: touchesCaves`)
+				if not near then
+					-- Shown or hidden, capped or not: the same boxes.
+					local hidden, n = GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, true)
+					for _, border in { false, { hidden = all } } :: { any } do
+						local shown, m =
+							GreedyMesher.mesh(r.data, r.height, y0, y1, false, if border then border else nil, true)
+						t.ok(n == m and buffer.tostring(hidden) == buffer.tostring(shown), `{c[1]},{c[2]} y {y0}: same`)
+					end
+					same += 1
+					if GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, true) then
+						skipped += 1
+					end
+					continue
+				end
+				-- Shown: every wall around the caves drawn, no box over a cave cell (no stone caps);
+				-- hidden again: the caves are rock (`verify` checks both against the reference).
+				local shownCount = verify(r.data, r.height, y0, y1, false)
+				local hiddenCount = if GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, true)
+					then 0
+					else verify(r.data, r.height, y0, y1, true)
+				caveSections += 1
+				local hasCave = false
+				for y = y0, y1 - 1 do
+					for z = 1, SIZE do
+						for x = 1, SIZE do
+							if buffer.readu16(r.data, ((y * P + z) * P + x) * 2) == Blocks.CAVE_AIR then
+								hasCave = true
+							end
+						end
+					end
+				end
+				if hasCave and shownCount > hiddenCount then
+					walls += 1
+				end
+			end
+		end
+		print(
+			`    {caveSections} sections near caves (cave walls drawn in {walls}), {same} without (meshed alike; {skipped} of them buried rock, skipped)`
+		)
+		t.ok(caveSections >= 15 and walls >= 10, "cave sections show their walls")
+		t.ok(skipped > 20, "buried rock without caves costs nothing")
+	end)
+
 	--[[ Odd boxes (GreedyMesher's `align`: Config.Textures.OddBoxes, full detail only) ]]
 
 	local KEY_STRIDE = GreedyMesher.KEY_STRIDE
