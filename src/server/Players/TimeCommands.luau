@@ -1,9 +1,10 @@
 --!strict
 --[[
 	The /time and /gamerule chat commands (parsed and checked by Players/TimeCommand), applied to the
-	world's clock (World/TimeOfDay).
+	world's clock (World/TimeOfDay) and the weather's (World/WeatherServer: doWeatherCycle).
 
-	  Commands  `/time set|add|query ...` and `/gamerule doDaylightCycle [true|false]`. With
+	  Commands  `/time set|add|query ...` and `/gamerule doDaylightCycle|doWeatherCycle
+	            [true|false]`. With
 	            TextChatService they are TextChatCommands made here (the message is not shown to
 	            anyone; Triggered fires on the server with the sender's TextSource). With the legacy
 	            chat they are read from Player.Chatted.
@@ -22,6 +23,7 @@ local Protocol = require(Shared.Net.Protocol)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
 local Operators = require(script.Parent.Operators)
 local TimeCommand = require(script.Parent.TimeCommand)
 
@@ -48,12 +50,16 @@ local function run(player: Player, text: string)
 		dayTime = TimeOfDay.get(),
 		gameTime = TimeOfDay.gameTime(),
 		cycle = TimeOfDay.cycle(),
+		weatherCycle = WeatherServer.cycle(),
 	})
 	if result == nil then
 		return
 	end
 	if result.cycle ~= nil then
 		TimeOfDay.setCycle(result.cycle)
+	end
+	if result.weatherCycle ~= nil then
+		WeatherServer.setCycle(result.weatherCycle)
 	end
 	if result.dayTime ~= nil then
 		TimeOfDay.set(result.dayTime)

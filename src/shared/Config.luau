@@ -441,6 +441,51 @@ local Config = {
 		Cycle = true,
 	},
 
+	-- Weather (shared model, server clock and gameplay) ----------------------------------------------
+
+	--[[
+		Regional weather (Shared/Weather): storms drift over the world with a wind that turns
+		slowly, raining or snowing by the biome and the altitude under them, thundering where they
+		are heaviest. Everyone computes it from the seed and the weather clock (server World/
+		WeatherServer publishes the clock as workspace attributes, like the day's), so nothing is
+		sent while it runs. Operators change it with /weather clear|rain|thunder [duration] and
+		/gamerule doWeatherCycle (Players/WeatherCommands, Players/TimeCommands).
+	]]
+	Weather = {
+		-- false: always clear (no clouds, rain, snow or lightning anywhere).
+		Enabled = true,
+		-- Minecraft's doWeatherCycle game rule: false stops the weather clock (storms stand where
+		-- they are, and a /weather override never runs out).
+		Cycle = true,
+		-- How fast the weather clock runs: 1 is 20 ticks a real second, whatever the day length;
+		-- 2 moves and changes the storms twice as fast.
+		Speed = 1,
+		-- Seconds a /weather override takes to blend in and out (Minecraft's rain level moves
+		-- 0.01 a tick: 5 s).
+		BlendSeconds = 5,
+		-- A new world's clock starts where its spawn stays clear for this many seconds
+		-- (Minecraft's first rain waits 10 to 150 minutes); 0 starts it at 0.
+		ClearStartSeconds = 300,
+		-- Lightning (server World/Lightning, Minecraft's LightningBolt) in thunderstorms near
+		-- players: one strike a player every MeanSeconds on average at full thunder (fewer where
+		-- it is lighter), within Radius blocks, only where it rains (not in snow or deserts). A
+		-- strike hurts the living within 3 blocks by Damage half hearts and sets them burning for
+		-- BurnSeconds, and lights fires by Minecraft's rules (with doFireTick:
+		-- Server.Fire.Tick). Clients within Distance blocks see the bolt and hear the thunder.
+		Lightning = {
+			Enabled = true,
+			MeanSeconds = 20,
+			Radius = 64,
+			Damage = 5,
+			BurnSeconds = 8,
+			Distance = 1024,
+		},
+		-- Fog distance factor at full rain, snow and thunder (client: the fog comes closer).
+		Fog = { Rain = 0.6, Snow = 0.4, Thunder = 0.45 },
+		-- Blocks a second thunder travels (the client hears a strike that much later).
+		SoundSpeed = 343,
+	},
+
 	-- Lighting (client) ------------------------------------------------------------------------------
 
 	--[[

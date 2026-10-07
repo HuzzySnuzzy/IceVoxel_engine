@@ -220,6 +220,12 @@
 	                 state, sent on joining and to everyone when it changes (Players/WorldMenu)
 	  CreateWorldResult u8 ok (0 / 1), u16 length + text: the answer to this player's CreateWorld
 	                 (why not, when it failed)
+	  Lightning      f32 x, y, z (blocks: the bottom centre of the struck cell), u32 seed (the
+	                 bolt's shape), u8 flashes (1..MAX_FLASHES, Minecraft's LightningBolt
+	                 flashes): a strike within Config.Weather.Lightning.Distance of the player
+	                 (server World/WeatherServer), for the bolt, the sky's flash and the thunder
+	                 (heard later the farther it is: Shared/Weather.thunderDelay). Coordinates
+	                 beyond MAX_COORDINATE (or not finite) and other flash counts are malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -312,6 +318,7 @@ Protocol.ServerMessage = {
 	Progress = 20,
 	MenuState = 21,
 	CreateWorldResult = 22,
+	Lightning = 23,
 }
 
 Protocol.EditAction = {
@@ -2937,6 +2944,43 @@ function Protocol.decodeCreateWorldResult(b: buffer): (boolean?, string)
 		return nil, ""
 	end
 	return flag == 1, texts[1]
+end
+
+--[[ Lightning (server -> client) ]]
+
+-- A lightning bolt at (x, y, z) (blocks: the bottom centre of the struck cell), its shape's seed
+-- and Minecraft's 1 to 3 flashes.
+export type LightningBolt = { x: number, y: number, z: number, seed: number, flashes: number }
+
+Protocol.LIGHTNING_BYTES = 17
+Protocol.MAX_FLASHES = 3
+
+function Protocol.encodeLightning(bolt: LightningBolt): buffer
+	local b = buffer.create(Protocol.LIGHTNING_BYTES)
+	buffer.writef32(b, 0, bolt.x)
+	buffer.writef32(b, 4, bolt.y)
+	buffer.writef32(b, 8, bolt.z)
+	buffer.writeu32(b, 12, bolt.seed)
+	buffer.writeu8(b, 16, bolt.flashes)
+	return b
+end
+
+-- The bolt of a Lightning message, or nil when it is malformed.
+function Protocol.decodeLightning(b: buffer): LightningBolt?
+	if buffer.len(b) ~= Protocol.LIGHTNING_BYTES then
+		return nil
+	end
+	local x, y, z = buffer.readf32(b, 0), buffer.readf32(b, 4), buffer.readf32(b, 8)
+	local flashes = buffer.readu8(b, 16)
+	for _, value in { x, y, z } do
+		if not (math.abs(value) <= Protocol.MAX_COORDINATE) then
+			return nil
+		end
+	end
+	if flashes < 1 or flashes > Protocol.MAX_FLASHES then
+		return nil
+	end
+	return { x = x, y = y, z = z, seed = buffer.readu32(b, 12), flashes = flashes }
 end
 
 return Protocol

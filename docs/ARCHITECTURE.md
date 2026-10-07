@@ -2193,6 +2193,122 @@ dark (tests/spec/SkyExposure checks real ones).
 Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
 Lighting is left alone, because Roblox lights both by the sun and moon itself.
 
+## Weather (`Weather/`, server `World/WeatherServer`, `World/WeatherRules`, `World/Lightning`)
+
+Minecraft's weather is one switch for the whole world. Here it is a field over the world and
+time, so storms can be seen coming, walked out of, and forecast. It is pure and deterministic:
+the server, every client and the tests compute the same storms from the world seed and the
+weather clock.
+
+**The field** (`Weather/WeatherModel`, `WeatherModel.new(seed)` or `Weather.setSeed(seed)` for
+the world's):
+- *Wind.* The air's displacement D(t) has a closed form: a prevailing wind (1.2 blocks a second,
+  its direction from the seed) plus three sinusoidal swings in time (periods of 7 to 31 minutes,
+  phases from the seed). The wind's speed (0 to about 3 blocks a second) and direction wander
+  slowly. `wind(t)` is its derivative.
+- *Moisture.* Three layers of Perlin noise are drawn in the air's frame, (x, z) − D(t), so
+  everything drifts with the wind. Weather systems are ~5 km across, storm cells ~1.6 km and
+  showers ~450 blocks. Each layer also moves slowly through its own time axis (one noise unit in
+  200000, 60000 and 20000 ticks), so storms grow and die out about half as fast as the mean
+  wind carries them.
+- *Outputs.* Precipitation is the moisture over a threshold, smoothed from drizzle at the edge to
+  1 in the core; it counts as falling over 0.2 (Minecraft's isRaining). Cloud cover starts lower,
+  so clouds spread around the rain. Thunder needs the highest moisture and a slower
+  "instability" noise, and never exceeds the precipitation.
+- *Precision.* Every noise coordinate is reduced modulo 256 (math.noise's lattice period) in
+  double precision first, so far places and late clocks stay smooth.
+- *Cost.* A sample costs ~0.5 µs. `grid` fills a buffer for a whole rectangle at once (the
+  per-time terms are worked out once).
+- *Calibration* (seeds 12345, 777 and 4242, 192 places over 40 in-game days, sampled every
+  10 s): it rains 23-24% of the time (Minecraft ~16%). Spells of rain last 16-18 minutes on
+  average (median 11-13, p10 2, p90 42, longest 2-3 hours). Clear stretches last 50-56
+  minutes. A storm's median chord is ~1.1 km (p10 225 blocks, p90 3.5 km). It thunders 3% of
+  the time, 13-14% of the rainy time. `tests/spec/Weather` checks the ranges on one seed.
+
+**The clock** (`Weather` State): the weather clock counts 20 ticks a real second times
+`Weather.Speed`, and nothing while doWeatherCycle is off. It is published like the day's clock,
+as three workspace attributes: `IceVoxelWeatherTime`, `IceVoxelWeatherSync` and
+`IceVoxelWeatherRate`. `/time` never touches it, so setting the time doesn't move a storm. A new
+world's clock starts where its spawn stays dry for `Weather.ClearStartSeconds`
+(`Weather.clearStart`). `IceVoxelWeatherEnabled` false (`Weather.Enabled` off, or the debug
+worlds) means always clear.
+
+**Overrides** (`/weather`): an override blends the whole world towards its kind:
+- rain: at least 0.8 precipitation, no thunder, overcast;
+- thunder: full rain and thunder;
+- clear: no rain and thin clouds at most.
+
+It blends in over `Weather.BlendSeconds` (5 s, Minecraft's 0.01 rain level a tick) from
+whatever was there before. The previous override fades out at the weight it had, so changing
+your mind never jumps. It blends back out over the last 5 s before it ends. With
+doWeatherCycle off an override's time stands still (Minecraft's counters wait too), so it never
+ends, and one fading out stays where it was. It is published as one string attribute,
+`IceVoxelWeatherOverride` ("kind;start;finish;left;previous;previousWeight"), so a client never
+sees half a change. `Weather.momentAt(state, serverTime)` gives a Moment: the clock with the
+override's weights, which `at`, `grid` and `forecastAt` take.
+
+**What falls where** (Minecraft's Biome.getPrecipitationAt):
+- Each biome has Minecraft's temperature and precipitation flag (`BiomeList` `weather`; Biomes
+  `weatherTemperature`, `precipitation`). Deserts and savannas get none.
+- It snows below 0.15, else it rains.
+- It gets colder with height: 0.05 every 40 blocks above y 80 in Minecraft, which is 0.0029 a
+  block above y 71 on this world's terrain (the datapack's heights × 0.43). A small noise makes
+  the snow line ragged.
+- So a plains valley rains while the slopes above ~295 snow, and a taiga snows from ~105 up.
+- `Weather.kindAt(x, y, z, time, biomeTemperature)` is "clear", "rain" or "snow".
+
+**Sky hooks** (pure, for the client):
+- Minecraft's darkening: (1 − rain × 5/16) × (1 − thunder × 5/16) of the sky's brightness:
+  `dimming`, `skyDarken`, `skyLight`, `sunBrightness`, and `isDay`, which is false in a full
+  thunderstorm even at noon.
+- The sky, cloud and fog colours greyed as in ClientLevel and FogRenderer.
+- `fogFactor`: the fog distance at full rain 0.6, snow 0.4, thunder 0.45.
+- The rain's sound volume and pitch (`rainSound`, LevelRenderer's weather.rain and
+  weather.rain.above).
+- `thunderDelay(distance)`: thunder at 343 blocks a second.
+
+**On the server** (`World/WeatherServer`):
+- *Rain on a cell* (`rainingAt`, `World/WeatherRules`: Minecraft's Level.isRainingAt):
+  precipitation over 0.2 there, rain (not snow, not a dry biome), and nothing that stops rain at
+  or above the cell (Minecraft's MOTION_BLOCKING: anything with a collision box, i.e.
+  Blocks.obstruction, and fluids; torches and plants let it through). The column's biome comes
+  from the generator and is cached per column. The moment is worked out once a frame.
+- *Fire* (`Behaviours/Fire`, FireBlock.tick): rain on a fire or beside it puts it out with a
+  chance of 0.2 + age × 0.03 a fire tick, and a cell near rain never catches.
+- *Wetness* (`Players/ToughAsNails`): rain at a player's feet or the top of their box, checked
+  once a second, makes them wet, as water does (TAN: 3 steps colder).
+- *The undead* (`Mobs/MobWorld`): zombies and skeletons don't burn in the rain
+  (isInWaterRainOrBubble) or where the weather makes it not day (`isDayAt`: a thunderstorm).
+- *Lightning* (`World/Lightning`, pure, with injected randomness):
+  - Rate: every player not in spectator rolls once a second, thunder at their feet ÷
+    `Lightning.MeanSeconds` (20). Minecraft's 1 in 100000 per chunk a tick would be rare near a
+    player here.
+  - Target: a column picked evenly within `Lightning.Radius` (64). It strikes the column's top
+    (the MOTION_BLOCKING heightmap), or a living thing within 3 blocks of the column that sees
+    the sky (findLightningTargetAround). It only strikes where it rains.
+  - Fire: with doFireTick, the struck cell, plus 4 random cells around it on normal and hard
+    (LightningBolt.spawnFire). Fire goes only into air where it can stay.
+  - Hurt: the living within x ± 3, y − 3 .. y + 9 of the bolt catch fire for 8 s and take 5 half
+    hearts through armor (Entity.thunderHit). Players via `Characters.lightning`, mobs via
+    `Mobs.lightning` and `MobWorld.lightning`; the boot script connects them
+    (`WeatherServer.setHandler`).
+  - An unloaded column is struck at the generator's height, as a sight only.
+  - Every player within 1024 blocks gets a `Lightning` message.
+- *Commands* (`Players/WeatherCommand`, pure; `Players/WeatherCommands`):
+  - `/weather clear|rain|thunder [duration]`: Minecraft's TimeArgument, at least 1 tick. The
+    default is Minecraft's random duration: clear 12000-180000 ticks, rain 12000-24000,
+    thunder 3600-15600. It answers with Minecraft's "Set the weather to rain & thunder" and
+    needs the operators' permission.
+  - `/weather query` (Bedrock's, for anyone) says what it is doing where you stand.
+  - `/gamerule doWeatherCycle` lives in `Players/TimeCommand` with doDaylightCycle.
+- *Saving*: `WeatherServer.encode()` gives a short string (`Weather.encodeState`: the clock's
+  value, doWeatherCycle, the override and its time left). `WeatherServer.decode(text)` restores
+  it before or after the weather starts, with the override already blended in, so a world loads
+  as it was.
+
+Not done: snow layers piling up and cauldrons filling (the game has no snow layer or cauldron
+blocks), charged creepers and skeleton horse traps.
+
 ## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 
 Minecraft 1.20.1's survival, creative, adventure and spectator (GameType). A player's mode is the
@@ -5071,6 +5187,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
 | server → client | `MenuState`     | the title screen's state (u8: waiting, creating, ready, failed), the operator's name and the world's (u16 length + text each), on joining and to everyone on a change |
 | server → client | `CreateWorldResult` | u8 ok, u16 length + text: the answer to this player's CreateWorld |
+| server → client | `Lightning`     | a strike within `Weather.Lightning.Distance` (1024 blocks): f32 x, y, z (the struck cell's bottom centre), u32 seed (the bolt's shape), u8 flashes (1-3): 17 bytes |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record

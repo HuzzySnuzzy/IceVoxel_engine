@@ -386,6 +386,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
   A tunnel dug into a hillside darkens with the distance from its mouth, not the depth of the rock
   above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
+- **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
+  few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
+  blocks a second), grow and die out, and leave clear stretches between them, so you can see one
+  coming and walk out of it. Everyone computes the same storms from the seed and a weather clock
+  of its own (`/time set` never moves a storm), so the weather costs no traffic. What falls
+  follows Minecraft's rules for the place: rain, or snow where the biome is cold (snowy plains,
+  groves, the peaks) and on high ground (it gets colder with height, so a mountain top snows
+  while its valley rains), and nothing in deserts and savannas. Measured on a seed: it rains at a
+  place about 23% of the time, a spell of rain lasts 17 minutes on average (2 minutes to a couple
+  of hours), clear weather about 50, and the heaviest storms thunder (13% of the rainy time).
+  Rain puts out fires under the open sky and keeps them from spreading, makes players wet (Tough
+  As Nails), and keeps zombies and skeletons from burning; a thunderstorm darkens the day enough
+  that they don't burn at all. Lightning strikes near players in thunderstorms (every 20 s or so
+  under the heaviest), at the highest block or a living thing near it, setting fires (with
+  doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, Minecraft's).
+  `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s, and
+  `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft.
 - **Torches, lanterns and the Glow Block.** Light sources for the dark: torches (light 14) stand on
   blocks or hang on walls, leaning out like Minecraft's; lanterns (15) stand on a block or hang
   under one; the Glow Block (15, the game's blue stand-in for glowstone) is a glowing full block.
@@ -963,6 +980,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
+| Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
@@ -1183,7 +1201,15 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
-  Biomes/  BiomeList        biome definitions and altitude bands
+  Weather/ init             the weather clock, /weather's overrides and their blending, the
+                            published attributes, the save, what falls where (biome, altitude),
+                            Minecraft's darkening, sky / cloud / fog colours, fog distance, the
+                            rain's sound and thunder's delay
+           WeatherModel     the storms: a field of noise drifting with a slowly turning wind
+                            (closed form), precipitation, thunder and cloud cover anywhere at any
+                            time, a grid sampler (minimap, far clouds) and forecasts
+  Biomes/  BiomeList        biome definitions and altitude bands (and Minecraft's temperature and
+                            precipitation for the weather)
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
     Relief                  terrain heights (JJThunder To The Max style)
@@ -1244,6 +1270,11 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
                             Simulation, TimeOfDay (the day clock, published as workspace attributes),
+                            WeatherServer (the weather clock and /weather's overrides, published
+                            the same way; rain for fire, players and mobs; lightning near
+                            players; the save's encode / decode), WeatherRules (where rain falls:
+                            Level.isRainingAt; pure), Lightning (strikes: rate, target, fires,
+                            reach; pure),
                             WorldInfo (the world's settings once created; creating it once),
                             Explosions (blasts in the world, fuel going off, per-tick cost
                             bounds, the primer hook for explosive blocks), FuelBlast (fuel
@@ -1293,7 +1324,8 @@ src/server   -> ServerScriptService.IceVoxel
                             it), GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
-                            /gamerule), Inventories + InventoryState (authoritative inventories),
+                            /gamerule), WeatherCommands + WeatherCommand (/weather; pure),
+                            Inventories + InventoryState (authoritative inventories),
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage, invulnerability, suffocation, lava and burning, explosions),
@@ -1553,6 +1585,15 @@ for performance:
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
+| `Weather.Enabled`         | true    | false: always clear (no clouds, rain, snow or lightning; the debug worlds have none either). |
+| `Weather.Cycle`           | true    | Minecraft's doWeatherCycle (false: the storms stand still and an override never runs out). |
+| `Weather.Speed`           | 1       | How fast the weather clock runs (2: storms drift and change twice as fast). |
+| `Weather.BlendSeconds`    | 5       | Seconds a `/weather` override blends in and out (Minecraft's 5).    |
+| `Weather.ClearStartSeconds` | 300   | A new world's weather starts where its spawn stays dry this long.   |
+| `Weather.Lightning.Enabled` / `MeanSeconds` / `Radius` | true / 20 / 64 | Strikes near players in thunderstorms: one every MeanSeconds at full thunder, within Radius blocks. |
+| `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 1024 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance see and hear it. |
+| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog distance at full rain, snow and thunder, as a share of the clear one. |
+| `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |

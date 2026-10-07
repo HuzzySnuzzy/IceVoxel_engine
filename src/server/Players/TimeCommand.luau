@@ -8,6 +8,7 @@
 	    /time add <time>
 	    /time query <daytime | gametime | day>
 	    /gamerule doDaylightCycle [true | false]
+	    /gamerule doWeatherCycle [true | false]   the weather clock (World/WeatherServer)
 
 	A time is a number of ticks with an optional unit, as in Minecraft: "d" days (24000 ticks), "s"
 	seconds (20 ticks), "t" ticks: 1d, 0.5d, 30s, 600 (Shared/DayCycle.parseDuration). Setting the
@@ -37,6 +38,8 @@ export type Context = {
 	dayTime: number,
 	gameTime: number,
 	cycle: boolean,
+	-- The doWeatherCycle rule (nil: true).
+	weatherCycle: boolean?,
 }
 
 export type Result = {
@@ -44,6 +47,8 @@ export type Result = {
 	dayTime: number?,
 	-- The new doDaylightCycle value, when the command changes it.
 	cycle: boolean?,
+	-- The new doWeatherCycle value, when the command changes it.
+	weatherCycle: boolean?,
 	-- Messages for the player who typed the command.
 	feedback: { string },
 }
@@ -57,12 +62,14 @@ TimeCommand.USAGE = "Usage: /time set <day | noon | night | midnight | ticks>, /
 TimeCommand.SET_USAGE = "Usage: /time set <day | noon | night | midnight | ticks> (e.g. 6000, 0.5d, 30s)"
 TimeCommand.ADD_USAGE = "Usage: /time add <ticks> (e.g. 1000, 1d, 30s)"
 TimeCommand.QUERY_USAGE = "Usage: /time query <daytime | gametime | day>"
-TimeCommand.GAMERULE_USAGE = "Usage: /gamerule doDaylightCycle [true | false]"
+TimeCommand.GAMERULE_USAGE = "Usage: /gamerule <doDaylightCycle | doWeatherCycle> [true | false]"
 TimeCommand.DENIED = "You can't change the time here"
 TimeCommand.DENIED_RULES = "You can't change game rules here"
 
 -- The game rules /gamerule knows (Minecraft's names).
 TimeCommand.DAYLIGHT_CYCLE = "doDaylightCycle"
+TimeCommand.WEATHER_CYCLE = "doWeatherCycle"
+TimeCommand.RULES = table.freeze({ TimeCommand.DAYLIGHT_CYCLE, TimeCommand.WEATHER_CYCLE })
 
 --[[
 	May user `userId` change the time and game rules? Admins (`admins`, Config.Gameplay.Admins),
@@ -141,13 +148,21 @@ local function runGameRule(list: { string }, context: Context, result: Result, s
 	local rule = list[2]
 	if rule == nil or #list > 3 then
 		return say(TimeCommand.GAMERULE_USAGE)
-	elseif string.lower(rule) ~= string.lower(TimeCommand.DAYLIGHT_CYCLE) then
-		return say(`Unknown game rule '{rule}'. This game has: {TimeCommand.DAYLIGHT_CYCLE}`)
 	end
-	local name = TimeCommand.DAYLIGHT_CYCLE
+	local name: string? = nil
+	for _, known in TimeCommand.RULES do
+		if string.lower(rule) == string.lower(known) then
+			name = known
+		end
+	end
+	if name == nil then
+		return say(`Unknown game rule '{rule}'. This game has: {table.concat(TimeCommand.RULES, ", ")}`)
+	end
+	local weather = name == TimeCommand.WEATHER_CYCLE
+	local current = if weather then context.weatherCycle ~= false else context.cycle
 	local value = list[3]
 	if value == nil then
-		return say(`Gamerule {name} is currently set to: {context.cycle}`)
+		return say(`Gamerule {name} is currently set to: {current}`)
 	end
 	local lower = string.lower(value)
 	if lower ~= "true" and lower ~= "false" then
@@ -156,7 +171,11 @@ local function runGameRule(list: { string }, context: Context, result: Result, s
 		return say(TimeCommand.DENIED_RULES)
 	end
 	local on = lower == "true"
-	result.cycle = on
+	if weather then
+		result.weatherCycle = on
+	else
+		result.cycle = on
+	end
 	return say(`Gamerule {name} is now set to: {on}`)
 end
 

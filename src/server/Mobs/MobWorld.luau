@@ -16,10 +16,12 @@
 	             10 ticks and sets it burning 15 s, fire and campfires hurt, burning costs 1 every
 	             20 ticks, water puts it out. (A mob catches fire after 20 ticks in a fire block,
 	             as a player does; Minecraft's mobs at once.) Zombies and skeletons burn in
-	             daylight (`burnsInDaylight`, Mob.isSunBurnTick): by day, out of water, with the
-	             open sky over their eyes (`skyClear`: Level.canSeeSky's full sky light, so the
-	             leaves of a tree shelter them, glass doesn't), one tick in 25 sets them burning
-	             for 8 s.
+	             daylight (`burnsInDaylight`, Mob.isSunBurnTick): by day (Level.isDay with the
+	             weather where they stand, `context.isDay`: not in a thunderstorm), out of water
+	             and out of the rain (`context.rainingAt` at the feet or the top of the box),
+	             with the open sky over their eyes (`skyClear`: Level.canSeeSky's full sky light,
+	             so the leaves of a tree shelter them, glass doesn't), one tick in 25 sets them
+	             burning for 8 s.
 	  Walls      eyes in an opaque block: 1 every 10 ticks (in_wall).
 	  Hurts      `hurt` goes through LivingEntity.hurt's cooldown (Burning.hurtPlayer: 10 ticks in
 	             which only a bigger hurt lands, by the difference), softened by the kind's armor
@@ -67,6 +69,7 @@ local MobList = require(Shared.Entities.MobList)
 local MobPhysics = require(Shared.Entities.MobPhysics)
 
 local Burning = require(script.Parent.Parent.Players.Burning)
+local Lightning = require(script.Parent.Parent.World.Lightning)
 local MobAI = require(script.Parent.MobAI)
 
 export type PlayerView = MobAI.PlayerView
@@ -161,6 +164,12 @@ export type Context = {
 	-- Does it see the sky at full light, nothing that dims it (leaves, fluids) above either
 	-- (World/Skylight.clear: Minecraft's canSeeSky, for burning in daylight)?
 	skyClear: (x: number, y: number, z: number) -> boolean?,
+	-- Is it raining on the cell (World/WeatherServer.rainingAt: Minecraft's Level.isRainingAt)?
+	-- nil: it never rains.
+	rainingAt: ((x: number, y: number, z: number) -> boolean)?,
+	-- Is it day at column (x, z), the weather's darkening counted (World/WeatherServer.isDayAt:
+	-- Minecraft's Level.isDay, false in a thunderstorm)? nil: DayCycle.isDay of `dayTime`.
+	isDay: ((x: number, z: number) -> boolean)?,
 	-- Does chunk (cx, cz) tick (loaded and near a player)?
 	active: (cx: number, cz: number) -> boolean,
 }
@@ -194,6 +203,7 @@ export type MobWorld = {
 	kill: (self: MobWorld, id: number) -> boolean,
 	attack: (self: MobWorld, id: number, attacker: Attacker) -> (number?, boolean | string),
 	explode: (self: MobWorld, x: number, y: number, z: number, power: number) -> number,
+	lightning: (self: MobWorld, x: number, y: number, z: number, damage: number, burnTicks: number) -> number,
 	near: (self: MobWorld, x: number, y: number, z: number, radius: number) -> { Mob },
 	overlaps: (
 		self: MobWorld,
@@ -586,6 +596,26 @@ function MobWorld.attack(self: MobWorld, id: number, attacker: Attacker): (numbe
 end
 
 --[[
+	A lightning bolt at (x, y, z) (blocks: the bottom centre of the struck cell; World/Lightning):
+	every live mob it reaches (Lightning.hits) catches fire for `burnTicks` (one tick more when it
+	already burns: Entity.thunderHit) and takes `damage` half hearts through its cooldown and
+	armor. Returns how many it reached.
+]]
+function MobWorld.lightning(self: MobWorld, x: number, y: number, z: number, damage: number, burnTicks: number): number
+	local reached = 0
+	for _, mob in MobWorld.near(self, x, y, z, Lightning.REACH + Lightning.REACH_UP + 4) do
+		local body, kind = mob.body, mob.kind
+		if Lightning.hits(x, y, z, body.x, body.y, body.z, kind.width, kind.height) then
+			local burn = mob.burn
+			burn.fire = if burn.fire > 0 then burn.fire + 1 else burnTicks
+			MobWorld.hurt(self, mob.id, damage, nil)
+			reached += 1
+		end
+	end
+	return reached
+end
+
+--[[
 	An explosion of `power` at (x, y, z) (blocks; World/Explosions' handler): every live mob in
 	reach takes Minecraft's damage for how close and how much in the open it is, through its
 	cooldown and armor, and is pushed away by it. Returns how many it killed.
@@ -744,15 +774,19 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 		return
 	end
 
-	-- Daylight (Mob.isSunBurnTick), then lava, fire and burning (Players/Burning).
+	-- Daylight (Mob.isSunBurnTick: not in rain either, isInWaterRainOrBubble's rain at the feet
+	-- or the top of the box), then lava, fire and burning (Players/Burning).
 	local x, z = floor(body.x), floor(body.z)
+	local isDay, rainingAt = context.isDay, context.rainingAt
 	if
 		kind.burnsInDaylight
 		and body.waterDepth <= 0
 		and mob.burn.fire <= 0
 		and DayCycle.isDay(context.dayTime)
+		and (isDay == nil or isDay(x, z))
 		and context.skyClear(x, floor(body.y + kind.eye), z) == true
 		and self.random() < MobWorld.SUN_BURN_CHANCE
+		and not (rainingAt ~= nil and (rainingAt(x, floor(body.y), z) or rainingAt(x, floor(body.y + kind.height), z)))
 	then
 		mob.burn.fire = MobWorld.SUN_BURN_SECONDS * TICKS_PER_SECOND
 	end

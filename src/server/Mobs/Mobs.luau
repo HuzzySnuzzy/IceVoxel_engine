@@ -7,7 +7,9 @@
 	             within Config.Server.SimulationRadius chunks), refreshed every 10 ticks; blocks
 	             come from `world:peekBlock`, which never generates terrain; the day time from
 	             World/TimeOfDay and the open sky from World/Skylight (`open`, and `clear` for
-	             burning in daylight: leaves shade). Players are their
+	             burning in daylight: leaves shade), the rain and the weather's darkening from
+	             World/WeatherServer (`rainingAt`, `isDayAt`: no burning in the rain or a
+	             thunderstorm). Players are their
 	             characters' feet (Rig.feet), standing eyes (1.62), game mode and health.
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
@@ -48,6 +50,8 @@
 	  Mobs.spawn(kind, x, y, z)    a mob of a MobList name at a position (0 when it can't)
 	  Mobs.explode(x, y, z, power, getBlock)   what a blast does to mobs (World/Explosions'
 	                       handler, set by the boot script)
+	  Mobs.lightning(x, y, z)   what a lightning bolt does to mobs (World/WeatherServer's strike
+	                       handler, set by the boot script): burning and Lightning.Damage
 	  Mobs.occupied(block, x, y, z)   would `block` placed at (x, y, z) overlap a mob (its
 	                       Blocks.obstruction: solid blocks and lanterns, not torches)?
 	                       (Network/ServerNet's `occupied` rule: no block goes inside a mob)
@@ -73,6 +77,7 @@ local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Simulation = require(script.Parent.Parent.World.Simulation)
 local Skylight = require(script.Parent.Parent.World.Skylight)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
 local Explosions = require(script.Parent.Parent.World.Explosions)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Entities = require(script.Parent.Parent.Entities.Entities)
@@ -551,12 +556,17 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				end
 			end
 			watchHeld()
+			local dayTime = TimeOfDay.get()
 			local context = {
 				players = playerViews(),
-				dayTime = TimeOfDay.get(),
+				dayTime = dayTime,
 				skyOpen = skyOpen,
 				skyClear = skyClear,
 				active = isActive,
+				rainingAt = WeatherServer.rainingAt,
+				isDay = function(x: number, z: number): boolean
+					return WeatherServer.isDayAt(x, z, dayTime)
+				end,
 			}
 			mobs:tick(context)
 			MobSpawning.step(mobs, spawnState, context, Settings)
@@ -612,6 +622,17 @@ function Mobs.spawn(kind: string, x: number, y: number, z: number): number
 		return 0
 	end
 	return mobs:spawn(id, x, y, z)
+end
+
+--[[
+	World/WeatherServer's strike handler (set by the boot script): a lightning bolt at (x, y, z)
+	(blocks: the bottom centre of the struck cell) burns and hurts the mobs it reaches
+	(MobWorld.lightning: Config.Weather.Lightning's Damage and BurnSeconds). Returns how many.
+]]
+function Mobs.lightning(x: number, y: number, z: number): number
+	local mobs = mobWorld
+	local settings = Config.Weather.Lightning
+	return if mobs then mobs:lightning(x, y, z, settings.Damage, math.floor(settings.BurnSeconds / TICK + 0.5)) else 0
 end
 
 -- World/Explosions' handler: a blast of `power` at (x, y, z) hurts and pushes the mobs near it.

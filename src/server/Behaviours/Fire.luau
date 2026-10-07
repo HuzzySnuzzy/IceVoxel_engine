@@ -33,8 +33,12 @@
 	                each empty cell with a flammable neighbour (Fire.igniteOddsAt) catches when
 	                rand(100 + 100 x (dy - 1) above 1) <= (odds + 40 + difficulty x 7) / (age + 30),
 	                at the age plus rand(5) / 4.
-	           Rain, humid biomes and infiniburn blocks (netherrack) don't exist here. Unloaded
-	           blocks burn nothing and catch nothing; updates never generate chunks.
+	           Rain (FireBlock.isNearRain: raining on the fire's cell or one of the four beside
+	           it, World/WeatherServer's `setRain` hook: World/WeatherRules.rainingAt): before
+	           step 2, the fire goes out with a chance of 0.2 + age x 0.03 (a fresh fire in the
+	           rain lasts about 5 of its ticks, 8 s); in step 5, a cell near rain never catches.
+	           Humid biomes and infiniburn blocks (netherrack) don't exist here. Unloaded blocks
+	           burn nothing and catch nothing; updates never generate chunks.
 	  Random   a random tick of a fire with no tick waiting (its chunk unloaded and back) starts its
 	           ticks again.
 
@@ -92,11 +96,39 @@ type State = {
 	placing: { [number]: number },
 }
 
+-- Is it raining on cell (x, y, z) of `world` (Minecraft's Level.isRainingAt)?
+export type RainCheck = (world: any, x: number, y: number, z: number) -> boolean
+
 local Fire = {}
 
 Fire.canSurvive = SharedFire.canSurvive
 
+-- FireBlock.tick in the rain: the chance a fire goes out (0.2 + age x 0.03).
+Fire.RAIN_OUT = 0.2
+Fire.RAIN_OUT_PER_AGE = 0.03
+
 local states: { [any]: State } = setmetatable({}, { __mode = "k" }) :: any
+-- The rain check (nil: it never rains on fire; World/WeatherServer sets it).
+local rainingAt: RainCheck? = nil
+
+-- Sets where it rains (see the header; nil: nowhere).
+function Fire.setRain(check: RainCheck?)
+	rainingAt = check
+end
+
+-- FireBlock.isNearRain: raining on (x, y, z) or one of the four cells beside it.
+local function nearRain(world: any, x: number, y: number, z: number): boolean
+	local check = rainingAt
+	return check ~= nil
+		and (
+			check(world, x, y, z)
+			or check(world, x - 1, y, z)
+			or check(world, x + 1, y, z)
+			or check(world, x, y, z - 1)
+			or check(world, x, y, z + 1)
+		)
+end
+Fire.nearRain = nearRain
 
 local function stateOf(world: any): State
 	local state = states[world]
@@ -276,6 +308,10 @@ function Fire.tick(world: any, ticker: any, x: number, y: number, z: number, ran
 	local key = Coords.posKey(x, y, z)
 	-- (Minecraft keeps the age it started with for the rest of the tick.)
 	local age = state.ages[key] or 0
+	if rainingAt ~= nil and nearRain(world, x, y, z) and random() < Fire.RAIN_OUT + age * Fire.RAIN_OUT_PER_AGE then
+		remove(world, x, y, z)
+		return
+	end
 	local aged = math.min(MAX_AGE, age + nextInt(random, 3) // 2)
 	if aged ~= age then
 		setAge(world, state, key, aged)
@@ -306,7 +342,11 @@ function Fire.tick(world: any, ticker: any, x: number, y: number, z: number, ran
 					local odds = SharedFire.igniteOddsAt(getBlock, x + dx, y + dy, z + dz)
 					if odds > 0 then
 						local chance = (odds + boost) // (age + 30)
-						if chance > 0 and nextInt(random, limit) <= chance then
+						if
+							chance > 0
+							and nextInt(random, limit) <= chance
+							and not (rainingAt ~= nil and nearRain(world, x + dx, y + dy, z + dz))
+						then
 							Fire.ignite(world, x + dx, y + dy, z + dz, math.min(MAX_AGE, age + nextInt(random, 5) // 4))
 						end
 					end
