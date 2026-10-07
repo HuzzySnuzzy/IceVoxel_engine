@@ -26,6 +26,10 @@
 	               Shared/Mining). Shears are no tier (level 0): fast on blocks with `shearDrops`
 	               (BlockList), which they harvest (Items.drops), and worn by every block.
 	  durability   Uses before it breaks (Minecraft's max damage); such items stack to 1.
+	  attack       { damage, speed }: Minecraft 1.20.1's attack damage (half hearts, the hand's 1
+	               included) and attack speed (full strength attacks a second) of a weapon or tool
+	               hitting a mob (Shared/Entities/Combat; anything else hits like the hand: 1, 4 a
+	               second). Swords 4-7, axes 7-9, pickaxes 2-5, shovels 2.5-5.5, hoes 1.
 	  color        { r, g, b } in 0-255, a representative colour.
 	  model        Boxes the item is drawn with, in pixels (1/16 of a block) around the item's centre:
 	               { size = { x, y, z }, offset = { x, y, z }, color = { r, g, b }?, material = "Metal"?,
@@ -62,6 +66,7 @@ export type ItemSpec = {
 	tan: { warmth: number?, cooling: number?, freezeImmune: boolean? }?,
 	tool: { kind: string, speed: number, level: number }?,
 	durability: number?,
+	attack: { damage: number, speed: number }?,
 	color: { number }?,
 	material: string?,
 	model: { ModelBox },
@@ -377,12 +382,27 @@ local SHAPES: { ToolShape } = {
 		end,
 	},
 }
+--[[
+	Hitting mobs (Shared/Entities/Combat): Minecraft 1.20.1's attack damage (half hearts, the
+	hand's 1 included: the tool's base + its tier's bonus, wood and gold 0, stone 1, iron 2,
+	diamond 3) and attack speed (full strength hits a second) by shape and tier. Axes hit hardest
+	and slowest, swords fastest of the weapons; a hoe hits like the hand, faster with the tier.
+]]
+local ATTACK: { [string]: { [string]: { number } } } = {
+	Sword = { Wooden = { 4, 1.6 }, Stone = { 5, 1.6 }, Iron = { 6, 1.6 }, Golden = { 4, 1.6 }, Diamond = { 7, 1.6 } },
+	Shovel = { Wooden = { 2.5, 1 }, Stone = { 3.5, 1 }, Iron = { 4.5, 1 }, Golden = { 2.5, 1 }, Diamond = { 5.5, 1 } },
+	Pickaxe = { Wooden = { 2, 1.2 }, Stone = { 3, 1.2 }, Iron = { 4, 1.2 }, Golden = { 2, 1.2 }, Diamond = { 5, 1.2 } },
+	Axe = { Wooden = { 7, 0.8 }, Stone = { 9, 0.8 }, Iron = { 9, 0.9 }, Golden = { 7, 1 }, Diamond = { 9, 1 } },
+	Hoe = { Wooden = { 1, 1 }, Stone = { 1, 2 }, Iron = { 1, 3 }, Golden = { 1, 1 }, Diamond = { 1, 4 } },
+}
 for _, tier in TIERS do
 	for _, shape in SHAPES do
+		local attack = ATTACK[shape.name][tier.name]
 		table.insert(list, {
 			name = tier.name .. shape.name,
 			maxStack = 1,
 			tool = { kind = shape.kind, speed = tier.speed, level = tier.level },
+			attack = { damage = attack[1], speed = attack[2] },
 			durability = tier.durability,
 			color = tier.color,
 			material = tier.material,
@@ -981,6 +1001,137 @@ table.insert(list, {
 		{ size = { 1.2, 0.5, 0.4 }, offset = { -1.9, 5, -0.1 }, color = { 60, 60, 66 } },
 		{ size = { 1.2, 0.5, 0.4 }, offset = { -1.9, 2.5, -0.1 }, color = { 60, 60, 66 } },
 		{ size = { 1.2, 0.5, 0.4 }, offset = { -1.9, 0, -0.1 }, color = { 60, 60, 66 } },
+	},
+})
+
+--[[
+	What mobs drop (Shared/Entities/MobList; server Mobs/MobWorld), Minecraft 1.20.1's loot:
+	Leather (cows: makes Minecraft's leather armor, Crafting/Recipes), raw meat (Raw Beef, Raw
+	Mutton, Raw Porkchop, Raw Chicken: a mob that dies burning drops it cooked, as Minecraft's
+	furnace_smelt loot function), cooked in a furnace (Steak, Cooked Mutton, Cooked Porkchop,
+	Cooked Chicken) and eaten with the 32 tick hold for health (Shared/Items/Foods), Feathers
+	(chickens), Rotten Flesh (zombies: edible, with a likely Thirst effect), Bones (skeletons),
+	String (spiders: four make White Wool). Gunpowder (creepers) is above. Pixel boxes like the
+	other items: a ragged hide, slabs of meat with their fat or bone, a drumstick, a quill, a
+	knobbed bone and a looped thread, as Minecraft's icons.
+]]
+local LEATHER = { 150, 88, 52 }
+table.insert(list, {
+	name = "Leather",
+	color = LEATHER,
+	material = "Fabric",
+	model = {
+		{ size = { 11, 11, 1.5 }, offset = { 0, 0, 0 } },
+		{ size = { 3, 3, 1.5 }, offset = { -5, 5, 0 }, rotation = 30 },
+		{ size = { 3, 3, 1.5 }, offset = { 5, -5, 0 }, rotation = 20 },
+		{ size = { 2.5, 2.5, 1.5 }, offset = { 5, 5, 0 }, rotation = 45, color = shade(LEATHER, 0.85) },
+		{ size = { 2.5, 2.5, 1.5 }, offset = { -5, -5, 0 }, rotation = 45, color = shade(LEATHER, 0.85) },
+		{ size = { 6, 1, 0.4 }, offset = { -0.5, 1.5, 0.8 }, rotation = 15, color = shade(LEATHER, 1.2) },
+		{ size = { 4, 1, 0.4 }, offset = { 1, -2.5, 0.8 }, rotation = -10, color = shade(LEATHER, 0.75) },
+	},
+})
+-- A slab of meat with a stripe of fat along one edge (beef, mutton: with a bone end), in `meat`.
+local FAT = { 236, 226, 214 }
+local BONE = { 232, 228, 210 }
+local function slab(meat: { number }, fat: { number }, bone: boolean): { ModelBox }
+	local boxes: { ModelBox } = {
+		{ size = { 11, 8, 3 }, offset = { 0, -0.5, 0 }, color = meat },
+		{ size = { 9, 2, 3.1 }, offset = { 0, 4, 0 }, color = fat },
+		{ size = { 3, 5, 3 }, offset = { -6, -1, 0 }, rotation = 15, color = meat },
+		{ size = { 5, 1, 0.4 }, offset = { 0.5, -1, 1.6 }, color = shade(meat, 0.75) },
+		{ size = { 3, 1, 0.4 }, offset = { -1, -3, 1.6 }, color = shade(meat, 1.2) },
+	}
+	if bone then
+		table.insert(boxes, { size = { 4, 2, 2 }, offset = { 7, -3, 0 }, color = BONE })
+		table.insert(boxes, { size = { 2, 3, 2 }, offset = { 9, -3, 0 }, color = BONE })
+	end
+	return boxes
+end
+-- A drumstick: the meat in a ball, the bone sticking out of it with its knob.
+local function drumstick(meat: { number }): { ModelBox }
+	return {
+		{ size = { 8, 8, 6 }, offset = { -2, 2, 0 }, color = meat, shape = "Ball" },
+		{ size = { 6, 6, 5 }, offset = { 0.5, -0.5, 0 }, color = shade(meat, 0.9), shape = "Ball" },
+		{ size = { 6, 1.6, 1.6 }, offset = { 4, -4, 0 }, rotation = -45, color = BONE },
+		{ size = { 2.4, 2.4, 2 }, offset = { 6.5, -6.5, 0 }, color = BONE },
+	}
+end
+local RAW_BEEF = { 196, 52, 52 }
+local STEAK = { 120, 66, 38 }
+local RAW_MUTTON = { 206, 70, 66 }
+local COOKED_MUTTON = { 140, 80, 50 }
+local RAW_PORKCHOP = { 236, 140, 140 }
+local COOKED_PORKCHOP = { 206, 156, 104 }
+local RAW_CHICKEN = { 238, 196, 172 }
+local COOKED_CHICKEN = { 196, 132, 72 }
+table.insert(list, { name = "RawBeef", color = RAW_BEEF, model = slab(RAW_BEEF, FAT, false) })
+table.insert(list, {
+	name = "CookedBeef",
+	displayName = "Steak",
+	color = STEAK,
+	model = slab(STEAK, { 176, 136, 92 }, false),
+})
+table.insert(list, { name = "RawMutton", color = RAW_MUTTON, model = slab(RAW_MUTTON, FAT, true) })
+table.insert(
+	list,
+	{ name = "CookedMutton", color = COOKED_MUTTON, model = slab(COOKED_MUTTON, { 186, 140, 96 }, true) }
+)
+table.insert(list, { name = "RawPorkchop", color = RAW_PORKCHOP, model = slab(RAW_PORKCHOP, FAT, false) })
+table.insert(list, {
+	name = "CookedPorkchop",
+	color = COOKED_PORKCHOP,
+	model = slab(COOKED_PORKCHOP, { 232, 200, 150 }, false),
+})
+table.insert(list, { name = "RawChicken", color = RAW_CHICKEN, model = drumstick(RAW_CHICKEN) })
+table.insert(list, { name = "CookedChicken", color = COOKED_CHICKEN, model = drumstick(COOKED_CHICKEN) })
+local FEATHER = { 244, 244, 240 }
+table.insert(list, {
+	name = "Feather",
+	color = FEATHER,
+	material = "Fabric",
+	model = {
+		{ size = { 0.8, 16, 0.8 }, offset = { 0, 0, 0 }, color = { 206, 200, 186 } },
+		{ size = { 3.5, 11, 1 }, offset = { -1.6, 2, 0 } },
+		{ size = { 2.5, 10, 1 }, offset = { 1.4, 2.5, 0 }, color = shade(FEATHER, 0.88) },
+	},
+	tilt = -45,
+})
+local ROTTEN = { 120, 112, 52 }
+table.insert(list, {
+	name = "RottenFlesh",
+	color = ROTTEN,
+	model = {
+		{ size = { 10, 9, 3 }, offset = { 0, 0, 0 } },
+		{ size = { 4, 4, 3 }, offset = { -5, -3, 0 }, rotation = 25, color = shade(ROTTEN, 0.85) },
+		{ size = { 3, 3, 3 }, offset = { 5, 4, 0 }, rotation = 40 },
+		{ size = { 3, 1.5, 0.4 }, offset = { -1, 1.5, 1.6 }, color = { 156, 74, 60 } },
+		{ size = { 2, 2, 0.4 }, offset = { 2, -2, 1.6 }, color = { 82, 96, 40 } },
+	},
+})
+table.insert(list, {
+	name = "Bone",
+	color = BONE,
+	model = {
+		{ size = { 2, 13, 2 }, offset = { 0, 0, 0 } },
+		{ size = { 2.2, 2.2, 2 }, offset = { -1.2, 7, 0 } },
+		{ size = { 2.2, 2.2, 2 }, offset = { 1.2, 7, 0 } },
+		{ size = { 2.2, 2.2, 2 }, offset = { -1.2, -7, 0 } },
+		{ size = { 2.2, 2.2, 2 }, offset = { 1.2, -7, 0 } },
+		{ size = { 0.6, 11, 2.1 }, offset = { 0.6, 0, 0 }, color = shade(BONE, 0.85) },
+	},
+	tilt = -45,
+})
+local STRING = { 236, 236, 236 }
+table.insert(list, {
+	name = "String",
+	color = STRING,
+	material = "Fabric",
+	model = {
+		{ size = { 0.8, 7, 0.8 }, offset = { -3, 2, 0 }, rotation = 20 },
+		{ size = { 7, 0.8, 0.8 }, offset = { 0, 5, 0 }, rotation = -10 },
+		{ size = { 0.8, 8, 0.8 }, offset = { 3, 0.5, 0 }, rotation = -15 },
+		{ size = { 7, 0.8, 0.8 }, offset = { -0.5, -3.5, 0 }, rotation = 12 },
+		{ size = { 0.8, 5, 0.8 }, offset = { -4, -5.5, 0 }, rotation = 30 },
 	},
 })
 

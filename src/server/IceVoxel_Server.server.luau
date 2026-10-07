@@ -35,6 +35,9 @@
 	                   use them), and generated structures' chests filled on first use
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
 	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state)
+	 11. mobs       -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
+	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
+	                   blasts hurting them), and eating what they drop (Players/Eating)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -71,6 +74,8 @@ local ItemUse = require(Server.Players.ItemUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
+local Mobs = require(Server.Mobs.Mobs)
+local Eating = require(Server.Players.Eating)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -129,15 +134,19 @@ Machines.start(net, world)
 StructureBlocks.start(net, world)
 -- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
 ToughAsNails.start(net, world)
+-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
+Mobs.start(net, world)
+Eating.start(net)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)
 SettingsStore.start(net)
 Simulation.start(world)
--- What blasts do beyond blocks: items, players (damage, knockback) and the clients' effects.
+-- What blasts do beyond blocks: items, players (damage, knockback), mobs and the clients' effects.
 Explosions.setHandler(function(x: number, y: number, z: number, power: number, getBlock, range: number?)
 	Entities.explode(x, y, z, power)
 	Characters.explosion(x, y, z, power, getBlock, range)
+	Mobs.explode(x, y, z, power)
 end)
 Api._ready(world, ticker)
 

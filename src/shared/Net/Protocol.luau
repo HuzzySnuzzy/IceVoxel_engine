@@ -75,6 +75,10 @@
 	                   3 cancel  let go early
 	                   4 hand    a sip from the water source with an empty hand
 	                   5 fill    fill the held Glass Bottle or canteen at the water source
+	  Attack         u32 mob id: a left click on a mob (server Mobs/Mobs checks the reach from the
+	                 eyes, the line of sight and the game mode, and hits with the held item)
+	  Eat            u8 action: 1 start / 2 finish / 3 cancel holding a food (Shared/Items/Foods;
+	                 the server checks the time held and the item, as for Drink)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -163,6 +167,20 @@
 	                 body temperature (Shared/ToughAsNails), sent to them alone when it changes
 	                 (at most every few ticks, and at once on joining and respawning); unknown
 	                 flags and out of range values are malformed
+	  Mobs           u16 count, count x op (u8 op, u32 mob id, then by op): the mobs within
+	                 Config.Mobs.TrackingDistance of the player (server Mobs/Mobs), positions in
+	                 1/32 block (i32 each: the feet), yaw in 1/256 of a turn (u8: facing
+	                 (sin, cos)), health in half hearts (u8), flags (u8: bit 0 hurt flash, 1
+	                 burning, 2 dying, 3 a creeper's fuse lit) and the fuse's ticks (u8):
+	                   1 spawn   u8 kind (Shared/Entities/MobList id), u8 variant, i32 x, y, z,
+	                             u8 yaw, u8 health, u8 flags, u8 fuse
+	                   2 state   i32 x, y, z, u8 yaw, u8 health, u8 flags, u8 fuse (sent when it
+	                             changed, every Config.Mobs.SyncTicks)
+	                   3 remove  nothing (gone, died, or out of range)
+	                   4 arrow   i32 x, y, z, i32 tx, ty, tz: a skeleton's arrow flying from x to tx
+	                   5 push    f32 kx, ky, kz: this player's knockback from the mob's hit (blocks
+	                             per tick, at most MAX_KNOCKBACK)
+	                 An unknown op or kind, a wrong length or a non-finite push is malformed.
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -223,6 +241,8 @@ Protocol.ClientMessage = {
 	SaveSettings = 15,
 	Exertion = 16,
 	Drink = 17,
+	Attack = 18,
+	Eat = 19,
 }
 
 Protocol.ServerMessage = {
@@ -243,6 +263,7 @@ Protocol.ServerMessage = {
 	Settings = 15,
 	Explosion = 16,
 	Survival = 17,
+	Mobs = 18,
 }
 
 Protocol.EditAction = {
@@ -2298,6 +2319,245 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		effect = buffer.readu16(b, 10),
 		clemency = buffer.readu16(b, 12),
 	}
+end
+
+--[[ Mobs ]]
+
+-- Positions in Mobs messages are this many steps a block (i32: ±67 million blocks).
+Protocol.MOB_POSITION_SCALE = 32
+-- Mobs flags (see the header).
+Protocol.MobFlag = table.freeze({ Hurt = 1, Burning = 2, Dying = 4, Fuse = 8 })
+
+export type MobOp = {
+	op: "spawn",
+	id: number,
+	kind: number,
+	variant: number,
+	x: number,
+	y: number,
+	z: number,
+	yaw: number,
+	health: number,
+	flags: number,
+	fuse: number,
+} | {
+	op: "state",
+	id: number,
+	x: number,
+	y: number,
+	z: number,
+	yaw: number,
+	health: number,
+	flags: number,
+	fuse: number,
+} | { op: "remove", id: number } | {
+	op: "arrow",
+	id: number,
+	x: number,
+	y: number,
+	z: number,
+	tx: number,
+	ty: number,
+	tz: number,
+} | { op: "push", id: number, kx: number, ky: number, kz: number }
+
+local MOB_SPAWN, MOB_STATE, MOB_REMOVE, MOB_ARROW, MOB_PUSH = 1, 2, 3, 4, 5
+local MOB_CODE = { spawn = MOB_SPAWN, state = MOB_STATE, remove = MOB_REMOVE, arrow = MOB_ARROW, push = MOB_PUSH }
+-- Bytes after the op's u8 code and u32 id.
+local MOB_SIZE = {
+	[MOB_SPAWN] = 2 + 12 + 4,
+	[MOB_STATE] = 12 + 4,
+	[MOB_REMOVE] = 0,
+	[MOB_ARROW] = 24,
+	[MOB_PUSH] = 12,
+}
+local POSITION_LIMIT = 2 ^ 31 - 1
+
+local function quantize(value: number): number
+	local q = math.round(value * Protocol.MOB_POSITION_SCALE)
+	if q ~= q then
+		return 0
+	end
+	return math.clamp(q, -POSITION_LIMIT, POSITION_LIMIT)
+end
+
+-- A yaw (radians) as 1/256 turns.
+function Protocol.mobYaw(yaw: number): number
+	local turns = yaw / (2 * math.pi)
+	if turns ~= turns or math.abs(turns) == math.huge then
+		return 0
+	end
+	return math.round(turns * 256) % 256
+end
+
+local function u8(value: number): number
+	if value ~= value then
+		return 0
+	end
+	return math.clamp(math.round(value), 0, 255)
+end
+
+function Protocol.encodeMobs(ops: { MobOp }): buffer
+	local size = 2
+	for _, op in ops do
+		size += 5 + MOB_SIZE[MOB_CODE[op.op]]
+	end
+	local b = buffer.create(size)
+	buffer.writeu16(b, 0, #ops)
+	local o = 2
+	for _, op in ops do
+		buffer.writeu8(b, o, MOB_CODE[op.op])
+		buffer.writeu32(b, o + 1, op.id)
+		o += 5
+		if op.op == "spawn" then
+			buffer.writeu8(b, o, op.kind)
+			buffer.writeu8(b, o + 1, u8(op.variant))
+			o += 2
+		end
+		if op.op == "spawn" or op.op == "state" then
+			buffer.writei32(b, o, quantize(op.x))
+			buffer.writei32(b, o + 4, quantize(op.y))
+			buffer.writei32(b, o + 8, quantize(op.z))
+			buffer.writeu8(b, o + 12, Protocol.mobYaw(op.yaw))
+			buffer.writeu8(b, o + 13, u8(op.health))
+			buffer.writeu8(b, o + 14, u8(op.flags))
+			buffer.writeu8(b, o + 15, u8(op.fuse))
+			o += 16
+		elseif op.op == "arrow" then
+			buffer.writei32(b, o, quantize(op.x))
+			buffer.writei32(b, o + 4, quantize(op.y))
+			buffer.writei32(b, o + 8, quantize(op.z))
+			buffer.writei32(b, o + 12, quantize(op.tx))
+			buffer.writei32(b, o + 16, quantize(op.ty))
+			buffer.writei32(b, o + 20, quantize(op.tz))
+			o += 24
+		elseif op.op == "push" then
+			buffer.writef32(b, o, op.kx)
+			buffer.writef32(b, o + 4, op.ky)
+			buffer.writef32(b, o + 8, op.kz)
+			o += 12
+		end
+	end
+	return b
+end
+
+-- The ops of a Mobs message, nil when malformed (see the header). `kinds`: how many mob kinds
+-- there are (Shared/Entities/MobList.COUNT).
+function Protocol.decodeMobs(b: buffer, kinds: number): { MobOp }?
+	local len = buffer.len(b)
+	if len < 2 then
+		return nil
+	end
+	local count = buffer.readu16(b, 0)
+	local ops: { MobOp } = table.create(count)
+	local o = 2
+	local scale = Protocol.MOB_POSITION_SCALE
+	local turn = 2 * math.pi / 256
+	for _ = 1, count do
+		if o + 5 > len then
+			return nil
+		end
+		local code = buffer.readu8(b, o)
+		local id = buffer.readu32(b, o + 1)
+		local size = MOB_SIZE[code]
+		if size == nil or o + 5 + size > len then
+			return nil
+		end
+		o += 5
+		if code == MOB_SPAWN then
+			local kind = buffer.readu8(b, o)
+			if kind < 1 or kind > kinds then
+				return nil
+			end
+			table.insert(ops, {
+				op = "spawn",
+				id = id,
+				kind = kind,
+				variant = buffer.readu8(b, o + 1),
+				x = buffer.readi32(b, o + 2) / scale,
+				y = buffer.readi32(b, o + 6) / scale,
+				z = buffer.readi32(b, o + 10) / scale,
+				yaw = buffer.readu8(b, o + 14) * turn,
+				health = buffer.readu8(b, o + 15),
+				flags = buffer.readu8(b, o + 16),
+				fuse = buffer.readu8(b, o + 17),
+			})
+		elseif code == MOB_STATE then
+			table.insert(ops, {
+				op = "state",
+				id = id,
+				x = buffer.readi32(b, o) / scale,
+				y = buffer.readi32(b, o + 4) / scale,
+				z = buffer.readi32(b, o + 8) / scale,
+				yaw = buffer.readu8(b, o + 12) * turn,
+				health = buffer.readu8(b, o + 13),
+				flags = buffer.readu8(b, o + 14),
+				fuse = buffer.readu8(b, o + 15),
+			})
+		elseif code == MOB_REMOVE then
+			table.insert(ops, { op = "remove", id = id })
+		elseif code == MOB_ARROW then
+			table.insert(ops, {
+				op = "arrow",
+				id = id,
+				x = buffer.readi32(b, o) / scale,
+				y = buffer.readi32(b, o + 4) / scale,
+				z = buffer.readi32(b, o + 8) / scale,
+				tx = buffer.readi32(b, o + 12) / scale,
+				ty = buffer.readi32(b, o + 16) / scale,
+				tz = buffer.readi32(b, o + 20) / scale,
+			})
+		else
+			local kx, ky, kz = buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)
+			if
+				not (kx == kx and ky == ky and kz == kz)
+				or math.sqrt(kx * kx + ky * ky + kz * kz) > Protocol.MAX_KNOCKBACK
+			then
+				return nil
+			end
+			table.insert(ops, { op = "push", id = id, kx = kx, ky = ky, kz = kz })
+		end
+		o += size
+	end
+	if o ~= len then
+		return nil
+	end
+	return ops
+end
+
+function Protocol.encodeAttack(id: number): buffer
+	local b = buffer.create(4)
+	buffer.writeu32(b, 0, id)
+	return b
+end
+
+-- The mob id of an Attack message, nil when malformed.
+function Protocol.decodeAttack(b: buffer): number?
+	if buffer.len(b) ~= 4 then
+		return nil
+	end
+	return buffer.readu32(b, 0)
+end
+
+-- Eat actions (see the header).
+Protocol.EatAction = table.freeze({ Start = 1, Finish = 2, Cancel = 3 })
+
+function Protocol.encodeEat(action: number): buffer
+	local b = buffer.create(1)
+	buffer.writeu8(b, 0, action)
+	return b
+end
+
+-- The action of an Eat message, nil when malformed.
+function Protocol.decodeEat(b: buffer): number?
+	if buffer.len(b) ~= 1 then
+		return nil
+	end
+	local action = buffer.readu8(b, 0)
+	if action < Protocol.EatAction.Start or action > Protocol.EatAction.Cancel then
+		return nil
+	end
+	return action
 end
 
 return Protocol

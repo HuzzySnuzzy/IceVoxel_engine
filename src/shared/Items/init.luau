@@ -77,6 +77,9 @@ export type ItemDef = {
 	tool: { kind: string, speed: number, level: number }?,
 	-- Uses before a tool breaks (nil: does not wear).
 	durability: number?,
+	-- Hitting a mob with it (ItemList `attack`; nil: like the hand): damage in half hearts and
+	-- full strength hits a second (Shared/Entities/Combat).
+	attack: { damage: number, speed: number }?,
 	color: { number },
 	-- Non-block items: boxes (pixels, 1/16 block) the item is drawn with, their default look and
 	-- how far the whole model is turned about Z (degrees).
@@ -135,6 +138,7 @@ for id = 0, Blocks.count - 1 do
 			tan = nil,
 			tool = nil,
 			durability = nil,
+			attack = nil,
 			color = block.color,
 			model = nil,
 			material = block.material,
@@ -186,6 +190,7 @@ for index, spec in ItemList do
 		tan = tan,
 		tool = spec.tool,
 		durability = spec.durability,
+		attack = spec.attack,
 		color = spec.color or { 255, 0, 255 },
 		model = spec.model,
 		material = spec.material or "SmoothPlastic",

@@ -291,6 +291,38 @@ function Characters.explosion(
 end
 
 --[[
+	Hurts a living player by `amount` half hearts from a mob (server Mobs/Mobs: a zombie's or a
+	spider's hit, a skeleton's arrow), through the hurt cooldown lava, burning and explosions share
+	and softened by the armor worn (Players/Burning.hurtPlayer; never in creative or spectator).
+	Returns the half hearts that landed and whether the hurt was a fresh one (not under the
+	cooldown: Minecraft knocks back only those).
+]]
+function Characters.hurt(player: Player, amount: number): (number, boolean)
+	local character = player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	if humanoid == nil or humanoid.Health <= 0 then
+		return 0, false
+	end
+	local state = burning[player]
+	if state == nil then
+		state = Burning.newPlayer()
+		burning[player] = state
+	end
+	local fresh = state.cooldown <= 0
+	local window = Inventories.get(player)
+	local armor, toughness = 0, 0
+	if window then
+		armor, toughness = Items.armorPoints(window.inventory.armor)
+	end
+	local landed = Burning.hurtPlayer(state, GameMode.of(player), amount, armor, toughness)
+	if landed > 0 then
+		-- (TakeDamage respects the ForceField of players who can't be hurt.)
+		humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
+	end
+	return landed, fresh and landed > 0
+end
+
+--[[
 	Starts handling characters. `world` (optional) gives the block a hurting landing sounds like
 	and the blocks players suffocate in and burn in; without it only the player's fall sound plays,
 	nobody suffocates and nothing burns.

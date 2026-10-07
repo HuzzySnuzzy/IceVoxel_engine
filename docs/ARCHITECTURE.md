@@ -1412,12 +1412,12 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
 
 - **Light level.** Blocks and fluids carry a "Light level N" line (`WailaInfo.lightLine`, context
   `light`): the light of the cell a mob would stand in (above an opaque block, else the block's
-  own cell), the larger of its block light (`CaveMood.blockLight`: sources less one per open cell
-  they travel, budgeted) and sky light (`LightingController.skyLight`, SkyExposure's estimate),
-  since the engine keeps no light map. It is worked out at every pick (0.05 s) and is part of the
-  panel's key, so a torch placed nearby updates it. Coloured for Minecraft 1.18+'s monster
-  spawning (block light 0): red with sky light at most 7, yellow above (night only), green lit;
-  F3 adds "(block b, sky s)". Meant for mob spawning later, which should use the same estimate.
+  own cell), the larger of its block light (`Shared/World/LightEstimate.blockLight`: sources less
+  one per open cell they travel, budgeted; the server's mob spawning uses the same) and sky light
+  (`LightingController.skyLight`, SkyExposure's estimate), since the engine keeps no light map.
+  It is worked out at every pick (0.05 s) and is part of the panel's key, so a torch placed nearby
+  updates it. Coloured for Minecraft 1.18+'s monster spawning (block light 0): red with sky light
+  at most 7, yellow above (night only), green lit; F3 adds "(block b, sky s)".
 
 - **Target.** `BlockInteraction.target()`: the highlighted block, with the same reach and rules
   (outlines included; a fire's from the walls it clings to, `Fire.outlineAt`; it is named "Fire"
@@ -3976,6 +3976,155 @@ Dropped items are Minecraft's ItemEntity:
 - Clients run the same `ItemPhysics` between syncs, ease corrections in, and draw items bobbing and
   spinning (more copies for bigger stacks). A picked-up item flies to the player.
 
+## Mobs (`Entities/MobList`, server `Mobs/`, client `Entities/MobRenderer`)
+
+Minecraft 1.20.1's farm animals and classic monsters as plain hitboxes. Tested in
+`tests/spec/Mobs` (server and shared) and `tests/spec/MobsClient`.
+
+**Kinds** (`Shared/Entities/MobList`, append only: a kind's id is a u8 on the wire). Each record
+holds Minecraft's numbers (box, eyes, health, MOVEMENT_SPEED, armor, attack damage, the goals'
+speed modifiers), its abilities (`burnsInDaylight`, `slowFall`, `fallDamage`, `climbs`,
+`darkOnly`, `leap`, a creeper's `fuse`, a skeleton's `bow`), its loot, spawn weight and group,
+hurt and death sounds, and how the client draws it (at most 2 boxes, `variants` recolouring the
+first: sheep's natural colours by Minecraft's odds). The registry resolves the loot to item ids
+at load (a typo fails loudly).
+
+| Kind     | Box          | Health | Speed | Does                                                              |
+| -------- | ------------ | ------ | ----- | ----------------------------------------------------------------- |
+| Cow      | 0.9 × 1.4    | 10     | 0.2   | wanders, panics (x2); leather 0-2, beef 1-3                       |
+| Sheep    | 0.9 × 1.3    | 8      | 0.23  | wanders, panics (x1.25); white wool, mutton 1-2                    |
+| Pig      | 0.9 × 0.9    | 10     | 0.25  | wanders, panics (x1.25); porkchop 1-3                              |
+| Chicken  | 0.4 × 0.7    | 4      | 0.25  | falls x 0.6 a tick, no fall damage; feathers 0-2, chicken          |
+| Zombie   | 0.6 × 1.95   | 20     | 0.23  | armor 2, hits 3, burns by day; rotten flesh 0-2 (+2.5% iron)       |
+| Skeleton | 0.6 × 1.99   | 20     | 0.25  | shoots within 15 (3-5, every 60 ticks), burns by day; bones 0-2    |
+| Creeper  | 0.6 × 1.7    | 20     | 0.25  | 30 tick fuse within 3, cancelled at 7, power 3; gunpowder 0-2      |
+| Spider   | 1.4 × 0.9    | 16     | 0.3   | hits 2, climbs, leaps, hunts only in the dark; string 0-2          |
+
+**Movement** (`Shared/Entities/MobPhysics`, pure): LivingEntity.aiStep and travel for a mob
+steered by its AI: `forward` (Minecraft's zza: speed x modifier x 0.98) along its yaw (facing
+(sin, cos)), the jump. Ground acceleration speed x 0.216 / f³ (so a zombie walks 0.114 blocks a
+tick, 2.3 a second: tested), air 0.02, gravity 0.08, x 0.98 vertically and f x 0.91 sideways;
+water's tag (water, fuel) 0.02 / x 0.8 / sinking 0.005, lava's tag (lava, oil) x 0.5 and
+gravity / 4; jumping 0.42 off the ground 10 ticks apart or 0.04 in a fluid deeper than 0.4 (how
+FloatGoal keeps mobs up); a ledge at the surface is hopped out of (0.3). Collision is `Hull` with
+Minecraft's mob step of 0.6, so a full block takes a jump; a spider pushing into a wall climbs
+at 0.2 a tick. The fall distance (cleared in water, halved in lava) comes back on landing.
+`dropAt` answers how far the floor is below a step (nil beyond the depth: a cliff).
+
+**AI** (`server/Mobs/MobAI`, pure): direct steering, no path finding.
+- Wander (RandomStrollGoal: one tick in 120, a spot 3-10 blocks away, at most 100 ticks), stand
+  idle between; panic (creatures hurt by anything: 3-5 s at `panic` speed away from the hurt's
+  source); float (jump 4 ticks in 5 when deeper than 0.4 or in lava).
+- Steering faces the goal and walks; a wall is jumped (a spider climbs it). `safeAhead` refuses a
+  step into an unloaded cell, a hazard (fire, campfire, lava, oil, fuel: `hazard`) or over a drop
+  of more than 3 blocks (the path finder's max fall): the mob stops (a stroll ends, a panic picks
+  another spot).
+- Targets: every 10 ticks (staggered by id) a monster without one looks for the nearest living
+  survival or adventure player (never creative or spectator: `attackable`) within `follow` (16)
+  it can see (`canSee`: a voxel ray from its eyes to theirs, solid blocks stop it); it keeps the
+  target while in range and attackable, and drops it after 60 ticks out of sight. Hurt by a
+  player, it hunts them (HurtByTargetGoal). Spiders notice players only under raw brightness 8
+  (the open sky by the time of day, else `LightEstimate.blockLight` with a 64 cell budget) and
+  give up 1 tick in 100 in the light.
+- Melee (zombie, spider): Minecraft's reach (distance² ≤ (2w)² + 0.6) with the target in sight,
+  every 20 ticks: a `hits` record with the damage and a 0.4 knockback away from the mob
+  (`Combat.knockback`). A spider leaps at a target 2-4 blocks away one tick in 5.
+- Creeper: SwellGoal and Creeper.tick: the goal runs while the fuse burns or a target is within
+  3 blocks (standing still), the fuse lights (+1 a tick; the hiss on the first) while the target
+  is seen within 7, else cools (-1); at 30 an `explosions` record (power 3) and the creeper is
+  gone (no loot, no death record).
+- Skeleton: RangedBowAttackGoal on normal: `seeTime` counts the target in sight; with it seen 20
+  ticks within 15 blocks it stands; a 20 tick draw, then a hitscan shot and a 40 tick reload. A
+  shot hits with 1.15 - distance / 15 (0.25..0.95) for 3-5 with a 0.4 knockback, else flies 1.5
+  blocks off; either way an `arrows` record (the clients draw it) and the bow's sound.
+
+**The world** (`server/Mobs/MobWorld`, pure, `MobWorld.new(getBlock, options)`): mobs by id in id
+order, ticked at 20 Hz (`tick(context)`: the players as PlayerViews (feet, eye height, game
+mode, alive), the day time, `skyOpen` and `active(cx, cz)`). Frozen when its chunk doesn't tick or
+its cell isn't loaded. Each live mob: AI, physics, fall damage (ceil(d - 3), bypassing armor; not
+chickens), daylight burning (by day, out of water, open sky over the eyes, 1 tick in 25 → 8 s),
+`Players/Burning.tickPlayer` as for a player (lava, fire, campfires, burning, water; a mob
+catches fire after 20 ticks in a fire block like a player, Minecraft's mobs at once) and
+suffocation (eyes in an opaque block, 1 under the cooldown).
+- `hurt(id, amount, source)`: Burning.hurtPlayer's LivingEntity cooldown (10 ticks: only a bigger
+  hurt lands, by the difference) and the kind's armor unless `bypassArmor`; a fresh hurt flashes
+  10 ticks (`hurtTime`), sounds, knocks back (`source.knockback` from (x, z)), and makes creatures
+  panic or monsters hunt the player. A player's hurt counts for the kill 100 ticks.
+- Death: the death sound, a `deaths` record (kind, position, killer or nil), 20 ticks lying (the
+  dying flag), then the loot (`kindDrops`: min..max, `chance`, `byPlayer` only with a killer; raw
+  meat cooked when it died burning: `Foods.COOKED`) and gone. `kill(id)` is /kill's death.
+- `explode(x, y, z, power)`: Explosion.seenPercent / hit on each live mob in reach: the damage
+  through `hurt` and the push added to its velocity.
+- `attack(id, attacker)`: refused for the dead, spectators (`Combat.reach` 0), dying or gone mobs,
+  a box beyond the mode's reach from the eyes (+ `SERVER_LEEWAY` 1), or out of sight (the mob's
+  centre, eyes and feet); else the held item's damage x 1.9's strength (`Combat.strength(ticks
+  since the swing or the change of item, speed)`) with a 0.4 knockback; returns the landed hurt
+  and whether it was strong.
+- Despawn every 20 ticks over every mob (Mob.checkDespawn): nothing with no players; monsters
+  beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40;
+  creatures with no player within 128 for `ForgetTicks` go; below y -64 anything.
+- `takeChanges()`: spawned, removed, deaths, drops, hits, arrows, explosions, sounds.
+Measured in Lune on a flat world with a player (mixed kinds, at night): 50 / 150 / 300 mobs
+cost 0.14 / 0.45 / 0.85 ms a tick native, 0.44 / 1.35 / 2.76 ms interpreted (~9 µs a mob).
+
+**Spawning** (`server/Mobs/MobSpawning`, pure): monsters every `HostileInterval` (20) ticks,
+creatures every `PassiveInterval` (400), for each living non-spectator player whose 128 block
+census is under `HostileCap` (15) / `PassiveCap` (10) and the world under `MaxHostile` /
+`MaxPassive` / `MaxMobs`: `Attempts` (3) packs, each a kind by spawn weight, a column 24-44
+blocks out (`SpawnDistance`) in a chunk that ticks, its centre the first standing spot down the
+column (creatures from 20 above the player's feet over 48, monsters from ±16 over 24), 2-4 /
+1-4 members spread ±4, each on its own spot within 3 up or down. `validSpot`: the chunk ticks, a
+solid opaque sturdy floor (grass or dry grass for creatures), the box free (no solid, unloaded,
+fluid, fire or campfire cell: Hull and Burning.touching), 24 blocks from every player, and the
+light: creatures raw brightness above 8, monsters no block light and Minecraft's two rolls
+(`LightEstimate.darkForMonsters`).
+
+**Light** (`Shared/World/LightEstimate`, pure, shared): `blockLight` (the search the cave mood
+used, moved here: sources less one per open cell, 256 cells, no allocations), `skyLight` (15
+where `open`, else 15 less the steps to the nearest open cell through open cells within 48:
+an overhang's edge 14, a cave 0; the server's `open` is World/Skylight.open), `darkForMonsters`
+(Monster.isDarkEnoughToSpawn: block light 0, sky ≤ rand(32), max(sky - skyDarken, block) ≤
+rand(0..7)) and `brightForAnimals` (> 8). WAILA's block light and Audio/CaveMood use the same.
+
+**On the server** (`server/Mobs/Mobs`): 20 Hz on Heartbeat (4 ticks a frame at most). Every 10
+ticks the ticking chunks from `Simulation.activeChunks` (a key set); players from their
+characters (Rig.feet, eyes 1.62). After each tick: sounds (Audio/Sounds), deaths (the `died`
+BindableEvent: killer Player or nil, kind, x, y, z, id), loot (Entities.spawnItem), hits
+(`Characters.hurt`: Burning.hurtPlayer's cooldown and the armor worn; a fresh one queues a `push`
+for the player), creepers' blasts (`Explosions.explode`, power 3 at the feet: a blast like any,
+which reaches the boot script's handler and so `Mobs.explode` for the other mobs), arrows
+(queued for players within tracking range). Every `SyncTicks` (2) each player gets one Mobs
+message: spawns for mobs coming within `TrackingDistance` (64; 128 spawns a message at most),
+states of known mobs whose quantized state changed (a per-player copy of what was sent), removes
+for those that left or are gone, and the queued arrows and push. Attacks: a token bucket of
+`AttacksPerSecond`, the held item (Inventories.heldTool, watched every tick for the attack
+strength's reset), `MobWorld.attack`, the strong or weak attack sound, the weapon's wear
+(Combat.wear: swords 1, tools 2; not with instabuild). /summon and /kill: TextChatCommands (or
+Chatted), SummonCommand's parse and TimeCommand.mayUse.
+
+**Combat and food** (`Shared/Entities/Combat`, `Shared/Items/Foods`, pure): ItemList's `attack`
+(swords 4-7 at 1.6 a second, axes 7-9 at 0.8-1, pickaxes 2-5, shovels 2.5-5.5, hoes 1, the hand 1
+at 4), `strength` (Player.getAttackStrengthScale(0.5)), `damage` (x (0.2 + s² x 0.8)), `reach`
+(3, creative 6, spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: heal (cooked
+beef and porkchop 4, mutton and chicken 3, raw 1-2, rotten flesh 2) and an optional effect
+(raw chicken 30%, rotten flesh 80%: TAN's Thirst effect 600 ticks, Minecraft's Hunger), `canEat`
+(hurt or invulnerable, never a spectator), `COOKED`. The 32 tick hold is Drinking's: client
+`Interaction/Eating`, server `Players/Eating` (start / finish / cancel, the time, slot and item
+checked, health += heal scaled to MaxHealth, one item used up outside creative, the burp).
+
+**On the client** (`Entities/MobRenderer`, `Entities/MobModel`): MobModel (pure) glides each mob
+from where it is drawn to the new state over the sync interval (yaw the short way; > 8 blocks
+snaps), colours parts (the variant, hurt → 0.7 of the way to red, a lit creeper flashing white
+faster as it burns), tips a dying mob over 1 s (sqrt(progress x 1.6) x 90°) and picks the nearest
+live box on a ray. MobRenderer: anchored, non-colliding, non-queried Parts from a pool (128
+spare), one BulkMoveTo a frame after the camera, colours written only on change, a Fire (BurningView's
+colours) on a burning mob's body, arrows as thin shafts flying at 32 blocks a second (at most
+32), `push` ops to `MovementController.knockback`. BlockInteraction aims at mobs first
+(`mobOn`: MobRenderer.pick on the aim ray, then the box within Combat.reach of the hull's eyes):
+a mob nearer than the block hides it (no outline, no mining, no placing) and a press (a tap on
+touch) sends Attack. WAILA (`pickEntity`) names mobs as items and players (`WailaInfo.mob`:
+name, "Health h / max", F3: kind, id, position; a colour box icon).
+
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
 
 Sounds are Minecraft's sound events, played with files that ship with every Roblox client.
@@ -4135,7 +4284,8 @@ What the client plays itself:
       (`SkyExposure.skyLight`, through `LightingController.skyLight` with its cached natural
       ground): 0 in an opaque block, 15 where nothing opaque is above, else 15 less the steps
       (a block face each, a diagonal two) to the nearest cell open to the sky along the 16 rays,
-      within a 512-cell budget. Block light (`CaveMood.blockLight`): breadth first through open
+      within a 512-cell budget. Block light (`CaveMood.blockLight`, Shared/World/LightEstimate's,
+      which WAILA and the server's mob spawning share): breadth first through open
       cells from the block, a source's light less one a face, an opaque block its own light only,
       at most 256 open cells (a whole tunnel, a few blocks around in a big cavern), with no
       allocations (flat frontier lists and a stamped visit buffer). About 0.2 ms a tick
@@ -4196,6 +4346,8 @@ live edits after it must arrive in the order they were sent.
 | client → server | `SaveSettings`  | the chosen settings of the client's device profile (below), after changes and when the menu closes |
 | client → server | `Exertion`      | movement that costs thirst since the last report: cm sprinted and in water, jumps, sprint jumps, sprinting now (7 bytes, about once a second) |
 | client → server | `Drink`         | u8 action: start / finish / cancel holding a drink; hand (a sip) / fill (a bottle or canteen) at a water source's cell |
+| client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes) |
+| client → server | `Eat`           | u8 action: start / finish / cancel holding a food |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -4213,6 +4365,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
 | server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
+| server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state) / state (position in 1/32 block, yaw in 1/256 turn, health, flags, fuse: 21 bytes) / remove / arrow (from, to) / push (this player's knockback) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
@@ -4349,6 +4502,8 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   edit. Placing over a replaceable plant drops nothing; the other half of a tall one then pops by
   itself with its no-tool drop (nothing for tall grass and large ferns).
 - `Entities/`: dropped items (see Item entities).
+- `Mobs/`: mobs, their spawning, players' attacks and /summon (see Mobs); `Players/Eating`: food.
+  `Characters.hurt` is how a mob's hit reaches a player (the hurt cooldown and armor).
 - `Players/GameModes`, `Players/GameModeCommand`, `Players/GameModeRules`: see Game modes.
   `Players/Inventories`, `Players/Containers`: see Items and inventories. `World/TimeOfDay` and
   `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see Sounds.
@@ -4529,3 +4684,9 @@ For IceVoxel the same idea fits persistence: saving edits per region (one DataSt
   `setLooks`) and ItemModels ask it, so near, far, plain, meshed and item looks agree. A change of
   looks goes through its generations and `changed` / `itemsChanged`, and what it touches is
   rebuilt in the background lane, never all at once.
+- Mob kinds (`Entities/MobList` positions) go on the wire as a u8: append, never reorder. Mobs
+  only tick in the chunks World/Simulation keeps (loaded, near a player) and read blocks with
+  `peekBlock`; spawning never generates terrain and never places a mob in a chunk that doesn't
+  tick. Mob AI and physics stay pure (MobWorld, MobAI, MobSpawning, MobPhysics take their blocks,
+  players, time and randomness as arguments), so the specs run them; Roblox calls stay in
+  `Mobs/Mobs`. Light for gameplay comes from `World/LightEstimate`, the one estimate WAILA shows.

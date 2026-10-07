@@ -105,8 +105,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   in a ripple. Lit, it glows, flashes white, hisses (`entity.tnt.primed`), falls as Minecraft's
   primed TNT does (speeding up, through air, fire, plants and fluids, which it gives back), can't
   be broken, and 4 s later explodes with power 4 and no fire (in water it breaks nothing).
-  **Gunpowder** (no creepers here): a coal or charcoal and a flint make two; TNT is Minecraft's
-  recipe (5 gunpowder in an X, 4 sand).
+  **Gunpowder** (creepers drop it too, see Mobs): a coal or charcoal and a flint make two; TNT is
+  Minecraft's recipe (5 gunpowder in an X, 4 sand).
 - **The Nuke** (for fun, a mod's nuke). A dark casing with hazard stripes and the radiation sign,
   lit like TNT: it glows red, flashes and beeps every second for 10 s, then digs a crater no ray
   explosion could: a ragged sphere of radius 24 (± 20%, smooth noise and a block of crumble; the
@@ -209,6 +209,36 @@ A fast, Minecraft-style voxel engine for Roblox.
   armor** (any leaves, which Shears harvest) cools a step a piece: a desert's 9 becomes 5. Both
   have leather's armor points. A **Thermometer** (an iron nugget over glass over glow dust) held
   in the hand reads the body temperature and where it is going as numbers over the gauge.
+- **Mobs.** Minecraft 1.20.1's farm animals and classic monsters as simple boxes moving about (a
+  body in the kind's colour and a head on the side it faces): **cows** (0.9 × 1.4 blocks, 10
+  health), **sheep** (0.9 × 1.3, 8; white, now and then black, grey, brown or pink), **pigs**
+  (0.9 × 0.9, 10) and **chickens** (0.4 × 0.7, 4; they flap down slowly and take no fall damage)
+  wander, stand about and run off when hurt; **zombies** (0.6 × 1.95, 20, armor 2) and
+  **spiders** (1.4 × 0.9, 16; they climb walls, leap, and only hunt in the dark) hunt survival
+  and adventure players they can see within 16 blocks and hit them (3 and 2 half hearts every
+  second, through the armor and the hurt cooldown, with a knockback); **skeletons** (0.6 × 1.99,
+  20) shoot within 15 blocks every 3 s (3-5 an arrow; the arrows are hitscan, seen flying);
+  **creepers** (0.6 × 1.7, 20) walk up, hiss within 3 blocks and 1.5 s later explode with power 3,
+  unless you get 7 blocks away. Zombies and skeletons burn in daylight under the open sky. Mobs
+  walk at Minecraft's speeds (a zombie 2.3 blocks a second), jump up blocks, never walk off a drop
+  of more than 3 blocks or into lava, fire, oil or fuel, swim up in water, take fall, fire, lava
+  and explosion damage (TNT, fuel and creepers hurt and throw them), flash red when hurt, tip
+  over when they die and drop Minecraft's loot a second later: **Leather** and **Raw Beef**,
+  **White Wool** and **Raw Mutton**, **Raw Porkchop**, **Feathers** and **Raw Chicken**, **Rotten
+  Flesh** (and now and then an iron ingot), **Bones**, **String**, **Gunpowder**; meat drops
+  cooked when the mob died burning. Raw meat cooks in a furnace; leather makes leather armor,
+  four string a block of wool (which burns like Minecraft's). **Food:** hold right click 1.6 s
+  with meat to eat it when hurt (steak and cooked porkchop heal 2 hearts, cooked mutton and
+  chicken 1.5, raw meat less; raw chicken and rotten flesh may give Tough As Nails' Thirst
+  effect). **Fighting:** a left click on a mob in reach (3 blocks, 6 in creative) hits it with
+  Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...) and 1.9's attack recovery (a
+  sword hits at full strength every 0.6 s), knocks it back and wears the weapon; WAILA names the
+  mob and its health. Creatures spawn on grass in the light 24-44 blocks from players (10 at most
+  around each), monsters on solid ground in the dark, at night or in caves (15 at most; never
+  by torchlight), from the same light estimate WAILA shows; monsters vanish far from everyone
+  (Minecraft's 128 and 32 block rules). Mobs only move within the simulated chunks around players
+  and freeze beyond. `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for admins.
+  `Config.Mobs` sets the caps and turns spawning or mobs off.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -628,11 +658,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   points at, like the Jade mod: the block's icon and name, the tool and tier it needs with a
   green check or red cross for the item in hand ("Requires Iron Pickaxe"), the mining progress
   as a line along its bottom edge, and "IceVoxel" as the mod name. It also names dropped items,
-  other players (health, game mode) and fluids when no block is in reach (lava says "Light 15"),
-  and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). Blocks and fluids show a "Light level"
-  line: Minecraft's 0-15 light where a mob would stand on the block (on top of it, or in the cell
-  of a see-through block), the larger of the block light from torches, lava, glow lichen and the
-  like and the sky light, estimated from the loaded blocks. Red: no block light and little sky
+  mobs (health), other players (health, game mode) and fluids when no block is in reach (lava
+  says "Light 15"), and the fluid tanks of machines ("Oil: 3,000 / 10,000 mB"). Blocks and fluids
+  show a "Light level" line: Minecraft's 0-15 light where a mob would stand on the block (on top
+  of it, or in the cell of a see-through block), the larger of the block light from torches,
+  lava, glow lichen and the like and the sky light, estimated from the loaded blocks (the block
+  light the same estimate the server's mob spawning uses). Red: no block light and little sky
   (monsters could spawn there at any time); yellow: no block light under the sky (at night); green:
   lit. While `F3` is open it adds both parts, and shows everything
   the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
@@ -654,7 +685,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   breaking, armor put on, getting hurt and dying, interface clicks and Minecraft's cave moods;
   lava popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss
   when water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
-  crackling; fire crackling, hissing when punched out, and flint and steel striking. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
+  crackling; fire crackling, hissing when punched out, and flint and steel striking; mobs hurt
+  and dying (each kind its own pitch), a creeper's hiss, a skeleton's bow and its arrows
+  striking, players' hits (strong and weak) and eating. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
   sounds every Roblox client ships, told apart by pitch, so nothing has to be uploaded, and players
   hear what others do within 16 blocks. Each one can be replaced by your own sound (see
   Extending).
@@ -733,6 +766,8 @@ Studio tips:
 | Action        | Mouse / keyboard            | Gamepad | Touch      |
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
+| Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon | R2 | Tap the mob |
+| Eat           | Hold right click 1.6 s with food (meat, cooked or raw, rotten flesh) while hurt (creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
@@ -769,6 +804,7 @@ Studio tips:
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
+| Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (admins, the owner, Studio) | | |
 
 ## Settings menu
 
@@ -872,6 +908,12 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             example), Pools (explicit template pools), Structures (what generates)
   Entities/ItemPhysics      dropped item movement (server and client; floating in water and fuel,
                             in lava and oil)
+  Entities/MobList          mob kinds (Minecraft's boxes, health, speeds, loot, spawn weights,
+                            sounds, how the client draws them); MobPhysics (a mob's movement
+                            tick: walking, jumping, fluids, climbing, falls); Combat (players
+                            hitting mobs: weapon damage, attack strength, reach, knockback, wear)
+  Items/Foods               what eating meat does (healing, the Thirst effect's odds), raw to
+                            cooked
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools
   ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
@@ -915,7 +957,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             (cave visibility: which sections connect, the search from the
                             camera), Horizon (far terrain hidden behind nearer terrain),
                             Explosion (Minecraft's explosion: rays, blast resistance, seen
-                            percent, damage, knockback, fire)
+                            percent, damage, knockback, fire), LightEstimate (block and sky light
+                            from the blocks, Minecraft's monster and animal spawn light tests;
+                            mob spawning, WAILA and the cave mood)
   PlayerSettings            the Options menu's settings: ids, ranges, presets, the LOD balance
                             rule, the wire and DataStore formats
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
@@ -951,6 +995,12 @@ src/server   -> ServerScriptService.IceVoxel
   Entities/                 EntityWorld (item rules: pickup, merging, despawn, burning in lava,
                             blasts),
                             Entities (spawning, replication)
+  Mobs/                     MobWorld (mobs' rules: ticks, hurts, death and loot, blasts, despawn,
+                            players' attacks; pure), MobAI (wander, panic, hunt, melee, a
+                            creeper's fuse, a skeleton's bow; pure), MobSpawning (natural spawning
+                            by light, ground and caps; pure), SummonCommand (/summon, /kill;
+                            pure), Mobs (20 Hz ticks, replication, attacks, commands, the `died`
+                            event and other scripts' hooks)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (every fluid in
                             pipes, machines' fluid tanks, the fluid ejector),
@@ -984,7 +1034,7 @@ src/server   -> ServerScriptService.IceVoxel
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
                             spectators),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
-                            settings)
+                            settings), Eating (food held 32 ticks: healing, used up)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -1010,7 +1060,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             changes apply), Pages (the menu's layout), saving them on the server
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
                             (does a bucket on a machine act on its tanks or open its screen),
-                            Drinking (Tough As Nails: filling, sipping, holding a drink)
+                            Drinking (Tough As Nails: filling, sipping, holding a drink), Eating
+                            (holding food); hitting mobs (BlockInteraction)
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: thirst droplets, the
                             temperature gauge, frost and heat at the edges), InventoryScreen (with the crafting,
@@ -1030,7 +1081,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
                             mood), CaveMood (Minecraft's mood, pure), Music + MusicRules (the
                             background music; when and which, pure), SoundRules (the pure rules)
-  Entities/EntityRenderer   dropped items
+  Entities/EntityRenderer   dropped items; MobRenderer + MobModel (mobs: boxes gliding between
+                            updates, hurt flashes, creepers' fuses, flames, arrows; the pure pose
+                            and aim)
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu
   Net/ClientNet             routes server messages; Notices shows server messages in the chat;
@@ -1148,6 +1201,14 @@ for performance:
 | `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire, Campfire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
+| `Mobs.Enabled` / `Spawning` | true / true | Mobs at all (false: none spawn, tick or are sent) / natural spawning (`/summon` still works). |
+| `Mobs.MaxMobs` / `MaxPassive` / `MaxHostile` | 300 / 120 / 160 | Most mobs in the world, creatures and monsters among them.  |
+| `Mobs.PassiveCap` / `HostileCap` | 10 / 15 | Most creatures / monsters within 128 blocks of a player for spawning to go on. |
+| `Mobs.HostileInterval` / `PassiveInterval` / `Attempts` | 20 / 400 / 3 | Ticks between spawning rounds of monsters and creatures; packs tried per player a round. |
+| `Mobs.SpawnDistance`      | 24, 44  | Blocks from a player a pack spawns (never within 24 of anyone).     |
+| `Mobs.ForgetTicks`        | 6000    | A creature with no player within 128 blocks this long is dropped (memory). |
+| `Mobs.TrackingDistance` / `SyncTicks` | 64 / 2 | Players see mobs this close; their state is sent every SyncTicks ticks while it changes. |
+| `Mobs.AttacksPerSecond`   | 10      | Attacks a player may send a second.                                 |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
 | `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
 | `Explosions.MaxCells` / `ClusterSize` / `MinBlastVolume` | 4096 / 4 / 0.5 | Fuel one ignition sets off at most; a blast per cube this wide; cubes with less fuel (buckets) just flash into fire. |
@@ -1437,6 +1498,45 @@ shape({ "##", "##" }, { ["#"] = "Marble" }, "MarbleBricks", 4) -- shaped, anywhe
 mix({ "Marble", "Coal" }, "DarkMarble")                       -- shapeless
 smelt("Marble", "SmoothMarble")                               -- furnace
 ```
+
+**A mob.** Append a kind to `src/shared/Entities/MobList.luau` (ids are list positions, sent as a
+u8: at the end) with Minecraft's numbers; everything else follows from its record:
+
+```lua
+table.insert(list, {
+	name = "Goat", hostile = false,
+	width = 0.9, height = 1.3, eye = 1.1, health = 10, speed = 0.2,
+	wander = 1, panic = 1.25,                                  -- speed modifiers
+	drops = { { item = "Leather", min = 0, max = 1 } },        -- loot (chance?, byPlayer?)
+	spawn = { weight = 5, group = { 2, 3 } },                  -- creatures: on grass, in the light
+	sounds = { hurt = "entity.goat.hurt", death = "entity.goat.death" }, -- SoundList events
+	parts = {                                                  -- at most 2 boxes, +Z forward
+		{ size = { 0.9, 0.9, 0.9 }, offset = { 0, 0.75, 0 }, color = { 220, 214, 200 } },
+		{ size = { 0.4, 0.45, 0.4 }, offset = { 0, 1.0, 0.55 }, color = { 200, 190, 170 } },
+	},
+	color = { 220, 214, 200 },                                 -- WAILA's icon
+})
+```
+
+A monster (`hostile = true`) hunts players within `follow` blocks and hits for `attack` half
+hearts; `burnsInDaylight`, `climbs`, `darkOnly`, `leap`, `fuse = { ticks, power, start, cancel }`
+(a creeper) and `bow = { range, draw, interval, min, max }` (a skeleton) give it Minecraft's
+behaviours (`server/Mobs/MobAI`). Add its two sound events at the end of SoundList. From a server
+script:
+
+```lua
+local Mobs = require(game.ServerScriptService.IceVoxel.Mobs.Mobs)
+local id = Mobs.spawn("Zombie", x + 0.5, y, z + 0.5)            -- feet position (blocks)
+Mobs.damage(id, 4, nil, x, z)                                 -- half hearts, knocked back from (x, z)
+for _, mob in Mobs.near(x, y, z, 16) do print(mob.kind, mob.health) end
+Mobs.died:Connect(function(killer: Player?, kind: string, x, y, z, id)
+	if killer then print(killer.Name, "killed a", kind) end
+end)
+```
+
+**Food.** `src/shared/Items/Foods.luau` lists what eating an item does: `[Items.id.CookedBeef] =
+{ heal = 4 }` (half hearts) with an optional `effect = { kind = "thirst", chance, ticks }`; any item
+in the table is eaten with the 32 tick hold, with no other change.
 
 **Block textures (the texture pack).** Every block texture is in one hand-edited module,
 `src/shared/TexturePack.luau`, like a Minecraft resource pack. Its `Textures` table lists the
@@ -1888,10 +1988,10 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,316 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,344 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
-and SurvivalGear).
+and SurvivalGear; mobs have Mobs and MobsClient).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
@@ -1931,9 +2031,11 @@ Natural next steps, roughly in order:
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
-- **Combat.** Swords exist and armor is worn, but nothing deals damage yet besides falling,
-  suffocating inside a block, lava and explosions (`Items.damageAfterArmor`, which both use).
-  Creepers and Blast Protection would sit on `World/Explosions` (`Api.explode`), as TNT does.
+- **More combat and mobs.** Players can't hurt each other yet (PvP), there are no bows, critical
+  hits, sweeps or enchantments, mobs steer straight at their goal (no path finding: a wall with a
+  door in it stops them) and don't push each other apart; skeletons' arrows are hitscan, not
+  projectiles; more kinds (endermen, slimes, wolves, villagers), breeding and taming, mob light
+  levels by biome, baby mobs, sheep shearing and dyes.
 - **More of lava and oil.** Basalt, water aquifers,
   BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
   particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).

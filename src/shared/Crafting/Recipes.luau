@@ -1,8 +1,8 @@
 --!strict
 --[[
 	Every crafting and smelting recipe, by item name: Minecraft Java 1.20's recipes for the items
-	this game has (the ones needing items it doesn't have, such as leather, clay or wool, are left
-	out), and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
+	this game has (the ones needing items it doesn't have, such as clay or dyes, are left out),
+	and Mekanism's: osmium's storage blocks and smelting as Mekanism has them, and its
 	transmitters, fluid tanks, Configurator, Universal Cables, machines, upgrade cards and energy
 	cubes adapted to the game's materials (see "Mekanism pipes and buckets", "Universal Cables",
 	"Heat Generator", "Electric Furnace", "upgrade cards", "Solar Generator" and "Energy Cubes"
@@ -137,7 +137,8 @@ for _, material in TOOL_MATERIALS do
 	shape({ "X", "X", "#" }, key, tier .. "Sword")
 end
 
---[[ Armor: iron, gold and diamond (leather needs leather; chainmail is not craftable, but smelts) ]]
+--[[ Armor: iron, gold and diamond (leather's are with the mobs' drops below; chainmail is not
+craftable, but smelts) ]]
 
 for _, material in { { "Iron", "IronIngot" }, { "Gold", "GoldIngot" }, { "Diamond", "Diamond" } } do
 	local key = { X = material[2] }
@@ -389,6 +390,24 @@ for _, material in { { "Straw", "Straw" }, { "Leaf", "#leaves" } } do
 end
 shape({ "N", "G", "D" }, { N = "IronNugget", G = "Glass", D = "GlowDust" }, "Thermometer")
 
+--[[
+	What mobs drop (Shared/Entities/MobList). Minecraft's: raw meat cooks in a furnace (200 ticks,
+	as everything here), Leather makes the leather armor pieces in the armor shapes (24 for a set;
+	the items were already in, now they can be made) and four String in a square make White Wool.
+]]
+smelt("RawBeef", "CookedBeef")
+smelt("RawMutton", "CookedMutton")
+smelt("RawPorkchop", "CookedPorkchop")
+smelt("RawChicken", "CookedChicken")
+do
+	local key = { X = "Leather" }
+	shape({ "XXX", "X X" }, key, "LeatherHelmet")
+	shape({ "X X", "XXX", "XXX" }, key, "LeatherChestplate")
+	shape({ "XXX", "X X", "X X" }, key, "LeatherLeggings")
+	shape({ "X X", "X X" }, key, "LeatherBoots")
+end
+shape({ "##", "##" }, { ["#"] = "String" }, "WhiteWool")
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,
@@ -404,6 +423,7 @@ Recipes.fuel = {
 	WoodenHoe = 200,
 	WoodenSword = 200,
 	Bowl = 100,
+	WhiteWool = 100,
 }
 
 Recipes.shaped = shaped

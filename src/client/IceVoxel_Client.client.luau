@@ -25,6 +25,9 @@
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay,
 	                             TankUse: buckets on machines)
 	  Entities/EntityRenderer    dropped items
+	  Entities/MobRenderer       mobs (cows, sheep, pigs, chickens, zombies, skeletons, creepers,
+	                             spiders): boxes gliding between the server's updates, hurt
+	                             flashes, creepers' fuses, flames, arrows, their hits' knockback
 	  Rendering/TransmitterRenderer  Mekanism pipes and machines: arms, fluids in pipes and tanks,
 	                             items moving through transporters, the windows of working
 	                             generators, furnaces and refineries (the server's
@@ -82,6 +85,7 @@ local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
+local MobRenderer = require(Client.Entities.MobRenderer)
 local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
 local FireRenderer = require(Client.Rendering.FireRenderer)
 local FuseView = require(Client.Rendering.FuseView)
@@ -247,6 +251,7 @@ Notices.start()
 StructureNet.start(world)
 StructureBoxes.start(world, StructureNet.records)
 EntityRenderer.start(world)
+MobRenderer.start(world)
 -- (Pipes are decorated only where their chunk is on screen.)
 TransmitterRenderer.start(world, function(cx: number, cz: number): boolean
 	local node = streamer.nodes[Coords.chunkKey(cx, cz)]

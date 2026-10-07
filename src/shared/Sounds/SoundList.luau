@@ -728,4 +728,126 @@ table.insert(SoundList.EVENTS, {
 	side = "server",
 })
 
+--[[
+	Mobs (Shared/Entities/MobList, server Mobs/MobWorld), from the server to everyone near: each
+	kind's hurt and death (Minecraft's entity.<kind>.hurt and .death: LivingEntity.playHurtSound,
+	die), the creeper's hiss when its fuse is lit (entity.creeper.primed: Creeper.tick, volume 1,
+	pitch 0.5), a skeleton loosing an arrow (entity.skeleton.shoot) and the arrow striking
+	(entity.arrow.hit), a player's hit landing (entity.player.attack.strong, or .weak before the
+	weapon recovered: Player.attack, 1.9's attack strength) and eating (entity.generic.eat every 4
+	ticks from the 7th of the 32 tick hold, and entity.player.burp at the end: Player.eat; the
+	eater's client plays its own, the server the last one to everyone else). Stand-ins told apart
+	by pitch: the ouch and the oof for hurts and deaths (low for cows, high for chickens), the
+	falling wind into the creeper's hiss, the landing thud into the bow and the hits, a footstep
+	into a bite.
+]]
+-- Each kind's event name and the pitch of its hurt and death.
+local MOB_VOICES: { { kind: string, hurt: number, death: number } } = {
+	{ kind = "cow", hurt = 0.55, death = 0.5 },
+	{ kind = "sheep", hurt = 1.35, death = 1.3 },
+	{ kind = "pig", hurt = 1.15, death = 1.1 },
+	{ kind = "chicken", hurt = 1.9, death = 1.8 },
+	{ kind = "zombie", hurt = 0.75, death = 0.7 },
+	{ kind = "skeleton", hurt = 1.25, death = 1.2 },
+	{ kind = "creeper", hurt = 0.9, death = 0.85 },
+	{ kind = "spider", hurt = 0.95, death = 0.9 },
+}
+for _, voice in MOB_VOICES do
+	local kind, hurt, death = voice.kind, voice.hurt, voice.death
+	table.insert(SoundList.EVENTS, {
+		name = `entity.{kind}.hurt`,
+		category = "entity.mob.hurt",
+		id = OUCH,
+		volume = 0.5,
+		pitch = hurt,
+		pitchVariance = 0.1,
+		source = "players",
+		side = "server",
+	})
+	table.insert(SoundList.EVENTS, {
+		name = `entity.{kind}.death`,
+		category = "entity.mob.death",
+		id = OOF,
+		volume = 0.6,
+		pitch = death,
+		pitchVariance = 0.05,
+		source = "players",
+		side = "server",
+	})
+end
+for _, event in
+	{
+		{
+			name = "entity.creeper.primed",
+			id = FALLING,
+			volume = 0.8,
+			pitch = 1.8,
+			duration = 1.5,
+			fallback = { id = SPLASH, pitch = 2.4 },
+			source = "players",
+			side = "server",
+		},
+		{
+			name = "entity.skeleton.shoot",
+			id = LAND,
+			volume = 0.6,
+			pitch = 2.6,
+			pitchVariance = 0.15,
+			source = "players",
+			side = "server",
+		},
+		{
+			name = "entity.arrow.hit",
+			id = LAND,
+			volume = 0.5,
+			pitch = 1.7,
+			pitchVariance = 0.15,
+			source = "players",
+			side = "server",
+		},
+		{
+			name = "entity.player.attack.strong",
+			category = "entity.player.attack",
+			id = LAND,
+			volume = 0.6,
+			pitch = 1.3,
+			pitchVariance = 0.1,
+			source = "players",
+			side = "server",
+		},
+		{
+			name = "entity.player.attack.weak",
+			category = "entity.player.attack",
+			id = LAND,
+			volume = 0.35,
+			pitch = 1.8,
+			pitchVariance = 0.1,
+			source = "players",
+			side = "server",
+		},
+		{
+			name = "entity.generic.eat",
+			id = STEPS,
+			volume = 0.5,
+			pitch = 1.8,
+			pitchVariance = 0.2,
+			duration = 0.15,
+			source = "players",
+			side = "predicted",
+		},
+		{
+			name = "entity.player.burp",
+			id = SWIM,
+			volume = 0.5,
+			pitch = 0.7,
+			pitchVariance = 0.1,
+			duration = 0.4,
+			source = "players",
+			side = "predicted",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList

@@ -5,8 +5,10 @@
 
 	  Target    the block BlockInteraction aims at (the highlighted one: the same reach and rules,
 	            torches and lanterns by their outline), or something nearer on the same aim: a
-	            dropped item (EntityRenderer.itemsNear) or another player (their standing hull,
-	            Shared/Movement/Rig). Entities are only in reach like blocks are (their centre within
+	            dropped item (EntityRenderer.itemsNear), a mob (Entities/MobRenderer.mobsNear: its
+	            box as drawn; its name, health and with F3 its kind and id) or another player
+	            (their standing hull, Shared/Movement/Rig). Entities are only in reach like blocks
+	            are (their centre within
 	            Config.Interaction.Reach of the player), and never seen through a block, even one
 	            too far to target. While survival mining, the mined block always wins. Water shows
 	            only when no block is in reach (its surface, not the water the camera is in), so it
@@ -66,15 +68,16 @@ local GameMode = require(Shared.GameMode)
 local Rig = require(Shared.Movement.Rig)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
+local LightEstimate = require(Shared.World.LightEstimate)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
-local CaveMood = require(script.Parent.Parent.Audio.CaveMood)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
+local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
@@ -91,6 +94,7 @@ local WailaInfo = require(script.Parent.WailaInfo)
 
 -- What WAILA names besides blocks.
 local SHOW_ITEMS = true
+local SHOW_MOBS = true
 local SHOW_PLAYERS = true
 local SHOW_FLUIDS = true
 -- How often (seconds) the aim is checked for items, players and water, and the text may change
@@ -169,7 +173,7 @@ local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
 
 -- An item or a player under the aim, `distance` blocks along it.
-type Entity = { distance: number, item: EntityRenderer.ItemView?, player: Player? }
+type Entity = { distance: number, item: EntityRenderer.ItemView?, player: Player?, mob: MobRenderer.MobView? }
 
 local Waila = {}
 
@@ -590,7 +594,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		if sky == nil or world:getBlock(hit.x, y, hit.z) == nil then
 			return nil, "-"
 		end
-		local block = CaveMood.blockLight(blockAt, hit.x, y, hit.z)
+		local block = LightEstimate.blockLight(blockAt, hit.x, y, hit.z)
 		return { block = block, sky = sky }, `{block},{sky}`
 	end
 
@@ -617,8 +621,22 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	end
 
 	local function showEntity(entity: Entity, extended: boolean)
-		local view, other = entity.item, entity.player
-		if view then
+		local view, other, mob = entity.item, entity.player, entity.mob
+		if mob then
+			local position = if extended then `{math.floor(mob.x)} {math.floor(mob.y)} {math.floor(mob.z)}` else ""
+			local key = `m {mob.id} {mob.health} {extended} {position}`
+			show(key, extended, function()
+				return WailaInfo.mob({
+					kind = mob.kind,
+					variant = mob.variant,
+					id = mob.id,
+					health = mob.health,
+					x = mob.x,
+					y = mob.y,
+					z = mob.z,
+				}, extended)
+			end)
+		elseif view then
 			local position = if extended then string.format("%.2f %.2f %.2f", view.x, view.y, view.z) else ""
 			local key = `i {view.id} {view.item} {view.count} {extended} {position}`
 			show(key, extended, function()
@@ -722,6 +740,28 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 				)
 				if t and t < bestDistance then
 					best, bestDistance = { distance = t, item = view, player = nil }, t
+				end
+			end
+		end
+		if SHOW_MOBS and not spectating then
+			for _, mob in MobRenderer.mobsNear(body.X, body.Y, body.Z, REACH) do
+				local half = mob.kind.width / 2
+				local t = WailaInfo.rayBox(
+					origin.X,
+					origin.Y,
+					origin.Z,
+					direction.X,
+					direction.Y,
+					direction.Z,
+					mob.x - half,
+					mob.y,
+					mob.z - half,
+					mob.x + half,
+					mob.y + mob.kind.height,
+					mob.z + half
+				)
+				if t and t < bestDistance then
+					best, bestDistance = { distance = t, item = nil, player = nil, mob = mob }, t
 				end
 			end
 		end

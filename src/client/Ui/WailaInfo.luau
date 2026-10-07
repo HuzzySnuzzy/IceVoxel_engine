@@ -5,7 +5,8 @@
 	content; Ui/Waila draws it.
 
 	  name      the block's name, white (a chest adds its slots in gray: "Chest (27 slots)"); a
-	            dropped item's name and count; a player's display name and @name
+	            dropped item's name and count; a player's display name and @name; a mob's kind
+	            ("Zombie") with its health in red ("Health 14 / 20", half hearts: `mob`)
 	  harvest   blocks only: the tool and tier they need to drop anything, with a green check or a
 	            red cross for whether the held item harvests them ("Requires Iron Pickaxe"), or
 	            the tool that mines them fastest when any hand will do ("Tool: Shovel"), or
@@ -37,8 +38,9 @@
 	  light     blocks and fluids: "Light level 7", the light where a mob would stand: the cell on
 	            top of an opaque block, a see-through block's own cell (`lightLine`). It is the
 	            larger of the cell's block light and sky light, as Minecraft's light level, from the
-	            client's estimate (the engine keeps no light map: Ui/Waila asks Audio/CaveMood.
-	            blockLight and Rendering/LightingController.skyLight). Red where block light is 0
+	            client's estimate (the engine keeps no light map: Ui/Waila asks Shared/World/
+	            LightEstimate.blockLight, which the server's mob spawning uses too, and
+	            Rendering/LightingController.skyLight). Red where block light is 0
 	            and sky light at most 7 (Minecraft 1.18+'s monsters may spawn there at any time),
 	            yellow where block light is 0 under more sky (they may spawn at night), green where
 	            a light source reaches it. The F3 view adds both parts ("block 0, sky 15").
@@ -75,6 +77,7 @@ local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
+local MobList = require(Shared.Entities.MobList)
 local Settings = require(Shared.Structures.Settings)
 local Transmitters = require(Shared.Transmitters)
 
@@ -907,6 +910,42 @@ export type PlayerFacts = {
 	z: number?,
 }
 
+-- A mob (client Entities/MobRenderer's view of it).
+export type MobFacts = {
+	kind: MobList.Kind,
+	variant: number,
+	id: number,
+	-- Half hearts left (the server's, rounded up).
+	health: number,
+	-- Feet position (blocks); the extended view shows the block it is in.
+	x: number?,
+	y: number?,
+	z: number?,
+}
+
+--[[
+	A mob: its name, its health in half hearts of its kind's ("Health 6 / 10", red, as a player's)
+	and, with F3, its kind's id, its entity id and the block its feet are in. The icon is a box in
+	its colour (a sheep's fleece in its variant's).
+]]
+function WailaInfo.mob(facts: MobFacts, extended: boolean): Info
+	local kind = facts.kind
+	local lines: { Line } = {
+		{ segment(kind.displayName, "white") },
+		{ segment(`Health {math.max(math.ceil(facts.health), 0)} / {kind.health}`, "red") },
+	}
+	if extended then
+		table.insert(lines, gray(`{kind.name} #{kind.id}, {if kind.hostile then "monster" else "creature"}`))
+		table.insert(lines, gray(`Mob entity {facts.id}`))
+		local x, y, z = facts.x, facts.y, facts.z
+		if x and y and z then
+			table.insert(lines, gray(`Position {math.floor(x)}, {math.floor(y)}, {math.floor(z)}`))
+		end
+	end
+	table.insert(lines, modLine())
+	return { icon = { colour = MobList.variantColor(kind, facts.variant) }, lines = lines, progress = nil }
+end
+
 -- Health in Minecraft's points (20 = 10 hearts), rounded up like the HUD's hearts.
 function WailaInfo.healthPoints(health: number, maxHealth: number): number
 	if maxHealth <= 0 then
@@ -992,7 +1031,7 @@ export type Choice = "block" | "entity" | "fluid"
 --[[
 	What the panel names, from what lies on the aim (distances in blocks along it):
 	  block   BlockInteraction's target (nil when no block is in reach), `mining` it or not;
-	  entity  the nearest dropped item or player in reach (nil: none);
+	  entity  the nearest dropped item, mob or player in reach (nil: none);
 	  wall    the first block on the aim at any distance, in reach or not (nil: none);
 	  fluid   water in reach with nothing before it.
 	An entity in front of the block wins, unless the block is being mined (its progress stays on

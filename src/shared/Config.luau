@@ -689,6 +689,40 @@ local Config = {
 		TrackingDistance = 96,
 	},
 
+	-- Mobs (Shared/Entities/MobList: cows, sheep, pigs, chickens, zombies, skeletons, creepers,
+	-- spiders; server Mobs/). They tick within Server.SimulationRadius chunks of a player and
+	-- freeze beyond.
+	Mobs = {
+		-- false: no mobs at all (nothing spawns, ticks or is sent; /summon says so).
+		Enabled = true,
+		-- false: no natural spawning (/summon still works).
+		Spawning = true,
+		-- Most mobs at once in the world, and of each category (Minecraft's mob caps, scaled to the
+		-- simulated area) ...
+		MaxMobs = 300,
+		MaxPassive = 120,
+		MaxHostile = 160,
+		-- ... and within 128 blocks of each player.
+		PassiveCap = 10,
+		HostileCap = 15,
+		-- Ticks between spawning rounds: monsters every second, creatures every 400 ticks
+		-- (Minecraft's spawnPersistent), each round `Attempts` packs a player.
+		HostileInterval = 20,
+		PassiveInterval = 400,
+		Attempts = 3,
+		-- Blocks from a player a pack may spawn (Minecraft: never within 24).
+		SpawnDistance = { 24, 44 },
+		-- A creature with no player within 128 blocks for this many ticks is dropped (5 minutes):
+		-- creatures don't despawn, but the server keeps no mob it can't reach.
+		ForgetTicks = 6000,
+		-- Players see mobs within this many blocks; mobs are sent 10 times a second
+		-- (SyncTicks 2) while they move.
+		TrackingDistance = 64,
+		SyncTicks = 2,
+		-- Attacks a player may send per second (anti-spam; Minecraft's fastest is the hand's 4).
+		AttacksPerSecond = 10,
+	},
+
 	-- Sounds -----------------------------------------------------------------------------------------
 
 	--[[

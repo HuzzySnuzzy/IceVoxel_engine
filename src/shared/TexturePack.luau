@@ -387,6 +387,8 @@ local Textures: { [string]: Texture } = {
 	-- (The herbs: Tough As Nails' mint and wild ginger.)
 	["mint"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	["wild ginger"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	-- (Sheep's wool: white, Shared/Entities/MobList.)
+	["white wool"] = { Color = "", Material = "Fabric", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -513,6 +515,9 @@ local Blocks: { [string]: Faces } = {
 	RedMushroom = { Sprite = "red mushroom" },
 	Mint = { Sprite = "mint" },
 	WildGinger = { Sprite = "wild ginger" },
+
+	-- Wool
+	WhiteWool = { All = "white wool" },
 }
 
 export type Pack = {

@@ -22,15 +22,16 @@
 	Underlands (f ~ 0.8); Minecraft takes 5 wherever it's dark. Daylight still wins it back.
 
 	The light is the game's estimate (`Light`): Rendering/SkyExposure.skyLight for the sky (no
-	dimming by leaves or water), and `blockLight` below for light sources (a search through the
-	open cells around, as far as Minecraft's light spreads). A block that isn't loaded leaves the
-	mood as it is.
+	dimming by leaves or water), and `blockLight` below for light sources (Shared/World/
+	LightEstimate: a search through the open cells around, as far as Minecraft's light spreads; the
+	server's mob spawning and WAILA use the same). A block that isn't loaded leaves the mood as it
+	is.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Blocks = require(Shared.Blocks)
+local LightEstimate = require(Shared.World.LightEstimate)
 
 -- (sky, block) light at a cell (0..15 each) and whether it is open (not opaque); nil sky: the
 -- cell isn't loaded.
@@ -52,12 +53,13 @@ CaveMood.SOUND_OFFSET = 2
 CaveMood.SKY_PULL = 0.001
 -- How much more a dark open block counts than dark rock (bigger caves, sooner moods).
 CaveMood.OPEN_WEIGHT = 4
--- Open cells the block light search may visit: a tunnel's light reaches its full 14 blocks, a big
--- cavern's is searched a few blocks around (missing torches farther off). Measured on generated
--- caves (interpreted Luau): a mood tick costs ~0.2 ms on average, one every 50 ms.
-CaveMood.LIGHT_BUDGET = 256
+-- Open cells the block light search may visit (LightEstimate.BLOCK_BUDGET): a tunnel's light
+-- reaches its full 14 blocks, a big cavern's is searched a few blocks around (missing torches
+-- farther off). Measured on generated caves (interpreted Luau): a mood tick costs ~0.2 ms on
+-- average, one every 50 ms.
+CaveMood.LIGHT_BUDGET = LightEstimate.BLOCK_BUDGET
 
-local MAX_LIGHT = 15
+local MAX_LIGHT = LightEstimate.MAX
 
 function CaveMood.new(): State
 	return { mood = 0 }
@@ -106,81 +108,11 @@ function CaveMood.tick(
 	return nil
 end
 
--- Scratch for the block light search, reused by every call: the frontier as flat x, y, z lists
--- and a visited stamp per cell offset from the start (within 32 each way), so a search allocates
--- nothing.
-local SPAN = 64
-local visited = buffer.create(SPAN * SPAN * SPAN * 2)
-local stamp = 0
-local frontier: { number } = {}
-local nextFrontier: { number } = {}
-
-local function offsetKey(dx: number, dy: number, dz: number): number
-	return (((dx + 32) * SPAN + (dy + 32)) * SPAN + (dz + 32)) * 2
-end
-
 --[[
-	Minecraft's block light (0..15) at cell (x, y, z), from the blocks: a light source's level less
-	one per block face it travels through open (not opaque) cells, as Minecraft's light spreads. An
-	opaque cell has its own light only (glowstone 15, stone 0). Unknown cells stop the light. At
-	most `budget` open cells are searched (CaveMood.LIGHT_BUDGET).
+	Minecraft's block light (0..15) at cell (x, y, z), from the blocks: Shared/World/LightEstimate's
+	(a light source's level less one per open cell it travels through, at most `budget` cells
+	searched: CaveMood.LIGHT_BUDGET), the estimate mob spawning and WAILA use too.
 ]]
-function CaveMood.blockLight(getBlock: GetBlock, x: number, y: number, z: number, budget: number?): number
-	local start = getBlock(x, y, z)
-	if start == nil then
-		return 0
-	end
-	local own = Blocks.light(start)
-	if Blocks.isOpaque(start) then
-		return own
-	end
-	local best = own
-	local limit = budget or CaveMood.LIGHT_BUDGET
-	stamp += 1
-	if stamp > 65535 then
-		buffer.fill(visited, 0, 0)
-		stamp = 1
-	end
-	buffer.writeu16(visited, offsetKey(0, 0, 0), stamp)
-	table.clear(frontier)
-	frontier[1], frontier[2], frontier[3] = 0, 0, 0
-	local count = 1
-	local distance = 0
-	-- Breadth first: cells at distance d come before d + 1, so once a source found can't be beaten
-	-- by anything farther (MAX_LIGHT - (d + 1) <= best) the search stops.
-	while #frontier > 0 and MAX_LIGHT - (distance + 1) > best do
-		table.clear(nextFrontier)
-		for i = 1, #frontier, 3 do
-			local cx, cy, cz = frontier[i], frontier[i + 1], frontier[i + 2]
-			for side = 1, 6 do
-				local dx = if side == 1 then 1 elseif side == 2 then -1 else 0
-				local dy = if side == 3 then 1 elseif side == 4 then -1 else 0
-				local dz = if side == 5 then 1 elseif side == 6 then -1 else 0
-				local nx, ny, nz = cx + dx, cy + dy, cz + dz
-				if nx >= -31 and nx <= 31 and ny >= -31 and ny <= 31 and nz >= -31 and nz <= 31 then
-					local key = offsetKey(nx, ny, nz)
-					if buffer.readu16(visited, key) ~= stamp then
-						buffer.writeu16(visited, key, stamp)
-						local block = getBlock(x + nx, y + ny, z + nz)
-						if block then
-							local emits = Blocks.light(block) - (distance + 1)
-							if emits > best then
-								best = emits
-							end
-							if count < limit and not Blocks.isOpaque(block) then
-								count += 1
-								local n = #nextFrontier
-								nextFrontier[n + 1], nextFrontier[n + 2], nextFrontier[n + 3] = nx, ny, nz
-							end
-						end
-					end
-				end
-			end
-		end
-		frontier, nextFrontier = nextFrontier, frontier
-		distance += 1
-	end
-	return math.max(best, 0)
-end
+CaveMood.blockLight = LightEstimate.blockLight
 
 return CaveMood

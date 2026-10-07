@@ -73,6 +73,15 @@
 	water sources, as a bucket's) finds, an empty hand sips from it, and a filled bottle or canteen
 	is drunk by holding the use button 32 ticks (letting go cancels; a tap or a free mouse's short
 	click, which has no hold, drinks it all).
+	Food (Interaction/Eating: the meat mobs drop, rotten flesh) is eaten the same way, holding the
+	use button 32 ticks, after a block's menu, in adventure too, while the player may eat
+	(Shared/Items/Foods.canEat: hurt, or in creative).
+	Mobs (Entities/MobRenderer) are aimed at before blocks: the nearest mob box on the aim, within
+	Minecraft's entity reach of the eyes (Shared/Entities/Combat: 3 blocks, 6 in creative; none
+	for spectators), hides the block behind it (no outline, no mining), and a press of the break
+	button (a tap on touch screens, or a hold's start) hits it instead: an Attack message with its
+	id and a swing, in survival, creative and adventure alike; the server checks it and answers
+	with the hurt (server Mobs/Mobs). One hit a press, as Minecraft.
 	A block with a menu still opens first, unless the player sneaks, except a machine with fluid
 	tanks clicked with a bucket that fills or empties one of them as far as its Machines record
 	shows (TankUse): the bucket goes to its tanks, else the screen opens (Mekanism's BlockFluidTank:
@@ -135,6 +144,7 @@ local Rig = require(Shared.Movement.Rig)
 local Transmitters = require(Shared.Transmitters)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Boiling = require(Shared.ToughAsNails.Boiling)
+local Combat = require(Shared.Entities.Combat)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -153,6 +163,8 @@ local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRe
 local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
 local Drinking = require(script.Parent.Drinking)
+local Eating = require(script.Parent.Eating)
+local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -216,6 +228,14 @@ end
 local readSide: () -> number? = function()
 	return nil
 end
+local readMob: () -> MobRenderer.MobView? = function()
+	return nil
+end
+
+-- The mob the player aims at this frame (in reach, before any block), or nil. Read only.
+function BlockInteraction.mobTarget(): MobRenderer.MobView?
+	return readMob()
+end
 
 -- The block the player aims at this frame (the highlighted one, in reach), or nil. Read only.
 function BlockInteraction.target(): Hit?
@@ -271,6 +291,7 @@ end
 function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local player = Players.LocalPlayer
 	Drinking.start()
+	Eating.start()
 
 	local highlight = Instance.new("Part")
 	highlight.Name = "IceVoxelSelection"
@@ -370,6 +391,40 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			maxDistance = (ray.Origin - root.Position).Magnitude / BLOCK + REACH,
 		}
 		return cast(aim, Blocks.isTargetable), aim
+	end
+
+	--[[
+		The mob on the aim `ray` (Entities/MobRenderer: the nearest box it enters) whose box is
+		within the game mode's entity reach of the eyes (Combat.reach: none for spectators), and how
+		far along the ray it is.
+	]]
+	local function mobOn(ray: Ray): (MobRenderer.MobView?, number)
+		local view = MovementController.current
+		local reach = Combat.reach(ClientInventory.mode())
+		if view == nil or reach <= 0 then
+			return nil, 0
+		end
+		local mob, distance = MobRenderer.pick(ray.origin, ray.direction, ray.maxDistance)
+		if mob == nil then
+			return nil, 0
+		end
+		local state = view.state
+		local half = mob.kind.width / 2
+		local fromEyes = Combat.boxDistance(
+			state.x,
+			state.y + Combat.EYE,
+			state.z,
+			mob.x - half,
+			mob.y,
+			mob.z - half,
+			mob.x + half,
+			mob.y + mob.kind.height,
+			mob.z + half
+		)
+		if fromEyes > reach then
+			return nil, 0
+		end
+		return mob, distance
 	end
 
 	-- Where the player aims, in viewport coordinates: the mouse while it is the active input and
@@ -579,8 +634,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local target: Hit? = nil
 	local targetRay: Ray? = nil
 	local mining: MinedBlock? = nil
+	-- The mob aimed at (before any block), if any.
+	local mobTarget: MobRenderer.MobView? = nil
 	readTarget = function()
 		return target
+	end
+	readMob = function()
+		return mobTarget
 	end
 	readProgress = function()
 		local current, hit = mining, target
@@ -906,6 +966,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				return
 			end
 		end
+		-- Food (Interaction/Eating): held 32 ticks, wherever the player looks, in adventure too.
+		if Eating.handles(stack) then
+			if Eating.use(stack, mode) then
+				useSpent = true
+			end
+			return
+		end
 		-- Adventure and spectator players may not build: nothing is used on blocks or placed
 		-- (ItemStack.useOn and BucketItem's mayUseItemAt want mayBuild).
 		if stack == nil or not GameMode.mayBuild(mode) then
@@ -1056,6 +1123,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		return best
 	end
 
+	--[[ Hitting mobs ]]
+
+	-- Hits `mob` (the server checks the reach, the sight and the game mode, then hurts it).
+	local function attack(mob: MobRenderer.MobView)
+		ClientNet.send(Protocol.ClientMessage.Attack, Protocol.encodeAttack(mob.id))
+		swing()
+	end
+
 	--[[ Buttons ]]
 
 	local function beginAttack(source: string)
@@ -1068,6 +1143,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			return
 		end
 		local mode = ClientInventory.mode()
+		local mob = mobTarget
+		if mob and not GameMode.isSpectator(mode) then
+			-- A mob in front of the block: hit it (one hit a press), mine nothing.
+			stopMining()
+			attack(mob)
+			return
+		end
 		if GameMode.isSpectator(mode) then
 			-- A spectator's attack spectates the player aimed at (ServerPlayer.attack: setCamera).
 			local ray = targetRay
@@ -1116,6 +1198,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if not anyHeld(useHeld) then
 			useSpent = false
 			Drinking.stop()
+			Eating.stop()
 		end
 	end
 
@@ -1133,6 +1216,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		rightDownAt = nil
 		stopMining()
 		Drinking.stop()
+		Eating.stop()
 	end
 
 	Screens.changed:Connect(function(open: boolean)
@@ -1187,6 +1271,17 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if aimed and GameMode.isSpectator(mode) and not opensMenu(aimed.block, mode) then
 			-- (The ray stays: it is what the spectator's click looks for players along.)
 			target = nil
+		end
+		-- A mob in reach in front of the block hides it (Minecraft's entity pick wins).
+		mobTarget = nil
+		local ray = targetRay
+		if ray and not open then
+			local mob, distance = mobOn(ray)
+			local block = target
+			if mob and (block == nil or distance < block.distance) then
+				mobTarget = mob
+				target = nil
+			end
 		end
 		if startHold then
 			beginAttack("touch")
@@ -1344,7 +1439,21 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				if t.holding then
 					endAttack("touch")
 				elseif not t.moved and os.clock() - t.startedAt < TOUCH_HOLD and not Screens.isOpen() then
-					useOnce(targetAt(t.position, true))
+					-- A tap on a mob hits it (Bedrock's touch controls), else it uses.
+					local hit, ray = targetAt(t.position, true)
+					local mob, distance = nil, 0
+					if ray then
+						mob, distance = mobOn(ray)
+					end
+					if
+						mob
+						and (hit == nil or distance < hit.distance)
+						and not GameMode.isSpectator(ClientInventory.mode())
+					then
+						attack(mob)
+					else
+						useOnce(hit, ray)
+					end
 				end
 			end
 		end
