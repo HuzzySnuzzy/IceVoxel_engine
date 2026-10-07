@@ -30,10 +30,12 @@
 	             burning, dying, a creeper's fuse), a remove when it leaves range or is gone; all
 	             in one Mobs message with that period's arrows and the player's knockback.
 	  Commands   /summon <kind> [x y z] and /kill @e[type=<kind>] (Mobs/SummonCommand), for those
-	             who may change the time (Config.Gameplay.Admins, the owner, Studio).
+	             who may change the time (the operators' permission: Players/Operators).
 	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent; a world type
 	             with `mobs = false` (the void and the debug worlds: Generation/WorldTypes) has no
-	             natural spawning (/summon still works).
+	             natural spawning, and Peaceful no monsters (World/WorldInfo.apply sets
+	             Config.Mobs.Spawning / the hostile caps before the world starts; /summon still
+	             works).
 
 	For other server scripts (the integration hooks):
 	  Mobs.died            Event (killer: Player?, kind: string, x, y, z, id): a mob died; the
@@ -65,7 +67,6 @@ local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
 local Rig = require(Shared.Movement.Rig)
-local WorldTypes = require(Shared.Generation.WorldTypes)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Simulation = require(script.Parent.Parent.World.Simulation)
@@ -76,9 +77,8 @@ local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Characters = require(script.Parent.Parent.Players.Characters)
 local Effects = require(script.Parent.Parent.Players.Effects)
-local GameModes = require(script.Parent.Parent.Players.GameModes)
+local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
-local TimeCommand = require(script.Parent.Parent.Players.TimeCommand)
 local MobWorld = require(script.Parent.MobWorld)
 local MobSpawning = require(script.Parent.MobSpawning)
 local SummonCommand = require(script.Parent.SummonCommand)
@@ -435,12 +435,9 @@ local function runCommand(net: Net, player: Player, text: string)
 	if not SummonCommand.matches(text) then
 		return
 	end
-	local studio = RunService:IsStudio()
-	local mayUse =
-		TimeCommand.mayUse(player.UserId, Config.Gameplay.Admins, studio or GameModes.isOwner(player), studio)
 	local feet = feetOf(player) or Vector3.zero
 	local result = SummonCommand.run(text, {
-		mayUse = mayUse,
+		mayUse = Operators.permitted(player),
 		enabled = Settings.Enabled and mobWorld ~= nil,
 		x = feet.X,
 		y = feet.Y,
@@ -527,13 +524,6 @@ function Mobs.start(net: Net, world: WorldServer.World)
 	})
 	mobWorld = mobs
 	local spawnState = MobSpawning.new()
-	-- The world type may turn natural spawning off (published before the world exists).
-	local spawnSettings: MobSpawning.Settings = Settings
-	if WorldTypes.published(Shared).mobs == false then
-		local off = table.clone(Settings)
-		off.Spawning = false
-		spawnSettings = off
-	end
 	local active: { [number]: boolean } = {}
 	local function isActive(cx: number, cz: number): boolean
 		return active[Coords.chunkKey(cx, cz)] == true
@@ -566,7 +556,7 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				active = isActive,
 			}
 			mobs:tick(context)
-			MobSpawning.step(mobs, spawnState, context, spawnSettings)
+			MobSpawning.step(mobs, spawnState, context, Settings)
 			apply(mobs, world)
 			if tickCount % math.max(1, Settings.SyncTicks) == 0 then
 				replicate(net, mobs)

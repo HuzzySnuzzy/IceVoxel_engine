@@ -12,9 +12,10 @@
 	               opens them too (Players/Inventories.onMenu).
 	  Permission   Structures/Permission: creative (the instabuild ability, as Minecraft's
 	               canUseGameMasterBlocks: never adventure or spectator), then
-	               Config.Structures.Permission (by default nobody else), with the game's owner
-	               (looked up once per player, as /gamemode does), Config.Gameplay.Admins and
-	               Studio always allowed. `operator` is ServerNet's rule for placing and breaking
+	               Config.Structures.Permission (by default nobody else), with the operators'
+	               permission always allowed (Players/Operators: operators, among them the game's
+	               owner, Config.Gameplay.Admins and Studio sessions; everyone in a world created
+	               with Allow Commands). `operator` is ServerNet's rule for placing and breaking
 	               these blocks.
 	  State        StructureStore follows every block change (`blockChanged`, chained onto
 	               WorldServer.onChanged by the server script). A chunk's records go to a player
@@ -43,7 +44,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -58,7 +58,7 @@ local Settings = require(Shared.Structures.Settings)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Containers = require(script.Parent.Parent.Players.Containers)
-local GameModes = require(script.Parent.Parent.Players.GameModes)
+local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
 local Permission = require(script.Parent.Permission)
 local StructureServer = require(script.Parent.StructureServer)
@@ -104,8 +104,7 @@ local core: StructureServer.Server? = nil
 local net: Net? = nil
 local started = false
 
--- Per player: owner of the game (looked up once), rate buckets, data pieces waiting to go out.
-local owners: { [Player]: boolean } = {}
+-- Per player: rate buckets, data pieces waiting to go out.
 type Bucket = { tokens: number, last: number }
 local buckets: { [Player]: { requests: Bucket, heavy: Bucket, pieces: Bucket } } = {}
 type Outgoing = { pieces: { buffer }, tokens: number }
@@ -149,9 +148,9 @@ function StructureBlocks.operator(player: Player): boolean
 		player.UserId,
 		Config.Structures.Permission,
 		GameMode.instabuildOf(player),
-		owners[player] == true,
-		RunService:IsStudio(),
-		Config.Gameplay.Admins
+		-- (Operators always may: Permission.allowed's owner argument.)
+		Operators.permitted(player),
+		false
 	)
 end
 
@@ -463,21 +462,7 @@ function StructureBlocks.start(serverNet: Net, world: WorldServer.World)
 	Inventories.onMenu("StructureBlock", onMenu)
 	Inventories.onMenu("Jigsaw", onMenu)
 
-	local function onPlayer(player: Player)
-		-- (May yield: a group game's owner is a web call.)
-		local owner = GameModes.isOwner(player)
-		if player.Parent then
-			owners[player] = owner
-		end
-	end
-	Players.PlayerAdded:Connect(function(player)
-		task.spawn(onPlayer, player)
-	end)
-	for _, player in Players:GetPlayers() do
-		task.spawn(onPlayer, player)
-	end
 	Players.PlayerRemoving:Connect(function(player)
-		owners[player] = nil
 		buckets[player] = nil
 		outgoing[player] = nil
 		transfers[player] = nil

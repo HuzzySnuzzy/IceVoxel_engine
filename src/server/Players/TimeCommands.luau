@@ -7,32 +7,27 @@
 	            TextChatService they are TextChatCommands made here (the message is not shown to
 	            anyone; Triggered fires on the server with the sender's TextSource). With the legacy
 	            chat they are read from Player.Chatted.
-	  Who may   changing the time or a game rule: Config.Gameplay.Admins, the game's owner and
-	            Studio sessions (the rule for changing other players' game modes); queries: anyone.
-	            The owner is the creator when a user owns the game, or the group's owner for group
-	            games (GroupService, looked up once per server), as in Players/GameModes.
+	  Who may   changing the time or a game rule: the operators' permission (Players/Operators:
+	            operators, among them Config.Gameplay.Admins, the game's owner and Studio
+	            sessions; everyone in a world created with Allow Commands); queries: anyone.
 	  Feedback  goes to the player as Notice messages, shown in their chat (client Net/Notices).
 ]]
 
-local GroupService = game:GetService("GroupService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local Operators = require(script.Parent.Operators)
 local TimeCommand = require(script.Parent.TimeCommand)
 
 local TimeCommands = {}
 
 local net: ServerNet.ServerNet? = nil
--- Group games: the user id of the group's owner (0 = none), once looked up.
-local groupOwner: number? = nil
 
 local function notify(player: Player, text: string)
 	if net and player.Parent then
@@ -40,38 +35,16 @@ local function notify(player: Player, text: string)
 	end
 end
 
--- Does `player` own this game? May yield the first time (a web call, for group games).
-local function isOwner(player: Player): boolean
-	if game.CreatorId == 0 then
-		return false
-	elseif game.CreatorType == Enum.CreatorType.User then
-		return player.UserId == game.CreatorId
-	end
-	if groupOwner == nil then
-		local ok, info = pcall(GroupService.GetGroupInfoAsync, GroupService, game.CreatorId)
-		if not ok or type(info) ~= "table" then
-			-- Try again next time rather than remember a failure.
-			return false
-		end
-		local owner = info.Owner
-		groupOwner = if type(owner) == "table" and type(owner.Id) == "number" then owner.Id else 0
-	end
-	return groupOwner ~= 0 and player.UserId == groupOwner
-end
-
 -- Runs a chat message as /time or /gamerule (ignores anything else).
 local function run(player: Player, text: string)
 	if not TimeCommand.matches(text) then
 		return
 	end
-	local studio = RunService:IsStudio()
-	local mayUse = TimeCommand.mayUse(player.UserId, Config.Gameplay.Admins, studio or isOwner(player), studio)
 	if player.Parent == nil then
-		-- Left while the ownership check yielded.
 		return
 	end
 	local result = TimeCommand.run(text, {
-		mayUse = mayUse,
+		mayUse = Operators.permitted(player),
 		dayTime = TimeOfDay.get(),
 		gameTime = TimeOfDay.gameTime(),
 		cycle = TimeOfDay.cycle(),

@@ -12,8 +12,11 @@
 	  * your own game mode: Config.Gameplay.GameModeCommand (true = everyone, false = nobody, or a
 	    list of user ids), plus admins (`mayChangeOwn`, which the server also tells each client as
 	    the GameMode.PERMISSION_ATTRIBUTE);
-	  * other players': Config.Gameplay.Admins;
-	  * the game's owner and Studio sessions may always do both.
+	  * other players': admins.
+	In the game "admins" are the operators' permission (Players/Operators.permitted: operators,
+	among them Config.Gameplay.Admins, the game's owner and Studio sessions; everyone in a world
+	created with Allow Commands): Players/GameModes passes it as `mayTarget` and as `allowed`'s
+	`isOwner` (always may). `isAdmin` is the rule for permanent operators.
 
 	The feedback uses Minecraft's wording ("Set own game mode to Creative Mode", "Set Steve's game
 	mode to Survival Mode"; the other player reads "Your game mode has been updated to ...").

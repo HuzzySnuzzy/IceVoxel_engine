@@ -83,6 +83,16 @@
 	                 Shared/Progression/Skills' list, 1-based); the server checks the Age, the
 	                 prerequisites and the skill points (Progression.canUnlock) and answers with a
 	                 Progress message, or a Notice saying why not
+	  CreateWorld    the title screen's Create World screen (Shared/WorldSettings Request): u8 mode
+	                 (GameType id: 0 survival, 1 creative, 2 adventure), u8 difficulty (0 peaceful
+	                 .. 3 hard), u8 flags (bit 0 allow commands, bit 1 generate structures), then
+	                 u16 length + text each: world name (at most MAX_WORLD_NAME bytes), world type
+	                 id (MAX_WORLD_TYPE), options (WorldTypes.encodeOptions, MAX_WORLD_OPTIONS) and
+	                 the seed as typed (MAX_WORLD_SEED). Other ids, flags, lengths or invalid UTF-8
+	                 are malformed; the server checks the rest (operators only, once:
+	                 Players/WorldMenu, WorldSettings.validate) and answers with CreateWorldResult
+	  EnterWorld     nothing: the title screen's Join World (or a created world): the server loads
+	                 the player's character once the world exists
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -202,6 +212,12 @@
 	                 of byte i // 8: milestone i + 1 met): the player's own progression
 	                 (Shared/Progression.status), sent to them alone on joining (once loaded) and
 	                 after every change, at most one a frame; anything out of range is malformed
+	  MenuState      u8 state (MenuState: 0 waiting for the operator, 1 creating, 2 ready, 3 failed),
+	                 then u16 length + text each: the operator's name (the first operator here, ""
+	                 for none) and the world's name ("" before it exists): the title screen's
+	                 state, sent on joining and to everyone when it changes (Players/WorldMenu)
+	  CreateWorldResult u8 ok (0 / 1), u16 length + text: the answer to this player's CreateWorld
+	                 (why not, when it failed)
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -267,6 +283,8 @@ Protocol.ClientMessage = {
 	Attack = 18,
 	Eat = 19,
 	UnlockSkill = 20,
+	CreateWorld = 21,
+	EnterWorld = 22,
 }
 
 Protocol.ServerMessage = {
@@ -290,6 +308,8 @@ Protocol.ServerMessage = {
 	Mobs = 18,
 	Effects = 19,
 	Progress = 20,
+	MenuState = 21,
+	CreateWorldResult = 22,
 }
 
 Protocol.EditAction = {
@@ -2739,6 +2759,181 @@ function Protocol.decodeProgress(b: buffer): Progression.Status?
 		met[i] = bit32.btest(buffer.readu8(b, offset + (i - 1) // 8), bit32.lshift(1, (i - 1) % 8))
 	end
 	return { points = points, age = age, skills = skills, counts = counts, milestones = met }
+end
+
+--[[ The title screen (Players/WorldMenu, client Ui/MainMenu) ]]
+
+-- Longest texts (bytes) a CreateWorld carries: WorldSettings' 32 characters, 4 bytes each at most.
+Protocol.MAX_WORLD_NAME = 128
+Protocol.MAX_WORLD_TYPE = 64
+Protocol.MAX_WORLD_OPTIONS = 1024
+Protocol.MAX_WORLD_SEED = 128
+Protocol.MAX_MENU_TEXT = 256
+
+-- The title screen's states (MenuState).
+Protocol.MenuState = table.freeze({
+	Waiting = 0,
+	Creating = 1,
+	Ready = 2,
+	Failed = 3,
+})
+
+-- A CreateWorld request (Shared/WorldSettings.Request with the options still encoded).
+export type CreateWorld = {
+	name: string,
+	gameMode: string,
+	difficulty: number,
+	allowCommands: boolean,
+	structures: boolean,
+	worldType: string,
+	-- WorldTypes.encodeOptions.
+	options: string,
+	seed: string,
+}
+
+-- Writes `texts` as u16 length + bytes each from `offset`; returns the offset after them.
+local function writeTexts(b: buffer, offset: number, texts: { string }): number
+	for _, text in texts do
+		buffer.writeu16(b, offset, #text)
+		buffer.writestring(b, offset + 2, text)
+		offset += 2 + #text
+	end
+	return offset
+end
+
+-- Reads `limits` texts (u16 length + valid UTF-8 bytes, at most each limit) from `offset`: nil
+-- when one is malformed or more bytes follow.
+local function readTexts(b: buffer, offset: number, limits: { number }): { string }?
+	local len = buffer.len(b)
+	local texts = {}
+	for _, limit in limits do
+		if offset + 2 > len then
+			return nil
+		end
+		local n = buffer.readu16(b, offset)
+		if n > limit or offset + 2 + n > len then
+			return nil
+		end
+		local text = buffer.readstring(b, offset + 2, n)
+		if utf8.len(text) == nil then
+			return nil
+		end
+		table.insert(texts, text)
+		offset += 2 + n
+	end
+	if offset ~= len then
+		return nil
+	end
+	return texts
+end
+
+-- `text` cut to at most `limit` bytes, at the start of a character (so it stays valid UTF-8).
+local function cut(text: string, limit: number): string
+	if #text <= limit then
+		return text
+	end
+	local stop = limit
+	-- (Back over continuation bytes, 0x80..0xBF, to the character the cut fell in.)
+	while stop > 0 do
+		local byte = string.byte(text, stop + 1)
+		if byte < 0x80 or byte >= 0xC0 then
+			break
+		end
+		stop -= 1
+	end
+	return string.sub(text, 1, stop)
+end
+
+function Protocol.encodeCreateWorld(request: CreateWorld): buffer
+	local texts = {
+		cut(request.name, Protocol.MAX_WORLD_NAME),
+		cut(request.worldType, Protocol.MAX_WORLD_TYPE),
+		cut(request.options, Protocol.MAX_WORLD_OPTIONS),
+		cut(request.seed, Protocol.MAX_WORLD_SEED),
+	}
+	local size = 3
+	for _, text in texts do
+		size += 2 + #text
+	end
+	local b = buffer.create(size)
+	buffer.writeu8(b, 0, GameMode.id(request.gameMode))
+	buffer.writeu8(b, 1, request.difficulty)
+	buffer.writeu8(b, 2, (if request.allowCommands then 1 else 0) + (if request.structures then 2 else 0))
+	writeTexts(b, 3, texts)
+	return b
+end
+
+-- The request, nil when the payload is malformed (Spectator too: the screen has no such choice).
+function Protocol.decodeCreateWorld(b: buffer): CreateWorld?
+	if buffer.len(b) < 3 then
+		return nil
+	end
+	local mode = GameMode.fromId(buffer.readu8(b, 0))
+	local difficulty = buffer.readu8(b, 1)
+	local flags = buffer.readu8(b, 2)
+	if mode == nil or mode == GameMode.SPECTATOR or difficulty > 3 or flags > 3 then
+		return nil
+	end
+	local texts = readTexts(
+		b,
+		3,
+		{ Protocol.MAX_WORLD_NAME, Protocol.MAX_WORLD_TYPE, Protocol.MAX_WORLD_OPTIONS, Protocol.MAX_WORLD_SEED }
+	)
+	if texts == nil then
+		return nil
+	end
+	return {
+		name = texts[1],
+		gameMode = mode,
+		difficulty = difficulty,
+		allowCommands = bit32.btest(flags, 1),
+		structures = bit32.btest(flags, 2),
+		worldType = texts[2],
+		options = texts[3],
+		seed = texts[4],
+	}
+end
+
+function Protocol.encodeMenuState(state: number, operator: string, world: string): buffer
+	local texts = { cut(operator, Protocol.MAX_MENU_TEXT), cut(world, Protocol.MAX_MENU_TEXT) }
+	local b = buffer.create(1 + 4 + #texts[1] + #texts[2])
+	buffer.writeu8(b, 0, state)
+	writeTexts(b, 1, texts)
+	return b
+end
+
+-- state (nil when malformed), the operator's name, the world's name.
+function Protocol.decodeMenuState(b: buffer): (number?, string, string)
+	if buffer.len(b) < 1 then
+		return nil, "", ""
+	end
+	local state = buffer.readu8(b, 0)
+	local texts = readTexts(b, 1, { Protocol.MAX_MENU_TEXT, Protocol.MAX_MENU_TEXT })
+	if state > Protocol.MenuState.Failed or texts == nil then
+		return nil, "", ""
+	end
+	return state, texts[1], texts[2]
+end
+
+function Protocol.encodeCreateWorldResult(ok: boolean, message: string): buffer
+	local text = cut(message, Protocol.MAX_MENU_TEXT)
+	local b = buffer.create(3 + #text)
+	buffer.writeu8(b, 0, if ok then 1 else 0)
+	writeTexts(b, 1, { text })
+	return b
+end
+
+-- ok (nil when malformed), the message.
+function Protocol.decodeCreateWorldResult(b: buffer): (boolean?, string)
+	if buffer.len(b) < 1 then
+		return nil, ""
+	end
+	local flag = buffer.readu8(b, 0)
+	local texts = readTexts(b, 1, { Protocol.MAX_MENU_TEXT })
+	if flag > 1 or texts == nil then
+		return nil, ""
+	end
+	return flag == 1, texts[1]
 end
 
 return Protocol

@@ -10,8 +10,8 @@
 	    /kill @e                          every mob (players are left alone here)
 
 	A kind is a MobList name in any case, with or without "minecraft:" ("zombie",
-	"minecraft:creeper"). Who may: as /time (Players/TimeCommand.mayUse: Config.Gameplay.Admins,
-	the game's owner and Studio sessions); others get "You can't summon or kill mobs here". Killed
+	"minecraft:creeper"). Who may: as /time (the operators' permission, Players/Operators); others
+	get "You can't summon or kill mobs here". Killed
 	mobs die (drops, death records) as if hurt to death, without a killer.
 ]]
 

@@ -3,7 +3,9 @@
 	World types (Minecraft's world presets: Default, Superflat, ... and the debug worlds): a registry
 	of generators, and how the server tells every client and chunk worker which one to build.
 
-	  Registry   `WorldTypes.list`, in menu order: { id, name, description, create(seed, options) }.
+	  Registry   `WorldTypes.list`, in menu order: { id, name, description, create(seed, options),
+	             hidden?, settings? } (`settings`: the Create World screen's Customize screen,
+	             see Setting below).
 	             `create` returns a TerrainGenerator.Generator (the whole interface the server,
 	             the client's streamer, the chunk workers, the map and the far terrain use), built
 	             only from the seed and the options, so every machine builds the same world.
@@ -48,15 +50,32 @@ local DebugWorlds = require(script.Parent.DebugWorlds)
 
 export type Options = { [string]: string | number | boolean }
 
--- One option a world type declares for the menu (see the header).
+--[[
+	One of a world type's settings, for the Create World screen's Customize screen (client
+	Ui/MainMenu draws them generically: a type declares them, nothing else is needed). `key` is
+	the Options key `create` reads, `default` its value when the player changes nothing:
+	  "toggle"  ON / OFF (a boolean);
+	  "choice"  one of `choices` (strings, cycled in this order; `labels` are what the button
+	            shows, in the same order, default the choices themselves);
+	  "text"    a code typed in (a preset, an id), at most `maxLength` characters (default 64) of
+	            letters, digits and _ : ; , . * + - = / # (Shared/WorldSettings.cleanText): never
+	            free text, so it is never shown to other players. `presets` ({ name, value }) are
+	            ready-made texts the screen offers (Minecraft's flat presets); `check` (text) is
+	            nil when the text is good, else what is wrong with it, shown under the box (a
+	            world made from a bad text still builds the type's fallback).
+	The server keeps only the declared keys, of their kind (WorldSettings.validateOptions).
+]]
 export type Setting = {
 	key: string,
 	name: string,
-	kind: string, -- "toggle" | "choice" | "text"
-	default: string | boolean,
+	kind: "toggle" | "choice" | "text",
+	default: string | number | boolean,
 	choices: { string }?,
 	labels: { string }?,
+	maxLength: number?,
 	presets: { { name: string, value: string } }?,
+	check: ((text: string) -> string?)?,
+	-- A line under the Customize screen's widget.
 	description: string?,
 }
 
@@ -67,7 +86,8 @@ export type WorldType = {
 	create: (seed: number, options: Options) -> TerrainGenerator.Generator,
 	-- Hidden from the create-world menu (still buildable by id).
 	hidden: boolean?,
-	-- Its options, for the menu (see the header).
+	-- The Customize screen's settings (none: no Customize button). Options outside them are
+	-- dropped when the world is created from the menu ("structures" is the screen's own toggle).
 	settings: { Setting }?,
 	-- Hints (see the header): false turns natural mob spawning / ticks off; the suggested game
 	-- mode (GameMode names); a debug world.
@@ -236,7 +256,13 @@ local PRESET: Setting = {
 	name = "Preset",
 	kind = "text",
 	default = Superflat.CLASSIC,
+	-- (Room for Minecraft's own strings: "minecraft:bedrock,2*minecraft:dirt,..." pasted as is.)
+	maxLength = 256,
 	presets = Superflat.PRESETS :: any,
+	check = function(text: string): string?
+		local _, problem = Superflat.parse(text)
+		return problem
+	end,
 	description = "The layers from the bottom up, then the biome: Bedrock,2*Dirt,Grass;Plains",
 }
 local DECORATION: Setting = {
