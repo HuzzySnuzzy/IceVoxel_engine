@@ -3,7 +3,10 @@
 	Minimap in the top right corner: terrain around the player (north up), the player's heading,
 	waypoints (pinned to the edge when off the map) and other players (not spectators, unless this
 	player spectates too: Player/SpectatorRules). Click it to open the world map; `-` / `=` zoom
-	out / in (the Minimap Zoom Out / In key bindings, Settings/Keybinds). `setVisible` (the
+	out / in (the Minimap Zoom Out / In key bindings, Settings/Keybinds). The cloud button in its
+	bottom left corner (or the Weather Map key, B) shows the weather over it (Map/WeatherLayer:
+	rain, snow, thunder and clouds, with the forecast step the world map picked and the wind in
+	its top left corner). `setVisible` (the
 	Minimap setting) hides it with its coordinates line; Map/init then
 	stops updating it and painting its tiles. Hidden on a touch screen, a small "Map" button takes
 	its corner: tapping the minimap is the only way to the world map there (M is a key).
@@ -22,9 +25,12 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
+local WeatherLayer = require(script.Parent.WeatherLayer)
 
 local BLOCK = Config.BlockSize
 local MAX_ZOOM = 16
+-- Seconds between updates of the weather caption (the wind turns slowly).
+local CAPTION_SECONDS = 0.5
 
 export type Minimap = {
 	view: MapView.MapView,
@@ -79,6 +85,8 @@ function Minimap.new(
 	holder.Parent = gui
 
 	local view = MapView.new(holder, layer, size)
+	-- The weather over the terrain, under the markers.
+	local weather = WeatherLayer.new(view, Config.Weather.Map.MiniCells, 2)
 
 	local arrow = Instance.new("TextLabel")
 	arrow.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -148,6 +156,55 @@ function Minimap.new(
 	mapButton.Activated:Connect(openMap)
 	mapButton.Parent = gui
 
+	-- The weather mode's switch (bottom left, over the click that opens the world map) and its
+	-- caption: the forecast step and the wind, with an arrow where it blows.
+	local weatherButton = Instance.new("TextButton")
+	weatherButton.Name = "WeatherButton"
+	weatherButton.AnchorPoint = Vector2.new(0, 1)
+	weatherButton.Position = UDim2.new(0, 4, 1, -4)
+	weatherButton.Size = UDim2.fromOffset(24, 24)
+	weatherButton.BackgroundColor3 = Color3.fromRGB(24, 28, 34)
+	weatherButton.BackgroundTransparency = 0.25
+	weatherButton.BorderSizePixel = 0
+	weatherButton.Font = Enum.Font.GothamBold
+	weatherButton.TextSize = 14
+	weatherButton.TextColor3 = Color3.new(1, 1, 1)
+	weatherButton.Text = "☁"
+	weatherButton.ZIndex = 11
+	weatherButton.Activated:Connect(WeatherLayer.toggle)
+	weatherButton.Parent = holder
+	local caption = Instance.new("TextLabel")
+	caption.Name = "WeatherCaption"
+	caption.Position = UDim2.fromOffset(24, 4)
+	caption.Size = UDim2.new(1, -28, 0, 14)
+	caption.BackgroundTransparency = 1
+	caption.Font = Enum.Font.Code
+	caption.TextSize = 12
+	caption.TextXAlignment = Enum.TextXAlignment.Left
+	caption.TextColor3 = Color3.new(1, 1, 1)
+	caption.TextStrokeTransparency = 0.3
+	caption.ZIndex = 7
+	caption.Visible = false
+	caption.Parent = holder
+	local windArrow = Instance.new("TextLabel")
+	windArrow.Name = "Wind"
+	windArrow.Position = UDim2.fromOffset(6, 3)
+	windArrow.Size = UDim2.fromOffset(16, 16)
+	windArrow.BackgroundTransparency = 1
+	windArrow.Font = Enum.Font.GothamBold
+	windArrow.TextSize = 14
+	windArrow.Text = "↑"
+	windArrow.TextColor3 = Color3.fromRGB(180, 220, 255)
+	windArrow.TextStrokeTransparency = 0.3
+	windArrow.ZIndex = 7
+	windArrow.Visible = false
+	windArrow.Parent = holder
+	local captionAt = -math.huge
+	-- (A new step or the mode switched: the caption and the buttons follow at once.)
+	WeatherLayer.changed:Connect(function()
+		captionAt = -math.huge
+	end)
+
 	local waypointDots: { Frame } = {}
 	local playerDots: { [Player]: Frame } = {}
 
@@ -175,6 +232,17 @@ function Minimap.new(
 		local me = rootOf(Players.LocalPlayer)
 		local position = if me then me.Position else camera.CFrame.Position
 		view:render(position.X / BLOCK, position.Z / BLOCK)
+		weather:update()
+		local weatherOn = WeatherLayer.isOn()
+		caption.Visible = weatherOn
+		windArrow.Visible = weatherOn
+		weatherButton.BackgroundColor3 = if weatherOn then Color3.fromRGB(60, 96, 160) else Color3.fromRGB(24, 28, 34)
+		if weatherOn and os.clock() - captionAt >= CAPTION_SECONDS then
+			captionAt = os.clock()
+			local stepText, windText, angle = WeatherLayer.caption()
+			caption.Text = `{stepText}  {windText}`
+			windArrow.Rotation = angle
+		end
 
 		local look = camera.CFrame.LookVector
 		arrow.Rotation = math.deg(math.atan2(look.X, -look.Z))

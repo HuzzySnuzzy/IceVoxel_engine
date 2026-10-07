@@ -8,7 +8,9 @@
 	  Ticks      20 a second (catching up a few per frame), for every living player:
 	               * a hurt that landed since the last tick (health went down, not by this
 	                 module) costs Thirst.EXHAUSTION.hurt;
-	               * water touching the standing box (Players/Burning.touching) makes them wet;
+	               * water touching the standing box (Players/Burning.touching) makes them wet, and
+	                 so does rain at their feet or the top of the box, looked at once a second
+	                 (World/WeatherServer.rainingAt: Minecraft's isInRain, TAN's wetness);
 	               * once a second (players spread over the second) the surroundings
 	                 (Players/Climate, with the armor's insulation: Climate.insulation) set the
 	                 temperature's target, with the player's effects and Climate Clemency
@@ -91,6 +93,7 @@ local ToughAsNails = require(Shared.ToughAsNails)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
+local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SkyCheck = require(script.Parent.Parent.Machines.SkyCheck)
 local MachineWorld = require(script.Parent.Parent.Machines.MachineWorld)
@@ -319,6 +322,16 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 	if temperatureOn() then
 		local touching = Burning.touchingAt(view.getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
 		if Burning.has(touching, Fluids.WATER) then
+			Temperature.soak(temperature)
+		elseif
+			sample
+			and (
+				WeatherServer.rainingAt(feet.X, feet.Y, feet.Z)
+				or WeatherServer.rainingAt(feet.X, feet.Y + BODY.height, feet.Z)
+			)
+		then
+			-- (Rain at the feet or the top of the box: Minecraft's isInRain. Once a second keeps
+			-- the wet countdown topped up.)
 			Temperature.soak(temperature)
 		end
 		local window = Inventories.get(player)

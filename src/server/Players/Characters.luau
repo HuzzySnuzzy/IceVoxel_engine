@@ -37,6 +37,9 @@
 	    Explosion message: the client draws the
 	    blast and adds the knockback to its movement (none for spectators, as Minecraft leaves
 	    them out of the explosion packet's knockback; the client leaves out creative flight).
+	  * lightning (`lightning`, World/WeatherServer's strike handler; World/Lightning): a living
+	    player (not a spectator) whose box meets a bolt's reach catches fire for 8 s and takes
+	    5 half hearts like any other hurt (Minecraft's Entity.thunderHit).
 	  * status effects (Players/Effects, ticked here with lava and burning, 20 a second): the
 	    fluids' effects first (oil's Slowness and Oil Coated, fuel's Nausea, Poison and Fuel Soaked,
 	    water washing them off; the eyes are looked at only when a fluid gives effects there),
@@ -70,6 +73,7 @@ local Explosion = require(Shared.World.Explosion)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
+local Lightning = require(script.Parent.Parent.World.Lightning)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SharedSounds = require(Shared.Sounds)
 local Burning = require(script.Parent.Burning)
@@ -338,6 +342,47 @@ function Characters.explosion(
 			Protocol.encodeExplosion({ x = x, y = y, z = z, power = power, kx = kx, ky = ky, kz = kz })
 		)
 	end
+end
+
+--[[
+	A lightning bolt at (x, y, z) (blocks: the bottom centre of the struck cell; World/
+	WeatherServer's strike handler): every living player it reaches (World/Lightning.hits, their
+	standing box; not spectators) catches fire for Config.Weather.Lightning.BurnSeconds (a tick
+	more when already burning: Entity.thunderHit; their fire rules: Fire Resistance, Fuel Soaked)
+	and takes its Damage half hearts as any other hurt (`hurt`: cooldown, armor, Resistance).
+	Returns how many it reached.
+]]
+function Characters.lightning(x: number, y: number, z: number): number
+	local settings = Config.Weather.Lightning
+	local reached = 0
+	for _, player in Players:GetPlayers() do
+		local character = player.Character
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		local feet = if character then Rig.feet(character) else nil
+		local mode = GameMode.of(player)
+		if
+			humanoid == nil
+			or humanoid.Health <= 0
+			or feet == nil
+			or GameMode.isSpectator(mode)
+			or not Lightning.hits(x, y, z, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		then
+			continue
+		end
+		reached += 1
+		local state = burning[player]
+		if state == nil then
+			state = Burning.newPlayer()
+			burning[player] = state
+		end
+		if Burning.onFire(state) then
+			state.fire += 1
+		else
+			Burning.ignite(state, mode, settings.BurnSeconds, Effects.fireRules(player))
+		end
+		Characters.hurt(player, settings.Damage)
+	end
+	return reached
 end
 
 --[[

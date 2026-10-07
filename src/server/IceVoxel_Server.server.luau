@@ -36,9 +36,14 @@
 	                   and Characters; World/Nuke: the Nuke's crater, dug a budget a tick)
 	  4. network    -> chunk edit requests, edit validation, replication (Network/ServerNet), and
 	                   the sounds players should hear (Audio/Sounds)
-	  5. clock      -> the day time, published to the clients (World/TimeOfDay)
-	  6. players    -> game modes (/gamemode, the F3 + F4 switcher and F3 + N), the time (/time,
-	                   /gamerule doDaylightCycle), cosmetic characters (collision group, teleports,
+	  5. clock      -> the day time, published to the clients (World/TimeOfDay), and the weather
+	                   (World/WeatherServer: its clock and /weather's overrides, published the same
+	                   way; rain on fire, players and the undead; lightning near players, whose
+	                   strikes hurt through Players/Characters and Mobs/Mobs once they start; none
+	                   in the debug worlds)
+	  6. players    -> game modes (/gamemode, the F3 + F4 switcher and F3 + N), the time and the
+	                   weather (/time, /weather, /gamerule doDaylightCycle and doWeatherCycle),
+	                   cosmetic characters (collision group, teleports,
 	                   fall damage, invulnerability, lava and burning), item entities (drops,
 	                   burning in lava), inventories, chests,
 	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
@@ -98,6 +103,7 @@ local RandomTicker = require(Server.World.RandomTicker)
 local Explosions = require(Server.World.Explosions)
 local Nuke = require(Server.World.Nuke)
 local TimeOfDay = require(Server.World.TimeOfDay)
+local WeatherServer = require(Server.World.WeatherServer)
 local WorldInfo = require(Server.World.WorldInfo)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
@@ -108,6 +114,7 @@ local GameModes = require(Server.Players.GameModes)
 local Operators = require(Server.Players.Operators)
 local WorldMenu = require(Server.Players.WorldMenu)
 local TimeCommands = require(Server.Players.TimeCommands)
+local WeatherCommands = require(Server.Players.WeatherCommands)
 local Inventories = require(Server.Players.Inventories)
 local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
@@ -164,8 +171,11 @@ local function startWorld(settings: WorldSettings.Settings)
 	local net = ServerNet.start(world)
 	Sounds.start(net)
 	TimeOfDay.start()
+	-- (No weather in a world without ticks: the debug worlds.)
+	WeatherServer.start(net, world, settings.seed, ticking)
 	GameModes.start(net)
 	TimeCommands.start(net)
+	WeatherCommands.start(net)
 	Effects.start(net)
 	Characters.start(net, world)
 	-- Items must exist before anything can drop them.
@@ -229,6 +239,20 @@ local function startWorld(settings: WorldSettings.Settings)
 		Entities.explode(x, y, z, power)
 		Characters.explosion(x, y, z, power, getBlock, range)
 		Mobs.explode(x, y, z, power)
+	end)
+	-- What lightning does to the living (players and mobs), and the mobs it may pick to strike.
+	WeatherServer.setHandler(function(x: number, y: number, z: number)
+		Characters.lightning(x, y, z)
+		Mobs.lightning(x, y, z)
+	end, function(x: number, y: number, z: number, radius: number)
+		local living = {}
+		for _, mob in Mobs.near(x, y, z, radius) do
+			table.insert(
+				living,
+				{ x = mob.x, y = mob.y, z = mob.z, width = mob.width, height = mob.height, key = mob.id }
+			)
+		end
+		return living
 	end)
 	Api._ready(world, ticker)
 

@@ -22,6 +22,12 @@
 	                             reads (Settings/Keybinds), the mouse's sensitivity and inversion
 	                             (Player/MouseLook) and the attack indicator (Ui/AttackIndicator)
 	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
+	  Weather/                   the weather (Shared/Weather's storms, the server's state): rain
+	                             and snow around the camera stopping at roofs, their sounds, LOD
+	                             clouds out to the view distance drifting with the wind, the
+	                             server's lightning and thunder, the darker light and nearer fog
+	                             (through LightingController and ViewSettings); the Clouds and
+	                             Weather settings (Options > Weather...)
 	  Rendering/FluidFog         the view from inside water, lava, oil or fuel: Minecraft's fluid
 	                             fog in the fluid's colour and a tint
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
@@ -48,7 +54,8 @@
 	  Rendering/StructureBoxes   structure blocks' outlines and names
 	  Rendering/FireRenderer     fire's animated flames on the floor and on burning walls
 	  Rendering/FuseView         lit TNT and Nukes flashing
-	  Map/                       minimap, world map (M), waypoints, teleporting
+	  Map/                       minimap, world map (M), waypoints, teleporting, the weather
+	                             mode with its forecasts (B, the maps' cloud buttons)
 	  Net/ClientNet              routes server messages to the modules above
 	  Audio/                     sounds: SoundPlayer (pooled 3D and interface sounds, the server's
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
@@ -103,6 +110,7 @@ local ChunkRenderer = require(Client.Rendering.ChunkRenderer)
 local TextureLooks = require(Client.Rendering.TextureLooks)
 local ViewSettings = require(Client.Rendering.ViewSettings)
 local LightingController = require(Client.Rendering.LightingController)
+local WeatherClient = require(Client.Weather)
 local FluidFog = require(Client.Rendering.FluidFog)
 local BlockInteraction = require(Client.Interaction.BlockInteraction)
 local ClientInventory = require(Client.Inventory.ClientInventory)
@@ -246,6 +254,13 @@ Settings.register("swapFrames", function(values)
 	-- (Read live by the renderer and the far meshes.)
 	Config.Render.SwapFrames = values.swapFrames
 end)
+-- The weather's looks (Options > Weather...): the cloud rings and the rain and snow strips.
+Settings.register("clouds", function(values)
+	WeatherClient.setClouds(values.clouds)
+end)
+Settings.register("weather", function(values)
+	WeatherClient.setWeather(values.weather)
+end)
 
 local world = ClientWorld.new()
 -- Texture ids are checked and averages measured in the background from now on; the renderer
@@ -257,6 +272,10 @@ local pool = WorkerPool.new(Client.Streaming.ChunkWorker :: LocalScript)
 local generator = WorldTypes.fromAttributes(Shared)
 local streamer = ChunkStreamer.new(generator, world, pool, renderer)
 LightingController.start(generator, world)
+-- (After the lighting: it reads the weather over the camera; the clouds reach the view distance.)
+WeatherClient.start(seed, generator, world, function(): number
+	return (ViewSettings.lod())
+end)
 
 -- The view: LodTree's four distances, plants and the cave view's radii, then the streamer selects
 -- again at once (one call a frame whichever of them changed). Hidden terrain ("skipHidden") is

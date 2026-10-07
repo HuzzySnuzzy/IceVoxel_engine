@@ -13,8 +13,11 @@
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
 	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill), and the
 	status effects (Player/EffectState: each one's name, level and time left, "**:**" for one
-	that never ends). Under the frame rate, the world: its name, world type, difficulty, seed and
-	whether commands are allowed (Shared/WorldSettings.info, from the server's attributes).
+	that never ends), and the weather at the player (Weather/: what falls there, the
+	precipitation, thunder and cloud cover, the wind and the weather clock, a /weather override's
+	share; the cloud parts and rings, the rain strips drawn, the bolts showing). Under the frame
+	rate, the world: its name, world type, difficulty, seed and whether commands are allowed
+	(Shared/WorldSettings.info, from the server's attributes). The panel grows to fit its lines.
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -41,6 +44,7 @@ local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
+local WeatherClient = require(script.Parent.Parent.Weather)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
 local Music = require(script.Parent.Parent.Audio.Music)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -244,6 +248,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
 	label.Size = UDim2.fromOffset(420, 280)
+	label.AutomaticSize = Enum.AutomaticSize.XY
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.BackgroundTransparency = 0.5
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -255,6 +260,8 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 	local padding = Instance.new("UIPadding")
 	padding.PaddingLeft = UDim.new(0, 6)
 	padding.PaddingTop = UDim.new(0, 6)
+	padding.PaddingRight = UDim.new(0, 6)
+	padding.PaddingBottom = UDim.new(0, 6)
 	padding.Parent = label
 
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
@@ -380,6 +387,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
 			timeLine(),
+			WeatherClient.describe(),
 			musicLine(),
 			survivalLine(),
 			effectsLine(),

@@ -35,6 +35,9 @@ export type Biome = {
 	bands: { number },
 	temperature: number,
 	humidity: number,
+	-- Minecraft's biome temperature and has_precipitation (BiomeList `weather`; Shared/Weather).
+	weatherTemperature: number,
+	precipitation: boolean,
 	vegetation: number,
 	top: number,
 	filler: number,
@@ -136,12 +139,15 @@ for index, spec in BiomeList.list do
 			herbs = if herbs then plantList(spec.name, herbs.species) else nil,
 		}
 	end
+	local weather = spec.weather
 	local biome: Biome = {
 		index = index,
 		name = spec.name,
 		bands = biomeBands,
 		temperature = spec.temperature,
 		humidity = spec.humidity,
+		weatherTemperature = if weather then weather.temperature elseif spec.frozen then 0 else 0.8,
+		precipitation = weather == nil or weather.precipitation ~= false,
 		vegetation = spec.vegetation,
 		top = block(spec.top),
 		filler = block(spec.filler),

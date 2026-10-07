@@ -405,6 +405,44 @@ A fast, Minecraft-style voxel engine for Roblox.
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
   A tunnel dug into a hillside darkens with the distance from its mouth, not the depth of the rock
   above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
+- **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
+  few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
+  blocks a second), grow and die out, and leave clear stretches between them, so you can see one
+  coming and walk out of it. Everyone computes the same storms from the seed and a weather clock
+  of its own (`/time set` never moves a storm), so the weather costs no traffic. What falls
+  follows Minecraft's rules for the place: rain, or snow where the biome is cold (snowy plains,
+  groves, the peaks) and on high ground (it gets colder with height, so a mountain top snows
+  while its valley rains), and nothing in deserts and savannas. Measured on a seed: it rains at a
+  place about 23% of the time, a spell of rain lasts 17 minutes on average (2 minutes to a couple
+  of hours), clear weather about 50, and the heaviest storms thunder (13% of the rainy time).
+  Rain puts out fires under the open sky and keeps them from spreading, makes players wet (Tough
+  As Nails), and keeps zombies and skeletons from burning; a thunderstorm darkens the day enough
+  that they don't burn at all. Lightning strikes near players in thunderstorms (every 20 s or so
+  under the heaviest), at the highest block or a living thing near it, setting fires (with
+  doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, Minecraft's).
+  `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s, and
+  `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft.
+- **Rain, snow, clouds and lightning.** Rain and snow fall around you as Minecraft draws them: a
+  streak in every block column within 10 blocks (5 on Fast), only above the highest block that
+  stops rain, so never indoors, under a tree or in a cave, rain or snow by each column's biome and
+  height (a snow line cuts through a storm on a mountainside), fainter at a storm's edge. You hear
+  it land around you (on a roof over you, muffled), the sky and the light darken by Minecraft's
+  amounts (5/16 for rain, as much again for thunder; caves stay as they are), the picture greys
+  and the fog comes in. Clouds reach the render distance at y 320 in rings of detail (16-block
+  boxes near you, bigger ones far off): scattered white ones in fair weather, a grey deck over
+  rain, near-black towers over thunderstorms with grey rain shafts under them, so a storm shows
+  on the horizon long before it arrives, and they drift with its wind. Lightning is Minecraft's
+  bolt (128 blocks of zigzag with two branches, flashing one to three times), with a flash of the
+  sky, a crack where it strikes and thunder that comes later the farther it struck (343 blocks a
+  second). The Clouds and Weather settings (Options > Weather...: OFF, Fast, Fancy) choose how
+  much is drawn; F3 shows the weather where you stand. Measured on seed 12345: about 200 cloud
+  parts at the default view (at most ~390, a third of them rain shafts), ~40 on a phone (Low:
+  Fast, 512 blocks), placed at most 48 a frame.
+- **The weather map.** `B` (or the cloud button on the minimap or the world map, the way in on a
+  touch screen) lays the weather over both maps: rain in blue, snow in white, thunderstorms purple
+  with yellow lightning, clouds as a grey veil, the wind with an arrow. The world map forecasts:
+  its buttons show the weather in 2, 5, 10 and 20 minutes (the storms are worked out from the
+  seed, so a forecast is the real weather then, `/weather` included).
 - **Torches, lanterns and the Glow Block.** Light sources for the dark: torches (light 14) stand on
   blocks or hang on walls, leaning out like Minecraft's; lanterns (15) stand on a block or hang
   under one; the Glow Block (15, the game's blue stand-in for glowstone) is a glowing full block.
@@ -881,7 +919,8 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Minimap and world map.** Painted straight from the generator, so the map shows the whole world,
   oil geysers as black dots. Right click the map to add waypoints (saved between sessions),
   teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
-  touch screens a small "Map" button takes its corner, to open the world map).
+  touch screens a small "Map" button takes its corner, to open the world map). `B` shows the
+  weather over both (see The weather map).
 - **Safe spawns.** Spawns and teleports never land in water, lava, oil, fuel or fire, on leaves or
   next to cacti, lava or fire; the rules live in `SpawnUnsafeBlocks`.
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
@@ -973,6 +1012,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Move a recipe (JEI) | `+` beside a crafting recipe (`Shift`: as many as possible) | A | Tap |
 | Full stack (JEI, creative) | `Shift` + click or middle click an item in the list | Y | |
 | World map     | `M`, or click the minimap   |         | Tap minimap (or the Map button while the Minimap setting is off) |
+| Weather map   | `B` (the Weather Map key binding), or the ☁ button on the minimap or the world map: the weather over both maps; on the world map, Now / +2 / +5 / +10 / +20 min along its bottom forecast it | | Tap ☁ on the minimap or the world map |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
 | Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory | D-pad right; B closes | Gear at the left end of the hotbar |
@@ -982,6 +1022,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
+| Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
@@ -1011,6 +1052,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1-3) |
 | Chat Settings   | Chat (Shown / Commands Only: no players' messages, and none sent / Hidden: no chat at all), Chat Text Opacity (10-100%), Text Background (0-100%), Text Size (OFF, 1-100%), Line Spacing (0-100%), Chat Delay (None, 0.5-6 s: other players' messages come out one per delay), Width (40-320 GUI pixels), Focused Height and Unfocused Height (20-180), Command Suggestions |
 | Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
+| Weather         | Clouds (OFF / Fast / Fancy), Weather (rain and snow: OFF / Fast / Fancy) |
 
 Key Binds is Minecraft's list: a row per action under its category, the action's name, its key
 and Reset (back to the default, greyed when it is). Clicking a key shows `> W <` in yellow and
@@ -1031,7 +1073,7 @@ default).
 | Inventory | Drop Selected Item (`Q`), Hotbar Slot 1-9 (`1`-`9`), Open/Close Inventory (`E`) |
 | Multiplayer | Open Chat (`T`), Open Command (`/`) |
 | Miscellaneous | Debug Screen (`F3`; its combinations become that key + `N` / `Q` / `F4`), Options (`P`), Skill Tree (`K`) |
-| Map | Minimap Zoom In (`=`), Minimap Zoom Out (`-`), World Map (`M`) |
+| Map | Minimap Zoom In (`=`), Minimap Zoom Out (`-`), Weather Map (`B`), World Map (`M`) |
 | Just Enough Items | Recipe Back (`Backspace`), Show Recipe (`R`), Show Uses (`U`) |
 
 The other new options, each Minecraft's:
@@ -1050,6 +1092,11 @@ The other new options, each Minecraft's:
   s, an axe in 1-1.25 s), a bar under the crosshair (or the mouse, while it is free) or a square
   right of the hotbar fills up.
 - Sneak: Hold (Minecraft's default) or Toggle.
+- Clouds and Weather (Minecraft keeps Clouds on its Video Settings, which is full here, and draws
+  rain and snow by its Graphics setting): Fancy clouds are boxes with storm towers and rain
+  shafts, Fast a flat layer of bigger cells; Fancy rain and snow fall within 10 blocks, Fast
+  within 5. OFF draws none; the sounds, the darker light and the fog stay. The Low preset (phones)
+  sets both to Fast, the others to Fancy.
 - Not here: Auto-Jump (the 1 1/16-block step height already walks up blocks without jumping),
   Toggle Perspective and Hide GUI (the game has no such keys), Show Subtitles.
 
@@ -1084,7 +1131,7 @@ skipping hidden terrain):
 
 | Preset | View / falloff / full detail    | Cave view | Also                                          | Spawn                    | Mountains           |
 | ------ | ------------------------------- | --------- | --------------------------------------------- | ------------------------ | ------------------- |
-| Low    | 512 / 2 / 64 blocks             | 96        | plants 24, no shadows, hidden terrain skipped | 13.8k (9.1k + 14 meshes) | 29.0k (16.6k + 16)  |
+| Low    | 512 / 2 / 64 blocks             | 96        | plants 24, no shadows, hidden terrain skipped, Fast clouds and weather | 13.8k (9.1k + 14 meshes) | 29.0k (16.6k + 16)  |
 | Medium | 1024 / 2 / 96 blocks            | 96        | plants 24                                     | 18.2k (11.5k + 29)       | 43.2k (23.5k + 37)  |
 | High   | 2048 / 3 / 96 blocks (Config's) | 128       | plants 40                                     | 33.5k (16.7k + 88)       | 81.5k (34.8k + 90)  |
 | Ultra  | 4096 / 3 / 96 blocks            | 144       | plants 64, far shadows                        | 45.6k (20.6k + 187)      | 97.5k (39.5k + 191) |
@@ -1212,7 +1259,15 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
            MusicList        the music (surface and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
-  Biomes/  BiomeList        biome definitions and altitude bands
+  Weather/ init             the weather clock, /weather's overrides and their blending, the
+                            published attributes, the save, what falls where (biome, altitude),
+                            Minecraft's darkening, sky / cloud / fog colours, fog distance, the
+                            rain's sound and thunder's delay
+           WeatherModel     the storms: a field of noise drifting with a slowly turning wind
+                            (closed form), precipitation, thunder and cloud cover anywhere at any
+                            time, a grid sampler (minimap, far clouds) and forecasts
+  Biomes/  BiomeList        biome definitions and altitude bands (and Minecraft's temperature and
+                            precipitation for the weather)
   Generation/
     TerrainGenerator        biomes, surfaces, filling chunks at any LOD
     Relief                  terrain heights (JJThunder To The Max style)
@@ -1274,6 +1329,11 @@ src/server   -> ServerScriptService.IceVoxel
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
                             Simulation, TimeOfDay (the day clock, published as workspace attributes),
+                            WeatherServer (the weather clock and /weather's overrides, published
+                            the same way; rain for fire, players and mobs; lightning near
+                            players; the save's encode / decode), WeatherRules (where rain falls:
+                            Level.isRainingAt; pure), Lightning (strikes: rate, target, fires,
+                            reach; pure),
                             WorldInfo (the world's settings once created; creating it once),
                             WorldSave (saving and loading worlds: the DataStore, autosave,
                             /save-all, players' records, the title screen's Load World),
@@ -1331,7 +1391,8 @@ src/server   -> ServerScriptService.IceVoxel
                             it), GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
-                            /gamerule), Inventories + InventoryState (authoritative inventories),
+                            /gamerule), WeatherCommands + WeatherCommand (/weather; pure),
+                            Inventories + InventoryState (authoritative inventories),
                             Containers (chests, furnaces, generated structures' chests),
                             Characters (cosmetic characters: collision group, teleports, fall
                             damage, invulnerability, suffocation, lava and burning, explosions),
@@ -1411,7 +1472,20 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             updates, hurt flashes, creepers' fuses, flames, arrows; the pure pose
                             and aim)
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
-                            Waypoints, ContextMenu
+                            Waypoints, ContextMenu, WeatherLayer (the weather mode over both
+                            maps, painted a band a frame) + WeatherMap (its colours, grids, cache,
+                            forecast steps and wind; pure)
+  Weather/                  the weather on this client: init (starts it, the picture's grading and
+                            fog, F3's lines), WeatherState (the server's state, this frame's
+                            moment, the weather over the camera smoothed, columns' biomes),
+                            PrecipitationView + Precipitation (rain and snow strips around the
+                            camera stopping at roofs, the rain's sound; Minecraft's rules, pure),
+                            CloudView + CloudLod (clouds in rings of detail to the view distance,
+                            drifting with the wind; rings, looks and merging, pure),
+                            LightningView + LightningBolt (the server's lightning: bolt, flash,
+                            thunder; Minecraft's shape and timing, pure), WeatherSky (what the
+                            weather does to the light, pure; Rendering/LightingController applies
+                            it)
   Net/ClientNet             routes server messages; Notices shows server messages in the chat;
                             StructureNet (structure blocks' and jigsaws' messages and screens)
   Player/                   MovementController (the hull, input, the cosmetic character,
@@ -1439,7 +1513,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             chests, crafting tables, furnaces, Mekanism's machines, structure
                             blocks and jigsaws)
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
-  Debug/DebugOverlay        F3 stats and time of day (also WAILA's extended view); DebugKeys
+  Debug/DebugOverlay        F3 stats, time of day and weather (also WAILA's extended view); DebugKeys
                             (Minecraft's debug keys: F3 when let go, F3 + N, F3 + F4, F3 + Q)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
@@ -1592,6 +1666,26 @@ for performance:
 | `Time.DayLength`          | 1200    | Real seconds per in-game day (Minecraft's 20 minutes).              |
 | `Time.StartTime`          | 1000    | Day time when the server starts (ticks; 6000 noon, 13000 night).    |
 | `Time.Cycle`              | true    | Minecraft's doDaylightCycle (false: the time stands still).         |
+| `Weather.Enabled`         | true    | false: always clear (no clouds, rain, snow or lightning; the debug worlds have none either). |
+| `Weather.Cycle`           | true    | Minecraft's doWeatherCycle (false: the storms stand still and an override never runs out). |
+| `Weather.Speed`           | 1       | How fast the weather clock runs (2: storms drift and change twice as fast). |
+| `Weather.BlendSeconds`    | 5       | Seconds a `/weather` override blends in and out (Minecraft's 5).    |
+| `Weather.ClearStartSeconds` | 300   | A new world's weather starts where its spawn stays dry this long.   |
+| `Weather.Lightning.Enabled` / `MeanSeconds` / `Radius` | true / 20 / 64 | Strikes near players in thunderstorms: one every MeanSeconds at full thunder, within Radius blocks. |
+| `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 1024 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance see and hear it. |
+| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog distance at full rain, snow and thunder, as a share of the clear one. |
+| `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
+| `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the streaks' Texture (a stand-in: swap in your own), Length, Width, Speed, Color, Transparency. |
+| `Weather.Precipitation.Smoothing` / `ScansPerFrame` | 0.8 / 64 | Seconds the rain drawn takes to follow the weather; block columns whose roof is looked up per frame. |
+| `Weather.Clouds.Altitude` / `Thickness` / `Cell` / `Cells` | 320 / 6 / 16 / 24 | Cloud base (blocks), fair-weather thickness, the nearest ring's cell and cells across a ring (Fast: cells twice as big, `FastCells` across, a block thick). |
+| `Weather.Clouds.Drop` / `RainThickness` / `Tower` | 32 / 28 / 160 | Rain lowers a cloud's base and thickens it; thunder raises a tower. |
+| `Weather.Clouds.CoverBase` / `Wavelength` | 0.22 / 96 | Share of a clear sky with clouds; a fair-weather cloud's size (blocks). |
+| `Weather.Clouds.ShaftLevel` / `ShaftMin` | 1 / 0.4 | Rain shafts from this ring out, under this much precipitation. |
+| `Weather.Clouds.PartsPerFrame` / `RefreshSeconds` | 48 / 4 | Cloud parts placed or removed per frame at most; seconds before the nearest ring is planned again (twice that for each ring further out). |
+| `Weather.Clouds.Color` / `Dark` / `ShaftColor` / `Transparency` | white / near black / grey / 0.12 | Fair-weather and full-thunder colours (shades between), the shafts' colour, the clouds' see-through. |
+| `Weather.Sky.CoverSun` / `Saturation` / `ThunderSaturation` / `Contrast` / `Tint` / `Smoothing` | 0.3 / 0.28 / 0.18 / 0.08 / cool / 1.5 | The sun hidden at full cover; the picture's greying, flattening and tint in rain and thunder; seconds the light takes to follow. |
+| `Weather.Bolt.Color` / `Glow` / `Flash` / `LightRange` | pale blue / 0.75 / 0.45 / 60 | The bolt's colour and glow, the sky's flash, the struck point's light (studs). |
+| `Weather.Map.MiniCells` / `WorldCells` / `RefreshSeconds` / `CellsPerFrame` | 48 / 96 / 3 / 1536 | The weather map's cells across (minimap, world map), seconds before a picture is drawn again, cells painted a frame. |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
@@ -1668,7 +1762,9 @@ Block textures below).
 sounds every Roblox client ships (`rbxasset://sounds/...`: the character's footsteps, landing,
 get-up rustle (chest lids, armor), free-fall wind (a cave mood that fails to load), swimming and splash, the
 explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
-told apart by pitch. To use your own, add a Folder named `IceVoxelSounds` to SoundService
+told apart by pitch (the weather's too: `weather.rain` and `weather.rain.above` are the wind
+pitched into a hiss, `entity.lightning_bolt.thunder` and `entity.lightning_bolt.impact` the
+explosion pitched down; each client plays them by itself). To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
 
 ```
@@ -2104,8 +2200,9 @@ opens.
 **The map.** The minimap and world map draw terrain with EditableImage. That API works in Studio
 right away, but **published games** need the experience owner to be 13+ and ID verified and to turn
 on *Enable Mesh / Image APIs* (Creator Dashboard, experience settings). Without it the maps still
-show players and waypoints, and the right click menu still works. Teleporting is controlled by
-`Config.Map.Teleport` and checked by the server.
+show players and waypoints, and the right click menu still works (the weather mode needs it too:
+without it only its wind and buttons show). Teleporting is controlled by `Config.Map.Teleport` and
+checked by the server.
 
 **Far meshes (EditableMesh superchunks).** Distant terrain (LOD level 2 and up, about 200 blocks
 and further) is merged per region of 4 × 4 chunks into MeshParts once the region has not changed

@@ -441,6 +441,163 @@ local Config = {
 		Cycle = true,
 	},
 
+	-- Weather (shared model, server clock and gameplay) ----------------------------------------------
+
+	--[[
+		Regional weather (Shared/Weather): storms drift over the world with a wind that turns
+		slowly, raining or snowing by the biome and the altitude under them, thundering where they
+		are heaviest. Everyone computes it from the seed and the weather clock (server World/
+		WeatherServer publishes the clock as workspace attributes, like the day's), so nothing is
+		sent while it runs. Operators change it with /weather clear|rain|thunder [duration] and
+		/gamerule doWeatherCycle (Players/WeatherCommands, Players/TimeCommands).
+	]]
+	Weather = {
+		-- false: always clear (no clouds, rain, snow or lightning anywhere).
+		Enabled = true,
+		-- Minecraft's doWeatherCycle game rule: false stops the weather clock (storms stand where
+		-- they are, and a /weather override never runs out).
+		Cycle = true,
+		-- How fast the weather clock runs: 1 is 20 ticks a real second, whatever the day length;
+		-- 2 moves and changes the storms twice as fast.
+		Speed = 1,
+		-- Seconds a /weather override takes to blend in and out (Minecraft's rain level moves
+		-- 0.01 a tick: 5 s).
+		BlendSeconds = 5,
+		-- A new world's clock starts where its spawn stays clear for this many seconds
+		-- (Minecraft's first rain waits 10 to 150 minutes); 0 starts it at 0.
+		ClearStartSeconds = 300,
+		-- Lightning (server World/Lightning, Minecraft's LightningBolt) in thunderstorms near
+		-- players: one strike a player every MeanSeconds on average at full thunder (fewer where
+		-- it is lighter), within Radius blocks, only where it rains (not in snow or deserts). A
+		-- strike hurts the living within 3 blocks by Damage half hearts and sets them burning for
+		-- BurnSeconds, and lights fires by Minecraft's rules (with doFireTick:
+		-- Server.Fire.Tick). Clients within Distance blocks see the bolt and hear the thunder.
+		Lightning = {
+			Enabled = true,
+			MeanSeconds = 20,
+			Radius = 64,
+			Damage = 5,
+			BurnSeconds = 8,
+			Distance = 1024,
+		},
+		-- Fog distance factor at full rain, snow and thunder (client: the fog comes closer).
+		Fog = { Rain = 0.6, Snow = 0.4, Thunder = 0.45 },
+		-- Blocks a second thunder travels (the client hears a strike that much later).
+		SoundSpeed = 343,
+
+		--[[
+			What the player sees and hears of it (client Weather/): rain and snow around the camera,
+			the clouds out to the view distance, the light, lightning, and the maps' weather mode
+			(Map/WeatherLayer). Options > Weather... has Clouds and Weather (Off / Fast / Fancy).
+			Images are Config values so they are easy to swap: any rbxassetid:// (or rbxasset://)
+			works; the defaults are Roblox's built-in particle sparkle, a stand-in.
+		]]
+		-- Rain and snow (Weather/PrecipitationView, Minecraft's renderSnowAndRain): one strip a
+		-- block column, facing the camera, within Radius (Fast, Fancy) blocks, from the column's
+		-- roof (or the camera's height - radius) to the camera's height + radius. Length: blocks
+		-- one tile of the image covers; Width: the streak's width (blocks); Speed: tiles a second it
+		-- falls (if your rain rises, make it negative); Color { r, g, b }; Transparency: the
+		-- streak's at full intensity (more see-through towards the disc's edge and in drizzle).
+		Precipitation = {
+			Radius = { 5, 10 },
+			Rain = {
+				Texture = "rbxasset://textures/particles/sparkles_main.dds",
+				Length = 1.25,
+				Width = 0.12,
+				Speed = 7,
+				Color = { 178, 196, 230 },
+				Transparency = 0.25,
+			},
+			Snow = {
+				Texture = "rbxasset://textures/particles/sparkles_main.dds",
+				Length = 1,
+				Width = 0.3,
+				Speed = 0.9,
+				Color = { 250, 252, 255 },
+				Transparency = 0.1,
+			},
+			-- Seconds the intensity at the camera takes to follow the weather (time constant).
+			Smoothing = 0.8,
+			-- Block columns whose roof is looked up in one frame at most (a scan of loaded data).
+			ScansPerFrame = 64,
+		},
+		--[[
+			Clouds (Weather/CloudView, Weather/CloudLod): flat boxes in rings of detail out to the
+			view distance, drifting with the wind. Altitude 320: above 9 in 10 of the land even in
+			mountainous worlds (seed 12345: half the land below 82, 1 in 10 above 283, 1 in 20 above
+			367), so most hills stay under them, but the great ranges (up to ~900) push through as
+			JJThunder's peaks do; rain lowers a cloud's base by Drop and thickens it by
+			RainThickness, thunder raises a tower of up to Tower blocks (anvils seen from far off).
+			Fancy: Cell-block cells, Cells across a ring, Thickness thick, rain shafts under rain
+			clouds from ring ShaftLevel on (over ShaftMin precipitation); Fast: one flat layer of
+			cells twice the size, half as many rings' cells, no towers or shafts. CoverBase: the
+			share of a clear sky that still has clouds (Minecraft always has some); Wavelength: the
+			size of a fair-weather cloud. Transparency 0 is cheapest; ShaftTransparency is a
+			shaft's (heavy, light). PartsPerFrame: parts placed, moved or removed in a frame at
+			most; a ring is planned again every RefreshSeconds x 2^ring (or when the camera moved
+			two of its cells), one ring a frame. Colours: Color (fair weather) to Dark at full
+			thunder; ShaftColor the rain shafts'.
+		]]
+		Clouds = {
+			Altitude = 320,
+			Thickness = 6,
+			Cell = 16,
+			Cells = 24,
+			FastCells = 16,
+			CoverBase = 0.22,
+			Wavelength = 96,
+			Drop = 32,
+			RainThickness = 28,
+			Tower = 160,
+			Step = 4,
+			ShaftLevel = 1,
+			ShaftMin = 0.4,
+			Transparency = 0.12,
+			ShaftTransparency = { 0.72, 0.84 },
+			Color = { 248, 250, 255 },
+			Dark = { 38, 40, 48 },
+			ShaftColor = { 108, 116, 132 },
+			Material = "SmoothPlastic",
+			CastShadow = false,
+			PartsPerFrame = 48,
+			RefreshSeconds = 4,
+			MaxLevels = 8,
+		},
+		-- The light (Rendering/LightingController, Weather/WeatherSky): Minecraft's darkening by
+		-- rain and thunder on the sky's light; CoverSun of the sun's light hidden at full cloud
+		-- cover; a grading of the picture (saturation down by Saturation in rain, ThunderSaturation
+		-- more in thunder, contrast by Contrast, a cool Tint); Smoothing: seconds the light takes to
+		-- follow (time constant).
+		Sky = {
+			CoverSun = 0.3,
+			Saturation = 0.28,
+			ThunderSaturation = 0.18,
+			Contrast = 0.08,
+			Tint = { 226, 234, 255 },
+			Smoothing = 1.5,
+		},
+		-- Lightning on the client (Weather/LightningView): the bolt's colour, its glow, the flash of
+		-- the sky (ColorCorrection brightness at the strike, less with distance and indoors) and
+		-- the light at the struck point; thunder within Distance (above) is heard ThunderDelay
+		-- (Shared/Weather.thunderDelay) later.
+		Bolt = {
+			Color = { 214, 220, 255 },
+			Glow = 0.75,
+			Flash = 0.45,
+			LightRange = 60,
+		},
+		-- The maps' weather mode (Map/WeatherLayer): grid cells across at most (minimap, world map),
+		-- seconds before a picture is drawn again, biome lookups for snow per frame, cells painted
+		-- per frame (a picture is spread over frames: ~0.7 us a cell, so ~1 ms a frame).
+		Map = {
+			MiniCells = 48,
+			WorldCells = 96,
+			RefreshSeconds = 3,
+			LookupsPerFrame = 96,
+			CellsPerFrame = 1536,
+		},
+	},
+
 	-- Lighting (client) ------------------------------------------------------------------------------
 
 	--[[

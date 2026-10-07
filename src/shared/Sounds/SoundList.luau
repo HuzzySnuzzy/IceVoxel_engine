@@ -890,4 +890,64 @@ table.insert(SoundList.EVENTS, {
 	side = "client",
 })
 
+--[[
+	Weather (Minecraft 1.20.1; client Weather/PrecipitationView and Weather/LightningView, each
+	client by itself, as Minecraft's sound source WEATHER, which here is the ambient volume).
+	LevelRenderer.tickRain: rain landing near the player (weather.rain, volume 0.2, pitch 1) or on
+	a roof over them (weather.rain.above, 0.1, 0.5), a sound every 2-3 ticks while it rains,
+	louder with the precipitation here (Shared/Weather.rainSound: those volumes are the cue's);
+	LightningBolt.tick: thunder (entity.lightning_bolt.thunder, Minecraft's volume 10000, heard
+	everywhere, pitch 0.8..1) and the strike's crack (entity.lightning_bolt.impact, volume 2,
+	pitch 0.5..0.7), the thunder later the farther the bolt (Shared/Weather.thunderDelay).
+	Stand-ins: the falling wind pitched up into a hiss for rain (down and muffled on a roof), the
+	explosion pitched far down into a rumble for thunder and half down for the crack. Give a Sound
+	of the event's name to use a real one (README, "Sounds").
+]]
+for _, event in
+	{
+		{
+			name = "weather.rain",
+			id = FALLING,
+			volume = 0.9,
+			pitch = 1.9,
+			pitchVariance = 0.1,
+			duration = 1.6,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "weather.rain.above",
+			id = FALLING,
+			volume = 1,
+			pitch = 1.1,
+			pitchVariance = 0.08,
+			duration = 1.6,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "entity.lightning_bolt.thunder",
+			id = EXPLOSION,
+			volume = 1,
+			pitch = 0.32,
+			pitchVariance = 0.05,
+			maxDistance = 48,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "entity.lightning_bolt.impact",
+			id = EXPLOSION,
+			volume = 0.8,
+			pitch = 0.6,
+			pitchVariance = 0.1,
+			maxDistance = 32,
+			source = "ambient",
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList
