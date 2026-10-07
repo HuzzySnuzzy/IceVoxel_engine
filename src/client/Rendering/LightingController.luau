@@ -25,6 +25,10 @@
 	             replaces it (`setFogColour`, Rendering/FluidFog), whatever the fog setting, and a
 	             status effect's (Blindness: black, `setEffectFogColour`, Rendering/EffectView)
 	             replaces both.
+	  Weather    the weather over the camera (Weather/WeatherState, smoothed over a second or two)
+	             darkens what the sky gives by Minecraft's rain and thunder darkening, hides some
+	             of the sun under full cloud cover and darkens the fog's colour (Weather/
+	             WeatherSky.apply), as much as the sky reaches the camera: caves don't change.
 	  Effects    Night Vision (`setNightVision`, Rendering/EffectView: its scale, 0..1, flickering
 	             in its last 10 s) raises the ambient and outdoor ambient towards
 	             Config.Effects.NightVisionAmbient's grey, so caves and nights read lit, as
@@ -49,6 +53,8 @@ local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local SkyExposure = require(script.Parent.SkyExposure)
 local ViewSettings = require(script.Parent.ViewSettings)
+local WeatherSky = require(script.Parent.Parent.Weather.WeatherSky)
+local WeatherState = require(script.Parent.Parent.Weather.WeatherState)
 
 local BLOCK = Config.BlockSize
 -- Natural ground heights kept (columns); the cache starts over beyond that.
@@ -142,6 +148,7 @@ local function update(dt: number)
 	-- Earth's tilt move it away from Minecraft's path, and the light should match the sky.
 	local sunHeight = Lighting:GetSunDirection().Y
 	local environment = DayCycle.environment(dayTime, current, settings, sunHeight)
+	WeatherSky.apply(environment, WeatherState.rain, WeatherState.storm, WeatherState.clouds, current)
 	if nightVision > 0 then
 		-- (Night Vision: the ambients raised towards its grey.)
 		local grey = Config.Effects.NightVisionAmbient

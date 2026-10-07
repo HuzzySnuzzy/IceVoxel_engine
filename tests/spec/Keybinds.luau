@@ -223,6 +223,7 @@ return function(t, shared, require, _server, client)
 			jeiRecipes = "R",
 			jeiUses = "U",
 			jeiBack = "Backspace",
+			weatherMap = "B",
 		}
 		for id, name in expect do
 			t.eq(KeyBindings.action(id).default, name, `{id}'s default`)
@@ -358,7 +359,9 @@ return function(t, shared, require, _server, client)
 		local entry = PlayerSettings.entry("key.forward")
 		t.eq(entry.kind, "key")
 		t.eq(entry.id, KeyBindings.KEY_BASE, "the first action's id")
-		t.eq(PlayerSettings.entry("key.jeiBack").id, KeyBindings.KEY_BASE + #KeyBindings.ACTIONS - 1)
+		-- (Actions append: the Weather Map key, the newest, has the last id.)
+		t.eq(PlayerSettings.entry("key.weatherMap").id, KeyBindings.KEY_BASE + #KeyBindings.ACTIONS - 1)
+		t.eq(PlayerSettings.entry("key.jeiBack").id, KeyBindings.KEY_BASE + #KeyBindings.ACTIONS - 2)
 		t.eq(PlayerSettings.clamp("key.forward", 104.6), 105, "whole codes")
 		t.eq(PlayerSettings.clamp("key.forward", 500), 119, "a code that can't be bound: the default")
 		t.eq(PlayerSettings.clamp("key.forward", 0 / 0), 119, "NaN: the default")

@@ -218,6 +218,18 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 			-- (Types only here; the real ones need the worker pool and the network.)
 			return {}
 		end
+		if n.path == "src/client/Map/WeatherLayer" then
+			-- (The weather mode needs EditableImage and the weather's state: off here.)
+			return {
+				new = function()
+					return { update = function() end }
+				end,
+				toggle = function() end,
+				isOn = function()
+					return false
+				end,
+			}
+		end
 		if n.path == "src/client/Settings/Keybinds" then
 			-- (The zoom keys: no key is pressed here.)
 			return {

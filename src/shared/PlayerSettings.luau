@@ -16,7 +16,8 @@
 	  effect    what applying it takes, a key of the client's effect registry (Settings.register):
 	            "lod", "caves", "foliage", "fog", "lighting", "lichen", "shadows", "farShadows",
 	            "textures", "overlay", "budget", "skipHidden", "swapFrames", "audio", "camera",
-	            "controls", "hud", "keys", "mouse", "chat" (`also` names more). The costly ones
+	            "controls", "hud", "keys", "mouse", "chat", "clouds", "weather" (`also` names
+	            more). The costly ones
 	            (EXPENSIVE) wait until a slider has stopped moving (Config.Settings.ApplyDelay).
 	  tooltip   (optional) Minecraft's option tooltip, shown while the setting is hovered or
 	            selected: what it does, and a warning when it is heavy ("May lower performance").
@@ -28,11 +29,11 @@
 
 	Presets (Low, Medium, High, Ultra; priced in parts in the README): High is Config's own view
 	(Lod, Caves, Render), Low its Mobile values (view, caves, plants, lichen lights: what phones
-	drew before this menu) with shadows off and hidden terrain skipped; lichen lights follow
-	Config's LichenLightDistance (every light, today) in all of them, the slider lowers it on slow
-	devices. Phones start on Low; other devices by Roblox's saved graphics quality
-	(`defaultPreset`: 1-3 Low, 4-6 Medium, 7-10 or Automatic High). Changing a value a preset sets
-	makes the preset read "Custom".
+	drew before this menu) with shadows off, hidden terrain skipped and Fast clouds and weather;
+	lichen lights follow Config's LichenLightDistance (every light, today) in all of them, the
+	slider lowers it on slow devices. Phones start on Low; other devices by Roblox's saved
+	graphics quality (`defaultPreset`: 1-3 Low, 4-6 Medium, 7-10 or Automatic High). Changing a
+	value a preset sets makes the preset read "Custom".
 
 	The LOD balance rule (`balance`): LodTree stays 2:1 balanced (no full detail chunk next to a
 	level 2 node) while the split distance is at least 2 and full detail (normal and underground)
@@ -134,6 +135,8 @@ PlayerSettings.EFFECT_ORDER = table.freeze({
 	"shadows",
 	"farShadows",
 	"textures",
+	"clouds",
+	"weather",
 })
 
 -- Brightness 100%: Minecraft's "Bright" for caves (Lighting.CaveAmbient; 0% is Config's own).
@@ -996,6 +999,45 @@ local ENTRIES: { Entry } = {
 		tooltip = "Always Shown draws every cave near you, not only the ones you can see into. "
 			.. "May lower performance: about 4x the parts of nearby terrain.",
 	},
+	-- The weather's looks (client Weather/; Minecraft's Clouds option and its Fast / Fancy
+	-- graphics for rain and snow), on their own page (Options > Weather...: the Video page is
+	-- full). Clouds: Off, Fast (one flat layer of bigger cells) or Fancy (boxes, storm towers,
+	-- rain shafts under distant rain); Weather: rain and snow around the camera within 5 (Fast)
+	-- or 10 (Fancy) blocks, Minecraft's radii, or none (Off; the sounds and the darker light
+	-- stay). Set by the presets: Low is Fast, the others Fancy.
+	{
+		id = 57,
+		key = "clouds",
+		name = "Clouds",
+		kind = "choice",
+		page = "weather",
+		min = 0,
+		max = 2,
+		step = 1,
+		default = 2,
+		effect = "clouds",
+		preset = true,
+		format = "plain",
+		labels = { [0] = "OFF", [1] = "Fast", [2] = "Fancy" },
+		tooltip = "Clouds out to the render distance, drifting with the wind: storms show from "
+			.. "far away. Fast draws a flat layer of fewer, bigger clouds.",
+	},
+	{
+		id = 58,
+		key = "weather",
+		name = "Weather",
+		kind = "choice",
+		page = "weather",
+		min = 0,
+		max = 2,
+		step = 1,
+		default = 2,
+		effect = "weather",
+		preset = true,
+		format = "plain",
+		labels = { [0] = "OFF", [1] = "Fast", [2] = "Fancy" },
+		tooltip = "Rain and snow falling around you: within 10 blocks on Fancy, 5 on Fast.",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the
@@ -1121,6 +1163,8 @@ local PRESETS: { Values } = {
 		farShadows = 0,
 		lichenLights = lichenValue(caves.Mobile.LichenLightDistance),
 		skipHidden = 1,
+		clouds = 1,
+		weather = 1,
 	},
 	{
 		renderDistance = 1024,
@@ -1132,6 +1176,8 @@ local PRESETS: { Values } = {
 		farShadows = 0,
 		lichenLights = lichenValue(caves.LichenLightDistance),
 		skipHidden = 0,
+		clouds = 2,
+		weather = 2,
 	},
 	-- High: Config's own view.
 	{
@@ -1144,6 +1190,8 @@ local PRESETS: { Values } = {
 		farShadows = bool(render.FarShadows),
 		lichenLights = lichenValue(caves.LichenLightDistance),
 		skipHidden = 0,
+		clouds = 2,
+		weather = 2,
 	},
 	{
 		renderDistance = 4096,
@@ -1155,6 +1203,8 @@ local PRESETS: { Values } = {
 		farShadows = 1,
 		lichenLights = PlayerSettings.ALL_LIGHTS,
 		skipHidden = 0,
+		clouds = 2,
+		weather = 2,
 	},
 }
 for _, preset in PRESETS do

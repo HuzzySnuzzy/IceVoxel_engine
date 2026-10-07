@@ -295,6 +295,9 @@ local ACTIONS: { Action } = {
 	action("jeiRecipes", "Show Recipe", "jei", "R", "screen"),
 	action("jeiUses", "Show Uses", "jei", "U", "screen"),
 	action("jeiBack", "Recipe Back", "jei", "Backspace", "screen"),
+	-- The maps' weather mode (Map/WeatherLayer: precipitation, thunder and clouds, the wind and
+	-- the forecast over the minimap and the world map).
+	action("weatherMap", "Weather Map", "map", "B", "game"),
 }
 
 local byId: { [string]: Action } = {}

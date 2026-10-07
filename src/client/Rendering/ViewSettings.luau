@@ -16,8 +16,9 @@
 	    the engine has to lower quality it keeps the draw distance and gives up lighting detail
 	    first), and Config.Lighting.CaveAmbient from the brightness slider (0% is Config's own,
 	    captured when this module loads; Rendering/LightingController reads it every update).
-	  * `applyFog`: fog fades the edge of the view distance, FogEnd = view x BlockSize and FogStart
-	    55% of that (skipped when the place has an Atmosphere, which replaces fog); with the fog
+	  * `applyFog`: fog fades the edge of the view distance, FogEnd = view x BlockSize (times the
+	    weather's factor, `setWeatherFog`: nearer in rain, snow and thunder) and FogStart 55% of
+	    that (skipped when the place has an Atmosphere, which replaces fog); with the fog
 	    setting off the place's own FogEnd / FogStart come back. Its colour follows the time of day
 	    (Rendering/LightingController, while `usesFog` says this fog is in use). While the camera
 	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog), and a status
@@ -56,6 +57,8 @@ local placeFog: { finish: number, start: number }? = nil
 local fluidFog: { finish: number, start: number }? = nil
 -- A status effect's fog (studs; Blindness), nil while there is none.
 local effectFog: { finish: number, start: number }? = nil
+-- The weather's fog factor (Weather/WeatherSky.fog: 1 in clear weather, nearer in rain).
+local weatherFog = 1
 
 function ViewSettings.isMobile(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -189,7 +192,7 @@ function ViewSettings.applyFog()
 		Lighting.FogStart = fluid.start
 	elseif ViewSettings.usesFog() then
 		local view = ViewSettings.lod()
-		Lighting.FogEnd = view * Config.BlockSize
+		Lighting.FogEnd = view * Config.BlockSize * weatherFog
 		Lighting.FogStart = Lighting.FogEnd * 0.55
 	else
 		local own = placeFog :: { finish: number, start: number }
@@ -214,6 +217,21 @@ end
 function ViewSettings.setEffectFog(start: number?, finish: number?)
 	effectFog = if start and finish then { start = start, finish = finish } else nil
 	ViewSettings.applyFog()
+end
+
+--[[
+	The weather's fog factor (Weather/WeatherSky.fog: 1 clear, down to Config.Weather.Fog's in
+	rain, snow and thunder), applied to the view distance's fog at once when it changed.
+]]
+function ViewSettings.setWeatherFog(factor: number)
+	factor = math.clamp(factor, 0.05, 1)
+	if math.abs(factor - weatherFog) < 0.005 then
+		return
+	end
+	weatherFog = factor
+	if fluidFog == nil and effectFog == nil then
+		ViewSettings.applyFog()
+	end
 end
 
 -- Everything above, at start (before the streamer is created).

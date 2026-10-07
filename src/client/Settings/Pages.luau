@@ -28,6 +28,8 @@
 	                 unfocused height, command suggestions
 	  accessibility  Minecraft's Accessibility Settings that apply here: view bobbing,
 	                 distortion effects, FOV effects, damage tilt
+	  weather        clouds and rain / snow (Off, Fast, Fancy): Minecraft keeps Clouds on its
+	                 Video Settings, but that page is full (MAX_ROWS)
 	A sub-page's Done goes back to its `parent` (the main page when none). `status` lists the
 	status lines a page shows (the controller's Settings.setStatus kinds).
 
@@ -137,6 +139,7 @@ Pages.list = {
 			page("hud", "HUD..."),
 			page("chat", "Chat Settings..."),
 			page("accessibility", "Accessibility Settings..."),
+			page("weather", "Weather..."),
 			{ kind = "action", id = "reset", text = "Reset", row = true },
 			{ kind = "action", id = "defaults", text = "Defaults" },
 		},
@@ -249,6 +252,15 @@ Pages.list = {
 			setting("chatWidth"),
 			setting("chatHeightFocused"),
 			setting("chatHeightUnfocused"),
+		},
+		status = {},
+	},
+	{
+		id = "weather",
+		title = "Weather",
+		items = {
+			setting("clouds"),
+			setting("weather"),
 		},
 		status = {},
 	},

@@ -193,17 +193,26 @@ local function weights(state: State, now: number): (number, number)
 	return min(rampIn, rampOut), rampIn
 end
 
--- The clock and the override's weights at server time `now` (see Moment).
-function Weather.momentAt(state: State, now: number): Moment
+-- The clock and the override's weights at server time `now` (see Moment), written into `into`
+-- when given (the client's visuals ask every frame).
+function Weather.momentAt(state: State, now: number, into: Moment?): Moment
 	local weight, rampIn = weights(state, now)
-	return {
-		time = Weather.clock(state, now),
-		enabled = state.enabled,
-		override = state.override,
-		weight = weight,
-		previous = state.previous,
-		previousWeight = if state.override == Weather.NONE then 0 else state.previousWeight * (1 - rampIn),
-	}
+	local moment = into
+		or {
+			time = 0,
+			enabled = false,
+			override = Weather.NONE,
+			weight = 0,
+			previous = Weather.NONE,
+			previousWeight = 0,
+		}
+	moment.time = Weather.clock(state, now)
+	moment.enabled = state.enabled
+	moment.override = state.override
+	moment.weight = weight
+	moment.previous = state.previous
+	moment.previousWeight = if state.override == Weather.NONE then 0 else state.previousWeight * (1 - rampIn)
+	return moment
 end
 
 -- Moves the clock's base to `now` (same time, fresh numbers), before its speed changes.

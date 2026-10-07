@@ -217,6 +217,11 @@ SoundRules.CAPS = table.freeze({
 	-- (A forest fire crackles all around, as in Minecraft, but a few at a time.)
 	["block.fire.ambient"] = 4,
 	["ambient.cave"] = 1,
+	-- (Rain comes every 2-3 ticks and lasts longer: a few at once make the downpour.)
+	["weather.rain"] = 4,
+	["weather.rain.above"] = 3,
+	["entity.lightning_bolt.thunder"] = 3,
+	["entity.lightning_bolt.impact"] = 2,
 }) :: { [string]: number }
 SoundRules.DEFAULT_CAP = 8
 
