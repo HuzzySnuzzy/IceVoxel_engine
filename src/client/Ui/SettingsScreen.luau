@@ -8,6 +8,8 @@
 
 	  Opening   Config.Settings.Key (P) or GamepadButton (D-pad right) with no screen open, the
 	            HUD's touch gear, the inventory's gear (Ui/Screens.onSettings). P closes it again.
+	            The title screen (Ui/MainMenu) shows it itself (`showIn`), before Ui/Screens
+	            starts: Done takes it back there.
 	  Pages     Options (Graphics preset, FOV, the pages, Reset, Defaults), Video Settings,
 	            Performance, Music & Sounds, Controls, HUD. Sliders move by dragging, clicking,
 	            the D-pad (left / right) or A; buttons cycle their values. "Graphics" cycles the
@@ -63,6 +65,10 @@ local views: { [string]: PageView } = {}
 local shownPage = "main"
 -- Set by start: applies what waits, saves and closes the menu.
 local finish: () -> () = function() end
+-- The menu's frame (set by start), and what to call when Done closes it while another host than
+-- Ui/Screens shows it (`showIn`).
+local menuRoot: Frame? = nil
+local hostDone: (() -> ())? = nil
 
 function SettingsScreen.isOpen(): boolean
 	local p = panel
@@ -256,6 +262,16 @@ function SettingsScreen.start()
 	-- Done on the main page and P: apply what waits, save, close.
 	finish = function()
 		Settings.flush()
+		local done = hostDone
+		if done then
+			-- (Shown by the title screen: back to it.)
+			hostDone = nil
+			root.Visible = false
+			root.Parent = nil
+			show("main")
+			done()
+			return
+		end
 		Screens.closePanel(thePanel)
 		show("main")
 	end
@@ -282,18 +298,19 @@ function SettingsScreen.start()
 		end,
 	}
 	panel = thePanel
+	menuRoot = root
 	show("main")
 
 	-- (A GUI Scale change rescales the panel by itself: Screens lays panels out every frame.)
 	Settings.changed:Connect(function()
-		if SettingsScreen.isOpen() then
+		if SettingsScreen.isOpen() or hostDone then
 			refresh()
 		end
 	end)
 
 	local sinceStatus = 0
 	RunService.Heartbeat:Connect(function(dt)
-		if not SettingsScreen.isOpen() then
+		if not SettingsScreen.isOpen() and hostDone == nil then
 			return
 		end
 		sinceStatus += dt
@@ -322,6 +339,31 @@ function SettingsScreen.toggle()
 		refresh()
 		refreshStatus()
 		Screens.showPanel(p)
+	end
+end
+
+--[[
+	Shows the menu on its main page inside `host` instead of through Ui/Screens (the title screen,
+	Ui/MainMenu, before the game's screens exist; `host` scales it). Done on the main page applies
+	what waits, saves, takes it away and calls `onDone`. Returns a function that closes it the same
+	way (the title screen's Escape). Call after start.
+]]
+function SettingsScreen.showIn(host: GuiObject, onDone: () -> ()): () -> ()
+	local root = menuRoot
+	assert(root, "SettingsScreen.showIn: call start first")
+	shownPage = "main"
+	for id, view in views do
+		view.frame.Visible = id == "main"
+	end
+	refresh()
+	refreshStatus()
+	hostDone = onDone
+	root.Parent = host
+	root.Visible = true
+	return function()
+		if hostDone == onDone then
+			finish()
+		end
 	end
 end
 

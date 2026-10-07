@@ -566,6 +566,40 @@ local Config = {
 		ScrollWheelHotbar = true,
 	},
 
+	-- The title screen, operators and the world's settings -------------------------------------------
+
+	--[[
+		Minecraft's title screen and Create World screen (client Ui/MainMenu; server
+		Players/WorldMenu, Players/Operators, World/WorldInfo; the rules: Shared/WorldSettings).
+		The first player to join a server becomes its operator (Minecraft's ops; Gameplay.Admins,
+		the game's owner and Studio sessions always are) and creates the world from the menu:
+		its name, game mode, difficulty, commands, world type (Generation/WorldTypes), seed and
+		structures. Nothing of the world exists before that, and nobody gets a character.
+	]]
+	MainMenu = {
+		-- false: no title screen; the server creates the world at once from `World` below (and
+		-- Seed), and players join straight into it (characters load as Roblox's usual).
+		Enabled = true,
+		-- The title screen's corners (Minecraft's version and copyright lines).
+		Version = "IceVoxel (Minecraft 1.20.1 style)",
+		Credits = "Not an official Minecraft product",
+	},
+	-- The world the server creates at once with MainMenu.Enabled false, and the Create World
+	-- screen's first choices otherwise (its game mode: Gameplay.DefaultGameMode).
+	World = {
+		Name = "New World",
+		-- A Generation/WorldTypes id (unknown ids make the Default).
+		Type = "default",
+		-- Minecraft's difficulty: "Peaceful" (no monsters spawn), "Easy", "Normal" or "Hard" (fire
+		-- spreads a little faster on harder ones, Server.Fire).
+		Difficulty = "Normal",
+		-- Minecraft's Allow Commands (cheats): true lets every player use the operators' commands
+		-- (/gamemode for others, /time, /effect, /summon...); false keeps them to operators.
+		AllowCommands = false,
+		-- Generate Structures (trees always grow; library structures need Structures.Generate).
+		Structures = true,
+	},
+
 	-- Game modes, inventories and item drops ---------------------------------------------------------
 
 	Gameplay = {
@@ -899,7 +933,8 @@ local Config = {
 		-- Fire (Behaviours/Fire, Minecraft's FireBlock): `Tick` is the doFireTick game rule (off:
 		-- fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing);
 		-- `Difficulty` is the world's (0 peaceful, 1 easy, 2 normal, 3 hard), which makes fire
-		-- spread a little faster (FireBlock.tick: + difficulty x 7 on the ignite odds).
+		-- spread a little faster (FireBlock.tick: + difficulty x 7 on the ignite odds); the
+		-- world's settings set it when it is created (World.Difficulty, the Create World screen).
 		Fire = { Tick = true, Difficulty = 2 },
 	},
 	-- Explosions (Shared/World/Explosion, Minecraft's) and burning fuel setting them off (server

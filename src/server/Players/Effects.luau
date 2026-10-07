@@ -16,9 +16,9 @@
 	             is told at once. Effects are not saved: rejoining starts clean.
 	  Glowing    a Highlight ("IceVoxelGlowing", outline only, seen through walls) in the character
 	             while it lasts: Roblox replicates it to everyone, as Minecraft's glowing outline.
-	  /effect    Players/EffectCommand's rules with the /time permission (Config.Gameplay.Admins,
-	             the owner: Players/GameModes.isOwner, and Studio); answers go to the chat as
-	             Notice messages. With TextChatService a TextChatCommand, else Player.Chatted.
+	  /effect    Players/EffectCommand's rules with the operators' permission (Players/Operators,
+	             as /time); answers go to the chat as Notice messages. With TextChatService a
+	             TextChatCommand, else Player.Chatted.
 
 	API (server modules; `effect` is an Effects id or a name Effects.find knows, "Speed",
 	"jump_boost"):
@@ -40,7 +40,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -51,8 +50,7 @@ local Protocol = require(Shared.Net.Protocol)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local EffectCommand = require(script.Parent.EffectCommand)
 local EffectRules = require(script.Parent.EffectRules)
-local GameModeCommand = require(script.Parent.GameModeCommand)
-local GameModes = require(script.Parent.GameModes)
+local Operators = require(script.Parent.Operators)
 
 --[[
 	An effect kept by another module (Effects `external`): `get` its ticks left for a player (0 or
@@ -306,13 +304,10 @@ local function run(player: Player, text: string)
 	if not EffectCommand.matches(text) then
 		return
 	end
-	local studio = RunService:IsStudio()
-	local mayUse =
-		GameModeCommand.isAdmin(player.UserId, Config.Gameplay.Admins, studio or GameModes.isOwner(player), studio)
 	if player.Parent == nil then
-		-- Left while the ownership check yielded.
 		return
 	end
+	local mayUse = Operators.permitted(player)
 	local candidates: { EffectCommand.Candidate } = {}
 	local source: EffectCommand.Candidate? = nil
 	for _, other in Players:GetPlayers() do

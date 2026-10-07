@@ -3,7 +3,9 @@
 	World types (Minecraft's world presets: Default, Superflat, ... and the debug worlds): a registry
 	of generators, and how the server tells every client and chunk worker which one to build.
 
-	  Registry   `WorldTypes.list`, in menu order: { id, name, description, create(seed, options) }.
+	  Registry   `WorldTypes.list`, in menu order: { id, name, description, create(seed, options),
+	             hidden?, settings? } (`settings`: the Create World screen's Customize screen,
+	             see Setting below).
 	             `create` returns a TerrainGenerator.Generator (the whole interface the server,
 	             the client's streamer, the chunk workers, the map and the far terrain use), built
 	             only from the seed and the options, so every machine builds the same world.
@@ -24,6 +26,30 @@ local TerrainGenerator = require(script.Parent.TerrainGenerator)
 
 export type Options = { [string]: string | number | boolean }
 
+--[[
+	One of a world type's settings, for the Create World screen's Customize screen (client
+	Ui/MainMenu draws them generically: a type declares them, nothing else is needed). `key` is
+	the Options key `create` reads, `default` its value when the player changes nothing:
+	  "toggle"  ON / OFF (a boolean);
+	  "choice"  one of `choices` (strings, cycled in this order; `names` are what the button shows,
+	            in the same order, default the choices themselves);
+	  "text"    a code typed in (a preset, an id), at most `maxLength` characters (default 64) of
+	            letters, digits and _ : , . * + - = / # (Shared/WorldSettings.cleanText): never
+	            free text, so it is never shown to other players.
+	The server keeps only the declared keys, of their kind (WorldSettings.validateOptions).
+]]
+export type Setting = {
+	key: string,
+	name: string,
+	kind: "toggle" | "choice" | "text",
+	default: string | number | boolean,
+	choices: { string }?,
+	names: { string }?,
+	maxLength: number?,
+	-- A line under the Customize screen's widget.
+	description: string?,
+}
+
 export type WorldType = {
 	id: string,
 	name: string,
@@ -31,6 +57,9 @@ export type WorldType = {
 	create: (seed: number, options: Options) -> TerrainGenerator.Generator,
 	-- Hidden from the create-world menu (still buildable by id).
 	hidden: boolean?,
+	-- The Customize screen's settings (none: no Customize button). Options outside them are
+	-- dropped when the world is created from the menu ("structures" is the screen's own toggle).
+	settings: { Setting }?,
 }
 
 local WorldTypes = {}

@@ -2,6 +2,11 @@
 --[[
 	IceVoxel client: generates, meshes and renders the world locally.
 
+	  Ui/MainMenu                the title screen, first (Config.MainMenu.Enabled): the operator
+	                             creates the world there, everyone joins it from there; nothing
+	                             below starts before the player enters the world (no input, no
+	                             terrain), then everything starts as on a plain join
+
 	  World/ClientWorld          block data of nearby chunks, edit lists, edit prediction
 	  Streaming/ChunkStreamer    which chunks (and LOD levels) exist, job scheduling
 	  Streaming/WorkerPool       Actors running Streaming/ChunkWorker (parallel generation + meshing)
@@ -126,12 +131,15 @@ local SettingsScreen = require(Client.Ui.SettingsScreen)
 local SkillTreeScreen = require(Client.Ui.SkillTreeScreen)
 local AgeToast = require(Client.Ui.AgeToast)
 local Hud = require(Client.Ui.Hud)
+local MainMenu = require(Client.Ui.MainMenu)
 local Style = require(Client.Ui.Style)
 
 -- First, so the server's sounds play from the start instead of piling up.
 SoundPlayer.start()
 -- Listens for the player's saved settings (the terrain below waits a moment for them).
 Settings.start()
+-- The title screen until the player enters the world (Ui/MainMenu: its Options menu works).
+MainMenu.run()
 
 local seed = Shared:GetAttribute("Seed")
 while type(seed) ~= "number" do

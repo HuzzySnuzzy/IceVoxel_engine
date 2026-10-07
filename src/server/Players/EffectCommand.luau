@@ -14,8 +14,9 @@
 	seconds count as ticks, as Minecraft's), `amplifier` 0..255 (default 0: level I),
 	`hideParticles` true or false (there are no particles; accepted for Minecraft's sake).
 
-	Who may: both need `mayUse`, which the glue gives Config.Gameplay.Admins, the game's owner
-	and Studio sessions (the /time rule, GameModeCommand.isAdmin).
+	Who may: both need `mayUse`, which the glue gives the operators' permission (Players/Operators,
+	as /time: operators, among them Config.Gameplay.Admins, the game's owner and Studio sessions;
+	everyone in a world created with Allow Commands).
 
 	The work is done through the context's `give` and `clear` (Players/Effects: give says whether
 	the effect took, MobEffectInstance.update's answer; clear how many effects went), and the

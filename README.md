@@ -16,6 +16,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   the new one (`Render.SwapFrames`; water and glass too), so an edit never shows the sky through
   the terrain. Edits have their own lane in the workers and the renderer and never wait behind
   loading.
+- **A title screen, operators and creating the world.** Minecraft's title screen greets every
+  player (a pixel logo, a pulsing yellow splash, a slowly sliding sky of clouds and hills): the
+  first player to join a server becomes its operator and creates the world from Minecraft 1.20's
+  Create World screen (World Name, Game Mode, Difficulty, Allow Commands; World Type with a
+  generic Customize screen for a type's settings, the seed read as Minecraft reads it, Generate
+  Structures), and everyone joins it with Join World. Until then the world doesn't exist at all
+  and nobody has a character. Operators (`/op`, `/deop`) may use the cheat commands; Load World
+  waits for saves, which are for later.
 - **Loading what you see first.** Terrain loads in the order you need it: the ground under you,
   then what is in front of the camera, then what is just behind, then the rest, and terrain hidden
   behind mountains last; after a teleport 90% of the view is there 15-40% sooner. A teleport drops
@@ -243,7 +251,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   13 blocks, however big the room), from the same light estimate WAILA shows; monsters vanish far
   from everyone (Minecraft's 128 and 32 block rules, those frozen out of reach too). Mobs only
   move within the simulated chunks around players and freeze beyond (a frozen mob that dies
-  still goes). `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for admins.
+  still goes). `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for operators.
   `Config.Mobs` sets the caps and turns spawning or mobs off.
 - **Status effects.** Minecraft 1.20.1's MobEffects with their numbers: Speed (+20% ground speed a
   level) and Slowness (-15%), Haste (+20% mining speed a level) and Mining Fatigue (x 0.3, 0.09,
@@ -267,7 +275,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   status row over the hotbar shows only with `Config.Effects.Hud` off; the Thirst effect and the
   clemency wait in creative and spectator, their times standing still on the icons). `/effect give
   <player> <effect> [seconds | infinite] [amplifier]` and `/effect clear [player] [effect]` with
-  Minecraft's ids and wording (admins, the owner and Studio, as `/time`).
+  Minecraft's ids and wording (operators, as `/time`).
 - **Oil and fuel on the skin.** Wading in crude oil is Slowness II, and leaving it leaves you **Oil
   Coated** for 30 s: still slower (Slowness I's -15%), and anything that sets you burning burns
   twice as long and a half heart harder. Fuel's fumes make you sick (Nausea, 8 s after the last
@@ -433,8 +441,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   the trunk has room.
 - **Structure blocks.** Minecraft 1.20.1's structure blocks, to save what you build as text and
   place it again. They, structure voids and jigsaw blocks are operator blocks: only creative players
-  may place, use and break them, and only the game's owner, `Gameplay.Admins`, Studio sessions and
-  the user ids in `Config.Structures.Permission` (none by default); survival players can't mine them
+  may place, use and break them, and only operators (the game's owner, `Gameplay.Admins` and
+  Studio sessions among them; everyone with the world's Allow Commands) and the user ids in
+  `Config.Structures.Permission` (none by default); survival players can't mine them
   and they never drop. Right click opens Minecraft's screen, whose mode button cycles Save, Load,
   Corner and Data; the block is its mode (its faces show the mode's sigil), so everyone sees it.
   **Save** has a name (`mything/houses/hut`: letters, digits and `_ . / : -`), a relative position
@@ -828,7 +837,10 @@ A fast, Minecraft-style voxel engine for Roblox.
    ```sh
    rojo build -o IceVoxel.rbxlx
    ```
-3. Press Play.
+3. Press Play. The title screen comes up: as the first player you are the operator, so Create
+   World, pick its settings and Create New World (Studio: every player is an operator). Set
+   `MainMenu.Enabled = false` in `src/shared/Config.luau` to skip the title screen and start
+   straight in a world made from `World` and `Seed`.
 
 Studio tips:
 - Delete the template's `Baseplate`; the world starts at y = 0 and the baseplate only sits under it.
@@ -882,10 +894,12 @@ Studio tips:
 | Skill tree    | `K` (`K` again, `E`, `Escape` or Done close it): click a skill, then Unlock; hover an Age's name for what it takes | D-pad left; A selects, B closes | The button over the gear |
 | Debug overlay | `F3`, when let go (also WAILA's extended view); not after a combination such as `F3` + `N` | | |
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
-| Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (admins, the owner, Studio) | | |
-| Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (admins, the owner, Studio) | | |
-| Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (admins, the owner, Studio); hover or tap an effect icon for its name and time | | Tap an icon |
-| Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs the admins' rule, as `/time` | | |
+| Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
+| Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
+| Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
+| Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` | | |
+| Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). The first player to join is the operator; when the last operator here leaves, the player here longest becomes one; `/deop` never takes the last one here. `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
+| Title screen  | Click the buttons (Join World, Create World, Options...); `Escape` goes back a screen (Create World, Customize, Options) | A; B goes back | Tap |
 
 ## Settings menu
 
@@ -944,6 +958,33 @@ High. Only what a player changed is saved, so everything else keeps following th
 Roblox's quality level), one profile per kind of device (desktop, touch, console), in the
 DataStore "IceVoxelSettings_v1" (`Settings.Save`). A joining client waits up to a second
 (`Settings.LoadWait`) for them, so the first terrain it loads is already the player's view.
+
+## Title screen and creating the world
+
+Every player sees Minecraft's title screen when they join, over everything: nothing else of the
+game has started yet (no terrain loads, no key does anything), and the server gives nobody a
+character before they enter the world.
+
+- **Join World** enters the world once it exists; the terrain then loads around the spawn as on
+  any join.
+- **Create World** is the operator's (the first player to join the server), while no world exists.
+  Everyone else reads "Waiting for <operator> to create the world..." until it does. Its two tabs,
+  as Minecraft 1.20's: **Game** (World Name; Game Mode: Survival, Creative or Adventure, the mode
+  new players get; Difficulty: Peaceful spawns no monsters, harder ones spread fire a little
+  faster; Allow Commands: everyone may use the operators' commands, switched on with Creative
+  unless you set it yourself) and **World** (World Type, from the world types the game has, with
+  its description, and **Customize** when the type declares settings; the seed: a number is used
+  as it is, any other text becomes Minecraft's number for it (Java's `String.hashCode`, so
+  "glacier" is 108181935), blank is random; Generate Structures). **Create New World** sends it to
+  the server, which checks it again (only the operator, only once, known types and modes, at most
+  32 characters of name and seed; the name goes through Roblox's text filter, as everyone sees
+  it), creates the world and puts you in it.
+- **Load World** is greyed out: worlds aren't saved yet (the server keeps one world for its
+  lifetime); loading a saved world is for the future.
+- **Options...** opens the Options menu (the same as `P` in the game); Done comes back.
+
+The world's name, type, difficulty and seed show in `F3`. Without the title screen
+(`MainMenu.Enabled = false`) the server makes the world at once from `World` and `Seed`.
 
 ## Project layout
 
@@ -1052,6 +1093,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             mob spawning, WAILA and the cave mood)
   PlayerSettings            the Options menu's settings: ids, ranges, presets, the LOD balance
                             rule, the wire and DataStore formats
+  WorldSettings             the world's settings (Create World): seeds as Minecraft reads them,
+                            checking a request, a world type's options, publishing them
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
                             character)
@@ -1063,10 +1106,12 @@ src/textures -> generated from the texture pack by tests/build_textures (never e
   Images.model.json         ReplicatedStorage.IceVoxelTextures: a Texture prototype of the same name
 
 src/server   -> ServerScriptService.IceVoxel
-  IceVoxel_Server           boot: seed, world, ticker, network, players
+  IceVoxel_Server           boot: operators, settings and the title screen first, then
+                            startWorld (world, ticker, network, players...) once it is created
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
                             Simulation, TimeOfDay (the day clock, published as workspace attributes),
+                            WorldInfo (the world's settings once created; creating it once),
                             Explosions (blasts in the world, fuel going off, per-tick cost
                             bounds, the primer hook for explosive blocks), FuelBlast (fuel
                             catching, measuring a body, power, chained blasts; pure), Nuke (the
@@ -1081,7 +1126,8 @@ src/server   -> ServerScriptService.IceVoxel
                             falling, blowing up), Drops (block update logic)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
-                            sustained data hooks, both halves of tall plants), replication
+                            sustained data hooks, both halves of tall plants), replication;
+                            LobbyNet (messages before the world exists)
   Entities/                 EntityWorld (item rules: pickup, merging, despawn, burning in lava,
                             blasts),
                             Entities (spawning, replication)
@@ -1108,7 +1154,10 @@ src/server   -> ServerScriptService.IceVoxel
                             Generate plans, placed over frames), Permission (who may use them)
   Players/ItemUse           the Configurator, buckets, flint and steel and dirty water (on a
                             campfire) used on blocks (UseItem)
-  Players/                  GameModes + GameModeCommand (/gamemode, the switcher's requests,
+  Players/                  Operators + OperatorList (Minecraft's ops: the first player, /op,
+                            /deop, the check every operators' command asks; pure), WorldMenu (the
+                            title screen's server side: creating the world, characters only in
+                            it), GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
                             /gamerule), Inventories + InventoryState (authoritative inventories),
@@ -1173,7 +1222,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             model), SettingsScreen (the Options menu), MusicToast (Now Playing),
                             EffectHud + EffectIcons (status effect icons in the top right, the
                             list beside open screens, their glyphs), SkillTreeScreen (the skill
-                            tree, K), AgeToast (a new Age's banner)
+                            tree, K), AgeToast (a new Age's banner), MainMenu (the title screen
+                            and Create World) + TitleRules + CreateWorldForm (their rules; pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
@@ -1269,7 +1319,7 @@ for performance:
 | `Lakes.Puddles`           | Spacing 32, Chance 0.05 | Puddles: one candidate per 32 × 32 blocks, a puddle with its biome's chance in `Biomes` (Jungle 0.14 ... Desert 0.005) or `Chance`, none in frozen or snowy biomes; `Size` 3-20 columns, `Radius` 1.5-3.5 blocks; `Enabled = false`: none. |
 | `Lakes.SpawnClearance`    | 24      | No water lake or puddle this close to the spawn (blocks). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
-| `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides the owner, `Gameplay.Admins` and Studio: user ids, or true (anyone in creative) / false. |
+| `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides operators (the owner, `Gameplay.Admins` and Studio among them): user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
 | `Structures.DetectRange`  | 80      | How far DETECT looks for Corner blocks of the same name.            |
 | `Structures.LoadBlocksPerFrame` | 2000 | Blocks LOAD and Generate place per frame (and at most 6 ms of it). |
@@ -1290,8 +1340,13 @@ for performance:
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
-| `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (`Gameplay.Admins`, the owner and Studio always may). |
-| `Gameplay.Admins`         | {}      | User ids who may change other players' game modes (and their own) and the time (`/time set\|add`, `/gamerule`). |
+| `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (operators always may). |
+| `Gameplay.Admins`         | {}      | User ids who are always operators (as the game's owner and everyone in Studio): other players' game modes, `/time set\|add`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, `/op`, `/deop`, structure blocks. |
+| `MainMenu.Enabled`        | true    | The title screen: the first player (the operator) creates the world from it, everyone joins it from it; nobody has a character before. false: the world is made at once from `World` and `Seed`, players join straight in. |
+| `MainMenu.Version` / `Credits` | "IceVoxel (Minecraft 1.20.1 style)" / "Not an official Minecraft product" | The title screen's bottom corners. |
+| `World.Name` / `Type`     | "New World" / "default" | The world made at once without the title screen, and the Create World screen's first choices (a `Generation/WorldTypes` id; its game mode is `Gameplay.DefaultGameMode`). |
+| `World.Difficulty`        | "Normal" | Peaceful (no monsters spawn), Easy, Normal or Hard (fire spreads a little faster on harder ones: `Server.Fire.Difficulty`). |
+| `World.AllowCommands` / `Structures` | false / true | Everyone may use the operators' commands (Minecraft's Allow Cheats) / library structures generate. |
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
 | `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
 | `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. Neither heals while fully frozen or overheated. |
@@ -1924,8 +1979,8 @@ a biome's `features`. Builders write in world coordinates; chunk clipping, cross
 and LOD are handled for you.
 
 **A structure**, from building it to seeing it generate. Structure blocks and jigsaws need
-creative and permission: the game's owner, Studio, `Gameplay.Admins` or a user id in
-`Config.Structures.Permission`.
+creative and permission: an operator (the game's owner, Studio, `Gameplay.Admins`, `/op`) or a
+user id in `Config.Structures.Permission`.
 
 1. **Build it** in creative. Air you leave inside the region is saved as air and clears whatever
    is there when the structure is placed; put a Structure Void (creative picker) where the world

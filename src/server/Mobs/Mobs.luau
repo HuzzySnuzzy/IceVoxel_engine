@@ -30,7 +30,7 @@
 	             burning, dying, a creeper's fuse), a remove when it leaves range or is gone; all
 	             in one Mobs message with that period's arrows and the player's knockback.
 	  Commands   /summon <kind> [x y z] and /kill @e[type=<kind>] (Mobs/SummonCommand), for those
-	             who may change the time (Config.Gameplay.Admins, the owner, Studio).
+	             who may change the time (the operators' permission: Players/Operators).
 	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent.
 
 	For other server scripts (the integration hooks):
@@ -73,9 +73,8 @@ local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Characters = require(script.Parent.Parent.Players.Characters)
 local Effects = require(script.Parent.Parent.Players.Effects)
-local GameModes = require(script.Parent.Parent.Players.GameModes)
+local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
-local TimeCommand = require(script.Parent.Parent.Players.TimeCommand)
 local MobWorld = require(script.Parent.MobWorld)
 local MobSpawning = require(script.Parent.MobSpawning)
 local SummonCommand = require(script.Parent.SummonCommand)
@@ -432,12 +431,9 @@ local function runCommand(net: Net, player: Player, text: string)
 	if not SummonCommand.matches(text) then
 		return
 	end
-	local studio = RunService:IsStudio()
-	local mayUse =
-		TimeCommand.mayUse(player.UserId, Config.Gameplay.Admins, studio or GameModes.isOwner(player), studio)
 	local feet = feetOf(player) or Vector3.zero
 	local result = SummonCommand.run(text, {
-		mayUse = mayUse,
+		mayUse = Operators.permitted(player),
 		enabled = Settings.Enabled and mobWorld ~= nil,
 		x = feet.X,
 		y = feet.Y,

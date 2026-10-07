@@ -6,9 +6,22 @@
 	players' edit requests, runs block updates (falling sand, flowing water...) and replicates every
 	change. Clients generate and render the terrain themselves from the seed.
 
-	Boot order:
-	  1. seed       -> published as an attribute on ReplicatedStorage.IceVoxel
-	  2. world      -> generated chunk cache + edit lists (World/WorldServer)
+	Before the world (at once, on the lobby's net: Network/LobbyNet):
+	  operators     -> Minecraft's ops: the first player to join is the operator, /op and /deop,
+	                   the permission every operators' command asks (Players/Operators)
+	  settings      -> player settings (the Options menu's choices, Players/SettingsStore): the
+	                   title screen has the Options menu too
+	  title screen  -> with Config.MainMenu.Enabled, the world waits for its operator to create it
+	                   from the title screen (Players/WorldMenu: no characters until then; World/
+	                   WorldInfo runs startWorld below with the screen's settings); without it the
+	                   world is created at once from Config.World and Config.Seed
+	                   (WorldSettings.fromConfig)
+
+	startWorld(settings), once:
+	  1. settings   -> into Config (World/WorldInfo.apply, just before: new players' game mode, the
+	                   difficulty) and to Players/Operators (Allow Commands)
+	  2. world      -> generated chunk cache + edit lists (World/WorldServer), from the world type,
+	                   options and seed (Generation/WorldTypes)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/), and random ticks
 	                   near players (World/RandomTicker: grass spreading, leaf decay, saplings)
 	                   and explosions (World/Explosions: fuel that touches fire or lava blowing
@@ -22,8 +35,7 @@
 	                   fall damage, invulnerability, lava and burning), item entities (drops,
 	                   burning in lava), inventories, chests,
 	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
-	                   spawning, map and spectator teleports, waypoints, player settings (the
-	                   Options menu's choices, Players/SettingsStore), keeping chunks around
+	                   spawning, map and spectator teleports, waypoints, keeping chunks around
 	                   players generated
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
 	                   transporters, fluids in pipes, Fluid Tanks and machines' tanks, replication),
@@ -42,18 +54,29 @@
 	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
 	                   on their windows, the perks the parts above ask for, saving, /knowledge and
 	                   /age)
+	 13. published  -> last, the world's settings on ReplicatedStorage.IceVoxel (WorldSettings
+	                   .publish: name, difficulty, then the world type, options and the "Seed"):
+	                   clients start loading once the seed is there, so everything above is ready
+	                   to answer them
 	Status effects (Players/Effects: Minecraft's MobEffects, potions, oil and fuel on the skin,
 	/effect) start with the players, before the characters that tick them; Tough As Nails
 	registers its effects there when it starts. A player's mining speed is their effects' times
 	their perks' (Shared/Mining.playerFactor, as the client's).
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+-- With the title screen nobody gets a character before entering the world (Players/WorldMenu):
+-- first of all, so a player joining while the modules below load gets none either.
+if Config.MainMenu.Enabled then
+	Players.CharacterAutoLoads = false
+end
 local WorldTypes = require(Shared.Generation.WorldTypes)
+local WorldSettings = require(Shared.WorldSettings)
 local Mining = require(Shared.Mining)
 
 local Server = script.Parent
@@ -65,11 +88,15 @@ local RandomTicker = require(Server.World.RandomTicker)
 local Explosions = require(Server.World.Explosions)
 local Nuke = require(Server.World.Nuke)
 local TimeOfDay = require(Server.World.TimeOfDay)
+local WorldInfo = require(Server.World.WorldInfo)
 local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
+local LobbyNet = require(Server.Network.LobbyNet)
 local Sounds = require(Server.Audio.Sounds)
 local Characters = require(Server.Players.Characters)
 local GameModes = require(Server.Players.GameModes)
+local Operators = require(Server.Players.Operators)
+local WorldMenu = require(Server.Players.WorldMenu)
 local TimeCommands = require(Server.Players.TimeCommands)
 local Inventories = require(Server.Players.Inventories)
 local Entities = require(Server.Entities.Entities)
@@ -88,121 +115,143 @@ local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
 local Progression = require(Server.Players.Progression)
 
-local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
--- (The world type and its options go out before the seed: clients build their generator once
--- the seed is there, Generation/WorldTypes.)
-WorldTypes.publish(Shared, WorldTypes.DEFAULT, seed, {})
-print(`[IceVoxel] world seed {seed}`)
+--[[
+	Creates the world and starts everything that needs it (see the header); World/WorldInfo calls
+	it once, with the title screen's settings or Config's, after putting them into Config.
+]]
+local function startWorld(settings: WorldSettings.Settings)
+	print(`[IceVoxel] world "{settings.name}": {settings.worldType}, seed {WorldSettings.seedText(settings.seed)}`)
+	Operators.setAllowCommands(settings.allowCommands)
 
-local world = WorldServer.new(WorldTypes.create(WorldTypes.DEFAULT, seed, {}))
-local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
-world.onChanged = function(x, y, z, old, new)
-	-- A generated structure's chest gets its contents before anything hears it change, so one
-	-- broken or replaced unopened still drops them.
-	Containers.materialize(x, y, z, old)
-	ticker:blockChanged(x, y, z)
-	-- A chest or furnace replaced by anything (breaking, the Api, block updates) drops what it
-	-- holds, and any block with a window closes it for its users.
-	Inventories.blockChanged(x, y, z, old, new)
-	-- Transmitters and fluid tanks come and go (a transporter's items drop), and pipes notice the
-	-- chests, furnaces, tanks and energy blocks around them.
-	Transmitters.blockChanged(x, y, z, old, new)
-	-- Machines come and go, and energy networks are worked out again around them.
-	Machines.blockChanged(x, y, z, old, new)
-	-- Structure blocks and jigsaws keep their settings while they stand.
-	StructureBlocks.blockChanged(x, y, z, old, new)
+	local world = WorldServer.new(WorldTypes.create(settings.worldType, settings.seed, settings.options))
+	local ticker = BlockTicker.new(world, Behaviours.byId, Config.Server.MaxUpdatesPerTick)
+	world.onChanged = function(x, y, z, old, new)
+		-- A generated structure's chest gets its contents before anything hears it change, so one
+		-- broken or replaced unopened still drops them.
+		Containers.materialize(x, y, z, old)
+		ticker:blockChanged(x, y, z)
+		-- A chest or furnace replaced by anything (breaking, the Api, block updates) drops what it
+		-- holds, and any block with a window closes it for its users.
+		Inventories.blockChanged(x, y, z, old, new)
+		-- Transmitters and fluid tanks come and go (a transporter's items drop), and pipes notice the
+		-- chests, furnaces, tanks and energy blocks around them.
+		Transmitters.blockChanged(x, y, z, old, new)
+		-- Machines come and go, and energy networks are worked out again around them.
+		Machines.blockChanged(x, y, z, old, new)
+		-- Structure blocks and jigsaws keep their settings while they stand.
+		StructureBlocks.blockChanged(x, y, z, old, new)
+	end
+
+	local net = ServerNet.start(world)
+	Sounds.start(net)
+	TimeOfDay.start()
+	GameModes.start(net)
+	TimeCommands.start(net)
+	Effects.start(net)
+	Characters.start(net, world)
+	-- Items must exist before anything can drop them.
+	Entities.start(net, world)
+	Inventories.start(net, world)
+	net.setRules({
+		place = Inventories.place,
+		acknowledge = Inventories.acknowledge,
+		dropBlock = Entities.dropBlock,
+		removeContainer = Inventories.removeContainer,
+		mayRemoveContainer = Inventories.mayRemoveContainer,
+		heldTool = Inventories.heldTool,
+		wearTool = Inventories.wearTool,
+		broke = ToughAsNails.blockBroken,
+		mined = Progression.mined,
+		-- (Haste and Mining Fatigue times the mining perks: the client predicts with the same.)
+		miningFactor = function(player: Player, tool: number?): number
+			return Mining.playerFactor(Effects.levels(player), Progression.state(player), tool)
+		end,
+		chunksSent = function(player: Player, coords: { { number } })
+			Transmitters.sendChunks(player, coords)
+			Machines.sendChunks(player, coords)
+			StructureBlocks.sendChunks(player, coords)
+		end,
+		operator = StructureBlocks.operator,
+		-- (Mobs start later; until then nothing is in the way.)
+		occupied = Mobs.occupied,
+	})
+	-- Pipes after inventories and items (they fill chests and drop items); item use after the pipes;
+	-- machines after the pipes (their cables are the pipes' nodes).
+	Transmitters.start(net, world)
+	ItemUse.start(net, world)
+	Machines.start(net, world)
+	-- Structure blocks after inventories (containers, the Use hook).
+	StructureBlocks.start(net, world)
+	-- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
+	ToughAsNails.start(net, world)
+	-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
+	Mobs.start(net, world)
+	Eating.start(net)
+	-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
+	-- perks go to the parts that apply them.
+	Progression.start(net, world)
+	Inventories.setWearFilter(Progression.wear)
+	-- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
+	Inventories.setResultsHandler(Progression.smelted)
+	ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
+	ItemUse.setBoilSpeed(Progression.boilSpeed)
+	-- A mob a player killed is knowledge: the first of its kind a discovery, then Knowledge.MOBS.
+	Mobs.died:Connect(function(killer: Player?, kind: string)
+		if killer then
+			Progression.killed(killer, kind)
+		end
+	end)
+	Spawning.start(world)
+	Teleport.start(world, net)
+	WaypointStore.start(net)
+	Simulation.start(world)
+	-- What blasts do beyond blocks: items, players (damage, knockback), mobs and the clients' effects.
+	Explosions.setHandler(function(x: number, y: number, z: number, power: number, getBlock, range: number?)
+		Entities.explode(x, y, z, power)
+		Characters.explosion(x, y, z, power, getBlock, range)
+		Mobs.explode(x, y, z, power)
+	end)
+	Api._ready(world, ticker)
+
+	-- Fixed rate block updates, then the frame's share of structures being placed, then one
+	-- replication message per frame, then the pipes, machines and structure blocks.
+	local randomTicker = RandomTicker.new(world, ticker)
+	local tickLength = 1 / Config.Server.TickRate
+	local accumulator = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accumulator = math.min(accumulator + dt, tickLength * 4)
+		while accumulator >= tickLength do
+			accumulator -= tickLength
+			ticker:step()
+			Explosions.step(world)
+			Nuke.step(world)
+			RandomTicker.step(randomTicker, Simulation.activeChunks(world), Config.Server.RandomTickSpeed, math.random)
+		end
+		StructureBlocks.place()
+		net.flush()
+		-- The pipes after the edits: a client knows a transmitter's block before its state.
+		Transmitters.update(dt)
+		Machines.update(dt)
+		StructureBlocks.update(dt)
+	end)
+
+	-- Last: clients start loading once the seed is there (the world type and its options, the
+	-- name and the difficulty go out before it: Shared/WorldSettings, Generation/WorldTypes).
+	WorldSettings.publish(Shared, settings)
 end
 
-local net = ServerNet.start(world)
-Sounds.start(net)
-TimeOfDay.start()
-GameModes.start(net)
-TimeCommands.start(net)
-Effects.start(net)
-Characters.start(net, world)
--- Items must exist before anything can drop them.
-Entities.start(net, world)
-Inventories.start(net, world)
-net.setRules({
-	place = Inventories.place,
-	acknowledge = Inventories.acknowledge,
-	dropBlock = Entities.dropBlock,
-	removeContainer = Inventories.removeContainer,
-	mayRemoveContainer = Inventories.mayRemoveContainer,
-	heldTool = Inventories.heldTool,
-	wearTool = Inventories.wearTool,
-	broke = ToughAsNails.blockBroken,
-	mined = Progression.mined,
-	-- (Haste and Mining Fatigue times the mining perks: the client predicts with the same.)
-	miningFactor = function(player: Player, tool: number?): number
-		return Mining.playerFactor(Effects.levels(player), Progression.state(player), tool)
-	end,
-	chunksSent = function(player: Player, coords: { { number } })
-		Transmitters.sendChunks(player, coords)
-		Machines.sendChunks(player, coords)
-		StructureBlocks.sendChunks(player, coords)
-	end,
-	operator = StructureBlocks.operator,
-	-- (Mobs start later; until then nothing is in the way.)
-	occupied = Mobs.occupied,
-})
--- Pipes after inventories and items (they fill chests and drop items); item use after the pipes;
--- machines after the pipes (their cables are the pipes' nodes).
-Transmitters.start(net, world)
-ItemUse.start(net, world)
-Machines.start(net, world)
--- Structure blocks after inventories (containers, the Use hook).
-StructureBlocks.start(net, world)
--- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
-ToughAsNails.start(net, world)
--- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
-Mobs.start(net, world)
-Eating.start(net)
--- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
--- perks go to the parts that apply them.
-Progression.start(net, world)
-Inventories.setWearFilter(Progression.wear)
--- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
-Inventories.setResultsHandler(Progression.smelted)
-ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
-ItemUse.setBoilSpeed(Progression.boilSpeed)
--- A mob a player killed is knowledge: the first of its kind a discovery, then Knowledge.MOBS.
-Mobs.died:Connect(function(killer: Player?, kind: string)
-	if killer then
-		Progression.killed(killer, kind)
+-- Before the world: operators, player settings and the title screen, on the lobby's net.
+local lobby = LobbyNet.start()
+Operators.start(lobby, GameModes.isOwner, GameModes.ownerKnown)
+SettingsStore.start(lobby)
+if Config.MainMenu.Enabled then
+	WorldMenu.start(lobby, startWorld)
+else
+	local ok, problem = WorldInfo.create(
+		WorldSettings.fromConfig(Config.Seed or Random.new():NextInteger(1, 2_147_483_646)),
+		startWorld
+	)
+	if not ok then
+		error(`[IceVoxel] the world could not be created: {problem}`)
 	end
-end)
-Spawning.start(world)
-Teleport.start(world, net)
-WaypointStore.start(net)
-SettingsStore.start(net)
-Simulation.start(world)
--- What blasts do beyond blocks: items, players (damage, knockback), mobs and the clients' effects.
-Explosions.setHandler(function(x: number, y: number, z: number, power: number, getBlock, range: number?)
-	Entities.explode(x, y, z, power)
-	Characters.explosion(x, y, z, power, getBlock, range)
-	Mobs.explode(x, y, z, power)
-end)
-Api._ready(world, ticker)
-
--- Fixed rate block updates, then the frame's share of structures being placed, then one
--- replication message per frame, then the pipes, machines and structure blocks.
-local randomTicker = RandomTicker.new(world, ticker)
-local tickLength = 1 / Config.Server.TickRate
-local accumulator = 0
-RunService.Heartbeat:Connect(function(dt)
-	accumulator = math.min(accumulator + dt, tickLength * 4)
-	while accumulator >= tickLength do
-		accumulator -= tickLength
-		ticker:step()
-		Explosions.step(world)
-		Nuke.step(world)
-		RandomTicker.step(randomTicker, Simulation.activeChunks(world), Config.Server.RandomTickSpeed, math.random)
-	end
-	StructureBlocks.place()
-	net.flush()
-	-- The pipes after the edits: a client knows a transmitter's block before its state.
-	Transmitters.update(dt)
-	Machines.update(dt)
-	StructureBlocks.update(dt)
-end)
+end

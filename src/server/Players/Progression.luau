@@ -45,8 +45,8 @@
 	             interval), never for a player whose saved progress could not be read. A player
 	             who left is written again at once while something changed during the write or
 	             it failed (LEAVE_RETRIES), even when a periodic write was in flight as they left.
-	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the /time
-	             rule: Config.Gameplay.Admins, the owner, Studio).
+	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the
+	             operators' permission, Players/Operators, as /time).
 
 	For the mobs: a player's kill calls `Progression.killed(player, mobName)` (the boot script
 	connects Mobs/Mobs' `died` event: a mob kind's first kill is a discovery, 10 points; every
@@ -73,6 +73,7 @@ local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local GameModeCommand = require(script.Parent.GameModeCommand)
 local GameModes = require(script.Parent.GameModes)
+local Operators = require(script.Parent.Operators)
 local Inventories = require(script.Parent.Inventories)
 local ProgressionCommand = require(script.Parent.ProgressionCommand)
 local ProgressStore = require(script.Parent.ProgressStore)
@@ -459,8 +460,6 @@ local function runCommand(player: Player, text: string)
 	if not ProgressionCommand.matches(text) then
 		return
 	end
-	local studio = RunService:IsStudio()
-	local owner = studio or GameModes.isOwner(player)
 	if player.Parent == nil then
 		return
 	end
@@ -483,7 +482,7 @@ local function runCommand(player: Player, text: string)
 	local result = ProgressionCommand.run(text, {
 		source = source,
 		players = candidates,
-		mayUse = GameModeCommand.isAdmin(player.UserId, Config.Gameplay.Admins, owner, studio),
+		mayUse = Operators.permitted(player),
 		stateOf = function(key: any): Progression.State?
 			local entry = entries[key :: Player]
 			return if entry and entry.loaded then entry.state else nil

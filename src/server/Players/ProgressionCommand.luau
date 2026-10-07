@@ -16,8 +16,8 @@
 	("iron", "Iron Age", "Iron", 2; Progression/Ages). `<player>` is as /gamemode reads it
 	(GameModeCommand.findPlayers: a name or display name or the start of one, @s, @a).
 
-	Who may: changing needs `mayUse` (Config.Gameplay.Admins, the game's owner and Studio, the rule
-	for /time); queries are harmless, so anyone may ask. After a change the glue checks the Ages
+	Who may: changing needs `mayUse` (the operators' permission, Players/Operators, as /time);
+	queries are harmless, so anyone may ask. After a change the glue checks the Ages
 	again (Progression.advance), so knowledge set high with the milestones met enters the next
 	Ages; not after an Age set lower (`lowered`), which holds until the next knowledge the player
 	gets (Ages entered again then are not announced again).

@@ -13,7 +13,8 @@
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
 	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill), and the
 	status effects (Player/EffectState: each one's name, level and time left, "**:**" for one
-	that never ends).
+	that never ends). Under the frame rate, the world: its name, world type, difficulty, seed and
+	whether commands are allowed (Shared/WorldSettings.info, from the server's attributes).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -54,6 +55,8 @@ local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
 local Protocol = require(Shared.Net.Protocol)
 local Temperature = require(Shared.ToughAsNails.Temperature)
+local WorldSettings = require(Shared.WorldSettings)
+local WorldTypes = require(Shared.Generation.WorldTypes)
 
 local DebugOverlay = {}
 
@@ -65,6 +68,18 @@ DebugOverlay.changed = changedEvent.Event
 -- Is the overlay shown (F3)?
 function DebugOverlay.isOpen(): boolean
 	return open
+end
+
+-- The world line: name, world type, difficulty, seed, and "cheats" with Allow Commands on.
+local function worldLine(): string
+	local info = WorldSettings.info(Shared)
+	if info == nil then
+		return "world  (none yet)"
+	end
+	local worldType = WorldTypes.get(info.worldType)
+	return `world  "{info.name}"  {if worldType then worldType.name else info.worldType}  `
+		.. `{WorldSettings.difficultyName(info.difficulty) or "?"}  seed {WorldSettings.seedText(info.seed)}`
+		.. (if info.allowCommands then "  cheats" else "")
 end
 
 -- The time of day line: clock, day number, tick in the day, sky light outdoors (0..15) and the
@@ -334,6 +349,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 		end
 		label.Text = table.concat({
 			string.format("IceVoxel  %.0f fps", fps),
+			worldLine(),
 			`chunks  {table.concat(levels, " ")}`,
 			`waiting {stats.waiting}  queued {stats.queued}  working {stats.working}`,
 			`workers busy {stats.busyWorkers}  builds pending {stats.building}`,

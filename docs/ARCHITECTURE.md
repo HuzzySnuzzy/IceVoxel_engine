@@ -1893,8 +1893,8 @@ MachineWorld's `dayTime`).
 and tested:
 - Time arguments follow Minecraft's TimeArgument: `d` = 24000 ticks, `s` = 20, `t` = 1, rounded,
   never negative.
-- Changing the time or the rule needs `Gameplay.Admins`, the owner or Studio; queries are open to
-  everyone.
+- Changing the time or the rule needs the operators' permission (`Players/Operators.permitted`,
+  see the title screen's section); queries are open to everyone.
 - Answers use Minecraft's wording and come back as Notices.
 
 **Lighting.** Roblox's engine does the lighting. `default.project.json` sets Future technology and
@@ -1985,15 +1985,16 @@ Code never compares modes: it asks what one allows, `GameMode.<ability>(mode)` o
   `parse` reads them: `TextChatCommand`s created by the server, whose `Triggered` fires on the
   server; the legacy chat falls back to `Player.Chatted`. `player` is a name, display name or
   unique prefix, `@s` or `@a`.
-- Permissions: `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode;
-  `Gameplay.Admins` for other players' (the same ids may change the time, see Day and night) and
-  for their own even where the command is off (`mayChangeOwn`, Minecraft's permission level 2);
-  the game's owner and Studio always may. A group game's owner is looked up once per server
-  (GroupService); a failed lookup is tried again after 5 s, doubling up to 300 s, and the first
-  one that works updates every player's permission.
+- Permissions: `Gameplay.GameModeCommand` (true / false / user ids) for one's own mode; the
+  operators' permission (`Players/Operators.permitted`: operators, among them `Gameplay.Admins`,
+  the game's owner and Studio; everyone in a world with Allow Commands) for other players' and for
+  their own even where the command is off (`mayChangeOwn`, Minecraft's permission level 2). A
+  group game's owner is looked up once per server (GroupService); a failed lookup is tried again
+  after 5 s, doubling up to 300 s (Players/Operators makes the owner an operator once it works),
+  and every change of a player's operator status updates their permission (`Operators.changed`).
 - The server tells each client whether it may change its own mode: the attribute
-  `IceVoxelGameModePermission` (`GameMode.mayChangeOwn`), false on joining until the owner check
-  is done and refreshed on every command and switch. Clients refuse `F3` + `N` and `F3` + `F4`
+  `IceVoxelGameModePermission` (`GameMode.mayChangeOwn`), set on joining and refreshed on every
+  command, switch and change of operator status. Clients refuse `F3` + `N` and `F3` + `F4`
   themselves with it.
 - The previous mode, `IceVoxelPreviousGameMode` (`GameMode.previousOf`), changes only when the
   mode does (`previousAfter`; none until the first change), as Minecraft's client keeps it
@@ -3120,8 +3121,8 @@ told once, not every 21 ticks as its frozen time drifted from the client's count
 **/effect** (`Players/EffectCommand`, pure; the glue in Players/Effects): `give <player> <effect>
 [seconds | infinite] [amplifier] [hideParticles]` (Minecraft's bounds 1..1000000 and 0..255,
 default 30 s, an instant effect's a tick and its seconds as ticks) and `clear [player] [effect]`,
-players as `/gamemode` finds them plus `@p`, the permission of `/time` (Config.Gameplay.Admins, the
-owner, Studio) and Minecraft's answers ("Applied effect Speed to Steve", "Removed every effect from
+players as `/gamemode` finds them plus `@p`, the permission of `/time` (the operators',
+Players/Operators) and Minecraft's answers ("Applied effect Speed to Steve", "Removed every effect from
 2 targets", "Unable to apply this effect (...)", "Unknown effect: x", "Integer must not be more than
 255, found 256"). Dead players take nothing.
 
@@ -4146,10 +4147,10 @@ levels).
 ### On the server (`server/Structures/`)
 
 - **`Permission`** (pure): Minecraft's canUseGameMasterBlocks. Creative players only, and of them
-  the game's owner, `Config.Gameplay.Admins` and Studio sessions always, else
-  `Config.Structures.Permission` (a list of user ids, by default none; true for every creative
-  player, false for nobody). `StructureBlocks.operator(player)` asks it (the owner looked up once
-  per player); it is ServerNet's `operator` rule for placing and breaking operator blocks
+  operators always (Players/Operators.permitted: the game's owner, `Config.Gameplay.Admins` and
+  Studio sessions among them), else `Config.Structures.Permission` (a list of user ids, by
+  default none; true for every creative player, false for nobody).
+  `StructureBlocks.operator(player)` asks it; it is ServerNet's `operator` rule for placing and breaking operator blocks
   (`EditRules.mayUseCreativeOnly`) and gates every request and upload.
 - **`StructureStore`** (pure): every structure block's and jigsaw's settings by position, for the
   session, like chests. `blockChanged` (chained onto WorldServer.onChanged) gives a new block its
@@ -4432,7 +4433,7 @@ strength's reset), `MobWorld.attack` with the player's effect levels (Players/Ef
 the strong or weak attack sound, the weapon's wear
 (Combat.wear: swords 1, tools 2; not with instabuild). Placing: `Mobs.occupied(block, x, y,
 z)` (ServerNet's `occupied` rule). /summon and /kill: TextChatCommands (or
-Chatted), SummonCommand's parse and TimeCommand.mayUse. The boot script connects `died` to
+Chatted), SummonCommand's parse and the operators' permission (Players/Operators.permitted). The boot script connects `died` to
 Players/Progression.killed for a player's kills (the kind's first a discovery, then
 Knowledge.MOBS: animals 2, monsters 5, creepers 6).
 
@@ -4659,6 +4660,80 @@ What the client plays itself:
   scaled by `Style.guiScale`. A newer toast replaces it.
 - Settings: Music (id 35, a source volume) and Music Toasts (id 36), both "audio" effects.
 
+## Title screen, operators and creating the world (`WorldSettings`, server `Players/Operators`, `Players/WorldMenu`, `World/WorldInfo`, client `Ui/MainMenu`)
+
+Minecraft's title screen and Create World screen, and its server operators.
+
+**Boot.** The server starts what doesn't need a world first, on `Network/LobbyNet`:
+Players/Operators, Players/SettingsStore (so the title screen's Options menu saves) and, with
+`Config.MainMenu.Enabled`, Players/WorldMenu (the boot script turns `Players.CharacterAutoLoads`
+off first of all). Everything else is the boot script's `startWorld(settings)`, which
+`World/WorldInfo.create` runs exactly once: from WorldMenu when the operator creates the world, or
+at once with the menu off (`WorldSettings.fromConfig`: `Config.World` and `Config.Seed`). Before it
+runs, `WorldInfo.apply` puts the settings into the server's Config (new players' game mode
+`Gameplay.DefaultGameMode`, the difficulty `Server.Fire.Difficulty`, and Peaceful's
+`Mobs.HostileCap` / `MaxHostile` 0: no monsters spawn; /summon still makes them), and `startWorld`
+hands Allow Commands to Operators. `startWorld` publishes last (`WorldSettings.publish`:
+"WorldName", "Difficulty", "AllowCommands", then WorldTypes' "WorldType", "WorldOptions" and
+"Seed"), so every part is up before a client starts loading. A `startWorld` that throws leaves the
+state "failed" for good (half the parts may have started: the server needs a restart).
+
+**Operators** (`Players/OperatorList`, pure and tested; the glue `Players/Operators`). Players are
+known by user id. The first player to join while no operator is here becomes one, and everyone is
+told ("Steve is the server operator"); while players are here one of them always is an operator:
+the last one leaving makes the player here longest one ("Alex is now the server operator"), and
+`/deop` refuses to take the last one away. The op list lasts the server's lifetime (rejoining keeps
+it, as Minecraft's ops.json). Permanent operators: `Gameplay.Admins` and everyone in Studio from
+the join, the game's owner once `GameModes.isOwner` says so (a group game's: retried, 5 s doubling
+to 300 s, while `GameModes.ownerKnown()` is false). `/op <player>` and `/deop <player>` (operators
+only; names as `/gamemode` finds them) answer as Minecraft ("Made Steve a server operator",
+"Nothing changed. The player already is an operator", ...), tell the player, and show the other
+operators Minecraft's admin line ("[Alex: Made Steve a server operator]"). `Operators.permitted
+(player)` is the check every operators' command asks (`/time`, `/gamerule`, `/gamemode` for others
+and the switcher's permission, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure
+blocks): an operator, or anyone once the world allows commands. `isOperator` is the real thing
+(`/op`, `/deop`, Create World). The Player attribute `IceVoxelOperator`
+(`WorldSettings.OPERATOR_ATTRIBUTE`) tells clients; `Operators.changed` fires for each player whose
+status or permission changed.
+
+**The title screen** (client `Ui/MainMenu`; its rules in `Ui/TitleRules` and `Ui/CreateWorldForm`,
+pure and tested). The client boot calls `MainMenu.run()` right after `SoundPlayer.start` and
+`Settings.start`, and nothing else starts until it returns: no streaming, no HUD, no input
+handlers, so the menu needs no input blocking and the world costs nothing while it shows. (Loading
+the world behind the menu would make Join instant, but every module's keys would then need a
+guard, and a player waiting for the operator has no world to load anyway; entering is a normal
+join, the movement waiting for the ground.) The Options menu is `SettingsScreen.showIn(host,
+onDone)`: the same panel, hosted by the title screen before Ui/Screens exists. The server's
+`MenuState` (waiting, creating, ready, failed; the operator's and the world's names) and the
+operator attribute decide what is enabled: Join World once ready, Create World for an operator
+while waiting, Load World never yet (saves are for later), Options always. The background is a
+moving sky (a gradient, a square sun, clouds and two hill layers, each two screens wide holding
+its pattern twice and slid by a scale offset: three property writes a frame); the other screens
+use Minecraft's options background (the texture pack's dirt, 32 GUI pixels a tile, at 64 / 255).
+Messages the server sends meanwhile wait in Net/ClientNet's backlog (edits for chunks the client
+has no edit list for are ignored anyway: it asks for the lists once it streams).
+
+**Creating** (`WorldSettings`, shared and tested). The screen sends `CreateWorld` (its options
+encoded by `WorldTypes.encodeOptions`); WorldMenu answers malformed ones, non-operators and
+anything after the first (`WorldInfo.refusal`) with `CreateWorldResult` false and a reason, else
+checks the request (`WorldSettings.validate`: a type the menu offers, one of the screen's three
+game modes, difficulty 0..3, a seed of at most 32 characters, the name cleaned: control characters
+out, trimmed, 32 characters, blank "New World"), puts the name through TextService's broadcast
+filter (everyone reads it; an unreachable filter gives "New World"), and calls
+`WorldInfo.create`. The seed: blank is random (1..2^31 - 2), a whole number (an optional sign and
+digits) is itself while |n| < 2^53, any other text is Java's `String.hashCode` over UTF-16 units
+(Minecraft's `WorldOptions.parseSeed`). A world type's options are only those it declares in its
+optional `settings` (WorldTypes.Setting: toggle, choice or text; text is a code alphabet, never
+free text, so it needs no filter), each of its kind or its default, plus `structures` (Generate
+Structures).
+
+**Characters.** With the menu nobody has a character before entering the world (Roblox's
+auto-loading is off; one that slipped in before the boot turned it off is removed). `EnterWorld`
+(Join World, or the creator's client after a success) loads it with `Player:LoadCharacterAsync`
+(LoadCharacter on an engine without it), and the server respawns the dead itself after
+`Players.RespawnTime`, as Roblox would. Players who join later see the title screen and Join
+World.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -4687,6 +4762,8 @@ live edits after it must arrive in the order they were sent.
 | client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes) |
 | client → server | `Eat`           | u8 action: start / finish / cancel holding a food |
 | client → server | `UnlockSkill`   | u8: a skill tree node's place in Progression/Skills (the server checks the Age, prerequisites and points) |
+| client → server | `CreateWorld`   | the Create World screen: u8 game mode (0..2), u8 difficulty (0..3), u8 flags (allow commands, structures), then name, world type, encoded options and seed text (u16 length + UTF-8 each, at most 128 / 64 / 1024 / 128 bytes) |
+| client → server | `EnterWorld`    | nothing: Join World (or a created world): the server loads the character once the world exists |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -4707,6 +4784,8 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state) / state (position in 1/32 block, yaw in 1/256 turn, health, flags, fuse: 21 bytes) / remove / arrow (from, to) / push (this player's knockback) |
 | server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (bit 0 ambient, bit 1 paused: an external effect its owner holds, not counted down)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
 | server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
+| server → client | `MenuState`     | the title screen's state (u8: waiting, creating, ready, failed), the operator's name and the world's (u16 length + text each), on joining and to everyone on a change |
+| server → client | `CreateWorldResult` | u8 ok, u16 length + text: the answer to this player's CreateWorld |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
@@ -4735,7 +4814,11 @@ one 23.
 
 On the client, `Net/ClientNet` owns the only listener (Roblox delivers queued messages to the first
 listener that connects) and routes messages by type, keeping early messages until a handler exists.
-On the server, `ServerNet.on(kind, handler)` registers handlers.
+On the server, `ServerNet.on(kind, handler)` registers handlers. What starts before the world
+exists (Players/Operators, Players/SettingsStore, Players/WorldMenu) uses `Network/LobbyNet`: the
+same `on` / `send` on the same remote with handlers of its own; ServerNet starts with the world
+and listens too, each ignoring the other's message types, so every message is handled once and
+sends stay in one ordered stream.
 
 ## Server
 
@@ -4867,6 +4950,9 @@ On the server, `ServerNet.on(kind, handler)` registers handlers.
   modes: On the server).
 - `Players/SettingsStore`: players' settings, one profile per kind of device, in a DataStore (see
   Player settings).
+- `Players/Operators`, `Players/WorldMenu`, `World/WorldInfo`, `Network/LobbyNet`: operators, the
+  title screen's server side, the world's settings and its one creation, the net before the world
+  (see Title screen, operators and creating the world).
 - `Structures/`: structure blocks, jigsaws and their Generate, and who may use them (see
   Structure blocks and jigsaw structures). `Players/Containers` fills a generated structure's chest
   from the generator the first time its contents are needed; ServerNet's `operator` rule

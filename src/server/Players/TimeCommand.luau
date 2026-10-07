@@ -13,9 +13,10 @@
 	seconds (20 ticks), "t" ticks: 1d, 0.5d, 30s, 600 (Shared/DayCycle.parseDuration). Setting the
 	time replaces the day count too, as Minecraft 1.20 does (/time set day starts day 0 again).
 
-	Who may: changing the time or a game rule needs `mayUse`, which the glue gives
-	Config.Gameplay.Admins, the game's owner and Studio sessions (the rule for changing other
-	players' game modes, GameModeCommand.isAdmin). Queries are harmless, so anyone may ask.
+	Who may: changing the time or a game rule needs `mayUse`, which the glue gives the operators'
+	permission (Players/Operators: operators, among them Config.Gameplay.Admins, the game's owner
+	and Studio sessions; everyone in a world created with Allow Commands). Queries are harmless,
+	so anyone may ask.
 
 	The feedback uses Minecraft's wording ("Set the time to 1000", "The time is 1000", "Gamerule
 	doDaylightCycle is now set to: false").

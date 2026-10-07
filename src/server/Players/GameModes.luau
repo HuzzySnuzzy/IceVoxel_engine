@@ -11,9 +11,10 @@
 	            and the switcher. Minecraft's client keeps it the same way (MultiPlayerGameMode
 	            .setLocalMode; the server's copy is MC-259571, which Paper fixes like this).
 	  Permission GameMode.PERMISSION_ATTRIBUTE: may the player change their own mode
-	            (GameModeCommand.mayChangeOwn)? Set on joining, again on every command and switch,
-	            and for everyone once a group game's owner is known, so clients can refuse F3 + N /
-	            F3 + F4 themselves (Minecraft's permission level 2).
+	            (Config.Gameplay.GameModeCommand, or the operators' permission: Players/Operators)?
+	            Set on joining, again on every command and switch and whenever their operator
+	            status changes, so clients can refuse F3 + N / F3 + F4 themselves (Minecraft's
+	            permission level 2).
 	  Command   `/gamemode <survival|creative|adventure|spectator> [player]`, alias `/gm`, parsed
 	            and checked by Players/GameModeCommand. With TextChatService it is a
 	            TextChatCommand made here (the message is not shown to anyone; Triggered fires on
@@ -22,17 +23,19 @@
 	  Switching SetGameMode messages (a GameType id) go through GameModeCommand.switchOwn: the
 	            command's permission and answer, nothing when the mode is already that one. At
 	            most SWITCHES_PER_SECOND a player (a token bucket), as each switch replicates.
-	  Owner     the game's owner may always use it: the creator when a user owns the game, or the
-	            group's owner for group games (GroupService, looked up once per server; a failed
-	            lookup is tried again, after OWNER_RETRY seconds doubling up to OWNER_RETRY_MAX, as
-	            the owner can't switch without it). So may everyone in Studio.
+	  Operators other players' modes need the operators' permission (Players/Operators.permitted:
+	            operators, among them Config.Gameplay.Admins, the game's owner and everyone in
+	            Studio; everyone in a world that allows commands), which also lets them change
+	            their own where Config.Gameplay.GameModeCommand doesn't.
+	  Owner     `isOwner`: the creator when a user owns the game, or the group's owner for group
+	            games (GroupService, looked up once per server; a failed lookup is tried again,
+	            after OWNER_RETRY seconds doubling up to OWNER_RETRY_MAX), for Players/Operators.
 	  Feedback  goes to the players as Notice messages, shown in their chat (client Net/Notices).
 ]]
 
 local GroupService = game:GetService("GroupService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -42,6 +45,7 @@ local Protocol = require(Shared.Net.Protocol)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local GameModeCommand = require(script.Parent.GameModeCommand)
+local Operators = require(script.Parent.Operators)
 
 -- Game mode switches (SetGameMode) a player may make per second, and at most this many at once.
 local SWITCHES_PER_SECOND = 4
@@ -72,17 +76,16 @@ local function notify(player: Player, text: string)
 	end
 end
 
+-- May `player` change their own mode (Config.Gameplay.GameModeCommand, or an operator)?
+local function mayChangeOwn(player: Player): boolean
+	return GameModeCommand.allowed(player.UserId, Config.Gameplay.GameModeCommand, false, false)
+		or Operators.permitted(player)
+end
+
 -- Tells the player's clients whether they may change their own mode (GameMode.mayChangeOwn).
-local function setPermission(player: Player, owner: boolean)
-	local may = GameModeCommand.mayChangeOwn(
-		player.UserId,
-		Config.Gameplay.GameModeCommand,
-		Config.Gameplay.Admins,
-		owner,
-		RunService:IsStudio()
-	)
+local function setPermission(player: Player)
 	if player.Parent then
-		player:SetAttribute(GameMode.PERMISSION_ATTRIBUTE, may)
+		player:SetAttribute(GameMode.PERMISSION_ATTRIBUTE, mayChangeOwn(player))
 	end
 end
 
@@ -92,10 +95,8 @@ local function isGroupGame(): boolean
 end
 
 --[[
-	Looks a group game's owner up (yields: a web call) unless it is known. The first lookup that
-	works tells every player in the game whether they may change their own mode, those who joined
-	while lookups failed too. Returns whether the owner is known now; a failure is not remembered,
-	so the next call tries again.
+	Looks a group game's owner up (yields: a web call) unless it is known. Returns whether the
+	owner is known now; a failure is not remembered, so the next call tries again.
 ]]
 local function lookUpGroupOwner(): boolean
 	if groupOwner ~= nil then
@@ -108,11 +109,7 @@ local function lookUpGroupOwner(): boolean
 	-- (Another lookup may have finished while this one yielded.)
 	if groupOwner == nil then
 		local owner = info.Owner
-		local ownerId = if type(owner) == "table" and type(owner.Id) == "number" then owner.Id else 0
-		groupOwner = ownerId
-		for _, other in Players:GetPlayers() do
-			setPermission(other, ownerId ~= 0 and other.UserId == ownerId)
-		end
+		groupOwner = if type(owner) == "table" and type(owner.Id) == "number" then owner.Id else 0
 	end
 	return true
 end
@@ -128,8 +125,13 @@ local function isOwner(player: Player): boolean
 end
 
 -- Does `player` own this game (the user, or a group game's group owner)? May yield the first time
--- (a web call for group games); Structures/StructureBlocks asks once per player.
+-- (a web call for group games); Players/Operators asks when they join.
 GameModes.isOwner = isOwner
+
+-- Is `isOwner`'s answer final (not a group game whose owner is still unknown)?
+function GameModes.ownerKnown(): boolean
+	return not isGroupGame() or groupOwner ~= nil
+end
 
 -- A player's game mode.
 function GameModes.get(player: Player): string
@@ -201,18 +203,18 @@ local function run(player: Player, text: string)
 	if not GameModeCommand.matches(text) then
 		return
 	end
-	local owner = isOwner(player)
-	setPermission(player, owner)
-	local studio = RunService:IsStudio()
+	setPermission(player)
 	local candidates, source = candidatesFor(player)
 	if source == nil then
 		return
 	end
+	local operator = Operators.permitted(player)
 	local result = GameModeCommand.run(text, {
 		source = source,
 		players = candidates,
-		mayUse = GameModeCommand.allowed(player.UserId, Config.Gameplay.GameModeCommand, owner, studio),
-		mayTarget = GameModeCommand.isAdmin(player.UserId, Config.Gameplay.Admins, owner, studio),
+		-- (Operators may always: GameModeCommand.allowed's "always" argument.)
+		mayUse = GameModeCommand.allowed(player.UserId, Config.Gameplay.GameModeCommand, operator, false),
+		mayTarget = operator,
 		modeOf = modeOf,
 	})
 	if result then
@@ -243,20 +245,19 @@ local function onSetGameMode(player: Player, payload: buffer)
 	if mode == nil or not takeSwitch(player) then
 		return
 	end
-	local owner = isOwner(player)
-	setPermission(player, owner)
-	local studio = RunService:IsStudio()
+	setPermission(player)
 	local _, source = candidatesFor(player)
 	if source == nil then
 		return
 	end
+	local operator = Operators.permitted(player)
 	apply(
 		player,
 		GameModeCommand.switchOwn(mode, {
 			source = source,
 			players = {},
-			mayUse = GameModeCommand.allowed(player.UserId, Config.Gameplay.GameModeCommand, owner, studio),
-			mayTarget = GameModeCommand.isAdmin(player.UserId, Config.Gameplay.Admins, owner, studio),
+			mayUse = GameModeCommand.allowed(player.UserId, Config.Gameplay.GameModeCommand, operator, false),
+			mayTarget = operator,
 			modeOf = modeOf,
 		})
 	)
@@ -287,12 +288,7 @@ function GameModes.start(serverNet: ServerNet.ServerNet)
 		if player:GetAttribute(GameMode.ATTRIBUTE) == nil then
 			GameModes.set(player, default, false)
 		end
-		-- Without the owner first, then with them once the lookup is done (at once, unless a
-		-- group game's owner has to be looked up).
-		setPermission(player, false)
-		task.spawn(function()
-			setPermission(player, isOwner(player))
-		end)
+		setPermission(player)
 		if legacy then
 			player.Chatted:Connect(function(message: string)
 				run(player, message)
@@ -310,9 +306,11 @@ function GameModes.start(serverNet: ServerNet.ServerNet)
 		listenToTextChat()
 	end
 	serverNet.on(Protocol.ClientMessage.SetGameMode, onSetGameMode)
+	-- (Becoming or no longer being an operator, and the world's Allow Commands.)
+	Operators.changed:Connect(setPermission)
 
-	-- A group game's owner may only learn they may switch from the lookup: keep trying until it
-	-- works (a web call can fail), so they needn't type /gamemode first.
+	-- The owner is an operator once the lookup works (Players/Operators asks too): keep trying
+	-- until it does (a web call can fail).
 	if isGroupGame() then
 		task.spawn(function()
 			local delay = OWNER_RETRY

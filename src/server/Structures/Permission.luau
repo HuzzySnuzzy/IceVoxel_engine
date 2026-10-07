@@ -2,15 +2,16 @@
 --[[
 	Who may use Minecraft's operator blocks: structure blocks, structure voids and jigsaws (BlockList
 	`creativeOnly`). Pure, so the tests can run it; Structures/StructureBlocks asks it with the
-	player's ownership worked out ahead (a group game's owner takes a web call).
+	player's operator status (Players/Operators).
 
 	As Minecraft's Player.canUseGameMasterBlocks (creative and an operator):
 	  * creative players only, always (Abilities.instabuild: never adventure or spectator
 	    players);
 	  * of those, Config.Structures.Permission decides: a list of user ids (by default none),
 	    true = every one, false = nobody;
-	  * the game's owner, Config.Gameplay.Admins (who may change others' game modes and the time:
-	    the operators) and Studio sessions always may.
+	  * the game's owner, Config.Gameplay.Admins and Studio sessions always may. In the game the
+	    glue passes the operators' permission (Players/Operators, which counts those three among
+	    the operators) as `isOwner`.
 	It covers placing and breaking these blocks (Network/ServerNet), opening their screens and
 	every request from them (SAVE, LOAD, DETECT, a jigsaw's Generate), and uploading pasted
 	structure data.
