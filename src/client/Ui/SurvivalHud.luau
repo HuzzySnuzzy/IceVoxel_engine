@@ -24,12 +24,13 @@
 	               right side), right-aligned: TAN's Climate Clemency while it lasts (a gold
 	               shield and the minutes and seconds left, with thirst or temperature on), then
 	               Internal Warmth (a flame) and Internal Chill (a snowflake) while they do (with
-	               temperature on).
+	               temperature on). Only with Config.Effects.Hud off: the status effects' icons in
+	               the top right (Ui/EffectHud) show the same three with their time left.
 	  reading      while a Thermometer (ItemList, TAN's) is the held item, with temperature on: the
-	               row above the status row reads out the body temperature and its target as
-	               numbers ("-3", "+5"), each in its zone's colour, with an arrow between them in
-	               the trend's colour (orange warming, pale blue cooling, white on target),
-	               right-aligned like the rows below it.
+	               row above the status row (in its place when it isn't drawn) reads out the body
+	               temperature and its target as numbers ("-3", "+5"), each in its zone's colour,
+	               with an arrow between them in the trend's colour (orange warming, pale blue
+	               cooling, white on target), right-aligned like the rows below it.
 	  edges        hypothermia and hyperthermia close in from the screen's edges, frost white-blue
 	               or heat orange-red, as strong as they have got (Minecraft's powder snow outline,
 	               alpha = the share of Temperature.EXTREME_TICKS frozen; TAN's heat overlay the
@@ -40,6 +41,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
 local Items = require(Shared.Items)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 
@@ -71,6 +73,8 @@ local TUBE_X = 7
 local ROW_WIDTH = 81
 -- The item whose holder sees the reading.
 local THERMOMETER = Items.id.Thermometer
+-- The status row, unless the effect icons (Ui/EffectHud) show its effects already.
+local STATUS_ROW = Config.Effects.Hud ~= true
 
 -- 9 x 9: K outline, L / R the left / right half, H a highlight (with the left half).
 local DROPLET = {
@@ -340,7 +344,9 @@ function SurvivalHud.build(canvas: Frame, layout: Layout)
 	Style.pixelArt(snowflake, 0, 0, SNOWFLAKE, { B = Color3.fromRGB(150, 210, 255), W = TEXT }, 2)
 	chillIcon = snowflake
 
-	local readingFrame = holder(canvas, "Thermometer", layout.width - ROW_WIDTH, layout.statusY - 10, ROW_WIDTH, 9, 2)
+	-- (In the status row's place when that isn't drawn.)
+	local readingY = if STATUS_ROW then layout.statusY - 10 else layout.statusY
+	local readingFrame = holder(canvas, "Thermometer", layout.width - ROW_WIDTH, readingY, ROW_WIDTH, 9, 2)
 	readingFrame.Visible = false
 	readingRow = readingFrame
 	local value, valueShadow =
@@ -499,7 +505,7 @@ function SurvivalHud.render(now: number, survival: boolean, held: number?)
 	local temperatureShown = survival and status ~= nil and status.temperatureOn
 	setVisible(row, thirstShown)
 	setVisible(gauge, temperatureShown)
-	setVisible(statusRow, thirstShown or temperatureShown)
+	setVisible(statusRow, STATUS_ROW and (thirstShown or temperatureShown))
 	setVisible(readingRow, temperatureShown and held == THERMOMETER)
 	if status == nil or not temperatureShown then
 		renderEdges(FROST, 0)

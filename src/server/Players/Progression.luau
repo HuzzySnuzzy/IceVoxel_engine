@@ -41,9 +41,9 @@
 	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the /time
 	             rule: Config.Gameplay.Admins, the owner, Studio).
 
-	For the mobs: when a player kills a mob, call `Progression.killed(player, mobName)` (a mob
-	kind's first kill is a discovery, 10 points; every kill a repeat of Knowledge.MOBS: animals 1,
-	monsters 5, others 3).
+	For the mobs: a player's kill calls `Progression.killed(player, mobName)` (the boot script
+	connects Mobs/Mobs' `died` event: a mob kind's first kill is a discovery, 10 points; every
+	kill a repeat of Knowledge.MOBS: animals 2, monsters 5, creepers 6, others 3).
 ]]
 
 local Players = game:GetService("Players")

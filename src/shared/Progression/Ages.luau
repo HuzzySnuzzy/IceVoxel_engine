@@ -10,16 +10,19 @@
 	                  stone bricks and polished stones, glass, smelting (iron ore and raw iron
 	                  into ingots too: smelting the first iron ingot is the way into the Iron
 	                  Age), Tough As Nails' basics (Glass Bottles, Bowls, mint and teas, the
-	                  Campfire, Straw and Leaf armor). Whatever is added to the game later starts
-	                  here unless an Age names it.
+	                  Campfire, Straw and Leaf armor), and what comes of the mobs' drops (cooked
+	                  meat, leather armor, White Wool from String). Whatever is added to the game
+	                  later starts here unless an Age names it.
 	  Iron Age        (level 5, a Furnace crafted, an Iron Ingot smelted) iron and gold: iron and
 	                  golden tools and armor, iron and gold blocks and nuggets, gold smelting,
 	                  Shears, the Bucket, Flint and Steel, the Lantern, the Canteen and the
-	                  Thermometer, and osmium smelting.
+	                  Thermometer, osmium smelting, and brewing: every potion's base variant
+	                  (Shared/Effects/PotionList; Minecraft's brewing waits for the Nether).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
-	                  Heat Generator, and Gunpowder and TNT (with the Demolition skill too).
+	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), and the
+	                  potions' strong (II) and long variants.
 	  Electric Age    (level 25, a Heat Generator crafted, 6 biomes discovered) basic and advanced
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
@@ -65,6 +68,8 @@ export type Age = {
 	color: { number },
 }
 
+local PotionList = require(script.Parent.Parent.Effects.PotionList)
+
 local TOOLS = { "Pickaxe", "Axe", "Shovel", "Hoe", "Sword" }
 local ARMOR = { "Helmet", "Chestplate", "Leggings", "Boots" }
 
@@ -101,6 +106,11 @@ for _, name in
 do
 	table.insert(iron, name)
 end
+-- (Potions: the base variant the Iron Age's, its strong and long ones the Industrial Age's.)
+local potions: { string } = {}
+for _, variant in PotionList.all() do
+	table.insert(if variant.from == PotionList.BASE then iron else potions, variant.item)
+end
 
 local industrial: { string } = {}
 each(industrial, "Diamond", TOOLS)
@@ -125,6 +135,9 @@ for _, name in
 		"Tnt",
 	}
 do
+	table.insert(industrial, name)
+end
+for _, name in potions do
 	table.insert(industrial, name)
 end
 

@@ -10,15 +10,17 @@
 	             characters' feet (Rig.feet), standing eyes (1.62), game mode and health.
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
-	             (Characters.hurt: the hurt cooldown and armor; a fresh one knocks the player back
-	             through a `push` op the client adds to its movement, as an explosion's), a
-	             creeper's blast (World/Explosions.explode, power 3, at its feet: blocks, items,
-	             players and other mobs as any blast) and arrows (an `arrow` op for everyone near).
+	             (Characters.hurt: the hurt cooldown, armor and Resistance; a fresh one knocks the
+	             player back through a `push` op the client adds to its movement, as an
+	             explosion's), a creeper's blast (World/Explosions.explode, power 3, at its feet:
+	             blocks, items, players and other mobs as any blast) and arrows (an `arrow` op for
+	             everyone near).
 	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
 	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
 	             the line of sight, then hits with the held item at its attack strength (ticks
-	             since the player's last attack or change of held item); a hit plays
+	             since the player's last attack or change of held item), with the player's
+	             Strength and Weakness (Players/Effects.levels); a hit plays
 	             entity.player.attack.strong or .weak and wears a tool (swords 1, other tools 2;
 	             not in creative).
 	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs within
@@ -65,6 +67,7 @@ local Explosions = require(script.Parent.Parent.World.Explosions)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Characters = require(script.Parent.Parent.Players.Characters)
+local Effects = require(script.Parent.Parent.Players.Effects)
 local GameModes = require(script.Parent.Parent.Players.GameModes)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
 local TimeCommand = require(script.Parent.Parent.Players.TimeCommand)
@@ -394,6 +397,8 @@ local function onAttack(player: Player, payload: buffer)
 		alive = aliveOf(player),
 		item = held,
 		ticks = since,
+		-- (Strength and Weakness.)
+		levels = Effects.levels(player),
 	})
 	if landed == nil then
 		return

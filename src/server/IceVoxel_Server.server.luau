@@ -160,6 +160,12 @@ Progression.start(net, world)
 Inventories.setWearFilter(Progression.wear)
 ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
 ItemUse.setBoilSpeed(Progression.boilSpeed)
+-- A mob a player killed is knowledge: the first of its kind a discovery, then Knowledge.MOBS.
+Mobs.died:Connect(function(killer: Player?, kind: string)
+	if killer then
+		Progression.killed(killer, kind)
+	end
+end)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)

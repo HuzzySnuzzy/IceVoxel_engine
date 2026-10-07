@@ -86,23 +86,30 @@ Knowledge.SMELTED = table.freeze({
 	Glass = 0.1,
 	Stone = 0.1,
 	SmoothStone = 0.1,
+	-- (The mobs' meat: Minecraft's cooked food gives 0.35.)
+	CookedBeef = 0.35,
+	CookedMutton = 0.35,
+	CookedPorkchop = 0.35,
+	CookedChicken = 0.35,
 }) :: { [string]: number }
 Knowledge.SMELT_DEFAULT = 0.1
 
 -- Points per craft (a result taken; a shift click's every round).
 Knowledge.CRAFT = 0.1
 
--- Points per mob killed (Minecraft: animals 1-3, monsters 5), for the mobs' side to give
--- (server Players/Progression.killed). A mob nobody listed gives MOB_DEFAULT.
+-- Points per mob a player killed (Shared/Entities/MobList names; server Mobs/Mobs' `died` event
+-- calls Players/Progression.killed): Minecraft's experience drops, animals 2 (the mean of their
+-- 1-3), monsters 5, and a creeper one more for walking up to something that explodes. A mob
+-- nobody listed gives MOB_DEFAULT.
 Knowledge.MOBS = table.freeze({
-	Sheep = 1,
-	Cow = 1,
-	Pig = 1,
-	Chicken = 1,
+	Sheep = 2,
+	Cow = 2,
+	Pig = 2,
+	Chicken = 2,
 	Zombie = 5,
 	Skeleton = 5,
 	Spider = 5,
-	Creeper = 5,
+	Creeper = 6,
 }) :: { [string]: number }
 Knowledge.MOB_DEFAULT = 3
 

@@ -55,6 +55,7 @@ local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Combat = require(Shared.Entities.Combat)
 local DayCycle = require(Shared.DayCycle)
+local Effects = require(Shared.Effects)
 local Explosion = require(Shared.World.Explosion)
 local Foods = require(Shared.Items.Foods)
 local GameMode = require(Shared.GameMode)
@@ -130,7 +131,8 @@ export type Source = {
 }
 
 -- A player's swing at a mob (`attack`): who, where their feet and eyes are, their game mode, the
--- item in hand and ticks since their last swing or change of item (Combat.strength).
+-- item in hand, ticks since their last swing or change of item (Combat.strength) and their status
+-- effects (Strength and Weakness: Shared/Effects.meleeDamage; nil: none).
 export type Attacker = {
 	key: any,
 	x: number,
@@ -141,6 +143,7 @@ export type Attacker = {
 	alive: boolean,
 	item: number?,
 	ticks: number,
+	levels: Effects.Levels?,
 }
 
 export type Context = {
@@ -472,9 +475,11 @@ end
 	A player hitting mob `id` (Protocol Attack; Shared/Entities/Combat): refused unless the player
 	is alive and not a spectator, the mob alive, its box within the mode's reach of the eyes
 	(+ Combat.SERVER_LEEWAY) and in sight (its centre, eyes or feet); then the held item's damage
-	at its attack strength with a 0.4 knockback away from the player. Returns the half hearts that
-	landed (0: refused, or under the mob's hurt cooldown) and whether it was a strong hit (strength
-	0.9 or more; else a weak one), or nil and why it was refused.
+	at its attack strength with a 0.4 knockback away from the player; the attacker's Strength and
+	Weakness change the item's damage first (Minecraft's attack_damage modifiers, which the attack
+	strength then scales). Returns the half hearts that landed (0: refused, or under the mob's hurt
+	cooldown) and whether it was a strong hit (strength 0.9 or more; else a weak one), or nil and
+	why it was refused.
 ]]
 function MobWorld.attack(self: MobWorld, id: number, attacker: Attacker): (number?, boolean | string)
 	local mob = self.byId[id]
@@ -514,6 +519,10 @@ function MobWorld.attack(self: MobWorld, id: number, attacker: Attacker): (numbe
 		return nil, "sight"
 	end
 	local base, speed = Combat.attackOf(attacker.item)
+	local levels = attacker.levels
+	if levels then
+		base = Effects.meleeDamage(base, levels)
+	end
 	local strength = Combat.strength(attacker.ticks, speed)
 	local landed = MobWorld.hurt(
 		self,

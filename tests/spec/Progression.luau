@@ -191,7 +191,7 @@ return function(t, shared, require, server, client)
 		t.eq(Progression.visited(maker, makerSession, "Plains"), 20)
 		t.eq(Progression.visited(maker, makerSession, "Plains"), 0)
 		t.eq(Progression.killed(maker, makerSession, "Zombie", 0, BUDGET), 10 + 5, "a monster: 5")
-		t.eq(Progression.killed(maker, makerSession, "Sheep", 0, BUDGET), 10 + 1, "an animal: 1")
+		t.eq(Progression.killed(maker, makerSession, "Sheep", 0, BUDGET), 10 + 2, "an animal: 2")
 		t.eq(Knowledge.mobPoints("Dragon"), Knowledge.MOB_DEFAULT)
 	end)
 

@@ -43,10 +43,10 @@
 	    their fire rules for burning (Fire Resistance, the burn factor and bonus, catching at
 	    once), then their own tick: Poison, Wither and Instant Damage hurt through the same hurt
 	    cooldown without armor (magic), Regeneration and Instant Health heal. Every hurt here
-	    (lava, fire, burning, the effects, blasts, falls, walls) is cut by Resistance
-	    (Effects.incomingDamage, after armor, as getDamageAfterMagicAbsorb), Jump Boost takes its
-	    levels off a fall's distance, and a blast that reaches a player whose effects ignite (Fuel
-	    Soaked) sets them burning (IN_FIRE_SECONDS, times their burn factor).
+	    (lava, fire, burning, the effects, blasts, falls, walls, mobs' hits: `hurt`) is cut by
+	    Resistance (Effects.incomingDamage, after armor, as getDamageAfterMagicAbsorb), Jump Boost
+	    takes its levels off a fall's distance, and a blast that reaches a player whose effects
+	    ignite (Fuel Soaked) sets them burning (IN_FIRE_SECONDS, times their burn factor).
 	  * sounds (Audio/Sounds), heard by everyone near: losing health (entity.player.hurt, at most
 	    every half second like Minecraft's invulnerability time) and dying (entity.player.death),
 	    from any cause; and a hurting landing's small or big fall with the fall sound of the block
@@ -340,9 +340,10 @@ end
 --[[
 	Hurts a living player by `amount` half hearts from a mob (server Mobs/Mobs: a zombie's or a
 	spider's hit, a skeleton's arrow), through the hurt cooldown lava, burning and explosions share
-	and softened by the armor worn (Players/Burning.hurtPlayer; never in creative or spectator).
-	Returns the half hearts that landed and whether the hurt was a fresh one (not under the
-	cooldown: Minecraft knocks back only those).
+	and softened by the armor worn (Players/Burning.hurtPlayer; never in creative or spectator),
+	then by Resistance (Players/Effects.incomingDamage, as every other hurt here). Returns the half
+	hearts that landed and whether the hurt was a fresh one (not under the cooldown: Minecraft
+	knocks back only those, Resistance or not).
 ]]
 function Characters.hurt(player: Player, amount: number): (number, boolean)
 	local character = player.Character
@@ -361,12 +362,13 @@ function Characters.hurt(player: Player, amount: number): (number, boolean)
 	if window then
 		armor, toughness = Items.armorPoints(window.inventory.armor)
 	end
-	local landed = Burning.hurtPlayer(state, GameMode.of(player), amount, armor, toughness)
+	local hit = Burning.hurtPlayer(state, GameMode.of(player), amount, armor, toughness)
+	local landed = Effects.incomingDamage(player, hit)
 	if landed > 0 then
 		-- (TakeDamage respects the ForceField of players who can't be hurt.)
 		humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
 	end
-	return landed, fresh and landed > 0
+	return landed, fresh and hit > 0
 end
 
 --[[

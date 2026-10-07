@@ -997,7 +997,8 @@ local Config = {
 		-- Poison and Fuel Soaked; water washes the coat off). Off, the fluids leave players be;
 		-- potions and /effect still work.
 		FluidEffects = true,
-		-- The effect icons in the top right corner (and the list beside open screens).
+		-- The effect icons in the top right corner (and the list beside open screens). Off, Tough
+		-- As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill.
 		Hud = true,
 		-- Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's
 		-- sway (a share of it), times the FOV Effects setting (Minecraft's Distortion Effects).

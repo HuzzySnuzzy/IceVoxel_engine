@@ -3018,9 +3018,13 @@ thermometer (a bulb in the zone's colour: pale blue, blue, green, orange, red; a
 tinted by zone with ticks at the zone borders; a pin on the temperature and an arrow beside it for
 the trend); a row higher, above the held item name's row (the centred name, long for most of the
 Tough As Nails items, reaches the right side), right-aligned, Climate Clemency's shield and time
-left (m:ss) and the Internal Warmth (flame) and Chill (snowflake) icons; and the frost or heat closing in from the
-screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the HUD). F3 prints a
-`survival` line with all the numbers.
+left (m:ss) and the Internal Warmth (flame) and Chill (snowflake) icons, only with
+`Config.Effects.Hud` off (the status effect icons list the same three, with their time); and the
+frost or heat closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its
+own behind the HUD). F3 prints a `survival` line with all the numbers. Knowledge's bar (Ui/Hud)
+fits between the hearts' and droplets' row and the hotbar, its level in the gap between them, so
+none of these rows moved for it; all of them are in the one canvas and its UIScale, so they keep
+apart at every GUI scale and on touch screens.
 
 ## Status effects (`Effects/`, server `Players/Effects`, client `Player/EffectState`, `Ui/EffectHud`, `Rendering/EffectView`)
 
@@ -3090,8 +3094,9 @@ Boost's levels first, and a blast that hurts a player whose effects `ignite` set
 registers Thirst, Internal Warmth and Chill with their switches, and Climate Clemency, each with
 `give` and `clear` for `/effect`), keeps the Glowing Highlight on the character and sends the
 Effects message when `needsSync` says the client's view is off. ServerNet's `miningFactor` rule
-(Effects.miningFactor) times survival mining (Mining's `factor`: the start check, the break check,
-a delayed break's time), so a Haste player's breaks are accepted when the client finishes them.
+(Mining.playerFactor: Effects.miningFactor times Progression's mining perks) times survival
+mining (Mining's `factor`: the start check, the break check, a delayed break's time), so a Haste
+player's breaks are accepted when the client finishes them.
 Potions are given by Players/ToughAsNails when a drink with `effects` finishes (`giveAll`). A new
 character starts with none (the client is told at once); nothing is saved.
 
@@ -3124,9 +3129,9 @@ level and time (blue, harmful red).
 speed factor, Jump Boost and Blindness onto the hull before every tick (PlayerPhysics' ground
 speed and, unlike Minecraft, a slowing factor in fluids too so oil's Slowness slows wading; jump
 velocity; the safe fall; no sprint start) and widens the field of view by (factor + 1) / 2;
-BlockInteraction times mining with its mining factor. `Rendering/EffectView` (after the camera)
-raises Lighting's ambients for Night Vision (LightingController.setNightVision), closes the fog in
-black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
+BlockInteraction times mining with its levels (Mining.playerFactor, with the perks).
+`Rendering/EffectView` (after the camera) raises Lighting's ambients for Night Vision
+(LightingController.setNightVision), closes the fog in black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
 LightingController.setEffectFogColour) and rolls the camera and sways the field of view for
 Nausea (MovementController.setFovSway), with a ColorCorrectionEffect for the brightness, darkness
 and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,
@@ -3164,7 +3169,7 @@ budget's bucket and the fraction of a point not yet given.
 | a crafting result taken | 8 (`craft`) | 0.1 a craft (`CRAFT`) |
 | a smelted result taken out | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
 | a biome stood in | 20 (`biome`) | - |
-| a mob killed (the mobs' side calls `killed`) | 10 (`mob`) | animals 1, monsters 5, others 3 (`MOBS`) |
+| a mob killed (Mobs/Mobs' `died`, wired to `killed` by the boot script) | 10 (`mob`) | animals 2 (Minecraft's 1-3), monsters 5, creepers 6, others 3 (`MOBS`) |
 | an Age reached | its reward: 50, 100, 150, 200 (`age`) | - |
 
 Repeats go through `Knowledge.repeatPoints(session, key, base, now, budget)`: each repeat of
@@ -3187,7 +3192,10 @@ lowering it holds until the next knowledge the player gets, which checks again. 
 milestones: Iron (5, a Furnace crafted, an Iron Ingot smelted), Industrial (15, an Osmium Ingot
 smelted, a Bucket crafted), Electric (25, a Heat Generator crafted, 6 biomes), Atomic (40, an
 Oil Refinery and a Basic Battery crafted). Iron smelting is the Stone Age's on purpose: smelting
-the first ingot is the way in; what is made of iron is the Iron Age's.
+the first ingot is the way in; what is made of iron is the Iron Age's. What the mobs brought
+(cooked meat, leather armor, White Wool) is the Stone Age's; the potions (Effects/PotionList)
+are brewed from the Iron Age (each potion's base variant), their level II and long variants from
+the Industrial Age (`tests/spec/Crossover` checks every one).
 
 **The recipe gate.** `Progression.allows(state, item)`: the item's Age reached and the node that
 names it (Demolition's gunpowder and TNT, Fission's Nuke) unlocked; a nil state allows
@@ -3223,7 +3231,7 @@ furnace's or machine's output slots before and after the action and tells it wha
 | Perk | Nodes | Where it plugs in |
 | ---- | ----- | ----------------- |
 | knowledge | Forager (+10% discoveries), Prospector (ores x2), Scholar (+10% all), Polymath (+15%), Enlightenment (+25%) | `knowledgeFactor(state, source)` inside `award` |
-| mining | Quarrying (stone tools x1.1), Ironworking (iron, golden), Diamond Cutting (diamond), Mastery (any tool) | `miningFactor(state, tool)` -> Shared/Mining's `factor` (`progressPerTick`, `ticks`, `mayBreak`): the client's mining (BlockInteraction, from ProgressionState) and the server's checks (ServerNet's `miningFactor` rule into EditRules.mayBreak, the delayed break's timing) |
+| mining | Quarrying (stone tools x1.1), Ironworking (iron, golden), Diamond Cutting (diamond), Mastery (any tool) | `miningFactor(state, tool)`, times the status effects' in `Mining.playerFactor` -> Shared/Mining's `factor` (`progressPerTick`, `ticks`, `mayBreak`): the client's mining (BlockInteraction, from ProgressionState.perks and EffectState) and the server's checks (ServerNet's `miningFactor` rule into EditRules.mayBreak, the delayed break's timing) |
 | wear | Smithing (15%), Tempering (15% more: 1 - 0.85²) | `wear(state, amount, random)`: each point skipped with `wearChance` (Unbreaking's way), from `Inventories.wearTool` (`setWearFilter`): mining, flint and steel, all tool wear |
 | thirst | Hardy (x0.9), Endurance (x0.9 more) | `thirstRate` -> `Thirst.tick`'s `rate` (a point costs 4 / rate exhaustion), server ToughAsNails (`setPerks`) |
 | insulation | Insulation, Thermoregulation (a step each) | `insulation` steps added to the armor's warmth and cooling before Climate's target (towards neutral either way), server ToughAsNails |
@@ -4318,9 +4326,10 @@ suffocation (eyes in an opaque block, 1 under the cooldown).
   through `hurt` and the push added to its velocity.
 - `attack(id, attacker)`: refused for the dead, spectators (`Combat.reach` 0), dying or gone mobs,
   a box beyond the mode's reach from the eyes (+ `SERVER_LEEWAY` 1), or out of sight (the mob's
-  centre, eyes and feet); else the held item's damage x 1.9's strength (`Combat.strength(ticks
-  since the swing or the change of item, speed)`) with a 0.4 knockback; returns the landed hurt
-  and whether it was strong.
+  centre, eyes and feet); else the held item's damage, with the attacker's Strength and Weakness
+  (`levels`: Effects.meleeDamage, as Minecraft's attack_damage modifiers) x 1.9's strength
+  (`Combat.strength(ticks since the swing or the change of item, speed)`) with a 0.4 knockback;
+  returns the landed hurt and whether it was strong.
 - Despawn every 20 ticks over every mob (Mob.checkDespawn): nothing with no players; monsters
   beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40;
   creatures with no player within 128 for `ForgetTicks` go; below y -64 anything.
@@ -4351,17 +4360,20 @@ rand(0..7)) and `brightForAnimals` (> 8). WAILA's block light and Audio/CaveMood
 ticks the ticking chunks from `Simulation.activeChunks` (a key set); players from their
 characters (Rig.feet, eyes 1.62). After each tick: sounds (Audio/Sounds), deaths (the `died`
 BindableEvent: killer Player or nil, kind, x, y, z, id), loot (Entities.spawnItem), hits
-(`Characters.hurt`: Burning.hurtPlayer's cooldown and the armor worn; a fresh one queues a `push`
-for the player), creepers' blasts (`Explosions.explode`, power 3 at the feet: a blast like any,
+(`Characters.hurt`: Burning.hurtPlayer's cooldown and the armor worn, then Resistance; a fresh one
+queues a `push` for the player), creepers' blasts (`Explosions.explode`, power 3 at the feet: a blast like any,
 which reaches the boot script's handler and so `Mobs.explode` for the other mobs), arrows
 (queued for players within tracking range). Every `SyncTicks` (2) each player gets one Mobs
 message: spawns for mobs coming within `TrackingDistance` (64; 128 spawns a message at most),
 states of known mobs whose quantized state changed (a per-player copy of what was sent), removes
 for those that left or are gone, and the queued arrows and push. Attacks: a token bucket of
 `AttacksPerSecond`, the held item (Inventories.heldTool, watched every tick for the attack
-strength's reset), `MobWorld.attack`, the strong or weak attack sound, the weapon's wear
+strength's reset), `MobWorld.attack` with the player's effect levels (Players/Effects.levels),
+the strong or weak attack sound, the weapon's wear
 (Combat.wear: swords 1, tools 2; not with instabuild). /summon and /kill: TextChatCommands (or
-Chatted), SummonCommand's parse and TimeCommand.mayUse.
+Chatted), SummonCommand's parse and TimeCommand.mayUse. The boot script connects `died` to
+Players/Progression.killed for a player's kills (the kind's first a discovery, then
+Knowledge.MOBS: animals 2, monsters 5, creepers 6).
 
 **Combat and food** (`Shared/Entities/Combat`, `Shared/Items/Foods`, pure): ItemList's `attack`
 (swords 4-7 at 1.6 a second, axes 7-9 at 0.8-1, pickaxes 2-5, shovels 2.5-5.5, hoes 1, the hand 1

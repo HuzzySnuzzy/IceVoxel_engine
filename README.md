@@ -176,8 +176,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   the cold or the heat off. Joining gives 5 minutes of
   Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at half the rate
   and doesn't hurt. Frost or heat closes in from the screen's edges, and a thermometer over the
-  droplets shows the temperature, coloured by zone, with an arrow for where it is going, the
-  clemency's time left and the effects above it. Creative and spectator players are untouched.
+  droplets shows the temperature, coloured by zone, with an arrow for where it is going; the
+  clemency's time left and the effects are status effect icons in the top right. Creative and
+  spectator players are untouched.
   `Config.ToughAsNails` turns thirst or temperature off.
 - **Herbs, bowls and teas (Tough As Nails).** Two herbs grow wild in rare small patches (about 4
   plants, some 30 blocks apart on open ground): **Mint** on plains, in meadows and jungles, and
@@ -217,7 +218,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   wander, stand about and run off when hurt; **zombies** (0.6 × 1.95, 20, armor 2) and
   **spiders** (1.4 × 0.9, 16; they climb walls, leap, and only hunt in the dark) hunt survival
   and adventure players they can see within 16 blocks and hit them (3 and 2 half hearts every
-  second, through the armor and the hurt cooldown, with a knockback); **skeletons** (0.6 × 1.99,
+  second, through the armor, Resistance and the hurt cooldown, with a knockback); **skeletons** (0.6 × 1.99,
   20) shoot within 15 blocks every 3 s (3-5 an arrow; the arrows are hitscan, seen flying);
   **creepers** (0.6 × 1.7, 20) walk up, hiss within 3 blocks and 1.5 s later explode with power 3,
   unless you get 7 blocks away. Zombies and skeletons burn in daylight under the open sky. Mobs
@@ -232,9 +233,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   with meat to eat it when hurt (steak and cooked porkchop heal 2 hearts, cooked mutton and
   chicken 1.5, raw meat less; raw chicken and rotten flesh may give Tough As Nails' Thirst
   effect). **Fighting:** a left click on a mob in reach (3 blocks, 6 in creative) hits it with
-  Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...) and 1.9's attack recovery (a
-  sword hits at full strength every 0.6 s), knocks it back and wears the weapon; WAILA names the
-  mob and its health. Creatures spawn on grass in the light 24-44 blocks from players (10 at most
+  Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...; Strength adds 3 a level and
+  Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength every 0.6 s), knocks
+  it back and wears the weapon; WAILA names the mob and its health. A kill is knowledge: the first
+  of each kind 10 points, then 2 an animal, 5 a monster, 6 a creeper. Creatures spawn on grass in the light 24-44 blocks from players (10 at most
   around each), monsters on solid ground in the dark, at night or in caves (15 at most; never
   by torchlight), from the same light estimate WAILA shows; monsters vanish far from everyone
   (Minecraft's 128 and 32 block rules). Mobs only move within the simulated chunks around players
@@ -242,11 +244,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   `Config.Mobs` sets the caps and turns spawning or mobs off.
 - **Status effects.** Minecraft 1.20.1's MobEffects with their numbers: Speed (+20% ground speed a
   level) and Slowness (-15%), Haste (+20% mining speed a level) and Mining Fatigue (x 0.3, 0.09,
-  0.0027...), Strength (+3 melee a level) and Weakness (-4, for the combat to come), Jump Boost
+  0.0027...), Strength (+3 melee a level) and Weakness (-4, on hits on mobs), Jump Boost
   (+0.1 jump and a block less fall damage a level), Regeneration (half a heart every 50 >> amp
   ticks), Poison (every 25 >> amp, never the last half heart, through armor) and Wither (every
   40 >> amp, and it kills), Fire Resistance (no fire, lava, campfire or burning hurts), Resistance
-  (20% of every hurt a level; V: nothing), Night Vision (caves and nights lit, flickering in its
+  (20% of every hurt a level, mobs' too; V: nothing), Night Vision (caves and nights lit, flickering in its
   last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
   the view sways, building up over 8 s), Instant Health and Instant Damage (4 and 6 half hearts,
   doubling a level) and Glowing (an outline everyone sees through walls). They stack and refresh
@@ -257,7 +259,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   and the music toast (beneficial in the top row, the rest below, longest first, blinking out over
   their last 10 s; hover one, or tap it on a touch screen, for its name, level and time), and
   Minecraft's list of names and times beside any open screen; F3 lists them too. Tough As Nails'
-  Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them. `/effect give
+  Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them (its own
+  status row over the hotbar shows only with `Config.Effects.Hud` off). `/effect give
   <player> <effect> [seconds | infinite] [amplifier]` and `/effect clear [player] [effect]` with
   Minecraft's ids and wording (admins, the owner and Studio, as `/time`).
 - **Oil and fuel on the skin.** Wading in crude oil is Slowness II, and leaving it leaves you **Oil
@@ -270,12 +273,13 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Potions.** Brewed in a crafting grid (the game has no brewing stand): a Purified Water Bottle
   with an ingredient makes a potion, the potion with Glow Dust (the game's glowstone) its level II
   and with a coal or charcoal its long variant, Minecraft's durations: Swiftness (Mint Leaves),
-  Leaping (Cornflower), Strength (Gunpowder), Healing (Gold Nugget), Harming (Red Mushroom), Poison
+  Leaping (Cornflower), Strength (Gunpowder: creepers drop it), Healing (Gold Nugget), Harming (Red Mushroom), Poison
   (Lily of the Valley), Regeneration (Oxeye Daisy), Fire Resistance (Ginger Root), Night Vision
   (Glow Dust), Weakness (any tulip), and this game's Haste (Gold Ingot) and Resistance (Iron
   Ingot): 29 potions. Bottles of the effect's colour, stacking to 1; hold use 1.6 s to drink one
   (whatever your thirst, Tough As Nails on or off) and the Glass Bottle comes back. The tooltip
-  lists the effect, its level and time, blue or red.
+  lists the effect, its level and time, blue or red. Brewing is the Iron Age's, levels II and the
+  long potions the Industrial Age's.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -335,16 +339,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   kind mined 5 points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind
   killed 10, an Age reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5),
   logs (0.25), each item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft
-  (0.1), each mob. Repeats wear off (a repeat of the same thing within a minute gives three
+  (0.1), each mob (an animal 2, a monster 5, a creeper 6). Repeats wear off (a repeat of the same thing within a minute gives three
   quarters of the last), all repeats give at most 20 points a minute, and blocks a player placed
   give nothing at all, so farms dry up. Knowledge opens five **Ages**, each at a level and two
   milestones: the **Stone Age** (where everyone starts: wood, stone tools, the crafting table,
-  furnace, chests, torches, glass, iron smelting, Tough As Nails' basics), the **Iron Age** (level
-  5, a Furnace crafted and an Iron Ingot smelted: iron and gold tools and armor, the Bucket,
-  Shears, Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting),
-  the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic
-  and advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and
-  TNT), the **Electric Age** (level 25, a Heat Generator and 6 biomes: cables, the Electric
+  furnace, chests, torches, glass, iron smelting, Tough As Nails' basics, cooked meat, leather
+  armor and wool), the **Iron Age** (level 5, a Furnace crafted and an Iron Ingot smelted: iron
+  and gold tools and armor, the Bucket, Shears, Flint and Steel, the Lantern, the Canteen, the
+  Thermometer, gold and osmium smelting, potions), the **Industrial Age** (level 15, an Osmium
+  Ingot and a Bucket: diamond gear, Mekanism's basic and advanced pipes, transporters and tanks,
+  the Configurator, the Heat Generator, gunpowder and TNT, potions II and long potions), the **Electric Age** (level 25, a Heat Generator and 6 biomes: cables, the Electric
   Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite pipes) and
   the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the ultimate tiers,
   the Nuke). A later Age's crafting results stay out of the grid (shown greyed with "Requires the
@@ -1319,7 +1323,7 @@ for performance:
 | `Nuke.EditsPerTick` / `ReadsPerTick` | 500 / 16000 | Cost bounds per server tick (each edit is 12 bytes to every client). |
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Effects.FluidEffects` | true | Oil and fuel give their effects (Slowness II and Oil Coated; Nausea, Poison and Fuel Soaked); off, they leave players be (potions and `/effect` still work). |
-| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens. |
+| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: Tough As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill). |
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the FOV Effects setting. |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
@@ -2089,10 +2093,12 @@ mining, combat and hurt paths read them through `Shared/Effects`), `interval` wi
 
 Server code gives and reads effects through `Players/Effects`: `Effects.give(player, "Speed",
 600, 1)` (ticks, amplifier; `Effects.INFINITE` for good), `giveAll`, `remove`, `clear`, `has`,
-`amplifier`, `levels`; combat calls `Effects.meleeDamage(player, base)` for a hit's half hearts
-with Strength and Weakness, and any hurt goes through `Effects.incomingDamage(player, amount)`
-(Resistance) before `TakeDamage` (Players/Characters does for lava, fire, blasts, falls, walls
-and the effects' own hurts). A mob could keep an `EffectRules` state of its own: `EffectRules.give`
+`amplifier`, `levels`; combat changes a hit's half hearts with Strength and Weakness
+(`Effects.meleeDamage(player, base)`; the mobs' MobWorld.attack takes the player's `levels`), and
+any hurt goes through `Effects.incomingDamage(player, amount)` (Resistance) before `TakeDamage`
+(Players/Characters does for lava, fire, blasts, falls, walls, mobs' hits and the effects' own
+hurts). A player's mining speed is `Mining.playerFactor(levels, progress, tool)`: the effects'
+times the Progression perks', on the client and the server alike. A mob could keep an `EffectRules` state of its own: `EffectRules.give`
 / `tick` (the hurt and healing per tick) / `levels`, and `Shared/Effects`' modifiers on those
 levels. An effect kept elsewhere (Tough As Nails' four) is `external = true` and registered with
 `Effects.addExternal(id, { get, give, clear })`, so it is listed with the rest.
@@ -2137,11 +2143,11 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,344 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,395 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
-and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge, Ages and
-skills have Progression).
+and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge,
+Ages and skills have Progression; where those three meet, Crossover).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune

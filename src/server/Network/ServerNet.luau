@@ -158,7 +158,8 @@ export type Rules = {
 	mined: ((player: Player, block: number, x: number, y: number, z: number, placed: boolean) -> ())?,
 	-- The player's own mining speed with `tool` in hand (1 without), for every timing check
 	-- (Mining's `factor`): the status effects' Haste and Mining Fatigue times Progression's perks
-	-- (Players/Effects.miningFactor x Players/Progression.miningFactor, joined in the boot script).
+	-- (Shared/Mining.playerFactor on Players/Effects.levels and Players/Progression.state, in the
+	-- boot script).
 	miningFactor: ((player: Player, tool: number?) -> number)?,
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
