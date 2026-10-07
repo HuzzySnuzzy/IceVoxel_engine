@@ -17,11 +17,13 @@
 	             LOGO_PIXEL GUI pixels a block, as Minecraft's stone letters), the edition line, a
 	             yellow splash turned -20 degrees and pulsing (TitleRules), and Minecraft's
 	             column of 200 x 20 buttons from a quarter down + 48: Join World (once the world
-	             exists), Create World (operators, while there is none), Load World (disabled:
-	             worlds aren't saved yet, coming later), Options... (the Options menu,
-	             Ui/SettingsScreen.showIn, Done comes back here); the status line under them
-	             (waiting for the operator, being created, ready); Config.MainMenu.Version
-	             bottom left and Credits bottom right.
+	             exists), Create World and Load World (operators, while there is none; Load
+	             World where worlds can be saved: the server's WorldSave state, Ui/SaveIndicator),
+	             Options... (the Options menu, Ui/SettingsScreen.showIn, Done comes back here);
+	             the status line under them (waiting for the operator, being created or loaded:
+	             "Loading world: 12 / 40", ready) and, in red, why worlds can't be saved here
+	             (Studio without API access); Config.MainMenu.Version bottom left and Credits
+	             bottom right.
 	  Panorama   there is no world to turn around yet, so the background is a moving sky:
 	             Minecraft's day sky blue, blocky clouds drifting, far snow-capped mountains and
 	             near grass hills sliding by at different speeds (parallax), each layer two
@@ -32,6 +34,14 @@
 	             seed, Generate Structures), then Create New World / Cancel. Creating shows
 	             "Creating the world..." until the server answers (CreateWorldResult): the world
 	             is entered, or the screen comes back with the server's reason in red.
+	  Load       Minecraft's Select World screen: the saved worlds (the server's WorldList, last
+	             played first), three lines each (Ui/WorldListRules: name; type and when last
+	             played; game mode and size), one selected (click; double click plays it), then
+	             Play Selected World (WorldAction load: "Loading the world..." with the count of
+	             keys read, then the world is entered, or the screen comes back with why not in
+	             red), Rename (a name box: the server filters it), Delete (Minecraft's "Are you
+	             sure you want to delete this world?" first) and Cancel. Each answer lists the
+	             worlds again with how it went.
 	  Customize  one widget per setting the world type declares (WorldTypes.Setting), drawn
 	             generically: toggles and choices are buttons that cycle, text a field with what
 	             its `check` finds wrong under it in red and its `presets` on a button that cycles
@@ -66,9 +76,12 @@ local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local CreateWorldForm = require(script.Parent.CreateWorldForm)
 local FormWidgets = require(script.Parent.FormWidgets)
+local SaveIndicator = require(script.Parent.SaveIndicator)
 local SettingsScreen = require(script.Parent.SettingsScreen)
 local Style = require(script.Parent.Style)
 local TitleRules = require(script.Parent.TitleRules)
+local WorldListRules = require(script.Parent.WorldListRules)
+local SaveText = require(Shared.SaveText)
 
 -- Over everything else (the HUD and screens are 1..20).
 local DISPLAY_ORDER = 100
@@ -121,7 +134,7 @@ local LETTERS: { [string]: { string } } = {
 local LOGO_TEXT = "ICEVOXEL"
 local EDITION = "ROBLOX EDITION"
 
-type Page = "title" | "create" | "customize" | "options" | "creating"
+type Page = "title" | "create" | "customize" | "options" | "creating" | "load" | "confirm" | "rename"
 
 local MainMenu = {}
 
@@ -374,6 +387,9 @@ function MainMenu.run()
 		customize = newPage("customize"),
 		options = newPage("options"),
 		creating = newPage("creating"),
+		load = newPage("load"),
+		confirm = newPage("confirm"),
+		rename = newPage("rename"),
 	}
 
 	--[[ Title ]]
@@ -406,14 +422,17 @@ function MainMenu.run()
 	local splashScale = Instance.new("UIScale")
 	splashScale.Parent = splash
 
-	local column = place(title, UDim2.new(0.5, -BUTTON_W / 2, 0.25, 48), UDim2.fromOffset(BUTTON_W, 5 * ROW), 5)
+	local column = place(title, UDim2.new(0.5, -BUTTON_W / 2, 0.25, 48), UDim2.fromOffset(BUTTON_W, 6 * ROW), 5)
 	local joinButton = FormWidgets.button(column, "Join World", 0, 0, BUTTON_W, BUTTON_H)
 	local createButton = FormWidgets.button(column, "Create World", 0, ROW, BUTTON_W, BUTTON_H)
-	local loadButton = FormWidgets.button(column, "Load World (Coming soon)", 0, 2 * ROW, BUTTON_W, BUTTON_H)
+	local loadButton = FormWidgets.button(column, "Load World", 0, 2 * ROW, BUTTON_W, BUTTON_H)
 	loadButton:setEnabled(false)
 	local optionsButton = FormWidgets.button(column, "Options...", 0, 3 * ROW + 12, BUTTON_W, BUTTON_H)
 	local statusLine = FormWidgets.label(column, "", -60, 4 * ROW + 16, BUTTON_W + 120, GRAY, "centre")
-	local titleOrder: { GuiObject } = { joinButton.button, createButton.button, optionsButton.button }
+	-- (Why worlds can't be saved here, in red: Studio without API access.)
+	local setSaveNote = infoText(column, -60, 4 * ROW + 28, BUTTON_W + 120, 3)
+	local titleOrder: { GuiObject } =
+		{ joinButton.button, createButton.button, loadButton.button, optionsButton.button }
 	for i, object in titleOrder do
 		object.NextSelectionDown = titleOrder[i + 1] or titleOrder[1]
 		object.NextSelectionUp = titleOrder[i - 1] or titleOrder[#titleOrder]
@@ -506,9 +525,59 @@ function MainMenu.run()
 	local optionsHost = pages.options
 	local closeOptions: (() -> ())? = nil
 
+	--[[ Load World, its delete confirmation and rename ]]
+
+	local load = pages.load
+	local loadTitle = FormWidgets.label(load, "Select World", 0, 0, 320, WHITE, "centre")
+	loadTitle.frame.Position = UDim2.new(0.5, -160, 0, 8)
+	local worldList = Instance.new("ScrollingFrame")
+	worldList.BackgroundTransparency = 0.5
+	worldList.BackgroundColor3 = Color3.new(0, 0, 0)
+	worldList.BorderSizePixel = 0
+	worldList.Position = UDim2.new(0.5, -140, 0, 24)
+	worldList.Size = UDim2.new(0, 280, 1, -24 - 84)
+	worldList.ScrollBarThickness = 4
+	worldList.ScrollingDirection = Enum.ScrollingDirection.Y
+	worldList.ZIndex = 5
+	worldList.Parent = load
+	local noteHolder = place(load, UDim2.new(0.5, -160, 1, -80), UDim2.fromOffset(320, 22), 5)
+	local setLoadNote = infoText(noteHolder, 0, 0, 320, 2)
+	local loadFooter = place(load, UDim2.new(0.5, -155, 1, -52), UDim2.fromOffset(310, ROW + BUTTON_H), 5)
+	local playButton = FormWidgets.button(loadFooter, "Play Selected World", 0, 0, 150, BUTTON_H)
+	local renameButton = FormWidgets.button(loadFooter, "Rename", 160, 0, 150, BUTTON_H)
+	local deleteButton = FormWidgets.button(loadFooter, "Delete", 0, ROW, 150, BUTTON_H)
+	local loadCancel = FormWidgets.button(loadFooter, "Cancel", 160, ROW, 150, BUTTON_H)
+
+	local confirm = pages.confirm
+	local confirmHolder = place(confirm, UDim2.new(0.5, -160, 0.5, -44), UDim2.fromOffset(320, 88), 5)
+	local setQuestion = infoText(confirmHolder, 0, 0, 320, 1)
+	local setWarning = infoText(confirmHolder, 0, 16, 320, 2)
+	local confirmDelete = FormWidgets.button(confirmHolder, "Delete", 5, 52, 150, BUTTON_H)
+	local confirmCancel = FormWidgets.button(confirmHolder, "Cancel", 165, 52, 150, BUTTON_H)
+
+	local renamePage = pages.rename
+	local renameHolder = place(renamePage, UDim2.new(0.5, -105, 0.5, -40), UDim2.fromOffset(210, 80), 5)
+	FormWidgets.label(renameHolder, "World Name", 1, 0, 208, GRAY)
+	local renameBox = FormWidgets.editBox(renameHolder, 1, 11, 208, BUTTON_H, 5, function(text: string): string
+		return if utf8.len(text) and (utf8.len(text) :: number) > WorldSettings.MAX_NAME
+			then string.sub(text, 1, (utf8.offset(text, WorldSettings.MAX_NAME + 1) :: number) - 1)
+			else text
+	end)
+	local renameNow = FormWidgets.button(renameHolder, "Rename", 0, 40, 100, BUTTON_H)
+	local renameCancel = FormWidgets.button(renameHolder, "Cancel", 110, 40, 100, BUTTON_H)
+
+	-- The saved worlds (the server's WorldList), the one picked, a request out.
+	local worlds: { Protocol.WorldEntry } = {}
+	local selectedId: string? = nil
+	local listBusy = false
+	-- What the creating page waits for ("create" or "load"), and a load's progress line.
+	local pending: string? = nil
+	local loadingText: string? = nil
+
 	--[[ Behaviour ]]
 
 	local page: Page = "title"
+	local connections: { RBXScriptConnection } = {}
 
 	local function gamepadUser(): boolean
 		local last = UserInputService:GetLastInputType()
@@ -524,15 +593,39 @@ function MainMenu.run()
 	end
 
 	local function refreshTitle()
-		local buttons = TitleRules.buttons(state, isOperator())
+		local saveState, saveWhy = SaveIndicator.state()
+		local saves = saveState == Protocol.SaveState.On or saveState == Protocol.SaveState.Off
+		local buttons = TitleRules.buttons(state, isOperator(), saves)
 		joinButton:setEnabled(buttons.join)
 		createButton:setEnabled(buttons.create)
+		loadButton:setEnabled(buttons.load)
 		optionsButton:setEnabled(buttons.options)
-		local text, kind = TitleRules.status(state, isOperator(), operatorName, worldName)
+		local text, kind = TitleRules.status(state, isOperator(), operatorName, worldName, loadingText)
 		statusLine:setText(
 			text,
 			if kind == "news" then Style.Colour.Yellow elseif kind == "warning" then Style.Colour.Red else GRAY
 		)
+		local note = if saveState ~= nil and saveState == Protocol.SaveState.Unavailable
+			then SaveText.state(saveState, saveWhy)
+			else nil
+		setSaveNote(note or "", Style.Colour.Red)
+	end
+
+	local function selectedEntry(): Protocol.WorldEntry?
+		for _, entry in worlds do
+			if entry.id == selectedId then
+				return entry
+			end
+		end
+		return nil
+	end
+
+	local function refreshLoad()
+		local buttons = WorldListRules.buttons(selectedEntry() ~= nil, listBusy)
+		playButton:setEnabled(buttons.play)
+		renameButton:setEnabled(buttons.rename)
+		deleteButton:setEnabled(buttons.delete)
+		loadCancel:setEnabled(buttons.cancel)
 	end
 
 	local function refreshCreate()
@@ -574,7 +667,88 @@ function MainMenu.run()
 			selectObject(if form.tab == "game" then modeButton.button else typeButton.button)
 		elseif name == "customize" then
 			selectObject(doneButton.button)
+		elseif name == "load" then
+			refreshLoad()
+			selectObject(loadCancel.button)
+		elseif name == "confirm" then
+			selectObject(confirmCancel.button)
+		elseif name == "rename" then
+			selectObject(renameCancel.button)
 		end
+	end
+
+	local play: () -> () = function() end
+	local lastClick = { id = "", at = -math.huge }
+	-- The list's rows: name, then two gray lines; the picked one framed in white.
+	local function buildRows()
+		for _, child in worldList:GetChildren() do
+			if not child:IsA("UIComponent") then
+				child:Destroy()
+			end
+		end
+		local y = 2
+		for _, entry in worlds do
+			local date = os.date("*t", math.floor(entry.lastPlayed))
+			local line1, line2, line3 = WorldListRules.row(entry, date :: any)
+			local row = Instance.new("TextButton")
+			row.Name = entry.id
+			row.Text = ""
+			row.AutoButtonColor = false
+			row.BackgroundTransparency = if entry.id == selectedId then 0 else 1
+			row.BackgroundColor3 = WHITE
+			row.BorderSizePixel = 0
+			row.Position = UDim2.fromOffset(4, y)
+			row.Size = UDim2.fromOffset(268, 36)
+			row.ZIndex = 6
+			row.Parent = worldList
+			local inside = Style.frame(row, 1, 1, 266, 34, Color3.new(0, 0, 0), 6)
+			inside.BackgroundTransparency = if entry.id == selectedId then 0 else 1
+			Style.shadowText(row, line1, 4, 3, 260, 10, WHITE, 7)
+			Style.shadowText(row, line2, 4, 13, 260, 10, GRAY, 7)
+			Style.shadowText(row, line3, 4, 23, 260, 10, GRAY, 7)
+			row.Activated:Connect(function()
+				local now = os.clock()
+				local again = lastClick.id == entry.id and now - lastClick.at < 0.4
+				lastClick.id, lastClick.at = entry.id, now
+				if selectedId ~= entry.id then
+					SoundPlayer.click()
+					selectedId = entry.id
+					buildRows()
+					refreshLoad()
+				elseif again then
+					play()
+				end
+			end)
+			y += 38
+		end
+		worldList.CanvasSize = UDim2.fromOffset(0, y + 2)
+	end
+
+	-- A request is out (its answer is the list again): the buttons wait.
+	local function waitForList(note: string)
+		listBusy = true
+		setLoadNote(note, GRAY)
+		refreshLoad()
+	end
+
+	local function requestList()
+		waitForList("Reading the saved worlds...")
+		ClientNet.send(Protocol.ClientMessage.WorldAction, Protocol.encodeWorldAction(Protocol.WorldAction.List))
+	end
+
+	play = function()
+		local entry = selectedEntry()
+		if entry == nil or listBusy or not isOperator() then
+			return
+		end
+		pending = "load"
+		creatingTitle:setText("Loading the world...")
+		creatingLine:setText(`"{entry.name}"`)
+		showPage("creating")
+		ClientNet.send(
+			Protocol.ClientMessage.WorldAction,
+			Protocol.encodeWorldAction(Protocol.WorldAction.Load, entry.id)
+		)
 	end
 
 	local function enter()
@@ -675,6 +849,8 @@ function MainMenu.run()
 			return
 		end
 		setError("")
+		pending = "create"
+		creatingTitle:setText("Creating the world...")
 		creatingLine:setText(`"{WorldSettings.cleanName(form.name)}"`)
 		showPage("creating")
 		ClientNet.send(Protocol.ClientMessage.CreateWorld, Protocol.encodeCreateWorld(CreateWorldForm.request(form)))
@@ -689,6 +865,10 @@ function MainMenu.run()
 			showPage("title")
 		elseif page == "customize" then
 			showPage("create")
+		elseif page == "load" then
+			showPage("title")
+		elseif page == "confirm" or page == "rename" then
+			showPage("load")
 		elseif page == "options" then
 			-- (A sub-page goes back a page; Key Binds waiting for a key takes the press.)
 			if not SettingsScreen.back(escaped) then
@@ -712,6 +892,58 @@ function MainMenu.run()
 	createButton.clicked = clickThen(function()
 		setError("")
 		showPage("create")
+	end)
+	loadButton.clicked = clickThen(function()
+		showPage("load")
+		requestList()
+	end)
+	playButton.clicked = clickThen(play)
+	loadCancel.clicked = clickThen(function()
+		showPage("title")
+	end)
+	deleteButton.clicked = clickThen(function()
+		local entry = selectedEntry()
+		if entry then
+			local question, warning = WorldListRules.deleteQuestion(entry.name)
+			setQuestion(question, WHITE)
+			setWarning(warning, GRAY)
+			showPage("confirm")
+		end
+	end)
+	confirmDelete.clicked = clickThen(function()
+		local entry = selectedEntry()
+		showPage("load")
+		if entry then
+			waitForList("Deleting...")
+			ClientNet.send(
+				Protocol.ClientMessage.WorldAction,
+				Protocol.encodeWorldAction(Protocol.WorldAction.Delete, entry.id)
+			)
+		end
+	end)
+	confirmCancel.clicked = clickThen(function()
+		showPage("load")
+	end)
+	renameButton.clicked = clickThen(function()
+		local entry = selectedEntry()
+		if entry then
+			renameBox:setText(entry.name)
+			showPage("rename")
+		end
+	end)
+	renameNow.clicked = clickThen(function()
+		local entry = selectedEntry()
+		showPage("load")
+		if entry then
+			waitForList("Renaming...")
+			ClientNet.send(
+				Protocol.ClientMessage.WorldAction,
+				Protocol.encodeWorldAction(Protocol.WorldAction.Rename, entry.id, renameBox:text())
+			)
+		end
+	end)
+	renameCancel.clicked = clickThen(function()
+		showPage("load")
 	end)
 	optionsButton.clicked = clickThen(function()
 		showPage("options")
@@ -766,14 +998,22 @@ function MainMenu.run()
 			return
 		end
 		state, operatorName, worldName = newState, operator, world
+		if newState ~= Protocol.MenuState.Creating then
+			loadingText = nil
+		end
 		if page == "title" then
 			refreshTitle()
 		elseif page == "create" then
 			refreshCreate()
 		end
 		-- Someone else made the world (or it failed) while this screen was open: back to the title.
+		local choosing = page == "create"
+			or page == "customize"
+			or page == "load"
+			or page == "confirm"
+			or page == "rename"
 		if
-			(page == "create" or page == "customize") and newState ~= Protocol.MenuState.Waiting
+			choosing and newState ~= Protocol.MenuState.Waiting and not listBusy
 			or page == "creating" and newState == Protocol.MenuState.Failed
 		then
 			showPage("title")
@@ -785,11 +1025,50 @@ function MainMenu.run()
 			return
 		elseif ok then
 			enter()
+		elseif page == "creating" and pending == "load" then
+			showPage("load")
+			setLoadNote(message, Style.Colour.Red)
 		elseif page == "creating" then
 			showPage("create")
 			setError(message, Style.Colour.Red)
 		end
 	end)
+	ClientNet.on(Protocol.ServerMessage.WorldList, function(payload: buffer)
+		local list, _, message = Protocol.decodeWorldList(payload)
+		if list == nil or entered then
+			return
+		end
+		worlds = list
+		selectedId = WorldListRules.keepSelection(worlds, selectedId)
+		listBusy = false
+		if #worlds == 0 and message == "" then
+			message = "No worlds are saved yet: create one"
+		end
+		setLoadNote(message, GRAY)
+		buildRows()
+		refreshLoad()
+	end)
+	-- Whether worlds can be saved here, and a load's progress (Ui/SaveIndicator hears them).
+	table.insert(
+		connections,
+		SaveIndicator.stateChanged:Connect(function()
+			if page == "title" then
+				refreshTitle()
+			end
+		end)
+	)
+	table.insert(
+		connections,
+		SaveIndicator.loading:Connect(function(done: number, total: number)
+			local line = WorldListRules.loading(done, total)
+			loadingText = line
+			if page == "creating" and pending == "load" then
+				creatingLine:setText(line)
+			elseif page == "title" then
+				refreshTitle()
+			end
+		end)
+	)
 	--[[ Layout, input, animation ]]
 
 	local function layout()
@@ -801,7 +1080,6 @@ function MainMenu.run()
 		dirt.TileSize = UDim2.fromOffset(DIRT_TILE * size, DIRT_TILE * size)
 	end
 	layout()
-	local connections: { RBXScriptConnection } = {}
 	table.insert(
 		connections,
 		player:GetAttributeChangedSignal(WorldSettings.OPERATOR_ATTRIBUTE):Connect(function()

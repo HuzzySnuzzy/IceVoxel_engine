@@ -4983,7 +4983,8 @@ GUI Scale setting (`Style.setScaleOverride`, again on every settings change unti
 "hud" effect takes over). The server's
 `MenuState` (waiting, creating, ready, failed; the operator's and the world's names) and the
 operator attribute decide what is enabled: Join World once ready, Create World for an operator
-while waiting, Load World never yet (saves are for later), Options always. The background is a
+while waiting, Load World for an operator while waiting where saving works (its Select World
+page: "Saving worlds" below), Options always. The background is a
 moving sky (a gradient, a square sun, clouds and two hill layers, each two screens wide holding
 its pattern twice and slid by a scale offset: three property writes a frame); the other screens
 use Minecraft's options background (the texture pack's dirt, 32 GUI pixels a tile, at 64 / 255).
@@ -5019,6 +5020,132 @@ auto-loading is off; one that slipped in before the boot turned it off is remove
 `Players.RespawnTime`, as Roblox would. Players who join later see the title screen and Join
 World.
 
+## Saving worlds (server `Save/`, `World/WorldSave`, client `Ui/SaveIndicator`, `Ui/MainMenu`)
+
+Minecraft's level saving, its autosave, `/save-all`, `/save-off`, `/save-on` and its world list,
+on Roblox's DataStores. The rules are pure and tested (tests/spec/WorldSave: a fake DataStore with
+budgets, the 6 s a key, latency and failures); `World/WorldSave` is the Roblox side.
+
+**What a saved world holds.** The only terrain state is the edit lists (WorldServer `edits`: what
+differs from what the seed generates; player-placed leaves are leaves in them and never decay),
+so a world is: its record (settings, the clock, its operators, the sections other parts register),
+its regions and its players.
+- Regions (`Save/RegionCodec`), 32 × 32 chunks each (`Config.Save.RegionChunks`, Minecraft's region
+  files): every chunk's edits as runs (gap, length, block; a dug tunnel row or a 16 × 16 layer of
+  one block is one run), containers (chests; furnaces with their fuel and cook progress; machines,
+  whose energy, gauges and tanks are their container's data, Shared/Machines), generated chests
+  already asked about (Containers `sourced`: looted ones never fill again), structure blocks' and
+  jigsaws' settings, transmitters (side modes, colour, a pipe's share of its network's fluid by
+  capacity, `TransmitterWorld.saveState`), Fluid Tanks, stacks in transporters, dropped items
+  (with their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway) and block updates
+  still due (`BlockTicker.scheduled`, in ticks from the save). Records are tagged and
+  length-prefixed and read back exactly to their length; ids this version doesn't know (a newer
+  version's blocks, items, mobs) are dropped one by one, anything else damaged refuses the region.
+- Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
+  spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
+  armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
+  the running status effects. Knowledge, Ages and skills stay in Players/ProgressStore, for every
+  world. 60-400 bytes.
+- Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
+  with no record starts its full fuse, Behaviours/Tnt), explosions under way, items' and mobs'
+  velocities, monsters, the session's SAVE texts of structure blocks (copy the IVS1 text) and
+  open windows (a window's cursor goes back into the inventory).
+
+**Format and keys** (`Save/SaveCodec`, `Save/WorldMeta`). DataStore "IceVoxelWorlds_v1"
+(`Config.Save.StoreName`): "index" (the world list: id, name, type, seed, game mode, created,
+last played, bytes), "<id>/meta" (the world's record: version, settings, the seed as its digits,
+`gen` the saves made, every region and player with its bytes, the op list, the sections),
+"<id>/lock", "<id>/r/<rx>_<rz>" (a region's head), "<id>/r/<rx>_<rz>/<slot>_<i>" (its further parts)
+and "<id>/p/<userId>" (written with the player's user id, as Roblox asks). Binary is kept as base85
+text (4 bytes in 5 characters over 85 printable characters JSON never escapes: 1.25 per byte, and
+exactly what Roblox counts against a key's 4,194,304 characters; text rather than buffers, whose
+stored size the code could not measure). A region longer than `Config.Save.MaxKeyBytes` (4,000,000) goes in
+parts: parts 2.. are written first, into the slot the committed head does not name, then the head
+(part 1, the part count, the slot, `gen`), so the head is the region's commit: a save cut short
+leaves the old head naming the old slot's intact parts. Every record carries a version; a newer
+one is refused, never half read or overwritten. A world's bytes are its record, regions and
+players (each value's text plus 96 for the JSON around it); a save that would take a world past
+`Config.Save.MaxWorldBytes` (64 MB) is refused as a whole, and operators are warned past
+`WarnShare` (80%) and every 5% more. Measured (tests/spec/WorldSave): a 9 × 9 × 5 house, a 3 × 3 ×
+64 tunnel, a chest, a furnace, a battery, pipes, an item and a cow are 797 edits, 881 bytes, 1,102
+characters; 6 fully edited chunks with no two neighbouring cells alike (no run compresses: the
+worst case) are 3.66 MB and two parts; a typical player record is 192 characters.
+
+**Safety.** A session lock per world (`Save/SaveLock`, inside UpdateAsync transforms: one atomic
+step): `{ job, at }`, renewed every third of `Config.Save.LockTimeout` (180 s); a live lock of
+another server refuses loading and deleting ("it is open on another server"); a stale one (a
+crashed server) is taken over, and the old server's next heartbeat finds it lost and stops
+saving. A world is loaded whole or not at all: any key that can't be read (after the scheduler's
+retries) or decoded gives the lock back and the world is never started, so nothing is ever
+written over it. A player whose record can't be read starts afresh and is never written that
+session (and is told), so an outage never replaces a saved inventory with an empty one. Studio
+without API access (or `Save.Enabled` off): one read of the index at boot fails, every title
+screen says why in red and Load World stays greyed; the world plays session-only and operators
+are told in the chat.
+
+**Writing** (`Save/SaveScheduler`, `Save/WorldStore`). Requests go in order (players and further
+parts, then heads, then the record, then the index: an UpdateAsync that merges the world's line),
+at most 8 in flight, each waiting for its kind's budget (DataStoreService
+:GetRequestBudgetForRequestType; SetAsync and RemoveAsync share one) and for the key's 6 s since
+its last write (kept across saves), failures tried again after 1, 2, 4, 8 s (5 tries), and a
+deadline at shutdown. What failed is reported and kept for the next save; a region whose parts
+failed is not committed (its head stays as it was). Saves write only what changed: every block
+change marks its region dirty (`WorldSave.blockChanged`), and `WorldSnapshot.collect` builds the
+dirty regions, the regions holding state now and those that held some at the last save (what
+moved or went away is written out of them, even when they are empty now), all in one frame (a
+chest broken mid-save can't be saved both as a chest and as its items; 0.2 ms for the area
+above in Lune); WorldStore then compares each region's text with what the store holds and writes
+only those that differ (the meta and index are written every save: 2 writes when nothing else
+changed). Autosave every `Config.Save.Interval` (300 s) while saving is on; `/save-all` waits
+for a save in flight and saves; `/save-off` stops autosaves; shutdown (BindToClose) saves within
+25 of its 30 s even after `/save-off` (as Minecraft's stop), then gives the lock back. A new world
+is saved at once (so the list has it). A leaving player's record is written at once
+(`WorldStore.savePlayers`, their key alone), and a player who comes back before it was written
+gets that record.
+
+**Loading.** The title screen's Load World (operators, while no world exists; Players/WorldMenu's
+WorldAction) or, with the menu off and `Config.Save.LoadLatest`, the world played last that no
+other server has open: `WorldSave.prepare` takes the lock, reads the record and every region the
+record lists (heads, then the parts of long ones, as many at once as the budget allows; each key
+read is a "Loading world: 12 / 40" on every title screen), joins and decodes them; then
+`WorldInfo.create` runs startWorld with the world's settings: `attach` makes the loaded edits the
+world's (before any chunk is generated: WorldServer overlays them on every chunk it makes, which
+is all terrain needs), `restore` (after every part started, before the world is published) puts
+back the containers (each block's fresh container with the saved slots and data copied in;
+furnaces cook on), runs the edits' transmitters, tanks, chests, machines and structure blocks
+through their parts' `blockChanged` from air (machines find their restored containers, pipes
+relink, networks join again over the next ticks adding the pipes' shares up), then the pipes' saved
+modes, colours and fluids, the structure settings, items, animals, the operators (`Operators.grant`)
+and the sections; block updates due are scheduled when their chunk generates (WorldServer
+`onGenerated`). Players: each one's record is read as they join; WorldMenu's `beforeEnter`
+holds their character until it is (at most 10 s); their inventory (`Inventories.restore`) and game
+mode come back at once, their place and facing with their first character (Players/Spawning's
+placement), health (`Characters.restoreHealth`, no hurt sound), Tough As Nails
+(`ToughAsNails.restore`) and effects (`Effects.restore`) with it too. With the menu off (characters
+load before the record arrives) the standing character is moved and set.
+
+**Sections** (`WorldSave.registerSection(name, encode, decode)`): state other parts keep with the
+world, in its record: `encode()` returns a small JSON-able value at every save (in the save's
+frame), `decode(value)` runs once when a saved world starts (after every part started, before
+the world is published), or at once when registered later. "time" is the day clock's (day time
+and doDaylightCycle); the weather's clock and override belong here.
+
+**Feedback.** WorldSave messages (Protocol): "saving" and "saved" to everyone (Ui/SaveIndicator:
+Bedrock's saving icon, a grass block bobbing in the bottom right corner with "Saving...", while a
+save is in flight and at least 1.2 s; higher up on touch screens, clear of the buttons), the sizes
+to operators only (the toast, as Ui/MusicToast's and under it while that one shows: "World saved"
+over "1.4 MB of 64 MB (largest region 0.3 / 4 MB)", red when it failed or nears the most), the
+state (on, off, unavailable and why, session only) to every title screen and the loading progress.
+Operators read failures, refusals and the size warnings in the chat.
+
+**Title screen** (client `Ui/MainMenu`, rules in `Ui/WorldListRules`, `Ui/TitleRules`). Load World
+is enabled for an operator while no world exists where saving works (`TitleRules.buttons`'
+`saves`); its page is Minecraft's Select World: the list (WorldList, last played first; rows of
+name, "Type, last played 2026-10-07 14:03", "Survival Mode, 1.4 MB"; click selects, double click
+plays), Play Selected World ("Loading the world..." with the count; a failure comes back in red),
+Rename (an edit box; the server filters the name), Delete (Minecraft's confirmation) and Cancel.
+Every answer is the list again with how it went. One list and one change a second per player.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -5049,6 +5176,7 @@ live edits after it must arrive in the order they were sent.
 | client → server | `UnlockSkill`   | u8: a skill tree node's place in Progression/Skills (the server checks the Age, prerequisites and points) |
 | client → server | `CreateWorld`   | the Create World screen: u8 game mode (0..2), u8 difficulty (0..3), u8 flags (allow commands, structures), then name, world type, encoded options and seed text (u16 length + UTF-8 each, at most 128 / 64 / 1024 / 128 bytes) |
 | client → server | `EnterWorld`    | nothing: Join World (or a created world): the server loads the character once the world exists |
+| client → server | `WorldAction`   | the Load World page (operators): u8 action (list, load, delete, rename), u16 length + world id (at most 16 bytes), u16 length + new name (rename) |
 | server → client | `ChunkEdits`    | edit list of each requested chunk             |
 | server → client | `Edits`         | every world change of the frame (or a reject) |
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
@@ -5071,6 +5199,8 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
 | server → client | `MenuState`     | the title screen's state (u8: waiting, creating, ready, failed), the operator's name and the world's (u16 length + text each), on joining and to everyone on a change |
 | server → client | `CreateWorldResult` | u8 ok, u16 length + text: the answer to this player's CreateWorld |
+| server → client | `WorldList`     | u8 saving works, u16 length + text (how the last WorldAction went), u16 count (at most 200), then each saved world: id, name, type and seed text (u16 length + text each), u8 game mode, f64 last played, f64 bytes |
+| server → client | `WorldSave`     | u8 op: saving; saved (u8 flags ok / sizes / warn, then the sizes for operators only: f64 bytes, max, largest key, key limit; text); loading (u16 keys read, u16 of, text); state (u8 on / off / unavailable / session only, text why) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write
 an unknown id as 0, decoders refuse one above `Fluids.COUNT` as malformed). A Transmitters record
@@ -5238,6 +5368,9 @@ sends stay in one ordered stream.
 - `Players/Operators`, `Players/WorldMenu`, `World/WorldInfo`, `Network/LobbyNet`: operators, the
   title screen's server side, the world's settings and its one creation, the net before the world
   (see Title screen, operators and creating the world).
+- `World/WorldSave`, `Save/`: saved worlds in DataStores: the world list, loading one, autosave,
+  `/save-all`, `/save-off`, `/save-on`, players' records and the sections other parts register
+  (see Saving worlds).
 - `Structures/`: structure blocks, jigsaws and their Generate, and who may use them (see
   Structure blocks and jigsaw structures). `Players/Containers` fills a generated structure's chest
   from the generator the first time its contents are needed; ServerNet's `operator` rule
@@ -5289,11 +5422,17 @@ terrain).
 
 **Regions** in Minecraft are a *storage* format: the save file groups 32 × 32 chunks into one
 `.mca` file so disks do not juggle millions of tiny files. They have nothing to do with rendering.
-For IceVoxel the same idea fits persistence: saving edits per region (one DataStore key per
-32 × 32 chunks) keeps the number of DataStore requests and keys low.
+IceVoxel saves the same way: each region's edits and state are one DataStore key (split in parts
+past 4 MB), so a world of a few hundred regions needs as many requests, not one per chunk (see
+Saving worlds).
 
 ## Rules to keep in mind
 
+- Saved worlds outlive versions: `Save/RegionCodec`, `PlayerCodec` and `WorldMeta` carry a format
+  version and are read by tags and lengths; add record tags and fields, never change what an
+  existing one means (bump the version and keep reading the old one), and keep block, item, mob
+  and fluid ids append-only (a saved world stores them). State another part keeps with a world
+  goes through `WorldSave.registerSection`, not new keys.
 - Generation must stay deterministic: use `Util/Hash` (never `math.random` or `Random`) and only
   the seed and coordinates as inputs. Clients and server must agree on every unedited block.
 - Block ids are list positions in `BlockList`: append, never reorder. The same holds for items in

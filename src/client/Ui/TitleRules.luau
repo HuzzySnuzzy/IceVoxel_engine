@@ -10,10 +10,12 @@
 	            (text width + 32) so a long splash is drawn smaller; turned -20 degrees, centred 90
 	            GUI pixels right of the screen's middle, 70 down.
 	  Buttons   what the screen offers (`buttons`): Join World once the world exists, Create World
-	            for an operator while there is none (`operator`: the Player attribute
-	            WorldSettings.OPERATOR_ATTRIBUTE), Load World never yet (saves are for the future),
-	            Options... always; and the status line under them (`status`), from the server's
-	            MenuState (Protocol.MenuState; nil before the first one arrives).
+	            and Load World for an operator while there is none (`operator`: the Player
+	            attribute WorldSettings.OPERATOR_ATTRIBUTE; Load World only where worlds can be
+	            saved, `saves`: the server's WorldSave state, World/WorldSave), Options...
+	            always; and the status line under them (`status`), from the server's MenuState
+	            (Protocol.MenuState; nil before the first one arrives), with a load's progress
+	            ("Loading world: 12 / 40") while a world loads.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -96,13 +98,14 @@ export type Buttons = {
 	options: boolean,
 }
 
--- Which buttons work in MenuState `state` (nil: none heard yet).
-function TitleRules.buttons(state: number?, operator: boolean): Buttons
+-- Which buttons work in MenuState `state` (nil: none heard yet); `saves`: worlds can be saved
+-- and loaded here.
+function TitleRules.buttons(state: number?, operator: boolean, saves: boolean?): Buttons
 	local MenuState = Protocol.MenuState
 	return {
 		join = state == MenuState.Ready,
 		create = operator and state == MenuState.Waiting,
-		load = false,
+		load = operator and state == MenuState.Waiting and saves == true,
 		options = true,
 	}
 end
@@ -112,9 +115,13 @@ function TitleRules.status(
 	state: number?,
 	operator: boolean,
 	operatorName: string,
-	worldName: string
+	worldName: string,
+	loading: string?
 ): (string, "plain" | "news" | "warning")
 	local MenuState = Protocol.MenuState
+	if state == MenuState.Creating and loading then
+		return loading, "plain"
+	end
 	if state == nil then
 		return "Connecting to the server...", "plain"
 	elseif state == MenuState.Waiting then

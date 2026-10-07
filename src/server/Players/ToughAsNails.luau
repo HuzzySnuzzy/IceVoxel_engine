@@ -31,9 +31,12 @@
 	             extremes' hurts).
 	  Clemency   TAN's Climate Clemency: a player's first character since joining gets
 	             Config.ToughAsNails.ClemencyTicks of it (5 minutes), every later one (a respawn)
-	             RespawnClemencyTicks (a minute). Nothing is saved between visits, so every visit
-	             starts afresh and gets the long one.
+	             RespawnClemencyTicks (a minute); a player returning to a saved world keeps what
+	             was left of theirs (Saved, below).
 	  Death      a new character starts over (full thirst, neutral, dry), as TAN resets on respawn.
+	  Saved      a saved world keeps each player's thirst and temperature (`export`), and gives
+	             them back to a returning player's next character, or the one standing
+	             (`restore`, World/WorldSave), as TAN keeps them in the player's data.
 	  Exertion   the client's movement reports (Protocol Exertion, ToughAsNails/Exertion), bounded
 	             by the time since the last one, cost exhaustion; their sprint flag counts as
 	             sprinting for SPRINT_HOLD seconds. Breaking a block costs Thirst.EXHAUSTION.mine
@@ -518,6 +521,57 @@ function ToughAsNailsServer.state(player: Player): (Thirst.State?, Temperature.S
 	return record.thirst, record.temperature
 end
 
+--[[ Saving (World/WorldSave) ]]
+
+-- Saved state waiting for a player's next character (their record is made on it).
+local restored: { [Player]: { thirst: Thirst.State?, temperature: Temperature.State? } } = {}
+
+-- Copies the fields of `from` that `into` has (numbers only, finite).
+local function copyNumbers(into: { [string]: any }, from: { [string]: any }?)
+	if from == nil then
+		return
+	end
+	for key, value in into do
+		local saved = from[key]
+		if type(value) == "number" and type(saved) == "number" and saved == saved and math.abs(saved) ~= math.huge then
+			into[key] = saved
+		end
+	end
+end
+
+local function applySaved(record: Record, thirst: Thirst.State?, temperature: Temperature.State?)
+	copyNumbers(record.thirst :: any, thirst :: any)
+	copyNumbers(record.temperature :: any, temperature :: any)
+	record.thirst.thirst = math.clamp(record.thirst.thirst, 0, Thirst.MAX)
+	record.temperature.value = math.clamp(record.temperature.value, Temperature.MIN, Temperature.MAX)
+	record.temperature.target = math.clamp(record.temperature.target, Temperature.MIN, Temperature.MAX)
+	-- (Health set with it is no hurt.)
+	record.health = nil
+	record.sent = nil
+end
+
+-- A player's thirst and temperature as a save keeps them (copies; nil before a character).
+function ToughAsNailsServer.export(player: Player): (Thirst.State?, Temperature.State?)
+	local record = records[player]
+	if record == nil then
+		return nil, nil
+	end
+	return table.clone(record.thirst), table.clone(record.temperature)
+end
+
+--[[
+	A saved player's thirst and temperature (Climate Clemency left included): into their record
+	when their character stands, else into their next character's instead of a fresh one.
+]]
+function ToughAsNailsServer.restore(player: Player, thirst: Thirst.State?, temperature: Temperature.State?)
+	local record = records[player]
+	if record and player.Character then
+		applySaved(record, thirst, temperature)
+	else
+		restored[player] = { thirst = thirst, temperature = temperature }
+	end
+end
+
 -- TAN's effects in the status effect list (see the header).
 local function registerEffects()
 	local id = SharedEffects.id
@@ -663,7 +717,13 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 		local settings = Config.ToughAsNails
 		local clemency = if joined[player] then settings.RespawnClemencyTicks else settings.ClemencyTicks
 		joined[player] = true
-		records[player] = newRecord(clemency)
+		local record = newRecord(clemency)
+		records[player] = record
+		local saved = restored[player]
+		if saved then
+			restored[player] = nil
+			applySaved(record, saved.thirst, saved.temperature)
+		end
 		if thirstOn() and Config.ToughAsNails.ThirstRegeneration then
 			stopRobloxRegeneration(character)
 		end
@@ -682,6 +742,7 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		records[player] = nil
+		restored[player] = nil
 		joined[player] = nil
 	end)
 

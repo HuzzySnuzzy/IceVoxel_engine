@@ -744,6 +744,38 @@ function Transport.dropFrom(world: World, node: Node)
 	end
 end
 
+--[[
+	A stack a saved world had in transporter `node` (World/WorldSave): it comes back waiting in the
+	middle of the transporter, with no home, and looks for a way on the next tick (a waiting
+	item's retry). Returns its id, nil for a node that is no transporter.
+]]
+function Transport.restore(world: World, node: Node, stack: Stack, colour: number): number?
+	if node.kind ~= "item" or stack.count < 1 then
+		return nil
+	end
+	local id = world.nextItem
+	world.nextItem += 1
+	local item: Item = {
+		id = id,
+		stack = stack,
+		colour = if Transmitters.isColour(colour) then colour else 0,
+		route = { node.key },
+		hop = 1,
+		target = nil,
+		face = 0,
+		progress = HALF,
+		wait = 1,
+		from = nil,
+		home = nil,
+		sentHop = 1,
+		sentSpeed = 0,
+	}
+	world.items[id] = item
+	world.itemCount += 1
+	sendAdd(world, item)
+	return id
+end
+
 -- The Transport add that shows `item` as it is now (for a player who starts seeing it).
 function Transport.op(world: World, item: Item): TransportOp
 	return (addOp(world, item))

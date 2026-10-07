@@ -95,6 +95,13 @@
 	                 Players/WorldMenu, WorldSettings.validate) and answers with CreateWorldResult
 	  EnterWorld     nothing: the title screen's Join World (or a created world): the server loads
 	                 the player's character once the world exists
+	  WorldAction    u8 action (WorldAction: 1 list, 2 load, 3 delete, 4 rename), then for 2..4
+	                 u16 length + the world's id (at most MAX_WORLD_ID bytes), and for 4 u16
+	                 length + the new name (MAX_WORLD_NAME): the title screen's Load World screen
+	                 (operators only, while no world exists: Players/WorldMenu, World/WorldSave);
+	                 a list is answered with WorldList, a load as Create World is (MenuState,
+	                 WorldSave loading progress, CreateWorldResult), a delete or rename with a new
+	                 WorldList saying how it went
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -220,6 +227,22 @@
 	                 state, sent on joining and to everyone when it changes (Players/WorldMenu)
 	  CreateWorldResult u8 ok (0 / 1), u16 length + text: the answer to this player's CreateWorld
 	                 (why not, when it failed)
+	  WorldList      u8 flags (bit 0: worlds can be saved here), u16 length + text (what the last
+	                 action did, or why the list can't be read), u16 count (at most
+	                 MAX_WORLD_LIST), count x (id, name, world type, seed: u16 length + text each;
+	                 u8 game mode (GameMode id), f64 last played (os.time), f64 bytes): the saved
+	                 worlds, last played first, for the Load World screen
+	  WorldSave      u8 op (SaveOp), then by op: the saving indicator and toast (World/WorldSave,
+	                 client Ui/SaveIndicator):
+	                   1 saving   nothing: a save started (everyone: the icon)
+	                   2 saved    u8 flags (bit 0 ok, bit 1 sizes follow, bit 2 near the most),
+	                              [f64 bytes, f64 most, f64 largest key, f64 key limit], u16
+	                              length + text (why not, when it failed): a save ended
+	                              (everyone; the sizes for operators, the toast's line)
+	                   3 loading  u16 done, u16 total, u16 length + world name: keys read while a
+	                              world loads (the title screen's "Loading world: 12 / 40")
+	                   4 state    u8 state (SaveState: 0 on, 1 off (/save-off), 2 unavailable (no
+	                              DataStore), 3 this world session only), u16 length + why
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -287,6 +310,7 @@ Protocol.ClientMessage = {
 	UnlockSkill = 20,
 	CreateWorld = 21,
 	EnterWorld = 22,
+	WorldAction = 23,
 }
 
 Protocol.ServerMessage = {
@@ -312,6 +336,8 @@ Protocol.ServerMessage = {
 	Progress = 20,
 	MenuState = 21,
 	CreateWorldResult = 22,
+	WorldList = 23,
+	WorldSave = 24,
 }
 
 Protocol.EditAction = {
@@ -2937,6 +2963,305 @@ function Protocol.decodeCreateWorldResult(b: buffer): (boolean?, string)
 		return nil, ""
 	end
 	return flag == 1, texts[1]
+end
+
+--[[ Saving worlds (World/WorldSave, Players/WorldMenu, client Ui/MainMenu, Ui/SaveIndicator) ]]
+
+-- Longest world id (bytes), most worlds a list carries.
+Protocol.MAX_WORLD_ID = 16
+Protocol.MAX_WORLD_LIST = 200
+
+Protocol.WorldAction = table.freeze({ List = 1, Load = 2, Delete = 3, Rename = 4 })
+Protocol.SaveOp = table.freeze({ Saving = 1, Saved = 2, Loading = 3, State = 4 })
+Protocol.SaveState = table.freeze({ On = 0, Off = 1, Unavailable = 2, SessionOnly = 3 })
+
+-- A saved world as the Load World screen lists it.
+export type WorldEntry = {
+	id: string,
+	name: string,
+	worldType: string,
+	seed: string,
+	gameMode: string,
+	lastPlayed: number,
+	bytes: number,
+}
+
+-- A WorldSave message.
+export type SaveStatus = {
+	op: number,
+	ok: boolean?,
+	-- Saved: the sizes (operators only), and whether the world nears its most.
+	sizes: boolean?,
+	warn: boolean?,
+	bytes: number?,
+	max: number?,
+	largest: number?,
+	keyLimit: number?,
+	-- Loading: keys read of all.
+	done: number?,
+	total: number?,
+	-- State: a SaveState.
+	state: number?,
+	text: string?,
+}
+
+-- Reads one u16 length + UTF-8 text of at most `limit` bytes at `o`: the text and the offset
+-- after it, nil when malformed.
+local function readText(b: buffer, o: number, limit: number): (string?, number)
+	local len = buffer.len(b)
+	if o + 2 > len then
+		return nil, o
+	end
+	local n = buffer.readu16(b, o)
+	if n > limit or o + 2 + n > len then
+		return nil, o
+	end
+	local text = buffer.readstring(b, o + 2, n)
+	if utf8.len(text) == nil then
+		return nil, o
+	end
+	return text, o + 2 + n
+end
+
+local function finite(value: number): boolean
+	return value == value and math.abs(value) ~= math.huge
+end
+
+function Protocol.encodeWorldAction(action: number, id: string?, name: string?): buffer
+	local texts: { string } = {}
+	if action ~= Protocol.WorldAction.List then
+		table.insert(texts, cut(id or "", Protocol.MAX_WORLD_ID))
+	end
+	if action == Protocol.WorldAction.Rename then
+		table.insert(texts, cut(name or "", Protocol.MAX_WORLD_NAME))
+	end
+	local size = 1
+	for _, text in texts do
+		size += 2 + #text
+	end
+	local b = buffer.create(size)
+	buffer.writeu8(b, 0, action)
+	writeTexts(b, 1, texts)
+	return b
+end
+
+-- The action (nil when malformed), the world's id ("" for a list) and the new name ("" but for a
+-- rename).
+function Protocol.decodeWorldAction(b: buffer): (number?, string, string)
+	if buffer.len(b) < 1 then
+		return nil, "", ""
+	end
+	local action = buffer.readu8(b, 0)
+	local limits: { number }
+	if action == Protocol.WorldAction.List then
+		limits = {}
+	elseif action == Protocol.WorldAction.Load or action == Protocol.WorldAction.Delete then
+		limits = { Protocol.MAX_WORLD_ID }
+	elseif action == Protocol.WorldAction.Rename then
+		limits = { Protocol.MAX_WORLD_ID, Protocol.MAX_WORLD_NAME }
+	else
+		return nil, "", ""
+	end
+	local texts = readTexts(b, 1, limits)
+	if texts == nil then
+		return nil, "", ""
+	end
+	return action, texts[1] or "", texts[2] or ""
+end
+
+function Protocol.encodeWorldList(worlds: { WorldEntry }, saving: boolean, message: string): buffer
+	local count = math.min(#worlds, Protocol.MAX_WORLD_LIST)
+	local note = cut(message, Protocol.MAX_MENU_TEXT)
+	local rows: { { string } } = {}
+	local size = 1 + 2 + #note + 2
+	for i = 1, count do
+		local entry = worlds[i]
+		local texts = {
+			cut(entry.id, Protocol.MAX_WORLD_ID),
+			cut(entry.name, Protocol.MAX_WORLD_NAME),
+			cut(entry.worldType, Protocol.MAX_WORLD_TYPE),
+			cut(entry.seed, Protocol.MAX_WORLD_SEED),
+		}
+		rows[i] = texts
+		for _, text in texts do
+			size += 2 + #text
+		end
+		size += 1 + 8 + 8
+	end
+	local b = buffer.create(size)
+	buffer.writeu8(b, 0, if saving then 1 else 0)
+	local o = writeTexts(b, 1, { note })
+	buffer.writeu16(b, o, count)
+	o += 2
+	for i = 1, count do
+		local entry = worlds[i]
+		o = writeTexts(b, o, rows[i])
+		buffer.writeu8(b, o, if GameMode.isValid(entry.gameMode) then GameMode.id(entry.gameMode) else 0)
+		buffer.writef64(b, o + 1, if finite(entry.lastPlayed) then entry.lastPlayed else 0)
+		buffer.writef64(b, o + 9, if finite(entry.bytes) then entry.bytes else 0)
+		o += 17
+	end
+	return b
+end
+
+-- The worlds (nil when malformed), whether saving works here, the message.
+function Protocol.decodeWorldList(b: buffer): ({ WorldEntry }?, boolean, string)
+	local len = buffer.len(b)
+	if len < 1 then
+		return nil, false, ""
+	end
+	local flags = buffer.readu8(b, 0)
+	local note, o = readText(b, 1, Protocol.MAX_MENU_TEXT)
+	if flags > 1 or note == nil or o + 2 > len then
+		return nil, false, ""
+	end
+	local count = buffer.readu16(b, o)
+	o += 2
+	if count > Protocol.MAX_WORLD_LIST then
+		return nil, false, ""
+	end
+	local worlds: { WorldEntry } = {}
+	local limits = { Protocol.MAX_WORLD_ID, Protocol.MAX_WORLD_NAME, Protocol.MAX_WORLD_TYPE, Protocol.MAX_WORLD_SEED }
+	for _ = 1, count do
+		local texts: { string } = {}
+		for i, limit in limits do
+			local text
+			text, o = readText(b, o, limit)
+			if text == nil then
+				return nil, false, ""
+			end
+			texts[i] = text
+		end
+		if o + 17 > len then
+			return nil, false, ""
+		end
+		local mode = GameMode.fromId(buffer.readu8(b, o))
+		local lastPlayed, bytes = buffer.readf64(b, o + 1), buffer.readf64(b, o + 9)
+		if mode == nil or not finite(lastPlayed) or not finite(bytes) then
+			return nil, false, ""
+		end
+		o += 17
+		table.insert(worlds, {
+			id = texts[1],
+			name = texts[2],
+			worldType = texts[3],
+			seed = texts[4],
+			gameMode = mode,
+			lastPlayed = lastPlayed,
+			bytes = bytes,
+		})
+	end
+	if o ~= len then
+		return nil, false, ""
+	end
+	return worlds, flags == 1, note
+end
+
+function Protocol.encodeWorldSave(status: SaveStatus): buffer
+	local op = status.op
+	local text = cut(status.text or "", Protocol.MAX_MENU_TEXT)
+	if op == Protocol.SaveOp.Saving then
+		local b = buffer.create(1)
+		buffer.writeu8(b, 0, op)
+		return b
+	elseif op == Protocol.SaveOp.Saved then
+		local sizes = status.sizes == true
+		local b = buffer.create(2 + (if sizes then 32 else 0) + 2 + #text)
+		buffer.writeu8(b, 0, op)
+		buffer.writeu8(b, 1, (if status.ok then 1 else 0) + (if sizes then 2 else 0) + (if status.warn then 4 else 0))
+		local o = 2
+		if sizes then
+			for _, value in { status.bytes or 0, status.max or 0, status.largest or 0, status.keyLimit or 0 } do
+				buffer.writef64(b, o, if finite(value) then value else 0)
+				o += 8
+			end
+		end
+		writeTexts(b, o, { text })
+		return b
+	elseif op == Protocol.SaveOp.Loading then
+		local b = buffer.create(5 + 2 + #text)
+		buffer.writeu8(b, 0, op)
+		buffer.writeu16(b, 1, math.clamp(math.floor(status.done or 0), 0, 65535))
+		buffer.writeu16(b, 3, math.clamp(math.floor(status.total or 0), 0, 65535))
+		writeTexts(b, 5, { text })
+		return b
+	end
+	local b = buffer.create(2 + 2 + #text)
+	buffer.writeu8(b, 0, Protocol.SaveOp.State)
+	buffer.writeu8(b, 1, status.state or Protocol.SaveState.On)
+	writeTexts(b, 2, { text })
+	return b
+end
+
+-- The status in a WorldSave message, nil when malformed.
+function Protocol.decodeWorldSave(b: buffer): SaveStatus?
+	local len = buffer.len(b)
+	if len < 1 then
+		return nil
+	end
+	local op = buffer.readu8(b, 0)
+	if op == Protocol.SaveOp.Saving then
+		return if len == 1 then { op = op } else nil
+	elseif op == Protocol.SaveOp.Saved then
+		if len < 2 then
+			return nil
+		end
+		local flags = buffer.readu8(b, 1)
+		if flags > 7 then
+			return nil
+		end
+		local sizes = bit32.btest(flags, 2)
+		local o = 2
+		local values: { number } = {}
+		if sizes then
+			if o + 32 > len then
+				return nil
+			end
+			for i = 1, 4 do
+				local value = buffer.readf64(b, o)
+				if not finite(value) or value < 0 then
+					return nil
+				end
+				values[i] = value
+				o += 8
+			end
+		end
+		local texts = readTexts(b, o, { Protocol.MAX_MENU_TEXT })
+		if texts == nil then
+			return nil
+		end
+		return {
+			op = op,
+			ok = bit32.btest(flags, 1),
+			sizes = sizes,
+			warn = bit32.btest(flags, 4),
+			bytes = values[1],
+			max = values[2],
+			largest = values[3],
+			keyLimit = values[4],
+			text = texts[1],
+		}
+	elseif op == Protocol.SaveOp.Loading then
+		if len < 5 then
+			return nil
+		end
+		local texts = readTexts(b, 5, { Protocol.MAX_MENU_TEXT })
+		if texts == nil then
+			return nil
+		end
+		return { op = op, done = buffer.readu16(b, 1), total = buffer.readu16(b, 3), text = texts[1] }
+	elseif op == Protocol.SaveOp.State then
+		if len < 2 then
+			return nil
+		end
+		local state = buffer.readu8(b, 1)
+		local texts = readTexts(b, 2, { Protocol.MAX_MENU_TEXT })
+		if state > Protocol.SaveState.SessionOnly or texts == nil then
+			return nil
+		end
+		return { op = op, state = state, text = texts[1] }
+	end
+	return nil
 end
 
 return Protocol

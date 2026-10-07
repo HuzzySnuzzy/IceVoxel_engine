@@ -116,6 +116,16 @@ local function apply(result: OperatorList.Result, source: Player?)
 	end
 end
 
+-- The op list's user ids (a saved world keeps them: World/WorldSave).
+function Operators.ops(): { number }
+	return OperatorList.ops(list)
+end
+
+-- Puts a saved world's operators back on the op list.
+function Operators.grant(userIds: { number })
+	apply(OperatorList.grant(list, userIds))
+end
+
 -- Commands for everyone (the world's Allow Commands) or operators only.
 function Operators.setAllowCommands(allow: boolean)
 	apply(OperatorList.setAllowCommands(list, allow))
