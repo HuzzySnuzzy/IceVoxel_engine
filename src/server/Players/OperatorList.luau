@@ -3,8 +3,9 @@
 	Minecraft's server operators (the ops list, /op and /deop) without the Roblox parts (those are
 	in Players/Operators), so the tests can run them. Players are known by user id.
 
-	  Operators  a player on the op list (`ops`, kept by user id for the server's lifetime: one
-	             who leaves and comes back is an operator again, as Minecraft's ops.json), or a
+	  Operators  a player on the op list (`ops`, kept by user id for the server's lifetime, and
+	             with a saved world: `ops` / `grant`, World/WorldSave; one who leaves and comes
+	             back is an operator again, as Minecraft's ops.json), or a
 	             permanent one: Config.Gameplay.Admins, the game's owner and everyone in a Studio
 	             session (the glue says who, `setPermanent`); those are never taken off.
 	  Automatic  only while `autoOperator` is on (`setAutoOperator`: Players/Operators turns it on
@@ -183,6 +184,33 @@ function OperatorList.setAutoOperator(list: List, auto: boolean): Result
 	list.autoOperator = auto
 	keepAnOperator(list, result)
 	return result
+end
+
+--[[
+	A saved world's op list (World/WorldSave): every user id in `userIds` is put on the list (those
+	here are told nothing: they are just operators again, as Minecraft's ops.json loads).
+]]
+function OperatorList.grant(list: List, userIds: { number }): Result
+	local result = newResult()
+	for _, userId in userIds do
+		if type(userId) == "number" and not list.ops[userId] then
+			list.ops[userId] = true
+			if indexOf(list, userId) then
+				table.insert(result.changed, userId)
+			end
+		end
+	end
+	return result
+end
+
+-- The op list's user ids (not the permanent operators), sorted.
+function OperatorList.ops(list: List): { number }
+	local ids: { number } = {}
+	for userId in list.ops do
+		table.insert(ids, userId)
+	end
+	table.sort(ids)
+	return ids
 end
 
 -- Commands for everyone (the Create World screen's Allow Commands) or for operators only.

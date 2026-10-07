@@ -13,7 +13,10 @@
 	             on or off and sends the player their effects when the client's view is off
 	             (EffectRules.needsSync: Protocol Effects).
 	  Death      a new character starts with none (Minecraft's respawned player), and the client
-	             is told at once. Effects are not saved: rejoining starts clean.
+	             is told at once.
+	  Saved      a saved world keeps each player's running effects (`export`) and gives them back
+	             on the returning player's character (`restore`, World/WorldSave), as Minecraft
+	             keeps them in the player's data.
 	  Glowing    a Highlight ("IceVoxelGlowing", outline only, seen through walls) in the character
 	             while it lasts: Roblox replicates it to everyone, as Minecraft's glowing outline.
 	  /effect    Players/EffectCommand's rules with the operators' permission (Players/Operators,
@@ -378,6 +381,51 @@ local function listen()
 	command.Parent = TextChatService
 end
 
+--[[ Saving (World/WorldSave) ]]
+
+export type Saved = { effect: number, amplifier: number, ticks: number, ambient: boolean }
+
+-- Effects waiting for a player's next character (a saved player's).
+local restored: { [Player]: { Saved } } = {}
+
+-- The running effects a save keeps (not the external ones: their owners keep those); nil when
+-- the player has no character's effects (gone, or not in the world yet).
+function EffectsServer.export(player: Player): { Saved }?
+	local state = states[player]
+	if state == nil then
+		return nil
+	end
+	local list: { Saved } = {}
+	for id, instance in state.active do
+		if Effects.list[id].instant == nil then
+			table.insert(
+				list,
+				{ effect = id, amplifier = instance.amplifier, ticks = instance.ticks, ambient = instance.ambient }
+			)
+		end
+	end
+	return list
+end
+
+local function giveSaved(player: Player, list: { Saved })
+	local state = stateOf(player)
+	for _, saved in list do
+		if Effects.isValid(saved.effect) and not (Effects.get(saved.effect) :: any).external then
+			EffectRules.give(state, saved.effect, saved.ticks, saved.amplifier, saved.ambient)
+		end
+	end
+	send(player, state)
+end
+
+-- A saved player's effects: on the standing character, else on their next one.
+function EffectsServer.restore(player: Player, list: { Saved })
+	if player.Character and states[player] then
+		giveSaved(player, list)
+	else
+		restored[player] = list
+	end
+end
+
 --[[
 	Starts the effects: new characters start clean (and their clients are told), leaving players
 	are forgotten, and /effect listens.
@@ -391,6 +439,12 @@ function EffectsServer.start(serverNet: ServerNet.ServerNet)
 			local state = EffectRules.new()
 			states[player] = state
 			send(player, state)
+			-- (A saved player's effects come back on their first character.)
+			local saved = restored[player]
+			if saved then
+				restored[player] = nil
+				giveSaved(player, saved)
+			end
 		end)
 	end
 	Players.PlayerAdded:Connect(onPlayer)
@@ -399,6 +453,7 @@ function EffectsServer.start(serverNet: ServerNet.ServerNet)
 	end
 	Players.PlayerRemoving:Connect(function(player)
 		states[player] = nil
+		restored[player] = nil
 	end)
 	listen()
 end

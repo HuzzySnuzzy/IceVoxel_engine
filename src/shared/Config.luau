@@ -925,6 +925,47 @@ local Config = {
 		LoadWait = 1,
 	},
 
+	-- Saving worlds (server World/WorldSave, the codecs in server Save/) ---------------------------
+
+	--[[
+		Worlds are saved in the DataStore `StoreName`: an index of the worlds, a record per world
+		(its settings, clock, operators, the regions and players saved), its edits and block
+		state in regions of RegionChunks x RegionChunks chunks (one key each, split into parts
+		near the 4 MB a key holds), and each player's record in it. In Studio this needs API
+		access (Game Settings > Security > Enable Studio Access to API Services), as SaveWaypoints;
+		without it worlds last for the session and the title screen says so.
+	]]
+	Save = {
+		-- Save worlds at all (off: every world is the session's only; Load World stays greyed).
+		Enabled = true,
+		-- The DataStore (a new name starts afresh; the old one stays untouched).
+		StoreName = "IceVoxelWorlds_v1",
+		-- Seconds between automatic saves (Minecraft's autosave: 6000 ticks, 5 minutes), each
+		-- writing only what changed. 0 saves only on /save-all and at shutdown.
+		Interval = 300,
+		-- The most a world may take in the store (bytes, all its keys); a save that would go over
+		-- is refused (the world plays on, unsaved) and operators are told. Operators are warned in
+		-- the chat once a save passes WarnShare of it.
+		MaxWorldBytes = 64 * 1048576,
+		WarnShare = 0.8,
+		-- Roblox's limit per key (4,194,304 characters), and the bytes of text a key is filled to
+		-- before a region goes on in another part (room for the record around it).
+		KeyLimit = 4194304,
+		MaxKeyBytes = 4000000,
+		-- Chunks per region side (32: Minecraft's region files, 512 x 512 blocks a key).
+		RegionChunks = 32,
+		-- Seconds without a heartbeat after which another server may take a world over (a server
+		-- that crashed); the server holding it renews its lock every third of that.
+		LockTimeout = 180,
+		-- Also saved: dropped items, and farm animals (cows, sheep, pigs, chickens; monsters are
+		-- not kept, as they despawn anyway).
+		Items = true,
+		Mobs = true,
+		-- With MainMenu.Enabled off, the server opens the world played last (when no other server
+		-- has it open) instead of making a new one from `World`.
+		LoadLatest = true,
+	},
+
 	-- Server -----------------------------------------------------------------------------------------
 
 	Server = {

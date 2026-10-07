@@ -52,6 +52,7 @@
 	    from any cause; and a hurting landing's small or big fall with the fall sound of the block
 	    landed on, for everyone but the player, whose client played them already
 	    (LivingEntity.causeFallDamage). Spectators make none (GameModeRules.makesSounds).
+	  * a saved player's health comes back without a hurt sound (`restoreHealth`, World/WorldSave).
 ]]
 
 local Players = game:GetService("Players")
@@ -103,6 +104,8 @@ Characters.ON_FIRE = "IceVoxelOnFire"
 
 -- Each player's burning (Players/Burning), started over with every character.
 local burning: { [Player]: Burning.PlayerState } = {}
+-- Players whose next health change is a restore, not a hurt (no hurt sound).
+local quietHealth: { [Player]: boolean } = {}
 
 local function setGroup(part: Instance, group: string)
 	if part:IsA("BasePart") then
@@ -345,6 +348,24 @@ end
 	hearts that landed and whether the hurt was a fresh one (not under the cooldown: Minecraft
 	knocks back only those, Resistance or not).
 ]]
+--[[
+	Sets a living character's health to `halfHearts` of Minecraft's 20 (scaled to its MaxHealth)
+	without it counting as a hurt (no hurt sound): a saved player's health coming back
+	(World/WorldSave). 0 or less leaves it full.
+]]
+function Characters.restoreHealth(player: Player, halfHearts: number)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid == nil or humanoid.Health <= 0 or not (halfHearts > 0) then
+		return
+	end
+	local health = math.clamp(halfHearts / MINECRAFT_HEALTH, 0, 1) * humanoid.MaxHealth
+	if math.abs(health - humanoid.Health) > 1e-6 then
+		quietHealth[player] = true
+		humanoid.Health = health
+	end
+end
+
 function Characters.hurt(player: Player, amount: number): (number, boolean)
 	local character = player.Character
 	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
@@ -406,8 +427,10 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 			local health = humanoid.Health
 			local lastHurt = -math.huge
 			local healthChanged = humanoid.HealthChanged:Connect(function(newHealth: number)
-				-- (Health cut to a lowered MaxHealth is no hurt.)
-				local hurt = newHealth < health and newHealth < humanoid.MaxHealth
+				-- (Health cut to a lowered MaxHealth is no hurt, nor is a saved health restored.)
+				local restored = quietHealth[player] == true
+				quietHealth[player] = nil
+				local hurt = not restored and newHealth < health and newHealth < humanoid.MaxHealth
 				health = newHealth
 				local now = os.clock()
 				if
@@ -502,6 +525,7 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 	Players.PlayerRemoving:Connect(function(player)
 		landings[player] = nil
 		burning[player] = nil
+		quietHealth[player] = nil
 	end)
 
 	-- Suffocation, checked every IN_WALL_INTERVAL against generated blocks only.

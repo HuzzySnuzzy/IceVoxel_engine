@@ -953,4 +953,144 @@ end
 TransmitterWorld.itemOp = Transport.op
 TransmitterWorld.itemPosition = Transport.position
 
+--[[ Saving (World/WorldSave, Save/WorldSnapshot) ]]
+
+export type SavedNode = {
+	x: number,
+	y: number,
+	z: number,
+	modes: number,
+	colour: number,
+	fluid: number,
+	amount: number,
+}
+export type SavedTank = { x: number, y: number, z: number, fluid: number, amount: number }
+export type SavedItem = { x: number, y: number, z: number, colour: number, stack: Types.Stack }
+
+--[[
+	What a saved world keeps of the pipes: every transmitter's side modes and colour, each pipe's
+	share of its network's fluid (Mekanism splits a network's buffer by the pipes' capacities; the
+	rest of the division goes to the first pipes by position, so nothing is lost), every tank's
+	contents and the stacks in transporters (where they are).
+]]
+function TransmitterWorld.saveState(world: World): ({ SavedNode }, { SavedTank }, { SavedItem })
+	local shares: { [number]: number } = {}
+	for network in world.networks do
+		local amount = network.amount
+		if amount > 0 and network.capacity > 0 then
+			local keys: { number } = {}
+			for key in network.nodes do
+				table.insert(keys, key)
+			end
+			table.sort(keys)
+			local given = 0
+			for _, key in keys do
+				local share = (amount * Transmitters.pipeCapacity(network.nodes[key].block)) // network.capacity
+				shares[key] = share
+				given += share
+			end
+			-- (The division's rest, into the pipes with room, first by position.)
+			local rest = amount - given
+			for _, key in keys do
+				if rest <= 0 then
+					break
+				end
+				local room = Transmitters.pipeCapacity(network.nodes[key].block) - shares[key]
+				local add = math.min(room, rest)
+				if add > 0 then
+					shares[key] += add
+					rest -= add
+				end
+			end
+		end
+	end
+	local nodes: { SavedNode } = {}
+	for key, node in world.nodes do
+		local network = node.network
+		local share = shares[key] or 0
+		table.insert(nodes, {
+			x = node.x,
+			y = node.y,
+			z = node.z,
+			modes = node.modes,
+			colour = node.colour,
+			fluid = if share > 0 and network then network.fluid else NONE,
+			amount = share,
+		})
+	end
+	local tanks: { SavedTank } = {}
+	for _, tank in world.tanks do
+		if tank.amount > 0 then
+			table.insert(tanks, { x = tank.x, y = tank.y, z = tank.z, fluid = tank.fluid, amount = tank.amount })
+		end
+	end
+	local items: { SavedItem } = {}
+	for _, item in world.items do
+		local x, y, z = Grid.decode(item.route[item.hop])
+		table.insert(items, { x = x, y = y, z = z, colour = item.colour, stack = item.stack })
+	end
+	return nodes, tanks, items
+end
+
+--[[
+	Puts a saved world's pipes back, after `blockChanged` made the nodes and tanks of its blocks
+	(fresh, default): each node's modes and colour, a pipe's share into its own network (the
+	flood fills join the pipes' networks again over the next ticks, adding the shares up), the
+	tanks' contents (at most their capacity) and the stacks in transporters (waiting there:
+	Transport.restore). Saved state of a position with no node or tank of its kind any more is
+	skipped. Returns how many records were taken.
+]]
+function TransmitterWorld.restoreState(
+	world: World,
+	nodes: { SavedNode },
+	tanks: { SavedTank },
+	items: { SavedItem }
+): number
+	local taken = 0
+	local touched: { Node } = {}
+	for _, saved in nodes do
+		local key = Grid.key(saved.x, saved.y, saved.z)
+		local node = if key then world.nodes[key] else nil
+		if node then
+			taken += 1
+			if saved.modes >= 0 and saved.modes < 4096 and saved.modes == math.floor(saved.modes) then
+				node.modes = saved.modes
+			end
+			if node.kind == "item" and Transmitters.isColour(saved.colour) then
+				node.colour = saved.colour
+			end
+			local network = node.network
+			if node.kind == "fluid" and network and saved.amount > 0 and Fluids.carriable(saved.fluid) then
+				if network.amount <= 0 or network.fluid == saved.fluid then
+					network.fluid = saved.fluid
+					network.amount = math.min(network.amount + math.floor(saved.amount), network.capacity)
+					network.sentFill = -1
+				end
+			end
+			world.dirtyNodes[node.key] = true
+			table.insert(touched, node)
+		end
+	end
+	-- (Every mode is in place before any side is worked out again.)
+	for _, node in touched do
+		relink(world, node)
+	end
+	for _, saved in tanks do
+		local tank = TransmitterWorld.tank(world, saved.x, saved.y, saved.z)
+		if tank and saved.amount > 0 and Fluids.carriable(saved.fluid) then
+			taken += 1
+			tank.fluid = saved.fluid
+			tank.amount = math.min(math.floor(saved.amount), tank.capacity)
+			world.dirtyTanks[tank.key] = true
+		end
+	end
+	for _, saved in items do
+		local node = TransmitterWorld.node(world, saved.x, saved.y, saved.z)
+		if node and Transport.restore(world, node, saved.stack, saved.colour) then
+			taken += 1
+		end
+	end
+	return taken
+end
+
 return TransmitterWorld

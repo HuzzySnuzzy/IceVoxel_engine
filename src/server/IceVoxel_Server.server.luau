@@ -11,17 +11,22 @@
 	                   the permission every operators' command asks (Players/Operators)
 	  settings      -> player settings (the Options menu's choices, Players/SettingsStore): the
 	                   title screen has the Options menu too
+	  saves         -> saved worlds (World/WorldSave): the DataStore looked at once, the title
+	                   screen's Load World (Players/WorldMenu), the world saved at shutdown
 	  title screen  -> with Config.MainMenu.Enabled, the world waits for its operator to create it
 	                   from the title screen (Players/WorldMenu: no characters until then; World/
 	                   WorldInfo runs startWorld below with the screen's settings); without it the
 	                   world is created at once from Config.World and Config.Seed
-	                   (WorldSettings.fromConfig)
+	                   (WorldSettings.fromConfig), or the world played last is loaded
+	                   (Config.Save.LoadLatest)
 
 	startWorld(settings), once:
 	  1. settings   -> into Config (World/WorldInfo.apply, just before: new players' game mode, the
 	                   difficulty) and to Players/Operators (Allow Commands)
 	  2. world      -> generated chunk cache + edit lists (World/WorldServer), from the world type,
-	                   options and seed (Generation/WorldTypes); a type's hints: `ticks = false`
+	                   options and seed (Generation/WorldTypes), with a loaded world's edits
+	                   (World/WorldSave.attach) and every change marking its region for the next
+	                   save (WorldSave.blockChanged); a type's hints: `ticks = false`
 	                   (the debug worlds) builds the ticker below without block behaviours,
 	                   `mobs = false` turns natural spawning off (World/WorldInfo.apply)
 	  3. ticker     -> scheduled block updates (World/BlockTicker, Behaviours/), and random ticks
@@ -56,10 +61,13 @@
 	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
 	                   on their windows, the perks the parts above ask for, saving, /knowledge and
 	                   /age)
-	 13. published  -> last, the world's settings on ReplicatedStorage.IceVoxel (WorldSettings
+	 13. restored   -> a loaded world's chests, furnaces, machines, pipes, structure blocks, items,
+	                   animals, operators and clock (World/WorldSave.restore)
+	 14. published  -> last, the world's settings on ReplicatedStorage.IceVoxel (WorldSettings
 	                   .publish: name, difficulty, then the world type, options and the "Seed"):
 	                   clients start loading once the seed is there, so everything above is ready
-	                   to answer them
+	                   to answer them; then saving starts (WorldSave.begin: players' records,
+	                   autosave, /save-all, /save-off, /save-on)
 	Status effects (Players/Effects: Minecraft's MobEffects, potions, oil and fuel on the skin,
 	/effect) start with the players, before the characters that tick them; Tough As Nails
 	registers its effects there when it starts. A player's mining speed is their effects' times
@@ -116,6 +124,7 @@ local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
 local Progression = require(Server.Players.Progression)
+local WorldSave = require(Server.World.WorldSave)
 
 --[[
 	Creates the world and starts everything that needs it (see the header); World/WorldInfo calls
@@ -126,6 +135,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	Operators.setAllowCommands(settings.allowCommands)
 
 	local world = WorldServer.new(WorldTypes.create(settings.worldType, settings.seed, settings.options))
+	-- A loaded world's edits, before any chunk is generated (and a new world's save handle).
+	WorldSave.attach(world, settings)
 	-- A world type without ticks (the debug worlds) gets no block behaviours: no block updates and
 	-- no random ticks, so nothing falls, flows, grows or burns (Minecraft's debug world).
 	local worldType = WorldTypes.get(settings.worldType)
@@ -146,6 +157,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		Machines.blockChanged(x, y, z, old, new)
 		-- Structure blocks and jigsaws keep their settings while they stand.
 		StructureBlocks.blockChanged(x, y, z, old, new)
+		-- Its region is written at the next save.
+		WorldSave.blockChanged(x, y, z)
 	end
 
 	local net = ServerNet.start(world)
@@ -241,23 +254,39 @@ local function startWorld(settings: WorldSettings.Settings)
 		StructureBlocks.update(dt)
 	end)
 
+	-- A loaded world's state back in every part, before anyone enters.
+	WorldSave.restore({
+		world = world,
+		containers = Containers.default,
+		transmitters = Transmitters.world(),
+		machines = Machines.world(),
+		structures = StructureBlocks.store,
+		items = Entities.world(),
+		mobs = Mobs.world(),
+		ticker = ticker,
+	})
+
 	-- Last: clients start loading once the seed is there (the world type and its options, the
 	-- name and the difficulty go out before it: Shared/WorldSettings, Generation/WorldTypes).
 	WorldSettings.publish(Shared, settings)
+	WorldSave.begin()
 end
 
 -- Before the world: operators, player settings and the title screen, on the lobby's net.
 local lobby = LobbyNet.start()
 Operators.start(lobby, GameModes.isOwner, GameModes.ownerKnown)
 SettingsStore.start(lobby)
+WorldSave.start(lobby)
 if Config.MainMenu.Enabled then
-	WorldMenu.start(lobby, startWorld)
+	WorldMenu.start(lobby, startWorld, WorldSave)
 else
 	local ok, problem = WorldInfo.create(
-		WorldSettings.fromConfig(Config.Seed or Random.new():NextInteger(1, 2_147_483_646)),
+		WorldSave.latest() or WorldSettings.fromConfig(Config.Seed or Random.new():NextInteger(1, 2_147_483_646)),
 		startWorld
 	)
 	if not ok then
+		-- (A loaded world that didn't start is given back.)
+		WorldSave.abandon()
 		error(`[IceVoxel] the world could not be created: {problem}`)
 	end
 end

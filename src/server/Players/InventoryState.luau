@@ -24,6 +24,8 @@
 	marks its other viewers dirty too. Crafting results are derived from their grids
 	(Menu.updateCraft), so every snapshot carries the right one.
 
+	A saved world's returning player gets their inventory back with `restore` (World/WorldSave).
+
 	Tools wear through `wearHeld` (the server's mining calls it); `heldStack` is what is in hand.
 	Using an item on a block (a bucket filling or emptying: Players/ItemUse) replaces what is in
 	hand with `setHeld` and hands stacks over with `give` (Inventory.add; the rest comes back);
@@ -101,6 +103,14 @@ export type InventoryState = {
 	die: (self: InventoryState, key: any, keepInventory: boolean) -> { Stack },
 	markDirty: (self: InventoryState, key: any) -> (),
 	takeDirty: (self: InventoryState) -> { any },
+	restore: (
+		self: InventoryState,
+		key: any,
+		slots: { [number]: Stack? },
+		armor: { [number]: Stack? },
+		selected: number,
+		cursor: Stack?
+	) -> { Stack },
 }
 
 local InventoryState = {}
@@ -541,6 +551,48 @@ function InventoryState.markDirty(self: InventoryState, key: any)
 	if player then
 		player.dirty = true
 	end
+end
+
+--[[
+	A saved player's inventory (World/WorldSave): replaces what they hold (slots 1..36, armor 1..4,
+	the selected hotbar slot), copies of the saved stacks; a saved cursor goes into the inventory
+	(Inventory.add). Returns what did not fit (none for a record this inventory wrote). A snapshot
+	is due.
+]]
+function InventoryState.restore(
+	self: InventoryState,
+	key: any,
+	slots: { [number]: Stack? },
+	armor: { [number]: Stack? },
+	selected: number,
+	cursor: Stack?
+): { Stack }
+	local player = self.players[key]
+	if player == nil then
+		return {}
+	end
+	local thrown = self:close(key)
+	local inventory = player.window.inventory
+	table.clear(inventory.slots)
+	table.clear(inventory.armor)
+	inventory.cursor = nil
+	for slot = 1, Types.INVENTORY_SIZE do
+		inventory.slots[slot] = Items.copyStack(slots[slot])
+	end
+	for slot = 1, Types.ARMOR_SIZE do
+		inventory.armor[slot] = Items.copyStack(armor[slot])
+	end
+	if selected >= 1 and selected <= Types.HOTBAR_SIZE and selected == math.floor(selected) then
+		inventory.selected = selected
+	end
+	if cursor and cursor.count >= 1 then
+		local left = Menu.add(inventory, cursor)
+		if left then
+			table.insert(thrown, left)
+		end
+	end
+	player.dirty = true
+	return thrown
 end
 
 -- The players due a snapshot (clears their flags).

@@ -57,6 +57,10 @@
 	                             CaveMood),
 	                             Music (surface and cave tracks, Minecraft's timing: MusicRules)
 	  Ui/MusicToast              the "Now Playing" toast in the top right corner
+	  Ui/SaveIndicator           the saving icon (bottom right) while the server saves the
+	                             world, and the "World saved" toast for operators; it hears the
+	                             server's saving state from the start (the title screen's Load
+	                             World)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
@@ -141,6 +145,7 @@ local SkillTreeScreen = require(Client.Ui.SkillTreeScreen)
 local AgeToast = require(Client.Ui.AgeToast)
 local Hud = require(Client.Ui.Hud)
 local MainMenu = require(Client.Ui.MainMenu)
+local SaveIndicator = require(Client.Ui.SaveIndicator)
 local Style = require(Client.Ui.Style)
 
 -- First, so the server's sounds play from the start instead of piling up.
@@ -155,6 +160,8 @@ Style.setScaleOverride(Settings.values.guiScale)
 local menuScale = Settings.changed:Connect(function()
 	Style.setScaleOverride(Settings.values.guiScale)
 end)
+-- Whether worlds can be saved here, and loads' progress, for the title screen.
+SaveIndicator.listen()
 -- The title screen until the player enters the world (Ui/MainMenu: its Options menu works).
 MainMenu.run()
 menuScale:Disconnect()
@@ -368,6 +375,8 @@ Ambience.start(function(x: number, y: number, z: number): number?
 end)
 MusicToast.start()
 Music.start()
+-- (After the music toast: the saving toast goes under it while it shows.)
+SaveIndicator.start()
 -- (After the toast: the icons go under its place; after the camera and the fluid's fog.)
 EffectHud.start()
 EffectView.start()

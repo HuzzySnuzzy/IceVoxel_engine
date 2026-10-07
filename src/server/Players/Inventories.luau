@@ -58,7 +58,8 @@
 	             Lids and armor that a player's messages cause use up that player's sound budget
 	             (Audio/Sounds.allow), so spamming them can't flood the players near.
 
-	Inventories last for the session: nothing is saved.
+	Saved      a saved world keeps every player's inventory (World/WorldSave reads it through
+	           `get`, and puts a returning player's back with `restore`).
 ]]
 
 local Players = game:GetService("Players")
@@ -188,6 +189,20 @@ end
 -- Acknowledges inventory action `seq` (a refused placement), so the client undoes its prediction.
 function Inventories.acknowledge(player: Player, seq: number)
 	state:acknowledge(player, seq)
+end
+
+--[[
+	A saved player's inventory comes back (World/WorldSave: InventoryState.restore); what did not
+	fit is thrown in front of them.
+]]
+function Inventories.restore(
+	player: Player,
+	slots: { [number]: Stack? },
+	armor: { [number]: Stack? },
+	selected: number,
+	cursor: Stack?
+)
+	throw(player, state:restore(player, slots, armor, selected, cursor), false)
 end
 
 -- Sends the player a snapshot this frame.

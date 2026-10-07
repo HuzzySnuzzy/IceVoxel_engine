@@ -18,9 +18,19 @@
 	            (faster ones are refused), one creation at a time, each answered with
 	            CreateWorldResult. No seed typed: a random one, 1..2^31 - 2 (as with Config.Seed
 	            unset).
+	  Loading   WorldAction from an operator while no world exists (World/WorldSave, given to
+	            `start` as `saves`): list (answered with WorldList), load (the world's lock, its
+	            record and regions read: everyone's title screen shows "Loading world: 12 / 40",
+	            then World/WorldInfo.create runs the boot's startWorld with its settings, as
+	            Creating does; a load that fails is answered with CreateWorldResult and why, and
+	            the server waits on), delete and rename (the name through the text filter first;
+	            each answered with the list again and how it went). A list a second per player,
+	            and a load, delete or rename a second, as CreateWorld.
 	  Entering  EnterWorld (Join World, or the creator's client once its world is made): when the
 	            world exists the player's character loads (Player:LoadCharacterAsync, or
-	            LoadCharacter on an engine without it). Roblox loads none
+	            LoadCharacter on an engine without it), once their record in a saved world was
+	            read (`saves.beforeEnter`: their place, inventory and the rest come back on that
+	            first character; a few seconds at most). Roblox loads none
 	            on its own (Players.CharacterAutoLoads is off from the start), so nobody stands
 	            anywhere before the world exists, and the dead are respawned here,
 	            Players.RespawnTime after dying (Roblox's own rule), while they are in the world.
@@ -46,11 +56,32 @@ local REQUEST_INTERVAL = 1
 
 local WorldMenu = {}
 
+-- What the title screen asks of saved worlds (World/WorldSave).
+export type Saves = {
+	-- Whether worlds can be saved and loaded here (Protocol.SaveState) and why not.
+	status: () -> (number, string?),
+	-- The saved worlds (yields), or nil and why not.
+	list: () -> ({ Protocol.WorldEntry }?, string?),
+	-- Opens a saved world for startWorld (yields): its settings, or nil and why not.
+	prepare: (id: string, progress: (done: number, total: number) -> ()) -> (WorldSettings.Settings?, string?),
+	-- A prepared world did not start: give it back.
+	abandon: () -> (),
+	delete: (id: string) -> (boolean, string?),
+	rename: (id: string, name: string) -> (boolean, string?),
+	-- Yields (a few seconds at most) until the player's record in the world was read.
+	beforeEnter: (player: Player) -> (),
+	-- Tells everyone the keys a load read (the title screen's progress).
+	progress: (done: number, total: number, name: string) -> (),
+}
+
 local net: ServerNet.ServerNet? = nil
 -- Players who entered the world (their character loads, and comes back after death).
 local entered: { [Player]: boolean } = {}
 local loading: { [Player]: boolean } = {}
 local lastRequest: { [Player]: number } = {}
+-- Per player: the last list request and the last load, delete or rename.
+local lastAction: { [Player]: { [string]: number } } = {}
+local savesInUse: Saves? = nil
 -- A creation is under way (the name's filter yields before WorldInfo.create).
 local busy = false
 
@@ -149,9 +180,19 @@ local function onEnter(player: Player, _payload: buffer)
 		sendState(player)
 		return
 	end
+	if entered[player] then
+		return
+	end
 	entered[player] = true
 	if player.Character == nil then
-		task.spawn(loadCharacter, player)
+		task.spawn(function()
+			-- (A saved world's player comes back as they were: their record first.)
+			local saves = savesInUse
+			if saves then
+				saves.beforeEnter(player)
+			end
+			loadCharacter(player)
+		end)
 	end
 end
 
@@ -218,6 +259,105 @@ local function onCreate(start: (WorldSettings.Settings) -> (), player: Player, p
 	broadcastState()
 end
 
+-- The saved worlds for `player`, with `message` (how the last action went).
+local function sendList(saves: Saves, player: Player, message: string?)
+	local network = net
+	local worlds, problem = saves.list()
+	local state = saves.status()
+	if network and player.Parent then
+		network.send(
+			player,
+			Protocol.ServerMessage.WorldList,
+			Protocol.encodeWorldList(
+				worlds or {},
+				state == Protocol.SaveState.On or state == Protocol.SaveState.Off,
+				problem or message or ""
+			)
+		)
+	end
+end
+
+local function onWorldAction(saves: Saves, start: (WorldSettings.Settings) -> (), player: Player, payload: buffer)
+	local action, id, name = Protocol.decodeWorldAction(payload)
+	if action == nil then
+		return
+	end
+	local function answer(ok: boolean, message: string)
+		local network = net
+		if network and player.Parent then
+			network.send(
+				player,
+				Protocol.ServerMessage.CreateWorldResult,
+				Protocol.encodeCreateWorldResult(ok, message)
+			)
+		end
+	end
+	local now = os.clock()
+	local load = action == Protocol.WorldAction.Load
+	local kind = if action == Protocol.WorldAction.List then "list" else "change"
+	local times = lastAction[player]
+	if times == nil then
+		times = {}
+		lastAction[player] = times
+	end
+	if now - (times[kind] or -math.huge) < REQUEST_INTERVAL then
+		if load then
+			answer(false, "Too fast: try again in a moment")
+		elseif kind == "change" then
+			sendList(saves, player, "Too fast: try again in a moment")
+		end
+		return
+	end
+	times[kind] = now
+	local refusal = WorldInfo.refusal(Operators.isOperator(player), busy)
+	if refusal then
+		refusal = string.gsub(refusal, "create the world", "load worlds")
+		if load then
+			answer(false, refusal)
+		else
+			sendList(saves, player, refusal)
+		end
+		return
+	end
+	if action == Protocol.WorldAction.List then
+		sendList(saves, player, nil)
+	elseif action == Protocol.WorldAction.Delete then
+		busy = true
+		local ok, problem = saves.delete(id)
+		busy = false
+		sendList(saves, player, if ok then "The world was deleted" else `It could not be deleted: {problem}`)
+	elseif action == Protocol.WorldAction.Rename then
+		busy = true
+		local filtered = filterName(WorldSettings.cleanName(name), player.UserId)
+		local ok, problem = saves.rename(id, filtered)
+		busy = false
+		sendList(saves, player, if ok then `Renamed to "{filtered}"` else `It could not be renamed: {problem}`)
+	elseif load then
+		busy = true
+		broadcastState()
+		local settings, problem = saves.prepare(id, function(done: number, total: number)
+			saves.progress(done, total, "")
+		end)
+		if settings == nil then
+			busy = false
+			warn(`[IceVoxel] the world {id} could not be loaded: {problem}`)
+			answer(false, `The world could not be loaded: {problem}`)
+			broadcastState()
+			return
+		end
+		local ok, err = WorldInfo.create(settings, start)
+		busy = false
+		if ok then
+			print(`[IceVoxel] {player.Name} loaded the world "{settings.name}" ({id})`)
+		else
+			saves.abandon()
+			warn(`[IceVoxel] the loaded world could not start: {err}`)
+		end
+		answer(ok, if ok then "" else "The world could not be started; the server needs a restart")
+		broadcastState()
+	end
+end
+
 local function watchCharacter(player: Player, character: Model)
 	local humanoid = character:WaitForChild("Humanoid", 10)
 	if humanoid == nil or not humanoid:IsA("Humanoid") then
@@ -233,15 +373,22 @@ end
 
 --[[
 	Starts the title screen's server side on the lobby's net. `start` is the boot's startWorld,
-	called once with the world's settings when the operator creates it (World/WorldInfo.create).
+	called once with the world's settings when the operator creates it (World/WorldInfo.create)
+	or loads one of `saves` (World/WorldSave; nil: no Load World).
 ]]
-function WorldMenu.start(serverNet: ServerNet.ServerNet, start: (WorldSettings.Settings) -> ())
+function WorldMenu.start(serverNet: ServerNet.ServerNet, start: (WorldSettings.Settings) -> (), saves: Saves?)
 	assert(net == nil, "WorldMenu.start was already called")
 	net = serverNet
+	savesInUse = saves
 	Players.CharacterAutoLoads = false
 	serverNet.on(Protocol.ClientMessage.CreateWorld, function(player: Player, payload: buffer)
 		onCreate(start, player, payload)
 	end)
+	if saves then
+		serverNet.on(Protocol.ClientMessage.WorldAction, function(player: Player, payload: buffer)
+			onWorldAction(saves, start, player, payload)
+		end)
+	end
 	serverNet.on(Protocol.ClientMessage.EnterWorld, onEnter)
 
 	local function onPlayer(player: Player)
@@ -264,6 +411,7 @@ function WorldMenu.start(serverNet: ServerNet.ServerNet, start: (WorldSettings.S
 		entered[player] = nil
 		loading[player] = nil
 		lastRequest[player] = nil
+		lastAction[player] = nil
 	end)
 	-- (Who the operator is shows on the title screen.)
 	Operators.changed:Connect(broadcastSoon)

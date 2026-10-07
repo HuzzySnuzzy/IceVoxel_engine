@@ -6,6 +6,10 @@
 	The spawn column comes from the generator (dry land near the origin). Every spawn re-checks the
 	spot against the real world (players may have built or poured water there) and searches nearby
 	for a new one when it is no longer safe (rules in SpawnUnsafeBlocks).
+
+	A saved world puts a returning player back where they were (World/WorldSave's `placement`,
+	`setPlacement`): asked on every new character, it gives their saved feet and facing once (the
+	first character after their record loaded); every other spawn is the world spawn.
 ]]
 
 local Players = game:GetService("Players")
@@ -25,6 +29,14 @@ local ROOT_HEIGHT = 3.5
 local RETRY_DELAY = 30
 
 local Spawning = {}
+
+-- Where a player's next character stands instead of the spawn (feet in blocks, yaw in radians),
+-- nil: the spawn (World/WorldSave: a saved player's place, once).
+local placement: ((player: Player) -> (Vector3?, number?))? = nil
+
+function Spawning.setPlacement(fn: ((player: Player) -> (Vector3?, number?))?)
+	placement = fn
+end
 
 -- Studs position for a character root standing with its feet in block (x, y, z).
 function Spawning.rootPosition(x: number, y: number, z: number): Vector3
@@ -61,8 +73,23 @@ function Spawning.start(world: WorldServer.World)
 	local first = spawnSpot()
 	Shared:SetAttribute("SpawnPosition", Spawning.rootPosition(first[1], first[2], first[3]))
 
-	local function onCharacter(character: Model)
-		if character:WaitForChild("HumanoidRootPart", 10) then
+	local function onCharacter(player: Player, character: Model)
+		local root = character:WaitForChild("HumanoidRootPart", 10)
+		if root == nil then
+			return
+		end
+		local place = placement
+		local feet, yaw = nil, nil
+		if place then
+			feet, yaw = place(player)
+		end
+		if feet then
+			-- (Facing first: the teleport keeps the rotation, and the client starts from it.)
+			if yaw and root:IsA("BasePart") then
+				character:PivotTo(CFrame.new(character:GetPivot().Position) * CFrame.Angles(0, yaw, 0))
+			end
+			Characters.teleportFeet(character, feet)
+		else
 			local s = spawnSpot()
 			Shared:SetAttribute("SpawnPosition", Spawning.rootPosition(s[1], s[2], s[3]))
 			Characters.teleport(character, s[1], s[2], s[3])
@@ -70,9 +97,11 @@ function Spawning.start(world: WorldServer.World)
 	end
 
 	local function onPlayer(player: Player)
-		player.CharacterAdded:Connect(onCharacter)
+		player.CharacterAdded:Connect(function(character)
+			onCharacter(player, character)
+		end)
 		if player.Character then
-			task.spawn(onCharacter, player.Character)
+			task.spawn(onCharacter, player, player.Character)
 		end
 	end
 

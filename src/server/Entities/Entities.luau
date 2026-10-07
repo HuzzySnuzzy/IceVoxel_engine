@@ -457,6 +457,11 @@ function Entities.explode(x: number, y: number, z: number, power: number): numbe
 end
 
 -- Number of dropped items in the world.
+-- The items' simulation (nil before `start`): World/WorldSave saves and restores items through it.
+function Entities.world(): EntityWorld.EntityWorld?
+	return entityWorld
+end
+
 function Entities.count(): number
 	local entities = entityWorld
 	return if entities then entities:count() else 0

@@ -46,6 +46,9 @@ export type World = {
 	pending: { number },
 	-- Called after every successful setBlock.
 	onChanged: ((x: number, y: number, z: number, old: number, new: number) -> ())?,
+	-- Called when a chunk is generated (with its edits), before anything reads it: a loaded
+	-- world's block updates due there are scheduled again (World/WorldSave).
+	onGenerated: ((cx: number, cz: number) -> ())?,
 	clock: () -> number,
 
 	getChunk: (self: World, cx: number, cz: number) -> Chunk,
@@ -70,6 +73,7 @@ function WorldServer.new(generator: TerrainGenerator.Generator, clock: (() -> nu
 		edits = {},
 		pending = {},
 		onChanged = nil,
+		onGenerated = nil,
 		clock = clock or os.clock,
 	}
 	return (setmetatable(self, WorldServer) :: any) :: World
@@ -111,6 +115,10 @@ function WorldServer.getChunk(self: World, cx: number, cz: number): Chunk
 	local created: Chunk = { cx = cx, cz = cz, data = data, height = height, lastUsed = self.clock() }
 	self.chunks[key] = created
 	self.chunkCount += 1
+	local onGenerated = self.onGenerated
+	if onGenerated then
+		onGenerated(cx, cz)
+	end
 	return created
 end
 

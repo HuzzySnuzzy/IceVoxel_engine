@@ -632,6 +632,12 @@ function Mobs.occupied(block: number, x: number, y: number, z: number): boolean
 		and mobs:overlaps(x + box[1], y + box[2], z + box[3], x + box[4], y + box[5], z + box[6])
 end
 
+-- The mobs' simulation (nil before `start`): World/WorldSave saves and restores farm animals
+-- through it.
+function Mobs.world(): MobWorld.MobWorld?
+	return mobWorld
+end
+
 -- Mobs in the world (for the debug overlay and tests).
 function Mobs.count(): number
 	local mobs = mobWorld

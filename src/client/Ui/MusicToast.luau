@@ -131,6 +131,18 @@ local function place(): (number, number)
 	return top, Style.guiScale(viewport, WIDTH, HEIGHT, touch)
 end
 
+-- Screen pixels (below the top bar) of the toast's top in the corner, and its scale: other
+-- toasts take the same place (Ui/SaveIndicator's "World saved").
+function MusicToast.top(): (number, number)
+	return place()
+end
+
+-- Is the Now Playing toast on screen (other toasts go under it)?
+function MusicToast.showing(): boolean
+	local frame = panel
+	return frame ~= nil and frame.Visible
+end
+
 --[[
 	Screen pixels (below the top bar) just under the toast's place in the corner, shown or not, and
 	the right margin: the status effect icons go there (Ui/EffectHud).

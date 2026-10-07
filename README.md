@@ -22,8 +22,27 @@ A fast, Minecraft-style voxel engine for Roblox.
   Create World screen (World Name, Game Mode, Difficulty, Allow Commands; World Type with a
   generic Customize screen for a type's settings, the seed read as Minecraft reads it, Generate
   Structures), and everyone joins it with Join World. Until then the world doesn't exist at all
-  and nobody has a character. Operators (`/op`, `/deop`) may use the cheat commands; Load World
-  waits for saves, which are for later.
+  and nobody has a character. Operators (`/op`, `/deop`) may use the cheat commands, and Load
+  World opens a saved world (below).
+- **Saving and loading worlds.** Worlds are saved in a DataStore, as Minecraft saves its level:
+  every block anyone changed (each chunk's edits, in regions of 32 × 32 chunks a key), chests,
+  furnaces still cooking, machines with their energy, tanks and slots, Mekanism pipes (side modes,
+  colours, the fluid in them), Fluid Tanks, items in transporters, structure blocks and jigsaws,
+  generated chests already looted, dropped items, farm animals, block updates still due (water
+  that was flowing flows on), the clock and doDaylightCycle, the world's operators, and each
+  player's place, facing, health, game mode, inventory and armor, thirst and temperature and
+  status effects (progress is kept per player for every world, as before). Autosave every 5
+  minutes writes only what changed (a house and a tunnel, a chest, a furnace, a battery, pipes,
+  an item and a cow: about 1.1 KB of a key); `/save-all`, `/save-off` and `/save-on` as
+  Minecraft's; and the world is saved when the server shuts down. While a save is in flight a
+  little grass block bobs in the bottom right corner ("Saving..."), and operators get a toast:
+  "World saved — 1.4 MB of 64 MB (largest region 0.3 / 4 MB)"; the chat warns them when the world
+  nears its most (`Save.MaxWorldBytes`). The title screen's Load World lists the saved worlds
+  (name, type, last played, size), loads one ("Loading world: 12 / 40"), renames or deletes it
+  (after Minecraft's "Are you sure you want to delete this world?"). One server opens a world at
+  a time (a lock that goes stale 3 minutes after a crash), a world that can't be read whole is
+  never started or written over, and Studio without API access says so on the title screen and
+  in the chat (worlds then last for the session).
 - **Loading what you see first.** Terrain loads in the order you need it: the ground under you,
   then what is in front of the camera, then what is just behind, then the rest, and terrain hidden
   behind mountains last; after a teleport 90% of the view is there 15-40% sooner. A teleport drops
@@ -966,8 +985,9 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
+| Saving        | `/save-all` (save now: "Saving the game (this may take a moment!)", then "Saved the game"), `/save-off` (no automatic saves until `/save-on`; shutdown still saves), `/save-on` (operators only); the saving icon shows bottom right while the world saves | | |
 | Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). Until the world exists (with the title screen and `MainMenu.AutoOperator`) the first player to join is the operator, and when the last operator here leaves the player here longest becomes one (`/deop` never takes the last one here then); after that nobody becomes one by being here (the first operator stays one). `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
-| Title screen  | Click the buttons (Join World, Create World, Options...); `Escape` goes back a screen (Create World, Customize, Options) | A; B goes back | Tap |
+| Title screen  | Click the buttons (Join World, Create World, Load World, Options...); `Escape` goes back a screen (Create World, Customize, Load World, its Delete and Rename, Options); in Load World click a world to select it, double click to play it | A; B goes back | Tap |
 
 ## Settings menu
 
@@ -1101,8 +1121,17 @@ character before they enter the world.
   the server, which checks it again (only the operator, only once, known types and modes, at most
   32 characters of name and seed; the name goes through Roblox's text filter, as everyone sees
   it), creates the world and puts you in it.
-- **Load World** is greyed out: worlds aren't saved yet (the server keeps one world for its
-  lifetime); loading a saved world is for the future.
+- **Load World** is the operator's too, while no world exists, where worlds can be saved (a red
+  line under the buttons says why not: Studio without API access, saving off): Minecraft's
+  Select World screen lists the saved worlds, last played first, three lines each (the name; its
+  type and when it was last played; its game mode and size). Click one to select it (double click
+  plays it), then **Play Selected World** ("Loading world: 12 / 40" on every title screen while
+  its keys are read; then everyone may join), **Rename** (the name goes through the text filter)
+  or **Delete** (after Minecraft's "Are you sure you want to delete this world?" / "'Name' will be
+  lost forever! (A long time!)"). A world another server has open can't be loaded or deleted; one
+  that can't be read whole says why and is left as it was. A created world is saved at once, so
+  it is in the list from then on. Joining a saved world puts each player back where they left,
+  with what they had; a player new to it starts at the spawn.
 - **Options...** opens the Options menu (the same as `P` in the game); Done comes back.
 
 The world's name, type, difficulty and seed show in `F3`. Without the title screen
@@ -1228,6 +1257,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             the bindable keys (Roblox's KeyCode values), conflicts, the list order
   WorldSettings             the world's settings (Create World): seeds as Minecraft reads them,
                             checking a request, a world type's options, publishing them
+  SaveText                  the words and sizes of saved worlds (the toast, the list, the chat)
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
                             character)
@@ -1245,6 +1275,8 @@ src/server   -> ServerScriptService.IceVoxel
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
                             Simulation, TimeOfDay (the day clock, published as workspace attributes),
                             WorldInfo (the world's settings once created; creating it once),
+                            WorldSave (saving and loading worlds: the DataStore, autosave,
+                            /save-all, players' records, the title screen's Load World),
                             Explosions (blasts in the world, fuel going off, per-tick cost
                             bounds, the primer hook for explosive blocks), FuelBlast (fuel
                             catching, measuring a body, power, chained blasts; pure), Nuke (the
@@ -1257,6 +1289,12 @@ src/server   -> ServerScriptService.IceVoxel
                             (spreading, burning blocks away, burning out, ages; lava lighting
                             fires; flint and steel), Tnt (lit TNT and Nukes: lighting, the fuse,
                             falling, blowing up), Drops (block update logic)
+  Save/                     saved worlds, pure: SaveCodec (bytes, stacks, base85 text),
+                            RegionCodec (a region's edits and block state), PlayerCodec,
+                            WorldMeta (records, keys, sizes), SaveLock, SaveScheduler (requests
+                            within the budgets and the 6 s a key), WorldSnapshot (the world's
+                            state to regions and back), WorldStore (save, load, delete, rename),
+                            SaveCommand (/save-all, /save-off, /save-on)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication;
@@ -1359,8 +1397,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             list beside open screens, their glyphs), SkillTreeScreen (the skill
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
                             weapon's recovery under the crosshair or beside the hotbar), MainMenu
-                            (the title screen and Create World) + TitleRules + CreateWorldForm
-                            (their rules; pure), Chat/ (the chat in place of Roblox's: ChatLog
+                            (the title screen, Create World and Load World) + TitleRules +
+                            CreateWorldForm + WorldListRules (their rules; pure), SaveIndicator
+                            (the saving icon and the "World saved" toast), Chat/ (the chat in place of Roblox's: ChatLog
                             the lines, ChatInput the box's rules: sending, history, Tab;
                             ChatFormat the messages' looks; all pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
@@ -1556,6 +1595,14 @@ for performance:
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
+| `Save.Enabled` / `StoreName` | true / "IceVoxelWorlds_v1" | Save worlds at all, and the DataStore they go in (a new name starts afresh; Studio needs API access). |
+| `Save.Interval`           | 300     | Seconds between automatic saves (Minecraft's 5 minutes), each writing only what changed; 0: only `/save-all` and shutdown. |
+| `Save.MaxWorldBytes` / `WarnShare` | 64 MB / 0.8 | The most a world may take in the store (a save past it is refused and operators are told); the chat warns operators past this share of it (again every 5% more). |
+| `Save.KeyLimit` / `MaxKeyBytes` | 4194304 / 4000000 | Roblox's limit per key, and the text a region's key is filled to before it goes on in another part. |
+| `Save.RegionChunks`       | 32      | Chunks per region side (512 × 512 blocks a key, Minecraft's region files). |
+| `Save.LockTimeout`        | 180     | Seconds after which a world whose server stopped renewing its lock (a crash) may be opened elsewhere; the lock is renewed every third of it. |
+| `Save.Items` / `Mobs`     | true / true | Also save dropped items, and farm animals (monsters are never kept). |
+| `Save.LoadLatest`         | true    | With `MainMenu.Enabled` off, open the world played last (no other server having it) instead of making a new one. |
 | `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu (the key: the Options key binding's default). |
 | `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
 | `Settings.SaveDelay` / `LoadWait` | 1.5 / 1 | Seconds before changes are sent to the server; seconds a joining client waits for its saved settings. |
@@ -2136,6 +2183,21 @@ for operators only). Mark the command with that rule (`instance:SetAttribute(Wor
 it only to players who may use it. Pure parsing (see `Players/TimeCommand`) keeps it testable.
 With the legacy chat, read `Player.Chatted` instead (the game's chat needs TextChatService and
 leaves Roblox's in place there).
+
+**State saved with the world.** Something of your own that a saved world should keep (a clock, a
+weather override, a score) registers a section with the server's `World/WorldSave`:
+```lua
+WorldSave.registerSection("weather", function()
+	return { clock = Weather.clock(), override = Weather.override() } -- small, JSON-able
+end, function(value)
+	Weather.restore(value) -- once, when a saved world with it starts
+end)
+```
+`encode` runs at every save (keep it cheap: it runs in the save's frame) and goes in the world's
+record; `decode` runs once when a saved world starts, after every part of the server started and
+before anyone is in, or at once if you register later. A section the world never saved gets no
+call. Block state belongs to the blocks instead: it is in the edits, or in `Players/Containers`
+like a chest's (see `Save/WorldSnapshot` for what else regions carry).
 
 **A biome.** Add an entry to `src/shared/Biomes/BiomeList.luau` with the altitude bands it appears
 in, a climate position (temperature, humidity), surface blocks (optionally patches of another
