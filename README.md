@@ -221,7 +221,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   second, through the armor, Resistance and the hurt cooldown, with a knockback); **skeletons** (0.6 × 1.99,
   20) shoot within 15 blocks every 3 s (3-5 an arrow; the arrows are hitscan, seen flying);
   **creepers** (0.6 × 1.7, 20) walk up, hiss within 3 blocks and 1.5 s later explode with power 3,
-  unless you get 7 blocks away. Zombies and skeletons burn in daylight under the open sky. Mobs
+  unless you get 7 blocks away. Zombies and skeletons burn in daylight under the open sky (a
+  tree's leaves shade them, glass doesn't). No block can be placed inside a mob. Mobs
   walk at Minecraft's speeds (a zombie 2.3 blocks a second), jump up blocks, never walk off a drop
   of more than 3 blocks or into lava, fire, oil or fuel, swim up in water, take fall, fire, lava
   and explosion damage (TNT, fuel and creepers hurt and throw them), flash red when hurt, tip
@@ -237,10 +238,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength every 0.6 s), knocks
   it back and wears the weapon; WAILA names the mob and its health. A kill is knowledge: the first
   of each kind 10 points, then 2 an animal, 5 a monster, 6 a creeper. Creatures spawn on grass in the light 24-44 blocks from players (10 at most
-  around each), monsters on solid ground in the dark, at night or in caves (15 at most; never
-  by torchlight), from the same light estimate WAILA shows; monsters vanish far from everyone
-  (Minecraft's 128 and 32 block rules). Mobs only move within the simulated chunks around players
-  and freeze beyond. `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for admins.
+  around each, counting the monsters in the simulated chunks), monsters on solid ground in the
+  dark, at night or in caves (15 at most; never by torchlight, as far as a torch's light reaches,
+  13 blocks, however big the room), from the same light estimate WAILA shows; monsters vanish far
+  from everyone (Minecraft's 128 and 32 block rules, those frozen out of reach too). Mobs only
+  move within the simulated chunks around players and freeze beyond (a frozen mob that dies
+  still goes). `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for admins.
   `Config.Mobs` sets the caps and turns spawning or mobs off.
 - **Status effects.** Minecraft 1.20.1's MobEffects with their numbers: Speed (+20% ground speed a
   level) and Slowness (-15%), Haste (+20% mining speed a level) and Mining Fatigue (x 0.3, 0.09,
@@ -248,8 +251,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   (+0.1 jump and a block less fall damage a level), Regeneration (half a heart every 50 >> amp
   ticks), Poison (every 25 >> amp, never the last half heart, through armor) and Wither (every
   40 >> amp, and it kills), Fire Resistance (no fire, lava, campfire or burning hurts), Resistance
-  (20% of every hurt a level, mobs' too; V: nothing), Night Vision (caves and nights lit, flickering in its
-  last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
+  (20% of every hurt a level, mobs' and Tough As Nails' freezing and heatstroke too, not
+  dehydration, which is starvation's; V: nothing), Night Vision (caves and nights lit, flickering in
+  its last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
   the view sways, building up over 8 s), Instant Health and Instant Damage (4 and 6 half hearts,
   doubling a level) and Glowing (an outline everyone sees through walls). They stack and refresh
   as Minecraft's (a stronger effect wins, a weaker longer one waits underneath and comes back), run
@@ -260,13 +264,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   their last 10 s; hover one, or tap it on a touch screen, for its name, level and time), and
   Minecraft's list of names and times beside any open screen; F3 lists them too. Tough As Nails'
   Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them (its own
-  status row over the hotbar shows only with `Config.Effects.Hud` off). `/effect give
+  status row over the hotbar shows only with `Config.Effects.Hud` off; the Thirst effect and the
+  clemency wait in creative and spectator, their times standing still on the icons). `/effect give
   <player> <effect> [seconds | infinite] [amplifier]` and `/effect clear [player] [effect]` with
   Minecraft's ids and wording (admins, the owner and Studio, as `/time`).
 - **Oil and fuel on the skin.** Wading in crude oil is Slowness II, and leaving it leaves you **Oil
   Coated** for 30 s: still slower (Slowness I's -15%), and anything that sets you burning burns
   twice as long and a half heart harder. Fuel's fumes make you sick (Nausea, 8 s after the last
-  whiff) and, after 3 s in it, poison you (Poison I while in it, 5 s after); it soaks you (**Fuel
+  whiff) and, after 3 s in it, poison you (Poison I while in it, a half heart every 1.25 s, and
+  up to 5 s after); it soaks you (**Fuel
   Soaked**, 20 s after leaving): fire catches at once, burning lasts three times as long, and a
   blast that reaches you sets you alight. A swim washes both off. The fluids' effects are data
   (`FluidList` `effects`), and `Config.Effects.FluidEffects` turns them off.
@@ -333,34 +339,36 @@ A fast, Minecraft-style voxel engine for Roblox.
   bucket and block in lookups: refining (a bucket of oil into fuel in 5 s for 20 kJ), the Heat
   Generator's lava ("Makes 4 MJ", "200 J/t for 1000 s") and the Combustion Generator's fuel ("Makes
   10 MJ", "2.5 kJ/t for 200 s"); `U` on an Oil Refinery or a Combustion Generator lists theirs.
-- **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve
-  (2L + 7 points a level to 15, 5L - 38 to 30, 9L - 158 above) and its green bar over the hotbar
-  with the level over it (survival and adventure). It comes from first times above all: a block
-  kind mined 5 points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind
-  killed 10, an Age reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5),
-  logs (0.25), each item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft
-  (0.1), each mob (an animal 2, a monster 5, a creeper 6). Repeats wear off (a repeat of the same thing within a minute gives three
-  quarters of the last), all repeats give at most 20 points a minute, and blocks a player placed
-  give nothing at all, so farms dry up. Knowledge opens five **Ages**, each at a level and two
-  milestones: the **Stone Age** (where everyone starts: wood, stone tools, the crafting table,
-  furnace, chests, torches, glass, iron smelting, Tough As Nails' basics, cooked meat, leather
-  armor and wool), the **Iron Age** (level 5, a Furnace crafted and an Iron Ingot smelted: iron
-  and gold tools and armor, the Bucket, Shears, Flint and Steel, the Lantern, the Canteen, the
-  Thermometer, gold and osmium smelting, potions), the **Industrial Age** (level 15, an Osmium
-  Ingot and a Bucket: diamond gear, Mekanism's basic and advanced pipes, transporters and tanks,
-  the Configurator, the Heat Generator, gunpowder and TNT, potions II and long potions), the **Electric Age** (level 25, a Heat Generator and 6 biomes: cables, the Electric
-  Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite pipes) and
-  the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the ultimate tiers,
-  the Nuke). A later Age's crafting results stay out of the grid (shown greyed with "Requires the
-  Iron Age"; JEI puts a padlock on them) and furnaces take nothing that would smelt into one;
-  reaching an Age is automatic, with a banner, a fanfare and a line in everyone's chat. Each level
-  is a **skill point** for the skill tree (`K`): 18 small perks in three branches across the Ages,
-  1 to 5 points each: Forager (+10% knowledge from discoveries), Quarrying (stone tools mine 10%
-  faster), Hardy (thirst drains 10% slower), Firekeeper (campfires boil twice as fast),
-  Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation (a step
-  of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar, Tempering,
-  Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke), Mastery and
-  Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death.
+- **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve (2L +
+  7 points a level to 15, 5L - 38 to 30, 9L - 158 above) and its green bar over the hotbar with the
+  level over it (survival and adventure). It comes from first times above all: a block kind mined 5
+  points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind killed 10, an Age
+  reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5), logs (0.25), each
+  item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft (0.1), each mob (an
+  animal 2, a monster 5, a creeper 6). Repeats wear off (a repeat of the same thing within a minute
+  gives three quarters of the last), all repeats give at most 20 points a minute (perks included),
+  and blocks a player placed give nothing at all, so farms dry up. What a furnace pushes into a
+  chest beside it, or a pipe pulls out, counts as smelted by whoever last used the furnace.
+  Knowledge opens five **Ages**, each at a level and two milestones: the **Stone Age** (where
+  everyone starts: wood, stone tools, the crafting table, furnace, chests, torches, glass, iron
+  smelting, Tough As Nails' basics, cooked meat, leather armor and wool), the **Iron Age** (level 5,
+  a Furnace crafted and an Iron Ingot smelted: iron and gold tools and armor, the Bucket, Shears,
+  Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting, potions),
+  the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic and
+  advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and TNT,
+  potions II and long potions), the **Electric Age** (level 25, a Heat Generator and 6 biomes:
+  cables, the Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion
+  Generator, elite pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar
+  Panel, the ultimate tiers, the Nuke). A later Age's crafting results stay out of the grid (shown
+  greyed with "Requires the Iron Age"; JEI puts a padlock on them) and furnaces take nothing that
+  would smelt into one; reaching an Age is automatic, with a banner, a fanfare and a line in
+  everyone's chat. Each level is a **skill point** for the skill tree (`K`): 18 small perks in three
+  branches across the Ages, 1 to 5 points each: Forager (+10% knowledge from discoveries), Quarrying
+  (stone tools mine 10% faster), Hardy (thirst drains 10% slower), Firekeeper (campfires boil twice
+  as fast), Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation
+  (a step of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar,
+  Tempering, Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke),
+  Mastery and Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death.
   Creative players have every recipe and earn nothing. `/knowledge` and `/age` set it for testing.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
@@ -1295,7 +1303,7 @@ for performance:
 | `ToughAsNails.ProximityRadius` / `HeatingBlocks` / `CoolingBlocks` | 5 / Lava, Fire, Campfire / ice, snow | Heat sources within that many blocks warm 3 steps (5 within 2 blocks, where cold sources no longer cool), cold sources cool 3 (fluid or block names; unknown names are skipped with a warning). |
 | `Progression.Enabled` / `GateRecipes` | true / true | Knowledge, Ages and the skill tree at all (off: no bar, no gates, no perks); a later Age's (or a skill's) crafting and smelting results locked. |
 | `Progression.Save` / `SaveInterval` | true / 120 | Keep progress between sessions (DataStore "IceVoxelProgress_v1"; Studio needs API access); seconds between saves of changed progress (and on leaving and shutdown). |
-| `Progression.RepeatBudget` | 20 | Points a minute at most from repeated actions together (ores, logs, smelting, crafting, mobs); discoveries are not limited. |
+| `Progression.RepeatBudget` | 20 | Points a minute at most from repeated actions together (ores, logs, smelting, crafting, mobs; the knowledge perks included); discoveries are not limited. |
 | `Progression.DeathLoss` | 0 | Share of the progress into the current level lost on death (levels, the Age and skills never are). |
 | `Progression.BiomeInterval` | 2 | Seconds between looks at the biome a player stands in (a first visit is a discovery). |
 | `Progression.Key` / `GamepadButton` | K / DPadLeft | Open and close the skill tree. |

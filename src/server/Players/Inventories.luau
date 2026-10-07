@@ -30,6 +30,8 @@
 	             change, and every other tick when only the flame or the arrow moved. Every 10 ticks
 	             a furnace with results pushes them into the chests next to it (Transmitters/Eject,
 	             Mekanism's ejector; blocks read without generating terrain, as the pipes do).
+	             Results that leave on their own so (or by a pipe) count as smelted for the player
+	             who last used the furnace's window (`resultsTaken`: Progression).
 	  Tools      ServerNet times and harvests breaks with `heldTool` and wears the tool with
 	             `wearTool` (InventoryState.wearHeld: at its durability it breaks), less with
 	             Progression's wear perks (`setWearFilter`).
@@ -242,6 +244,30 @@ function Inventories.setWearFilter(filter: ((player: Player, amount: number) -> 
 	wearFilter = filter
 end
 
+--[[
+	Results that leave a furnace's or machine's output on their own (Transmitters/Eject pushing
+	them into a chest, a pipe pulling them: their envs' `resultsTaken`) go to the results handler
+	(Progression's smelting knowledge; set by the server script) for the player who last used that
+	furnace's window, as if they had taken them out themselves: Minecraft's furnace keeps what it
+	smelted for a player even when a hopper empties it. Without it a furnace next to a chest would
+	never count as smelting (the Iron Age's "Smelt an Iron Ingot").
+]]
+local resultsHandler: ((player: Player, stack: Stack) -> ())? = nil
+-- The player who last acted in each furnace's or machine's window (weak: gone with the container).
+local lastUsers: { [Types.Container]: Player } = setmetatable({}, { __mode = "k" }) :: any
+
+function Inventories.setResultsHandler(handler: ((player: Player, stack: Stack) -> ())?)
+	resultsHandler = handler
+end
+
+function Inventories.resultsTaken(_x: number, _y: number, _z: number, container: Types.Container, stack: Stack)
+	local user = lastUsers[container]
+	local handler = resultsHandler
+	if user and handler and user.Parent then
+		handler(user, stack)
+	end
+end
+
 -- The tool in the player's hand was used `amount` times (ServerNet's breaks); at its durability it
 -- breaks, which everyone near hears (the owner too: clients don't predict wear). The wear
 -- filter (perks) may skip some of it.
@@ -388,6 +414,9 @@ local function onInventory(player: Player, payload: buffer)
 	if fx ~= nil and container and container.kind == "furnace" then
 		Containers.default:markActive(fx, fy, fz)
 	end
+	if container and (container.kind == "furnace" or container.kind == "machine") then
+		lastUsers[container] = player
+	end
 	if window then
 		for slot = 1, Types.ARMOR_SIZE do
 			local sound = SharedSounds.equip(armor[slot], window.inventory.armor[slot])
@@ -511,6 +540,7 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 		end,
 		containers = Containers.default,
 		inventoryChanged = Inventories.containerChanged,
+		resultsTaken = Inventories.resultsTaken,
 	}
 
 	local sinceCheck = 0

@@ -8,7 +8,8 @@
 	            not a spectator (Minecraft leaves spectators out), each player on a tick of their
 	            own within the interval (so the costs spread out), while that category has room:
 	            fewer than PassiveCap creatures / HostileCap monsters within 128 blocks of the
-	            player, and fewer than MaxPassive / MaxHostile (and the world's MaxMobs) in all.
+	            player (monsters only in the chunks that tick: `census`), and fewer than
+	            MaxPassive / MaxHostile (and the world's MaxMobs) in all.
 	  Where     `Attempts` packs a player per round, each in a random direction SpawnDistance
 	            (24..44) blocks out, inside the chunks that tick (World/Simulation), never in a
 	            chunk that isn't loaded (nothing is generated) and never within 24 blocks of any
@@ -31,7 +32,10 @@
 	            server keeps no light map; the sky is World/Skylight.open), the same estimate the
 	            client's WAILA shows.
 	  Costs     per round at most players x Attempts packs x 4 members, each spot a short column
-	            scan and at most one block light search of 256 cells and one sky search of 48.
+	            scan and one sky search of 48 cells, and for a monster whose light rolls pass a
+	            block light search of up to LightEstimate.SPAWN_BUDGET (2048) cells, so torches
+	            keep monsters out of a room as far as their light reaches (13 blocks), however
+	            big the room (a creature's: 256 cells).
 
 	Config.Mobs.Spawning = false turns natural spawning off (/summon still works).
 ]]
@@ -175,8 +179,13 @@ function MobSpawning.validSpot(
 	end
 	local sky = LightEstimate.skyLight(getBlock, context.skyOpen, x, y, z)
 	if kind.hostile then
-		local block = LightEstimate.blockLight(getBlock, x, y, z)
-		return LightEstimate.darkForMonsters(sky, block, DayCycle.skyDarken(context.dayTime), nextInt)
+		-- The sky's rolls first (as with no block light), then the block light, which must be 0:
+		-- the same odds, but the costly search (every cell a torch could light: SPAWN_BUDGET)
+		-- only for spots the rolls let through.
+		if not LightEstimate.darkForMonsters(sky, 0, DayCycle.skyDarken(context.dayTime), nextInt) then
+			return false
+		end
+		return LightEstimate.blockLight(getBlock, x, y, z, LightEstimate.SPAWN_BUDGET, 1) == 0
 	end
 	if LightEstimate.brightForAnimals(sky, 0) then
 		return true
@@ -267,7 +276,13 @@ local function tryPack(
 	return spawned
 end
 
--- Mobs of each category (hostile, creatures) in the world, and within CAP_DISTANCE of (x, y, z).
+--[[
+	Mobs of each category (hostile, creatures) in the world, or around (x, y, z): within
+	CAP_DISTANCE of it, monsters only where they tick (not `frozen`). The chunks that tick reach
+	about 56 blocks (Config.Server.SimulationRadius 3), half the 128 of the caps: monsters left
+	frozen farther out would fill a player's cap while none are about them (they idle away,
+	MobWorld's despawning). Creatures stay for good, so all of them count.
+]]
 local function census(world: MobWorld.MobWorld, x: number?, y: number?, z: number?): (number, number)
 	local hostile, passive = 0, 0
 	local limit = MobSpawning.CAP_DISTANCE * MobSpawning.CAP_DISTANCE
@@ -277,7 +292,7 @@ local function census(world: MobWorld.MobWorld, x: number?, y: number?, z: numbe
 			local counted = true
 			if x and y and z then
 				local dx, dy, dz = body.x - x, body.y - y, body.z - z
-				counted = dx * dx + dy * dy + dz * dz <= limit
+				counted = dx * dx + dy * dy + dz * dz <= limit and not (mob.frozen and mob.kind.hostile)
 			end
 			if counted then
 				if mob.kind.hostile then

@@ -16,7 +16,8 @@
 	Pure (no Roblox APIs, so the tests run it): blocks come from Env.getBlock, which never
 	generates terrain (peekBlock, falling back to the edit list, as the pipes read them), and
 	contents from Players/Containers. Both containers' viewers hear of a change through
-	Env.inventoryChanged, and a furnace is ticked again (its output has room now).
+	Env.inventoryChanged, and a furnace is ticked again (its output has room now). What left the
+	output goes to Env.resultsTaken (smelting knowledge for the furnace's last user).
 
 	Who runs it: Players/Inventories' furnace loop, every INTERVAL furnace ticks, for every
 	furnace with results (`furnaces`); Machines/MachineWorld, every INTERVAL ticks, for every
@@ -43,6 +44,10 @@ export type Env = {
 	containers: Containers.Store,
 	-- The slots of the inventory at (x, y, z) changed (its viewers need a snapshot).
 	inventoryChanged: ((x: number, y: number, z: number) -> ())?,
+	-- Results left a furnace's or machine's output at (x, y, z) on their own (pushed out, or
+	-- pulled by a pipe): Players/Inventories.resultsTaken credits them as smelted to the
+	-- player who last used its window (Progression), as if taken out by hand.
+	resultsTaken: ((x: number, y: number, z: number, container: InventoryTypes.Container, stack: Stack) -> ())?,
 }
 
 local Eject = {}
@@ -121,6 +126,10 @@ function Eject.push(env: Env, x: number, y: number, z: number, container: Contai
 					changed(env, target.x, target.y, target.z)
 					left -= fits
 					moved += fits
+					local resultsTaken = env.resultsTaken
+					if resultsTaken then
+						resultsTaken(x, y, z, container, taken)
+					end
 				end
 			end
 		end

@@ -581,6 +581,16 @@ end
 
 --[[ Pulling ]]
 
+-- Is `item` among a furnace's or machine's `results` (Transmitters.results)?
+local function isResult(results: { Stack }, item: number): boolean
+	for _, result in results do
+		if result.item == item then
+			return true
+		end
+	end
+	return false
+end
+
 --[[
 	One pull of `node` through `side` (Mekanism's TransitRequest): "sent", "failed" (items there,
 	nowhere to send them) or "none" (nothing to take). `routes` gives the route search, which is
@@ -614,6 +624,8 @@ local function pullSide(
 	-- A furnace or machine pushes a stack out at once (the ejector); other inventories give the
 	-- tier's pull amount.
 	local ejects = Transmitters.ejects(block)
+	-- (Its results' kinds: one of them taken out is smelted, for its last user.)
+	local results = if ejected then types elseif ejects then Transmitters.results(block, container.slots) else nil
 	local pull = Transmitters.pullAmount(node.block)
 	for _, kind in types do
 		local most = if ejects then math.min(Items.maxStack(kind.item), Items.MAX_STACK) else pull
@@ -629,6 +641,11 @@ local function pullSide(
 			end
 			if taken then
 				store(world, x, y, z, block, newSlots)
+				-- (A furnace's or machine's results pulled out: smelted, for its last user.)
+				local resultsTaken = world.env.resultsTaken
+				if resultsTaken and results and isResult(results, taken.item) then
+					resultsTaken(x, y, z, container, taken)
+				end
 				local id = world.nextItem
 				world.nextItem += 1
 				local item: Item = {

@@ -39,7 +39,9 @@
 	  toRecord / fromRecord
 	              the saved form (DataStore, server Players/ProgressStore), read back
 	              migration-safe: garbage reads as a fresh start, unknown skills are dropped, an
-	              unknown Age reads as the Stone Age (and is reached again by `advance`)
+	              unknown Age reads as the Stone Age (and is reached again by `advance`); a
+	              record of another version reads as a fresh start that must not be saved over
+	              (its second result), so an old server never overwrites a newer one's record
 	  status      the Progress message's content: points, Age, skills, counts of discoveries by
 	              category and which milestones are met
 ]]
@@ -230,7 +232,9 @@ end
 
 --[[
 	A repeat of `key` worth `base` from `source` at `now` (seconds), within `budget` repeat points a
-	minute (Knowledge.repeatPoints: fatigue, the bucket). Returns the whole points given.
+	minute (Knowledge.repeatPoints: fatigue, the bucket). The perks multiply `base` before the
+	bucket, so all repeats together give at most `budget` a minute, perks or not. Returns the whole
+	points given.
 ]]
 function Progression.repeatAction(
 	state: State,
@@ -241,7 +245,12 @@ function Progression.repeatAction(
 	now: number,
 	budget: number
 ): number
-	return Progression.award(state, session, Knowledge.repeatPoints(session, key, base, now, budget), source)
+	local points = Knowledge.repeatPoints(session, key, base * Progression.knowledgeFactor(state, source), now, budget)
+	local whole = Knowledge.carry(session, points)
+	if whole > 0 then
+		Progression.addPoints(state, whole)
+	end
+	return whole
 end
 
 --[[
@@ -327,17 +336,23 @@ end
 
 --[[
 	Enters every next Age whose requirements are met, one after another (each gives its reward,
-	which may open the next). Returns the Ages reached, in order.
+	which may open the next). Returns the Ages reached, in order, and those of them reached for
+	the first time (the others were reached before, then set lower by /age: no reward again, and
+	nothing to announce).
 ]]
-function Progression.advance(state: State, session: Session): { Age }
+function Progression.advance(state: State, session: Session): ({ Age }, { Age })
 	local reached: { Age } = {}
+	local first: { Age } = {}
 	while state.age < Ages.count and Progression.requirementsMet(state, state.age + 1) do
 		state.age += 1
 		local age = Ages.get(state.age) :: Age
 		table.insert(reached, age)
+		if not Progression.found(state, "age", age.id) then
+			table.insert(first, age)
+		end
 		Progression.discover(state, session, "age", age.id)
 	end
-	return reached
+	return reached, first
 end
 
 -- Sets the Age (1..Ages.count; /age set). Ages passed on the way up count as discovered.
@@ -579,15 +594,23 @@ local function isKey(value: unknown): boolean
 	return type(value) == "string" and value ~= "" and #value <= Progression.MAX_KEY
 end
 
--- The state a record holds (see the header: anything odd reads safely).
-function Progression.fromRecord(record: unknown): State
+--[[
+	The state a record holds (see the header: anything odd reads safely), and whether it may be
+	saved over: yes for nothing saved (nil) or a record of this version, no for anything else (a
+	record of another version, a newer server's during an update, read as a fresh start but kept
+	for the build that understands it: the caller then saves nothing this session).
+]]
+function Progression.fromRecord(record: unknown): (State, boolean)
 	local state = Progression.new()
+	if record == nil then
+		return state, true
+	end
 	if type(record) ~= "table" then
-		return state
+		return state, false
 	end
 	local data = record :: { [any]: any }
 	if data.v ~= Progression.RECORD_VERSION then
-		return state
+		return state, false
 	end
 	if type(data.points) == "number" then
 		Progression.setPoints(state, data.points)
@@ -618,7 +641,7 @@ function Progression.fromRecord(record: unknown): State
 			end
 		end
 	end
-	return state
+	return state, true
 end
 
 --[[ The client's view ]]

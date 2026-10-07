@@ -1448,11 +1448,13 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   - a structure block's mode and name ("Mode: Save", "Name: hut"; a DATA block its marker) and a
     jigsaw's name, target and pool, from the records Net/StructureNet keeps (F3 adds a structure
     block's region and, in LOAD mode, its rotation, mirror, integrity and seed);
-  - while the F3 overlay is open (`DebugOverlay.isOpen()`), gray lines: `Stone #3`, position,
-    chunk (floored, with the local column), biome (`generator.column`), hardness, tool kind and
-    level, drops with the held item and by hand (`Items.drops`; a tall plant's top shows its lower
-    half's, which breaking either half harvests), break time (`Mining.ticks / 20`,
-    standing and dry), light (`Blocks.light`), fluid level, render kind, solidity, friction, menu;
+  - while the F3 overlay is open (`DebugOverlay.isOpen()`), gray lines: `Stone #3`, position, chunk
+    (floored, with the local column), biome (`generator.column`), hardness, tool kind and level,
+    drops with the held item and by hand (`Items.drops`; a tall plant's top shows its lower half's,
+    which breaking either half harvests), break time (`Mining.ticks / 20`, standing and dry, at the
+    player's own speed: the context's `miningFactor`, Mining.playerFactor of the effects' levels,
+    the perks and the held item, as BlockInteraction mines), light (`Blocks.light`), fluid level,
+    render kind, solidity, friction, menu;
   - "IceVoxel" in blue italics, always last.
 - **Drawing.** Minecraft's tooltip shape, Jade's default theme: a translucent dark background
   with cut corners and a 1 pixel purple border fading downwards, the Arcade font with its shadow,
@@ -3076,23 +3078,29 @@ instances of a tick (a potion's) or of `/effect`'s seconds as ticks, never shown
 
 **The fluids' effects** (`touchFluids`, FluidList `effects`, resolved by Shared/Fluids to ids and
 ticks): each fluid's list of `{ effect, seconds, amplifier, when, after }`: "in" refreshes the
-effect every tick the body touches the fluid (once `after` seconds unbroken), "head" while the eyes
-are in it (Players/Characters looks at the eyes only when a fluid has such an effect), "left" gives
-it the tick the body stops touching it. Then a fluid that `extinguishes` washes off every `washOff`
-effect (after the giving: water and fuel together leave nothing to wash). Spectators touch
-nothing. Oil: Slowness II for 1 s while in it, Oil Coated for 30 s on leaving. Fuel: Nausea 8 s
-while in it, Poison I 5 s after 3 s in it, Fuel Soaked 20 s while in it.
+effect every tick the body touches the fluid (once `after` seconds unbroken; an effect that acts on
+an interval, fuel's Poison, only once it ran down that interval: isDurationEffectTick asks the ticks
+left, so put back to its full 100 every tick it acted every tick, 141 hurts in 10 s of fuel and a
+hurt cooldown that never ended; now Poison I's half heart every 25 ticks), "head" while the eyes are
+in it (Players/Characters looks at the eyes only when a fluid has such an effect), "left" gives it
+the tick the body stops touching it. Then a fluid that `extinguishes` washes off every `washOff`
+effect (after the giving: water and fuel together leave nothing to wash). Spectators touch nothing.
+Oil: Slowness II for 1 s while in it, Oil Coated for 30 s on leaving. Fuel: Nausea 8 s while in it,
+Poison I (up to 5 s left) after 3 s in it, Fuel Soaked 20 s while in it.
 `Config.Effects.FluidEffects` turns it off.
 
 **In the world** (`Players/Effects`, the API): Players/Characters runs it in its 20 Hz body tick:
 the fluids' effects (`touchFluids`, with the masks Burning already made), the fire rules for
 Burning.tickPlayer, then `tick`, whose hurt goes through the same hurt cooldown as lava (no
 armor: magic) and whose healing raises the Humanoid's health; every hurt there (lava, fire,
-burning, the effects, blasts, falls, walls) is cut by Resistance after armor, a fall loses Jump
+burning, the effects, blasts, falls, walls; Players/ToughAsNails' hypothermia and hyperthermia
+too, which are Minecraft's freeze damage, not dehydration, which is starvation's and bypasses
+effects) is cut by Resistance after armor, a fall loses Jump
 Boost's levels first, and a blast that hurts a player whose effects `ignite` sets them burning.
 `tick` also reads the external effects from their adapters (`addExternal`: Tough As Nails
 registers Thirst, Internal Warmth and Chill with their switches, and Climate Clemency, each with
-`give` and `clear` for `/effect`), keeps the Glowing Highlight on the character and sends the
+`give` and `clear` for `/effect`, Thirst and the clemency with `paused`: they stand still for
+creative and spectator players), keeps the Glowing Highlight on the character and sends the
 Effects message when `needsSync` says the client's view is off. ServerNet's `miningFactor` rule
 (Mining.playerFactor: Effects.miningFactor times Progression's mining perks) times survival
 mining (Mining's `factor`: the start check, the break check, a delayed break's time), so a Haste
@@ -3105,7 +3113,9 @@ character starts with none (the client is told at once); nothing is saved.
 server sends the whole list (7 bytes an effect) when an effect comes or goes, its amplifier or
 ambience changes, or its ticks left differ from the client's countdown by more than 20: an effect
 refreshed every tick in a fluid costs a message about once a second, an untouched one nothing
-until it ends.
+until it ends. An external effect its owner holds goes out `paused` (flags bit 1): the client keeps
+its time as sent and the server compares against that, so a creative player's Climate Clemency is
+told once, not every 21 ticks as its frozen time drifted from the client's countdown.
 
 **/effect** (`Players/EffectCommand`, pure; the glue in Players/Effects): `give <player> <effect>
 [seconds | infinite] [amplifier] [hideParticles]` (Minecraft's bounds 1..1000000 and 0..255,
@@ -3167,28 +3177,35 @@ budget's bucket and the fraction of a point not yet given.
 | ------ | ---------------------- | ----- |
 | a block broken | 5 (`mine`) | ores: coal 1, iron and osmium 2, gold 3, diamond and emerald 5 (`ORES`, source "ore"); logs 0.25 (`LOG`) |
 | a crafting result taken | 8 (`craft`) | 0.1 a craft (`CRAFT`) |
-| a smelted result taken out | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
+| a smelted result taken out (or pushed out, or pulled by a pipe: for the furnace's last user) | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
 | a biome stood in | 20 (`biome`) | - |
 | a mob killed (Mobs/Mobs' `died`, wired to `killed` by the boot script) | 10 (`mob`) | animals 2 (Minecraft's 1-3), monsters 5, creepers 6, others 3 (`MOBS`) |
 | an Age reached | its reward: 50, 100, 150, 200 (`age`) | - |
 
-Repeats go through `Knowledge.repeatPoints(session, key, base, now, budget)`: each repeat of
-the same key gives `FATIGUE_FACTOR` (0.75) of the one before, one repeat of fatigue wearing off
-every `FATIGUE_SECONDS` (60), so mining one ore vein pays less and less while variety keeps
-paying; then all repeats together draw on a bucket of `Config.Progression.RepeatBudget` (20)
-points a minute that refills smoothly. Discoveries are finite, so not budgeted. Whatever comes
-out goes through `award`, which multiplies it by the knowledge perks for its source
-(`knowledgeFactor`: 1 + the bonuses, added) and carries the fraction (`Knowledge.carry`), so
-quarter points add up. A block placed after generation gives nothing at all, neither the
-discovery nor a repeat: ServerNet reads `EditRules.placed` (the chunk's edit list holds that
-block there, as Behaviours/Leaves tells placed leaves; a cobblestone generator's stone too) just
-before the break removes it and hands it to the `mined` rule. Creative and spectator players earn
-nothing (survival and adventure: Minecraft's hasExperience).
+Repeats go through `Knowledge.repeatPoints(session, key, base, now, budget)`: each repeat of the
+same key gives `FATIGUE_FACTOR` (0.75) of the one before, one repeat of fatigue wearing off every
+`FATIGUE_SECONDS` (60), so mining one ore vein pays less and less while variety keeps paying; then
+all repeats together draw on a bucket of `Config.Progression.RepeatBudget` (20) points a minute that
+refills smoothly. Discoveries are finite, so not budgeted. The knowledge perks for its source
+(`knowledgeFactor`: 1 + the bonuses, added) multiply a repeat's base before the bucket
+(`repeatAction`), so the 20 a minute holds with every perk (they were applied after it: ores cycled
+every 10 s gave 45 a minute with Prospector, Scholar, Polymath and Enlightenment, 18 without);
+`award` (discoveries, the API's direct points) multiplies what it is given. The fraction carries
+(`Knowledge.carry`), so quarter points add up; a stack taken out at once is one repeat worth every
+item, items taken one at a time are repeats of their own and wear off (ten glass: 1 point in one
+stack, about 0.38 one by one). A block placed after generation gives nothing at all, neither the
+discovery nor a repeat: ServerNet reads `EditRules.placed` (the chunk's edit list holds that block
+there, as Behaviours/Leaves tells placed leaves; a cobblestone generator's stone too) just before
+the break removes it and hands it to the `mined` rule. Creative and spectator players earn nothing
+(survival and adventure: Minecraft's hasExperience).
 
 **Ages** (`requirementsMet`, `advance`): after every change the server enters each next Age whose
 level and milestones are met, one after another (a reward can open the next), each a discovery
 of category "age" (its reward through `award`). `setAge` (the command) sets it either way;
-lowering it holds until the next knowledge the player gets, which checks again. With the
+lowering it holds until the next knowledge the player gets, which checks again (the command's
+`lowered` targets skip the check it would otherwise get at once, and `advance`'s second result,
+the Ages reached for the first time, is what the chat announces, so Ages entered again are not
+announced again nor rewarded). With the
 milestones: Iron (5, a Furnace crafted, an Iron Ingot smelted), Industrial (15, an Osmium Ingot
 smelted, a Bucket crafted), Electric (25, a Heat Generator crafted, 6 biomes), Atomic (40, an
 Oil Refinery and a Basic Battery crafted). Iron smelting is the Stone Age's on purpose: smelting
@@ -3204,8 +3221,9 @@ everything. It plugs into the inventory logic as the window's `recipes` (Types.W
 - crafting: `Menu.updateCraft` leaves the result slot empty when the gate refuses the match
   (Minecraft's doLimitedCrafting). Every way of taking a result (click, shift-click, number
   key, Q) takes the result slot's stack, so a locked result can't be taken whatever the client
-  sends: the server's window simply never holds it. The match itself is unchanged, so JEI's
-  transfer still fills the grid, and the screens draw the locked result greyed;
+  sends: the server's window simply never holds it. The match itself is unchanged, so a grid
+  filled by hand shows the locked result greyed; JEI greys a locked recipe's "+" with what it
+  needs (its transfer fills no grid);
 - furnaces and machines: they smelt for nobody in particular (a furnace is shared and keeps
   cooking unwatched), so the gate is at the input: `Menu.mayPlace` refuses an item whose
   smelting result is locked in a furnace's input or a machine's slot (`gated`), and so do the
@@ -3224,7 +3242,13 @@ changes. `Menu.copyWindow` keeps the gate and drops `onTake`.
 **What is taken** (Types.Window `onTake`, server only): `Menu`'s `craft` (ResultSlot.onTake)
 tells it each craft's result, every round of a shift-click too; `Menu.apply` compares a
 furnace's or machine's output slots before and after the action and tells it what left them
-(FurnaceResultSlot.checkTakeAchievements). Pipes and Eject taking results out give nothing.
+(FurnaceResultSlot.checkTakeAchievements). Results that leave on their own (Transmitters/Eject
+pushing them into a chest beside, a pipe pulling them: the envs' `resultsTaken`) count for the
+player who last acted in that furnace's or machine's window (Players/Inventories keeps it,
+weakly), as if taken by hand: Minecraft's furnace keeps what it smelted for a player even when a
+hopper empties it. Without it a furnace next to a chest, which pushes each ingot out within half
+a second, never counted as smelting, and the Iron Age's "Smelt an Iron Ingot" (and the Industrial
+Age's osmium) could not be met. A furnace fed only by pipes (no window user) credits nobody.
 
 **Perks** (`Progression.perk(state, id)` is one node; the aggregates are what the game asks):
 
@@ -3242,27 +3266,33 @@ furnace's or machine's output slots before and after the action and tells it wha
 experience drops because it is a currency (enchanting), which knowledge isn't.
 
 **On the server** (`Players/Progression`): a fresh state at join, then the saved one
-(`Players/ProgressStore`: DataStore "IceVoxelProgress_v1", key player_<UserId>, the record
-`{ v = 1, points, age = id, skills = { ids }, found = { [category] = { keys } } }`, names and
-ids rather than numbers; loaded with three tries, and a player whose record could not be read is
-never saved that session; saved on leave, on shutdown and every `SaveInterval` seconds while
-changed). Until it is read the player has the Stone Age's gate and earns nothing (a first time
-missed meanwhile counts the next time). `fromRecord` reads
-anything safely: another version or garbage is a fresh start, unknown skills are dropped, an
-unknown Age reads as the Stone Age (and `advance` reaches it again), points are clamped and
-whole, keys checked (at most 64 bytes, 4096 a category). Biomes are looked at every
-`BiomeInterval` seconds (the generator's surface biome of the column; no chunk is generated).
-UnlockSkill messages (5 a second) go through `unlock` once loaded; a refusal is a Notice with the
-reason and the status sent again. A player whose state changed gets one Progress message a frame
-at most. An Age reached is told to everyone in the chat. Commands (`Players/ProgressionCommand`,
-pure): `/knowledge add|set|query` (also `/xp`, `/experience`; points or levels, Minecraft's /xp)
-and `/age set|query`, changing with the admins' rule (`GameModeCommand.isAdmin`: as /time).
+(`Players/ProgressStore`: DataStore "IceVoxelProgress_v1", key player_<UserId>, the record `{ v = 1,
+points, age = id, skills = { ids }, found = { [category] = { keys } } }`, names and ids rather than
+numbers; loaded with three tries, and a player whose record could not be read, or is of another
+version (`fromRecord`'s second result: a newer server's during an update, kept for it), is never
+saved that session; saved on leave, on shutdown and every `SaveInterval` seconds while changed, one
+write a call: what changes during a write waits for the next interval (written again at once it kept
+the key in DataStore's queue, a write every 6 s for as long as the player earned); a player who left
+is written again at once while something changed during the write or it failed (`LEAVE_RETRIES` 2),
+a periodic write in flight as they left included, and BindToClose waits for those writes). Until it
+is read the player has the Stone Age's gate and earns nothing (a first time missed meanwhile counts
+the next time). `fromRecord` reads anything safely: another version or garbage is a fresh start (not
+saved over), unknown skills are dropped, an unknown Age reads as the Stone Age (and `advance`
+reaches it again), points are clamped and whole, keys checked (at most 64 bytes, 4096 a category).
+Biomes are looked at every `BiomeInterval` seconds (the generator's surface biome of the column; no
+chunk is generated). UnlockSkill messages (5 a second) go through `unlock` once loaded; a refusal is
+a Notice with the reason and the status sent again. A player whose state changed gets one Progress
+message a frame at most. An Age reached is told to everyone in the chat. Commands
+(`Players/ProgressionCommand`, pure): `/knowledge add|set|query` (also `/xp`, `/experience`: with
+TextChatService one TextChatCommand per two aliases; points or levels, Minecraft's /xp) and `/age
+set|query`, changing with the admins' rule (`GameModeCommand.isAdmin`: as /time).
 
 The API for other parts: `award(player, points, reason)` (direct: no fatigue or budget, the
 caller's own reasons), `discover(player, category, key)` (true when new), `killed(player,
 mobName)` (the mobs' death signal: a discovery and a repeat of `Knowledge.MOBS`), `state(player)`,
-`allows(player, item)`, and the perks' `miningFactor`, `wear`, `thirstRate`, `insulation`,
-`boilSpeed`.
+`allows(player, item)`, `smelted(player, stack)` (results a furnace the player last used gave
+up on its own: Inventories' results handler), and the perks' `miningFactor`, `wear`,
+`thirstRate`, `insulation`, `boilSpeed`.
 
 **On the client**: `Player/ProgressionState` keeps the last status (`Progression.status`: points,
 Age, skills, discovery counts by category, the milestones' bits) as a state for the shared rules
@@ -4309,9 +4339,11 @@ at 0.2 a tick. The fall distance (cleared in water, halved in lava) comes back o
 
 **The world** (`server/Mobs/MobWorld`, pure, `MobWorld.new(getBlock, options)`): mobs by id in id
 order, ticked at 20 Hz (`tick(context)`: the players as PlayerViews (feet, eye height, game
-mode, alive), the day time, `skyOpen` and `active(cx, cz)`). Frozen when its chunk doesn't tick or
-its cell isn't loaded. Each live mob: AI, physics, fall damage (ceil(d - 3), bypassing armor; not
-chickens), daylight burning (by day, out of water, open sky over the eyes, 1 tick in 25 → 8 s),
+mode, alive), the day time, `skyOpen`, `skyClear` and `active(cx, cz)`). Frozen (`frozen`) when
+its chunk doesn't tick or its cell isn't loaded. Each live mob: AI, physics, fall damage (ceil(d
+- 3), bypassing armor; not chickens), daylight burning (by day, out of water, the sky over the
+eyes at full light: `skyClear`, World/Skylight.clear, Level.canSeeSky's sky light 15, so leaves
+and fluids shade and glass doesn't; 1 tick in 25 → 8 s),
 `Players/Burning.tickPlayer` as for a player (lava, fire, campfires, burning, water; a mob
 catches fire after 20 ticks in a fire block like a player, Minecraft's mobs at once) and
 suffocation (eyes in an opaque block, 1 under the cooldown).
@@ -4321,7 +4353,13 @@ suffocation (eyes in an opaque block, 1 under the cooldown).
   panic or monsters hunt the player. A player's hurt counts for the kill 100 ticks.
 - Death: the death sound, a `deaths` record (kind, position, killer or nil), 20 ticks lying (the
   dying flag), then the loot (`kindDrops`: min..max, `chance`, `byPlayer` only with a killer; raw
-  meat cooked when it died burning: `Foods.COOKED`) and gone. `kill(id)` is /kill's death.
+  meat cooked when it died burning: `Foods.COOKED`) and gone; the 20 ticks count in a frozen
+  chunk too (the body still), so /kill's far mobs go. `kill(id)` is /kill's death.
+- `overlaps(box)`: is any mob's box (dying ones too) in it? ServerNet refuses a block placed
+  inside a mob (its `occupied` rule, `Mobs.occupied` with the block's Blocks.obstruction: Level.
+  isUnobstructed), as inside a player; the client checks the mobs where it draws them first.
+  Otherwise a block in a monster's head cell would blind it (no melee, fuse or shot) until the
+  wall smothered it.
 - `explode(x, y, z, power)`: Explosion.seenPercent / hit on each live mob in reach: the damage
   through `hurt` and the push added to its velocity.
 - `attack(id, attacker)`: refused for the dead, spectators (`Combat.reach` 0), dying or gone mobs,
@@ -4331,7 +4369,9 @@ suffocation (eyes in an opaque block, 1 under the cooldown).
   (`Combat.strength(ticks since the swing or the change of item, speed)`) with a 0.4 knockback;
   returns the landed hurt and whether it was strong.
 - Despawn every 20 ticks over every mob (Mob.checkDespawn): nothing with no players; monsters
-  beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40;
+  beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40 (a frozen
+  monster's idle time counts on in this check: the chunks that tick reach about 56 blocks,
+  Minecraft's simulation distance past 128, where its monsters would tick and idle away);
   creatures with no player within 128 for `ForgetTicks` go; below y -64 anything.
 - `takeChanges()`: spawned, removed, deaths, drops, hits, arrows, explosions, sounds.
 Measured in Lune on a flat world with a player (mixed kinds, at night): 50 / 150 / 300 mobs
@@ -4341,16 +4381,26 @@ cost 0.14 / 0.45 / 0.85 ms a tick native, 0.44 / 1.35 / 2.76 ms interpreted (~9 
 creatures every `PassiveInterval` (400), for each living non-spectator player whose 128 block
 census is under `HostileCap` (15) / `PassiveCap` (10) and the world under `MaxHostile` /
 `MaxPassive` / `MaxMobs`: `Attempts` (3) packs, each a kind by spawn weight, a column 24-44
-blocks out (`SpawnDistance`) in a chunk that ticks, its centre the first standing spot down the
+blocks out (`SpawnDistance`) in a chunk that ticks (the census counts a player's monsters only
+in those chunks: frozen ones farther out would fill the cap with none about the player, and they
+idle away), its centre the first standing spot down the
 column (creatures from 20 above the player's feet over 48, monsters from ±16 over 24), 2-4 /
 1-4 members spread ±4, each on its own spot within 3 up or down. `validSpot`: the chunk ticks, a
 solid opaque sturdy floor (grass or dry grass for creatures), the box free (no solid, unloaded,
 fluid, fire or campfire cell: Hull and Burning.touching), 24 blocks from every player, and the
-light: creatures raw brightness above 8, monsters no block light and Minecraft's two rolls
-(`LightEstimate.darkForMonsters`).
+light: creatures raw brightness above 8, monsters Minecraft's two rolls
+(`LightEstimate.darkForMonsters`) and then no block light (searched with `SPAWN_BUDGET`, only
+for the spots the rolls let through). Measured on generated terrain (seed 12345, a player
+switching between two spots 80 blocks apart every 2 minutes at night): before, 15 monsters
+within 128 blocks of which 10-12 frozen at the old spot, none spawning about the player; now
+14-15 ticking about the player within a minute of arriving and 4-11 frozen ones idling away.
 
 **Light** (`Shared/World/LightEstimate`, pure, shared): `blockLight` (the search the cave mood
-used, moved here: sources less one per open cell, 256 cells, no allocations), `skyLight` (15
+used, moved here: sources less one per open cell, 256 cells, no allocations; a monster's spawn
+check `SPAWN_BUDGET` 2048, every cell a torch lights (13 steps) in a room of any height or on the
+open ground, stopping at the first light found: a torch 12 blocks off in a 2, 3 or 6 high hall
+gives 2, where 256 cells reached 8 blocks; ~0.7 ms a dark open-ground search interpreted, 0.1
+with 256), `skyLight` (15
 where `open`, else 15 less the steps to the nearest open cell through open cells within 48:
 an overhang's edge 14, a cave 0; the server's `open` is World/Skylight.open), `darkForMonsters`
 (Monster.isDarkEnoughToSpawn: block light 0, sky ≤ rand(32), max(sky - skyDarken, block) ≤
@@ -4370,7 +4420,8 @@ for those that left or are gone, and the queued arrows and push. Attacks: a toke
 `AttacksPerSecond`, the held item (Inventories.heldTool, watched every tick for the attack
 strength's reset), `MobWorld.attack` with the player's effect levels (Players/Effects.levels),
 the strong or weak attack sound, the weapon's wear
-(Combat.wear: swords 1, tools 2; not with instabuild). /summon and /kill: TextChatCommands (or
+(Combat.wear: swords 1, tools 2; not with instabuild). Placing: `Mobs.occupied(block, x, y,
+z)` (ServerNet's `occupied` rule). /summon and /kill: TextChatCommands (or
 Chatted), SummonCommand's parse and TimeCommand.mayUse. The boot script connects `died` to
 Players/Progression.killed for a player's kills (the kind's first a discovery, then
 Knowledge.MOBS: animals 2, monsters 5, creepers 6).
@@ -4389,14 +4440,18 @@ checked, health += heal scaled to MaxHealth, one item used up outside creative, 
 from where it is drawn to the new state over the sync interval (yaw the short way; > 8 blocks
 snaps), colours parts (the variant, hurt → 0.7 of the way to red, a lit creeper flashing white
 faster as it burns), tips a dying mob over 1 s (sqrt(progress x 1.6) x 90°) and picks the nearest
-live box on a ray. MobRenderer: anchored, non-colliding, non-queried Parts from a pool (128
-spare), one BulkMoveTo a frame after the camera, colours written only on change, a Fire (BurningView's
-colours) on a burning mob's body, arrows as thin shafts flying at 32 blocks a second (at most
-32), `push` ops to `MovementController.knockback`. BlockInteraction aims at mobs first
-(`mobOn`: MobRenderer.pick on the aim ray, then the box within Combat.reach of the hull's eyes):
-a mob nearer than the block hides it (no outline, no mining, no placing) and a press (a tap on
-touch) sends Attack. WAILA (`pickEntity`) names mobs as items and players (`WailaInfo.mob`:
-name, "Health h / max", F3: kind, id, position; a colour box icon).
+live box on a ray. MobRenderer takes the Mobs messages from the moment it loads (the boot script
+requires it before anything waits), its parts in a folder kept out of the workspace until `start`:
+the server sends a spawn once and then only changes, so a message dropped by ClientNet's backlog (64
+a kind, ~6 s of the stream) while a slow client booted left mobs invisible or ghosted for good.
+MobRenderer: anchored, non-colliding, non-queried Parts from a pool (128 spare), one BulkMoveTo a
+frame after the camera, colours written only on change, a Fire (BurningView's colours) on a burning
+mob's body, arrows as thin shafts flying at 32 blocks a second (at most 32), `push` ops to
+`MovementController.knockback`. BlockInteraction aims at mobs first (`mobOn`: MobRenderer.pick on
+the aim ray, then the box within Combat.reach of the hull's eyes): a mob nearer than the block hides
+it (no outline, no mining, no placing) and a press (a tap on touch) sends Attack. WAILA
+(`pickEntity`) names mobs as items and players (`WailaInfo.mob`: name, "Health h / max", F3: kind,
+id, position; a colour box icon).
 
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
 
@@ -4640,7 +4695,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
 | server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
 | server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state) / state (position in 1/32 block, yaw in 1/256 turn, health, flags, fuse: 21 bytes) / remove / arrow (from, to) / push (this player's knockback) |
-| server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (ambient)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
+| server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (bit 0 ambient, bit 1 paused: an external effect its owner holds, not counted down)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
 | server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
 
 Fluids travel as Shared/Fluids ids, a u8 (0 none, 1 water, 2 lava, 3 oil, 4 fuel; encoders write

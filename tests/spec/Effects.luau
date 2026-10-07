@@ -294,6 +294,22 @@ return function(t, shared, require, server, client)
 		t.ok(not EffectRules.has(state, E.Poison), "59 ticks in it: still none")
 		EffectRules.touchFluids(state, FUEL, 0, SURVIVAL)
 		t.eq(EffectRules.get(state, E.Poison).ticks, 100, "after 3 s: Poison I, refreshed")
+		-- In fuel, Poison I acts every 25 ticks, as Poison I does: refreshed only as it acts
+		-- (refreshed every tick to its full 100, every tick would be an acting one).
+		local sick = EffectRules.new()
+		local hurts, first = 0, nil
+		for tick = 1, 60 + 250 do
+			EffectRules.touchFluids(sick, FUEL, 0, SURVIVAL)
+			if EffectRules.tick(sick, SURVIVAL, 20, 20) > 0 then
+				hurts += 1
+				first = first or tick
+			end
+		end
+		t.eq(first, 60, "the first hurt as the poison comes")
+		t.eq(hurts, 11, "then one every 25 ticks (250 ticks: 10 more), not one a tick")
+		local left = EffectRules.get(sick, E.Poison).ticks
+		t.ok(left > 75 and left <= 100, `kept up while in it ({left} ticks left)`)
+		t.eq(EffectRules.get(sick, E.Nausea).ticks, 159, "an effect without an interval: refreshed every tick")
 		-- A break in the contact starts the count over.
 		local again = EffectRules.new()
 		for _ = 1, 50 do
@@ -592,7 +608,7 @@ return function(t, shared, require, server, client)
 		local entries = {
 			{ effect = E.Speed, amplifier = 1, ticks = 1800, ambient = false },
 			{ effect = E.NightVision, amplifier = 0, ticks = INFINITE, ambient = true },
-			{ effect = E.ClimateClemency, amplifier = 0, ticks = 6000, ambient = false },
+			{ effect = E.ClimateClemency, amplifier = 0, ticks = 6000, ambient = false, paused = true },
 		}
 		local payload = Protocol.encodeEffects(entries)
 		t.eq(buffer.len(payload), 1 + 3 * Protocol.EFFECT_BYTES)
@@ -605,7 +621,8 @@ return function(t, shared, require, server, client)
 				got.effect == entry.effect
 					and got.amplifier == entry.amplifier
 					and got.ticks == entry.ticks
-					and got.ambient == entry.ambient,
+					and got.ambient == entry.ambient
+					and got.paused == (entry.paused == true),
 				`entry {i}`
 			)
 		end
@@ -623,7 +640,7 @@ return function(t, shared, require, server, client)
 		t.eq(Protocol.decodeEffects(with(1, 99)), nil, "unknown effect")
 		t.eq(Protocol.decodeEffects(with(1 + Protocol.EFFECT_BYTES, E.Speed)), nil, "the same effect twice")
 		t.eq(Protocol.decodeEffects(with(3, -2, "i32")), nil, "ticks below -1")
-		t.eq(Protocol.decodeEffects(with(7, 2)), nil, "unknown flags")
+		t.eq(Protocol.decodeEffects(with(7, 4)), nil, "unknown flags")
 		t.eq(Protocol.decodeEffects(with(0, 4)), nil, "a count that doesn't fit the length")
 		t.eq(Protocol.decodeEffects(buffer.create(0)), nil, "empty")
 		local many = buffer.create(1 + 25 * Protocol.EFFECT_BYTES)
@@ -679,6 +696,23 @@ return function(t, shared, require, server, client)
 		EffectRules.setExternal(state, E.Thirst, 0)
 		EffectRules.markSent(state, EffectRules.entries(state))
 		t.eq(#EffectRules.entries(state), 0)
+		-- One its owner holds (Climate Clemency for a creative player: its time stands still) goes
+		-- out paused, and the client keeps its time: never told again while it waits.
+		local held = EffectRules.new()
+		local told = 0
+		for _ = 1, 200 do
+			EffectRules.setExternal(held, E.ClimateClemency, 6000, true)
+			EffectRules.tick(held, CREATIVE, 20, 20)
+			if EffectRules.needsSync(held) then
+				told += 1
+				EffectRules.markSent(held, EffectRules.entries(held))
+			end
+		end
+		t.eq(told, 1, "told once in 10 s, not every second")
+		t.ok(EffectRules.entries(held)[1].paused, "as paused")
+		t.eq(Effects.remaining(6000, 200, true), 6000, "which the client doesn't count down")
+		EffectRules.setExternal(held, E.ClimateClemency, 6000)
+		t.ok(EffectRules.needsSync(held), "running again (back in survival): told")
 	end)
 
 	--[[ /effect ]]

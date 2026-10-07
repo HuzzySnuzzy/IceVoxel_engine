@@ -69,6 +69,7 @@ local Rig = require(Shared.Movement.Rig)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
 local LightEstimate = require(Shared.World.LightEstimate)
+local Mining = require(Shared.Mining)
 
 local BlockInteraction = require(script.Parent.Parent.Interaction.BlockInteraction)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
@@ -76,6 +77,8 @@ local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local DebugOverlay = require(script.Parent.Parent.Debug.DebugOverlay)
+local EffectState = require(script.Parent.Parent.Player.EffectState)
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
@@ -603,10 +606,15 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		local transmitter, tank, machine, facts = pipeFacts(hit, extended)
 		local structure, jigsaw, structureKey = structureFacts(hit)
 		local light, lightKey = lightFacts(hit)
-		local key = `b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey}`
+		-- (The break time at the player's own speed, as BlockInteraction mines: Haste, Mining
+		-- Fatigue, the mining perks.)
+		local factor = Mining.playerFactor(EffectState.levels(), ProgressionState.perks(), held)
+		local key =
+			`b {hit.x} {hit.y} {hit.z} {hit.block} {held or 0} {extended} {facts} {structureKey} {lightKey} {factor}`
 		show(key, extended, function()
 			local biome = if extended then biomeAt(hit.x, hit.z) else nil
 			return WailaInfo.block(hit.block, held, hit.x, hit.y, hit.z, extended, {
+				miningFactor = factor,
 				progress = progress,
 				biome = biome,
 				transmitter = transmitter,

@@ -48,8 +48,9 @@
 	  extended  while the F3 overlay is open, gray lines with what the game knows: internal name
 	            and id, position and chunk, biome, hardness, tool kind and level, drops with the
 	            held item and by hand (a tall plant's top: what its lower half drops, as breaking
-	            either half harvests the plant once), break time with the held item (Mining.ticks / 20, standing
-	            and dry), light, fluid level, render kind, solidity, friction and menu; for
+	            either half harvests the plant once), break time with the held item (Mining.ticks /
+	            20, standing and dry, at the player's own speed: Haste, Mining Fatigue, the mining
+	            perks), light, fluid level, render kind, solidity, friction and menu; for
 	            transmitters their tier's numbers, the packed side modes and each side's mode,
 	            colour and fill byte, the connected sides and the network the client sees; for
 	            tanks their tier's numbers and contents; for machines their kind and part in an
@@ -156,6 +157,9 @@ export type BlockContext = {
 	jigsaw: Settings.JigsawSettings?,
 	-- The light where a mob would stand on the block (`lightLine`); nil: not known (unloaded).
 	light: LightFacts?,
+	-- The player's own mining speed with the held item (Mining.playerFactor: Haste, Mining
+	-- Fatigue, the mining perks), for the break time; nil: 1.
+	miningFactor: number?,
 }
 
 -- Minecraft's light parts at a cell, 0..15 each.
@@ -674,7 +678,7 @@ local function blockDetails(
 			elseif def.hardness == 0 then
 				table.insert(lines, gray("Breaks at once"))
 			else
-				local ticks = Mining.ticks(block, true, false, held)
+				local ticks = Mining.ticks(block, true, false, held, context and context.miningFactor)
 				table.insert(lines, gray(`Breaks in {seconds(ticks)} ({ticks} ticks)`))
 			end
 		end

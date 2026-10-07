@@ -29,8 +29,9 @@
 	               fatigue easing by one repeat every FATIGUE_SECONDS (60 s), so a farm of one
 	               thing dries up fast while a varied day keeps paying; and all repeats together
 	               give at most Config.Progression.RepeatBudget points a minute (a token bucket
-	               that refills smoothly). Fractions add up (`Session.fraction`), so ten glass
-	               taken out one at a time give the one point a stack of ten gives.
+	               that refills smoothly). Fractions add up (`Session.fraction`): a stack of ten
+	               glass taken out at once is one repeat worth ten (a point); taken out one at a
+	               time each glass is a repeat of its own and wears off (about 0.38 for the ten).
 	  Never        blocks a player placed (the server's edit list knows them, as Behaviours/Leaves
 	               tells placed leaves): breaking them gives neither a discovery nor a repeat, so
 	               placing and breaking an ore block, or a cobblestone generator, earns nothing.

@@ -8,7 +8,8 @@
 	  Block light  `blockLight`: a light source's level (Blocks.light: torches 14, lava, glow
 	               blocks and lanterns 15, glow lichen 7) less one per block face it travels
 	               through open (not opaque) cells, as Minecraft's light spreads: a breadth first
-	               search from the cell through open cells, at most BLOCK_BUDGET of them, stopping
+	               search from the cell through open cells, at most BLOCK_BUDGET of them
+	               (SPAWN_BUDGET for monster spawning, which must see every torch), stopping
 	               once nothing farther could be brighter. An opaque cell has its own light only.
 	               Unknown (unloaded) cells stop the light.
 	  Sky light    `skyLight`: 15 in a cell under the open sky (`open`: the server's
@@ -46,6 +47,11 @@ LightEstimate.MAX = 15
 -- big cavern's is searched a few blocks around (missing torches farther off). Measured on
 -- generated caves (interpreted Luau): ~0.2 ms a search on average.
 LightEstimate.BLOCK_BUDGET = 256
+-- ... and for a monster's spawn check (server Mobs/MobSpawning), where a missed torch means
+-- monsters in a lit room: every cell a torch's light reaches (13 steps) in a room of any
+-- height or on the open ground (a half ball of 13 steps: about 1,800 open cells), only big
+-- caverns cut short. It stops at the first light found (`enough` 1), so a lit spot is quick.
+LightEstimate.SPAWN_BUDGET = 2048
 -- Cells the sky light search may visit (and ask `open` about) away from the open sky.
 LightEstimate.SKY_BUDGET = 48
 -- Raw brightness an animal needs above (Animal.isBrightEnoughToSpawn: > 8).
@@ -79,9 +85,17 @@ end
 
 --[[
 	Minecraft's block light (0..15) at cell (x, y, z), from the blocks (see the header). At most
-	`budget` open cells are searched (BLOCK_BUDGET).
+	`budget` open cells are searched (BLOCK_BUDGET). With `enough`, the search stops once it found
+	that much light (a spawn check only asks whether there is any: 1).
 ]]
-function LightEstimate.blockLight(getBlock: GetBlock, x: number, y: number, z: number, budget: number?): number
+function LightEstimate.blockLight(
+	getBlock: GetBlock,
+	x: number,
+	y: number,
+	z: number,
+	budget: number?,
+	enough: number?
+): number
 	local start = getBlock(x, y, z)
 	if start == nil then
 		return 0
@@ -92,6 +106,7 @@ function LightEstimate.blockLight(getBlock: GetBlock, x: number, y: number, z: n
 	end
 	local best = own
 	local limit = budget or LightEstimate.BLOCK_BUDGET
+	local stop = enough or math.huge
 	nextStamp()
 	buffer.writeu16(visited, offsetKey(0, 0, 0), stamp)
 	table.clear(frontier)
@@ -100,7 +115,7 @@ function LightEstimate.blockLight(getBlock: GetBlock, x: number, y: number, z: n
 	local distance = 0
 	-- Breadth first: cells at distance d come before d + 1, so once a source found can't be beaten
 	-- by anything farther (MAX_LIGHT - (d + 1) <= best) the search stops.
-	while #frontier > 0 and MAX_LIGHT - (distance + 1) > best do
+	while #frontier > 0 and MAX_LIGHT - (distance + 1) > best and best < stop do
 		table.clear(nextFrontier)
 		for i = 1, #frontier, 3 do
 			local cx, cy, cz = frontier[i], frontier[i + 1], frontier[i + 2]

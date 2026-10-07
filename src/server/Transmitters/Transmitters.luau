@@ -266,6 +266,7 @@ function Transmitters.start(serverNet: Net, world: WorldServer.World)
 		getBlock = knownBlock,
 		containers = Containers.default,
 		inventoryChanged = Inventories.containerChanged,
+		resultsTaken = Inventories.resultsTaken,
 		drop = Entities.dropBlock,
 	})
 	state = simulation

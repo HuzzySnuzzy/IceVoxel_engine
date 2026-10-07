@@ -17,7 +17,9 @@
 	             20 ticks, water puts it out. (A mob catches fire after 20 ticks in a fire block,
 	             as a player does; Minecraft's mobs at once.) Zombies and skeletons burn in
 	             daylight (`burnsInDaylight`, Mob.isSunBurnTick): by day, out of water, with the
-	             open sky over their eyes, one tick in 25 sets them burning for 8 s.
+	             open sky over their eyes (`skyClear`: Level.canSeeSky's full sky light, so the
+	             leaves of a tree shelter them, glass doesn't), one tick in 25 sets them burning
+	             for 8 s.
 	  Walls      eyes in an opaque block: 1 every 10 ticks (in_wall).
 	  Hurts      `hurt` goes through LivingEntity.hurt's cooldown (Burning.hurtPlayer: 10 ticks in
 	             which only a bigger hurt lands, by the difference), softened by the kind's armor
@@ -27,16 +29,18 @@
 	             (monsters, MobAI.hurt). A player's hit counts for the kill for 100 ticks
 	             (lastHurtByPlayerTime).
 	  Death      at 0 health it dies: the death sound, a `deaths` record (the killer: the player
-	             whose hit counts, or nil), and 20 ticks later (the body lies tipped and red) it
-	             is gone, dropping its loot (MobList drops: min..max each, `chance`, `byPlayer`
-	             only when a player killed it; raw meat cooked when it died burning).
+	             whose hit counts, or nil), and 20 ticks later (the body lies tipped and red; the
+	             count goes on in a frozen chunk too) it is gone, dropping its loot (MobList
+	             drops: min..max each, `chance`, `byPlayer` only when a player killed it; raw meat
+	             cooked when it died burning).
 	  Blasts     `explode`: Minecraft's explosion damage and push (Shared/World/Explosion) on every
 	             live mob in reach, as for items and players. A creeper that blows up is gone
 	             without drops or a death.
 	  Despawn    every 20 ticks, every mob (frozen ones too): a monster more than 128 blocks from
 	             every player goes at once; beyond 32 blocks, after 600 ticks without anything
-	             happening near it (noActionTime: hurt, or a player within 32, start it over),
-	             one check in 40 (Minecraft: a tick in 800). Creatures stay, but one with no
+	             happening near it (noActionTime: hurt, or a player within 32, start it over;
+	             a frozen one's time counts on, as Minecraft's would tick there), one check in
+	             40 (Minecraft: a tick in 800). Creatures stay, but one with no
 	             player within 128 blocks for Config.Mobs.ForgetTicks goes too, to keep memory
 	             bounded. Below the world (y < -64) anything goes.
 	At most `maxMobs` exist: spawning more fails (`spawn` returns 0).
@@ -84,6 +88,8 @@ export type Mob = {
 	idle: number,
 	-- Ticks with no player within the despawn distance (creatures' forgetting).
 	far: number,
+	-- Its chunk didn't tick on the last tick (not active, or not loaded): it stands frozen.
+	frozen: boolean,
 	-- The player whose hit counts for the kill, and for how many ticks more.
 	attacker: any?,
 	attackerTicks: number,
@@ -152,6 +158,9 @@ export type Context = {
 	dayTime: number,
 	-- Is the cell under the open sky (server World/Skylight.open; nil: not loaded)?
 	skyOpen: (x: number, y: number, z: number) -> boolean?,
+	-- Does it see the sky at full light, nothing that dims it (leaves, fluids) above either
+	-- (World/Skylight.clear: Minecraft's canSeeSky, for burning in daylight)?
+	skyClear: (x: number, y: number, z: number) -> boolean?,
 	-- Does chunk (cx, cz) tick (loaded and near a player)?
 	active: (cx: number, cz: number) -> boolean,
 }
@@ -186,6 +195,15 @@ export type MobWorld = {
 	attack: (self: MobWorld, id: number, attacker: Attacker) -> (number?, boolean | string),
 	explode: (self: MobWorld, x: number, y: number, z: number, power: number) -> number,
 	near: (self: MobWorld, x: number, y: number, z: number, radius: number) -> { Mob },
+	overlaps: (
+		self: MobWorld,
+		minX: number,
+		minY: number,
+		minZ: number,
+		maxX: number,
+		maxY: number,
+		maxZ: number
+	) -> boolean,
 	takeChanges: (self: MobWorld) -> Changes,
 	-- (MobAI's World.)
 	hitPlayer: (self: MobWorld, mob: Mob, player: PlayerView, damage: number, kx: number, ky: number, kz: number) -> (),
@@ -289,6 +307,7 @@ function MobWorld.spawn(
 		age = 0,
 		idle = 0,
 		far = 0,
+		frozen = false,
 		attacker = nil,
 		attackerTicks = 0,
 		killer = nil,
@@ -355,6 +374,39 @@ function MobWorld.near(self: MobWorld, x: number, y: number, z: number, radius: 
 		end
 	end
 	return found
+end
+
+--[[
+	Does any mob (dying ones too: their bodies are there until gone) have its box overlapping the
+	box (minX, minY, minZ) to (maxX, maxY, maxZ)? Boxes that only touch don't overlap. Placing a
+	block refuses such a box (Level.isUnobstructed: no block is placed inside a living entity).
+]]
+function MobWorld.overlaps(
+	self: MobWorld,
+	minX: number,
+	minY: number,
+	minZ: number,
+	maxX: number,
+	maxY: number,
+	maxZ: number
+): boolean
+	for _, mob in self.order do
+		if not mob.removed then
+			local body, kind = mob.body, mob.kind
+			local half = kind.width / 2
+			if
+				body.x + half > minX
+				and body.x - half < maxX
+				and body.y + kind.height > minY
+				and body.y < maxY
+				and body.z + half > minZ
+				and body.z - half < maxZ
+			then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 local function sound(self: MobWorld, name: string, mob: Mob)
@@ -654,8 +706,16 @@ local function despawn(self: MobWorld, context: Context)
 				removeMob(self, mob)
 			elseif distance < MobWorld.NO_DESPAWN_DISTANCE then
 				mob.idle = 0
-			elseif mob.idle > MobWorld.IDLE_DESPAWN and floor(self.random() * MobWorld.DESPAWN_ODDS) == 0 then
-				removeMob(self, mob)
+			else
+				-- (A frozen monster's idle time counts here, as its chunk doesn't tick: Minecraft's
+				-- simulation distance reaches past these 128 blocks, so its monsters this far out
+				-- tick and idle away. Otherwise those left 56-128 blocks behind would stay for good.)
+				if mob.frozen then
+					mob.idle += interval
+				end
+				if mob.idle > MobWorld.IDLE_DESPAWN and floor(self.random() * MobWorld.DESPAWN_ODDS) == 0 then
+					removeMob(self, mob)
+				end
 			end
 		elseif distance > MobWorld.DESPAWN_DISTANCE then
 			mob.far += interval
@@ -691,7 +751,7 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 		and body.waterDepth <= 0
 		and mob.burn.fire <= 0
 		and DayCycle.isDay(context.dayTime)
-		and context.skyOpen(x, floor(body.y + kind.eye), z) == true
+		and context.skyClear(x, floor(body.y + kind.eye), z) == true
 		and self.random() < MobWorld.SUN_BURN_CHANCE
 	then
 		mob.burn.fire = MobWorld.SUN_BURN_SECONDS * TICKS_PER_SECOND
@@ -729,20 +789,28 @@ function MobWorld.tick(self: MobWorld, context: Context)
 		end
 		local body = mob.body
 		local cx, cz = floor(body.x) // CHUNK, floor(body.z) // CHUNK
-		if not context.active(cx, cz) or getBlock(floor(body.x), floor(body.y), floor(body.z)) == nil then
+		local frozen = not context.active(cx, cz) or getBlock(floor(body.x), floor(body.y), floor(body.z)) == nil
+		mob.frozen = frozen
+		if frozen and not mob.dead then
 			continue
 		end
-		mob.age += 1
-		mob.idle += 1
+		if not frozen then
+			mob.age += 1
+			mob.idle += 1
+			if mob.attackerTicks > 0 then
+				mob.attackerTicks -= 1
+			end
+		end
 		if mob.hurtTime > 0 then
 			mob.hurtTime -= 1
 		end
-		if mob.attackerTicks > 0 then
-			mob.attackerTicks -= 1
-		end
 		if mob.dead then
-			-- The body falls where it is, then goes with its loot.
-			MobPhysics.tick(body, mob.kind, 0, false, getBlock)
+			-- The body falls where it is, then goes with its loot. (Dying goes on in a chunk that
+			-- doesn't tick too, the body still: a frozen mob killed by /kill is gone 20 ticks
+			-- later, not left dying for good.)
+			if not frozen then
+				MobPhysics.tick(body, mob.kind, 0, false, getBlock)
+			end
 			mob.deathTime += 1
 			if mob.deathTime >= MobWorld.DEATH_TIME then
 				dropLoot(self, mob)

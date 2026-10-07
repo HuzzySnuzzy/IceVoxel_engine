@@ -15,7 +15,11 @@
 	                 repeat; nothing for a block placed after generation (EditRules.placed);
 	               * a crafting result taken, every craft of a shift click too, and stacks taken
 	                 out of a furnace's or machine's output (the window's `onTake`,
-	                 Inventory/Menu): crafting and smelting discoveries and repeats;
+	                 Inventory/Menu): crafting and smelting discoveries and repeats; results
+	                 that leave a furnace on their own (pushed into a chest, pulled by a pipe)
+	                 count for the player who last used its window (`smelted`, Players/
+	                 Inventories' results handler), so a furnace by a chest still smelts the
+	                 Iron Age's ingot;
 	               * the biome stood in, every Config.Progression.BiomeInterval seconds (the
 	                 generator's surface biome of the column): a first visit;
 	               * other parts of the server: `award`, `discover`, `killed` (mobs).
@@ -37,7 +41,10 @@
 	             (Protocol: points, Age, skills, discovery counts, milestones met).
 	  Saving     Players/ProgressStore: on leave, on shutdown (BindToClose, waiting up to
 	             SHUTDOWN_WAIT seconds) and every Config.Progression.SaveInterval seconds while
-	             changed, never for a player whose saved progress could not be read.
+	             changed, one write at a time (what changes during one waits for the next
+	             interval), never for a player whose saved progress could not be read. A player
+	             who left is written again at once while something changed during the write or
+	             it failed (LEAVE_RETRIES), even when a periodic write was in flight as they left.
 	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the /time
 	             rule: Config.Gameplay.Admins, the owner, Studio).
 
@@ -74,6 +81,9 @@ local BLOCK = Config.BlockSize
 local SHUTDOWN_WAIT = 25
 -- UnlockSkill messages a player may send per second.
 local UNLOCKS_PER_SECOND = 5
+-- Writes tried again at once when a player who left could not be saved (each one ProgressStore's
+-- two attempts).
+local LEAVE_RETRIES = 2
 
 type Entry = {
 	state: Progression.State,
@@ -86,6 +96,8 @@ type Entry = {
 	sendDirty: boolean,
 	saving: boolean,
 	lastSave: number,
+	-- The player left: their last save (`save`) writes again what changed meanwhile, or failed.
+	left: boolean,
 	-- The window the gate is on (re-hooked when Inventories makes a new one).
 	window: Types.Window?,
 	lastBiome: number,
@@ -126,10 +138,11 @@ local function refreshWindow(player: Player)
 	end
 end
 
--- Enters the Ages the player's progress opens (told to everyone); whether any was.
+-- Enters the Ages the player's progress opens (told to everyone the first time: one set lower by
+-- /age and entered again is not news); whether any was.
 local function checkAges(player: Player, entry: Entry): boolean
-	local reached = Progression.advance(entry.state, entry.session)
-	for _, age in reached do
+	local reached, first = Progression.advance(entry.state, entry.session)
+	for _, age in first do
 		for _, other in Players:GetPlayers() do
 			notify(other, `{player.DisplayName} has reached the {age.name}`)
 		end
@@ -263,6 +276,33 @@ end
 
 --[[ Windows: the gate and what is taken ]]
 
+-- The player took `stack` out of a crafting result (`kind` "craft") or a furnace's or machine's
+-- output ("smelt"): its discovery and repeat.
+local function took(player: Player, kind: string, stack: Types.Stack)
+	local current = earner(player)
+	local def = Items.get(stack.item)
+	if current == nil or def == nil then
+		return
+	end
+	local name = def.name
+	local now, budget = os.clock(), Config.Progression.RepeatBudget
+	local given = if kind == "craft"
+		then Progression.crafted(current.state, current.session, name, now, budget)
+		else Progression.smelted(current.state, current.session, name, stack.count, now, budget)
+	if given > 0 then
+		changed(player, current)
+	end
+end
+
+--[[
+	Results that left a furnace or machine the player last used on their own (pushed into a chest,
+	pulled by a pipe: Players/Inventories' results handler, set by the server script): smelted by
+	them, as if taken out by hand.
+]]
+function ProgressionServer.smelted(player: Player, stack: Types.Stack)
+	took(player, "smelt", stack)
+end
+
 local function hook(player: Player, entry: Entry)
 	local window = Inventories.get(player)
 	if window == nil or window == entry.window then
@@ -273,41 +313,37 @@ local function hook(player: Player, entry: Entry)
 		return ProgressionServer.allows(player, item)
 	end
 	window.onTake = function(kind: string, stack: Types.Stack)
-		local current = earner(player)
-		local def = Items.get(stack.item)
-		if current == nil or def == nil then
-			return
-		end
-		local name = def.name
-		local now, budget = os.clock(), Config.Progression.RepeatBudget
-		local given = if kind == "craft"
-			then Progression.crafted(current.state, current.session, name, now, budget)
-			else Progression.smelted(current.state, current.session, name, stack.count, now, budget)
-		if given > 0 then
-			changed(player, current)
-		end
+		took(player, kind, stack)
 	end
 	Menu.updateCraft(window)
 end
 
 --[[ Saving ]]
 
--- Saves the player's progress if it changed; keeps saving while it changes during the save.
+--[[
+	Saves the player's progress if it changed: one write a call, so a player who keeps earning is
+	written once every SaveInterval (the Heartbeat calls again), not again and again while each
+	write waits its turn in DataStore's queue (one write a key every 6 s). A player who left is the
+	exception, as nothing else will save them: what changed during the write, or a write that
+	failed (up to LEAVE_RETRIES times more), is written again at once. A call while a write is in
+	flight does nothing: that write sees `left` when it ends (and BindToClose waits for it).
+]]
 local function save(player: Player, entry: Entry)
 	local target = store
-	if target == nil or not entry.loaded or not entry.canSave or entry.saving then
+	if target == nil or not entry.loaded or not entry.canSave or entry.saving or not entry.saveDirty then
 		return
 	end
 	entry.saving = true
 	savesInFlight += 1
-	while entry.saveDirty do
+	local failures = 0
+	repeat
 		entry.saveDirty = false
 		entry.lastSave = os.clock()
 		if not target:save(player, Progression.toRecord(entry.state)) then
 			entry.saveDirty = true
-			break
+			failures += 1
 		end
-	end
+	until not (entry.left and entry.saveDirty and failures <= LEAVE_RETRIES)
 	entry.saving = false
 	savesInFlight -= 1
 end
@@ -341,6 +377,7 @@ local function onPlayer(player: Player)
 		sendDirty = false,
 		saving = false,
 		lastSave = os.clock(),
+		left = false,
 		window = nil,
 		lastBiome = 0,
 		unlockTokens = UNLOCKS_PER_SECOND,
@@ -360,7 +397,13 @@ local function onPlayer(player: Player)
 	if target then
 		local ok, record = target:load(player)
 		if ok then
-			saved = Progression.fromRecord(record)
+			local writable
+			saved, writable = Progression.fromRecord(record)
+			if not writable then
+				-- (A record of another version: a newer server's. Never saved over.)
+				warn(`[IceVoxel] the progress of {player.Name} is from another version: session-only`)
+				entry.canSave = false
+			end
 		else
 			entry.canSave = false
 		end
@@ -453,7 +496,13 @@ local function runCommand(player: Player, text: string)
 		local target = key :: Player
 		local entry = entries[target]
 		if entry then
-			changed(target, entry)
+			if table.find(result.lowered, key) then
+				-- (An Age set lower holds until the next knowledge they get: no check now.)
+				entry.sendDirty = true
+				entry.saveDirty = true
+			else
+				changed(target, entry)
+			end
 			refreshWindow(target)
 		end
 	end
@@ -475,19 +524,23 @@ local function listenToCommands()
 		end
 		return
 	end
+	-- (A TextChatCommand has two aliases: one more command for every two more, /experience's.)
 	local function command(name: string, aliases: { string })
-		local instance = Instance.new("TextChatCommand")
-		instance.Name = name
-		instance.PrimaryAlias = aliases[1]
-		instance.SecondaryAlias = aliases[2] or ""
-		instance.Triggered:Connect(function(source: TextSource, text: string)
-			local player = Players:GetPlayerByUserId(source.UserId)
-			if player then
-				runCommand(player, text)
-			end
-		end)
-		-- Commands work when parented to TextChatService (replicated, so clients sink the message).
-		instance.Parent = TextChatService
+		for first = 1, #aliases, 2 do
+			local instance = Instance.new("TextChatCommand")
+			instance.Name = if first == 1 then name else `{name}{(first + 1) // 2}`
+			instance.PrimaryAlias = aliases[first]
+			instance.SecondaryAlias = aliases[first + 1] or ""
+			instance.Triggered:Connect(function(source: TextSource, text: string)
+				local player = Players:GetPlayerByUserId(source.UserId)
+				if player then
+					runCommand(player, text)
+				end
+			end)
+			-- Commands work when parented to TextChatService (replicated, so clients sink the
+			-- message).
+			instance.Parent = TextChatService
+		end
 	end
 	command("IceVoxelKnowledge", ProgressionCommand.KNOWLEDGE_ALIASES)
 	command("IceVoxelAge", ProgressionCommand.AGE_ALIASES)
@@ -535,7 +588,9 @@ function ProgressionServer.start(serverNet: ServerNet.ServerNet, world: WorldSer
 	Players.PlayerRemoving:Connect(function(player)
 		local entry = entries[player]
 		entries[player] = nil
-		if entry and entry.loaded then
+		if entry then
+			-- (Marked first: a periodic write in flight then writes again what it missed.)
+			entry.left = true
 			save(player, entry)
 		end
 	end)

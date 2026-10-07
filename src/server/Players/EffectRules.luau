@@ -35,11 +35,16 @@
 	            (the fluids the standing box touches and those over the eyes): every fluid's
 	            `effects` (FluidList): "in" while touching it (once touching `after` ticks
 	            unbroken), refreshed every tick, "head" while the eyes are in it, "left" the tick
-	            it stops touching it. A fluid that `extinguishes` (water) then washes off every
-	            effect that `washOff` (Oil Coated, Fuel Soaked), after the giving, so water and
-	            fuel together leave nothing to wash. Spectators touch nothing.
+	            it stops touching it. An effect that acts on an interval (fuel's Poison: every 25
+	            ticks) is refreshed only once it ran down that interval, which keeps it acting on
+	            its interval (refreshed every tick, its time left would always be the full duration,
+	            an acting tick: Poison every tick). A fluid that `extinguishes` (water) then washes
+	            off every effect that `washOff` (Oil Coated, Fuel Soaked), after the giving, so
+	            water and fuel together leave nothing to wash. Spectators touch nothing.
 	  External  effects kept elsewhere (Tough As Nails': Effects `external`) are set every tick
-	            from their owners (`setExternal`), only to be shown.
+	            from their owners (`setExternal`), only to be shown; one its owner holds for now
+	            (Thirst and Climate Clemency stand still for a creative player) goes out
+	            `paused`, and the client keeps its time as sent.
 	  Sending   `needsSync` says whether the client's view (the entries last sent, `markSent`,
 	            counted down since) is off: an effect came, went before its time, changed its
 	            amplifier or ambience, or its time left differs from the countdown by more than
@@ -66,15 +71,17 @@ export type Instance = {
 }
 
 -- What the client was last told of an effect, and the player's age then.
-type Sent = { amplifier: number, ticks: number, ambient: boolean, at: number }
+type Sent = { amplifier: number, ticks: number, ambient: boolean, paused: boolean, at: number }
 
 export type State = {
 	-- The running effects by id, and their levels (Effects.Levels: what the modifiers read), kept
 	-- in step.
 	active: { [number]: Instance },
 	levels: Effects.Levels,
-	-- External effects (Effects `external`) and their ticks left (0 or absent: none).
+	-- External effects (Effects `external`) and their ticks left (0 or absent: none), and those
+	-- whose owner holds them for now (not counting down).
 	external: { [number]: number },
+	paused: { [number]: boolean },
 	-- Per fluid id: ticks of unbroken contact; the fluids touched last tick (a mask).
 	contact: { [number]: number },
 	touched: number,
@@ -125,7 +132,7 @@ local function touches(mask: number, fluid: number): boolean
 end
 
 function EffectRules.new(): State
-	return { active = {}, levels = {}, external = {}, contact = {}, touched = 0, age = 0, sent = {} }
+	return { active = {}, levels = {}, external = {}, paused = {}, contact = {}, touched = 0, age = 0, sent = {} }
 end
 
 -- (The levels follow the running effects: the instant ones never count.)
@@ -264,12 +271,20 @@ function EffectRules.levels(state: State): Effects.Levels
 	return state.levels
 end
 
--- Sets external effect `effect` to `ticks` left (0: none), as its owner keeps it.
-function EffectRules.setExternal(state: State, effect: number, ticks: number)
+-- Sets external effect `effect` to `ticks` left (0: none), as its owner keeps it; `paused` while
+-- the owner holds it (doesn't count it down: Tough As Nails' Thirst and Climate Clemency for a
+-- creative player), so the client stops its countdown too.
+function EffectRules.setExternal(state: State, effect: number, ticks: number, paused: boolean?)
 	if ticks > 0 or ticks == INFINITE then
 		state.external[effect] = ticks
+		if paused then
+			state.paused[effect] = true
+		else
+			state.paused[effect] = nil
+		end
 	else
 		state.external[effect] = nil
+		state.paused[effect] = nil
 	end
 end
 
@@ -350,6 +365,25 @@ function EffectRules.tick(state: State, mode: string, health: number, maxHealth:
 end
 
 --[[
+	Is a fluid's effect due to be given again while it is still running? Every tick, except an
+	effect that acts on an interval (Poison: every 25 ticks at amplifier 0) running at the given
+	amplifier: only once it has run down a whole interval. Its isDurationEffectTick asks its ticks
+	left, so put back to its full duration every tick it would act every tick (fuel's Poison I
+	every tick, not every 25); this way it acts on its own interval, given back each time it acts.
+]]
+local function giveDue(state: State, given: Fluids.FluidEffect): boolean
+	local current = state.active[given.effect]
+	if current == nil or current.amplifier ~= given.amplifier or infinite(current) then
+		return true
+	end
+	local effect = Effects.list[given.effect]
+	local every = if effect.instant == nil and effect.interval > 0
+		then bit32.rshift(effect.interval, math.clamp(given.amplifier, 0, 31))
+		else 0
+	return every <= 1 or current.ticks <= given.ticks - every
+end
+
+--[[
 	One tick of the fluids' effects (see the header): `touching` the fluids the body touches and
 	`eyes` those over the eyes (Players/Burning masks, a bit per Shared/Fluids id), in game `mode`.
 	`fluids` (default: every fluid that gives effects) is for the tests.
@@ -377,7 +411,7 @@ function EffectRules.touchFluids(state: State, touching: number, eyes: number, m
 				then inside and ticks >= given.after
 				elseif when == "head" then touches(eyes, id) and ticks >= given.after
 				else not inside and touches(before, id)
-			if due then
+			if due and giveDue(state, given) then
 				EffectRules.give(state, given.effect, given.ticks, given.amplifier)
 			end
 		end
@@ -407,23 +441,34 @@ function EffectRules.entries(state: State): { Effects.Entry }
 		end
 		local external = state.external[id]
 		if external then
-			table.insert(entries, { effect = id, amplifier = 0, ticks = external, ambient = false })
+			table.insert(
+				entries,
+				{ effect = id, amplifier = 0, ticks = external, ambient = false, paused = state.paused[id] == true }
+			)
 		end
 	end
 	return entries
 end
 
--- What the client counts `sent` down to by now (below 0: it has sat at 0 that long).
+-- What the client counts `sent` down to by now (below 0: it has sat at 0 that long; a paused
+-- one stays).
 local function predicted(state: State, sent: Sent): number
-	if sent.ticks == INFINITE then
-		return INFINITE
+	if sent.ticks == INFINITE or sent.paused then
+		return sent.ticks
 	end
 	return sent.ticks - (state.age - sent.at)
 end
 
 -- Is the client's countdown of one shown effect off (see the header)?
-local function off(state: State, sent: Sent?, amplifier: number, ticks: number, ambient: boolean): boolean
-	if sent == nil or sent.amplifier ~= amplifier or sent.ambient ~= ambient then
+local function off(
+	state: State,
+	sent: Sent?,
+	amplifier: number,
+	ticks: number,
+	ambient: boolean,
+	paused: boolean
+): boolean
+	if sent == nil or sent.amplifier ~= amplifier or sent.ambient ~= ambient or sent.paused ~= paused then
 		return true
 	end
 	local guess = predicted(state, sent)
@@ -443,11 +488,11 @@ function EffectRules.needsSync(state: State): boolean
 		local entry = sent[id]
 		if shown then
 			local i = instance :: Instance
-			if off(state, entry, i.amplifier, i.ticks, i.ambient) then
+			if off(state, entry, i.amplifier, i.ticks, i.ambient, false) then
 				return true
 			end
 		elseif external then
-			if off(state, entry, 0, external, false) then
+			if off(state, entry, 0, external, false, state.paused[id] == true) then
 				return true
 			end
 		elseif entry then
@@ -463,8 +508,13 @@ function EffectRules.markSent(state: State, entries: { Effects.Entry })
 	local sent = state.sent
 	table.clear(sent)
 	for _, entry in entries do
-		sent[entry.effect] =
-			{ amplifier = entry.amplifier, ticks = entry.ticks, ambient = entry.ambient, at = state.age }
+		sent[entry.effect] = {
+			amplifier = entry.amplifier,
+			ticks = entry.ticks,
+			ambient = entry.ambient,
+			paused = entry.paused == true,
+			at = state.age,
+		}
 	end
 end
 

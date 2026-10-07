@@ -6,7 +6,8 @@
 	  Ticking    mobs tick only in the chunks World/Simulation keeps around players (loaded and
 	             within Config.Server.SimulationRadius chunks), refreshed every 10 ticks; blocks
 	             come from `world:peekBlock`, which never generates terrain; the day time from
-	             World/TimeOfDay and the open sky from World/Skylight.open. Players are their
+	             World/TimeOfDay and the open sky from World/Skylight (`open`, and `clear` for
+	             burning in daylight: leaves shade). Players are their
 	             characters' feet (Rig.feet), standing eyes (1.62), game mode and health.
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
@@ -43,6 +44,9 @@
 	  Mobs.spawn(kind, x, y, z)    a mob of a MobList name at a position (0 when it can't)
 	  Mobs.explode(x, y, z, power, getBlock)   what a blast does to mobs (World/Explosions'
 	                       handler, set by the boot script)
+	  Mobs.occupied(block, x, y, z)   would `block` placed at (x, y, z) overlap a mob (its
+	                       Blocks.obstruction: solid blocks and lanterns, not torches)?
+	                       (Network/ServerNet's `occupied` rule: no block goes inside a mob)
 ]]
 
 local Players = game:GetService("Players")
@@ -51,6 +55,7 @@ local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Combat = require(Shared.Entities.Combat)
 local Coords = require(Shared.World.Coords)
@@ -526,6 +531,9 @@ function Mobs.start(net: Net, world: WorldServer.World)
 	local function skyOpen(x: number, y: number, z: number): boolean?
 		return Skylight.open(world, x, y, z)
 	end
+	local function skyClear(x: number, y: number, z: number): boolean?
+		return Skylight.clear(world, x, y, z)
+	end
 
 	local accumulator = 0
 	RunService.Heartbeat:Connect(function(dt: number)
@@ -544,6 +552,7 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				players = playerViews(),
 				dayTime = TimeOfDay.get(),
 				skyOpen = skyOpen,
+				skyClear = skyClear,
 				active = isActive,
 			}
 			mobs:tick(context)
@@ -606,6 +615,18 @@ end
 function Mobs.explode(x: number, y: number, z: number, power: number): number
 	local mobs = mobWorld
 	return if mobs then mobs:explode(x, y, z, power) else 0
+end
+
+-- Would `block` placed at (x, y, z) overlap a mob's box (dying ones too)? ServerNet refuses such
+-- a placement (its `occupied` rule), as Minecraft's Level.isUnobstructed refuses a block inside a
+-- living entity: otherwise a block in a monster's head cell would blind it (no melee, fuse or
+-- bow) until the wall smothers it.
+function Mobs.occupied(block: number, x: number, y: number, z: number): boolean
+	local mobs = mobWorld
+	local box = Blocks.obstruction(block)
+	return mobs ~= nil
+		and box ~= nil
+		and mobs:overlaps(x + box[1], y + box[2], z + box[3], x + box[4], y + box[5], z + box[6])
 end
 
 -- Mobs in the world (for the debug overlay and tests).

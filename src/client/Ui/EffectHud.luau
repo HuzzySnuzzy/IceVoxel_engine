@@ -87,7 +87,7 @@ local pinned: number? = nil
 
 -- Ticks left of `entry` now (counted down since the effects were drawn).
 local function ticksLeft(entry: Effects.Entry, now: number): number
-	return Effects.remaining(entry.ticks, math.floor((now - builtAt) * Effects.TICKS_PER_SECOND))
+	return Effects.remaining(entry.ticks, math.floor((now - builtAt) * Effects.TICKS_PER_SECOND), entry.paused)
 end
 
 -- The background square and the glyph of `entry` at (x, y) of `parent`.

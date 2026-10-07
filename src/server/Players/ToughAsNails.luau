@@ -338,7 +338,10 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			})
 			temperature.target = Temperature.target(env, temperature)
 		end
-		damage += Temperature.tick(temperature, mode, freezeImmune)
+		-- (Resistance softens the extremes, as Minecraft's freeze damage, which TAN's
+		-- hypothermia is: in neither bypasses_resistance nor bypasses_effects. Dehydration below
+		-- doesn't: it is starvation's, which bypasses effects.)
+		damage += EffectsServer.incomingDamage(player, Temperature.tick(temperature, mode, freezeImmune))
 	else
 		Temperature.tickEffects(temperature, mode)
 	end
@@ -530,11 +533,17 @@ local function registerEffects()
 		local record = records[player]
 		return if record then record.temperature else nil
 	end
+	-- (Thirst's effect and the clemency stand still for creative and spectator players:
+	-- Thirst.tick, Temperature.tickEffects. The warmth and chill count down in every mode.)
+	local function held(player: Player): boolean
+		return GameMode.invulnerable(GameMode.of(player))
+	end
 	EffectsServer.addExternal(id.Thirst, {
 		get = function(player: Player): number?
 			local thirst = thirstOf(player)
 			return if thirst then thirst.effect else nil
 		end,
+		paused = held,
 		give = function(player: Player, ticks: number)
 			local thirst = thirstOf(player)
 			if thirst then
@@ -589,6 +598,7 @@ local function registerEffects()
 			local temperature = clemencyOf(player)
 			return if temperature then temperature.clemency else nil
 		end,
+		paused = held,
 		give = function(player: Player, ticks: number)
 			local temperature = clemencyOf(player)
 			if temperature then

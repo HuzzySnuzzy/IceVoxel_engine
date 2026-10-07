@@ -86,7 +86,9 @@ export type Levels = { [number]: number }
 -- One effect as the protocol carries it and the HUD shows it: ticks left (INFINITE: never ends)
 -- and whether it is ambient (Minecraft's beacon effects; none here yet, but /effect and the
 -- protocol keep the flag).
-export type Entry = { effect: number, amplifier: number, ticks: number, ambient: boolean }
+-- (`paused`: the time stands still for now: an external effect its owner holds, Tough As Nails'
+-- Thirst and Climate Clemency for a creative player; the client then doesn't count it down.)
+export type Entry = { effect: number, amplifier: number, ticks: number, ambient: boolean, paused: boolean? }
 
 -- How fire treats a player (server Players/Burning): no fire hurts (`immune`), burning set lasts
 -- `factor` times longer, each burning hurt takes `bonus` more, and fire catches at once.
@@ -393,9 +395,10 @@ function Effects.tooltip(
 	return lines
 end
 
--- Ticks left of an entry the server sent with `ticks` left, `elapsed` ticks ago (INFINITE stays).
-function Effects.remaining(ticks: number, elapsed: number): number
-	if ticks == Effects.INFINITE then
+-- Ticks left of an entry the server sent with `ticks` left, `elapsed` ticks ago (INFINITE stays,
+-- and a `paused` one).
+function Effects.remaining(ticks: number, elapsed: number, paused: boolean?): number
+	if ticks == Effects.INFINITE or paused then
 		return ticks
 	end
 	return math.max(0, ticks - math.max(0, elapsed))

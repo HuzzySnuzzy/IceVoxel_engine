@@ -162,7 +162,8 @@ local list: { FluidSpec } = {
 	-- 4: BuildCraft's fuel, refined from oil: thin and amber. Players move and swim in it as in
 	-- water; it burns in the Combustion Generator, not in furnaces (they burn solid fuels only).
 	-- Its fog: amber, a third of water's. Its fumes make you sick (Nausea, 8 s after the last
-	-- whiff) and poison you after 3 s in it (Poison I while in it, 5 s after), and it soaks the
+	-- whiff) and poison you after 3 s in it (Poison I while in it, acting every 25 ticks as Poison I
+	-- does: Players/EffectRules refreshes it only as it acts; up to 5 s after), and it soaks the
 	-- skin (Fuel Soaked, 20 s after leaving: anything that sets you alight burns three times as
 	-- long, fire catches at once, a blast lights you) until water washes it off.
 	{

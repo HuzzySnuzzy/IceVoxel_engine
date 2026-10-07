@@ -56,11 +56,13 @@ local GameModes = require(script.Parent.GameModes)
 
 --[[
 	An effect kept by another module (Effects `external`): `get` its ticks left for a player (0 or
-	nil: none; read every tick), `give` it for at least `ticks` (/effect give; the owner's own
-	rule, a longer one stays), `clear` it (/effect clear). Only `get` is needed.
+	nil: none; read every tick), `paused` whether the owner holds it for now (it doesn't count
+	down: the client is told to keep its time), `give` it for at least `ticks` (/effect give; the
+	owner's own rule, a longer one stays), `clear` it (/effect clear). Only `get` is needed.
 ]]
 export type Adapter = {
 	get: (player: Player) -> number?,
+	paused: ((player: Player) -> boolean)?,
 	give: ((player: Player, ticks: number) -> ())?,
 	clear: ((player: Player) -> ())?,
 }
@@ -281,7 +283,8 @@ function EffectsServer.tick(player: Player, mode: string, health: number, maxHea
 	local state = stateOf(player)
 	local damage, heal = EffectRules.tick(state, mode, health, maxHealth)
 	for id, adapter in adapters do
-		EffectRules.setExternal(state, id, adapter.get(player) or 0)
+		local paused = adapter.paused
+		EffectRules.setExternal(state, id, adapter.get(player) or 0, paused ~= nil and paused(player))
 	end
 	updateGlowing(player, state)
 	if EffectRules.needsSync(state) then

@@ -26,6 +26,7 @@ return function(t, shared, require, server)
 	local MobAI = require(server.Mobs.MobAI)
 	local MobSpawning = require(server.Mobs.MobSpawning)
 	local SummonCommand = require(server.Mobs.SummonCommand)
+	local Skylight = require(server.World.Skylight)
 
 	local B, I = Blocks.id, Items.id
 	local AIR, STONE, GRASS = Blocks.AIR, B.Stone, B.Grass
@@ -86,7 +87,22 @@ return function(t, shared, require, server)
 			end
 			return true
 		end
-		return getBlock, set, skyOpen
+		-- (World/Skylight.clear itself, on the flat world: leaves and fluids shade too.)
+		local view = {
+			peekChunk = function(_self, _cx: number, _cz: number)
+				return { height = TOP + 1 }
+			end,
+			peekBlock = function(_self, x: number, y: number, z: number): number?
+				return getBlock(x, y, z)
+			end,
+		}
+		local function skyClear(x: number, y: number, z: number): boolean?
+			if getBlock(x, y, z) == nil then
+				return nil
+			end
+			return Skylight.clear(view, x, y, z)
+		end
+		return getBlock, set, skyOpen, skyClear
 	end
 
 	local function newWorld(getBlock, seed: number?, maxMobs: number?)
@@ -97,11 +113,18 @@ return function(t, shared, require, server)
 		return { key = key, x = x, y = y, z = z, eye = 1.62, mode = mode or GameMode.SURVIVAL, alive = true }
 	end
 
-	local function context(players: { MobWorld.PlayerView }, skyOpen, dayTime: number?): MobWorld.Context
+	-- (`skyClear`, the sun's test: the open sky unless a test needs the leaves' shade.)
+	local function context(
+		players: { MobWorld.PlayerView },
+		skyOpen,
+		dayTime: number?,
+		skyClear: any?
+	): MobWorld.Context
 		return {
 			players = players,
 			dayTime = dayTime or MIDNIGHT,
 			skyOpen = skyOpen,
+			skyClear = skyClear or skyOpen,
 			active = function()
 				return true
 			end,
@@ -484,7 +507,7 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("mobs: zombies and skeletons burn in daylight under the open sky", function()
-		local getBlock, set, skyOpen = flat()
+		local getBlock, set, skyOpen, skyClear = flat()
 		local world = newWorld(getBlock)
 		local open = world:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
 		local roofed = world:spawn(SKELETON, 20.5, FLOOR, 0.5)
@@ -493,15 +516,25 @@ return function(t, shared, require, server)
 				set(x, FLOOR + 3, z, STONE)
 			end
 		end
+		-- Under a tree's leaves (Level.canSeeSky: sky light 14 there) and under glass (15).
+		local shaded = world:spawn(ZOMBIE, 40.5, FLOOR, 0.5)
+		local glazed = world:spawn(ZOMBIE, 60.5, FLOOR, 0.5)
+		for x = 38, 43 do
+			for z = -3, 3 do
+				set(x, FLOOR + 4, z, B.OakLeaves)
+				set(x + 20, FLOOR + 4, z, B.Glass)
+			end
+		end
 		local cow = world:spawn(COW, -20.5, FLOOR, 0.5)
-		local ctx = context({}, skyOpen, NOON)
+		local ctx = context({}, skyOpen, NOON, skyClear)
+		local home = { [open] = 0.5, [roofed] = 20.5, [shaded] = 40.5, [glazed] = 60.5, [cow] = -20.5 }
 		-- (Keep them in place.)
 		for _ = 1, 100 do
-			for _, id in { open, roofed, cow } do
+			for id, x in home do
 				local mob = world:get(id)
 				if mob then
 					mob.ai.goal = "idle"
-					mob.body.x = if id == open then 0.5 elseif id == roofed then 20.5 else -20.5
+					mob.body.x = x
 				end
 			end
 			world:tick(ctx)
@@ -509,6 +542,8 @@ return function(t, shared, require, server)
 		local zombie = world:get(open) :: MobWorld.Mob
 		t.ok(zombie.health < 20, `the zombie in the sun burns ({zombie.health})`)
 		t.eq((world:get(roofed) :: MobWorld.Mob).health, 20, "the skeleton under a roof doesn't")
+		t.eq((world:get(shaded) :: MobWorld.Mob).health, 20, "nor a zombie in a tree's shade")
+		t.ok((world:get(glazed) :: MobWorld.Mob).health < 20, "glass doesn't shade")
 		t.eq((world:get(cow) :: MobWorld.Mob).health, 10, "nor does a cow")
 		-- Not at night.
 		local night = newWorld(getBlock)
@@ -684,12 +719,30 @@ return function(t, shared, require, server)
 			end,
 		}
 		run(world2, frozen, 600)
-		t.eq(world2:count(), 20, "frozen mobs don't idle away")
+		t.eq(world2:count(), 20, "none before 30 s of nothing happening")
 		for _, mob in world2:each() do
 			mob.idle = 700
 		end
 		run(world2, frozen, 400)
 		t.ok(world2:count() < 20 and world2:count() > 0, `a few at a time ({world2:count()} left)`)
+		-- Frozen ones too (their chunks don't tick; Minecraft's would, out to 128 blocks): left
+		-- behind, they don't stay for good.
+		run(world2, frozen, 6000)
+		t.eq(world2:count(), 0, "frozen monsters idle away too")
+		-- A frozen mob that dies (/kill) still goes 20 ticks later, with its loot.
+		local world3 = newWorld(getBlock, 5)
+		local doomed = world3:spawn(COW, 60.5, FLOOR, 0.5)
+		run(world3, frozen, 1)
+		world3:takeChanges()
+		t.ok(world3:kill(doomed), "killed")
+		run(world3, frozen, MobWorld.DEATH_TIME - 1)
+		t.ok(world3:get(doomed) ~= nil, "lies dying")
+		run(world3, frozen, 1)
+		t.eq(world3:get(doomed), nil, "then gone, though its chunk doesn't tick")
+		local changes = world3:takeChanges()
+		t.eq(#changes.deaths, 1, "one death")
+		t.eq(changes.removed[1], doomed, "removed")
+		t.ok(#changes.drops > 0, "its beef dropped")
 		-- The cap.
 		local small = newWorld(getBlock, 1, 3)
 		for _ = 1, 5 do
@@ -947,12 +1000,101 @@ return function(t, shared, require, server)
 		)
 	end)
 
+	t.test("spawning: monsters frozen beyond the chunks that tick don't fill a player's cap", function()
+		local getBlock, _, skyOpen = flat()
+		local world = newWorld(getBlock, 31)
+		local p = player("p", 0.5, FLOOR, 0.5)
+		-- Ticking: chunks within 3 of the player's (Config.Server.SimulationRadius), about 56 blocks.
+		local ticking = {
+			players = { p },
+			dayTime = MIDNIGHT,
+			skyOpen = skyOpen,
+			skyClear = skyOpen,
+			active = function(cx: number, cz: number): boolean
+				return math.abs(cx) <= 3 and math.abs(cz) <= 3
+			end,
+		}
+		-- A full cap of monsters left 80 blocks behind (within the cap's 128), frozen there.
+		for i = 1, 15 do
+			world:spawn(ZOMBIE, 80.5, FLOOR, i - 7.5)
+		end
+		world:tick(ticking)
+		local frozen = 0
+		for _, mob in world:each() do
+			if mob.frozen then
+				frozen += 1
+			end
+		end
+		t.eq(frozen, 15, "frozen out there")
+		t.eq(MobSpawning.census(world, p.x, p.y, p.z), 0, "they don't count against the player's cap")
+		local settings = table.clone(SETTINGS)
+		settings.PassiveInterval = 100000
+		local state = MobSpawning.new()
+		for _ = 1, 400 do
+			MobSpawning.step(world, state, ticking, settings)
+		end
+		local near = MobSpawning.census(world, p.x, p.y, p.z)
+		t.eq(near, 15, "monsters still spawn around the player, up to the cap")
+		t.eq((MobSpawning.census(world)), 30, "the frozen ones are still there, until they idle away")
+	end)
+
+	t.test("mobs: no block is placed inside one (Level.isUnobstructed)", function()
+		local getBlock = flat()
+		local world = newWorld(getBlock)
+		local id = world:spawn(ZOMBIE, 2.5, FLOOR, 0.5)
+		local function cell(x: number, y: number, z: number): boolean
+			return world:overlaps(x, y, z, x + 1, y + 1, z + 1)
+		end
+		t.ok(cell(2, FLOOR + 1, 0), "its head's cell")
+		t.ok(cell(2, FLOOR, 0), "its feet's")
+		t.ok(not cell(3, FLOOR + 1, 0), "the cell beside it (0.6 wide: 2.2 to 2.8)")
+		t.ok(not cell(2, FLOOR + 2, 0), "above its 1.95 tall box")
+		t.ok(not cell(2, FLOOR - 1, 0), "the floor it stands on (touching)")
+		-- A lantern's outline beside its box: no; a torch has none (Blocks.obstruction).
+		t.ok(not world:overlaps(2.8, FLOOR, 0.3, 3.2, FLOOR + 0.5, 0.7), "a box that only touches")
+		world:kill(id)
+		t.ok(cell(2, FLOOR + 1, 0), "a dying body too")
+		run(world, context({}, nil), MobWorld.DEATH_TIME)
+		t.ok(not cell(2, FLOOR + 1, 0), "nothing once it is gone")
+	end)
+
 	t.test("light estimate: block light, sky light and Minecraft's spawn tests", function()
 		local getBlock, set, skyOpen = flat()
 		set(0, FLOOR, 0, B.Torch)
 		t.eq(LightEstimate.blockLight(getBlock, 0, FLOOR, 0), 14, "a torch's 14")
 		t.eq(LightEstimate.blockLight(getBlock, 3, FLOOR, 0), 11, "one less a block")
 		t.eq(LightEstimate.blockLight(getBlock, 20, FLOOR, 0), 0, "dark far away")
+		-- A torch lights a room as far as its light goes, whatever the room's height (a spawn
+		-- check's search: SPAWN_BUDGET), so torches 12 apart keep a hall free of monsters.
+		for _, height in { 2, 3, 6 } do
+			local getHall, setHall = flat()
+			for x = -40, 40 do
+				for z = -40, 40 do
+					setHall(x, FLOOR + height, z, STONE)
+				end
+			end
+			setHall(13, FLOOR, 0, B.Torch)
+			t.eq(
+				LightEstimate.blockLight(getHall, 1, FLOOR, 0, LightEstimate.SPAWN_BUDGET),
+				2,
+				`12 away, {height} high`
+			)
+			t.eq(LightEstimate.blockLight(getHall, 0, FLOOR, 0, LightEstimate.SPAWN_BUDGET), 1, `13 away`)
+			t.eq(LightEstimate.blockLight(getHall, -1, FLOOR, 0, LightEstimate.SPAWN_BUDGET), 0, `14 away: dark`)
+			t.eq(LightEstimate.blockLight(getHall, 1, FLOOR, 0, LightEstimate.SPAWN_BUDGET, 1), 2, "stops at a light")
+			local kind = MobList.get(ZOMBIE) :: MobList.Kind
+			local function darkest(n: number): number
+				return n - 1
+			end
+			local inside = context({}, function()
+				return false
+			end, MIDNIGHT)
+			t.ok(
+				not MobSpawning.validSpot(getHall, inside, kind, 1, FLOOR, 0, darkest),
+				`no monster 12 blocks from a torch in a {height} high hall`
+			)
+			t.ok(MobSpawning.validSpot(getHall, inside, kind, -1, FLOOR, 0, darkest), "14 blocks away: dark")
+		end
 		t.eq(LightEstimate.skyLight(getBlock, skyOpen, 10, FLOOR, 0), 15, "the open sky")
 		-- A roof: 1 block under its edge 14, deep under it 0.
 		for x = 20, 40 do

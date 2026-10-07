@@ -140,6 +140,31 @@ return function(t, shared, require, server, client)
 		t.eq(Knowledge.repeatPoints(session, "more", 5, 0, 20), 0, "then nothing")
 		t.near(Knowledge.repeatPoints(session, "more2", 5, 30, 20), 5, 1e-9, "half a minute later: 10 back, 5 taken")
 		t.near(Knowledge.repeatPoints(session, "more3", 50, 30, 20), 5, 1e-9, "the rest of it")
+		-- Perks multiply before the bucket: the cap holds with every knowledge perk. An ore every
+		-- 10 s, the six kinds in turn, for 10 minutes.
+		local ORES = { "CoalOre", "IronOre", "OsmiumOre", "GoldOre", "DiamondOre", "EmeraldOre" }
+		local function minute(perks: boolean): number
+			local state, mining = fresh()
+			if perks then
+				for _, id in { "prospector", "scholar", "polymath", "enlightenment" } do
+					state.skills[id] = true
+				end
+			end
+			-- (The steady rate: from the third minute on, the discoveries and the first full
+			-- bucket behind.)
+			local before = 0
+			for i = 1, 60 do
+				if i == 13 then
+					before = state.points
+				end
+				Progression.mined(state, mining, ORES[(i - 1) % 6 + 1], false, i * 10, 20)
+			end
+			return (state.points - before) / 8
+		end
+		local plain, perked = minute(false), minute(true)
+		t.ok(plain <= 20 + 1e-9, `{plain} points a minute without perks`)
+		t.ok(perked <= 20 + 0.5, `{perked} points a minute with every knowledge perk: still the 20`)
+		t.ok(perked > plain, "the perks still help under the cap")
 	end)
 
 	t.test("knowledge: fractions carry over, perks multiply their source", function()
@@ -803,11 +828,20 @@ return function(t, shared, require, server, client)
 		t.ok(back.skills.forager and back.skills.hardy)
 		t.ok(Progression.found(back, "mine", "Stone"))
 		t.ok(Progression.found(back, "age", "iron"))
-		for _, junk in { nil, 5, "x", {}, { v = 2, points = 99 }, { v = 1, points = "lots" } } do
+		for _, junk in { 5, "x", {}, { v = 2, points = 99 }, { v = 1, points = "lots" } } do
 			local read = Progression.fromRecord(junk)
 			t.eq(read.points, 0, "a fresh start")
 			t.eq(read.age, 1)
 		end
+		-- Saved over: nothing saved, or a record of this version; never another version's (a newer
+		-- server's, during an update) nor anything unreadable.
+		t.eq(select(2, Progression.fromRecord(nil)), true, "nothing saved yet")
+		t.eq(select(2, Progression.fromRecord(record)), true, "this version")
+		t.eq(select(2, Progression.fromRecord({ v = 1, points = "lots" })), true, "this version, odd fields")
+		for _, other in { { v = 2, points = 99 }, { v = 0 }, {}, 5, "x" } do
+			t.eq(select(2, Progression.fromRecord(other)), false, "kept for the build that reads it")
+		end
+		t.eq(Progression.fromRecord(nil).points, 0, "nil: a fresh start")
 		local odd = Progression.fromRecord({
 			v = 1,
 			points = 1e12,
@@ -939,8 +973,30 @@ return function(t, shared, require, server, client)
 		t.eq(states.alex.age, 3, "by id")
 		run("/age set alex 5")
 		t.eq(states.alex.age, 5, "by number")
-		run("/age set alex stone")
+		t.eq(#run("/age set alex 5").lowered, 0, "not lower")
+		local down = run("/age set alex stone")
 		t.eq(states.alex.age, 1, "down too")
+		t.eq(down.lowered[1], "alex", "lowered: the glue checks no Ages now (they would undo it)")
+		-- When the Ages are checked again (the next knowledge), they come back, none for the
+		-- first time (nothing to announce, no reward again).
+		Progression.setPoints(states.alex, Knowledge.total(40))
+		local before = states.alex.points
+		local back, first = Progression.advance(states.alex, Knowledge.newSession())
+		t.eq(#back, 0, "the milestones were never met (set by command): it holds")
+		t.eq(#first, 0)
+		local held = Progression.new()
+		Progression.setPoints(held, Knowledge.total(5))
+		for _, pair in { { "craft", "Furnace" }, { "smelt", "IronIngot" } } do
+			Progression.discover(held, Knowledge.newSession(), pair[1], pair[2])
+		end
+		local session = Knowledge.newSession()
+		local _, news = Progression.advance(held, session)
+		t.eq(#news, 1, "the Iron Age the first time: news")
+		Progression.setAge(held, 1)
+		local again, again1 = Progression.advance(held, session)
+		t.eq(#again, 1, "entered again")
+		t.eq(#again1, 0, "but not news, nor a reward again")
+		t.eq(states.alex.points, before)
 		t.eq(run("/age query alex", false).feedback[1], "Alex is in the Stone Age")
 		t.ok(string.find(run("/age set alex steam").feedback[1], "Unknown Age", 1, true) ~= nil)
 		t.eq(run("/age").feedback[1], ProgressionCommand.AGE_USAGE)

@@ -193,6 +193,8 @@ local PARTICLE_GRAVITY = 45 -- studs / s^2
 local SWING_RESTART = 0.15
 -- A whole cell, as Blocks.outline gives boxes.
 local FULL_OUTLINE = { 0, 0, 0, 1, 1, 1 }
+-- Mobs whose feet are this close to a cell may reach into it (the biggest box: 1.4 wide, 2 tall).
+local MOB_NEAR = 3
 -- Items used on blocks (UseItem): the Configurator and the empty Bucket (full buckets: Fluids).
 local CONFIGURATOR = Items.id.Configurator
 local BUCKET = Items.id.Bucket
@@ -465,10 +467,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[
 		Would a block whose obstruction box is `cell` (solid blocks: the whole cell; lanterns: their
-		outline) at (x, y, z) overlap a player? Mirrors the server's EditRules.obstructs. The local
-		player is checked with the standing hull (as the server does, whatever the pose) at the
-		hull's position and where the character is drawn (what the server sees); other players at
-		their characters.
+		outline) at (x, y, z) overlap a player or a mob? Mirrors the server's EditRules.obstructs
+		and Mobs.occupied. The local player is checked with the standing hull (as the server does,
+		whatever the pose) at the hull's position and where the character is drawn (what the
+		server sees); other players at their characters, mobs where they are drawn.
 	]]
 	local function blocksCharacter(x: number, y: number, z: number, cell: { number }): boolean
 		local view = MovementController.current
@@ -502,6 +504,15 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				if min and max and overlaps(min, max, x, y, z, cell) then
 					return true
 				end
+			end
+		end
+		-- Nor a mob, where they are drawn (the server refuses it too: Mobs.occupied).
+		for _, mob in MobRenderer.mobsNear(x + 0.5, y, z + 0.5, MOB_NEAR) do
+			local half = mob.kind.width / 2
+			local min = Vector3.new(mob.x - half, mob.y, mob.z - half)
+			local max = Vector3.new(mob.x + half, mob.y + mob.kind.height, mob.z + half)
+			if overlaps(min, max, x, y, z, cell) then
+				return true
 			end
 		end
 		return false

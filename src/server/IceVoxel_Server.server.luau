@@ -141,6 +141,8 @@ net.setRules({
 		StructureBlocks.sendChunks(player, coords)
 	end,
 	operator = StructureBlocks.operator,
+	-- (Mobs start later; until then nothing is in the way.)
+	occupied = Mobs.occupied,
 })
 -- Pipes after inventories and items (they fill chests and drop items); item use after the pipes;
 -- machines after the pipes (their cables are the pipes' nodes).
@@ -158,6 +160,8 @@ Eating.start(net)
 -- perks go to the parts that apply them.
 Progression.start(net, world)
 Inventories.setWearFilter(Progression.wear)
+-- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
+Inventories.setResultsHandler(Progression.smelted)
 ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
 ItemUse.setBoilSpeed(Progression.boilSpeed)
 -- A mob a player killed is knowledge: the first of its kind a discovery, then Knowledge.MOBS.

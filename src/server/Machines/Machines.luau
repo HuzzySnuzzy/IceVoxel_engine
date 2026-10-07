@@ -181,6 +181,7 @@ function Machines.start(serverNet: Net, world: WorldServer.World)
 		getBlock = knownBlock,
 		containers = Containers.default,
 		inventoryChanged = Inventories.containerChanged,
+		resultsTaken = Inventories.resultsTaken,
 		transmitters = Transmitters.world(),
 		dayTime = TimeOfDay.get,
 		sky = seesSky,

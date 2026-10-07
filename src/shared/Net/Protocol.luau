@@ -190,7 +190,8 @@
 	                 external ones), sent to them alone when the list changes, an effect ends
 	                 early or its time left drifts from the client's own countdown by more than a
 	                 second (server Players/EffectRules.needsSync), and at once for a new character
-	                 (empty). `ticks` left (-1: never ends, Effects.INFINITE), flags bit 0 ambient.
+	                 (empty). `ticks` left (-1: never ends, Effects.INFINITE), flags bit 0 ambient,
+	                 bit 1 paused (its time stands still: not counted down by the client).
 	                 Unknown effects, the same effect twice, ticks below -1, other flags or more
 	                 entries than effects are malformed.
 	  Progress       u32 points (total knowledge, at most Knowledge.MAX_POINTS), u8 age (an
@@ -2600,7 +2601,7 @@ function Protocol.encodeEffects(entries: { Effects.Entry }): buffer
 		buffer.writeu8(b, o, entry.effect)
 		buffer.writeu8(b, o + 1, math.clamp(entry.amplifier, 0, Effects.MAX_AMPLIFIER))
 		buffer.writei32(b, o + 2, math.clamp(math.floor(entry.ticks), Effects.INFINITE, 2 ^ 31 - 1))
-		buffer.writeu8(b, o + 6, if entry.ambient then 1 else 0)
+		buffer.writeu8(b, o + 6, (if entry.ambient then 1 else 0) + (if entry.paused then 2 else 0))
 	end
 	return b
 end
@@ -2622,11 +2623,17 @@ function Protocol.decodeEffects(b: buffer): { Effects.Entry }?
 		local effect = buffer.readu8(b, o)
 		local ticks = buffer.readi32(b, o + 2)
 		local flags = buffer.readu8(b, o + 6)
-		if not Effects.isValid(effect) or seen[effect] or ticks < Effects.INFINITE or flags > 1 then
+		if not Effects.isValid(effect) or seen[effect] or ticks < Effects.INFINITE or flags > 3 then
 			return nil
 		end
 		seen[effect] = true
-		entries[i] = { effect = effect, amplifier = buffer.readu8(b, o + 1), ticks = ticks, ambient = flags == 1 }
+		entries[i] = {
+			effect = effect,
+			amplifier = buffer.readu8(b, o + 1),
+			ticks = ticks,
+			ambient = bit32.btest(flags, 1),
+			paused = bit32.btest(flags, 2),
+		}
 	end
 	return entries
 end

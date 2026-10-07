@@ -74,6 +74,10 @@ export type Env = {
 	-- Does cell (x, y, z) see the sky straight up (Machines/SkyCheck over the server's world)?
 	-- Uncached; never generates terrain. nil: the cells above are read with `getBlock`.
 	sky: ((x: number, y: number, z: number) -> boolean)?,
+	-- Results left a furnace's or machine's output at (x, y, z) on their own (pushed out, or
+	-- pulled by a pipe): Players/Inventories.resultsTaken credits them as smelted to the
+	-- player who last used its window (Progression), as if taken out by hand.
+	resultsTaken: ((x: number, y: number, z: number, container: Container, stack: InventoryTypes.Stack) -> ())?,
 }
 
 export type World = {

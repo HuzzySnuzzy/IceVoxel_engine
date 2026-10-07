@@ -17,7 +17,8 @@
 	  Knockback a zombie's or spider's hit (and an arrow's) comes as a `push` the hull adds to its
 	            velocity (Player/MovementController.knockback, as an explosion's).
 	The server only sends the mobs within Config.Mobs.TrackingDistance (64 blocks) of the player;
-	the parts go when it says they left.
+	the parts go when it says they left. Its messages are taken from the moment this module loads
+	(see `start`), so none is lost while the client boots.
 
 	`mobsNear` and `pick` let other modules (Ui/Waila, Interaction/BlockInteraction) see where the
 	mobs are drawn, read only.
@@ -69,7 +70,10 @@ local models: { [number]: MobModel.Mob } = {}
 local count = 0
 local spare: { BasePart } = {}
 local arrows: { Arrow } = {}
-local folder: Folder? = nil
+-- (Made as the module loads, kept out of the workspace until `start`: mobs the server sends while
+-- the client boots are built in it, unseen.)
+local folder = Instance.new("Folder")
+folder.Name = "IceVoxelMobs"
 
 local function newPart(): BasePart
 	local part = table.remove(spare)
@@ -251,13 +255,18 @@ local function draw()
 	end
 end
 
+--[[
+	The Mobs messages are taken from the moment this module loads (the boot script requires it
+	before anything waits), not from `start`: the server sends a mob's spawn once and then only
+	what changed, so a message ClientNet's backlog dropped while the client booted (it keeps 64 a
+	kind, about 6 s of a 10 a second stream) would leave mobs invisible, or ghosts, for good.
+	What arrives before `start` is applied to the mobs at once; their parts wait out of sight.
+]]
+ClientNet.on(Protocol.ServerMessage.Mobs, onMessage)
+
 -- Starts drawing the mobs the server sends.
 function MobRenderer.start(_world: ClientWorld.ClientWorld)
-	local container = Instance.new("Folder")
-	container.Name = "IceVoxelMobs"
-	container.Parent = workspace
-	folder = container
-	ClientNet.on(Protocol.ServerMessage.Mobs, onMessage)
+	folder.Parent = workspace
 	RunService:BindToRenderStep("IceVoxelMobs", RENDER_PRIORITY, draw)
 end
 

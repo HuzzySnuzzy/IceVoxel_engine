@@ -19,7 +19,8 @@
 	Who may: changing needs `mayUse` (Config.Gameplay.Admins, the game's owner and Studio, the rule
 	for /time); queries are harmless, so anyone may ask. After a change the glue checks the Ages
 	again (Progression.advance), so knowledge set high with the milestones met enters the next
-	Ages, and an Age set lower holds until the next knowledge the player gets.
+	Ages; not after an Age set lower (`lowered`), which holds until the next knowledge the player
+	gets (Ages entered again then are not announced again).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -46,6 +47,9 @@ export type Context = {
 export type Result = {
 	-- Players whose progression changed (resend, save, check the Ages).
 	changed: { any },
+	-- Of those, players whose Age was set lower (/age set): resend and save, but no Age check
+	-- (Progression.advance would put them straight back), so it holds until their next knowledge.
+	lowered: { any },
 	-- Messages for the player who typed the command.
 	feedback: { string },
 }
@@ -120,7 +124,7 @@ function ProgressionCommand.run(text: string, context: Context): Result?
 	end
 	local isAge = table.find(ProgressionCommand.AGE_ALIASES, first) ~= nil
 	local usage = if isAge then ProgressionCommand.AGE_USAGE else ProgressionCommand.KNOWLEDGE_USAGE
-	local result: Result = { changed = {}, feedback = {} }
+	local result: Result = { changed = {}, lowered = {}, feedback = {} }
 	local function say(message: string): Result
 		table.insert(result.feedback, message)
 		return result
@@ -170,6 +174,9 @@ function ProgressionCommand.run(text: string, context: Context): Result?
 			if state == nil then
 				say(ProgressionCommand.NOT_LOADED)
 			else
+				if age.index < state.age then
+					table.insert(result.lowered, target.key)
+				end
 				Progression.setAge(state, age.index)
 				table.insert(result.changed, target.key)
 				say(`Set {target.displayName}'s Age to the {age.name}`)

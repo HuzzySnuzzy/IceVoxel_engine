@@ -8,7 +8,8 @@
 	    Transmitters/Transmitters), so a client always has a chunk's blocks before their state.
 	  * Validates block edit requests: rate limit, reach, breakable / placeable, what an attached
 	    block (torch, lantern) hangs on or a plant stands on, room for a tall plant's top, not
-	    inside a player (solid blocks and lanterns, not torches or plants: EditRules.obstructs).
+	    inside a player (solid blocks and lanterns, not torches or plants: EditRules.obstructs)
+	    nor a mob (the `occupied` rule: Mobs/Mobs.occupied).
 	    Creative only blocks (structure blocks, structure voids, jigsaws) are placed and broken
 	    only by players the `operator` rule allows (Structures/Permission: creative, and
 	    Config.Structures.Permission, Config.Gameplay.Admins, the owner or Studio;
@@ -161,6 +162,9 @@ export type Rules = {
 	-- (Shared/Mining.playerFactor on Players/Effects.levels and Players/Progression.state, in the
 	-- boot script).
 	miningFactor: ((player: Player, tool: number?) -> number)?,
+	-- Would `block` placed at (x, y, z) overlap a mob (Mobs/Mobs.occupied)? Such a placement is
+	-- refused, as one inside a player.
+	occupied: ((block: number, x: number, y: number, z: number) -> boolean)?,
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
@@ -511,6 +515,7 @@ function ServerNet.start(world: World): ServerNet
 				not EditRules.mayPlace(block, current)
 				or not EditRules.supported(block, peekBlock, x, y, z)
 				or intersectsCharacter(block, x, y, z)
+				or (rules.occupied ~= nil and rules.occupied(block, x, y, z))
 			then
 				reject()
 				return

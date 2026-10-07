@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
+local InventoryTypes = require(Shared.Inventory.Types)
 
 local Containers = require(script.Parent.Parent.Players.Containers)
 
@@ -133,6 +134,10 @@ export type Env = {
 	inventoryChanged: ((x: number, y: number, z: number) -> ())?,
 	-- Drops a stack as an item entity at block (x, y, z) (a broken transporter's items).
 	drop: ((x: number, y: number, z: number, stack: Stack) -> ())?,
+	-- Results left a furnace's or machine's output at (x, y, z) on their own (pushed out, or
+	-- pulled by a pipe): Players/Inventories.resultsTaken credits them as smelted to the
+	-- player who last used its window (Progression), as if taken out by hand.
+	resultsTaken: ((x: number, y: number, z: number, container: InventoryTypes.Container, stack: Stack) -> ())?,
 }
 
 export type TransportOp = Protocol.TransportOp

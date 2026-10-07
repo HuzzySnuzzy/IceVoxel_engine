@@ -2,9 +2,10 @@
 --[[
 	This player's status effects as the server last sent them (Protocol Effects, server
 	Players/Effects), counted down here between messages (Shared/Effects.remaining, from when each
-	message arrived): what the movement (Player/MovementController: speed, Jump Boost, Blindness),
-	mining (Interaction/BlockInteraction: Haste, Mining Fatigue), the view (Rendering/EffectView:
-	Night Vision, Blindness, Nausea), the HUD (Ui/EffectHud) and F3 (Debug/DebugOverlay) read.
+	message arrived; a `paused` one keeps its time): what the movement (Player/MovementController:
+	speed, Jump Boost, Blindness), mining (Interaction/BlockInteraction: Haste, Mining Fatigue), the
+	view (Rendering/EffectView: Night Vision, Blindness, Nausea), the HUD (Ui/EffectHud) and F3
+	(Debug/DebugOverlay) read.
 
 	An effect stays, at 0, until the server says it is gone (as Minecraft's client keeps it until
 	the remove packet), so one refreshed every tick in a fluid never blinks out. `levels` is kept
@@ -45,8 +46,9 @@ function EffectState.list(now: number?): { Effects.Entry }
 		list[i] = {
 			effect = entry.effect,
 			amplifier = entry.amplifier,
-			ticks = Effects.remaining(entry.ticks, passed),
+			ticks = Effects.remaining(entry.ticks, passed, entry.paused),
 			ambient = entry.ambient,
+			paused = entry.paused,
 		}
 	end
 	return list
@@ -66,7 +68,7 @@ end
 function EffectState.get(effect: number): (number?, number)
 	for _, entry in entries do
 		if entry.effect == effect then
-			return entry.amplifier, Effects.remaining(entry.ticks, elapsed())
+			return entry.amplifier, Effects.remaining(entry.ticks, elapsed(), entry.paused)
 		end
 	end
 	return nil, 0

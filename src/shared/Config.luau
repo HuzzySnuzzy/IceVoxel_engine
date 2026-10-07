@@ -662,8 +662,8 @@ local Config = {
 		-- Seconds between saves of a player whose progress changed (and on leaving and shutdown).
 		SaveInterval = 120,
 		-- Points a minute at most from repeated actions together (ores, logs, smelting, crafting,
-		-- mobs), each also wearing off when repeated (Progression/Knowledge's fatigue).
-		-- Discoveries are not limited.
+		-- mobs; the knowledge perks included), each also wearing off when repeated
+		-- (Progression/Knowledge's fatigue). Discoveries are not limited.
 		RepeatBudget = 20,
 		-- Share (0..1) of the progress into the current level lost on death. Levels, the Age,
 		-- skills and discoveries are never lost; 0 keeps everything (knowledge is learning).

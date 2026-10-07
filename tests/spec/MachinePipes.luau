@@ -69,10 +69,17 @@ return function(t, shared, require, server)
 			changed[key] = (changed[key] or 0) + 1
 			containers:markActive(x, y, z)
 		end
+		-- Results that left a furnace's or machine's output on their own, per item (Players/
+		-- Inventories.resultsTaken: smelted, for its last user).
+		local taken: { [number]: number } = {}
+		local function resultsTaken(_x: number, _y: number, _z: number, _container: any, stack: any)
+			taken[stack.item] = (taken[stack.item] or 0) + stack.count
+		end
 		local pipes = TransmitterWorld.new({
 			getBlock = getBlock,
 			containers = containers,
 			inventoryChanged = inventoryChanged,
+			resultsTaken = resultsTaken,
 			drop = function(_x: number, _y: number, _z: number, stack: any)
 				table.insert(drops, stack)
 			end,
@@ -81,13 +88,20 @@ return function(t, shared, require, server)
 			getBlock = getBlock,
 			containers = containers,
 			inventoryChanged = inventoryChanged,
+			resultsTaken = resultsTaken,
 			transmitters = pipes,
 			dayTime = function()
 				return 6000
 			end,
 		})
-		local eject = { getBlock = getBlock, containers = containers, inventoryChanged = inventoryChanged }
+		local eject = {
+			getBlock = getBlock,
+			containers = containers,
+			inventoryChanged = inventoryChanged,
+			resultsTaken = resultsTaken,
+		}
 		local s: any = {
+			taken = taken,
 			pipes = pipes,
 			machines = machines,
 			containers = containers,
@@ -218,6 +232,8 @@ return function(t, shared, require, server)
 		t.eq(s.count(2, Y + 1, 5, I.RawIron), 0, "never the input")
 		t.eq(b[INPUT] and b[INPUT].count, 5, "the ore stays")
 		t.eq(s.pipes.itemCount, 0, "nothing else on its way")
+		t.eq(s.taken[I.IronIngot], 6, "the results pulled are told (smelted, for the last user)")
+		t.eq(s.taken[I.Coal], nil, "the fuel never")
 	end)
 
 	t.test("machine rules: fuel and ore put in by hand stay in a furnace a transporter pulls from", function()
@@ -265,6 +281,7 @@ return function(t, shared, require, server)
 		s.step(100)
 		t.eq(slots[FUEL], nil, "pulled out")
 		t.eq(s.count(2, Y, 0, I.Bucket), 1)
+		t.eq(s.taken[I.Bucket], nil, "not a result: nothing smelted")
 	end)
 
 	--[[ Furnaces push their results out ]]
@@ -284,6 +301,7 @@ return function(t, shared, require, server)
 		t.ok((s.changed[Coords.posKey(0, Y - 1, 0)] or 0) >= 3, "the chest's viewers heard of each")
 		t.ok((s.changed[Coords.posKey(0, Y, 0)] or 0) >= 3, "and the furnace's")
 		t.eq(s.ejected, 3)
+		t.eq(s.taken[I.IronIngot], 3, "what left on its own is told (smelted, for the last user)")
 		-- The chest below full: the next ones go east.
 		local below = s.slots(0, Y - 1, 0)
 		for slot = 1, 27 do
@@ -483,6 +501,7 @@ return function(t, shared, require, server)
 		t.eq(s.count(2, Y - 1, 0, I.RawIron), 0, "all the ore went in through its bottom")
 		t.eq(s.count(2, Y - 1, 0, I.Coal), 4, "coal doesn't smelt: it stays")
 		t.eq(s.count(-1, Y, 0, I.IronIngot), 5, "every ingot was pushed into the chest")
+		t.eq(s.taken[I.IronIngot], 5, "and told (smelted, for the machine's last user)")
 		t.eq(smelter[1], nil)
 		t.eq(smelter[2], nil)
 		-- Without the chest, a transporter pulling from its north side takes them.
@@ -494,6 +513,8 @@ return function(t, shared, require, server)
 		source[1] = S(I.RawIron, 5)
 		s.step(500)
 		t.eq(s.count(0, Y, -3, I.IronIngot), 5, "pulled through its north side")
+		t.eq(s.taken[I.IronIngot], 10, "told too")
+		t.eq(s.taken[I.SpeedUpgrade], nil, "never its cards")
 		t.eq(smelter[1], nil)
 		t.eq(smelter[2], nil)
 		-- Never its cards.
