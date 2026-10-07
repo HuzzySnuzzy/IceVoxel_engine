@@ -37,6 +37,16 @@
 	    Explosion message: the client draws the
 	    blast and adds the knockback to its movement (none for spectators, as Minecraft leaves
 	    them out of the explosion packet's knockback; the client leaves out creative flight).
+	  * status effects (Players/Effects, ticked here with lava and burning, 20 a second): the
+	    fluids' effects first (oil's Slowness and Oil Coated, fuel's Nausea, Poison and Fuel Soaked,
+	    water washing them off; the eyes are looked at only when a fluid gives effects there),
+	    their fire rules for burning (Fire Resistance, the burn factor and bonus, catching at
+	    once), then their own tick: Poison, Wither and Instant Damage hurt through the same hurt
+	    cooldown without armor (magic), Regeneration and Instant Health heal. Every hurt here
+	    (lava, fire, burning, the effects, blasts, falls, walls) is cut by Resistance
+	    (Effects.incomingDamage, after armor, as getDamageAfterMagicAbsorb), Jump Boost takes its
+	    levels off a fall's distance, and a blast that reaches a player whose effects ignite (Fuel
+	    Soaked) sets them burning (IN_FIRE_SECONDS, times their burn factor).
 	  * sounds (Audio/Sounds), heard by everyone near: losing health (entity.player.hurt, at most
 	    every half second like Minecraft's invulnerability time) and dying (entity.player.death),
 	    from any cause; and a hurting landing's small or big fall with the fall sound of the block
@@ -62,6 +72,8 @@ local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SharedSounds = require(Shared.Sounds)
 local Burning = require(script.Parent.Burning)
+local EffectRules = require(script.Parent.EffectRules)
+local Effects = require(script.Parent.Effects)
 local GameModeRules = require(script.Parent.GameModeRules)
 local Inventories = require(script.Parent.Inventories)
 
@@ -147,7 +159,8 @@ local function suffocate(blocks: PlayerPhysics.World)
 			and feet
 			and GameModeRules.inWall(GameMode.of(player), blocks, feet.X, feet.Y, feet.Z)
 		then
-			humanoid:TakeDamage(GameModeRules.IN_WALL_DAMAGE / MINECRAFT_HEALTH * humanoid.MaxHealth)
+			local damage = Effects.incomingDamage(player, GameModeRules.IN_WALL_DAMAGE)
+			humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
 		end
 	end
 end
@@ -159,8 +172,9 @@ local function setOnFire(character: Model, onFire: boolean)
 end
 
 --[[
-	One tick of lava and burning for every living player (Players/Burning): the half hearts it
-	costs, the burn and extinguish sounds, and the ON_FIRE attribute.
+	One tick of lava, burning and status effects for every living player (Players/Burning,
+	Players/Effects): the half hearts it costs and gives back, the burn and extinguish sounds, and
+	the ON_FIRE attribute.
 ]]
 local function burnTick(getBlock: Burning.GetBlock)
 	for _, player in Players:GetPlayers() do
@@ -185,12 +199,36 @@ local function burnTick(getBlock: Burning.GetBlock)
 		end
 		local mode = GameMode.of(player)
 		local touching = Burning.touchingAt(getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		-- (The fluid over the eyes, only when some fluid gives effects there.)
+		local eyes = 0
+		if EffectRules.HEAD_EFFECTS then
+			local eyeY = feet.Y + BODY.eye
+			eyes = Burning.touching(
+				getBlock,
+				feet.X - 0.01,
+				eyeY,
+				feet.Z - 0.01,
+				feet.X + 0.01,
+				eyeY + 0.01,
+				feet.Z + 0.01
+			)
+		end
+		Effects.touchFluids(player, touching, eyes, mode)
 		local window = Inventories.get(player)
 		local armor, toughness = 0, 0
 		if window then
 			armor, toughness = Items.armorPoints(window.inventory.armor)
 		end
-		local damage, extinguished, hurt = Burning.tickPlayer(state, mode, touching, armor, toughness)
+		local damage, extinguished, hurt =
+			Burning.tickPlayer(state, mode, touching, armor, toughness, Effects.fireRules(player))
+		-- (The effects' own hurt is magic: through armor, under the same cooldown.)
+		local maxHealth = humanoid.MaxHealth
+		local health = if maxHealth > 0 then humanoid.Health / maxHealth * MINECRAFT_HEALTH else 0
+		local magic, heal = Effects.tick(player, mode, health, MINECRAFT_HEALTH)
+		if magic > 0 then
+			damage += Burning.hurtPlayer(state, mode, magic)
+		end
+		damage = Effects.incomingDamage(player, damage)
 		-- (The events carry Minecraft's volume and pitch already: no cue on top.)
 		if GameModeRules.makesSounds(mode) then
 			if extinguished and EXTINGUISH then
@@ -204,6 +242,10 @@ local function burnTick(getBlock: Burning.GetBlock)
 		if damage > 0 then
 			-- (TakeDamage respects the ForceField of players who can't be hurt.)
 			humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
+		end
+		if heal > 0 and humanoid.Health > 0 then
+			humanoid.Health =
+				math.min(humanoid.MaxHealth, humanoid.Health + heal / MINECRAFT_HEALTH * humanoid.MaxHealth)
 		end
 	end
 end
@@ -275,7 +317,12 @@ function Characters.explosion(
 				if window then
 					armor, toughness = Items.armorPoints(window.inventory.armor)
 				end
-				local landed = Burning.hurtPlayer(state, mode, damage, armor, toughness)
+				local landed = Effects.incomingDamage(player, Burning.hurtPlayer(state, mode, damage, armor, toughness))
+				local fire = Effects.fireRules(player)
+				if fire and fire.ignites and damage > 0 then
+					-- (Petrol on the skin catches from the blast.)
+					Burning.ignite(state, mode, Burning.IN_FIRE_SECONDS, fire)
+				end
 				if landed > 0 then
 					-- (TakeDamage respects the ForceField of players who can't be hurt.)
 					humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
@@ -414,7 +461,8 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 		if distance == nil then
 			return
 		end
-		local halfHearts = GameModeRules.fallDamage(GameMode.of(player), distance)
+		-- (Jump Boost takes its levels off the fall: LivingEntity.calculateFallDamage.)
+		local halfHearts = GameModeRules.fallDamage(GameMode.of(player), distance - Effects.fallReduction(player))
 		if halfHearts <= 0 then
 			return
 		end
@@ -446,7 +494,8 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 			end
 		end
 		-- TakeDamage respects ForceFields (e.g. spawn protection).
-		humanoid:TakeDamage(halfHearts / MINECRAFT_HEALTH * humanoid.MaxHealth)
+		local damage = Effects.incomingDamage(player, halfHearts)
+		humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
 	end)
 	Players.PlayerRemoving:Connect(function(player)
 		landings[player] = nil

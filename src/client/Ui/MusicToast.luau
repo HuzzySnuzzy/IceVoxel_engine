@@ -119,20 +119,35 @@ local function slide(x: number, direction: Enum.EasingDirection)
 	next:Play()
 end
 
+-- The toast's top in the corner (screen pixels below the top bar) and its scale.
+local function place(): (number, number)
+	local camera = workspace.CurrentCamera
+	local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
+	local touch = UserInputService.TouchEnabled
+	local top = if minimapShown
+		then MINIMAP_EXTRA + Config.Map.MinimapSize + MINIMAP_GAP
+		elseif touch then TOUCH_TOP
+		else MARGIN
+	return top, Style.guiScale(viewport, WIDTH, HEIGHT, touch)
+end
+
+--[[
+	Screen pixels (below the top bar) just under the toast's place in the corner, shown or not, and
+	the right margin: the status effect icons go there (Ui/EffectHud).
+]]
+function MusicToast.bottom(): (number, number)
+	local top, scale = place()
+	return top + HEIGHT * scale, MARGIN
+end
+
 local function layout()
 	local holder = root
 	local scale = uiScale
 	if holder == nil or scale == nil then
 		return
 	end
-	local camera = workspace.CurrentCamera
-	local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
-	local touch = UserInputService.TouchEnabled
-	scale.Scale = Style.guiScale(viewport, WIDTH, HEIGHT, touch)
-	local top = if minimapShown
-		then MINIMAP_EXTRA + Config.Map.MinimapSize + MINIMAP_GAP
-		elseif touch then TOUCH_TOP
-		else MARGIN
+	local top, toastScale = place()
+	scale.Scale = toastScale
 	holder.Position = UDim2.new(1, -MARGIN, 0, top)
 end
 

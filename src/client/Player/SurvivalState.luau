@@ -31,12 +31,16 @@ end
 
 --[[
 	May this player drink `drink` now, in game `mode` (Drinks.drinkable: thirsty or invulnerable
-	with thirst on, Thirst.canDrink's rule; a tea whenever temperature is on)?
+	with thirst on, Thirst.canDrink's rule; a tea whenever temperature is on; a potion always,
+	Tough As Nails on or off)?
 ]]
 function SurvivalState.canDrink(mode: string, drink: Drinks.Drink?): boolean
 	local status = current
-	if status == nil or GameMode.isSpectator(mode) then
+	if GameMode.isSpectator(mode) then
 		return false
+	elseif status == nil then
+		-- (Nothing from the server yet, or thirst and temperature off: potions only.)
+		return Drinks.isPotion(drink)
 	end
 	local thirsty = GameMode.invulnerable(mode) or status.thirst < ToughAsNails.Thirst.MAX
 	return Drinks.drinkable(drink, thirsty, status.thirstOn, status.temperatureOn)

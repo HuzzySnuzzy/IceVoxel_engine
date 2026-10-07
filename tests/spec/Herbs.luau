@@ -550,7 +550,11 @@ return function(t, shared, require, server, client)
 		t.eq((brew(I.GingerRoot, I.PurifiedWaterBowl) :: Items.Stack).item, I.GingerTea)
 		t.eq((brew(I.MintLeaves, I.PurifiedWaterBowl, I.GingerRoot) :: Items.Stack).item, I.HerbalTea)
 		t.eq((brew(I.DirtyWaterBowl, I.GingerRoot)), nil, "dirty water brews nothing")
-		t.eq((brew(I.PurifiedWaterBottle, I.MintLeaves)), nil, "a tea is a bowl's")
+		t.eq(
+			(brew(I.PurifiedWaterBottle, I.MintLeaves) :: Items.Stack).item,
+			I.PotionOfSwiftness,
+			"a tea is a bowl's (a bottle brews a potion: Shared/Effects/PotionList)"
+		)
 		for _, tea in { I.MintTea, I.GingerTea, I.HerbalTea } do
 			t.eq(Items.maxStack(tea), 1, `{Items.displayName(tea)} stacks to 1, like a stew`)
 			local drink = Drinks.of(tea) :: any
@@ -629,9 +633,10 @@ return function(t, shared, require, server, client)
 		local purified = categories(JeiData.recipes(I.PurifiedWaterBowl))
 		t.eq(purified.crafting, 1, "mint")
 		t.eq(purified.smelting, 1, "the furnace")
-		-- Mint Leaves: the three cures, Mint Tea and Herbal Tea.
-		t.eq(categories(JeiData.uses(I.MintLeaves)).crafting, 5)
-		t.eq(categories(JeiData.uses(I.GingerRoot)).crafting, 2)
+		-- Mint Leaves: the three cures, Mint Tea, Herbal Tea and the Potion of Swiftness.
+		t.eq(categories(JeiData.uses(I.MintLeaves)).crafting, 6)
+		-- Ginger Root: Ginger Tea, Herbal Tea and the Potion of Fire Resistance.
+		t.eq(categories(JeiData.uses(I.GingerRoot)).crafting, 3)
 		t.eq(categories(JeiData.uses(I.PurifiedWaterBowl)).crafting, 3, "the three teas")
 		t.ok(JeiData.has("recipes", I.HerbalTea))
 		-- WAILA: the plant's name, its herb's icon.

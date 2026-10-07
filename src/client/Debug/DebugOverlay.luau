@@ -11,7 +11,9 @@
 	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
 	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
-	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill).
+	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill), and the
+	status effects (Player/EffectState: each one's name, level and time left, "**:**" for one
+	that never ends).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -33,6 +35,7 @@ local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
+local EffectState = require(script.Parent.Parent.Player.EffectState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
@@ -46,6 +49,7 @@ local DebugKeys = require(script.Parent.DebugKeys)
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local DayCycle = require(Shared.DayCycle)
+local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local LodTree = require(Shared.World.LodTree)
 local Protocol = require(Shared.Net.Protocol)
@@ -120,6 +124,19 @@ local function survivalLine(): string
 		)
 		else "temp off"
 	return `survival {thirst}{clemency}\n        {temperature}`
+end
+
+-- The status effects, as the server last sent them (counted down since).
+local function effectsLine(): string
+	local list = EffectState.list()
+	if #list == 0 then
+		return "effects -"
+	end
+	local parts = table.create(#list)
+	for i, entry in list do
+		parts[i] = `{Effects.levelName(entry.effect, entry.amplifier)} {Effects.formatTicks(entry.ticks)}`
+	end
+	return `effects {table.concat(parts, ", ")}`
 end
 
 -- Movement hull line (blocks; speeds in blocks per second).
@@ -327,6 +344,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			timeLine(),
 			musicLine(),
 			survivalLine(),
+			effectsLine(),
 		}, "\n")
 	end)
 end

@@ -69,9 +69,11 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
+local Drinks = require(Shared.ToughAsNails.Drinks)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
@@ -284,12 +286,22 @@ function Screens.toggle()
 end
 
 -- The tooltip of `item`: its name, the lines of a stack's item data (Items.describe: a tank's
--- water, stored energy), then an armor piece's stats.
+-- water, stored energy), a potion's effects (Shared/Effects.tooltip), then an armor piece's
+-- stats.
 local function tooltipLines(item: number, details: { string }?): { Line }
 	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
 	if details then
 		for _, text in details do
 			table.insert(lines, { text = text, colour = Style.Colour.Gray })
+		end
+	end
+	local drink = Drinks.of(item)
+	if drink and drink.effects then
+		for _, line in Effects.tooltip(drink.effects) do
+			table.insert(
+				lines,
+				{ text = line.text, colour = if line.harmful then Style.Colour.Red else Style.Colour.Blue }
+			)
 		end
 	end
 	local def = Items.get(item)

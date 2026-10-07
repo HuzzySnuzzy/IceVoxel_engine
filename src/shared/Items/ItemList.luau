@@ -1135,4 +1135,30 @@ table.insert(list, {
 	},
 })
 
+--[[
+	Potions (Shared/Effects/PotionList: Minecraft's, brewed in a crafting grid from a Purified Water
+	Bottle, Crafting/Recipes): the Glass Bottle with the liquid in its effect's colour (Minecraft's
+	potion colour is its effect's), stacking to 1 as Minecraft's potions do; the strong and long
+	variants follow each base potion. Drinking one (held 32 ticks: ToughAsNails/Drinks) gives its
+	effect, and the Glass Bottle comes back.
+]]
+local EffectList = require(script.Parent.Parent.Effects.EffectList)
+local PotionList = require(script.Parent.Parent.Effects.PotionList)
+local EFFECT_COLOURS: { [string]: { number } } = {}
+for _, effect in EffectList do
+	EFFECT_COLOURS[effect.name] = effect.color
+end
+for _, variant in PotionList.all() do
+	local colour = EFFECT_COLOURS[variant.effect]
+	assert(colour, `Potion {variant.item} gives an unknown effect {variant.effect}`)
+	table.insert(list, {
+		name = variant.item,
+		displayName = variant.displayName,
+		maxStack = 1,
+		color = colour,
+		material = "Glass",
+		model = bottle(colour),
+	})
+end
+
 return list

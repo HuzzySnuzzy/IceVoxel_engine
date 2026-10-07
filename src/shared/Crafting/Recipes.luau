@@ -33,6 +33,8 @@ export type Shaped = {
 export type Shapeless = { ingredients: { string }, result: string, count: number?, keep: string? }
 export type Smelting = { input: string, result: string, count: number? }
 
+local PotionList = require(script.Parent.Parent.Effects.PotionList)
+
 local Recipes = {}
 
 Recipes.tags = {
@@ -42,6 +44,8 @@ Recipes.tags = {
 	stone_crafting_materials = { "Cobblestone" },
 	coals = { "Coal", "Charcoal" },
 	leaves = { "OakLeaves", "BirchLeaves", "SpruceLeaves", "AcaciaLeaves", "JungleLeaves" },
+	-- (Potions: any tulip brews Weakness, as any gives it in Minecraft's suspicious stew.)
+	tulips = { "RedTulip", "OrangeTulip", "WhiteTulip", "PinkTulip" },
 }
 
 local shaped: { Shaped } = {}
@@ -407,6 +411,17 @@ do
 	shape({ "X X", "X X" }, key, "LeatherBoots")
 end
 shape({ "##", "##" }, { ["#"] = "String" }, "WhiteWool")
+
+--[[
+	Potions (Shared/Effects/PotionList), brewed in a crafting grid as the game has no brewing stand
+	(shapeless, the inventory's 2 x 2 too): a Purified Water Bottle with the potion's ingredient
+	makes the potion (Mint Leaves Swiftness, Glow Dust Night Vision...), the potion with Glow Dust
+	its level II and with a coal or charcoal its long variant, where it has them (Minecraft's
+	glowstone and redstone).
+]]
+for _, variant in PotionList.all() do
+	mix({ variant.from, variant.with }, variant.item)
+end
 
 Recipes.fuel = {
 	Coal = 1600,

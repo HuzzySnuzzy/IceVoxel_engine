@@ -15,7 +15,8 @@
 	         use animation) and the player moves at full speed: only the sounds tell.
 	Nothing is predicted: the server's inventory snapshot brings the emptied bottle or the worn
 	canteen, and its Survival message the thirst. Spectators do none of it, and drinks need
-	SurvivalState.canDrink (thirsty, or creative; a tea whenever temperature is on).
+	SurvivalState.canDrink (thirsty, or creative; a tea whenever temperature is on; a potion
+	always, with Tough As Nails off too: its effects come in the server's Effects message).
 ]]
 
 local Players = game:GetService("Players")

@@ -38,6 +38,9 @@
 	 11. mobs       -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
 	                   blasts hurting them), and eating what they drop (Players/Eating)
+	Status effects (Players/Effects: Minecraft's MobEffects, potions, oil and fuel on the skin,
+	/effect) start with the players, before the characters that tick them; Tough As Nails
+	registers its effects there when it starts.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -76,6 +79,7 @@ local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
+local Effects = require(Server.Players.Effects)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -105,6 +109,7 @@ Sounds.start(net)
 TimeOfDay.start()
 GameModes.start(net)
 TimeCommands.start(net)
+Effects.start(net)
 Characters.start(net, world)
 -- Items must exist before anything can drop them.
 Entities.start(net, world)
@@ -118,6 +123,7 @@ net.setRules({
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
 	broke = ToughAsNails.blockBroken,
+	miningFactor = Effects.miningFactor,
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)

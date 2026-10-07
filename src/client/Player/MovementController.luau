@@ -51,6 +51,10 @@
 	            velocity, as Minecraft's client does).
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
 	            does not die on its own, so the controller puts the Humanoid into Dead itself.
+	  Effects   the status effects the server sent (Player/EffectState) go onto the hull before
+	            every tick: Speed, Slowness and Oil Coated's speed factor, Jump Boost, Blindness
+	            keeping sprints from starting (PlayerPhysics); the field of view follows the speed
+	            factor as Minecraft's does ((factor + 1) / 2, Speed I: x 1.1).
 	  Sounds    after every tick, Audio/MovementSounds plays the footsteps, swimming, splashes and
 	            hurting landings of what the hull did.
 
@@ -76,6 +80,7 @@ local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
+local EffectState = require(script.Parent.EffectState)
 local Exertion = require(script.Parent.Exertion)
 
 local BLOCK = Config.BlockSize
@@ -148,6 +153,8 @@ MovementController.current = nil :: View?
 -- flying / sprinting widening shows (0..1).
 local fovSetting: number? = nil
 local fovEffects = 1
+-- A status effect's sway of the field of view (Nausea), a multiplier.
+local fovSway = 1
 
 -- The player a spectator spectates (nil: none), and the camera mode to go back to afterwards.
 local spectated: Player? = nil
@@ -330,6 +337,17 @@ function MovementController.setFovEffects(scale: number)
 	fovEffects = math.clamp(scale, 0, 1)
 end
 
+-- The FOV Effects setting's share (0..1), for other screen effects (Nausea: Rendering/EffectView).
+function MovementController.fovEffects(): number
+	return fovEffects
+end
+
+-- A status effect's sway of the field of view (Nausea: Rendering/EffectView), a multiplier on it
+-- applied every frame (1: none).
+function MovementController.setFovSway(multiplier: number)
+	fovSway = multiplier
+end
+
 function MovementController.start(world: ClientWorld.ClientWorld, streamer: Streamer)
 	local player = Players.LocalPlayer
 	local physicsWorld: PlayerPhysics.World = {
@@ -457,7 +475,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		if math.abs(target - fovModifier) < 1e-4 then
 			fovModifier = target
 		end
-		camera.FieldOfView = math.clamp(baseFov * fovModifier, 1, MAX_FOV)
+		camera.FieldOfView = math.clamp(baseFov * fovModifier * fovSway, 1, MAX_FOV)
 		setFov = camera.FieldOfView
 	end
 	local function resetFov()
@@ -765,6 +783,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				while accumulator >= TICK do
 					accumulator -= TICK
 					previous = Vector3.new(state.x, state.y, state.z)
+					-- (The status effects as the server last sent them.)
+					state.speedFactor = EffectState.speedFactor()
+					state.jumpBoost, state.fallReduction = EffectState.jumpBoost()
+					state.noSprint = EffectState.noSprint()
 					local events = PlayerPhysics.tick(state, frameInput, physicsWorld)
 					MovementSounds.tick(state, events, previous, physicsWorld.getBlock)
 					-- (Thirst: sprinting, swimming and jumps, Tough As Nails.)
@@ -821,10 +843,12 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0) + lag
 			hum.CameraOffset = cframe:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(hum, rootPart), 0)
 
-			-- Minecraft's FOV modifier: x 1.1 flying, x SprintFov sprinting.
+			-- Minecraft's FOV modifier: x 1.1 flying, x SprintFov sprinting, and the effects' speed.
 			local fov = 1
 			if not view.frozen then
-				fov = (if state.flying then FLYING_FOV else 1) * (if state.sprinting then Movement.SprintFov else 1)
+				fov = (if state.flying then FLYING_FOV else 1)
+					* (if state.sprinting then Movement.SprintFov else 1)
+					* ((state.speedFactor + 1) / 2)
 			end
 			updateFov(dt, fov)
 		end)
