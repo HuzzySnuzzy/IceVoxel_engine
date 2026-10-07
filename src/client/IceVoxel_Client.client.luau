@@ -33,6 +33,9 @@
 	                             generators, furnaces and refineries (the server's
 	                             Transmitters / Tanks / Machines / Transport messages)
 	  Net/Notices                server messages in the chat (/gamemode answers)
+	  Ui/Chat                    Minecraft's chat in place of Roblox's window and bar (T, "/"):
+	                             players' messages through TextChatService (filtered), commands,
+	                             the notices, joins and leaves; Chat Settings
 	  Net/StructureNet           structure blocks and jigsaws: their records, their screens
 	                             (Ui/StructureScreen), SAVE's data and pasted data in pieces
 	  Rendering/StructureBoxes   structure blocks' outlines and names
@@ -99,6 +102,7 @@ local TransmitterRenderer = require(Client.Rendering.TransmitterRenderer)
 local FireRenderer = require(Client.Rendering.FireRenderer)
 local FuseView = require(Client.Rendering.FuseView)
 local Notices = require(Client.Net.Notices)
+local Chat = require(Client.Ui.Chat)
 local StructureNet = require(Client.Net.StructureNet)
 local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
@@ -174,6 +178,9 @@ Settings.register("audio", function(values)
 		ambient = on(values, "caveRumble"),
 	})
 	Music.setToasts(on(values, "musicToasts"))
+end)
+Settings.register("chat", function(values)
+	Chat.applySettings(values)
 end)
 Settings.register("hud", function(values)
 	local minimap = on(values, "minimap")
@@ -268,6 +275,8 @@ Screens.start()
 SettingsScreen.start()
 SkillTreeScreen.start()
 AgeToast.start()
+-- (Before the notices: they go to the chat from the first one.)
+Chat.start()
 Notices.start()
 StructureNet.start(world)
 StructureBoxes.start(world, StructureNet.records)

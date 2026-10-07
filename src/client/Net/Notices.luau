@@ -3,8 +3,11 @@
 	Shows the server's Notice messages (Protocol.ServerMessage.Notice, e.g. the /gamemode command's
 	feedback) in the chat, as system messages only this player sees.
 
-	  TextChatService  RBXSystem:DisplaySystemMessage. The channel appears a moment after joining,
-	                   so messages wait for it (in order) instead of being lost.
+	  Game chat        the game's own chat (Ui/Chat, which replaces Roblox's chat window) takes
+	                   them once it runs (`setSink`): white lines, the debug prefix in bold
+	                   yellow, at once (they never wait for Chat Delay).
+	  TextChatService  otherwise RBXSystem:DisplaySystemMessage. The channel appears a moment after
+	                   joining, so messages wait for it (in order) instead of being lost.
 	  Legacy chat      StarterGui:SetCore("ChatMakeSystemMessage"), retried until the chat has
 	                   registered it.
 
@@ -97,15 +100,34 @@ end
 
 local listeners: { (text: string) -> () } = {}
 
+-- Where notices go instead of Roblox's chat: (text, debug prefix or nil). Set by Ui/Chat.
+export type Sink = (text: string, prefix: string?) -> ()
+local sink: Sink? = nil
+
+-- Sends every notice from now on to `fn` (the game's chat) instead of Roblox's chat.
+function Notices.setSink(fn: Sink?)
+	sink = fn
+end
+
 -- Calls `listener` with every notice shown from now on.
 function Notices.listen(listener: (text: string) -> ())
 	table.insert(listeners, listener)
 end
 
--- Shows `text` (plain) in this player's chat, `rich` (its rich text form) where rich text shows.
-local function display(text: string, rich: string)
+-- Shows `text` (plain) in this player's chat, `rich` (its rich text form) where rich text shows;
+-- `prefix`: the debug prefix that starts `text` (for the game's chat).
+local function display(text: string, rich: string, prefix: string?)
 	for _, listener in listeners do
 		task.spawn(listener, text)
+	end
+	local gameChat = sink
+	if gameChat then
+		if prefix then
+			gameChat(string.sub(text, #prefix + 2), prefix)
+		else
+			gameChat(text, nil)
+		end
+		return
 	end
 	if TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService then
 		showLegacy(text)
@@ -126,7 +148,7 @@ end
 
 -- Shows `text` after Minecraft's bold yellow debug prefix (`prefix`, "[Debug]:").
 function Notices.debug(prefix: string, text: string)
-	display(`{prefix} {text}`, `<font color="{DEBUG_COLOUR}"><b>{escape(prefix)}</b></font> {escape(text)}`)
+	display(`{prefix} {text}`, `<font color="{DEBUG_COLOUR}"><b>{escape(prefix)}</b></font> {escape(text)}`, prefix)
 end
 
 function Notices.start()

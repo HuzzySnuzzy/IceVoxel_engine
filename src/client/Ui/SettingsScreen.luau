@@ -9,8 +9,9 @@
 	  Opening   Config.Settings.Key (P) or GamepadButton (D-pad right) with no screen open, the
 	            HUD's touch gear, the inventory's gear (Ui/Screens.onSettings). P closes it again.
 	  Pages     Options (Graphics preset, FOV, the pages, Reset, Defaults), Video Settings,
-	            Performance, Music & Sounds, Controls, HUD. Sliders move by dragging, clicking,
-	            the D-pad (left / right) or A; buttons cycle their values. "Graphics" cycles the
+	            Performance, Music & Sounds, Controls, HUD, Chat Settings. Sliders move by
+	            dragging, clicking, the D-pad (left / right) or A; buttons cycle their values.
+	            "Graphics" cycles the
 	            presets and reads "Custom" once a value it sets was changed; Reset puts the current
 	            preset's values back, Defaults every setting (the device's default preset). The
 	            status lines say what the terrain is doing ("Updating terrain: 120 queued, 34 building"),

@@ -14,8 +14,8 @@
 	  effect    what applying it takes, a key of the client's effect registry (Settings.register):
 	            "lod", "caves", "foliage", "fog", "lighting", "lichen", "shadows", "farShadows",
 	            "textures", "overlay", "budget", "skipHidden", "swapFrames", "audio", "camera",
-	            "controls", "hud" (`also` names more). The costly ones (EXPENSIVE) wait until a
-	            slider has stopped moving (Config.Settings.ApplyDelay).
+	            "controls", "hud", "chat" (`also` names more). The costly ones (EXPENSIVE) wait
+	            until a slider has stopped moving (Config.Settings.ApplyDelay).
 
 	Presets (Low, Medium, High, Ultra; priced in parts in the README): High is Config's own view
 	(Lod, Caves, Render), Low its Mobile values (view, caves, plants, lichen lights: what phones
@@ -62,9 +62,10 @@ export type Entry = {
 	-- Set by presets.
 	preset: boolean,
 	-- How the value reads (`text`): "blocks" (a distance, the name says in what), "factor",
-	-- "percent", "ms", "plain", "fullDetail" (about 32 x the value: how far full detail reaches,
-	-- in blocks); toggles read ON / OFF; `labels` name special values. Kept short: buttons are
-	-- 150 GUI pixels wide and the pixel font is 8 pixels a character.
+	-- "percent", "ms", "seconds", "pixels" (GUI pixels), "plain", "fullDetail" (about 32 x the
+	-- value: how far full detail reaches, in blocks); toggles read ON / OFF; `labels` name special
+	-- values. Kept short: buttons are 150 GUI pixels wide and the pixel font is 8 pixels a
+	-- character.
 	format: string,
 	labels: { [number]: string }?,
 	-- Only offered on touch screens.
@@ -102,6 +103,7 @@ PlayerSettings.EFFECT_ORDER = table.freeze({
 	"camera",
 	"audio",
 	"hud",
+	"chat",
 	"budget",
 	"swapFrames",
 	"lighting",
@@ -668,6 +670,154 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 	},
+	-- Chat Settings (client Ui/Chat), Minecraft's ChatOptionsScreen: chatVisibility, chatOpacity
+	-- (shown 10-100%), textBackgroundOpacity ("Text Background": Minecraft's name is too long for
+	-- the button), chatScale, chatLineSpacing, chatDelay (in half seconds here: tenths are not
+	-- exact in f32), chatWidth (40-320 GUI pixels), chatHeightFocused / Unfocused (20-180) and
+	-- autoSuggestions, with Minecraft's defaults.
+	{
+		id = 37,
+		key = "chatVisibility",
+		name = "Chat",
+		kind = "choice",
+		page = "chat",
+		min = 1,
+		max = 3,
+		step = 1,
+		default = 1,
+		effect = "chat",
+		preset = false,
+		format = "plain",
+		labels = { [1] = "Shown", [2] = "Commands Only", [3] = "Hidden" },
+	},
+	{
+		id = 38,
+		key = "chatOpacity",
+		name = "Chat Text Opacity",
+		kind = "slider",
+		page = "chat",
+		min = 10,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 39,
+		key = "chatBackground",
+		name = "Text Background",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 50,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 40,
+		key = "chatScale",
+		name = "Text Size",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 100,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+		labels = { [0] = "OFF" },
+	},
+	{
+		id = 41,
+		key = "chatLineSpacing",
+		name = "Line Spacing",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 100,
+		step = 1,
+		default = 0,
+		effect = "chat",
+		preset = false,
+		format = "percent",
+	},
+	{
+		id = 42,
+		key = "chatDelay",
+		name = "Chat Delay",
+		kind = "slider",
+		page = "chat",
+		min = 0,
+		max = 6,
+		step = 0.5,
+		default = 0,
+		effect = "chat",
+		preset = false,
+		format = "seconds",
+		labels = { [0] = "None" },
+	},
+	{
+		id = 43,
+		key = "chatWidth",
+		name = "Width",
+		kind = "slider",
+		page = "chat",
+		min = 40,
+		max = 320,
+		step = 1,
+		default = 320,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 44,
+		key = "chatHeightFocused",
+		name = "Focused Height",
+		kind = "slider",
+		page = "chat",
+		min = 20,
+		max = 180,
+		step = 1,
+		default = 180,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 45,
+		key = "chatHeightUnfocused",
+		name = "Unfocused Height",
+		kind = "slider",
+		page = "chat",
+		min = 20,
+		max = 180,
+		step = 1,
+		default = 90,
+		effect = "chat",
+		preset = false,
+		format = "pixels",
+	},
+	{
+		id = 46,
+		key = "commandSuggestions",
+		name = "Command Suggestions",
+		kind = "toggle",
+		page = "chat",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 1,
+		effect = "chat",
+		preset = false,
+		format = "plain",
+	},
 }
 
 local byKey: { [string]: Entry } = {}
@@ -1021,6 +1171,10 @@ function PlayerSettings.valueText(key: string, value: number): string
 		return `{value}%`
 	elseif format == "ms" then
 		return `{value} ms`
+	elseif format == "seconds" then
+		return string.format("%.1f s", value)
+	elseif format == "pixels" then
+		return `{value} px`
 	end
 	return if value == math.floor(value) then tostring(math.floor(value)) else tostring(value)
 end

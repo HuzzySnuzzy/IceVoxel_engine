@@ -18,6 +18,9 @@
 	                interface), footsteps, interface clicks, cave moods and music toasts
 	  controls      FOV effects, sprint, the scroll wheel, touch buttons
 	  hud           minimap, WAILA, GUI scale
+	  chat          Chat Settings (Ui/Chat): Chat (shown, commands only, hidden), text opacity,
+	                background opacity, text size, line spacing, chat delay, width, focused and
+	                unfocused height, command suggestions
 	A sub-page's Done goes back to the main page. `status` lists the status lines a page shows
 	(the controller's Settings.setStatus kinds).
 ]]
@@ -89,6 +92,7 @@ Pages.list = {
 			page("sounds", "Music & Sounds..."),
 			page("controls", "Controls..."),
 			page("hud", "HUD..."),
+			page("chat", "Chat Settings..."),
 			{ kind = "action", id = "reset", text = "Reset", row = true },
 			{ kind = "action", id = "defaults", text = "Defaults" },
 		},
@@ -160,6 +164,23 @@ Pages.list = {
 			setting("minimap"),
 			setting("waila"),
 			setting("guiScale"),
+		},
+		status = {},
+	},
+	{
+		id = "chat",
+		title = "Chat Settings",
+		items = {
+			setting("chatVisibility"),
+			setting("commandSuggestions"),
+			setting("chatOpacity"),
+			setting("chatBackground"),
+			setting("chatScale"),
+			setting("chatLineSpacing"),
+			setting("chatDelay"),
+			setting("chatWidth"),
+			setting("chatHeightFocused"),
+			setting("chatHeightUnfocused"),
 		},
 		status = {},
 	},
