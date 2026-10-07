@@ -945,6 +945,19 @@ return function(t, shared, require, server, client)
 		t.ok(ProgressionCommand.matches("/AGE query alex"))
 		t.eq(run("/knowledge add @s 100", false).feedback[1], ProgressionCommand.DENIED, "not an admin")
 		t.eq(states.steve.points, 0)
+		-- Where progress is saved for every server, an operator who is not one of the game's own
+		-- is told why (Players/Progression passes `denied`).
+		local saved = ProgressionCommand.run("/age set @s iron", {
+			source = steve,
+			players = { steve, alex },
+			mayUse = false,
+			denied = ProgressionCommand.SAVED_DENIED,
+			stateOf = function(key)
+				return states[key]
+			end,
+		}) :: any
+		t.eq(saved.feedback[1], ProgressionCommand.SAVED_DENIED)
+		t.eq(states.steve.age, 1, "unchanged")
 		t.eq(run("/knowledge query alex", false).feedback[1], "Alex has 0 knowledge points", "anyone asks")
 		local result = run("/knowledge add @s 100")
 		t.eq(states.steve.points, 100)

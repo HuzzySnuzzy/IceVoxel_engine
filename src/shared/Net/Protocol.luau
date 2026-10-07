@@ -84,7 +84,9 @@
 	                 prerequisites and the skill points (Progression.canUnlock) and answers with a
 	                 Progress message, or a Notice saying why not
 	  CreateWorld    the title screen's Create World screen (Shared/WorldSettings Request): u8 mode
-	                 (GameType id: 0 survival, 1 creative, 2 adventure), u8 difficulty (0 peaceful
+	                 (GameType id: 0 survival, 1 creative, 2 adventure, 3 spectator: the
+	                 All Blocks debug world's own; WorldSettings.validate allows it only for a
+	                 world type whose hint it is), u8 difficulty (0 peaceful
 	                 .. 3 hard), u8 flags (bit 0 allow commands, bit 1 generate structures), then
 	                 u16 length + text each: world name (at most MAX_WORLD_NAME bytes), world type
 	                 id (MAX_WORLD_TYPE), options (WorldTypes.encodeOptions, MAX_WORLD_OPTIONS) and
@@ -2863,7 +2865,8 @@ function Protocol.encodeCreateWorld(request: CreateWorld): buffer
 	return b
 end
 
--- The request, nil when the payload is malformed (Spectator too: the screen has no such choice).
+-- The request, nil when the payload is malformed. Any game mode decodes (Spectator too: the All
+-- Blocks debug world preselects it); whether the world type allows it is WorldSettings.validate's.
 function Protocol.decodeCreateWorld(b: buffer): CreateWorld?
 	if buffer.len(b) < 3 then
 		return nil
@@ -2871,7 +2874,7 @@ function Protocol.decodeCreateWorld(b: buffer): CreateWorld?
 	local mode = GameMode.fromId(buffer.readu8(b, 0))
 	local difficulty = buffer.readu8(b, 1)
 	local flags = buffer.readu8(b, 2)
-	if mode == nil or mode == GameMode.SPECTATOR or difficulty > 3 or flags > 3 then
+	if mode == nil or difficulty > 3 or flags > 3 then
 		return nil
 	end
 	local texts = readTexts(

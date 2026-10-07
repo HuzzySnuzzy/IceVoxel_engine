@@ -28,8 +28,9 @@
 	            Minecraft's does; a gamepad's B leaves it as it was. Meanwhile nothing else takes
 	            the keys or the clicks (a cover over the panel; Screens' `capturing`). A key bound
 	            to two actions that can be active together shows red in brackets ("[ Q ]"),
-	            Shared/KeyBindings.conflicting; both still work. Reset Keys: every binding back to
-	            its default.
+	            Shared/KeyBindings.conflicting: a warning, as only one of them may act on it
+	            (Sprint and Sneak take it from the others; see KeyBindings). Reset Keys: every
+	            binding back to its default.
 	  Closing   Done (on a sub-page: back to the page it came from), E, Escape, gamepad B, P: every
 	            waiting change applies at once and the settings are sent to the server
 	            (Settings.flush).
@@ -112,6 +113,17 @@ local listening: string? = nil
 local capturedAt = -math.huge
 local takeKey: (code: number?) -> () = function() end
 local scrollKeys: (delta: number) -> () = function() end
+
+-- Is a gamepad steering (something selected, or the last input a gamepad's)? Then a page change
+-- moves the selection to the new page's first widget: the old one is hidden, and with nothing
+-- selected the D-pad reaches nothing (the title screen's menu: no Ui/Screens to select it).
+local function gamepadSteering(): boolean
+	if GuiService.SelectedObject ~= nil then
+		return true
+	end
+	local last = UserInputService:GetLastInputType()
+	return string.sub(last.Name, 1, 7) == "Gamepad"
+end
 
 -- Stops waiting for a key, leaving the binding as it was.
 local function stopListening()
@@ -622,6 +634,8 @@ function SettingsScreen.start()
 
 	local function show(id: string)
 		stopListening()
+		-- (Before the old page hides: its selected widget goes with it.)
+		local steering = gamepadSteering()
 		-- (A page change or the menu closing: Done, P, E, Escape all come here.)
 		hideTooltip()
 		local previous = views[shownPage]
@@ -633,9 +647,9 @@ function SettingsScreen.start()
 		view.frame.Visible = true
 		refresh()
 		refreshStatus()
-		-- (A gamepad's selection moves to the new page.)
+		-- (A gamepad's selection moves to the new page, in Ui/Screens or the title screen.)
 		local first = view.first
-		if first and Screens.panelShown(thePanel) and GuiService.SelectedObject ~= nil then
+		if first and steering and (Screens.panelShown(thePanel) or hostDone ~= nil) then
 			GuiService.SelectedObject = first
 		end
 	end
@@ -751,17 +765,17 @@ function SettingsScreen.toggle()
 end
 
 --[[
-	Shows the menu on its main page inside `host` instead of through Ui/Screens (the title screen,
-	Ui/MainMenu, before the game's screens exist; `host` scales it). Done on the main page applies
-	what waits, saves, takes it away and calls `onDone`. Returns a function that closes it the same
-	way (the title screen's Escape). Call after start.
-]]
---[[
 	Escape / gamepad B in the menu `showIn` shows (the title screen's): back a page from a sub-page
 	(true), false on the main page (the host closes the menu then) or while the Key Binds screen
-	waits for a key or just took one (it took that press itself: true).
+	waits for a key or just took one (it took that press itself: true). `escaped`: it was Escape
+	(perhaps only as Roblox's menu opening, which the Key Binds list's own key listener never
+	sees): a key waiting becomes "Not Bound", as Ui/Screens' `escaped` does.
 ]]
-function SettingsScreen.back(): boolean
+function SettingsScreen.back(escaped: boolean?): boolean
+	if escaped and listening ~= nil then
+		takeKey(KeyBindings.NONE)
+		return true
+	end
 	if SettingsScreen.capturing() then
 		return true
 	end
@@ -773,6 +787,13 @@ function SettingsScreen.back(): boolean
 	return true
 end
 
+--[[
+	Shows the menu on its main page inside `host` instead of through Ui/Screens (the title screen,
+	Ui/MainMenu, before the game's screens exist; `host` scales it). Done on the main page applies
+	what waits, saves, takes it away and calls `onDone`. Returns a function that closes it the same
+	way (the title screen's Escape). A gamepad's selection starts on its first widget (the button
+	that opened it is hidden now). Call after start.
+]]
 function SettingsScreen.showIn(host: GuiObject, onDone: () -> ()): () -> ()
 	local root = menuRoot
 	assert(root, "SettingsScreen.showIn: call start first")
@@ -785,6 +806,10 @@ function SettingsScreen.showIn(host: GuiObject, onDone: () -> ()): () -> ()
 	hostDone = onDone
 	root.Parent = host
 	root.Visible = true
+	local first = views.main and views.main.first
+	if first and gamepadSteering() then
+		GuiService.SelectedObject = first
+	end
 	return function()
 		if hostDone == onDone then
 			finish()

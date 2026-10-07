@@ -39,6 +39,14 @@
 	  Death      Config.Progression.DeathLoss of the progress into the level (0: none).
 	  Sending    a player whose progression changed gets one Progress message a frame at most
 	             (Protocol: points, Age, skills, discovery counts, milestones met).
+	  World      only a world whose progress is saved (`start`'s `saved`: Shared/WorldSettings
+	             .savesProgress: not superflat or a debug world, not with Allow Commands) writes
+	             to ProgressStore; elsewhere the saved progress is read and played with, what is
+	             earned stays on this server (a debug world lays out every block and biome, a
+	             superflat preset may be ore), and each player is told once they are in. There
+	             /knowledge and /age changes need the operators' permission; where progress is
+	             saved, a permanent operator (Players/Operators.isPermanent: Gameplay.Admins, the
+	             owner, Studio), not one made by being first or by /op.
 	  Saving     Players/ProgressStore: on leave, on shutdown (BindToClose, waiting up to
 	             SHUTDOWN_WAIT seconds) and every Config.Progression.SaveInterval seconds while
 	             changed, one write at a time (what changes during one waits for the next
@@ -46,7 +54,8 @@
 	             who left is written again at once while something changed during the write or
 	             it failed (LEAVE_RETRIES), even when a periodic write was in flight as they left.
 	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the
-	             operators' permission, Players/Operators, as /time).
+	             operators' permission, Players/Operators, as /time; a permanent operator where
+	             progress is saved: World above).
 
 	For the mobs: a player's kill calls `Progression.killed(player, mobName)` (the boot script
 	connects Mobs/Mobs' `died` event: a mob kind's first kill is a discovery, 10 points; every
@@ -113,6 +122,8 @@ local net: ServerNet.ServerNet? = nil
 local store: ProgressStore.Store? = nil
 local savesInFlight = 0
 local started = false
+-- The world's progress is saved for every server (`start`'s `saved`).
+local worldSaves = true
 
 local function enabled(): boolean
 	return Config.Progression.Enabled == true
@@ -373,7 +384,7 @@ local function onPlayer(player: Player)
 		state = Progression.new(),
 		session = Progression.Knowledge.newSession(),
 		loaded = false,
-		canSave = store ~= nil,
+		canSave = store ~= nil and worldSaves,
 		saveDirty = false,
 		sendDirty = false,
 		saving = false,
@@ -416,6 +427,10 @@ local function onPlayer(player: Player)
 	entry.state = saved
 	entry.loaded = true
 	entry.sendDirty = true
+	if not worldSaves then
+		-- (Queued on the client until its chat runs: read once they are in the world.)
+		notify(player, "Progress made in this world stays on this server: it is not saved")
+	end
 	-- (Saved again only when an Age was reached on reading it.)
 	entry.saveDirty = checkAges(player, entry)
 	refreshWindow(player)
@@ -482,7 +497,8 @@ local function runCommand(player: Player, text: string)
 	local result = ProgressionCommand.run(text, {
 		source = source,
 		players = candidates,
-		mayUse = Operators.permitted(player),
+		mayUse = Operators.permitted(player) and (not worldSaves or Operators.isPermanent(player)),
+		denied = if Operators.permitted(player) then ProgressionCommand.SAVED_DENIED else nil,
 		stateOf = function(key: any): Progression.State?
 			local entry = entries[key :: Player]
 			return if entry and entry.loaded then entry.state else nil
@@ -568,12 +584,14 @@ end
 
 --[[
 	Starts progression. Inventories (the windows) and GameModes must have started; ServerNet's rules
-	come from the server script (`mined`, `miningFactor`).
+	come from the server script (`mined`, `miningFactor`). `saved`: the world's progress is saved
+	for every server (WorldSettings.savesProgress; see the header).
 ]]
-function ProgressionServer.start(serverNet: ServerNet.ServerNet, world: WorldServer.World)
+function ProgressionServer.start(serverNet: ServerNet.ServerNet, world: WorldServer.World, saved: boolean)
 	assert(not started, "Progression.start was already called")
 	started = true
 	net = serverNet
+	worldSaves = saved
 	if not enabled() then
 		return
 	end

@@ -1,6 +1,7 @@
 --[[
 	Server operators (Players/OperatorList, the rules Players/Operators plays out): the first player
-	becomes the operator, one of the players here always is one, rejoining keeps it, permanent
+	becomes the operator, one of the players here always is one (both only until the world exists,
+	and never with the menu off), rejoining keeps it, permanent
 	operators (Config.Gameplay.Admins, the owner, Studio), Allow Commands, and /op and /deop with
 	Minecraft's answers; which commands the chat offers a player (Shared/WorldSettings.mayRun).
 ]]
@@ -161,6 +162,47 @@ return function(t, shared, require, server)
 		local refused = OperatorList.run(alone, "/deop @s", 1) :: any
 		t.eq(refused.feedback[1], "Nothing changed. Steve is the only operator here: /op another player first")
 		t.ok(OperatorList.isOperator(alone, 1))
+	end)
+
+	t.test("operators: automatic only until the world exists (and not with the menu off)", function()
+		-- The world made: nobody becomes an operator by being here, the first one stays one.
+		local list = OperatorList.new()
+		OperatorList.join(list, member(1, "Steve"), false)
+		OperatorList.join(list, member(2, "Alex"), false)
+		t.eq(#OperatorList.setAutoOperator(list, false).changed, 0, "the operator here stays")
+		local left = OperatorList.leave(list, 1)
+		t.ok(not OperatorList.isOperator(list, 2), "no hand-over once the world exists")
+		t.eq(#left.broadcast, 0)
+		OperatorList.leave(list, 2)
+		local stranger = OperatorList.join(list, member(3, "Sam"), false)
+		t.ok(not OperatorList.isOperator(list, 3), "an empty server's next player is no operator")
+		t.eq(#stranger.broadcast, 0)
+		local back = OperatorList.join(list, member(1, "Steve"), false)
+		t.ok(OperatorList.isOperator(list, 1), "the first operator is still on the op list")
+		t.eq(#back.broadcast, 0)
+		-- The last operator here may /deop themselves then (no world left to create).
+		local self = OperatorList.run(list, "/deop @s", 1) :: any
+		t.eq(self.feedback[1], "Made Steve no longer a server operator")
+		t.ok(not OperatorList.isOperator(list, 1))
+
+		-- The menu off (or AutoOperator false): only permanent operators, and those they /op.
+		local fixed = OperatorList.new()
+		OperatorList.setAutoOperator(fixed, false)
+		local first = OperatorList.join(fixed, member(1, "Steve"), false)
+		t.ok(not OperatorList.isOperator(fixed, 1), "the first player is no operator")
+		t.eq(#first.broadcast, 0)
+		OperatorList.join(fixed, member(7, "Admin"), true)
+		t.ok(OperatorList.isOperator(fixed, 7), "an admin is")
+		OperatorList.run(fixed, "/op Steve", 7)
+		t.ok(OperatorList.isOperator(fixed, 1), "opped by the admin")
+		OperatorList.leave(fixed, 7)
+		OperatorList.leave(fixed, 1)
+		OperatorList.join(fixed, member(2, "Alex"), false)
+		t.ok(not OperatorList.isOperator(fixed, 2))
+		-- Turned on with nobody operator here: the one here longest becomes one.
+		local on = OperatorList.setAutoOperator(fixed, true)
+		t.ok(OperatorList.isOperator(fixed, 2))
+		t.ok(has(on.broadcast, "Alex is now the server operator"))
 	end)
 
 	t.test("operators: the chat offers each player only the commands they may run", function()

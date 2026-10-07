@@ -8,8 +8,9 @@
 	  Opening   the key bindings' "chat" and "command" (Settings/Keybinds, Minecraft's key.chat and
 	            key.command: T and / by default): "chat" opens an empty box, "command" one with "/"
 	            typed (no screen, the game mode switcher or Roblox's menu open, no other text box
-	            focused); the HUD's touch chat
-	            button (Hud.onChatButton) opens and closes it. With the Chat setting on Hidden it
+	            focused); the HUD's touch chat button (Hud.onChatButton) opens and closes it (the
+	            tap that closes it is not taken for a new open: TAP_CLOSE). Roblox's own chat is
+	            off from the title screen on (`hideRoblox`). With the Chat setting on Hidden it
 	            does not open: "Chat disabled in client options." shows above the hotbar instead
 	            (Minecraft's overlay message, 3 s).
 	  Lines     bottom left, their bottom 40 GUI pixels above the screen's bottom, newest at the
@@ -20,6 +21,8 @@
 	            players white "<Name> message", joins yellow, errors red...). "[+N pending lines]"
 	            while Chat Delay holds messages back. While open a scroll bar shows beside them
 	            when they don't all fit (red once a message arrived while scrolled up).
+	  Layers    box and lines over the HUD (the hotbar and hearts, as Minecraft draws them), under a
+	            screen's darkened backdrop while one is open (OVER_HUD, UNDER_SCREENS).
 	  Box       Minecraft's: across the bottom of the screen, half transparent. Enter sends (and
 	            closes), Escape closes, Up / Down go through what was sent (Ui/Chat/ChatInput), Tab
 	            completes command names and players' names, and while a command's name is typed its
@@ -108,6 +111,15 @@ local MEASURE_CACHE = 4096
 local SEEN_IDS = 64
 -- Seconds to look for Roblox's chat window and bar to turn them off.
 local CONFIG_WAIT = 30
+-- The chat's DisplayOrder: over the HUD (Ui/Hud 10, the Age toast 11; Minecraft's Gui draws the
+-- chat after the hotbar and hearts, and its chat screen's box over them), under the game mode
+-- switcher (15) and the screens' cursor (20); under a screen's backdrop (Ui/Screens 9) while one
+-- is open (Minecraft draws the chat under a screen).
+local OVER_HUD = 12
+local UNDER_SCREENS = 8
+-- A tap that took the box's focus away and closed it is followed by the chat button's Activated
+-- when it was on that button: that tap closed the chat, so it does not reopen it (seconds).
+local TAP_CLOSE = 0.6
 local MOUSE_STEP = "IceVoxelChatMouse"
 
 type Row = {
@@ -338,8 +350,13 @@ local function send(text: string)
 	end)
 end
 
--- Turns Roblox's chat window, tabs and input bar off (they appear a moment after joining).
+-- Turns Roblox's chat window, tabs and input bar off (they appear a moment after joining), once.
+local robloxHidden = false
 local function hideRobloxChat()
+	if robloxHidden or TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService then
+		return
+	end
+	robloxHidden = true
 	for _, className in { "ChatWindowConfiguration", "ChatInputBarConfiguration", "ChannelTabsConfiguration" } do
 		task.spawn(function()
 			local deadline = os.clock() + CONFIG_WAIT
@@ -359,6 +376,15 @@ end
 
 --[[ Start ]]
 
+--[[
+	Turns Roblox's chat window and input bar off before the chat starts: the title screen (Ui/MainMenu)
+	has no chat, as Minecraft's has none (nothing typed there goes out as chat, the world's commands
+	don't exist yet, and Roblox's window would sit over the menu). Chat.start does it too.
+]]
+function Chat.hideRoblox()
+	hideRobloxChat()
+end
+
 function Chat.start()
 	if started then
 		return
@@ -375,8 +401,13 @@ function Chat.start()
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	-- (Under the screens' darkened backdrop, 9, as Minecraft draws the chat under a screen.)
-	gui.DisplayOrder = 8
+	-- (Over the HUD; under a screen's darkened backdrop while one is open: `restack`.)
+	gui.DisplayOrder = OVER_HUD
+
+	local function restack()
+		gui.DisplayOrder = if Screens.isOpen() and not open then UNDER_SCREENS else OVER_HUD
+	end
+	restack()
 
 	-- While open, clicks beside the box land here (not in the world) and the mouse is free.
 	local catcher = Instance.new("TextButton")
@@ -661,6 +692,8 @@ function Chat.start()
 	-- The box's text as last set or seen (a stripped Tab changes nothing).
 	local lastText = ""
 	local mouseIconWas = true
+	-- When a tap elsewhere last closed the box (the chat button's own tap: TAP_CLOSE).
+	local touchClosedAt = -math.huge
 	-- Right after opening, the opening key typed into the box is taken back (`guardText`: what
 	-- the box held, `guardUntil`: until when, `guardKey`: the character that key types, lower
 	-- case; "/" when unknown).
@@ -724,6 +757,7 @@ function Chat.start()
 		updateHint()
 		strip.Visible = true
 		catcher.Visible = true
+		restack()
 		local touch = UserInputService.TouchEnabled
 		catcher.Modal = not touch
 		Hud.setInputTaken(true)
@@ -760,6 +794,7 @@ function Chat.start()
 		end
 		setText("")
 		Hud.setInputTaken(false)
+		restack()
 		RunService:UnbindFromRenderStep(MOUSE_STEP)
 		if not UserInputService.TouchEnabled then
 			UserInputService.MouseIconEnabled = mouseIconWas
@@ -800,6 +835,9 @@ function Chat.start()
 			return
 		end
 		-- Escape, a tap elsewhere, the window losing focus.
+		if kind == Enum.UserInputType.Touch then
+			touchClosedAt = os.clock()
+		end
 		closeImpl()
 	end)
 
@@ -932,6 +970,7 @@ function Chat.start()
 		if isOpen then
 			closeImpl()
 		end
+		restack()
 	end)
 	GuiService.MenuOpened:Connect(closeImpl)
 
@@ -951,10 +990,12 @@ function Chat.start()
 		UserInputService:GetPropertyChangedSignal("OnScreenKeyboardSize"):Connect(readKeyboard)
 	end)
 
+	-- (A tap on the button while the box is open takes its focus first, which closes it: that
+	-- tap is the button's close, not a new open.)
 	Hud.onChatButton(function()
 		if open then
 			closeImpl()
-		else
+		elseif os.clock() - touchClosedAt > TAP_CLOSE then
 			Chat.open("")
 		end
 	end)

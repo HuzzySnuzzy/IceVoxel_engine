@@ -3,12 +3,15 @@
 	Server operators in the game: Minecraft's ops (the rules, tested: Players/OperatorList), /op and
 	/deop, and the one check every operators' command asks.
 
-	  Who        the first player to join becomes the operator ("Name is the server operator", to
-	             everyone), and while players are here one of them always is one (the longest here
-	             takes over when the last operator leaves). Config.Gameplay.Admins and everyone in
-	             Studio are operators from the start; the game's owner (Players/GameModes.isOwner:
-	             the user, or a group game's owner, a web call looked up again until it works) as
-	             soon as that is known.
+	  Who        with the title screen (Config.MainMenu.Enabled and AutoOperator), until the world
+	             exists (World/WorldInfo.onReady): the first player to join becomes the operator
+	             ("Name is the server operator", to everyone), and one of the players here always
+	             is one (the longest here takes over when the last operator leaves), so someone
+	             can create the world. After that, and with the menu off, nobody becomes one by
+	             being here: Config.Gameplay.Admins and everyone in Studio are operators from the
+	             start, the game's owner (Players/GameModes.isOwner: the user, or a group game's
+	             owner, a web call looked up again until it works) as soon as that is known, and
+	             operators /op others. The first operator stays one (the op list).
 	  Check      `permitted(player)`: may use the operators' commands (/time, /gamerule, /gamemode
 	             for others, /effect, /summon, /kill, /knowledge, /age; structure blocks in
 	             creative): an operator, or anyone in a world created with Allow Commands
@@ -35,6 +38,7 @@ local Protocol = require(Shared.Net.Protocol)
 local WorldSettings = require(Shared.WorldSettings)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
+local WorldInfo = require(script.Parent.Parent.World.WorldInfo)
 local OperatorList = require(script.Parent.OperatorList)
 
 -- Seconds before a group game's owner is looked up again, doubling up to the most.
@@ -53,6 +57,12 @@ Operators.changed = changedEvent.Event
 -- Is `player` an operator?
 function Operators.isOperator(player: Player): boolean
 	return OperatorList.isOperator(list, player.UserId)
+end
+
+-- Is `player` always an operator (Config.Gameplay.Admins, the game's owner, Studio): the game's
+-- own people, not one made by being here or by /op (Players/Progression's saved progress)?
+function Operators.isPermanent(player: Player): boolean
+	return OperatorList.isPermanent(list, player.UserId)
 end
 
 -- May `player` use the operators' commands (an operator, or anyone with commands allowed)?
@@ -143,6 +153,11 @@ function Operators.start(serverNet: ServerNet.ServerNet, isOwner: (Player) -> bo
 	net = serverNet
 	local studio = RunService:IsStudio()
 	local legacy = TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService
+	-- Automatic operators only for creating the world from the title screen (see the header).
+	OperatorList.setAutoOperator(list, Config.MainMenu.Enabled and Config.MainMenu.AutoOperator)
+	WorldInfo.onReady(function()
+		apply(OperatorList.setAutoOperator(list, false))
+	end)
 
 	local function onPlayer(player: Player)
 		local permanent = studio or table.find(Config.Gameplay.Admins, player.UserId) ~= nil

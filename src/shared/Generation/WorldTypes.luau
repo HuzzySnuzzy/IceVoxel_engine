@@ -27,7 +27,10 @@
 	             Minecraft's debug world: the server script builds its BlockTicker without
 	             behaviours), `gameMode` (the game mode the type suggests: the Create World screen
 	             preselects it, and a server without the menu gives it), `debug` (a debug world:
-	             listed last). The server applies the hints when the world starts (World/WorldInfo
+	             listed last), `savesProgress = false` (progression earned here stays on this
+	             server, never saved for the others: Shared/WorldSettings.savesProgress,
+	             Players/Progression; the debug worlds lay everything out, and a superflat preset
+	             may be made of ore). The server applies the hints when the world starts (World/WorldInfo
 	             .apply, the boot's startWorld); `published` reads the type back from the
 	             attributes once the world exists.
 	  Replicated the server sets three attributes on ReplicatedStorage.IceVoxel, in this order:
@@ -92,11 +95,12 @@ export type WorldType = {
 	-- dropped when the world is created from the menu ("structures" is the screen's own toggle).
 	settings: { Setting }?,
 	-- Hints (see the header): false turns natural mob spawning / ticks off; the suggested game
-	-- mode (GameMode names); a debug world.
+	-- mode (GameMode names); a debug world; false keeps progression to this server.
 	mobs: boolean?,
 	ticks: boolean?,
 	gameMode: string?,
 	debug: boolean?,
+	savesProgress: boolean?,
 }
 
 local WorldTypes = {}
@@ -306,6 +310,8 @@ WorldTypes.register({
 	description = "Flat layers of blocks, Minecraft's presets or your own",
 	create = Superflat.create,
 	settings = { PRESET, DECORATION },
+	-- (A preset of ore layers would hand out mining knowledge saved for every server.)
+	savesProgress = false,
 })
 
 -- The Void's platform: VOID_RADIUS blocks around the origin at VOID_Y, cobblestone in the middle.
@@ -370,6 +376,7 @@ WorldTypes.register({
 	ticks = false,
 	gameMode = GameMode.SPECTATOR,
 	debug = true,
+	savesProgress = false,
 })
 
 WorldTypes.register({
@@ -383,6 +390,7 @@ WorldTypes.register({
 	ticks = false,
 	gameMode = GameMode.CREATIVE,
 	debug = true,
+	savesProgress = false,
 })
 
 WorldTypes.register({
@@ -393,6 +401,7 @@ WorldTypes.register({
 	mobs = false,
 	gameMode = GameMode.CREATIVE,
 	debug = true,
+	savesProgress = false,
 })
 
 return WorldTypes

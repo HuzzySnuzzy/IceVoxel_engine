@@ -40,9 +40,14 @@
 	  Sub-screens (Create, Customize, Options, creating) sit on Minecraft's options background:
 	             the dirt texture (TexturePack "dirt") tiled 32 GUI pixels a tile at a quarter of
 	             its brightness (Minecraft's 64 / 255), or plain dark brown without one.
-	  Input      mouse, touch, gamepad (A presses, the selection starts on the first button);
-	             Escape / B go back a screen. The GUI scale is Minecraft's (Style.guiScale for 320
-	             x 240), laid out again when the window changes.
+	  Input      mouse, touch, gamepad (A presses, the selection starts on the first button, the
+	             Options menu's too); Escape / B go back a screen. Roblox opens its menu on Escape
+	             (MenuOpened) and the key may reach InputBegan too, before, after or not at all,
+	             as Ui/Screens handles it: whichever comes first goes back (or makes the Key Binds
+	             key waiting "Not Bound") and the other, right after, is ignored, as is the Escape
+	             that closes Roblox's menu. The GUI scale is Minecraft's (Style.guiScale for 320 x
+	             240, or the GUI Scale setting: the boot script's Style.setScaleOverride), laid
+	             out again when the window or the setting changes.
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -67,6 +72,8 @@ local TitleRules = require(script.Parent.TitleRules)
 
 -- Over everything else (the HUD and screens are 1..20).
 local DISPLAY_ORDER = 100
+-- Seconds within which a second Escape (InputBegan and MenuOpened for one press) is the same one.
+local ESCAPE_REPEAT = 0.3
 -- GUI pixels a block of the logo, and its extrusion.
 local LOGO_PIXEL = 5
 local LOGO_DEPTH = 3
@@ -673,8 +680,9 @@ function MainMenu.run()
 		ClientNet.send(Protocol.ClientMessage.CreateWorld, Protocol.encodeCreateWorld(CreateWorldForm.request(form)))
 	end
 
-	-- Escape and gamepad B: back a screen.
-	local function back()
+	-- Escape and gamepad B: back a screen (`escaped`: Escape, which makes the Key Binds key waiting
+	-- "Not Bound").
+	local function back(escaped: boolean?)
 		if page == "create" then
 			form.name = nameBox:text()
 			form.seed = seedBox:text()
@@ -683,7 +691,7 @@ function MainMenu.run()
 			showPage("create")
 		elseif page == "options" then
 			-- (A sub-page goes back a page; Key Binds waiting for a key takes the press.)
-			if not SettingsScreen.back() then
+			if not SettingsScreen.back(escaped) then
 				showPage("title")
 			end
 		end
@@ -819,13 +827,32 @@ function MainMenu.run()
 		end)
 	)
 	table.insert(connections, Style.scaleChanged:Connect(layout))
+	-- Escape (see the header): the key or Roblox's menu opening, whichever comes first.
+	local lastEscape = -math.huge
+	local function escape()
+		local now = os.clock()
+		if now - lastEscape < ESCAPE_REPEAT then
+			return
+		end
+		lastEscape = now
+		back(true)
+	end
+	table.insert(connections, GuiService.MenuOpened:Connect(escape))
+	table.insert(
+		connections,
+		GuiService.MenuClosed:Connect(function()
+			lastEscape = os.clock()
+		end)
+	)
 	table.insert(
 		connections,
 		UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-			if processed then
-				return
-			end
-			if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
+			if input.KeyCode == Enum.KeyCode.Escape then
+				-- (Processed or not: Roblox's menu may have claimed the key.)
+				if not GuiService.MenuIsOpen then
+					escape()
+				end
+			elseif input.KeyCode == Enum.KeyCode.ButtonB and not processed then
 				back()
 			end
 		end)

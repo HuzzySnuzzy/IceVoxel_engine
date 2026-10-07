@@ -24,8 +24,12 @@
 	             with Minecraft's display name ("Left Shift", "Right Button", "/").
 	  Conflicts  two actions bound to the same input conflict when their contexts overlap (game
 	             with game, screen with screen, universal with either); the Key Binds screen
-	             draws them red, as Minecraft does, and both still work. The defaults conflict
-	             nowhere (tests/spec/Keybinds).
+	             draws them red, as Minecraft does, as a warning: one key need not reach both, as
+	             in Minecraft (where one mapping gets a key). Sprint and Sneak take their key from
+	             every other action (bound through ContextActionService, the key then arrives
+	             processed everywhere else; with each other, the one bound last), and an
+	             inventory screen acts on the first of its bindings that matches. The defaults
+	             conflict nowhere (tests/spec/Keybinds).
 	  Order      the Key Binds list shows categories in `CATEGORIES` order and, within one,
 	             actions by name (KeyMapping.compareTo sorts by the translated name), `ordered`.
 

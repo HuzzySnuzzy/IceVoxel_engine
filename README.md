@@ -376,7 +376,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   as fast), Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation
   (a step of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar,
   Tempering, Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke),
-  Mastery and Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death.
+  Mastery and Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death;
+  in a superflat or debug world, or one with Allow Commands, what is earned stays on that server.
   Creative players have every recipe and earn nothing. `/knowledge` and `/age` set it for testing.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
@@ -516,13 +517,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   at y 64 over nothing; **Single Biome**, the Default's mountains with one biome everywhere (sand
   up the peaks of a desert world); **Large Biomes**, the Default with climate four times as wide;
   and three debug worlds: **All Blocks** (Minecraft's Debug Mode: every block once, variants and
-  fluid levels included, at y 70 on a grid with a gap between, nothing ticks so nothing flows or
-  falls, spectator suggested), **All Structures** (every template of the structure library and
-  every generated structure on a grass floor, each with a structure block name tag that WAILA
-  reads and F3 outlines) and **All Biomes** (a 16 block strip of every biome's ground, trees and
-  plants). The void and the debug worlds spawn no mobs. The server publishes the type and its
-  options with the seed, so every client and worker builds the same world; the far terrain, the
-  map, WAILA's biome, Tough As Nails, safe spawning and sky checks all follow it.
+  fluid levels included (not the cave twins, which look exactly like theirs), at y 70 on a grid
+  with a gap between, nothing ticks so nothing flows or falls, spectator suggested), **All
+  Structures** (every template of the structure library and every generated structure on a grass
+  floor, each with a structure block name tag that WAILA reads and F3 outlines) and **All Biomes**
+  (a 16 block strip of every biome's ground, trees and plants). The void and the debug worlds
+  spawn no mobs. The server publishes the type and its options with the seed, so every client and
+  worker builds the same world; the far terrain, the map, WAILA's biome, Tough As Nails, safe
+  spawning and sky checks all follow it.
   The Create World screen offers every type (the debug worlds last) with its Customize screen;
   without the title screen `Config.World.Type` and `Config.World.Options` pick it.
 - **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
@@ -605,7 +607,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   nobody knows is not sent but answered with Minecraft's red "Unknown or incomplete command, see
   below for error". Chat Settings: Chat (Shown, Commands Only, Hidden), text and background
   opacity, text size, line spacing, chat delay, width, focused and unfocused height, command
-  suggestions. On touch screens a speech bubble over the `…` button opens it.
+  suggestions. On touch screens a speech bubble over the `…` button opens and closes it. The chat
+  draws over the hotbar, as Minecraft's; the title screen has no chat (Roblox's is off from the
+  start).
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -961,8 +965,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
-| Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` | | |
-| Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). The first player to join is the operator; when the last operator here leaves, the player here longest becomes one; `/deop` never takes the last one here. `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
+| Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
+| Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). Until the world exists (with the title screen and `MainMenu.AutoOperator`) the first player to join is the operator, and when the last operator here leaves the player here longest becomes one (`/deop` never takes the last one here then); after that nobody becomes one by being here (the first operator stays one). `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
 | Title screen  | Click the buttons (Join World, Create World, Options...); `Escape` goes back a screen (Create World, Customize, Options) | A; B goes back | Tap |
 
 ## Settings menu
@@ -993,10 +997,12 @@ and Reset (back to the default, greyed when it is). Clicking a key shows `> W <`
 waits: the next key or mouse button pressed becomes the binding (clicking anywhere binds that
 mouse button, as in Minecraft); Escape makes it "Not Bound" (Minecraft's; Roblox opens its menu
 too, close it again); a gamepad's B leaves it as it was. A key used by two actions that can
-happen at the same time shows red in brackets (`[ Q ]`), and both still act on it; keys that
-only work in different places don't clash (JEI's keys work in the inventory, the movement keys
-outside it). The wheel or the bar on the right scrolls the list. Bindings are saved with the
-other settings (only those changed from their default).
+happen at the same time shows red in brackets (`[ Q ]`), Minecraft's warning: only one of them
+may act on it (Sprint and Sneak take their key from every other action, and Sprint and Sneak on
+one key leave just one of them); keys that only work in different places don't clash (JEI's
+keys work in the inventory, the movement keys outside it). The wheel or the bar on the right
+scrolls the list. Bindings are saved with the other settings (only those changed from their
+default).
 
 | Category | Key binding (default) |
 | -------- | --------------------- |
@@ -1478,7 +1484,8 @@ for performance:
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
 | `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (operators always may). |
 | `Gameplay.Admins`         | {}      | User ids who are always operators (as the game's owner and everyone in Studio): other players' game modes, `/time set\|add`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, `/op`, `/deop`, structure blocks. |
-| `MainMenu.Enabled`        | true    | The title screen: the first player (the operator) creates the world from it, everyone joins it from it; nobody has a character before. false: the world is made at once from `World` and `Seed`, players join straight in. |
+| `MainMenu.Enabled`        | true    | The title screen: the first player (the operator) creates the world from it, everyone joins it from it; nobody has a character before. false: the world is made at once from `World` and `Seed`, players join straight in, and only `Gameplay.Admins`, the owner, Studio and those they `/op` are operators. |
+| `MainMenu.AutoOperator`   | true    | Until the world exists, the first player to join (and the one here longest when the last operator leaves) becomes an operator so someone can create it; no more after that. false: only `Gameplay.Admins`, the owner and Studio may create the world (a private game). |
 | `MainMenu.Version` / `Credits` | "IceVoxel (Minecraft 1.20.1 style)" / "Not an official Minecraft product" | The title screen's bottom corners. |
 | `World.Name` / `Type`     | "New World" / "default" | The world made at once without the title screen, and the Create World screen's first choices (a `Generation/WorldTypes` id; its game mode is `Gameplay.DefaultGameMode`, or the type's own: Spectator for All Blocks, Creative for the other debug worlds). |
 | `World.Options`           | {}      | The world type's options without the title screen (its `settings` keys, see below). |

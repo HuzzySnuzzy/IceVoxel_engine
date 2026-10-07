@@ -7,13 +7,17 @@
 	             who leaves and comes back is an operator again, as Minecraft's ops.json), or a
 	             permanent one: Config.Gameplay.Admins, the game's owner and everyone in a Studio
 	             session (the glue says who, `setPermanent`); those are never taken off.
-	  First      a player who joins while no operator is in the server becomes one: the first
+	  Automatic  only while `autoOperator` is on (`setAutoOperator`: Players/Operators turns it on
+	             with the title screen and Config.MainMenu.AutoOperator, and off for good once the
+	             world exists, so nobody becomes an operator just by being here after that):
+	    First    a player who joins while no operator is in the server becomes one: the first
 	             player of a server, and the first after it emptied. Everyone is told "Name is the
 	             server operator" (in Studio too, where the first player is one anyway).
-	  Last       while players are here, one of them is an operator: when the last operator here
+	    Last     while players are here, one of them is an operator: when the last operator here
 	             leaves, the player here longest becomes one ("Name is now the server operator"),
-	             and /deop refuses to take the last one away. So the world can always be created
-	             and run.
+	             and /deop refuses to take the last one away. So the world can always be created.
+	             Without it (the menu off, or the world made) only the permanent operators and
+	             those they /op are operators, and the last one here may /deop themselves.
 	  Commands   `/op <player>` and `/deop <player>` (a name or display name, its start, @s or @a,
 	             as /gamemode's: GameModeCommand.findPlayers), for operators only, with Minecraft's
 	             answers ("Made Steve a server operator", "Nothing changed. The player already is
@@ -39,6 +43,8 @@ export type List = {
 	present: { Member },
 	-- Everyone may use the operators' commands.
 	allowCommands: boolean,
+	-- Players become operators by being here (the first to join, the hand-over: see the header).
+	autoOperator: boolean,
 }
 
 export type Result = {
@@ -60,7 +66,7 @@ OperatorList.OP_USAGE = "Usage: /op <player>"
 OperatorList.DEOP_USAGE = "Usage: /deop <player>"
 
 function OperatorList.new(): List
-	return { ops = {}, permanent = {}, present = {}, allowCommands = false }
+	return { ops = {}, permanent = {}, present = {}, allowCommands = false, autoOperator = true }
 end
 
 local function newResult(): Result
@@ -73,6 +79,11 @@ end
 
 function OperatorList.isOperator(list: List, userId: number): boolean
 	return list.permanent[userId] == true or list.ops[userId] == true
+end
+
+-- Is `userId` always an operator (Config.Gameplay.Admins, the game's owner, Studio)?
+function OperatorList.isPermanent(list: List, userId: number): boolean
+	return list.permanent[userId] == true
 end
 
 -- May `userId` use the operators' commands (an operator, or anyone with commands allowed)?
@@ -100,10 +111,11 @@ local function indexOf(list: List, userId: number): number?
 	return nil
 end
 
--- With players here and no operator among them, the one here longest becomes one.
+-- With players here and no operator among them, the one here longest becomes one (while operators
+-- are automatic).
 local function keepAnOperator(list: List, result: Result)
 	local first = list.present[1]
-	if first == nil or #OperatorList.presentOperators(list) > 0 then
+	if not list.autoOperator or first == nil or #OperatorList.presentOperators(list) > 0 then
 		return
 	end
 	list.ops[userIdOf(first)] = true
@@ -113,12 +125,12 @@ end
 
 --[[
 	`member` (key: their user id) joined; `permanent`: always an operator (as far as known yet).
-	With no operator here before, they become one and everyone is told.
+	With no operator here before (and operators automatic), they become one and everyone is told.
 ]]
 function OperatorList.join(list: List, member: Member, permanent: boolean): Result
 	local result = newResult()
 	local userId = userIdOf(member)
-	local alone = #OperatorList.presentOperators(list) == 0
+	local alone = list.autoOperator and #OperatorList.presentOperators(list) == 0
 	local existing = indexOf(list, userId)
 	if existing then
 		table.remove(list.present, existing)
@@ -159,6 +171,17 @@ function OperatorList.setPermanent(list: List, userId: number, permanent: boolea
 		table.insert(result.changed, userId)
 		keepAnOperator(list, result)
 	end
+	return result
+end
+
+--[[
+	Players become operators by being here (`auto`: the first to join, the hand-over) or only as
+	permanent ones and by /op. Turning it on with no operator here makes the one here longest one.
+]]
+function OperatorList.setAutoOperator(list: List, auto: boolean): Result
+	local result = newResult()
+	list.autoOperator = auto
+	keepAnOperator(list, result)
 	return result
 end
 
@@ -261,7 +284,7 @@ function OperatorList.run(list: List, text: string, sourceId: number): Result?
 			say("Nothing changed. The player is not an operator")
 		elseif list.permanent[userId] then
 			say(`Nothing changed. {name} is always an operator here`)
-		elseif #OperatorList.presentOperators(list) <= 1 then
+		elseif list.autoOperator and #OperatorList.presentOperators(list) <= 1 then
 			say(`Nothing changed. {name} is the only operator here: /op another player first`)
 		else
 			list.ops[userId] = nil

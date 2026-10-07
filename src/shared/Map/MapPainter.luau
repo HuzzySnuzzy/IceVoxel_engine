@@ -70,14 +70,15 @@ local function shade(
 	surface: number,
 	sea: number
 ): number
-	if surface == AIR and height <= 0 then
-		return pack(VOID[1], VOID[2], VOID[3])
-	elseif height < sea then
+	-- (The sea first: a superflat world of water only has no ground, height 0, under its sea.)
+	if height < sea then
 		if Biomes.list[biome].frozen then
 			return pack(ICE[1], ICE[2], ICE[3])
 		end
 		local t = math.min(1, (sea - height) / 40)
 		return pack(64 - 46 * t, 138 - 90 * t, 214 - 94 * t)
+	elseif surface == AIR and height <= 0 then
+		return pack(VOID[1], VOID[2], VOID[3])
 	end
 	local c = Blocks.get(surface).color
 	-- Light from the north-west: slopes facing it are brighter.

@@ -195,7 +195,7 @@ local function startWorld(settings: WorldSettings.Settings)
 	Eating.start(net)
 	-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
 	-- perks go to the parts that apply them.
-	Progression.start(net, world)
+	Progression.start(net, world, WorldSettings.savesProgress(settings))
 	Inventories.setWearFilter(Progression.wear)
 	-- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
 	Inventories.setResultsHandler(Progression.smelted)

@@ -147,8 +147,17 @@ local Style = require(Client.Ui.Style)
 SoundPlayer.start()
 -- Listens for the player's saved settings (the terrain below waits a moment for them).
 Settings.start()
+-- No Roblox chat over the title screen (Minecraft's has no chat; the game's starts in the world).
+Chat.hideRoblox()
+-- The GUI Scale setting sizes the title screen too: the saved one once it arrives, and changes in
+-- its Options menu at once (in the world the "hud" effect below keeps it).
+Style.setScaleOverride(Settings.values.guiScale)
+local menuScale = Settings.changed:Connect(function()
+	Style.setScaleOverride(Settings.values.guiScale)
+end)
 -- The title screen until the player enters the world (Ui/MainMenu: its Options menu works).
 MainMenu.run()
+menuScale:Disconnect()
 
 local seed = Shared:GetAttribute("Seed")
 while type(seed) ~= "number" do

@@ -31,6 +31,11 @@
 	              values, a text code cut to its length (`cleanText`); the rest is dropped, and
 	              "structures" is the screen's toggle. Text options are codes (presets, ids) of a
 	              small alphabet, never free text, so they need no filtering.
+	  Progress    `savesProgress`: whether progression earned in the world is saved for every
+	              server (Players/Progression, ProgressStore's global DataStore): not in a world
+	              type with `savesProgress = false` (superflat, the debug worlds:
+	              Generation/WorldTypes), nor with Allow Commands (everyone may /knowledge set:
+	              Minecraft turns achievements off with cheats). There it is this server's only.
 	  Published   the server sets ReplicatedStorage.IceVoxel's "WorldName", "Difficulty" and
 	              "AllowCommands", then WorldTypes.publish ("WorldType", "WorldOptions", "Seed"
 	              last: clients start once it is there); `info` reads them back (F3).
@@ -364,6 +369,14 @@ function WorldSettings.fromConfig(seed: number): Settings
 	local hint = configured and configured.gameMode
 	settings.gameMode = if hint and GameMode.isValid(hint) then hint else GameMode.default()
 	return settings
+end
+
+--[[ Progress ]]
+
+-- Is progression earned in the world `settings` make saved for every server (see the header)?
+function WorldSettings.savesProgress(settings: Settings): boolean
+	local worldType = WorldTypes.get(settings.worldType)
+	return not settings.allowCommands and not (worldType and worldType.savesProgress == false)
 end
 
 --[[ Commands ]]

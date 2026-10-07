@@ -585,14 +585,21 @@ local Config = {
 		Minecraft's title screen and Create World screen (client Ui/MainMenu; server
 		Players/WorldMenu, Players/Operators, World/WorldInfo; the rules: Shared/WorldSettings).
 		The first player to join a server becomes its operator (Minecraft's ops; Gameplay.Admins,
-		the game's owner and Studio sessions always are) and creates the world from the menu:
-		its name, game mode, difficulty, commands, world type (Generation/WorldTypes), seed and
-		structures. Nothing of the world exists before that, and nobody gets a character.
+		the game's owner and Studio sessions always are; see AutoOperator) and creates the world
+		from the menu: its name, game mode, difficulty, commands, world type
+		(Generation/WorldTypes), seed and structures. Nothing of the world exists before that,
+		and nobody gets a character.
 	]]
 	MainMenu = {
 		-- false: no title screen; the server creates the world at once from `World` below (and
 		-- Seed), and players join straight into it (characters load as Roblox's usual).
 		Enabled = true,
+		-- true: until the world exists, the first player to join is made an operator (and the one
+		-- here longest when the last operator leaves), so somebody can create it; once it exists
+		-- nobody becomes one by being here (operators /op others). false: only Gameplay.Admins,
+		-- the game's owner and Studio sessions are operators, so only they can create the world
+		-- (for a private game). Ignored with Enabled false (the old rule: those, and /op).
+		AutoOperator = true,
 		-- The title screen's corners (Minecraft's version and copyright lines).
 		Version = "IceVoxel (Minecraft 1.20.1 style)",
 		Credits = "Not an official Minecraft product",

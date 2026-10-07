@@ -670,9 +670,10 @@ builds Classic Flat (`resolve`), so every machine agrees. The presets are Minecr
 blocks exist: Classic Flat, Tunnelers' Dream, Water World, Overworld, Snowy Kingdom, Bottomless
 Pit, Desert, Redstone Ready.
 
-**DebugWorlds.** All Blocks is Minecraft's DebugLevelSource: every block id but air and cave air
-(variants, both halves of tall plants, every fluid level, cave twins) at y 70, block k at
-x = 2 (k // W) + 1, z = 2 (k % W) + 1 with W = ceil(sqrt(n)) (211 blocks: a 30 x 30 square),
+**DebugWorlds.** All Blocks is Minecraft's DebugLevelSource: every block id but air, cave air and
+the cave twins (variants, both halves of tall plants, every fluid level; a twin looks exactly like
+its twin, and hidden caves would draw it as a stone cap in the open air) at y 70, block k at
+x = 2 (k // W) + 1, z = 2 (k % W) + 1 with W = ceil(sqrt(n)) (203 blocks: a 30 x 30 square),
 nothing under them. Blocks that need support and fluids are shown alone, as they are: the type has
 no ticks, so nothing flows, falls or pops even next to an edit. All Structures lays out every
 template of the library (sorted, rotation 0) and every generated structure (assembled whole from
@@ -2029,8 +2030,13 @@ Options screen; Config gives every default and the presets.
 ## Chat (client `Ui/Chat/`, `Net/Notices`)
 
 Minecraft 1.20.1's chat (ChatComponent, ChatScreen, CommandSuggestions, ChatListener) replaces
-Roblox's chat window and input bar, which the client turns off (`ChatWindowConfiguration`,
-`ChatInputBarConfiguration`, `ChannelTabsConfiguration` `.Enabled = false`). Roblox still carries
+Roblox's chat window and input bar, which the client turns off before the title screen shows
+(`Chat.hideRoblox`: `ChatWindowConfiguration`, `ChatInputBarConfiguration`,
+`ChannelTabsConfiguration` `.Enabled = false`; the title screen has no chat, as Minecraft's). Box
+and lines are drawn over the HUD (DisplayOrder 12, as Minecraft draws the chat over the hotbar),
+under a screen's backdrop while one is open (8). On touch, the tap on the HUD's chat button that
+takes the box's focus closes the chat, and the button's own Activated right after (`TAP_CLOSE`)
+does not open it again. Roblox still carries
 every message: players' text is only ever sent with `TextChannel:SendAsync` and shown from
 `TextChatService.MessageReceived`, so Roblox filters it for each reader; the game never sends
 player text through its own remotes. No server code and no Protocol message were added.
@@ -3540,7 +3546,14 @@ a Notice with the reason and the status sent again. A player whose state changed
 message a frame at most. An Age reached is told to everyone in the chat. Commands
 (`Players/ProgressionCommand`, pure): `/knowledge add|set|query` (also `/xp`, `/experience`: with
 TextChatService one TextChatCommand per two aliases; points or levels, Minecraft's /xp) and `/age
-set|query`, changing with the admins' rule (`GameModeCommand.isAdmin`: as /time).
+set|query`, changing with the operators' permission (as /time), and only the game's own operators
+(`Operators.isPermanent`: `Gameplay.Admins`, the owner, Studio) where progress is saved.
+
+**Saved for every server or not** (`WorldSettings.savesProgress`, the boot's `Progression.start(net,
+world, saved)`): a world type with `savesProgress = false` (superflat, whose preset may be layers
+of ore, and the debug worlds, which lay out every block and biome) or Allow Commands keeps what is
+earned on that server: the saved progress is read and played with, never written, and each player
+is told once in the world.
 
 The API for other parts: `award(player, points, reason)` (direct: no fatigue or budget, the
 caller's own reasons), `discover(player, category, key)` (true when new), `killed(player,
@@ -4928,10 +4941,14 @@ the block ticker without behaviours for a type with `ticks = false` (the debug w
 state "failed" for good (half the parts may have started: the server needs a restart).
 
 **Operators** (`Players/OperatorList`, pure and tested; the glue `Players/Operators`). Players are
-known by user id. The first player to join while no operator is here becomes one, and everyone is
-told ("Steve is the server operator"); while players are here one of them always is an operator:
-the last one leaving makes the player here longest one ("Alex is now the server operator"), and
-`/deop` refuses to take the last one away. The op list lasts the server's lifetime (rejoining keeps
+known by user id. Automatic operators (`autoOperator`) only with the menu and
+`Config.MainMenu.AutoOperator`, and only until the world exists (`WorldInfo.onReady` turns them
+off for good): meanwhile the first player to join while no operator is here becomes one, and
+everyone is told ("Steve is the server operator"), and while players are here one of them always
+is an operator: the last one leaving makes the player here longest one ("Alex is now the server
+operator"), and `/deop` refuses to take the last one away, so the world can be created. After that
+(and with the menu off) nobody becomes an operator by being here: the permanent ones, and whoever
+they `/op`; the first operator stays one. The op list lasts the server's lifetime (rejoining keeps
 it, as Minecraft's ops.json). Permanent operators: `Gameplay.Admins` and everyone in Studio from
 the join, the game's owner once `GameModes.isOwner` says so (a group game's: retried, 5 s doubling
 to 300 s, while `GameModes.ownerKnown()` is false). `/op <player>` and `/deop <player>` (operators
@@ -4941,7 +4958,8 @@ operators Minecraft's admin line ("[Alex: Made Steve a server operator]"). `Oper
 (player)` is the check every operators' command asks (`/time`, `/gamerule`, `/gamemode` for others
 and the switcher's permission, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure
 blocks): an operator, or anyone once the world allows commands. `isOperator` is the real thing
-(`/op`, `/deop`, Create World). Each command's `TextChatCommand` carries who may use it
+(`/op`, `/deop`, Create World); `isPermanent` the game's own (changing progress that is saved for
+every server). Each command's `TextChatCommand` carries who may use it
 (`WorldSettings.COMMAND_ATTRIBUTE`), so the chat offers a player only theirs (see Chat). The Player attribute `IceVoxelOperator`
 (`WorldSettings.OPERATOR_ATTRIBUTE`) tells clients; `Operators.changed` fires for each player whose
 status or permission changed.
@@ -4956,7 +4974,13 @@ join, the movement waiting for the ground.) The Options menu is `SettingsScreen.
 onDone)`: the same panel, hosted by the title screen before Ui/Screens exists, every page with it
 (Controls with Mouse Settings and Key Binds, Chat Settings, Video's Caves, Accessibility). Hosted
 there it takes the mouse wheel itself (the Key Binds list), and Escape / B go back a page
-(`SettingsScreen.back`, nothing while Key Binds waits for a key) before leaving to the title. The server's
+(`SettingsScreen.back`; Escape makes a key Key Binds waits for "Not Bound", B leaves it) before
+leaving to the title; the title screen takes Escape as Ui/Screens does (InputBegan or Roblox's
+`MenuOpened`, whichever comes first, the other ignored), and a gamepad's selection moves to each
+page's first widget (`showIn` too). Before the menu the boot turns Roblox's chat window and input
+bar off (`Chat.hideRoblox`: nothing typed on the title screen goes out as chat) and applies the
+GUI Scale setting (`Style.setScaleOverride`, again on every settings change until the world's
+"hud" effect takes over). The server's
 `MenuState` (waiting, creating, ready, failed; the operator's and the world's names) and the
 operator attribute decide what is enabled: Join World once ready, Create World for an operator
 while waiting, Load World never yet (saves are for later), Options always. The background is a

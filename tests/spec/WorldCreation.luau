@@ -338,9 +338,13 @@ return function(t, shared, require, server, client)
 			t.eq(back[key], value, key)
 		end
 		t.eq(Protocol.decodeCreateWorld(buffer.create(2)), nil, "too short")
+		-- Spectator decodes (the All Blocks world's own mode); the type check is validate's.
 		local b = Protocol.encodeCreateWorld(message)
 		buffer.writeu8(b, 0, 3)
-		t.eq(Protocol.decodeCreateWorld(b), nil, "spectator")
+		t.eq((Protocol.decodeCreateWorld(b) :: any).gameMode, GameMode.SPECTATOR, "spectator")
+		b = Protocol.encodeCreateWorld(message)
+		buffer.writeu8(b, 0, 4)
+		t.eq(Protocol.decodeCreateWorld(b), nil, "unknown game mode")
 		b = Protocol.encodeCreateWorld(message)
 		buffer.writeu8(b, 1, 4)
 		t.eq(Protocol.decodeCreateWorld(b), nil, "difficulty 4")
@@ -512,9 +516,12 @@ return function(t, shared, require, server, client)
 		return 12345
 	end
 
-	-- The server's view of what the Create World form sends (Protocol CreateWorld, decoded).
+	-- The server's view of what the Create World form sends (Protocol CreateWorld, through the
+	-- wire: encoded, decoded).
 	local function sentRequest(form: CreateWorldForm.Form): WorldSettings.Request
-		local sent = CreateWorldForm.request(form)
+		local decoded = Protocol.decodeCreateWorld(Protocol.encodeCreateWorld(CreateWorldForm.request(form)))
+		assert(decoded, "the form's request decodes")
+		local sent = decoded :: Protocol.CreateWorld
 		return {
 			name = sent.name,
 			gameMode = sent.gameMode,
@@ -608,6 +615,25 @@ return function(t, shared, require, server, client)
 		t.eq(form.gameMode, GameMode.ADVENTURE)
 		pick(form, WorldTypes.DEFAULT)
 		t.eq(form.gameMode, GameMode.ADVENTURE, "the player's choice")
+	end)
+
+	t.test("world creation: progress is saved for every server only in fair worlds", function()
+		local function saves(worldType: string, allowCommands: boolean): boolean
+			local settings = WorldSettings.validate(
+				request({ worldType = worldType, allowCommands = allowCommands, gameMode = GameMode.CREATIVE }),
+				fixedSeed,
+				true
+			) :: WorldSettings.Settings
+			return WorldSettings.savesProgress(settings)
+		end
+		for _, id in { WorldTypes.DEFAULT, "singleBiome", "largeBiomes", "void" } do
+			t.ok(saves(id, false), `{id}: saved`)
+			t.ok(not saves(id, true), `{id} with Allow Commands: this server's only`)
+		end
+		-- Laid out to show everything, or made of what the player picks (ore layers).
+		for _, id in { "superflat", "debugBlocks", "debugStructures", "debugBiomes" } do
+			t.ok(not saves(id, false), `{id}: this server's only`)
+		end
 	end)
 
 	t.test("world creation: superflat's preset: Minecraft's presets, its check, kept whole", function()

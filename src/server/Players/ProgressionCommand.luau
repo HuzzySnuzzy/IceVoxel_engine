@@ -16,11 +16,12 @@
 	("iron", "Iron Age", "Iron", 2; Progression/Ages). `<player>` is as /gamemode reads it
 	(GameModeCommand.findPlayers: a name or display name or the start of one, @s, @a).
 
-	Who may: changing needs `mayUse` (the operators' permission, Players/Operators, as /time);
-	queries are harmless, so anyone may ask. After a change the glue checks the Ages
-	again (Progression.advance), so knowledge set high with the milestones met enters the next
-	Ages; not after an Age set lower (`lowered`), which holds until the next knowledge the player
-	gets (Ages entered again then are not announced again).
+	Who may: changing needs `mayUse` (the operators' permission, Players/Operators, as /time; where
+	progress is saved for every server only the game's own operators: Players/Progression, and
+	then `denied` says so); queries are harmless, so anyone may ask. After a change the glue
+	checks the Ages again (Progression.advance), so knowledge set high with the milestones met
+	enters the next Ages; not after an Age set lower (`lowered`), which holds until the next
+	knowledge the player gets (Ages entered again then are not announced again).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,6 +41,8 @@ export type Context = {
 	players: { Candidate },
 	-- May change knowledge and Ages.
 	mayUse: boolean,
+	-- Why not, when `mayUse` is false (default DENIED).
+	denied: string?,
 	-- A player's progression (nil: not loaded yet).
 	stateOf: (key: any) -> Progression.State?,
 }
@@ -62,6 +65,7 @@ ProgressionCommand.KNOWLEDGE_USAGE =
 	"Usage: /knowledge <add | set> <player> <amount> [points | levels], /knowledge query <player> [points | levels]"
 ProgressionCommand.AGE_USAGE = "Usage: /age set <player> <age>, /age query <player>"
 ProgressionCommand.DENIED = "You can't change knowledge or Ages here"
+ProgressionCommand.SAVED_DENIED = "Progress here is saved for every server: only the game's admins can change it"
 ProgressionCommand.NOT_LOADED = "That player's progress hasn't loaded yet"
 
 local function words(text: string): { string }
@@ -137,7 +141,7 @@ function ProgressionCommand.run(text: string, context: Context): Result?
 	end
 	local query = action == "query"
 	if not query and not context.mayUse then
-		return say(ProgressionCommand.DENIED)
+		return say(context.denied or ProgressionCommand.DENIED)
 	end
 	local targets, problem = GameModeCommand.findPlayers(list[3], context.source, context.players)
 	if targets == nil then

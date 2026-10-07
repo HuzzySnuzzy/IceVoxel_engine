@@ -25,6 +25,7 @@ return function(t, shared, require, server)
 	local Superflat = require(shared.Generation.Superflat)
 	local DebugWorlds = require(shared.Generation.DebugWorlds)
 	local MapPainter = require(shared.Map.MapPainter)
+	local GreedyMesher = require(shared.Meshing.GreedyMesher)
 	local Library = require(shared.Structures.Library)
 	local Jigsaw = require(shared.Structures.Jigsaw)
 	local Settings = require(shared.Structures.Settings)
@@ -409,6 +410,14 @@ return function(t, shared, require, server)
 		-- The map draws it as water.
 		local tile = MapPainter.new(gen)(0, 0, 4, 4)
 		t.ok(readu8(tile, 2) > readu8(tile, 0), "blue")
+		-- Water only (no ground under it: height 0): still the sea, never the void's grey.
+		for _, preset in { "64*Water;Plains", "64*Water;Tundra" } do
+			local ocean = WorldTypes.create("superflat", SEED, { preset = preset })
+			t.eq(ocean.seaLevel, 64, preset)
+			local pixel = MapPainter.new(ocean)(0, 0, 4, 4)
+			local red, green, blue = readu8(pixel, 0), readu8(pixel, 1), readu8(pixel, 2)
+			t.ok(blue > red + 40 or (red > 150 and blue > 150), `{preset}: sea or ice ({red}, {green}, {blue})`)
+		end
 		-- Spawning finds no dry spot (open water): SafeSpot.column skips it.
 		local world = WorldServer.new(gen)
 		t.eq(SafeSpot.column(world, 0, 0), nil, "open water")
@@ -576,7 +585,17 @@ return function(t, shared, require, server)
 	t.test("debug blocks: every block but air once, at y 70 on odd x and z, ordered by id", function()
 		local gen = WorldTypes.create("debugBlocks", SEED, {})
 		local list = DebugWorlds.gridBlocks()
-		t.eq(#list, Blocks.count - 2, "every id but air and cave air")
+		-- Not the cave twins: hidden caves draw them as cave air (stone caps in the open air).
+		local twins = 0
+		for id = 0, Blocks.count - 1 do
+			if Blocks.isCaveTwin(id) then
+				twins += 1
+				t.eq(table.find(list, id), nil, `{Blocks.get(id).name}: a cave twin`)
+				t.ok(table.find(list, Blocks.caveTwinOf(id) :: number) ~= nil, "its twin is there")
+			end
+		end
+		t.eq(twins, 8, "CaveGlowLichen and its five facings, CaveLava, CaveOil")
+		t.eq(#list, Blocks.count - 2 - twins, "every id but air, cave air and the cave twins")
 		local width = DebugWorlds.gridWidth(#list)
 		t.eq(width, math.ceil(math.sqrt(#list)))
 		local found: { [number]: { number } } = {}
@@ -603,6 +622,18 @@ return function(t, shared, require, server)
 			end
 		end
 		t.eq(count, #list, "all of them")
+		-- Drawn the same whether caves are hidden or shown (the Caves setting, far terrain): no
+		-- cave cell in the grid, so no stone caps where a twin would have stood.
+		for cx = 0, span do
+			for cz = 0, span do
+				local r = gen.generate(0, cx, cz)
+				local y0, y1 = DebugWorlds.BLOCK_Y - 6, DebugWorlds.BLOCK_Y + 10
+				local hidden, n = GreedyMesher.mesh(r.data, r.height, y0, y1, true)
+				local shown, m = GreedyMesher.mesh(r.data, r.height, y0, y1, false)
+				t.eq(n, m, `chunk {cx} {cz}: boxes`)
+				t.ok(buffer.tostring(hidden) == buffer.tostring(shown), `chunk {cx} {cz}: caves hidden or shown`)
+			end
+		end
 		for k, block in list do
 			local x, z = DebugWorlds.gridPosition(k - 1, width)
 			local where = found[block]
@@ -611,7 +642,7 @@ return function(t, shared, require, server)
 		-- The fluid rule: every level of every fluid (sources and flowing), standing still since
 		-- the world has no ticks; plants and supported blocks alone, as in Minecraft.
 		t.ok(found[Blocks.fluidId("Water", 0)] and found[Blocks.fluidId("Water", 5)], "water levels")
-		t.ok(found[Blocks.fluidId("Lava", 8)] and found[B.CaveLava], "lava levels and its twin")
+		t.ok(found[Blocks.fluidId("Lava", 8)] and found[B.Lava], "lava levels")
 		t.ok(found[B.TallGrassTop] and found[B.WallTorchNorth], "upper halves and wall torches")
 		t.eq((WorldTypes.get("debugBlocks") :: any).ticks, false, "no ticks: nothing flows or drops")
 		-- Spawn standing on block 0 (bedrock), which column() reports.
