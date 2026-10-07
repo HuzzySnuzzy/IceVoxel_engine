@@ -3147,8 +3147,14 @@ Nausea (MovementController.setFovSway), with a ColorCorrectionEffect for the bri
 and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,
 9 × 9 glyphs from `Ui/EffectIcons` at 2 pixels, beneficial row over the rest, longest first,
 GroupTransparency for the last 10 s' blinking) below `MusicToast.bottom()`, the hovered or tapped
-one's name and time under them, and Minecraft's 120 × 32 list on the left while a screen is open;
-it is rebuilt only when a message comes. F3 lists every effect.
+one's name and time under them, and Minecraft's 120 × 32 list on the left while an inventory
+screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9, under the
+cursor's 20), never taking clicks, Minecraft's 32 wide compact list (glyphs alone) when the full one
+would reach the screen's panels (`Screens.screenLeft`), none when even that wouldn't fit, and
+nothing behind panel screens (skill tree, Options: `Screens.panelOpen`). Its ScreenGui orders
+children over parents (ZIndexBehavior Sibling, as Style's builders expect: under Instance.new's
+Global ordering each list panel's outline covered its own face and text). It is rebuilt only when
+a message comes. F3 lists every effect.
 
 ## Knowledge, Ages and skills (`Progression/`, server `Players/Progression`, client `Player/ProgressionState`)
 
@@ -3306,9 +3312,13 @@ droplets), in survival and adventure. `Ui/AgeToast` fades a new Age's name in bi
 "A new Age begins", how many recipes it opens). `Ui/SkillTreeScreen` is a panel (K, D-pad left,
 the touch button over the gear): a column per Age, a row per node (Skills `row`: the knowledge,
 tools and survival branches), lines from prerequisites (along a row, else through the gap after
-the prerequisite's column), frames gold unlocked / white available / dark locked, an info area
-for the hovered or selected node or Age title (an Age's level and milestones, green when met),
-and Unlock. The inventory screen draws a locked crafting result greyed in the empty result slot
+the prerequisite's column), nodes in slot-grey wells with frames gold unlocked / white available /
+dark locked (a locked skill's item mildly dimmed, still recognisable), an info area on the grid's
+dark backdrop for the hovered or selected node or Age title (an Age's level and milestones, green
+when met; wrapped at word breaks by `Ui/TextWrap`, the status line always kept), and Unlock.
+Columns are 80 wide so "Industrial" and the header stay at the font's own size, the panel short
+enough (416 × 291) for GUI scale 3 on 900 pixel tall screens; the title and header are dark text
+without a shadow, as on the inventory, and gamepad selection is an outline. The inventory screen draws a locked crafting result greyed in the empty result slot
 with its requirement on hover (Crafting.match again only when a grid stack or the status
 changed); JEI's recipe view puts a padlock on a locked output, adds "Requires the Iron Age" to
 its tooltip and greys its "+" with that reason (`JeiData.lockText`).

@@ -2151,7 +2151,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,395 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,399 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
 and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge,

@@ -63,9 +63,12 @@ local BLOCK_LIGHT_DIRECTION = Vector3.new(0, -2, -1)
 local ITEM_AMBIENT = Color3.new(0.55, 0.55, 0.55)
 local ITEM_LIGHT = Color3.new(0.5, 0.5, 0.5)
 local ITEM_LIGHT_DIRECTION = Vector3.new(0.3, -0.7, 0.65)
--- A dimmed icon (`setDimmed`): greyed and faded.
+-- A dimmed icon (`setDimmed`): greyed and faded; `mild`, less (still clearly the item: the skill
+-- tree's locked skills, which a player needs to recognise).
 local DIMMED_COLOUR = Color3.fromRGB(120, 120, 120)
 local DIMMED_TRANSPARENCY = 0.35
+local MILD_COLOUR = Color3.fromRGB(175, 175, 175)
+local MILD_TRANSPARENCY = 0.15
 
 export type ItemIcon = {
 	-- 16 x 16 GUI pixels: the viewport and the count.
@@ -77,7 +80,7 @@ export type ItemIcon = {
 	data: Items.Data?,
 	set: (self: ItemIcon, item: number?, count: number?, damage: number?, data: Items.Data?) -> (),
 	setCountColour: (self: ItemIcon, colour: Color3?) -> (),
-	setDimmed: (self: ItemIcon, dimmed: boolean) -> (),
+	setDimmed: (self: ItemIcon, dimmed: boolean, mild: boolean?) -> (),
 	destroy: (self: ItemIcon) -> (),
 }
 
@@ -346,12 +349,15 @@ function ItemIcon.setCountColour(self: Self, colour: Color3?)
 	end
 end
 
--- Draws the item greyed and faded (a locked recipe's result, a locked skill), or as it is.
-function ItemIcon.setDimmed(self: Self, dimmed: boolean)
-	local colour = if dimmed then DIMMED_COLOUR else Color3.new(1, 1, 1)
+-- Draws the item greyed and faded (a locked recipe's result; `mild`: a locked skill), or as it is.
+function ItemIcon.setDimmed(self: Self, dimmed: boolean, mild: boolean?)
+	local colour = if not dimmed then Color3.new(1, 1, 1) elseif mild then MILD_COLOUR else DIMMED_COLOUR
 	if self.viewport.ImageColor3 ~= colour then
 		self.viewport.ImageColor3 = colour
-		self.viewport.ImageTransparency = if dimmed then DIMMED_TRANSPARENCY else 0
+		self.viewport.ImageTransparency = if not dimmed
+			then 0
+			elseif mild then MILD_TRANSPARENCY
+			else DIMMED_TRANSPARENCY
 	end
 end
 

@@ -224,6 +224,16 @@ function Screens.panelOpen(): boolean
 	return current == "panel"
 end
 
+-- The left edge (screen pixels) of the open inventory screen's centred panels (the inventory, a
+-- block's menu, the creative picker), as last laid out; nil while none is open.
+local screenLeftEdge: number? = nil
+function Screens.screenLeft(): number?
+	if current == nil or current == "panel" then
+		return nil
+	end
+	return screenLeftEdge
+end
+
 -- Set by start.
 local open: (kind: Kind) -> () = function() end
 local close: () -> () = function() end
@@ -613,6 +623,7 @@ function Screens.start()
 		-- JEI: the recipe view in the panel's place (at most the panel's scale), the list to the right
 		-- of the panels (all three are centred and MenuLayout.WIDTH wide).
 		local viewSize = jei.view:size()
+		screenLeftEdge = viewport.X / 2 - MenuLayout.WIDTH / 2 * scale
 		jei:place({
 			viewportX = viewport.X,
 			top = GuiService:GetGuiInset().Y,

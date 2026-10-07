@@ -43,6 +43,7 @@ local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
+local TextWrap = require(script.Parent.TextWrap)
 
 local Ages = Progression.Ages
 local Skills = Progression.Skills
@@ -53,7 +54,9 @@ type Age = Progression.Age
 
 -- Layout (GUI pixels).
 local MARGIN = 8
-local COLUMN = 72
+-- (80: "Industrial" and the longest header fit at Style.TEXT_SIZE: a pixel font shrunk to 6 or 7
+-- blurs.)
+local COLUMN = 80
 local ROW = 28
 local NODE = 22
 local WIDTH = MARGIN * 2 + COLUMN * Ages.count
@@ -63,9 +66,11 @@ local TITLE_H = 12
 local NODES_Y = GRID_Y + TITLE_H + 2
 local GRID_H = TITLE_H + 4 + ROW * Skills.ROWS
 -- The info lines, on their own dark backdrop under the grid (the panel's whole width).
-local INFO_Y = GRID_Y + GRID_H + 8
+-- (5 lines: the most a skill needs; the panel stays short enough for GUI scale 3 on 900 pixel
+-- tall screens and 1.25 on phones.)
+local INFO_Y = GRID_Y + GRID_H + 6
 local LINE = 10
-local INFO_LINES = 6
+local INFO_LINES = 5
 local INFO_PAD = 3
 local BUTTON_W, BUTTON_H = 56, 18
 -- The buttons' row, under the info backdrop.
@@ -73,21 +78,36 @@ local BUTTONS_Y = INFO_Y + LINE * INFO_LINES + INFO_PAD + 4
 local HEIGHT = BUTTONS_Y + BUTTON_H + 6
 local LINE_WIDTH = 2
 
--- Colours: the grid's dark backdrop, the node frames by state, the lines.
-local BACKDROP = Color3.fromRGB(40, 36, 32)
+-- Colours: the grid's dark backdrop (darker than the text shadows, as Minecraft's tooltips, so
+-- shadows lift the text instead of smearing it), the nodes' slot grey well, their frames by state,
+-- the lines.
+local BACKDROP = Color3.fromRGB(22, 20, 18)
+local WELL = Style.Colour.Slot
 local UNLOCKED = Color3.fromRGB(240, 200, 60)
 local AVAILABLE = Color3.fromRGB(240, 240, 240)
-local LOCKED = Color3.fromRGB(90, 90, 90)
+local LOCKED = Color3.fromRGB(70, 70, 70)
 local LINE_DONE = Color3.fromRGB(240, 200, 60)
 local LINE_OPEN = Color3.fromRGB(170, 170, 170)
 local LINE_LOCKED = Color3.fromRGB(70, 70, 70)
 -- Text on the dark backdrops (with shadows): names white, the rest light grey, Ages not reached
--- yet a dimmer grey that still reads.
+-- yet a dimmer grey that still reads (reached ones in their colour, brightened: `reachedColour`).
 local GREEN = Color3.fromRGB(85, 255, 85)
 local WHITE = Color3.fromRGB(255, 255, 255)
 local LIGHT = Color3.fromRGB(225, 225, 225)
 local GRAY = Color3.fromRGB(190, 190, 190)
-local DIM = Color3.fromRGB(145, 145, 145)
+local DIM = Color3.fromRGB(115, 115, 115)
+
+-- Gamepad selection on this screen: an outline only, so a selected node's state colour and a
+-- selected title's text stay readable (Style.selectionImage washes them out).
+local SELECTION = Instance.new("Frame")
+SELECTION.BackgroundTransparency = 1
+SELECTION.Size = UDim2.fromScale(1, 1)
+do
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.new(1, 1, 1)
+	stroke.Thickness = 1
+	stroke.Parent = SELECTION
+end
 
 type NodeView = {
 	skill: Skill,
@@ -108,6 +128,12 @@ local close: () -> () = function() end
 function SkillTreeScreen.isOpen(): boolean
 	local p = panel
 	return p ~= nil and Screens.panelShown(p)
+end
+
+-- A reached Age's title colour: its own, brightened a quarter of the way to white (so the Stone
+-- Age's grey stands well clear of DIM).
+local function reachedColour(age: Age): Color3
+	return Color3.fromRGB(age.color[1], age.color[2], age.color[3]):Lerp(WHITE, 0.25)
 end
 
 -- An Age's name without " Age" (the column titles: "Industrial").
@@ -165,11 +191,11 @@ local function drawNode(parent: Instance, skill: Skill): NodeView
 	button.Text = ""
 	button.AutoButtonColor = false
 	button.BorderSizePixel = 0
-	button.BackgroundColor3 = BACKDROP
+	button.BackgroundColor3 = WELL
 	button.Position = UDim2.fromOffset(x - NODE // 2, y - NODE // 2)
 	button.Size = UDim2.fromOffset(NODE, NODE)
 	button.ZIndex = 4
-	button.SelectionImageObject = Style.selectionImage
+	button.SelectionImageObject = SELECTION
 	button.Parent = parent
 	local frame = Style.border(button, 0, 0, NODE, NODE, 2, LOCKED, 5)
 	local icon = ItemIcon.new(button, (NODE - Style.ITEM) // 2, (NODE - Style.ITEM) // 2, 6)
@@ -281,14 +307,14 @@ function SkillTreeScreen.start()
 	local titleButtons: { TextButton } = {}
 	for index, age in Ages.list do
 		local x = MARGIN + (index - 1) * COLUMN
-		titles[index] = FormWidgets.label(root, shortName(age), x + 2, GRID_Y + 2, COLUMN - 4, DIM, "centre", 6)
+		titles[index] = FormWidgets.label(root, shortName(age), x, GRID_Y + 2, COLUMN, DIM, "centre", 6)
 		local button = Instance.new("TextButton")
 		button.Text = ""
 		button.BackgroundTransparency = 1
 		button.Position = UDim2.fromOffset(x, GRID_Y)
 		button.Size = UDim2.fromOffset(COLUMN, TITLE_H)
 		button.ZIndex = 7
-		button.SelectionImageObject = Style.selectionImage
+		button.SelectionImageObject = SELECTION
 		button.Parent = root
 		table.insert(titleButtons, button)
 	end
@@ -334,22 +360,13 @@ function SkillTreeScreen.start()
 	local hoveredSkill: Skill? = nil
 	local hoveredAge: Age? = nil
 
-	-- `lines`, each wrapped at word breaks to the info's width (Style.textWidth), as many as fit.
+	-- `lines`, wrapped at word breaks to the info's width (Ui/TextWrap.fit: when they don't all fit,
+	-- the last line, the status, keeps its place).
+	local function measure(text: string): number
+		return Style.textWidth(text)
+	end
 	local function showLines(lines: { Line })
-		local rows: { Line } = {}
-		for _, entry in lines do
-			local current = ""
-			for word in string.gmatch(entry.text, "%S+") do
-				local candidate = if current == "" then word else current .. " " .. word
-				if current ~= "" and Style.textWidth(candidate) > infoWidth then
-					table.insert(rows, { text = current, colour = entry.colour })
-					current = word
-				else
-					current = candidate
-				end
-			end
-			table.insert(rows, { text = current, colour = entry.colour })
-		end
+		local rows = TextWrap.fit(lines, INFO_LINES, infoWidth, measure)
 		for i = 1, INFO_LINES do
 			local entry = rows[i]
 			info[i]:setText(if entry then entry.text else "", if entry then entry.colour else GRAY)
@@ -366,17 +383,14 @@ function SkillTreeScreen.start()
 		for index, title in titles do
 			local entry = Ages.get(index) :: Age
 			local reached = state.age >= index
-			title:setText(
-				shortName(entry),
-				if reached then Color3.fromRGB(entry.color[1], entry.color[2], entry.color[3]) else DIM
-			)
+			title:setText(shortName(entry), if reached then reachedColour(entry) else DIM)
 		end
 		for _, view in nodes do
 			local skill = view.skill
 			local unlocked = state.skills[skill.id] == true
 			local available = not unlocked and (Progression.canUnlock(state, skill.id))
 			Style.paint(view.frame, if unlocked then UNLOCKED elseif available then AVAILABLE else LOCKED)
-			view.icon:setDimmed(not (unlocked or available))
+			view.icon:setDimmed(not (unlocked or available), true)
 			for _, line in view.lines do
 				local fromDone = state.skills[line.from.id] == true
 				Style.paint(

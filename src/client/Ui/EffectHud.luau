@@ -18,9 +18,13 @@
 	           Ui/Screens) the icons give way to Minecraft's inventory list, on the left of the
 	           screen (where JEI moves it, its item list taking the right): a 120 x 32 panel per
 	           effect with the glyph, the name and level in white and the time in grey, 33 apart
-	           (closer when more than five need the room, as Minecraft squeezes them). A panel
-	           screen (the Options menu, the skill tree, a structure form: Screens.panelOpen) hides
-	           both, as Minecraft's menus show no effects.
+	           (closer when more than five need the room, as Minecraft squeezes them). It draws
+	           over the screens' darkened backdrop (DisplayOrder 10 while shown, above Screens' 9,
+	           under the cursor's 20), as Minecraft draws it over renderBackground, and never takes
+	           clicks. When it would reach the screen's panels (Screens.screenLeft) it shrinks to
+	           Minecraft's compact list, the glyphs alone in 32 wide panels, and hides when even
+	           that doesn't fit. A panel screen (the Options menu, the skill tree, a structure
+	           form: Screens.panelOpen) hides both, as Minecraft's menus show no effects.
 	Scaled like the toasts (Style.guiScale: the GUI Scale setting, touch screens), hidden with the
 	HUD (the world map hides it) and with Config.Effects.Hud off. Built again only when the server's
 	effects come in another set or order (a refresh only takes the new times); a frame only fades
@@ -54,6 +58,11 @@ local HEIGHT = ROW * 2 + 12
 -- The inventory list's panels and their spacing (Minecraft: 120 x 32, 33 apart; with more than
 -- five, 132 / (count - 1)).
 local LIST_WIDTH, LIST_HEIGHT = 120, 32
+-- Minecraft's compact list (no room for the names): the glyph alone.
+local COMPACT_WIDTH = 32
+-- DisplayOrder of the icons (with the toasts) and of the list (over Screens' backdrop at 9,
+-- under the cursor and tooltip at 20).
+local ICONS_ORDER, LIST_ORDER = 7, 10
 local LIST_STEP = 33
 local LIST_ROOM = 132
 -- Screen pixels from the left edge and the top for the list.
@@ -118,7 +127,7 @@ function EffectHud.start()
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = false
 	-- (With the toasts: over the minimap, under WAILA, the HUD and the screens' tooltips.)
-	gui.DisplayOrder = 7
+	gui.DisplayOrder = ICONS_ORDER
 	-- Children draw over their parents whatever their ZIndex (Style's rule: a list panel's face,
 	-- glyph and text sit inside its outline frame; with Global ordering the outline, at a higher
 	-- ZIndex, covered them all: an empty black box).
@@ -161,8 +170,10 @@ function EffectHud.start()
 		end
 	end
 
-	-- Draws the icons and the list again from the effects the server sent.
+	-- Draws the icons and the list again from the effects the server sent (`compact`: the list
+	-- with the glyphs alone).
 	local lastLayout = ""
+	local compact = false
 	local function build()
 		local now = os.clock()
 		local entries = EffectState.list(now)
@@ -177,6 +188,7 @@ function EffectHud.start()
 		for _, entry in rest do
 			table.insert(parts, `{entry.effect}:{entry.amplifier}:{entry.ambient}`)
 		end
+		table.insert(parts, if compact then "c" else "f")
 		local key = table.concat(parts, " ")
 		if key == lastLayout then
 			local byEffect: { [number]: Effects.Entry } = {}
@@ -244,12 +256,19 @@ function EffectHud.start()
 		local all = table.clone(good)
 		table.move(rest, 1, #rest, #all + 1, all)
 		local step = if #all > 5 then math.min(LIST_STEP, LIST_ROOM // (#all - 1)) else LIST_STEP
-		list.Size = UDim2.fromOffset(LIST_WIDTH, step * math.max(#all - 1, 0) + LIST_HEIGHT)
+		local width = if compact then COMPACT_WIDTH else LIST_WIDTH
+		list.Size = UDim2.fromOffset(width, step * math.max(#all - 1, 0) + LIST_HEIGHT)
 		for i, entry in all do
 			local y = (i - 1) * step
-			local panel = Style.panel(list, 0, y, LIST_WIDTH, LIST_HEIGHT)
+			local panel = Style.panel(list, 0, y, width, LIST_HEIGHT)
 			panel.ZIndex = i * 10
+			-- (The list never takes the screen's clicks.)
+			panel.Active = false
 			drawIcon(panel, 4, 4, entry, 4)
+			if compact then
+				table.insert(rows, { entry = entry, seconds = -1, alpha = 1 })
+				continue
+			end
 			Style.shadowText(
 				panel,
 				Effects.levelName(entry.effect, entry.amplifier),
@@ -286,9 +305,25 @@ function EffectHud.start()
 		if not on then
 			return
 		end
-		if holder.Visible == screen then
+		local order = if screen then LIST_ORDER else ICONS_ORDER
+		if gui.DisplayOrder ~= order then
+			gui.DisplayOrder = order
+		end
+		-- The list beside the screen's panels: full, compact, or none when even that would reach them.
+		local listShown = screen
+		if screen then
+			local left = Screens.screenLeft()
+			local room = if left then left - LIST_MARGIN * 2 else math.huge
+			local wantCompact = LIST_WIDTH * listScale.Scale > room
+			listShown = COMPACT_WIDTH * listScale.Scale <= room
+			if wantCompact ~= compact then
+				compact = wantCompact
+				build()
+			end
+		end
+		if holder.Visible == screen or list.Visible ~= listShown then
 			holder.Visible = not screen
-			list.Visible = screen
+			list.Visible = listShown
 		end
 		-- (The minimap setting moves the toast's place: follow it.)
 		layout()
