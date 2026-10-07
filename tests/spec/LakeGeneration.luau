@@ -724,10 +724,11 @@ return function(t, shared, require)
 			end
 			return os.clock() - t0
 		end
-		-- The best of three runs each, alternating, so a busy machine skews both alike.
+		-- The best of five runs each, alternating, so a busy machine skews both alike (three were
+		-- not enough under a loaded full suite: one slow run on each side could pass 20%).
 		local was = { Config.Lakes.Water.Enabled, Config.Lakes.Puddles.Enabled }
 		local with, without = math.huge, math.huge
-		for _ = 1, 3 do
+		for _ = 1, 5 do
 			with = math.min(with, run())
 			Config.Lakes.Water.Enabled, Config.Lakes.Puddles.Enabled = false, false
 			without = math.min(without, run())
