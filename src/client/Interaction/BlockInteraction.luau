@@ -13,7 +13,9 @@
 
 	  Survival  mining takes time: Shared/Mining's progress for the held tool (its speed on the
 	            block's kind, and whether it can harvest it) is added at a fixed 20 ticks per second
-	            (slower in the air and with the eyes under water) and the block breaks at 1, then a
+	            (slower in the air and with the eyes under water, faster with Progression's mining
+	            perks: Player/ProgressionState.miningFactor, as the server's check) and the block
+	            breaks at 1, then a
 	            Mining.DELAY_TICKS pause comes before the next one. Switching to another item starts
 	            the block over (Minecraft's sameDestroyTarget). The server is told when mining
 	            starts and stops (ClientMessage.Mine) and checks the time, with the tool in hand,
@@ -65,7 +67,8 @@
 	                flammable one). Breaking a fire puts it out (it breaks at once). On TNT or a
 	                Nuke, any face: the server lights it (TntBlock.use).
 	Tough As Nails' campfire, after a block's menu: dirty water (a bottle, a canteen) clicked on a
-	Campfire boils clean, one a click and at most one every Boiling.INTERVAL ticks (a click too
+	Campfire boils clean, one a click and at most one every Boiling.INTERVAL ticks (half that with
+	Progression's Firekeeper: ProgressionState.boilSpeed, as the server's check) (a click too
 	soon sends nothing; held, it boils when the water is ready) (Shared/ToughAsNails/Boiling, the
 	campfire's own use: in adventure too, not sneaking; sent as a UseItem, not predicted).
 	Tough As Nails' water (Interaction/Drinking), after a block's menu and before anything else, in
@@ -150,6 +153,7 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
 local Drinking = require(script.Parent.Drinking)
@@ -659,7 +663,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local view = MovementController.current
 		local onGround = if view then view.state.onGround else true
 		local underWater = if view then view.state.eyeInWater else false
-		local perTick = Mining.progressPerTick(hit.block, onGround, underWater, tool)
+		local perTick =
+			Mining.progressPerTick(hit.block, onGround, underWater, tool, ProgressionState.miningFactor(tool))
 		if perTick <= 0 then
 			-- Unbreakable: it only sounds hit.
 			if SoundRules.hitTick(hits, hit.x, hit.y, hit.z, hit.block) then
@@ -879,7 +884,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if hit and ray and Boiling.applies(hit.block, stack, mode, sneaking) then
 			local now = os.clock()
 			if
-				Boiling.ready(if lastBoil then now - lastBoil else nil)
+				Boiling.ready(if lastBoil then now - lastBoil else nil, nil, ProgressionState.boilSpeed())
 				and sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking)
 			then
 				lastBoil = now

@@ -31,7 +31,8 @@
 	             a furnace with results pushes them into the chests next to it (Transmitters/Eject,
 	             Mekanism's ejector; blocks read without generating terrain, as the pipes do).
 	  Tools      ServerNet times and harvests breaks with `heldTool` and wears the tool with
-	             `wearTool` (InventoryState.wearHeld: at its durability it breaks).
+	             `wearTool` (InventoryState.wearHeld: at its durability it breaks), less with
+	             Progression's wear perks (`setWearFilter`).
 	  Placing    ServerNet asks `place` before putting a block down: survival players use up the held
 	             item; refused edits are still acknowledged so the client's prediction is undone.
 	             It hands ServerNet the stack the block came from (data intact), for the sustained
@@ -233,10 +234,23 @@ function Inventories.containerChanged(x: number, y: number, z: number)
 	Containers.default:markActive(x, y, z)
 end
 
+-- Of `amount` wear points on a player's tool, those that land (Progression's Smithing; set by the
+-- server script: Players/Progression.wear). nil: all of them.
+local wearFilter: ((player: Player, amount: number) -> number)? = nil
+
+function Inventories.setWearFilter(filter: ((player: Player, amount: number) -> number)?)
+	wearFilter = filter
+end
+
 -- The tool in the player's hand was used `amount` times (ServerNet's breaks); at its durability it
--- breaks, which everyone near hears (the owner too: clients don't predict wear).
+-- breaks, which everyone near hears (the owner too: clients don't predict wear). The wear
+-- filter (perks) may skip some of it.
 function Inventories.wearTool(player: Player, amount: number)
-	if state:wearHeld(player, amount) then
+	local filter = wearFilter
+	if filter then
+		amount = filter(player, amount)
+	end
+	if amount >= 1 and state:wearHeld(player, amount) then
 		Sounds.playAt(player, "entity.item.break")
 	end
 end

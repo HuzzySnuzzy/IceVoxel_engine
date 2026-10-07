@@ -35,6 +35,9 @@
 	                   use them), and generated structures' chests filled on first use
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
 	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state)
+	 11. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
+	                   earn mining, crafting, smelting and exploring, the recipe gate on their
+	                   windows, the perks the parts above ask for, saving, /knowledge and /age)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -71,6 +74,7 @@ local ItemUse = require(Server.Players.ItemUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
+local Progression = require(Server.Players.Progression)
 
 local seed = Config.Seed or Random.new():NextInteger(1, 2_147_483_646)
 Shared:SetAttribute("Seed", seed)
@@ -113,6 +117,8 @@ net.setRules({
 	heldTool = Inventories.heldTool,
 	wearTool = Inventories.wearTool,
 	broke = ToughAsNails.blockBroken,
+	mined = Progression.mined,
+	miningFactor = Progression.miningFactor,
 	chunksSent = function(player: Player, coords: { { number } })
 		Transmitters.sendChunks(player, coords)
 		Machines.sendChunks(player, coords)
@@ -129,6 +135,12 @@ Machines.start(net, world)
 StructureBlocks.start(net, world)
 -- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
 ToughAsNails.start(net, world)
+-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
+-- perks go to the parts that apply them.
+Progression.start(net, world)
+Inventories.setWearFilter(Progression.wear)
+ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
+ItemUse.setBoilSpeed(Progression.boilSpeed)
 Spawning.start(world)
 Teleport.start(world, net)
 WaypointStore.start(net)

@@ -46,6 +46,8 @@
 	  Wear      a survival break wears the tool in hand (Mining.wear: 1, 2 for swords, nothing on
 	            blocks that break at once, but Shears 1 on every block); creative players never
 	            wear their tools.
+	  Placed    `placed`: was a block put there after generation (the edit list)? Breaking one
+	            gives no knowledge (server Players/Progression).
 	  Menus     blocks that open a window (chests, furnaces, crafting tables) close it for everyone
 	            using them when they go; only containers (chests, furnaces) hold items to drop.
 	  Data      Mekanism's sustained data: a block whose state some part of the server keeps (a
@@ -61,6 +63,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local ChunkLayout = require(Shared.World.ChunkLayout)
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -148,7 +151,8 @@ end
 --[[
 	May a player break `block` at (x, y, z) at time `now`, having started mining `mine`, holding
 	`tool` (an item id, nil = bare hands) now? `creative`: the instabuild ability (breaks at once).
-	Players who may not edit at all (`mayEdit`) never get this far.
+	`factor`: the player's own mining speed (Progression's perks, Mining). Players who may not
+	edit at all (`mayEdit`) never get this far.
 ]]
 function EditRules.mayBreak(
 	block: number,
@@ -158,7 +162,8 @@ function EditRules.mayBreak(
 	y: number,
 	z: number,
 	now: number,
-	tool: number?
+	tool: number?,
+	factor: number?
 ): boolean
 	local d = def(block)
 	if d == nil or not d.breakable or d.hardness < 0 then
@@ -172,7 +177,7 @@ function EditRules.mayBreak(
 	if mine == nil or mine.x ~= x or mine.y ~= y or mine.z ~= z then
 		return false
 	end
-	return Mining.mayBreak(block, now - mine.startedAt, nil, tool)
+	return Mining.mayBreak(block, now - mine.startedAt, nil, tool, factor)
 end
 
 --[[
@@ -269,6 +274,19 @@ function EditRules.harvested(
 		end
 	end
 	return block, y
+end
+
+--[[
+	Was `block` at (x, y, z) put there after generation (placed by a player, or left by a block
+	update: lava's cobblestone)? The chunk's edit list holds every change from the generated
+	terrain, as Behaviours/Leaves tells placed leaves. Progression gives no knowledge for breaking
+	one (a placed ore block, a cobblestone generator). Never generates terrain.
+]]
+function EditRules.placed(world: World, x: number, y: number, z: number, block: number): boolean
+	local size = ChunkLayout.SIZE
+	local cx, cz = x // size, z // size
+	local edits = world:chunkEdits(cx, cz)
+	return edits ~= nil and edits[ChunkLayout.localIndex(x - cx * size, y, z - cz * size)] == block
 end
 
 --[[

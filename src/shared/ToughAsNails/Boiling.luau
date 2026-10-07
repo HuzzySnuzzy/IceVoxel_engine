@@ -48,10 +48,15 @@ Boiling.SOUND = "block.campfire.boil"
 Boiling.INTERVAL = 60
 Boiling.LEEWAY = 4
 
--- Has the water had time to boil `elapsed` seconds after the player's last boil (nil: none yet),
--- `leeway` ticks short of INTERVAL allowed (see the header)?
-function Boiling.ready(elapsed: number?, leeway: number?): boolean
-	return elapsed == nil or elapsed >= (Boiling.INTERVAL - (leeway or 0)) / 20
+--[[
+	Has the water had time to boil `elapsed` seconds after the player's last boil (nil: none yet),
+	`leeway` ticks short of INTERVAL allowed (see the header)? `speed`: how many times as fast the
+	player boils (default 1; Progression's Firekeeper 2: INTERVAL / 2), the same on the client's
+	wait and the server's check.
+]]
+function Boiling.ready(elapsed: number?, leeway: number?, speed: number?): boolean
+	local interval = Boiling.INTERVAL / (if speed and speed > 0 then speed else 1)
+	return elapsed == nil or elapsed >= (interval - (leeway or 0)) / 20
 end
 
 -- Does `stack` boil clean (dirty water, `Drinks.isDirty`)?

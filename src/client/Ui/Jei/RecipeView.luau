@@ -29,6 +29,10 @@
 	                        (fuel: "Makes 10 MJ" and "2.5 kJ/t for 200 s")
 	            A fluid stack stands for its bucket in navigation (clicks, R / U, gamepad).
 
+	A recipe the player may not make yet (Progression: a later Age's result; the controller's
+	`setLocks`, JeiData.lockText) has its output greyed with a padlock on it; hovering the output
+	adds what it needs ("Requires the Iron Age", `lockAt`), and its "+" is greyed with the same.
+
 	Navigation (clicking items in it, R / U, Back, history) is the controller's (Ui/Jei): this
 	module draws one state and hit-tests (screen pixels, the InputObject.Position space).
 ]]
@@ -75,6 +79,22 @@ local UNLIT_PALETTE: { [string]: Color3 } = {
 	Y = Style.Colour.Slot,
 	W = Style.Colour.Slot,
 }
+-- The padlock over a locked recipe's output (7 x 8): K outline, Y body, S shackle.
+local PADLOCK_ART = {
+	"..KKK..",
+	".KSKSK.",
+	".KS.SK.",
+	"KKKKKKK",
+	"KYYYYYK",
+	"KYYKYYK",
+	"KYYYYYK",
+	"KKKKKKK",
+}
+local PADLOCK_PALETTE: { [string]: Color3 } = {
+	K = Color3.fromRGB(40, 30, 10),
+	Y = Color3.fromRGB(230, 180, 40),
+	S = Color3.fromRGB(200, 200, 210),
+}
 -- JEI's shapeless mark: two arrows crossing over (9 x 10).
 local SHAPELESS_ART = {
 	".....#...",
@@ -102,6 +122,9 @@ type EntryWidget = {
 	cells: { CellWidget },
 	fluids: { FluidWidget },
 	output: ItemIcon.Slot?,
+	-- The padlock over a locked output, and what the recipe needs (nil: not locked).
+	padlock: Frame?,
+	lock: string?,
 	plus: TextButton?,
 	setPlus: ((enabled: boolean) -> ())?,
 	status: JeiTransfer.Status?,
@@ -133,6 +156,9 @@ export type RecipeView = {
 	turn: (self: RecipeView, delta: number) -> (),
 	selectCategory: (self: RecipeView, index: number) -> (),
 	setTransfer: (self: RecipeView, statusOf: (entry: Entry) -> JeiTransfer.Status?) -> (),
+	setLocks: (self: RecipeView, lockOf: (entry: Entry) -> string?) -> (),
+	refreshLocks: (self: RecipeView) -> (),
+	lockAt: (self: RecipeView, point: Vector2) -> string?,
 	refreshTransfer: (self: RecipeView) -> (),
 	render: (self: RecipeView, now: number, point: Vector2?) -> (),
 	itemAt: (self: RecipeView, point: Vector2) -> (number?, { number }?),
@@ -157,6 +183,7 @@ type Self = RecipeView & {
 	byButton: { [GuiObject]: ItemIcon.ItemIcon },
 	fluidButtons: { [GuiObject]: number },
 	statusOf: ((entry: Entry) -> JeiTransfer.Status?)?,
+	lockOf: ((entry: Entry) -> string?)?,
 }
 
 local RecipeView = {}
@@ -232,6 +259,7 @@ function RecipeView.new(parent: Instance): RecipeView
 			byButton = {},
 			fluidButtons = {},
 			statusOf = nil,
+			lockOf = nil,
 		}, RecipeView) :: any
 	) :: Self
 
@@ -351,6 +379,8 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		cells = {},
 		fluids = {},
 		output = nil,
+		padlock = nil,
+		lock = nil,
 		plus = nil,
 		setPlus = nil,
 		status = nil,
@@ -398,6 +428,17 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		slot.icon:set(output.item, output.count)
 		widget.output = slot
 		self.byButton[slot.button] = slot.icon
+		-- (Shown while the recipe is locked: `refreshLocks`.)
+		local padlock = Instance.new("Frame")
+		padlock.Name = "Padlock"
+		padlock.BackgroundTransparency = 1
+		padlock.Position = UDim2.fromOffset(out.x + Style.ITEM - 7, out.y - 1)
+		padlock.Size = UDim2.fromOffset(7, 8)
+		padlock.ZIndex = 9
+		padlock.Visible = false
+		padlock.Parent = frame
+		Style.pixelArt(padlock, 0, 0, PADLOCK_ART, PADLOCK_PALETTE, 1)
+		widget.padlock = padlock
 	end
 	local arrow = layout.arrow
 	if arrow then
@@ -551,6 +592,7 @@ local function build(self: Self, canBack: boolean?)
 		table.insert(self.widgets, buildEntry(self, entries[first + i], ox, oy))
 	end
 	applyTransfer(self)
+	self:refreshLocks()
 	if wasSelected and (wasSelected.Parent == nil or not Style.shown(wasSelected)) then
 		GuiService.SelectedObject = self:firstSelectable()
 	end
@@ -590,6 +632,45 @@ function RecipeView.selectCategory(self: Self, index: number)
 	state.category = index
 	state.page = 1
 	build(self)
+end
+
+--[[
+	What each shown recipe still needs (Progression; nil: nothing): its output is greyed under a
+	padlock while it needs something. `lockOf` answers JeiData.lockText for an entry.
+]]
+function RecipeView.setLocks(self: Self, lockOf: (entry: Entry) -> string?)
+	self.lockOf = lockOf
+	self:refreshLocks()
+end
+
+-- The locks again (the player's progression changed).
+function RecipeView.refreshLocks(self: Self)
+	local lockOf = self.lockOf
+	for _, widget in self.widgets do
+		local lock = if lockOf then lockOf(widget.entry) else nil
+		widget.lock = lock
+		local output, padlock = widget.output, widget.padlock
+		if output then
+			output.icon:setDimmed(lock ~= nil)
+		end
+		if padlock then
+			padlock.Visible = lock ~= nil
+		end
+	end
+end
+
+-- What the recipe whose output is under `point` still needs (nil: nothing, or no output there).
+function RecipeView.lockAt(self: Self, point: Vector2): string?
+	if not self.root.Visible then
+		return nil
+	end
+	for _, widget in self.widgets do
+		local output = widget.output
+		if widget.lock and output and Style.contains(output.button, point) then
+			return widget.lock
+		end
+	end
+	return nil
 end
 
 --[[

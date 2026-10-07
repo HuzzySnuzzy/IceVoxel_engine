@@ -39,6 +39,15 @@
 	and pick block from nothing. Adventure plays like survival. What a game mode may do at all is
 	`allows` (spectators look into menus but change nothing), checked before `apply`.
 
+	Progression's recipe gate (Window `recipes`, Shared/Progression.allows for the window's
+	player): a crafting result it refuses is never offered (`updateCraft` leaves the result slot
+	empty, Minecraft's doLimitedCrafting), so it can't be taken however the client clicks, and a
+	furnace's input or a machine's slot takes nothing that smelts into a refused result (`mayPlace`
+	and the merging of shift clicks), as furnaces smelt for nobody in particular. Windows without
+	one (no player: the tests' grids, gating off, creative players) make everything. A window's
+	`onTake` (the server's) hears of every crafting result taken and every stack taken out of an
+	output (Minecraft's ResultSlot and FurnaceResultSlot checkTakeAchievements): knowledge.
+
 	Stacks are treated as values: a changed slot gets a new table, so no table is ever shared by
 	two slots and a caller holding an old stack never sees it change. A stack's `damage` (a tool's
 	wear) and item data (`data`, Items) travel with every copy, and two stacks only stack together
@@ -152,6 +161,23 @@ local function isOutput(window: Window, index: number): boolean
 end
 
 --[[
+	Does the window's recipe gate (Window `recipes`) keep `item` out of window slot `index`: a
+	furnace's input or a machine's slot, and the item smelts into a result the player may not make?
+]]
+local function gated(window: Window, index: number, item: number): boolean
+	local recipes = window.recipes
+	local container = window.container
+	if recipes == nil or container == nil or not isInt(index) or index < 0 or index >= container.size then
+		return false
+	end
+	if not (isMachine(container) or (container.kind == "furnace" and index == FURNACE_INPUT - 1)) then
+		return false
+	end
+	local result = Smelting.result(item)
+	return result ~= nil and not recipes(result.item)
+end
+
+--[[
 	Minecraft's Slot.getMaxStackSize() (without an item): 1 for armor, a machine slot's limit,
 	else the container's 64.
 ]]
@@ -251,7 +277,7 @@ end
 --[[
 	Slot.mayPlace: armor slots take only armor of their slot, a furnace's fuel slot only what burns,
 	a machine's slots what its kind says, crafting results and outputs nothing, other slots any
-	known item.
+	known item; and a furnace's input or a machine nothing the recipe gate refuses (`gated`).
 ]]
 function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	if not Items.isValid(item) then
@@ -261,7 +287,7 @@ function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	if store == "armor" then
 		return Items.armorSlot(item) == i
 	elseif store == "container" then
-		if isCraftResult(window, index) or isOutput(window, index) then
+		if isCraftResult(window, index) or isOutput(window, index) or gated(window, index, item) then
 			return false
 		end
 		local container = window.container :: Container
@@ -337,13 +363,24 @@ function Menu.updateCraft(window: Window)
 	if container == nil or width == 0 then
 		return
 	end
-	container.slots[RESULT] = Crafting.match(gridOf(container, width), width)
+	local result = Crafting.match(gridOf(container, width), width)
+	local recipes = window.recipes
+	if result and recipes and not recipes(result.item) then
+		-- (A result of a later Age: never offered.)
+		result = nil
+	end
+	container.slots[RESULT] = result
 end
 
 -- The result was taken (ResultSlot.onTake): one item less in every used grid slot, a new result.
 local function craft(window: Window)
 	local container = window.container :: Container
 	local width = gridWidth(container)
+	local taken = container.slots[RESULT]
+	local onTake = window.onTake
+	if onTake and taken then
+		onTake("craft", taken)
+	end
 	local after = Crafting.consume(gridOf(container, width), width)
 	for i = 1, width * width do
 		container.slots[RESULT + i] = copy(after[i])
@@ -558,7 +595,7 @@ local function moveItemStackTo(
 		local index = first
 		while count > 0 and index >= from and index < to do
 			local current = get(window, index)
-			if current and same(current, stack) then
+			if current and same(current, stack) and not gated(window, index, item) then
 				local total = current.count + count
 				if total <= max then
 					count = 0
@@ -606,7 +643,7 @@ local function moveItemStackToSlots(window: Window, stack: Stack, indices: { num
 			end
 			local current = get(window, index)
 			local max = maxStackFor(window, index, item)
-			if current and same(current, stack) and current.count < max then
+			if current and same(current, stack) and current.count < max and not gated(window, index, item) then
 				local put = math.min(count, max - current.count)
 				set(window, index, make(item, current.count + put, damage, data))
 				count -= put
@@ -1105,8 +1142,31 @@ end
 	(GameMode.instabuild).
 ]]
 function Menu.apply(window: Window, action: Action, creative: boolean): { Stack }
+	local onTake = window.onTake
+	local container = window.container
+	-- (The outputs as they were, to tell the server's onTake what was taken out of them.)
+	local outputs: { [number]: Stack }? = nil
+	if onTake and container and (container.kind == "furnace" or isMachine(container)) then
+		local found: { [number]: Stack } = {}
+		for index = 0, container.size - 1 do
+			local stack = container.slots[index + 1]
+			if stack and isOutput(window, index) then
+				found[index + 1] = stack
+			end
+		end
+		outputs = found
+	end
 	local thrown = applyAction(window, action, creative)
 	Menu.updateCraft(window)
+	if onTake and container and outputs then
+		for slot, before in outputs do
+			local after = container.slots[slot]
+			local left = if after and after.item == before.item then after.count else 0
+			if left < before.count then
+				onTake("smelt", make(before.item, before.count - left, before.damage, before.data) :: Stack)
+			end
+		end
+	end
 	return thrown
 end
 
@@ -1198,7 +1258,14 @@ function Menu.copyWindow(window: Window): Window
 			data = if container.data then table.clone(container.data) else nil,
 		}
 	end
-	return { id = window.id, inventory = Menu.copyInventory(window.inventory), container = copied }
+	-- (The recipe gate goes along, so a copy predicts as the window does; onTake, the server's,
+	-- doesn't.)
+	return {
+		id = window.id,
+		inventory = Menu.copyInventory(window.inventory),
+		container = copied,
+		recipes = window.recipes,
+	}
 end
 
 --[[ Pick block ]]

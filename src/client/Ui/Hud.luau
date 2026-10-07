@@ -15,6 +15,12 @@
 	             10 hearts (the Humanoid's health as 20 half hearts) and, above them, 10 armor icons
 	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
 	             makes them shake; damage makes their outline blink.
+	  knowledge  survival and adventure only (Minecraft's hasExperience), with Config.Progression on:
+	             Minecraft's experience bar, 182 x 5 just above the hotbar (KNOWLEDGE_Y, where
+	             Minecraft's layout already leaves it room: no row moved for it), filling green with
+	             the progress into the level (Shared/Progression/Knowledge.progress), and the level
+	             in green with a black outline over its middle, between the hearts and the
+	             droplets (shown from level 1, Minecraft's). From Player/ProgressionState.
 	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
 	             droplets on the right level with the hearts, the temperature thermometer above
 	             them (level with the armor), Climate Clemency's time left and the warmth and
@@ -22,7 +28,9 @@
 	             right side, where they are), the numbers a held Thermometer reads above those,
 	             and frost or heat closing in from the screen's edges.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
-	             the spectator menu's middle click), a gear at its start the Options menu
+	             the spectator menu's middle click), a gear at its start the Options menu, and a
+	             skill tree button over the gear the skill tree (Ui/SkillTreeScreen; with
+	             Config.Progression on)
 
 	Game modes (Shared/GameMode): creative has no hearts and its item name sits lower. Spectators
 	(no showsHud) get neither the hotbar nor its item name, hearts or armor: their number keys,
@@ -50,10 +58,12 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
+local Knowledge = require(Shared.Progression.Knowledge)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SpectatorGui = require(script.Parent.SpectatorGui)
 local SurvivalHud = require(script.Parent.SurvivalHud)
@@ -72,6 +82,28 @@ local HEARTS_Y = BAR_Y - 17
 local ARMOR_Y = HEARTS_Y - 10
 local NAME_Y_SURVIVAL = BAR_Y - 37
 local NAME_Y_CREATIVE = BAR_Y - 23
+-- Minecraft's experience bar: 182 x 5, 7 above the hotbar's top (its y is height - 29); the level
+-- 13 above it (height - 35), centred, over the gap between the hearts and the droplets.
+local KNOWLEDGE_Y = BAR_Y - 7
+local KNOWLEDGE_H = 5
+local LEVEL_Y = BAR_Y - 13
+local LEVEL_GREEN = Color3.fromRGB(128, 255, 32)
+local KNOWLEDGE_EMPTY = Color3.fromRGB(30, 42, 20)
+local KNOWLEDGE_FILL = Color3.fromRGB(110, 220, 40)
+local KNOWLEDGE_SHINE = Color3.fromRGB(170, 255, 90)
+-- The touch skill tree button's art (11 x 10): three nodes joined, G the nodes, # the lines.
+local SKILLS_ART = {
+	"....GGG....",
+	"....GGG....",
+	".....#.....",
+	".#########.",
+	".#.......#.",
+	"GGG.....GGG",
+	"GGG.....GGG",
+	".#.......#.",
+	".#.......#.",
+	"GGG.....GGG",
+}
 -- The spectator menu's label: 35 pixels above the screen's bottom (SpectatorGui.renderTooltip).
 local SPECTATOR_LABEL_Y = HEIGHT - 35
 -- The name shows this long (Minecraft: 40 ticks), fading over the last part (10 ticks).
@@ -142,6 +174,7 @@ local wheelHandler: ((delta: number) -> ())? = nil
 local inputTaken = false
 local inventoryHandler: (() -> ())? = nil
 local settingsHandler: (() -> ())? = nil
+local skillsHandler: (() -> ())? = nil
 -- The wheel selects hotbar slots (else it zooms the camera).
 local wheelSelects = Config.Interaction.ScrollWheelHotbar
 local previewWindow: Types.Window? = nil
@@ -196,6 +229,11 @@ end
 -- The touch gear button calls `handler` (the Options menu).
 function Hud.onSettingsButton(handler: () -> ())
 	settingsHandler = handler
+end
+
+-- The touch skill tree button calls `handler` (Ui/SkillTreeScreen).
+function Hud.onSkillsButton(handler: () -> ())
+	skillsHandler = handler
 end
 
 -- The Scroll Wheel setting: the wheel selects hotbar slots (true) or zooms the camera.
@@ -411,6 +449,61 @@ function Hud.start()
 		end
 	end)
 
+	-- The touch skill tree button over the gear (progression on).
+	local skills = Style.frame(canvas, -(TOUCH_BUTTON + 2), BAR_Y - 24, TOUCH_BUTTON, 22, Color3.new(0, 0, 0), 1)
+	skills.BackgroundTransparency = 0.55
+	table.insert(coverage, skills)
+	Style.border(skills, 0, 0, TOUCH_BUTTON, 22, 1, Color3.fromRGB(20, 20, 20), 2)
+	Style.border(skills, 1, 1, TOUCH_BUTTON - 2, 20, 2, Color3.fromRGB(150, 150, 150), 3)
+	Style.pixelArt(skills, 6, 6, SKILLS_ART, { G = LEVEL_GREEN, ["#"] = Style.Colour.Text }, 4)
+	local skillsButton = Instance.new("TextButton")
+	skillsButton.Text = ""
+	skillsButton.BackgroundTransparency = 1
+	skillsButton.Size = UDim2.fromScale(1, 1)
+	skillsButton.ZIndex = 6
+	skillsButton.Parent = skills
+	skillsButton.Activated:Connect(function()
+		if skillsHandler then
+			SoundPlayer.click()
+			skillsHandler()
+		end
+	end)
+
+	--[[ Knowledge (Minecraft's experience bar) ]]
+
+	local knowledge = Instance.new("Frame")
+	knowledge.Name = "Knowledge"
+	knowledge.BackgroundTransparency = 1
+	knowledge.Size = UDim2.fromScale(1, 1)
+	knowledge.Visible = false
+	knowledge.Parent = canvas
+	local knowledgeBar = Style.frame(knowledge, 0, KNOWLEDGE_Y, WIDTH, KNOWLEDGE_H, Color3.new(0, 0, 0), 2)
+	Style.frame(knowledgeBar, 1, 1, WIDTH - 2, KNOWLEDGE_H - 2, KNOWLEDGE_EMPTY, 3)
+	local knowledgeFill = Style.frame(knowledgeBar, 1, 1, 0, KNOWLEDGE_H - 2, KNOWLEDGE_FILL, 4)
+	Style.frame(knowledgeFill, 0, 0, WIDTH, 1, KNOWLEDGE_SHINE, 5)
+	knowledgeFill.ClipsDescendants = true
+	-- The level: green over a black outline (Minecraft draws it four times offset in black first).
+	local levelOutline: { TextLabel } = {}
+	for _, offset in { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } } do
+		local label = Style.text(
+			knowledge,
+			"",
+			offset[1],
+			LEVEL_Y + offset[2],
+			WIDTH,
+			8,
+			Color3.new(0, 0, 0),
+			6,
+			Enum.TextXAlignment.Center
+		)
+		table.insert(levelOutline, label)
+	end
+	local levelLabel = Style.text(knowledge, "", 0, LEVEL_Y, WIDTH, 8, LEVEL_GREEN, 7, Enum.TextXAlignment.Center)
+	local knowledgeDirty = true
+	ProgressionState.changed:Connect(function()
+		knowledgeDirty = true
+	end)
+
 	--[[ Hearts and armor ]]
 
 	local hearts: { Icon } = {}
@@ -445,6 +538,7 @@ function Hud.start()
 		local touch = UserInputService.TouchEnabled
 		more.Visible = touch
 		gear.Visible = touch
+		skills.Visible = touch and ProgressionState.enabled()
 		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
 		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
 	end
@@ -533,6 +627,23 @@ function Hud.start()
 			armorRow.Visible = points > 0
 		end
 		SurvivalHud.render(now, survival, if held then held.item else nil)
+
+		-- Knowledge (survival and adventure, once the server sent it).
+		local status = ProgressionState.get()
+		local knows = survival and status ~= nil
+		if knowledge.Visible ~= knows then
+			knowledge.Visible = knows
+		end
+		if knows and status and knowledgeDirty then
+			knowledgeDirty = false
+			local level, into, needed = Knowledge.progress(status.points)
+			knowledgeFill.Size = UDim2.fromOffset(math.floor(into / math.max(needed, 1) * (WIDTH - 2)), KNOWLEDGE_H - 2)
+			local text = if level > 0 then tostring(level) else ""
+			levelLabel.Text = text
+			for _, label in levelOutline do
+				label.Text = text
+			end
+		end
 		if not survival then
 			return
 		end

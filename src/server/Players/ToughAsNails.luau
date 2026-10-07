@@ -55,6 +55,8 @@
 	               fill            a Glass Bottle or canteen at a water source within reach:
 	                               filled (Drinks.fill), item.bottle.fill for everyone near.
 	             Sounds a player's requests cause use their budget (Audio/Sounds.allow).
+	  Perks      Progression's (`setPerks`): thirst drains slower (Thirst.tick's `rate`), and steps
+	             of insulation are added to the armor's.
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
 	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks.
@@ -133,6 +135,17 @@ type Record = {
 }
 
 local ToughAsNailsServer = {}
+
+--[[
+	Progression's perks for a player (server Players/Progression; set by the server script): how
+	fast their thirst drains (Hardy: 0.9) and the steps of warmth and of cooling they add to their
+	armor's (Insulation: 1). nil: none.
+]]
+export type Perks = {
+	thirstRate: (player: Player) -> number,
+	insulation: (player: Player) -> number,
+}
+local perks: Perks? = nil
 
 local records: { [Player]: Record } = {}
 -- Players whose first character since joining has come (their next ones are respawns).
@@ -301,6 +314,11 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 		if window then
 			warmth, cooling, freezeImmune = Climate.insulation(window.inventory.armor)
 		end
+		if perks then
+			local steps = perks.insulation(player)
+			warmth += steps
+			cooling += steps
+		end
 		if sample then
 			local env = Climate.environment(view, feet.X, feet.Y, feet.Z, TimeOfDay.get(), {
 				wet = Temperature.isWet(temperature),
@@ -327,7 +345,8 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			HEALTH,
 			if hot then Config.ToughAsNails.HotExhaustion else 0,
 			Temperature.clement(temperature),
-			stopped
+			stopped,
+			if perks then perks.thirstRate(player) else nil
 		)
 		damage += lost
 		heal += gained
@@ -460,6 +479,11 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 end
 
 --[[ API ]]
+
+-- Sets Progression's perks (see Perks; nil: none).
+function ToughAsNailsServer.setPerks(value: Perks?)
+	perks = value
+end
 
 -- ServerNet's `broke` rule: `player` broke `block` in survival (Minecraft's EXHAUSTION_MINE).
 function ToughAsNailsServer.blockBroken(player: Player, _block: number)

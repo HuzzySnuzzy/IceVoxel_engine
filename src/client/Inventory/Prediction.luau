@@ -19,6 +19,10 @@
 	grid, Types.newWindow), as the server does; window 0 keeps its own. Crafting results come from
 	Menu, the same way on both sides.
 
+	Progression's recipe gate (`setRecipes`: Shared/Progression.allows for this player, as the
+	server's window has it) goes on every window the prediction makes, so a locked crafting result
+	is never predicted (the screens draw it greyed from Crafting.match themselves).
+
 	Every action goes through the game mode's rules as on the server: an action the mode does not
 	allow (Menu.allows: a spectator only selects hotbar slots and closes windows) changes nothing,
 	and Menu.apply gets the mode's instabuild ability (creative slots, middle-click clones, placing
@@ -51,10 +55,13 @@ export type Prediction = {
 	pending: { Pending },
 	-- base + pending: what the player sees.
 	predicted: Window,
+	-- The recipe gate every window here gets (Types.Window `recipes`; nil: none).
+	recipes: ((item: number) -> boolean)?,
 
 	receive: (self: Prediction, snapshot: Types.Snapshot, mode: string) -> (),
 	push: (self: Prediction, action: Action, mode: string) -> number,
 	replay: (self: Prediction, mode: string) -> (),
+	setRecipes: (self: Prediction, recipes: ((item: number) -> boolean)?, mode: string) -> (),
 	window: (self: Prediction) -> Window,
 }
 
@@ -93,7 +100,12 @@ end
 
 -- A server snapshot arrived: it replaces the base, and the actions it includes stop being pending.
 function Prediction.receive(self: Prediction, snapshot: Types.Snapshot, mode: string)
-	self.base = { id = snapshot.window, inventory = snapshot.inventory, container = snapshot.container }
+	self.base = {
+		id = snapshot.window,
+		inventory = snapshot.inventory,
+		container = snapshot.container,
+		recipes = self.recipes,
+	}
 	self.ack = snapshot.ack
 	-- (Never reuse a number the server has seen, whatever happened before.)
 	if snapshot.ack >= self.nextSeq then
@@ -135,6 +147,18 @@ function Prediction.replay(self: Prediction, mode: string)
 		applyLocal(window, entry.action, mode)
 	end
 	self.predicted = window
+end
+
+--[[
+	Sets the recipe gate (nil: none) and rebuilds the prediction with it. The snapshot's own
+	crafting result was the server's, gated by the same rule.
+]]
+function Prediction.setRecipes(self: Prediction, recipes: ((item: number) -> boolean)?, mode: string)
+	self.recipes = recipes
+	local base = Menu.copyWindow(self.base)
+	base.recipes = recipes
+	self.base = base
+	self:replay(mode)
 end
 
 -- The predicted window. Read only: it is replaced (not updated) by snapshots.

@@ -75,6 +75,10 @@
 	                   3 cancel  let go early
 	                   4 hand    a sip from the water source with an empty hand
 	                   5 fill    fill the held Glass Bottle or canteen at the water source
+	  UnlockSkill    u8 skill: unlock node `skill` of the skill tree (its place in
+	                 Shared/Progression/Skills' list, 1-based); the server checks the Age, the
+	                 prerequisites and the skill points (Progression.canUnlock) and answers with a
+	                 Progress message, or a Notice saying why not
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -163,6 +167,14 @@
 	                 body temperature (Shared/ToughAsNails), sent to them alone when it changes
 	                 (at most every few ticks, and at once on joining and respawning); unknown
 	                 flags and out of range values are malformed
+	  Progress       u32 points (total knowledge, at most Knowledge.MAX_POINTS), u8 age (an
+	                 Ages index, 1..Ages.count), u8 n + n x u8 skill (unlocked nodes, Skills'
+	                 places, 1..Skills.count), u8 categories (= #Knowledge.CATEGORIES) +
+	                 categories x u16 count (discoveries by category, clamped to 65535), u8
+	                 milestones (= #Ages.MILESTONES) + ceil(milestones / 8) bytes of bits (bit i % 8
+	                 of byte i // 8: milestone i + 1 met): the player's own progression
+	                 (Shared/Progression.status), sent to them alone on joining (once loaded) and
+	                 after every change, at most one a frame; anything out of range is malformed
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -199,6 +211,7 @@ local GameMode = require(script.Parent.Parent.GameMode)
 local InventoryTypes = require(script.Parent.Parent.Inventory.Types)
 local Items = require(script.Parent.Parent.Items)
 local PlayerSettings = require(script.Parent.Parent.PlayerSettings)
+local Progression = require(script.Parent.Parent.Progression)
 local Settings = require(script.Parent.Parent.Structures.Settings)
 local Exertion = require(script.Parent.Parent.ToughAsNails.Exertion)
 local Temperature = require(script.Parent.Parent.ToughAsNails.Temperature)
@@ -223,6 +236,7 @@ Protocol.ClientMessage = {
 	SaveSettings = 15,
 	Exertion = 16,
 	Drink = 17,
+	UnlockSkill = 18,
 }
 
 Protocol.ServerMessage = {
@@ -243,6 +257,7 @@ Protocol.ServerMessage = {
 	Settings = 15,
 	Explosion = 16,
 	Survival = 17,
+	Progress = 18,
 }
 
 Protocol.EditAction = {
@@ -2298,6 +2313,109 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		effect = buffer.readu16(b, 10),
 		clemency = buffer.readu16(b, 12),
 	}
+end
+
+--[[ Progression (knowledge, Ages, skills) ]]
+
+-- A node to unlock (UnlockSkill): its place in Skills' list.
+function Protocol.encodeUnlockSkill(skill: number): buffer
+	local b = buffer.create(1)
+	buffer.writeu8(b, 0, math.clamp(skill, 0, 255))
+	return b
+end
+
+-- The node's place, nil when malformed (wrong length, no such node).
+function Protocol.decodeUnlockSkill(b: buffer): number?
+	if buffer.len(b) ~= 1 then
+		return nil
+	end
+	local skill = buffer.readu8(b, 0)
+	if skill < 1 or skill > Progression.Skills.count then
+		return nil
+	end
+	return skill
+end
+
+function Protocol.encodeProgress(status: Progression.Status): buffer
+	local Skills, Knowledge, Ages = Progression.Skills, Progression.Knowledge, Progression.Ages
+	local skills: { number } = {}
+	for id in status.skills do
+		local skill = Skills.byId(id)
+		if skill then
+			table.insert(skills, skill.index)
+		end
+	end
+	table.sort(skills)
+	local categories = #Knowledge.CATEGORIES
+	local milestones = #Ages.MILESTONES
+	local bytes = (milestones + 7) // 8
+	local b = buffer.create(4 + 1 + 1 + #skills + 1 + categories * 2 + 1 + bytes)
+	buffer.writeu32(b, 0, math.clamp(math.floor(status.points), 0, Knowledge.MAX_POINTS))
+	buffer.writeu8(b, 4, math.clamp(status.age, 1, Ages.count))
+	buffer.writeu8(b, 5, #skills)
+	local offset = 6
+	for _, index in skills do
+		buffer.writeu8(b, offset, index)
+		offset += 1
+	end
+	buffer.writeu8(b, offset, categories)
+	offset += 1
+	for _, category in Knowledge.CATEGORIES do
+		buffer.writeu16(b, offset, math.clamp(status.counts[category] or 0, 0, 65535))
+		offset += 2
+	end
+	buffer.writeu8(b, offset, milestones)
+	offset += 1
+	for i = 1, milestones do
+		if status.milestones[i] then
+			local at = offset + (i - 1) // 8
+			buffer.writeu8(b, at, bit32.bor(buffer.readu8(b, at), bit32.lshift(1, (i - 1) % 8)))
+		end
+	end
+	return b
+end
+
+-- The status, nil when malformed.
+function Protocol.decodeProgress(b: buffer): Progression.Status?
+	local Skills, Knowledge, Ages = Progression.Skills, Progression.Knowledge, Progression.Ages
+	local len = buffer.len(b)
+	if len < 6 then
+		return nil
+	end
+	local points, age, n = buffer.readu32(b, 0), buffer.readu8(b, 4), buffer.readu8(b, 5)
+	if points > Knowledge.MAX_POINTS or age < 1 or age > Ages.count or len < 6 + n + 1 then
+		return nil
+	end
+	local skills: { [string]: boolean } = {}
+	local offset = 6
+	for _ = 1, n do
+		local skill = Skills.get(buffer.readu8(b, offset))
+		if skill == nil then
+			return nil
+		end
+		skills[skill.id] = true
+		offset += 1
+	end
+	local categories = buffer.readu8(b, offset)
+	offset += 1
+	if categories ~= #Knowledge.CATEGORIES or len < offset + categories * 2 + 1 then
+		return nil
+	end
+	local counts: { [string]: number } = {}
+	for _, category in Knowledge.CATEGORIES do
+		counts[category] = buffer.readu16(b, offset)
+		offset += 2
+	end
+	local milestones = buffer.readu8(b, offset)
+	offset += 1
+	if milestones ~= #Ages.MILESTONES or len ~= offset + (milestones + 7) // 8 then
+		return nil
+	end
+	local met: { boolean } = {}
+	for i = 1, milestones do
+		met[i] = bit32.btest(buffer.readu8(b, offset + (i - 1) // 8), bit32.lshift(1, (i - 1) % 8))
+	end
+	return { points = points, age = age, skills = skills, counts = counts, milestones = met }
 end
 
 return Protocol

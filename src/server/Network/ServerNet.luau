@@ -36,6 +36,10 @@
 	    survival break that drops the block's own item puts the data `save` read just before the
 	    block went on it; a placement hands the stack it came from (as `place` returned it, data
 	    intact, before the item was used up) to every `placed` hook right after setBlock.
+	  * Knowledge (Players/Progression, through `setRules`): a survival break's `mined` rule says
+	    whether the block had been placed (EditRules.placed, read before it goes), and every
+	    mining time check takes the player's own speed (`miningFactor`: the perks), as the
+	    client's mining does.
 	  * Broadcasts all world changes once per frame.
 	  * Plays the sounds of players' breaks and placements to everyone near but that player, whose
 	    client already played them (Audio/Sounds; Minecraft's levelEvent 2001 and place sound).
@@ -147,6 +151,12 @@ export type Rules = {
 	-- A player who is no instabuilder broke `block` (Tough As Nails' thirst: Minecraft's
 	-- EXHAUSTION_MINE). (Players/ToughAsNails.blockBroken)
 	broke: ((player: Player, block: number) -> ())?,
+	-- A player who is no instabuilder broke `block` at (x, y, z); `placed`: it was put there after
+	-- generation (EditRules.placed, read before it went). (Players/Progression.mined: knowledge)
+	mined: ((player: Player, block: number, x: number, y: number, z: number, placed: boolean) -> ())?,
+	-- The player's own mining speed with `tool` in hand (1 without; Progression's perks:
+	-- Players/Progression.miningFactor), for every timing check (Mining's `factor`).
+	miningFactor: ((player: Player, tool: number?) -> number)?,
 	-- The player was just sent the edit lists of chunks `coords` ({ cx, cz } each): send them the
 	-- state those chunks hold beyond their blocks (Transmitters/Transmitters.sendChunks).
 	chunksSent: ((player: Player, coords: { { number } }) -> ())?,
@@ -243,6 +253,12 @@ function ServerNet.start(world: World): ServerNet
 		return if rule then rule(player) else nil
 	end
 
+	-- The player's own mining speed with `tool` (1 without the rule).
+	local function miningFactor(player: Player, tool: number?): number
+		local rule = rules.miningFactor
+		return if rule then rule(player, tool) else 1
+	end
+
 	-- Is block (x, y, z) within the player's reach (with some slack for movement and latency)?
 	local function inReach(player: Player, x: number, y: number, z: number): boolean
 		local root = rootOf(player)
@@ -279,8 +295,9 @@ function ServerNet.start(world: World): ServerNet
 			local startedAt = os.clock()
 			local pending = delayed[player]
 			if pending then
-				local ready = pending.startedAt
-					+ (Mining.ticks(pending.block, true, false, pending.tool) - 1) / Mining.TICK_RATE
+				local factor = miningFactor(player, pending.tool)
+				local ticks = Mining.ticks(pending.block, true, false, pending.tool, factor)
+				local ready = pending.startedAt + (ticks - 1) / Mining.TICK_RATE
 				startedAt = math.max(startedAt, ready)
 			end
 			if mine == nil then
@@ -316,6 +333,8 @@ function ServerNet.start(world: World): ServerNet
 		-- read while it is still there: setBlock tells its keepers it is gone.)
 		local harvested, harvestedY = EditRules.harvested(current, peekBlock, x, y, z)
 		local drop = EditRules.breakDrop(blockData, x, harvestedY, z, harvested, creative, tool)
+		local mined = if creative then nil else rules.mined
+		local placed = mined ~= nil and EditRules.placed(world, x, y, z, current)
 		if not EditRules.removeBroken(world, x, y, z, current) then
 			return false
 		end
@@ -337,6 +356,9 @@ function ServerNet.start(world: World): ServerNet
 		if broke and not creative then
 			broke(breaker, current)
 		end
+		if mined then
+			mined(breaker, current, x, y, z, placed)
+		end
 		return true
 	end
 
@@ -347,12 +369,13 @@ function ServerNet.start(world: World): ServerNet
 		for player, pending in delayed do
 			local current = world:peekBlock(pending.x, pending.y, pending.z)
 			local alive = player.Parent ~= nil and inReach(player, pending.x, pending.y, pending.z)
+			local held = heldTool(player)
 			if current ~= pending.block or not alive or not EditRules.minesOverTime(GameMode.of(player)) then
 				delayed[player] = nil
 				if player.Parent then
 					sendBlock(player, pending.x, pending.y, pending.z)
 				end
-			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, heldTool(player)) then
+			elseif Mining.mayBreak(pending.block, now - pending.startedAt, 1, held, miningFactor(player, held)) then
 				delayed[player] = nil
 				-- Like Minecraft's delayed destroy, the item in hand when it completes times, harvests
 				-- and wears (switching to a slower one just waits, until `expires` undoes it).
@@ -436,7 +459,7 @@ function ServerNet.start(world: World): ServerNet
 			-- Minecraft times (and harvests) a break with the item in hand when it arrives. (Creative
 			-- players need it too: they can't break with a sword.)
 			local tool = heldTool(player)
-			if not EditRules.mayBreak(current, creative, mine, x, y, z, now, tool) then
+			if not EditRules.mayBreak(current, creative, mine, x, y, z, now, tool, miningFactor(player, tool)) then
 				if
 					not creative
 					and mine

@@ -18,6 +18,11 @@
 	structure voids, jigsaws: Minecraft's hardness -1), which only creative players break, at
 	once like every block (the server's EditRules, the client's creative breaking).
 
+	A player's own mining speed (`factor`, default 1) multiplies the speed after the tool's:
+	Progression's mining perks (Shared/Progression.miningFactor: Quarrying's 1.1 with stone
+	tools). The client's mining and the server's checks (ServerNet, EditRules) pass the same one,
+	so a perk is predicted and accepted alike.
+
 	The server accepts a break once `TOLERANCE` of the time has passed since the player started
 	(Minecraft's ServerPlayerGameMode does the same), which covers network delay. A break arriving
 	earlier still is finished by the server once the full time has passed (Minecraft's delayed
@@ -55,8 +60,14 @@ function Mining.toolSpeed(block: number, tool: number?): number
 end
 
 -- Progress per tick of a survival player mining `block` holding `tool` (0 = can't be mined:
--- unbreakable and creative only blocks).
-function Mining.progressPerTick(block: number, onGround: boolean?, underwater: boolean?, tool: number?): number
+-- unbreakable and creative only blocks), `factor` their own speed (perks; default 1).
+function Mining.progressPerTick(
+	block: number,
+	onGround: boolean?,
+	underwater: boolean?,
+	tool: number?,
+	factor: number?
+): number
 	local def = Blocks.get(block)
 	if def == nil or not def.breakable or def.hardness < 0 or def.creativeOnly then
 		return 0
@@ -64,7 +75,7 @@ function Mining.progressPerTick(block: number, onGround: boolean?, underwater: b
 	if def.hardness == 0 then
 		return 1
 	end
-	local speed = Mining.toolSpeed(block, tool)
+	local speed = Mining.toolSpeed(block, tool) * (factor or 1)
 	if underwater then
 		speed /= 5
 	end
@@ -75,8 +86,8 @@ function Mining.progressPerTick(block: number, onGround: boolean?, underwater: b
 end
 
 -- Ticks of mining it takes (math.huge if it can't be mined).
-function Mining.ticks(block: number, onGround: boolean?, underwater: boolean?, tool: number?): number
-	local progress = Mining.progressPerTick(block, onGround, underwater, tool)
+function Mining.ticks(block: number, onGround: boolean?, underwater: boolean?, tool: number?, factor: number?): number
+	local progress = Mining.progressPerTick(block, onGround, underwater, tool, factor)
 	if progress <= 0 then
 		return math.huge
 	end
@@ -87,10 +98,10 @@ end
 	Server check: may a player who started mining `block` `elapsed` seconds ago, holding `tool`
 	now, break it? Uses the fastest possible speed (on the ground, dry), like Minecraft's server, and
 	accepts a break once `needed` of the progress is done (default TOLERANCE; 1 for a delayed break
-	finishing).
+	finishing). `factor`: the player's own speed (perks).
 ]]
-function Mining.mayBreak(block: number, elapsed: number, needed: number?, tool: number?): boolean
-	local progress = Mining.progressPerTick(block, true, false, tool)
+function Mining.mayBreak(block: number, elapsed: number, needed: number?, tool: number?, factor: number?): boolean
+	local progress = Mining.progressPerTick(block, true, false, tool, factor)
 	if progress <= 0 then
 		return false
 	end

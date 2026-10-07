@@ -66,6 +66,15 @@ export type Window = {
 	id: number,
 	inventory: Inventory,
 	container: Container?,
+	-- Progression's recipe gate (Shared/Progression.allows for the window's player; nil: every
+	-- result): a crafting result it refuses stays empty (Minecraft's doLimitedCrafting), and a
+	-- furnace's input or a machine takes nothing that smelts into one (Inventory/Menu). The
+	-- server sets it on each player's window, the client on its prediction.
+	recipes: ((item: number) -> boolean)?,
+	-- Server only: told about each crafting result taken ("craft", the result) and each stack
+	-- taken out of a furnace's or machine's output ("smelt"): Minecraft's ResultSlot and
+	-- FurnaceResultSlot checkTakeAchievements, for Progression's knowledge.
+	onTake: ((kind: string, stack: Stack) -> ())?,
 }
 
 --[[
