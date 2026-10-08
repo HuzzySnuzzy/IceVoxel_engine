@@ -12,7 +12,10 @@
 	             join     "Name joined the game" / "Name left the game" in yellow
 	                      (multiplayer.player.joined / left)
 	             notice   the server's messages (Protocol Notice: command feedback, Age
-	                      announcements, structure saves) in white, Minecraft's command feedback
+	                      announcements, structure saves) in white, Minecraft's command feedback;
+	                      a notice's link (/locate's coordinates) is a green span that suggests a
+	                      command when clicked (`suggest`, Minecraft's SUGGEST_COMMAND click
+	                      event) and says so when hovered (`hover`: "Click to teleport")
 	             debug    the debug keys' feedback: "[Debug]:" bold yellow, then white
 	                      (debugFeedbackTranslated)
 	             error    what the chat itself refuses, in red: unknown commands, chat turned off,
@@ -41,7 +44,14 @@ export type Span = {
 	bold: boolean?,
 	italic: boolean?,
 	underline: boolean?,
+	-- Clicking it puts this in the chat box (Minecraft's SUGGEST_COMMAND), and what hovering
+	-- it shows.
+	suggest: string?,
+	hover: string?,
 }
+
+-- A notice's clickable part (Protocol.NoticeLink): bytes first..last, the command it suggests.
+export type Link = { first: number, last: number, suggest: string }
 
 export type Message = {
 	kind: Kind,
@@ -57,6 +67,8 @@ ChatFormat.WHITE = "#FFFFFF"
 ChatFormat.YELLOW = "#FFFF55"
 ChatFormat.RED = "#FF5555"
 ChatFormat.GRAY = "#AAAAAA"
+-- Minecraft's green (§a): /locate's coordinates.
+ChatFormat.GREEN = "#55FF55"
 ChatFormat.SUGGESTION = "#AAAAAA"
 ChatFormat.SUGGESTION_SELECTED = "#FFFF00"
 
@@ -72,6 +84,8 @@ ChatFormat.DISABLED_OPTIONS = "Chat disabled in client options."
 ChatFormat.DISABLED_PROFILE = "Chat not allowed by account settings."
 ChatFormat.CANNOT_SEND = "Cannot send chat message"
 ChatFormat.UNAVAILABLE = "Chat is not available here"
+-- chat.coordinates.tooltip: hovering a notice's link.
+ChatFormat.LINK_HOVER = "Click to teleport"
 -- Roblox's refusals of a sent message (TextChatMessageStatus names).
 ChatFormat.STATUS_TEXT = table.freeze({
 	Floodchecked = "You must wait before sending another message.",
@@ -138,8 +152,23 @@ function ChatFormat.left(name: string): Message
 	return ChatFormat.message("join", { span(`{name} left the game`, ChatFormat.YELLOW) })
 end
 
-function ChatFormat.notice(text: string): Message
-	return ChatFormat.message("notice", { span(text, ChatFormat.WHITE) })
+-- A server notice; `link` (bytes of `text`) is green and suggests its command when clicked.
+function ChatFormat.notice(text: string, link: Link?): Message
+	if link == nil or link.first < 1 or link.last < link.first or link.last > #text then
+		return ChatFormat.message("notice", { span(text, ChatFormat.WHITE) })
+	end
+	local spans: { Span } = {}
+	if link.first > 1 then
+		table.insert(spans, span(string.sub(text, 1, link.first - 1), ChatFormat.WHITE))
+	end
+	local linked = span(string.sub(text, link.first, link.last), ChatFormat.GREEN)
+	linked.suggest = link.suggest
+	linked.hover = ChatFormat.LINK_HOVER
+	table.insert(spans, linked)
+	if link.last < #text then
+		table.insert(spans, span(string.sub(text, link.last + 1), ChatFormat.WHITE))
+	end
+	return ChatFormat.message("notice", spans)
 end
 
 function ChatFormat.debug(prefix: string, text: string): Message

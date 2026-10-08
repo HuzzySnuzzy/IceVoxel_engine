@@ -1,8 +1,9 @@
 --[[
 	The chat's pure parts: the line buffer (Ui/Chat/ChatLog: wrapping, the 100-line cap, fading,
 	rows, scrolling, Chat Delay), the box's rules (Ui/Chat/ChatInput: what is sent, commands,
-	history, Tab completion) and the lines' looks (Ui/Chat/ChatFormat: message kinds, visibility,
-	rich text, Minecraft's unknown command lines), with the Chat Settings' clamps
+	history, Tab completion, a command's listed arguments) and the lines' looks
+	(Ui/Chat/ChatFormat: message kinds, visibility, rich text, Minecraft's unknown command lines, a
+	notice's link and ChatLog.spanAt finding it under the pointer), with the Chat Settings' clamps
 	(Shared/PlayerSettings) and the notices' route into the chat (Net/Notices' sink is glue; the
 	formatting of what it hands over is checked here). Text is measured as the Arcade font
 	(8 pixels a character).
@@ -433,6 +434,86 @@ return function(t, shared, require, _server, client)
 		t.eq(ChatFormat.targetHint("RBXWhisper:1_2", "Bob"), "To Bob (Backspace: everyone)")
 		t.ok(ChatFormat.targetHint("RBXTeamBright red") ~= nil)
 		t.eq(ChatFormat.shadowHex("#FFFF55"), "#3F3F15")
+	end)
+
+	--[[ Arguments and links (/locate) ]]
+
+	local LISTED = ChatInput.parseArguments(
+		"|structure,biome,poi\nstructure|outpost,mineshaft,mineshaft_overgrown,#mineshaft,#cave\nbiome|birch_forest,forest"
+	)
+	local function arguments(alias: string, previous: { string }): { string }?
+		if alias ~= "/locate" then
+			return nil
+		end
+		return LISTED[table.concat(previous, " ")]
+	end
+	local LOCATE = { "/locate", "/time" }
+
+	t.test("chat input: a command's listed arguments complete (ids, #tags, minecraft:)", function()
+		t.eq(table.concat(LISTED[""], ","), "structure,biome,poi", "the first word's")
+		local c = ChatInput.complete("/locate ", 9, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "biome,poi,structure", "every kind, sorted")
+		c = ChatInput.complete("/locate st", 11, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "structure")
+		c = ChatInput.complete("/locate structure mi", 21, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "mineshaft,mineshaft_overgrown", "ids, no tags")
+		t.eq(c.start, 19)
+		c = ChatInput.complete("/locate structure #", 20, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "#cave,#mineshaft", "tags once # is typed")
+		c = ChatInput.complete("/LOCATE Structure minecraft:out", 32, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "outpost", "any case, a namespace skipped")
+		local suggestions = ChatInput.suggest("/locate structure minecraft:out", 32, c)
+		t.eq((ChatInput.tab(suggestions)), "/locate structure outpost", "the word replaced")
+		t.eq(ChatInput.complete("/locate structure zz", 21, LOCATE, PLAYERS, false, arguments), nil, "none match")
+		-- Not listed: players' names (Tab), nothing by itself.
+		c = ChatInput.complete("/time set S", 12, LOCATE, PLAYERS, false, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "Sam,Steve", "another command: names")
+		t.eq(ChatInput.complete("/time set S", 12, LOCATE, {}, true, arguments), nil)
+		-- The suggestions that show by themselves list the arguments too.
+		c = ChatInput.complete("/locate biome b", 16, LOCATE, {}, true, arguments) :: any
+		t.eq(table.concat(c.candidates, ","), "birch_forest")
+		t.eq(ChatInput.complete("/locate biome forest x", 23, LOCATE, {}, true, arguments), nil, "past the listed")
+	end)
+
+	t.test("chat format: a notice's link is a green span that suggests its command", function()
+		local text = "The nearest outpost is at [1142, ~, 582] (1281 blocks away)"
+		local link = { first = 27, last = 40, suggest = "/tp @s 1142 ~ 582" }
+		t.eq(string.sub(text, link.first, link.last), "[1142, ~, 582]")
+		local message = ChatFormat.notice(text, link)
+		t.eq(message.text, text, "the same text")
+		t.eq(#message.spans, 3)
+		t.eq(message.spans[1].colour, ChatFormat.WHITE)
+		t.eq(message.spans[2].text, "[1142, ~, 582]")
+		t.eq(message.spans[2].colour, ChatFormat.GREEN)
+		t.eq(message.spans[2].suggest, "/tp @s 1142 ~ 582")
+		t.eq(message.spans[2].hover, "Click to teleport")
+		t.eq(message.spans[3].suggest, nil)
+		t.eq(#ChatFormat.notice(text).spans, 1, "without a link: one white span")
+		t.eq(#ChatFormat.notice("abc", { first = 2, last = 9, suggest = "x" }).spans, 1, "a bad link: plain")
+		local edge = ChatFormat.notice("[1, 2, 3]", { first = 1, last = 9, suggest = "/tp @s 1 2 3" })
+		t.eq(#edge.spans, 1, "a link that is the whole text")
+		t.eq(edge.spans[1].suggest, "/tp @s 1 2 3")
+	end)
+
+	t.test("chat log: spanAt finds the span under a point, across wrapped lines", function()
+		local text = "The nearest outpost is at [1142, ~, 582] (1281 blocks away)"
+		local link = { first = 27, last = 40, suggest = "/tp @s 1142 ~ 582" }
+		-- 8 units a character: "The nearest outpost is at " is 26 characters.
+		local log = newLog(304)
+		ChatLog.add(log, ChatFormat.notice(text, link), 0)
+		t.eq(#log.lines, 2, "wrapped in two")
+		local top = log.lines[2]
+		t.eq(lineText(top), "The nearest outpost is at [1142, ~,")
+		t.eq(ChatLog.spanAt(top, 10, measure).suggest, nil, "on the words")
+		t.eq(ChatLog.spanAt(top, 26 * 8 + 1, measure).suggest, link.suggest, "on the link")
+		t.eq(ChatLog.spanAt(top, 26 * 8 - 1, measure).suggest, nil, "just before it")
+		t.eq(ChatLog.spanAt(top, 2000, measure), nil, "past the line's end")
+		t.eq(ChatLog.spanAt(top, -1, measure), nil, "before it")
+		local bottom = log.lines[1]
+		t.eq(lineText(bottom), "582] (1281 blocks away)")
+		t.eq(ChatLog.spanAt(bottom, 4, measure).suggest, link.suggest, "the link goes on")
+		t.eq(ChatLog.spanAt(bottom, 5 * 8 + 1, measure).suggest, nil, "after it")
+		t.ok(string.find(top.rich, '<font color="#55FF55">[1142, ~,</font>', 1, true) ~= nil, "drawn green")
 	end)
 
 	t.test("chat format: unknown commands as Minecraft's two red lines; refused messages", function()

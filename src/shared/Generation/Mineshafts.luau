@@ -124,6 +124,11 @@
 
 	Loot (`container`, Minecraft's chests/abandoned_mineshaft on this game's items): a fresh table
 	for a chest a plan puts at (x, y, z), rolled from the position alone (LOOT).
+
+	Locating (/locate, Generation/Locate): `candidate` is a cell's start (the hash, then the room
+	centre's height and biome: about 10 µs) without the cache, so a search over thousands of cells
+	leaves the LRU to the chunks; `planAt` is the cached plan of one cell, for the few candidates
+	that might be nearest (its room may still be refused, an entrance may find no spot).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -382,6 +387,14 @@ export type Mineshafts = {
 	container: (x: number, y: number, z: number) -> { ContainerItem }?,
 	-- Plans built (not served from the cache) so far.
 	built: () -> number,
+	--[[
+		/locate (see the header): cell (gx, gz)'s start without the cache: its room's centre
+		column (x, z; x nil: no start), the room's floor (y), whether it is overgrown and whether
+		it wants an entrance; and the cell's plan (cached; `yield` as for `plans`), nil when the
+		room is refused or there is no start.
+	]]
+	candidate: (gx: number, gz: number) -> (number?, number, number, boolean, boolean),
+	planAt: (gx: number, gz: number, yield: (() -> ())?) -> Plan?,
 }
 
 local Mineshafts = {}
@@ -1403,6 +1416,15 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		return Mineshafts.write(list, data, originX, originZ, cells, heights, carved, height)
 	end
 
+	local function candidate(gx: number, gz: number): (number?, number, number, boolean, boolean)
+		local start = startOf(gx, gz)
+		if start == false then
+			return nil, 0, 0, false, false
+		end
+		local s = start :: Start
+		return s.x + s.sx // 2, s.z + s.sz // 2, s.y, s.overgrown, s.entrance
+	end
+
 	return {
 		plans = plans,
 		entrances = entrances,
@@ -1412,7 +1434,42 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		built = function(): number
 			return builtCount
 		end,
+		candidate = candidate,
+		planAt = planAt,
 	}
+end
+
+--[[
+	Appends x, y, z, block for every chest `plans` put in the block rectangle (inclusive) when
+	`lut` (u8 per block id) marks the chest: /locate poi (World/PoiSearch) finds them from the
+	plans, without generating their chunks.
+]]
+function Mineshafts.poiBlocks(
+	plans: { Plan },
+	lut: buffer,
+	minX: number,
+	minZ: number,
+	maxX: number,
+	maxZ: number,
+	out: { number }
+)
+	if readu8(lut, CHEST_BLOCK) == 0 then
+		return
+	end
+	for _, plan in plans do
+		for _, piece in plan.pieces do
+			local chests = piece.chests
+			for i = 1, #chests, 3 do
+				local x, z = chests[i], chests[i + 2]
+				if x >= minX and x <= maxX and z >= minZ and z <= maxZ then
+					table.insert(out, x)
+					table.insert(out, chests[i + 1])
+					table.insert(out, z)
+					table.insert(out, CHEST_BLOCK)
+				end
+			end
+		end
+	end
 end
 
 --[[ Writing ]]

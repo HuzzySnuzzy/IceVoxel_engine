@@ -26,6 +26,7 @@
 	            lines]" shows how many wait (`pending`). Setting the delay to 0 lets them all out.
 
 	`version` changes whenever the lines do, so the chat's labels are rebuilt only then.
+	`spanAt` finds the span under a point of a line (a click on /locate's coordinates, a hover).
 ]]
 
 local ChatFormat = require(script.Parent.ChatFormat)
@@ -398,6 +399,30 @@ function ChatLog.row(log: Log, row: number, now: number): (Line?, number)
 		return line, 0
 	end
 	return line, ChatLog.fade(age)
+end
+
+--[[
+	The span of `line` drawn at `x` (chat units from where its text starts, as `measure` measures
+	it), nil before it or past its end.
+]]
+function ChatLog.spanAt(line: Line, x: number, measure: Measure): ChatFormat.Span?
+	if x < 0 then
+		return nil
+	end
+	local message = line.entry.message
+	local offset = 0
+	for _, part in message.spans do
+		local from, to = offset + 1, offset + #part.text
+		offset = to
+		local last = math.min(to, line.last)
+		if math.max(from, line.first) > last then
+			continue
+		end
+		if x < measure(string.sub(message.text, line.first, last)) then
+			return part
+		end
+	end
+	return nil
 end
 
 -- Is anything to draw at `now` (an open chat, a line still fading, delayed messages)?

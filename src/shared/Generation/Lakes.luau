@@ -215,6 +215,9 @@ export type LakeGen = {
 		cells: number,
 		topCells: { number }
 	) -> (number, number),
+	-- The water lake of candidate cell (cx, cz) (nil: none), decided without the cache:
+	-- /locate's probe (Generation/Locate) looks at thousands of cells.
+	peekLake: (cx: number, cz: number) -> Lake?,
 }
 
 local Lakes = {}
@@ -774,6 +777,9 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 		lakes = lakes,
 		puddles = puddles,
 		write = write,
+		peekLake = function(cx: number, cz: number): Lake?
+			return decideLake(cx, cz)
+		end,
 	}
 end
 

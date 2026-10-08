@@ -179,6 +179,9 @@ export type Wells = {
 		topCells: { number },
 		carved: Caves.Carved?
 	) -> (number, number, Caves.Carved?, number, number),
+	-- The well of cell (gx, gz) (nil: none) without filling the cache: /locate's probe
+	-- (Generation/Locate) looks at thousands of cells.
+	peek: (gx: number, gz: number) -> Well?,
 }
 
 local OilWells = {}
@@ -703,11 +706,21 @@ function OilWells.new(seed: number, terrain: Terrain): Wells
 		return lowest, top, carved, twins, oil
 	end
 
+	local function peek(gx: number, gz: number): Well?
+		local key = cellKey(gx, gz)
+		local entry = recent[key] or older[key]
+		if entry then
+			return entry.well
+		end
+		return decide(gx, gz)
+	end
+
 	return {
 		find = find,
 		lakeBox = lakeBox,
 		lakeOf = lakeOf,
 		write = write,
+		peek = peek,
 	}
 end
 

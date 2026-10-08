@@ -41,7 +41,9 @@
 	The rest of the contract: `seaLevel` is the top of the stack's water when it ends in water
 	(else 0: no sea; Players/SafeSpot, the map and structures read it), `findSpawn` is
 	`Spec.spawn`'s column (default 0, 0) standing on what `column` reports there, `labels` the
-	placer's name tags (Spec.labels).
+	placer's name tags (Spec.labels). /locate (Generation/Locate): no structure kinds; `biomes` is
+	the one biome of a world with one stack (nil with `columnAt`: any), and `poiBlocks` the placed
+	blocks and the placer's pieces' blocks of a set (chests, structure blocks...).
 
 	Costs: each stack's cells are worked out once per level (`planOf`). One stack everywhere is
 	written a whole layer at a time, a layer like the one below being a buffer.copy, then the
@@ -135,6 +137,12 @@ local NO_SURFACE_CAVES: SurfaceCaves.SurfaceCaves = {
 	end,
 	built = function(): number
 		return 0
+	end,
+	start = function(): (number?, number)
+		return nil, 0
+	end,
+	wormOf = function(): any
+		return nil
 	end,
 } :: any
 LayeredGenerator.NO_SURFACE_CAVES = NO_SURFACE_CAVES
@@ -628,6 +636,26 @@ function LayeredGenerator.new(spec: Spec): TerrainGenerator.Generator
 		return {}
 	end
 
+	-- Placed blocks and the placer's pieces' blocks marked in `lut` in the rectangle.
+	local function poiBlocks(minX: number, minZ: number, maxX: number, maxZ: number, lut: buffer): { number }
+		local out: { number } = {}
+		if px0 <= maxX and px1 >= minX and pz0 <= maxZ and pz1 >= minZ then
+			for i = 1, #placed, 4 do
+				local x, z, block = placed[i], placed[i + 2], placed[i + 3]
+				if x >= minX and x <= maxX and z >= minZ and z <= maxZ and readu8(lut, block) ~= 0 then
+					table.insert(out, x)
+					table.insert(out, placed[i + 1])
+					table.insert(out, z)
+					table.insert(out, block)
+				end
+			end
+		end
+		if placer then
+			placer.pieceBlocks(placer.starts(minX, minZ, maxX, maxZ), lut, minX, minZ, maxX, maxZ, out)
+		end
+		return out
+	end
+
 	return {
 		seed = seed,
 		column = column,
@@ -649,6 +677,8 @@ function LayeredGenerator.new(spec: Spec): TerrainGenerator.Generator
 		labels = function(): { TerrainGenerator.Label }
 			return labels
 		end,
+		biomes = if columnAt then nil else { constantBiome },
+		poiBlocks = poiBlocks,
 	}
 end
 

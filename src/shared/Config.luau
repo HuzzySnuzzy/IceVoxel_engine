@@ -1178,6 +1178,35 @@ local Config = {
 		Generate = true,
 	},
 
+	--[[
+		/locate structure | biome | poi (Players/LocateCommands, Generation/Locate, World/PoiSearch)
+		and /tp. Searches run on the server a slice of each frame, one at a time: at most BudgetMs
+		a frame (the generation preload, World/GenQueue, takes what is left of the frame), at most
+		Queue of them waiting (one per player: a new /locate replaces that player's), and one still
+		running after TimeoutSeconds gives up with the not-found answer.
+	]]
+	Locate = {
+		BudgetMs = 3,
+		TimeoutSeconds = 20,
+		Queue = 8,
+		-- Library structures: Minecraft's 100 rings of placement regions (an outpost's region is
+		-- 56 x 56 chunks: 89,600 blocks out). A full miss costs some 40,000 probes (0.9 s).
+		StructureRings = 100,
+		-- How far (blocks) the built-in kinds are searched: mineshafts and their entrances,
+		-- oil wells (geysers, deposits), surface lava lakes and water lakes, cave entrances,
+		-- ravines. Each is a ring count of its grid (Generation/Locate).
+		Radius = { mineshaft = 4096, oil = 16384, lake = 4096, cave = 3072, ravine = 6144 },
+		-- Biomes: Minecraft's 6400 blocks in steps of 32, both times min(the world's climate
+		-- scale, 2) (Large Biomes: 12800 in steps of 64, the same 160,801 samples at most).
+		BiomeRadius = 6400,
+		BiomeStep = 32,
+		-- Points of interest: Minecraft's 256 blocks (3D). Generated ones (a structure's chests and
+		-- furnaces, a mineshaft's chests) count wherever they are; true: only in chunks the
+		-- server has loaded, as Minecraft knows only generated chunks' points of interest.
+		PoiRadius = 256,
+		PoiGeneratedNear = false,
+	},
+
 	Entities = {
 		-- Dropped items disappear after this many seconds (Minecraft: 5 minutes).
 		ItemLifetime = 300,

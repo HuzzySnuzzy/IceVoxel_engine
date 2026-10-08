@@ -16,6 +16,10 @@
 
 	`debug` shows the debug keys' feedback (Debug/DebugKeys) as Minecraft's debugFeedbackTranslated
 	does: "[Debug]:" in bold yellow, then the message (the legacy chat shows it all in white).
+
+	A notice may carry a link (Protocol.NoticeLink: /locate's coordinates and the "/tp" they
+	suggest): the game's chat gets it with the text (green, clickable: Ui/Chat), Roblox's chat
+	shows that part green (nothing to click there), the legacy chat plain.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -30,9 +34,11 @@ local ClientNet = require(script.Parent.ClientNet)
 -- Seconds to wait for the chat to be ready, and between legacy retries.
 local CHAT_TIMEOUT = 60
 local RETRY_DELAY = 0.5
--- Minecraft shows command feedback in white, and the debug prefix in yellow (§e).
+-- Minecraft shows command feedback in white, the debug prefix in yellow (§e) and a link (the
+-- coordinates /locate answers with) in green (§a).
 local LEGACY_COLOUR = Color3.fromRGB(255, 255, 255)
 local DEBUG_COLOUR = "#FFFF55"
+local LINK_COLOUR = "#55FF55"
 
 local Notices = {}
 
@@ -100,8 +106,9 @@ end
 
 local listeners: { (text: string) -> () } = {}
 
--- Where notices go instead of Roblox's chat: (text, debug prefix or nil). Set by Ui/Chat.
-export type Sink = (text: string, prefix: string?) -> ()
+-- Where notices go instead of Roblox's chat: (text, debug prefix or nil, link or nil). Set by
+-- Ui/Chat.
+export type Sink = (text: string, prefix: string?, link: Protocol.NoticeLink?) -> ()
 local sink: Sink? = nil
 
 -- Sends every notice from now on to `fn` (the game's chat) instead of Roblox's chat.
@@ -115,8 +122,8 @@ function Notices.listen(listener: (text: string) -> ())
 end
 
 -- Shows `text` (plain) in this player's chat, `rich` (its rich text form) where rich text shows;
--- `prefix`: the debug prefix that starts `text` (for the game's chat).
-local function display(text: string, rich: string, prefix: string?)
+-- `prefix`: the debug prefix that starts `text` (for the game's chat); `link` its link.
+local function display(text: string, rich: string, prefix: string?, link: Protocol.NoticeLink?)
 	for _, listener in listeners do
 		task.spawn(listener, text)
 	end
@@ -125,7 +132,7 @@ local function display(text: string, rich: string, prefix: string?)
 		if prefix then
 			gameChat(string.sub(text, #prefix + 2), prefix)
 		else
-			gameChat(text, nil)
+			gameChat(text, nil, link)
 		end
 		return
 	end
@@ -141,9 +148,16 @@ local function display(text: string, rich: string, prefix: string?)
 	end
 end
 
--- Shows `text` in this player's chat.
-function Notices.show(text: string)
-	display(text, escape(text))
+-- Shows `text` in this player's chat; `link`: its clickable part (green).
+function Notices.show(text: string, link: Protocol.NoticeLink?)
+	local rich = escape(text)
+	if link then
+		local before = string.sub(text, 1, link.first - 1)
+		local part = string.sub(text, link.first, link.last)
+		local after = string.sub(text, link.last + 1)
+		rich = `{escape(before)}<font color="{LINK_COLOUR}">{escape(part)}</font>{escape(after)}`
+	end
+	display(text, rich, nil, link)
 end
 
 -- Shows `text` after Minecraft's bold yellow debug prefix (`prefix`, "[Debug]:").
@@ -154,9 +168,9 @@ end
 function Notices.start()
 	ClientNet.on(Protocol.ServerMessage.Notice, function(payload: buffer)
 		if buffer.len(payload) >= 2 then
-			local ok, text = pcall(Protocol.decodeNotice, payload)
+			local ok, text, link = pcall(Protocol.decodeNotice, payload)
 			if ok then
-				Notices.show(text)
+				Notices.show(text, link)
 			end
 		end
 	end)

@@ -2303,6 +2303,16 @@ player text through its own remotes. No server code and no Protocol message were
   and they become white lines (the debug ones with their bold yellow prefix) shown at once,
   instead of RBXSystem system messages. `Notices.listen` (the structure screen's status line)
   is unchanged.
+- **Arguments and links** (/locate). A command may list its arguments
+  (`WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE`: one line per position, "<words before>|<candidate>,
+  ..."; `ChatInput.parseArguments`): Tab and the suggestions that show by themselves complete
+  them by the start of the word ("minecraft:" skipped, tags only once "#" is typed), for the
+  commands the player may use. A notice's link (`Protocol.NoticeLink`) becomes a green span with
+  `suggest` and `hover` (`ChatFormat.notice(text, link)`); while the chat is open a click or tap
+  on it (`ChatLog.spanAt`: the span under the pointer, measuring the line's text up to each span)
+  puts its command in the box and keeps the focus (Minecraft's SUGGEST_COMMAND), and hovering it
+  shows Minecraft's tooltip ("Click to teleport"). Roblox's chat (before the game's chat starts)
+  shows the link's part green; the legacy chat plain text.
 - **Settings** (`PlayerSettings` ids 46-55, page "chat", effect "chat"): chatVisibility,
   chatOpacity (10-100), chatBackground, chatScale, chatLineSpacing, chatDelay (half seconds:
   tenths are not exact in f32), chatWidth (40-320), chatHeightFocused / chatHeightUnfocused
@@ -5505,6 +5515,85 @@ What the client plays itself:
   scaled by `Style.guiScale`. A newer toast replaces it.
 - Settings: Music (id 35, a source volume) and Music Toasts (id 36), both "audio" effects.
 
+## Locating (`Generation/Locate`, `Poi`, server `World/PoiSearch`, `Players/LocateCommands`, `Players/TeleportCommands`)
+
+Minecraft 1.20.1's `/locate structure | biome | poi` (LocateCommand,
+ChunkGenerator.findNearestMapStructure, ServerLevel.findClosestBiome3d,
+PoiManager.findClosestWithType) and a small `/tp`, for operators (Minecraft's permission level
+2: `Operators.permitted`). Nothing keeps a list of what was generated, and a search must never
+generate the chunks it looks through: everything a locate needs is decided per grid cell from the
+seed and the full detail terrain, and the generators answer for one cell at a time.
+
+- **Ids and tags** (`Generation/Locate`, pure). A `Registry` per kind of thing: structures (the
+  built-in kinds `mineshaft`, `mineshaft_overgrown`, `mineshaft_entrance`, `oil_geyser`,
+  `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`, `ravine`, then the library's structures;
+  a library name clashing with a built-in one is left out), biomes (BiomeList's 18) and points of
+  interest (`Shared/Poi`). Ids show in snake case without a namespace ("birch_forest") and match
+  loosely (`Locate.key`: any case, "minecraft:" or "icevoxel:" dropped, no `_`, spaces or dashes).
+  Tags (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#library`; `#is_forest`, `#is_taiga`,
+  `#is_mountain`, `#is_hill`, `#is_savanna`, `#is_jungle`, `#is_snowy`, `#band_lowland` ..
+  `#band_peaks`, also without "is_"; `#workstation`, `#machine`, `#generator`, `#container`,
+  `#structure`, `#explosive`) search their members together and answer "#tag (member)". An id
+  in the registry that this world can't have answers not found at once (no probe); an unknown one
+  Minecraft's parse errors.
+- **Kinds** (the generator's `locateKinds`, TerrainGenerator). One kind per locatable structure,
+  on a cell grid (`grid`, `origin`): a `probe` that never touches a cache (a library structure's
+  start check: the start piece alone, its centre column's biome and ground, 21 µs; a mineshaft's
+  start: a hash and two columns, 10 µs; an oil well's or a lake's decision, read from the cache
+  when there, else decided and not stored; a surface cave's hash) and an exact `verify` for the
+  few candidates that might be nearest (`StructureGen.assembleAt`, `Mineshafts.planAt`,
+  `SurfaceCaves.wormOf`: cached as the chunks cache them, 0.5-5 ms, yielding). `slack` bounds how
+  far a verified position lies outside its cell, `spread` how far from its probe (an entrance from
+  its room, a ravine's nearest step from its start). Left out when the world can't have them: no
+  structures, a Single Biome outside a structure's biomes, too dry for moss (overgrown mineshafts
+  and entrances), frozen, snowy or wet (lava lakes). Flat worlds have none; the debug structures
+  world lists its laid out things instead (`locateList`).
+- **Rings** (`Locate.nearest`). Square rings of cells around the player's (k = 0..rings): every
+  cell probed, the candidates sorted by distance and verified in order while one could still be
+  nearer than the best; a kind stops at the first ring whose cells all lie (k - 1) x grid - slack
+  beyond the best. The answer is the true nearest (horizontal distance) at the probe's resolution,
+  not Minecraft's first hit of the first ring. A tag's kinds share the best distance. Rings:
+  `Config.Locate.StructureRings` (Minecraft's 100) for library structures, `Radius` per built-in
+  kind.
+- **Biomes** (`Locate.biome`). Samples `BiomeStep` (32) apart in square rings out to
+  `BiomeRadius` (6400), both times the generator's `climateScale` clamped to 0.25..2 (Large
+  Biomes: 12800 in steps of 64; Debug: All Biomes' 16 block strips: steps of 8); the nearest
+  sample of the set wins and the search stops at the first ring farther than it (at most about
+  sqrt(2) times the first hit's ring). A set the generator's `biomes` can't produce fails with no
+  sample. The answer's y is the column's surface, the distance horizontal (biomes are 2D here).
+- **Points of interest** (`World/PoiSearch`, `Poi`). The wanted blocks within `PoiRadius` (256,
+  3D) of the player: the world's edits in the 33 x 33 chunks around (what is there now), and what
+  the plans put there (`generator.poiBlocks`: library templates' cells, worked out once per
+  template and rotation, mineshafts' chests, laid out blocks) where no edit changed it; nearest
+  first, a generated one checked against the block really there (the world's loaded chunk, else
+  the chunk generated by the search's own generator a slice at a time). `PoiGeneratedNear` keeps
+  only those in loaded chunks (Minecraft's generated-only rule).
+- **Answers** (`Players/LocateCommand`, pure). Minecraft's texts exactly; the coordinates are
+  "[x, y, z]" with y "~" for surface structures, the y for underground ones, the surface for
+  biomes, the block's for points of interest; distances floored. The coordinates are a link
+  (`Protocol.NoticeLink` after the Notice's text: its bytes and "/tp @s x y z"), green in the
+  chat, which puts the command in the box when clicked (see Chat). Coordinates are true world
+  coordinates (F3's), with or without the floating origin: positions come from
+  `PlayerPositions.feet`.
+- **Scheduling** (`LocateCommand.Queue`, glue `Players/LocateCommands`). One search at a time,
+  resumed each Heartbeat for at most `BudgetMs` (3); the searches call the queue's yield after
+  every probe and verify, which suspends them once the slice is spent, so no frame takes more than
+  the budget plus one probe or verify (tested with a fake clock). At most `Queue` (8) waiting, one
+  per player (a new /locate replaces theirs; leaving cancels), `TimeoutSeconds` (20) of running
+  answers not found. Searches run on a generator of their own (`WorldTypes.create` with the
+  world's type and seed, made at the first search): they stop in the middle of plans and chunks,
+  which the world's generator, generating the chunks around players in the same frames, must
+  never do, and their caches never evict what the chunks need. A full miss costs about 0.9 s of
+  work (40,000 outpost probes, or 160,801 biome samples): some 300 frames; a typical answer 1-20.
+- **/tp** (`Players/TeleportCommand`, pure; glue `TeleportCommands`). `/tp x y z`,
+  `/tp targets x y z`, `/tp player`, `/tp targets player`; "~" and "~n" relative to whoever typed
+  it, whole x and z the block's centre (Vec3Argument), limits `Protocol.MAX_COORDINATE` and
+  PlayerSync's y range, Minecraft's answers (its "%f" numbers). Moves go through
+  `PlayerPositions.teleport` (characters today; the private Teleport message and a new epoch
+  with server positions). Survival and adventure players who would land unsafe
+  (`SafeSpot.isSafe`) stand on the block asked for, else on the column's safe top (a /locate
+  link's "~"); creative and spectator players land exactly.
+
 ## Title screen, operators and creating the world (`WorldSettings`, server `Players/Operators`, `Players/WorldMenu`, `World/WorldInfo`, client `Ui/MainMenu`)
 
 Minecraft's title screen and Create World screen, and its server operators.
@@ -5888,7 +5977,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Waypoints`     | saved waypoints (on join, or after filtering) |
 | server → client | `Inventory`     | inventory + window container after action `ack` |
 | server → client | `Entities`      | dropped items: spawn / sync / count / remove  |
-| server → client | `Notice`        | a message for the chat                        |
+| server → client | `Notice`        | a message for the chat (and a link: /locate's coordinates and the command they suggest) |
 | server → client | `Transmitters`  | transmitter states: packed side modes, colour, pipe fill, the fluid id its network holds |
 | server → client | `Tanks`         | fluid tank contents (fluid id, mB)            |
 | server → client | `Transport`     | items entering, re-routed in or leaving transporters (path, speed, start time) |

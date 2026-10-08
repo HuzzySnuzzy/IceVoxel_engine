@@ -127,6 +127,9 @@ export type Terrain = {
 export type LavaGen = {
 	-- Every surface lake whose box (grown by PROTECT) reaches the block rectangle (inclusive).
 	surfaceLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lake },
+	-- The surface lake of candidate cell (cx, cz) (nil: none) without filling the cache:
+	-- /locate's probe (Generation/Locate) looks at thousands of cells.
+	peek: (cx: number, cz: number) -> Lake?,
 	--[[
 		Writes surface `lakes` into the padded `level` chunk (first core column originX, originZ;
 		`cells` tall). Level 0 writes the box's cells (lava, air, the stone barrier); levels up to
@@ -619,10 +622,20 @@ function Lava.new(seed: number, terrain: Terrain): LavaGen
 		return nil, carved
 	end
 
+	local function peek(cx: number, cz: number): Lake?
+		local key = cellKey(cx, cz)
+		local entry = recent[key] or older[key]
+		if entry then
+			return entry.lake
+		end
+		return decide(cx, cz)
+	end
+
 	return {
 		surfaceLakes = surfaceLakes,
 		writeSurface = writeSurface,
 		underground = underground,
+		peek = peek,
 	}
 end
 

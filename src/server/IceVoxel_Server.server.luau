@@ -47,8 +47,9 @@
 	                   fall damage, invulnerability, lava and burning), item entities (drops,
 	                   burning in lava), inventories, chests,
 	                   furnaces and crafting tables, tools (mining speed, drops, wear), safe
-	                   spawning, map and spectator teleports, waypoints, keeping chunks around
-	                   players generated
+	                   spawning, map and spectator teleports, /tp, /locate (searched a slice of
+	                   each frame on a generator of its own: Players/LocateCommands), waypoints,
+	                   keeping chunks around players generated
 	  7. pipes      -> Mekanism's transmitters and fluid tanks (Transmitters/Transmitters: items in
 	                   transporters, fluids in pipes, Fluid Tanks and machines' tanks, replication),
 	                   and the Configurator and buckets (Players/ItemUse)
@@ -122,6 +123,8 @@ local Inventories = require(Server.Players.Inventories)
 local Entities = require(Server.Entities.Entities)
 local Spawning = require(Server.Players.Spawning)
 local Teleport = require(Server.Players.Teleport)
+local TeleportCommands = require(Server.Players.TeleportCommands)
+local LocateCommands = require(Server.Players.LocateCommands)
 local WaypointStore = require(Server.Players.WaypointStore)
 local SettingsStore = require(Server.Players.SettingsStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
@@ -238,6 +241,11 @@ local function startWorld(settings: WorldSettings.Settings)
 	end)
 	Spawning.start(world)
 	Teleport.start(world, net)
+	-- /tp, and /locate's searches on a generator of their own (the world's type and seed).
+	TeleportCommands.start(net, world)
+	LocateCommands.start(net, world, function()
+		return WorldTypes.create(settings.worldType, settings.seed, settings.options)
+	end)
 	WaypointStore.start(net)
 	Simulation.start(world)
 	-- What blasts do beyond blocks: items, players (damage, knockback), mobs and the clients' effects.
