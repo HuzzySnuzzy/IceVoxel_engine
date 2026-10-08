@@ -34,6 +34,7 @@ return function(t, shared, require)
 	local ROPE, LOG = B.Rope, B.OakLog
 	local readu16, readu8 = buffer.readu16, buffer.readu8
 	local cfg = Config.Mineshafts
+	local FRAME = Mineshafts.FRAME
 	local SPAWN = { 512, -128 }
 
 	local gen = TerrainGenerator.new(SEED)
@@ -496,18 +497,24 @@ return function(t, shared, require)
 			local function get(x: number, y: number, z: number): number?
 				return blockAt(gen, x, y, z)
 			end
-			-- The rope: continuous from under the beam to the floor, each one held.
-			for y = e.bottom, e.top + 1 do
+			-- The rope: continuous from under the beam (FRAME over the collar) to the floor, each one held.
+			for y = e.bottom, e.top + FRAME - 1 do
 				t.eq(blockAt(gen, e.x, y, e.z), ROPE, `rope at {e.x} {y} {e.z}`)
 				t.ok(Blocks.canSurvive(ROPE, get, e.x, y, e.z), "the rope holds")
 			end
 			t.ok(Blocks.isSturdy(blockAt(gen, e.x, e.bottom - 1, e.z)), "the rope's end above a floor")
-			t.eq(blockAt(gen, e.x, e.top + 2, e.z), LOG, "the beam")
+			t.eq(blockAt(gen, e.x, e.top + FRAME, e.z), LOG, "the beam")
+			local ax, az = if e.axis == "X" then 1 else 0, if e.axis == "X" then 0 else 1
+			for _, d in { -2, 2 } do
+				for y = e.top, e.top + FRAME - 1 do
+					t.eq(blockAt(gen, e.x + d * ax, y, e.z + d * az), B.OakFence, "a headframe post")
+				end
+			end
 			t.ok(Blocks.isSturdy(LOG), "a sturdy beam")
 			-- The opening: open from the floor to the sky (ropes and vines aside).
 			for dz = -1, 1 do
 				for dx = -1, 1 do
-					for y = e.bottom, e.top + 1 do
+					for y = e.bottom, e.top + FRAME - 1 do
 						local id = blockAt(gen, e.x + dx, y, e.z + dz)
 						local name = Blocks.get(id).name
 						t.ok(
@@ -534,7 +541,7 @@ return function(t, shared, require)
 					local collar = math.abs(x - e.x) <= 2 and math.abs(z - e.z) <= 2
 					for y = e.top - 1, e.top + (if collar then 24 else 1) do
 						local id = blockAt(gen, x, y, z)
-						if (collar and isTreePart[id] or isLog[id]) and not (id == LOG and y == e.top + 2) then
+						if (collar and isTreePart[id] or isLog[id]) and not (id == LOG and y == e.top + FRAME) then
 							t.ok(false, `a tree at {x} {y} {z} by an entrance`)
 						end
 					end
@@ -921,10 +928,10 @@ return function(t, shared, require)
 				if e then
 					t.eq(e.top, DebugWorlds.FLOOR)
 					local r = world.generate(0, e.x // SIZE, e.z // SIZE)
-					for y = e.bottom, e.top + 1 do
+					for y = e.bottom, e.top + FRAME - 1 do
 						t.eq(ChunkLayout.get(r.data, e.x % SIZE, y, e.z % SIZE), ROPE, `the rope at y {y}`)
 					end
-					t.eq(ChunkLayout.get(r.data, e.x % SIZE, e.top + 2, e.z % SIZE), LOG, "the beam")
+					t.eq(ChunkLayout.get(r.data, e.x % SIZE, e.top + FRAME, e.z % SIZE), LOG, "the beam")
 					t.ok((n.MossBlock or 0) > 0, "moss")
 				end
 			end

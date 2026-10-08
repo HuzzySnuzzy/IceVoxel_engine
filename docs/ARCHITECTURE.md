@@ -620,9 +620,14 @@ detail chunks only (caves exist only there), in step 8 after the library structu
   mineshaft in the shaft's way. About half the overgrown mineshafts get one (46 of 103 in 36 km²).
   It is Air from the piece's floor layer up through the ground (an underground pocket for the cave
   view, open to the sky like a cave entrance's pit; `topCells` stay), a mossy cobblestone collar
-  two deep, two oak fence posts and a 5 block oak log beam, an ordinary Rope from under the beam's
-  middle to the floor (each held by the one above, the top one by the beam), vines down its walls
-  and from the beam. Its square (5 blocks around) joins `keepOut` at every level up to
+  two deep, two oak fence posts three tall and a 5 block oak log beam on them `FRAME` (3) over the
+  collar, an ordinary Rope from under the beam's middle to the floor (each held by the one above,
+  the top one by the beam), vines down its walls from the collar's top layer and from the beam.
+  The beam's height is the climber's (PlayerPhysics): holding jump up the rope, the head meets the
+  beam with the feet 1.2 over the collar, enough to drift across the beam onto the collar before
+  dropping below its top; under a beam 2 over the collar the feet stop 0.2 over it and a climber
+  stepping off falls back down the shaft (tests/spec/MineshaftClimbing). A wall vine run starting
+  in the collar's top layer climbs out the same way as a ladder's top. Its square (5 blocks around) joins `keepOut` at every level up to
   `StructureMaxLevel`, so trees and surface caves keep away.
 - **Loot.** `container(x, y, z)`: Minecraft's chests/abandoned_mineshaft on this game's items
   (`Mineshafts.LOOT`), rolled from `Hash.rng(Hash.hash3(lootSalt, x, y, z))` into random slots,
@@ -5150,7 +5155,9 @@ idle away), its centre the first standing spot down the
 column (creatures from 20 above the player's feet over 48, monsters from ±16 over 24), 2-4 /
 1-4 members spread ±4, each on its own spot within 3 up or down. `validSpot`: the chunk ticks, a
 solid opaque sturdy floor (grass or dry grass for creatures), the box free (no solid, unloaded,
-fluid, fire or campfire cell: Hull and Burning.touching), 24 blocks from every player, and the
+fluid, fire or campfire cell: Hull and Burning.touching), no rail in the feet's cell or the
+one above (Minecraft's `#prevent_mob_spawning_inside`; a cobweb does not stop a spawn, as
+NaturalSpawner.isValidEmptySpawnBlock allows), 24 blocks from every player, and the
 light: creatures raw brightness above 8, monsters Minecraft's two rolls
 (`LightEstimate.darkForMonsters`) and then no block light (searched with `SPAWN_BUDGET`, only
 for the spots the rolls let through). Measured on generated terrain (seed 12345, a player

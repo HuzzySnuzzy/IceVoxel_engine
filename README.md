@@ -607,12 +607,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   carpets, vines hanging from the walls, hanging roots, glow lichen and fewer cobwebs. About half
   of the overgrown ones have an **entrance**: a 3 × 3 shaft open to the sky on dry, level ground
   (never by water, a cave entrance, a lake or the spawn), framed by a mossy cobblestone collar, an
-  oak log beam on two fence posts across it, and a **rope hanging all the way down** from the beam to
-  the floor of the room or corridor 20-60 blocks below (climb it, or let go and slide down it:
-  a rope never hurts), with vines down its walls; no tree grows by one. A mineshaft is written
+  oak log beam on two fence posts three blocks over it, and a **rope hanging all the way down** from
+  the beam to the floor of the room or corridor 20-60 blocks below: jump onto it from the collar
+  and let go to slide down (a rope never hurts), or sneak to hold on; hold jump to climb back up,
+  and at the top, where your head meets the beam, walk off across the beam onto the collar. Vines
+  run down its walls from the collar's top (they climb out too); no tree grows by one. A mineshaft is written
   into the full detail chunks only, as cave air and cave twins of its rails, posts, cobwebs,
   torches and plants, so while caves are hidden it costs nothing to draw until you find it (the
-  entrance shaft is open air like a cave entrance's pit); mobs spawn in its dark like any cave.
+  entrance shaft is open air like a cave entrance's pit); mobs spawn in its dark like any cave
+  (never on its rails, as in Minecraft; an overgrown one's glow lichen keeps most of it lit).
   Generate Structures (and `Config.Structures.Generate`, `Config.Mineshafts.Enabled`) turns them
   off. Worlds saved before mineshafts existed get them too, under ground nobody changed (terrain
   comes from the seed; every edit stays). The All Structures debug world shows a sample of each.
@@ -980,7 +983,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   below it down, a block a tick, each dropping itself. **Cobwebs** hold whatever is in them: a
   quarter of the speed across, a twentieth up and down, momentum lost every tick and the fall
   forgotten (Minecraft's makeStuckInBlock); a sword cuts one quickly for String, Shears take the
-  cobweb, a bare hand gets nothing; nobody spawns in one. Mobs climb ladders, vines and rope they
+  cobweb, a bare hand gets nothing; no player spawns or teleports into one (mobs may, as in
+  Minecraft). Mobs climb ladders, vines and rope they
   walk into and get caught in webs, except spiders, which climb any wall and walk through webs.
   Climbing makes the ladder's, vine's or rope's own step sound every 1.67 blocks, the climb
   animation plays, and the `F3` overlay shows "climbing" and "stuck". Also: **Rails** (six iron

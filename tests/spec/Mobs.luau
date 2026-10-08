@@ -998,6 +998,23 @@ return function(t, shared, require, server)
 			not MobSpawning.validSpot(getBlock, context({}, skyOpen, MIDNIGHT), kind, 40, FLOOR + 1, 0, nextInt),
 			"not in the air"
 		)
+		-- Nothing spawns inside a rail (a mineshaft's track: #prevent_mob_spawning_inside); a
+		-- cobweb doesn't stop it (NaturalSpawner.isValidEmptySpawnBlock).
+		for _, name in { "Rail", "RailEastWest", "CaveRail", "CaveRailEastWest", "Cobweb", "CaveCobweb" } do
+			local inside = Blocks.find(name) :: number
+			local function getWith(x: number, y: number, z: number): number?
+				if x == 40 and y == FLOOR and z == 0 then
+					return inside
+				end
+				return getBlock(x, y, z)
+			end
+			local web = string.find(name, "Cobweb") ~= nil
+			t.eq(
+				MobSpawning.validSpot(getWith, context({}, skyOpen, MIDNIGHT), kind, 40, FLOOR, 0, nextInt),
+				web,
+				`{name}: {if web then "spawns" else "no spawn inside"}`
+			)
+		end
 	end)
 
 	t.test("spawning: monsters frozen beyond the chunks that tick don't fill a player's cap", function()

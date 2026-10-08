@@ -20,7 +20,10 @@
 	            4 blocks around it, `group` of them (2-4 creatures, 1-4 monsters), each on a spot
 	            of its own found within 3 blocks up or down.
 	  A spot    a solid, opaque, sturdy floor (not leaves, glass, a chest...) with the mob's whole
-	            box free above it (no solid block, no fluid, no fire: Burning.touching), and:
+	            box free above it (no solid block, no fluid, no fire: Burning.touching), no rail
+	            in its cell or the one above (Minecraft's #prevent_mob_spawning_inside, so a
+	            mineshaft's track stays clear; a cobweb does not stop a spawn, as in Minecraft:
+	            NaturalSpawner.isValidEmptySpawnBlock), and:
 	              creatures  grass (or savanna grass) under it and a raw brightness above 8
 	                         (Animal.checkAnimalSpawnRules: the sky light, or a torch): open
 	                         ground by day or night, never deserts, beaches, snow or mycelium;
@@ -95,6 +98,11 @@ local floor = math.floor
 local CHUNK = ChunkLayout.SIZE
 local GRASS = Blocks.find("Grass")
 local DRY_GRASS = Blocks.find("DryGrass")
+-- Nothing spawns inside these (Minecraft's #prevent_mob_spawning_inside: the rails).
+local PREVENT_INSIDE: { [number]: boolean } = {}
+for _, name in { "Rail", "RailEastWest", "CaveRail", "CaveRailEastWest" } do
+	PREVENT_INSIDE[Blocks.find(name) :: number] = true
+end
 
 function MobSpawning.new(): State
 	return { tick = 0 }
@@ -169,6 +177,10 @@ function MobSpawning.validSpot(
 		return block == nil or Blocks.isSolid(block)
 	end
 	if not Hull.noCollision(solidAt, box) then
+		return false
+	end
+	local feet, head = getBlock(x, y, z), getBlock(x, y + 1, z)
+	if (feet and PREVENT_INSIDE[feet]) or (head and PREVENT_INSIDE[head]) then
 		return false
 	end
 	if Burning.touching(getBlock, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ) ~= 0 then

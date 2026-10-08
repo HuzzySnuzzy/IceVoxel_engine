@@ -104,11 +104,16 @@
 	(Terrain.carvesTop); no lake, puddle, lava lake, oil well or library piece within MARGIN of
 	the collar; SpawnClearance blocks from the spawn; no other piece of the mineshaft in the
 	shaft's way. It is written last: the opening Air from the piece's lowest open layer up
-	through the ground, a mossy cobblestone collar two deep around it, oak fence posts and an
-	oak log beam across it, ordinary Rope from under the beam's middle down to the floor
-	(every rope hanging from the beam or the rope above), and vines on the shaft's walls and
-	the beam. Its box (5 blocks around the centre) keeps trees and surface caves away at every
-	level (TerrainGenerator's keepOut).
+	through the ground, a mossy cobblestone collar two deep around it, oak fence posts three
+	tall and an oak log beam across them FRAME (3) blocks over the collar, ordinary Rope from
+	under the beam's middle down to the floor (every rope hanging from the beam or the rope
+	above), and vines on the beam and down the shaft's walls from the collar's top layer. The
+	beam is that high so a climber can get out (Shared/Movement/PlayerPhysics): at the top of
+	the rope their head (1.8 tall) meets the beam with their feet 1.2 over the collar, enough to
+	drift off the rope onto the collar before they drop below its top (under a beam 2 over the
+	collar the feet stop at 0.2, and a climber stepping off falls back down the shaft); a wall
+	vine reaching the collar's top climbs out as a ladder does. Its box (5 blocks around the centre)
+	keeps trees and surface caves away at every level (TerrainGenerator's keepOut).
 
 	Loot (`container`, Minecraft's chests/abandoned_mineshaft on this game's items): a fresh table
 	for a chest a plan puts at (x, y, z), rolled from the position alone (LOOT).
@@ -150,6 +155,7 @@ local CANDIDATES = 32 -- entrance spots tried at most
 local SHAFT_VINES = 0.2 -- a vine run from each wall face of the shaft's opening
 local BEAM_VINES = 0.25 -- a vine on each side cell of the beam over the opening
 local KEEP_OUT = 5 -- trees and surface caves keep this far from an entrance's centre
+local FRAME = 3 -- the entrance's beam this far over the collar's top (a climber steps off: header)
 local CACHE = 64 -- cells (plans and rejected candidates) kept per generator
 local SLOTS = 27 -- a chest's slots
 
@@ -281,7 +287,7 @@ export type Piece = {
 
 --[[
 	The surface entrance: the opening's centre column (x, z), `top` that column's height (the
-	first air: the collar's top is top - 1, the beam at top + 2), `bottom` the lowest open layer
+	first air: the collar's top is top - 1, the beam at top + FRAME), `bottom` the lowest open layer
 	of the piece it opens into (the rope's last cell), the beam's `axis` ("X" or "Z"), `box` the
 	square trees and surface caves keep out of (x0, z0, x1, z1) and `shaft` every cell it writes
 	(x0, y0, z0, x1, y1, z1).
@@ -375,6 +381,7 @@ Mineshafts.SECTION = SECTION
 Mineshafts.MARGIN = MARGIN
 Mineshafts.GUARD = GUARD
 Mineshafts.KEEP_OUT = KEEP_OUT
+Mineshafts.FRAME = FRAME
 Mineshafts.CACHE = CACHE
 Mineshafts.PILLAR = PILLAR
 Mineshafts.SLOTS = SLOTS
@@ -1031,7 +1038,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 			end
 		end
 		-- No other piece in the shaft's way, from the piece up through the ground.
-		local shaftBox = { cx - 2, bottom, cz - 2, cx + 2, h0 + 3, cz + 2 }
+		local shaftBox = { cx - 2, bottom, cz - 2, cx + 2, h0 + FRAME + 1, cz + 2 }
 		for _, other in b.pieces do
 			if other ~= piece then
 				local o = other.box
@@ -1069,7 +1076,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 			bottom = bottom,
 			axis = axis,
 			box = { cx - KEEP_OUT, cz - KEEP_OUT, cx + KEEP_OUT, cz + KEEP_OUT },
-			shaft = { cx - 2, bottom - 1, cz - 2, cx + 2, h0 + 3, cz + 2 },
+			shaft = { cx - 2, bottom - 1, cz - 2, cx + 2, h0 + FRAME + 1, cz + 2 },
 		}
 	end
 
@@ -1850,11 +1857,11 @@ local function writeEntrance(plan: Plan, e: Entrance)
 			end
 		end
 	end
-	-- The headframe: two fence posts and an oak log beam across the opening.
+	-- The headframe: two fence posts and an oak log beam across the opening, FRAME over the collar.
 	local ax, az = if e.axis == "X" then 1 else 0, if e.axis == "X" then 0 else 1
 	for _, d in { -2, 2 } do
 		local x, z = cx + d * ax, cz + d * az
-		for y = h0, h0 + 1 do
+		for y = h0, h0 + FRAME - 1 do
 			local o = at(x, y, z)
 			if o >= 0 then
 				put(o, y, FENCE)
@@ -1862,16 +1869,17 @@ local function writeEntrance(plan: Plan, e: Entrance)
 		end
 	end
 	for d = -2, 2 do
-		solid(cx + d * ax, h0 + 2, cz + d * az, LOG)
+		solid(cx + d * ax, h0 + FRAME, cz + d * az, LOG)
 	end
 	-- The rope, from under the beam to the floor.
-	for y = bottom, h0 + 1 do
+	for y = bottom, h0 + FRAME - 1 do
 		local o = at(cx, y, cz)
 		if o >= 0 then
 			put(o, y, ROPE)
 		end
 	end
-	-- Vines down the opening's walls (from the collar) and on the beam's sides.
+	-- Vines down the opening's walls (from the collar's top layer, so a climber on one reaches the
+	-- ground: Shared/Movement/PlayerPhysics) and on the beam's sides.
 	for s = 1, 4 do
 		local dx, dz = SIDE_DX[s], SIDE_DZ[s]
 		local vine = VINE_ON[SIDES[s]]
@@ -1881,7 +1889,7 @@ local function writeEntrance(plan: Plan, e: Entrance)
 			if (h % 1024) / 1024 >= SHAFT_VINES then
 				continue
 			end
-			for y = h0 - 2, h0 - 3 - (h // 1024) % 5, -1 do
+			for y = h0 - 1, h0 - 2 - (h // 1024) % 5, -1 do
 				local o = at(x, y, z)
 				if o < 0 or readu16(wData, o) ~= AIR then
 					break
@@ -1902,9 +1910,9 @@ local function writeEntrance(plan: Plan, e: Entrance)
 		local vine = VINE_ON[support]
 		for along = -1, 1 do
 			local x, z = cx + along * ax + side * az, cz + along * az + side * ax
-			local h = cellHash(shaftSalt, x, h0 + 2, z)
+			local h = cellHash(shaftSalt, x, h0 + FRAME, z)
 			if (h % 1024) / 1024 < BEAM_VINES then
-				for y = h0 + 2, h0 + 1 - (h // 1024) % 2, -1 do
+				for y = h0 + FRAME, h0 + FRAME - 1 - (h // 1024) % 2, -1 do
 					local o = at(x, y, z)
 					if o >= 0 and readu16(wData, o) == AIR then
 						put(o, y, vine)
@@ -2065,7 +2073,7 @@ function Mineshafts.sample(x: number, y: number, z: number, overgrown: boolean, 
 			bottom = y + 1,
 			axis = "X",
 			box = { ex - KEEP_OUT, ez - KEEP_OUT, ex + KEEP_OUT, ez + KEEP_OUT },
-			shaft = { ex - 2, y, ez - 2, ex + 2, ground + 3, ez + 2 },
+			shaft = { ex - 2, y, ez - 2, ex + 2, ground + FRAME + 1, ez + 2 },
 		}
 	end
 	return {
