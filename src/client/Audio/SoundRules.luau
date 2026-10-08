@@ -22,7 +22,8 @@
 	             else, when a kind of sound (an event's category or name) already has its most at
 	             once (CAPS: overlapping mining hits, many footsteps), its oldest; else the oldest.
 	             Distant sounds (far thunder) have a few voices of their own (`acquireQuietest`):
-	             a free one, else the quietest as heard now if this one is louder, else none.
+	             a free one, else the quietest as heard now if this one is louder (it fades out
+	             first: `fadeOut`), else none.
 	  steps      Minecraft's footsteps (Entity.move, `move`): a walked distance growing by 0.6 per
 	             block walked on the level, and the next whole number at which a step sounds, so a
 	             step every 1.67 blocks. The step is the block under the feet (floor(y - 0.2));
@@ -300,6 +301,18 @@ end
 
 -- Seconds in which a distant sound counts as half as loud as it started (a rumble dies away).
 SoundRules.DISTANT_HALF_LIFE = 3
+-- Seconds a distant sound giving way to a louder one fades out before that one starts (a sound
+-- stopped dead clicks).
+SoundRules.DISTANT_FADE = 0.2
+
+-- The volume of a sound fading out from `from` over `seconds`, `elapsed` seconds in (linear), and
+-- whether it is done.
+function SoundRules.fadeOut(from: number, elapsed: number, seconds: number): (number, boolean)
+	if seconds <= 0 or elapsed >= seconds then
+		return 0, true
+	end
+	return from * (1 - math.max(elapsed, 0) / seconds), false
+end
 
 --[[
 	Takes one of the first `limit` voices of `pool` for a distant sound of Sound.Volume `volume`

@@ -635,21 +635,24 @@ local Config = {
 			rains), the rest in the cloud. At most PerMinute in reach (FastPerMinute with Clouds on
 			Fast; Off: none at all); no bolt within MinDistance of anyone or Lightning.Radius +
 			Margin of a player in thunder (the server's strikes are there): those flash in the
-			cloud. Sampling: CellsPerFrame cells of the grid a frame (all of it within a period).
+			cloud. A period's flashes are worked out during the one before, at least CellsPerFrame
+			cells of its grid a frame, more when the frames are few (ready before it starts).
 			Seen out to the view distance (Bolts / FastBolts bolts, Glows flashes at once; bolts
 			about two pixels wide at any distance, PixelWidth blocks per block away, and up to
 			MaxBrightness times as bright as the haze needs (Beam.Brightness); Glow: how far the
 			lit clouds go towards the bolt's colour, GlowParts parts within GlowRadius blocks); the
-			sky's flash weakens with distance and to DayFlash by day, InCloudFlash for a flash in
-			the cloud. Heard out to Hearing blocks (MobileHearing on phones; MaxReach: no
-			flashes made farther): half as loud at HalfVolume blocks (InCloudVolume for a flash in
-			the cloud), up to Deepen lower (and longer) at the edge, muffled from Near on by an
-			equalizer (High and Mid dB less every 256 blocks, down to HighFloor / MidFloor; Low dB
-			more by 1024), an echo from Echo.From blocks (Volume, Pitch, Delay seconds later); at
-			most Voices distant sounds at once (MobileVoices on phones), the quietest giving way.
+			sky's flash weakens with distance and by day (to DayFlash from Near on), InCloudFlash
+			for a flash in the cloud. Heard out to Hearing blocks (MobileHearing on phones;
+			MaxReach: no flashes made farther): half as loud at HalfVolume blocks (InCloudVolume
+			for a flash in the cloud), up to Deepen lower (and longer) at the edge, muffled from
+			Near on by an equalizer (High and Mid dB less every 256 blocks, down to HighFloor /
+			MidFloor; Low dB more by 1024), an echo from Echo.From blocks (Volume, Pitch, Delay
+			seconds later); at most Voices distant sounds at once (MobileVoices on phones), the
+			quietest giving way.
 			Rain: a hiss of the rain around (Rings blocks out in Directions directions, Half: blocks
 			at which it counts half), Volume at full rain, muffled by Muffle (dB), Smoothing
-			seconds to follow, sampled every Interval s; it fades as the rain here takes over.
+			seconds to follow, sampled every Interval s; it fades as the rain here takes over, and
+			under a roof to Roofed of it, muffled by RoofMuffle instead.
 		]]
 		Distant = {
 			Enabled = true,
@@ -668,7 +671,7 @@ local Config = {
 			Bolts = 3,
 			FastBolts = 2,
 			Glows = 4,
-			PixelWidth = 0.0023,
+			PixelWidth = 0.0026,
 			MaxBrightness = 20,
 			Glow = 0.85,
 			GlowParts = 6,
@@ -695,6 +698,8 @@ local Config = {
 				Half = 64,
 				Volume = 0.6,
 				Muffle = { Low = 0, Mid = -4, High = -14 },
+				Roofed = 0.5,
+				RoofMuffle = { Low = 0, Mid = -8, High = -24 },
 				Smoothing = 1.2,
 				Interval = 0.25,
 			},

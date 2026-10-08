@@ -27,7 +27,8 @@
 	            setting (Minecraft's sounds don't depend on the graphics; Fast halves the level it
 	            tries columns with, as Minecraft's does): the columns it tries are queued for a
 	            roof scan as the strips' are, so Off (no strips) and Fast (5 blocks of them) still
-	            hear rain landing anywhere within 10.
+	            hear rain landing anywhere within 10. `roofed` tells Weather/StormView whether the
+	            camera is under a roof (the distant rain's hiss is quieter and duller there).
 
 	Cost: on a cell change ~300 strips are checked (Fancy), with property writes only where a
 	strip changed; the roofs' scans run once per column until an edit, and only while something
@@ -334,6 +335,19 @@ function PrecipitationView.setMode(value: number)
 		end
 	end
 	layoutDirty = true
+end
+
+--[[
+	Whether a block that stops rain is over the camera: its column's rain floor is above the
+	camera's cell (as tickRain's weather.rain.above asks). False while that column is not known
+	(its scan is queued, and learned within a frame or two).
+]]
+function PrecipitationView.roofed(): boolean
+	if world == nil then
+		return false
+	end
+	local entry = entryOf(WeatherState.cameraX, WeatherState.cameraZ)
+	return entry ~= nil and entry.floor > WeatherState.cameraY
 end
 
 -- Strips drawn now and in all (F3).

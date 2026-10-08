@@ -20,7 +20,8 @@
 	            "rain", "snow" or "" (a dry biome); `kind` "clear", "rain" or "snow".
 	  Columns   `temperatureAt(x, z)`: the Minecraft temperature of a column's biome (nil: nothing
 	            falls there) and its natural ground height, from the generator, kept for COLUMNS
-	            columns (shared by the rain, the snow line and the maps).
+	            columns (shared by the rain, the snow line and the maps); `seaLevel()` the
+	            generator's sea surface (distant bolts stand on it over water).
 	  Wind      `wind()`: blocks a second now; `displacement()`: how far the air has moved (the
 	            clouds' frame).
 
@@ -163,6 +164,12 @@ end
 ]]
 function WeatherState.temperatureAt(x: number, z: number): (number?, number)
 	return column(math.floor(x), math.floor(z))
+end
+
+-- The sea's surface (blocks): the generator's (0 in a flat world without a sea), else Config's.
+function WeatherState.seaLevel(): number
+	local terrain = generator
+	return if terrain and terrain.seaLevel then terrain.seaLevel else Config.SeaLevel
 end
 
 -- Is column (x, z)'s biome and ground height known already (no generator call)?

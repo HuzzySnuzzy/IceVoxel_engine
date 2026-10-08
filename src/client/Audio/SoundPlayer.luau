@@ -26,7 +26,8 @@
 	             volume the caller gives, wherever the player walks or turns: Minecraft plays its
 	             sounds heard everywhere 2 blocks off that way, LevelRenderer.globalLevelEvent).
 	             When all are busy the quietest as heard now gives way to a louder one
-	             (SoundRules.acquireQuietest).
+	             (SoundRules.acquireQuietest): it fades out over SoundRules.DISTANT_FADE seconds
+	             first (no click), then the louder one starts on its voice.
 	  Voices     a voice is free again once its sound ends, or when it is cut at the event's
 	             `duration`; when all are busy the oldest is taken, and a kind of sound never has
 	             more than a few at once (overlapping mining hits, many footsteps:
@@ -102,8 +103,25 @@ type Event = Sounds.Event
 
 type Voice = { sound: Sound, attachment: Attachment?, stopAt: number }
 type Bank = { pool: SoundRules.Pool, voices: { Voice } }
+-- A distant sound to start: its file, Sound.Volume, PlaybackSpeed, SoundGroup and length (s),
+-- where it comes from (studs) and its equalizer's gains (dB).
+type Start = {
+	id: string,
+	volume: number,
+	pitch: number,
+	group: SoundGroup?,
+	length: number?,
+	x: number,
+	y: number,
+	z: number,
+	low: number,
+	mid: number,
+	high: number,
+}
 -- A distant voice or a bed's: where it comes from (studs; a bed's `x`, `z` are a direction from
--- the listener instead, `relative`), when it is cut, and its equalizer's gains as written.
+-- the listener instead, `relative`), when it is cut, and its equalizer's gains as written; the
+-- sound it starts once the one playing has faded out (`waiting`: since `fadeAt`, from
+-- `fadeFrom`).
 type Distant = {
 	sound: Sound,
 	attachment: Attachment,
@@ -116,6 +134,10 @@ type Distant = {
 	low: number,
 	mid: number,
 	high: number,
+	start: Start,
+	waiting: boolean,
+	fadeAt: number,
+	fadeFrom: number,
 }
 -- A looped sound driven by its caller (`setBed`): its event, whether it plays, its volume at cue 1
 -- before the volume settings (taken when it starts) and the cue volume written.
@@ -496,6 +518,22 @@ local function newDistant(parent: Part, name: string): Distant
 		low = 0,
 		mid = 0,
 		high = 0,
+		start = {
+			id = "",
+			volume = 0,
+			pitch = 1,
+			group = nil :: SoundGroup?,
+			length = nil :: number?,
+			x = 0,
+			y = 0,
+			z = 0,
+			low = 0,
+			mid = 0,
+			high = 0,
+		},
+		waiting = false,
+		fadeAt = 0,
+		fadeFrom = 0,
 	}
 end
 
@@ -529,8 +567,29 @@ local function follow(voice: Distant, listener: Vector3)
 	voice.attachment.Position = listener + offset
 end
 
--- Frees the distant voices whose sound ended and moves the playing ones and the beds with the
--- listener.
+-- Starts the sound `voice` was given (its `start`) at `now`.
+local function begin(voice: Distant, now: number)
+	local start = voice.start
+	local sound = voice.sound
+	sound.SoundId = start.id
+	sound.Volume = start.volume
+	sound.PlaybackSpeed = start.pitch
+	sound.SoundGroup = start.group
+	setGains(voice, start.low, start.mid, start.high)
+	voice.x, voice.y, voice.z = start.x, start.y, start.z
+	local listener = hearingPoint()
+	if listener then
+		follow(voice, listener)
+	end
+	sound.TimePosition = 0
+	sound:Play()
+	voice.stopAt = if start.length then now + start.length else math.huge
+end
+
+--[[
+	Frees the distant voices whose sound ended, fades out those giving way and starts what they
+	give way to, and moves the playing ones and the beds with the listener.
+]]
 local function stepDistant(now: number)
 	local pool = distantPool
 	if pool == nil then
@@ -540,7 +599,22 @@ local function stepDistant(now: number)
 	for i, voice in distantVoices do
 		local state = pool.voices[i]
 		if state.busy then
-			if now >= voice.stopAt then
+			if voice.waiting then
+				local sound = voice.sound
+				local volume, done = SoundRules.fadeOut(voice.fadeFrom, now - voice.fadeAt, SoundRules.DISTANT_FADE)
+				if done or not sound.Playing then
+					sound:Stop()
+					voice.waiting = false
+					begin(voice, now)
+					-- (Its grace to start counts from now.)
+					state.startedAt = now
+				else
+					sound.Volume = volume
+					if listener then
+						follow(voice, listener)
+					end
+				end
+			elseif now >= voice.stopAt then
 				voice.sound:Stop()
 				SoundRules.release(pool, i)
 			elseif now - state.startedAt > START_GRACE and not voice.sound.IsPlaying then
@@ -691,23 +765,22 @@ function SoundPlayer.playDistant(
 	end
 	playedThisFrame += 1
 	local voice = distantVoices[index]
-	local playing = voice.sound
-	if playing.Playing then
-		playing:Stop()
+	local start = voice.start
+	start.id, start.volume, start.pitch = playback.id, playback.volume, playback.pitch
+	start.group = if replacement then replacement.SoundGroup else nil
+	start.length = playback.length
+	start.x, start.y, start.z = x * BLOCK, y * BLOCK, z * BLOCK
+	start.low, start.mid, start.high = low, mid, high
+	if voice.sound.Playing then
+		-- (The one playing gives way: it fades out first, stepDistant then starts this one. One
+		-- that comes while it fades takes this one's place.)
+		if not voice.waiting then
+			voice.waiting, voice.fadeAt, voice.fadeFrom = true, now, voice.sound.Volume
+		end
+	else
+		voice.waiting = false
+		begin(voice, now)
 	end
-	playing.SoundId = playback.id
-	playing.Volume = playback.volume
-	playing.PlaybackSpeed = playback.pitch
-	playing.SoundGroup = if replacement then replacement.SoundGroup else nil
-	setGains(voice, low, mid, high)
-	voice.x, voice.y, voice.z = x * BLOCK, y * BLOCK, z * BLOCK
-	local listener = hearingPoint()
-	if listener then
-		follow(voice, listener)
-	end
-	playing.TimePosition = 0
-	playing:Play()
-	voice.stopAt = if playback.length then now + playback.length else math.huge
 	return true
 end
 

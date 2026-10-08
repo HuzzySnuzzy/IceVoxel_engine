@@ -2667,12 +2667,13 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   gives Minecraft's bolt (8 sections of 16 blocks zigzagging by up to 5 blocks, two branches
   zigzagging by up to 15, widening upwards) and its life (LightningBolt.tick: 2 ticks, then up to
   `flashes` more shapes after random pauses); the sky flashes while its life is at least 0 (a
-  ColorCorrectionEffect's brightness, less with distance, indoors and blind:
-  `EffectView.blindness`) and a PointLight lights the
+  ColorCorrectionEffect's brightness, less with distance (`DistantStorms.skyFlash`: half at 512
+  blocks, and by day the farther the less, to the distant flashes' `DayFlash` at Near), indoors
+  and blind: `EffectView.blindness`) and a PointLight lights the
   struck point. Each segment is a Neon core and a see-through glow (pooled parts; three bolts at
-  once at most). The crack plays where it struck; the thunder after `Weather.thunderDelay`, a few
-  blocks from the listener towards the strike, fainter with distance (`DistantStorms
-  .thunderVolume`). A strike farther than `Distant.Near` (256) is drawn and heard as a distant
+  once at most). The crack plays where it struck; the thunder after `Weather.thunderDelay`, 8
+  blocks (`DistantStorms.THUNDER_OFFSET`) from the listener towards the strike, fainter with
+  distance (`DistantStorms.thunderCue`). A strike farther than `Distant.Near` (256) is drawn and heard as a distant
   one (below). Every strike also lights the clouds over it (`CloudView.glow`).
 - *Distant storms* (`Weather/DistantStorms`, pure; `StormView`; drawn and heard by
   `LightningView.distant`): Minecraft has lightning only near players and no weather far off, so
@@ -2680,55 +2681,68 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   with nothing sent (as Minecraft 1.21.9's End flashes come from the game time alone):
   - Schedule: `Distant.Cell` (128) block cells, `Distant.Period` (2 s) periods of the server's
     clock (`GetServerTimeNow`: the weather clock stands still with doWeatherCycle off, while the
-    server goes on striking). During a period the next one's thunder is sampled at every cell
-    centre within reach (`Field:grid` at that period's start, a band of rows a frame:
-    `prepare` / `fill`); at its start each cell's chance is `1 − exp(−rate × cell² × period ×
-    weight)` with the most thunder of it and its 8 neighbours (`weight`: 0 at `MinThunder` 0.15,
-    the clouds' first tower step, to 1), rolled by a hash of (seed, cell, period); a cell that
-    fires draws its point, time, kind, shape seed and flashes from more of the hash and keeps the
-    point with the share of the weight the thunder there has (`plan`). Rate: `Distant.Rate` (12)
+    server goes on striking). During a period the next one's flashes are worked out, a band of
+    rows a frame (`prepare`, then `advance` by `budget`'s cells: the rows left shared out over the
+    frames until it is due, half a second before it starts, or half a second after its work
+    began when that began late; at least `CellsPerFrame`): its thunder sampled at every cell
+    centre within reach (`Field:grid` at that period's start: `fill`), each cell's chance
+    `1 − exp(−rate × cell² × period × weight)` with the most thunder of it and its 8 neighbours
+    (`weight`: 0 at `MinThunder` 0.15, the clouds' first tower step, to 1) worked out as the rows
+    come in, then each cell rolled by a hash of (seed, cell, period) (`roll`); a cell that fires
+    draws its point, time, kind, shape seed and flashes from more of the hash and keeps the point
+    with the share of the weight the thunder there has. A grid not ready when its period starts
+    is finished and shown late (flashes up to 1 s late), never thrown away. Rate: `Distant.Rate` (12)
     a minute per km² of full thunder (Minecraft's near a player: 47; the server's: 233; real
     storms 0.04-1). 55% of 2048-block views hold thunder (seeds 12345, 777, 4242); the median
-    holds 0.38 km² of its weight: a flash every 13 s; with a storm thundering 600 blocks off, 13
-    a minute. At most `PerMinute` (24; `FastPerMinute` 12 on Fast clouds; Off none) in reach,
-    thinned by one scale for all cells, keeping the lowest rolls (Fast's flashes are Fancy's).
+    holds 0.38 km² of its weight: a flash every 13 s (one in ten over 22 a minute, the biggest
+    83); with a storm thundering 600 blocks off, 13 a minute. At most `PerMinute` (24, one every
+    2.5 s; `FastPerMinute` 12 on Fast clouds; Off none) in reach, thinned by one scale for all
+    cells, keeping the lowest rolls (Fast's flashes are Fancy's). Under the cap every client sees
+    the same flashes; over it, clients with another reach or Fast thin by another scale and
+    share most of them.
   - Kinds: `GroundShare` (0.3) bolts, where rain falls; the rest flash in the cloud. No bolt
-    within `MinDistance` (64) of anyone or `Lightning.Radius` + `Margin` (96) of a player in
-    thunder, not a spectator (the server's strikes are there; now sent out to 4096): an
-    in-cloud flash instead.
+    within `MinDistance` (64) of the camera or anyone or `Lightning.Radius` + `Margin` (96) of a
+    player in thunder, not a spectator (the server's strikes are there; now sent out to 4096):
+    an in-cloud flash instead (`strikes`, asked as the flash shows).
   - Reach: max(view, `Hearing` 2048, `MobileHearing` 1024 on phones), at most `MaxReach` 4096:
     seen within the view, heard within the hearing (Ultra's outer 2 km flicker silently).
-  - Seen: a far bolt from the ground (the generator's height, the sea's over water) to the
-    cloud's base (`CloudView.base`), one FaceCamera Beam a segment (LightEmission 1,
-    LightInfluence 0, pooled with its two Attachments) `boltWidth` wide (`PixelWidth` × the
-    distance: about 2 px at FOV 70, 1080p) and `brightness` bright (Beam.Brightness =
+  - Seen: a far bolt from the ground (`groundAt`: the generator's height, its own sea level's
+    surface over water, so on a flat world's ground too) to the cloud's base (`CloudView.base`),
+    one FaceCamera Beam a segment (LightEmission 1, LightInfluence 0, pooled with its two
+    Attachments) `boltWidth` wide (`PixelWidth` 0.0026 × the distance: 2 px at the vertical FOV
+    70, 1080p, where a pixel is 2 tan 35° / 1080 = 1.3e-3 of the distance) and `brightness` bright (Beam.Brightness =
     1 / the Atmosphere's transmittance there, `AtmosphereModel.haze`, at most `MaxBrightness`
     20); at most `Bolts` (3; `FastBolts` 2) bolts and `Glows` (4) distant flashes at once. The
     clouds over a flash are lit while it flashes (`CloudView.glow` / `light` / `unglow`: up to
     `GlowParts` 6 cloud parts of the finest ring with any within `GlowRadius` 96 blocks, turned
     `Glow` of the way to the bolt's colour and Neon, written only on change and only while a
     part still shows its box; a lit part released by a plan gets its material back). The sky's
-    flash: `skyFlash` (half at 512 blocks, `DayFlash` 0.3 of that by day, `InCloudFlash` 0.5 in
-    the cloud).
+    flash: `skyFlash` (half at 512 blocks, by day down to `DayFlash` 0.3 of that from Near on,
+    so no jump where strikes turn distant; `InCloudFlash` 0.5 in the cloud).
   - Heard: after `Weather.thunderDelay` (6 s from 2 km), `entity.lightning_bolt.thunder.far`
     (the thunder's stand-in lower still; its category is the thunder) on
     `SoundPlayer.playDistant`'s own voices (3, `MobileVoices` 2 on phones: an Attachment each with
     an EqualizerSoundEffect of its own, kept 8 blocks from the listener towards the flash every
-    frame, the quietest as heard now giving way: `SoundRules.acquireQuietest`), at
-    `thunderVolume` (1 / (1 + (d / 700)²), fading out over the hearing's last quarter;
-    `InCloudVolume` 0.7 for a cloud flash), `thunderPitch` (up to 25% lower and longer), `muffle`
+    frame, the quietest as heard now giving way: `SoundRules.acquireQuietest`, fading out over
+    `DISTANT_FADE` 0.2 s before the louder one starts, `fadeOut`), at `thunderCue`
+    (`thunderVolume`, 1 / (1 + (d / 700)²), fading out over the hearing's last quarter, times what
+    the near thunder's voice keeps 8 blocks off, `rolloff` 0.85, so it is never louder just past
+    Near; `InCloudVolume` 0.7 for a cloud flash), `thunderPitch` (up to 25% lower and longer), `muffle`
     (highs −10 dB and mids −2.5 dB every 256 blocks past Near, floors −40 / −15, lows +2 dB by
     1024: the air takes the highs, 33 dB a km at 4 kHz, under 1 below 250 Hz), an echo from 768
     blocks (0.8-1.8 s later, 0.55 as loud).
   - Rain: every 0.25 s the rain level (`rainLevel`: the rain sound's) at 4 rings (24-168 blocks)
     × 8 directions around the camera, snapped to 8 blocks for the column cache, where rain falls
     by the biome (`hiss`: the loudest, weighted 1 / (1 + (r / 64)²), and its side, shorter when
-    it falls all around), `hissVolume` fading as the rain at the camera takes over and indoors
-    (sky exposure), smoothed over 1.2 s, played on `SoundPlayer.newBed`'s looped
-    `weather.rain.far`, muffled (mids −4, highs −14 dB).
-  - Cost (Lune, interpreted / native): a 2048 reach's 35 × 35 grid 1.7 / 0.5 ms a period, spread
-    over its frames (128 cells a frame, or a thirtieth of the grid); a plan 0.04 ms in a clear
-    sky, 0.4 in random weather, 1.8 / 0.5 ms under /weather thunder, once a period.
+    it falls all around), `hissVolume` fading as the rain at the camera takes over, underground
+    (sky exposure) and under a roof (`PrecipitationView.roofed`: the camera column's rain floor
+    above it; `Roofed` 0.5 of it), smoothed over 1.2 s, played on `SoundPlayer.newBed`'s looped
+    `weather.rain.far`, muffled (`hissMuffle`: mids −4, highs −14 dB; under a roof −8, −24).
+  - Cost (Lune, interpreted / native): a 2048 reach's 35 × 35 grid 1.5 / 0.5 ms a period to
+    sample and 0.9 / 0.4 ms to roll under /weather thunder (0.1 in random weather, none clear);
+    Ultra's 67 × 67 5.1 / 1.9 and 3.5 / 1.5 ms. All spread over the period before: at 60 fps 3
+    rows a frame at 2048, 2 at 4096 (99% of frames under 0.2-0.5 ms interpreted), at 15 fps 4
+    and 6; ready before its period from 5 fps up.
 - *F3*: the weather at the camera (kind, precipitation, thunder, cover), the wind and where it
   blows, the weather clock and an override's share; the cloud parts and rings (and parts still to
   place), the strips drawn and the near bolts showing; the distant flashes a minute expected in

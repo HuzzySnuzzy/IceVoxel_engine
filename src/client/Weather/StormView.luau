@@ -6,34 +6,40 @@
 	not here.
 
 	  Schedule  the server's clock (workspace:GetServerTimeNow) in Period-second periods. While
-	            one runs, the next one's thunder is sampled around the camera at that period's
-	            moment (Weather.momentAt with its start; DistantStorms.prepare and fill: a band of
-	            rows a frame, CellsPerFrame cells or a thirtieth of the grid, whichever is more, so
-	            it is ready long before it starts). When it starts its flashes are planned
-	            (DistantStorms.plan) and handed to LightningView.distant as their times come (none
-	            more than a second late). A change of the server's weather state (/weather, the
-	            clock) samples the next period again.
-	  Players   where no bolt may strike is read once a period: every player's feet
-	            (Shared/Movement/Rig.feet) within MinDistance, and a player standing in thunder
-	            (not a spectator: the server's World/WeatherServer rolls only for the others)
-	            within Lightning.Radius + Margin.
+	            one runs, the next one's flashes are worked out around the camera, a band of rows a
+	            frame (DistantStorms.prepare and advance: its thunder sampled at that period's moment,
+	            Weather.momentAt with its start, then each cell rolled), as many rows a frame as
+	            DistantStorms.budget gives for it to be ready before it starts at the frame rate now
+	            (smoothed over about ten frames): no frame does it all, and none is thrown away. When
+	            it starts its flashes are handed to LightningView.distant as their times come (none
+	            more than LATE late: one that came in late, after a change, shows the rest). A
+	            change of the server's weather state (/weather, the clock) works the next period
+	            out again.
+	  Players   as a bolt shows, where it may not strike (DistantStorms.strikes): within
+	            MinDistance of the camera or of any player's feet (Shared/Movement/Rig.feet), or
+	            within Lightning.Radius + Margin of a player standing in thunder (not a spectator:
+	            the server's World/WeatherServer rolls only for the others): it flashes in the cloud.
 	  Rain      every Rain.Interval seconds the rain level at DistantStorms.rainPoints around the
 	            camera (snapped to LATTICE blocks so Weather/WeatherState's column cache serves
 	            them; only where rain falls by the column's biome: snow and deserts are silent),
-	            DistantStorms.hiss; its volume (hissVolume: fading as the rain here takes over,
-	            indoors and underground) and direction smoothed over Rain.Smoothing seconds, and
-	            played on Audio/SoundPlayer's bed of weather.rain.far, muffled by Rain.Muffle.
+	            DistantStorms.hiss, and whether a block that stops rain is over the camera
+	            (Weather/PrecipitationView.roofed, its column's rain floor); its volume (hissVolume:
+	            fading as the rain here takes over, underground, and to Rain.Roofed under a roof),
+	            direction and roof smoothed over Rain.Smoothing seconds, and played on
+	            Audio/SoundPlayer's bed of weather.rain.far, muffled by Rain.Muffle (hissMuffle:
+	            Rain.RoofMuffle under a roof).
 	  Off       no flashes with the Clouds setting Off, Distant.Enabled or Lightning.Enabled
 	            false, or no weather at all (the server's own strikes still show); the hiss
 	            follows Rain.Enabled and plays whatever the Clouds and Weather settings, as the
 	            rain's own sound does.
 
-	Cost (tests/spec/DistantStorms, Lune; interpreted, as Roblox clients may run it, then native):
-	a period's grid around a 2048-block reach (35 x 35 cells) takes 1.7 ms (0.5 native) to sample,
-	spread over its frames (128 cells, 0.18 ms, a frame); planning it 0.04 ms in a clear sky (one
-	read a cell), 0.4 ms in the weather of random places and times, 1.8 ms (0.5) under /weather
-	thunder, once every Period seconds; the rain's 32 points every Interval seconds. Nothing is
-	allocated per frame but a flash's own tables when one comes.
+	Cost (tests/spec/DistantStorms, Lune; interpreted, as Roblox clients may run it, then native): a
+	period's grid around a 2048-block reach (35 x 35 cells) takes 1.5 ms (0.5 native) to sample and
+	0.9 ms (0.4) to roll under /weather thunder (0.1 in the weather of random places and times, none
+	in a clear sky); around Ultra's 4096 (67 x 67) 5.1 and 3.5 ms (1.9, 1.5). All of it is spread
+	over the frames of the period before: at 60 fps 3 rows a frame at 2048 and 2 at 4096 (99 in 100
+	frames under 0.2-0.5 ms interpreted), at 15 fps 4 and 6. The rain's 32 points every Interval
+	seconds. Nothing is allocated per frame but a flash's own tables when one comes.
 ]]
 
 local Players = game:GetService("Players")
@@ -54,12 +60,17 @@ local CloudLod = require(script.Parent.CloudLod)
 local CloudView = require(script.Parent.CloudView)
 local DistantStorms = require(script.Parent.DistantStorms)
 local LightningView = require(script.Parent.LightningView)
+local PrecipitationView = require(script.Parent.PrecipitationView)
 local WeatherState = require(script.Parent.WeatherState)
 
 -- The distant rain's points snap to this lattice (blocks).
 local LATTICE = 8
--- Seconds late a flash may still be shown (a hitch, a slow frame).
+-- Seconds late a flash may still be shown (a hitch, a slow frame, a period worked out late).
 local LATE = 1
+-- The frame time the work is shared out by follows each frame's by this share (about ten frames'
+-- average), a hitch counting as HITCH seconds at most.
+local FRAME_SMOOTHING = 0.1
+local HITCH = 0.25
 
 local StormView = {}
 
@@ -70,16 +81,14 @@ end
 local settings: DistantStorms.Settings? = nil
 -- What `settings` were made for.
 local settingsMode, settingsView, settingsMobile = -1, -1, false
--- The running period's grid and the next one's, and their moments.
+-- The running period's flashes and the next one's being worked out (at its moment).
 local current = DistantStorms.newGrid()
 local upcoming = DistantStorms.newGrid()
-local currentMoment: Weather.Moment = Weather.momentAt(WeatherState.state(), 0)
 local upcomingMoment: Weather.Moment = Weather.momentAt(WeatherState.state(), 0)
 local scratch: buffer? = nil
--- The period planned last, its flashes (in time order) and the next to show.
-local planned = -1
-local events: { DistantStorms.Event } = {}
+-- The next of the running period's flashes to show, and the frame time (smoothed).
 local nextEvent = 1
+local frameTime = 1 / 60
 -- The flashes a minute the plan expected, and when (os.clock) the last minute's were shown.
 local expected = 0
 local recent: { number } = {}
@@ -92,6 +101,8 @@ local bed: number? = nil
 local hissClock = math.huge
 local hissLevel, hissX, hissZ = 0, 0, 0
 local hissVolume, hissDX, hissDZ = 0, 0, 0
+-- Whether a roof is over the camera (sampled), and smoothed (0 in the open, 1 under it).
+local roofed, roof = false, 0
 local originX, originZ = 0, 0
 
 -- The weather field's grid at the upcoming period's moment (DistantStorms.Sampler).
@@ -106,25 +117,28 @@ local function sample(x0: number, z0: number, step: number, cols: number, rows: 
 end
 
 local checks: DistantStorms.Checks = {
+	-- (The flashes being rolled are the upcoming period's.)
 	thunder = function(x: number, z: number): number
-		local _, thunder = WeatherState.at(x, z, currentMoment)
+		local _, thunder = WeatherState.at(x, z, upcomingMoment)
 		return thunder
 	end,
 	rains = function(x: number, z: number): boolean
 		return WeatherState.formAt(x, nil, z) == Weather.RAIN
 	end,
-	guarded = function(x: number, z: number): boolean
-		for i = 1, guardCount * 3, 3 do
-			local dx, dz, radius = x - guards[i], z - guards[i + 1], guards[i + 2]
-			if dx * dx + dz * dz <= radius * radius then
-				return true
-			end
-		end
-		return false
-	end,
 }
 
--- Reads where no bolt may strike this period (see the header).
+-- Is a player near (x, z) (blocks), as `gatherGuards` read them?
+local function guarded(x: number, z: number): boolean
+	for i = 1, guardCount * 3, 3 do
+		local dx, dz, radius = x - guards[i], z - guards[i + 1], guards[i + 2]
+		if dx * dx + dz * dz <= radius * radius then
+			return true
+		end
+	end
+	return false
+end
+
+-- Reads where no bolt may strike now (see the header).
 local function gatherGuards(s: DistantStorms.Settings)
 	guardCount = 0
 	for _, player in Players:GetPlayers() do
@@ -135,7 +149,7 @@ local function gatherGuards(s: DistantStorms.Settings)
 		end
 		local radius = s.minDistance
 		if not GameMode.isSpectator(GameMode.of(player)) then
-			local _, thunder = WeatherState.at(feet.X, feet.Z, currentMoment)
+			local _, thunder = WeatherState.at(feet.X, feet.Z)
 			if thunder > 0 then
 				radius = math.max(radius, s.guard)
 			end
@@ -166,49 +180,49 @@ local function active(): DistantStorms.Settings?
 	return settings
 end
 
-local function schedule()
+local function schedule(dt: number)
 	local s = active()
 	if s == nil then
-		table.clear(events)
-		nextEvent, expected, planned = 1, 0, -1
+		current.period, upcoming.period = -1, -1
+		nextEvent, expected = 1, 0
 		return
 	end
+	frameTime += (math.min(dt, HITCH) - frameTime) * FRAME_SMOOTHING
 	local now = workspace:GetServerTimeNow()
 	local period = math.floor(now / s.period)
-	if planned ~= period then
-		planned = period
-		if upcoming.period == period and upcoming.filled >= upcoming.rows then
-			current, upcoming = upcoming, current
-			currentMoment, upcomingMoment = upcomingMoment, currentMoment
-		end
-		nextEvent = 1
-		if current.period == period then
-			gatherGuards(s)
-			local _, perMinute =
-				DistantStorms.plan(s, current, worldSeed, WeatherState.cameraX, WeatherState.cameraZ, checks, events)
-			expected = perMinute
-		else
-			table.clear(events)
-			expected = 0
-		end
-	end
-	-- The next period's grid, a band a frame.
-	if upcoming.period ~= period + 1 then
+	-- The next period's flashes, a band of rows a frame (one still being worked out for this
+	-- period, late, is finished first; one for a period gone by is dropped).
+	if upcoming.period < period or upcoming.period > period + 1 then
 		DistantStorms.prepare(upcoming, s, period + 1, WeatherState.cameraX, WeatherState.cameraZ)
 		Weather.momentAt(WeatherState.state(), (period + 1) * s.period, upcomingMoment)
 	end
-	if upcoming.filled < upcoming.rows then
-		local budget = math.max(Config.Weather.Distant.CellsPerFrame, math.ceil(upcoming.cols * upcoming.rows / 30))
-		DistantStorms.fill(upcoming, s, sample, budget)
+	if not upcoming.ready then
+		local budget = DistantStorms.budget(upcoming, s, frameTime, now)
+		DistantStorms.advance(upcoming, s, sample, worldSeed, checks, budget)
 	end
-	-- The flashes whose time came.
-	while nextEvent <= #events and events[nextEvent].time <= now do
-		local event = events[nextEvent]
-		nextEvent += 1
-		if now - event.time <= LATE then
-			LightningView.distant(event)
-			table.insert(recent, os.clock())
+	-- Its period came (or it is ready late in it): its flashes are shown now.
+	if upcoming.ready and upcoming.period == period then
+		current, upcoming = upcoming, current
+		nextEvent = 1
+		expected = DistantStorms.perMinute(s, current)
+	end
+	if current.period == period then
+		-- The flashes whose time came.
+		local events = current.events
+		while nextEvent <= #events and events[nextEvent].time <= now do
+			local event = events[nextEvent]
+			nextEvent += 1
+			if now - event.time <= LATE then
+				if event.ground then
+					gatherGuards(s)
+					event.ground = DistantStorms.strikes(s, event, WeatherState.cameraX, WeatherState.cameraZ, guarded)
+				end
+				LightningView.distant(event)
+				table.insert(recent, os.clock())
+			end
 		end
+	else
+		expected = 0
 	end
 	local clock = os.clock()
 	while #recent > 0 and clock - recent[1] > 60 do
@@ -239,17 +253,19 @@ local function hiss(dt: number)
 		if rain.Enabled and WeatherState.enabled() and SoundPlayer.isEnabled() then
 			originX, originZ = WeatherState.cameraX, WeatherState.cameraZ
 			hissLevel, hissX, hissZ = DistantStorms.hiss(points, rainLevelAt)
+			roofed = hissLevel > 0 and PrecipitationView.roofed()
 		else
 			hissLevel = 0
 		end
 	end
+	roof = DayCycle.approach(roof, if roofed then 1 else 0, dt, rain.Smoothing)
 	local near = if WeatherState.form == Weather.RAIN then WeatherState.intensity else 0
-	local target = DistantStorms.hissVolume(hissLevel, near, LightingController.skyExposure())
+	local target = DistantStorms.hissVolume(hissLevel, near, LightingController.skyExposure(), roof)
 	hissVolume = DayCycle.approach(hissVolume, target, dt, rain.Smoothing)
 	hissDX = DayCycle.approach(hissDX, hissX, dt, rain.Smoothing)
 	hissDZ = DayCycle.approach(hissDZ, hissZ, dt, rain.Smoothing)
-	local muffle = rain.Muffle
-	SoundPlayer.setBed(handle, hissDX, hissDZ, hissVolume, muffle.Low, muffle.Mid, muffle.High)
+	local low, mid, high = DistantStorms.hissMuffle(roof)
+	SoundPlayer.setBed(handle, hissDX, hissDZ, hissVolume, low, mid, high)
 end
 
 --[[
@@ -270,7 +286,7 @@ function StormView.start(seed: number, distance: () -> number)
 		upcoming.period = -1
 	end)
 	RunService.Heartbeat:Connect(function(dt: number)
-		schedule()
+		schedule(dt)
 		hiss(dt)
 	end)
 end

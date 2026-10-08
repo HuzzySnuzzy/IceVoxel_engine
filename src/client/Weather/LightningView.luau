@@ -25,18 +25,18 @@
 	            (CloudView.glow / light: a few cloud parts turned towards the bolt's colour by
 	            Distant.Glow, Neon): an in-cloud flash shows only there and in the sky.
 	  Flash     while the sky flashes (life >= 0), a ColorCorrectionEffect ("IceVoxelLightning" in
-	            Lighting) brightens the picture by Bolt.Flash, less the farther the strike (half at
-	            512 blocks), indoors (the sky exposure, Rendering/LightingController) and blind
-	            (Rendering/EffectView.blindness: none at all through Blindness's black fog, as
+	            Lighting) brightens the picture by Bolt.Flash times DistantStorms.skyFlash (less the
+	            farther the strike, half at 512 blocks, and the farther the less by day; less again
+	            inside the cloud), indoors (the sky exposure, Rendering/LightingController) and
+	            blind (Rendering/EffectView.blindness: none at all through Blindness's black fog, as
 	            Minecraft's flash only lights the sky the fog hides), and a PointLight at the
-	            struck point lights the ground around a near one (Bolt.LightRange). A distant flash
-	            brightens it by DistantStorms.skyFlash: also less by day and inside the cloud.
+	            struck point lights the ground around a near one (Bolt.LightRange).
 	  Sound     a strike's crack (entity.lightning_bolt.impact) at once where it struck (heard
 	            within 32 blocks). Thunder for every strike and flash within the hearing
 	            (DistantStorms.settings: Distant.Hearing), Weather.thunderDelay(distance) seconds
-	            later (343 blocks a second), DistantStorms.thunderVolume loud: a near strike's
-	            (entity.lightning_bolt.thunder) a few blocks from the listener towards it, as
-	            Minecraft's (volume 10000: heard everywhere it is sent); a distant one's
+	            later (343 blocks a second), DistantStorms.thunderCue loud: a near strike's
+	            (entity.lightning_bolt.thunder) THUNDER_OFFSET blocks from the listener towards it,
+	            as Minecraft's (volume 10000: heard everywhere it is sent); a distant one's
 	            (entity.lightning_bolt.thunder.far) on Audio/SoundPlayer's distant voices
 	            (playDistant: the same, following the listener, at most Distant.Voices at once, the
 	            quietest giving way), lower and longer (thunderPitch), muffled (muffle: an
@@ -51,6 +51,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local Protocol = require(Shared.Net.Protocol)
+local Sounds = require(Shared.Sounds)
 local Weather = require(Shared.Weather)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -59,6 +60,7 @@ local AtmosphereModel = require(script.Parent.Parent.Rendering.AtmosphereModel)
 local EffectView = require(script.Parent.Parent.Rendering.EffectView)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local ViewSettings = require(script.Parent.Parent.Rendering.ViewSettings)
+local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local CloudView = require(script.Parent.CloudView)
 local DistantStorms = require(script.Parent.DistantStorms)
 local LightningBolt = require(script.Parent.LightningBolt)
@@ -67,8 +69,10 @@ local WeatherState = require(script.Parent.WeatherState)
 local BLOCK = Config.BlockSize
 -- Bolts drawn at once at most (older ones give way).
 local MAX_BOLTS = 3
--- How far from the listener the thunder plays (blocks), towards the strike.
-local THUNDER_OFFSET = 8
+-- How far from the listener a near strike's thunder plays (blocks), towards the strike.
+local THUNDER_OFFSET = DistantStorms.THUNDER_OFFSET
+-- How far the near thunder's voice is heard (blocks: SoundPlayer's range at a cue of 1 or less).
+local NEAR_RANGE = SoundRules.range(Sounds.get(Sounds.id["entity.lightning_bolt.thunder"]) :: Sounds.Event, 1)
 -- The struck point's light while the sky flashes (PointLight brightness).
 local FLASH_LIGHT = 6
 -- A far bolt's branches are this much thinner than its main bolt.
@@ -291,7 +295,7 @@ local function thunder(
 	scale: number
 )
 	local hearing = settings.hearing
-	local volume = DistantStorms.thunderVolume(distance, hearing) * scale
+	local volume = DistantStorms.thunderCue(distance, hearing, NEAR_RANGE) * scale
 	if volume <= 0.01 then
 		return
 	end
@@ -440,7 +444,7 @@ local function strike(message: Protocol.LightningBolt)
 		parts = {},
 		light = light,
 		anchor = anchor,
-		falloff = 1 / (1 + distance / 512),
+		falloff = DistantStorms.skyFlash(distance, true, DayCycle.skyBrightness(LightingController.dayTime())),
 		glow = CloudView.glow(x, z),
 	})
 	-- The thunder when it gets here.
@@ -511,14 +515,14 @@ end
 
 --[[
 	A distant storm's flash (Weather/StormView; DistantStorms.Event): a bolt to the ground at the
-	column's natural height (the generator's, the sea's surface over water), else a flash in the
-	cloud.
+	column's natural height (the generator's, its sea's surface over water: DistantStorms
+	.groundAt), else a flash in the cloud.
 ]]
 function LightningView.distant(event: DistantStorms.Event)
-	local y = Config.SeaLevel
+	local y = WeatherState.seaLevel()
 	if event.ground then
 		local _, ground = WeatherState.temperatureAt(event.x, event.z)
-		y = math.max(ground, Config.SeaLevel)
+		y = DistantStorms.groundAt(ground, y)
 	end
 	showFar(event.x, y, event.z, event.ground, event.seed, event.flashes)
 end
