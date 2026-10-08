@@ -251,8 +251,10 @@ return function(t, shared, require, server)
 
 	-- Digests of the Default world (seed 12345) made before world types existed: chunk data, its
 	-- Horizon summary and surface, height, solidBelow, emptyAbove (outposts in the last three).
+	-- Mineshafts (Generation/Mineshafts) since reach the full detail chunks 0,0 and -150,60: their
+	-- data digests moved (from 3763431356 and 3358180211); nothing else of any row did.
 	local PINNED = {
-		{ 0, 0, 0, 3763431356, 2385823076, 637642054, 112, 73, 75 },
+		{ 0, 0, 0, 2497134012, 2385823076, 637642054, 112, 73, 75 },
 		{ 0, 3, -2, 3308524465, 2787425146, 1146561170, 112, 71, 74 },
 		{ 0, -7, 11, 1407525034, 2203614583, 1426292326, 96, 60, 64 },
 		{ 0, 20, 5, 1128386215, 684176278, 885456967, 112, 40, 84 },
@@ -260,7 +262,7 @@ return function(t, shared, require, server)
 		{ 2, -2, 3, 3908353193, 1244948833, 0, 24, 13, 16 },
 		{ 4, 0, 0, 784031936, 522254533, 0, 7, 3, 5 },
 		{ 0, 100, -40, 2062877020, 2634376917, 4083301882, 272, 229, 246 },
-		{ 0, -150, 60, 3358180211, 3657096357, 3972328917, 144, 98, 107 },
+		{ 0, -150, 60, 897012576, 3657096357, 3972328917, 144, 98, 107 },
 		{ 3, 10, -10, 1875142174, 3052199922, 0, 40, 25, 35 },
 		{ 6, 0, 0, 3250628276, 4267492549, 0, 12, 1, 9 },
 		{ 0, 21, 118, 103057674, 1369674844, 1140634773, 112, 64, 71 },
@@ -681,7 +683,8 @@ return function(t, shared, require, server)
 
 	t.test("debug structures: every template and generated structure once, no overlaps, tags outside", function()
 		local entries = DebugWorlds.structureLayout(SEED, library)
-		t.eq(#entries, #library.names + #library.structures, "every template and structure")
+		-- (And the two sample mineshafts, Generation/Mineshafts.)
+		t.eq(#entries, #library.names + #library.structures + 2, "every template and structure")
 		local seen: { [string]: number } = {}
 		for _, e in entries do
 			seen[e.name] = (seen[e.name] or 0) + 1
@@ -827,7 +830,11 @@ return function(t, shared, require, server)
 		t.eq(y, DebugWorlds.FLOOR)
 		local world = WorldServer.new(gen)
 		t.eq(SafeSpot.column(world, x, z), DebugWorlds.FLOOR, "standing on the floor")
-		t.eq(#gen.structures(-10, -10, 10000, 10000), #labels, "every start")
+		t.eq(
+			#gen.structures(-10, -10, 10000, 10000) + #(gen.mineshafts :: any)(-10, -10, 10000, 10000),
+			#labels,
+			"every start and sample mineshaft"
+		)
 	end)
 
 	--[[ Debug: All Biomes ]]

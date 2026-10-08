@@ -137,7 +137,8 @@ type CaveSet = {
 
 --[[
 	Marks the lattice cells holding any block of the box (x0..x1, y0..y1, z0..z1, world blocks) as
-	carved in (flag 0 becomes 1; 2 stays), for what later passes put into the rock as cave cells
+	carved in (flag 0 becomes 1; 2 stays, unless `read`: Caves.markRead), for what later passes
+	put into the rock as cave cells
 	(Generation/Lava's underground lakes, Generation/OilWells' deposits: cave twins and cave air
 	where the carver left rock). `carved` is the chunk's lattice (nil: none yet) for the padded
 	chunk whose first core column is (originX, originZ); it is created or grown upwards as needed
@@ -145,7 +146,7 @@ type CaveSet = {
 	chunk: only its part inside is marked. Marking a cell that holds no cave cell only costs a read
 	(World/SectionGraph reads marked cells instead of assuming rock).
 ]]
-function Caves.mark(
+local function markBox(
 	carved: Carved?,
 	originX: number,
 	originZ: number,
@@ -154,7 +155,8 @@ function Caves.mark(
 	z0: number,
 	x1: number,
 	y1: number,
-	z1: number
+	z1: number,
+	read: boolean
 ): Carved?
 	-- The carver's lattice over the padded chunk.
 	local gx0 = (originX - 1) // GRID_XZ
@@ -197,13 +199,49 @@ function Caves.mark(
 		for lz = (z0 - map.z) // GRID_XZ, (z1 - map.z) // GRID_XZ do
 			local row = (ly * mnz + lz) * mnx
 			for lx = (x0 - map.x) // GRID_XZ, (x1 - map.x) // GRID_XZ do
-				if buffer.readu8(flags, row + lx) == 0 then
+				if read or buffer.readu8(flags, row + lx) == 0 then
 					buffer.writeu8(flags, row + lx, 1)
 				end
 			end
 		end
 	end
 	return map
+end
+
+-- Marks a box (see above): flag 0 becomes 1, 2 stays.
+function Caves.mark(
+	carved: Carved?,
+	originX: number,
+	originZ: number,
+	x0: number,
+	y0: number,
+	z0: number,
+	x1: number,
+	y1: number,
+	z1: number
+): Carved?
+	return markBox(carved, originX, originZ, x0, y0, z0, x1, y1, z1, false)
+end
+
+--[[
+	As Caves.mark, but every lattice cell the box touches becomes 1 (2 as well: "cave air
+	throughout" no longer holds where something else was written into it), for structures that
+	write cave air, cave twins and other blocks alike into the rock and the caves
+	(Generation/Mineshafts: corridors, planks bridging a cavern, a fence post in a cave). Flag 1
+	is never wrong: SectionGraph only reads the cells.
+]]
+function Caves.markRead(
+	carved: Carved?,
+	originX: number,
+	originZ: number,
+	x0: number,
+	y0: number,
+	z0: number,
+	x1: number,
+	y1: number,
+	z1: number
+): Carved?
+	return markBox(carved, originX, originZ, x0, y0, z0, x1, y1, z1, true)
 end
 
 -- 3D cave noise with the datapack's spread (Noise.noise3 has a standard deviation of 1/3).
