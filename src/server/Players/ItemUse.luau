@@ -80,10 +80,10 @@ local TransmitterWorld = require(script.Parent.Parent.Transmitters.TransmitterWo
 local Transmitters = require(script.Parent.Parent.Transmitters.Transmitters)
 local UseRules = require(script.Parent.Parent.Transmitters.UseRules)
 local GameModeRules = require(script.Parent.GameModeRules)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 
 type Stack = Items.Stack
 
-local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
 -- Uses a player may make per second (bursts of twice that).
 local USES_PER_SECOND = 10
@@ -115,26 +115,15 @@ local function mayUse(player: Player): boolean
 	return true
 end
 
-local function rootOf(player: Player): BasePart?
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
-	end
-	return nil
-end
-
 local function isAlive(player: Player): boolean
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	return humanoid ~= nil and humanoid.Health > 0
 end
 
--- Is block (x, y, z) within the player's reach (as ServerNet checks edits)?
+-- Is block (x, y, z) within the player's reach (as ServerNet checks edits: Players/PlayerPositions)?
 local function inReach(player: Player, x: number, y: number, z: number): boolean
-	local root = rootOf(player)
-	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-	return root ~= nil and (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+	return PlayerPositions.inReach(player, x, y, z)
 end
 
 -- The held stack after a use, and what the player is given besides.

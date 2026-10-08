@@ -86,8 +86,8 @@ local Operators = require(script.Parent.Operators)
 local Inventories = require(script.Parent.Inventories)
 local ProgressionCommand = require(script.Parent.ProgressionCommand)
 local ProgressStore = require(script.Parent.ProgressStore)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 
-local BLOCK = Config.BlockSize
 local SHUTDOWN_WAIT = 25
 -- UnlockSkill messages a player may send per second.
 local UNLOCKS_PER_SECOND = 5
@@ -564,13 +564,11 @@ end
 --[[ Every frame ]]
 
 local function sampleBiome(world: WorldServer.World, player: Player, entry: Entry)
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root == nil or not root:IsA("BasePart") or earner(player) == nil then
+	local fx, _, fz = PlayerPositions.feet(player)
+	if fx == nil or earner(player) == nil then
 		return
 	end
-	local position = root.Position
-	local x, z = math.floor(position.X / BLOCK), math.floor(position.Z / BLOCK)
+	local x, z = math.floor(fx), math.floor(fz)
 	if math.abs(x) > Protocol.MAX_COORDINATE or math.abs(z) > Protocol.MAX_COORDINATE then
 		return
 	end

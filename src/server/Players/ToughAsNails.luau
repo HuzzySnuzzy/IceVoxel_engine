@@ -86,7 +86,6 @@ local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
-local Rig = require(Shared.Movement.Rig)
 local SharedMachines = require(Shared.Machines)
 local ToughAsNails = require(Shared.ToughAsNails)
 
@@ -104,13 +103,13 @@ local EffectsServer = require(script.Parent.Effects)
 local Climate = require(script.Parent.Climate)
 local Containers = require(script.Parent.Containers)
 local Inventories = require(script.Parent.Inventories)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 
 local Thirst = require(Shared.ToughAsNails.Thirst)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Exertion = require(Shared.ToughAsNails.Exertion)
 
-local BLOCK = Config.BlockSize
 -- Minecraft players have 20 health points (half hearts).
 local HEALTH = 20
 local TICK = 1 / 20
@@ -203,15 +202,9 @@ local function humanoidOf(player: Player): Humanoid?
 	return nil
 end
 
--- Is block (x, y, z) within the player's reach (as ItemUse checks)?
+-- Is block (x, y, z) within the player's reach (as ItemUse checks: Players/PlayerPositions)?
 local function inReach(player: Player, x: number, y: number, z: number): boolean
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root == nil or not root:IsA("BasePart") then
-		return false
-	end
-	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+	return PlayerPositions.inReach(player, x, y, z)
 end
 
 -- May the player drink `item` now (Drinks.drinkable: thirsty with thirst on, or a tea with
@@ -296,14 +289,14 @@ end
 local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: Player, record: Record, sample: boolean)
 	local character = player.Character
 	local humanoid = humanoidOf(player)
-	local feet = if character then Rig.feet(character) else nil
+	local fx, fy, fz = PlayerPositions.feet(player)
 	if
 		character == nil
 		or humanoid == nil
-		or feet == nil
-		or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
-		or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
-		or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+		or fx == nil
+		or not (math.abs(fx) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(fy) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(fz) <= Protocol.MAX_COORDINATE)
 	then
 		return
 	end
@@ -320,15 +313,11 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 
 	local damage, heal = 0, 0
 	if temperatureOn() then
-		local touching = Burning.touchingAt(view.getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		local touching = Burning.touchingAt(view.getBlock, fx, fy, fz, BODY.width, BODY.height)
 		if Burning.has(touching, Fluids.WATER) then
 			Temperature.soak(temperature)
 		elseif
-			sample
-			and (
-				WeatherServer.rainingAt(feet.X, feet.Y, feet.Z)
-				or WeatherServer.rainingAt(feet.X, feet.Y + BODY.height, feet.Z)
-			)
+			sample and (WeatherServer.rainingAt(fx, fy, fz) or WeatherServer.rainingAt(fx, fy + BODY.height, fz))
 		then
 			-- (Rain at the feet or the top of the box: Minecraft's isInRain. Once a second keeps
 			-- the wet countdown topped up.)
@@ -345,7 +334,7 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			cooling += steps
 		end
 		if sample then
-			local env = Climate.environment(view, feet.X, feet.Y, feet.Z, TimeOfDay.get(), {
+			local env = Climate.environment(view, fx, fy, fz, TimeOfDay.get(), {
 				wet = Temperature.isWet(temperature),
 				sprinting = os.clock() < record.sprintingUntil,
 				burning = character:GetAttribute(Characters.ON_FIRE) == true,

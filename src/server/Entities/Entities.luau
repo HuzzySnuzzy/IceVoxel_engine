@@ -5,7 +5,8 @@
 
 	  Blocks    `world:peekBlock`, which never generates chunks: an item in a chunk the server has
 	            not generated (or evicted) is frozen; unloaded neighbours count as solid.
-	  Pickups   living characters (Humanoid.Health > 0) pick items up at their feet (Rig.feet),
+	  Pickups   living characters (Humanoid.Health > 0) pick items up at their feet
+	            (Players/PlayerPositions, as every position of a player here),
 	            but not spectators' (Players/GameModeRules.picksUp); the pickup handler
 	            (Players/Inventories) says how many fit in the inventory.
 	            Everyone near hears it, the collector too (entity.item.pickup at the item,
@@ -40,7 +41,6 @@ local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
 local SharedSounds = require(Shared.Sounds)
 
@@ -48,6 +48,7 @@ local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EntityWorld = require(script.Parent.EntityWorld)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local GameModeRules = require(script.Parent.Parent.Players.GameModeRules)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 
 type Stack = Items.Stack
 type EntityOp = Protocol.EntityOp
@@ -74,9 +75,9 @@ local Entities = {}
 local entityWorld: EntityWorld.EntityWorld? = nil
 local pickupHandler: ((player: Player, stack: Stack) -> number)? = nil
 local random = Random.new()
--- Per player: the ids their client knows, and their last known feet position (blocks).
+-- Per player: the ids their client knows, and their last known feet position (blocks: x, y, z).
 local tracked: { [Player]: { [number]: boolean } } = {}
-local lastFeet: { [Player]: Vector3 } = {}
+local lastFeet: { [Player]: { number } } = {}
 
 local function finite(...: number): boolean
 	for i = 1, select("#", ...) do
@@ -88,8 +89,8 @@ local function finite(...: number): boolean
 	return true
 end
 
--- Players own their characters, so a position from one may be anything: only finite ones within
--- the world's coordinate range count (EntityWorld's grids and Hull would otherwise loop forever).
+-- Only finite positions within the world's coordinate range count (EntityWorld's grids and Hull
+-- would otherwise loop forever).
 local MAX_SPEED = 4
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local MAX_HEIGHT = 4096
@@ -97,17 +98,18 @@ local function sane(x: number, y: number, z: number): boolean
 	return finite(x, y, z) and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT and math.abs(y) <= MAX_HEIGHT
 end
 
--- A character's feet, if they are a sane position.
-local function characterFeet(character: Model?): Vector3?
-	local feet = if character then Rig.feet(character) else nil
-	if feet and sane(feet.X, feet.Y, feet.Z) then
-		return feet
+-- A player's feet (PlayerPositions: only finite ones within the world's coordinate range, or
+-- EntityWorld's grids and Hull would loop forever), else where they were last seen.
+local function feetOf(player: Player): (number?, number, number)
+	local x, y, z = PlayerPositions.feet(player)
+	if x then
+		return x, y, z
 	end
-	return nil
-end
-
-local function feetOf(player: Player): Vector3?
-	return characterFeet(player.Character) or lastFeet[player]
+	local last = lastFeet[player]
+	if last then
+		return last[1], last[2], last[3]
+	end
+	return nil, 0, 0
 end
 
 local function tryPickup(
@@ -198,9 +200,8 @@ local function replicate(net: Net, entities: EntityWorld.EntityWorld, scan: bool
 			end
 		end
 
-		local feet = feetOf(player)
-		if feet then
-			local px, py, pz = feet.X, feet.Y, feet.Z
+		local px, py, pz = feetOf(player)
+		if px then
 			local function inRange(entity: EntityWorld.Entity): boolean
 				local body = entity.body
 				local dx, dy, dz = body.x - px, body.y - py, body.z - pz
@@ -275,15 +276,18 @@ local function step(net: Net, entities: EntityWorld.EntityWorld, tick: number)
 	-- Living players pick items up (not spectators); everyone's position is remembered for
 	-- tracking and throws.
 	local pickers: { EntityWorld.PlayerBox } = {}
-	for _, player in Players:GetPlayers() do
+	for player, x, y, z in PlayerPositions.each() do
 		local character = player.Character
-		local feet = characterFeet(character)
-		if character and feet then
-			lastFeet[player] = feet
-			local humanoid = character:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 and GameModeRules.picksUp(GameMode.of(player)) then
-				table.insert(pickers, { key = player, x = feet.X, y = feet.Y, z = feet.Z })
-			end
+		local last = lastFeet[player]
+		if last == nil then
+			last = { x, y, z }
+			lastFeet[player] = last
+		else
+			last[1], last[2], last[3] = x, y, z
+		end
+		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+		if humanoid and humanoid.Health > 0 and GameModeRules.picksUp(GameMode.of(player)) then
+			table.insert(pickers, { key = player, x = x, y = y, z = z })
 		end
 	end
 	entities:tick(pickers, tryPickup)
@@ -424,8 +428,8 @@ end
 	Returns the item's id (nil if the player was never seen in the world).
 ]]
 function Entities.throwFromPlayer(player: Player, stack: Stack, scatter: boolean): number?
-	local feet = feetOf(player)
-	if feet == nil then
+	local fx, fy, fz = feetOf(player)
+	if fx == nil then
 		return nil
 	end
 	local vx, vy, vz
@@ -434,11 +438,10 @@ function Entities.throwFromPlayer(player: Player, stack: Stack, scatter: boolean
 		local angle = random:NextNumber() * math.pi * 2
 		vx, vy, vz = -math.sin(angle) * speed, 0.2, math.cos(angle) * speed
 	else
-		-- The server cannot know the camera's pitch, so items fly level, like looking straight ahead.
-		local character = player.Character
-		local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
-		local look = if root and root:IsA("BasePart") then root.CFrame.LookVector else Vector3.zAxis
-		local flat = Vector3.new(look.X, 0, look.Z)
+		-- Items fly level, like looking straight ahead (reading characters, the server can't know
+		-- the camera's pitch), towards where the player faces.
+		local lx, _, lz = PlayerPositions.look(player)
+		local flat = Vector3.new(lx, 0, lz)
 		flat = if flat.Magnitude > 1e-6 then flat.Unit else Vector3.zAxis
 		local angle = random:NextNumber() * math.pi * 2
 		local jitter = 0.02 * random:NextNumber()
@@ -446,7 +449,7 @@ function Entities.throwFromPlayer(player: Player, stack: Stack, scatter: boolean
 		vy = 0.1 + (random:NextNumber() - random:NextNumber()) * 0.1
 		vz = flat.Z * 0.3 + math.sin(angle) * jitter
 	end
-	return Entities.spawnItem(stack, feet.X, feet.Y + THROW_HEIGHT, feet.Z, vx, vy, vz, EntityWorld.THROWN_PICKUP_DELAY)
+	return Entities.spawnItem(stack, fx, fy + THROW_HEIGHT, fz, vx, vy, vz, EntityWorld.THROWN_PICKUP_DELAY)
 end
 
 -- An explosion of `power` at (x, y, z) (blocks): items near it are destroyed or pushed away

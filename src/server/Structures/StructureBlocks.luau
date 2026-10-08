@@ -21,7 +21,10 @@
 	               WorldServer.onChanged by the server script). A chunk's records go to a player
 	               right after its edit list (`sendChunks`, ServerNet's `chunksSent`), and changed
 	               ones once per frame (`update`) to every player within RECORD_RANGE blocks
-	               sideways (all of them while they have no character yet), as the pipes' records.
+	               sideways of their feet (Players/PlayerPositions; all of them while they have no
+	               position yet, or none with the server's own positions, Config.Players
+	               .ServerPositions: a far base's records tell nobody it is there), as the pipes'
+	               records.
 	  Placing      LOADs and Generates are queued; `place` (every frame, before ServerNet's flush,
 	               so their edits go out the same frame and before the records they make) sets
 	               up to Config.Structures.LoadBlocksPerFrame blocks within PLACE_SECONDS and
@@ -53,13 +56,13 @@ local GameMode = require(Shared.GameMode)
 local Library = require(Shared.Structures.Library)
 local Machines = require(Shared.Machines)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local Settings = require(Shared.Structures.Settings)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Containers = require(script.Parent.Parent.Players.Containers)
 local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local Permission = require(script.Parent.Permission)
 local StructureServer = require(script.Parent.StructureServer)
 local StructureStore = require(script.Parent.StructureStore)
@@ -70,7 +73,6 @@ type Net = {
 	send: (player: Player, kind: number, payload: buffer) -> (),
 }
 
-local BLOCK = Config.BlockSize
 local ClientMessage = Protocol.ClientMessage
 local ServerMessage = Protocol.ServerMessage
 
@@ -110,7 +112,8 @@ local buckets: { [Player]: { requests: Bucket, heavy: Bucket, pieces: Bucket } }
 type Outgoing = { pieces: { buffer }, tokens: number }
 local outgoing: { [Player]: Outgoing } = {}
 local transfers: { [Player]: number } = {}
-local lastFeet: { [Player]: Vector3 } = {}
+-- Each player's last known feet, x and z (blocks).
+local lastFeet: { [Player]: { number } } = {}
 -- This session's StringValues by structure name.
 local savedValues: { [string]: StringValue } = {}
 
@@ -154,23 +157,21 @@ function StructureBlocks.operator(player: Player): boolean
 	)
 end
 
-local function rootOf(player: Player): BasePart?
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
+-- The player's feet x and z (blocks), else where they were last seen; nil, 0 when never.
+local function feetOf(player: Player): (number?, number)
+	local x, _, z = PlayerPositions.feet(player)
+	local last = lastFeet[player]
+	if x and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT then
+		if last == nil then
+			lastFeet[player] = { x, z }
+		else
+			last[1], last[2] = x, z
+		end
+		return x, z
+	elseif last then
+		return last[1], last[2]
 	end
-	return nil
-end
-
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet and feet.X == feet.X and feet.Z == feet.Z and math.abs(feet.X) <= LIMIT and math.abs(feet.Z) <= LIMIT then
-		lastFeet[player] = feet
-		return feet
-	end
-	return lastFeet[player]
+	return nil, 0
 end
 
 local function notify(player: Player, text: string)
@@ -243,13 +244,9 @@ local function forget(name: string)
 	end
 end
 
+-- Is block (x, y, z) within `range` blocks of the middle of the player's body?
 local function inRange(player: any, x: number, y: number, z: number, range: number): boolean
-	local root = rootOf(player :: Player)
-	if root == nil then
-		return false
-	end
-	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-	return (root.Position - center).Magnitude <= range * BLOCK
+	return PlayerPositions.inReach(player :: Player, x, y, z, range)
 end
 
 local random = Random.new()
@@ -294,21 +291,22 @@ local function sendRecords(structures: { Protocol.StructureBlockRecord }, jigsaw
 	if #structures == 0 and #jigsaws == 0 then
 		return
 	end
+	-- (With the server's own positions nobody without one is sent anything.)
+	local everything = not PlayerPositions.networked()
 	for _, player in Players:GetPlayers() do
-		local feet = feetOf(player)
-		if feet == nil then
-			sendStructureBlocks(player, structures, false)
-			sendJigsaws(player, jigsaws, false)
+		local fx, fz = feetOf(player)
+		if fx == nil then
+			if everything then
+				sendStructureBlocks(player, structures, false)
+				sendJigsaws(player, jigsaws, false)
+			end
 		else
 			local function near<T>(records: { T }): { T }
 				local list = {}
 				for _, record in records do
 					local r = record :: any
-					-- (Rig.feet is in blocks.)
-					if
-						math.abs(r.x + 0.5 - feet.X) <= RECORD_RANGE
-						and math.abs(r.z + 0.5 - feet.Z) <= RECORD_RANGE
-					then
+					-- (The feet are in blocks.)
+					if math.abs(r.x + 0.5 - fx) <= RECORD_RANGE and math.abs(r.z + 0.5 - fz) <= RECORD_RANGE then
 						table.insert(list, record)
 					end
 				end

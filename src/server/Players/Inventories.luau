@@ -84,10 +84,10 @@ local InventoryState = require(script.Parent.InventoryState)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Eject = require(script.Parent.Parent.Transmitters.Eject)
 local GameModeRules = require(script.Parent.GameModeRules)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 
 type Stack = Types.Stack
 
-local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
 -- Seconds between the checks that close chests players walked away from.
 local CHECK_INTERVAL = 0.25
@@ -111,29 +111,15 @@ local actor: Player? = nil
 -- Creative throw budget per player.
 local throwBudget: { [Player]: { tokens: number, last: number } } = {}
 
-local function rootOf(player: Player): BasePart?
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
-	end
-	return nil
-end
-
 local function isAlive(player: Player): boolean
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	return humanoid ~= nil and humanoid.Health > 0
 end
 
--- Is block (x, y, z) within reach of the player (as ServerNet checks edits)?
+-- Is block (x, y, z) within reach of the player (as ServerNet checks edits: Players/PlayerPositions)?
 local function withinReach(player: Player, x: number, y: number, z: number): boolean
-	local root = rootOf(player)
-	if root == nil then
-		return false
-	end
-	local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-	return (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+	return PlayerPositions.inReach(player, x, y, z)
 end
 
 -- Takes `cost` stacks from a creative (instabuild) player's budget (the other modes only drop what

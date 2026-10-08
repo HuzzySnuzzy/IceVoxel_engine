@@ -43,7 +43,16 @@
 	    whether the block had been placed (EditRules.placed, read before it goes), and every
 	    mining time check takes the player's own speed (`miningFactor`: the perks times the
 	    status effects'), as the client's mining does.
-	  * Broadcasts all world changes once per frame.
+	  * Broadcasts all world changes once per frame. With the server's own positions
+	    (Config.Players.ServerPositions: Players/PlayerPositions.networked) only to the players
+	    within Config.Interest.EditSendRadius chunks of each change (Players/Interest.routeEdits;
+	    none to a player without a position), and a chunk's edit list only once the player is
+	    within EditChunkRadius chunks of it: a request for a farther one waits (at most
+	    DeferredChunkRequests a player, the oldest dropped) and is answered by a scan twice a
+	    second once they come near, as the client asks for each list once. So building and
+	    digging far away tell nobody where it happens.
+	  * Reach and the players in the way of a placement are Players/PlayerPositions' (feet in
+	    blocks, doubles), never the characters.
 	  * Plays the sounds of players' breaks and placements to everyone near but that player, whose
 	    client already played them (Audio/Sounds; Minecraft's levelEvent 2001 and place sound).
 
@@ -60,24 +69,29 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
+local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Protocol = require(Shared.Net.Protocol)
 local Remotes = require(Shared.Net.Remotes)
-local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Drops = require(script.Parent.Parent.Behaviours.Drops)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local Interest = require(script.Parent.Parent.Players.Interest)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local EditRules = require(script.Parent.EditRules)
 local Mining = require(Shared.Mining)
 
 type World = WorldServer.World
 
-local BLOCK = Config.BlockSize
 local HEIGHT = Config.WorldHeight
+local CHUNK = Config.ChunkSize
+local STANDING = PlayerPhysics.STANDING
 local EDITS_PER_MESSAGE = 4096
 local CHUNK_REQUESTS_PER_SECOND = 1500
 -- A break that arrived early is finished within this many seconds or undone.
 local DELAY_LIMIT = 1
+-- Seconds between scans of the chunk requests waiting for their player to come near.
+local DEFERRED_SCAN = 0.5
 
 local ClientMessage = Protocol.ClientMessage
 local ServerMessage = Protocol.ServerMessage
@@ -99,25 +113,27 @@ local function take(bucket: Bucket, rate: number, cost: number): boolean
 	return true
 end
 
-local function rootOf(player: Player): BasePart?
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root
-	end
-	return nil
-end
-
 -- Would `block` at (x, y, z) overlap any player's (standing) movement hull (EditRules.obstructs)?
 -- Spectators are never in the way (EditRules.blocksPlacing).
 local function intersectsCharacter(block: number, x: number, y: number, z: number): boolean
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if character and EditRules.blocksPlacing(GameMode.of(player)) then
-			local min, max = Rig.hull(character)
-			if min and max and EditRules.obstructs(block, x, y, z, min.X, min.Y, min.Z, max.X, max.Y, max.Z) then
-				return true
-			end
+	local half = STANDING.width / 2
+	for player, px, py, pz in PlayerPositions.each() do
+		if
+			EditRules.blocksPlacing(GameMode.of(player))
+			and EditRules.obstructs(
+				block,
+				x,
+				y,
+				z,
+				px - half,
+				py,
+				pz - half,
+				px + half,
+				py + STANDING.height,
+				pz + half
+			)
+		then
+			return true
 		end
 	end
 	return false
@@ -237,14 +253,8 @@ function ServerNet.start(world: World): ServerNet
 		end
 	end
 
-	local function handleChunkRequest(player: Player, payload: buffer)
-		local coords = Protocol.decodeChunkRequest(payload)
-		if coords == nil then
-			return
-		end
-		if not take(bucket(chunkBuckets, player, CHUNK_REQUESTS_PER_SECOND), CHUNK_REQUESTS_PER_SECOND, #coords) then
-			return
-		end
+	-- Sends `player` the edit lists of chunks `coords`, then what else they hold (`chunksSent`).
+	local function sendChunks(player: Player, coords: { { number } })
 		local lists: { Protocol.ChunkEditList } = table.create(#coords)
 		for i, coord in coords do
 			lists[i] = { cx = coord[1], cz = coord[2], edits = world:chunkEdits(coord[1], coord[2]) or EMPTY }
@@ -254,6 +264,65 @@ function ServerNet.start(world: World): ServerNet
 		local chunksSent = rules.chunksSent
 		if chunksSent then
 			chunksSent(player, coords)
+		end
+	end
+
+	-- Chunk requests waiting for their player to come near (server positions only).
+	local deferred: { [Player]: Interest.Deferred } = {}
+	local nextScan = 0
+
+	-- May `player` have chunk (cx, cz)'s edit list now (Interest.chunkAllowed)?
+	local function chunkAllowed(player: Player, cx: number, cz: number): boolean
+		local store = PlayerPositions.store()
+		return store ~= nil and Interest.chunkAllowed(store:get(player), cx, cz)
+	end
+
+	local function handleChunkRequest(player: Player, payload: buffer)
+		local coords = Protocol.decodeChunkRequest(payload)
+		if coords == nil then
+			return
+		end
+		if not take(bucket(chunkBuckets, player, CHUNK_REQUESTS_PER_SECOND), CHUNK_REQUESTS_PER_SECOND, #coords) then
+			return
+		end
+		if PlayerPositions.networked() then
+			-- (Far chunks wait for the player: the client asks once and waits.)
+			local near: { { number } } = {}
+			for _, coord in coords do
+				if chunkAllowed(player, coord[1], coord[2]) then
+					table.insert(near, coord)
+				else
+					local queue = deferred[player]
+					if queue == nil then
+						queue = Interest.newDeferred()
+						deferred[player] = queue
+					end
+					queue:add(coord[1], coord[2])
+				end
+			end
+			coords = near
+		end
+		if #coords > 0 then
+			sendChunks(player, coords)
+		end
+	end
+
+	-- Answers the waiting chunk requests whose player came near.
+	local function scanDeferred()
+		for player, queue in deferred do
+			if player.Parent == nil then
+				deferred[player] = nil
+				continue
+			end
+			local ready = queue:take(function(cx: number, cz: number): boolean
+				return chunkAllowed(player, cx, cz)
+			end)
+			if #ready > 0 then
+				sendChunks(player, ready)
+			end
+			if queue:count() == 0 then
+				deferred[player] = nil
+			end
 		end
 	end
 
@@ -271,9 +340,7 @@ function ServerNet.start(world: World): ServerNet
 
 	-- Is block (x, y, z) within the player's reach (with some slack for movement and latency)?
 	local function inReach(player: Player, x: number, y: number, z: number): boolean
-		local root = rootOf(player)
-		local center = Vector3.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
-		return root ~= nil and (root.Position - center).Magnitude <= (Config.Interaction.Reach + 2) * BLOCK
+		return PlayerPositions.inReach(player, x, y, z)
 	end
 
 	-- Mine messages: a survival player started (or stopped) mining a block. A start only counts for
@@ -567,18 +634,65 @@ function ServerNet.start(world: World): ServerNet
 		chunkBuckets[player] = nil
 		mining[player] = nil
 		delayed[player] = nil
+		deferred[player] = nil
 	end)
+
+	local step = EDITS_PER_MESSAGE * 4
+
+	-- Sends `edits` (x, y, z, block flat) to `player`, or to everyone when nil.
+	local function sendEdits(edits: { number }, player: Player?)
+		local n = #edits
+		for first = 1, n, step do
+			local payload = Protocol.encodeEdits(edits, first, math.min(first + step - 1, n))
+			if player then
+				remote:FireClient(player, ServerMessage.Edits, payload)
+			else
+				remote:FireAllClients(ServerMessage.Edits, payload)
+			end
+		end
+	end
 
 	local function flush()
 		updateDelayed()
 		local pending = world:takePending()
-		local n = #pending
-		local step = EDITS_PER_MESSAGE * 4
-		for first = 1, n, step do
-			remote:FireAllClients(
-				ServerMessage.Edits,
-				Protocol.encodeEdits(pending, first, math.min(first + step - 1, n))
-			)
+		local networked = PlayerPositions.networked()
+		if #pending > 0 and not networked then
+			sendEdits(pending, nil)
+		elseif #pending > 0 then
+			-- (Each player the edits near them: Interest.routeEdits.)
+			local viewers: { Interest.EditViewer } = {}
+			for player, px, _, pz in PlayerPositions.each() do
+				table.insert(viewers, { key = player, cx = math.floor(px / CHUNK), cz = math.floor(pz / CHUNK) })
+			end
+			local all: { buffer }? = nil
+			for key, edits in Interest.routeEdits(pending, viewers) do
+				local player = key :: Player
+				if edits == true then
+					-- (The same messages for everyone near all of them.)
+					if all == nil then
+						local list: { buffer } = {}
+						for first = 1, #pending, step do
+							table.insert(
+								list,
+								Protocol.encodeEdits(pending, first, math.min(first + step - 1, #pending))
+							)
+						end
+						all = list
+					end
+					for _, payload in all :: { buffer } do
+						remote:FireClient(player, ServerMessage.Edits, payload)
+					end
+				elseif type(edits) == "table" then
+					sendEdits(edits, player)
+				end
+			end
+		end
+		if networked and next(deferred) ~= nil then
+			local now = os.clock()
+			if now >= nextScan then
+				nextScan = now + DEFERRED_SCAN
+				scanDeferred()
+			end
 		end
 	end
 

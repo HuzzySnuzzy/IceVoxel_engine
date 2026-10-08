@@ -18,12 +18,12 @@ local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local Weather = require(Shared.Weather)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
 local Operators = require(script.Parent.Operators)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 local WeatherCommand = require(script.Parent.WeatherCommand)
 
 local WeatherCommands = {}
@@ -39,12 +39,11 @@ end
 
 -- The weather where `player` stands, for the query.
 local function here(player: Player): string
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet == nil then
+	local x, y, z = PlayerPositions.feet(player)
+	if x == nil then
 		return Weather.CLEAR
 	end
-	return WeatherServer.describe(feet.X, feet.Y, feet.Z)
+	return WeatherServer.describe(x, y, z)
 end
 
 -- Runs a chat message as /weather (ignores anything else).

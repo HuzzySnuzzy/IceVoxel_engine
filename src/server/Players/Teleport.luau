@@ -10,6 +10,9 @@
 	             (no safe spot: spectators fly through everything), the target in the game with a
 	             character (GameModeRules.spectatorTeleport), at most one every
 	             SPECTATOR_COOLDOWN seconds. The spectator keeps looking where they looked.
+
+	Positions are Players/PlayerPositions' (feet, blocks, doubles), and the teleports go through it
+	(Players/Characters): the player alone is told where they now are.
 ]]
 
 local Players = game:GetService("Players")
@@ -19,13 +22,13 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local SafeSpot = require(script.Parent.SafeSpot)
 local Characters = require(script.Parent.Characters)
 local GameModeRules = require(script.Parent.GameModeRules)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 
 -- Blocks around the requested column searched for a safe spot.
 local LANDING_RADIUS = 24
@@ -61,7 +64,7 @@ function Teleport.start(world: WorldServer.World, net: ServerNet.ServerNet)
 		lastTeleport[player] = now
 
 		local character = player.Character
-		if character == nil or character:FindFirstChild("HumanoidRootPart") == nil then
+		if character == nil or PlayerPositions.feet(player) == nil then
 			return
 		end
 		local fx, fy, fz = SafeSpot.find(world, x, z, LANDING_RADIUS)
@@ -84,18 +87,19 @@ function Teleport.start(world: WorldServer.World, net: ServerNet.ServerNet)
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local target = Players:GetPlayerByUserId(userId)
-		local targetCharacter = target and target.Character
-		local feet = if targetCharacter then Rig.feet(targetCharacter) else nil
-		if character == nil or humanoid == nil or humanoid.Health <= 0 or feet == nil then
+		local tx, ty, tz = nil, 0, 0
+		if target then
+			tx, ty, tz = PlayerPositions.feet(target)
+		end
+		if character == nil or humanoid == nil or humanoid.Health <= 0 or tx == nil then
 			return
 		end
-		local x, y, z =
-			GameModeRules.spectatorTeleport(GameMode.of(player), player.UserId, userId, feet.X, feet.Y, feet.Z)
+		local x, y, z = GameModeRules.spectatorTeleport(GameMode.of(player), player.UserId, userId, tx, ty, tz)
 		if x == nil then
 			return
 		end
 		lastSpectatorTeleport[player] = now
-		Characters.teleportFeet(character, Vector3.new(x, y, z))
+		Characters.teleportTo(player, x, y, z)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)

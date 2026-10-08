@@ -29,7 +29,10 @@
 	             the target, the fires); the handler the boot
 	             script sets (`setHandler`) hurts the living it reaches (Players/Characters,
 	             Mobs/Mobs), and every player within Config.Weather.Lightning.Distance gets a
-	             Lightning message for the bolt, the flash and the thunder.
+	             Lightning message for the bolt, the flash and the thunder (with the server's own
+	             positions, Config.Players.ServerPositions: within Config.Interest
+	             .LightningDistance, so a strike doesn't tell far players where someone is).
+	             Players are where Players/PlayerPositions says (feet, blocks).
 	  Saving     `encode()` and `decode(text)` (Weather.encodeState: the clock, doWeatherCycle and
 	             the override with its time left) for the world's save: World/WorldSave's
 	             "weather" section, decoded after `start` (startWorld starts the weather first).
@@ -43,13 +46,13 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Weather = require(Shared.Weather)
 
 local WorldServer = require(script.Parent.WorldServer)
 local WeatherRules = require(script.Parent.WeatherRules)
 local Lightning = require(script.Parent.Lightning)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local Skylight = require(script.Parent.Skylight)
 local Fire = require(script.Parent.Parent.Behaviours.Fire)
 
@@ -260,22 +263,22 @@ end
 
 --[[ Lightning ]]
 
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
-	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-	if character == nil or humanoid == nil or humanoid.Health <= 0 then
-		return nil
+-- A living player's feet (Players/PlayerPositions, blocks), nil, 0, 0 for the dead and those
+-- without a position.
+local function feetOf(player: Player): (number?, number, number)
+	if not PlayerPositions.alive(player) then
+		return nil, 0, 0
 	end
-	local feet = Rig.feet(character)
+	local x, y, z = PlayerPositions.feet(player)
 	if
-		feet == nil
-		or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
-		or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
-		or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+		x == nil
+		or not (math.abs(x) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(y) <= Protocol.MAX_COORDINATE)
+		or not (math.abs(z) <= Protocol.MAX_COORDINATE)
 	then
-		return nil
+		return nil, 0, 0
 	end
-	return feet
+	return x, y, z
 end
 
 local function roll(): number
@@ -296,14 +299,14 @@ local view: Lightning.View = {
 		local list: { Lightning.Living } = {}
 		local limit = radius * radius
 		for _, player in Players:GetPlayers() do
-			local feet = feetOf(player)
-			if feet and not GameMode.isSpectator(GameMode.of(player)) then
-				local dx, dy, dz = feet.X - x, feet.Y - y, feet.Z - z
+			local fx, fy, fz = feetOf(player)
+			if fx and not GameMode.isSpectator(GameMode.of(player)) then
+				local dx, dy, dz = fx - x, fy - y, fz - z
 				if dx * dx + dy * dy + dz * dz <= limit then
 					table.insert(list, {
-						x = feet.X,
-						y = feet.Y,
-						z = feet.Z,
+						x = fx,
+						y = fy,
+						z = fz,
 						width = BODY.width,
 						height = BODY.height,
 						key = player,
@@ -359,11 +362,16 @@ local function strike(x: number, y: number, z: number, loaded: boolean)
 	end
 	local flashes, seed = Lightning.bolt(roll)
 	local payload = Protocol.encodeLightning({ x = bx, y = by, z = bz, seed = seed, flashes = flashes })
-	local reach = Config.Weather.Lightning.Distance
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		local feet = if character then Rig.feet(character) else nil
-		if feet and (feet - Vector3.new(bx, by, bz)).Magnitude <= reach then
+	-- (With the server's own positions only those near hear of it: a strike falls within
+	-- Lightning.Radius of a player, so a far one told everyone where someone was. The clients draw
+	-- far storms themselves.)
+	local reach = if PlayerPositions.networked()
+		then math.min(Config.Weather.Lightning.Distance, Config.Interest.LightningDistance)
+		else Config.Weather.Lightning.Distance
+	local reachSq = reach * reach
+	for player, fx, fy, fz in PlayerPositions.each() do
+		local dx, dy, dz = fx - bx, fy - by, fz - bz
+		if dx * dx + dy * dy + dz * dz <= reachSq then
 			sender.send(player, Protocol.ServerMessage.Lightning, payload)
 		end
 	end
@@ -378,12 +386,12 @@ local function lightningStep()
 	end
 	local rollers: { Lightning.Roller } = {}
 	for _, player in Players:GetPlayers() do
-		local feet = feetOf(player)
-		if feet == nil or GameMode.isSpectator(GameMode.of(player)) then
+		local fx, _, fz = feetOf(player)
+		if fx == nil or GameMode.isSpectator(GameMode.of(player)) then
 			continue
 		end
-		local _, thunder = WeatherServer.sample(math.floor(feet.X), math.floor(feet.Z))
-		table.insert(rollers, { x = feet.X, z = feet.Z, thunder = thunder })
+		local _, thunder = WeatherServer.sample(math.floor(fx), math.floor(fz))
+		table.insert(rollers, { x = fx, z = fz, thunder = thunder })
 	end
 	for _, column in Lightning.roll(rollers, settings.MeanSeconds, settings.Radius, STEP_SECONDS, roll) do
 		local x, y, z, loaded = Lightning.target(view, column[1], column[2], roll)

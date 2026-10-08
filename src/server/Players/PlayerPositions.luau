@@ -10,19 +10,25 @@
 	             IceVoxelFeet / IceVoxelTeleports attributes (what Characters.teleportFeet did).
 	             Positions that are not finite or lie beyond Protocol.MAX_COORDINATE + 64 blocks
 	             (|y| beyond 4096) count as none: a client-owned character may say anything.
-	  networked  (ServerPositions true; the server side of the floating origin): characters stand
-	             parked and anchored at Config.Players.ParkPosition, so nothing replicates where
-	             anyone is; positions come from the clients' Move messages (Net/PlayerSync, checked
-	             by MoveCheck), teleports are a private Teleport message to the owner with a new
-	             epoch, and poses go only to players whose interest includes them
-	             (Players/Interest, PlayerRelay). Built on top of this API; until then the switch
-	             reads the characters too.
+	  networked  (ServerPositions true; the server side of the floating origin and "fake coords"):
+	             characters stand parked and anchored at Config.Players.ParkPosition
+	             (Players/Characters.park), so nothing that replicates says where anyone is.
+	             Positions are the server's own (Players/PositionStore): each client sends its
+	             feet and pose about 20 times a second (Net/PlayerSync Move on the unreliable
+	             Net/Remotes.moves()), taken only with the current teleport epoch and within
+	             Players/MoveCheck's speeds (else corrected: Config.Players.MoveCheck); a
+	             teleport is a private Teleport message to the player alone, with a new epoch
+	             (and their character's life, so a new character knows its spawn); a spectator
+	             tells whom they spectate (ClientMessage.Spectate) and their place follows that
+	             player's. Players/PlayerRelay sends the poses only to players whose interest
+	             includes them (Players/Interest). `center` and `eye` follow the pose the client
+	             sends (standing, sneaking, lying), `look` its view.
 
 	API (positions are feet, the bottom centre of the body, in world blocks):
 	  feet(player) -> (x?, y, z)       nil: not standing in the world (no character, no root)
 	  feetVector(player) -> Vector3?   the same, float32 (Rig.feet's drop-in)
-	  center(player) -> (x?, y, z)     the middle of the body (today: the root part's centre)
-	  eye(player) -> (x?, y, z)        the eyes (standing: 1.62 above the feet)
+	  center(player) -> (x?, y, z)     the middle of the body (compat: the root part's centre)
+	  eye(player) -> (x?, y, z)        the eyes (standing: 1.62 above the feet; compat: always)
 	  hull(player) -> (min?, max?)     the standing hull, blocks (Rig.hull's drop-in)
 	  yaw(player) -> radians           facing (CFrame.Angles(0, yaw, 0))
 	  look(player) -> (x, y, z)        unit view direction
@@ -38,6 +44,14 @@
 	                                   the speed checks (networked only)
 	  spectating(player) -> Player?    whom the player spectates (networked only: the client tells)
 	  start(net)                       once, with the world (before Players/Characters)
+	  networked() -> boolean           are positions the server's own (started, ServerPositions)?
+	                                   The interest rules (who is sent edits, chunks, records,
+	                                   lightning) apply only then, so the switch off is as before.
+	  spawned(player, character)       a new character (Characters.park, networked): its life
+	  store() -> PositionStore?        the records (Players/PlayerRelay), networked only
+
+	A leaving player's position stays readable through PlayerRemoving (their save:
+	World/WorldSave) and goes REMOVE_DELAY seconds later; nobody sees them from the moment they go.
 ]]
 
 local Players = game:GetService("Players")
@@ -45,16 +59,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local GameMode = require(Shared.GameMode)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
+local PlayerSync = require(Shared.Net.PlayerSync)
 local Protocol = require(Shared.Net.Protocol)
+local Remotes = require(Shared.Net.Remotes)
 local Rig = require(Shared.Movement.Rig)
+
+local PositionStore = require(script.Parent.PositionStore)
 
 local BLOCK = Config.BlockSize
 local CHUNK = Config.ChunkSize
 local STANDING = PlayerPhysics.STANDING
+local CROUCHING = PlayerPhysics.dimensions("crouching")
+local CRAWLING = PlayerPhysics.dimensions("crawling")
 -- Positions a client-owned character may claim that still count (blocks).
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local MAX_HEIGHT = 4096
+-- Seconds a leaving player's record stays (their save reads it while they go).
+local REMOVE_DELAY = 5
 
 -- What PlayerPositions talks through: Network/ServerNet's `on` and `send` (not required here:
 -- ServerNet asks PlayerPositions for reach).
@@ -80,9 +103,11 @@ export type Backend = {
 
 local PlayerPositions = {}
 
-local teleportedEvent = Instance.new("BindableEvent")
--- Fires (player: Player, x: number, y: number, z: number) after a teleport (feet, blocks).
-PlayerPositions.teleported = teleportedEvent.Event
+-- (Pure loaders, the Lune specs, have no Instance: no event there, and nothing fires it.)
+local teleportedEvent: BindableEvent? = if Instance then Instance.new("BindableEvent") else nil
+-- Fires (player: Player, x: number, y: number, z: number) after a teleport (feet, blocks); not
+-- for a speed check's correction (the player goes back where they were).
+PlayerPositions.teleported = (if teleportedEvent then teleportedEvent.Event else nil) :: RBXScriptSignal
 
 local function sane(x: number, y: number, z: number): boolean
 	return x == x and y == y and z == z and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT and math.abs(y) <= MAX_HEIGHT
@@ -180,8 +205,101 @@ local compat: Backend = {
 	end,
 }
 
-local backend: Backend = compat
+--[[ networked: the server's own positions (Players/PositionStore) ]]
+
+local store = PositionStore.new()
 local net: Net? = nil
+
+-- The record of a player who has a position.
+local function placed(player: Player): PositionStore.Record?
+	local record = store:get(player)
+	return if record and record.known then record else nil
+end
+
+-- The body the pose says: lying (tilt), sneaking or standing.
+local function bodyOf(record: PositionStore.Record): PlayerPhysics.Dimensions
+	if record.tilt >= 0.5 then
+		return CRAWLING
+	elseif bit32.btest(record.flags, PlayerSync.Flag.Sneaking) then
+		return CROUCHING
+	end
+	return STANDING
+end
+
+local function sendTeleport(player: Player, message: PlayerSync.Teleport)
+	local current = net
+	if current then
+		current.send(player, Protocol.ServerMessage.Teleport, PlayerSync.encodeTeleport(message))
+	end
+end
+
+local networked: Backend = {
+	feet = function(player: Player): (number?, number, number)
+		local record = placed(player)
+		if record == nil then
+			return nil, 0, 0
+		end
+		return record.x, record.y, record.z
+	end,
+
+	center = function(player: Player): (number?, number, number)
+		local record = placed(player)
+		if record == nil then
+			return nil, 0, 0
+		end
+		return record.x, record.y + bodyOf(record).height / 2, record.z
+	end,
+
+	eye = function(player: Player): (number?, number, number)
+		local record = placed(player)
+		if record == nil then
+			return nil, 0, 0
+		end
+		return record.x, record.y + bodyOf(record).eye, record.z
+	end,
+
+	yaw = function(player: Player): number
+		local record = store:get(player)
+		return if record then record.yaw else 0
+	end,
+
+	-- (Yaw as CFrame.Angles(0, yaw, 0): its LookVector, raised by the look pitch.)
+	look = function(player: Player): (number, number, number)
+		local record = store:get(player)
+		if record == nil then
+			return 0, 0, 1
+		end
+		local cosPitch = math.cos(record.pitch)
+		return -math.sin(record.yaw) * cosPitch, math.sin(record.pitch), -math.cos(record.yaw) * cosPitch
+	end,
+
+	alive = compat.alive,
+
+	-- A new epoch and the private Teleport message (Players/PositionStore.teleport).
+	teleport = function(player: Player, x: number, y: number, z: number, yaw: number?): boolean
+		if player.Character == nil then
+			return false
+		end
+		local message = store:teleport(player, x, y, z, yaw, os.clock())
+		if message == nil then
+			return false
+		end
+		sendTeleport(player, message)
+		return true
+	end,
+
+	grant = function(player: Player, blocks: number)
+		store:grant(player, blocks, os.clock())
+	end,
+
+	spectating = function(player: Player): Player?
+		local record = store:get(player)
+		local target = record and record.spectating
+		return if typeof(target) == "Instance" and target:IsA("Player") then target else nil
+	end,
+}
+
+local backend: Backend = compat
 
 --[[ The API ]]
 
@@ -267,7 +385,7 @@ end
 -- Puts the player's feet at (x, y, z) (blocks, doubles), facing `yaw` when given (radians, as
 -- CFrame.Angles(0, yaw, 0)), and fires `teleported`.
 function PlayerPositions.teleport(player: Player, x: number, y: number, z: number, yaw: number?)
-	if backend.teleport(player, x, y, z, yaw) then
+	if backend.teleport(player, x, y, z, yaw) and teleportedEvent then
 		teleportedEvent:Fire(player, x, y, z)
 	end
 end
@@ -280,13 +398,98 @@ function PlayerPositions.spectating(player: Player): Player?
 	return backend.spectating(player)
 end
 
+-- Are positions the server's own (started with Config.Players.ServerPositions)? The interest
+-- rules apply only then.
+function PlayerPositions.networked(): boolean
+	return backend == networked
+end
+
+-- The character each player's position belongs to (Characters.park): only its removal takes the
+-- position away (not an older one's, whatever order the events come in).
+local characters: { [Player]: Model } = setmetatable({}, { __mode = "k" }) :: any
+
+-- A new character of `player` (Players/Characters.park): its life (0 reading characters).
+function PlayerPositions.spawned(player: Player, character: Model): number
+	if backend ~= networked then
+		return 0
+	end
+	characters[player] = character
+	return store:spawned(player)
+end
+
+-- The server's records (Players/PlayerRelay), nil reading characters.
+function PlayerPositions.store(): PositionStore.Store?
+	return if backend == networked then store else nil
+end
+
+-- The networked backend's connections (see the header).
+local function listen(serverNet: Net)
+	-- (Created now, before any client looks for it.)
+	local moves = Remotes.moves()
+	local scratch: PlayerSync.Move =
+		{ seq = 0, epoch = 0, x = 0, y = 0, z = 0, yaw = 0, pitch = 0, tilt = 0, flags = 0, speed = 0, climb = 0 }
+	moves.OnServerEvent:Connect(function(player: Player, payload: unknown)
+		if typeof(payload) ~= "buffer" then
+			return
+		end
+		local move = PlayerSync.decodeMove(payload, scratch)
+		if move == nil then
+			return
+		end
+		local result, correction = store:move(player, move, os.clock())
+		if correction then
+			sendTeleport(player, correction)
+		elseif result == "logged" then
+			local record = store:get(player)
+			warn(
+				`[IceVoxel] {player.Name} moved too quickly to ({math.floor(move.x)}, {math.floor(move.y)}, `
+					.. `{math.floor(move.z)}) as a {if record then record.mode else "?"} player (Config.Players.MoveCheck "log")`
+			)
+		end
+	end)
+
+	-- Whom a spectator spectates (0: nobody): only spectators, only players in the game.
+	serverNet.on(Protocol.ClientMessage.Spectate, function(player: Player, payload: buffer)
+		local userId = PlayerSync.decodeSpectate(payload)
+		if userId == nil then
+			return
+		end
+		local target = if userId ~= 0 then Players:GetPlayerByUserId(userId) else nil
+		store:spectate(player, if target and GameMode.isSpectatorOf(player) then target else nil, os.clock())
+	end)
+
+	local function onPlayer(player: Player)
+		store:add(player, GameMode.of(player), os.clock())
+		player:GetAttributeChangedSignal(GameMode.ATTRIBUTE):Connect(function()
+			store:setMode(player, GameMode.of(player), os.clock())
+		end)
+		player.CharacterRemoving:Connect(function(character: Model)
+			if characters[player] == character then
+				characters[player] = nil
+				store:left(player)
+			end
+		end)
+	end
+	Players.PlayerAdded:Connect(onPlayer)
+	for _, player in Players:GetPlayers() do
+		onPlayer(player)
+	end
+	Players.PlayerRemoving:Connect(function(player: Player)
+		store:leaving(player)
+		task.delay(REMOVE_DELAY, function()
+			store:remove(player)
+		end)
+	end)
+end
+
 function PlayerPositions.start(serverNet: Net)
 	if net then
 		return
 	end
 	net = serverNet
 	if Config.Players.ServerPositions then
-		warn("[IceVoxel] Config.Players.ServerPositions: server positions aren't built yet; reading characters")
+		backend = networked
+		listen(serverNet)
 	end
 end
 

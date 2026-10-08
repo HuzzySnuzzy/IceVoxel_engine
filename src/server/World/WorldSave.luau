@@ -85,7 +85,6 @@ local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local SaveText = require(Shared.SaveText)
 local InventoryTypes = require(Shared.Inventory.Types)
 local WorldSettings = require(Shared.WorldSettings)
@@ -100,6 +99,7 @@ local Effects = require(Server.Players.Effects)
 local GameModes = require(Server.Players.GameModes)
 local Inventories = require(Server.Players.Inventories)
 local Operators = require(Server.Players.Operators)
+local PlayerPositions = require(Server.Players.PlayerPositions)
 local Spawning = require(Server.Players.Spawning)
 local ToughAsNails = require(Server.Players.ToughAsNails)
 local PlayerCodec = require(Server.Save.PlayerCodec)
@@ -529,13 +529,12 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 	local standing = false
 	if character and humanoid and humanoid.Health > 0 then
 		standing = true
-		local feet = Rig.feet(character)
-		local root = character:FindFirstChild("HumanoidRootPart")
-		if feet and root and root:IsA("BasePart") then
+		-- (Players/PlayerPositions: doubles, as the record keeps them.)
+		local x, y, z = PlayerPositions.feet(player)
+		if x then
 			record.position = true
-			record.x, record.y, record.z = feet.X, feet.Y, feet.Z
-			local _, yaw = root.CFrame:ToOrientation()
-			record.yaw = yaw
+			record.x, record.y, record.z = x, y, z
+			record.yaw = PlayerPositions.yaw(player)
 		end
 		record.health = if humanoid.MaxHealth > 0 then humanoid.Health / humanoid.MaxHealth * 20 else 20
 	end
@@ -588,11 +587,10 @@ local function finalRecord(player: Player, ps: PlayerState): (Record, number)
 	return fresh, order
 end
 
--- Puts a character where the record says and gives it the record's health.
-local function placeCharacter(player: Player, character: Model, record: Record)
+-- Puts a player where the record says and gives their character the record's health.
+local function placeCharacter(player: Player, record: Record)
 	if record.position then
-		character:PivotTo(CFrame.new(character:GetPivot().Position) * CFrame.Angles(0, record.yaw, 0))
-		Characters.teleportFeet(character, Vector3.new(record.x, record.y, record.z))
+		Characters.teleportTo(player, record.x, record.y, record.z, record.yaw)
 	end
 	Characters.restoreHealth(player, record.health)
 end
@@ -613,28 +611,29 @@ local function applyRecord(player: Player, ps: PlayerState, record: Record)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if character and humanoid and humanoid.Health > 0 then
 		-- (Already standing: the menu off, characters load as Roblox's.)
-		placeCharacter(player, character, record)
+		placeCharacter(player, record)
 	else
 		ps.record = record
 		ps.waiting = record
 	end
 end
 
--- Players/Spawning's placement: a returning player's first character stands where they left.
-local function placement(player: Player): (Vector3?, number?)
+-- Players/Spawning's placement: a returning player's first character stands where they left
+-- (feet, blocks, doubles, and yaw).
+local function placement(player: Player): (number?, number, number, number?)
 	local ps = players[player]
 	local record = ps and ps.record
 	if ps == nil or record == nil then
-		return nil, nil
+		return nil, 0, 0, nil
 	end
 	ps.record = nil
 	task.defer(function()
 		Characters.restoreHealth(player, record.health)
 	end)
 	if not record.position then
-		return nil, nil
+		return nil, 0, 0, nil
 	end
-	return Vector3.new(record.x, record.y, record.z), record.yaw
+	return record.x, record.y, record.z, record.yaw
 end
 
 local function track(player: Player)

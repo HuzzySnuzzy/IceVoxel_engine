@@ -3,9 +3,9 @@
 	Sounds the server plays: it tells the players near a sound which event (Shared/Sounds) to play
 	where, like Minecraft's ServerLevel.playSound and PlayerList.broadcast.
 
-	  Who hears  every player whose feet are within the event's maxDistance (scaled up by a volume
-	             above 1, as Minecraft does) plus Config.Sounds.BroadcastSlack blocks, except the
-	             one given: the player whose own client already played it (a block they broke or
+	  Who hears  every player whose feet (Players/PlayerPositions) are within the event's
+	             maxDistance (scaled up by a volume above 1, as Minecraft does) plus
+	             Config.Sounds.BroadcastSlack blocks, except the one given: the player whose own client already played it (a block they broke or
 	             placed, their own hurting landing: the events whose `side` is "predicted").
 	  Batching   sounds queue up and go out once per frame (Heartbeat), one Protocol `Sound`
 	             message per player holding all of theirs, at most Config.Sounds.MaxPerFrame (the
@@ -34,15 +34,15 @@
 	them.
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local SharedSounds = require(Shared.Sounds)
+
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 
 type SoundCue = Protocol.SoundCue
 
@@ -221,16 +221,14 @@ function Sounds.playBlock(block: number, action: string, x: number, y: number, z
 	Sounds.play(SharedSounds.block(block, action), x + 0.5, y + 0.5, z + 0.5, except)
 end
 
--- Plays event `sound` at the feet of `player`'s character (nothing without one), except for
--- `except`.
+-- Plays event `sound` at the feet of `player` (nothing without a position), except for `except`.
 function Sounds.playAt(player: Player, sound: (number | string)?, except: Player?, volume: number?, pitch: number?)
 	if sound == nil or not started then
 		return
 	end
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet then
-		Sounds.play(sound, feet.X, feet.Y, feet.Z, except, volume, pitch)
+	local x, y, z = PlayerPositions.feet(player)
+	if x then
+		Sounds.play(sound, x, y, z, except, volume, pitch)
 	end
 end
 
@@ -246,12 +244,8 @@ function Sounds.start(net: Net)
 			return
 		end
 		local listeners: { Listener } = {}
-		for _, player in Players:GetPlayers() do
-			local character = player.Character
-			local feet = if character then Rig.feet(character) else nil
-			if feet then
-				table.insert(listeners, { key = player, x = feet.X, y = feet.Y, z = feet.Z })
-			end
+		for player, x, y, z in PlayerPositions.each() do
+			table.insert(listeners, { key = player, x = x, y = y, z = z })
 		end
 		for key, cues in queue:route(listeners, Config.Sounds.MaxPerFrame) do
 			local player = key :: Player

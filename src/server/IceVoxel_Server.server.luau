@@ -78,7 +78,8 @@
 	registers its effects there when it starts. A player's mining speed is their effects' times
 	their perks' (Shared/Mining.playerFactor, as the client's).
 	Players' positions (Players/PlayerPositions: feet, reach, teleports) start with the players too,
-	before everything that reads them.
+	before everything that reads them; with Config.Players.ServerPositions, Players/PlayerRelay
+	sends each player the others they may see, from after the mobs.
 ]]
 
 local Players = game:GetService("Players")
@@ -112,6 +113,7 @@ local ServerNet = require(Server.Network.ServerNet)
 local LobbyNet = require(Server.Network.LobbyNet)
 local Sounds = require(Server.Audio.Sounds)
 local PlayerPositions = require(Server.Players.PlayerPositions)
+local PlayerRelay = require(Server.Players.PlayerRelay)
 local Characters = require(Server.Players.Characters)
 local GameModes = require(Server.Players.GameModes)
 local Operators = require(Server.Players.Operators)
@@ -221,6 +223,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	ToughAsNails.start(net, world)
 	-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
 	Mobs.start(net, world)
+	-- Other players' poses to those who may see them (Players/PlayerRelay; with
+	-- Config.Players.ServerPositions only).
+	PlayerRelay.start(net)
 	Eating.start(net)
 	-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
 	-- perks go to the parts that apply them.

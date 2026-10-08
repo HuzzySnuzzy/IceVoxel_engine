@@ -22,7 +22,10 @@
 	            non-default ones go to a player right after its edit list (ServerNet's
 	            `chunksSent` rule calls `sendChunks`), and changes go once per frame to every
 	            player within RECORD_RANGE blocks (sideways) of them, which covers the chunks a
-	            client keeps in full detail (players without a character yet get them all).
+	            client keeps in full detail (players without a character yet get them all; none
+	            with the server's own positions, Config.Players.ServerPositions, whose chunk edit
+	            lists, and the records sent with them, wait for the player to come near). Feet
+	            are Players/PlayerPositions'.
 	  Transport items in transporters are tracked per player within TRACK_RANGE blocks of their
 	            feet, like dropped items: an add when one appears, is re-routed or changes speed,
 	            a remove when it leaves; every SCAN_INTERVAL ticks, items coming into range are
@@ -42,7 +45,6 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local SharedTransmitters = require(Shared.Transmitters)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
@@ -50,6 +52,7 @@ local EditRules = require(script.Parent.Parent.Network.EditRules)
 local Containers = require(script.Parent.Parent.Players.Containers)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local TransmitterWorld = require(script.Parent.TransmitterWorld)
 
 type TransportOp = Protocol.TransportOp
@@ -81,7 +84,7 @@ local Transmitters = {}
 local state: TransmitterWorld.World? = nil
 -- Per player: the items their client knows, and their last sane feet position (blocks).
 local tracked: { [Player]: { [number]: boolean } } = {}
-local lastFeet: { [Player]: Vector3 } = {}
+local lastFeet: { [Player]: { number } } = {}
 
 -- The simulation (nil before `start`): Players/ItemUse configures transmitters and fills tanks.
 function Transmitters.world(): TransmitterWorld.World?
@@ -96,14 +99,22 @@ function Transmitters.blockChanged(x: number, y: number, z: number, old: number,
 	end
 end
 
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet and feet.X == feet.X and feet.Z == feet.Z and math.abs(feet.X) <= LIMIT and math.abs(feet.Z) <= LIMIT then
-		lastFeet[player] = feet
-		return feet
+-- The player's feet (Players/PlayerPositions, blocks), else where they were last seen; nil, 0, 0
+-- when never.
+local function feetOf(player: Player): (number?, number, number)
+	local x, y, z = PlayerPositions.feet(player)
+	local last = lastFeet[player]
+	if x and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT then
+		if last == nil then
+			lastFeet[player] = { x, y, z }
+		else
+			last[1], last[2], last[3] = x, y, z
+		end
+		return x, y, z
+	elseif last then
+		return last[1], last[2], last[3]
 	end
-	return lastFeet[player]
+	return nil, 0, 0
 end
 
 local function send(net: Net, player: Player, records: { TransmitterRecord }, tanks: { TankRecord })
@@ -142,15 +153,18 @@ local function sendRecords(sender: Net, records: { TransmitterRecord }, tanks: {
 	if #records == 0 and #tanks == 0 then
 		return
 	end
+	local everything = not PlayerPositions.networked()
 	for _, player in Players:GetPlayers() do
-		local feet = feetOf(player)
-		if feet == nil then
+		local px, _, pz = feetOf(player)
+		if px == nil then
 			-- (Never seen in the world yet, while its client already streams the chunks around
 			-- the spawn point: it gets every change, and its client keeps those of the chunks it
-			-- asked for. Range alone would leave those chunks' records stale.)
-			send(sender, player, records, tanks)
+			-- asked for. Range alone would leave those chunks' records stale. With the server's
+			-- own positions those chunks' lists wait for the player, records and all: nothing.)
+			if everything then
+				send(sender, player, records, tanks)
+			end
 		else
-			local px, pz = feet.X, feet.Z
 			local near: { TransmitterRecord } = {}
 			for _, record in records do
 				if math.abs(record.x + 0.5 - px) <= RECORD_RANGE and math.abs(record.z + 0.5 - pz) <= RECORD_RANGE then
@@ -168,8 +182,8 @@ local function sendRecords(sender: Net, records: { TransmitterRecord }, tanks: {
 	end
 end
 
-local function within(x: number, y: number, z: number, feet: Vector3, range: number): boolean
-	local dx, dy, dz = x + 0.5 - feet.X, y + 0.5 - feet.Y, z + 0.5 - feet.Z
+local function within(x: number, y: number, z: number, fx: number, fy: number, fz: number, range: number): boolean
+	local dx, dy, dz = x + 0.5 - fx, y + 0.5 - fy, z + 0.5 - fz
 	return dx * dx + dy * dy + dz * dz <= range * range
 end
 
@@ -191,11 +205,11 @@ local function sendTransport(
 			known = {}
 			tracked[player] = known
 		end
-		local feet = feetOf(player)
+		local fx, fy, fz = feetOf(player)
 		local out: { TransportOp } = {}
 		for _, op in ops do
 			if op.op == "add" then
-				if known[op.id] or (feet and within(op.x, op.y, op.z, feet, TRACK_RANGE)) then
+				if known[op.id] or (fx and within(op.x, op.y, op.z, fx, fy, fz, TRACK_RANGE)) then
 					known[op.id] = true
 					table.insert(out, op)
 				end
@@ -208,20 +222,20 @@ local function sendTransport(
 			for id in known do
 				local item = world.items[id]
 				local gone = item == nil
-				if item and feet then
+				if item and fx then
 					local x, y, z = TransmitterWorld.itemPosition(item)
-					gone = not within(x, y, z, feet, UNTRACK_RANGE)
+					gone = not within(x, y, z, fx, fy, fz, UNTRACK_RANGE)
 				end
 				if gone then
 					known[id] = nil
 					table.insert(out, { op = "remove", id = id, reason = Protocol.TransportRemoveReason.Gone })
 				end
 			end
-			if feet then
+			if fx then
 				for id, item in world.items do
 					if not known[id] then
 						local x, y, z = TransmitterWorld.itemPosition(item)
-						if within(x, y, z, feet, TRACK_RANGE) then
+						if within(x, y, z, fx, fy, fz, TRACK_RANGE) then
 							local op = TransmitterWorld.itemOp(world, item)
 							if op.op == "add" then
 								op.startTime = lastTick

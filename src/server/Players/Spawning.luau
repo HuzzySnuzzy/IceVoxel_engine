@@ -10,6 +10,12 @@
 	A saved world puts a returning player back where they were (World/WorldSave's `placement`,
 	`setPlacement`): asked on every new character, it gives their saved feet and facing once (the
 	first character after their record loaded); every other spawn is the world spawn.
+
+	With the server's own positions (Config.Players.ServerPositions) a new character is parked
+	first (Players/Characters.park: its life, anchored at the park spot), then placed through
+	Players/PlayerPositions.teleport like any teleport: the private Teleport message that carries
+	the character's life is its spawn. `SpawnPosition` stays public (the world spawn: anyone may
+	know it).
 ]]
 
 local Players = game:GetService("Players")
@@ -30,11 +36,12 @@ local RETRY_DELAY = 30
 
 local Spawning = {}
 
--- Where a player's next character stands instead of the spawn (feet in blocks, yaw in radians),
--- nil: the spawn (World/WorldSave: a saved player's place, once).
-local placement: ((player: Player) -> (Vector3?, number?))? = nil
+-- Where a player's next character stands instead of the spawn (feet x, y, z in blocks, doubles,
+-- and yaw in radians), nil: the spawn (World/WorldSave: a saved player's place, once).
+export type Placement = (player: Player) -> (number?, number, number, number?)
+local placement: Placement? = nil
 
-function Spawning.setPlacement(fn: ((player: Player) -> (Vector3?, number?))?)
+function Spawning.setPlacement(fn: Placement?)
 	placement = fn
 end
 
@@ -78,17 +85,15 @@ function Spawning.start(world: WorldServer.World)
 		if root == nil then
 			return
 		end
+		-- (Before anything places it: with the server's own positions it stands parked for good.)
+		Characters.park(player, character)
 		local place = placement
-		local feet, yaw = nil, nil
+		local x, y, z, yaw = nil, 0, 0, nil
 		if place then
-			feet, yaw = place(player)
+			x, y, z, yaw = place(player)
 		end
-		if feet then
-			-- (Facing first: the teleport keeps the rotation, and the client starts from it.)
-			if yaw and root:IsA("BasePart") then
-				character:PivotTo(CFrame.new(character:GetPivot().Position) * CFrame.Angles(0, yaw, 0))
-			end
-			Characters.teleportFeet(character, feet)
+		if x then
+			Characters.teleportTo(player, x, y, z, yaw)
 		else
 			local s = spawnSpot()
 			Shared:SetAttribute("SpawnPosition", Spawning.rootPosition(s[1], s[2], s[3]))

@@ -10,14 +10,15 @@
 	             burning in daylight: leaves shade), the rain and the weather's darkening from
 	             World/WeatherServer (`rainingAt`, `isDayAt`: no burning in the rain or a
 	             thunderstorm). Players are their
-	             characters' feet (Rig.feet), standing eyes (1.62), game mode and health.
+	             feet (Players/PlayerPositions), standing eyes (1.62), game mode and health.
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
 	             (Characters.hurt: the hurt cooldown, armor and Resistance; a fresh one knocks the
 	             player back through a `push` op the client adds to its movement, as an
-	             explosion's), a creeper's blast (World/Explosions.explode, power 3, at its feet:
-	             blocks, items, players and other mobs as any blast) and arrows (an `arrow` op for
-	             everyone near).
+	             explosion's, which the server's speed checks are told to allow:
+	             Characters.knockedBack), a creeper's blast (World/Explosions.explode, power 3,
+	             at its feet: blocks, items, players and other mobs as any blast) and arrows (an
+	             `arrow` op for everyone near).
 	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
 	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
@@ -71,7 +72,6 @@ local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Simulation = require(script.Parent.Parent.World.Simulation)
@@ -85,6 +85,7 @@ local Characters = require(script.Parent.Parent.Players.Characters)
 local Effects = require(script.Parent.Parent.Players.Effects)
 local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local MobWorld = require(script.Parent.MobWorld)
 local MobSpawning = require(script.Parent.MobSpawning)
 local SummonCommand = require(script.Parent.SummonCommand)
@@ -143,14 +144,13 @@ local function finite(x: number, y: number, z: number): boolean
 	return x == x and y == y and z == z and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT and math.abs(y) <= MAX_HEIGHT
 end
 
--- A character's feet, if they are a sane position.
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet and finite(feet.X, feet.Y, feet.Z) then
-		return feet
+-- A player's feet (Players/PlayerPositions), if they are a sane position; nil, 0, 0 else.
+local function feetOf(player: Player): (number?, number, number)
+	local x, y, z = PlayerPositions.feet(player)
+	if x and finite(x, y, z) then
+		return x, y, z
 	end
-	return nil
+	return nil, 0, 0
 end
 
 local function aliveOf(player: Player): boolean
@@ -163,13 +163,13 @@ end
 local function playerViews(): { MobWorld.PlayerView }
 	local views = {}
 	for _, player in Players:GetPlayers() do
-		local feet = feetOf(player)
-		if feet then
+		local fx, fy, fz = feetOf(player)
+		if fx then
 			table.insert(views, {
 				key = player,
-				x = feet.X,
-				y = feet.Y,
-				z = feet.Z,
+				x = fx,
+				y = fy,
+				z = fz,
 				eye = EYE,
 				mode = GameMode.of(player),
 				alive = aliveOf(player),
@@ -238,11 +238,10 @@ local function replicate(net: Net, mobs: MobWorld.MobWorld)
 		end
 		local ops: { Protocol.MobOp } = pending[player] or {}
 		pending[player] = nil
-		local feet = feetOf(player)
+		local px, py, pz = feetOf(player)
 		local inRange: { [number]: boolean } = {}
 		local spawns = 0
-		if feet then
-			local px, py, pz = feet.X, feet.Y, feet.Z
+		if px then
 			for _, mob in all do
 				local body = mob.body
 				local dx, dy, dz = body.x - px, body.y - py, body.z - pz
@@ -326,6 +325,7 @@ local function apply(mobs: MobWorld.MobWorld, world: WorldServer.World)
 			local _, fresh = Characters.hurt(player, hit.damage)
 			if fresh then
 				queue(player, { op = "push", id = hit.id, kx = hit.kx, ky = hit.ky, kz = hit.kz })
+				Characters.knockedBack(player, hit.kx, hit.ky, hit.kz)
 			end
 		end
 	end
@@ -333,12 +333,13 @@ local function apply(mobs: MobWorld.MobWorld, world: WorldServer.World)
 		Explosions.explode(world, blast.x, blast.y, blast.z, blast.power)
 	end
 	if #changes.arrows > 0 then
-		local range = Settings.TrackingDistance
+		local rangeSq = Settings.TrackingDistance * Settings.TrackingDistance
 		for _, player in Players:GetPlayers() do
-			local feet = feetOf(player)
-			if feet then
+			local fx, fy, fz = feetOf(player)
+			if fx then
 				for _, arrow in changes.arrows do
-					if (Vector3.new(arrow.x, arrow.y, arrow.z) - feet).Magnitude <= range then
+					local dx, dy, dz = arrow.x - fx, arrow.y - fy, arrow.z - fz
+					if dx * dx + dy * dy + dz * dz <= rangeSq then
 						queue(player, {
 							op = "arrow",
 							id = arrow.id,
@@ -388,8 +389,8 @@ local function onAttack(player: Player, payload: buffer)
 		return
 	end
 	bucket.tokens -= 1
-	local feet = feetOf(player)
-	if feet == nil then
+	local fx, fy, fz = feetOf(player)
+	if fx == nil then
 		return
 	end
 	local mode = GameMode.of(player)
@@ -403,9 +404,9 @@ local function onAttack(player: Player, payload: buffer)
 	local since = tickCount - math.max(swing.swing, swing.changed)
 	local landed, result = mobs:attack(id, {
 		key = player,
-		x = feet.X,
-		y = feet.Y,
-		z = feet.Z,
+		x = fx,
+		y = fy,
+		z = fz,
 		eye = EYE,
 		mode = mode,
 		alive = aliveOf(player),
@@ -441,13 +442,14 @@ local function runCommand(net: Net, player: Player, text: string)
 	if not SummonCommand.matches(text) then
 		return
 	end
-	local feet = feetOf(player) or Vector3.zero
+	-- (Relative coordinates from the feet; from 0, 0, 0 without a position.)
+	local fx, fy, fz = feetOf(player)
 	local result = SummonCommand.run(text, {
 		mayUse = Operators.permitted(player),
 		enabled = Settings.Enabled and mobWorld ~= nil,
-		x = feet.X,
-		y = feet.Y,
-		z = feet.Z,
+		x = fx or 0,
+		y = if fx then fy else 0,
+		z = if fx then fz else 0,
 	})
 	if result == nil or player.Parent == nil then
 		return

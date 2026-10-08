@@ -3,12 +3,22 @@
 	Server side of the cosmetic characters.
 
 	Players move as a Minecraft-style hull on their own client (Player/MovementController); the
-	Roblox character only shows where the hull is. So on the server:
+	Roblox character only shows where the hull is. Where a player is, the server asks
+	Players/PlayerPositions (feet in blocks, doubles), never the character. So on the server:
 	  * every character part goes into a collision group that collides with nothing (Rig), so Roblox
 	    physics never pushes characters around; a dead character's parts go back to Default so the
-	    body falls onto the terrain,
-	  * `teleport` / `teleportFeet` move a character and tell its client the exact feet position
-	    (attributes), so the hull moves with it,
+	    body falls onto the terrain (reading positions from characters; see `park` otherwise),
+	  * `teleport` / `teleportFeet` / `teleportTo` put a player's feet somewhere through
+	    PlayerPositions.teleport, which tells their client the exact feet position (so the hull
+	    moves with it) and fires PlayerPositions.teleported,
+	  * with the server's own positions (Config.Players.ServerPositions) a new character is
+	    `park`ed (Players/Spawning, first thing): its life counted (the IceVoxelLife attribute,
+	    matched by the Teleport that places it), its root anchored (server-owned: each client
+	    places every character locally from the hull or relayed poses, and that never
+	    replicates) and the whole character put at Config.Players.ParkPosition for good: the fake
+	    coordinates everyone can read. Joints don't break at death and the body doesn't fall (the
+	    clients play Minecraft's death tilt); `Died` is made sure of on the server (an anchored
+	    root),
 	  * landings reported by the client turn into fall damage (Config.Movement.FallDamage), like
 	    Minecraft: ceil(distance - 3) half hearts of 20, scaled to the Humanoid's MaxHealth
 	    (GameModeRules.fallDamage). Survival and adventure players only: creative and spectator
@@ -17,8 +27,8 @@
 	    GameModeRules.invulnerable): while in those modes their character holds an invisible
 	    ForceField (INVULNERABLE), which Humanoid:TakeDamage and explosions respect. (Setting
 	    Health directly still hurts, as Minecraft's /kill and the void do.)
-	  * players in a wall suffocate (GameModeRules.inWall, at the feet Rig.feet reads from the
-	    character, against the server's blocks): IN_WALL_DAMAGE half hearts every
+	  * players in a wall suffocate (GameModeRules.inWall, at their feet, against the server's
+	    blocks): IN_WALL_DAMAGE half hearts every
 	    IN_WALL_INTERVAL, until they get out or die, so one who leaves spectator inside rock
 	    isn't walled in for good (Minecraft's in-wall damage).
 	  * lava hurts and burns (Players/Burning, 20 ticks a second on the standing box at the feet,
@@ -36,7 +46,9 @@
 	    within Config.Explosions.EffectDistance (the Nuke's: Config.Nuke.EffectDistance) gets an
 	    Explosion message: the client draws the
 	    blast and adds the knockback to its movement (none for spectators, as Minecraft leaves
-	    them out of the explosion packet's knockback; the client leaves out creative flight).
+	    them out of the explosion packet's knockback; the client leaves out creative flight),
+	    which the server's speed checks are told to allow (PlayerPositions.grant: 12 x the push,
+	    which ground and air drag keep under 11 x).
 	  * lightning (`lightning`, World/WeatherServer's strike handler; World/Lightning): a living
 	    player (not a spectator) whose box meets a bolt's reach catches fire for 8 s and takes
 	    5 half hearts like any other hurt (Minecraft's Entity.thunderHit). Rain puts burning
@@ -79,13 +91,13 @@ local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Lightning = require(script.Parent.Parent.World.Lightning)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local SharedSounds = require(Shared.Sounds)
+local PlayerPositions = require(script.Parent.PlayerPositions)
 local Burning = require(script.Parent.Burning)
 local EffectRules = require(script.Parent.EffectRules)
 local Effects = require(script.Parent.Effects)
 local GameModeRules = require(script.Parent.GameModeRules)
 local Inventories = require(script.Parent.Inventories)
 
-local BLOCK = Config.BlockSize
 -- Minecraft players have 20 health points (half hearts).
 local MINECRAFT_HEALTH = GameModeRules.MINECRAFT_HEALTH
 -- The invisible ForceField of characters whose game mode can't be hurt.
@@ -94,6 +106,9 @@ local INVULNERABLE = "IceVoxelInvulnerable"
 local MAX_LANDINGS_PER_SECOND = 4
 -- Seconds between hurt sounds of one character (Minecraft's 10 ticks of invulnerability).
 local HURT_SOUND_INTERVAL = 0.5
+-- Blocks of movement a knockback of 1 block a tick may cause (ground drag 0.546 and air drag 0.91
+-- keep the travel under 11 x the push): what the speed checks are told to allow.
+local KNOCKBACK_TRAVEL = 12
 -- Lava and burning run at Minecraft's 20 ticks a second, catching up at most a few per frame.
 local BURN_TICK = 1 / 20
 local MAX_BURN_TICKS_PER_FRAME = 4
@@ -123,16 +138,23 @@ local function setGroup(part: Instance, group: string)
 end
 
 --[[
+	Puts `player`'s feet at (x, y, z) (blocks, doubles), facing `yaw` when given (radians, as
+	CFrame.Angles(0, yaw, 0)), else as they face: PlayerPositions.teleport (their client is told,
+	the hull follows, `teleported` fires).
+]]
+function Characters.teleportTo(player: Player, x: number, y: number, z: number, yaw: number?)
+	PlayerPositions.teleport(player, x, y, z, yaw)
+end
+
+--[[
 	Moves a character so its feet are at `feet` (blocks), keeping its rotation, and tells its
-	client where the hull now is.
+	client where the hull now is. (A character that is no player's is left alone.)
 ]]
 function Characters.teleportFeet(character: Model, feet: Vector3)
-	local root = character:FindFirstChild("HumanoidRootPart")
-	local rotation = if root and root:IsA("BasePart") then root.CFrame.Rotation else CFrame.identity
-	local position = feet * BLOCK + Vector3.new(0, Rig.rootOffset(character), 0)
-	character:PivotTo(CFrame.new(position) * rotation)
-	character:SetAttribute(Rig.TELEPORT_FEET, feet)
-	character:SetAttribute(Rig.TELEPORT_COUNT, ((character:GetAttribute(Rig.TELEPORT_COUNT) :: number?) or 0) + 1)
+	local player = Players:GetPlayerFromCharacter(character)
+	if player then
+		PlayerPositions.teleport(player, feet.X, feet.Y, feet.Z)
+	end
 end
 
 --[[
@@ -140,7 +162,32 @@ end
 	keeping its rotation, and tells its client where the hull now is.
 ]]
 function Characters.teleport(character: Model, x: number, y: number, z: number)
-	Characters.teleportFeet(character, Vector3.new(x + 0.5, y, z + 0.5))
+	local player = Players:GetPlayerFromCharacter(character)
+	if player then
+		PlayerPositions.teleport(player, x + 0.5, y, z + 0.5)
+	end
+end
+
+--[[
+	A new character, with the server's own positions (see the header; Players/Spawning calls it
+	before placing it): its life, its root anchored, no joints broken at death, parked at
+	Config.Players.ParkPosition. Does nothing while positions are read from characters.
+]]
+function Characters.park(player: Player, character: Model)
+	if not PlayerPositions.networked() then
+		return
+	end
+	character:SetAttribute(Rig.LIFE, PlayerPositions.spawned(player, character))
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		root.Anchored = true
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.BreakJointsOnDeath = false
+	end
+	local park = Config.Players.ParkPosition
+	character:PivotTo(CFrame.new(park[1], park[2], park[3]))
 end
 
 -- Gives the character an invisible ForceField while the player's game mode can't be hurt
@@ -161,16 +208,10 @@ end
 
 -- Hurts every living player who is in a wall (GameModeRules.inWall) by IN_WALL_DAMAGE.
 local function suffocate(blocks: PlayerPhysics.World)
-	for _, player in Players:GetPlayers() do
+	for player, x, y, z in PlayerPositions.each() do
 		local character = player.Character
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-		local feet = if character then Rig.feet(character) else nil
-		if
-			humanoid
-			and humanoid.Health > 0
-			and feet
-			and GameModeRules.inWall(GameMode.of(player), blocks, feet.X, feet.Y, feet.Z)
-		then
+		if humanoid and humanoid.Health > 0 and GameModeRules.inWall(GameMode.of(player), blocks, x, y, z) then
 			local damage = Effects.incomingDamage(player, GameModeRules.IN_WALL_DAMAGE)
 			humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
 		end
@@ -189,18 +230,16 @@ end
 	the ON_FIRE attribute.
 ]]
 local function burnTick(getBlock: Burning.GetBlock)
-	for _, player in Players:GetPlayers() do
+	for player, fx, fy, fz in PlayerPositions.each() do
 		local character = player.Character
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-		local feet = if character then Rig.feet(character) else nil
 		if
 			character == nil
 			or humanoid == nil
 			or humanoid.Health <= 0
-			or feet == nil
-			or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
-			or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
-			or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(fx) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(fy) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(fz) <= Protocol.MAX_COORDINATE)
 		then
 			continue
 		end
@@ -210,25 +249,17 @@ local function burnTick(getBlock: Burning.GetBlock)
 			burning[player] = state
 		end
 		local mode = GameMode.of(player)
-		local touching = Burning.touchingAt(getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		local touching = Burning.touchingAt(getBlock, fx, fy, fz, BODY.width, BODY.height)
 		-- (The weather only while burning: rain puts it out.)
 		local rain = rainingAt
-		if state.fire > 0 and rain and Burning.inRain(rain, feet.X, feet.Y, feet.Z, BODY.height) then
+		if state.fire > 0 and rain and Burning.inRain(rain, fx, fy, fz, BODY.height) then
 			touching = bit32.bor(touching, Burning.RAIN)
 		end
 		-- (The fluid over the eyes, only when some fluid gives effects there.)
 		local eyes = 0
 		if EffectRules.HEAD_EFFECTS then
-			local eyeY = feet.Y + BODY.eye
-			eyes = Burning.touching(
-				getBlock,
-				feet.X - 0.01,
-				eyeY,
-				feet.Z - 0.01,
-				feet.X + 0.01,
-				eyeY + 0.01,
-				feet.Z + 0.01
-			)
+			local eyeY = fy + BODY.eye
+			eyes = Burning.touching(getBlock, fx - 0.01, eyeY, fz - 0.01, fx + 0.01, eyeY + 0.01, fz + 0.01)
 		end
 		Effects.touchFluids(player, touching, eyes, mode)
 		local window = Inventories.get(player)
@@ -249,10 +280,10 @@ local function burnTick(getBlock: Burning.GetBlock)
 		-- (The events carry Minecraft's volume and pitch already: no cue on top.)
 		if GameModeRules.makesSounds(mode) then
 			if extinguished and EXTINGUISH then
-				Sounds.play(EXTINGUISH, feet.X, feet.Y, feet.Z)
+				Sounds.play(EXTINGUISH, fx, fy, fz)
 			end
 			if hurt and BURN then
-				Sounds.play(BURN, feet.X, feet.Y, feet.Z)
+				Sounds.play(BURN, fx, fy, fz)
 			end
 		end
 		setOnFire(character, Burning.onFire(state))
@@ -289,24 +320,24 @@ function Characters.explosion(
 		return
 	end
 	local reach = range or Config.Explosions.EffectDistance
-	for _, player in Players:GetPlayers() do
+	for player, fx, fy, fz in PlayerPositions.each() do
 		local character = player.Character
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-		local feet = if character then Rig.feet(character) else nil
+		local dx, dy, dz = fx - x, fy - y, fz - z
+		local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
 		if
 			humanoid == nil
-			or feet == nil
-			or not (math.abs(feet.X) <= Protocol.MAX_COORDINATE)
-			or not (math.abs(feet.Y) <= Protocol.MAX_COORDINATE)
-			or not (math.abs(feet.Z) <= Protocol.MAX_COORDINATE)
-			or (feet - Vector3.new(x, y, z)).Magnitude > reach
+			or not (math.abs(fx) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(fy) <= Protocol.MAX_COORDINATE)
+			or not (math.abs(fz) <= Protocol.MAX_COORDINATE)
+			or distance > reach
 		then
 			continue
 		end
 		local mode = GameMode.of(player)
 		local kx, ky, kz = 0, 0, 0
 		-- (Only those in reach are hurt: no rays for the Nuke's far audience.)
-		local inReach = (feet - Vector3.new(x, y, z)).Magnitude <= Explosion.REACH * power
+		local inReach = distance <= Explosion.REACH * power
 		if inReach and humanoid.Health > 0 and not GameMode.isSpectator(mode) then
 			local half = BODY.width / 2
 			local seen = Explosion.seenPercent(
@@ -314,14 +345,14 @@ function Characters.explosion(
 				x,
 				y,
 				z,
-				feet.X - half,
-				feet.Y,
-				feet.Z - half,
-				feet.X + half,
-				feet.Y + BODY.height,
-				feet.Z + half
+				fx - half,
+				fy,
+				fz - half,
+				fx + half,
+				fy + BODY.height,
+				fz + half
 			)
-			local damage, px, py, pz = Explosion.hit(x, y, z, power, feet.X, feet.Y, feet.Z, feet.Y + BODY.eye, seen)
+			local damage, px, py, pz = Explosion.hit(x, y, z, power, fx, fy, fz, fy + BODY.eye, seen)
 			if damage then
 				kx, ky, kz = px, py, pz
 				local state = burning[player]
@@ -351,6 +382,19 @@ function Characters.explosion(
 			Protocol.ServerMessage.Explosion,
 			Protocol.encodeExplosion({ x = x, y = y, z = z, power = power, kx = kx, ky = ky, kz = kz })
 		)
+		local push = math.sqrt(kx * kx + ky * ky + kz * kz)
+		if push > 0 then
+			PlayerPositions.grant(player, KNOCKBACK_TRAVEL * push)
+		end
+	end
+end
+
+-- Lets `player`'s movement take a knockback of (kx, ky, kz) blocks a tick (a mob's hit: Mobs/
+-- Mobs' push), as an explosion's does.
+function Characters.knockedBack(player: Player, kx: number, ky: number, kz: number)
+	local push = math.sqrt(kx * kx + ky * ky + kz * kz)
+	if push > 0 and push == push then
+		PlayerPositions.grant(player, KNOCKBACK_TRAVEL * push)
 	end
 end
 
@@ -370,17 +414,15 @@ end
 function Characters.lightning(x: number, y: number, z: number): number
 	local settings = Config.Weather.Lightning
 	local reached = 0
-	for _, player in Players:GetPlayers() do
+	for player, fx, fy, fz in PlayerPositions.each() do
 		local character = player.Character
 		local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
-		local feet = if character then Rig.feet(character) else nil
 		local mode = GameMode.of(player)
 		if
 			humanoid == nil
 			or humanoid.Health <= 0
-			or feet == nil
 			or GameMode.isSpectator(mode)
-			or not Lightning.hits(x, y, z, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+			or not Lightning.hits(x, y, z, fx, fy, fz, BODY.width, BODY.height)
 		then
 			continue
 		end
@@ -486,7 +528,17 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 		if humanoid and humanoid:IsA("Humanoid") then
 			local health = humanoid.Health
 			local lastHurt = -math.huge
+			local died = false
 			local healthChanged = humanoid.HealthChanged:Connect(function(newHealth: number)
+				if newHealth <= 0 and PlayerPositions.networked() then
+					-- (A parked character's root is anchored and server-owned: make sure the server
+					-- hears it die, for the respawn and the drops.)
+					task.defer(function()
+						if not died and humanoid.Parent and humanoid:GetState() ~= Enum.HumanoidStateType.Dead then
+							humanoid:ChangeState(Enum.HumanoidStateType.Dead)
+						end
+					end)
+				end
 				-- (Health cut to a lowered MaxHealth is no hurt, nor is a saved health restored.)
 				local restored = quietHealth[player] == true
 				quietHealth[player] = nil
@@ -504,14 +556,18 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 				end
 			end)
 			humanoid.Died:Connect(function()
+				died = true
 				healthChanged:Disconnect()
 				added:Disconnect()
 				removing:Disconnect()
 				if GameModeRules.makesSounds(GameMode.of(player)) then
 					Sounds.playAt(player, "entity.player.death")
 				end
-				for _, part in character:GetDescendants() do
-					setGroup(part, "Default")
+				-- (A parked body stays where it is: each client plays the death tilt.)
+				if not PlayerPositions.networked() then
+					for _, part in character:GetDescendants() do
+						setGroup(part, "Default")
+					end
 				end
 			end)
 		end
@@ -568,14 +624,12 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 		end
 		-- Everyone else hears the landing (the player's client played it): the fall, and the
 		-- block landed on (Minecraft's playBlockFallSound: the block 0.2 below the feet).
-		local feet = if character then Rig.feet(character) else nil
-		if feet then
-			Sounds.play(SharedSounds.fall(halfHearts), feet.X, feet.Y, feet.Z, player)
-			local below = if world
-				then world:peekBlock(math.floor(feet.X), math.floor(feet.Y - 0.2), math.floor(feet.Z))
-				else nil
+		local fx, fy, fz = PlayerPositions.feet(player)
+		if fx then
+			Sounds.play(SharedSounds.fall(halfHearts), fx, fy, fz, player)
+			local below = if world then world:peekBlock(math.floor(fx), math.floor(fy - 0.2), math.floor(fz)) else nil
 			if below then
-				Sounds.play(SharedSounds.block(below, "fall"), feet.X, feet.Y, feet.Z, player)
+				Sounds.play(SharedSounds.block(below, "fall"), fx, fy, fz, player)
 			end
 		end
 		-- TakeDamage respects ForceFields (e.g. spawn protection).

@@ -28,7 +28,8 @@
 	            rate, active, its kind's state code) for WAILA and the world: a chunk's non-default
 	            ones go to a player right after its edit list (`sendChunks`, from ServerNet's
 	            `chunksSent` rule) and changes, at most 4 a second per machine, to every player
-	            within RECORD_RANGE blocks (sideways), as Tanks records do.
+	            within RECORD_RANGE blocks (sideways) of their feet (Players/PlayerPositions), as
+	            Tanks records do.
 
 	Nothing is saved: machines' energy and contents last for the session, like chests.
 ]]
@@ -41,13 +42,13 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local EditRules = require(script.Parent.Parent.Network.EditRules)
 local Containers = require(script.Parent.Parent.Players.Containers)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
 local Transmitters = require(script.Parent.Parent.Transmitters.Transmitters)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
 local MachineWorld = require(script.Parent.MachineWorld)
 local SkyCheck = require(script.Parent.SkyCheck)
@@ -76,7 +77,8 @@ local Machines = {}
 local state: MachineWorld.World? = nil
 local net: Net? = nil
 local started = false
-local lastFeet: { [Player]: Vector3 } = {}
+-- Each player's last known feet (blocks: x, y, z).
+local lastFeet: { [Player]: { number } } = {}
 
 -- The simulation (nil before `start`).
 function Machines.world(): MachineWorld.World?
@@ -91,14 +93,22 @@ function Machines.blockChanged(x: number, y: number, z: number, old: number, new
 	end
 end
 
-local function feetOf(player: Player): Vector3?
-	local character = player.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet and feet.X == feet.X and feet.Z == feet.Z and math.abs(feet.X) <= LIMIT and math.abs(feet.Z) <= LIMIT then
-		lastFeet[player] = feet
-		return feet
+-- The player's feet (Players/PlayerPositions, blocks), else where they were last seen; nil, 0, 0
+-- when never.
+local function feetOf(player: Player): (number?, number, number)
+	local x, y, z = PlayerPositions.feet(player)
+	local last = lastFeet[player]
+	if x and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT then
+		if last == nil then
+			lastFeet[player] = { x, y, z }
+		else
+			last[1], last[2], last[3] = x, y, z
+		end
+		return x, y, z
+	elseif last then
+		return last[1], last[2], last[3]
 	end
-	return lastFeet[player]
+	return nil, 0, 0
 end
 
 local function send(sender: Net, player: Player, records: { MachineRecord })
@@ -124,22 +134,23 @@ function Machines.sendChunks(player: Player, coords: { { number } })
 	send(sender, player, records)
 end
 
--- Changed records to every player near them (every one to players not seen in the world yet).
+-- Changed records to every player near them (every one to players not seen in the world yet;
+-- none with the server's own positions, Config.Players.ServerPositions).
 local function sendRecords(sender: Net, records: { MachineRecord })
 	if #records == 0 then
 		return
 	end
+	local everything = not PlayerPositions.networked()
 	for _, player in Players:GetPlayers() do
-		local feet = feetOf(player)
-		if feet == nil then
-			send(sender, player, records)
+		local fx, _, fz = feetOf(player)
+		if fx == nil then
+			if everything then
+				send(sender, player, records)
+			end
 		else
 			local near: { MachineRecord } = {}
 			for _, record in records do
-				if
-					math.abs(record.x + 0.5 - feet.X) <= RECORD_RANGE
-					and math.abs(record.z + 0.5 - feet.Z) <= RECORD_RANGE
-				then
+				if math.abs(record.x + 0.5 - fx) <= RECORD_RANGE and math.abs(record.z + 0.5 - fz) <= RECORD_RANGE then
 					table.insert(near, record)
 				end
 			end

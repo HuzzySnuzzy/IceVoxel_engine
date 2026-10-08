@@ -5846,6 +5846,64 @@ refuse wrong lengths, non-finite numbers, positions beyond `MAX_COORDINATE` or h
 −256..4096, unknown ops, modes and reasons, too many records and user ids that aren't whole;
 `decodePoses` fills a reused list.
 
+**The server's own positions** (`Config.Players.ServerPositions`; server `Players/PositionStore`,
+`MoveCheck`, `Interest` (pure, specs of the same names), `PlayerPositions`' networked backend,
+`PlayerRelay`). With the switch off every part below is as before; on:
+- *Characters.* `Players/Spawning` parks every new character first (`Characters.park`: its life +1
+  in the `IceVoxelLife` attribute, `Rig.LIFE`; the root anchored, so server-owned; no joints broken
+  at death; `PivotTo(Players.ParkPosition)` once and for good), then places the player through
+  `PlayerPositions.teleport` like any teleport. What replicates of any character is the park: the
+  fake coordinates. Each client places every character locally (its own from the hull, others from
+  relayed poses); those writes never replicate. A dead body stays where it is (the clients play the
+  death tilt); `Died` is made sure of on the server (`ChangeState(Dead)` if health reached 0 without
+  it). `Characters.teleport` / `teleportFeet` (signatures kept) and `teleportTo(player, x, y, z,
+  yaw?)` (doubles) all go through `PlayerPositions.teleport`.
+- *Records* (PositionStore, keyed by Player): feet doubles and whether there is a position at all
+  (none before a character's first teleport nor after it is removed: only the parked character's
+  removal counts), the last move's pose (the Dead flag is the server's, from the Humanoid), a slot
+  (u16, increasing, never one in use), life and teleport epoch (u16), the last move's seq,
+  whom the player spectates, MoveCheck's buckets, a version bumped by every change, `gone` while
+  leaving (unseen at once; the record stays 5 s so the save still reads it).
+- *Moves* (Moves remote, about 20 a second): taken when they decode, the player has a position, the
+  epoch is the record's (a teleport's new epoch drops what is on its way until the client snapped
+  and confirms), the seq is newer (wrap-aware), the player spectates nobody and MoveCheck allows
+  them. MoveCheck: horizontal, up and down buckets refilled in server time at the game mode's
+  `Players.MoveLimits` up to `MoveSlack` seconds of it; a move costs its displacement, one that
+  would overdraw any is refused; the larger of the old and new limits for 2 s after a mode change;
+  `grant` (12 × an explosion's or a mob hit's knockback) over the cap for 2 s; a teleport fills
+  them. Refused under `MoveCheck = "correct"`: a Teleport (reason correction, a new epoch) back to
+  the last accepted place, at most every 0.5 s; `"log"` takes it and warns (every 10 s at most);
+  `"off"` takes anything in bounds. The spec replays 30 s of real PlayerPhysics in every mode
+  (sprint-jumping on ice with Speed II, sprint-flying, the fastest spectator flight, a 2000-block
+  fall) with jittery latency and no refusal.
+- *Teleports* (`PlayerPositions.teleport`): position and yaw set, epoch + 1, buckets full,
+  spectating ended, the Teleport message to that player alone (reason spawn for a new character's
+  first, carrying its life), `teleported` fired (not for corrections).
+- *Spectating*: `Spectate(userId)` from a spectator (0 stops; leaving spectator mode, a teleport or
+  the target leaving end it too); their place follows the target's every relay tick, through
+  chains, never in a loop, so their chunk lists, edits and streaming follow the target.
+- *Who sees whom* (`Interest.sees`, Minecraft's tracked-entity rule): never oneself, both with a
+  position, a spectator only by spectators (SpectatorRules.sees, copied), always the spectated
+  player, else within `Interest.PlayerDistance` (256) blocks horizontally to start and 272 to stay;
+  the dead stay seen. `PlayerRelay`, 20 times a second: alive flags, spectators follow, then per
+  player `Interest.update` (changes as one reliable Players message: untracks by slot, tracks with
+  the whole pose and game mode) and `Interest.due` (poses changed since sent, or every
+  `KeepAliveSeconds`) in unreliable Poses messages of at most 40.
+- *Leaks closed*: edits go only to players within `EditSendRadius` (26) chunks of them
+  (`Interest.routeEdits`: one shared message for those near all of a frame's edits; none without a
+  position); a chunk's edit list (and the records sent after it) is answered only within
+  `EditChunkRadius` (24) chunks of the player, farther requests wait in a per-player queue (at
+  most `DeferredChunkRequests`, oldest dropped) answered by a scan twice a second once they come
+  near (the client asks for a list once and waits); records of machines, pipes and structure blocks
+  go to nobody without a position (before: everyone); server lightning is sent within
+  `LightningDistance` (512) blocks (before: 4096; the clients draw far storms themselves).
+- *Every server read of a position* is `PlayerPositions`' (reach, hulls in the way, suffocation,
+  lava and burning, blasts, lightning, landings, items, sounds, mobs, weather, records, biome
+  discovery, thirst and temperature, /weather, /summon, saves, map and spectator teleports); only
+  `World/Simulation` still reads the root (the server generation work replaces it).
+  `PlayerPositions.networked()` says whether the rules above apply; `spawned(player, character)`
+  (Characters.park) and `store()` (PlayerRelay, ServerNet) reach the records.
+
 Config: `Origin` (Enabled, RebaseDistance, SoftDistance, Snap), `Interest` (PlayerDistance 256 and
 its hysteresis 16, RelayRate 20, KeepAliveSeconds, MaxPosesPerMessage 40, InterpolationDelay 0.1,
 EditChunkRadius 24, EditSendRadius 26, DeferredChunkRequests, LightningDistance 512), `Players`

@@ -1513,6 +1513,13 @@ src/server   -> ServerScriptService.IceVoxel
                             Generate plans, placed over frames), Permission (who may use them)
   Players/ItemUse           the Configurator, buckets, flint and steel and dirty water (on a
                             campfire) used on blocks (UseItem)
+  Players/PlayerPositions   where every player is, for all server code (feet in blocks, doubles;
+                            reach, teleports): the characters, or with
+                            Config.Players.ServerPositions the server's own, from checked client
+                            moves: PositionStore (records, teleport epochs, spectating; pure),
+                            MoveCheck (speed buckets per game mode; pure), Interest (who sees
+                            whom, chunk lists and edits by distance; pure), PlayerRelay (other
+                            players' poses only to those who may see them)
   Players/                  Operators + OperatorList (Minecraft's ops: the first player, /op,
                             /deop, the check every operators' command asks; pure), WorldMenu (the
                             title screen's server side: creating the world, characters only in
@@ -1889,6 +1896,18 @@ at most 6,000 (half that on phones); `Render.Foliage = false` saves them.
 
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
+
+**Who learns where players are** (`Players`, `Interest`; server `Players/PlayerPositions`). With
+`Players.ServerPositions` on, every character stands parked and anchored at `Players.ParkPosition`
+on the server, which is all Roblox replicates of it ("fake coords"); the server keeps where each
+player is from their client's moves, checked against `Players.MoveLimits` (blocks a second per
+game mode, `MoveSlack` seconds of slack; `MoveCheck = "correct"` sends a too fast player back,
+`"log"` only warns, `"off"` trusts), and tells each player only about others within
+`Interest.PlayerDistance` (256 blocks, kept until 16 more; spectators only to spectators, the
+spectated player always). Edits reach players within `Interest.EditSendRadius` (26) chunks, a
+chunk's edit list and records only come within `EditChunkRadius` (24), and server lightning within
+`LightningDistance` (512 blocks). Off, positions are read from the characters and everything is
+sent as before.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,
