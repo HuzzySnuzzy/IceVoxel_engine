@@ -339,6 +339,69 @@ return function(t, shared, require, _server, client)
 		t.eq(below, B.Sand, "sand underfoot")
 	end)
 
+	t.test("sounds client: climbing steps on the ladder every 1.67 blocks climbed, off the ground", function()
+		-- Minecraft's climb: 0.1176 blocks a tick straight up, the ladder under the feet.
+		local function climbing(below: number?, overrides: { [string]: any }?)
+			local motion = walking(below, { dx = 0, dy = 0.1176, onGround = false, climbing = true })
+			for key, value in overrides or {} do
+				(motion :: any)[key] = value
+			end
+			return motion
+		end
+		local walker = SoundRules.newWalker()
+		local steps = {}
+		for tick = 1, 60 do
+			local step = SoundRules.move(walker, climbing(B.Ladder))
+			if step then
+				t.eq(step, B.Ladder, "the ladder's own step")
+				table.insert(steps, tick)
+			end
+		end
+		-- 0.6 x 0.1176 a tick passes 1, 2, 3, 4 at ticks 15, 29, 43, 57: every 1.67 blocks.
+		t.eq(#steps, 4, "four steps in 7 blocks")
+		t.eq(steps[1], 15, "first after 1.76 blocks")
+		t.eq(steps[2], 29, "then every 14.2 ticks")
+		t.eq(Sounds.block(B.Ladder, "step"), event("block.ladder.step").index, "a ladder sounds like one")
+		t.eq(Sounds.block(B.Rope, "step"), event("block.rope.step").index, "rope like rope")
+		t.eq(Sounds.block(B.CaveVineNorth, "step"), event("block.vine.step").index, "vines like vines")
+		-- Sliding down counts the same.
+		local slider = SoundRules.newWalker()
+		local slides = 0
+		for _ = 1, 60 do
+			if SoundRules.move(slider, climbing(B.Vine, { dy = -0.15 })) then
+				slides += 1
+			end
+		end
+		t.eq(slides, 5, "0.6 x 0.15 x 60 = 5.4")
+		-- Over the floor under the bottom rung the step passes silently, and is not owed.
+		local bottom = SoundRules.newWalker()
+		for _ = 1, 14 do
+			SoundRules.move(bottom, climbing(B.Ladder))
+		end
+		t.eq(SoundRules.move(bottom, climbing(B.Stone)), nil, "no stone step in the air")
+		t.eq(bottom.nextStep, 2, "the step was taken")
+		-- Without `climbing`, vertical movement in the air stays silent (the old rule).
+		local air = SoundRules.newWalker()
+		for _ = 1, 60 do
+			t.eq(SoundRules.move(air, climbing(B.Ladder, { climbing = false })), nil, "not climbing")
+		end
+		-- Flying is silent; sneaking on a ladder is not (the controller only silences it on the ground).
+		local flyer = SoundRules.newWalker()
+		for _ = 1, 60 do
+			t.eq(SoundRules.move(flyer, climbing(B.Ladder, { silent = true })), nil, "flying")
+		end
+		-- Another character's feet in a ladder cell, off the ground: climbing.
+		local blocks = { ["0,63,0"] = B.Stone, ["0,64,0"] = B.Ladder, ["0,65,0"] = B.Ladder }
+		local function getBlock(x: number, y: number, z: number): number?
+			return blocks[`{x},{y},{z}`] or B.Air
+		end
+		local onGround, _, below, isClimbing = SoundRules.observe(getBlock, 0.5, 65.4, 0.5)
+		t.ok(not onGround and isClimbing, "climbing")
+		t.eq(below, B.Ladder, "on the ladder")
+		local standing, _, _, climbsStanding = SoundRules.observe(getBlock, 0.5, 64, 0.5)
+		t.ok(standing and not climbsStanding, "standing at its foot is walking")
+	end)
+
 	--[[ Mining hits, ambience ]]
 
 	t.test("sounds client: mining hits every 4 ticks on one block, from its first", function()

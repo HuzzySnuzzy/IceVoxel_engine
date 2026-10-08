@@ -87,7 +87,11 @@
 	    diagonals instead of its boxes (BlockSize x sqrt 2 wide, a cell tall, PartPool.SPRITE_BOX),
 	    placed and turned like the boxes; tinted ones get their soil's tint on the planes' Decals
 	    (written only when the part's tint differs: `spriteTints`). Their Bounds still aim and
-	    outline them.
+	    outline them. Rope, cobwebs and hanging roots draw their sprites the same way.
+	Shaped blocks build only the boxes TextureLooks.drawnBoxes names: with a Front image drawn
+	(ladders, rails, vines, glow lichen) the plate carrying it and the glowing boxes, so the picture
+	replaces the rails and rungs; without one every box but a fully see-through plate (the
+	ladder's image carrier).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -779,7 +783,9 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 		local sparseLight = buffer.readu8(GreedyMesher.sparseLightLut, appearance) == 1
 		local dark = sparseLight and surface == 0
 		local sprite = if far then nil else TextureLooks.spriteOf(appearance)
-		local perCell = if sprite then #SPRITE_TURNS else #shape
+		-- (The boxes built: a Front image replaces the others.)
+		local drawn: { number } = TextureLooks.drawnBoxes(appearance, plain) or {}
+		local perCell = if sprite then #SPRITE_TURNS else #drawn
 		for cy = y, y + sy - 1 do
 			for cz = z, z + sz - 1 do
 				for cx = x, x + sx - 1 do
@@ -828,11 +834,12 @@ local function buildBox(self: ChunkRenderer, b: Build, node: RenderNode, i: numb
 						end
 						continue
 					end
-					for index, box in shape do
+					for _, index in drawn do
 						if k < skip then
 							k += 1
 							continue
 						end
+						local box = shape[index]
 						if self.windowBuilt > 0 and os.clock() > deadline then
 							b.sub = k
 							return false

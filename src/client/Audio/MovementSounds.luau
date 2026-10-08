@@ -2,7 +2,8 @@
 --[[
 	The sounds of moving about, as Minecraft makes them (SoundRules.move, after Entity.move):
 	footsteps on the block under the feet every 1.67 blocks walked, swimming in water, a splash on
-	falling in, and a landing that hurts.
+	falling in, and a landing that hurts; climbing a ladder, vine or rope steps on it every 1.67
+	blocks climbed (the hull's `climbing`, off the ground), sneaking or not.
 
 	  This player  Player/MovementController calls `tick` after every tick of the hull, with what
 	               happened (PlayerPhysics events). A landing that hurts (survival, fall damage on,
@@ -102,6 +103,7 @@ function MovementSounds.tick(
 		swimming = state.swimming,
 		silent = state.flying or (state.onGround and state.sneaking),
 		below = below,
+		climbing = state.climbing and not state.onGround,
 	})
 	playSounds(x, y, z, step, swim, splash)
 
@@ -142,6 +144,7 @@ function MovementSounds.start(world: ClientWorld.ClientWorld)
 		swimming = false,
 		silent = false,
 		below = nil,
+		climbing = false,
 	}
 
 	RunService.Heartbeat:Connect(function(dt: number)
@@ -172,7 +175,7 @@ function MovementSounds.start(world: ClientWorld.ClientWorld)
 					and (feet - listener).Magnitude <= FOLLOW_DISTANCE
 					and delta.X * delta.X + delta.Z * delta.Z <= TELEPORT_DISTANCE * TELEPORT_DISTANCE
 				then
-					local onGround, inWater, below = SoundRules.observe(getBlock, feet.X, feet.Y, feet.Z)
+					local onGround, inWater, below, climbing = SoundRules.observe(getBlock, feet.X, feet.Y, feet.Z)
 					-- Swimming: lying down in water (MovementController pitches the body forward).
 					local root = character:FindFirstChild("HumanoidRootPart")
 					local lying = root ~= nil and root:IsA("BasePart") and root.CFrame.UpVector.Y < LYING_UP
@@ -180,6 +183,7 @@ function MovementSounds.start(world: ClientWorld.ClientWorld)
 					motion.ticks = dt * TICK_RATE
 					motion.onGround, motion.inWater, motion.swimming = onGround, inWater, inWater and lying
 					motion.below = below
+					motion.climbing = climbing
 					local step, swim, splash = SoundRules.move(record.walker, motion)
 					playSounds(feet.X, feet.Y, feet.Z, step, swim, splash)
 				else

@@ -935,6 +935,30 @@ A fast, Minecraft-style voxel engine for Roblox.
   a block are walked up without jumping, so the steep terrain is walkable
   (`Config.Movement.StepHeight`; Minecraft's is 0.6). The Roblox character is purely cosmetic: it is
   drawn on the hull (interpolated) and never collides with anything.
+- **Ladders, rope and climbing.** Minecraft 1.20.1's ladders and vines and Supplementaries' rope.
+  A **Ladder** (seven sticks make three; it burns in a furnace like planks) goes on the wall you
+  click, else the first wall the way you look; one clicked on the front of a ladder goes nowhere.
+  Walk into a ladder or a vine to climb it at Minecraft's 2.35 blocks a second, let go to slide
+  down at 3 a second without any fall damage, sneak to hold still (pushing on still climbs), and
+  step off onto the ledge at the top. **Vines** (found, taken with Shears) climb the same; a vine
+  also hangs under the same vine. **Rope** (three Straw in a column, or three String on a
+  diagonal, make three) hangs under a solid ceiling or another rope: hold jump to climb it, let go
+  to slide down in free fall that never hurts (Supplementaries' rope slide), sneak to hold on.
+  Right click a rope holding Rope to let one more down from the bottom of the column, however far
+  down that is (into air, plants or vines, never into water or a block); right click one with an
+  empty hand to pull the bottom rope back up into your inventory (creative uses and gains
+  nothing; adventure and spectator do neither). `Shift` + right click places Rope against the
+  clicked face like any block. Breaking a rope (or burning it: it burns fast) brings every rope
+  below it down, a block a tick, each dropping itself. **Cobwebs** hold whatever is in them: a
+  quarter of the speed across, a twentieth up and down, momentum lost every tick and the fall
+  forgotten (Minecraft's makeStuckInBlock); a sword cuts one quickly for String, Shears take the
+  cobweb, a bare hand gets nothing; nobody spawns in one. Mobs climb ladders, vines and rope they
+  walk into and get caught in webs, except spiders, which climb any wall and walk through webs.
+  Climbing makes the ladder's, vine's or rope's own step sound every 1.67 blocks, the climb
+  animation plays, and the `F3` overlay shows "climbing" and "stuck". Also: **Rails** (six iron
+  ingots and a stick make 16, from the Iron Age) lie along the way you face; the **Oak Fence**
+  (planks and sticks) is a post; **Moss Block**, **Moss Carpet** (two moss make three), **Hanging
+  Roots** and **Mossy Cobblestone** (cobblestone and a vine or moss).
 - **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
   up to 5 blocks away, so it runs down slopes instead of flooding the ground around it. Flowing
   water steps down level by level, and its current pushes the player downstream. Lava and oil head
@@ -1013,6 +1037,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
+| Climb         | Walk into a ladder or vine, or hold `Space` on a rope or a hanging vine (2.35 blocks a second); let go to slide down (a rope: a fast slide that never hurts); hold `Shift` to hold still | stick / A; B holds | move / Jump; Sneak holds |
+| Rope          | Right click a rope with Rope: one more at the bottom of it, however far down; with an empty hand: pull the bottom one up (held, it repeats); `Shift` + right click with Rope places it against the face | L2 | Tap |
 | Configure a pipe | Right click a transmitter's arm or core face with the Configurator: normal → push → pull → none (Universal Cables only tell none apart); `Shift` + right click a transporter: next colour | L2 | Tap |
 | Flint and Steel | Right click a face: fire in front of it where fire can burn; break a fire (left click) to put it out | L2 | Tap |
 | Buckets       | Right click a source (water, lava, oil, fuel), a Fluid Tank or a machine with a bucket to fill it; right click a block, tank or machine with a full bucket to empty it (a machine whose tanks can't take or give a bucket opens its screen; `Shift`: into the world, past tanks and machines) | L2 | Tap |
@@ -1241,6 +1267,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             furnace fuel, fog and bucket sounds
   Fire                      fire's shared rules (Minecraft's FireBlock): survival, ignite odds,
                             the sides it clings to, its outline and planes, the animation frames
+  Rope                      using rope on rope (Supplementaries): the column's bottom, where one
+                            more goes, which one an empty hand pulls up, what a use does
   Transmitters/             Mekanism pipes and cables: Tiers (Mekanism's numbers), sides,
                             connection modes, colours, the connection rule, route costs,
                             Inventories (sided slots, insert / extract, what furnaces and
@@ -1269,8 +1297,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             in lava and oil)
   Entities/MobList          mob kinds (Minecraft's boxes, health, speeds, loot, spawn weights,
                             sounds, how the client draws them); MobPhysics (a mob's movement
-                            tick: walking, jumping, fluids, climbing, falls); Combat (players
-                            hitting mobs: weapon damage, attack strength, reach, knockback, wear)
+                            tick: walking, jumping, fluids, ladders and walls, cobwebs, falls);
+                            Combat (players hitting mobs: weapon damage, attack strength, reach,
+                            knockback, wear)
   Items/Foods               what eating meat does (healing, the Thirst effect's odds), raw to
                             cooked
   GameMode, Mining          the four game modes and what each allows, mining times by hand and

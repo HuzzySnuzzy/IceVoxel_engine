@@ -2,8 +2,9 @@
 --[[
 	Right clicks on blocks with items that are no block (UseItem messages): Mekanism's Configurator
 	on transmitters, Minecraft's buckets on fluid sources, Fluid Tanks and machines' fluid tanks,
-	for every fluid pipes carry (Shared/Fluids: water, lava, oil, fuel), and flint and steel. The
-	rules are Transmitters/UseRules and Behaviours/Fire (pure, tested); this checks the request
+	for every fluid pipes carry (Shared/Fluids: water, lava, oil, fuel), and flint and steel; and
+	rope's own uses (Rope or an empty hand on a rope). The rules are Transmitters/UseRules,
+	Behaviours/Fire and Shared/Rope (pure, tested); this checks the request
 	and plays them out. Clients do
 	not predict any of it: the inventory snapshot, the world's edits and the Transmitters / Tanks
 	records bring the results.
@@ -38,6 +39,12 @@
 	                 there; it wears by 1 (64 uses), never in creative. On TNT or a Nuke
 	                 (TntBlock.use, whatever the side) it lights it instead (Behaviours/Tnt.prime,
 	                 with its hiss) and wears the same.
+	  Rope           (Supplementaries: Shared/Rope) not sneaking, on a rope: held Rope lets one more
+	                 down under the column's bottom however far down (one used, none in creative;
+	                 the place sound at x 0.8 pitch there); an empty hand pulls the bottom rope of
+	                 a column of two or more up and gives it back (nothing in creative; the break
+	                 sound at x 0.6). The edit goes through the world (recorded and replicated as
+	                 any other); the reach is checked on the rope clicked, not the bottom.
 	  Dirty water    (Tough As Nails: Shared/ToughAsNails/Boiling) on a Campfire, not sneaking:
 	                 one bottle, bowl or canteen boils into its purified twin (a canteen keeps its
 	                 sips), with block.campfire.boil at the campfire, at most one every
@@ -59,6 +66,8 @@ local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local SharedTransmitters = require(Shared.Transmitters)
 local Boiling = require(Shared.ToughAsNails.Boiling)
+local Rope = require(Shared.Rope)
+local SharedSounds = require(Shared.Sounds)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Fire = require(script.Parent.Parent.Behaviours.Fire)
@@ -222,6 +231,46 @@ local function strike(world: WorldServer.World, player: Player, x: number, y: nu
 	end
 end
 
+-- Rope used on rope (x, y, z) with `held` (nil: an empty hand): let down or pulled up (see the
+-- header). Returns whether it was a rope use (then nothing else is tried).
+local function useRope(
+	world: WorldServer.World,
+	player: Player,
+	held: Stack?,
+	block: number?,
+	x: number,
+	y: number,
+	z: number,
+	sneaking: boolean
+): boolean
+	if not Rope.wantsUse(if held then held.item else nil, block, sneaking) then
+		return false
+	end
+	local env: Rope.Env = {
+		getBlock = function(bx: number, by: number, bz: number): number?
+			return world:peekBlock(bx, by, bz)
+		end,
+		setBlock = function(bx: number, by: number, bz: number, set: number): boolean
+			return world:setBlock(bx, by, bz, set)
+		end,
+	}
+	local done = Rope.use(env, held, block, x, y, z, sneaking, GameMode.instabuildOf(player))
+	if done == nil then
+		return true
+	end
+	if done.held ~= held then
+		Inventories.setHeld(player, done.held)
+	end
+	if done.give then
+		Inventories.give(player, done.give)
+	end
+	if Sounds.allow(player) then
+		local sound = SharedSounds.block(Rope.ROPE, done.action)
+		Sounds.play(sound, done.x + 0.5, done.y + 0.5, done.z + 0.5, nil, nil, done.pitch)
+	end
+	return true
+end
+
 -- Dirty water held over a campfire at (x, y, z): one container boiled clean (see the header).
 local function boil(player: Player, held: Stack, x: number, y: number, z: number)
 	local newHeld, give = Boiling.boil(held, GameMode.instabuildOf(player), function(item: number): boolean
@@ -257,6 +306,9 @@ local function onUseItem(net: ServerNet.ServerNet, world: WorldServer.World, pla
 			lastBoil[player] = now
 			boil(player, held, x, y, z)
 		end
+		return
+	end
+	if useRope(world, player, held, block, x, y, z, sneaking) then
 		return
 	end
 	local simulation = Transmitters.world()

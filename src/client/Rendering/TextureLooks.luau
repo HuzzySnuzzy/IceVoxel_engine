@@ -42,8 +42,19 @@
 	  sprite plants with a filled Sprite texture (Config.Textures.Sprites): two crossed planes
 	         carrying Decals (ChunkRenderer, PartPool, ItemModels), Color3 = the plant's target
 	         (its soil's foliage colour for tinted plants, per tint like their boxes) / average.
-	  front  glow lichen's plate: one Decal with its Front texture on the face away from its
-	         support; the plate itself goes see-through.
+	  front  glow lichen's, a ladder's, a rail's and a vine's plate: one Decal with its Front
+	         texture on the face away from its support; the plate itself goes see-through.
+	  shapes two rules for textured shaped blocks (`drawnBoxes`, `shapeLook`):
+	         * Front replaces the boxes: with a Front image drawn, a shaped block builds only its
+	           plate (the first box that does not glow, which carries the image) and its glowing
+	           boxes, so a ladder's rails and rungs or a rail's iron bars give way to the picture
+	           (Minecraft's single textured quad); without one, a plate that is fully see-through
+	           (transparency 1: the ladder's carrier, there only for the image) is not built;
+	         * shaped boxes take the near look: a shaped block whose entry has cube faces (All,
+	           Sides, Top: the oak fence's planks, the moss carpet's moss block) draws its boxes
+	           (glowing ones aside) in that texture's MaterialVariant, material and tint at full
+	           detail, as a cube's near look does, without images (its Minecraft model uses the
+	           texture); far boxes keep their own colours.
 	  mesh   far meshes (`lookOf`, `lookInfo`): with Render.FarMaterials every face takes its
 	         appearance's far look (material + variant + transparency + reflectance), vertex
 	         colour = the far part's Color, or its BlockList material in its voxel colour; without
@@ -500,6 +511,11 @@ type Dark = { amount: number, near: boolean, far: boolean, darker: boolean }
 type Resolved = {
 	near: PartLook?,
 	far: PartLook?,
+	-- A shaped block's boxes' look (`shapeLook`), and the boxes built near / far and plain
+	-- (`drawnBoxes`).
+	shape: PartLook?,
+	drawn: { number }?,
+	drawnPlain: { number }?,
 	-- Per face key: the texture drawn and whether a part (variant) draws it, for averageOf.
 	faces: { [string]: { texture: string, part: boolean } },
 	plain: { number },
@@ -695,6 +711,24 @@ local function spriteOf(info: Blocks.Appearance): Sprite?
 	return { texture = drawn, tints = tints, tinted = tinted }
 end
 
+--[[
+	The look of a shaped block's boxes (see the header): its cube faces' variant texture (Blocks.
+	variantTexture: the sides', else the top's), material and part tint, with textures on and a
+	texture to draw (a blank one draws nothing, or the missing texture with ShowMissing); nil for
+	cubes, for shapes without cube faces (plants' sprites, Front plates) and with nothing to draw.
+]]
+local function shapeOf(info: Blocks.Appearance): PartLook?
+	local textures = info.textures
+	if not style.textures or info.shape == nil or textures == nil then
+		return nil
+	end
+	if textures.north == nil and textures.top == nil then
+		return nil
+	end
+	local chosen = drawable(Blocks.variantTexture(info), true)
+	return if chosen then partLook(info, chosen) else nil
+end
+
 local function frontOf(info: Blocks.Appearance): Image?
 	local textures = info.textures
 	if textures == nil or textures.front == nil or not style.textures or info.shape == nil then
@@ -824,10 +858,20 @@ local function resolve(appearance: number): Resolved
 		spriteSignature = table.concat(tints, ",")
 	end
 	local frontSignature = if front then `{front.texture}:{front.color}` else "-"
+	local shape = shapeOf(info)
+	local shapeSignature = signatureOf(shape)
 	local nearSignature = signatureOf(near)
+	local drawn, drawnPlain = nil, nil
+	if info.shape then
+		drawn = TextureLooks.drawnBoxesOf(info.shape, info.transparency, front ~= nil)
+		drawnPlain = TextureLooks.drawnBoxesOf(info.shape, info.transparency, false)
+	end
 	local resolved: Resolved = {
 		near = near,
 		far = far,
+		shape = shape,
+		drawn = drawn,
+		drawnPlain = drawnPlain,
 		faces = faces,
 		plain = plain,
 		sprite = sprite,
@@ -836,8 +880,8 @@ local function resolve(appearance: number): Resolved
 		look = look,
 		lookColour = lookColour,
 		dark = dark,
-		signature = `{nearSignature};{signatureOf(far)};{spriteSignature};{frontSignature}`,
-		itemSignature = `{nearSignature};{imagesSignature(items)};{spriteSignature};{frontSignature}`,
+		signature = `{nearSignature};{signatureOf(far)};{spriteSignature};{frontSignature};{shapeSignature}`,
+		itemSignature = `{nearSignature};{imagesSignature(items)};{spriteSignature};{frontSignature};{shapeSignature}`,
 	}
 	cache[appearance] = resolved
 	return resolved
@@ -873,9 +917,55 @@ function TextureLooks.spriteOf(appearance: number): Sprite?
 	return resolve(appearance).sprite
 end
 
--- Glow lichen's image: the face of its plate away from its support, else nil.
+-- A Front plate's image (glow lichen, ladders, rails, vines): the face of the plate away from
+-- its support, else nil.
 function TextureLooks.frontOf(appearance: number): Image?
 	return resolve(appearance).front
+end
+
+--[[
+	The look a shaped appearance's boxes take at full detail (see the header: the fence post's
+	planks), nil when they keep their own colours and materials.
+]]
+function TextureLooks.shapeLook(appearance: number): PartLook?
+	return resolve(appearance).shape
+end
+
+-- The plate of a shape: its first box that does not glow (0: none). It carries a Front image.
+function TextureLooks.plateBox(shape: { Blocks.ShapeBox }): number
+	for i, box in shape do
+		if not box.glow then
+			return i
+		end
+	end
+	return 0
+end
+
+--[[
+	Which boxes of `shape` (indices, in order) are built (pure; `transparency` is the block's,
+	for boxes without their own): with a Front image drawn (`front`), the plate and the glowing
+	boxes only; without one, every box but those that do not glow and are fully see-through
+	(transparency 1: they would show nothing). See the header.
+]]
+function TextureLooks.drawnBoxesOf(shape: { Blocks.ShapeBox }, transparency: number, front: boolean): { number }
+	local plate = TextureLooks.plateBox(shape)
+	local list: { number } = {}
+	for i, box in shape do
+		local keep = if front
+			then i == plate or box.glow == true
+			else box.glow == true or (box.transparency or transparency) < 1
+		if keep then
+			table.insert(list, i)
+		end
+	end
+	return list
+end
+
+-- The boxes of a shaped appearance ChunkRenderer builds per cell (`drawnBoxesOf` with its Front
+-- image, none on plain parts, which carry no images); nil for a cube.
+function TextureLooks.drawnBoxes(appearance: number, plain: boolean?): { number }?
+	local resolved = resolve(appearance)
+	return if plain then resolved.drawnPlain else resolved.drawn
 end
 
 --[[

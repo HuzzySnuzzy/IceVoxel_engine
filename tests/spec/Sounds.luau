@@ -245,6 +245,21 @@ return function(t, shared, require, server, _client)
 		t.eq(Sounds.block(B.Air, "break"), nil, "air")
 		t.eq(Sounds.block(B.Stone, "explode"), nil, "unknown action")
 		t.eq(Sounds.block(99999, "break"), nil, "unknown block")
+		-- What climbing steps on (the climbable's own step: Audio/SoundRules), and what rope use
+		-- plays (Shared/Rope: its place and break sounds, at lower pitches).
+		t.eq(name(Sounds.block(B.LadderWest, "step")), "block.ladder.step", "a ladder")
+		t.eq(name(Sounds.block(B.Rope, "step")), "block.rope.step", "rope")
+		t.eq(name(Sounds.block(B.Rope, "place")), "block.rope.place", "rope let down")
+		t.eq(name(Sounds.block(B.Rope, "break")), "block.rope.break", "rope pulled up")
+		t.eq(name(Sounds.block(B.VineEast, "step")), "block.vine.step", "vines")
+		t.eq(name(Sounds.block(B.CaveVine, "step")), "block.vine.step", "their cave twins")
+		t.eq(name(Sounds.block(B.Cobweb, "step")), "block.wool.step", "a cobweb is soft")
+		-- Every climbable has a step sound to climb by.
+		for id = 0, Blocks.count - 1 do
+			if Blocks.isClimbable(id) then
+				t.ok(Sounds.block(id, "step") ~= nil, `{Blocks.get(id).name} steps`)
+			end
+		end
 	end)
 
 	t.test("sounds: block events scale their clips like Minecraft's actions", function()

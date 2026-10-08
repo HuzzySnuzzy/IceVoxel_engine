@@ -50,7 +50,9 @@
 	            held item and by hand (a tall plant's top: what its lower half drops, as breaking
 	            either half harvests the plant once), break time with the held item (Mining.ticks /
 	            20, standing and dry, at the player's own speed: Haste, Mining Fatigue, the mining
-	            perks), light, fluid level, render kind, solidity, friction and menu; for
+	            perks), light, fluid level, render kind, solidity, friction and menu, whether it is
+	            climbed (ladders, vines, rope) and how a cobweb slows ("Slows x 0.25 across, x 0.05
+	            up and down", Blocks.stuckIn); for
 	            transmitters their tier's numbers, the packed side modes and each side's mode,
 	            colour and fill byte, the connected sides and the network the client sees; for
 	            tanks their tier's numbers and contents; for machines their kind and part in an
@@ -686,6 +688,13 @@ local function blockDetails(
 	table.insert(lines, gray(`Light {Blocks.light(block)}`))
 	local solid = if def.solid then "solid" else "not solid"
 	table.insert(lines, gray(`Render {def.render}, {solid}, friction {number(def.friction)}`))
+	if Blocks.isClimbable(block) then
+		table.insert(lines, gray("Climbable"))
+	end
+	local stuck = Blocks.stuckIn(block)
+	if stuck then
+		table.insert(lines, gray(`Slows x {number(stuck[1])} across, x {number(stuck[2])} up and down`))
+	end
 	if def.menu then
 		-- (A machine's slots are its kind's, not BlockList's `container`.)
 		local slots = Machines.containerSize(block)

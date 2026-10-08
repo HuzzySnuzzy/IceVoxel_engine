@@ -161,6 +161,27 @@ return function(t, shared, require, _server, client)
 		t.ok(icon ~= nil and icon.item == nil and icon.colour ~= nil, "colour icon")
 	end)
 
+	t.test("waila: ladders, rope and vines are climbable; a cobweb wants a sword and slows", function()
+		for _, name in { "Ladder", "LadderEast", "Rope", "Vine", "CaveVineWest" } do
+			local info = WailaInfo.block(B[name], nil, 0, 0, 0, true)
+			has(info, "Climbable", name)
+			hasNot(info, "Slows", name)
+			hasNot(WailaInfo.block(B[name], nil, 0, 0, 0, false), "Climbable", `{name}: F3 only`)
+		end
+		hasNot(WailaInfo.block(B.Stone, nil, 0, 0, 0, true), "Climbable", "stone")
+		local C, X = WailaInfo.CHECK, WailaInfo.CROSS
+		local web = WailaInfo.block(B.Cobweb, nil, 0, 0, 0, true)
+		has(web, `{X} Requires Wooden Sword`, "a cobweb by hand")
+		has(web, "Slows x 0.25 across, x 0.05 up and down", "the web's hold")
+		has(web, "Drops by hand: nothing", "nothing by hand")
+		has(WailaInfo.block(B.Cobweb, I.IronSword, 0, 0, 0, true), `{C} Requires Wooden Sword`, "a sword")
+		has(WailaInfo.block(B.Cobweb, I.IronSword, 0, 0, 0, true), "Drops with Iron Sword: String", "String")
+		has(WailaInfo.block(B.Cobweb, I.Shears, 0, 0, 0, true), "Drops with Shears: Cobweb", "Shears")
+		local twin = WailaInfo.block(B.CaveCobweb, nil, 0, 0, 0, false)
+		t.eq(WailaInfo.text(twin.lines[1]), "Cobweb", "the twin is a cobweb")
+		t.eq(twin.icon and twin.icon.item, I.Cobweb, "with the cobweb's icon")
+	end)
+
 	t.test("waila: F3 drops of plants; a tall plant's top shows what breaking it harvests", function()
 		-- Breaking either half harvests the lower half once (server EditRules.harvested).
 		local top = WailaInfo.block(B.SunflowerTop, nil, 0, 11, 0, true)

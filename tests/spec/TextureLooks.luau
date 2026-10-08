@@ -475,6 +475,82 @@ return function(t)
 		t.eq(Looks.frontOf(app("Stone")), nil)
 	end)
 
+	t.test("texture looks: textured shapes: a Front replaces the boxes, cube faces dress them", function()
+		local function list(boxes: { number }?): string
+			return if boxes then table.concat(boxes, ",") else "nil"
+		end
+		-- Pure: the plate alone with a picture; without, every box but a see-through plate.
+		local ladder = Blocks.get(B.Ladder).shape
+		local rungs = {}
+		for i = 2, #ladder do
+			table.insert(rungs, i)
+		end
+		t.eq(ladder[1].transparency, 1, "the ladder's plate only carries its picture")
+		t.eq(list(Looks.drawnBoxesOf(ladder, 0, true)), "1", "a picture: the plate")
+		t.eq(list(Looks.drawnBoxesOf(ladder, 0, false)), table.concat(rungs, ","), "no picture: rails and rungs")
+		local lit = {
+			{ size = { 2, 2, 2 }, offset = { 0, 0, 0 }, glow = true, transparency = 1 },
+			{ size = { 4, 4, 4 }, offset = { 0, 0, 0 } },
+			{ size = { 4, 4, 4 }, offset = { 0, 4, 0 } },
+		}
+		t.eq(Looks.plateBox(lit), 2, "the plate is the first box that does not glow")
+		t.eq(list(Looks.drawnBoxesOf(lit, 0, true)), "1,2", "glowing boxes stay with a picture")
+		t.eq(list(Looks.drawnBoxesOf(lit, 0, false)), "1,2,3", "a see-through light carrier stays")
+		t.eq(list(Looks.drawnBoxesOf(lit, 1, false)), "1", "the block's own transparency counts")
+		-- Glow lichen looks as it did: every box, its picture or not.
+		local lichen = Blocks.get(B.GlowLichen).shape
+		local every = {}
+		for i = 1, #lichen do
+			table.insert(every, i)
+		end
+		t.ok(Looks.frontOf(app("GlowLichen")) ~= nil, "lichen draws its picture")
+		t.eq(list(Looks.drawnBoxes(app("GlowLichen"))), table.concat(every, ","), "lichen keeps its boxes")
+		t.eq(list(Looks.drawnBoxesOf(lichen, 0, false)), table.concat(every, ","), "without its picture too")
+		t.eq(Looks.drawnBoxes(app("Stone")), nil, "cubes have no boxes")
+
+		-- The blocks with their textures blank, then filled.
+		local blank = newLooks(nil, { "ladder", "rail", "vine", "moss block" })
+		local BL, BB = blank.Looks, blank.Blocks
+		local function bapp(BBlocks: any, name: string): number
+			return BBlocks.get(BBlocks.id[name]).appearance
+		end
+		t.eq(BL.frontOf(bapp(BB, "Ladder")), nil, "a blank ladder: no picture")
+		t.eq(list(BL.drawnBoxes(bapp(BB, "Ladder"))), table.concat(rungs, ","), "its rails and rungs")
+		t.eq(list(BL.drawnBoxes(bapp(BB, "Rail"))), "1,2,3", "a blank rail: sleepers and bars")
+		t.eq(BL.shapeLook(bapp(BB, "MossCarpet")), nil, "a blank carpet keeps its colour")
+		local filled = newLooks(function(pack)
+			for _, name in { "ladder", "rail", "vine", "moss block" } do
+				pack.Textures[name].Color = `rbxassetid://{#name}`
+			end
+		end)
+		local FL, FB = filled.Looks, filled.Blocks
+		for _, name in { "Ladder", "LadderSouth", "LadderWest", "LadderEast" } do
+			t.ok(FL.frontOf(bapp(FB, name)) ~= nil, `{name}: its picture`)
+			t.eq(list(FL.drawnBoxes(bapp(FB, name))), "1", `{name}: the plate alone`)
+			t.eq(list(FL.drawnBoxes(bapp(FB, name), true)), table.concat(rungs, ","), `{name}: plain`)
+		end
+		t.eq(FL.frontOf(bapp(FB, "Ladder")).face, Enum.NormalId.Front, "on the face away from its wall")
+		t.eq(FL.frontOf(bapp(FB, "RailEastWest")).face, Enum.NormalId.Top, "a rail's on top")
+		t.eq(list(FL.drawnBoxes(bapp(FB, "CaveRail"))), "1", "twins too")
+		t.eq(list(FL.drawnBoxes(bapp(FB, "VineWest"))), "1", "a vine is its plate")
+		-- Cube faces dress a shape: the fence post in planks, the carpet in moss.
+		local fence = FL.shapeLook(bapp(FB, "OakFence"))
+		t.ok(fence ~= nil, "the fence takes its planks")
+		t.eq(fence.texture, "planks")
+		t.eq(fence.variant, FB.variantName("planks"))
+		t.eq(fence.material, Enum.Material.WoodPlanks)
+		t.eq(#fence.images, 0, "no images on boxes")
+		t.eq(FL.shapeLook(bapp(FB, "CaveOakFence")).texture, "planks", "and its twin")
+		t.eq(FL.shapeLook(bapp(FB, "MossCarpet")).texture, "moss block", "the carpet its moss")
+		t.eq(FL.shapeLook(bapp(FB, "Torch")), nil, "a torch keeps its boxes' colours")
+		t.eq(FL.shapeLook(bapp(FB, "Ladder")), nil, "a picture is no cube face")
+		t.eq(FL.nearLook(bapp(FB, "OakFence")), nil, "no cube look for a shape")
+		-- Textures off: boxes as they are.
+		FL.setStyle(false, false)
+		t.eq(FL.shapeLook(bapp(FB, "OakFence")), nil, "textures off: the fence's own colour")
+		t.eq(list(FL.drawnBoxes(bapp(FB, "Ladder"))), table.concat(rungs, ","), "textures off: rails and rungs")
+	end)
+
 	t.test("texture looks: images are clones of the prototypes, else new from the colour map", function()
 		local world = newLooks()
 		world.prototypes = { IV_grass_top = true }

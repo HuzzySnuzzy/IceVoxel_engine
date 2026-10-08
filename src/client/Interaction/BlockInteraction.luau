@@ -83,6 +83,11 @@
 	Food (Interaction/Eating: the meat mobs drop, rotten flesh) is eaten the same way, holding the
 	use button 32 ticks, after a block's menu, in adventure too, while the player may eat
 	(Shared/Items/Foods.canEat: hurt, or in creative).
+	Rope (Shared/Rope, Supplementaries'), before anything is placed, in survival and creative, not
+	sneaking: Rope clicked on a rope lets one more down under the bottom of its column, an empty
+	hand pulls the bottom one up (Rope.wantsUse); sent as a UseItem, not predicted (the world's
+	edit and the inventory snapshot bring it), repeated while the button is held as placing is.
+	Sneaking with Rope places it against the clicked face like any block.
 	Mobs (Entities/MobRenderer) are aimed at before blocks: the nearest mob box on the aim, within
 	Minecraft's entity reach of the eyes (Shared/Entities/Combat: 3 blocks, 6 in creative; none
 	for spectators), hides the block behind it (no outline, no mining), and a press of the break
@@ -99,7 +104,9 @@
 	torch on top of a block stands, on a side it is a wall torch facing away from it, under a
 	ceiling it goes on a wall or the floor next to the spot (by where the player looks) or nowhere;
 	a lantern clicked under a block hangs from it. The variant's block id is what is sent; the
-	server checks the support again.
+	server checks the support again. Ladders go on the clicked wall, else the first wall in the
+	look order; a ladder clicked on the front of a ladder goes nowhere (LadderBlock.
+	getStateForPlacement), rails lie along the way the player faces.
 
 	A block goes into the clicked block when that can be replaced, else against the clicked face;
 	a replaceable block is not replaced by its own item (Items.isReplacedBy: Short Grass clicked on
@@ -152,6 +159,7 @@ local Transmitters = require(Shared.Transmitters)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Boiling = require(Shared.ToughAsNails.Boiling)
 local Combat = require(Shared.Entities.Combat)
+local Rope = require(Shared.Rope)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -204,6 +212,7 @@ local MOB_NEAR = 3
 local CONFIGURATOR = Items.id.Configurator
 local BUCKET = Items.id.Bucket
 local FLINT_AND_STEEL = Items.id.FlintAndSteel
+local LADDER = Blocks.id.Ladder
 
 -- The fluid a full bucket pours (a carriable fluid's: Fluids.ofBucket), 0 for any other item.
 local function bucketFluid(item: number): number
@@ -997,6 +1006,19 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 			return
 		end
+		-- Rope on a rope lets one more down, an empty hand pulls one up (Shared/Rope; not sneaking,
+		-- not in adventure). Not predicted; a held button repeats it.
+		if
+			hit
+			and ray
+			and GameMode.mayBuild(mode)
+			and Rope.wantsUse(if stack then stack.item else nil, hit.block, sneaking)
+		then
+			if sendUseItem(hit.x, hit.y, hit.z, faceSide(hit, ray), sneaking) then
+				swing()
+			end
+			return
+		end
 		-- Adventure and spectator players may not build: nothing is used on blocks or placed
 		-- (ItemStack.useOn and BucketItem's mayUseItemAt want mayBuild).
 		if stack == nil or not GameMode.mayBuild(mode) then
@@ -1023,6 +1045,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- clicked face.
 		local x, y, z = hit.x, hit.y, hit.z
 		if not Items.isReplacedBy(hit.block, stack.item) then
+			-- (A ladder on the front of a ladder: nowhere, LadderBlock.getStateForPlacement.)
+			if stack.item == LADDER and Items.ofBlock(hit.block) == LADDER then
+				local sx, sy, sz = Blocks.supportOffset(hit.block)
+				if sx == -hit.nx and sy == -hit.ny and sz == -hit.nz then
+					return
+				end
+			end
 			x, y, z = x + hit.nx, y + hit.ny, z + hit.nz
 		end
 		-- Inside the world's build limits only (the server refuses the rest).

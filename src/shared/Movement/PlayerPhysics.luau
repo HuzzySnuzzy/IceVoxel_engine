@@ -48,6 +48,26 @@
 	           (scrollFlyingSpeed: steps of 0.005 between 0 and 0.2, MouseHandler.onScroll);
 	  in a wall  `isInWall` (Entity.isInWall): the eyes in a block the player suffocates in, which
 	           hurts (the server's Players/GameModeRules.inWall), e.g. after leaving spectator in rock.
+	  climbing (LivingEntity.onClimbable and handleOnClimbable, around the move of
+	           handleRelativeFrictionAndCalculateMovement) with the feet cell (the floor of the
+	           position) in a climbable block (ladders, vines, rope: Blocks.isClimbable,
+	           Minecraft's #climbable): before the move the fall distance is cleared, the
+	           sideways speed held to 0.15 (0.15F) a tick each way and the descent to 0.15, and
+	           sneaking holds still (no sliding down); after the move, pushing into a wall or
+	           holding jump sets 0.2 up, which gravity and drag turn into (0.2 - 0.08) x 0.98 =
+	           0.1176 blocks a tick (2.35 m/s) up, while letting go slides down 0.15 a tick (3
+	           m/s). Jump climbs a free-hanging rope or vine, where there is no wall to push.
+	           Rope (Supplementaries' RopeBlock with slide_on_fall, its LivingEntityMixin) is not
+	           held to 0.15: one slides down it in free fall with the fall distance cleared every
+	           tick, so a rope of any length lands unhurt. In water a wall push on a climbable
+	           lifts 0.2 too (climbing out); never in lava, never for spectators; flight keeps its
+	           own vertical speed. `climbing` says whether the feet are in one after the tick
+	           (sounds, animation, F3);
+	  cobwebs  (Entity.makeStuckInBlock, WebBlock.entityInside) after each move, any cell the hull
+	           overlaps (deflated by 1e-7: Entity.checkInsideBlocks) holding a block with a `stuck`
+	           multiplier (Blocks.stuckIn: cobwebs 0.25, 0.05, 0.25) clears the fall distance and
+	           is kept in `stuck`; the next move is multiplied by it and the velocity zeroed, so
+	           walking through a web makes 0.49 m/s and falling in one 0.004 blocks a tick.
 
 	  effects  status effects (Shared/Effects, set on the state by the client's controller):
 	           `speedFactor` multiplies the ground speed (Speed, Slowness, Oil Coated: Minecraft's
@@ -133,6 +153,18 @@ for id, fluid in Fluids.list do
 end
 
 local FALL_SAFE = 3
+
+-- Climbing (LivingEntity.handleOnClimbable): the most sideways and downward speed on a climbable
+-- (0.15F), and the vertical speed a wall push or a held jump sets after the move.
+local CLIMB_LIMIT = 0.15000000596046448 -- 0.15F
+local CLIMB_SPEED = 0.2
+PlayerPhysics.CLIMB_LIMIT = CLIMB_LIMIT
+PlayerPhysics.CLIMB_SPEED = CLIMB_SPEED
+-- Supplementaries' fast-fall rope: slid down in free fall (no descent limit), never hurting.
+local ROPE = Blocks.id.Rope
+-- Entity.checkInsideBlocks: the hull shrinks by this much before the cells it is in are found,
+-- so touching a cobweb's face is not being in it.
+local INSIDE_EPSILON = 1.0e-7
 
 -- Flight (Abilities.flyingSpeed 0.05F, doubled when sprinting; jump / sneak add it x 3). The
 -- spectators' mouse wheel changes it in steps of 0.005F between 0 and 0.2F.
@@ -232,6 +264,11 @@ export type State = {
 	jumpBoost: number,
 	fallReduction: number,
 	noSprint: boolean,
+	-- The feet in a climbable block after the tick (ladder, vine, rope: LivingEntity.onClimbable).
+	climbing: boolean,
+	-- The multiplier a cobweb the hull touched puts on the next move (Entity.stuckSpeedMultiplier,
+	-- Blocks.stuckIn: { x, y, z }), nil when none.
+	stuck: { number }?,
 }
 
 export type Input = {
@@ -311,6 +348,8 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		jumpBoost = 0,
 		fallReduction = 0,
 		noSprint = false,
+		climbing = false,
+		stuck = nil,
 	}
 end
 
@@ -338,6 +377,8 @@ function PlayerPhysics.setGameMode(state: State, mode: string)
 		state.verticalCollision = false
 		state.supportX, state.supportZ = nil, nil
 		state.fallDistance = 0
+		state.climbing = false
+		state.stuck = nil
 	end
 	state.flyingSpeed = FLYING_SPEED
 end
@@ -369,6 +410,7 @@ function PlayerPhysics.place(state: State, x: number, y: number, z: number)
 	state.fallDistance = 0
 	state.onGround = false
 	state.sprinting = false
+	state.stuck = nil
 end
 
 --[[
@@ -650,11 +692,70 @@ local function findSupport(state: State, solidAt: Hull.SolidAt): (number?, numbe
 end
 
 --[[
-	Entity.move: back off edges when sneaking, collide, update collision flags, ground state and the
-	fall distance, and stop the velocity on the axes that hit something.
+	LivingEntity.onClimbable: the climbable block (ladder, vine, rope: Blocks.isClimbable) the feet
+	are in (the cell at the floor of the position, Entity.blockPosition), nil when none. Never for
+	spectators (Entity.isSpectator).
+]]
+local function climbableAt(state: State, world: World): number?
+	if state.noClip then
+		return nil
+	end
+	local block = world.getBlock(floor(state.x), floor(state.y), floor(state.z))
+	return if block ~= nil and Blocks.isClimbable(block) then block else nil
+end
+
+--[[
+	LivingEntity.handleOnClimbable, before the move, on climbable `block`: no fall damage, the
+	sideways speed held to 0.15 a tick and the descent to 0.15 (not on rope: Supplementaries' slide
+	is a free fall), and sneaking stops the slide (Player.isSuppressingSlidingDownLadder).
+]]
+local function handleOnClimbable(state: State, block: number)
+	state.fallDistance = 0
+	state.vx = math.clamp(state.vx, -CLIMB_LIMIT, CLIMB_LIMIT)
+	state.vz = math.clamp(state.vz, -CLIMB_LIMIT, CLIMB_LIMIT)
+	if block ~= ROPE then
+		state.vy = math.max(state.vy, -CLIMB_LIMIT)
+	end
+	if state.vy < 0 and state.sneaking then
+		state.vy = 0
+	end
+end
+
+--[[
+	Entity.checkInsideBlocks for cobwebs (WebBlock.entityInside): the `stuck` multiplier of the
+	first block with one in the cells the hull overlaps (deflated by INSIDE_EPSILON), nil when none.
+	Every cobweb's is the same, so the first found is the one.
+]]
+local function stuckInside(state: State, world: World): { number }?
+	local box = PlayerPhysics.box(state)
+	local stuckLut = Blocks.stuckLut
+	for x = floor(box.minX + INSIDE_EPSILON), floor(box.maxX - INSIDE_EPSILON) do
+		for y = floor(box.minY + INSIDE_EPSILON), floor(box.maxY - INSIDE_EPSILON) do
+			for z = floor(box.minZ + INSIDE_EPSILON), floor(box.maxZ - INSIDE_EPSILON) do
+				local block = world.getBlock(x, y, z)
+				if block ~= nil and block >= 0 and block < Blocks.count and buffer.readu8(stuckLut, block) == 1 then
+					return Blocks.stuckIn(block)
+				end
+			end
+		end
+	end
+	return nil
+end
+
+--[[
+	Entity.move: a cobweb's multiplier from the last move first (the velocity stops), back off
+	edges when sneaking, collide, update collision flags, ground state and the fall distance, stop
+	the velocity on the axes that hit something, then look for cobwebs in the hull for the next
+	move (they clear the fall distance).
 ]]
 local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: number, inputZ: number, events: Events)
 	local dx, dy, dz = state.vx, state.vy, state.vz
+	local stuck = state.stuck
+	if stuck then
+		dx, dy, dz = dx * stuck[1], dy * stuck[2], dz * stuck[3]
+		state.stuck = nil
+		state.vx, state.vy, state.vz = 0, 0, 0
+	end
 	local box = PlayerPhysics.box(state)
 
 	-- Sneaking never walks off an edge (Player.maybeBackOffFromEdge), except when flying.
@@ -729,6 +830,13 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 	end
 	if state.verticalCollision then
 		state.vy = 0
+	end
+
+	-- In a cobweb: the next move is slowed, and no fall damage (Entity.makeStuckInBlock).
+	local inside = stuckInside(state, world)
+	if inside then
+		state.stuck = inside
+		state.fallDistance = 0
 	end
 end
 
@@ -959,6 +1067,10 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		-- (Effects only slow it: see the header.)
 		accelerate(state, WATER_ACCELERATION * math.min(1, state.speedFactor), inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
+		-- Pushing into a wall on a ladder, vine or rope climbs out of the water.
+		if state.horizontalCollision and climbableAt(state, world) then
+			state.vy = CLIMB_SPEED
+		end
 		state.vx *= drag
 		state.vy *= WATER_VERTICAL_DRAG
 		state.vz *= drag
@@ -1020,7 +1132,16 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		if noClip then
 			moveNoClip(state)
 		else
+			-- LivingEntity.handleRelativeFrictionAndCalculateMovement: the climbing limits before
+			-- the move, and a wall pushed into (or jump held) climbs after it.
+			local climbable = climbableAt(state, world)
+			if climbable then
+				handleOnClimbable(state, climbable)
+			end
 			move(state, solidAt, world, inputX, inputZ, events)
+			if (state.horizontalCollision or input.jump) and climbableAt(state, world) then
+				state.vy = CLIMB_SPEED
+			end
 		end
 		state.vx *= drag
 		state.vy = (state.vy - GRAVITY) * VERTICAL_DRAG
@@ -1035,6 +1156,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if state.onGround and state.flying then
 		state.flying = false
 	end
+	state.climbing = climbableAt(state, world) ~= nil
 
 	-- Player.updatePlayerPose: swim, crouch when sneaking (not when flying), and crouch or crawl
 	-- whenever there is no room to stand. Stuck in blocks (not even crawling fits), the pose stays

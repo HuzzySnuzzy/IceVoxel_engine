@@ -70,7 +70,7 @@
 	  Sounds    after every tick, Audio/MovementSounds plays the footsteps, swimming, splashes and
 	            hurting landings of what the hull did.
 
-	CharacterAnimator plays the avatar's animations from the hull state.
+	CharacterAnimator plays the avatar's animations from the hull state (climbing: `climbSpeed`).
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -155,6 +155,9 @@ export type View = {
 	tilt: number,
 	-- Horizontal speed over the last tick (blocks per second).
 	speed: number,
+	-- Vertical speed over the last tick while climbing a ladder, vine or rope (blocks per second,
+	-- up positive; 0 when not climbing), for the climb animation.
+	climbSpeed: number,
 	-- os.clock() of the last jump.
 	jumpedAt: number,
 	-- Waiting for the ground to load (after spawning / teleports).
@@ -670,6 +673,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			yaw = rootYaw,
 			tilt = 0,
 			speed = 0,
+			climbSpeed = 0,
 			jumpedAt = -math.huge,
 			frozen = true,
 		}
@@ -693,6 +697,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			previous = position
 			view.feet = position
 			view.speed = 0
+			view.climbSpeed = 0
 			view.frozen = true
 			accumulator = 0
 			stepLag = 0
@@ -884,6 +889,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				accumulator = 0
 				stepLag = 0
 				view.speed = 0
+				view.climbSpeed = 0
 			elseif view.frozen then
 				-- Wait for the server's spawn teleport (fresh characters) and for the ground.
 				if not settled and os.clock() - spawnedAt > SPAWN_SETTLE then
@@ -911,6 +917,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					frameInput.jump = jumpHeld()
 					jumpLatched = false
 					view.speed = math.sqrt((state.x - previous.X) ^ 2 + (state.z - previous.Z) ^ 2) * TICK_RATE
+					view.climbSpeed = if state.climbing then (state.y - previous.Y) * TICK_RATE else 0
 					if events.jumped then
 						view.jumpedAt = os.clock()
 					end

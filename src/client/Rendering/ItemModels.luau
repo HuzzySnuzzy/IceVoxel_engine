@@ -10,7 +10,8 @@
 	               (chest, crafting table, furnace) get their faces as thin raised slabs
 	               (Rendering/BlockDecor), since ViewportFrames do not draw SurfaceGuis. Shaped
 	               blocks (torches, lanterns, plants) are their shape's boxes, as the terrain draws
-	               them (glowing boxes Neon, glow lichen's plate its image), centred on the shape's
+	               them (glowing boxes Neon, a Front plate its image, which then replaces the other
+	               boxes: a ladder's picture; a fence post in its planks), centred on the shape's
 	               outline; they count as items rather than blocks (`isBlock`), so icons show them
 	               from the front and they drop like items. A block's `icon` boxes replace its shape
 	               when it has them (a Mekanism transmitter: its core and two arms; a tall plant: its
@@ -141,12 +142,29 @@ local function shapePrototype(model: Model, block: number, shape: { Blocks.Shape
 	local boxes = if own then #own else 1
 	local pixel = size / 16
 	local centre = shapeCentre(block)
+	-- The terrain's rules for textured shapes (TextureLooks): a Front image replaces the other
+	-- boxes of the block's own shape, and cube faces' texture dresses its boxes.
+	local drawn: { [number]: boolean }? = nil
+	if shape == own then
+		local set: { [number]: boolean } = {}
+		local list: { number } = TextureLooks.drawnBoxes(appearance) or {}
+		for _, index in list do
+			set[index] = true
+		end
+		drawn = set
+	end
+	local dressed = TextureLooks.shapeLook(appearance) ~= nil
 	for i, box in shape do
+		if drawn and not drawn[i] then
+			continue
+		end
 		-- (Boxes past the shape's take the first box's template: no textures, no light.)
 		local part = PartPool.makeTemplate(appearance, if i <= boxes then i else 1)
-		part.Material = if box.glow then Enum.Material.Neon else material(box.material or def.material)
-		local c = box.color or def.color
-		part.Color = Color3.fromRGB(c[1], c[2], c[3])
+		if box.glow or not dressed or i > boxes then
+			part.Material = if box.glow then Enum.Material.Neon else material(box.material or def.material)
+			local c = box.color or def.color
+			part.Color = Color3.fromRGB(c[1], c[2], c[3])
+		end
 		-- (A box carrying an image, glow lichen's plate, shows only the image.)
 		part.Transparency = if part:FindFirstChildOfClass("Decal") then 1 else box.transparency or def.transparency
 		inert(part)
@@ -156,7 +174,7 @@ local function shapePrototype(model: Model, block: number, shape: { Blocks.Shape
 		local offset = Vector3.new(box.offset[1], box.offset[2], box.offset[3]) - centre
 		part.CFrame = CFrame.new(offset * pixel) * CFrame.Angles(math.rad(r[1]), math.rad(r[2]), math.rad(r[3]))
 		part.Parent = model
-		if i == 1 then
+		if model.PrimaryPart == nil then
 			model.PrimaryPart = part
 		end
 	end

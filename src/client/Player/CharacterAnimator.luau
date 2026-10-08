@@ -14,6 +14,10 @@
 	  lying down     swim, at speed / 10 (the swimming / crawling pose: MovementController tilts the
 	                 body as Roblox's Swimming state does, which the swim animation is made for),
 	  deep water     swim idle while upright (R6 rigs have no swim animations: walk / idle),
+	  climbing       climb on a ladder, vine or rope off the ground (PlayerPhysics `climbing`), at
+	                 the vertical speed / 5 (R15, over the height scale) or / 12 (R6) in studs a
+	                 second, backwards sliding down, held still (speed 0) when the player is;
+	                 kept within CLIMB_MAX_SPEED (a rope slide falls far faster than one climbs),
 	  holding a tool the arm pose of `toolnone` on top.
 
 	Tracks played on the owning client by the Humanoid's Animator replicate to other players.
@@ -32,7 +36,12 @@ local BLOCK = Config.BlockSize
 -- After a jump the jump animation plays this long before falling takes over.
 local JUMP_TIME = 0.31
 -- Fade time (s) into each mode.
-local FADES: { [string]: number } = { idle = 0.2, walk = 0.2, jump = 0.1, fall = 0.2, swim = 0.4, swimidle = 0.4 }
+local FADES: { [string]: number } =
+	{ idle = 0.2, walk = 0.2, jump = 0.1, fall = 0.2, swim = 0.4, swimidle = 0.4, climb = 0.1 }
+-- The Animate script's climbing speed scales (studs a second per playback speed) and the fastest
+-- playback here.
+local R15_CLIMB_SCALE, R6_CLIMB_SCALE = 5, 12
+local CLIMB_MAX_SPEED = 3
 local TOOL_FADE = 0.1
 -- Standing below this speed (studs/s; R15: times the height scale).
 local R15_IDLE_SPEED = 0.75
@@ -54,6 +63,7 @@ local DEFAULTS = {
 		fall = "rbxassetid://507767968",
 		swim = "rbxassetid://913384386",
 		swimidle = "rbxassetid://913389285",
+		climb = "rbxassetid://507765644",
 		toolnone = "rbxassetid://507768375",
 	},
 	R6 = {
@@ -62,6 +72,7 @@ local DEFAULTS = {
 		run = "rbxassetid://180426354",
 		jump = "rbxassetid://125750702",
 		fall = "rbxassetid://180436148",
+		climb = "rbxassetid://180436334",
 		toolnone = "rbxassetid://182393478",
 	},
 }
@@ -129,7 +140,7 @@ function CharacterAnimator.start()
 
 		local rig = if hum.RigType == Enum.HumanoidRigType.R15 then "R15" else "R6"
 		local tracks: { [string]: AnimationTrack } = {}
-		for _, name in { "idle", "walk", "run", "jump", "fall", "swim", "swimidle", "toolnone" } do
+		for _, name in { "idle", "walk", "run", "jump", "fall", "swim", "swimidle", "climb", "toolnone" } do
 			local animation = animationFor(animate, name, rig)
 			if animation then
 				local ok, track = pcall(function()
@@ -188,6 +199,8 @@ function CharacterAnimator.start()
 			local nextMode
 			if view.tilt > 0.5 and tracks.swim then
 				nextMode = "swim"
+			elseif state.climbing and not state.onGround and not state.flying and tracks.climb then
+				nextMode = "climb"
 			elseif
 				state.inWater
 				and state.waterHeight > 0.9
@@ -217,6 +230,9 @@ function CharacterAnimator.start()
 			set("fall", mode == "fall", fade)
 			set("swim", mode == "swim", fade, 1, speed / 10)
 			set("swimidle", mode == "swimidle", fade)
+			local climbScale = if rig == "R15" then R15_CLIMB_SCALE * scale else R6_CLIMB_SCALE
+			local climbSpeed = math.clamp(view.climbSpeed * BLOCK / climbScale, -CLIMB_MAX_SPEED, CLIMB_MAX_SPEED)
+			set("climb", mode == "climb", fade, 1, climbSpeed)
 			if mode == "walk" and rig == "R15" then
 				-- The Animate script's setRunSpeed.
 				local runSpeed = speed / 16 * 1.25 / scale

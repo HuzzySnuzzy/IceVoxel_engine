@@ -10,8 +10,10 @@
 	Textures (the texture pack, through Rendering/TextureLooks, which decides every look): a cube
 	takes its look's MaterialVariant, material and colour (the tint); near templates also carry its
 	Texture images (a grass top over the grass side variant), tiled once per block, so recycled
-	parts keep them for free; far templates only the variant (the top's). Glow lichen's plate goes
-	see-through and carries its image as a Decal. Plants with a sprite are drawn as two crossed
+	parts keep them for free; far templates only the variant (the top's). A Front plate (glow
+	lichen, ladders, rails, vines) goes see-through and carries its image as a Decal; a shaped
+	block whose entry has cube faces (the oak fence's planks) takes that look on its near boxes
+	(TextureLooks.shapeLook; glowing boxes stay Neon). Plants with a sprite are drawn as two crossed
 	planes (`SPRITE_BOX`, ChunkRenderer): see-through thin parts with the sprite as a Decal on both
 	sides (`images(part)`: ChunkRenderer tints them per soil).
 
@@ -244,17 +246,11 @@ local function addLight(part: BasePart, info: Blocks.Appearance, style: Style)
 	light.Parent = part
 end
 
--- The box of a shape that carries glow lichen's image: its first box that does not glow (the plate).
+-- The box of a shape that carries a Front image (glow lichen, ladders): its first box that does
+-- not glow (the plate).
 local function plateBox(info: Blocks.Appearance): number
 	local shape = info.shape
-	if shape then
-		for i, box in shape do
-			if not box.glow then
-				return i
-			end
-		end
-	end
-	return 0
+	return if shape then TextureLooks.plateBox(shape) else 0
 end
 
 -- A plant's sprite plane: a see-through thin part with the sprite on both sides (sized by the caller).
@@ -358,11 +354,21 @@ local function makeTemplate(
 			end
 		end
 	elseif shapeBox and box == plateBox(info) then
-		-- Glow lichen: the plate shows its image only.
+		-- Glow lichen, ladders, rails, vines: the plate shows its image only.
 		local front = TextureLooks.frontOf(appearance)
 		if front then
 			part.Transparency = 1
 			TextureLooks.newDecal(front.texture, front.face, front.color).Parent = part
+		end
+	end
+	-- A shape in its cube faces' texture (the fence post's planks) at full detail; glowing boxes
+	-- stay Neon.
+	if shapeBox and not shapeBox.glow and not far then
+		local look = TextureLooks.shapeLook(appearance)
+		if look then
+			part.Material = look.material
+			part.MaterialVariant = look.variant
+			part.Color = look.color
 		end
 	end
 	if decor and info.decor and not far and shapeBox == nil then

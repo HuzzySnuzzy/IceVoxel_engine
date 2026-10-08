@@ -1290,4 +1290,49 @@ return function(t, shared, require)
 		end
 		t.eq(run(), run())
 	end)
+
+	--[[ Ladders and cobwebs (the numbers: Climbing spec) ]]
+
+	t.test("climbing: the state's flags, which teleports and game modes forget", function()
+		local fresh = PlayerPhysics.new(0.5, 1, 0.5)
+		t.eq(fresh.climbing, false, "a new state climbs nothing")
+		t.eq(fresh.stuck, nil, "nor is it stuck")
+		-- Walking on the floor of a cell with a ladder and a cobweb in it.
+		local cell = physicsWorld(function(x, y, z)
+			if x == 0 and z == 0 and y == 1 then
+				return Blocks.id.Ladder
+			elseif x == 0 and z == 0 and y == 2 then
+				return Blocks.id.Cobweb
+			end
+			return nil
+		end)
+		local state = PlayerPhysics.new(0.5, 1, 0.5)
+		state.onGround = true
+		PlayerPhysics.tick(state, input(0, 0), cell)
+		t.ok(state.climbing, "the feet in a ladder's cell")
+		t.ok(state.stuck ~= nil, "the head in a web")
+		PlayerPhysics.place(state, 5.5, 1, 5.5)
+		t.eq(state.stuck, nil, "a teleport leaves the web behind")
+		PlayerPhysics.tick(state, input(0, 0), cell)
+		t.ok(not state.climbing, "no ladder there")
+		PlayerPhysics.place(state, 0.5, 1, 0.5)
+		PlayerPhysics.tick(state, input(0, 0), cell)
+		PlayerPhysics.setGameMode(state, GameMode.SPECTATOR)
+		t.ok(not state.climbing and state.stuck == nil, "spectating forgets both")
+		PlayerPhysics.tick(state, input(0, 0), cell)
+		t.ok(not state.climbing and state.stuck == nil, "and a spectator gains neither")
+		-- Walking on through a web's cell gains its slowdown each tick, never more.
+		local walker = PlayerPhysics.new(-2.5, 1, 0.5)
+		walker.onGround = true
+		local slowest = math.huge
+		for _ = 1, 150 do
+			local x0 = walker.x
+			PlayerPhysics.tick(walker, input(1, 0), cell)
+			if walker.x < 1 then
+				slowest = math.min(slowest, walker.x - x0)
+			end
+		end
+		t.ok(walker.x > 1.5, `walked through ({walker.x})`)
+		t.near(slowest, 0.1 * 0.98 * 0.25, 1e-8, "x 0.25 of one tick's push in the web")
+	end)
 end

@@ -1698,6 +1698,9 @@ hull is.
   - idle below 0.75 × height scale;
   - jump for 0.31 s, then fall;
   - swim at `speed / 10`;
+  - climb (on a ladder, vine or rope off the ground: the hull's `climbing`) at the vertical speed
+    / 5 (R15, over the height scale) or / 12 (R6) in studs a second, from the controller's
+    `climbSpeed`; backwards sliding down, still when holding on, at most 3;
   - fades of 0.2 / 0.1 / 0.4 s;
   - Core priority for movement tracks, Idle for `toolnone`.
 
@@ -1726,6 +1729,62 @@ to 64 blocks above its top (`NO_CLIP_MAX_Y`). `setGameMode(state, mode)` applies
 spectator flies at once, creative keeps flying as it was (from spectator too), survival and
 adventure stop flying and fall. `PlayerPhysics.isInWall` is Minecraft's in-wall test, which the
 server uses for suffocation (see Game modes: On the server).
+
+**Ladders, vines and rope** (`PlayerPhysics`, LivingEntity 1.20.1 tick for tick; the numbers are
+pinned by tests/spec/Climbing). The player climbs while the feet cell (`floor` of the position,
+`blockPosition`) holds a block `Blocks.isClimbable` names (ladders, vines and their cave twins,
+rope; Minecraft's `#climbable`); spectators never climb. In the normal travel branch,
+`handleOnClimbable` runs after the acceleration and before the move: the fall distance is cleared,
+the sideways speed held to ±0.15F a tick and the descent to −0.15F, and sneaking (`state.sneaking`,
+`isSuppressingSlidingDownLadder`) turns a descent into 0. After the move, a horizontal collision
+or a held jump on a climbable sets the vertical speed to 0.2, which the gravity and drag line turns
+into (0.2 − 0.08) × 0.98 = 0.1176 blocks a tick, 2.35 m/s up; letting go settles at 0.15 a tick
+down (3 m/s). Jump is what climbs a free-hanging rope or vine: there is no wall to push against.
+Rope follows Supplementaries' `LivingEntityMixin` (`slide_on_fall`): its descent is not limited,
+a free fall, but the fall distance is still cleared before every move, so a slide of any length
+lands without damage (fall damage is the client's `events.damage`, sent as a Fall message: the
+server needs nothing). In water the water branch adds Minecraft's climb out: a horizontal
+collision on a climbable sets 0.2 before the water's drag (0.155 a tick). Lava has no climbing;
+creative flight runs the clamps and then restores its own vertical speed as before. The ledge at
+the top is stepped onto because the feet leave the ladder's top cell above the wall's top while
+still rising. `climbing` (after the tick) feeds the sounds, the animator and F3.
+
+**Cobwebs** (`Entity.makeStuckInBlock`). After every move the cells the hull overlaps, deflated by
+1e-7 (`checkInsideBlocks`), are looked up in `Blocks.stuckLut`; a hit stores the block's
+`stuck` multiplier (cobwebs and their twin: 0.25, 0.05, 0.25) in `state.stuck` and clears the fall
+distance. The next local `move` multiplies its movement by it before the edge back-off and the
+collision, clears it and zeroes the velocity, so nothing builds up: 0.49 m/s walking (a quarter
+of one tick's push), 0.004 blocks a tick falling. It works in every branch (water, lava, flight)
+but never for spectators (`moveNoClip`). Teleports (`place`) and game mode changes forget it.
+
+**Mobs** (`Entities/MobPhysics`) use the same rules: a mob whose feet cell is climbable gets the
+clamps before its move (rope: no descent limit) and 0.2 after it when it walked into something or
+its AI jumped, so a zombie that walks into a ladder climbs it at 0.1176 a tick; they never seek one
+out. Spiders keep their own wall climbing (`climbs`: Spider.onClimbable is its wall flag) and are
+not slowed by webs (Spider.makeStuckInBlock does nothing); every other mob is.
+
+**Using rope** (`Shared/Rope`, pure; server `Players/ItemUse`; client
+`Interaction/BlockInteraction`). Supplementaries' `RopeHelper`: Rope used (not sneaking) on any rope of a column walks down the
+column (`bottom`) and places one Rope under it (`extendTarget`: a loaded, replaceable cell without
+fluid, y ≥ 1), using one item (none in creative), with the rope's place sound at × 0.8 pitch; an
+empty hand on a rope with a rope above or below removes the column's bottom rope (`pullTarget`) and
+gives it back (nothing in creative), with its break sound at × 0.6. `Rope.use` returns the hand's
+new stack, the stack given and the sound; ItemUse runs it after its usual checks (reach on the
+clicked rope, `GameModeRules.mayUseItemOn`, the use budget, the held stack) through
+`world:setBlock`, so the edits are recorded and replicated like any other. The client sends a
+UseItem for exactly the clicks `Rope.wantsUse` names (Rope or an empty hand on a rope, not
+sneaking, in survival or creative), unpredicted and repeated while the button is held. A rope cut
+anywhere comes down a block a tick through `Behaviours/Attached` (`Blocks.canSurvive`'s chain
+rule), each rope dropping itself. `SpawnUnsafeBlocks` keeps spawns out of cobwebs.
+
+**Sounds of climbing** (`Audio/SoundRules.move`, `Audio/MovementSounds`; Entity.move). While the
+hull climbs off the ground (`Motion.climbing`), the vertical movement counts toward the step
+distance (the 3D distance × 0.6) and the step plays in the air: the block under the feet
+(`floor(y − 0.2)`) when it is climbable, its own sound type (ladder, vine, rope), about every
+1.67 blocks climbed, sneaking or not (only flying, and sneaking on the ground, are silent). Over
+the floor below a ladder's bottom rung the step passes without a sound, as Minecraft's second
+`vibrationAndSoundEffectsFromBlock` call does. `observe` reports other characters climbing when
+their feet are in a climbable cell and they do not stand.
 
 **Fluids and the player.**
 - `World/FluidFlow` is Minecraft's `getFlow`. It takes the height differences to the neighbours,
@@ -1847,13 +1906,31 @@ Per appearance, cached until the next change:
 - plain: SmoothPlastic in what the top averages to (`plainColour`);
 - sprite (`Config.Textures.Sprites`): the texture and its Decal colours per foliage tint (target
   × `FOLIAGE_TINTS[t]`, clamped like the boxes' colours, / average);
-- front (glow lichen): one Decal on the plate's face away from the support (Down: Top, Up: Bottom,
-  North: Back, South: Front, West: Right, East: Left);
+- front (glow lichen, ladders, rails, vines): one Decal on the plate's face away from the support
+  (Down: Top, Up: Bottom, North: Back, South: Front, West: Right, East: Left);
+- shapes (`drawnBoxes`, `shapeLook`): see textured shapes below;
 - item cube faces: an image per face that draws a texture;
 - far mesh look (`lookOf`, `lookInfo`, `plainRgb`): with Far Materials the far look (material +
   variant + transparency + reflectance; one per appearance, as a far part has one variant) and the
   far part's Color as vertex colour, or the BlockList material in the voxel colour; without it the
   plain look in the plain colour.
+
+**Textured shapes.** A shaped block can carry a texture three ways: a Sprite (two crossed planes
+instead of its boxes: plants, rope, cobwebs, hanging roots), a Front image on its plate (the first
+box that does not glow), or its entry's cube faces. Two rules make filled textures look right:
+- *A Front replaces the boxes* (`drawnBoxes`, from the pure `drawnBoxesOf(shape, transparency,
+  front)`): when the plate draws a Front image, ChunkRenderer builds only the plate (see-through,
+  with its Decal) and the glowing boxes, so a ladder's rails and rungs and a rail's iron bars give
+  way to the picture, like Minecraft's single textured quad. Without one, every box is built but a
+  plate that is fully see-through (transparency 1: the ladder's image carrier, which would show
+  nothing). Plain parts carry no images, so they keep the boxes. Glow lichen has only its plate
+  and its glowing box, so it looks as before. ItemModels follows the same list for item icons.
+- *Shaped boxes take the near look* (`shapeLook`): a shaped block whose entry has cube faces (All,
+  Sides, Top) draws its boxes at full detail in that texture's MaterialVariant, material and tint
+  (`Blocks.variantTexture`, as a cube's near look, without images); glowing boxes stay Neon, far
+  boxes keep their colours. That dresses the oak fence post in planks and the moss carpet in moss
+  block. PartPool applies it per template; both rules are part of the looks' signatures, so a
+  filled texture or the Textures setting restyles them like any look.
 
 `drawable` turns a blank texture (with ShowMissing), a failed id or a variant missing from
 MaterialService (`GetMaterialVariant`, warned once with the fix) into the missing texture, and that

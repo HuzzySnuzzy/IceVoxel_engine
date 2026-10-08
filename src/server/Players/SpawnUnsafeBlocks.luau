@@ -24,7 +24,8 @@ return {
 		"JungleLeaves",
 	},
 
-	-- Never stand inside these (a fluid's name covers its cave twin too: CaveLava, CaveOil).
+	-- Never stand inside these (a fluid's name covers its cave twin too: CaveLava, CaveOil; other
+	-- cave twins are named on their own).
 	Body = {
 		"Water",
 		"Lava",
@@ -32,6 +33,9 @@ return {
 		"Fuel",
 		"Fire",
 		"Campfire",
+		-- (A web holds whoever is in it: x 0.05 falling, x 0.25 walking.)
+		"Cobweb",
+		"CaveCobweb",
 	},
 
 	-- Never stand next to these (lava and fire burn a player whose box reaches into them, and a

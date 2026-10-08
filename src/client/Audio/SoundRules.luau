@@ -27,8 +27,14 @@
 	             fluids make none. In water off the ground it is a swim sound instead; entering
 	             water splashes (not on the first tick); flying and sneaking on the ground are
 	             silent (Player.getMovementEmission). In the air the step waits, so landing from
-	             a jump sounds at once. `observe` guesses the ground and water of another
-	             character from where its feet are.
+	             a jump sounds at once. Climbing (the feet in a ladder, vine or rope, off the
+	             ground: Entity.move's isStateClimbable) the vertical movement counts too (3D
+	             distance x 0.6) and the step plays off the ground: the climbable's own step
+	             (ladder, vine, rope sounds) about every 1.67 blocks climbed, or nothing when the
+	             block under the feet is not climbable (the floor below a ladder's bottom rung:
+	             vibrationAndSoundEffectsFromBlock's silent second call); sneaking on a ladder
+	             still sounds, flying never. `observe` guesses the ground, water and climbing of
+	             another character from where its feet are.
 	  hits       Minecraft's mining hit (MultiPlayerGameMode.destroyTicks): every HIT_INTERVAL
 	             ticks on one block, from its first (`hitTick`).
 	  ambience   a lit furnace crackles with Minecraft's odds for a furnace a block or two away
@@ -332,6 +338,9 @@ export type Motion = {
 	silent: boolean,
 	-- The block under the feet (floor(y - STEP_BELOW)), nil where nothing is loaded.
 	below: number?,
+	-- The feet in a climbable block (ladder, vine, rope), off the ground: the vertical movement
+	-- counts and the step plays in the air (nil: not climbing).
+	climbing: boolean?,
 }
 
 function SoundRules.newWalker(): Walker
@@ -389,8 +398,19 @@ function SoundRules.move(walker: Walker, motion: Motion): (number?, number?, num
 	if motion.silent then
 		return nil, nil, splash
 	end
-	walker.moveDist += math.sqrt(motion.dx * motion.dx + motion.dz * motion.dz) * SoundRules.STEP_SCALE
+	local climbing = motion.climbing == true and not motion.swimming
+	-- (Entity.move counts the vertical movement only on a climbable.)
+	local dy = if climbing then motion.dy else 0
+	walker.moveDist += math.sqrt(motion.dx * motion.dx + dy * dy + motion.dz * motion.dz) * SoundRules.STEP_SCALE
 	local below = motion.below
+	if climbing then
+		if walker.moveDist <= walker.nextStep then
+			return nil, nil, splash
+		end
+		walker.nextStep = math.floor(walker.moveDist) + 1
+		-- The climbable's step; over the floor under the bottom rung the step passes silently.
+		return if below ~= nil and Blocks.isClimbable(below) then below else nil, nil, splash
+	end
 	if walker.moveDist <= walker.nextStep or below == nil or kindOf(below) == Blocks.KIND_NONE then
 		return nil, nil, splash
 	end
@@ -410,11 +430,11 @@ export type GetBlock = (x: number, y: number, z: number) -> number?
 --[[
 	Another character's surroundings from its feet (blocks): whether it stands on something (feet
 	at the top of a solid block under its hull), whether it is in water or fuel (a fluid one swims
-	in, at the feet or the middle of the body) and the block it would step on (under the feet, or
-	the solid block under its
-	hull it stands on at an edge).
+	in, at the feet or the middle of the body), the block it would step on (under the feet, or
+	the solid block under its hull it stands on at an edge) and whether it climbs (the feet in a
+	climbable block, not standing).
 ]]
-function SoundRules.observe(getBlock: GetBlock, x: number, y: number, z: number): (boolean, boolean, number?)
+function SoundRules.observe(getBlock: GetBlock, x: number, y: number, z: number): (boolean, boolean, number?, boolean)
 	local floor = math.floor
 	local by = floor(y - SoundRules.STEP_BELOW)
 	local below = getBlock(floor(x), by, floor(z))
@@ -435,7 +455,9 @@ function SoundRules.observe(getBlock: GetBlock, x: number, y: number, z: number)
 	end
 	local inWater = swimmable(getBlock(floor(x), floor(y + 0.1), floor(z)))
 		or swimmable(getBlock(floor(x), floor(y + 0.9), floor(z)))
-	return onGround, inWater, below
+	local feet = getBlock(floor(x), floor(y), floor(z))
+	local climbing = not onGround and feet ~= nil and Blocks.isClimbable(feet)
+	return onGround, inWater, below, climbing
 end
 
 --[[ Mining hits ]]
