@@ -228,6 +228,40 @@ SoundList.BLOCK_TYPES = {
 		dig = { id = SPLASH, volume = 0.5, pitch = 1.25, pitchVariance = 0.1 },
 		step = { id = SWIM, volume = 1.6, pitch = 1.6, pitchVariance = 0.1, duration = 0.5 },
 	},
+	--[[
+		Ladders, rope, vines (and hanging roots) and moss (Minecraft's SoundType.LADDER, VINE and
+		MOSS / MOSS_CARPET, Supplementaries' rope): a ladder a woody step just under wood's (a
+		climber hears it every metre and a half), rope a dull low one, vines a light rustle above
+		grass, moss a soft step between wood and grass. Every step pitch stays apart from the others'.
+	]]
+	{
+		name = "ladder",
+		volume = 1,
+		pitch = 1,
+		dig = { id = LAND, volume = 0.8, pitch = 1.05, pitchVariance = 0.05 },
+		step = { id = STEPS, volume = 1.6, pitchVariance = 0.05, duration = ONE_STEP },
+	},
+	{
+		name = "rope",
+		volume = 0.8,
+		pitch = 0.85,
+		dig = { id = LAND, volume = 0.6, pitchVariance = 0.05 },
+		step = { id = STEPS, volume = 1.2, pitch = 0.85, pitchVariance = 0.05, duration = ONE_STEP },
+	},
+	{
+		name = "vine",
+		volume = 1,
+		pitch = 1.45,
+		dig = { id = LAND, volume = 0.7, pitchVariance = 0.08 },
+		step = { id = STEPS, volume = 1.4, pitchVariance = 0.08, duration = ONE_STEP },
+	},
+	{
+		name = "moss",
+		volume = 1,
+		pitch = 1.25,
+		dig = { id = LAND, volume = 0.7, pitch = 0.95, pitchVariance = 0.08 },
+		step = { id = STEPS, volume = 1.4, pitchVariance = 0.08, duration = ONE_STEP },
+	},
 } :: { BlockType }
 
 -- Every other event. Block events (block.<type>.<action>) come first in the catalogue, then these

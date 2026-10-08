@@ -413,6 +413,23 @@ end
 shape({ "##", "##" }, { ["#"] = "String" }, "WhiteWool")
 
 --[[
+	Climbing and the mineshafts' blocks. Minecraft's: the Ladder (seven sticks, three ladders),
+	Rails (six iron ingots around a stick, sixteen), the Oak Fence (oak planks and sticks, three),
+	the Moss Carpet (two moss blocks, three) and Mossy Cobblestone (cobblestone with a vine or a moss
+	block). Rope is Supplementaries': three flax in a column make three, or three String on a
+	diagonal; Straw (grass broken by hand) is this game's plant fibre, so three Straw in a column.
+	Cobwebs have no recipe (Minecraft 1.20.1 has none).
+]]
+shape({ "S S", "SSS", "S S" }, { S = "Stick" }, "Ladder", 3)
+shape({ "#", "#", "#" }, { ["#"] = "Straw" }, "Rope", 3)
+shape({ "#  ", " # ", "  #" }, { ["#"] = "String" }, "Rope", 3)
+shape({ "I I", "ISI", "I I" }, { I = "IronIngot", S = "Stick" }, "Rail", 16)
+shape({ "PSP", "PSP" }, { P = "Planks", S = "Stick" }, "OakFence", 3)
+shape({ "##" }, { ["#"] = "MossBlock" }, "MossCarpet", 3)
+mix({ "Cobblestone", "Vine" }, "MossyCobblestone")
+mix({ "Cobblestone", "MossBlock" }, "MossyCobblestone")
+
+--[[
 	Potions (Shared/Effects/PotionList), brewed in a crafting grid as the game has no brewing stand
 	(shapeless, the inventory's 2 x 2 too): a Purified Water Bottle with the potion's ingredient
 	makes the potion (Mint Leaves Swiftness, Glow Dust Night Vision...), the potion with Glow Dust
@@ -439,6 +456,8 @@ Recipes.fuel = {
 	WoodenSword = 200,
 	Bowl = 100,
 	WhiteWool = 100,
+	Ladder = 300,
+	OakFence = 300,
 }
 
 Recipes.shaped = shaped

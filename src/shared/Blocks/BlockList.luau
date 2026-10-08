@@ -109,6 +109,23 @@
 	                (Minecraft's FireBlock.bootStrap: planks 5 / 20, logs 5 / 5, leaves 30 / 60,
 	                plants 60 / 100...) or on the block itself. See server Behaviours/Fire.
 
+	Climbing, hanging and lying along (ladders, rope, vines, rails, cobwebs):
+	  climbable     Players and mobs climb it from inside its cell (Minecraft's #climbable tag:
+	                ladders, vines; the rope too, Supplementaries'). Blocks.isClimbable;
+	                Shared/Movement/PlayerPhysics.
+	  chain         It also holds on under a block of its own kind (or that block's cave twin)
+	                right above it, not only on its `support`: a rope hangs from the rope above
+	                (Supplementaries' RopeBlock.canSurvive), a vine from the same vine above
+	                (VineBlock). Blocks.canSurvive. Needs a `support`.
+	  axis          "X" or "Z": the horizontal axis it runs along (rails: "Z" North-South, "X"
+	                East-West). A block and its variants with an `axis` form an axis group, one
+	                per axis: placing picks the one along the player's facing
+	                (BaseRailBlock.getStateForPlacement), turning a structure a quarter turn
+	                swaps it (Blocks.placementFor, Blocks.rotate, Blocks.axisVariant).
+	  stuck         { x, y, z }: moving inside it multiplies a move by these and stops the mover
+	                (Minecraft's makeStuckInBlock: a cobweb's 0.25, 0.05, 0.25), and resets the
+	                fall distance. Blocks.stuckIn.
+
 	Plants (grass, ferns, flowers, mushrooms; Minecraft's BushBlock family, see "Plants" below):
 	  plant         { soil = "dirt" | "deadbush" | "mushroom"?, top = "<Name>"?, bottom = "<Name>"? }.
 	                A single plant or the lower half of a tall one stands on a block of its `soil`
@@ -154,7 +171,9 @@
 	                Up or Down with a horizontal top, or a horizontal front with top Up; one block
 	                per orientation, Blocks.jigsawOrientation / Blocks.jigsawBlock).
 	  caveTwin      Name of the block this one is the cave twin of (CaveGlowLichen* of GlowLichen*,
-	                CaveLava of Lava, CaveOil of Oil): it looks, drops and behaves exactly like it
+	                CaveLava of Lava, CaveOil of Oil, and the mineshafts' rails, fence posts,
+	                cobwebs, wall torches, moss carpets, vines and hanging roots, at the end of the
+	                list): it looks, drops and behaves exactly like it
 	                (a fluid twin is a source of the same group), but generation places it in caves
 	                and the mesher treats it like cave air while caves are hidden
 	                (Blocks.cullLutHiddenCaves, Blocks.caveTwinLut), as CaveAir is to Air. Players
@@ -272,6 +291,10 @@ export type BlockSpec = {
 	jigsaw: JigsawSpec?,
 	caveTwin: string?,
 	flammable: FlammableSpec?,
+	climbable: boolean?,
+	chain: boolean?,
+	axis: string?,
+	stuck: { number }?,
 }
 
 local list: { BlockSpec } = {
@@ -2645,5 +2668,403 @@ table.insert(list, {
 	hardness = 0.8,
 	flammable = { ignite = 30, burn = 60 },
 })
+
+--[[
+	Ladders, rope and the mineshafts' blocks (Minecraft 1.20.1's LadderBlock, RailBlock,
+	FenceBlock, WebBlock, the lush caves' moss, vines and hanging roots, and Supplementaries'
+	rope). Generation/Mineshafts builds the mineshafts of them. Each block's fire odds and blast
+	resistance are its own (the bootstraps above ran before them). New block sounds: "ladder",
+	"rope", "vine" and "moss" (Minecraft's SoundType.LADDER, VINE and MOSS, Supplementaries' rope).
+	Every shape box is a Part per block: decorations generation writes by the hundred keep to one
+	or two.
+]]
+
+-- A box given against the wall to the south (+Z: `support` "South"), turned onto the wall on
+-- side `support`: x across the wall, y up, z towards the wall.
+local function onWall(box: ShapeBox, support: string): ShapeBox
+	local s, o = box.size, box.offset
+	local turned = table.clone(box)
+	if support == "South" then
+		turned.size, turned.offset = { s[1], s[2], s[3] }, { o[1], o[2], o[3] }
+	elseif support == "North" then
+		turned.size, turned.offset = { s[1], s[2], s[3] }, { -o[1], o[2], -o[3] }
+	elseif support == "East" then
+		turned.size, turned.offset = { s[3], s[2], s[1] }, { o[3], o[2], -o[1] }
+	else
+		turned.size, turned.offset = { s[3], s[2], s[1] }, { -o[3], o[2], o[1] }
+	end
+	return turned
+end
+
+-- The outline of a panel `depth` pixels thick against the wall on side `support`.
+local function wallBounds(support: string, depth: number): Bounds
+	local lo, hi = { 0, 0, 0 }, { 16, 16, 16 }
+	local d = DIRECTIONS[support]
+	for k = 1, 3 do
+		if d[k] < 0 then
+			hi[k] = depth
+		elseif d[k] > 0 then
+			lo[k] = 16 - depth
+		end
+	end
+	return { min = lo, max = hi }
+end
+
+--[[
+	The Ladder (Minecraft's LadderBlock): a 3 pixel panel against a wall, facing away from it
+	(Ladder faces North, on the wall to its south; LadderSouth, LadderWest and LadderEast the other
+	ways: wall torches' naming). The wall must be sturdy (`support`, Attached); placing picks the
+	clicked wall, else the first wall in the look order that holds one (Blocks.placementFor, as
+	LadderBlock.getStateForPlacement). Climbable (Minecraft's #climbable: PlayerPhysics), strength
+	0.4, mined fastest with an axe, drops itself, never burns (Minecraft's isn't flammable), 300
+	ticks of furnace fuel, ladder sounds. Not `solid` and no collision box here (the movement hull
+	only knows full cubes; Minecraft's 3 pixel box only keeps you off the wall), and water stops at
+	it (Minecraft waterlogs it; there is no waterlogging here).
+
+	Drawn as two rails 2 pixels wide and four rungs 4 pixels apart (so stacked ladders keep the
+	spacing), 0 to 1.5 pixels off the wall, after a see-through plate a fifth of a pixel thick
+	0.8 pixels off the wall: Minecraft's model is one textured quad there, and the texture pack's
+	"ladder" picture goes on that plate (its Front) in place of the boxes (client rendering).
+	Minecraft's outline: the 3 pixel panel.
+]]
+do
+	local LADDER = { 150, 116, 70 }
+	local ladder: { ShapeBox } = {
+		{ size = { 16, 16, 0.2 }, offset = { 0, 0, 7.1 }, transparency = 1 },
+		{ size = { 2, 16, 1.5 }, offset = { -5, 0, 7.25 } },
+		{ size = { 2, 16, 1.5 }, offset = { 5, 0, 7.25 } },
+	}
+	for _, y in { -6, -2, 2, 6 } do
+		table.insert(ladder, { size = { 8, 1.5, 1 }, offset = { 0, y, 6.9 } })
+	end
+	for _, facing in { "North", "South", "West", "East" } do
+		local support = OPPOSITE[facing]
+		local boxes: { ShapeBox } = {}
+		for _, box in ladder do
+			table.insert(boxes, onWall(box, support))
+		end
+		local base = facing == "North"
+		table.insert(list, {
+			name = if base then "Ladder" else "Ladder" .. facing,
+			displayName = "Ladder",
+			color = LADDER,
+			material = "WoodPlanks",
+			sound = "ladder",
+			solid = false,
+			placeable = base,
+			item = if base then nil else "Ladder",
+			hardness = 0.4,
+			tool = "axe",
+			shape = boxes,
+			bounds = wallBounds(support, 3),
+			support = support,
+			behaviour = "Attached",
+			climbable = true,
+		})
+	end
+end
+
+--[[
+	Rope (Supplementaries' RopeBlock, Minecraft 1.20.1): a rope hanging straight down, a 3 pixel
+	thick strand in the middle of its cell. It hangs under a sturdy block or under another rope
+	(`support` Up and `chain`: RopeBlock.canSurvive's ceiling or rope above; its side attachments
+	and knots are left out), so breaking a rope drops every rope below it, one a tick (Attached).
+	Climbable: hold jump to climb a free hanging rope; sliding down is a free fall that never
+	hurts (Supplementaries' fast-fall rope; PlayerPhysics). Strength 0.25, no tool, drops itself,
+	burns fast (10 / 100), rope sounds, water stops at it (Supplementaries waterlogs it). Made of
+	three Straw in a column (Supplementaries' flax) or three String on a diagonal (Crafting/
+	Recipes). Using Rope on a rope adds one at its bottom (server Players/ItemUse). The overgrown
+	mineshafts' entrances hang one all the way down. Its texture is a sprite (two crossed planes,
+	Minecraft's chain model). Outline: Supplementaries' 4 pixel post.
+]]
+table.insert(list, {
+	name = "Rope",
+	color = { 156, 124, 84 },
+	material = "Fabric",
+	sound = "rope",
+	solid = false,
+	placeable = true,
+	hardness = 0.25,
+	shape = { { size = { 3, 16, 3 }, offset = { 0, 0, 0 } } },
+	bounds = { min = { 6, 0, 6 }, max = { 10, 16, 10 } },
+	support = "Up",
+	chain = true,
+	behaviour = "Attached",
+	climbable = true,
+	flammable = { ignite = 10, burn = 100 },
+})
+
+--[[
+	Rails (Minecraft's RailBlock, straight pieces only: no curves, slopes or minecarts): Rail runs
+	North-South (`axis` Z), RailEastWest East-West; placing picks the one along the player's facing
+	(BaseRailBlock.getStateForPlacement), turning a structure swaps them. They lie on a sturdy
+	block (`support` Down, Attached), have no collision, strength 0.7, a pickaxe mines them fast
+	but anything drops them, metal sounds, never burn; water stops at them (Minecraft waterlogs
+	them). Sixteen from six iron ingots and a stick. Drawn as a sleeper board (the plate the "rail"
+	picture goes on, its Front) under two iron bars. Minecraft's outline: 2 pixels high.
+]]
+do
+	local SLEEPERS = { 108, 84, 56 }
+	local RAIL_IRON = { 150, 150, 158 }
+	for _, axis in { "Z", "X" } do
+		local northSouth = axis == "Z"
+		local function box(across: number, height: number, y: number, x: number): ShapeBox
+			return {
+				size = if northSouth then { across, height, 16 } else { 16, height, across },
+				offset = if northSouth then { x, y, 0 } else { 0, y, x },
+			}
+		end
+		local sleepers = box(14, 1, -7.5, 0)
+		sleepers.color, sleepers.material = SLEEPERS, "Wood"
+		local shape: { ShapeBox } = { sleepers }
+		for _, x in { -4.5, 4.5 } do
+			local bar = box(1.5, 1, -6.5, x)
+			bar.color = RAIL_IRON
+			table.insert(shape, bar)
+		end
+		table.insert(list, {
+			name = if northSouth then "Rail" else "RailEastWest",
+			displayName = "Rail",
+			color = RAIL_IRON,
+			material = "Metal",
+			sound = "metal",
+			solid = false,
+			placeable = northSouth,
+			item = if northSouth then nil else "Rail",
+			hardness = 0.7,
+			tool = "pickaxe",
+			shape = shape,
+			bounds = { min = { 0, 0, 0 }, max = { 16, 2, 16 } },
+			support = "Down",
+			behaviour = "Attached",
+			axis = axis,
+		})
+	end
+end
+
+--[[
+	The Oak Fence (Minecraft's oak_fence), as a post only: its 4 x 4 pixel post, solid (the
+	movement hull makes it a full block, where Minecraft's collision is 1.5 high: players can step
+	onto one). Minecraft's fence also reaches arms towards fences and walls beside it; a block's
+	look here is its id alone, and the mineshafts' posts stand against rock, so the arms are left
+	out (a client overlay could draw them later without new blocks). Not sturdy (nothing hangs on
+	it). Strength 2, blast resistance 3, an axe mines it fast, wood sounds, burns like planks
+	(5 / 20), 300 ticks of fuel. Three from four oak planks and two sticks. Drawn in the planks'
+	texture (the pack's "planks" on the post).
+]]
+table.insert(list, {
+	name = "OakFence",
+	displayName = "Oak Fence",
+	color = { 170, 134, 84 },
+	material = "WoodPlanks",
+	sound = "wood",
+	solid = true,
+	hardness = 2,
+	blastResistance = 3,
+	tool = "axe",
+	shape = { { size = { 4, 16, 4 }, offset = { 0, 0, 0 } } },
+	bounds = { min = { 6, 0, 6 }, max = { 10, 16, 10 } },
+	flammable = { ignite = 5, burn = 20 },
+})
+
+--[[
+	The Cobweb (Minecraft's WebBlock): moving through one is slowed to a quarter sideways and a
+	twentieth up and down, with every move's speed lost, and stops a fall (`stuck`,
+	makeStuckInBlock). Strength 4: a sword (speed 15, Shared/Mining) or Shears (15) are the tools
+	that get anything: a sword gives a String, Shears the cobweb, a hand nothing. Water washes it
+	away (a String). No recipe (Minecraft 1.20.1 has none), never burns. Wool sounds (1.20.1's
+	cobweb has the default stone ones; later versions give it a soft sound). Drawn as two crossed
+	see-through planes (Minecraft's cross model; the pack's "cobweb" sprite).
+]]
+table.insert(list, {
+	name = "Cobweb",
+	displayName = "Cobweb",
+	color = { 232, 232, 236 },
+	material = "SmoothPlastic",
+	transparency = 0.45,
+	sound = "wool",
+	solid = false,
+	placeable = true,
+	hardness = 4,
+	tool = "sword",
+	toolLevel = 0,
+	drops = "String" :: string,
+	shearDrops = true,
+	shape = {
+		{ size = { 22.6, 16, 0.2 }, offset = { 0, 0, 0 }, rotation = { 0, 45, 0 } },
+		{ size = { 22.6, 16, 0.2 }, offset = { 0, 0, 0 }, rotation = { 0, -45, 0 } },
+	},
+	bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } },
+	brokenByFluid = true,
+	stuck = { 0.25, 0.05, 0.25 },
+})
+
+--[[
+	Moss (Minecraft 1.20.1's lush caves): the Moss Block, a soft green block (strength 0.1, a hoe
+	mines it fast, moss sounds, never burns) in Minecraft's dirt tag, so plants stand on it
+	(Blocks' "dirt" soil set), and the Moss Carpet, a pixel of it on the floor (support Down: here
+	the block below must be sturdy, where Minecraft's carpet lies on anything; washed away by
+	water), three from two moss blocks. The overgrown mineshafts are full of both. The carpet takes
+	the pack's "moss block" texture, as Minecraft's model does.
+]]
+do
+	local MOSS = { 89, 110, 45 }
+	table.insert(list, {
+		name = "MossBlock",
+		displayName = "Moss Block",
+		color = MOSS,
+		material = "Grass",
+		sound = "moss",
+		hardness = 0.1,
+		tool = "hoe",
+	})
+	table.insert(list, {
+		name = "MossCarpet",
+		displayName = "Moss Carpet",
+		color = MOSS,
+		material = "Grass",
+		sound = "moss",
+		solid = false,
+		placeable = true,
+		hardness = 0.1,
+		tool = "hoe",
+		shape = { { size = { 16, 1, 16 }, offset = { 0, -7.5, 0 } } },
+		bounds = { min = { 0, 0, 0 }, max = { 16, 1, 16 } },
+		support = "Down",
+		brokenByFluid = true,
+		behaviour = "Attached",
+	})
+end
+
+--[[
+	Vines (Minecraft's VineBlock, one wall per block here, as glow lichen): Vine covers the wall
+	to its south, VineNorth, VineWest and VineEast the others (`support`, the clicked wall first
+	when placed). A vine holds on to its wall or hangs from the same vine above it (`chain`:
+	VineBlock's hanging vines), so cutting one drops the hanging ones below. Climbable, replaceable,
+	washed away by water, strength 0.2 (an axe), only Shears get it (at 2: ShearsItem), burns
+	(15 / 100), vine sounds. No growth (Minecraft's random spreading is left out). A slightly
+	see-through plate 0.8 pixels off the wall (Minecraft's model), the pack's "vine" picture on it
+	(its Front, tinted with the vine's green). Outline: a pixel thick plate on the wall.
+]]
+do
+	local VINE = { 58, 104, 34 }
+	local plate: ShapeBox = { size = { 16, 16, 0.4 }, offset = { 0, 0, 7.2 } }
+	for _, support in { "South", "North", "West", "East" } do
+		local base = support == "South"
+		table.insert(list, {
+			name = if base then "Vine" else "Vine" .. support,
+			displayName = "Vines",
+			color = VINE,
+			material = "LeafyGrass",
+			transparency = 0.15,
+			sound = "vine",
+			solid = false,
+			replaceable = true,
+			placeable = base,
+			item = if base then nil else "Vine",
+			hardness = 0.2,
+			tool = "axe",
+			drops = false,
+			shearDrops = true,
+			shearSpeed = 2,
+			shape = { onWall(plate, support) },
+			bounds = wallBounds(support, 1),
+			support = support,
+			chain = true,
+			brokenByFluid = true,
+			behaviour = "Attached",
+			climbable = true,
+			flammable = { ignite = 15, burn = 100 },
+		})
+	end
+end
+
+--[[
+	Hanging Roots (Minecraft's HangingRootsBlock): roots hanging under a sturdy ceiling (`support`
+	Up), the top 6 pixels of the cell, two crossed planes (Minecraft's cross model; the pack's
+	"hanging roots" sprite). Replaceable, broken at once, only Shears get them, washed away by
+	water, burn (30 / 60), vine sounds (Minecraft's own hanging roots sounds stand closest).
+]]
+table.insert(list, {
+	name = "HangingRoots",
+	displayName = "Hanging Roots",
+	color = { 160, 118, 92 },
+	material = "SmoothPlastic",
+	sound = "vine",
+	solid = false,
+	replaceable = true,
+	placeable = true,
+	hardness = 0,
+	tool = "axe",
+	drops = false,
+	shearDrops = true,
+	shape = {
+		{ size = { 16.9, 6, 0.3 }, offset = { 0, 5, 0 }, rotation = { 0, 45, 0 } },
+		{ size = { 16.9, 6, 0.3 }, offset = { 0, 5, 0 }, rotation = { 0, -45, 0 } },
+	},
+	bounds = { min = { 2, 10, 2 }, max = { 14, 16, 14 } },
+	support = "Up",
+	brokenByFluid = true,
+	behaviour = "Attached",
+	flammable = { ignite = 30, burn = 60 },
+})
+
+-- Mossy Cobblestone (Minecraft's): cobblestone with moss (cobblestone and a vine or a moss block
+-- in any slots), strength 2, blast resistance 6, a pickaxe to drop it. The overgrown mineshafts'
+-- entrances have a collar of it.
+table.insert(list, {
+	name = "MossyCobblestone",
+	displayName = "Mossy Cobblestone",
+	color = { 102, 112, 92 },
+	material = "Cobblestone",
+	sound = "stone",
+	hardness = 2,
+	blastResistance = 6,
+	tool = "pickaxe",
+	toolLevel = 0,
+})
+
+--[[
+	Cave twins of what the mineshafts put in their tunnels (`caveTwin`): wall torches, rails,
+	fence posts, cobwebs, moss carpets, vines and hanging roots, exactly their twins (a copy of the
+	spec), but cave air while caves are hidden, so a mineshaft's decorations cost nothing until a
+	player reaches it (Generation/Mineshafts: a twin in cave air, the block itself in the open).
+]]
+do
+	local function caveTwin(name: string)
+		for _, spec in list do
+			if spec.name == name then
+				local twin = table.clone(spec)
+				twin.name = "Cave" .. name
+				twin.placeable = false
+				twin.item = spec.item or name
+				twin.caveTwin = name
+				table.insert(list, twin)
+				return
+			end
+		end
+		error(`No block {name} to twin`)
+	end
+	for _, name in
+		{
+			"WallTorchNorth",
+			"WallTorchSouth",
+			"WallTorchWest",
+			"WallTorchEast",
+			"Rail",
+			"RailEastWest",
+			"OakFence",
+			"Cobweb",
+			"MossCarpet",
+			"Vine",
+			"VineNorth",
+			"VineWest",
+			"VineEast",
+			"HangingRoots",
+		}
+	do
+		caveTwin(name)
+	end
+end
 
 return list

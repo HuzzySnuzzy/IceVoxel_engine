@@ -16,7 +16,7 @@
 	  Iron Age        (level 5, a Furnace crafted, an Iron Ingot smelted) iron and gold: iron and
 	                  golden tools and armor, iron and gold blocks and nuggets, gold smelting,
 	                  Shears, the Bucket, Flint and Steel, the Lantern, the Canteen and the
-	                  Thermometer, osmium smelting, and brewing: every potion's base variant
+	                  Thermometer, Rails, osmium smelting, and brewing: every potion's base variant
 	                  (Shared/Effects/PotionList; Minecraft's brewing waits for the Nether).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
@@ -102,6 +102,7 @@ for _, name in
 		"Canteen",
 		"Thermometer",
 		"OsmiumIngot",
+		"Rail",
 	}
 do
 	table.insert(iron, name)

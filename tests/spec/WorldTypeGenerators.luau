@@ -594,7 +594,7 @@ return function(t, shared, require, server)
 				t.ok(table.find(list, Blocks.caveTwinOf(id) :: number) ~= nil, "its twin is there")
 			end
 		end
-		t.eq(twins, 8, "CaveGlowLichen and its five facings, CaveLava, CaveOil")
+		t.eq(twins, 22, "CaveGlowLichen and its five facings, CaveLava, CaveOil, and the mineshafts' fourteen")
 		t.eq(#list, Blocks.count - 2 - twins, "every id but air, cave air and the cave twins")
 		local width = DebugWorlds.gridWidth(#list)
 		t.eq(width, math.ceil(math.sqrt(#list)))

@@ -65,11 +65,13 @@
 
 	Faces (Blocks)
 	  All sets every face; Sides the four sides; Top and Bottom their own. A face given nothing
-	  falls back to All, then to Sides. Front is glow lichen's: the face looking away from what it
-	  hangs on. Sprite is a plant's, drawn as two crossed images. An entry also covers the block's
-	  cave twin (which must look exactly like it, so twins never get entries of their own) and the
-	  other blocks of its variant group (the six glow lichen sides; a tall plant's top half unless
-	  it has its own).
+	  falls back to All, then to Sides. Front is for thin blocks on a face (glow lichen, ladders,
+	  rails, vines): their plate's face looking away from what they hang on. Sprite is drawn as two
+	  crossed images: plants, and the blocks Minecraft draws as a cross (rope, cobwebs, hanging
+	  roots). An entry also covers the block's cave twin (which must look exactly like it, so
+	  twins never get entries of their own) and the other blocks of its variant group (the six
+	  glow lichen sides, the four ladders, both rails; a tall plant's top half unless it has its
+	  own).
 
 	ShowMissing
 	  true draws the missing texture in place of blank textures, so you can see in game what is
@@ -108,9 +110,9 @@ export type Faces = {
 	Sides: string?,
 	Top: string?,
 	Bottom: string?,
-	-- Glow lichen: the face looking away from its support.
+	-- Glow lichen, ladders, rails, vines: the face looking away from its support.
 	Front: string?,
-	-- Plants: drawn as two crossed images.
+	-- Plants, rope, cobwebs, hanging roots: drawn as two crossed images.
 	Sprite: string?,
 }
 
@@ -389,6 +391,20 @@ local Textures: { [string]: Texture } = {
 	["wild ginger"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	-- (Sheep's wool: white, Shared/Entities/MobList.)
 	["white wool"] = { Color = "", Material = "Fabric", Tint = false },
+	-- Ladders, rope and the mineshafts' blocks. The ladder, rail and vine pictures are drawn on the
+	-- block's plate (Front: Minecraft's single quad, see-through around the rails and rungs), the
+	-- rope, cobweb and hanging roots pictures as sprites (two crossed planes, Minecraft's chain and
+	-- cross models); the fence post takes "planks" and the moss carpet "moss block", as their
+	-- Minecraft models do. Vines take the vine's own green (a grey picture, as Minecraft tints
+	-- vines with the foliage colour).
+	["ladder"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["rope"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["rail"] = { Color = "", Material = "Metal", Tint = false },
+	["cobweb"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["moss block"] = { Color = "", Material = "Grass", Tint = false },
+	["vine"] = { Color = "", Material = "SmoothPlastic", Tint = true },
+	["hanging roots"] = { Color = "", Material = "SmoothPlastic", Tint = false },
+	["mossy cobblestone"] = { Color = "", Material = "Cobblestone", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -518,6 +534,19 @@ local Blocks: { [string]: Faces } = {
 
 	-- Wool
 	WhiteWool = { All = "white wool" },
+
+	-- Ladders, rope and the mineshafts' blocks (an entry covers a variant group: the four ladders,
+	-- both rails, the four vines; and every cave twin)
+	Ladder = { Front = "ladder" },
+	Rope = { Sprite = "rope" },
+	Rail = { Front = "rail" },
+	OakFence = { All = "planks" },
+	Cobweb = { Sprite = "cobweb" },
+	MossBlock = { All = "moss block" },
+	MossCarpet = { All = "moss block" },
+	Vine = { Front = "vine" },
+	HangingRoots = { Sprite = "hanging roots" },
+	MossyCobblestone = { All = "mossy cobblestone" },
 }
 
 export type Pack = {

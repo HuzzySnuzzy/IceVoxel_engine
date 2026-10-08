@@ -36,6 +36,12 @@
   * fire (BlockList `flammable`, Minecraft's FireBlock odds): `igniteOdds`, `burnOdds` and
     `isFlammable` (FireBlock.canBurn), also as `igniteLut` and `burnLut`, which Shared/Fire and
     server Behaviours/Fire read;
+	  * climbing and hanging (ladders, rope, vines, rails, cobwebs): what players and mobs climb
+	    (`climbable`: `isClimbable`, `climbableLut`, Minecraft's #climbable), what slows them down
+	    (`stuck`: `stuckIn`, `stuckLut`, makeStuckInBlock), what also hangs from its own kind above
+	    (`chain`, in `canSurvive`: a rope under a rope, a vine under a vine) and the axis groups
+	    of blocks lying along X or Z (`axis`: rails; `axisOf`, `axisVariant`, picked by the
+	    player's facing in `placementFor`, swapped by a quarter turn in `rotate`);
 	  * textures (Shared/TexturePack, the texture pack): each block's texture per face
 	    (`textures` on defs and appearances, resolved from the pack's All / Sides / Top / Bottom /
 	    Front / Sprite; a cave twin takes its twin's, a variant its group's), whether an
@@ -158,6 +164,13 @@ export type BlockDef = {
 	-- readily it burns away, 0 for blocks that never burn. See Shared/Fire.
 	ignite: number,
 	burn: number,
+	-- Climbed from inside its cell (BlockList `climbable`), also held up by its own kind right
+	-- above (`chain`), the horizontal axis it lies along ("X", "Z"; `axis`) and the move
+	-- multiplier inside it (`stuck`, { x, y, z }); see BlockList.
+	climbable: boolean,
+	chain: boolean,
+	axis: string?,
+	stuck: { number }?,
 	appearance: number,
 }
 
@@ -246,10 +259,26 @@ Blocks.MAX_SHAPE_BOXES = 15
 	Sound types, Minecraft's SoundType: how a block sounds when broken, placed, hit while mining,
 	walked on and fallen on. Shared/Sounds has the events `block.<type>.<action>` for each. A
 	block's type is its `sound`, else its material's (SOUND_BY_MATERIAL), else stone; fluids sound
-	like water and blocks that are never drawn (air) like nothing.
+	like water and blocks that are never drawn (air) like nothing. Ladders, rope, vines (and
+	hanging roots) and moss have types of their own (Minecraft's SoundType.LADDER, VINE and MOSS,
+	Supplementaries' rope), named on their blocks.
 ]]
-Blocks.SOUND_TYPES =
-	table.freeze({ "stone", "wood", "gravel", "grass", "sand", "glass", "snow", "metal", "wool", "water" })
+Blocks.SOUND_TYPES = table.freeze({
+	"stone",
+	"wood",
+	"gravel",
+	"grass",
+	"sand",
+	"glass",
+	"snow",
+	"metal",
+	"wool",
+	"water",
+	"ladder",
+	"rope",
+	"vine",
+	"moss",
+})
 local SOUND_BY_MATERIAL: { [string]: string } = {
 	Wood = "wood",
 	WoodPlanks = "wood",
@@ -574,8 +603,28 @@ for index, spec in BlockList do
 		caveTwin = spec.caveTwin,
 		ignite = if spec.flammable then spec.flammable.ignite else 0,
 		burn = if spec.flammable then spec.flammable.burn else 0,
+		climbable = spec.climbable == true,
+		chain = spec.chain == true,
+		axis = spec.axis,
+		stuck = if spec.stuck then table.freeze(table.clone(spec.stuck)) else nil,
 		appearance = 0,
 	}
+	assert(spec.axis == nil or spec.axis == "X" or spec.axis == "Z", `Block {spec.name} has a bad axis {spec.axis}`)
+	assert(not def.chain or def.support ~= nil, `Block {spec.name} hangs in a chain on nothing (no support)`)
+	local stuck = spec.stuck
+	assert(
+		stuck == nil
+			or (
+				#stuck == 3
+				and stuck[1] >= 0
+				and stuck[1] <= 1
+				and stuck[2] >= 0
+				and stuck[2] <= 1
+				and stuck[3] >= 0
+				and stuck[3] <= 1
+			),
+		`Block {spec.name} has a bad stuck multiplier`
+	)
 	assert(spec.shape == nil or #spec.shape <= Blocks.MAX_SHAPE_BOXES, `Block {spec.name} has too many shape boxes`)
 	assert(
 		def.maxStack >= 1 and def.maxStack <= 64 and def.maxStack == math.floor(def.maxStack),
@@ -718,6 +767,12 @@ local function sameFluid(a: BlockDef, b: BlockDef): boolean
 	end
 	return x.group == y.group and x.level == y.level and x.tickDelay == y.tickDelay
 end
+local function sameStuck(a: { number }?, b: { number }?): boolean
+	if a == nil or b == nil then
+		return a == b
+	end
+	return a[1] == b[1] and a[2] == b[2] and a[3] == b[3]
+end
 for _, def in defs do
 	local name = def.caveTwin
 	if name then
@@ -738,6 +793,10 @@ for _, def in defs do
 				and def.behaviour == twin.behaviour
 				and def.ignite == twin.ignite
 				and def.burn == twin.burn
+				and def.climbable == twin.climbable
+				and def.chain == twin.chain
+				and def.axis == twin.axis
+				and sameStuck(def.stuck, twin.stuck)
 				and not def.placeable,
 			`Cave twin {def.name} differs from {name}`
 		)
@@ -812,6 +871,17 @@ end)
 -- 1 for creative only blocks (BlockList `creativeOnly`).
 Blocks.creativeOnlyLut = u8Lut(function(def)
 	return def.creativeOnly
+end)
+
+-- 1 for blocks players and mobs climb from inside their cell (BlockList `climbable`: ladders,
+-- vines, rope; Minecraft's #climbable tag).
+Blocks.climbableLut = u8Lut(function(def)
+	return def.climbable
+end)
+
+-- 1 for blocks that slow down what moves inside them (BlockList `stuck`: cobwebs).
+Blocks.stuckLut = u8Lut(function(def)
+	return def.stuck ~= nil
 end)
 
 Blocks.solidLut = u8Lut(function(def)
@@ -1072,6 +1142,19 @@ function Blocks.isSturdy(id: number): boolean
 	return id >= 0 and id < Blocks.count and buffer.readu8(Blocks.sturdyLut, id) == 1
 end
 
+-- Do players and mobs climb the block from inside its cell (ladders, vines, rope: Minecraft's
+-- #climbable tag; BlockList `climbable`)? false for unknown ids.
+function Blocks.isClimbable(id: number): boolean
+	return id >= 0 and id < Blocks.count and buffer.readu8(Blocks.climbableLut, id) == 1
+end
+
+-- The multiplier { x, y, z } a move inside the block is slowed by (BlockList `stuck`: a cobweb's
+-- 0.25, 0.05, 0.25, Minecraft's makeStuckInBlock), nil when it slows nothing. Read only.
+function Blocks.stuckIn(id: number): { number }?
+	local def = defs[id]
+	return if def then def.stuck else nil
+end
+
 -- Sound type of a block (one of SOUND_TYPES), nil for silent blocks (air) and unknown ids.
 function Blocks.soundType(id: number): string?
 	if id < 0 or id >= Blocks.count or id ~= id // 1 then
@@ -1140,15 +1223,29 @@ for id = 0, Blocks.count - 1 do
 		variants[id] = group
 	end
 end
+-- Per axis group (keyed by its first block): the variant lying along each axis ("X", "Z").
+local byAxis: { [number]: { [string]: number } } = {}
 for _, group in variants do
 	local base = group[1]
 	if bySupport[base] == nil then
 		local map = {}
-		for _, id in group do
-			local support = defs[id].support
-			if support then
-				assert(map[support] == nil, `Two variants of {defs[base].name} hang on {support}`)
-				map[support] = id
+		if defs[base].axis then
+			-- (An axis group's variants all lie on the floor: the facing picks them, not a side.)
+			local axes = {}
+			for _, id in group do
+				local axis = defs[id].axis
+				assert(axis and axes[axis] == nil, `Axis group {defs[base].name} needs one variant per axis`)
+				axes[axis] = id
+			end
+			byAxis[base] = axes
+		else
+			for _, id in group do
+				local support = defs[id].support
+				assert(defs[id].axis == nil, `Block {defs[id].name} lies along an axis in a group that does not`)
+				if support then
+					assert(map[support] == nil, `Two variants of {defs[base].name} hang on {support}`)
+					map[support] = id
+				end
 			end
 		end
 		bySupport[base] = map
@@ -1167,6 +1264,24 @@ function Blocks.variants(block: number): { number }
 	return variants[block] or { block }
 end
 
+-- The horizontal axis a block lies along ("X" or "Z": BlockList `axis`, rails), nil for others.
+function Blocks.axisOf(block: number): string?
+	local def = defs[block]
+	return if def then def.axis else nil
+end
+
+--[[
+	The variant of `block`'s axis group (a rail, or any rail of the group) lying along `axis`
+	("X" East-West, "Z" North-South), nil when the block is in no axis group or the axis is
+	unknown. Generation picks rails by a corridor's axis with it (and their cave twins with
+	`caveTwinFor`).
+]]
+function Blocks.axisVariant(block: number, axis: string): number?
+	local group = variants[block]
+	local axes = if group then byAxis[group[1]] else nil
+	return if axes then axes[axis] else nil
+end
+
 -- The direction from a block to the block it hangs on, as an offset (nil: needs nothing).
 function Blocks.supportOffset(block: number): (number?, number?, number?)
 	local def = defs[block]
@@ -1181,11 +1296,12 @@ end
 --[[ Plants (BlockList `plant`) ]]
 
 --[[
-	Soil sets (BlockList `plant.soil`): "dirt" is Minecraft's DIRT tag as far as this game has it,
-	"deadbush" adds sand (DeadBushBlock; there is no terracotta), "mushroom" is Minecraft's
-	MUSHROOM_GROW_BLOCK tag, plus any sturdy opaque full block (`mayPlaceOn`).
+	Soil sets (BlockList `plant.soil`): "dirt" is Minecraft's DIRT tag as far as this game has it
+	(the Moss Block is in it too), "deadbush" adds sand (DeadBushBlock; there is no terracotta),
+	"mushroom" is Minecraft's MUSHROOM_GROW_BLOCK tag, plus any sturdy opaque full block
+	(`mayPlaceOn`).
 ]]
-local DIRT_SOIL = { "Grass", "DryGrass", "Dirt", "CoarseDirt", "Podzol", "Mycelium" }
+local DIRT_SOIL = { "Grass", "DryGrass", "Dirt", "CoarseDirt", "Podzol", "Mycelium", "MossBlock" }
 local soils: { [string]: { [number]: boolean } } = { dirt = {}, deadbush = {}, mushroom = {} }
 for _, name in DIRT_SOIL do
 	soils.dirt[ids[name]] = true
@@ -1279,9 +1395,18 @@ end
 	    BushBlock), an upper half its own lower half (DoublePlantBlock; whether a lower half has
 	    its top is the server's Plant behaviour's business);
 	  * other blocks with a `support` need a sturdy block on that side (TorchBlock,
-	    WallTorchBlock, LanternBlock).
+	    WallTorchBlock, LanternBlock, LadderBlock, BaseRailBlock), or, for `chain` blocks, a
+	    block of their own kind right above them, a cave twin counting as its twin (a rope under
+	    a rope: Supplementaries' RopeBlock; a vine under the same vine: VineBlock).
 	`getBlock` answers nil for unknown (unloaded) blocks, which hold nothing up.
 ]]
+-- A block's kind for `chain`: its twin's id for a cave twin, else its own.
+local function chainKind(id: number): number
+	local def = defs[id]
+	local twin = def and def.caveTwin
+	return if twin then rawget(ids :: any, twin) :: number else id
+end
+
 function Blocks.canSurvive(
 	block: number,
 	getBlock: (x: number, y: number, z: number) -> number?,
@@ -1302,7 +1427,15 @@ function Blocks.canSurvive(
 		return true
 	end
 	local support = getBlock(x + dx, y + dy, z + dz)
-	return support ~= nil and Blocks.isSturdy(support)
+	if support ~= nil and Blocks.isSturdy(support) then
+		return true
+	end
+	local def = defs[block]
+	if def and def.chain then
+		local above = getBlock(x, y + 1, z)
+		return above ~= nil and defs[above] ~= nil and chainKind(above) == chainKind(block)
+	end
+	return false
 end
 
 --[[
@@ -1407,8 +1540,10 @@ end
 	alone. Blocks without supports place as they are. A plant gives itself or nil, never the upper
 	half of a tall one (it hangs on nothing, so no direction picks it). A group whose variants
 	hang on nothing places the item's own block (a structure block in SAVE mode), and a jigsaw
-	takes its orientation from the clicked face and the look (`jigsawPlacement`). Cave twins are
-	never placed.
+	takes its orientation from the clicked face and the look (`jigsawPlacement`). An axis group
+	(rails) places the variant along the player's horizontal facing (East / West: "X", else "Z")
+	when it can lie there. Ladders and vines are wall variants like the wall torch, so a click
+	on a floor puts one on a wall beside the cell. Cave twins are never placed.
 ]]
 function Blocks.placementFor(
 	block: number,
@@ -1430,6 +1565,13 @@ function Blocks.placementFor(
 	local base = group[1]
 	if jigsawGroup(base) then
 		return Blocks.jigsawPlacement(nx, ny, nz, lx, ly, lz)
+	end
+	local axes = byAxis[base]
+	if axes then
+		-- Along the way the player faces (BaseRailBlock.getStateForPlacement), if it can lie there.
+		local facing = Blocks.horizontalFacing(lx, lz)
+		local variant = axes[if facing == "East" or facing == "West" then "X" else "Z"]
+		return if variant and Blocks.canPlace(variant, getBlock, x, y, z) then variant else nil
 	end
 	local hanging = bySupport[base]
 	if next(hanging) == nil then
@@ -1666,27 +1808,37 @@ function Blocks.turnDirection(direction: string, rotation: number, mirror: strin
 	return d
 end
 
--- Cave twins and their twins, both ways, and per variant group the twins hanging on each side.
+-- Cave twins and their twins, both ways, and per variant group the twins hanging on each side
+-- (or, for an axis group, lying along each axis).
 local twinOf: { [number]: number } = {}
 local twinFor: { [number]: number } = {}
 local twinsBySupport: { [number]: { [string]: number } } = {}
+local twinsByAxis: { [number]: { [string]: number } } = {}
 for id, def in defs do
 	if def.caveTwin then
 		local twin = ids[def.caveTwin]
 		twinOf[id] = twin
 		twinFor[twin] = id
 		local base = (variants[twin] or { twin })[1]
-		local map = twinsBySupport[base] or {}
-		twinsBySupport[base] = map
-		if def.support then
-			assert(map[def.support] == nil, `Two cave twins of {defs[base].name} hang on {def.support}`)
-			map[def.support] = id
+		if def.axis then
+			local map = twinsByAxis[base] or {}
+			twinsByAxis[base] = map
+			assert(map[def.axis] == nil, `Two cave twins of {defs[base].name} lie along {def.axis}`)
+			map[def.axis] = id
+		else
+			local map = twinsBySupport[base] or {}
+			twinsBySupport[base] = map
+			if def.support then
+				assert(map[def.support] == nil, `Two cave twins of {defs[base].name} hang on {def.support}`)
+				map[def.support] = id
+			end
 		end
 	end
 end
 
 -- The block `id` becomes when its structure is turned: its variant (or twin) hanging on the turned
--- side, a jigsaw's turned orientation, else itself.
+-- side, its variant (or twin) along the other axis after an odd number of quarter turns (mirrors
+-- keep an axis), a jigsaw's turned orientation, else itself.
 local function turned(id: number, rotation: number, mirror: string): number
 	local def = defs[id]
 	local orientation = def.jigsaw
@@ -1694,6 +1846,21 @@ local function turned(id: number, rotation: number, mirror: string): number
 		local front = Blocks.turnDirection(orientation.front, rotation, mirror)
 		local top = Blocks.turnDirection(orientation.top, rotation, mirror)
 		return jigsaws[`{front}|{top}`] or id
+	end
+	local axis = def.axis
+	if axis then
+		if math.floor(rotation) % 2 == 0 then
+			return id
+		end
+		local other = if axis == "X" then "Z" else "X"
+		local family
+		if def.caveTwin then
+			local twin = twinOf[id]
+			family = twinsByAxis[(variants[twin] or { twin })[1]]
+		else
+			family = byAxis[(variants[id] or { id })[1]]
+		end
+		return (family and family[other]) or id
 	end
 	local support = def.support
 	if support == nil or support == "Up" or support == "Down" then
@@ -1734,8 +1901,8 @@ function Blocks.rotateLut(rotation: number, mirror: string?): buffer
 end
 
 -- The block `id` becomes when its structure is turned by `rotation` and `mirror`: wall torches,
--- glow lichen (cave twins stay twins) and jigsaws face the turned way; everything else is
--- unchanged. Unknown ids come back as they are.
+-- ladders, vines, glow lichen (cave twins stay twins) and jigsaws face the turned way, rails lie
+-- along the turned axis; everything else is unchanged. Unknown ids come back as they are.
 function Blocks.rotate(id: number, rotation: number, mirror: string?): number
 	if defs[id] == nil then
 		return id

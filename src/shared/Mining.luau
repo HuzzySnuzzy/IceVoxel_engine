@@ -7,9 +7,10 @@
 	    progress = speed / hardness / (canHarvest ? 30 : 100)
 
 	where `speed` is the held tool's speed when it is the block's kind of tool (BlockList `tool`;
-	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves; Shears 15
-	on blocks they harvest, BlockList `shearDrops`: leaves, and plants that break at once, but 2 on
-	glow lichen, its `shearSpeed`), else 1, times the player's own `factor` (below), divided by 5
+	Minecraft's tiers: wood 2, stone 4, iron 6, diamond 8, gold 12; swords 1.5 on leaves and 15 on
+	cobwebs; Shears 15 on blocks they harvest, BlockList `shearDrops`: leaves, cobwebs and plants
+	that break at once, but 2 on glow lichen and vines, their `shearSpeed`), else 1, times the
+	player's own `factor` (below), divided by 5
 	under water and by 5 while not standing on the ground. `canHarvest`: the block drops anything with
 	that tool (Items.canHarvest: blocks with a `toolLevel` need a good enough tool, so stone by hand
 	takes 7.5 s and drops nothing). The block breaks when the progress reaches 1: stone with a
@@ -42,8 +43,10 @@ Mining.TICK_RATE = 20
 Mining.TOLERANCE = 0.7
 -- Ticks between breaking a block and starting on the next one (survival and creative).
 Mining.DELAY_TICKS = 5
--- A sword's speed on blocks it cuts well (leaves; Minecraft's sword_efficient tag).
+-- A sword's speed on blocks it cuts well (leaves; Minecraft's sword_efficient tag), and on blocks
+-- that are a sword's to mine (BlockList `tool` "sword": the cobweb, SwordItem.getDestroySpeed).
 local SWORD_SPEED = 1.5
+local SWORD_ON_WEB = 15
 
 -- Mining speed of `tool` (an item id, nil = bare hands) on `block`.
 function Mining.toolSpeed(block: number, tool: number?): number
@@ -54,7 +57,7 @@ function Mining.toolSpeed(block: number, tool: number?): number
 	local def = Blocks.get(block)
 	local kind = def.tool
 	if data.kind == "sword" then
-		return if kind == "hoe" then SWORD_SPEED else 1
+		return if kind == "sword" then SWORD_ON_WEB elseif kind == "hoe" then SWORD_SPEED else 1
 	elseif data.kind == "shears" then
 		-- (Minecraft's ShearsItem.getDestroySpeed: 15 on leaves and cobwebs, which they harvest; 2 on
 		-- vines and glow lichen.)

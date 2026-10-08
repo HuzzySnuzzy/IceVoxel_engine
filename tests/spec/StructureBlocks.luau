@@ -329,12 +329,25 @@ return function(t, shared, require, _server, client)
 					fluids += 1
 					t.eq(Items.drops(block, Items.id.Shears), nil, "fluids drop nothing")
 				else
-					local sheared = Items.drops(block, Items.id.Shears)
-					t.ok(sheared and sheared.item == Items.id.GlowLichen)
+					-- (Shears get what they get from the twin: glow lichen, a cobweb, vines, roots;
+					-- the twin's usual drop where Shears harvest nothing special: a torch, a rail.)
+					local sheared, twinSheared = Items.drops(block, Items.id.Shears), Items.drops(twin, Items.id.Shears)
+					t.eq(sheared and sheared.item, twinSheared and twinSheared.item, `{def.name} sheared`)
+					t.eq(sheared and sheared.count, twinSheared and twinSheared.count)
+					t.eq(Blocks.isClimbable(block), Blocks.isClimbable(twin), `{def.name} climbable`)
+					local stuck, twinStuck = Blocks.stuckIn(block), Blocks.stuckIn(twin)
+					t.eq(
+						stuck and table.concat(stuck, ","),
+						twinStuck and table.concat(twinStuck, ","),
+						`{def.name} stuck`
+					)
+					t.eq(Blocks.axisOf(block), Blocks.axisOf(twin), `{def.name} axis`)
 				end
 			end
 		end
-		t.eq(twins, 8, "six glow lichen sides, lava and oil")
+		-- (Then the mineshafts' tunnel decorations: four wall torches, two rails, the fence post, the
+		-- cobweb, the moss carpet, four vines and hanging roots.)
+		t.eq(twins, 22, "six glow lichen sides, lava and oil, and fourteen of the mineshafts'")
 		t.eq(fluids, 2)
 		t.eq(Blocks.surfaceForm(Blocks.CAVE_AIR), AIR)
 		t.eq(Blocks.surfaceForm(STONE), STONE)

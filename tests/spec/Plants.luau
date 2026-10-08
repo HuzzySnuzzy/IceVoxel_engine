@@ -80,7 +80,8 @@ return function(t, shared, require, server)
 		LargeFernTop = true,
 	}
 	local LEAVES = { B.OakLeaves, B.BirchLeaves, B.SpruceLeaves, B.AcaciaLeaves, B.JungleLeaves }
-	local DIRT_SET = { B.Grass, B.DryGrass, B.Dirt, B.CoarseDirt, B.Podzol, B.Mycelium }
+	-- (The Moss Block is in Minecraft's dirt tag too.)
+	local DIRT_SET = { B.Grass, B.DryGrass, B.Dirt, B.CoarseDirt, B.Podzol, B.Mycelium, B.MossBlock }
 
 	-- A sparse world: unset blocks are air, `false` = not loaded.
 	local function sparse(blocks: { [string]: number | false })

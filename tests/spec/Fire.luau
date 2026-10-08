@@ -149,7 +149,18 @@ return function(t, shared, require, server)
 			GlowLichenUp = { 15, 100 },
 			CaveGlowLichenNorth = { 15, 100 },
 			CoalBlock = { 5, 5 },
-			-- Not flammable in Minecraft: saplings, mushrooms, stone, chests, crafting tables...
+			-- Fences, vines and hanging roots (Minecraft's), Supplementaries' rope.
+			OakFence = { 5, 20 },
+			VineEast = { 15, 100 },
+			CaveVine = { 15, 100 },
+			HangingRoots = { 30, 60 },
+			Rope = { 10, 100 },
+			-- Not flammable in Minecraft: saplings, mushrooms, stone, chests, crafting tables,
+			-- ladders, rails, cobwebs, moss...
+			Ladder = { 0, 0 },
+			Rail = { 0, 0 },
+			Cobweb = { 0, 0 },
+			MossBlock = { 0, 0 },
 			OakSapling = { 0, 0 },
 			BrownMushroom = { 0, 0 },
 			Stone = { 0, 0 },
@@ -166,7 +177,8 @@ return function(t, shared, require, server)
 		end
 		t.eq(Blocks.igniteOdds(-1), 0, "unknown ids")
 		t.ok(not Blocks.isFlammable(Blocks.count), "past the end")
-		-- Every flammable block is a plant, leaves, a log, planks, glow lichen or coal.
+		-- Every flammable block is a plant, leaves, a log, planks, glow lichen, coal, wool, a fence,
+		-- vines, roots or rope.
 		for id, def in Blocks.defs do
 			if def.ignite > 0 then
 				t.ok(def.burn > 0, `{def.name} burns`)

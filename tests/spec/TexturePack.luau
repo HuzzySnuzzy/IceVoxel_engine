@@ -274,6 +274,17 @@ local BLANKS = {
 	{ "mint", { "Mint" } },
 	{ "wild ginger", { "WildGinger" } },
 	{ "white wool", { "WhiteWool" } },
+	{ "ladder", { "Ladder", "LadderSouth", "LadderWest", "LadderEast" } },
+	{ "rope", { "Rope" } },
+	{ "rail", { "Rail", "RailEastWest", "CaveRail", "CaveRailEastWest" } },
+	{ "cobweb", { "Cobweb", "CaveCobweb" } },
+	{ "moss block", { "MossBlock", "MossCarpet", "CaveMossCarpet" } },
+	{
+		"vine",
+		{ "Vine", "VineNorth", "VineWest", "VineEast", "CaveVine", "CaveVineNorth", "CaveVineWest", "CaveVineEast" },
+	},
+	{ "hanging roots", { "HangingRoots", "CaveHangingRoots" } },
+	{ "mossy cobblestone", { "MossyCobblestone" } },
 }
 
 return function(t, shared, require)
@@ -294,6 +305,11 @@ return function(t, shared, require)
 	for _, base in { B.Torch, B.Lantern, B.Fire, B.Campfire } do
 		for _, id in Blocks.variants(base) do
 			never[id] = true
+			-- (The mineshafts' wall torches in caves are the wall torches' cave twins.)
+			local twin = Blocks.caveTwinFor(id)
+			if twin then
+				never[twin] = true
+			end
 		end
 	end
 	for id, def in Blocks.defs do
@@ -458,10 +474,20 @@ return function(t, shared, require)
 		end
 		-- Plant sprites keep their pictures' colours, except grass and ferns (their soil's foliage)
 		-- and saplings (one black and white picture in each sapling's own colour).
+		-- (Besides plants, the blocks Minecraft draws as a cross: rope (its chain model), cobwebs,
+		-- hanging roots, and their cave twins.)
+		local crosses: { [number]: boolean } = {}
+		for _, name in { "Rope", "Cobweb", "HangingRoots" } do
+			crosses[B[name]] = true
+			local twin = Blocks.caveTwinFor(B[name])
+			if twin then
+				crosses[twin] = true
+			end
+		end
 		for id, def in Blocks.defs do
 			local sprite = def.textures and def.textures.sprite
 			if sprite then
-				t.ok(def.plant ~= nil, `{def.name}: only plants have sprites`)
+				t.ok(def.plant ~= nil or crosses[id], `{def.name}: only plants and crosses have sprites`)
 				local sapling = string.sub(def.name, -7) == "Sapling"
 				t.eq(
 					Pack.Textures[sprite].Tint ~= false,
@@ -571,8 +597,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			171,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool)"
+			188,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}

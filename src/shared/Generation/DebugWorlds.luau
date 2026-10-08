@@ -7,12 +7,13 @@
 	All Blocks   Minecraft's DebugLevelSource: every block id but air and cave air (every variant:
 	             wall torches, both halves of tall plants, each fluid level, structure blocks), once,
 	             ordered by id, at y = BLOCK_Y (70) over the void. Not the cave twins (CaveGlowLichen*,
-	             CaveLava, CaveOil, Blocks.isCaveTwin) either: they look exactly like their twin,
-	             which is there, and while caves are hidden (the Caves setting's default, and far
-	             terrain always) the mesher draws a twin as cave air, a stone cap where it touches
-	             open air. The grid is W = ceil(sqrt(n)) wide; block k stands at
+	             CaveLava, CaveOil, the mineshafts' Cave*: Blocks.isCaveTwin) either: they look
+	             exactly like their twin, which is there, and while caves are hidden (the Caves
+	             setting's default, and far terrain always) the mesher draws a twin as cave air,
+	             a stone cap where it touches open air. The grid is W = ceil(sqrt(n)) wide; block
+	             k stands at
 	             x = 2 * (k // W) + 1, z = 2 * (k % W) + 1 (Minecraft's: odd x and z, one air cell
-	             between neighbours), so 203 blocks take 15 x 15 spots, a 30 x 30 square. Nothing
+	             between neighbours), so 220 blocks take 15 x 15 spots, a 30 x 30 square. Nothing
 	             stands under them, as in Minecraft: blocks that need support (plants, torches,
 	             lanterns, glow lichen, the upper half of a tall plant alone) and fluids (sources
 	             and every flowing level) are shown as they are, because the world type turns ticks

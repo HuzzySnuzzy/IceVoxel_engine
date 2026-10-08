@@ -27,7 +27,8 @@ return function(t, shared, require, server, _client)
 	end
 
 	t.test("sounds: every block sound type has Minecraft's five actions", function()
-		t.eq(#Blocks.SOUND_TYPES, 10, "ten types")
+		-- (Ten, then ladder, rope, vine and moss for ladders, rope and the overgrown mineshafts.)
+		t.eq(#Blocks.SOUND_TYPES, 14, "fourteen types")
 		for _, typeName in Blocks.SOUND_TYPES do
 			for _, action in Sounds.ACTIONS do
 				local event = Sounds.get(`block.{typeName}.{action}`)

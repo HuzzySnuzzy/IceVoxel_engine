@@ -208,6 +208,36 @@ local Config = {
 		SpawnClearance = 24,
 	},
 
+	-- Mineshafts (Generation/Mineshafts): Minecraft's abandoned mineshafts, at a depth under the
+	-- local surface, and overgrown ones in humid biomes, some with an entrance shaft open to the
+	-- sky and a rope all the way down. They follow Generate Structures (off with it, and with
+	-- Structures.Generate false).
+	Mineshafts = {
+		Enabled = true,
+		-- One candidate start room per Grid x Grid blocks, kept with Chance: about one mineshaft
+		-- per 256 x 256 blocks (Minecraft's 0.4% of chunks, 15 per km²).
+		Grid = 128,
+		Chance = 0.25,
+		-- The start room's floor this many blocks under its column's surface (fewest, most).
+		Depth = { 28, 64 },
+		-- No mineshaft block below this height (the caves' lava seas lie below Caves.LavaLevel).
+		MinY = 16,
+		-- Blocks of ground kept above every piece (under each column's surface).
+		Cover = 6,
+		-- Minecraft's piece grammar: pieces at most MaxDepth steps from the start room, starting
+		-- within Extent blocks of its corner.
+		MaxDepth = 8,
+		Extent = 80,
+		-- The chance a mineshaft is overgrown, by its start's biome humidity: none at
+		-- OvergrownHumidity[1] or drier, rising to OvergrownChance at OvergrownHumidity[2].
+		OvergrownHumidity = { 0.1, 0.6 },
+		OvergrownChance = 0.8,
+		-- The chance an overgrown mineshaft has an entrance shaft from the surface, and how far
+		-- from the spawn an entrance keeps (blocks).
+		EntranceChance = 0.5,
+		SpawnClearance = 32,
+	},
+
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).
 	StructureMaxLevel = 2,
 

@@ -326,7 +326,8 @@ end
 --[[
 	Can a player holding `tool` (an item id, nil = bare hands) harvest `block`, i.e. does it drop
 	anything? Blocks with a `toolLevel` need a tool of their kind of at least that tier (Minecraft's
-	requiresCorrectToolForDrops and harvest levels).
+	requiresCorrectToolForDrops and harvest levels), or Shears when Shears harvest the block
+	(`shearDrops`: the cobweb, which needs a sword or Shears, ShearsItem.isCorrectToolForDrops).
 ]]
 function Items.canHarvest(block: number, tool: number?): boolean
 	local def = Blocks.get(block)
@@ -334,6 +335,9 @@ function Items.canHarvest(block: number, tool: number?): boolean
 		return true
 	end
 	local data = Items.tool(tool)
+	if data ~= nil and data.kind == "shears" and def.shearDrops ~= nil then
+		return true
+	end
 	return data ~= nil and data.kind == def.tool and data.level >= def.toolLevel
 end
 
