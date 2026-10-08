@@ -45,7 +45,8 @@ end
 --[[
 	A fresh client: `world.frame()` runs one Heartbeat (1/60 s), `world.serverSends(buffer)`
 	delivers a Settings message, `world.sent` lists the SaveSettings payloads. Saved quality level
-	`quality`; an Atmosphere in Lighting with `atmosphere`.
+	`quality`; an Atmosphere in Lighting with `atmosphere` (`world.atmosphere`, a property bag
+	whose Parent says whether it is in Lighting).
 ]]
 local function fakeClient(shared: any, sharedRequire: (any) -> any, quality: number, atmosphere: boolean?): any
 	local world: any = { clock = 100, sent = {}, warnings = {} }
@@ -56,9 +57,13 @@ local function fakeClient(shared: any, sharedRequire: (any) -> any, quality: num
 		FogStart = 0,
 		PrioritizeLightingQuality = true,
 		FindFirstChildOfClass = function(_, class: string)
-			return if class == "Atmosphere" and atmosphere then {} else nil
+			local found = world.atmosphere
+			return if class == "Atmosphere" and found and found.Parent == world.lighting then found else nil
 		end,
 	}
+	if atmosphere then
+		world.atmosphere = { Name = "Atmosphere", Parent = world.lighting }
+	end
 	local services: { [string]: any } = {
 		ReplicatedStorage = {
 			WaitForChild = function(_, name: string)
@@ -751,12 +756,89 @@ return function(t, shared, require, _server, client)
 			local tunnels, caverns = ViewSettings.revealRadii()
 			t.eq(caverns, 176)
 			t.eq(tunnels, Config.Caves.RevealRadius)
+		end)
+	end)
 
-			-- An Atmosphere: the fog is left alone.
-			local other = fakeClient(shared, require, 0, true)
-			other.ViewSettings.applyFog()
-			t.eq(other.lighting.FogEnd, 100000)
-			t.ok(not other.ViewSettings.usesFog())
+	t.test("settings client sim: the Atmosphere is the view's haze; short fogs take it out of Lighting", function()
+		restoring(function()
+			-- Without an Atmosphere the old view fog stays (FogEnd at the view, FogStart 55%).
+			local plain = fakeClient(shared, require, 0)
+			plain.ViewSettings.applyFog()
+			t.eq(plain.ViewSettings.fogMode(), "classic")
+			t.eq(plain.lighting.FogEnd, Config.Lod.ViewDistance * Config.BlockSize)
+			plain.ViewSettings.setWeatherFog(0.5)
+			t.eq(plain.lighting.FogEnd, Config.Lod.ViewDistance * Config.BlockSize * 0.5, "nearer in rain")
+
+			-- With one: adopted, left in Lighting, the old fog the place's own.
+			local world = fakeClient(shared, require, 0, true)
+			local Settings, ViewSettings = world.Settings, world.ViewSettings
+			local atmosphere = world.atmosphere
+			ViewSettings.applyFog()
+			t.eq(ViewSettings.atmosphere(), atmosphere, "the place's Atmosphere")
+			t.eq(ViewSettings.fogMode(), "atmosphere")
+			t.eq(atmosphere.Parent, world.lighting, "in Lighting")
+			t.eq(world.lighting.FogEnd, 100000, "the old fog: the place's own")
+			t.eq(world.lighting.FogStart, 0)
+			t.ok(ViewSettings.usesFog(), "the haze is on")
+			t.ok(not ViewSettings.placeKeepsFog(), "IceVoxel drives it: the Fog setting works")
+			-- The weather's factor is read by the lighting's update, not written as fog.
+			ViewSettings.setWeatherFog(0.6)
+			t.eq(ViewSettings.weatherFog(), 0.6)
+			t.eq(world.lighting.FogEnd, 100000)
+
+			-- Lava: Minecraft's 0.25 .. 1 block with the Atmosphere out, in the same call.
+			local block = Config.BlockSize
+			ViewSettings.setFluidFog(0.25 * block, 1 * block)
+			t.eq(ViewSettings.fogMode(), "fluid")
+			t.eq(atmosphere.Parent, nil, "out of Lighting")
+			t.eq(world.lighting.FogStart, 0.25 * block)
+			t.eq(world.lighting.FogEnd, 1 * block)
+			-- Blindness (5 blocks) is further than the lava's: the lava's stays.
+			ViewSettings.setEffectFog(1.25 * block, 5 * block)
+			t.eq(ViewSettings.fogMode(), "fluid")
+			t.eq(world.lighting.FogEnd, 1 * block)
+			-- Out of the lava, still blind: Blindness' fog, the Atmosphere still out.
+			ViewSettings.setFluidFog(nil, nil)
+			t.eq(ViewSettings.fogMode(), "effect")
+			t.eq(atmosphere.Parent, nil)
+			t.eq(world.lighting.FogEnd, 5 * block)
+			t.eq(world.lighting.FogStart, 1.25 * block)
+			-- Blindness over: the Atmosphere back, the old fog the place's again.
+			ViewSettings.setEffectFog(nil, nil)
+			t.eq(ViewSettings.fogMode(), "atmosphere")
+			t.eq(atmosphere.Parent, world.lighting, "back in Lighting")
+			t.eq(world.lighting.FogEnd, 100000)
+			t.eq(world.lighting.FogStart, 0)
+
+			-- The Fog setting off: the Atmosphere stays (density 0), the old fog the place's.
+			Settings.set("fog", 0)
+			ViewSettings.applyFog()
+			t.ok(not ViewSettings.usesFog())
+			t.eq(ViewSettings.fogMode(), "atmosphere")
+			t.eq(atmosphere.Parent, world.lighting)
+			-- Water while it is off: the fluid's fog shows all the same.
+			ViewSettings.setFluidFog(0, 24 * block)
+			t.eq(atmosphere.Parent, nil)
+			t.eq(world.lighting.FogEnd, 24 * block)
+			ViewSettings.setFluidFog(nil, nil)
+			t.eq(atmosphere.Parent, world.lighting)
+			t.eq(PlayerSettings.text("fog", 0), "Fog: OFF")
+			t.eq(PlayerSettings.text("fog", 1), "Fog: Atmosphere")
+
+			-- A place that keeps its own lighting keeps its Atmosphere: the setting can't switch it.
+			local enabled = Config.Lighting.Enabled
+			Config.Lighting.Enabled = false
+			local keeps, none = ViewSettings.placeKeepsFog(), plain.ViewSettings.placeKeepsFog()
+			Config.Lighting.Enabled = enabled
+			t.ok(keeps, "the place's own")
+			t.ok(not none, "none to keep")
+
+			-- One made for a place without (LightingController.start): the haze from then on.
+			local made = { Name = "IceVoxelAtmosphere", Parent = plain.lighting }
+			plain.ViewSettings.setAtmosphere(made)
+			t.eq(plain.ViewSettings.fogMode(), "atmosphere")
+			t.eq(plain.ViewSettings.atmosphere(), made)
+			t.eq(plain.lighting.FogEnd, 100000, "the old view fog gone")
 		end)
 	end)
 

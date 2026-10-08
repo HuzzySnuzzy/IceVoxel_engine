@@ -21,14 +21,15 @@
 	               camera: Rendering/LightingController), as Minecraft's fog follows the light; lava
 	               glows anyway.
 	  Tint         `tint`: a ColorCorrectionEffect ("IceVoxelFluidView" in Lighting) tints the
-	               view towards the fluid's colour (TINT strength), so it shows even when the
-	               place has an Atmosphere, which replaces Lighting's fog. Worked out once per
-	               fluid.
+	               view towards the fluid's colour (TINT strength), the sky seen through the
+	               surface too (Lighting's fog never covers the sky). Worked out once per fluid.
 
 	`start` works it out every frame after the camera moved, as numbers, and writes it only when
 	it changed (the fluid, the fog to a tenth of a block, the colour): the fog through
-	ViewSettings.setFluidFog and LightingController.setFogColour (both put the view distance's fog
-	back once the camera leaves the fluid), the tint directly. A frame in an unchanging fluid makes
+	ViewSettings.setFluidFog and LightingController.setFogColour, in the same frame (the fog is
+	Lighting's FogStart / FogEnd / FogColor: ViewSettings takes the Atmosphere out of Lighting
+	while it shows, and puts it back with the view's haze once the camera leaves the fluid), the
+	tint directly. A frame in an unchanging fluid makes
 	no garbage. Everything but `start` is pure (tests/spec/LavaOilClient).
 ]]
 

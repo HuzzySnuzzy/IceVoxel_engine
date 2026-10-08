@@ -16,9 +16,10 @@
 
 	This module starts them and keeps the rest of the picture in step at 10 Hz: a
 	ColorCorrectionEffect ("IceVoxelWeatherView" in Lighting) greys and cools the picture in rain
-	and thunder (WeatherSky.grading, by the sky exposure), and the fog comes nearer
-	(WeatherSky.fog through Rendering/ViewSettings.setWeatherFog). The Clouds and Weather settings
-	reach CloudView and PrecipitationView through `setClouds` and `setWeather`.
+	and thunder (WeatherSky.grading, by the sky exposure), and the haze thickens (WeatherSky.fog
+	through Rendering/ViewSettings.setWeatherFog: the Atmosphere's density for a view that much
+	nearer, Rendering/AtmosphereModel). The Clouds and Weather settings reach CloudView and
+	PrecipitationView through `setClouds` and `setWeather`.
 ]]
 
 local Lighting = game:GetService("Lighting")

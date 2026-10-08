@@ -15,17 +15,19 @@
 	                             variants, tints, images, sprites, far looks; checks the ids
 	                             and measures the textures' averages in the background
 	  Rendering/ViewSettings     the view from the player's settings: distances, caves, plants,
-	                             lights, lighting quality and fog
+	                             lights, lighting quality, and which fog shows (the Atmosphere's
+	                             haze, or a fluid's or Blindness' short Lighting fog)
 	  Settings/                  the player's settings (the Options menu, Ui/SettingsScreen: P):
 	                             values, saving them on the server, and the effects registered
 	                             below that apply them live; the key bindings every input site
 	                             reads (Settings/Keybinds), the mouse's sensitivity and inversion
 	                             (Player/MouseLook) and the attack indicator (Ui/AttackIndicator)
-	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, fog colour
+	  Rendering/LightingController  day and night: the sun, sky light, cave darkness, the
+	                             Atmosphere's haze (Rendering/AtmosphereModel) and the fog colour
 	  Weather/                   the weather (Shared/Weather's storms, the server's state): rain
 	                             and snow around the camera stopping at roofs, their sounds, LOD
 	                             clouds out to the view distance drifting with the wind, the
-	                             server's lightning and thunder, the darker light and nearer fog
+	                             server's lightning and thunder, the darker light and thicker haze
 	                             (through LightingController and ViewSettings); the Clouds and
 	                             Weather settings (Options > Weather...)
 	  Rendering/FluidFog         the view from inside water, lava, oil or fuel: Minecraft's fluid
@@ -245,6 +247,8 @@ Settings.register("lighting", function()
 end)
 Settings.register("fog", function()
 	ViewSettings.applyFog()
+	-- (The Atmosphere's density follows the view distance and the Fog setting.)
+	LightingController.refresh()
 end)
 -- (Read live: ChunkRenderer's light sweep asks ViewSettings.lichenLightDistance.)
 Settings.register("lichen", function() end)

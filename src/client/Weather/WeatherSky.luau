@@ -11,13 +11,17 @@
 	              (OutdoorAmbient, the sun's Brightness, the sky box's diffuse and specular light)
 	              times the dimming; the sun's warm ColorShift_Top and its Brightness also by
 	              Config.Weather.Sky.CoverSun of the cloud cover (an overcast sky hides the sun
-	              before it rains); the fog's colour Weather.fogColour (darker, bluer). Ambient
-	              (the caves' light) is never touched.
+	              before it rains); the fog's colour Weather.fogColour (darker, bluer: the
+	              Atmosphere's Color); the Atmosphere's Haze up by Sky.Haze x rain (and
+	              ThunderHaze x thunder), so the horizon greys over, and its Glare gone with the
+	              sun behind rain clouds. Ambient (the caves' light) is never touched.
 	  `grading`   a ColorCorrectionEffect for the rest of the picture, since Roblox's sky box can't
-	              be greyed by a property: saturation down by Sky.Saturation x rain (and thunder),
-	              contrast slightly down (flat, overcast light), a cool tint; all 0 indoors.
+	              be greyed by a property (the haze only reaches up from the horizon): saturation
+	              down by Sky.Saturation x rain (and thunder), contrast slightly down (flat,
+	              overcast light), a cool tint; all 0 indoors.
 	  `fog`       the fog's distance factor (Weather.fogFactor: 0.6 at full rain, 0.4 in snow,
-	              0.45 in thunder), back to 1 with no sky exposure.
+	              0.45 in thunder), back to 1 with no sky exposure: the Atmosphere's density
+	              for a view that much shorter (Rendering/AtmosphereModel).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -63,6 +67,10 @@ function WeatherSky.apply(
 	environment.environmentSpecular *= sun
 	local fog = Weather.fogColour(environment.fogColor, rain * reach, thunder * reach)
 	environment.fogColor = fog
+	local settings = sky()
+	local wet = math.clamp(rain, 0, 1) * reach
+	environment.haze += settings.Haze * wet + settings.ThunderHaze * math.clamp(thunder, 0, 1) * reach
+	environment.glare *= sun * (1 - wet)
 	return environment
 end
 

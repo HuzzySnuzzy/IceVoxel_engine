@@ -16,13 +16,19 @@
 	    the engine has to lower quality it keeps the draw distance and gives up lighting detail
 	    first), and Config.Lighting.CaveAmbient from the brightness slider (0% is Config's own,
 	    captured when this module loads; Rendering/LightingController reads it every update).
-	  * `applyFog`: fog fades the edge of the view distance, FogEnd = view x BlockSize (times the
-	    weather's factor, `setWeatherFog`: nearer in rain, snow and thunder) and FogStart 55% of
-	    that (skipped when the place has an Atmosphere, which replaces fog); with the fog
-	    setting off the place's own FogEnd / FogStart come back. Its colour follows the time of day
-	    (Rendering/LightingController, while `usesFog` says this fog is in use). While the camera
-	    is in a fluid, its fog wins over both (`setFluidFog`, Rendering/FluidFog), and a status
-	    effect's (Blindness: `setEffectFog`, Rendering/EffectView) over the fluid's when nearer.
+	  * `applyFog`: which fog shows (Rendering/AtmosphereModel.fog). Normally the Atmosphere in
+	    Lighting (`atmosphere`: the place's first, else the one Rendering/LightingController makes),
+	    whose haze LightingController works out from the view distance, the weather's fog factor
+	    (`setWeatherFog`: nearer in rain, snow and thunder), the time of day, the sky exposure and
+	    the Fog setting (`usesFog`). While the camera is in a fluid, the fluid's short fog wins
+	    (`setFluidFog`, Rendering/FluidFog), and a status effect's (Blindness: `setEffectFog`,
+	    Rendering/EffectView) over the fluid's when nearer: those are the old Lighting fog
+	    (FogStart / FogEnd, their colour LightingController's), which Roblox ignores while an
+	    Atmosphere is in Lighting, so the Atmosphere is taken out (Parent nil) in the same call
+	    that writes them and put back when they end, with the place's own FogStart / FogEnd.
+	    Without an Atmosphere at all (Config.Lighting.Enabled false in a place that has none) the
+	    old view fog stays: FogEnd = view x BlockSize x the weather's factor, FogStart 55% of it,
+	    or the place's own with the Fog setting off.
 	  * Getters for the streamer and renderer, read live: `revealReach` / `revealRadii` (caves),
 	    `alwaysCaves` (the Caves setting), `lichenLightDistance`, `lavaLightDistance` (Config
 	    only), `foliageDistance`, `lod`, `get`.
@@ -40,6 +46,8 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local LodTree = require(Shared.World.LodTree)
 local PlayerSettings = require(Shared.PlayerSettings)
+
+local AtmosphereModel = require(script.Parent.AtmosphereModel)
 
 local ViewSettings = {}
 
@@ -59,6 +67,10 @@ local fluidFog: { finish: number, start: number }? = nil
 local effectFog: { finish: number, start: number }? = nil
 -- The weather's fog factor (Weather/WeatherSky.fog: 1 in clear weather, nearer in rain).
 local weatherFog = 1
+-- The Atmosphere the view uses (nil: none yet), whether it is in Lighting, and the fog showing.
+local atmosphere: Atmosphere? = nil
+local attached = true
+local mode: AtmosphereModel.Mode = "none"
 
 function ViewSettings.isMobile(): boolean
 	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -87,15 +99,53 @@ function ViewSettings.get(key: string): number
 	return current()[key]
 end
 
--- Does the place have an Atmosphere (which replaces IceVoxel's fog)?
-function ViewSettings.hasAtmosphere(): boolean
-	return Lighting:FindFirstChildOfClass("Atmosphere") ~= nil
+--[[
+	The Atmosphere the view uses: the one `setAtmosphere` gave, else the place's first in Lighting
+	(adopted the first time it is found); nil while there is none.
+]]
+function ViewSettings.atmosphere(): Atmosphere?
+	local current = atmosphere
+	if current == nil then
+		current = Lighting:FindFirstChildOfClass("Atmosphere")
+		if current then
+			atmosphere = current
+			attached = true
+		end
+	end
+	return current
 end
 
--- Is IceVoxel's distance fog in use (the fog setting, Config.Render.Fog, and no Atmosphere)?
+-- Uses `created` (in Lighting) as the view's Atmosphere from now on (Rendering/LightingController
+-- makes one when the place has none); the fog is applied again at once.
+function ViewSettings.setAtmosphere(created: Atmosphere)
+	atmosphere = created
+	attached = true
+	ViewSettings.applyFog()
+end
+
+--[[
+	Does the place keep its own Atmosphere (Config.Lighting.Enabled false with one in Lighting)?
+	Then only the place decides the haze and the Fog setting changes nothing.
+]]
+function ViewSettings.placeKeepsFog(): boolean
+	return not Config.Lighting.Enabled and ViewSettings.atmosphere() ~= nil
+end
+
+-- Is the view's haze on (the Fog setting, or Config.Render.Fog while unbound; Config's false
+-- always wins)?
 function ViewSettings.usesFog(): boolean
 	local bound = values
-	return Config.Render.Fog and (bound == nil or PlayerSettings.on(bound, "fog")) and not ViewSettings.hasAtmosphere()
+	return Config.Render.Fog and (bound == nil or PlayerSettings.on(bound, "fog"))
+end
+
+-- The fog showing now (AtmosphereModel.Mode), as the last `applyFog` chose it.
+function ViewSettings.fogMode(): AtmosphereModel.Mode
+	return mode
+end
+
+-- The weather's fog factor now (1 in clear weather).
+function ViewSettings.weatherFog(): number
+	return weatherFog
 end
 
 -- Config's caves for this device (unbound: Caves, or Caves.Mobile on phones).
@@ -173,31 +223,37 @@ function ViewSettings.applyLighting()
 	Config.Lighting.CaveAmbient = PlayerSettings.caveAmbient(settings, CONFIG_CAVE_AMBIENT)
 end
 
--- The fog for the view distance, or the place's own with the fog setting off; a fluid's while the
--- camera is in one.
+--[[
+	The fog that shows (see the header): the Atmosphere, a fluid's or a status effect's short fog
+	(the old Lighting fog, with the Atmosphere out of Lighting), or without an Atmosphere the old
+	view fog (the place's own with the Fog setting off). The old fog's distances are written
+	before the Atmosphere goes out or comes back, in the same call.
+]]
 function ViewSettings.applyFog()
-	if ViewSettings.hasAtmosphere() then
-		return
-	end
 	if placeFog == nil then
 		placeFog = { finish = Lighting.FogEnd, start = Lighting.FogStart }
 	end
-	local fluid = fluidFog
-	local effect = effectFog
-	if effect and (fluid == nil or effect.finish < fluid.finish) then
-		Lighting.FogEnd = effect.finish
-		Lighting.FogStart = effect.start
-	elseif fluid then
-		Lighting.FogEnd = fluid.finish
-		Lighting.FogStart = fluid.start
-	elseif ViewSettings.usesFog() then
-		local view = ViewSettings.lod()
-		Lighting.FogEnd = view * Config.BlockSize * weatherFog
-		Lighting.FogStart = Lighting.FogEnd * 0.55
-	else
+	local handle = ViewSettings.atmosphere()
+	local view = ViewSettings.lod()
+	local shown: AtmosphereModel.Mode, start: number?, finish: number? = AtmosphereModel.fog(
+		effectFog,
+		fluidFog,
+		handle ~= nil,
+		ViewSettings.usesFog(),
+		view * Config.BlockSize,
+		weatherFog
+	)
+	mode = shown
+	if start == nil or finish == nil then
 		local own = placeFog :: { finish: number, start: number }
-		Lighting.FogEnd = own.finish
-		Lighting.FogStart = own.start
+		start, finish = own.start, own.finish
+	end
+	Lighting.FogEnd = finish
+	Lighting.FogStart = start
+	local inLighting = AtmosphereModel.attached(shown)
+	if handle and inLighting ~= attached then
+		attached = inLighting
+		handle.Parent = if inLighting then Lighting else nil
 	end
 end
 
@@ -221,7 +277,8 @@ end
 
 --[[
 	The weather's fog factor (Weather/WeatherSky.fog: 1 clear, down to Config.Weather.Fog's in
-	rain, snow and thunder), applied to the view distance's fog at once when it changed.
+	rain, snow and thunder): the Atmosphere's density follows at LightingController's next update;
+	the old view fog (without an Atmosphere) is applied again at once when it changed.
 ]]
 function ViewSettings.setWeatherFog(factor: number)
 	factor = math.clamp(factor, 0.05, 1)
@@ -229,7 +286,7 @@ function ViewSettings.setWeatherFog(factor: number)
 		return
 	end
 	weatherFog = factor
-	if fluidFog == nil and effectFog == nil then
+	if mode == "classic" then
 		ViewSettings.applyFog()
 	end
 end

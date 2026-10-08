@@ -54,6 +54,10 @@ export type Environment = {
 	environmentDiffuse: number,
 	environmentSpecular: number,
 	fogColor: { number },
+	-- The Atmosphere's Haze, Glare and Decay (Rendering/AtmosphereModel; its Color is fogColor's).
+	haze: number,
+	glare: number,
+	decay: { number },
 }
 
 local function frac(x: number): number
@@ -262,8 +266,9 @@ local BLACK = table.freeze({ 0, 0, 0 })
 --[[
 	The Lighting values for `dayTime` with `exposure` (0..1, skyExposure) of the sky light reaching
 	the camera: Night blended to Day by the daylight factor, the Dusk colours mixed in by the glow
-	x Dusk.Strength, then everything the sky gives (outdoor ambient, sun / moon, sky box light)
-	faded out underground. Ambient is always CaveAmbient. `settings` defaults to Config.Lighting.
+	x Dusk.Strength, then everything the sky gives (outdoor ambient, sun / moon, sky box light, the
+	Atmosphere's haze and glare) faded out underground. Ambient is always CaveAmbient. `settings`
+	defaults to Config.Lighting.
 
 	`sunHeight` (-1..1) is the height of the sun the blend follows; it defaults to Minecraft's
 	(sunHeight(dayTime)). The client passes the sun Roblox really draws, whose path also depends
@@ -284,6 +289,9 @@ function DayCycle.environment(dayTime: number, exposure: number, settings: Light
 	local function level(dayValue: number, nightValue: number): number
 		return mix(mix(nightValue, dayValue, daylight), 0, dark)
 	end
+	local function hazy(dayValue: number, nightValue: number, duskValue: number): number
+		return mix(mix(mix(nightValue, dayValue, daylight), duskValue, glow), 0, dark)
+	end
 
 	return {
 		ambient = table.clone(light.CaveAmbient),
@@ -293,6 +301,9 @@ function DayCycle.environment(dayTime: number, exposure: number, settings: Light
 		environmentDiffuse = level(day.EnvironmentDiffuse, night.EnvironmentDiffuse),
 		environmentSpecular = level(day.EnvironmentSpecular, night.EnvironmentSpecular),
 		fogColor = colour(day.FogColor, night.FogColor, dusk.FogColor, light.Underground.FogColor),
+		haze = hazy(day.Haze, night.Haze, dusk.Haze),
+		glare = hazy(day.Glare, night.Glare, dusk.Glare),
+		decay = colour(day.Decay, night.Decay, dusk.Decay, night.Decay),
 	}
 end
 

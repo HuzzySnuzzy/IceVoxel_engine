@@ -20,11 +20,19 @@
 	             the sky nearby: nothing opaque above the camera (a pit or shaft), or open air a
 	             few blocks away (a tunnel into a hillside, a quarry under an overhang; the fade
 	             then follows the distance to it). See Rendering/SkyExposure.
-	  Fog        its colour follows the time while IceVoxel's fog is in use (ViewSettings.usesFog);
-	             its distance is ViewSettings'. While the camera is in a fluid, the fluid's colour
-	             replaces it (`setFogColour`, Rendering/FluidFog), whatever the fog setting, and a
-	             status effect's (Blindness: black, `setEffectFogColour`, Rendering/EffectView)
-	             replaces both.
+	  Haze       a Lighting Atmosphere (Rendering/AtmosphereModel.state, written every update,
+	             only what changed): its Density from the view distance and the weather's fog
+	             factor (ViewSettings), thinned out underground by the exposure; its Color, Haze,
+	             Glare and Decay from the time of day and the weather (DayCycle.environment,
+	             Weather/WeatherSky.apply); none with the Fog setting off (ViewSettings.usesFog).
+	             `start` drives the place's first Atmosphere (default.project.json's) or makes
+	             "IceVoxelAtmosphere", and makes "IceVoxelSky" when Lighting has no Sky (Roblox
+	             ignores an Atmosphere without one); a second Atmosphere is taken out of Lighting
+	             (which one Roblox would use is undefined).
+	  Fog        the old Lighting fog only shows inside a fluid and under Blindness (ViewSettings
+	             takes the Atmosphere out meanwhile): FogColor is the fluid's colour
+	             (`setFogColour`, Rendering/FluidFog) or a status effect's over it (Blindness:
+	             black, `setEffectFogColour`, Rendering/EffectView), else the place's own.
 	  Weather    the weather over the camera (Weather/WeatherState, smoothed over a second or two)
 	             darkens what the sky gives by Minecraft's rain and thunder darkening, hides some
 	             of the sun under full cloud cover and darkens the fog's colour (Weather/
@@ -34,9 +42,10 @@
 	             Config.Effects.NightVisionAmbient's grey, so caves and nights read lit, as
 	             Minecraft's lightmap does; a change of scale writes at once.
 
-	An Atmosphere or Sky in Lighting is left alone: Roblox lights both by the sun and moon itself.
-	Config.Lighting.Enabled = false leaves everything but ClockTime to the place (the exposure is
-	still worked out: the cave ambience and F3 read it). Values are written every
+	Roblox lights the sky and the Atmosphere's haze by the sun and moon itself. Config.Lighting
+	.Enabled = false leaves everything but ClockTime to the place, its Atmosphere and Sky too (the
+	exposure is still worked out: the cave ambience and F3 read it; the short fogs still take an
+	Atmosphere out of Lighting while they show). Values are written every
 	Config.Lighting.UpdateInterval seconds, and only when they changed (outside sunrise, sunset and
 	the underground fade only ClockTime does).
 ]]
@@ -51,6 +60,7 @@ local DayCycle = require(Shared.DayCycle)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local AtmosphereModel = require(script.Parent.AtmosphereModel)
 local SkyExposure = require(script.Parent.SkyExposure)
 local ViewSettings = require(script.Parent.ViewSettings)
 local WeatherSky = require(script.Parent.Parent.Weather.WeatherSky)
@@ -77,8 +87,8 @@ local grounds: { [number]: number } = {}
 local groundCount = 0
 -- Lighting property -> the value written last.
 local written: { [string]: any } = {}
--- The fog colour of the fluid the camera is in (nil: none), the place's own fog colour (captured
--- before a fluid first changes it) and the time of day's last one.
+-- The fog colour of the fluid the camera is in (nil: none) and the place's own fog colour
+-- (captured before a fluid first changes it).
 local fogOverride: Color3? = nil
 -- A status effect's fog colour (Blindness), over the fluid's.
 local effectFog: Color3? = nil
@@ -86,8 +96,26 @@ local effectFog: Color3? = nil
 local nightVision = 0
 local nightVisionChanged = false
 local placeFogColour: Color3? = nil
-local dayFogColour: Color3? = nil
 local lighting: any = Lighting
+-- Something the haze follows changed (`refresh`): update at the next frame.
+local refreshed = false
+-- The Atmosphere worked out at the last update, and what was written to which Atmosphere (density
+-- in thousandths, haze, glare and offset in hundredths, colours in whole steps: Roblox redraws its
+-- sky for each change and steps through quick ones).
+local atmosphereState = AtmosphereModel.new()
+local shown = {
+	atmosphere = nil :: Atmosphere?,
+	density = -1,
+	offset = -1,
+	haze = -1,
+	glare = -1,
+	r = -1,
+	g = -1,
+	b = -1,
+	dr = -1,
+	dg = -1,
+	db = -1,
+}
 
 local function attribute(name: string, fallback: number): number
 	local value = workspace:GetAttribute(name)
@@ -103,6 +131,47 @@ end
 
 local function colour(rgb: { number }): Color3
 	return Color3.new(rgb[1] / 255, rgb[2] / 255, rgb[3] / 255)
+end
+
+-- Writes `state` (AtmosphereModel.State) into `atmosphere`: only what changed since it was last
+-- written (everything into an Atmosphere not written before).
+local function writeAtmosphere(atmosphere: Atmosphere, state: AtmosphereModel.State)
+	if shown.atmosphere ~= atmosphere then
+		shown.atmosphere = atmosphere
+		shown.density, shown.offset, shown.haze, shown.glare = -1, -1, -1, -1
+		shown.r, shown.g, shown.b, shown.dr, shown.dg, shown.db = -1, -1, -1, -1, -1, -1
+	end
+	local density = math.floor(state.density * 1000 + 0.5)
+	if density ~= shown.density then
+		shown.density = density
+		atmosphere.Density = density / 1000
+	end
+	local offset = math.floor(state.offset * 100 + 0.5)
+	if offset ~= shown.offset then
+		shown.offset = offset
+		atmosphere.Offset = offset / 100
+	end
+	local haze = math.floor(state.haze * 100 + 0.5)
+	if haze ~= shown.haze then
+		shown.haze = haze
+		atmosphere.Haze = haze / 100
+	end
+	local glare = math.floor(state.glare * 100 + 0.5)
+	if glare ~= shown.glare then
+		shown.glare = glare
+		atmosphere.Glare = glare / 100
+	end
+	local c, d = state.color, state.decay
+	local r, g, b = math.floor(c[1] + 0.5), math.floor(c[2] + 0.5), math.floor(c[3] + 0.5)
+	if r ~= shown.r or g ~= shown.g or b ~= shown.b then
+		shown.r, shown.g, shown.b = r, g, b
+		atmosphere.Color = Color3.fromRGB(r, g, b)
+	end
+	r, g, b = math.floor(d[1] + 0.5), math.floor(d[2] + 0.5), math.floor(d[3] + 0.5)
+	if r ~= shown.dr or g ~= shown.dg or b ~= shown.db then
+		shown.dr, shown.dg, shown.db = r, g, b
+		atmosphere.Decay = Color3.fromRGB(r, g, b)
+	end
 end
 
 -- The natural ground height of block column (x, z) (integers). Needs the generator.
@@ -170,19 +239,24 @@ local function update(dt: number)
 	write("ColorShift_Top", colour(environment.colorShiftTop))
 	write("EnvironmentDiffuseScale", environment.environmentDiffuse)
 	write("EnvironmentSpecularScale", environment.environmentSpecular)
-	dayFogColour = colour(environment.fogColor)
-	if effectFog then
-		write("FogColor", effectFog)
-	elseif fogOverride then
-		write("FogColor", fogOverride)
-	elseif ViewSettings.usesFog() then
-		write("FogColor", dayFogColour)
+	-- (Written while a short fog has it out of Lighting too, so it comes back up to date.)
+	local atmosphere = ViewSettings.atmosphere()
+	if atmosphere then
+		AtmosphereModel.state(
+			atmosphereState,
+			environment,
+			ViewSettings.lod() * BLOCK,
+			ViewSettings.weatherFog(),
+			current,
+			ViewSettings.usesFog()
+		)
+		writeAtmosphere(atmosphere, atmosphereState)
 	end
 end
 
 --[[
-	The fog colour of the fluid the camera is in (Rendering/FluidFog), or with nil the normal one
-	again (the time of day's while IceVoxel's fog is in use, else the place's own); written at once.
+	The fog colour of the fluid the camera is in (Rendering/FluidFog), or with nil the place's own
+	again (the Atmosphere is back by then); written at once.
 ]]
 function LightingController.setFogColour(fog: Color3?)
 	if fog and placeFogColour == nil then
@@ -194,8 +268,6 @@ function LightingController.setFogColour(fog: Color3?)
 		return
 	elseif fog then
 		write("FogColor", fog)
-	elseif ViewSettings.usesFog() and dayFogColour then
-		write("FogColor", dayFogColour)
 	elseif placeFogColour then
 		write("FogColor", placeFogColour)
 	end
@@ -215,6 +287,11 @@ function LightingController.setEffectFogColour(fog: Color3?)
 	else
 		LightingController.setFogColour(fogOverride)
 	end
+end
+
+-- The haze follows a changed setting (the Fog setting, the view distance) at the next frame.
+function LightingController.refresh()
+	refreshed = true
 end
 
 -- Night Vision's scale (0: none .. 1; see the header): the ambients follow at the next frame.
@@ -244,6 +321,38 @@ function LightingController.skyExposure(): number
 end
 
 --[[
+	F3's fog line: the fog showing (ViewSettings.fogMode) and, for the Atmosphere, its Density
+	(with how far things are 90% hazed), Haze, Glare and Offset as Lighting has them; the old
+	fog's start and end (blocks) for the others.
+]]
+function LightingController.describeFog(): string
+	local mode = ViewSettings.fogMode()
+	local atmosphere = ViewSettings.atmosphere()
+	if mode == "atmosphere" and atmosphere then
+		local density = atmosphere.Density
+		local reach = AtmosphereModel.reach(density, 0.9) / BLOCK
+		return string.format(
+			"fog     atmosphere%s  density %.3f (90%% at %s)  haze %.2f  glare %.2f  offset %.2f",
+			if Config.Lighting.Enabled then "" else " (the place's)",
+			density,
+			if reach < 1e6 then string.format("%d", math.floor(reach + 0.5)) else "never",
+			atmosphere.Haze,
+			atmosphere.Glare,
+			atmosphere.Offset
+		)
+	elseif mode == "none" then
+		return "fog     none (the place's own)"
+	end
+	return string.format(
+		"fog     %s  %.1f-%.1f blocks (Lighting fog%s)",
+		mode,
+		Lighting.FogStart / BLOCK,
+		Lighting.FogEnd / BLOCK,
+		if atmosphere then ", atmosphere out" else ""
+	)
+end
+
+--[[
 	Minecraft's sky light (0..15) at block cell (x, y, z), estimated from the client's blocks
 	(SkyExposure.skyLight), for the cave mood (Audio/Ambience); nil where the cell isn't loaded or
 	before `start` was given a generator and a world.
@@ -266,6 +375,29 @@ function LightingController.start(terrain: TerrainGenerator.Generator?, world: C
 	assert(not started, "LightingController.start was already called")
 	started = true
 	generator = terrain
+	if Config.Lighting.Enabled then
+		-- The haze's Atmosphere and the Sky it needs (see the header).
+		if Lighting:FindFirstChildOfClass("Sky") == nil then
+			local sky = Instance.new("Sky")
+			sky.Name = "IceVoxelSky"
+			sky.Parent = Lighting
+		end
+		local atmosphere = ViewSettings.atmosphere()
+		if atmosphere == nil then
+			local created = Instance.new("Atmosphere")
+			created.Name = "IceVoxelAtmosphere"
+			-- (Its values are written by the update below, before the next frame.)
+			created.Parent = Lighting
+			ViewSettings.setAtmosphere(created)
+			atmosphere = created
+		end
+		for _, child in Lighting:GetChildren() do
+			if child:IsA("Atmosphere") and child ~= atmosphere then
+				warn(`[IceVoxel] a second Atmosphere in Lighting ("{child.Name}") was taken out; IceVoxel drives one`)
+				child.Parent = nil
+			end
+		end
+	end
 	if world then
 		getBlock = function(x: number, y: number, z: number): number?
 			return world:getBlock(x, y, z)
@@ -284,9 +416,10 @@ function LightingController.start(terrain: TerrainGenerator.Generator?, world: C
 	local elapsed = 0
 	RunService.Heartbeat:Connect(function(dt: number)
 		elapsed += dt
-		if changed or nightVisionChanged or elapsed >= Config.Lighting.UpdateInterval then
+		if changed or nightVisionChanged or refreshed or elapsed >= Config.Lighting.UpdateInterval then
 			changed = false
 			nightVisionChanged = false
+			refreshed = false
 			update(elapsed)
 			elapsed = 0
 		end

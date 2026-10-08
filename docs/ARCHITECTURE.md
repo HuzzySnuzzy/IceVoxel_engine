@@ -1244,13 +1244,15 @@ Minecraft's FogRenderer fog in blocks from each fluid's record: lava 0.25..1 (sp
 the view distance), oil 0..2, fuel -8..32, water -8..96 times the water vision (`vision`: at least
 0.25, building up over 600 ticks under water and dropping 10 a tick out of it, `stepVision`;
 LocalPlayer.getWaterVision), never past the view distance (Roblox fog starts at 0 at the
-nearest). It goes through `ViewSettings.setFluidFog` and `LightingController.setFogColour`, which
-put the view distance's fog (or the place's own) back once the camera leaves the fluid. The colour
+nearest). It goes through `ViewSettings.setFluidFog` and `LightingController.setFogColour` in the
+same frame: Lighting's old FogStart / FogEnd / FogColor, which Roblox only draws with no Atmosphere
+in Lighting, so ViewSettings takes the Atmosphere out meanwhile and puts it back once the camera
+leaves the fluid (see Lighting, Haze). The colour
 is the fluid's `fogColor` (water's brightened towards its brightest hue with the vision); fluids
 giving no light darken with the light around the camera (the sun's brightness times the sky light
 reaching it, `light`), lava glows anyway. A ColorCorrectionEffect ("IceVoxelFluidView" in
 Lighting) tints the view towards the fluid's colour (`TINT`: water 0.12, lava 0.55, oil 0.5, fuel
-0.3), so it shows even with an Atmosphere, which replaces Lighting's fog. Each fluid's tint and
+0.3), the sky seen through the surface too (Lighting's fog never covers the sky). Each fluid's tint and
 Color3 are made once; a frame compares the fluid, the fog to a tenth of a block and the colour with
 what it last wrote, in locals, and writes only changes, so a frame in an unchanging fluid makes no
 garbage.
@@ -1597,7 +1599,9 @@ A panel at the top centre names what the crosshair points at, like the Jade mod.
   a screen is open, while the HUD is hidden (the world map) and with nothing aimed at.
 
 The F3 overlay also shows the time: clock, day number, tick, sky light and how much of it reaches
-the camera (`LightingController.dayTime`, `skyExposure`); the PointLights in the world (lichen
+the camera (`LightingController.dayTime`, `skyExposure`); the fog showing (`describeFog`: the
+Atmosphere's density, how far it hazes things 90%, haze, glare and offset, or a fluid's or
+Blindness' fog in blocks); the PointLights in the world (lichen
 and lava lights: on of all); the cave view (how far caves are revealed, the level 1 split in
 use); and the hull's flags, `lava` among them.
 
@@ -1960,7 +1964,7 @@ Options screen; Config gives every default and the presets.
   | Effect                       | What it calls                                                       |
   | ---------------------------- | ------------------------------------------------------------------- |
   | lod, caves, foliage          | `ChunkStreamer:applyView()` (see Streaming; the Caves setting switches its `alwaysCaves`) |
-  | fog, lighting                | `ViewSettings.applyFog` / `applyLighting` (Prefer, Brightness)      |
+  | fog, lighting                | `ViewSettings.applyFog` and `LightingController.refresh` (the Atmosphere's density follows the view and the Fog setting at the next frame) / `applyLighting` (Prefer, Brightness) |
   | shadows, farShadows, textures | `ChunkRenderer:restyle` (see Rendering; farMaterials uses textures) |
   | overlay                      | `MeshOverlay:setUserEnabled` (see Far meshes)                       |
   | budget                       | `ChunkRenderer:setBuildBudget(ms?)`, nil for Auto                   |
@@ -2194,8 +2198,62 @@ A cave entrance darkens like a dug tunnel (half light ~17 blocks in, dark from ~
 floor is under the open sky (nothing opaque above it: full light), and the deep caves beyond stay
 dark (tests/spec/SkyExposure checks real ones).
 
-Fog colour follows the time while `ViewSettings.usesFog()` is true. An Atmosphere or Sky in
-Lighting is left alone, because Roblox lights both by the sun and moon itself.
+**Haze** (`Rendering/AtmosphereModel`, pure, tested in tests/spec/Atmosphere). The view's
+distance fades into the sky through a Lighting Atmosphere, Roblox's newer fog: while one is in
+Lighting (with a Sky: without one Roblox ignores it) the old `FogStart` / `FogEnd` / `FogColor`
+are ignored, even at Density 0.
+- *Whose.* `default.project.json` puts an `Atmosphere` (its daytime values, so Studio's edit view
+  looks right; the spec checks they match what the client writes at noon) and a `Sky` in
+  Lighting, under the names a new place's template uses, so `rojo serve` updates those.
+  `ViewSettings.atmosphere()` adopts the first Atmosphere in Lighting; `LightingController.start`
+  makes "IceVoxelAtmosphere" when there is none, "IceVoxelSky" when there is no Sky, and takes a
+  second Atmosphere out (which one Roblox would use is undefined). With `Lighting.Enabled = false`
+  nothing is made or written: the place's Atmosphere is its own (the Fog button reads "Place's
+  Own"), but the short fogs below still take it out while they show.
+- *Distance.* An Atmosphere has no start or end. Roblox publishes no formula; the best model (a
+  re-implementation of its renderer, matching developers' reports such as Density 1 hiding things
+  some 30 studs away and the docs' examples) is transmittance T(d) = exp(-Scale x Density^4 x d),
+  d in studs from the camera. `extinction` gives the k = -ln(Edge) / R that leaves `Edge` (0.1) of
+  a thing's light at R = view x BlockSize x the weather's fog factor (the old FogEnd), `density`
+  the Density (k / Scale)^(1/4): 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at
+  4096. The loaded terrain's edge is 90% hazed, LodTree's far nodes drawn whole up to a third past
+  it over 95%; near things stay clear (haze(d) = 1 - Edge^(d / R), whatever Scale is: 6% at R /
+  40, 13% at R / 16, 44% at R / 4). The old fog was clear to 55% of R and opaque at R, so the
+  middle distance is hazier than before. `Offset` 0.05 fades the haze into the sky right behind a
+  thing, so the edge melts into it (a high Offset gives silhouettes and shows LOD changes).
+- *Weather.* `WeatherSky.fog`'s factor (0.6 rain, 0.4 snow, 0.45 thunder) shortens R: the
+  Density x factor^(-1/4) that hides the old fog's nearer FogEnd. `WeatherSky.apply` darkens the
+  fog colour (Minecraft's), adds `Sky.Haze` x rain and `ThunderHaze` x thunder to Haze (the
+  horizon greys over) and takes the sun's glare away.
+- *Caves.* The haze fades things into the sky behind them, a daylit sky even in a cave, so k is
+  scaled by the sky exposure squared (deep down: Density 0), and `DayCycle.environment` fades
+  Haze and Glare out with the rest of the sky's light. Both follow the exposure's smoothing.
+- *Colour.* Roblox lights the haze by the sky (dark at night, warm towards a low sun), so Color
+  is `DayCycle.environment`'s fog colour (Minecraft's day, dusk, night fog: the colour of
+  Minecraft's horizon) raised to `ColorFloor` (96) at its brightest channel, since the dark night
+  sky already darkens it; Haze, Glare and Decay are blended like the light (`Day`, `Night`,
+  `Dusk`: a warm haze and a glow around the sun at sunset, no glare at night, where the moon side
+  would glow).
+- *Off.* The Fog setting off (or `Render.Fog` false): Density, Haze and Glare 0. The Atmosphere
+  stays in Lighting.
+- *Writing.* `LightingController` works it out every update into one table (`state`) and writes
+  only what changed (Density to a thousandth, Haze and Glare to a hundredth, colours in whole
+  steps), into the Atmosphere even while it is out of Lighting, so it comes back up to date.
+- *Which fog shows* (`AtmosphereModel.fog`, `ViewSettings.applyFog`): a status effect's fog
+  (Blindness) when nearer than the fluid's, the fluid's, else the Atmosphere. The short fogs keep
+  Minecraft's exact distances and colours with the old fog: `applyFog` writes FogStart / FogEnd
+  and takes the Atmosphere out (Parent nil, the reference kept) in one call, and the colour comes
+  from LightingController in the same frame (FluidFog and EffectView call both), so no frame
+  shows both or neither; when they end the Atmosphere goes back with the place's own FogStart /
+  FogEnd. Without any Atmosphere (`Lighting.Enabled` false in a place without one) the old view
+  fog stays: FogEnd at the view x the weather's factor, FogStart 55% of it.
+- *F3*: the `fog` line, the Atmosphere's Density and how far it hazes things 90% (in blocks),
+  Haze, Glare, Offset; or the short fog's start and end.
+
+Uncertain: the Scale constant (and so the Densities) comes from a re-implementation, not Roblox;
+calibrate it in Studio with a part d studs away whose haze looks half: Scale = 0.693 /
+(Density^4 x d). Roblox steps quick changes of Color and Haze (Density changes are smooth), so
+everything here changes over seconds.
 
 ## Weather (`Weather/`, server `World/WeatherServer`, `World/WeatherRules`, `World/Lightning`, client `Weather/`, `Map/WeatherLayer`)
 
@@ -2268,7 +2326,8 @@ override's weights, which `at`, `grid` and `forecastAt` take.
   `dimming`, `skyDarken`, `skyLight`, `sunBrightness`, and `isDay`, which is false in a full
   thunderstorm even at noon.
 - The sky, cloud and fog colours greyed as in ClientLevel and FogRenderer.
-- `fogFactor`: the fog distance at full rain 0.6, snow 0.4, thunder 0.45.
+- `fogFactor`: the fog distance at full rain 0.6, snow 0.4, thunder 0.45 (the client's
+  Atmosphere: as dense as for a view that much shorter).
 - The rain's sound volume and pitch (`rainSound`, LevelRenderer's weather.rain and
   weather.rain.above).
 - `thunderDelay(distance)`: thunder at 343 blocks a second.
@@ -2361,10 +2420,13 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   `DayCycle.environment`'s values through `WeatherSky.apply` every update: what the sky gives
   (OutdoorAmbient, the sun's Brightness and ColorShift_Top, the sky box's diffuse and specular
   light) times Minecraft's dimming, the sun also by `Sky.CoverSun` of the cloud cover, the fog's
-  colour by `Weather.fogColour`, all scaled by the sky exposure, so caves never change. At 10 Hz
-  a ColorCorrectionEffect (`IceVoxelWeatherView`) greys, flattens and cools the picture
-  (`WeatherSky.grading`), and the view distance's fog comes nearer by `Weather.fogFactor`
-  (`ViewSettings.setWeatherFog`; a fluid's or Blindness's fog still wins).
+  colour by `Weather.fogColour` (the Atmosphere's Color), the Atmosphere's Haze up by `Sky.Haze`
+  and `ThunderHaze` and its Glare gone, all scaled by the sky exposure, so caves never change. At
+  10 Hz a ColorCorrectionEffect (`IceVoxelWeatherView`) greys, flattens and cools the picture
+  (`WeatherSky.grading`), and the haze thickens by `Weather.fogFactor` (`ViewSettings
+  .setWeatherFog`, read by LightingController's next update: see Lighting, Haze; a fluid's or
+  Blindness's fog still wins). The clouds are parts, hazed by distance like the terrain: their
+  rings' ragged edge just past the view distance over 90%, a cloud halfway out under 70%.
 - *Clouds* (`Weather/CloudLod`, pure; `CloudView`): flat boxes at `Clouds.Altitude` (320: above
   9 in 10 of the land on seed 12345, under the great ranges' peaks) in the air's frame
   ((x, z) − D(t)), so they drift with the storms. Rings of detail as a clipmap: ring L has cells
@@ -3630,7 +3692,7 @@ velocity; the safe fall; no sprint start) and widens the field of view by (facto
 BlockInteraction times mining with its levels (Mining.playerFactor, with the perks).
 `Rendering/EffectView` (after the camera) raises Lighting's ambients for Night Vision
 (LightingController.setNightVision), closes the fog in black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
-LightingController.setEffectFogColour) and rolls the camera and sways the field of view for
+LightingController.setEffectFogColour, in the same frame: Lighting's fog with the Atmosphere out of Lighting) and rolls the camera and sways the field of view for
 Nausea (MovementController.setFovSway; the wobble times the Distortion Effects setting squared,
 Minecraft's screenEffectScale: `EffectView.setDistortion`), with a ColorCorrectionEffect for the brightness, darkness
 and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,

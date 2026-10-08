@@ -7,8 +7,10 @@
 	                nights) by Effects.nightVisionScale (full, flickering in the last 10 s), and the
 	                view brightens a little (a ColorCorrectionEffect, "IceVoxelEffectView").
 	  Blindness     the fog closes in to 5 blocks, black (ViewSettings.setEffectFog, LightingController
-	                .setEffectFogColour: Effects.blindnessFog, opening up over its last second),
-	                and the view darkens; it keeps sprints from starting (Player/MovementController).
+	                .setEffectFogColour, in the same frame: Effects.blindnessFog, opening up over its
+	                last second; Lighting's fog, with the Atmosphere out of Lighting meanwhile), and
+	                the view darkens (the sky too, which Lighting's fog never covers); it keeps
+	                sprints from starting (Player/MovementController).
 	                How blind the view is (`blindness`) dims other brightenings by as much
 	                (Weather/LightningView's flash: Minecraft's sky flash is hidden by the fog).
 	  Nausea        the camera rolls and the field of view sways (Minecraft's spinning distortion,

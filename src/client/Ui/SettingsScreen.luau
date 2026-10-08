@@ -253,14 +253,14 @@ local function settingWidget(parent: Frame, placed: Pages.Placed): Widget
 	local function refresh()
 		if key == "preset" then
 			button:setText(`{entry.name}: {Settings.presetName()}`)
-		elseif key == "fog" and ViewSettings.hasAtmosphere() then
-			-- (An Atmosphere replaces the fog: nothing to switch.)
-			button:setText("Fog: Atmosphere")
+		elseif key == "fog" and ViewSettings.placeKeepsFog() then
+			-- (The place keeps its own lighting and Atmosphere: nothing to switch.)
+			button:setText("Fog: Place's Own")
 		else
 			button:setText(PlayerSettings.text(key, Settings.get(key)))
 		end
 		if key == "fog" then
-			button:setEnabled(not ViewSettings.hasAtmosphere())
+			button:setEnabled(not ViewSettings.placeKeepsFog())
 		end
 	end
 	return { button = button, slider = nil, refresh = refresh }

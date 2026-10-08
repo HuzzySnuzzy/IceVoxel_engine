@@ -413,7 +413,13 @@ A fast, Minecraft-style voxel engine for Roblox.
   sunrises and sunsets, dark blue nights you can still find your way in (Minecraft's night sky
   light of 4), and caves and closed rooms that stay dark at any time of day unless you light them.
   A tunnel dug into a hillside darkens with the distance from its mouth, not the depth of the rock
-  above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft.
+  above it. `/time` and `/gamerule doDaylightCycle` work as in Minecraft. The distance fades into
+  the sky through Roblox's Atmosphere instead of the old distance fog: a light haze that thickens
+  with the distance until the edge of the view distance melts into the sky behind it (90% hazed
+  there, the far LOD terrain past it more; 6% at a fortieth of the way), in Minecraft's fog colour
+  along the horizon, warm at sunrise and sunset, dark at night (Roblox lights it by the sky), and
+  thinning out underground so cave walls never fade into a daylit sky. Water, lava, oil, fuel and
+  Blindness keep Minecraft's exact short fogs (the Atmosphere steps aside while they show).
 - **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
   few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
   blocks a second), grow and die out, and leave clear stretches between them, so you can see one
@@ -443,7 +449,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   height (a snow line cuts through a storm on a mountainside), fainter at a storm's edge. You hear
   it land around you (on a roof over you, muffled), the sky and the light darken by Minecraft's
   amounts (5/16 for rain, as much again for thunder; caves stay as they are), the picture greys
-  and the fog comes in. Clouds reach the render distance at y 320 in rings of detail (16-block
+  and the haze thickens (as a view 0.6 as far in rain, 0.4 in snow, 0.45 in thunder) and darkens,
+  greying the horizon over. Clouds reach the render distance at y 320 in rings of detail (16-block
   boxes near you, bigger ones far off): scattered white ones in fair weather, a grey deck over
   rain, near-black towers over thunderstorms with grey rain shafts under them, so a storm shows
   on the horizon long before it arrives, and they drift with its wind. Lightning is Minecraft's
@@ -977,8 +984,12 @@ A fast, Minecraft-style voxel engine for Roblox.
 
 Studio tips:
 - Delete the template's `Baseplate`; the world starts at y = 0 and the baseplate only sits under it.
-- New places come with an `Atmosphere` in Lighting, which adds haze to the far LOD chunks. Without
-  one, IceVoxel uses distance fog at the edge of the view distance instead.
+- The project puts an `Atmosphere` and a `Sky` in Lighting (a new place's template has both, under
+  the same names, so `rojo serve` updates them). IceVoxel drives the first Atmosphere in Lighting
+  (it makes "IceVoxelAtmosphere", and "IceVoxelSky", when there is none; a second Atmosphere is
+  taken out). Roblox ignores an Atmosphere without a Sky, and ignores `FogStart` / `FogEnd` while
+  an Atmosphere is in Lighting. Judge the haze in the Roblox player too: F3's `fog` line shows the
+  Atmosphere's density and how far it hazes things 90%.
 - How far parts are drawn is up to the engine, not the script: it depends on the graphics quality
   level and how many objects are on screen. Studio ignores that limit, so judge long views in the
   Roblox player with a high graphics level. Phones draw far less (a few hundred studs), which is why
@@ -1058,7 +1069,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Page            | Settings |
 | --------------- | -------- |
 | Options         | Graphics (the preset: Low / Medium / High / Ultra, "Custom" once a value it sets is changed), FOV (30-110, Minecraft's 70 "Normal" by default); the pages below; Reset (the current preset's values again), Defaults (every setting back to this device's defaults, key bindings included) |
-| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog, Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting), Caves (Hidden Until Seen / Always Shown) |
+| Video Settings  | Render Distance (256-4096 blocks, phones at most 1024), Detail Falloff (2-4), Full Detail (48-160 blocks, at most what the falloff allows), Cave View (64-176 blocks), Plant Distance (OFF, 8-64), Lichen Lights (16-128 blocks or All), Shadows, Far Shadows, Fog (Atmosphere / OFF), Textures (when the texture pack has a filled texture), Far Materials (where far meshes run), Brightness (Moody to Bright), Prefer (Distance / Lighting), Caves (Hidden Until Seen / Always Shown) |
 | Performance     | Far Meshes (with their state), Build Budget (Auto or 1-12 ms), Hidden Terrain (Draw / Skip), Swap Frames (0-3) |
 | Music & Sounds  | Master Volume, Music, Blocks, Players, Ambient, Interface (0-100%); Footsteps, Interface Clicks, Cave Moods, Music Toasts |
 | Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Touch Buttons (touch screens; after rejoining) |
@@ -1110,7 +1121,7 @@ The other new options, each Minecraft's:
 - Clouds and Weather (Minecraft keeps Clouds on its Video Settings, which is full here, and draws
   rain and snow by its Graphics setting): Fancy clouds are boxes with storm towers and rain
   shafts, Fast a flat layer of bigger cells; Fancy rain and snow fall within 10 blocks, Fast
-  within 5. OFF draws none; the sounds, the darker light and the fog stay. The Low preset (phones)
+  within 5. OFF draws none; the sounds, the darker light and the haze stay. The Low preset (phones)
   sets both to Fast, the others to Fancy.
 - Not here: Auto-Jump (the 1 1/16-block step height already walks up blocks without jumping),
   Toggle Perspective and Hide GUI (the game has no such keys), Show Subtitles.
@@ -1124,8 +1135,13 @@ the Performance page, the far meshes' state. A few notes on what the settings do
   falloff allows).
 - Caves: Hidden Until Seen draws a cave once you can see into it from underground (above);
   Always Shown draws every cave within full detail, about 4 × the parts of nearby terrain (see
-  Caves always shown in Features). No preset changes it. Settings with a tooltip (Caves, so far)
-  show it while the pointer rests on them or the gamepad selects them, as Minecraft's options do.
+  Caves always shown in Features). No preset changes it. Settings with a tooltip (Caves, Fog,
+  Clouds and Weather) show it while the pointer rests on them or the gamepad selects them, as
+  Minecraft's options do.
+- Fog: Atmosphere fades the far land and clouds into the sky (thicker in rain and snow, with a
+  haze along the horizon); OFF clears the Atmosphere (density and haze 0), a clear view to the
+  edge. Water, lava, oil, fuel and Blindness keep their fog either way. In a place that keeps its
+  own lighting (`Lighting.Enabled` false) with its own Atmosphere it reads "Place's Own".
 - Build Budget: Auto adapts the milliseconds a frame spends building parts to the frame time
   (`Render.AutoBudget`); a number fixes them.
 - Prefer Distance tells Roblox to lower lighting quality before draw distance
@@ -1442,7 +1458,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Rendering/                ChunkRenderer (boxes -> parts), RenderSchedule (build lanes, commit
                             groups), SectionDiff (in-place remesh), FrameBudget (adaptive build
                             budget), PartPool, ViewSettings (the view from the player's
-                            settings), LightingController (day, night and cave lighting),
+                            settings; which fog shows), LightingController (day, night and cave
+                            lighting, the Atmosphere), AtmosphereModel (the Atmosphere's haze
+                            from the view, weather, time and depth; which fog shows; pure),
                             SkyExposure (how much sky light reaches the camera), FluidFog (the
                             view from inside a fluid: fog and tint), MeshOverlay + MeshRegions
                             (far meshes), TextureLooks (every look of the texture pack: variants,
@@ -1492,7 +1510,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             maps, painted a band a frame) + WeatherMap (its colours, grids, cache,
                             forecast steps and wind; pure)
   Weather/                  the weather on this client: init (starts it, the picture's grading and
-                            fog, F3's lines), WeatherState (the server's state, this frame's
+                            haze, F3's lines), WeatherState (the server's state, this frame's
                             moment, the weather over the camera smoothed, columns' biomes),
                             PrecipitationView + Precipitation (rain and snow strips around the
                             camera stopping at roofs, the rain's sound; Minecraft's rules, pure),
@@ -1689,7 +1707,7 @@ for performance:
 | `Weather.ClearStartSeconds` | 300   | A new world's weather starts where its spawn stays dry this long.   |
 | `Weather.Lightning.Enabled` / `MeanSeconds` / `Radius` | true / 20 / 64 | Strikes near players in thunderstorms: one every MeanSeconds at full thunder, within Radius blocks. |
 | `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 1024 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance see and hear it. |
-| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog distance at full rain, snow and thunder, as a share of the clear one. |
+| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The haze at full rain, snow and thunder: the Atmosphere's density for a view this share as far. |
 | `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
 | `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the streaks' Texture (a stand-in: swap in your own), Length, Width, Speed, Color, Transparency. |
 | `Weather.Precipitation.Smoothing` / `ScansPerFrame` | 0.8 / 64 | Seconds the rain drawn takes to follow the weather; block columns whose roof is looked up per frame. |
@@ -1700,10 +1718,15 @@ for performance:
 | `Weather.Clouds.PartsPerFrame` / `RefreshSeconds` | 48 / 4 | Cloud parts placed or removed per frame at most; seconds before the nearest ring is planned again (twice that for each ring further out). |
 | `Weather.Clouds.Color` / `Dark` / `ShaftColor` / `Transparency` | white / near black / grey / 0.12 | Fair-weather and full-thunder colours (shades between), the shafts' colour, the clouds' see-through. |
 | `Weather.Sky.CoverSun` / `Saturation` / `ThunderSaturation` / `Contrast` / `Tint` / `Smoothing` | 0.3 / 0.28 / 0.18 / 0.08 / cool / 1.5 | The sun hidden at full cover; the picture's greying, flattening and tint in rain and thunder; seconds the light takes to follow. |
+| `Weather.Sky.Haze` / `ThunderHaze` | 1.8 / 1 | Atmosphere Haze added at full rain or snow, and more at full thunder (the horizon greys over). |
 | `Weather.Bolt.Color` / `Glow` / `Flash` / `LightRange` | pale blue / 0.75 / 0.45 / 60 | The bolt's colour and glow, the sky's flash, the struck point's light (studs). |
 | `Weather.Map.MiniCells` / `WorldCells` / `RefreshSeconds` / `CellsPerFrame` | 48 / 96 / 3 / 1536 | The weather map's cells across (minimap, world map), seconds before a picture is drawn again, cells painted a frame. |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
-| `Lighting.Enabled`        | true    | false leaves Lighting to the place (only the sun moves; the music and cave moods still follow the light). |
+| `Lighting.Enabled`        | true    | false leaves Lighting to the place, its Atmosphere and Sky too (only the sun moves; the music and cave moods still follow the light). |
+| `Render.Fog`              | true    | The Fog setting's default; false: no haze at all. |
+| `Lighting.Atmosphere.Edge` / `Scale` | 0.1 / 0.1 | The light left at the view distance (0.1: 90% hazed) and the Atmosphere's Scale x Density^4 per stud (Roblox publishes no formula; calibrate it in Studio, see Config). Density 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at 4096. |
+| `Lighting.Atmosphere.Offset` / `ColorFloor` | 0.05 / 96 | How sharp a sky the haze fades into (low: the edge melts into it; high: silhouettes, LOD changes show); the haze colour's brightest channel at least (night). |
+| `Lighting.Day` / `Night` / `Dusk` `.Haze` / `Glare` / `Decay` | 0.25 / 0.2 / 0.8, glare 0 / 0 / 0.4 | The Atmosphere's haze along the horizon, glow round the sun and colour away from it, blended like the light; its Color is `FogColor` (Minecraft's fog colours). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
 | `Save.Enabled` / `StoreName` | true / "IceVoxelWorlds_v1" | Save worlds at all, and the DataStore they go in (a new name starts afresh; Studio needs API access). |
 | `Save.Interval`           | 300     | Seconds between automatic saves (Minecraft's 5 minutes), each writing only what changed; 0: only `/save-all` and shutdown. |
@@ -1717,9 +1740,11 @@ for performance:
 | `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
 | `Settings.SaveDelay` / `LoadWait` | 1.5 / 1 | Seconds before changes are sent to the server; seconds a joining client waits for its saved settings. |
 
-Lighting comes from `default.project.json`: Future technology, shadows and a dark ambient light. With
-`rojo serve` into an existing place, check that `Lighting.Technology` is Future (or LightingStyle
-Realistic in newer Studios). An Atmosphere or Sky you add is left alone, and
+Lighting comes from `default.project.json`: Future technology, shadows, a dark ambient light, an
+Atmosphere (its daytime values: tests/spec/Atmosphere checks they match what the client writes)
+and a Sky. With `rojo serve` into an existing place, check that `Lighting.Technology` is Future (or
+LightingStyle Realistic in newer Studios). IceVoxel drives the Atmosphere and keeps a Sky you add
+(its skybox colours the haze: the haze fades distant things into the sky behind them), and
 `Lighting.GeographicLatitude` sets how high the sun climbs; the lighting follows the sun wherever
 Roblox draws it.
 

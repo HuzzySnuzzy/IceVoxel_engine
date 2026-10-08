@@ -276,6 +276,9 @@ local ENTRIES: { Entry } = {
 		preset = true,
 		format = "plain",
 	},
+	-- The view's haze (client Rendering/AtmosphereModel: a Lighting Atmosphere fading the view
+	-- distance's edge into the sky); off, the Atmosphere's density and haze are 0. Fluids' and
+	-- Blindness' fogs show either way.
 	{
 		id = 9,
 		key = "fog",
@@ -289,6 +292,9 @@ local ENTRIES: { Entry } = {
 		effect = "fog",
 		preset = false,
 		format = "plain",
+		labels = { [0] = "OFF", [1] = "Atmosphere" },
+		tooltip = "Far land and clouds fade into the sky, more in rain and snow. OFF: a clear view to "
+			.. "the edge. Water, lava and Blindness keep their fog.",
 	},
 	{
 		id = 10,

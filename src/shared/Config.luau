@@ -327,7 +327,8 @@ local Config = {
 		FarShadows = false,
 		-- Recycled parts kept around for reuse.
 		PoolLimit = 8000,
-		-- Fades the edge of the view distance with Lighting fog (ignored if an Atmosphere exists).
+		-- Fades the view distance's edge into the sky with the Lighting Atmosphere IceVoxel drives
+		-- (Lighting.Atmosphere below; the Fog setting's default). false: no haze (Density 0).
 		Fog = true,
 		-- Draw the texture pack's textures (Shared/TexturePack; see Config.Textures). false: every
 		-- block in its plain Roblox material and colour.
@@ -480,7 +481,8 @@ local Config = {
 			BurnSeconds = 8,
 			Distance = 1024,
 		},
-		-- Fog distance factor at full rain, snow and thunder (client: the fog comes closer).
+		-- Fog distance factor at full rain, snow and thunder (client: the haze comes closer, as a
+		-- denser Atmosphere: Rendering/AtmosphereModel).
 		Fog = { Rain = 0.6, Snow = 0.4, Thunder = 0.45 },
 		-- Blocks a second thunder travels (the client hears a strike that much later).
 		SoundSpeed = 343,
@@ -567,7 +569,9 @@ local Config = {
 		-- rain and thunder on the sky's light; CoverSun of the sun's light hidden at full cloud
 		-- cover; a grading of the picture (saturation down by Saturation in rain, ThunderSaturation
 		-- more in thunder, contrast by Contrast, a cool Tint); Smoothing: seconds the light takes to
-		-- follow (time constant).
+		-- follow (time constant). Haze: Atmosphere.Haze added at full rain or snow, ThunderHaze
+		-- more at full thunder (the horizon greys over in the storm's darker fog colour; the sun's
+		-- glare goes as the rain comes).
 		Sky = {
 			CoverSun = 0.3,
 			Saturation = 0.28,
@@ -575,6 +579,8 @@ local Config = {
 			Contrast = 0.08,
 			Tint = { 226, 234, 255 },
 			Smoothing = 1.5,
+			Haze = 1.8,
+			ThunderHaze = 1,
 		},
 		-- Lightning on the client (Weather/LightningView): the bolt's colour, its glow, the flash of
 		-- the sky (ColorCorrection brightness at the strike, less with distance and indoors) and
@@ -616,9 +622,14 @@ local Config = {
 		is how dark caves are, at any time of day as in Minecraft. Raise it to brighten them, like
 		Minecraft's Brightness slider (Moody to Bright).
 
-		An Atmosphere or Sky the place has is left alone (Roblox lights them by the sun and moon
-		itself). Fog colour follows FogColor only while IceVoxel's fog is in use (Render.Fog and no
-		Atmosphere, see Rendering/ViewSettings).
+		The view's haze is a Lighting Atmosphere (Atmosphere below; Roblox ignores the old FogStart /
+		FogEnd while one is in Lighting): IceVoxel drives the place's first (default.project.json's)
+		or makes one, and a Sky if there is none (without one Roblox ignores the Atmosphere). Its
+		Color is FogColor below (Minecraft's fog colours, the horizon's colour in Minecraft too),
+		its Haze, Glare and Decay are blended like the rest, and Roblox fades distant geometry
+		into the sky behind it (lit by the sun and moon itself: dark at night, warm at sunset).
+		Lighting.FogColor itself only shows inside fluids and under Blindness, whose short fogs are
+		the old Lighting fog (Rendering/ViewSettings takes the Atmosphere out meanwhile).
 	]]
 	Lighting = {
 		-- false: only Lighting.ClockTime follows the day; everything else is left to the place. The
@@ -637,8 +648,14 @@ local Config = {
 			-- Lighting.EnvironmentDiffuseScale / EnvironmentSpecularScale: light from the sky box.
 			EnvironmentDiffuse = 1,
 			EnvironmentSpecular = 0.5,
-			-- Lighting.FogColor (Minecraft's day fog).
+			-- Minecraft's day fog: the Atmosphere's Color (see Atmosphere.ColorFloor).
 			FogColor = { 192, 216, 255 },
+			-- Atmosphere.Haze (0..10: how far up the sky the horizon's haze reaches; Color only
+			-- shows through it), Glare (0..10: a glow around the sun; needs Haze) and Decay (the
+			-- haze's colour away from the sun; needs Haze and Glare). Minecraft's sun has no glow.
+			Haze = 0.25,
+			Glare = 0,
+			Decay = { 106, 112, 125 },
 		},
 		-- Dark blue but readable (Minecraft's night sky light is 4 of 15).
 		Night = {
@@ -648,6 +665,10 @@ local Config = {
 			EnvironmentDiffuse = 0.4,
 			EnvironmentSpecular = 0.2,
 			FogColor = { 14, 18, 34 },
+			-- (No glare: the moon side would glow.)
+			Haze = 0.2,
+			Glare = 0,
+			Decay = { 40, 50, 80 },
 		},
 		-- Warm sunrise and sunset light, mixed in up to Strength (Minecraft's sunrise colour curve).
 		Dusk = {
@@ -655,6 +676,10 @@ local Config = {
 			OutdoorAmbient = { 150, 104, 84 },
 			ColorShiftTop = { 200, 96, 30 },
 			FogColor = { 230, 140, 96 },
+			-- A warm haze along the horizon with a glow around the low sun, cooler away from it.
+			Haze = 0.8,
+			Glare = 0.4,
+			Decay = { 120, 110, 150 },
 		},
 		-- Sky light fades out between Start and End blocks below the natural ground at the camera,
 		-- smoothed with a time constant of Seconds (settled after about 3 x Seconds), leaving only
@@ -667,6 +692,31 @@ local Config = {
 			End = 16,
 			Seconds = 0.75,
 			FogColor = { 12, 12, 16 },
+		},
+		--[[
+			The Atmosphere (Rendering/AtmosphereModel). It has no FogStart / FogEnd: the light of a
+			thing d studs away is let through by T = exp(-Scale x Density^4 x d) (an exponential
+			from the camera on; Roblox publishes no formula, Scale 0.1 and the 4th power come from
+			a re-implementation of its renderer and match what developers report, e.g. Density 1
+			hides things some 30 studs off). Density is worked out so that Edge of the light is
+			left at the view distance (x the weather's fog factor): 0.1, so the edge of the loaded
+			terrain is 90% hazed, its far LOD nodes (up to a third further) 95%, while what is near
+			stays clear (6% at 1/40 of the view, 13% at 1/16, 44% at 1/4: an exponential's shape,
+			whatever Scale is). Density at 2048 blocks: 0.247 (1024: 0.294, 512: 0.350, 4096:
+			0.208). Underground it thins out by the sky exposure squared, so cave walls never fade
+			into a daylit sky. To calibrate Scale in Studio: put a part d studs away, find the
+			Density at which it looks half hazed, then Scale = 0.693 / (Density^4 x d); a larger
+			Edge keeps more of the middle distance (and shows more of the edge).
+			Offset: how sharp a sky the haze fades to (0: the sky right behind, so the edge melts
+			into it; 1: one blurred average, a silhouette, and LOD changes show). ColorFloor: the
+			fog colour's brightest channel is raised to at least this (the sky's own light already
+			darkens the haze at night: Minecraft's dark night fog would darken it twice).
+		]]
+		Atmosphere = {
+			Scale = 0.1,
+			Edge = 0.1,
+			Offset = 0.05,
+			ColorFloor = 96,
 		},
 	},
 

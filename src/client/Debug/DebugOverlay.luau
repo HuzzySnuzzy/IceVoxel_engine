@@ -6,8 +6,10 @@
 	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
 	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
 	knows about (EntityRenderer), the time of day (the clock, day number, Minecraft's sky light
-	outdoors and how much of it reaches the camera; Rendering/LightingController) and the music
-	(surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
+	outdoors and how much of it reaches the camera; Rendering/LightingController), the fog showing
+	(LightingController.describeFog: the Atmosphere's density, how far it hazes things 90%, its
+	haze, glare and offset; or a fluid's or Blindness' Lighting fog, start and end in blocks) and
+	the music (surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
 	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
 	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
@@ -387,6 +389,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
 			timeLine(),
+			LightingController.describeFog(),
 			WeatherClient.describe(),
 			musicLine(),
 			survivalLine(),
