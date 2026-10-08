@@ -60,6 +60,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local Origin = require(Shared.World.Origin)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local AtmosphereModel = require(script.Parent.AtmosphereModel)
@@ -194,14 +195,15 @@ local function groundAt(x: number, z: number): number
 	return height :: number
 end
 
--- How much sky light should reach the camera now (SkyExposure.target).
+-- How much sky light should reach the camera now (SkyExposure.target; the camera in world blocks:
+-- Shared/World/Origin).
 local function targetExposure(): number
 	local camera = workspace.CurrentCamera
 	if camera == nil or generator == nil then
 		return 1
 	end
-	local position = camera.CFrame.Position / BLOCK
-	return SkyExposure.target(position.X, position.Y, position.Z, groundAt, getBlock, Config.Lighting.Underground)
+	local x, y, z = Origin.renderToBlocks(camera.CFrame.Position)
+	return SkyExposure.target(x, y, z, groundAt, getBlock, Config.Lighting.Underground)
 end
 
 local function update(dt: number)

@@ -16,6 +16,11 @@
 	can also run on the real generator: walking down a real cave entrance reveals the cave beyond
 	within frames, and under the open sky of a pit or a ravine full detail keeps its range (the
 	underground split only once shut in).
+
+	The floating origin (Shared/World/Origin): the simulation's camera is placed in render studs, so
+	with the origin moved far away the streamer selects, loads and swaps exactly as at the world's
+	0; the viewer comes from the hull hook (`viewerFeet`), else the world spawn attribute (world
+	studs), else the camera read back into world blocks.
 ]]
 
 local fs = require("@lune/fs")
@@ -37,6 +42,7 @@ return function(t, shared, require, _server, client)
 	local Horizon = require(shared.World.Horizon)
 	local Caves = require(shared.Generation.Caves)
 	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
+	local Origin = require(shared.World.Origin)
 	local LoadPriority = require(client.Streaming.LoadPriority)
 	local RemeshQueue = require(client.Streaming.RemeshQueue)
 	local SwapUnits = require(client.Streaming.SwapUnits)
@@ -1394,10 +1400,15 @@ return function(t, shared, require, _server, client)
 			table.insert(sim.teleportModes, active)
 		end
 
+		-- (The camera in render studs: world studs minus the floating origin, Shared/World/Origin.)
 		function sim.place(self, px: number, pz: number, yaw: number?)
 			self.x, self.z = px, pz
 			local angle = yaw or 0
-			local eye = Vector3.new(px * Config.BlockSize, self.eyeY * Config.BlockSize, pz * Config.BlockSize)
+			local eye = Vector3.new(
+				px * Config.BlockSize - Origin.x,
+				self.eyeY * Config.BlockSize,
+				pz * Config.BlockSize - Origin.z
+			)
 			env.camera.CFrame = CFrame.lookAt(eye, eye + Vector3.new(math.cos(angle), 0, math.sin(angle)))
 		end
 		sim:place(x, z)
@@ -2046,6 +2057,91 @@ return function(t, shared, require, _server, client)
 				t.eq(sim.gaps, 0, `seed {seed}: no gaps outside teleports`)
 				t.eq(sim.streamer.remesh:pending(), 0, `seed {seed}: no dirty section left`)
 			end)
+		end
+	end)
+
+	t.test("streamer: with the render origin far away it selects and loads as at the world's 0", function()
+		-- One load and a step, with the origin at (ox, oz) studs and the camera in render studs.
+		local function run(ox: number, oz: number): any
+			Origin.reset()
+			Origin.set(ox, oz)
+			local out: any = {}
+			simulate(40.5, -20.5, function(sim)
+				out.frames = sim:run(600, function()
+					return sim:idle()
+				end)
+				out.idle = sim:idle()
+				out.viewer = sim.streamer.viewer
+				out.eye = sim.streamer.eye
+				out.modes = #sim.teleportModes
+				local keys = {}
+				for key in sim.streamer.desired do
+					table.insert(keys, key)
+				end
+				table.sort(keys)
+				out.desired = table.concat(keys, ",")
+				out.shown = shownCount(sim)
+				out.overlaps, out.gaps = sim.overlaps, sim.gaps
+				-- A step on: the next refresh sees a block of walking, no teleport.
+				sim:place(sim.x + 1, sim.z)
+				sim:run(15)
+				out.walked = sim.streamer.viewer
+				out.trashed = #sim.renderer.trashed
+			end)
+			return out
+		end
+		local ok, err = pcall(function()
+			local home, away = run(0, 0), run(7680, -7680)
+			t.ok(home.idle and away.idle, "both loaded")
+			t.eq(away.frames, home.frames, "in as many frames")
+			t.eq(away.desired, home.desired, "the same selection")
+			t.eq(away.shown, home.shown, "as many nodes shown")
+			t.ok(away.viewer:FuzzyEq(home.viewer, 1e-4), `the viewer in world blocks: {away.viewer}`)
+			t.ok(away.eye:FuzzyEq(home.eye, 1e-4), `the eye in world blocks: {away.eye}`)
+			t.eq(away.modes, home.modes, "teleport mode as at 0")
+			t.ok(away.walked:FuzzyEq(home.walked, 1e-4), "walking on")
+			t.eq(away.trashed, 0, "no teleport")
+			t.eq(away.overlaps + away.gaps, 0, "no overlaps or gaps")
+		end)
+		Origin.reset()
+		if not ok then
+			error(err, 0)
+		end
+	end)
+
+	t.test("streamer: the viewer is the hull hook, else the world spawn, else the camera", function()
+		Origin.reset()
+		Origin.set(3072, 1536)
+		local ok, err = pcall(function()
+			simulate(40.5, 40.5, function(sim)
+				local streamer = sim.streamer
+				sim:run(15)
+				t.ok(
+					streamer.viewer:FuzzyEq(Vector3.new(40.5, sim.eyeY, 40.5), 1e-4),
+					`the camera, in world blocks: {streamer.viewer}`
+				)
+				-- No hull yet: the world spawn (world studs).
+				shared:SetAttribute("SpawnPosition", Vector3.new(90 * 3, 33 * 3, -60 * 3))
+				local feet: { number }? = nil
+				streamer.viewerFeet = function(): (number?, number, number)
+					if feet then
+						return feet[1], feet[2], feet[3]
+					end
+					return nil, 0, 0
+				end
+				sim:run(15)
+				t.ok(streamer.viewer:FuzzyEq(Vector3.new(90, 33, -60), 1e-4), `the spawn: {streamer.viewer}`)
+				-- The hull (world blocks).
+				feet = { 41.25, 30, 39.75 }
+				sim:run(15)
+				t.ok(streamer.viewer:FuzzyEq(Vector3.new(41.25, 30, 39.75), 1e-4), `the hull: {streamer.viewer}`)
+				t.ok(streamer.eye:FuzzyEq(Vector3.new(40.5, sim.eyeY, 40.5), 1e-4), "the eye is the camera's")
+			end)
+		end)
+		shared:SetAttribute("SpawnPosition", nil)
+		Origin.reset()
+		if not ok then
+			error(err, 0)
 		end
 	end)
 

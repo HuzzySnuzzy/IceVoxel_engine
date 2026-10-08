@@ -34,6 +34,12 @@
 	            when it is used next (`release`). `base` is the cloud's base over a point, where a
 	            far bolt ends.
 
+	  Origin    the floating origin (Shared/World/Origin): boxes and pivots are written at render
+	            studs (world studs minus the origin); a move of the origin moves each ring's Model
+	            with PivotTo (its pivot minus the move: a Rendering/Rebase mover, "clouds"), never
+	            its parts one by one, so its WorldPivot stays right for the next drift. The camera
+	            is read back into world blocks.
+
 	Measured on seed 12345 (tests/spec/WeatherVisuals, two in-game days at the spawn and 3 km out):
 	Fancy at the default view (2048 blocks, 5 rings) 202 parts on average, 387 at most (122 of
 	them rain shafts); Fancy at Ultra's 4096 (6 rings): 325, 496; Fancy at 1024: 140, 238; Fast at
@@ -46,8 +52,10 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Origin = require(Shared.World.Origin)
 
 local CloudLod = require(script.Parent.CloudLod)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local WeatherState = require(script.Parent.WeatherState)
 
 local BLOCK = Config.BlockSize
@@ -117,7 +125,7 @@ local function newRing(level: number): Ring
 	local model = Instance.new("Model")
 	model.Name = `Ring{level}`
 	local dx, dz = WeatherState.displacement()
-	model.WorldPivot = CFrame.new(dx * BLOCK, 0, dz * BLOCK)
+	model.WorldPivot = CFrame.new(dx * BLOCK - Origin.x, 0, dz * BLOCK - Origin.z)
 	model.Parent = folder
 	return {
 		model = model,
@@ -183,9 +191,9 @@ local function place(ring: Ring, box: CloudLod.Box): Part | false
 	local part = acquire()
 	part.Size = Vector3.new((box.x1 - box.x0) * BLOCK, (top - base) * BLOCK, (box.z1 - box.z0) * BLOCK)
 	part.CFrame = CFrame.new(
-		((box.x0 + box.x1) / 2 + ring.appliedX) * BLOCK,
+		((box.x0 + box.x1) / 2 + ring.appliedX) * BLOCK - Origin.x,
 		(base + top) / 2 * BLOCK,
-		((box.z0 + box.z1) / 2 + ring.appliedZ) * BLOCK
+		((box.z0 + box.z1) / 2 + ring.appliedZ) * BLOCK - Origin.z
 	)
 	if box.shaft then
 		part.Color = colourOf(clouds.ShaftColor)
@@ -284,9 +292,13 @@ local function step()
 	end
 
 	local camera = workspace.CurrentCamera
-	local position = if camera then camera.CFrame.Position / BLOCK else Vector3.zero
+	local px, pz = 0, 0
+	if camera then
+		local x, _, z = Origin.renderToBlocks(camera.CFrame.Position)
+		px, pz = x, z
+	end
 	local dx, dz = WeatherState.displacement()
-	local cu, cw = position.X - dx, position.Z - dz
+	local cu, cw = px - dx, pz - dz
 	local now = os.clock()
 
 	-- One plan a frame: the finest ring that needs one and has placed its last.
@@ -325,7 +337,7 @@ local function step()
 		if now - ring.movedAt >= 0.1 * 2 ^ (level - 1) and (ring.appliedX ~= dx or ring.appliedZ ~= dz) then
 			ring.movedAt = now
 			ring.appliedX, ring.appliedZ = dx, dz
-			ring.model:PivotTo(CFrame.new(dx * BLOCK, 0, dz * BLOCK))
+			ring.model:PivotTo(CFrame.new(dx * BLOCK - Origin.x, 0, dz * BLOCK - Origin.z))
 		end
 	end
 end
@@ -496,6 +508,13 @@ function CloudView.start(seed: number, distance: () -> number)
 	root.Name = "IceVoxelClouds"
 	root.Parent = workspace
 	folder = root
+	-- Each ring's Model moves with the render origin, as a whole (see the header).
+	Rebase.register("clouds", function(dx: number, dz: number, _parts: { BasePart }, _cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for _, ring in rings do
+			ring.model:PivotTo(ring.model:GetPivot() - d)
+		end
+	end)
 	RunService.Heartbeat:Connect(step)
 end
 

@@ -42,6 +42,7 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local Fluids = require(Shared.Fluids)
+local Origin = require(Shared.World.Origin)
 
 local FluidFog = {}
 
@@ -223,8 +224,9 @@ function FluidFog.start(
 		if camera == nil then
 			return
 		end
-		local at = camera.CFrame.Position / Config.BlockSize
-		local fluid = FluidFog.cameraFluid(getBlock, at.X, at.Y, at.Z)
+		-- (The camera in world blocks: Shared/World/Origin.)
+		local x, y, z = Origin.renderToBlocks(camera.CFrame.Position)
+		local fluid = FluidFog.cameraFluid(getBlock, x, y, z)
 		local spectator = isSpectator()
 		clock = math.min(clock + dt, tick * 5)
 		while clock >= tick do

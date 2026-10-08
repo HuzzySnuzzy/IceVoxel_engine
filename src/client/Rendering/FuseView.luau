@@ -13,6 +13,9 @@
 	            loads (World/ClientWorld knownEdits) and followed through block changes (a falling
 	            one moves cell by cell). Every REFRESH_INTERVAL the nearest MAX_DRAWN within RADIUS
 	            blocks of the camera get a box (from a pool); the rest go without.
+	  Origin    boxes are placed at render studs (Shared/World/Origin, from the block's doubles)
+	            and move with the floating origin (a Rendering/Rebase mover, "fuses"); the camera
+	            is read back into world blocks.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -23,8 +26,10 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
+local Origin = require(Shared.World.Origin)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local Rebase = require(script.Parent.Rebase)
 
 local BLOCK = Config.BlockSize
 local SIZE = ChunkLayout.SIZE
@@ -101,7 +106,8 @@ local function draw(record: Record)
 	local part = table.remove(spare) or newPart()
 	part.Color = COLOURS[record.block]
 	part.Transparency = if shown then SHOWN else 1
-	part.CFrame = CFrame.new((record.x + 0.5) * BLOCK, (record.y + 0.5) * BLOCK, (record.z + 0.5) * BLOCK)
+	part.CFrame =
+		CFrame.new((record.x + 0.5) * BLOCK - Origin.x, (record.y + 0.5) * BLOCK, (record.z + 0.5) * BLOCK - Origin.z)
 	part.Parent = folder
 	record.part = part
 	drawn[record] = true
@@ -131,8 +137,8 @@ local function onBlockChanged(x: number, y: number, z: number, block: number, pr
 		local camera = workspace.CurrentCamera
 		local record = lit[Coords.posKey(x, y, z)]
 		if camera and record then
-			local eye = camera.CFrame.Position / BLOCK
-			if (Vector3.new(x + 0.5, y + 0.5, z + 0.5) - eye).Magnitude <= RADIUS then
+			local ex, ey, ez = Origin.renderToBlocks(camera.CFrame.Position)
+			if Vector3.new(x + 0.5 - ex, y + 0.5 - ey, z + 0.5 - ez).Magnitude <= RADIUS then
 				draw(record)
 			end
 		end
@@ -170,10 +176,10 @@ local function refresh()
 	if camera == nil then
 		return
 	end
-	local eye = camera.CFrame.Position / BLOCK
+	local ex, ey, ez = Origin.renderToBlocks(camera.CFrame.Position)
 	local near: { { record: Record, distance: number } } = {}
 	for _, record in lit do
-		local d = (Vector3.new(record.x + 0.5, record.y + 0.5, record.z + 0.5) - eye).Magnitude
+		local d = Vector3.new(record.x + 0.5 - ex, record.y + 0.5 - ey, record.z + 0.5 - ez).Magnitude
 		if d <= RADIUS then
 			table.insert(near, { record = record, distance = d })
 		end
@@ -223,6 +229,17 @@ function FuseView.start(clientWorld: ClientWorld.ClientWorld)
 		local cx, cz = Coords.decodeChunkKey(key)
 		onChunkLoaded(clientWorld, cx, cz, true)
 	end
+	-- Drawn boxes move with the render origin.
+	Rebase.register("fuses", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for record in drawn do
+			local part = record.part
+			if part then
+				table.insert(parts, part)
+				table.insert(cframes, part.CFrame - d)
+			end
+		end
+	end)
 
 	local nextRefresh = 0
 	RunService.Heartbeat:Connect(function()

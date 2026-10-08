@@ -92,6 +92,25 @@
 	(ladders, rails, vines, glow lichen) the plate carrying it and the glowing boxes, so the picture
 	replaces the rails and rungs; without one every box but a fully see-through plate (the
 	ladder's image carrier).
+
+	The floating origin (Shared/World/Origin, Rendering/Rebase): parts are placed at world studs
+	minus the render origin. A build takes the origin when it starts (`Build.ox/oz`; its
+	`originX/originZ` are the node's corner in that frame, exact doubles) and every node records
+	the origin its parts are placed for (`NodeState.ox/oz`). The renderer's Rebase mover
+	("terrain") moves, in the one BulkMoveTo of a move, only what is in the workspace: the live
+	parts of nodes whose model is parented, retiring models, folders and lists still parented,
+	trashed models still there, and the far meshes (MeshOverlay.gather); the sparse lights' cached
+	positions follow. What is out of the workspace is fixed when it goes in (the lazy rule: a part
+	goes into the workspace only placed for the current origin):
+	  * a build's new parts (out of the workspace until the commit) are moved to their node's
+	    origin just before the commit parents them (plain CFrame writes);
+	  * a node model shown again (`show`, or the far meshes putting it back: overlay.settle) after
+	    the origin moved is moved by (its origin - the current one) with one BulkMoveTo right
+	    after it is parented, in the same Luau step (BulkMoveTo outside a WorldRoot is
+	    undocumented).
+	So a move costs only the parts on screen; the tens of thousands kept out of the workspace under
+	far meshes are fixed a node at a time when they come back. With Config.Origin off the origin
+	stays 0 and none of this moves a part.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -103,9 +122,11 @@ local Scatter = require(Shared.Meshing.Scatter)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
 local LodTree = require(Shared.World.LodTree)
+local Origin = require(Shared.World.Origin)
 local Blocks = require(Shared.Blocks)
 
 local PartPool = require(script.Parent.PartPool)
+local Rebase = require(script.Parent.Rebase)
 local MeshOverlay = require(script.Parent.MeshOverlay)
 local TextureLooks = require(script.Parent.TextureLooks)
 local ViewSettings = require(script.Parent.ViewSettings)
@@ -239,6 +260,10 @@ type NodeState = {
 	records: { [number]: Record },
 	-- Parts in live records.
 	parts: number,
+	-- The render origin (world studs) everything in the node's model is placed for: the current
+	-- one while the model is in the workspace (see the header).
+	ox: number,
+	oz: number,
 }
 
 -- The renderer's state of one task (RenderSchedule.Task.data).
@@ -265,7 +290,10 @@ type Build = {
 	folder: Folder?,
 	texture: number,
 	callbacks: { () -> () },
-	-- Placement.
+	-- Placement: the render origin when the build started (world studs) and the node's corner in
+	-- that frame (studs).
+	ox: number,
+	oz: number,
 	originX: number,
 	originZ: number,
 	scale: number,
@@ -315,7 +343,8 @@ type Release = {
 	keep: number,
 }
 
--- (`lava`: a lit fluid's, which follows the lava light distance.)
+-- (`lava`: a lit fluid's, which follows the lava light distance; `position`: render studs for the
+-- current origin, wherever the part is now.)
 type SparseEntry = { light: PointLight, position: Vector3, on: boolean, lava: boolean }
 
 type WalkEntry = { node: RenderNode, section: number }
@@ -427,9 +456,11 @@ export type ChunkRenderer = {
 local ChunkRenderer = {}
 ChunkRenderer.__index = ChunkRenderer
 
--- (Below: the look of a node now, and what a change of looks rebuilds.)
+-- (Below: the look of a node now, and what a change of looks rebuilds; the origin's moves.)
 local isCurrent: (self: ChunkRenderer, node: RenderNode) -> boolean
 local looksChanged: (self: ChunkRenderer, changes: TextureLooks.Changes) -> ()
+local settle: (self: ChunkRenderer, node: RenderNode) -> ()
+local gather: (self: ChunkRenderer, dx: number, dz: number, parts: { BasePart }, cframes: { CFrame }) -> ()
 
 function ChunkRenderer.new(): ChunkRenderer
 	local root = Instance.new("Folder")
@@ -497,6 +528,14 @@ function ChunkRenderer.new(): ChunkRenderer
 	TextureLooks.changed:Connect(function(changes: TextureLooks.Changes)
 		looksChanged(renderer, changes)
 	end)
+	-- The floating origin (see the header): what is on screen moves with it, models the far
+	-- meshes put back are placed for it.
+	renderer.overlay.settle = function(node: any)
+		settle(renderer, node)
+	end
+	Rebase.register("terrain", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		gather(renderer, dx, dz, parts, cframes)
+	end)
 	return renderer
 end
 
@@ -520,7 +559,8 @@ end
 local function stateOf(self: ChunkRenderer, node: RenderNode): NodeState
 	local state = self.states[node]
 	if state == nil then
-		state = { records = {}, parts = 0 }
+		-- (Nothing in it yet: placed for the origin now.)
+		state = { records = {}, parts = 0, ox = Origin.x, oz = Origin.z }
 		self.states[node] = state
 	end
 	return state :: NodeState
@@ -539,9 +579,9 @@ local function sparseWanted(distance: number, on: boolean, lava: boolean): boole
 	return distance < reach
 end
 
--- A part with a light was built: its light on (sparse lights: when near the camera; `lava`: a
--- lit fluid's).
-local function lightOn(self: ChunkRenderer, part: BasePart, sparse: boolean, lava: boolean)
+-- A part with a light was built by `b`: its light on (sparse lights: when near the camera; `lava`:
+-- a lit fluid's).
+local function lightOn(self: ChunkRenderer, b: Build, part: BasePart, sparse: boolean, lava: boolean)
 	self.lightCount += 1
 	local light = self.pool:light(part)
 	if light == nil then
@@ -551,7 +591,11 @@ local function lightOn(self: ChunkRenderer, part: BasePart, sparse: boolean, lav
 		light.Enabled = true
 		return
 	end
+	-- (Where it shows for the current origin: the build may have started before the last move.)
 	local position = part.Position
+	if b.ox ~= Origin.x or b.oz ~= Origin.z then
+		position += Vector3.new(b.ox - Origin.x, 0, b.oz - Origin.z)
+	end
 	local on = sparseWanted((position - workspace.CurrentCamera.CFrame.Position).Magnitude, false, lava)
 	light.Enabled = on
 	self.sparseLights[part] = { light = light, position = position, on = on, lava = lava }
@@ -748,7 +792,7 @@ local function addPart(self: ChunkRenderer, b: Build, part: BasePart, sparse: bo
 	end
 	if self.pool:hasLight(part) then
 		table.insert(b.lights, part)
-		lightOn(self, part, sparse, lava == true)
+		lightOn(self, b, part, sparse, lava == true)
 	end
 	self.partCount += 1
 	self.windowBuilt += 1
@@ -932,8 +976,11 @@ local function startBuild(self: ChunkRenderer, task: Task)
 	b.step, b.stepY = step, stepY
 	b.scale = step * Config.BlockSize
 	b.scaleY = stepY * Config.BlockSize
-	b.originX = node.nx * Config.ChunkSize * b.scale
-	b.originZ = node.nz * Config.ChunkSize * b.scale
+	-- (The node's corner in render studs for the origin now: exact doubles; the parts are placed
+	-- for it and moved to the node's origin at the commit if it moved meanwhile.)
+	b.ox, b.oz = Origin.x, Origin.z
+	b.originX = node.nx * Config.ChunkSize * b.scale - b.ox
+	b.originZ = node.nz * Config.ChunkSize * b.scale - b.oz
 	b.maxCells = math.max(1, MAX_PART // b.scale)
 	b.maxCellsY = math.max(1, MAX_PART // b.scaleY)
 end
@@ -1009,6 +1056,22 @@ local function retireRecord(self: ChunkRenderer, node: RenderNode, record: Recor
 	end
 end
 
+--[[
+	A build's new parts (out of the workspace) to the origin their node's parts are placed for,
+	before the commit parents them: (world - b.o) + (b.o - state.o). Nothing unless the origin
+	moved while it was built.
+]]
+local function placeBuilt(b: Build, state: NodeState, parts: { BasePart })
+	local dx, dz = b.ox - state.ox, b.oz - state.oz
+	if dx == 0 and dz == 0 then
+		return
+	end
+	local d = Vector3.new(dx, 0, dz)
+	for _, part in parts do
+		part.CFrame += d
+	end
+end
+
 -- Puts a built task live.
 local function commit(self: ChunkRenderer, task: Task)
 	local b: Build = task.data
@@ -1037,6 +1100,7 @@ local function commit(self: ChunkRenderer, task: Task)
 					self.pool:refresh(part)
 				end
 			end
+			placeBuilt(b, state, b.parts)
 			folder.Parent = modelOf(node)
 			if base then
 				retireRecord(self, node, base)
@@ -1054,6 +1118,7 @@ local function commit(self: ChunkRenderer, task: Task)
 		else
 			local live = (base :: Record).folder :: Folder
 			local old = base :: Record
+			placeBuilt(b, state, b.added)
 			for _, part in b.added do
 				if not self.pool:isCurrent(part) then
 					self.pool:refresh(part)
@@ -1170,6 +1235,8 @@ local function newBuild(boxes: buffer, restyle: boolean): Build
 		folder = nil,
 		texture = 0,
 		callbacks = {},
+		ox = 0,
+		oz = 0,
 		originX = 0,
 		originZ = 0,
 		scale = 0,
@@ -1267,6 +1334,7 @@ function ChunkRenderer.show(self: ChunkRenderer, node: RenderNode)
 		self.swapUsed += self:partsOf(node)
 	end
 	model.Parent = self.root
+	settle(self, node)
 	self.overlay:onShow(node)
 end
 
@@ -1506,6 +1574,130 @@ function looksChanged(self: ChunkRenderer, changes: TextureLooks.Changes)
 			addTask(self, task)
 		end
 	end
+end
+
+--[[ The floating origin (see the header) ]]
+
+-- Appends every part of `records` with its CFrame moved by -shift.
+local function appendRecords(records: { Record }, shift: Vector3, parts: { BasePart }, cframes: { CFrame })
+	local n = #parts
+	for _, record in records do
+		for _, part in record.parts do
+			n += 1
+			parts[n] = part
+			cframes[n] = part.CFrame - shift
+		end
+	end
+end
+
+--[[
+	The Rebase mover: every part of ours in the workspace, with its CFrame for the new origin
+	(the far meshes' too); the nodes in the workspace are placed for the new origin from now on and
+	the sparse lights' positions follow. What is out of the workspace stays where it is (fixed when
+	it goes in). Each part is visited once: a record's parts are its own (a diff build's kept parts
+	are only in its base record until the commit), retiring and trashed records were taken out of
+	their nodes.
+]]
+function gather(self: ChunkRenderer, dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+	local ox, oz = Origin.x, Origin.z
+	local d = Vector3.new(dx, 0, dz)
+	for node, state in self.states do
+		local model = node.model
+		if model == nil or model.Parent == nil then
+			continue
+		end
+		-- (Placed for the old origin, as every model in the workspace is: the shift is the move.)
+		local sx, sz = ox - state.ox, oz - state.oz
+		state.ox, state.oz = ox, oz
+		if sx == 0 and sz == 0 then
+			continue
+		end
+		local shift = if sx == dx and sz == dz then d else Vector3.new(sx, 0, sz)
+		local n = #parts
+		for _, record in state.records do
+			for _, part in record.parts do
+				n += 1
+				parts[n] = part
+				cframes[n] = part.CFrame - shift
+			end
+		end
+	end
+	-- Retiring models, folders and removed parts still in the workspace (the swap delay).
+	local retiring = self.retiring
+	for i = self.retiringHead, #retiring do
+		local entry = retiring[i]
+		if entry.done then
+			continue
+		end
+		local model = entry.model
+		local folder = entry.folder
+		local list = entry.list
+		if model then
+			if model.Parent ~= nil and entry.records then
+				appendRecords(entry.records, d, parts, cframes)
+			end
+		elseif folder then
+			local parent = folder.Parent
+			if parent ~= nil and parent.Parent ~= nil and entry.records then
+				appendRecords(entry.records, d, parts, cframes)
+			end
+		elseif list then
+			local inFolder = entry.inFolder
+			local parent = if inFolder then inFolder.Parent else nil
+			if parent ~= nil and parent.Parent ~= nil then
+				local n = #parts
+				for _, part in list do
+					n += 1
+					parts[n] = part
+					cframes[n] = part.CFrame - d
+				end
+			end
+		end
+	end
+	-- Trashed models still in the workspace (teleports).
+	for _, entry in self.trash do
+		if not entry.done and entry.model.Parent ~= nil then
+			appendRecords(entry.records, d, parts, cframes)
+		end
+	end
+	self.overlay:gather(d, parts, cframes)
+	for _, entry in self.sparseLights do
+		entry.position -= d
+	end
+end
+
+--[[
+	The node's model was just put into the workspace (`show`, or the far meshes putting it back):
+	when the origin moved since its parts were placed, everything in it (live sections, and any
+	retiring folder or removed parts still inside) moves by (its origin - the current one) in one
+	BulkMoveTo, before anything yields.
+]]
+function settle(self: ChunkRenderer, node: RenderNode)
+	local state = self.states[node]
+	local model = node.model
+	if state == nil or model == nil or model.Parent == nil then
+		return
+	end
+	local ox, oz = Origin.x, Origin.z
+	if state.ox == ox and state.oz == oz then
+		return
+	end
+	local d = Vector3.new(state.ox - ox, 0, state.oz - oz)
+	state.ox, state.oz = ox, oz
+	local parts: { BasePart } = {}
+	local cframes: { CFrame } = {}
+	-- (A node's model holds section folders, and they hold only parts.)
+	for _, folder in model:GetChildren() do
+		for _, child in folder:GetChildren() do
+			local part = child :: BasePart
+			table.insert(parts, part)
+			table.insert(cframes, part.CFrame + d)
+		end
+	end
+	if #parts > 0 then
+		workspace:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)
+	end
+	Rebase.settled(#parts)
 end
 
 -- Should the workers also make quads (for far meshes) for nodes of this level?

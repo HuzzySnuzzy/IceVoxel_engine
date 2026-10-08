@@ -53,6 +53,13 @@
 
 	Config.Sounds.Enabled = false plays nothing (and leaves Roblox's character sounds alone).
 	Positions are in blocks.
+
+	The floating origin (Shared/World/Origin): positions come in as world blocks and are kept as
+	render studs inside (world studs minus the origin: the voices' Attachments on the emitter, which
+	stays at the identity, the distant voices' sources, the listener given to SetListener), so a
+	sound and the camera are compared in one frame; `listener()` gives world blocks back. When the
+	origin moves, the Attachments, the distant sources and the listener move back by it
+	(Origin.onRebase).
 ]]
 
 local ContentProvider = game:GetService("ContentProvider")
@@ -65,6 +72,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
 local Sounds = require(Shared.Sounds)
+local Origin = require(Shared.World.Origin)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local SoundRules = require(script.Parent.SoundRules)
@@ -104,7 +112,7 @@ type Event = Sounds.Event
 type Voice = { sound: Sound, attachment: Attachment?, stopAt: number }
 type Bank = { pool: SoundRules.Pool, voices: { Voice } }
 -- A distant sound to start: its file, Sound.Volume, PlaybackSpeed, SoundGroup and length (s),
--- where it comes from (studs) and its equalizer's gains (dB).
+-- where it comes from (render studs) and its equalizer's gains (dB).
 type Start = {
 	id: string,
 	volume: number,
@@ -118,9 +126,9 @@ type Start = {
 	mid: number,
 	high: number,
 }
--- A distant voice or a bed's: where it comes from (studs; a bed's `x`, `z` are a direction from
--- the listener instead, `relative`), when it is cut, and its equalizer's gains as written; the
--- sound it starts once the one playing has faded out (`waiting`: since `fadeAt`, from
+-- A distant voice or a bed's: where it comes from (render studs; a bed's `x`, `z` are a direction
+-- from the listener instead, `relative`), when it is cut, and its equalizer's gains as written;
+-- the sound it starts once the one playing has faded out (`waiting`: since `fadeAt`, from
 -- `fadeFrom`).
 type Distant = {
 	sound: Sound,
@@ -158,7 +166,7 @@ local beds: { Bed } = {}
 local playedThisFrame = 0
 -- Files that failed to load (their events play their fallback).
 local failed: { [string]: boolean } = {}
--- Where the player hears from (studs; SoundRules.listenerAt), nil before the first frame.
+-- Where the player hears from (render studs; SoundRules.listenerAt), nil before the first frame.
 local listenerPosition: Vector3? = nil
 -- The player's settings (Settings/: Music & Sounds), on top of Config.Sounds.
 local playerVolume = 1
@@ -341,7 +349,7 @@ end
 
 --[[ Listener ]]
 
--- Where the player hears from (studs): the listener set last frame, else the camera.
+-- Where the player hears from (render studs): the listener set last frame, else the camera.
 local function hearingPoint(): Vector3?
 	if listenerPosition then
 		return listenerPosition
@@ -362,9 +370,11 @@ local function updateListener()
 		return
 	end
 	local cframe = camera.CFrame
-	local eye, focus = cframe.Position / BLOCK, camera.Focus.Position / BLOCK
-	local x, y, z = SoundRules.listenerAt(eye.X, eye.Y, eye.Z, focus.X, focus.Y, focus.Z, SoundRules.LISTENER_REACH)
-	local position = Vector3.new(x, y, z) * BLOCK
+	-- (In world blocks, as SoundRules works; back to render studs for Roblox.)
+	local ex, ey, ez = Origin.renderToBlocks(cframe.Position)
+	local fx, fy, fz = Origin.renderToBlocks(camera.Focus.Position)
+	local x, y, z = SoundRules.listenerAt(ex, ey, ez, fx, fy, fz, SoundRules.LISTENER_REACH)
+	local position = Vector3.new(x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z)
 	listenerPosition = position
 	SoundService:SetListener(Enum.ListenerType.CFrame, cframe.Rotation + position)
 end
@@ -428,7 +438,7 @@ local function playbackOf(event: Event, cueVolume: number, cuePitch: number): (S
 end
 
 --[[
-	Starts `event` on a voice of `bank`, at `position` (studs; nil: flat). Returns whether it
+	Starts `event` on a voice of `bank`, at `position` (render studs; nil: flat). Returns whether it
 	plays.
 ]]
 local function start(bank: Bank, event: Event, position: Vector3?, cueVolume: number, cuePitch: number): boolean
@@ -554,7 +564,7 @@ local function setGains(voice: Distant, low: number, mid: number, high: number)
 	end
 end
 
--- Puts `voice` DISTANT_OFFSET blocks from the listener (studs) towards where it comes from.
+-- Puts `voice` DISTANT_OFFSET blocks from the listener (render studs) towards where it comes from.
 local function follow(voice: Distant, listener: Vector3)
 	local reach = DISTANT_OFFSET * BLOCK
 	local offset
@@ -681,7 +691,12 @@ end
 -- from the eyes. nil without a camera.
 function SoundPlayer.listener(): Vector3?
 	local point = hearingPoint()
-	return if point then point / BLOCK else nil
+	return if point then Vector3.new(Origin.renderToBlocks(point)) else nil
+end
+
+-- World blocks (doubles) to render studs.
+local function renderAt(x: number, y: number, z: number): Vector3
+	return Vector3.new(x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z)
 end
 
 --[[
@@ -702,7 +717,7 @@ function SoundPlayer.play(
 	if event == nil then
 		return false
 	end
-	return playEvent(event, Vector3.new(x, y, z) * BLOCK, volume, pitch)
+	return playEvent(event, renderAt(x, y, z), volume, pitch)
 end
 
 -- Plays the sound `block` makes for `action` ("break", "place", "hit", "step", "fall"; its sound
@@ -769,7 +784,7 @@ function SoundPlayer.playDistant(
 	start.id, start.volume, start.pitch = playback.id, playback.volume, playback.pitch
 	start.group = if replacement then replacement.SoundGroup else nil
 	start.length = playback.length
-	start.x, start.y, start.z = x * BLOCK, y * BLOCK, z * BLOCK
+	start.x, start.y, start.z = x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z
 	start.low, start.mid, start.high = low, mid, high
 	if voice.sound.Playing then
 		-- (The one playing gives way: it fades out first, stepDistant then starts this one. One
@@ -885,7 +900,7 @@ end
 local function playCue(cue: Protocol.SoundCue)
 	local event = Sounds.get(cue.sound)
 	if event then
-		playEvent(event, Vector3.new(cue.x, cue.y, cue.z) * BLOCK, cue.volume, cue.pitch)
+		playEvent(event, renderAt(cue.x, cue.y, cue.z), cue.volume, cue.pitch)
 	end
 end
 
@@ -935,6 +950,28 @@ function SoundPlayer.start()
 	end
 	distantPool = SoundRules.newPool(DISTANT_VOICES)
 	world.Parent = workspace
+	-- What is kept in render studs moves back with the render origin (see the header): every
+	-- Attachment on the emitter (it stays at the identity), the distant sources, the listener.
+	Origin.onRebase(function(dx: number, dz: number)
+		local d = Vector3.new(dx, 0, dz)
+		for _, child in emitter:GetChildren() do
+			if child:IsA("Attachment") then
+				child.Position -= d
+			end
+		end
+		for _, voice in distantVoices do
+			if not voice.relative then
+				voice.x -= dx
+				voice.z -= dz
+			end
+			voice.start.x -= dx
+			voice.start.z -= dz
+		end
+		local point = listenerPosition
+		if point then
+			listenerPosition = point - d
+		end
+	end)
 
 	local interface = Instance.new("Folder")
 	interface.Name = FOLDER

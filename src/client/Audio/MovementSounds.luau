@@ -10,12 +10,13 @@
 	               ceil(distance - 3) half hearts) plays Minecraft's small or big fall and the fall
 	               sound of the block landed on (Sounds.fall, Sounds.block "fall") at once: the
 	               server sends them to everyone else (predicted events).
-	  Others       other players' characters near the listener are followed every frame (their feet,
-	               Rig.feet): the same rules from how far they moved, whether they stand on
-	               something and whether they are in water (SoundRules.observe), swimming when
-	               their body lies down in water. Whether they sneak is not known, so they always
-	               make footsteps. The server never sends footsteps, so every client makes
-	               everyone's.
+	  Others       other players near the listener are followed every frame (their feet in world
+	               blocks, Player/RemotePlayers: only those the client is told about): the same
+	               rules from how far they moved, whether they stand on something and whether they
+	               are in water (SoundRules.observe), swimming when their body lies down in water.
+	               Whether they sneak is not known, so they always make footsteps. The server
+	               never sends footsteps, so every client makes everyone's. World blocks all the
+	               way: a move of the floating origin (Shared/World/Origin) is no step.
 
 	Footsteps follow Config.Sounds.Footsteps and the player's Footsteps setting (SoundPlayer.
 	allows); swimming and splashes always play. Spectators make no sound at all (Player/
@@ -30,10 +31,10 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
-local Rig = require(Shared.Movement.Rig)
 local Sounds = require(Shared.Sounds)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local SoundPlayer = require(script.Parent.SoundPlayer)
 local SoundRules = require(script.Parent.SoundRules)
@@ -44,8 +45,9 @@ local TICK_RATE = PlayerPhysics.TICK_RATE
 local FOLLOW_DISTANCE = Sounds.DEFAULT_DISTANCE + 8
 -- A character moving further than this (blocks) in one frame was teleported: no steps for it.
 local TELEPORT_DISTANCE = 4
--- A character whose body leans further than 45 degrees lies down (swims, in water).
-local LYING_UP = math.cos(math.rad(45))
+-- A body leaning further than 45 degrees (RemotePlayers' tilt: 1 lying flat) lies down (swims,
+-- in water).
+local LYING_TILT = 0.5
 
 type GetBlock = SoundRules.GetBlock
 
@@ -117,12 +119,20 @@ function MovementSounds.tick(
 	end
 end
 
--- A followed character: its walker and where its feet were last frame.
-type Followed = { character: Model, walker: SoundRules.Walker, feet: Vector3? }
+-- A followed player: their character, walker, where their feet were last frame (world blocks;
+-- nil x: unknown) and the frame they were last seen.
+type Followed = {
+	character: Model?,
+	walker: SoundRules.Walker,
+	known: boolean,
+	x: number,
+	y: number,
+	z: number,
+	seen: number,
+}
 
 -- Starts following other players' characters for their footsteps, swimming and splashes.
 function MovementSounds.start(world: ClientWorld.ClientWorld)
-	local localPlayer = Players.LocalPlayer
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
 	end
@@ -147,50 +157,64 @@ function MovementSounds.start(world: ClientWorld.ClientWorld)
 		climbing = false,
 	}
 
+	local frame = 0
 	RunService.Heartbeat:Connect(function(dt: number)
 		if not SoundPlayer.isEnabled() then
 			return
 		end
+		frame += 1
 		local listener = SoundPlayer.listener()
-		for _, player in Players:GetPlayers() do
-			local character = player.Character
-			local audible = SpectatorRules.audible(GameMode.of(player))
-			if player ~= localPlayer and (character == nil or not audible) then
+		for player, remote in RemotePlayers.each() do
+			if not SpectatorRules.audible(GameMode.of(player)) then
 				followed[player] = nil
-			elseif player ~= localPlayer and character then
-				local record = followed[player]
-				if record == nil or record.character ~= character then
-					record = { character = character, walker = SoundRules.newWalker(), feet = nil }
-					followed[player] = record
-				end
-				local humanoid = character:FindFirstChildOfClass("Humanoid")
-				local feet = if humanoid and humanoid.Health > 0 then Rig.feet(character) else nil
-				local last = record.feet
-				record.feet = feet
-				local delta = if feet and last then feet - last else nil
-				if
-					feet
-					and delta
-					and listener
-					and (feet - listener).Magnitude <= FOLLOW_DISTANCE
-					and delta.X * delta.X + delta.Z * delta.Z <= TELEPORT_DISTANCE * TELEPORT_DISTANCE
-				then
-					local onGround, inWater, below, climbing = SoundRules.observe(getBlock, feet.X, feet.Y, feet.Z)
-					-- Swimming: lying down in water (MovementController pitches the body forward).
-					local root = character:FindFirstChild("HumanoidRootPart")
-					local lying = root ~= nil and root:IsA("BasePart") and root.CFrame.UpVector.Y < LYING_UP
-					motion.dx, motion.dy, motion.dz = delta.X, delta.Y, delta.Z
-					motion.ticks = dt * TICK_RATE
-					motion.onGround, motion.inWater, motion.swimming = onGround, inWater, inWater and lying
-					motion.below = below
-					motion.climbing = climbing
-					local step, swim, splash = SoundRules.move(record.walker, motion)
-					playSounds(feet.X, feet.Y, feet.Z, step, swim, splash)
-				else
-					-- Not followed this frame (far, teleported, dead): no splash when it comes back
-					-- already in water.
-					record.walker.inWater = nil
-				end
+				continue
+			end
+			local record = followed[player]
+			if record == nil or record.character ~= remote.character then
+				record = {
+					character = remote.character,
+					walker = SoundRules.newWalker(),
+					known = false,
+					x = 0,
+					y = 0,
+					z = 0,
+					seen = frame,
+				}
+				followed[player] = record
+			end
+			record.seen = frame
+			local alive = remote.alive
+			local x, y, z = remote.x, remote.y, remote.z
+			local known = record.known
+			local dx, dy, dz = x - record.x, y - record.y, z - record.z
+			record.known = alive
+			record.x, record.y, record.z = x, y, z
+			local near = false
+			if listener then
+				local lx, ly, lz = x - listener.X, y - listener.Y, z - listener.Z
+				near = lx * lx + ly * ly + lz * lz <= FOLLOW_DISTANCE * FOLLOW_DISTANCE
+			end
+			if alive and known and near and dx * dx + dz * dz <= TELEPORT_DISTANCE * TELEPORT_DISTANCE then
+				local onGround, inWater, below, climbing = SoundRules.observe(getBlock, x, y, z)
+				-- Swimming: lying down in water (the body pitched forward).
+				local lying = remote.tilt > LYING_TILT
+				motion.dx, motion.dy, motion.dz = dx, dy, dz
+				motion.ticks = dt * TICK_RATE
+				motion.onGround, motion.inWater, motion.swimming = onGround, inWater, inWater and lying
+				motion.below = below
+				motion.climbing = climbing
+				local step, swim, splash = SoundRules.move(record.walker, motion)
+				playSounds(x, y, z, step, swim, splash)
+			else
+				-- Not followed this frame (far, teleported, dead): no splash when it comes back
+				-- already in water.
+				record.walker.inWater = nil
+			end
+		end
+		-- (Players the client is no longer told about start over when they come back.)
+		for player, record in followed do
+			if record.seen ~= frame then
+				followed[player] = nil
 			end
 		end
 	end)

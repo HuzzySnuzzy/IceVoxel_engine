@@ -168,7 +168,11 @@ end
 local Motion = {}
 Motion.__index = Motion
 
--- Average camera speed over the last `window` seconds (studs per second).
+--[[
+	Average camera speed over the last `window` seconds (studs per second). Positions are world
+	studs (doubles: MeshOverlay adds the render origin, Shared/World/Origin), so a move of the
+	floating origin is no jump.
+]]
 function FrameBudget.motion(window: number): Motion
 	local self = {
 		window = window,

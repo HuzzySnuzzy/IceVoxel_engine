@@ -1568,7 +1568,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             view from inside a fluid: fog and tint), MeshOverlay + MeshRegions
                             (far meshes), TextureLooks (every look of the texture pack: variants,
                             tints, images, sprites, far and plain looks, far mesh looks; checks
-                            the ids and measures averages)
+                            the ids and measures averages), Rebase (moves the floating origin
+                            and everything placed in its frame, in one frame)
   Settings/                 the player's settings: State (values and choices), Schedule (when
                             changes apply), Pages (the menu's layout, the Key Binds list and its
                             scrolling), saving them on the server; Keybinds (what every input
@@ -1896,6 +1897,15 @@ at most 6,000 (half that on phones); `Render.Foliage = false` saves them.
 
 Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
 float precision makes parts and characters jitter.
+
+The floating origin's rendering side (`Config.Origin`, off until the player and server sides are
+in): every client-made part is placed at world studs minus a render origin that follows the camera
+(Rendering/Rebase), so near the camera parts stay within 8192 studs of 0 anywhere in the world. A
+move of the origin moves only what is on screen, in one `BulkMoveTo` (terrain, far meshes, pipes,
+fire, lit TNT, structure outlines, rain, lightning, clouds); terrain kept out of the workspace
+under far meshes is moved a node at a time when it is shown again. The Luau side of a move costs
+about 2 ms for the 17k parts on screen at the default view with far meshes and about 6.5 ms for
+80k (Lune, interpreted), plus the engine's part reads and `BulkMoveTo`, measured in Studio.
 
 **Who learns where players are** (`Players`, `Interest`; server `Players/PlayerPositions`). With
 `Players.ServerPositions` on, every character stands parked and anchored at `Players.ParkPosition`

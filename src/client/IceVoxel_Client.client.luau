@@ -309,9 +309,20 @@ end
 Settings.register("lod", applyView)
 Settings.register("caves", applyView)
 Settings.register("foliage", applyView)
--- Teleports (and the first load): map tiles wait until the new area is there.
+-- Teleports (and the first load): map tiles wait until the new area is there, and the render
+-- origin may move early (the old area is going anyway: Rendering/Rebase's soft distance).
 streamer.onTeleportMode = function(active: boolean)
 	Map.setPaused(active)
+	Rebase.setHidden("teleport", active)
+end
+-- The streamer selects around the local player's hull (world blocks), once there is one.
+streamer.viewerFeet = function(): (number?, number, number)
+	local view = MovementController.current
+	if view == nil then
+		return nil, 0, 0
+	end
+	local state = view.state
+	return state.x, state.y, state.z
 end
 -- Shadows, far shadows, textures and far materials restyle live parts (ChunkRenderer.restyle;
 -- "farMaterials" uses the "textures" effect).

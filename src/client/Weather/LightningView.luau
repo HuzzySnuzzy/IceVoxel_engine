@@ -41,6 +41,13 @@
 	            (playDistant: the same, following the listener, at most Distant.Voices at once, the
 	            quietest giving way), lower and longer (thunderPitch), muffled (muffle: an
 	            equalizer) and from Echo.From on rolling on in an echo.
+	  Origin    the floating origin (Shared/World/Origin): bolts, strike anchors and the far
+	            bolts' Attachments (offsets from their anchor, which stays at the identity) are
+	            written at render studs (world studs minus the origin, from the strike's doubles);
+	            at a move of the origin the near bolts' parts and the strike anchors go into the
+	            one BulkMoveTo and the live far strands' Attachments are moved back by it (a
+	            Rendering/Rebase mover, "lightning"). Distances are world blocks
+	            (Audio/SoundPlayer.listener).
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -53,12 +60,14 @@ local DayCycle = require(Shared.DayCycle)
 local Protocol = require(Shared.Net.Protocol)
 local Sounds = require(Shared.Sounds)
 local Weather = require(Shared.Weather)
+local Origin = require(Shared.World.Origin)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local AtmosphereModel = require(script.Parent.Parent.Rendering.AtmosphereModel)
 local EffectView = require(script.Parent.Parent.Rendering.EffectView)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local ViewSettings = require(script.Parent.Parent.Rendering.ViewSettings)
 local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local CloudView = require(script.Parent.CloudView)
@@ -176,9 +185,18 @@ local function draw(bolt: Bolt, seed: number)
 	local settings = Config.Weather.Bolt
 	local colour = boltColour()
 	local root = folder :: Folder
+	local ox, oz = Origin.x, Origin.z
 	for _, segment in LightningBolt.segments(seed) do
-		local a = Vector3.new(bolt.x + segment.x0, bolt.y + segment.y0, bolt.z + segment.z0) * BLOCK
-		local b = Vector3.new(bolt.x + segment.x1, bolt.y + segment.y1, bolt.z + segment.z1) * BLOCK
+		local a = Vector3.new(
+			(bolt.x + segment.x0) * BLOCK - ox,
+			(bolt.y + segment.y0) * BLOCK,
+			(bolt.z + segment.z0) * BLOCK - oz
+		)
+		local b = Vector3.new(
+			(bolt.x + segment.x1) * BLOCK - ox,
+			(bolt.y + segment.y1) * BLOCK,
+			(bolt.z + segment.z1) * BLOCK - oz
+		)
 		local length = (b - a).Magnitude
 		local frame = CFrame.lookAt((a + b) / 2, b)
 		for layer = 1, 2 do
@@ -250,11 +268,20 @@ local function drawFar(far: Far, seed: number)
 		return
 	end
 	local k = far.scale
+	-- (Offsets from the anchor at the identity: render studs.)
+	local ox, oz = Origin.x, Origin.z
 	for _, segment in LightningBolt.segments(seed) do
 		local strand = newStrand()
-		strand.from.Position = Vector3.new(far.x + segment.x0 * k, far.y + segment.y0 * k, far.z + segment.z0 * k)
-			* BLOCK
-		strand.to.Position = Vector3.new(far.x + segment.x1 * k, far.y + segment.y1 * k, far.z + segment.z1 * k) * BLOCK
+		strand.from.Position = Vector3.new(
+			(far.x + segment.x0 * k) * BLOCK - ox,
+			(far.y + segment.y0 * k) * BLOCK,
+			(far.z + segment.z0 * k) * BLOCK - oz
+		)
+		strand.to.Position = Vector3.new(
+			(far.x + segment.x1 * k) * BLOCK - ox,
+			(far.y + segment.y1 * k) * BLOCK,
+			(far.z + segment.z1 * k) * BLOCK - oz
+		)
 		local width = far.width * BLOCK * (if segment.branch then BRANCH_WIDTH else 1)
 		local beam = strand.beam
 		beam.Width0 = width
@@ -425,7 +452,7 @@ local function strike(message: Protocol.LightningBolt)
 	anchor.CanTouch = false
 	anchor.Transparency = 1
 	anchor.Size = Vector3.one
-	anchor.CFrame = CFrame.new(Vector3.new(x, y + 1, z) * BLOCK)
+	anchor.CFrame = CFrame.new(x * BLOCK - Origin.x, (y + 1) * BLOCK, z * BLOCK - Origin.z)
 	local light = Instance.new("PointLight")
 	light.Range = settings.LightRange
 	light.Brightness = 0
@@ -560,6 +587,24 @@ function LightningView.start(distance: () -> number)
 	effect.Enabled = false
 	effect.Parent = Lighting
 	correction = effect
+	-- What is drawn moves with the render origin (see the header).
+	Rebase.register("lightning", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for _, bolt in bolts do
+			table.insert(parts, bolt.anchor)
+			table.insert(cframes, bolt.anchor.CFrame - d)
+			for _, part in bolt.parts do
+				table.insert(parts, part)
+				table.insert(cframes, part.CFrame - d)
+			end
+		end
+		for _, far in fars do
+			for _, strand in far.strands do
+				strand.from.Position -= d
+				strand.to.Position -= d
+			end
+		end
+	end)
 	ClientNet.on(Protocol.ServerMessage.Lightning, function(payload: buffer)
 		local bolt = Protocol.decodeLightning(payload)
 		if bolt then

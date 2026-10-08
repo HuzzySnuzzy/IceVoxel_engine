@@ -26,6 +26,13 @@
 
 	`shake`, `isNuke` and `flash` are pure (tests/spec/Tnt, Explosions); everything Roblox is set
 	up in `start`.
+
+	The floating origin (Shared/World/Origin): the Explosion is put at render studs from the
+	message's world blocks (it lasts 3 s and is not a part: a move meanwhile leaves it where it
+	was); the shake's distance reads the camera's focus back into world blocks. The Nuke's six parts
+	are placed every frame from its world centre and how far along the cloud is (`placeNukes`, a
+	render step after the origin's: Sine out, as the tweens it replaced), so a move of the origin
+	is never undone by a CFrame tween; only sizes, colours and transparency are tweened.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -33,8 +40,25 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
+local Origin = require(Shared.World.Origin)
 
 local ExplosionView = {}
+
+-- A Nuke being drawn: its centre (world blocks) and parts, placed every frame.
+type Nuke = {
+	start: number,
+	x: number,
+	y: number,
+	z: number,
+	radius: number,
+	folder: Folder,
+	ball: Part,
+	ring: Part,
+	stem: Part,
+	caps: { Part },
+	-- Each cap's start offset from the centre (studs).
+	offsets: { Vector3 },
+}
 
 local BLOCK = Config.BlockSize
 -- Radius of the drawn blast: blocks per power, and at most.
@@ -120,9 +144,41 @@ function ExplosionView.start()
 			:Play()
 	end
 
-	-- The Nuke's look at `centre` (blocks), `distance` blocks from the camera.
-	local function nuke(centre: Vector3, distance: number)
-		local origin = centre * BLOCK
+	-- Nukes being drawn (placeNukes).
+	local nukes: { Nuke } = {}
+	local QUARTER_TURN = CFrame.Angles(0, 0, math.pi / 2)
+
+	-- Every Nuke's parts where they are now: from the world centre for the render origin now and
+	-- the cloud's progress (Sine out over CLOUD_SECONDS, as the tweens it replaced).
+	local function placeNukes()
+		local now = os.clock()
+		local rise = CLOUD_RISE * BLOCK
+		for i = #nukes, 1, -1 do
+			local entry = nukes[i]
+			local age = now - entry.start
+			if entry.folder.Parent == nil or age > CLOUD_SECONDS + 5 then
+				table.remove(nukes, i)
+				continue
+			end
+			local alpha = math.sin(math.min(age / CLOUD_SECONDS, 1) * math.pi / 2)
+			local origin = Vector3.new(entry.x * BLOCK - Origin.x, entry.y * BLOCK, entry.z * BLOCK - Origin.z)
+			local radius = entry.radius
+			entry.ball.CFrame = CFrame.new(origin)
+			entry.ring.CFrame = CFrame.new(origin) * QUARTER_TURN
+			local stemY = radius * 0.25 + (rise / 2 - radius * 0.25) * alpha
+			entry.stem.CFrame = CFrame.new(origin + Vector3.new(0, stemY, 0)) * QUARTER_TURN
+			for k, cap in entry.caps do
+				local offset = entry.offsets[k]
+				-- (Out to 1.8 times its offset, up to the top of the rise.)
+				local cx, cy = offset.X * (1 + 0.8 * alpha), offset.Y + (rise - offset.Y) * alpha
+				cap.CFrame = CFrame.new(origin + Vector3.new(cx, cy, 0))
+			end
+		end
+	end
+
+	-- The Nuke's look at (x, y, z) (world blocks), `distance` blocks from the camera.
+	local function nuke(x: number, y: number, z: number, distance: number)
+		local origin = Vector3.new(x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z)
 		local radius = Config.Nuke.Radius * BLOCK
 		local folder = Instance.new("Folder")
 		folder.Name = "IceVoxelNuke"
@@ -151,10 +207,10 @@ function ExplosionView.start()
 		stem.Parent = folder
 		tween(stem, CLOUD_SECONDS, {
 			Size = Vector3.new(rise, radius * 0.5, radius * 0.5),
-			CFrame = CFrame.new(origin + Vector3.new(0, rise / 2, 0)) * CFrame.Angles(0, 0, math.pi / 2),
 			Color = Color3.fromRGB(96, 88, 84),
 		}, Enum.EasingStyle.Sine)
 		local caps: { Part } = {}
+		local offsets: { Vector3 } = {}
 		for i, scale in { 1, 0.7, 1.3 } do
 			local cap = effectPart(Enum.PartType.Ball, Color3.fromRGB(255, 170, 70), Enum.Material.Neon)
 			local size = radius * scale
@@ -165,11 +221,25 @@ function ExplosionView.start()
 			cap.Parent = folder
 			tween(cap, CLOUD_SECONDS, {
 				Size = Vector3.new(size * 2.2, size * 1.1, size * 2.2),
-				CFrame = CFrame.new(origin + Vector3.new(offset.X * 1.8, rise, 0)),
 				Color = Color3.fromRGB(120, 110, 104),
 			}, Enum.EasingStyle.Sine)
 			table.insert(caps, cap)
+			table.insert(offsets, offset)
 		end
+		-- (Rising: placed every frame from here on.)
+		table.insert(nukes, {
+			start = os.clock(),
+			x = x,
+			y = y,
+			z = z,
+			radius = radius,
+			folder = folder,
+			ball = ball,
+			ring = ring,
+			stem = stem,
+			caps = caps,
+			offsets = offsets,
+		})
 		-- Smoke (the cloud's fire burns out after a few seconds), then gone.
 		task.delay(CLOUD_SECONDS * 0.4, function()
 			stem.Material = Enum.Material.SmoothPlastic
@@ -212,10 +282,9 @@ function ExplosionView.start()
 		if effect == nil then
 			return
 		end
-		local centre = Vector3.new(effect.x, effect.y, effect.z)
 		local isNuke = ExplosionView.isNuke(effect.power)
 		local blast = Instance.new("Explosion")
-		blast.Position = centre * BLOCK
+		blast.Position = Origin.blocksToRender(effect.x, effect.y, effect.z)
 		blast.BlastRadius = math.min(effect.power * BLAST_SCALE, if isNuke then NUKE_BLAST else MAX_BLAST) * BLOCK
 		blast.BlastPressure = 0
 		blast.DestroyJointRadiusPercent = 0
@@ -227,7 +296,9 @@ function ExplosionView.start()
 
 		local camera = workspace.CurrentCamera
 		if camera then
-			local distance = (camera.Focus.Position / BLOCK - centre).Magnitude
+			local fx, fy, fz = Origin.renderToBlocks(camera.Focus.Position)
+			local dx, dy, dz = fx - effect.x, fy - effect.y, fz - effect.z
+			local distance = math.sqrt(dx * dx + dy * dy + dz * dz)
 			local strength = ExplosionView.shake(distance, effect.power)
 			if strength > 0 then
 				table.insert(shakes, {
@@ -238,12 +309,15 @@ function ExplosionView.start()
 				})
 			end
 			if isNuke then
-				nuke(centre, distance)
+				nuke(effect.x, effect.y, effect.z, distance)
 			end
 		end
 	end)
 
 	RunService:BindToRenderStep("IceVoxelExplosionShake", Enum.RenderPriority.Camera.Value + 1, function()
+		if #nukes > 0 then
+			placeNukes()
+		end
 		if #shakes == 0 then
 			return
 		end
