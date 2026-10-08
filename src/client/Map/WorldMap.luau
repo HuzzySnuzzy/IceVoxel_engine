@@ -10,7 +10,9 @@
 	                  +2, +5, +10, +20 minutes), the wind and a legend along the bottom
 
 	The map paints straight from the terrain generator, so it can show any part of the world,
-	explored or not.
+	explored or not. Its centre and the player's arrow are in true world coordinates (the
+	character, read through the render origin: Shared/World/Origin). While it is open the screen
+	hides a move of the render origin (Rendering/Rebase.setHidden "map").
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -21,10 +23,12 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Origin = require(Shared.World.Origin)
 local Protocol = require(Shared.Net.Protocol)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local ContextMenu = require(script.Parent.ContextMenu)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
@@ -35,7 +39,6 @@ local Screens = require(script.Parent.Parent.Ui.Screens)
 local Hud = require(script.Parent.Parent.Ui.Hud)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
-local BLOCK = Config.BlockSize
 local ZOOMS = Config.Map.ZoomLevels
 -- Image pixels across the map at most (the layer must be at least this + one tile wide).
 local MAX_PIXELS = 768
@@ -323,6 +326,8 @@ function WorldMap.new(
 		backdrop.Visible = value
 		-- The map and the HUD / inventory screens are never on screen together.
 		Hud.setVisible(not value)
+		-- (It covers the screen: the render origin may move meanwhile.)
+		Rebase.setHidden("map", value)
 		dragging, dragInput = nil, nil
 		ContextMenu.close()
 		if value then
@@ -458,9 +463,11 @@ function WorldMap.new(
 		local camera = workspace.CurrentCamera
 		local character = Players.LocalPlayer.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
-		local position = if root and root:IsA("BasePart") then root.Position else camera.CFrame.Position
+		-- (World blocks, doubles: the character or the camera, through the render origin.)
+		local px, _, pz =
+			Origin.renderToBlocks(if root and root:IsA("BasePart") then root.Position else camera.CFrame.Position)
 		if following then
-			centerX, centerZ = position.X / BLOCK, position.Z / BLOCK
+			centerX, centerZ = px, pz
 		end
 		view:render(centerX, centerZ)
 		weather:update()
@@ -482,7 +489,7 @@ function WorldMap.new(
 		bar.Position = UDim2.new(0.5, 0, 0.52, -size.Y / 2 - 4)
 		bar.Size = UDim2.fromOffset(size.X, 40)
 
-		local p = view:toFrame(position.X / BLOCK, position.Z / BLOCK)
+		local p = view:toFrame(px, pz)
 		player.Position = UDim2.fromOffset(p.X, p.Y)
 		local look = camera.CFrame.LookVector
 		player.Rotation = math.deg(math.atan2(look.X, -look.Z))

@@ -8,11 +8,15 @@
 	the flames on the body replace.
 
 	Polled a few times a second over the players (a handful), so nothing is connected per
-	character. `onFire` is pure (tests/spec/LavaOilClient).
+	character. `onFire` is pure (tests/spec/LavaOilClient). No flames for a player whose character
+	isn't shown here (Player/RemotePlayers.shown: with the server's own positions, one this client
+	isn't sent, parked far away).
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+
+local RemotePlayers = require(script.Parent.RemotePlayers)
 
 local BurningView = {}
 
@@ -84,7 +88,7 @@ function BurningView.start()
 			selfBurning = false
 			for _, player in Players:GetPlayers() do
 				local character = player.Character
-				if character then
+				if character and (player == localPlayer or RemotePlayers.shown(player)) then
 					local burning = BurningView.onFire(character:GetAttribute(BurningView.ON_FIRE))
 					local root = rootOf(character)
 					if burning and root then

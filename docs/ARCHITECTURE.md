@@ -5959,6 +5959,59 @@ EditChunkRadius 24, EditSendRadius 26, DeferredChunkRequests, LightningDistance 
 (ServerPositions, MoveRate 20, MoveCheck "correct" / "log" / "off", MoveSlack, MoveLimits by game
 mode, ParkPosition).
 
+**The player's side** (client `Player/MovementController`, `Player/LocalPosition`,
+`Player/RemotePlayers` + `Player/RemoteMotion`, `Player/SpectatorView`; specs `LocalPosition` and
+`RemoteMotion`). With `Players.ServerPositions` off everything below reads and writes the
+characters as before (the old unanchored path is kept as the switch's other side); conversions go
+through `Origin` either way (the identity while it stays at 0).
+- *The local character.* The hull and the drawn feet are doubles (`View.feetX/feetY/feetZ`;
+  `feet` stays as their float32 Vector3 for readers near the camera) and the root goes at
+  `Rig.rootCFrame(character, Origin.blocksToRender(feet), yaw, tilt, bodyPitch)`. On: the root is
+  anchored by the server, so no VectorForce, no velocity and no "moved by another script" check;
+  a new character is placed at once at the newest Teleport (else `SpawnPosition`), frozen, and
+  waits for the Teleport whose `life` equals its `IceVoxelLife` attribute (`LocalPosition.placing`:
+  either may arrive first; `SPAWN_SETTLE` falls back to the newest). Every Teleport of that life
+  (teleports, corrections) snaps the hull, sets the yaw, tells the streamer (teleport mode) and
+  `Rebase.request`s the destination, then the move epoch is adopted. Death on: Minecraft's tilt
+  (`Rig.deathCFrame`, 20 ticks) in a render step of its own, in the render frame of each moment;
+  after a second `SpectatorView` hides the body (`MovementController.deathTime`). Off: the body
+  falls as before. `Origin.onRebase` shifts `lastPlaced` and the view bob's camera CFrames (so
+  `unbob` still finds its own CFrame). Screens and the Options menu (`Screens.changed`), Roblox's
+  menu and the death set `Rebase.setHidden` ("screen", "menu", "dead"); the world map sets "map".
+  `Config.Origin.Enabled` without `ServerPositions` is warned about: a character the client owns
+  would replicate render studs.
+- *Moves* (`LocalPosition.step`, pure): after the movement's ticks, the newest tick's hull (f64
+  feet), yaw, look pitch, tilt, flags (`LocalPosition.flags`), speed and climb, with the adopted
+  epoch and a u16 seq, on `Remotes.moves()`; at most `MoveRate` a second in a steady rhythm (a new
+  rhythm after a pause or a long frame, never a burst), an unchanged pose only every `KEEPALIVE`
+  (1 s), nothing before a Teleport was adopted, while frozen or while spectating.
+  `MovementController.spectate` sends `Spectate` (0 when it stops).
+- *Other players* (`RemotePlayers` networked): `Players` messages track (slot, user, whole pose)
+  and untrack by slot (a track for a user not in this client's game yet waits for `PlayerAdded`);
+  `Poses` on `Moves` go into each slot's `RemoteMotion` ring with their tick's server time; poses
+  of untracked slots are dropped. `RemoteMotion`: the server clock from the ticks (u16 unwrapped
+  the nearer way, the smallest `arrival − tick time` over the last 1–2 s), playback at that minus
+  `InterpolationDelay`; feet lerped in doubles, yaw the short way, flags of the nearer snapshot; a
+  jump over 8 blocks snaps; past the newest, extrapolation along the last velocity for 0.1 s, then
+  hold; late or repeated snapshots ignored. The render step `IceVoxelRemotePlayers` (Camera − 2,
+  after the origin's, before the local character and the camera) samples every tracked record and
+  writes its root (`Rig.rootCFrame` at `Origin.blocksToRender`; the death tilt when the pose is
+  dead). `RemotePlayers.shown(player)`: tracked and not a body gone after its tilt (compat: always).
+- *Visibility* (`SpectatorView`, the one writer of other characters' `LocalTransparencyModifier`
+  and `DisplayDistanceType`): characters not `shown` are hidden whole, nameless, their Highlights
+  (the Glowing outline) off; spectators as before. What can be hidden of a character is listed once
+  and again only when its descendants change. `HeldItems` and `BurningView` skip characters not
+  shown.
+- *Consumers*: `BlockInteraction` casts from `Origin.renderToBlocks(ray.Origin)` (the aim `Ray`
+  carries the origin as doubles), compares reach in render studs, places the outline and the debris
+  at `Origin.blocksToRender` (live debris has a `Rebase` mover), and checks placement obstruction
+  and the spectator's pick against `RemotePlayers`; `CrackOverlay` likewise (a mover while shown);
+  `Eating` and `Drinking` sound at the drawn hull; `Waila` picks from doubles and names other
+  players' true coordinates through `RemotePlayers`; the minimap and the world map centre on the
+  character read back through `Origin` and dot only `RemotePlayers.each()`; `Waypoints` beacons
+  stand at `Origin.blocksToRender` with a mover; F3 adds the `origin` line (`Rebase.stats`, the
+  move epoch and the players tracked).
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps

@@ -19,7 +19,6 @@
 	always, with Tough As Nails off too: its effects come in the server's Effects message).
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -27,11 +26,11 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
@@ -51,12 +50,12 @@ type Holding = { slot: number, item: number, elapsed: number, ticks: number }
 local holding: Holding? = nil
 local started = false
 
--- Minecraft's drinking sound at this player (pitch 0.9..1.0: the event's own variance).
+-- Minecraft's drinking sound at this player (pitch 0.9..1.0: the event's own variance), at the
+-- drawn hull's mouth (world blocks: MovementController).
 local function gulp()
-	local character = Players.LocalPlayer.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet then
-		SoundPlayer.play(DRINK, feet.X, feet.Y + 1.5, feet.Z)
+	local view = MovementController.current
+	if view then
+		SoundPlayer.play(DRINK, view.feetX, view.feetY + 1.5, view.feetZ)
 	end
 end
 

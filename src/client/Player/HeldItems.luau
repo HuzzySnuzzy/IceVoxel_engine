@@ -20,9 +20,13 @@
 
 	Nothing is drawn for an empty hand or while a Tool is equipped, nor for spectators (Shared/
 	GameMode): their body is invisible or a floating head (Player/SpectatorRules), and in first
-	person they have no hand. A third person model hides with its character's head when the camera
-	fades that out: the local player's in first person, and the player a spectator spectates, whose
-	eyes the camera is in (Roblox fades the camera subject's character).
+	person they have no hand. Nor for a player whose character isn't shown on this client (Player/
+	RemotePlayers.shown: with the server's own positions, one it doesn't send this client, parked
+	far away, or a body gone after its death). A third person model hides with its character's
+	head when the camera fades that out: the local player's in first person, and the player a
+	spectator spectates, whose eyes the camera is in (Roblox fades the camera subject's
+	character). The models follow the hands every frame (PivotTo, in the render frame the
+	characters are placed in), so a move of the render origin needs nothing here.
 ]]
 
 local Players = game:GetService("Players")
@@ -36,6 +40,7 @@ local Types = require(Shared.Inventory.Types)
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local RemotePlayers = require(script.Parent.RemotePlayers)
 
 -- Minecraft's arm swing lasts 6 ticks.
 local SWING_TIME = 0.3
@@ -90,6 +95,10 @@ function HeldItems.start()
 
 	local function itemOf(player: Player): number
 		if GameMode.isSpectator(GameMode.of(player)) then
+			return 0
+		end
+		-- (Not drawn here: untracked, or a body gone.)
+		if player ~= localPlayer and not RemotePlayers.shown(player) then
 			return 0
 		end
 		if player == localPlayer then

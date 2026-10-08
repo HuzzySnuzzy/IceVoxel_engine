@@ -22,10 +22,10 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Foods = require(Shared.Items.Foods)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 
@@ -40,11 +40,11 @@ type Holding = { slot: number, item: number, elapsed: number, ticks: number }
 local holding: Holding? = nil
 local started = false
 
+-- Plays `sound` at this player's mouth (the drawn hull's feet, world blocks: MovementController).
 local function play(sound: string)
-	local character = Players.LocalPlayer.Character
-	local feet = if character then Rig.feet(character) else nil
-	if feet then
-		SoundPlayer.play(sound, feet.X, feet.Y + 1.5, feet.Z)
+	local view = MovementController.current
+	if view then
+		SoundPlayer.play(sound, view.feetX, view.feetY + 1.5, view.feetZ)
 	end
 end
 
