@@ -19,9 +19,10 @@
 	             ran before), but always MinGenerationBudgetMs, so the backlog keeps moving. A
 	             slice overshoots by the generator's longest stretch between two yields (~5 ms at
 	             most, see GenQueue).
-	  /genstats  operators: the background generation of the last 10 s (chunks/s, ms/s, the worst
-	             frame), the backlog, and the chunks generated inline (getChunk: edits, spawns, map
-	             teleports, structures) since the start; feedback as Notice messages.
+	  /genstats  operators (WorldSettings.COMMAND_PERMITTED, so the chat suggests it to them only):
+	             the background generation of the last 10 s (chunks/s, ms/s, the worst frame), the
+	             backlog, and the chunks generated inline (getChunk: edits, spawns, map teleports,
+	             structures) since the start; feedback as Notice messages.
 ]]
 
 local Players = game:GetService("Players")
@@ -33,6 +34,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
+local WorldSettings = require(Shared.WorldSettings)
 
 local WorldServer = require(script.Parent.WorldServer)
 local GenQueue = require(script.Parent.GenQueue)
@@ -176,6 +178,8 @@ function Simulation.start(
 		local instance = Instance.new("TextChatCommand")
 		instance.Name = "IceVoxelGenStats"
 		instance.PrimaryAlias = ALIAS
+		-- (The operators' permission: the chat suggests it only to those who have it.)
+		instance:SetAttribute(WorldSettings.COMMAND_ATTRIBUTE, WorldSettings.COMMAND_PERMITTED)
 		instance.Triggered:Connect(function(source: TextSource, text: string)
 			local player = Players:GetPlayerByUserId(source.UserId)
 			if player then

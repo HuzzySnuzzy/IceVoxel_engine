@@ -267,7 +267,7 @@ export type SurfaceCaves = {
 		/locate (Generation/Locate): the start column of grid cell (gx, gz)'s candidate of `kind`
 		("entrance" or "ravine"; x nil: none, or the kind is off), a hash only, never cached; and
 		the cell's worm (built and cached as the chunks would; nil: the candidate made none),
-		`yield` called after a build.
+		`yield` called every WORM_PAUSE steps of a build and after it.
 	]]
 	start: (kind: string, gx: number, gz: number) -> (number?, number),
 	wormOf: (kind: string, gx: number, gz: number, yield: (() -> ())?) -> Worm?,
@@ -1304,7 +1304,7 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 			return nil
 		end
 		local before = builtCount
-		local worm = wormAt(if kind == "entrance" then ENTRANCE else RAVINE, gx, gz, sx, sz, sx, sz)
+		local worm = wormAt(if kind == "entrance" then ENTRANCE else RAVINE, gx, gz, sx, sz, sx, sz, yield)
 		if yield and builtCount > before then
 			yield()
 		end

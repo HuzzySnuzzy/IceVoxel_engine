@@ -1048,7 +1048,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
   touch screens a small "Map" button takes its corner, to open the world map). `B` shows the
   weather over both (see The weather map).
-- **Other players as the server tells them** (with `Players.ServerPositions` on). Each client
+- **Other players as the server tells them** (`Players.ServerPositions`, on). Each client
   draws only the players the server sends it (within `Interest.PlayerDistance`, spectators only to
   spectators), 0.1 s behind (`Interest.InterpolationDelay`) and gliding between their poses, a
   teleport as a jump; everyone else's character stays parked far above the world, hidden whole,
@@ -1705,6 +1705,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
              command line), build_structures (the example outpost's builder), build_textures (the
              texture pack -> src/textures; logic in lib/TextureBuild)
+tools/probes Studio probes, never in the place: RebaseProbe (what a floating-origin move costs),
+             UnionProbe (CSG unions of real terrain sections); how to run them in their README
 docs/        ARCHITECTURE.md (how everything fits together)
 ```
 
@@ -1792,6 +1794,13 @@ for performance:
 | `Render.FarMeshes.UvStuds` | 3      | Studs per texture tile in far mesh UVs (one block face).            |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
+| `Origin.Enabled`          | true    | The floating origin (see "Far from the origin" below); a kill switch, off only together with `Players.ServerPositions`. |
+| `Origin.RebaseDistance` / `SoftDistance` / `Snap` | 8192 / 3072 / 768 | Studs from the render origin that move it at once / at a hidden moment (teleports, screens, menus); its steps. |
+| `Players.ServerPositions` | true    | "Fake coords": characters parked on the server, true positions from checked client moves, relayed by interest; off: read from the characters as before. |
+| `Players.MoveCheck` / `MoveSlack` | "correct" / 2 | Too fast moves: "correct" (sent back), "log" or "off"; seconds of movement at `Players.MoveLimits` (blocks a second per game mode) the checks allow at once. |
+| `Interest.PlayerDistance` / `PlayerHysteresis` | 256 / 16 | Players are told about others this near (blocks, horizontal), and until this much farther. |
+| `Interest.EditChunkRadius` / `EditSendRadius` | 24 / 26 | Chunks: a chunk's edit list and records are sent this near the player (else deferred), live edits this near. |
+| `Interest.LightningDistance` | 512 | Blocks: server lightning strikes are sent this near. |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
 | `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (operators always may). |
 | `Gameplay.Admins`         | {}      | User ids who are always operators (as the game's owner and everyone in Studio): other players' game modes, `/time set\|add`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, `/op`, `/deop`, structure blocks. |
@@ -1949,29 +1958,66 @@ What remains are the near levels (full detail and level 1), which stay parts. In
 Plants add parts of their own, only within `Lod.FoliageDistance`: about 1,000-3,000 on grassland,
 at most 6,000 (half that on phones); `Render.Foliage = false` saves them.
 
-Keep the playable area within about ±16,000 studs (±5,000 blocks) of the origin: further out,
-float precision makes parts and characters jitter.
+**Far from the origin: the floating origin and "fake coords"** (`Origin`, `Players`, `Interest`).
+There is no playable-area limit any more. Float precision used to make parts and characters
+jitter beyond about ±16,000 studs (±5,000 blocks); now every client-made part is placed at world
+studs minus a render origin that follows the camera (Shared/World/Origin, client Rendering/Rebase),
+so near the camera parts stay within 8192 studs of 0 anywhere in the world (1/1024 stud). The
+origin moves in steps of `Origin.Snap` (768 studs, 16 chunks): at once when the camera is
+`Origin.RebaseDistance` (8192 studs) away along X or Z, and earlier, beyond `SoftDistance` (3072),
+at a moment a hitch can't be seen (a teleport, a respawn, terrain loading, the world map, an
+inventory screen or a menu). A move moves only what is on screen, in one `BulkMoveTo` (terrain,
+far meshes, pipes, fire, lit TNT, structure outlines, rain, lightning, clouds, the crack overlay,
+waypoint beacons); terrain kept out of the workspace under far meshes is moved a node at a time
+when it is shown again. The Luau side of a move costs about 2 ms for the 17k parts on screen at
+the default view with far meshes and about 6.5 ms for 80k (Lune, interpreted), plus the engine's
+part reads and `BulkMoveTo`: F3's `origin` line shows both for real moves, and
+`tools/probes/RebaseProbe` measures them in Studio (its README has the rule that picks the
+distances). Every logic, message, save and command keeps true world coordinates (F3, `/locate`,
+`/tp`, the maps); only drawing converts.
 
-The floating origin's rendering side (`Config.Origin`, off until the player and server sides are
-in): every client-made part is placed at world studs minus a render origin that follows the camera
-(Rendering/Rebase), so near the camera parts stay within 8192 studs of 0 anywhere in the world. A
-move of the origin moves only what is on screen, in one `BulkMoveTo` (terrain, far meshes, pipes,
-fire, lit TNT, structure outlines, rain, lightning, clouds); terrain kept out of the workspace
-under far meshes is moved a node at a time when it is shown again. The Luau side of a move costs
-about 2 ms for the 17k parts on screen at the default view with far meshes and about 6.5 ms for
-80k (Lune, interpreted), plus the engine's part reads and `BulkMoveTo`, measured in Studio.
+The server has no origin, and it no longer trusts or replicates where characters are. With
+`Players.ServerPositions` every character stands parked and anchored at `Players.ParkPosition` on
+the server, which is all Roblox replicates of it ("fake coords"): each client places its own
+character from its hull and the others from what the server tells it. The server keeps where each
+player is from their client's moves (20 a second), checked against `Players.MoveLimits` (blocks a
+second per game mode, `MoveSlack` seconds of slack, knockback allowed for; `MoveCheck = "correct"`
+sends a too fast player back as Minecraft's "moved too quickly", `"log"` only warns, `"off"`
+trusts), and tells each player only about others within `Interest.PlayerDistance` (256 blocks,
+kept until 16 more; spectators only to spectators, the spectated player always). Teleports go
+privately to the player teleported. Edits reach players within `Interest.EditSendRadius` (26)
+chunks, a chunk's edit list and records (machines, pipes, structure blocks) only come within
+`EditChunkRadius` (24, else the request waits until the player comes near), and server lightning
+within `LightningDistance` (512 blocks; far storms are the client's own). Both switches are kill
+switches, and go off together: off, positions are read from the characters, everything is sent as
+before and the origin stays at 0 (and the ±16,000 studs limit is back).
 
-**Who learns where players are** (`Players`, `Interest`; server `Players/PlayerPositions`). With
-`Players.ServerPositions` on, every character stands parked and anchored at `Players.ParkPosition`
-on the server, which is all Roblox replicates of it ("fake coords"); the server keeps where each
-player is from their client's moves, checked against `Players.MoveLimits` (blocks a second per
-game mode, `MoveSlack` seconds of slack; `MoveCheck = "correct"` sends a too fast player back,
-`"log"` only warns, `"off"` trusts), and tells each player only about others within
-`Interest.PlayerDistance` (256 blocks, kept until 16 more; spectators only to spectators, the
-spectated player always). Edits reach players within `Interest.EditSendRadius` (26) chunks, a
-chunk's edit list and records only come within `EditChunkRadius` (24), and server lightning within
-`LightningDistance` (512 blocks). Off, positions are read from the characters and everything is
-sent as before.
+**Studio checklist for the floating origin** (two players on a local server; what the Lune specs
+can't see):
+
+- **Park:** in client B's Explorer, A's HumanoidRootPart is at the park spot and anchored, and on
+  the server `Humanoid.Died` still fires for a parked character (else the HealthChanged fallback
+  kills it).
+- **Movement:** A walks, sprints, swims and flies; B sees A smoothly 0.1 s behind, at the right
+  place, with animations playing on the anchored rig. Walk more than 272 blocks apart: A vanishes
+  (no name, held item, flames, glow or minimap dot); back within 256: A reappears.
+- **No rubber-banding** with `MoveCheck = "correct"` at a sprint, on ice, in creative flight and
+  with Speed; an explosion's or a mob's push is not corrected (use `"log"` while tuning).
+- **Spectators** are invisible to non-spectators; spectating a far target streams the chunks
+  around it (the deferred requests), and the camera follows it.
+- **Teleports:** `/tp`, `/locate`'s green coordinates, the map's teleport and a spectator's
+  teleport snap the player with no flash of the park spot (0, 20000, 0); F3's `moves epoch` rises.
+- **Death and rejoin:** the death tilt, the body hidden after a second, a clean respawn; a rejoin
+  restores the saved position.
+- **A forced move** (fly about 2,700 blocks, or run
+  `require(game.Players.LocalPlayer.PlayerScripts.IceVoxel.Rendering.Rebase).now()` in the
+  client's command bar): no terrain seams, far meshes in place, no camera swing; clouds, rain,
+  lightning, thunder, fire, pipes, transporter items, structure outlines, the crack overlay, debris
+  and waypoints where they were; positioned sounds not jumping, the Nuke's cloud riding through it,
+  no one-frame flash where shown nodes and far-mesh members are moved after parenting; F3's
+  `origin` line updates.
+- **The cost:** run `tools/probes/RebaseProbe.client.luau` on a PC and a phone and apply its rule
+  (`tools/probes/README.md`) to `Origin.RebaseDistance` / `SoftDistance` and far meshes.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,
@@ -2805,11 +2851,14 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,399 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,749 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
 and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge,
-Ages and skills have Progression; where those three meet, Crossover).
+Ages and skills have Progression; where those three meet, Crossover; the floating origin and "fake
+coords" have Origin, Rebase, PlayerSync, PositionStore, MoveCheck, Interest, RemoteMotion and
+LocalPosition; the server's preloading has ServerGeneration; `/locate` has Locate, LocateCommand and
+LocatePoi).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
@@ -2895,4 +2944,3 @@ Natural next steps, roughly in order:
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result; cap the size of
   water and glass boxes, so an edit in a lake replaces less of its surface (while old and new
   surfaces overlap for `Render.SwapFrames` frames, the water looks darker there).
-- **Floating origin** for play far beyond ±16k studs, where float precision starts to show.

@@ -906,8 +906,10 @@ local Config = {
 		-- Every client-made instance is placed at (world studs - origin), and the origin follows the
 		-- camera (Shared/World/Origin, client Rendering/Rebase), so nothing drawn is ever farther than
 		-- RebaseDistance + the view distance from 0 (float32 stays within 1/512 stud). false: the
-		-- origin stays at 0 and every conversion is the identity.
-		Enabled = false, -- (true once the world's and the player's sides are in)
+		-- origin stays at 0 and every conversion is the identity (a kill switch: turn it off only
+		-- together with Players.ServerPositions, as a client-owned character would replicate
+		-- render studs).
+		Enabled = true,
 		-- The camera farther than this (studs, along X or Z) from the origin moves it at once (one
 		-- frame moves every client part: a hitch). 8192 studs: 1/1024 stud near the camera.
 		RebaseDistance = 8192,
@@ -949,8 +951,9 @@ local Config = {
 	Players = {
 		-- Positions come from the clients' Move messages (checked), characters are parked and
 		-- anchored, and poses are relayed by interest. false: positions are read from the
-		-- characters as before (server Players/PlayerPositions' compat backend).
-		ServerPositions = false, -- (true once the server's and the player's sides are in)
+		-- characters as before (server Players/PlayerPositions' compat backend; a kill switch, off
+		-- only together with Origin.Enabled).
+		ServerPositions = true,
 		-- Move messages a client sends a second.
 		MoveRate = 20,
 		-- What a move faster than MoveLimits does: "correct" (teleport back, Minecraft's "moved too

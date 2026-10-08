@@ -1547,6 +1547,17 @@ instead of 1-2; a 1,616-quad region builds in 4.0 ms instead of 2.9 (native; 6.7
 interpreted). Unchecked in Studio: whether a MeshPart's material follows the written UVs (and their
 scale and signs), and whether vertex colours tint it.
 
+**Why not CSG unions.** Unioning each section's boxes per look (`GeometryService:UnionAsync`)
+would cut the parts of levels 0-1 15-31× (18k parts → 1.2k unions at the spawn, 36k → 1.2k in
+the mountains, measured with the real generator and meshers), but each union is a mesh of its
+own (Roblox's part instancing no longer applies, so draw calls likely rise), every block edit
+would wait on an asynchronous CSG job instead of the 1-2 frames it takes, near collision and the
+texture pack's tiling get worse, and streaming would need 20-110 `UnionAsync` calls a second. Far
+meshes already merge what is stable, with written UVs and no CSG. The cheaper lever is starting
+far meshes at level 1 (`MinLevel = 1`: about 47% fewer parts on screen, which also halves a
+floating-origin move). `tools/probes/UnionProbe.client.luau` measures union time, triangles, an
+edit's re-union and memory in Studio, should the estimates ever need settling.
+
 ### Map (`Map/`)
 
 Map tiles are painted from the generator, not from loaded chunks, so the map shows the whole
@@ -5867,11 +5878,13 @@ list asked faster gets the last one again: the screen waits for an answer).
 
 ## Floating origin and player sync (`World/Origin`, `Net/PlayerSync`, server `Players/PlayerPositions`, client `Player/RemotePlayers`, `Rendering/Rebase`)
 
-Two switches, both **off** for now (the foundation is in; the server, world and player sides land
-on it): `Config.Origin.Enabled` (the client's floating origin) and `Config.Players.ServerPositions`
-(positions from checked client moves, characters parked on the server, poses relayed by interest:
-"fake coords"). Off, everything behaves as before: the origin stays at 0, every conversion is the
-identity, and both position APIs read the characters.
+Two switches, both **on**: `Config.Origin.Enabled` (the client's floating origin) and
+`Config.Players.ServerPositions` (positions from checked client moves, characters parked on the
+server, poses relayed by interest: "fake coords"). They are kill switches and go off together (a
+client-owned character in a moved render frame would replicate render studs): off, everything
+behaves as it did before the floating origin, the origin stays at 0, every conversion is the
+identity, both position APIs read the characters, and play is again limited to about ±16,000
+studs of 0 by float precision.
 
 **Frames.** All logic stays in world coordinates: blocks as Luau doubles (the hull, the streamer,
 raycasts, entities, mobs, weather, sounds, the protocol, the server). Each client has a render
@@ -5953,8 +5966,9 @@ Measured (Lune, interpreted as Roblox clients run it; ChunkRenderer's real mover
 2.8 for 35k, 6.5 for 80k and 11.5 for 140k (0.08 µs a part). The `part.CFrame` read and the
 `CFrame − Vector3` per part are engine calls in Roblox and come on top (Lune's userdata versions
 take about 0.75 µs a part, which says nothing of Roblox's); BulkMoveTo's own cost and the next
-frame's broadphase and lighting work are only measurable in Studio (scratchpad
-`origin-design/RebaseProbe.client.luau`, the design's §2.4 decision rule).
+frame's broadphase and lighting work are only measurable in Studio
+(`tools/probes/RebaseProbe.client.luau`; `tools/probes/README.md` has the rule that turns its
+numbers into `RebaseDistance`, `SoftDistance` and far meshes from level 1).
 
 **Players' positions.** One API on each side, world blocks as doubles, each with a compat backend
 that reads the characters exactly as before:
@@ -6046,8 +6060,9 @@ refuse wrong lengths, non-finite numbers, positions beyond `MAX_COORDINATE` or h
   `LightningDistance` (512) blocks (before: 4096; the clients draw far storms themselves).
 - *Every server read of a position* is `PlayerPositions`' (reach, hulls in the way, suffocation,
   lava and burning, blasts, lightning, landings, items, sounds, mobs, weather, records, biome
-  discovery, thirst and temperature, /weather, /summon, saves, map and spectator teleports); only
-  `World/Simulation` still reads the root (the server generation work replaces it).
+  discovery, thirst and temperature, /weather, /summon, saves, map and spectator teleports, the
+  server's chunk generation (`World/Simulation` queues around `each()` and rescans at
+  `teleported`), `/locate` (`feet`) and `/tp` (`teleport`)).
   `PlayerPositions.networked()` says whether the rules above apply; `spawned(player, character)`
   (Characters.park) and `store()` (PlayerRelay, ServerNet) reach the records.
 

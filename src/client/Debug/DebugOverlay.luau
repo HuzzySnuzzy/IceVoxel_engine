@@ -22,7 +22,8 @@
 	(Shared/WorldSettings.info, from the server's attributes). The panel grows to fit its lines.
 	The player's position is the hull's, in true world coordinates (as Minecraft's F3), whatever
 	the render origin; under it the render origin (Shared/World/Origin: where it is in studs and
-	blocks, its moves and the last one's parts and milliseconds, Rendering/Rebase.stats) and, with
+	blocks, its moves, the last one's parts and milliseconds split into the Luau gather and the
+	BulkMoveTo, and the parts moved lazily when shown again: Rendering/Rebase.stats) and, with
 	the server's own positions, the move epoch and the players this client is sent (Player/
 	LocalPosition, Player/RemotePlayers).
 
@@ -218,7 +219,7 @@ end
 local function originLine(): string
 	local stats = Rebase.stats()
 	local line = string.format(
-		"origin  %d %d studs (%d %d blocks)  epoch %d, %d moves, last %d parts in %.1f ms",
+		"origin  %d %d studs (%d %d blocks)  epoch %d, %d moves\n        last %d parts in %.1f ms (gathered in %.1f, BulkMoveTo %.1f), %d moved lazily",
 		stats.x,
 		stats.z,
 		stats.x // Config.BlockSize,
@@ -226,7 +227,10 @@ local function originLine(): string
 		stats.epoch,
 		stats.count,
 		stats.lastParts,
-		stats.lastMs
+		stats.lastMs,
+		stats.lastGatherMs,
+		stats.lastMoveMs,
+		stats.lazyParts
 	)
 	if LocalPosition.active() then
 		local tracked = 0
