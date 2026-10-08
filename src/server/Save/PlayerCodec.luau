@@ -22,7 +22,8 @@
 	            thirst], [10 x f32 temperature], u8 n + n x (u8 effect, u8 amplifier, i32 ticks,
 	            u8 ambient). Typical: 60-400 bytes.
 	Decoding checks every number: non-finite ones, unknown modes, slots and effects are a damaged
-	record (nil), and unknown items are dropped (SaveCodec.readStack).
+	record (nil), and unknown items are dropped (SaveCodec.readStack) and counted (`dropped`: such
+	a record is not written back this session, World/WorldSave).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -68,6 +69,8 @@ export type Record = {
 	thirst: Thirst?,
 	temperature: Temperature?,
 	effects: { Effect },
+	-- Stacks of items this version doesn't know, left out while reading (never written).
+	dropped: number,
 }
 
 local PlayerCodec = {}
@@ -97,7 +100,44 @@ function PlayerCodec.new(): Record
 		thirst = nil,
 		temperature = nil,
 		effects = {},
+		dropped = 0,
 	}
+end
+
+-- What a player has live now (World/WorldSave's capture).
+export type Live = {
+	-- A character stands: its place and health are captured.
+	standing: boolean,
+	-- Players/ToughAsNails has their thirst and temperature (a character made them).
+	climate: boolean,
+	-- Players/Effects has their effects (a character made them).
+	effects: boolean,
+}
+
+--[[
+	`record` (captured now) completed from the saved record `waiting` that no character has used
+	yet (the player sits on the title screen, or their client never finished loading): where they
+	stood and their health while no character stands, Tough As Nails and the effects while nothing
+	live has them yet. The inventory and game mode came back at once, so they are `record`'s own.
+	Without it, leaving (or an autosave) before their first character would write a fresh player
+	over the saved one. nil `waiting`: `record` as it is.
+]]
+function PlayerCodec.withWaiting(record: Record, waiting: Record?, live: Live): Record
+	if waiting == nil then
+		return record
+	end
+	if not live.standing then
+		record.position = waiting.position
+		record.x, record.y, record.z, record.yaw = waiting.x, waiting.y, waiting.z, waiting.yaw
+		record.health = waiting.health
+	end
+	if not live.climate then
+		record.thirst, record.temperature = waiting.thirst, waiting.temperature
+	end
+	if not live.effects then
+		record.effects = table.clone(waiting.effects)
+	end
+	return record
 end
 
 local function finite(value: number): boolean
@@ -211,7 +251,10 @@ local function decode(bytes: buffer): Record
 	end
 	for _ = 1, SaveCodec.readU8(r) do
 		local place = SaveCodec.readU8(r)
-		local stack = SaveCodec.readStack(r)
+		local stack, lost = SaveCodec.readStack(r)
+		if lost then
+			record.dropped += 1
+		end
 		if place >= 1 and place <= Types.INVENTORY_SIZE then
 			record.slots[place] = stack
 		elseif place > Types.INVENTORY_SIZE and place < CURSOR then

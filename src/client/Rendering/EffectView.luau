@@ -9,6 +9,8 @@
 	  Blindness     the fog closes in to 5 blocks, black (ViewSettings.setEffectFog, LightingController
 	                .setEffectFogColour: Effects.blindnessFog, opening up over its last second),
 	                and the view darkens; it keeps sprints from starting (Player/MovementController).
+	                How blind the view is (`blindness`) dims other brightenings by as much
+	                (Weather/LightningView's flash: Minecraft's sky flash is hidden by the fog).
 	  Nausea        the camera rolls and the field of view sways (Minecraft's spinning distortion,
 	                which a Roblox camera can't do): Effects.nauseaIntensity builds up over about
 	                8 s once it has more than 3 s left and fades over 5 s after, and Effects.
@@ -53,10 +55,17 @@ local NAUSEA = Effects.id.Nausea
 local started = false
 -- The Distortion Effects setting's share of the Nausea wobble (0..1, already squared).
 local distortion = 1
+-- How blind the view is now (0..1).
+local blindNow = 0
 
 -- The Distortion Effects setting (PlayerSettings.distortion: the slider's share squared).
 function EffectView.setDistortion(share: number)
 	distortion = math.clamp(share, 0, 1)
+end
+
+-- How blind the view is now: 0 (not), 1 (Blindness; opening up over its last second).
+function EffectView.blindness(): number
+	return blindNow
 end
 
 function EffectView.start()
@@ -107,6 +116,7 @@ function EffectView.start()
 		local blindness = if blind
 			then (if blindTicks == Effects.INFINITE then 1 else math.min(1, blindTicks / TICKS_PER_SECOND))
 			else 0
+		blindNow = blindness
 
 		local _, nauseaTicks = EffectState.get(NAUSEA)
 		local left = if EffectState.levels()[NAUSEA] ~= nil then nauseaTicks else 0

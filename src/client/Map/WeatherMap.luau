@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	The maps' weather mode, pure (Map/WeatherLayer draws it over the minimap and the world map;
 	tests/spec/WeatherVisuals checks it). The weather is a deterministic field (Shared/Weather), so
@@ -12,7 +13,8 @@
 	            across), its corner on multiples of the margin (`grid`), so the map pans that far
 	            before it is sampled again, drawn as a small image stretched over the map
 	            (smoothed). `paint` can paint a band of rows of a picture at a time (Map/
-	            WeatherLayer spreads a picture over frames).
+	            WeatherLayer spreads a picture over frames: `bandRows` sizes a band to a frame's
+	            time by what the last band cost, so a slow device paints thinner bands).
 	  Colours   `colour`: clouds a light grey veil (CLOUD) by the cover; where it rains RAIN blue,
 	            where it snows SNOW white (by the cell's biome and ground height, Weather.formAt),
 	            stronger with the precipitation, nothing over dry biomes but the clouds;
@@ -181,6 +183,19 @@ function WeatherMap.paint(
 		end
 	end
 	return out
+end
+
+--[[
+	Rows of `count` cells to paint in a frame: as many as `budget` seconds hold at `perCell`
+	seconds a cell (what the last band cost; 0: unknown), at most `maxCells` cells (Map
+	.CellsPerFrame) and the `left` rows, at least one.
+]]
+function WeatherMap.bandRows(count: number, left: number, maxCells: number, budget: number, perCell: number): number
+	local rows = math.floor(maxCells / count)
+	if perCell > 0 then
+		rows = math.min(rows, math.floor(budget / (perCell * count)))
+	end
+	return math.clamp(rows, 1, math.max(1, left))
 end
 
 --[[ Cache ]]

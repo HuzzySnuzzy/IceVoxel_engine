@@ -24,8 +24,11 @@
 	            then World/WorldInfo.create runs the boot's startWorld with its settings, as
 	            Creating does; a load that fails is answered with CreateWorldResult and why, and
 	            the server waits on), delete and rename (the name through the text filter first;
-	            each answered with the list again and how it went). A list a second per player,
-	            and a load, delete or rename a second, as CreateWorld.
+	            each answered with the list again and how it went). Only the player's own worlds
+	            (the ones they created: `claim` before creating one), and the game's for the
+	            game's own people (World/WorldSave's owners). A list a second per player (one
+	            asked faster gets the last list again: the screen waits for an answer), and a
+	            load, delete or rename a second, as CreateWorld.
 	  Entering  EnterWorld (Join World, or the creator's client once its world is made): when the
 	            world exists the player's character loads (Player:LoadCharacterAsync, or
 	            LoadCharacter on an engine without it), once their record in a saved world was
@@ -60,14 +63,20 @@ local WorldMenu = {}
 export type Saves = {
 	-- Whether worlds can be saved and loaded here (Protocol.SaveState) and why not.
 	status: () -> (number, string?),
-	-- The saved worlds (yields), or nil and why not.
-	list: () -> ({ Protocol.WorldEntry }?, string?),
-	-- Opens a saved world for startWorld (yields): its settings, or nil and why not.
-	prepare: (id: string, progress: (done: number, total: number) -> ()) -> (WorldSettings.Settings?, string?),
-	-- A prepared world did not start: give it back.
+	-- The saved worlds `player` may open (yields), or nil and why not.
+	list: (player: Player) -> ({ Protocol.WorldEntry }?, string?),
+	-- `player` creates the next world (its owner): true, or false and why not (their list is full).
+	claim: (player: Player) -> (boolean, string?),
+	-- Opens a saved world of `player`'s for startWorld (yields): its settings, or nil and why not.
+	prepare: (
+		id: string,
+		progress: (done: number, total: number) -> (),
+		player: Player
+	) -> (WorldSettings.Settings?, string?),
+	-- A world did not start: never save it, give it back.
 	abandon: () -> (),
-	delete: (id: string) -> (boolean, string?),
-	rename: (id: string, name: string) -> (boolean, string?),
+	delete: (id: string, player: Player) -> (boolean, string?),
+	rename: (id: string, name: string, player: Player) -> (boolean, string?),
 	-- Yields (a few seconds at most) until the player's record in the world was read.
 	beforeEnter: (player: Player) -> (),
 	-- Tells everyone the keys a load read (the title screen's progress).
@@ -81,6 +90,8 @@ local loading: { [Player]: boolean } = {}
 local lastRequest: { [Player]: number } = {}
 -- Per player: the last list request and the last load, delete or rename.
 local lastAction: { [Player]: { [string]: number } } = {}
+-- Per player: the last list sent (a list asked too fast gets it again).
+local lastList: { [Player]: { Protocol.WorldEntry } } = {}
 local savesInUse: Saves? = nil
 -- A creation is under way (the name's filter yields before WorldInfo.create).
 local busy = false
@@ -242,10 +253,24 @@ local function onCreate(start: (WorldSettings.Settings) -> (), player: Player, p
 	end
 	busy = true
 	broadcastState()
+	-- (Yields: the creator's world list must have room for it, when worlds are saved.)
+	local saves = savesInUse
+	if saves then
+		local room, full = saves.claim(player)
+		if not room then
+			busy = false
+			answer(false, `You can't make another world: {full}`)
+			broadcastState()
+			return
+		end
+	end
 	-- (Yields: a web call.)
 	settings.name = filterName(settings.name, player.UserId)
 	local ok, err = WorldInfo.create(settings, start)
 	busy = false
+	if not ok and saves then
+		saves.abandon()
+	end
 	if ok then
 		print(
 			`[IceVoxel] {player.Name} created the world "{settings.name}" ({settings.worldType}, seed {WorldSettings.seedText(
@@ -259,10 +284,19 @@ local function onCreate(start: (WorldSettings.Settings) -> (), player: Player, p
 	broadcastState()
 end
 
--- The saved worlds for `player`, with `message` (how the last action went).
-local function sendList(saves: Saves, player: Player, message: string?)
+-- The saved worlds for `player`, with `message` (how the last action went). `again`: the list
+-- sent last (asked too fast: no read).
+local function sendList(saves: Saves, player: Player, message: string?, again: boolean?)
 	local network = net
-	local worlds, problem = saves.list()
+	local worlds: { Protocol.WorldEntry }?, problem: string? = nil, nil
+	if again then
+		worlds = lastList[player]
+	else
+		worlds, problem = saves.list(player)
+		if worlds and player.Parent then
+			lastList[player] = worlds
+		end
+	end
 	local state = saves.status()
 	if network and player.Parent then
 		network.send(
@@ -301,10 +335,13 @@ local function onWorldAction(saves: Saves, start: (WorldSettings.Settings) -> ()
 		lastAction[player] = times
 	end
 	if now - (times[kind] or -math.huge) < REQUEST_INTERVAL then
+		-- (Every request is answered: the screen waits for one.)
 		if load then
 			answer(false, "Too fast: try again in a moment")
 		elseif kind == "change" then
 			sendList(saves, player, "Too fast: try again in a moment")
+		else
+			sendList(saves, player, if lastList[player] then nil else "Too fast: try again in a moment", true)
 		end
 		return
 	end
@@ -323,13 +360,13 @@ local function onWorldAction(saves: Saves, start: (WorldSettings.Settings) -> ()
 		sendList(saves, player, nil)
 	elseif action == Protocol.WorldAction.Delete then
 		busy = true
-		local ok, problem = saves.delete(id)
+		local ok, problem = saves.delete(id, player)
 		busy = false
 		sendList(saves, player, if ok then "The world was deleted" else `It could not be deleted: {problem}`)
 	elseif action == Protocol.WorldAction.Rename then
 		busy = true
 		local filtered = filterName(WorldSettings.cleanName(name), player.UserId)
-		local ok, problem = saves.rename(id, filtered)
+		local ok, problem = saves.rename(id, filtered, player)
 		busy = false
 		sendList(saves, player, if ok then `Renamed to "{filtered}"` else `It could not be renamed: {problem}`)
 	elseif load then
@@ -337,7 +374,7 @@ local function onWorldAction(saves: Saves, start: (WorldSettings.Settings) -> ()
 		broadcastState()
 		local settings, problem = saves.prepare(id, function(done: number, total: number)
 			saves.progress(done, total, "")
-		end)
+		end, player)
 		if settings == nil then
 			busy = false
 			warn(`[IceVoxel] the world {id} could not be loaded: {problem}`)
@@ -412,6 +449,7 @@ function WorldMenu.start(serverNet: ServerNet.ServerNet, start: (WorldSettings.S
 		loading[player] = nil
 		lastRequest[player] = nil
 		lastAction[player] = nil
+		lastList[player] = nil
 	end)
 	-- (Who the operator is shows on the title screen.)
 	Operators.changed:Connect(broadcastSoon)

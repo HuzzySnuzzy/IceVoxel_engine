@@ -240,6 +240,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		Characters.explosion(x, y, z, power, getBlock, range)
 		Mobs.explode(x, y, z, power)
 	end)
+	-- Rain puts burning players out (mobs ask the weather themselves: Mobs/Mobs).
+	Characters.setRain(WeatherServer.rainingAt)
 	-- What lightning does to the living (players and mobs), and the mobs it may pick to strike.
 	WeatherServer.setHandler(function(x: number, y: number, z: number)
 		Characters.lightning(x, y, z)

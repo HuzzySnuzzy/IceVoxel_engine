@@ -25,7 +25,8 @@
 	  Day        `isDayAt(x, z, dayTime)`: Weather.isDay with the weather over the column (no
 	             daylight burning in a thunderstorm).
 	  Lightning  once a second, every player in a thunderstorm (not a spectator) may draw a strike
-	             near them (World/Lightning: the rate, the target, the fires); the handler the boot
+	             near them, players together sharing their sky (World/Lightning.roll: the rate,
+	             the target, the fires); the handler the boot
 	             script sets (`setHandler`) hurts the living it reaches (Players/Characters,
 	             Mobs/Mobs), and every player within Config.Weather.Lightning.Distance gets a
 	             Lightning message for the bolt, the flash and the thunder.
@@ -368,23 +369,24 @@ local function strike(x: number, y: number, z: number, loaded: boolean)
 	end
 end
 
--- One second's lightning near every player in a thunderstorm.
+-- One second's lightning near every player in a thunderstorm (the strikes per area, however many
+-- stand there: Lightning.roll).
 local function lightningStep()
 	local settings = Config.Weather.Lightning
 	if not settings.Enabled or not state.enabled then
 		return
 	end
+	local rollers: { Lightning.Roller } = {}
 	for _, player in Players:GetPlayers() do
 		local feet = feetOf(player)
 		if feet == nil or GameMode.isSpectator(GameMode.of(player)) then
 			continue
 		end
 		local _, thunder = WeatherServer.sample(math.floor(feet.X), math.floor(feet.Z))
-		if roll() >= Lightning.chance(thunder, settings.MeanSeconds, STEP_SECONDS) then
-			continue
-		end
-		local dx, dz = Lightning.pick(roll, settings.Radius)
-		local x, y, z, loaded = Lightning.target(view, math.floor(feet.X + dx), math.floor(feet.Z + dz), roll)
+		table.insert(rollers, { x = feet.X, z = feet.Z, thunder = thunder })
+	end
+	for _, column in Lightning.roll(rollers, settings.MeanSeconds, settings.Radius, STEP_SECONDS, roll) do
+		local x, y, z, loaded = Lightning.target(view, column[1], column[2], roll)
 		if x and y and z then
 			strike(x, y, z, loaded)
 		end

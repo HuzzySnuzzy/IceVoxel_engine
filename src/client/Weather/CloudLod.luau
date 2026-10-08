@@ -14,7 +14,10 @@
 	           air-frame position snapped to two of its cells (`window`); the next level's window
 	           is cut out of it (`hole`, on its cell edges), so the levels make rings, small cells
 	           near the camera and coarse ones far off. Levels are added until one reaches the
-	           view distance (`levels`); cells farther than the view distance are left out.
+	           view distance (`levels`); cells farther than the view distance are left out. A
+	           level's window moves every two of its cells but its hole (the finer level's window)
+	           every one: a level is planned again when either moved (`sameWindow`), or the rings
+	           would leave a strip with no clouds on one side and two layers on the other.
 	  Cells    a cell is cloudy where a smooth pattern (Perlin noise in the air's frame, its
 	           wavelength `wavelength` blocks or 3 cells, whichever is longer, so far rings keep
 	           whole clouds; finer raggedness near the camera) is below the clouded fraction
@@ -37,7 +40,9 @@
 	           keeps the parts of boxes it shares with the old one (CloudView's diff).
 
 	Positions are blocks; boxes are air-frame rectangles [x0, x1) x [z0, z1) from `base` to `top`
-	(a shaft's base is filled in by CloudView: the ground under it).
+	(a shaft's base is filled in at each plan, `groundShafts`: the lowest ground under it where
+	the clouds are now, in GROUND_STEP steps that are part of its key, so a shaft drifting from a
+	plateau over the sea is placed again lower at the next plan, not left hanging).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -430,6 +435,54 @@ function CloudLod.plan(
 		return ax * ax + az * az < bx * bx + bz * bz
 	end)
 	return boxes
+end
+
+-- Is window `b` the one `a` was planned for (the same cells and the same hole)? nil `a`: no.
+function CloudLod.sameWindow(a: Window?, b: Window): boolean
+	if a == nil or a.u0 ~= b.u0 or a.w0 ~= b.w0 or a.size ~= b.size or a.cols ~= b.cols then
+		return false
+	end
+	local ha, hb = a.hole, b.hole
+	if ha == nil or hb == nil then
+		return ha == hb
+	end
+	return ha.u0 == hb.u0 and ha.w0 == hb.w0 and ha.u1 == hb.u1 and ha.w1 == hb.w1
+end
+
+-- Blocks between the ground heights a shaft's key tells apart.
+CloudLod.GROUND_STEP = 8
+-- A shaft wider than this (blocks) looks for the ground at four more points.
+local WIDE_SHAFT = 64
+local QUARTERS = { { 0.25, 0.25 }, { 0.75, 0.25 }, { 0.25, 0.75 }, { 0.75, 0.75 } }
+
+--[[
+	Fills in the base of `boxes`' rain shafts (see the header): the lowest ground under each
+	(`groundAt(x, z)`, world blocks: at its centre and, when it is wide, a quarter of the way in
+	from each corner) with the air's frame displaced by (dx, dz) now, at least `lowest` (sea
+	level), down to a GROUND_STEP step; their keys follow.
+]]
+function CloudLod.groundShafts(
+	boxes: { Box },
+	groundAt: (x: number, z: number) -> number,
+	dx: number,
+	dz: number,
+	lowest: number
+)
+	local groundStep = CloudLod.GROUND_STEP
+	for _, box in boxes do
+		if not box.shaft then
+			continue
+		end
+		local width, depth = box.x1 - box.x0, box.z1 - box.z0
+		local ground = groundAt(box.x0 + width / 2 + dx, box.z0 + depth / 2 + dz)
+		if width > WIDE_SHAFT or depth > WIDE_SHAFT then
+			for _, at in QUARTERS do
+				ground = math.min(ground, groundAt(box.x0 + width * at[1] + dx, box.z0 + depth * at[2] + dz))
+			end
+		end
+		box.base = floor(math.max(ground, lowest) / groundStep) * groundStep
+		box.key = keyOf(box)
+	end
 end
 
 --[[

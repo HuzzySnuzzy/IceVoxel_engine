@@ -18,11 +18,14 @@
 	            per step (WeatherMap's cache): it is painted again when the map panned past the
 	            grid's margin, zoomed, after Map.RefreshSeconds, or when the server's weather
 	            changed (an override).
-	  Spread    a picture is painted a band of rows a frame (Map.CellsPerFrame cells: the world
-	            map's 96 x 96 costs ~7 ms in all, ~1 ms a frame), into a buffer of its own, at the
-	            moment it started; until it is done the map keeps the last picture (placed on its
-	            own grid, so it stays right while the map pans). A picture is always finished,
-	            then the next is started for wherever the map is then.
+	  Spread    a picture is painted a band of rows a frame (at most Map.CellsPerFrame cells, and
+	            as many rows as Map.FrameMs holds at what the last band cost a cell: WeatherMap
+	            .bandRows; the new columns' lookups stop at that time too), into a buffer of its
+	            own, at the moment it started; until it is done the map keeps the last picture
+	            (placed on its own grid, so it stays right while the map pans). A picture is always
+	            finished, then the next is started for wherever the map is then. With native code
+	            (Lune) the world map's 96 x 96 costs ~7 ms in all; run interpreted (a phone) about
+	            3 times that, so it takes more frames, never more of a frame.
 	  Off       without EditableImage access nothing is drawn; the wind and the step still show.
 ]]
 
@@ -71,6 +74,8 @@ export type Layer = {
 	-- The grid last asked for and its key (made again only when the grid changes).
 	grid: { x0: number, z0: number, cell: number, count: number },
 	gridKey: string,
+	-- Seconds a cell of the last band took (0: none painted yet).
+	perCell: number,
 	update: (self: Layer) -> (),
 }
 
@@ -153,11 +158,14 @@ local function begin(self: Layer, index: number, key: string, x0: number, z0: nu
 	}
 end
 
--- Paints the next band of `job`'s rows (Map.CellsPerFrame cells). Returns whether it is done.
+-- Paints the next band of `job`'s rows (see Spread). Returns whether it is done.
 local function advance(self: Layer, job: Job, field: Weather.Field): boolean
 	local settings = Config.Weather.Map
+	local started = os.clock()
+	local seconds = settings.FrameMs / 1000
+	local deadline = started + seconds
 	local count, cell = job.count, job.cell
-	local rows = math.clamp(math.floor(settings.CellsPerFrame / count), 1, count - job.row)
+	local rows = WeatherMap.bandRows(count, count - job.row, settings.CellsPerFrame, seconds, self.perCell)
 	local z0 = job.z0 + job.row * cell
 	local band = field:grid(job.moment, job.x0 + cell / 2, z0 + cell / 2, cell, count, rows, self.band)
 	self.band = band
@@ -165,7 +173,7 @@ local function advance(self: Layer, job: Job, field: Weather.Field): boolean
 	local function formAt(x: number, z: number): string
 		if WeatherState.knows(x, z) then
 			return WeatherState.formAt(x, nil, z)
-		elseif budget > 0 then
+		elseif budget > 0 and os.clock() < deadline then
 			budget -= 1
 			return WeatherState.formAt(x, nil, z)
 		end
@@ -174,6 +182,7 @@ local function advance(self: Layer, job: Job, field: Weather.Field): boolean
 	end
 	WeatherMap.paint(band, job.x0, z0, cell, count, rows, formAt, job.pixels, job.row * count)
 	job.row += rows
+	self.perCell = (os.clock() - started) / (rows * count)
 	return job.row >= count
 end
 
@@ -301,6 +310,7 @@ function WeatherLayer.new(view: MapView.MapView, maxCells: number, zIndex: numbe
 		band = nil,
 		grid = { x0 = math.huge, z0 = math.huge, cell = 0, count = 0 },
 		gridKey = "",
+		perCell = 0,
 	}
 	local layer = (setmetatable(self, Layer) :: any) :: Layer
 	-- An override or doWeatherCycle changes what is coming: paint again.

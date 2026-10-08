@@ -39,7 +39,10 @@
 	    them out of the explosion packet's knockback; the client leaves out creative flight).
 	  * lightning (`lightning`, World/WeatherServer's strike handler; World/Lightning): a living
 	    player (not a spectator) whose box meets a bolt's reach catches fire for 8 s and takes
-	    5 half hearts like any other hurt (Minecraft's Entity.thunderHit).
+	    5 half hearts like any other hurt (Minecraft's Entity.thunderHit). Rain puts burning
+	    out (`setRain`: the weather is asked only while a player burns, Players/Burning), and
+	    a bolt strikes only where it rains, so its fire goes out on the next tick, as
+	    Minecraft's does: a strike costs its 5 half hearts, not 13.
 	  * status effects (Players/Effects, ticked here with lava and burning, 20 a second): the
 	    fluids' effects first (oil's Slowness and Oil Coated, fuel's Nausea, Poison and Fuel Soaked,
 	    water washing them off; the eyes are looked at only when a fluid gives effects there),
@@ -108,6 +111,8 @@ Characters.ON_FIRE = "IceVoxelOnFire"
 
 -- Each player's burning (Players/Burning), started over with every character.
 local burning: { [Player]: Burning.PlayerState } = {}
+-- The weather's rain (World/WeatherServer.rainingAt, `setRain`): rain puts burning players out.
+local rainingAt: ((x: number, y: number, z: number) -> boolean)? = nil
 -- Players whose next health change is a restore, not a hurt (no hurt sound).
 local quietHealth: { [Player]: boolean } = {}
 
@@ -206,6 +211,11 @@ local function burnTick(getBlock: Burning.GetBlock)
 		end
 		local mode = GameMode.of(player)
 		local touching = Burning.touchingAt(getBlock, feet.X, feet.Y, feet.Z, BODY.width, BODY.height)
+		-- (The weather only while burning: rain puts it out.)
+		local rain = rainingAt
+		if state.fire > 0 and rain and Burning.inRain(rain, feet.X, feet.Y, feet.Z, BODY.height) then
+			touching = bit32.bor(touching, Burning.RAIN)
+		end
 		-- (The fluid over the eyes, only when some fluid gives effects there.)
 		local eyes = 0
 		if EffectRules.HEAD_EFFECTS then
@@ -342,6 +352,11 @@ function Characters.explosion(
 			Protocol.encodeExplosion({ x = x, y = y, z = z, power = power, kx = kx, ky = ky, kz = kz })
 		)
 	end
+end
+
+-- Where it rains (World/WeatherServer.rainingAt; nil: nowhere): burning players in it go out.
+function Characters.setRain(check: ((x: number, y: number, z: number) -> boolean)?)
+	rainingAt = check
 end
 
 --[[

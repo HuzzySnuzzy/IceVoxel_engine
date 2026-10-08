@@ -8,12 +8,17 @@
 	           would be rare near a player here: instead every player (not a spectator) rolls once
 	           a second, `chance`: the thunder at their feet (0..1) / Config.Weather.Lightning
 	           .MeanSeconds, a strike every 20 s on average under a full thunderstorm (10 to 40 s
-	           apart most of the time), none where it doesn't thunder.
+	           apart most of the time), none where it doesn't thunder. As Minecraft's are a
+	           chunk's, the strikes are the area's, not the players': a column one player drew is
+	           kept with the share 1 / (the players whose discs hold it) (`roll`), so eight
+	           players at one base see the strikes one would, not eight times as many.
 	  Where    a column picked evenly within Config.Weather.Lightning.Radius blocks of the player
 	           (`pick`), struck at its top (`target`: World/WeatherRules.top, Minecraft's
 	           MOTION_BLOCKING heightmap: a tree's crown, a roof, the ground), or, when living
 	           things that see the sky stand within 3 blocks of that column at or above 3 below
-	           its top, at one of them picked at random (findLightningTargetAround). Then only
+	           its top (up to the build height, Config.WorldHeight: Minecraft's box, so one on a
+	           pillar or a tower draws it), at one of them picked at random
+	           (findLightningTargetAround). Then only
 	           where it is raining (Level.isRainingAt: no strikes in snow or deserts, nor under a
 	           roof a living thing hides under). A column whose chunk isn't loaded is struck at the
 	           generator's height, as a sight and a sound only (nothing there to burn or hurt).
@@ -36,6 +41,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Config = require(Shared.Config)
 local SharedFire = require(Shared.Fire)
 
 local AIR = Blocks.AIR
@@ -55,13 +61,16 @@ export type View = {
 
 export type Living = { x: number, y: number, z: number, width: number, height: number, key: any? }
 
+-- A player rolling for a strike: their feet's column and the thunder there (0..1).
+export type Roller = { x: number, z: number, thunder: number }
+
 export type Random = () -> number
 
 local Lightning = {}
 
--- findLightningTargetAround's reach around the column, how far from the column's top living
--- things are looked for (its box keeps those within reach of the column), and the bolt's reach
--- (LightningBolt).
+-- findLightningTargetAround's reach around the column, how far around it (and the column's top)
+-- living things are looked for at least (its box keeps those within reach of the column, up to
+-- the build height), and the bolt's reach (LightningBolt).
 Lightning.SEARCH = 3
 Lightning.LIVING_RADIUS = 12
 Lightning.REACH = 3
@@ -91,6 +100,42 @@ function Lightning.pick(random: Random, radius: number): (number, number)
 end
 
 --[[
+	One roll of `seconds` for `players` (see the header): the columns struck, before `target`.
+	Each player may draw one within `radius` of them (`chance`, `pick`); it is kept with the
+	share of the players whose discs hold it, so the strikes a column gets don't grow with the
+	players near it.
+]]
+function Lightning.roll(
+	players: { Roller },
+	meanSeconds: number,
+	radius: number,
+	seconds: number,
+	random: Random
+): { { number } }
+	local struck: { { number } } = {}
+	local limit = radius * radius
+	for _, player in players do
+		if random() >= Lightning.chance(player.thunder, meanSeconds, seconds) then
+			continue
+		end
+		local dx, dz = Lightning.pick(random, radius)
+		local x, z = player.x + dx, player.z + dz
+		local sharing = 0
+		for _, other in players do
+			local ox, oz = x - other.x, z - other.z
+			if ox * ox + oz * oz <= limit then
+				sharing += 1
+			end
+		end
+		if sharing > 1 and random() * sharing >= 1 then
+			continue
+		end
+		table.insert(struck, { math.floor(x), math.floor(z) })
+	end
+	return struck
+end
+
+--[[
 	Where a strike aimed at column (x, z) lands (see the header): the cell (x, y, z) and whether its
 	chunk is loaded; nil when it doesn't strike (no rain there).
 ]]
@@ -98,10 +143,13 @@ function Lightning.target(view: View, x: number, z: number, random: Random): (nu
 	local top, loaded = view.top(x, z)
 	local tx, ty, tz = x, top, z
 	if loaded then
-		-- (Minecraft's box: the column from 3 below its top up, 3 blocks wider each way.)
+		-- (Minecraft's box: the column from 3 below its top up to 3 above the build height, 3
+		-- blocks wider each way; looked for in a sphere around the top that holds all of it.)
 		local search = Lightning.SEARCH
+		local ceiling = Config.WorldHeight + search
 		local found: { { number } } = {}
-		for _, living in view.living(x + 0.5, top, z + 0.5, Lightning.LIVING_RADIUS) do
+		local radius = math.max(Lightning.LIVING_RADIUS, ceiling - top + Lightning.LIVING_RADIUS)
+		for _, living in view.living(x + 0.5, top, z + 0.5, radius) do
 			local half = living.width / 2
 			if
 				living.x + half >= x - search
@@ -109,6 +157,7 @@ function Lightning.target(view: View, x: number, z: number, random: Random): (nu
 				and living.z + half >= z - search
 				and living.z - half <= z + 1 + search
 				and living.y + living.height >= top - search
+				and living.y <= ceiling
 			then
 				local fx, fy, fz = math.floor(living.x), math.floor(living.y), math.floor(living.z)
 				if view.skyOpen(fx, fy, fz) then

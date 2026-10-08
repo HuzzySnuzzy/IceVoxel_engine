@@ -9,6 +9,8 @@
 	    /save-off           turns automatic saving off (Minecraft's level.noSave): no autosaves and
 	                        no save on shutdown, until /save-on; /save-all still saves
 	    /save-on            turns it back on
+	A world that can't be saved at all (no DataStore, its lock lost, refused) has no automatic
+	saving to turn off or on: all three say why instead (the title screens keep saying it too).
 
 	Who may: operators only (Players/Operators.isOperator, Minecraft's permission level 4; Allow
 	Commands is not enough: saving touches every player's world). The answers are Minecraft's
@@ -71,16 +73,19 @@ function SaveCommand.run(text: string, context: Context): Result?
 	if not context.operator then
 		return { action = nil, feedback = { SaveCommand.DENIED } }
 	end
+	local unavailable = {
+		action = nil,
+		feedback = { `Unable to save the game: {context.reason or "saving is not available"}` },
+	}
 	if command == SaveCommand.SAVE_ALL then
 		if #list > 2 or (list[2] ~= nil and list[2] ~= "flush") then
 			return { action = nil, feedback = { SaveCommand.USAGE_ALL } }
 		elseif not context.available then
-			return {
-				action = nil,
-				feedback = { `Unable to save the game: {context.reason or "saving is not available"}` },
-			}
+			return unavailable
 		end
 		return { action = "save", feedback = { SaveCommand.SAVING } }
+	elseif not context.available then
+		return unavailable
 	elseif command == SaveCommand.SAVE_OFF then
 		if not context.autosave then
 			return { action = nil, feedback = { SaveCommand.ALREADY_OFF } }

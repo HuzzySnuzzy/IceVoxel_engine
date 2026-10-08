@@ -17,7 +17,10 @@
 	            thunder; thunder: full rain and thunder; clear: no rain and thin clouds at most)
 	            over Config.Weather.BlendSeconds (Minecraft's 0.01 rain level a tick: 5 s), and
 	            back out over the last BlendSeconds before it ends. A new override blends from
-	            whatever the old one gave (`previous`, at the weight it had). While doWeatherCycle
+	            whatever the old one gave (`previous`: the old one at the weight it had, after
+	            what it was still blending from, so commands in quick succession never jump), and
+	            one shorter than the blend is dropped only once what it replaced has faded out
+	            (`expire`). While doWeatherCycle
 	            is off an override's time stands still (Minecraft's counters wait too): it never
 	            ends, and one fading out stays where it was. Published as one string attribute,
 	            ATTRIBUTE_OVERRIDE (`writeState` / `readState`), so a client never sees half a
@@ -62,13 +65,15 @@ export type Field = WeatherModel.Field
 export type Moment = WeatherModel.Moment
 export type Sample = WeatherModel.Sample
 export type Kind = WeatherModel.Kind
+export type Blend = WeatherModel.Blend
 
 --[[
 	The weather's state as the server keeps it and clients read it from the attributes: the clock
 	(`base` ticks at server time `syncedAt`, `rate` ticks a second), doWeatherCycle (`cycle`), and
 	the override: `override` ("" none, CLEAR, RAIN or THUNDER) since server time `start` until
 	`finish` (math.huge while its time stands still: then `left` seconds remain), blended over
-	`previous` at `previousWeight`.
+	`previous` (the overrides it replaced, oldest first, at their weights when it started; they
+	fade out as it blends in).
 ]]
 export type State = {
 	enabled: boolean,
@@ -80,8 +85,7 @@ export type State = {
 	start: number,
 	finish: number,
 	left: number?,
-	previous: Kind,
-	previousWeight: number,
+	previous: { Blend },
 }
 
 -- A forecast step: seconds from now and the weather then.
@@ -98,6 +102,11 @@ Weather.THUNDER = "thunder"
 Weather.SNOW = "snow"
 Weather.NONE = ""
 Weather.OVERRIDES = table.freeze({ Weather.CLEAR, Weather.RAIN, Weather.THUNDER })
+
+-- Most overrides a new one blends from (commands faster than the blend: the oldest goes), and
+-- the weight below which one is gone (less than a byte of the grid's).
+local MAX_PREVIOUS = 8
+local FADED = 1 / 1024
 
 -- Precipitation over this is rain (or snow) falling (Minecraft's isRaining: rain level > 0.2).
 Weather.RAINING = WeatherModel.RAINING
@@ -157,8 +166,7 @@ function Weather.newState(time: number?, now: number?, cycle: boolean?, enabled:
 		start = 0,
 		finish = 0,
 		left = nil,
-		previous = Weather.NONE,
-		previousWeight = 0,
+		previous = {},
 	}
 end
 
@@ -203,15 +211,31 @@ function Weather.momentAt(state: State, now: number, into: Moment?): Moment
 			enabled = false,
 			override = Weather.NONE :: Kind,
 			weight = 0,
-			previous = Weather.NONE :: Kind,
-			previousWeight = 0,
+			previous = {},
 		}
 	moment.time = Weather.clock(state, now)
 	moment.enabled = state.enabled
 	moment.override = state.override
 	moment.weight = weight
-	moment.previous = state.previous
-	moment.previousWeight = if state.override == Weather.NONE then 0 else state.previousWeight * (1 - rampIn)
+	-- (What it replaced fades out as it blends in; `into`'s entries are reused: no garbage a frame.)
+	local list = moment.previous
+	local count = 0
+	local fade = 1 - rampIn
+	if state.override ~= Weather.NONE and fade > 0 then
+		for _, earlier in state.previous do
+			count += 1
+			local entry = list[count]
+			if entry == nil then
+				entry = { kind = earlier.kind, weight = 0 }
+				list[count] = entry
+			end
+			entry.kind = earlier.kind
+			entry.weight = earlier.weight * fade
+		end
+	end
+	for i = #list, count + 1, -1 do
+		list[i] = nil
+	end
 	return moment
 end
 
@@ -258,12 +282,25 @@ end
 function Weather.setOverride(state: State, kind: Kind, seconds: number, now: number)
 	assert(isOverride(kind), `Weather.setOverride: unknown kind {kind}`)
 	assert(seconds > 0 and seconds == seconds, "Weather.setOverride needs a positive duration")
-	local weight = weights(state, now)
-	if weight > 0 then
-		state.previous, state.previousWeight = state.override, weight
-	else
-		state.previous, state.previousWeight = Weather.NONE, 0
+	-- What the weather is now: what the old one still blended from, then the old one.
+	local weight, rampIn = weights(state, now)
+	local previous: { Blend } = {}
+	if state.override ~= Weather.NONE then
+		local fade = 1 - rampIn
+		for _, earlier in state.previous do
+			local faded = earlier.weight * fade
+			if faded > FADED then
+				table.insert(previous, { kind = earlier.kind, weight = faded })
+			end
+		end
+		if weight > FADED then
+			table.insert(previous, { kind = state.override, weight = weight })
+		end
 	end
+	while #previous > MAX_PREVIOUS do
+		table.remove(previous, 1)
+	end
+	state.previous = previous
 	state.override = kind
 	state.start = now
 	if state.cycle then
@@ -273,10 +310,19 @@ function Weather.setOverride(state: State, kind: Kind, seconds: number, now: num
 	end
 end
 
--- Drops an override that has run out by server time `now`. Returns whether it did.
+--[[
+	Drops an override that has run out by server time `now`, once what it replaced has faded out
+	too (an override shorter than the blend ends before that: dropped then, the weather would
+	jump). Returns whether it did.
+]]
 function Weather.expire(state: State, now: number): boolean
-	if state.override ~= Weather.NONE and state.left == nil and state.finish <= now then
-		state.override, state.previous, state.previousWeight = Weather.NONE, Weather.NONE, 0
+	if
+		state.override ~= Weather.NONE
+		and state.left == nil
+		and state.finish <= now
+		and (#state.previous == 0 or now - state.start >= Weather.blendSeconds())
+	then
+		state.override, state.previous = Weather.NONE, {}
 		state.start, state.finish = 0, 0
 		return true
 	end
@@ -296,41 +342,61 @@ local function number(text: string?): number?
 	return if value and value == value then value else nil
 end
 
--- The override as ATTRIBUTE_OVERRIDE's text: "kind;start;finish;left;previous;previousWeight"
--- (finish -1 and left >= 0 while its time stands still; "" for none).
+--[[
+	The override as ATTRIBUTE_OVERRIDE's text: "kind;start;finish;left;previous;weight..." (finish
+	-1 and left >= 0 while its time stands still; a previous kind and its weight for each it
+	blends from, oldest first, or ";0" for none; "" for no override).
+]]
 function Weather.encodeOverride(state: State): string
 	if state.override == Weather.NONE then
 		return ""
 	end
-	return string.format(
-		"%s;%.17g;%.17g;%.17g;%s;%.17g",
+	local parts = {
 		state.override,
-		state.start,
-		if state.finish == math.huge then -1 else state.finish,
-		state.left or -1,
-		state.previous,
-		state.previousWeight
-	)
+		string.format("%.17g", state.start),
+		string.format("%.17g", if state.finish == math.huge then -1 else state.finish),
+		string.format("%.17g", state.left or -1),
+	}
+	for _, earlier in state.previous do
+		table.insert(parts, earlier.kind)
+		table.insert(parts, string.format("%.17g", earlier.weight))
+	end
+	if #state.previous == 0 then
+		table.insert(parts, Weather.NONE)
+		table.insert(parts, "0")
+	end
+	return table.concat(parts, ";")
 end
 
 -- Reads ATTRIBUTE_OVERRIDE's text into `state` (none when it is empty or malformed).
 function Weather.decodeOverride(state: State, text: any)
-	state.override, state.previous, state.previousWeight = Weather.NONE, Weather.NONE, 0
+	state.override, state.previous = Weather.NONE, {}
 	state.start, state.finish, state.left = 0, 0, nil
 	if type(text) ~= "string" or text == "" then
 		return
 	end
 	local parts = string.split(text, ";")
-	local start, finish, left, previousWeight = number(parts[2]), number(parts[3]), number(parts[4]), number(parts[6])
-	if #parts ~= 6 or not isOverride(parts[1]) or start == nil or finish == nil or left == nil then
+	local start, finish, left = number(parts[2]), number(parts[3]), number(parts[4])
+	if
+		#parts < 6
+		or #parts % 2 ~= 0
+		or #parts > 4 + 2 * MAX_PREVIOUS
+		or not isOverride(parts[1])
+		or start == nil
+		or finish == nil
+		or left == nil
+	then
 		return
 	end
 	state.override = parts[1]
 	state.start = start
 	state.finish = if finish < 0 then math.huge else finish
 	state.left = if left >= 0 then left else nil
-	if isOverride(parts[5]) and previousWeight then
-		state.previous, state.previousWeight = parts[5], clamp(previousWeight, 0, 1)
+	for i = 5, #parts, 2 do
+		local weight = number(parts[i + 1])
+		if isOverride(parts[i]) and weight and weight > 0 then
+			table.insert(state.previous, { kind = parts[i], weight = clamp(weight, 0, 1) })
+		end
 	end
 end
 

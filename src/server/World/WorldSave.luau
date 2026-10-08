@@ -11,16 +11,23 @@
 	             saving off: worlds last for the session, and the title screen and the chat say
 	             so: Protocol WorldSave state). Requests go through Save/SaveScheduler with
 	             DataStoreService:GetRequestBudgetForRequestType as their budget.
+	  Owners     the title screen lists, loads, renames and deletes a player's own worlds only
+	             (those they created: `claim` makes them the next world's owner, when their list
+	             has room), and the game's people (Operators.isPermanent) the game's worlds too
+	             (Save/WorldMeta's owners): the first stranger into an empty server, its operator
+	             until a world exists, can't touch anyone else's.
 	  Loading    `prepare` (the title screen's Load World, or the latest world with the menu off
 	             and Config.Save.LoadLatest) takes the world's lock and reads its record and
 	             regions, showing "Loading world: 12 / 40" on every title screen; a world that
-	             can't be read whole is never started (nor written). startWorld then makes the
-	             world: `attach` gives it the loaded edits before any chunk is generated (and
-	             makes a new world's handle), `restore` puts containers, machines, pipes,
-	             structure blocks, items, animals, operators and the sections (the clock, and
-	             whatever registered: `registerSection`) back once every part has started, before
-	             the world is published; block updates that were due come back as their chunks
-	             generate.
+	             can't be read whole is never started (nor written), and one holding what this
+	             version doesn't know is played but not saved. startWorld then makes the world:
+	             `attach` gives it the loaded edits before any chunk is generated (and makes a
+	             new world's handle), `restore` puts containers, machines, pipes, structure
+	             blocks, items, animals, operators and the sections (the clock, and whatever
+	             registered: `registerSection`) back once every part has started, before the
+	             world is published; block updates that were due come back as their chunks
+	             generate (and are saved again, as they were, until then). A world whose start
+	             failed (`abandon`) is never saved: half of it may be missing.
 	  Dirty      every block change marks its region (`blockChanged`); a save writes the regions
 	             that changed, those holding state now and those that held some at the last save
 	             (WorldSnapshot.collect), comparing each with what the store holds (WorldStore:
@@ -39,15 +46,22 @@
 	             until it is, they wait on the title screen (WorldMenu's `beforeEnter`, at most
 	             ENTER_WAIT seconds). Their inventory and game mode come back at once, the rest on
 	             their first character: where they stood and looked (Players/Spawning's
-	             placement), health (Characters.restoreHealth), Tough As Nails and effects. A
-	             player whose record could not be read starts afresh and is never written this
-	             session (an outage never replaces a saved inventory with an empty one), and is
-	             told. Records go out with every save, and at once when a player leaves.
-	  Lock       held while the world is open, renewed every third of Config.Save.LockTimeout; a
-	             lost lock (another server took a stale world over) stops saving, and operators
-	             are told.
+	             placement), health (Characters.restoreHealth), Tough As Nails and effects; until
+	             a character stands, what they are saved with is the record's (PlayerCodec
+	             .withWaiting: leaving from the title screen keeps their place). A player whose
+	             record could not be read starts afresh, and one whose record holds items this
+	             version doesn't know plays with the rest: neither is written this session (an
+	             outage never replaces a saved inventory with an empty one), and they are told.
+	             Records go out with every save, and at once when a player leaves, each numbered
+	             as it is captured: an older one is never written over a newer
+	             (WorldStore's `order`).
+	  Lock       held while the world is open, renewed while it loads, as it starts and every
+	             third of Config.Save.LockTimeout, and looked at before every save writes; a lost
+	             lock (another server took a stale world over) stops saving, and operators are
+	             told.
 	  Commands   /save-all [flush], /save-off, /save-on (operators: Save/SaveCommand), as
-	             TextChatCommands (or the legacy chat's Chatted).
+	             TextChatCommands (or the legacy chat's Chatted); in a world that can't be saved
+	             they say why and change nothing.
 	  Sections   `registerSection(name, encode, decode)`: other parts of the game keep state of
 	             their own with the world (the weather's clock and overrides, say): `encode()`
 	             returns a JSON-able value (strings, numbers, booleans, tables of them; small: it
@@ -114,8 +128,11 @@ type PlayerState = {
 	-- Their record was read (or there is none); writing it is allowed (never after a failed read).
 	loaded: boolean,
 	canSave: boolean,
-	-- The saved record whose place and health wait for their next character.
+	-- The saved record whose place and health wait for their next character (Spawning takes it).
 	record: Record?,
+	-- The saved record no character has used yet (a save keeps its place, health, Tough As Nails
+	-- and effects until one stands).
+	waiting: Record?,
 	-- Their inventory (the same table all session: Players/InventoryState).
 	inventory: InventoryTypes.Inventory?,
 	-- The record as last seen alive (what a leaving player whose character went already keeps).
@@ -144,8 +161,12 @@ local savedSections: { [string]: any } = {}
 local restoredSections = false
 local pendingTicks: { [number]: { RegionCodec.TickRecord } } = {}
 local players: { [Player]: PlayerState } = {}
--- Records of players who left, not written yet (user id -> text).
-local departed: { [number]: string } = {}
+-- A captured record's order (WorldStore's: later captures are higher).
+local captures = 0
+-- Records of players who left, not written yet (user id -> text and order).
+local departed: { [number]: { text: string, order: number } } = {}
+-- The next new world's owner (`claim`: the player creating it; 0: the game's).
+local creator = 0
 
 --[[ Messages ]]
 
@@ -318,19 +339,47 @@ end
 
 --[[ The title screen ]]
 
--- The saved worlds, last played first (yields), or nil and why not.
-function WorldSave.list(): ({ Protocol.WorldEntry }?, string?)
+-- Who `player` is to the saved worlds (WorldMeta.mayManage); nil: the server itself.
+local function requester(player: Player?): WorldMeta.Requester?
+	if player == nil then
+		return nil
+	end
+	return { userId = player.UserId, permanent = Operators.isPermanent(player) }
+end
+
+--[[
+	The saved worlds `player` may open (see the header: their own, and the game's for its own
+	people; nil: the game's, for the boot), last played first (yields), or nil and why not.
+]]
+function WorldSave.list(player: Player?): ({ Protocol.WorldEntry }?, string?)
 	waitForProbe()
 	local store = saves
 	if store == nil then
 		return nil, SaveText.state(state, reason)
 	end
-	local index, why = WorldStore.list(store)
-	if index == nil then
-		return nil, why
+	local owners = { 0 }
+	if player then
+		owners = { player.UserId }
+		if Operators.isPermanent(player) and player.UserId ~= 0 then
+			table.insert(owners, 0)
+		end
 	end
+	local found: { WorldMeta.Entry } = {}
+	for _, owner in owners do
+		local index, why = WorldStore.list(store, owner)
+		if index == nil then
+			return nil, why
+		end
+		table.move(index.worlds, 1, #index.worlds, #found + 1, found)
+	end
+	table.sort(found, function(a, b)
+		if a.lastPlayed ~= b.lastPlayed then
+			return a.lastPlayed > b.lastPlayed
+		end
+		return a.id < b.id
+	end)
 	local entries: { Protocol.WorldEntry } = {}
-	for _, entry in index.worlds do
+	for _, entry in found do
 		table.insert(entries, {
 			id = entry.id,
 			name = entry.name,
@@ -344,10 +393,31 @@ function WorldSave.list(): ({ Protocol.WorldEntry }?, string?)
 	return entries, nil
 end
 
--- Opens saved world `id` for startWorld (yields): its settings, or nil and why not.
+--[[
+	The title screen's Create World: `player` will own the world about to be made, when their
+	list has room (true, or false and why not; true when worlds can't be saved here at all).
+]]
+function WorldSave.claim(player: Player): (boolean, string?)
+	waitForProbe()
+	local store = saves
+	if store == nil or state == Protocol.SaveState.Unavailable then
+		return true, nil
+	end
+	local ok, why = WorldStore.room(store, player.UserId)
+	if ok then
+		creator = player.UserId
+	end
+	return ok, why
+end
+
+--[[
+	Opens saved world `id` for startWorld (yields): its settings, or nil and why not. `player`
+	(nil: the boot) must be allowed to (see the header).
+]]
 function WorldSave.prepare(
 	id: string,
-	progress: ((done: number, total: number) -> ())?
+	progress: ((done: number, total: number) -> ())?,
+	player: Player?
 ): (WorldSettings.Settings?, string?)
 	waitForProbe()
 	local store = saves
@@ -356,42 +426,52 @@ function WorldSave.prepare(
 	elseif current or prepared then
 		return nil, "a world is open already"
 	end
-	local loaded, why = WorldStore.load(store, id, progress)
+	local loaded, why = WorldStore.load(store, id, progress, requester(player))
 	if loaded == nil then
 		return nil, why
 	end
 	prepared = loaded
 	if loaded.dropped > 0 then
-		warn(`[IceVoxel] {loaded.dropped} blocks, items or mobs this version doesn't know were left out of the world`)
+		warn(
+			`[IceVoxel] {loaded.dropped} blocks, items or mobs this version doesn't know were left out of the world: it is not saved this session`
+		)
 	end
 	return loaded.settings, nil
 end
 
--- A prepared world did not start: its lock goes back.
+--[[
+	A world that did not start (startWorld failed, after `prepare` or for a new world): it is never
+	saved (half of its parts may not have its state), and its lock goes back.
+]]
 function WorldSave.abandon()
 	local loaded, store = prepared, saves
 	prepared = nil
-	if loaded and store then
-		WorldStore.release(store, loaded.world)
+	local world = current or (if loaded then loaded.world else nil)
+	if world then
+		world.canSave = false
+		world.reason = "it could not be started"
+		if store then
+			WorldStore.release(store, world)
+		end
 	end
 end
 
-function WorldSave.delete(id: string): (boolean, string?)
+function WorldSave.delete(id: string, player: Player?): (boolean, string?)
 	waitForProbe()
 	local store = saves
 	if store == nil then
 		return false, SaveText.state(state, reason)
 	end
-	return WorldStore.delete(store, id)
+	return WorldStore.delete(store, id, requester(player))
 end
 
-function WorldSave.rename(id: string, name: string): (boolean, string?)
+function WorldSave.rename(id: string, name: string, player: Player?): (boolean, string?)
 	waitForProbe()
 	local store = saves
 	if store == nil then
 		return false, SaveText.state(state, reason)
 	end
-	return WorldStore.rename(store, id, name)
+	return WorldStore.rename(store, id, name, requester(player))
 end
 
 --[[
@@ -440,12 +520,15 @@ function WorldSave.beforeEnter(player: Player)
 	end
 end
 
--- The player as a save keeps them now.
-local function capture(player: Player, ps: PlayerState): Record
+-- The player as a save keeps them now (each capture numbered: `captures`).
+local function capture(player: Player, ps: PlayerState): (Record, number)
+	captures += 1
 	local record = PlayerCodec.new()
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local standing = false
 	if character and humanoid and humanoid.Health > 0 then
+		standing = true
 		local feet = Rig.feet(character)
 		local root = character:FindFirstChild("HumanoidRootPart")
 		if feet and root and root:IsA("BasePart") then
@@ -475,12 +558,22 @@ local function capture(player: Player, ps: PlayerState): Record
 	record.temperature = temperature :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or {}) :: any
-	return record
+	-- (Until a character stands, the saved record's place and the rest are what they have.)
+	local waiting = ps.waiting
+	if standing then
+		ps.waiting = nil
+	end
+	PlayerCodec.withWaiting(
+		record,
+		waiting,
+		{ standing = standing, climate = thirst ~= nil and temperature ~= nil, effects = effects ~= nil }
+	)
+	return record, captures
 end
 
 -- A leaving player's record: as they are, or as last seen alive where their character went first.
-local function finalRecord(player: Player, ps: PlayerState): Record
-	local fresh = capture(player, ps)
+local function finalRecord(player: Player, ps: PlayerState): (Record, number)
+	local fresh, order = capture(player, ps)
 	local cached = ps.cache
 	if cached and player.Character == nil then
 		fresh.position, fresh.x, fresh.y, fresh.z, fresh.yaw = cached.position, cached.x, cached.y, cached.z, cached.yaw
@@ -492,7 +585,7 @@ local function finalRecord(player: Player, ps: PlayerState): Record
 	if cached and Effects.export(player) == nil then
 		fresh.effects = cached.effects
 	end
-	return fresh
+	return fresh, order
 end
 
 -- Puts a character where the record says and gives it the record's health.
@@ -523,6 +616,7 @@ local function applyRecord(player: Player, ps: PlayerState, record: Record)
 		placeCharacter(player, character, record)
 	else
 		ps.record = record
+		ps.waiting = record
 	end
 end
 
@@ -547,8 +641,15 @@ local function track(player: Player)
 	if players[player] then
 		return
 	end
-	local ps: PlayerState =
-		{ loaded = false, canSave = false, record = nil, inventory = nil, cache = nil, waiters = {} }
+	local ps: PlayerState = {
+		loaded = false,
+		canSave = false,
+		record = nil,
+		waiting = nil,
+		inventory = nil,
+		cache = nil,
+		waiters = {},
+	}
 	players[player] = ps
 	local window = Inventories.get(player)
 	ps.inventory = window and window.inventory
@@ -559,11 +660,13 @@ local function track(player: Player)
 			wake(ps.waiters)
 			return
 		end
-		-- (Back before their record was written: the one they left with.)
+		-- (Back before their record was written: the one they left with, theirs again now: a
+		-- later capture of them supersedes it, and nothing writes it over their newer ones.)
 		local left = departed[player.UserId]
 		local ok, record
 		if left then
-			ok, record = true, PlayerCodec.fromText(left)
+			departed[player.UserId] = nil
+			ok, record = true, PlayerCodec.fromText(left.text)
 		else
 			ok, record = WorldStore.loadPlayer(store, world, player.UserId)
 		end
@@ -571,7 +674,7 @@ local function track(player: Player)
 			return
 		end
 		ps.loaded = true
-		ps.canSave = ok
+		ps.canSave = ok and (record == nil or record.dropped == 0)
 		if not ok then
 			warn(`[IceVoxel] the record of {player.Name} in this world could not be read`)
 			notify(
@@ -579,6 +682,13 @@ local function track(player: Player)
 				"Your things in this world could not be read: you start afresh, and this visit is not saved for you"
 			)
 		elseif record then
+			if record.dropped > 0 then
+				warn(`[IceVoxel] the record of {player.Name} holds items this version doesn't know`)
+				notify(
+					player,
+					"Your things in this world include items this version doesn't know: this visit is not saved for you"
+				)
+			end
 			applyRecord(player, ps, record)
 		end
 		wake(ps.waiters)
@@ -592,7 +702,12 @@ local function flushDeparted()
 		return
 	end
 	local batch = table.clone(departed)
-	local written = WorldStore.savePlayers(store, world, batch)
+	local texts: { [number]: string } = {}
+	local order: { [number]: number } = {}
+	for userId, entry in batch do
+		texts[userId], order[userId] = entry.text, entry.order
+	end
+	local written = WorldStore.savePlayers(store, world, texts, nil, order)
 	for userId in written do
 		if departed[userId] == batch[userId] then
 			departed[userId] = nil
@@ -609,7 +724,8 @@ local function leave(player: Player)
 	wake(ps.waiters)
 	local world = current
 	if ps.loaded and ps.canSave and world and world.canSave then
-		departed[player.UserId] = PlayerCodec.toText(finalRecord(player, ps))
+		local record, order = finalRecord(player, ps)
+		departed[player.UserId] = { text = PlayerCodec.toText(record), order = order }
 		task.spawn(flushDeparted)
 	end
 end
@@ -693,7 +809,7 @@ function WorldSave.attach(world: WorldServer.World, settings: WorldSettings.Sett
 		current = loaded.world
 		savedSections = loaded.world.meta.sections
 	elseif saves and state ~= Protocol.SaveState.Unavailable then
-		current = WorldStore.create(saves :: WorldStore.Saves, settings)
+		current = WorldStore.create(saves :: WorldStore.Saves, settings, creator)
 		-- (Everything a new world has is dirty: its first save writes it all.)
 	end
 end
@@ -708,10 +824,10 @@ end
 	goes back into `parts` (see the header).
 ]]
 function WorldSave.restore(parts: WorldSnapshot.Systems)
-	systems = parts
 	local loaded = prepared
 	if loaded then
-		prepared = nil
+		-- (Throwing here fails startWorld: `prepared` stays for `abandon`, and `systems` stays
+		-- unset, so nothing half restored is ever saved.)
 		local report = WorldSnapshot.restore(parts, loaded.regions)
 		pendingTicks = report.ticks
 		Operators.grant(loaded.world.meta.operators)
@@ -733,6 +849,7 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 		print(
 			`[IceVoxel] world "{loaded.world.meta.name}" loaded: {#loaded.regions} regions, {report.containers} containers, {report.machines} machines, {report.pipes} pipes and tanks, {report.items} items, {report.mobs} animals`
 		)
+		prepared = nil
 	end
 	for name, value in savedSections do
 		local section = sections[name]
@@ -763,6 +880,8 @@ function WorldSave.restore(parts: WorldSnapshot.Systems)
 			end
 		end
 	end
+	-- Last: saves start from here, with everything restored.
+	systems = parts
 end
 
 --[[ Saving ]]
@@ -830,7 +949,7 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 		-- (One frame: see WorldSnapshot.collect.)
 		dirty = {}
 		local regions, liveRegions =
-			WorldSnapshot.collect(parts, takenDirty, previousLive, Config.Save.Items, Config.Save.Mobs)
+			WorldSnapshot.collect(parts, takenDirty, previousLive, Config.Save.Items, Config.Save.Mobs, pendingTicks)
 		local encoded: { [string]: buffer } = {}
 		local empty: { [string]: boolean } = {}
 		for name, region in regions do
@@ -839,16 +958,22 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 				empty[name] = true
 			end
 		end
-		local records: { [number]: string } = table.clone(departed)
+		local records: { [number]: string } = {}
+		local order: { [number]: number } = {}
+		for userId, entry in departed do
+			records[userId], order[userId] = entry.text, entry.order
+		end
 		for player, ps in players do
 			if ps.loaded and ps.canSave then
-				records[player.UserId] = PlayerCodec.toText(capture(player, ps))
+				local record, captured = capture(player, ps)
+				records[player.UserId], order[player.UserId] = PlayerCodec.toText(record), captured
 			end
 		end
 		return {
 			regions = encoded,
 			empty = empty,
 			players = records,
+			order = order,
 			sections = encodeSections(),
 			operators = Operators.ops(),
 		},
@@ -889,7 +1014,8 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 	end
 	live = liveNow :: { [string]: boolean }
 	for userId in result.written do
-		if departed[userId] == saveInput.players[userId] then
+		local entry = departed[userId]
+		if entry and entry.text == saveInput.players[userId] then
 			departed[userId] = nil
 		end
 	end
@@ -932,10 +1058,15 @@ local function runCommand(player: Player, text: string)
 		end)
 	elseif result.action == "off" then
 		autosave = false
-		setState(Protocol.SaveState.Off, nil)
+		-- (Only between On and Off: a world not being saved keeps saying why.)
+		if state == Protocol.SaveState.On then
+			setState(Protocol.SaveState.Off, nil)
+		end
 	elseif result.action == "on" then
 		autosave = true
-		setState(Protocol.SaveState.On, nil)
+		if state == Protocol.SaveState.Off then
+			setState(Protocol.SaveState.On, nil)
+		end
 	end
 end
 
@@ -1025,7 +1156,11 @@ function WorldSave.begin()
 		end)
 		return
 	end
-	if world.meta.gen == 0 then
+	if not world.canSave then
+		-- (Loaded, but not saved this session: say why, as a lost lock does.)
+		setState(Protocol.SaveState.SessionOnly, world.reason)
+		notifyOperators(`This world is not being saved: {world.reason or "it can't be"}`)
+	elseif world.meta.gen == 0 then
 		-- A new world: everything it has is in its first save.
 		for name in WorldSnapshot.editedRegions((systems :: WorldSnapshot.Systems).world) do
 			dirty[name] = true
@@ -1042,15 +1177,16 @@ function WorldSave.begin()
 			end
 		end
 	end)
-	-- The lock's heartbeat.
+	-- The lock's heartbeat: at once (startWorld took a while since the load), then every third of
+	-- its timeout.
 	task.spawn(function()
 		while not closing do
-			task.wait(math.max(10, Config.Save.LockTimeout / 3))
 			local store = saves
 			if store and world.lockHeld and not closing and not WorldStore.heartbeat(store, world) then
 				setState(Protocol.SaveState.SessionOnly, world.reason)
 				notifyOperators(`The world is no longer saved here: {world.reason or "its lock was lost"}`)
 			end
+			task.wait(math.max(10, Config.Save.LockTimeout / 3))
 		end
 	end)
 	-- What leaving players had, as last seen alive.

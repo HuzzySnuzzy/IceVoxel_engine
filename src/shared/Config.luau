@@ -588,13 +588,16 @@ local Config = {
 		},
 		-- The maps' weather mode (Map/WeatherLayer): grid cells across at most (minimap, world map),
 		-- seconds before a picture is drawn again, biome lookups for snow per frame, cells painted
-		-- per frame (a picture is spread over frames: ~0.7 us a cell, so ~1 ms a frame).
+		-- per frame at most (a picture is spread over frames: ~0.7 us a cell with native code,
+		-- ~2.4 us interpreted), and the milliseconds a map may paint in a frame (bands are sized
+		-- to it by what the last one cost: a phone paints thinner ones; both maps open, twice it).
 		Map = {
 			MiniCells = 48,
 			WorldCells = 96,
 			RefreshSeconds = 3,
 			LookupsPerFrame = 96,
 			CellsPerFrame = 1536,
+			FrameMs = 0.75,
 		},
 	},
 

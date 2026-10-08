@@ -14,7 +14,8 @@
 	             (LivingEntity.causeFallDamage; not chickens).
 	  Fire       Players/Burning.tickPlayer with the kind's armor, as for players: lava hurts 4 every
 	             10 ticks and sets it burning 15 s, fire and campfires hurt, burning costs 1 every
-	             20 ticks, water puts it out. (A mob catches fire after 20 ticks in a fire block,
+	             20 ticks, water and rain put it out (`context.rainingAt`, looked up only while it
+	             burns). (A mob catches fire after 20 ticks in a fire block,
 	             as a player does; Minecraft's mobs at once.) Zombies and skeletons burn in
 	             daylight (`burnsInDaylight`, Mob.isSunBurnTick): by day (Level.isDay with the
 	             weather where they stand, `context.isDay`: not in a thunderstorm), out of water
@@ -791,6 +792,10 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 		mob.burn.fire = MobWorld.SUN_BURN_SECONDS * TICKS_PER_SECOND
 	end
 	local touching = Burning.touchingAt(self.getBlock, body.x, body.y, body.z, kind.width, kind.height)
+	if mob.burn.fire > 0 and rainingAt ~= nil and Burning.inRain(rainingAt, body.x, body.y, body.z, kind.height) then
+		-- (Rain puts it out: a bolt's fire, or the day's, once the storm reaches it.)
+		touching = bit32.bor(touching, Burning.RAIN)
+	end
 	local fresh = mob.burn.cooldown <= 1
 	local damage = Burning.tickPlayer(mob.burn, SURVIVAL, touching, kind.armor or 0, 0)
 	if damage > 0 then

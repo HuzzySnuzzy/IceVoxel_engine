@@ -16,8 +16,9 @@
 	  Stacks    u16 item, varint count (1..255), varint damage (a tool's wear, 0 new), then the
 	            item data in Net/Protocol's format (Protocol.writeData / readData: Minecraft's
 	            item NBT made flat, checked by Items.validData). An item this version doesn't
-	            know (a save from a newer one) reads back as nil: the stack is dropped, not the
-	            save.
+	            know (a save from a newer one) reads back as nil and `lost` (the decoders count
+	            it: a world or player holding one is never written back, Save/WorldStore): the
+	            stack is dropped, not the save.
 	  Text      DataStore values are JSON: binary has to become text. Base85 (Ascii85's
 	            arithmetic: 4 bytes are a big-endian u32 written as 5 digits base 85, the last
 	            group of k bytes as k + 1 digits) over 85 printable ASCII characters that JSON
@@ -269,11 +270,11 @@ function SaveCodec.stack(w: Writer, stack: Stack?)
 	w.n = Protocol.writeData(w.b, w.n, stack.data)
 end
 
--- A stack written by `stack` (nil: empty, or an item this version doesn't know).
-function SaveCodec.readStack(r: Reader): Stack?
+-- A stack written by `stack` (nil: empty, or an item this version doesn't know: then `lost` true).
+function SaveCodec.readStack(r: Reader): (Stack?, boolean)
 	local item = SaveCodec.readU16(r)
 	if item == 0 then
-		return nil
+		return nil, false
 	end
 	local count = SaveCodec.readVarint(r)
 	local damage = SaveCodec.readVarint(r)
@@ -283,9 +284,10 @@ function SaveCodec.readStack(r: Reader): Stack?
 	end
 	r.o = after
 	if not Items.isValid(item) or count < 1 or count > 255 then
-		return nil
+		return nil, true
 	end
-	return Items.newStack(item, count, if damage > 0 then damage else nil, data)
+	local stack = Items.newStack(item, count, if damage > 0 then damage else nil, data)
+	return stack, stack == nil
 end
 
 --[[ Text (base85) ]]

@@ -701,6 +701,105 @@ return function(t, shared, require, _server, client)
 		end
 	end)
 
+	t.test("weather visuals: rings planned again when the finer ring moved never gap or double", function()
+		local fancy = settings(CloudLod.FANCY, 2048)
+		local overcast = table.clone(fancy)
+		overcast.coverBase = 1
+		local pattern = CloudLod.pattern(SEED)
+		local function sample(_u0: number, _w0: number, _step: number, cols: number, rows: number): buffer
+			local grid = buffer.create(cols * rows * 3)
+			for i = 0, cols * rows - 1 do
+				buffer.writeu8(grid, i * 3 + 2, 255)
+			end
+			return grid
+		end
+		-- CloudView's rule: plan a ring again when its window or its hole moved (sameWindow).
+		local planned: { [number]: any } = {}
+		local boxes: { [number]: { CloudLod.Box } } = {}
+		local function follow(cu: number): { boolean }
+			local replanned = {}
+			for level = 0, 1 do
+				local window = CloudLod.window(overcast, level, cu, 0)
+				replanned[level] = not CloudLod.sameWindow(planned[level], window)
+				if replanned[level] then
+					planned[level] = window
+					boxes[level] = CloudLod.plan(overcast, pattern, level, cu, 0, sample)
+				end
+			end
+			return replanned
+		end
+		follow(0)
+		-- 20 blocks on: ring 0's window moves, ring 1's doesn't, but its hole (ring 0's window) does.
+		local moved = follow(20)
+		t.eq(moved[0], true)
+		t.ok(planned[1].u0 == CloudLod.window(overcast, 1, 0, 0).u0, "ring 1's own window stayed (two of its cells)")
+		t.eq(moved[1], true, "planned again all the same: its hole moved")
+		local function covering(u: number, w: number): number
+			local n = 0
+			for level = 0, 1 do
+				for _, box in boxes[level] do
+					if not box.shaft and u >= box.x0 and u < box.x1 and w >= box.z0 and w < box.z1 then
+						n += 1
+					end
+				end
+			end
+			return n
+		end
+		local outer = planned[1]
+		local span = outer.cols * outer.size
+		local gaps, doubled = 0, 0
+		for u = outer.u0 + 4, outer.u0 + span, 8 do
+			for w = outer.w0 + 4, outer.w0 + span, 8 do
+				if (u - 20) ^ 2 + w ^ 2 < (overcast.viewDistance * 0.5) ^ 2 then
+					local n = covering(u, w)
+					if n == 0 then
+						gaps += 1
+					elseif n > 1 then
+						doubled += 1
+					end
+				end
+			end
+		end
+		t.eq(gaps, 0, "no strip without clouds")
+		t.eq(doubled, 0, "no strip of two layers")
+		t.eq(CloudLod.sameWindow(nil, planned[0]), false, "never planned: plan")
+		t.eq(CloudLod.sameWindow(planned[0], planned[0]), true)
+
+		-- Rain shafts stand on the lowest ground under them where the clouds are now (a key per
+		-- ground step): drifted from a plateau over the sea, a shaft is placed again lower.
+		local function groundAt(x: number, _z: number): number
+			return if x < 1000 then 250 elseif x < 1100 then 100 else 20
+		end
+		local function shaft(x0: number, x1: number): CloudLod.Box
+			return { x0 = x0, z0 = 0, x1 = x1, z1 = 32, base = 0, top = 300, shade = 1, shaft = true, key = "" }
+		end
+		local cloud =
+			{ x0 = 900, z0 = 0, x1 = 932, z1 = 32, base = 280, top = 300, shade = 1, shaft = false, key = "c" }
+		local list = { shaft(900, 932), cloud }
+		CloudLod.groundShafts(list, groundAt, 0, 0, Config.SeaLevel)
+		t.eq(list[1].base, 248, "on the plateau (a ground step down)")
+		t.eq(cloud.key, "c", "clouds left as they are")
+		local before = list[1].key
+		CloudLod.groundShafts(list, groundAt, 600, 0, Config.SeaLevel)
+		t.eq(list[1].base, math.floor(Config.SeaLevel / CloudLod.GROUND_STEP) * CloudLod.GROUND_STEP, "over the sea")
+		t.ok(list[1].key ~= before, "a new key: the part is placed again")
+		local wide = { shaft(900, 1200) }
+		CloudLod.groundShafts(wide, groundAt, 0, 0, Config.SeaLevel)
+		t.ok(wide[1].base < 248, "a wide shaft reaches down to the lowest ground under it")
+	end)
+
+	t.test("weather visuals: a map band fits the frame's time by what the last one cost", function()
+		local cells = Config.Weather.Map.CellsPerFrame
+		local frame = Config.Weather.Map.FrameMs / 1000
+		t.eq(WeatherMap.bandRows(96, 96, cells, frame, 0), cells // 96, "unknown cost: CellsPerFrame")
+		local fast = WeatherMap.bandRows(96, 96, cells, frame, 0.7e-6)
+		local slow = WeatherMap.bandRows(96, 96, cells, frame, 2.4e-6)
+		t.ok(fast * 96 * 0.7e-6 <= frame and slow * 96 * 2.4e-6 <= frame, "within the frame's time")
+		t.ok(slow < fast, `interpreted: thinner bands ({slow} rows, native {fast})`)
+		t.eq(WeatherMap.bandRows(96, 96, cells, frame, 1), 1, "at least a row")
+		t.eq(WeatherMap.bandRows(96, 2, cells, frame, 0), 2, "no more than are left")
+	end)
+
 	t.test("weather visuals: map grids, the forecast cache, forecasts as the field later, the wind", function()
 		t.eq(WeatherMap.cellFor(384, 48), 16, "minimap at 2 blocks a pixel")
 		t.eq(WeatherMap.cellFor(100, 48), WeatherMap.MIN_CELL)

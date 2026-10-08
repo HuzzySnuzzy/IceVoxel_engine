@@ -39,12 +39,19 @@ A fast, Minecraft-style voxel engine for Roblox.
   Minecraft's; and the world is saved when the server shuts down. While a save is in flight a
   little grass block bobs in the bottom right corner ("Saving..."), and operators get a toast:
   "World saved — 1.4 MB of 64 MB (largest region 0.3 / 4 MB)"; the chat warns them when the world
-  nears its most (`Save.MaxWorldBytes`). The title screen's Load World lists the saved worlds
+  nears its most (`Save.MaxWorldBytes`). The title screen's Load World lists your saved worlds
   (name, type, last played, size), loads one ("Loading world: 12 / 40"), renames or deletes it
-  (after Minecraft's "Are you sure you want to delete this world?"). One server opens a world at
-  a time (a lock that goes stale 3 minutes after a crash), a world that can't be read whole is
-  never started or written over, and Studio without API access says so on the title screen and
-  in the chat (worlds then last for the session).
+  (after Minecraft's "Are you sure you want to delete this world?"). A world is its creator's:
+  only they (and the game's own people: `Gameplay.Admins`, the owner, Studio, who also see the
+  worlds made with the title screen off) can see, load, rename or delete it, so whoever is first
+  into an empty server can't touch anyone else's; each list holds 200 worlds, and a new one past
+  that is refused, never an old one dropped. One server opens a world at a time (a lock renewed
+  while it loads and before every save, that goes stale 3 minutes after a crash), a world that
+  can't be read whole is never started or written over, one holding blocks or items this
+  version doesn't know (saved by a newer version) is played but not saved, a player who leaves
+  from the title screen keeps their saved place, and Studio without API access says so on the
+  title screen and in the chat (worlds then last for the session; `/save-on` doesn't pretend
+  otherwise).
 - **Loading what you see first.** Terrain loads in the order you need it: the ground under you,
   then what is in front of the camera, then what is just behind, then the rest, and terrain hidden
   behind mountains last; after a teleport 90% of the view is there 15-40% sooner. A teleport drops
@@ -421,8 +428,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   As Nails), and keeps zombies and skeletons from burning; a thunderstorm darkens the day enough
   that they don't burn at all. Lightning strikes near players in thunderstorms (every 20 s or so
   under the heaviest), at the highest block or a living thing near it, setting fires (with
-  doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, Minecraft's).
-  `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s, and
+  doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, which the
+  rain it strikes in puts out at once: Minecraft's), on a tower or a pillar too. Rain puts out
+  any burning player or mob, as water does. Players together share their sky: eight at one base
+  see the strikes one would, not eight times as many.
+  `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s
+  (from whatever it was, however quickly the commands come), and
   `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft. A saved world
   keeps its weather: loaded again, the same storms are where they were and an override has the
   time it had left; a new world starts with a clear sky over spawn.
@@ -1174,7 +1185,8 @@ character before they enter the world.
   it), creates the world and puts you in it.
 - **Load World** is the operator's too, while no world exists, where worlds can be saved (a red
   line under the buttons says why not: Studio without API access, saving off): Minecraft's
-  Select World screen lists the saved worlds, last played first, three lines each (the name; its
+  Select World screen lists your saved worlds (the ones you created; the game's own people see
+  the game's too), last played first, three lines each (the name; its
   type and when it was last played; its game mode and size). Click one to select it (double click
   plays it), then **Play Selected World** ("Loading world: 12 / 40" on every title screen while
   its keys are read; then everyone may join), **Rename** (the name goes through the text filter)

@@ -2243,12 +2243,14 @@ worlds) means always clear.
 - clear: no rain and thin clouds at most.
 
 It blends in over `Weather.BlendSeconds` (5 s, Minecraft's 0.01 rain level a tick) from
-whatever was there before. The previous override fades out at the weight it had, so changing
-your mind never jumps. It blends back out over the last 5 s before it ends. With
-doWeatherCycle off an override's time stands still (Minecraft's counters wait too), so it never
-ends, and one fading out stays where it was. It is published as one string attribute,
-`IceVoxelWeatherOverride` ("kind;start;finish;left;previous;previousWeight"), so a client never
-sees half a change. `Weather.momentAt(state, serverTime)` gives a Moment: the clock with the
+whatever was there before: the overrides it replaced (`previous`, oldest first: the old one at the
+weight it had, after what that one was still blending from, up to 8) fade out as it comes in, so
+changing your mind, even three times in three seconds, never jumps. It blends back out over the
+last 5 s before it ends; one shorter than the blend is dropped only once what it replaced has
+faded out too (`expire`). With doWeatherCycle off an override's time stands still (Minecraft's
+counters wait too), so it never ends, and one fading out stays where it was. It is published as
+one string attribute, `IceVoxelWeatherOverride` ("kind;start;finish;left;previous;weight..."), so
+a client never sees half a change. `Weather.momentAt(state, serverTime)` gives a Moment: the clock with the
 override's weights, which `at`, `grid` and `forecastAt` take.
 
 **What falls where** (Minecraft's Biome.getPrecipitationAt):
@@ -2283,17 +2285,26 @@ override's weights, which `at`, `grid` and `forecastAt` take.
   once a second, makes them wet, as water does (TAN: 3 steps colder).
 - *The undead* (`Mobs/MobWorld`): zombies and skeletons don't burn in the rain
   (isInWaterRainOrBubble) or where the weather makes it not day (`isDayAt`: a thunderstorm).
+- *Burning* (`Players/Burning`'s RAIN bit, Entity.move's isInWaterRainOrBubble): rain at the feet
+  or the top of the box puts out a burning player (`Characters.setRain`) or mob, whatever set it
+  (a bolt, daylight, lava they left), after the tick's fire and lava; the weather is asked only
+  while something burns.
 - *Lightning* (`World/Lightning`, pure, with injected randomness):
   - Rate: every player not in spectator rolls once a second, thunder at their feet ÷
     `Lightning.MeanSeconds` (20). Minecraft's 1 in 100000 per chunk a tick would be rare near a
-    player here.
+    player here. Like Minecraft's, the rate is the area's (`Lightning.roll`): a column a player
+    drew is kept with the share 1 / (players whose discs hold it), so players standing together
+    don't multiply the strikes (eight at one spot: 1053 strikes in 20000 s against one player's
+    987; two far apart: 1985).
   - Target: a column picked evenly within `Lightning.Radius` (64). It strikes the column's top
-    (the MOTION_BLOCKING heightmap), or a living thing within 3 blocks of the column that sees
-    the sky (findLightningTargetAround). It only strikes where it rains.
+    (the MOTION_BLOCKING heightmap), or a living thing within 3 blocks of the column, from 3 below
+    its top up to the build height, that sees the sky (findLightningTargetAround's box: one on a
+    pillar draws it). It only strikes where it rains.
   - Fire: with doFireTick, the struck cell, plus 4 random cells around it on normal and hard
     (LightningBolt.spawnFire). Fire goes only into air where it can stay.
   - Hurt: the living within x ± 3, y − 3 .. y + 9 of the bolt catch fire for 8 s and take 5 half
-    hearts through armor (Entity.thunderHit). Players via `Characters.lightning`, mobs via
+    hearts through armor (Entity.thunderHit); the rain the bolt struck in puts the fire out on
+    the next tick (above), so a strike costs 5 half hearts. Players via `Characters.lightning`, mobs via
     `Mobs.lightning` and `MobWorld.lightning`; the boot script connects them
     (`WeatherServer.setHandler`).
   - An unloaded column is struck at the generator's height, as a sight only.
@@ -2340,7 +2351,9 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   step changes, writing only what differs; in clear weather nothing is looked up. The pure work
   of a layout is 0.06 ms for 305 columns (Lune).
 - *The rain's sound*: Minecraft's tickRain, 20 times a second: 100 × level² random columns
-  within 10 blocks (level halved on Fast), the last whose rain lands within 10 blocks of the
+  within 10 blocks (level halved on Fast; the columns it tries are queued for a roof scan as the
+  strips' are, so it plays with the Weather setting Off and reaches 10 blocks on Fast), the last
+  whose rain lands within 10 blocks of the
   camera's height is where `weather.rain` (or `weather.rain.above`, quieter and lower, when it
   lands more than a block above the camera and the camera's column is roofed) plays, when
   nextInt(3) < the ticks since the last one. Volume and pitch from `Weather.rainSound`.
@@ -2362,20 +2375,25 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   CoverBase + (1 − CoverBase) × cover. Its look comes from the precipitation and thunder there in
   a few steps: the grey of `Weather.cloudColour` in 6 shades, the base lowered and the box
   thickened by rain, a tower of up to 160 blocks over thunder; from ring 1 out, heavy rain gets a
-  see-through grey shaft from the ground to the cloud deck. Equal neighbours merge greedily into
-  rectangles (at most a part's 2048 studs a side). A ring is planned again when its window moved,
-  every RefreshSeconds × 2^ring, or when the mode or view changed: one ring a frame at most
+  see-through grey shaft from the ground to the cloud deck (the lowest ground under it where the
+  clouds are at each plan, in 8-block steps that are part of its key: `CloudLod.groundShafts`, so
+  a shaft that drifted off a plateau is placed again lower). Equal neighbours merge greedily into
+  rectangles (at most a part's 2048 studs a side). A ring is planned again when its window or its
+  hole (the finer ring's window, which moves twice as often) moved (`CloudLod.sameWindow`), every
+  RefreshSeconds × 2^ring, or when the mode or view changed: one ring a frame at most
   (0.2-0.7 ms in Lune), keyed boxes diffed against the live ones so unchanged parts stay; at most
   PartsPerFrame (48) parts are placed or removed a frame, new ones first (no holes), released ones
   pooled. Each ring is one Model moved with PivotTo to the displacement now (every 0.1 s near,
   less often far). Parts on seed 12345 (two in-game days, at the spawn and 3 km out): Fancy 2048
   202 on average, 387 at most (122 shafts); Fancy 4096 325 / 496; Fancy 1024 140 / 238; Fast
-  2048 88 / 122; Fast 512 (Low, phones) 38 / 48.
+  2048 88 / 122; Fast 512 (Low, phones) 38 / 48. A world without weather (the debug worlds,
+  `Weather.Enabled` off) has no clouds.
 - *Lightning* (`Weather/LightningBolt`, pure; `LightningView`): the `Lightning` message's seed
   gives Minecraft's bolt (8 sections of 16 blocks zigzagging by up to 5 blocks, two branches
   zigzagging by up to 15, widening upwards) and its life (LightningBolt.tick: 2 ticks, then up to
   `flashes` more shapes after random pauses); the sky flashes while its life is at least 0 (a
-  ColorCorrectionEffect's brightness, less with distance and indoors) and a PointLight lights the
+  ColorCorrectionEffect's brightness, less with distance, indoors and blind:
+  `EffectView.blindness`) and a PointLight lights the
   struck point. Each segment is a Neon core and a see-through glow (pooled parts; three bolts at
   once at most). The crack plays where it struck; the thunder after `Weather.thunderDelay`, a few
   blocks from the listener towards the strike, fainter with distance.
@@ -2393,8 +2411,11 @@ blocks, so the view and 4 cells of margin fit; the grid's corner sits on multipl
 so the map pans that far before it is painted again. A cell's colour: clouds a grey veil, rain
 blue, snow white (by the cell's biome and ground height, up to 96 new columns looked up a frame,
 rain until known), thunder purple with yellow speckles where it is over half; clear cells are
-see-through. A picture is painted a band of rows a frame (`Map.CellsPerFrame`, 1536 cells:
-~1.2 ms; the world map's 96 × 96 picture is 6.5 ms in all, 6 frames) at the moment it started,
+see-through. A picture is painted a band of rows a frame (at most `Map.CellsPerFrame`, 1536
+cells, ~1.1 ms with native code; and as many rows as `Map.FrameMs`, 0.75 ms, holds at what the
+last band cost a cell, `WeatherMap.bandRows`, the columns' lookups stopping at that time too: run
+interpreted, about 3 times slower, a picture takes more frames, never more of a frame; the world
+map's 96 × 96 picture is 7.8 ms in all with native code) at the moment it started,
 into a buffer of its own, and kept per step, so switching steps back costs nothing; it is painted
 again after `Map.RefreshSeconds`, when the map panned past its margin or zoomed, and when the
 server's weather changed. Until a new picture is done the last one stays, placed on its own grid.
@@ -5253,29 +5274,39 @@ its regions and its players.
   (with their age), farm animals (`Config.Save.Mobs`; monsters despawn anyway) and block updates
   still due (`BlockTicker.scheduled`, in ticks from the save). Records are tagged and
   length-prefixed and read back exactly to their length; ids this version doesn't know (a newer
-  version's blocks, items, mobs) are dropped one by one, anything else damaged refuses the region.
+  version's blocks, items, mobs, items in a chest) are dropped one by one and counted (`dropped`),
+  anything else damaged refuses the region. A world with any dropped is played but never saved
+  (`canSave` false, "saved by a newer version" on the title screens): writing it back would lose
+  them for good. Block updates still waiting for their chunk to generate are saved again as they
+  were (`WorldSnapshot.collect`'s `pending`), not lost at the next save.
 - Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
   spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
   armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
   the running status effects. Knowledge, Ages and skills stay in Players/ProgressStore, for every
-  world. 60-400 bytes.
+  world. 60-400 bytes. A record holding items this version doesn't know is applied (what it can
+  read) but never written that session.
 - Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
   with no record starts its full fuse, Behaviours/Tnt), explosions under way, items' and mobs'
   velocities, monsters, the session's SAVE texts of structure blocks (copy the IVS1 text) and
   open windows (a window's cursor goes back into the inventory).
 
 **Format and keys** (`Save/SaveCodec`, `Save/WorldMeta`). DataStore "IceVoxelWorlds_v1"
-(`Config.Save.StoreName`): "index" (the world list: id, name, type, seed, game mode, created,
-last played, bytes), "<id>/meta" (the world's record: version, settings, the seed as its digits,
-`gen` the saves made, every region and player with its bytes, the op list, the sections),
+(`Config.Save.StoreName`): "index" (the game's world list, the worlds made with the title screen
+off: id, name, type, seed, game mode, owner, created, last played, bytes), "index/<userId>" (a
+player's: the worlds they created on the title screen), "<id>/meta" (the world's record: version,
+settings, the seed as its digits, its owner, `gen` the saves made, every region and player with
+its bytes, the op list, the sections),
 "<id>/lock", "<id>/r/<rx>_<rz>" (a region's head), "<id>/r/<rx>_<rz>/<slot>_<i>" (its further parts)
 and "<id>/p/<userId>" (written with the player's user id, as Roblox asks). Binary is kept as base85
 text (4 bytes in 5 characters over 85 printable characters JSON never escapes: 1.25 per byte, and
 exactly what Roblox counts against a key's 4,194,304 characters; text rather than buffers, whose
 stored size the code could not measure). A region longer than `Config.Save.MaxKeyBytes` (4,000,000) goes in
 parts: parts 2.. are written first, into the slot the committed head does not name, then the head
-(part 1, the part count, the slot, `gen`), so the head is the region's commit: a save cut short
-leaves the old head naming the old slot's intact parts. Every record carries a version; a newer
+(part 1, the part count, the slot, `gen`, the writing server's tag `w`: an FNV hash of its JobId),
+so the head is the region's commit: a save cut short leaves the old head naming the old slot's
+intact parts, and parts whose `gen` or `w` differ from their head's (two servers that both
+believed they held the world, numbering their saves alike) refuse the load instead of joining
+into a region neither wrote. Every record carries a version; a newer
 one is refused, never half read or overwritten. A world's bytes are its record, regions and
 players (each value's text plus 96 for the JSON around it); a save that would take a world past
 `Config.Save.MaxWorldBytes` (64 MB) is refused as a whole, and operators are warned past
@@ -5284,17 +5315,38 @@ players (each value's text plus 96 for the JSON around it); a save that would ta
 characters; 6 fully edited chunks with no two neighbouring cells alike (no run compresses: the
 worst case) are 3.66 MB and two parts; a typical player record is 192 characters.
 
+**Owners.** A world is its creator's (`WorldMeta` `owner`: the operator who pressed Create New
+World, `WorldSave.claim`; 0, the game's, with the title screen off). Load World lists a player's
+own list, and for the game's own people (`Operators.isPermanent`: `Gameplay.Admins`, the game's
+owner, Studio) the game's too; loading, renaming and deleting check the record's owner on the
+server (`WorldMeta.mayManage`: "it is not yours"), whatever id a client sends. So the first
+stranger into an empty public server, its operator until a world exists, sees and touches only
+the worlds they made. A world whose record is gone is deleted only from a list of one's own. A
+list holds `WorldMeta.MAX_WORLDS` (200): Create World is refused past it ("delete one to save
+another"), and a world that would be the 201st (another server filled the list meanwhile) is
+refused whole at its first save, never written unlisted; no world is ever dropped from a list.
+
 **Safety.** A session lock per world (`Save/SaveLock`, inside UpdateAsync transforms: one atomic
-step): `{ job, at }`, renewed every third of `Config.Save.LockTimeout` (180 s); a live lock of
-another server refuses loading and deleting ("it is open on another server"); a stale one (a
-crashed server) is taken over, and the old server's next heartbeat finds it lost and stops
-saving. A world is loaded whole or not at all: any key that can't be read (after the scheduler's
-retries) or decoded gives the lock back and the world is never started, so nothing is ever
-written over it. A player whose record can't be read starts afresh and is never written that
-session (and is told), so an outage never replaces a saved inventory with an empty one. Studio
-without API access (or `Save.Enabled` off): one read of the index at boot fails, every title
-screen says why in red and Load World stays greyed; the world plays session-only and operators
-are told in the chat.
+step): `{ job, at }`, renewed every third of `Config.Save.LockTimeout` (180 s) while the world is
+open, while it loads (a load of 250 regions at an empty server's 60 reads a minute takes about
+190 s: the lock is never more than 60 s old meanwhile), once more as it starts, and before every
+save writes (`ensureLock`: renewed when its last renewal is 30 s old, before the writes and again
+before the commit and the record); a live lock of another server refuses loading and deleting
+("it is open on another server"); a stale one (a crashed or stalled server) is taken over, and
+the old server's next heartbeat or save finds it lost and stops saving. A world is loaded whole
+or not at all: any key that can't be read (after the scheduler's retries) or decoded gives the
+lock back and the world is never started, so nothing is ever written over it; a world whose start
+failed half way (`WorldSave.abandon`) is never saved either. A player whose record can't be read
+starts afresh and is never written that session (and is told), so an outage never replaces a
+saved inventory with an empty one; one who leaves before their first character (still on the
+title screen) is written with their saved place, health, Tough As Nails and effects
+(`PlayerCodec.withWaiting`), not as a fresh player. Each player record a save or a leaving player
+writes carries its capture's order: a record older than one already written (or being written)
+for that player is skipped (an autosave's retry can't put back what a leaving player had
+before), and a player back before their leaving record went out takes it over. Studio without
+API access (or `Save.Enabled` off): one read of the index at boot fails, every title screen says
+why in red and Load World stays greyed; the world plays session-only and operators are told in
+the chat (`/save-off` and `/save-on` say why and change nothing).
 
 **Writing** (`Save/SaveScheduler`, `Save/WorldStore`). Requests go in order (players and further
 parts, then heads, then the record, then the index: an UpdateAsync that merges the world's line),
@@ -5362,7 +5414,8 @@ is enabled for an operator while no world exists where saving works (`TitleRules
 name, "Type, last played 2026-10-07 14:03", "Survival Mode, 1.4 MB"; click selects, double click
 plays), Play Selected World ("Loading the world..." with the count; a failure comes back in red),
 Rename (an edit box; the server filters the name), Delete (Minecraft's confirmation) and Cancel.
-Every answer is the list again with how it went. One list and one change a second per player.
+Every answer is the list again with how it went. One list and one change a second per player (a
+list asked faster gets the last one again: the screen waits for an answer).
 
 ## Networking (`Net/Protocol`)
 

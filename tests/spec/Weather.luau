@@ -5,8 +5,9 @@
 	where (biomes, altitude), the sky hooks, the sampler and forecasts, the /weather command and
 	/gamerule doWeatherCycle with their permissions, the server's rain (World/WeatherRules: open
 	sky, roofs, leaves, glass, snow, deserts), fire in the rain (Behaviours/Fire), the undead not
-	burning in rain or thunderstorms (Mobs/MobWorld), and lightning (World/Lightning: rate, target,
-	fires, who it hurts; the Lightning message).
+	burning in rain or thunderstorms (Mobs/MobWorld), rain putting burning players and mobs out
+	(Players/Burning), and lightning (World/Lightning: rate, per area however many players stand
+	together, target, a pillar's top too, fires, who it hurts; the Lightning message).
 ]]
 
 return function(t, shared, require, server)
@@ -251,8 +252,7 @@ return function(t, shared, require, server)
 			enabled = false,
 			override = "",
 			weight = 0,
-			previous = "",
-			previousWeight = 0,
+			previous = {},
 		}, 0, 0, 10, 4, 4)
 		for i = 0, 47 do
 			t.eq(buffer.readu8(off, i), 0, "no weather")
@@ -340,7 +340,7 @@ return function(t, shared, require, server)
 		local before = precipitation(102)
 		Weather.setOverride(state, Weather.CLEAR, 600, 102)
 		t.near(precipitation(102), before, 1e-9, "no jump when it changes")
-		t.eq(state.previous, Weather.RAIN, "blending from the rain")
+		t.eq(state.previous[1].kind, Weather.RAIN, "blending from the rain")
 		t.eq(precipitation(102 + Weather.blendSeconds()), 0, "then clear")
 		-- Clear keeps thin clouds at most.
 		local wet = rainyPlace(field, Weather.clock(state, 200), 0.5)
@@ -373,6 +373,76 @@ return function(t, shared, require, server)
 		t.ok(not pcall(Weather.setOverride, state, Weather.RAIN, 0, 0), "no duration")
 	end)
 
+	t.test("weather: overrides in quick succession and short ones never make it jump", function()
+		local blend = Weather.blendSeconds()
+		-- The worst change between two looks 0.05 s apart, expiring every second as the server does.
+		local function worst(state: Weather.State, x: number, from: number, to: number, commands: { any }): number
+			local last = (field:at(x, 0, Weather.momentAt(state, from)))
+			local biggest = 0
+			local nextExpire = math.floor(from) + 1
+			local step = 0
+			while from + step * 0.05 < to do
+				step += 1
+				local now = from + step * 0.05
+				for _, command in commands do
+					if not command.done and now >= command.at then
+						command.done = true
+						Weather.setOverride(state, command.kind, command.seconds, command.at)
+					end
+				end
+				if now >= nextExpire then
+					Weather.expire(state, now)
+					nextExpire += 1
+				end
+				local p = (field:at(x, 0, Weather.momentAt(state, now)))
+				biggest = math.max(biggest, math.abs(p - last))
+				last = p
+			end
+			return biggest
+		end
+		-- (a) Over a dry place: thunder, then clear 2 s later, then rain 1 s later.
+		local state = Weather.newState(1000, 0, true, true)
+		local dry = dryPlace(field, Weather.clock(state, 100))
+		local a = worst(state, dry, 99, 140, {
+			{ at = 100, kind = Weather.THUNDER, seconds = 600 },
+			{ at = 102, kind = Weather.CLEAR, seconds = 600 },
+			{ at = 103, kind = Weather.RAIN, seconds = 600 },
+		})
+		t.ok(a < 0.03, `three commands in 3 s: no jump ({a} in 0.05 s)`)
+		t.eq(#state.previous, 2, "blending from the clear and from the thunder under it")
+		-- (b) Over natural heavy rain: clear blended in, then /weather rain 2 (shorter than the blend).
+		state = Weather.newState(100000, 0, true, true)
+		local wet = rainyPlace(field, Weather.clock(state, 100), 0.9)
+		local b = worst(state, wet, 99, 130, {
+			{ at = 100, kind = Weather.CLEAR, seconds = 600 },
+			{ at = 110, kind = Weather.RAIN, seconds = 2 },
+		})
+		t.ok(b < 0.03, `a 2 s override: no jump at its end ({b} in 0.05 s)`)
+		t.eq(state.override, Weather.NONE, "dropped once what it replaced faded out")
+		t.ok(not Weather.expire(state, 200), "nothing left to drop")
+		-- Dropped only after its blend: not at its finish.
+		state = Weather.newState(100000, 0, true, true)
+		Weather.setOverride(state, Weather.CLEAR, 600, 0)
+		Weather.setOverride(state, Weather.RAIN, 2, 10)
+		t.ok(not Weather.expire(state, 12.5), "the clear under it still fades")
+		t.ok(Weather.expire(state, 10 + blend), "gone with it")
+		-- The attribute carries the whole chain.
+		state = Weather.newState(1000, 0, true, true)
+		Weather.setOverride(state, Weather.THUNDER, 600, 100)
+		Weather.setOverride(state, Weather.CLEAR, 600, 102)
+		Weather.setOverride(state, Weather.RAIN, 600, 103)
+		local copy = Weather.newState()
+		Weather.decodeOverride(copy, Weather.encodeOverride(state))
+		t.eq(#copy.previous, 2)
+		t.eq(copy.previous[1].kind, Weather.THUNDER)
+		t.eq(copy.previous[2].kind, Weather.CLEAR)
+		t.near(copy.previous[1].weight, state.previous[1].weight, 1e-12)
+		-- A moment reuses its entries (the client asks every frame).
+		local moment = Weather.momentAt(state, 104)
+		local first = moment.previous[1]
+		t.eq(Weather.momentAt(state, 104.5, moment).previous[1], first, "no new tables a frame")
+	end)
+
 	t.test("weather: attributes and the save round-trip", function()
 		local state = Weather.newState(12345.5, 100, true, true)
 		Weather.setOverride(state, Weather.THUNDER, 300, 150)
@@ -391,8 +461,11 @@ return function(t, shared, require, server)
 			t.eq(b.time, a.time, "clock")
 			t.eq(b.override, a.override, "override")
 			t.near(b.weight, a.weight, 1e-12, "weight")
-			t.eq(b.previous, a.previous, "previous")
-			t.near(b.previousWeight, a.previousWeight, 1e-12, "previous weight")
+			t.eq(#b.previous, #a.previous, "previous")
+			for i, earlier in a.previous do
+				t.eq(b.previous[i].kind, earlier.kind, "previous kind")
+				t.near(b.previous[i].weight, earlier.weight, 1e-12, "previous weight")
+			end
 		end
 		-- Nothing published yet: no weather.
 		local none = Weather.readState(function(_name: string): any
@@ -907,6 +980,127 @@ return function(t, shared, require, server)
 		t.eq(hit.burn.fire, 160, "8 s of fire")
 		t.eq((mobs:get(far) :: MobWorld.Mob).health, 10, "the far one untouched")
 		t.eq(Config.Weather.Lightning.Damage, 5, "Minecraft's thunderHit")
+	end)
+
+	t.test("lightning: rain puts out who it set on fire; strikes are the area's; a pillar draws them", function()
+		local Burning = require(server.Players.Burning)
+		local SURVIVAL = "survival"
+		-- A player struck in the rain: 8 s of fire set, out on the next tick (Minecraft's
+		-- isInWaterRainOrBubble), so the strike costs its 5 half hearts, not 13.
+		local function burnt(rain: boolean): number
+			local state = Burning.newPlayer()
+			Burning.hurtPlayer(state, SURVIVAL, Config.Weather.Lightning.Damage)
+			Burning.ignite(state, SURVIVAL, Config.Weather.Lightning.BurnSeconds)
+			local total = 0
+			for _ = 1, 200 do
+				local touching = if rain and state.fire > 0 then Burning.RAIN else 0
+				total += Burning.tickPlayer(state, SURVIVAL, touching)
+			end
+			return total
+		end
+		t.eq(burnt(true), 0, "rain: no burning after the strike")
+		t.ok(burnt(false) >= 7, `dry: it burns on ({burnt(false)} half hearts)`)
+		local state = Burning.newPlayer()
+		state.fire = 100
+		local _, extinguished = Burning.tickPlayer(state, SURVIVAL, Burning.RAIN)
+		t.eq(state.fire, 0)
+		t.eq(extinguished, true, "the sizzle")
+		t.ok(
+			Burning.inRain(function(_x, y, _z)
+				return y == 11
+			end, 0.5, 10, 0.5, 1.8),
+			"rain on the head counts"
+		)
+		-- A mob struck in the rain, and a zombie burning by day when a storm reaches it.
+		local function ground(_x: number, y: number, _z: number): number?
+			return if y < FLOOR then STONE else AIR
+		end
+		local function always(): boolean
+			return true
+		end
+		local function context(rain: boolean, day: boolean): any
+			return {
+				players = {},
+				dayTime = NOON,
+				skyOpen = always,
+				skyClear = always,
+				active = always,
+				rainingAt = function(): boolean
+					return rain
+				end,
+				isDay = function(): boolean
+					return day
+				end,
+			}
+		end
+		local mobs = MobWorld.new(ground, { maxMobs = 10, forgetTicks = 6000, random = lcg(3) })
+		local cow = mobs:spawn(MobList.find("Cow") :: number, 0.5, FLOOR, 0.5)
+		mobs:lightning(0.5, FLOOR, 0.5, Config.Weather.Lightning.Damage, 160)
+		for _ = 1, 200 do
+			mobs:tick(context(true, false))
+		end
+		local struck = mobs:get(cow) :: MobWorld.Mob
+		t.eq(struck.burn.fire, 0, "out in the rain")
+		t.eq(struck.health, 10 - Config.Weather.Lightning.Damage, "only the strike's 5")
+		local zombies = MobWorld.new(ground, { maxMobs = 10, forgetTicks = 6000, random = lcg(4) })
+		local zombie = zombies:spawn(MobList.find("Zombie") :: number, 0.5, FLOOR, 0.5)
+		local burning = zombies:get(zombie) :: MobWorld.Mob
+		burning.burn.fire = 160
+		zombies:tick(context(true, true))
+		t.eq((zombies:get(zombie) :: MobWorld.Mob).burn.fire, 0, "a storm reaching a burning zombie puts it out")
+
+		-- Eight players at one base draw the strikes one would; two far apart, twice as many.
+		local settings = Config.Weather.Lightning
+		local function strikes(players: { Lightning.Roller }, seconds: number, seed: number): number
+			-- (Luau's generator: the small LCG's rolls in a row are too alike for these counts.)
+			math.randomseed(seed)
+			local function random(): number
+				return math.random()
+			end
+			local count = 0
+			for _ = 1, seconds do
+				count += #Lightning.roll(players, settings.MeanSeconds, settings.Radius, 1, random)
+			end
+			return count
+		end
+		local SECONDS = 20000
+		local one = strikes({ { x = 0, z = 0, thunder = 1 } }, SECONDS, 1)
+		local together = {}
+		for i = 1, 8 do
+			table.insert(together, { x = i * 0.7, z = -i * 0.4, thunder = 1 })
+		end
+		local eight = strikes(together, SECONDS, 2)
+		local apart = strikes({ { x = 0, z = 0, thunder = 1 }, { x = 1000, z = 0, thunder = 1 } }, SECONDS, 3)
+		print(`    strikes in {SECONDS} s: one player {one}, eight together {eight}, two apart {apart}`)
+		t.near(one, SECONDS / settings.MeanSeconds, SECONDS / settings.MeanSeconds * 0.1, "one every 20 s")
+		t.near(eight / one, 1, 0.15, "eight together: the same strikes per area")
+		t.near(apart / one, 2, 0.25, "two apart: each their own")
+
+		-- One standing on a 20 block pillar 2 blocks beside the column (sees the sky): struck.
+		local living = { { x = 7.5, y = 40, z = 7.5, width = 0.6, height = 1.8 } }
+		local view: Lightning.View = {
+			top = function(): (number, boolean)
+				return 20, true
+			end,
+			living = function(x: number, y: number, z: number, radius: number): { Lightning.Living }
+				local near = {}
+				for _, thing in living do
+					local dx, dy, dz = thing.x - x, thing.y - y, thing.z - z
+					if dx * dx + dy * dy + dz * dz <= radius * radius then
+						table.insert(near, thing)
+					end
+				end
+				return near
+			end,
+			skyOpen = always,
+			raining = always,
+		}
+		local x, y = Lightning.target(view, 5, 7, lcg(9))
+		t.eq(x, 7, "drawn to the one on the pillar")
+		t.eq(y, 40)
+		living = { { x = 7.5, y = Config.WorldHeight + 10, z = 7.5, width = 0.6, height = 1.8 } }
+		x, y = Lightning.target(view, 5, 7, lcg(9))
+		t.eq(y, 20, "not past the build height (Minecraft's box)")
 	end)
 
 	t.test("lightning: the Lightning message", function()

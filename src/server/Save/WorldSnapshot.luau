@@ -10,7 +10,8 @@
 	             two systems' reads, so a chest broken in the middle of a save can't be saved both
 	             as a chest and as its dropped items): every region holding state now (containers,
 	             generated chests asked about, structure blocks, pipes, tanks, items in
-	             transporters, dropped items, farm animals, block updates due), every region that
+	             transporters, dropped items, farm animals, block updates due, those a load
+	             gave back that wait for their chunk to generate: `pending`), every region that
 	             held some at the last save (`previous`: what moved or went away must be written
 	             out of it too, even when it is empty now) and every region whose edits changed
 	             (`dirty`), each with all of its chunks' edits (the edit tables themselves, read
@@ -103,14 +104,17 @@ end
 
 --[[
 	The regions a save writes (see the header): `dirty` and `previous` are sets of region names
-	(RegionCodec.name). `items` / `mobs` false leave dropped items / farm animals out.
+	(RegionCodec.name). `items` / `mobs` false leave dropped items / farm animals out. `pending`:
+	loaded block updates not scheduled yet (Restored.ticks, what is left of it: their chunks were
+	not generated since), saved again as they were (frozen, as in an unloaded chunk).
 ]]
 function WorldSnapshot.collect(
 	systems: Systems,
 	dirty: { [string]: boolean }?,
 	previous: { [string]: boolean }?,
 	items: boolean?,
-	mobs: boolean?
+	mobs: boolean?,
+	pending: { [number]: { RegionCodec.TickRecord } }?
 ): ({ [string]: Region }, { [string]: boolean })
 	local regions: { [string]: Region } = {}
 
@@ -197,6 +201,16 @@ function WorldSnapshot.collect(
 				regionFor(regions, x, z).ticks,
 				{ x = x, y = y, z = z, delay = math.max(1, due - ticker.tick) }
 			)
+		end
+	end
+	if pending then
+		for _, list in pending do
+			for _, tick in list do
+				table.insert(
+					regionFor(regions, tick.x, tick.z).ticks,
+					{ x = tick.x, y = tick.y, z = tick.z, delay = tick.delay }
+				)
+			end
 		end
 	end
 

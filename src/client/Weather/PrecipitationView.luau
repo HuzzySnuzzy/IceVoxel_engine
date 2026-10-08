@@ -25,7 +25,9 @@
 	            Audio/SoundPlayer, its volume and pitch from Shared/Weather.rainSound (a cue of
 	            Minecraft's 0.2 is played at RAIN_GAIN x that). It plays whatever the Weather
 	            setting (Minecraft's sounds don't depend on the graphics; Fast halves the level it
-	            tries columns with, as Minecraft's does).
+	            tries columns with, as Minecraft's does): the columns it tries are queued for a
+	            roof scan as the strips' are, so Off (no strips) and Fast (5 blocks of them) still
+	            hear rain landing anywhere within 10.
 
 	Cost: on a cell change ~300 strips are checked (Fancy), with property writes only where a
 	strip changed; the roofs' scans run once per column until an edit, and only while something
@@ -257,9 +259,10 @@ local function layout(intensity: number)
 	part.CFrame = CFrame.new(cellX * BLOCK, cellY * BLOCK, cellZ * BLOCK)
 end
 
--- The rain floor of column (x, z) and whether rain falls there (for the sound; nil: unknown).
+-- The rain floor of column (x, z) and whether rain falls there (for the sound; nil: unknown, its
+-- scan queued: the sound's 10 blocks are learned whatever the Weather setting draws).
 local function landing(x: number, z: number): (number?, boolean)
-	local entry = Precipitation.cached(cache, x, z)
+	local entry = entryOf(x, z)
 	if entry == nil then
 		return nil, false
 	end

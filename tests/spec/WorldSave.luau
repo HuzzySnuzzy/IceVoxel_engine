@@ -8,7 +8,10 @@
 	with its loaded edits is the chunk before saving; chests, furnaces, machines, pipes, tanks,
 	transporters, structure blocks, items, animals, block updates), and the store's rules
 	(WorldStore: save -> load, a failed load never written over, one server per world, the
-	world's most, retries), with the sizes a typical edited area takes.
+	world's most, retries; owners, full lists, the lock kept through a long load and looked at
+	before saving, two servers' parts never joined, players' records in order, what a newer
+	version saved never written back, block updates waiting for their chunk), with the sizes a
+	typical edited area takes.
 ]]
 
 return function(t, shared, require, server, client)
@@ -1334,6 +1337,383 @@ return function(t, shared, require, server, client)
 		t.eq(#fake.violations, 0)
 	end)
 
+	--[[ Owners, lists, locks and records: what keeps saved worlds safe ]]
+
+	t.test("world save: a world is its owner's: others can't list, load, rename or delete it", function()
+		local backend = newBackend()
+		local fake = fakeStore(backend)
+		local saves = WorldStore.new(fake.store, fake.env)
+		local game = newGame()
+		furnish(game)
+		local OWNER, STRANGER, ADMIN = 501, 777, 1
+		local world = WorldStore.create(saves, settings("Base"), OWNER)
+		t.eq(WorldStore.save(saves, world, input(game)).ok, true)
+		WorldStore.release(saves, world)
+		fake.advance(10)
+		t.eq(#(WorldStore.list(saves) :: any).worlds, 0, "not in the game's list")
+		t.eq(#(WorldStore.list(saves, STRANGER) :: any).worlds, 0, "nor a stranger's")
+		local mine = WorldStore.list(saves, OWNER) :: any
+		t.eq(#mine.worlds, 1)
+		t.eq(mine.worlds[1].owner, OWNER)
+		t.eq(WorldMeta.mayManage(OWNER, { userId = OWNER, permanent = false }), true)
+		t.eq(WorldMeta.mayManage(OWNER, { userId = STRANGER, permanent = false }), false)
+		t.eq(WorldMeta.mayManage(0, { userId = STRANGER, permanent = false }), false, "the game's: its people only")
+		t.eq(WorldMeta.mayManage(OWNER, { userId = ADMIN, permanent = true }), true)
+		t.eq(WorldMeta.mayManage(OWNER, nil), true, "the server itself")
+
+		-- A stranger, the operator of an empty server, sends the world's id anyway.
+		local stranger = { userId = STRANGER, permanent = false }
+		local before = deepCopy(backend.data)
+		local none, why = WorldStore.load(saves, world.id, nil, stranger)
+		t.eq(none, nil)
+		t.eq(why, "it is not yours")
+		fake.advance(10)
+		local deleted, deleteWhy = WorldStore.delete(saves, world.id, stranger)
+		t.eq(deleted, false)
+		t.eq(deleteWhy, "it is not yours")
+		fake.advance(10)
+		local renamed, renameWhy = WorldStore.rename(saves, world.id, "Mine now", stranger)
+		t.eq(renamed, false)
+		t.eq(renameWhy, "it is not yours")
+		for key, value in backend.data do
+			if key ~= WorldMeta.lockKey(world.id) then
+				t.eq(jsonLength(value), jsonLength(before[key]), `{key} untouched`)
+			end
+		end
+		t.eq((backend.data[WorldMeta.lockKey(world.id)] :: any).released, true, "its lock given back")
+
+		-- The game's own people may; the owner may.
+		fake.advance(10)
+		local opened = WorldStore.load(saves, world.id, nil, { userId = ADMIN, permanent = true })
+		t.ok(opened ~= nil, "an admin opens it")
+		WorldStore.release(saves, (opened :: any).world)
+		fake.advance(10)
+		t.eq((WorldStore.rename(saves, world.id, "Castle", { userId = OWNER, permanent = false })), true)
+		t.eq((WorldStore.list(saves, OWNER) :: any).worlds[1].name, "Castle")
+
+		-- A world whose record is gone is deleted only from a list of one's own.
+		local lost = WorldStore.create(saves, settings("Lost"), OWNER)
+		fake.advance(10)
+		t.eq(WorldStore.save(saves, lost, input(game)).ok, true)
+		WorldStore.release(saves, lost)
+		backend.data[WorldMeta.metaKey(lost.id)] = nil
+		fake.advance(10)
+		local gone, goneWhy = WorldStore.delete(saves, lost.id, stranger)
+		t.eq(gone, false)
+		t.eq(goneWhy, "there is no such world")
+		t.eq(#(WorldStore.list(saves, OWNER) :: any).worlds, 2, "still listed")
+		fake.advance(10)
+		t.eq((WorldStore.delete(saves, lost.id, { userId = OWNER, permanent = false })), true)
+		fake.advance(10)
+		t.eq((WorldStore.delete(saves, world.id, { userId = OWNER, permanent = false })), true)
+		t.eq(#(WorldStore.list(saves, OWNER) :: any).worlds, 0)
+	end)
+
+	t.test("world save: a full list refuses a new world whole and never drops one", function()
+		local backend = newBackend()
+		local fake = fakeStore(backend)
+		local saves = WorldStore.new(fake.store, fake.env)
+		local OWNER = 9
+		local index = WorldMeta.readIndex(nil) :: any
+		for i = 1, WorldMeta.MAX_WORLDS do
+			local meta = WorldMeta.new(string.format("w%08d", i), settings(`World {i}`), 1000 + i, OWNER)
+			index = WorldMeta.withEntry(index, WorldMeta.entry(meta, 100)) :: any
+			t.ok(index ~= nil)
+		end
+		t.eq(#index.worlds, WorldMeta.MAX_WORLDS)
+		local newcomer = WorldMeta.entry(WorldMeta.new("wnewcomer", settings("New"), 99999, OWNER), 100)
+		t.eq(WorldMeta.withEntry(index, newcomer), nil, "full: refused, none dropped")
+		local played = table.clone(index.worlds[WorldMeta.MAX_WORLDS])
+		played.lastPlayed = 99999
+		local again = WorldMeta.withEntry(index, played) :: any
+		t.eq(#again.worlds, WorldMeta.MAX_WORLDS, "a listed one is still updated")
+		t.eq(again.worlds[1].id, played.id)
+		backend.data[WorldMeta.indexKey(OWNER)] = index
+
+		local room, why = WorldStore.room(saves, OWNER)
+		t.eq(room, false)
+		t.ok(string.find(why or "", "full", 1, true) ~= nil, why)
+		t.eq((WorldStore.room(saves, 10)), true, "another player's list is their own")
+		local game = newGame()
+		furnish(game)
+		local world = WorldStore.create(saves, settings("One too many"), OWNER)
+		local refused = WorldStore.save(saves, world, input(game))
+		t.eq(refused.refused, true)
+		t.eq(#fake.writes, 0, "nothing written: no world without its line in the list")
+		t.eq(world.canSave, false)
+		t.eq(#(backend.data[WorldMeta.indexKey(OWNER)] :: any).worlds, WorldMeta.MAX_WORLDS)
+		t.eq((backend.data[WorldMeta.indexKey(OWNER)] :: any).worlds[1].id, index.worlds[1].id)
+	end)
+
+	t.test("world save: a long load keeps its lock; a save looks at it first; two servers' parts never mix", function()
+		local Region = RegionCodec
+		local backend = newBackend()
+		local writer = fakeStore(backend, { job = "w", players = 20 })
+		local savesW = WorldStore.new(writer.store, writer.env)
+		local world = WorldStore.create(savesW, settings())
+		local regions = {}
+		local N = 250
+		for i = 1, N do
+			local rx, rz = i % 40, i // 40
+			local region = Region.new(rx, rz)
+			table.insert(region.sourced, Coords.posKey(rx * REGION + 1, FLOOR, rz * REGION + 1))
+			regions[Region.name(rx, rz)] = Region.encode(region)
+		end
+		local saved = WorldStore.save(savesW, world, { regions = regions, players = {}, sections = {}, operators = {} })
+		t.eq(saved.ok, true, saved.message)
+		WorldStore.release(savesW, world)
+
+		-- An empty server reads 250 keys at 60 a minute: longer than the lock's timeout.
+		local a = fakeStore(backend, { job = "a", players = 0, clock = writer.clock + 600 })
+		local savesA = WorldStore.new(a.store, a.env)
+		local t0 = a.clock
+		local oldest = 0
+		local loaded = WorldStore.load(savesA, world.id, function()
+			local lock = backend.data[WorldMeta.lockKey(world.id)] :: any
+			oldest = math.max(oldest, a.env.time() - lock.at)
+		end) :: any
+		t.ok(loaded ~= nil)
+		local took = a.clock - t0
+		print(`    {N} regions loaded in {string.format("%.0f", took)} s; the lock at most {oldest} s old meanwhile`)
+		t.ok(took > Config.Save.LockTimeout, "longer than the lock's timeout")
+		t.ok(oldest <= Config.Save.LockTimeout / 3 + 10, `renewed while it loads ({oldest} s)`)
+		local b = fakeStore(backend, { job = "b", players = 1, clock = a.clock })
+		local savesB = WorldStore.new(b.store, b.env)
+		local taken, refusal = WorldStore.lock(savesB, world.id)
+		t.eq(taken, false, "a second server can't take a running server's world")
+		t.eq(refusal, "it is open on another server")
+
+		-- A stalls past the timeout (no heartbeat), B takes it over: A's next save looks first.
+		b.advance(Config.Save.LockTimeout + 10)
+		local loadedB = WorldStore.load(savesB, world.id) :: any
+		t.ok(loadedB ~= nil, "taken over")
+		a.advance(b.clock - a.clock + 10)
+		local writes = #a.writes
+		local changed = Region.new(0, 0)
+		table.insert(changed.sourced, Coords.posKey(5, FLOOR, 5))
+		local stale = WorldStore.save(
+			savesA,
+			loaded.world,
+			{ regions = { ["0_0"] = Region.encode(changed) }, players = {}, sections = {}, operators = {} }
+		)
+		t.eq(stale.refused, true)
+		t.eq(loaded.world.canSave, false)
+		t.eq(#a.writes - writes, 1, "only the look at the lock")
+
+		-- Even two servers that both believe they hold it (a clock gone wrong) never mix their
+		-- saves' parts: B's parts over the slot A's head names are refused, never joined.
+		local maxKey = Config.Save.MaxKeyBytes
+		Config.Save.MaxKeyBytes = 1100
+		local function long(seed: number)
+			local region = Region.new(0, 0)
+			for i = 1, 300 do
+				table.insert(region.sourced, Coords.posKey((i * 7 + seed) % 512, 60, (i * 13) % 512))
+			end
+			return Region.encode(region)
+		end
+		local c = fakeStore(backend, { job = "c", players = 20, clock = b.clock + Config.Save.LockTimeout + 10 })
+		local savesC = WorldStore.new(c.store, c.env)
+		local first = WorldStore.load(savesC, world.id) :: any
+		t.eq(
+			WorldStore.save(
+				savesC,
+				first.world,
+				{ regions = { ["0_0"] = long(1) }, players = {}, sections = {}, operators = {} }
+			).ok,
+			true
+		)
+		WorldStore.release(savesC, first.world)
+		c.advance(10)
+		local d = fakeStore(backend, { job = "d", players = 20, clock = c.clock })
+		local e = fakeStore(backend, { job = "e", players = 20, clock = c.clock })
+		local savesD, savesE = WorldStore.new(d.store, d.env), WorldStore.new(e.store, e.env)
+		local loadedD = WorldStore.load(savesD, world.id) :: any
+		e.advance(Config.Save.LockTimeout + 10)
+		d.advance(Config.Save.LockTimeout + 10)
+		local loadedE = WorldStore.load(savesE, world.id) :: any
+		t.ok(loadedD ~= nil and loadedE ~= nil)
+		loadedD.world.renewedAt = d.env.now() -- (D's clock says its lock is fresh)
+		t.eq(
+			WorldStore.save(
+				savesD,
+				loadedD.world,
+				{ regions = { ["0_0"] = long(2) }, players = {}, sections = {}, operators = {} }
+			).ok,
+			true
+		)
+		e.advance(10)
+		e.failures[WorldMeta.regionKey(world.id, "0_0")] = 99
+		local failedE = WorldStore.save(
+			savesE,
+			loadedE.world,
+			{ regions = { ["0_0"] = long(3) }, players = {}, sections = {}, operators = {} }
+		)
+		t.eq(failedE.ok, false)
+		Config.Save.MaxKeyBytes = maxKey
+		local f = fakeStore(backend, { job = "f", players = 20, clock = e.clock + Config.Save.LockTimeout + 10 })
+		local mixed, mixedWhy = WorldStore.load(WorldStore.new(f.store, f.env), world.id)
+		t.eq(mixed, nil, "never a region equal to neither save")
+		t.ok(string.find(mixedWhy or "", "another save", 1, true) ~= nil, mixedWhy)
+		t.ok(WorldMeta.writerTag("d") ~= WorldMeta.writerTag("e"))
+		t.eq(WorldMeta.writerTag("d"), WorldMeta.writerTag("d"))
+	end)
+
+	t.test(
+		"world save: a player's older record never goes over a newer one; one who never stood keeps theirs",
+		function()
+			local backend = newBackend()
+			local fake = fakeStore(backend)
+			local saves = WorldStore.new(fake.store, fake.env)
+			local game = newGame()
+			local world = WorldStore.create(saves, settings())
+			t.eq(WorldStore.save(saves, world, input(game)).ok, true)
+			local function holding(count: number): string
+				local record = PlayerCodec.new()
+				record.slots[1] = Items.newStack(id.Stone, count)
+				return PlayerCodec.toText(record)
+			end
+			local key = WorldMeta.playerKey(world.id, 7)
+			-- An autosave captured P (order 3); P left (order 5) and was written first.
+			fake.advance(10)
+			t.eq(WorldStore.savePlayers(saves, world, { [7] = holding(50) }, nil, { [7] = 5 })[7], true)
+			local tagged = input(game, {}, nil, { [7] = holding(10) })
+			tagged.order = { [7] = 3 }
+			fake.advance(10)
+			local retried = WorldStore.save(saves, world, tagged)
+			t.eq(retried.ok, true)
+			t.eq(retried.playersWritten, 0, "the older one is not written")
+			t.eq((backend.data[key] :: any).d, holding(50), "what P left with stays")
+			t.eq(world.players["7"], holding(50))
+			-- A newer one is.
+			fake.advance(10)
+			local newer = input(game, {}, nil, { [7] = holding(60) })
+			newer.order = { [7] = 9 }
+			t.eq(WorldStore.save(saves, world, newer).playersWritten, 1)
+			t.eq((backend.data[key] :: any).d, holding(60))
+			fake.advance(10)
+			t.eq(next(WorldStore.savePlayers(saves, world, { [7] = holding(55) }, nil, { [7] = 6 })), nil)
+			t.eq((backend.data[key] :: any).d, holding(60), "nor a leaving record older than the save's")
+
+			-- Saved far from spawn, back on the title screen, gone again before a character stood:
+			-- the record they are saved with is the saved one, not a fresh player at spawn.
+			local saved = PlayerCodec.new()
+			saved.position = true
+			saved.x, saved.y, saved.z, saved.yaw = 5000, 70, -1200, 1.5
+			saved.health = 11
+			saved.slots[3] = Items.newStack(id.Sand, 4)
+			saved.thirst = { thirst = 9, hydration = 1, exhaustion = 0.5, effect = 0, timer = 3 }
+			saved.temperature = {
+				value = 2,
+				target = 1,
+				drift = 0,
+				frozen = 0,
+				heat = 0,
+				timer = 0,
+				wet = 0,
+				warmth = 0,
+				chill = 0,
+				clemency = 100,
+			}
+			saved.effects = { { effect = 1, amplifier = 0, ticks = 400, ambient = false } }
+			local captured = PlayerCodec.new()
+			captured.slots[3] = Items.newStack(id.Sand, 4)
+			local kept =
+				PlayerCodec.withWaiting(captured, saved, { standing = false, climate = false, effects = false })
+			t.eq(PlayerCodec.toText(kept), PlayerCodec.toText(saved), "exactly as saved: nothing new to write")
+			-- What lives already is the live one's.
+			local standing = PlayerCodec.new()
+			standing.position = true
+			standing.x, standing.y, standing.z = 1, 2, 3
+			standing.thirst = { thirst = 20, hydration = 5, exhaustion = 0, effect = 0, timer = 0 }
+			standing.temperature = saved.temperature
+			local live = PlayerCodec.withWaiting(standing, saved, { standing = true, climate = true, effects = false })
+			t.eq(live.x, 1)
+			t.eq((live.thirst :: any).thirst, 20)
+			t.eq(#live.effects, 1, "effects not made yet: the saved ones")
+			t.eq(
+				PlayerCodec.withWaiting(PlayerCodec.new(), nil, { standing = false, climate = false, effects = false }).position,
+				false
+			)
+		end
+	)
+
+	t.test("world save: what this version doesn't know keeps the world (or player) from being written", function()
+		local backend = newBackend()
+		local fake = fakeStore(backend)
+		local saves = WorldStore.new(fake.store, fake.env)
+		local game = newGame()
+		furnish(game)
+		local world = WorldStore.create(saves, settings())
+		local saved = input(game)
+		-- A block a newer version added, in a chunk of region 0_0.
+		local newer = RegionCodec.decode(saved.regions["0_0"], 0, 0)
+		newer.chunks[Coords.chunkKey(0, 0)][7] = 60000
+		saved.regions["0_0"] = RegionCodec.encode(newer)
+		t.eq(WorldStore.save(saves, world, saved).ok, true)
+		WorldStore.release(saves, world)
+		local b = fakeStore(backend, { job = "b", clock = fake.clock + 10 })
+		local savesB = WorldStore.new(b.store, b.env)
+		local loaded = WorldStore.load(savesB, world.id) :: any
+		t.ok(loaded ~= nil, "it opens")
+		t.ok(loaded.dropped > 0)
+		t.eq(loaded.world.canSave, false, "but is never written")
+		b.advance(10)
+		local writes = #b.writes
+		local result = WorldStore.save(savesB, loaded.world, input(game))
+		t.eq(result.refused, true)
+		t.ok(string.find(result.message or "", "newer version", 1, true) ~= nil, result.message)
+		t.eq(#b.writes, writes)
+
+		-- A chest holding an item, and a player record holding one, this version doesn't know.
+		local isValid = Items.isValid
+		local region = RegionCodec.new(0, 0)
+		table.insert(region.containers, {
+			x = 2,
+			y = FLOOR,
+			z = 2,
+			container = {
+				kind = "chest",
+				block = id.Chest,
+				size = 27,
+				slots = { [1] = Items.newStack(id.Sand, 3), [2] = Items.newStack(id.Stone, 1) },
+			},
+		})
+		local bytes = RegionCodec.encode(region)
+		local record = PlayerCodec.new()
+		record.slots[1] = Items.newStack(id.Sand, 3)
+		record.slots[2] = Items.newStack(id.Stone, 5)
+		local text = PlayerCodec.toText(record)
+		local items: any = Items
+		items.isValid = function(item: number): boolean
+			return item ~= id.Sand and isValid(item)
+		end
+		local back = RegionCodec.decode(bytes, 0, 0)
+		local player = PlayerCodec.fromText(text) :: any
+		items.isValid = isValid
+		t.eq(back.dropped, 1, "the chest's unknown stack counts")
+		t.eq(player.dropped, 1, "the record's too")
+		t.ok(sameStack(player.slots[2], record.slots[2]), "the rest is read")
+		t.eq(PlayerCodec.fromText(text).dropped, 0)
+	end)
+
+	t.test("world save: block updates waiting for their chunk are saved again as they were", function()
+		local a = newGame()
+		a.world:setBlock(100, FLOOR, 100, id.Glass)
+		a.ticker:schedule(101, FLOOR, 100, 5)
+		local regions = WorldSnapshot.collect(a, WorldSnapshot.editedRegions(a.world))
+		t.eq(#regions["0_0"].ticks, 1)
+		local stored = RegionCodec.encode(regions["0_0"])
+		local loaded = { RegionCodec.decode(stored, 0, 0) }
+		local b = newGame()
+		WorldSnapshot.applyEdits(b.world, loaded)
+		local report = WorldSnapshot.restore(b, loaded)
+		-- Nobody went near chunk (6, 6) before the next save.
+		local again = WorldSnapshot.collect(b, {}, { ["0_0"] = true }, nil, nil, report.ticks)
+		t.eq(#again["0_0"].ticks, 1, "kept")
+		t.eq(again["0_0"].ticks[1].delay, 5)
+		t.ok(sameBuffer(RegionCodec.encode(again["0_0"]), stored), "the region as it was: nothing to write")
+	end)
+
 	--[[ Commands ]]
 
 	t.test("world save: /save-all, /save-off and /save-on", function()
@@ -1359,7 +1739,17 @@ return function(t, shared, require, server, client)
 		t.eq(unavailable.action, nil)
 		t.ok(string.find(unavailable.feedback[1], "no API access", 1, true) ~= nil)
 		t.eq(SaveCommand.run("/time set day", ctx), nil)
+		-- A world not being saved has no automatic saving to turn off or on: it says why.
+		local sessionOnly = { operator = true, autosave = true, available = false, reason = "its lock was lost" }
+		for _, command in { "/save-off", "/save-on" } do
+			local refused = SaveCommand.run(command, sessionOnly) :: any
+			t.eq(refused.action, nil, command)
+			t.ok(string.find(refused.feedback[1], "its lock was lost", 1, true) ~= nil)
+		end
+		local offUnavailable = { operator = true, autosave = false, available = false }
+		t.eq((SaveCommand.run("/save-on", offUnavailable) :: any).action, nil)
 	end)
+
 	--[[ Players' things back in the game's own parts ]]
 
 	t.test("world save: a returning player's inventory, operators and records written as they leave", function()

@@ -490,7 +490,10 @@ local function decodeContainer(r: Reader, region: Region)
 	local slots: { [number]: Stack? } = {}
 	for _ = 1, SaveCodec.readU8(r) do
 		local slot = SaveCodec.readU8(r)
-		local stack = SaveCodec.readStack(r)
+		local stack, lost = SaveCodec.readStack(r)
+		if lost then
+			region.dropped += 1
+		end
 		if slot >= 1 and slot <= size then
 			slots[slot] = stack
 		end

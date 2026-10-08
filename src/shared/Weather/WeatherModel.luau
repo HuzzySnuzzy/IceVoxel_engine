@@ -60,18 +60,21 @@ local max, min = math.max, math.min
 -- An override's kind: none (""), or what /weather asked for.
 export type Kind = string
 
+-- An override blended in at `weight` (0..1).
+export type Blend = { kind: Kind, weight: number }
+
 --[[
 	The weather clock at one moment with the /weather override then (Shared/Weather.momentAt): the
-	override `kind` at `weight` (0..1), blended over what was there before it, `previous` at
-	`previousWeight` (fading out while the new one comes in). `enabled` false: no weather at all.
+	override `kind` at `weight` (0..1), blended over what was there before it, `previous` (the
+	overrides it replaced while they still blended, oldest first, each at its weight: fading out
+	while the new one comes in). `enabled` false: no weather at all.
 ]]
 export type Moment = {
 	time: number,
 	enabled: boolean,
 	override: Kind,
 	weight: number,
-	previous: Kind,
-	previousWeight: number,
+	previous: { Blend },
 }
 
 -- One step of a forecast: the weather clock and the weather then.
@@ -277,14 +280,18 @@ end
 
 --[[
 	The natural values blended with a moment's override: first towards what was there before it
-	(`previous` at `previousWeight`), then towards the override at `weight` (see the header).
+	(each of `previous` at its weight, oldest first), then towards the override at `weight` (see
+	the header).
 ]]
 local function blend(moment: Moment, p: number, th: number, c: number): (number, number, number)
-	local pw, w = moment.previousWeight, moment.weight
-	if pw > 0 then
-		local tp, tth, tc = target(moment.previous, p, th, c)
-		p, th, c = p + (tp - p) * pw, th + (tth - th) * pw, c + (tc - c) * pw
+	for _, earlier in moment.previous do
+		local pw = earlier.weight
+		if pw > 0 then
+			local tp, tth, tc = target(earlier.kind, p, th, c)
+			p, th, c = p + (tp - p) * pw, th + (tth - th) * pw, c + (tc - c) * pw
+		end
 	end
+	local w = moment.weight
 	if w > 0 then
 		local tp, tth, tc = target(moment.override, p, th, c)
 		p, th, c = p + (tp - p) * w, th + (tth - th) * w, c + (tc - c) * w
@@ -352,7 +359,7 @@ function Field.grid(
 		buffer.fill(out, 0, 0, size)
 		return out
 	end
-	local blending = moment ~= nil and (moment.weight > 0 or moment.previousWeight > 0)
+	local blending = moment ~= nil and (moment.weight > 0 or #moment.previous > 0)
 	local dx, dz = self:displacement(clock)
 	local ot = self._ot
 	local t1, t2, t3 = (clock * E1 + ot[1]) % 256, (clock * E2 + ot[2]) % 256, (clock * E3 + ot[3]) % 256

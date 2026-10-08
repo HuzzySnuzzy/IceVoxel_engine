@@ -11,8 +11,10 @@
 	            pooled; a few bolts can show at once.
 	  Flash     while the sky flashes (life >= 0), a ColorCorrectionEffect ("IceVoxelLightning" in
 	            Lighting) brightens the picture by Bolt.Flash, less the farther the strike (half at
-	            512 blocks) and indoors (the sky exposure, Rendering/LightingController), and a
-	            PointLight at the struck point lights the ground around it (Bolt.LightRange).
+	            512 blocks), indoors (the sky exposure, Rendering/LightingController) and blind
+	            (Rendering/EffectView.blindness: none at all through Blindness's black fog, as
+	            Minecraft's flash only lights the sky the fog hides), and a PointLight at the
+	            struck point lights the ground around it (Bolt.LightRange).
 	  Sound     the strike's crack (entity.lightning_bolt.impact) at once where it struck (heard
 	            within 32 blocks), the thunder (entity.lightning_bolt.thunder) after
 	            Weather.thunderDelay(distance) seconds (343 blocks a second), played a few blocks
@@ -31,6 +33,7 @@ local Weather = require(Shared.Weather)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local EffectView = require(script.Parent.Parent.Rendering.EffectView)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local LightningBolt = require(script.Parent.LightningBolt)
 
@@ -209,7 +212,10 @@ local function step()
 	end
 	local effect = correction
 	if effect then
-		local value = flash * Config.Weather.Bolt.Flash * LightingController.skyExposure()
+		local value = flash
+			* Config.Weather.Bolt.Flash
+			* LightingController.skyExposure()
+			* (1 - EffectView.blindness())
 		if math.abs(value - flashWritten) > 0.005 then
 			flashWritten = value
 			effect.Brightness = value

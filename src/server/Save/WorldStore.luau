@@ -6,29 +6,45 @@
 	budgets, cooldowns, latency and failures. Keys and records: Save/WorldMeta; locks:
 	Save/SaveLock; regions: Save/RegionCodec; players: Save/PlayerCodec.
 
-	  list     the index (the worlds, last played first).
-	  create   a new world's handle (an id no listed world has); nothing is written until it is
-	           saved, which takes its lock first.
+	  list     an owner's list (WorldMeta's owners: a player's own, or the game's), last
+	           played first; `room` whether it takes one more world.
+	  create   a new world's handle (an id no listed world has, its owner); nothing is written
+	           until it is saved, which takes its lock first (and, the first time, looks that its
+	           owner's list has room: a world that can't be listed is refused whole, never
+	           written unlisted, and never pushes another out).
 	  load     takes the world's lock (refused while another live server holds it), reads its
 	           record and every region it lists (heads, then the parts of long ones, as many at
 	           once as the scheduler allows, `progress(done, total)` after each key), joins and
-	           decodes them. Any failure gives the lock back and returns nil and why: a world
-	           that could not be read whole is never started, so nothing is ever written over it.
+	           decodes them, renewing the lock every third of its timeout while it reads (a long
+	           load never leaves a running server holding a stale lock). Any failure gives the
+	           lock back and returns nil and why: a world that could not be read whole is never
+	           started, so nothing is ever written over it. A world holding blocks, items or mobs
+	           this version doesn't know (saved by a newer one) opens, but is never saved
+	           (`canSave` false): writing it would lose them.
 	  save     writes what changed (see `save`): never for a world that can't be saved
 	           (`canSave` false: its lock was lost, or it was refused), never past
-	           Config.Save.MaxWorldBytes (refused as a whole, and said so), parts before heads
-	           before the record, failed writes tried again (the scheduler) and what still failed
-	           kept for the next save (a region whose parts failed is not committed: its old head
-	           and parts stay intact).
+	           Config.Save.MaxWorldBytes (refused as a whole, and said so), and only once the
+	           lock is known to be this server's still (renewed first when its last renewal is a
+	           sixth of the timeout old: before the writes and again before the commit); parts
+	           before heads before the record, each head and part tagged with this server
+	           (WorldMeta.writerTag), failed writes tried again (the scheduler) and what still
+	           failed kept for the next save (a region whose parts failed is not committed: its
+	           old head and parts stay intact).
 	  players  `loadPlayer` reads one player's record with retries: false when it could not be
 	           read (the caller then never writes that player this session, so an outage can't
-	           replace a saved inventory with an empty one); their records go out with `save`.
+	           replace a saved inventory with an empty one); their records go out with `save`
+	           and `savePlayers`, each with its order (`order`: later captures are higher), and
+	           a record older than one already written (or being written) for that player is
+	           never written: an autosave's retry can't put back what a leaving player had
+	           minutes before.
 	  lock     `heartbeat` renews it (false: lost to another server, saving stops), `release`
 	           gives it back at shutdown or after a failed load.
-	  delete   takes the lock (a world open elsewhere can't be deleted), takes the world off the
-	           index, then removes its keys (best effort, within the budget: what is left is
+	  delete   only the world's owner or the game's own people (WorldMeta.mayManage); takes the
+	           lock (a world open elsewhere can't be deleted), takes the world off its owner's
+	           list, then removes its keys (best effort, within the budget: what is left is
 	           unreachable).
-	  rename   the index's and the record's name (not while another server has it open).
+	  rename   the list's and the record's name (the owner's, as delete; not while another
+	           server has it open).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -75,7 +91,14 @@ export type World = {
 	regions: { [string]: RegionState },
 	-- The text last written for each player (user id as text).
 	players: { [string]: string },
+	-- The order of the newest record written, or being written, for each player (user id as
+	-- text): an older one is never written after it.
+	order: { [string]: number },
 	lockHeld: boolean,
+	-- When the lock was last taken or renewed (Env.now).
+	renewedAt: number,
+	-- Listed in its owner's list (loaded, or a save put it there).
+	listed: boolean,
 	canSave: boolean,
 	reason: string?,
 }
@@ -95,6 +118,8 @@ export type SaveInput = {
 	empty: { [string]: boolean }?,
 	-- Player records (PlayerCodec.toText) by user id.
 	players: { [number]: string },
+	-- Each record's order (user id -> a number later captures make higher; none: always written).
+	order: { [number]: number }?,
 	sections: { [string]: any },
 	operators: { number },
 }
@@ -121,6 +146,8 @@ export type Saves = {
 	scheduler: SaveScheduler.Scheduler,
 	-- The ids the last list had (new ids avoid them).
 	known: { [string]: boolean },
+	-- This server's tag on the heads and parts it writes (WorldMeta.writerTag).
+	writer: string,
 }
 
 local WorldStore = {}
@@ -131,6 +158,7 @@ function WorldStore.new(store: Store, env: Env, options: SaveScheduler.Options?)
 		env = env,
 		scheduler = SaveScheduler.new(env, options),
 		known = {},
+		writer = WorldMeta.writerTag(env.job),
 	}
 end
 
@@ -187,19 +215,33 @@ local function timeout(): number
 	return math.max(10, Config.Save.LockTimeout)
 end
 
+local FULL = `the world list is full ({WorldMeta.MAX_WORLDS} worlds): delete one to save another`
+
 --[[ The list ]]
 
--- The world list (last played first), or nil and why not.
-function WorldStore.list(saves: Saves): (WorldMeta.Index?, string?)
-	local ok, value = read(saves, WorldMeta.INDEX)
+-- `owner`'s world list (nil or 0: the game's), last played first, or nil and why not.
+function WorldStore.list(saves: Saves, owner: number?): (WorldMeta.Index?, string?)
+	local ok, value = read(saves, WorldMeta.indexKey(owner))
 	if not ok then
 		return nil, `the world list could not be read ({value})`
 	end
 	local index, why = WorldMeta.readIndex(value)
 	if index then
-		saves.known = WorldMeta.ids(index)
+		for id in WorldMeta.ids(index) do
+			saves.known[id] = true
+		end
 	end
 	return index, why
+end
+
+-- Whether `owner`'s list takes one more world: true, or false and why not (true when it can't
+-- be read: the world's first save looks again).
+function WorldStore.room(saves: Saves, owner: number?): (boolean, string?)
+	local index = WorldStore.list(saves, owner)
+	if index and #index.worlds >= WorldMeta.MAX_WORLDS then
+		return false, FULL
+	end
+	return true, nil
 end
 
 --[[ Locks ]]
@@ -229,26 +271,70 @@ local function releaseId(saves: Saves, id: string, deadline: number?)
 	end, deadline)
 end
 
+-- Renews world `id`'s lock: "ok", "lost" (another server holds it, or it was released or
+-- removed) or "failed" (the store could not be reached).
+local function renewId(saves: Saves, id: string, deadline: number?): "ok" | "lost" | "failed"
+	local env = saves.env
+	local lost = false
+	local ok = update(saves, WorldMeta.lockKey(id), function(old: unknown): unknown?
+		local lock, gone = SaveLock.renew(old, env.job, env.time())
+		lost = gone
+		return lock
+	end, deadline)
+	if not ok then
+		return "failed"
+	end
+	return if lost then "lost" else "ok"
+end
+
+local function lose(world: World)
+	world.lockHeld = false
+	world.canSave = false
+	world.reason = "another server opened it"
+end
+
 -- Renews the world's lock; false when it was lost (saving stops: `canSave` false).
 function WorldStore.heartbeat(saves: Saves, world: World): boolean
 	if not world.lockHeld then
 		return world.canSave
 	end
-	local env = saves.env
-	local lost = false
-	local ok = update(saves, WorldMeta.lockKey(world.id), function(old: unknown): unknown?
-		local lock, gone = SaveLock.renew(old, env.job, env.time())
-		lost = gone
-		return lock
-	end)
-	if ok and lost then
-		world.lockHeld = false
-		world.canSave = false
-		world.reason = "another server opened it"
+	local renewed = renewId(saves, world.id)
+	if renewed == "lost" then
+		lose(world)
 		return false
+	elseif renewed == "ok" then
+		world.renewedAt = saves.env.now()
 	end
 	-- (A failed heartbeat is tried again next time: the lock stays ours until it goes stale.)
 	return true
+end
+
+--[[
+	Before writing: is the world's lock still this server's? Renewed first unless its last
+	renewal is less than a sixth of the timeout old (nobody can take it before the timeout).
+	false and why when it was lost (`canSave` false), or could not be renewed while too old to be
+	sure (this save is refused; the next one tries again).
+]]
+local function ensureLock(saves: Saves, world: World, deadline: number?): (boolean, string?)
+	if not world.lockHeld then
+		return true, nil
+	end
+	local env = saves.env
+	if env.now() - world.renewedAt < timeout() / 6 then
+		return true, nil
+	end
+	local renewed = renewId(saves, world.id, deadline)
+	if renewed == "lost" then
+		lose(world)
+		return false, world.reason
+	elseif renewed == "ok" then
+		world.renewedAt = env.now()
+		return true, nil
+	elseif env.now() - world.renewedAt < timeout() / 2 then
+		-- (Not renewed, but still too young for another server to have taken it.)
+		return true, nil
+	end
+	return false, "its lock could not be renewed"
 end
 
 -- Gives the world's lock back (shutdown).
@@ -261,16 +347,20 @@ end
 
 --[[ Creating and loading ]]
 
--- A new world's handle (not written yet: its first save writes it).
-function WorldStore.create(saves: Saves, settings: WorldSettings.Settings): World
+-- A new world's handle (not written yet: its first save writes it). `owner`: its creator's
+-- user id (nil or 0: the game's).
+function WorldStore.create(saves: Saves, settings: WorldSettings.Settings, owner: number?): World
 	local id = WorldMeta.newId(saves.env.random, saves.known)
 	saves.known[id] = true
 	return {
 		id = id,
-		meta = WorldMeta.new(id, settings, saves.env.time()),
+		meta = WorldMeta.new(id, settings, saves.env.time(), owner),
 		regions = {},
 		players = {},
+		order = {},
 		lockHeld = false,
+		renewedAt = -math.huge,
+		listed = false,
 		canSave = true,
 		reason = nil,
 	}
@@ -278,12 +368,19 @@ end
 
 --[[
 	Opens world `id` (see the header): its handle, settings and regions, or nil and why not. Yields.
-	`progress(done, total)` follows the keys read.
+	`progress(done, total)` follows the keys read; `who` (nil: the server itself) must be allowed
+	to (WorldMeta.mayManage).
 ]]
-function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -> ())?): (Loaded?, string?)
+function WorldStore.load(
+	saves: Saves,
+	id: string,
+	progress: ((number, number) -> ())?,
+	who: WorldMeta.Requester?
+): (Loaded?, string?)
 	if not WorldMeta.validId(id) then
 		return nil, "there is no such world"
 	end
+	local env = saves.env
 	local locked, refusal = WorldStore.lock(saves, id)
 	if not locked then
 		return nil, refusal
@@ -291,6 +388,23 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 	local function fail(reason: string): (Loaded?, string?)
 		releaseId(saves, id)
 		return nil, reason
+	end
+	-- The lock, renewed every third of its timeout while the keys are read.
+	local renewedAt = env.now()
+	local renewing = false
+	local lost = false
+	local function keepLock()
+		if renewing or lost or env.now() - renewedAt < timeout() / 3 then
+			return
+		end
+		renewing = true
+		local renewed = renewId(saves, id)
+		renewing = false
+		if renewed == "lost" then
+			lost = true
+		elseif renewed == "ok" then
+			renewedAt = env.now()
+		end
 	end
 	local okMeta, value = read(saves, WorldMeta.metaKey(id))
 	if not okMeta then
@@ -303,6 +417,8 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		return fail(why or "its record is damaged")
 	elseif meta.id ~= id then
 		return fail("its record belongs to another world")
+	elseif not WorldMeta.mayManage(meta.owner, who) then
+		return fail("it is not yours")
 	end
 	local settings, problem = WorldMeta.settings(meta)
 	if settings == nil then
@@ -321,6 +437,7 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		if progress then
 			progress(done, total)
 		end
+		keepLock()
 	end
 	if progress then
 		progress(0, total)
@@ -351,7 +468,10 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		)
 	end
 	local result = run(saves, jobs)
-	if #result.failed > 0 then
+	keepLock()
+	if lost then
+		return fail("it was opened on another server")
+	elseif #result.failed > 0 then
 		return fail(`a region could not be read ({result.failed[1].err})`)
 	elseif broken then
 		return fail(broken)
@@ -371,7 +491,7 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 					if not ok then
 						return false, tostring(stored)
 					end
-					local text, partProblem = WorldMeta.readPart(stored, head.gen, index)
+					local text, partProblem = WorldMeta.readPart(stored, head.gen, index, head.writer)
 					if text == nil then
 						broken = broken or `region {name}: {partProblem}`
 					else
@@ -384,7 +504,10 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		end
 	end
 	result = run(saves, jobs)
-	if #result.failed > 0 then
+	keepLock()
+	if lost then
+		return fail("it was opened on another server")
+	elseif #result.failed > 0 then
 		return fail(`a region could not be read ({result.failed[1].err})`)
 	elseif broken then
 		return fail(broken)
@@ -395,7 +518,10 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		meta = meta,
 		regions = {},
 		players = {},
+		order = {},
 		lockHeld = true,
+		renewedAt = renewedAt,
+		listed = true,
 		canSave = true,
 		reason = nil,
 	}
@@ -423,6 +549,11 @@ function WorldStore.load(saves: Saves, id: string, progress: ((number, number) -
 		end
 		world.regions[name] = { parts = parts, slot = head.slot, gen = head.gen, bytes = size, largest = largest }
 		meta.regions[name] = size
+	end
+	if dropped > 0 then
+		-- (Written back, they would be gone for good: a newer version's world is played here, not saved.)
+		world.canSave = false
+		world.reason = "it holds blocks, items or mobs this version doesn't know (saved by a newer version)"
 	end
 	return { world = world, settings = settings, regions = regions, dropped = dropped }, nil
 end
@@ -454,46 +585,68 @@ function WorldStore.loadPlayer(saves: Saves, world: World, userId: number): (boo
 end
 
 --[[
-	Writes the records of players who left (user id -> PlayerCodec text) at once, without the rest
-	of the world (Minecraft saves a player's data when they leave). Only for a world that holds
-	its lock (a new world's first save writes them instead). Yields. Returns those written.
+	A job writing `text` as player `userId`'s record, of order `order` (see the header): done
+	without writing when a newer record was written, or is being written, for them. Those written
+	go in `written`.
+]]
+local function playerJob(
+	saves: Saves,
+	world: World,
+	userId: number,
+	text: string,
+	order: number?,
+	written: { [number]: boolean }
+): SaveScheduler.Job
+	local key = string.format("%.0f", userId)
+	local storeKey = WorldMeta.playerKey(world.id, userId)
+	return SaveScheduler.job(storeKey, "set", function(): (boolean, string?)
+		local newest = world.order[key]
+		if order and newest and order < newest then
+			-- (Older than what went out: never written after it.)
+			return true, nil
+		end
+		if order then
+			world.order[key] = order
+		end
+		local ok, err = saves.store.set(storeKey, WorldMeta.playerValue(text), { userId })
+		if ok then
+			if order == nil or world.order[key] == nil or order >= world.order[key] then
+				world.players[key] = text
+				world.meta.players[key] = WorldMeta.valueBytes(text)
+			end
+			written[userId] = true
+		end
+		return ok, err
+	end)
+end
+
+--[[
+	Writes the records of players who left (user id -> PlayerCodec text, `order` as the save's) at
+	once, without the rest of the world (Minecraft saves a player's data when they leave). Only for
+	a world that holds its lock, still (a new world's first save writes them instead). Yields.
+	Returns those written (or already stored).
 ]]
 function WorldStore.savePlayers(
 	saves: Saves,
 	world: World,
 	players: { [number]: string },
-	deadline: number?
+	deadline: number?,
+	order: { [number]: number }?
 ): { [number]: boolean }
 	local written: { [number]: boolean } = {}
-	if not world.canSave or not world.lockHeld then
+	if not world.canSave or not world.lockHeld or not ensureLock(saves, world, deadline) then
 		return written
 	end
 	local jobs: { SaveScheduler.Job } = {}
-	local entries: { { userId: number, key: string, text: string } } = {}
 	for userId, text in players do
 		local key = string.format("%.0f", userId)
 		if world.players[key] ~= text then
-			local storeKey = WorldMeta.playerKey(world.id, userId)
-			table.insert(entries, { userId = userId, key = key, text = text })
-			table.insert(
-				jobs,
-				SaveScheduler.job(storeKey, "set", function(): (boolean, string?)
-					return saves.store.set(storeKey, WorldMeta.playerValue(text), { userId })
-				end)
-			)
+			table.insert(jobs, playerJob(saves, world, userId, text, order and order[userId], written))
 		else
 			written[userId] = true
 		end
 	end
 	run(saves, jobs, deadline)
-	for i, job in jobs do
-		if job.ok then
-			local entry = entries[i]
-			world.players[entry.key] = entry.text
-			world.meta.players[entry.key] = WorldMeta.valueBytes(entry.text)
-			written[entry.userId] = true
-		end
-	end
 	return written
 end
 
@@ -611,35 +764,52 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 		return result
 	end
 
-	-- The lock (a new world's first save takes it).
+	local function refuse(message: string): SaveResult
+		result.refused = true
+		result.message = message
+		return result
+	end
+	-- A world not listed yet: its owner's list must have room (refused whole, nothing written).
+	if not world.listed then
+		local okIndex, value = read(saves, WorldMeta.indexKey(meta.owner), deadline)
+		local index = if okIndex then WorldMeta.readIndex(value) else nil
+		if index and WorldMeta.full(index, world.id) then
+			world.canSave = false
+			world.reason = FULL
+			return refuse(`The world could not be saved: {FULL}`)
+		end
+	end
+	-- The lock (a new world's first save takes it); a held one must still be this server's.
 	if not world.lockHeld then
 		local locked, refusal = WorldStore.lock(saves, world.id, deadline)
 		if not locked then
-			result.refused = true
-			result.message = `The world could not be saved: {refusal}`
 			if refusal == "it is open on another server" then
 				world.canSave = false
 				world.reason = refusal
 			end
-			return result
+			return refuse(`The world could not be saved: {refusal}`)
 		end
 		world.lockHeld = true
+		world.renewedAt = saves.env.now()
+	else
+		local held, why = ensureLock(saves, world, deadline)
+		if not held then
+			return refuse(`The world could not be saved: {why}`)
+		end
 	end
 
 	local store = saves.store
+	local writer = saves.writer
 	-- Players and further parts.
 	local jobs: { SaveScheduler.Job } = {}
 	local partJobs: { [string]: { SaveScheduler.Job } } = {}
+	local order = input.order
 	for _, entry in players do
-		local key = WorldMeta.playerKey(world.id, entry.userId)
 		table.insert(
 			jobs,
-			SaveScheduler.job(key, "set", function(): (boolean, string?)
-				return store.set(key, WorldMeta.playerValue(entry.text), { entry.userId })
-			end)
+			playerJob(saves, world, entry.userId, entry.text, order and order[entry.userId], result.written)
 		)
 	end
-	local playerJobs = #jobs
 	for _, plan in planned do
 		local list: { SaveScheduler.Job } = {}
 		partJobs[plan.name] = list
@@ -647,7 +817,7 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 			local key = WorldMeta.partKey(world.id, plan.name, plan.slot, index)
 			local text = plan.parts[index]
 			local job = SaveScheduler.job(key, "set", function(): (boolean, string?)
-				return store.set(key, WorldMeta.partValue(gen, index, text))
+				return store.set(key, WorldMeta.partValue(gen, index, text, writer))
 			end)
 			table.insert(list, job)
 			table.insert(jobs, job)
@@ -655,15 +825,16 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 	end
 	local first = run(saves, jobs, deadline)
 	result.failed += #first.failed
-	for i = 1, playerJobs do
-		local job = jobs[i]
-		if job.ok then
-			local entry = players[i]
-			world.players[entry.key] = entry.text
-			meta.players[entry.key] = WorldMeta.valueBytes(entry.text)
-			result.written[entry.userId] = true
-			result.playersWritten += 1
-		end
+	for _ in result.written do
+		result.playersWritten += 1
+	end
+
+	-- The lock again before the commit (a long save: still this server's?).
+	local still, lostWhy = ensureLock(saves, world, deadline)
+	if not still then
+		result.failed += 1
+		result.message = `The world could not be saved: {lostWhy}`
+		return result
 	end
 
 	-- Heads (the commit of each region).
@@ -681,7 +852,7 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 			table.insert(
 				heads,
 				SaveScheduler.job(key, "set", function(): (boolean, string?)
-					return store.set(key, WorldMeta.headValue(gen, #plan.parts, plan.slot, plan.parts[1]))
+					return store.set(key, WorldMeta.headValue(gen, #plan.parts, plan.slot, plan.parts[1], writer))
 				end)
 			)
 			table.insert(headPlans, plan)
@@ -699,7 +870,7 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 		end
 	end
 
-	-- The world's record, then its line in the index.
+	-- The world's record, then its line in its owner's list.
 	meta.gen = gen
 	meta.lastPlayed = saves.env.time()
 	meta.sections = input.sections
@@ -709,6 +880,12 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 	local metaJob = SaveScheduler.job(metaKey, "set", function(): (boolean, string?)
 		return store.set(metaKey, stored)
 	end)
+	local held, why = ensureLock(saves, world, deadline)
+	if not held then
+		result.failed += 1
+		result.message = `The world could not be saved: {why}`
+		return result
+	end
 	local third = run(saves, { metaJob }, deadline)
 	result.failed += #third.failed
 	local bytes = WorldMeta.total(meta)
@@ -716,16 +893,27 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 	local entry = WorldMeta.entry(meta, bytes)
 	local indexed = false
 	if metaJob.ok then
-		local ok = update(saves, WorldMeta.INDEX, function(old: unknown): unknown?
+		local full = false
+		local ok = update(saves, WorldMeta.indexKey(meta.owner), function(old: unknown): unknown?
 			local index = WorldMeta.readIndex(old)
 			if index == nil then
 				return nil
 			end
-			return WorldMeta.withEntry(index, entry)
+			local listed = WorldMeta.withEntry(index, entry)
+			full = listed == nil
+			return listed
 		end, deadline)
-		indexed = ok
-		if not ok then
+		indexed = ok and not full
+		if full then
+			-- (Filled meanwhile by another server: this world is not saved again, unlisted.)
+			world.canSave = false
+			world.reason = FULL
 			result.failed += 1
+			result.message = `The world could not be saved: {FULL}`
+		elseif not ok then
+			result.failed += 1
+		else
+			world.listed = true
 		end
 	end
 	saves.known[world.id] = true
@@ -739,8 +927,12 @@ end
 
 --[[ Deleting and renaming ]]
 
--- Deletes world `id` (see the header): true, or false and why not. Yields.
-function WorldStore.delete(saves: Saves, id: string): (boolean, string?)
+--[[
+	Deletes world `id` (see the header) for `who` (nil: the server itself): true, or false and why
+	not. Yields. A world whose record is gone or damaged is deleted from the lists `who` may
+	change (their own, the game's for its own people) where it is listed, and only then.
+]]
+function WorldStore.delete(saves: Saves, id: string, who: WorldMeta.Requester?): (boolean, string?)
 	if not WorldMeta.validId(id) then
 		return false, "there is no such world"
 	end
@@ -748,18 +940,45 @@ function WorldStore.delete(saves: Saves, id: string): (boolean, string?)
 	if not locked then
 		return false, refusal
 	end
-	local _, value = read(saves, WorldMeta.metaKey(id))
-	local meta = WorldMeta.read(value)
-	local ok, err = update(saves, WorldMeta.INDEX, function(old: unknown): unknown?
-		local index = WorldMeta.readIndex(old)
-		if index == nil then
-			return nil
-		end
-		return WorldMeta.without(index, id)
-	end)
-	if not ok then
+	local okMeta, value = read(saves, WorldMeta.metaKey(id))
+	if not okMeta then
 		releaseId(saves, id)
-		return false, `the world list could not be changed ({err})`
+		return false, `its record could not be read ({value})`
+	end
+	local meta = WorldMeta.read(value)
+	local owners: { number } = {}
+	if meta then
+		if not WorldMeta.mayManage(meta.owner, who) then
+			releaseId(saves, id)
+			return false, "it is not yours"
+		end
+		owners = { meta.owner }
+	elseif who == nil then
+		owners = { 0 }
+	else
+		owners = if who.permanent then { who.userId, 0 } else { who.userId }
+	end
+	local listed = false
+	for _, owner in owners do
+		local found = false
+		local ok, err = update(saves, WorldMeta.indexKey(owner), function(old: unknown): unknown?
+			local index = WorldMeta.readIndex(old)
+			if index == nil or WorldMeta.find(index, id) == nil then
+				return nil
+			end
+			found = true
+			return WorldMeta.without(index, id)
+		end)
+		if not ok then
+			releaseId(saves, id)
+			return false, `the world list could not be changed ({err})`
+		end
+		listed = listed or found
+	end
+	if meta == nil and who ~= nil and not listed then
+		-- (Nothing says whose it is: only a world in one's own list is deleted.)
+		releaseId(saves, id)
+		return false, "there is no such world"
 	end
 	saves.known[id] = nil
 	-- Its keys, best effort (what is left is unreachable).
@@ -796,8 +1015,8 @@ function WorldStore.delete(saves: Saves, id: string): (boolean, string?)
 	return true, nil
 end
 
--- Renames world `id` to `name` (cleaned): true, or false and why not. Yields.
-function WorldStore.rename(saves: Saves, id: string, name: string): (boolean, string?)
+-- Renames world `id` to `name` (cleaned) for `who` (as delete): true, or false and why not. Yields.
+function WorldStore.rename(saves: Saves, id: string, name: string, who: WorldMeta.Requester?): (boolean, string?)
 	if not WorldMeta.validId(id) then
 		return false, "there is no such world"
 	end
@@ -806,16 +1025,28 @@ function WorldStore.rename(saves: Saves, id: string, name: string): (boolean, st
 	if not locked then
 		return false, refusal
 	end
+	local owner: number? = nil
+	local refused: string? = nil
 	local ok, err = update(saves, WorldMeta.metaKey(id), function(old: unknown): unknown?
 		local meta = WorldMeta.read(old)
 		if meta == nil then
+			refused = "there is no such world"
+			return nil
+		elseif not WorldMeta.mayManage(meta.owner, who) then
+			refused = "it is not yours"
 			return nil
 		end
+		refused = nil
+		owner = meta.owner
 		meta.name = clean
 		return WorldMeta.stored(meta)
 	end)
+	if ok and refused then
+		releaseId(saves, id)
+		return false, refused
+	end
 	if ok then
-		ok, err = update(saves, WorldMeta.INDEX, function(old: unknown): unknown?
+		ok, err = update(saves, WorldMeta.indexKey(owner), function(old: unknown): unknown?
 			local index = WorldMeta.readIndex(old)
 			local entry = if index then WorldMeta.find(index, id) else nil
 			if index == nil or entry == nil then

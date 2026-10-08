@@ -5,7 +5,7 @@
 	updateFluidHeightAndDoFluidPushing (what touches a body), BaseFireBlock.entityInside (fire
 	blocks), LivingEntity.hurt's cooldown and ItemEntity's health, with the numbers of each fluid's
 	record (Shared/Fluids: lava hurts 4 every 10 ticks and sets burning for 15 s; water puts
-	burning out).
+	burning out, and so does rain: Entity.move's isInWaterRainOrBubble).
 
 	  Touching  `touching(getBlock, box)`: the fluids reaching into a box (a bit per Shared/Fluids
 	            id, `has`), deflated by 0.001 as Minecraft does: a fluid cell overlapping it whose
@@ -36,7 +36,12 @@
 	              5. in a campfire (CampfireBlock.entityInside, always lit here): CAMPFIRE_DAMAGE
 	                 (its fireDamage, 1) half heart, inFire, softened by armor, under the
 	                 cooldown, and nothing more: a campfire sets nobody alight (nor is it in
-	                 BlockTags.FIRE, so it doesn't keep the count above going either).
+	                 BlockTags.FIRE, so it doesn't keep the count above going either);
+	              6. in the rain (the RAIN bit: the caller asks the weather while the player
+	                 burns, `inRain`: at the feet or the top of the box, Entity.isInRain), burning
+	                 is put out (Entity.move, after all of the above: what lava or a fire block set
+	                 this tick goes out too, so a bolt's 8 s of fire never outlast the tick; the
+	                 sizzle only out of fire and lava, as Minecraft's).
 	            Hurts follow LivingEntity.hurt's cooldown: after a hurt lands, for its `damageInterval`
 	            (lava: 10 ticks, half of Minecraft's 20 invulnerable ticks; burning: HURT_COOLDOWN, the
 	            same 10) only a bigger hurt lands, and only by the difference. So lava takes 4 every
@@ -116,13 +121,15 @@ local FIRE_BLOCK = Blocks.id.Fire
 Burning.CAMPFIRE = bit32.lshift(1, 29)
 Burning.CAMPFIRE_DAMAGE = 1
 local CAMPFIRE_BLOCK = Blocks.id.Campfire
+-- The bit a caller sets when it rains on the body (`inRain`).
+Burning.RAIN = bit32.lshift(1, 28)
 
 local fluidHeightLut = Blocks.fluidHeightLut
 local FULL = Blocks.FLUID_FULL
 local blockLut = Fluids.blockLut
 local floor = math.floor
 
-assert(#Fluids.list < 29, "fluid bits must stay below Burning.CAMPFIRE and Burning.FIRE")
+assert(#Fluids.list < 28, "fluid bits must stay below Burning.RAIN, Burning.CAMPFIRE and Burning.FIRE")
 
 -- Per fluid id: does it put burning out, and does it hurt (its record)?
 local EXTINGUISHES = 0
@@ -205,6 +212,21 @@ end
 function Burning.touchingAt(getBlock: GetBlock, x: number, y: number, z: number, width: number, height: number): number
 	local half = width / 2
 	return Burning.touching(getBlock, x - half, y, z - half, x + half, y + height, z + half)
+end
+
+--[[
+	Does it rain on a body `height` tall standing at (x, y, z) (Entity.isInRain: at the cell of the
+	feet or of the top of its box)? `rainingAt` is the weather's (World/WeatherServer.rainingAt).
+]]
+function Burning.inRain(
+	rainingAt: (x: number, y: number, z: number) -> boolean,
+	x: number,
+	y: number,
+	z: number,
+	height: number
+): boolean
+	local cx, cz = floor(x), floor(z)
+	return rainingAt(cx, floor(y), cz) or rainingAt(cx, floor(y + height), cz)
 end
 
 -- The most harmful fluid in `touching` (its record), nil when none hurts.
@@ -334,6 +356,13 @@ function Burning.tickPlayer(
 			landed = Items.damageAfterArmor(landed, armor or 0, toughness or 0)
 		end
 		damage += landed
+	end
+	if bit32.btest(touching, Burning.RAIN) and state.fire > 0 then
+		-- (Entity.move: rain puts it out, whatever set it; the sizzle only out of fire and lava.)
+		state.fire, state.heat = 0, 0
+		if fluid == nil and not bit32.btest(touching, Burning.FIRE) then
+			extinguished = true
+		end
 	end
 	return damage, extinguished, hurtNow
 end

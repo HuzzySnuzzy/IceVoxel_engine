@@ -7,13 +7,16 @@
 	            boxes: anchored, no collision, queries, touches or audio, Config's material,
 	            colour by shade (Color to Dark), see-through by Transparency; rain shafts in
 	            ShaftColor, more see-through, from the ground under them (the generator's height
-	            there, Weather/WeatherState) up to the lowest rain cloud's base.
+	            there, Weather/WeatherState, looked up again at every plan: CloudLod.groundShafts)
+	            up to the lowest rain cloud's base. No clouds at all where the world has no
+	            weather (WeatherState.enabled false: the debug worlds, Config.Weather.Enabled).
 	  Planning  a ring is planned again (CloudLod.plan: the weather sampled with Shared/Weather's
 	            grid at this frame's moment, one call a ring) when the camera has moved two of its
-	            cells in the air's frame (its window changed), every RefreshSeconds x 2^ring (the
-	            storms change slowly), or when the mode or view distance changed; one ring a frame
-	            at most, the finest first, and only once the last plan's parts are all placed.
-	            CloudLod.diff keeps the parts of boxes the new plan shares.
+	            cells in the air's frame (its window changed) or the finer ring's window moved (its
+	            hole: CloudLod.sameWindow), every RefreshSeconds x 2^ring (the storms change
+	            slowly), or when the mode or view distance changed; one ring a frame at most, the
+	            finest first, and only once the last plan's parts are all placed. CloudLod.diff
+	            keeps the parts of boxes the new plan shares.
 	  Budget    at most Clouds.PartsPerFrame parts are placed or removed in a frame: new boxes
 	            nearest first, then the ones the plan dropped (after their replacements, so the
 	            sky never shows a hole); released parts are pooled (unparented) and reused.
@@ -42,9 +45,8 @@ local BLOCK = Config.BlockSize
 
 type Ring = {
 	model: Model,
-	-- The window the ring was planned for, and when (os.clock).
-	u0: number,
-	w0: number,
+	-- The window the ring was planned for (its hole too), and when (os.clock).
+	window: CloudLod.Window?,
 	planned: number,
 	-- Box key -> its part (false: a shaft with no room under its cloud).
 	live: { [string]: BasePart | false },
@@ -94,8 +96,7 @@ local function newRing(level: number): Ring
 	model.Parent = folder
 	return {
 		model = model,
-		u0 = math.huge,
-		w0 = math.huge,
+		window = nil,
 		planned = -math.huge,
 		live = {},
 		adds = {},
@@ -136,17 +137,18 @@ local function release(part: Part)
 	partCount -= 1
 end
 
+-- The generator's ground at (x, z) (a shaft's base: CloudLod.groundShafts).
+local function groundAt(x: number, z: number): number
+	local _, ground = WeatherState.temperatureAt(x, z)
+	return ground
+end
+
 -- Places box `box` of `ring` (returns its part, or false for a shaft with no room).
 local function place(ring: Ring, box: CloudLod.Box): Part | false
 	local clouds = Config.Weather.Clouds
 	local base, top = box.base, box.top
-	if box.shaft then
-		local cx, cz = (box.x0 + box.x1) / 2 + ring.appliedX, (box.z0 + box.z1) / 2 + ring.appliedZ
-		local _, ground = WeatherState.temperatureAt(cx, cz)
-		base = math.max(ground, Config.SeaLevel)
-		if base >= top - 8 then
-			return false
-		end
+	if box.shaft and base >= top - 8 then
+		return false
 	end
 	local part = acquire()
 	part.Size = Vector3.new((box.x1 - box.x0) * BLOCK, (top - base) * BLOCK, (box.z1 - box.z0) * BLOCK)
@@ -181,8 +183,9 @@ local function plan(level: number, ring: Ring, cu: number, cw: number, dx: numbe
 		return out
 	end
 	local boxes = CloudLod.plan(s, pattern :: CloudLod.Pattern, level, cu, cw, sample)
-	local window = CloudLod.window(s, level, cu, cw)
-	ring.u0, ring.w0 = window.u0, window.w0
+	-- (Shafts stand on the ground under where the clouds are now: placed again once it changed.)
+	CloudLod.groundShafts(boxes, groundAt, dx, dz, Config.SeaLevel)
+	ring.window = CloudLod.window(s, level, cu, cw)
 	ring.planned = os.clock()
 	local added, removed = CloudLod.diff(ring.live, boxes)
 	ring.adds, ring.addIndex, ring.removals = added, 1, removed
@@ -238,10 +241,11 @@ local function step()
 		settings = if mode == CloudLod.OFF then nil else CloudLod.settings(mode, view)
 		for _, ring in rings do
 			ring.planned = -math.huge
-			ring.u0 = math.huge
+			ring.window = nil
 		end
 	end
-	local s = settings
+	-- (A world without weather has no clouds: as the Clouds setting's Off.)
+	local s = if WeatherState.enabled() then settings else nil
 	local wanted = if s then CloudLod.levels(s) else 0
 	while #rings < wanted do
 		table.insert(rings, newRing(#rings))
@@ -262,7 +266,7 @@ local function step()
 				continue
 			end
 			local window = CloudLod.window(s, level, cu, cw)
-			if window.u0 ~= ring.u0 or window.w0 ~= ring.w0 or now - ring.planned >= refresh * 2 ^ level then
+			if not CloudLod.sameWindow(ring.window, window) or now - ring.planned >= refresh * 2 ^ level then
 				plan(level, ring, cu, cw, dx, dz)
 				break
 			end

@@ -4,9 +4,13 @@
 	their keys, for World/WorldSave. Pure, so the specs run it. Every record carries a version `v`;
 	one from a newer version is refused, never half read or overwritten.
 
-	  Keys      "index"                         the world list: { v, worlds = { entry } }, an
-	                                            entry per world (id, name, type, seed, game mode,
-	                                            created, last played, bytes), newest first
+	  Keys      "index"                         the game's world list: { v, worlds = { entry } },
+	                                            an entry per world (id, name, type, seed, game
+	                                            mode, owner, created, last played, bytes), last
+	                                            played first: the worlds made with the title
+	                                            screen off (owner 0, the game's)
+	            "index/<userId>"                a player's world list: the worlds they created
+	                                            on the title screen (their owner)
 	            "<id>/meta"                     the world (Meta)
 	            "<id>/lock"                     who has it open (Save/SaveLock)
 	            "<id>/r/<rx>_<rz>"              a region's head: its first part and how many
@@ -17,15 +21,23 @@
 	            stays far below the 50 characters a DataStore key may have.
 	  Meta      v, id, name, worldType, options (WorldTypes.encodeOptions), seed (its digits:
 	            Minecraft's /seed text, exact to 2^53, where JSON numbers may not be), difficulty,
-	            gameMode (new players'), allowCommands, created and lastPlayed (os.time), gen (the
-	            saves made), regions (name -> bytes stored), players (user id -> bytes),
+	            gameMode (new players'), allowCommands, owner (the user id of the player who
+	            created it on the title screen; 0: the game's), created and lastPlayed (os.time),
+	            gen (the saves made), regions (name -> bytes stored), players (user id -> bytes),
 	            operators (user ids: the world's op list), sections (name -> a value other parts
 	            of the game keep with the world: `registerSection`, the clock, the weather).
-	  Regions   a head is { v, gen, parts, slot, d }, a further part { v, gen, i, d }; `d` is
-	            base85 text. Parts 2.. are written before the head and the head last, in the
-	            slot the last save did not use (0 or 1), so the head is the save's commit: until
-	            it is written, the old head still names the old slot's parts, which are intact.
-	            A head whose parts carry another `gen` is a damaged save.
+	  Owners    a world is listed in its owner's list only, and only its owner or the game's own
+	            people (`mayManage`: Config.Gameplay.Admins, the game's owner, Studio) may load,
+	            rename or delete it: a stranger first into an empty server (its operator until
+	            the world exists) sees and touches only worlds they made. A list holds at most
+	            MAX_WORLDS; a new world past that is refused (`withEntry`), never one dropped.
+	  Regions   a head is { v, gen, w, parts, slot, d }, a further part { v, gen, w, i, d }; `d`
+	            is base85 text, `w` the writing server's tag (`writerTag`: two servers that both
+	            believe they hold the world never number their saves alike). Parts 2.. are
+	            written before the head and the head last, in the slot the last save did not use
+	            (0 or 1), so the head is the save's commit: until it is written, the old head
+	            still names the old slot's parts, which are intact. A head whose parts carry
+	            another `gen` or `w` is a damaged save (refused, never joined).
 	  Sizes     a key counts its JSON: the text plus the record around it (VALUE_OVERHEAD, a
 	            generous 96 characters). A world's bytes are its meta, regions and players.
 ]]
@@ -48,6 +60,8 @@ export type Meta = {
 	difficulty: number,
 	gameMode: string,
 	allowCommands: boolean,
+	-- The user id of the player who created it (0: the game's).
+	owner: number,
 	created: number,
 	lastPlayed: number,
 	gen: number,
@@ -63,6 +77,7 @@ export type Entry = {
 	worldType: string,
 	seed: string,
 	gameMode: string,
+	owner: number,
 	created: number,
 	lastPlayed: number,
 	bytes: number,
@@ -70,7 +85,10 @@ export type Entry = {
 
 export type Index = { v: number, worlds: { Entry } }
 
-export type Head = { gen: number, parts: number, slot: number, text: string }
+export type Head = { gen: number, writer: string, parts: number, slot: number, text: string }
+
+-- Who asks to load, rename or delete a world (nil: the server itself, the boot's LoadLatest).
+export type Requester = { userId: number, permanent: boolean }
 
 local WorldMeta = {}
 
@@ -78,10 +96,18 @@ WorldMeta.VERSION = 1
 -- Characters a stored value takes besides its text (the JSON record around it).
 WorldMeta.VALUE_OVERHEAD = 96
 WorldMeta.INDEX = "index"
--- Most worlds the index lists (the oldest beyond it are dropped from the list, not deleted).
+-- Most worlds a list holds (a new world past it is refused: none is ever dropped).
 WorldMeta.MAX_WORLDS = 200
 
 --[[ Keys ]]
+
+-- The key of `owner`'s world list (0: the game's, "index").
+function WorldMeta.indexKey(owner: number?): string
+	if owner == nil or owner == 0 then
+		return WorldMeta.INDEX
+	end
+	return `{WorldMeta.INDEX}/{string.format("%.0f", owner)}`
+end
 
 function WorldMeta.metaKey(id: string): string
 	return `{id}/meta`
@@ -125,10 +151,50 @@ function WorldMeta.newId(random: () -> number, taken: { [string]: boolean }?): s
 	error("no free world id")
 end
 
+-- A user id as an owner (0 for nothing that is one).
+local function ownerOf(value: unknown): number
+	if type(value) == "number" and value == value and math.abs(value) ~= math.huge and value == math.floor(value) then
+		return value
+	end
+	return 0
+end
+
+--[[
+	May `who` load, rename or delete a world of `owner` (see the header)? nil `who` is the server
+	itself (always); a player only their own worlds, unless they are one of the game's own people.
+]]
+function WorldMeta.mayManage(owner: number, who: Requester?): boolean
+	if who == nil or who.permanent then
+		return true
+	end
+	return owner ~= 0 and owner == who.userId
+end
+
+--[[
+	A short tag of the server `job` writing a world (FNV-1a of its JobId in base 36): a save's
+	heads and parts carry it, so two servers' saves of the same `gen` never pass for one.
+]]
+function WorldMeta.writerTag(job: string): string
+	local hash = 2166136261
+	for i = 1, #job do
+		hash = bit32.bxor(hash, string.byte(job, i))
+		-- (x 16777619, kept to 32 bits without losing precision: 2^24 + 403.)
+		hash = (bit32.lshift(hash, 24) + hash * 403) % 4294967296
+	end
+	local digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+	local out = {}
+	repeat
+		local d = hash % 36
+		table.insert(out, 1, string.sub(digits, d + 1, d + 1))
+		hash = hash // 36
+	until hash == 0
+	return table.concat(out)
+end
+
 --[[ Meta ]]
 
--- A new world's record.
-function WorldMeta.new(id: string, settings: WorldSettings.Settings, now: number): Meta
+-- A new world's record (`owner`: its creator's user id; 0 or nil: the game's).
+function WorldMeta.new(id: string, settings: WorldSettings.Settings, now: number, owner: number?): Meta
 	return {
 		v = WorldMeta.VERSION,
 		id = id,
@@ -139,6 +205,7 @@ function WorldMeta.new(id: string, settings: WorldSettings.Settings, now: number
 		difficulty = settings.difficulty,
 		gameMode = settings.gameMode,
 		allowCommands = settings.allowCommands,
+		owner = ownerOf(owner),
 		created = now,
 		lastPlayed = now,
 		gen = 0,
@@ -216,6 +283,7 @@ function WorldMeta.read(value: unknown): (Meta?, string?)
 		difficulty = math.clamp(math.floor(number(stored.difficulty) or 2), 0, 3),
 		gameMode = if GameMode.isValid(stored.gameMode) then stored.gameMode else GameMode.SURVIVAL,
 		allowCommands = stored.allowCommands == true,
+		owner = ownerOf(stored.owner),
 		created = number(stored.created) or 0,
 		lastPlayed = number(stored.lastPlayed) or 0,
 		gen = math.max(0, math.floor(number(stored.gen) or 0)),
@@ -263,6 +331,7 @@ function WorldMeta.stored(meta: Meta): { [string]: any }
 		difficulty = meta.difficulty,
 		gameMode = meta.gameMode,
 		allowCommands = meta.allowCommands,
+		owner = meta.owner,
 		created = meta.created,
 		lastPlayed = meta.lastPlayed,
 		gen = meta.gen,
@@ -322,12 +391,17 @@ end
 
 --[[ Region values ]]
 
-function WorldMeta.headValue(gen: number, parts: number, slot: number, text: string): { [string]: any }
-	return { v = WorldMeta.VERSION, gen = gen, parts = parts, slot = slot, d = text }
+-- `writer`: the writing server's tag (`writerTag`).
+function WorldMeta.headValue(gen: number, parts: number, slot: number, text: string, writer: string?): { [string]: any }
+	return { v = WorldMeta.VERSION, gen = gen, w = writer or "", parts = parts, slot = slot, d = text }
 end
 
-function WorldMeta.partValue(gen: number, index: number, text: string): { [string]: any }
-	return { v = WorldMeta.VERSION, gen = gen, i = index, d = text }
+function WorldMeta.partValue(gen: number, index: number, text: string, writer: string?): { [string]: any }
+	return { v = WorldMeta.VERSION, gen = gen, w = writer or "", i = index, d = text }
+end
+
+local function writerOf(value: unknown): string
+	return if type(value) == "string" then value else ""
 end
 
 -- A region's head, or nil and why not.
@@ -348,16 +422,21 @@ function WorldMeta.readHead(value: unknown): (Head?, string?)
 	elseif type(stored.d) ~= "string" then
 		return nil, "damaged region"
 	end
-	return { gen = gen, parts = parts, slot = slot :: number, text = stored.d }, nil
+	return { gen = gen, writer = writerOf(stored.w), parts = parts, slot = slot :: number, text = stored.d }, nil
 end
 
--- Part `index` of a region whose head says `gen`: its text, or nil and why not.
-function WorldMeta.readPart(value: unknown, gen: number, index: number): (string?, string?)
+-- Part `index` of a region whose head says `gen` and `writer`: its text, or nil and why not.
+function WorldMeta.readPart(value: unknown, gen: number, index: number, writer: string?): (string?, string?)
 	if type(value) ~= "table" then
 		return nil, "region part missing"
 	end
 	local stored = value :: { [string]: any }
-	if number(stored.v) ~= WorldMeta.VERSION or number(stored.gen) ~= gen or number(stored.i) ~= index then
+	if
+		number(stored.v) ~= WorldMeta.VERSION
+		or number(stored.gen) ~= gen
+		or number(stored.i) ~= index
+		or writerOf(stored.w) ~= (writer or "")
+	then
 		return nil, "region part from another save"
 	elseif type(stored.d) ~= "string" then
 		return nil, "damaged region part"
@@ -408,6 +487,7 @@ function WorldMeta.readIndex(value: unknown): (Index?, string?)
 					worldType = if type(entry.worldType) == "string" then entry.worldType else WorldTypes.DEFAULT,
 					seed = if type(entry.seed) == "string" then entry.seed else "0",
 					gameMode = if GameMode.isValid(entry.gameMode) then entry.gameMode else GameMode.SURVIVAL,
+					owner = ownerOf(entry.owner),
 					created = number(entry.created) or 0,
 					lastPlayed = number(entry.lastPlayed) or 0,
 					bytes = number(entry.bytes) or 0,
@@ -426,6 +506,7 @@ function WorldMeta.entry(meta: Meta, bytes: number): Entry
 		worldType = meta.worldType,
 		seed = meta.seed,
 		gameMode = meta.gameMode,
+		owner = meta.owner,
 		created = meta.created,
 		lastPlayed = meta.lastPlayed,
 		bytes = bytes,
@@ -442,8 +523,19 @@ local function sortWorlds(worlds: { Entry })
 	end)
 end
 
--- The index with `entry` in place of the world of its id (or added), at most MAX_WORLDS.
-function WorldMeta.withEntry(index: Index, entry: Entry): Index
+-- Is the list full for world `id` (not in it, and MAX_WORLDS others are)?
+function WorldMeta.full(index: Index, id: string): boolean
+	return WorldMeta.find(index, id) == nil and #index.worlds >= WorldMeta.MAX_WORLDS
+end
+
+--[[
+	The index with `entry` in place of the world of its id (or added), or nil when the list is
+	full for it (`full`: no world is ever dropped to make room).
+]]
+function WorldMeta.withEntry(index: Index, entry: Entry): Index?
+	if WorldMeta.full(index, entry.id) then
+		return nil
+	end
 	local worlds: { Entry } = { entry }
 	for _, other in index.worlds do
 		if other.id ~= entry.id then
@@ -451,9 +543,6 @@ function WorldMeta.withEntry(index: Index, entry: Entry): Index
 		end
 	end
 	sortWorlds(worlds)
-	while #worlds > WorldMeta.MAX_WORLDS do
-		table.remove(worlds)
-	end
 	return { v = WorldMeta.VERSION, worlds = worlds }
 end
 
