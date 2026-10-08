@@ -502,14 +502,16 @@ local Config = {
 		-- it is lighter), within Radius blocks, only where it rains (not in snow or deserts). A
 		-- strike hurts the living within 3 blocks by Damage half hearts and sets them burning for
 		-- BurnSeconds, and lights fires by Minecraft's rules (with doFireTick:
-		-- Server.Fire.Tick). Clients within Distance blocks see the bolt and hear the thunder.
+		-- Server.Fire.Tick). Clients within Distance blocks are told (17 bytes a strike; 4096 is
+		-- Ultra's view, so a storm where players stand is seen from as far as any view reaches):
+		-- each sees the bolt within its view distance and hears it within Distant.Hearing.
 		Lightning = {
 			Enabled = true,
 			MeanSeconds = 20,
 			Radius = 64,
 			Damage = 5,
 			BurnSeconds = 8,
-			Distance = 1024,
+			Distance = 4096,
 		},
 		-- Fog distance factor at full rain, snow and thunder (client: the haze comes closer, as a
 		-- denser Atmosphere: Rendering/AtmosphereModel).
@@ -614,13 +616,88 @@ local Config = {
 		},
 		-- Lightning on the client (Weather/LightningView): the bolt's colour, its glow, the flash of
 		-- the sky (ColorCorrection brightness at the strike, less with distance and indoors) and
-		-- the light at the struck point; thunder within Distance (above) is heard ThunderDelay
-		-- (Shared/Weather.thunderDelay) later.
+		-- the light at the struck point; thunder is heard Shared/Weather.thunderDelay (SoundSpeed)
+		-- later. Strikes farther than Distant.Near are drawn and heard as distant ones (below).
 		Bolt = {
 			Color = { 214, 220, 255 },
 			Glow = 0.75,
 			Flash = 0.45,
 			LightRange = 60,
+		},
+		--[[
+			Distant storms (client Weather/DistantStorms, Weather/StormView, Weather/LightningView):
+			lightning each client works out for itself from the weather field, the same flashes on
+			every client with nothing sent (a hash of the world seed, a Cell-block cell and a
+			Period-second slot of the server's clock), so a thunderstorm on the horizon flickers and
+			rumbles. Rate: flashes a minute per km^2 of full thunder, none below MinThunder (the
+			clouds' first tower step; seed 12345's median 2 km view with thunder in it holds 0.38
+			km^2 of it: a flash every 13 s); GroundShare of them bolts to the ground (only where it
+			rains), the rest in the cloud. At most PerMinute in reach (FastPerMinute with Clouds on
+			Fast; Off: none at all); no bolt within MinDistance of anyone or Lightning.Radius +
+			Margin of a player in thunder (the server's strikes are there): those flash in the
+			cloud. Sampling: CellsPerFrame cells of the grid a frame (all of it within a period).
+			Seen out to the view distance (Bolts / FastBolts bolts, Glows flashes at once; bolts
+			about two pixels wide at any distance, PixelWidth blocks per block away, and up to
+			MaxBrightness times as bright as the haze needs (Beam.Brightness); Glow: how far the
+			lit clouds go towards the bolt's colour, GlowParts parts within GlowRadius blocks); the
+			sky's flash weakens with distance and to DayFlash by day, InCloudFlash for a flash in
+			the cloud. Heard out to Hearing blocks (MobileHearing on phones; MaxReach: no
+			flashes made farther): half as loud at HalfVolume blocks (InCloudVolume for a flash in
+			the cloud), up to Deepen lower (and longer) at the edge, muffled from Near on by an
+			equalizer (High and Mid dB less every 256 blocks, down to HighFloor / MidFloor; Low dB
+			more by 1024), an echo from Echo.From blocks (Volume, Pitch, Delay seconds later); at
+			most Voices distant sounds at once (MobileVoices on phones), the quietest giving way.
+			Rain: a hiss of the rain around (Rings blocks out in Directions directions, Half: blocks
+			at which it counts half), Volume at full rain, muffled by Muffle (dB), Smoothing
+			seconds to follow, sampled every Interval s; it fades as the rain here takes over.
+		]]
+		Distant = {
+			Enabled = true,
+			Rate = 12,
+			MinThunder = 0.15,
+			GroundShare = 0.3,
+			PerMinute = 24,
+			FastPerMinute = 12,
+			Cell = 128,
+			Period = 2,
+			CellsPerFrame = 128,
+			MinDistance = 64,
+			Margin = 32,
+			MaxReach = 4096,
+			Near = 256,
+			Bolts = 3,
+			FastBolts = 2,
+			Glows = 4,
+			PixelWidth = 0.0023,
+			MaxBrightness = 20,
+			Glow = 0.85,
+			GlowParts = 6,
+			GlowRadius = 96,
+			DayFlash = 0.3,
+			InCloudFlash = 0.5,
+			Hearing = 2048,
+			MobileHearing = 1024,
+			HalfVolume = 700,
+			InCloudVolume = 0.7,
+			Deepen = 0.25,
+			High = 10,
+			HighFloor = 40,
+			Mid = 2.5,
+			MidFloor = 15,
+			Low = 2,
+			Echo = { From = 768, Volume = 0.55, Pitch = 0.92, Delay = { 0.8, 1.8 } },
+			Voices = 3,
+			MobileVoices = 2,
+			Rain = {
+				Enabled = true,
+				Rings = { 24, 56, 104, 168 },
+				Directions = 8,
+				Half = 64,
+				Volume = 0.6,
+				Muffle = { Low = 0, Mid = -4, High = -14 },
+				Smoothing = 1.2,
+				Interval = 0.25,
+			},
 		},
 		-- The maps' weather mode (Map/WeatherLayer): grid cells across at most (minimap, world map),
 		-- seconds before a picture is drawn again, biome lookups for snow per frame, cells painted

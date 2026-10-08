@@ -438,7 +438,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, which the
   rain it strikes in puts out at once: Minecraft's), on a tower or a pillar too. Rain puts out
   any burning player or mob, as water does. Players together share their sky: eight at one base
-  see the strikes one would, not eight times as many.
+  see the strikes one would, not eight times as many, and every player sees and hears those
+  strikes from as far as their view reaches.
   `/weather clear|rain|thunder [duration]` blends the whole world into that weather over 5 s
   (from whatever it was, however quickly the commands come), and
   `/gamerule doWeatherCycle false` stops the storms where they are, as in Minecraft. A saved world
@@ -461,6 +462,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   much is drawn; F3 shows the weather where you stand. Measured on seed 12345: about 200 cloud
   parts at the default view (at most ~390, a third of them rain shafts), ~40 on a phone (Low:
   Fast, 512 blocks), placed at most 48 a frame.
+- **Distant storms.** A thunderstorm far off is seen and heard, not only the one you stand in
+  (Minecraft has no weather far off). Its towers flicker as lightning lights them from inside, and
+  bolts reach from its cloud base to the ground (about 3 in 10 flashes, only where rain falls),
+  drawn about two pixels wide and bright enough to show through the haze out to the render
+  distance, with a fainter flash of the sky (fainter still by day). Thunder rolls in later the
+  farther it is (6 s from 2 km), quieter, lower, longer and muffled (an equalizer takes the highs
+  first, as the air does) out to 2048 blocks (1024 on phones); past that a storm on Ultra's
+  4096-block view flickers silently, as heat lightning. Every client works the flashes out from
+  the seed, the weather and the server's clock, so everyone sees the same lightning with nothing
+  sent: 12 flashes a minute per km² of full thunder (a storm in view flashes every few seconds,
+  a big one twice a second), at most 24 a minute in all (12 on Fast clouds, none with clouds
+  Off), never a bolt within 64 blocks of a player or near one standing in thunder (the server's
+  real strikes are there). Rain falling nearby but not on you is heard as a soft, muffled hiss
+  from its side that gives way to the rain's own sound as it arrives. F3 shows the flashes a
+  minute in reach, those shown and the distant sounds playing. Cost: a 35 × 35 grid of the
+  weather sampled every 2 s, a band a frame (about 0.2 ms a frame for ten frames, interpreted),
+  and a plan of each 2 s (0.04 ms in a clear sky, under 2 ms in thunder everywhere).
 - **The weather map.** `B` (or the cloud button on the minimap or the world map, the way in on a
   touch screen) lays the weather over both maps: rain in blue, snow in white, thunderstorms purple
   with yellow lightning, clouds as a grey veil, the wind with an arrow. The world map forecasts:
@@ -1188,8 +1206,10 @@ The other new options, each Minecraft's:
 - Clouds and Weather (Minecraft keeps Clouds on its Video Settings, which is full here, and draws
   rain and snow by its Graphics setting): Fancy clouds are boxes with storm towers and rain
   shafts, Fast a flat layer of bigger cells; Fancy rain and snow fall within 10 blocks, Fast
-  within 5. OFF draws none; the sounds, the darker light and the haze stay. The Low preset (phones)
-  sets both to Fast, the others to Fancy.
+  within 5. OFF draws none; the sounds, the darker light and the haze stay. Distant storms'
+  lightning follows Clouds: Fast shows half as many flashes and fewer bolts at once, OFF none
+  (the server's real strikes still show). The Low preset (phones) sets both to Fast, the others
+  to Fancy.
 - Not here: Auto-Jump (the 1 1/16-block step height already walks up blocks without jumping),
   Toggle Perspective and Hide GUI (the game has no such keys), Show Subtitles.
 
@@ -1787,7 +1807,7 @@ for performance:
 | `Weather.BlendSeconds`    | 5       | Seconds a `/weather` override blends in and out (Minecraft's 5).    |
 | `Weather.ClearStartSeconds` | 300   | A new world's weather starts where its spawn stays dry this long.   |
 | `Weather.Lightning.Enabled` / `MeanSeconds` / `Radius` | true / 20 / 64 | Strikes near players in thunderstorms: one every MeanSeconds at full thunder, within Radius blocks. |
-| `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 1024 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance see and hear it. |
+| `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 4096 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance are told (they see it within their view and hear it within `Distant.Hearing`). |
 | `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog at full rain, snow and thunder: the old view fog's distance this share as far; the Atmosphere's density for a view this share to `Lighting.Atmosphere.WeatherPower` as far. |
 | `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
 | `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the streaks' Texture (a stand-in: swap in your own), Length, Width, Speed, Color, Transparency. |
@@ -1801,6 +1821,16 @@ for performance:
 | `Weather.Sky.CoverSun` / `Saturation` / `ThunderSaturation` / `Contrast` / `Tint` / `Smoothing` | 0.3 / 0.28 / 0.18 / 0.08 / cool / 1.5 | The sun hidden at full cover; the picture's greying, flattening and tint in rain and thunder; seconds the light takes to follow. |
 | `Weather.Sky.Haze` / `ThunderHaze` | 1.8 / 1 | Atmosphere Haze added at full rain or snow, and more at full thunder (the horizon greys over). |
 | `Weather.Bolt.Color` / `Glow` / `Flash` / `LightRange` | pale blue / 0.75 / 0.45 / 60 | The bolt's colour and glow, the sky's flash, the struck point's light (studs). |
+| `Weather.Distant.Enabled` / `Rate` / `MinThunder` / `GroundShare` | true / 12 / 0.15 / 0.3 | Distant storms' lightning: flashes a minute per km² of full thunder (none below MinThunder), the share that are bolts to the ground (the rest light the cloud). |
+| `Weather.Distant.PerMinute` / `FastPerMinute` | 24 / 12 | Most distant flashes a minute in reach (Fancy / Fast clouds; Off: none). |
+| `Weather.Distant.Cell` / `Period` / `CellsPerFrame` / `MaxReach` | 128 / 2 / 128 / 4096 | The schedule's cells (blocks) and periods (s), grid cells sampled a frame, the farthest a flash is made. |
+| `Weather.Distant.MinDistance` / `Margin` / `Near` | 64 / 32 / 256 | No distant bolt within MinDistance of anyone or `Lightning.Radius` + Margin of a player in thunder; strikes farther than Near are drawn and heard as distant ones. |
+| `Weather.Distant.Bolts` / `FastBolts` / `Glows` / `GlowParts` / `GlowRadius` / `Glow` | 3 / 2 / 4 / 6 / 96 / 0.85 | Far bolts and distant flashes at once; cloud parts a flash lights, within how many blocks, and how far towards the bolt's colour. |
+| `Weather.Distant.PixelWidth` / `MaxBrightness` / `DayFlash` / `InCloudFlash` | 0.0023 / 20 / 0.3 / 0.5 | A far bolt's width per block away (about 2 pixels), its most Beam.Brightness against the haze; the sky's flash by day and for an in-cloud flash. |
+| `Weather.Distant.Hearing` / `MobileHearing` / `HalfVolume` / `InCloudVolume` / `Deepen` | 2048 / 1024 / 700 / 0.7 / 0.25 | How far distant thunder is heard, where it is half as loud, an in-cloud flash's share, how much lower at the edge. |
+| `Weather.Distant.High` / `HighFloor` / `Mid` / `MidFloor` / `Low` / `Echo` | 10 / 40 / 2.5 / 15 / 2 / from 768 | Its muffling: dB less every 256 blocks past Near (highs, mids, down to their floors), dB more lows by 1024; one echo from Echo.From blocks. |
+| `Weather.Distant.Voices` / `MobileVoices` | 3 / 2 | Distant sounds at once (the quietest gives way). |
+| `Weather.Distant.Rain` | 4 rings to 168 blocks, 8 directions, volume 0.6 | The hiss of rain nearby: where it is listened for, Half (blocks at which it counts half), Volume, Muffle (dB), Smoothing, Interval. |
 | `Weather.Map.MiniCells` / `WorldCells` / `RefreshSeconds` / `CellsPerFrame` | 48 / 96 / 3 / 1536 | The weather map's cells across (minimap, world map), seconds before a picture is drawn again, cells painted a frame. |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
 | `Lighting.Enabled`        | true    | false leaves Lighting to the place, its own Atmosphere and Sky too (only the sun moves; the music and cave moods still follow the light). The project's Atmosphere (attribute `IceVoxel`) is taken out then, so the old view fog follows the view, the weather and the Fog setting. |
@@ -1888,7 +1918,9 @@ get-up rustle (chest lids, armor), free-fall wind (a cave mood that fails to loa
 explosion, `oof`, `ouch` and the volume slider's tick; the jump sound is unused), as stand-ins
 told apart by pitch (the weather's too: `weather.rain` and `weather.rain.above` are the wind
 pitched into a hiss, `entity.lightning_bolt.thunder` and `entity.lightning_bolt.impact` the
-explosion pitched down; each client plays them by itself). To use your own, add a Folder named `IceVoxelSounds` to SoundService
+explosion pitched down; the distant storms' `entity.lightning_bolt.thunder.far` (a Sound named
+`entity.lightning_bolt.thunder` serves it too) and `weather.rain.far` (looped) the same, lower
+and muffled; each client plays them by itself). To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
 
 ```

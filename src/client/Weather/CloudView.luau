@@ -25,6 +25,15 @@
 	            displacement now every 0.1 x 2^ring seconds: the clouds drift with the weather's
 	            wind (a step of a few hundredths of a block near the camera), far rings less often.
 
+	  Flashes   lightning lights the clouds over it (Weather/LightningView: `glow`, `light`,
+	            `unglow`): at most Config.Weather.Distant.Glows flashes at once, each taking up to
+	            GlowParts cloud parts (not shafts) of the finest ring with any within GlowRadius
+	            blocks, nearest first, none another flash has; `light` turns them towards the
+	            bolt's colour and Neon (so they glow at night) only when its amount changes, and
+	            only while each still shows its box. A part let go while lit is a cloud again
+	            when it is used next (`release`). `base` is the cloud's base over a point, where a
+	            far bolt ends.
+
 	Measured on seed 12345 (tests/spec/WeatherVisuals, two in-game days at the spawn and 3 km out):
 	Fancy at the default view (2048 blocks, 5 rings) 202 parts on average, 387 at most (122 of
 	them rain shafts); Fancy at Ultra's 4096 (6 rings): 325, 496; Fancy at 1024: 140, 238; Fast at
@@ -48,8 +57,9 @@ type Ring = {
 	-- The window the ring was planned for (its hole too), and when (os.clock).
 	window: CloudLod.Window?,
 	planned: number,
-	-- Box key -> its part (false: a shaft with no room under its cloud).
+	-- Box key -> its part (false: a shaft with no room under its cloud), and its box.
 	live: { [string]: BasePart | false },
+	boxes: { [string]: CloudLod.Box },
 	adds: { CloudLod.Box },
 	addIndex: number,
 	removals: { string },
@@ -76,6 +86,21 @@ local palette: { Color3 } = {}
 local partCount = 0
 local gridBuffer: buffer? = nil
 
+-- A flash lighting the clouds (`glow`): the parts it lights, with their rings, keys and colours,
+-- and how much it lights them now.
+type Glow = {
+	busy: boolean,
+	amount: number,
+	parts: { BasePart },
+	rings: { Ring },
+	keys: { string },
+	colours: { Color3 },
+}
+local glows: { Glow } = {}
+-- Parts some flash lights, and which (their material is the cloud's again when they are let go).
+local lit: { [BasePart]: number } = {}
+local cloudMaterial: Enum.Material = Enum.Material.SmoothPlastic
+
 local function colourOf(rgb: { number }): Color3
 	return Color3.fromRGB(rgb[1], rgb[2], rgb[3])
 end
@@ -99,6 +124,7 @@ local function newRing(level: number): Ring
 		window = nil,
 		planned = -math.huge,
 		live = {},
+		boxes = {},
 		adds = {},
 		addIndex = 1,
 		removals = {},
@@ -123,8 +149,7 @@ local function acquire(): Part
 	fresh.CastShadow = clouds.CastShadow
 	fresh.TopSurface = Enum.SurfaceType.Smooth
 	fresh.BottomSurface = Enum.SurfaceType.Smooth
-	local material = (Enum.Material :: any)[clouds.Material]
-	fresh.Material = if material then material else Enum.Material.SmoothPlastic
+	fresh.Material = cloudMaterial
 	pcall(function()
 		(fresh :: any).AudioCanCollide = false
 	end)
@@ -132,6 +157,11 @@ local function acquire(): Part
 end
 
 local function release(part: Part)
+	if lit[part] then
+		-- (A flash let go of it: a cloud again when it is used next.)
+		lit[part] = nil
+		part.Material = cloudMaterial
+	end
 	part.Parent = nil
 	table.insert(pool, part)
 	partCount -= 1
@@ -208,6 +238,7 @@ local function apply(ring: Ring, budget: number): number
 		ring.addIndex += 1
 		if ring.live[box.key] == nil then
 			ring.live[box.key] = place(ring, box)
+			ring.boxes[box.key] = box
 			budget -= 1
 		end
 	end
@@ -218,6 +249,7 @@ local function apply(ring: Ring, budget: number): number
 		local key = table.remove(ring.removals) :: string
 		local part = ring.live[key]
 		ring.live[key] = nil
+		ring.boxes[key] = nil
 		if part then
 			release(part :: Part)
 			budget -= 1
@@ -303,6 +335,146 @@ function CloudView.setMode(value: number)
 	mode = math.clamp(math.floor(value), CloudLod.OFF, CloudLod.FANCY)
 end
 
+-- The Clouds setting now.
+function CloudView.mode(): number
+	return mode
+end
+
+-- The base (blocks) of the cloud over (x, z) now (CloudLod.heights by the weather there); nil
+-- without clouds (Off, or no weather).
+function CloudView.base(x: number, z: number): number?
+	local s = settings
+	if s == nil or not WeatherState.enabled() then
+		return nil
+	end
+	local p, t = WeatherState.at(x, z)
+	local base = CloudLod.heights(s, p, t)
+	return base
+end
+
+-- How far (blocks) point (u, w) is from box `box`'s rectangle (0 inside).
+local function outside(box: CloudLod.Box, u: number, w: number): number
+	local du = math.max(box.x0 - u, 0, u - box.x1)
+	local dw = math.max(box.z0 - w, 0, w - box.z1)
+	return math.sqrt(du * du + dw * dw)
+end
+
+--[[
+	A flash in the clouds over world point (x, z) (blocks): takes the cloud parts (not shafts) of
+	the finest ring that has any within Distant.GlowRadius of it, at most GlowParts of them,
+	nearest first, none another flash lights. Returns its handle for `light` and `unglow` (nil
+	when no cloud is near, or Distant.Glows flashes light clouds already).
+]]
+function CloudView.glow(x: number, z: number): number?
+	local distant = Config.Weather.Distant
+	local slot: Glow? = nil
+	local handle = 0
+	for i = 1, distant.Glows do
+		local glow = glows[i]
+		if glow == nil then
+			glow = { busy = false, amount = 0, parts = {}, rings = {}, keys = {}, colours = {} }
+			glows[i] = glow
+		end
+		if not glow.busy then
+			slot, handle = glow, i
+			break
+		end
+	end
+	if slot == nil then
+		return nil
+	end
+	local most, radius = distant.GlowParts, distant.GlowRadius
+	local distances: { number } = {}
+	for _, ring in rings do
+		local u, w = x - ring.appliedX, z - ring.appliedZ
+		for key, box in ring.boxes do
+			local part = ring.live[key]
+			if box.shaft or not part or lit[part :: BasePart] then
+				continue
+			end
+			local away = outside(box, u, w)
+			if away > radius or (#distances >= most and away >= distances[#distances]) then
+				continue
+			end
+			-- (Kept nearest first, at most `most`.)
+			local at = #distances + 1
+			while at > 1 and distances[at - 1] > away do
+				at -= 1
+			end
+			table.insert(distances, at, away)
+			table.insert(slot.parts, at, part :: BasePart)
+			table.insert(slot.rings, at, ring)
+			table.insert(slot.keys, at, key)
+			table.insert(slot.colours, at, palette[box.shade])
+			if #distances > most then
+				table.remove(distances)
+				table.remove(slot.parts)
+				table.remove(slot.rings)
+				table.remove(slot.keys)
+				table.remove(slot.colours)
+			end
+		end
+		if #slot.parts > 0 then
+			break
+		end
+	end
+	if #slot.parts == 0 then
+		return nil
+	end
+	for _, part in slot.parts do
+		lit[part] = handle
+	end
+	slot.busy, slot.amount = true, 0
+	return handle
+end
+
+--[[
+	Lights flash `handle`'s clouds by `amount` (0: their own colour .. 1: the bolt's, Neon so they
+	glow at night too); 0 puts them back. Writes only when the amount changed, and only to parts
+	still showing their box.
+]]
+function CloudView.light(handle: number, amount: number)
+	local glow = glows[handle]
+	if glow == nil or not glow.busy or glow.amount == amount then
+		return
+	end
+	glow.amount = amount
+	local bolt = Config.Weather.Bolt.Color
+	local flash = Color3.fromRGB(bolt[1], bolt[2], bolt[3])
+	for i, part in glow.parts do
+		-- (Only the parts still showing their box, and still this flash's.)
+		if glow.rings[i].live[glow.keys[i]] ~= part or lit[part] ~= handle then
+			continue
+		end
+		if amount > 0 then
+			part.Color = glow.colours[i]:Lerp(flash, amount)
+			part.Material = Enum.Material.Neon
+		else
+			part.Color = glow.colours[i]
+			part.Material = cloudMaterial
+		end
+	end
+end
+
+-- Ends flash `handle`: its clouds as they were.
+function CloudView.unglow(handle: number)
+	local glow = glows[handle]
+	if glow == nil or not glow.busy then
+		return
+	end
+	CloudView.light(handle, 0)
+	for _, part in glow.parts do
+		if lit[part] == handle then
+			lit[part] = nil
+		end
+	end
+	glow.busy = false
+	table.clear(glow.parts)
+	table.clear(glow.rings)
+	table.clear(glow.keys)
+	table.clear(glow.colours)
+end
+
 -- Cloud parts on screen, rings and parts still to place or remove (F3).
 function CloudView.stats(): (number, number, number)
 	local waiting = 0
@@ -317,6 +489,8 @@ end
 function CloudView.start(seed: number, distance: () -> number)
 	viewDistance = distance
 	pattern = CloudLod.pattern(seed)
+	local material = (Enum.Material :: any)[Config.Weather.Clouds.Material]
+	cloudMaterial = if material then material else Enum.Material.SmoothPlastic
 	buildPalette()
 	local root = Instance.new("Folder")
 	root.Name = "IceVoxelClouds"

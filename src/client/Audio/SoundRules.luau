@@ -21,6 +21,8 @@
 	  voices     the pool of Sound instances (`newPool`, `acquire`, `release`): a free voice;
 	             else, when a kind of sound (an event's category or name) already has its most at
 	             once (CAPS: overlapping mining hits, many footsteps), its oldest; else the oldest.
+	             Distant sounds (far thunder) have a few voices of their own (`acquireQuietest`):
+	             a free one, else the quietest as heard now if this one is louder, else none.
 	  steps      Minecraft's footsteps (Entity.move, `move`): a walked distance growing by 0.6 per
 	             block walked on the level, and the next whole number at which a step sounds, so a
 	             step every 1.67 blocks. The step is the block under the feet (floor(y - 0.2));
@@ -228,6 +230,8 @@ SoundRules.CAPS = table.freeze({
 	["weather.rain.above"] = 3,
 	["entity.lightning_bolt.thunder"] = 3,
 	["entity.lightning_bolt.impact"] = 2,
+	-- (Distant thunder and rain play on voices of their own: SoundPlayer.playDistant, newBed.)
+	["weather.rain.far"] = 1,
 }) :: { [string]: number }
 SoundRules.DEFAULT_CAP = 8
 
@@ -292,6 +296,47 @@ function SoundRules.playing(pool: Pool, key: string): number
 		end
 	end
 	return count
+end
+
+-- Seconds in which a distant sound counts as half as loud as it started (a rumble dies away).
+SoundRules.DISTANT_HALF_LIFE = 3
+
+--[[
+	Takes one of the first `limit` voices of `pool` for a distant sound of Sound.Volume `volume`
+	starting at `now` (thunder far off: SoundPlayer.playDistant), and returns its number: a free
+	one; else the quietest playing (its volume in `loudness`, halved every DISTANT_HALF_LIFE
+	seconds since it started) when that is quieter than this one (it is cut); else nil (this one
+	is not played: a far rumble never cuts a nearer one).
+]]
+function SoundRules.acquireQuietest(
+	pool: Pool,
+	loudness: { number },
+	limit: number,
+	volume: number,
+	now: number
+): number?
+	local quiet, quietest = 0, math.huge
+	local index: number? = nil
+	for i = 1, math.min(limit, #pool.voices) do
+		local voice = pool.voices[i]
+		if not voice.busy then
+			index = i
+			break
+		end
+		local heard = (loudness[i] or 0) * 0.5 ^ ((now - voice.startedAt) / SoundRules.DISTANT_HALF_LIFE)
+		if heard < quietest then
+			quiet, quietest = i, heard
+		end
+	end
+	if index == nil and quiet > 0 and quietest < volume then
+		index = quiet
+	end
+	if index then
+		local voice = pool.voices[index]
+		voice.busy, voice.key, voice.startedAt = true, "distant", now
+		loudness[index] = volume
+	end
+	return index
 end
 
 --[[ Steps, swimming, splashes ]]

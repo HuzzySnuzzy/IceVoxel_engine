@@ -984,4 +984,41 @@ do
 	table.insert(SoundList.EVENTS, event)
 end
 
+--[[
+	Distant storms (not Minecraft's, which has no weather far off; client Weather/LightningView and
+	Weather/StormView): thunder from a strike or a flash in the clouds far away
+	(entity.lightning_bolt.thunder.far: the thunder's stand-in pitched lower still; its category is
+	the thunder, so a developer's Sound named entity.lightning_bolt.thunder plays here too unless
+	one of this name is given), played muffled, lower and longer the farther it is
+	(Weather/DistantStorms), and the hiss of rain falling nearby but not here (weather.rain.far:
+	the rain's stand-in, lower, looped and muffled while it lasts). Both are played by each client
+	by itself, at the ambient volume, and come after the rest so no other event's number changed.
+]]
+for _, event in
+	{
+		{
+			name = "entity.lightning_bolt.thunder.far",
+			category = "entity.lightning_bolt.thunder",
+			id = EXPLOSION,
+			volume = 1,
+			pitch = 0.27,
+			pitchVariance = 0.06,
+			maxDistance = 48,
+			source = "ambient",
+			side = "client",
+		},
+		{
+			name = "weather.rain.far",
+			id = FALLING,
+			volume = 0.7,
+			pitch = 1.45,
+			pitchVariance = 0,
+			source = "ambient",
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList

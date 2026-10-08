@@ -18,6 +18,15 @@
 	             where the world near the player would fall silent (SoundService:SetListener, every
 	             frame after the camera; a Scriptable camera is left as it is).
 	  2D         interface events (`ui`) play on FLAT_VOICES Sounds in SoundService.IceVoxelAudio.
+	  Distant    far thunder (`playDistant`) plays on DISTANT_VOICES voices of its own and a
+	             looped sound (the distant rain: `newBed`, `setBed`) on one each: every one in its
+	             own Attachment of the emitter with an EqualizerSoundEffect of its own (the
+	             muffling never reaches another sound), kept DISTANT_OFFSET blocks from the
+	             listener towards where it comes from every frame (heard from that side at the
+	             volume the caller gives, wherever the player walks or turns: Minecraft plays its
+	             sounds heard everywhere 2 blocks off that way, LevelRenderer.globalLevelEvent).
+	             When all are busy the quietest as heard now gives way to a louder one
+	             (SoundRules.acquireQuietest).
 	  Voices     a voice is free again once its sound ends, or when it is cut at the event's
 	             `duration`; when all are busy the oldest is taken, and a kind of sound never has
 	             more than a few at once (overlapping mining hits, many footsteps:
@@ -62,6 +71,12 @@ local SoundRules = require(script.Parent.SoundRules)
 local BLOCK = Config.BlockSize
 local POSITIONED_VOICES = 32
 local FLAT_VOICES = 4
+-- Voices for distant sounds (the most a caller may ask for), and how far from the listener they
+-- play (blocks), always within their full-volume distance (no fading by the distance: the caller's
+-- volume is the distance's).
+local DISTANT_VOICES = 3
+local DISTANT_OFFSET = 8
+local DISTANT_FULL = DISTANT_OFFSET + 8
 -- Most sounds started in one frame (a burst of server cues; the rest are dropped).
 local MAX_PER_FRAME = 32
 -- A voice whose Sound is not playing this long (seconds) after it started is free: its sound
@@ -87,6 +102,24 @@ type Event = Sounds.Event
 
 type Voice = { sound: Sound, attachment: Attachment?, stopAt: number }
 type Bank = { pool: SoundRules.Pool, voices: { Voice } }
+-- A distant voice or a bed's: where it comes from (studs; a bed's `x`, `z` are a direction from
+-- the listener instead, `relative`), when it is cut, and its equalizer's gains as written.
+type Distant = {
+	sound: Sound,
+	attachment: Attachment,
+	equalizer: EqualizerSoundEffect,
+	x: number,
+	y: number,
+	z: number,
+	relative: boolean,
+	stopAt: number,
+	low: number,
+	mid: number,
+	high: number,
+}
+-- A looped sound driven by its caller (`setBed`): its event, whether it plays, its volume at cue 1
+-- before the volume settings (taken when it starts) and the cue volume written.
+type Bed = { voice: Distant, event: Event, playing: boolean, clip: number, volume: number }
 
 local SoundPlayer = {}
 
@@ -94,6 +127,12 @@ local started = false
 local enabled = false
 local positioned: Bank? = nil
 local flat: Bank? = nil
+local emitterPart: Part? = nil
+local distantPool: SoundRules.Pool? = nil
+local distantVoices: { Distant } = {}
+-- The Sound.Volume each distant voice started at (SoundRules.acquireQuietest).
+local distantLoudness: { number } = {}
+local beds: { Bed } = {}
 local playedThisFrame = 0
 -- Files that failed to load (their events play their fallback).
 local failed: { [string]: boolean } = {}
@@ -353,6 +392,19 @@ local function overrideOf(sound: Sound?): SoundRules.Override?
 	return { id = sound.SoundId, volume = sound.Volume, speed = sound.PlaybackSpeed }
 end
 
+-- How `event` plays now with a cue's volume and pitch (SoundRules.playback), and the developer's
+-- replacement Sound it plays as, if any.
+local function playbackOf(event: Event, cueVolume: number, cuePitch: number): (SoundRules.Playback, Sound?)
+	local replacement = SoundRules.chooseOverride(overrides(), Sounds.lookupNames(event.index), math.random())
+	-- (Config.Sounds is read live: a developer may change it during the game.)
+	local settings = Config.Sounds :: any
+	mixed.Volume = settings.Volume * playerVolume
+	local source = event.source
+	mixed.Sources[source] = (settings.Sources[source] or 1) * (playerSources[source] or 1)
+	return SoundRules.playback(event, overrideOf(replacement), failed, cueVolume, cuePitch, math.random(), mixed),
+		replacement
+end
+
 --[[
 	Starts `event` on a voice of `bank`, at `position` (studs; nil: flat). Returns whether it
 	plays.
@@ -361,14 +413,7 @@ local function start(bank: Bank, event: Event, position: Vector3?, cueVolume: nu
 	if playedThisFrame >= MAX_PER_FRAME then
 		return false
 	end
-	local replacement = SoundRules.chooseOverride(overrides(), Sounds.lookupNames(event.index), math.random())
-	-- (Config.Sounds is read live: a developer may change it during the game.)
-	local settings = Config.Sounds :: any
-	mixed.Volume = settings.Volume * playerVolume
-	local source = event.source
-	mixed.Sources[source] = (settings.Sources[source] or 1) * (playerSources[source] or 1)
-	local playback =
-		SoundRules.playback(event, overrideOf(replacement), failed, cueVolume, cuePitch, math.random(), mixed)
+	local playback, replacement = playbackOf(event, cueVolume, cuePitch)
 	if playback.volume <= 0 then
 		return false
 	end
@@ -421,6 +466,97 @@ local function playEvent(event: Event, position: Vector3?, volume: number?, pitc
 		return false
 	end
 	return start(bank, event, if event.ui then nil else position, volume or 1, pitch or 1)
+end
+
+--[[ Distant ]]
+
+local function newDistant(parent: Part, name: string): Distant
+	local holder = Instance.new("Attachment")
+	holder.Name = name
+	holder.Parent = parent
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.RollOffMode = Enum.RollOffMode.Linear
+	-- (Always within full volume: the caller's volume is the distance's.)
+	sound.RollOffMinDistance = DISTANT_FULL * BLOCK
+	sound.RollOffMaxDistance = DISTANT_FULL * 4 * BLOCK
+	sound.Parent = holder
+	local equalizer = Instance.new("EqualizerSoundEffect")
+	equalizer.LowGain, equalizer.MidGain, equalizer.HighGain = 0, 0, 0
+	equalizer.Parent = sound
+	return {
+		sound = sound,
+		attachment = holder,
+		equalizer = equalizer,
+		x = 0,
+		y = 0,
+		z = 0,
+		relative = false,
+		stopAt = math.huge,
+		low = 0,
+		mid = 0,
+		high = 0,
+	}
+end
+
+-- The equalizer's gains (dB), written only when they changed.
+local function setGains(voice: Distant, low: number, mid: number, high: number)
+	local equalizer = voice.equalizer
+	if voice.low ~= low then
+		voice.low = low
+		equalizer.LowGain = low
+	end
+	if voice.mid ~= mid then
+		voice.mid = mid
+		equalizer.MidGain = mid
+	end
+	if voice.high ~= high then
+		voice.high = high
+		equalizer.HighGain = high
+	end
+end
+
+-- Puts `voice` DISTANT_OFFSET blocks from the listener (studs) towards where it comes from.
+local function follow(voice: Distant, listener: Vector3)
+	local reach = DISTANT_OFFSET * BLOCK
+	local offset
+	if voice.relative then
+		offset = Vector3.new(voice.x, 0, voice.z) * reach
+	else
+		local toward = Vector3.new(voice.x, voice.y, voice.z) - listener
+		offset = if toward.Magnitude > reach then toward.Unit * reach else toward
+	end
+	voice.attachment.Position = listener + offset
+end
+
+-- Frees the distant voices whose sound ended and moves the playing ones and the beds with the
+-- listener.
+local function stepDistant(now: number)
+	local pool = distantPool
+	if pool == nil then
+		return
+	end
+	local listener = hearingPoint()
+	for i, voice in distantVoices do
+		local state = pool.voices[i]
+		if state.busy then
+			if now >= voice.stopAt then
+				voice.sound:Stop()
+				SoundRules.release(pool, i)
+			elseif now - state.startedAt > START_GRACE and not voice.sound.IsPlaying then
+				SoundRules.release(pool, i)
+			elseif listener then
+				follow(voice, listener)
+			end
+		end
+	end
+	if listener then
+		for _, bed in beds do
+			if bed.playing then
+				follow(bed.voice, listener)
+			end
+		end
+	end
 end
 
 --[[ API ]]
@@ -518,6 +654,153 @@ function SoundPlayer.playFlat(sound: (number | string)?, volume: number?, pitch:
 	return playEvent(event, nil, volume, pitch)
 end
 
+--[[
+	Plays event `sound` heard from far away at (x, y, z) (blocks): on a distant voice (one of the
+	first `limit`, at most DISTANT_VOICES), kept DISTANT_OFFSET blocks from the listener towards
+	that point while it plays, at `volume` x the event's (the distance's own fading is the
+	caller's) and `pitch`, through its equalizer at `low`, `mid` and `high` dB (Roblox's
+	EqualizerSoundEffect bands: under 400 Hz, to 4 kHz, above). Returns whether it plays (a
+	quieter one than all those playing does not).
+]]
+function SoundPlayer.playDistant(
+	sound: (number | string)?,
+	x: number,
+	y: number,
+	z: number,
+	volume: number,
+	pitch: number,
+	limit: number,
+	low: number,
+	mid: number,
+	high: number
+): boolean
+	local event = resolve(sound)
+	local pool = distantPool
+	if event == nil or pool == nil or not enabled or playedThisFrame >= MAX_PER_FRAME then
+		return false
+	end
+	local playback, replacement = playbackOf(event, volume, pitch)
+	if playback.volume <= 0 then
+		return false
+	end
+	local now = os.clock()
+	local index =
+		SoundRules.acquireQuietest(pool, distantLoudness, math.min(limit, DISTANT_VOICES), playback.volume, now)
+	if index == nil then
+		return false
+	end
+	playedThisFrame += 1
+	local voice = distantVoices[index]
+	local playing = voice.sound
+	if playing.Playing then
+		playing:Stop()
+	end
+	playing.SoundId = playback.id
+	playing.Volume = playback.volume
+	playing.PlaybackSpeed = playback.pitch
+	playing.SoundGroup = if replacement then replacement.SoundGroup else nil
+	setGains(voice, low, mid, high)
+	voice.x, voice.y, voice.z = x * BLOCK, y * BLOCK, z * BLOCK
+	local listener = hearingPoint()
+	if listener then
+		follow(voice, listener)
+	end
+	playing.TimePosition = 0
+	playing:Play()
+	voice.stopAt = if playback.length then now + playback.length else math.huge
+	return true
+end
+
+-- Distant sounds playing now (F3).
+function SoundPlayer.distantPlaying(): number
+	local pool = distantPool
+	if pool == nil then
+		return 0
+	end
+	local count = 0
+	for _, voice in pool.voices do
+		if voice.busy then
+			count += 1
+		end
+	end
+	return count
+end
+
+--[[
+	A looped sound of event `name` played around the listener while its caller keeps it up
+	(`setBed`), on a voice of its own: returns its handle (nil while sounds are off).
+]]
+function SoundPlayer.newBed(name: string): number?
+	local event = resolve(name)
+	local parent = emitterPart
+	if event == nil or parent == nil or not enabled then
+		return nil
+	end
+	local voice = newDistant(parent, `Bed{#beds + 1}`)
+	voice.relative = true
+	voice.sound.Looped = true
+	table.insert(beds, { voice = voice, event = event, playing = false, clip = 0, volume = -1 })
+	return #beds
+end
+
+--[[
+	Bed `handle` at cue `volume` (x the event's and the volume settings; 0 stops it), coming from
+	direction (dx, dz) (a length of 1: DISTANT_OFFSET blocks off that way; shorter: nearer the
+	listener, as from all around), through its equalizer at `low`, `mid` and `high` dB. Writes only
+	what changed: call it every frame.
+]]
+function SoundPlayer.setBed(
+	handle: number,
+	dx: number,
+	dz: number,
+	volume: number,
+	low: number,
+	mid: number,
+	high: number
+)
+	local bed = beds[handle]
+	if bed == nil then
+		return
+	end
+	local sound = bed.voice.sound
+	local mix = SoundPlayer.sourceVolume(bed.event.source)
+	if volume <= 0.002 or mix <= 0 then
+		if bed.playing then
+			sound:Stop()
+			bed.playing = false
+		end
+		return
+	end
+	if not bed.playing then
+		local playback, replacement = playbackOf(bed.event, 1, 1)
+		if playback.volume <= 0 then
+			return
+		end
+		bed.clip = playback.volume / mix
+		sound.SoundId = playback.id
+		sound.PlaybackSpeed = playback.pitch
+		sound.SoundGroup = if replacement then replacement.SoundGroup else nil
+		sound.Volume = 0
+		bed.volume = -1
+		local listener = hearingPoint()
+		bed.voice.x, bed.voice.z = dx, dz
+		if listener then
+			follow(bed.voice, listener)
+		end
+		sound.TimePosition = 0
+		sound:Play()
+		bed.playing = true
+	end
+	-- (The volume settings are followed while it plays.)
+	local level = math.clamp(bed.clip * mix * volume, 0, SoundRules.MAX_VOLUME)
+	if math.abs(level - bed.volume) > 0.002 then
+		bed.volume = level
+		sound.Volume = level
+	end
+	bed.voice.x, bed.voice.z = dx, dz
+	setGains(bed.voice, low, mid, high)
+end
+
 -- An interface button or tab was clicked (ui.button.click; Config.Sounds.Interface).
 function SoundPlayer.click()
 	if SoundPlayer.allows("interface") then
@@ -572,6 +855,12 @@ function SoundPlayer.start()
 	emitter.CFrame = CFrame.identity
 	emitter.Parent = world
 	local positionedBank = newBank(POSITIONED_VOICES, emitter, true)
+	emitterPart = emitter
+	for i = 1, DISTANT_VOICES do
+		distantVoices[i] = newDistant(emitter, `Distant{i}`)
+		distantLoudness[i] = 0
+	end
+	distantPool = SoundRules.newPool(DISTANT_VOICES)
 	world.Parent = workspace
 
 	local interface = Instance.new("Folder")
@@ -590,6 +879,7 @@ function SoundPlayer.start()
 		local now = os.clock()
 		sweep(positionedBank, now)
 		sweep(flatBank, now)
+		stepDistant(now)
 	end)
 
 	task.spawn(preload, interface)

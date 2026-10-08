@@ -9,8 +9,12 @@
 	  CloudView          clouds out to the view distance in rings of detail (CloudLod), white,
 	                     grey or towering dark by the weather under them, drifting with its wind,
 	                     rain shafts under distant rain
-	  LightningView      the server's lightning: the bolt, the sky's flash, the crack and the
-	                     thunder (later with distance)
+	  LightningView      lightning: the server's strikes and the distant storms' flashes, the
+	                     bolt (far ones as wide, bright beams), the clouds lit over it, the sky's
+	                     flash, the crack and the thunder (later, lower and muffled with distance)
+	  StormView          the distant storms (DistantStorms): every thunderstorm in reach flashes
+	                     and rumbles, the same on every client with nothing sent, and rain falling
+	                     nearby is heard as a muffled hiss
 	  (Rendering/LightingController darkens the light by the weather: Weather/WeatherSky)
 	  (Map/WeatherLayer  the minimap's and the world map's weather mode and forecasts)
 
@@ -30,12 +34,14 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local Weather = require(Shared.Weather)
 
+local SoundPlayer = require(script.Parent.Audio.SoundPlayer)
 local ClientWorld = require(script.Parent.World.ClientWorld)
 local LightingController = require(script.Parent.Rendering.LightingController)
 local ViewSettings = require(script.Parent.Rendering.ViewSettings)
 local CloudView = require(script.CloudView)
 local LightningView = require(script.LightningView)
 local PrecipitationView = require(script.PrecipitationView)
+local StormView = require(script.StormView)
 local WeatherSky = require(script.WeatherSky)
 local WeatherState = require(script.WeatherState)
 
@@ -75,26 +81,38 @@ function WeatherClient.setWeather(mode: number)
 	PrecipitationView.setMode(mode)
 end
 
--- F3's weather lines (see Weather/WeatherState.describe), and what draws it: cloud parts, rings and
--- parts still to place or remove, rain and snow strips shown of the setting's, bolts showing.
+--[[
+	F3's weather lines (see Weather/WeatherState.describe), and what draws it: cloud parts, rings
+	and parts still to place or remove, rain and snow strips shown of the setting's, near bolts
+	showing; the distant storms' flashes a minute expected in reach and shown in the last minute,
+	distant flashes showing, distant sounds playing and the distant rain's volume.
+]]
 function WeatherClient.describe(): string
 	local parts, rings, waiting = CloudView.stats()
 	local shown, columns = PrecipitationView.stats()
+	local near, far = LightningView.count()
+	local perMinute, lastMinute, hiss = StormView.stats()
 	return string.format(
-		"%s\n        clouds %d parts %d rings (%d to do)  strips %d/%d  bolts %d",
+		"%s\n        clouds %d parts %d rings (%d to do)  strips %d/%d  bolts %d"
+			.. "\n        distant %.1f/min (%d last min)  flashes %d  thunder %d  rain %.2f",
 		WeatherState.describe(),
 		parts,
 		rings,
 		waiting,
 		shown,
 		columns,
-		LightningView.count()
+		near,
+		perMinute,
+		lastMinute,
+		far,
+		SoundPlayer.distantPlaying(),
+		hiss
 	)
 end
 
 --[[
 	Starts the weather for world `seed`: `generator` for biomes and ground heights, `world` for the
-	roofs over the rain, `viewDistance()` how far clouds reach (blocks).
+	roofs over the rain, `viewDistance()` how far clouds and distant lightning reach (blocks).
 ]]
 function WeatherClient.start(
 	seed: number,
@@ -105,7 +123,8 @@ function WeatherClient.start(
 	WeatherState.start(seed, generator)
 	PrecipitationView.start(world)
 	CloudView.start(seed, viewDistance)
-	LightningView.start()
+	LightningView.start(viewDistance)
+	StormView.start(seed, viewDistance)
 	local effect = Instance.new("ColorCorrectionEffect")
 	effect.Name = "IceVoxelWeatherView"
 	effect.Enabled = false
