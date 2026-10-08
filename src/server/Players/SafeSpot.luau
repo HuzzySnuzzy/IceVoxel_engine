@@ -50,6 +50,7 @@ local unsafeFloor = resolve(SpawnUnsafeBlocks.Floor)
 local unsafeBody = resolve(SpawnUnsafeBlocks.Body)
 local hazards = resolve(SpawnUnsafeBlocks.Hazards)
 local headroom = SpawnUnsafeBlocks.Headroom
+local water = resolve({ "Water" })
 
 local SafeSpot = {}
 
@@ -101,6 +102,20 @@ function SafeSpot.column(world: World, x: number, z: number): number?
 		end
 	end
 	return nil
+end
+
+--[[
+	Where a character floats in open water in column (x, z): the feet in the top water block with
+	only air above it (the eyes, 1.62 blocks up, are out of the water), or nil when the column's
+	top isn't water. Not safe ground (SafeSpot.isSafe wants a floor), but a swimmer's place: for a
+	teleport with no dry spot near (Players/TeleportCommand), better than the seabed.
+]]
+function SafeSpot.waterSurface(world: World, x: number, z: number): number?
+	local y = world:topBlock(x, z)
+	if y < 0 or not water[world:getBlock(x, y, z)] then
+		return nil
+	end
+	return y
 end
 
 --[[

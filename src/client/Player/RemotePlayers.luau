@@ -29,7 +29,9 @@
 	             Dead flag) falls over as Minecraft's LivingEntityRenderer turns them (`Rig.
 	             deathCFrame`, 20 ticks), and after DEATH_SECONDS their body is no longer shown
 	             (`shown`; Player/SpectatorView hides it, as it hides untracked players, who stay
-	             parked).
+	             parked: an untracked character's root is written back to the park, since this
+	             client's last write to it would stay otherwise, in render studs that mean
+	             another place after every move of the origin).
 
 	API (positions are feet, the bottom centre of the body, in world blocks):
 	  get(player) -> Remote?            nil: not tracked (compat: no character; networked: beyond
@@ -245,12 +247,28 @@ local function resolve(entry: Entry)
 	end
 end
 
+-- Puts `character`'s root back at the park (Config.Players.ParkPosition, where the server left
+-- it): the placement step's last write stays otherwise (the server never writes the anchored
+-- root again), and a move of the render origin would carry the hidden body, its chat bubbles
+-- with it, to some place near the viewer.
+local function park(character: Model?)
+	local root = rootOf(character)
+	if root then
+		local at = Config.Players.ParkPosition
+		root.CFrame = CFrame.new(at[1], at[2], at[3])
+	end
+end
+
 local function untrackSlot(slot: number)
 	local entry = bySlot[slot]
 	if entry == nil then
 		return
 	end
 	bySlot[slot] = nil
+	local remote = entry.remote
+	if remote then
+		park(remote.character)
+	end
 	local player = entry.player
 	if player and entryOf[player] == entry then
 		entryOf[player] = nil

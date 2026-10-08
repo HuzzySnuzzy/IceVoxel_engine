@@ -45,9 +45,10 @@
 	    status effects'), as the client's mining does.
 	  * Broadcasts all world changes once per frame. With the server's own positions
 	    (Config.Players.ServerPositions: Players/PlayerPositions.networked) only to the players
-	    within Config.Interest.EditSendRadius chunks of each change (Players/Interest.routeEdits;
-	    none to a player without a position), and a chunk's edit list only once the player is
-	    within EditChunkRadius chunks of it: a request for a farther one waits (at most
+	    within Config.Interest.EditSendRadius chunks (from the feet to the chunk's nearest point)
+	    of each change (Players/Interest.routeEdits; none to a player without a position), and a
+	    chunk's edit list only once the player is within EditChunkRadius chunks of it: a request
+	    for a farther one waits (at most
 	    DeferredChunkRequests a player, the oldest dropped) and is answered by a scan twice a
 	    second once they come near, as the client asks for each list once. So building and
 	    digging far away tell nobody where it happens.
@@ -84,7 +85,6 @@ local Mining = require(Shared.Mining)
 type World = WorldServer.World
 
 local HEIGHT = Config.WorldHeight
-local CHUNK = Config.ChunkSize
 local STANDING = PlayerPhysics.STANDING
 local EDITS_PER_MESSAGE = 4096
 local CHUNK_REQUESTS_PER_SECOND = 1500
@@ -662,7 +662,7 @@ function ServerNet.start(world: World): ServerNet
 			-- (Each player the edits near them: Interest.routeEdits.)
 			local viewers: { Interest.EditViewer } = {}
 			for player, px, _, pz in PlayerPositions.each() do
-				table.insert(viewers, { key = player, cx = math.floor(px / CHUNK), cz = math.floor(pz / CHUNK) })
+				table.insert(viewers, { key = player, x = px, z = pz })
 			end
 			local all: { buffer }? = nil
 			for key, edits in Interest.routeEdits(pending, viewers) do

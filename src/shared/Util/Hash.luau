@@ -103,4 +103,12 @@ function Hash.rng(seed: number): Rng
 	return (setmetatable({ state = state }, Rng) :: any) :: Rng
 end
 
+--[[
+	A generator that goes on from another's `state` (a number kept instead of the generator, so
+	every use starts from the same point: a cache keeps numbers, never a stream someone advanced).
+]]
+function Hash.rngFrom(state: number): Rng
+	return (setmetatable({ state = state }, Rng) :: any) :: Rng
+end
+
 return Hash

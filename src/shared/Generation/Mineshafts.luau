@@ -647,7 +647,10 @@ end
 	where, overgrown or not), with its random stream ready for the pieces.
 ]]
 type Start = {
-	rng: Hash.Rng,
+	-- The cell's random stream after the start's draws (Hash.rngFrom): a number, so every build
+	-- of the plan starts from it (a build left half done, its job dropped or cancelled at a
+	-- yield, would otherwise leave the stream advanced and the next build different).
+	rngState: number,
 	salt: number,
 	x: number,
 	z: number,
@@ -1216,7 +1219,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		local chance = math.clamp((humidity - lo) / (hi - lo), 0, 1) * cfg.OvergrownChance
 		local overgrown = overgrownRoll < chance
 		return {
-			rng = rng,
+			rngState = rng.state,
 			salt = Hash.hash3(salt, gx, 1, gz),
 			x = x,
 			z = z,
@@ -1247,7 +1250,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		end
 		local room = newPiece("room", roomBox, nil, 0, Hash.hash3(s.salt, 1, 0x9E, 0))
 		table.insert(b.pieces, room)
-		addChildren(b, s.rng, room)
+		addChildren(b, Hash.rngFrom(s.rngState), room)
 		finishRoom(room)
 		local entrance = if s.entrance then findEntrance(b) else nil
 		return {

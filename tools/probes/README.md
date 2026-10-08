@@ -24,21 +24,24 @@ here.
 2. Put `RebaseProbe.client.luau` in `StarterPlayer.StarterPlayerScripts` as a LocalScript (or
    paste its body into the command bar while playing).
 3. It builds anchored parts like the terrain's (boxes 3-48 studs, about half CanCollide and
-   CanQuery, 70% casting shadows) over the default view, lets them settle, and prints one line per
-   count:
+   CanQuery, 70% casting shadows) over the default view, looks over them from a fixed camera,
+   lets them settle, and moves them and the camera together (as the game's `Rebase` does, so the
+   frames after draw the same scene). It prints one line per count:
 
    ```
-   [RebaseProbe] parts | gather ms | BulkMoveTo ms | frames before mean/max | after mean/max
+   [RebaseProbe] parts | gather ms | BulkMoveTo ms | before mean/max | after: 1st, 2nd, rest max | hitch ms
    ```
 
-   The hitch of a move is gather + BulkMoveTo plus the extra in the "after" max over "before".
-   In the game itself, F3's `origin` line shows the same split for real moves (`gathered in`,
-   `BulkMoveTo`).
+   The **hitch** is what the first two frames after the move took beyond the mean before. The
+   gather and `BulkMoveTo` run inside a RenderStepped, so the first frame after already holds
+   them (don't add them again); the second holds what the engine left for later. The two
+   columns before it show the Luau and engine split. In the game itself, F3's `origin` line
+   shows the same split for real moves (`gathered in`, `BulkMoveTo`).
 
-**Decision rule** (probe total at 35k parts, about the default view in the mountains or at the
+**Decision rule** (the hitch at 35k parts, about the default view in the mountains or at the
 spawn without far meshes):
 
-| Total at 35k on PC | Action |
+| Hitch at 35k on PC | Action |
 | --- | --- |
 | ≤ 20 ms | Keep `Origin.RebaseDistance = 8192` and `SoftDistance = 3072` |
 | 20-50 ms | `RebaseDistance = 16384` (still within 1/512 stud near the camera); keep soft moves; keep far meshes on by default |

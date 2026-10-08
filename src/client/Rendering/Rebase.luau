@@ -9,8 +9,8 @@
 	  hard      the camera farther than RebaseDistance (8192 studs, 2731 blocks) from the origin
 	            along X or Z: at once, a hitch about every 2600 blocks of travel;
 	  soft      farther than SoftDistance (3072) while something hides a hitch: `setHidden(reason,
-	            true)` from the world map, inventory screens, menus, the death screen, the
-	            streamer's teleport mode;
+	            true)` from the world map, inventory screens, menus, the streamer's teleport mode
+	            (not death: the game has no death screen, the world stays in view);
 	  teleport  `request(destination)` (a teleport, a respawn): the origin goes to the destination
 	            at the next step, before the hull snaps and the character is placed there.
 	With Config.Origin.Enabled false nothing ever moves (the step returns at once).
@@ -107,7 +107,7 @@ function Rebase.register(name: string, mover: Mover): () -> ()
 	end
 end
 
--- Something that hides a hitch is showing (`reason`: "map", "screen", "menu", "teleport", "dead")
+-- Something that hides a hitch is showing (`reason`: "map", "screen", "menu", "teleport")
 -- or not any more: while any is, the origin moves at SoftDistance.
 function Rebase.setHidden(reason: string, on: boolean)
 	local was = hiddenReasons[reason] == true

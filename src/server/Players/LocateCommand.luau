@@ -22,9 +22,10 @@
 	            without the floating origin.
 	  Y         "~" for structures on the surface (Minecraft's), the y for underground ones
 	            (mineshafts, an entrance's collar, an oil deposit: "~" would be useless there),
-	            the surface's height for biomes, the block's y for points of interest.
-	  Distance  floored; horizontal for structures and biomes (biomes are 2D here), 3D for points
-	            of interest (Minecraft's).
+	            the surface's height for biomes, the block's y for points of interest (Minecraft
+	            shows "~" for those too: a deviation, as a chest is often underground).
+	  Distance  floored and horizontal (Minecraft's for structures and points of interest, found
+	            in 3D within PoiRadius; biomes are 2D here, where Minecraft's is 3D).
 	  Who may   the operators' permission (Minecraft's level 2: Players/Operators).
 
 	Searches run one at a time, a slice of each frame (`Queue`): `submit` puts a player's search
@@ -219,7 +220,17 @@ function LocateCommand.search(
 	if found == nil then
 		return nil
 	end
-	return { id = found.id, x = found.x, y = found.y, z = found.z, showY = true, distance = found.distance }
+	-- (The nearest is the nearest in 3D, as Minecraft's search; the distance shown is horizontal,
+	-- as its answer: showLocateResult's absoluteY false.)
+	local dx, dz = found.x - bx, found.z - bz
+	return {
+		id = found.id,
+		x = found.x,
+		y = found.y,
+		z = found.z,
+		showY = true,
+		distance = math.sqrt(dx * dx + dz * dz),
+	}
 end
 
 --[[ Answers ]]

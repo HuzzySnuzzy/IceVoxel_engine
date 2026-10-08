@@ -136,9 +136,12 @@
 
 	Where the viewer is, in world blocks (the floating origin: Shared/World/Origin): the hook
 	`viewerFeet` (the boot sets it to the local player's hull: MovementController, which this
-	module must not require), else the world spawn (Shared's SpawnPosition attribute, world studs),
-	else the camera read back from render studs; the eye is the camera read back too. Everything
-	else here is in blocks, so a move of the render origin changes nothing (no jump, no teleport).
+	module must not require); once it has given feet, a hook without them (dead: the camera stays
+	on the body until the respawn, Players.RespawnTime; between characters) leaves the viewer
+	where it was (or where `teleported` put it), as the character's root did; before that the
+	world spawn (Shared's SpawnPosition attribute, world studs), else the camera read back from
+	render studs; the eye is the camera read back too. Everything else here is in blocks, so a
+	move of the render origin changes nothing (no jump, no teleport).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -380,6 +383,8 @@ export type ChunkStreamer = {
 	-- Where the viewer's feet are (world blocks), nil x when unknown (no character): set by the
 	-- boot to the local player's hull.
 	viewerFeet: (() -> (number?, number, number))?,
+	-- The hook has given feet once (since then, none means the viewer stays: `viewerPosition`).
+	hullSeen: boolean,
 	busy: boolean,
 
 	update: (self: ChunkStreamer, dt: number) -> (),
@@ -395,14 +400,19 @@ ChunkStreamer.__index = ChunkStreamer
 
 --[[ Helpers ]]
 
--- The viewer's feet in world blocks: the hook (the local player's hull), else the world spawn,
--- else the camera (see the header).
+-- The viewer's feet in world blocks: the hook (the local player's hull); once it has had one,
+-- where the viewer was while it has none; else the world spawn, else the camera (see the header).
 local function viewerPosition(self: ChunkStreamer): Vector3
 	local hook = self.viewerFeet
 	if hook then
 		local x, y, z = hook()
 		if x then
+			self.hullSeen = true
 			return Vector3.new(x, y, z)
+		elseif self.hullSeen then
+			-- (Dead, or between characters: the camera is still on the body, so the area stays.
+			-- `teleported` moves the viewer meanwhile, a respawn's.)
+			return self.viewer
 		end
 	end
 	local spawn = Shared:GetAttribute("SpawnPosition")
@@ -2560,6 +2570,7 @@ function ChunkStreamer.new(
 			trashHead = 1,
 			onTeleportMode = nil,
 			viewerFeet = nil,
+			hullSeen = false,
 			busy = false,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer

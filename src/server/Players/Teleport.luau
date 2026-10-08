@@ -9,7 +9,13 @@
 	             handleTeleportToEntityPacket): a spectator goes to another player's feet, exactly
 	             (no safe spot: spectators fly through everything), the target in the game with a
 	             character (GameModeRules.spectatorTeleport), at most one every
-	             SPECTATOR_COOLDOWN seconds. The spectator keeps looking where they looked.
+	             SPECTATOR_COOLDOWN seconds. The spectator keeps looking where they looked. With
+	             the server's own positions (PlayerPositions.networked) a player the spectator
+	             doesn't see (Players/Interest.maySpectate) takes the operators' permission
+	             (Players/Operators.permitted, as /tp to a player does): in Minecraft only
+	             permission level 2 makes anyone a spectator, while here everyone may switch
+	             (Config.Gameplay.GameModeCommand), and going to someone tells where they are.
+	             Others are told FAR (a Notice).
 
 	Positions are Players/PlayerPositions' (feet, blocks, doubles), and the teleports go through it
 	(Players/Characters): the player alone is told where they now are.
@@ -28,6 +34,8 @@ local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local SafeSpot = require(script.Parent.SafeSpot)
 local Characters = require(script.Parent.Characters)
 local GameModeRules = require(script.Parent.GameModeRules)
+local Interest = require(script.Parent.Interest)
+local Operators = require(script.Parent.Operators)
 local PlayerPositions = require(script.Parent.PlayerPositions)
 
 -- Blocks around the requested column searched for a safe spot.
@@ -37,6 +45,22 @@ local LANDING_RADIUS = 24
 local SPECTATOR_COOLDOWN = 0.25
 
 local Teleport = {}
+
+-- What a spectator going to a player they don't see, without the operators' permission, is told.
+Teleport.FAR = "That player is too far away to teleport to"
+
+--[[
+	May `player` teleport to `target` from the spectator menu, as far as who knows where is
+	concerned (see the header)? Always while positions are the characters' (they replicate).
+]]
+function Teleport.mayGoTo(player: Player, target: Player): boolean
+	local store = PlayerPositions.store()
+	if store == nil or Operators.permitted(player) then
+		return true
+	end
+	local viewer, wanted = store:get(player), store:get(target)
+	return viewer ~= nil and wanted ~= nil and Interest.maySpectate(viewer, wanted)
+end
 
 function Teleport.allowed(player: Player): boolean
 	local rule = Config.Map.Teleport
@@ -99,6 +123,10 @@ function Teleport.start(world: WorldServer.World, net: ServerNet.ServerNet)
 			return
 		end
 		lastSpectatorTeleport[player] = now
+		if not Teleport.mayGoTo(player, target :: Player) then
+			net.send(player, Protocol.ServerMessage.Notice, Protocol.encodeNotice(Teleport.FAR))
+			return
+		end
 		Characters.teleportTo(player, x, y, z)
 	end)
 

@@ -31,7 +31,8 @@
 	             Mobs/Mobs), and every player within Config.Weather.Lightning.Distance gets a
 	             Lightning message for the bolt, the flash and the thunder (with the server's own
 	             positions, Config.Players.ServerPositions: within Config.Interest
-	             .LightningDistance, so a strike doesn't tell far players where someone is).
+	             .LightningDistance, 184, so a strike, rolled within Lightning.Radius (64) of a
+	             player, tells only those who see that player that they are there).
 	             Players are where Players/PlayerPositions says (feet, blocks).
 	  Saving     `encode()` and `decode(text)` (Weather.encodeState: the clock, doWeatherCycle and
 	             the override with its time left) for the world's save: World/WorldSave's

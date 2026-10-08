@@ -76,9 +76,10 @@
 	            character far are noticed too, and the hull follows. The render origin goes to the
 	            destination at the next frame when it is far (Rendering/Rebase.request).
 	  Origin    a move of the render origin (Shared/World/Origin) shifts what this keeps in render
-	            studs (the root's last place, the view bob's camera CFrames) with it. Screens, the
-	            Roblox menu and the death let the origin move early (Rebase.setHidden: "screen",
-	            "menu", "dead"), where the hitch is hidden.
+	            studs (the root's last place, the view bob's camera CFrames) with it. Screens and
+	            the Roblox menu let the origin move early (Rebase.setHidden: "screen", "menu"),
+	            where the hitch is hidden; dying doesn't (there is no death screen: the world
+	            stays in view while the body tips over, until the respawn).
 	  Knockback explosions push the hull (`knockback`: the server's Explosion message adds to its
 	            velocity, as Minecraft's client does).
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
@@ -724,7 +725,6 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			return
 		end
 		diedAt = nil
-		Rebase.setHidden("dead", false)
 
 		-- Cosmetic rig: no collisions, no humanoid forces, no gravity.
 		for _, part in character:GetDescendants() do
@@ -923,8 +923,6 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				rootJoint.C0 = rootJointC0
 			end
 			diedAt = os.clock()
-			-- (The death screen hides a move of the origin.)
-			Rebase.setHidden("dead", true)
 			if not networked then
 				-- The body falls onto the terrain (only this client has it to land on).
 				for _, part in character:GetDescendants() do

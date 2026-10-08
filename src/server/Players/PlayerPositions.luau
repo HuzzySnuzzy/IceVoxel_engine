@@ -19,8 +19,9 @@
 	             Players/MoveCheck's speeds (else corrected: Config.Players.MoveCheck); a
 	             teleport is a private Teleport message to the player alone, with a new epoch
 	             (and their character's life, so a new character knows its spawn); a spectator
-	             tells whom they spectate (ClientMessage.Spectate) and their place follows that
-	             player's. Players/PlayerRelay sends the poses only to players whose interest
+	             tells whom they spectate (ClientMessage.Spectate: only a player they see,
+	             Players/Interest.maySpectate) and their place follows that player's.
+	             Players/PlayerRelay sends the poses only to players whose interest
 	             includes them (Players/Interest). `center` and `eye` follow the pose the client
 	             sends (standing, sneaking, lying), `look` its view.
 
@@ -66,6 +67,7 @@ local Protocol = require(Shared.Net.Protocol)
 local Remotes = require(Shared.Net.Remotes)
 local Rig = require(Shared.Movement.Rig)
 
+local Interest = require(script.Parent.Interest)
 local PositionStore = require(script.Parent.PositionStore)
 
 local BLOCK = Config.BlockSize
@@ -448,14 +450,20 @@ local function listen(serverNet: Net)
 		end
 	end)
 
-	-- Whom a spectator spectates (0: nobody): only spectators, only players in the game.
+	-- Whom a spectator spectates (0: nobody): only spectators, only players in the game they see
+	-- now (Interest.maySpectate: else anyone could follow anyone, anywhere).
 	serverNet.on(Protocol.ClientMessage.Spectate, function(player: Player, payload: buffer)
 		local userId = PlayerSync.decodeSpectate(payload)
 		if userId == nil then
 			return
 		end
 		local target = if userId ~= 0 then Players:GetPlayerByUserId(userId) else nil
-		store:spectate(player, if target and GameMode.isSpectatorOf(player) then target else nil, os.clock())
+		local viewer, wanted = store:get(player), if target then store:get(target) else nil
+		local allowed = GameMode.isSpectatorOf(player)
+			and viewer ~= nil
+			and wanted ~= nil
+			and Interest.maySpectate(viewer, wanted)
+		store:spectate(player, if allowed then target else nil, os.clock())
 	end)
 
 	local function onPlayer(player: Player)

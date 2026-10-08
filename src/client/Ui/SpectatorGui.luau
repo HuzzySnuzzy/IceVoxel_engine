@@ -16,7 +16,9 @@
 	            and otherwise changes the flying speed (`onFlyingSpeed`: Player/MovementController,
 	            MouseHandler.onScroll). A click or tap on a slot of the open menu is its number key.
 	  teleport  using a player sends Protocol SpectatorTeleport; the server moves the spectator
-	            to their feet (Players/Teleport, Characters.teleportFeet). The menu stays open.
+	            to their feet (Players/Teleport, Characters.teleportFeet), or, with server
+	            positions, answers "That player is too far away to teleport to" for one this
+	            client doesn't see unless it has the operators' permission. The menu stays open.
 ]]
 
 local Players = game:GetService("Players")

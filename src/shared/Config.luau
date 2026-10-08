@@ -937,13 +937,18 @@ local Config = {
 		MaxPosesPerMessage = 40,
 		-- Seconds (client) remote players are drawn behind the newest pose, to glide between them.
 		InterpolationDelay = 0.1,
-		-- Chunks: edit lists are answered this near the player's chunk (else deferred until they
-		-- come near), live edits reach players this near, and at most this many requests wait.
-		EditChunkRadius = 24,
-		EditSendRadius = 26,
+		-- Chunks (x 16 blocks, from the feet to a chunk's nearest point): edit lists are answered
+		-- this near (else deferred until the player comes near), live edits reach players this
+		-- near, and at most this many requests wait. 14: an edit this near is made by someone
+		-- within PlayerDistance, and the client's lists reach 195 blocks at most (Players/Interest).
+		EditChunkRadius = 14,
+		EditSendRadius = 14,
 		DeferredChunkRequests = 1024,
 		-- Blocks: server lightning strikes are sent this near (the client draws far storms itself).
-		LightningDistance = 512,
+		-- Strikes fall within Weather.Lightning.Radius (64) of a player (and up to 4 blocks aside,
+		-- onto someone standing there: World/Lightning.target), so 184 tells only of players
+		-- within PlayerDistance.
+		LightningDistance = 184,
 	},
 
 	-- Players' positions (server) --------------------------------------------------------------------
@@ -1184,7 +1189,8 @@ local Config = {
 	--[[
 		/locate structure | biome | poi (Players/LocateCommands, Generation/Locate, World/PoiSearch)
 		and /tp. Searches run on the server a slice of each frame, one at a time: at most BudgetMs
-		a frame (the generation preload, World/GenQueue, takes what is left of the frame), at most
+		a frame, just before the generation preload's slice (World/Simulation), which takes what
+		is left of the frame (Server.FrameBudgetMs), at most
 		Queue of them waiting (one per player: a new /locate replaces that player's), and one still
 		running after TimeoutSeconds gives up with the not-found answer.
 	]]
@@ -1438,8 +1444,9 @@ local Config = {
 		-- player's own chunk or one around it is missing (a join, a teleport) or more than
 		-- UrgentBacklog chunks wait (a window is 49): about 2 chunks a frame instead of 1. The
 		-- slice never takes the frame's work so far (from its first script step) past
-		-- FrameBudgetMs, but is always at least MinGenerationBudgetMs. Other per-frame budgets
-		-- (/locate's search, the pose relay) come on top.
+		-- FrameBudgetMs, but is always at least MinGenerationBudgetMs. /locate's search slice
+		-- (Locate.BudgetMs) runs just before it and counts in that work; the pose relay may come
+		-- on top.
 		GenerationBudgetMs = 4,
 		UrgentGenerationBudgetMs = 8,
 		UrgentBacklog = 49,

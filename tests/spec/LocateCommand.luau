@@ -267,7 +267,11 @@ return function(t, shared, require, server)
 		world:setBlock(10, 120, 20, require(shared.Blocks).id.Furnace)
 		local furnace = search("/locate poi #workstation", 0, 120, 0) :: any
 		t.ok(furnace and furnace.id == "furnace" and furnace.x == 10 and furnace.z == 20, "a placed furnace")
-		t.eq(math.floor(furnace.distance), math.floor(math.sqrt(10 * 10 + 20 * 20)), "3D distance")
+		t.eq(math.floor(furnace.distance), math.floor(math.sqrt(10 * 10 + 20 * 20)), "the distance")
+		-- 40 blocks below: still the horizontal distance, as Minecraft's answer.
+		local below = search("/locate poi #workstation", 0, 160, 0) :: any
+		t.ok(below and below.x == 10 and below.y == 120 and below.z == 20, "the furnace from above")
+		t.eq(math.floor(below.distance), math.floor(math.sqrt(10 * 10 + 20 * 20)), "horizontal, not 3D")
 		t.eq(Config.Locate.PoiRadius, 256, "Minecraft's radius")
 	end)
 
@@ -345,11 +349,104 @@ return function(t, shared, require, server)
 		t.eq(moves(r), "Steve@7.5,40,7.5", "a safe spot as asked")
 		r = TeleportCommand.run("/tp @s 7 39 7", tpContext(true, safe, 90)) :: any
 		t.eq(moves(r), "Steve@7.5,40,7.5", "on top of the block found (a chest)")
+		r = TeleportCommand.run("/tp @s 7 46 7", tpContext(true, safe, 90)) :: any
+		t.eq(moves(r), "Steve@7.5,40,7.5", "a written y: the safe spot within 16 of it, not the top")
+		t.eq(r.feedback[1], "Teleported Steve to 7.500000, 40.000000, 7.500000", "where they landed")
+		r = TeleportCommand.run("/tp @s 7 30 7", tpContext(true, safe, 90)) :: any
+		t.eq(moves(r), "Steve@7.5,40,7.5", "or above it")
+		r = TeleportCommand.run("/tp @s 7 60 7", tpContext(true, safe, 90)) :: any
+		t.eq(moves(r), "Steve@7.5,90,7.5", "20 off: the column's safe top")
 		r = TeleportCommand.run("/tp @s 7 ~ 7", tpContext(true, safe, 90)) :: any
 		t.eq(moves(r), "Steve@7.5,90,7.5", "a link's ~ lands on the column's safe top")
+		t.eq(r.feedback[1], "Teleported Steve to 7.500000, 90.000000, 7.500000", "where they landed")
+		r = TeleportCommand.run("/tp @s 7 ~-30 7", tpContext(true, safe, 90)) :: any
+		t.eq(moves(r), "Steve@7.5,40,7.5", "~n is a written y")
 		r = TeleportCommand.run("/tp @s 7 ~ 7", tpContext(true, safe, nil)) :: any
 		t.eq(moves(r), "Steve@7.5,70,7.5", "no safe spot at all: as asked")
+		-- No safe top: the nearest column with one, else afloat, else as asked.
+		local context = tpContext(true, function()
+			return false
+		end, nil) :: any
+		context.near = function(x: number, z: number): (number?, number, number)
+			return x + 3, 66, z - 2
+		end
+		context.waterSurface = function(): number?
+			return 62
+		end
+		r = TeleportCommand.run("/tp @s 7 ~ 7", context) :: any
+		t.eq(moves(r), "Steve@10.5,66,5.5", "the nearest safe column (a lake's shore)")
+		context.near = function(): (number?, number, number)
+			return nil, 0, 0
+		end
+		r = TeleportCommand.run("/tp @s 7 30 7", context) :: any
+		t.eq(moves(r), "Steve@7.5,62,7.5", "none near: afloat on the water (not its bed)")
+		r = TeleportCommand.run("/tp @a 7 30 7", context) :: any
+		t.eq(moves(r), "Steve@7.5,62,7.5 Alex@7.5,30,7.5 Ghost@7.5,62,7.5", "each mode its own landing")
+		t.eq(r.feedback[1], "Teleported 3 entities to 7.500000, 30.000000, 7.500000", "several: where asked")
 		r = TeleportCommand.run("/tp Alex 7 ~ 7", tpContext(true, safe, 90)) :: any
 		t.eq(moves(r), "Alex@7.5,70,7.5", "creative: exactly (relative to who typed it)")
+	end)
+
+	t.test("tp command: on real worlds, /locate's links and moves in a cave land survival players safe", function()
+		local SafeSpot = require(server.Players.SafeSpot)
+		local Blocks = require(shared.Blocks)
+		-- Safe ground, or afloat at the top of open water.
+		local function landedWell(world: any, move: any): boolean
+			local bx, by, bz = math.floor(move.x), math.floor(move.y), math.floor(move.z)
+			return SafeSpot.isSafe(world, bx, by, bz) or SafeSpot.waterSurface(world, bx, bz) == by
+		end
+		local count = 0
+		for _, seed in { 12345, 99 } do
+			local gen = TerrainGenerator.new(seed)
+			local world = WorldServer.new(TerrainGenerator.new(seed))
+			local kinds = {}
+			for _, kind in (gen :: any).locateKinds() do
+				kinds[kind.id] = kind
+			end
+			for _, p in { { 0, 0 }, { 3000, -2000 } } do
+				-- (Standing on the surface where they typed it: the link's ~ is that height.)
+				local source = player("Steve", p[1] + 0.5, gen.column(p[1], p[2]), p[2] + 0.5)
+				for _, id in { "lake", "lava_lake", "oil_geyser", "cave_entrance", "ravine" } do
+					local found = Locate.nearest({ kinds[id] }, p[1], p[2]) :: any
+					if found == nil then
+						continue
+					end
+					local link = LocateCommand.suggestion(found)
+					local r =
+						TeleportCommand.run(link, TeleportCommand.worldContext(world, true, source, { source })) :: any
+					local move = r.moves[1]
+					count += 1
+					t.ok(landedWell(world, move), `seed {seed}, {id}: {link} landed at {move.x}, {move.y}, {move.z}`)
+				end
+			end
+		end
+		t.ok(count >= 15, `{count} links`)
+		-- A biome answer's y is its surface: under the sea, the seabed. Afloat instead.
+		local seaWorld = WorldServer.new(TerrainGenerator.new(4242))
+		local source = player("Steve", -2000.5, 70, -1400.5)
+		t.ok(seaWorld.generator.column(-2096, -1496) < Config.SeaLevel, "the spot is under the sea")
+		local r = TeleportCommand.run(
+			"/tp @s -2096 30 -1496",
+			TeleportCommand.worldContext(seaWorld, true, source, { source })
+		) :: any
+		local move = r.moves[1]
+		t.ok(landedWell(seaWorld, move) and move.y >= Config.SeaLevel - 1, `afloat: {move.y}`)
+		-- In a mineshaft room (seed 12345): a small move stays in the room, not on the surface.
+		local mineWorld = WorldServer.new(TerrainGenerator.new(12345))
+		local miner = player("Steve", -45.5, 27, -12.5)
+		t.ok(SafeSpot.isSafe(mineWorld, -46, 27, -13), "standing in the room")
+		for _, command in { "/tp ~ ~2 ~", "/tp ~ ~10 ~", "/tp ~1 ~ ~" } do
+			r = TeleportCommand.run(command, TeleportCommand.worldContext(mineWorld, true, miner, { miner })) :: any
+			move = r.moves[1]
+			t.ok(landedWell(mineWorld, move) and move.y < 45, `{command}: {move.x}, {move.y}, {move.z}`)
+			t.eq(
+				r.feedback[1],
+				`Teleported Steve to {TeleportCommand.formatNumber(move.x)}, {TeleportCommand.formatNumber(move.y)}, {TeleportCommand.formatNumber(
+					move.z
+				)}`,
+				"the answer says where"
+			)
+			t.ok(Blocks.isSolid(mineWorld:getBlock(-46, 46, -13)), "rock above the room")
+		end
 	end)
 end

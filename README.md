@@ -345,9 +345,12 @@ A fast, Minecraft-style voxel engine for Roblox.
     keep their inventory if they die. Instead of the hotbar, a number key or the middle click
     opens Minecraft's spectator menu: `1` "Teleport to Player" lists the other players' heads (7
     on the first page, then 6 a page), a player's number pressed twice teleports there, `9`
-    closes it. A left click on a player looks through their eyes until you sneak. Switching from
-    spectator to survival or adventure inside a block suffocates you (half a heart every half
-    second) until you get out, as in Minecraft.
+    closes it. A left click on a player looks through their eyes until you sneak. With the
+    server's own positions (`Players.ServerPositions`) both reach only the players you see
+    (within `Interest.PlayerDistance`); teleporting to anyone else takes the operators'
+    permission, as `/tp` to a player does (in Minecraft only operators become spectators).
+    Switching from spectator to survival or adventure inside a block suffocates you (half a heart
+    every half second) until you get out, as in Minecraft.
 - **Game mode switcher and debug keys.** Minecraft's `F3` + `F4` switcher: hold `F3`, press `F4`
   to step through Creative, Survival, Adventure and Spectator (or point at one) and let go of `F3`
   to switch. `F3` + `N` toggles spectator and the previous mode, `F3` + `Q` lists the keys in the
@@ -759,13 +762,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   points of interest (chests, crafting tables, furnaces, campfires, the machines, batteries,
   tanks, structure blocks, jigsaws, TNT and Nukes; `#workstation`, `#machine`, `#container`...)
   within 256 blocks, placed ones and generated ones (an outpost's chests, a mineshaft's) alike.
-  A search never generates a chunk: it reads the generators' plans cell by cell, nearest first,
-  and answers the true nearest (Minecraft's sometimes answers a farther one); underground things
-  show their y (a mineshaft's room, an entrance's collar), surface ones `~`. Searches run on the
-  server a slice of each frame (3 ms), so a long one (no outpost for 100 regions, a rare biome:
-  about a second of work) never stalls it. The coordinates are green: click them with the chat
-  open and `/tp @s x y z` is typed for you. `/tp` (`/teleport`) moves you or others to
-  coordinates (`~` relative) or to a player; survival players land on safe ground.
+  A structure or biome search generates no chunk: it reads the generators' plans cell by cell,
+  nearest first, and answers the true nearest (Minecraft's sometimes answers a farther one); a
+  poi search checks each generated candidate by generating its chunk on the search's own
+  generator (never the world's). Underground things show their y (a mineshaft's room, an
+  entrance's collar, a point of interest's block, where Minecraft shows `~`), surface ones `~`;
+  distances are horizontal. Searches run on the server a slice of each frame (3 ms, just before
+  the chunk preload's slice), so a long one (no outpost for 100 regions, a rare biome: about a
+  second of work) never stalls it. The coordinates are green: click them with the chat open and
+  `/tp @s x y z` is typed for you. `/tp` (`/teleport`) moves you or others to coordinates (`~`
+  relative) or to a player. Survival players land on safe ground: a `~` height on the column's
+  safe top, a written one at the safe spot nearest it in the column (within 16 blocks, so a
+  small move in a cave stays in the cave), else the nearest column with safe ground within 24
+  blocks (a lake's, lava lake's, geyser's, ravine's or cave entrance's middle has none), else
+  afloat on open water; the answer says where they landed.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -1051,9 +1061,10 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Other players as the server tells them** (`Players.ServerPositions`, on). Each client
   draws only the players the server sends it (within `Interest.PlayerDistance`, spectators only to
   spectators), 0.1 s behind (`Interest.InterpolationDelay`) and gliding between their poses, a
-  teleport as a jump; everyone else's character stays parked far above the world, hidden whole,
-  with no name, held item, flames, glow or minimap dot. A dead player tips over as in Minecraft and
-  is gone after a second. Your own moves go to the server 20 times a second; its teleports and
+  teleport as a jump; everyone else's character stays parked far above the world (a player who
+  leaves your interest is put back there on your client too), hidden whole, with no name, held
+  item, flames, glow or minimap dot. A dead player tips over as in Minecraft and is gone after a
+  second. Your own moves go to the server 20 times a second; its teleports and
   corrections snap you as before. F3 shows the true coordinates and, under them, the render
   origin (`origin` line: where it is, its moves and the last one's cost) and the players tracked.
   Off, other players are their characters, as before.
@@ -1169,7 +1180,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Locate        | `/locate structure outpost` (or `#mineshaft`, `mineshaft_entrance`, `oil_geyser`, `lava_lake`, `ravine`...), `/locate biome jungle` (or `#is_forest`...), `/locate poi chest` (or `#machine`...) (operators); the answer's green coordinates type their `/tp` when clicked | | |
-| Teleport      | `/tp 100 64 -20`, `/tp ~ ~10 ~`, `/tp <player>`, `/tp <players> <x> <y> <z>`, `/tp <players> <player>` (also `/teleport`; players are names, their start, `@s` or `@a`) (operators) | | |
+| Teleport      | `/tp 100 64 -20`, `/tp ~ ~ ~10`, `/tp <player>`, `/tp <players> <x> <y> <z>`, `/tp <players> <player>` (also `/teleport`; players are names, their start, `@s` or `@a`) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
 | Generation    | `/genstats` (operators): the server's background chunk generation over the last 10 s (chunks/s, ms/s, the worst frame), the backlog and the chunks generated inline | | |
@@ -1799,8 +1810,8 @@ for performance:
 | `Players.ServerPositions` | true    | "Fake coords": characters parked on the server, true positions from checked client moves, relayed by interest; off: read from the characters as before. |
 | `Players.MoveCheck` / `MoveSlack` | "correct" / 2 | Too fast moves: "correct" (sent back), "log" or "off"; seconds of movement at `Players.MoveLimits` (blocks a second per game mode) the checks allow at once. |
 | `Interest.PlayerDistance` / `PlayerHysteresis` | 256 / 16 | Players are told about others this near (blocks, horizontal), and until this much farther. |
-| `Interest.EditChunkRadius` / `EditSendRadius` | 24 / 26 | Chunks: a chunk's edit list and records are sent this near the player (else deferred), live edits this near. |
-| `Interest.LightningDistance` | 512 | Blocks: server lightning strikes are sent this near. |
+| `Interest.EditChunkRadius` / `EditSendRadius` | 14 / 14 | Chunks (x 16 blocks, from the feet to the chunk's nearest point): a chunk's edit list and records are sent this near the player (else deferred), live edits this near. An edit within 14 was made by someone within `PlayerDistance`; the client's lists reach 195 blocks at most. |
+| `Interest.LightningDistance` | 184 | Blocks: server lightning strikes are sent this near (strikes fall within 64 of a player, so only of players within `PlayerDistance`). |
 | `Gameplay.DefaultGameMode` | Survival | Game mode of players when they join: Survival, Creative, Adventure or Spectator. |
 | `Gameplay.GameModeCommand` | true   | Who may change their own game mode (`/gamemode`, `F3` + `N`, `F3` + `F4`): everyone, nobody, or a user id list (operators always may). |
 | `Gameplay.Admins`         | {}      | User ids who are always operators (as the game's owner and everyone in Studio): other players' game modes, `/time set\|add`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, `/op`, `/deop`, structure blocks. |
@@ -1985,19 +1996,24 @@ second per game mode, `MoveSlack` seconds of slack, knockback allowed for; `Move
 sends a too fast player back as Minecraft's "moved too quickly", `"log"` only warns, `"off"`
 trusts), and tells each player only about others within `Interest.PlayerDistance` (256 blocks,
 kept until 16 more; spectators only to spectators, the spectated player always). Teleports go
-privately to the player teleported. Edits reach players within `Interest.EditSendRadius` (26)
-chunks, a chunk's edit list and records (machines, pipes, structure blocks) only come within
-`EditChunkRadius` (24, else the request waits until the player comes near), and server lightning
-within `LightningDistance` (512 blocks; far storms are the client's own). Both switches are kill
-switches, and go off together: off, positions are read from the characters, everything is sent as
-before and the origin stays at 0 (and the ±16,000 studs limit is back).
+privately to the player teleported. Edits reach players within `Interest.EditSendRadius` (14)
+chunks (from the feet to the chunk's nearest point), a chunk's edit list and records (machines,
+pipes, structure blocks) only come within `EditChunkRadius` (14, else the request waits until the
+player comes near), and server lightning within `LightningDistance` (184 blocks; far storms are
+the client's own): an edit or a strike that reaches you was made by, or fell next to, someone
+within `PlayerDistance`, so building, digging and storms farther off tell nobody where anyone is.
+A spectator follows, or without the operators' permission teleports to, only players they see.
+Both switches are kill switches, and go off together: off, positions are read from the
+characters, everything is sent as before and the origin stays at 0 (and the ±16,000 studs limit
+is back).
 
 **Studio checklist for the floating origin** (two players on a local server; what the Lune specs
 can't see):
 
-- **Park:** in client B's Explorer, A's HumanoidRootPart is at the park spot and anchored, and on
-  the server `Humanoid.Died` still fires for a parked character (else the HealthChanged fallback
-  kills it).
+- **Park:** in the server's Explorer, A's HumanoidRootPart is at the park spot and anchored (in
+  client B's only while A is out of B's interest, more than 272 blocks away: within it B draws A
+  where A is), and on the server `Humanoid.Died` still fires for a parked character (else the
+  HealthChanged fallback kills it).
 - **Movement:** A walks, sprints, swims and flies; B sees A smoothly 0.1 s behind, at the right
   place, with animations playing on the anchored rig. Walk more than 272 blocks apart: A vanishes
   (no name, held item, flames, glow or minimap dot); back within 256: A reappears.
@@ -2007,11 +2023,15 @@ can't see):
   around it (the deferred requests), and the camera follows it.
 - **Teleports:** `/tp`, `/locate`'s green coordinates, the map's teleport and a spectator's
   teleport snap the player with no flash of the park spot (0, 20000, 0); F3's `moves epoch` rises.
-- **Death and rejoin:** the death tilt, the body hidden after a second, a clean respawn; a rejoin
-  restores the saved position.
-- **A forced move** (fly about 2,700 blocks, or run
-  `require(game.Players.LocalPlayer.PlayerScripts.IceVoxel.Rendering.Rebase).now()` in the
-  client's command bar): no terrain seams, far meshes in place, no camera swing; clouds, rain,
+- **Death and rejoin:** the death tilt, the body hidden after a second, the terrain around the
+  body staying until the respawn (dying far from the spawn), a clean respawn; a rejoin restores
+  the saved position.
+- **Spectating far players** (a published test place: in Studio everyone is an operator): a
+  non-operator spectator's "Teleport to Player" to someone more than 256 blocks away answers
+  "That player is too far away to teleport to", to someone near it works.
+- **A forced move** (fly about 2,700 blocks: half a minute as a spectator; or, in a test copy,
+  lower `Origin.RebaseDistance` to 300 and `SoftDistance` to 150, so every 100 blocks of walking
+  moves it): no terrain seams, far meshes in place, no camera swing; clouds, rain,
   lightning, thunder, fire, pipes, transporter items, structure outlines, the crack overlay, debris
   and waypoints where they were; positioned sounds not jumping, the Nuke's cloud riding through it,
   no one-frame flash where shown nodes and far-mesh members are moved after parenting; F3's
@@ -2851,7 +2871,7 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,749 tests, all passing (lava and oil have LavaOil,
+`lune run tests/run` runs the whole suite: 1,754 tests, all passing (lava and oil have LavaOil,
 LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
 has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
 and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge,

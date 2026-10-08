@@ -9,7 +9,8 @@
 	            suggests it to those who may) and its arguments
 	            (WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE: the three kinds, then every id and tag
 	            of each, for the chat's completion and suggestions).
-	  Searches  one at a time, a slice of each Heartbeat (Config.Locate.BudgetMs, 3 ms), in the
+	  Searches  one at a time, a slice of each Heartbeat (Config.Locate.BudgetMs, 3 ms: `step`,
+	            which World/Simulation runs before the generation preload's slice), in the
 	            order typed, at most Config.Locate.Queue waiting ("Too many locates are running"
 	            past that); a player's new /locate replaces their earlier one, leaving cancels
 	            it, and one still running after Config.Locate.TimeoutSeconds answers not found.
@@ -27,7 +28,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -121,6 +121,18 @@ local function run(player: Player, text: string)
 end
 
 --[[
+	The searches' slice of this frame (at most Config.Locate.BudgetMs): World/Simulation runs it on
+	Heartbeat just before sizing the generation preload's slice, which so takes what is left of
+	the frame (Config.Server.FrameBudgetMs).
+]]
+function LocateCommands.step()
+	local jobs = queue
+	if jobs and LocateCommand.pending(jobs) > 0 then
+		LocateCommand.step(jobs)
+	end
+end
+
+--[[
 	Starts /locate on `serverWorld` (its edits: /locate poi). `newGenerator` makes the searches'
 	generator (the world's type and seed, as the world's own: Generation/WorldTypes.create).
 ]]
@@ -147,11 +159,6 @@ function LocateCommands.start(
 	local jobs = LocateCommand.newQueue(cfg.BudgetMs / 1000, cfg.TimeoutSeconds, cfg.Queue, os.clock)
 	queue = jobs
 
-	RunService.Heartbeat:Connect(function()
-		if LocateCommand.pending(jobs) > 0 then
-			LocateCommand.step(jobs)
-		end
-	end)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		LocateCommand.cancel(jobs, player)
 	end)

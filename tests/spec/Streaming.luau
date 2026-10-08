@@ -19,8 +19,9 @@
 
 	The floating origin (Shared/World/Origin): the simulation's camera is placed in render studs, so
 	with the origin moved far away the streamer selects, loads and swaps exactly as at the world's
-	0; the viewer comes from the hull hook (`viewerFeet`), else the world spawn attribute (world
-	studs), else the camera read back into world blocks.
+	0; the viewer comes from the hull hook (`viewerFeet`; once it had feet, none leaves the viewer
+	where it was: dying far from the spawn keeps the area around the body), else the world spawn
+	attribute (world studs), else the camera read back into world blocks.
 ]]
 
 local fs = require("@lune/fs")
@@ -2136,6 +2137,53 @@ return function(t, shared, require, _server, client)
 				sim:run(15)
 				t.ok(streamer.viewer:FuzzyEq(Vector3.new(41.25, 30, 39.75), 1e-4), `the hull: {streamer.viewer}`)
 				t.ok(streamer.eye:FuzzyEq(Vector3.new(40.5, sim.eyeY, 40.5), 1e-4), "the eye is the camera's")
+				-- The hull goes (death): the viewer stays, not the spawn.
+				feet = nil
+				sim:run(15)
+				t.ok(streamer.viewer:FuzzyEq(Vector3.new(41.25, 30, 39.75), 1e-4), `still the body: {streamer.viewer}`)
+			end)
+		end)
+		shared:SetAttribute("SpawnPosition", nil)
+		Origin.reset()
+		if not ok then
+			error(err, 0)
+		end
+	end)
+
+	t.test("streamer: dying far from the spawn keeps the area around the body; a respawn goes", function()
+		-- MovementController drops its hull at death (the hook answers nil until the next
+		-- character) while the camera stays on the body for Players.RespawnTime: the spawn
+		-- fallback made that a teleport, and the ground under the body went.
+		Origin.reset()
+		local ok, err = pcall(function()
+			simulate(2000.5, 2000.5, function(sim)
+				local streamer = sim.streamer
+				shared:SetAttribute("SpawnPosition", Vector3.new(0.5 * 3, 33 * 3, 0.5 * 3))
+				local alive = true
+				streamer.viewerFeet = function(): (number?, number, number)
+					if alive then
+						return 2000.5, 30, 2000.5
+					end
+					return nil, 0, 0
+				end
+				sim:run(900, function()
+					return sim:idle()
+				end)
+				t.ok(sim:idle(), "loaded around the player")
+				local modes, trashed = #sim.teleportModes, #sim.renderer.trashed
+				t.ok(sim.coverOf(2000 // 16, 2000 // 16) ~= nil, "the ground under the player")
+				alive = false
+				sim:run(60)
+				t.eq(#sim.teleportModes, modes, "no teleport mode")
+				t.eq(#sim.renderer.trashed, trashed, "nothing trashed")
+				t.ok(sim.coverOf(2000 // 16, 2000 // 16) ~= nil, "the ground under the body stays")
+				t.ok(streamer.viewer:FuzzyEq(Vector3.new(2000.5, 30, 2000.5), 1e-4), `the body: {streamer.viewer}`)
+				-- The respawn's teleport (the new character's, before its hull) goes to the spawn.
+				streamer:teleported(Vector3.new(0.5, 33, 0.5))
+				sim:place(0.5, 0.5)
+				sim:run(30)
+				t.ok(#sim.teleportModes > modes, "the respawn is a teleport")
+				t.ok(streamer.viewer:FuzzyEq(Vector3.new(0.5, 33, 0.5), 1e-4), `at the spawn: {streamer.viewer}`)
 			end)
 		end)
 		shared:SetAttribute("SpawnPosition", nil)

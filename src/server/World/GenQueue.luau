@@ -16,7 +16,9 @@
 	            coordinates (a total order: the same input always gives the same order). Chunks
 	            that left every window are dropped from it; the job in flight is abandoned when its
 	            chunk did (a generator never resumed leaves nothing half done: every cache it fills
-	            takes an entry only once complete, as with the client's cancelled worker jobs).
+	            takes an entry only once complete and keeps no random stream a build advances, as
+	            Generation/Mineshafts' starts keep a number to restart theirs from; the same holds
+	            for the client's cancelled worker jobs).
 	  Job       one at a time: a coroutine running `generate(cx, cz, yield)` on a generator
 	            instance of its own, never the world's. One instance can't run two calls at once
 	            (its column scratch would be shared, 14 chunks in 15 came out wrong when tried);

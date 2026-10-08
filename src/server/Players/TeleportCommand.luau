@@ -18,12 +18,20 @@
 	  Landing      Minecraft puts you exactly there, in rock or mid-air. Here (a deviation) a
 	               survival or adventure player who would land unsafe (Players/SafeSpot.isSafe:
 	               the feet's block, standing room, no lava around) stands on the block instead
-	               when that is safe (a chest /locate poi found), else on the column's safe top
-	               (SafeSpot.column; a /locate link's "~" y lands there), else exactly as asked.
-	               Creative and spectator players go exactly where asked, as to a player.
-	  Answers      Minecraft's: "Teleported Steve to 100.500000, 64.000000, 200.500000" (its %f),
-	               "Teleported 3 entities to ...", "Teleported Steve to Alex"; "No player was
-	               found".
+	               when that is safe (a chest /locate poi found); else, for a y written as a
+	               number or "~n", the nearest safe spot in the column within NEAR (16) blocks of
+	               it (so "/tp ~ ~10 ~" in a cave stays in the cave, and in the open lands on the
+	               ground below); else on the column's safe top (SafeSpot.column: where a plain
+	               "~" y, "any height" as in /locate's links, goes first); else the nearest column
+	               with one within LANDING_RADIUS (24) blocks (SafeSpot.find, as the map's
+	               teleport: a lake's, a lava lake's, a geyser's, a ravine's or a cave entrance's
+	               middle has no safe top); else afloat on open water (SafeSpot.waterSurface: an
+	               ocean's middle, not its bed); else exactly as asked. Creative and spectator
+	               players go exactly where asked, as to a player.
+	  Answers      Minecraft's: "Teleported Steve to 100.500000, 64.000000, 200.500000" (its %f;
+	               one player: where they landed, a deviation when that isn't where asked),
+	               "Teleported 3 entities to ..." (where asked), "Teleported Steve to Alex"; "No
+	               player was found".
 	  Who may      the operators' permission (Minecraft's level 2: Players/Operators).
 ]]
 
@@ -35,6 +43,8 @@ local PlayerSync = require(Shared.Net.PlayerSync)
 local Protocol = require(Shared.Net.Protocol)
 
 local GameModeCommand = require(script.Parent.GameModeCommand)
+local SafeSpot = require(script.Parent.SafeSpot)
+local WorldServer = require(script.Parent.Parent.World.WorldServer)
 
 -- A player the command can name, with where they stand (feet, blocks; x nil: nowhere).
 export type Candidate = {
@@ -54,6 +64,10 @@ export type Context = {
 	-- Can a player stand with their feet in block (x, y, z)? And the column's safe top (nil: none).
 	isSafe: (x: number, y: number, z: number) -> boolean,
 	column: (x: number, z: number) -> number?,
+	-- The nearest safe spot within LANDING_RADIUS of column (x, z) (nil x: none), and the feet's
+	-- block afloat on open water there (nil: no water on top). nil: not looked for.
+	near: ((x: number, z: number) -> (number?, number, number))?,
+	waterSurface: ((x: number, z: number) -> number?)?,
 }
 
 -- A move to make: the player, and the feet (blocks, doubles).
@@ -72,6 +86,9 @@ TeleportCommand.DENIED = "You can't use /tp here"
 TeleportCommand.INVALID = "Invalid position for teleport"
 TeleportCommand.NO_PLAYER = "No player was found"
 TeleportCommand.NOT_SINGLE = "Only one player is allowed, but the provided selector allows more than one"
+-- Blocks from a written y searched in its column, and around the column searched for a safe one.
+TeleportCommand.NEAR = 16
+TeleportCommand.LANDING_RADIUS = 24
 
 local function words(text: string): { string }
 	local list = {}
@@ -115,28 +132,84 @@ function TeleportCommand.formatNumber(value: number): string
 	return string.format("%f", value)
 end
 
--- Where a player of `mode` asking for feet (x, y, z) lands (see the header).
+--[[
+	Where a player of `mode` asking for feet (x, y, z) lands (see the header). `anyHeight`: the y
+	was a plain "~" (any height: the column's safe top before a spot near it).
+]]
 function TeleportCommand.landing(
 	mode: string,
 	x: number,
 	y: number,
 	z: number,
-	context: Context
+	context: Context,
+	anyHeight: boolean?
 ): (number, number, number)
 	if mode == GameMode.CREATIVE or mode == GameMode.SPECTATOR then
 		return x, y, z
 	end
+	local isSafe = context.isSafe
 	local bx, by, bz = math.floor(x), math.floor(y), math.floor(z)
-	if context.isSafe(bx, by, bz) then
+	if isSafe(bx, by, bz) then
 		return x, y, z
-	elseif context.isSafe(bx, by + 1, bz) then
+	elseif isSafe(bx, by + 1, bz) then
 		return x, by + 1, z
+	end
+	if not anyHeight then
+		-- (Nearest first: d below, then d + 1 above, by + 1 was looked at.)
+		for d = 1, TeleportCommand.NEAR do
+			if isSafe(bx, by - d, bz) then
+				return x, by - d, z
+			elseif isSafe(bx, by + d + 1, bz) then
+				return x, by + d + 1, z
+			end
+		end
 	end
 	local top = context.column(bx, bz)
 	if top then
 		return x, top, z
 	end
+	local near = context.near
+	if near then
+		local nx, ny, nz = near(bx, bz)
+		if nx then
+			return nx + 0.5, ny, nz + 0.5
+		end
+	end
+	local waterSurface = context.waterSurface
+	local afloat = if waterSurface then waterSurface(bx, bz) else nil
+	if afloat then
+		return x, afloat, z
+	end
 	return x, y, z
+end
+
+--[[
+	A Context on `world`'s blocks (Players/SafeSpot; a chunk may be generated to look): what
+	Players/TeleportCommands runs /tp with.
+]]
+function TeleportCommand.worldContext(
+	world: WorldServer.World,
+	mayUse: boolean,
+	source: Candidate,
+	players: { Candidate }
+): Context
+	return {
+		mayUse = mayUse,
+		source = source,
+		players = players,
+		isSafe = function(x: number, y: number, z: number): boolean
+			return SafeSpot.isSafe(world, x, y, z)
+		end,
+		column = function(x: number, z: number): number?
+			return SafeSpot.column(world, x, z)
+		end,
+		near = function(x: number, z: number): (number?, number, number)
+			return SafeSpot.find(world, x, z, TeleportCommand.LANDING_RADIUS)
+		end,
+		waterSurface = function(x: number, z: number): number?
+			return SafeSpot.waterSurface(world, x, z)
+		end,
+	}
 end
 
 -- The players `query` names (GameModeCommand.findPlayers' rules), or nil and why not.
@@ -246,16 +319,27 @@ function TeleportCommand.run(text: string, context: Context): Result?
 	elseif not valid(x, y, z) then
 		return say(TeleportCommand.INVALID)
 	end
+	-- (Where each game mode lands, worked out once: it may look at many columns.)
+	local anyHeight = args[#args - 1] == "~"
+	local landed: { [string]: { number } } = {}
 	for _, target in targets do
-		local fx, fy, fz = TeleportCommand.landing(target.mode, x, y, z, context)
-		table.insert(result.moves, { key = target.key, x = fx, y = fy, z = fz })
+		local spot = landed[target.mode]
+		if spot == nil then
+			local fx, fy, fz = TeleportCommand.landing(target.mode, x, y, z, context, anyHeight)
+			spot = { fx, fy, fz }
+			landed[target.mode] = spot
+		end
+		table.insert(result.moves, { key = target.key, x = spot[1], y = spot[2], z = spot[3] })
 	end
-	local position =
-		`{TeleportCommand.formatNumber(x)}, {TeleportCommand.formatNumber(y)}, {TeleportCommand.formatNumber(z)}`
+	local function position(px: number, py: number, pz: number): string
+		local format = TeleportCommand.formatNumber
+		return `{format(px)}, {format(py)}, {format(pz)}`
+	end
 	if #targets == 1 then
-		return say(`Teleported {targets[1].name} to {position}`)
+		local move = result.moves[1]
+		return say(`Teleported {targets[1].name} to {position(move.x, move.y, move.z)}`)
 	end
-	return say(`Teleported {#targets} entities to {position}`)
+	return say(`Teleported {#targets} entities to {position(x, y, z)}`)
 end
 
 return TeleportCommand

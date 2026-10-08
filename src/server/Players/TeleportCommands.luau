@@ -11,7 +11,7 @@
 	            It carries the operators' permission (WorldSettings.COMMAND_PERMITTED), so the
 	            chat suggests it to those who may use it.
 	  Landing   Players/SafeSpot on the world's blocks (a chunk may be generated to look), for
-	            survival and adventure players (TeleportCommand.landing).
+	            survival and adventure players (TeleportCommand.landing, worldContext).
 	  Feedback  Notice messages to whoever typed it (client Net/Notices: the chat).
 ]]
 
@@ -28,7 +28,6 @@ local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Operators = require(script.Parent.Operators)
 local PlayerPositions = require(script.Parent.PlayerPositions)
-local SafeSpot = require(script.Parent.SafeSpot)
 local TeleportCommand = require(script.Parent.TeleportCommand)
 
 local TeleportCommands = {}
@@ -66,17 +65,8 @@ local function run(player: Player, text: string)
 	for _, other in Players:GetPlayers() do
 		table.insert(everyone, if other == player then source else candidate(other))
 	end
-	local result = TeleportCommand.run(text, {
-		mayUse = Operators.permitted(player),
-		source = source,
-		players = everyone,
-		isSafe = function(x: number, y: number, z: number): boolean
-			return SafeSpot.isSafe(blocks, x, y, z)
-		end,
-		column = function(x: number, z: number): number?
-			return SafeSpot.column(blocks, x, z)
-		end,
-	})
+	local result =
+		TeleportCommand.run(text, TeleportCommand.worldContext(blocks, Operators.permitted(player), source, everyone))
 	if result == nil then
 		return
 	end

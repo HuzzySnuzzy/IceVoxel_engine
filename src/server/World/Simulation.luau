@@ -16,9 +16,9 @@
 	             (just joined or teleported) or more than UrgentBacklog chunks wait (joins,
 	             teleports, fast flyers); never past FrameBudgetMs of the frame's work so far
 	             (measured from PreSimulation, the frame's first script step: physics and whatever
-	             ran before), but always MinGenerationBudgetMs, so the backlog keeps moving. A
-	             slice overshoots by the generator's longest stretch between two yields (~5 ms at
-	             most, see GenQueue).
+	             ran before, /locate's slice included: `start`'s `before`), but always
+	             MinGenerationBudgetMs, so the backlog keeps moving. A slice overshoots by the
+	             generator's longest stretch between two yields (~5 ms at most, see GenQueue).
 	  /genstats  operators (WorldSettings.COMMAND_PERMITTED, so the chat suggests it to them only):
 	             the background generation of the last 10 s (chunks/s, ms/s, the worst frame), the
 	             backlog, and the chunks generated inline (getChunk: edits, spawns, map teleports,
@@ -96,12 +96,17 @@ end
 
 --[[
 	Starts preloading around players (once, with the world). `newGenerator` builds the background
-	generator: the world's type, seed and options, as its own generator was built.
+	generator: the world's type, seed and options, as its own generator was built. `before` (nil:
+	none) runs every Heartbeat just before the generation slice is sized, so its time counts in
+	the frame's work (/locate's search slice: Players/LocateCommands.step); two Heartbeat
+	handlers run in no set order, so a slice of its own could land after this one's and on top
+	of FrameBudgetMs.
 ]]
 function Simulation.start(
 	world: WorldServer.World,
 	net: ServerNet.ServerNet,
-	newGenerator: () -> TerrainGenerator.Generator
+	newGenerator: () -> TerrainGenerator.Generator,
+	before: (() -> ())?
 )
 	assert(queue == nil, "Simulation.start was already called")
 	local cfg = Config.Server
@@ -160,6 +165,9 @@ function Simulation.start(
 		if elapsed >= SCAN_INTERVAL then
 			elapsed = 0
 			scan()
+		end
+		if before then
+			before()
 		end
 		q:step(q:budget(limits, (os.clock() - frameStart) * 1000) / 1000)
 	end)

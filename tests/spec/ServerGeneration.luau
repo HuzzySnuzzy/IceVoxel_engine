@@ -3,7 +3,9 @@
 	glue): the windows and the queue's order, abandoning, chunks made meanwhile, failures, the
 	budget's packing (fake clock), installs (edits, crop growth, onGenerated once, the race with
 	getChunk), and on the Default generator: a chunk generated a yield at a time on a second
-	instance, with the world's generator run at every yield, is the chunk generated in one go, and
+	instance, with the world's generator run at every yield, is the chunk generated in one go; a
+	job dropped at a yield inside a mineshaft plan's piece grammar changes no chunk that instance
+	makes later (the start's random stream is restarted from a number each build); and
 	slices keep near their budget (the generator yields inside its long decisions: Generation/
 	Lakes, SurfaceCaves, Mineshafts, TerrainGenerator).
 ]]
@@ -418,6 +420,67 @@ return function(t, shared, require, server)
 		for _, site in { "Lakes", "SurfaceCaves", "Mineshafts", "TerrainGenerator", "Caves" } do
 			t.ok((sites[site] or 0) > 0, `yields in {site}`)
 		end
+	end)
+
+	t.test("default world: a job dropped inside a mineshaft plan build changes no later chunk", function()
+		-- Plans near the origin, each found on a throwaway instance; the queue's job for the chunk
+		-- at a plan's middle is dropped (its player teleported away) at the first yield inside
+		-- the plan's piece grammar, then the same instance makes the chunks around it again.
+		local plans = (WorldTypes.create("default", 12345, {}) :: any).mineshafts(-2048, -2048, 2048, 2048)
+		local dropped, compared = 0, 0
+		for i, plan in plans do
+			if i > 3 then
+				break
+			end
+			local b = plan.bounds
+			local cx, cz = (b[1] + b[4]) // 2 // ChunkLayout.SIZE, (b[3] + b[6]) // 2 // ChunkLayout.SIZE
+			local background = WorldTypes.create("default", 12345, {})
+			local reference = WorldTypes.create("default", 12345, {})
+			local inGrammar = false
+			local q = GenQueue.new({
+				radius = 0,
+				generate = function(gx: number, gz: number, yield: () -> ()): (buffer, number)
+					local r = background.generate(0, gx, gz, function()
+						if string.find(debug.traceback(), "addChildren", 1, true) then
+							inGrammar = true
+						end
+						yield()
+					end)
+					return r.data, r.height
+				end,
+				install = function(): boolean
+					return true
+				end,
+				loaded = function(): boolean
+					return false
+				end,
+			})
+			q:update({ cx, cz })
+			local steps = 0
+			repeat
+				q:step(0)
+				steps += 1
+			until inGrammar or steps >= 100000 or q:stats().inFlight == nil
+			if not inGrammar then
+				continue
+			end
+			q:update({ cx + 5000, cz + 5000 })
+			t.eq(q:stats().abandoned, 1, "the job was dropped")
+			dropped += 1
+			for dz = -2, 2 do
+				for dx = -2, 2 do
+					local got = background.generate(0, cx + dx, cz + dz)
+					local want = reference.generate(0, cx + dx, cz + dz)
+					compared += 1
+					t.ok(
+						got.height == want.height and buffer.tostring(got.data) == buffer.tostring(want.data),
+						`({cx + dx}, {cz + dz}) after the drop at plan {i}`
+					)
+				end
+			end
+		end
+		t.ok(dropped >= 2, `{dropped} jobs dropped inside a plan's grammar`)
+		print(`    {dropped} jobs dropped inside a mineshaft plan build, {compared} chunks the same after`)
 	end)
 
 	t.test("default world: slices keep near the budget on cold chunks", function()
