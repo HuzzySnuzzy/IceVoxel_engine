@@ -21,10 +21,11 @@
 	Order of a chunk: fill, caves (Caves.luau, cave air), cave entrances and ravines
 	(SurfaceCaves.luau, air open to the surface), lava below LavaLevel, surface lava lakes and oil
 	wells (Lava.luau, OilWells.luau), water lakes and puddles (Lakes.luau), ores, underground lava
-	lakes, trees and library structures, glow lichen, ground plants. Trees ask the worms (not the
-	chunk) whether a surface cave opens under them, so every chunk agrees on every tree; no
-	surface cave is carved next to a structure's piece, a surface lava or water lake, a puddle or
-	a geyser's oil lake, and no tree grows in one.
+	lakes (kept off mineshafts), trees and library structures, mineshafts (Mineshafts.luau, full
+	detail only: their entrance shafts last), glow lichen, ground plants. Trees ask the worms (not
+	the chunk) whether a surface cave opens under them, so every chunk agrees on every tree; no
+	surface cave is carved next to a structure's piece, a surface lava or water lake, a puddle, a
+	geyser's oil lake or a mineshaft's entrance, and no tree grows in one.
 
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
@@ -56,6 +57,7 @@ local CaveDecor = require(script.Parent.CaveDecor)
 local Lava = require(script.Parent.Lava)
 local OilWells = require(script.Parent.OilWells)
 local Lakes = require(script.Parent.Lakes)
+local Mineshafts = require(script.Parent.Mineshafts)
 local StructureGen = require(script.Parent.StructureGen)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
@@ -175,6 +177,9 @@ export type Generator = {
 	-- rectangle (inclusive), and the puddles whose columns come within Lakes.PUDDLE_MARGIN.
 	waterLakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Lake },
 	puddles: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Puddle },
+	-- The mineshafts (Generation/Mineshafts) whose bounds touch the block rectangle (inclusive),
+	-- in write order; nil or empty: the world has none (flat and debug worlds, structures off).
+	mineshafts: ((minX: number, minZ: number, maxX: number, maxZ: number) -> { Mineshafts.Plan })?,
 	--[[
 		The sea's surface (blocks: the first air above the sea): a column whose height (`column`)
 		is lower lies under water up to it. Config.SeaLevel here; flat and debug worlds
@@ -422,6 +427,57 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		spawn = spawnColumn,
 		carvesTop = surfaceCaves.carvesTop,
 	})
+	-- Mineshafts, decided from the full detail terrain; they keep clear of all of the above (and
+	-- nothing above asks them), and follow Generate Structures.
+	local mineshafts: Mineshafts.Mineshafts? = nil
+	if opts.structures ~= false and Config.Structures.Generate and Config.Mineshafts.Enabled then
+		mineshafts = Mineshafts.new(seed, {
+			height = outsideHeight,
+			biome = biomeAt,
+			river = function(x: number, z: number): number
+				local _, _, _, river = relief.height(x, z, 0)
+				return river
+			end,
+			-- Library pieces, oil wells (deposits) and their lakes, surface lava lakes, water lakes
+			-- and puddles, each with the margin its own queries keep.
+			blocked = function(minX: number, minZ: number, maxX: number, maxZ: number): { number }
+				local list: { number } = {}
+				local function add(x0: number, z0: number, x1: number, z1: number)
+					table.insert(list, x0)
+					table.insert(list, z0)
+					table.insert(list, x1)
+					table.insert(list, z1)
+				end
+				if placer then
+					for _, start in placer.starts(minX, minZ, maxX, maxZ) do
+						for _, piece in start.pieces do
+							local box = piece.box
+							add(box[1], box[3], box[4], box[6])
+						end
+					end
+				end
+				for _, well in wells.find(minX, minZ, maxX, maxZ) do
+					local r = math.max(well.radius, well.lakeRadius) + OilWells.MARGIN
+					add(well.x - r, well.z - r, well.x + r, well.z + r)
+				end
+				for _, lake in lava.surfaceLakes(minX, minZ, maxX, maxZ) do
+					local m = Lava.PROTECT
+					add(lake.x - m, lake.z - m, lake.x + Lava.BOX - 1 + m, lake.z + Lava.BOX - 1 + m)
+				end
+				for _, lake in lakes.lakes(minX, minZ, maxX, maxZ) do
+					local m = Lakes.PROTECT
+					add(lake.x - m, lake.z - m, lake.x + Lakes.BOX - 1 + m, lake.z + Lakes.BOX - 1 + m)
+				end
+				for _, puddle in lakes.puddles(minX, minZ, maxX, maxZ) do
+					local m = Lakes.PUDDLE_MARGIN
+					add(puddle.x0 - m, puddle.z0 - m, puddle.x1 + m, puddle.z1 + m)
+				end
+				return list
+			end,
+			spawn = spawnColumn,
+			carvesTop = surfaceCaves.carvesTop,
+		})
+	end
 
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
@@ -589,6 +645,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				table.insert(keepOut, puddle.z0 - m)
 				table.insert(keepOut, puddle.x1 + m)
 				table.insert(keepOut, puddle.z1 + m)
+			end
+			-- Mineshaft entrances (written at full detail only, but kept clear at every level).
+			if mineshafts then
+				for _, entrance in mineshafts.entrances(x0, z0, x1, z1) do
+					table.move(entrance.box, 1, 4, #keepOut + 1, keepOut)
+				end
 			end
 		end
 
@@ -759,14 +821,27 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				emptyAbove = top
 			end
 		end
+		-- Mineshafts reaching the padded chunk (full detail only).
+		local shafts: { Mineshafts.Plan }? = nil
+		if level == 0 and mineshafts then
+			local found = mineshafts.plans(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE, yield)
+			if #found > 0 then
+				shafts = found
+			end
+		end
 		if level == 0 then
 			Ores.place(data, seed, nx, nz, cells)
 			-- An underground lava lake, sunk into a cave floor (decided from this chunk's blocks; it
-			-- never reaches the neighbours' padding), not into a library structure's piece.
+			-- never reaches the neighbours' padding), not into a library structure's piece nor
+			-- near a mineshaft.
 			if carved then
 				local blocked: ((number, number, number, number, number, number) -> boolean)? = nil
-				if starts then
-					local list = starts
+				local taken: { number } = {}
+				if shafts and mineshafts then
+					taken = mineshafts.boxes(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE)
+				end
+				if starts or #taken > 0 then
+					local list: { StructureGen.Start } = starts or {}
 					blocked = function(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): boolean
 						for _, start in list do
 							for _, piece in start.pieces do
@@ -781,6 +856,18 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 								then
 									return true
 								end
+							end
+						end
+						for i = 1, #taken, 6 do
+							if
+								taken[i] <= x1
+								and taken[i + 3] >= x0
+								and taken[i + 1] <= y1
+								and taken[i + 4] >= y0
+								and taken[i + 2] <= z1
+								and taken[i + 5] >= z0
+							then
+								return true
 							end
 						end
 						return false
@@ -862,6 +949,19 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				if lowest < huge then
 					structureSpan = { lowest, top - 1 }
 				end
+			end
+		end
+
+		-- Mineshafts, after the library structures (full detail only): cave air and cave twins in
+		-- the rock, marked in the cave lattice; their entrances' shafts open to the sky.
+		if shafts and mineshafts then
+			local lowest, top, map = mineshafts.write(shafts, data, originX, originZ, cells, heights, carved)
+			carved = map
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+			if top > emptyAbove then
+				emptyAbove = top
 			end
 		end
 
@@ -1100,10 +1200,11 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	end
 
 	local function structureContainer(x: number, y: number, z: number): { StructureGen.ContainerItem }?
-		if placer == nil then
-			return nil
+		local items = if placer then placer.container(x, y, z) else nil
+		if items == nil and mineshafts then
+			items = mineshafts.container(x, y, z)
 		end
-		return placer.container(x, y, z)
+		return items
 	end
 
 	local function structuresIn(minX: number, minZ: number, maxX: number, maxZ: number): { StructureGen.Start }
@@ -1128,6 +1229,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		lavaLakes = lava.surfaceLakes,
 		waterLakes = lakes.lakes,
 		puddles = lakes.puddles,
+		mineshafts = function(minX: number, minZ: number, maxX: number, maxZ: number): { Mineshafts.Plan }
+			return if mineshafts then mineshafts.plans(minX, minZ, maxX, maxZ) else {}
+		end,
 		seaLevel = SEA,
 	}
 end

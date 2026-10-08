@@ -235,13 +235,14 @@ end
 
 --[[ The world types ]]
 
--- Minecraft's "Generate Structures" (library structures: Structures/Library).
+-- Minecraft's "Generate Structures" (library structures: Structures/Library, and mineshafts:
+-- Generation/Mineshafts).
 local STRUCTURES: Setting = {
 	key = "structures",
 	name = "Generate Structures",
 	kind = "toggle",
 	default = true,
-	description = "Outposts and the other structures of the structure library",
+	description = "Outposts, mineshafts and the other structures of the structure library",
 }
 
 -- "BirchForest" -> "Birch Forest".

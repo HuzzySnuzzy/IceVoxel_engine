@@ -588,6 +588,34 @@ A fast, Minecraft-style voxel engine for Roblox.
   along them a hut, a storehouse with a chest of supplies, an open forge and a woodpile: at most one
   per 896 × 896 blocks, in plains, savannas, meadows and forests. With `Config.Structures.Generate`
   false none generate.
+- **Mineshafts.** Minecraft 1.20.1's abandoned mineshafts, grown from its own piece grammar
+  (MineshaftPieces: a room, then corridors, crossings and stairs, depth first, at most 8 steps and
+  80 blocks from the room): rooms with a domed roof, 3 × 3 corridors 10-20 blocks long with a
+  support every 5 blocks (an oak plank beam on two oak fence posts; a quarter of them broken to their
+  end planks), a rough ceiling, rails in a third of the corridors (with gaps), cobwebs in the
+  corners and whole spider corridors full of them, a rare wall torch, plank bridges with oak log
+  pillars where a corridor crosses a cave, crossings (some two floors tall) and stairs going down,
+  and a chest now and then (1 in 100 per section side) with Minecraft's mineshaft loot on this
+  game's items (an iron pickaxe, ingots, raw ores, a diamond, coal, porkchops, glow dust, herbs and
+  straw; rails, torches and rope). About 13-15 per km² (Minecraft's 1 in 250 chunks), each
+  typically 60-150 pieces over some 130 × 130 blocks; the room's floor lies 28-64 blocks under the
+  surface, every piece keeps 6 blocks of ground over it, none goes below y 16 (the lava seas) or
+  near a lake, puddle, lava lake, oil well or library structure, so they never flood. In humid
+  biomes they are **overgrown** (as one running into Minecraft's lush caves; jungles 72%, birch
+  forests and mushroom fields 80%, old growth taigas 56%, forests and taigas 32%, never in dry
+  biomes): moss on the rock around (floors, walls and ceilings; the woodwork stays wood), moss
+  carpets, vines hanging from the walls, hanging roots, glow lichen and fewer cobwebs. About half
+  of the overgrown ones have an **entrance**: a 3 × 3 shaft open to the sky on dry, level ground
+  (never by water, a cave entrance, a lake or the spawn), framed by a mossy cobblestone collar, an
+  oak log beam on two fence posts across it, and a **rope hanging all the way down** from the beam to
+  the floor of the room or corridor 20-60 blocks below (climb it, or let go and slide down it:
+  a rope never hurts), with vines down its walls; no tree grows by one. A mineshaft is written
+  into the full detail chunks only, as cave air and cave twins of its rails, posts, cobwebs,
+  torches and plants, so while caves are hidden it costs nothing to draw until you find it (the
+  entrance shaft is open air like a cave entrance's pit); mobs spawn in its dark like any cave.
+  Generate Structures (and `Config.Structures.Generate`, `Config.Mineshafts.Enabled`) turns them
+  off. Worlds saved before mineshafts existed get them too, under ground nobody changed (terrain
+  comes from the seed; every edit stays). The All Structures debug world shows a sample of each.
 - **World types.** Minecraft's world presets, each with its own options: **Default**;
   **Superflat**, layers from a preset line in this game's names (`Bedrock,2*Dirt,Grass;Plains`;
   Minecraft's own strings such as `minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block` paste
@@ -1321,6 +1349,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     Structures/             placement + Trees (builders) + Writer (clipping, LOD)
     StructureGen            library structures in chunks (random_spread starts, assembly cache,
                             pieces, foundations, generated chests)
+    Mineshafts              Minecraft's mineshafts (piece grammar, overgrown ones, entrance
+                            shafts with a rope, chest loot; full detail only)
     CaveDecor               glow lichen on cave walls (full detail only)
     Foliage                 ground plants by biome (full detail only)
     WorldTypes              the world types (registry, options and settings, hints, the
@@ -1611,6 +1641,14 @@ for performance:
 | `Lakes.Water`             | Rarity 600 | Water lakes: one candidate per `Rarity` chunks of area, kept with its biome's weight in `Biomes` (Desert 0.3, Savanna 0.6, Windswept Savanna 0.5; others 1); `Enabled = false`: none. |
 | `Lakes.Puddles`           | Spacing 32, Chance 0.05 | Puddles: one candidate per 32 × 32 blocks, a puddle with its biome's chance in `Biomes` (Jungle 0.14 ... Desert 0.005) or `Chance`, none in frozen or snowy biomes; `Size` 3-20 columns, `Radius` 1.5-3.5 blocks; `Enabled = false`: none. |
 | `Lakes.SpawnClearance`    | 24      | No water lake or puddle this close to the spawn (blocks). |
+| `Mineshafts.Enabled`      | true    | Mineshafts (Generation/Mineshafts); they also follow Generate Structures and `Structures.Generate`. |
+| `Mineshafts.Grid` / `Chance` | 128 / 0.25 | One candidate start room per 128 × 128 blocks, kept with `Chance` (about 15 per km², Minecraft's 1 in 250 chunks). |
+| `Mineshafts.Depth`        | { 28, 64 } | The start room's floor this many blocks under its centre column's surface (fewest, most). |
+| `Mineshafts.MinY` / `Cover` | 16 / 6 | No mineshaft block below y 16; 6 blocks of ground kept over every piece. |
+| `Mineshafts.MaxDepth` / `Extent` | 8 / 80 | Minecraft's grammar: pieces at most 8 steps from the room, starting within 80 blocks of its corner. |
+| `Mineshafts.OvergrownHumidity` / `OvergrownChance` | { 0.1, 0.6 } / 0.8 | Overgrown with a chance rising from 0 at biome humidity 0.1 to 0.8 at 0.6 and above. |
+| `Mineshafts.EntranceChance` | 0.5  | The chance an overgrown mineshaft has an entrance shaft with a rope (when a spot passes). |
+| `Mineshafts.SpawnClearance` | 32   | No entrance this close to the spawn (blocks). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides operators (the owner, `Gameplay.Admins` and Studio among them): user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |

@@ -79,7 +79,7 @@ node key) and `posKey(x, y, z)` for block positions.
    the same rock in a chunk's padding as in its neighbour's core; then water lakes (point-sampled
    up to `Config.StructureMaxLevel`) and puddles (full detail only; `Lakes.luau`, see Lakes and
    puddles). After the ores (step 6) a full detail chunk with caves may sink an underground lava
-   lake into a cave floor.
+   lake into a cave floor (not within 2 blocks of a library piece or a mineshaft's piece).
 6. **Ores** (level 0 only, `Ores.luau`). Random-walk veins inside the chunk's own core, in altitude
    bands (diorite, andesite and granite blobs low to high, emeralds only inside high mountains).
    Each feature in `Ores.FEATURES` has `veins` per 128 blocks of height and `size` walk steps.
@@ -97,11 +97,14 @@ node key) and `posKey(x, y, z)` for block positions.
 7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
    the structure library's jigsaw structures (`StructureGen.luau`), whose air clears trees and
    whose structure voids keep them. See below.
-8. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures, so it only clings to rock
-   that is still there; it grows only in cave air, so surface caves get none. See below.
-9. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
-   trunk, leaves or a building, nor in or over a pit (the column's generated top must be ground
-   with air above). See Foliage below.
+8. **Mineshafts** (level 0 only, `Mineshafts.luau`): their pieces carved and furnished as cave air
+   and cave twins, overgrowth, then their entrance shafts open to the sky. See Mineshafts below.
+9. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures and mineshafts, so it only
+   clings to rock that is still there; it grows only in cave air, so surface caves get none. See
+   below.
+10. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+   trunk, leaves or a building, nor in or over a pit or an entrance shaft (the column's generated
+   top must be ground with air above). See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
 rock or cave air; lowered under a structure's cells that are neither, under surface caves' air
@@ -110,7 +113,9 @@ structures, plants and geysers' spouts). A dug lake (a geyser's oil lake, a wate
 puddle) lowers its columns' `topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
 cave cells into rock (deposits, the spout below a lake, underground lava lakes) marks the cave
 lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads those cells
-instead of assuming rock.
+instead of assuming rock; mineshafts, which also put planks, logs and moss into caves, mark every
+lattice cell their pieces and shafts touch as read (`Caves.markRead`: a cell flagged "cave air
+throughout" becomes "read" too).
 `TerrainGenerator.new(seed, options?)` takes the structure library to generate (`options.library`,
 default `Library.load()` while `Config.Structures.Generate` is on; `structures = false` for none);
 `generator.structures(minX, minZ, maxX, maxZ)` lists the generated structures with a piece in a
@@ -123,6 +128,9 @@ surface lava lakes and `waterLakes(...)` / `puddles(...)` the water lakes and pu
 `options.biome` (a biome index) puts one biome on every column and `options.climateScale` widens
 the climate noise (World types below); without them a world is byte for byte what it was
 (tests/spec/WorldTypeGenerators pins digests of chunks, columns, the spawn and a map tile).
+`generator.mineshafts(minX, minZ, maxX, maxZ)` (optional: the Default and the debug structures
+world have it) lists the mineshafts whose bounds touch a rectangle, and `structureContainer`
+answers for their chests too (after the library's).
 `generator.seaLevel` is the sea's surface (`Config.SeaLevel` here; the map, safe spawning and
 structures' ground read it) and `generator.labels` (optional) lists generated structure blocks
 with settings of their own (the debug structures world's name tags).
@@ -488,9 +496,10 @@ up. Builders must draw random numbers the same way regardless of which chunk run
 On LOD chunks the writer point-samples (a cell is written if its center block is), so trees keep
 their real size from far away. A spot is refused near a library structure's piece (`accept`, see
 below), so no canopy is cut by a hut and no trunk stands in a path, inside a surface lava or
-water lake's box, a puddle's bounds or a geyser's lake square (with their margins:
-TerrainGenerator's `keepOut`; far nodes keep trees out of puddles too, though they don't draw
-them, so every level agrees on every tree), and where a cave
+water lake's box, a puddle's bounds, a geyser's lake square or a mineshaft entrance's square
+(5 blocks around its opening's centre) (with their margins: TerrainGenerator's `keepOut`; far
+nodes keep trees out of puddles and entrances too, though they don't draw them, so every level
+agrees on every tree), and where a cave
 entrance or ravine may carve the column's top (`SurfaceCaves.carvesTop`, decided from the worms,
 never the chunk's data, so every chunk and level agrees on every tree).
 
@@ -543,6 +552,85 @@ RandomSpreadStructurePlacement, written right after the trees at levels up to
 In a normal Luau VM a chunk under the example outpost costs within a few percent of plain terrain,
 an outpost's assembly (~30 pieces) about 0.5 ms, and chunks with no start near them the same as
 before.
+
+### Mineshafts (`Mineshafts.luau`)
+
+Minecraft 1.20.1's abandoned mineshafts (MineshaftStructure, MineshaftPieces), procedural rather
+than templates: a jigsaw structure underground would write plain Air (always meshed, never
+hidden); these write cave air and cave twins, which hidden caves draw as rock. Written in full
+detail chunks only (caves exist only there), in step 8 after the library structures.
+
+- **Placement** (`Config.Mineshafts`). One candidate per `Grid` × `Grid` (128) block cell, kept with
+  `Chance` (0.25: ~15 per km², Minecraft's 0.4% of chunks), from `Hash.rng(Hash.hash3(salt, gx, 0,
+  gz))`: the start room's corner at a hashed spot of the cell, its size (8..13 × 5..10 × 8..13),
+  and its floor `Depth` (28..64) blocks under the full detail surface of its centre, never below
+  `MinY + 4` (a start that can't keep 28 blocks over it, a deep sea floor, is dropped). Depth is
+  measured from the surface because the world is 1024 tall: Minecraft's absolute y -10..52 would
+  bury them hundreds of blocks deep or put them in the Underlands. Overgrown with
+  `clamp((humidity - 0.1) / 0.5, 0, 1) × OvergrownChance` by the start column's biome; an
+  overgrown one wants an entrance with `EntranceChance`.
+- **Pieces.** Minecraft's grammar with its draws, depth first from one random stream (rooms with
+  exits along their sides; crossings at rand(100) ≥ 80, stairs ≥ 70, else corridors 5 n long,
+  shortened while refused; straight on, left or right a block down, level or up; side branches
+  every 5 blocks two steps deeper; nothing past `MaxDepth` 8 or `Extent` 80 blocks from the room's
+  corner). A piece is refused below `MinY`, with less than `Cover` blocks of ground over it (on a
+  world-aligned 8 block lattice of columns within 4 of its footprint), overlapping an earlier
+  piece, or within `MARGIN` (2) of a library piece, an oil well or its lake, a surface lava lake, a
+  water lake or a puddle (TerrainGenerator's `blocked` lists them per 64 × 64 tile, with their own
+  margins). Plans depend on the seed, their cell and the full detail terrain only, and are kept in
+  an LRU of 64 cells per generator (each worker its own); a lookup only builds the cells whose
+  start may reach it (`Extent + 30` blocks every way). Measured in Lune: ~13-15 per km² on seed
+  12345, typically 60-150 pieces; a plan builds in ~1-3 ms (a lookup at a room 2.3 ms median with
+  cold lakes and puddles, 13 ms at most for two big ones).
+- **Writing** (`write(plans, data, originX, originZ, cells, heights, carved)`): every plan
+  touching the padded chunk, its pieces in plan order clipped to it, a plan's overgrowth after all
+  its pieces, then every entrance. Rock (opaque, not bedrock, not the structure's planks, logs or
+  chests) becomes cave air; Air (a surface cave) stays Air; fluids are never touched; and no cell is
+  carved within `GUARD` (2) blocks of the open above or beside it (its own and its four
+  neighbours' full detail heights), so a cliff between Cover samples never opens a tunnel to the
+  sky or the sea. Decorations go into cave air as their cave twin and into Air as themselves;
+  those hanging on a side (torches, vines, lichen) only into cave air. An opaque or ordinary block
+  is decided by the plan, per cell hashes and its own column only, so a padding column gets what
+  the neighbour's core column gets (ores count as rock, twins as the cave air they may be); twins
+  may read their sides, so a padding ring twin can differ, as glow lichen's can. Every attached
+  block written is checked last and taken away if what held it went. Each piece's box grown by
+  one, each log pillar and each shaft is marked read in the cave lattice. `write` returns the
+  lowest cell it wrote with something neither opaque nor a cave cell (ordinary decorations in a
+  surface cave, the shaft's air and rope: `solidBelow`) and one above its highest (`emptyAbove`).
+- **Furnishing** (MineShaftCorridor.postProcess per column): rough ceilings (80% of the top layer),
+  a support every 5 blocks (a plank beam where the cell above isn't open, a quarter of them only
+  their end planks; oak fence posts under the end planks), wall torches 5% each side of a whole
+  beam (twins hanging on the beam), cobwebs 10% / 5% at the top corners under opaque rock (60% of
+  a spider corridor's lower two layers), planks over floor cells that aren't sturdy and oak log
+  pillars down to sturdy ground within 20 blocks under a bridge's ends, rails 70% along a rail
+  corridor on a sturdy floor (along its axis: `Blocks.axisVariant`), a Chest 1% per section side on
+  a sturdy floor (decided with the plan, so `container` needs no chunk); crossings get plank
+  pillars and floors; rooms and stairs are carved only. Overgrown: moss blocks on the rock around
+  the open space (floors 60%, ceilings 25%, walls 30%; from the pieces' open cells, not the
+  chunk's), moss carpets 35% over moss or planks, hanging roots 8% under sturdy ceilings, vines
+  15% from wall cells under the ceiling hanging 1..3 cells, glow lichen 6%; cobwebs × 0.3, no
+  spider corridors.
+- **Entrances** (overgrown, when a spot passes): the room's centre (moved up to 2 blocks), then each
+  corridor section's middle between supports, at most 32 tried; the 3 × 3 opening must lie in
+  core columns 2..13 of one chunk (so the whole entrance, collar and headframe, is in columns no
+  neighbour holds in its padding and no LOD seam meets), its 5 × 5 collar on dry level land (within
+  a block of the centre's height, above sea level + 2, no river), no surface cave opening there
+  (`carvesTop`), nothing of the `blocked` list within 2 blocks, 32 blocks from the spawn
+  (`spawnColumn`; findSpawn is unchanged, so there is no cycle) and no other piece of the
+  mineshaft in the shaft's way. About half the overgrown mineshafts get one (46 of 103 in 36 km²).
+  It is Air from the piece's floor layer up through the ground (an underground pocket for the cave
+  view, open to the sky like a cave entrance's pit; `topCells` stay), a mossy cobblestone collar
+  two deep, two oak fence posts and a 5 block oak log beam, an ordinary Rope from under the beam's
+  middle to the floor (each held by the one above, the top one by the beam), vines down its walls
+  and from the beam. Its square (5 blocks around) joins `keepOut` at every level up to
+  `StructureMaxLevel`, so trees and surface caves keep away.
+- **Loot.** `container(x, y, z)`: Minecraft's chests/abandoned_mineshaft on this game's items
+  (`Mineshafts.LOOT`), rolled from `Hash.rng(Hash.hash3(lootSalt, x, y, z))` into random slots,
+  a fresh table each call.
+- **Cost.** Level 0 chunks over an overgrown mineshaft: ~3.9 ms against ~3.5 without (best of 5,
+  90 chunks); far nodes only ask for entrance squares (no measurable difference).
+- The debug structures world (`DebugWorlds`) writes two fixed samples (`Mineshafts.sample`)
+  through the same module into its floor's stone.
 
 ### Glow lichen (`CaveDecor.luau`)
 
@@ -638,7 +726,7 @@ generator from them (`fromAttributes`); `published` reads the type back once the
 | Single Biome | TerrainGenerator `biome` | `biome` choice (BiomeList), `structures` |
 | Large Biomes | TerrainGenerator `climateScale = 4` | `structures` |
 | Debug: All Blocks | DebugWorlds on LayeredGenerator | every block id once; no ticks, no mobs, spectator |
-| Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, name tags; no ticks, no mobs |
+| Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, two sample mineshafts, name tags; no ticks, no mobs |
 | Debug: All Biomes | DebugWorlds on LayeredGenerator | a 16 block strip per biome; no mobs |
 
 **LayeredGenerator** builds a whole Generator from a stack of layers per column (one stack
@@ -683,7 +771,12 @@ level or above); StructureGen takes the layout instead of its random spread (`la
 are written per chunk like any structure, far levels point sample them and chests hold their
 loot. Each has a SAVE structure block 3 blocks north of its corner, named after it with its box
 as the region; server `Structures/StructureBlocks` seeds those records from `generator.labels` at
-the start, so WAILA names them and F3 draws the outline. All Biomes repeats 16 block strips of
+the start, so WAILA names them and F3 draws the outline. Then two sample mineshafts,
+"mineshaft" and "mineshaft/overgrown" (`Mineshafts.sample`), in a row of chunks of their own: the
+generator is the LayeredGenerator's with its full detail `generate` wrapped to write them into the
+floor's stone through Generation/Mineshafts (24 blocks under the floor; the overgrown one's
+entrance opens on the floor with its rope), `structureContainer` answering for their chests and
+`mineshafts` listing them. All Biomes repeats 16 block strips of
 every biome's ground (stone, filler, top) with its trees and plants.
 Single Biome changes only the biome pick (the terrain's height is the Default's everywhere: a
 desert's sand climbs the mountains, a tundra freezes the seas); Large Biomes only the climate's
@@ -1044,7 +1137,11 @@ A graph ends with its sky line (the generator's `surface`, u16 per core column: 
 in all), so `refresh` classifies dug air as the generation did. The lattice knows nothing of
 surface caves, so the worker also scans each core column from `solidBelow` up to its sky line
 (`dugSections`, ~0.1 ms a chunk) and reads the sections holding such air cell by cell (+0.1-0.3 ms
-a chunk in all). From an entrance's mouth the search reaches 23-34 sections (9-10 with pockets
+a chunk in all). A mineshaft's tunnels are cave pockets like any cave (cave air and cave twins,
+in lattice cells marked read, `Caves.markRead`), its planks, logs and moss rock; an overgrown
+one's entrance shaft is an underground pocket (Air below the sky line, found by `dugSections`
+from the lowered `solidBelow`), so the search climbs it to the sky and walks down its rope into
+the tunnels, as from a cave entrance's pit. From an entrance's mouth the search reaches 23-34 sections (9-10 with pockets
 below the sky line not followed: it never left the mouth), at most ~200 walking down to the cave
 (0.03-0.26 ms a search), 16-163 from ravine floors; following all air would reach 180-560 from the
 same cameras.
@@ -5750,7 +5847,8 @@ sends stay in one ordered stream.
 **How caves are hidden.** Caves are carved as `CaveAir` and never reach the surface on their own;
 cave entrances and ravines (`SurfaceCaves`) are carved as Air and run into them. The mesher can
 treat cave air (and the cave twins: the glow lichen generated on cave walls, the lava of the
-caves' lava seas and lakes, the oil of buried deposits) as rock (`hideCaves`), which removes every
+caves' lava seas and lakes, the oil of buried deposits, the mineshafts' rails, fence posts,
+cobwebs, wall torches, moss carpets, vines and hanging roots) as rock (`hideCaves`), which removes every
 cave wall, and draws the hidden side of a junction with open air as stone caps; sections are meshed
 with caves visible only while the camera is below the terrain surface, and only those its section
 visibility search reaches (see Meshing, Streaming and Cave visibility above); the Caves setting's
@@ -5807,8 +5905,9 @@ Saving worlds).
   memory, like chests.
 - Transmitters, fluid tanks, chests and furnaces come from edits: the pipes (and furnaces pushing
   their results into chests) read unloaded chunks' edit lists to find them. The one exception is a
-  library structure's chests and furnaces, which Players/Containers fills from the generator
-  (`structureContainer`) when first needed and the pipes only see in loaded chunks. Keep
+  library structure's chests and furnaces, and a second the mineshafts' chests, which
+  Players/Containers fills from the generator (`structureContainer`) when first needed and the
+  pipes only see in loaded chunks. Keep
   transmitters, tanks and machines out of library templates: nothing on the server knows a
   generated one (a LOAD or Generate places them as edits, which is fine).
 - Furnaces and machines follow Mekanism's machine rules for automation on every face: inputs only
@@ -5850,6 +5949,13 @@ Saving worlds).
   `ofBucket`, the record), never names water; every fluid group needs its flow `RULES`
   (Behaviours/Fluid) and its own bucket item, and the registry checks BlockList and ItemList
   against it at load.
+- Mineshafts are planned from the seed and the full detail terrain only (never a chunk's blocks),
+  and write an opaque or ordinary block from the plan, cell hashes and its own column only; only
+  cave twins may read their four sides. Everything they put into cave air is cave air or a cave
+  twin (a new decoration needs a twin), everything in the open (a surface cave, the entrance
+  shaft) the ordinary block, and their pieces and shafts are marked read in the cave lattice
+  (`Caves.markRead`). Nothing they plan asks the mineshafts back (trees and lava lakes only read
+  their boxes).
 - Surface lava lakes and oil wells are decided from the seed and the full detail terrain only
   (heights, biome, structure pieces, the spawn, the surface caves' worms), never from a chunk's
   blocks; underground lava lakes from the chunk's own blocks, but their lava and bowl stay in the

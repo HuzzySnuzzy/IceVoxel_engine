@@ -35,7 +35,15 @@
 	             shows its outline (the server seeds those records from the generator's `labels`,
 	             Structures/StructureBlocks). Pieces write through Generation/StructureGen with a
 	             fixed layout, so a piece crossing chunk borders is written by every chunk alike,
-	             far levels point sample them, and generated chests hold their loot.
+	             far levels point sample them, and generated chests hold their loot. Then, in a
+	             row of their own (in chunks of their own), "mineshaft" and "mineshaft/overgrown"
+	             (named as the library's are: structure names hold no spaces):
+	             a fixed sample each (Mineshafts.sample: a room, a rail corridor with whole beams,
+	             torches and a chest, a crossing, a spider corridor and stairs down), dug by
+	             Generation/Mineshafts into the floor's stone (MINESHAFT_DEPTH under the floor,
+	             in full detail chunks, as the Default's), the overgrown one with its entrance at
+	             the room's centre: the collar and headframe on the floor and a rope all the way
+	             down. Their name tags' regions reach down to them.
 	All Biomes   strips STRIP (16) blocks wide along x, one per biome in BiomeList order and
 	             again (x // 16 mod the biome count), each a column of the biome's own ground
 	             (stone, its filler, its top block; first air at FLOOR) with its trees and ground
@@ -56,6 +64,8 @@ local Library = require(script.Parent.Parent.Structures.Library)
 local LayeredGenerator = require(script.Parent.LayeredGenerator)
 local StructureGen = require(script.Parent.StructureGen)
 local TerrainGenerator = require(script.Parent.TerrainGenerator)
+local Mineshafts = require(script.Parent.Mineshafts)
+local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 
 type Start = StructureGen.Start
 type Piece = Jigsaw.Piece
@@ -68,6 +78,8 @@ DebugWorlds.GAP = 5
 DebugWorlds.ROW_GAP = 8
 DebugWorlds.LABEL = 3
 DebugWorlds.STRIP = 16
+-- The sample mineshafts' room floor lies this far under the floor of All Structures.
+DebugWorlds.MINESHAFT_DEPTH = 24
 
 local PLAINS = (Biomes.byName("Plains") :: Biomes.Biome).index
 
@@ -126,6 +138,8 @@ export type Entry = {
 	sizeZ: number,
 	start: Start,
 	label: TerrainGenerator.Label,
+	-- A sample mineshaft (its `start` has no pieces: Generation/Mineshafts writes it).
+	mineshaft: Mineshafts.Plan?,
 }
 
 -- A piece moved by (dx, dz).
@@ -261,6 +275,54 @@ function DebugWorlds.structureLayout(seed: number, library: Library.Library): { 
 		cursorX += sizeX + DebugWorlds.GAP
 		rowDepth = math.max(rowDepth, sizeZ)
 	end
+
+	-- The sample mineshafts, in a row of chunks after every other entry's. Mineshafts.sample's
+	-- bounds reach 1 block west of the room's corner and 18 north, and the room's centre must lie
+	-- in a chunk's core columns 3..12 (the entrance's rule): the corner at 3 mod 16.
+	local roomY = floor - 1 - DebugWorlds.MINESHAFT_DEPTH
+	local roomZ = ((rowZ + rowDepth + DebugWorlds.ROW_GAP + 18) // 16 + 2) * 16 + 3
+	local roomX = 3
+	for k, name in { "mineshaft", "mineshaft/overgrown" } do
+		local plan = Mineshafts.sample(roomX, roomY, roomZ, k == 2, floor)
+		local b = plan.bounds
+		local sizeX, sizeY, sizeZ = b[4] - b[1] + 1, b[5] - b[2] + 1, b[6] - b[3] + 1
+		local x, z = b[1], b[3]
+		local labelX, labelY, labelZ = x, floor, z - DebugWorlds.LABEL
+		table.insert(entries, {
+			name = name,
+			x = x,
+			z = z,
+			sizeX = sizeX,
+			sizeZ = sizeZ,
+			start = {
+				name = name,
+				index = #entries + 1,
+				chunkX = x // 16,
+				chunkZ = z // 16,
+				x = x,
+				z = z,
+				pieces = {},
+				templates = {},
+				bounds = { x, b[2], z, b[4], b[5], b[6] },
+				foundation = false,
+			},
+			label = {
+				x = labelX,
+				y = labelY,
+				z = labelZ,
+				name = name,
+				offset = {
+					0,
+					math.clamp(b[2] - labelY, -maxOffset, maxOffset),
+					math.min(DebugWorlds.LABEL, maxOffset),
+				},
+				size = { math.min(sizeX, maxSize), math.min(sizeY, maxSize), math.min(sizeZ, maxSize) },
+			},
+			mineshaft = plan,
+		})
+		-- The next one a chunk apart.
+		roomX += (sizeX // 16 + 2) * 16
+	end
 	return entries
 end
 
@@ -282,8 +344,13 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 	local labels: { TerrainGenerator.Label } = {}
 	local placed: { number } = {}
 	local tag = Blocks.structureBlock("save") :: number
+	local samples: { Mineshafts.Plan } = {}
 	for _, entry in entries do
-		table.insert(starts, entry.start)
+		if entry.mineshaft then
+			table.insert(samples, entry.mineshaft)
+		else
+			table.insert(starts, entry.start)
+		end
 		table.insert(labels, entry.label)
 		table.insert(placed, entry.label.x)
 		table.insert(placed, entry.label.y)
@@ -312,7 +379,7 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 			return true
 		end,
 	}, layout)
-	return LayeredGenerator.new({
+	local gen = LayeredGenerator.new({
 		seed = seed,
 		stack = floorStack(),
 		biome = PLAINS,
@@ -321,6 +388,58 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 		labels = labels,
 		spawn = { -2, -2 * DebugWorlds.LABEL },
 	})
+
+	-- The sample mineshafts, written over the flat chunks at full detail as the Default does.
+	local function sampleLayout(minX: number, minZ: number, maxX: number, maxZ: number): { Mineshafts.Plan }
+		local list: { Mineshafts.Plan } = {}
+		for _, plan in samples do
+			local b = plan.bounds
+			if b[1] <= maxX and b[4] >= minX and b[3] <= maxZ and b[6] >= minZ then
+				table.insert(list, plan)
+			end
+		end
+		return list
+	end
+	local mineshafts = Mineshafts.new(seed, {
+		height = function(): number
+			return floor
+		end,
+		biome = function(): number
+			return PLAINS
+		end,
+	}, sampleLayout)
+	local flatHeights = table.create(ChunkLayout.PADDED * ChunkLayout.PADDED, floor)
+	local generate = gen.generate
+	local size = ChunkLayout.SIZE
+	local wrapped = table.clone(gen)
+	wrapped.generate = function(
+		level: number,
+		nx: number,
+		nz: number,
+		yield: (() -> ())?,
+		extras: boolean?
+	): TerrainGenerator.ChunkResult
+		local r = generate(level, nx, nz, yield, extras)
+		if level == 0 then
+			local originX, originZ = nx * size, nz * size
+			local list = mineshafts.plans(originX - 1, originZ - 1, originX + size, originZ + size)
+			if #list > 0 then
+				local lowest, top, map =
+					mineshafts.write(list, r.data, originX, originZ, r.height, flatHeights, r.carved)
+				r.carved = map
+				r.solidBelow = math.min(r.solidBelow, lowest)
+				r.emptyAbove = math.max(r.emptyAbove, math.min(top, r.height))
+			end
+		end
+		return r
+	end
+	wrapped.structureContainer = function(x: number, y: number, z: number): { StructureGen.ContainerItem }?
+		return gen.structureContainer(x, y, z) or mineshafts.container(x, y, z)
+	end
+	wrapped.mineshafts = function(minX: number, minZ: number, maxX: number, maxZ: number): { Mineshafts.Plan }
+		return mineshafts.plans(minX, minZ, maxX, maxZ)
+	end
+	return wrapped
 end
 
 --[[ All Biomes ]]
