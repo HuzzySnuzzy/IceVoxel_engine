@@ -7,6 +7,11 @@
 	the character so its feet are on the hull's bottom: the HumanoidRootPart's centre is
 	`rootOffset` studs above the feet. The server teleports characters through `teleport`-style
 	attributes (see Players/Characters) so the client can move its hull exactly.
+
+	`rootCFrame` is that placement from feet in render studs (Shared/World/Origin), for the local
+	character and, once characters stand parked on the server (Config.Players.ServerPositions),
+	every remote one; `deathCFrame` is Minecraft's death roll and `yaw` reads a placed root's yaw
+	back at any body pitch.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -70,6 +75,40 @@ function Rig.hull(character: Model): (Vector3?, Vector3?)
 	local standing = PlayerPhysics.STANDING
 	local half = standing.width / 2
 	return feet - Vector3.new(half, 0, half), feet + Vector3.new(half, standing.height, half)
+end
+
+--[[
+	Where a character's root part goes for feet at `renderFeet` (render studs: Shared/World/Origin),
+	facing `yaw`, lying `tilt` of the way (0..1) with the body pitched `bodyPitch` (radians: pi / 2
+	face down when crawling, along the view when swimming): the root `Rig.rootHeight` above the feet,
+	turned, then pitched forward (MovementController's placement, and every remote character's).
+]]
+function Rig.rootCFrame(character: Model, renderFeet: Vector3, yaw: number, tilt: number, bodyPitch: number): CFrame
+	return CFrame.new(renderFeet + Vector3.new(0, Rig.rootHeight(character, tilt), 0))
+		* CFrame.Angles(0, yaw, 0)
+		* CFrame.Angles(-bodyPitch * tilt, 0, 0)
+end
+
+-- The yaw a root CFrame was placed with (`rootCFrame`), at any body pitch (from its right vector,
+-- which the pitch leaves level; ToOrientation's yaw is lost when the body lies flat).
+function Rig.yaw(root: CFrame): number
+	local right = root.RightVector
+	return math.atan2(-right.Z, right.X)
+end
+
+--[[
+	A dying body falling over (Minecraft's LivingEntityRenderer.setupRotations): rolled about its
+	forward axis by 90 degrees x min(1, sqrt(1.6 x progress)), progress = (deathTime + partial tick
+	- 1) / 20 (so it lies on its side after 13.5 ticks). `base` is the root's CFrame alive;
+	`height` (studs: the root above the feet, Rig.rootOffset) makes it turn about the feet, as
+	Minecraft's model does (nil: about the root's centre).
+]]
+function Rig.deathCFrame(base: CFrame, progress: number, height: number?): CFrame
+	local roll = math.min(1, math.sqrt(math.max(0, progress) * 1.6)) * (math.pi / 2)
+	if height == nil or height == 0 then
+		return base * CFrame.Angles(0, 0, roll)
+	end
+	return base * CFrame.new(0, -height, 0) * CFrame.Angles(0, 0, roll) * CFrame.new(0, height, 0)
 end
 
 return Rig

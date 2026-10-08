@@ -900,6 +900,76 @@ local Config = {
 		SaveWaypoints = true,
 	},
 
+	-- Floating origin (client) -----------------------------------------------------------------------
+
+	Origin = {
+		-- Every client-made instance is placed at (world studs - origin), and the origin follows the
+		-- camera (Shared/World/Origin, client Rendering/Rebase), so nothing drawn is ever farther than
+		-- RebaseDistance + the view distance from 0 (float32 stays within 1/512 stud). false: the
+		-- origin stays at 0 and every conversion is the identity.
+		Enabled = false, -- (true once the world's and the player's sides are in)
+		-- The camera farther than this (studs, along X or Z) from the origin moves it at once (one
+		-- frame moves every client part: a hitch). 8192 studs: 1/1024 stud near the camera.
+		RebaseDistance = 8192,
+		-- Beyond this the origin moves at a moment a hitch can't be seen (teleports, respawns,
+		-- terrain loading, the world map, inventory screens, menus: Rebase.setHidden).
+		SoftDistance = 3072,
+		-- The origin is a multiple of this (16 chunks, 2^8 x 3): blocks, chunks, texture tiles and
+		-- the lighting grid line up the same after a move.
+		Snap = 768,
+	},
+
+	-- Who learns what about whom (server) ------------------------------------------------------------
+
+	Interest = {
+		-- Other players' poses are sent this near (blocks, horizontal: Minecraft's tracked entity
+		-- range is 144 at its default view distance, at most 512) ...
+		PlayerDistance = 256,
+		-- ... and until this much farther.
+		PlayerHysteresis = 16,
+		-- Pose messages a second, and an unchanged pose is sent again after KeepAliveSeconds.
+		RelayRate = 20,
+		KeepAliveSeconds = 0.5,
+		-- Poses in one unreliable message (22 bytes each; Roblox drops unreliable messages over
+		-- 1000 bytes, so at most 45: Net/PlayerSync).
+		MaxPosesPerMessage = 40,
+		-- Seconds (client) remote players are drawn behind the newest pose, to glide between them.
+		InterpolationDelay = 0.1,
+		-- Chunks: edit lists are answered this near the player's chunk (else deferred until they
+		-- come near), live edits reach players this near, and at most this many requests wait.
+		EditChunkRadius = 24,
+		EditSendRadius = 26,
+		DeferredChunkRequests = 1024,
+		-- Blocks: server lightning strikes are sent this near (the client draws far storms itself).
+		LightningDistance = 512,
+	},
+
+	-- Players' positions (server) --------------------------------------------------------------------
+
+	Players = {
+		-- Positions come from the clients' Move messages (checked), characters are parked and
+		-- anchored, and poses are relayed by interest. false: positions are read from the
+		-- characters as before (server Players/PlayerPositions' compat backend).
+		ServerPositions = false, -- (true once the server's and the player's sides are in)
+		-- Move messages a client sends a second.
+		MoveRate = 20,
+		-- What a move faster than MoveLimits does: "correct" (teleport back, Minecraft's "moved too
+		-- quickly"), "log" (warn) or "off".
+		MoveCheck = "correct",
+		-- Seconds of movement at the limits the checks' buckets hold.
+		MoveSlack = 2,
+		-- Blocks a second, by game mode (generous: sprint-jumping on ice with Speed II is about 10,
+		-- creative sprint-flying 21.8, spectators about 87, falling at most 78).
+		MoveLimits = {
+			Survival = { horizontal = 12, up = 12, down = 80 },
+			Adventure = { horizontal = 12, up = 12, down = 80 },
+			Creative = { horizontal = 30, up = 30, down = 80 },
+			Spectator = { horizontal = 100, up = 100, down = 100 },
+		},
+		-- Studs: where every character stands on the server (what replicates: the fake coordinates).
+		ParkPosition = { 0, 20000, 0 },
+	},
+
 	-- Interaction ------------------------------------------------------------------------------------
 
 	Interaction = {

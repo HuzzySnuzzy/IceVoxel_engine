@@ -5767,6 +5767,91 @@ Rename (an edit box; the server filters the name), Delete (Minecraft's confirmat
 Every answer is the list again with how it went. One list and one change a second per player (a
 list asked faster gets the last one again: the screen waits for an answer).
 
+## Floating origin and player sync (`World/Origin`, `Net/PlayerSync`, server `Players/PlayerPositions`, client `Player/RemotePlayers`, `Rendering/Rebase`)
+
+Two switches, both **off** for now (the foundation is in; the server, world and player sides land
+on it): `Config.Origin.Enabled` (the client's floating origin) and `Config.Players.ServerPositions`
+(positions from checked client moves, characters parked on the server, poses relayed by interest:
+"fake coords"). Off, everything behaves as before: the origin stays at 0, every conversion is the
+identity, and both position APIs read the characters.
+
+**Frames.** All logic stays in world coordinates: blocks as Luau doubles (the hull, the streamer,
+raycasts, entities, mobs, weather, sounds, the protocol, the server). Each client has a render
+origin O = (Ox, 0, Oz) studs, a multiple of `Origin.Snap` (768 = 2^8 × 3: blocks, chunks, the
+4-stud lighting grid and texture tiles up to 256 studs line up the same after a move); every
+client-made instance is written at world studs − O and read back with + O. Y is never shifted.
+`Shared/World/Origin` (pure: specs and the streamer's fake `game` load it) does every conversion
+from doubles: `blocksToRender`, `blockCentreToRender`, `studsToRender`, `renderX`/`renderZ` (hot
+paths), `toRender`/`cframeToRender` (near values only), `renderToBlocks`/`renderToStuds` (doubles
+back), `toWorld`, `offset`, `snap`, `plan`, `planTo`, `set` (returns (dx, dz), epoch + 1, listeners
+in order), `onRebase`, `reset`. Its Vector3 / CFrame functions read Roblox's globals when called
+(under Lune a spec lends them: tests/spec/Origin). The server has no origin.
+
+Rules for code that places or reads instances:
+- R1: never write a world Vector3 into an instance; convert from doubles (a float32 world value
+  at 1e6 blocks is 1/16 block off).
+- R2: never compare a render position with a world one; convert one side. Differences of two render
+  positions need nothing.
+- R3: Y is never shifted. R4: directions are frame-free.
+- R5: a module that caches render studs subscribes to `Origin.onRebase`; one that places instances
+  once registers a `Rebase` mover; per-frame writers only convert.
+
+**Re-basing** (client `Rendering/Rebase`, the render step `IceVoxelOrigin` at Camera − 3, before
+remote players (198), the local character (199) and the camera). The origin moves under the camera
+when it is farther than `Origin.RebaseDistance` (8192 studs: 1/1024 stud there) along X or Z, at
+`SoftDistance` (3072) while `Rebase.setHidden(reason, true)` holds (the map, screens, menus, the
+death screen, the streamer's teleport mode), and to a teleport's destination after
+`Rebase.request(x, z)` (world studs). A move: `Origin.set` (listeners shift caches), every mover
+(`Rebase.register(name, fn(dx, dz, parts, cframes))`) appends its parented parts with their new
+CFrames to two reused arrays, one `workspace:BulkMoveTo(..., FireCFrameChanged)`, the camera's
+CFrame and Focus − d, stats (`Rebase.stats()`: epoch, x, z, count, lastMs, lastParts) and one
+line. A failing mover is warned about and left out. `Rebase.now()` forces a move (debug). The boot
+puts the origin over `SpawnPosition` before the streamer builds (`Origin.planTo`). Unparented
+containers are fixed when they are shown (their owners record the origin they were placed for).
+
+**Players' positions.** One API on each side, world blocks as doubles, each with a compat backend
+that reads the characters exactly as before:
+- server `Players/PlayerPositions`: `feet(player) -> (x?, y, z)` (nil: not standing in the world;
+  also for a position that is not finite or beyond `MAX_COORDINATE` + 64), `feetVector` (Rig.feet's
+  drop-in), `center` (the body's middle: today the root), `eye`, `hull` (standing, Rig.hull's
+  drop-in), `yaw`, `look`, `alive`, `inReach(player, x, y, z, reach?)` (block centre within
+  `Interaction.Reach` + 2 of the centre, every reach check's rule), `each()` (`for player, x, y, z
+  in ...`), `chunkOf`, `teleport(player, x, y, z, yaw?)` (feet; compat: PivotTo plus the
+  IceVoxelFeet / IceVoxelTeleports attributes, as `Characters.teleportFeet`), `teleported` (a
+  signal: player, x, y, z), `grant(player, blocks)` (knockback allowance), `spectating(player)`,
+  `start(net)` (before `Characters.start`). The getters work before `start`.
+- client `Player/RemotePlayers`: `get(player) -> Remote?` (one table per player refreshed in
+  place: feet, yaw, pitch, tilt, PlayerSync flags, speed, climb, alive, character), `feet`, `hull`,
+  `each()` (`for player, remote in ...`), `isTracked`, `onTracked(fn(player, tracked))`, `start()`
+  (before MovementController). Compat: every other player with a character is tracked.
+- `Movement/Rig`: `rootCFrame(character, renderFeet, yaw, tilt, bodyPitch)` (MovementController's
+  placement), `yaw(rootCFrame)` (at any body pitch), `deathCFrame(base, progress, height?)`
+  (Minecraft's death roll about the feet).
+
+**Wire** (`Net/PlayerSync`, ids in Protocol: `ClientMessage.Spectate` 24, `ServerMessage.Teleport`
+26, `ServerMessage.Players` 27; the unreliable remote `Net/Remotes.moves()`, "Moves"). Every
+position is world blocks; the receiver converts with its own O.
+
+| Message | Channel | Layout |
+| --- | --- | --- |
+| Move (client → server, 20 Hz) | unreliable Moves | u16 seq, u16 epoch, f64 x, y, z, tail: 36 bytes |
+| Poses (server → client, 20 Hz) | unreliable Moves | u16 tick, u8 n (≤ 40), n × (u16 slot, i32 x, y, z in 1/256 block, tail): 3 + 22 n ≤ 883 bytes (Roblox drops unreliable messages over 1000) |
+| Players (server → client) | Net, `Players` | u8 n, n × (u8 op: 2 untrack u16 slot; 1 track u16 slot, f64 user id, u8 game mode, i32 x, y, z, tail) |
+| Teleport (server → its player) | Net, `Teleport` | u16 epoch, u16 life, f64 x, y, z, f32 yaw (NaN: keep), u8 reason (spawn, teleport, correction): 33 bytes |
+| Spectate (client → server) | Net, `Spectate` | f64 user id (0: stopped) |
+
+The pose tail (8 bytes): u16 yaw, i16 pitch (× 20860), u8 tilt, u8 flags (sneaking, sprinting,
+flying, on ground, in water, climbing, jumped, dead), u8 speed (× 8), i8 climb (× 8). Decoders
+refuse wrong lengths, non-finite numbers, positions beyond `MAX_COORDINATE` or heights outside
+−256..4096, unknown ops, modes and reasons, too many records and user ids that aren't whole;
+`decodePoses` fills a reused list.
+
+Config: `Origin` (Enabled, RebaseDistance, SoftDistance, Snap), `Interest` (PlayerDistance 256 and
+its hysteresis 16, RelayRate 20, KeepAliveSeconds, MaxPosesPerMessage 40, InterpolationDelay 0.1,
+EditChunkRadius 24, EditSendRadius 26, DeferredChunkRequests, LightningDistance 512), `Players`
+(ServerPositions, MoveRate 20, MoveCheck "correct" / "log" / "off", MoveSlack, MoveLimits by game
+mode, ParkPosition).
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps

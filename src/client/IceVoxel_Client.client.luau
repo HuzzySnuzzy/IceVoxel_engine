@@ -72,6 +72,12 @@
 	                             World)
 	  Player/MovementController  Minecraft movement: a hull simulated against the blocks, the
 	                             character only drawn on top of it (waits for the ground to load)
+	  Player/RemotePlayers       where the other players are (world blocks): their characters
+	                             now, the server's relay by interest with Config.Players
+	                             .ServerPositions
+	  Rendering/Rebase           the floating origin (Shared/World/Origin): instances are placed at
+	                             world - origin and the origin follows the camera (off: Config
+	                             .Origin.Enabled)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Player/HeldItems           the item in every character's hand, and in first person
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
@@ -102,6 +108,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local WorldTypes = require(Shared.Generation.WorldTypes)
 local Coords = require(Shared.World.Coords)
+local Origin = require(Shared.World.Origin)
 local PlayerSettings = require(Shared.PlayerSettings)
 
 local Client = script.Parent
@@ -128,6 +135,8 @@ local StructureNet = require(Client.Net.StructureNet)
 local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
 local MovementController = require(Client.Player.MovementController)
+local RemotePlayers = require(Client.Player.RemotePlayers)
+local Rebase = require(Client.Rendering.Rebase)
 local CharacterAnimator = require(Client.Player.CharacterAnimator)
 local SpectatorView = require(Client.Player.SpectatorView)
 local BurningView = require(Client.Player.BurningView)
@@ -266,6 +275,16 @@ Settings.register("weather", function(values)
 	WeatherClient.setWeather(values.weather)
 end)
 
+-- The render origin over the world spawn before anything is built (Shared/World/Origin; nothing
+-- moves while Config.Origin is off).
+local spawnPosition = Shared:GetAttribute("SpawnPosition")
+if typeof(spawnPosition) == "Vector3" then
+	local originX, originZ = Origin.planTo(spawnPosition.X, spawnPosition.Z)
+	if originX and originZ then
+		Origin.set(originX, originZ)
+	end
+end
+
 local world = ClientWorld.new()
 -- Texture ids are checked and averages measured in the background from now on; the renderer
 -- follows TextureLooks' looks (its parts, and the far meshes through MeshOverlay:setLooks).
@@ -363,7 +382,11 @@ FireRenderer.start(world, function(cx: number, cz: number): boolean
 	return node ~= nil and node.shown
 end)
 FuseView.start(world)
+-- (Before the movement: other players' positions, from their characters or the server's relay.)
+RemotePlayers.start()
 MovementController.start(world, streamer)
+-- The render origin follows the camera (a render step before every placement in the frame).
+Rebase.start()
 -- (After the camera: the fluid at the camera, its fog and tint.)
 FluidFog.start(
 	function(x: number, y: number, z: number): number?

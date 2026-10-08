@@ -77,6 +77,8 @@
 	/effect) start with the players, before the characters that tick them; Tough As Nails
 	registers its effects there when it starts. A player's mining speed is their effects' times
 	their perks' (Shared/Mining.playerFactor, as the client's).
+	Players' positions (Players/PlayerPositions: feet, reach, teleports) start with the players too,
+	before everything that reads them.
 ]]
 
 local Players = game:GetService("Players")
@@ -109,6 +111,7 @@ local Behaviours = require(Server.Behaviours)
 local ServerNet = require(Server.Network.ServerNet)
 local LobbyNet = require(Server.Network.LobbyNet)
 local Sounds = require(Server.Audio.Sounds)
+local PlayerPositions = require(Server.Players.PlayerPositions)
 local Characters = require(Server.Players.Characters)
 local GameModes = require(Server.Players.GameModes)
 local Operators = require(Server.Players.Operators)
@@ -177,6 +180,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	TimeCommands.start(net)
 	WeatherCommands.start(net)
 	Effects.start(net)
+	-- Where players are, for everything after it (Players/PlayerPositions: their characters, or
+	-- their clients' checked moves with Config.Players.ServerPositions).
+	PlayerPositions.start(net)
 	Characters.start(net, world)
 	-- Items must exist before anything can drop them.
 	Entities.start(net, world)

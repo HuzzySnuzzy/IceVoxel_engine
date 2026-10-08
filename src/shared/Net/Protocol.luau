@@ -102,6 +102,8 @@
 	                 a list is answered with WorldList, a load as Create World is (MenuState,
 	                 WorldSave loading progress, CreateWorldResult), a delete or rename with a new
 	                 WorldList saying how it went
+	  Spectate       f64 userId (0: stopped): the player this one spectates, so the server keeps
+	                 them in its interest (Net/PlayerSync: the codecs of players' positions)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -249,6 +251,12 @@
 	                 (server World/WeatherServer), for the bolt, the sky's flash and the thunder
 	                 (heard later the farther it is: Shared/Weather.thunderDelay). Coordinates
 	                 beyond MAX_COORDINATE (or not finite) and other flash counts are malformed.
+	  Teleport       this player's new place (feet, world blocks), teleport epoch, life, yaw and
+	                 why (Net/PlayerSync), sent to them alone: with Config.Players.ServerPositions
+	                 characters stand parked on the server and only this tells a client where it is
+	  Players        who this player now sees (tracks: slot, user id, game mode, pose) and no
+	                 longer sees (untracks) (Net/PlayerSync); their poses then come on the
+	                 unreliable remote Net/Remotes.moves(), and the player's own Moves go up it
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -317,6 +325,7 @@ Protocol.ClientMessage = {
 	CreateWorld = 21,
 	EnterWorld = 22,
 	WorldAction = 23,
+	Spectate = 24,
 }
 
 Protocol.ServerMessage = {
@@ -345,6 +354,8 @@ Protocol.ServerMessage = {
 	WorldList = 23,
 	WorldSave = 24,
 	Lightning = 25,
+	Teleport = 26,
+	Players = 27,
 }
 
 Protocol.EditAction = {
