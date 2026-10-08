@@ -124,7 +124,10 @@
 	                   3 count   u8 count
 	                   4 remove  f64 collector (UserId of the player who picked it up, 0 = none)
 	                   5 take    u8 count, f64 collector: a partial pickup (the item stays, smaller)
-	  Notice         u16 length, text: a message for the player (shown in the chat)
+	  Notice         u16 length, text: a message for the player (shown in the chat); then,
+	                 optionally, a link: u16 first, u16 last (its bytes in the text), u16 length,
+	                 the command it suggests (/locate's coordinates: "/tp @s x y z"). A notice
+	                 without one decodes as before.
 	  Sound          u16 count, count x (u16 sound, f32 x, y, z, u8 volume, u8 pitch): sound events
 	                 to play at (x, y, z) (blocks), `sound` an event number of Shared/Sounds,
 	                 volume and pitch in hundredths of the event's own (100 = as listed). The
@@ -1082,16 +1085,38 @@ end
 
 Protocol.MAX_NOTICE = 1000
 
-function Protocol.encodeNotice(text: string): buffer
+-- A notice's clickable part: bytes first..last of its text, and the command a click suggests.
+export type NoticeLink = { first: number, last: number, suggest: string }
+
+function Protocol.encodeNotice(text: string, link: NoticeLink?): buffer
 	local cut = string.sub(text, 1, Protocol.MAX_NOTICE)
-	local b = buffer.create(2 + #cut)
+	local suggest = if link then string.sub(link.suggest, 1, Protocol.MAX_NOTICE) else ""
+	local b = buffer.create(2 + #cut + (if link then 6 + #suggest else 0))
 	buffer.writeu16(b, 0, #cut)
 	buffer.writestring(b, 2, cut)
+	if link then
+		local o = 2 + #cut
+		buffer.writeu16(b, o, math.clamp(link.first, 1, math.max(#cut, 1)))
+		buffer.writeu16(b, o + 2, math.clamp(link.last, 0, #cut))
+		buffer.writeu16(b, o + 4, #suggest)
+		buffer.writestring(b, o + 6, suggest)
+	end
 	return b
 end
 
-function Protocol.decodeNotice(b: buffer): string
-	return buffer.readstring(b, 2, buffer.readu16(b, 0))
+-- The text, and the link when there is a well-formed one.
+function Protocol.decodeNotice(b: buffer): (string, NoticeLink?)
+	local length = buffer.readu16(b, 0)
+	local text = buffer.readstring(b, 2, length)
+	local o = 2 + length
+	if buffer.len(b) < o + 6 then
+		return text, nil
+	end
+	local first, last, n = buffer.readu16(b, o), buffer.readu16(b, o + 2), buffer.readu16(b, o + 4)
+	if buffer.len(b) < o + 6 + n or first < 1 or last < first or last > length then
+		return text, nil
+	end
+	return text, { first = first, last = last, suggest = buffer.readstring(b, o + 6, n) }
 end
 
 --[[ Sounds (server -> client) ]]

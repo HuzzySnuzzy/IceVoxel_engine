@@ -25,7 +25,9 @@
 	            screen's darkened backdrop while one is open (OVER_HUD, UNDER_SCREENS).
 	  Box       Minecraft's: across the bottom of the screen, half transparent. Enter sends (and
 	            closes), Escape closes, Up / Down go through what was sent (Ui/Chat/ChatInput), Tab
-	            completes command names and players' names, and while a command's name is typed its
+	            completes command names, the arguments a command lists (its
+	            WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE: /locate's kinds, ids and tags) and
+	            players' names, and while a command's name or a listed argument is typed its
 	            suggestions show above the box (the Command Suggestions setting; Up / Down move
 	            the highlight, Tab uses it); both offer only the commands this player may use
 	            (WorldSettings.mayRun: operators, Allow Commands, the game mode permission, as
@@ -52,6 +54,10 @@
 	            The Chat setting drops what it doesn't show (Commands Only: other players' talk;
 	            Hidden: everything), as Minecraft's server does not send it. Roblox's /clear
 	            (RBXClearCommand) clears the lines.
+	  Links     a notice's link (/locate's green coordinates) puts the command it suggests ("/tp
+	            @s x y z") in the box when clicked or tapped while the chat is open (Minecraft's
+	            SUGGEST_COMMAND), and hovering it shows "Click to teleport" (ChatLog.spanAt
+	            finds the span under the pointer).
 	  Settings  `applySettings` (the "chat" settings effect): visibility, text and background
 	            opacity, text size, line spacing, delay, width, focused / unfocused height,
 	            command suggestions (Ui/Chat/ChatLog.metrics).
@@ -244,10 +250,12 @@ local function canChat(channel: TextChannel): boolean
 	return true
 end
 
--- Every TextChatCommand's aliases, and who may use each (WorldSettings.COMMAND_ATTRIBUTE),
--- remembered until commands come or go.
+-- Every TextChatCommand's aliases, who may use each (WorldSettings.COMMAND_ATTRIBUTE) and the
+-- arguments it lists (COMMAND_ARGUMENTS_ATTRIBUTE, by lower case alias), remembered until
+-- commands come or go.
 local aliasCache: { string }? = nil
 local aliasLevels: { [string]: unknown } = {}
+local aliasArguments: { [string]: ChatInput.Arguments } = {}
 local function commandAliases(): { string }
 	local cached = aliasCache
 	if cached then
@@ -255,14 +263,20 @@ local function commandAliases(): { string }
 	end
 	local list: { string } = {}
 	table.clear(aliasLevels)
+	table.clear(aliasArguments)
 	for _, instance in TextChatService:GetDescendants() do
 		if instance:IsA("TextChatCommand") and instance.Enabled then
 			local level = instance:GetAttribute(WorldSettings.COMMAND_ATTRIBUTE)
-			table.insert(list, instance.PrimaryAlias)
-			aliasLevels[instance.PrimaryAlias] = level
-			if instance.SecondaryAlias ~= "" then
-				table.insert(list, instance.SecondaryAlias)
-				aliasLevels[instance.SecondaryAlias] = level
+			local listed = instance:GetAttribute(WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE)
+			local arguments = if type(listed) == "string" then ChatInput.parseArguments(listed) else nil
+			for _, alias in { instance.PrimaryAlias, instance.SecondaryAlias } do
+				if alias ~= "" then
+					table.insert(list, alias)
+					aliasLevels[alias] = level
+					if arguments then
+						aliasArguments[string.lower(alias)] = arguments
+					end
+				end
 			end
 		end
 	end
@@ -289,6 +303,20 @@ local function usableAliases(): { string }
 		end
 	end
 	return usable
+end
+
+-- The candidates a usable command lists for the words after `alias` (ChatInput.ArgumentSource).
+local function argumentsFor(alias: string, previous: { string }): { string }?
+	local key = string.lower(alias)
+	local usable = false
+	for _, name in usableAliases() do
+		if string.lower(name) == key then
+			usable = true
+			break
+		end
+	end
+	local arguments = if usable then aliasArguments[key] else nil
+	return if arguments then arguments[table.concat(previous, " ")] else nil
 end
 
 -- Players' names and display names, for Tab.
@@ -491,6 +519,15 @@ function Chat.start()
 	local overlayLabel, overlayShadow =
 		Style.shadowText(overlay, "", 0, 0, 400, 8, Style.Colour.Red, 1, Enum.TextXAlignment.Center)
 	local overlayUntil = 0
+
+	-- Hovering a link: Minecraft's tooltip (a dark box by the pointer), in GUI pixels.
+	local tip = Style.frame(gui, 0, 0, 0, 12, Color3.fromRGB(16, 0, 16), 6)
+	tip.BackgroundTransparency = 1 - 0xF0 / 255
+	tip.AnchorPoint = Vector2.new(0, 1)
+	tip.Visible = false
+	local tipScale = Instance.new("UIScale")
+	tipScale.Parent = tip
+	local tipLabel = Style.text(tip, "", 3, 2, 300, 8, Style.Colour.Text, 7)
 
 	local function showOverlay(text: string)
 		overlayLabel.Text = text
@@ -728,13 +765,13 @@ function Chat.start()
 		box.PlaceholderText = hint or ""
 	end
 
-	-- The suggestions that show by themselves while a command's name is typed.
+	-- The suggestions that show by themselves while a command's name or a listed argument is typed.
 	local function autoSuggest()
 		suggestions = nil
 		if metrics.suggestions then
 			local text = box.Text
 			local cursor = cursorOf(text)
-			local completion = ChatInput.complete(text, cursor, usableAliases(), {}, true)
+			local completion = ChatInput.complete(text, cursor, usableAliases(), {}, true, argumentsFor)
 			if completion and not (#completion.candidates == 1 and completion.candidates[1] == completion.word) then
 				suggestions = ChatInput.suggest(text, cursor, completion)
 			end
@@ -802,6 +839,53 @@ function Chat.start()
 		layout()
 	end
 
+	--[[ Links ]]
+
+	-- A point of the screen (pixels from its top left corner, as this gui's AbsolutePosition: it
+	-- ignores the inset) from an input's position (which leaves the top bar's inset out).
+	local function screenPoint(input: InputObject): Vector2
+		local inset = GuiService:GetGuiInset()
+		return Vector2.new(input.Position.X, input.Position.Y) + inset
+	end
+
+	-- The span drawn under a screen point, nil when none.
+	local function spanAt(point: Vector2): ChatFormat.Span?
+		local unit = linesScale.Scale
+		if unit <= 0 or not lines.Visible then
+			return nil
+		end
+		for index = 1, log.page do
+			local row = rows[index]
+			local line = if row and row.back.Visible then row.line else nil
+			if row and line then
+				local top, height = row.back.AbsolutePosition.Y, row.back.AbsoluteSize.Y
+				if point.Y >= top and point.Y < top + height then
+					return ChatLog.spanAt(line, (point.X - row.label.AbsolutePosition.X) / unit, measure)
+				end
+			end
+		end
+		return nil
+	end
+
+	-- A click or tap on a link: its command in the box (the box keeps the focus).
+	local function followLink(point: Vector2): boolean
+		local span = spanAt(point)
+		local suggest = if span then span.suggest else nil
+		if suggest == nil then
+			return false
+		end
+		RunService.Heartbeat:Once(function()
+			if open then
+				if not box:IsFocused() then
+					box:CaptureFocus()
+				end
+				setText(suggest)
+				autoSuggest()
+			end
+		end)
+		return true
+	end
+
 	local function submit()
 		local text = ChatInput.normalize(box.Text)
 		closeImpl()
@@ -821,6 +905,13 @@ function Chat.start()
 			return
 		end
 		local kind = input and input.UserInputType
+		if
+			input
+			and (kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch)
+			and followLink(screenPoint(input))
+		then
+			return
+		end
 		if
 			kind == Enum.UserInputType.MouseButton1
 			or kind == Enum.UserInputType.MouseButton2
@@ -873,7 +964,7 @@ function Chat.start()
 		if current == nil then
 			local text = box.Text
 			local cursor = cursorOf(text)
-			local completion = ChatInput.complete(text, cursor, usableAliases(), playerNames())
+			local completion = ChatInput.complete(text, cursor, usableAliases(), playerNames(), false, argumentsFor)
 			if completion == nil then
 				return
 			end
@@ -957,6 +1048,13 @@ function Chat.start()
 		Chat.open(if command then "/" else "")
 	end)
 
+	-- (A click while the box had no focus: FocusLost saw nothing.)
+	catcher.Activated:Connect(function(input: InputObject)
+		if open then
+			followLink(screenPoint(input))
+		end
+	end)
+
 	-- The wheel scrolls the open chat (Hud.setInputTaken keeps it from the hotbar and camera).
 	UserInputService.InputChanged:Connect(function(input: InputObject)
 		if open and input.UserInputType == Enum.UserInputType.MouseWheel then
@@ -1002,12 +1100,12 @@ function Chat.start()
 
 	--[[ Messages ]]
 
-	-- The server's notices, at once (Chat Delay holds only players' messages).
-	Notices.setSink(function(text: string, prefix: string?)
+	-- The server's notices, at once (Chat Delay holds only players' messages), with their links.
+	Notices.setSink(function(text: string, prefix: string?, link: ChatFormat.Link?)
 		if prefix then
 			Chat.add(ChatFormat.debug(prefix, text))
 		else
-			Chat.add(ChatFormat.notice(text))
+			Chat.add(ChatFormat.notice(text, link))
 		end
 	end)
 
@@ -1090,6 +1188,25 @@ function Chat.start()
 		local left = overlayUntil - now
 		if overlay.Visible ~= (left > 0) then
 			overlay.Visible = left > 0
+		end
+		-- A link's tooltip under the mouse while the chat is open.
+		local hover = nil
+		if open and UserInputService.MouseEnabled then
+			local mouse = UserInputService:GetMouseLocation()
+			local span = spanAt(mouse)
+			hover = if span then span.hover else nil
+			if hover then
+				local scale = stripScale.Scale
+				tipScale.Scale = scale
+				tip.Position = UDim2.fromOffset(mouse.X + 9 * scale, mouse.Y - 3 * scale)
+				tip.Size = UDim2.fromOffset(measure(hover) + 6, 12)
+				if tipLabel.Text ~= hover then
+					tipLabel.Text = hover
+				end
+			end
+		end
+		if tip.Visible ~= (hover ~= nil) then
+			tip.Visible = hover ~= nil
 		end
 		if left > 0 then
 			local alpha = math.clamp(left / OVERLAY_FADE, 0, 1)

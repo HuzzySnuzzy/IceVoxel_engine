@@ -27,6 +27,14 @@
 	surface cave is carved next to a structure's piece, a surface lava or water lake, a puddle, a
 	geyser's oil lake or a mineshaft's entrance, and no tree grows in one.
 
+	Locating (/locate: Generation/Locate, Players/LocateCommands): `locateKinds` lists what this
+	world can have on cell grids, each with a probe that never fills a cache (a library
+	structure's start check, a mineshaft's start, an oil well's or a lake's decision, a surface
+	cave's hash) and a cached verify; a kind the options rule out is left out (no structures, a
+	Single Biome where a structure, an overgrown mineshaft or a lava lake can't be). `biomes` (a
+	Single Biome's one) and `climateScale` tell the biome search what to expect, and `poiBlocks`
+	where structures and mineshafts put chests, furnaces and the like.
+
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
 	  same terrain every 2^L blocks horizontally (and every min(2^L, Lod.MaxVerticalStep) blocks
@@ -62,6 +70,7 @@ local StructureGen = require(script.Parent.StructureGen)
 local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
 local Library = require(script.Parent.Parent.Structures.Library)
+local Locate = require(script.Parent.Locate)
 
 local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
@@ -179,7 +188,14 @@ export type Generator = {
 	puddles: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lakes.Puddle },
 	-- The mineshafts (Generation/Mineshafts) whose bounds touch the block rectangle (inclusive),
 	-- in write order; nil or empty: the world has none (flat and debug worlds, structures off).
-	mineshafts: ((minX: number, minZ: number, maxX: number, maxZ: number) -> { Mineshafts.Plan })?,
+	-- `yield` is called while plans are built (Mineshafts `plans`).
+	mineshafts: ((
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		yield: (() -> ())?
+	) -> { Mineshafts.Plan })?,
 	--[[
 		The sea's surface (blocks: the first air above the sea): a column whose height (`column`)
 		is lower lies under water up to it. Config.SeaLevel here; flat and debug worlds
@@ -193,6 +209,31 @@ export type Generator = {
 		records (Structures/StructureBlocks); nil or empty: none.
 	]]
 	labels: (() -> { Label })?,
+	--[[
+		Locating (/locate; see the header). nil fields: nothing of the kind.
+		  locateKinds   the structures this world can have, on their cell grids
+		  locateList    instead, every locatable thing of a fixed layout (the debug structures
+		                world)
+		  biomes        the biome indices it can produce (nil: every one)
+		  climateScale  how many times wider than the Default's its biomes are (Large Biomes: 4;
+		                Debug: All Biomes' strips 0.25): /locate biome's step and radius follow it
+		  poiBlocks     x, y, z, block of every block marked in `lut` (u8 per block id) that its
+		                structures, mineshafts and laid out blocks put in the block rectangle
+		                (inclusive), from their plans alone (`yield` while plans are built); a later
+		                piece or a player may have changed what is there
+	]]
+	locateKinds: (() -> { Locate.Kind })?,
+	locateList: (() -> { Locate.Listed })?,
+	biomes: { number }?,
+	climateScale: number?,
+	poiBlocks: ((
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		lut: buffer,
+		yield: (() -> ())?
+	) -> { number })?,
 }
 
 -- A generated structure block with its settings (Generator `labels`): a SAVE block named `name`
@@ -1234,6 +1275,296 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		return placer.starts(minX, minZ, maxX, maxZ)
 	end
 
+	--[[ Locating (see the header) ]]
+
+	local locateCfg = Config.Locate
+	-- Rings of `grid` blocks covering `radius` blocks.
+	local function ringsFor(radius: number, grid: number): number
+		return math.ceil(radius / grid)
+	end
+	local forcedBiome = if forced then Biomes.list[forced] else nil
+
+	local function libraryKinds(list: { Locate.Kind })
+		local p = placer
+		if p == nil then
+			return
+		end
+		for index, structure in p.library.structures do
+			if forced and not structure.biomeSet[forced] then
+				continue
+			end
+			table.insert(list, {
+				id = Locate.snake(structure.name),
+				grid = structure.spacing * SIZE,
+				-- (The start piece's centre lies within `reach` of the start chunk's corner.)
+				slack = structure.reach,
+				rings = locateCfg.StructureRings,
+				showY = false,
+				probe = function(rx: number, rz: number): (number?, number, number)
+					local x, z = p.probe(index, rx, rz)
+					return x, z, 0
+				end,
+				verify = function(rx: number, rz: number): (number?, number, number)
+					if p.assembleAt(index, rx, rz) == nil then
+						return nil, 0, 0
+					end
+					local x, z = p.probe(index, rx, rz)
+					return x, 0, z
+				end,
+			})
+		end
+	end
+
+	local function mineshaftKinds(list: { Locate.Kind })
+		local m = mineshafts
+		if m == nil then
+			return
+		end
+		local cfg = Config.Mineshafts
+		local grid = cfg.Grid
+		local rings = ringsFor(locateCfg.Radius.mineshaft, grid)
+		local function room(overgrownOnes: boolean): Locate.Kind
+			return {
+				id = if overgrownOnes then "mineshaft_overgrown" else "mineshaft",
+				-- (A room's centre lies in its cell: its corner is at most Grid - 14 in.)
+				grid = grid,
+				slack = 0,
+				rings = rings,
+				showY = true,
+				probe = function(gx: number, gz: number): (number?, number, number)
+					local x, z, y, overgrown = m.candidate(gx, gz)
+					if x == nil or overgrown ~= overgrownOnes then
+						return nil, 0, 0
+					end
+					return x, z, y + 1
+				end,
+				-- The room's centre, standing on its floor.
+				verify = function(
+					gx: number,
+					gz: number,
+					_px: number,
+					_pz: number,
+					yield: () -> ()
+				): (number?, number, number)
+					local plan = m.planAt(gx, gz, yield)
+					if plan == nil then
+						return nil, 0, 0
+					end
+					local box = plan.pieces[1].box
+					return (box[1] + box[4]) // 2, plan.y + 1, (box[3] + box[6]) // 2
+				end,
+			}
+		end
+		table.insert(list, room(false))
+		-- (A Single Biome too dry for moss has no overgrown mineshafts, nor entrances.)
+		local lo, hi = cfg.OvergrownHumidity[1], cfg.OvergrownHumidity[2]
+		if forcedBiome and math.clamp((forcedBiome.humidity - lo) / (hi - lo), 0, 1) * cfg.OvergrownChance <= 0 then
+			return
+		end
+		table.insert(list, room(true))
+		local reach = Mineshafts.reach()
+		table.insert(list, {
+			id = "mineshaft_entrance",
+			grid = grid,
+			-- The entrance lies within `reach` of the room's corner, the room's centre 6 from it.
+			slack = reach,
+			spread = (reach + 6) * 1.5,
+			rings = rings,
+			showY = true,
+			probe = function(gx: number, gz: number): (number?, number, number)
+				local x, z, y, _, entrance = m.candidate(gx, gz)
+				if x == nil or not entrance then
+					return nil, 0, 0
+				end
+				return x, z, y + 1
+			end,
+			-- The collar's top: where a player stands over the rope.
+			verify = function(
+				gx: number,
+				gz: number,
+				_px: number,
+				_pz: number,
+				yield: () -> ()
+			): (number?, number, number)
+				local plan = m.planAt(gx, gz, yield)
+				local entrance = if plan then plan.entrance else nil
+				if entrance == nil then
+					return nil, 0, 0
+				end
+				return entrance.x, entrance.top, entrance.z
+			end,
+		})
+	end
+
+	local function fluidKinds(list: { Locate.Kind })
+		local oil = Config.Caves.OilWells
+		if oil.Enabled then
+			local rings = ringsFor(locateCfg.Radius.oil, oil.Spacing)
+			-- (A well lies in its cell, INSET blocks from its sides.)
+			for _, geysers in { true, false } do
+				table.insert(list, {
+					id = if geysers then "oil_geyser" else "oil_deposit",
+					grid = oil.Spacing,
+					slack = 0,
+					rings = rings,
+					showY = not geysers,
+					probe = function(gx: number, gz: number): (number?, number, number)
+						local well = wells.peek(gx, gz)
+						if well == nil or (geysers and not well.geyser) then
+							return nil, 0, 0
+						end
+						return well.x, well.z, if geysers then well.surface else well.y
+					end,
+				})
+			end
+		end
+		-- Surface lava lakes and water lakes: a lake's centre is its box's corner (in its 16 block
+		-- cell) plus 8, so cells start 8 blocks in.
+		local box = Lava.BOX
+		local lakeRings = ringsFor(locateCfg.Radius.lake, box)
+		local surface = Config.Caves.LavaLakes.Surface
+		local lavaPossible = forcedBiome == nil
+			or not (forcedBiome.frozen or forcedBiome.top == SNOW or forcedBiome.humidity >= Lava.WET)
+		if surface.Enabled and lavaPossible then
+			table.insert(list, {
+				id = "lava_lake",
+				grid = box,
+				origin = box // 2,
+				slack = 0,
+				rings = lakeRings,
+				showY = false,
+				probe = function(cx: number, cz: number): (number?, number, number)
+					local lake = lava.peek(cx, cz)
+					if lake == nil then
+						return nil, 0, 0
+					end
+					return lake.x + box // 2, lake.z + box // 2, lake.y
+				end,
+			})
+		end
+		if Config.Lakes.Water.Enabled then
+			table.insert(list, {
+				id = "lake",
+				grid = box,
+				origin = box // 2,
+				slack = 0,
+				rings = lakeRings,
+				showY = false,
+				probe = function(cx: number, cz: number): (number?, number, number)
+					local lake = lakes.peekLake(cx, cz)
+					if lake == nil then
+						return nil, 0, 0
+					end
+					return lake.x + box // 2, lake.z + box // 2, lake.y
+				end,
+			})
+		end
+	end
+
+	local function caveKinds(list: { Locate.Kind })
+		local entrances, ravines = Config.Caves.Entrances, Config.Caves.Ravines
+		if entrances.Enabled then
+			table.insert(list, {
+				id = "cave_entrance",
+				grid = entrances.Spacing,
+				-- (A worm starts at its column's centre.)
+				slack = 1,
+				spread = 1,
+				rings = ringsFor(locateCfg.Radius.cave, entrances.Spacing),
+				showY = false,
+				probe = function(gx: number, gz: number): (number?, number, number)
+					local x, z = surfaceCaves.start("entrance", gx, gz)
+					return x, z, 0
+				end,
+				verify = function(
+					gx: number,
+					gz: number,
+					_px: number,
+					_pz: number,
+					yield: () -> ()
+				): (number?, number, number)
+					local worm = surfaceCaves.wormOf("entrance", gx, gz, yield)
+					if worm == nil then
+						return nil, 0, 0
+					end
+					return math.floor(worm.startX), math.floor(worm.startY), math.floor(worm.startZ)
+				end,
+			})
+		end
+		if ravines.Enabled then
+			local reach = SurfaceCaves.ravineReach()
+			table.insert(list, {
+				id = "ravine",
+				grid = ravines.Spacing,
+				slack = reach,
+				spread = reach,
+				rings = ringsFor(locateCfg.Radius.ravine, ravines.Spacing),
+				showY = false,
+				probe = function(gx: number, gz: number): (number?, number, number)
+					local x, z = surfaceCaves.start("ravine", gx, gz)
+					return x, z, 0
+				end,
+				-- The ravine's step nearest the player: a ravine is up to 160 blocks long.
+				verify = function(
+					gx: number,
+					gz: number,
+					px: number,
+					pz: number,
+					yield: () -> ()
+				): (number?, number, number)
+					local worm = surfaceCaves.wormOf("ravine", gx, gz, yield)
+					if worm == nil or worm.count == 0 then
+						return nil, 0, 0
+					end
+					local best, at = huge, 1
+					for i = 1, worm.count do
+						local d = (worm.x[i] - px) ^ 2 + (worm.z[i] - pz) ^ 2
+						if d < best then
+							best, at = d, i
+						end
+					end
+					return math.floor(worm.x[at]), math.floor(worm.y[at]), math.floor(worm.z[at])
+				end,
+			})
+		end
+	end
+
+	local kinds: { Locate.Kind }? = nil
+	local function locateKinds(): { Locate.Kind }
+		local list = kinds
+		if list == nil then
+			local new: { Locate.Kind } = {}
+			mineshaftKinds(new)
+			fluidKinds(new)
+			caveKinds(new)
+			libraryKinds(new)
+			kinds = new
+			return new
+		end
+		return list
+	end
+
+	local function poiBlocks(
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		lut: buffer,
+		yield: (() -> ())?
+	): { number }
+		local out: { number } = {}
+		if placer then
+			placer.pieceBlocks(placer.starts(minX, minZ, maxX, maxZ), lut, minX, minZ, maxX, maxZ, out)
+			if yield then
+				yield()
+			end
+		end
+		if mineshafts then
+			Mineshafts.poiBlocks(mineshafts.plans(minX, minZ, maxX, maxZ, yield), lut, minX, minZ, maxX, maxZ, out)
+		end
+		return out
+	end
+
 	return {
 		seed = seed,
 		column = column,
@@ -1249,10 +1580,20 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		lavaLakes = lava.surfaceLakes,
 		waterLakes = lakes.lakes,
 		puddles = lakes.puddles,
-		mineshafts = function(minX: number, minZ: number, maxX: number, maxZ: number): { Mineshafts.Plan }
-			return if mineshafts then mineshafts.plans(minX, minZ, maxX, maxZ) else {}
+		mineshafts = function(
+			minX: number,
+			minZ: number,
+			maxX: number,
+			maxZ: number,
+			yield: (() -> ())?
+		): { Mineshafts.Plan }
+			return if mineshafts then mineshafts.plans(minX, minZ, maxX, maxZ, yield) else {}
 		end,
 		seaLevel = SEA,
+		locateKinds = locateKinds,
+		biomes = if forced then { forced } else nil,
+		climateScale = climateScale,
+		poiBlocks = poiBlocks,
 	}
 end
 

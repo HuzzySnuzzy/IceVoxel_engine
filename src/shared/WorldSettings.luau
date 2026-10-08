@@ -49,6 +49,11 @@
 	              own commands). `mayRun` is the rule; the chat (client Ui/Chat) completes and
 	              suggests only what the player may run, as Minecraft's client knows only the
 	              commands its permission level allows. The server checks every command anyway.
+	              COMMAND_ARGUMENTS_ATTRIBUTE, when a command has it, lists what its arguments may
+	              be, one line per position: "<the words before, lower case, space joined>|<the
+	              candidates, comma joined>" (/locate's: "|structure,biome,poi", then
+	              "structure|outpost,mineshaft,...,#mineshaft,..."): the chat completes and
+	              suggests them as Minecraft's client does a command's argument suggestions.
 ]]
 
 local Config = require(script.Parent.Config)
@@ -109,6 +114,8 @@ WorldSettings.COMMAND_ATTRIBUTE = "IceVoxelPermission"
 WorldSettings.COMMAND_OPERATOR = "operator"
 WorldSettings.COMMAND_PERMITTED = "commands"
 WorldSettings.COMMAND_GAMEMODE = "gamemode"
+-- A TextChatCommand's attribute: its arguments' candidates (see the header).
+WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE = "IceVoxelArguments"
 
 WorldSettings.MAX_NAME = 32
 WorldSettings.MAX_SEED = 32

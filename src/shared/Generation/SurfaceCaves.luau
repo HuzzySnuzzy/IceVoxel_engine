@@ -263,6 +263,14 @@ export type SurfaceCaves = {
 	worms: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Worm },
 	-- Worms built (not served from the cache) so far.
 	built: () -> number,
+	--[[
+		/locate (Generation/Locate): the start column of grid cell (gx, gz)'s candidate of `kind`
+		("entrance" or "ravine"; x nil: none, or the kind is off), a hash only, never cached; and
+		the cell's worm (built and cached as the chunks would; nil: the candidate made none),
+		`yield` called after a build.
+	]]
+	start: (kind: string, gx: number, gz: number) -> (number?, number),
+	wormOf: (kind: string, gx: number, gz: number, yield: (() -> ())?) -> Worm?,
 }
 
 local SurfaceCaves = {}
@@ -285,6 +293,8 @@ local function ravineReach(): number
 	local r = Config.Caves.Ravines
 	return r.Length[2] + r.Radius[2] + TREE_MARGIN + 1
 end
+SurfaceCaves.entranceReach = entranceReach
+SurfaceCaves.ravineReach = ravineReach
 
 --[[
 	A grid cell of one kind as far as it was looked at: whether it has a candidate (`start`) and
@@ -1274,6 +1284,33 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		return list
 	end
 
+	--[[ Locating ]]
+
+	local function start(kind: string, gx: number, gz: number): (number?, number)
+		local k = if kind == "entrance" then ENTRANCE else RAVINE
+		if not (if k == ENTRANCE then entranceCfg else ravineCfg).Enabled then
+			return nil, 0
+		end
+		local _, has, sx, sz = candidate(k, gx, gz)
+		if not has then
+			return nil, 0
+		end
+		return sx, sz
+	end
+
+	local function wormOf(kind: string, gx: number, gz: number, yield: (() -> ())?): Worm?
+		local sx, sz = start(kind, gx, gz)
+		if sx == nil then
+			return nil
+		end
+		local before = builtCount
+		local worm = wormAt(if kind == "entrance" then ENTRANCE else RAVINE, gx, gz, sx, sz, sx, sz)
+		if yield and builtCount > before then
+			yield()
+		end
+		return worm
+	end
+
 	return {
 		carve = carve,
 		carvesTop = carvesTop,
@@ -1283,6 +1320,8 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		built = function(): number
 			return builtCount
 		end,
+		start = start,
+		wormOf = wormOf,
 	}
 end
 

@@ -53,6 +53,13 @@
 	None spawns mobs (WorldTypes `mobs = false`) and none has weather or fire to tick; All Blocks
 	and All Structures have no ticks at all (`ticks = false`: leaves stay without logs nearby,
 	sand floats, a showcase stays as generated), All Biomes ticks as any world does.
+
+	/locate in All Biomes: its `climateScale` (a quarter) has the biome search sample every 8
+	blocks, so no strip falls between two samples. In All Structures (Generation/Locate): its
+	`locateList` holds every generated jigsaw
+	structure laid out (at its start piece's centre, by its id) and the two sample mineshafts
+	("mineshaft", "mineshaft_overgrown" at their room's centre, and the overgrown one's
+	"mineshaft_entrance"); `poiBlocks` adds the samples' chests.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -65,6 +72,7 @@ local LayeredGenerator = require(script.Parent.LayeredGenerator)
 local StructureGen = require(script.Parent.StructureGen)
 local TerrainGenerator = require(script.Parent.TerrainGenerator)
 local Mineshafts = require(script.Parent.Mineshafts)
+local Locate = require(script.Parent.Locate)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 
 type Start = StructureGen.Start
@@ -436,8 +444,61 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 	wrapped.structureContainer = function(x: number, y: number, z: number): { StructureGen.ContainerItem }?
 		return gen.structureContainer(x, y, z) or mineshafts.container(x, y, z)
 	end
-	wrapped.mineshafts = function(minX: number, minZ: number, maxX: number, maxZ: number): { Mineshafts.Plan }
-		return mineshafts.plans(minX, minZ, maxX, maxZ)
+	wrapped.mineshafts = function(
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		yield: (() -> ())?
+	): { Mineshafts.Plan }
+		return mineshafts.plans(minX, minZ, maxX, maxZ, yield)
+	end
+
+	-- /locate: the laid out generated structures and the sample mineshafts (see the header).
+	local listed: { Locate.Listed } = {}
+	for _, entry in entries do
+		local plan = entry.mineshaft
+		if plan then
+			local box = plan.pieces[1].box
+			local id = if plan.overgrown then "mineshaft_overgrown" else "mineshaft"
+			local x, z = (box[1] + box[4]) // 2, (box[3] + box[6]) // 2
+			table.insert(listed, { id = id, x = x, y = plan.y + 1, z = z, showY = true })
+			local entrance = plan.entrance
+			if entrance then
+				table.insert(listed, {
+					id = "mineshaft_entrance",
+					x = entrance.x,
+					y = entrance.top,
+					z = entrance.z,
+					showY = true,
+				})
+			end
+		elseif lib.structure(entry.name) and #entry.start.pieces > 0 then
+			local box = entry.start.pieces[1].box
+			table.insert(listed, {
+				id = Locate.snake(entry.name),
+				x = (box[1] + box[4]) // 2,
+				y = floor,
+				z = (box[3] + box[6]) // 2,
+				showY = false,
+			})
+		end
+	end
+	wrapped.locateList = function(): { Locate.Listed }
+		return listed
+	end
+	local poiBlocks = gen.poiBlocks
+	wrapped.poiBlocks = function(
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		lut: buffer,
+		yield: (() -> ())?
+	): { number }
+		local out = if poiBlocks then poiBlocks(minX, minZ, maxX, maxZ, lut, yield) else {}
+		Mineshafts.poiBlocks(sampleLayout(minX, minZ, maxX, maxZ), lut, minX, minZ, maxX, maxZ, out)
+		return out
 	end
 	return wrapped
 end
@@ -465,7 +526,7 @@ function DebugWorlds.allBiomes(seed: number): TerrainGenerator.Generator
 		stacks[i] = LayeredGenerator.stack(layers)
 	end
 	local strip = DebugWorlds.STRIP
-	return LayeredGenerator.new({
+	local gen = LayeredGenerator.new({
 		seed = seed,
 		columnAt = function(x: number, _z: number): (LayeredGenerator.Stack, number)
 			local b = DebugWorlds.biomeAt(x)
@@ -474,6 +535,9 @@ function DebugWorlds.allBiomes(seed: number): TerrainGenerator.Generator
 		decoration = true,
 		spawn = { (PLAINS - 1) * strip + strip // 2, strip // 2 },
 	})
+	-- (Biomes 16 blocks wide: /locate biome samples them 8 apart, a quarter of its 32.)
+	gen.climateScale = strip / 64
+	return gen
 end
 
 return DebugWorlds

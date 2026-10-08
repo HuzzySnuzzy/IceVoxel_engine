@@ -58,6 +58,14 @@
 	reaching a block rectangle (in write order, the same for every rectangle that holds them),
 	and everything above (writing, trees, containers) works from it. The debug structures world
 	(Generation/DebugWorlds) lays out every template of the library that way.
+
+	Locating (/locate, Generation/Locate): `probe` is a start's first step alone (the start piece
+	and its centre column's biome and ground, about 21 µs) for any region, never cached, so a
+	search over thousands of regions leaves the LRU to the chunks; `assembleAt` is the cached
+	assembly, for the few candidates that might be nearest. `pieceBlocks` lists where the starts'
+	pieces put blocks of a set (points of interest: chests, furnaces...), from each template's
+	cells (worked out once per template and rotation), so /locate poi finds generated chests
+	without generating their chunks.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -158,6 +166,27 @@ export type Placer = {
 	container: (x: number, y: number, z: number) -> { ContainerItem }?,
 	-- Starts assembled (not served from the cache) so far, for tests and benchmarks.
 	assembled: () -> number,
+	--[[
+		/locate (see the header): the centre column (x, z) of region (rx, rz)'s start piece of
+		structure `index` (library.structures) when its start check passes (x nil: no start), never
+		cached; the region's assembled start (cached), nil when it has none.
+	]]
+	probe: (index: number, rx: number, rz: number) -> (number?, number),
+	assembleAt: (index: number, rx: number, rz: number) -> Start?,
+	--[[
+		Appends x, y, z, block to `out` for every cell of `starts`' pieces in the block rectangle
+		(inclusive) whose block is marked in `lut` (u8 per block id, not 0: wanted), as the pieces
+		write it (turned; a jigsaw's final state). A later piece or a player may have changed it.
+	]]
+	pieceBlocks: (
+		starts: { Start },
+		lut: buffer,
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		out: { number }
+	) -> (),
 }
 
 local StructureGen = {}
@@ -221,6 +250,39 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 		cached += 1
 	end
 
+	-- The assembly options of the start in chunk (cx, cz), the start piece alone (maxDepth 0).
+	local function startOptions(structure: Structure, cx: number, cz: number): Jigsaw.Options
+		return {
+			seed = Hash.hash3(assemblySalt, cx, structure.salt, cz),
+			startPool = structure.startPool,
+			startJigsawName = structure.startJigsawName,
+			x = cx * SIZE,
+			z = cz * SIZE,
+			startHeight = structure.startHeight,
+			projectToHeightmap = structure.projectToHeightmap,
+			firstFreeHeight = firstFreeHeight,
+			maxDepth = 0,
+			maxDistance = structure.maxDistance,
+			pool = poolOf,
+			template = templateOf,
+		}
+	end
+
+	-- The start check: the centre column (x, z) of the start piece when it stands in one of the
+	-- structure's biomes (and on land with `onLand`), x nil otherwise.
+	local function startCheck(structure: Structure, options: Jigsaw.Options): (number?, number)
+		local first = Jigsaw.assemble(options)[1]
+		if first == nil then
+			return nil, 0
+		end
+		local box = first.box
+		local mx, mz = midpoint(box[1], box[4]), midpoint(box[3], box[6])
+		if structure.biomeSet[terrain.biome(mx, mz)] ~= true or (structure.onLand and not terrain.land(mx, mz)) then
+			return nil, 0
+		end
+		return mx, mz
+	end
+
 	local function assemble(index: number, structure: Structure, rx: number, rz: number): Start?
 		local key = `{index}:{rx}:{rz}`
 		local entry = cache[key]
@@ -232,29 +294,10 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 		assembledCount += 1
 		local cx, cz = StructureGen.startChunk(seed, structure, rx, rz)
 		local x, z = cx * SIZE, cz * SIZE
-		local options: Jigsaw.Options = {
-			seed = Hash.hash3(assemblySalt, cx, structure.salt, cz),
-			startPool = structure.startPool,
-			startJigsawName = structure.startJigsawName,
-			x = x,
-			z = z,
-			startHeight = structure.startHeight,
-			projectToHeightmap = structure.projectToHeightmap,
-			firstFreeHeight = firstFreeHeight,
-			maxDepth = 0,
-			maxDistance = structure.maxDistance,
-			pool = poolOf,
-			template = templateOf,
-		}
+		local options = startOptions(structure, cx, cz)
 		-- The start piece alone first (the same draws begin the full assembly): its centre column
 		-- decides the biome and the ground.
-		local first = Jigsaw.assemble(options)[1]
-		local ok = first ~= nil
-		if first then
-			local box = first.box
-			local mx, mz = midpoint(box[1], box[4]), midpoint(box[3], box[6])
-			ok = structure.biomeSet[terrain.biome(mx, mz)] == true and (not structure.onLand or terrain.land(mx, mz))
-		end
+		local ok = startCheck(structure, options) ~= nil
 		local start: Start? = nil
 		if ok then
 			options.maxDepth = structure.size
@@ -506,6 +549,60 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 		return nil
 	end
 
+	--[[ Locating ]]
+
+	local function probe(index: number, rx: number, rz: number): (number?, number)
+		local structure = structures[index]
+		local cx, cz = StructureGen.startChunk(seed, structure, rx, rz)
+		return startCheck(structure, startOptions(structure, cx, cz))
+	end
+
+	local function assembleAt(index: number, rx: number, rz: number): Start?
+		return assemble(index, structures[index], rx, rz)
+	end
+
+	local function pieceBlocks(
+		list: { Start },
+		lut: buffer,
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		out: { number }
+	)
+		for _, start in list do
+			for k, piece in start.pieces do
+				local box = piece.box
+				if box[1] > maxX or box[4] < minX or box[3] > maxZ or box[6] < minZ then
+					continue
+				end
+				local template = start.templates[k]
+				local palette, finals = Jigsaw.writeTables(piece, template)
+				local size = template.size
+				local sx, sz = size[1], size[3]
+				local rotation = piece.rotation
+				local terrainMatching = piece.projection == TERRAIN_MATCHING
+				for _, index in StructureGen.cellsOf(template, piece, lut) do
+					local final = finals[index]
+					local block = if final ~= nil then final else palette[readu16(template.cells, index * 2)]
+					local lx = index % sx
+					local lz = (index // sx) % sz
+					local ly = index // (sx * sz)
+					local tx, _, tz = Transform.position(lx, 0, lz, sx, sz, rotation)
+					local x, z = piece.x + tx, piece.z + tz
+					if x < minX or x > maxX or z < minZ or z > maxZ then
+						continue
+					end
+					local base = if terrainMatching then firstFreeHeight(x, z) - 1 else piece.y
+					table.insert(out, x)
+					table.insert(out, base + ly)
+					table.insert(out, z)
+					table.insert(out, block)
+				end
+			end
+		end
+	end
+
 	return {
 		library = library,
 		starts = starts,
@@ -516,7 +613,49 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 		assembled = function(): number
 			return assembledCount
 		end,
+		probe = probe,
+		assembleAt = assembleAt,
+		pieceBlocks = pieceBlocks,
 	}
+end
+
+--[[
+	The cells of `template` (indices, as Jigsaw.writeTables reads them: (ly * sz + lz) * sx + lx)
+	whose block, as `piece`'s rotation writes it (a jigsaw's final state), is marked in `lut`;
+	worked out once per template, rotation and lut.
+]]
+type CellLists = { lut: buffer, byRotation: { [number]: { number } } }
+local cellLists: { [Template]: CellLists } = setmetatable({}, { __mode = "k" }) :: any
+function StructureGen.cellsOf(template: Template, piece: Piece, lut: buffer): { number }
+	local lists = cellLists[template]
+	if lists == nil or lists.lut ~= lut then
+		local new: CellLists = { lut = lut, byRotation = {} }
+		cellLists[template] = new
+		lists = new
+	end
+	assert(lists)
+	local rotation = piece.rotation % 4
+	local found = lists.byRotation[rotation]
+	if found == nil then
+		local list: { number } = {}
+		local palette, finals = Jigsaw.writeTables(piece, template)
+		local size = template.size
+		local cells = template.cells
+		for index = 0, size[1] * size[2] * size[3] - 1 do
+			local v = readu16(cells, index * 2)
+			if v == 0 then
+				continue
+			end
+			local final = finals[index]
+			local block = if final ~= nil then final else palette[v]
+			if block >= 0 and readu8(lut, block) ~= 0 then
+				table.insert(list, index)
+			end
+		end
+		lists.byRotation[rotation] = list
+		found = list
+	end
+	return found
 end
 
 return StructureGen

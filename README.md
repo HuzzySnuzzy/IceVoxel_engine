@@ -734,9 +734,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   above the hotbar in the pixel font with a shadow and a dark background, fading 10 s after they
   arrive (all of them back while the box is open), 100 kept and scrolled with the wheel. `T`
   opens the box (`/` with "/" typed; both are key bindings): `Enter` sends, `Escape` closes, `Up` /
-  `Down` bring back what you sent, `Tab` completes command names and players' names, and command
-  names are suggested as you type them (only the commands you may use: `/op` and `/deop` for
-  operators, `/effect`, `/summon` and `/kill` for operators or with Allow Commands, `/gamemode`
+  `Down` bring back what you sent, `Tab` completes command names, `/locate`'s arguments and
+  players' names, and command names (and `/locate`'s arguments) are suggested as you type them
+  (only the commands you may use: `/op` and `/deop` for operators, `/effect`, `/summon`,
+  `/kill`, `/locate` and `/tp` for operators or with Allow Commands, `/gamemode`
   when you may change your own mode). Players' messages read "<Name> message", joins and leaves are yellow ("Alex
   joined the game"), command answers and the server's messages white, errors red. Everything
   players type goes through Roblox's TextChatService, so Roblox filters it (and an account that
@@ -748,6 +749,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   suggestions. On touch screens a speech bubble over the `…` button opens and closes it. The chat
   draws over the hotbar, as Minecraft's; the title screen has no chat (Roblox's is off from the
   start).
+- **Finding things: `/locate` and `/tp`.** Minecraft 1.20.1's `/locate structure | biome | poi`
+  for operators (or everyone with Allow Commands): `/locate structure outpost` answers "The
+  nearest outpost is at [1142, ~, 582] (1281 blocks away)" in true world coordinates (F3's).
+  Structures are the library's (outposts) and the built-in `mineshaft`, `mineshaft_overgrown`,
+  `mineshaft_entrance`, `oil_geyser`, `oil_deposit`, `lava_lake`, `lake`, `cave_entrance` and
+  `ravine`, or a tag (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#library`); biomes by id
+  (`birch_forest`, `minecraft:jungle`) or tag (`#is_forest`, `#is_snowy`, `#band_peaks`...);
+  points of interest (chests, crafting tables, furnaces, campfires, the machines, batteries,
+  tanks, structure blocks, jigsaws, TNT and Nukes; `#workstation`, `#machine`, `#container`...)
+  within 256 blocks, placed ones and generated ones (an outpost's chests, a mineshaft's) alike.
+  A search never generates a chunk: it reads the generators' plans cell by cell, nearest first,
+  and answers the true nearest (Minecraft's sometimes answers a farther one); underground things
+  show their y (a mineshaft's room, an entrance's collar), surface ones `~`. Searches run on the
+  server a slice of each frame (3 ms), so a long one (no outpost for 100 regions, a rare biome:
+  about a second of work) never stalls it. The coordinates are green: click them with the chat
+  open and `/tp @s x y z` is typed for you. `/tp` (`/teleport`) moves you or others to
+  coordinates (`~` relative) or to a player; survival players land on safe ground.
 - **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
@@ -1124,7 +1142,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Fly (spectator) | Always, through blocks; `Space` / `Shift` up / down, sprinting (`Ctrl`) twice as fast; mouse wheel (spectator menu closed): flying speed | A / B | Jump / Sneak |
 | Spectator menu | `1`–`9` or middle click open it, then a number selects and the same number again (or middle click) uses; the wheel moves the selection | L1 / R1 open and move, D-pad up uses | `…` button; tap a slot |
 | Spectate a player (spectator) | Left click them; `Shift` leaves | R2; B leaves | Hold on them; Sneak button leaves |
-| Chat          | `T` opens the chat, `/` opens it with "/" typed (the Open Chat and Open Command key bindings); `Enter` sends, `Escape` closes, `Up` / `Down` what you sent (or the highlighted suggestion), `Tab` completes command names and players' names (`Shift` + `Tab` back), the wheel (`Shift`: a line at a time), `Page Up` / `Page Down` scroll | | Speech bubble over the `…` button |
+| Chat          | `T` opens the chat, `/` opens it with "/" typed (the Open Chat and Open Command key bindings); `Enter` sends, `Escape` closes, `Up` / `Down` what you sent (or the highlighted suggestion), `Tab` completes command names, `/locate`'s arguments and players' names (`Shift` + `Tab` back), the wheel (`Shift`: a line at a time), `Page Up` / `Page Down` scroll; click `/locate`'s green coordinates to type their `/tp` | | Speech bubble over the `…` button; tap the coordinates |
 | Game mode     | `/gamemode survival` / `creative` / `adventure` / `spectator` (or `/gm s` / `c` / `a` / `sp`, `0`–`3`) in the chat; `F3` + `N`: spectator ↔ the previous mode | | |
 | Game mode switcher | Hold `F3`, press `F4` (each further `F4`: the next mode; or point at one), let go of `F3` to switch; `Escape` cancels | | |
 | Sprint        | `Ctrl` turns it on / off (held instead with the Sprint setting on Hold), or double tap `W` | L3 (stick press) | Sprint button (toggle) |
@@ -1150,6 +1168,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
 | Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
+| Locate        | `/locate structure outpost` (or `#mineshaft`, `mineshaft_entrance`, `oil_geyser`, `lava_lake`, `ravine`...), `/locate biome jungle` (or `#is_forest`...), `/locate poi chest` (or `#machine`...) (operators); the answer's green coordinates type their `/tp` when clicked | | |
+| Teleport      | `/tp 100 64 -20`, `/tp ~ ~10 ~`, `/tp <player>`, `/tp <players> <x> <y> <z>`, `/tp <players> <player>` (also `/teleport`; players are names, their start, `@s` or `@a`) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
 | Generation    | `/genstats` (operators): the server's background chunk generation over the last 10 s (chunks/s, ms/s, the worst frame), the backlog and the chunks generated inline | | |
@@ -1434,6 +1454,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             placer (flat, void and debug worlds; every LOD level)
     Superflat               superflat preset lines, Minecraft's presets
     DebugWorlds             the debug worlds' grids (all blocks, all structures, all biomes)
+    Locate                  /locate's searches: ids and tags, ring searches over the
+                            generators' cell grids (cheap probes, exact verifies), the biome
+                            rings (pure; the generators' `locateKinds` probe their own cells)
   Meshing/GreedyMesher      blocks -> boxes (parts; odd boxes for textures with OddBoxes)
   Meshing/Scatter           plants' offset and turn per position (Minecraft's OffsetType)
   Meshing/QuadMesher        blocks -> faces (meshes); MeshGeometry: faces -> mesh arrays (split by
@@ -1452,7 +1475,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   KeyBindings               Minecraft's key mappings: every action, its default and category,
                             the bindable keys (Roblox's KeyCode values), conflicts, the list order
   WorldSettings             the world's settings (Create World): seeds as Minecraft reads them,
-                            checking a request, a world type's options, publishing them
+                            checking a request, a world type's options, publishing them;
+                            commands' permission and argument attributes
+  Poi                       /locate poi's types and tags (chests, furnaces, machines...): the
+                            blocks of each, a lookup table by block id
   SaveText                  the words and sizes of saved worlds (the toast, the list, the chat)
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
@@ -1483,7 +1509,8 @@ src/server   -> ServerScriptService.IceVoxel
                             Explosions (blasts in the world, fuel going off, per-tick cost
                             bounds, the primer hook for explosive blocks), FuelBlast (fuel
                             catching, measuring a body, power, chained blasts; pure), Nuke (the
-                            Nuke's crater: ragged sphere, scorching, fire, a budget a tick)
+                            Nuke's crater: ragged sphere, scorching, fire, a budget a tick),
+                            PoiSearch (/locate poi: edits and the plans' points; pure)
   Behaviours/               Gravity, Fluid (water, lava, oil and fuel; lava hardening against
                             water), Grass (dying and spreading), Leaves (decay), Sapling, Herb
                             (mint and wild ginger spreading), Attached (torches and lanterns need
@@ -1555,7 +1582,9 @@ src/server   -> ServerScriptService.IceVoxel
                             sync rule; pure) + EffectCommand (/effect; pure),
                             Spawning,
                             SafeSpot + SpawnUnsafeBlocks (safety rules), Teleport (map,
-                            spectators),
+                            spectators), TeleportCommands + TeleportCommand (/tp; pure),
+                            LocateCommands + LocateCommand (/locate: parsing, answers and their
+                            links, the searches' budgeted queue; pure),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
                             settings), Eating (food held 32 ticks: healing, used up),
                             Progression + ProgressionCommand + ProgressStore (knowledge, Ages and
@@ -1746,6 +1775,10 @@ for performance:
 | `Structures.MaxDataChars` | 200000  | Longest structure text saved or pasted (what a StringValue holds).  |
 | `Structures.DataPieceChars` | 16000 | Structure text travels in pieces of this many characters, `DataPiecesPerSecond` (20) a second. |
 | `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
+| `Locate.BudgetMs` / `TimeoutSeconds` / `Queue` | 3 / 20 / 8 | `/locate`'s searches: milliseconds of each server frame, how long one may run before answering not found, how many may wait. |
+| `Locate.StructureRings` / `Radius` | 100 / per kind | How far structures are searched: rings of placement regions (Minecraft's 100), and blocks for the built-in kinds (`mineshaft` 4096, `oil` 16384, `lake` 4096, `cave` 3072, `ravine` 6144). |
+| `Locate.BiomeRadius` / `BiomeStep` | 6400 / 32 | Minecraft's biome search (times the world's climate scale, at most 2: Large Biomes). |
+| `Locate.PoiRadius` / `PoiGeneratedNear` | 256 / false | Points of interest within this many blocks (3D); true: generated ones only in loaded chunks. |
 | `Render.Textures`         | true    | Draw the texture pack's textures (the Textures setting); false: every block in its plain material and colour. |
 | `Render.FarMaterials`     | false   | Materials and textures on merged far chunks, a far mesh per look (the Far Materials setting), instead of plain colours. |
 | `Textures.OddBoxes`       | false   | Odd-sized boxes (in blocks) for textured cubes at full detail, for variants that tile from a face's centre (see Block textures): 14-18% more parts near the player. |

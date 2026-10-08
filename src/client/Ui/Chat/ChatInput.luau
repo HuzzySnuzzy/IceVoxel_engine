@@ -25,6 +25,11 @@
 	            the list stays until the text is typed into. Up / Down move the highlight while a
 	            list is shown. While a command's name is typed, its suggestions show by themselves
 	            (the Command Suggestions setting), at most SUGGESTION_ROWS at a time.
+	  Arguments a command that lists its arguments (WorldSettings.COMMAND_ARGUMENTS_ATTRIBUTE,
+	            read by `parseArguments`: /locate's kinds, ids and tags) has them completed and
+	            suggested as its name is, by the start of the word; a typed "minecraft:" is
+	            skipped, and tags ("#...") come up only once "#" is typed (Minecraft's resource
+	            or tag arguments). Other words complete players' names.
 ]]
 
 local ChatInput = {}
@@ -145,6 +150,49 @@ end
 
 --[[ Completion ]]
 
+-- A command's arguments: the candidates by the words before them (lower case, space joined).
+export type Arguments = { [string]: { string } }
+
+-- The candidates the words after `alias` may be (nil: none listed for them).
+export type ArgumentSource = (alias: string, previous: { string }) -> { string }?
+
+-- Reads a COMMAND_ARGUMENTS_ATTRIBUTE: "<previous words>|<candidate>,<candidate>..." per line.
+function ChatInput.parseArguments(text: string): Arguments
+	local out: Arguments = {}
+	for line in string.gmatch(text, "[^\n]+") do
+		local bar = string.find(line, "|", 1, true)
+		if bar then
+			local key = string.lower(string.sub(line, 1, bar - 1))
+			local list: { string } = {}
+			for candidate in string.gmatch(string.sub(line, bar + 1), "[^,]+") do
+				table.insert(list, candidate)
+			end
+			out[key] = list
+		end
+	end
+	return out
+end
+
+-- Strips a "minecraft:" namespace (Minecraft's suggestions match ids with or without one).
+local function withoutNamespace(word: string): string
+	if string.lower(string.sub(word, 1, 10)) == "minecraft:" then
+		return string.sub(word, 11)
+	end
+	return word
+end
+
+-- Does argument `candidate` complete `word` (see the header)?
+function ChatInput.argumentMatches(candidate: string, word: string): boolean
+	local tagWord = string.sub(word, 1, 1) == "#"
+	local tagCandidate = string.sub(candidate, 1, 1) == "#"
+	if tagWord ~= tagCandidate then
+		return false
+	end
+	local typed = withoutNamespace(if tagWord then string.sub(word, 2) else word)
+	local name = if tagCandidate then string.sub(candidate, 2) else candidate
+	return string.sub(string.lower(name), 1, #typed) == string.lower(typed)
+end
+
 export type Completion = {
 	-- The word being completed: bytes `start`..`cursor - 1` of the text.
 	start: number,
@@ -180,15 +228,17 @@ end
 --[[
 	What Tab completes in `text` with the cursor at byte `cursor` (the word before it): a
 	command's name (`commands`: the aliases, slash included) while the cursor is in the first word
-	of a command, else `players` (names); nil when nothing matches. `commandsOnly`: only a
-	command's name (the suggestions that show by themselves).
+	of a command, the command's argument candidates where `arguments` lists them, else `players`
+	(names); nil when nothing matches. `commandsOnly`: no players' names (the suggestions that
+	show by themselves).
 ]]
 function ChatInput.complete(
 	text: string,
 	cursor: number,
 	commands: { string },
 	players: { string },
-	commandsOnly: boolean?
+	commandsOnly: boolean?,
+	arguments: ArgumentSource?
 ): Completion?
 	local before = string.sub(text, 1, math.max(cursor - 1, 0))
 	local lastSpace = 0
@@ -201,6 +251,27 @@ function ChatInput.complete(
 	local start = lastSpace + 1
 	local word = string.sub(before, start)
 	local commandWord = lastSpace == 0 and ChatInput.isCommand(before)
+	if not commandWord and arguments and ChatInput.isCommand(before) then
+		-- A command's argument: its listed candidates.
+		local previous: { string } = {}
+		for w in string.gmatch(string.sub(before, 1, lastSpace), "%S+") do
+			table.insert(previous, string.lower(w))
+		end
+		local alias = table.remove(previous, 1) :: string
+		local candidates = arguments(alias, previous)
+		if candidates then
+			local matches = {}
+			for _, candidate in candidates do
+				if ChatInput.argumentMatches(candidate, word) then
+					table.insert(matches, candidate)
+				end
+			end
+			if #matches == 0 then
+				return nil
+			end
+			return { start = start, word = word, candidates = sortedUnique(matches), command = false }
+		end
+	end
 	if commandsOnly and not commandWord then
 		return nil
 	end
