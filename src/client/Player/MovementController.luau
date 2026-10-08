@@ -24,7 +24,22 @@
 	            cancels gravity, and the root part is moved with CFrame + velocity. The client owns
 	            its character, so that replicates to everyone like normal movement. In the
 	            swimming / crawling pose the body lies down (pitched with the view when swimming),
-	            as Roblox's own Swimming state and Minecraft's renderer do.
+	            as Roblox's own Swimming state and Minecraft's renderer do. The hull and the drawn
+	            feet are Luau doubles (`feetX / feetY / feetZ`; `feet` is their float32 Vector3 for
+	            readers near the camera) and the root is put at `Rig.rootCFrame` of
+	            `Origin.blocksToRender` of them: the client's render frame (Shared/World/Origin),
+	            exact however far out the player is.
+	  Server's  with Config.Players.ServerPositions ("fake coords") the server parks the character
+	  places    and anchors its root (server Players/Characters.park): no VectorForce, no velocity,
+	            the root's CFrame written here stays on this client, and where the player is
+	            reaches the server only as Player/LocalPosition's moves (20 a second, after the
+	            ticks). A new character is put at the newest Teleport (or the world spawn) at once,
+	            frozen, so the camera never shows the park, and waits for the Teleport carrying its
+	            life (the IceVoxelLife attribute, Rig.LIFE): the server's placement of it. Teleports
+	            and the server's corrections come as Teleport messages (LocalPosition.onTeleport)
+	            instead of the character's attributes, and nothing is "moved by another script".
+	            A death plays Minecraft's death tilt (Rig.deathCFrame, 20 ticks) on the body
+	            where it stands; Player/SpectatorView hides it after that (`deathTime`).
 	  Facing    towards where the character walks, or where the camera looks in first person and
 	            with shift lock.
 	  Camera    at the hull's eye height (eased like Minecraft's when crouching / crawling); the
@@ -58,7 +73,12 @@
 	            teleports), it stays frozen in place.
 	  Teleports the server sets the feet position as attributes (Rig), and the streamer is told the
 	            destination at once (`teleported`: teleport mode); other scripts moving the
-	            character far are noticed too, and the hull follows.
+	            character far are noticed too, and the hull follows. The render origin goes to the
+	            destination at the next frame when it is far (Rendering/Rebase.request).
+	  Origin    a move of the render origin (Shared/World/Origin) shifts what this keeps in render
+	            studs (the root's last place, the view bob's camera CFrames) with it. Screens, the
+	            Roblox menu and the death let the origin move early (Rebase.setHidden: "screen",
+	            "menu", "dead"), where the hitch is hidden.
 	  Knockback explosions push the hull (`knockback`: the server's Explosion message adds to its
 	            velocity, as Minecraft's client does).
 	  Damage    landings after falls are reported to the server for fall damage. The Physics state
@@ -74,6 +94,7 @@
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -83,8 +104,10 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local KeyBindings = require(Shared.KeyBindings)
+local Origin = require(Shared.World.Origin)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
+local PlayerSync = require(Shared.Net.PlayerSync)
 local Rig = require(Shared.Movement.Rig)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
@@ -94,8 +117,11 @@ local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local EffectState = require(script.Parent.EffectState)
 local Exertion = require(script.Parent.Exertion)
+local LocalPosition = require(script.Parent.LocalPosition)
+local RemotePlayers = require(script.Parent.RemotePlayers)
 local ViewBob = require(script.Parent.ViewBob)
 
 local BLOCK = Config.BlockSize
@@ -133,6 +159,10 @@ local FLYING_FOV = 1.1
 -- Eye heights (blocks) of a standing and a lying (swimming / crawling) player.
 local STANDING_EYE = PlayerPhysics.dimensions("standing").eye
 local LYING_EYE = PlayerPhysics.dimensions("crawling").eye
+-- Minecraft's death: the body tips over in 20 ticks (LivingEntityRenderer.setupRotations) and is
+-- gone at deathTime 20 (LivingEntity.tickDeath).
+local DEATH_SECONDS = 1
+local DYING_STEP = "IceVoxelDying"
 
 -- The terrain streamer: whether the ground under (x, z) is shown, and (optional) a teleport's
 -- destination (feet, blocks), so it selects there at once (teleport mode beyond
@@ -147,10 +177,15 @@ export type View = {
 	-- may fly (creative, spectator), flies, moves through blocks (spectator) and how fast it flies
 	-- (state.mayFly, state.flying, state.noClip, state.flyingSpeed).
 	state: PlayerPhysics.State,
-	-- Where the hull is drawn this frame (feet, blocks, between the last two ticks) and the
-	-- character's facing (radians around Y).
+	-- Where the hull is drawn this frame (feet, world blocks, between the last two ticks): doubles,
+	-- and the same as a float32 Vector3 (for readers near the camera); the character's facing
+	-- (radians around Y, as CFrame.Angles(0, yaw, 0)) and the view's pitch (radians, up positive).
+	feetX: number,
+	feetY: number,
+	feetZ: number,
 	feet: Vector3,
 	yaw: number,
+	pitch: number,
 	-- How far the body lies down: 0 upright .. 1 in the swimming / crawling pose.
 	tilt: number,
 	-- Horizontal speed over the last tick (blocks per second).
@@ -185,6 +220,13 @@ local bobCamera: Camera? = nil
 local bobClean = CFrame.identity
 local bobSet = CFrame.identity
 
+-- Positions are the server's own (Config.Players.ServerPositions, read at start): see the header.
+local networked = false
+-- The pose Player/LocalPosition sends, refilled every frame.
+local pose: LocalPosition.Pose = { x = 0, y = 0, z = 0, yaw = 0, pitch = 0, tilt = 0, flags = 0, speed = 0, climb = 0 }
+-- os.clock() when the local character died (nil: alive), for the death tilt.
+local diedAt: number? = nil
+
 -- The player a spectator spectates (nil: none), and the camera mode to go back to afterwards.
 local spectated: Player? = nil
 local cameraModeBefore: Enum.CameraMode? = nil
@@ -212,6 +254,8 @@ function MovementController.spectate(target: Player?)
 	local player = Players.LocalPlayer
 	spectated = target
 	releaseOffset()
+	-- (The server keeps the target in this player's interest and follows them with its own place.)
+	LocalPosition.spectate(target)
 	if target then
 		if cameraModeBefore == nil then
 			cameraModeBefore = player.CameraMode
@@ -236,6 +280,20 @@ end
 function MovementController.spectating(): Player?
 	return spectated
 end
+
+-- Seconds since the local character died (nil: alive), with the server's own positions (the body
+-- tips over where it stands, and Player/SpectatorView hides it after the tilt); nil reading
+-- characters, whose body falls onto the terrain instead.
+function MovementController.deathTime(): number?
+	local at = diedAt
+	if at == nil or not networked then
+		return nil
+	end
+	return os.clock() - at
+end
+
+-- How long the death tilt lasts (seconds); after it the body is no longer shown.
+MovementController.DEATH_SECONDS = DEATH_SECONDS
 
 --[[
 	An explosion's knockback (blocks per tick, the server's Explosion message through
@@ -327,12 +385,13 @@ local function cameraHeight(hum: Humanoid, root: BasePart): number
 end
 
 --[[
-	Puts the camera at the eyes of the spectated player (`humanoid`, feet at `feet` in blocks):
-	Roblox's camera aims at its fixed height above their root part plus their CameraOffset in the
-	root's space, and the offset their own client sets (below) never replicates. Their pose doesn't
-	either: standing eyes, or lying ones as far as the body is pitched (as Rig.feet reads it).
+	Puts the camera at the eyes of the spectated player (`humanoid`, feet at (x, y, z) in world
+	blocks, lying `tilt` of the way: Player/RemotePlayers): Roblox's camera aims at its fixed height
+	above their root part plus their CameraOffset in the root's space, and the offset their own
+	client sets (below) never replicates. Their pose doesn't either: standing eyes, or lying ones as
+	far as the body lies. (The eyes and the root are compared in render studs.)
 ]]
-local function aimAtEyes(humanoid: Humanoid, feet: Vector3)
+local function aimAtEyes(humanoid: Humanoid, x: number, y: number, z: number, tilt: number)
 	local root = humanoid.RootPart
 	if root == nil then
 		return
@@ -341,10 +400,8 @@ local function aimAtEyes(humanoid: Humanoid, feet: Vector3)
 		releaseOffset()
 		offsetHumanoid, offsetBefore = humanoid, humanoid.CameraOffset
 	end
-	local pitch = math.acos(math.clamp(root.CFrame.UpVector.Y, -1, 1))
-	local tilt = math.clamp(pitch / (math.pi / 2), 0, 1)
 	local eye = STANDING_EYE + (LYING_EYE - STANDING_EYE) * tilt
-	local toEye = (feet + Vector3.new(0, eye, 0)) * BLOCK - root.Position
+	local toEye = Origin.blocksToRender(x, y + eye, z) - root.Position
 	local offset = root.CFrame:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(humanoid, root), 0)
 	if (humanoid.CameraOffset - offset).Magnitude > 1e-3 then
 		humanoid.CameraOffset = offset
@@ -417,6 +474,33 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			return world:getBlock(x, y, z)
 		end,
 	}
+	networked = Config.Players.ServerPositions
+	if Config.Origin.Enabled and not networked then
+		-- (A character the client owns replicates its CFrame: in a moved render frame the server
+		-- and everyone else would read render studs as world ones.)
+		warn("[IceVoxel] Config.Origin.Enabled needs Config.Players.ServerPositions")
+	end
+	-- Teleports and moves (nothing with the switch off).
+	LocalPosition.start()
+
+	-- Moments that hide the origin's hitch (Rendering/Rebase): an inventory screen or the
+	-- Options menu (Ui/Screens), Roblox's menu; the death below.
+	Screens.changed:Connect(function(open: boolean)
+		Rebase.setHidden("screen", open)
+	end)
+	GuiService.MenuOpened:Connect(function()
+		Rebase.setHidden("menu", true)
+	end)
+	GuiService.MenuClosed:Connect(function()
+		Rebase.setHidden("menu", false)
+	end)
+	-- The view bob's camera CFrames are render studs: they move with the origin (the step moved
+	-- the camera by the same amount, so `unbob` still finds its own CFrame there).
+	Origin.onRebase(function(dx: number, dz: number)
+		local d = Vector3.new(dx, 0, dz)
+		bobClean -= d
+		bobSet -= d
+	end)
 
 	-- The default control scripts, if the game has them (false: tried and failed).
 	local controls: any = nil
@@ -593,17 +677,39 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	end
 
 	local connections: { RBXScriptConnection } = {}
+	-- Other things to undo with the character (Origin and LocalPosition listeners).
+	local cleanups: { () -> () } = {}
 	local function disconnectAll()
 		for _, connection in connections do
 			connection:Disconnect()
 		end
 		table.clear(connections)
+		for _, cleanup in cleanups do
+			cleanup()
+		end
+		table.clear(cleanups)
 		RunService:UnbindFromRenderStep("IceVoxelMovement")
 		RunService:UnbindFromRenderStep("IceVoxelViewBob")
+		RunService:UnbindFromRenderStep(DYING_STEP)
 		unbob()
 		MovementController.current = nil
 		MovementController.spectate(nil)
 		resetFov()
+	end
+
+	-- The feet (world blocks, doubles) under a root part placed by Rig.rootCFrame: Rig.feet's
+	-- reading (the lean from the root's pitch), through the render origin.
+	local function feetUnder(character: Model, root: BasePart): (number, number, number)
+		local cframe = root.CFrame
+		local tilt = math.clamp(math.acos(math.clamp(cframe.UpVector.Y, -1, 1)) / (math.pi / 2), 0, 1)
+		local x, y, z = Origin.renderToBlocks(cframe.Position)
+		return x, y - Rig.rootHeight(character, tilt) / BLOCK, z
+	end
+
+	-- The life (Rig.LIFE) the server gave `character`, nil until its attribute arrives.
+	local function lifeOf(character: Model): number?
+		local life = character:GetAttribute(Rig.LIFE)
+		return if type(life) == "number" then life else nil
 	end
 
 	local function onCharacter(character: Model)
@@ -617,6 +723,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		if hum.Health <= 0 or character.Parent == nil then
 			return
 		end
+		diedAt = nil
+		Rebase.setHidden("dead", false)
 
 		-- Cosmetic rig: no collisions, no humanoid forces, no gravity.
 		for _, part in character:GetDescendants() do
@@ -637,15 +745,21 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		)
 		hum.AutoRotate = false
 		hum:ChangeState(Enum.HumanoidStateType.Physics)
-		local attachment = Instance.new("Attachment")
-		attachment.Name = "IceVoxelMovement"
-		attachment.Parent = rootPart
-		local antiGravity = Instance.new("VectorForce")
-		antiGravity.Name = "IceVoxelAntiGravity"
-		antiGravity.Attachment0 = attachment
-		antiGravity.RelativeTo = Enum.ActuatorRelativeTo.World
-		antiGravity.ApplyAtCenterOfMass = true
-		antiGravity.Parent = rootPart
+		-- (A parked root is anchored by the server: nothing to hold up.)
+		local attachment: Attachment? = nil
+		local antiGravity: VectorForce? = nil
+		if not networked then
+			local made = Instance.new("Attachment")
+			made.Name = "IceVoxelMovement"
+			made.Parent = rootPart
+			local force = Instance.new("VectorForce")
+			force.Name = "IceVoxelAntiGravity"
+			force.Attachment0 = made
+			force.RelativeTo = Enum.ActuatorRelativeTo.World
+			force.ApplyAtCenterOfMass = true
+			force.Parent = rootPart
+			attachment, antiGravity = made, force
+		end
 		-- The joint holding the body to the root part (R15 LowerTorso.Root, R6 RootJoint). The
 		-- step-up catch-up lowers the body through it, so the root part (the player's position for
 		-- the server and other players) always stays on the hull.
@@ -659,18 +773,44 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			end
 		end
 
-		-- Hull, starting where the server put the character.
+		-- Hull, starting where the server put the character: its feet attribute (or where it
+		-- stands); with the server's own positions the Teleport of its life when it is here
+		-- already, else the newest Teleport or the world spawn, frozen, until that one comes.
 		local spawnedAt = os.clock()
-		local feet = character:GetAttribute(Rig.TELEPORT_FEET)
-		local start = if typeof(feet) == "Vector3" then feet else Rig.feet(character) or Vector3.zero
-		local state = PlayerPhysics.new(start.X, start.Y, start.Z)
+		local startX, startY, startZ, startYaw = 0, 0, 0, 0
+		local settled = false
+		if networked then
+			local teleport = LocalPosition.latest()
+			local spawn = Shared:GetAttribute("SpawnPosition")
+			if teleport then
+				startX, startY, startZ = teleport.x, teleport.y, teleport.z
+				startYaw = teleport.yaw or 0
+			elseif typeof(spawn) == "Vector3" then
+				-- (The spawn attribute is where a root stands there, in world studs.)
+				startX, startY, startZ = spawn.X / BLOCK, (spawn.Y - Rig.rootOffset(character)) / BLOCK, spawn.Z / BLOCK
+			end
+		else
+			local feet = character:GetAttribute(Rig.TELEPORT_FEET)
+			if typeof(feet) == "Vector3" then
+				startX, startY, startZ = feet.X, feet.Y, feet.Z
+				settled = true
+			else
+				startX, startY, startZ = feetUnder(character, rootPart)
+			end
+			local _, rootYaw = rootPart.CFrame:ToOrientation()
+			startYaw = rootYaw
+		end
+		local state = PlayerPhysics.new(startX, startY, startZ)
 		state.stepHeight = Movement.StepHeight
 		PlayerPhysics.setGameMode(state, GameMode.of(player))
-		local _, rootYaw = rootPart.CFrame:ToOrientation()
 		local view: View = {
 			state = state,
-			feet = start,
-			yaw = rootYaw,
+			feetX = startX,
+			feetY = startY,
+			feetZ = startZ,
+			feet = Vector3.new(startX, startY, startZ),
+			yaw = startYaw,
+			pitch = 0,
 			tilt = 0,
 			speed = 0,
 			climbSpeed = 0,
@@ -678,57 +818,131 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			frozen = true,
 		}
 		MovementController.current = view
+		if networked then
+			-- (At once: the camera never shows the park.)
+			rootPart.CFrame =
+				Rig.rootCFrame(character, Origin.blocksToRender(startX, startY, startZ), startYaw, 0, math.pi / 2)
+		end
 
-		local previous = start
+		-- The hull at the last tick (world blocks, doubles).
+		local previousX, previousY, previousZ = startX, startY, startZ
 		local accumulator = 0
 		local jumpLatched = false
 		-- Blocks the drawn character is below the hull after stepping up.
 		local stepLag = 0
 		-- Eye height (blocks) the camera is at, easing towards the hull's.
 		local eye = PlayerPhysics.eyeHeight(state)
-		-- Where the root part was put last frame (studs), its velocity then and that frame's length.
+		-- Where the root part was put last frame (render studs), its velocity then and that
+		-- frame's length (reading characters: the "moved by another script" check).
 		local lastPlaced: Vector3? = nil
 		local lastVelocity = Vector3.zero
 		local lastDt = 0
-		local settled = typeof(feet) == "Vector3"
+		-- (Render studs: it moves with the origin.)
+		table.insert(
+			cleanups,
+			Origin.onRebase(function(dx: number, dz: number)
+				local placed = lastPlaced
+				if placed then
+					lastPlaced = placed - Vector3.new(dx, 0, dz)
+				end
+			end)
+		)
 
-		local function snap(position: Vector3)
-			PlayerPhysics.place(state, position.X, position.Y, position.Z)
-			previous = position
-			view.feet = position
+		local function snap(x: number, y: number, z: number)
+			PlayerPhysics.place(state, x, y, z)
+			previousX, previousY, previousZ = x, y, z
+			view.feetX, view.feetY, view.feetZ = x, y, z
+			view.feet = Vector3.new(x, y, z)
 			view.speed = 0
 			view.climbSpeed = 0
 			view.frozen = true
 			accumulator = 0
 			stepLag = 0
 		end
-		local function onTeleport()
-			local target = character:GetAttribute(Rig.TELEPORT_FEET)
-			if typeof(target) == "Vector3" then
-				-- (A teleport ends spectating, as ServerPlayer.teleportTo sets the camera back.)
-				MovementController.spectate(nil)
-				settled = true
-				snap(target)
-				local teleported = streamer.teleported
-				if teleported then
-					teleported(streamer, target)
-				end
+		-- The server put the player at feet (x, y, z): the hull snaps there, the streamer selects
+		-- around it at once (teleport mode when far) and the render origin follows when far.
+		local function teleported(x: number, y: number, z: number)
+			-- (A teleport ends spectating, as ServerPlayer.teleportTo sets the camera back.)
+			MovementController.spectate(nil)
+			settled = true
+			snap(x, y, z)
+			Rebase.request(x * BLOCK, z * BLOCK)
+			local select = streamer.teleported
+			if select then
+				select(streamer, Vector3.new(x, y, z))
 			end
 		end
-		table.insert(connections, character:GetAttributeChangedSignal(Rig.TELEPORT_FEET):Connect(onTeleport))
-		table.insert(connections, character:GetAttributeChangedSignal(Rig.TELEPORT_COUNT):Connect(onTeleport))
+		-- The Teleport the hull last snapped to (with the server's own positions).
+		local applied: PlayerSync.Teleport? = nil
+		local function apply(teleport: PlayerSync.Teleport)
+			applied = teleport
+			local yaw = teleport.yaw
+			if yaw then
+				view.yaw = yaw
+			end
+			teleported(teleport.x, teleport.y, teleport.z)
+			-- (Moves carry its epoch from now on: the server waits for them.)
+			LocalPosition.adopted(teleport)
+		end
+		-- The newest Teleport of this character's life when the hull isn't there yet: the spawn's
+		-- (whichever of it and the life attribute came first), then teleports and corrections.
+		local function followTeleports()
+			local teleport = LocalPosition.placingFor(lifeOf(character))
+			if teleport and teleport ~= applied then
+				apply(teleport)
+			end
+		end
+		if networked then
+			table.insert(cleanups, LocalPosition.onTeleport(followTeleports))
+			table.insert(connections, character:GetAttributeChangedSignal(Rig.LIFE):Connect(followTeleports))
+			followTeleports()
+		else
+			local function onTeleport()
+				local target = character:GetAttribute(Rig.TELEPORT_FEET)
+				if typeof(target) == "Vector3" then
+					teleported(target.X, target.Y, target.Z)
+				end
+			end
+			table.insert(connections, character:GetAttributeChangedSignal(Rig.TELEPORT_FEET):Connect(onTeleport))
+			table.insert(connections, character:GetAttributeChangedSignal(Rig.TELEPORT_COUNT):Connect(onTeleport))
+		end
 
+		-- How the body was pitched last frame (for the death tilt).
+		local drawnPitch = math.pi / 2
 		local function release()
+			local x, y, z, yaw, tilt, bodyPitch = view.feetX, view.feetY, view.feetZ, view.yaw, view.tilt, drawnPitch
 			disconnectAll()
-			antiGravity:Destroy()
-			attachment:Destroy()
+			if antiGravity then
+				antiGravity:Destroy()
+			end
+			if attachment then
+				attachment:Destroy()
+			end
 			hum.CameraOffset = Vector3.zero
 			if rootJoint then
 				rootJoint.C0 = rootJointC0
 			end
-			for _, part in character:GetDescendants() do
-				setGroup(part, "Default")
+			diedAt = os.clock()
+			-- (The death screen hides a move of the origin.)
+			Rebase.setHidden("dead", true)
+			if not networked then
+				-- The body falls onto the terrain (only this client has it to land on).
+				for _, part in character:GetDescendants() do
+					setGroup(part, "Default")
+				end
+				return
 			end
+			-- An anchored body doesn't fall: it tips over where it stands, as Minecraft's does, in the
+			-- render frame of each moment (the origin may move meanwhile).
+			RunService:BindToRenderStep(DYING_STEP, RENDER_PRIORITY, function()
+				local at = diedAt
+				if rootPart.Parent == nil or at == nil then
+					RunService:UnbindFromRenderStep(DYING_STEP)
+					return
+				end
+				local base = Rig.rootCFrame(character, Origin.blocksToRender(x, y, z), yaw, tilt, bodyPitch)
+				rootPart.CFrame = Rig.deathCFrame(base, os.clock() - at - TICK, Rig.rootHeight(character, tilt))
+			end)
 		end
 		table.insert(connections, hum.Died:Connect(release))
 		-- The Physics state does not die by itself when health runs out.
@@ -841,59 +1055,71 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			if humanoidState ~= Enum.HumanoidStateType.Physics and humanoidState ~= Enum.HumanoidStateType.Dead then
 				hum:ChangeState(Enum.HumanoidStateType.Physics)
 			end
-			antiGravity.Force = Vector3.new(0, rootPart.AssemblyMass * workspace.Gravity, 0)
+			local force = antiGravity
+			if force then
+				force.Force = Vector3.new(0, rootPart.AssemblyMass * workspace.Gravity, 0)
+			end
 
 			-- Moved by some other script? Follow it. Roblox physics moves the root along its velocity
 			-- in between, for a step that need not match this frame's dt (hitches), so allow for
-			-- the velocity over both frames.
+			-- the velocity over both frames. (Not a parked root: only this client moves it.)
 			local placed = lastPlaced
 			local drift = lastVelocity.Magnitude * (dt + lastDt)
-			if placed and (rootPart.Position - placed).Magnitude > MOVED_TOLERANCE + drift then
-				local moved = Rig.feet(character)
-				if moved then
-					snap(moved)
-				end
+			if not networked and placed and (rootPart.Position - placed).Magnitude > MOVED_TOLERANCE + drift then
+				snap(feetUnder(character, rootPart))
 			end
 
 			local frameInput = readInput(dt)
+			view.pitch = math.asin(frameInput.lookY)
 			stepLag *= math.exp(-STEP_CATCH_UP * dt)
 			-- Spectating someone: follow their feet (no ticks of our own); sneaking leaves (not a
-			-- Shift that a screen or the switcher takes: a container's shift click).
-			local following: Vector3? = nil
+			-- Shift that a screen or the switcher takes: a container's shift click). Their feet
+			-- are Player/RemotePlayers' (their character, or the server's relay).
+			local following = false
 			local target = spectated
 			if target then
 				local other = target.Character
 				local otherHumanoid = other and other:FindFirstChildOfClass("Humanoid")
-				local otherFeet = other and Rig.feet(other)
+				local remote = RemotePlayers.get(target)
 				if
 					not GameMode.isSpectatorOf(player)
 					or target.Parent == nil
 					or otherHumanoid == nil
 					or otherHumanoid.Health <= 0
-					or otherFeet == nil
+					or remote == nil
 					or frameInput.sneak
 				then
 					MovementController.spectate(nil)
-				else
+				elseif remote then
 					local camera = workspace.CurrentCamera
 					if camera and camera.CameraSubject ~= otherHumanoid then
 						camera.CameraSubject = otherHumanoid
 					end
-					aimAtEyes(otherHumanoid, otherFeet)
-					following = otherFeet
+					aimAtEyes(otherHumanoid, remote.x, remote.y, remote.z, remote.tilt)
+					PlayerPhysics.place(state, remote.x, remote.y, remote.z)
+					previousX, previousY, previousZ = remote.x, remote.y, remote.z
+					following = true
 				end
 			end
 			if following then
-				PlayerPhysics.place(state, following.X, following.Y, following.Z)
-				previous = following
 				accumulator = 0
 				stepLag = 0
 				view.speed = 0
 				view.climbSpeed = 0
 			elseif view.frozen then
 				-- Wait for the server's spawn teleport (fresh characters) and for the ground.
+				if networked and not settled then
+					-- (The life attribute or the Teleport may come any time.)
+					followTeleports()
+				end
 				if not settled and os.clock() - spawnedAt > SPAWN_SETTLE then
 					settled = true
+					-- (No Teleport of this life came: the newest one's epoch, or the moves would
+					-- all be refused.)
+					local latest = LocalPosition.latest()
+					if networked and latest and latest ~= applied then
+						apply(latest)
+					end
 				end
 				-- Jumps pressed while waiting don't fire afterwards.
 				jumpLatched = false
@@ -905,7 +1131,8 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				accumulator = math.min(accumulator + dt, TICK * MAX_TICKS_PER_FRAME)
 				while accumulator >= TICK do
 					accumulator -= TICK
-					previous = Vector3.new(state.x, state.y, state.z)
+					previousX, previousY, previousZ = state.x, state.y, state.z
+					local previous = Vector3.new(previousX, previousY, previousZ)
 					-- (The status effects as the server last sent them.)
 					state.speedFactor = EffectState.speedFactor()
 					state.jumpBoost, state.fallReduction = EffectState.jumpBoost()
@@ -916,14 +1143,14 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					Exertion.tick(state, events, previous)
 					frameInput.jump = jumpHeld()
 					jumpLatched = false
-					view.speed = math.sqrt((state.x - previous.X) ^ 2 + (state.z - previous.Z) ^ 2) * TICK_RATE
-					view.climbSpeed = if state.climbing then (state.y - previous.Y) * TICK_RATE else 0
+					view.speed = math.sqrt((state.x - previousX) ^ 2 + (state.z - previousZ) ^ 2) * TICK_RATE
+					view.climbSpeed = if state.climbing then (state.y - previousY) * TICK_RATE else 0
 					if events.jumped then
 						view.jumpedAt = os.clock()
 					end
 					if events.stepUp > 0 then
 						-- A step up is a whole block in one tick: draw it as a quick climb instead.
-						previous += Vector3.new(0, events.stepUp, 0)
+						previousY += events.stepUp
 						stepLag = math.min(stepLag + events.stepUp, MAX_STEP_LAG)
 					end
 					if events.landed and events.damage > 0 and Movement.FallDamage then
@@ -932,10 +1159,12 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				end
 			end
 
-			-- Draw the character between the last two ticks.
+			-- Draw the character between the last two ticks (doubles: exact far out).
 			local alpha = if view.frozen then 1 else accumulator / TICK
-			local hull = previous:Lerp(Vector3.new(state.x, state.y, state.z), alpha)
-			view.feet = hull
+			view.feetX = previousX + (state.x - previousX) * alpha
+			view.feetY = previousY + (state.y - previousY) * alpha
+			view.feetZ = previousZ + (state.z - previousZ) * alpha
+			view.feet = Vector3.new(view.feetX, view.feetY, view.feetZ)
 
 			-- Lie down in the swimming / crawling pose: face down, or along the view when swimming
 			-- (Minecraft's PlayerRenderer), the body's middle at the middle of the low hull.
@@ -943,19 +1172,27 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 			view.tilt = math.clamp(view.tilt + (if lying then dt else -dt) * TILT_PER_SECOND, 0, 1)
 			local bodyPitch = math.pi / 2
 			if state.inWater then
-				bodyPitch = math.clamp(math.pi / 2 - math.asin(frameInput.lookY), 0, math.pi)
+				bodyPitch = math.clamp(math.pi / 2 - view.pitch, 0, math.pi)
 			end
+			drawnPitch = bodyPitch
 			local rootHeight = Rig.rootHeight(character, view.tilt)
-			local cframe = CFrame.new(view.feet * BLOCK + Vector3.new(0, rootHeight, 0))
-				* CFrame.Angles(0, view.yaw, 0)
-				* CFrame.Angles(-bodyPitch * view.tilt, 0, 0)
-			local velocity = if view.frozen
-				then Vector3.zero
-				else Vector3.new(state.vx, state.vy, state.vz) * VELOCITY_SCALE
+			-- (In the render frame: Shared/World/Origin.)
+			local cframe = Rig.rootCFrame(
+				character,
+				Origin.blocksToRender(view.feetX, view.feetY, view.feetZ),
+				view.yaw,
+				view.tilt,
+				bodyPitch
+			)
 			rootPart.CFrame = cframe
-			rootPart.AssemblyLinearVelocity = velocity
-			rootPart.AssemblyAngularVelocity = Vector3.zero
-			lastPlaced, lastVelocity, lastDt = cframe.Position, velocity, dt
+			if not networked then
+				local velocity = if view.frozen
+					then Vector3.zero
+					else Vector3.new(state.vx, state.vy, state.vz) * VELOCITY_SCALE
+				rootPart.AssemblyLinearVelocity = velocity
+				rootPart.AssemblyAngularVelocity = Vector3.zero
+				lastPlaced, lastVelocity, lastDt = cframe.Position, velocity, dt
+			end
 
 			-- The camera looks from the hull's eyes, whatever the body does (Roblox's camera adds
 			-- CameraOffset in the root part's space).
@@ -975,6 +1212,16 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					* ((state.speedFactor + 1) / 2)
 			end
 			updateFov(dt, fov)
+
+			-- Where the player is, for the server (its own positions): the newest tick's hull.
+			if networked then
+				pose.x, pose.y, pose.z = state.x, state.y, state.z
+				pose.yaw, pose.pitch, pose.tilt = view.yaw, view.pitch, view.tilt
+				pose.flags =
+					LocalPosition.flags(state, os.clock() - view.jumpedAt < LocalPosition.JUMP_TIME, hum.Health <= 0)
+				pose.speed, pose.climb = view.speed, view.climbSpeed
+				LocalPosition.send(pose, view.frozen, spectated ~= nil)
+			end
 		end)
 
 		-- Minecraft's view bobbing and hurt tilt (Player/ViewBob), after the camera and the screen

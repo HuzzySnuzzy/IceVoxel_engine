@@ -20,6 +20,11 @@
 	share; the cloud parts and rings, the rain strips drawn, the bolts showing). Under the frame
 	rate, the world: its name, world type, difficulty, seed and whether commands are allowed
 	(Shared/WorldSettings.info, from the server's attributes). The panel grows to fit its lines.
+	The player's position is the hull's, in true world coordinates (as Minecraft's F3), whatever
+	the render origin; under it the render origin (Shared/World/Origin: where it is in studs and
+	blocks, its moves and the last one's parts and milliseconds, Rendering/Rebase.stats) and, with
+	the server's own positions, the move epoch and the players this client is sent (Player/
+	LocalPosition, Player/RemotePlayers).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
 	its extended view while it is, as Jade does with F3.
@@ -42,6 +47,9 @@ local ChunkStreamer = require(script.Parent.Parent.Streaming.ChunkStreamer)
 local ChunkRenderer = require(script.Parent.Parent.Rendering.ChunkRenderer)
 local MeshOverlay = require(script.Parent.Parent.Rendering.MeshOverlay)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
+local LocalPosition = require(script.Parent.Parent.Player.LocalPosition)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
@@ -58,6 +66,7 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
@@ -202,6 +211,31 @@ local function movementLine(): string
 		s.flyingSpeed,
 		EntityRenderer.count()
 	)
+end
+
+-- The render origin (Shared/World/Origin) and its moves (Rendering/Rebase); with the server's own
+-- positions, the epoch moves carry and how many other players this client is sent.
+local function originLine(): string
+	local stats = Rebase.stats()
+	local line = string.format(
+		"origin  %d %d studs (%d %d blocks)  epoch %d, %d moves, last %d parts in %.1f ms",
+		stats.x,
+		stats.z,
+		stats.x // Config.BlockSize,
+		stats.z // Config.BlockSize,
+		stats.epoch,
+		stats.count,
+		stats.lastParts,
+		stats.lastMs
+	)
+	if LocalPosition.active() then
+		local tracked = 0
+		for _ in RemotePlayers.each() do
+			tracked += 1
+		end
+		line ..= string.format("\n        moves epoch %d, %d players tracked", LocalPosition.epoch(), tracked)
+	end
+	return line
 end
 
 local function meshLine(stats: MeshOverlay.Stats): string
@@ -391,6 +425,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			caveLine(stats),
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
+			originLine(),
 			timeLine(),
 			LightingController.describeFog(),
 			WeatherClient.describe(),

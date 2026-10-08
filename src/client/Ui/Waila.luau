@@ -50,7 +50,10 @@
 	item, F3) and rebuilds the text only when the key changes, at most every REBUILD_INTERVAL (also
 	when the target flickers on and off: hiding keeps the text); the progress line only resizes.
 	Items, players, water and the block hiding them are looked for every PICK_INTERVAL. On touch
-	screens a finger aims only while breaking (BlockInteraction), so they show blocks only.
+	screens a finger aims only while breaking (BlockInteraction), so they show blocks only. The aim
+	starts at the camera, in render studs, and is cast from world blocks as doubles (Shared/World/
+	Origin); other players are Player/RemotePlayers' (their characters, or the server's relay:
+	only those this client is sent), and their F3 position is in true world coordinates.
 
 	The tunables are below (Config is shared with every other module, so they live here).
 ]]
@@ -65,7 +68,8 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Fire = require(Shared.Fire)
 local GameMode = require(Shared.GameMode)
-local Rig = require(Shared.Movement.Rig)
+local Origin = require(Shared.World.Origin)
+local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
 local LightEstimate = require(Shared.World.LightEstimate)
@@ -83,6 +87,7 @@ local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local TransmitterRenderer = require(script.Parent.Parent.Rendering.TransmitterRenderer)
 local StructureNet = require(script.Parent.Parent.Net.StructureNet)
 local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
@@ -174,9 +179,15 @@ local CROSS_ART = {
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
+-- Other players are aimed at by their standing hull (as the server's EditRules and Minecraft's).
+local PLAYER_WIDTH = PlayerPhysics.STANDING.width
+local PLAYER_HEIGHT = PlayerPhysics.STANDING.height
 
 -- An item or a player under the aim, `distance` blocks along it.
 type Entity = { distance: number, item: EntityRenderer.ItemView?, player: Player?, mob: MobRenderer.MobView? }
+
+-- A point in world blocks as doubles (the aim's origin, the body: exact far from 0).
+type Point = { X: number, Y: number, Z: number }
 
 local Waila = {}
 
@@ -655,10 +666,14 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 			local health = if humanoid then humanoid.Health else 0
 			local maxHealth = if humanoid then humanoid.MaxHealth else 0
-			local feet = if extended and character then Rig.feet(character) else nil
+			-- (World blocks: Player/RemotePlayers.)
+			local fx, fy, fz = nil, 0, 0
+			if extended then
+				fx, fy, fz = RemotePlayers.feet(other)
+			end
 			local mode = GameMode.of(other)
 			local points = WailaInfo.healthPoints(health, maxHealth)
-			local position = if feet then `{math.floor(feet.X)} {math.floor(feet.Y)} {math.floor(feet.Z)}` else ""
+			local position = if fx then `{math.floor(fx)} {math.floor(fy)} {math.floor(fz)}` else ""
 			local key = `p {other.UserId} {other.DisplayName} {points} {mode} {extended} {position}`
 			show(key, extended, function()
 				return WailaInfo.player({
@@ -668,9 +683,9 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 					health = health,
 					maxHealth = maxHealth,
 					gameMode = mode,
-					x = if feet then feet.X else nil,
-					y = if feet then feet.Y else nil,
-					z = if feet then feet.Z else nil,
+					x = fx,
+					y = if fx then fy else nil,
+					z = if fx then fz else nil,
 				}, extended)
 			end)
 		end
@@ -717,14 +732,15 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	end
 
 	--[[
-		The nearest item or player on the ray (blocks) within `maxDistance` and in reach of `body`
-		(no spectators, nor the player spectated; a spectator only players).
+		The nearest item or player on the ray from `origin` (world blocks, doubles: {x, y, z}) within
+		`maxDistance` and in reach of `body` (likewise) (no spectators, nor the player spectated; a
+		spectator only players).
 	]]
 	local function pickEntity(
-		origin: Vector3,
+		origin: Point,
 		direction: Vector3,
 		maxDistance: number,
-		body: Vector3,
+		body: Point,
 		spectating: boolean
 	): Entity?
 		local best: Entity? = nil
@@ -775,11 +791,13 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		end
 		if SHOW_PLAYERS then
 			local spectated = MovementController.spectating()
-			for _, other in Players:GetPlayers() do
-				local character = other.Character
-				if other ~= player and character and SpectatorRules.aimable(GameMode.of(other), other == spectated) then
-					local min, max = Rig.hull(character)
-					if min and max and ((min + max) / 2 - body).Magnitude <= REACH then
+			local half, height = PLAYER_WIDTH / 2, PLAYER_HEIGHT
+			-- (The players this client knows of, where Player/RemotePlayers has them.)
+			for other, remote in RemotePlayers.each() do
+				if SpectatorRules.aimable(GameMode.of(other), other == spectated) then
+					-- Their standing hull's centre within reach of the body.
+					local dx, dy, dz = remote.x - body.X, remote.y + height / 2 - body.Y, remote.z - body.Z
+					if dx * dx + dy * dy + dz * dz <= REACH * REACH then
 						local t = WailaInfo.rayBox(
 							origin.X,
 							origin.Y,
@@ -787,12 +805,12 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 							direction.X,
 							direction.Y,
 							direction.Z,
-							min.X,
-							min.Y,
-							min.Z,
-							max.X,
-							max.Y,
-							max.Z
+							remote.x - half,
+							remote.y,
+							remote.z - half,
+							remote.x + half,
+							remote.y + height,
+							remote.z + half
 						)
 						if t and t < bestDistance then
 							best, bestDistance = { distance = t, item = nil, player = other }, t
@@ -808,7 +826,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		Water on the ray, in reach: the first fluid after the ray has left any fluid it started in
 		(looking out of a lake shows the next one, not the water around the camera).
 	]]
-	local function pickFluid(origin: Vector3, direction: Vector3, maxDistance: number, body: Vector3): VoxelRaycast.Hit?
+	local function pickFluid(origin: Point, direction: Vector3, maxDistance: number, body: Point): VoxelRaycast.Hit?
 		local outside = false
 		local hit = VoxelRaycast.cast(
 			origin.X,
@@ -831,7 +849,8 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		if hit == nil or not isFluid(hit.block) then
 			return nil
 		end
-		if (Vector3.new(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5) - body).Magnitude > REACH then
+		local dx, dy, dz = hit.x + 0.5 - body.X, hit.y + 0.5 - body.Y, hit.z + 0.5 - body.Z
+		if dx * dx + dy * dy + dz * dz > REACH * REACH then
 			return nil
 		end
 		return hit
@@ -842,6 +861,9 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	-- The first block on the aim, in reach or not (it hides the entities behind it).
 	local pickedWall: number? = nil
 	local lastPick = -math.huge
+	-- The aim's origin and the body (world blocks, doubles), refilled at every pick.
+	local origin: Point = { X = 0, Y = 0, Z = 0 }
+	local body: Point = { X = 0, Y = 0, Z = 0 }
 
 	local function pick()
 		pickedEntity, pickedFluid, pickedWall = nil, nil, nil
@@ -855,9 +877,10 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 			return
 		end
 		local ray = workspace.CurrentCamera:ViewportPointToRay(point.X, point.Y)
-		local origin = ray.Origin / BLOCK
+		-- (The camera and the root are render studs: world blocks from them, as doubles.)
+		origin.X, origin.Y, origin.Z = Origin.renderToBlocks(ray.Origin)
 		local direction = ray.Direction
-		local body = rootPart.Position / BLOCK
+		body.X, body.Y, body.Z = Origin.renderToBlocks(rootPart.Position)
 		local spectating = GameMode.isSpectator(ClientInventory.mode())
 		-- (BlockInteraction's limit: the camera's distance to the player plus the reach.)
 		local maxDistance = (ray.Origin - rootPart.Position).Magnitude / BLOCK + REACH

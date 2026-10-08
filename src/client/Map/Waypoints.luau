@@ -8,6 +8,10 @@
 	changed names in it; an echo is applied only if no newer change was made since, so a slow
 	answer never undoes a change. Nothing is sent before the saved list arrived; waypoints added
 	before that are merged into it.
+
+	Waypoints are world blocks; their beacons stand in the client's render frame (Shared/World/
+	Origin: world studs - the origin) and move with it (a Rendering/Rebase mover). The distance on
+	a label is between two render positions (the beacon and the camera).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,9 +19,11 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Origin = require(Shared.World.Origin)
 local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 
 type Waypoint = Protocol.Waypoint
 
@@ -59,6 +65,17 @@ function Waypoints.new(): Waypoints
 	local saveAt: number? = nil
 	local revision = 0
 	local synced = false
+	-- The beacons stay over their waypoints when the render origin moves.
+	Rebase.register("Waypoints", function(dx: number, dz: number, parts, cframes)
+		local d = Vector3.new(dx, 0, dz)
+		for _, beacon in beacons do
+			local part = beacon.part
+			if part.Parent ~= nil then
+				table.insert(parts, part)
+				table.insert(cframes, part.CFrame - d)
+			end
+		end
+	end)
 
 	local function rebuildBeacons()
 		for _, beacon in beacons do
@@ -74,8 +91,7 @@ function Waypoints.new(): Waypoints
 			part.CanTouch = false
 			part.Transparency = 1
 			part.Size = Vector3.one
-			part.Position =
-				Vector3.new((waypoint.x + 0.5) * BLOCK, (waypoint.y + 2) * BLOCK, (waypoint.z + 0.5) * BLOCK)
+			part.Position = Origin.blocksToRender(waypoint.x + 0.5, waypoint.y + 2, waypoint.z + 0.5)
 
 			local billboard = Instance.new("BillboardGui")
 			billboard.AlwaysOnTop = true

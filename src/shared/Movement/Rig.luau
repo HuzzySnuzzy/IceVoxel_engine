@@ -27,6 +27,10 @@ Rig.COLLISION_GROUP = "IceVoxelCharacters"
 -- changes on every teleport (so teleporting to the same place twice is noticed too).
 Rig.TELEPORT_FEET = "IceVoxelFeet"
 Rig.TELEPORT_COUNT = "IceVoxelTeleports"
+-- With Config.Players.ServerPositions: the character's life (a counter, +1 for each new
+-- character of a player, Players/Characters.park); the Teleport message (Net/PlayerSync) that
+-- carries the same life is the one that placed this character.
+Rig.LIFE = "IceVoxelLife"
 
 -- Studs from the character's feet to the centre of its HumanoidRootPart, standing.
 function Rig.rootOffset(character: Model): number

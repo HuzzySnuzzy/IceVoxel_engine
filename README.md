@@ -1027,6 +1027,15 @@ A fast, Minecraft-style voxel engine for Roblox.
   teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
   touch screens a small "Map" button takes its corner, to open the world map). `B` shows the
   weather over both (see The weather map).
+- **Other players as the server tells them** (with `Players.ServerPositions` on). Each client
+  draws only the players the server sends it (within `Interest.PlayerDistance`, spectators only to
+  spectators), 0.1 s behind (`Interest.InterpolationDelay`) and gliding between their poses, a
+  teleport as a jump; everyone else's character stays parked far above the world, hidden whole,
+  with no name, held item, flames, glow or minimap dot. A dead player tips over as in Minecraft and
+  is gone after a second. Your own moves go to the server 20 times a second; its teleports and
+  corrections snap you as before. F3 shows the true coordinates and, under them, the render
+  origin (`origin` line: where it is, its moves and the last one's cost) and the players tracked.
+  Off, other players are their characters, as before.
 - **Safe spawns.** Spawns and teleports never land in water, lava, oil, fuel or fire, on leaves or
   next to cacti, lava or fire; the rules live in `SpawnUnsafeBlocks`.
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
@@ -1628,7 +1637,11 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             ProgressionState (knowledge, the Age and skills from the server; the
                             recipe gate and perks the client predicts with), ViewBob (Minecraft's
                             view bobbing and hurt tilt, pure), MouseLook (mouse sensitivity and
-                            Invert Mouse on Roblox's camera)
+                            Invert Mouse on Roblox's camera), RemotePlayers + RemoteMotion (where
+                            the other players are: their characters, or the server's relay drawn
+                            0.1 s behind; the interpolation is pure), LocalPosition (this player's
+                            moves to the server and its teleports, with
+                            Config.Players.ServerPositions; pure core)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared

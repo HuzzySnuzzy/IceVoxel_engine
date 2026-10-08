@@ -10,6 +10,11 @@
 	Minimap setting) hides it with its coordinates line; Map/init then
 	stops updating it and painting its tiles. Hidden on a touch screen, a small "Map" button takes
 	its corner: tapping the minimap is the only way to the world map there (M is a key).
+
+	The centre and the coordinates line are where the player is in true world coordinates (the
+	character, read through the render origin: Shared/World/Origin), the dots the other players
+	Player/RemotePlayers knows of: with the server's own positions only those this client is sent
+	(within Config.Interest.PlayerDistance), nobody beyond.
 ]]
 
 local Players = game:GetService("Players")
@@ -19,7 +24,9 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
+local Origin = require(Shared.World.Origin)
 
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local MapLayer = require(script.Parent.MapLayer)
@@ -27,7 +34,6 @@ local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
 local WeatherLayer = require(script.Parent.WeatherLayer)
 
-local BLOCK = Config.BlockSize
 local MAX_ZOOM = 16
 -- Seconds between updates of the weather caption (the wind turns slowly).
 local CAPTION_SECONDS = 0.5
@@ -207,6 +213,8 @@ function Minimap.new(
 
 	local waypointDots: { Frame } = {}
 	local playerDots: { [Player]: Frame } = {}
+	-- The players dotted this update (reused).
+	local dotted: { [Player]: boolean } = {}
 
 	UserInputService.InputBegan:Connect(function(input, processed)
 		if processed or not holder.Visible then
@@ -230,8 +238,9 @@ function Minimap.new(
 	local function update()
 		local camera = workspace.CurrentCamera
 		local me = rootOf(Players.LocalPlayer)
-		local position = if me then me.Position else camera.CFrame.Position
-		view:render(position.X / BLOCK, position.Z / BLOCK)
+		-- (World blocks, doubles: the character or the camera, through the render origin.)
+		local px, py, pz = Origin.renderToBlocks(if me then me.Position else camera.CFrame.Position)
+		view:render(px, pz)
 		weather:update()
 		local weatherOn = WeatherLayer.isOn()
 		caption.Visible = weatherOn
@@ -246,13 +255,7 @@ function Minimap.new(
 
 		local look = camera.CFrame.LookVector
 		arrow.Rotation = math.deg(math.atan2(look.X, -look.Z))
-		info.Text = string.format(
-			"%d, %d, %d   1:%d",
-			math.floor(position.X / BLOCK),
-			math.floor(position.Y / BLOCK),
-			math.floor(position.Z / BLOCK),
-			layer.scale
-		)
+		info.Text = string.format("%d, %d, %d   1:%d", math.floor(px), math.floor(py), math.floor(pz), layer.scale)
 
 		-- Waypoints, pinned to the border when outside.
 		for i, waypoint in waypoints.list do
@@ -268,19 +271,22 @@ function Minimap.new(
 		end
 
 		local viewer = GameMode.of(Players.LocalPlayer)
-		for _, player in Players:GetPlayers() do
-			local shown = player ~= Players.LocalPlayer and SpectatorRules.sees(viewer, GameMode.of(player))
-			local root = if shown then rootOf(player) else nil
-			local existing: Frame? = playerDots[player]
-			if root then
-				local marker = existing or dot(holder, 6, 5)
+		table.clear(dotted)
+		for player, remote in RemotePlayers.each() do
+			if SpectatorRules.sees(viewer, GameMode.of(player)) then
+				local marker = playerDots[player] or dot(holder, 6, 5)
 				marker.BackgroundColor3 = Color3.new(1, 1, 1)
 				playerDots[player] = marker
-				local p = view:toFrame(root.Position.X / BLOCK, root.Position.Z / BLOCK)
+				local p = view:toFrame(remote.x, remote.z)
 				marker.Position = UDim2.fromOffset(p.X, p.Y)
 				marker.Visible = p.X >= 0 and p.Y >= 0 and p.X <= size and p.Y <= size
-			elseif existing then
-				existing.Visible = false
+				dotted[player] = true
+			end
+		end
+		-- (Players no longer known of, or not seen, lose their dot.)
+		for player, marker in playerDots do
+			if not dotted[player] then
+				marker.Visible = false
 			end
 		end
 	end

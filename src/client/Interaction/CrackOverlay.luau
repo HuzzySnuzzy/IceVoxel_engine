@@ -14,13 +14,18 @@
 	selection highlight): the part takes that box, and each face shows the middle of the pattern
 	at the same size, like Minecraft's cracks on the block's own model.
 
-	`show` only toggles visibility and resizes; everything is built once in `new`.
+	`show` only toggles visibility and resizes; everything is built once in `new`. The part sits in
+	the client's render frame (Shared/World/Origin: world studs - the origin); while it shows, a
+	move of the origin carries it along (a Rendering/Rebase mover), and every `show` puts it again.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Origin = require(Shared.World.Origin)
+
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 
 local BLOCK = Config.BlockSize
 local STAGES = 10
@@ -140,6 +145,8 @@ type Self = CrackOverlay & {
 	visible: boolean,
 	-- The outline box the part was last sized for.
 	box: { number },
+	-- Removes the Rendering/Rebase mover.
+	unregister: () -> (),
 }
 
 function CrackOverlay.new(): CrackOverlay
@@ -204,7 +211,15 @@ function CrackOverlay.new(): CrackOverlay
 		stage = -1,
 		visible = false,
 		box = FULL_BOX,
+		unregister = function() end,
 	}, CrackOverlay) :: any
+	-- (Shown, it stays with its block when the origin moves; hidden, the next `show` places it.)
+	self.unregister = Rebase.register("CrackOverlay", function(dx: number, dz: number, parts, cframes)
+		if self.visible and part.Parent ~= nil then
+			table.insert(parts, part)
+			table.insert(cframes, part.CFrame - Vector3.new(dx, 0, dz))
+		end
+	end)
 	return self
 end
 
@@ -231,9 +246,11 @@ function CrackOverlay.show(self: Self, x: number, y: number, z: number, stage: n
 		end
 	end
 	part.CFrame = CFrame.new(
-		(x + (outline[1] + outline[4]) / 2) * BLOCK,
-		(y + (outline[2] + outline[5]) / 2) * BLOCK,
-		(z + (outline[3] + outline[6]) / 2) * BLOCK
+		Origin.blocksToRender(
+			x + (outline[1] + outline[4]) / 2,
+			y + (outline[2] + outline[5]) / 2,
+			z + (outline[3] + outline[6]) / 2
+		)
 	)
 	if stage ~= self.stage then
 		self.stage = stage
@@ -264,6 +281,7 @@ end
 
 function CrackOverlay.destroy(self: Self)
 	self.visible = false
+	self.unregister()
 	self.part:Destroy()
 	table.clear(self.faces)
 end

@@ -126,6 +126,13 @@
 	screen is open (Ui/Screens). Broken blocks throw a few debris particles in their colour;
 	hitting, placing, using and dropping swing the held item (Player/HeldItems).
 
+	Frames (Shared/World/Origin): the camera's ray starts in render studs and is cast from world
+	blocks as doubles (`Origin.renderToBlocks`), exact however far out; reach compares render
+	positions with render positions (the block's centre and the root part). The outline and the
+	debris are placed at `Origin.blocksToRender`; live debris moves with the render origin
+	(a Rendering/Rebase mover). Other players (placement obstruction, the spectator's pick) are
+	Player/RemotePlayers' (their characters, or the server's relay by interest).
+
 	`target()`, `targetSide()` (the transmitter side the Configurator would act on) and
 	`miningProgress()` let other modules (Ui/Waila) read what is aimed at and how far mining has
 	got, without changing anything.
@@ -151,10 +158,10 @@ local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Mining = require(Shared.Mining)
 local Protocol = require(Shared.Net.Protocol)
+local Origin = require(Shared.World.Origin)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
 local Hull = require(Shared.Movement.Hull)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
-local Rig = require(Shared.Movement.Rig)
 local Transmitters = require(Shared.Transmitters)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Boiling = require(Shared.ToughAsNails.Boiling)
@@ -170,7 +177,9 @@ local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local WailaInfo = require(script.Parent.Parent.Ui.WailaInfo)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local SpectatorRules = require(script.Parent.Parent.Player.SpectatorRules)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local SoundRules = require(script.Parent.Parent.Audio.SoundRules)
 local TransmitterModel = require(script.Parent.Parent.Rendering.TransmitterModel)
@@ -234,8 +243,9 @@ local BlockInteraction = {}
 
 type Hit = VoxelRaycast.Hit
 
--- The ray an aim was cast along (blocks; `direction` is a unit vector) and how far it went.
-type Ray = { origin: Vector3, direction: Vector3, maxDistance: number }
+-- The ray an aim was cast along: its origin in world blocks (doubles: x, y, z; `origin` is the
+-- same as a float32 Vector3, for readers near it), `direction` a unit vector, and how far it went.
+type Ray = { x: number, y: number, z: number, origin: Vector3, direction: Vector3, maxDistance: number }
 
 -- A block being mined (survival), and the item in hand when it started (nil: bare hands).
 type MinedBlock = { x: number, y: number, z: number, block: number, tool: number?, progress: number }
@@ -372,11 +382,11 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if root == nil then
 			return nil
 		end
-		local origin, direction = ray.origin, ray.direction
+		local direction = ray.direction
 		local hit = VoxelRaycast.cast(
-			origin.X,
-			origin.Y,
-			origin.Z,
+			ray.x,
+			ray.y,
+			ray.z,
 			direction.X,
 			direction.Y,
 			direction.Z,
@@ -386,8 +396,8 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			outlineAt
 		)
 		if hit then
-			local center = Vector3.new(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5) * BLOCK
-			if (center - root.Position).Magnitude > REACH * BLOCK then
+			-- (Both in render studs.)
+			if (Origin.blockCentreToRender(hit.x, hit.y, hit.z) - root.Position).Magnitude > REACH * BLOCK then
 				return nil
 			end
 		end
@@ -407,8 +417,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local ray = if gui
 			then camera:ScreenPointToRay(point.X, point.Y)
 			else camera:ViewportPointToRay(point.X, point.Y)
+		-- (The camera is in render studs: world blocks from it, as doubles.)
+		local x, y, z = Origin.renderToBlocks(ray.Origin)
 		local aim: Ray = {
-			origin = ray.Origin / BLOCK,
+			x = x,
+			y = y,
+			z = z,
+			origin = Vector3.new(x, y, z),
 			direction = ray.Direction.Unit,
 			maxDistance = (ray.Origin - root.Position).Magnitude / BLOCK + REACH,
 		}
@@ -484,7 +499,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		outline) at (x, y, z) overlap a player or a mob? Mirrors the server's EditRules.obstructs
 		and Mobs.occupied. The local player is checked with the standing hull (as the server does,
 		whatever the pose) at the hull's position and where the character is drawn (what the
-		server sees); other players at their characters, mobs where they are drawn.
+		server sees); other players where Player/RemotePlayers has them, mobs where they are drawn.
 	]]
 	local function blocksCharacter(x: number, y: number, z: number, cell: { number }): boolean
 		local view = MovementController.current
@@ -511,10 +526,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 		end
 		-- (Spectators are in nobody's way.)
-		for _, other in Players:GetPlayers() do
-			local character = other.Character
-			if other ~= player and character and SpectatorRules.targetable(GameMode.of(other)) then
-				local min, max = Rig.hull(character)
+		for other in RemotePlayers.each() do
+			if SpectatorRules.targetable(GameMode.of(other)) then
+				local min, max = RemotePlayers.hull(other)
 				if min and max and overlaps(min, max, x, y, z, cell) then
 					return true
 				end
@@ -539,6 +553,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	particleFolder.Parent = workspace.CurrentCamera
 	local particles: { Particle } = {}
 	local spare: { Part } = {}
+	-- Flying debris moves on from where it is: a move of the render origin carries it along.
+	Rebase.register("BlockInteraction debris", function(dx: number, dz: number, parts, cframes)
+		local d = Vector3.new(dx, 0, dz)
+		for _, p in particles do
+			table.insert(parts, p.part)
+			table.insert(cframes, p.part.CFrame - d)
+		end
+	end)
 
 	-- The colour of `block`'s debris at (x, y, z): a tinted plant's (grass, ferns) is tinted by its
 	-- soil as the terrain draws it (GreedyMesher, Rendering/ChunkRenderer).
@@ -594,9 +616,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			part.Transparency = def.transparency
 			local size = BLOCK * (0.09 + math.random() * 0.07)
 			part.Size = Vector3.one * size
-			-- From a random point in the block, outwards from its centre and up.
+			-- From a random point in the block, outwards from its centre and up (render studs).
 			local offset = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5)
-			local position = (Vector3.new(x + 0.5, y + 0.5, z + 0.5) + offset * 0.8) * BLOCK
+			local position =
+				Origin.blocksToRender(x + 0.5 + offset.X * 0.8, y + 0.5 + offset.Y * 0.8, z + 0.5 + offset.Z * 0.8)
 			part.CFrame = CFrame.new(position)
 				* CFrame.Angles(math.random() * math.pi, math.random() * math.pi, math.random() * math.pi)
 			part.Parent = particleFolder
@@ -824,15 +847,27 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	]]
 	local function transmitterSide(hit: Hit, ray: Ray): number
 		local linked, acceptors = TransmitterRenderer.connections(hit.x, hit.y, hit.z)
-		local o, d = ray.origin, ray.direction
-		local side =
-			TransmitterModel.pickSide(o.X, o.Y, o.Z, d.X, d.Y, d.Z, hit.x, hit.y, hit.z, linked, acceptors, hit.block)
+		local d = ray.direction
+		local side = TransmitterModel.pickSide(
+			ray.x,
+			ray.y,
+			ray.z,
+			d.X,
+			d.Y,
+			d.Z,
+			hit.x,
+			hit.y,
+			hit.z,
+			linked,
+			acceptors,
+			hit.block
+		)
 		if side == nil then
 			local t = hit.distance
 			side = TransmitterModel.sideFromPoint(
-				o.X + d.X * t - hit.x - 0.5,
-				o.Y + d.Y * t - hit.y - 0.5,
-				o.Z + d.Z * t - hit.z - 0.5
+				ray.x + d.X * t - hit.x - 0.5,
+				ray.y + d.Y * t - hit.y - 0.5,
+				ray.z + d.Z * t - hit.z - 0.5
 			)
 		end
 		return side or Transmitters.sideOf(hit.nx, hit.ny, hit.nz) or Transmitters.UP
@@ -1124,12 +1159,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		if root == nil then
 			return nil
 		end
-		local origin, direction, maxDistance = ray.origin, ray.direction, ray.maxDistance
-		local body = root.Position / BLOCK
+		local direction, maxDistance = ray.direction, ray.maxDistance
+		-- (The root's centre in world blocks, doubles.)
+		local bx, by, bz = Origin.renderToBlocks(root.Position)
 		local wall = VoxelRaycast.cast(
-			origin.X,
-			origin.Y,
-			origin.Z,
+			ray.x,
+			ray.y,
+			ray.z,
 			direction.X,
 			direction.Y,
 			direction.Z,
@@ -1141,31 +1177,33 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		local best: Player? = nil
 		local nearest = if wall then wall.distance else maxDistance
 		local spectated = MovementController.spectating()
-		for _, other in Players:GetPlayers() do
+		local half, height = PlayerPhysics.STANDING.width / 2, PlayerPhysics.STANDING.height
+		-- (Other players this client knows of: their characters, or the server's relay.)
+		for other, remote in RemotePlayers.each() do
 			local character = other.Character
 			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 			if
-				other ~= player
-				and character
-				and humanoid
+				humanoid
 				and humanoid.Health > 0
+				and remote.alive
 				and SpectatorRules.aimable(GameMode.of(other), other == spectated)
 			then
-				local min, max = Rig.hull(character)
-				if min and max and ((min + max) / 2 - body).Magnitude <= REACH then
+				-- Their standing hull's centre within reach of the body.
+				local dx, dy, dz = remote.x - bx, remote.y + height / 2 - by, remote.z - bz
+				if dx * dx + dy * dy + dz * dz <= REACH * REACH then
 					local t = WailaInfo.rayBox(
-						origin.X,
-						origin.Y,
-						origin.Z,
+						ray.x,
+						ray.y,
+						ray.z,
 						direction.X,
 						direction.Y,
 						direction.Z,
-						min.X,
-						min.Y,
-						min.Z,
-						max.X,
-						max.Y,
-						max.Z
+						remote.x - half,
+						remote.y,
+						remote.z - half,
+						remote.x + half,
+						remote.y + height,
+						remote.z + half
 					)
 					if t and t < nearest then
 						best, nearest = other, t
@@ -1353,10 +1391,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				highlight.Size = Vector3.new(box[4] - box[1], box[5] - box[2], box[6] - box[3]) * BLOCK
 					+ Vector3.one * 0.05
 			end
+			-- (Every frame, in the render frame of the moment.)
 			highlight.CFrame = CFrame.new(
-				(hit.x + (box[1] + box[4]) / 2) * BLOCK,
-				(hit.y + (box[2] + box[5]) / 2) * BLOCK,
-				(hit.z + (box[3] + box[6]) / 2) * BLOCK
+				Origin.blocksToRender(
+					hit.x + (box[1] + box[4]) / 2,
+					hit.y + (box[2] + box[5]) / 2,
+					hit.z + (box[3] + box[6]) / 2
+				)
 			)
 			selection.Visible = true
 		else
