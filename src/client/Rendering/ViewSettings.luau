@@ -26,9 +26,10 @@
 	    (FogStart / FogEnd, their colour LightingController's), which Roblox ignores while an
 	    Atmosphere is in Lighting, so the Atmosphere is taken out (Parent nil) in the same call
 	    that writes them and put back when they end, with the place's own FogStart / FogEnd.
-	    Without an Atmosphere at all (Config.Lighting.Enabled false in a place that has none) the
-	    old view fog stays: FogEnd = view x BlockSize x the weather's factor, FogStart 55% of it,
-	    or the place's own with the Fog setting off.
+	    Without an Atmosphere at all (Config.Lighting.Enabled false in a place that has none of its
+	    own: default.project.json's, marked with the PROJECT_ATTRIBUTE, is IceVoxel's and taken out
+	    then) the old view fog stays: FogEnd = view x BlockSize x the weather's factor, FogStart
+	    55% of it, or the place's own with the Fog setting off.
 	  * Getters for the streamer and renderer, read live: `revealReach` / `revealRadii` (caves),
 	    `alwaysCaves` (the Caves setting), `lichenLightDistance`, `lavaLightDistance` (Config
 	    only), `foliageDistance`, `lod`, `get`.
@@ -50,6 +51,9 @@ local PlayerSettings = require(Shared.PlayerSettings)
 local AtmosphereModel = require(script.Parent.AtmosphereModel)
 
 local ViewSettings = {}
+
+-- The attribute (true) default.project.json marks its Atmosphere with: IceVoxel's, not the place's.
+ViewSettings.PROJECT_ATTRIBUTE = "IceVoxel"
 
 -- Config's own values the settings start from (its Foliage = false always wins; brightness 0% is
 -- its CaveAmbient).
@@ -101,12 +105,23 @@ end
 
 --[[
 	The Atmosphere the view uses: the one `setAtmosphere` gave, else the place's first in Lighting
-	(adopted the first time it is found); nil while there is none.
+	(adopted the first time it is found); nil while there is none. With Config.Lighting.Enabled
+	false IceVoxel drives none, so the project's own (PROJECT_ATTRIBUTE) is taken out of Lighting
+	instead: its fixed daytime haze would neither follow the view nor the Fog setting, where the
+	old view fog does.
 ]]
 function ViewSettings.atmosphere(): Atmosphere?
 	local current = atmosphere
 	if current == nil then
 		current = Lighting:FindFirstChildOfClass("Atmosphere")
+		while
+			current
+			and not Config.Lighting.Enabled
+			and current:GetAttribute(ViewSettings.PROJECT_ATTRIBUTE) == true
+		do
+			current.Parent = nil
+			current = Lighting:FindFirstChildOfClass("Atmosphere")
+		end
 		if current then
 			atmosphere = current
 			attached = true
@@ -124,8 +139,8 @@ function ViewSettings.setAtmosphere(created: Atmosphere)
 end
 
 --[[
-	Does the place keep its own Atmosphere (Config.Lighting.Enabled false with one in Lighting)?
-	Then only the place decides the haze and the Fog setting changes nothing.
+	Does the place keep its own Atmosphere (Config.Lighting.Enabled false with one in Lighting that
+	is not the project's)? Then only the place decides the haze and the Fog setting changes nothing.
 ]]
 function ViewSettings.placeKeepsFog(): boolean
 	return not Config.Lighting.Enabled and ViewSettings.atmosphere() ~= nil

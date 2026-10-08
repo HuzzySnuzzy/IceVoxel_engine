@@ -264,11 +264,20 @@ end
 local BLACK = table.freeze({ 0, 0, 0 })
 
 --[[
+	The sun's height (sunHeight) by which the Dusk glare is full; it fades out to none with the sun
+	on the horizon, and there is none below it (`environment`). The haze keeps Dusk's glow until
+	the sun is some 24 degrees down, but once the sun has set Roblox may be lighting from the moon
+	(with an Atmosphere it is reported to swap them at ClockTime 6 and 18), and the glare would
+	sit round the moon, which Night.Glare 0 is there to avoid.
+]]
+DayCycle.GLARE_RISE = 0.05
+
+--[[
 	The Lighting values for `dayTime` with `exposure` (0..1, skyExposure) of the sky light reaching
 	the camera: Night blended to Day by the daylight factor, the Dusk colours mixed in by the glow
-	x Dusk.Strength, then everything the sky gives (outdoor ambient, sun / moon, sky box light, the
-	Atmosphere's haze and glare) faded out underground. Ambient is always CaveAmbient. `settings`
-	defaults to Config.Lighting.
+	x Dusk.Strength (its glare only with the sun above the horizon: GLARE_RISE), then everything
+	the sky gives (outdoor ambient, sun / moon, sky box light, the Atmosphere's haze and glare)
+	faded out underground. Ambient is always CaveAmbient. `settings` defaults to Config.Lighting.
 
 	`sunHeight` (-1..1) is the height of the sun the blend follows; it defaults to Minecraft's
 	(sunHeight(dayTime)). The client passes the sun Roblox really draws, whose path also depends
@@ -289,9 +298,11 @@ function DayCycle.environment(dayTime: number, exposure: number, settings: Light
 	local function level(dayValue: number, nightValue: number): number
 		return mix(mix(nightValue, dayValue, daylight), 0, dark)
 	end
-	local function hazy(dayValue: number, nightValue: number, duskValue: number): number
-		return mix(mix(mix(nightValue, dayValue, daylight), duskValue, glow), 0, dark)
+	local function hazy(dayValue: number, nightValue: number, duskValue: number, weight: number): number
+		return mix(mix(mix(nightValue, dayValue, daylight), duskValue, weight), 0, dark)
 	end
+	-- (Dusk's glare only while the sun is up: below the horizon Roblox may light from the moon.)
+	local sunUp = clamp01(height / DayCycle.GLARE_RISE)
 
 	return {
 		ambient = table.clone(light.CaveAmbient),
@@ -301,8 +312,8 @@ function DayCycle.environment(dayTime: number, exposure: number, settings: Light
 		environmentDiffuse = level(day.EnvironmentDiffuse, night.EnvironmentDiffuse),
 		environmentSpecular = level(day.EnvironmentSpecular, night.EnvironmentSpecular),
 		fogColor = colour(day.FogColor, night.FogColor, dusk.FogColor, light.Underground.FogColor),
-		haze = hazy(day.Haze, night.Haze, dusk.Haze),
-		glare = hazy(day.Glare, night.Glare, dusk.Glare),
+		haze = hazy(day.Haze, night.Haze, dusk.Haze, glow),
+		glare = hazy(day.Glare, night.Glare, dusk.Glare, glow * sunUp),
 		decay = colour(day.Decay, night.Decay, dusk.Decay, night.Decay),
 	}
 end

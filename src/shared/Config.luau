@@ -699,24 +699,37 @@ local Config = {
 			from the camera on; Roblox publishes no formula, Scale 0.1 and the 4th power come from
 			a re-implementation of its renderer and match what developers report, e.g. Density 1
 			hides things some 30 studs off). Density is worked out so that Edge of the light is
-			left at the view distance (x the weather's fog factor): 0.1, so the edge of the loaded
-			terrain is 90% hazed, its far LOD nodes (up to a third further) 95%, while what is near
-			stays clear (6% at 1/40 of the view, 13% at 1/16, 44% at 1/4: an exponential's shape,
-			whatever Scale is). Density at 2048 blocks: 0.247 (1024: 0.294, 512: 0.350, 4096:
-			0.208). Underground it thins out by the sky exposure squared, so cave walls never fade
-			into a daylit sky. To calibrate Scale in Studio: put a part d studs away, find the
-			Density at which it looks half hazed, then Scale = 0.693 / (Density^4 x d); a larger
-			Edge keeps more of the middle distance (and shows more of the edge).
+			left at the view distance: 0.1, so the edge of the loaded terrain is 90% hazed, its far
+			LOD nodes (up to a third further) 95%, while what is near stays clear (6% at 1/40 of the
+			view, 13% at 1/16, 44% at 1/4: an exponential's shape, whatever Scale is). Density at
+			2048 blocks: 0.247 (1024: 0.294, 512: 0.350, 4096: 0.208). To calibrate Scale in
+			Studio: put a part d studs away, find the Density at which it looks half hazed, then
+			Scale = 0.693 / (Density^4 x d); a larger Edge keeps more of the middle distance (and
+			shows more of the edge).
+			WeatherPower: rain, snow and thunder haze it as for a view their fog factor
+			(Weather.Fog) to this power as far: 1/3 keeps the storm clouds overhead under half
+			hazed into the clear sky behind them from 1024 blocks of view up (the whole factor, 1,
+			would wash them out: this haze starts at the camera, the old fog at 55%); the storm's
+			Haze and darker Color grey the horizon instead.
+			ThinBelow: under this much sky exposure (Rendering/SkyExposure) the haze thins out, k
+			by (exposure / ThinBelow)^2, so deep cave walls never fade into a daylit sky, while a
+			tunnel's mouth (exposure 1 - distance / 16) keeps the full haze over the view out of it
+			for its first 9-10 blocks.
 			Offset: how sharp a sky the haze fades to (0: the sky right behind, so the edge melts
-			into it; 1: one blurred average, a silhouette, and LOD changes show). ColorFloor: the
-			fog colour's brightest channel is raised to at least this (the sky's own light already
-			darkens the haze at night: Minecraft's dark night fog would darken it twice).
+			into it; 1: one blurred average, a silhouette, and LOD changes show).
+			ColorFloor: the time of day's fog colour (Color) has its brightest channel raised to at
+			least this before the weather darkens it; 0: Minecraft's own colours. Roblox scatters
+			the sky's light into the haze by Color (in the re-implementation that light is not
+			darkened at night, so a brighter night Color would glow over the dark sky): raise it
+			(e.g. 64) only if the night's horizon looks black in the Roblox player.
 		]]
 		Atmosphere = {
 			Scale = 0.1,
 			Edge = 0.1,
+			WeatherPower = 1 / 3,
+			ThinBelow = 0.4,
 			Offset = 0.05,
-			ColorFloor = 96,
+			ColorFloor = 0,
 		},
 	},
 

@@ -839,6 +839,29 @@ return function(t, shared, require, _server, client)
 			t.eq(plain.ViewSettings.fogMode(), "atmosphere")
 			t.eq(plain.ViewSettings.atmosphere(), made)
 			t.eq(plain.lighting.FogEnd, 100000, "the old view fog gone")
+
+			-- Lighting.Enabled false with the project's own Atmosphere (marked): IceVoxel drives
+			-- none, so it goes, and the old view fog follows the view and the Fog setting as it
+			-- did before the project had one. A place's own (unmarked) one stays, as above.
+			Config.Lighting.Enabled = false
+			local ok, err = pcall(function()
+				local project = fakeClient(shared, require, 0, true)
+				local marked = project.atmosphere
+				function marked.GetAttribute(_, name: string): any
+					return if name == project.ViewSettings.PROJECT_ATTRIBUTE then true else nil
+				end
+				project.ViewSettings.applyFog()
+				t.eq(marked.Parent, nil, "the project's Atmosphere out of Lighting")
+				t.eq(project.ViewSettings.atmosphere(), nil)
+				t.eq(project.ViewSettings.fogMode(), "classic")
+				t.eq(project.lighting.FogEnd, Config.Lod.ViewDistance * Config.BlockSize, "the view's fog")
+				t.ok(not project.ViewSettings.placeKeepsFog(), "the Fog setting switches it")
+				project.Settings.set("fog", 0)
+				project.ViewSettings.applyFog()
+				t.eq(project.ViewSettings.fogMode(), "none", "off: the place's own fog")
+			end)
+			Config.Lighting.Enabled = enabled
+			assert(ok, err)
 		end)
 	end)
 

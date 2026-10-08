@@ -417,9 +417,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   the sky through Roblox's Atmosphere instead of the old distance fog: a light haze that thickens
   with the distance until the edge of the view distance melts into the sky behind it (90% hazed
   there, the far LOD terrain past it more; 6% at a fortieth of the way), in Minecraft's fog colour
-  along the horizon, warm at sunrise and sunset, dark at night (Roblox lights it by the sky), and
-  thinning out underground so cave walls never fade into a daylit sky. Water, lava, oil, fuel and
-  Blindness keep Minecraft's exact short fogs (the Atmosphere steps aside while they show).
+  along the horizon, warm at sunrise and sunset, dark at night (Minecraft's night fog), and
+  thinning out deep underground so cave walls never fade into a daylit sky (the view out of a
+  tunnel's mouth stays hazed). Water, lava, oil, fuel and Blindness keep Minecraft's exact short
+  fogs (the Atmosphere steps aside while they show).
 - **Weather.** Regional, not Minecraft's one switch for the whole world: storms a few hundred to a
   few thousand blocks across drift over the world with a wind that slowly turns (about 1 to 3
   blocks a second), grow and die out, and leave clear stretches between them, so you can see one
@@ -988,8 +989,10 @@ Studio tips:
   the same names, so `rojo serve` updates them). IceVoxel drives the first Atmosphere in Lighting
   (it makes "IceVoxelAtmosphere", and "IceVoxelSky", when there is none; a second Atmosphere is
   taken out). Roblox ignores an Atmosphere without a Sky, and ignores `FogStart` / `FogEnd` while
-  an Atmosphere is in Lighting. Judge the haze in the Roblox player too: F3's `fog` line shows the
-  Atmosphere's density and how far it hazes things 90%.
+  an Atmosphere is in Lighting. The project's Atmosphere carries the attribute `IceVoxel` = true:
+  with `Lighting.Enabled` false the client takes that one out (an unmarked one is the place's own
+  and stays). Judge the haze in the Roblox player too: F3's `fog` line shows the Atmosphere's
+  density and how far it hazes things 90%.
 - How far parts are drawn is up to the engine, not the script: it depends on the graphics quality
   level and how many objects are on screen. Studio ignores that limit, so judge long views in the
   Roblox player with a high graphics level. Phones draw far less (a few hundred studs), which is why
@@ -1141,7 +1144,8 @@ the Performance page, the far meshes' state. A few notes on what the settings do
 - Fog: Atmosphere fades the far land and clouds into the sky (thicker in rain and snow, with a
   haze along the horizon); OFF clears the Atmosphere (density and haze 0), a clear view to the
   edge. Water, lava, oil, fuel and Blindness keep their fog either way. In a place that keeps its
-  own lighting (`Lighting.Enabled` false) with its own Atmosphere it reads "Place's Own".
+  own lighting (`Lighting.Enabled` false) with its own Atmosphere it reads "Place's Own"; without
+  one (the project's is taken out then) it switches the old view fog.
 - Build Budget: Auto adapts the milliseconds a frame spends building parts to the frame time
   (`Render.AutoBudget`); a number fixes them.
 - Prefer Distance tells Roblox to lower lighting quality before draw distance
@@ -1707,7 +1711,7 @@ for performance:
 | `Weather.ClearStartSeconds` | 300   | A new world's weather starts where its spawn stays dry this long.   |
 | `Weather.Lightning.Enabled` / `MeanSeconds` / `Radius` | true / 20 / 64 | Strikes near players in thunderstorms: one every MeanSeconds at full thunder, within Radius blocks. |
 | `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 1024 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance see and hear it. |
-| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The haze at full rain, snow and thunder: the Atmosphere's density for a view this share as far. |
+| `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog at full rain, snow and thunder: the old view fog's distance this share as far; the Atmosphere's density for a view this share to `Lighting.Atmosphere.WeatherPower` as far. |
 | `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
 | `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the streaks' Texture (a stand-in: swap in your own), Length, Width, Speed, Color, Transparency. |
 | `Weather.Precipitation.Smoothing` / `ScansPerFrame` | 0.8 / 64 | Seconds the rain drawn takes to follow the weather; block columns whose roof is looked up per frame. |
@@ -1722,11 +1726,13 @@ for performance:
 | `Weather.Bolt.Color` / `Glow` / `Flash` / `LightRange` | pale blue / 0.75 / 0.45 / 60 | The bolt's colour and glow, the sky's flash, the struck point's light (studs). |
 | `Weather.Map.MiniCells` / `WorldCells` / `RefreshSeconds` / `CellsPerFrame` | 48 / 96 / 3 / 1536 | The weather map's cells across (minimap, world map), seconds before a picture is drawn again, cells painted a frame. |
 | `Lighting.CaveAmbient`    | 26, 26, 32 | How dark caves are; raise it like Minecraft's Brightness slider. |
-| `Lighting.Enabled`        | true    | false leaves Lighting to the place, its Atmosphere and Sky too (only the sun moves; the music and cave moods still follow the light). |
+| `Lighting.Enabled`        | true    | false leaves Lighting to the place, its own Atmosphere and Sky too (only the sun moves; the music and cave moods still follow the light). The project's Atmosphere (attribute `IceVoxel`) is taken out then, so the old view fog follows the view, the weather and the Fog setting. |
 | `Render.Fog`              | true    | The Fog setting's default; false: no haze at all. |
 | `Lighting.Atmosphere.Edge` / `Scale` | 0.1 / 0.1 | The light left at the view distance (0.1: 90% hazed) and the Atmosphere's Scale x Density^4 per stud (Roblox publishes no formula; calibrate it in Studio, see Config). Density 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at 4096. |
-| `Lighting.Atmosphere.Offset` / `ColorFloor` | 0.05 / 96 | How sharp a sky the haze fades into (low: the edge melts into it; high: silhouettes, LOD changes show); the haze colour's brightest channel at least (night). |
-| `Lighting.Day` / `Night` / `Dusk` `.Haze` / `Glare` / `Decay` | 0.25 / 0.2 / 0.8, glare 0 / 0 / 0.4 | The Atmosphere's haze along the horizon, glow round the sun and colour away from it, blended like the light; its Color is `FogColor` (Minecraft's fog colours). |
+| `Lighting.Atmosphere.WeatherPower` | 1/3 | Rain, snow and thunder haze it as for a view `Weather.Fog`'s factor to this power as far (1/3 keeps the storm clouds overhead at most half hazed from 1024 blocks of view up; 1 would wash them out). |
+| `Lighting.Atmosphere.ThinBelow` | 0.4 | Under this much sky exposure the haze thins out, by (exposure / ThinBelow)^2, so deep cave walls never fade into a daylit sky; the view out of a tunnel stays hazed for its first 9 blocks. |
+| `Lighting.Atmosphere.Offset` / `ColorFloor` | 0.05 / 0 | How sharp a sky the haze fades into (low: the edge melts into it; high: silhouettes, LOD changes show); the time of day's haze colour raised to this at its brightest channel before the weather darkens it (0: Minecraft's own; raise it only if the night horizon looks black in the Roblox player). |
+| `Lighting.Day` / `Night` / `Dusk` `.Haze` / `Glare` / `Decay` | 0.25 / 0.2 / 0.8, glare 0 / 0 / 0.4 | The Atmosphere's haze along the horizon, glow round the sun and colour away from it, blended like the light (the dusk glare only while the sun is above the horizon); its Color is `FogColor` (Minecraft's fog colours). |
 | `Settings.Save`           | true    | Keep players' settings between sessions (DataStore, one profile per kind of device). |
 | `Save.Enabled` / `StoreName` | true / "IceVoxelWorlds_v1" | Save worlds at all, and the DataStore they go in (a new name starts afresh; Studio needs API access). |
 | `Save.Interval`           | 300     | Seconds between automatic saves (Minecraft's 5 minutes), each writing only what changed; 0: only `/save-all` and shutdown. |

@@ -2209,31 +2209,48 @@ are ignored, even at Density 0.
   makes "IceVoxelAtmosphere" when there is none, "IceVoxelSky" when there is no Sky, and takes a
   second Atmosphere out (which one Roblox would use is undefined). With `Lighting.Enabled = false`
   nothing is made or written: the place's Atmosphere is its own (the Fog button reads "Place's
-  Own"), but the short fogs below still take it out while they show.
+  Own"), but the short fogs below still take it out while they show. The project's Atmosphere is
+  marked (attribute `IceVoxel` = true, `ViewSettings.PROJECT_ATTRIBUTE`) and is not the place's:
+  with `Enabled` false `ViewSettings.atmosphere()` takes it out of Lighting, so the old view fog
+  follows the view, the weather and the Fog setting as before the project had one (its fixed
+  daytime haze would follow none of them).
 - *Distance.* An Atmosphere has no start or end. Roblox publishes no formula; the best model (a
   re-implementation of its renderer, matching developers' reports such as Density 1 hiding things
   some 30 studs away and the docs' examples) is transmittance T(d) = exp(-Scale x Density^4 x d),
   d in studs from the camera. `extinction` gives the k = -ln(Edge) / R that leaves `Edge` (0.1) of
-  a thing's light at R = view x BlockSize x the weather's fog factor (the old FogEnd), `density`
-  the Density (k / Scale)^(1/4): 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at
-  4096. The loaded terrain's edge is 90% hazed, LodTree's far nodes drawn whole up to a third past
+  a thing's light at R = view x BlockSize (the old FogEnd), `density` the Density
+  (k / Scale)^(1/4): 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at 4096. The loaded terrain's edge is 90% hazed, LodTree's far nodes drawn whole up to a third past
   it over 95%; near things stay clear (haze(d) = 1 - Edge^(d / R), whatever Scale is: 6% at R /
   40, 13% at R / 16, 44% at R / 4). The old fog was clear to 55% of R and opaque at R, so the
   middle distance is hazier than before. `Offset` 0.05 fades the haze into the sky right behind a
   thing, so the edge melts into it (a high Offset gives silhouettes and shows LOD changes).
-- *Weather.* `WeatherSky.fog`'s factor (0.6 rain, 0.4 snow, 0.45 thunder) shortens R: the
-  Density x factor^(-1/4) that hides the old fog's nearer FogEnd. `WeatherSky.apply` darkens the
-  fog colour (Minecraft's), adds `Sky.Haze` x rain and `ThunderHaze` x thunder to Haze (the
-  horizon greys over) and takes the sun's glare away.
-- *Caves.* The haze fades things into the sky behind them, a daylit sky even in a cave, so k is
-  scaled by the sky exposure squared (deep down: Density 0), and `DayCycle.environment` fades
-  Haze and Glare out with the rest of the sky's light. Both follow the exposure's smoothing.
-- *Colour.* Roblox lights the haze by the sky (dark at night, warm towards a low sun), so Color
-  is `DayCycle.environment`'s fog colour (Minecraft's day, dusk, night fog: the colour of
-  Minecraft's horizon) raised to `ColorFloor` (96) at its brightest channel, since the dark night
-  sky already darkens it; Haze, Glare and Decay are blended like the light (`Day`, `Night`,
-  `Dusk`: a warm haze and a glow around the sun at sunset, no glare at night, where the moon side
-  would glow).
+- *Weather.* `WeatherSky.fog`'s factor f (0.6 rain, 0.4 snow, 0.45 thunder) shortens R to
+  R x f^`WeatherPower` (1/3: Density x f^(-1/12); the loaded terrain's edge 93-96% hazed). Not
+  the old fog's whole nearer FogEnd: this haze starts at the camera, and the storm's cloud deck
+  overhead (224 blocks up from y 64) would come out 57-72% hazed into the clear sky behind it at
+  1024 blocks of view, where the old fog (from 55% of FogEnd) never reached it; with 1/3 it stays
+  at most half hazed from 1024 blocks up (Low's 512: 70-75%). `WeatherSky.apply` darkens the fog
+  colour (Minecraft's), adds `Sky.Haze` x rain and `ThunderHaze` x thunder to Haze (the horizon
+  greys over in the storm's colour: that is the storm's look) and takes the sun's glare away.
+- *Caves.* The haze fades things into the sky behind them, a daylit sky even in a cave, so below
+  `ThinBelow` (0.4) of sky exposure k is scaled by (exposure / ThinBelow)^2 (deep down: Density
+  0), and `DayCycle.environment` fades Haze and Glare out with the rest of the sky's light. Both
+  follow the exposure's smoothing. Above ThinBelow the haze is the outdoor one: inside a tunnel
+  dug into a hillside (exposure 1 - distance / 16) the view out of its mouth keeps it for the
+  first 9 blocks (87% at the view's edge 10 blocks in, 59% at 12), so the edge of the loaded
+  terrain doesn't show and stepping out doesn't pump the haze; the tunnel's own walls, within 16
+  blocks, are under 3% hazed anyway.
+- *Colour.* Color is `DayCycle.environment`'s fog colour (Minecraft's day, dusk, night fog: the
+  colour of Minecraft's horizon), then darkened by the weather (`WeatherSky.apply`). In the
+  re-implementation the haze scatters the sky box's light by Color^2, not darkened at night, so
+  Minecraft's dark night fog gives a dark night haze, and a brighter night Color would glow over
+  the dark sky. `ColorFloor` (0: off) raises the time of day's colour at its brightest channel
+  (`AtmosphereModel.floor`, before `WeatherSky.apply`, so rain and thunder still darken it):
+  a knob for the Roblox player if the night's horizon shows black there. Haze, Glare and Decay
+  are blended like the light (`Day`, `Night`, `Dusk`: a warm haze and a glow around the sun at
+  sunset, no glare at night). The Dusk glare only shows with the sun above the horizon (full by
+  `DayCycle.GLARE_RISE`, 0.05): with an Atmosphere Roblox is reported to light from the moon from
+  ClockTime 18 to 6, and the glare would sit round the moon; the haze keeps the dusk's glow.
 - *Off.* The Fog setting off (or `Render.Fog` false): Density, Haze and Glare 0. The Atmosphere
   stays in Lighting.
 - *Writing.* `LightingController` works it out every update into one table (`state`) and writes
@@ -2245,15 +2262,17 @@ are ignored, even at Density 0.
   and takes the Atmosphere out (Parent nil, the reference kept) in one call, and the colour comes
   from LightingController in the same frame (FluidFog and EffectView call both), so no frame
   shows both or neither; when they end the Atmosphere goes back with the place's own FogStart /
-  FogEnd. Without any Atmosphere (`Lighting.Enabled` false in a place without one) the old view
-  fog stays: FogEnd at the view x the weather's factor, FogStart 55% of it.
+  FogEnd. Without any Atmosphere (`Lighting.Enabled` false in a place without one of its own)
+  the old view fog stays: FogEnd at the view x the weather's factor, FogStart 55% of it.
 - *F3*: the `fog` line, the Atmosphere's Density and how far it hazes things 90% (in blocks),
   Haze, Glare, Offset; or the short fog's start and end.
 
 Uncertain: the Scale constant (and so the Densities) comes from a re-implementation, not Roblox;
 calibrate it in Studio with a part d studs away whose haze looks half: Scale = 0.693 /
 (Density^4 x d). Roblox steps quick changes of Color and Haze (Density changes are smooth), so
-everything here changes over seconds.
+everything here changes over seconds. Also uncertain: that the haze's light is not darkened at
+night (the re-implementation; why `ColorFloor` is 0), and when Roblox swaps the sun's light for
+the moon's (forum reports; why the dusk glare stops at the horizon).
 
 ## Weather (`Weather/`, server `World/WeatherServer`, `World/WeatherRules`, `World/Lightning`, client `Weather/`, `Map/WeatherLayer`)
 
@@ -2327,7 +2346,7 @@ override's weights, which `at`, `grid` and `forecastAt` take.
   thunderstorm even at noon.
 - The sky, cloud and fog colours greyed as in ClientLevel and FogRenderer.
 - `fogFactor`: the fog distance at full rain 0.6, snow 0.4, thunder 0.45 (the client's
-  Atmosphere: as dense as for a view that much shorter).
+  Atmosphere: as dense as for a view that factor to `Lighting.Atmosphere.WeatherPower` shorter).
 - The rain's sound volume and pitch (`rainSound`, LevelRenderer's weather.rain and
   weather.rain.above).
 - `thunderDelay(distance)`: thunder at 343 blocks a second.
@@ -2423,10 +2442,12 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   colour by `Weather.fogColour` (the Atmosphere's Color), the Atmosphere's Haze up by `Sky.Haze`
   and `ThunderHaze` and its Glare gone, all scaled by the sky exposure, so caves never change. At
   10 Hz a ColorCorrectionEffect (`IceVoxelWeatherView`) greys, flattens and cools the picture
-  (`WeatherSky.grading`), and the haze thickens by `Weather.fogFactor` (`ViewSettings
-  .setWeatherFog`, read by LightingController's next update: see Lighting, Haze; a fluid's or
-  Blindness's fog still wins). The clouds are parts, hazed by distance like the terrain: their
-  rings' ragged edge just past the view distance over 90%, a cloud halfway out under 70%.
+  (`WeatherSky.grading`), and the haze thickens by `Weather.fogFactor` to the power
+  `Lighting.Atmosphere.WeatherPower` (`ViewSettings.setWeatherFog`, read by LightingController's
+  next update: see Lighting, Haze; a fluid's or Blindness's fog still wins). The clouds are parts,
+  hazed by distance like the terrain: their rings' ragged edge just past the view distance over
+  90%, a cloud halfway out under 70%, the storm's deck overhead at most half from 1024 blocks of
+  view up.
 - *Clouds* (`Weather/CloudLod`, pure; `CloudView`): flat boxes at `Clouds.Altitude` (320: above
   9 in 10 of the land on seed 12345, under the great ranges' peaks) in the air's frame
   ((x, z) − D(t)), so they drift with the storms. Rings of detail as a clipmap: ring L has cells

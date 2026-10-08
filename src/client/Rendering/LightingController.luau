@@ -22,9 +22,10 @@
 	             then follows the distance to it). See Rendering/SkyExposure.
 	  Haze       a Lighting Atmosphere (Rendering/AtmosphereModel.state, written every update,
 	             only what changed): its Density from the view distance and the weather's fog
-	             factor (ViewSettings), thinned out underground by the exposure; its Color, Haze,
-	             Glare and Decay from the time of day and the weather (DayCycle.environment,
-	             Weather/WeatherSky.apply); none with the Fog setting off (ViewSettings.usesFog).
+	             factor (ViewSettings), thinned out deep underground by the exposure; its Color,
+	             Haze, Glare and Decay from the time of day (DayCycle.environment, the colour's
+	             floor: AtmosphereModel.floor) and then the weather (Weather/WeatherSky.apply);
+	             none with the Fog setting off (ViewSettings.usesFog).
 	             `start` drives the place's first Atmosphere (default.project.json's) or makes
 	             "IceVoxelAtmosphere", and makes "IceVoxelSky" when Lighting has no Sky (Roblox
 	             ignores an Atmosphere without one); a second Atmosphere is taken out of Lighting
@@ -43,11 +44,12 @@
 	             Minecraft's lightmap does; a change of scale writes at once.
 
 	Roblox lights the sky and the Atmosphere's haze by the sun and moon itself. Config.Lighting
-	.Enabled = false leaves everything but ClockTime to the place, its Atmosphere and Sky too (the
-	exposure is still worked out: the cave ambience and F3 read it; the short fogs still take an
-	Atmosphere out of Lighting while they show). Values are written every
-	Config.Lighting.UpdateInterval seconds, and only when they changed (outside sunrise, sunset and
-	the underground fade only ClockTime does).
+	.Enabled = false leaves everything but ClockTime to the place, its own Atmosphere and Sky too
+	(the exposure is still worked out: the cave ambience and F3 read it; the short fogs still take
+	an Atmosphere out of Lighting while they show; default.project.json's Atmosphere is IceVoxel's
+	and goes, so the old view fog follows the view: ViewSettings.atmosphere). Values are written
+	every Config.Lighting.UpdateInterval seconds, and only when they changed (outside sunrise,
+	sunset and the underground fade only ClockTime does).
 ]]
 
 local Lighting = game:GetService("Lighting")
@@ -217,6 +219,8 @@ local function update(dt: number)
 	-- Earth's tilt move it away from Minecraft's path, and the light should match the sky.
 	local sunHeight = Lighting:GetSunDirection().Y
 	local environment = DayCycle.environment(dayTime, current, settings, sunHeight)
+	-- (The haze colour's floor goes on the time of day's colour, before the weather darkens it.)
+	AtmosphereModel.floor(environment)
 	WeatherSky.apply(environment, WeatherState.rain, WeatherState.storm, WeatherState.clouds, current)
 	if nightVision > 0 then
 		-- (Night Vision: the ambients raised towards its grey.)

@@ -21,7 +21,8 @@
 	              overcast light), a cool tint; all 0 indoors.
 	  `fog`       the fog's distance factor (Weather.fogFactor: 0.6 at full rain, 0.4 in snow,
 	              0.45 in thunder), back to 1 with no sky exposure: the Atmosphere's density
-	              for a view that much shorter (Rendering/AtmosphereModel).
+	              for a view that factor to Config.Lighting.Atmosphere.WeatherPower shorter
+	              (Rendering/AtmosphereModel), the old view fog's FogEnd that much nearer.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

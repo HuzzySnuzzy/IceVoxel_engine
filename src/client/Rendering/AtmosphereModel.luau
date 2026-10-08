@@ -9,21 +9,28 @@
 	            from the camera on, never quite opaque; Roblox publishes no formula, so Scale is a
 	            Config knob, see Config.Lighting.Atmosphere for the source and how to calibrate it).
 	            `extinction`: the k that leaves Edge of the light at the view distance, the old
-	            fog's FogEnd (view x BlockSize x the weather's fog factor: rain, snow and thunder
-	            bring it nearer, so the same rule gives them a denser haze, Density x factor^-1/4);
-	            `density` turns k back into a Density (0..1), `haze` is how hazed a distance is.
-	            k, not Density, is what blends: k ~ Density^4.
-	  Caves     the haze fades things into the sky behind them, daylit even in a cave: k is scaled
-	            by the sky exposure squared (Rendering/SkyExposure: 1 outdoors, 0 deep
-	            underground), so cave walls stay clear and the sky's haze (Haze, Glare: DayCycle
-	            .environment fades them out underground) goes with it. Both follow the exposure's
-	            own smoothing (Config.Lighting.Underground.Seconds), and the weather's.
-	  Colour    Roblox lights the haze by the sky itself (dark at night, warm towards a low sun),
-	            so Color is DayCycle.environment's fog colour (Minecraft's day, dusk and night fog,
-	            darker and bluer in rain and thunder: Weather/WeatherSky) raised to ColorFloor at
-	            its brightest channel: Minecraft's near-black night fog would darken a dark sky's
-	            haze twice. Decay, Haze and Glare are the environment's (blended by the time of
-	            day, thickened by the weather). Offset stays Config's.
+	            fog's FogEnd; `density` turns k back into a Density (0..1), `haze` is how hazed a
+	            distance is. k, not Density, is what blends: k ~ Density^4.
+	  Weather   rain, snow and thunder bring the view nearer by the weather's fog factor to the
+	            power WeatherPower (1/3: Density x factor^-1/12). The whole factor (the old fog's
+	            nearer FogEnd) would haze the storm clouds overhead towards the clear sky behind
+	            them, since this haze starts at the camera where the old fog started at 55%; the
+	            storm's look is the sky's Haze and darker Color (Weather/WeatherSky) instead.
+	  Caves     the haze fades things into the sky behind them, daylit even in a cave: below
+	            ThinBelow of sky exposure (Rendering/SkyExposure: 1 outdoors, 0 deep underground) k
+	            thins out by (exposure / ThinBelow)^2, so deep cave walls stay clear while a tunnel's
+	            mouth keeps the full haze over the view out of it (its walls are too near to haze).
+	            The sky's haze (Haze, Glare: DayCycle.environment fades them out underground) goes
+	            with the exposure. Both follow the exposure's own smoothing (Config.Lighting
+	            .Underground.Seconds), and the weather's.
+	  Colour    Color is DayCycle.environment's fog colour: Minecraft's day, dusk and night fog
+	            (`floor` first raises the time of day's to ColorFloor at its brightest channel; 0,
+	            not at all, unless the night needs it in the Roblox player), then darker and bluer
+	            in rain and thunder (Weather/WeatherSky.apply). Roblox scatters the sky's light into
+	            the haze by Color (not darkened at night, as far as the re-implementation shows), so
+	            Minecraft's near-black night fog gives a dark night haze. Decay, Haze and Glare are
+	            the environment's (blended by the time of day, thickened by the weather). Offset
+	            stays Config's.
 	  Off       the Fog setting off (or Config.Render.Fog false): Density, Haze and Glare 0, the
 	            plain sky. An Atmosphere stays in Lighting all the same: Roblox's old fog only comes
 	            back without one.
@@ -33,8 +40,8 @@
 	            Atmosphere is in Lighting: ViewSettings takes it out (Parent nil) in the same call
 	            that writes those distances, and puts it back when they end, so no frame shows
 	            both or neither. Without any Atmosphere (Config.Lighting.Enabled false in a place
-	            that has none) the old view fog stays: FogEnd at the view, FogStart CLASSIC_START
-	            of it.
+	            that has none of its own: ViewSettings takes the project's out then) the old view
+	            fog stays: FogEnd at the view, FogStart CLASSIC_START of it.
 
 	`state` fills a table it is given (`new`), so an update allocates nothing.
 ]]
@@ -108,7 +115,7 @@ end
 
 --[[
 	`out` (a list of three, 0..255) set to `rgb` with its brightest channel raised to `floor`
-	(the hue kept; black stays black); returns `out`.
+	(the hue kept; black stays black); returns `out` (which may be `rgb` itself).
 ]]
 function AtmosphereModel.lift(rgb: { number }, floor: number, out: { number }): { number }
 	local r, g, b = rgb[1], rgb[2], rgb[3]
@@ -121,8 +128,19 @@ function AtmosphereModel.lift(rgb: { number }, floor: number, out: { number }): 
 end
 
 --[[
-	The Atmosphere into `out` (returned) for: `environment` (DayCycle.environment after
-	Weather/WeatherSky.apply), a view of `view` studs, the weather's fog factor `weather`
+	`environment` (DayCycle.environment's, changed in place and returned) with the time of day's
+	fog colour raised to ColorFloor (`lift`). Before Weather/WeatherSky.apply, so the weather's
+	darkening still shows on top of it.
+]]
+function AtmosphereModel.floor(environment: DayCycle.Environment, settings: Settings?): DayCycle.Environment
+	local atmosphere = settings or Config.Lighting.Atmosphere
+	AtmosphereModel.lift(environment.fogColor, atmosphere.ColorFloor, environment.fogColor)
+	return environment
+end
+
+--[[
+	The Atmosphere into `out` (returned) for: `environment` (DayCycle.environment after `floor`
+	and Weather/WeatherSky.apply), a view of `view` studs, the weather's fog factor `weather`
 	(WeatherSky.fog: 1 clear, nearer in rain, snow and thunder), the sky `exposure` (0..1) and the
 	Fog setting `on`. `settings` defaults to Config.Lighting.Atmosphere.
 ]]
@@ -137,8 +155,9 @@ function AtmosphereModel.state(
 ): State
 	local atmosphere = settings or Config.Lighting.Atmosphere
 	if on then
-		local reach = math.clamp(exposure, 0, 1)
-		local k = AtmosphereModel.extinction(view * math.clamp(weather, 0.05, 1), atmosphere.Edge)
+		local reach = math.clamp(exposure / math.max(atmosphere.ThinBelow, 1e-3), 0, 1)
+		local nearer = math.clamp(weather, 0.05, 1) ^ math.max(atmosphere.WeatherPower, 0)
+		local k = AtmosphereModel.extinction(view * nearer, atmosphere.Edge)
 		out.density = AtmosphereModel.density(k * reach * reach, atmosphere)
 		out.haze = math.clamp(environment.haze, 0, 10)
 		out.glare = math.clamp(environment.glare, 0, 10)
@@ -146,8 +165,8 @@ function AtmosphereModel.state(
 		out.density, out.haze, out.glare = 0, 0, 0
 	end
 	out.offset = math.clamp(atmosphere.Offset, 0, 1)
-	AtmosphereModel.lift(environment.fogColor, atmosphere.ColorFloor, out.color)
-	local decay = environment.decay
+	local color, decay = environment.fogColor, environment.decay
+	out.color[1], out.color[2], out.color[3] = color[1], color[2], color[3]
 	out.decay[1], out.decay[2], out.decay[3] = decay[1], decay[2], decay[3]
 	return out
 end
