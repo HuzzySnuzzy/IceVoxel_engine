@@ -439,8 +439,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				return river
 			end,
 			-- Library pieces, oil wells (deposits) and their lakes, surface lava lakes, water lakes
-			-- and puddles, each with the margin its own queries keep.
-			blocked = function(minX: number, minZ: number, maxX: number, maxZ: number): { number }
+			-- and puddles, each with the margin its own queries keep (`yield` between them and
+			-- after each puddle candidate: a cold tile decides 9-16 puddles, up to 10 ms).
+			blocked = function(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { number }
 				local list: { number } = {}
 				local function add(x0: number, z0: number, x1: number, z1: number)
 					table.insert(list, x0)
@@ -460,6 +461,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					local r = math.max(well.radius, well.lakeRadius) + OilWells.MARGIN
 					add(well.x - r, well.z - r, well.x + r, well.z + r)
 				end
+				if yield then
+					yield()
+				end
 				for _, lake in lava.surfaceLakes(minX, minZ, maxX, maxZ) do
 					local m = Lava.PROTECT
 					add(lake.x - m, lake.z - m, lake.x + Lava.BOX - 1 + m, lake.z + Lava.BOX - 1 + m)
@@ -468,7 +472,10 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					local m = Lakes.PROTECT
 					add(lake.x - m, lake.z - m, lake.x + Lakes.BOX - 1 + m, lake.z + Lakes.BOX - 1 + m)
 				end
-				for _, puddle in lakes.puddles(minX, minZ, maxX, maxZ) do
+				if yield then
+					yield()
+				end
+				for _, puddle in lakes.puddles(minX, minZ, maxX, maxZ, yield) do
 					local m = Lakes.PUDDLE_MARGIN
 					add(puddle.x0 - m, puddle.z0 - m, puddle.x1 + m, puddle.z1 + m)
 				end
@@ -638,7 +645,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				table.insert(keepOut, lake.x + Lakes.BOX - 1 + m)
 				table.insert(keepOut, lake.z + Lakes.BOX - 1 + m)
 			end
-			puddles = lakes.puddles(x0, z0, x1, z1)
+			puddles = lakes.puddles(x0, z0, x1, z1, yield)
 			for _, puddle in puddles :: { Lakes.Puddle } do
 				local m = Lakes.PUDDLE_MARGIN
 				table.insert(keepOut, puddle.x0 - m)
@@ -648,7 +655,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 			-- Mineshaft entrances (written at full detail only, but kept clear at every level).
 			if mineshafts then
-				for _, entrance in mineshafts.entrances(x0, z0, x1, z1) do
+				for _, entrance in mineshafts.entrances(x0, z0, x1, z1, yield) do
 					table.move(entrance.box, 1, 4, #keepOut + 1, keepOut)
 				end
 			end

@@ -44,10 +44,13 @@
 	A plan depends on the seed, its cell and the full detail terrain only (never a chunk's
 	blocks), so every chunk, worker and level agrees; plans are kept in an LRU of CACHE cells
 	(rejected cells too) per generator, a lookup builds only the cells whose start may reach it
-	(`reach`: Extent + 30 blocks every way), and `built` counts the plans built. Measured on seed
-	12345 (Lune): 13-14 per km², 60-150 pieces each (some 250), about 130 x 130 blocks; a plan
-	builds in 1-3 ms (lakes and puddles worked out too); level 0 chunks over an overgrown one cost
-	~12% more than without it, far nodes nothing measurable.
+	(`reach`: Extent + 30 blocks every way), and `built` counts the plans built. A build calls the
+	caller's yield every PAUSE (64) terrain lookups (a `blocked` tile, which may decide lakes and
+	puddles, counts 64 and is handed the yield), so a worker keeps to its slice. Measured in
+	Lune: 9-16 per km² on eight seeds (13 on 12345; fewer where there is more sea), 60-150
+	pieces each (some 250), about 130 x 130 blocks; a plan builds in 1-3 ms (lakes and puddles
+	worked out too); level 0 chunks over an overgrown one cost ~12% more than without it, far
+	nodes nothing measurable.
 
 	Writing (`write`, in TerrainGenerator's step 4 after the library structures, before glow
 	lichen and plants): every plan reaching the padded chunk, its pieces in plan order clipped to the
@@ -95,19 +98,23 @@
 
 	The entrance (overgrown only): candidates are the room's centre (moved up to 2 blocks) and
 	the middle of each corridor section between two supports, in plan order, at most CANDIDATES
-	(32: with 12, a third of the mineshafts that want one found none; with 32 about 80% do, so
-	about EntranceChance of the overgrown ones have one). The first that passes is taken: its
-	3 x 3 opening lies in core columns 2..13 of one chunk
-	(so the whole entrance, collar and headframe, is in columns no neighbour holds in its
-	padding, and no LOD seam meets it); the 5 x 5 collar's columns are dry land (above sea level
-	+ 2, no river) within a block of the centre's height; no surface cave opens there
+	(32: with 12, a third of the mineshafts that want one found none; past 32 almost no more
+	do). The first that passes is taken, so about EntranceChance of the overgrown ones under
+	dry land have one (0.38-0.57 on eight seeds) and none under the sea or a beach: 0.18-0.45 of
+	all the overgrown ones, by the seed's coasts. Its 3 x 3 opening lies in core columns 2..13
+	of one chunk (so the whole entrance, collar and headframe, is in columns no neighbour holds
+	in its padding, and no LOD seam meets it); the 5 x 5 collar's columns are dry land (above
+	sea level + 2, no river) within a block of the centre's height; no surface cave opens there
 	(Terrain.carvesTop); no lake, puddle, lava lake, oil well or library piece within MARGIN of
 	the collar; SpawnClearance blocks from the spawn; no other piece of the mineshaft in the
 	shaft's way. It is written last: the opening Air from the piece's lowest open layer up
-	through the ground, a mossy cobblestone collar two deep around it, oak fence posts three
-	tall and an oak log beam across them FRAME (3) blocks over the collar, ordinary Rope from
-	under the beam's middle down to the floor (every rope hanging from the beam or the rope
-	above), and vines on the beam and down the shaft's walls from the collar's top layer. The
+	through the ground, planks under it where its floor is not sturdy (a room keeps its natural
+	floor, and a cave crossing it would leave the rope hanging over a drop: 9 of 86 entrances on
+	four seeds, some over a lava sea) with log pillars under the planked corners, a mossy
+	cobblestone collar two deep around it, oak fence posts three tall and an oak log beam
+	across them FRAME (3) blocks over the collar, ordinary Rope from under the beam's middle
+	down to the floor (every rope hanging from the beam or the rope above), and vines on the
+	beam and down the shaft's walls from the collar's top layer. The
 	beam is that high so a climber can get out (Shared/Movement/PlayerPhysics): at the top of
 	the rope their head (1.8 tall) meets the beam with their feet 1.2 over the collar, enough to
 	drift off the rope onto the collar before they drop below its top (under a beam 2 over the
@@ -157,6 +164,7 @@ local BEAM_VINES = 0.25 -- a vine on each side cell of the beam over the opening
 local KEEP_OUT = 5 -- trees and surface caves keep this far from an entrance's centre
 local FRAME = 3 -- the entrance's beam this far over the collar's top (a climber steps off: header)
 local CACHE = 64 -- cells (plans and rejected candidates) kept per generator
+local PAUSE = 64 -- terrain lookups a plan build makes between two yields (a `blocked` tile: all 64)
 local SLOTS = 27 -- a chest's slots
 
 local abs = math.abs
@@ -327,13 +335,14 @@ export type Plan = {
 	(first air), river strength (Relief; nil: none) and biome index; the rectangles pieces keep
 	MARGIN blocks from (library pieces, oil wells and their lakes, surface lava lakes, water lakes
 	and puddles, each with its own margin: x0, z0, x1, z1 per rectangle) touching a block
-	rectangle; the spawn column; whether a surface cave may open a column.
+	rectangle (calling the plan build's yield, if any, now and then); the spawn column; whether a
+	surface cave may open a column.
 ]]
 export type Terrain = {
 	height: (x: number, z: number) -> number,
 	biome: (x: number, z: number) -> number,
 	river: ((x: number, z: number) -> number)?,
-	blocked: ((minX: number, minZ: number, maxX: number, maxZ: number) -> { number })?,
+	blocked: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { number })?,
 	spawn: (() -> (number, number))?,
 	carvesTop: ((x: number, z: number) -> boolean)?,
 }
@@ -344,11 +353,11 @@ export type Layout = (minX: number, minZ: number, maxX: number, maxZ: number) ->
 
 export type Mineshafts = {
 	-- Every plan whose bounds touch the block rectangle (inclusive), in write order. `yield` is
-	-- called after each plan built.
+	-- called while a plan is built (every PAUSE terrain lookups) and after each.
 	plans: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Plan },
 	-- Every entrance whose keep-out box touches the block rectangle (only builds the plans that
-	-- may have one: cheap for far chunks).
-	entrances: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Entrance },
+	-- may have one: cheap for far chunks; `yield` as for `plans`).
+	entrances: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Entrance },
 	-- The boxes an underground lava lake must not overlap (every piece grown by MARGIN and every
 	-- entrance shaft of the plans touching the rectangle; six numbers each).
 	boxes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { number },
@@ -383,6 +392,7 @@ Mineshafts.GUARD = GUARD
 Mineshafts.KEEP_OUT = KEEP_OUT
 Mineshafts.FRAME = FRAME
 Mineshafts.CACHE = CACHE
+Mineshafts.PAUSE = PAUSE
 Mineshafts.PILLAR = PILLAR
 Mineshafts.SLOTS = SLOTS
 
@@ -642,13 +652,16 @@ type Cell = {
 	plan: Plan | false | nil,
 }
 
--- Everything a plan's pieces are checked against while it is built.
+-- Everything a plan's pieces are checked against while it is built, and the caller's yield
+-- (nil: none) with the terrain lookups made since it was last called.
 type Build = {
 	pieces: { Piece },
 	salt: number,
 	overgrown: boolean,
 	heights: { [number]: number },
 	tiles: { [number]: { number } },
+	yield: (() -> ())?,
+	work: number,
 }
 
 local function columnKey(x: number, z: number): number
@@ -671,10 +684,24 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 
 	--[[ Checks while building ]]
 
+	-- Counts `n` terrain lookups, yielding every PAUSE: a plan reads some 200 columns and 4-12
+	-- `blocked` tiles, 2-15 ms in one go, against a worker's 3 ms slice (Config.Workers).
+	local function spend(b: Build, n: number)
+		local yield = b.yield
+		if yield then
+			b.work += n
+			if b.work >= PAUSE then
+				b.work = 0
+				yield()
+			end
+		end
+	end
+
 	local function heightAt(b: Build, x: number, z: number): number
 		local key = columnKey(x, z)
 		local h = b.heights[key]
 		if h == nil then
+			spend(b, 1)
 			h = height(x, z)
 			b.heights[key] = h
 		end
@@ -710,8 +737,12 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 				local key = columnKey(tx, tz)
 				local list = b.tiles[key]
 				if list == nil then
-					list = blocked(tx * TILE, tz * TILE, tx * TILE + TILE - 1, tz * TILE + TILE - 1)
+					-- (A yield before and after: a cold tile decides lakes and puddles, up to 10 ms,
+					-- and yields inside too.)
+					spend(b, PAUSE)
+					list = blocked(tx * TILE, tz * TILE, tx * TILE + TILE - 1, tz * TILE + TILE - 1, b.yield)
 					b.tiles[key] = list
+					spend(b, PAUSE)
 				end
 				for i = 1, #list, 4 do
 					if list[i] <= x1 and list[i + 2] >= x0 and list[i + 1] <= z1 and list[i + 3] >= z0 then
@@ -1032,8 +1063,14 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 			for dx = -2, 2 do
 				local x, z = cx + dx, cz + dz
 				local h = heightAt(b, x, z)
-				if abs(h - h0) > 1 or h <= SEA + 2 or (river and river(x, z) > 0) then
+				if abs(h - h0) > 1 or h <= SEA + 2 then
 					return nil
+				end
+				if river then
+					spend(b, 1)
+					if river(x, z) > 0 then
+						return nil
+					end
 				end
 			end
 		end
@@ -1063,6 +1100,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		if carvesTop then
 			for dz = -2, 2 do
 				for dx = -2, 2 do
+					spend(b, 1)
 					if carvesTop(cx + dx, cz + dz) then
 						return nil
 					end
@@ -1178,10 +1216,18 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		}
 	end
 
-	-- The plan of a start (false: its room is refused).
-	local function build(gx: number, gz: number, s: Start): Plan | false
+	-- The plan of a start (false: its room is refused), `yield` called every PAUSE terrain lookups.
+	local function build(gx: number, gz: number, s: Start, yield: (() -> ())?): Plan | false
 		builtCount += 1
-		local b: Build = { pieces = {}, salt = s.salt, overgrown = s.overgrown, heights = {}, tiles = {} }
+		local b: Build = {
+			pieces = {},
+			salt = s.salt,
+			overgrown = s.overgrown,
+			heights = {},
+			tiles = {},
+			yield = yield,
+			work = 0,
+		}
 		local roomBox = { s.x, s.y, s.z, s.x + s.sx, s.y + s.sy, s.z + s.sz }
 		if not accept(b, roomBox) then
 			return false
@@ -1238,7 +1284,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 			return nil
 		end
 		if cell.plan == nil then
-			cell.plan = build(gx, gz, cell.start :: Start)
+			cell.plan = build(gx, gz, cell.start :: Start, yield)
 			if yield then
 				yield()
 			end
@@ -1275,7 +1321,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		return list
 	end
 
-	local function entrances(minX: number, minZ: number, maxX: number, maxZ: number): { Entrance }
+	local function entrances(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { Entrance }
 		local list: { Entrance } = {}
 		local function add(plan: Plan)
 			local e = plan.entrance
@@ -1301,7 +1347,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 					continue
 				end
 				if s.entrance then
-					local plan = planAt(gx, gz)
+					local plan = planAt(gx, gz, yield)
 					if plan then
 						add(plan)
 					end
@@ -1838,6 +1884,19 @@ local function writeEntrance(plan: Plan, e: Entrance)
 						put(o, y, AIR)
 					end
 				end
+			end
+		end
+	end
+	-- A floor under the opening, so the rope never ends over a drop: planks over the cells that
+	-- are not sturdy (a room keeps its natural floor, which a cave may cross), log pillars under
+	-- the corners planked here, as under a bridge's ends.
+	for dz = -1, 1 do
+		for dx = -1, 1 do
+			local x, z = cx + dx, cz + dz
+			local before = read(x, bottom - 1, z)
+			floorAt(x, bottom - 1, z, PLANKS)
+			if dx ~= 0 and dz ~= 0 and before ~= PLANKS then
+				pillar(x, bottom - 1, z)
 			end
 		end
 	end

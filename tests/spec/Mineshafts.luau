@@ -6,9 +6,10 @@
 	MinY, near a lake, puddle, lava lake, oil well or library piece, or opens onto the surface, so
 	every lava and water cell stays held in; the lattice hint gives the exact cave graph; hidden
 	caves draw nothing of a tunnel; entrances (an Air shaft, a continuous rope hanging from a log
-	beam, no trees, in one chunk's core) on about EntranceChance of the overgrown ones; overgrowth
-	by humidity; every attached block holds; the off switches; loot; frequency; cost; the debug
-	structures world's samples.
+	beam down to a sturdy floor on four seeds, no trees, in one chunk's core) on about
+	EntranceChance of the overgrown ones under dry land; overgrowth by humidity; every attached
+	block holds; the off switches; loot; frequency on three seeds; plan builds yield every PAUSE
+	terrain lookups; cost against a plain chunk's; the debug structures world's samples.
 ]]
 return function(t, shared, require)
 	local Config = require(shared.Config)
@@ -574,6 +575,45 @@ return function(t, shared, require)
 		t.ok(checked >= 2, `entrances checked: {checked}`)
 	end)
 
+	t.test("entrances on other seeds: every rope continuous down to a sturdy floor, none over a cave", function()
+		-- A start room keeps its natural floor, which a cave may cross: the entrance planks it (seed
+		-- 42's at -1257 217 and 99's at -138 -1117 hung 12 and 21 blocks over a cave, 2024's at
+		-- 108 1908 over a lava sea).
+		local R = 2200
+		local checked, planked = 0, 0
+		for _, seed in { 42, 99, 2024, 777 } do
+			local g = TerrainGenerator.new(seed)
+			for _, plan in g.mineshafts(-R, -R, R, R) do
+				local e = plan.entrance
+				if e == nil then
+					continue
+				end
+				checked += 1
+				for y = e.bottom, e.top + FRAME - 1 do
+					t.eq(blockAt(g, e.x, y, e.z), ROPE, `seed {seed}: rope at {e.x} {y} {e.z}`)
+				end
+				for dz = -1, 1 do
+					for dx = -1, 1 do
+						local under = blockAt(g, e.x + dx, e.bottom - 1, e.z + dz)
+						t.ok(
+							Blocks.isSturdy(under),
+							`seed {seed}: under the opening at {e.x + dx} {e.bottom - 1} {e.z + dz}: {Blocks.get(under).name}`
+						)
+					end
+				end
+				local room = plan.pieces[1].box
+				local inRoom = e.x >= room[1] and e.x <= room[4] and e.z >= room[3] and e.z <= room[6]
+				if inRoom and blockAt(g, e.x, e.bottom - 1, e.z) == B.Planks then
+					planked += 1
+				end
+			end
+			caches[g] = nil
+		end
+		print(`    {checked} entrances on 4 seeds, {planked} floored with planks`)
+		t.ok(checked >= 60, `entrances checked: {checked}`)
+		t.ok(planked >= 3, "some floored over a cave")
+	end)
+
 	--[[ Overgrowth, attached blocks ]]
 
 	t.test("overgrown: moss, carpets, vines and roots in humid biomes only; every attached block holds", function()
@@ -752,50 +792,154 @@ return function(t, shared, require)
 
 	--[[ Frequency, cost ]]
 
-	t.test("mineshafts: about 15 per km², overgrown by humidity, about EntranceChance with an entrance", function()
-		local R = 3000
-		local fresh = TerrainGenerator.new(SEED)
-		local all = fresh.mineshafts(-R, -R, R - 1, R - 1)
-		local count = 0
-		local overgrown, entrances = 0, 0
-		local wet, wetOvergrown = 0, 0
-		for _, plan in all do
-			if plan.x >= -R and plan.x < R and plan.z >= -R and plan.z < R then
-				count += 1
-				if plan.overgrown then
-					overgrown += 1
-					if plan.entrance then
-						entrances += 1
+	t.test(
+		"mineshafts: 9-16 per km², overgrown by humidity, about EntranceChance under dry land with an entrance",
+		function()
+			-- Three seeds' 36 km² each. An entrance needs dry, level ground over its piece, so the share
+			-- of overgrown ones with one is about EntranceChance only of those under dry land (the start
+			-- room's column above the sea's shore); one under the sea or a beach has none. Measured on
+			-- eight seeds: 9.2-16.1 per km², 0.38-0.57 of those under dry land and 0.18-0.45 of all.
+			local R = 3000
+			local SEA = Config.SeaLevel
+			for _, seed in { SEED, 777, 2024 } do
+				local fresh = TerrainGenerator.new(seed)
+				local all = fresh.mineshafts(-R, -R, R - 1, R - 1)
+				local count = 0
+				local overgrown, entrances, dry, dryEntrances = 0, 0, 0, 0
+				local wet, wetOvergrown = 0, 0
+				for _, plan in all do
+					if plan.x >= -R and plan.x < R and plan.z >= -R and plan.z < R then
+						count += 1
+						local room = plan.pieces[1].box
+						local h, b = fresh.column((room[1] + room[4]) // 2, (room[3] + room[6]) // 2)
+						if plan.overgrown then
+							overgrown += 1
+							local land = h > SEA + 2
+							if land then
+								dry += 1
+							end
+							if plan.entrance then
+								entrances += 1
+								if land then
+									dryEntrances += 1
+								end
+							end
+						end
+						if Biomes.list[b].humidity >= cfg.OvergrownHumidity[2] then
+							wet += 1
+							if plan.overgrown then
+								wetOvergrown += 1
+							end
+						end
 					end
 				end
-				local room = plan.pieces[1].box
-				local _, b = fresh.column((room[1] + room[4]) // 2, (room[3] + room[6]) // 2)
-				if Biomes.list[b].humidity >= cfg.OvergrownHumidity[2] then
-					wet += 1
-					if plan.overgrown then
-						wetOvergrown += 1
-					end
+				local perKm2 = count / (2 * R / 1000) ^ 2
+				print(
+					`    seed {seed}: {count} mineshafts in {(2 * R / 1000) ^ 2} km²: {string.format("%.1f", perKm2)} per km², {overgrown} overgrown, {entrances} with an entrance ({dryEntrances} of the {dry} under dry land); {wetOvergrown} of {wet} in the wettest biomes overgrown`
+				)
+				t.ok(perKm2 > 7.5 and perKm2 < 22.5, `seed {seed}: 9-16 per km²`)
+				t.ok(overgrown > 0 and dry >= 10, `seed {seed}: some overgrown under dry land`)
+				local share = dryEntrances / dry
+				t.ok(
+					share > cfg.EntranceChance - 0.2 and share < cfg.EntranceChance + 0.15,
+					`seed {seed}: entrance share under dry land {share}`
+				)
+				t.ok(entrances / overgrown > 0.12, `seed {seed}: entrance share of all {entrances / overgrown}`)
+				if wet >= 10 then
+					t.ok(wetOvergrown / wet > cfg.OvergrownChance - 0.3, "the wettest biomes mostly overgrown")
 				end
 			end
 		end
-		local perKm2 = count / (2 * R / 1000) ^ 2
-		print(
-			`    {count} mineshafts in {(2 * R / 1000) ^ 2} km²: {string.format("%.1f", perKm2)} per km², {overgrown} overgrown, {entrances} with an entrance; {wetOvergrown} of {wet} in the wettest biomes overgrown`
-		)
-		t.ok(perKm2 > 7.5 and perKm2 < 22.5, "about 15 per km²")
-		t.ok(overgrown > 0, "some overgrown")
-		local share = entrances / overgrown
-		t.ok(share > cfg.EntranceChance - 0.2 and share < cfg.EntranceChance + 0.1, `entrance share {share}`)
-		if wet >= 10 then
-			t.ok(wetOvergrown / wet > cfg.OvergrownChance - 0.3, "the wettest biomes mostly overgrown")
+	)
+
+	t.test("mineshafts: a plan build yields every PAUSE terrain lookups (a worker's slice)", function()
+		-- The generator's terrain, counted: a column's height, river or surface cave one lookup, a
+		-- `blocked` tile PAUSE (it decides lakes and puddles, and is handed the yield too).
+		local PAUSE = Mineshafts.PAUSE
+		local work, most, yields, handed = 0, 0, 0, 0
+		local function spend(n: number)
+			work += n
+			most = math.max(most, work)
+		end
+		local function yield()
+			yields += 1
+			work = 0
+		end
+		local terrain = {
+			height = function(x: number, z: number): number
+				spend(1)
+				return (gen.column(x, z))
+			end,
+			biome = function(x: number, z: number): number
+				local _, b = gen.column(x, z)
+				return b
+			end,
+			river = function(): number
+				spend(1)
+				return 0
+			end,
+			blocked = function(_: number, _: number, _: number, _: number, y: (() -> ())?): { number }
+				spend(PAUSE)
+				if y then
+					handed += 1
+				end
+				return {}
+			end,
+			carvesTop = function(): boolean
+				spend(1)
+				return false
+			end,
+		}
+		local ms = Mineshafts.new(SEED, terrain)
+		local plain2 = Mineshafts.new(SEED, terrain)
+		local fromEntrances = 0
+		for k, plan in list do
+			if k > 12 then
+				break
+			end
+			-- A chunk's lookups: its keep-out squares (the plans with an entrance), then its plans.
+			local x0, z0 = plan.x // SIZE * SIZE, plan.z // SIZE * SIZE
+			work = 0
+			local before = yields
+			ms.entrances(x0 - 64, z0 - 64, x0 + SIZE + 63, z0 + SIZE + 63, yield)
+			fromEntrances += yields - before
+			ms.plans(x0 - 1, z0 - 1, x0 + SIZE, z0 + SIZE, yield)
+		end
+		local built = ms.built()
+		print(`    {built} plans built: {yields} yields, at most {most} lookups between two (PAUSE {PAUSE})`)
+		t.ok(built >= 12, "plans built")
+		-- (The grid cells' start columns a lookup reads before it builds: 9 for a chunk.)
+		t.ok(most <= PAUSE + 16, `lookups between two yields: {most}`)
+		t.ok(yields >= built * 4, "several yields a plan")
+		t.ok(handed > 0, "blocked is handed the yield")
+		t.ok(fromEntrances > 0, "entrance lookups yield while they build")
+		-- Yields change nothing: the same plans without them.
+		for k, plan in list do
+			if k > 12 then
+				break
+			end
+			local x0, z0 = plan.x // SIZE * SIZE, plan.z // SIZE * SIZE
+			local a = ms.plans(x0, z0, x0 + SIZE - 1, z0 + SIZE - 1)
+			local b = plain2.plans(x0, z0, x0 + SIZE - 1, z0 + SIZE - 1)
+			t.eq(#a, #b, "plans")
+			for i, p in a do
+				t.eq(#p.pieces, #b[i].pieces, "pieces")
+				t.eq(p.entrance and p.entrance.x, b[i].entrance and b[i].entrance.x, "entrance")
+			end
 		end
 	end)
 
 	t.test("mineshafts: cost (plans, full detail chunks, far nodes)", function()
 		-- Plans, built by a fresh generator (its lakes and puddles worked out too): a lookup at a
-		-- plan's room builds every plan that may reach it (one or two).
+		-- plan's room builds every plan that may reach it (one or two). Against a plain full
+		-- detail chunk made by another fresh generator (no structures) between two lookups, so a
+		-- busy machine slows both alike: a lookup takes about half a chunk's time (2-3 ms
+		-- against 5-6 here), its worst about 3 chunks' (up to 5 with six copies of this spec on
+		-- four cores: a single sample takes the machine's spikes).
 		local fresh = TerrainGenerator.new(SEED)
+		local unit = TerrainGenerator.new(SEED, { structures = false })
 		local times: { number } = {}
+		local chunkTimes: { number } = {}
 		for k, plan in list do
 			if k > 30 then
 				break
@@ -803,18 +947,24 @@ return function(t, shared, require)
 			local s = os.clock()
 			fresh.mineshafts(plan.x, plan.z, plan.x, plan.z)
 			table.insert(times, (os.clock() - s) * 1000)
+			s = os.clock()
+			unit.generate(0, plan.x // SIZE + 3, plan.z // SIZE)
+			table.insert(chunkTimes, (os.clock() - s) * 1000)
 		end
 		table.sort(times)
+		table.sort(chunkTimes)
 		local median, worst = times[#times // 2 + 1], times[#times]
+		local chunkMedian = chunkTimes[#chunkTimes // 2 + 1]
 		print(
 			string.format(
-				"    plan lookups (building the plans in reach): median %.2f ms, worst %.2f ms",
+				"    plan lookups (building the plans in reach): median %.2f ms, worst %.2f ms; a plain chunk %.2f ms",
 				median,
-				worst
+				worst,
+				chunkMedian
 			)
 		)
-		t.ok(median < 5, "a plan in under 5 ms (median)")
-		t.ok(worst < 30, "two plans in under 30 ms")
+		t.ok(median < chunkMedian, "a plan in less than a plain chunk's time (median)")
+		t.ok(worst < chunkMedian * 10, "two plans in less than 10 plain chunks' time")
 		-- Two fresh generators, the same world with and without mineshafts (library structures
 		-- and the rest alike).
 		local both = TerrainGenerator.new(SEED)

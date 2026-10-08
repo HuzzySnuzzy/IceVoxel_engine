@@ -597,18 +597,21 @@ A fast, Minecraft-style voxel engine for Roblox.
   pillars where a corridor crosses a cave, crossings (some two floors tall) and stairs going down,
   and a chest now and then (1 in 100 per section side) with Minecraft's mineshaft loot on this
   game's items (an iron pickaxe, ingots, raw ores, a diamond, coal, porkchops, glow dust, herbs and
-  straw; rails, torches and rope). About 13-15 per km² (Minecraft's 1 in 250 chunks), each
-  typically 60-150 pieces over some 130 × 130 blocks; the room's floor lies 28-64 blocks under the
+  straw; rails, torches and rope). About 9-16 per km², fewer where a seed has more sea
+  (Minecraft's 1 in 250 chunks would be 15), each typically 60-150 pieces over some 130 × 130
+  blocks; the room's floor lies 28-64 blocks under the
   surface, every piece keeps 6 blocks of ground over it, none goes below y 16 (the lava seas) or
   near a lake, puddle, lava lake, oil well or library structure, so they never flood. In humid
   biomes they are **overgrown** (as one running into Minecraft's lush caves; jungles 72%, birch
   forests and mushroom fields 80%, old growth taigas 56%, forests and taigas 32%, never in dry
   biomes): moss on the rock around (floors, walls and ceilings; the woodwork stays wood), moss
   carpets, vines hanging from the walls, hanging roots, glow lichen and fewer cobwebs. About half
-  of the overgrown ones have an **entrance**: a 3 × 3 shaft open to the sky on dry, level ground
-  (never by water, a cave entrance, a lake or the spawn), framed by a mossy cobblestone collar, an
-  oak log beam on two fence posts three blocks over it, and a **rope hanging all the way down** from
-  the beam to the floor of the room or corridor 20-60 blocks below: jump onto it from the collar
+  of the overgrown ones under dry land have an **entrance** (none under the sea or a beach, so a
+  fifth to a half of all of them, by the seed): a 3 × 3 shaft open to the sky on dry, level
+  ground (never by water, a cave entrance, a lake or the spawn), framed by a mossy cobblestone
+  collar, an oak log beam on two fence posts three blocks over it, and a **rope hanging all the
+  way down** from the beam to the floor of the room or corridor 20-65 blocks below (now and then
+  as much as 85; planks under it where a cave crosses that floor): jump onto it from the collar
   and let go to slide down (a rope never hurts), or sneak to hold on; hold jump to climb back up,
   and at the top, where your head meets the beam, walk off across the beam onto the collar. Vines
   run down its walls from the collar's top (they climb out too); no tree grows by one. A mineshaft is written
@@ -617,8 +620,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   entrance shaft is open air like a cave entrance's pit); mobs spawn in its dark like any cave
   (never on its rails, as in Minecraft; an overgrown one's glow lichen keeps most of it lit).
   Generate Structures (and `Config.Structures.Generate`, `Config.Mineshafts.Enabled`) turns them
-  off. Worlds saved before mineshafts existed get them too, under ground nobody changed (terrain
-  comes from the seed; every edit stays). The All Structures debug world shows a sample of each.
+  off. Worlds saved before mineshafts existed get them too, wherever nobody changed the blocks
+  (terrain comes from the seed; every edit stays): mostly under ground, but an entrance's pit,
+  collar and headframe can also open in untouched ground there, even in the natural floor of a
+  house built before (its walls and roof stay; the pit is 20-85 blocks deep). The All Structures
+  debug world shows a sample of each.
 - **World types.** Minecraft's world presets, each with its own options: **Default**;
   **Superflat**, layers from a preset line in this game's names (`Bedrock,2*Dirt,Grass;Plains`;
   Minecraft's own strings such as `minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block` paste
@@ -1680,7 +1686,7 @@ for performance:
 | `Mineshafts.MinY` / `Cover` | 16 / 6 | No mineshaft block below y 16; 6 blocks of ground kept over every piece. |
 | `Mineshafts.MaxDepth` / `Extent` | 8 / 80 | Minecraft's grammar: pieces at most 8 steps from the room, starting within 80 blocks of its corner. |
 | `Mineshafts.OvergrownHumidity` / `OvergrownChance` | { 0.1, 0.6 } / 0.8 | Overgrown with a chance rising from 0 at biome humidity 0.1 to 0.8 at 0.6 and above. |
-| `Mineshafts.EntranceChance` | 0.5  | The chance an overgrown mineshaft has an entrance shaft with a rope (when a spot passes). |
+| `Mineshafts.EntranceChance` | 0.5  | The chance an overgrown mineshaft has an entrance shaft with a rope (when a dry, level spot passes: none under the sea or a beach). |
 | `Mineshafts.SpawnClearance` | 32   | No entrance this close to the spawn (blocks). |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides operators (the owner, `Gameplay.Admins` and Studio among them): user ids, or true (anyone in creative) / false. |
@@ -1694,7 +1700,7 @@ for performance:
 | `Render.FarMaterials`     | false   | Materials and textures on merged far chunks, a far mesh per look (the Far Materials setting), instead of plain colours. |
 | `Textures.OddBoxes`       | false   | Odd-sized boxes (in blocks) for textured cubes at full detail, for variants that tile from a face's centre (see Block textures): 14-18% more parts near the player. |
 | `Textures.BottomFaces` / `SideImages` | false / false | Draw bottoms (grass's dirt) as images, one more instance per part / the sides as upright images over the top's variant, four more. |
-| `Textures.Sprites`        | true    | Plants with a filled `Sprite` are two crossed images instead of their boxes. |
+| `Textures.Sprites`        | true    | Plants, rope, cobwebs and hanging roots with a filled `Sprite` are two crossed images instead of their boxes. |
 | `Textures.MeasureAverages` / `ValidateIds` | true / true | Measure the averages the pack lacks and print them to paste / check every image id once at startup and name each one that fails. |
 | `Render.FarMeshes`        | on (PC) | Merge stable far regions into meshes (see Far meshes below).        |
 | `Render.FarMeshes.MaxBuildSpeed` / `SpeedWindow` | 2 / 2 | No mesh builds while the camera moved faster than this many blocks a second, averaged over this many seconds. |
@@ -2148,9 +2154,15 @@ keeps its own sounds); Neon, Glass, ForceField, Air and Water cannot take a Mate
 `Align = false` marks a noisy texture (leaves) that never needs odd boxes (see the tiling check
 below). The pack's `Blocks` table says which texture each block shows on each face: `All`,
 `Sides`, `Top` and `Bottom` (a face given nothing falls back to All, then Sides), `Front` for glow
-lichen (the face looking away from what it hangs on) and `Sprite` for plants (two crossed images).
-An entry also covers the block's cave twin and the other blocks of its variant group (the six
-glow lichen sides, a tall plant's top half unless it has its own). Fluids, air, torches and
+lichen, ladders, rails and vines (the face looking away from what it hangs on or lies on) and
+`Sprite` for plants, rope, cobwebs and hanging roots (two crossed images). An entry also covers
+the block's cave twin and the other blocks of its variant group (the six glow lichen sides, the
+four ladders and vines, both rails, a tall plant's top half unless it has its own). A filled
+texture changes some shapes: a ladder or rail with a `Front` image draws only that flat picture
+(its rails and rungs, or iron bars, give way to it, as Minecraft draws a single textured quad),
+and rope with a `Sprite` becomes two crossed images instead of its thin post; shaped blocks given
+cube faces draw their boxes in that texture (the oak fence post takes `planks`, the moss carpet
+`moss block`). Fluids, air, torches and
 lanterns, pipes, cables and tanks, machines and the solar panel, structure blocks and jigsaws and
 the Glow Block (Neon) are never textured. One tile covers one block face (`StudsPerTile = 3`): a
 512 × 512 image per 3-stud face. Blocks checks the pack when it loads and fails naming the mistake
@@ -2241,11 +2253,16 @@ setting off every block is drawn in its plain material and colour, plants as box
   Far Materials is off): SmoothPlastic in the colour the block's top averages to on screen,
   texture and tint included. The far meshes take the same colours, so distant terrain keeps the
   colours of the textured terrain near you (once the averages are known).
-- **Plants** with a filled `Sprite` (`Config.Textures.Sprites`): two crossed see-through planes
-  along the cell's diagonals carrying the image on both sides, offset and turned like the boxes;
-  grass and ferns take their soil's foliage colour. Blank sprites keep their boxes.
-- **Glow lichen** with its `Front` texture: the plate goes see-through and shows the image on its
-  face away from the wall; the glowing speck stays.
+- **Plants**, rope, cobwebs and hanging roots with a filled `Sprite` (`Config.Textures.Sprites`):
+  two crossed see-through planes along the cell's diagonals carrying the image on both sides,
+  offset and turned like the boxes; grass and ferns take their soil's foliage colour. Blank
+  sprites keep their boxes.
+- **Glow lichen, ladders, rails and vines** with their `Front` texture: the plate goes see-through
+  and shows the image on its face away from the wall (or up, for a rail), and only the plate is
+  drawn: a ladder's rails and rungs and a rail's iron bars give way to the picture (draw them into
+  the image); the lichen's glowing speck stays. A blank Front keeps the boxes.
+- **Shaped blocks with cube faces** (the oak fence post's `planks`, the moss carpet's `moss
+  block`): their boxes take that texture's material and variant near you, without images.
 - **Items**: a textured block's item is a cube with one image per textured face, one tile per
   face, in its tint (untextured faces keep the block's material and colour); a plant's item is its
   sprite on an upright plane. Item icons build their models again a few per frame when looks change.

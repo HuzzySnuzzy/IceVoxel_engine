@@ -8,7 +8,7 @@
 	    over it, as first planned, stops the feet 0.2 over and a climber stepping off falls back
 	    down the shaft);
 	  * a player sprint-jumps from the collar onto the rope, holds on sneaking, then lets go and
-	    slides to the floor 20-60 blocks down unhurt;
+	    slides to the floor (20 or more blocks down, onto planks where a cave crosses it) unhurt;
 	  * a vine run down the shaft's wall starts in the collar's top layer, so it climbs out too;
 	  * the server's neighbour updates over freshly generated mineshaft chunks break nothing that
 	    was generated (every rope, vine, torch, rail, carpet and root holds: Blocks.canSurvive with
@@ -126,7 +126,7 @@ return function(t, shared, require, server)
 			end
 			t.ok(Blocks.isClimbable(ROPE), "rope is climbable")
 			t.eq(world:getBlock(e.x, e.top + FRAME, e.z), LOG, "the beam FRAME over the collar")
-			t.eq(world:getBlock(e.x, e.bottom - 1, e.z) ~= AIR, true, "a floor under the rope")
+			t.ok(Blocks.isSturdy(world:getBlock(e.x, e.bottom - 1, e.z)), "a sturdy floor under the rope")
 
 			local physics = physicsWorld(e, true)
 			local state = PlayerPhysics.new(e.x + 0.5, e.bottom, e.z + 0.5)

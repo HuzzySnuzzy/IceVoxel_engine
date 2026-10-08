@@ -579,9 +579,14 @@ detail chunks only (caves exist only there), in step 8 after the library structu
   water lake or a puddle (TerrainGenerator's `blocked` lists them per 64 × 64 tile, with their own
   margins). Plans depend on the seed, their cell and the full detail terrain only, and are kept in
   an LRU of 64 cells per generator (each worker its own); a lookup only builds the cells whose
-  start may reach it (`Extent + 30` blocks every way). Measured in Lune: ~13-15 per km² on seed
-  12345, typically 60-150 pieces; a plan builds in ~1-3 ms (a lookup at a room 2.3 ms median with
-  cold lakes and puddles, 13 ms at most for two big ones).
+  start may reach it (`Extent + 30` blocks every way). Measured in Lune: 9-16 per km² on eight
+  seeds (13 on seed 12345; starts under deep sea floors are dropped), typically 60-150 pieces; a
+  plan builds in ~1-3 ms (a lookup at a room 2.3 ms median with cold lakes and puddles, 13 ms at
+  most for two big ones). A build calls the generator's `yield` every `PAUSE` (64) terrain
+  lookups, a `blocked` tile counting 64 (yielding before and after it, and handing it the yield:
+  TerrainGenerator yields between its lists and Lakes after each puddle candidate), and
+  `entrances` takes the yield too: on seed 42 the longest level 0 stretch between yields went
+  from 11-12.5 ms to ~6 ms (one cold puddle decision), against ~3-5 without mineshafts.
 - **Writing** (`write(plans, data, originX, originZ, cells, heights, carved)`): every plan
   touching the padded chunk, its pieces in plan order clipped to it, a plan's overgrowth after all
   its pieces, then every entrance. Rock (opaque, not bedrock, not the structure's planks, logs or
@@ -617,9 +622,15 @@ detail chunks only (caves exist only there), in step 8 after the library structu
   a block of the centre's height, above sea level + 2, no river), no surface cave opening there
   (`carvesTop`), nothing of the `blocked` list within 2 blocks, 32 blocks from the spawn
   (`spawnColumn`; findSpawn is unchanged, so there is no cycle) and no other piece of the
-  mineshaft in the shaft's way. About half the overgrown mineshafts get one (46 of 103 in 36 km²).
-  It is Air from the piece's floor layer up through the ground (an underground pocket for the cave
-  view, open to the sky like a cave entrance's pit; `topCells` stay), a mossy cobblestone collar
+  mineshaft in the shaft's way. About `EntranceChance` (half) of the overgrown mineshafts under
+  dry land get one (0.38-0.57 on eight seeds; 45 of 85 on seed 12345); one under the sea or a beach
+  never does (every candidate fails the dry land rule, and more than 32 candidates find almost
+  none more), so of all the overgrown ones 0.18-0.45 by the seed (46 of 103 on 12345, 36 of 195
+  on 777). It is Air from the piece's floor layer up through the ground (an underground pocket for
+  the cave view, open to the sky like a cave entrance's pit; `topCells` stay), planks under the
+  opening where its floor is not sturdy (a room keeps its natural floor, which a cave may cross: 9
+  of 86 entrances on four seeds hung their rope over a drop, some over a lava sea) with log
+  pillars under the planked corners, a mossy cobblestone collar
   two deep, two oak fence posts three tall and a 5 block oak log beam on them `FRAME` (3) over the
   collar, an ordinary Rope from under the beam's middle to the floor (each held by the one above,
   the top one by the beam), vines down its walls from the collar's top layer and from the beam.
@@ -766,7 +777,7 @@ Pit, Desert, Redstone Ready.
 **DebugWorlds.** All Blocks is Minecraft's DebugLevelSource: every block id but air, cave air and
 the cave twins (variants, both halves of tall plants, every fluid level; a twin looks exactly like
 its twin, and hidden caves would draw it as a stone cap in the open air) at y 70, block k at
-x = 2 (k // W) + 1, z = 2 (k % W) + 1 with W = ceil(sqrt(n)) (203 blocks: a 30 x 30 square),
+x = 2 (k // W) + 1, z = 2 (k % W) + 1 with W = ceil(sqrt(n)) (220 blocks: a 30 x 30 square),
 nothing under them. Blocks that need support and fluids are shown alone, as they are: the type has
 no ticks, so nothing flows, falls or pops even next to an edit. All Structures lays out every
 template of the library (sorted, rotation 0) and every generated structure (assembled whole from

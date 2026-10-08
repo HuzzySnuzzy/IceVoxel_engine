@@ -193,8 +193,9 @@ export type Terrain = {
 export type LakeGen = {
 	-- Every water lake whose box (grown by PROTECT) reaches the block rectangle (inclusive).
 	lakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lake },
-	-- Every puddle whose bounds (grown by PUDDLE_MARGIN) reach the block rectangle (inclusive).
-	puddles: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Puddle },
+	-- Every puddle whose bounds (grown by PUDDLE_MARGIN) reach the block rectangle (inclusive);
+	-- `yield` is called after each candidate cell.
+	puddles: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Puddle },
 	--[[
 		Writes `lakes` and `puddles` into the padded `level` chunk (first core column originX,
 		originZ; `cells` tall). Level 0 writes the lakes' cells (water or ice, the bowl's air, the
@@ -564,11 +565,14 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 	end
 	local puddleAt: (cx: number, cz: number) -> Puddle? = cache(decidePuddle)
 
-	local function puddles(minX: number, minZ: number, maxX: number, maxZ: number): { Puddle }
+	local function puddles(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { Puddle }
 		local list: { Puddle } = {}
 		for cz = (minZ - puddleReach) // spacing, (maxZ + puddleReach) // spacing do
 			for cx = (minX - puddleReach) // spacing, (maxX + puddleReach) // spacing do
 				local puddle: Puddle? = puddleAt(cx, cz)
+				if yield then
+					yield()
+				end
 				if
 					puddle
 					and puddle.x0 - PUDDLE_MARGIN <= maxX
