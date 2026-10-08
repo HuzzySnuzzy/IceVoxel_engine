@@ -133,9 +133,14 @@
 
 	Settings (`applyView`): LodTree's four distances and plants from ViewSettings, the cave view's
 	reach and radii, and an immediate refresh.
+
+	Where the viewer is, in world blocks (the floating origin: Shared/World/Origin): the hook
+	`viewerFeet` (the boot sets it to the local player's hull: MovementController, which this
+	module must not require), else the world spawn (Shared's SpawnPosition attribute, world studs),
+	else the camera read back from render studs; the eye is the camera read back too. Everything
+	else here is in blocks, so a move of the render origin changes nothing (no jump, no teleport).
 ]]
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
@@ -148,6 +153,7 @@ local GreedyMesher = require(Shared.Meshing.GreedyMesher)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Horizon = require(Shared.World.Horizon)
+local Origin = require(Shared.World.Origin)
 local Blocks = require(Shared.Blocks)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
@@ -371,6 +377,9 @@ export type ChunkStreamer = {
 	trashHead: number,
 	-- Called when teleport mode (or the first load) starts and ends (map tiles wait meanwhile).
 	onTeleportMode: ((active: boolean) -> ())?,
+	-- Where the viewer's feet are (world blocks), nil x when unknown (no character): set by the
+	-- boot to the local player's hull.
+	viewerFeet: (() -> (number?, number, number))?,
 	busy: boolean,
 
 	update: (self: ChunkStreamer, dt: number) -> (),
@@ -386,17 +395,21 @@ ChunkStreamer.__index = ChunkStreamer
 
 --[[ Helpers ]]
 
-local function viewerPosition(): Vector3
-	local character = Players.LocalPlayer.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if root and root:IsA("BasePart") then
-		return root.Position
+-- The viewer's feet in world blocks: the hook (the local player's hull), else the world spawn,
+-- else the camera (see the header).
+local function viewerPosition(self: ChunkStreamer): Vector3
+	local hook = self.viewerFeet
+	if hook then
+		local x, y, z = hook()
+		if x then
+			return Vector3.new(x, y, z)
+		end
 	end
 	local spawn = Shared:GetAttribute("SpawnPosition")
 	if typeof(spawn) == "Vector3" then
-		return spawn
+		return spawn / BLOCK
 	end
-	return workspace.CurrentCamera.CFrame.Position
+	return Vector3.new(Origin.renderToBlocks(workspace.CurrentCamera.CFrame.Position))
 end
 
 local function toSet(list: { number }): { [number]: boolean }
@@ -2355,7 +2368,7 @@ end
 local function refresh(self: ChunkStreamer, now: number)
 	local target = self.teleportTarget
 	self.teleportTarget = nil
-	local pos = if target then target else viewerPosition() / BLOCK
+	local pos = if target then target else viewerPosition(self)
 	-- (The first load works like a teleport, with nothing to drop.)
 	local teleport = not self.refreshed
 		or TeleportMode.isJump(self.viewer.X, self.viewer.Z, pos.X, pos.Z, Streaming.TeleportDistance)
@@ -2368,7 +2381,9 @@ local function refresh(self: ChunkStreamer, now: number)
 	self.view = LoadPriority.view(pos.X, pos.Z, look.X, look.Z, camera.FieldOfView, aspect)
 	-- (After `teleported` the camera follows the character a frame later: the eye is put above
 	-- the destination's feet.)
-	self.eye = if target then Vector3.new(target.X, target.Y + EYE_HEIGHT, target.Z) else camera.CFrame.Position / BLOCK
+	self.eye = if target
+		then Vector3.new(target.X, target.Y + EYE_HEIGHT, target.Z)
+		else Vector3.new(Origin.renderToBlocks(camera.CFrame.Position))
 	self.horizon:track(now, self.eye.X, self.eye.Z)
 	local skipWas = self.skipHidden
 	self.skipHidden = ViewSettings.get("skipHidden") == 1
@@ -2544,6 +2559,7 @@ function ChunkStreamer.new(
 			trashLater = {},
 			trashHead = 1,
 			onTeleportMode = nil,
+			viewerFeet = nil,
 			busy = false,
 		}, ChunkStreamer) :: any
 	) :: ChunkStreamer

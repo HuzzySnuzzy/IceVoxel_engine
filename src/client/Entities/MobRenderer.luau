@@ -22,6 +22,10 @@
 
 	`mobsNear` and `pick` let other modules (Ui/Waila, Interaction/BlockInteraction) see where the
 	mobs are drawn, read only.
+
+	The floating origin (Shared/World/Origin): mobs and arrows stay in world blocks (doubles) and
+	are placed every frame at render studs (world studs minus the origin, after the origin's render
+	step), so a move of the origin needs nothing here.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,6 +35,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
+local Origin = require(Shared.World.Origin)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
@@ -61,7 +66,18 @@ type Entry = {
 	fire: Fire?,
 }
 
-type Arrow = { part: BasePart, from: Vector3, to: Vector3, startedAt: number, duration: number }
+-- (From the bow to where it struck, world blocks.)
+type Arrow = {
+	part: BasePart,
+	fromX: number,
+	fromY: number,
+	fromZ: number,
+	toX: number,
+	toY: number,
+	toZ: number,
+	startedAt: number,
+	duration: number,
+}
 
 local MobRenderer = {}
 
@@ -165,8 +181,7 @@ local function shoot(op: any, now: number)
 		local oldest = table.remove(arrows, 1) :: Arrow
 		release(oldest.part)
 	end
-	local from = Vector3.new(op.x, op.y, op.z)
-	local to = Vector3.new(op.tx, op.ty, op.tz)
+	local dx, dy, dz = op.tx - op.x, op.ty - op.y, op.tz - op.z
 	local part = newPart()
 	part.CastShadow = false
 	part.Size = Vector3.new(ARROW_WIDTH, ARROW_WIDTH, ARROW_LENGTH) * BLOCK
@@ -174,10 +189,14 @@ local function shoot(op: any, now: number)
 	part.Parent = folder
 	table.insert(arrows, {
 		part = part,
-		from = from,
-		to = to,
+		fromX = op.x,
+		fromY = op.y,
+		fromZ = op.z,
+		toX = op.tx,
+		toY = op.ty,
+		toZ = op.tz,
 		startedAt = now,
-		duration = math.max((to - from).Magnitude / ARROW_SPEED, 0.05),
+		duration = math.max(math.sqrt(dx * dx + dy * dy + dz * dz) / ARROW_SPEED, 0.05),
 	})
 end
 
@@ -213,10 +232,12 @@ local function draw()
 	local now = os.clock()
 	table.clear(moved)
 	table.clear(cframes)
+	-- (World blocks to render studs: Shared/World/Origin.)
+	local ox, oz = Origin.x, Origin.z
 	for _, entry in entries do
 		local model = entry.model
 		local x, y, z, yaw = MobModel.pose(model, now)
-		local base = CFrame.new(x * BLOCK, y * BLOCK, z * BLOCK) * CFrame.Angles(0, yaw, 0)
+		local base = CFrame.new(x * BLOCK - ox, y * BLOCK, z * BLOCK - oz) * CFrame.Angles(0, yaw, 0)
 		local tip = MobModel.tip(model, now)
 		if tip > 0 then
 			-- (On its side: about the facing, around the bottom of its box.)
@@ -245,9 +266,15 @@ local function draw()
 			table.remove(arrows, i)
 			release(arrow.part)
 		else
-			local at = arrow.from:Lerp(arrow.to, alpha) * BLOCK
+			local fx, fy, fz = arrow.fromX, arrow.fromY, arrow.fromZ
+			local tx, ty, tz = arrow.toX, arrow.toY, arrow.toZ
+			local at = Vector3.new(
+				(fx + (tx - fx) * alpha) * BLOCK - ox,
+				(fy + (ty - fy) * alpha) * BLOCK,
+				(fz + (tz - fz) * alpha) * BLOCK - oz
+			)
 			table.insert(moved, arrow.part)
-			table.insert(cframes, CFrame.lookAt(at, arrow.to * BLOCK))
+			table.insert(cframes, CFrame.lookAt(at, Vector3.new(tx * BLOCK - ox, ty * BLOCK, tz * BLOCK - oz)))
 		end
 	end
 	if #moved > 0 then

@@ -17,6 +17,11 @@
 	every INTERVAL seconds and whenever the records or the open screen change. As Minecraft's
 	(drawn for players who may use operator blocks, and for spectators), it shows only with the
 	instabuild ability (creative) or in spectator mode (Shared/GameMode).
+
+	The floating origin (Shared/World/Origin): outlines, label anchors and air markers are placed at
+	render studs (world studs minus the origin) and move with it (a Rendering/Rebase mover,
+	"structure boxes": every one of them in the workspace, hidden outlines included); the camera is
+	read back into world blocks.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,12 +32,14 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Settings = require(Shared.Structures.Settings)
+local Origin = require(Shared.World.Origin)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
 local StructureScreen = require(script.Parent.Parent.Ui.StructureScreen)
 local Style = require(script.Parent.Parent.Ui.Style)
+local Rebase = require(script.Parent.Rebase)
 
 local BLOCK = Config.BlockSize
 -- Blocks sideways from the camera, outlines at most, seconds between refreshes.
@@ -140,6 +147,22 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 		return world:getBlock(x, y, z)
 	end
 
+	-- Everything here in the workspace moves with the render origin.
+	Rebase.register("structure boxes", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for _, entry in entries do
+			table.insert(parts, entry.part)
+			table.insert(cframes, entry.part.CFrame - d)
+			table.insert(parts, entry.anchor)
+			table.insert(cframes, entry.anchor.CFrame - d)
+		end
+		for i = 1, airUsed do
+			local part = airParts[i]
+			table.insert(parts, part)
+			table.insert(cframes, part.CFrame - d)
+		end
+	end)
+
 	local function airPart(index: number): Part
 		local part: Part? = airParts[index]
 		if part == nil then
@@ -188,7 +211,11 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 						if (block == Blocks.AIR or block == Blocks.CAVE_AIR) and count < MAX_AIR then
 							count += 1
 							local part = airPart(count)
-							part.CFrame = CFrame.new((x + 0.5) * BLOCK, (y + 0.5) * BLOCK, (z + 0.5) * BLOCK)
+							part.CFrame = CFrame.new(
+								(x + 0.5) * BLOCK - Origin.x,
+								(y + 0.5) * BLOCK,
+								(z + 0.5) * BLOCK - Origin.z
+							)
 							part.Parent = airFolder
 						end
 					end
@@ -238,12 +265,12 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 		lastVersion = r.version
 		lastPreview = previewKey
 
-		local camera = workspace.CurrentCamera.CFrame.Position / BLOCK
+		local cameraX, _, cameraZ = Origin.renderToBlocks(workspace.CurrentCamera.CFrame.Position)
 		local override: StructureRecords.Outlined? = nil
 		if px and py and pz and preview then
 			override = { x = px, y = py, z = pz, settings = preview }
 		end
-		local list = StructureRecords.outlined(r, camera.X, camera.Z, RANGE, LIMIT, getBlock, override)
+		local list = StructureRecords.outlined(r, cameraX, cameraZ, RANGE, LIMIT, getBlock, override)
 		local airRegion: { number }? = nil
 		local airFor = ""
 		for i, item in list do
@@ -266,12 +293,13 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 			local size = Vector3.new(region[4] - region[1] + 1, region[5] - region[2] + 1, region[6] - region[3] + 1)
 			entry.part.Size = size * BLOCK + Vector3.new(OUTSET, OUTSET, OUTSET) * 2
 			entry.part.CFrame = CFrame.new(
-				(region[1] + size.X / 2) * BLOCK,
+				(region[1] + size.X / 2) * BLOCK - Origin.x,
 				(region[2] + size.Y / 2) * BLOCK,
-				(region[3] + size.Z / 2) * BLOCK
+				(region[3] + size.Z / 2) * BLOCK - Origin.z
 			)
 			entry.box.Visible = true
-			entry.anchor.CFrame = CFrame.new((item.x + 0.5) * BLOCK, (item.y + 0.5) * BLOCK, (item.z + 0.5) * BLOCK)
+			entry.anchor.CFrame =
+				CFrame.new((item.x + 0.5) * BLOCK - Origin.x, (item.y + 0.5) * BLOCK, (item.z + 0.5) * BLOCK - Origin.z)
 			entry.label.Text = labelText(item.settings, mode)
 			entry.gui.Enabled = true
 			if airRegion == nil and mode == "save" and item.settings.showInvisible then

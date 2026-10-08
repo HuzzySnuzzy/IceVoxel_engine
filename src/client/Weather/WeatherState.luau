@@ -37,11 +37,11 @@ local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local Weather = require(Shared.Weather)
+local Origin = require(Shared.World.Origin)
 
 -- (Pure: the wind's words, as the maps write them.)
 local WeatherMap = require(script.Parent.Parent.Map.WeatherMap)
 
-local BLOCK = Config.BlockSize
 -- Columns whose biome temperature and ground height are kept (the cache starts over beyond).
 local COLUMNS = 16384
 local COLUMN_SPAN = 67108864
@@ -191,14 +191,18 @@ local function update(dt: number)
 	end
 	local now = workspace:GetServerTimeNow()
 	local moment = Weather.momentAt(state, now, WeatherState.moment)
+	-- (The camera in world blocks: Shared/World/Origin.)
 	local camera = workspace.CurrentCamera
-	local position = if camera then camera.CFrame.Position / BLOCK else Vector3.zero
-	local x, y, z = math.floor(position.X), math.floor(position.Y), math.floor(position.Z)
+	local px, py, pz = 0, 0, 0
+	if camera then
+		px, py, pz = Origin.renderToBlocks(camera.CFrame.Position)
+	end
+	local x, y, z = math.floor(px), math.floor(py), math.floor(pz)
 	WeatherState.cameraX, WeatherState.cameraY, WeatherState.cameraZ = x, y, z
 	local p, th, c = 0, 0, 0
 	local world = field
 	if world then
-		p, th, c = world:at(position.X, position.Z, moment)
+		p, th, c = world:at(px, pz, moment)
 	end
 	WeatherState.precipitation, WeatherState.thunder, WeatherState.cover = p, th, c
 	local sky = if settled then Config.Weather.Sky.Smoothing else 0

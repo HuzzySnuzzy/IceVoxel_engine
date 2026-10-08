@@ -25,14 +25,16 @@
 	     each part once), and may move what isn't a part (PivotTo models, attachments);
 	  4. one workspace:BulkMoveTo(parts, cframes, FireCFrameChanged);
 	  5. the camera's CFrame and Focus - d (CameraModule then follows its subject like a teleport);
-	  6. stats and one line: "[IceVoxel] origin moved by (dx, dz) studs: N parts in T ms".
+	  6. stats and one line: "[IceVoxel] origin moved by (dx, dz) studs: N parts in T ms (gathered
+	     in G, BulkMoveTo M)" (`stats`: also for F3).
 	The engine draws once after RenderStepped, so no frame shows the world half moved. A mover that
 	errors is warned about and its parts are left out (the others still move).
 
 	Movers (Rebase.register) come from the renderers that place parts once: terrain, far meshes,
 	pipes, fire, structure boxes, weather, waypoints...; per-frame writers (characters, items, mobs,
 	held items) only convert and need none. Unparented containers are fixed when shown (their
-	owners compare the origin they were placed for with Origin's).
+	owners compare the origin they were placed for with Origin's, move the parts right after
+	parenting them, in the same Luau step, and count them with `settled`).
 
 	`workspace` and RunService are touched only in `start`, `step` and `perform` (specs load this
 	module with fakes).
@@ -58,10 +60,15 @@ export type Stats = {
 	epoch: number,
 	x: number,
 	z: number,
-	-- Moves so far, and the last one's time (ms) and parts.
+	-- Moves so far, and the last one's time (ms) and parts; of that time, the Luau side (Origin's
+	-- listeners and the movers gathering the parts) and the one BulkMoveTo.
 	count: number,
 	lastMs: number,
 	lastParts: number,
+	lastGatherMs: number,
+	lastMoveMs: number,
+	-- Parts moved later, when what held them went back into the workspace (`settled`), in total.
+	lazyParts: number,
 }
 
 local Rebase = {}
@@ -76,7 +83,17 @@ local started = false
 -- Reused by every move (cleared after, so no part is kept alive).
 local parts: { BasePart } = {}
 local cframes: { CFrame } = {}
-local stats: Stats = { epoch = 0, x = 0, z = 0, count = 0, lastMs = 0, lastParts = 0 }
+local stats: Stats = {
+	epoch = 0,
+	x = 0,
+	z = 0,
+	count = 0,
+	lastMs = 0,
+	lastParts = 0,
+	lastGatherMs = 0,
+	lastMoveMs = 0,
+	lazyParts = 0,
+}
 
 -- Adds a mover, called at every move in the order registered; returns its removal.
 function Rebase.register(name: string, mover: Mover): () -> ()
@@ -123,6 +140,12 @@ function Rebase.now()
 	forced = true
 end
 
+-- A container out of the workspace at a move went back with `count` parts placed for the origin
+-- now (its owner moved them: the lazy rule, see the header); for the stats.
+function Rebase.settled(count: number)
+	stats.lazyParts += count
+end
+
 -- The moves so far (the same table every call: read it, don't change it).
 function Rebase.stats(): Stats
 	stats.epoch, stats.x, stats.z = Origin.epoch, Origin.x, Origin.z
@@ -158,9 +181,11 @@ function Rebase.perform(nx: number, nz: number, camera: Camera?): (number, numbe
 		end
 	end
 	local count = #parts
+	local t1 = os.clock()
 	if count > 0 then
 		workspace:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)
 	end
+	local t2 = os.clock()
 	table.clear(parts)
 	table.clear(cframes)
 	if camera then
@@ -170,7 +195,12 @@ function Rebase.perform(nx: number, nz: number, camera: Camera?): (number, numbe
 	local ms = (os.clock() - t0) * 1000
 	stats.count += 1
 	stats.lastMs, stats.lastParts = ms, count
-	print(`[IceVoxel] origin moved by ({dx}, {dz}) studs: {count} parts in {string.format("%.1f", ms)} ms`)
+	stats.lastGatherMs, stats.lastMoveMs = (t1 - t0) * 1000, (t2 - t1) * 1000
+	local gathered, moved = string.format("%.1f", stats.lastGatherMs), string.format("%.1f", stats.lastMoveMs)
+	print(
+		`[IceVoxel] origin moved by ({dx}, {dz}) studs: {count} parts in {string.format("%.1f", ms)} ms`
+			.. ` (gathered in {gathered}, BulkMoveTo {moved})`
+	)
 	return dx, dz
 end
 

@@ -64,6 +64,11 @@
 	keep their bare core until parts free up) and MAX_ITEMS item models (more items in range move
 	on unseen). Item models are moved together with one BulkMoveTo per frame, after the camera.
 
+	The floating origin (Shared/World/Origin): parts and item models are placed at render studs
+	(world studs minus the origin, from the cell's or the item's doubles); the cells' parts move
+	with the origin (a Rendering/Rebase mover, "transmitters"), item models are placed every frame
+	anyway; the camera is read back into world blocks for the ranges.
+
 	Read-only queries for WAILA (Ui/Waila), aiming (Interaction/BlockInteraction) and sounds
 	(Audio/Ambience): `state`, `tank`, `machine`, `activeMachines`, `connections`, `itemsIn`,
 	`network` (the pipes, transporters or cables connected to a position, as the client sees them)
@@ -80,11 +85,13 @@ local Coords = require(Shared.World.Coords)
 local Machines = require(Shared.Machines)
 local Protocol = require(Shared.Net.Protocol)
 local Transmitters = require(Shared.Transmitters)
+local Origin = require(Shared.World.Origin)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ItemModels = require(script.Parent.ItemModels)
 local TransmitterModel = require(script.Parent.TransmitterModel)
+local Rebase = require(script.Parent.Rebase)
 
 local BLOCK = Config.BlockSize
 local PIXEL = BLOCK / 16
@@ -345,15 +352,18 @@ local function markAround(x: number, y: number, z: number)
 	end
 end
 
--- The camera's position in blocks.
-local function cameraBlocks(): Vector3
+-- The camera's position in world blocks (doubles).
+local function cameraBlocks(): (number, number, number)
 	local camera = workspace.CurrentCamera
-	return if camera then camera.CFrame.Position / BLOCK else Vector3.zero
+	if camera == nil then
+		return 0, 0, 0
+	end
+	return Origin.renderToBlocks(camera.CFrame.Position)
 end
 
--- Is the cell in range of the camera (`eye`, blocks) and its chunk shown?
-local function inRange(cell: Cell, eye: Vector3): boolean
-	local dx, dy, dz = cell.x + 0.5 - eye.X, cell.y + 0.5 - eye.Y, cell.z + 0.5 - eye.Z
+-- Is the cell in range of the camera (at ex, ey, ez: world blocks) and its chunk shown?
+local function inRange(cell: Cell, ex: number, ey: number, ez: number): boolean
+	local dx, dy, dz = cell.x + 0.5 - ex, cell.y + 0.5 - ey, cell.z + 0.5 - ez
 	return dx * dx + dy * dy + dz * dz <= RADIUS * RADIUS and isShown(cell.x // SIZE, cell.z // SIZE)
 end
 
@@ -689,7 +699,7 @@ local function redraw(key: number)
 		end
 	end
 	local container = folder
-	local cx, cy, cz = (cell.x + 0.5) * BLOCK, (cell.y + 0.5) * BLOCK, (cell.z + 0.5) * BLOCK
+	local cx, cy, cz = (cell.x + 0.5) * BLOCK - Origin.x, (cell.y + 0.5) * BLOCK, (cell.z + 0.5) * BLOCK - Origin.z
 	local parts: { Part } = {}
 	for _, box in boxes do
 		local list = reusable[lookKey(box.kind, box.colour)]
@@ -717,11 +727,11 @@ end
 
 -- Decorates what came into range (and is shown), takes down what left it.
 local function refresh()
-	local eye = cameraBlocks()
+	local ex, ey, ez = cameraBlocks()
 	local limit = RADIUS * RADIUS
 	local shownChunks: { [number]: boolean } = {}
 	for key, cell in cells do
-		local dx, dy, dz = cell.x + 0.5 - eye.X, cell.y + 0.5 - eye.Y, cell.z + 0.5 - eye.Z
+		local dx, dy, dz = cell.x + 0.5 - ex, cell.y + 0.5 - ey, cell.z + 0.5 - ez
 		local near = dx * dx + dy * dy + dz * dz <= limit
 		if near then
 			local shown = shownChunks[cell.chunk]
@@ -936,7 +946,8 @@ local function moveItems()
 	local w = world
 	local now = workspace:GetServerTimeNow()
 	local clock = os.clock()
-	local eye = cameraBlocks()
+	local ex, ey, ez = cameraBlocks()
+	local ox, oz = Origin.x, Origin.z
 	local limit = RADIUS * RADIUS
 	for id, entry in transit do
 		local ticks = (now - entry.startTime) * TICK_RATE
@@ -957,7 +968,7 @@ local function moveItems()
 		local key = posKey(x, y, z)
 		itemsAt[key] = (itemsAt[key] or 0) + entry.count
 		stacksAt[key] = (stacksAt[key] or 0) + 1
-		local dx, dy, dz = px - eye.X, py - eye.Y, pz - eye.Z
+		local dx, dy, dz = px - ex, py - ey, pz - ez
 		local near = dx * dx + dy * dy + dz * dz <= limit
 		if near then
 			entry.seenAt = clock
@@ -976,7 +987,7 @@ local function moveItems()
 			view = nil
 		end
 		if view then
-			local pivot = CFrame.new(px * BLOCK, py * BLOCK, pz * BLOCK)
+			local pivot = CFrame.new(px * BLOCK - ox, py * BLOCK, pz * BLOCK - oz)
 				* CFrame.Angles(0, entry.spin + clock * TICK_RATE * ITEM_SPIN, 0)
 			for i, part in view.parts do
 				table.insert(moveParts, part)
@@ -1163,6 +1174,16 @@ function TransmitterRenderer.start(clientWorld: ClientWorld.ClientWorld, shown: 
 		local cx, cz = Coords.decodeChunkKey(key)
 		onChunkLoaded(cx, cz, true)
 	end
+	-- The cells' parts move with the render origin (item models are placed every frame).
+	Rebase.register("transmitters", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for _, cell in cells do
+			for _, part in cell.parts do
+				table.insert(parts, part)
+				table.insert(cframes, part.CFrame - d)
+			end
+		end
+	end)
 
 	ClientNet.on(Protocol.ServerMessage.Transmitters, function(payload)
 		local records = Protocol.decodeTransmitters(payload)

@@ -16,6 +16,13 @@
 	and the budgets: parts unparented per frame, release time per frame, edit latency, commit
 	groups going live together, priorities, the swap delay, teleport trash, restyles, and the far
 	mesh overlay's demotion delay, gating and settings switch.
+
+	The floating origin (Shared/World/Origin, Rendering/Rebase, its mover in ChunkRenderer): after a
+	move every part in the workspace equals a fresh build's minus the new origin, moved in the one
+	BulkMoveTo (FakeWorld records it, and BulkMoveTo outside the workspace); nodes out of the
+	workspace are placed when shown or put back by the far meshes, once; builds in flight across a
+	move commit in place; retiring and trashed models move; the sparse lights' cache follows;
+	meshes applied after a move are placed for it; the far meshes' camera speed sees no jump.
 ]]
 
 local fs = require("@lune/fs")
@@ -52,8 +59,22 @@ local function newWorld(shared: any): any
 			call = 0.3e-6,
 			clock = 0.02e-6,
 		},
-		count = { writes = 0, parents = 0, clones = 0, destroys = 0, destroyCalls = 0, entered = 0, left = 0 },
+		count = {
+			writes = 0,
+			parents = 0,
+			clones = 0,
+			destroys = 0,
+			destroyCalls = 0,
+			entered = 0,
+			left = 0,
+			-- workspace:BulkMoveTo: calls, parts moved, parts moved that were not in the workspace.
+			bulkCalls = 0,
+			bulkParts = 0,
+			bulkOutside = 0,
+		},
 		warnings = {},
+		-- Lines printed (Rendering/Rebase's).
+		printed = {},
 	}
 	local costs = world.costs
 	local count = world.count
@@ -271,6 +292,21 @@ local function newWorld(shared: any): any
 		local mine = rawget(o, "__class")
 		return class == "Instance" or mine == class or (class == "BasePart" and CLASS_PARTS[mine] == true)
 	end
+	-- WorldRoot:BulkMoveTo: every part's CFrame at once (one call; FireCFrameChanged or not).
+	methods.BulkMoveTo = function(o: Fake, parts: { Fake }, cframes: { any }, _mode: any)
+		assert(o == world.workspace, "BulkMoveTo is called on the workspace")
+		assert(#parts == #cframes, "BulkMoveTo: as many CFrames as parts")
+		world.clock += costs.call
+		count.bulkCalls += 1
+		count.bulkParts += #parts
+		for i, part in parts do
+			if not inWorkspace(part) then
+				count.bulkOutside += 1
+			end
+			rawget(part, "__props").CFrame = cframes[i]
+			world.clock += costs.write * 0.25
+		end
+	end
 	methods.IsDescendantOf = function(o: Fake, ancestor: Fake): boolean
 		local p = rawget(o, "__parent")
 		while p ~= nil do
@@ -292,6 +328,7 @@ local function newWorld(shared: any): any
 	world.workspace = workspace
 	local camera = new("Camera")
 	rawget(camera, "__props").CFrame = CFrame.new(0, 100, 0)
+	rawget(camera, "__props").Focus = CFrame.new(0, 98, -10)
 	rawget(workspace, "__props").CurrentCamera = camera
 	world.camera = camera
 
@@ -356,6 +393,9 @@ local function newWorld(shared: any): any
 	world.warn = function(...)
 		table.insert(world.warnings, table.concat({ ... }, " "))
 	end
+	world.print = function(...)
+		table.insert(world.printed, table.concat({ ... }, " "))
+	end
 	-- Frame since which an instance is drawn (the latest parenting on its way up), or nil.
 	function world.drawnSince(o: Fake): number?
 		local at = 0
@@ -391,7 +431,7 @@ end
 
 -- Arguments every client module gets (as locals, like tests/lib/Loader: fast builtins stay on).
 local GLOBALS =
-	"script, require, game, workspace, Instance, Vector3, Vector2, CFrame, Color3, UDim2, Enum, Content, os, task, warn"
+	"script, require, game, workspace, Instance, Vector3, Vector2, CFrame, Color3, UDim2, Enum, Content, os, task, warn, print"
 
 local function withHeader(source: string): string
 	local lines = string.split(source, "\n")
@@ -455,7 +495,8 @@ local function rendering(world: any, shared: any, sharedRequire: (any) -> any): 
 				},
 				world.os,
 				world.task,
-				world.warn
+				world.warn,
+				world.print
 			)
 			cache[node] = result
 			return result
@@ -474,6 +515,7 @@ return function(t, shared, require, _server, client)
 	local ChunkLayout = require(shared.World.ChunkLayout)
 	local LodTree = require(shared.World.LodTree)
 	local TerrainGenerator = require(shared.Generation.TerrainGenerator)
+	local Origin = require(shared.World.Origin)
 	local SectionDiff = require(client.Rendering.SectionDiff)
 	local FrameBudget = require(client.Rendering.FrameBudget)
 	local RenderSchedule = require(client.Rendering.RenderSchedule)
@@ -1037,10 +1079,11 @@ return function(t, shared, require, _server, client)
 		return aabbKey(p.X - s.X / 2, p.Y - s.Y / 2, p.Z - s.Z / 2, p.X + s.X / 2, p.Y + s.Y / 2, p.Z + s.Z / 2)
 	end
 
+	-- (Render studs: the node's corner minus the render origin, Shared/World/Origin.)
 	local function boxKey(node: any, boxes: buffer, i: number): (string, number)
 		local step, stepY = ChunkLayout.steps(node.level)
 		local s, sy = step * BLOCK, stepY * BLOCK
-		local ox, oz = node.nx * SIZE * s, node.nz * SIZE * s
+		local ox, oz = node.nx * SIZE * s - Origin.x, node.nz * SIZE * s - Origin.z
 		local o = i * BOX
 		local x, y, z = buffer.readu16(boxes, o), buffer.readu16(boxes, o + 2), buffer.readu16(boxes, o + 4)
 		local sx, syy, sz = buffer.readu16(boxes, o + 6), buffer.readu16(boxes, o + 8), buffer.readu16(boxes, o + 10)
@@ -2414,6 +2457,271 @@ return function(t, shared, require, _server, client)
 		end)
 	end)
 
+	--[[ The floating origin (Shared/World/Origin, Rendering/Rebase, ChunkRenderer's mover) ]]
+
+	-- Runs `fn` with the render origin at 0 before and after (its state is shared by every spec).
+	local function withOrigin(fn: () -> ())
+		Origin.reset()
+		local ok, err = pcall(fn)
+		Origin.reset()
+		if not ok then
+			error(err, 0)
+		end
+	end
+
+	--[[
+		Section `section` of cubes, a torch (a shaped block), glow lichen (one cell lit: a sparse
+		light) and `extra` more single cells (every 7th a glowing block, every 9th lit lichen): exact
+		studs for any origin, so two builds can be compared part for part.
+	]]
+	local function originRows(extra: number, section: number?): buffer
+		local y0 = (section or 0) * SECTION
+		local lichen = Blocks.get(B.GlowLichen).appearance
+		local lit = lichen + GreedyMesher.KEY_STRIDE
+		local torch = Blocks.get(B.Torch).appearance
+		local rows = {
+			{ 0, y0, 0, 16, 1, 16, stoneApp },
+			{ 3, y0 + 1, 3, 1, 1, 1, torch },
+			{ 6, y0 + 1, 6, 1, 1, 1, lit },
+			{ 7, y0 + 1, 6, 1, 1, 1, lichen },
+		}
+		for i = 1, extra do
+			local kind = if i % 9 == 0 then lit elseif i % 7 == 0 then glowApp else stoneApp
+			table.insert(rows, { i % 16, y0 + 2 + i // 256, (i // 16) % 16, 1, 1, 1, kind })
+		end
+		return boxesOf(rows)
+	end
+
+	-- The parts in a node's model now, by their positions.
+	local function positionsIn(node: any): { [any]: any }
+		local out = {}
+		for _, folder in node.model:GetChildren() do
+			for _, part in folder:GetChildren() do
+				out[part] = part.Position
+			end
+		end
+		return out
+	end
+
+	t.test(
+		"origin: a move takes what is in the workspace in one BulkMoveTo; nodes out of it move when shown",
+		function()
+			withOrigin(function()
+				local sim = newSim()
+				local renderer, world = sim.renderer, sim.world
+				local Rebase = sim.load("Rebase")
+				local shown, far, hidden = newNode(0, 5, -3), newNode(1, 2, -2), newNode(0, 6, -3)
+				local nodes = { shown, far, hidden }
+				for _, node in nodes do
+					renderer:build(node, 0, originRows(40))
+					renderer:build(node, 1, originRows(3, 1))
+				end
+				sim.settle(nil, false)
+				sim.show(shown)
+				sim.show(far)
+				sim.step(3)
+				local calls, moved = world.count.bulkCalls, world.count.bulkParts
+				local onScreen = renderer:partsOf(shown) + renderer:partsOf(far)
+				local dx, dz = Rebase.perform(7680, -3840, world.camera)
+				t.eq(dx, 7680, "moved by the new origin (X)")
+				t.eq(dz, -3840, "and Z")
+				t.eq(Origin.x, 7680)
+				t.eq(world.count.bulkCalls, calls + 1, "one BulkMoveTo")
+				t.eq(world.count.bulkParts - moved, onScreen, "every part on screen, once")
+				t.eq(world.count.bulkOutside, 0, "nothing out of the workspace")
+				t.eq(renderer.states[shown].ox, 7680, "nodes in the workspace are placed for the new origin")
+				t.eq(renderer.states[hidden].ox, 0, "one out of it keeps the origin it was placed for")
+				t.ok(world.camera.CFrame.Position:FuzzyEq(Vector3.new(-7680, 100, 3840), 1e-3), "the camera moved too")
+				local stats = Rebase.stats()
+				t.eq(stats.count, 1)
+				t.eq(stats.lastParts, onScreen)
+				t.ok(stats.lastGatherMs >= 0 and stats.lastMoveMs >= 0, "timed")
+				t.ok(string.find(world.printed[#world.printed] or "", "origin moved by", 1, true) ~= nil, "logged")
+				-- Frames after it see no gap (the checks compare render studs for the new origin).
+				sim.step(3)
+
+				-- Where a fresh build at the new origin puts them.
+				local fresh = newSim()
+				local copies = { newNode(0, 5, -3), newNode(1, 2, -2), newNode(0, 6, -3) }
+				for _, node in copies do
+					fresh.renderer:build(node, 0, originRows(40))
+					fresh.renderer:build(node, 1, originRows(3, 1))
+				end
+				fresh.settle(nil, false)
+				local function same(k: number, what: string)
+					local mine, theirs = signatures(renderer, nodes[k]), signatures(fresh.renderer, copies[k])
+					for section, sig in theirs do
+						t.eq(mine[section], sig, `{what}: section {section} as a fresh build`)
+					end
+				end
+				same(1, "a node on screen")
+				same(2, "a far node on screen")
+
+				-- The node kept out of the workspace goes on screen: moved as it is parented, once.
+				local lazy = Rebase.stats().lazyParts
+				sim.show(hidden)
+				t.eq(world.count.bulkCalls, calls + 2, "one more BulkMoveTo as it is shown")
+				t.eq(world.count.bulkOutside, 0, "after it is parented")
+				t.eq(Rebase.stats().lazyParts - lazy, renderer:partsOf(hidden), "counted as moved later")
+				t.eq(renderer.states[hidden].ox, 7680)
+				same(3, "a node shown after the move")
+				sim.step(3)
+				t.eq(world.count.bulkCalls, calls + 2, "nothing more")
+				t.eq(sim.gaps, 0, sim.gapDetail or "gaps")
+				t.eq(sim.doubled, 0, "doubled lights")
+			end)
+		end
+	)
+
+	t.test(
+		"origin: builds in flight go live in place; retiring and trashed models move; sparse lights follow",
+		function()
+			withOrigin(function()
+				local sim = newSim()
+				local renderer, world = sim.renderer, sim.world
+				local Rebase = sim.load("Rebase")
+				local edited, leaving, gone = newNode(0, 2, 1), newNode(0, 3, 1), newNode(0, 4, 1)
+				for _, node in { edited, leaving, gone } do
+					renderer:build(node, 0, originRows(20))
+				end
+				sim.settle(nil, false)
+				for _, node in { edited, leaving, gone } do
+					sim.show(node)
+				end
+				sim.step(2)
+				-- Built a part a frame: an edit (kept parts, new ones, new lit lichen) and a new section.
+				renderer:setBuildBudget(0.001)
+				renderer:build(edited, 0, originRows(60))
+				renderer:build(edited, 1, originRows(30, 1))
+				sim.step(3)
+				t.ok(renderer:pending() > 0, "still building")
+				-- Within the swap delay: one node replaced (retiring), one dropped by a teleport (trash).
+				sim.clear(leaving)
+				gone.removed = true
+				sim.shown[gone] = nil
+				renderer:trashNode(gone, 10, false)
+				t.ok(leaving.model.Parent ~= nil and gone.model.Parent ~= nil, "both still in the workspace")
+				local before = positionsIn(leaving)
+				for part, at in positionsIn(gone) do
+					before[part] = at
+				end
+				local outside = world.count.bulkOutside
+				local d = Vector3.new(-768 * 5, 0, 768 * 3)
+				Rebase.perform(d.X, d.Z, world.camera)
+				t.eq(world.count.bulkOutside, outside, "only parts in the workspace")
+				local checked = 0
+				for part, at in before do
+					t.ok(part.Position:FuzzyEq(at - d, 1e-3), "retiring and trashed parts moved")
+					checked += 1
+				end
+				t.ok(checked > 40, `{checked} parts checked`)
+				local cached = 0
+				for part, entry in renderer.sparseLights do
+					if world.inWorkspace(part) then
+						t.ok(entry.position:FuzzyEq(part.Position, 1e-3), "a sparse light's cached position follows")
+						cached += 1
+					end
+				end
+				t.ok(cached >= 1, "sparse lights on screen")
+
+				renderer:setBuildBudget(nil)
+				sim.settle()
+				local fresh = newSim()
+				local copy = newNode(0, 2, 1)
+				fresh.renderer:build(copy, 0, originRows(60))
+				fresh.renderer:build(copy, 1, originRows(30, 1))
+				fresh.settle(nil, false)
+				local mine, theirs = signatures(renderer, edited), signatures(fresh.renderer, copy)
+				t.eq(mine[0], theirs[0], "the edit begun before the move: kept and new parts in place")
+				t.eq(mine[1], theirs[1], "the section begun before the move")
+				t.eq(renderer.sparseCount, fresh.renderer.sparseCount, "as many sparse lights")
+				for part, entry in renderer.sparseLights do
+					t.ok(entry.position:FuzzyEq(part.Position, 1e-3), "lights built across the move: cache in place")
+				end
+				t.eq(leaving.model.Parent, nil, "the retiring model left")
+				t.eq(gone.model.Parent, nil, "the trash left")
+				t.eq(sim.gaps, 0, sim.gapDetail or "gaps")
+				t.eq(sim.doubled, 0, "doubled lights")
+				t.eq(sim.handedEarly, 0, "quarantine")
+			end)
+		end
+	)
+
+	t.test("origin: far meshes move; applied after a move they are placed for it; members put back move", function()
+		withOrigin(function()
+			local sim = overlaySim()
+			local renderer, overlay, world = sim.renderer, sim.renderer.overlay, sim.world
+			local Rebase = sim.load("Rebase")
+			local rows = { { 0, 0, 0, 16, 1, 16, stoneApp }, { 2, 1, 2, 3, 1, 3, stoneApp } }
+			local members = {}
+			for i = 0, 1 do
+				local node = newNode(2, i, 0)
+				renderer:build(node, 0, boxesOf(rows))
+				renderer:setQuads(node, buffer.create(16), 1)
+				table.insert(members, node)
+			end
+			sim.settle(nil, false)
+			for _, node in members do
+				sim.show(node)
+			end
+			for _ = 1, 60 * 3 do
+				sim.step(1, false)
+				if overlay.pending then
+					break
+				end
+			end
+			t.ok(overlay.pending ~= nil, "a build started")
+			-- The origin moves while it builds (the camera with it: still in the world).
+			Rebase.perform(768 * 4, -768 * 2, world.camera)
+			-- It finishes, built for the old origin, centred at world studs (300, 60, -90).
+			local job = overlay.pending
+			overlay.pending = nil
+			local mesh = world.new("MeshPart")
+			mesh.CFrame = CFrame.new(300, 60, -90)
+			table.insert(overlay.done, { job = job, parts = { mesh }, centers = { { 300, 60, -90 } }, triangles = 2 })
+			sim.step(1, false)
+			t.ok(mesh.Parent ~= nil, "shown")
+			t.ok(
+				mesh.Position:FuzzyEq(Vector3.new(300 - 768 * 4, 60, -90 + 768 * 2), 1e-3),
+				"placed for the origin now"
+			)
+			sim.step(2, false)
+			t.eq(overlay:getStats().gate, "", "the camera's move with the origin is no speed")
+			for _ = 1, 30 do
+				sim.step(1, false)
+				if members[1].model.Parent == nil and members[2].model.Parent == nil then
+					break
+				end
+			end
+			for _, node in members do
+				t.eq(node.model.Parent, nil, "merged: out of the workspace")
+			end
+
+			-- Another move: the mesh moves, the hidden members stay as they were placed.
+			local at = mesh.Position
+			local outside = world.count.bulkOutside
+			Rebase.perform(Origin.x - 768 * 3, Origin.z + 768, world.camera)
+			t.ok(mesh.Position:FuzzyEq(at - Vector3.new(-768 * 3, 0, 768), 1e-3), "the mesh moved")
+			t.eq(world.count.bulkOutside, outside, "hidden members not moved")
+			for _, node in members do
+				t.eq(renderer.states[node].ox, 768 * 4, "placed for the origin they were hidden at")
+			end
+			-- Meshes off: the members come back, placed for the origin now as they are parented.
+			overlay:setUserEnabled(false)
+			sim.step(10, false)
+			t.eq(world.count.bulkOutside, outside, "moved after they are parented")
+			local fresh = overlaySim()
+			for i, node in members do
+				t.ok(node.model.Parent ~= nil, "back")
+				t.eq(renderer.states[node].ox, Origin.x)
+				local copy = newNode(2, i - 1, 0)
+				fresh.renderer:build(copy, 0, boxesOf(rows))
+				fresh.settle(nil, false)
+				t.eq(signatures(renderer, node)[0], signatures(fresh.renderer, copy)[0], "where a fresh build puts it")
+			end
+		end)
+	end)
+
 	--[[ Textures (Rendering/TextureLooks through PartPool) ]]
 
 	-- The children of a part of a class.
@@ -2843,7 +3151,8 @@ return function(t, shared, require, _server, client)
 			{},
 			world.os,
 			world.task,
-			world.warn
+			world.warn,
+			world.print
 		)
 	end
 

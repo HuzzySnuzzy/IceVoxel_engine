@@ -16,9 +16,10 @@
 	            change of the server's weather state (/weather, the clock) works the next period
 	            out again.
 	  Players   as a bolt shows, where it may not strike (DistantStorms.strikes): within
-	            MinDistance of the camera or of any player's feet (Shared/Movement/Rig.feet), or
-	            within Lightning.Radius + Margin of a player standing in thunder (not a spectator:
-	            the server's World/WeatherServer rolls only for the others): it flashes in the cloud.
+	            MinDistance of the camera or of any player's feet (this player's hull, the others
+	            from Player/RemotePlayers: world blocks), or within Lightning.Radius + Margin of a
+	            player standing in thunder (not a spectator: the server's World/WeatherServer rolls
+	            only for the others): it flashes in the cloud.
 	  Rain      every Rain.Interval seconds the rain level at DistantStorms.rainPoints around the
 	            camera (snapped to LATTICE blocks so Weather/WeatherState's column cache serves
 	            them; only where rain falls by the column's biome: snow and deserts are silent),
@@ -50,12 +51,13 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
-local Rig = require(Shared.Movement.Rig)
 local Weather = require(Shared.Weather)
 
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local ViewSettings = require(script.Parent.Parent.Rendering.ViewSettings)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local CloudLod = require(script.Parent.CloudLod)
 local CloudView = require(script.Parent.CloudView)
 local DistantStorms = require(script.Parent.DistantStorms)
@@ -138,25 +140,31 @@ local function guarded(x: number, z: number): boolean
 	return false
 end
 
--- Reads where no bolt may strike now (see the header).
+-- A player's feet at (x, z) (world blocks) keep bolts away (see the header).
+local function guard(s: DistantStorms.Settings, player: Player, x: number, z: number)
+	local radius = s.minDistance
+	if not GameMode.isSpectator(GameMode.of(player)) then
+		local _, thunder = WeatherState.at(x, z)
+		if thunder > 0 then
+			radius = math.max(radius, s.guard)
+		end
+	end
+	local at = guardCount * 3
+	guards[at + 1], guards[at + 2], guards[at + 3] = x, z, radius
+	guardCount += 1
+end
+
+-- Reads where no bolt may strike now (see the header): this player's hull, and the other players
+-- this client knows of (Player/RemotePlayers, world blocks).
 local function gatherGuards(s: DistantStorms.Settings)
 	guardCount = 0
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		local feet = if character then Rig.feet(character) else nil
-		if feet == nil then
-			continue
-		end
-		local radius = s.minDistance
-		if not GameMode.isSpectator(GameMode.of(player)) then
-			local _, thunder = WeatherState.at(feet.X, feet.Z)
-			if thunder > 0 then
-				radius = math.max(radius, s.guard)
-			end
-		end
-		local at = guardCount * 3
-		guards[at + 1], guards[at + 2], guards[at + 3] = feet.X, feet.Z, radius
-		guardCount += 1
+	local me = Players.LocalPlayer
+	local view = MovementController.current
+	if me and view then
+		guard(s, me, view.state.x, view.state.z)
+	end
+	for player, remote in RemotePlayers.each() do
+		guard(s, player, remote.x, remote.z)
 	end
 end
 

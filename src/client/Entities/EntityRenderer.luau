@@ -24,6 +24,12 @@
 	looks change (ItemModels.generation: the Textures setting, texture averages measured) items
 	build their copies again, LOOK_REBUILDS_PER_FRAME items a frame.
 	`itemsNear` lists the items around a point, read only (WAILA aims at them, Ui/Waila).
+
+	The floating origin (Shared/World/Origin): items are simulated in world blocks (doubles) and
+	drawn every frame at render studs (world studs minus the origin, after the origin's render
+	step), so a move of the origin needs nothing here. A pickup flight goes to the collector's feet
+	in world blocks: the local hull (MovementController) for this player, Player/RemotePlayers for
+	the others; with no collector to fly to the item goes at once.
 ]]
 
 local Players = game:GetService("Players")
@@ -33,12 +39,14 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
-local Rig = require(Shared.Movement.Rig)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
+local Origin = require(Shared.World.Origin)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
+local MovementController = require(script.Parent.Parent.Player.MovementController)
+local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 
 local BLOCK = Config.BlockSize
 local TICK = 1 / ItemPhysics.TICK_RATE
@@ -113,10 +121,13 @@ type SpawnOp = {
 
 type Flight = {
 	item: Item,
-	-- Where the item was (blocks) and the model's offset from there (studs, bob and spin frozen).
-	from: Vector3,
+	-- Where the item was (world blocks) and the model's offset from there (studs, bob and spin
+	-- frozen).
+	fromX: number,
+	fromY: number,
+	fromZ: number,
 	pose: CFrame,
-	character: Model,
+	collector: Player,
 	life: number,
 }
 
@@ -263,8 +274,11 @@ local function sync(entity: Item, x: number, y: number, z: number, vx: number, v
 	body.onGround = false
 end
 
--- Model pose (studs) of an item `alpha` of the way from its last tick to the next.
-local function pose(entity: Item, alpha: number): (Vector3, CFrame)
+--[[
+	Where an item is drawn `alpha` of the way from its last tick to the next: its position (world
+	blocks, doubles) and the model's offset from there (studs).
+]]
+local function pose(entity: Item, alpha: number): (number, number, number, CFrame)
 	local body = entity.body
 	local x = entity.prevX + entity.prevErrX + (body.x + entity.errX - entity.prevX - entity.prevErrX) * alpha
 	local y = entity.prevY + entity.prevErrY + (body.y + entity.errY - entity.prevY - entity.prevErrY) * alpha
@@ -272,17 +286,47 @@ local function pose(entity: Item, alpha: number): (Vector3, CFrame)
 	local age = entity.age + alpha
 	local bob = math.sin(age / 10 + entity.bobOffset) * 0.1 + 0.1
 	local spin = age / 20 + entity.bobOffset
-	return Vector3.new(x, y, z), CFrame.new(0, (FLOAT_HEIGHT + bob) * BLOCK, 0) * CFrame.Angles(0, spin, 0)
+	return x, y, z, CFrame.new(0, (FLOAT_HEIGHT + bob) * BLOCK, 0) * CFrame.Angles(0, spin, 0)
+end
+
+-- A collector's feet in world blocks (nil x: nowhere to fly to): this player's hull, others' from
+-- Player/RemotePlayers (nil while the server tells this client nothing about them).
+local function collectorFeet(player: Player): (number?, number, number)
+	if player == Players.LocalPlayer then
+		local view = MovementController.current
+		if view == nil then
+			return nil, 0, 0
+		end
+		local state = view.state
+		return state.x, state.y, state.z
+	end
+	return RemotePlayers.feet(player)
+end
+
+-- The collector of a pickup (userId) when it has somewhere to fly to.
+local function collectorOf(collector: number): Player?
+	local player = if collector ~= 0 then Players:GetPlayerByUserId(collector) else nil
+	if player and collectorFeet(player) ~= nil then
+		return player
+	end
+	return nil
 end
 
 local function remove(entity: Item, collector: number, alpha: number)
 	items[entity.id] = nil
 	itemCount -= 1
-	local player = if collector ~= 0 then Players:GetPlayerByUserId(collector) else nil
-	local character = player and player.Character
-	if character then
-		local from, offset = pose(entity, alpha)
-		table.insert(flights, { item = entity, from = from, pose = offset, character = character, life = 0 })
+	local player = collectorOf(collector)
+	if player then
+		local x, y, z, offset = pose(entity, alpha)
+		table.insert(flights, {
+			item = entity,
+			fromX = x,
+			fromY = y,
+			fromZ = z,
+			pose = offset,
+			collector = player,
+			life = 0,
+		})
 	else
 		destroy(entity)
 	end
@@ -290,12 +334,11 @@ end
 
 -- A partial pickup: `count` of the item fly to the collector while the rest stays.
 local function take(entity: Item, count: number, collector: number, alpha: number)
-	local player = if collector ~= 0 then Players:GetPlayerByUserId(collector) else nil
-	local character = player and player.Character
-	if character == nil then
+	local player = collectorOf(collector)
+	if player == nil then
 		return
 	end
-	local from, offset = pose(entity, alpha)
+	local x, y, z, offset = pose(entity, alpha)
 	local taken: Item = table.clone(entity)
 	taken.count = count
 	taken.model = Instance.new("Model")
@@ -303,7 +346,15 @@ local function take(entity: Item, count: number, collector: number, alpha: numbe
 	taken.copies = {}
 	buildCopies(taken)
 	taken.model.Parent = folder
-	table.insert(flights, { item = taken, from = from, pose = offset, character = character, life = 0 })
+	table.insert(flights, {
+		item = taken,
+		fromX = x,
+		fromY = y,
+		fromZ = z,
+		pose = offset,
+		collector = player,
+		life = 0,
+	})
 end
 
 local function tick(getBlock: ItemPhysics.GetBlock)
@@ -359,20 +410,23 @@ end
 local function draw(alpha: number)
 	table.clear(parts)
 	table.clear(cframes)
+	-- (World blocks to render studs: Shared/World/Origin.)
+	local ox, oz = Origin.x, Origin.z
 	for _, entity in items do
-		local position, offset = pose(entity, alpha)
-		place(entity, CFrame.new(position * BLOCK) * offset)
+		local x, y, z, offset = pose(entity, alpha)
+		place(entity, CFrame.new(x * BLOCK - ox, y * BLOCK, z * BLOCK - oz) * offset)
 	end
 	for _, flight in flights do
 		local f = math.min((flight.life + alpha) / PICKUP_TICKS, 1)
 		f *= f
-		local target = flight.from
-		local feet = Rig.feet(flight.character)
-		if feet then
-			target = feet + Vector3.new(0, PICKUP_HEIGHT, 0)
+		local fx, fy, fz = flight.fromX, flight.fromY, flight.fromZ
+		local tx, ty, tz = fx, fy, fz
+		local feetX, feetY, feetZ = collectorFeet(flight.collector)
+		if feetX then
+			tx, ty, tz = feetX, feetY + PICKUP_HEIGHT, feetZ
 		end
-		local position = flight.from:Lerp(target, f)
-		place(flight.item, CFrame.new(position * BLOCK) * flight.pose)
+		local x, y, z = fx + (tx - fx) * f, fy + (ty - fy) * f, fz + (tz - fz) * f
+		place(flight.item, CFrame.new(x * BLOCK - ox, y * BLOCK, z * BLOCK - oz) * flight.pose)
 	end
 	if #parts > 0 then
 		workspace:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)

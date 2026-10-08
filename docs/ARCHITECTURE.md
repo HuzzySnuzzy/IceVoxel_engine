@@ -5809,6 +5809,55 @@ line. A failing mover is warned about and left out. `Rebase.now()` forces a move
 puts the origin over `SpawnPosition` before the streamer builds (`Origin.planTo`). Unparented
 containers are fixed when they are shown (their owners record the origin they were placed for).
 
+**The world in the render frame** (client rendering, audio, weather, entities). Everything the
+client simulates stays in world blocks; only the writes into instances subtract the origin (from
+doubles: `x * BlockSize - Origin.x`) and only camera reads add it back (`Origin.renderToBlocks`:
+FireRenderer, FuseView, TransmitterRenderer, StructureBoxes, LightingController, FluidFog,
+WeatherState, CloudView, the streamer's eye, SoundPlayer's listener). What is placed once moves
+with the origin; what is placed every frame (after the origin's render step) only converts:
+
+| Owner | At a move | Placed every frame |
+| --- | --- | --- |
+| `ChunkRenderer` ("terrain" mover) | parts of nodes whose model is in the workspace; retiring models, folders and removed parts still there; trashed models still there; the far meshes in the workspace (`MeshOverlay.gather`); the sparse lights' cached positions | |
+| `TransmitterRenderer`, `FireRenderer`, `FuseView`, `StructureBoxes` | their parts in the workspace (pipes, flames, flashing boxes, outlines, labels, air markers) | items in transporters |
+| `PrecipitationView` | the one anchor part (every strip's attachments are on it) | |
+| `LightningView` | near bolts and strike anchors; the far bolts' Attachments (their anchor stays at the identity) − d | |
+| `CloudView` | each ring's Model `PivotTo(GetPivot() − d)` (never its parts one by one: its WorldPivot stays right) | |
+| `SoundPlayer` (`Origin.onRebase`) | the emitter's Attachments, the distant voices' sources and the listener − d (the emitter stays at the identity) | the listener |
+| `EntityRenderer`, `MobRenderer`, `ExplosionView` | | items and pickup flights, mobs and arrows, the Nuke's six parts (a per-frame updater replaced its CFrame tweens) |
+
+Containers out of the workspace are never moved at a move (the lazy rule: a part goes into the
+workspace only placed for the current origin):
+- every ChunkRenderer node records the origin its parts are placed for (`NodeState.ox/oz`); the
+  mover moves the parented ones and sets theirs to the new origin. A node shown again (`show`, or
+  the far meshes putting a member back: `overlay.settle`) whose origin differs is moved by
+  (its origin − the current one) in one BulkMoveTo right after it is parented, everything in its
+  model (`GetChildren` of its section folders: retiring folders and removed parts too);
+  `Rebase.settled(n)` counts them (`stats().lazyParts`);
+- a build takes the origin when it starts (`Build.ox/oz`; `originX/originZ` are the node's corner
+  in that frame) and its new parts, out of the workspace until the commit, are moved to their
+  node's origin by plain CFrame writes just before the commit parents them; a sparse light built
+  across a move caches where it will show (its position + (build origin − origin));
+- a far mesh keeps its centre in world studs and is placed for the origin of the moment `apply`
+  parents it; the camera's speed (the far meshes' motion gate) is measured in world studs.
+
+The streamer selects around `streamer.viewerFeet()` (the boot: the local hull's world blocks; the
+streamer may not require MovementController), else `SpawnPosition` (world studs), else the camera
+read back; its eye is the camera read back. Pickup flights go to `RemotePlayers.feet(collector)` or
+the local hull; StormView's lightning guards and MovementSounds' other players' footsteps come
+from `RemotePlayers.each()` (world blocks, so a move is no jump and no teleport). The streamer's
+teleport mode is a hidden moment (`Rebase.setHidden("teleport", active)` in the boot). Stats:
+`stats()` also gives the last move's Luau side (Origin's listeners and the movers gathering:
+`lastGatherMs`) and its BulkMoveTo (`lastMoveMs`), and the log line both.
+
+Measured (Lune, interpreted as Roblox clients run it; ChunkRenderer's real mover through
+`Rebase.perform`, 200 parts a node, no BulkMoveTo): the walk costs 1.8 ms for 17k parts on screen,
+2.8 for 35k, 6.5 for 80k and 11.5 for 140k (0.08 µs a part). The `part.CFrame` read and the
+`CFrame − Vector3` per part are engine calls in Roblox and come on top (Lune's userdata versions
+take about 0.75 µs a part, which says nothing of Roblox's); BulkMoveTo's own cost and the next
+frame's broadphase and lighting work are only measurable in Studio (scratchpad
+`origin-design/RebaseProbe.client.luau`, the design's §2.4 decision rule).
+
 **Players' positions.** One API on each side, world blocks as doubles, each with a compat backend
 that reads the characters exactly as before:
 - server `Players/PlayerPositions`: `feet(player) -> (x?, y, z)` (nil: not standing in the world;

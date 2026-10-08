@@ -5,7 +5,9 @@
 	called once in order with (dx, dz) after Origin's listeners, the camera's CFrame and Focus
 	shifted; a request (teleport) beats the camera's plan, and one within SoftDistance leaves it to
 	the camera; hidden reasons count once each and let the soft distance move it; a failing mover is
-	left out while the others move; removed movers aren't called; `now` forces a move; the stats.
+	left out while the others move; removed movers aren't called; `now` forces a move; the stats
+	(the gather's and the BulkMoveTo's time apart, parts moved later through `settled`). The movers
+	of the renderers themselves are checked in tests/spec/RenderPipeline (terrain, far meshes).
 
 	Rebase is loaded here with its Roblox globals as arguments (as tests/spec/RenderPipeline loads
 	Rendering modules); Shared modules come from the runner (its Origin, reset around each test).
@@ -257,6 +259,25 @@ return function(t, shared, require, _server, _client)
 		for _, entry in log do
 			t.ok(entry[1] ~= "removed", "the removed mover isn't called")
 		end
+		finish()
+	end)
+
+	t.test("rebase: the stats time the gather and the BulkMoveTo apart; parts moved later add up", function()
+		begin(true)
+		local w = world(Settings.RebaseDistance * 2, 0)
+		local log = {}
+		w.Rebase.register("terrain", w.mover(w.parts("t", 300), log, "terrain"))
+		w.Rebase.step()
+		local stats = w.Rebase.stats()
+		t.eq(stats.lastParts, 300)
+		t.ok(stats.lastGatherMs >= 0 and stats.lastMoveMs >= 0, "both timed")
+		t.ok(stats.lastGatherMs + stats.lastMoveMs <= stats.lastMs + 1e-6, "parts of the whole")
+		t.ok(string.find(w.lines[1], "gathered in", 1, true) ~= nil, w.lines[1])
+		t.eq(stats.lazyParts, 0)
+		w.Rebase.settled(120)
+		w.Rebase.settled(30)
+		t.eq(w.Rebase.stats().lazyParts, 150, "containers placed when they went back")
+		t.eq(w.Rebase.stats().count, 1, "not moves")
 		finish()
 	end)
 

@@ -42,6 +42,10 @@
 
 	Read-only queries: `firesNear` (Audio/Ambience's crackle, campfires' too) and `stats` (drawn
 	fires, parts).
+
+	The floating origin (Shared/World/Origin): planes are placed at render studs (world studs minus
+	the origin, from the block's doubles) and move with it (a Rendering/Rebase mover, "fire": every
+	drawn plane); the camera is read back into world blocks for the distances.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,8 +56,10 @@ local Config = require(Shared.Config)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
 local Fire = require(Shared.Fire)
+local Origin = require(Shared.World.Origin)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local Rebase = require(script.Parent.Rebase)
 
 local BLOCK = Config.BlockSize
 local PIXEL = BLOCK / 16
@@ -244,7 +250,8 @@ local function build(record: Record)
 	end
 	undraw(record)
 	record.sides = sides
-	local centre = Vector3.new(record.x + 0.5, record.y + 0.5, record.z + 0.5) * BLOCK
+	local centre =
+		Vector3.new((record.x + 0.5) * BLOCK - Origin.x, (record.y + 0.5) * BLOCK, (record.z + 0.5) * BLOCK - Origin.z)
 	local parts: { BasePart } = {}
 	for _, plane in Fire.planes(sides) do
 		local part = acquire(plane.faces)
@@ -303,8 +310,8 @@ local function add(x: number, y: number, z: number)
 	-- (Drawn at once when the camera is near: a fire lit in front of the player shows.)
 	local camera = workspace.CurrentCamera
 	if camera then
-		local eye = camera.CFrame.Position / BLOCK
-		local d = (Vector3.new(x + 0.5, y + 0.5, z + 0.5) - eye).Magnitude
+		local ex, ey, ez = Origin.renderToBlocks(camera.CFrame.Position)
+		local d = Vector3.new(x + 0.5 - ex, y + 0.5 - ey, z + 0.5 - ez).Magnitude
 		if d <= RADIUS and drawn < MAX_FIRES and isShown(cx, cz) then
 			new.wanted = true
 			new.distance = d
@@ -395,10 +402,11 @@ local function refresh()
 	if camera == nil then
 		return
 	end
-	local eye = camera.CFrame.Position / BLOCK
+	local ex, ey, ez = Origin.renderToBlocks(camera.CFrame.Position)
 	local near: { Record } = {}
 	for _, record in fires do
-		local d = (Vector3.new(record.x + 0.5, record.y + 0.5, record.z + 0.5) - eye).Magnitude
+		local dx, dy, dz = record.x + 0.5 - ex, record.y + 0.5 - ey, record.z + 0.5 - ez
+		local d = math.sqrt(dx * dx + dy * dy + dz * dz)
 		record.distance = d
 		record.wanted = false
 		if d <= RADIUS and isShown(record.x // SIZE, record.z // SIZE) then
@@ -496,6 +504,19 @@ function FireRenderer.start(clientWorld: ClientWorld.ClientWorld, shown: ((cx: n
 
 	clientWorld:onBlockChanged(onBlockChanged)
 	clientWorld:onChunkLoaded(onChunkLoaded)
+	-- Drawn planes move with the render origin.
+	Rebase.register("fire", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		local d = Vector3.new(dx, 0, dz)
+		for _, record in fires do
+			local list = record.parts
+			if list then
+				for _, part in list do
+					table.insert(parts, part)
+					table.insert(cframes, part.CFrame - d)
+				end
+			end
+		end
+	end)
 	for key in clientWorld.chunks do
 		local cx, cz = Coords.decodeChunkKey(key)
 		onChunkLoaded(cx, cz, true)

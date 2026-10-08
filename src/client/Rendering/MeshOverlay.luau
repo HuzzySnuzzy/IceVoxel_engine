@@ -60,6 +60,13 @@
 	by the renderer), so a mesh is never built from parts about to be restyled. When the overlay
 	changes `plainLevel`'s answer on its own (`dropLooks`), it calls `onLooks` (set by the
 	renderer) to restyle what was drawn in the old look.
+
+	The floating origin (Shared/World/Origin, Rendering/Rebase): a mesh keeps its centre in world
+	studs and is placed for the origin of the moment it goes into the workspace (`apply`), so a
+	move during a build costs nothing; MeshParts in the workspace move with the renderer's mover
+	(`gather`); members put back (`unhideStep`) are placed for the origin now by the renderer
+	(`settle`) before anything yields. The camera's speed is measured in world studs (a move of
+	the origin is no speed).
 ]]
 
 local AssetService = game:GetService("AssetService")
@@ -71,6 +78,7 @@ local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local LodTree = require(Shared.World.LodTree)
+local Origin = require(Shared.World.Origin)
 local MeshGeometry = require(Shared.Meshing.MeshGeometry)
 local QuadMesher = require(Shared.Meshing.QuadMesher)
 
@@ -125,6 +133,8 @@ type Dying = {
 type Done = {
 	job: MeshRegions.Job,
 	parts: { MeshPart }?,
+	-- Each part's centre (world studs): placed for the origin when it is applied.
+	centers: { { number } }?,
 	triangles: number,
 	err: string?,
 }
@@ -216,6 +226,9 @@ export type MeshOverlay = {
 	dying: { Dying },
 	-- Parts in a node's model (set by ChunkRenderer; 0 without it).
 	countParts: (node: Node) -> number,
+	-- A node's model was just put back into the workspace: placed for the render origin now
+	-- (set by ChunkRenderer; nothing without it).
+	settle: (node: Node) -> (),
 	-- Far Materials (see the header): on now, asked for (the setting), possible here (false once
 	-- the probe could not build a mesh in a look); the look callbacks, the options builds use and
 	-- the look generation (bumped by every setLooks).
@@ -258,6 +271,7 @@ export type MeshOverlay = {
 	setStreamerBusy: (self: MeshOverlay, busy: boolean) -> (),
 	restyle: (self: MeshOverlay, farShadows: boolean) -> (),
 	gate: (self: MeshOverlay, now: number) -> string,
+	gather: (self: MeshOverlay, d: Vector3, parts: { BasePart }, cframes: { CFrame }) -> (),
 }
 
 local MeshOverlay = {}
@@ -424,7 +438,9 @@ local function buildMesh(
 		part:Destroy()
 		return nil, `mesh part size {got} instead of {size[1]}, {size[2]}, {size[3]}`
 	end
-	part.CFrame = CFrame.new(mesh.center[1], mesh.center[2], mesh.center[3])
+	-- (Render studs for the origin now; `apply` places it again for the origin then.)
+	local center = mesh.center
+	part.CFrame = CFrame.new(center[1] - Origin.x, center[2], center[3] - Origin.z)
 	return part, nil
 end
 
@@ -434,8 +450,15 @@ local function destroyAll(parts: { MeshPart })
 	end
 end
 
--- Builds every MeshPart of a region. Returns the parts and their triangles, or nil and an error.
-local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions.Job): ({ MeshPart }?, number, string?)
+--[[
+	Builds every MeshPart of a region. Returns the parts, their triangles and each one's centre
+	(world studs), or nil and an error.
+]]
+local function buildRegion(
+	self: MeshOverlay,
+	em: EditableMesh,
+	job: MeshRegions.Job
+): ({ MeshPart }?, number, string?, { { number } }?)
 	-- The members' quads and the looks as they were when the build started (see MeshOverlay.step).
 	local payload = job.payload :: Payload
 	local builder = MeshGeometry.builder(BLOCK, Settings.Overlap, Settings.MaxTriangles, payload.options)
@@ -451,6 +474,7 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 		slice()
 	end
 	local parts: { MeshPart } = {}
+	local centers: { { number } } = {}
 	local triangles = 0
 	for _, mesh in builder:finish() do
 		-- Paused (a teleport): stop between MeshParts, each costs a long frame.
@@ -466,10 +490,11 @@ local function buildRegion(self: MeshOverlay, em: EditableMesh, job: MeshRegions
 			return nil, 0, if ok then err else tostring(part)
 		end
 		table.insert(parts, part :: MeshPart)
+		table.insert(centers, mesh.center)
 		triangles += mesh.quads * 2
 		self.baked += mesh.quads * 2
 	end
-	return parts, triangles, nil
+	return parts, triangles, nil, centers
 end
 
 -- A mesh made of `quads` (MeshGeometry builder input) for the probe, plain or with `options`
@@ -659,7 +684,7 @@ local function builderLoop(self: MeshOverlay)
 		end)
 		sliceStart = os.clock()
 		local started = os.clock()
-		local okRun, parts, triangles, err = pcall(buildRegion, self, scratch, job)
+		local okRun, parts, triangles, err, centers = pcall(buildRegion, self, scratch, job)
 		pcall(function()
 			scratch:Clear()
 		end);
@@ -669,7 +694,7 @@ local function builderLoop(self: MeshOverlay)
 		self.stats.slowestFrameMs = math.max(self.stats.slowestFrameMs * 0.9, excess * 1000)
 		self.pending = nil
 		if okRun and parts then
-			table.insert(self.done, { job = job, parts = parts, triangles = triangles })
+			table.insert(self.done, { job = job, parts = parts, centers = centers, triangles = triangles })
 		else
 			table.insert(self.done, { job = job, triangles = 0, err = if okRun then err else tostring(parts) })
 		end
@@ -785,10 +810,17 @@ local function apply(self: MeshOverlay, finished: Done)
 	entry.retiring, entry.retiringTriangles = entry.parts, entry.triangles
 	entry.parts, entry.triangles = parts, finished.triangles
 	self.liveTriangles += finished.triangles
-	for _, part in parts do
+	local centers = finished.centers
+	for i, part in parts do
 		local cast = self.farShadows and part.Transparency == 0
 		if part.CastShadow ~= cast then
 			part.CastShadow = cast
+		end
+		-- (Built for the origin then; the origin may have moved since: placed for it now, before
+		-- it goes into the workspace.)
+		local center = if centers then centers[i] else nil
+		if center then
+			part.CFrame = CFrame.new(center[1] - Origin.x, center[2], center[3] - Origin.z)
 		end
 		part.Parent = self.root
 	end
@@ -818,6 +850,8 @@ local function unhideStep(self: MeshOverlay, allowance: number, used: number, mo
 			self.unhiding[node] = nil
 			if back then
 				node.model.Parent = self.partsRoot
+				-- (Placed for the origin now, before anything yields: Rendering/Rebase.)
+				self.settle(node)
 				used += cost
 				moved = true
 			end
@@ -942,6 +976,7 @@ function MeshOverlay.new(root: Instance): MeshOverlay
 		countParts = function(_node: Node): number
 			return 0
 		end,
+		settle = function(_node: Node) end,
 		looks = false,
 		lookWanted = false,
 		lookable = true,
@@ -1172,8 +1207,9 @@ function MeshOverlay.step(self: MeshOverlay, allowance: number?, used: number?):
 	local now = os.clock()
 	local camera = workspace.CurrentCamera
 	if camera then
-		local p = camera.CFrame.Position
-		self.motion:update(p.X, p.Y, p.Z, now)
+		-- (World studs: a move of the render origin is no speed.)
+		local x, y, z = Origin.renderToStuds(camera.CFrame.Position)
+		self.motion:update(x, y, z, now)
 	end
 	while #self.done > 0 do
 		apply(self, table.remove(self.done, 1) :: Done)
@@ -1280,6 +1316,31 @@ function MeshOverlay.restyle(self: MeshOverlay, farShadows: boolean)
 	end
 	for _, dying in self.dying do
 		set(dying.parts)
+	end
+end
+
+--[[
+	The render origin moves by `d` (studs; Rendering/Rebase, through ChunkRenderer's mover):
+	appends every MeshPart in the workspace (shown, retiring, dying) with its CFrame - d. Built
+	ones not applied yet are placed in `apply`.
+]]
+function MeshOverlay.gather(self: MeshOverlay, d: Vector3, parts: { BasePart }, cframes: { CFrame })
+	local n = #parts
+	local function add(list: { MeshPart })
+		for _, part in list do
+			if part.Parent ~= nil then
+				n += 1
+				parts[n] = part
+				cframes[n] = part.CFrame - d
+			end
+		end
+	end
+	for _, entry in self.instances do
+		add(entry.parts)
+		add(entry.retiring)
+	end
+	for _, dying in self.dying do
+		add(dying.parts)
 	end
 end
 

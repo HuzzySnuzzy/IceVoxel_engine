@@ -34,6 +34,10 @@
 	strip changed; the roofs' scans run once per column until an edit, and only while something
 	falls at the camera (in clear weather the strips are hidden and nothing is looked up).
 	Nothing is allocated per frame but the scan queue's entries.
+
+	The floating origin (Shared/World/Origin): the anchor sits at the camera's cell in render studs
+	and is the one part that moves with the origin (a Rendering/Rebase mover, "precipitation"); the
+	strips' attachments are relative to it, so every beam goes along.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -44,8 +48,10 @@ local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
 local Hash = require(Shared.Util.Hash)
 local Weather = require(Shared.Weather)
+local Origin = require(Shared.World.Origin)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
+local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Precipitation = require(script.Parent.Precipitation)
 local WeatherState = require(script.Parent.WeatherState)
@@ -257,7 +263,7 @@ local function layout(intensity: number)
 			strip.beam.Enabled = true
 		end
 	end
-	part.CFrame = CFrame.new(cellX * BLOCK, cellY * BLOCK, cellZ * BLOCK)
+	part.CFrame = CFrame.new(cellX * BLOCK - Origin.x, cellY * BLOCK, cellZ * BLOCK - Origin.z)
 end
 
 -- The rain floor of column (x, z) and whether rain falls there (for the sound; nil: unknown, its
@@ -383,6 +389,11 @@ function PrecipitationView.start(blocks: ClientWorld.ClientWorld)
 	end)
 	folder.Parent = workspace
 	anchor = part
+	-- The anchor (and with it every strip) moves with the render origin.
+	Rebase.register("precipitation", function(dx: number, dz: number, parts: { BasePart }, cframes: { CFrame })
+		table.insert(parts, part)
+		table.insert(cframes, part.CFrame - Vector3.new(dx, 0, dz))
+	end)
 	PrecipitationView.setMode(mode)
 	blocks:onBlockChanged(function(x: number, y: number, z: number, block: number)
 		if Precipitation.edited(cache, x, y, z, block) then
