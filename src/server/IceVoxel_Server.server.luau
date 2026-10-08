@@ -239,7 +239,11 @@ local function startWorld(settings: WorldSettings.Settings)
 	Spawning.start(world)
 	Teleport.start(world, net)
 	WaypointStore.start(net)
-	Simulation.start(world)
+	-- Chunks around players generated a slice of each frame, on a generator of their own
+	-- (World/Simulation, World/GenQueue), and /genstats.
+	Simulation.start(world, net, function()
+		return WorldTypes.create(settings.worldType, settings.seed, settings.options)
+	end)
 	-- What blasts do beyond blocks: items, players (damage, knockback), mobs and the clients' effects.
 	Explosions.setHandler(function(x: number, y: number, z: number, power: number, getBlock, range: number?)
 		Entities.explode(x, y, z, power)

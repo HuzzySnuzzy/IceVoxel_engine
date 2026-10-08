@@ -286,7 +286,9 @@ after the caves.
   that box, so its padding equals the neighbouring core (a test checks every side). Each block is
   decided alone, so the worms' order doesn't matter. Cells and their built worms sit in an LRU per
   generator (384 entrance and 48 ravine cells); the first chunk in a new area builds ~25 worms
-  (~0.7 ms each, interpreted), and `generate`'s `yield` is called after each one built.
+  (~0.7 ms each, interpreted), and `generate`'s `yield` is called after each one built and
+  every 16 steps while one is (`WORM_PAUSE`: a cold worm samples the surface along its whole walk,
+  up to ~7 ms; `carvesTop(x, z, yield)` passes a caller's yield on to the worms it builds).
 - **Trees and spawns.** `carvesTop(x, z)` says, from the worms alone (never the chunk's data),
   whether a surface cave may carve the top of column (x, z) or of one within 1.5 blocks: trees are
   refused there (see Structures) and `findSpawn` skips it. It keeps the worms of its last 16 tiles
@@ -475,6 +477,12 @@ below the sea), cached per generator, so every chunk and level agrees. All of it
   counted by the biome at the dip's bottom, which a spot in a wetter neighbour can drain into:
   savannas next to plains get more than their own chance.)
 
+A puddle decision calls the generator's `yield` (handed down through `puddles`) every 64 new
+height lookups, around its checks of wells, lava lakes, structures and lakes, and while
+`carvesTop` builds worms: a cold decision ran up to 11 ms in one go, more than a slice of the
+server's background generation or a worker's (see Server chunk generation). The answer never
+depends on where it yields, and a decision is cached only once complete.
+
 Cost: deciding a km² of puddles takes ~35 ms (native code, once per generator), more than half of
 it building the surface caves' worms (`carvesTop`, last), which the chunks there build anyway, and
 lakes ~6 ms; chunks around lakes and puddles generate within a few percent of the time without them
@@ -584,7 +592,8 @@ detail chunks only (caves exist only there), in step 8 after the library structu
   plan builds in ~1-3 ms (a lookup at a room 2.3 ms median with cold lakes and puddles, 13 ms at
   most for two big ones). A build calls the generator's `yield` every `PAUSE` (64) terrain
   lookups, a `blocked` tile counting 64 (yielding before and after it, and handing it the yield:
-  TerrainGenerator yields between its lists and Lakes after each puddle candidate), and
+  TerrainGenerator yields between its lists and Lakes after each puddle candidate and inside
+  each decision; the entrance check hands `carvesTop` the build's yield too), and
   `entrances` takes the yield too: on seed 42 the longest level 0 stretch between yields went
   from 11-12.5 ms to ~6 ms (one cold puddle decision), against ~3-5 without mineshafts.
 - **Writing** (`write(plans, data, originX, originZ, cells, heights, carved)`): every plan
@@ -5945,6 +5954,8 @@ sends stay in one ordered stream.
 ## Server
 
 - `World/WorldServer`: generated chunk cache (evicted when no player is near) plus the edit lists.
+  Chunks come in through `install` (their edits laid over, `onGenerated` once): `getChunk`
+  generates inline, World/Simulation in the background (see Server chunk generation).
   `setBlock` records the edit, queues it for replication and notifies the block ticker.
 - `World/BlockTicker`: scheduled block updates at `Server.TickRate`. A change notifies the block and
   its six neighbours; blocks with a behaviour schedule ticks. Overflow beyond
@@ -6029,7 +6040,8 @@ sends stay in one ordered stream.
   ticker every tick (see Explosions). `Behaviours/Fluid` hands fuel touching fire or lava to it.
 - `Behaviours/Tnt` + `World/Nuke`: lit TNT and Nukes (block ticks) and the Nuke's crater, stepped
   after the explosions every tick (see TNT and the Nuke).
-- `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated.
+- `World/Simulation`: keeps chunks within `Server.SimulationRadius` of players generated, a
+  slice of each frame on a generator of its own (see Server chunk generation).
 - `Network/ServerNet`: rate limits, reach checks, the game mode (`EditRules.mayEdit`: survival and
   creative edit, adventure and spectator edits are answered with the real block;
   `EditRules.minesOverTime`: only survival's Mine messages count), breakable / placeable /
@@ -6096,6 +6108,84 @@ sends stay in one ordered stream.
   from the generator's height alone and columns are scanned from just above the tallest structure.
   Spawning re-checks the spawn spot on every respawn, since players may have built or poured water
   there; when no safe spot exists it waits 30 s before searching again.
+
+## Server chunk generation (server `World/Simulation`, `World/GenQueue`, `World/WorldServer`)
+
+The server generates the chunks around players itself, from the seed, at full detail: block
+updates, random ticks, mobs and edit validation read them. Minecraft keeps the chunks within a
+ticket distance of each player loaded and generates new ones off the main thread; here they are
+generated on the main thread, but a slice of each frame at a time.
+
+- **Two ways in.** `WorldServer.getChunk` generates inline on the world's generator for anything
+  that needs a block now (edit validation, `setBlock`, SafeSpot for spawns and map teleports,
+  structures, the Api; counted in `inlineChunks` / `inlineMs`). The chunks around players come
+  from Simulation's background job instead. Both end in `WorldServer.install(cx, cz, data,
+  height)`: the chunk's edits are laid over the terrain (the buffer grows when one lies above the
+  crop), it is stored and `onGenerated` runs once. A chunk already there (getChunk made it while
+  the job ran) is kept and returned with false; the late terrain is dropped. Edits made while a
+  job runs either generated the chunk inline (`setBlock`) or wait in `world.edits` (a loaded
+  world's), so the install lays them over either way.
+- **Windows and order** (`GenQueue`, pure). Every 0.5 s, and at the next frame after a teleport
+  (`PlayerPositions.teleported`), Simulation gives GenQueue the chunk of every player's feet
+  (`PlayerPositions.each()`: true world positions, whatever the characters replicate; a spectator's
+  is its target's). The chunks within `SimulationRadius` (3: 7 × 7) of a player are *near*: they
+  are generated, and block updates, random ticks and mobs run there (`Simulation.activeChunks`).
+  One ring wider (9 × 9) is *kept*: eviction (`WorldServer.evict`) never drops those and keeps at
+  most `CacheSize` (192) others, least recently used dropped first. The queue holds every near
+  chunk neither generated nor in flight, closest to its nearest player first (dx² + dz²: a
+  player's own chunk and the 8 around it lead), ties by age, then by coordinates. Chunks that
+  left every window leave the queue, and the job in flight is abandoned when its chunk did.
+- **The job.** One at a time: a coroutine running `generate(0, cx, cz, yield)` on a second
+  generator instance, built once from the world's type, seed and options. It can't be the world's:
+  a generator keeps per-instance column scratch, so two calls in flight on one instance corrupt
+  each other (14 chunks in 15 came out wrong when tried). Two instances are safe, since no
+  generation module keeps module-level scratch across a yield: the spec runs the world's generator
+  at every yield of the background one and compares both with chunks made in one go. A generator
+  never resumed leaves nothing half done (its caches take an entry only once complete), which the
+  client's cancelled worker jobs relied on already; an abandoned job is simply dropped.
+- **Slices.** `yield` suspends the job once the step's deadline has passed; `step(budget)`
+  resumes it, installs it when it finishes and starts the next while time is left. A step lasts
+  its budget plus the stretch to the generator's next yield. Over 600 cold random chunks (seed
+  12345, Lune, native) the longest stretch per chunk is p50 0.7, p99 3.6 and at most ~5 ms, since
+  Lakes' puddle decisions, SurfaceCaves' worm builds and the tail of TerrainGenerator.generate
+  (after the ores, the trees and library structures, the mineshafts) now yield inside; before
+  that it was p99 9.2 ms and 10.7 ms at most, in one puddle decision.
+- **Budget** (`GenQueue.budget`, Config.Server): `GenerationBudgetMs` (4) a frame;
+  `UrgentGenerationBudgetMs` (8) while a player's own chunk or one around it is missing (a join or
+  a teleport) or more than `UrgentBacklog` (49, a window) chunks wait; never past `FrameBudgetMs`
+  (12) of the frame's work so far, measured from `RunService.PreSimulation`, the frame's first
+  script step; but always `MinGenerationBudgetMs` (1), so the backlog keeps moving. Budgets that
+  run later in the frame (/locate's search, the pose relay) come on top.
+- **Why not Actors.** A chunk costs 3.4-3.75 ms along a walk (the region caches stay warm) and
+  ~11 ms alone; 8 sprinting players need ~1.3 ms of generation a frame. Roblox gives a server
+  Parallel Luau threads by its maximum player count (one for a small server), every Actor is its
+  own VM with its own copy of the native generation code and caches (+8-23 % CPU), and chunk
+  buffers would be copied across. On one thread an Actor pool only slices the work, as this
+  does. What hurt was one whole chunk a frame: 16-45 ms frames whenever one generated (40-50 ms
+  interpreted) and at most 60 chunks a second. Actors become worth it with 20-30+ player servers
+  of flyers, an interpreted generator, or a bigger SimulationRadius: GenQueue's job would then go
+  to K workers (a Folder of Actors running the generator, chosen by 8 × 8-chunk region so their
+  caches stay warm, results installed on the main thread through `install`).
+- **/genstats** (operators): the last 10 s of background generation (chunks/s, ms/s, the worst
+  frame), the backlog and the chunk in flight, the totals (generated, dropped because made
+  meanwhile, abandoned, failed) and the chunks generated inline since the start.
+
+Measured (`lune run tests/servergen <scenario>`: players spread 6-18k blocks apart moving
+diagonally, 60 Hz frames, the real Default generator on seed 12345, Lune, native code; before =
+the old Simulation, one whole chunk a frame; after = GenQueue with the budget above):
+
+| Scenario | Frame while generating, p99 / max (ms) | Frames over 16.7 ms | Chunks/s | A player's own 3 × 3 waited (max) | Every window complete / backlog at the end |
+|---|---|---|---|---|---|
+| 1 walking, 30 s | 14.8 / 17.1 → 9.8 / 15.0 (a rerun: 8.2 / 9.1) | 0.1 % → 0 | 4.0 → 4.0 | 0.13 → 0.12 s | 0.80 → 0.77 s |
+| 1 joining | 12.1 / 12.1 → 9.0 / 9.0 | 0 → 0 | | 0.13 → 0.12 s | 0.80 → 0.78 s |
+| 8 joining at once | 10.6 / 17.9 → 9.0 / 10.5 | 0.2 % → 0 | | 1.18 → 0.60 s | 6.52 → 3.20 s |
+| 8 sprinting, 20 s | 10.6 / 18.5 → 8.6 / 11.8 | 0.1 % → 0 | 38.4 → 41.7 | 1.57 → 0.60 s | 7.45 → 3.70 s; 21 → 21 waiting |
+| 8 flying, 15 s | 10.0 / 21.1 → 8.6 / 11.9 | 0.2 % → 0 | 56.3 → 66.9 | 1.35 → 0.67 s | 36 → 33 waiting |
+| 8 sprint-flying, 12 s | 11.7 / 19.9 → 8.9 / 12.0 | 0.1 % → 0 | 60.0 (the cap) → 99.4 | 2.20 → 0.68 s | 178 → 70 waiting |
+
+The frames over 16.7 ms were single chunks (the report measured up to 45 ms natively, 40-50 ms
+interpreted, on other chunks); a frame now lasts its budget plus at most one stretch. With 4 cores
+shared by other jobs a run shows the odd outlier either way (a rerun of the walk: 9.1 ms at most).
 
 ## Hidden caves, octrees and regions
 
