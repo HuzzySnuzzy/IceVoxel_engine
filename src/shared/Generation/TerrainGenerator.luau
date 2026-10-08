@@ -884,6 +884,10 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				carved = map
 			end
 		end
+		-- (The steps below run 1-4 ms together on a cold chunk: a yield between each.)
+		if yield then
+			yield()
+		end
 
 		local structureSpan: { number }? = nil
 
@@ -938,6 +942,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 			-- Library structures, after the trees: their air clears trees, their voids keep them.
 			if placer and starts then
+				if yield then
+					yield()
+				end
 				local top, lowest = placer.write(starts, {
 					data = data,
 					cells = cells,
@@ -957,6 +964,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					structureSpan = { lowest, top - 1 }
 				end
 			end
+			if yield then
+				yield()
+			end
 		end
 
 		-- Mineshafts, after the library structures (full detail only): cave air and cave twins in
@@ -974,6 +984,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 		-- 5. Glow lichen on cave walls (full detail only, like the caves).
 		if carved then
+			if yield then
+				yield()
+			end
 			growLichen(data, cells, originX, originZ, heights, carved)
 		end
 

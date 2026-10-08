@@ -1400,8 +1400,19 @@ local Config = {
 		HerbSpread = 1 / 8,
 		-- Generated chunks the server keeps in memory beyond the ones near players.
 		CacheSize = 192,
-		-- Max chunks the server generates per frame while preloading around players.
-		GenerationsPerFrame = 1,
+		-- Preloading around players (World/Simulation, World/GenQueue): a background generator
+		-- works on them a slice of every frame, closest first, instead of a whole chunk a frame
+		-- (3.5-11 ms each, up to 45; at most 60 a second). Milliseconds a frame; Urgent while a
+		-- player's own chunk or one around it is missing (a join, a teleport) or more than
+		-- UrgentBacklog chunks wait (a window is 49): about 2 chunks a frame instead of 1. The
+		-- slice never takes the frame's work so far (from its first script step) past
+		-- FrameBudgetMs, but is always at least MinGenerationBudgetMs. Other per-frame budgets
+		-- (/locate's search, the pose relay) come on top.
+		GenerationBudgetMs = 4,
+		UrgentGenerationBudgetMs = 8,
+		UrgentBacklog = 49,
+		FrameBudgetMs = 12,
+		MinGenerationBudgetMs = 1,
 		-- Fire (Behaviours/Fire, Minecraft's FireBlock): `Tick` is the doFireTick game rule (off:
 		-- fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing);
 		-- `Difficulty` is the world's (0 peaceful, 1 easy, 2 normal, 3 hard), which makes fire

@@ -982,7 +982,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   trick), flowing water, lava, oil and fuel (Minecraft rules, including water's infinite sources
   and lava hardening against water), lava and burning, fire spreading and burning out, grass turning
   into dirt and plants popping off when their soil goes; random ticks spread grass, decay leaves,
-  grow saplings and let lava light fires.
+  grow saplings and let lava light fires. The server keeps the chunks around every player
+  generated on a generator of its own, a few milliseconds of each frame, closest first: no more
+  frames lost to a whole chunk at once, and joins, teleports and flyers catch up about twice as
+  fast (`/genstats` shows it).
 - **Minecraft movement.** Players are a 0.6 × 1.8 block hull moved through the block data with
   Minecraft Java Edition's physics, tick for tick at 20 ticks per second: walking, sprinting
   (Ctrl toggles it, or is held with the Sprint setting on Hold; or double tap forward) with
@@ -1149,6 +1152,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
 | Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
+| Generation    | `/genstats` (operators): the server's background chunk generation over the last 10 s (chunks/s, ms/s, the worst frame), the backlog and the chunks generated inline | | |
 | Saving        | `/save-all` (save now: "Saving the game (this may take a moment!)", then "Saved the game"), `/save-off` (no automatic saves until `/save-on`; shutdown still saves), `/save-on` (operators only); the saving icon shows bottom right while the world saves | | |
 | Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). Until the world exists (with the title screen and `MainMenu.AutoOperator`) the first player to join is the operator, and when the last operator here leaves the player here longest becomes one (`/deop` never takes the last one here then); after that nobody becomes one by being here (the first operator stays one). `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
 | Title screen  | Click the buttons (Join World, Create World, Load World, Options...); `Escape` goes back a screen (Create World, Customize, Load World, its Delete and Rename, Options); in Load World click a world to select it, double click to play it | A; B goes back | Tap |
@@ -1465,7 +1469,9 @@ src/server   -> ServerScriptService.IceVoxel
                             startWorld (world, ticker, network, players...) once it is created
   Api                       require this from your own server scripts
   World/                    WorldServer (chunks + edits), BlockTicker, RandomTicker, Skylight,
-                            Simulation, TimeOfDay (the day clock, published as workspace attributes),
+                            Simulation (chunks kept generated around players, /genstats),
+                            GenQueue (which, in what order, a slice of a frame at a time; pure),
+                            TimeOfDay (the day clock, published as workspace attributes),
                             WeatherServer (the weather clock and /weather's overrides, published
                             the same way; rain for fire, players and mobs; lightning near
                             players; the save's encode / decode), WeatherRules (where rain falls:
@@ -1805,6 +1811,8 @@ for performance:
 | `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: Tough As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill). |
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
+| `Server.GenerationBudgetMs` / `UrgentGenerationBudgetMs` | 4 / 8 | Milliseconds a frame the server spends generating the chunks around players (a second generator, sliced: World/GenQueue); the urgent budget while a player's own chunk or one next to it is missing or more than `UrgentBacklog` (49) chunks wait. |
+| `Server.FrameBudgetMs` / `MinGenerationBudgetMs` | 12 / 1 | The slice never takes the frame's work so far past FrameBudgetMs, but is always at least MinGenerationBudgetMs. |
 | `Server.Fire.Tick`  | true    | Minecraft's doFireTick: off, fire neither spreads, burns blocks nor goes out by itself, and lava lights nothing. |
 | `Server.Fire.Difficulty` | 2  | The world's difficulty for fire (0 peaceful .. 3 hard): fire spreads a little faster on harder ones (+ 7 × difficulty on the ignite odds). |
 | `Server.HerbSpread` | 1/8 | Chance per random tick that a herb (mint, wild ginger) spreads next to it while fewer than 5 grow within 4 blocks: a try every 9 minutes or so (Minecraft's mushrooms: 1/25). |
@@ -2756,6 +2764,7 @@ The engine's core is pure Luau, so most of it runs and is tested outside Roblox 
 ```sh
 lune run tests/run [Spec]             # unit tests and simulations (Spec: only specs with it in their name)
 lune run tests/bench [seed]           # generation / meshing speed and part count estimate
+lune run tests/servergen <scenario>   # the server's preloading: frame times, chunks/s, backlog
 lune run tests/preview [seed] [blocksPerPixel] [pixels]   # top-down map in tests/out/preview.ppm
 lune run tests/structure decode <file | IVS1:... | -> [--lua t.luau]   # structure data, as ASCII
 lune run tests/structure encode t.luau [--out file] [--module]        # an edited table to IVS1
@@ -2846,7 +2855,10 @@ Natural next steps, roughly in order:
   chests (they hold their template's items); Minecraft's beard terrain adaptation instead of the
   foundations; structure sets and exclusion zones, so different structures keep apart; glow
   lichen on several faces of a block, as Minecraft's multiface block.
-- **Parallel server generation.** The server generates chunks on its main thread (one per frame).
+- **Parallel server generation.** The server generates the chunks around players on its main
+  thread, a slice of each frame (`World/GenQueue`); an Actor pool only pays once servers get
+  several Parallel Luau threads (20-30+ players) with many flyers, or the generator runs
+  interpreted (see ARCHITECTURE, Server chunk generation).
 - **Mesher.** Try both X-first and Z-first growth and keep the smaller result; cap the size of
   water and glass boxes, so an edit in a lake replaces less of its surface (while old and new
   surfaces overlap for `Render.SwapFrames` frames, the water looks darker there).

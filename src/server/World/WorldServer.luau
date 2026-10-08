@@ -7,6 +7,13 @@
 	generated lazily (block updates, edit validation, players nearby) and evicted again when unused;
 	their edits stay.
 
+	A chunk comes into the world in two steps: its terrain is generated (level 0, from the seed),
+	then `install` lays its edits over it, stores it and calls `onGenerated`. `getChunk` does both
+	at once on `generator`, inside the caller's frame (`inlineChunks` / `inlineMs` count those);
+	World/Simulation generates the chunks around players on a generator of its own, a slice of each
+	frame (World/GenQueue), and installs them when done: a chunk getChunk made meanwhile is kept and
+	the late terrain dropped, and edits made meanwhile are in `edits`, so they are laid over too.
+
 	Every change goes through `setBlock`, which records the edit, queues it for replication and
 	calls `onChanged` (the block ticker uses that to wake up neighbouring blocks).
 ]]
@@ -50,8 +57,12 @@ export type World = {
 	-- world's block updates due there are scheduled again (World/WorldSave).
 	onGenerated: ((cx: number, cz: number) -> ())?,
 	clock: () -> number,
+	-- Chunks getChunk generated itself (inside the caller's frame) and the milliseconds it took.
+	inlineChunks: number,
+	inlineMs: number,
 
 	getChunk: (self: World, cx: number, cz: number) -> Chunk,
+	install: (self: World, cx: number, cz: number, data: buffer, height: number) -> (Chunk, boolean),
 	peekChunk: (self: World, cx: number, cz: number) -> Chunk?,
 	getBlock: (self: World, x: number, y: number, z: number) -> number,
 	peekBlock: (self: World, x: number, y: number, z: number) -> number?,
@@ -75,6 +86,8 @@ function WorldServer.new(generator: TerrainGenerator.Generator, clock: (() -> nu
 		onChanged = nil,
 		onGenerated = nil,
 		clock = clock or os.clock,
+		inlineChunks = 0,
+		inlineMs = 0,
 	}
 	return (setmetatable(self, WorldServer) :: any) :: World
 end
@@ -88,8 +101,26 @@ function WorldServer.getChunk(self: World, cx: number, cz: number): Chunk
 		return chunk
 	end
 
+	local started = os.clock()
 	local result = self.generator.generate(0, cx, cz)
-	local data, height = result.data, result.height
+	self.inlineChunks += 1
+	self.inlineMs += (os.clock() - started) * 1000
+	return (WorldServer.install(self, cx, cz, result.data, result.height))
+end
+
+--[[
+	Puts chunk (cx, cz)'s generated terrain (`data`, `height`: a generator's level 0 result, which
+	becomes the chunk's) into the world: its edits laid over, stored, `onGenerated` called. Returns
+	the chunk and true; or, when the chunk is there already (made meanwhile), that one and false,
+	`data` unused.
+]]
+function WorldServer.install(self: World, cx: number, cz: number, data: buffer, height: number): (Chunk, boolean)
+	local key = Coords.chunkKey(cx, cz)
+	local existing = self.chunks[key]
+	if existing then
+		existing.lastUsed = self.clock()
+		return existing, false
+	end
 	local edits = self.edits[key]
 	if edits then
 		-- Edits may lie above the generated terrain's crop.
@@ -119,7 +150,7 @@ function WorldServer.getChunk(self: World, cx: number, cz: number): Chunk
 	if onGenerated then
 		onGenerated(cx, cz)
 	end
-	return created
+	return created, true
 end
 
 -- Returns the chunk only if it is already generated.

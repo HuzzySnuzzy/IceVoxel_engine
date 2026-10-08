@@ -128,6 +128,9 @@ local THIN_ROOF = 1 -- an entrance step leaving a column a roof this thin (block
 -- A worm that water stops within this many carved steps is dropped (no stubs by the shore).
 local MIN_ENTRANCE_STEPS = 16
 local MIN_RAVINE_STEPS = 30
+-- A worm being built calls its caller's yield every this many steps (a cold one samples the
+-- surface along its whole walk: up to some 7 ms in one go, more than a slice).
+local WORM_PAUSE = 16
 -- Steering towards the cave regions (Caves.regions): every STEER_EVERY steps a tunnel not yet in
 -- a full strength region (STEER_FULL) compares the regions STEER_AHEAD blocks ahead to either
 -- side (STEER_ANGLE) and turns towards the better one (yaw impulse STEER_TURN).
@@ -220,8 +223,8 @@ export type SurfaceCaves = {
 		into `data`. `heights` / `topCells`: per padded column (index pz * PADDED + px + 1), its
 		surface height and top cell, as `generate` filled them; `cells`: the buffer's height;
 		`protected`: columns to leave alone (nil: none); `yield` is called after each worm built
-		(a few in the first chunks of an area). Returns the lowest cell carved (math.huge: none),
-		for the chunk's solidBelow.
+		(a few in the first chunks of an area) and every WORM_PAUSE steps while one is. Returns
+		the lowest cell carved (math.huge: none), for the chunk's solidBelow.
 	]]
 	carve: (
 		data: buffer,
@@ -235,8 +238,9 @@ export type SurfaceCaves = {
 		yield: (() -> ())?
 	) -> number,
 	-- May a surface cave carve the top block of column (x, z), or of a column ~1.5 blocks away?
-	-- From the worms alone (trees, spawns).
-	carvesTop: (x: number, z: number) -> boolean,
+	-- From the worms alone (trees, spawns). `yield` (nil: none) is called after each worm it
+	-- builds (a cold tile builds a few, some milliseconds: Lakes' puddle decisions pass theirs).
+	carvesTop: (x: number, z: number, yield: (() -> ())?) -> boolean,
 	--[[
 		The lowest cell `carve` carves in a column of a `level` chunk whose sample block is (x, z),
 		whose surface height (at that level) is `height` and top cell `topCell` (a core column's,
@@ -328,7 +332,7 @@ local function cellKey(gx: number, gz: number): number
 	return gx * 2097152 + gz
 end
 
--- Steps under construction.
+-- Steps under construction, and the caller's yield (nil: none).
 type Builder = {
 	x: { number },
 	y: { number },
@@ -337,10 +341,11 @@ type Builder = {
 	v: { number },
 	floor: { number },
 	count: number,
+	yield: (() -> ())?,
 }
 
-local function newBuilder(): Builder
-	return { x = {}, y = {}, z = {}, h = {}, v = {}, floor = {}, count = 0 }
+local function newBuilder(yield: (() -> ())?): Builder
+	return { x = {}, y = {}, z = {}, h = {}, v = {}, floor = {}, count = 0, yield = yield }
 end
 
 local function push(b: Builder, x: number, y: number, z: number, h: number, v: number, f: number)
@@ -496,7 +501,11 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		-- Whether the tunnel has been under the ground yet, for how many steps its top has been
 		-- open again since, and whether it skipped its last step.
 		local covered, reopened, skipped = false, 0, false
+		local yield = b.yield
 		for j = 0, steps - 1 do
+			if yield and j % WORM_PAUSE == WORM_PAUSE - 1 then
+				yield()
+			end
 			if j > 0 then
 				local cp = cos(pitch)
 				x += cos(yaw) * cp
@@ -591,7 +600,14 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		end
 	end
 
-	local function buildEntrance(gx: number, gz: number, rng: Hash.Rng, sx: number, sz: number): Worm?
+	local function buildEntrance(
+		gx: number,
+		gz: number,
+		rng: Hash.Rng,
+		sx: number,
+		sz: number,
+		yield: (() -> ())?
+	): Worm?
 		local e = entranceCfg
 		-- Every draw that shapes the worm first, so none of them depends on the terrain.
 		local length = rng:int(e.Length[1], e.Length[2])
@@ -647,7 +663,7 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		end
 
 		clearLattice()
-		local b = newBuilder()
+		local b = newBuilder(yield)
 		local whole, ex, ey, ez, eyaw, epitch, fork = tunnel(
 			b,
 			Hash.rng(walkSeed),
@@ -711,7 +727,7 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 
 	--[[ Ravines ]]
 
-	local function buildRavine(gx: number, gz: number, rng: Hash.Rng, sx: number, sz: number): Worm?
+	local function buildRavine(gx: number, gz: number, rng: Hash.Rng, sx: number, sz: number, yield: (() -> ())?): Worm?
 		local r = ravineCfg
 		local length = rng:int(r.Length[1], r.Length[2])
 		local rEnd, rMiddle = r.Radius[1], r.Radius[2]
@@ -728,12 +744,15 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		end
 
 		clearLattice()
-		local b = newBuilder()
+		local b = newBuilder(yield)
 		local walk = Hash.rng(walkSeed)
 		local ref = h
 		local dYaw = 0
 		local highest = h
 		for i = 0, length - 1 do
+			if yield and i % WORM_PAUSE == WORM_PAUSE - 1 then
+				yield()
+			end
 			if i > 0 then
 				x += cos(yaw)
 				z += sin(yaw)
@@ -800,7 +819,8 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		return rng, true, sx, sz
 	end
 
-	-- The worm of grid cell (gx, gz) of `kind` if its start is within reach of the rectangle.
+	-- The worm of grid cell (gx, gz) of `kind` if its start is within reach of the rectangle
+	-- (`yield` every WORM_PAUSE steps while it is built; it is cached only once built).
 	local function wormAt(
 		kind: number,
 		gx: number,
@@ -808,7 +828,8 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		minX: number,
 		minZ: number,
 		maxX: number,
-		maxZ: number
+		maxZ: number,
+		yield: (() -> ())?
 	): Worm?
 		local cache = if kind == ENTRANCE then entranceCache else ravineCache
 		local key = cellKey(gx, gz)
@@ -833,13 +854,16 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 		end
 		local rng = candidate(kind, gx, gz)
 		builtCount += 1
-		local worm = if kind == ENTRANCE then buildEntrance(gx, gz, rng, sx, sz) else buildRavine(gx, gz, rng, sx, sz)
+		local worm = if kind == ENTRANCE
+			then buildEntrance(gx, gz, rng, sx, sz, yield)
+			else buildRavine(gx, gz, rng, sx, sz, yield)
 		cell.built, cell.worm = true, worm
 		return worm
 	end
 
 	-- Appends to `list` every worm of an enabled kind (from `firstKind` on: RAVINE for ravines
-	-- only) whose bounds touch the block rectangle. `yield` is called after each worm built.
+	-- only) whose bounds touch the block rectangle. `yield` is called after each worm built (and
+	-- while it is).
 	local function collect(
 		minX: number,
 		minZ: number,
@@ -857,7 +881,7 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 				for gz = floor((minZ - reach) / spacing), floor((maxZ + reach) / spacing) do
 					for gx = floor((minX - reach) / spacing), floor((maxX + reach) / spacing) do
 						local before = builtCount
-						local worm = wormAt(kind, gx, gz, minX, minZ, maxX, maxZ)
+						local worm = wormAt(kind, gx, gz, minX, minZ, maxX, maxZ, yield)
 						if yield and builtCount > before then
 							yield()
 						end
@@ -1071,15 +1095,16 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 	--[[ Trees and spawns ]]
 
 	-- (x, z) -> the worms (of the kinds from `firstKind` on) whose bounds touch the TILE x TILE
-	-- block tile of column (x, z), kept for the last TILES tiles asked for.
-	local function tileCache(firstKind: number): (x: number, z: number) -> { Worm }
+	-- block tile of column (x, z), kept for the last TILES tiles asked for. `yield` (nil: none) is
+	-- called after each worm built; a tile is kept only once complete.
+	local function tileCache(firstKind: number): (x: number, z: number, yield: (() -> ())?) -> { Worm }
 		local tileKeys: { number } = table.create(TILES, huge)
 		local tileLists: { { Worm } } = {}
 		for t = 1, TILES do
 			tileLists[t] = {}
 		end
 		local tileNext = 1
-		return function(x: number, z: number): { Worm }
+		return function(x: number, z: number, yield: (() -> ())?): { Worm }
 			local tx, tz = x // TILE, z // TILE
 			local key = cellKey(tx, tz)
 			for t = 1, TILES do
@@ -1088,7 +1113,7 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 				end
 			end
 			local list: { Worm } = {}
-			collect(tx * TILE, tz * TILE, tx * TILE + TILE - 1, tz * TILE + TILE - 1, list, nil, firstKind)
+			collect(tx * TILE, tz * TILE, tx * TILE + TILE - 1, tz * TILE + TILE - 1, list, yield, firstKind)
 			tileKeys[tileNext], tileLists[tileNext] = key, list
 			tileNext = tileNext % TILES + 1
 			return list
@@ -1098,8 +1123,8 @@ function SurfaceCaves.new(seed: number, surfaceAt: SurfaceSampler, regions: Regi
 	-- (Far seams only look for ravines: no entrance worm is built for them.)
 	local ravinesNear = tileCache(RAVINE)
 
-	local function carvesTop(x: number, z: number): boolean
-		local list = wormsNear(x, z)
+	local function carvesTop(x: number, z: number, yield: (() -> ())?): boolean
+		local list = wormsNear(x, z, yield)
 		if #list == 0 then
 			return false
 		end

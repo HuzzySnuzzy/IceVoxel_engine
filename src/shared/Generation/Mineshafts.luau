@@ -336,7 +336,7 @@ export type Plan = {
 	MARGIN blocks from (library pieces, oil wells and their lakes, surface lava lakes, water lakes
 	and puddles, each with its own margin: x0, z0, x1, z1 per rectangle) touching a block
 	rectangle (calling the plan build's yield, if any, now and then); the spawn column; whether a
-	surface cave may open a column.
+	surface cave may open a column (calling the yield after each surface cave it builds).
 ]]
 export type Terrain = {
 	height: (x: number, z: number) -> number,
@@ -344,7 +344,7 @@ export type Terrain = {
 	river: ((x: number, z: number) -> number)?,
 	blocked: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { number })?,
 	spawn: (() -> (number, number))?,
-	carvesTop: ((x: number, z: number) -> boolean)?,
+	carvesTop: ((x: number, z: number, yield: (() -> ())?) -> boolean)?,
 }
 
 -- A fixed list of plans in place of the grid (the debug structures world): those touching a
@@ -1101,7 +1101,7 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 			for dz = -2, 2 do
 				for dx = -2, 2 do
 					spend(b, 1)
-					if carvesTop(cx + dx, cz + dz) then
+					if carvesTop(cx + dx, cz + dz, b.yield) then
 						return nil
 					end
 				end

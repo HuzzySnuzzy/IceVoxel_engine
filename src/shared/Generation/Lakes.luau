@@ -85,6 +85,7 @@ local PROTECT = 2 -- surface caves and trees keep this many blocks from a lake's
 local PUDDLE_MARGIN = 1 -- ... and this many from a puddle's columns' bounds
 local DRAIN = 12 -- a puddle's spot runs at most this many steps downhill to the bottom of its dip
 local WOBBLE = 0.3 -- amplitude of each of the two harmonics of a puddle's radius (share of it)
+local PAUSE = 64 -- new height lookups a puddle decision makes between two yields (as Mineshafts)
 -- A dirt-floored biome's lake floor: the mean of two coarse hashes (2- and 3-block grids) below
 -- FLOOR_SAND is sand, below FLOOR_GRAVEL gravel, else dirt (a triangular spread: 40 / 31 / 29 %).
 local FLOOR_SAND, FLOOR_GRAVEL = 0.45, 0.62
@@ -187,14 +188,14 @@ export type Terrain = {
 	biome: (x: number, z: number) -> number,
 	free: (minX: number, minZ: number, maxX: number, maxZ: number) -> boolean,
 	spawn: () -> (number, number),
-	carvesTop: ((x: number, z: number) -> boolean)?,
+	carvesTop: ((x: number, z: number, yield: (() -> ())?) -> boolean)?,
 }
 
 export type LakeGen = {
 	-- Every water lake whose box (grown by PROTECT) reaches the block rectangle (inclusive).
 	lakes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { Lake },
 	-- Every puddle whose bounds (grown by PUDDLE_MARGIN) reach the block rectangle (inclusive);
-	-- `yield` is called after each candidate cell.
+	-- `yield` is called after each candidate cell, and inside a cell's decision (see decidePuddle).
 	puddles: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Puddle },
 	--[[
 		Writes `lakes` and `puddles` into the padded `level` chunk (first core column originX,
@@ -276,15 +277,19 @@ local function cellKey(cx: number, cz: number): number
 end
 
 -- A cache of decided candidate cells (`value` nil: none) in two generations, so it stays small.
-local function cache<T>(decide: (cx: number, cz: number) -> T?): (cx: number, cz: number) -> T?
+-- `yield` goes on to the decision; a cell is cached only once decided, so a caller that never
+-- resumes after a yield (a cancelled job) leaves nothing half done behind.
+local function cache<T>(
+	decide: (cx: number, cz: number, yield: (() -> ())?) -> T?
+): (cx: number, cz: number, yield: (() -> ())?) -> T?
 	local recent: { [number]: { value: T? } } = {}
 	local older: { [number]: { value: T? } } = {}
 	local count = 0
-	return function(cx: number, cz: number): T?
+	return function(cx: number, cz: number, yield: (() -> ())?): T?
 		local key = cellKey(cx, cz)
 		local entry = recent[key]
 		if entry == nil then
-			entry = older[key] or { value = decide(cx, cz) }
+			entry = older[key] or { value = decide(cx, cz, yield) }
 			if count >= 4096 then
 				older, recent, count = recent, {}, 0
 			end
@@ -314,7 +319,7 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 	end
 
 	-- The water lake of candidate cell (cx, cz), nil when it has none.
-	local function decideLake(cx: number, cz: number): Lake?
+	local function decideLake(cx: number, cz: number, _yield: (() -> ())?): Lake?
 		local rng = Hash.rng(Hash.hash2(lakeSalt, cx, cz))
 		if not water.Enabled or rng:float() * water.Rarity >= 1 then
 			return nil
@@ -402,7 +407,7 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 			patch = rng:int(0, 2 ^ 30),
 		})
 	end
-	local lakeAt: (cx: number, cz: number) -> Lake? = cache(decideLake)
+	local lakeAt: (cx: number, cz: number, yield: (() -> ())?) -> Lake? = cache(decideLake)
 
 	local function lakes(minX: number, minZ: number, maxX: number, maxZ: number): { Lake }
 		local list: { Lake } = {}
@@ -425,8 +430,13 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 		return list
 	end
 
-	-- The puddle of candidate cell (cx, cz), nil when it has none.
-	local function decidePuddle(cx: number, cz: number): Puddle?
+	--[[
+		The puddle of candidate cell (cx, cz), nil when it has none. `yield` (nil: none) is called
+		every PAUSE new height lookups and around the checks that decide the lakes, wells, lava
+		lakes, structures and surface caves nearby: a cold cell did all that in one go, up to 11 ms
+		(more than a server's or a worker's slice). The answer never depends on it.
+	]]
+	local function decidePuddle(cx: number, cz: number, yield: (() -> ())?): Puddle?
 		local rng = Hash.rng(Hash.hash2(puddleSalt, cx, cz))
 		local roll = rng:float()
 		if not puddleCfg.Enabled or roll >= MAX_PUDDLE_CHANCE then
@@ -439,10 +449,18 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 		end
 		-- Heights around the spot, each sampled once (DRAIN + the radius stays within 64).
 		local known: { [number]: number } = {}
+		local lookups = 0
 		local function height(x: number, z: number): number
 			local k = (x - sx + 64) * 256 + (z - sz + 64)
 			local h = known[k]
 			if h == nil then
+				if yield then
+					lookups += 1
+					if lookups >= PAUSE then
+						lookups = 0
+						yield()
+					end
+				end
 				h = terrain.height(x, z)
 				known[k] = h
 			end
@@ -527,6 +545,9 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 			x0, z0 = math.min(x0, px), math.min(z0, pz)
 			x1, z1 = math.max(x1, px), math.max(z1, pz)
 		end
+		if yield then
+			yield()
+		end
 		-- No water by snow or ice: every column around it is of a biome where water doesn't freeze.
 		for qz = z0 - 1, z1 + 1 do
 			for qx = x0 - 1, x1 + 1 do
@@ -535,14 +556,27 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 				end
 			end
 		end
+		if yield then
+			yield()
+		end
+		-- (Each of these decides the wells, lava lakes, structures and lakes around when cold.)
 		local m = PUDDLE_MARGIN
-		if not terrain.free(x0 - m, z0 - m, x1 + m, z1 + m) or #lakes(x0 - m, z0 - m, x1 + m, z1 + m) > 0 then
+		if not terrain.free(x0 - m, z0 - m, x1 + m, z1 + m) then
 			return nil
+		end
+		if yield then
+			yield()
+		end
+		if #lakes(x0 - m, z0 - m, x1 + m, z1 + m) > 0 then
+			return nil
+		end
+		if yield then
+			yield()
 		end
 		-- (Last: it builds the surface caves' worms around.)
 		if terrain.carvesTop then
 			for i = 1, count * 2, 2 do
-				if terrain.carvesTop(accepted[i], accepted[i + 1]) then
+				if terrain.carvesTop(accepted[i], accepted[i + 1], yield) then
 					return nil
 				end
 			end
@@ -563,13 +597,13 @@ function Lakes.new(seed: number, terrain: Terrain): LakeGen
 			biome = biome,
 		})
 	end
-	local puddleAt: (cx: number, cz: number) -> Puddle? = cache(decidePuddle)
+	local puddleAt: (cx: number, cz: number, yield: (() -> ())?) -> Puddle? = cache(decidePuddle)
 
 	local function puddles(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { Puddle }
 		local list: { Puddle } = {}
 		for cz = (minZ - puddleReach) // spacing, (maxZ + puddleReach) // spacing do
 			for cx = (minX - puddleReach) // spacing, (maxX + puddleReach) // spacing do
-				local puddle: Puddle? = puddleAt(cx, cz)
+				local puddle: Puddle? = puddleAt(cx, cz, yield)
 				if yield then
 					yield()
 				end

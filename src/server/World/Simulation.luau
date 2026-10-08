@@ -3,104 +3,188 @@
 	Keeps the chunks around every player generated on the server (so block updates can run there and
 	edit requests validate instantly) and evicts chunks nobody is near anymore. `activeChunks` lists
 	the loaded ones within SimulationRadius of a player, where random ticks run (World/RandomTicker).
+
+	  Where      every SCAN_INTERVAL (and at the next frame after a teleport) the players' feet
+	             (Players/PlayerPositions: true world positions, whatever the characters replicate)
+	             give their chunks to World/GenQueue: the near and kept windows, the queue (closest
+	             first). Eviction (World/WorldServer.evict) then keeps the kept windows plus at most
+	             Config.Server.CacheSize other chunks, least recently used dropped first.
+	  Generating on a generator of its own (built once from the world's settings: the world's
+	             generator stays with getChunk's callers, which generate inline), a slice of each
+	             Heartbeat (GenQueue.budget): Config.Server.GenerationBudgetMs,
+	             UrgentGenerationBudgetMs while a player's own chunk or one around it is missing
+	             (just joined or teleported) or more than UrgentBacklog chunks wait (joins,
+	             teleports, fast flyers); never past FrameBudgetMs of the frame's work so far
+	             (measured from PreSimulation, the frame's first script step: physics and whatever
+	             ran before), but always MinGenerationBudgetMs, so the backlog keeps moving. A
+	             slice overshoots by the generator's longest stretch between two yields (~5 ms at
+	             most, see GenQueue).
+	  /genstats  operators: the background generation of the last 10 s (chunks/s, ms/s, the worst
+	             frame), the backlog, and the chunks generated inline (getChunk: edits, spawns, map
+	             teleports, structures) since the start; feedback as Notice messages.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local Coords = require(Shared.World.Coords)
 local Protocol = require(Shared.Net.Protocol)
+local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 
 local WorldServer = require(script.Parent.WorldServer)
+local GenQueue = require(script.Parent.GenQueue)
+local ServerNet = require(script.Parent.Parent.Network.ServerNet)
+local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
+local Operators = require(script.Parent.Parent.Players.Operators)
 
-local CHUNK_STUDS = Config.ChunkSize * Config.BlockSize
+local CHUNK = Config.ChunkSize
 local SCAN_INTERVAL = 0.5
--- Players own their characters, so a position may be anything: only finite ones inside the world
--- count (studs).
-local LIMIT = (Protocol.MAX_COORDINATE + 64) * Config.BlockSize
-
-local function sane(position: Vector3): boolean
-	local x, z = position.X, position.Z
-	return x == x and z == z and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT
-end
+local ALIAS = "/genstats"
+local DENIED = "Only operators can see the chunk generation stats"
 
 local Simulation = {}
 
--- Keys of the chunks within SimulationRadius of a player (refreshed with every scan).
-local active: { number } = {}
+local queue: GenQueue.Queue? = nil
 
 -- The loaded chunks within SimulationRadius of a player.
 function Simulation.activeChunks(world: WorldServer.World): { WorldServer.Chunk }
 	local chunks = {}
-	for _, key in active do
-		local chunk = world.chunks[key]
-		if chunk then
-			table.insert(chunks, chunk)
+	if queue then
+		for _, key in queue.active do
+			local chunk = world.chunks[key]
+			if chunk then
+				table.insert(chunks, chunk)
+			end
 		end
 	end
 	return chunks
 end
 
-function Simulation.start(world: WorldServer.World)
-	local radius = Config.Server.SimulationRadius
-	local wanted: { [number]: boolean } = {}
-	local queue: { { number } } = {}
+-- /genstats' lines (nil before the world).
+function Simulation.describe(world: WorldServer.World): { string }?
+	if queue == nil then
+		return nil
+	end
+	local lines = queue:describe()
+	table.insert(
+		lines,
+		string.format(
+			"Generated inline (edits, spawns, teleports, structures): %d chunks, %.0f ms in all",
+			world.inlineChunks,
+			world.inlineMs
+		)
+	)
+	return lines
+end
 
+-- /genstats from `player`'s chat (anything else is ignored).
+local function command(net: ServerNet.ServerNet, world: WorldServer.World, player: Player, text: string)
+	local word = string.match(text, "^%s*(%S+)")
+	if word == nil or string.lower(word) ~= ALIAS or player.Parent == nil then
+		return
+	end
+	local lines: { string } = if Operators.permitted(player) then Simulation.describe(world) or {} else { DENIED }
+	for _, line in lines do
+		net.send(player, Protocol.ServerMessage.Notice, Protocol.encodeNotice(line))
+	end
+end
+
+--[[
+	Starts preloading around players (once, with the world). `newGenerator` builds the background
+	generator: the world's type, seed and options, as its own generator was built.
+]]
+function Simulation.start(
+	world: WorldServer.World,
+	net: ServerNet.ServerNet,
+	newGenerator: () -> TerrainGenerator.Generator
+)
+	assert(queue == nil, "Simulation.start was already called")
+	local cfg = Config.Server
+	local background = newGenerator()
+	local q = GenQueue.new({
+		radius = cfg.SimulationRadius,
+		generate = function(cx: number, cz: number, yield: () -> ()): (buffer, number)
+			local result = background.generate(0, cx, cz, yield)
+			return result.data, result.height
+		end,
+		install = function(cx: number, cz: number, data: buffer, height: number): boolean
+			local _, fresh = world:install(cx, cz, data, height)
+			return fresh
+		end,
+		loaded = function(cx: number, cz: number): boolean
+			return world:peekChunk(cx, cz) ~= nil
+		end,
+		warn = function(message: string)
+			warn(`[IceVoxel] {message}`)
+		end,
+	})
+	queue = q
+
+	local centers: { number } = {}
+	local function keep(cx: number, cz: number): boolean
+		return q:keeps(cx, cz)
+	end
 	local function scan()
-		wanted = {}
-		queue = {}
-		local near: { [number]: boolean } = {}
-		for _, player in Players:GetPlayers() do
-			local character = player.Character
-			local root = character and character:FindFirstChild("HumanoidRootPart")
-			if root and root:IsA("BasePart") and sane(root.Position) then
-				local pcx = math.floor(root.Position.X / CHUNK_STUDS)
-				local pcz = math.floor(root.Position.Z / CHUNK_STUDS)
-				for dz = -radius - 1, radius + 1 do
-					for dx = -radius - 1, radius + 1 do
-						local cx, cz = pcx + dx, pcz + dz
-						wanted[Coords.chunkKey(cx, cz)] = true
-						if math.abs(dx) <= radius and math.abs(dz) <= radius then
-							near[Coords.chunkKey(cx, cz)] = true
-						end
-						if math.abs(dx) <= radius and math.abs(dz) <= radius and not world:peekChunk(cx, cz) then
-							table.insert(queue, { cx, cz, dx * dx + dz * dz })
-						end
-					end
-				end
-			end
+		table.clear(centers)
+		for _, x, _, z in PlayerPositions.each() do
+			table.insert(centers, math.floor(x / CHUNK))
+			table.insert(centers, math.floor(z / CHUNK))
 		end
-		active = {}
-		for key in near do
-			table.insert(active, key)
-		end
-		-- Closest first; pop from the end.
-		table.sort(queue, function(a, b)
-			return a[3] > b[3]
-		end)
-		world:evict(function(cx, cz)
-			return wanted[Coords.chunkKey(cx, cz)] == true
-		end, Config.Server.CacheSize)
+		q:update(centers)
+		world:evict(keep, cfg.CacheSize)
 	end
 
+	local limits: GenQueue.Limits = {
+		normal = cfg.GenerationBudgetMs,
+		urgent = cfg.UrgentGenerationBudgetMs,
+		backlog = cfg.UrgentBacklog,
+		frame = cfg.FrameBudgetMs,
+		least = cfg.MinGenerationBudgetMs,
+	}
 	local elapsed = SCAN_INTERVAL
-	RunService.Heartbeat:Connect(function(dt)
+	-- A teleport's destination is queued at the next frame, not the next scan.
+	PlayerPositions.teleported:Connect(function()
+		elapsed = SCAN_INTERVAL
+	end)
+	local frameStart = os.clock()
+	RunService.PreSimulation:Connect(function()
+		frameStart = os.clock()
+	end)
+	RunService.Heartbeat:Connect(function(dt: number)
 		elapsed += dt
 		if elapsed >= SCAN_INTERVAL then
 			elapsed = 0
 			scan()
 		end
-		for _ = 1, Config.Server.GenerationsPerFrame do
-			local entry = table.remove(queue)
-			if entry == nil then
-				break
-			end
-			world:getChunk(entry[1], entry[2])
-		end
+		q:step(q:budget(limits, (os.clock() - frameStart) * 1000) / 1000)
 	end)
+
+	if TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService then
+		local function onPlayer(player: Player)
+			player.Chatted:Connect(function(message: string)
+				command(net, world, player, message)
+			end)
+		end
+		Players.PlayerAdded:Connect(onPlayer)
+		for _, player in Players:GetPlayers() do
+			onPlayer(player)
+		end
+	else
+		local instance = Instance.new("TextChatCommand")
+		instance.Name = "IceVoxelGenStats"
+		instance.PrimaryAlias = ALIAS
+		instance.Triggered:Connect(function(source: TextSource, text: string)
+			local player = Players:GetPlayerByUserId(source.UserId)
+			if player then
+				command(net, world, player, text)
+			end
+		end)
+		-- Commands work when parented to TextChatService (replicated, so clients sink the message).
+		instance.Parent = TextChatService
+	end
 end
 
 return Simulation
