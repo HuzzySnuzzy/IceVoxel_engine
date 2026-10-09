@@ -22,9 +22,16 @@
 	             looped sound (the distant rain: `newBed`, `setBed`) on one each: every one in its
 	             own Attachment of the emitter with an EqualizerSoundEffect of its own (the
 	             muffling never reaches another sound), kept DISTANT_OFFSET blocks from the
-	             listener towards where it comes from every frame (heard from that side at the
-	             volume the caller gives, wherever the player walks or turns: Minecraft plays its
-	             sounds heard everywhere 2 blocks off that way, LevelRenderer.globalLevelEvent).
+	             listener towards where it comes from every frame, right after the listener moved
+	             (heard from that side at the volume the caller gives, wherever the player walks or
+	             turns: Minecraft plays its sounds heard everywhere 2 blocks off that way,
+	             LevelRenderer.globalLevelEvent). A bed heard from all around (a direction shorter
+	             than 1: the rain on the player, the wind) also plays flat on a Sound of its own in
+	             SoundService.IceVoxelAudio, the two in step: the flat one takes 1 - the direction's
+	             length of its volume, the positioned one the rest, always the full DISTANT_OFFSET
+	             away (a source on the listener would swap ears as the camera turns). Roblox's
+	             Doppler shift is off (SoundService.DopplerScale 0): the listener swings round with
+	             the camera and jumps with the render origin, and Minecraft has none.
 	             When all are busy the quietest as heard now gives way to a louder one
 	             (SoundRules.acquireQuietest): it fades out over SoundRules.DISTANT_FADE seconds
 	             first (no click), then the louder one starts on its voice.
@@ -149,7 +156,17 @@ type Distant = {
 }
 -- A looped sound driven by its caller (`setBed`): its event, whether it plays, its volume at cue 1
 -- before the volume settings (taken when it starts) and the cue volume written.
-type Bed = { voice: Distant, event: Event, playing: boolean, clip: number, volume: number }
+-- Its flat half (`flat`, through `flatEqualizer`) plays along at `flatVolume`.
+type Bed = {
+	voice: Distant,
+	flat: Sound,
+	flatEqualizer: EqualizerSoundEffect,
+	event: Event,
+	playing: boolean,
+	clip: number,
+	volume: number,
+	flatVolume: number,
+}
 
 local SoundPlayer = {}
 
@@ -158,6 +175,8 @@ local enabled = false
 local positioned: Bank? = nil
 local flat: Bank? = nil
 local emitterPart: Part? = nil
+-- SoundService.IceVoxelAudio (the flat voices and the beds' flat halves).
+local flatFolder: Folder? = nil
 local distantPool: SoundRules.Pool? = nil
 local distantVoices: { Distant } = {}
 -- The Sound.Volume each distant voice started at (SoundRules.acquireQuietest).
@@ -358,27 +377,6 @@ local function hearingPoint(): Vector3?
 	return if camera then camera.CFrame.Position else nil
 end
 
--- Puts Roblox's listener where the player hears from (after the camera moved this frame).
-local function updateListener()
-	local camera = workspace.CurrentCamera
-	if camera == nil or camera.CameraType == Enum.CameraType.Scriptable then
-		-- (A scripted camera, a cutscene say, hears from where it is.)
-		if listenerPosition then
-			listenerPosition = nil
-			SoundService:SetListener(Enum.ListenerType.Camera)
-		end
-		return
-	end
-	local cframe = camera.CFrame
-	-- (In world blocks, as SoundRules works; back to render studs for Roblox.)
-	local ex, ey, ez = Origin.renderToBlocks(cframe.Position)
-	local fx, fy, fz = Origin.renderToBlocks(camera.Focus.Position)
-	local x, y, z = SoundRules.listenerAt(ex, ey, ez, fx, fy, fz, SoundRules.LISTENER_REACH)
-	local position = Vector3.new(x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z)
-	listenerPosition = position
-	SoundService:SetListener(Enum.ListenerType.CFrame, cframe.Rotation + position)
-end
-
 --[[ Voices ]]
 
 local function newBank(size: number, parent: Instance, positionedVoices: boolean): Bank
@@ -569,7 +567,9 @@ local function follow(voice: Distant, listener: Vector3)
 	local reach = DISTANT_OFFSET * BLOCK
 	local offset
 	if voice.relative then
-		offset = Vector3.new(voice.x, 0, voice.z) * reach
+		-- (Always the full way off: how near it sounds is its flat half's share of the volume.)
+		local direction = Vector3.new(voice.x, 0, voice.z)
+		offset = if direction.Magnitude > 1e-3 then direction.Unit * reach else Vector3.new(0, 0, reach)
 	else
 		local toward = Vector3.new(voice.x, voice.y, voice.z) - listener
 		offset = if toward.Magnitude > reach then toward.Unit * reach else toward
@@ -598,14 +598,13 @@ end
 
 --[[
 	Frees the distant voices whose sound ended, fades out those giving way and starts what they
-	give way to, and moves the playing ones and the beds with the listener.
+	give way to (moveDistant keeps them with the listener).
 ]]
 local function stepDistant(now: number)
 	local pool = distantPool
 	if pool == nil then
 		return
 	end
-	local listener = hearingPoint()
 	for i, voice in distantVoices do
 		local state = pool.voices[i]
 		if state.busy then
@@ -620,27 +619,56 @@ local function stepDistant(now: number)
 					state.startedAt = now
 				else
 					sound.Volume = volume
-					if listener then
-						follow(voice, listener)
-					end
 				end
 			elseif now >= voice.stopAt then
 				voice.sound:Stop()
 				SoundRules.release(pool, i)
 			elseif now - state.startedAt > START_GRACE and not voice.sound.IsPlaying then
 				SoundRules.release(pool, i)
-			elseif listener then
-				follow(voice, listener)
 			end
 		end
 	end
-	if listener then
-		for _, bed in beds do
-			if bed.playing then
-				follow(bed.voice, listener)
-			end
+end
+
+-- Moves the playing distant voices and beds with the listener (in the same step that moved it:
+-- a frame late, a source near the listener jumps from ear to ear while the camera turns).
+local function moveDistant(listener: Vector3)
+	local pool = distantPool
+	if pool == nil then
+		return
+	end
+	for i, voice in distantVoices do
+		if pool.voices[i].busy then
+			follow(voice, listener)
 		end
 	end
+	for _, bed in beds do
+		if bed.playing then
+			follow(bed.voice, listener)
+		end
+	end
+end
+
+-- Puts Roblox's listener where the player hears from (after the camera moved this frame).
+local function updateListener()
+	local camera = workspace.CurrentCamera
+	if camera == nil or camera.CameraType == Enum.CameraType.Scriptable then
+		-- (A scripted camera, a cutscene say, hears from where it is.)
+		if listenerPosition then
+			listenerPosition = nil
+			SoundService:SetListener(Enum.ListenerType.Camera)
+		end
+		return
+	end
+	local cframe = camera.CFrame
+	-- (In world blocks, as SoundRules works; back to render studs for Roblox.)
+	local ex, ey, ez = Origin.renderToBlocks(cframe.Position)
+	local fx, fy, fz = Origin.renderToBlocks(camera.Focus.Position)
+	local x, y, z = SoundRules.listenerAt(ex, ey, ez, fx, fy, fz, SoundRules.LISTENER_REACH)
+	local position = Vector3.new(x * BLOCK - Origin.x, y * BLOCK, z * BLOCK - Origin.z)
+	listenerPosition = position
+	SoundService:SetListener(Enum.ListenerType.CFrame, cframe.Rotation + position)
+	moveDistant(position)
 end
 
 --[[ API ]]
@@ -816,26 +844,44 @@ end
 
 --[[
 	A looped sound of event `name` played around the listener while its caller keeps it up
-	(`setBed`), on a voice of its own: returns its handle (nil while sounds are off).
+	(`setBed`), on a voice of its own and a flat Sound of its own: returns its handle (nil while
+	sounds are off).
 ]]
 function SoundPlayer.newBed(name: string): number?
 	local event = resolve(name)
 	local parent = emitterPart
-	if event == nil or parent == nil or not enabled then
+	local folder = flatFolder
+	if event == nil or parent == nil or folder == nil or not enabled then
 		return nil
 	end
 	local voice = newDistant(parent, `Bed{#beds + 1}`)
 	voice.relative = true
 	voice.sound.Looped = true
-	table.insert(beds, { voice = voice, event = event, playing = false, clip = 0, volume = -1 })
+	local flatSound = Instance.new("Sound")
+	flatSound.Name = `Bed{#beds + 1}`
+	flatSound.Looped = true
+	flatSound.Parent = folder
+	local flatEqualizer = Instance.new("EqualizerSoundEffect")
+	flatEqualizer.LowGain, flatEqualizer.MidGain, flatEqualizer.HighGain = 0, 0, 0
+	flatEqualizer.Parent = flatSound
+	table.insert(beds, {
+		voice = voice,
+		flat = flatSound,
+		flatEqualizer = flatEqualizer,
+		event = event,
+		playing = false,
+		clip = 0,
+		volume = -1,
+		flatVolume = -1,
+	})
 	return #beds
 end
 
 --[[
 	Bed `handle` at cue `volume` (x the event's and the volume settings; 0 stops it), coming from
-	direction (dx, dz) (a length of 1: DISTANT_OFFSET blocks off that way; shorter: nearer the
-	listener, as from all around), through its equalizer at `low`, `mid` and `high` dB. Writes only
-	what changed: call it every frame.
+	direction (dx, dz) (a length of 1: DISTANT_OFFSET blocks off that way; shorter: more of it
+	flat, as from all around; 0: all flat), through its equalizers at `low`, `mid` and `high` dB.
+	Writes only what changed: call it every frame.
 ]]
 function SoundPlayer.setBed(
 	handle: number,
@@ -851,10 +897,12 @@ function SoundPlayer.setBed(
 		return
 	end
 	local sound = bed.voice.sound
+	local flatSound = bed.flat
 	local mix = SoundPlayer.sourceVolume(bed.event.source)
 	if volume <= 0.002 or mix <= 0 then
 		if bed.playing then
 			sound:Stop()
+			flatSound:Stop()
 			bed.playing = false
 		end
 		return
@@ -867,25 +915,42 @@ function SoundPlayer.setBed(
 		bed.clip = playback.volume / mix
 		sound.SoundId = playback.id
 		sound.PlaybackSpeed = playback.pitch
-		sound.SoundGroup = if replacement then replacement.SoundGroup else nil
+		local group = if replacement then replacement.SoundGroup else nil
+		sound.SoundGroup = group
 		sound.Volume = 0
-		bed.volume = -1
+		flatSound.SoundId = playback.id
+		flatSound.PlaybackSpeed = playback.pitch
+		flatSound.SoundGroup = group
+		flatSound.Volume = 0
+		bed.volume, bed.flatVolume = -1, -1
 		local listener = hearingPoint()
 		bed.voice.x, bed.voice.z = dx, dz
 		if listener then
 			follow(bed.voice, listener)
 		end
+		-- (The two halves start together and stay in step: both always play, one maybe silent.)
 		sound.TimePosition = 0
+		flatSound.TimePosition = 0
 		sound:Play()
+		flatSound:Play()
 		bed.playing = true
 	end
 	-- (The volume settings are followed while it plays.)
 	local level = math.clamp(bed.clip * mix * volume, 0, SoundRules.MAX_VOLUME)
-	if math.abs(level - bed.volume) > 0.002 then
-		bed.volume = level
-		sound.Volume = level
+	local positionedLevel, flatLevel = SoundRules.bedSplit(level, dx, dz)
+	if math.abs(positionedLevel - bed.volume) > 0.002 then
+		bed.volume = positionedLevel
+		sound.Volume = positionedLevel
+	end
+	if math.abs(flatLevel - bed.flatVolume) > 0.002 then
+		bed.flatVolume = flatLevel
+		flatSound.Volume = flatLevel
 	end
 	bed.voice.x, bed.voice.z = dx, dz
+	local equalizer = bed.flatEqualizer
+	if bed.voice.low ~= low or bed.voice.mid ~= mid or bed.voice.high ~= high then
+		equalizer.LowGain, equalizer.MidGain, equalizer.HighGain = low, mid, high
+	end
 	setGains(bed.voice, low, mid, high)
 end
 
@@ -977,6 +1042,9 @@ function SoundPlayer.start()
 	interface.Name = FOLDER
 	local flatBank = newBank(FLAT_VOICES, interface, false)
 	interface.Parent = SoundService
+	flatFolder = interface
+	-- (No Doppler shift: see the header.)
+	SoundService.DopplerScale = 0
 	positioned, flat = positionedBank, flatBank
 	enabled = true
 

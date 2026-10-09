@@ -51,6 +51,9 @@
 			}
 		},
 		"SoundService": {
+			"$properties": {
+				"DopplerScale": 0
+			},
 			"IceVoxelSounds": {
 				"$path": "src/sounds"
 			}

@@ -2264,8 +2264,10 @@ and muffled; each client plays them by itself). The weather ships real sounds th
 `src/sounds/Weather.model.json` becomes SoundService.IceVoxelSounds.Weather, with four near and
 ten distant thunder variants (picked at random), a minute-long rain loop (near rain and the
 distant hiss play it looped, duller under a roof) and a wind loop (`weather.wind`: outdoors,
-louder in a strong wind, a storm and high up, silent underground; Config.Weather.Wind). Edit that
-file to swap them. To use your own, add a Folder named `IceVoxelSounds` to SoundService
+louder in a strong wind, a storm and high up, silent underground; Config.Weather.Wind). The
+loops heard from all around (the rain on the player, the wind) play flat, so turning the camera
+never pans them; the distant hiss is heard from the storm's side. Roblox's Doppler shift is off
+(SoundService.DopplerScale 0). Edit that file to swap them. To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
 
 ```

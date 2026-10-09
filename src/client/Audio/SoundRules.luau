@@ -659,4 +659,15 @@ function SoundRules.fireCrackle(dx: number, dy: number, dz: number): number
 	return math.min(1, SoundRules.displayOdds(dx, dy, dz)) * SoundRules.FIRE_AMBIENT
 end
 
+--[[
+	A looped bed's `level` split between its positioned voice and its flat Sound (SoundPlayer.setBed)
+	for direction (dx, dz): all positioned at a length of 1 or more, all flat at 0 (a source on the
+	listener would swap ears as the camera turns), in between in proportion. The two play the same
+	clip in step, so their levels add.
+]]
+function SoundRules.bedSplit(level: number, dx: number, dz: number): (number, number)
+	local toward = math.clamp(math.sqrt(dx * dx + dz * dz), 0, 1)
+	return level * toward, level * (1 - toward)
+end
+
 return SoundRules
