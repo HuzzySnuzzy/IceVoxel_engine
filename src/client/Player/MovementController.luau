@@ -552,10 +552,10 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		return if ok and typeof(vector) == "Vector3" then vector else nil
 	end
 
-	-- An inventory screen, the game mode switcher or a text box (the chat) has the keys: the
-	-- player stands still.
+	-- An inventory screen, the game mode switcher or a text box (the chat; Keybinds.typing: the
+	-- game's own boxes and Roblox's bar only while it is on) has the keys: the player stands still.
 	local function inputTaken(): boolean
-		return Screens.isOpen() or GameModeSwitcher.isOpen() or UserInputService:GetFocusedTextBox() ~= nil
+		return Screens.isOpen() or GameModeSwitcher.isOpen() or Keybinds.typing()
 	end
 
 	-- Sprint / sneak keys and touch toggles.

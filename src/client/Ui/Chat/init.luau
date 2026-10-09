@@ -134,6 +134,8 @@ local UNDER_SCREENS = UiScale.Layer.ChatUnderScreens
 -- when it was on that button: that tap closed the chat, so it does not reopen it (seconds).
 local TAP_CLOSE = 0.6
 local MOUSE_STEP = "IceVoxelChatMouse"
+-- Seconds after the box takes the focus that the key which opened it may still type into it.
+local GUARD_TIME = 0.5
 
 type Row = {
 	back: Frame,
@@ -762,8 +764,10 @@ function Chat.start()
 	-- When a tap elsewhere last closed the box (the chat button's own tap: TAP_CLOSE).
 	local touchClosedAt = -math.huge
 	-- Right after opening, the opening key typed into the box is taken back (`guardText`: what
-	-- the box held, `guardUntil`: until when, `guardKey`: the character that key types, lower
-	-- case; "/" when unknown).
+	-- the box held, `guardUntil`: until when (GUARD_TIME after the box took the focus, or the
+	-- box's first change, whichever comes first: the key's character can arrive a few frames
+	-- late, and "/" then doubled the command's slash), `guardKey`: the character that key types,
+	-- lower case; "/" when unknown).
 	local guardText = ""
 	local guardUntil = 0
 	local guardKey = "/"
@@ -840,7 +844,7 @@ function Chat.start()
 		-- Next frame, so the key that opened the box is not typed into it.
 		RunService.Heartbeat:Once(function()
 			if open then
-				guardText, guardUntil = prefill, os.clock() + 0.1
+				guardText, guardUntil = prefill, os.clock() + GUARD_TIME
 				box:CaptureFocus()
 			end
 		end)

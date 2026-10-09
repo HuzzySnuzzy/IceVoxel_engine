@@ -45,11 +45,20 @@ end
 --[[
 	The client's Settings/Keybinds over `values` (its Settings stand-in), with a fake
 	UserInputService: `world.down` holds the KeyCode names held, `world.mouse` the mouse buttons
-	held, `world.last` the last input type's name, `world.typing` a focused text box.
+	held, `world.last` the last input type's name, `world.typing` a focused text box (the game's own,
+	in the PlayerGui; `world.coreBox` makes it one of Roblox's hidden core boxes instead).
 ]]
 local function fakeKeybinds(shared: any, sharedRequire: (any) -> any, values: any): (any, any, any)
 	local Enum = fakeEnum()
-	local world: any = { down = {}, mouse = {}, last = "Keyboard", typing = false, keyboard = true }
+	local world: any = { down = {}, mouse = {}, last = "Keyboard", typing = false, keyboard = true, coreBox = false }
+	local playerGui = {}
+	local function textBox(): any
+		return {
+			IsDescendantOf = function(_, ancestor)
+				return ancestor == playerGui and not world.coreBox
+			end,
+		}
+	end
 	local services: { [string]: any } = {
 		ReplicatedStorage = {
 			WaitForChild = function(_, name: string)
@@ -68,7 +77,7 @@ local function fakeKeybinds(shared: any, sharedRequire: (any) -> any, values: an
 				return Enum.UserInputType[world.last]
 			end,
 			GetFocusedTextBox = function()
-				return if world.typing then {} else nil
+				return if world.typing then textBox() else nil
 			end,
 		}, {
 			__index = function(_, key: string)
@@ -82,6 +91,13 @@ local function fakeKeybinds(shared: any, sharedRequire: (any) -> any, values: an
 			FindFirstChildOfClass = function()
 				return nil
 			end,
+		},
+		Players = {
+			LocalPlayer = {
+				FindFirstChildOfClass = function(_, class: string)
+					return if class == "PlayerGui" then playerGui else nil
+				end,
+			},
 		},
 	}
 	local game = {
@@ -468,6 +484,13 @@ return function(t, shared, require, _server, client)
 		t.ok(Keybinds.isDown("forward"))
 		world.typing = true
 		t.ok(not Keybinds.isDown("forward"), "typing")
+		t.ok(Keybinds.typing(), "the game's own box has the keys")
+		-- Roblox's hidden core chat box keeping the focus after the game's chat closed is not
+		-- typing: the walk goes on at once.
+		world.coreBox = true
+		t.ok(not Keybinds.typing(), "a core box is not the player typing")
+		t.ok(Keybinds.isDown("forward"), "keys work while only a core box has the focus")
+		world.coreBox = false
 		world.typing = false
 		world.mouse.MouseButton3 = true
 		t.ok(Keybinds.isDown("pickItem"))

@@ -29,6 +29,7 @@
 	help text comes from `Keybinds.name("chat")`.
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
@@ -90,9 +91,25 @@ function Keybinds.matches(action: string, input: InputObject): boolean
 	return KeyBindings.matches(values, action, Keybinds.codeOf(input))
 end
 
+-- Does a text box of the game's own (in this player's PlayerGui) have the keys? Roblox's hidden
+-- core boxes don't count: its chat bar, turned off by the game, can keep the focus a moment after
+-- the game's chat box closed and would otherwise hold the player still meanwhile.
+function Keybinds.textBoxFocused(): boolean
+	local focused = UserInputService:GetFocusedTextBox()
+	if focused == nil then
+		return false
+	end
+	local player = Players.LocalPlayer
+	local playerGui = if player then player:FindFirstChildOfClass("PlayerGui") else nil
+	local ok, ours = pcall(function()
+		return playerGui ~= nil and focused:IsDescendantOf(playerGui)
+	end)
+	return ok and ours
+end
+
 -- Is the player typing (a text box or Roblox's chat bar has the keys)?
 function Keybinds.typing(): boolean
-	if UserInputService:GetFocusedTextBox() ~= nil then
+	if Keybinds.textBoxFocused() then
 		return true
 	end
 	-- (Roblox's own input bar counts only while it is on: the game turns it off, and a bar left
