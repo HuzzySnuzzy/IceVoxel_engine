@@ -418,6 +418,26 @@ return function(t, shared, require, server)
 		t.eq(Items.get(I.GlassBottle).maxStack, 64)
 	end)
 
+	t.test("drinks: Terraria's mana potions are drunk any time, for mana and a bottle", function()
+		for item, mana in { [I.LesserManaPotion] = 50, [I.ManaPotion] = 100 } do
+			local drink = Drinks.of(item)
+			t.eq(Drinks.manaOf(drink), mana)
+			t.ok(Drinks.isPotion(drink), "a potion")
+			-- Not thirsty, thirst on or off: still drunk.
+			for _, thirstOn in { true, false } do
+				local canDrink = Drinks.drinkable(drink, false, thirstOn, thirstOn)
+				t.eq(Drinks.action({ item = item, count = 2 }, false, canDrink, true), "drink")
+			end
+			t.eq(Drinks.emptyOf(item), I.GlassBottle)
+			t.ok(not Drinks.fills({ item = item, count = 1 }), "never filled at water")
+			-- No water in it: drinking changes no thirst.
+			local thirst = Thirst.new()
+			thirst.thirst = 10
+			Drinks.apply(thirst, drink :: any, rolls({ 0 }), nil)
+			t.eq(thirst.thirst, 10)
+		end
+	end)
+
 	t.test("drinks: recipes (the Glass Bottle, the Canteen) and purification by smelting", function()
 		local function grid(cells)
 			local stacks = {}

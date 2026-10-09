@@ -64,8 +64,11 @@
 	                   use them), and generated structures' chests filled on first use
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
 	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state), and
-	                   each player's mana (Players/Mana: Terraria's, kept with the character)
-	 11. mobs       -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
+	                   each player's mana (Players/Mana: Terraria's, kept with the character:
+	                   regeneration, potions, Mana Crystals), magic weapons and their
+	                   projectiles (Players/Magic: casts, server-simulated flights, hits on mobs)
+	                   and Fallen Stars at night (Players/FallenStars)
+	 11. mobs      -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
 	                   blasts hurting them), and eating what they drop (Players/Eating)
 	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
@@ -142,6 +145,8 @@ local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
 local Mana = require(Server.Players.Mana)
+local Magic = require(Server.Players.Magic)
+local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
@@ -234,6 +239,10 @@ local function startWorld(settings: WorldSettings.Settings)
 	ToughAsNails.start(net, world)
 	-- Mana after inventories (what is held) and effects (Mana Sickness).
 	Mana.start(net)
+	-- Magic weapons (HeldUse, the projectiles; hits on mobs once they start) and Fallen Stars
+	-- (items: after Entities).
+	Magic.start(net, world)
+	FallenStars.start(net, world)
 	-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
 	Mobs.start(net, world)
 	-- Other players' poses to those who may see them (Players/PlayerRelay; with

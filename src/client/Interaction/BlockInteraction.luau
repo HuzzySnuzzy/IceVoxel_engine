@@ -83,6 +83,12 @@
 	Food (Interaction/Eating: the meat mobs drop, rotten flesh) is eaten the same way, holding the
 	use button 32 ticks, after a block's menu, in adventure too, while the player may eat
 	(Shared/Items/Foods.canEat: hurt, or in creative).
+	Magic (Interaction/Casting: Terraria's magic weapons and Mana Crystals), after a block's menu
+	and food, in adventure and creative too: a magic weapon casts along the aim (towards what the
+	camera's ray hits) every use time of the weapon while the use button is held (checked every
+	frame, not at the repeat interval; a touch held on a weapon casts at the finger instead of
+	breaking), predicted (the projectile, the sound, the mana); a Mana Crystal is used once a
+	press.
 	Rope (Shared/Rope, Supplementaries'), before anything is placed, in survival and creative, not
 	sneaking: Rope clicked on a rope lets one more down under the bottom of its column, an empty
 	hand pulls the bottom one up (Rope.wantsUse); sent as a UseItem, not predicted (the world's
@@ -189,6 +195,7 @@ local CrackOverlay = require(script.Parent.CrackOverlay)
 local TankUse = require(script.Parent.TankUse)
 local Drinking = require(script.Parent.Drinking)
 local Eating = require(script.Parent.Eating)
+local Casting = require(script.Parent.Casting)
 local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
@@ -1041,6 +1048,17 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 			return
 		end
+		-- Magic (Interaction/Casting): a magic weapon casts along the aim at its own pace while
+		-- the button is held (the frame's check below), a Mana Crystal is used once a press; in
+		-- adventure and creative too, never by spectators.
+		if stack and Casting.handles(stack) then
+			local used = if ray then Casting.use(stack, mode, ray, if hit then hit.distance else nil) else nil
+			if used then
+				useSpent = used == "crystal"
+				swing()
+			end
+			return
+		end
 		-- Rope on a rope lets one more down, an empty hand pulls one up (Shared/Rope; not sneaking,
 		-- not in adventure). Not predicted; a held button repeats it.
 		if
@@ -1377,7 +1395,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 		end
 		if startHold then
-			beginAttack("touch")
+			-- (With a magic weapon a held finger casts at it instead of breaking: Interaction/Casting.)
+			if Casting.handles(ClientInventory.selectedStack()) and not GameMode.isSpectator(mode) then
+				beginUse("touch", target, targetRay)
+			else
+				beginAttack("touch")
+			end
 		end
 		local hit = target
 		if hit and (GameMode.mayBuild(mode) or GameMode.isSpectator(mode)) then
@@ -1433,6 +1456,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				while tickClock >= TICK do
 					tickClock -= TICK
 					miningTick()
+				end
+			end
+			-- A magic weapon held: it casts at its own use time (Interaction/Casting), every frame
+			-- looked at, not the repeat's.
+			local held = ClientInventory.selectedStack()
+			if anyHeld(useHeld) and not useSpent and held and Casting.handles(held) and targetRay then
+				if Casting.use(held, mode, targetRay, if hit then hit.distance else nil) then
+					swing()
 				end
 			end
 			-- Using / placing, repeated while held.
@@ -1546,6 +1577,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				touch = nil
 				if t.holding then
 					endAttack("touch")
+					if useHeld.touch then
+						endUse("touch")
+					end
 				elseif not t.moved and os.clock() - t.startedAt < TOUCH_HOLD and not Screens.isOpen() then
 					-- A tap on a mob hits it (Bedrock's touch controls), else it uses.
 					local hit, ray = targetAt(t.position, true)

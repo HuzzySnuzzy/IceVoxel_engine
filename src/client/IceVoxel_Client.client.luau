@@ -97,6 +97,11 @@
 	                             draws them in the top right corner (a list beside open screens),
 	                             Rendering/EffectView does Night Vision, Blindness and Nausea
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
+	  Player/ManaState           Terraria's mana from the server, which Ui/ManaHud draws as stars
+	                             over the hearts; Interaction/Casting casts magic weapons and
+	                             uses Mana Crystals (predicted), Rendering/ProjectileView flies
+	                             every magic projectile with the server's pure step (neon balls,
+	                             trails), and Fallen Stars glow (Entities/EntityRenderer)
 	  Player/ProgressionState    knowledge, the Age and skills from the server (the recipe gate on
 	                             the predicted inventory, mining and boiling perks), which Ui/Hud
 	                             draws as the knowledge bar; Ui/AgeToast shows a new Age's banner,
@@ -146,6 +151,8 @@ local BurningView = require(Client.Player.BurningView)
 local ExplosionView = require(Client.Rendering.ExplosionView)
 local SurvivalState = require(Client.Player.SurvivalState)
 local EffectState = require(Client.Player.EffectState)
+local ManaState = require(Client.Player.ManaState)
+local ProjectileView = require(Client.Rendering.ProjectileView)
 local EffectView = require(Client.Rendering.EffectView)
 local EffectHud = require(Client.Ui.EffectHud)
 local ProgressionState = require(Client.Player.ProgressionState)
@@ -370,6 +377,7 @@ end)
 ClientInventory.start()
 SurvivalState.start()
 EffectState.start()
+ManaState.start()
 -- (After the inventory: it sets the recipe gate on the prediction.)
 ProgressionState.start()
 Screens.start()
@@ -385,6 +393,7 @@ StructureNet.start(world)
 StructureBoxes.start(world, StructureNet.records)
 EntityRenderer.start(world)
 MobRenderer.start(world)
+ProjectileView.start(world)
 -- (Pipes are decorated only where their chunk is on screen.)
 TransmitterRenderer.start(world, function(cx: number, cz: number): boolean
 	local node = streamer.nodes[Coords.chunkKey(cx, cz)]

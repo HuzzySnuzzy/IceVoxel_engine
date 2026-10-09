@@ -29,6 +29,7 @@
 	  giveAll(player, { { effect, ticks, amplifier? } })   a potion's or a drink's effects
 	  remove(player, effect) -> boolean,  clear(player) -> number
 	  has(player, effect) -> boolean,  amplifier(player, effect) -> number?
+	  ticks(player, effect) -> number   ticks left (0: none), a status effect's own (Mana Sickness)
 	  levels(player) -> Effects.Levels (read only)
 	  meleeDamage(player, base) -> number   a melee hit with Strength and Weakness (combat)
 	  incomingDamage(player, amount) -> number   what Resistance lets through of a hurt
@@ -226,6 +227,15 @@ function EffectsServer.amplifier(player: Player, effect: number | string): numbe
 	end
 	local state = states[player]
 	return if state then EffectRules.amplifier(state, id) else nil
+end
+
+-- Ticks left of `player`'s effect `effect` (0: they haven't it; Effects.INFINITE: for good). Not
+-- for external effects (their owners keep the time). Players/Mana reads Mana Sickness's.
+function EffectsServer.ticks(player: Player, effect: number | string): number
+	local id = idOf(effect)
+	local state = states[player]
+	local instance = if id and state then EffectRules.get(state, id) else nil
+	return if instance then instance.ticks else 0
 end
 
 -- The levels in force for `player` (read only).

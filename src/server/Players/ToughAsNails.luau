@@ -52,7 +52,8 @@
 	                               temperature is on): drunk (its water only with thirst on),
 	                               the Thirst effect rolled, Internal Warmth or Chill given (a
 	                               drink's `warmth` / `chill`), a potion's status effects given
-	                               (Players/Effects.giveAll), the bottle or sip used up
+	                               (Players/Effects.giveAll), a mana potion's mana and Mana
+	                               Sickness (Players/Mana.potion), the bottle or sip used up
 	                               (Drinks.afterDrinking); everyone else hears the last gulp
 	                               (entity.generic.drink: the drinker's client plays its own);
 	               hand            an empty hand at a water source within reach
@@ -103,6 +104,7 @@ local EffectsServer = require(script.Parent.Effects)
 local Climate = require(script.Parent.Climate)
 local Containers = require(script.Parent.Containers)
 local Inventories = require(script.Parent.Inventories)
+local ManaServer = require(script.Parent.Mana)
 local PlayerPositions = require(script.Parent.PlayerPositions)
 
 local Thirst = require(Shared.ToughAsNails.Thirst)
@@ -450,6 +452,10 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 		if drink.effects then
 			-- (A potion: PotionItem.finishUsingItem.)
 			EffectsServer.giveAll(player, drink.effects)
+		end
+		if Drinks.manaOf(drink) > 0 then
+			-- (Terraria's mana potions: the mana and Mana Sickness, Players/Mana.)
+			ManaServer.potion(player, Drinks.manaOf(drink))
 		end
 		local newHeld, give = Drinks.afterDrinking(held, GameMode.instabuild(mode))
 		if newHeld ~= held then

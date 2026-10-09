@@ -6356,6 +6356,84 @@ accessory row (16 x 18 buttons on touch). The eyes are buttons of their own send
 `targetAt` says nothing over them. Tooltips add `Accessories.tooltip` ("When worn:" and a line an
 effect, or "Vanity: worn for its look only").
 
+### Mana and magic (`Mana`, `Mana/StarFall`, `Magic/Projectiles`, `Magic/Casting`, server `Players/Mana`, `Players/Magic`, `Players/FallenStars`, client `Player/ManaState`, `Ui/ManaHud`, `Interaction/Casting`, `Rendering/ProjectileView`)
+
+Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
+
+- **Capacity** (`Shared/Mana.maxOf`): 20, +20 for each Mana Crystal used (at most 9: 200), plus
+  the accessories' `mana` (Band of Starpower 20, read off the inventory with
+  `Items/Accessories.stats`), capped at `Config.Mana.Max` 400. Taking a band off clamps mana to the
+  new max on the next tick.
+- **Regeneration** (`Shared/Mana.tick`): Terraria's `UpdateManaRegen` with its 60 Hz numbers,
+  three steps per 20 Hz tick, in floats. Spending sets a delay of 0.7 x (45 + 240 x missing share)
+  Terraria ticks (0.525 s full, 3.325 s empty), which counts down twice as fast standing still;
+  then mana comes back at (max / 7 + 1, plus max / 2 standing still) x (0.2 + 0.8 x mana / max) x
+  1.15 / 2 a second. For max 20 that is 7.47 / 1.49 / 1.72 / 0.35 a second (standing full, standing
+  empty, moving full, moving empty); for max 200 it is 74.2 / 14.8 / 16.7 / 3.33. "Standing still"
+  is the server's own reading: the feet moved less than 0.01 blocks since the last tick and nothing
+  was cast in it. Terraria 1.4.5.7's rework (no delay) was not taken. A regeneration that fills
+  mana plays Terraria's chime (`entity.player.mana_full`, flat, on that client only).
+- **Server** (`Players/Mana`): one state per player, ticked 20 times a second. The Mana message
+  (`Net/MagicSync`: u16 mana, u16 max, flags `refused` and `full`) goes out when the whole number
+  or the max changes, at most every 4 ticks, and at once after a cast, a refused cast, a potion, a
+  crystal or a restore. A respawn starts full; the first character since joining keeps the mana it
+  has (a restored character's). `export` / `restore` are what `Players/CharacterStore` saves.
+- **Potions and Mana Sickness**: the Lesser Mana Potion (50) and Mana Potion (100) are
+  `ToughAsNails/Drinks` entries with a `mana` field. They count as potions: drunk any time with the
+  32-tick hold, Tough As Nails on or off, and they give a Glass Bottle back. When one finishes,
+  `Players/ToughAsNails` calls `Players/Mana.potion`, which adds the mana and Mana Sickness
+  (effect 25 through `Players/Effects`: 5 s more each time, 10 s at most). While Mana Sickness
+  lasts, magic damage is cut by 5% per second left (`Mana.damageFactor`: half at 10 s).
+- **Casting** (`Magic/Casting`, server `Players/Magic`, client `Interaction/Casting`): holding the
+  use button with a magic weapon casts every `useTicks` of the weapon. This comes after a block's
+  own use (a chest still opens with a wand in hand), and works in survival, adventure and creative
+  (creative is free), never for spectators. The client sends HeldUse (u16 seq, the hotbar slot,
+  the item, the unit direction from its eyes towards what the camera's ray hits). At the same
+  moment it predicts the projectile, plays `item.magic.cast` and takes the mana locally. The
+  server checks the player is alive and not a spectator, that the slot is the selected one and the
+  item is in hand, and the use time on its own clock (one tick of slack; a late arrival counts
+  from when it was due, so jitter never holds the next cast back and a run of casts is never
+  faster). It then spends the mana (refused: told, nothing flies) and spawns the projectile from
+  the eyes (1.62 standing, 1.27 sneaking). A Mana Crystal goes through the same HeldUse: once per
+  press, while fewer than nine were used (max +20 and mana +20, `item.mana_crystal.use`).
+  Creative keeps the crystal.
+- **Projectiles** (`Magic/Projectiles`, pure; kinds by u8 index): spark (1.0 blocks a tick,
+  gravity 0.03, drag 0.99, 20 ticks: an arc of about 18 blocks; ends on a block or a mob),
+  bolt (1.5 straight, 20 ticks: 30 blocks) and water (0.6 straight, 60 ticks; bounces off 5 blocks,
+  turning the velocity component across the face it hits; goes through one mob and ends in a
+  second). Each tick the segment is cast against blocks with a collision box
+  (`World/VoxelRaycast`; plants, torches and fluids let it through) and against mob boxes grown by
+  0.3 with a slab test, nearest first. The start is rounded to f32 as the wire carries it, so a
+  client flying the server's spawn op follows the server's path exactly, as long as their blocks
+  agree. The server (`Players/Magic`) flies every projectile against `world:peekBlock` and
+  `Mobs.near`. A hit uses `Mobs.magicDamage`: the weapon's half hearts times the Mana Sickness
+  cut, through armour and the hurt cooldown, with the weapon's own knockback, credited to the
+  caster. The spark sets a mob burning for 3 s half the time (`Mobs.ignite`). Only three ops are
+  sent, in Projectiles messages to players within `Config.Interest.PlayerDistance`: spawn (with
+  the caster's seq, so the caster's client adopts the projectile it already flies), sync (after
+  a bounce) and end. Players are never hit (the game has no PvP path) and no fire block is ever
+  placed.
+- **Client** (`Rendering/ProjectileView`): every projectile flies with the same step against the
+  client's blocks and the mobs as they are drawn. It is drawn as a Neon ball with a PointLight and
+  a trail, interpolated between ticks at `Origin.blocksToRender` (no Rebase mover; trails are
+  cleared when the origin moves). A cast the server refused takes away the newest prediction not
+  yet adopted.
+- **HUD** (`Ui/ManaHud` built into `Ui/Hud`'s canvas, pure layout in `Ui/ManaStars`): 10 stars a
+  row (9 x 9 pixel art, 8 GUI px apart, 20 mana a star: full, half, empty), left-aligned in the
+  armour's row, or the row above it when armour icons show; past 200 mana a second row goes
+  above. They show in survival and adventure only, while a magic weapon is selected, while mana
+  is not full, or for `Config.Mana.HudLinger` 3 s after a change, and they blink when a cast is
+  refused. The held item's name and Tough As Nails' status row move up only as far as needed to
+  clear the stars (`ManaStars.layout`'s raise).
+- **Fallen Stars** (`Mana/StarFall`, pure; server `Players/FallenStars`): at night (time of day
+  13000..23000), once a second, each player in survival, adventure or creative has a
+  PerNight / night-seconds chance (5 a night on average, whatever the day length) of a Fallen Star
+  item falling 40 blocks onto the top block of a random column 16..48 blocks away. It starts at
+  -1 block a tick, and only columns the server has generated are used. It makes
+  `entity.fallen_star.fall` and glows on clients (a PointLight and sparkles:
+  `Entities/EntityRenderer`). At dawn every Fallen Star item on the ground vanishes (Terraria's
+  rule); stars in inventories and chests stay.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -6857,3 +6935,9 @@ Saving worlds).
   tick. Mob AI and physics stay pure (MobWorld, MobAI, MobSpawning, MobPhysics take their blocks,
   players, time and randomness as arguments), so the specs run them; Roblox calls stay in
   `Mobs/Mobs`. Light for gameplay comes from `World/LightEstimate`, the one estimate WAILA shows.
+- Projectile kinds (`Magic/Projectiles.KINDS` positions) go on the wire as a u8, so append and
+  never reorder. `Projectiles.step` must stay pure and deterministic, with the same double
+  arithmetic on both sides, starts rounded to f32 and no randomness: the server only sends where a
+  projectile starts, bounces and ends, and every client flies it with the same step. Mana is the
+  server's (`Players/Mana`); a client only predicts a cast and takes the server's next Mana message
+  as the truth.
