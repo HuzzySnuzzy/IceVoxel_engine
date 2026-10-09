@@ -176,8 +176,10 @@ return function(t, shared, require)
 		-- mint cures and the three teas; 128 before the Campfire, Straw and Leaf armor and the
 		-- Thermometer, Tough As Nails' gear; 138 before the leather armor and White Wool from String,
 		-- the mobs' drops; 143 before the 29 potions, brewed in the grid; 172 before the Ladder,
-		-- two Rope recipes, Rails, the Oak Fence, the Moss Carpet and two of Mossy Cobblestone.)
-		t.eq(#Crafting.recipes, 180, "recipes compiled")
+		-- two Rope recipes, Rails, the Oak Fence, the Moss Carpet and two of Mossy Cobblestone; 180
+		-- before Terraria's Aglet, Anklet of the Wind, Band of Starpower, Obsidian Skull, Mana
+		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants.)
+		t.eq(#Crafting.recipes, 191, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

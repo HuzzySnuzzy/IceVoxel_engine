@@ -71,6 +71,9 @@ return function(t, shared, require, _server, _client)
 		t.eq(Protocol.ClientMessage.Spectate, 24)
 		t.eq(Protocol.ServerMessage.Teleport, 26)
 		t.eq(Protocol.ServerMessage.Players, 27)
+		-- (Then Terraria's: Net/CharacterSync and Net/MagicSync.)
+		t.eq(Protocol.ClientMessage.HeldUse, 26)
+		t.eq(Protocol.ServerMessage.Projectiles, 31)
 		for _, list in { Protocol.ClientMessage, Protocol.ServerMessage } do
 			local seen = {}
 			for name, kind in list :: { [string]: number } do

@@ -929,15 +929,16 @@ return function(t, shared, require, _server, client)
 			t.eq((event :: any).source, "ambient", "Minecraft's WEATHER source: the ambient volume")
 		end
 		-- Appended at the end of the list (ids of the sounds before them unchanged), the distant
-		-- storms' two after them (tests/spec/DistantStorms).
+		-- storms' two after them (tests/spec/DistantStorms), then Terraria's six.
 		local list = SoundList.EVENTS
 		local at = {}
 		for index, entry in list do
 			at[entry.name] = index
 		end
-		t.eq(at["weather.rain"], #list - 5, "the four come last but the distant storms'")
-		t.eq(at["entity.lightning_bolt.impact"], #list - 2)
-		t.eq(at["entity.lightning_bolt.thunder.far"], #list - 1)
+		local terraria = 6
+		t.eq(at["weather.rain"], #list - 5 - terraria, "the four come before the distant storms' and Terraria's")
+		t.eq(at["entity.lightning_bolt.impact"], #list - 2 - terraria)
+		t.eq(at["entity.lightning_bolt.thunder.far"], #list - 1 - terraria)
 		t.eq(Sounds.count, #Blocks.SOUND_TYPES * #Sounds.ACTIONS + #list)
 		local volume, pitch = Weather.rainSound(1, false)
 		t.near(volume, 0.2, 1e-9, "weather.rain at 0.2")

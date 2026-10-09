@@ -84,6 +84,16 @@
 	Never textured (no entries): fluids, air, cave air and structure voids, torches and lanterns,
 	transmitters (pipes, cables, transporters), fluid tanks, machines and the solar panel, structure
 	blocks and jigsaws, and the Glow Block (Neon cannot take a MaterialVariant).
+
+	Icons (items that are no blocks)
+	  Item name (ItemList) -> the *Image* asset id of its inventory picture (a square image, best
+	  16 x 16 pixel art scaled up; transparent around the item), "rbxassetid://<number>", or "" for
+	  not made yet. Inventories, the hotbar and JEI draw a filled icon instead of the item's model
+	  (client Ui/ItemIcon); the hand, dropped items and characters keep drawing the model (ItemList
+	  `model`, in the item's voxel colours). Items without an entry are drawn as models too: the
+	  list holds the items made since icons came in (Terraria's), blank, so each look is one id to
+	  paste. Nothing to build: an image is shown as it is (no MaterialVariant). Shared/Items checks
+	  every name and id when it loads.
 ]]
 
 export type Texture = {
@@ -549,12 +559,43 @@ local Blocks: { [string]: Faces } = {
 	MossyCobblestone = { All = "mossy cobblestone" },
 }
 
+-- Item name (ItemList) -> its inventory icon ("" = not made yet; see the header).
+local Icons: { [string]: string } = {
+	-- Terraria's accessories.
+	HermesBoots = "",
+	CloudInABottle = "",
+	ShinyRedBalloon = "",
+	LuckyHorseshoe = "",
+	Aglet = "",
+	AnkletOfTheWind = "",
+	BandOfRegeneration = "",
+	BandOfStarpower = "",
+	ObsidianSkull = "",
+	Flipper = "",
+	CobaltShield = "",
+	FeralClaws = "",
+	-- Mana.
+	FallenStar = "",
+	ManaCrystal = "",
+	LesserManaPotion = "",
+	ManaPotion = "",
+	-- Magic weapons.
+	WandOfSparking = "",
+	EmeraldStaff = "",
+	WaterBolt = "",
+	-- Vanity clothes.
+	TopHat = "",
+	TuxedoShirt = "",
+	TuxedoPants = "",
+}
+
 export type Pack = {
 	StudsPerTile: number,
 	ShowMissing: boolean,
 	Missing: string,
 	Textures: { [string]: Texture },
 	Blocks: { [string]: Faces },
+	Icons: { [string]: string },
 }
 
 local pack: Pack = {
@@ -566,6 +607,7 @@ local pack: Pack = {
 	Missing = "missing texture",
 	Textures = Textures,
 	Blocks = Blocks,
+	Icons = Icons,
 }
 
 return pack

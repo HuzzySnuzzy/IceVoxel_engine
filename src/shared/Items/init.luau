@@ -49,14 +49,22 @@
 	What an item leaves behind when a recipe or a furnace uses it up is its `craftingRemainder`
 	(Minecraft's Item.getCraftingRemainingItem): a full bucket (Shared/Fluids' buckets) leaves the
 	empty Bucket.
+
+	Terraria's equipment and weapons (ItemList `accessory`, `vanity`, `magic`, checked as they
+	load: one of them at most, one item a slot, no armor) are answered by `accessory`,
+	`vanitySlot` and `magic`; `icon` is an item's picture once Shared/TexturePack's `Icons` has
+	one (every name there must be an item's).
 ]]
 
 local Blocks = require(script.Parent.Blocks)
 -- (The fluids' data only: Shared/Fluids requires Items.)
 local FluidList = require(script.Parent.Fluids.FluidList)
+local TexturePack = require(script.Parent.TexturePack)
 local ItemList = require(script.ItemList)
 
 export type ModelBox = ItemList.ModelBox
+export type AccessorySpec = ItemList.AccessorySpec
+export type MagicSpec = ItemList.MagicSpec
 
 -- A worn piece's Tough As Nails insulation (ItemList `tan`, with the defaults filled in).
 export type TanInsulation = { warmth: number, cooling: number, freezeImmune: boolean }
@@ -86,6 +94,12 @@ export type ItemDef = {
 	model: { ModelBox }?,
 	material: string,
 	tilt: number,
+	-- Terraria's accessory (ItemList `accessory`): what it does in an accessory slot.
+	accessory: AccessorySpec?,
+	-- A vanity item's vanity armor slot (1 head .. 4 feet; ItemList `vanity`).
+	vanity: number?,
+	-- A magic weapon (ItemList `magic`).
+	magic: MagicSpec?,
 }
 
 -- One value of item data, and item data itself (see above; nil = none).
@@ -143,8 +157,57 @@ for id = 0, Blocks.count - 1 do
 			model = nil,
 			material = block.material,
 			tilt = 0,
+			accessory = nil,
+			vanity = nil,
+			magic = nil,
 		})
 	end
+end
+
+-- What an accessory may say (ItemList `accessory`): number fields (at least 0), flags, places.
+local ACCESSORY_NUMBERS: { [string]: boolean } = {
+	speed = true,
+	runBoost = true,
+	airJumps = true,
+	jump = true,
+	regen = true,
+	mana = true,
+	defense = true,
+	knockback = true,
+	swim = true,
+	attackSpeed = true,
+}
+local ACCESSORY_FLAGS: { [string]: boolean } = { noFallDamage = true, fireWalk = true }
+local WORN: { [string]: boolean } =
+	{ Feet = true, Hand = true, Back = true, Waist = true, Face = true, Head = true, Neck = true }
+
+local function checkAccessory(name: string, accessory: AccessorySpec)
+	for field, value in accessory :: { [string]: any } do
+		if ACCESSORY_NUMBERS[field] then
+			assert(
+				type(value) == "number" and value >= 0 and value < math.huge,
+				`Item {name}'s accessory {field} must be a number of at least 0`
+			)
+		elseif ACCESSORY_FLAGS[field] then
+			assert(type(value) == "boolean", `Item {name}'s accessory {field} must be true or false`)
+		elseif field == "worn" then
+			assert(WORN[value], `Item {name} is worn on an unknown place {value}`)
+		else
+			error(`Item {name}'s accessory has an unknown field {field}`)
+		end
+	end
+	assert((accessory.knockback or 0) <= 1, `Item {name}'s knockback resistance is above 1`)
+end
+
+local function checkMagic(name: string, magic: MagicSpec)
+	assert(magic.mana > 0 and magic.damage > 0, `Item {name}'s magic needs mana and damage above 0`)
+	assert(
+		magic.useTicks >= 1 and magic.useTicks == math.floor(magic.useTicks),
+		`Item {name}'s magic use time must be whole ticks`
+	)
+	assert(type(magic.projectile) == "string" and magic.projectile ~= "", `Item {name} casts no projectile`)
+	assert((magic.fire or 0) >= 0 and (magic.fire or 0) <= 1, `Item {name}'s fire chance is outside 0..1`)
+	assert((magic.knockback or 0) >= 0, `Item {name}'s knockback is below 0`)
 end
 
 -- Blocks placed by an item of ItemList (`places`, Minecraft's ItemNameBlockItem) -> that item.
@@ -180,6 +243,26 @@ for index, spec in ItemList do
 			freezeImmune = spec.tan.freezeImmune == true,
 		})
 	end
+	local vanity: number? = nil
+	if spec.vanity then
+		vanity = ARMOR_SLOT[spec.vanity]
+		assert(vanity, `Item {spec.name} has unknown vanity slot {spec.vanity}`)
+	end
+	if spec.accessory then
+		checkAccessory(spec.name, spec.accessory)
+	end
+	if spec.magic then
+		checkMagic(spec.name, spec.magic)
+	end
+	-- (Equipment and weapons are one item a slot: Terraria's accessories and social items, wands.)
+	if spec.accessory or vanity or spec.magic then
+		assert(armor == nil and spec.tool == nil, `Item {spec.name} is equipment or a weapon and armor or a tool`)
+		assert(spec.maxStack == 1, `Item {spec.name} must stack to 1`)
+		assert(
+			(if spec.accessory then 1 else 0) + (if vanity then 1 else 0) + (if spec.magic then 1 else 0) == 1,
+			`Item {spec.name} is more than one of an accessory, a vanity item and a weapon`
+		)
+	end
 	add({
 		id = Items.ITEM_BASE + index - 1,
 		name = spec.name,
@@ -195,6 +278,9 @@ for index, spec in ItemList do
 		model = spec.model,
 		material = spec.material or "SmoothPlastic",
 		tilt = spec.tilt or 0,
+		accessory = if spec.accessory then table.freeze(table.clone(spec.accessory)) else nil,
+		vanity = vanity,
+		magic = if spec.magic then table.freeze(table.clone(spec.magic)) else nil,
 	})
 end
 
@@ -223,6 +309,19 @@ end
 
 -- Every item, in creative inventory order.
 Items.list = list
+
+-- Item icons (TexturePack.Icons): every name an item's, every id "" (not made yet) or an image.
+local icons: { [number]: string } = {}
+for name, image in TexturePack.Icons do
+	assert(ids[name] ~= nil, `TexturePack.Icons names unknown item {name}`)
+	assert(
+		type(image) == "string" and (image == "" or string.match(image, "^rbxassetid://%d+$") ~= nil),
+		`TexturePack.Icons.{name} must be "" or "rbxassetid://<number>"`
+	)
+	if image ~= "" then
+		icons[ids[name]] = image
+	end
+end
 
 -- What a full bucket leaves when it is used up (Minecraft's craftRemainder(BUCKET)): the Bucket.
 local remainders: { [number]: number } = {}
@@ -315,6 +414,30 @@ end
 function Items.armorSlot(id: number): number?
 	local def = defs[id]
 	return if def and def.armor then def.armor.slot else nil
+end
+
+-- What an accessory does (nil: `id` is no accessory).
+function Items.accessory(id: number?): AccessorySpec?
+	local def = if id then defs[id] else nil
+	return if def then def.accessory else nil
+end
+
+-- The vanity armor slot (1 head .. 4 feet) a vanity item is worn in (nil: no vanity item).
+function Items.vanitySlot(id: number?): number?
+	local def = if id then defs[id] else nil
+	return if def then def.vanity else nil
+end
+
+-- A magic weapon's numbers (nil: `id` is no magic weapon).
+function Items.magic(id: number?): MagicSpec?
+	local def = if id then defs[id] else nil
+	return if def then def.magic else nil
+end
+
+-- The item's icon image (TexturePack.Icons, "rbxassetid://..."), nil while it has none: then
+-- inventories draw its model.
+function Items.icon(id: number?): string?
+	return if id then icons[id] else nil
 end
 
 -- The tool data of an item (nil for anything that is not a tool).

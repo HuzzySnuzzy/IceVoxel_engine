@@ -111,6 +111,7 @@ export type InventoryState = {
 		selected: number,
 		cursor: Stack?
 	) -> { Stack },
+	restoreEquipment: (self: InventoryState, key: any, equipment: Types.Equipment) -> (),
 }
 
 local InventoryState = {}
@@ -593,6 +594,32 @@ function InventoryState.restore(
 	end
 	player.dirty = true
 	return thrown
+end
+
+--[[
+	A saved character's equipment (Terraria's accessories, vanity armor and vanity accessories and
+	the hidden looks: Inventory/Types): replaces what the player wears there with copies of the
+	saved stacks, and the hidden bits. Nothing is checked or thrown here (the record was written
+	from a window); what the slots allow is Inventory/Menu's. A snapshot is due.
+]]
+function InventoryState.restoreEquipment(self: InventoryState, key: any, equipment: Types.Equipment)
+	local player = self.players[key]
+	if player == nil then
+		return
+	end
+	local inventory = player.window.inventory
+	local function copyInto(into: { [number]: Stack? }, from: { [number]: Stack? }, size: number)
+		table.clear(into)
+		for slot = 1, size do
+			into[slot] = Items.copyStack(from[slot])
+		end
+	end
+	copyInto(inventory.accessories, equipment.accessories, Types.ACCESSORY_SIZE)
+	copyInto(inventory.vanityArmor, equipment.vanityArmor, Types.VANITY_ARMOR_SIZE)
+	copyInto(inventory.vanityAccessories, equipment.vanityAccessories, Types.VANITY_ACCESSORY_SIZE)
+	local hidden = equipment.hidden
+	inventory.hidden = if hidden == hidden and hidden >= 0 then math.floor(hidden) % 65536 else 0
+	player.dirty = true
 end
 
 -- The players due a snapshot (clears their flags).

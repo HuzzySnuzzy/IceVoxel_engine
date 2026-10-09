@@ -1228,17 +1228,28 @@ function Menu.clear(inventory: Inventory): { Stack }
 	return stacks
 end
 
--- Deep copy (stacks too).
+-- Deep copy of slots 1..`size` of `store`.
+local function copyStore(store: { [number]: Stack? }, size: number): { [number]: Stack? }
+	local copied: { [number]: Stack? } = {}
+	for slot = 1, size do
+		copied[slot] = copy(store[slot])
+	end
+	return copied
+end
+
+-- Deep copy (stacks too; Terraria's equipment too).
 function Menu.copyInventory(inventory: Inventory): Inventory
-	local slots: { [number]: Stack? } = {}
-	for slot = 1, INVENTORY do
-		slots[slot] = copy(inventory.slots[slot])
-	end
-	local armor: { [number]: Stack? } = {}
-	for slot = 1, ARMOR do
-		armor[slot] = copy(inventory.armor[slot])
-	end
-	return { slots = slots, armor = armor, cursor = copy(inventory.cursor), selected = inventory.selected }
+	return {
+		slots = copyStore(inventory.slots, INVENTORY),
+		armor = copyStore(inventory.armor, ARMOR),
+		cursor = copy(inventory.cursor),
+		selected = inventory.selected,
+		accessories = copyStore(inventory.accessories, Types.ACCESSORY_SIZE),
+		vanityArmor = copyStore(inventory.vanityArmor, Types.VANITY_ARMOR_SIZE),
+		vanityAccessories = copyStore(inventory.vanityAccessories, Types.VANITY_ACCESSORY_SIZE),
+		hidden = inventory.hidden,
+		accessorySlots = inventory.accessorySlots,
+	}
 end
 
 -- Deep copy (inventory, container and stacks).

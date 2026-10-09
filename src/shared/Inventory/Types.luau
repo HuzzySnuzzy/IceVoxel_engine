@@ -32,8 +32,26 @@
 	carries it, and stacks with different data never merge (Inventory/Menu).
 
 	Window 0 is the inventory screen (its container the 2 x 2 grid); the others get ids 1..255.
+
+	Terraria's equipment (Config.Accessories, Items/Accessories) is in the inventory too:
+	ACCESSORY_SIZE accessory slots (`accessorySlots` of them open: Config.Accessories.Slots, one
+	more at each of its Ages; the server sets it, it is never saved), 4 vanity armor slots (the look
+	over each armor piece), ACCESSORY_SIZE vanity accessory slots (the look over each accessory),
+	and `hidden`, a bit per accessory slot (bit i - 1) and per armor slot (bit HIDE_ARMOR + i - 1)
+	whose look is not drawn (it still works). In window slot numbers they come after the hotbar,
+	so every slot above keeps its number:
+
+	    [n + 40, n + 47)  accessories 1..7          (ACCESSORY_START)
+	    [n + 47, n + 51)  vanity armor 1..4         (VANITY_ARMOR_START)
+	    [n + 51, n + 58)  vanity accessories 1..7   (VANITY_ACCESSORY_START; EQUIPMENT_END)
+
+	(Inventory/Menu numbers windows with PLAYER_SLOTS = 40 until these slots work; then
+	PLAYER_SLOTS becomes EQUIPMENT_END.) Saved records number a player's stacks by PLACE_*: 1..36
+	the slots, 37..40 armor, 41 the cursor, 42..48 accessories, 49..52 vanity armor, 53..59 vanity
+	accessories.
 ]]
 
+local Config = require(script.Parent.Parent.Config)
 local Items = require(script.Parent.Parent.Items)
 
 export type Stack = Items.Stack
@@ -47,6 +65,24 @@ export type Inventory = {
 	cursor: Stack?,
 	-- Hotbar slot in hand, 1..9.
 	selected: number,
+	-- 1..ACCESSORY_SIZE: Terraria's accessories (only the first `accessorySlots` work).
+	accessories: { [number]: Stack? },
+	-- 1..4: vanity armor, the look over armor slot 1..4.
+	vanityArmor: { [number]: Stack? },
+	-- 1..ACCESSORY_SIZE: vanity accessories, the look over accessory slot 1..7.
+	vanityAccessories: { [number]: Stack? },
+	-- Looks not drawn: bit i - 1 accessory slot i, bit HIDE_ARMOR + i - 1 armor slot i.
+	hidden: number,
+	-- Accessory slots open (Config.Accessories: the server sets it from the Age; not saved).
+	accessorySlots: number,
+}
+
+-- What a character wears besides armor (a saved record's equipment, Inventories.restoreEquipment).
+export type Equipment = {
+	accessories: { [number]: Stack? },
+	vanityArmor: { [number]: Stack? },
+	vanityAccessories: { [number]: Stack? },
+	hidden: number,
 }
 
 export type Container = {
@@ -146,9 +182,52 @@ Types.FURNACE_OUTPUT = 3
 -- Player attribute with the item id in the player's hand (0 = nothing), set by the server so every
 -- client can draw it in the character's hand.
 Types.HELD_ATTRIBUTE = "IceVoxelHeldItem"
+-- Player attribute with what the character shows (comma separated item ids, 0 none: head, chest,
+-- legs, feet, then the accessories drawn), set by the server so every client can draw it.
+Types.LOOKS_ATTRIBUTE = "IceVoxelLooks"
+
+--[[ Terraria's equipment (see the header) ]]
+
+-- Accessory slots a character has (open or not), vanity armor and vanity accessory slots.
+Types.ACCESSORY_SIZE = 7
+Types.VANITY_ARMOR_SIZE = 4
+Types.VANITY_ACCESSORY_SIZE = 7
+Types.EQUIPMENT_SIZE = Types.ACCESSORY_SIZE + Types.VANITY_ARMOR_SIZE + Types.VANITY_ACCESSORY_SIZE
+-- Window offsets past the container (after the 40 slots above).
+Types.ACCESSORY_START = 40
+Types.VANITY_ARMOR_START = Types.ACCESSORY_START + Types.ACCESSORY_SIZE -- 47
+Types.VANITY_ACCESSORY_START = Types.VANITY_ARMOR_START + Types.VANITY_ARMOR_SIZE -- 51
+Types.EQUIPMENT_END = Types.VANITY_ACCESSORY_START + Types.VANITY_ACCESSORY_SIZE -- 58
+-- `hidden`'s first armor bit (accessory slot i is bit i - 1).
+Types.HIDE_ARMOR = 8
+-- Saved records' places of a player's stacks (Save/PlayerCodec, Save/CharacterCodec).
+Types.PLACE_ARMOR = Types.INVENTORY_SIZE + 1 -- 37..40
+Types.PLACE_CURSOR = Types.INVENTORY_SIZE + Types.ARMOR_SIZE + 1 -- 41
+Types.PLACE_ACCESSORY = Types.PLACE_CURSOR + 1 -- 42..48
+Types.PLACE_VANITY_ARMOR = Types.PLACE_ACCESSORY + Types.ACCESSORY_SIZE -- 49..52
+Types.PLACE_VANITY_ACCESSORY = Types.PLACE_VANITY_ARMOR + Types.VANITY_ARMOR_SIZE -- 53..59
+Types.PLACE_END = Types.PLACE_VANITY_ACCESSORY + Types.VANITY_ACCESSORY_SIZE - 1 -- 59
+
+-- Accessory slots open to a character before any Age adds one.
+Types.BASE_ACCESSORY_SLOTS = math.clamp(math.floor(Config.Accessories.Slots), 0, Types.ACCESSORY_SIZE)
 
 function Types.newInventory(): Inventory
-	return { slots = {}, armor = {}, cursor = nil, selected = 1 }
+	return {
+		slots = {},
+		armor = {},
+		cursor = nil,
+		selected = 1,
+		accessories = {},
+		vanityArmor = {},
+		vanityAccessories = {},
+		hidden = 0,
+		accessorySlots = Types.BASE_ACCESSORY_SLOTS,
+	}
+end
+
+-- No equipment: nothing worn, nothing hidden.
+function Types.newEquipment(): Equipment
+	return { accessories = {}, vanityArmor = {}, vanityAccessories = {}, hidden = 0 }
 end
 
 -- A crafting container: the inventory's 2 x 2 grid ("inventory") or a crafting table's 3 x 3

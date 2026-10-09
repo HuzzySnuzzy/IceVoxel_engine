@@ -108,6 +108,8 @@ local started = false
 -- The player whose message is being handled (Use, Inventory), whose sound budget a chest lid it
 -- opens or closes uses up (Audio/Sounds.allow); nil for the server's own closes.
 local actor: Player? = nil
+-- Whether a dying player keeps everything besides the keepInventory rule (`setKeepRule`).
+local keepRule: ((player: Player) -> boolean)? = nil
 -- Creative throw budget per player.
 local throwBudget: { [Player]: { tokens: number, last: number } } = {}
 
@@ -189,6 +191,22 @@ function Inventories.restore(
 	cursor: Stack?
 )
 	throw(player, state:restore(player, slots, armor, selected, cursor), false)
+end
+
+--[[
+	A saved character's equipment comes back (Terraria's accessories, vanity and hidden looks:
+	InventoryState.restoreEquipment), beside `restore`'s slots and armor.
+]]
+function Inventories.restoreEquipment(player: Player, equipment: Types.Equipment)
+	state:restoreEquipment(player, equipment)
+end
+
+--[[
+	Whether a dying player keeps their inventory besides the keepInventory game rule (nil: only the
+	rule): server Players/CharacterStore's difficulty (a Classic character keeps everything).
+]]
+function Inventories.setKeepRule(rule: ((player: Player) -> boolean)?)
+	keepRule = rule
 end
 
 -- Sends the player a snapshot this frame.
@@ -469,6 +487,7 @@ local function onCharacter(player: Player, character: Model)
 	if humanoid and humanoid:IsA("Humanoid") then
 		humanoid.Died:Connect(function()
 			local keep = GameModeRules.keepsInventory(GameMode.of(player), Config.Gameplay.KeepInventory)
+				or (keepRule ~= nil and keepRule(player))
 			throw(player, state:die(player, keep), true)
 		end)
 	end

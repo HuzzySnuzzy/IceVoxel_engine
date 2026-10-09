@@ -3,8 +3,8 @@
 	Status effects (Minecraft 1.20.1's MobEffect and MobEffectInstance), shared and pure: the
 	registry of EffectList (ids are u8 list positions, append only: 1 Speed .. 18 Glowing,
 	19 Oil Coated, 20 Fuel Soaked, 21..24 Tough As Nails' Thirst, Internal Warmth, Internal Chill,
-	Climate Clemency) and the rules both sides need, so the client's prediction and the server's
-	checks agree:
+	Climate Clemency, 25 Terraria's Mana Sickness) and the rules both sides need, so the client's
+	prediction and the server's checks agree:
 
 	  Registry   `id.Name`, `get`, `list`, `find` (a name or an /effect id, "minecraft:" or not, any
 	             case), `levelName` ("Speed II": the amplifier + 1 in roman numerals up to X, as

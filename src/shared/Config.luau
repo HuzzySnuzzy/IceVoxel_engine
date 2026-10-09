@@ -1565,6 +1565,136 @@ local Config = {
 		-- the darkest cave reads like an overcast day.
 		NightVisionAmbient = 150,
 	},
+
+	-- Characters (Terraria's player files) -----------------------------------------------------------
+
+	--[[
+		Terraria's players: each Roblox user keeps several characters, chosen on the title screen
+		before the world (Shared/Characters; server Players/CharacterStore; client Ui/MainMenu).
+		A character carries its look (an R15 avatar made from the user's own, Shared/Characters/
+		Appearance), name, difficulty, inventory and equipment, health, mana, status effects,
+		Tough As Nails and Knowledge, Ages and skills from world to world; a world keeps only where
+		each character stood and its game mode (server Save/CharacterCodec, Save/
+		WorldCharacterCodec). In Studio this needs API access, as Save; without it characters last
+		for the session and the title screen says so.
+	]]
+	Characters = {
+		-- false: no characters (the title screen goes straight to the world buttons, inventories stay
+		-- in each world's player records and progression per user, as before).
+		Enabled = true,
+		-- The DataStore: an index per user ("u<UserId>") and a key per character ("u<UserId>/c<id>").
+		StoreName = "IceVoxelCharacters_v1",
+		-- Most characters a user keeps (Terraria has no limit; the list is one key).
+		MaxPerUser = 10,
+		-- Characters (code points) in a name, after trimming (Terraria's 20).
+		NameLength = 20,
+		-- A new character's difficulty: "Classic" (keeps everything on death), "Mediumcore" (drops
+		-- everything, Minecraft's rule) or "Hardcore" (drops everything and dies for good).
+		DefaultDifficulty = "Classic",
+		-- Seconds between saves of a character that changed (and on leaving and shutdown).
+		SaveInterval = 60,
+		-- Seconds a selected character waits for another server's live lock on it (that server is
+		-- still saving it) before the player is told it is open elsewhere.
+		LockWait = 30,
+		-- What a body may be (HumanoidDescription scales, Roblox's avatar rules): { least, most }.
+		-- Body type and proportion 0 are the classic blocky shape. The hull stays Minecraft's
+		-- 0.6 x 1.8 blocks whatever the look.
+		Scales = {
+			height = { 0.9, 1.05 },
+			width = { 0.7, 1 },
+			depth = { 0.7, 1 },
+			head = { 0.95, 1 },
+			bodyType = { 0, 1 },
+			proportion = { 0, 1 },
+		},
+		-- Most items of the user's own avatar a character keeps (accessories, clothing, body parts,
+		-- animations), and seconds the server waits after an edit before rebuilding the preview.
+		MaxAssets = 40,
+		PreviewDelay = 0.5,
+		-- Make a first character for a returning player from their old progress, and bring the
+		-- inventories of their old world records into the first character entering each world.
+		Migrate = true,
+	},
+
+	-- Accessories and vanity (Terraria's equipment) ----------------------------------------------------
+
+	--[[
+		Terraria's accessory slots, vanity armor and vanity accessories (Inventory/Types, Items/
+		Accessories; ItemList `accessory`, `vanity`). An accessory works from its slot (Hermes
+		Boots, Cloud in a Bottle, Band of Regeneration...); a vanity item only changes what the
+		character looks like.
+	]]
+	Accessories = {
+		-- Accessory slots every character has open (Terraria's 5), and the Ages (Shared/
+		-- Progression/Ages ids) that open one more each (Terraria's Demon Heart and Master mode):
+		-- at most Inventory/Types.ACCESSORY_SIZE (7) in all.
+		Slots = 5,
+		ExtraSlotAges = { "industrial", "atomic" },
+		-- Hermes Boots: ticks of sprinting on the ground before the speed builds, then ticks to build
+		-- it to the full `runBoost` (Terraria's run acceleration up to its accRunSpeed).
+		RunDelay = 10,
+		RunRamp = 12,
+		-- A Cloud in a Bottle's jump: take-off speed in blocks a tick (a ground jump is 0.42: 1.25
+		-- blocks; 0.36 is 0.96 blocks, Terraria's three quarters of a jump).
+		AirJumpPower = 0.36,
+	},
+
+	-- Mana and magic -----------------------------------------------------------------------------------
+
+	--[[
+		Terraria's mana (Shared/Mana, server Players/Mana): 20 to start, Mana Crystals (five Fallen
+		Stars) add 20 each up to 200, accessories more; it comes back by Terraria 1.4.4's
+		regeneration (faster standing still and when nearly full) and is spent by magic weapons
+		(Wand of Sparking, Emerald Staff, Water Bolt). Mana potions restore it and give Mana
+		Sickness. Fallen Stars fall at night.
+	]]
+	Mana = {
+		-- false: no mana (no stars on the HUD, no falling stars; magic weapons do nothing).
+		Enabled = true,
+		-- Mana to start with, per Mana Crystal used, crystals usable, and the most with everything.
+		Base = 20,
+		PerCrystal = 20,
+		MaxCrystals = 9,
+		Max = 400,
+		-- Mana Sickness: seconds each mana potion adds, the most it reaches, and the share of magic
+		-- damage taken off per second left (Terraria: 5 s, 10 s, 5%).
+		SicknessSeconds = 5,
+		SicknessMax = 10,
+		SicknessDamage = 0.05,
+		-- Seconds the HUD's stars stay after mana changed (they show while a magic item is held or
+		-- mana is not full).
+		HudLinger = 3,
+		-- Fallen Stars: each player sees about PerNight a night, falling FallHeight blocks onto the
+		-- ground MinDistance..MaxDistance blocks away, between NightStart and NightEnd (time of day,
+		-- ticks); at NightEnd the ones still on the ground vanish.
+		Stars = {
+			Enabled = true,
+			PerNight = 5,
+			MinDistance = 16,
+			MaxDistance = 48,
+			FallHeight = 40,
+			NightStart = 13000,
+			NightEnd = 23000,
+		},
+	},
+
+	-- GUI scale (client) -------------------------------------------------------------------------------
+
+	--[[
+		Minecraft's GUI Scale for every part of the interface (client Ui/GuiScale, Ui/UiScale): the
+		automatic scale is the largest that keeps 320 x 240 GUI pixels on the screen, the setting
+		picks a smaller one, and touch screens take eighths.
+	]]
+	UiScale = {
+		-- Largest scale (Minecraft has none: a 4K screen's automatic scale is 9).
+		MaxScale = 12,
+		-- Widgets drawn in fixed pixels (F3, the world map's bar, billboards) were drawn for this
+		-- scale (1920 x 1080's automatic one) and keep at least MinReference of their size.
+		ReferenceScale = 4,
+		MinReference = 0.75,
+		-- The minimap's side in GUI pixels (times the scale on screen; Map.MinimapSize is its image).
+		Minimap = 56,
+	},
 }
 
 return Config

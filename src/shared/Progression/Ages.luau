@@ -17,7 +17,10 @@
 	                  golden tools and armor, iron and gold blocks and nuggets, gold smelting,
 	                  Shears, the Bucket, Flint and Steel, the Lantern, the Canteen and the
 	                  Thermometer, Rails, osmium smelting, and brewing: every potion's base variant
-	                  (Shared/Effects/PotionList; Minecraft's brewing waits for the Nether).
+	                  (Shared/Effects/PotionList; Minecraft's brewing waits for the Nether) and the
+	                  Mana Potion; Terraria's Aglet, Anklet of the Wind, Band of Starpower,
+	                  Obsidian Skull, Emerald Staff and Tuxedo (the Mana Crystal, Lesser Mana
+	                  Potion and Top Hat are the Stone Age's).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
@@ -103,6 +106,15 @@ for _, name in
 		"Thermometer",
 		"OsmiumIngot",
 		"Rail",
+		-- (Terraria's things of iron, gold and emerald, and the Mana Potion: brewing.)
+		"Aglet",
+		"AnkletOfTheWind",
+		"BandOfStarpower",
+		"ObsidianSkull",
+		"EmeraldStaff",
+		"ManaPotion",
+		"TuxedoShirt",
+		"TuxedoPants",
 	}
 do
 	table.insert(iron, name)

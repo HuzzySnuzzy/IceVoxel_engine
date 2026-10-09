@@ -449,9 +449,19 @@ return function(t, shared, require, _server, client)
 		local function uses(pattern: string): boolean
 			return string.find(source, pattern) ~= nil
 		end
+		-- Terraria's sounds whose players are still being built (the double jump: the accessories'
+		-- movement; the cast and mana full: the mana HUD and magic). Each comes off this list
+		-- with the code that plays it.
+		local pending: { [string]: boolean } = {
+			["entity.player.double_jump"] = true,
+			["item.magic.cast"] = true,
+			["entity.player.mana_full"] = true,
+		}
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
-			if sound.side == "server" then
+			if pending[sound.name] then
+				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is played now: take it off the list`)
+			elseif sound.side == "server" then
 				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is the server's to play`)
 			elseif sound.category and string.sub(sound.category, 1, 6) == "block." then
 				-- Block events go by action: playBlock(block, "hit", ...) / Sounds.block(block, "step").

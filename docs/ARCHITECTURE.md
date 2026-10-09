@@ -6161,6 +6161,43 @@ through `Origin` either way (the identity while it stays at 0).
   stand at `Origin.blocksToRender` with a mover; F3 adds the `origin` line (`Rebase.stats`, the
   move epoch and the players tracked).
 
+## Terraria's characters, equipment and mana (`Characters/`, `Items/Accessories`, `Net/CharacterSync`, `Net/MagicSync`, server `Save/CharacterCodec`, `Save/WorldCharacterCodec`, `Players/Mana`)
+
+Terraria's player files, accessories, vanity and mana, on Minecraft's units (blocks, 20 ticks a
+second, half hearts). The shared groundwork (data, codecs, messages; nothing plays differently yet):
+
+- **Characters** (`Config.Characters`, `Shared/Characters`): up to 10 per Roblox user, chosen on the
+  title screen before the world. A character carries its look, name, difficulty (Classic keeps
+  everything on death, Mediumcore drops it, Hardcore dies for good), inventory and equipment,
+  health, mana and Mana Crystals, effects, Tough As Nails and its Knowledge/Ages/skills between
+  worlds; a world keeps only where each character stood, its game mode and a spawn point.
+  `Save/CharacterCodec` is the record (inventory places 1..59: `Inventory/Types.PLACE_*`), its
+  DataStore value (`{ v, data, progress, lock }`: the session lock inside the value, so loading
+  with it and every save are one UpdateAsync each) and the user's index (`{ v, next, chars }`);
+  `Save/WorldCharacterCodec` the per-world entry. `Characters/Appearance` is the R15 look: body
+  colours, scales within Roblox's avatar rules, and a snapshot of the user's own avatar (body
+  parts, face, clothing, animations, accessories) with a worn flag each; `sanitize` keeps only
+  the server's snapshot, so a client switches the user's own things on and off and never names an
+  asset. `Net/CharacterSync` carries the title screen's messages (CharacterAction 25, Characters
+  28, Avatar 29) and EnterWorld's character id.
+- **Equipment** (`Config.Accessories`, ItemList `accessory` / `vanity`): `Inventory/Types` has 7
+  accessory slots (5 open, one more at the Industrial and the Atomic Age), 4 vanity armour and 7
+  vanity accessory slots, hide bits per accessory and armour slot; their window numbers come after
+  the hotbar (`[n + 40, n + 58)`), so no existing slot number moves. `Items/Accessories.stats`
+  adds up what the open slots wear (each item once; hiding a look keeps its effect), the same on
+  both sides from the same inventory: Hermes Boots (sprint builds to x1.4), Cloud in a Bottle (one
+  air jump of 0.96 blocks), Shiny Red Balloon (+0.1 jump), Lucky Horseshoe (no fall damage), Aglet
+  and Anklet of the Wind (+5% / +10% speed), Band of Regeneration (a half heart every 10 s), Band of
+  Starpower (+20 mana), Obsidian Skull (+1 armour, no campfire hurt), Flipper (swim x2), Cobalt
+  Shield (no knockback, +1 armour), Feral Claws (+12% attack speed). Mineshaft chests hide most of
+  them (a fourth loot pool after Minecraft's three); spiders drop Feral Claws.
+- **Mana** (`Config.Mana`, server `Players/Mana`): 20, +20 a Mana Crystal (five Fallen Stars) up
+  to 200, accessories on top, 400 at most; Mana Sickness is effect 25. Magic weapons (ItemList
+  `magic`: Wand of Sparking, Emerald Staff, Water Bolt) and the mana potions are items;
+  `Net/MagicSync` carries HeldUse (26), Mana (30) and Projectiles (31).
+- **GUI scale**: client `Ui/GuiScale` is Minecraft's `Window.calculateScale` (Auto = the largest
+  scale leaving 320 x 240 GUI pixels: 4 at 1920 x 1080, 6 at 2560 x 1440; eighths on touch).
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps
@@ -6544,7 +6581,9 @@ Saving worlds).
   `ItemList` (ids from 4096).
 - Status effect ids are list positions in `Effects/EffectList` (sent as a u8), and potion items
   follow `Effects/PotionList`'s order (and each potion's base, strong, long): append, never
-  reorder. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
+  reorder. ItemList's potion loop covers the first 12 potions only (Terraria's items come after
+  it): a new potion needs a loop of its own at the end of ItemList (ItemList asserts it). A new
+  item gets a blank `TexturePack.Icons` entry, so its picture is one id to paste later. Every hurt a player takes on the server goes through `Players/Effects.incomingDamage`
   (Resistance), and the mining factor reaches both the client's progress and ServerNet's check
   (`Mining`'s `factor`), or their timings drift apart.
 - `Inventory/Menu` and `Crafting` must stay pure and deterministic: the client predicts every

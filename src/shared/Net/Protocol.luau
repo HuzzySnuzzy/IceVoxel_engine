@@ -93,8 +93,9 @@
 	                 the seed as typed (MAX_WORLD_SEED). Other ids, flags, lengths or invalid UTF-8
 	                 are malformed; the server checks the rest (operators only, once:
 	                 Players/WorldMenu, WorldSettings.validate) and answers with CreateWorldResult
-	  EnterWorld     nothing: the title screen's Join World (or a created world): the server loads
-	                 the player's character once the world exists
+	  EnterWorld     the title screen's Join World (or a created world): the server loads the
+	                 player's character once the world exists; u32 the character played (Net/
+	                 CharacterSync.encodeEnter; empty or 0: none, Config.Characters.Enabled off)
 	  WorldAction    u8 action (WorldAction: 1 list, 2 load, 3 delete, 4 rename), then for 2..4
 	                 u16 length + the world's id (at most MAX_WORLD_ID bytes), and for 4 u16
 	                 length + the new name (MAX_WORLD_NAME): the title screen's Load World screen
@@ -104,6 +105,10 @@
 	                 WorldList saying how it went
 	  Spectate       f64 userId (0: stopped): the player this one spectates, so the server keeps
 	                 them in its interest (Net/PlayerSync: the codecs of players' positions)
+	  CharacterAction  the title screen's characters: list, create, delete, rename, select, the
+	                 avatar editor's look and previews (Net/CharacterSync, its codecs and bytes)
+	  HeldUse        use the held item without a block: a magic weapon casts, a Mana Crystal is
+	                 used up (Net/MagicSync)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -260,6 +265,10 @@
 	  Players        who this player now sees (tracks: slot, user id, game mode, pose) and no
 	                 longer sees (untracks) (Net/PlayerSync); their poses then come on the
 	                 unreliable remote Net/Remotes.moves(), and the player's own Moves go up it
+	  Characters     the user's characters for the title screen (Net/CharacterSync)
+	  Avatar         the user's own avatar for the character editor (Net/CharacterSync)
+	  Mana           the player's mana and max mana (Net/MagicSync)
+	  Projectiles    magic projectiles near the player: spawn, sync, end (Net/MagicSync)
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -329,6 +338,8 @@ Protocol.ClientMessage = {
 	EnterWorld = 22,
 	WorldAction = 23,
 	Spectate = 24,
+	CharacterAction = 25,
+	HeldUse = 26,
 }
 
 Protocol.ServerMessage = {
@@ -359,6 +370,10 @@ Protocol.ServerMessage = {
 	Lightning = 25,
 	Teleport = 26,
 	Players = 27,
+	Characters = 28,
+	Avatar = 29,
+	Mana = 30,
+	Projectiles = 31,
 }
 
 Protocol.EditAction = {

@@ -440,6 +440,36 @@ for _, variant in PotionList.all() do
 	mix({ variant.from, variant.with }, variant.item)
 end
 
+--[[
+	Terraria's things, made from what this game has (Config.Accessories, Mana). Terraria finds most
+	early accessories in chests (here Generation/Mineshafts' fourth loot pool and spiders' Feral
+	Claws); the ones made here:
+	  Aglet               a Leather and two Iron Nuggets (the lace's leather, its metal tip)
+	  Anklet of the Wind  three Feathers, a String and an Emerald (Terraria's jungle find)
+	  Band of Starpower   four Gold Ingots around a Fallen Star (" G ", "GSG", " G ")
+	  Obsidian Skull      six Obsidian in a skull ("OOO", "O O", " O "; Terraria's 20 at a
+	                      furnace: obsidian needs a diamond pickaxe here, which is gate enough)
+	Mana (Shared/Mana): five Fallen Stars make a Mana Crystal (Terraria's, by hand: here in a
+	crafting table, five don't fit the 2 x 2); two Purified Water Bottles with a Fallen Star and Glow
+	Dust brew two Lesser Mana Potions, and two of those with Glow Lichen (Terraria's glowing
+	mushroom) two Mana Potions. The Emerald Staff: three Emeralds at the head of two Sticks on the
+	diagonal (Terraria's gem staves). Vanity clothes: a Top Hat of five Leather (" L ", " L ",
+	"LLL": crown and brim), a Tuxedo Shirt of two White Wool, two Leather and a String, Tuxedo
+	Pants of three Leather and a String. Progression/Ages opens the ones of iron, gold and emerald
+	in the Iron Age.
+]]
+mix({ "Leather", "IronNugget", "IronNugget" }, "Aglet")
+mix({ "Feather", "Feather", "Feather", "String", "Emerald" }, "AnkletOfTheWind")
+shape({ " G ", "GSG", " G " }, { G = "GoldIngot", S = "FallenStar" }, "BandOfStarpower")
+shape({ "OOO", "O O", " O " }, { O = "Obsidian" }, "ObsidianSkull")
+mix({ "FallenStar", "FallenStar", "FallenStar", "FallenStar", "FallenStar" }, "ManaCrystal")
+mix({ "PurifiedWaterBottle", "PurifiedWaterBottle", "FallenStar", "GlowDust" }, "LesserManaPotion", 2)
+mix({ "LesserManaPotion", "LesserManaPotion", "GlowLichen" }, "ManaPotion", 2)
+shape({ " EE", " SE", "S  " }, { E = "Emerald", S = "Stick" }, "EmeraldStaff")
+shape({ " L ", " L ", "LLL" }, { L = "Leather" }, "TopHat")
+mix({ "WhiteWool", "WhiteWool", "Leather", "Leather", "String" }, "TuxedoShirt")
+mix({ "Leather", "Leather", "Leather", "String" }, "TuxedoPants")
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,

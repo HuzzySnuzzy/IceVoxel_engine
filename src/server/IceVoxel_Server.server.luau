@@ -59,7 +59,8 @@
 	                   settings and replication, SAVE / LOAD / DETECT, a jigsaw's Generate, who may
 	                   use them), and generated structures' chests filled on first use
 	 10. survival   -> Tough As Nails' thirst and body temperature (Players/ToughAsNails:
-	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state)
+	                   drinking, dehydration, hypothermia and hyperthermia, the HUD's state), and
+	                   each player's mana (Players/Mana: Terraria's, kept with the character)
 	 11. mobs       -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
 	                   blasts hurting them), and eating what they drop (Players/Eating)
@@ -135,6 +136,7 @@ local ItemUse = require(Server.Players.ItemUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
+local Mana = require(Server.Players.Mana)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
@@ -224,6 +226,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	StructureBlocks.start(net, world)
 	-- Thirst and temperature after inventories (drinks, armor) and machines (warm generators).
 	ToughAsNails.start(net, world)
+	-- Mana after inventories (what is held) and effects (Mana Sickness).
+	Mana.start(net)
 	-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
 	Mobs.start(net, world)
 	-- Other players' poses to those who may see them (Players/PlayerRelay; with

@@ -424,7 +424,11 @@ Mineshafts.reach = reach
 	fewest, most } per entry. Pool 1: the golden apples, name tag and enchanted book are left out
 	(nothing). Pool 2: redstone -> raw iron, lapis -> raw gold, bread -> cooked porkchop, glow
 	berries -> glow dust, the three seeds -> mint leaves, ginger root and straw. Pool 3: the
-	powered, detector and activator rails -> nothing, and Supplementaries' rope.
+	powered, detector and activator rails -> nothing, and Supplementaries' rope. Pool 4 is
+	Terraria's underground chest find (one roll, after the others so they roll as before): an
+	accessory in about 3 chests of 10 (Hermes Boots, Cloud in a Bottle, Band of Regeneration,
+	Shiny Red Balloon, Lucky Horseshoe, Flipper, Cobalt Shield), a Wand of Sparking or Water Bolt,
+	or Lesser Mana Potions; nothing in more than half.
 ]]
 local LOOT: { { rolls: { number }, entries: { { any } } } } = {
 	{ rolls = { 1, 1 }, entries = { { "IronPickaxe", 5, 1, 1 }, { false, 66, 0, 0 } } },
@@ -447,6 +451,22 @@ local LOOT: { { rolls: { number }, entries: { { any } } } } = {
 	{
 		rolls = { 3, 3 },
 		entries = { { "Rail", 20, 4, 8 }, { "Torch", 15, 1, 16 }, { "Rope", 10, 4, 8 }, { false, 15, 0, 0 } },
+	},
+	{
+		rolls = { 1, 1 },
+		entries = {
+			{ false, 60, 0, 0 },
+			{ "HermesBoots", 6, 1, 1 },
+			{ "CloudInABottle", 7, 1, 1 },
+			{ "BandOfRegeneration", 6, 1, 1 },
+			{ "ShinyRedBalloon", 3, 1, 1 },
+			{ "LuckyHorseshoe", 3, 1, 1 },
+			{ "Flipper", 4, 1, 1 },
+			{ "CobaltShield", 2, 1, 1 },
+			{ "WandOfSparking", 6, 1, 1 },
+			{ "WaterBolt", 2, 1, 1 },
+			{ "LesserManaPotion", 6, 1, 2 },
+		},
 	},
 }
 Mineshafts.LOOT = LOOT

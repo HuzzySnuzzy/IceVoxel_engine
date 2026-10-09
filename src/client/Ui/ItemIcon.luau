@@ -25,6 +25,11 @@
 
 	`ItemIcon.slot` is an inventory slot with an icon and the hover overlay (`big`: a result slot's
 	large frame).
+
+	An item with a picture in Shared/TexturePack's `Icons` (Items.icon: filled in, not "") is drawn
+	as that image instead of its model (pixel art kept sharp: ResamplerMode.Pixelated); the image
+	label is made the first time an icon needs one. Items whose entry is still blank keep their
+	model, so filling an icon in later is all it takes to change the look.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -94,6 +99,8 @@ type Self = ItemIcon & {
 	-- The durability or energy bar (made when first needed) and its coloured part.
 	bar: Frame?,
 	barFill: Frame?,
+	-- The item's picture (TexturePack.Icons), made when first needed.
+	image: ImageLabel?,
 }
 
 -- An inventory slot: the inset frame (a TextButton), the icon and the hover overlay.
@@ -237,6 +244,7 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 		block = nil,
 		bar = nil,
 		barFill = nil,
+		image = nil,
 	}
 	live[self] = true
 	return (setmetatable(self, ItemIcon) :: any) :: ItemIcon
@@ -308,7 +316,32 @@ function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?
 		end
 		self.item = item
 		self.model = nil
-		if item then
+		local picture = Items.icon(item)
+		local image = self.image
+		if picture then
+			if image == nil then
+				local label = Instance.new("ImageLabel")
+				label.Name = "Icon"
+				label.BackgroundTransparency = 1
+				label.BorderSizePixel = 0
+				label.Size = UDim2.fromScale(1, 1)
+				label.ResampleMode = Enum.ResamplerMode.Pixelated
+				label.ZIndex = 1
+				label.ImageColor3 = self.viewport.ImageColor3
+				label.ImageTransparency = self.viewport.ImageTransparency
+				label.Parent = self.root
+				image = label
+				self.image = label
+			end
+			assert(image, "icon image")
+			image.Image = picture
+			image.Visible = true
+			self.viewport.Visible = false
+		elseif image and image.Visible then
+			image.Visible = false
+			self.viewport.Visible = true
+		end
+		if item and picture == nil then
 			local new = takeModel(item)
 			local block = ItemModels.isBlock(item)
 			if block ~= self.block then
@@ -358,6 +391,11 @@ function ItemIcon.setDimmed(self: Self, dimmed: boolean, mild: boolean?)
 			then 0
 			elseif mild then MILD_TRANSPARENCY
 			else DIMMED_TRANSPARENCY
+		local image = self.image
+		if image then
+			image.ImageColor3 = colour
+			image.ImageTransparency = self.viewport.ImageTransparency
+		end
 	end
 end
 

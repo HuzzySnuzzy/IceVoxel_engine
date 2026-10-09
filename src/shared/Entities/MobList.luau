@@ -299,7 +299,11 @@ table.insert(list, {
 	climbs = true,
 	darkOnly = true,
 	leap = true,
-	drops = { { item = "String", min = 0, max = 2 } },
+	-- (Feral Claws: Terraria's jungle accessory, a spider's now and then, killed by a player.)
+	drops = {
+		{ item = "String", min = 0, max = 2 },
+		{ item = "FeralClaws", min = 1, max = 1, chance = 0.025, byPlayer = true },
+	},
 	spawn = { weight = 100, group = { 1, 4 } },
 	sounds = { hurt = "entity.spider.hurt", death = "entity.spider.death" },
 	parts = {
