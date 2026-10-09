@@ -1,10 +1,10 @@
 --[[
 	Returning players' old data into characters (server Save/CharacterMigration, Config.Characters
 	.Migrate): the old progress becomes a Mediumcore "legacy" character with the user's avatar all
-	worn; an old per-world player record (Save/PlayerCodec version 1) is taken in once per world by
-	the first character entering it (its place and game mode to the world's entry for that
-	character, its slots, armor and cursor into the character's inventory, what does not fit
-	listed to drop), the world keeping who took it (WorldMeta's legacyImported, saved and read
+	worn; an old per-world player record (Save/PlayerCodec, version 1 or 2) is taken in once per
+	world by the first character entering it (its place and game mode to the world's entry for
+	that character, its slots, armor, equipment and cursor into the character's inventory, what
+	does not fit listed to drop), the world keeping who took it (WorldMeta's legacyImported, saved and read
 	back) and the character the world's id; and what a world keeps of each character (WorldStore's
 	entries "<id>/c/<userId>_<charId>": written, read back, in order, deleted with the world).
 ]]
@@ -316,6 +316,32 @@ return function(t, shared, require, server)
 		f3.env.wait(1000)
 		t.eq(WorldStore.delete(saves3, again.id), true)
 		t.eq(f.data[WorldMeta.characterKey(again.id, USER, record.id)], nil)
+	end)
+
+	t.test("character migration: a version 2 record's equipment goes to the same place or the bag", function()
+		local record = CharacterCodec.new(5, "Worn", Characters.Difficulty.Classic, Appearance.default(), 0)
+		record.accessories[2] = Items.newStack(Items.id.Aglet, 1)
+		local old = oldRecord()
+		old.accessories[1] = Items.newStack(Items.id.HermesBoots, 1)
+		old.accessories[2] = Items.newStack(Items.id.CloudInABottle, 1)
+		old.vanityArmor[1] = Items.newStack(Items.id.TopHat, 1)
+		old.vanityAccessories[7] = Items.newStack(Items.id.ShinyRedBalloon, 1)
+		local leftovers = CharacterMigration.import(record, old)
+		t.eq(record.accessories[1].item, Items.id.HermesBoots, "an empty accessory slot takes it")
+		t.eq(record.accessories[2].item, Items.id.Aglet, "the character's own stays")
+		t.eq(record.vanityArmor[1].item, Items.id.TopHat)
+		t.eq(record.vanityAccessories[7].item, Items.id.ShinyRedBalloon)
+		local clouds = 0
+		for slot = 1, Types.INVENTORY_SIZE do
+			local stack = record.slots[slot]
+			if stack and stack.item == Items.id.CloudInABottle then
+				clouds += stack.count
+			end
+		end
+		t.eq(clouds, 1, "a taken accessory slot: into the bag")
+		t.eq(#leftovers, 0)
+		t.eq(old.accessories[1].item, Items.id.HermesBoots, "the old record untouched")
+		t.ok(record.accessories[1] ~= old.accessories[1], "copies, not the old record's stacks")
 	end)
 
 	t.test("character migration: an equipment record (version 2) round trips; version 1 still reads", function()

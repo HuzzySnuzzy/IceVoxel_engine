@@ -6177,7 +6177,7 @@ through `Origin` either way (the identity while it stays at 0).
 ## Terraria's characters, equipment and mana (`Characters/`, `Items/Accessories`, `Net/CharacterSync`, `Net/MagicSync`, server `Save/CharacterCodec`, `Save/WorldCharacterCodec`, `Players/Mana`)
 
 Terraria's player files, accessories, vanity and mana, on Minecraft's units (blocks, 20 ticks a
-second, half hearts). The shared groundwork (data, codecs, messages; nothing plays differently yet):
+second, half hearts). The shared groundwork (data, codecs, messages), then how each part works:
 
 - **Characters** (`Config.Characters`, `Shared/Characters`): up to 10 per Roblox user, chosen on the
   title screen before the world. A character carries its look, name, difficulty (Classic keeps
@@ -6212,109 +6212,6 @@ second, half hearts). The shared groundwork (data, codecs, messages; nothing pla
 - **GUI scale**: client `Ui/GuiScale` is Minecraft's `Window.calculateScale` (Auto = the largest
   scale leaving 320 x 240 GUI pixels: 4 at 1920 x 1080, 6 at 2560 x 1440; eighths on touch); every
   part of the interface follows it (see "GUI scale").
-
-## GUI scale (client `Ui/GuiScale`, `Ui/UiScale`, `Ui/HudLayout`)
-
-One scale for the whole interface, Minecraft's. Before, Auto was capped at 3 and the setting could
-only lower it, so on phones and in most Studio windows 2, 3 and Auto drew the same; the minimap,
-F3, the crosshair and the world map's chrome were fixed screen pixels, and everything in the top
-right corner was pinned to the 192 pixel minimap (on a 667 × 375 phone the effect icons ran past the
-bottom of the screen and the saving icon sat on the minimap).
-
-- **The scale** (`Ui/GuiScale`, pure, tested): Minecraft 1.20.1's `Window.calculateScale`. Auto is
-  the largest whole scale that still leaves 320 × 240 GUI pixels on the screen: 2 at 640 × 480, 3 at
-  1280 × 720, 4 at 1920 × 1080 (a third bigger than the old cap of 3, which stays a choice), 6 at
-  2560 × 1440, 9 on a 3840 × 2160 window (`Config.UiScale.MaxScale` 12 is only a sanity cap). Touch
-  screens take eighths of min(w / 320, h / 240): 1.5 on 667 × 375, 1.625 on 844 × 390. The GUI Scale
-  button offers Auto, then 1 up to that largest (`maxChoice`; Settings/State's per-screen limit,
-  set by the Options menu when it shows and when the window changes), so every choice draws
-  differently; a stored choice above a screen's largest is kept and acts as the largest there, as
-  Minecraft's does. `fit` shrinks it for content that does not fit (whole scales at and above 1
-  on a desktop, eighths otherwise, never below 0.5); `reference` = scale / 4, at least 0.75, is for
-  widgets drawn in fixed pixels at 1080p's Auto.
-- **One source** (`Ui/UiScale`, glue): the camera's `ViewportSize` (hooked again when the camera
-  changes), one touch flag (`UserInputService.PreferredInput` is Touch; `TouchEnabled` where that
-  property is missing: a touch laptop used with its mouse is a desktop), and the safe area's insets
-  and Roblox's top bar, measured with three empty probe ScreenGuis (ScreenInsets None,
-  DeviceSafeInsets, CoreUISafeInsets) whose AbsolutePositions differ by exactly the notches and the
-  bar. `base()` is cached; `changed` fires when it changes, `follow(fn)` / `screenChanged` when it
-  or the screen does; `setSetting` is the GUI Scale setting (the boot script on the title screen
-  and the "hud" effect). `Style.guiScale` / `setScaleOverride` / `scaleChanged` forward here.
-- **ScreenGuis**: `UiScale.screenGui(name, layer, opts)` is the client's only
-  `Instance.new("ScreenGui")` (tests/spec/UiScaleUsage reads the sources): ResetOnSpawn off,
-  Sibling ordering, an explicit IgnoreGuiInset, `full` for the whole screen notches included
-  (ScreenInsets None: offsets are screen pixels and the centre is the camera's), and the
-  DisplayOrder from `UiScale.Layer`, the one table of what draws over what:
-
-  | Layer | Order | What |
-  | --- | --- | --- |
-  | Hand, Fire, Frost | -1 | first-person hand, fire overlay, frost and heat at the edges |
-  | Crosshair, Debug | 0 | the crosshair, F3 |
-  | Map | 5 | minimap (its corner gui), world map |
-  | Toasts, Effects | 7 | Now Playing, the status effect icons |
-  | Saving, Waila, ChatUnderScreens | 8 | saving icon and "World saved", WAILA, the chat under an open screen |
-  | Screens, AttackBar | 9 | inventories and menus, the attack indicator |
-  | Hud, EffectList | 10 | the HUD, the effect list beside open screens |
-  | AgeToast | 11 | a new Age's banner |
-  | Chat | 12 | the chat |
-  | Switcher | 15 | F3 + F4 |
-  | Cursor | 20 | the carried stack and tooltip |
-  | Title, Flash | 100 | the title screen, the Nuke's flash |
-
-  Each says its kind: "scaled" (GUI pixels under a UIScale that follows the scale) or "screen"
-  (shares of the screen by design: the hand, the fire overlay, the frost and heat edges, the Nuke's
-  flash and the world map, the spec's allowlist with reasons).
-- **Who follows it.** The HUD, the chat, the screens (inventory, creative, JEI, panels, the cursor)
-  and the F3 + F4 switcher take the scale fitted to their own area, the device's safe area; JEI's
-  list and the inventory's effect list keep beside the shown panel's real width (`size()`: the
-  inventory with its equipment panel is wider than `MenuLayout.WIDTH`). The title screen fits
-  320 × 240 below Roblox's top bar, so no page starts under its buttons. The Age banner and the
-  attack indicator take the scale; the crosshair is Minecraft's 9 × 9 GUI pixel plus of 1 pixel
-  lines at the scale in the camera's centre (white with a dark outline: Roblox has no inverting
-  blend; shown for gamepads, as before). F3 (Code 14), the world map's bar, weather bar, markers and
-  right-click menu and prompt, and the waypoint and structure block labels are drawn at 1080p's
-  look and scaled by `reference()`: as before at 1920 × 1080, 2.25× on a 4K window, three quarters
-  on a phone.
-- **The corner** (`Ui/HudLayout`, pure, tested over phones, a notched phone, a tablet, Studio,
-  desktops and 4K, every offered choice, the minimap on and off, touch on and off, toasts, effect
-  icons and the saving icon showing or not). In screen pixels, from the screen, the insets, the
-  scale, touch and what shows (each widget tells `UiScale`: `setMinimap`, `setToast`, `setEffects`,
-  `setSaving`, `setDebugRight`; each places itself on `hudChanged`):
-  - the minimap `Config.UiScale.Minimap` (56) GUI pixels square, 4 GUI pixels inside the safe
-    area's top right corner below the top bar (224 pixels at 1080p's Auto, 84 on a phone at 1.5;
-    its picture is still `Map.MinimapSize` map pixels, the same 384 blocks), its coordinates line
-    (the HUD's pixel font, as wide as its text, right aligned) 2 under it; on a touch screen with
-    the minimap off the 32 × 16 Map button;
-  - the toasts: slot 1 under that column is Now Playing's place, shown or not; "World saved" takes
-    slot 1, or slot 2 under Now Playing while that one shows or once it went under it
-    (SaveIndicator's rule: it never moves back up), else beside slot 1, else it waits for room, as
-    Minecraft's toasts queue for a free slot;
-  - the status effect icons (24 pixel squares 25 apart, rows 26 apart, the hovered one's line under
-    them) in the toast slot while no toast shows, else under the toasts, else beside them, else
-    beside the minimap column at the top, else smaller (down to half the scale), else not drawn;
-  - the saving icon at the bottom right, raised above Roblox's touch buttons and the HUD where they
-    are in its way, by their real size: the live TouchGui JumpButton and ContextActionService
-    buttons, measured when PlayerGui's children change and every second on touch screens, else
-    PlayerModule's rule (70 pixels at right - 95, bottom - 90 when the safe area's smaller side is at
-    most 500, else 120 at right - 170, bottom - 210);
-  - WAILA's edges: left of the map or the Map button (`wailaRight`), left of the coordinates line
-    too once the panel reaches down to it (`wailaLow`), right of F3's real right edge with F3 open
-    (`wailaAvoid`, from `DebugOverlay.rightEdge`).
-
-  Everything that shows is inside the safe area and disjoint from everything else, the touch
-  buttons and the HUD. The toasts, the effect icons, the saving icon and WAILA hide with the HUD
-  (the world map hides it), the minimap's corner while the world map covers it. Where things go
-  with a 20 character coordinates line, both toasts, the saving icon and two rows of three effect
-  icons:
-
-  | Screen | Auto | Minimap | Slot 1 top | Notes |
-  | --- | --- | --- | --- | --- |
-  | 667 × 375 phone (bar 58) | 1.5 | 84 px at y 64 | 169 | "World saved" beside Now Playing; the saving icon right above the jump button (y 258-282, the button at 285); effect icons beside the toasts |
-  | 844 × 390 notched phone | 1.625 | 91 px | 179 | 47 pixel side insets kept clear |
-  | 1024 × 768 tablet | 3.125 | 175 px | 290 | the saving icon above the HUD's "..." and the jump button (y 492-542); "World saved" waits until it goes; effect icons beside the toasts |
-  | 1280 × 660 Studio | 2 | 112 px | 206 | |
-  | 1920 × 1080 | 4 | 224 px at (1680, 74) | 354 | |
-  | 3840 × 2160 | 9 | 504 px | 724 | |
 
 ### Characters (server `Players/CharacterStore`, `Players/CharacterLooks`, `Save/CharacterSaves`, `Save/CharacterMigration`; client `Ui/CharacterSelect`, `Ui/AvatarEditor`, `Ui/CharacterPreview`, `Ui/CharacterRules`)
 
@@ -6546,6 +6443,137 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   `entity.fallen_star.fall` and glows on clients (a PointLight and sparkles:
   `Entities/EntityRenderer`). At dawn every Fallen Star item on the ground vanishes (Terraria's
   rule); stars in inventories and chests stay.
+
+### How the parts meet
+
+- **The character carries its equipment and mana.** `Players/CharacterStore` captures the
+  accessories, vanity pieces and hidden bits with the inventory, and `Players/Mana.export` (mana
+  and crystals) with the rest; entering puts the equipment back (`Inventories.restoreEquipment`),
+  then the progress, then asks the slots rule at once (`Inventories.refreshSlots`: the Age opens a
+  sixth and seventh accessory row) and only then restores the mana, so the max it is held to from
+  the next tick counts a Band of Starpower in any open row. With characters off the world's player
+  record keeps both (`Save/PlayerCodec` version 2: the equipment places and an optional mana
+  section, read back at once by `World/WorldSave`); the migration takes an old record's equipment
+  in like its slots (same place when free, else the bag). Restored hidden bits are masked to
+  `Types.HIDDEN_MASK`, as a snapshot may carry no others.
+- **Looks.** In the world every client draws what `Types.LOOKS_ATTRIBUTE` says on the body Roblox
+  made from the character's HumanoidDescription, wherever its client placed that body (the server
+  keeps it parked; `Player/EquipmentLooks` follows the parts after the camera step). On the title
+  screen a listed character's preview rig carries the same text (`CharacterStore`'s `dressedOf`,
+  `CharacterLooks.preview`'s `dressed`), and `Ui/CharacterPreview` dresses the clone with
+  `EquipmentLooks.dress`, so the list shows each character as it plays.
+- **The interface follows the GUI scale.** The character pages and the avatar editor are pages of
+  MainMenu's scaled 320 x 240 canvas, the mana stars are in the HUD's canvas, the equipment panel
+  is part of the inventory screen (`size()` 262 wide, which JEI and the effect list lay out from).
+  While the stars show, the HUD's name and status row sit up to 20 GUI pixels higher; Hud tells
+  UiScale (`setHudRaise`), and `HudLayout` keeps the corner clear of the taller HUD.
+- **Tooltips and F3.** `Shared/Mana.tooltip` adds a magic weapon's damage, mana a cast and fire
+  chance, a mana potion's mana, the Mana Crystal's +20 and the Fallen Star's "Disappears after the
+  sunrise" under the accessories' lines; F3's survival line ends with the mana and the magic
+  projectiles flying.
+
+## GUI scale (client `Ui/GuiScale`, `Ui/UiScale`, `Ui/HudLayout`)
+
+One scale for the whole interface, Minecraft's. Before, Auto was capped at 3 and the setting could
+only lower it, so on phones and in most Studio windows 2, 3 and Auto drew the same; the minimap,
+F3, the crosshair and the world map's chrome were fixed screen pixels, and everything in the top
+right corner was pinned to the 192 pixel minimap (on a 667 × 375 phone the effect icons ran past the
+bottom of the screen and the saving icon sat on the minimap).
+
+- **The scale** (`Ui/GuiScale`, pure, tested): Minecraft 1.20.1's `Window.calculateScale`. Auto is
+  the largest whole scale that still leaves 320 × 240 GUI pixels on the screen: 2 at 640 × 480, 3 at
+  1280 × 720, 4 at 1920 × 1080 (a third bigger than the old cap of 3, which stays a choice), 6 at
+  2560 × 1440, 9 on a 3840 × 2160 window (`Config.UiScale.MaxScale` 12 is only a sanity cap). Touch
+  screens take eighths of min(w / 320, h / 240): 1.5 on 667 × 375, 1.625 on 844 × 390. The GUI Scale
+  button offers Auto, then 1 up to that largest (`maxChoice`; Settings/State's per-screen limit,
+  set by the Options menu when it shows and when the window changes), so every choice draws
+  differently; a stored choice above a screen's largest is kept and acts as the largest there, as
+  Minecraft's does. `fit` shrinks it for content that does not fit (whole scales at and above 1
+  on a desktop, eighths otherwise, never below 0.5); `reference` = scale / 4, at least 0.75, is for
+  widgets drawn in fixed pixels at 1080p's Auto.
+- **One source** (`Ui/UiScale`, glue): the camera's `ViewportSize` (hooked again when the camera
+  changes), one touch flag (`UserInputService.PreferredInput` is Touch; `TouchEnabled` where that
+  property is missing: a touch laptop used with its mouse is a desktop), and the safe area's insets
+  and Roblox's top bar, measured with three empty probe ScreenGuis (ScreenInsets None,
+  DeviceSafeInsets, CoreUISafeInsets) whose AbsolutePositions differ by exactly the notches and the
+  bar. `base()` is cached; `changed` fires when it changes, `follow(fn)` / `screenChanged` when it
+  or the screen does; `setSetting` is the GUI Scale setting (the boot script on the title screen
+  and the "hud" effect). `Style.guiScale` / `setScaleOverride` / `scaleChanged` forward here.
+- **ScreenGuis**: `UiScale.screenGui(name, layer, opts)` is the client's only
+  `Instance.new("ScreenGui")` (tests/spec/UiScaleUsage reads the sources): ResetOnSpawn off,
+  Sibling ordering, an explicit IgnoreGuiInset, `full` for the whole screen notches included
+  (ScreenInsets None: offsets are screen pixels and the centre is the camera's), and the
+  DisplayOrder from `UiScale.Layer`, the one table of what draws over what:
+
+  | Layer | Order | What |
+  | --- | --- | --- |
+  | Hand, Fire, Frost | -1 | first-person hand, fire overlay, frost and heat at the edges |
+  | Crosshair, Debug | 0 | the crosshair, F3 |
+  | Map | 5 | minimap (its corner gui), world map |
+  | Toasts, Effects | 7 | Now Playing, the status effect icons |
+  | Saving, Waila, ChatUnderScreens | 8 | saving icon and "World saved", WAILA, the chat under an open screen |
+  | Screens, AttackBar | 9 | inventories and menus, the attack indicator |
+  | Hud, EffectList | 10 | the HUD, the effect list beside open screens |
+  | AgeToast | 11 | a new Age's banner |
+  | Chat | 12 | the chat |
+  | Switcher | 15 | F3 + F4 |
+  | Cursor | 20 | the carried stack and tooltip |
+  | Title, Flash | 100 | the title screen, the Nuke's flash |
+
+  Each says its kind: "scaled" (GUI pixels under a UIScale that follows the scale) or "screen"
+  (shares of the screen by design: the hand, the fire overlay, the frost and heat edges, the Nuke's
+  flash and the world map, the spec's allowlist with reasons).
+- **Who follows it.** The HUD, the chat, the screens (inventory, creative, JEI, panels, the cursor)
+  and the F3 + F4 switcher take the scale fitted to their own area, the device's safe area; JEI's
+  list and the inventory's effect list keep beside the shown panel's real width (`size()`: the
+  inventory with its equipment panel is wider than `MenuLayout.WIDTH`). The title screen fits
+  320 × 240 below Roblox's top bar, so no page starts under its buttons. The Age banner and the
+  attack indicator take the scale; the crosshair is Minecraft's 9 × 9 GUI pixel plus of 1 pixel
+  lines at the scale in the camera's centre (white with a dark outline: Roblox has no inverting
+  blend; shown for gamepads, as before). F3 (Code 14), the world map's bar, weather bar, markers and
+  right-click menu and prompt, and the waypoint and structure block labels are drawn at 1080p's
+  look and scaled by `reference()`: as before at 1920 × 1080, 2.25× on a 4K window, three quarters
+  on a phone.
+- **The corner** (`Ui/HudLayout`, pure, tested over phones, a notched phone, a tablet, Studio,
+  desktops and 4K, every offered choice, the minimap on and off, touch on and off, toasts, effect
+  icons and the saving icon showing or not). In screen pixels, from the screen, the insets, the
+  scale, touch and what shows (each widget tells `UiScale`: `setMinimap`, `setToast`, `setEffects`,
+  `setSaving`, `setDebugRight`; each places itself on `hudChanged`):
+  - the minimap `Config.UiScale.Minimap` (56) GUI pixels square, 4 GUI pixels inside the safe
+    area's top right corner below the top bar (224 pixels at 1080p's Auto, 84 on a phone at 1.5;
+    its picture is still `Map.MinimapSize` map pixels, the same 384 blocks), its coordinates line
+    (the HUD's pixel font, as wide as its text, right aligned) 2 under it; on a touch screen with
+    the minimap off the 32 × 16 Map button;
+  - the toasts: slot 1 under that column is Now Playing's place, shown or not; "World saved" takes
+    slot 1, or slot 2 under Now Playing while that one shows or once it went under it
+    (SaveIndicator's rule: it never moves back up), else beside slot 1, else it waits for room, as
+    Minecraft's toasts queue for a free slot;
+  - the status effect icons (24 pixel squares 25 apart, rows 26 apart, the hovered one's line under
+    them) in the toast slot while no toast shows, else under the toasts, else beside them, else
+    beside the minimap column at the top, else smaller (down to half the scale), else not drawn;
+  - the saving icon at the bottom right, raised above Roblox's touch buttons and the HUD where they
+    are in its way, by their real size: the live TouchGui JumpButton and ContextActionService
+    buttons, measured when PlayerGui's children change and every second on touch screens, else
+    PlayerModule's rule (70 pixels at right - 95, bottom - 90 when the safe area's smaller side is at
+    most 500, else 120 at right - 170, bottom - 210);
+  - WAILA's edges: left of the map or the Map button (`wailaRight`), left of the coordinates line
+    too once the panel reaches down to it (`wailaLow`), right of F3's real right edge with F3 open
+    (`wailaAvoid`, from `DebugOverlay.rightEdge`).
+
+  Everything that shows is inside the safe area and disjoint from everything else, the touch
+  buttons and the HUD. The toasts, the effect icons, the saving icon and WAILA hide with the HUD
+  (the world map hides it), the minimap's corner while the world map covers it. Where things go
+  with a 20 character coordinates line, both toasts, the saving icon and two rows of three effect
+  icons:
+
+  | Screen | Auto | Minimap | Slot 1 top | Notes |
+  | --- | --- | --- | --- | --- |
+  | 667 × 375 phone (bar 58) | 1.5 | 84 px at y 64 | 169 | "World saved" beside Now Playing; the saving icon right above the jump button (y 258-282, the button at 285); effect icons beside the toasts |
+  | 844 × 390 notched phone | 1.625 | 91 px | 179 | 47 pixel side insets kept clear |
+  | 1024 × 768 tablet | 3.125 | 175 px | 290 | the saving icon above the HUD's "..." and the jump button (y 492-542); "World saved" waits until it goes; effect icons beside the toasts |
+  | 1280 × 660 Studio | 2 | 112 px | 206 | |
+  | 1920 × 1080 | 4 | 224 px at (1680, 74) | 354 | |
+  | 3840 × 2160 | 9 | 504 px | 724 | |
 
 ## Networking (`Net/Protocol`)
 

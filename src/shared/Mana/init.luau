@@ -36,10 +36,18 @@
 	             damage is cut by SicknessDamage 5% for each second left (`damageFactor`: 25% at
 	             5 s, 50% at 10 s), Terraria's.
 	  HUD        a star holds STAR = 20 mana (`stars`: how many the max needs).
+	  Tooltip    `tooltip(item)`: what a mana item says under its name (client Ui/Screens: the
+	             first line gray, the rest blue, as the accessories'): a magic weapon its damage
+	             (half hearts, Minecraft's "Attack Damage"), mana a cast and fire chance; a mana
+	             potion the mana it restores; a Mana Crystal its +20 max (Terraria's
+	             "Permanently increases maximum mana by 20"); a Fallen Star Terraria's
+	             "Disappears after the sunrise".
 ]]
 
 local Config = require(script.Parent.Config)
 local Accessories = require(script.Parent.Items.Accessories)
+local Drinks = require(script.Parent.ToughAsNails.Drinks)
+local Items = require(script.Parent.Items)
 local Types = require(script.Parent.Inventory.Types)
 
 local Settings = Config.Mana
@@ -196,6 +204,35 @@ end
 function Mana.damageFactor(ticks: number): number
 	local seconds = math.max(ticks, 0) / 20
 	return math.max(0, 1 - Settings.SicknessDamage * seconds)
+end
+
+--[[ Tooltips ]]
+
+-- What `item` says about mana under its name (see the header; empty: nothing).
+function Mana.tooltip(item: number): { string }
+	local lines: { string } = {}
+	local magic = Items.magic(item)
+	if magic then
+		table.insert(lines, "When used:")
+		table.insert(lines, `{magic.damage} Magic Damage`)
+		table.insert(lines, `Uses {magic.mana} mana`)
+		local fire = magic.fire or 0
+		if fire > 0 then
+			table.insert(lines, `{math.floor(fire * 100 + 0.5)}% chance to set on fire`)
+		end
+		return lines
+	end
+	local restores = Drinks.manaOf(Drinks.of(item))
+	if restores > 0 then
+		table.insert(lines, "When drunk:")
+		table.insert(lines, `Restores {restores} mana`)
+	elseif item == Items.id.ManaCrystal then
+		table.insert(lines, "When used:")
+		table.insert(lines, `+{Settings.PerCrystal} max mana for good ({Settings.MaxCrystals} at most)`)
+	elseif item == Items.id.FallenStar then
+		table.insert(lines, "Disappears after the sunrise")
+	end
+	return lines
 end
 
 return Mana

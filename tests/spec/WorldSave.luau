@@ -644,7 +644,19 @@ return function(t, shared, require, server, client)
 		t.eq(back.temperature.clemency, 4000)
 		t.eq(#back.effects, 2)
 		t.eq(back.effects[2].ticks, -1)
+		t.eq(back.mana, nil, "no mana kept: the player starts full")
 		print(`    a player's record: {#text} characters`)
+		-- Terraria's mana and Mana Crystals (version 2, characters off): kept, clamped, checked.
+		record.mana, record.crystals = 87.25, 4
+		local withMana = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any
+		t.eq(withMana.mana, 87.25)
+		t.eq(withMana.crystals, 4)
+		t.eq(#withMana.effects, 2, "the effects after the mana")
+		record.mana, record.crystals = 1e9, 99
+		local clamped = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any
+		t.eq(clamped.mana, Config.Mana.Max)
+		t.eq(clamped.crystals, Config.Mana.MaxCrystals)
+		record.mana, record.crystals = nil, 0
 		-- No position, nothing held: tiny.
 		t.ok(#PlayerCodec.toText(PlayerCodec.new()) < 20)
 		t.eq((PlayerCodec.fromText("not base85 \\")), nil)
@@ -1637,10 +1649,14 @@ return function(t, shared, require, server, client)
 				clemency = 100,
 			}
 			saved.effects = { { effect = 1, amplifier = 0, ticks = 400, ambient = false } }
+			saved.mana, saved.crystals = 60, 2
 			local captured = PlayerCodec.new()
 			captured.slots[3] = Items.newStack(id.Sand, 4)
-			local kept =
-				PlayerCodec.withWaiting(captured, saved, { standing = false, climate = false, effects = false })
+			local kept = PlayerCodec.withWaiting(
+				captured,
+				saved,
+				{ standing = false, climate = false, effects = false, mana = false }
+			)
 			t.eq(PlayerCodec.toText(kept), PlayerCodec.toText(saved), "exactly as saved: nothing new to write")
 			-- What lives already is the live one's.
 			local standing = PlayerCodec.new()
@@ -1648,12 +1664,23 @@ return function(t, shared, require, server, client)
 			standing.x, standing.y, standing.z = 1, 2, 3
 			standing.thirst = { thirst = 20, hydration = 5, exhaustion = 0, effect = 0, timer = 0 }
 			standing.temperature = saved.temperature
-			local live = PlayerCodec.withWaiting(standing, saved, { standing = true, climate = true, effects = false })
+			standing.mana, standing.crystals = 35, 3
+			local live = PlayerCodec.withWaiting(
+				standing,
+				saved,
+				{ standing = true, climate = true, effects = false, mana = true }
+			)
 			t.eq(live.x, 1)
 			t.eq((live.thirst :: any).thirst, 20)
 			t.eq(#live.effects, 1, "effects not made yet: the saved ones")
+			t.eq(live.mana, 35, "mana kept live: the live one's")
+			t.eq(live.crystals, 3)
 			t.eq(
-				PlayerCodec.withWaiting(PlayerCodec.new(), nil, { standing = false, climate = false, effects = false }).position,
+				PlayerCodec.withWaiting(
+					PlayerCodec.new(),
+					nil,
+					{ standing = false, climate = false, effects = false, mana = false }
+				).position,
 				false
 			)
 		end

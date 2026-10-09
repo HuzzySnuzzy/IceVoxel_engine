@@ -453,8 +453,7 @@ return function(t, shared, require, _server, client)
 		-- that plays them (the double jump: Player/EquipmentLooks.airJump; the cast and mana full:
 		-- Interaction/Casting, Player/ManaState). It stays for the next client sound added ahead of
 		-- its player.
-		local pending: { [string]: boolean } = {
-		}
+		local pending: { [string]: boolean } = {}
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
 			if pending[sound.name] then

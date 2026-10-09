@@ -76,6 +76,7 @@ local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Accessories = require(Shared.Items.Accessories)
+local Mana = require(Shared.Mana)
 local Menu = require(Shared.Inventory.Menu)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Types = require(Shared.Inventory.Types)
@@ -302,7 +303,8 @@ end
 
 -- The tooltip of `item`: its name, the lines of a stack's item data (Items.describe: a tank's
 -- water, stored energy), a potion's effects (Shared/Effects.tooltip), then an armor piece's
--- stats, an accessory's effects or a vanity item's note (Items/Accessories.tooltip).
+-- stats, an accessory's effects or a vanity item's note (Items/Accessories.tooltip), and what a
+-- mana item does (Shared/Mana.tooltip).
 local function tooltipLines(item: number, details: { string }?): { Line }
 	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
 	if details then
@@ -329,12 +331,15 @@ local function tooltipLines(item: number, details: { string }?): { Line }
 			table.insert(lines, { text = `+{armor.toughness} Armor Toughness`, colour = Style.Colour.Blue })
 		end
 	end
-	-- Terraria's accessories and vanity items: what they do (Items/Accessories.tooltip).
-	for index, text in Accessories.tooltip(item) do
-		if index == 1 then
-			table.insert(lines, { text = "", colour = Style.Colour.Text })
+	-- Terraria's accessories and vanity items: what they do (Items/Accessories.tooltip); its mana
+	-- items: a magic weapon's damage and mana, a mana potion's mana (Shared/Mana.tooltip).
+	for _, more in { Accessories.tooltip(item), Mana.tooltip(item) } do
+		for index, text in more do
+			if index == 1 then
+				table.insert(lines, { text = "", colour = Style.Colour.Text })
+			end
+			table.insert(lines, { text = text, colour = if index == 1 then Style.Colour.Gray else Style.Colour.Blue })
 		end
-		table.insert(lines, { text = text, colour = if index == 1 then Style.Colour.Gray else Style.Colour.Blue })
 	end
 	return lines
 end

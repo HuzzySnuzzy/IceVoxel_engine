@@ -18,17 +18,20 @@
 	            (Inventory/Types, version 2); Tough As Nails' thirst
 	            (thirst, hydration, exhaustion, Thirst effect, timer) and temperature (value,
 	            target, drift, hypothermia, hyperthermia, timer, wet, Internal Warmth and Chill,
-	            Climate Clemency left), each optional; and the running status effects (effect,
-	            amplifier, ticks left or -1, ambient).
-	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature, 3 hidden looks),
-	            [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode ids, 255
-	            none), u8 selected, [u16 hidden], u8 n + n x (u8 place: Inventory/Types.PLACE_*:
-	            1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories, 49..52 vanity armor,
-	            53..59 vanity accessories; stack), [5 x f32 thirst], [10 x f32 temperature], u8 n +
-	            n x (u8 effect, u8 amplifier, i32 ticks, u8 ambient). Typical: 60-400 bytes.
-	  Versions  2 added the equipment places and the hidden bits; a version 1 record (places up to
-	            41, flags up to 7) still reads, and an older server refuses a version 2 one, so it
-	            never writes over equipment it can't keep.
+	            Climate Clemency left), each optional; Terraria's mana and the Mana Crystals used
+	            (optional, version 2: Players/Mana; with characters the character keeps them);
+	            and the running status effects (effect, amplifier, ticks left or -1, ambient).
+	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature, 3 hidden looks,
+	            4 mana), [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode
+	            ids, 255 none), u8 selected, [u16 hidden], u8 n + n x (u8 place:
+	            Inventory/Types.PLACE_*: 1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories,
+	            49..52 vanity armor, 53..59 vanity accessories; stack), [5 x f32 thirst], [10 x
+	            f32 temperature],
+	            [f32 mana, u8 crystals], u8 n + n x (u8 effect, u8 amplifier, i32 ticks, u8
+	            ambient). Typical: 60-400 bytes.
+	  Versions  2 added the equipment places, the hidden bits and the mana; a version 1 record
+	            (places up to 41, flags up to 7) still reads, and an older server refuses a version
+	            2 one, so it never writes over equipment it can't keep.
 	Decoding checks every number: non-finite ones, unknown modes, slots and effects are a damaged
 	record (nil), and unknown items are dropped (SaveCodec.readStack) and counted (`dropped`: such
 	a record is not written back this session, World/WorldSave).
@@ -37,6 +40,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Config = require(Shared.Config)
 local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -81,6 +85,9 @@ export type Record = {
 	hidden: number,
 	thirst: Thirst?,
 	temperature: Temperature?,
+	-- Terraria's mana (nil: none kept, the player starts full) and the Mana Crystals used.
+	mana: number?,
+	crystals: number,
 	effects: { Effect },
 	-- Stacks of items this version doesn't know, left out while reading (never written).
 	dropped: number,
@@ -116,6 +123,8 @@ function PlayerCodec.new(): Record
 		hidden = 0,
 		thirst = nil,
 		temperature = nil,
+		mana = nil,
+		crystals = 0,
 		effects = {},
 		dropped = 0,
 	}
@@ -129,6 +138,8 @@ export type Live = {
 	climate: boolean,
 	-- Players/Effects has their effects (a character made them).
 	effects: boolean,
+	-- Players/Mana has their mana (restored, or made by a character).
+	mana: boolean,
 }
 
 --[[
@@ -154,6 +165,9 @@ function PlayerCodec.withWaiting(record: Record, waiting: Record?, live: Live): 
 	if not live.effects then
 		record.effects = table.clone(waiting.effects)
 	end
+	if not live.mana then
+		record.mana, record.crystals = waiting.mana, waiting.crystals
+	end
 	return record
 end
 
@@ -178,10 +192,13 @@ function PlayerCodec.encode(record: Record): buffer
 	SaveCodec.u8(w, PlayerCodec.VERSION)
 	local position = record.position and finite(record.x) and finite(record.y) and finite(record.z)
 	local hidden = if finite(record.hidden or 0) then math.clamp(math.floor(record.hidden or 0), 0, 65535) else 0
+	local mana = record.mana
+	local hasMana = mana ~= nil and finite(mana)
 	local flags = (if position then 1 else 0)
 		+ (if record.thirst then 2 else 0)
 		+ (if record.temperature then 4 else 0)
 		+ (if hidden ~= 0 then 8 else 0)
+		+ (if hasMana then 16 else 0)
 	SaveCodec.u8(w, flags)
 	if position then
 		SaveCodec.f64(w, record.x)
@@ -235,6 +252,11 @@ function PlayerCodec.encode(record: Record): buffer
 			SaveCodec.f32(w, if type(value) == "number" and finite(value) then value else 0)
 		end
 	end
+	if hasMana then
+		SaveCodec.f32(w, math.clamp(mana :: number, 0, Config.Mana.Max))
+		local crystals = if finite(record.crystals) then math.floor(record.crystals) else 0
+		SaveCodec.u8(w, math.clamp(crystals, 0, Config.Mana.MaxCrystals))
+	end
 	local effects: { Effect } = {}
 	for _, effect in record.effects do
 		if Effects.isValid(effect.effect) and #effects < 255 then
@@ -259,7 +281,7 @@ local function decode(bytes: buffer): Record
 	end
 	local record = PlayerCodec.new()
 	local flags = SaveCodec.readU8(r)
-	if flags > (if version >= 2 then 15 else 7) then
+	if flags > (if version >= 2 then 31 else 7) then
 		error("bad player flags", 0)
 	end
 	if bit32.btest(flags, 1) then
@@ -336,6 +358,14 @@ local function decode(bytes: buffer): Record
 			temperature[field] = value
 		end
 		record.temperature = temperature
+	end
+	if bit32.btest(flags, 16) then
+		local mana = SaveCodec.readF32(r)
+		local crystals = SaveCodec.readU8(r)
+		if not finite(mana) or crystals > Config.Mana.MaxCrystals then
+			error("bad mana", 0)
+		end
+		record.mana, record.crystals = math.clamp(mana, 0, Config.Mana.Max), crystals
 	end
 	for _ = 1, SaveCodec.readU8(r) do
 		local effect = SaveCodec.readU8(r)

@@ -12,12 +12,20 @@
 	           unsent edits back onto it). `show(nil)` empties the box.
 	  Turning  dragging across the box with the mouse or a finger turns the character (a GUI
 	           pixel a degree), as Minecraft's and Terraria's previews do.
+	  Dressed  a listed character's rig carries what it wears (the attribute
+	           Types.LOOKS_ATTRIBUTE: Players/CharacterLooks), put on the clone as in the world
+	           (Player/EquipmentLooks.dress): armour or its vanity, accessories, a hat.
 	Built in the title screen's scaled canvas (Ui/MainMenu), so it follows the GUI scale.
 ]]
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
+local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Types = require(Shared.Inventory.Types)
+
+local EquipmentLooks = require(script.Parent.Parent.Player.EquipmentLooks)
 local Style = require(script.Parent.Style)
 
 -- The folder the server builds rigs in (Players/CharacterLooks.FOLDER).
@@ -127,6 +135,10 @@ function CharacterPreview.new(parent: Instance, x: number, y: number, w: number,
 		end
 		clear()
 		made:PivotTo(CFrame.identity)
+		local looks = rig:GetAttribute(Types.LOOKS_ATTRIBUTE)
+		if type(looks) == "string" and looks ~= "" then
+			EquipmentLooks.dress(made, looks)
+		end
 		made.Parent = world
 		local centre, size = made:GetBoundingBox()
 		local height = math.max(size.Y, 1)

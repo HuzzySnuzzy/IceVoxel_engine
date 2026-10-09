@@ -626,8 +626,11 @@ function InventoryState.restoreEquipment(self: InventoryState, key: any, equipme
 	copyInto(inventory.accessories, equipment.accessories, Types.ACCESSORY_SIZE)
 	copyInto(inventory.vanityArmor, equipment.vanityArmor, Types.VANITY_ARMOR_SIZE)
 	copyInto(inventory.vanityAccessories, equipment.vanityAccessories, Types.VANITY_ACCESSORY_SIZE)
+	-- (Only the bits a snapshot may carry: Types.HIDDEN_MASK; the client refuses any other.)
 	local hidden = equipment.hidden
-	inventory.hidden = if hidden == hidden and hidden >= 0 then math.floor(hidden) % 65536 else 0
+	inventory.hidden = if hidden == hidden and hidden >= 0
+		then bit32.band(math.floor(hidden) % 65536, Types.HIDDEN_MASK)
+		else 0
 	player.dirty = true
 end
 

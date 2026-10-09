@@ -28,7 +28,11 @@
 	             editor's). The client clones it into its ViewportFrame. A request waits
 	             Config.Characters.PreviewDelay seconds for the next (a slider dragged: only the
 	             last look is built), one build at a time per player, and a look already built
-	             under that name is not built again.
+	             under that name is not built again. `dressed` (Items/Accessories.looks of the
+	             character's armour, vanity and accessories) goes on the rig as the attribute
+	             Types.LOOKS_ATTRIBUTE, and the client puts those pieces on its clone
+	             (Player/EquipmentLooks.dress), so the list shows a character as it plays, as
+	             Terraria's player select does.
 ]]
 
 local Players = game:GetService("Players")
@@ -37,6 +41,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Appearance = require(Shared.Characters.Appearance)
 local Config = require(Shared.Config)
+local Types = require(Shared.Inventory.Types)
 
 type Appearance = Appearance.Appearance
 
@@ -336,7 +341,7 @@ end
 
 --[[ Preview rigs ]]
 
-type Pending = { name: string, look: Appearance, key: string }
+type Pending = { name: string, look: Appearance, dressed: string?, key: string }
 type Previews = {
 	-- The latest request per rig name, built after PreviewDelay.
 	pending: { [string]: Pending },
@@ -368,8 +373,8 @@ local function folderOf(player: Player): Folder?
 	return made
 end
 
--- Builds one preview rig of `look` as `name` in `player`'s folder (yields).
-local function build(player: Player, name: string, look: Appearance): boolean
+-- Builds one preview rig of `look` as `name` in `player`'s folder, wearing `dressed` (yields).
+local function build(player: Player, name: string, look: Appearance, dressed: string?): boolean
 	local description = CharacterLooks.description(look)
 	local ok, model = callAsync(
 		Players,
@@ -403,6 +408,9 @@ local function build(player: Player, name: string, look: Appearance): boolean
 	end
 	rig.Name = name
 	rig.Archivable = true
+	if dressed and dressed ~= "" then
+		rig:SetAttribute(Types.LOOKS_ATTRIBUTE, dressed)
+	end
 	local folder = folderOf(player)
 	if folder == nil or player.Parent == nil then
 		rig:Destroy()
@@ -430,7 +438,7 @@ local function run(player: Player, state: Previews)
 		end
 		state.pending[name] = nil
 		if state.built[name] ~= request.key then
-			if build(player, name, request.look) then
+			if build(player, name, request.look, request.dressed) then
 				state.built[name] = request.key
 			end
 		end
@@ -440,19 +448,20 @@ end
 
 --[[
 	Builds (soon: see the header) `player`'s preview rig `name` ("c<id>" or EDITOR) with `look`,
-	unless that look is the one built under that name.
+	wearing `dressed` (Accessories.looks' text; nil: nothing), unless that is what was built under
+	that name.
 ]]
-function CharacterLooks.preview(player: Player, name: string, look: Appearance)
+function CharacterLooks.preview(player: Player, name: string, look: Appearance, dressed: string?)
 	local state = previews[player]
 	if state == nil then
 		state = { pending = {}, built = {}, running = false, requestedAt = 0 }
 		previews[player] = state
 	end
-	local key = keyOf(look)
+	local key = `{keyOf(look)}|{dressed or ""}`
 	if state.built[name] == key and state.pending[name] == nil then
 		return
 	end
-	state.pending[name] = { name = name, look = Appearance.copy(look), key = key }
+	state.pending[name] = { name = name, look = Appearance.copy(look), dressed = dressed, key = key }
 	state.requestedAt = os.clock()
 	if not state.running then
 		task.spawn(run, player, state)

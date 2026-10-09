@@ -23,7 +23,8 @@
 	            `buttons`; on a touch screen without them PlayerModule's jump button rule:
 	            `jumpButton`), which never scale with the GUI scale, so they are measured, not
 	            guessed in GUI pixels; and the HUD's canvas (Ui/Hud: 182 x 70 GUI pixels, 230 wide
-	            with the touch buttons, at the bottom centre). Nothing of the corner covers them.
+	            with the touch buttons, at the bottom centre; `hudRaise` taller while its name and
+	            status row sit higher over the mana stars). Nothing of the corner covers them.
 	  saving    while it shows: the bottom right, raised above every button in its way (by the
 	            buttons' real size, not a fixed raise times the scale); dropped if that reaches the
 	            minimap column.
@@ -79,7 +80,8 @@ HudLayout.EFFECT_STEP = 25
 HudLayout.EFFECT_ROW = 26
 HudLayout.EFFECT_TIP = 12
 -- Ui/Hud's canvas: the hotbar, hearts, armour and item name (wider with the touch buttons beside
--- the hotbar), one pixel above the safe area's bottom.
+-- the hotbar), one pixel above the safe area's bottom; `hudRaise` more on top while the name and
+-- the status row are moved up over Terraria's mana stars.
 HudLayout.HUD_WIDTH = 182
 HudLayout.HUD_TOUCH_WIDTH = 230
 HudLayout.HUD_HEIGHT = 70
@@ -111,6 +113,9 @@ export type Input = {
 	saving: boolean,
 	-- The F3 text's right edge (screen pixels) while it is open.
 	debugRight: number?,
+	-- GUI pixels the HUD's held item name and status row reach above its canvas (Ui/Hud: they
+	-- move up over Terraria's mana stars, Ui/ManaStars.layout; 0 or nil without).
+	hudRaise: number?,
 	-- Roblox's touch controls (screen pixels); nil: `jumpButton`'s rule on a touch screen.
 	buttons: { Rect }?,
 }
@@ -177,10 +182,18 @@ function HudLayout.jumpButton(width: number, height: number, insets: Insets): Re
 	return rect(right - 170, bottom - 210, 120, 120)
 end
 
--- Ui/Hud's canvas at `scale` (at most: the HUD shrinks to fit narrower screens).
-function HudLayout.hud(width: number, height: number, insets: Insets, scale: number, touch: boolean): Rect
+-- Ui/Hud's canvas at `scale` (at most: the HUD shrinks to fit narrower screens), `raise` GUI
+-- pixels taller on top (the text moved up over the mana stars).
+function HudLayout.hud(
+	width: number,
+	height: number,
+	insets: Insets,
+	scale: number,
+	touch: boolean,
+	raise: number?
+): Rect
 	local w = (if touch then HudLayout.HUD_TOUCH_WIDTH else HudLayout.HUD_WIDTH) * scale
-	local h = HudLayout.HUD_HEIGHT * scale
+	local h = (HudLayout.HUD_HEIGHT + math.max(raise or 0, 0)) * scale
 	local safeWidth = width - insets.left - insets.right
 	return rect(insets.left + (safeWidth - w) / 2, height - insets.bottom - 1 - h, w, h)
 end
@@ -280,7 +293,7 @@ function HudLayout.compute(input: Input): Layout
 
 	local buttons: { Rect } = input.buttons
 		or (if input.touch then { HudLayout.jumpButton(input.width, input.height, insets) } else {})
-	local hud = HudLayout.hud(input.width, input.height, insets, s, input.touch)
+	local hud = HudLayout.hud(input.width, input.height, insets, s, input.touch, input.hudRaise)
 	-- Everything placed so far that later pieces keep clear of (the buttons and the HUD first).
 	local placed: { Rect } = table.clone(buttons)
 	table.insert(placed, hud)

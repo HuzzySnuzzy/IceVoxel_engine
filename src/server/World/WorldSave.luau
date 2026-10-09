@@ -54,8 +54,9 @@
 	             outage never replaces a saved inventory with an empty one), and they are told.
 	             Records go out with every save, and at once when a player leaves, each numbered
 	             as it is captured: an older one is never written over a newer
-	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) is in
-	             the record too (PlayerCodec version 2).
+	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) and
+	             their mana and Mana Crystals (Players/Mana: put back at once) are in the record
+	             too (PlayerCodec version 2).
 	  Characters with Config.Characters on, a player's things are their character's (Players/
 	             CharacterStore keeps and saves the character: inventory, equipment, health,
 	             mana, Tough As Nails, effects, progress) and a world keeps only what is its own
@@ -116,6 +117,7 @@ local Characters = require(Server.Players.Characters)
 local Effects = require(Server.Players.Effects)
 local GameModes = require(Server.Players.GameModes)
 local Inventories = require(Server.Players.Inventories)
+local Mana = require(Server.Players.Mana)
 local Operators = require(Server.Players.Operators)
 local PlayerPositions = require(Server.Players.PlayerPositions)
 local Spawning = require(Server.Players.Spawning)
@@ -598,16 +600,22 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 	record.temperature = temperature :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or {}) :: any
+	-- (Terraria's mana and crystals: nil once Players/Mana forgot a leaving player.)
+	local mana = Mana.peek(player)
+	if mana then
+		record.mana, record.crystals = mana.mana, mana.crystals
+	end
 	-- (Until a character stands, the saved record's place and the rest are what they have.)
 	local waiting = ps.waiting
 	if standing then
 		ps.waiting = nil
 	end
-	PlayerCodec.withWaiting(
-		record,
-		waiting,
-		{ standing = standing, climate = thirst ~= nil and temperature ~= nil, effects = effects ~= nil }
-	)
+	PlayerCodec.withWaiting(record, waiting, {
+		standing = standing,
+		climate = thirst ~= nil and temperature ~= nil,
+		effects = effects ~= nil,
+		mana = mana ~= nil,
+	})
 	return record, captures
 end
 
@@ -624,6 +632,9 @@ local function finalRecord(player: Player, ps: PlayerState): (Record, number)
 	end
 	if cached and Effects.export(player) == nil then
 		fresh.effects = cached.effects
+	end
+	if cached and Mana.peek(player) == nil then
+		fresh.mana, fresh.crystals = cached.mana, cached.crystals
 	end
 	return fresh, order
 end
@@ -654,6 +665,11 @@ local function applyRecord(player: Player, ps: PlayerState, record: Record)
 	end
 	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any)
 	Effects.restore(player, record.effects :: any)
+	-- (A record without mana, version 1's or a new player's: Players/Mana's own start.)
+	local mana = record.mana
+	if mana then
+		Mana.restore(player, mana, record.crystals)
+	end
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if character and humanoid and humanoid.Health > 0 then

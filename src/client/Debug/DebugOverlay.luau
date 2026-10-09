@@ -13,11 +13,12 @@
 	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
 	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
-	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill), and the
-	status effects (Player/EffectState: each one's name, level and time left, "**:**" for one
-	that never ends), and the weather at the player (Weather/: what falls there, the
-	precipitation, thunder and cloud cover, the wind and the weather clock, a /weather override's
-	share; the cloud parts and rings, the rain strips drawn, the bolts showing). Under the frame
+	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill; then
+	Terraria's mana and max, Player/ManaState, and the magic projectiles flying, Rendering/
+	ProjectileView), and the status effects (Player/EffectState: each one's name, level and time
+	left, "**:**" for one that never ends), and the weather at the player (Weather/: what falls
+	there, the precipitation, thunder and cloud cover, the wind and the weather clock, a /weather
+	override's share; the cloud parts and rings, the rain strips drawn, the bolts showing). Under the frame
 	rate, the world: its name, world type, difficulty, seed and whether commands are allowed
 	(Shared/WorldSettings.info, from the server's attributes). The panel grows to fit its lines.
 	The player's position is the hull's, in true world coordinates (as Minecraft's F3), whatever
@@ -57,6 +58,8 @@ local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
 local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
+local ManaState = require(script.Parent.Parent.Player.ManaState)
+local ProjectileView = require(script.Parent.Parent.Rendering.ProjectileView)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local WeatherClient = require(script.Parent.Parent.Weather)
@@ -172,7 +175,10 @@ local function survivalLine(): string
 			if status.chill then "  chill" else ""
 		)
 		else "temp off"
-	return `survival {thirst}{clemency}\n        {temperature}`
+	-- Terraria's mana (Player/ManaState: as the server last sent it, less predicted casts) and the
+	-- magic projectiles this client flies (Rendering/ProjectileView).
+	local mana, max = ManaState.get()
+	return `survival {thirst}{clemency}\n        {temperature}  mana {mana}/{max}  {ProjectileView.count()} shots`
 end
 
 -- The status effects, as the server last sent them (counted down since).

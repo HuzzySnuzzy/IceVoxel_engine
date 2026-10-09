@@ -30,11 +30,11 @@
 	             follows the base) or "screen" (screen-relative by design: the first-person hand,
 	             the fire and frost overlays, the Nuke's flash, the world map's backdrop).
 	  corner     what shows in the HUD's corner (`setMinimap`, `setToast`, `setEffects`,
-	             `setSaving`, `setDebugRight`) and Roblox's touch buttons (the live JumpButton and
-	             ContextActionService buttons, measured again when PlayerGui's children change and
-	             every BUTTON_CHECK seconds on touch screens) go into HudLayout.compute; `hud()` is
-	             the result (screen pixels) and `hudChanged` fires when anything in it may have
-	             moved.
+	             `setSaving`, `setDebugRight`, `setHudRaise`) and Roblox's touch buttons (the live
+	             JumpButton and ContextActionService buttons, measured again when PlayerGui's
+	             children change and every BUTTON_CHECK seconds on touch screens) go into
+	             HudLayout.compute; `hud()` is the result (screen pixels) and `hudChanged` fires
+	             when anything in it may have moved.
 
 	Ui/Style's guiScale, setScaleOverride and scaleChanged forward here for older callers.
 ]]
@@ -138,6 +138,7 @@ local corner = {
 	effects = nil :: { w: number, h: number }?,
 	saving = false,
 	debugRight = nil :: number?,
+	hudRaise = 0,
 }
 -- Roblox's touch buttons as last measured (nil: none found), and the corner's layout.
 local buttons: { HudLayout.Rect }? = nil
@@ -260,6 +261,7 @@ local function layoutCorner()
 		effects = corner.effects,
 		saving = corner.saving,
 		debugRight = corner.debugRight,
+		hudRaise = corner.hudRaise,
 		buttons = buttons,
 	})
 end
@@ -539,6 +541,14 @@ end
 function UiScale.setDebugRight(x: number?)
 	if x ~= corner.debugRight then
 		corner.debugRight = x
+		cornerChanged()
+	end
+end
+
+-- GUI pixels Ui/Hud's name and status row reach above its canvas (over the mana stars; 0: none).
+function UiScale.setHudRaise(raise: number)
+	if raise ~= corner.hudRaise then
+		corner.hudRaise = raise
 		cornerChanged()
 	end
 end

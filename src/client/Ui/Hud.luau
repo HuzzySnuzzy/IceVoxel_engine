@@ -36,7 +36,7 @@
 	             left in the armor's row (over the armor icons when they show; a second row above
 	             past 200 mana) while a magic weapon is held, mana isn't full or just changed; the
 	             held item's name and the status row move up (`manaRaise`) when the stars reach
-	             the name's row.
+	             the name's row, and the corner keeps clear of them (UiScale.setHudRaise).
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu, a
 	             skill tree button over the gear the skill tree (Ui/SkillTreeScreen; with
@@ -725,6 +725,8 @@ function Hud.start()
 		-- the held item's name and Tough As Nails' status row move up as far as they need.
 		manaRaise = ManaHud.render(now, survival, held ~= nil and Items.magic(held.item) ~= nil, points > 0)
 		SurvivalHud.render(now, survival, if held then held.item else nil, manaRaise)
+		-- (The corner keeps clear of the raised rows: Ui/HudLayout's hudRaise; only a change counts.)
+		UiScale.setHudRaise(manaRaise)
 
 		-- Knowledge (survival and adventure, once the server sent it).
 		local status = ProgressionState.get()

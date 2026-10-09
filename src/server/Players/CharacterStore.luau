@@ -25,9 +25,10 @@
 	             Config.Characters.LockWait for another server still saving it, then "This
 	             character is open on another server"; a dead one is refused); avatar (the user's
 	             own avatar for the editor: ServerMessage.Avatar, and the editor's preview rig);
-	             preview (a listed character's rig) and edit preview (the editor's rig with an
-	             edited look): Players/CharacterLooks. A change a second (create, delete, rename,
-	             select), lists and previews four a second; one change at a time per player
+	             preview (a listed character's rig, wearing its armour, vanity and accessories:
+	             `dressedOf`) and edit preview (the editor's rig with an edited look):
+	             Players/CharacterLooks. A change a second (create, delete, rename, select),
+	             lists and previews four a second; one change at a time per player
 	             (`busy` in the list meanwhile). Once a player entered the world their character
 	             is theirs for the session: switching means leaving and rejoining.
 	  Entering   `enter` (Players/WorldMenu's EnterWorld, or the title screen off): the selected,
@@ -71,6 +72,7 @@ local Appearance = require(Shared.Characters.Appearance)
 local CharacterSync = require(Shared.Net.CharacterSync)
 local Characters = require(Shared.Characters)
 local Config = require(Shared.Config)
+local Accessories = require(Shared.Items.Accessories)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
@@ -164,8 +166,9 @@ type User = {
 	migrateMark: boolean,
 	lastList: number,
 	lastChange: number,
-	-- Looks of listed characters read for their previews.
+	-- Looks of listed characters read for their previews, and what they wear there (`dressedOf`).
 	looks: { [number]: Appearance.Appearance },
+	dressed: { [number]: string },
 }
 
 local CharacterStore = {}
@@ -412,6 +415,22 @@ local function newSelected(record: Record, progress: unknown?): Selected
 	}
 end
 
+--[[
+	What `record` wears on its preview rig (Items/Accessories.looks: armour or its vanity, the
+	accessories with a `worn` place, hidden ones left out). Every accessory row counts: the list
+	doesn't know the character's Age, and a row its Age closed holds something only after /age.
+]]
+local function dressedOf(record: Record): string
+	local inventory = Types.newInventory()
+	inventory.armor = record.armor
+	inventory.accessories = record.accessories
+	inventory.vanityArmor = record.vanityArmor
+	inventory.vanityAccessories = record.vanityAccessories
+	inventory.hidden = record.hidden
+	inventory.accessorySlots = Types.ACCESSORY_SIZE
+	return Accessories.looks(inventory)
+end
+
 -- The character as it is now (see the header): a new record over the selected one's.
 local function capture(player: Player, user: User, selected: Selected): Record
 	local base = selected.record
@@ -599,6 +618,7 @@ local function select(player: Player, user: User, id: number): string
 	end
 	user.selected = selected
 	user.looks[id] = loaded.appearance
+	user.dressed[id] = dressedOf(loaded)
 	if loaded.dropped > 0 then
 		return `{loaded.name} holds items this version doesn't know: it plays, but is not saved`
 	end
@@ -632,6 +652,7 @@ local function create(player: Player, user: User, request: CharacterSync.Request
 	end
 	user.selected = selected
 	user.looks[id] = look
+	user.dressed[id] = ""
 	if Config.MainMenu.Enabled then
 		CharacterLooks.preview(player, `c{id}`, look)
 	end
@@ -660,6 +681,7 @@ local function delete(player: Player, user: User, id: number): string
 	end
 	user.index = listed
 	user.looks[id] = nil
+	user.dressed[id] = nil
 	return `Deleted {line.name}`
 end
 
@@ -686,24 +708,28 @@ local function rename(player: Player, user: User, id: number, text: string): str
 	return `Renamed to {name}`
 end
 
--- The look of listed character `id` (the selected one's, one read before, or read now).
-local function lookOf(player: Player, user: User, id: number): Appearance.Appearance?
+--[[
+	The look of listed character `id` and what it wears (`dressedOf`): the selected one's, one
+	read before, or read now.
+]]
+local function lookOf(player: Player, user: User, id: number): (Appearance.Appearance?, string?)
 	local selected = user.selected
 	if selected and selected.id == id then
-		return selected.record.appearance
+		return selected.record.appearance, dressedOf(selected.record)
 	end
 	local known = user.looks[id]
 	if known then
-		return known
+		return known, user.dressed[id]
 	elseif findLine(user, id) == nil then
-		return nil
+		return nil, nil
 	end
 	local record = CharacterSaves.peek(user.saves, player.UserId, id)
 	if record then
 		user.looks[id] = record.appearance
-		return record.appearance
+		user.dressed[id] = dressedOf(record)
+		return record.appearance, user.dressed[id]
 	end
-	return nil
+	return nil, nil
 end
 
 local function onAction(player: Player, payload: buffer)
@@ -737,9 +763,9 @@ local function onAction(player: Player, payload: buffer)
 		elseif action == A.Preview and request.id then
 			local id = request.id
 			task.spawn(function()
-				local look = lookOf(player, user, id)
+				local look, dressed = lookOf(player, user, id)
 				if look then
-					CharacterLooks.preview(player, `c{id}`, look)
+					CharacterLooks.preview(player, `c{id}`, look, dressed)
 				end
 			end)
 		elseif action == A.EditPreview and request.appearance then
@@ -844,6 +870,7 @@ local function join(player: Player)
 		lastList = -math.huge,
 		lastChange = -math.huge,
 		looks = {},
+		dressed = {},
 	}
 	users[player] = user
 	waitForProbe()
@@ -1021,8 +1048,11 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 	})
 	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any)
 	Effects.restore(player, record.effects :: any)
-	Mana.restore(player, record.mana, record.crystals)
 	selected.progressWritable = Progression.restore(player, selected.progress)
+	-- (Mana after the progress and the accessory slots its Age opens: the max it is held to from
+	-- the next tick counts every accessory the character wears, a Band of Starpower included.)
+	Inventories.refreshSlots(player)
+	Mana.restore(player, record.mana, record.crystals)
 	local window = Inventories.get(player)
 	selected.inventory = window and window.inventory
 	selected.applied = true

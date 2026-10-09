@@ -254,6 +254,15 @@ local function applySlots(player: Player)
 end
 
 --[[
+	Asks the slots rule for `player` now instead of at the next look (a few times a second): a
+	character's progress just came back (Players/CharacterStore), so Players/Mana's next tick
+	already counts a Band of Starpower in a slot its Age opens.
+]]
+function Inventories.refreshSlots(player: Player)
+	applySlots(player)
+end
+
+--[[
 	After a snapshot of `inventory`: the accessories' sums, the move check's speed factor and the
 	looks attribute, each passed on only when it changed.
 ]]

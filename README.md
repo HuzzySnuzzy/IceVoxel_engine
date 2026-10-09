@@ -34,7 +34,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   the rest of the visit, then shown dead in the list). A character carries its look, inventory
   and equipment, health, mana and Mana Crystals, status effects, thirst and temperature and its
   Knowledge, Ages and skills from world to world and server to server; each world keeps only
-  where it stood and its game mode. It spawns with its own look and its name on the nametag.
+  where it stood and its game mode. It spawns with its own look and its name on the nametag, and
+  the list's preview shows it in the armor, vanity and accessories it wears.
   Characters are saved in a DataStore with a lock each (one server at a time: one still saving
   it is waited for, up to 30 seconds), every minute, when you leave and at shutdown; a list that
   could not be read is never written over, and in Studio without API access characters last for
@@ -362,6 +363,10 @@ A fast, Minecraft-style voxel engine for Roblox.
     and other clients fly the same path from three small messages.
   - **Fallen Stars:** they fall at night near every player, about five a night, glowing as they
     come down. The ones left on the ground vanish at dawn.
+  - **Tooltips:** a magic weapon says its damage, mana a cast and fire chance; a mana potion the
+    mana it restores; a Mana Crystal its +20; F3 shows your mana and the projectiles flying.
+  - **Saved:** mana and the crystals used go with the character (with characters off, with the
+    world's player record).
   - **Off:** `Config.Mana` turns all of it off.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and

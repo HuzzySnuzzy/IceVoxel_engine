@@ -27,6 +27,8 @@
 
 	  start       once, with the world's net.
 	  export      { mana, crystals } to save.
+	  peek        `export`, or nil when nothing is kept for the player (they left, or nothing
+	              came yet): World/WorldSave's record with characters off.
 	  restore     a saved character's mana and crystals (crystals 0..MaxCrystals; mana 0..Max now,
 	              and within the character's own max, its accessories once restored too, from the
 	              next tick).
@@ -107,7 +109,10 @@ local function stateOf(player: Player): State
 			full = false,
 			joined = false,
 		}
-		states[player] = state
+		-- (Not kept for a player who left: a late look must not bring them back to tick.)
+		if player.Parent ~= nil then
+			states[player] = state
+		end
 	end
 	return state
 end
@@ -217,6 +222,13 @@ end
 function Mana.export(player: Player): { mana: number, crystals: number }
 	local state = stateOf(player)
 	return { mana = math.min(state.regen.mana, maxOf(player, state)), crystals = state.crystals }
+end
+
+function Mana.peek(player: Player): { mana: number, crystals: number }?
+	if states[player] == nil then
+		return nil
+	end
+	return Mana.export(player)
 end
 
 function Mana.restore(player: Player, mana: number, crystals: number)

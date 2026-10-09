@@ -23,10 +23,12 @@
 	             has them, `legacyImported` does not, the character's `imported` does not name the
 	             world) takes it in (`import`): its place, facing, game mode and previous one
 	             become the character's entry in that world when it has none there yet
-	             (`entry`); its 36 slots, armor and the cursor's stack go into the character's
-	             inventory: each into the same slot when that is empty (an armor piece into its
-	             armor slot), else merged and into empty slots (Inventory/Menu.add), and what
-	             does not fit is listed to drop at the character's feet when it spawns; its
+	             (`entry`); its 36 slots, armor, equipment (a version 2 record's accessories,
+	             vanity armor and vanity accessories: Save/PlayerCodec) and the cursor's stack go
+	             into the character's inventory: each into the same slot when that is empty (an
+	             armor piece into its armor slot, an accessory into its accessory slot), else
+	             merged and into empty slots (Inventory/Menu.add), and what does not fit is
+	             listed to drop at the character's feet when it spawns; its
 	             health, Tough As Nails and effects are left (the character's own count). Then
 	             the meta records `legacyImported[userId] = charId` (saved with the world) and
 	             the character the world's id in `imported` (`markImported`). The old record is
@@ -127,8 +129,8 @@ function CharacterMigration.entry(
 end
 
 --[[
-	Puts the old record's slots, armor and cursor into `record`'s inventory (see the header) and
-	returns what did not fit (copies, to drop at the character's feet).
+	Puts the old record's slots, armor, equipment and cursor into `record`'s inventory (see the
+	header) and returns what did not fit (copies, to drop at the character's feet).
 ]]
 function CharacterMigration.import(record: Record, old: PlayerCodec.Record): { Stack }
 	local leftovers: { Stack } = {}
@@ -158,6 +160,27 @@ function CharacterMigration.import(record: Record, old: PlayerCodec.Record): { S
 			end
 		end
 	end
+	-- (A version 2 record's equipment: the same place when the character's is empty. A version 1
+	-- record has none: empty tables.)
+	local function equipment(from: { [number]: Stack? }?, into: { [number]: Stack? }, size: number)
+		if from == nil then
+			return
+		end
+		for slot = 1, size do
+			local stack = Items.copyStack(from[slot])
+			if stack and stack.count >= 1 then
+				local current = into[slot]
+				if current == nil or current.count < 1 then
+					into[slot] = stack
+				else
+					table.insert(pending, stack)
+				end
+			end
+		end
+	end
+	equipment(old.accessories, record.accessories, Types.ACCESSORY_SIZE)
+	equipment(old.vanityArmor, record.vanityArmor, Types.VANITY_ARMOR_SIZE)
+	equipment(old.vanityAccessories, record.vanityAccessories, Types.VANITY_ACCESSORY_SIZE)
 	local cursor = Items.copyStack(old.cursor)
 	if cursor and cursor.count >= 1 then
 		table.insert(pending, cursor)

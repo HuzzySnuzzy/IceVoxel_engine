@@ -6,7 +6,7 @@
 	(crystals, a Band of Starpower, the cap), Terraria 1.4.4's regeneration table run at 20 Hz
 	(standing and moving, full and empty, max 20 and 200; the delay after spending, 0.525 s to
 	3.325 s), spending and adding, the full chime, Mana Sickness's stacking and damage cut, the
-	mana potions; Mana/StarFall: the night, the chance, the ring, the landing column and simulated
+	mana potions, the items' tooltips; Mana/StarFall: the night, the chance, the ring, the landing column and simulated
 	nights' stars; client Ui/ManaStars: the HUD's stars, rows and when they show.
 ]]
 
@@ -318,6 +318,23 @@ return function(t, shared, require, _server, client)
 		local held, give = Drinks.afterDrinking({ item = id.ManaPotion, count = 3 }, false)
 		t.eq(held and held.count, 2)
 		t.eq(give and give.item, id.GlassBottle)
+	end)
+
+	t.test("mana: what the mana items say in their tooltips", function()
+		local wand = Mana.tooltip(id.WandOfSparking)
+		t.eq(wand[1], "When used:")
+		t.eq(wand[2], "3 Magic Damage")
+		t.eq(wand[3], "Uses 2 mana")
+		t.eq(wand[4], "50% chance to set on fire")
+		local staff = Mana.tooltip(id.EmeraldStaff)
+		t.eq(#staff, 3, "no fire")
+		t.eq(staff[3], `Uses {(Items.magic(id.EmeraldStaff) :: any).mana} mana`)
+		t.eq(Mana.tooltip(id.LesserManaPotion)[2], "Restores 50 mana")
+		t.eq(Mana.tooltip(id.ManaPotion)[2], "Restores 100 mana")
+		t.eq(Mana.tooltip(id.ManaCrystal)[2], "+20 max mana for good (9 at most)")
+		t.eq(Mana.tooltip(id.FallenStar)[1], "Disappears after the sunrise")
+		t.eq(#Mana.tooltip(id.PurifiedWaterBottle), 0, "water says nothing of mana")
+		t.eq(#Mana.tooltip(id.Dirt), 0)
 	end)
 
 	--[[ Fallen Stars (Mana/StarFall) ]]

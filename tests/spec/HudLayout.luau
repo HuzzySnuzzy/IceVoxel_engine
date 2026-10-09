@@ -5,10 +5,11 @@
 	touch on and off, the toasts and the saving icon showing or not and a few sets of effect icons:
 	everything placed stays inside the safe area below the top bar; the minimap, its coordinates
 	line, the Map button, the toasts, the effect icons, the saving icon, the touch buttons and the
-	HUD's canvas never overlap; WAILA's reserve covers the minimap column; the toasts start under the minimap's scaled
-	bottom. Named regressions: on a 667 x 375 phone the effect icons ran past the bottom of the
-	screen and the saving icon sat on the minimap (the corner was pinned to a 192 pixel minimap and
-	raised by a fixed 150 GUI pixels).
+	HUD's canvas never overlap (also while its rows are raised over the mana stars); WAILA's
+	reserve covers the minimap column; the toasts start under the minimap's scaled bottom. Named
+	regressions: on a 667 x 375 phone the effect icons ran past the bottom of the screen and the
+	saving icon sat on the minimap (the corner was pinned to a 192 pixel minimap and raised by a
+	fixed 150 GUI pixels).
 ]]
 
 return function(t, _shared, require, _server, client)
@@ -278,6 +279,41 @@ return function(t, _shared, require, _server, client)
 		local live = HudLayout.compute(phone({ saving = true, buttons = { { x = 560, y = 200, w = 90, h = 150 } } }))
 		local raised = live.saving
 		t.ok(raised ~= nil and raised.y + raised.h <= 200, "above a big live button")
+	end)
+
+	t.test("hud layout: the corner keeps clear of the HUD's rows raised over the mana stars", function()
+		-- (Ui/Hud moves the held item's name and the status row up to 20 GUI pixels over its canvas
+		-- while Terraria's mana stars show: Ui/ManaStars.layout, UiScale.setHudRaise.)
+		local checked = 0
+		for _, screen in SCREENS do
+			local w, h, inset = screen[1], screen[2], screen[3]
+			for _, touch in { false, true } do
+				local scale = GuiScale.base(w, h, touch, 0)
+				for _, raise in { 0, 10, 20 } do
+					local input = phone({
+						width = w,
+						height = h,
+						insets = inset,
+						scale = scale,
+						touch = touch,
+						music = true,
+						saving = true,
+						hudRaise = raise,
+					})
+					local layout = HudLayout.compute(input)
+					local hud = layout.hud
+					t.eq(hud.h, (HudLayout.HUD_HEIGHT + raise) * layout.scale, `{w} x {h}: raised {raise}`)
+					for name, r in shown(input, layout) do
+						t.ok(not HudLayout.overlaps(r, hud), `{w} x {h} raised {raise}: {name} off the HUD`)
+					end
+					checked += 1
+				end
+			end
+		end
+		t.eq(checked, #SCREENS * 2 * 3)
+		-- Without a raise the HUD is its canvas, as before.
+		local plain = HudLayout.compute(phone({}))
+		t.eq(plain.hud.h, HudLayout.HUD_HEIGHT * plain.scale)
 	end)
 
 	t.test("hud layout: the toasts' slots, the Map button and WAILA's edges", function()
