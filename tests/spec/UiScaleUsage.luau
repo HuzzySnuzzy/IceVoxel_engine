@@ -67,6 +67,7 @@ return function(t, _shared, _require, _server, _client)
 		t.ok(layers.ChatUnderScreens < layers.Screens, "the chat goes under an open screen's backdrop")
 		t.ok(layers.Chat < layers.Switcher and layers.Switcher < layers.Cursor, "the switcher, then the cursor")
 		t.ok(layers.Cursor < layers.Title and layers.Flash == layers.Title, "the title screen and the flash on top")
+		t.ok(layers.Tip > layers.Title, "the menus' button tooltips over every menu, the title screen's too")
 	end)
 
 	t.test("ui scale usage: only Ui/UiScale creates ScreenGuis", function()

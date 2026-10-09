@@ -43,6 +43,7 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local Style = require(script.Parent.Parent.Ui.Style)
 local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local HudLayout = require(script.Parent.Parent.Ui.HudLayout)
+local HoverTip = require(script.Parent.Parent.Ui.HoverTip)
 local MapLayer = require(script.Parent.MapLayer)
 local MapView = require(script.Parent.MapView)
 local Waypoints = require(script.Parent.Waypoints)
@@ -197,6 +198,7 @@ function Minimap.new(
 	open.ZIndex = 10
 	open.Activated:Connect(openMap)
 	open.Parent = holder
+	HoverTip.attach(open, "map.open")
 
 	-- The world map's way in on touch screens while the minimap is hidden.
 	local mapButton = Instance.new("TextButton")
@@ -219,6 +221,7 @@ function Minimap.new(
 	buttonStroke.Parent = mapButton
 	mapButton.Activated:Connect(openMap)
 	mapButton.Parent = gui
+	HoverTip.attach(mapButton, "map.open")
 
 	-- The weather mode's switch (bottom left, over the click that opens the world map) and its
 	-- caption: the forecast step and the wind, with an arrow where it blows. The switch drawn is
@@ -235,6 +238,7 @@ function Minimap.new(
 	weatherHit.ZIndex = 11
 	weatherHit.Activated:Connect(WeatherLayer.toggle)
 	weatherHit.Parent = holder
+	HoverTip.attach(weatherHit, "map.weather")
 	local weatherButton = Instance.new("TextLabel")
 	weatherButton.Name = "Cloud"
 	weatherButton.AnchorPoint = Vector2.new(0, 1)

@@ -1360,9 +1360,11 @@ the Performance page, the far meshes' state. A few notes on what the settings do
   falloff allows).
 - Caves: Hidden Until Seen draws a cave once you can see into it from underground (above);
   Always Shown draws every cave within full detail, about 4 × the parts of nearby terrain (see
-  Caves always shown in Features). No preset changes it. Settings with a tooltip (Caves, Fog,
-  Clouds and Weather) show it while the pointer rests on them or the gamepad selects them, as
-  Minecraft's options do.
+  Caves always shown in Features). No preset changes it.
+- Every setting has a tooltip (what it does, its cost: "May lower performance" on the heavy
+  ones), and every other menu button a description: rest the pointer on it, select it with a
+  gamepad, or hold a finger on it on a touch screen (`client/Ui/HoverTip`; the texts are in
+  `client/Ui/ButtonHelp`, easy to edit).
 - Fog: Atmosphere fades the far land and clouds into the sky (thicker in rain and snow, with a
   haze along the horizon); OFF clears the Atmosphere (density and haze 0), a clear view to the
   edge. Water, lava, oil, fuel and Blindness keep their fog either way. In a place that keeps its
@@ -1792,7 +1794,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             CharacterRules (their rules; pure), SaveIndicator
                             (the saving icon and the "World saved" toast), Chat/ (the chat in place of Roblox's: ChatLog
                             the lines, ChatInput the box's rules: sending, history, Tab;
-                            ChatFormat the messages' looks; all pure)
+                            ChatFormat the messages' looks; all pure), HoverTip (every menu
+                            button's tooltip) + ButtonHelp (their texts) + TooltipLayout
+                            (wrapping and placement; pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave

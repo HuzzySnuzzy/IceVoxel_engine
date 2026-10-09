@@ -79,6 +79,7 @@ local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
+local HoverTip = require(script.Parent.HoverTip)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SpectatorGui = require(script.Parent.SpectatorGui)
 local SurvivalHud = require(script.Parent.SurvivalHud)
@@ -484,6 +485,7 @@ function Hud.start()
 	moreButton.Size = UDim2.fromScale(1, 1)
 	moreButton.ZIndex = 5
 	moreButton.Parent = more
+	HoverTip.attach(moreButton, "hud.inventory")
 	moreButton.Activated:Connect(function()
 		if mode == "play" and GameMode.isSpectator(ClientInventory.mode()) then
 			-- (Spectators have no inventory: the button is their middle click.)
@@ -508,6 +510,7 @@ function Hud.start()
 	gearButton.Size = UDim2.fromScale(1, 1)
 	gearButton.ZIndex = 6
 	gearButton.Parent = gear
+	HoverTip.attach(gearButton, "hud.options")
 	gearButton.Activated:Connect(function()
 		if settingsHandler then
 			SoundPlayer.click()
@@ -528,6 +531,7 @@ function Hud.start()
 	skillsButton.Size = UDim2.fromScale(1, 1)
 	skillsButton.ZIndex = 6
 	skillsButton.Parent = skills
+	HoverTip.attach(skillsButton, "hud.skills")
 	skillsButton.Activated:Connect(function()
 		if skillsHandler then
 			SoundPlayer.click()
@@ -548,6 +552,7 @@ function Hud.start()
 	chatButton.Size = UDim2.fromScale(1, 1)
 	chatButton.ZIndex = 6
 	chatButton.Parent = chat
+	HoverTip.attach(chatButton, "hud.chat")
 	chatButton.Activated:Connect(function()
 		if chatHandler then
 			SoundPlayer.click()

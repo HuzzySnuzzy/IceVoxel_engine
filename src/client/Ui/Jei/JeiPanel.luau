@@ -23,6 +23,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Items = require(Shared.Items)
 
 local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
+local HoverTip = require(script.Parent.Parent.HoverTip)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
 local Style = require(script.Parent.Parent.Style)
 local JeiData = require(script.Parent.JeiData)
@@ -148,6 +149,9 @@ function JeiPanel.new(parent: Instance): JeiPanel
 		SoundPlayer.click()
 		self:turn(1)
 	end)
+	HoverTip.attach(prev, "jei.previous")
+	HoverTip.attach(nextButton, "jei.next")
+	HoverTip.attach(self.search, "jei.search")
 	return self
 end
 

@@ -29,6 +29,7 @@ local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
+local HoverTip = require(script.Parent.HoverTip)
 local SpectatorMenu = require(script.Parent.SpectatorMenu)
 local Style = require(script.Parent.Style)
 
@@ -268,6 +269,11 @@ function SpectatorGui.build(
 			if SpectatorMenu.isOpen(gui) then
 				SpectatorGui.hotbarKey(slot)
 			end
+		end)
+		-- (What the slot's item does, while the menu is open: SpectatorMenu's slots count from 0.)
+		HoverTip.attach(button, "spectator.slot", function(): string?
+			local menu = gui.menu
+			return if menu then SpectatorMenu.item(menu, slot - 1).kind else nil
 		end)
 		cells[slot] = { icon = icon, key = key, keyShadow = keyShadow, shown = "" }
 	end

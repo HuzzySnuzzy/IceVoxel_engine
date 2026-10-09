@@ -59,6 +59,10 @@
 	             its `check` finds wrong under it in red and its `presets` on a button that cycles
 	             them (superflat: Minecraft's flat presets); Create New World refuses a text that
 	             fails its check (CreateWorldForm.problem).
+	  Tooltips   every button, field and list row says what it does when hovered, selected with a
+	             gamepad or long pressed (Ui/HoverTip; the texts: Ui/ButtonHelp's "title.*",
+	             "create.*", "load.*", "confirm.*", "rename.*"): what each game mode and
+	             difficulty means, who may create or load a world, what can't be undone.
 	  Sub-screens (Create, Customize, Options, creating) sit on Minecraft's options background:
 	             the dirt texture (TexturePack "dirt") tiled 32 GUI pixels a tile at a quarter of
 	             its brightness (Minecraft's 64 / 255), or plain dark brown without one.
@@ -96,6 +100,7 @@ local CharacterRules = require(script.Parent.CharacterRules)
 local CharacterSelect = require(script.Parent.CharacterSelect)
 local CreateWorldForm = require(script.Parent.CreateWorldForm)
 local FormWidgets = require(script.Parent.FormWidgets)
+local HoverTip = require(script.Parent.HoverTip)
 local SaveIndicator = require(script.Parent.SaveIndicator)
 local SettingsScreen = require(script.Parent.SettingsScreen)
 local Style = require(script.Parent.Style)
@@ -464,6 +469,10 @@ function MainMenu.run()
 	local statusLine = FormWidgets.label(column, "", -60, 4 * ROW + 16, BUTTON_W + 120, GRAY, "centre")
 	-- (Why worlds can't be saved here, in red: Studio without API access.)
 	local setSaveNote = infoText(column, -60, 4 * ROW + 28, BUTTON_W + 120, 3)
+	HoverTip.attach(joinButton.button, "title.join")
+	HoverTip.attach(createButton.button, "title.create")
+	HoverTip.attach(loadButton.button, "title.load")
+	HoverTip.attach(optionsButton.button, "title.options")
 	local titleOrder: { GuiObject } =
 		{ joinButton.button, createButton.button, loadButton.button, optionsButton.button }
 	-- With characters the title has Play and Options...; the buttons above move to the world page
@@ -477,12 +486,15 @@ function MainMenu.run()
 			place(title, UDim2.new(0.5, -BUTTON_W / 2, 0.25, 48), UDim2.fromOffset(BUTTON_W, 2 * ROW + 12), 5)
 		local play = FormWidgets.button(titleColumn, "Play", 0, 0, BUTTON_W, BUTTON_H)
 		local options = FormWidgets.button(titleColumn, "Options...", 0, ROW + 12, BUTTON_W, BUTTON_H)
+		HoverTip.attach(play.button, "title.play")
+		HoverTip.attach(options.button, "title.options")
 		play.button.NextSelectionDown, play.button.NextSelectionUp = options.button, options.button
 		options.button.NextSelectionDown, options.button.NextSelectionUp = play.button, play.button
 		charactersButton, titleOptions = play, options
 		column.Parent = pages.world
 		optionsButton:setVisible(false)
 		local back = FormWidgets.button(column, "Back", 0, 3 * ROW + 12, BUTTON_W, BUTTON_H)
+		HoverTip.attach(back.button, "world.back")
 		worldBack = back
 		titleOrder = { joinButton.button, createButton.button, loadButton.button, back.button }
 		local label = FormWidgets.label(pages.world, "", 0, 0, 320, WHITE, "centre", 5)
@@ -621,6 +633,30 @@ function MainMenu.run()
 	end)
 	local renameNow = FormWidgets.button(renameHolder, "Rename", 0, 40, 100, BUTTON_H)
 	local renameCancel = FormWidgets.button(renameHolder, "Cancel", 110, 40, 100, BUTTON_H)
+
+	-- What each widget does (Ui/ButtonHelp), shown hovered, selected or long pressed.
+	HoverTip.attach(gameTab.button, "create.tabGame")
+	HoverTip.attach(worldTab.button, "create.tabWorld")
+	HoverTip.attach(nameBox.box, "create.name")
+	HoverTip.attach(modeButton.button, "create.gameMode")
+	HoverTip.attach(difficultyButton.button, "create.difficulty")
+	HoverTip.attach(commandsButton.button, "create.commands")
+	HoverTip.attach(typeButton.button, "create.worldType")
+	HoverTip.attach(customizeButton.button, "create.customize")
+	HoverTip.attach(seedBox.box, "create.seed")
+	HoverTip.attach(structuresButton.button, "create.structures")
+	HoverTip.attach(createNow.button, "create.createNow")
+	HoverTip.attach(cancel.button, "create.cancel")
+	HoverTip.attach(doneButton.button, "create.customDone")
+	HoverTip.attach(playButton.button, "load.play")
+	HoverTip.attach(renameButton.button, "load.rename")
+	HoverTip.attach(deleteButton.button, "load.delete")
+	HoverTip.attach(loadCancel.button, "load.cancel")
+	HoverTip.attach(confirmDelete.button, "confirm.delete")
+	HoverTip.attach(confirmCancel.button, "confirm.cancel")
+	HoverTip.attach(renameBox.box, "rename.name")
+	HoverTip.attach(renameNow.button, "rename.confirm")
+	HoverTip.attach(renameCancel.button, "rename.cancel")
 
 	-- The saved worlds (the server's WorldList), the one picked, a request out.
 	local worlds: { Protocol.WorldEntry } = {}
@@ -785,6 +821,7 @@ function MainMenu.run()
 			row.Size = UDim2.fromOffset(268, 36)
 			row.ZIndex = 6
 			row.Parent = worldList
+			HoverTip.attach(row, "load.row")
 			local inside = Style.frame(row, 1, 1, 266, 34, Color3.new(0, 0, 0), 6)
 			inside.BackgroundTransparency = if entry.id == selectedId then 0 else 1
 			Style.shadowText(row, line1, 4, 3, 260, 10, WHITE, 7)
@@ -891,6 +928,10 @@ function MainMenu.run()
 				end)
 				local setProblem = infoText(row, 0, 34, 320, 1)
 				local presetButton = if hasPresets then FormWidgets.button(row, "", 55, 48, 210, BUTTON_H) else nil
+				HoverTip.attach(box.box, "create.customSetting")
+				if presetButton then
+					HoverTip.attach(presetButton.button, "create.customSetting")
+				end
 				local function refreshText()
 					setProblem(CreateWorldForm.settingProblem(form, setting) or "", Style.Colour.Red)
 					if presetButton then
@@ -916,6 +957,7 @@ function MainMenu.run()
 				local row = place(customizeList, UDim2.fromOffset(0, y), UDim2.fromOffset(320, 40), 5)
 				local button =
 					FormWidgets.button(row, CreateWorldForm.settingLabel(form, setting), 55, 0, 210, BUTTON_H)
+				HoverTip.attach(button.button, "create.customSetting")
 				button.clicked = function()
 					SoundPlayer.click()
 					CreateWorldForm.cycleSetting(form, setting)

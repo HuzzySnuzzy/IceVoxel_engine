@@ -19,8 +19,10 @@
 	            "controls", "hud", "keys", "mouse", "chat", "clouds", "weather" (`also` names
 	            more). The costly ones
 	            (EXPENSIVE) wait until a slider has stopped moving (Config.Settings.ApplyDelay).
-	  tooltip   (optional) Minecraft's option tooltip, shown while the setting is hovered or
-	            selected: what it does, and a warning when it is heavy ("May lower performance").
+	  tooltip   Minecraft's option tooltip, shown while the setting is hovered, selected or long
+	            pressed (Ui/HoverTip, from Ui/ButtonHelp's "options.setting"): what it does, its
+	            trade-off, and a warning when it is heavy ("May lower performance"). Every entry
+	            has one (tests/spec/ButtonHelp); a key binding's is its action's (KeyBindings).
 
 	Ids: the plain settings are 1, 2, 3... (id = place in the list); the key bindings are generated
 	from Shared/KeyBindings' actions from KeyBindings.KEY_BASE (128) on, one per action in its
@@ -83,7 +85,7 @@ export type Entry = {
 	-- Only offered on touch screens.
 	touchOnly: boolean?,
 	-- What the menu shows while the pointer (or the gamepad selection) rests on the setting:
-	-- Minecraft's option tooltips (Ui/SettingsScreen, wrapped to Settings/Pages.TOOLTIP_W).
+	-- Minecraft's option tooltips (Ui/HoverTip, wrapped to Ui/TooltipLayout.WIDTH).
 	tooltip: string?,
 }
 
@@ -173,6 +175,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [1] = "Low", [2] = "Medium", [3] = "High", [4] = "Ultra" },
+		tooltip = "Sets the view distance, detail, caves, plants, shadows, hidden terrain and the "
+			.. "weather's looks together. Changing one of them reads Custom.",
 	},
 	{
 		id = 2,
@@ -189,6 +193,8 @@ local ENTRIES: { Entry } = {
 		also = { "fog" },
 		preset = true,
 		format = "blocks",
+		tooltip = "How far terrain is drawn, in blocks: the farther, the coarser. The fog follows it. "
+			.. "Farther may lower performance and uses more memory.",
 	},
 	{
 		id = 3,
@@ -203,6 +209,8 @@ local ENTRIES: { Entry } = {
 		effect = "lod",
 		preset = true,
 		format = "factor",
+		tooltip = "How soon terrain gets coarser with distance: higher keeps more detail far away. May "
+			.. "lower performance.",
 	},
 	{
 		id = 4,
@@ -217,6 +225,8 @@ local ENTRIES: { Entry } = {
 		effect = "lod",
 		preset = true,
 		format = "fullDetail",
+		tooltip = "How far full detail terrain reaches, in blocks: the only terrain with caves and "
+			.. "plants. The heaviest terrain: may lower performance.",
 	},
 	{
 		id = 5,
@@ -232,6 +242,8 @@ local ENTRIES: { Entry } = {
 		also = { "lod" },
 		preset = true,
 		format = "blocks",
+		tooltip = "How far into caves you see while underground, in blocks: big caverns open up farther. "
+			.. "May lower performance.",
 	},
 	{
 		id = 6,
@@ -247,6 +259,8 @@ local ENTRIES: { Entry } = {
 		preset = true,
 		format = "blocks",
 		labels = { [0] = "OFF" },
+		tooltip = "How far grass, flowers and mushrooms are drawn. Each plant is up to 4 parts: may lower "
+			.. "performance. OFF: plants are still there, only not drawn.",
 	},
 	{
 		id = 7,
@@ -261,6 +275,8 @@ local ENTRIES: { Entry } = {
 		effect = "shadows",
 		preset = true,
 		format = "plain",
+		tooltip = "Shadows on nearby terrain, and torch and lantern light stopping at walls. May lower "
+			.. "performance.",
 	},
 	{
 		id = 8,
@@ -275,6 +291,7 @@ local ENTRIES: { Entry } = {
 		effect = "farShadows",
 		preset = true,
 		format = "plain",
+		tooltip = "Shadows on distant terrain too. May lower performance.",
 	},
 	-- The view's haze (client Rendering/AtmosphereModel: a Lighting Atmosphere fading the view
 	-- distance's edge into the sky); off, the Atmosphere's density and haze are 0. Fluids' and
@@ -309,6 +326,8 @@ local ENTRIES: { Entry } = {
 		effect = "textures",
 		preset = false,
 		format = "plain",
+		tooltip = "The texture pack's block textures. OFF: every block in its plain material and colour, "
+			.. "lighter for slow devices.",
 	},
 	{
 		id = 11,
@@ -324,6 +343,8 @@ local ENTRIES: { Entry } = {
 		preset = true,
 		format = "blocks",
 		labels = { [144] = "All" },
+		tooltip = "How far from you glow lichen lights up caves. Farther lichen still glows, but lights "
+			.. "nothing around it. All: every light. More lights may lower performance.",
 	},
 	{
 		id = 12,
@@ -339,6 +360,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "Moody", [100] = "Bright" },
+		tooltip = "How light caves and other dark places are. Moody: dark caves, bring torches. Bright: "
+			.. "you can see in unlit caves.",
 	},
 	{
 		id = 13,
@@ -354,6 +377,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "Lighting", [1] = "Distance" },
+		tooltip = "What Roblox keeps when it has to lower the graphics quality: the draw distance "
+			.. "(Distance) or the lighting's detail (Lighting).",
 	},
 	{
 		id = 14,
@@ -369,6 +394,8 @@ local ENTRIES: { Entry } = {
 		effect = "overlay",
 		preset = false,
 		format = "plain",
+		tooltip = "Merges distant terrain into a few meshes instead of thousands of parts: smoother "
+			.. "frames, a plainer look far away. Needs Roblox's mesh support.",
 	},
 	{
 		id = 15,
@@ -384,6 +411,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "ms",
 		labels = { [0] = "Auto" },
+		tooltip = "Milliseconds a frame spent building terrain. Auto follows how busy your frames are. "
+			.. "Higher loads terrain faster but may stutter.",
 	},
 	{
 		id = 16,
@@ -399,6 +428,8 @@ local ENTRIES: { Entry } = {
 		preset = true,
 		format = "plain",
 		labels = { [0] = "Draw", [1] = "Skip" },
+		tooltip = "Skip: distant terrain hidden behind nearer hills is not built until you could see it. "
+			.. "Fewer parts, but it may pop in as you move.",
 	},
 	{
 		id = 17,
@@ -413,6 +444,8 @@ local ENTRIES: { Entry } = {
 		effect = "swapFrames",
 		preset = false,
 		format = "plain",
+		tooltip = "Frames old terrain stays while its replacement appears, so no gaps show the sky. 0 "
+			.. "swaps at once.",
 	},
 	{
 		id = 18,
@@ -428,6 +461,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "The volume of every sound and the music.",
 	},
 	{
 		id = 19,
@@ -443,6 +477,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "Blocks breaking and being placed, chests, furnaces, lava, fire and explosions.",
 	},
 	{
 		id = 20,
@@ -458,6 +493,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "Footsteps, swimming, eating, fighting and getting hurt.",
 	},
 	{
 		id = 21,
@@ -473,6 +509,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "Rain, thunder and the cave moods.",
 	},
 	{
 		id = 22,
@@ -488,6 +525,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "Button clicks, level-ups and the other interface sounds.",
 	},
 	{
 		id = 23,
@@ -502,6 +540,7 @@ local ENTRIES: { Entry } = {
 		effect = "audio",
 		preset = false,
 		format = "plain",
+		tooltip = "Footstep sounds while walking and running.",
 	},
 	{
 		id = 24,
@@ -516,6 +555,7 @@ local ENTRIES: { Entry } = {
 		effect = "audio",
 		preset = false,
 		format = "plain",
+		tooltip = "The click of buttons in the menus.",
 	},
 	{
 		id = 25,
@@ -530,6 +570,7 @@ local ENTRIES: { Entry } = {
 		effect = "audio",
 		preset = false,
 		format = "plain",
+		tooltip = "The eerie sounds that play now and then in dark places, as Minecraft's cave ambience.",
 	},
 	{
 		id = 26,
@@ -545,6 +586,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [70] = "Normal", [110] = "Quake Pro" },
+		tooltip = "How wide the camera sees. Wider shows more around you, but everything looks smaller "
+			.. "and farther.",
 	},
 	{
 		id = 27,
@@ -560,6 +603,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "How much sprinting, flying and status effects change the field of view.",
 	},
 	{
 		id = 28,
@@ -575,6 +619,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "Hold", [1] = "Toggle" },
+		tooltip = "Hold: sprint while the key is held. Toggle: press once to start sprinting, again to " .. "stop.",
 	},
 	{
 		id = 29,
@@ -590,6 +635,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "Zoom", [1] = "Hotbar" },
+		tooltip = "Hotbar: the mouse wheel picks hotbar slots. Zoom: it zooms the camera in and out.",
 	},
 	{
 		id = 30,
@@ -605,6 +651,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		touchOnly = true,
+		tooltip = "On-screen Sprint and Sneak buttons on touch screens. Applies after rejoining.",
 	},
 	{
 		id = 31,
@@ -619,6 +666,8 @@ local ENTRIES: { Entry } = {
 		effect = "hud",
 		preset = false,
 		format = "plain",
+		tooltip = "The minimap in the corner, with the coordinates. OFF on a touch screen: a Map button "
+			.. "takes its place.",
 	},
 	{
 		id = 32,
@@ -633,6 +682,8 @@ local ENTRIES: { Entry } = {
 		effect = "hud",
 		preset = false,
 		format = "plain",
+		tooltip = "What You're Looking At: the name and details of the block or creature under the "
+			.. "crosshair, at the top of the screen.",
 	},
 	-- Minecraft's GUI Scale: 0 is Auto, which is always the largest scale the screen allows (client
 	-- Ui/GuiScale: 4 at 1920 x 1080, 9 on a 4K window); 1 .. 12 a choice, offered only up to this
@@ -652,6 +703,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "Auto" },
+		tooltip = "The size of the menus and the HUD. Auto: the largest that fits this screen.",
 	},
 	-- Materials and textures on merged far chunks (far meshes split by look) instead of plain
 	-- colours; restyled like Textures. Offered only where far meshes can run (Settings.shown).
@@ -668,6 +720,8 @@ local ENTRIES: { Entry } = {
 		effect = "textures",
 		preset = false,
 		format = "plain",
+		tooltip = "Distant merged terrain keeps its block materials and textures instead of plain "
+			.. "colours. More meshes to build: may lower performance.",
 	},
 	-- Minecraft's Music slider: the background music (Audio/Music).
 	{
@@ -684,6 +738,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "The background music.",
 	},
 	-- The "Now Playing" toast when a track starts (Ui/MusicToast).
 	{
@@ -699,6 +754,7 @@ local ENTRIES: { Entry } = {
 		effect = "audio",
 		preset = false,
 		format = "plain",
+		tooltip = "Shows the title of a track in the corner when it starts.",
 	},
 	-- Mouse Settings (Minecraft's MouseSettingsScreen). Sensitivity: 0-200%, 100% is Roblox's own
 	-- feel (`mouseSensitivity`: Minecraft's (0.6 s + 0.2)^3 x 8 curve).
@@ -716,6 +772,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "*yawn*", [200] = "HYPERSPEED!!!" },
+		tooltip = "How fast the camera turns as the mouse moves.",
 	},
 	{
 		id = 38,
@@ -730,6 +787,7 @@ local ENTRIES: { Entry } = {
 		effect = "mouse",
 		preset = false,
 		format = "plain",
+		tooltip = "Moving the mouse up looks down, and down looks up.",
 	},
 	-- Minecraft's slider: -200..100 on a log scale, 10 ^ (value / 100) = 0.01..10, 1.00 by default
 	-- (`scroll`).
@@ -746,6 +804,7 @@ local ENTRIES: { Entry } = {
 		effect = "controls",
 		preset = false,
 		format = "log",
+		tooltip = "How far one turn of the mouse wheel scrolls the hotbar and lists.",
 	},
 	{
 		id = 40,
@@ -760,6 +819,7 @@ local ENTRIES: { Entry } = {
 		effect = "controls",
 		preset = false,
 		format = "plain",
+		tooltip = "Every notch of the wheel is one step, however fast it turns: for touchpads and smooth " .. "wheels.",
 	},
 	-- Minecraft's toggleCrouch (Hold by default; the touch Sneak button always toggles).
 	{
@@ -776,6 +836,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "Hold", [1] = "Toggle" },
+		tooltip = "Hold: sneak while the key is held. Toggle: press once to sneak, again to stand. The "
+			.. "touch Sneak button always toggles.",
 	},
 	-- Accessibility: the camera bobbing while walking, the Nausea wobble's share (squared, as
 	-- Minecraft's screenEffectScale), the hurt camera's tilt.
@@ -792,6 +854,7 @@ local ENTRIES: { Entry } = {
 		effect = "camera",
 		preset = false,
 		format = "plain",
+		tooltip = "The camera bobs as you walk.",
 	},
 	{
 		id = 43,
@@ -807,6 +870,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "How strongly Nausea wobbles the screen. Lower it if it makes you feel unwell.",
 	},
 	{
 		id = 44,
@@ -822,6 +886,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "How much the camera tilts when you are hurt.",
 	},
 	-- Minecraft's attack indicator: the weapon's recovery (Combat.strength) under the crosshair or
 	-- beside the hotbar.
@@ -839,6 +904,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [0] = "OFF", [1] = "Crosshair", [2] = "Hotbar" },
+		tooltip = "Your weapon's recovery after a swing, under the crosshair or beside the hotbar: hits "
+			.. "do full damage once it is full.",
 	},
 	-- Chat Settings (client Ui/Chat), Minecraft's ChatOptionsScreen: chatVisibility, chatOpacity
 	-- (shown 10-100%), textBackgroundOpacity ("Text Background": Minecraft's name is too long for
@@ -859,6 +926,8 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 		labels = { [1] = "Shown", [2] = "Commands Only", [3] = "Hidden" },
+		tooltip = "Shown: every message. Commands Only: other players' messages are hidden. Hidden: no "
+			.. "chat at all.",
 	},
 	{
 		id = 47,
@@ -873,6 +942,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "percent",
+		tooltip = "How solid the chat's text is.",
 	},
 	{
 		id = 48,
@@ -887,6 +957,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "percent",
+		tooltip = "How dark the box behind the chat's lines is.",
 	},
 	{
 		id = 49,
@@ -902,6 +973,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "percent",
 		labels = { [0] = "OFF" },
+		tooltip = "The size of the chat's text. OFF hides the chat.",
 	},
 	{
 		id = 50,
@@ -916,6 +988,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "percent",
+		tooltip = "Extra space between the chat's lines.",
 	},
 	{
 		id = 51,
@@ -931,6 +1004,7 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "seconds",
 		labels = { [0] = "None" },
+		tooltip = "Waits this long before showing other players' messages.",
 	},
 	{
 		id = 52,
@@ -945,6 +1019,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "pixels",
+		tooltip = "How wide the chat is.",
 	},
 	{
 		id = 53,
@@ -959,6 +1034,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "pixels",
+		tooltip = "How tall the chat is while you type.",
 	},
 	{
 		id = 54,
@@ -973,6 +1049,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "pixels",
+		tooltip = "How tall the chat is while you play.",
 	},
 	{
 		id = 55,
@@ -987,6 +1064,7 @@ local ENTRIES: { Entry } = {
 		effect = "chat",
 		preset = false,
 		format = "plain",
+		tooltip = "Lists the commands that match while you type one after a /.",
 	},
 	-- Caves hidden until the camera can see into them (Streaming/CaveReach's search), or every
 	-- cave of every full detail chunk meshed with its walls: about 4x the parts of full detail
@@ -1069,6 +1147,7 @@ for i, action in KeyBindings.ACTIONS do
 			effect = "keys",
 			preset = false,
 			format = "key",
+			tooltip = action.tooltip,
 		} :: Entry
 	)
 end
