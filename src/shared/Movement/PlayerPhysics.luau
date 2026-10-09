@@ -76,10 +76,31 @@
 	           `jumpBoost` adds to the jump velocity and `fallReduction` blocks to the safe fall
 	           (Jump Boost: +0.1 and a block a level); `noSprint` keeps sprinting from starting
 	           (Blindness: LocalPlayer.canStartSprinting).
+	  accessories  Terraria's (Items/Accessories, set on the state by the client's controller;
+	           every field's default leaves Minecraft's movement exactly as it was):
+	             air jumps  (Cloud in a Bottle) `airJumpsMax` jumps in the air, each a new press of
+	                        jump (not held) while airborne, not in a fluid, not climbing, not
+	                        flying: the vertical speed becomes Config.Accessories.AirJumpPower
+	                        (0.36: 0.96 blocks, Terraria's three quarters of a jump) plus
+	                        `jumpBoost` (a Shiny Red Balloon's 0.1: 1.48 blocks), the fall
+	                        distance starts again from there (Terraria measures the fall from the
+	                        second jump's top), `events.jumped` and `events.airJumped`. They come
+	                        back (`airJumpsLeft`) on the ground, climbing and in any fluid;
+	             running    (Hermes Boots) after Config.Accessories.RunDelay ticks (10) of
+	                        sprinting on the ground the ground speed's multiplier `runFactor`
+	                        rises linearly over RunRamp ticks (12) to 1 + `runBoost` (1.4: 5.6 ->
+	                        7.9 blocks a second); airborne it is kept (a sprint jump carries it);
+	                        it starts again when sprinting stops (running into a wall head on
+	                        stops it) or knockback lands (Terraria's accRunSpeed build-up, reset
+	                        by walls and hits);
+	             swimming   (Flipper) `swimFactor` multiplies water's acceleration and the swim up
+	                        on jump (1 + its `swim`: 2);
+	             knockback  `knockbackResist` (Cobalt Shield: 0..1) takes that share off a push
+	                        given to `knockback`.
 
 	`setGameMode` gives a state the abilities of a game mode (Shared/GameMode), as Minecraft's
 	GameType.updatePlayerAbilities does. `knockback` adds an explosion's push to the velocity
-	(not for spectators or creative flight).
+	(not for spectators or creative flight; less `knockbackResist`'s share).
 
 	Units are blocks and ticks: positions in blocks (feet centre), velocities in blocks per tick.
 	Speeds of Minecraft's Abilities are floats, so they are kept rounded to floats here too.
@@ -136,6 +157,12 @@ local LAVA_VERTICAL_DRAG = 0.800000011920929
 local LAVA_GRAVITY = GRAVITY / 4
 -- Entity.baseTick: in lava the fall distance halves every tick (0.5F).
 local LAVA_FALL_FACTOR = 0.5
+
+-- Terraria's accessories (Config.Accessories): a Hermes run's ticks before it builds and to build
+-- fully, and a Cloud in a Bottle's take-off speed (blocks a tick).
+local RUN_DELAY = Config.Accessories.RunDelay
+local RUN_RAMP = math.max(Config.Accessories.RunRamp, 1)
+local AIR_JUMP_POWER = Config.Accessories.AirJumpPower
 
 -- The fluid of each block (Shared/Fluids id per block id, 0 none: every level and cave twin).
 local fluidLut = Fluids.blockLut
@@ -264,6 +291,17 @@ export type State = {
 	jumpBoost: number,
 	fallReduction: number,
 	noSprint: boolean,
+	-- Terraria's accessories (see the header): jumps in the air a time aloft (0: none) and how
+	-- many are left; the share sprinting builds the ground speed up by (0: none), the ticks sprinted
+	-- on the ground and the multiplier reached (1); swimming's multiplier (1); the share of
+	-- knockback taken off (0).
+	airJumpsMax: number,
+	airJumpsLeft: number,
+	runBoost: number,
+	runTicks: number,
+	runFactor: number,
+	swimFactor: number,
+	knockbackResist: number,
 	-- The feet in a climbable block after the tick (ladder, vine, rope: LivingEntity.onClimbable).
 	climbing: boolean,
 	-- The multiplier a cobweb the hull touched puts on the next move (Entity.stuckSpeedMultiplier,
@@ -295,6 +333,8 @@ export type World = {
 
 export type Events = {
 	jumped: boolean,
+	-- The jump was one in the air (Terraria's Cloud in a Bottle): `jumped` too.
+	airJumped: boolean,
 	-- Height (blocks) stepped up onto something this tick, 0 if none.
 	stepUp: number,
 	-- Landed this tick after falling `fallDistance` blocks; `damage` in half hearts (0 = none).
@@ -348,6 +388,13 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		jumpBoost = 0,
 		fallReduction = 0,
 		noSprint = false,
+		airJumpsMax = 0,
+		airJumpsLeft = 0,
+		runBoost = 0,
+		runTicks = 0,
+		runFactor = 1,
+		swimFactor = 1,
+		knockbackResist = 0,
 		climbing = false,
 		stuck = nil,
 	}
@@ -411,13 +458,16 @@ function PlayerPhysics.place(state: State, x: number, y: number, z: number)
 	state.onGround = false
 	state.sprinting = false
 	state.stuck = nil
+	state.runTicks, state.runFactor = 0, 1
 end
 
 --[[
 	An explosion's knockback (kx, ky, kz blocks per tick; the server's Explosion message, Shared/
 	World/Explosion.hit), added to the velocity as Minecraft's client does with the explosion
 	packet's. Not for spectators (noClip) nor a player flying who may fly (Minecraft's server
-	leaves creative flight out of the packet's knockback). Returns whether it was applied.
+	leaves creative flight out of the packet's knockback). `knockbackResist` takes its share off
+	(all of it: nothing happens). A push that lands stops a Hermes run building up. Returns
+	whether it was applied.
 ]]
 function PlayerPhysics.knockback(state: State, kx: number, ky: number, kz: number): boolean
 	if state.noClip or (state.flying and state.mayFly) then
@@ -426,9 +476,18 @@ function PlayerPhysics.knockback(state: State, kx: number, ky: number, kz: numbe
 	if not (kx == kx and ky == ky and kz == kz) or (kx == 0 and ky == 0 and kz == 0) then
 		return false
 	end
+	local resist = state.knockbackResist
+	if resist ~= 0 then
+		local share = 1 - math.clamp(resist, 0, 1)
+		if not (share > 0) then
+			return false
+		end
+		kx, ky, kz = kx * share, ky * share, kz * share
+	end
 	state.vx += kx
 	state.vy += ky
 	state.vz += kz
+	state.runTicks, state.runFactor = 0, 1
 	return true
 end
 
@@ -881,7 +940,8 @@ end
 ]]
 function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	local solidAt = solidChecker(world)
-	local events: Events = { jumped = false, stepUp = 0, landed = false, fallDistance = 0, damage = 0 }
+	local events: Events =
+		{ jumped = false, airJumped = false, stepUp = 0, landed = false, fallDistance = 0, damage = 0 }
 
 	-- The game mode changed between ticks (the server updates the abilities): no flying without
 	-- being allowed to; spectators always fly (LocalPlayer.aiStep: isAlwaysFlying).
@@ -979,6 +1039,17 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			state.sprinting = false
 		end
 	end
+	-- Terraria's Hermes Boots: sprinting on the ground builds the ground speed up after RUN_DELAY
+	-- ticks over RUN_RAMP more; aloft it is kept; it starts again whenever sprinting stops (a wall
+	-- run into head on stops it, above) or knockback lands (`knockback`).
+	if state.runBoost > 0 and state.sprinting and not state.flying then
+		if state.onGround and not state.inWater and not state.inLava then
+			state.runTicks = math.min(state.runTicks + 1, RUN_DELAY + RUN_RAMP)
+		end
+		state.runFactor = 1 + state.runBoost * math.clamp((state.runTicks - RUN_DELAY) / RUN_RAMP, 0, 1)
+	elseif state.runTicks ~= 0 or state.runFactor ~= 1 then
+		state.runTicks, state.runFactor = 0, 1
+	end
 	-- Double tapping jump toggles flying: the first press arms it for DOUBLE_TAP_TICKS (counted down
 	-- in Player.aiStep below), a second press within them toggles (not while swimming, and never
 	-- for spectators, who always fly).
@@ -1021,13 +1092,20 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if abs(state.vz) < MIN_VELOCITY then
 		state.vz = 0
 	end
+	-- Terraria's air jumps come back on the ground, climbing and in any fluid.
+	if state.onGround or state.climbing or state.inWater or state.inLava then
+		state.airJumpsLeft = state.airJumpsMax
+	elseif state.airJumpsLeft > state.airJumpsMax then
+		state.airJumpsLeft = state.airJumpsMax
+	end
 	if input.jump and not state.flying then
 		-- (Minecraft reads the lava's height when in lava, else the water's.)
 		local height = if state.inLava then state.lavaHeight elseif state.inWater then state.waterHeight else 0
 		local swimming = state.inWater and height > 0
 		local deep = not state.onGround or height > FLUID_JUMP_THRESHOLD
 		if swimming and deep then
-			state.vy += WATER_JUMP
+			-- (A Flipper swims up faster.)
+			state.vy += WATER_JUMP * state.swimFactor
 		elseif state.inLava and deep then
 			-- jumpInLiquid(LAVA): the same 0.04 a tick.
 			state.vy += WATER_JUMP
@@ -1039,6 +1117,21 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			end
 			state.noJumpDelay = JUMP_DELAY
 			events.jumped = true
+		elseif
+			not prevJump
+			and state.airJumpsLeft > 0
+			and not state.onGround
+			and not state.inWater
+			and not state.inLava
+			and not state.climbing
+		then
+			-- Terraria's Cloud in a Bottle: a new press in the air jumps again, and the fall is
+			-- counted from here.
+			state.airJumpsLeft -= 1
+			state.vy = AIR_JUMP_POWER + state.jumpBoost
+			state.fallDistance = 0
+			events.jumped = true
+			events.airJumped = true
 		end
 	else
 		state.noJumpDelay = 0
@@ -1064,8 +1157,8 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	if state.inWater and not state.flying then
 		local startY = state.y
 		local drag = if state.sprinting then WATER_SPRINT_DRAG else waterDrag
-		-- (Effects only slow it: see the header.)
-		accelerate(state, WATER_ACCELERATION * math.min(1, state.speedFactor), inputX, inputZ)
+		-- (Effects only slow it: see the header. A Flipper's swimFactor speeds it.)
+		accelerate(state, WATER_ACCELERATION * math.min(1, state.speedFactor) * state.swimFactor, inputX, inputZ)
 		move(state, solidAt, world, inputX, inputZ, events)
 		-- Pushing into a wall on a ladder, vine or rope climbs out of the water.
 		if state.horizontalCollision and climbableAt(state, world) then
@@ -1126,6 +1219,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		local speed = if state.onGround
 			then (if state.sprinting then SPRINT_SPEED else WALK_SPEED)
 				* state.speedFactor
+				* state.runFactor
 				* (GROUND_FACTOR / (friction * friction * friction))
 			else airSpeed
 		accelerate(state, speed, inputX, inputZ)

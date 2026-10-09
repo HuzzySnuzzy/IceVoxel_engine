@@ -13,7 +13,9 @@
 
 	The recovery starts over as the server's does (server Mobs: a hit that lands, a change of the
 	held item): at each attack sent (`attacked`, from BlockInteraction) and when the selected
-	stack's item changes. Nothing for spectators, with a screen open or the HUD hidden.
+	stack's item changes; Feral Claws worn speed it up as on the server (Items/Accessories
+	.hasteTicks of the predicted inventory's accessories, summed again only when it changes).
+	Nothing for spectators, with a screen open or the HUD hidden.
 ]]
 
 local Players = game:GetService("Players")
@@ -24,6 +26,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Combat = require(Shared.Entities.Combat)
 local GameMode = require(Shared.GameMode)
+local Accessories = require(Shared.Items.Accessories)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Hud = require(script.Parent.Hud)
@@ -47,6 +50,8 @@ local started = false
 local attackedAt = -math.huge
 local changedAt = -math.huge
 local heldItem: number? = nil
+-- The accessories worn (their attack speed: Feral Claws), from the predicted inventory.
+local worn: Accessories.Stats = Accessories.new()
 
 -- The Attack Indicator setting (OFF, CROSSHAIR or HOTBAR).
 function AttackIndicator.setMode(value: number)
@@ -65,7 +70,7 @@ end
 function AttackIndicator.strength(): number
 	local since = math.max(attackedAt, changedAt)
 	local _, speed = Combat.attackOf(heldItem)
-	return Combat.strength((os.clock() - since) * TICKS_PER_SECOND, speed)
+	return Combat.strength(Accessories.hasteTicks((os.clock() - since) * TICKS_PER_SECOND, worn.attackSpeed), speed)
 end
 
 function AttackIndicator.start()
@@ -73,6 +78,11 @@ function AttackIndicator.start()
 		return
 	end
 	started = true
+	local function refreshWorn()
+		Accessories.stats(ClientInventory.inventory(), worn)
+	end
+	refreshWorn()
+	ClientInventory.changed:Connect(refreshWorn)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "IceVoxelAttackIndicator"
 	gui.IgnoreGuiInset = true

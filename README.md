@@ -329,8 +329,8 @@ A fast, Minecraft-style voxel engine for Roblox.
     go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
     a pickaxe of the right tier to drop anything (iron and osmium ore a stone pickaxe, diamonds an iron one),
     and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor
-    slots on the left and a 2 × 2 crafting grid at the top right; chests, crafting tables and
-    furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
+    slots on the left and a 2 × 2 crafting grid at the top right, with Terraria's equipment beside
+    it (below); chests, crafting tables and furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
     spread, double click. Items drop on death.
   - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
     (double tap jump), and nothing hurts.
@@ -410,6 +410,24 @@ A fast, Minecraft-style voxel engine for Roblox.
   Mastery and Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death;
   in a superflat or debug world, or one with Allow Commands, what is earned stays on that server.
   Creative players have every recipe and earn nothing. `/knowledge` and `/age` set it for testing.
+- **Accessories and vanity (Terraria).** The inventory has Terraria's equipment panel to the right
+  of the player: 7 accessory slots (5 open; the Industrial Age opens a 6th and the Atomic Age a 7th,
+  a padlock until then), 4 vanity armor slots and 7 vanity accessory slots. An accessory goes in
+  one accessory slot at a time (shift-click wears it, as it does armor and vanity pieces); what the
+  accessory slots wear works, what the vanity slots wear only shows. Each accessory row and armor
+  slot has an eye that hides its look and keeps its effect. The early-game accessories:
+  **Hermes Boots** (sprinting on the ground builds to 1.4 times the speed over a second), **Cloud
+  in a Bottle** (a second jump in the air, about a block, with a puff of cloud), **Shiny Red
+  Balloon** (jumps higher: the air jump then reaches 1.5 blocks), **Lucky Horseshoe** (no fall
+  damage), **Aglet** and **Anklet of the Wind** (+5% and +10% speed), **Band of Regeneration** (a
+  half heart every 10 s), **Band of Starpower** (+20 mana), **Obsidian Skull** (campfires don't
+  hurt, +1 armor), **Flipper** (swims twice as fast), **Cobalt Shield** (no knockback, +1 armor)
+  and **Feral Claws** (the attack bar fills 12% faster). Every character draws what it wears,
+  vanity over armor (armor and vanity armor as Minecraft-like layers on the R15 or R6 body,
+  accessories as small models on the feet, hand, back, waist or face), the same in the
+  inventory's preview; the tooltip says what each does ("When worn:"). The server checks the
+  faster movement (its move check allows the worn speed) and applies knockback, regeneration,
+  attack speed, fall damage and campfires itself.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
   midnight 18000), with the sun at Minecraft's angle for the time and light that always matches the
   sun on screen. Roblox's Future lighting with shadows replaces the old fullbright look: warm
@@ -1163,6 +1181,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Swim fast     | Sprint under water or fuel; look where to go | L3 | Sprint button |
 | Climb out     | Swim (or wade) at a ledge just above the surface | stick | move |
 | In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the hotbar, `Q` drop, double click to collect, drag to spread | A / X / Y, B closes | tap / long press |
+| Equipment (inventory) | `Shift` + click an accessory, armor or vanity piece to wear it; click an eye to hide or show that look | Y on a piece; A on an eye | Tap (the eyes have finger-sized buttons) |
+| Air jump      | `Space` again in mid-air, wearing a Cloud in a Bottle | A | Jump button |
 | Recipes / uses (JEI) | Click / right click an item in the list, or `R` / `U` over any item; `Backspace` back, `E` / `Escape` back to the inventory | A / X on a list item, B leaves the recipes | Tap / long press |
 | Move a recipe (JEI) | `+` beside a crafting recipe (`Shift`: as many as possible) | A | Tap |
 | Full stack (JEI, creative) | `Shift` + click or middle click an item in the list | Y | |
@@ -1389,8 +1409,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   Crafting/                 Recipes (Minecraft's and Mekanism's recipes, smelting and fuel; a
                             recipe may keep an ingredient's data), Crafting (grid matching),
                             Smelting (the furnace tick; the Lava Bucket's burn time)
-  Inventory/                Types (inventory, window, action shapes), Menu (Minecraft's inventory
-                            clicks, used by the server and for client prediction)
+  Inventory/                Types (inventory, window, action shapes; Terraria's equipment stores
+                            and hide bits), Menu (Minecraft's inventory clicks and the equipment
+                            slots' rules, used by the server and for client prediction)
   Structures/               structure blocks' data and jigsaw structures: Template (the IVS1
                             text, SAVE's capture, ASCII tables), Settings (structure block and
                             jigsaw fields, ranges, wire format), Transform (rotation and mirror),
@@ -1695,7 +1716,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             the other players are: their characters, or the server's relay drawn
                             0.1 s behind; the interpolation is pure), LocalPosition (this player's
                             moves to the server and its teleports, with
-                            Config.Players.ServerPositions; pure core)
+                            Config.Players.ServerPositions; pure core), EquipmentLooks (armor,
+                            vanity and accessories drawn on every character and the inventory's
+                            preview; air jump puffs), AirJumps (other players' air jumps told
+                            from their poses, pure)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
@@ -1823,6 +1847,9 @@ for performance:
 | `World.Difficulty`        | "Normal" | Peaceful (no monsters spawn), Easy, Normal or Hard (fire spreads a little faster on harder ones: `Server.Fire.Difficulty`). |
 | `World.AllowCommands` / `Structures` | false / true | Everyone may use the operators' commands (Minecraft's Allow Cheats) / library structures generate. |
 | `Gameplay.KeepInventory`  | false   | Keep the inventory on death instead of dropping it (spectators always keep theirs). |
+| `Accessories.Slots` / `ExtraSlotAges` | 5 / {"industrial", "atomic"} | Accessory slots every character has open, and the Ages that open one more each (7 at most). |
+| `Accessories.RunDelay` / `RunRamp` | 10 / 12 | Hermes Boots: ticks of sprinting on the ground before the speed builds, then ticks to its full boost. |
+| `Accessories.AirJumpPower` | 0.36   | A Cloud in a Bottle's take-off speed (blocks a tick; 0.36 rises 0.96 blocks, a ground jump's 0.42 rises 1.25). |
 | `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
 | `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. Neither heals while fully frozen or overheated. |
 | `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |

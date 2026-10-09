@@ -13,6 +13,7 @@
 	    [n, n + 4)        armor: head, chest, legs, feet
 	    [n + 4, n + 31)   inventory slots 10..36 (the three rows above the hotbar)
 	    [n + 31, n + 40)  the hotbar, inventory slots 1..9
+	    [n + 40, n + 58)  Terraria's equipment (below)
 
 	Containers by kind (slot numbers within the container, 1-based):
 
@@ -45,10 +46,15 @@
 	    [n + 47, n + 51)  vanity armor 1..4         (VANITY_ARMOR_START)
 	    [n + 51, n + 58)  vanity accessories 1..7   (VANITY_ACCESSORY_START; EQUIPMENT_END)
 
-	(Inventory/Menu numbers windows with PLAYER_SLOTS = 40 until these slots work; then
-	PLAYER_SLOTS becomes EQUIPMENT_END.) Saved records number a player's stacks by PLACE_*: 1..36
-	the slots, 37..40 armor, 41 the cursor, 42..48 accessories, 49..52 vanity armor, 53..59 vanity
-	accessories.
+	so window 0 is 63 slots: 0 result, 1..4 grid, 5..8 armor, 9..35 main, 36..44 hotbar (Minecraft's
+	InventoryMenu as before), 45..51 accessories, 52..55 vanity armor, 56..62 vanity accessories
+	(Minecraft appended its offhand slot 45 the same way). Every window has them (PLAYER_SLOTS =
+	EQUIPMENT_END), though only the inventory screen draws them. What each slot takes and where a
+	shift click sends things is Inventory/Menu's; the `hide` action flips a `hidden` bit (slot 1..7
+	an accessory's, HIDE_ARMOR + 1..4 = 9..12 an armor piece's: the bit's number plus one).
+
+	Saved records number a player's stacks by PLACE_*: 1..36 the slots, 37..40 armor, 41 the
+	cursor, 42..48 accessories, 49..52 vanity armor, 53..59 vanity accessories.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -127,6 +133,8 @@ export type Window = {
 	            Minecraft's creative slot packet sends whole stacks) in a window slot or, with slot
 	            CURSOR, on the cursor
 	  close     close the window (the carried stack goes back into the inventory)
+	  hide      show or hide the look of accessory slot `slot` (1..7) or armor slot `slot` - 8
+	            (9..12): `hidden`'s bit slot - 1 (Terraria's eye toggles; the item still works)
 ]]
 export type Action =
 	{ kind: "click", window: number, slot: number, clickType: number, button: number }
@@ -144,6 +152,7 @@ export type Action =
 		data: Items.Data?,
 	}
 	| { kind: "close", window: number }
+	| { kind: "hide", slot: number, hidden: boolean }
 
 -- The server's state of a player's inventory, after the player's action number `ack`.
 export type Snapshot = {
@@ -159,8 +168,6 @@ local Types = {}
 Types.INVENTORY_SIZE = 36
 Types.HOTBAR_SIZE = 9
 Types.ARMOR_SIZE = 4
--- Window slots besides the container's.
-Types.PLAYER_SLOTS = 40
 -- Clicking outside the window (drops the carried stack).
 Types.OUTSIDE = -999
 -- `creative` action slot meaning the cursor.
@@ -198,8 +205,15 @@ Types.ACCESSORY_START = 40
 Types.VANITY_ARMOR_START = Types.ACCESSORY_START + Types.ACCESSORY_SIZE -- 47
 Types.VANITY_ACCESSORY_START = Types.VANITY_ARMOR_START + Types.VANITY_ARMOR_SIZE -- 51
 Types.EQUIPMENT_END = Types.VANITY_ACCESSORY_START + Types.VANITY_ACCESSORY_SIZE -- 58
+-- Window slots besides the container's: armor, inventory, hotbar and the equipment.
+Types.PLAYER_SLOTS = Types.EQUIPMENT_END
 -- `hidden`'s first armor bit (accessory slot i is bit i - 1).
 Types.HIDE_ARMOR = 8
+-- The bits `hidden` may have: accessory slots 1..7 (bits 0..6) and armor slots 1..4 (bits 8..11).
+Types.HIDDEN_MASK = bit32.bor(
+	bit32.lshift(1, Types.ACCESSORY_SIZE) - 1,
+	bit32.lshift(bit32.lshift(1, Types.ARMOR_SIZE) - 1, Types.HIDE_ARMOR)
+) -- 0x0F7F
 -- Saved records' places of a player's stacks (Save/PlayerCodec, Save/CharacterCodec).
 Types.PLACE_ARMOR = Types.INVENTORY_SIZE + 1 -- 37..40
 Types.PLACE_CURSOR = Types.INVENTORY_SIZE + Types.ARMOR_SIZE + 1 -- 41

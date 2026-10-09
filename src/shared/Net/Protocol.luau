@@ -25,6 +25,8 @@
 	                               u16 damage, item data (below): the whole stack, as
 	                               Minecraft's creative slot packet
 	                   6 close     u8 window
+	                   7 hide      u8 slot (1..7 an accessory's look, 9..12 an armor piece's),
+	                               u8 hidden (0 / 1): Terraria's eye toggles
 	  Use            i32 x, u16 y, i32 z: right click on a usable block (opens a chest)
 	  UseItem        i32 x, u16 y, i32 z, u8 side (0..5), u8 flags (bit 0: sneaking): a right click
 	                 on block (x, y, z) with an item that is no block (the Configurator, buckets).
@@ -115,8 +117,11 @@
 	  Edits          u32 count, count x (i32 x, u16 y, i32 z, u16 block)
 	  Waypoints      waypoint list (below)
 	  Inventory      the player's inventory after their action `ack`: u32 ack, u8 selected (1..9),
-	                 4 armor + 36 inventory + 1 cursor stacks, u8 window, u8 containerKind (0 none,
-	                 else its index in Types.KINDS), u16 containerBlock, u8 containerSize,
+	                 4 armor + 36 inventory + 1 cursor stacks, Terraria's equipment (7 accessory +
+	                 4 vanity armor + 7 vanity accessory stacks, u16 hidden looks (Types
+	                 HIDDEN_MASK's bits only), u8 open accessory slots (0..7)), u8 window,
+	                 u8 containerKind (0 none, else its index in Types.KINDS), u16 containerBlock,
+	                 u8 containerSize,
 	                 u8 n + n x f64 container data (at most Types.MAX_CONTAINER_DATA, no NaN: a
 	                 furnace's litTime, litDuration, cookingProgress, cookingTotalTime,
 	                 cookingItem; machines' energy), containerSize stacks. A stack is u16 item,
@@ -659,6 +664,7 @@ end
 --[[ Inventory actions (client -> server) ]]
 
 local ACTION_CLICK, ACTION_DRAG, ACTION_SELECT, ACTION_DROP, ACTION_CREATIVE, ACTION_CLOSE = 1, 2, 3, 4, 5, 6
+local ACTION_HIDE = 7
 
 -- Encodes inventory action number `seq`. `place` actions travel inside Edit messages instead.
 function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Action): buffer
@@ -701,6 +707,11 @@ function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Acti
 		b = buffer.create(6)
 		buffer.writeu8(b, 4, ACTION_CLOSE)
 		buffer.writeu8(b, 5, action.window)
+	elseif action.kind == "hide" then
+		b = buffer.create(7)
+		buffer.writeu8(b, 4, ACTION_HIDE)
+		buffer.writeu8(b, 5, action.slot)
+		buffer.writeu8(b, 6, if action.hidden then 1 else 0)
 	else
 		error(`Inventory action {action.kind} is not sent on its own`)
 	end
@@ -760,6 +771,12 @@ function Protocol.decodeInventoryAction(b: buffer): (number?, InventoryTypes.Act
 			}
 	elseif kind == ACTION_CLOSE and len == 6 then
 		return seq, { kind = "close", window = buffer.readu8(b, 5) }
+	elseif kind == ACTION_HIDE and len == 7 then
+		local hidden = buffer.readu8(b, 6)
+		if hidden > 1 then
+			return nil, nil
+		end
+		return seq, { kind = "hide", slot = buffer.readu8(b, 5), hidden = hidden == 1 }
 	end
 	return nil, nil
 end
@@ -823,10 +840,27 @@ local function dataValue(value: number?): number
 	return value
 end
 
+-- The equipment's fixed part after its stacks: u16 hidden, u8 accessorySlots.
+local EQUIPMENT_BYTES = 3
+
+-- Terraria's equipment stores in their order on the wire (no allocation: the tables are reused).
+local storeList: { { stacks: { [number]: InventoryTypes.Stack? }, size: number } } = {
+	{ stacks = {}, size = InventoryTypes.ACCESSORY_SIZE },
+	{ stacks = {}, size = InventoryTypes.VANITY_ARMOR_SIZE },
+	{ stacks = {}, size = InventoryTypes.VANITY_ACCESSORY_SIZE },
+}
+local function equipmentStores(inventory: InventoryTypes.Inventory): typeof(storeList)
+	storeList[1].stacks = inventory.accessories
+	storeList[2].stacks = inventory.vanityArmor
+	storeList[3].stacks = inventory.vanityAccessories
+	return storeList
+end
+
 --[[
 	An Inventory message for `snapshot`. A container of a kind Types.KINDS does not list travels as
 	none (kind 0, no slots, no data), so the snapshot still decodes; container data beyond
-	Types.MAX_CONTAINER_DATA values is cut and NaN is sent as 0.
+	Types.MAX_CONTAINER_DATA values is cut and NaN is sent as 0. Hidden bits outside
+	Types.HIDDEN_MASK are left out.
 ]]
 function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	local container = snapshot.container
@@ -838,7 +872,7 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 	local dataCount = if data then math.min(#data, InventoryTypes.MAX_CONTAINER_DATA) else 0
 	local inventory = snapshot.inventory
 
-	local bytes = 5 + 5 + 1 + dataCount * 8
+	local bytes = 5 + 5 + 1 + dataCount * 8 + EQUIPMENT_BYTES
 	for slot = 1, InventoryTypes.ARMOR_SIZE do
 		bytes += stackSize(inventory.armor[slot])
 	end
@@ -846,6 +880,11 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 		bytes += stackSize(inventory.slots[slot])
 	end
 	bytes += stackSize(inventory.cursor)
+	for _, store in equipmentStores(inventory) do
+		for slot = 1, store.size do
+			bytes += stackSize(store.stacks[slot])
+		end
+	end
 	if container then
 		for slot = 1, size do
 			bytes += stackSize(container.slots[slot])
@@ -863,6 +902,15 @@ function Protocol.encodeInventory(snapshot: InventoryTypes.Snapshot): buffer
 		o = writeStack(b, o, inventory.slots[slot])
 	end
 	o = writeStack(b, o, inventory.cursor)
+	for _, store in equipmentStores(inventory) do
+		for slot = 1, store.size do
+			o = writeStack(b, o, store.stacks[slot])
+		end
+	end
+	local hidden = inventory.hidden
+	buffer.writeu16(b, o, if hidden == hidden then bit32.band(hidden, InventoryTypes.HIDDEN_MASK) else 0)
+	buffer.writeu8(b, o + 2, math.clamp(inventory.accessorySlots, 0, InventoryTypes.ACCESSORY_SIZE))
+	o += EQUIPMENT_BYTES
 	buffer.writeu8(b, o, snapshot.window)
 	buffer.writeu8(b, o + 1, if container then KIND_CODE[container.kind] else 0)
 	buffer.writeu16(b, o + 2, if container then container.block else 0)
@@ -883,7 +931,8 @@ end
 
 --[[
 	The snapshot in an Inventory message, or nil when it is malformed: wrong lengths, a selected
-	slot outside 1..9, an unknown container kind (or slots without one), more container slots or
+	slot outside 1..9, hidden bits outside Types.HIDDEN_MASK, more than Types.ACCESSORY_SIZE open
+	accessory slots, an unknown container kind (or slots without one), more container slots or
 	data than allowed, NaN data, or item data Items.validData refuses.
 ]]
 function Protocol.decodeInventory(b: buffer): InventoryTypes.Snapshot?
@@ -917,6 +966,27 @@ function Protocol.decodeInventory(b: buffer): InventoryTypes.Snapshot?
 		return nil
 	end
 	inventory.cursor = stack
+	for _, store in equipmentStores(inventory) do
+		for slot = 1, store.size do
+			ok, stack, o = readStack(b, o, len)
+			if not ok then
+				return nil
+			end
+			store.stacks[slot] = stack
+		end
+	end
+	if o + EQUIPMENT_BYTES > len then
+		return nil
+	end
+	inventory.hidden = buffer.readu16(b, o)
+	inventory.accessorySlots = buffer.readu8(b, o + 2)
+	if
+		bit32.band(inventory.hidden, bit32.bnot(InventoryTypes.HIDDEN_MASK)) ~= 0
+		or inventory.accessorySlots > InventoryTypes.ACCESSORY_SIZE
+	then
+		return nil
+	end
+	o += EQUIPMENT_BYTES
 	if o + 6 > len then
 		return nil
 	end

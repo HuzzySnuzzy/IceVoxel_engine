@@ -88,6 +88,15 @@
 	            every tick: Speed, Slowness and Oil Coated's speed factor, Jump Boost, Blindness
 	            keeping sprints from starting (PlayerPhysics); the field of view follows the speed
 	            factor as Minecraft's does ((factor + 1) / 2, Speed I: x 1.1).
+	  Accessories  Terraria's, worn in the predicted inventory (Inventory/ClientInventory; summed by
+	            Items/Accessories.stats into one table, again only when the inventory changes): the
+	            speed share times the effects' speed factor, the jump added to Jump Boost's, the
+	            air jumps (Cloud in a Bottle), the Hermes run, the Flipper's swimming
+	            (PlayerPhysics' accessory fields); a Lucky Horseshoe's landings hurt nothing, so no
+	            Fall is sent (the server skips them too). Knockback resistance is the server's: it
+	            sends the pushes already less the player's share (Players/Characters, Mobs/Mobs), so
+	            the hull's own `knockbackResist` stays 0 here. An air jump puffs a cloud and plays
+	            entity.player.double_jump (Player/EquipmentLooks.airJump), where others see it too.
 	  Sounds    after every tick, Audio/MovementSounds plays the footsteps, swimming, splashes and
 	            hurting landings of what the hull did.
 
@@ -110,6 +119,7 @@ local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local PlayerSync = require(Shared.Net.PlayerSync)
 local Rig = require(Shared.Movement.Rig)
+local Accessories = require(Shared.Items.Accessories)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -118,8 +128,10 @@ local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local MovementSounds = require(script.Parent.Parent.Audio.MovementSounds)
+local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Rebase = require(script.Parent.Parent.Rendering.Rebase)
 local EffectState = require(script.Parent.EffectState)
+local EquipmentLooks = require(script.Parent.EquipmentLooks)
 local Exertion = require(script.Parent.Exertion)
 local LocalPosition = require(script.Parent.LocalPosition)
 local RemotePlayers = require(script.Parent.RemotePlayers)
@@ -138,6 +150,12 @@ local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value - 1
 local VIEW_BOB_PRIORITY = Enum.RenderPriority.Camera.Value + 4
 -- The server moves new characters to the spawn first; don't trust their position before that.
 local SPAWN_SETTLE = 3
+-- Blocks taken off every fall by a Lucky Horseshoe (no landing hurts).
+local NO_FALL = 1e6
+
+-- Terraria's accessories worn (Items/Accessories.stats of the predicted inventory, filled in
+-- place when it changes).
+local worn: Accessories.Stats = Accessories.new()
 -- A root part further than this (studs) from where the controller left it was moved by a script.
 local MOVED_TOLERANCE = 4
 -- Studs per block per tick -> studs per second.
@@ -483,6 +501,13 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	end
 	-- Teleports and moves (nothing with the switch off).
 	LocalPosition.start()
+
+	-- The accessories worn, from the predicted inventory (see the header).
+	local function refreshWorn()
+		Accessories.stats(ClientInventory.inventory(), worn)
+	end
+	refreshWorn()
+	ClientInventory.changed:Connect(refreshWorn)
 
 	-- Moments that hide the origin's hitch (Rendering/Rebase): an inventory screen or the
 	-- Options menu (Ui/Screens), Roblox's menu; the death below.
@@ -1131,10 +1156,15 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					accumulator -= TICK
 					previousX, previousY, previousZ = state.x, state.y, state.z
 					local previous = Vector3.new(previousX, previousY, previousZ)
-					-- (The status effects as the server last sent them.)
-					state.speedFactor = EffectState.speedFactor()
-					state.jumpBoost, state.fallReduction = EffectState.jumpBoost()
+					-- (The status effects as the server last sent them, and the accessories worn.)
+					state.speedFactor = EffectState.speedFactor() * (1 + worn.speed)
+					local jumpBoost, fallReduction = EffectState.jumpBoost()
+					state.jumpBoost = jumpBoost + worn.jump
+					state.fallReduction = fallReduction + (if worn.noFallDamage then NO_FALL else 0)
 					state.noSprint = EffectState.noSprint()
+					state.airJumpsMax = worn.airJumps
+					state.runBoost = worn.runBoost
+					state.swimFactor = 1 + worn.swim
 					local events = PlayerPhysics.tick(state, frameInput, physicsWorld)
 					MovementSounds.tick(state, events, previous, physicsWorld.getBlock)
 					-- (Thirst: sprinting, swimming and jumps, Tough As Nails.)
@@ -1146,12 +1176,15 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					if events.jumped then
 						view.jumpedAt = os.clock()
 					end
+					if events.airJumped then
+						EquipmentLooks.airJump(state.x, state.y, state.z)
+					end
 					if events.stepUp > 0 then
 						-- A step up is a whole block in one tick: draw it as a quick climb instead.
 						previousY += events.stepUp
 						stepLag = math.min(stepLag + events.stepUp, MAX_STEP_LAG)
 					end
-					if events.landed and events.damage > 0 and Movement.FallDamage then
+					if events.landed and events.damage > 0 and Movement.FallDamage and not worn.noFallDamage then
 						ClientNet.send(Protocol.ClientMessage.Fall, Protocol.encodeFall(events.fallDistance))
 					end
 				end

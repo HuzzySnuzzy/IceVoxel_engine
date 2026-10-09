@@ -43,6 +43,9 @@
 	                                   given; fires `teleported` (player, x, y, z)
 	  grant(player, blocks)            movement a knockback (explosions, mob hits) may add beyond
 	                                   the speed checks (networked only)
+	  setSpeedFactor(player, factor)   the accessories worn move the player `factor` times as
+	                                   fast sideways (Players/Inventories from Items/Accessories:
+	                                   MoveCheck.setFactor; networked only)
 	  spectating(player) -> Player?    whom the player spectates (networked only: the client tells)
 	  start(net)                       once, with the world (before Players/Characters)
 	  networked() -> boolean           are positions the server's own (started, ServerPositions)?
@@ -68,6 +71,7 @@ local Remotes = require(Shared.Net.Remotes)
 local Rig = require(Shared.Movement.Rig)
 
 local Interest = require(script.Parent.Interest)
+local MoveCheck = require(script.Parent.MoveCheck)
 local PositionStore = require(script.Parent.PositionStore)
 
 local BLOCK = Config.BlockSize
@@ -396,6 +400,18 @@ function PlayerPositions.grant(player: Player, blocks: number)
 	backend.grant(player, blocks)
 end
 
+-- Each player's accessories' speed factor (kept for a record made later: `listen`'s onPlayer).
+local speedFactors: { [Player]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+-- The accessories worn move `player` `factor` times as fast sideways (MoveCheck.setFactor).
+function PlayerPositions.setSpeedFactor(player: Player, factor: number)
+	speedFactors[player] = factor
+	local record = if backend == networked then store:get(player) else nil
+	if record then
+		MoveCheck.setFactor(record.check, factor, os.clock())
+	end
+end
+
 function PlayerPositions.spectating(player: Player): Player?
 	return backend.spectating(player)
 end
@@ -467,7 +483,11 @@ local function listen(serverNet: Net)
 	end)
 
 	local function onPlayer(player: Player)
-		store:add(player, GameMode.of(player), os.clock())
+		local record = store:add(player, GameMode.of(player), os.clock())
+		local factor = speedFactors[player]
+		if factor then
+			MoveCheck.setFactor(record.check, factor, os.clock())
+		end
 		player:GetAttributeChangedSignal(GameMode.ATTRIBUTE):Connect(function()
 			store:setMode(player, GameMode.of(player), os.clock())
 		end)

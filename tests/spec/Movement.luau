@@ -1335,4 +1335,277 @@ return function(t, shared, require)
 		t.ok(walker.x > 1.5, `walked through ({walker.x})`)
 		t.near(slowest, 0.1 * 0.98 * 0.25, 1e-8, "x 0.25 of one tick's push in the web")
 	end)
+
+	--[[ Terraria's accessories (Items/Accessories through the controller's state fields) ]]
+
+	-- A player standing still in the air at height `y` (no floor reached for a while).
+	local function aloft(y: number): PlayerPhysics.State
+		local state = PlayerPhysics.new(0.5, y, 0.5)
+		state.airJumpsMax, state.airJumpsLeft = 1, 1
+		return state
+	end
+	-- Highest the feet get over `from` within `ticks`, pressing jump on the first tick only.
+	local function airJumpPeak(state: PlayerPhysics.State, ticks: number): (number, boolean)
+		local flat = physicsWorld()
+		local from = state.y
+		local peak, airJumped = 0, false
+		for tick = 1, ticks do
+			local events = PlayerPhysics.tick(state, input(0, 0, { jump = tick == 1 }), flat)
+			airJumped = airJumped or events.airJumped
+			peak = math.max(peak, state.y - from)
+		end
+		return peak, airJumped
+	end
+
+	t.test("accessories: no accessories, no change (the defaults are Minecraft's movement)", function()
+		local state = PlayerPhysics.new(0.5, 10, 0.5)
+		t.eq(state.airJumpsMax, 0)
+		t.eq(state.runBoost, 0)
+		t.eq(state.runFactor, 1)
+		t.eq(state.swimFactor, 1)
+		t.eq(state.knockbackResist, 0)
+		local peak, airJumped = airJumpPeak(state, 20)
+		t.eq(peak, 0, "pressing jump in the air does nothing")
+		t.ok(not airJumped)
+	end)
+
+	t.test("accessories: a Cloud in a Bottle's jump rises 0.96 blocks, 1.48 with a Shiny Red Balloon", function()
+		local peak, airJumped = airJumpPeak(aloft(20), 20)
+		t.ok(airJumped, "jumped in the air")
+		t.ok(near(peak, 0.9609, 0.0005), `0.36 a tick rises {peak} (a ground jump: 1.2522)`)
+		local balloon = aloft(20)
+		balloon.jumpBoost = 0.1
+		peak = airJumpPeak(balloon, 20)
+		t.ok(near(peak, 1.4805, 0.0005), `0.46 a tick rises {peak}`)
+		-- Each jump wants a new press, and there is one a time aloft.
+		local state = aloft(40)
+		local flat = physicsWorld()
+		local jumps = 0
+		for tick = 1, 40 do
+			local events = PlayerPhysics.tick(state, input(0, 0, { jump = tick % 2 == 1 }), flat)
+			if events.airJumped then
+				t.ok(events.jumped, "an air jump is a jump")
+				jumps += 1
+			end
+		end
+		t.eq(jumps, 1, "one air jump with one Cloud in a Bottle")
+		t.eq(state.airJumpsLeft, 0)
+		state.airJumpsMax = 2
+		t.eq(state.airJumpsLeft, 0, "a second bottle gives nothing until it comes back")
+	end)
+
+	t.test("accessories: holding jump from the ground never air jumps; landing gives it back", function()
+		local flat = physicsWorld()
+		local state = PlayerPhysics.new(0.5, 1, 0.5)
+		state.onGround = true
+		state.airJumpsMax = 1
+		local air, ground = 0, 0
+		for _ = 1, 30 do
+			local events = PlayerPhysics.tick(state, input(0, 0, { jump = true }), flat)
+			if events.airJumped then
+				air += 1
+			elseif events.jumped then
+				ground += 1
+			end
+		end
+		t.eq(air, 0, "held: bunny hops only")
+		t.ok(ground >= 2, `bunny hops: {ground}`)
+		-- A ground jump, a release, a press near the top: both jumps; on landing it comes back.
+		local s = PlayerPhysics.new(0.5, 1, 0.5)
+		s.onGround = true
+		s.airJumpsMax = 1
+		local presses = { [1] = true, [6] = true }
+		local kinds = {}
+		local top = 0
+		for tick = 1, 40 do
+			local events = PlayerPhysics.tick(s, input(0, 0, { jump = presses[tick] == true }), flat)
+			if events.jumped then
+				table.insert(kinds, if events.airJumped then "air" else "ground")
+			end
+			top = math.max(top, s.y - 1)
+		end
+		t.eq(table.concat(kinds, ","), "ground,air")
+		t.ok(top > 1.2522 + 0.5, `higher than a jump: {top}`)
+		t.ok(s.onGround and s.airJumpsLeft == 1, "back on the ground, the jump back")
+	end)
+
+	t.test("accessories: an air jump starts the fall again; not in fluids, on ladders or flying", function()
+		local flat = physicsWorld()
+		-- Falling 20 blocks with an air jump on the way down: the fall counts from its top.
+		local state = aloft(21)
+		local landed: number? = nil
+		local jumpedAtY = 0
+		for tick = 1, 100 do
+			local events = PlayerPhysics.tick(state, input(0, 0, { jump = tick == 25 }), flat)
+			if events.airJumped then
+				jumpedAtY = state.y - 0.36
+				t.eq(state.fallDistance, 0, "the fall starts again")
+			end
+			if events.landed then
+				landed = events.fallDistance
+				break
+			end
+		end
+		t.ok(jumpedAtY > 1, "jumped on the way down")
+		t.ok(landed ~= nil and near(landed :: number, jumpedAtY + 0.9609 - 1, 0.6), `fell {landed} blocks`)
+		-- Deep water: swimming up instead.
+		local deep = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 20 then WATER else nil
+		end)
+		local swimmer = aloft(10)
+		for tick = 1, 5 do
+			local events = PlayerPhysics.tick(swimmer, input(0, 0, { jump = tick == 5 }), deep)
+			t.ok(not events.airJumped, "no air jump in water")
+		end
+		t.eq(swimmer.airJumpsLeft, 1, "in water it is kept")
+		-- Flying: no air jump (creative flight's own jump rises).
+		local flier = aloft(20)
+		flier.mayFly, flier.flying = true, true
+		local _, flew = airJumpPeak(flier, 5)
+		t.ok(not flew, "no air jump while flying")
+		-- A ladder (climbing): no air jump, and it comes back.
+		local LADDER = Blocks.id.Ladder
+		local ladder = physicsWorld(function(x, y, z)
+			return if x == 0 and z == 0 and y >= 1 and y <= 10 then LADDER else nil
+		end)
+		local climber = PlayerPhysics.new(0.5, 5, 0.5)
+		climber.airJumpsMax = 1
+		PlayerPhysics.tick(climber, input(0, 0), ladder)
+		t.ok(climber.climbing, "on the ladder")
+		local events = PlayerPhysics.tick(climber, input(0, 0, { jump = true }), ladder)
+		t.ok(not events.airJumped, "no air jump on a ladder")
+		t.eq(climber.airJumpsLeft, 1, "climbing gives it back")
+	end)
+
+	-- A player standing on the floor at (x, 1, 0.5), settled (two ticks: on the ground every tick).
+	local function standing(world: PlayerPhysics.World, x: number): PlayerPhysics.State
+		local state = PlayerPhysics.new(x, 1, 0.5)
+		for _ = 1, 2 do
+			PlayerPhysics.tick(state, input(0, 0), world)
+		end
+		assert(state.onGround, "settled on the floor")
+		return state
+	end
+
+	t.test("accessories: Hermes Boots build sprinting to x1.4 after 10 + 12 ticks", function()
+		local flat = physicsWorld()
+		local state = standing(flat, 0.5)
+		state.runBoost = 0.4
+		local factors = {}
+		for tick = 1, 30 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true }), flat)
+			factors[tick] = state.runFactor
+		end
+		t.eq(factors[1], 1, "sprinting from the first tick")
+		t.eq(factors[10], 1, "ten ticks before it builds")
+		t.ok(near(factors[11], 1 + 0.4 / 12), `then linearly: {factors[11]}`)
+		t.ok(near(factors[16], 1 + 0.4 * 6 / 12), `half way: {factors[16]}`)
+		t.ok(near(factors[22], 1.4), `full after 22 ticks: {factors[22]}`)
+		t.ok(near(factors[30], 1.4), "and it stays")
+		-- 5.61 m/s sprinting becomes 1.4 times as fast once built.
+		local function sprintSpeed(boost: number): number
+			local s = PlayerPhysics.new(0.5, 1, 0.5)
+			s.onGround = true
+			s.runBoost = boost
+			local x0 = 0
+			for tick = 1, 100 do
+				PlayerPhysics.tick(s, input(1, 0, { sprint = true }), flat)
+				if tick == 40 then
+					x0 = s.x
+				end
+			end
+			return (s.x - x0) / 60 * PlayerPhysics.TICK_RATE
+		end
+		local plain, hermes = sprintSpeed(0), sprintSpeed(0.4)
+		t.ok(near(plain, 5.612, 0.002), `sprint {plain}`)
+		t.ok(near(hermes, 5.612 * 1.4, 0.005), `Hermes sprint {hermes} m/s`)
+		-- Kept in the air (a sprint jump carries it), never built there.
+		PlayerPhysics.tick(state, input(1, 0, { sprint = true, jump = true }), flat)
+		for _ = 1, 4 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true }), flat)
+			t.ok(not state.onGround and near(state.runFactor, 1.4), "kept aloft")
+		end
+		-- Knockback that lands starts it again.
+		t.ok(PlayerPhysics.knockback(state, 0.1, 0.1, 0))
+		t.eq(state.runFactor, 1, "knocked back")
+		t.eq(state.runTicks, 0)
+	end)
+
+	t.test("accessories: a Hermes run starts again when sprinting stops or a wall stops it", function()
+		local flat = physicsWorld()
+		local state = standing(flat, 0.5)
+		state.runBoost = 0.4
+		for _ = 1, 30 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true }), flat)
+		end
+		t.ok(near(state.runFactor, 1.4))
+		PlayerPhysics.tick(state, input(0, 0), flat)
+		t.eq(state.runFactor, 1, "letting go stops the sprint and the run")
+		t.eq(state.runTicks, 0)
+		-- A wall at x = 6 run into head on.
+		local wall = physicsWorld(function(x, y, _z)
+			return if x == 6 and y >= 1 and y <= 3 then STONE else nil
+		end)
+		local runner = standing(wall, -10.5)
+		runner.runBoost = 0.4
+		local built = false
+		for _ = 1, 100 do
+			PlayerPhysics.tick(runner, input(1, 0, { sprint = true }), wall)
+			built = built or near(runner.runFactor, 1.4)
+		end
+		t.ok(built, "built up on the way")
+		t.ok(runner.x < 6, "stopped by the wall")
+		t.ok(runner.runFactor < 1.4, `the wall starts it again: {runner.runFactor}`)
+		-- Taking the boots off (runBoost 0) ends it at once.
+		for _ = 1, 30 do
+			PlayerPhysics.tick(state, input(1, 0, { sprint = true }), flat)
+		end
+		state.runBoost = 0
+		PlayerPhysics.tick(state, input(1, 0, { sprint = true }), flat)
+		t.eq(state.runFactor, 1, "no boots, no run")
+	end)
+
+	t.test("accessories: a Flipper doubles swimming's push and swimming up", function()
+		local deep = physicsWorld(function(_x, y, _z)
+			return if y >= 1 and y <= 30 then WATER else nil
+		end)
+		local function swimSpeed(factor: number): number
+			local s = PlayerPhysics.new(0.5, 10, 0.5)
+			s.swimFactor = factor
+			local x0 = 0
+			for tick = 1, 100 do
+				PlayerPhysics.tick(s, input(1, 0), deep)
+				if tick == 40 then
+					x0 = s.x
+				end
+			end
+			return (s.x - x0) / 60 * PlayerPhysics.TICK_RATE
+		end
+		local plain, flipper = swimSpeed(1), swimSpeed(2)
+		t.ok(near(flipper / plain, 2, 0.01), `swimming {plain} -> {flipper} m/s`)
+		local function rise(factor: number): number
+			local s = PlayerPhysics.new(0.5, 5, 0.5)
+			s.swimFactor = factor
+			for _ = 1, 20 do
+				PlayerPhysics.tick(s, input(0, 0, { jump = true }), deep)
+			end
+			return s.y - 5
+		end
+		t.ok(rise(2) > rise(1) * 1.5, `swims up faster: {rise(1)} -> {rise(2)}`)
+	end)
+
+	t.test("accessories: knockback resistance takes its share off a push (Cobalt Shield: all)", function()
+		local state = PlayerPhysics.new(0.5, 10, 0.5)
+		state.knockbackResist = 1
+		t.ok(not PlayerPhysics.knockback(state, 0.4, 0.3, 0.2), "a shield holds it all")
+		t.eq(state.vx, 0)
+		t.eq(state.vy, 0)
+		state.knockbackResist = 0.5
+		t.ok(PlayerPhysics.knockback(state, 0.4, 0.2, 0))
+		t.ok(near(state.vx, 0.2) and near(state.vy, 0.1), `half of it: {state.vx}, {state.vy}`)
+		state.knockbackResist = 0
+		state.vx, state.vy = 0, 0
+		t.ok(PlayerPhysics.knockback(state, 0.4, 0.2, 0))
+		t.eq(state.vx, 0.4, "none: all of it, exactly")
+	end)
 end

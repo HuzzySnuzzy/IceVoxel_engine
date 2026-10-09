@@ -80,6 +80,8 @@
 	                             .Origin.Enabled)
 	  Player/CharacterAnimator   the character's animations from the hull's movement
 	  Player/HeldItems           the item in every character's hand, and in first person
+	  Player/EquipmentLooks      armor, vanity and accessories drawn on every character, and
+	                             air jumps' puffs (Player/AirJumps)
 	  Player/SpectatorView       spectators invisible to other players, a floating head to spectators
 	  Player/BurningView         flames on burning players (lava), the fire overlay in first person
 	  Rendering/ExplosionView    explosions (the server's Explosion messages): the blast drawn, its
@@ -134,6 +136,7 @@ local Chat = require(Client.Ui.Chat)
 local StructureNet = require(Client.Net.StructureNet)
 local StructureBoxes = require(Client.Rendering.StructureBoxes)
 local HeldItems = require(Client.Player.HeldItems)
+local EquipmentLooks = require(Client.Player.EquipmentLooks)
 local MovementController = require(Client.Player.MovementController)
 local RemotePlayers = require(Client.Player.RemotePlayers)
 local Rebase = require(Client.Rendering.Rebase)
@@ -418,6 +421,8 @@ FluidFog.start(
 )
 CharacterAnimator.start()
 HeldItems.start()
+-- What every character wears (armor, vanity armor, accessories), drawn after the hands.
+EquipmentLooks.start()
 SpectatorView.start()
 BurningView.start()
 ExplosionView.start()

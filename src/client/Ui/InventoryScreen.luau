@@ -9,7 +9,17 @@
 	    facing the viewer and turning a little towards the mouse like Minecraft's;
 	  * at the top right the 2 x 2 crafting grid under its "Crafting" label, an arrow and the
 	    result slot (window 0's own "inventory" container, slots 2..5 and 1);
-	  * the 27 inventory slots and, below them after a small gap, the hotbar row.
+	  * the 27 inventory slots and, below them after a small gap, the hotbar row;
+	  * Terraria's equipment (window 0 only: the inventory alone, also creative's inventory tab), a
+	    panel of its own 84 x 166 docked 2 px right of the player panel (Terraria's is right of
+	    its inventory too), so `size` is 262 wide then: the title "Equipment" at (8, 6), seven
+	    rows at y = 17 + 18 (r - 1): the vanity armor (x 8, rows 1..4, the armor ghosts tinted
+	    violet, a 6 x 6 eye in each slot's top right corner hiding that armor piece's look), the
+	    vanity accessories (x 28), the accessories (x 48: rows past the open ones darkened with a
+	    padlock, "Opens at the Industrial Age"), and a 9 x 9 eye per accessory row (x 68; a 16 x
+	    18 button, so a finger finds it) hiding that accessory's look (Types `hidden`: the
+	    inventory's `hide` action, predicted like any other). The preview wears what the
+	    character shows (Player/EquipmentLooks.dress, again whenever the equipment changes).
 
 	When a block's window is open, its panel sits ABOVE the player panel (Ui/MenuLayout):
 	  chest     its name and size / 9 rows of 9 slots
@@ -39,7 +49,9 @@
 	This module only draws and hit-tests (in screen pixels, the InputObject.Position space): the
 	clicks themselves are Ui/SlotClicks, driven by Ui/Screens, and Inventory/Menu applies the rules
 	of each slot (results are only taken, crafting happens there). Slots map to window slots by the
-	window layout of Inventory/Types (container, armor, inventory 10..36, hotbar).
+	window layout of Inventory/Types (container, armor, inventory 10..36, hotbar, equipment). The
+	eyes are buttons of their own (Activated): over one, `targetAt` says nothing, so no slot click
+	happens under it.
 ]]
 
 local Players = game:GetService("Players")
@@ -47,6 +59,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Accessories = require(Shared.Items.Accessories)
+local Ages = require(Shared.Progression.Ages)
+local Config = require(Shared.Config)
 local Crafting = require(Shared.Crafting)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
@@ -54,6 +69,8 @@ local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
+local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local EquipmentLooks = require(script.Parent.Parent.Player.EquipmentLooks)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ItemIcon = require(script.Parent.ItemIcon)
@@ -69,6 +86,66 @@ local PLAYER_HEIGHT = MenuLayout.PLAYER_HEIGHT
 -- Gap between the container panel and the player panel.
 local GAP = 2
 local TAB_HEIGHT = ItemIcon.TAB_HEIGHT
+-- Terraria's equipment panel: its width (right of the player panel, GAP apart), its rows' first
+-- y and the columns: vanity armor, vanity accessories, accessories, the accessories' eyes.
+local EQUIP_W = 84
+local EQUIP_ROW = 17
+local EQUIP_VANITY_X, EQUIP_VANITY_ACC_X, EQUIP_ACC_X, EQUIP_EYE_X = 8, 28, 48, 68
+-- The vanity armor slots' ghosts: the armor ones, tinted violet (Terraria's vanity slots).
+local VANITY_GHOST = Color3.fromRGB(128, 112, 150)
+-- A closed accessory row: dark over the slot, and a padlock.
+local LOCK_SHADE = Color3.fromRGB(0, 0, 0)
+local LOCK_SHADE_TRANSPARENCY = 0.45
+local LOCK_ART = {
+	"..###..",
+	".#...#.",
+	".#...#.",
+	"#######",
+	"###.###",
+	"###.###",
+	"#######",
+}
+-- The eyes: open (shown) and shut (hidden), 9 x 9 for accessories and 6 x 6 for armor.
+local EYE_ART = {
+	".........",
+	"..#####..",
+	".#.....#.",
+	"#..###..#",
+	"#..#W#..#",
+	"#..###..#",
+	".#.....#.",
+	"..#####..",
+	".........",
+}
+local EYE_SHUT_ART = {
+	".........",
+	".........",
+	".........",
+	"#.......#",
+	".#.....#.",
+	"..#####..",
+	"..#.#.#..",
+	".........",
+	".........",
+}
+local SMALL_EYE_ART = {
+	"......",
+	".####.",
+	"#.WW.#",
+	"#.WW.#",
+	".####.",
+	"......",
+}
+local SMALL_EYE_SHUT_ART = {
+	"......",
+	"......",
+	"#....#",
+	".####.",
+	"#.#.#.",
+	"......",
+}
+local EYE_COLOUR = Color3.fromRGB(64, 64, 64)
+local EYE_SHUT_COLOUR = Color3.fromRGB(110, 110, 110)
 -- The character preview box (Minecraft's: 51 x 72 at (26, 8)).
 local PREVIEW_X, PREVIEW_Y, PREVIEW_W, PREVIEW_H = 26, 8, 49, 69
 local PREVIEW_FOV = 30
@@ -233,7 +310,25 @@ type Self = InventoryScreen & {
 	heldItem: number | false | nil,
 	heldModel: Model?,
 	heldLook: number,
+	-- Terraria's equipment panel (window 0 only), its slots, its eyes and the padlocks over the
+	-- closed accessory rows; what they last showed (hidden bits, open slots); the root's width.
+	equipPanel: Frame,
+	equipmentSlots: { SlotWidget },
+	equipShown: boolean,
+	eyes: { Eye },
+	locks: { Frame },
+	shownHidden: number,
+	shownOpen: number,
+	width: number,
+	-- The preview's equipment: the stacks and bits it was dressed from (stacks are values: a
+	-- change is a new table), the looks text and the pieces' folder (Player/EquipmentLooks.dress).
+	looksRefs: { any },
+	looksText: string?,
+	looksFolder: Folder?,
 }
+
+-- An eye toggling a look: its button, the open and shut art, and the `hide` action's slot.
+type Eye = { button: TextButton, open: Frame, shut: Frame, slot: number }
 
 local InventoryScreen = {}
 InventoryScreen.__index = InventoryScreen
@@ -290,6 +385,85 @@ local function addGhost(widget: SlotWidget, art: { string })
 	widget.ghost = ghost
 end
 
+-- An eye button at (x, y) of `parent`, `w` x `h`, its art (`small`: the armor's 6 x 6) centred.
+local function newEye(parent: Instance, x: number, y: number, w: number, h: number, small: boolean, slot: number): Eye
+	local button = Instance.new("TextButton")
+	button.Text = ""
+	button.AutoButtonColor = false
+	button.BackgroundTransparency = 1
+	button.Position = UDim2.fromOffset(x, y)
+	button.Size = UDim2.fromOffset(w, h)
+	button.ZIndex = 12
+	button.Parent = parent
+	local size = if small then 6 else 9
+	local function art(rows: { string }, colour: Color3): Frame
+		local holder = Instance.new("Frame")
+		holder.BackgroundTransparency = 1
+		holder.Position = UDim2.fromOffset((w - size) // 2, (h - size) // 2)
+		holder.Size = UDim2.fromOffset(size, size)
+		holder.ZIndex = 12
+		holder.Parent = button
+		Style.pixelArt(holder, 0, 0, rows, { ["#"] = colour, W = Color3.new(1, 1, 1) }, 13)
+		return holder
+	end
+	local open = art(if small then SMALL_EYE_ART else EYE_ART, EYE_COLOUR)
+	local shut = art(if small then SMALL_EYE_SHUT_ART else EYE_SHUT_ART, EYE_SHUT_COLOUR)
+	shut.Visible = false
+	local eye: Eye = { button = button, open = open, shut = shut, slot = slot }
+	button.Activated:Connect(function()
+		local hidden = not shut.Visible
+		SoundPlayer.click()
+		ClientInventory.apply({ kind = "hide", slot = slot, hidden = hidden })
+	end)
+	return eye
+end
+
+--[[
+	Terraria's equipment panel (see the header), right of the player panel: hidden until
+	setLayout shows it for window 0.
+]]
+local function buildEquipment(self: Self, root: Frame)
+	local panel = Style.panel(root, WIDTH + GAP, 0, EQUIP_W, PLAYER_HEIGHT)
+	panel.Name = "Equipment"
+	panel.Visible = false
+	self.equipPanel = panel
+	Style.text(panel, "Equipment", 8, 6, EQUIP_W - 10, 8, Style.Colour.Title, 5)
+	local touch = UserInputService.TouchEnabled
+	for row = 1, Types.ACCESSORY_SIZE do
+		local y = EQUIP_ROW + (row - 1) * Style.SLOT
+		if row <= Types.VANITY_ARMOR_SIZE then
+			local widget = newSlot(self, panel, self.equipmentSlots, EQUIP_VANITY_X, y, "vanityArmor", row)
+			addGhost(widget, ARMOR_GHOSTS[row])
+			for _, frame in (widget.ghost :: Frame):GetDescendants() do
+				if frame:IsA("Frame") then
+					frame.BackgroundColor3 = VANITY_GHOST
+				end
+			end
+			-- Hiding the armor piece's look: a small eye in the slot's top right corner.
+			local reach = if touch then 10 else 6
+			table.insert(
+				self.eyes,
+				newEye(panel, EQUIP_VANITY_X + 16 - reach, y, reach, reach, true, Types.HIDE_ARMOR + row)
+			)
+		end
+		newSlot(self, panel, self.equipmentSlots, EQUIP_VANITY_ACC_X, y, "vanityAccessory", row)
+		local accessory = newSlot(self, panel, self.equipmentSlots, EQUIP_ACC_X, y, "accessory", row)
+		-- A closed row: dark, with a padlock (shown by render).
+		local lock = Style.frame(accessory.view.button, 1, 1, Style.ITEM, Style.ITEM, LOCK_SHADE, 11)
+		lock.BackgroundTransparency = LOCK_SHADE_TRANSPARENCY
+		lock.Visible = false
+		Style.pixelArt(lock, 5, 4, LOCK_ART, { ["#"] = Style.Colour.Panel }, 12)
+		table.insert(self.locks, lock)
+		-- The accessory's eye: 9 x 9, in a 16 x 18 button on touch screens.
+		local w = if touch then 16 else 9
+		local h = if touch then 18 else 9
+		table.insert(
+			self.eyes,
+			newEye(panel, EQUIP_EYE_X + (9 - w) // 2 + (if touch then 4 else 0), y + 4 - (h - 9) // 2, w, h, false, row)
+		)
+	end
+end
+
 function InventoryScreen.new(parent: Instance): InventoryScreen
 	local root = Instance.new("Frame")
 	root.Name = "Inventory"
@@ -334,6 +508,16 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			heldItem = false,
 			heldModel = nil,
 			heldLook = 0,
+			equipmentSlots = {},
+			equipShown = false,
+			eyes = {},
+			locks = {},
+			shownHidden = -1,
+			shownOpen = -1,
+			width = WIDTH,
+			looksRefs = {},
+			looksText = nil,
+			looksFolder = nil,
 		}, InventoryScreen) :: any
 	) :: Self
 
@@ -419,13 +603,15 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 		newSlot(self, panel, self.playerSlots, 8 + column * 18, 142, "inventory", 1 + column)
 	end
 
+	buildEquipment(self, root)
+
 	self:setLayout(nil, false)
 	return self
 end
 
--- Size of the content in GUI pixels.
+-- Size of the content in GUI pixels (262 wide with the equipment panel: window 0).
 function InventoryScreen.size(self: Self): Vector2
-	return Vector2.new(WIDTH, self.height)
+	return Vector2.new(self.width, self.height)
 end
 
 local function assignIndices(self: Self, window: Window)
@@ -438,6 +624,10 @@ local function assignIndices(self: Self, window: Window)
 	-- (The 2 x 2 grid's slots are window 0's container slots: they are nothing in other windows.)
 	for _, widget in self.gridSlots do
 		widget.window = if self.gridShown then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
+	end
+	-- (The equipment's only with its panel: window 0.)
+	for _, widget in self.equipmentSlots do
+		widget.window = if self.equipShown then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
 	end
 end
 
@@ -589,13 +779,19 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 			buildPanel(self, panelContainer)
 		end
 	end
-	-- The 2 x 2 grid only belongs to window 0; other windows show the player's name there.
+	-- The 2 x 2 grid only belongs to window 0; other windows show the player's name there. So does
+	-- the equipment panel.
 	local grid = MenuLayout.showsGrid(container)
 	if grid ~= self.gridShown then
 		self.gridShown = grid
 		self.gridGroup.Visible = grid
 		self.nameLabel.Visible = not grid
 	end
+	if grid ~= self.equipShown then
+		self.equipShown = grid
+		self.equipPanel.Visible = grid
+	end
+	self.width = if grid then WIDTH + GAP + EQUIP_W else WIDTH
 	self.playerClose.Visible = UserInputService.TouchEnabled and panelContainer == nil
 	local showTabs = tabs and panelContainer == nil
 	self.tabsShown = showTabs
@@ -610,8 +806,9 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 		top = TAB_HEIGHT
 	end
 	self.playerPanel.Position = UDim2.fromOffset(0, top)
+	self.equipPanel.Position = UDim2.fromOffset(WIDTH + GAP, top)
 	self.height = top + PLAYER_HEIGHT
-	self.root.Size = UDim2.fromOffset(WIDTH, self.height)
+	self.root.Size = UDim2.fromOffset(self.width, self.height)
 	-- Window slots for this layout (only the container's size matters).
 	assignIndices(self, { id = 0, inventory = Types.newInventory(), container = container })
 end
@@ -782,6 +979,84 @@ local function isResultWidget(widget: SlotWidget, window: Window): boolean
 	return widget.store == "container" and widget.index == Types.CRAFT_RESULT and Types.craftWidth(window.container) > 0
 end
 
+-- The eyes (open or shut by the `hidden` bits) and the closed accessory rows' padlocks.
+local function renderEquipment(self: Self, window: Window)
+	local inventory = window.inventory
+	local hidden = inventory.hidden
+	if hidden ~= self.shownHidden then
+		self.shownHidden = hidden
+		for _, eye in self.eyes do
+			local shut = bit32.btest(hidden, bit32.lshift(1, eye.slot - 1))
+			eye.open.Visible = not shut
+			eye.shut.Visible = shut
+		end
+	end
+	local open = inventory.accessorySlots
+	if open ~= self.shownOpen then
+		self.shownOpen = open
+		for row, lock in self.locks do
+			lock.Visible = row > open
+		end
+	end
+end
+
+--[[
+	Dresses the preview in what the character shows (Player/EquipmentLooks.dress), again only when
+	an armor or equipment stack, the hidden bits or the open slots changed (compared by table:
+	stacks are values) and the looks text with them.
+]]
+local function updateLooks(self: Self, window: Window)
+	local clone = self.clone
+	if clone == nil then
+		return
+	end
+	local inventory = window.inventory
+	local refs = self.looksRefs
+	local changed = false
+	local i = 0
+	for slot = 1, Types.ARMOR_SIZE do
+		i += 1
+		if refs[i] ~= inventory.armor[slot] then
+			refs[i], changed = inventory.armor[slot], true
+		end
+		i += 1
+		if refs[i] ~= inventory.vanityArmor[slot] then
+			refs[i], changed = inventory.vanityArmor[slot], true
+		end
+	end
+	for slot = 1, Types.ACCESSORY_SIZE do
+		i += 1
+		if refs[i] ~= inventory.accessories[slot] then
+			refs[i], changed = inventory.accessories[slot], true
+		end
+		i += 1
+		if refs[i] ~= inventory.vanityAccessories[slot] then
+			refs[i], changed = inventory.vanityAccessories[slot], true
+		end
+	end
+	i += 1
+	if refs[i] ~= inventory.hidden then
+		refs[i], changed = inventory.hidden, true
+	end
+	i += 1
+	if refs[i] ~= inventory.accessorySlots then
+		refs[i], changed = inventory.accessorySlots, true
+	end
+	if not changed and self.looksText ~= nil then
+		return
+	end
+	local looks = Accessories.looks(inventory)
+	if looks == self.looksText then
+		return
+	end
+	self.looksText = looks
+	local old = self.looksFolder
+	if old then
+		old:Destroy()
+	end
+	self.looksFolder = EquipmentLooks.dress(clone, looks)
+end
+
 -- Draws `window`; `hover` gets the white overlay, so do the slots of a drag in progress.
 function InventoryScreen.render(self: Self, window: Window, hover: Target?, dragged: { [number]: boolean })
 	updateHeld(self, window)
@@ -822,12 +1097,27 @@ function InventoryScreen.render(self: Self, window: Window, hover: Target?, drag
 	for _, widget in self.playerSlots do
 		draw(widget)
 	end
+	if self.equipShown then
+		for _, widget in self.equipmentSlots do
+			draw(widget)
+		end
+		renderEquipment(self, window)
+	end
+	updateLooks(self, window)
 	renderGauges(self, window)
 end
 
 -- What is under `point` (screen pixels): a slot, nil over a panel, or outside.
 function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
-	for _, list in { self.containerSlots, self.gridSlots, self.playerSlots } do
+	-- (An eye is a button of its own: no slot click under it.)
+	if self.equipShown then
+		for _, eye in self.eyes do
+			if Style.contains(eye.button, point) then
+				return nil
+			end
+		end
+	end
+	for _, list in { self.containerSlots, self.gridSlots, self.playerSlots, self.equipmentSlots } do
 		for _, widget in list do
 			if widget.window >= 0 and Style.contains(widget.view.button, point) then
 				return { kind = "slot", index = widget.window }
@@ -835,7 +1125,11 @@ function InventoryScreen.targetAt(self: Self, point: Vector2): Target?
 		end
 	end
 	local container = self.containerPanel
-	if Style.contains(self.playerPanel, point) or (container and Style.contains(container, point)) then
+	if
+		Style.contains(self.playerPanel, point)
+		or (container and Style.contains(container, point))
+		or Style.contains(self.equipPanel, point)
+	then
 		return nil
 	end
 	for _, frame in self.tabFrames do
@@ -860,6 +1154,21 @@ function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): 
 				if item and text then
 					return { Items.displayName(item), text }
 				end
+			end
+		end
+	end
+	-- The equipment: a closed accessory row says when it opens; an eye what it does.
+	if self.equipShown then
+		for row, lock in self.locks do
+			if lock.Visible and Style.contains(lock, point) then
+				local age = Ages.byId(Config.Accessories.ExtraSlotAges[row - Types.BASE_ACCESSORY_SLOTS] or "")
+				return { if age then `Opens at the {age.name}` else "Closed" }
+			end
+		end
+		for _, eye in self.eyes do
+			if Style.contains(eye.button, point) then
+				local what = if eye.slot > Types.HIDE_ARMOR then "armor piece" else "accessory"
+				return { if eye.shut.Visible then `Show this {what}` else `Hide this {what}` }
 			end
 		end
 	end
@@ -962,6 +1271,10 @@ function InventoryScreen.opened(self: Self)
 	self.clone = clone
 	self.cloneYaw = 0
 	self.heldItem = false
+	-- (Dressed by the next render.)
+	table.clear(self.looksRefs)
+	self.looksText = nil
+	self.looksFolder = nil
 end
 
 function InventoryScreen.closed(self: Self)
@@ -972,6 +1285,8 @@ function InventoryScreen.closed(self: Self)
 	end
 	self.heldModel = nil
 	self.heldItem = false
+	self.looksFolder = nil
+	self.looksText = nil
 end
 
 --[[

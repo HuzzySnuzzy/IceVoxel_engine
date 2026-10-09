@@ -36,7 +36,9 @@
 	              5. in a campfire (CampfireBlock.entityInside, always lit here): CAMPFIRE_DAMAGE
 	                 (its fireDamage, 1) half heart, inFire, softened by armor, under the
 	                 cooldown, and nothing more: a campfire sets nobody alight (nor is it in
-	                 BlockTags.FIRE, so it doesn't keep the count above going either);
+	                 BlockTags.FIRE, so it doesn't keep the count above going either). Not at all
+	                 with `fireWalk` (Terraria's Obsidian Skull: hot blocks don't hurt; lava, fire
+	                 blocks and burning still do);
 	              6. in the rain (the RAIN bit: the caller asks the weather while the player
 	                 burns, `inRain`: at the feet or the top of the box, Entity.isInRain), burning
 	                 is put out (Entity.move, after all of the above: what lava or a fire block set
@@ -276,7 +278,8 @@ end
 --[[
 	One tick of a player in game mode `mode` touching the fluids `touching` (`touching`'s mask),
 	wearing `armor` points with `toughness` (Items.armorPoints; default none), with the status
-	effects' `fire` rules (Shared/Effects.fireRules; nil: none). Returns the half hearts (of 20) it
+	effects' `fire` rules (Shared/Effects.fireRules; nil: none) and, with `fireWalk` (an
+	accessory's: Items/Accessories), unhurt by campfires. Returns the half hearts (of 20) it
 	costs them this tick, whether burning was put out (by water: Minecraft's
 	entity.generic.extinguish_fire) and whether the fluid's hurt landed (Entity.lavaHurt's hurt
 	returned true, however much armor took: Minecraft's entity.generic.burn).
@@ -287,7 +290,8 @@ function Burning.tickPlayer(
 	touching: number,
 	armor: number?,
 	toughness: number?,
-	fire: Effects.FireRules?
+	fire: Effects.FireRules?,
+	fireWalk: boolean?
 ): (number, boolean, boolean)
 	if state.cooldown > 0 then
 		state.cooldown -= 1
@@ -349,7 +353,7 @@ function Burning.tickPlayer(
 	elseif fluid == nil and state.fire <= 0 then
 		state.heat = 0
 	end
-	if bit32.btest(touching, Burning.CAMPFIRE) and not immune then
+	if bit32.btest(touching, Burning.CAMPFIRE) and not immune and not fireWalk then
 		-- (CampfireBlock.entityInside: hurt(inFire, fireDamage), no burning.)
 		local landed = hurt(state, Burning.CAMPFIRE_DAMAGE, Burning.HURT_COOLDOWN)
 		if landed > 0 and (armor or 0) > 0 then

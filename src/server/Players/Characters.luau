@@ -71,6 +71,15 @@
 	    landed on, for everyone but the player, whose client played them already
 	    (LivingEntity.causeFallDamage). Spectators make none (GameModeRules.makesSounds).
 	  * a saved player's health comes back without a hurt sound (`restoreHealth`, World/WorldSave).
+	  * Terraria's accessories (Players/Inventories.accessories: Items/Accessories' sums of what
+	    is worn): their defense joins the armor's wherever armor softens a hurt (lava, fire,
+	    blasts, mobs: Accessories.armorPoints); a Lucky Horseshoe takes fall damage away
+	    altogether (its client sends no Fall either); a Band of Regeneration heals a half heart
+	    every `regen` (200) ticks of the 20 a second while hurt, alive and in survival or
+	    adventure (Terraria's lifeRegen, any thirst, moving or not); an Obsidian Skull's
+	    fireWalk keeps campfires from hurting (Players/Burning); knockback resistance (Cobalt
+	    Shield) takes its share off the explosion's push sent to the player and the speed
+	    check's allowance for it (mobs' pushes: Mobs/Mobs).
 ]]
 
 local Players = game:GetService("Players")
@@ -80,7 +89,6 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
-local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local Rig = require(Shared.Movement.Rig)
@@ -97,6 +105,7 @@ local EffectRules = require(script.Parent.EffectRules)
 local Effects = require(script.Parent.Effects)
 local GameModeRules = require(script.Parent.GameModeRules)
 local Inventories = require(script.Parent.Inventories)
+local Accessories = require(Shared.Items.Accessories)
 
 -- Minecraft players have 20 health points (half hearts).
 local MINECRAFT_HEALTH = GameModeRules.MINECRAFT_HEALTH
@@ -130,6 +139,8 @@ local burning: { [Player]: Burning.PlayerState } = {}
 local rainingAt: ((x: number, y: number, z: number) -> boolean)? = nil
 -- Players whose next health change is a restore, not a hurt (no hurt sound).
 local quietHealth: { [Player]: boolean } = {}
+-- Ticks each player has healed towards a Band of Regeneration's next half heart.
+local regenTicks: { [Player]: number } = {}
 
 local function setGroup(part: Instance, group: string)
 	if part:IsA("BasePart") then
@@ -265,10 +276,11 @@ local function burnTick(getBlock: Burning.GetBlock)
 		local window = Inventories.get(player)
 		local armor, toughness = 0, 0
 		if window then
-			armor, toughness = Items.armorPoints(window.inventory.armor)
+			armor, toughness = Accessories.armorPoints(window.inventory)
 		end
+		local worn = Inventories.accessories(player)
 		local damage, extinguished, hurt =
-			Burning.tickPlayer(state, mode, touching, armor, toughness, Effects.fireRules(player))
+			Burning.tickPlayer(state, mode, touching, armor, toughness, Effects.fireRules(player), worn.fireWalk)
 		-- (The effects' own hurt is magic: through armor, under the same cooldown.)
 		local maxHealth = humanoid.MaxHealth
 		local health = if maxHealth > 0 then humanoid.Health / maxHealth * MINECRAFT_HEALTH else 0
@@ -290,6 +302,17 @@ local function burnTick(getBlock: Burning.GetBlock)
 		if damage > 0 then
 			-- (TakeDamage respects the ForceField of players who can't be hurt.)
 			humanoid:TakeDamage(damage / MINECRAFT_HEALTH * humanoid.MaxHealth)
+		end
+		-- A Band of Regeneration: a half heart every `regen` ticks while hurt (see the header).
+		if worn.regen > 0 or regenTicks[player] then
+			local mayHeal = GameMode.isSurvivalLike(mode) and humanoid.Health < humanoid.MaxHealth
+			local ticks, healed = Accessories.regenerate(worn, regenTicks[player] or 0, mayHeal)
+			if ticks > 0 then
+				regenTicks[player] = ticks
+			else
+				regenTicks[player] = nil
+			end
+			heal += healed
 		end
 		if heal > 0 and humanoid.Health > 0 then
 			humanoid.Health =
@@ -363,7 +386,7 @@ function Characters.explosion(
 				local window = Inventories.get(player)
 				local armor, toughness = 0, 0
 				if window then
-					armor, toughness = Items.armorPoints(window.inventory.armor)
+					armor, toughness = Accessories.armorPoints(window.inventory)
 				end
 				local landed = Effects.incomingDamage(player, Burning.hurtPlayer(state, mode, damage, armor, toughness))
 				local fire = Effects.fireRules(player)
@@ -377,6 +400,9 @@ function Characters.explosion(
 				end
 			end
 		end
+		-- (Knockback resistance takes its share off the push: a Cobalt Shield all of it.)
+		local share = Characters.knockbackShare(player)
+		kx, ky, kz = kx * share, ky * share, kz * share
 		net.send(
 			player,
 			Protocol.ServerMessage.Explosion,
@@ -389,8 +415,16 @@ function Characters.explosion(
 	end
 end
 
+--[[
+	The share of a push that reaches `player` (1 - their accessories' knockback resistance: a
+	Cobalt Shield's 1 leaves 0): explosions here, mobs' hits in Mobs/Mobs.
+]]
+function Characters.knockbackShare(player: Player): number
+	return Accessories.knockbackShare(Inventories.accessories(player))
+end
+
 -- Lets `player`'s movement take a knockback of (kx, ky, kz) blocks a tick (a mob's hit: Mobs/
--- Mobs' push), as an explosion's does.
+-- Mobs' push, already less the player's resistance), as an explosion's does.
 function Characters.knockedBack(player: Player, kx: number, ky: number, kz: number)
 	local push = math.sqrt(kx * kx + ky * ky + kz * kz)
 	if push > 0 and push == push then
@@ -483,7 +517,7 @@ function Characters.hurt(player: Player, amount: number): (number, boolean)
 	local window = Inventories.get(player)
 	local armor, toughness = 0, 0
 	if window then
-		armor, toughness = Items.armorPoints(window.inventory.armor)
+		armor, toughness = Accessories.armorPoints(window.inventory)
 	end
 	local hit = Burning.hurtPlayer(state, GameMode.of(player), amount, armor, toughness)
 	local landed = Effects.incomingDamage(player, hit)
@@ -599,7 +633,8 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 			return
 		end
 		local distance = Protocol.decodeFall(payload)
-		if distance == nil then
+		if distance == nil or Inventories.accessories(player).noFallDamage then
+			-- (A Lucky Horseshoe: no fall damage at all, Terraria's noFallDmg.)
 			return
 		end
 		-- (Jump Boost takes its levels off the fall: LivingEntity.calculateFallDamage.)
@@ -640,6 +675,7 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 		landings[player] = nil
 		burning[player] = nil
 		quietHealth[player] = nil
+		regenTicks[player] = nil
 	end)
 
 	-- Suffocation, checked every IN_WALL_INTERVAL against generated blocks only.

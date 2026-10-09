@@ -9,9 +9,31 @@
 	    [n, n + 4)        armor: head, chest, legs, feet (only armor of that slot, one item each)
 	    [n + 4, n + 31)   inventory slots 10..36
 	    [n + 31, n + 40)  hotbar, inventory slots 1..9
+	    [n + 40, n + 47)  accessories 1..7 (store "accessory")
+	    [n + 47, n + 51)  vanity armor 1..4 ("vanityArmor")
+	    [n + 51, n + 58)  vanity accessories 1..7 ("vanityAccessory")
 
 	Window 0 (Types.newWindow) holds the inventory screen's 2 x 2 crafting grid, so it numbers its
-	slots like Minecraft's InventoryMenu: 0 result, 1..4 grid, 5..8 armor, 9..35 main, 36..44 hotbar.
+	slots like Minecraft's InventoryMenu: 0 result, 1..4 grid, 5..8 armor, 9..35 main, 36..44 hotbar,
+	then Terraria's equipment 45..62 (appended, as Minecraft appended its offhand slot 45).
+
+	Terraria's equipment (Items/Accessories, Config.Accessories):
+	  accessory slot i     one item with ItemList `accessory`, only while i <= the inventory's
+	                       `accessorySlots` (the rest are locked until an Age opens them; what a
+	                       locked slot still holds after /age lowered the Age can be taken out and
+	                       does nothing), and never an item another accessory slot holds (Terraria
+	                       wears no accessory twice: a click with a duplicate does nothing; putting
+	                       it back, or swapping with the slot that holds it, is fine)
+	  vanity armor slot j  one item whose armor slot or `vanity` slot is j (the look over armor j)
+	  vanity accessory     one accessory of any kind, duplicates allowed (looks only)
+	  shift click          window 0, from the inventory: armor to its empty armor slot as before;
+	                       an accessory to the first open empty accessory slot it may go in; a
+	                       vanity item to its empty vanity armor slot; else hotbar <-> 10..36 as
+	                       before. From an equipment slot (any window): into 10..36, then the
+	                       hotbar. Nothing else ever goes into the equipment.
+	  number keys          swap by the same rules (mayPlace)
+	  hide                 flips a `hidden` bit (Types): the look only, never the effect
+	Death without keepInventory (`clear`) empties the three equipment stores too; `hidden` stays.
 
 	Container kinds (Types) change the slot rules:
 	  inventory, crafting  slot 1 is the crafting result: derived from the grid after every change
@@ -85,12 +107,22 @@ local CURSOR = Types.CURSOR
 local ARMOR = Types.ARMOR_SIZE
 local HOTBAR = Types.HOTBAR_SIZE
 local INVENTORY = Types.INVENTORY_SIZE
+local ACCESSORIES = Types.ACCESSORY_SIZE
+local VANITY_ARMOR = Types.VANITY_ARMOR_SIZE
+local VANITY_ACCESSORIES = Types.VANITY_ACCESSORY_SIZE
 local RESULT = Types.CRAFT_RESULT
 local FURNACE_INPUT, FURNACE_FUEL, FURNACE_OUTPUT = Types.FURNACE_INPUT, Types.FURNACE_FUEL, Types.FURNACE_OUTPUT
--- Window offsets past the container: armor, then inventory 10..36, then the hotbar.
+-- Window offsets past the container: armor, then inventory 10..36, then the hotbar, then the
+-- equipment (accessories, vanity armor, vanity accessories).
 local MAIN_START = ARMOR -- 4
 local HOTBAR_START = ARMOR + INVENTORY - HOTBAR -- 31
-local PLAYER_END = Types.PLAYER_SLOTS -- 40
+local PLAYER_END = Types.ACCESSORY_START -- 40: the hotbar's end
+local ACCESSORY_START = Types.ACCESSORY_START -- 40
+local VANITY_ARMOR_START = Types.VANITY_ARMOR_START -- 47
+local VANITY_ACCESSORY_START = Types.VANITY_ACCESSORY_START -- 51
+local EQUIPMENT_END = Types.EQUIPMENT_END -- 58
+-- The `hide` action's slots: accessory slots 1..7, armor slots HIDE_ARMOR + 1..4 (bit + 1).
+local HIDE_ARMOR = Types.HIDE_ARMOR
 
 --[[ Helpers ]]
 
@@ -178,13 +210,13 @@ local function gated(window: Window, index: number, item: number): boolean
 end
 
 --[[
-	Minecraft's Slot.getMaxStackSize() (without an item): 1 for armor, a machine slot's limit,
-	else the container's 64.
+	Minecraft's Slot.getMaxStackSize() (without an item): 1 for armor and Terraria's equipment, a
+	machine slot's limit, else the container's 64.
 ]]
 local function slotLimit(window: Window, index: number): number
 	local n = containerSize(window)
 	local offset = index - n
-	if offset >= 0 and offset < ARMOR then
+	if offset >= 0 and (offset < ARMOR or (offset >= ACCESSORY_START and offset < EQUIPMENT_END)) then
 		return 1
 	end
 	local container = window.container
@@ -202,8 +234,9 @@ function Menu.size(window: Window): number
 end
 
 --[[
-	Which store a window slot lives in and its index there: "container" (1..n), "armor" (1..4) or
-	"inventory" (1..36, 1-9 the hotbar). nil, 0 for anything else (OUTSIDE, out of range).
+	Which store a window slot lives in and its index there: "container" (1..n), "armor" (1..4),
+	"inventory" (1..36, 1-9 the hotbar), "accessory" (1..7), "vanityArmor" (1..4) or
+	"vanityAccessory" (1..7). nil, 0 for anything else (OUTSIDE, out of range).
 ]]
 function Menu.locate(window: Window, index: number): (string?, number)
 	if not isInt(index) or index < 0 then
@@ -220,6 +253,12 @@ function Menu.locate(window: Window, index: number): (string?, number)
 		return "inventory", offset - MAIN_START + HOTBAR + 1
 	elseif offset < PLAYER_END then
 		return "inventory", offset - HOTBAR_START + 1
+	elseif offset < VANITY_ARMOR_START then
+		return "accessory", offset - ACCESSORY_START + 1
+	elseif offset < VANITY_ACCESSORY_START then
+		return "vanityArmor", offset - VANITY_ARMOR_START + 1
+	elseif offset < EQUIPMENT_END then
+		return "vanityAccessory", offset - VANITY_ACCESSORY_START + 1
 	end
 	return nil, 0
 end
@@ -238,6 +277,12 @@ function Menu.windowIndex(window: Window, store: string, index: number): number?
 		return n + HOTBAR_START + index - 1
 	elseif store == "inventory" and index > HOTBAR and index <= INVENTORY then
 		return n + MAIN_START + index - HOTBAR - 1
+	elseif store == "accessory" and index >= 1 and index <= ACCESSORIES then
+		return n + ACCESSORY_START + index - 1
+	elseif store == "vanityArmor" and index >= 1 and index <= VANITY_ARMOR then
+		return n + VANITY_ARMOR_START + index - 1
+	elseif store == "vanityAccessory" and index >= 1 and index <= VANITY_ACCESSORIES then
+		return n + VANITY_ACCESSORY_START + index - 1
 	end
 	return nil
 end
@@ -252,6 +297,12 @@ function Menu.get(window: Window, index: number): Stack?
 		stack = window.inventory.armor[i]
 	elseif store == "inventory" then
 		stack = window.inventory.slots[i]
+	elseif store == "accessory" then
+		stack = window.inventory.accessories[i]
+	elseif store == "vanityArmor" then
+		stack = window.inventory.vanityArmor[i]
+	elseif store == "vanityAccessory" then
+		stack = window.inventory.vanityAccessories[i]
 	end
 	if stack == nil or stack.count < 1 then
 		return nil
@@ -271,13 +322,34 @@ function Menu.set(window: Window, index: number, stack: Stack?)
 		window.inventory.armor[i] = stack
 	elseif store == "inventory" then
 		window.inventory.slots[i] = stack
+	elseif store == "accessory" then
+		window.inventory.accessories[i] = stack
+	elseif store == "vanityArmor" then
+		window.inventory.vanityArmor[i] = stack
+	elseif store == "vanityAccessory" then
+		window.inventory.vanityAccessories[i] = stack
 	end
+end
+
+-- Does an accessory slot other than `slot` hold `item` (Terraria wears no accessory twice)?
+local function wornElsewhere(inventory: Inventory, slot: number, item: number): boolean
+	local accessories = inventory.accessories
+	for other = 1, ACCESSORIES do
+		local stack = accessories[other]
+		if other ~= slot and stack and stack.count >= 1 and stack.item == item then
+			return true
+		end
+	end
+	return false
 end
 
 --[[
 	Slot.mayPlace: armor slots take only armor of their slot, a furnace's fuel slot only what burns,
 	a machine's slots what its kind says, crafting results and outputs nothing, other slots any
 	known item; and a furnace's input or a machine nothing the recipe gate refuses (`gated`).
+	Terraria's equipment (see the header): an open accessory slot takes an accessory no other
+	accessory slot holds, a vanity armor slot armor or a vanity item of its slot, a vanity
+	accessory slot any accessory.
 ]]
 function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	if not Items.isValid(item) then
@@ -286,6 +358,14 @@ function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	local store, i = Menu.locate(window, index)
 	if store == "armor" then
 		return Items.armorSlot(item) == i
+	elseif store == "accessory" then
+		local inventory = window.inventory
+		local open = inventory.accessorySlots
+		return Items.accessory(item) ~= nil and isInt(open) and i <= open and not wornElsewhere(inventory, i, item)
+	elseif store == "vanityArmor" then
+		return Items.armorSlot(item) == i or Items.vanitySlot(item) == i
+	elseif store == "vanityAccessory" then
+		return Items.accessory(item) ~= nil
 	elseif store == "container" then
 		if isCraftResult(window, index) or isOutput(window, index) or gated(window, index, item) then
 			return false
@@ -301,7 +381,8 @@ function Menu.mayPlace(window: Window, index: number, item: number): boolean
 	return store ~= nil
 end
 
--- Slot.getMaxStackSize(stack): the item's max stack, at most 1 in armor slots (0 if not a slot).
+-- Slot.getMaxStackSize(stack): the item's max stack, at most 1 in armor and equipment slots (0 if
+-- not a slot).
 function Menu.maxStackFor(window: Window, index: number, item: number): number
 	if Menu.locate(window, index) == nil then
 		return 0
@@ -686,6 +767,10 @@ end
 	                             machine's slots that take it (Machines.quickMoveTargets), and
 	                             only when none took anything 10..36 <-> hotbar (what did not fit
 	                             stays where it was).
+
+	Terraria's equipment: from an equipment slot (any window) -> player slots; in the inventory
+	screen, an accessory from the player slots -> the first open empty accessory slot that takes it
+	(else 10..36 <-> hotbar), a vanity item -> its empty vanity armor slot (else the same).
 ]]
 local function quickMoveStack(window: Window, index: number): Stack?
 	local current = get(window, index)
@@ -707,7 +792,10 @@ local function quickMoveStack(window: Window, index: number): Stack?
 		end
 	end
 
-	if kind == Machines.CONTAINER_KIND then
+	if index >= last then
+		-- Terraria's equipment, in any window: into 10..36, then the hotbar.
+		left, moved = moveItemStackTo(window, current, main, last, false)
+	elseif kind == Machines.CONTAINER_KIND then
 		if index < main then
 			-- Out of the machine (an output backwards, like a furnace's) or the armor.
 			left, moved = moveItemStackTo(window, current, main, last, isOutput(window, index))
@@ -758,9 +846,20 @@ local function quickMoveStack(window: Window, index: number): Stack?
 			toOtherPart()
 		end
 	else
-		local armorSlot = Items.armorSlot(current.item)
+		local item = current.item
+		local armorSlot = Items.armorSlot(item)
+		local vanity = n + VANITY_ARMOR_START + (Items.vanitySlot(item) or 0) - 1
 		if armorSlot and get(window, n + armorSlot - 1) == nil then
 			left, moved = moveItemStackTo(window, current, n + armorSlot - 1, n + armorSlot, false)
+		elseif Items.accessory(item) then
+			-- The first empty accessory slot that takes it (open, not worn already).
+			local first = n + ACCESSORY_START
+			left, moved = moveItemStackTo(window, current, first, first + ACCESSORIES, false)
+			if not moved then
+				toOtherPart()
+			end
+		elseif Items.vanitySlot(item) and get(window, vanity) == nil then
+			left, moved = moveItemStackTo(window, current, vanity, vanity + 1, false)
 		else
 			toOtherPart()
 		end
@@ -981,17 +1080,22 @@ local function drag(window: Window, mode: number, slots: { number })
 	local max = Items.maxStack(item)
 	local chosen: { number } = {}
 	local seen: { [number]: boolean } = {}
+	-- (One accessory slot at most: a creative full-stack drag must not wear one item twice.)
+	local accessory = false
 	-- Numeric loop: apply validated exactly slots[1..#slots].
 	for i = 1, #slots do
 		local index = slots[i]
 		local current = get(window, index)
+		local isAccessory = Menu.locate(window, index) == "accessory"
 		if
 			not seen[index]
 			and (current == nil or (same(current, carried) and current.count <= max))
 			and mayPlace(window, index, item)
 			and (mode == CLONE_DRAG or carried.count > #chosen)
+			and not (isAccessory and accessory)
 		then
 			seen[index] = true
+			accessory = accessory or isAccessory
 			table.insert(chosen, index)
 		end
 	end
@@ -1113,6 +1217,18 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 			return {}
 		end
 		return Menu.close(window)
+	elseif action.kind == "hide" then
+		-- Terraria's eye toggles: accessory slot 1..7 is bit slot - 1, armor slot 1..4 is
+		-- HIDE_ARMOR + 1..4 (bit slot - 1 too). The look only: nothing moves.
+		local slot, hidden = action.slot, action.hidden
+		local valid = isInt(slot)
+			and ((slot >= 1 and slot <= ACCESSORIES) or (slot > HIDE_ARMOR and slot <= HIDE_ARMOR + ARMOR))
+		if valid and type(hidden) == "boolean" then
+			local bit = bit32.lshift(1, slot - 1)
+			local bits = if isInt(inventory.hidden) then inventory.hidden else 0
+			inventory.hidden = if hidden then bit32.bor(bits, bit) else bit32.band(bits, bit32.bnot(bit))
+		end
+		return {}
 	end
 	return {}
 end
@@ -1206,7 +1322,8 @@ function Menu.close(window: Window): { Stack }
 	return thrown
 end
 
--- Empties the inventory, armor and cursor (death) and returns the stacks.
+-- Empties the inventory, armor, cursor and Terraria's equipment (death) and returns the stacks.
+-- (The hidden looks stay: they are the player's choice, not things.)
 function Menu.clear(inventory: Inventory): { Stack }
 	local stacks: { Stack } = {}
 	local function take(stack: Stack?)
@@ -1215,16 +1332,19 @@ function Menu.clear(inventory: Inventory): { Stack }
 			table.insert(stacks, taken)
 		end
 	end
-	for slot = 1, INVENTORY do
-		take(inventory.slots[slot])
-		inventory.slots[slot] = nil
+	local function empty(store: { [number]: Stack? }, size: number)
+		for slot = 1, size do
+			take(store[slot])
+			store[slot] = nil
+		end
 	end
-	for slot = 1, ARMOR do
-		take(inventory.armor[slot])
-		inventory.armor[slot] = nil
-	end
+	empty(inventory.slots, INVENTORY)
+	empty(inventory.armor, ARMOR)
 	take(inventory.cursor)
 	inventory.cursor = nil
+	empty(inventory.accessories, ACCESSORIES)
+	empty(inventory.vanityArmor, VANITY_ARMOR)
+	empty(inventory.vanityAccessories, VANITY_ACCESSORIES)
 	return stacks
 end
 

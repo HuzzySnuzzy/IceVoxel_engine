@@ -75,6 +75,7 @@ local Config = require(Shared.Config)
 local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
+local Accessories = require(Shared.Items.Accessories)
 local Menu = require(Shared.Inventory.Menu)
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Types = require(Shared.Inventory.Types)
@@ -300,7 +301,7 @@ end
 
 -- The tooltip of `item`: its name, the lines of a stack's item data (Items.describe: a tank's
 -- water, stored energy), a potion's effects (Shared/Effects.tooltip), then an armor piece's
--- stats.
+-- stats, an accessory's effects or a vanity item's note (Items/Accessories.tooltip).
 local function tooltipLines(item: number, details: { string }?): { Line }
 	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
 	if details then
@@ -326,6 +327,13 @@ local function tooltipLines(item: number, details: { string }?): { Line }
 		if armor.toughness > 0 then
 			table.insert(lines, { text = `+{armor.toughness} Armor Toughness`, colour = Style.Colour.Blue })
 		end
+	end
+	-- Terraria's accessories and vanity items: what they do (Items/Accessories.tooltip).
+	for index, text in Accessories.tooltip(item) do
+		if index == 1 then
+			table.insert(lines, { text = "", colour = Style.Colour.Text })
+		end
+		table.insert(lines, { text = text, colour = if index == 1 then Style.Colour.Gray else Style.Colour.Blue })
 	end
 	return lines
 end
@@ -593,6 +601,9 @@ function Screens.start()
 		-- Where JEI's list may reach down to: above the creative screen's hotbar row (also while the
 		-- recipe view hides it, so the list keeps its cells instead of rebuilding them).
 		local listBottom = viewport.Y
+		-- The centred content's width: MenuLayout.WIDTH, or the inventory's (wider in window 0 with
+		-- Terraria's equipment panel: InventoryScreen.size).
+		local contentWidth = MenuLayout.WIDTH
 		local shownPanel = panel
 		if current == "panel" and shownPanel then
 			local size = shownPanel.size()
@@ -617,16 +628,17 @@ function Screens.start()
 			local size = inventory:size()
 			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen)
 			setScale(inventoryScale, scale)
+			contentWidth = size.X
 		end
 		-- JEI: the recipe view in the panel's place (at most the panel's scale), the list to the right
-		-- of the panels (all three are centred and MenuLayout.WIDTH wide).
+		-- of the panels (all three are centred, `contentWidth` wide).
 		local viewSize = jei.view:size()
-		screenLeftEdge = viewport.X / 2 - MenuLayout.WIDTH / 2 * scale
+		screenLeftEdge = viewport.X / 2 - contentWidth / 2 * scale
 		jei:place({
 			viewportX = viewport.X,
 			top = GuiService:GetGuiInset().Y,
 			bottom = listBottom,
-			guiRight = viewport.X / 2 + MenuLayout.WIDTH / 2 * scale,
+			guiRight = viewport.X / 2 + contentWidth / 2 * scale,
 			scale = scale,
 			viewScale = math.min(scale, Style.guiScale(viewport, viewSize.X, viewSize.Y, touchScreen)),
 		})

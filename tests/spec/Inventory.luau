@@ -1,9 +1,10 @@
 --[[
 	Inventory/Menu: Minecraft 1.20.1 container clicks on the window layout (container, armor,
-	inventory 10..36, hotbar), quick moves, drags, double clicks, Inventory.add, pick block,
-	creative actions, crafting grids (the inventory's 2 x 2 and the crafting table's 3 x 3, their
-	result slot), furnace slots, tool wear (damage) on stacks, invalid input and a conservation
-	fuzz.
+	inventory 10..36, hotbar, Terraria's equipment), quick moves, drags, double clicks,
+	Inventory.add, pick block, creative actions, crafting grids (the inventory's 2 x 2 and the
+	crafting table's 3 x 3, their result slot), furnace slots, tool wear (damage) on stacks, the
+	equipment's rules (accessories once each and only in open rows, vanity by slot, shift-clicks,
+	number keys, drags, hiding, death, copies, the snapshot), invalid input and a conservation fuzz.
 ]]
 
 return function(t, shared, require)
@@ -14,6 +15,7 @@ return function(t, shared, require)
 	local Crafting = require(shared.Crafting)
 	local Smelting = require(shared.Crafting.Smelting)
 	local Protocol = require(shared.Net.Protocol)
+	local GameMode = require(shared.GameMode)
 
 	local DIRT, STONE, COBBLE, PLANKS = Items.id.Dirt, Items.id.Stone, Items.id.Cobblestone, Items.id.Planks
 	local HELMET, CHESTPLATE, LEGGINGS, BOOTS =
@@ -22,6 +24,10 @@ return function(t, shared, require)
 	local LOG, STICK, COAL = Items.id.OakLog, Items.id.Stick, Items.id.Coal
 	local RAW_IRON, INGOT = Items.id.RawIron, Items.id.IronIngot
 	local PICKAXE, STONE_PICKAXE = Items.id.WoodenPickaxe, Items.id.StonePickaxe
+	-- Terraria's equipment: accessories and a vanity item.
+	local HERMES, CLOUD, AGLET, BALLOON =
+		Items.id.HermesBoots, Items.id.CloudInABottle, Items.id.Aglet, Items.id.ShinyRedBalloon
+	local TOP_HAT, TUXEDO_SHIRT = Items.id.TopHat, Items.id.TuxedoShirt
 	local Click = Menu.ClickType
 	local Drag = Menu.DragMode
 	local OUTSIDE, CURSOR = Types.OUTSIDE, Types.CURSOR
@@ -152,6 +158,18 @@ return function(t, shared, require)
 			table.insert(parts, stackText(inventory.slots[i]))
 		end
 		table.insert(parts, `| cursor {stackText(inventory.cursor)} sel {inventory.selected}`)
+		-- Terraria's equipment.
+		table.insert(parts, "| eq")
+		for i = 1, Types.ACCESSORY_SIZE do
+			table.insert(parts, stackText(inventory.accessories[i]))
+		end
+		for i = 1, Types.VANITY_ARMOR_SIZE do
+			table.insert(parts, stackText(inventory.vanityArmor[i]))
+		end
+		for i = 1, Types.VANITY_ACCESSORY_SIZE do
+			table.insert(parts, stackText(inventory.vanityAccessories[i]))
+		end
+		table.insert(parts, `hidden {inventory.hidden} open {inventory.accessorySlots}`)
 		return table.concat(parts, " ")
 	end
 
@@ -178,6 +196,13 @@ return function(t, shared, require)
 			add(window.inventory.slots[i])
 		end
 		add(window.inventory.cursor)
+		for i = 1, Types.ACCESSORY_SIZE do
+			add(window.inventory.accessories[i])
+			add(window.inventory.vanityAccessories[i])
+		end
+		for i = 1, Types.VANITY_ARMOR_SIZE do
+			add(window.inventory.vanityArmor[i])
+		end
 		for _, stack in extra or {} do
 			add(stack)
 		end
@@ -224,11 +249,14 @@ return function(t, shared, require)
 
 	t.test("inventory menu: window layout, locate and windowIndex", function()
 		-- Window 0 numbers its slots like Minecraft's InventoryMenu: 0 result, 1..4 grid, 5..8
-		-- armor, 9..35 inventory 10..36, 36..44 the hotbar.
+		-- armor, 9..35 inventory 10..36, 36..44 the hotbar; then Terraria's equipment, appended so
+		-- every slot above keeps its number: 45..51 accessories, 52..55 vanity armor, 56..62 vanity
+		-- accessories. (The sizes below grew by 18 deliberately with the equipment: 45 -> 63,
+		-- 40 -> 58, a chest 67 -> 85, a crafting table 50 -> 68, a furnace 43 -> 61.)
 		local w = newWindow()
 		t.eq(w.id, 0)
 		t.eq(w.container.kind, "inventory")
-		t.eq(Menu.size(w), 45)
+		t.eq(Menu.size(w), 63)
 		local store, i = Menu.locate(w, 0)
 		t.eq(store, "container")
 		t.eq(i, 1, "window slot 0 is the result")
@@ -251,7 +279,25 @@ return function(t, shared, require)
 		t.eq(i, 1, "window slot 36 is hotbar slot 1")
 		store, i = Menu.locate(w, 44)
 		t.eq(i, 9)
-		t.eq((Menu.locate(w, 45)), nil)
+		store, i = Menu.locate(w, 45)
+		t.eq(store, "accessory")
+		t.eq(i, 1, "window slot 45 is accessory slot 1")
+		store, i = Menu.locate(w, 51)
+		t.eq(store, "accessory")
+		t.eq(i, 7)
+		store, i = Menu.locate(w, 52)
+		t.eq(store, "vanityArmor")
+		t.eq(i, 1)
+		store, i = Menu.locate(w, 55)
+		t.eq(store, "vanityArmor")
+		t.eq(i, 4)
+		store, i = Menu.locate(w, 56)
+		t.eq(store, "vanityAccessory")
+		t.eq(i, 1)
+		store, i = Menu.locate(w, 62)
+		t.eq(store, "vanityAccessory")
+		t.eq(i, 7)
+		t.eq((Menu.locate(w, 63)), nil)
 		t.eq((Menu.locate(w, -1)), nil)
 		t.eq((Menu.locate(w, OUTSIDE)), nil)
 		t.eq((Menu.locate(w, 1.5)), nil)
@@ -259,7 +305,7 @@ return function(t, shared, require)
 
 		-- Without a container: armor first.
 		local b = bareWindow()
-		t.eq(Menu.size(b), 40)
+		t.eq(Menu.size(b), 58)
 		store, i = Menu.locate(b, 0)
 		t.eq(store, "armor")
 		t.eq(i, 1)
@@ -267,9 +313,12 @@ return function(t, shared, require)
 		t.eq(i, 10)
 		store, i = Menu.locate(b, 31)
 		t.eq(i, 1)
+		store, i = Menu.locate(b, 40)
+		t.eq(store, "accessory")
+		t.eq(i, 1)
 
 		local c = newWindow(27)
-		t.eq(Menu.size(c), 67)
+		t.eq(Menu.size(c), 85)
 		store, i = Menu.locate(c, 0)
 		t.eq(store, "container")
 		t.eq(i, 1)
@@ -283,7 +332,13 @@ return function(t, shared, require)
 		t.eq(i, 10)
 		store, i = Menu.locate(c, 58)
 		t.eq(i, 1)
-		t.eq((Menu.locate(c, 67)), nil)
+		store, i = Menu.locate(c, 67)
+		t.eq(store, "accessory")
+		t.eq(i, 1, "after a chest's hotbar too")
+		store, i = Menu.locate(c, 84)
+		t.eq(store, "vanityAccessory")
+		t.eq(i, 7)
+		t.eq((Menu.locate(c, 85)), nil)
 
 		-- windowIndex is locate's inverse, for every layout.
 		for _, window in { w, c, b, tableWindow(), furnaceWindow() } do
@@ -296,8 +351,14 @@ return function(t, shared, require)
 		t.eq(Menu.windowIndex(b, "container", 1), nil)
 		t.eq(Menu.windowIndex(w, "inventory", 37), nil)
 		t.eq(Menu.windowIndex(w, "armor", 0), nil)
-		t.eq(Menu.size(tableWindow()), 50)
-		t.eq(Menu.size(furnaceWindow()), 43)
+		t.eq(Menu.windowIndex(w, "accessory", 8), nil)
+		t.eq(Menu.windowIndex(w, "vanityArmor", 5), nil)
+		t.eq(Menu.windowIndex(w, "vanityAccessory", 0), nil)
+		t.eq(Menu.windowIndex(w, "accessory", 1), 45)
+		t.eq(Menu.windowIndex(w, "vanityArmor", 1), 52)
+		t.eq(Menu.windowIndex(w, "vanityAccessory", 1), 56)
+		t.eq(Menu.size(tableWindow()), 68)
+		t.eq(Menu.size(furnaceWindow()), 61)
 	end)
 
 	t.test("inventory menu: get and set reach the right store", function()
@@ -1380,6 +1441,361 @@ return function(t, shared, require)
 		is(slotTable, DIRT, 32, "the old slot table is untouched")
 	end)
 
+	--[[ Terraria's equipment: accessories, vanity armor, vanity accessories, hidden looks ]]
+
+	-- Window slot of accessory slot a, vanity armor slot v, vanity accessory slot va.
+	local function acc(window, a: number): number
+		return Menu.windowIndex(window, "accessory", a)
+	end
+	local function van(window, v: number): number
+		return Menu.windowIndex(window, "vanityArmor", v)
+	end
+	local function vacc(window, va: number): number
+		return Menu.windowIndex(window, "vanityAccessory", va)
+	end
+	local function pickupAt(window, slot: number)
+		return { kind = "click", window = window.id, slot = slot, clickType = Click.Pickup, button = 0 }
+	end
+	local function swapAt(window, slot: number, button: number)
+		return { kind = "click", window = window.id, slot = slot, clickType = Click.Swap, button = button }
+	end
+
+	t.test("equipment: accessory slots take one accessory, open slots only, never one worn twice", function()
+		local w = newWindow()
+		t.eq(w.inventory.accessorySlots, 5, "five open (Config.Accessories.Slots)")
+		t.ok(Menu.mayPlace(w, acc(w, 1), HERMES))
+		t.ok(not Menu.mayPlace(w, acc(w, 1), DIRT), "only accessories")
+		t.ok(not Menu.mayPlace(w, acc(w, 1), HELMET), "no armor")
+		t.ok(not Menu.mayPlace(w, acc(w, 1), TOP_HAT), "no vanity items")
+		t.ok(Menu.mayPlace(w, acc(w, 5), HERMES))
+		t.ok(not Menu.mayPlace(w, acc(w, 6), HERMES), "slot 6 opens at the Industrial Age")
+		w.inventory.accessorySlots = 6
+		t.ok(Menu.mayPlace(w, acc(w, 6), HERMES))
+		t.ok(not Menu.mayPlace(w, acc(w, 7), HERMES), "slot 7 at the Atomic Age")
+		t.eq(Menu.maxStackFor(w, acc(w, 1), HERMES), 1)
+		t.eq(Menu.maxStackFor(w, acc(w, 1), DIRT), 1, "equipment slots hold one item")
+		t.ok(Menu.mayPlace(w, inv(w, 10), HERMES), "accessories go anywhere in the inventory")
+
+		-- Worn once: a second Hermes Boots goes into no other accessory slot.
+		w.inventory.accessories[1] = S(HERMES, 1)
+		w.inventory.accessories[2] = S(AGLET, 1)
+		t.ok(not Menu.mayPlace(w, acc(w, 3), HERMES), "worn already")
+		t.ok(Menu.mayPlace(w, acc(w, 1), HERMES), "where it is is fine")
+		w.inventory.cursor = S(HERMES, 1)
+		unchanged(w, pickupAt(w, acc(w, 3)), false, "a duplicate into an empty slot")
+		unchanged(w, pickupAt(w, acc(w, 2)), false, "a duplicate swapped in")
+		-- Another accessory swaps in; the one taken out may go back where it was.
+		w.inventory.cursor = S(CLOUD, 1)
+		click(w, acc(w, 1), Click.Pickup, 0)
+		is(w.inventory.accessories[1], CLOUD, 1, "swapped in")
+		is(w.inventory.cursor, HERMES, 1, "swapped out")
+		click(w, acc(w, 1), Click.Pickup, 0)
+		is(w.inventory.accessories[1], HERMES, 1, "and back")
+		is(w.inventory.cursor, CLOUD, 1, "cursor")
+		-- Taking one out and putting it in another slot moves it.
+		w.inventory.cursor = nil
+		click(w, acc(w, 1), Click.Pickup, 0)
+		is(w.inventory.cursor, HERMES, 1, "taken out")
+		click(w, acc(w, 4), Click.Pickup, 1)
+		is(w.inventory.accessories[4], HERMES, 1, "moved (right click puts the one down)")
+		t.eq(w.inventory.cursor, nil)
+		-- A creative slot follows the same rules.
+		unchanged(w, { kind = "creative", window = 0, slot = acc(w, 3), item = HERMES, count = 1 }, true, "creative")
+		unchanged(w, { kind = "creative", window = 0, slot = acc(w, 3), item = BALLOON, count = 2 }, true, "two")
+		Menu.apply(w, { kind = "creative", window = 0, slot = acc(w, 3), item = BALLOON, count = 1 }, true)
+		is(w.inventory.accessories[3], BALLOON, 1, "creative")
+	end)
+
+	t.test("equipment: a locked slot keeps what it holds; it comes out, nothing goes in", function()
+		local w = newWindow()
+		w.inventory.accessorySlots = 5
+		w.inventory.accessories[6] = S(CLOUD, 1)
+		w.inventory.accessories[7] = S(BALLOON, 1)
+		w.inventory.cursor = S(AGLET, 1)
+		unchanged(w, pickupAt(w, acc(w, 7)), false, "no swap into a locked slot")
+		w.inventory.cursor = nil
+		click(w, acc(w, 6), Click.Pickup, 0)
+		is(w.inventory.cursor, CLOUD, 1, "taken out")
+		t.eq(w.inventory.accessories[6], nil)
+		unchanged(w, pickupAt(w, acc(w, 6)), false, "not back in")
+		-- Shift click and Q take it out too.
+		w.inventory.cursor = nil
+		click(w, acc(w, 7), Click.QuickMove, 0)
+		t.eq(w.inventory.accessories[7], nil)
+		is(w.inventory.slots[10], BALLOON, 1, "into 10..36 first")
+		w.inventory.accessories[7] = S(BALLOON, 1)
+		local thrown = click(w, acc(w, 7), Click.Throw, 0)
+		t.eq(#thrown, 1)
+		is(thrown[1], BALLOON, 1, "thrown")
+		-- A broken count opens nothing.
+		w.inventory.accessorySlots = 0 / 0
+		t.ok(not Menu.mayPlace(w, acc(w, 1), HERMES), "NaN open slots: none open")
+	end)
+
+	t.test(
+		"equipment: vanity armor takes armor or vanity items of its slot; vanity accessories any accessory",
+		function()
+			local w = newWindow()
+			t.ok(Menu.mayPlace(w, van(w, 1), HELMET), "armor shows over armor")
+			t.ok(Menu.mayPlace(w, van(w, 1), GOLD_HELMET))
+			t.ok(Menu.mayPlace(w, van(w, 1), TOP_HAT), "a vanity hat")
+			t.ok(not Menu.mayPlace(w, van(w, 1), CHESTPLATE), "another slot's armor")
+			t.ok(not Menu.mayPlace(w, van(w, 1), TUXEDO_SHIRT), "another slot's vanity item")
+			t.ok(Menu.mayPlace(w, van(w, 2), TUXEDO_SHIRT))
+			t.ok(Menu.mayPlace(w, van(w, 2), CHESTPLATE))
+			t.ok(Menu.mayPlace(w, van(w, 4), BOOTS))
+			t.ok(not Menu.mayPlace(w, van(w, 1), DIRT))
+			t.ok(not Menu.mayPlace(w, van(w, 1), HERMES), "accessories are no vanity armor")
+			t.ok(not Menu.mayPlace(w, arm(w, 1), TOP_HAT), "vanity items are no armor")
+			t.eq(Menu.maxStackFor(w, van(w, 1), HELMET), 1)
+			t.ok(Menu.mayPlace(w, vacc(w, 1), HERMES))
+			t.ok(Menu.mayPlace(w, vacc(w, 7), HERMES), "every vanity accessory slot, whatever the Age")
+			t.ok(not Menu.mayPlace(w, vacc(w, 1), TOP_HAT))
+			t.ok(not Menu.mayPlace(w, vacc(w, 1), DIRT))
+			w.inventory.accessories[1] = S(HERMES, 1)
+			w.inventory.vanityAccessories[1] = S(HERMES, 1)
+			t.ok(Menu.mayPlace(w, vacc(w, 2), HERMES), "the looks may repeat")
+			t.eq(Menu.maxStackFor(w, vacc(w, 1), HERMES), 1)
+			w.inventory.cursor = S(TOP_HAT, 1)
+			click(w, van(w, 1), Click.Pickup, 0)
+			is(w.inventory.vanityArmor[1], TOP_HAT, 1, "worn")
+			t.eq(w.inventory.cursor, nil)
+		end
+	)
+
+	t.test("equipment: shift clicks (an accessory to the first open slot, a vanity item to its slot)", function()
+		local w = newWindow()
+		w.inventory.slots[10] = S(HERMES, 1)
+		click(w, inv(w, 10), Click.QuickMove, 0)
+		is(w.inventory.accessories[1], HERMES, 1, "the first empty slot")
+		t.eq(w.inventory.slots[10], nil)
+		w.inventory.slots[1] = S(AGLET, 1)
+		click(w, inv(w, 1), Click.QuickMove, 0)
+		is(w.inventory.accessories[2], AGLET, 1, "from the hotbar too, the next empty slot")
+		-- Worn already: hotbar <-> 10..36 as before.
+		w.inventory.slots[11] = S(HERMES, 1)
+		click(w, inv(w, 11), Click.QuickMove, 0)
+		is(w.inventory.slots[1], HERMES, 1, "worn already: to the hotbar")
+		t.eq(w.inventory.accessories[3], nil)
+		-- Every open slot full: as before; a locked slot is skipped.
+		w.inventory.accessories[3] = S(CLOUD, 1)
+		w.inventory.accessories[4] = S(BALLOON, 1)
+		w.inventory.accessories[5] = S(Items.id.LuckyHorseshoe, 1)
+		w.inventory.slots[12] = S(Items.id.Flipper, 1)
+		click(w, inv(w, 12), Click.QuickMove, 0)
+		is(w.inventory.slots[2], Items.id.Flipper, 1, "no open slot: to the hotbar")
+		t.eq(w.inventory.accessories[6], nil, "slot 6 is locked")
+		-- A vanity item to its empty vanity armor slot; armor to its armor slot as before.
+		w.inventory.slots[13] = S(TOP_HAT, 1)
+		click(w, inv(w, 13), Click.QuickMove, 0)
+		is(w.inventory.vanityArmor[1], TOP_HAT, 1, "vanity slot")
+		w.inventory.slots[14] = S(TOP_HAT, 1)
+		click(w, inv(w, 14), Click.QuickMove, 0)
+		is(w.inventory.slots[3], TOP_HAT, 1, "taken: to the hotbar")
+		w.inventory.slots[15] = S(HELMET, 1)
+		click(w, inv(w, 15), Click.QuickMove, 0)
+		is(w.inventory.armor[1], HELMET, 1, "armor as before")
+		w.inventory.slots[16] = S(GOLD_HELMET, 1)
+		click(w, inv(w, 16), Click.QuickMove, 0)
+		is(w.inventory.slots[4], GOLD_HELMET, 1, "never into the vanity slot")
+		-- Out of the equipment: 10..36 first, then the hotbar.
+		click(w, acc(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[10], HERMES, 1, "accessory out")
+		click(w, van(w, 1), Click.QuickMove, 0)
+		is(w.inventory.slots[11], TOP_HAT, 1, "vanity out")
+		w.inventory.vanityAccessories[3] = S(CLOUD, 1)
+		click(w, vacc(w, 3), Click.QuickMove, 0)
+		is(w.inventory.slots[12], CLOUD, 1, "vanity accessory out")
+		-- Nothing goes into the equipment from a chest window (it shows none); out of it works.
+		local c = newWindow(27)
+		c.inventory.slots[10] = S(HERMES, 1)
+		click(c, inv(c, 10), Click.QuickMove, 0)
+		is(c.container.slots[1], HERMES, 1, "a chest takes it as before")
+		c.inventory.accessories[1] = S(AGLET, 1)
+		click(c, acc(c, 1), Click.QuickMove, 0)
+		is(c.inventory.slots[10], AGLET, 1, "out of the equipment into the inventory, not the chest")
+		local f = furnaceWindow()
+		f.inventory.vanityArmor[2] = S(TUXEDO_SHIRT, 1)
+		click(f, van(f, 2), Click.QuickMove, 0)
+		is(f.inventory.slots[10], TUXEDO_SHIRT, 1, "the same in a furnace's window")
+	end)
+
+	t.test("equipment: number keys swap with the hotbar by the same rules", function()
+		local w = newWindow()
+		w.inventory.slots[1] = S(HERMES, 1)
+		click(w, acc(w, 1), Click.Swap, 0)
+		is(w.inventory.accessories[1], HERMES, 1, "into an empty slot")
+		t.eq(w.inventory.slots[1], nil)
+		w.inventory.slots[2] = S(AGLET, 1)
+		click(w, acc(w, 1), Click.Swap, 1)
+		is(w.inventory.accessories[1], AGLET, 1, "exchanged")
+		is(w.inventory.slots[2], HERMES, 1, "exchanged out")
+		w.inventory.accessories[2] = S(CLOUD, 1)
+		w.inventory.slots[3] = S(CLOUD, 1)
+		unchanged(w, swapAt(w, acc(w, 1), 2), false, "worn in another slot")
+		click(w, acc(w, 2), Click.Swap, 2)
+		is(w.inventory.accessories[2], CLOUD, 1, "with the slot that holds it: fine")
+		w.inventory.slots[4] = S(DIRT, 5)
+		unchanged(w, swapAt(w, acc(w, 3), 3), false, "dirt")
+		unchanged(w, swapAt(w, acc(w, 6), 1), false, "locked")
+		w.inventory.accessories[6] = S(BALLOON, 1)
+		click(w, acc(w, 6), Click.Swap, 4)
+		is(w.inventory.slots[5], BALLOON, 1, "out of a locked slot")
+		w.inventory.slots[6] = S(TOP_HAT, 1)
+		click(w, van(w, 1), Click.Swap, 5)
+		is(w.inventory.vanityArmor[1], TOP_HAT, 1, "vanity armor")
+		w.inventory.slots[7] = S(CHESTPLATE, 1)
+		unchanged(w, swapAt(w, van(w, 1), 6), false, "another slot's armor")
+	end)
+
+	t.test("equipment: drags and clones never wear one accessory twice", function()
+		local w = newWindow()
+		w.inventory.cursor = S(HERMES, 1)
+		drag(w, Drag.Clone, { acc(w, 1), acc(w, 2), vacc(w, 1), vacc(w, 2) }, true)
+		is(w.inventory.accessories[1], HERMES, 1, "the first accessory slot")
+		t.eq(w.inventory.accessories[2], nil, "not a second one")
+		is(w.inventory.vanityAccessories[1], HERMES, 1, "looks may repeat")
+		is(w.inventory.vanityAccessories[2], HERMES, 1, "looks may repeat (2)")
+		w.inventory.cursor = S(AGLET, 1)
+		drag(w, Drag.Split, { acc(w, 2) })
+		is(w.inventory.accessories[2], AGLET, 1, "one slot: a click")
+		-- Pick-all gathers nothing out of the equipment (stacks of one).
+		w.inventory.cursor = S(HERMES, 1)
+		click(w, inv(w, 20), Click.PickupAll, 0)
+		is(w.inventory.accessories[1], HERMES, 1, "still worn")
+	end)
+
+	t.test("equipment: the hide action flips a look's bit, in any mode but spectator", function()
+		local w = newWindow()
+		local function hide(slot: any, hidden: any)
+			return Menu.apply(w, { kind = "hide", slot = slot, hidden = hidden } :: any, false)
+		end
+		t.eq(#hide(1, true), 0)
+		t.eq(w.inventory.hidden, 1, "accessory slot 1 is bit 0")
+		hide(7, true)
+		t.eq(w.inventory.hidden, 1 + 64)
+		hide(9, true)
+		t.eq(w.inventory.hidden, 1 + 64 + 256, "armor slot 1 (9) is bit HIDE_ARMOR")
+		hide(12, true)
+		t.eq(w.inventory.hidden, 1 + 64 + 256 + 2048)
+		hide(12, true)
+		t.eq(w.inventory.hidden, 1 + 64 + 256 + 2048, "hiding twice changes nothing")
+		hide(1, false)
+		t.eq(w.inventory.hidden, 64 + 256 + 2048)
+		for _, bad in { 0, 8, 13, 1.5, 0 / 0, -1, "1" } do
+			unchanged(w, { kind = "hide", slot = bad, hidden = true } :: any, false, `slot {bad}`)
+		end
+		unchanged(w, { kind = "hide", slot = 2, hidden = 1 } :: any, false, "hidden must be a boolean")
+		local toggle = { kind = "hide", slot = 1, hidden = true }
+		t.ok(Menu.allows(toggle :: any, GameMode.SURVIVAL))
+		t.ok(Menu.allows(toggle :: any, GameMode.ADVENTURE))
+		t.ok(Menu.allows(toggle :: any, GameMode.CREATIVE))
+		t.ok(not Menu.allows(toggle :: any, GameMode.SPECTATOR))
+		-- The look only: the item stays where it is.
+		w.inventory.accessories[1] = S(HERMES, 1)
+		hide(1, true)
+		is(w.inventory.accessories[1], HERMES, 1, "still worn")
+	end)
+
+	t.test("equipment: death empties it (the hidden looks stay); copies are deep", function()
+		local inventory = Types.newInventory()
+		inventory.accessories[1] = S(HERMES, 1)
+		inventory.accessories[7] = S(CLOUD, 1)
+		inventory.vanityArmor[1] = S(TOP_HAT, 1)
+		inventory.vanityAccessories[3] = S(AGLET, 1)
+		inventory.hidden = 5
+		inventory.slots[1] = S(DIRT, 3)
+		local window = Types.newWindow(inventory)
+		local copy = Menu.copyWindow(window)
+		t.ok(copy.inventory.accessories[1] ~= inventory.accessories[1], "a copy")
+		t.ok(copy.inventory.vanityArmor[1] ~= inventory.vanityArmor[1], "a copy (vanity)")
+		t.eq(dump(copy), dump(window))
+		local stacks = Menu.clear(inventory)
+		t.eq(#stacks, 5)
+		local sums = {}
+		for _, stack in stacks do
+			sums[stack.item] = (sums[stack.item] or 0) + stack.count
+		end
+		t.eq(sums[HERMES], 1)
+		t.eq(sums[CLOUD], 1)
+		t.eq(sums[TOP_HAT], 1)
+		t.eq(sums[AGLET], 1)
+		t.eq(inventory.accessories[1], nil)
+		t.eq(inventory.vanityArmor[1], nil)
+		t.eq(inventory.vanityAccessories[3], nil)
+		t.eq(inventory.hidden, 5, "the looks chosen stay")
+		is(copy.inventory.accessories[7], CLOUD, 1, "the copy keeps its own")
+	end)
+
+	t.test("equipment: snapshots and the hide action round trip; malformed ones are refused", function()
+		local inventory = Types.newInventory()
+		inventory.slots[1] = S(DIRT, 3)
+		inventory.cursor = S(STONE, 2)
+		inventory.accessories[1] = S(HERMES, 1)
+		inventory.accessories[7] = S(CLOUD, 1)
+		inventory.vanityArmor[2] = S(TUXEDO_SHIRT, 1)
+		inventory.vanityAccessories[4] = S(AGLET, 1)
+		inventory.hidden = bit32.bor(2, bit32.lshift(1, Types.HIDE_ARMOR + 3))
+		inventory.accessorySlots = 6
+		local chest = { kind = "chest", block = Blocks.id.Chest, size = 27, slots = { [3] = S(LOG, 4) } }
+		local bytes = Protocol.encodeInventory({ ack = 9, inventory = inventory, window = 2, container = chest } :: any)
+		local snapshot = Protocol.decodeInventory(bytes) :: any
+		t.ok(snapshot ~= nil, "decodes")
+		is(snapshot.inventory.accessories[1], HERMES, 1, "accessory 1")
+		is(snapshot.inventory.accessories[7], CLOUD, 1, "accessory 7")
+		t.eq(snapshot.inventory.accessories[2], nil)
+		is(snapshot.inventory.vanityArmor[2], TUXEDO_SHIRT, 1, "vanity armor")
+		is(snapshot.inventory.vanityAccessories[4], AGLET, 1, "vanity accessory")
+		t.eq(snapshot.inventory.hidden, inventory.hidden)
+		t.eq(snapshot.inventory.accessorySlots, 6)
+		is(snapshot.inventory.cursor, STONE, 2, "the cursor before it")
+		is(snapshot.container.slots[3], LOG, 4, "the container after it")
+		-- Empty equipment: 18 empty stacks and 3 bytes after the cursor.
+		local empty =
+			Protocol.encodeInventory({ ack = 1, inventory = Types.newInventory(), window = 0, container = nil })
+		t.eq(buffer.len(empty), 5 + (41 + 18) * 3 + 3 + 6)
+		local at = 5 + (41 + 18) * 3
+		local function patched(offset: number, value: number, wide: boolean?): buffer
+			local b = buffer.create(buffer.len(empty))
+			buffer.copy(b, 0, empty)
+			if wide then
+				buffer.writeu16(b, offset, value)
+			else
+				buffer.writeu8(b, offset, value)
+			end
+			return b
+		end
+		t.ok(Protocol.decodeInventory(patched(at, Types.HIDDEN_MASK, true)) ~= nil, "every real bit")
+		t.eq(Protocol.decodeInventory(patched(at, 0x80, true)), nil, "bit 7 is no slot")
+		t.eq(Protocol.decodeInventory(patched(at, 0x1000, true)), nil, "bit 12 is no slot")
+		t.eq((Protocol.decodeInventory(patched(at + 2, 7)) :: any).inventory.accessorySlots, 7)
+		t.eq(Protocol.decodeInventory(patched(at + 2, 8)), nil, "8 open slots")
+		-- Stray bits are left out when sent; open slots are kept in range.
+		inventory.hidden = 0xFFFF
+		inventory.accessorySlots = 99
+		local clean = Protocol.decodeInventory(
+			Protocol.encodeInventory({ ack = 1, inventory = inventory, window = 0, container = nil })
+		) :: any
+		t.eq(clean.inventory.hidden, Types.HIDDEN_MASK)
+		t.eq(clean.inventory.accessorySlots, Types.ACCESSORY_SIZE)
+		-- The hide action: kind 7, u8 slot, u8 hidden.
+		for _, action in { { kind = "hide", slot = 3, hidden = true }, { kind = "hide", slot = 12, hidden = false } } do
+			local b = Protocol.encodeInventoryAction(41, action :: any)
+			t.eq(buffer.len(b), 7)
+			local seq, decoded = Protocol.decodeInventoryAction(b)
+			t.eq(seq, 41)
+			t.eq((decoded :: any).kind, "hide")
+			t.eq((decoded :: any).slot, action.slot)
+			t.eq((decoded :: any).hidden, action.hidden)
+		end
+		local bad = Protocol.encodeInventoryAction(1, { kind = "hide", slot = 1, hidden = true })
+		buffer.writeu8(bad, 6, 2)
+		t.eq((Protocol.decodeInventoryAction(bad)), nil, "hidden 2")
+		local long = buffer.create(8)
+		buffer.copy(long, 0, Protocol.encodeInventoryAction(1, { kind = "hide", slot = 1, hidden = true }))
+		t.eq((Protocol.decodeInventoryAction(long)), nil, "a byte too many")
+	end)
+
 	--[[ Crafting grids and their result ]]
 
 	t.test("crafting (2 x 2): a log makes planks; taking the result crafts", function()
@@ -2132,8 +2548,13 @@ return function(t, shared, require)
 		RAW_IRON,
 		INGOT,
 		PICKAXE,
+		HERMES,
+		CLOUD,
+		AGLET,
+		TOP_HAT,
 	}
 	local ARMOR_OF = { HELMET, CHESTPLATE, LEGGINGS, BOOTS }
+	local ACCESSORY_POOL = { HERMES, CLOUD, AGLET, BALLOON }
 
 	-- A random stack (or nil); tools are sometimes worn.
 	local function stack(): any
@@ -2205,6 +2626,30 @@ return function(t, shared, require)
 		end
 		w.inventory.cursor = stack()
 		w.inventory.selected = 1 + rand(9)
+		-- Terraria's equipment, by its rules (no accessory worn twice); sometimes an Age was lost,
+		-- so some slots are locked and still hold what they held.
+		local equipment = w.inventory
+		for i = 1, Types.ACCESSORY_SIZE do
+			local item = ACCESSORY_POOL[1 + rand(#ACCESSORY_POOL)]
+			local twice = false
+			for j = 1, i - 1 do
+				local other = equipment.accessories[j]
+				twice = twice or (other ~= nil and other.item == item)
+			end
+			if rand(3) == 0 and not twice then
+				equipment.accessories[i] = S(item, 1)
+			end
+			if rand(4) == 0 then
+				equipment.vanityAccessories[i] = S(ACCESSORY_POOL[1 + rand(#ACCESSORY_POOL)], 1)
+			end
+		end
+		for i = 1, Types.VANITY_ARMOR_SIZE do
+			if rand(4) == 0 then
+				equipment.vanityArmor[i] = S(if i == 1 and rand(2) == 0 then TOP_HAT else ARMOR_OF[i], 1)
+			end
+		end
+		equipment.accessorySlots = if rand(4) == 0 then rand(Types.ACCESSORY_SIZE + 1) else 5 + rand(3)
+		equipment.hidden = bit32.band(rand(4096), Types.HIDDEN_MASK)
 		return w
 	end
 
@@ -2257,11 +2702,14 @@ return function(t, shared, require)
 				item = item,
 				count = rand(66),
 			}
-		elseif r < 93 then
+		elseif r < 91 then
 			return { kind = "close", window = window }
+		elseif r < 95 then
+			-- Terraria's eye toggles (slots 1..7 and 9..12 are real).
+			return { kind = "hide", slot = rand(14), hidden = rand(2) == 0 }
 		end
 		-- Garbage.
-		local junk = { "click", "drag", "select", "creative", "close", "drop", "place", "nope" }
+		local junk = { "click", "drag", "select", "creative", "close", "drop", "place", "hide", "nope" }
 		return {
 			kind = junk[1 + rand(#junk)],
 			window = if rand(2) == 0 then "0" else 0 / 0,
@@ -2273,6 +2721,7 @@ return function(t, shared, require)
 			item = -1,
 			count = 0 / 0,
 			all = "yes",
+			hidden = if rand(2) == 0 then 1 else "no",
 		}
 	end
 
@@ -2322,18 +2771,38 @@ return function(t, shared, require)
 				error(`{context}: the fuel slot holds {fuel.item}`)
 			end
 		end
+		local worn = {}
 		for index = 0, Menu.size(w) - 1 do
 			local store, i = Menu.locate(w, index)
 			local raw = if store == "container"
 				then w.container.slots[i]
 				elseif store == "armor" then w.inventory.armor[i]
+				elseif store == "accessory" then w.inventory.accessories[i]
+				elseif store == "vanityArmor" then w.inventory.vanityArmor[i]
+				elseif store == "vanityAccessory" then w.inventory.vanityAccessories[i]
 				else w.inventory.slots[i]
 			if raw then
 				check(raw, `slot {index}`, Menu.maxStackFor(w, index, raw.item))
 				if store == "armor" and Items.armorSlot(raw.item) ~= i then
 					error(`{context}: armor slot {i} holds {raw.item}`)
+				elseif (store == "accessory" or store == "vanityAccessory") and Items.accessory(raw.item) == nil then
+					error(`{context}: {store} slot {i} holds {raw.item}`)
+				elseif
+					store == "vanityArmor"
+					and Items.armorSlot(raw.item) ~= i
+					and Items.vanitySlot(raw.item) ~= i
+				then
+					error(`{context}: vanity armor slot {i} holds {raw.item}`)
+				elseif store == "accessory" then
+					if worn[raw.item] then
+						error(`{context}: accessory {raw.item} worn twice`)
+					end
+					worn[raw.item] = true
 				end
 			end
+		end
+		if bit32.band(w.inventory.hidden, bit32.bnot(Types.HIDDEN_MASK)) ~= 0 then
+			error(`{context}: hidden {w.inventory.hidden}`)
 		end
 		local cursor = w.inventory.cursor
 		if cursor then
@@ -2456,9 +2925,9 @@ return function(t, shared, require)
 		local buffers = 0
 		for round = 1, 3000 do
 			-- Mostly the right length for a random kind (so most decode), sometimes any length.
-			local kind = 1 + rand(6)
+			local kind = 1 + rand(7)
 			local count = rand(8)
-			local lengths = { 10, 8 + count * 2, 6, 6, 11, 6 }
+			local lengths = { 10, 8 + count * 2, 6, 6, 11, 6, 7 }
 			local length = if rand(5) == 0 then 4 + rand(20) else lengths[kind]
 			local b = buffer.create(length)
 			for i = 0, length - 1 do
@@ -2503,6 +2972,8 @@ return function(t, shared, require)
 				return type(action.all) == "boolean"
 			elseif action.kind == "close" then
 				return byte(action.window)
+			elseif action.kind == "hide" then
+				return byte(action.slot) and type(action.hidden) == "boolean"
 			end
 			return false
 		end

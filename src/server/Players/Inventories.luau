@@ -58,6 +58,18 @@
 	             Lids and armor that a player's messages cause use up that player's sound budget
 	             (Audio/Sounds.allow), so spamming them can't flood the players near.
 
+	Equipment  Terraria's accessories, vanity armor and vanity accessories (Inventory/Menu's rules,
+	           the `hide` action's looks). After each snapshot a player's worn accessories are
+	           summed (Items/Accessories.stats, kept in one table per player: `accessories`, read
+	           by Players/Characters for falls, regeneration, armor and knockback, Mobs/Mobs for
+	           attack speed and Players/Mana for max mana), their move check gets the speed
+	           factor (PlayerPositions.setSpeedFactor) and the Types.LOOKS_ATTRIBUTE player
+	           attribute what the character shows (Accessories.looks, for every client's
+	           Player/EquipmentLooks), each only when it changed. The open accessory slots come
+	           from the rule the server script sets (`setSlotsRule`: the player's Age,
+	           Accessories.slotsForAge), asked on joining and a few times a second. Putting an
+	           accessory or a vanity piece on plays the generic equip sound as armor does.
+
 	Saved      a saved world keeps every player's inventory (World/WorldSave reads it through
 	           `get`, and puts a returning player's back with `restore`).
 ]]
@@ -75,6 +87,8 @@ local GameMode = require(Shared.GameMode)
 local Protocol = require(Shared.Net.Protocol)
 local SharedSounds = require(Shared.Sounds)
 local Types = require(Shared.Inventory.Types)
+local Menu = require(Shared.Inventory.Menu)
+local Accessories = require(Shared.Items.Accessories)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
@@ -112,6 +126,12 @@ local actor: Player? = nil
 local keepRule: ((player: Player) -> boolean)? = nil
 -- Creative throw budget per player.
 local throwBudget: { [Player]: { tokens: number, last: number } } = {}
+-- What each player's worn accessories add up to (refilled in place after each snapshot), the
+-- speed factor and looks last given out, and the rule for their open accessory slots.
+local equipment: { [Player]: Accessories.Stats } = {}
+local speedFactors: { [Player]: number } = {}
+local NONE: Accessories.Stats = table.freeze(Accessories.new())
+local slotsRule: ((player: Player) -> number)? = nil
 
 local function isAlive(player: Player): boolean
 	local character = player.Character
@@ -207,6 +227,52 @@ end
 ]]
 function Inventories.setKeepRule(rule: ((player: Player) -> boolean)?)
 	keepRule = rule
+end
+
+--[[
+	What the accessories `player` wears add up to (Items/Accessories.stats; read only, updated in
+	place after each of their snapshots: don't keep it across frames). Nothing worn: all zero.
+]]
+function Inventories.accessories(player: Player): Accessories.Stats
+	return equipment[player] or NONE
+end
+
+--[[
+	The open accessory slots of a player (the server script: Accessories.slotsForAge of their Age,
+	Players/Progression); asked on joining and a few times a second, a change goes out in the next
+	snapshot. nil: Config.Accessories.Slots for everyone.
+]]
+function Inventories.setSlotsRule(rule: ((player: Player) -> number)?)
+	slotsRule = rule
+end
+
+-- The slots rule for `player` (see setSlotsRule).
+local function applySlots(player: Player)
+	local rule = slotsRule
+	local slots = if rule then rule(player) else Types.BASE_ACCESSORY_SLOTS
+	state:setAccessorySlots(player, slots)
+end
+
+--[[
+	After a snapshot of `inventory`: the accessories' sums, the move check's speed factor and the
+	looks attribute, each passed on only when it changed.
+]]
+local function refreshEquipment(player: Player, inventory: Types.Inventory)
+	local stats = equipment[player]
+	if stats == nil then
+		stats = Accessories.new()
+		equipment[player] = stats
+	end
+	Accessories.stats(inventory, stats)
+	local factor = Accessories.speedFactor(stats)
+	if speedFactors[player] ~= factor then
+		speedFactors[player] = factor
+		PlayerPositions.setSpeedFactor(player, factor)
+	end
+	local looks = Accessories.looks(inventory)
+	if player:GetAttribute(Types.LOOKS_ATTRIBUTE) ~= looks then
+		player:SetAttribute(Types.LOOKS_ATTRIBUTE, looks)
+	end
 end
 
 -- Sends the player a snapshot this frame.
@@ -353,6 +419,8 @@ end
 -- crafting table's grid remembers the table's block id too).
 local function checkOpenContainers(world: WorldServer.World)
 	for _, player in Players:GetPlayers() do
+		-- (And the accessory slots their Age opens, which no message announces.)
+		applySlots(player)
 		local x, y, z = state:openPosition(player)
 		if x ~= nil then
 			local window = state:window(player)
@@ -419,11 +487,15 @@ local function onInventory(player: Player, payload: buffer)
 	local window = state:window(player)
 	local container = window and window.container
 	local fx, fy, fz = state:openPosition(player)
-	-- (The armor as it was, to hear what the action put on.)
+	-- (The armor and the equipment as they were, to hear what the action put on.)
 	local armor: { [number]: Stack? } = {}
+	local worn: { [number]: Stack? } = {}
 	if window then
 		for slot = 1, Types.ARMOR_SIZE do
 			armor[slot] = window.inventory.armor[slot]
+		end
+		for index = 1, Types.EQUIPMENT_SIZE do
+			worn[index] = Menu.get(window, Menu.windowIndex(window, "accessory", 1) :: number + index - 1)
 		end
 	end
 	actor = player
@@ -441,6 +513,20 @@ local function onInventory(player: Player, payload: buffer)
 			local sound = SharedSounds.equip(armor[slot], window.inventory.armor[slot])
 			if sound and Sounds.allow(player) then
 				Sounds.playAt(player, sound)
+			end
+		end
+		-- (Accessories and vanity pieces: the generic equip sound, at most one an action.)
+		local now = state:window(player)
+		if now then
+			local first = Menu.windowIndex(now, "accessory", 1) :: number
+			for index = 1, Types.EQUIPMENT_SIZE do
+				local sound = SharedSounds.equip(worn[index], Menu.get(now, first + index - 1))
+				if sound then
+					if Sounds.allow(player) then
+						Sounds.playAt(player, sound)
+					end
+					break
+				end
 			end
 		end
 	end
@@ -495,6 +581,7 @@ end
 
 local function onPlayer(player: Player)
 	state:join(player)
+	applySlots(player)
 	player.CharacterAdded:Connect(function(character)
 		onCharacter(player, character)
 	end)
@@ -541,6 +628,8 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	Players.PlayerRemoving:Connect(function(player)
 		state:leave(player)
 		throwBudget[player] = nil
+		equipment[player] = nil
+		speedFactors[player] = nil
 	end)
 
 	-- Furnaces' results into the chests next to them. Blocks without generating terrain: chests
@@ -591,6 +680,8 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 				if player:GetAttribute(Types.HELD_ATTRIBUTE) ~= item then
 					player:SetAttribute(Types.HELD_ATTRIBUTE, item)
 				end
+				-- The accessories' sums, speed factor and looks (see the header).
+				refreshEquipment(player, inventory)
 			end
 		end
 	end)
