@@ -72,13 +72,10 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
-local Effects = require(Shared.Effects)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
-local Accessories = require(Shared.Items.Accessories)
-local Mana = require(Shared.Mana)
+local Tooltip = require(Shared.Items.Tooltip)
 local Menu = require(Shared.Inventory.Menu)
-local Drinks = require(Shared.ToughAsNails.Drinks)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
@@ -90,8 +87,10 @@ local Jei = require(script.Parent.Jei)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
+local TextWrap = require(script.Parent.TextWrap)
 local UiScale = require(script.Parent.UiScale)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
+local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 
 type Target = SlotClicks.Target
 type Kind = "inventory" | "creative" | "panel"
@@ -301,52 +300,70 @@ function Screens.toggle()
 	end
 end
 
--- The tooltip of `item`: its name, the lines of a stack's item data (Items.describe: a tank's
--- water, stored energy), a potion's effects (Shared/Effects.tooltip), then an armor piece's
--- stats, an accessory's effects or a vanity item's note (Items/Accessories.tooltip), and what a
--- mana item does (Shared/Mana.tooltip).
-local function tooltipLines(item: number, details: { string }?): { Line }
-	local lines: { Line } = { { text = Items.displayName(item), colour = Style.Colour.Text } }
-	if details then
-		for _, text in details do
-			table.insert(lines, { text = text, colour = Style.Colour.Gray })
-		end
-	end
-	local drink = Drinks.of(item)
-	if drink and drink.effects then
-		for _, line in Effects.tooltip(drink.effects) do
-			table.insert(
-				lines,
-				{ text = line.text, colour = if line.harmful then Style.Colour.Red else Style.Colour.Blue }
-			)
-		end
-	end
-	local def = Items.get(item)
-	local armor = def and def.armor
-	if armor then
-		table.insert(lines, { text = "", colour = Style.Colour.Text })
-		table.insert(lines, { text = `When on {Items.ARMOR_SLOTS[armor.slot]}:`, colour = Style.Colour.Gray })
-		table.insert(lines, { text = `+{armor.defense} Armor`, colour = Style.Colour.Blue })
-		if armor.toughness > 0 then
-			table.insert(lines, { text = `+{armor.toughness} Armor Toughness`, colour = Style.Colour.Blue })
-		end
-	end
-	-- Terraria's accessories and vanity items: what they do (Items/Accessories.tooltip); its mana
-	-- items: a magic weapon's damage and mana, a mana potion's mana (Shared/Mana.tooltip).
-	for _, more in { Accessories.tooltip(item), Mana.tooltip(item) } do
-		for index, text in more do
-			if index == 1 then
-				table.insert(lines, { text = "", colour = Style.Colour.Text })
-			end
-			table.insert(lines, { text = text, colour = if index == 1 then Style.Colour.Gray else Style.Colour.Blue })
-		end
+-- Shared/Items/Tooltip's colour names -> the palette.
+local TOOLTIP_COLOURS: { [Tooltip.Colour]: Color3 } = {
+	white = Style.Colour.Text,
+	gray = Style.Colour.Gray,
+	blue = Style.Colour.Blue,
+	red = Style.Colour.Red,
+	darkGreen = Style.Colour.DarkGreen,
+	lore = Style.Colour.Lore,
+}
+
+--[[
+	The tooltip of `item` (and of the `stack` it is in, when it is a slot's: its data and wear):
+	Shared/Items/Tooltip's lines (name, item data, lore, what it is, its stat blocks, its wear, and
+	for a player the recipe gate judges what making it needs), in Minecraft's colours. The
+	inventory, the creative grid and JEI all show these.
+]]
+local function tooltipLines(item: number, stack: Items.Stack?): { Line }
+	local lines: { Line } = {}
+	for _, line in Tooltip.lines(item, stack, { gate = ProgressionState.gate() }) do
+		table.insert(lines, { text = line.text, colour = TOOLTIP_COLOURS[line.colour] or Style.Colour.Text })
 	end
 	return lines
+end
+
+-- What the tooltip of `item` in `stack` depends on beyond the item (its wear, its data, the
+-- recipe gate's verdict), so it is rebuilt only when that changes.
+local function tooltipState(item: number, stack: Items.Stack?): string
+	local lock = ProgressionState.lockText(item) or ""
+	if stack == nil or stack.item ~= item then
+		return lock
+	end
+	return `{Items.cleanDamage(stack.damage) or 0}#{Items.dataKey(stack.data)}#{lock}`
+end
+
+-- Lines wider than this (GUI pixels) wrap (the lore), as the settings' tooltips do; never
+-- narrower than the name.
+local TOOLTIP_WRAP = 200
+
+-- `lines` with every line wider than the wrap width cut into rows of its colour (Ui/TextWrap).
+local function wrapLines(lines: { Line }): { Line }
+	local width = TOOLTIP_WRAP
+	if lines[1] then
+		width = math.max(width, Style.textWidth(lines[1].text))
+	end
+	local measure = function(text: string): number
+		return Style.textWidth(text)
+	end
+	local out: { Line } = {}
+	for i, line in lines do
+		if i == 1 or line.text == "" or measure(line.text) <= width then
+			table.insert(out, line)
+		else
+			for _, row in TextWrap.wrap(line.text, width, measure) do
+				table.insert(out, { text = row, colour = line.colour })
+			end
+		end
+	end
+	return out
 end
 
 -- Minecraft's tooltip: a dark purple box with a lighter purple border, the name, then details.
 local function buildTooltip(parent: Frame, lines: { Line }): Vector2
 	parent:ClearAllChildren()
+	lines = wrapLines(lines)
 	local scale = Instance.new("UIScale")
 	scale.Name = "Scale"
 	scale.Parent = parent
@@ -1358,14 +1375,13 @@ function Screens.start()
 		-- item data.
 		local item: number? = nil
 		local extra: { Line }? = nil
-		local details: { string }? = nil
+		local slotStack: Items.Stack? = nil
 		if cursor == nil and point then
 			item, extra = jei:tooltipAt(point)
 			if item == nil and extra == nil and hover then
 				if hover.kind == "slot" then
-					local stack = Menu.get(window, hover.index)
-					item = stack and stack.item
-					details = if stack and stack.data then Items.describe(stack) else nil
+					slotStack = Menu.get(window, hover.index)
+					item = slotStack and slotStack.item
 				elseif hover.kind == "grid" and Items.isValid(hover.item) then
 					item = hover.item
 				end
@@ -1382,12 +1398,7 @@ function Screens.start()
 				end
 			end
 		end
-		local key = if item then tostring(item) else ""
-		if details then
-			for _, text in details do
-				key ..= `#{text}`
-			end
-		end
+		local key = if item then `{item}#{tooltipState(item, slotStack)}` else ""
 		if extra then
 			for _, line in extra do
 				key ..= `|{line.text}`
@@ -1395,7 +1406,7 @@ function Screens.start()
 		end
 		if key ~= "" and point then
 			if key ~= tooltipKey then
-				local lines: { Line } = if item then tooltipLines(item, details) else {}
+				local lines: { Line } = if item then tooltipLines(item, slotStack) else {}
 				if extra then
 					table.move(extra, 1, #extra, #lines + 1, lines)
 				end

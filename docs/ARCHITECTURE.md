@@ -3369,7 +3369,28 @@ they were added; other keys show nothing (Minecraft hides NBT). "fluid" ("Lava: 
 machine tank's name gets one (Shared/Machines: "Oil: 3,000 mB"); `Items.addDescriber(key, fn)` adds
 or replaces one (a failing one is skipped). `formatEnergy` is Mekanism's short form (J, kJ, MJ, GJ,
 two decimals cut, so nothing short of full reads full; "Infinite"); `formatFluid` and `thousands`
-write "12,000". `Ui/Screens` shows the lines in grey under a hovered slot's item name.
+write "12,000". `Items/Tooltip` puts the lines in grey under a hovered slot's item name.
+
+**Item tooltips** (`Items/Tooltip`, `Items/LoreList`, pure). `Tooltip.lines(item, stack?, { gate?
+})` is every line of an item's tooltip as `{ text, colour }`, `colour` a name ("white", "gray",
+"blue", "red", "darkGreen", "lore") that `Ui/Screens` maps to `Style.Colour` (DarkGreen and Lore are
+Minecraft's §2 and §5); the inventory, the creative grid and JEI (whose `tooltipAt` gives the item,
+with extra lines of its own) all go through it, and Screens rebuilds the box only when the item,
+the stack's wear and data (`Items.dataKey`) or the gate's verdict change, wrapping lines past 200
+GUI pixels (`Ui/TextWrap`). The order: name; `Items.describe(stack)`; the lore (LoreList, keyed
+by item name, asserted to name only items as Tooltip loads; `tests/spec/Tooltips` checks every
+item has one); what the item is (a tool's harvest level, the best blocks it harvests from
+BlockList's `toolLevel`, ores first, and its mining speed; a block item's tool, light, Gravity
+behaviour, climbable, friction, chest slots, flammable, Config.ToughAsNails' heating and cooling
+blocks, creative only, `Machines.energyOf` capacity, its tank and `Transmitters/Tiers` numbers);
+then the stat blocks, each an empty line and a gray heading: "When in Main Hand:"
+(`Combat.attackOf`), the wear ("Durability: n / max", from `stack.damage`), "When on <slot>:"
+(armor, toughness, the `tan` insulation), "When eaten:" (`Items/Foods`), "When drunk:"
+(`ToughAsNails/Drinks`: thirst, hydration as `Thirst.drink` adds it, the Thirst risk, a tea's
+Internal Warmth / Chill and a potion's effects through `Effects.tooltip`), a canteen's "Sips:",
+"As fuel:" (`Smelting.fuel`, `Smelting.COOK_TIME`, the Heat and Combustion Generators'
+`Machines.info`), `Accessories.tooltip` and `Mana.tooltip`; last, with a gate (client
+`ProgressionState.gate()`), `Progression.lockText` as "Crafting requires the Iron Age" in red.
 
 **Sustained data** (`Network/EditRules`, `Network/ServerNet`). Mekanism keeps a block's contents in
 its item when it is broken. Parts of the server that keep block state register hooks with

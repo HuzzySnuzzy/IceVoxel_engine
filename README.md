@@ -431,6 +431,27 @@ A fast, Minecraft-style voxel engine for Roblox.
   bucket and block in lookups: refining (a bucket of oil into fuel in 5 s for 20 kJ), the Heat
   Generator's lava ("Makes 4 MJ", "200 J/t for 1000 s") and the Combustion Generator's fuel ("Makes
   10 MJ", "2.5 kJ/t for 200 s"); `U` on an Oil Refinery or a Combustion Generator lists theirs.
+- **Item tooltips.** Hovering any item (a slot, the creative picker, JEI) shows Minecraft's
+  tooltip with everything the game knows about it: the name, what the stack holds (a tank's
+  fluid, a battery's charge), a line of lore in dark purple saying what the item is for ("Allows
+  the holder to double jump", "Purify it in a furnace, on a campfire or with mint"), then
+  - **tools:** harvest level and the best blocks a pickaxe harvests ("Harvest level: Iron",
+    "Harvests up to: Gold Ore, Diamond Ore, Emerald Ore"), mining speed, and Minecraft's "When in
+    Main Hand:" block in dark green (" 6 Attack Damage", " 1.6 Attack Speed": the real combat
+    numbers), then "Durability: 200 / 250";
+  - **armor:** "When on Head:", "+2 Armor", "+2 Armor Toughness" and Tough As Nails' insulation
+    ("+1 Warmth", "+1 Cooling", "Keeps you from freezing");
+  - **food and drinks:** "When eaten: Heals 2 hearts", "When drunk: Restores 6 thirst, +4.8
+    Hydration", dirty water's "50% chance: Thirst (0:15)" in red, a tea's Internal Warmth, a
+    potion's effects, a canteen's "Sips: 2 / 3";
+  - **fuel:** "Burns for 80 s, smelts 8 items" and what a Heat or Combustion Generator makes of it;
+  - **blocks:** the tool they need ("Needs a Stone Pickaxe or better", "Best tool: Axe"), light,
+    falling, climbable, slippery, flammable, warming or cooling you, a chest's slots, and a
+    Mekanism block's store, tank, pipe or cable numbers;
+  - **Terraria's** accessories ("When worn:") and mana items, and in survival with the recipe gate
+    on, "Crafting requires the Iron Age" in red when your Age can't make it yet.
+  Every item has its lore in `Shared/Items/LoreList` (one line each, easy to edit; a test checks
+  none is missing).
 - **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve (2L +
   7 points a level to 15, 5L - 38 to 30, 9L - 158 above) and its green bar over the hotbar with the
   level over it (survival and adventure). It comes from first times above all: a block kind mined 5
@@ -1480,7 +1501,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             and the texture of each block's faces; hand-edited, pure data
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
                             Mekanism's energy and fluid formats, what a full bucket leaves);
-                            ItemList (items that are not blocks)
+                            ItemList (items that are not blocks); Tooltip (every line of an
+                            item's tooltip) and LoreList (every item's lore line)
   Fluids/  FluidList        the fluid registry: water, lava, oil and fuel by id (0 none .. 4 fuel),
                             their blocks and cave twins, buckets, colour, light, movement, harm,
                             furnace fuel, fog and bucket sounds

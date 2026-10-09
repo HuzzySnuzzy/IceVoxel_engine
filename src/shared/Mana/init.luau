@@ -39,7 +39,7 @@
 	             damage is cut by SicknessDamage 5% for each second left (`damageFactor`: 25% at
 	             5 s, 50% at 10 s), Terraria's.
 	  HUD        a star holds STAR = 20 mana (`stars`: how many the max needs).
-	  Tooltip    `tooltip(item)`: what a mana item says under its name (client Ui/Screens: the
+	  Tooltip    `tooltip(item)`: what a mana item says under its name (Items/Tooltip: the
 	             first line gray, the rest blue, as the accessories'): a magic weapon its damage
 	             (half hearts, Minecraft's "Attack Damage"), mana a cast and fire chance; a mana
 	             potion the mana it restores; a Mana Crystal its +20 max (Terraria's

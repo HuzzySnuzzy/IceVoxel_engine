@@ -61,6 +61,10 @@ Style.Colour = {
 	ButtonDisabled = Color3.fromRGB(44, 44, 44),
 	TextDisabled = Color3.fromRGB(160, 160, 160),
 	Missing = Color3.fromRGB(255, 0, 0),
+	-- Item tooltips (Shared/Items/Tooltip): a weapon's attack numbers (Minecraft's dark green,
+	-- §2) and the lore (its dark purple, §5).
+	DarkGreen = Color3.fromRGB(0, 170, 0),
+	Lore = Color3.fromRGB(170, 0, 170),
 }
 
 -- The lit furnace flame's colours (MenuLayout.FLAME_ART): R red edge, O orange, Y yellow, W core.
