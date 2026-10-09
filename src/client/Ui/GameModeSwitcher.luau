@@ -7,7 +7,7 @@
 	           inventory's sunken slot look) with their icons, Creative a grass block and Survival an
 	           iron sword (Ui/ItemIcon), Adventure a map and Spectator an ender eye drawn as pixel
 	           art (the game has neither item), a white frame on the highlighted slot, and
-	           "[ F4 ] Next" under them with "[ F4 ]" in aqua. Scaled like the HUD (Style.guiScale).
+	           "[ F4 ] Next" under them with "[ F4 ]" in aqua. Scaled like the HUD (Ui/UiScale).
 	  input    opened by Debug/DebugOverlay (F3 + F4, with the permission to change one's own
 	           mode), which also passes on F4 while it is open (`next`). The mouse highlights the
 	           slot it moves onto; clicking does nothing more, as in Minecraft. It is checked
@@ -41,6 +41,7 @@ local ItemIcon = require(script.Parent.ItemIcon)
 local ModeSwitch = require(script.Parent.ModeSwitch)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 local WIDTH, HEIGHT = ModeSwitch.PANEL_WIDTH, ModeSwitch.PANEL_HEIGHT
 local MOUSE_STEP = "IceVoxelSwitcherMouse"
@@ -135,14 +136,9 @@ type Slot = { mode: string, button: TextButton, selection: Frame }
 function GameModeSwitcher.start()
 	local player = Players.LocalPlayer
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelGameModeSwitcher"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	-- Over the HUD and WAILA, under the carried stack's layer.
-	gui.DisplayOrder = 15
-	gui.Enabled = false
+	local gui =
+		UiScale.screenGui("IceVoxelGameModeSwitcher", "Switcher", { inset = true, kind = "scaled", enabled = false })
 
 	-- Visible and Modal: Roblox frees the mouse while it is shown; it also takes the clicks.
 	local modal = Instance.new("TextButton")
@@ -270,7 +266,7 @@ function GameModeSwitcher.start()
 			close(true)
 			return
 		end
-		local value = Style.guiScale(gui.AbsoluteSize, WIDTH, HEIGHT, UserInputService.TouchEnabled)
+		local value = UiScale.fit(WIDTH, HEIGHT, gui.AbsoluteSize)
 		if scale.Scale ~= value then
 			scale.Scale = value
 		end

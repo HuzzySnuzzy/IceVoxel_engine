@@ -10,6 +10,10 @@
 	asks the workers for tiles (the world map still does while open). `setPaused` holds every
 	tile job (both maps) while the terrain needs the workers more, e.g. right after a teleport.
 
+	Two ScreenGuis (Ui/UiScale): the world map's (its backdrop covers the screen; below Roblox's top
+	bar, where input positions start) and the minimap's corner (the whole screen, so its offsets
+	are Ui/HudLayout's screen pixels), which hides while the world map covers it.
+
 	The Weather Map key binding (B by default, Settings/Keybinds) switches both maps' weather
 	mode, as their cloud buttons do (the way in on touch screens): rain, snow, thunder and
 	clouds over the terrain, the wind, and forecasts on the world map.
@@ -27,6 +31,7 @@ local TerrainGenerator = require(Shared.Generation.TerrainGenerator)
 local WorkerPool = require(script.Parent.Streaming.WorkerPool)
 local Keybinds = require(script.Parent.Settings.Keybinds)
 local Screens = require(script.Parent.Ui.Screens)
+local UiScale = require(script.Parent.Ui.UiScale)
 local MapLayer = require(script.MapLayer)
 local Minimap = require(script.Minimap)
 local WorldMap = require(script.WorldMap)
@@ -66,18 +71,18 @@ function Map.start(pool: WorkerPool.WorkerPool, generator: TerrainGenerator.Gene
 		return
 	end
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelMap"
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 5
-	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local gui = UiScale.screenGui("IceVoxelMap", "Map", { inset = false, kind = "screen" })
+	gui.Parent = playerGui
+	local cornerGui = UiScale.screenGui("IceVoxelMinimap", "Map", { inset = true, full = true, kind = "scaled" })
+	cornerGui.Parent = playerGui
 
 	local waypoints = Waypoints.new()
 	local miniLayer = MapLayer.new(layerSize(Config.Map.MinimapSize), Config.Map.MinimapScale)
 	local worldLayer = MapLayer.new(layerSize(WorldMap.MAX_PIXELS), 4)
 
 	local worldMap = WorldMap.new(gui, worldLayer, waypoints, generator)
-	local mini = Minimap.new(gui, miniLayer, waypoints, worldMap.toggle)
+	local mini = Minimap.new(cornerGui, miniLayer, waypoints, worldMap.toggle)
 	minimap = mini
 	mini.setVisible(minimapVisible)
 
@@ -89,7 +94,11 @@ function Map.start(pool: WorkerPool.WorkerPool, generator: TerrainGenerator.Gene
 	end)
 
 	RunService.Heartbeat:Connect(function()
-		if minimapVisible then
+		local covered = worldMap.isOpen()
+		if cornerGui.Enabled == covered then
+			cornerGui.Enabled = not covered
+		end
+		if minimapVisible and not covered then
 			mini.update()
 		end
 		worldMap.update()

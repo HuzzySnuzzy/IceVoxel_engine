@@ -247,6 +247,11 @@ function Settings.cycle(key: string, delta: number?)
 	changed(State.cycle(state, key, delta))
 end
 
+-- This screen's highest value of `key` for cycling (State.setLimit: GUI Scale's 1 .. the largest).
+function Settings.setLimit(key: string, limit: number?)
+	State.setLimit(state, key, limit)
+end
+
 function Settings.setPreset(index: number)
 	changed(State.setPreset(state, index))
 end

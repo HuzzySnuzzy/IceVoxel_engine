@@ -6,19 +6,19 @@
 	what it opens ("37 new recipes"), as Minecraft's title command shows a title and subtitle: fade
 	in FADE_IN, stay HOLD, fade out FADE_OUT (Minecraft's /title times 10, 70, 20 ticks). Ages
 	reached together (a command, a big reward) show one after another. A 220 x 44 GUI pixel panel
-	scaled like the HUD (Style.guiScale, the GUI Scale setting).
+	at the GUI scale (Ui/UiScale, shrunk to fit a narrow screen).
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Progression = require(Shared.Progression)
 
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 local WIDTH, HEIGHT = 220, 44
 local FADE_IN, HOLD, FADE_OUT = 0.5, 3.5, 1
@@ -42,12 +42,8 @@ function AgeToast.start()
 	started = true
 	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelAgeToast"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	-- (Over the world and the HUD, under the screens.)
-	gui.DisplayOrder = 11
+	-- (Over the world and the HUD.)
+	local gui = UiScale.screenGui("IceVoxelAgeToast", "AgeToast", { inset = true, kind = "scaled" })
 
 	local holder = Instance.new("Frame")
 	holder.Name = "AgeToast"
@@ -70,17 +66,9 @@ function AgeToast.start()
 	local bottom = line("", 34, 10, Style.Colour.Text, Style.TEXT_SIZE)
 	local lines = { top, name, bottom }
 
-	local function layout()
-		local camera = workspace.CurrentCamera
-		local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
-		scale.Scale = Style.guiScale(viewport, WIDTH, HEIGHT, UserInputService.TouchEnabled)
-	end
-	layout()
-	local camera = workspace.CurrentCamera
-	if camera then
-		camera:GetPropertyChangedSignal("ViewportSize"):Connect(layout)
-	end
-	Style.scaleChanged:Connect(layout)
+	UiScale.follow(function()
+		scale.Scale = UiScale.fit(WIDTH, HEIGHT)
+	end)
 
 	local function fade(transparency: number, seconds: number): Tween?
 		local last: Tween? = nil

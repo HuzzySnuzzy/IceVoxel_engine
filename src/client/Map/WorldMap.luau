@@ -13,6 +13,13 @@
 	explored or not. Its centre and the player's arrow are in true world coordinates (the
 	character, read through the render origin: Shared/World/Origin). While it is open the screen
 	hides a move of the render origin (Rendering/Rebase.setHidden "map").
+
+	The panel and its image are a share of the screen (86 % of its height, square); the chrome
+	around them (the bar with its title and buttons, the weather bar, the player's arrow, the
+	waypoints' dots and names, the right-click menu: Map/ContextMenu) is drawn in pixels of
+	1080p's Auto and scaled by Ui/UiScale.reference (the GUI scale / 4, at least 0.75), so it grows
+	on a 4K screen and stays readable on a phone. Markers are placed as shares of the panel
+	(MapView.toFraction).
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -37,6 +44,7 @@ local WeatherLayer = require(script.Parent.WeatherLayer)
 local WeatherMap = require(script.Parent.WeatherMap)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local Hud = require(script.Parent.Parent.Ui.Hud)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 local ZOOMS = Config.Map.ZoomLevels
@@ -142,6 +150,15 @@ function WorldMap.new(
 	player.TextStrokeTransparency = 0
 	player.ZIndex = 26
 	player.Parent = markers
+	-- The chrome's scales (UiScale.reference), set by `restyle`.
+	local chromeScales: { UIScale } = {}
+	local function chromeScale(object: GuiObject)
+		local scale = Instance.new("UIScale")
+		scale.Scale = UiScale.reference()
+		scale.Parent = object
+		table.insert(chromeScales, scale)
+	end
+	chromeScale(player)
 
 	-- Input catcher on top of the map. Modal frees the mouse in first person.
 	local catcher = Instance.new("TextButton")
@@ -157,6 +174,7 @@ function WorldMap.new(
 	bar.BackgroundTransparency = 1
 	bar.ZIndex = 31
 	bar.Parent = backdrop
+	chromeScale(bar)
 
 	local title = Instance.new("TextLabel")
 	title.BackgroundTransparency = 1
@@ -187,13 +205,15 @@ function WorldMap.new(
 	weatherBar.Name = "WeatherBar"
 	weatherBar.AnchorPoint = Vector2.new(0, 1)
 	weatherBar.Position = UDim2.new(0, 6, 1, -6)
-	weatherBar.Size = UDim2.new(1, -12, 0, 52)
+	-- (As wide as the panel less 6 on each side, in GUI pixels under its scale: `restyle`.)
+	weatherBar.Size = UDim2.fromOffset(0, 52)
 	weatherBar.BackgroundColor3 = Color3.fromRGB(24, 28, 34)
 	weatherBar.BackgroundTransparency = 0.25
 	weatherBar.BorderSizePixel = 0
 	weatherBar.ZIndex = 31
 	weatherBar.Visible = false
 	weatherBar.Parent = panel
+	chromeScale(weatherBar)
 	local function row(top: number): Frame
 		local frame = Instance.new("Frame")
 		frame.BackgroundTransparency = 1
@@ -209,11 +229,10 @@ function WorldMap.new(
 		layout.Parent = frame
 		return frame
 	end
-	local function fit(text: GuiObject, most: number)
-		(text :: any).TextScaled = true
-		local limit = Instance.new("UITextSizeConstraint")
-		limit.MaxTextSize = most
-		limit.Parent = text
+	-- (Fixed sizes under the bar's UIScale; a label too long for its share is cut with "...".)
+	local function fit(text: GuiObject, size: number)
+		(text :: any).TextSize = size;
+		(text :: any).TextTruncate = Enum.TextTruncate.AtEnd
 	end
 	local stepsRow = row(3)
 	local infoRow = row(27)
@@ -290,6 +309,7 @@ function WorldMap.new(
 		label.TextStrokeTransparency = 0.3
 		label.ZIndex = 25
 		label.Parent = marker
+		chromeScale(marker)
 		marker.Parent = markers
 		return marker
 	end
@@ -453,6 +473,23 @@ function WorldMap.new(
 		end
 	end)
 
+	-- The chrome at UiScale.reference: its scales, and the bars as wide as the panel on screen.
+	local chromeFor = Vector2.zero
+	local function restyle()
+		local reference = UiScale.reference()
+		for _, scale in chromeScales do
+			if scale.Scale ~= reference then
+				scale.Scale = reference
+			end
+		end
+		local size = panel.AbsoluteSize
+		bar.Position = UDim2.new(0.5, 0, 0.52, -size.Y / 2 - 4)
+		bar.Size = UDim2.fromOffset(size.X / reference, 40)
+		weatherBar.Size = UDim2.fromOffset((size.X - 12) / reference, 52)
+		view:setResample(size.X)
+	end
+	UiScale.follow(restyle)
+
 	local function update()
 		if not open then
 			return
@@ -486,19 +523,21 @@ function WorldMap.new(
 		end
 
 		local size = panel.AbsoluteSize
-		bar.Position = UDim2.new(0.5, 0, 0.52, -size.Y / 2 - 4)
-		bar.Size = UDim2.fromOffset(size.X, 40)
+		if size ~= chromeFor then
+			chromeFor = size
+			restyle()
+		end
 
-		local p = view:toFrame(px, pz)
-		player.Position = UDim2.fromOffset(p.X, p.Y)
+		local u, v = view:toFraction(px, pz)
+		player.Position = UDim2.fromScale(u, v)
 		local look = camera.CFrame.LookVector
 		player.Rotation = math.deg(math.atan2(look.X, -look.Z))
 
 		for i, waypoint in waypoints.list do
 			local frame = waypointMarkers[i] or newWaypointMarker()
 			waypointMarkers[i] = frame
-			local q = view:toFrame(waypoint.x + 0.5, waypoint.z + 0.5)
-			frame.Position = UDim2.fromOffset(q.X, q.Y)
+			local wu, wv = view:toFraction(waypoint.x + 0.5, waypoint.z + 0.5)
+			frame.Position = UDim2.fromScale(wu, wv)
 			frame.BackgroundColor3 = Color3.fromRGB(waypoint.color[1], waypoint.color[2], waypoint.color[3])
 			frame.Visible = true
 			local label = frame:FindFirstChild("Label") :: TextLabel

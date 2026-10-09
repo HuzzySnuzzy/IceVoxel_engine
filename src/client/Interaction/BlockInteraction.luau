@@ -181,6 +181,7 @@ local Screens = require(script.Parent.Parent.Ui.Screens)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local SpectatorGui = require(script.Parent.Parent.Ui.SpectatorGui)
 local WailaInfo = require(script.Parent.Parent.Ui.WailaInfo)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local HeldItems = require(script.Parent.Parent.Player.HeldItems)
 local RemotePlayers = require(script.Parent.Parent.Player.RemotePlayers)
@@ -350,21 +351,42 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	local cracks = CrackOverlay.new()
 
-	local crosshairGui = Instance.new("ScreenGui")
-	crosshairGui.Name = "IceVoxelCrosshair"
-	crosshairGui.IgnoreGuiInset = true
-	crosshairGui.ResetOnSpawn = false
+	--[[
+		Minecraft's crosshair: a plus of 1 GUI pixel lines 9 GUI pixels across, at the GUI scale
+		(Ui/UiScale), in the camera's centre (the whole screen, notches included). Minecraft draws
+		it inverting what is behind it; Roblox has no such blend, so it is white with a dark outline.
+	]]
+	local crosshairGui =
+		UiScale.screenGui("IceVoxelCrosshair", "Crosshair", { inset = true, full = true, kind = "scaled" })
+	local CROSSHAIR, CROSSHAIR_OUTLINE = 9, Color3.fromRGB(24, 24, 24)
 	local crosshair = Instance.new("Frame")
+	crosshair.Name = "Crosshair"
 	crosshair.AnchorPoint = Vector2.new(0.5, 0.5)
 	crosshair.Position = UDim2.fromScale(0.5, 0.5)
-	crosshair.Size = UDim2.fromOffset(6, 6)
-	crosshair.BackgroundColor3 = Color3.new(1, 1, 1)
+	crosshair.Size = UDim2.fromOffset(CROSSHAIR, CROSSHAIR)
+	crosshair.BackgroundTransparency = 1
 	crosshair.Visible = false
-	local round = Instance.new("UICorner")
-	round.CornerRadius = UDim.new(1, 0)
-	round.Parent = crosshair
-	local outline = Instance.new("UIStroke")
-	outline.Parent = crosshair
+	local centre = CROSSHAIR // 2
+	local function crosshairLine(x: number, y: number, w: number, h: number, outline: boolean)
+		local bar = Instance.new("Frame")
+		bar.BorderSizePixel = 0
+		bar.Position = UDim2.fromOffset(x, y)
+		bar.Size = UDim2.fromOffset(w, h)
+		bar.BackgroundColor3 = if outline then CROSSHAIR_OUTLINE else Color3.new(1, 1, 1)
+		bar.BackgroundTransparency = if outline then 0.4 else 0
+		bar.ZIndex = if outline then 1 else 2
+		bar.Parent = crosshair
+	end
+	-- (The dark outline one pixel around both lines, then the white lines over it.)
+	crosshairLine(-1, centre - 1, CROSSHAIR + 2, 3, true)
+	crosshairLine(centre - 1, -1, 3, CROSSHAIR + 2, true)
+	crosshairLine(0, centre, CROSSHAIR, 1, false)
+	crosshairLine(centre, 0, 1, CROSSHAIR, false)
+	local crosshairScale = Instance.new("UIScale")
+	crosshairScale.Parent = crosshair
+	UiScale.follow(function()
+		crosshairScale.Scale = UiScale.base()
+	end)
 	crosshair.Parent = crosshairGui
 	crosshairGui.Parent = player:WaitForChild("PlayerGui")
 

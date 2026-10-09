@@ -11,7 +11,8 @@
 
 	Waypoints are world blocks; their beacons stand in the client's render frame (Shared/World/
 	Origin: world studs - the origin) and move with it (a Rendering/Rebase mover). The distance on
-	a label is between two render positions (the beacon and the camera).
+	a label is between two render positions (the beacon and the camera). Their labels are drawn in
+	pixels of 1080p's Auto, scaled by Ui/UiScale.reference with the GUI scale.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -24,11 +25,14 @@ local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Rebase = require(script.Parent.Parent.Rendering.Rebase)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 
 type Waypoint = Protocol.Waypoint
 
 local BLOCK = Config.BlockSize
 local SAVE_DELAY = 1
+-- A beacon's label (pixels at 1080p's Auto: times UiScale.reference).
+local LABEL_WIDTH, LABEL_HEIGHT, LABEL_TEXT = 160, 40, 14
 local PALETTE = {
 	{ 255, 99, 71 },
 	{ 255, 196, 61 },
@@ -61,7 +65,7 @@ function Waypoints.new(): Waypoints
 	local folder = Instance.new("Folder")
 	folder.Name = "IceVoxelWaypoints"
 	folder.Parent = workspace.CurrentCamera
-	local beacons: { { part: Part, label: TextLabel } } = {}
+	local beacons: { { part: Part, label: TextLabel, billboard: BillboardGui } } = {}
 	local saveAt: number? = nil
 	local revision = 0
 	local synced = false
@@ -76,6 +80,16 @@ function Waypoints.new(): Waypoints
 			end
 		end
 	end)
+
+	-- The labels at the GUI scale's reference size.
+	local function resize()
+		local reference = UiScale.reference()
+		for _, beacon in beacons do
+			beacon.billboard.Size = UDim2.fromOffset(LABEL_WIDTH * reference, LABEL_HEIGHT * reference)
+			beacon.label.TextSize = math.floor(LABEL_TEXT * reference + 0.5)
+		end
+	end
+	UiScale.changed:Connect(resize)
 
 	local function rebuildBeacons()
 		for _, beacon in beacons do
@@ -97,22 +111,21 @@ function Waypoints.new(): Waypoints
 			billboard.AlwaysOnTop = true
 			billboard.LightInfluence = 0
 			billboard.MaxDistance = math.huge
-			billboard.Size = UDim2.fromOffset(160, 40)
 			billboard.Parent = part
 
 			local label = Instance.new("TextLabel")
 			label.BackgroundTransparency = 1
 			label.Size = UDim2.fromScale(1, 1)
 			label.Font = Enum.Font.GothamBold
-			label.TextSize = 14
 			label.TextStrokeTransparency = 0.3
 			label.TextColor3 = Color3.fromRGB(waypoint.color[1], waypoint.color[2], waypoint.color[3])
 			label.Text = waypoint.name
 			label.Parent = billboard
 
 			part.Parent = folder
-			table.insert(beacons, { part = part, label = label })
+			table.insert(beacons, { part = part, label = label, billboard = billboard })
 		end
+		resize()
 	end
 
 	local function changed(save: boolean)

@@ -48,12 +48,14 @@ end
 
 -- Minecraft's fire overlay: a flickering orange glow rising from the bottom of the screen.
 local function newOverlay(): (ScreenGui, Frame)
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelFireOverlay"
-	gui.IgnoreGuiInset = true
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = -1
-	gui.Enabled = false
+	-- (Screen-relative, over the whole screen, under everything else. Required here: the tests load
+	-- this module without Roblox's instances.)
+	local UiScale = require(script.Parent.Parent.Ui.UiScale)
+	local gui: ScreenGui = UiScale.screenGui(
+		"IceVoxelFireOverlay",
+		"Fire",
+		{ inset = true, full = true, kind = "screen", enabled = false }
+	)
 	local frame = Instance.new("Frame")
 	frame.BorderSizePixel = 0
 	frame.AnchorPoint = Vector2.new(0, 1)

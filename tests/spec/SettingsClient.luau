@@ -173,6 +173,8 @@ end
 --[[
 	Map/Minimap with fake GUI instances (property bags; Activated / InputBegan signals) on a touch
 	screen or not. `ui.named(name)` finds a created instance; `opened` counts world map openings.
+	Where the minimap and the Map button go is Ui/HudLayout's (the real one, through a fake
+	Ui/UiScale on a 1280 x 720 screen at scale 2); Ui/Style's text is property bags too.
 ]]
 local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: boolean): any
 	local ui: any = { created = {}, opened = 0 }
@@ -241,6 +243,46 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 			return {
 				matches = function()
 					return false
+				end,
+			}
+		end
+		if n.path == "src/client/Ui/UiScale" then
+			-- (The corner as Ui/HudLayout lays it out, with the minimap as Map/Minimap says.)
+			local HudLayout = req(node("src/client", nil).Ui.HudLayout)
+			local shown = false
+			return {
+				hud = function()
+					return HudLayout.compute({
+						width = 1280,
+						height = 720,
+						insets = { left = 0, top = 0, right = 0, bottom = 0, bar = 58 },
+						scale = 2,
+						touch = touch,
+						minimap = shown,
+						coordsWidth = HudLayout.MINIMAP,
+						music = false,
+						saveUnder = false,
+						saving = false,
+					} :: any)
+				end,
+				setMinimap = function(value: boolean)
+					shown = value
+				end,
+				hudChanged = fakeSignal(),
+			}
+		end
+		if n.path == "src/client/Ui/Style" then
+			-- (The coordinates line's text: two property bags; the pixel font 8 wide a character.)
+			return {
+				TEXT_SIZE = 8,
+				Colour = { Text = roblox.Color3.new(1, 1, 1) },
+				shadowText = function(parent: any)
+					local label, shadow = Instance.new("TextLabel"), Instance.new("TextLabel")
+					label.Parent, shadow.Parent = parent, parent
+					return label, shadow
+				end,
+				textWidth = function(text: string): number
+					return #text * 8
 				end,
 			}
 		end
@@ -381,9 +423,25 @@ return function(t, shared, require, _server, client)
 		t.eq(values.fog, 0)
 		State.cycle(state, "fog")
 		t.eq(values.fog, 1)
+		-- GUI Scale: Auto, 1 .. this screen's largest (Minecraft's), the screen's largest from
+		-- Ui/GuiScale (State.setLimit; 3 on a 1280 x 720 window, 9 on a 4K one).
+		State.setLimit(state, "guiScale", 3)
 		values.guiScale = 3
 		State.cycle(state, "guiScale")
-		t.eq(values.guiScale, 0, "Auto after 3")
+		t.eq(values.guiScale, 0, "Auto after the screen's largest")
+		State.cycle(state, "guiScale", -1)
+		t.eq(values.guiScale, 3, "backwards from Auto: the screen's largest")
+		State.setLimit(state, "guiScale", 9)
+		State.cycle(state, "guiScale")
+		t.eq(values.guiScale, 4, "a bigger screen offers more")
+		State.setLimit(state, "guiScale", 2)
+		t.eq(values.guiScale, 4, "a choice above a smaller screen's largest is kept")
+		State.cycle(state, "guiScale")
+		t.eq(values.guiScale, 0, "and the next press goes to Auto")
+		State.setLimit(state, "guiScale", nil)
+		values.guiScale = 11
+		State.cycle(state, "guiScale")
+		t.eq(values.guiScale, 12, "no limit: up to the setting's own 12")
 		State.cycle(state, "preset")
 		t.eq(values.preset, PlayerSettings.MEDIUM)
 		State.cycle(state, "preset", -1)

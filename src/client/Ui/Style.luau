@@ -4,11 +4,10 @@
 	image assets).
 
 	Everything is laid out in Minecraft GUI pixels (the inventory is 176 x 166 of them) and blown
-	up by a UIScale with `guiScale`, Minecraft's automatic GUI scale: the largest whole number that
-	still shows 320 x 240 GUI pixels (at most MAX_SCALE), never more than what fits the content.
-	Touch screens get in-between scales too, so the UI is as big as fits. The player's GUI Scale
-	setting (`setScaleOverride`: 1, 2 or 3, as Minecraft's) lowers that maximum; GUIs scaled once
-	(the HUD, WAILA) lay out again on `scaleChanged`.
+	up by a UIScale with Minecraft's GUI scale, which Ui/UiScale owns (the screen, the GUI Scale
+	setting, Ui/GuiScale's rule: Auto is the largest whole scale that still shows 320 x 240 GUI
+	pixels, touch screens get eighths; shrunk to fit the content). `guiScale`, `setScaleOverride`
+	and `scaleChanged` forward there for older callers.
 
 	  panel   #C6C6C6 face, 2 px white bevel top-left and #555555 bottom-right, black outline with
 	          slightly rounded corners
@@ -26,6 +25,9 @@
 ]]
 
 local TextService = game:GetService("TextService")
+
+local GuiScale = require(script.Parent.GuiScale)
+local UiScale = require(script.Parent.UiScale)
 
 local Style = {}
 
@@ -79,61 +81,23 @@ Style.SLOT = 18
 Style.ITEM = 16
 Style.BIG_SLOT = 26
 
--- Minecraft's automatic GUI scale keeps at least 320 x 240 GUI pixels on screen.
-local BASE_WIDTH, BASE_HEIGHT = 320, 240
-local MAX_SCALE = 3
--- Screen pixels kept free around scaled content.
-local MARGIN = 8
+-- Fires when the GUI scale changes (UiScale.changed).
+Style.scaleChanged = UiScale.changed
 
--- The player's GUI Scale setting (1..MAX_SCALE; nil: automatic), and its change signal.
-local scaleOverride: number? = nil
-local scaleChangedEvent = Instance.new("BindableEvent")
--- Fires when the GUI Scale setting changes (scaled GUIs lay out again).
-Style.scaleChanged = scaleChangedEvent.Event
-
---[[
-	Sets the GUI Scale setting: a whole scale (Minecraft's 1, 2, 3), still never more than the
-	automatic scale allows on this screen nor more than fits; nil or 0 is automatic.
-]]
+-- Sets the GUI Scale setting (UiScale.setSetting: a whole choice; nil or 0 is Auto).
 function Style.setScaleOverride(scale: number?)
-	local value = if scale and scale >= 1 then math.min(math.floor(scale), MAX_SCALE) else nil
-	if value ~= scaleOverride then
-		scaleOverride = value
-		scaleChangedEvent:Fire()
-	end
+	UiScale.setSetting(scale)
 end
 
 --[[
-	The UIScale for content of `width` x `height` GUI pixels on a `viewport`-sized screen:
-	Minecraft's automatic scale (a whole number, at most MAX_SCALE; lower with the GUI Scale
-	setting), shrunk to fit the content into `area` (default: the whole viewport; the automatic
-	scale always comes from the viewport, so content fitted into part of the screen matches the
-	rest). Touch screens may use fractions (in eighths), so they get as big as fits.
+	The UIScale for content of `width` x `height` GUI pixels on a `viewport`-sized screen: the GUI
+	Scale setting's scale there (GuiScale.base), shrunk to fit the content into `area` (default:
+	the whole viewport). New code asks Ui/UiScale (`base`, `fit`), which knows the screen.
 ]]
 function Style.guiScale(viewport: Vector2, width: number, height: number, touch: boolean, area: Vector2?): number
 	local space = area or viewport
-	local fit = math.min((space.X - 2 * MARGIN) / width, (space.Y - 2 * MARGIN) / height)
-	local override = scaleOverride
-	local scale
-	if touch then
-		scale = math.min(viewport.X / BASE_WIDTH, viewport.Y / BASE_HEIGHT, override or MAX_SCALE, fit)
-		scale = math.floor(scale * 8) / 8
-	else
-		local auto = 1
-		while auto < MAX_SCALE and viewport.X / (auto + 1) >= BASE_WIDTH and viewport.Y / (auto + 1) >= BASE_HEIGHT do
-			auto += 1
-		end
-		if override then
-			auto = math.min(auto, override)
-		end
-		scale = math.min(auto, fit)
-		if scale >= 1 then
-			scale = math.floor(scale)
-		else
-			scale = math.floor(scale * 8) / 8
-		end
-	end
-	return math.max(scale, 0.5)
+	local base = GuiScale.base(viewport.X, viewport.Y, touch, UiScale.setting())
+	return GuiScale.fit(base, width, height, space.X, space.Y, touch)
 end
 
 --[[ Builders ]]

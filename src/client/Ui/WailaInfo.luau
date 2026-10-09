@@ -1068,7 +1068,7 @@ end
 export type Screen = {
 	width: number,
 	height: number,
-	-- The HUD's GUI scale (Style.guiScale) and whether it is a touch screen (fractional scales).
+	-- The HUD's GUI scale (Ui/UiScale) and whether it is a touch screen (fractional scales).
 	scale: number,
 	touch: boolean,
 	-- Pixels from the screen's top to the panel, and kept free inside every edge.
@@ -1083,7 +1083,7 @@ export type Screen = {
 --[[
 	The scale to draw a `width` x `height` (GUI pixels) panel at and its shift right of the top
 	centre (whole screen pixels). The panel gets the HUD's scale, drawn smaller (down to half
-	size: whole scales on desktops, eighths on touch screens, like Style.guiScale) when it does not
+	size: whole scales on desktops, eighths on touch screens, like Ui/GuiScale.fit) when it does not
 	fit between the margins, the minimap and the bottom. It stays centred unless that covers the
 	minimap or the F3 text: the screen edges come first, then the minimap, then the F3 text.
 	Where the room left of the minimap is too narrow to read the panel (it would be drawn below

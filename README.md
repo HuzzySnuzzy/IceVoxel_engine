@@ -314,9 +314,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   on the server, and the client's movement and mining prediction use the same numbers as the
   server's checks. Creative and spectator players get them too, but nothing hurts them. Death
   clears them; they are not saved. Icons in Minecraft's frames in the top right, under the minimap
-  and the music toast (beneficial in the top row, the rest below, longest first, blinking out over
-  their last 10 s; hover one, or tap it on a touch screen, for its name, level and time), and
-  Minecraft's list of names and times beside any open screen; F3 lists them too. Tough As Nails'
+  and the toasts, or beside them on small phones (beneficial in the top row, the rest below,
+  longest first, blinking out over their last 10 s; hover one, or tap it on a touch screen, for
+  its name, level and time), and Minecraft's list of names and times beside any open screen; F3
+  lists them too. Tough As Nails'
   Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them (its own
   status row over the hotbar shows only with `Config.Effects.Hud` off; the Thirst effect and the
   clemency wait in creative and spectator, their times standing still on the icons). `/effect give
@@ -1115,7 +1116,19 @@ A fast, Minecraft-style voxel engine for Roblox.
   oil geysers as black dots. Right click the map to add waypoints (saved between sessions),
   teleport, or center the view. The Minimap setting hides the minimap, which then costs nothing (on
   touch screens a small "Map" button takes its corner, to open the world map). `B` shows the
-  weather over both (see The weather map).
+  weather over both (see The weather map). The minimap follows the GUI Scale setting like the rest
+  of the HUD (see GUI scale).
+- **GUI scale, Minecraft's way.** One scale for the whole interface: Auto is the largest scale that
+  still leaves 320 x 240 GUI pixels on the screen (4 at 1920 x 1080, 6 at 2560 x 1440, 9 on a 4K
+  window; eighths on touch screens: 1.5 on a small phone), and the GUI Scale button offers Auto
+  and 1 up to that largest, so every choice looks different. The HUD, the hotbar, the inventory
+  and every screen, the chat, the minimap (56 GUI pixels square: 224 pixels at 1080p, 84 on a
+  phone) with its coordinates line, the toasts, the status effect icons, the saving icon, WAILA,
+  the crosshair (Minecraft's plus) and the title screen all follow it; F3, the world map's bar and
+  menus and the waypoint labels keep their 1080p look and grow on bigger screens. The top right
+  corner is laid out as a whole (the minimap, then the toasts, then the effect icons; the saving
+  icon above Roblox's jump button by its real size), so nothing there overlaps on phones and
+  tablets, and the title screen keeps clear of Roblox's top bar.
 - **Other players as the server tells them** (`Players.ServerPositions`, on). Each client
   draws only the players the server sends it (within `Interest.PlayerDistance`, spectators only to
   spectators), 0.1 s behind (`Interest.InterpolationDelay`) and gliding between their poses, a
@@ -1269,7 +1282,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Touch Buttons (touch screens; after rejoining) |
 | Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom); with a mouse |
 | Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
-| HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1-3) |
+| HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
 | Chat Settings   | Chat (Shown / Commands Only: no players' messages, and none sent / Hidden: no chat at all), Chat Text Opacity (10-100%), Text Background (0-100%), Text Size (OFF, 1-100%), Line Spacing (0-100%), Chat Delay (None, 0.5-6 s: other players' messages come out one per delay), Width (40-320 GUI pixels), Focused Height and Unfocused Height (20-180), Command Suggestions |
 | Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
 | Weather         | Clouds (OFF / Fast / Fancy), Weather (rain and snow: OFF / Fast / Fancy) |
@@ -1748,7 +1761,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
                             buttons), SpectatorGui + SpectatorMenu (the spectator menu and its
                             model), GameModeSwitcher + ModeSwitch (the F3 + F4 switcher and its
-                            model), SettingsScreen (the Options menu), MusicToast (Now Playing),
+                            model), SettingsScreen (the Options menu), UiScale (the GUI scale on
+                            this screen, every ScreenGui, the HUD's corner) + GuiScale and
+                            HudLayout (Minecraft's scale and the corner's layout; pure),
+                            MusicToast (Now Playing),
                             EffectHud + EffectIcons (status effect icons in the top right, the
                             list beside open screens, their glyphs), SkillTreeScreen (the skill
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
@@ -1915,6 +1931,9 @@ for performance:
 | `Render.FarMeshes.LookRemainder` | "plain" | The other quads: "plain" (SmoothPlastic in the colour they average to) or "largest" (joined to the largest opaque look, tinted to that colour). |
 | `Render.FarMeshes.UvStuds` | 3      | Studs per texture tile in far mesh UVs (one block face).            |
 | `Map.Teleport`            | true    | Who may teleport from the map: everyone, nobody, or a user id list. |
+| `UiScale.MaxScale`        | 12      | The largest GUI scale (a sanity cap: Minecraft has none; a 4K window's Auto is 9). |
+| `UiScale.ReferenceScale` / `MinReference` | 4 / 0.75 | Widgets drawn in fixed pixels (F3, the world map's bar and menus, waypoint and structure labels) look as drawn at this GUI scale (1080p's Auto) and keep at least this share of their size. |
+| `UiScale.Minimap`         | 56      | The minimap's side in GUI pixels (its picture stays `Map.MinimapSize` map pixels, 384 blocks). |
 | `Map.SaveWaypoints`       | true    | Keep waypoints between sessions (DataStore).                        |
 | `Origin.Enabled`          | true    | The floating origin (see "Far from the origin" below); a kill switch, off only together with `Players.ServerPositions`. |
 | `Origin.RebaseDistance` / `SoftDistance` / `Snap` | 8192 / 3072 / 768 | Studs from the render origin that move it at once / at a hidden moment (teleports, screens, menus); its steps. |

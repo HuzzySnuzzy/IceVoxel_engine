@@ -82,6 +82,7 @@ local GameModeSwitcher = require(script.Parent.GameModeSwitcher)
 local Hud = require(script.Parent.Hud)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 local ChatFormat = require(script.ChatFormat)
 local ChatInput = require(script.ChatInput)
 local ChatLog = require(script.ChatLog)
@@ -121,8 +122,8 @@ local CONFIG_WAIT = 30
 -- chat after the hotbar and hearts, and its chat screen's box over them), under the game mode
 -- switcher (15) and the screens' cursor (20); under a screen's backdrop (Ui/Screens 9) while one
 -- is open (Minecraft draws the chat under a screen).
-local OVER_HUD = 12
-local UNDER_SCREENS = 8
+local OVER_HUD = UiScale.Layer.Chat
+local UNDER_SCREENS = UiScale.Layer.ChatUnderScreens
 -- A tap that took the box's focus away and closed it is followed by the chat button's Activated
 -- when it was on that button: that tap closed the chat, so it does not reopen it (seconds).
 local TAP_CLOSE = 0.6
@@ -424,13 +425,8 @@ function Chat.start()
 	started = true
 	hideRobloxChat()
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelChat"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	-- (Over the HUD; under a screen's darkened backdrop while one is open: `restack`.)
-	gui.DisplayOrder = OVER_HUD
+	local gui = UiScale.screenGui("IceVoxelChat", "Chat", { inset = true, kind = "scaled" })
 
 	local function restack()
 		gui.DisplayOrder = if Screens.isOpen() and not open then UNDER_SCREENS else OVER_HUD
@@ -687,7 +683,8 @@ function Chat.start()
 		if viewport.X <= 0 or viewport.Y <= 0 then
 			return
 		end
-		local scale = Style.guiScale(viewport, HUD_W, HUD_H, UserInputService.TouchEnabled)
+		-- (The HUD's scale: the GUI scale fitted to this GUI's own area, the device's safe area.)
+		local scale = UiScale.fit(HUD_W, HUD_H, viewport)
 		local inset = if open then keyboardInset else 0
 		local size = metrics.scale
 		lines.Visible = size > 0 and metrics.visibility < ChatFormat.HIDDEN
@@ -1216,7 +1213,7 @@ function Chat.start()
 	end)
 
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
-	Style.scaleChanged:Connect(layout)
+	UiScale.changed:Connect(layout)
 	gui.Parent = player:WaitForChild("PlayerGui")
 	layout()
 end

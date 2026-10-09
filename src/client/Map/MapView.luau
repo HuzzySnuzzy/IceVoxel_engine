@@ -4,8 +4,12 @@
 
 	The layer is a ring buffer, so the window can wrap around its edges; up to four ImageLabels
 	(all sharing the same image) show the pieces, positioned with Scale coordinates so there are no
-	seams at any frame size. Also converts between world block coordinates and frame pixels for
-	markers and clicks.
+	seams at any frame size. Also converts world block coordinates to shares of the frame for
+	markers (`toFraction`: placed with UDim2.fromScale, they stay right under a UIScale, where the
+	frame's AbsoluteSize is already scaled) and screen pixels back to world blocks for clicks
+	(`toWorld`). The image is drawn Pixelated while each image pixel covers at least one screen
+	pixel and smoothed below that (`setResample`: the minimap on a phone shows its 192 image pixels
+	in about 84 screen pixels).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,7 +31,9 @@ export type MapView = {
 	setCenter: (self: MapView, centerX: number, centerZ: number) -> (),
 	render: (self: MapView, centerX: number, centerZ: number) -> (),
 	toFrame: (self: MapView, x: number, z: number) -> Vector2,
+	toFraction: (self: MapView, x: number, z: number) -> (number, number),
 	toWorld: (self: MapView, position: Vector2) -> (number, number),
+	setResample: (self: MapView, screenPixels: number) -> (),
 }
 
 local MapView = {}
@@ -104,14 +110,30 @@ function MapView.render(self: MapView, centerX: number, centerZ: number)
 	end
 end
 
--- World block position -> pixel offset inside the frame (for the current window).
+-- World block position -> screen pixel offset inside the frame (for the current window).
 function MapView.toFrame(self: MapView, x: number, z: number): Vector2
 	local size = self.frame.AbsoluteSize
-	local scale = self.layer.scale
-	return Vector2.new((x / scale - self.u0) / self.pixels * size.X, (z / scale - self.v0) / self.pixels * size.Y)
+	local u, v = MapView.toFraction(self, x, z)
+	return Vector2.new(u * size.X, v * size.Y)
 end
 
--- Pixel offset inside the frame -> world block position.
+-- World block position -> its share of the frame across and down (0..1 inside the window).
+function MapView.toFraction(self: MapView, x: number, z: number): (number, number)
+	local scale = self.layer.scale
+	return (x / scale - self.u0) / self.pixels, (z / scale - self.v0) / self.pixels
+end
+
+-- Pixelated while an image pixel covers at least one of the `screenPixels` across the frame.
+function MapView.setResample(self: MapView, screenPixels: number)
+	local mode = if screenPixels >= self.pixels then Enum.ResamplerMode.Pixelated else Enum.ResamplerMode.Default
+	if self.labels[1].ResampleMode ~= mode then
+		for _, label in self.labels do
+			label.ResampleMode = mode
+		end
+	end
+end
+
+-- Screen pixel offset inside the frame -> world block position.
 function MapView.toWorld(self: MapView, position: Vector2): (number, number)
 	local size = self.frame.AbsoluteSize
 	local scale = self.layer.scale

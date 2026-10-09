@@ -1,9 +1,13 @@
 --!strict
 --[[
-	Small reusable GUI pieces for the map: a right-click menu and a text prompt.
+	Small reusable GUI pieces for the map: a right-click menu and a text prompt. Both are drawn in
+	pixels of 1080p's Auto and scaled by Ui/UiScale.reference (the GUI scale / 4, at least 0.75),
+	like the world map's bar; the menu is kept on the screen by its size as drawn.
 ]]
 
 local UserInputService = game:GetService("UserInputService")
+
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 
 export type Item = { text: string, action: () -> () }
 
@@ -24,6 +28,14 @@ local function style(button: TextButton, text: string)
 end
 
 local current: Instance? = nil
+
+-- A UIScale at UiScale.reference on `object` (scaled about its AnchorPoint); the scale.
+local function referenceScale(object: GuiObject): number
+	local scale = Instance.new("UIScale")
+	scale.Scale = UiScale.reference()
+	scale.Parent = object
+	return scale.Scale
+end
 
 function ContextMenu.close()
 	if current then
@@ -54,10 +66,12 @@ function ContextMenu.show(gui: ScreenGui, position: Vector2, items: { Item })
 	menu.BorderSizePixel = 0
 	menu.ZIndex = 51
 	local height = #items * ROW + 8
+	local scale = referenceScale(menu)
+	-- (Kept on the screen by its size as drawn: GUI pixels times its scale.)
 	local screen = gui.AbsoluteSize
 	menu.Position = UDim2.fromOffset(
-		math.clamp(position.X, 0, math.max(0, screen.X - WIDTH)),
-		math.clamp(position.Y, 0, math.max(0, screen.Y - height))
+		math.clamp(position.X, 0, math.max(0, screen.X - WIDTH * scale)),
+		math.clamp(position.Y, 0, math.max(0, screen.Y - height * scale))
 	)
 	menu.Size = UDim2.fromOffset(WIDTH, height)
 	local corner = Instance.new("UICorner")
@@ -116,6 +130,7 @@ function ContextMenu.prompt(gui: ScreenGui, title: string, default: string, done
 	box.Size = UDim2.fromOffset(300, 130)
 	box.BackgroundColor3 = Color3.fromRGB(24, 26, 32)
 	box.ZIndex = 61
+	referenceScale(box)
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 8)
 	corner.Parent = box

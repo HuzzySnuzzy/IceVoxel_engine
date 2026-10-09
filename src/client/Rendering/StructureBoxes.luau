@@ -8,7 +8,8 @@
 	           (Minecraft's light gray lines) on an invisible, non-colliding, non-queried part the
 	           size of the region. While a structure block's screen is open its outline follows
 	           the fields being typed (Ui/StructureScreen.preview).
-	  name     a small label over the block with the structure's name (and mode).
+	  name     a small label over the block with the structure's name (and mode), drawn in pixels
+	           of 1080p's Auto and scaled by Ui/UiScale.reference with the GUI scale.
 	  air      a SAVE block with "Show Invisible Blocks" marks the air cells of its region with
 	           small blue cubes (Minecraft draws their outlines), at most MAX_AIR of them, in
 	           regions of at most MAX_SCAN cells; structure voids are drawn by the world itself.
@@ -39,6 +40,7 @@ local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local StructureRecords = require(script.Parent.Parent.World.StructureRecords)
 local StructureScreen = require(script.Parent.Parent.Ui.StructureScreen)
 local Style = require(script.Parent.Parent.Ui.Style)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local Rebase = require(script.Parent.Rebase)
 
 local BLOCK = Config.BlockSize
@@ -46,8 +48,10 @@ local BLOCK = Config.BlockSize
 local RANGE = 128
 local LIMIT = 24
 local INTERVAL = 0.25
--- The name label is drawn this far (blocks).
+-- The name label is drawn this far (blocks), this big (pixels at 1080p's Auto: times
+-- UiScale.reference).
 local LABEL_DISTANCE = 48
+local LABEL_WIDTH, LABEL_HEIGHT, LABEL_TEXT = 240, 18, 14
 -- "Show Invisible Blocks": regions scanned at most (cells), air markers at most, rescans (s).
 local MAX_SCAN = 16384
 local MAX_AIR = 2048
@@ -63,6 +67,13 @@ type Entry = { part: Part, box: SelectionBox, anchor: Part, label: TextLabel, gu
 local StructureBoxes = {}
 
 local started = false
+
+-- The name label at the GUI scale's reference size.
+local function sizeLabel(entry: Entry)
+	local reference = UiScale.reference()
+	entry.gui.Size = UDim2.fromOffset(LABEL_WIDTH * reference, LABEL_HEIGHT * reference)
+	entry.label.TextSize = math.floor(LABEL_TEXT * reference + 0.5)
+end
 
 local function newEntry(folder: Folder): Entry
 	local part = Instance.new("Part")
@@ -94,7 +105,6 @@ local function newEntry(folder: Folder): Entry
 	anchor.Locked = true
 	anchor.Parent = folder
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(240, 18)
 	gui.StudsOffset = Vector3.new(0, BLOCK * 0.5 + 1, 0)
 	gui.MaxDistance = LABEL_DISTANCE * BLOCK
 	gui.LightInfluence = 0
@@ -104,12 +114,13 @@ local function newEntry(folder: Folder): Entry
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
 	label.Font = Style.FONT
-	label.TextSize = 14
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 0.4
 	label.Text = ""
 	label.Parent = gui
-	return { part = part, box = box, anchor = anchor, label = label, gui = gui }
+	local entry = { part = part, box = box, anchor = anchor, label = label, gui = gui }
+	sizeLabel(entry)
+	return entry
 end
 
 local function hide(entry: Entry)
@@ -133,6 +144,11 @@ function StructureBoxes.start(world: ClientWorld.ClientWorld, records: () -> Str
 	folder.Name = "IceVoxelStructureBoxes"
 	folder.Parent = workspace
 	local entries: { Entry } = {}
+	UiScale.changed:Connect(function()
+		for _, entry in entries do
+			sizeLabel(entry)
+		end
+	end)
 
 	local airFolder = Instance.new("Folder")
 	airFolder.Name = "Air"

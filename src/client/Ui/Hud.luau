@@ -83,6 +83,7 @@ local SpectatorGui = require(script.Parent.SpectatorGui)
 local SurvivalHud = require(script.Parent.SurvivalHud)
 local ManaHud = require(script.Parent.ManaHud)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 export type Mode = "play" | "creative" | "hidden"
 
@@ -406,13 +407,8 @@ function Hud.start()
 	disableCoreGui()
 
 	local player = Players.LocalPlayer
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelHud"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.DisplayOrder = 10
-	gui.Enabled = hudVisible
+	-- (From the screen's top, inside the safe area: the canvas sits at its bottom.)
+	local gui = UiScale.screenGui("IceVoxelHud", "Hud", { inset = true, kind = "scaled", enabled = hudVisible })
 	hudGui = gui
 
 	local canvas = Instance.new("Frame")
@@ -626,18 +622,20 @@ function Hud.start()
 		Style.shadowText(hotbar, "", 0, NAME_Y_SURVIVAL, WIDTH, 8, Style.Colour.Text, 8, Enum.TextXAlignment.Center)
 
 	local function updateScale()
-		local touch = UserInputService.TouchEnabled
+		-- (Ui/UiScale's touch flag: a touch screen played by touch, not with a mouse or a gamepad.)
+		local touch = UiScale.touch()
 		more.Visible = touch
 		gear.Visible = touch
 		skills.Visible = touch and ProgressionState.enabled()
 		chat.Visible = touch and chatHandler ~= nil
 		local width = if touch then WIDTH + 2 * (TOUCH_BUTTON + 2) else WIDTH
-		scale.Scale = Style.guiScale(gui.AbsoluteSize, width, HEIGHT, touch)
+		-- (The GUI scale, shrunk to fit this GUI's own area: the device's safe area.)
+		scale.Scale = UiScale.fit(width, HEIGHT, gui.AbsoluteSize)
 		attack.Position = UDim2.fromOffset(WIDTH + 6 + (if touch then TOUCH_BUTTON + 2 else 0), BAR_Y + 2)
 	end
 	refreshButtons = updateScale
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateScale)
-	Style.scaleChanged:Connect(updateScale)
+	UiScale.screenChanged:Connect(updateScale)
 	gui.Parent = player:WaitForChild("PlayerGui")
 	updateScale()
 

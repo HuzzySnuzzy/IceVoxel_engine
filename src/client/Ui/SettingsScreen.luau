@@ -60,6 +60,7 @@ local FormWidgets = require(script.Parent.FormWidgets)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
 local TextWrap = require(script.Parent.TextWrap)
+local UiScale = require(script.Parent.UiScale)
 
 -- Minecraft's white title and gray status text, and the Key Binds list's red conflicts and
 -- yellow key waiting for a press (ChatFormatting.RED / YELLOW).
@@ -605,12 +606,19 @@ local function refreshStatus()
 	end
 end
 
+-- The GUI Scale button cycles Auto, 1 .. this screen's largest choice (Minecraft's), whatever the
+-- window: set when the menu shows and whenever the screen changes.
+local function limitScale()
+	Settings.setLimit("guiScale", UiScale.maxChoice())
+end
+
 -- Builds the menu and registers it with the screens (Ui/Screens.onSettings). Call after Screens.start.
 function SettingsScreen.start()
 	if started then
 		return
 	end
 	started = true
+	UiScale.follow(limitScale)
 
 	local root = Instance.new("Frame")
 	root.Name = "Options"
@@ -754,6 +762,7 @@ function SettingsScreen.toggle()
 	if Screens.panelShown(p) then
 		finish()
 	elseif not Screens.isOpen() then
+		limitScale()
 		shownPage = "main"
 		for id, view in views do
 			view.frame.Visible = id == "main"
@@ -797,6 +806,7 @@ end
 function SettingsScreen.showIn(host: GuiObject, onDone: () -> ()): () -> ()
 	local root = menuRoot
 	assert(root, "SettingsScreen.showIn: call start first")
+	limitScale()
 	shownPage = "main"
 	for id, view in views do
 		view.frame.Visible = id == "main"

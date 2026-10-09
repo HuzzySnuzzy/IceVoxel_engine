@@ -883,7 +883,8 @@ local Config = {
 
 	Map = {
 		Enabled = true,
-		-- Minimap size in pixels and blocks per minimap pixel.
+		-- The minimap's image in map pixels (its size on screen: UiScale.Minimap GUI pixels) and
+		-- blocks per map pixel.
 		MinimapSize = 192,
 		MinimapScale = 2,
 		-- Zoom levels of the world map (M), in blocks per pixel.

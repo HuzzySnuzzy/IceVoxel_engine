@@ -261,10 +261,10 @@ function ExplosionView.start()
 		local player = Players.LocalPlayer
 		local gui = if player then player:FindFirstChildOfClass("PlayerGui") else nil
 		if brightness > 0 and gui then
-			local screen = Instance.new("ScreenGui")
-			screen.Name = "IceVoxelNukeFlash"
-			screen.IgnoreGuiInset = true
-			screen.DisplayOrder = 100
+			-- (Required here: the tests load this module without Roblox's instances.)
+			local UiScale = require(script.Parent.Parent.Ui.UiScale)
+			local screen: ScreenGui =
+				UiScale.screenGui("IceVoxelNukeFlash", "Flash", { inset = true, full = true, kind = "screen" })
 			local frame = Instance.new("Frame")
 			frame.Size = UDim2.fromScale(1, 1)
 			frame.BorderSizePixel = 0
