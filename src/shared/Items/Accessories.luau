@@ -26,6 +26,30 @@
 	  armorPoints  Items.armorPoints of the armor worn plus the accessories' defense (Obsidian Skull,
 	               Cobalt Shield: Terraria's +1 defense each), for every reader of armor points.
 	  isHidden     whether an accessory slot's or an armor slot's look is hidden.
+	  speedFactor  how much faster the stats move a player sideways at most, (1 + speed) x (1 +
+	               runBoost): the server's move check (Players/MoveCheck.setFactor; 1.61 with
+	               today's accessories).
+	  knockbackShare  the share of a push that reaches the player (1 - knockback): the server
+	               scales the explosion and mob pushes it sends, and their speed allowance.
+	  regenerate   one 20 Hz tick of a Band of Regeneration's count: a half heart every `regen`
+	               ticks while hurt, alive and in survival or adventure (Players/Characters).
+	  hasteTicks   ticks since the last swing as a weapon `attackSpeed` faster than its own sees
+	               them (Feral Claws: Combat.strength's recharge x (1 + attackSpeed), done on the
+	               ticks so Combat's speeds stay Minecraft's): the server's hits (Mobs/Mobs) and
+	               the client's attack indicator agree.
+	  looks        what the character shows, as the text of the Types.LOOKS_ATTRIBUTE player
+	               attribute (server Players/Inventories sets it, every client's
+	               Player/EquipmentLooks draws it): the four armor pieces, head to feet, each its
+	               vanity item over the armor worn and "0" when the armor slot is hidden or empty;
+	               then the accessories drawn (only items with a `worn` place), at most
+	               ACCESSORY_SIZE, each a vanity accessory over the accessory in its row (shown
+	               even when that one is hidden, Terraria; vanity rows are never closed: looks
+	               only), else the accessory unless hidden or its slot closed, each item once.
+	               "4100,0,0,4235,4237".
+	  parseLooks   the item ids of such a text ([1..4] armor, 0 none; [5..] accessories); nonsense
+	               reads as nothing.
+	  tooltip      the lines an accessory's or vanity item's tooltip adds ("When worn:", "Sprinting
+	               builds up to 40% faster", ...).
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -149,6 +173,186 @@ end
 function Accessories.isHidden(inventory: Types.Inventory, kind: "accessory" | "armor", slot: number): boolean
 	local bit = if kind == "armor" then Types.HIDE_ARMOR + slot - 1 else slot - 1
 	return bit32.btest(inventory.hidden, bit32.lshift(1, bit))
+end
+
+-- How much faster `stats` move a player sideways at most (see the header).
+function Accessories.speedFactor(stats: Stats): number
+	return (1 + stats.speed) * (1 + stats.runBoost)
+end
+
+-- The share of a push that reaches a player wearing `stats` (a Cobalt Shield's 1 resistance: 0).
+function Accessories.knockbackShare(stats: Stats): number
+	return 1 - math.clamp(stats.knockback, 0, 1)
+end
+
+--[[
+	One tick of a Band of Regeneration (`stats.regen` ticks a half heart; 0: none): `ticks` counted
+	so far, whether the player may heal now (hurt, alive, survival or adventure). Returns the new
+	count and the half hearts healed this tick (Players/Characters' 20 a second): one every
+	`regen` ticks while it may, the count starting over whenever it may not.
+]]
+function Accessories.regenerate(stats: Stats, ticks: number, mayHeal: boolean): (number, number)
+	local regen = stats.regen
+	if regen <= 0 or not mayHeal then
+		return 0, 0
+	end
+	ticks += 1
+	if ticks >= regen then
+		return 0, 1
+	end
+	return ticks, 0
+end
+
+-- `ticks` since the last swing as a weapon `haste` (Stats.attackSpeed) faster sees them.
+function Accessories.hasteTicks(ticks: number, haste: number): number
+	if not (haste > 0) then
+		return ticks
+	end
+	return (ticks + 0.5) * (1 + haste) - 0.5
+end
+
+-- The item drawn for a stack, if it may be (an accessory with a `worn` place).
+local function drawn(stack: Types.Stack?): number?
+	local item = if stack and stack.count >= 1 then stack.item else nil
+	local accessory = if item then Items.accessory(item) else nil
+	return if accessory and accessory.worn then item else nil
+end
+
+-- What the character shows (Types.LOOKS_ATTRIBUTE's text, see the header).
+function Accessories.looks(inventory: Types.Inventory): string
+	local parts: { string } = {}
+	for slot = 1, Types.ARMOR_SIZE do
+		local stack: Types.Stack? = nil
+		if not Accessories.isHidden(inventory, "armor", slot) then
+			local vanity = inventory.vanityArmor[slot]
+			stack = if vanity and vanity.count >= 1 then vanity else inventory.armor[slot]
+		end
+		parts[slot] = if stack and stack.count >= 1 then tostring(stack.item) else "0"
+	end
+	local open = math.clamp(inventory.accessorySlots, 0, Types.ACCESSORY_SIZE)
+	local shown: { [number]: boolean } = {}
+	for slot = 1, Types.ACCESSORY_SIZE do
+		local vanity = inventory.vanityAccessories[slot]
+		local item = if vanity and vanity.count >= 1 then drawn(vanity) else nil
+		if
+			(vanity == nil or vanity.count < 1)
+			and slot <= open
+			and not Accessories.isHidden(inventory, "accessory", slot)
+		then
+			item = drawn(inventory.accessories[slot])
+		end
+		if item and not shown[item] then
+			shown[item] = true
+			table.insert(parts, tostring(item))
+		end
+	end
+	return table.concat(parts, ",")
+end
+
+-- The ids of a looks text ([1..4] armor, 0 none; [5..] accessories drawn): see the header.
+function Accessories.parseLooks(text: any): { number }
+	local ids = { 0, 0, 0, 0 }
+	if type(text) ~= "string" or #text > 200 then
+		return ids
+	end
+	local index = 0
+	for word in string.gmatch(text, "[^,]+") do
+		index += 1
+		local id = tonumber(word)
+		local valid = id ~= nil and id == math.floor(id) and Items.isValid(id)
+		if index <= Types.ARMOR_SIZE then
+			ids[index] = if valid then id :: number else 0
+		elseif index <= Types.ARMOR_SIZE + Types.ACCESSORY_SIZE then
+			if valid and drawn({ item = id :: number, count = 1 }) then
+				table.insert(ids, id :: number)
+			end
+		end
+	end
+	return ids
+end
+
+local ROMAN = { "I", "II", "III", "IV", "V" }
+
+-- A share as a whole percentage ("40%").
+local function percent(share: number): string
+	return `{math.floor(share * 100 + 0.5)}%`
+end
+
+-- The lines an accessory's or vanity item's tooltip adds (see the header); {} for other items.
+function Accessories.tooltip(item: number): { string }
+	local lines: { string } = {}
+	local accessory = Items.accessory(item)
+	if accessory == nil then
+		if Items.vanitySlot(item) then
+			table.insert(lines, "Vanity: worn for its look only")
+		end
+		return lines
+	end
+	table.insert(lines, "When worn:")
+	local runBoost = accessory.runBoost or 0
+	if runBoost > 0 then
+		table.insert(lines, `Sprinting builds up to {percent(runBoost)} faster`)
+	end
+	local airJumps = accessory.airJumps or 0
+	if airJumps == 1 then
+		table.insert(lines, "Jump once more in the air")
+	elseif airJumps > 1 then
+		table.insert(lines, `Jump {airJumps} more times in the air`)
+	end
+	local jump = accessory.jump or 0
+	if jump > 0 then
+		local level = math.floor(jump / 0.1 + 0.5)
+		local roman = ROMAN[level]
+		table.insert(
+			lines,
+			if roman and math.abs(level * 0.1 - jump) < 1e-9
+				then `Jump higher (as Jump Boost {roman})`
+				else "Jump higher"
+		)
+	end
+	if accessory.noFallDamage then
+		table.insert(lines, "No fall damage")
+	end
+	local speed = accessory.speed or 0
+	if speed > 0 then
+		table.insert(lines, `+{percent(speed)} movement speed`)
+	end
+	local regen = accessory.regen or 0
+	if regen > 0 then
+		local seconds = regen / 20
+		table.insert(
+			lines,
+			if seconds == math.floor(seconds)
+				then `Heals half a heart every {seconds} seconds`
+				else `Heals half a heart every {string.format("%.1f", seconds)} seconds`
+		)
+	end
+	local mana = accessory.mana or 0
+	if mana > 0 then
+		table.insert(lines, `+{mana} max mana`)
+	end
+	local defense = accessory.defense or 0
+	if defense > 0 then
+		table.insert(lines, `+{defense} Armor`)
+	end
+	if accessory.fireWalk then
+		table.insert(lines, "Campfires don't hurt")
+	end
+	local knockback = accessory.knockback or 0
+	if knockback >= 1 then
+		table.insert(lines, "No knockback")
+	elseif knockback > 0 then
+		table.insert(lines, `{percent(knockback)} less knockback`)
+	end
+	local swim = accessory.swim or 0
+	if swim > 0 then
+		table.insert(lines, `Swims {percent(swim)} faster`)
+	end
+	local attackSpeed = accessory.attackSpeed or 0
+	if attackSpeed > 0 then
+		table.insert(lines, `+{percent(attackSpeed)} attack speed`)
+	end
+	return lines
 end
 
 return Accessories

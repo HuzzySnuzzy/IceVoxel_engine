@@ -481,8 +481,9 @@ return function(t, shared, require, server, client)
 		is(decoded.inventory.slots[1], TANK, 1, 5, "the inventory arrives")
 	end)
 
-	-- Offset of the container header (window byte) in a snapshot whose stacks are all empty.
-	local HEADER = 5 + 41 * 3
+	-- Offset of the container header (window byte) in a snapshot whose stacks are all empty: the
+	-- 41 stacks, Terraria's 18 equipment stacks, its hidden bits (u16) and open slots (u8).
+	local HEADER = 5 + (41 + 18) * 3 + 3
 
 	t.test("protocol: malformed snapshots decode to nil", function()
 		local inventory = Types.newInventory()

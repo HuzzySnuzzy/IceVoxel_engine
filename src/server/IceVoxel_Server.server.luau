@@ -102,6 +102,7 @@ end
 local WorldTypes = require(Shared.Generation.WorldTypes)
 local WorldSettings = require(Shared.WorldSettings)
 local Mining = require(Shared.Mining)
+local Accessories = require(Shared.Items.Accessories)
 
 local Server = script.Parent
 local Api = require(Server.Api)
@@ -245,6 +246,13 @@ local function startWorld(settings: WorldSettings.Settings)
 	Inventories.setWearFilter(Progression.wear)
 	-- A Classic character keeps everything when it dies (Terraria's softcore; Shared/Characters).
 	Inventories.setKeepRule(CharacterStore.keepsInventory)
+	-- Terraria's accessory slots: five, one more at each of Config.Accessories.ExtraSlotAges
+	-- (Items/Accessories.slotsForAge of the player's Age; Players/Inventories asks a few times a
+	-- second, as nothing announces an Age reached).
+	Inventories.setSlotsRule(function(player: Player): number
+		local progress = Progression.state(player)
+		return Accessories.slotsForAge(if progress then progress.age else 1)
+	end)
 	-- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
 	Inventories.setResultsHandler(Progression.smelted)
 	ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })

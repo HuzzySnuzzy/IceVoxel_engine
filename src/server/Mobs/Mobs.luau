@@ -16,14 +16,16 @@
 	             (Characters.hurt: the hurt cooldown, armor and Resistance; a fresh one knocks the
 	             player back through a `push` op the client adds to its movement, as an
 	             explosion's, which the server's speed checks are told to allow:
-	             Characters.knockedBack), a creeper's blast (World/Explosions.explode, power 3,
+	             Characters.knockedBack; less the player's knockback resistance, a Cobalt
+	             Shield's all of it: Characters.knockbackShare), a creeper's blast (World/Explosions.explode, power 3,
 	             at its feet: blocks, items, players and other mobs as any blast) and arrows (an
 	             `arrow` op for everyone near).
 	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
 	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
 	             the line of sight, then hits with the held item at its attack strength (ticks
-	             since the player's last attack or change of held item), with the player's
+	             since the player's last attack or change of held item; Feral Claws' attack speed
+	             recharges it faster: Items/Accessories.hasteTicks), with the player's
 	             Strength and Weakness (Players/Effects.levels); a hit plays
 	             entity.player.attack.strong or .weak and wears a tool (swords 1, other tools 2;
 	             not in creative).
@@ -68,6 +70,7 @@ local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local WorldSettings = require(Shared.WorldSettings)
 local Combat = require(Shared.Entities.Combat)
+local Accessories = require(Shared.Items.Accessories)
 local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
@@ -323,9 +326,12 @@ local function apply(mobs: MobWorld.MobWorld, world: WorldServer.World)
 		local player = hit.key
 		if typeof(player) == "Instance" and player:IsA("Player") and player.Parent then
 			local _, fresh = Characters.hurt(player, hit.damage)
-			if fresh then
-				queue(player, { op = "push", id = hit.id, kx = hit.kx, ky = hit.ky, kz = hit.kz })
-				Characters.knockedBack(player, hit.kx, hit.ky, hit.kz)
+			-- (Knockback resistance takes its share off: a Cobalt Shield all of it.)
+			local share = Characters.knockbackShare(player)
+			if fresh and share > 0 then
+				local kx, ky, kz = hit.kx * share, hit.ky * share, hit.kz * share
+				queue(player, { op = "push", id = hit.id, kx = kx, ky = ky, kz = kz })
+				Characters.knockedBack(player, kx, ky, kz)
 			end
 		end
 	end
@@ -402,6 +408,8 @@ local function onAttack(player: Player, payload: buffer)
 		swing.changed = tickCount
 	end
 	local since = tickCount - math.max(swing.swing, swing.changed)
+	-- (Feral Claws: the weapon recovers attackSpeed faster.)
+	since = Accessories.hasteTicks(since, Inventories.accessories(player).attackSpeed)
 	local landed, result = mobs:attack(id, {
 		key = player,
 		x = fx,

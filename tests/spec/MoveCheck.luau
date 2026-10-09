@@ -4,7 +4,10 @@
 	PlayerPhysics runs of 30 s in every mode (sprint-jumping on ice with Speed II, creative
 	sprint-flying, the fastest spectator flight up and down, a long fall) sent at 20 a second with
 	jittery latency are never refused; teleport-like jumps and sustained over-speed are; a 10 block
-	a tick explosion push passes with its grant; the mode-switch grace; NaN and bounds.
+	a tick explosion push passes with its grant; the mode-switch grace; NaN and bounds; Terraria's
+	accessories' speed factor (`setFactor`: the fastest of them sprinting passes, a minute of it
+	without the factor and anything faster do not; a lowered factor waits the grace; nonsense
+	counts as 1).
 ]]
 
 return function(t, shared, require, server, _client)
@@ -285,6 +288,78 @@ return function(t, shared, require, server, _client)
 		t.eq(same.previous, nil, "no previous mode")
 	end)
 
+	t.test("move check: the accessories' factor lets the fastest of them through, and no more", function()
+		-- The fastest worn: Aglet and Anklet of the Wind (x 1.15) with Hermes Boots built up
+		-- (x 1.4) and Speed II (x 1.4), sprinting on stone (12.65 blocks a second, the fastest
+		-- they go: sprint-jumping is slower, its air acceleration is not sped up): the factor
+		-- the server sets for them is (1 + 0.15) x (1 + 0.4) = 1.61.
+		local factor = (1 + 0.15) * (1 + 0.4)
+		local function runner(): PlayerPhysics.State
+			local state = PlayerPhysics.new(0.5, 1, 0.5)
+			state.onGround = true
+			PlayerPhysics.setGameMode(state, SURVIVAL)
+			state.speedFactor = 1.4 * 1.15
+			state.runBoost = 0.4
+			return state
+		end
+		local sprint = input(1, 0, { sprint = true })
+		local bucket = MoveCheck.new(SURVIVAL, 0)
+		MoveCheck.setFactor(bucket, factor, 0)
+		local refused, travelled = replay(runner(), bucket, flat(Blocks.id.Stone), sprint, 60, 11)
+		t.eq(refused, 0, "Hermes Boots, two speed accessories and Speed II sprinting")
+		local speed = travelled / 60
+		t.ok(speed > MoveCheck.limits(SURVIVAL).horizontal, `faster than survival's limit: {speed} blocks a second`)
+		t.ok(speed < MoveCheck.limits(SURVIVAL).horizontal * factor, `within the factor's: {speed}`)
+		-- Sprint-jumping on ice with all of it passes too.
+		local hops = MoveCheck.new(SURVIVAL, 0)
+		MoveCheck.setFactor(hops, factor, 0)
+		refused = replay(runner(), hops, flat(Blocks.id.Ice), input(1, 0, { sprint = true, jump = true }), 30, 12)
+		t.eq(refused, 0, "sprint-jumping on ice")
+		-- Without the factor the sprint is refused (0.65 blocks a second over 12 overdraws the
+		-- 2 s of slack within a minute).
+		refused = replay(runner(), MoveCheck.new(SURVIVAL, 0), flat(Blocks.id.Stone), sprint, 60, 11)
+		t.ok(refused > 0, `refused without it ({refused})`)
+		-- Beyond the factor's limit (a speed hack at 25 blocks a second) is refused within seconds.
+		local hacked = MoveCheck.new(SURVIVAL, 0)
+		MoveCheck.setFactor(hacked, factor, 0)
+		local refusedAt = nil
+		for tick = 1, 200 do
+			if not MoveCheck.check(hacked, 25 * TICK, 0, 0, tick * TICK) and refusedAt == nil then
+				refusedAt = tick * TICK
+			end
+		end
+		t.ok(refusedAt ~= nil and (refusedAt :: number) < 6, `25 blocks a second refused after {refusedAt} s`)
+		-- Up keeps its limit: the factor is sideways only.
+		local up = MoveCheck.new(SURVIVAL, 0)
+		MoveCheck.setFactor(up, factor, 0)
+		t.near(up.up, MoveCheck.limits(SURVIVAL).up * SLACK, 1e-9, "up unchanged")
+		t.ok(not MoveCheck.check(up, 0, MoveCheck.limits(SURVIVAL).up * SLACK + 1, 0, 0), "up's cap")
+	end)
+
+	t.test("move check: a lower factor waits out the grace; nonsense counts as 1", function()
+		local bucket = MoveCheck.new(SURVIVAL, 0)
+		local h = MoveCheck.limits(SURVIVAL).horizontal
+		MoveCheck.setFactor(bucket, 1.5, 0)
+		t.eq(bucket.factor, 1.5)
+		-- At 1.5 x the limit for 4 s: fine while worn.
+		for tick = 1, 80 do
+			t.ok(MoveCheck.check(bucket, h * 1.45 * TICK, 0, 0, tick * TICK), "worn")
+		end
+		-- Taken off at 4 s: the client may still be fast for a moment (the grace), then not.
+		MoveCheck.setFactor(bucket, 1, 4)
+		local refusedAt = nil
+		for tick = 81, 400 do
+			if not MoveCheck.check(bucket, h * 1.45 * TICK, 0, 0, tick * TICK) and refusedAt == nil then
+				refusedAt = tick * TICK
+			end
+		end
+		t.ok(refusedAt ~= nil and (refusedAt :: number) > 4 + MoveCheck.GRACE, `after the grace: {refusedAt}`)
+		for _, bad in { 0 / 0, -2, 0.5, math.huge } do
+			local b = MoveCheck.new(SURVIVAL, 0)
+			MoveCheck.setFactor(b, bad, 0)
+			t.eq(b.factor, 1, `factor {bad}`)
+		end
+	end)
 	t.test("move check: NaN and out of bounds", function()
 		local bucket = MoveCheck.new(SPECTATOR, 0)
 		t.ok(not MoveCheck.check(bucket, 0 / 0, 0, 0, 0), "NaN x")

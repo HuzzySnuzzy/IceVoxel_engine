@@ -26,6 +26,10 @@
 
 	A saved world's returning player gets their inventory back with `restore` (World/WorldSave).
 
+	Terraria's equipment (Inventory/Types, Inventory/Menu's rules): `restoreEquipment` puts a saved
+	character's back, and `setAccessorySlots` opens the accessory slots the player's Age gives
+	(Items/Accessories.slotsForAge, never saved; a snapshot carries it to the client).
+
 	Tools wear through `wearHeld` (the server's mining calls it); `heldStack` is what is in hand.
 	Using an item on a block (a bucket filling or emptying: Players/ItemUse) replaces what is in
 	hand with `setHeld` and hands stacks over with `give` (Inventory.add; the rest comes back);
@@ -112,6 +116,7 @@ export type InventoryState = {
 		cursor: Stack?
 	) -> { Stack },
 	restoreEquipment: (self: InventoryState, key: any, equipment: Types.Equipment) -> (),
+	setAccessorySlots: (self: InventoryState, key: any, slots: number) -> boolean,
 }
 
 local InventoryState = {}
@@ -477,26 +482,30 @@ function InventoryState.give(self: InventoryState, key: any, stack: Stack): Stac
 	return left
 end
 
--- Does the player have `item` in their inventory or armor (Minecraft's Inventory.contains)?
+-- Does `store` (slots 1..`size`) hold `item`?
+local function holds(store: { [number]: Stack? }, size: number, item: number): boolean
+	for slot = 1, size do
+		local stack = store[slot]
+		if stack and stack.item == item and stack.count >= 1 then
+			return true
+		end
+	end
+	return false
+end
+
+-- Does the player have `item` in their inventory, armor or equipment (Minecraft's
+-- Inventory.contains, which looks at every compartment)?
 function InventoryState.has(self: InventoryState, key: any, item: number): boolean
 	local player = self.players[key]
 	if player == nil then
 		return false
 	end
 	local inventory = player.window.inventory
-	for slot = 1, Types.INVENTORY_SIZE do
-		local stack = inventory.slots[slot]
-		if stack and stack.item == item and stack.count >= 1 then
-			return true
-		end
-	end
-	for slot = 1, Types.ARMOR_SIZE do
-		local stack = inventory.armor[slot]
-		if stack and stack.item == item and stack.count >= 1 then
-			return true
-		end
-	end
-	return false
+	return holds(inventory.slots, Types.INVENTORY_SIZE, item)
+		or holds(inventory.armor, Types.ARMOR_SIZE, item)
+		or holds(inventory.accessories, Types.ACCESSORY_SIZE, item)
+		or holds(inventory.vanityArmor, Types.VANITY_ARMOR_SIZE, item)
+		or holds(inventory.vanityAccessories, Types.VANITY_ACCESSORY_SIZE, item)
 end
 
 --[[
@@ -620,6 +629,26 @@ function InventoryState.restoreEquipment(self: InventoryState, key: any, equipme
 	local hidden = equipment.hidden
 	inventory.hidden = if hidden == hidden and hidden >= 0 then math.floor(hidden) % 65536 else 0
 	player.dirty = true
+end
+
+--[[
+	The player has `slots` accessory slots open (their Age's: Items/Accessories.slotsForAge; kept
+	within 0..Types.ACCESSORY_SIZE). What the closed ones hold stays (Inventory/Menu: it can be
+	taken out and does nothing). Returns whether it changed (a snapshot is then due).
+]]
+function InventoryState.setAccessorySlots(self: InventoryState, key: any, slots: number): boolean
+	local player = self.players[key]
+	if player == nil or slots ~= slots then
+		return false
+	end
+	local open = math.clamp(math.floor(slots), 0, Types.ACCESSORY_SIZE)
+	local inventory = player.window.inventory
+	if inventory.accessorySlots == open then
+		return false
+	end
+	inventory.accessorySlots = open
+	player.dirty = true
+	return true
 end
 
 -- The players due a snapshot (clears their flags).

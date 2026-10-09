@@ -17,8 +17,9 @@
 	             fading over the last half second
 	  hearts     survival and adventure only (GameMode.isSurvivalLike, Minecraft's canHurtPlayer):
 	             10 hearts (the Humanoid's health as 20 half hearts) and, above them, 10 armor icons
-	             when armor is worn (Items.armorPoints). Drawn as pixel art from Frames. Low health
-	             makes them shake; damage makes their outline blink.
+	             when armor is worn (Items/Accessories.armorPoints: accessories' defense too). Drawn
+	             as pixel art from Frames. Low health makes them shake; damage makes their outline
+	             blink.
 	  knowledge  survival and adventure only (Minecraft's hasExperience), with Config.Progression on:
 	             Minecraft's experience bar, 182 x 5 just above the hotbar (KNOWLEDGE_Y, where
 	             Minecraft's layout already leaves it room: no row moved for it), filling green with
@@ -63,6 +64,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
+local Accessories = require(Shared.Items.Accessories)
 local Knowledge = require(Shared.Progression.Knowledge)
 local PlayerSettings = require(Shared.PlayerSettings)
 local Types = require(Shared.Inventory.Types)
@@ -703,7 +705,7 @@ function Hud.start()
 		end
 
 		-- Hearts and armor (survival).
-		local points = if survival then Items.armorPoints(inventory.armor) else 0
+		local points = if survival then Accessories.armorPoints(inventory) else 0
 		if heartRow.Visible ~= survival then
 			heartRow.Visible = survival
 		end

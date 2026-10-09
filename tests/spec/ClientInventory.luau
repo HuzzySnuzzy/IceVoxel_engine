@@ -220,7 +220,8 @@ return function(t, shared, require, server, client)
 		local w = Prediction.new():window()
 		t.eq(w.id, 0)
 		t.eq(w.container.kind, "inventory")
-		t.eq(Menu.size(w), 45)
+		-- 45 slots and Terraria's 18 equipment slots after them (deliberately 63 since then).
+		t.eq(Menu.size(w), 63)
 	end)
 
 	t.test("prediction: matches the server after crafting in the 2 x 2 grid and closing", function()

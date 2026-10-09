@@ -3049,6 +3049,9 @@ is what a screen shows: the inventory plus a container, its top part. Its slots 
 | `n .. n+3`        | armor: head, chest, legs, feet          |
 | `n+4 .. n+30`     | inventory slots 10–36                   |
 | `n+31 .. n+39`    | the hotbar                              |
+| `n+40 .. n+46`    | Terraria's accessories (Equipment, below) |
+| `n+47 .. n+50`    | vanity armor: head, chest, legs, feet   |
+| `n+51 .. n+57`    | vanity accessories                      |
 
 Containers come in four kinds:
 
@@ -3061,7 +3064,8 @@ Containers come in four kinds:
 | `machine`   | its kind's slots (0 or more), plus `data` (energy first) | shared |
 
 So window 0 is numbered exactly like Minecraft's InventoryMenu (0 result, 1–4 grid, 5–8 armor,
-9–35 inventory, 36–44 hotbar).
+9–35 inventory, 36–44 hotbar), and Terraria's equipment follows it (45–51 accessories, 52–55
+vanity armor, 56–62 vanity accessories: 63 slots).
 
 `Menu.apply(window, action, creative)` performs one action (`creative`: the instabuild ability;
 whether a game mode may do it at all is `Menu.allows`, checked first on both sides), ported from
@@ -6190,7 +6194,8 @@ second, half hearts). The shared groundwork (data, codecs, messages; nothing pla
   and Anklet of the Wind (+5% / +10% speed), Band of Regeneration (a half heart every 10 s), Band of
   Starpower (+20 mana), Obsidian Skull (+1 armour, no campfire hurt), Flipper (swim x2), Cobalt
   Shield (no knockback, +1 armour), Feral Claws (+12% attack speed). Mineshaft chests hide most of
-  them (a fourth loot pool after Minecraft's three); spiders drop Feral Claws.
+  them (a fourth loot pool after Minecraft's three); spiders drop Feral Claws. How they are worn,
+  work and show: Equipment, below.
 - **Mana** (`Config.Mana`, server `Players/Mana`): 20, +20 a Mana Crystal (five Fallen Stars) up
   to 200, accessories on top, 400 at most; Mana Sickness is effect 25. Magic weapons (ItemList
   `magic`: Wand of Sparking, Emerald Staff, Water Bolt) and the mana potions are items;
@@ -6276,6 +6281,80 @@ stays: a non-operator joins the one running.
   when empty, else merged; leftovers dropped at its feet on spawn), marks the meta and the
   character's `imported`, and is saved at once. The old record is kept. A crash between the
   character's save and the world's save can import twice: a duplicate, never a loss.
+
+### Equipment (`Inventory/Menu`, `Items/Accessories`, `Movement/PlayerPhysics`, server `Players/Inventories`, `Players/MoveCheck`, client `Player/EquipmentLooks`, `Player/AirJumps`, `Ui/InventoryScreen`)
+
+What the equipment slots take, what worn accessories do, and how every character shows them.
+Everything an accessory does is computed from the inventory alone (`Accessories.stats`), on both
+sides, so nothing new is sent for it.
+
+**Slots and rules** (`Inventory/Menu`, pure, predicted like any click). Window slots `[n + 40,
+n + 47)` are the accessories, `[n + 47, n + 51)` vanity armor, `[n + 51, n + 58)` vanity
+accessories (window 0: 45–51, 52–55, 56–62); every one holds a single item (`slotLimit` 1).
+- An accessory slot takes an accessory (ItemList `accessory`) only while it is open (`inventory.
+  accessorySlots`, from the player's Age) and only if no other accessory slot wears the same item
+  (Terraria). A closed row still gives its item back.
+- A vanity armor slot takes the armor or vanity piece (ItemList `vanity`) of its slot; a vanity
+  accessory slot takes any accessory, open or not (looks only).
+- Shift-click: equipment goes back to the inventory (any window); from the inventory, armor to its
+  empty armor slot, then an accessory to the first open accessory slot that takes it, then a vanity
+  piece to its empty vanity slot, else the usual inventory ↔ hotbar move. Number keys and drags
+  follow `mayPlace`; a drag puts at most one item in accessory slots.
+- `hide` (action 7: slot 1..7 an accessory row, 9..12 an armor slot; `Types.hidden` bits, masked by
+  `HIDDEN_MASK` 0x0F7F) hides that look and keeps the effect. Death drops the three stores unless
+  the inventory is kept; `hidden` stays. The snapshot carries the 18 stacks, `hidden` (u16) and
+  `accessorySlots` (u8); decoding refuses bits outside the mask and more than 7 slots.
+
+**Effects.**
+- *Movement* (`PlayerPhysics`, the client's prediction): `airJumpsMax` jumps in the air
+  (`Config.Accessories.AirJumpPower` 0.36 + the balloon's 0.1 `jumpBoost`: 0.96 blocks, 1.48 with
+  both), refilled on the ground, on a ladder or in a fluid, one per press and none while flying;
+  `runBoost` builds up while sprinting on the ground (`RunDelay` 10 ticks, then `RunRamp` 12 to x1.4)
+  and drops back on a stop, a wall, a push or taking the boots off; `swimFactor` multiplies the
+  swimming acceleration and the swim up; `speed` multiplies `speedFactor` with the effects'.
+  PlayerPhysics also takes `knockbackResist`, but the client leaves it 0: the server already scales
+  the pushes it sends (below), so scaling again would square it. With the defaults the tick is
+  bit for bit Minecraft's (tests/spec/Movement).
+- *The move check* (`MoveCheck.setFactor`, through `PlayerPositions.setSpeedFactor`): the
+  horizontal allowance times `Accessories.speedFactor` ((1 + speed)(1 + runBoost): 1.61 with
+  everything, Speed II sprinting on stone at 12.65 blocks a second passes for a minute); a lower
+  factor waits `GRACE` (2 s) for the moves already sent; the vertical limits stay as they are (an
+  air jump is well inside them).
+- *The server* (`Players/Inventories.accessories(player)`, a stats table per player kept in place
+  after every snapshot): `Players/Characters` skips fall damage with `noFallDamage` (the client
+  stops sending its Fall too), heals a half heart every `regen` ticks while hurt
+  (`Accessories.regenerate`), counts the accessories' defense in armor points
+  (`Accessories.armorPoints`, also the HUD's), scales explosion pushes by `knockbackShare`;
+  `Players/Burning` spares `fireWalk` from campfires; `Mobs/Mobs` scales mob pushes the same way
+  and sees the time since a swing through `Accessories.hasteTicks` (Feral Claws: the recharge x
+  (1 + attackSpeed) without touching Combat's Minecraft speeds; the client's `Ui/AttackIndicator`
+  does the same); `mana` is there for `Players/Mana`'s max. The open slots come from
+  `setSlotsRule` (the boot script: `Accessories.slotsForAge` of the player's Age), asked on
+  joining and every 0.25 s.
+
+**Looks.** The server sets the player attribute `Types.LOOKS_ATTRIBUTE` to `Accessories.looks`
+("head,chest,legs,feet,accessory,...": vanity over armor, hidden armor 0, only accessories with a
+`worn` place, each once) whenever it changes; every client's `Player/EquipmentLooks` draws it,
+the local player from the predicted inventory at once. Armor is Minecraft's layers (a box a little
+larger than each body part, boots over leggings over the body; R15 and R6), a vanity hat an
+ItemModels model on the head, accessories their models at their place (feet, the left hand: the
+right one holds the item, back, waist, face, head, neck; a second at the same place a step along).
+One render step after the camera moves every piece with one BulkMoveTo into reused arrays; pieces
+are rebuilt only when the looks, the character, a body part's size or the item looks change, and
+hidden in first person, for spectators, dead bodies and unshown players. The inventory's preview
+wears the same (`dress`). An air jump puffs a cloud and plays `entity.player.double_jump`: the
+local player's on PlayerPhysics' `airJumped`; other players' are told from their relayed poses
+(`Player/AirJumps`, pure: a sharp rise of the drawn feet after 0.15 s off the ground, counted when
+the pose's Jumped flag shows within 0.1 s, since `RemoteMotion` takes the flags of the nearer
+pose).
+
+**The panel** (`Ui/InventoryScreen`, window 0 only, also creative's inventory tab): 84 x 166 GUI
+pixels docked 2 right of the player panel, so `size()` is 262 wide there (JEI and the screens lay
+out from it). Columns: vanity armor (violet ghosts, a 6 x 6 eye per slot), vanity accessories,
+accessories (closed rows darkened with a padlock: "Opens at the Industrial Age") and a 9 x 9 eye per
+accessory row (16 x 18 buttons on touch). The eyes are buttons of their own sending `hide`;
+`targetAt` says nothing over them. Tooltips add `Accessories.tooltip` ("When worn:" and a line an
+effect, or "Vanity: worn for its look only").
 
 ## Networking (`Net/Protocol`)
 

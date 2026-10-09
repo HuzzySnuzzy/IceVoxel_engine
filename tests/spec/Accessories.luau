@@ -5,10 +5,15 @@
 	server's restoreEquipment), what worn accessories add up to (Items/Accessories: sums, the
 	largest, each once, open slots only, hidden ones still working, slots by Age, armor points),
 	and where they come from (Crafting/Recipes, Progression/Ages' gate, Generation/Mineshafts'
-	fourth loot pool, spiders' Feral Claws).
+	fourth loot pool, spiders' Feral Claws). Then what they do and show: the looks text drawn
+	(vanity over armor, hidden slots, closed rows, each once) and its parser, the tooltips, the
+	speed factor, knockback share, attack speed and regeneration, the server's InventoryState
+	(open slots, `has`, death drops), the Obsidian Skull on campfires (Players/Burning), and other
+	players' air jumps told from their poses (Player/AirJumps: every frame rate, never a ground
+	jump, the flag a frame late, ledges, flying, cooldown, nonsense).
 ]]
 
-return function(t, shared, require, server)
+return function(t, shared, require, server, client)
 	local Accessories = require(shared.Items.Accessories)
 	local Ages = require(shared.Progression.Ages)
 	local Config = require(shared.Config)
@@ -109,7 +114,9 @@ return function(t, shared, require, server)
 		t.eq(inventory.accessorySlots, Config.Accessories.Slots)
 		t.eq(Types.ACCESSORY_SIZE, 7)
 		t.eq(Types.EQUIPMENT_SIZE, 18)
-		t.eq(Types.ACCESSORY_START, Types.PLAYER_SLOTS, "after the hotbar: every slot before keeps its number")
+		t.eq(Types.ACCESSORY_START, 40, "after the hotbar: every slot before keeps its number")
+		t.eq(Types.PLAYER_SLOTS, Types.EQUIPMENT_END, "every window has the equipment slots")
+		t.eq(Types.HIDDEN_MASK, 0x0F7F, "7 accessory bits, 4 armor bits from HIDE_ARMOR")
 		t.eq(Types.VANITY_ARMOR_START, 47)
 		t.eq(Types.VANITY_ACCESSORY_START, 51)
 		t.eq(Types.EQUIPMENT_END, 58)
@@ -296,4 +303,301 @@ return function(t, shared, require, server)
 		t.eq((claws :: any).chance, 0.025)
 		t.eq((claws :: any).byPlayer, true)
 	end)
+
+	--[[ What the equipment does (the builders' rules on top of the stats) ]]
+
+	t.test("accessories: the looks drawn: vanity over armor, hidden slots, worn places, once each", function()
+		local inventory = Types.newInventory()
+		t.eq(Accessories.looks(inventory), "0,0,0,0", "nothing worn")
+		inventory.armor[1] = stack("IronHelmet")
+		inventory.armor[2] = stack("IronChestplate")
+		inventory.armor[4] = stack("IronBoots")
+		inventory.vanityArmor[1] = stack("TopHat")
+		inventory.vanityArmor[3] = stack("TuxedoPants")
+		local head, chest, legs, feet = id.TopHat, id.IronChestplate, id.TuxedoPants, id.IronBoots
+		t.eq(Accessories.looks(inventory), `{head},{chest},{legs},{feet}`, "vanity over armor, vanity alone too")
+		-- A hidden armor slot shows nothing, its vanity piece neither (Terraria's eye on the row).
+		inventory.hidden = bit32.lshift(1, Types.HIDE_ARMOR + 1)
+		t.eq(Accessories.looks(inventory), `{head},0,{legs},{feet}`, "the chest hidden")
+		inventory.hidden = 0
+		-- Accessories: only those with a `worn` place (all of today's), open slots, unhidden.
+		inventory.accessories[1] = stack("HermesBoots")
+		inventory.accessories[2] = stack("ShinyRedBalloon")
+		inventory.accessories[6] = stack("CloudInABottle")
+		local armor = `{head},{chest},{legs},{feet}`
+		t.eq(Accessories.looks(inventory), `{armor},{id.HermesBoots},{id.ShinyRedBalloon}`, "slot 6 is closed")
+		inventory.hidden = 1
+		t.eq(Accessories.looks(inventory), `{armor},{id.ShinyRedBalloon}`, "slot 1 hidden: not drawn")
+		-- A vanity accessory shows over its row, even when the row's accessory is hidden.
+		inventory.vanityAccessories[1] = stack("Flipper")
+		t.eq(Accessories.looks(inventory), `{armor},{id.Flipper},{id.ShinyRedBalloon}`, "vanity over hidden")
+		-- The same item twice is drawn once; vanity rows are never closed.
+		inventory.vanityAccessories[2] = stack("Flipper")
+		inventory.vanityAccessories[7] = stack("CobaltShield")
+		t.eq(Accessories.looks(inventory), `{armor},{id.Flipper},{id.CobaltShield}`, "once each")
+		-- Back to ids.
+		local ids = Accessories.parseLooks(Accessories.looks(inventory))
+		t.eq(#ids, 6)
+		t.eq(ids[1], head)
+		t.eq(ids[2], chest)
+		t.eq(ids[5], id.Flipper)
+		t.eq(ids[6], id.CobaltShield)
+		-- Nonsense reads as nothing worn (a client never trusts an attribute's text).
+		for _, bad in { nil :: any, 5, "", "a,b", "99999,1.5,-3", string.rep("1,", 200) } do
+			local parsed = Accessories.parseLooks(bad)
+			t.ok(#parsed == 4 and parsed[1] == 0 and parsed[4] == 0, `{bad} reads as nothing`)
+		end
+		local mixed = Accessories.parseLooks(`{head},x,{chest},0,{id.Dirt},{id.HermesBoots},{id.IronHelmet}`)
+		t.eq(mixed[1], head)
+		t.eq(mixed[2], 0, "x is nothing")
+		t.eq(#mixed, 5, "dirt and a helmet are no accessories to draw")
+		t.eq(mixed[5], id.HermesBoots)
+	end)
+
+	t.test("accessories: tooltips say what each does", function()
+		local function says(name: string, text: string)
+			local lines = Accessories.tooltip(id[name])
+			t.eq(lines[1], "When worn:", `{name}'s first line`)
+			t.ok(table.find(lines, text) ~= nil, `{name} says "{text}": {table.concat(lines, " / ")}`)
+		end
+		says("HermesBoots", "Sprinting builds up to 40% faster")
+		says("CloudInABottle", "Jump once more in the air")
+		says("ShinyRedBalloon", "Jump higher (as Jump Boost I)")
+		says("LuckyHorseshoe", "No fall damage")
+		says("Aglet", "+5% movement speed")
+		says("AnkletOfTheWind", "+10% movement speed")
+		says("BandOfRegeneration", "Heals half a heart every 10 seconds")
+		says("BandOfStarpower", "+20 max mana")
+		says("ObsidianSkull", "+1 Armor")
+		says("ObsidianSkull", "Campfires don't hurt")
+		says("Flipper", "Swims 100% faster")
+		says("CobaltShield", "No knockback")
+		says("FeralClaws", "+12% attack speed")
+		t.eq(Accessories.tooltip(id.TopHat)[1], "Vanity: worn for its look only")
+		t.eq(#Accessories.tooltip(id.Dirt), 0)
+		t.eq(#Accessories.tooltip(id.IronHelmet), 0, "armor's lines are the armor tooltip's")
+	end)
+
+	t.test("accessories: speed factor, knockback share, attack speed and regeneration", function()
+		local inventory = Types.newInventory()
+		local stats = Accessories.stats(inventory)
+		t.eq(Accessories.speedFactor(stats), 1, "nothing worn")
+		t.eq(Accessories.knockbackShare(stats), 1)
+		inventory.accessories[1] = stack("HermesBoots")
+		inventory.accessories[2] = stack("Aglet")
+		inventory.accessories[3] = stack("AnkletOfTheWind")
+		inventory.accessories[4] = stack("CobaltShield")
+		Accessories.stats(inventory, stats)
+		t.near(Accessories.speedFactor(stats), 1.15 * 1.4, 1e-9, "1.61: MoveCheck's factor")
+		t.eq(Accessories.knockbackShare(stats), 0, "the shield holds all of it")
+		-- Feral Claws: a sword (1.6 attacks a second) recovers in 12.5 ticks, with the claws in
+		-- 12.5 / 1.12; ticks seen faster give the same strength as a faster weapon.
+		local Combat = require(shared.Entities.Combat)
+		for _, ticks in { 0, 3, 7, 11 } do
+			t.near(
+				Combat.strength(Accessories.hasteTicks(ticks, 0.12), 1.6),
+				Combat.strength(ticks, 1.6 * 1.12),
+				1e-9,
+				`{ticks} ticks`
+			)
+		end
+		t.eq(Accessories.hasteTicks(5, 0), 5, "no claws: as before")
+		t.ok(Combat.strength(Accessories.hasteTicks(11, 0.12), 1.6) >= 1, "full strength after 11 ticks, not 12.5")
+		-- A Band of Regeneration: a half heart every 200 ticks while hurt; stopping starts over.
+		inventory.accessories[5] = stack("BandOfRegeneration")
+		Accessories.stats(inventory, stats)
+		local ticks, healed = 0, 0
+		for _ = 1, 1000 do
+			local h
+			ticks, h = Accessories.regenerate(stats, ticks, true)
+			healed += h
+		end
+		t.eq(healed, 5, "1000 ticks: five half hearts")
+		ticks = 150
+		ticks, healed = Accessories.regenerate(stats, ticks, false)
+		t.eq(ticks, 0, "full health (or creative): the count starts over")
+		t.eq(healed, 0)
+		inventory.accessories[5] = nil
+		Accessories.stats(inventory, stats)
+		t.eq(select(2, Accessories.regenerate(stats, 199, true)), 0, "no band, no healing")
+	end)
+
+	t.test("accessories: the server's inventory: open slots by Age, has, death drops", function()
+		local state = InventoryState.new()
+		state:join("p")
+		local window = state:window("p") :: any
+		t.eq(window.inventory.accessorySlots, 5)
+		state:takeDirty()
+		t.ok(state:setAccessorySlots("p", 6), "the Industrial Age")
+		t.eq(window.inventory.accessorySlots, 6)
+		t.eq(#state:takeDirty(), 1, "a snapshot is due")
+		t.ok(not state:setAccessorySlots("p", 6), "the same: nothing")
+		t.eq(#state:takeDirty(), 0)
+		state:setAccessorySlots("p", 99)
+		t.eq(window.inventory.accessorySlots, Types.ACCESSORY_SIZE, "at most 7")
+		state:setAccessorySlots("p", -3)
+		t.eq(window.inventory.accessorySlots, 0)
+		t.ok(not state:setAccessorySlots("p", 0 / 0), "NaN: nothing")
+		t.ok(not state:setAccessorySlots("nobody", 6))
+		-- Inventory.contains looks into every compartment.
+		window.inventory.vanityAccessories[3] = stack("FeralClaws")
+		t.ok(state:has("p", id.FeralClaws), "in a vanity slot")
+		window.inventory.accessories[1] = stack("Aglet")
+		t.ok(state:has("p", id.Aglet), "in an accessory slot")
+		t.ok(not state:has("p", id.HermesBoots))
+		-- Dying without keepInventory drops the equipment; keeping it keeps it.
+		local kept = state:die("p", true)
+		t.eq(#kept, 0)
+		t.ok(window.inventory.accessories[1] ~= nil, "kept")
+		local dropped = state:die("p", false)
+		t.eq(#dropped, 2, "the accessory and the vanity accessory")
+		t.eq(window.inventory.accessories[1], nil)
+	end)
+
+	t.test("accessories: an Obsidian Skull walks on campfires; lava and fire still hurt", function()
+		local Burning = require(server.Players.Burning)
+		local GameMode = require(shared.GameMode)
+		local SURVIVAL = GameMode.SURVIVAL
+		local function hurtBy(touching: number, fireWalk: boolean): number
+			local state = Burning.newPlayer()
+			local total = 0
+			for _ = 1, 40 do
+				total += Burning.tickPlayer(state, SURVIVAL, touching, 0, 0, nil, fireWalk)
+			end
+			return total
+		end
+		t.ok(hurtBy(Burning.CAMPFIRE, false) > 0, "a campfire hurts")
+		t.eq(hurtBy(Burning.CAMPFIRE, true), 0, "not with fireWalk")
+		t.ok(hurtBy(Burning.FIRE, true) > 0, "a fire block still does")
+		local Fluids = require(shared.Fluids)
+		local lava = bit32.lshift(1, Fluids.LAVA)
+		t.eq(hurtBy(lava, true), hurtBy(lava, false), "lava as ever")
+	end)
+
+	-- Other players' air jumps (Player/AirJumps), from poses as Player/RemoteMotion draws them.
+	do
+		local AirJumps = require(client.Player.AirJumps)
+		local PlayerSync = require(shared.Net.PlayerSync)
+		local Flag = PlayerSync.Flag
+		local TICK = 1 / 20
+
+		type Pose = { y: number, flags: number }
+
+		-- A remote player's poses, one a tick, with Minecraft's jump numbers: `jumps[k]` presses
+		-- jump on tick k (from the ground: 0.42; in the air: 0.36, while `airJumps` last); the floor
+		-- is at 0, or at `ledge` until tick `ledgeEnd` (walking off it). Jumped stays on 0.31 s.
+		local function poses(
+			jumps: { [number]: boolean },
+			ticks: number,
+			airJumps: number,
+			flying: boolean?,
+			ledge: number?,
+			ledgeEnd: number?
+		): { Pose }
+			local list = {}
+			local y, vy = ledge or 0, 0
+			local onGround, left, jumpedAt = true, airJumps, -math.huge
+			for k = 1, ticks do
+				local floor = if ledge and ledgeEnd and k < ledgeEnd then ledge else 0
+				if jumps[k] and onGround then
+					vy, jumpedAt = 0.42, k
+				elseif jumps[k] and left > 0 then
+					vy, jumpedAt, left = 0.36, k, left - 1
+				end
+				y += vy
+				if y <= floor then
+					y, vy, onGround, left = floor, 0, true, airJumps
+				else
+					onGround = false
+				end
+				vy = (vy - 0.08) * 0.98
+				local flags = 0
+				if onGround then
+					flags = bit32.bor(flags, Flag.OnGround)
+				end
+				if (k - jumpedAt) * TICK < 0.31 then
+					flags = bit32.bor(flags, Flag.Jumped)
+				end
+				if flying then
+					flags = bit32.bor(flags, Flag.Flying)
+				end
+				list[k] = { y = y, flags = flags }
+			end
+			return list
+		end
+
+		-- Draws them at `fps` frames a second, from `phase` (seconds) on: feet lerped between the
+		-- two poses around each frame, the nearer one's flags; the times of the air jumps seen.
+		local function watch(list: { Pose }, fps: number, phase: number): { number }
+			local seen = {}
+			local w = AirJumps.new()
+			local frame = 0
+			while true do
+				local now = phase + frame / fps
+				local p = now / TICK + 1
+				local k = math.floor(p)
+				if k + 1 > #list then
+					break
+				end
+				local alpha = p - k
+				local a, b = list[k], list[k + 1]
+				local y = a.y + (b.y - a.y) * alpha
+				local flags = if alpha < 0.5 then a.flags else b.flags
+				if AirJumps.step(w, flags, y, now) then
+					table.insert(seen, now)
+				end
+				frame += 1
+			end
+			return seen
+		end
+
+		-- Every frame rate and phase sees the air jumps at ticks `at`, each within 0.1 s of its rise
+		-- (tick k's pose is drawn at (k - 1) TICK, so its rise starts a tick before).
+		local function sees(list: { Pose }, at: { number }, what: string)
+			for _, fps in { 30, 60, 144 } do
+				for _, phase in { 0, 0.004, 0.013, 0.021, 0.037 } do
+					local seen = watch(list, fps, phase)
+					t.eq(#seen, #at, `{what}: {fps} fps, phase {phase}: {#seen} air jumps`)
+					for i, k in at do
+						local when = (k - 2) * TICK
+						if seen[i] then
+							t.ok(
+								seen[i] > when and seen[i] <= when + 0.1,
+								`{what}: {fps} fps: air jump {i} at {seen[i]} for {when}`
+							)
+						end
+					end
+				end
+			end
+		end
+
+		t.test("air jumps: others' air jumps are told from their poses, never their ground jumps", function()
+			sees(poses({ [3] = true }, 60, 1), {}, "a ground jump")
+			sees(poses({ [3] = true, [30] = true }, 80, 1), {}, "two ground jumps")
+			sees(poses({ [3] = true, [9] = true }, 60, 1), { 9 }, "at the top (Jumped still on)")
+			sees(poses({ [3] = true, [14] = true }, 60, 1), { 14 }, "falling (a new Jumped)")
+			sees(poses({ [3] = true, [9] = true, [20] = true }, 80, 2), { 9, 20 }, "two in one flight")
+			sees(poses({ [3] = true, [9] = true, [40] = true, [46] = true }, 100, 1), { 9, 46 }, "again after landing")
+			sees(poses({ [12] = true }, 60, 1, false, 10, 5), { 12 }, "walking off a ledge")
+			sees(poses({ [3] = true, [9] = true }, 60, 1, true), {}, "flying")
+			-- Too soon after the ground: the ground jump's own rise, never an air jump.
+			sees(poses({ [3] = true, [5] = true }, 60, 1), {}, "0.1 s after leaving the ground")
+		end)
+
+		t.test("air jumps: a first frame, a repeated time or NaN show nothing", function()
+			local w = AirJumps.new()
+			t.ok(not AirJumps.step(w, Flag.Jumped, 0, 1), "the first frame")
+			t.ok(not AirJumps.step(w, Flag.Jumped, 5, 1), "the same time")
+			t.ok(not AirJumps.step(w, Flag.Jumped, 0 / 0, 2), "NaN")
+			t.ok(not AirJumps.step(w, Flag.Jumped, 1, 3), "after NaN: no speed yet")
+			-- Off the ground long enough, a rise flagged Jumped counts once, then the cooldown.
+			t.ok(not AirJumps.step(w, 0, 1, 3.5))
+			t.ok(AirJumps.step(w, Flag.Jumped, 1.5, 3.55), "a rise of 10 blocks a second")
+			t.ok(not AirJumps.step(w, Flag.Jumped, 1.5, 3.6))
+			t.ok(not AirJumps.step(w, Flag.Jumped, 2, 3.65), "within the cooldown")
+			-- In water a rise is swimming.
+			AirJumps.step(w, 0, 2, 4.5)
+			t.ok(not AirJumps.step(w, bit32.bor(Flag.Jumped, Flag.InWater), 2.5, 4.55), "in water")
+		end)
+	end
 end

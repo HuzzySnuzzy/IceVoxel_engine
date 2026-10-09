@@ -22,6 +22,13 @@
 	             client hasn't heard of the change yet isn't refused.
 	  grants     knockback the server gave (an explosion's push, a mob's hit: `grant`, blocks)
 	             adds to all three buckets and may take them over their cap for GRACE seconds.
+	  factor     Terraria's accessories (`setFactor`: Players/Inventories from Items/
+	             Accessories): the horizontal limit times (1 + speed) x (1 + runBoost), at most
+	             1.15 x 1.4 = 1.61 with today's (Aglet and Anklet of the Wind with Hermes
+	             Boots: survival's 12 becomes 19.3; all three with Speed II sprint 12.65 a
+	             second, their fastest). Up and down keep theirs (an air jump is 0.36 a tick,
+	             7.2 a second). A lower factor waits GRACE seconds (the client's moves may still
+	             be at the old speed); a higher one counts at once. Never below 1.
 	  teleports  `reset` fills the buckets (the server moved the player itself).
 	  bounds     `inBounds`: finite, |x| and |z| within Protocol.MAX_COORDINATE, y within
 	             -256 .. 4096 (Net/PlayerSync's decoders refuse the rest already).
@@ -57,6 +64,11 @@ export type Bucket = {
 	modeGrace: number,
 	-- Until then the buckets may hold more than their cap (a grant).
 	grantGrace: number,
+	-- The horizontal limit's multiplier (accessories, `setFactor`), the one before the last
+	-- change and until when that one still counts if it was larger.
+	factor: number,
+	previousFactor: number,
+	factorGrace: number,
 }
 
 -- (A mode Config doesn't list moves at the slowest's limits.)
@@ -69,7 +81,8 @@ function MoveCheck.limits(mode: string): Limits
 end
 
 -- The limits that apply to `bucket` at `now`: its mode's, or the larger of the old and the new
--- mode's during the grace after a change.
+-- mode's during the grace after a change; the horizontal one times the accessories' factor (the
+-- larger of the old and the new during its grace).
 local function current(bucket: Bucket, now: number): (number, number, number)
 	local limits = MoveCheck.limits(bucket.mode)
 	local h, u, d = limits.horizontal, limits.up, limits.down
@@ -78,7 +91,11 @@ local function current(bucket: Bucket, now: number): (number, number, number)
 		local old = MoveCheck.limits(previous)
 		h, u, d = math.max(h, old.horizontal), math.max(u, old.up), math.max(d, old.down)
 	end
-	return h, u, d
+	local factor = bucket.factor
+	if now < bucket.factorGrace then
+		factor = math.max(factor, bucket.previousFactor)
+	end
+	return h * factor, u, d
 end
 
 -- New, full buckets for a player in `mode` at server time `now`.
@@ -94,6 +111,9 @@ function MoveCheck.new(mode: string, now: number): Bucket
 		previous = nil,
 		modeGrace = -math.huge,
 		grantGrace = -math.huge,
+		factor = 1,
+		previousFactor = 1,
+		factorGrace = -math.huge,
 	}
 end
 
@@ -136,6 +156,23 @@ function MoveCheck.setMode(bucket: Bucket, mode: string, now: number)
 	bucket.previous = bucket.mode
 	bucket.mode = mode
 	bucket.modeGrace = now + MoveCheck.GRACE
+end
+
+--[[
+	The accessories worn now move the player `factor` times as fast sideways (see the header; NaN,
+	infinite or below 1 count as 1), from server time `now`.
+]]
+function MoveCheck.setFactor(bucket: Bucket, factor: number, now: number)
+	if not (factor >= 1) or factor == math.huge then
+		factor = 1
+	end
+	if factor == bucket.factor then
+		return
+	end
+	refill(bucket, now)
+	bucket.previousFactor = bucket.factor
+	bucket.factor = factor
+	bucket.factorGrace = now + MoveCheck.GRACE
 end
 
 -- Knockback the server gave: `blocks` more each way, over the cap for GRACE seconds.
