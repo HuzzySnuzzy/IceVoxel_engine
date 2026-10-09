@@ -50,6 +50,29 @@
 				"$path": "src/server"
 			}
 		},
+		"TextChatService": {
+			"$properties": {
+				"ChatVersion": "TextChatService"
+			},
+			"ChatWindowConfiguration": {
+				"$className": "ChatWindowConfiguration",
+				"$properties": {
+					"Enabled": false
+				}
+			},
+			"ChatInputBarConfiguration": {
+				"$className": "ChatInputBarConfiguration",
+				"$properties": {
+					"Enabled": false
+				}
+			},
+			"ChannelTabsConfiguration": {
+				"$className": "ChannelTabsConfiguration",
+				"$properties": {
+					"Enabled": false
+				}
+			}
+		},
 		"StarterPlayer": {
 			"$properties": {
 				"GameSettingsAvatar": "R15"

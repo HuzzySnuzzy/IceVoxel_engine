@@ -10,7 +10,9 @@
 	            typed (no screen, the game mode switcher or Roblox's menu open, no other text box
 	            focused); the HUD's touch chat button (Hud.onChatButton) opens and closes it (the
 	            tap that closes it is not taken for a new open: TAP_CLOSE). Roblox's own chat is
-	            off from the title screen on (`hideRoblox`). With the Chat setting on Hidden it
+	            off from the title screen on (`hideRoblox`: the project ships its window, tabs and
+	            bar disabled, they are held off if Roblox adds or re-enables them, and the core
+	            Chat GUI is turned off, which Roblox's newer Here / Global / Friends window follows). With the Chat setting on Hidden it
 	            does not open: "Chat disabled in client options." shows above the hotbar instead
 	            (Minecraft's overlay message, 3 s).
 	  Lines     bottom left, their bottom 40 GUI pixels above the screen's bottom, newest at the
@@ -62,13 +64,15 @@
 	            opacity, text size, line spacing, delay, width, focused / unfocused height,
 	            command suggestions (Ui/Chat/ChatLog.metrics).
 	  Legacy    with the legacy chat (TextChatService.ChatVersion LegacyChatService) nothing here
-	            starts: Roblox's chat stays, and Net/Notices shows notices there.
+	            starts: Roblox's chat stays, and Net/Notices shows notices there. The project pins
+	            ChatVersion to TextChatService, so only a place edited back by hand gets there.
 ]]
 
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -116,8 +120,10 @@ local BAR_EDGE = Color3.fromRGB(204, 204, 204)
 local MEASURE_CACHE = 4096
 -- Message ids remembered so one never shows twice.
 local SEEN_IDS = 64
--- Seconds to look for Roblox's chat window and bar to turn them off.
-local CONFIG_WAIT = 30
+-- Seconds between tries of StarterGui:SetCoreGuiEnabled(Chat, false) (it errors until the core
+-- scripts have registered it) and how long to keep trying.
+local CORE_RETRY = 0.5
+local CORE_WAIT = 60
 -- The chat's DisplayOrder: over the HUD (Ui/Hud 10, the Age toast 11; Minecraft's Gui draws the
 -- chat after the hotbar and hearts, and its chat screen's box over them), under the game mode
 -- switcher (15) and the screens' cursor (20); under a screen's backdrop (Ui/Screens 9) while one
@@ -379,28 +385,55 @@ local function send(text: string)
 	end)
 end
 
--- Turns Roblox's chat window, tabs and input bar off (they appear a moment after joining), once.
+-- Turns Roblox's chat off for the whole session: its window, channel tabs and input bar (the
+-- configurations: the project already ships them disabled, and Roblox may add or re-enable them
+-- later, so each one is held off for good) and the core chat GUI itself
+-- (StarterGui:SetCoreGuiEnabled(Chat, false): Roblox's newer chat window, the one with Here /
+-- Global / Friends tabs, follows only that). Bubble chat is left alone. Once.
+local CONFIG_CLASSES = { "ChatWindowConfiguration", "ChatInputBarConfiguration", "ChannelTabsConfiguration" }
 local robloxHidden = false
+local function holdOff(config: Instance)
+	local function off()
+		pcall(function()
+			if (config :: any).Enabled then
+				(config :: any).Enabled = false
+			end
+		end)
+	end
+	off()
+	pcall(function()
+		(config :: any):GetPropertyChangedSignal("Enabled"):Connect(off)
+	end)
+end
 local function hideRobloxChat()
+	-- (With the legacy chat the game's chat can't start: Roblox's stays, the only chat there is.)
 	if robloxHidden or TextChatService.ChatVersion == Enum.ChatVersion.LegacyChatService then
 		return
 	end
 	robloxHidden = true
-	for _, className in { "ChatWindowConfiguration", "ChatInputBarConfiguration", "ChannelTabsConfiguration" } do
-		task.spawn(function()
-			local deadline = os.clock() + CONFIG_WAIT
-			repeat
-				local config = TextChatService:FindFirstChildOfClass(className)
-				if config then
-					pcall(function()
-						(config :: any).Enabled = false
-					end)
-					return
-				end
-				task.wait(0.5)
-			until os.clock() > deadline
-		end)
+	for _, child in TextChatService:GetChildren() do
+		if table.find(CONFIG_CLASSES, child.ClassName) then
+			holdOff(child)
+		end
 	end
+	TextChatService.ChildAdded:Connect(function(child: Instance)
+		if table.find(CONFIG_CLASSES, child.ClassName) then
+			holdOff(child)
+		end
+	end)
+	task.spawn(function()
+		local deadline = os.clock() + CORE_WAIT
+		repeat
+			local ok = pcall(function()
+				StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+			end)
+			if ok then
+				return
+			end
+			task.wait(CORE_RETRY)
+		until os.clock() > deadline
+		warn("[IceVoxel] could not turn Roblox's chat window off")
+	end)
 end
 
 --[[ Start ]]

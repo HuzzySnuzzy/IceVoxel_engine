@@ -95,8 +95,10 @@ function Keybinds.typing(): boolean
 	if UserInputService:GetFocusedTextBox() ~= nil then
 		return true
 	end
+	-- (Roblox's own input bar counts only while it is on: the game turns it off, and a bar left
+	-- focused from before would otherwise block every key, the chat's T among them.)
 	local bar = TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
-	return bar ~= nil and bar.IsFocused
+	return bar ~= nil and bar.Enabled and bar.IsFocused
 end
 
 -- Is action `action`'s key or mouse button held now (never while typing: the letters typed
