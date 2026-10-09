@@ -11,8 +11,9 @@
 	             TextBox.TextEditable, "copy and paste text within a TextBox"). Focusing one
 	             selects everything (SelectionStart / CursorPosition).
 	  button     Minecraft's button with a label that can change (cycle buttons, "ON" / "OFF")
-	             and an inactive look; Activated covers mouse, touch and gamepad A. A label wider
-	             than the button shrinks to fit (the pixel font is wider than Minecraft's).
+	             and an inactive look; Activated covers mouse, touch and gamepad A (not a long
+	             press that showed its Ui/HoverTip description). A label wider than the button
+	             shrinks to fit (the pixel font is wider than Minecraft's).
 	  label      text with Minecraft's shadow, left aligned, centred or ending at its right edge;
 	             a right aligned or centred label shrinks its text to fit (the pixel font is wider
 	             than Minecraft's, and right aligned labels share their row with another).
@@ -27,6 +28,7 @@ local ContextActionService = game:GetService("ContextActionService")
 local GuiService = game:GetService("GuiService")
 local UserInputService = game:GetService("UserInputService")
 
+local HoverTip = require(script.Parent.HoverTip)
 local Style = require(script.Parent.Style)
 
 local FormWidgets = {}
@@ -243,7 +245,8 @@ function FormWidgets.button(
 	end)
 	button.Activated:Connect(function()
 		local callback = (self :: any).clicked
-		if (self :: any).enabled and callback then
+		-- (A long press that showed the button's tooltip, Ui/HoverTip, is no click.)
+		if (self :: any).enabled and callback and not HoverTip.consumed(button) then
 			callback()
 		end
 	end)

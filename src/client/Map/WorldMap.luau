@@ -9,6 +9,9 @@
 	                  purple with yellow lightning, clouds grey), with the forecast buttons (Now,
 	                  +2, +5, +10, +20 minutes), the wind and a legend along the bottom
 
+	The bar's buttons and the forecast steps say what they do when hovered or long pressed
+	(Ui/HoverTip, Ui/ButtonHelp's "map.*").
+
 	The map paints straight from the terrain generator, so it can show any part of the world,
 	explored or not. Its centre and the player's arrow are in true world coordinates (the
 	character, read through the render origin: Shared/World/Origin). While it is open the screen
@@ -43,6 +46,7 @@ local Waypoints = require(script.Parent.Waypoints)
 local WeatherLayer = require(script.Parent.WeatherLayer)
 local WeatherMap = require(script.Parent.WeatherMap)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local HoverTip = require(script.Parent.Parent.Ui.HoverTip)
 local Hud = require(script.Parent.Parent.Ui.Hud)
 local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
@@ -196,6 +200,11 @@ function WorldMap.new(
 	for _, b in { close, me, zoomIn, zoomOut, cloud } do
 		b.ZIndex = 32
 	end
+	HoverTip.attach(close, "map.close")
+	HoverTip.attach(me, "map.centre")
+	HoverTip.attach(zoomIn, "map.zoomIn")
+	HoverTip.attach(zoomOut, "map.zoomOut")
+	HoverTip.attach(cloud, "map.weather")
 	cloud.Activated:Connect(WeatherLayer.toggle)
 
 	-- The weather mode's bar along the bottom of the map, two rows sized by the map's width (so it
@@ -254,6 +263,7 @@ function WorldMap.new(
 		end)
 		stepButton.Parent = stepsRow
 		stepButtons[index] = stepButton
+		HoverTip.attach(stepButton, "map.forecast", tostring(index))
 	end
 	local windLabel = Instance.new("TextLabel")
 	windLabel.LayoutOrder = 0

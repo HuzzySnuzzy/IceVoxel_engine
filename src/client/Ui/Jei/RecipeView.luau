@@ -46,6 +46,7 @@ local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 
 local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
+local HoverTip = require(script.Parent.Parent.HoverTip)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.Parent.MenuLayout)
 local Style = require(script.Parent.Parent.Style)
@@ -214,6 +215,8 @@ local function newTab(self: Self, root: Frame, category: JeiData.Category)
 	local activeTab = ItemIcon.tab(active, 0, item, true)
 	local inactiveTab = ItemIcon.tab(inactive, 0, item, false)
 	activeTab.button.Selectable = false
+	HoverTip.attach(activeTab.button, "jei.tab", category)
+	HoverTip.attach(inactiveTab.button, "jei.tab", category)
 	inactiveTab.button.Activated:Connect(function()
 		local state = self.current
 		if state == nil then
@@ -289,14 +292,20 @@ function RecipeView.new(parent: Instance): RecipeView
 		self.onClose()
 	end)
 	local p, n = JeiLayout.PREV, JeiLayout.NEXT
-	Style.button(panel, "<", p.x, p.y, p.w, p.h, 6).Activated:Connect(function()
+	local previous = Style.button(panel, "<", p.x, p.y, p.w, p.h, 6)
+	previous.Activated:Connect(function()
 		SoundPlayer.click()
 		self:turn(-1)
 	end)
-	Style.button(panel, ">", n.x, n.y, n.w, n.h, 6).Activated:Connect(function()
+	local following = Style.button(panel, ">", n.x, n.y, n.w, n.h, 6)
+	following.Activated:Connect(function()
 		SoundPlayer.click()
 		self:turn(1)
 	end)
+	HoverTip.attach(self.back, "jei.back")
+	HoverTip.attach(self.close, "jei.close")
+	HoverTip.attach(previous, "jei.previousPage")
+	HoverTip.attach(following, "jei.nextPage")
 	return self
 end
 

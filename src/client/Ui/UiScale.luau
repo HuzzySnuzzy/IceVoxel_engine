@@ -84,6 +84,8 @@ UiScale.Layer = table.freeze({
 	-- The title screen, and the Nuke's flash.
 	Title = 100,
 	Flash = 100,
+	-- The menus' button tooltips (Ui/HoverTip), over every menu, the title screen's too.
+	Tip = 110,
 })
 
 export type Kind = "scaled" | "screen"

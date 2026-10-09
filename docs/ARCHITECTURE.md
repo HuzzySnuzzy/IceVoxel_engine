@@ -2209,11 +2209,11 @@ Options screen; Config gives every default and the presets.
   Gamepad: D-pad left / right step a slider (`FormWidgets`' `stepSelected` keeps the selection on
   it), down / up move through the widgets in reading order. Status lines come from providers the
   client script sets (`Settings.setStatus`: "terrain", "farMeshes", "controls", "mouse"). Key
-  Binds needs a keyboard and Mouse Settings a mouse (`Settings.pageShown`). A setting with a
-  `tooltip` (PlayerSettings; Caves warns "May lower performance") shows it in Minecraft's tooltip
-  box while hovered or selected: wrapped to `Pages.TOOLTIP_W` (200) pixels (Ui/TextWrap), below
-  the widget or above it near the panel's bottom (`Pages.tooltipAt`, Minecraft's
-  BelowOrAboveWidgetTooltipPositioner).
+  Binds needs a keyboard and Mouse Settings a mouse (`Settings.pageShown`). Every setting has a
+  `tooltip` (PlayerSettings: what it does and its trade-off, "May lower performance" on the heavy
+  ones; a key binding's is its action's, `KeyBindings` `tooltip`), shown like every other menu
+  button's description (below: `Ui/HoverTip`); the page buttons, Reset, Defaults, Done and the Key
+  Binds screen's categories, keys and Reset have theirs in `Ui/ButtonHelp` ("options.*").
 - **Key bindings** (`Shared/KeyBindings`, pure; client `Settings/Keybinds`; tested in
   tests/spec/Keybinds). Minecraft's KeyMapping: 32 actions in Minecraft's categories (Movement,
   Gameplay, Inventory, Multiplayer, Miscellaneous) and this game's (Map, Just Enough Items), each a
@@ -2251,6 +2251,47 @@ Options screen; Config gives every default and the presets.
   early profile). Saved on leave and in `BindToClose` (which waits for saves in flight, up to
   25 s), only when something changed. tests/spec/SettingsStore runs the real store against a fake
   DataStore with delays and failures, wired to the real client controller.
+
+## Menu tooltips (client `Ui/HoverTip`, `Ui/ButtonHelp`, `Ui/TooltipLayout`)
+
+Every menu button says what it does, as Minecraft's option tooltips do: the title screen and its
+pages (characters, the avatar editor, Create World and Customize, Select World, rename and
+delete), the Options menu, the skill tree's buttons, the inventory's gear, eyes, tab and close
+button, the creative tab, JEI's buttons and tabs, the minimap's and world map's buttons and
+forecast steps, the HUD's touch buttons, the spectator menu's slots, the game mode switcher and
+the structure and jigsaw screens. Items keep their own tooltips (`Ui/Screens`).
+
+- **The texts** (`Ui/ButtonHelp`, pure): one table by id, `"<menu>.<button>"`, a text or a table
+  of variants for buttons built in loops or whose meaning changes (`"avatar.scale"` by scale,
+  `"spectator.slot"` by the slot's item kind, `"inventory.eye"` hide or show). The Options
+  menu's settings (`"options.setting"`, by key) and the Key Binds keys (`"options.keyButton"`)
+  are generated from PlayerSettings' and KeyBindings' tooltips, so a setting's text stays with
+  the setting. `ButtonHelp.text(id, variant)` picks the variant (or `default`); none: no tooltip.
+- **The helper** (`Ui/HoverTip`): `HoverTip.attach(object, "<id>", variant?)` registers a
+  GuiObject (a variant may be a function asked each time it shows). Mouse: after resting
+  `HOVER_DELAY` (0.25 s), near the pointer and following it; touch: a finger held still
+  `LONG_PRESS` (0.5 s) shows it over the finger, the press then is no click (the object is not
+  Interactable until the finger lifts, and `HoverTip.consumed` keeps `FormWidgets`' buttons from
+  firing), and it lingers `LINGER` (2.5 s); gamepad (or keyboard) selection: under or over the
+  widget. It hides when the pointer leaves, the selection moves, the object or a parent hides,
+  or on `HoverTip.hide` (the Options menu's page changes). One tooltip, on its own ScreenGui on
+  `UiScale.Layer.Tip` (over the title screen), drawn at its object's scale (the UIScales over
+  it, so a menu's tooltip reads at the menu's GUI scale; the base GUI scale for an object under
+  none). `HoverTip.drawBox` draws Minecraft's box: the translucent dark back, a 1 pixel purple
+  border, shadowed rows.
+- **The layout** (`Ui/TooltipLayout`, pure): rows wrapped at `WIDTH` (200 GUI pixels) at word
+  breaks (`Ui/TextWrap`; "\n" breaks a row), the box `PAD` (4) around rows `LINE` (10) apart;
+  `nearPointer` (Minecraft's DefaultTooltipPositioner: 12 right of and above the pointer, flipped
+  left at the screen's right edge, moved up at the bottom), `aboveTouch` (centred `FINGER` above
+  the finger, below it near the top) and `belowOrAbove` (BelowOrAboveWidgetTooltipPositioner),
+  all kept on the screen.
+- **Checks** (tests/spec/ButtonHelp, tests/spec/TooltipLayout): every PlayerSettings entry has a
+  tooltip of at most 8 rows that ends a sentence; the registry is read from the sources: every
+  `HoverTip.attach` names its id as a string literal ButtonHelp has (variants when it passes
+  one), and every text there is used; the loops' variants cover their data (the avatar's scales
+  and presets, the Options pages, the key binds' categories, JEI's categories, the forecast
+  steps, the spectator menu's items, the game modes, the structure screens' widgets); the
+  placements' arithmetic.
 
 ## Chat (client `Ui/Chat/`, `Net/Notices`)
 

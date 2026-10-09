@@ -26,6 +26,8 @@
 	            Unlock sends it to the server (Protocol UnlockSkill), which checks it all again
 	            and answers with the new state (or a chat notice).
 	  Gamepad   the nodes, the titles and the buttons are selectable; A selects / presses.
+	  Buttons   Unlock and Done describe themselves when hovered, selected or long pressed
+	            (Ui/HoverTip); the nodes and titles already do, in the info lines.
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -41,6 +43,7 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local FormWidgets = require(script.Parent.FormWidgets)
+local HoverTip = require(script.Parent.HoverTip)
 local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
 local Screens = require(script.Parent.Screens)
@@ -356,6 +359,8 @@ function SkillTreeScreen.start()
 	end
 	local unlock = FormWidgets.button(root, "Unlock", WIDTH - MARGIN * 2 - BUTTON_W * 2, BUTTONS_Y, BUTTON_W, BUTTON_H)
 	local done = FormWidgets.button(root, "Done", WIDTH - MARGIN - BUTTON_W, BUTTONS_Y, BUTTON_W, BUTTON_H)
+	HoverTip.attach(unlock.button, "skills.unlock")
+	HoverTip.attach(done.button, "skills.done")
 
 	-- What the info shows: a hovered node or title, else the selected node.
 	local selected: Skill? = nil

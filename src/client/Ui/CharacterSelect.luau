@@ -12,7 +12,8 @@
 	  Buttons   Play Selected Character, Create New Character, Rename, Delete and Back
 	            (CharacterRules.buttons: Play needs a living character, nothing waits while a
 	            request is out); what the server last said under the list, and in red when
-	            characters last for this session only.
+	            characters last for this session only. The buttons and rows describe themselves
+	            when hovered, selected or long pressed (Ui/HoverTip, Ui/ButtonHelp's "characters.*").
 	  Gamepad   the rows, then the buttons (D-pad down from the last row).
 	The page only draws and reports: Ui/MainMenu sends the requests (`onPlay`, `onCreate`,
 	`onRename`, `onDelete`, `onBack`) except the previews, asked for here as rows are highlighted.
@@ -31,6 +32,7 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local CharacterPreview = require(script.Parent.CharacterPreview)
 local CharacterRules = require(script.Parent.CharacterRules)
 local FormWidgets = require(script.Parent.FormWidgets)
+local HoverTip = require(script.Parent.HoverTip)
 local Style = require(script.Parent.Style)
 
 local BUTTON_H = 20
@@ -127,6 +129,11 @@ function CharacterSelect.new(frame: Frame): Page
 	local renameButton = FormWidgets.button(footer, "Rename", 0, ROW, 72, BUTTON_H)
 	local deleteButton = FormWidgets.button(footer, "Delete", 78, ROW, 72, BUTTON_H)
 	local backButton = FormWidgets.button(footer, "Back", 160, ROW, 150, BUTTON_H)
+	HoverTip.attach(playButton.button, "characters.play")
+	HoverTip.attach(createButton.button, "characters.create")
+	HoverTip.attach(renameButton.button, "characters.rename")
+	HoverTip.attach(deleteButton.button, "characters.delete")
+	HoverTip.attach(backButton.button, "characters.back")
 	local buttonOrder: { GuiObject } =
 		{ playButton.button, createButton.button, renameButton.button, deleteButton.button, backButton.button }
 
@@ -197,6 +204,7 @@ function CharacterSelect.new(frame: Frame): Page
 			row.ZIndex = 6
 			row.SelectionImageObject = Style.selectionImage
 			row.Parent = list
+			HoverTip.attach(row, "characters.row")
 			local inside = Style.frame(row, 1, 1, LIST_W - 10, ROW_H - 4, Color3.new(0, 0, 0), 6)
 			inside.BackgroundTransparency = if picked then 0 else 1
 			Style.shadowText(row, line1, 4, 3, LIST_W - 16, 10, Color3.fromRGB(rgb[1], rgb[2], rgb[3]), 7)

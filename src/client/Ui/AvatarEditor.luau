@@ -26,6 +26,8 @@
 	  Bottom    the name (Characters.cleanName: 1..20 characters; the server filters it), the
 	            difficulty cycled with its line (Classic, Mediumcore, Hardcore), Create and
 	            Cancel. A refused name or the server's answer shows in red on the line.
+	  Tooltips  every widget says what it does when hovered, selected or long pressed (Ui/HoverTip,
+	            Ui/ButtonHelp's "avatar.*": the difficulty's what each one keeps on death).
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -43,6 +45,7 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local CharacterPreview = require(script.Parent.CharacterPreview)
 local CharacterRules = require(script.Parent.CharacterRules)
 local FormWidgets = require(script.Parent.FormWidgets)
+local HoverTip = require(script.Parent.HoverTip)
 local Style = require(script.Parent.Style)
 
 type Appearance = Appearance.Appearance
@@ -129,6 +132,7 @@ function AvatarEditor.new(page: Frame): Editor
 	local tabButtons: { FormWidgets.Button } = {}
 	for i, label in tabLabels do
 		tabButtons[i] = FormWidgets.button(frame, label, PANE_X + (i - 1) * 54, 4, 52, BUTTON_H)
+		HoverTip.attach(tabButtons[i].button, "avatar.tab", tabNames[i])
 	end
 	local underline = Style.frame(frame, PANE_X, 4 + BUTTON_H + 1, 52, 1, WHITE, 6)
 	local panes: { [string]: Frame } = {}
@@ -151,6 +155,7 @@ function AvatarEditor.new(page: Frame): Editor
 		swatch.ZIndex = 5
 		swatch.SelectionImageObject = Style.selectionImage
 		swatch.Parent = skin
+		HoverTip.attach(swatch, "avatar.swatch")
 		Style.frame(swatch, 1, 1, SWATCH_STEP - 4, 14, toColor3(rgb), 6)
 		swatches[i] = swatch
 	end
@@ -161,6 +166,10 @@ function AvatarEditor.new(page: Frame): Editor
 		return `Brightness: {v * 5}%`
 	end)
 	local randomButton = FormWidgets.button(skin, "Randomise", 0, 92, 105, BUTTON_H)
+	HoverTip.attach(partButton.button, "avatar.part")
+	HoverTip.attach(hueSlider.button.button, "avatar.hue")
+	HoverTip.attach(valueSlider.button.button, "avatar.brightness")
+	HoverTip.attach(randomButton.button, "avatar.randomise")
 
 	-- Body.
 	local body = panes.body
@@ -179,8 +188,10 @@ function AvatarEditor.new(page: Frame): Editor
 				return CharacterRules.scaleLabel(name, CharacterRules.scaleAt(name, step))
 			end
 		)
+		HoverTip.attach(scaleSliders[name].button.button, "avatar.scale", name)
 	end
 	local resetButton = FormWidgets.button(body, "Reset", 0, 76, 104, BUTTON_H)
+	HoverTip.attach(resetButton.button, "avatar.resetBody")
 
 	-- Clothing.
 	local clothing = Instance.new("ScrollingFrame")
@@ -197,6 +208,7 @@ function AvatarEditor.new(page: Frame): Editor
 	local presetButtons: { FormWidgets.Button } = {}
 	for i, name in CharacterRules.PRESETS do
 		presetButtons[i] = FormWidgets.button(panes.presets, name, 0, (i - 1) * 24, PANE_W, BUTTON_H)
+		HoverTip.attach(presetButtons[i].button, "avatar.preset", name)
 	end
 	FormWidgets.label(panes.presets, "Presets set colours and body", 0, 76, PANE_W, GRAY, "centre")
 
@@ -215,6 +227,10 @@ function AvatarEditor.new(page: Frame): Editor
 		Style.shadowText(lineHolder, "", 0, 0, WIDTH, 10, GRAY, 5, Enum.TextXAlignment.Center, Style.TEXT_SIZE)
 	local createButton = FormWidgets.button(frame, "Create", 5, 190, 150, BUTTON_H)
 	local cancelButton = FormWidgets.button(frame, "Cancel", 165, 190, 150, BUTTON_H)
+	HoverTip.attach(nameBox.box, "avatar.name")
+	HoverTip.attach(difficultyButton.button, "avatar.difficulty")
+	HoverTip.attach(createButton.button, "avatar.create")
+	HoverTip.attach(cancelButton.button, "avatar.cancel")
 	local errorText: string? = nil
 
 	local function setLine(text: string, colour: Color3)
@@ -373,6 +389,7 @@ function AvatarEditor.new(page: Frame): Editor
 		end
 		table.clear(clothingButtons)
 		local blocky = FormWidgets.button(clothing, "", 0, 0, PANE_W - 6, BUTTON_H)
+		HoverTip.attach(blocky.button, "avatar.blocky")
 		blocky:setText(`Blocky body: {if CharacterRules.isBlocky(look) then "ON" else "OFF"}`)
 		blocky.clicked = function()
 			SoundPlayer.click()
@@ -384,6 +401,7 @@ function AvatarEditor.new(page: Frame): Editor
 		for i, asset in look.assets do
 			if asset.kind > #Appearance.PARTS then
 				local button = FormWidgets.button(clothing, "", 0, y, PANE_W - 6, BUTTON_H)
+				HoverTip.attach(button.button, "avatar.asset")
 				button:setText(CharacterRules.assetToggleLabel(look, i))
 				button.clicked = function()
 					SoundPlayer.click()

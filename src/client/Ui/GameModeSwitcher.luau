@@ -20,7 +20,8 @@
 	           wheel (Ui/Hud.setInputTaken) and the clicks (Interaction/BlockInteraction) do
 	           nothing.
 	  mouse    only while it is shown: a Modal button frees the mouse (in first person too) and
-	           takes the clicks, so nothing behind it is broken or used.
+	           takes the clicks, so nothing behind it is broken or used. A slot the mouse rests
+	           on says what its mode allows (Ui/HoverTip, Ui/ButtonHelp's "switcher.mode").
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -36,6 +37,7 @@ local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
+local HoverTip = require(script.Parent.HoverTip)
 local Hud = require(script.Parent.Hud)
 local ItemIcon = require(script.Parent.ItemIcon)
 local ModeSwitch = require(script.Parent.ModeSwitch)
@@ -212,6 +214,7 @@ function GameModeSwitcher.start()
 		button.Size = UDim2.fromOffset(size, size)
 		button.ZIndex = 6
 		button.Parent = root
+		HoverTip.attach(button, "switcher.mode", mode)
 		table.insert(slots, { mode = mode, button = button, selection = selection })
 	end
 

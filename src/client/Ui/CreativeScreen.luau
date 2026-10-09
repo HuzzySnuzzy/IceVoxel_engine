@@ -27,6 +27,7 @@ local Types = require(Shared.Inventory.Types)
 
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Hud = require(script.Parent.Hud)
+local HoverTip = require(script.Parent.HoverTip)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
@@ -132,6 +133,7 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 		SoundPlayer.click()
 		self.onTab()
 	end)
+	HoverTip.attach(inventoryTab.button, "creative.inventoryTab")
 
 	local panel = Style.panel(root, 0, TOP, WIDTH, PANEL_HEIGHT)
 	panel.Name = "Items"
@@ -144,6 +146,7 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 		SoundPlayer.click()
 		self.onClose()
 	end)
+	HoverTip.attach(close, "creative.close")
 
 	-- Search box: Minecraft's text field (black, gray border).
 	Style.frame(panel, 7, 17, WIDTH - 14, 12, Style.Colour.FieldBorder, 4)

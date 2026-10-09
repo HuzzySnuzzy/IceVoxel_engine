@@ -27,6 +27,10 @@
 	  levels 0..7, "Keep Jigsaws" and Generate (which, as Minecraft's, applies the fields, starts
 	  the assembly and closes). Done and Generate are off while a field is no valid name or the
 	  final state no block; the status line says which.
+	Tooltips
+	  every field and button says what it does when hovered, selected or long pressed
+	  (Ui/HoverTip; Ui/ButtonHelp's "structure.widget" / "jigsaw.widget", by StructureForm's
+	  widget ids).
 
 	Only creative players open these (the server checks the rest: Config.Structures.Permission,
 	Config.Gameplay.Admins, the owner, Studio); the screen closes when the player leaves creative
@@ -43,6 +47,7 @@ local Settings = require(Shared.Structures.Settings)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Notices = require(script.Parent.Parent.Net.Notices)
 local FormWidgets = require(script.Parent.FormWidgets)
+local HoverTip = require(script.Parent.HoverTip)
 local Screens = require(script.Parent.Screens)
 local StructureForm = require(script.Parent.StructureForm)
 local Style = require(script.Parent.Style)
@@ -194,6 +199,13 @@ local function buildStructure(): Screens.Panel
 				fields[w.id] = paste
 			else
 				buttons[w.id] = FormWidgets.button(root, w.text or "", x, y, w.w, w.h)
+			end
+			-- (What each field and button does: Ui/ButtonHelp, by the widget's id.)
+			local field, button = fields[w.id], buttons[w.id]
+			if field then
+				HoverTip.attach(field.box, "structure.widget", w.id)
+			elseif button then
+				HoverTip.attach(button.button, "structure.widget", w.id)
 			end
 		end
 	end
@@ -431,12 +443,15 @@ local function buildJigsaw(): Screens.Panel
 			labels[w.id] = FormWidgets.label(root, w.text or "", x, y, w.w, LABEL)
 		elseif w.kind == "field" then
 			fields[w.id] = FormWidgets.editBox(root, x, y, w.w, w.h, 4, StructureForm.filterName)
+			HoverTip.attach(fields[w.id].box, "jigsaw.widget", w.id)
 		elseif w.kind == "slider" then
 			slider = FormWidgets.slider(root, x, y, w.w, w.h, 0, Settings.MAX_LEVELS, function(value: number): string
 				return `Levels: {value}`
 			end)
+			HoverTip.attach((slider :: FormWidgets.Slider).button.button, "jigsaw.widget", w.id)
 		else
 			buttons[w.id] = FormWidgets.button(root, w.text or "", x, y, w.w, w.h)
+			HoverTip.attach(buttons[w.id].button, "jigsaw.widget", w.id)
 		end
 	end
 	local levels = slider :: FormWidgets.Slider

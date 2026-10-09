@@ -51,6 +51,9 @@ export type Action = {
 	-- The default input's name (an Enum.KeyCode name or "MouseButton1".."MouseButton3").
 	default: string,
 	context: Context,
+	-- What the action does (`TOOLTIPS`): the Key Binds screen's tooltip, and its setting's
+	-- (PlayerSettings) tooltip.
+	tooltip: string,
 }
 
 export type Category = { id: string, name: string }
@@ -255,8 +258,53 @@ local function keyboardKey(names: { any }?, fallback: string): string
 end
 
 local function action(id: string, name: string, category: string, default: string, context: Context): Action
-	return { id = id, name = name, category = category, default = default, context = context }
+	return { id = id, name = name, category = category, default = default, context = context, tooltip = "" }
 end
+
+--[[
+	What each action does, by id: the Key Binds screen's tooltips (Minecraft has none there; its
+	option tooltips' style: what it does, then what else the key does in a screen). Every action
+	needs one (checked as ACTIONS is built).
+]]
+local TOOLTIPS: { [string]: string } = {
+	forward = "Walks forwards. Twice quickly (or with Sprint): sprints.",
+	back = "Walks backwards.",
+	left = "Steps to the left.",
+	right = "Steps to the right.",
+	jump = "Jumps; swims up in water and climbs ropes and ladders. Creative: twice quickly to fly, " .. "held to rise.",
+	sneak = "Sneaks: slower, and you never walk off an edge. Flying: goes down.",
+	sprint = "Runs while walking forwards.",
+	attack = "Attacks, and breaks the block you look at (held: mines it).",
+	use = "Uses the held item: places a block, eats, drinks. Opens a chest, a furnace or a machine.",
+	pickItem = "Puts the block you look at in your hand, from your inventory (Creative: a new stack). "
+		.. "Spectators: the spectator menu.",
+	drop = "Throws one of the held item away (with Control: the whole stack). In a screen: the "
+		.. "stack under the pointer.",
+	inventory = "Opens your inventory, and closes any screen.",
+	hotbar1 = "Selects hotbar slot 1. In a screen: swaps the stack under the pointer with it.",
+	hotbar2 = "Selects hotbar slot 2. In a screen: swaps the stack under the pointer with it.",
+	hotbar3 = "Selects hotbar slot 3. In a screen: swaps the stack under the pointer with it.",
+	hotbar4 = "Selects hotbar slot 4. In a screen: swaps the stack under the pointer with it.",
+	hotbar5 = "Selects hotbar slot 5. In a screen: swaps the stack under the pointer with it.",
+	hotbar6 = "Selects hotbar slot 6. In a screen: swaps the stack under the pointer with it.",
+	hotbar7 = "Selects hotbar slot 7. In a screen: swaps the stack under the pointer with it.",
+	hotbar8 = "Selects hotbar slot 8. In a screen: swaps the stack under the pointer with it.",
+	hotbar9 = "Selects hotbar slot 9. In a screen: swaps the stack under the pointer with it.",
+	chat = "Opens the chat to talk to the other players.",
+	command = "Opens the chat with a / typed, for a command.",
+	options = "Opens the Options menu, and closes it.",
+	skillTree = "Opens the skill tree: your Age, knowledge and the skills to unlock.",
+	debug = "Shows the debug screen (position, chunk, frame rate). Held with another key: the debug "
+		.. "keys (F3 + Q lists them).",
+	worldMap = "Opens the world map: the land all around, where you are and your waypoints.",
+	zoomIn = "Zooms the minimap in.",
+	zoomOut = "Zooms the minimap out.",
+	jeiRecipes = "Over an item in a screen: the recipes that make it (Just Enough Items).",
+	jeiUses = "Over an item in a screen: the recipes it is used in (Just Enough Items).",
+	jeiBack = "Back to the recipes shown before.",
+	weatherMap = "Switches the minimap and the world map to the weather: rain, snow, storms, clouds, "
+		.. "the wind and a forecast.",
+}
 
 local progression = (Config :: any).Progression
 local settings = (Config :: any).Settings
@@ -310,6 +358,9 @@ for _, entry in ACTIONS do
 	assert(byId[entry.id] == nil, `KeyBindings: duplicate action {entry.id}`)
 	assert(keyByName[entry.default], `KeyBindings: unknown default {entry.default} of {entry.id}`)
 	assert(categoryIds[entry.category], `KeyBindings: unknown category {entry.category}`)
+	local tooltip = TOOLTIPS[entry.id]
+	assert(tooltip, `KeyBindings: no tooltip for {entry.id}`)
+	entry.tooltip = tooltip
 	byId[entry.id] = entry
 	settingKeys[entry.id] = KeyBindings.SETTING_PREFIX .. entry.id
 	table.freeze(entry)

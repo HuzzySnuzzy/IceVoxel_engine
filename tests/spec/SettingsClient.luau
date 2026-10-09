@@ -238,6 +238,10 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 				changed = fakeSignal(),
 			}
 		end
+		if n.path == "src/client/Ui/HoverTip" then
+			-- (The buttons' tooltips: nothing to show here.)
+			return { attach = function() end }
+		end
 		if n.path == "src/client/Settings/Keybinds" then
 			-- (The zoom keys: no key is pressed here.)
 			return {
@@ -945,17 +949,23 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		t.ok(caves ~= nil, "on the Video page")
-		local w, h = Pages.TOOLTIP_W + 2 * Pages.TOOLTIP_PAD, 60
-		local x, y = Pages.tooltipAt(caves, w, h)
+		-- (Selected with a gamepad, Ui/HoverTip places it as Ui/TooltipLayout.belowOrAbove; here
+		-- within the panel itself.)
+		local TooltipLayout = require(client.Ui.TooltipLayout)
+		local function at(placed: any, w: number, h: number): (number, number)
+			return TooltipLayout.belowOrAbove(placed.x, placed.y, placed.w, placed.h, w, h, Pages.WIDTH, Pages.HEIGHT)
+		end
+		local w, h = TooltipLayout.WIDTH + 2 * TooltipLayout.PAD, 60
+		local x, y = at(caves, w, h)
 		t.ok(x >= 0 and x + w <= Pages.WIDTH, "within the panel's width")
 		t.ok(y + h <= caves.y or y >= caves.y + caves.h, "never over its button")
 		local top = { item = caves.item, x = 0, y = Pages.TOP, w = 150, h = 20 }
-		local tx, ty = Pages.tooltipAt(top, w, h)
-		t.eq(ty, Pages.TOP + 20 + Pages.TOOLTIP_GAP, "below a button with room under it")
+		local tx, ty = at(top, w, h)
+		t.eq(ty, Pages.TOP + 20 + TooltipLayout.GAP, "below a button with room under it")
 		t.eq(tx, 0)
 		local bottom = { item = caves.item, x = 160, y = Pages.HEIGHT - 40, w = 150, h = 20 }
-		local bx, by = Pages.tooltipAt(bottom, w, h)
-		t.eq(by, Pages.HEIGHT - 40 - Pages.TOOLTIP_GAP - h, "above one near the bottom")
+		local bx, by = at(bottom, w, h)
+		t.eq(by, Pages.HEIGHT - 40 - TooltipLayout.GAP - h, "above one near the bottom")
 		t.eq(bx, Pages.WIDTH - w, "moved left to end inside the panel")
 	end)
 

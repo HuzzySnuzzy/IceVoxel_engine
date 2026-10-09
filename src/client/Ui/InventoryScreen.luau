@@ -52,7 +52,9 @@
 	of each slot (results are only taken, crafting happens there). Slots map to window slots by the
 	window layout of Inventory/Types (container, armor, inventory 10..36, hotbar, equipment). The
 	eyes are buttons of their own (Activated): over one, `targetAt` says nothing, so no slot click
-	happens under it.
+	happens under it. The eyes, the gear, the creative tab and the touch close button describe
+	themselves when hovered, selected or long pressed (Ui/HoverTip, Ui/ButtonHelp's
+	"inventory.*").
 ]]
 
 local Players = game:GetService("Players")
@@ -74,6 +76,7 @@ local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local EquipmentLooks = require(script.Parent.Parent.Player.EquipmentLooks)
 local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local HoverTip = require(script.Parent.HoverTip)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
@@ -354,6 +357,7 @@ local function closeButton(self: Self, panel: Frame): TextButton
 		SoundPlayer.click()
 		self.onClose()
 	end)
+	HoverTip.attach(button, "inventory.close")
 	return button
 end
 
@@ -411,6 +415,11 @@ local function newEye(parent: Instance, x: number, y: number, w: number, h: numb
 	local shut = art(if small then SMALL_EYE_SHUT_ART else EYE_SHUT_ART, EYE_SHUT_COLOUR)
 	shut.Visible = false
 	local eye: Eye = { button = button, open = open, shut = shut, slot = slot }
+	-- (Its tooltip says what a click does now: hide or show, an armor piece or an accessory.)
+	HoverTip.attach(button, "inventory.eye", function(): string?
+		local what = if slot > Types.HIDE_ARMOR then "Armor" else "Accessory"
+		return if shut.Visible then `show{what}` else `hide{what}`
+	end)
 	button.Activated:Connect(function()
 		local hidden = not shut.Visible
 		SoundPlayer.click()
@@ -531,6 +540,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 		SoundPlayer.click()
 		self.onTab()
 	end)
+	HoverTip.attach(itemsTab.button, "inventory.itemsTab")
 
 	local panel = Style.panel(root, 0, 0, WIDTH, PLAYER_HEIGHT)
 	panel.Name = "Player"
@@ -545,6 +555,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 		SoundPlayer.click()
 		self.onSettings()
 	end)
+	HoverTip.attach(gear, "inventory.options")
 
 	-- Armor column.
 	for slot = 1, Types.ARMOR_SIZE do
@@ -1156,18 +1167,13 @@ function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): 
 			end
 		end
 	end
-	-- The equipment: a closed accessory row says when it opens; an eye what it does.
+	-- The equipment: a closed accessory row says when it opens (an eye is a button: Ui/HoverTip
+	-- says what it does).
 	if self.equipShown then
 		for row, lock in self.locks do
 			if lock.Visible and Style.contains(lock, point) then
 				local age = Ages.byId(Config.Accessories.ExtraSlotAges[row - Types.BASE_ACCESSORY_SLOTS] or "")
 				return { if age then `Opens at the {age.name}` else "Closed" }
-			end
-		end
-		for _, eye in self.eyes do
-			if Style.contains(eye.button, point) then
-				local what = if eye.slot > Types.HIDE_ARMOR then "armor piece" else "accessory"
-				return { if eye.shut.Visible then `Show this {what}` else `Hide this {what}` }
 			end
 		end
 	end
