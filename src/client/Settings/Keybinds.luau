@@ -91,7 +91,7 @@ function Keybinds.matches(action: string, input: InputObject): boolean
 	return KeyBindings.matches(values, action, Keybinds.codeOf(input))
 end
 
--- Does a text box of the game's own (in this player's PlayerGui) have the keys? Roblox's hidden
+-- Does a visible text box of the game's own (in this player's PlayerGui) have the keys? Roblox's hidden
 -- core boxes don't count: its chat bar, turned off by the game, can keep the focus a moment after
 -- the game's chat box closed and would otherwise hold the player still meanwhile.
 function Keybinds.textBoxFocused(): boolean
@@ -102,7 +102,21 @@ function Keybinds.textBoxFocused(): boolean
 	local player = Players.LocalPlayer
 	local playerGui = if player then player:FindFirstChildOfClass("PlayerGui") else nil
 	local ok, ours = pcall(function()
-		return playerGui ~= nil and focused:IsDescendantOf(playerGui)
+		if playerGui == nil or not focused:IsDescendantOf(playerGui) then
+			return false
+		end
+		-- (Only a box the player can see: a hidden one that kept the focus, as the chat's box
+		-- once it closed, doesn't take the keys.)
+		local node: Instance? = focused
+		while node and node ~= playerGui do
+			if node:IsA("GuiObject") and not node.Visible then
+				return false
+			elseif node:IsA("LayerCollector") and not node.Enabled then
+				return false
+			end
+			node = node.Parent
+		end
+		return true
 	end)
 	return ok and ours
 end

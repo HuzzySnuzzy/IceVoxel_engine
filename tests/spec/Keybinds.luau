@@ -53,7 +53,33 @@ local function fakeKeybinds(shared: any, sharedRequire: (any) -> any, values: an
 	local world: any = { down = {}, mouse = {}, last = "Keyboard", typing = false, keyboard = true, coreBox = false }
 	local playerGui = {}
 	local function textBox(): any
+		-- (A box on a frame on a ScreenGui in the PlayerGui; `world.hiddenBox` hides its frame.)
+		local screen = {
+			Parent = playerGui,
+			IsA = function(_, class: string)
+				return class == "LayerCollector"
+			end,
+			Enabled = true,
+		}
+		local frame = setmetatable({
+			Parent = screen,
+			IsA = function(_, class: string)
+				return class == "GuiObject"
+			end,
+		}, {
+			__index = function(_, key: string)
+				if key == "Visible" then
+					return not world.hiddenBox
+				end
+				return nil
+			end,
+		})
 		return {
+			Parent = frame,
+			Visible = true,
+			IsA = function(_, class: string)
+				return class == "GuiObject"
+			end,
 			IsDescendantOf = function(_, ancestor)
 				return ancestor == playerGui and not world.coreBox
 			end,
@@ -491,6 +517,11 @@ return function(t, shared, require, _server, client)
 		t.ok(not Keybinds.typing(), "a core box is not the player typing")
 		t.ok(Keybinds.isDown("forward"), "keys work while only a core box has the focus")
 		world.coreBox = false
+		-- A hidden box that kept the focus (the chat's, after Enter closed it) isn't typing either.
+		world.hiddenBox = true
+		t.ok(not Keybinds.typing(), "a hidden box is not the player typing")
+		t.ok(Keybinds.isDown("forward"), "keys work while only a hidden box has the focus")
+		world.hiddenBox = false
 		world.typing = false
 		world.mouse.MouseButton3 = true
 		t.ok(Keybinds.isDown("pickItem"))

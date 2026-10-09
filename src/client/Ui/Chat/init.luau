@@ -136,6 +136,8 @@ local TAP_CLOSE = 0.6
 local MOUSE_STEP = "IceVoxelChatMouse"
 -- Seconds after the box takes the focus that the key which opened it may still type into it.
 local GUARD_TIME = 0.5
+-- Frames after closing in which a focus handed back to the hidden box is released.
+local RELEASE_FRAMES = 6
 
 type Row = {
 	back: Frame,
@@ -867,6 +869,16 @@ function Chat.start()
 		Hud.setInputTaken(false)
 		restack()
 		RunService:UnbindFromRenderStep(MOUSE_STEP)
+		-- Roblox may hand the focus back to the (now hidden) box while it finishes the key that
+		-- closed it (Enter): it would keep the keys, so the player could not walk until another
+		-- Enter or a click. Let go of it for the next few frames.
+		for frame = 1, RELEASE_FRAMES do
+			task.delay(frame / 60, function()
+				if not open and box:IsFocused() then
+					box:ReleaseFocus()
+				end
+			end)
+		end
 		if not UserInputService.TouchEnabled then
 			UserInputService.MouseIconEnabled = mouseIconWas
 		end
