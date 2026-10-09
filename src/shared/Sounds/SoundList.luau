@@ -1099,4 +1099,24 @@ do
 	table.insert(SoundList.EVENTS, event)
 end
 
+--[[
+	Wind (not Minecraft's, which has none: client Weather/WindSound and Weather/StormView): a loop
+	around the player outdoors (weather.wind), louder in a stronger wind, in a storm and high up,
+	quieter and duller under a roof, silent underground. The stand-in is the falling wind pitched
+	down; the game ships a real loop in SoundService.IceVoxelSounds (src/sounds). After the rest,
+	so no other event's number changed.
+]]
+table.insert(
+	SoundList.EVENTS,
+	{
+		name = "weather.wind",
+		id = FALLING,
+		volume = 0.5,
+		pitch = 0.6,
+		pitchVariance = 0,
+		source = "ambient",
+		side = "client",
+	} :: EventSpec
+)
+
 return SoundList

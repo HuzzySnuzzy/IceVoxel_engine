@@ -524,31 +524,52 @@ local Config = {
 			the clouds out to the view distance, the light, lightning, and the maps' weather mode
 			(Map/WeatherLayer). Options > Weather... has Clouds and Weather (Off / Fast / Fancy).
 			Images are Config values so they are easy to swap: any rbxassetid:// (or rbxasset://)
-			works; the defaults are Roblox's built-in particle sparkle, a stand-in.
+			works.
 		]]
 		-- Rain and snow (Weather/PrecipitationView, Minecraft's renderSnowAndRain): one strip a
 		-- block column, facing the camera, within Radius (Fast, Fancy) blocks, from the column's
 		-- roof (or the camera's height - radius) to the camera's height + radius. Length: blocks
-		-- one tile of the image covers; Width: the streak's width (blocks); Speed: tiles a second it
-		-- falls (if your rain rises, make it negative); Color { r, g, b }; Transparency: the
-		-- streak's at full intensity (more see-through towards the disc's edge and in drizzle).
+		-- one tile of the image covers along the fall; Width: the strip's width (blocks); Speed:
+		-- tiles a second it falls (if your rain rises, make it negative); Color { r, g, b }
+		-- multiplies the image (white: as drawn); Transparency: the strip's at full intensity
+		-- (more see-through towards the disc's edge and in drizzle).
+		-- The strips are Beams, and a Beam lays its image's WIDTH along its length: the image's
+		-- left-to-right runs down the fall. So an image drawn upright (rain streaks running top to
+		-- bottom, as Minecraft's rain.png) must be uploaded turned 90 degrees counter-clockwise
+		-- (the image's bottom on its right), and Length / Width keep its proportions: an upright
+		-- 180 x 720 rain image (Minecraft's 1 x 4 blocks a sheet) turned is 720 x 180 = Length 4,
+		-- Width 1. The snow image (1024 x 576) is round flakes, which look the same either way:
+		-- Length 1.78, Width 1 keeps them round.
 		Precipitation = {
 			Radius = { 5, 10 },
 			Rain = {
-				Texture = "rbxasset://textures/particles/sparkles_main.dds",
-				Length = 1.25,
-				Width = 0.12,
-				Speed = 7,
-				Color = { 178, 196, 230 },
-				Transparency = 0.25,
+				Texture = "rbxassetid://75812216912065",
+				Length = 4,
+				Width = 1,
+				-- (2.2 sheets of 4 blocks a second: about 9 blocks a second, Minecraft's rain.)
+				Speed = 2.2,
+				Color = { 255, 255, 255 },
+				Transparency = 0,
 			},
 			Snow = {
-				Texture = "rbxasset://textures/particles/sparkles_main.dds",
-				Length = 1,
-				Width = 0.3,
-				Speed = 0.9,
-				Color = { 250, 252, 255 },
-				Transparency = 0.1,
+				Texture = "rbxassetid://12003098335",
+				Length = 1.78,
+				Width = 1,
+				-- (About a block a second, drifting down slowly.)
+				Speed = 0.55,
+				Color = { 255, 255, 255 },
+				Transparency = 0,
+			},
+			-- The rain's sound where it lands within 10 blocks (Minecraft's tickRain finds the spot;
+			-- here a looped weather.rain plays while it keeps finding one): Volume of the loop at
+			-- Minecraft's full cue, Hold seconds it stays up after the last spot found (the spots
+			-- come every 2-3 ticks), Smoothing (seconds, time constant), and the equalizer (dB)
+			-- under a roof (weather.rain.above's spots: the same loop, duller).
+			Sound = {
+				Volume = 1,
+				Hold = 0.6,
+				Smoothing = 0.6,
+				RoofMuffle = { Low = 0, Mid = -6, High = -20 },
 			},
 			-- Seconds the intensity at the camera takes to follow the weather (time constant).
 			Smoothing = 0.8,
@@ -703,6 +724,24 @@ local Config = {
 				Smoothing = 1.2,
 				Interval = 0.25,
 			},
+		},
+		-- Wind (Weather/WindSound, Weather/StormView): a looped weather.wind around the player
+		-- under the open sky. Its cue volume is Volume x (Calm + PerSpeed x the wind's speed in
+		-- blocks a second + Storm x the storm at the camera (rain 0..1, thunder counts double) +
+		-- Altitude.Gain over Altitude.From..To blocks above sea level), at most Max, times the sky
+		-- reaching the camera (none in caves) and Roofed under a roof (duller: RoofMuffle dB).
+		-- Smoothing: seconds (time constant).
+		Wind = {
+			Enabled = true,
+			Volume = 0.5,
+			Calm = 0.3,
+			PerSpeed = 0.2,
+			Storm = 0.5,
+			Altitude = { From = 40, To = 300, Gain = 0.6 },
+			Max = 1.6,
+			Roofed = 0.45,
+			RoofMuffle = { Low = 0, Mid = -6, High = -18 },
+			Smoothing = 2,
 		},
 		-- The maps' weather mode (Map/WeatherLayer): grid cells across at most (minimap, world map),
 		-- seconds before a picture is drawn again, biome lookups for snow per frame, cells painted

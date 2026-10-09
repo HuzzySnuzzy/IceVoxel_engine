@@ -50,6 +50,11 @@
 				"$path": "src/server"
 			}
 		},
+		"SoundService": {
+			"IceVoxelSounds": {
+				"$path": "src/sounds"
+			}
+		},
 		"TextChatService": {
 			"$properties": {
 				"ChatVersion": "TextChatService"

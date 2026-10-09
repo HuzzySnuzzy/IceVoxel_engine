@@ -64,6 +64,7 @@ local DistantStorms = require(script.Parent.DistantStorms)
 local LightningView = require(script.Parent.LightningView)
 local PrecipitationView = require(script.Parent.PrecipitationView)
 local WeatherState = require(script.Parent.WeatherState)
+local WindSound = require(script.Parent.WindSound)
 
 -- The distant rain's points snap to this lattice (blocks).
 local LATTICE = 8
@@ -106,6 +107,11 @@ local hissVolume, hissDX, hissDZ = 0, 0, 0
 -- Whether a roof is over the camera (sampled), and smoothed (0 in the open, 1 under it).
 local roofed, roof = false, 0
 local originX, originZ = 0, 0
+-- The wind's bed (weather.wind), its cue volume now and its roof (0 open .. 1 under one).
+local windBed: number? = nil
+local windVolume, windRoof = 0, 0
+local windClock = math.huge
+local windRoofed = false
 
 -- The weather field's grid at the upcoming period's moment (DistantStorms.Sampler).
 local function sample(x0: number, z0: number, step: number, cols: number, rows: number): buffer
@@ -276,6 +282,38 @@ local function hiss(dt: number)
 	SoundPlayer.setBed(handle, hissDX, hissDZ, hissVolume, low, mid, high)
 end
 
+-- The wind around the player (Weather/WindSound), a looped bed under the open sky.
+local function wind(dt: number)
+	local handle = windBed
+	if handle == nil then
+		return
+	end
+	local settings = Config.Weather.Wind
+	windClock += dt
+	if windClock >= 0.25 then
+		windClock = 0
+		windRoofed = PrecipitationView.roofed()
+	end
+	windRoof = DayCycle.approach(windRoof, if windRoofed then 1 else 0, dt, settings.Smoothing)
+	local target = 0
+	if settings.Enabled and SoundPlayer.isEnabled() then
+		local vx, vz = WeatherState.wind()
+		local rain = if WeatherState.enabled() then WeatherState.precipitation else 0
+		local thunder = if WeatherState.enabled() then WeatherState.thunder else 0
+		target = WindSound.volume(
+			math.sqrt(vx * vx + vz * vz),
+			rain,
+			thunder,
+			WeatherState.cameraY - WeatherState.seaLevel(),
+			LightingController.skyExposure(),
+			windRoof
+		)
+	end
+	windVolume = DayCycle.approach(windVolume, target, dt, settings.Smoothing)
+	local low, mid, high = WindSound.muffle(windRoof)
+	SoundPlayer.setBed(handle, 0, 0, windVolume, low, mid, high)
+end
+
 --[[
 	F3: the flashes a minute expected in reach (after the cap), how many were shown in the last
 	minute, and the distant rain's cue volume now.
@@ -289,6 +327,7 @@ function StormView.start(seed: number, distance: () -> number)
 	worldSeed = seed
 	viewDistance = distance
 	bed = SoundPlayer.newBed("weather.rain.far")
+	windBed = SoundPlayer.newBed("weather.wind")
 	WeatherState.changed:Connect(function()
 		-- (The forecast changed: the next period is sampled again.)
 		upcoming.period = -1
@@ -296,6 +335,7 @@ function StormView.start(seed: number, distance: () -> number)
 	RunService.Heartbeat:Connect(function(dt: number)
 		schedule(dt)
 		hiss(dt)
+		wind(dt)
 	end)
 end
 

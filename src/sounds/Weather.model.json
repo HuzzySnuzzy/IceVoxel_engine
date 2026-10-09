@@ -1,0 +1,141 @@
+{
+	"ClassName": "Folder",
+	"Children": [
+		{
+			"Name": "entity.lightning_bolt.thunder",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://130457325001606",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://133858804746399",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://114778516343256",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://6734393210",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://136909414800877",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://4961240438",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://116293183813872",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://236328669",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://111792757907186",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://102482745382237",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://91467741639547",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://120910310811306",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://236328734",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "entity.lightning_bolt.thunder.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://81589914094431",
+				"Volume": 1
+			}
+		},
+		{
+			"Name": "weather.rain",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://9064263922",
+				"Volume": 0.5
+			}
+		},
+		{
+			"Name": "weather.rain.far",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://9064263922",
+				"Volume": 0.5
+			}
+		},
+		{
+			"Name": "weather.wind",
+			"ClassName": "Sound",
+			"Properties": {
+				"SoundId": "rbxassetid://5799870105",
+				"Volume": 0.5
+			}
+		}
+	]
+}

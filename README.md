@@ -2082,7 +2082,8 @@ for performance:
 | `Weather.Lightning.Damage` / `BurnSeconds` / `Distance` | 5 / 8 / 4096 | Half hearts and seconds of fire for the living within 3 blocks of a strike; clients within Distance are told (they see it within their view and hear it within `Distant.Hearing`). |
 | `Weather.Fog.Rain` / `Snow` / `Thunder` | 0.6 / 0.4 / 0.45 | The fog at full rain, snow and thunder: the old view fog's distance this share as far; the Atmosphere's density for a view this share to `Lighting.Atmosphere.WeatherPower` as far. |
 | `Weather.SoundSpeed`      | 343     | Blocks a second thunder travels (a strike is heard that much later). |
-| `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the streaks' Texture (a stand-in: swap in your own), Length, Width, Speed, Color, Transparency. |
+| `Weather.Precipitation.Radius` | 5 / 10 | Blocks around the camera rain and snow fall in on Fast / Fancy (Minecraft's). `Rain` / `Snow`: the image (rain rbxassetid://75812216912065, snow rbxassetid://12003098335), Length, Width, Speed, Color, Transparency. The strips are Beams, which lay an image's width along the fall: an upright image (streaks top to bottom) must be uploaded turned 90° counter-clockwise. `Sound`: the near rain loop's Volume, Hold, Smoothing, RoofMuffle. |
+| `Weather.Wind` | on | The wind loop: Volume, Calm, PerSpeed (per block a second of wind), Storm, Altitude (From / To / Gain), Max, Roofed, RoofMuffle, Smoothing. |
 | `Weather.Precipitation.Smoothing` / `ScansPerFrame` | 0.8 / 64 | Seconds the rain drawn takes to follow the weather; block columns whose roof is looked up per frame. |
 | `Weather.Clouds.Altitude` / `Thickness` / `Cell` / `Cells` | 320 / 6 / 16 / 24 | Cloud base (blocks), fair-weather thickness, the nearest ring's cell and cells across a ring (Fast: cells twice as big, `FastCells` across, a block thick). |
 | `Weather.Clouds.Drop` / `RainThickness` / `Tower` | 32 / 28 / 160 | Rain lowers a cloud's base and thickens it; thunder raises a tower. |
@@ -2259,7 +2260,12 @@ told apart by pitch (the weather's too: `weather.rain` and `weather.rain.above` 
 pitched into a hiss, `entity.lightning_bolt.thunder` and `entity.lightning_bolt.impact` the
 explosion pitched down; the distant storms' `entity.lightning_bolt.thunder.far` (a Sound named
 `entity.lightning_bolt.thunder` serves it too) and `weather.rain.far` (looped) the same, lower
-and muffled; each client plays them by itself). To use your own, add a Folder named `IceVoxelSounds` to SoundService
+and muffled; each client plays them by itself). The weather ships real sounds this way:
+`src/sounds/Weather.model.json` becomes SoundService.IceVoxelSounds.Weather, with four near and
+ten distant thunder variants (picked at random), a minute-long rain loop (near rain and the
+distant hiss play it looped, duller under a roof) and a wind loop (`weather.wind`: outdoors,
+louder in a strong wind, a storm and high up, silent underground; Config.Weather.Wind). Edit that
+file to swap them. To use your own, add a Folder named `IceVoxelSounds` to SoundService
 (or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
 
 ```

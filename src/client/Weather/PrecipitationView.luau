@@ -21,9 +21,12 @@
 	            unknown column shows nothing until scanned. Edits and chunk loads keep the cache
 	            right (ClientWorld's onBlockChanged / onChunkLoaded).
 	  Sound     20 times a second, Precipitation.rainSound (Minecraft's tickRain: weather.rain or
-	            weather.rain.above where rain lands within 10 blocks, every 2-3 ticks) through
-	            Audio/SoundPlayer, its volume and pitch from Shared/Weather.rainSound (a cue of
-	            Minecraft's 0.2 is played at RAIN_GAIN x that). It plays whatever the Weather
+	            weather.rain.above where rain lands within 10 blocks, every 2-3 ticks) finds a spot;
+	            while it keeps finding one (Config.Weather.Precipitation.Sound.Hold) a looped
+	            weather.rain plays around the player (an Audio/SoundPlayer bed: the game's rain is
+	            a minute-long loop, not Minecraft's short clips), its volume from
+	            Shared/Weather.rainSound (a cue of Minecraft's 0.2 at RAIN_GAIN x that), duller
+	            (RoofMuffle) when the spots are on a roof (weather.rain.above's). It plays whatever the Weather
 	            setting (Minecraft's sounds don't depend on the graphics; Fast halves the level it
 	            tries columns with, as Minecraft's does): the columns it tries are queued for a
 	            roof scan as the strips' are, so Off (no strips) and Fast (5 blocks of them) still
@@ -46,6 +49,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Coords = require(Shared.World.Coords)
+local DayCycle = require(Shared.DayCycle)
 local Hash = require(Shared.Util.Hash)
 local Weather = require(Shared.Weather)
 local Origin = require(Shared.World.Origin)
@@ -99,6 +103,13 @@ local lastStep = -1
 local sound = Precipitation.newSound()
 local random = Random.new()
 local soundClock = 0
+-- The rain's loop (weather.rain as a bed): when a spot was last found, its cue volume, whether
+-- it was on a roof, and what plays (volume, roof 0..1).
+local rainBed: number? = nil
+local rainHeardAt = -math.huge
+local rainCue = 0
+local rainAbove = false
+local rainVolume, rainRoof = 0, 0
 local lut: buffer? = nil
 
 local function nextInt(n: number): number
@@ -284,14 +295,33 @@ local function tickSound()
 	local x, y, z = WeatherState.cameraX, WeatherState.cameraY, WeatherState.cameraZ
 	local own = Precipitation.cached(cache, x, z)
 	local level = if mode == Precipitation.FANCY then intensity else intensity / 2
-	local name, hx, hy, hz =
-		Precipitation.rainSound(sound, x, y, z, if own then own.floor else 0, level, landing, nextInt)
+	local name = Precipitation.rainSound(sound, x, y, z, if own then own.floor else 0, level, landing, nextInt)
 	if name then
-		local volume, pitch = Weather.rainSound(WeatherState.precipitation, name == "weather.rain.above")
+		local volume = Weather.rainSound(WeatherState.precipitation, name == "weather.rain.above")
 		if volume > 0 then
-			SoundPlayer.play(name, hx + 0.5, hy + 1, hz + 0.5, volume * RAIN_GAIN, pitch)
+			rainHeardAt = os.clock()
+			rainCue = volume * RAIN_GAIN
+			rainAbove = name == "weather.rain.above"
 		end
 	end
+end
+
+-- The rain's loop (see the header): up while tickRain keeps finding a spot, duller under a roof.
+local function rainBedStep(dt: number)
+	if rainBed == nil then
+		rainBed = SoundPlayer.newBed("weather.rain")
+	end
+	local handle = rainBed
+	if handle == nil then
+		return
+	end
+	local settings = Config.Weather.Precipitation.Sound
+	local heard = WeatherState.intensity > 0 and os.clock() - rainHeardAt <= settings.Hold
+	local target = if heard then rainCue * settings.Volume else 0
+	rainVolume = DayCycle.approach(rainVolume, target, dt, settings.Smoothing)
+	rainRoof = DayCycle.approach(rainRoof, if rainAbove then 1 else 0, dt, settings.Smoothing)
+	local muffle = settings.RoofMuffle
+	SoundPlayer.setBed(handle, 0, 0, rainVolume, muffle.Low * rainRoof, muffle.Mid * rainRoof, muffle.High * rainRoof)
 end
 
 local function step(dt: number)
@@ -327,6 +357,7 @@ local function step(dt: number)
 		soundClock = math.min(soundClock - TICK, TICK)
 		tickSound()
 	end
+	rainBedStep(dt)
 end
 
 -- The Weather setting (Precipitation.OFF / FAST / FANCY): how many strips.
