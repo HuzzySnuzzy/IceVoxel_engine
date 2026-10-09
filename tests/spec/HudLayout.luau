@@ -183,6 +183,10 @@ return function(t, _shared, require, _server, client)
 					if button == nil then
 						return "no Map button"
 					end
+					-- (A finger's size, whatever the scale.)
+					if button.h < HudLayout.TOUCH_TARGET or button.w < 2 * HudLayout.TOUCH_TARGET then
+						return `the Map button is {button.w} x {button.h}`
+					end
 					if layout.wailaRight > button.x then
 						return "WAILA's reserve leaves the Map button"
 					end
@@ -195,6 +199,34 @@ return function(t, _shared, require, _server, client)
 				-- Toasts that show are placed.
 				if input.music and layout.music == nil then
 					return "Now Playing was dropped"
+				end
+				-- On a touch screen the effect icons (buttons) keep out of the thumbstick's zone.
+				local icons = layout.effects
+				if
+					input.touch
+					and icons
+					and HudLayout.overlaps(icons, HudLayout.thumbstick(input.width, input.height))
+				then
+					return "the effect icons are in the thumbstick's zone"
+				end
+				-- The HUD's rows raised over the mana stars (10 or 20 GUI pixels) drop a toast only
+				-- where it would sit on them (it then waits for room: Ui/MusicToast, SaveIndicator).
+				for _, raise in { 10, 20 } do
+					local raisedInput = table.clone(input)
+					raisedInput.hudRaise = raise
+					local raised = HudLayout.compute(raisedInput)
+					if input.music and raised.music == nil then
+						local music = layout.music
+						if music == nil or not HudLayout.overlaps(music, raised.hud) then
+							return `raised {raise}: Now Playing was dropped with room for it`
+						end
+					end
+					if effects and effects.w <= 3 * HudLayout.EFFECT_STEP and raised.effects == nil then
+						local icons2 = layout.effects
+						if icons2 == nil or not HudLayout.overlaps(icons2, raised.hud) then
+							return `raised {raise}: the effect icons were dropped with room for them`
+						end
+					end
 				end
 				return nil
 			end)
@@ -361,6 +393,12 @@ return function(t, _shared, require, _server, client)
 		local desk =
 			HudLayout.compute(phone({ width = 1920, height = 1080, scale = 4, touch = false, minimap = false }))
 		t.ok(desk.mapButton == nil, "no Map button on a desktop")
+		-- The minimap's weather button: a finger's size on touch (GUI pixels at the scale).
+		for _, scale in { 1, 1.25, 1.5, 1.625, 2, 4 } do
+			local side = HudLayout.touchSide(11, scale)
+			t.ok(side * scale >= HudLayout.TOUCH_TARGET and side >= 11, `the weather button at {scale}`)
+		end
+		t.eq(HudLayout.touchSide(11, 4), 11, "big enough already at 4")
 		t.eq((desk.music :: Rect).y, 58 + 16, "the toast in the corner")
 		t.eq(desk.wailaRight, 1920 - 16, "nothing to keep out of")
 		-- WAILA keeps right of the F3 text.

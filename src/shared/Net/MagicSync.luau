@@ -4,7 +4,8 @@
 	Player/ManaState and Rendering/ProjectileView), apart from Net/Protocol as Net/PlayerSync is:
 	codecs only, pure. Ids: Protocol.ClientMessage.HeldUse, Protocol.ServerMessage.Mana and
 	Projectiles. Positions are world blocks (f32: a projectile lives a few seconds near its
-	caster, and Protocol.MAX_COORDINATE keeps a block's 1/64 within f32), velocities blocks a tick.
+	caster; f32 keeps a sixteenth of a block out to Protocol.MAX_COORDINATE 1e6, finer nearer
+	spawn: a bounce keeps off its wall, Magic/Projectiles' offFace), velocities blocks a tick.
 
 	Client -> server
 	  HeldUse      u16 seq (the client's count, wrapping), u8 slot (the hotbar slot, 1..9), u16
@@ -14,10 +15,12 @@
 	               direction far from unit length or another slot are malformed.
 	Server -> client
 	  Mana         u16 mana (whole), u16 max, u8 flags (bit 0 a cast was refused for want of mana,
-	               bit 1 mana just became full: Terraria's chime): 5 bytes, to the player alone
-	               when the whole number changes (at most every few ticks) and at once after a
-	               cast, a potion, a crystal or a respawn. Other flags or mana above the max are
-	               malformed.
+	               bit 1 mana just became full: Terraria's chime, bit 2 a cast was refused for
+	               another reason: too soon after the last, too many in flight; either refusal
+	               means the cast the client predicted did not happen): 5 bytes, to the player
+	               alone when the whole number changes (at most every few ticks) and at once after
+	               a cast, a refused one, a potion, a crystal or a respawn. Other flags or mana
+	               above the max are malformed.
 	  Projectiles  u16 count, count x op (u8 op, u32 id, then by op):
 	                 1 spawn  u8 kind (Shared/Magic's index, 1..kinds), f64 owner (the caster's
 	                          UserId), u16 seq (the caster's HeldUse, so its client adopts the
@@ -35,7 +38,7 @@ local Protocol = require(script.Parent.Protocol)
 
 export type HeldUse = { seq: number, slot: number, item: number, dx: number, dy: number, dz: number }
 
-export type ManaStatus = { mana: number, max: number, refused: boolean, full: boolean }
+export type ManaStatus = { mana: number, max: number, refused: boolean, full: boolean, dropped: boolean? }
 
 export type ProjectileOp = {
 	op: "spawn" | "sync" | "end",
@@ -112,7 +115,11 @@ function MagicSync.encodeMana(status: ManaStatus): buffer
 	local max = math.clamp(math.floor(status.max), 0, 65535)
 	buffer.writeu16(b, 0, math.clamp(math.floor(status.mana), 0, max))
 	buffer.writeu16(b, 2, max)
-	buffer.writeu8(b, 4, (if status.refused then 1 else 0) + (if status.full then 2 else 0))
+	buffer.writeu8(
+		b,
+		4,
+		(if status.refused then 1 else 0) + (if status.full then 2 else 0) + (if status.dropped then 4 else 0)
+	)
 	return b
 end
 
@@ -121,10 +128,16 @@ function MagicSync.decodeMana(b: buffer): ManaStatus?
 		return nil
 	end
 	local mana, max, flags = buffer.readu16(b, 0), buffer.readu16(b, 2), buffer.readu8(b, 4)
-	if mana > max or flags > 3 then
+	if mana > max or flags > 7 then
 		return nil
 	end
-	return { mana = mana, max = max, refused = bit32.btest(flags, 1), full = bit32.btest(flags, 2) }
+	return {
+		mana = mana,
+		max = max,
+		refused = bit32.btest(flags, 1),
+		full = bit32.btest(flags, 2),
+		dropped = bit32.btest(flags, 4),
+	}
 end
 
 local function writeVector(b: buffer, o: number, x: number, y: number, z: number): number

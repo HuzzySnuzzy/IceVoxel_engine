@@ -22,7 +22,11 @@
 	             moving to a bigger screen brings it back).
 	  fit        `base` shrunk so content of cw x ch GUI pixels fits an area of aw x ah screen pixels
 	             with MARGIN around it (the inventory on a small window): whole scales at and above 1
-	             on a desktop, eighths below 1 and on touch, never below MIN.
+	             on a desktop, eighths below 1 and on touch, never below MIN. With `minHeight`
+	             (content that lays itself out down to that height: the title screen's pages,
+	             Ui/MainMenu) the base is kept whenever cw x minHeight fits the area whole: a
+	             1366 x 768 window's 710 pixels below Roblox's top bar hold the pages' 236 at its
+	             Auto 3, where 240 and the margins would have cost a whole step.
 	  reference  for widgets drawn in fixed pixels at 1080p's Auto (the F3 text, the world map's
 	             bar, billboards): base / Config.UiScale.ReferenceScale, at least
 	             Config.UiScale.MinReference.
@@ -98,7 +102,18 @@ function GuiScale.base(w: number, h: number, touch: boolean, setting: number?): 
 end
 
 -- `base` shrunk so cw x ch GUI pixels fit an aw x ah area (see the header).
-function GuiScale.fit(base: number, cw: number, ch: number, aw: number, ah: number, touch: boolean): number
+function GuiScale.fit(
+	base: number,
+	cw: number,
+	ch: number,
+	aw: number,
+	ah: number,
+	touch: boolean,
+	minHeight: number?
+): number
+	if minHeight and cw * base <= aw and minHeight * base <= ah then
+		return base
+	end
 	local room = math.min((aw - 2 * GuiScale.MARGIN) / cw, (ah - 2 * GuiScale.MARGIN) / ch)
 	local scale = math.min(base, room)
 	if not touch and scale >= 1 then

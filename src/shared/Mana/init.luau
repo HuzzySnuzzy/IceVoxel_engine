@@ -24,8 +24,11 @@
 	             So, a second:            standing, full   empty   moving, full   empty
 	                           max 20          7.47        1.49        1.72       0.35
 	                           max 200         74.2        14.8        16.7       3.33
-	             "Standing still" is the server's: the feet moved less than 0.01 blocks since the
-	             last tick and nothing was cast in it (Players/Mana). Terraria 1.4.5.7 replaced the
+	             "Standing still" is the server's (Players/Mana, `stillness`): the feet moved no
+	             more than 0.01 blocks and nothing was cast for STILL_TICKS 4 ticks running (0.2 s:
+	             moves come at most 20 a second, unreliably, on the client's frames, so a single
+	             tick without one says nothing; with 4, no walking player counts as still at 20 to
+	             144 fps and up to 100 ms of jitter). Terraria 1.4.5.7 replaced the
 	             delay with a slow regeneration while attacking; that was not taken: 1.4.4's rules
 	             are the ones its wiki numbers (Mana Regeneration Band: +2.875 to +14.375 a second
 	             = 25 x 1.15 x (0.2..1) / 2) cross-check.
@@ -177,6 +180,22 @@ function Mana.step(state: State, max: number, still: boolean): boolean
 		return true
 	end
 	return false
+end
+
+-- Ticks without a move or a cast before a player stands still (see the header).
+Mana.STILL_TICKS = 4
+
+--[[
+	Standing still (see the header): `quiet` ticks so far without a move or a cast and whether this
+	tick had one (`moved`: the feet more than 0.01 blocks from where they last moved, or a cast).
+	Returns the new count and whether the player stands still now.
+]]
+function Mana.stillness(quiet: number, moved: boolean): (number, boolean)
+	if moved then
+		return 0, false
+	end
+	local count = math.min(quiet + 1, Mana.STILL_TICKS)
+	return count, count >= Mana.STILL_TICKS
 end
 
 -- One IceVoxel tick: STEPS_PER_TICK steps. Whether regeneration filled mana up this tick.

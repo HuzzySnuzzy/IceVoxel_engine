@@ -31,6 +31,10 @@
 	               today's accessories).
 	  knockbackShare  the share of a push that reaches the player (1 - knockback): the server
 	               scales the explosion and mob pushes it sends, and their speed allowance.
+	  fallReduction  blocks of fall the jump added takes off before fall damage, as Jump Boost's
+	               (Minecraft's LivingEntity.calculateFallDamage: a block for each 0.1 of jump
+	               velocity; a Shiny Red Balloon's 0.1: 1): the client's prediction
+	               (PlayerPhysics' `fallReduction`) and the server's Fall (Players/Characters).
 	  regenerate   one 20 Hz tick of a Band of Regeneration's count: a half heart every `regen`
 	               ticks while hurt, alive and in survival or adventure (Players/Characters).
 	  hasteTicks   ticks since the last swing as a weapon `attackSpeed` faster than its own sees
@@ -183,6 +187,11 @@ end
 -- The share of a push that reaches a player wearing `stats` (a Cobalt Shield's 1 resistance: 0).
 function Accessories.knockbackShare(stats: Stats): number
 	return 1 - math.clamp(stats.knockback, 0, 1)
+end
+
+-- Blocks of fall `stats`' added jump takes off (see the header).
+function Accessories.fallReduction(stats: Stats): number
+	return math.floor(stats.jump * 10 + 1e-6)
 end
 
 --[[

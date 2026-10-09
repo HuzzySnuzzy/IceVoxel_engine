@@ -21,7 +21,8 @@
 	    root),
 	  * landings reported by the client turn into fall damage (Config.Movement.FallDamage), like
 	    Minecraft: ceil(distance - 3) half hearts of 20, scaled to the Humanoid's MaxHealth
-	    (GameModeRules.fallDamage). Survival and adventure players only: creative and spectator
+	    (GameModeRules.fallDamage), less Jump Boost's levels and a Shiny Red Balloon's block
+	    (Items/Accessories.fallReduction). Survival and adventure players only: creative and spectator
 	    players never take fall damage (they may fly).
 	  * creative and spectator players can't be hurt (Minecraft's Abilities.invulnerable,
 	    GameModeRules.invulnerable): while in those modes their character holds an invisible
@@ -637,8 +638,10 @@ function Characters.start(net: ServerNet.ServerNet, world: WorldServer.World?)
 			-- (A Lucky Horseshoe: no fall damage at all, Terraria's noFallDmg.)
 			return
 		end
-		-- (Jump Boost takes its levels off the fall: LivingEntity.calculateFallDamage.)
-		local halfHearts = GameModeRules.fallDamage(GameMode.of(player), distance - Effects.fallReduction(player))
+		-- (Jump Boost takes its levels off the fall: LivingEntity.calculateFallDamage; a Shiny Red
+		-- Balloon's jump as much, Items/Accessories.fallReduction.)
+		local reduction = Effects.fallReduction(player) + Accessories.fallReduction(Inventories.accessories(player))
+		local halfHearts = GameModeRules.fallDamage(GameMode.of(player), distance - reduction)
 		if halfHearts <= 0 then
 			return
 		end

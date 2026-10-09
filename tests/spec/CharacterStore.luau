@@ -3,7 +3,9 @@
 	out with the DataStore "IceVoxelCharacters_v1"), against a fake DataStore with budgets, the
 	6 s a key, failures and servers that share it: a list that could not be read is never written
 	over, selecting takes the lock (one server at a time; another's live lock refuses, a stale one
-	is taken), a lost lock stops saving, saves carry order numbers, creating writes the record
+	is taken; a rejoin to the same server waits for its character's last save there), a lost lock
+	stops saving, saves carry order numbers, a visit that stopped being fair keeps the things it
+	had then (CharacterCodec.keepThings), creating writes the record
 	before the list (an orphan of a failed list write is taken over), the most a user keeps,
 	deleting and renaming refused while another server has the character, and the session-only
 	store in memory.
@@ -365,6 +367,100 @@ return function(t, shared, require, server)
 		newer.played = 800
 		t.eq(CharacterSaves.save(a.saves, USER, 1, newer, nil, 6), "failed", "given up after three")
 		t.eq(((stored(backend, 1)) :: any).played, 700)
+	end)
+
+	t.test("character store: a rejoin to the same server waits for the last save of its character", function()
+		-- The player leaves: their character's last save (a release) fails once and backs off; they
+		-- rejoin this server meanwhile. This server's own lock counts as free, so the select must
+		-- wait for that save, else it would load the record from before it and every later save
+		-- of the stale copy would be refused ("lost").
+		local backend = newBackend()
+		local a = fakeStore(backend, { job = "server-a" })
+		CharacterSaves.create(a.saves, USER, newRecord(1, "Alice"), nil, true)
+		local key = CharacterSaves.recordKey(USER, 1)
+		local before = newRecord(1, "Alice")
+		before.slots[2] = Items.newStack(Items.id.Diamond, 10)
+		a.env.wait(10)
+		t.eq(CharacterSaves.save(a.saves, USER, 1, before, nil, 1), "ok", "an autosave with 10 diamonds")
+		-- (The diamonds go into a chest; the player leaves with none.)
+		local left = newRecord(1, "Alice")
+		a.env.wait(10)
+		a.failures[key] = 1
+		local during: any = nil
+		local update = a.store.update
+		a.store.update = function(k: string, transform: any)
+			if k == key and during == nil then
+				-- (The rejoined session asks while the release backs off.)
+				during = {}
+				local status, _, _, why = CharacterSaves.select(a.saves, USER, 1)
+				local renamed, renameWhy = CharacterSaves.rename(a.saves, USER, 1, "Zed")
+				during[1], during[4], during.renamed, during.renameWhy = status, why, renamed, renameWhy
+			end
+			return update(k, transform)
+		end
+		t.eq(CharacterSaves.save(a.saves, USER, 1, left, nil, 2, true), "ok", "the release, on its second try")
+		a.store.update = update
+		t.eq(during[1], "busy", "the rejoin waits for it")
+		t.eq(during[4], CharacterSaves.STILL_SAVING)
+		t.eq(during.renamed, nil, "no rename meanwhile either")
+		t.eq(during.renameWhy, CharacterSaves.STILL_SAVING)
+		t.eq(backend.data[key].lock.released, true)
+		t.eq(a.saves.releasing[key], nil, "done")
+		-- Asked again: the record as the release left it, and its saves go on.
+		a.env.wait(10)
+		local status, record = CharacterSaves.select(a.saves, USER, 1)
+		t.eq(status, "ok")
+		t.eq((record :: any).slots[2], nil, "no diamonds: they are in the chest")
+		a.env.wait(10)
+		t.eq(CharacterSaves.save(a.saves, USER, 1, record, nil, 3), "ok", "not lost")
+		-- A release that fails for good also lets the next select through.
+		a.env.wait(10)
+		a.failures[key] = 3
+		t.eq(CharacterSaves.save(a.saves, USER, 1, record, nil, 4, true), "failed")
+		t.eq(a.saves.releasing[key], nil)
+		a.env.wait(10)
+		t.eq((CharacterSaves.select(a.saves, USER, 1)), "ok")
+	end)
+
+	t.test("character store: a visit that stopped being fair keeps the things it had then", function()
+		-- (Players/CharacterStore: creative or a world that doesn't save progress; the things are
+		-- copies, so the live inventory changing later doesn't reach them.)
+		local frozen = newRecord(1, "Alice")
+		frozen.slots[5] = Items.newStack(Items.id.IronIngot, 3)
+		frozen.accessories[1] = Items.newStack(Items.id.HermesBoots, 1)
+		frozen.vanityArmor[1] = Items.newStack(Items.id.TopHat, 1)
+		frozen.cursor = Items.newStack(Items.id.Stick, 2)
+		frozen.crystals, frozen.mana, frozen.hidden, frozen.selected = 2, 40, 0x0101, 4
+		frozen.effects = { { effect = 1, amplifier = 0, ticks = 200, ambient = false } }
+		local kept = CharacterCodec.new(1, "Alice", D.Classic, Appearance.default(), 0)
+		CharacterCodec.keepThings(kept, frozen)
+		frozen.slots[5].count = 64
+		frozen.slots[6] = Items.newStack(Items.id.Diamond, 64)
+		frozen.accessories[2] = Items.newStack(Items.id.CloudInABottle, 1)
+		frozen.crystals = 9
+		frozen.effects[1].ticks = 9999
+		-- A later capture (live things: creative stacks) saved with the kept things instead.
+		local live = newRecord(1, "Alice")
+		live.slots[6] = Items.newStack(Items.id.Diamond, 64)
+		live.accessories[2] = Items.newStack(Items.id.ManaCrystal, 1)
+		live.crystals, live.deaths, live.played = 9, 3, 500
+		CharacterCodec.keepThings(live, kept)
+		t.eq(live.slots[5].count, 3, "as it was then")
+		t.eq(live.slots[6], nil, "nothing made since")
+		t.eq(live.accessories[1].item, Items.id.HermesBoots)
+		t.eq(live.accessories[2], nil)
+		t.eq(live.vanityArmor[1].item, Items.id.TopHat)
+		t.eq(live.cursor.count, 2)
+		t.eq(live.crystals, 2)
+		t.eq(live.mana, 40)
+		t.eq(live.hidden, 0x0101)
+		t.eq(live.selected, 4)
+		t.eq(live.effects[1].ticks, 200)
+		t.eq(live.deaths, 3, "the rest is the character's now")
+		t.eq(live.played, 500)
+		t.ok(live.slots[5] ~= kept.slots[5], "copies: the kept things stay as they were")
+		local back = CharacterCodec.fromText(CharacterCodec.toText(live)) :: any
+		t.eq(back.slots[5].count, 3)
 	end)
 
 	--[[ Deleting and renaming ]]

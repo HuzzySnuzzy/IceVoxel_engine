@@ -90,8 +90,9 @@
 	            factor as Minecraft's does ((factor + 1) / 2, Speed I: x 1.1).
 	  Accessories  Terraria's, worn in the predicted inventory (Inventory/ClientInventory; summed by
 	            Items/Accessories.stats into one table, again only when the inventory changes): the
-	            speed share times the effects' speed factor, the jump added to Jump Boost's, the
-	            air jumps (Cloud in a Bottle), the Hermes run, the Flipper's swimming
+	            speed share times the effects' speed factor, the jump added to Jump Boost's (and
+	            its fall reduction, Accessories.fallReduction, as the server's), the air jumps
+	            (Cloud in a Bottle), the Hermes run, the Flipper's swimming
 	            (PlayerPhysics' accessory fields); a Lucky Horseshoe's landings hurt nothing, so no
 	            Fall is sent (the server skips them too). Knockback resistance is the server's: it
 	            sends the pushes already less the player's share (Players/Characters, Mobs/Mobs), so
@@ -1160,7 +1161,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					state.speedFactor = EffectState.speedFactor() * (1 + worn.speed)
 					local jumpBoost, fallReduction = EffectState.jumpBoost()
 					state.jumpBoost = jumpBoost + worn.jump
-					state.fallReduction = fallReduction + (if worn.noFallDamage then NO_FALL else 0)
+					state.fallReduction = fallReduction
+						+ Accessories.fallReduction(worn)
+						+ (if worn.noFallDamage then NO_FALL else 0)
 					state.noSprint = EffectState.noSprint()
 					state.airJumpsMax = worn.airJumps
 					state.runBoost = worn.runBoost

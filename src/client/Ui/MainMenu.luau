@@ -69,8 +69,10 @@
 	             key waiting "Not Bound") and the other, right after, is ignored, as is the Escape
 	             that closes Roblox's menu. The GUI scale is Minecraft's (Ui/UiScale: Auto for
 	             320 x 240, or the GUI Scale setting the boot script hands it), fitted below
-	             Roblox's top bar so no page starts under its buttons, and laid out again when the
-	             window, the insets or the setting change.
+	             Roblox's top bar so no page starts under its buttons (the pages lay themselves out
+	             down to PAGES_HEIGHT 236 GUI pixels, the Select Character page's preview meeting
+	             its message: the base scale stays while that fits, so a 1366 x 768 window keeps its
+	             Auto 3), and laid out again when the window, the insets or the setting change.
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -111,6 +113,8 @@ local LOGO_DEPTH = 3
 local BUTTON_W = 200
 local BUTTON_H = 20
 local ROW = 24
+-- GUI pixels the pages need at least (see the header).
+local PAGES_HEIGHT = 236
 -- Columns of the panorama's hills per screen, and how fast each layer slides (screens a second).
 local COLUMNS = 48
 local FAR_SPEED = 0.004
@@ -1331,13 +1335,14 @@ function MainMenu.run()
 	--[[ Layout, input, animation ]]
 
 	-- The content canvas: the safe area below Roblox's top bar (this GUI is the safe area, from the
-	-- screen's top), 320 x 240 GUI pixels fitted into it at the GUI scale (Ui/UiScale).
+	-- screen's top), 320 x 240 GUI pixels fitted into it at the GUI scale (Ui/UiScale); the pages
+	-- lay themselves out down to PAGES_HEIGHT, so the scale stays the base while that fits.
 	local function layout()
 		local viewport = UiScale.viewport()
 		local insets = UiScale.insets()
 		local area = Vector2.new(viewport.X - insets.left - insets.right, viewport.Y - insets.top - insets.bottom)
 		local top = math.max(insets.bar - insets.top, 0)
-		local size = UiScale.fit(320, 240, Vector2.new(area.X, area.Y - top))
+		local size = UiScale.fit(320, 240, Vector2.new(area.X, area.Y - top), PAGES_HEIGHT)
 		scale.Scale = size
 		content.Position = UDim2.fromOffset(0, top)
 		content.Size = UDim2.fromOffset(math.floor(area.X / size), math.floor((area.Y - top) / size))

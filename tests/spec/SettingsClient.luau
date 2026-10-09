@@ -268,6 +268,9 @@ local function fakeMinimap(shared: any, sharedRequire: (any) -> any, touch: bool
 				setMinimap = function(value: boolean)
 					shown = value
 				end,
+				touch = function(): boolean
+					return touch
+				end,
 				hudChanged = fakeSignal(),
 			}
 		end
@@ -971,8 +974,15 @@ return function(t, shared, require, _server, client)
 			t.eq(button.Visible, touch, if touch then "touch: the button takes its place" else "keyboard: M")
 			button.Activated.fire()
 			t.eq(ui.opened, 1, "opens the world map")
+			if touch then
+				-- (A finger's size at the corner's scale 2: HudLayout.mapButtonSize.)
+				t.ok(button.Size.Y.Offset * 2 >= 32 and button.Size.X.Offset * 2 >= 64, "the Map button")
+			end
 			ui.minimap.setVisible(true)
 			t.eq(button.Visible, false, "gone again")
+			-- The cloud button's tap area: a finger's 32 pixels on touch (scale 2), its own 11 else.
+			local cloud = ui.named("WeatherButton")
+			t.eq(cloud.Size.X.Offset, if touch then 16 else 11, "the weather button's tap area")
 		end
 	end)
 end

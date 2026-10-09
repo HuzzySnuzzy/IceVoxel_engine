@@ -14,7 +14,8 @@
 	    panel of its own 84 x 166 docked 2 px right of the player panel (Terraria's is right of
 	    its inventory too), so `size` is 262 wide then: the title "Equipment" at (8, 6), seven
 	    rows at y = 17 + 18 (r - 1): the vanity armor (x 8, rows 1..4, the armor ghosts tinted
-	    violet, a 6 x 6 eye in each slot's top right corner hiding that armor piece's look), the
+	    violet, a 6 x 6 eye in each slot's top right corner hiding that armor piece's look, its
+	    button 8 x 8 out to the frame's corner on touch: MenuLayout.armorEye), the
 	    vanity accessories (x 28), the accessories (x 48: rows past the open ones darkened with a
 	    padlock, "Opens at the Industrial Age"), and a 9 x 9 eye per accessory row (x 68; a 16 x
 	    18 button, so a finger finds it) hiding that accessory's look (Types `hidden`: the
@@ -439,12 +440,10 @@ local function buildEquipment(self: Self, root: Frame)
 					frame.BackgroundColor3 = VANITY_GHOST
 				end
 			end
-			-- Hiding the armor piece's look: a small eye in the slot's top right corner.
-			local reach = if touch then 10 else 6
-			table.insert(
-				self.eyes,
-				newEye(panel, EQUIP_VANITY_X + 16 - reach, y, reach, reach, true, Types.HIDE_ARMOR + row)
-			)
+			-- Hiding the armor piece's look: a small eye in the slot's top right corner (on touch
+			-- a little larger, out to the frame's corner: never over the slot's middle).
+			local eye = MenuLayout.armorEye(EQUIP_VANITY_X, y, touch)
+			table.insert(self.eyes, newEye(panel, eye.x, eye.y, eye.w, eye.h, true, Types.HIDE_ARMOR + row))
 		end
 		newSlot(self, panel, self.equipmentSlots, EQUIP_VANITY_ACC_X, y, "vanityAccessory", row)
 		local accessory = newSlot(self, panel, self.equipmentSlots, EQUIP_ACC_X, y, "accessory", row)

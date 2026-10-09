@@ -1431,7 +1431,8 @@ return function(t, shared, require)
 
 	t.test("accessories: an air jump starts the fall again; not in fluids, on ladders or flying", function()
 		local flat = physicsWorld()
-		-- Falling 20 blocks with an air jump on the way down: the fall counts from its top.
+		-- Falling 20 blocks with an air jump on the way down: the fall counts from where it took off
+		-- (from below zero by the 0.96 blocks it rises).
 		local state = aloft(21)
 		local landed: number? = nil
 		local jumpedAtY = 0
@@ -1439,7 +1440,7 @@ return function(t, shared, require)
 			local events = PlayerPhysics.tick(state, input(0, 0, { jump = tick == 25 }), flat)
 			if events.airJumped then
 				jumpedAtY = state.y - 0.36
-				t.eq(state.fallDistance, 0, "the fall starts again")
+				t.ok(near(state.fallDistance, -0.9609, 0.0005), `the fall starts again: {state.fallDistance}`)
 			end
 			if events.landed then
 				landed = events.fallDistance
@@ -1447,7 +1448,9 @@ return function(t, shared, require)
 			end
 		end
 		t.ok(jumpedAtY > 1, "jumped on the way down")
-		t.ok(landed ~= nil and near(landed :: number, jumpedAtY + 0.9609 - 1, 0.6), `fell {landed} blocks`)
+		-- (Minecraft counts no fall on the tick that lands: up to that tick's drop less.)
+		t.ok(landed ~= nil and near(landed :: number, jumpedAtY - 1, 0.6), `fell {landed} blocks`)
+		t.ok((landed :: number) <= jumpedAtY - 1 + 1e-9, "from where it took off, not from its top")
 		-- Deep water: swimming up instead.
 		local deep = physicsWorld(function(_x, y, _z)
 			return if y >= 1 and y <= 20 then WATER else nil
@@ -1475,6 +1478,92 @@ return function(t, shared, require)
 		local events = PlayerPhysics.tick(climber, input(0, 0, { jump = true }), ladder)
 		t.ok(not events.airJumped, "no air jump on a ladder")
 		t.eq(climber.airJumpsLeft, 1, "climbing gives it back")
+	end)
+
+	t.test("accessories: a double jump never hurts back on the ground it left (nor off a step)", function()
+		local flat = physicsWorld()
+		-- A Cloud in a Bottle, with a Shiny Red Balloon, and with Jump Boost I too (its fall
+		-- reduction: a block), the second press at every tick of the first jump: the second top
+		-- reaches 3.3 and 4.6 blocks, the fall from where the air jump took off never 3.
+		for _, case in { { 0, 0 }, { 0.1, 0 }, { 0.2, 1 } } do
+			for press = 3, 14 do
+				local state = PlayerPhysics.new(0.5, 1, 0.5)
+				for _ = 1, 3 do
+					PlayerPhysics.tick(state, input(0, 0), flat)
+				end
+				state.airJumpsMax, state.jumpBoost, state.fallReduction = 1, case[1], case[2]
+				local damage, air = 0, false
+				for tick = 1, 80 do
+					local events = PlayerPhysics.tick(state, input(0, 0, { jump = tick == 1 or tick == press }), flat)
+					air = air or events.airJumped
+					if events.landed then
+						damage = events.damage
+						break
+					end
+				end
+				t.eq(damage, 0, `jump boost {case[1]}, second press at tick {press}`)
+				t.ok(air or press > 10, `air jumped at tick {press}`)
+			end
+		end
+		-- Walking off a one block step and jumping in the air on the way down: no hurt either.
+		local step = physicsWorld(function(x, y, _z)
+			return if y == 1 and x < 1 then STONE else nil
+		end)
+		local airJumps = 0
+		for delay = 1, 8 do
+			local state = PlayerPhysics.new(0.5, 2, 0.5)
+			for _ = 1, 3 do
+				PlayerPhysics.tick(state, input(0, 0), step)
+			end
+			state.airJumpsMax = 1
+			local leftAt: number? = nil
+			local damage, landed, air = 0, false, false
+			for tick = 1, 80 do
+				local jump = leftAt ~= nil and tick == (leftAt :: number) + delay
+				local events = PlayerPhysics.tick(state, input(1, 0, { jump = jump }), step)
+				air = air or events.airJumped
+				if leftAt == nil and not state.onGround then
+					leftAt = tick
+				end
+				if events.landed and state.y < 1.5 then
+					damage, landed = events.damage, true
+					break
+				end
+			end
+			t.ok(landed, "landed below the step")
+			t.eq(damage, 0, `off a step with an air jump {delay} ticks after`)
+			airJumps += if air then 1 else 0
+		end
+		t.ok(airJumps >= 3, `jumped in the air on the way down {airJumps} times`)
+	end)
+
+	t.test("accessories: the double tap that stops flying is no air jump", function()
+		local flat = physicsWorld()
+		local state = PlayerPhysics.new(0.5, 1, 0.5)
+		PlayerPhysics.setGameMode(state, GameMode.CREATIVE)
+		state.airJumpsMax = 1
+		for _ = 1, 3 do
+			PlayerPhysics.tick(state, input(0, 0), flat)
+		end
+		-- Double tap: flying; rise a while; double tap again: falling, without a jump.
+		local presses = { [1] = true, [3] = true, [30] = true, [32] = true }
+		local airJumps = 0
+		local stoppedAt: number? = nil
+		local yAt = 0
+		for tick = 1, 40 do
+			local events = PlayerPhysics.tick(state, input(0, 0, { jump = presses[tick] == true }), flat)
+			if events.airJumped then
+				airJumps += 1
+			end
+			if tick == 32 then
+				stoppedAt, yAt = tick, state.y
+				t.ok(not state.flying, "flying stopped")
+			end
+		end
+		t.ok(stoppedAt ~= nil)
+		t.eq(airJumps, 0, "the second tap only stops flying")
+		t.ok(state.y < yAt, "it falls")
+		t.eq(state.airJumpsLeft, 1, "the jump is still there for a later press")
 	end)
 
 	-- A player standing on the floor at (x, 1, 0.5), settled (two ticks: on the ground every tick).

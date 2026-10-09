@@ -51,7 +51,9 @@
 	  Mobs.near(x, y, z, radius)   the live mobs around a point (MobView: id, kind, position,
 	                       box, health)
 	  Mobs.magicDamage(id, amount, attacker?, x?, z?, knockback?)   a magic projectile's hit
-	                       (Players/Magic): as `damage`, with the weapon's own knockback
+	                       (Players/Magic): as `damage`, with the weapon's own knockback, never
+	                       refused by the hurt cooldown (a projectile strikes a mob once:
+	                       MobWorld's `ownImmunity`)
 	  Mobs.ignite(id, ticks)   sets a mob burning for at least `ticks` (the spark's fire)
 	  Mobs.spawn(kind, x, y, z)    a mob of a MobList name at a position (0 when it can't)
 	  Mobs.explode(x, y, z, power, getBlock)   what a blast does to mobs (World/Explosions'
@@ -608,9 +610,11 @@ end
 
 --[[
 	A magic projectile's hit (Players/Magic): hurts mob `id` by `amount` half hearts through its
-	cooldown and armor (Terraria's defense against magic), credited to `attacker`, pushed away from
-	(x, z) by `knockback` blocks a tick (0: no push; the weapon's own, not a melee hit's 0.4).
-	Returns what landed.
+	armor (Terraria's defense against magic), credited to `attacker`, pushed away from (x, z) by
+	`knockback` blocks a tick (0: no push; the weapon's own, not a melee hit's 0.4). The hurt
+	cooldown doesn't refuse it (each projectile strikes a mob once, Terraria's projectile immunity:
+	a Wand of Sparking's 9 tick casts all land on one mob); it starts one, as any hurt. Returns what
+	landed.
 ]]
 function Mobs.magicDamage(
 	id: number,
@@ -624,7 +628,7 @@ function Mobs.magicDamage(
 	if mobs == nil then
 		return 0
 	end
-	return mobs:hurt(id, amount, { player = attacker, x = x, z = z, knockback = knockback or 0 })
+	return mobs:hurt(id, amount, { player = attacker, x = x, z = z, knockback = knockback or 0, ownImmunity = true })
 end
 
 --[[

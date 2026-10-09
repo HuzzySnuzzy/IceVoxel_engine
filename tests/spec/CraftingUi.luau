@@ -212,6 +212,22 @@ return function(t, shared, require, _server, client)
 		t.ok(MenuLayout.panelKey(table3()) ~= MenuLayout.panelKey(furnace()), "kinds differ")
 	end)
 
+	t.test("layout: the armor eye never covers the middle of its vanity armor slot", function()
+		for _, touch in { false, true } do
+			local eye = MenuLayout.armorEye(8, 17, touch)
+			local cx, cy = 8 + 8, 17 + 8
+			local inside = cx >= eye.x and cx < eye.x + eye.w and cy >= eye.y and cy < eye.y + eye.h
+			t.ok(not inside, `the slot's middle is the slot's (touch {touch})`)
+			t.ok(eye.x >= 8 - 1 and eye.x + eye.w <= 8 + 17, "within the slot's own frame: x")
+			t.ok(eye.y >= 17 - 1 and eye.y + eye.h <= 17 + 17, "and y")
+			local overX = math.min(eye.x + eye.w, 8 + 16) - math.max(eye.x, 8)
+			local overY = math.min(eye.y + eye.h, 17 + 16) - math.max(eye.y, 17)
+			t.ok(overX * overY <= 16 * 16 / 4, `a corner of the item at most ({overX * overY} px)`)
+		end
+		t.eq(MenuLayout.armorEye(8, 17, false).w, 6, "6 x 6 with a mouse")
+		t.ok(MenuLayout.armorEye(8, 17, true).w > 6, "larger for a finger")
+	end)
+
 	t.test("layout: arrows point right and the flame is 14 x 14", function()
 		for _, size in { { 16, 13 }, { 22, 15 }, { 24, 16 } } do
 			local w, h = size[1], size[2]

@@ -9,7 +9,8 @@
 	    "place", "hit", "step" or "fall", or the block's own (SoundList.BLOCK_SOUNDS: punching fire
 	    out hisses).
 	  * `container(block, opened)`: a chest's lid; `equip(old, new)` / `armorEquip(item)`: armor
-	    put on; `fall(halfHearts)`: Minecraft's small or big fall.
+	    put on (`equipment(old, new)`: an equipment slot's, the generic sound for accessories and
+	    vanity clothes); `fall(halfHearts)`: Minecraft's small or big fall.
 	  * `lookupNames(sound)`: the names a developer's Sound may have to replace an event, most
 	    specific first (block.stone.break, then its category block.break).
 	  * `contentIds()`: every sound file the catalogue uses (fallbacks too), to preload;
@@ -272,6 +273,21 @@ function Sounds.equip(old: Items.Stack?, new: Items.Stack?): number?
 		return nil
 	end
 	return Sounds.armorEquip(new.item)
+end
+
+--[[
+	An equipment slot (an accessory, vanity armor or vanity accessory slot) went from `old` to
+	`new`: as `equip`, and the generic equip sound for what is not armor (accessories and vanity
+	clothes), nil when nothing was put on.
+]]
+function Sounds.equipment(old: Items.Stack?, new: Items.Stack?): number?
+	if new == nil or new.count < 1 then
+		return nil
+	end
+	if old and old.count >= 1 and old.item == new.item and (old.damage or 0) == (new.damage or 0) then
+		return nil
+	end
+	return Sounds.armorEquip(new.item) or Sounds.find(SoundList.ARMOR_DEFAULT)
 end
 
 -- The sound of a landing that hurt `halfHearts` (Minecraft's small_fall up to 4, else big_fall).

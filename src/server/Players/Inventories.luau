@@ -68,7 +68,8 @@
 	           Player/EquipmentLooks), each only when it changed. The open accessory slots come
 	           from the rule the server script sets (`setSlotsRule`: the player's Age,
 	           Accessories.slotsForAge), asked on joining and a few times a second. Putting an
-	           accessory or a vanity piece on plays the generic equip sound as armor does.
+	           accessory or a vanity piece on plays the generic equip sound as armor does (armor
+	           put in a vanity slot its own: Shared/Sounds.equipment).
 
 	Saved      a saved world keeps every player's inventory (World/WorldSave reads it through
 	           `get`, and puts a returning player's back with `restore`).
@@ -529,7 +530,7 @@ local function onInventory(player: Player, payload: buffer)
 		if now then
 			local first = Menu.windowIndex(now, "accessory", 1) :: number
 			for index = 1, Types.EQUIPMENT_SIZE do
-				local sound = SharedSounds.equip(worn[index], Menu.get(now, first + index - 1))
+				local sound = SharedSounds.equipment(worn[index], Menu.get(now, first + index - 1))
 				if sound then
 					if Sounds.allow(player) then
 						Sounds.playAt(player, sound)

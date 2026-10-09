@@ -31,6 +31,11 @@
 
 	A slot's (x, y) is its item's top left corner, as in Minecraft's menus: the 18 x 18 slot frame
 	(and the hit area) is one pixel up and left of it, a large frame five.
+
+	  armor eye     the button hiding a vanity armor slot's armor look (Ui/InventoryScreen's
+	                equipment panel): its 6 x 6 art in the item's top right corner, and the button
+	                that size too, or on touch screens 8 x 8 out to the frame's corner; never over
+	                the item's middle, so a tap on the slot still reaches the slot.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -354,6 +359,16 @@ function MenuLayout.panelKey(container: Container?): string
 		return ""
 	end
 	return `{container.kind}:{container.block}:{container.size}`
+end
+
+--[[ The equipment panel ]]
+
+-- The armor eye's button for the slot whose item is at (x, y) (see the header).
+function MenuLayout.armorEye(x: number, y: number, touch: boolean): Rect
+	if touch then
+		return { x = x + 9, y = y - 1, w = 8, h = 8 }
+	end
+	return { x = x + 10, y = y, w = 6, h = 6 }
 end
 
 --[[ Furnace gauges ]]

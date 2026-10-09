@@ -390,6 +390,13 @@ return function(t, shared, require, server, client)
 		Accessories.stats(inventory, stats)
 		t.near(Accessories.speedFactor(stats), 1.15 * 1.4, 1e-9, "1.61: MoveCheck's factor")
 		t.eq(Accessories.knockbackShare(stats), 0, "the shield holds all of it")
+		-- A Shiny Red Balloon's 0.1 jump takes a block off the fall, as Jump Boost I's does.
+		t.eq(Accessories.fallReduction(stats), 0, "no jump added: no reduction")
+		inventory.accessories[5] = stack("ShinyRedBalloon")
+		Accessories.stats(inventory, stats)
+		t.eq(Accessories.fallReduction(stats), 1)
+		inventory.accessories[5] = nil
+		Accessories.stats(inventory, stats)
 		-- Feral Claws: a sword (1.6 attacks a second) recovers in 12.5 ticks, with the claws in
 		-- 12.5 / 1.12; ticks seen faster give the same strength as a faster weapon.
 		local Combat = require(shared.Entities.Combat)

@@ -385,14 +385,15 @@ function UiScale.base(): number
 	return base
 end
 
--- The base shrunk so `width` x `height` GUI pixels fit `area` (screen pixels; the viewport).
-function UiScale.fit(width: number, height: number, area: Vector2?): number
+-- The base shrunk so `width` x `height` GUI pixels fit `area` (screen pixels; the viewport);
+-- `minHeight`: content laying itself out down to that height (GuiScale.fit).
+function UiScale.fit(width: number, height: number, area: Vector2?, minHeight: number?): number
 	UiScale.start()
 	local space = area or viewport
 	if space.X < 2 or space.Y < 2 then
 		space = viewport
 	end
-	return GuiScale.fit(base, width, height, space.X, space.Y, touch)
+	return GuiScale.fit(base, width, height, space.X, space.Y, touch, minHeight)
 end
 
 -- The scale of widgets drawn in fixed pixels at 1080p's Auto (GuiScale.reference).

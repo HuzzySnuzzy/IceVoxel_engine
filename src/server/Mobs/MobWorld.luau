@@ -131,13 +131,16 @@ export type Changes = {
 
 -- Where a hurt comes from (all optional): a player (kill credit, a monster's revenge), a
 -- position (the knockback's and the panic's direction), its knockback strength, whether armor
--- softens it.
+-- softens it, and whether it keeps its own immunity (`ownImmunity`: a magic projectile, which
+-- strikes a mob once, Shared/Magic/Projectiles' `struck`, as Terraria's projectiles keep their
+-- own per-NPC immunity: the 10 tick hurt cooldown doesn't refuse it, it starts one as any hurt).
 export type Source = {
 	player: any?,
 	x: number?,
 	z: number?,
 	knockback: number?,
 	bypassArmor: boolean?,
+	ownImmunity: boolean?,
 }
 
 -- A player's swing at a mob (`attack`): who, where their feet and eyes are, their game mode, the
@@ -495,6 +498,10 @@ function MobWorld.hurt(self: MobWorld, id: number, amount: number, source: Sourc
 	local mob = self.byId[id]
 	if mob == nil or mob.dead or not (amount > 0) then
 		return 0
+	end
+	if source and source.ownImmunity then
+		-- (Its own immunity: see Source.)
+		mob.burn.cooldown = 0
 	end
 	local fresh = mob.burn.cooldown <= 0
 	local armor = if source and source.bypassArmor then 0 else mob.kind.armor or 0

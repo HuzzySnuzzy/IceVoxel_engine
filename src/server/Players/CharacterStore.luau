@@ -33,7 +33,9 @@
 	             is theirs for the session: switching means leaving and rejoining.
 	  Entering   `enter` (Players/WorldMenu's EnterWorld, or the title screen off): the selected,
 	             loaded, living character goes into the world: World/WorldSave.enterCharacter
-	             (where it stood there, its game mode, an old record taken in), then its
+	             (where it stood there, its game mode, an old record taken in: only by a
+	             character that is saved, in a world that saves progress, not in creative; the
+	             world's mark waits for this character's first save with it, confirmImport), then its
 	             inventory and equipment (Players/Inventories.restore, restoreEquipment), Tough
 	             As Nails, effects, mana and crystals (Players/Mana) and progress
 	             (Players/Progression.restore); its health on its first body, the leftovers of an
@@ -46,16 +48,28 @@
 	             newer); the last save gives the lock back and writes the character's line in the
 	             list (time played, last played, dead). A lost lock stops saving that character
 	             (the player is told). What a leaving player had is taken from the last look at
-	             them (every 2 s), as the parts that keep it forget them as they leave. Progress
-	             is written where the world saves progress (Progression.savesProgress); elsewhere
-	             the progress the character came with is written back unchanged.
+	             them (every 2 s), as the parts that keep it forget them as they leave (mana and
+	             crystals from Players/Mana while it still has them). Progress is written where
+	             the world saves progress (Progression.savesProgress); elsewhere the progress the
+	             character came with is written back unchanged.
+	  Fair       a character carries its things from world to world (Terraria), so they leave a
+	             world only from a fair visit: one where the world saves progress (no Allow
+	             Commands, not superflat or debug) and the player was never in creative. From the
+	             moment a visit stops being fair (entering such a world, or in creative mode;
+	             switching to creative later: `kept`), the things the character had then are
+	             what is saved: inventory, armor, equipment, Mana Crystals, mana and effects (what
+	             creative or a cheat world makes stays in that world, as Terraria keeps Journey
+	             characters apart). The player is told once.
 	  Death      every death counts (`deaths`); Classic characters keep everything
 	             (`keepsInventory`, Players/Inventories' keep rule), Mediumcore and Hardcore drop
 	             it; a Hardcore character dies for good: marked dead and saved at once, its player
 	             a spectator for the rest of the session. Respawns come with full mana.
 	  No title   with Config.MainMenu.Enabled off (Roblox loads characters itself), each player
 	             plays their most recently played living character, or one made from their avatar
-	             (the default difficulty), entered as soon as the world is ready; its look goes
+	             (the default difficulty) when they have none living (one that can't be loaded,
+	             busy on another server or the store failing, is never replaced by a new one: the
+	             player is kicked with the reason, to rejoin), entered as soon as the world is
+	             ready; its look goes
 	             onto each body Roblox makes (Humanoid:ApplyDescriptionResetAsync: the only live
 	             apply, accepted for this mode).
 ]]
@@ -111,6 +125,9 @@ local CACHE_INTERVAL = 2
 local PROGRESS_EVERY = 5
 -- The list's words.
 local SESSION_NOTE = "Characters last for this session only"
+local UNFAIR_WORLD =
+	"This world can't change your character (it allows commands, or is superflat or debug): it leaves with the things and progress it brought"
+local CREATIVE_NOTE = "Your character is in creative: it leaves this world with the things it had until now"
 local A = CharacterSync.Action
 
 -- What a player left with, as last seen (the parts that keep it forget players as they leave).
@@ -148,6 +165,12 @@ type Selected = {
 	pendingHealth: number?,
 	leftovers: { Stack },
 	bodies: number,
+	-- The things it had when this visit stopped being fair (see the header: written back instead of
+	-- the live ones), nil while it is fair.
+	kept: Record?,
+	-- The world whose old record it took in, until a save with it was written (then the world's
+	-- mark: WorldSave.confirmImport).
+	importing: string?,
 }
 
 type User = {
@@ -412,6 +435,8 @@ local function newSelected(record: Record, progress: unknown?): Selected
 		pendingHealth = nil,
 		leftovers = {},
 		bodies = 0,
+		kept = nil,
+		importing = nil,
 	}
 end
 
@@ -468,20 +493,41 @@ local function capture(player: Player, user: User, selected: Selected): Record
 	else
 		record.health = cache.health or base.health
 	end
-	if user.leaving then
+	-- (Players/Mana while it keeps the player: the crystal a leaving player just used too.)
+	local mana = Mana.peek(player)
+	if mana then
+		record.mana, record.crystals = mana.mana, mana.crystals
+	else
 		record.mana = cache.mana or base.mana
 		record.crystals = cache.crystals or base.crystals
-	else
-		local mana = Mana.export(player)
-		record.mana, record.crystals = mana.mana, mana.crystals
 	end
 	local thirst, temperature = ToughAsNails.export(player)
 	record.thirst = (thirst or cache.thirst or base.thirst) :: any
 	record.temperature = (temperature or cache.temperature or base.temperature) :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or cache.effects or base.effects) :: any
+	local kept = selected.kept
+	if kept then
+		-- (Not a fair visit: the things it had then.)
+		CharacterCodec.keepThings(record, kept)
+	end
 	selected.record = record
 	return record
+end
+
+--[[
+	The visit stops being fair (see the header): the things the character has now are what it
+	leaves with. Once a visit.
+]]
+local function freeze(player: Player, user: User, selected: Selected, message: string)
+	if selected.kept or not selected.applied then
+		return
+	end
+	local now = capture(player, user, selected)
+	local kept = CharacterCodec.new(now.id, now.name, now.difficulty, now.appearance, now.created)
+	CharacterCodec.keepThings(kept, now)
+	selected.kept = kept
+	notify(player, message)
 end
 
 -- The progress saved with the character (see the header).
@@ -506,6 +552,8 @@ local function save(player: Player, user: User, selected: Selected, release: boo
 	local order = captures
 	local record = if selected.canSave then capture(player, user, selected) else nil
 	local writes = record ~= nil and (selected.applied or release == true)
+	-- (An old record taken in: this save has it when the character is in the world.)
+	local importing = if writes and selected.applied then selected.importing else nil
 	local status = CharacterSaves.save(
 		user.saves,
 		player.UserId,
@@ -521,6 +569,11 @@ local function save(player: Player, user: User, selected: Selected, release: boo
 		warn(`[IceVoxel] {player.Name}'s character "{selected.record.name}" was opened on another server`)
 		notify(player, "Your character is no longer saved here: it was opened on another server")
 		return
+	end
+	if status == "ok" and importing and selected.importing == importing then
+		-- (Saved with what it took in: now the world may say it was taken.)
+		selected.importing = nil
+		WorldSave.confirmImport(player.UserId, selected.id, importing)
 	end
 	if release and status ~= "failed" and selected.canSave then
 		local listed = CharacterSaves.touch(
@@ -595,11 +648,19 @@ local function select(player: Player, user: User, id: number): string
 		if status ~= "busy" or player.Parent == nil or os.clock() + delay > deadline then
 			break
 		end
-		sendList(player, user, `{line.name} is still being saved by another server: waiting...`)
+		local here = why == CharacterSaves.STILL_SAVING
+		sendList(
+			player,
+			user,
+			`{line.name} is still being saved{if here then "" else " by another server"}: waiting...`
+		)
 		task.wait(delay)
 		delay = math.min(delay * 2, 8)
 	end
 	if status == "busy" then
+		if why == CharacterSaves.STILL_SAVING then
+			return `{line.name} is still being saved: try again in a moment`
+		end
 		return `{line.name} is open on another server`
 	elseif status == "missing" then
 		return `{line.name} is gone`
@@ -1078,6 +1139,11 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 		selected.pendingHealth = record.health
 	end
 	CharacterLooks.clear(player)
+	if not Progression.savesProgress() then
+		freeze(player, user, selected, UNFAIR_WORLD)
+	elseif GameMode.instabuild(GameMode.of(player)) then
+		freeze(player, user, selected, CREATIVE_NOTE)
+	end
 end
 
 --[[
@@ -1101,15 +1167,24 @@ function CharacterStore.enter(player: Player, id: number): (boolean, string?)
 		return true, nil
 	end
 	user.entered = true
-	local before = #selected.record.imported
-	local leftovers = WorldSave.enterCharacter(player, selected.record)
+	-- (Only a character that is saved takes an old record in, and only on a fair visit: see the
+	-- header; WorldSave checks the game mode it enters with.)
+	local mayImport = user.saving and selected.canSave and not selected.lost and Progression.savesProgress()
+	local leftovers, imported = WorldSave.enterCharacter(player, selected.record, mayImport)
 	if users[player] ~= user or user.selected ~= selected then
 		return false, "the player left"
 	end
 	apply(player, user, selected, leftovers)
-	if #selected.record.imported ~= before then
-		-- (An old record was taken in: saved at once, so the world's mark has a character behind it.)
-		task.spawn(saveSoon, player, user)
+	if imported then
+		-- (An old record was taken in: saved at once, after a save under way; the world's mark
+		-- waits for it.)
+		selected.importing = imported
+		task.spawn(function()
+			while selected.saving do
+				task.wait(0.2)
+			end
+			saveSoon(player, user)
+		end)
 	end
 	return true, nil
 end
@@ -1148,12 +1223,20 @@ autoPlay = function(player: Player, user: User)
 			break
 		end
 	end
+	local why = ""
 	if chosen then
-		select(player, user, chosen.id)
-	end
-	if user.selected == nil then
+		why = select(player, user, chosen.id)
+		if user.selected == nil then
+			-- (Never a new character in its place: see the header.)
+			warn(`[IceVoxel] {player.Name}'s character "{chosen.name}" could not be played: {why}`)
+			if player.Parent then
+				player:Kick(`Your character could not be loaded ({why}). Please rejoin.`)
+			end
+			return
+		end
+	else
 		local look = CharacterMigration.allWorn(CharacterLooks.snapshot(player))
-		create(player, user, {
+		why = create(player, user, {
 			action = A.Create,
 			name = player.DisplayName,
 			difficulty = Characters.DEFAULT_DIFFICULTY,
@@ -1162,7 +1245,8 @@ autoPlay = function(player: Player, user: User)
 	end
 	local selected = user.selected
 	if selected == nil then
-		warn(`[IceVoxel] {player.Name} has no character to play`)
+		warn(`[IceVoxel] {player.Name} has no character to play: {why}`)
+		notify(player, `You have no character to play ({why}): nothing is saved for you this visit`)
 		return
 	end
 	sendList(player, user)
@@ -1194,6 +1278,14 @@ function CharacterStore.start(lobby: ServerNet.ServerNet)
 	end)
 	lobby.on(Protocol.ClientMessage.CharacterAction, onAction)
 	WorldSave.onSaveAll(CharacterStore.saveAll)
+	-- (Creative from now on: the visit stops being fair, see the header.)
+	GameModes.changed:Connect(function(player: Player, mode: string)
+		local user = users[player]
+		local selected = user and user.selected
+		if user and selected and GameMode.instabuild(mode) then
+			freeze(player, user, selected, CREATIVE_NOTE)
+		end
+	end)
 
 	local function onPlayer(player: Player)
 		player.CharacterAdded:Connect(function(character: Model)

@@ -141,10 +141,41 @@ return function(t, shared, require)
 		t.eq(Projectiles.step(one, getBlock), "bounce")
 		t.eq(one.vx, -vx)
 		t.eq(one.vz, vz)
-		t.near(one.x, 4 - Projectiles.BOUNCE_GAP, 1e-9, "left just off the face")
+		t.near(one.x, 4 - Projectiles.BOUNCE_GAP, 1e-6, "left just off the face (an f32)")
 		-- The spark and the bolt never bounce.
 		local bolt = Projectiles.launch(BOLT, 1.5, 100.5, 0.5, 1, 0, 0)
 		t.eq(fly(bolt, getBlock, nil)[1], "block")
+	end)
+
+	t.test("projectiles: far from spawn a bounce keeps off its wall in f32 (the sync op's numbers)", function()
+		-- Past 32768 blocks an f32 step is more than the gap: rounded, the bolt must stay out.
+		for _, base in { 0, 1000, 40000, 100000, 500000, 999000 } do
+			for _, dir in { 1, -1 } do
+				local wallX = if dir > 0 then base + 5 else base - 6
+				local getBlock = function(x: number, _y: number, _z: number): number?
+					return if x == wallX then Blocks.id.Stone else Blocks.AIR
+				end
+				local p = Projectiles.launch(WATER, base + 0.5, 64.5, 0.5, dir, 0, 0.05)
+				local bounced, after = false, nil
+				for _ = 1, 30 do
+					local event = Projectiles.step(p, getBlock, nil)
+					if event == "bounce" then
+						-- (The server's sync rounding.)
+						Projectiles.round(p)
+						bounced = true
+						t.ok((p.x - (if dir > 0 then wallX else wallX + 1)) * -dir > 0, `off the face at {base}`)
+					elseif bounced and after == nil then
+						after = event or "flying"
+					end
+					if p.dead then
+						break
+					end
+				end
+				t.ok(bounced, `bounced at {base} ({dir})`)
+				t.eq(after, "flying", `and flies back at {base} ({dir})`)
+				t.ok(if dir > 0 then p.x < wallX - 1 else p.x > wallX + 2, `away from the wall ({p.x})`)
+			end
+		end
 	end)
 
 	t.test("projectiles: mob boxes (slab test, nearest first, not through walls, pierce)", function()

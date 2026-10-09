@@ -573,6 +573,22 @@ return function(t, shared, require, server)
 		-- Armor: a zombie's 2 points soften a hit, falls bypass it.
 		local zid = world:spawn(ZOMBIE, 10.5, FLOOR, 0.5)
 		t.near(world:hurt(zid, 10, {}), Items.damageAfterArmor(10, 2, 0), 1e-9, "armor softens")
+		-- A magic projectile keeps its own immunity (Mobs.magicDamage): a Wand of Sparking's
+		-- 9 tick casts on one mob all land, and each starts the cooldown for the rest.
+		local target = world:spawn(PIG, 20.5, FLOOR, 0.5)
+		local pig = world:get(target) :: MobWorld.Mob
+		pig.health = 1000
+		local landed = 0
+		for cast = 1, 20 do
+			if world:hurt(target, 3, { player = "p", ownImmunity = true }) > 0 then
+				landed += 1
+			end
+			if cast == 1 then
+				t.eq(world:hurt(target, 2, { player = "p" }), 0, "a melee hit right after: the cooldown")
+			end
+			run(world, ctx, 9)
+		end
+		t.eq(landed, 20, "every cast lands")
 	end)
 
 	t.test("mobs: death, the killer and the loot 20 ticks later (cooked when burning)", function()

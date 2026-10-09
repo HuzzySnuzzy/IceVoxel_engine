@@ -27,8 +27,11 @@
 	  Select    one UpdateAsync that reads the record and takes its lock (SaveLock.acquire,
 	            Config.Save.LockTimeout), the bytes kept exactly as stored: "busy" while another
 	            server's live lock holds it (that server is still saving it; the caller asks again
-	            for Config.Characters.LockWait), "missing", "damaged" (another version, or bytes
-	            this one can't read: never written over) or "failed" (the store).
+	            for Config.Characters.LockWait), and while this server's own last save of it (a
+	            `release`: its player left, maybe to rejoin here) is still under way, as a lock
+	            of this server counts as free and the record read would be the one before that
+	            save; "missing", "damaged" (another version, or bytes this one can't read: never
+	            written over) or "failed" (the store).
 	  Save      an UpdateAsync that writes only while the lock in the value is still this server's
 	            (SaveLock.renew; "lost" otherwise, and nothing is written: the caller stops saving
 	            that character), giving it back (`release`) with the last save. Without a record it
@@ -38,8 +41,9 @@
 	            an autosave's retry can't put back what a leaving player had.
 	  Delete    refused while another server's live lock holds the character; then off the index
 	            first, then the record removed (one left behind is unreachable).
-	  Rename    the record (refused while another server holds it, and for one holding items this
-	            version doesn't know: writing it would lose them), then the index.
+	  Rename    the record (refused while another server holds it or this one's last save of it
+	            is under way, and for one holding items this version doesn't know: writing it
+	            would lose them), then the index.
 	  Touch     a character's line in the index written again (name, dead, time played, last
 	            played: what the list shows), and the migration's mark.
 	  Peek      a character read without its lock (its look for the list's preview).
@@ -65,6 +69,8 @@ export type Saves = {
 	scheduler: SaveScheduler.Scheduler,
 	-- The order of the newest save under way or done, by record key.
 	order: { [string]: number },
+	-- Last saves (`release`) under way, by record key (see the header's Select).
+	releasing: { [string]: number },
 }
 
 export type SelectStatus = "ok" | "busy" | "missing" | "damaged" | "failed"
@@ -75,6 +81,7 @@ local CharacterSaves = {}
 -- What a full list says.
 CharacterSaves.FULL = `you have {Characters.MAX} characters: delete one to make another`
 CharacterSaves.ELSEWHERE = "it is open on another server"
+CharacterSaves.STILL_SAVING = "it is still being saved"
 
 -- Three tries, 2 then 4 seconds apart.
 local OPTIONS: SaveScheduler.Options = { attempts = 3, backoff = 2, maxBackoff = 4 }
@@ -84,7 +91,7 @@ function CharacterSaves.new(store: WorldStore.Store, env: WorldStore.Env, option
 	for key, value in (options or {}) :: { [string]: any } do
 		(merged :: any)[key] = value
 	end
-	return { store = store, env = env, scheduler = SaveScheduler.new(env, merged), order = {} }
+	return { store = store, env = env, scheduler = SaveScheduler.new(env, merged), order = {}, releasing = {} }
 end
 
 local function deepCopy(value: any): any
@@ -318,11 +325,16 @@ end
 ]]
 function CharacterSaves.select(saves: Saves, userId: number, id: number): (SelectStatus, Record?, unknown?, string?)
 	local env = saves.env
+	local key = CharacterSaves.recordKey(userId, id)
+	if (saves.releasing[key] or 0) > 0 then
+		-- (This server's last save of it is under way: asked again once it is done.)
+		return "busy", nil, nil, CharacterSaves.STILL_SAVING
+	end
 	local status: SelectStatus = "failed"
 	local record: Record? = nil
 	local progress: unknown? = nil
 	local why: string? = nil
-	local ok, err = update(saves, CharacterSaves.recordKey(userId, id), function(old: unknown): unknown?
+	local ok, err = update(saves, key, function(old: unknown): unknown?
 		record, progress, why = nil, nil, nil
 		if old == nil then
 			status = "missing"
@@ -422,7 +434,19 @@ function CharacterSaves.save(
 		end)
 		return ok, if ok then nil else tostring(result)
 	end)
-	if not runOne(saves, job, deadline) then
+	if release then
+		saves.releasing[key] = (saves.releasing[key] or 0) + 1
+	end
+	local done = runOne(saves, job, deadline)
+	if release then
+		local left = (saves.releasing[key] or 1) - 1
+		if left > 0 then
+			saves.releasing[key] = left
+		else
+			saves.releasing[key] = nil
+		end
+	end
+	if not done then
 		return "failed"
 	elseif skipped then
 		return "skipped"
@@ -489,8 +513,12 @@ end
 ]]
 function CharacterSaves.rename(saves: Saves, userId: number, id: number, name: string): (Index?, string?)
 	local env = saves.env
+	local key = CharacterSaves.recordKey(userId, id)
+	if (saves.releasing[key] or 0) > 0 then
+		return nil, CharacterSaves.STILL_SAVING
+	end
 	local refused: string? = nil
-	local ok, err = update(saves, CharacterSaves.recordKey(userId, id), function(old: unknown): unknown?
+	local ok, err = update(saves, key, function(old: unknown): unknown?
 		refused = nil
 		if old == nil then
 			refused = "it is gone"

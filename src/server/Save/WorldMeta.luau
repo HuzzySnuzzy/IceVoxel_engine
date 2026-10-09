@@ -2,7 +2,10 @@
 --[[
 	The records of saved worlds in the DataStore (Config.Save.StoreName, "IceVoxelWorlds_v1") and
 	their keys, for World/WorldSave. Pure, so the specs run it. Every record carries a version `v`;
-	one from a newer version is refused, never half read or overwritten.
+	one from a newer version is refused, never half read or overwritten. The meta has its own
+	(META_VERSION 2: `characters` and `legacyImported` came with characters, and a server of
+	version 1 would read such a meta and save it without them, giving old records out twice), the
+	regions, players and lists VERSION 1.
 
 	  Keys      "index"                         the game's world list: { v, worlds = { entry } },
 	                                            an entry per world (id, name, type, seed, game
@@ -106,6 +109,8 @@ export type Requester = { userId: number, permanent: boolean }
 local WorldMeta = {}
 
 WorldMeta.VERSION = 1
+-- The meta's own version (see the header): 2 since characters; a version 1 meta reads as one.
+WorldMeta.META_VERSION = 2
 -- Characters a stored value takes besides its text (the JSON record around it).
 WorldMeta.VALUE_OVERHEAD = 96
 WorldMeta.INDEX = "index"
@@ -227,7 +232,7 @@ end
 -- A new world's record (`owner`: its creator's user id; 0 or nil: the game's).
 function WorldMeta.new(id: string, settings: WorldSettings.Settings, now: number, owner: number?): Meta
 	return {
-		v = WorldMeta.VERSION,
+		v = WorldMeta.META_VERSION,
 		id = id,
 		name = settings.name,
 		worldType = settings.worldType,
@@ -295,7 +300,7 @@ function WorldMeta.read(value: unknown): (Meta?, string?)
 	local version = number(stored.v)
 	if version == nil or version < 1 then
 		return nil, "not a world"
-	elseif version > WorldMeta.VERSION then
+	elseif version > WorldMeta.META_VERSION then
 		return nil, "saved by a newer version"
 	end
 	if not WorldMeta.validId(stored.id) or type(stored.worldType) ~= "string" or type(stored.seed) ~= "string" then
@@ -319,7 +324,7 @@ function WorldMeta.read(value: unknown): (Meta?, string?)
 		end
 	end
 	return {
-		v = WorldMeta.VERSION,
+		v = WorldMeta.META_VERSION,
 		id = stored.id,
 		name = if type(stored.name) == "string"
 			then WorldSettings.cleanName(stored.name)

@@ -80,12 +80,17 @@
 	           every field's default leaves Minecraft's movement exactly as it was):
 	             air jumps  (Cloud in a Bottle) `airJumpsMax` jumps in the air, each a new press of
 	                        jump (not held) while airborne, not in a fluid, not climbing, not
-	                        flying: the vertical speed becomes Config.Accessories.AirJumpPower
-	                        (0.36: 0.96 blocks, Terraria's three quarters of a jump) plus
-	                        `jumpBoost` (a Shiny Red Balloon's 0.1: 1.48 blocks), the fall
-	                        distance starts again from there (Terraria measures the fall from the
-	                        second jump's top), `events.jumped` and `events.airJumped`. They come
-	                        back (`airJumpsLeft`) on the ground, climbing and in any fluid;
+	                        flying, nor the press that stopped flying (a double tap): the vertical
+	                        speed becomes Config.Accessories.AirJumpPower (0.36: 0.96 blocks,
+	                        Terraria's three quarters of a jump) plus `jumpBoost` (a Shiny Red
+	                        Balloon's 0.1: 1.48 blocks), and the fall is counted from where it
+	                        took off: the fall distance starts again at minus the height it rises
+	                        (`riseOf`), so landing back on the ground it left from hurts no more
+	                        than its first jump did (Terraria resets the fall at a double jump;
+	                        Minecraft's 3 block safe fall is far smaller than Terraria's, so
+	                        counting from the second jump's top would hurt on flat ground),
+	                        `events.jumped` and `events.airJumped`. They come back
+	                        (`airJumpsLeft`) on the ground, climbing and in any fluid;
 	             running    (Hermes Boots) after Config.Accessories.RunDelay ticks (10) of
 	                        sprinting on the ground the ground speed's multiplier `runFactor`
 	                        rises linearly over RunRamp ticks (12) to 1 + `runBoost` (1.4: 5.6 ->
@@ -807,6 +812,16 @@ end
 	the velocity on the axes that hit something, then look for cobwebs in the hull for the next
 	move (they clear the fall distance).
 ]]
+-- Blocks a jump at vertical speed `vy` rises in free air (gravity, then drag, a tick: travel's).
+local function riseOf(vy: number): number
+	local rise = 0
+	while vy > 0 do
+		rise += vy
+		vy = (vy - GRAVITY) * VERTICAL_DRAG
+	end
+	return rise
+end
+
 local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: number, inputZ: number, events: Events)
 	local dx, dy, dz = state.vx, state.vy, state.vz
 	local stuck = state.stuck
@@ -817,13 +832,12 @@ local function move(state: State, solidAt: Hull.SolidAt, world: World, inputX: n
 	end
 	local box = PlayerPhysics.box(state)
 
-	-- Sneaking never walks off an edge (Player.maybeBackOffFromEdge), except when flying.
+	-- Sneaking never walks off an edge (Player.maybeBackOffFromEdge), except when flying. (An air
+	-- jump's fall starts below zero: its rise, see the header; Minecraft's check reads it as 0.)
 	if state.sneaking and not state.flying and dy <= 0 then
+		local fallen = math.max(state.fallDistance, 0)
 		local aboveGround = state.onGround
-			or (
-				state.fallDistance < STEP_HEIGHT
-				and not Hull.noCollision(solidAt, Hull.offset(box, 0, state.fallDistance - STEP_HEIGHT, 0))
-			)
+			or (fallen < STEP_HEIGHT and not Hull.noCollision(solidAt, Hull.offset(box, 0, fallen - STEP_HEIGHT, 0)))
 		if aboveGround then
 			dx, dz = Hull.backOffFromEdge(solidAt, box, dx, dz, STEP_HEIGHT)
 		end
@@ -1053,12 +1067,15 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	-- Double tapping jump toggles flying: the first press arms it for DOUBLE_TAP_TICKS (counted down
 	-- in Player.aiStep below), a second press within them toggles (not while swimming, and never
 	-- for spectators, who always fly).
+	-- (The press that toggles it is no air jump: `toggledFlight`.)
+	local toggledFlight = false
 	if state.mayFly and not noClip and input.jump and not prevJump then
 		if state.jumpTriggerTime == 0 then
 			state.jumpTriggerTime = DOUBLE_TAP_TICKS
 		elseif not state.swimming then
 			state.flying = not state.flying
 			state.jumpTriggerTime = 0
+			toggledFlight = true
 		end
 	end
 	-- Sneaking in water sinks (LocalPlayer.goDownInWater). A flying player is not affected by
@@ -1119,6 +1136,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			events.jumped = true
 		elseif
 			not prevJump
+			and not toggledFlight
 			and state.airJumpsLeft > 0
 			and not state.onGround
 			and not state.inWater
@@ -1126,10 +1144,10 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 			and not state.climbing
 		then
 			-- Terraria's Cloud in a Bottle: a new press in the air jumps again, and the fall is
-			-- counted from here.
+			-- counted from here (from below zero by the height it rises: see the header).
 			state.airJumpsLeft -= 1
 			state.vy = AIR_JUMP_POWER + state.jumpBoost
-			state.fallDistance = 0
+			state.fallDistance = -riseOf(state.vy)
 			events.jumped = true
 			events.airJumped = true
 		end

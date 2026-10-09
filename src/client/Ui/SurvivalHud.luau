@@ -507,9 +507,10 @@ end
 	Draws this frame (Ui/Hud's RenderStepped): `survival` when the hearts show (survival,
 	adventure, the HUD in play), `held` the held item (the Thermometer shows its reading), `raise`
 	GUI pixels the status and reading rows move up with the held item's name (Ui/ManaHud's stars
-	under it; 0 or nil: where they were built).
+	under it; 0 or nil: where they were built). Returns whether a row that moves up is drawn (Ui/Hud
+	reserves the raised space in the corner's layout only then).
 ]]
-function SurvivalHud.render(now: number, survival: boolean, held: number?, raise: number?)
+function SurvivalHud.render(now: number, survival: boolean, held: number?, raise: number?): boolean
 	local up = raise or 0
 	if up ~= raised then
 		raised = up
@@ -526,13 +527,16 @@ function SurvivalHud.render(now: number, survival: boolean, held: number?, raise
 	local temperatureShown = survival and status ~= nil and status.temperatureOn
 	setVisible(row, thirstShown)
 	setVisible(gauge, temperatureShown)
-	setVisible(statusRow, STATUS_ROW and (thirstShown or temperatureShown))
-	setVisible(readingRow, temperatureShown and held == THERMOMETER)
+	local statusShown = STATUS_ROW and (thirstShown or temperatureShown)
+	local readingShown = temperatureShown and held == THERMOMETER
+	setVisible(statusRow, statusShown)
+	setVisible(readingRow, readingShown)
+	local rowsShown = statusShown or readingShown
 	if status == nil or not temperatureShown then
 		renderEdges(FROST, 0)
 	end
 	if status == nil then
-		return
+		return rowsShown
 	end
 	local ticked = now >= nextTick
 	if ticked then
@@ -572,6 +576,7 @@ function SurvivalHud.render(now: number, survival: boolean, held: number?, raise
 			renderEdges(HEAT, heat)
 		end
 	end
+	return rowsShown
 end
 
 return SurvivalHud

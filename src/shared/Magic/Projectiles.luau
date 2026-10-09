@@ -26,8 +26,10 @@
 	     grown by MOB_MARGIN 0.3 (Minecraft's ProjectileUtil inflates them so) with a slab test;
 	  2. mobs before the block are struck nearest first (`hits` lists them for the caller) until
 	     the kind's `hits` run out: it ends at the last one;
-	  3. a block ends it, or bounces it (water): it stops at the face, BOUNCE_GAP off it, the rest
-	     of the tick's travel dropped;
+	  3. a block ends it, or bounces it (water): it stops at the face, BOUNCE_GAP off it (across
+	     the face as an f32 the gap holds: far from spawn, past 32768 blocks, an f32 step is more
+	     than the gap, so it is the next f32 off the face, `offFace`: the sync op's f32 numbers
+	     never put it back on the wall), the rest of the tick's travel dropped;
 	  4. otherwise it moves the whole segment; then drag and gravity; after `life` moves it
 	     expires.
 	The returned event says what the caller tells the clients: nil (flying), "bounce" (a sync),
@@ -218,6 +220,20 @@ end
 
 --[[ A tick ]]
 
+--[[
+	Just off a face at `face` on the side `n` points to (-1 or 1), BOUNCE_GAP away, as an f32 that
+	is still on that side (see the header): the gap doubled until rounding keeps it there.
+]]
+local function offFace(face: number, n: number): number
+	local gap = Projectiles.BOUNCE_GAP
+	local value = round(face + n * gap)
+	while (value - face) * n <= 0 do
+		gap *= 2
+		value = round(face + n * gap)
+	end
+	return value
+end
+
 local function stops(block: number): boolean
 	return Blocks.obstruction(block) ~= nil
 end
@@ -332,9 +348,9 @@ function Projectiles.step(
 		if wall then
 			local t = wall.distance
 			local nx, ny, nz = wall.nx, wall.ny, wall.nz
-			p.x = p.x + dx * t + nx * Projectiles.BOUNCE_GAP
-			p.y = p.y + dy * t + ny * Projectiles.BOUNCE_GAP
-			p.z = p.z + dz * t + nz * Projectiles.BOUNCE_GAP
+			p.x = if nx ~= 0 then offFace(p.x + dx * t, nx) else p.x + dx * t
+			p.y = if ny ~= 0 then offFace(p.y + dy * t, ny) else p.y + dy * t
+			p.z = if nz ~= 0 then offFace(p.z + dz * t, nz) else p.z + dz * t
 			if p.bounces >= kind.bounces or (nx == 0 and ny == 0 and nz == 0) then
 				-- (No face: it started inside the block.)
 				finish(p, MagicSync.Reason.Block)

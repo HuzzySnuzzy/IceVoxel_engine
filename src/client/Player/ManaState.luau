@@ -6,10 +6,11 @@
 
 	  changedAt  os.clock() when the whole mana or the max last changed (the HUD's stars linger
 	             Config.Mana.HudLinger after it).
-	  refused    a message saying a cast was refused for want of mana fires `refused` (the newest
-	             cast this client predicted didn't happen: Rendering/ProjectileView drops its
-	             projectile) and blinks the stars; `noteRefused` blinks them for a cast this
-	             client didn't send for want of mana.
+	  refused    a message saying a cast was refused fires `refused` (the newest cast this client
+	             predicted didn't happen: Rendering/ProjectileView drops its projectile); for want
+	             of mana it also blinks the stars (refused for another reason, `dropped`: too soon,
+	             too many in flight, it doesn't); `noteRefused` blinks them for a cast this client
+	             didn't send for want of mana.
 	  full       regeneration just filled it: Terraria's chime, entity.player.mana_full (flat).
 	  spend      a cast predicted here takes its mana at once, so a held button doesn't predict a
 	             cast the server will refuse; the server's next message (sent at once after the
@@ -36,7 +37,7 @@ local changedEvent = Instance.new("BindableEvent")
 local refusedEvent = Instance.new("BindableEvent")
 -- Fires when a message changes the mana or the max.
 ManaState.changed = changedEvent.Event
--- Fires when the server refused a cast for want of mana.
+-- Fires when the server refused a cast (for want of mana, or another reason).
 ManaState.refused = refusedEvent.Event
 
 -- Mana (whole, after predicted casts) and max mana (0, 0 before the first message).
@@ -88,6 +89,8 @@ function ManaState.start()
 		end
 		if status.refused then
 			refusedAt = now
+		end
+		if status.refused or status.dropped then
 			refusedEvent:Fire()
 		end
 		if status.full then

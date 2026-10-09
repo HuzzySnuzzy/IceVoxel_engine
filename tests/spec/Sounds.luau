@@ -378,6 +378,13 @@ return function(t, shared, require, server, _client)
 		t.eq(name(Sounds.equip(nil, iron)), "item.armor.equip_iron", "put on")
 		t.eq(Sounds.equip(iron, { item = I.IronHelmet, count = 1 }), nil, "the same stack again")
 		t.eq(Sounds.equip(iron, nil), nil, "taken off")
+		-- Equipment slots: accessories and vanity clothes put on make the generic sound.
+		for _, item in { I.HermesBoots, I.CloudInABottle, I.CobaltShield, I.TopHat, I.TuxedoShirt } do
+			t.eq(name(Sounds.equipment(nil, { item = item, count = 1 })), "item.armor.equip_generic", "generic")
+		end
+		t.eq(name(Sounds.equipment(nil, iron)), "item.armor.equip_iron", "armor in a vanity slot: its own")
+		t.eq(Sounds.equipment({ item = I.HermesBoots, count = 1 }, { item = I.HermesBoots, count = 1 }), nil)
+		t.eq(Sounds.equipment({ item = I.HermesBoots, count = 1 }, nil), nil, "taken off")
 		t.eq(name(Sounds.equip(iron, diamond)), "item.armor.equip_diamond", "swapped")
 		t.eq(name(Sounds.equip(iron, { item = I.IronHelmet, count = 1, damage = 3 })), "item.armor.equip_iron", "worn")
 		t.eq(Sounds.equip(nil, { item = I.IronHelmet, count = 0 }), nil, "empty")

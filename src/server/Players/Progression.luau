@@ -223,9 +223,8 @@ function ProgressionServer.restore(player: Player, record: unknown?): boolean
 	entry.state = state
 	entry.loaded = true
 	entry.sendDirty = true
-	if not worldSaves then
-		notify(player, "Progress made in this world stays on this server: it is not saved")
-	end
+	-- (Where progress is not saved, Players/CharacterStore tells the player: nothing the
+	-- character gains here is.)
 	checkAges(player, entry)
 	refreshWindow(player)
 	return writable

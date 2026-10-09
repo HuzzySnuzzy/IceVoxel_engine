@@ -9,12 +9,16 @@
 	             from the crystals and the accessories worn (Shared/Mana.maxOf on the inventory:
 	             a Band of Starpower taken off clamps mana to the new max at once), then a living
 	             player's mana comes back by Terraria 1.4.4's rule (Shared/Mana.tick). "Standing
-	             still" is the server's own: the feet (Players/PlayerPositions) moved less than
-	             STILL 0.01 blocks since the last tick and nothing was cast in it.
+	             still" is the server's own (Shared/Mana.stillness): the feet
+	             (Players/PlayerPositions) stayed within STILL 0.01 blocks of where they last moved
+	             and nothing was cast, for Shared/Mana.STILL_TICKS 4 ticks running (a tick without
+	             a new Move from the client says nothing on its own).
 	  Message    the player's Mana message (Net/MagicSync: whole mana, max, flags) when the whole
 	             number or the max changed, at most every SEND_TICKS 4 ticks, and at once after a
-	             cast (`spend`), a refused cast (flag `refused`: not enough mana), a potion, a
-	             crystal, a respawn or a restore. Flag `full`: regeneration just filled it
+	             cast (`spend`), a refused cast (flag `refused`: not enough mana; `dropped`, from
+	             `dropCast`: Players/Magic refused it for another reason, too soon or too many in
+	             flight, so the client takes its prediction back and shows the true mana), a
+	             potion, a crystal, a respawn or a restore. Flag `full`: regeneration just filled it
 	             (Terraria's chime: the client plays entity.player.mana_full).
 	  Respawn    a player's first character since joining keeps the mana it has (a restored
 	             character's); every later one (a respawn) starts full, as Terraria's.
@@ -28,12 +32,15 @@
 	  start       once, with the world's net.
 	  export      { mana, crystals } to save.
 	  peek        `export`, or nil when nothing is kept for the player (they left, or nothing
-	              came yet): World/WorldSave's record with characters off.
+	              came yet): what a leaving player's character (Players/CharacterStore) or record
+	              (World/WorldSave, characters off) is saved with. A leaving player is forgotten
+	              only after every PlayerRemoving handler ran (task.defer).
 	  restore     a saved character's mana and crystals (crystals 0..MaxCrystals; mana 0..Max now,
 	              and within the character's own max, its accessories once restored too, from the
 	              next tick).
 	  get         mana and max mana.
 	  spend       takes `amount` if there is that much (whether it did); a refusal is told.
+	  dropCast    tells the player a cast was refused for another reason (see Message).
 	  add         gives up to the max.
 	  potion      a mana potion: `add` and Mana Sickness.
 	  useCrystal  a Mana Crystal (whether it was used: false at nine).
@@ -63,17 +70,20 @@ type State = {
 	-- The regeneration's state (Shared/Mana: mana, delay) and the crystals used.
 	regen: SharedMana.State,
 	crystals: number,
-	-- The feet at the last tick (nil: none yet), and whether something was cast this tick.
+	-- The feet where they last moved (nil: none yet), whether something was cast this tick, and
+	-- ticks since the last move or cast (Shared/Mana.stillness).
 	x: number?,
 	y: number,
 	z: number,
 	cast: boolean,
+	quiet: number,
 	-- What the client was last told (whole mana, max), the tick it was, and flags to tell.
 	sentMana: number,
 	sentMax: number,
 	sentTick: number,
 	refused: boolean,
 	full: boolean,
+	dropped: boolean,
 	-- A character came since the player joined (every later one is a respawn: it starts full).
 	joined: boolean,
 }
@@ -84,7 +94,7 @@ local TICK = 1 / 20
 local MAX_TICKS_PER_FRAME = 4
 -- Ticks between two regeneration messages to one player.
 local SEND_TICKS = 4
--- Blocks the feet may move in a tick and still stand still.
+-- Blocks the feet may move from where they last moved and still stand still.
 local STILL = 0.01
 local SICKNESS = SharedEffects.id.ManaSickness
 
@@ -102,11 +112,13 @@ local function stateOf(player: Player): State
 			y = 0,
 			z = 0,
 			cast = false,
+			quiet = 0,
 			sentMana = -1,
 			sentMax = -1,
 			sentTick = -math.huge,
 			refused = false,
 			full = false,
+			dropped = false,
 			joined = false,
 		}
 		-- (Not kept for a player who left: a late look must not bring them back to tick.)
@@ -133,10 +145,16 @@ local function send(player: Player, state: State, max: number)
 	current.send(
 		player,
 		Protocol.ServerMessage.Mana,
-		MagicSync.encodeMana({ mana = mana, max = max, refused = state.refused, full = state.full })
+		MagicSync.encodeMana({
+			mana = mana,
+			max = max,
+			refused = state.refused,
+			full = state.full,
+			dropped = state.dropped,
+		})
 	)
 	state.sentMana, state.sentMax, state.sentTick = math.floor(mana), max, tickCount
-	state.refused, state.full = false, false
+	state.refused, state.full, state.dropped = false, false, false
 end
 
 -- Clamps to the max now and tells the player at once.
@@ -149,16 +167,18 @@ end
 local function tickPlayer(player: Player, state: State)
 	local max = maxOf(player, state)
 	local x, y, z = PlayerPositions.feet(player)
-	local still = false
+	local moved = state.cast or x == nil
 	if x then
 		local lastX = state.x
-		if lastX then
-			local dx, dy, dz = x - lastX, y - state.y, z - state.z
-			still = dx * dx + dy * dy + dz * dz < STILL * STILL and not state.cast
+		local dx, dy, dz = if lastX then x - lastX else math.huge, y - state.y, z - state.z
+		if dx * dx + dy * dy + dz * dz > STILL * STILL then
+			moved = true
+			state.x, state.y, state.z = x, y, z
 		end
-		state.x, state.y, state.z = x, y, z
 	end
 	state.cast = false
+	local still
+	state.quiet, still = SharedMana.stillness(state.quiet, moved)
 	if PlayerPositions.alive(player) then
 		if SharedMana.tick(state.regen, max, still) then
 			state.full = true
@@ -201,7 +221,11 @@ function Mana.start(serverNet: Net)
 		onPlayer(player)
 	end
 	Players.PlayerRemoving:Connect(function(player: Player)
-		states[player] = nil
+		-- (After every other PlayerRemoving handler: a leaving player's character and record are
+		-- saved with the mana and crystals kept here, a crystal used a moment ago included.)
+		task.defer(function()
+			states[player] = nil
+		end)
 	end)
 	if not Config.Mana.Enabled then
 		return
@@ -258,6 +282,12 @@ function Mana.spend(player: Player, amount: number): boolean
 	state.cast = true
 	send(player, state, max)
 	return true
+end
+
+function Mana.dropCast(player: Player)
+	local state = stateOf(player)
+	state.dropped = true
+	sendNow(player, state)
 end
 
 function Mana.add(player: Player, amount: number)

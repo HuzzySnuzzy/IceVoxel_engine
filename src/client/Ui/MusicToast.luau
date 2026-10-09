@@ -8,9 +8,11 @@
 	It sits in the top right corner in Ui/HudLayout's first toast slot (UiScale.hud().music: under
 	the minimap and its coordinates line, under the Map button on touch screens, else in the
 	corner itself, at the GUI scale), and tells Ui/UiScale while it shows, so the "World saved"
-	toast goes under it and the status effect icons under both. It hides with the HUD (the world
-	map hides it). `setEnabled` (the player's Music Toasts setting) stops new toasts; one showing
-	slides out.
+	toast goes under it and the status effect icons under both. While the corner has no room for
+	it (a small phone with the HUD's rows raised: HudLayout's `music` nil) it waits hidden, and its
+	seconds count only while it shows, as Minecraft's toasts queue for a free slot. It hides with
+	the HUD (the world map hides it). `setEnabled` (the player's Music Toasts setting) stops new
+	toasts; one showing slides out.
 ]]
 
 local Players = game:GetService("Players")
@@ -226,7 +228,15 @@ function MusicToast.show(title: string)
 		frame.Visible = true
 	end
 	slide(0, Enum.EasingDirection.Out)
-	task.delay(SLIDE + Config.Music.ToastSeconds, function()
+	task.spawn(function()
+		-- (Its time counts only while the corner has room for it: see the header.)
+		local left = SLIDE + Config.Music.ToastSeconds
+		while left > 0 and generation == mine do
+			local dt = task.wait(0.1)
+			if UiScale.hud().music ~= nil then
+				left -= dt
+			end
+		end
 		if generation == mine then
 			slide(hiddenX(), Enum.EasingDirection.In)
 			task.delay(SLIDE, function()

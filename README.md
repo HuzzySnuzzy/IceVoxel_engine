@@ -35,13 +35,17 @@ A fast, Minecraft-style voxel engine for Roblox.
   and equipment, health, mana and Mana Crystals, status effects, thirst and temperature and its
   Knowledge, Ages and skills from world to world and server to server; each world keeps only
   where it stood and its game mode. It spawns with its own look and its name on the nametag, and
-  the list's preview shows it in the armor, vanity and accessories it wears.
+  the list's preview shows it in the armor, vanity and accessories it wears. What it gains only
+  travels from a fair visit: in a world with Allow Commands, a superflat or debug world, or once
+  you went into creative, it leaves with the things (and progress) it had then, so nothing made
+  in creative reaches another world (Terraria keeps Journey characters apart); you are told.
   Characters are saved in a DataStore with a lock each (one server at a time: one still saving
   it is waited for, up to 30 seconds), every minute, when you leave and at shutdown; a list that
   could not be read is never written over, and in Studio without API access characters last for
   the session (the list says so). A returning player's old progress becomes their first
   character (a Mediumcore "legacy" one), and the first of their characters to enter an old saved
-  world takes in what they had there.
+  world takes in what they had there (only a character that is saved, in a world that saves
+  progress; the world remembers it once the character was saved with it).
 - **Saving and loading worlds.** Worlds are saved in a DataStore, as Minecraft saves its level:
   every block anyone changed (each chunk's edits, in regions of 32 × 32 chunks a key), chests,
   furnaces still cooking, machines with their energy, tanks and slots, Mekanism pipes (side modes,
@@ -347,7 +351,8 @@ A fast, Minecraft-style voxel engine for Roblox.
     good, up to nine (200). A Band of Starpower adds 20 more, and the cap is 400.
   - **Regeneration:** Terraria's rule. Spending starts a delay of 0.5 s at full mana to 3.3 s
     empty, then mana comes back faster when it's nearly full and much faster standing still
-    (20 max: about 7.5 a second standing, 1.7 walking).
+    (20 max: about 7.5 a second standing, 1.7 walking; standing still means a fifth of a second
+    without moving or casting).
   - **HUD:** a row of blue stars (20 mana each, half stars) over the hearts. They show while you
     hold a magic weapon, while mana isn't full, and for 3 s after it changes. They sit above the
     armour icons when you wear armour; the item name moves up out of their way.
@@ -359,8 +364,10 @@ A fast, Minecraft-style voxel engine for Roblox.
     **Emerald Staff** (6 mana, a straight bolt reaching 30 blocks) is crafted, Iron Age. The
     **Water Bolt** (10 mana, bounces off five walls and goes through a mob) is a rare mineshaft
     find.
-  - **Projectiles:** the server flies them and decides every hit. Your own shot flies at once,
-    and other clients fly the same path from three small messages.
+  - **Projectiles:** the server flies them and decides every hit (each shot hits a mob once, and
+    every shot lands: magic doesn't wait for Minecraft's hurt cooldown). Your own shot flies at
+    once, and other clients fly the same path from three small messages; a cast the server
+    refuses (too soon, too many flying, no mana) is taken back on your screen.
   - **Fallen Stars:** they fall at night near every player, about five a night, glowing as they
     come down. The ones left on the ground vanish at dawn.
   - **Tooltips:** a magic weapon says its damage, mana a cast and fire chance; a mana potion the
@@ -463,8 +470,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   accessory slots wear works, what the vanity slots wear only shows. Each accessory row and armor
   slot has an eye that hides its look and keeps its effect. The early-game accessories:
   **Hermes Boots** (sprinting on the ground builds to 1.4 times the speed over a second), **Cloud
-  in a Bottle** (a second jump in the air, about a block, with a puff of cloud), **Shiny Red
-  Balloon** (jumps higher: the air jump then reaches 1.5 blocks), **Lucky Horseshoe** (no fall
+  in a Bottle** (a second jump in the air, about a block, with a puff of cloud; its fall counts
+  from where it took off), **Shiny Red Balloon** (jumps higher: the air jump then reaches 1.5
+  blocks; like Jump Boost I it takes a block off a fall), **Lucky Horseshoe** (no fall
   damage), **Aglet** and **Anklet of the Wind** (+5% and +10% speed), **Band of Regeneration** (a
   half heart every 10 s), **Band of Starpower** (+20 mana), **Obsidian Skull** (campfires don't
   hurt, +1 armor), **Flipper** (swims twice as fast), **Cobalt Shield** (no knockback, +1 armor)
@@ -1132,8 +1140,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   the crosshair (Minecraft's plus) and the title screen all follow it; F3, the world map's bar and
   menus and the waypoint labels keep their 1080p look and grow on bigger screens. The top right
   corner is laid out as a whole (the minimap, then the toasts, then the effect icons; the saving
-  icon above Roblox's jump button by its real size), so nothing there overlaps on phones and
-  tablets, and the title screen keeps clear of Roblox's top bar.
+  icon above Roblox's jump button by its real size; on touch screens the effect icons stay out of
+  the movement thumbstick's corner, the Map and cloud buttons take a finger-sized tap, and a toast
+  with no room waits for it), so nothing there overlaps on phones and tablets, and the title
+  screen keeps clear of Roblox's top bar (its pages keep the full scale while they fit: Auto 3 on
+  a 1366 × 768 window).
 - **Other players as the server tells them** (`Players.ServerPositions`, on). Each client
   draws only the players the server sends it (within `Interest.PlayerDistance`, spectators only to
   spectators), 0.1 s behind (`Interest.InterpolationDelay`) and gliding between their poses, a

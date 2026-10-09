@@ -18,7 +18,9 @@
 	  minimap   MINIMAP (Config.UiScale.Minimap, 56) GUI pixels square in the area's top right
 	            corner, the coordinates line (the pixel font, COORDS_HEIGHT tall, as wide as its
 	            text: `coordsWidth`, right aligned) GAP under it. Off on a touch screen, the MAP
-	            button takes the corner (the only way to the world map there).
+	            button takes the corner (the only way to the world map there), never smaller than
+	            a finger's TOUCH_TARGET (`mapButtonSize`); `touchSide` is the same floor for the
+	            minimap's own weather button (Map/Minimap).
 	  in the way  Roblox's touch controls (the live JumpButton and ContextActionService buttons,
 	            `buttons`; on a touch screen without them PlayerModule's jump button rule:
 	            `jumpButton`), which never scale with the GUI scale, so they are measured, not
@@ -39,7 +41,11 @@
 	            no toast shows, else goes under the lowest toast showing; when that reaches the
 	            bottom, a button or the saving icon, it goes beside the toasts (left of them), else
 	            beside the minimap column at the top (`effectsAside`), and as a last resort it is
-	            drawn smaller (`effectsScale`, down to half the scale) before it is dropped.
+	            drawn smaller (`effectsScale`, down to half the scale) before it is dropped. On a
+	            touch screen it never goes into the movement thumbstick's zone (`thumbstick`:
+	            PlayerModule's DynamicThumbstick, as Interaction/BlockInteraction keeps out of it):
+	            the icons are buttons, and a thumb landing on one would pin its tooltip instead of
+	            moving.
 	  WAILA     keeps left of `wailaRight` (the map or the Map button, and anything put beside the
 	            column at the top) and, when it is tall enough to reach the coordinates line
 	            (`wailaLow.y`, with F3's extended lines), left of `wailaLow.right` too; with F3
@@ -68,6 +74,9 @@ HudLayout.COORDS_HEIGHT = 10
 -- The touch screen's Map button (the minimap off).
 HudLayout.MAP_BUTTON_WIDTH = 32
 HudLayout.MAP_BUTTON_HEIGHT = 16
+-- Screen pixels a button a finger taps is at least (high, and the Map button twice as wide):
+-- small phones' GUI scales (1.25 to 1.625) would make the corner's buttons 11 to 26 pixels.
+HudLayout.TOUCH_TARGET = 32
 -- Minecraft's toast.
 HudLayout.TOAST_WIDTH = 160
 HudLayout.TOAST_HEIGHT = 32
@@ -180,6 +189,31 @@ function HudLayout.jumpButton(width: number, height: number, insets: Insets): Re
 		return rect(right - 95, bottom - 90, 70, 70)
 	end
 	return rect(right - 170, bottom - 210, 120, 120)
+end
+
+--[[
+	Where a touch screen's movement thumbstick starts (PlayerModule's DynamicThumbstick, the same
+	rule as Interaction/BlockInteraction's): in landscape the left 40% below the top third, in
+	portrait the bottom 40%.
+]]
+function HudLayout.thumbstick(width: number, height: number): Rect
+	if width >= height then
+		return rect(0, height / 3, width * 0.4, height - height / 3)
+	end
+	return rect(0, height * 0.6, width, height * 0.4)
+end
+
+-- The Map button's size (screen pixels) at `scale`: its GUI size, at least TOUCH_TARGET high.
+function HudLayout.mapButtonSize(scale: number): (number, number)
+	local w = math.max(HudLayout.MAP_BUTTON_WIDTH * scale, 2 * HudLayout.TOUCH_TARGET)
+	local h = math.max(HudLayout.MAP_BUTTON_HEIGHT * scale, HudLayout.TOUCH_TARGET)
+	return w, h
+end
+
+-- GUI pixels a button `side` GUI pixels square takes at `scale` so a finger finds it (at least
+-- TOUCH_TARGET screen pixels).
+function HudLayout.touchSide(side: number, scale: number): number
+	return math.max(side, math.ceil(HudLayout.TOUCH_TARGET / scale))
 end
 
 -- Ui/Hud's canvas at `scale` (at most: the HUD shrinks to fit narrower screens), `raise` GUI
@@ -334,7 +368,7 @@ function HudLayout.compute(input: Input): Layout
 		top = map
 		columnBottom = coords.y + coords.h
 	elseif input.touch then
-		local w, h = HudLayout.MAP_BUTTON_WIDTH * s, HudLayout.MAP_BUTTON_HEIGHT * s
+		local w, h = HudLayout.mapButtonSize(s)
 		local button = snap(rect(right - w, area.y, w, h))
 		layout.mapButton = button
 		table.insert(placed, button)
@@ -402,8 +436,15 @@ function HudLayout.compute(input: Input): Layout
 	local effects = input.effects
 	if effects and effects.w > 0 and effects.h > 0 then
 		local y = if toastBottom then toastBottom + gap else slotTop
+		-- (On touch, never in the thumbstick's zone: see the header.)
+		local effectSpace = space
+		if input.touch then
+			local kept = table.clone(placed)
+			table.insert(kept, HudLayout.thumbstick(input.width, input.height))
+			effectSpace = { safe = safe, area = area, placed = kept, gap = gap }
+		end
 		for _, es in effectScales(s) do
-			local block, moved = find(space, y, { slotTop, area.y }, effects.w * es, effects.h * es)
+			local block, moved = find(effectSpace, y, { slotTop, area.y }, effects.w * es, effects.h * es)
 			if block then
 				layout.effects, layout.effectsScale, layout.effectsAside = block, es, moved
 				table.insert(placed, block)

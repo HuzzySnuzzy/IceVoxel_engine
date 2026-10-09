@@ -27,6 +27,9 @@
 	            Decoding checks every number; anything odd is a damaged record (nil), an unknown
 	            item is dropped and counted (`dropped`, as PlayerCodec's: such a record is not
 	            written back this session).
+	  Things    `keepThings`: one record's inventory, equipment, mana, Mana Crystals and effects
+	            copied into another (Players/CharacterStore saves a visit that stopped being fair
+	            with the things it had then).
 	  Value     what the DataStore key "u<UserId>/c<id>" holds: { v = 1, data = base85 bytes,
 	            progress = Progression's record or nil, lock = { job, at, released? } } (the lock is
 	            Save/SaveLock's, inside the value so that loading with it and every later save are
@@ -162,6 +165,36 @@ function CharacterCodec.summary(record: Record): Characters.Summary
 		lastPlayed = record.lastPlayed,
 		played = record.played,
 	}
+end
+
+local function copyStore(from: { [number]: Stack? }, size: number): { [number]: Stack? }
+	local out: { [number]: Stack? } = {}
+	for slot = 1, size do
+		out[slot] = Items.copyStack(from[slot])
+	end
+	return out
+end
+
+--[[
+	Sets `record`'s things to copies of `from`'s: the inventory (slots, armor, cursor, the selected
+	slot), the equipment and its hidden bits, mana, the Mana Crystals and the effects. Players/
+	CharacterStore saves a visit that stopped being fair with the things it had then.
+]]
+function CharacterCodec.keepThings(record: Record, from: Record)
+	record.selected = from.selected
+	record.slots = copyStore(from.slots, Types.INVENTORY_SIZE)
+	record.armor = copyStore(from.armor, Types.ARMOR_SIZE)
+	record.cursor = Items.copyStack(from.cursor)
+	record.accessories = copyStore(from.accessories, Types.ACCESSORY_SIZE)
+	record.vanityArmor = copyStore(from.vanityArmor, Types.VANITY_ARMOR_SIZE)
+	record.vanityAccessories = copyStore(from.vanityAccessories, Types.VANITY_ACCESSORY_SIZE)
+	record.hidden = from.hidden
+	record.mana, record.crystals = from.mana, from.crystals
+	local effects: { PlayerCodec.Effect } = {}
+	for _, effect in from.effects do
+		table.insert(effects, table.clone(effect))
+	end
+	record.effects = effects
 end
 
 -- (place, store, size) of each part of the inventory kept, in place order.

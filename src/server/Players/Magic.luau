@@ -10,7 +10,9 @@
 	             Minecraft's instabuild); a weapon casts when its use time has passed since the
 	             last cast (Casting.ready / after on the server's clock: 1 tick of slack, late
 	             arrivals credited) and Players/Mana can spend its mana (creative: free;
-	             not enough: the client is told, nothing flies).
+	             not enough: the client is told, nothing flies). Every refused cast is answered
+	             (Players/Mana: `refused` for want of mana, `dropCast` for anything else), as the
+	             client already drew it and took its mana.
 	  Casting    the projectile (Shared/Magic/Projectiles: the weapon's kind) leaves the eyes
 	             (Players/PlayerPositions.eye: 1.62 above the feet, 1.27 sneaking) along the unit
 	             direction the client aimed (its camera ray towards what it points at), at most
@@ -168,11 +170,14 @@ local function cast(net: Net, player: Player, mode: string, use: MagicSync.HeldU
 		or (perPlayer[player] or 0) >= MAX_PER_PLAYER
 		or flightCount >= MAX_FLYING
 	then
+		-- (The client drew it already: told, so it takes it back.)
+		Mana.dropCast(player)
 		return
 	end
 	local ex, ey, ez = PlayerPositions.eye(player)
 	local kind = Projectiles.kind(magic.projectile)
 	if ex == nil or kind == nil then
+		Mana.dropCast(player)
 		return
 	end
 	if Casting.free(mode) then

@@ -115,6 +115,17 @@ return function(t, shared, require, _server, client)
 		t.eq(status.max, 60)
 		t.eq(status.refused, true)
 		t.eq(status.full, false)
+		t.eq(status.dropped, false)
+		-- A cast refused for another reason (too soon, too many in flight): the client takes back
+		-- what it drew.
+		local dropped = MagicSync.decodeMana(
+			MagicSync.encodeMana({ mana = 12, max = 60, refused = false, full = false, dropped = true })
+		) :: MagicSync.ManaStatus
+		t.eq(dropped.dropped, true)
+		t.eq(dropped.refused, false)
+		local bad = MagicSync.encodeMana({ mana = 1, max = 2, refused = false, full = false })
+		buffer.writeu8(bad, 4, 8)
+		t.eq(MagicSync.decodeMana(bad), nil, "an unknown flag")
 		local over = MagicSync.encodeMana({ mana = 10, max = 20, refused = false, full = true })
 		buffer.writeu16(over, 0, 30)
 		t.eq(MagicSync.decodeMana(over), nil, "mana above the max")
@@ -260,6 +271,60 @@ return function(t, shared, require, _server, client)
 		t.near(wait(2, 20, 2, false), 0.7 * (45 + 240 * 0.9) / 60, 0.05, "spent at 2 of 20 (the mana before)")
 		t.near(wait(20, 20, 2, true), 0.525 / 2, 0.05, "standing still counts it down twice as fast")
 		t.near(wait(200, 200, 200, false), 0.525, 0.05, "the mana before the spend sets it")
+	end)
+
+	t.test("mana: standing still wants 4 quiet ticks: a walker's late moves never count", function()
+		-- A walking player's moves leave the client every 50 ms or more, on its frames, and come
+		-- with jitter; the server ticks at 20 Hz off its own frames. A tick without a new move is
+		-- not standing still.
+		local seed = 1
+		local function rnd(): number
+			seed = (seed * 48271) % 2147483647
+			return seed / 2147483647
+		end
+		for _, fps in { 20, 30, 60, 144 } do
+			for _, jitter in { 0.005, 0.05, 0.1 } do
+				local arrivals = {}
+				local t0, nextAt, last = 0, 0, 0
+				while t0 < 20 do
+					if t0 >= nextAt then
+						nextAt = (if nextAt < t0 - 0.05 then t0 else nextAt) + 0.05
+						last = math.max(t0 + 0.04 + rnd() * jitter, last)
+						table.insert(arrivals, last)
+					end
+					t0 += 1 / fps * (0.9 + 0.2 * rnd())
+				end
+				local clock, acc, index, feet, anchor, quiet, stillTicks = 0, 0, 1, 0, -1, 0, 0
+				while clock < 19 do
+					local dt = 1 / 60 * (0.95 + 0.1 * rnd())
+					clock += dt
+					while arrivals[index] and arrivals[index] <= clock do
+						feet = arrivals[index]
+						index += 1
+					end
+					acc = math.min(acc + dt, 0.2)
+					while acc >= 0.05 do
+						acc -= 0.05
+						local moved = feet ~= anchor
+						anchor = feet
+						local still
+						quiet, still = Mana.stillness(quiet, moved)
+						stillTicks += if still then 1 else 0
+					end
+				end
+				t.eq(stillTicks, 0, `walking at {fps} fps with {jitter * 1000} ms of jitter`)
+			end
+		end
+		-- Standing: still from the fourth quiet tick; a move or a cast starts it over.
+		local quiet, still = 0, false
+		for tick = 1, 5 do
+			quiet, still = Mana.stillness(quiet, false)
+			t.eq(still, tick >= Mana.STILL_TICKS, `quiet tick {tick}`)
+		end
+		quiet, still = Mana.stillness(quiet, true)
+		t.eq(quiet, 0)
+		t.eq(still, false)
+		t.eq(Mana.STILL_TICKS, 4)
 	end)
 
 	t.test("mana: spending, adding, clamping and the full chime", function()

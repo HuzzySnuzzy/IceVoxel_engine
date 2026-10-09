@@ -679,7 +679,12 @@ return function(t, shared, require, server, client)
 		t.eq(s.worldType, "default")
 		t.eq(s.options.structures, true)
 		t.eq(s.difficulty, 2)
-		stored.v = WorldMeta.VERSION + 1
+		t.eq(stored.v, 2, "the meta's version: 2 since characters")
+		-- A meta of version 1 (before characters) still reads; a version 1 server refuses this one.
+		local first = WorldMeta.stored(meta)
+		first.v = 1
+		t.ok(WorldMeta.read(first) ~= nil, "a version 1 meta reads")
+		stored.v = WorldMeta.META_VERSION + 1
 		local none, why = WorldMeta.read(stored)
 		t.eq(none, nil)
 		t.eq(why, "saved by a newer version")

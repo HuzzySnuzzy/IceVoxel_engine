@@ -71,9 +71,12 @@
 	             player records are left as they are: the first character of a user entering a
 	             world that holds one takes it in (Save/CharacterMigration: its place and mode
 	             as the entry when there is none, its things into the character, what does not
-	             fit dropped at its feet on spawn; the world's record marks it taken,
-	             `legacyImported`, saved with the world). /save-all saves the characters too
-	             (`onSaveAll`).
+	             fit dropped at its feet on spawn), when the caller says it may (a character
+	             that is saved, in a world that saves progress), it does not enter in creative
+	             and it is still here after reading it; the world's record marks it taken
+	             (`legacyImported`, saved with the world) once that character was saved with it
+	             (`confirmImport`), and meanwhile no other character of that user takes it in
+	             here. /save-all saves the characters too (`onSaveAll`).
 	  Lock       held while the world is open, renewed while it loads, as it starts and every
 	             third of Config.Save.LockTimeout, and looked at before every save writes; a lost
 	             lock (another server took a stale world over) stops saving, and operators are
@@ -203,6 +206,9 @@ local departed: { [number]: { text: string, order: number } } = {}
 local departedCharacters: { [string]: { text: string, order: number } } = {}
 -- What else /save-all saves (Players/CharacterStore's characters).
 local saveAllHooks: { () -> () } = {}
+-- Old records taken in whose character was not saved with them yet (user id -> that character's
+-- id): the world's mark waits for that save (`confirmImport`), no other character takes them.
+local importing: { [number]: number } = {}
 local CHARACTERS = Config.Characters.Enabled == true
 -- The next new world's owner (`claim`: the player creating it; 0: the game's).
 local creator = 0
@@ -770,19 +776,25 @@ end
 --[[
 	With characters: `player` enters this world with `record` (their selected character, from
 	Players/CharacterStore: see the header). Reads what the world keeps of it, takes in their old
-	player record of this world when it is the first of their characters here (`record`'s
-	inventory changes: the caller saves it; the leftovers come back to drop at its feet), puts its
-	game mode back and its place for its first character (or moves one already standing). Yields.
+	player record of this world when it is the first of their characters here and `mayImport`
+	(`record`'s inventory changes: the caller saves it, then `confirmImport`; the leftovers come
+	back to drop at its feet, and the world's id when it took one in), puts its game mode back
+	and its place for its first character (or moves one already standing). Yields.
 ]]
-function WorldSave.enterCharacter(player: Player, record: CharacterCodec.Record): { Stack }
+function WorldSave.enterCharacter(
+	player: Player,
+	record: CharacterCodec.Record,
+	mayImport: boolean
+): ({ Stack }, string?)
 	local ps = stateFor(player)
 	if ps == nil or player.Parent == nil then
-		return {}
+		return {}, nil
 	end
 	local name = WorldMeta.characterName(player.UserId, record.id)
 	ps.charName = name
 	ps.placed = false
 	local leftovers: { Stack } = {}
+	local imported: string? = nil
 	local world, store = current, saves
 	local entry: Entry? = nil
 	if world and store then
@@ -804,27 +816,40 @@ function WorldSave.enterCharacter(player: Player, record: CharacterCodec.Record)
 				"Where your character stood in this world could not be read: this visit's place is not saved"
 			)
 		end
+		local taker = importing[player.UserId]
 		if
 			Config.Characters.Migrate
+			and mayImport
 			and ok
 			and world.canSave
+			and (taker == nil or taker == record.id)
 			and CharacterMigration.shouldImport(world.meta, player.UserId, record)
 		then
 			local okOld, old = WorldStore.loadPlayer(store, world, player.UserId)
-			if okOld and old and old.dropped == 0 then
+			-- (The mode it would play in: nothing made in creative comes into a character.)
+			local mode = if entry and entry.mode
+				then entry.mode
+				elseif old and old.mode then old.mode
+				else GameMode.of(player)
+			if players[player] ~= ps or not player.Parent or current ~= world then
+				-- (Left meanwhile: nothing taken in.)
+				return leftovers, nil
+			elseif okOld and old and old.dropped == 0 and not GameMode.instabuild(mode) then
 				entry = CharacterMigration.entry(entry, old)
 				leftovers = CharacterMigration.import(record, old)
-				CharacterMigration.markImported(world.meta, player.UserId, record)
+				CharacterMigration.markCharacter(world.meta, record)
+				importing[player.UserId] = record.id
+				imported = world.id
 				print(`[IceVoxel] {player.Name}'s things in this world went to their character "{record.name}"`)
 				notify(player, "Your things in this world from before characters are now this character's")
-			elseif okOld and old then
+			elseif okOld and old and old.dropped > 0 then
 				warn(`[IceVoxel] the old record of {player.Name} holds items this version doesn't know: not taken in`)
 			end
 		end
 	end
 	if players[player] ~= ps then
 		-- (Left meanwhile.)
-		return leftovers
+		return leftovers, imported
 	end
 	ps.entry = entry
 	if entry then
@@ -845,7 +870,22 @@ function WorldSave.enterCharacter(player: Player, record: CharacterCodec.Record)
 			Characters.teleportTo(player, entry.x, entry.y, entry.z, entry.yaw)
 		end
 	end
-	return leftovers
+	return leftovers, imported
+end
+
+--[[
+	Character `charId` of user `userId`, which took in their old record of world `worldId`
+	(`enterCharacter`), was saved with it: the world's record says so from its next save (see the
+	header).
+]]
+function WorldSave.confirmImport(userId: number, charId: number, worldId: string)
+	local world = current
+	if importing[userId] == charId then
+		importing[userId] = nil
+	end
+	if world and world.id == worldId then
+		CharacterMigration.markWorld(world.meta, userId, charId)
+	end
 end
 
 -- What else /save-all saves (Players/CharacterStore: the characters), called as it starts.

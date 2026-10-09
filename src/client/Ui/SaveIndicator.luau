@@ -18,8 +18,9 @@
 	          corner (under the Now Playing toast while that one shows, and dropping under one
 	          that comes in over it; the status effect icons then move under it too), sliding in
 	          with "World saved" and "1.4 MB of 64 MB (largest region 0.3 / 4 MB)", red when the
-	          save failed or the world nears its most; it stays TOAST_SECONDS and slides out, as
-	          wide as its line.
+	          save failed or the world nears its most; it stays TOAST_SECONDS (counted while
+	          the corner has room for it: it waits hidden otherwise) and slides out, as wide as
+	          its line.
 	Both are placed by Ui/HudLayout (UiScale.hud: `saving`, `save`; this tells Ui/UiScale when they
 	show), at the GUI scale, and hidden with the HUD (the world map hides it: on narrower screens
 	the icon would cover its weather bar, the toast its buttons). While the icon or the toast is
@@ -301,7 +302,15 @@ function SaveIndicator.start()
 		layout()
 		watch()
 		slide(0, Enum.EasingDirection.Out)
-		task.delay(SLIDE + TOAST_SECONDS, function()
+		task.spawn(function()
+			-- (Its time counts only while the corner has room for it, as Now Playing's.)
+			local left = SLIDE + TOAST_SECONDS
+			while left > 0 and generation == mine do
+				local dt = task.wait(0.1)
+				if UiScale.hud().save ~= nil then
+					left -= dt
+				end
+			end
 			if generation == mine then
 				slide(hiddenX(), Enum.EasingDirection.In)
 				task.delay(SLIDE, function()

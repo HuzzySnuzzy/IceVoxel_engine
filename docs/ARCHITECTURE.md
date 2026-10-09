@@ -6232,9 +6232,11 @@ stays: a non-operator joins the one running.
   for another job's live lock: CharacterStore retries 2, 4, 8 s up to `LockWait`). Every save is
   an UpdateAsync that writes only while `SaveLock.renew` says the lock is still this job's
   ("lost" stops saving that character) and carries an order number (an older capture is
-  "skipped"); the last save releases. Delete: refused under another job's live lock, index
-  first, then RemoveAsync. Rename: record (refused for a record holding unknown items), then
-  index. `touch` rewrites a character's index line (played, lastPlayed, dead) at release and
+  "skipped"); the last save releases. A select (and a rename) while this server's own last save
+  of that character is still under way (`releasing`: its player left, maybe to rejoin here, and
+  this job's lock counts as free) is "busy" until that save is done, so a rejoin never loads the
+  record from before it. Delete: refused under another job's live lock, index first, then
+  RemoveAsync. Rename: record (refused for a record holding unknown items), then index. `touch` rewrites a character's index line (played, lastPlayed, dead) at release and
   marks the migration. `memoryStore` is the session-only store (Studio without API access,
   `Save.Enabled` off, a user whose index read failed: nothing is written to the DataStore for
   them this session, the list says why).
@@ -6245,9 +6247,19 @@ stays: a non-operator joins the one running.
   world only renews its lock), on leave, on `/save-all` (`WorldSave.onSaveAll`) and in
   BindToClose (25 s). A leaving player's mana, Tough As Nails, effects, health and progress come
   from a cache refreshed every 2 s (the systems that keep them forget players in their own
-  PlayerRemoving handlers, in no fixed order); the inventory is the live table kept since
-  entering. Progress is exported only where `Progression.savesProgress()`; elsewhere the stored
-  progress goes back unchanged (also when it is another version's).
+  PlayerRemoving handlers, in no fixed order; Players/Mana keeps a leaving player until every
+  handler ran, so mana and crystals come from it, a crystal used a moment ago included); the
+  inventory is the live table kept since entering. Progress is exported only where
+  `Progression.savesProgress()`; elsewhere the stored progress goes back unchanged (also when it
+  is another version's).
+- **Fair visits.** A character's things leave a world only from a fair visit: the world saves
+  progress (no Allow Commands, not superflat or debug) and the player was never in creative. A
+  visit stops being fair on entering such a world, or in creative mode (at entry, or a later
+  switch: `GameModes.changed`); from then on every save writes the things the character had at
+  that moment (`selected.kept`, `CharacterCodec.keepThings`: inventory, armour, equipment,
+  Mana Crystals, mana, effects), so nothing made in creative or a cheat world reaches another
+  world (Terraria keeps Journey characters apart; this game has no Journey difficulty). The
+  player is told once.
 - **Entering** (`CharacterStore.enter`, from WorldMenu's EnterWorld with
   `CharacterSync.decodeEnter`): the selected, loaded, living character only (a refusal kicks
   with why: the client's title screen is gone already). `WorldSave.enterCharacter` reads the
@@ -6259,7 +6271,9 @@ stays: a non-operator joins the one running.
   Async name, falling back to `LoadCharacterAsync`), on every respawn too; the first body gets
   the record's health, later ones full mana; `Humanoid.DisplayName` is the character's
   (filtered) name. With `MainMenu.Enabled` off the most recently played living character (or
-  one made from the avatar) enters when the world is ready and its look is applied to each body
+  one made from the avatar when there is none living; one that can't be loaded is never
+  replaced by a new one: the player is kicked with why) enters when the world is ready and its
+  look is applied to each body
   Roblox makes with `ApplyDescriptionResetAsync` (the only live apply: a rebuilt body's parts
   join the collision group through Characters' DescendantAdded, and MovementController takes its
   root again on CharacterAdded only, so verify the first body in Studio in this mode).
@@ -6287,10 +6301,17 @@ stays: a non-operator joins the one running.
   Mediumcore legacy "Character 1" (DisplayName filtered, avatar all worn, progress copied;
   ProgressStore is never written again). The first character of a user entering a world whose
   meta lists an old player record not yet taken in (`legacyImported`) takes its place and mode
-  as its entry (when it has none), its slots, armour and cursor into its inventory (same slot
-  when empty, else merged; leftovers dropped at its feet on spawn), marks the meta and the
-  character's `imported`, and is saved at once. The old record is kept. A crash between the
-  character's save and the world's save can import twice: a duplicate, never a loss.
+  as its entry (when it has none), its slots, armour, equipment (no accessory worn twice) and
+  cursor into its inventory (same slot when empty, else merged; leftovers dropped at its feet on
+  spawn) and its Mana Crystals (added, up to nine; past that as items), marks the character's
+  `imported` at once, and is saved at once; the meta's mark (`markWorld`) comes only when that
+  save wrote ("ok": `WorldSave.confirmImport`), and meanwhile no other character of the user
+  takes it in on this server. Only a character that is saved takes one in (not a session-only
+  one, nor one holding unknown items), on a fair visit, not entering in creative, and only if
+  the player is still there after the read. The old record is kept. A crash between the
+  character's save and the world's save can import twice: a duplicate, never a loss. The world
+  record's version is 2 (`WorldMeta.META_VERSION`): a server of the version before characters
+  refuses such a world instead of saving it without `characters` and `legacyImported`.
 
 ### Equipment (`Inventory/Menu`, `Items/Accessories`, `Movement/PlayerPhysics`, server `Players/Inventories`, `Players/MoveCheck`, client `Player/EquipmentLooks`, `Player/AirJumps`, `Ui/InventoryScreen`)
 
@@ -6318,7 +6339,11 @@ accessories (window 0: 45–51, 52–55, 56–62); every one holds a single item
 **Effects.**
 - *Movement* (`PlayerPhysics`, the client's prediction): `airJumpsMax` jumps in the air
   (`Config.Accessories.AirJumpPower` 0.36 + the balloon's 0.1 `jumpBoost`: 0.96 blocks, 1.48 with
-  both), refilled on the ground, on a ladder or in a fluid, one per press and none while flying;
+  both), refilled on the ground, on a ladder or in a fluid, one per press and none while flying
+  nor on the double tap that stops flying; an air jump's fall counts from where it took off (the
+  fall distance starts at minus its rise, `riseOf`: with Minecraft's 3 block safe fall, counting
+  from the second top would hurt a double jump on flat ground), and the balloon's jump takes a
+  block off the fall as Jump Boost I does (`Accessories.fallReduction`, client and server);
   `runBoost` builds up while sprinting on the ground (`RunDelay` 10 ticks, then `RunRamp` 12 to x1.4)
   and drops back on a stop, a wall, a push or taking the boots off; `swimFactor` multiplies the
   swimming acceleration and the swim up; `speed` multiplies `speedFactor` with the effects'.
@@ -6340,7 +6365,8 @@ accessories (window 0: 45–51, 52–55, 56–62); every one holds a single item
   (1 + attackSpeed) without touching Combat's Minecraft speeds; the client's `Ui/AttackIndicator`
   does the same); `mana` is there for `Players/Mana`'s max. The open slots come from
   `setSlotsRule` (the boot script: `Accessories.slotsForAge` of the player's Age), asked on
-  joining and every 0.25 s.
+  joining and every 0.25 s. Putting an accessory or a vanity piece on plays
+  `item.armor.equip_generic` (armour in a vanity slot its own: `Shared/Sounds.equipment`).
 
 **Looks.** The server sets the player attribute `Types.LOOKS_ATTRIBUTE` to `Accessories.looks`
 ("head,chest,legs,feet,accessory,...": vanity over armor, hidden armor 0, only accessories with a
@@ -6360,7 +6386,9 @@ pose).
 
 **The panel** (`Ui/InventoryScreen`, window 0 only, also creative's inventory tab): 84 x 166 GUI
 pixels docked 2 right of the player panel, so `size()` is 262 wide there (JEI and the screens lay
-out from it). Columns: vanity armor (violet ghosts, a 6 x 6 eye per slot), vanity accessories,
+out from it). Columns: vanity armor (violet ghosts, a 6 x 6 eye per slot in its top right corner,
+an 8 x 8 button out to the frame's corner on touch, never over the slot's middle:
+`MenuLayout.armorEye`), vanity accessories,
 accessories (closed rows darkened with a padlock: "Opens at the Industrial Age") and a 9 x 9 eye per
 accessory row (16 x 18 buttons on touch). The eyes are buttons of their own sending `hide`;
 `targetAt` says nothing over them. Tooltips add `Accessories.tooltip` ("When worn:" and a line an
@@ -6380,12 +6408,17 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   then mana comes back at (max / 7 + 1, plus max / 2 standing still) x (0.2 + 0.8 x mana / max) x
   1.15 / 2 a second. For max 20 that is 7.47 / 1.49 / 1.72 / 0.35 a second (standing full, standing
   empty, moving full, moving empty); for max 200 it is 74.2 / 14.8 / 16.7 / 3.33. "Standing still"
-  is the server's own reading: the feet moved less than 0.01 blocks since the last tick and nothing
-  was cast in it. Terraria 1.4.5.7's rework (no delay) was not taken. A regeneration that fills
+  is the server's own reading (`Shared/Mana.stillness`): the feet stayed within 0.01 blocks of
+  where they last moved and nothing was cast, for `STILL_TICKS` 4 ticks running (moves arrive
+  20 a second at most, unreliably, on the client's frames: one tick without a new move is no
+  standing still; with 4 no walking player counts as still from 20 to 144 fps with up to 100 ms of
+  jitter). Terraria 1.4.5.7's rework (no delay) was not taken. A regeneration that fills
   mana plays Terraria's chime (`entity.player.mana_full`, flat, on that client only).
 - **Server** (`Players/Mana`): one state per player, ticked 20 times a second. The Mana message
-  (`Net/MagicSync`: u16 mana, u16 max, flags `refused` and `full`) goes out when the whole number
-  or the max changes, at most every 4 ticks, and at once after a cast, a refused cast, a potion, a
+  (`Net/MagicSync`: u16 mana, u16 max, flags `refused`, `full` and `dropped`) goes out when the
+  whole number or the max changes, at most every 4 ticks, and at once after a cast, a refused cast
+  (`refused` for want of mana; `dropped` for anything else: too soon, too many in flight; both take
+  the client's prediction back, only the first blinks the stars), a potion, a
   crystal or a restore. A respawn starts full; the first character since joining keeps the mana it
   has (a restored character's). `export` / `restore` are what `Players/CharacterStore` saves.
 - **Potions and Mana Sickness**: the Lesser Mana Potion (50) and Mana Potion (100) are
@@ -6417,8 +6450,11 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   client flying the server's spawn op follows the server's path exactly, as long as their blocks
   agree. The server (`Players/Magic`) flies every projectile against `world:peekBlock` and
   `Mobs.near`. A hit uses `Mobs.magicDamage`: the weapon's half hearts times the Mana Sickness
-  cut, through armour and the hurt cooldown, with the weapon's own knockback, credited to the
-  caster. The spark sets a mob burning for 3 s half the time (`Mobs.ignite`). Only three ops are
+  cut, through armour, with the weapon's own knockback, credited to the caster; the 10 tick hurt
+  cooldown never refuses it (each projectile strikes a mob once, `struck`: Terraria's projectile
+  immunity, so a Wand of Sparking's 9 tick casts all land), and it starts one as any hurt. A
+  bounce leaves the bolt just off the face as an f32 that stays off it (`offFace`: past 32768
+  blocks an f32 step is larger than the 0.001 gap). The spark sets a mob burning for 3 s half the time (`Mobs.ignite`). Only three ops are
   sent, in Projectiles messages to players within `Config.Interest.PlayerDistance`: spawn (with
   the caster's seq, so the caster's client adopts the projectile it already flies), sync (after
   a bounce) and end. Players are never hit (the game has no PvP path) and no fire block is ever
@@ -6527,7 +6563,10 @@ bottom of the screen and the saving icon sat on the minimap).
   and the F3 + F4 switcher take the scale fitted to their own area, the device's safe area; JEI's
   list and the inventory's effect list keep beside the shown panel's real width (`size()`: the
   inventory with its equipment panel is wider than `MenuLayout.WIDTH`). The title screen fits
-  320 × 240 below Roblox's top bar, so no page starts under its buttons. The Age banner and the
+  320 × 240 below Roblox's top bar, so no page starts under its buttons; its pages lay out down to
+  236 GUI pixels, so the base scale stays while that fits whole (a 1366 × 768 window keeps its
+  Auto 3; 2560 × 1440 and 4K windows, whose bar leaves 230 GUI pixels at Auto, draw the title a
+  step smaller than the HUD). The Age banner and the
   attack indicator take the scale; the crosshair is Minecraft's 9 × 9 GUI pixel plus of 1 pixel
   lines at the scale in the camera's centre (white with a dark outline: Roblox has no inverting
   blend; shown for gamepads, as before). F3 (Code 14), the world map's bar, weather bar, markers and
@@ -6543,14 +6582,18 @@ bottom of the screen and the saving icon sat on the minimap).
     area's top right corner below the top bar (224 pixels at 1080p's Auto, 84 on a phone at 1.5;
     its picture is still `Map.MinimapSize` map pixels, the same 384 blocks), its coordinates line
     (the HUD's pixel font, as wide as its text, right aligned) 2 under it; on a touch screen with
-    the minimap off the 32 × 16 Map button;
+    the minimap off the 32 × 16 Map button, never under a finger's 32 pixels high (64 wide:
+    `mapButtonSize`; the minimap's cloud button likewise takes taps in a square of at least 32
+    pixels, `touchSide`);
   - the toasts: slot 1 under that column is Now Playing's place, shown or not; "World saved" takes
     slot 1, or slot 2 under Now Playing while that one shows or once it went under it
     (SaveIndicator's rule: it never moves back up), else beside slot 1, else it waits for room, as
-    Minecraft's toasts queue for a free slot;
+    Minecraft's toasts queue for a free slot (its seconds count only while it has a place);
   - the status effect icons (24 pixel squares 25 apart, rows 26 apart, the hovered one's line under
     them) in the toast slot while no toast shows, else under the toasts, else beside them, else
     beside the minimap column at the top, else smaller (down to half the scale), else not drawn;
+    on a touch screen never in the movement thumbstick's zone (`thumbstick`: the left 40% below
+    the top third in landscape, the bottom 40% in portrait): the icons are buttons;
   - the saving icon at the bottom right, raised above Roblox's touch buttons and the HUD where they
     are in its way, by their real size: the live TouchGui JumpButton and ContextActionService
     buttons, measured when PlayerGui's children change and every second on touch screens, else
@@ -6561,16 +6604,17 @@ bottom of the screen and the saving icon sat on the minimap).
     (`wailaAvoid`, from `DebugOverlay.rightEdge`).
 
   Everything that shows is inside the safe area and disjoint from everything else, the touch
-  buttons and the HUD. The toasts, the effect icons, the saving icon and WAILA hide with the HUD
+  buttons and the HUD (with the HUD's rows raised over the mana stars only while the item name or
+  a Thermometer's reading is drawn: `Hud` reports the raise then). The toasts, the effect icons, the saving icon and WAILA hide with the HUD
   (the world map hides it), the minimap's corner while the world map covers it. Where things go
   with a 20 character coordinates line, both toasts, the saving icon and two rows of three effect
   icons:
 
   | Screen | Auto | Minimap | Slot 1 top | Notes |
   | --- | --- | --- | --- | --- |
-  | 667 × 375 phone (bar 58) | 1.5 | 84 px at y 64 | 169 | "World saved" beside Now Playing; the saving icon right above the jump button (y 258-282, the button at 285); effect icons beside the toasts |
-  | 844 × 390 notched phone | 1.625 | 91 px | 179 | 47 pixel side insets kept clear |
-  | 1024 × 768 tablet | 3.125 | 175 px | 290 | the saving icon above the HUD's "..." and the jump button (y 492-542); "World saved" waits until it goes; effect icons beside the toasts |
+  | 667 × 375 phone (bar 58) | 1.5 | 84 px at y 64 | 169 | "World saved" beside Now Playing; the saving icon right above the jump button (y 258-282, the button at 285); effect icons beside the minimap (beside the toasts they would sit in the thumbstick's zone) |
+  | 844 × 390 notched phone | 1.625 | 91 px | 179 | 47 pixel side insets kept clear; effect icons beside the minimap |
+  | 1024 × 768 tablet | 3.125 | 175 px | 290 | the saving icon above the HUD's "..." and the jump button (y 492-542); "World saved" waits until it goes; effect icons beside the minimap |
   | 1280 × 660 Studio | 2 | 112 px | 206 | |
   | 1920 × 1080 | 4 | 224 px at (1680, 74) | 354 | |
   | 3840 × 2160 | 9 | 504 px | 724 | |

@@ -4,8 +4,9 @@
 	waypoints (pinned to the edge when off the map) and other players (not spectators, unless this
 	player spectates too: Player/SpectatorRules). Click it to open the world map; `-` / `=` zoom
 	out / in (the Minimap Zoom Out / In key bindings, Settings/Keybinds; the zoom shows in its
-	bottom right corner). The cloud button in its bottom left corner (or the Weather Map key, B)
-	shows the weather over it (Map/WeatherLayer: rain, snow, thunder and clouds, with the forecast
+	bottom right corner). The cloud button in its bottom left corner (or the Weather Map key, B;
+	on touch screens a tap anywhere in a finger-sized square there: HudLayout.touchSide) shows the
+	weather over it (Map/WeatherLayer: rain, snow, thunder and clouds, with the forecast
 	step the world map picked and the wind in its top left corner). `setVisible` (the Minimap
 	setting) hides it with its coordinates line; Map/init then stops updating it and painting its
 	tiles. Hidden on a touch screen, a small "Map" button takes its corner: tapping the minimap is
@@ -220,9 +221,22 @@ function Minimap.new(
 	mapButton.Parent = gui
 
 	-- The weather mode's switch (bottom left, over the click that opens the world map) and its
-	-- caption: the forecast step and the wind, with an arrow where it blows.
-	local weatherButton = Instance.new("TextButton")
-	weatherButton.Name = "WeatherButton"
+	-- caption: the forecast step and the wind, with an arrow where it blows. The switch drawn is
+	-- WEATHER_BUTTON square; what a tap hits is a finger's size on touch screens
+	-- (HudLayout.touchSide: `place`), so a tap meant for it doesn't open the world map.
+	local weatherHit = Instance.new("TextButton")
+	weatherHit.Name = "WeatherButton"
+	weatherHit.Text = ""
+	weatherHit.AutoButtonColor = false
+	weatherHit.BackgroundTransparency = 1
+	weatherHit.AnchorPoint = Vector2.new(0, 1)
+	weatherHit.Position = UDim2.fromScale(0, 1)
+	weatherHit.Size = UDim2.fromOffset(WEATHER_BUTTON + 2, WEATHER_BUTTON + 2)
+	weatherHit.ZIndex = 11
+	weatherHit.Activated:Connect(WeatherLayer.toggle)
+	weatherHit.Parent = holder
+	local weatherButton = Instance.new("TextLabel")
+	weatherButton.Name = "Cloud"
 	weatherButton.AnchorPoint = Vector2.new(0, 1)
 	weatherButton.Position = UDim2.new(0, 1, 1, -1)
 	weatherButton.Size = UDim2.fromOffset(WEATHER_BUTTON, WEATHER_BUTTON)
@@ -234,8 +248,7 @@ function Minimap.new(
 	weatherButton.TextColor3 = Color3.new(1, 1, 1)
 	weatherButton.Text = "☁"
 	weatherButton.ZIndex = 11
-	weatherButton.Activated:Connect(WeatherLayer.toggle)
-	weatherButton.Parent = holder
+	weatherButton.Parent = weatherHit
 	local caption = smallText(holder, "WeatherCaption", 7)
 	caption.Position = UDim2.fromOffset(8, 1)
 	caption.Size = UDim2.new(1, -9, 0, SMALL_TEXT + 1)
@@ -291,6 +304,20 @@ function Minimap.new(
 		for _, piece in { holderScale, coordsScale, mapButtonScale } do
 			if piece.Scale ~= scale then
 				piece.Scale = scale
+			end
+		end
+		-- (Touch: the buttons a finger's size, HudLayout.mapButtonSize / touchSide.)
+		local hitSide = WEATHER_BUTTON + 2
+		if UiScale.touch() then
+			hitSide = HudLayout.touchSide(hitSide, scale)
+		end
+		if weatherHit.Size.X.Offset ~= hitSide then
+			weatherHit.Size = UDim2.fromOffset(hitSide, hitSide)
+		end
+		if button then
+			local size = UDim2.fromOffset(button.w / scale, button.h / scale)
+			if mapButton.Size ~= size then
+				mapButton.Size = size
 			end
 		end
 		if map then

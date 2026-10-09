@@ -3,9 +3,10 @@
 	.Migrate): the old progress becomes a Mediumcore "legacy" character with the user's avatar all
 	worn; an old per-world player record (Save/PlayerCodec, version 1 or 2) is taken in once per
 	world by the first character entering it (its place and game mode to the world's entry for
-	that character, its slots, armor, equipment and cursor into the character's inventory, what
-	does not fit listed to drop), the world keeping who took it (WorldMeta's legacyImported, saved and read
-	back) and the character the world's id; and what a world keeps of each character (WorldStore's
+	that character, its slots, armor, equipment (no accessory worn twice), cursor and Mana
+	Crystals into the character, what does not fit listed to drop), the character keeping the
+	world's id at once and the world who took it once that character was saved (WorldMeta's
+	legacyImported, saved and read back); and what a world keeps of each character (WorldStore's
 	entries "<id>/c/<userId>_<charId>": written, read back, in order, deleted with the world).
 ]]
 
@@ -342,6 +343,54 @@ return function(t, shared, require, server)
 		t.eq(#leftovers, 0)
 		t.eq(old.accessories[1].item, Items.id.HermesBoots, "the old record untouched")
 		t.ok(record.accessories[1] ~= old.accessories[1], "copies, not the old record's stacks")
+	end)
+
+	t.test("character migration: no accessory is worn twice; a version 2 record's Mana Crystals come too", function()
+		local record = CharacterCodec.new(6, "Boots", Characters.Difficulty.Classic, Appearance.default(), 0)
+		record.accessories[1] = Items.newStack(Items.id.HermesBoots, 1)
+		record.crystals = 5
+		local old = oldRecord()
+		old.accessories[2] = Items.newStack(Items.id.HermesBoots, 1)
+		old.accessories[3] = Items.newStack(Items.id.Aglet, 1)
+		old.crystals = 7
+		local leftovers = CharacterMigration.import(record, old)
+		t.eq(record.accessories[2], nil, "a second pair is not worn")
+		t.eq(record.accessories[3].item, Items.id.Aglet, "another accessory is")
+		local boots, crystals = 0, 0
+		for slot = 1, Types.INVENTORY_SIZE do
+			local stack = record.slots[slot]
+			if stack and stack.item == Items.id.HermesBoots then
+				boots += stack.count
+			elseif stack and stack.item == Items.id.ManaCrystal then
+				crystals += stack.count
+			end
+		end
+		t.eq(boots, 1, "the second pair into the bag")
+		t.eq(record.crystals, 9, "the crystals used add up to the most")
+		t.eq(crystals, 5 + 7 - 9, "those past it come back as items")
+		t.eq(#leftovers, 0)
+		local fresh = CharacterCodec.new(7, "Fresh", Characters.Difficulty.Classic, Appearance.default(), 0)
+		local few = oldRecord()
+		few.crystals = 4
+		CharacterMigration.import(fresh, few)
+		t.eq(fresh.crystals, 4, "a character with none takes them all")
+	end)
+
+	t.test("character migration: the character's mark comes at once, the world's after its save", function()
+		local f = fake()
+		local saves = WorldStore.new(f.store, f.env)
+		local world = WorldStore.create(saves, settings(), USER)
+		world.meta.players[tostring(USER)] = 100
+		local record = CharacterCodec.new(2, "Alex", Characters.Difficulty.Classic, Appearance.default(), 0)
+		t.eq(CharacterMigration.shouldImport(world.meta, USER, record), true)
+		CharacterMigration.markCharacter(world.meta, record)
+		t.eq(record.imported[1], world.id, "the character never takes it twice")
+		t.eq(world.meta.legacyImported[tostring(USER)], nil, "the world says nothing until it is saved")
+		t.eq(CharacterMigration.shouldImport(world.meta, USER, record), false)
+		CharacterMigration.markWorld(world.meta, USER, record.id)
+		t.eq(world.meta.legacyImported[tostring(USER)], 2)
+		local other = CharacterCodec.new(3, "Other", Characters.Difficulty.Classic, Appearance.default(), 0)
+		t.eq(CharacterMigration.shouldImport(world.meta, USER, other), false, "then no other character")
 	end)
 
 	t.test("character migration: an equipment record (version 2) round trips; version 1 still reads", function()
