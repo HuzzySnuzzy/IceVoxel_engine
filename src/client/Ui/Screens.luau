@@ -88,6 +88,7 @@ local Jei = require(script.Parent.Jei)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
 type Target = SlotClicks.Target
@@ -382,14 +383,8 @@ function Screens.start()
 
 	--[[ GUI ]]
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelScreens"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	-- Under the HUD (whose hotbar is the creative screen's hotbar row), over the map.
-	gui.DisplayOrder = 9
-	gui.Enabled = false
+	local gui = UiScale.screenGui("IceVoxelScreens", "Screens", { inset = true, kind = "scaled", enabled = false })
 
 	-- Minecraft darkens the world behind a screen.
 	local backdrop = Instance.new("Frame")
@@ -426,13 +421,7 @@ function Screens.start()
 	local panelScale = Instance.new("UIScale")
 
 	-- The carried stack and the tooltip, above everything (also the HUD).
-	local top = Instance.new("ScreenGui")
-	top.Name = "IceVoxelCursor"
-	top.ResetOnSpawn = false
-	top.IgnoreGuiInset = true
-	top.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	top.DisplayOrder = 20
-	top.Enabled = false
+	local top = UiScale.screenGui("IceVoxelCursor", "Cursor", { inset = true, kind = "scaled", enabled = false })
 	local carried = Instance.new("Frame")
 	carried.Name = "Carried"
 	carried.BackgroundTransparency = 1
@@ -586,17 +575,20 @@ function Screens.start()
 		end
 	end
 
+	-- (The GUI scale from Ui/UiScale, fitted to this GUI's own area: the device's safe area.)
 	local function layout()
 		local viewport = gui.AbsoluteSize
-		local touchScreen = UserInputService.TouchEnabled
 		local scale
 		-- Where JEI's list may reach down to: above the creative screen's hotbar row (also while the
 		-- recipe view hides it, so the list keeps its cells instead of rebuilding them).
 		local listBottom = viewport.Y
+		-- The shown panel's width (GUI pixels): JEI's list and the effect list keep beside it.
+		local width
 		local shownPanel = panel
 		if current == "panel" and shownPanel then
 			local size = shownPanel.size()
-			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen)
+			width = size.X
+			scale = UiScale.fit(size.X, size.Y, viewport)
 			setScale(panelScale, scale)
 		elseif current == "creative" then
 			-- Centred in the space above the HUD's hotbar (the screen's hotbar row).
@@ -607,7 +599,8 @@ function Screens.start()
 			end
 			listBottom = bottom
 			local size = creative:size()
-			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen, Vector2.new(viewport.X, math.max(bottom, 60)))
+			width = size.X
+			scale = UiScale.fit(size.X, size.Y, Vector2.new(viewport.X, math.max(bottom, 60)))
 			setScale(creativeScale, scale)
 			local y = math.floor(bottom / 2 + size.Y * scale / 2)
 			if creative.root.Position.Y.Offset ~= y then
@@ -615,20 +608,22 @@ function Screens.start()
 			end
 		else
 			local size = inventory:size()
-			scale = Style.guiScale(viewport, size.X, size.Y, touchScreen)
+			width = size.X
+			scale = UiScale.fit(size.X, size.Y, viewport)
 			setScale(inventoryScale, scale)
 		end
 		-- JEI: the recipe view in the panel's place (at most the panel's scale), the list to the right
-		-- of the panels (all three are centred and MenuLayout.WIDTH wide).
+		-- of the shown panel (all are centred; the inventory with its equipment panel is wider than
+		-- MenuLayout.WIDTH, so its own size counts).
 		local viewSize = jei.view:size()
-		screenLeftEdge = viewport.X / 2 - MenuLayout.WIDTH / 2 * scale
+		screenLeftEdge = viewport.X / 2 - width / 2 * scale
 		jei:place({
 			viewportX = viewport.X,
 			top = GuiService:GetGuiInset().Y,
 			bottom = listBottom,
-			guiRight = viewport.X / 2 + MenuLayout.WIDTH / 2 * scale,
+			guiRight = viewport.X / 2 + width / 2 * scale,
 			scale = scale,
-			viewScale = math.min(scale, Style.guiScale(viewport, viewSize.X, viewSize.Y, touchScreen)),
+			viewScale = math.min(scale, UiScale.fit(viewSize.X, viewSize.Y, viewport)),
 		})
 		setScale(carriedScale, scale)
 		local tooltipScale = tooltip:FindFirstChild("Scale")

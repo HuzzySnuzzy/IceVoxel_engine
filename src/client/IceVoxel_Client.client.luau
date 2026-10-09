@@ -2,6 +2,9 @@
 --[[
 	IceVoxel client: generates, meshes and renders the world locally.
 
+	  Ui/UiScale                 Minecraft's GUI scale on this screen with the GUI Scale setting
+	                             (Ui/GuiScale), every ScreenGui, and the HUD's shared corner
+	                             (Ui/HudLayout: minimap, toasts, effect icons, saving icon, WAILA)
 	  Ui/MainMenu                the title screen, first (Config.MainMenu.Enabled): the operator
 	                             creates the world there, everyone joins it from there; nothing
 	                             below starts before the player enters the world (no input, no
@@ -166,6 +169,7 @@ local Hud = require(Client.Ui.Hud)
 local MainMenu = require(Client.Ui.MainMenu)
 local SaveIndicator = require(Client.Ui.SaveIndicator)
 local Style = require(Client.Ui.Style)
+local UiScale = require(Client.Ui.UiScale)
 
 -- First, so the server's sounds play from the start instead of piling up.
 SoundPlayer.start()
@@ -174,7 +178,9 @@ Settings.start()
 -- No Roblox chat over the title screen (Minecraft's has no chat; the game's starts in the world).
 Chat.hideRoblox()
 -- The GUI Scale setting sizes the title screen too: the saved one once it arrives, and changes in
--- its Options menu at once (in the world the "hud" effect below keeps it).
+-- its Options menu at once (in the world the "hud" effect below keeps it). Ui/UiScale follows the
+-- screen from here on (every interface's scale, the HUD's corner).
+UiScale.start()
 Style.setScaleOverride(Settings.values.guiScale)
 local menuScale = Settings.changed:Connect(function()
 	Style.setScaleOverride(Settings.values.guiScale)
@@ -243,12 +249,10 @@ Settings.register("chat", function(values)
 	Chat.applySettings(values)
 end)
 Settings.register("hud", function(values)
-	local minimap = on(values, "minimap")
-	Map.setMinimapVisible(minimap)
-	Waila.setMinimapShown(minimap)
-	MusicToast.setMinimapShown(minimap)
+	-- (The minimap's corner, and so the toasts, effect icons and WAILA around it: Ui/UiScale.)
+	Map.setMinimapVisible(on(values, "minimap"))
 	Waila.setEnabled(on(values, "waila"))
-	Style.setScaleOverride(values.guiScale)
+	UiScale.setSetting(values.guiScale)
 	AttackIndicator.setMode(values.attackIndicator)
 end)
 Settings.register("lighting", function()

@@ -272,11 +272,12 @@ function Layer.update(self: Layer)
 		label.ImageRectOffset = Vector2.zero
 		label.ImageRectSize = Vector2.new(entry.cols, entry.rows)
 	end
+	-- (Shares of the map's frame: right under the minimap's UIScale too.)
 	local view = self.view
-	local p0 = view:toFrame(entry.x0, entry.z0)
-	local p1 = view:toFrame(entry.x0 + entry.cols * entry.cell, entry.z0 + entry.rows * entry.cell)
-	label.Position = UDim2.fromOffset(p0.X, p0.Y)
-	label.Size = UDim2.fromOffset(p1.X - p0.X, p1.Y - p0.Y)
+	local u0, v0 = view:toFraction(entry.x0, entry.z0)
+	local u1, v1 = view:toFraction(entry.x0 + entry.cols * entry.cell, entry.z0 + entry.rows * entry.cell)
+	label.Position = UDim2.fromScale(u0, v0)
+	label.Size = UDim2.fromScale(u1 - u0, v1 - v0)
 	label.Visible = true
 end
 

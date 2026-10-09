@@ -40,6 +40,7 @@ local Types = require(Shared.Inventory.Types)
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 
 -- Minecraft's arm swing lasts 6 ticks.
@@ -110,11 +111,8 @@ function HeldItems.start()
 	end
 
 	-- First person view: a viewport in the bottom right corner.
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelHand"
-	gui.IgnoreGuiInset = true
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = -1
+	-- (A view of the world, sized by the screen: under everything else.)
+	local gui = UiScale.screenGui("IceVoxelHand", "Hand", { inset = true, kind = "screen" })
 	local viewport = Instance.new("ViewportFrame")
 	viewport.AnchorPoint = Vector2.new(1, 1)
 	viewport.Position = UDim2.fromScale(1, 1)

@@ -47,6 +47,7 @@ local Temperature = require(Shared.ToughAsNails.Temperature)
 
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 -- Where Ui/Hud puts things (GUI pixels in its canvas).
 export type Layout = {
@@ -359,12 +360,12 @@ function SurvivalHud.build(canvas: Frame, layout: Layout)
 	readingArt = Style.pixelArt(arrow, 0, 0, RIGHT, { A = TEXT }, 3)
 	readingArrow = arrow
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelTemperatureOverlay"
-	gui.IgnoreGuiInset = true
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = -1
-	gui.Enabled = false
+	-- (Screen-relative edges over the whole screen, under everything else.)
+	local gui = UiScale.screenGui(
+		"IceVoxelTemperatureOverlay",
+		"Frost",
+		{ inset = true, full = true, kind = "screen", enabled = false }
+	)
 	edges = {
 		newEdge(gui, Vector2.new(0, 0), UDim2.fromScale(0, 0), UDim2.fromScale(1, EDGE), 90),
 		newEdge(gui, Vector2.new(0, 1), UDim2.fromScale(0, 1), UDim2.fromScale(1, EDGE), -90),

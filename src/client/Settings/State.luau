@@ -13,6 +13,10 @@
 	  revision  bumps with every change of what is saved, so the controller knows when to send.
 	  received  the server's saved profile arrived (`receive`: merged under the choices the
 	            player made this session before it came).
+	  limits    this screen's highest value of a setting the screen decides (`setLimit`: GUI Scale
+	            goes up to Ui/GuiScale.maxChoice for the window): `cycle` wraps after it, as
+	            Minecraft's GUI Scale button offers Auto, 1 .. the largest scale that fits. A value
+	            above it (chosen on a bigger screen) is kept, not clamped.
 
 	Every operation returns the keys whose values changed (for the effects, Settings/Schedule).
 ]]
@@ -35,6 +39,7 @@ export type State = {
 	received: boolean,
 	-- "Defaults" was pressed this session (saved choices arriving later don't apply).
 	cleared: boolean,
+	limits: { [string]: number? },
 }
 
 local State = {}
@@ -50,6 +55,7 @@ function State.new(profile: number, mobile: boolean, quality: number): State
 		sent = 0,
 		received = false,
 		cleared = false,
+		limits = {},
 	}
 end
 
@@ -105,6 +111,10 @@ function State.cycle(self: State, key: string, delta: number?): { string }
 	local value = self.values[key] + step * entry.step
 	if entry.kind ~= "slider" then
 		local max = PlayerSettings.maxOf(entry, self.mobile)
+		local limit = self.limits[key]
+		if limit then
+			max = math.clamp(limit, entry.min, max)
+		end
 		if value > max then
 			value = entry.min
 		elseif value < entry.min then
@@ -112,6 +122,11 @@ function State.cycle(self: State, key: string, delta: number?): { string }
 		end
 	end
 	return State.set(self, key, value)
+end
+
+-- This screen's highest value of `key` for `cycle` (nil: the setting's own; see the header).
+function State.setLimit(self: State, key: string, limit: number?)
+	self.limits[key] = limit
 end
 
 -- "Reset": the current preset's values again.

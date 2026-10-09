@@ -35,16 +35,18 @@
 	            along the panel's bottom edge.
 	  Look      Minecraft's tooltip, which is Jade's default theme: a dark translucent panel with cut
 	            corners and a purple border fading to a darker purple, the pixel font with its shadow
-	            (Ui/Style), in GUI pixels at the HUD's scale (Style.guiScale). It fits its content.
+	            (Ui/Style), in GUI pixels at the HUD's scale (Ui/UiScale). It fits its content.
 	            Minecraft's italics are drawn by shearing: the text is cut into strips 2 pixels
 	            tall, each shifted a whole pixel or none (the pixel font has no italic face).
-	  Place     the top centre, kept out of the minimap's corner (when that leaves room to read it)
-	            and, while F3 is open, right of the debug text when the screen allows; drawn
-	            smaller when it doesn't fit (WailaInfo.placement, tested).
+	  Place     the top centre, kept out of the HUD's corner (the minimap or the Map button, and
+	            its coordinates line once the panel reaches down that far: Ui/HudLayout's
+	            `wailaRight` and `wailaLow`, through UiScale.hud) when that leaves room to read it,
+	            and, while F3 is open, right of the debug text (`wailaAvoid`: Debug/DebugOverlay
+	            reports its edge) when the screen allows; drawn smaller when it doesn't fit
+	            (WailaInfo.placement, tested). Laid out again when the corner moves.
 	  Hidden    while a screen is open (Ui/Screens), while the HUD is hidden (the world map), with
 	            nothing aimed at, and with the WAILA setting off (`setEnabled`: then nothing is
-	            picked either). It keeps out of the minimap's corner only while the minimap shows
-	            (`setMinimapShown`, the Minimap setting).
+	            picked either).
 
 	Updates are cheap: every frame builds a short key of what would be shown (the target, the held
 	item, F3) and rebuilds the text only when the key changes, at most every REBUILD_INTERVAL (also
@@ -96,6 +98,7 @@ local Machines = require(Shared.Machines)
 local Transmitters = require(Shared.Transmitters)
 local Screens = require(script.Parent.Screens)
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 local WailaInfo = require(script.Parent.WailaInfo)
 
 --[[ Tunables ]]
@@ -116,12 +119,6 @@ local ITEM_HEIGHT = 0.8
 -- Screen pixels between Roblox's top bar and the panel, and kept free inside the screen's edges.
 local TOP_GAP = 4
 local SCREEN_MARGIN = 8
--- With F3 open the panel keeps right of the debug text (screen pixels from the left edge), as
--- long as it still fits on the screen.
-local DEBUG_TEXT_RIGHT = 440
--- Screen pixels at the right the panel keeps out of while the minimap shows (Map/Minimap:
--- MinimapSize pixels, 16 from the edge, a 2 pixel outline) and a gap.
-local MINIMAP_RESERVE = Config.Map.MinimapSize + 16 + 2 + 6
 -- Minecraft's tooltip colours (Jade's default theme). The background is a little more
 -- see-through than a tooltip's; the border is Minecraft's 0x50 alpha.
 local BACKGROUND = Color3.fromRGB(16, 0, 16)
@@ -192,24 +189,12 @@ type Point = { X: number, Y: number, Z: number }
 local Waila = {}
 
 local started = false
--- The WAILA setting, and whether the minimap shows (the Minimap setting and Config.Map.Enabled).
+-- The WAILA setting.
 local enabled = true
-local minimapShown = Config.Map.Enabled
--- Set by start: lays the panel out again.
-local relayout: () -> () = function() end
 
 -- The WAILA setting: off hides the panel and stops looking for what is aimed at.
 function Waila.setEnabled(value: boolean)
 	enabled = value
-end
-
--- Whether the minimap shows in the top right corner (the panel keeps out of it).
-function Waila.setMinimapShown(value: boolean)
-	local shown = value and Config.Map.Enabled
-	if shown ~= minimapShown then
-		minimapShown = shown
-		relayout()
-	end
 end
 
 --[[
@@ -225,12 +210,9 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 
 	--[[ The panel ]]
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelWaila"
-	gui.ResetOnSpawn = false
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	-- Under the screens (9) and the HUD (10); hidden anyway while either covers the screen.
-	gui.DisplayOrder = 8
+	-- (Below Roblox's top bar and inside the safe area. Under the screens and the HUD; hidden anyway
+	-- while either covers the screen.)
+	local gui = UiScale.screenGui("IceVoxelWaila", "Waila", { inset = false, kind = "scaled" })
 
 	local root = Instance.new("Frame")
 	root.Name = "Waila"
@@ -305,25 +287,38 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 	local extendedShown = false
 
 	-- Scale and place the panel (WailaInfo.placement): the HUD's scale (smaller if it doesn't fit),
-	-- at the top centre, out of the minimap's corner, moved right of the F3 text while that is open.
+	-- at the top centre, out of the HUD's corner, moved right of the F3 text while that is open.
+	-- (Ui/HudLayout's edges are screen pixels; this GUI starts below the top bar, in the safe area.)
 	local function layout()
-		local camera = workspace.CurrentCamera
-		local viewport = if camera then camera.ViewportSize else gui.AbsoluteSize
-		-- (The GUI's own area, below Roblox's top bar; the minimap and F3 text are placed in theirs.)
+		local viewport = UiScale.viewport()
 		local area = gui.AbsoluteSize
 		if area.X <= 0 or area.Y <= 0 then
 			area = viewport
 		end
-		local touch = UserInputService.TouchEnabled
+		local origin = UiScale.origin(gui)
+		local insets = UiScale.insets()
+		local touch = UiScale.touch()
+		local base = UiScale.fit(
+			if touch then SCALE_WIDTH_TOUCH else SCALE_WIDTH,
+			SCALE_HEIGHT,
+			Vector2.new(viewport.X - insets.left - insets.right, viewport.Y - insets.top - insets.bottom)
+		)
+		local corner = UiScale.hud()
+		local right = corner.wailaRight
+		local low = corner.wailaLow
+		if low and origin.Y + TOP_GAP + panelHeight * base > low.y then
+			right = math.min(right, low.right)
+		end
+		local avoid = corner.wailaAvoid
 		local value, shift = WailaInfo.placement({
 			width = area.X,
 			height = area.Y,
-			scale = Style.guiScale(viewport, if touch then SCALE_WIDTH_TOUCH else SCALE_WIDTH, SCALE_HEIGHT, touch),
+			scale = base,
 			touch = touch,
 			top = TOP_GAP,
 			margin = SCREEN_MARGIN,
-			rightReserve = if minimapShown then MINIMAP_RESERVE else 0,
-			avoidLeft = if extendedShown then DEBUG_TEXT_RIGHT else nil,
+			rightReserve = math.max(origin.X + area.X - right, 0),
+			avoidLeft = if extendedShown and avoid then avoid - origin.X else nil,
 		}, panelWidth, panelHeight)
 		if scale.Scale ~= value then
 			scale.Scale = value
@@ -727,7 +722,7 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 		then
 			return UserInputService:GetMouseLocation()
 		end
-		local size = workspace.CurrentCamera.ViewportSize
+		local size = UiScale.viewport()
 		return Vector2.new(size.X / 2, size.Y / 2)
 	end
 
@@ -909,16 +904,13 @@ function Waila.start(world: ClientWorld.ClientWorld, generator: TerrainGenerator
 
 	--[[ Every frame ]]
 
-	-- (The GUI's size follows the viewport's.)
+	-- (The GUI's size follows the viewport's; the corner follows the scale, the minimap, F3.)
 	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout)
-	UserInputService:GetPropertyChangedSignal("TouchEnabled"):Connect(layout)
-	Style.scaleChanged:Connect(layout)
-	relayout = layout
+	UiScale.hudChanged:Connect(layout)
 
 	-- The world map hides the HUD (Hud.setVisible); WAILA is part of the HUD, so it hides with it.
 	local function hudShown(): boolean
-		local hud = playerGui:FindFirstChild("IceVoxelHud")
-		return hud == nil or not hud:IsA("ScreenGui") or hud.Enabled
+		return UiScale.hudShown()
 	end
 
 	RunService.RenderStepped:Connect(function()

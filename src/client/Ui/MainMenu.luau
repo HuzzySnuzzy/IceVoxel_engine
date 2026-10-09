@@ -55,9 +55,10 @@
 	             (MenuOpened) and the key may reach InputBegan too, before, after or not at all,
 	             as Ui/Screens handles it: whichever comes first goes back (or makes the Key Binds
 	             key waiting "Not Bound") and the other, right after, is ignored, as is the Escape
-	             that closes Roblox's menu. The GUI scale is Minecraft's (Style.guiScale for 320 x
-	             240, or the GUI Scale setting: the boot script's Style.setScaleOverride), laid
-	             out again when the window or the setting changes.
+	             that closes Roblox's menu. The GUI scale is Minecraft's (Ui/UiScale: Auto for
+	             320 x 240, or the GUI Scale setting the boot script hands it), fitted below
+	             Roblox's top bar so no page starts under its buttons, and laid out again when the
+	             window, the insets or the setting change.
 ]]
 
 local GuiService = game:GetService("GuiService")
@@ -80,11 +81,10 @@ local SaveIndicator = require(script.Parent.SaveIndicator)
 local SettingsScreen = require(script.Parent.SettingsScreen)
 local Style = require(script.Parent.Style)
 local TitleRules = require(script.Parent.TitleRules)
+local UiScale = require(script.Parent.UiScale)
 local WorldListRules = require(script.Parent.WorldListRules)
 local SaveText = require(Shared.SaveText)
 
--- Over everything else (the HUD and screens are 1..20).
-local DISPLAY_ORDER = 100
 -- Seconds within which a second Escape (InputBegan and MenuOpened for one press) is the same one.
 local ESCAPE_REPEAT = 0.3
 -- GUI pixels a block of the logo, and its extrusion.
@@ -287,12 +287,7 @@ function MainMenu.run()
 		return player:GetAttribute(WorldSettings.OPERATOR_ATTRIBUTE) == true
 	end
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelMainMenu"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.DisplayOrder = DISPLAY_ORDER
+	local gui = UiScale.screenGui("IceVoxelMainMenu", "Title", { inset = true, kind = "scaled" })
 
 	-- Backgrounds: the moving sky (the title) and the dirt (the other screens).
 	local sky = place(gui, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 0)
@@ -1071,12 +1066,17 @@ function MainMenu.run()
 	)
 	--[[ Layout, input, animation ]]
 
+	-- The content canvas: the safe area below Roblox's top bar (this GUI is the safe area, from the
+	-- screen's top), 320 x 240 GUI pixels fitted into it at the GUI scale (Ui/UiScale).
 	local function layout()
-		local camera = workspace.CurrentCamera
-		local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
-		local size = Style.guiScale(viewport, 320, 240, UserInputService.TouchEnabled)
+		local viewport = UiScale.viewport()
+		local insets = UiScale.insets()
+		local area = Vector2.new(viewport.X - insets.left - insets.right, viewport.Y - insets.top - insets.bottom)
+		local top = math.max(insets.bar - insets.top, 0)
+		local size = UiScale.fit(320, 240, Vector2.new(area.X, area.Y - top))
 		scale.Scale = size
-		content.Size = UDim2.fromOffset(math.floor(viewport.X / size), math.floor(viewport.Y / size))
+		content.Position = UDim2.fromOffset(0, top)
+		content.Size = UDim2.fromOffset(math.floor(area.X / size), math.floor((area.Y - top) / size))
 		dirt.TileSize = UDim2.fromOffset(DIRT_TILE * size, DIRT_TILE * size)
 	end
 	layout()
@@ -1090,21 +1090,8 @@ function MainMenu.run()
 			end
 		end)
 	)
-	local function watchCamera()
-		local camera = workspace.CurrentCamera
-		if camera then
-			table.insert(connections, camera:GetPropertyChangedSignal("ViewportSize"):Connect(layout))
-		end
-	end
-	watchCamera()
-	table.insert(
-		connections,
-		workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-			watchCamera()
-			layout()
-		end)
-	)
-	table.insert(connections, Style.scaleChanged:Connect(layout))
+	-- (The window, the insets, the camera and the GUI Scale setting: Ui/UiScale follows them.)
+	table.insert(connections, UiScale.screenChanged:Connect(layout))
 	-- Escape (see the header): the key or Roblox's menu opening, whichever comes first.
 	local lastEscape = -math.huge
 	local function escape()

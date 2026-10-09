@@ -28,7 +28,11 @@
 	LocalPosition, Player/RemotePlayers).
 
 	`isOpen()` and `changed` tell other modules whether the overlay is shown: WAILA (Ui/Waila) shows
-	its extended view while it is, as Jade does with F3.
+	its extended view while it is, as Jade does with F3. `rightEdge()` is where the text ends on the
+	screen (it grows with its longest line); Ui/UiScale hears it (`setDebugRight`), so WAILA keeps
+	right of it. The text is drawn in pixels of 1080p's Auto (Code 14) and scaled by
+	UiScale.reference (the GUI scale / 4, at least 0.75), as Minecraft's F3 follows the GUI scale:
+	bigger on a 4K screen, a quarter smaller on a phone.
 
 	F3 is also Minecraft's debug key (Debug/DebugKeys, pure): the overlay toggles when F3 is let go,
 	not pressed, unless a combination ran while it was held: F3 + N (spectator <-> the previous
@@ -62,6 +66,7 @@ local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local Notices = require(script.Parent.Parent.Net.Notices)
 local GameModeSwitcher = require(script.Parent.Parent.Ui.GameModeSwitcher)
 local Screens = require(script.Parent.Parent.Ui.Screens)
+local UiScale = require(script.Parent.Parent.Ui.UiScale)
 local DebugKeys = require(script.Parent.DebugKeys)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 
@@ -87,6 +92,16 @@ DebugOverlay.changed = changedEvent.Event
 -- Is the overlay shown (F3)?
 function DebugOverlay.isOpen(): boolean
 	return open
+end
+
+-- The text's right edge (screen pixels) while the overlay is shown, nil while it is not.
+local textLabel: TextLabel? = nil
+function DebugOverlay.rightEdge(): number?
+	local label = textLabel
+	if not open or label == nil or label.AbsoluteSize.X <= 0 then
+		return nil
+	end
+	return UiScale.origin(label).X + label.AbsoluteSize.X
 end
 
 -- The world line: name, world type, difficulty, seed, and "cheats" with Allow Commands on.
@@ -283,10 +298,8 @@ local function caveLine(stats: ChunkStreamer.Stats): string
 end
 
 function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelDebug"
-	gui.ResetOnSpawn = false
-	gui.Enabled = false
+	-- (Below Roblox's top bar, as Minecraft's text starts under the window's top.)
+	local gui = UiScale.screenGui("IceVoxelDebug", "Debug", { inset = false, kind = "scaled", enabled = false })
 
 	local label = Instance.new("TextLabel")
 	label.Position = UDim2.fromOffset(10, 10)
@@ -306,6 +319,19 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 	padding.PaddingRight = UDim.new(0, 6)
 	padding.PaddingBottom = UDim.new(0, 6)
 	padding.Parent = label
+	local scale = Instance.new("UIScale")
+	scale.Parent = label
+	UiScale.follow(function()
+		scale.Scale = UiScale.reference()
+	end)
+	textLabel = label
+	-- (WAILA keeps right of the text: its edge moves with its longest line, and with the scale.)
+	local function report()
+		UiScale.setDebugRight(DebugOverlay.rightEdge())
+	end
+	label:GetPropertyChangedSignal("AbsoluteSize"):Connect(report)
+	label:GetPropertyChangedSignal("AbsolutePosition"):Connect(report)
+	changedEvent.Event:Connect(report)
 
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 

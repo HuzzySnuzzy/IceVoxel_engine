@@ -5,36 +5,29 @@
 	Playing" in yellow and the track's title, stays Config.Music.ToastSeconds (5) and slides back
 	out ("swooshes away"). A new track's toast replaces the one showing.
 
-	It sits in the top right corner, under the minimap and its coordinates line while the minimap
-	shows (`setMinimapShown`, the Minimap setting), else in the corner itself (below the Map
-	button on touch screens). Scaled like the rest of the HUD (Style.guiScale, the GUI Scale
-	setting). `setEnabled` (the player's Music Toasts setting) stops new toasts; one showing slides
-	out. Other toasts share its place (`top`) or go under it while it shows (`showing`); one
-	under it says so (`setBelow`), and the status effect icons under the place (`bottom`) move
-	down while it is there.
+	It sits in the top right corner in Ui/HudLayout's first toast slot (UiScale.hud().music: under
+	the minimap and its coordinates line, under the Map button on touch screens, else in the
+	corner itself, at the GUI scale), and tells Ui/UiScale while it shows, so the "World saved"
+	toast goes under it and the status effect icons under both. It hides with the HUD (the world
+	map hides it). `setEnabled` (the player's Music Toasts setting) stops new toasts; one showing
+	slides out.
 ]]
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 
 local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 -- Minecraft's toast (GUI pixels).
 local WIDTH, HEIGHT = 160, 32
 -- Seconds sliding in and out (Minecraft's toasts take 600 ms each way, eased).
 local SLIDE = 0.45
--- Screen pixels from the right edge and the top, and below the minimap's coordinates line
--- (Map/Minimap: the map 16 from the top, its line 4 below it, 18 high).
-local MARGIN = 16
-local MINIMAP_GAP = 6
-local MINIMAP_EXTRA = 16 + 4 + 18
--- Where the toast starts on touch screens without the minimap (below the Map button).
-local TOUCH_TOP = 64
 -- The text: left edge, lines and the room for the title.
 local TEXT_X = 30
 local TITLE_Y, NAME_Y = 7, 18
@@ -73,17 +66,16 @@ local MusicToast = {}
 
 local started = false
 local enabled = true
-local minimapShown = true
 local root: Frame? = nil
 local panel: Frame? = nil
 local nameLabel: TextLabel? = nil
 local nameShadow: TextLabel? = nil
 local uiScale: UIScale? = nil
--- Screen pixels another toast takes under this one's place right now (`setBelow`).
-local below = 0
 -- Bumped by every show, so an older toast's timer never slides a newer one out.
 local generation = 0
 local tween: Tween? = nil
+-- Hides the toasts with the HUD while one shows (one connection a frame then, none otherwise).
+local following: RBXScriptConnection? = nil
 
 -- `text` cut to fit `width` GUI pixels, with "..." when it was cut.
 local function fitted(text: string, width: number): string
@@ -101,9 +93,12 @@ local function fitted(text: string, width: number): string
 	return "..."
 end
 
--- Panel x when shown (0) and hidden (out past the screen's right edge).
+-- Panel x (GUI pixels) when hidden: out past the screen's right edge (its margin and notch too).
 local function hiddenX(): number
-	return WIDTH + MARGIN + 8
+	local insets = UiScale.insets()
+	local layout = UiScale.hud()
+	local right = UiScale.viewport().X - (layout.area.x + layout.area.w)
+	return WIDTH + 8 + math.ceil((right + insets.right) / layout.scale)
 end
 
 local function slide(x: number, direction: Enum.EasingDirection)
@@ -123,57 +118,38 @@ local function slide(x: number, direction: Enum.EasingDirection)
 	next:Play()
 end
 
--- The toast's top in the corner (screen pixels below the top bar) and its scale.
-local function place(): (number, number)
-	local camera = workspace.CurrentCamera
-	local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
-	local touch = UserInputService.TouchEnabled
-	local top = if minimapShown
-		then MINIMAP_EXTRA + Config.Map.MinimapSize + MINIMAP_GAP
-		elseif touch then TOUCH_TOP
-		else MARGIN
-	return top, Style.guiScale(viewport, WIDTH, HEIGHT, touch)
-end
-
--- Screen pixels (below the top bar) of the toast's top in the corner, and its scale: other
--- toasts take the same place (Ui/SaveIndicator's "World saved").
-function MusicToast.top(): (number, number)
-	return place()
-end
-
 -- Is the Now Playing toast on screen (other toasts go under it)?
 function MusicToast.showing(): boolean
 	local frame = panel
 	return frame ~= nil and frame.Visible
 end
 
---[[
-	Screen pixels (below the top bar) just under the toast's place in the corner, shown or not (and
-	under another toast below it while that one shows: `setBelow`), and the right margin: the
-	status effect icons go there (Ui/EffectHud, which follows it every frame).
-]]
-function MusicToast.bottom(): (number, number)
-	local top, scale = place()
-	return top + HEIGHT * scale + below, MARGIN
-end
-
---[[
-	Another toast takes `pixels` (screen pixels; 0 when gone) under this one's place now
-	(Ui/SaveIndicator's "World saved" while it sits under Now Playing): `bottom` moves down by them.
-]]
-function MusicToast.setBelow(pixels: number)
-	below = math.max(pixels, 0)
-end
-
+-- Puts the toast where Ui/HudLayout says (hidden while it waits for room), at its scale.
 local function layout()
 	local holder = root
 	local scale = uiScale
 	if holder == nil or scale == nil then
 		return
 	end
-	local top, toastScale = place()
-	scale.Scale = toastScale
-	holder.Position = UDim2.new(1, -MARGIN, 0, top)
+	local corner = UiScale.hud()
+	local place = corner.music
+	if scale.Scale ~= corner.scale then
+		scale.Scale = corner.scale
+	end
+	holder.Visible = place ~= nil
+	if place then
+		holder.Position = UDim2.fromOffset(place.x, place.y)
+	end
+end
+
+-- The toast has gone: the corner forgets it, the HUD is no longer followed.
+local function gone()
+	UiScale.setToast("music", nil)
+	local connection = following
+	if connection then
+		following = nil
+		connection:Disconnect()
+	end
 end
 
 function MusicToast.start()
@@ -184,16 +160,12 @@ function MusicToast.start()
 	local player = Players.LocalPlayer
 	local playerGui = player:WaitForChild("PlayerGui")
 
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelToasts"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = false
-	-- (Over the minimap, under WAILA, the HUD and the screens.)
-	gui.DisplayOrder = 7
+	-- (The whole screen: Ui/HudLayout's screen pixels. Over the minimap, under WAILA, the HUD and
+	-- the screens.)
+	local gui = UiScale.screenGui("IceVoxelToasts", "Toasts", { inset = true, full = true, kind = "scaled" })
 
 	local holder = Instance.new("Frame")
 	holder.Name = "Toasts"
-	holder.AnchorPoint = Vector2.new(1, 0)
 	holder.Size = UDim2.fromOffset(WIDTH, HEIGHT)
 	holder.BackgroundTransparency = 1
 	holder.Parent = gui
@@ -211,12 +183,26 @@ function MusicToast.start()
 
 	root, panel, nameLabel, nameShadow, uiScale = holder, face, label, shadow, scale
 	layout()
-	local camera = workspace.CurrentCamera
-	if camera then
-		camera:GetPropertyChangedSignal("ViewportSize"):Connect(layout)
-	end
-	Style.scaleChanged:Connect(layout)
+	UiScale.hudChanged:Connect(layout)
 	gui.Parent = playerGui
+end
+
+-- Follows the HUD's visibility while the toast shows.
+local function follow()
+	if following then
+		return
+	end
+	local holder = root
+	local gui = holder and holder.Parent
+	if gui == nil or not gui:IsA("ScreenGui") then
+		return
+	end
+	following = RunService.RenderStepped:Connect(function()
+		local shown = UiScale.hudShown()
+		if gui.Enabled ~= shown then
+			gui.Enabled = shown
+		end
+	end)
 end
 
 -- Slides the toast in with `title`, and out again after Config.Music.ToastSeconds.
@@ -232,6 +218,8 @@ function MusicToast.show(title: string)
 		nameLabel.Text = text
 		nameShadow.Text = text
 	end
+	UiScale.setToast("music", WIDTH)
+	follow()
 	layout()
 	if not frame.Visible then
 		frame.Position = UDim2.fromOffset(hiddenX(), 0)
@@ -244,16 +232,11 @@ function MusicToast.show(title: string)
 			task.delay(SLIDE, function()
 				if generation == mine and panel then
 					panel.Visible = false
+					gone()
 				end
 			end)
 		end
 	end)
-end
-
--- Whether the minimap shows in the top right corner (the toast goes under it).
-function MusicToast.setMinimapShown(value: boolean)
-	minimapShown = value
-	layout()
 end
 
 -- The player's Music Toasts setting: off, no new toasts (one showing slides out).
@@ -266,6 +249,7 @@ function MusicToast.setEnabled(value: boolean)
 		task.delay(SLIDE, function()
 			if generation == mine and panel then
 				panel.Visible = false
+				gone()
 			end
 		end)
 	end

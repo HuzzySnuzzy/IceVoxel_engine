@@ -634,6 +634,10 @@ local ENTRIES: { Entry } = {
 		preset = false,
 		format = "plain",
 	},
+	-- Minecraft's GUI Scale: 0 is Auto, which is always the largest scale the screen allows (client
+	-- Ui/GuiScale: 4 at 1920 x 1080, 9 on a 4K window); 1 .. 12 a choice, offered only up to this
+	-- screen's largest (the button's limit: Settings/State.setLimit). A stored choice above a
+	-- screen's largest is kept and acts as the largest there, as Minecraft's does.
 	{
 		id = 33,
 		key = "guiScale",
@@ -641,7 +645,7 @@ local ENTRIES: { Entry } = {
 		kind = "choice",
 		page = "hud",
 		min = 0,
-		max = 3,
+		max = 12,
 		step = 1,
 		default = 0,
 		effect = "hud",

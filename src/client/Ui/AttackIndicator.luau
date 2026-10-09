@@ -28,7 +28,7 @@ local GameMode = require(Shared.GameMode)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Hud = require(script.Parent.Hud)
 local Screens = require(script.Parent.Screens)
-local Style = require(script.Parent.Style)
+local UiScale = require(script.Parent.UiScale)
 
 local AttackIndicator = {}
 
@@ -73,11 +73,9 @@ function AttackIndicator.start()
 		return
 	end
 	started = true
-	local gui = Instance.new("ScreenGui")
-	gui.Name = "IceVoxelAttackIndicator"
-	gui.IgnoreGuiInset = true
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 9
+	-- (The whole screen: the aim is in viewport pixels, as the crosshair's centre.)
+	local gui =
+		UiScale.screenGui("IceVoxelAttackIndicator", "AttackBar", { inset = true, full = true, kind = "scaled" })
 	local bar = Instance.new("Frame")
 	bar.Name = "Bar"
 	bar.BorderSizePixel = 0
@@ -115,9 +113,8 @@ function AttackIndicator.start()
 		if not onCrosshair then
 			return
 		end
-		local camera = workspace.CurrentCamera
-		local viewport = camera.ViewportSize
-		local scale = Style.guiScale(viewport, BAR_W, BAR_H, UserInputService.TouchEnabled)
+		local viewport = UiScale.viewport()
+		local scale = UiScale.base()
 		-- The aim: the mouse while it is free and the input, else the centre (as BlockInteraction).
 		local aim = Vector2.new(viewport.X / 2, viewport.Y / 2)
 		if
