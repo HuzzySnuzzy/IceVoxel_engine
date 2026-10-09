@@ -675,6 +675,28 @@ return function(t, shared, require, server, client)
 		local gone = WorldMeta.stored(meta)
 		gone.worldType = "spec.gone"
 		t.eq((WorldMeta.settings(WorldMeta.read(gone) :: any)), nil, "a world type that is gone")
+		-- Characters' entries and the migration's marks are kept, counted and checked (a record
+		-- saved before characters reads with none).
+		meta.characters[WorldMeta.characterName(42, 3)] = 150
+		meta.legacyImported["42"] = 3
+		local withCharacters = WorldMeta.read(deepCopy(WorldMeta.stored(meta))) :: any
+		t.eq(withCharacters.characters["42_3"], 150)
+		t.eq(withCharacters.legacyImported["42"], 3)
+		local before = WorldMeta.stored(meta)
+		before.characters, before.legacyImported = nil, nil
+		local old = WorldMeta.read(before) :: any
+		t.eq(next(old.characters), nil)
+		t.eq(next(old.legacyImported), nil)
+		local damaged = WorldMeta.stored(meta)
+		damaged.legacyImported = { ["42"] = -1, ["43"] = "x" }
+		t.eq(next((WorldMeta.read(damaged) :: any).legacyImported), nil, "only character ids")
+		t.ok(select(1, WorldMeta.total(meta)) >= 150, "the entries count in the world's bytes")
+		t.eq(WorldMeta.characterKey("w0000abcd", 42, 3), "w0000abcd/c/42_3")
+		local user, char = WorldMeta.parseCharacterName("-5_12")
+		t.eq(user, -5, "Studio's test users")
+		t.eq(char, 12)
+		t.eq((WorldMeta.parseCharacterName("42")), nil)
+		t.ok(#WorldMeta.characterKey("w12345678", 99999999999, 4294967295) <= 50)
 		-- Ids are unique and short.
 		local taken = {}
 		local random = lcg(1)

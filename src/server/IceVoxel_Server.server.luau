@@ -11,6 +11,10 @@
 	                   the permission every operators' command asks (Players/Operators)
 	  settings      -> player settings (the Options menu's choices, Players/SettingsStore): the
 	                   title screen has the Options menu too
+	  characters    -> Terraria's characters (Players/CharacterStore, Config.Characters): each
+	                   player's list read as they join, the title screen's character pages,
+	                   their R15 looks and preview rigs (Players/CharacterLooks), saving with a
+	                   lock per character, the migration of old progress
 	  saves         -> saved worlds (World/WorldSave): the DataStore looked at once, the title
 	                   screen's Load World (Players/WorldMenu), the world saved at shutdown
 	  title screen  -> with Config.MainMenu.Enabled, the world waits for its operator to create it
@@ -142,6 +146,7 @@ local Eating = require(Server.Players.Eating)
 local Effects = require(Server.Players.Effects)
 local Progression = require(Server.Players.Progression)
 local WorldSave = require(Server.World.WorldSave)
+local CharacterStore = require(Server.Players.CharacterStore)
 
 --[[
 	Creates the world and starts everything that needs it (see the header); World/WorldInfo calls
@@ -238,6 +243,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	-- perks go to the parts that apply them.
 	Progression.start(net, world, WorldSettings.savesProgress(settings))
 	Inventories.setWearFilter(Progression.wear)
+	-- A Classic character keeps everything when it dies (Terraria's softcore; Shared/Characters).
+	Inventories.setKeepRule(CharacterStore.keepsInventory)
 	-- (Results a furnace pushes into a chest, or a pipe pulls out, are smelted by its last user.)
 	Inventories.setResultsHandler(Progression.smelted)
 	ToughAsNails.setPerks({ thirstRate = Progression.thirstRate, insulation = Progression.insulation })
@@ -331,6 +338,7 @@ end
 local lobby = LobbyNet.start()
 Operators.start(lobby, GameModes.isOwner, GameModes.ownerKnown)
 SettingsStore.start(lobby)
+CharacterStore.start(lobby)
 WorldSave.start(lobby)
 if Config.MainMenu.Enabled then
 	WorldMenu.start(lobby, startWorld, WorldSave)

@@ -4,23 +4,31 @@
 	looked, their health, game mode, inventory, Tough As Nails state and status effects, as bytes
 	(Save/SaveCodec) for World/WorldSave, which keeps one key per player per world. Knowledge,
 	Ages and skills are not here: Players/ProgressStore keeps them per player for every world.
-	Pure, so the specs run it.
+	With Config.Characters on, the character carries all but the place and the game mode
+	(Save/CharacterCodec, Save/WorldCharacterCodec) and these records are only read, once, by the
+	migration (Players/CharacterStore). Pure, so the specs run it.
 
 	  Record    position (the feet, blocks) and yaw (radians, the character's facing: the
 	            client's camera starts from it), or none (`position` false: a player who was dead
 	            or nowhere comes back at the spawn); health in half hearts (0..20, Minecraft's,
 	            scaled to the character's MaxHealth on both ends); the game mode and the previous
 	            one (F3 + N's); the selected hotbar slot; the 36 slots, 4 armor pieces and the
-	            stack on the cursor (it goes back into the inventory); Tough As Nails' thirst
+	            stack on the cursor (it goes back into the inventory), Terraria's 7 accessories,
+	            4 vanity armor and 7 vanity accessories and the hidden looks' bits
+	            (Inventory/Types, version 2); Tough As Nails' thirst
 	            (thirst, hydration, exhaustion, Thirst effect, timer) and temperature (value,
 	            target, drift, hypothermia, hyperthermia, timer, wet, Internal Warmth and Chill,
 	            Climate Clemency left), each optional; and the running status effects (effect,
 	            amplifier, ticks left or -1, ambient).
-	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature), [f64 x, y, z, f32
-	            yaw], f32 health, u8 mode and u8 previous (GameMode ids, 255 none), u8 selected,
-	            u8 n + n x (u8 place: 1..36 slots, 37..40 armor, 41 cursor; stack), [5 x f32
-	            thirst], [10 x f32 temperature], u8 n + n x (u8 effect, u8 amplifier, i32 ticks,
-	            u8 ambient). Typical: 60-400 bytes.
+	  Bytes     u8 VERSION, u8 flags (bit 0 position, 1 thirst, 2 temperature, 3 hidden looks),
+	            [f64 x, y, z, f32 yaw], f32 health, u8 mode and u8 previous (GameMode ids, 255
+	            none), u8 selected, [u16 hidden], u8 n + n x (u8 place: Inventory/Types.PLACE_*:
+	            1..36 slots, 37..40 armor, 41 cursor, 42..48 accessories, 49..52 vanity armor,
+	            53..59 vanity accessories; stack), [5 x f32 thirst], [10 x f32 temperature], u8 n +
+	            n x (u8 effect, u8 amplifier, i32 ticks, u8 ambient). Typical: 60-400 bytes.
+	  Versions  2 added the equipment places and the hidden bits; a version 1 record (places up to
+	            41, flags up to 7) still reads, and an older server refuses a version 2 one, so it
+	            never writes over equipment it can't keep.
 	Decoding checks every number: non-finite ones, unknown modes, slots and effects are a damaged
 	record (nil), and unknown items are dropped (SaveCodec.readStack) and counted (`dropped`: such
 	a record is not written back this session, World/WorldSave).
@@ -66,6 +74,11 @@ export type Record = {
 	slots: { [number]: Stack? },
 	armor: { [number]: Stack? },
 	cursor: Stack?,
+	accessories: { [number]: Stack? },
+	vanityArmor: { [number]: Stack? },
+	vanityAccessories: { [number]: Stack? },
+	-- Inventory/Types' hidden bits.
+	hidden: number,
 	thirst: Thirst?,
 	temperature: Temperature?,
 	effects: { Effect },
@@ -75,9 +88,9 @@ export type Record = {
 
 local PlayerCodec = {}
 
-PlayerCodec.VERSION = 1
+PlayerCodec.VERSION = 2
 local NONE = 255
-local CURSOR = Types.INVENTORY_SIZE + Types.ARMOR_SIZE + 1
+local CURSOR = Types.PLACE_CURSOR
 local THIRST_FIELDS = { "thirst", "hydration", "exhaustion", "effect", "timer" }
 local TEMPERATURE_FIELDS =
 	{ "value", "target", "drift", "frozen", "heat", "timer", "wet", "warmth", "chill", "clemency" }
@@ -97,6 +110,10 @@ function PlayerCodec.new(): Record
 		slots = {},
 		armor = {},
 		cursor = nil,
+		accessories = {},
+		vanityArmor = {},
+		vanityAccessories = {},
+		hidden = 0,
 		thirst = nil,
 		temperature = nil,
 		effects = {},
@@ -144,11 +161,27 @@ local function finite(value: number): boolean
 	return value == value and math.abs(value) ~= math.huge
 end
 
+-- (first place, store, size) of each part of the inventory kept, in place order (the cursor is
+-- PLACE_CURSOR, between the armor and the accessories).
+local function stores(record: Record): { { any } }
+	return {
+		{ 1, record.slots, Types.INVENTORY_SIZE },
+		{ Types.PLACE_ARMOR, record.armor, Types.ARMOR_SIZE },
+		{ Types.PLACE_ACCESSORY, record.accessories, Types.ACCESSORY_SIZE },
+		{ Types.PLACE_VANITY_ARMOR, record.vanityArmor, Types.VANITY_ARMOR_SIZE },
+		{ Types.PLACE_VANITY_ACCESSORY, record.vanityAccessories, Types.VANITY_ACCESSORY_SIZE },
+	}
+end
+
 function PlayerCodec.encode(record: Record): buffer
 	local w = SaveCodec.writer(256)
 	SaveCodec.u8(w, PlayerCodec.VERSION)
 	local position = record.position and finite(record.x) and finite(record.y) and finite(record.z)
-	local flags = (if position then 1 else 0) + (if record.thirst then 2 else 0) + (if record.temperature then 4 else 0)
+	local hidden = if finite(record.hidden or 0) then math.clamp(math.floor(record.hidden or 0), 0, 65535) else 0
+	local flags = (if position then 1 else 0)
+		+ (if record.thirst then 2 else 0)
+		+ (if record.temperature then 4 else 0)
+		+ (if hidden ~= 0 then 8 else 0)
 	SaveCodec.u8(w, flags)
 	if position then
 		SaveCodec.f64(w, record.x)
@@ -163,23 +196,26 @@ function PlayerCodec.encode(record: Record): buffer
 		if record.previous and GameMode.isValid(record.previous) then GameMode.id(record.previous) else NONE
 	)
 	SaveCodec.u8(w, math.clamp(math.floor(record.selected), 1, Types.HOTBAR_SIZE))
-	local held: { { place: number, stack: Stack } } = {}
-	for slot = 1, Types.INVENTORY_SIZE do
-		local stack = record.slots[slot]
-		if stack and stack.count >= 1 then
-			table.insert(held, { place = slot, stack = stack })
-		end
+	if hidden ~= 0 then
+		SaveCodec.u16(w, hidden)
 	end
-	for slot = 1, Types.ARMOR_SIZE do
-		local stack = record.armor[slot]
-		if stack and stack.count >= 1 then
-			table.insert(held, { place = Types.INVENTORY_SIZE + slot, stack = stack })
+	local held: { { place: number, stack: Stack } } = {}
+	for _, part in stores(record) do
+		local first, store, size = part[1] :: number, part[2] :: { [number]: Stack? }, part[3] :: number
+		for slot = 1, size do
+			local stack = store[slot]
+			if stack and stack.count >= 1 then
+				table.insert(held, { place = first + slot - 1, stack = stack })
+			end
 		end
 	end
 	local cursor = record.cursor
 	if cursor and cursor.count >= 1 then
 		table.insert(held, { place = CURSOR, stack = cursor })
 	end
+	table.sort(held, function(a, b)
+		return a.place < b.place
+	end)
 	SaveCodec.u8(w, #held)
 	for _, entry in held do
 		SaveCodec.u8(w, entry.place)
@@ -223,7 +259,7 @@ local function decode(bytes: buffer): Record
 	end
 	local record = PlayerCodec.new()
 	local flags = SaveCodec.readU8(r)
-	if flags > 7 then
+	if flags > (if version >= 2 then 15 else 7) then
 		error("bad player flags", 0)
 	end
 	if bit32.btest(flags, 1) then
@@ -249,19 +285,33 @@ local function decode(bytes: buffer): Record
 	if record.selected < 1 or record.selected > Types.HOTBAR_SIZE then
 		error("bad selected slot", 0)
 	end
+	if bit32.btest(flags, 8) then
+		record.hidden = SaveCodec.readU16(r)
+	end
+	-- (Version 1 knew the slots, the armor and the cursor only.)
+	local lastPlace = if version >= 2 then Types.PLACE_END else CURSOR
+	local parts = stores(record)
 	for _ = 1, SaveCodec.readU8(r) do
 		local place = SaveCodec.readU8(r)
 		local stack, lost = SaveCodec.readStack(r)
 		if lost then
 			record.dropped += 1
 		end
-		if place >= 1 and place <= Types.INVENTORY_SIZE then
-			record.slots[place] = stack
-		elseif place > Types.INVENTORY_SIZE and place < CURSOR then
-			record.armor[place - Types.INVENTORY_SIZE] = stack
-		elseif place == CURSOR then
+		local placed = false
+		if place == CURSOR then
 			record.cursor = stack
-		else
+			placed = true
+		elseif place >= 1 and place <= lastPlace then
+			for _, part in parts do
+				local first, store, size = part[1] :: number, part[2] :: { [number]: Stack? }, part[3] :: number
+				if place >= first and place < first + size then
+					store[place - first + 1] = stack
+					placed = true
+					break
+				end
+			end
+		end
+		if not placed then
 			error("bad inventory slot", 0)
 		end
 	end

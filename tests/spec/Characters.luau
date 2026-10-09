@@ -563,4 +563,54 @@ return function(t, shared, require, server)
 		t.eq(#(look :: any).assets, 5)
 		t.eq((CharacterSync.decodeAvatar(CharacterSync.encodeAvatar(2, sampleLook()))), nil, "an unknown purpose")
 	end)
+
+	--[[ The look on Roblox's side (server Players/CharacterLooks' mapping) ]]
+
+	t.test("characters: a look as HumanoidDescription's properties and back", function()
+		local CharacterLooks = require(server.Players.CharacterLooks)
+		local look = sampleLook()
+		local fields = CharacterLooks.fields(look)
+		t.eq(fields.colors.HeadColor, 0x112233)
+		t.eq(fields.colors.RightLegColor, 0xEAB892)
+		t.eq(fields.scales.HeightScale, 1.05)
+		t.eq(fields.scales.BodyTypeScale, look.scales.bodyType)
+		t.eq(fields.properties.Shirt, 9007199254740992, "a worn shirt")
+		t.eq(fields.properties.Head, 5, "a worn head")
+		t.eq(fields.properties.Torso, 0, "a body part not worn: the blocky one")
+		t.eq(fields.properties.IdleAnimation, 0)
+		t.eq(#fields.accessories, 2, "the worn accessories only")
+		t.eq(fields.accessories[1].AssetId, 123456789012)
+		t.eq(fields.accessories[1].AccessoryType, 1, "a Hat")
+		t.eq(fields.accessories[2].IsLayered, true)
+		t.eq(fields.accessories[2].Order, 3)
+		-- A user's own avatar read back: everything worn, within the rules and the most kept.
+		fields.scales.HeightScale = 1.4
+		fields.properties.IdleAnimation = 777
+		local back = CharacterLooks.fromFields(fields)
+		t.eq(back.colors[1], 0x112233)
+		t.eq(back.scales.height, Config.Characters.Scales.height[2], "clamped")
+		local kinds = {}
+		for _, asset in back.assets do
+			t.eq(asset.worn, true)
+			kinds[asset.kind] = asset.id
+		end
+		t.eq(kinds[Appearance.KIND.Head], 5)
+		t.eq(kinds[Appearance.KIND.IdleAnimation], 777)
+		t.eq(kinds[Appearance.KIND.Torso], nil, "0 is no asset")
+		t.eq(kinds[Appearance.ACCESSORY + 10], 77)
+		local many = { colors = {}, scales = {}, properties = {}, accessories = {} }
+		for i = 1, 100 do
+			table.insert(many.accessories, {
+				AssetId = i,
+				AccessoryType = 1,
+				IsLayered = false,
+				Order = 0,
+				Puffiness = 1,
+			})
+		end
+		t.eq(#CharacterLooks.fromFields(many :: any).assets, Config.Characters.MaxAssets, "at most MaxAssets")
+		local plain = CharacterLooks.fromFields({ colors = {}, scales = {}, properties = {}, accessories = {} })
+		t.eq(#plain.assets, 0)
+		t.eq(plain.colors[1], Appearance.default().colors[1], "nothing read: the default look's")
+	end)
 end

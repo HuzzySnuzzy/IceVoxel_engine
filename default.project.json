@@ -51,6 +51,9 @@
 			}
 		},
 		"StarterPlayer": {
+			"$properties": {
+				"GameSettingsAvatar": "R15"
+			},
 			"StarterPlayerScripts": {
 				"IceVoxel": {
 					"$path": "src/client"

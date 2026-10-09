@@ -32,9 +32,11 @@
 	            Save/SaveLock's, inside the value so that loading with it and every later save are
 	            one UpdateAsync each). `readValue` refuses another `v` (a newer server's) so it is
 	            never written over.
-	  Index     the key "u<UserId>": { v = 1, next = the next id, chars = { summary } }
-	            (Characters.Summary: what the list shows). `readIndex` of nil is a new empty index;
-	            one with a malformed summary or another `v` is refused whole (never written over).
+	  Index     the key "u<UserId>": { v = 1, next = the next id, chars = { summary },
+	            migrated = true once the user's old progress was looked at (Players/CharacterStore's
+	            migration: done, or there was none) } (Characters.Summary: what the list shows).
+	            `readIndex` of nil is a new empty index; one with a malformed summary or another `v`
+	            is refused whole (never written over).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -85,7 +87,12 @@ export type Record = {
 	dropped: number,
 }
 
-export type Index = { next: number, chars: { Characters.Summary } }
+export type Index = {
+	next: number,
+	chars: { Characters.Summary },
+	-- The user's old progress was looked at (the migration ran, or had nothing to do).
+	migrated: boolean,
+}
 
 local CharacterCodec = {}
 
@@ -416,7 +423,7 @@ end
 
 -- A user with no characters yet.
 function CharacterCodec.newIndex(): Index
-	return { next = 1, chars = {} }
+	return { next = 1, chars = {}, migrated = false }
 end
 
 -- The value of a user's index key.
@@ -425,7 +432,12 @@ function CharacterCodec.indexValue(index: Index): { [string]: any }
 	for i, summary in index.chars do
 		chars[i] = table.clone(summary)
 	end
-	return { v = CharacterCodec.INDEX_VERSION, next = index.next, chars = chars }
+	return {
+		v = CharacterCodec.INDEX_VERSION,
+		next = index.next,
+		chars = chars,
+		migrated = if index.migrated then true else nil,
+	}
 end
 
 --[[
@@ -465,7 +477,7 @@ function CharacterCodec.readIndex(value: unknown): (Index?, string?)
 		table.insert(chars, summary)
 	end
 	Characters.sort(chars)
-	return { next = nextId, chars = chars }, nil
+	return { next = nextId, chars = chars, migrated = stored.migrated == true }, nil
 end
 
 return CharacterCodec

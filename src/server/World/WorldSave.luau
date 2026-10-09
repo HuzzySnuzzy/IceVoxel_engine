@@ -54,7 +54,25 @@
 	             outage never replaces a saved inventory with an empty one), and they are told.
 	             Records go out with every save, and at once when a player leaves, each numbered
 	             as it is captured: an older one is never written over a newer
-	             (WorldStore's `order`).
+	             (WorldStore's `order`). Their equipment (accessories, vanity, hidden looks) is in
+	             the record too (PlayerCodec version 2).
+	  Characters with Config.Characters on, a player's things are their character's (Players/
+	             CharacterStore keeps and saves the character: inventory, equipment, health,
+	             mana, Tough As Nails, effects, progress) and a world keeps only what is its own
+	             of each character (Save/WorldCharacterCodec, "<id>/c/<userId>_<charId>"): where
+	             it stood and looked, its game mode and the previous one, a spawn point. Nothing
+	             is read when a player joins; `enterCharacter` (Players/WorldMenu's EnterWorld,
+	             or the title screen off) reads the character's entry, puts its game mode back
+	             and its place for Players/Spawning (or moves a character already standing). An
+	             entry that could not be read is never written this session, as a player record.
+	             Entries go out as records did: with every save, at once when the player leaves
+	             (as last seen alive when the character went first), each numbered. The old
+	             player records are left as they are: the first character of a user entering a
+	             world that holds one takes it in (Save/CharacterMigration: its place and mode
+	             as the entry when there is none, its things into the character, what does not
+	             fit dropped at its feet on spawn; the world's record marks it taken,
+	             `legacyImported`, saved with the world). /save-all saves the characters too
+	             (`onSaveAll`).
 	  Lock       held while the world is open, renewed while it loads, as it starts and every
 	             third of Config.Save.LockTimeout, and looked at before every save writes; a lost
 	             lock (another server took a stale world over) stops saving, and operators are
@@ -102,8 +120,11 @@ local Operators = require(Server.Players.Operators)
 local PlayerPositions = require(Server.Players.PlayerPositions)
 local Spawning = require(Server.Players.Spawning)
 local ToughAsNails = require(Server.Players.ToughAsNails)
+local CharacterCodec = require(Server.Save.CharacterCodec)
+local CharacterMigration = require(Server.Save.CharacterMigration)
 local PlayerCodec = require(Server.Save.PlayerCodec)
 local RegionCodec = require(Server.Save.RegionCodec)
+local WorldCharacterCodec = require(Server.Save.WorldCharacterCodec)
 local SaveCommand = require(Server.Save.SaveCommand)
 local SaveScheduler = require(Server.Save.SaveScheduler)
 local WorldMeta = require(Server.Save.WorldMeta)
@@ -111,6 +132,8 @@ local WorldSnapshot = require(Server.Save.WorldSnapshot)
 local WorldStore = require(Server.Save.WorldStore)
 
 type Record = PlayerCodec.Record
+type Entry = WorldCharacterCodec.Entry
+type Stack = InventoryTypes.Stack
 
 -- Seconds a player entering the world waits for their record at most.
 local ENTER_WAIT = 10
@@ -138,6 +161,15 @@ type PlayerState = {
 	-- The record as last seen alive (what a leaving player whose character went already keeps).
 	cache: Record?,
 	waiters: { thread },
+	-- With characters: the character played here (its name in the world, WorldMeta.characterName),
+	-- whether its entry was read (and may be written), the entry as read (its place waits for the
+	-- next character, then its spawn point stays), whether Players/Spawning has taken its place,
+	-- and the entry as last seen alive.
+	charName: string?,
+	entryCanSave: boolean,
+	entry: Entry?,
+	placed: boolean,
+	entryCache: Entry?,
 }
 
 local saves: WorldStore.Saves? = nil
@@ -165,6 +197,11 @@ local players: { [Player]: PlayerState } = {}
 local captures = 0
 -- Records of players who left, not written yet (user id -> text and order).
 local departed: { [number]: { text: string, order: number } } = {}
+-- The same for characters' entries (by WorldMeta.characterName).
+local departedCharacters: { [string]: { text: string, order: number } } = {}
+-- What else /save-all saves (Players/CharacterStore's characters).
+local saveAllHooks: { () -> () } = {}
+local CHARACTERS = Config.Characters.Enabled == true
 -- The next new world's owner (`claim`: the player creating it; 0: the game's).
 local creator = 0
 
@@ -551,6 +588,10 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 		record.armor = inventory.armor
 		record.cursor = inventory.cursor
 		record.selected = inventory.selected
+		record.accessories = inventory.accessories
+		record.vanityArmor = inventory.vanityArmor
+		record.vanityAccessories = inventory.vanityAccessories
+		record.hidden = inventory.hidden
 	end
 	local thirst, temperature = ToughAsNails.export(player)
 	record.thirst = thirst :: any
@@ -598,6 +639,12 @@ end
 -- A player's saved record comes back (see the header).
 local function applyRecord(player: Player, ps: PlayerState, record: Record)
 	Inventories.restore(player, record.slots, record.armor, record.selected, record.cursor)
+	Inventories.restoreEquipment(player, {
+		accessories = record.accessories,
+		vanityArmor = record.vanityArmor,
+		vanityAccessories = record.vanityAccessories,
+		hidden = record.hidden,
+	})
 	local mode = record.mode
 	if mode and GameMode.isValid(mode) then
 		GameModes.set(player, mode, false)
@@ -622,6 +669,16 @@ end
 -- (feet, blocks, doubles, and yaw).
 local function placement(player: Player): (number?, number, number, number?)
 	local ps = players[player]
+	if ps and ps.charName then
+		-- (A character's entry: its place once; its health is the character's, Players/CharacterStore.)
+		local entry = ps.entry
+		if ps.placed or entry == nil or not entry.position then
+			ps.placed = true
+			return nil, 0, 0, nil
+		end
+		ps.placed = true
+		return entry.x, entry.y, entry.z, entry.yaw
+	end
 	local record = ps and ps.record
 	if ps == nil or record == nil then
 		return nil, 0, 0, nil
@@ -636,6 +693,150 @@ local function placement(player: Player): (number?, number, number, number?)
 	return record.x, record.y, record.z, record.yaw
 end
 
+--[[ Characters (Config.Characters) ]]
+
+-- What the world keeps of the player's character now (see the header), numbered as captured.
+local function captureEntry(player: Player, ps: PlayerState): (Entry, number)
+	captures += 1
+	local entry = WorldCharacterCodec.new()
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local standing = false
+	if character and humanoid and humanoid.Health > 0 then
+		standing = true
+		local x, y, z = PlayerPositions.feet(player)
+		if x then
+			entry.position = true
+			entry.x, entry.y, entry.z = x, y, z
+			entry.yaw = PlayerPositions.yaw(player)
+		end
+	end
+	local waiting = ps.entry
+	if waiting then
+		-- (Until a character stood, the entry's own place; its spawn point always.)
+		if not standing or not ps.placed then
+			entry.position, entry.x, entry.y, entry.z, entry.yaw =
+				waiting.position, waiting.x, waiting.y, waiting.z, waiting.yaw
+		end
+		entry.spawn = waiting.spawn
+	end
+	entry.mode = GameMode.of(player)
+	entry.previous = GameMode.previousOf(player)
+	return entry, captures
+end
+
+-- A leaving player's character's entry: as it is, or as last seen alive where it went first.
+local function finalEntry(player: Player, ps: PlayerState): (Entry, number)
+	local fresh, order = captureEntry(player, ps)
+	local cached = ps.entryCache
+	if cached and player.Character == nil then
+		fresh.position, fresh.x, fresh.y, fresh.z, fresh.yaw = cached.position, cached.x, cached.y, cached.z, cached.yaw
+	end
+	return fresh, order
+end
+
+--[[
+	Waits (a few seconds at most) for the player's state in this world, the world's saving having
+	begun: nil when they left meanwhile.
+]]
+local function stateFor(player: Player): PlayerState?
+	local deadline = os.clock() + ENTER_WAIT
+	while player.Parent and os.clock() < deadline do
+		local ps = players[player]
+		if ps and ps.loaded then
+			return ps
+		end
+		task.wait(0.1)
+	end
+	return players[player]
+end
+
+--[[
+	With characters: `player` enters this world with `record` (their selected character, from
+	Players/CharacterStore: see the header). Reads what the world keeps of it, takes in their old
+	player record of this world when it is the first of their characters here (`record`'s
+	inventory changes: the caller saves it; the leftovers come back to drop at its feet), puts its
+	game mode back and its place for its first character (or moves one already standing). Yields.
+]]
+function WorldSave.enterCharacter(player: Player, record: CharacterCodec.Record): { Stack }
+	local ps = stateFor(player)
+	if ps == nil or player.Parent == nil then
+		return {}
+	end
+	local name = WorldMeta.characterName(player.UserId, record.id)
+	ps.charName = name
+	ps.placed = false
+	local leftovers: { Stack } = {}
+	local world, store = current, saves
+	local entry: Entry? = nil
+	if world and store then
+		-- (Back before their entry was written: the one they left with, theirs again now.)
+		local left = departedCharacters[name]
+		local ok: boolean, read: Entry? = false, nil
+		if left then
+			departedCharacters[name] = nil
+			ok, read = true, WorldCharacterCodec.fromText(left.text)
+		else
+			ok, read = WorldStore.loadCharacter(store, world, player.UserId, record.id)
+		end
+		entry = read
+		ps.entryCanSave = ok
+		if not ok then
+			warn(`[IceVoxel] what this world keeps of {player.Name}'s character could not be read`)
+			notify(
+				player,
+				"Where your character stood in this world could not be read: this visit's place is not saved"
+			)
+		end
+		if
+			Config.Characters.Migrate
+			and ok
+			and world.canSave
+			and CharacterMigration.shouldImport(world.meta, player.UserId, record)
+		then
+			local okOld, old = WorldStore.loadPlayer(store, world, player.UserId)
+			if okOld and old and old.dropped == 0 then
+				entry = CharacterMigration.entry(entry, old)
+				leftovers = CharacterMigration.import(record, old)
+				CharacterMigration.markImported(world.meta, player.UserId, record)
+				print(`[IceVoxel] {player.Name}'s things in this world went to their character "{record.name}"`)
+				notify(player, "Your things in this world from before characters are now this character's")
+			elseif okOld and old then
+				warn(`[IceVoxel] the old record of {player.Name} holds items this version doesn't know: not taken in`)
+			end
+		end
+	end
+	if players[player] ~= ps then
+		-- (Left meanwhile.)
+		return leftovers
+	end
+	ps.entry = entry
+	if entry then
+		local mode = entry.mode
+		if mode and GameMode.isValid(mode) then
+			GameModes.set(player, mode, false)
+		end
+		if entry.previous then
+			player:SetAttribute(GameMode.PREVIOUS_ATTRIBUTE, entry.previous)
+		end
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and humanoid and humanoid.Health > 0 then
+		-- (Already standing: the title screen off, characters load as Roblox's.)
+		ps.placed = true
+		if entry and entry.position then
+			Characters.teleportTo(player, entry.x, entry.y, entry.z, entry.yaw)
+		end
+	end
+	return leftovers
+end
+
+-- What else /save-all saves (Players/CharacterStore: the characters), called as it starts.
+function WorldSave.onSaveAll(fn: () -> ())
+	table.insert(saveAllHooks, fn)
+end
+
 local function track(player: Player)
 	if players[player] then
 		return
@@ -648,10 +849,20 @@ local function track(player: Player)
 		inventory = nil,
 		cache = nil,
 		waiters = {},
+		charName = nil,
+		entryCanSave = false,
+		entry = nil,
+		placed = false,
+		entryCache = nil,
 	}
 	players[player] = ps
 	local window = Inventories.get(player)
 	ps.inventory = window and window.inventory
+	if CHARACTERS then
+		-- (Their things are their character's: what the world keeps comes with `enterCharacter`.)
+		ps.loaded = true
+		return
+	end
 	task.spawn(function()
 		local world, store = current, saves
 		if world == nil or store == nil then
@@ -697,7 +908,24 @@ end
 -- Records of players who left, written now (Minecraft saves a player's data as they leave).
 local function flushDeparted()
 	local world, store = current, saves
-	if world == nil or store == nil or closing or next(departed) == nil then
+	if world == nil or store == nil or closing then
+		return
+	end
+	if next(departedCharacters) ~= nil then
+		local batch = table.clone(departedCharacters)
+		local texts: { [string]: string } = {}
+		local order: { [string]: number } = {}
+		for name, entry in batch do
+			texts[name], order[name] = entry.text, entry.order
+		end
+		local written = WorldStore.saveCharacters(store, world, texts, nil, order)
+		for name in written do
+			if departedCharacters[name] == batch[name] then
+				departedCharacters[name] = nil
+			end
+		end
+	end
+	if next(departed) == nil then
 		return
 	end
 	local batch = table.clone(departed)
@@ -722,7 +950,12 @@ local function leave(player: Player)
 	players[player] = nil
 	wake(ps.waiters)
 	local world = current
-	if ps.loaded and ps.canSave and world and world.canSave then
+	local name = ps.charName
+	if name and ps.entryCanSave and world and world.canSave then
+		local entry, order = finalEntry(player, ps)
+		departedCharacters[name] = { text = WorldCharacterCodec.toText(entry), order = order }
+		task.spawn(flushDeparted)
+	elseif ps.loaded and ps.canSave and world and world.canSave then
 		local record, order = finalRecord(player, ps)
 		departed[player.UserId] = { text = PlayerCodec.toText(record), order = order }
 		task.spawn(flushDeparted)
@@ -962,8 +1195,19 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 		for userId, entry in departed do
 			records[userId], order[userId] = entry.text, entry.order
 		end
+		local entries: { [string]: string } = {}
+		local entryOrder: { [string]: number } = {}
+		for name, entry in departedCharacters do
+			entries[name], entryOrder[name] = entry.text, entry.order
+		end
 		for player, ps in players do
-			if ps.loaded and ps.canSave then
+			local name = ps.charName
+			if name then
+				if ps.entryCanSave then
+					local entry, captured = captureEntry(player, ps)
+					entries[name], entryOrder[name] = WorldCharacterCodec.toText(entry), captured
+				end
+			elseif ps.loaded and ps.canSave then
 				local record, captured = capture(player, ps)
 				records[player.UserId], order[player.UserId] = PlayerCodec.toText(record), captured
 			end
@@ -973,6 +1217,8 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 			empty = empty,
 			players = records,
 			order = order,
+			characters = entries,
+			characterOrder = entryOrder,
 			sections = encodeSections(),
 			operators = Operators.ops(),
 		},
@@ -994,6 +1240,7 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 			regionsWritten = 0,
 			playersWritten = 0,
 			written = {},
+			writtenCharacters = {},
 			failed = 0,
 			state = "ok",
 			message = "The world could not be gathered for saving (see the server's output)",
@@ -1016,6 +1263,12 @@ local function saveNow(forced: boolean?, deadline: number?): WorldStore.SaveResu
 		local entry = departed[userId]
 		if entry and entry.text == saveInput.players[userId] then
 			departed[userId] = nil
+		end
+	end
+	for name in result.writtenCharacters do
+		local entry = departedCharacters[name]
+		if entry and saveInput.characters and entry.text == saveInput.characters[name] then
+			departedCharacters[name] = nil
 		end
 	end
 	if not world.canSave and state == Protocol.SaveState.On then
@@ -1049,6 +1302,9 @@ local function runCommand(player: Player, text: string)
 		notify(player, line)
 	end
 	if result.action == "save" then
+		for _, hook in saveAllHooks do
+			task.spawn(hook)
+		end
 		task.spawn(function()
 			local saved = saveNow(true)
 			if saved and player.Parent then
@@ -1195,7 +1451,9 @@ function WorldSave.begin()
 			for player, ps in players do
 				local character = player.Character
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-				if ps.loaded and humanoid and humanoid.Health > 0 then
+				if ps.charName and humanoid and humanoid.Health > 0 then
+					ps.entryCache = captureEntry(player, ps)
+				elseif ps.loaded and humanoid and humanoid.Health > 0 then
 					ps.cache = capture(player, ps)
 				end
 			end

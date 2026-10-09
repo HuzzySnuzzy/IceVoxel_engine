@@ -24,6 +24,23 @@ A fast, Minecraft-style voxel engine for Roblox.
   Structures), and everyone joins it with Join World. Until then the world doesn't exist at all
   and nobody has a character. Operators (`/op`, `/deop`) may use the cheat commands, and Load
   World opens a saved world (below).
+- **Characters, as Terraria's.** Before the world, each player picks one of their characters (up
+  to 10 per Roblox account, with a 3D preview of each) or makes one: an R15 avatar editor starts
+  from your own Roblox avatar (skin colours for every part or one, hue and brightness, height,
+  width, depth, head, body type and proportion within Roblox's avatar rules, each of your own
+  accessories, clothes, body parts and animations on or off, the Classic and Natural presets), a
+  name and a difficulty: **Classic** keeps everything when it dies, **Mediumcore** drops
+  everything (Minecraft's rule), **Hardcore** drops everything and dies for good (a spectator for
+  the rest of the visit, then shown dead in the list). A character carries its look, inventory
+  and equipment, health, mana and Mana Crystals, status effects, thirst and temperature and its
+  Knowledge, Ages and skills from world to world and server to server; each world keeps only
+  where it stood and its game mode. It spawns with its own look and its name on the nametag.
+  Characters are saved in a DataStore with a lock each (one server at a time: one still saving
+  it is waited for, up to 30 seconds), every minute, when you leave and at shutdown; a list that
+  could not be read is never written over, and in Studio without API access characters last for
+  the session (the list says so). A returning player's old progress becomes their first
+  character (a Mediumcore "legacy" one), and the first of their characters to enter an old saved
+  world takes in what they had there.
 - **Saving and loading worlds.** Worlds are saved in a DataStore, as Minecraft saves its level:
   every block anyone changed (each chunk's edits, in regions of 32 × 32 chunks a key), chests,
   furnaces still cooking, machines with their energy, tanks and slots, Mekanism pipes (side modes,
@@ -33,7 +50,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   doWeatherCycle and a `/weather` override with its time left: storms go on where they were),
   the world's operators, and each
   player's place, facing, health, game mode, inventory and armor, thirst and temperature and
-  status effects (progress is kept per player for every world, as before). Autosave every 5
+  status effects (with characters the character carries all of that but where it stood and its
+  game mode, above; without them progress is kept per player for every world). Autosave every 5
   minutes writes only what changed (a house and a tunnel, a chest, a furnace, a battery, pipes,
   an item and a cow: about 1.1 KB of a key); `/save-all`, `/save-off` and `/save-on` as
   Minecraft's; and the world is saved when the server shuts down. While a save is in flight a
@@ -1186,7 +1204,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Generation    | `/genstats` (operators): the server's background chunk generation over the last 10 s (chunks/s, ms/s, the worst frame), the backlog and the chunks generated inline | | |
 | Saving        | `/save-all` (save now: "Saving the game (this may take a moment!)", then "Saved the game"), `/save-off` (no automatic saves until `/save-on`; shutdown still saves), `/save-on` (operators only); the saving icon shows bottom right while the world saves | | |
 | Operators     | `/op <player>`, `/deop <player>` (operators only; a name, its start, `@s` or `@a`). Until the world exists (with the title screen and `MainMenu.AutoOperator`) the first player to join is the operator, and when the last operator here leaves the player here longest becomes one (`/deop` never takes the last one here then); after that nobody becomes one by being here (the first operator stays one). `Gameplay.Admins`, the game's owner and everyone in Studio always are. With the world's Allow Commands on, everyone may use the operators' commands (`/gamemode` for others, `/time`, `/gamerule`, `/effect`, `/summon`, `/kill`, `/knowledge`, `/age`, structure blocks) | | |
-| Title screen  | Click the buttons (Join World, Create World, Load World, Options...); `Escape` goes back a screen (Create World, Customize, Load World, its Delete and Rename, Options); in Load World click a world to select it, double click to play it | A; B goes back | Tap |
+| Title screen  | Click the buttons (Play, Options...; then Join World, Create World, Load World once a character is chosen; with `Characters.Enabled` off the title has those at once); `Escape` goes back a screen (the character list, the avatar editor, the world page, Create World, Customize, Load World, its Delete and Rename, Options); in Select Character click a character to see it, double click to play it; in the avatar editor drag the character to turn it; in Load World click a world to select it, double click to play it | A; B goes back | Tap; drag to turn |
 
 ## Settings menu
 
@@ -1314,6 +1332,29 @@ DataStore "IceVoxelSettings_v1" (`Settings.Save`). A joining client waits up to 
 Every player sees Minecraft's title screen when they join, over everything: nothing else of the
 game has started yet (no terrain loads, no key does anything), and the server gives nobody a
 character before they enter the world.
+
+With characters (`Characters.Enabled`, the default) the title has **Play** and **Options...**;
+Play opens **Select Character** (Terraria's player select, in Minecraft's widgets):
+
+- **The list**: your characters, last played first, each with its name in its difficulty's
+  colour (white Classic, blue Mediumcore, red Hardcore, gray once dead) and its difficulty, time
+  played and the day it was last played. Click one to see it on the right (drag it to turn it);
+  double click plays it. A red line says when characters last for this session only.
+- **Play Selected Character** loads it (another server that still has it open is waited for up to
+  30 seconds, then "open on another server") and goes on to the world page. A dead Hardcore
+  character can't be played, only deleted.
+- **Create New Character** opens the avatar editor: your own avatar on the left (drag to turn
+  it), tabs **Skin** (the part to paint, twelve skin tones, hue and brightness, Randomise),
+  **Body** (height, width, depth, head, body type, proportion; Reset), **Clothing** ("Blocky
+  body" and a toggle for each of your own accessories, clothes, body parts and animations) and
+  **Presets** (Classic, Natural, My Avatar), then the name (1 to 20 characters, filtered as
+  everyone sees it) and the difficulty (Classic, Mediumcore, Hardcore). **Create** makes it and
+  goes on to the world page. Only your own avatar's things can be worn: the server keeps its own
+  copy of your avatar and never takes an item from the client.
+- **Rename** and **Delete** (after "Are you sure you want to delete this character?"), **Back**.
+
+The world page says "Playing as <name>" over the buttons below (and Back to the list). Once you
+enter a world your character is yours for the visit: to play another, leave and rejoin.
 
 - **Join World** enters the world once it exists; the terrain then loads around the spawn as on
   any join.
@@ -1535,7 +1576,11 @@ src/server   -> ServerScriptService.IceVoxel
                             WorldMeta (records, keys, sizes), SaveLock, SaveScheduler (requests
                             within the budgets and the 6 s a key), WorldSnapshot (the world's
                             state to regions and back), WorldStore (save, load, delete, rename),
-                            SaveCommand (/save-all, /save-off, /save-on)
+                            SaveCommand (/save-all, /save-off, /save-on); characters, pure:
+                            CharacterCodec (the record, its value and the user's index),
+                            WorldCharacterCodec (what a world keeps of one), CharacterSaves (the
+                            store's rules: create, select with the lock, save, delete, rename),
+                            CharacterMigration (old progress and per-world records into them)
   Audio/Sounds              plays sounds to the players near them (Sound messages)
   Network/ServerNet         edit lists, edit validation (EditRules: mining time, tools, drops,
                             sustained data hooks, both halves of tall plants), replication;
@@ -1576,7 +1621,10 @@ src/server   -> ServerScriptService.IceVoxel
   Players/                  Operators + OperatorList (Minecraft's ops: the first player, /op,
                             /deop, the check every operators' command asks; pure), WorldMenu (the
                             title screen's server side: creating the world, characters only in
-                            it), GameModes + GameModeCommand (/gamemode, the switcher's requests,
+                            it, spawned with their look), CharacterStore (Terraria's characters:
+                            the lists, the title screen's requests, locks, saving, entering a
+                            world, Hardcore deaths, the migration), CharacterLooks (the R15 look:
+                            the user's avatar read, HumanoidDescriptions, preview rigs), GameModes + GameModeCommand (/gamemode, the switcher's requests,
                             permissions, the previous mode), GameModeRules (what each mode may
                             do on the server; pure), TimeCommands + TimeCommand (/time,
                             /gamerule), WeatherCommands + WeatherCommand (/weather; pure),
@@ -1652,7 +1700,10 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
                             weapon's recovery under the crosshair or beside the hotbar), MainMenu
                             (the title screen, Create World and Load World) + TitleRules +
-                            CreateWorldForm + WorldListRules (their rules; pure), SaveIndicator
+                            CreateWorldForm + WorldListRules (their rules; pure),
+                            CharacterSelect (the character list) + AvatarEditor (the R15 editor)
+                            + CharacterPreview (a server-built rig in a viewport) +
+                            CharacterRules (their rules; pure), SaveIndicator
                             (the saving icon and the "World saved" toast), Chat/ (the chat in place of Roblox's: ChatLog
                             the lines, ChatInput the box's rules: sending, history, Tab;
                             ChatFormat the messages' looks; all pure)
@@ -1818,6 +1869,13 @@ for performance:
 | `MainMenu.Enabled`        | true    | The title screen: the first player (the operator) creates the world from it, everyone joins it from it; nobody has a character before. false: the world is made at once from `World` and `Seed`, players join straight in, and only `Gameplay.Admins`, the owner, Studio and those they `/op` are operators. |
 | `MainMenu.AutoOperator`   | true    | Until the world exists, the first player to join (and the one here longest when the last operator leaves) becomes an operator so someone can create it; no more after that. false: only `Gameplay.Admins`, the owner and Studio may create the world (a private game). |
 | `MainMenu.Version` / `Credits` | "IceVoxel (Minecraft 1.20.1 style)" / "Not an official Minecraft product" | The title screen's bottom corners. |
+| `Characters.Enabled`      | true    | Terraria's characters: chosen (or made in the avatar editor) on the title screen before the world, carrying their look, inventory, equipment, health, mana, effects, Tough As Nails and progress between worlds. false: no character pages, inventories in each world's player records and progress per player, as before. With `MainMenu.Enabled` off each player plays their most recently played character (one made from their avatar if they have none). |
+| `Characters.StoreName`    | "IceVoxelCharacters_v1" | The DataStore: an index per user (`u<UserId>`) and a key per character (`u<UserId>/c<id>`, its lock inside). Needs `Save.Enabled` (and API access in Studio); otherwise characters last for the session. |
+| `Characters.MaxPerUser` / `NameLength` | 10 / 20 | Most characters a user keeps; characters in a name. |
+| `Characters.DefaultDifficulty` | "Classic" | A new character's difficulty in the editor (and with the title screen off): Classic keeps everything on death, Mediumcore drops it, Hardcore drops it and dies for good. |
+| `Characters.SaveInterval` / `LockWait` | 60 / 30 | Seconds between saves of the selected character (also its lock's heartbeat; and on leaving, at shutdown and on `/save-all`); seconds a selection waits for another server still saving that character. |
+| `Characters.Scales` / `MaxAssets` / `PreviewDelay` | Roblox's avatar rules / 40 / 0.5 | What a body may be (height 0.90-1.05, width and depth 0.70-1, head 0.95-1, body type and proportion 0-1); things of the user's own avatar a character keeps; seconds the server waits after an edit before rebuilding the editor's preview. |
+| `Characters.Migrate`      | true    | A returning player's old progress becomes their first character (Mediumcore, "legacy"), and the first of their characters to enter an old saved world takes in what they had there (once; the old records stay as a backup). |
 | `World.Name` / `Type`     | "New World" / "default" | The world made at once without the title screen, and the Create World screen's first choices (a `Generation/WorldTypes` id; its game mode is `Gameplay.DefaultGameMode`, or the type's own: Spectator for All Blocks, Creative for the other debug worlds). |
 | `World.Options`           | {}      | The world type's options without the title screen (its `settings` keys, see below). |
 | `World.Difficulty`        | "Normal" | Peaceful (no monsters spawn), Easy, Normal or Hard (fire spreads a little faster on harder ones: `Server.Fire.Difficulty`). |

@@ -37,6 +37,12 @@
 	           a record older than one already written (or being written) for that player is
 	           never written: an autosave's retry can't put back what a leaving player had
 	           minutes before.
+	  characters  with Config.Characters on, what the world keeps of each character (Save/
+	           WorldCharacterCodec: where it stood, its game mode) instead of a player record:
+	           `loadCharacter`, `saveCharacters` and `save`'s `characters`, by name
+	           "<userId>_<charId>" (WorldMeta.characterName), with the same rules (a failed read
+	           is never written over, the same order numbers). The old player records stay as
+	           they are (the migration reads them: Players/CharacterStore).
 	  lock     `heartbeat` renews it (false: lost to another server, saving stops), `release`
 	           gives it back at shutdown or after a failed load.
 	  delete   only the world's owner or the game's own people (WorldMeta.mayManage); takes the
@@ -55,6 +61,7 @@ local WorldSettings = require(Shared.WorldSettings)
 
 local PlayerCodec = require(script.Parent.PlayerCodec)
 local RegionCodec = require(script.Parent.RegionCodec)
+local WorldCharacterCodec = require(script.Parent.WorldCharacterCodec)
 local SaveLock = require(script.Parent.SaveLock)
 local SaveScheduler = require(script.Parent.SaveScheduler)
 local WorldMeta = require(script.Parent.WorldMeta)
@@ -94,6 +101,9 @@ export type World = {
 	-- The order of the newest record written, or being written, for each player (user id as
 	-- text): an older one is never written after it.
 	order: { [string]: number },
+	-- The same for characters' entries, by WorldMeta.characterName.
+	characters: { [string]: string },
+	characterOrder: { [string]: number },
 	lockHeld: boolean,
 	-- When the lock was last taken or renewed (Env.now).
 	renewedAt: number,
@@ -120,6 +130,9 @@ export type SaveInput = {
 	players: { [number]: string },
 	-- Each record's order (user id -> a number later captures make higher; none: always written).
 	order: { [number]: number }?,
+	-- Characters' entries (WorldCharacterCodec.toText) by WorldMeta.characterName, and their order.
+	characters: { [string]: string }?,
+	characterOrder: { [string]: number }?,
 	sections: { [string]: any },
 	operators: { number },
 }
@@ -135,6 +148,8 @@ export type SaveResult = {
 	playersWritten: number,
 	-- Players whose record was written (the caller's "last written").
 	written: { [number]: boolean },
+	-- Characters' entries written (by name).
+	writtenCharacters: { [string]: boolean },
 	failed: number,
 	state: "ok" | "warn" | "over",
 	message: string?,
@@ -358,6 +373,8 @@ function WorldStore.create(saves: Saves, settings: WorldSettings.Settings, owner
 		regions = {},
 		players = {},
 		order = {},
+		characters = {},
+		characterOrder = {},
 		lockHeld = false,
 		renewedAt = -math.huge,
 		listed = false,
@@ -519,6 +536,8 @@ function WorldStore.load(
 		regions = {},
 		players = {},
 		order = {},
+		characters = {},
+		characterOrder = {},
 		lockHeld = true,
 		renewedAt = renewedAt,
 		listed = true,
@@ -650,6 +669,101 @@ function WorldStore.savePlayers(
 	return written
 end
 
+--[[ Characters ]]
+
+--[[
+	What the world keeps of character `charId` of user `userId`: true and the entry (nil: none yet,
+	its first visit), or false when it could not be read (or is damaged, or from a newer version):
+	then never write that entry this session. Yields.
+]]
+function WorldStore.loadCharacter(
+	saves: Saves,
+	world: World,
+	userId: number,
+	charId: number
+): (boolean, WorldCharacterCodec.Entry?)
+	local ok, value = read(saves, WorldMeta.characterKey(world.id, userId, charId))
+	if not ok then
+		return false, nil
+	end
+	local text = WorldMeta.readPlayer(value)
+	if text == nil then
+		return true, nil
+	elseif type(text) ~= "string" then
+		return false, nil
+	end
+	local entry = WorldCharacterCodec.fromText(text)
+	if entry == nil then
+		return false, nil
+	end
+	world.characters[WorldMeta.characterName(userId, charId)] = text
+	return true, entry
+end
+
+-- A job writing a character's entry `text` (by its name), as `playerJob` does a player's record.
+local function characterJob(
+	saves: Saves,
+	world: World,
+	name: string,
+	text: string,
+	order: number?,
+	written: { [string]: boolean }
+): SaveScheduler.Job?
+	local userId, charId = WorldMeta.parseCharacterName(name)
+	if userId == nil or charId == nil then
+		return nil
+	end
+	local storeKey = WorldMeta.characterKey(world.id, userId, charId)
+	return SaveScheduler.job(storeKey, "set", function(): (boolean, string?)
+		local newest = world.characterOrder[name]
+		if order and newest and order < newest then
+			return true, nil
+		end
+		if order then
+			world.characterOrder[name] = order
+		end
+		local ok, err = saves.store.set(storeKey, WorldMeta.playerValue(text), { userId })
+		if ok then
+			if order == nil or world.characterOrder[name] == nil or order >= world.characterOrder[name] then
+				world.characters[name] = text
+				world.meta.characters[name] = WorldMeta.valueBytes(text)
+			end
+			written[name] = true
+		end
+		return ok, err
+	end)
+end
+
+--[[
+	Writes the entries of characters that left (name -> WorldCharacterCodec text, `order` as the
+	save's) at once, as `savePlayers`. Returns those written (or already stored).
+]]
+function WorldStore.saveCharacters(
+	saves: Saves,
+	world: World,
+	entries: { [string]: string },
+	deadline: number?,
+	order: { [string]: number }?
+): { [string]: boolean }
+	local written: { [string]: boolean } = {}
+	if not world.canSave or not world.lockHeld or not ensureLock(saves, world, deadline) then
+		return written
+	end
+	local jobs: { SaveScheduler.Job } = {}
+	for name, text in entries do
+		if world.characters[name] ~= text then
+			local job = characterJob(saves, world, name, text, order and order[name], written)
+			if job then
+				table.insert(jobs, job)
+			end
+		else
+			written[name] = true
+		end
+	end
+	run(saves, jobs, deadline)
+	return written
+end
+
 --[[ Saving ]]
 
 local function sameParts(a: { string }, b: { string }): boolean
@@ -685,6 +799,7 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 		regionsWritten = 0,
 		playersWritten = 0,
 		written = {},
+		writtenCharacters = {},
 		failed = 0,
 		state = "ok",
 		message = nil,
@@ -733,6 +848,13 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 			table.insert(players, { userId = userId, key = key, text = text })
 		end
 	end
+	local characters: { { name: string, text: string } } = {}
+	local entries: { [string]: string } = input.characters or {}
+	for name, text in entries do
+		if world.characters[name] ~= text and WorldMeta.parseCharacterName(name) ~= nil then
+			table.insert(characters, { name = name, text = text })
+		end
+	end
 
 	-- Sizes after it (refused as a whole past the most).
 	local after = WorldMeta.stored(meta)
@@ -748,6 +870,9 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 	for _, entry in players do
 		after.players[entry.key] = WorldMeta.valueBytes(entry.text)
 		largest = math.max(largest, WorldMeta.valueBytes(entry.text))
+	end
+	for _, entry in characters do
+		after.characters[entry.name] = WorldMeta.valueBytes(entry.text)
 	end
 	after.sections = input.sections
 	after.operators = input.operators
@@ -809,6 +934,20 @@ function WorldStore.save(saves: Saves, world: World, input: SaveInput, deadline:
 			jobs,
 			playerJob(saves, world, entry.userId, entry.text, order and order[entry.userId], result.written)
 		)
+	end
+	local characterOrder = input.characterOrder
+	for _, entry in characters do
+		local job = characterJob(
+			saves,
+			world,
+			entry.name,
+			entry.text,
+			characterOrder and characterOrder[entry.name],
+			result.writtenCharacters
+		)
+		if job then
+			table.insert(jobs, job)
+		end
 	end
 	for _, plan in planned do
 		local list: { SaveScheduler.Job } = {}
@@ -998,6 +1137,12 @@ function WorldStore.delete(saves: Saves, id: string, who: WorldMeta.Requester?):
 			local n = tonumber(userId)
 			if n then
 				table.insert(keys, WorldMeta.playerKey(id, n))
+			end
+		end
+		for name in meta.characters do
+			local userId, charId = WorldMeta.parseCharacterName(name)
+			if userId and charId then
+				table.insert(keys, WorldMeta.characterKey(id, userId, charId))
 			end
 		end
 	end

@@ -384,6 +384,21 @@ return function(t, shared, require, server, client)
 		t.ok(Protocol.ServerMessage.MenuState ~= nil and Protocol.ServerMessage.CreateWorldResult ~= nil)
 	end)
 
+	t.test("world creation: entering names the character played (an empty payload: none, as before)", function()
+		local CharacterSync = require(shared.Net.CharacterSync)
+		local CharacterRules = require(client.Ui.CharacterRules)
+		-- (Characters changed what EnterWorld carries: an old client's empty payload still enters.)
+		t.eq(CharacterSync.decodeEnter(buffer.create(0)), 0, "no character")
+		t.eq(CharacterSync.decodeEnter(CharacterSync.encodeEnter(7)), 7)
+		t.eq(CharacterSync.decodeEnter(buffer.create(3)), nil, "malformed")
+		-- With characters, the world page's buttons are the title's as they were; the page flow
+		-- reaches it through a chosen character, and back leads to the list.
+		local ready = TitleRules.buttons(Protocol.MenuState.Ready, false, true)
+		t.eq(ready.join, true)
+		t.eq(CharacterRules.back("world"), "characters")
+		t.eq(CharacterRules.back("characters"), "title")
+	end)
+
 	t.test("world creation: message ids are new, after every older one", function()
 		local function unique(ids: { [string]: number })
 			local seen = {}

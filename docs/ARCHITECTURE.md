@@ -6198,6 +6198,85 @@ second, half hearts). The shared groundwork (data, codecs, messages; nothing pla
 - **GUI scale**: client `Ui/GuiScale` is Minecraft's `Window.calculateScale` (Auto = the largest
   scale leaving 320 x 240 GUI pixels: 4 at 1920 x 1080, 6 at 2560 x 1440; eighths on touch).
 
+### Characters (server `Players/CharacterStore`, `Players/CharacterLooks`, `Save/CharacterSaves`, `Save/CharacterMigration`; client `Ui/CharacterSelect`, `Ui/AvatarEditor`, `Ui/CharacterPreview`, `Ui/CharacterRules`)
+
+The flow is Terraria's player select before its world select: title (Play, Options...) ->
+characters (the list, a preview of the highlighted one; Play Selected Character, Create New
+Character, Rename, Delete, Back) -> editor for a new one -> world page ("Playing as <name>",
+then today's Join World / Create World / Load World with TitleRules' rules) -> the world. All of
+it lives in MainMenu's scaled 320 x 240 canvas (no ScreenGui of its own). One world per server
+stays: a non-operator joins the one running.
+
+- **Store** (`Save/CharacterSaves`, pure, against WorldStore's `Store`/`Env` and
+  SaveScheduler: three tries, 2 then 4 s apart): the index `u<UserId>` and a key per character
+  `u<UserId>/c<id>` holding `{ v, data, progress, lock }`. Create writes the record first (with
+  this server's lock when selected at once), then appends to the index (`next` moves past the
+  id, never reused; refused at `Characters.MAX`); an orphan record of a failed index write is
+  written over by the next create unless another job's live lock sits on it. Select is one
+  UpdateAsync that reads the record and takes the lock, keeping the stored bytes exactly ("busy"
+  for another job's live lock: CharacterStore retries 2, 4, 8 s up to `LockWait`). Every save is
+  an UpdateAsync that writes only while `SaveLock.renew` says the lock is still this job's
+  ("lost" stops saving that character) and carries an order number (an older capture is
+  "skipped"); the last save releases. Delete: refused under another job's live lock, index
+  first, then RemoveAsync. Rename: record (refused for a record holding unknown items), then
+  index. `touch` rewrites a character's index line (played, lastPlayed, dead) at release and
+  marks the migration. `memoryStore` is the session-only store (Studio without API access,
+  `Save.Enabled` off, a user whose index read failed: nothing is written to the DataStore for
+  them this session, the list says why).
+- **Server glue** (`Players/CharacterStore`, on the lobby net before any world): probes the
+  DataStore once, reads each joining user's index, runs the migration, answers CharacterAction
+  (changes one a second, one at a time per player, `busy` in the list meanwhile; lists and
+  previews four a second), saves every `SaveInterval` (jittered; a character not yet in the
+  world only renews its lock), on leave, on `/save-all` (`WorldSave.onSaveAll`) and in
+  BindToClose (25 s). A leaving player's mana, Tough As Nails, effects, health and progress come
+  from a cache refreshed every 2 s (the systems that keep them forget players in their own
+  PlayerRemoving handlers, in no fixed order); the inventory is the live table kept since
+  entering. Progress is exported only where `Progression.savesProgress()`; elsewhere the stored
+  progress goes back unchanged (also when it is another version's).
+- **Entering** (`CharacterStore.enter`, from WorldMenu's EnterWorld with
+  `CharacterSync.decodeEnter`): the selected, loaded, living character only (a refusal kicks
+  with why: the client's title screen is gone already). `WorldSave.enterCharacter` reads the
+  world's entry `<id>/c/<userId>_<charId>` (WorldMeta.characterKey; meta.characters lists them),
+  puts its game mode back and its place for Spawning's placement, and runs the per-world
+  migration; then the record goes into Inventories (restore + restoreEquipment), ToughAsNails,
+  Effects, Mana and Progression (`restore`, which also starts earning). WorldMenu spawns with
+  `LoadCharacterWithHumanoidDescriptionAsync(CharacterLooks.description(look))` (probing the
+  Async name, falling back to `LoadCharacterAsync`), on every respawn too; the first body gets
+  the record's health, later ones full mana; `Humanoid.DisplayName` is the character's
+  (filtered) name. With `MainMenu.Enabled` off the most recently played living character (or
+  one made from the avatar) enters when the world is ready and its look is applied to each body
+  Roblox makes with `ApplyDescriptionResetAsync` (the only live apply: a rebuilt body's parts
+  join the collision group through Characters' DescendantAdded, and MovementController takes its
+  root again on CharacterAdded only, so verify the first body in Studio in this mode).
+- **World entries** (`WorldStore.loadCharacter` / `saveCharacters` / `save`'s `characters`):
+  the same safety as player records (a failed read is never written over, departed entries are
+  flushed at once, order numbers). With characters on, WorldSave no longer reads or applies
+  `<id>/p/<userId>` at PlayerAdded; with them off everything is as before (PlayerCodec version 2
+  only adds the equipment places 42..59 and the hidden bits; version 1 still reads).
+- **Death**: `Inventories.setKeepRule(CharacterStore.keepsInventory)` keeps everything for
+  Classic; Hardcore marks the record dead, saves it and touches the index at once, and makes the
+  player a Spectator for the session.
+- **Looks** (`Players/CharacterLooks`): the snapshot is
+  `GetHumanoidDescriptionFromUserIdAsync` read into an Appearance (cached per session; the
+  default look when it fails, e.g. Studio's negative ids); `fields` / `fromFields` are the pure
+  mapping to HumanoidDescription properties (specs). Preview rigs are built on the server with
+  `CreateHumanoidModelFromDescriptionAsync(desc, R15)`, scripts removed and parts anchored, and
+  parented to `PlayerGui.IceVoxelPreviews` as `c<id>` or `editor` (only that client receives
+  them), debounced `PreviewDelay`, one build at a time per player, not rebuilt for the same look.
+  The client (`Ui/CharacterPreview`) clones the rig into a WorldModel in a ViewportFrame; the
+  editor shows colour, scale and clothing edits on the clone at once and asks for a rebuild at
+  most every 0.5 s (EditPreview, sanitized over the server's snapshot). `default.project.json`
+  sets `StarterPlayer.GameSettingsAvatar = R15`.
+- **Migration** (`Save/CharacterMigration`, `Config.Characters.Migrate`): an index without the
+  `migrated` mark reads ProgressStore once (a failed read decides nothing); a record makes a
+  Mediumcore legacy "Character 1" (DisplayName filtered, avatar all worn, progress copied;
+  ProgressStore is never written again). The first character of a user entering a world whose
+  meta lists an old player record not yet taken in (`legacyImported`) takes its place and mode
+  as its entry (when it has none), its slots, armour and cursor into its inventory (same slot
+  when empty, else merged; leftovers dropped at its feet on spawn), marks the meta and the
+  character's `imported`, and is saved at once. The old record is kept. A crash between the
+  character's save and the world's save can import twice: a duplicate, never a loss.
+
 ## Networking (`Net/Protocol`)
 
 One RemoteEvent carries `(messageType, buffer)` in both directions. A single remote keeps

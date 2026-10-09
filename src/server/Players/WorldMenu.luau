@@ -37,6 +37,16 @@
 	            on its own (Players.CharacterAutoLoads is off from the start), so nobody stands
 	            anywhere before the world exists, and the dead are respawned here,
 	            Players.RespawnTime after dying (Roblox's own rule), while they are in the world.
+	            With Config.Characters on, EnterWorld names the character played
+	            (Net/CharacterSync.encodeEnter): it must be the one the player selected, loaded
+	            and alive (Players/CharacterStore.enter puts it into the world: its entry there,
+	            its things; a refusal disconnects the player with why, as their screen is gone
+	            already), and every body spawns with its look: Player
+	            :LoadCharacterWithHumanoidDescriptionAsync with the character's
+	            HumanoidDescription (Players/CharacterLooks; the older name, then
+	            LoadCharacterAsync, when that fails), never again before the last one loaded
+	            (`loading`). The parking, the client's placement and the floating origin don't
+	            change: they work on whatever body spawned.
 	Started only with Config.MainMenu.Enabled (before the world, on the lobby's net,
 	Network/LobbyNet); without it the boot creates the world at once and Roblox loads characters.
 ]]
@@ -46,12 +56,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextService = game:GetService("TextService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local CharacterSync = require(Shared.Net.CharacterSync)
+local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
 local WorldSettings = require(Shared.WorldSettings)
 local WorldTypes = require(Shared.Generation.WorldTypes)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldInfo = require(script.Parent.Parent.World.WorldInfo)
+local CharacterLooks = require(script.Parent.CharacterLooks)
+local CharacterStore = require(script.Parent.CharacterStore)
 local Operators = require(script.Parent.Operators)
 
 -- Seconds between a player's CreateWorld requests.
@@ -158,19 +172,43 @@ local function filterName(name: string, userId: number): string
 	return WorldSettings.DEFAULT_NAME
 end
 
--- Loads the character (yields until it is there): Player:LoadCharacterAsync, Roblox's current
--- name for it, or LoadCharacter on an engine without it.
-local function spawnCharacter(player: Player): (boolean, unknown)
+-- `player`'s method `name` (Roblox's current name for it), else `older` (nil: neither).
+local function method(player: Player, name: string, older: string): ((...any) -> ...any)?
 	local anyPlayer = player :: any
-	local found, method = pcall(function(): unknown
-		return anyPlayer.LoadCharacterAsync
-	end)
-	if found and type(method) == "function" then
-		return pcall(method :: (Player) -> (), player)
+	for _, key in { name, older } do
+		local found, value = pcall(function(): unknown
+			return anyPlayer[key]
+		end)
+		if found and type(value) == "function" then
+			return value :: (...any) -> ...any
+		end
 	end
-	return pcall(function()
-		anyPlayer:LoadCharacter()
-	end)
+	return nil
+end
+
+--[[
+	Loads the character (yields until it is there): with a character selected (Config.Characters),
+	Player:LoadCharacterWithHumanoidDescriptionAsync with its look; else, or when that fails,
+	Player:LoadCharacterAsync (Roblox's current names; the older ones on an engine without them).
+]]
+local function spawnCharacter(player: Player): (boolean, unknown)
+	local look = if Config.Characters.Enabled then CharacterStore.look(player) else nil
+	if look then
+		local load = method(player, "LoadCharacterWithHumanoidDescriptionAsync", "LoadCharacterWithHumanoidDescription")
+		if load then
+			local description = CharacterLooks.description(look)
+			local ok, err = pcall(load, player, description)
+			if ok then
+				return true, nil
+			end
+			warn(`[IceVoxel] {player.Name}'s character did not load with its look ({err}); loading it without`)
+		end
+	end
+	local load = method(player, "LoadCharacterAsync", "LoadCharacter")
+	if load == nil then
+		return false, "no way to load a character"
+	end
+	return pcall(load, player)
 end
 
 local function loadCharacter(player: Player)
@@ -185,7 +223,11 @@ local function loadCharacter(player: Player)
 	end
 end
 
-local function onEnter(player: Player, _payload: buffer)
+local function onEnter(player: Player, payload: buffer)
+	local charId = CharacterSync.decodeEnter(payload)
+	if charId == nil then
+		return
+	end
 	if not WorldInfo.exists() then
 		-- (Not yet: the title screen's state may be behind.)
 		sendState(player)
@@ -195,7 +237,23 @@ local function onEnter(player: Player, _payload: buffer)
 		return
 	end
 	entered[player] = true
-	if player.Character == nil then
+	if Config.Characters.Enabled then
+		task.spawn(function()
+			-- (The character the title screen chose goes into the world: its place and things.)
+			local ok, why = CharacterStore.enter(player, charId)
+			if not ok then
+				entered[player] = nil
+				warn(`[IceVoxel] {player.Name} could not enter: {why}`)
+				if player.Parent then
+					player:Kick(`Your character could not enter the world ({why}). Please rejoin.`)
+				end
+				return
+			end
+			if player.Character == nil and entered[player] then
+				loadCharacter(player)
+			end
+		end)
+	elseif player.Character == nil then
 		task.spawn(function()
 			-- (A saved world's player comes back as they were: their record first.)
 			local saves = savesInUse

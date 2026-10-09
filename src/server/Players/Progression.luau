@@ -53,6 +53,13 @@
 	             interval), never for a player whose saved progress could not be read. A player
 	             who left is written again at once while something changed during the write or
 	             it failed (LEAVE_RETRIES), even when a periodic write was in flight as they left.
+	  Characters with Config.Characters on, progress is the character's (Terraria keeps it in the
+	             player file): nothing is read from or written to ProgressStore (the migration
+	             reads it once, Players/CharacterStore); the character's progress comes in with
+	             `restore` as it enters the world (nothing is earned before), and
+	             Players/CharacterStore saves `export` with the character: only where the world's
+	             progress is saved (`savesProgress`); elsewhere it writes back what it loaded,
+	             unchanged.
 	  Commands   /knowledge (/xp) and /age (Players/ProgressionCommand; changing needs the
 	             operators' permission, Players/Operators, as /time; a permanent operator where
 	             progress is saved: World above).
@@ -118,6 +125,8 @@ type Entry = {
 local ProgressionServer = {}
 
 local entries: { [Player]: Entry } = {}
+-- Characters' progress that came before the player's entry (Players/CharacterStore's `restore`).
+local restoring: { [Player]: { record: unknown } } = {}
 local net: ServerNet.ServerNet? = nil
 local store: ProgressStore.Store? = nil
 local savesInFlight = 0
@@ -189,6 +198,47 @@ local function earner(player: Player): Entry?
 end
 
 --[[ The API other parts call ]]
+
+-- Is progress saved from this world (`start`'s `saved`: WorldSettings.savesProgress)?
+function ProgressionServer.savesProgress(): boolean
+	return worldSaves
+end
+
+--[[
+	With characters: the progression of the character `player` plays, from its stored record
+	(Shared/Progression.toRecord's; nil: a new one). Returns whether that record may be written
+	back (false: another version's, kept as it is). Earning starts now.
+]]
+function ProgressionServer.restore(player: Player, record: unknown?): boolean
+	local state, writable = Progression.fromRecord(record)
+	if not enabled() then
+		return writable
+	end
+	local entry = entries[player]
+	if entry == nil then
+		-- (Before the player's entry: it takes this when it is made.)
+		restoring[player] = { record = record }
+		return writable
+	end
+	entry.state = state
+	entry.loaded = true
+	entry.sendDirty = true
+	if not worldSaves then
+		notify(player, "Progress made in this world stays on this server: it is not saved")
+	end
+	checkAges(player, entry)
+	refreshWindow(player)
+	return writable
+end
+
+-- The player's progression as its record (Progression.toRecord), nil before it was loaded.
+function ProgressionServer.export(player: Player): unknown?
+	local entry = entries[player]
+	if entry == nil or not entry.loaded then
+		return nil
+	end
+	return Progression.toRecord(entry.state)
+end
 
 -- The player's progression (read only; nil before they joined or with Config.Progression off).
 function ProgressionServer.state(player: Player): Progression.State?
@@ -380,11 +430,13 @@ local function onCharacter(player: Player, character: Model)
 end
 
 local function onPlayer(player: Player)
+	local characters = Config.Characters.Enabled == true
 	local entry: Entry = {
 		state = Progression.new(),
 		session = Progression.Knowledge.newSession(),
 		loaded = false,
-		canSave = store ~= nil and worldSaves,
+		-- (A character's progress is saved with it: Players/CharacterStore.)
+		canSave = store ~= nil and worldSaves and not characters,
 		saveDirty = false,
 		sendDirty = false,
 		saving = false,
@@ -402,6 +454,15 @@ local function onPlayer(player: Player)
 	end)
 	if player.Character then
 		task.spawn(onCharacter, player, player.Character)
+	end
+	if characters then
+		-- (The character's progress comes with it: `restore`, maybe already here.)
+		local early = restoring[player]
+		if early then
+			restoring[player] = nil
+			ProgressionServer.restore(player, early.record)
+		end
+		return
 	end
 
 	local saved = Progression.new()
@@ -603,6 +664,7 @@ function ProgressionServer.start(serverNet: ServerNet.ServerNet, world: WorldSer
 	Players.PlayerRemoving:Connect(function(player)
 		local entry = entries[player]
 		entries[player] = nil
+		restoring[player] = nil
 		if entry then
 			-- (Marked first: a periodic write in flight then writes again what it missed.)
 			entry.left = true

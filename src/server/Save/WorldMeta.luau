@@ -16,16 +16,24 @@
 	            "<id>/r/<rx>_<rz>"              a region's head: its first part and how many
 	                                            parts it has, in which slot (Save/RegionCodec)
 	            "<id>/r/<rx>_<rz>/<slot>_<i>"   its part i (2, 3...) when one key can't hold it
-	            "<id>/p/<userId>"               a player's record (Save/PlayerCodec)
+	            "<id>/p/<userId>"               a player's record (Save/PlayerCodec): the world's own
+	                                            inventories, before characters (and with
+	                                            Config.Characters.Enabled off)
+	            "<id>/c/<userId>_<charId>"      what the world keeps of a character (Save/
+	                                            WorldCharacterCodec: where it stood, its game mode)
 	            Ids are "w" + 8 base 36 digits; the longest key ("w12345678/r/-1954_-1954/1_9")
-	            stays far below the 50 characters a DataStore key may have.
+	            stays far below the 50 characters a DataStore key may have (a character's at most
+	            "w12345678/c/12345678901_4294967295", 34).
 	  Meta      v, id, name, worldType, options (WorldTypes.encodeOptions), seed (its digits:
 	            Minecraft's /seed text, exact to 2^53, where JSON numbers may not be), difficulty,
 	            gameMode (new players'), allowCommands, owner (the user id of the player who
 	            created it on the title screen; 0: the game's), created and lastPlayed (os.time),
 	            gen (the saves made), regions (name -> bytes stored), players (user id -> bytes),
-	            operators (user ids: the world's op list), sections (name -> a value other parts
-	            of the game keep with the world: `registerSection`, the clock, the weather).
+	            characters ("<userId>_<charId>" -> bytes), legacyImported (user id -> the character
+	            that took that user's old player record in: the migration's, once per user per
+	            world, Players/CharacterStore), operators (user ids: the world's op list),
+	            sections (name -> a value other parts of the game keep with the world:
+	            `registerSection`, the clock, the weather).
 	  Owners    a world is listed in its owner's list only, and only its owner or the game's own
 	            people (`mayManage`: Config.Gameplay.Admins, the game's owner, Studio) may load,
 	            rename or delete it: a stranger first into an empty server (its operator until
@@ -39,7 +47,8 @@
 	            still names the old slot's parts, which are intact. A head whose parts carry
 	            another `gen` or `w` is a damaged save (refused, never joined).
 	  Sizes     a key counts its JSON: the text plus the record around it (VALUE_OVERHEAD, a
-	            generous 96 characters). A world's bytes are its meta, regions and players.
+	            generous 96 characters). A world's bytes are its meta, regions, players and
+	            characters.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -67,6 +76,10 @@ export type Meta = {
 	gen: number,
 	regions: { [string]: number },
 	players: { [string]: number },
+	-- "<userId>_<charId>" -> bytes of what the world keeps of that character.
+	characters: { [string]: number },
+	-- User id (text) -> the character that imported their old player record here.
+	legacyImported: { [string]: number },
 	operators: { number },
 	sections: { [string]: any },
 }
@@ -127,6 +140,24 @@ end
 
 function WorldMeta.playerKey(id: string, userId: number): string
 	return `{id}/p/{string.format("%.0f", userId)}`
+end
+
+-- The name a world gives one character of one user ("<userId>_<charId>": meta.characters' keys).
+function WorldMeta.characterName(userId: number, charId: number): string
+	return `{string.format("%.0f", userId)}_{string.format("%.0f", charId)}`
+end
+
+-- The user id and character id in a character's name (nil, nil for anything else).
+function WorldMeta.parseCharacterName(name: string): (number?, number?)
+	local user, char = string.match(name, "^(%-?%d+)_(%d+)$")
+	if user == nil or char == nil then
+		return nil, nil
+	end
+	return tonumber(user), tonumber(char)
+end
+
+function WorldMeta.characterKey(id: string, userId: number, charId: number): string
+	return `{id}/c/{WorldMeta.characterName(userId, charId)}`
 end
 
 -- Is `id` a world id this module makes?
@@ -211,6 +242,8 @@ function WorldMeta.new(id: string, settings: WorldSettings.Settings, now: number
 		gen = 0,
 		regions = {},
 		players = {},
+		characters = {},
+		legacyImported = {},
 		operators = {},
 		sections = {},
 	}
@@ -229,6 +262,20 @@ local function sizes(value: unknown): { [string]: number }
 		for key, bytes in value :: { [any]: any } do
 			local n = number(bytes)
 			if type(key) == "string" and n and n >= 0 then
+				out[key] = n
+			end
+		end
+	end
+	return out
+end
+
+-- User id (text) -> a character id (whole, positive): the meta's legacyImported.
+local function importers(value: unknown): { [string]: number }
+	local out: { [string]: number } = {}
+	if type(value) == "table" then
+		for key, charId in value :: { [any]: any } do
+			local n = number(charId)
+			if type(key) == "string" and n and n >= 1 and n == math.floor(n) then
 				out[key] = n
 			end
 		end
@@ -289,6 +336,8 @@ function WorldMeta.read(value: unknown): (Meta?, string?)
 		gen = math.max(0, math.floor(number(stored.gen) or 0)),
 		regions = sizes(stored.regions),
 		players = sizes(stored.players),
+		characters = sizes(stored.characters),
+		legacyImported = importers(stored.legacyImported),
 		operators = operators,
 		sections = sections,
 	},
@@ -337,6 +386,8 @@ function WorldMeta.stored(meta: Meta): { [string]: any }
 		gen = meta.gen,
 		regions = table.clone(meta.regions),
 		players = table.clone(meta.players),
+		characters = table.clone(meta.characters),
+		legacyImported = table.clone(meta.legacyImported),
 		operators = table.clone(meta.operators),
 		sections = table.clone(meta.sections),
 	}
@@ -349,6 +400,12 @@ function WorldMeta.metaBytes(meta: Meta): number
 		bytes += #name + 16
 	end
 	for userId in meta.players do
+		bytes += #userId + 16
+	end
+	for name in meta.characters do
+		bytes += #name + 16
+	end
+	for userId in meta.legacyImported do
 		bytes += #userId + 16
 	end
 	bytes += #meta.operators * 16
@@ -366,6 +423,9 @@ function WorldMeta.total(meta: Meta): (number, number)
 		total += bytes
 	end
 	for _, bytes in meta.players do
+		total += bytes
+	end
+	for _, bytes in meta.characters do
 		total += bytes
 	end
 	return total, largest
@@ -444,7 +504,7 @@ function WorldMeta.readPart(value: unknown, gen: number, index: number, writer: 
 	return stored.d, nil
 end
 
--- A player's stored value.
+-- A player's stored value (a character's per-world entry is stored the same way).
 function WorldMeta.playerValue(text: string): { [string]: any }
 	return { v = WorldMeta.VERSION, d = text }
 end

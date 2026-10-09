@@ -42,6 +42,18 @@
 	             red), Rename (a name box: the server filters it), Delete (Minecraft's "Are you
 	             sure you want to delete this world?" first) and Cancel. Each answer lists the
 	             worlds again with how it went.
+	  Characters with Config.Characters on (Terraria's player select before its world select):
+	             the title has Play and Options...; Play opens the character list
+	             (Ui/CharacterSelect: the user's characters, a preview of the highlighted one,
+	             Play Selected Character, Create New Character, Rename, Delete with Minecraft's
+	             confirmation, Back), Create New Character the avatar editor (Ui/AvatarEditor: an
+	             R15 look from the player's own avatar, the name and the difficulty), and a
+	             character chosen (or made) leads to the world page: "Playing as <name>" over
+	             the buttons the title had (Join World, Create World, Load World, as TitleRules
+	             says) and Back. Entering sends the character's id (Net/CharacterSync
+	             .encodeEnter); the server's list (ServerMessage.Characters) says what each
+	             request did. The rules: Ui/CharacterRules; the server's side:
+	             Players/CharacterStore.
 	  Customize  one widget per setting the world type declares (WorldTypes.Setting), drawn
 	             generically: toggles and choices are buttons that cycle, text a field with what
 	             its `check` finds wrong under it in red and its `presets` on a button that cycles
@@ -67,6 +79,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local CharacterSync = require(Shared.Net.CharacterSync)
+local Characters = require(Shared.Characters)
 local Config = require(Shared.Config)
 local Protocol = require(Shared.Net.Protocol)
 local TexturePack = require(Shared.TexturePack)
@@ -74,6 +88,9 @@ local WorldSettings = require(Shared.WorldSettings)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
+local AvatarEditor = require(script.Parent.AvatarEditor)
+local CharacterRules = require(script.Parent.CharacterRules)
+local CharacterSelect = require(script.Parent.CharacterSelect)
 local CreateWorldForm = require(script.Parent.CreateWorldForm)
 local FormWidgets = require(script.Parent.FormWidgets)
 local SaveIndicator = require(script.Parent.SaveIndicator)
@@ -134,7 +151,21 @@ local LETTERS: { [string]: { string } } = {
 local LOGO_TEXT = "ICEVOXEL"
 local EDITION = "ROBLOX EDITION"
 
-type Page = "title" | "create" | "customize" | "options" | "creating" | "load" | "confirm" | "rename"
+type Page =
+	"title"
+	| "create"
+	| "customize"
+	| "options"
+	| "creating"
+	| "load"
+	| "confirm"
+	| "rename"
+	| "characters"
+	| "editor"
+	| "world"
+
+-- Characters (Config.Characters): a character is chosen before the world.
+local CHARACTERS = Config.Characters.Enabled == true
 
 local MainMenu = {}
 
@@ -390,6 +421,9 @@ function MainMenu.run()
 		load = newPage("load"),
 		confirm = newPage("confirm"),
 		rename = newPage("rename"),
+		characters = newPage("characters"),
+		editor = newPage("editor"),
+		world = newPage("world"),
 	}
 
 	--[[ Title ]]
@@ -433,6 +467,29 @@ function MainMenu.run()
 	local setSaveNote = infoText(column, -60, 4 * ROW + 28, BUTTON_W + 120, 3)
 	local titleOrder: { GuiObject } =
 		{ joinButton.button, createButton.button, loadButton.button, optionsButton.button }
+	-- With characters the title has Play and Options...; the buttons above move to the world page
+	-- (the character is chosen first), Options... giving way to Back.
+	local charactersButton: FormWidgets.Button? = nil
+	local titleOptions: FormWidgets.Button? = nil
+	local worldBack: FormWidgets.Button? = nil
+	local playingAs: FormWidgets.Label? = nil
+	if CHARACTERS then
+		local titleColumn =
+			place(title, UDim2.new(0.5, -BUTTON_W / 2, 0.25, 48), UDim2.fromOffset(BUTTON_W, 2 * ROW + 12), 5)
+		local play = FormWidgets.button(titleColumn, "Play", 0, 0, BUTTON_W, BUTTON_H)
+		local options = FormWidgets.button(titleColumn, "Options...", 0, ROW + 12, BUTTON_W, BUTTON_H)
+		play.button.NextSelectionDown, play.button.NextSelectionUp = options.button, options.button
+		options.button.NextSelectionDown, options.button.NextSelectionUp = play.button, play.button
+		charactersButton, titleOptions = play, options
+		column.Parent = pages.world
+		optionsButton:setVisible(false)
+		local back = FormWidgets.button(column, "Back", 0, 3 * ROW + 12, BUTTON_W, BUTTON_H)
+		worldBack = back
+		titleOrder = { joinButton.button, createButton.button, loadButton.button, back.button }
+		local label = FormWidgets.label(pages.world, "", 0, 0, 320, WHITE, "centre", 5)
+		label.frame.Position = UDim2.new(0.5, -160, 0.25, 30)
+		playingAs = label
+	end
 	for i, object in titleOrder do
 		object.NextSelectionDown = titleOrder[i + 1] or titleOrder[1]
 		object.NextSelectionUp = titleOrder[i - 1] or titleOrder[#titleOrder]
@@ -557,7 +614,7 @@ function MainMenu.run()
 
 	local renamePage = pages.rename
 	local renameHolder = place(renamePage, UDim2.new(0.5, -105, 0.5, -40), UDim2.fromOffset(210, 80), 5)
-	FormWidgets.label(renameHolder, "World Name", 1, 0, 208, GRAY)
+	local renameLabel = FormWidgets.label(renameHolder, "World Name", 1, 0, 208, GRAY)
 	local renameBox = FormWidgets.editBox(renameHolder, 1, 11, 208, BUTTON_H, 5, function(text: string): string
 		return if utf8.len(text) and (utf8.len(text) :: number) > WorldSettings.MAX_NAME
 			then string.sub(text, 1, (utf8.offset(text, WorldSettings.MAX_NAME + 1) :: number) - 1)
@@ -573,6 +630,20 @@ function MainMenu.run()
 	-- What the creating page waits for ("create" or "load"), and a load's progress line.
 	local pending: string? = nil
 	local loadingText: string? = nil
+
+	--[[ Characters (Config.Characters) ]]
+
+	local characterPage = if CHARACTERS then CharacterSelect.new(pages.characters) else nil
+	local editor = if CHARACTERS then AvatarEditor.new(pages.editor) else nil
+	-- The server's last list (nil until one came), a request out ("select" of `id`, "create"
+	-- while `previous` was selected, or another change), what the shared rename and confirm
+	-- pages are open for and the character they are about.
+	local characterList: CharacterSync.List? = nil
+	local characterPending: { kind: string, id: number, previous: number }? = nil
+	local dialogFor = "world"
+	local dialogCharacter: Characters.Summary? = nil
+	-- Where the world's own pages go back to: the world page with characters, else the title.
+	local worldHome: Page = if CHARACTERS then "world" else "title"
 
 	--[[ Behaviour ]]
 
@@ -657,11 +728,25 @@ function MainMenu.run()
 		for id, frame in pages :: { [string]: Frame } do
 			frame.Visible = id == name
 		end
-		sky.Visible = name == "title"
-		dirt.Visible = name ~= "title"
-		if name == "title" then
+		sky.Visible = name == "title" or name == "world"
+		dirt.Visible = not sky.Visible
+		if name == "title" and charactersButton then
+			selectObject(charactersButton.button)
+		elseif name == "title" then
 			refreshTitle()
 			selectObject(if joinButton.enabled then joinButton.button else optionsButton.button)
+		elseif name == "world" then
+			refreshTitle()
+			local list = characterList
+			local chosen = if list then CharacterRules.find(list.characters, list.selected) else nil
+			if playingAs then
+				playingAs:setText(if chosen then `Playing as {chosen.name}` else "")
+			end
+			selectObject(if joinButton.enabled then joinButton.button elseif worldBack then worldBack.button else nil)
+		elseif name == "characters" then
+			if characterPage then
+				characterPage:opened(gamepadUser())
+			end
 		elseif name == "create" then
 			refreshCreate()
 			selectObject(if form.tab == "game" then modeButton.button else typeButton.button)
@@ -755,9 +840,18 @@ function MainMenu.run()
 		if entered then
 			return
 		end
+		local list = characterList
+		if CHARACTERS and (list == nil or list.selected == 0) then
+			-- (No character chosen: choose one first.)
+			showPage("characters")
+			return
+		end
 		entered = true
 		shown = false
-		ClientNet.send(Protocol.ClientMessage.EnterWorld, buffer.create(0))
+		ClientNet.send(
+			Protocol.ClientMessage.EnterWorld,
+			if CHARACTERS and list then CharacterSync.encodeEnter(list.selected) else buffer.create(0)
+		)
 		if closeOptions then
 			local close = closeOptions
 			closeOptions = nil
@@ -766,6 +860,12 @@ function MainMenu.run()
 		local selected = GuiService.SelectedObject
 		if selected and selected:IsDescendantOf(gui) then
 			GuiService.SelectedObject = nil
+		end
+		if characterPage then
+			characterPage:destroy()
+		end
+		if editor then
+			editor:destroy()
 		end
 		gui:Destroy()
 		enteredEvent:Fire()
@@ -862,13 +962,13 @@ function MainMenu.run()
 		if page == "create" then
 			form.name = nameBox:text()
 			form.seed = seedBox:text()
-			showPage("title")
+			showPage(worldHome)
 		elseif page == "customize" then
 			showPage("create")
 		elseif page == "load" then
-			showPage("title")
-		elseif page == "confirm" or page == "rename" then
-			showPage("load")
+			showPage(worldHome)
+		elseif page == "confirm" or page == "rename" or page == "characters" or page == "editor" or page == "world" then
+			showPage((CharacterRules.back(page, dialogFor) or "title") :: Page)
 		elseif page == "options" then
 			-- (A sub-page goes back a page; Key Binds waiting for a key takes the press.)
 			if not SettingsScreen.back(escaped) then
@@ -899,11 +999,12 @@ function MainMenu.run()
 	end)
 	playButton.clicked = clickThen(play)
 	loadCancel.clicked = clickThen(function()
-		showPage("title")
+		showPage(worldHome)
 	end)
 	deleteButton.clicked = clickThen(function()
 		local entry = selectedEntry()
 		if entry then
+			dialogFor = "world"
 			local question, warning = WorldListRules.deleteQuestion(entry.name)
 			setQuestion(question, WHITE)
 			setWarning(warning, GRAY)
@@ -911,6 +1012,20 @@ function MainMenu.run()
 		end
 	end)
 	confirmDelete.clicked = clickThen(function()
+		local character = dialogCharacter
+		if dialogFor == "character" then
+			showPage("characters")
+			if character and characterPage then
+				characterPending = { kind = "delete", id = character.id, previous = 0 }
+				characterPage:setBusy(true)
+				characterPage:setMessage("Deleting...")
+				ClientNet.send(
+					Protocol.ClientMessage.CharacterAction,
+					CharacterSync.encodeAction({ action = CharacterSync.Action.Delete, id = character.id })
+				)
+			end
+			return
+		end
 		local entry = selectedEntry()
 		showPage("load")
 		if entry then
@@ -922,16 +1037,35 @@ function MainMenu.run()
 		end
 	end)
 	confirmCancel.clicked = clickThen(function()
-		showPage("load")
+		showPage(if dialogFor == "character" then "characters" else "load")
 	end)
 	renameButton.clicked = clickThen(function()
 		local entry = selectedEntry()
 		if entry then
+			dialogFor = "world"
+			renameLabel:setText("World Name")
 			renameBox:setText(entry.name)
 			showPage("rename")
 		end
 	end)
 	renameNow.clicked = clickThen(function()
+		local character = dialogCharacter
+		if dialogFor == "character" then
+			showPage("characters")
+			local name = Characters.cleanName(renameBox:text())
+			if character and characterPage and name == nil then
+				characterPage:setMessage(CharacterRules.nameProblem(renameBox:text()) or "", Style.Colour.Red)
+			elseif character and characterPage and name then
+				characterPending = { kind = "rename", id = character.id, previous = 0 }
+				characterPage:setBusy(true)
+				characterPage:setMessage("Renaming...")
+				ClientNet.send(
+					Protocol.ClientMessage.CharacterAction,
+					CharacterSync.encodeAction({ action = CharacterSync.Action.Rename, id = character.id, name = name })
+				)
+			end
+			return
+		end
 		local entry = selectedEntry()
 		showPage("load")
 		if entry then
@@ -943,7 +1077,7 @@ function MainMenu.run()
 		end
 	end)
 	renameCancel.clicked = clickThen(function()
-		showPage("load")
+		showPage(if dialogFor == "character" then "characters" else "load")
 	end)
 	optionsButton.clicked = clickThen(function()
 		showPage("options")
@@ -990,6 +1124,88 @@ function MainMenu.run()
 	cancel.clicked = clickThen(back)
 	doneButton.clicked = clickThen(back)
 
+	-- The character pages.
+	local function sendCharacters(request: CharacterSync.Request)
+		ClientNet.send(Protocol.ClientMessage.CharacterAction, CharacterSync.encodeAction(request))
+	end
+	local function openOptions()
+		showPage("options")
+		closeOptions = SettingsScreen.showIn(optionsHost, function()
+			closeOptions = nil
+			if not entered then
+				showPage("title")
+			end
+		end)
+	end
+	if charactersButton and titleOptions then
+		charactersButton.clicked = clickThen(function()
+			showPage("characters")
+			if characterList == nil and characterPage then
+				-- (The server sends it once it read it: asked again in case it came before.)
+				characterPage:setBusy(true)
+				characterPage:setMessage("Loading your characters...")
+				sendCharacters({ action = CharacterSync.Action.List })
+			end
+		end)
+		titleOptions.clicked = clickThen(openOptions)
+	end
+	if worldBack then
+		worldBack.clicked = clickThen(function()
+			showPage("characters")
+		end)
+	end
+	if characterPage then
+		characterPage.onPlay = function(summary: Characters.Summary)
+			local list = characterList
+			if list and list.selected == summary.id then
+				showPage("world")
+				return
+			end
+			characterPending = { kind = "select", id = summary.id, previous = 0 }
+			characterPage:setBusy(true)
+			characterPage:setMessage(`Loading {summary.name}...`)
+			sendCharacters({ action = CharacterSync.Action.Select, id = summary.id })
+		end
+		characterPage.onCreate = function()
+			showPage("editor")
+			if editor then
+				editor:open(gamepadUser())
+			end
+		end
+		characterPage.onRename = function(summary: Characters.Summary)
+			dialogFor, dialogCharacter = "character", summary
+			renameLabel:setText("Character Name")
+			renameBox:setText(summary.name)
+			showPage("rename")
+		end
+		characterPage.onDelete = function(summary: Characters.Summary)
+			dialogFor, dialogCharacter = "character", summary
+			local question, warning = CharacterRules.deleteQuestion(summary.name)
+			setQuestion(question, WHITE)
+			setWarning(warning, GRAY)
+			showPage("confirm")
+		end
+		characterPage.onBack = function()
+			showPage("title")
+		end
+	end
+	if editor then
+		editor.onCreate = function(name: string, difficulty: number, look)
+			local list = characterList
+			characterPending = { kind = "create", id = 0, previous = if list then list.selected else 0 }
+			editor:setBusy(true)
+			sendCharacters({
+				action = CharacterSync.Action.Create,
+				name = name,
+				difficulty = difficulty,
+				appearance = look,
+			})
+		end
+		editor.onCancel = function()
+			showPage("characters")
+		end
+	end
+
 	--[[ The server ]]
 
 	ClientNet.on(Protocol.ServerMessage.MenuState, function(payload: buffer)
@@ -1001,22 +1217,22 @@ function MainMenu.run()
 		if newState ~= Protocol.MenuState.Creating then
 			loadingText = nil
 		end
-		if page == "title" then
+		if page == "title" or page == "world" then
 			refreshTitle()
 		elseif page == "create" then
 			refreshCreate()
 		end
-		-- Someone else made the world (or it failed) while this screen was open: back to the title.
+		-- Someone else made the world (or it failed) while this screen was open: back to the title
+		-- (the world page with characters).
 		local choosing = page == "create"
 			or page == "customize"
 			or page == "load"
-			or page == "confirm"
-			or page == "rename"
+			or (page == "confirm" or page == "rename") and dialogFor == "world"
 		if
 			choosing and newState ~= Protocol.MenuState.Waiting and not listBusy
 			or page == "creating" and newState == Protocol.MenuState.Failed
 		then
-			showPage("title")
+			showPage(worldHome)
 		end
 	end)
 	ClientNet.on(Protocol.ServerMessage.CreateWorldResult, function(payload: buffer)
@@ -1032,6 +1248,54 @@ function MainMenu.run()
 			showPage("create")
 			setError(message, Style.Colour.Red)
 		end
+	end)
+	-- The user's characters and what the last request did (Players/CharacterStore).
+	ClientNet.on(Protocol.ServerMessage.Characters, function(payload: buffer)
+		local list = CharacterSync.decodeCharacters(payload)
+		if list == nil or entered or characterPage == nil then
+			return
+		end
+		characterList = list
+		local request = characterPending
+		local done = request ~= nil and not list.busy
+		if done then
+			characterPending = nil
+		end
+		characterPage:setList(list, list.busy or (request ~= nil and not done))
+		local failed = false
+		if done and request then
+			if request.kind == "select" then
+				failed = list.selected ~= request.id
+				if not failed and page == "characters" then
+					showPage("world")
+				end
+			elseif request.kind == "create" then
+				failed = list.selected == 0 or list.selected == request.previous
+				if editor then
+					editor:setBusy(false)
+				end
+				if editor and page == "editor" then
+					if failed then
+						editor:setError(list.message)
+					else
+						showPage("world")
+					end
+				end
+			end
+		end
+		characterPage:setMessage(list.message, if failed then Style.Colour.Red else GRAY)
+		if page == "world" and playingAs then
+			local chosen = CharacterRules.find(list.characters, list.selected)
+			playingAs:setText(if chosen then `Playing as {chosen.name}` else "")
+		end
+	end)
+	-- The user's own avatar for the editor.
+	ClientNet.on(Protocol.ServerMessage.Avatar, function(payload: buffer)
+		local purpose, look = CharacterSync.decodeAvatar(payload)
+		if purpose == nil or look == nil or entered or editor == nil or page ~= "editor" then
+			return
+		end
+		editor:setSnapshot(look)
 	end)
 	ClientNet.on(Protocol.ServerMessage.WorldList, function(payload: buffer)
 		local list, _, message = Protocol.decodeWorldList(payload)
@@ -1052,7 +1316,7 @@ function MainMenu.run()
 	table.insert(
 		connections,
 		SaveIndicator.stateChanged:Connect(function()
-			if page == "title" then
+			if page == "title" or page == "world" then
 				refreshTitle()
 			end
 		end)
@@ -1064,7 +1328,7 @@ function MainMenu.run()
 			loadingText = line
 			if page == "creating" and pending == "load" then
 				creatingLine:setText(line)
-			elseif page == "title" then
+			elseif page == "title" or page == "world" then
 				refreshTitle()
 			end
 		end)
@@ -1083,7 +1347,7 @@ function MainMenu.run()
 	table.insert(
 		connections,
 		player:GetAttributeChangedSignal(WorldSettings.OPERATOR_ATTRIBUTE):Connect(function()
-			if page == "title" then
+			if page == "title" or page == "world" then
 				refreshTitle()
 			elseif page == "create" then
 				refreshCreate()
