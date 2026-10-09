@@ -1,83 +1,285 @@
 --!strict
 --[[
-	Each player's mana (Terraria's: Config.Mana, Shared/Mana), kept by the server as health is.
+	Each player's mana (Terraria's: Config.Mana, Shared/Mana), kept by the server as health is: the
+	authority over what a cast costs, what a potion or a Mana Crystal gives and how it comes back.
+	A character carries its mana and the Mana Crystals it used from world to world (server
+	Players/CharacterStore: `export` into the record, `restore` from it).
 
-	For now only the store and the API the rest of the game is written against: a player's mana and
-	the Mana Crystals they used, which a character carries from world to world (server
-	Players/CharacterStore: `export` into the record, `restore` from it). Regeneration, the HUD's
-	message, casting and the crystals' use come with the mana itself (MANA: Shared/Mana,
-	Players/Magic, Players/FallenStars).
+	  Ticks      20 a second (catching up a few per frame), for every player: the max is worked out
+	             from the crystals and the accessories worn (Shared/Mana.maxOf on the inventory:
+	             a Band of Starpower taken off clamps mana to the new max at once), then a living
+	             player's mana comes back by Terraria 1.4.4's rule (Shared/Mana.tick). "Standing
+	             still" is the server's own: the feet (Players/PlayerPositions) moved less than
+	             STILL 0.01 blocks since the last tick and nothing was cast in it.
+	  Message    the player's Mana message (Net/MagicSync: whole mana, max, flags) when the whole
+	             number or the max changed, at most every SEND_TICKS 4 ticks, and at once after a
+	             cast (`spend`), a refused cast (flag `refused`: not enough mana), a potion, a
+	             crystal, a respawn or a restore. Flag `full`: regeneration just filled it
+	             (Terraria's chime: the client plays entity.player.mana_full).
+	  Respawn    a player's first character since joining keeps the mana it has (a restored
+	             character's); every later one (a respawn) starts full, as Terraria's.
+	  Sickness   `potion` (a mana potion's finish: Players/ToughAsNails) adds the mana and Mana
+	             Sickness (Shared/Mana.sicknessTicks: 5 s more, 10 s at most, through
+	             Players/Effects); `damageFactor` is what magic damage is cut to while it lasts.
+	  Crystals   `useCrystal` (a Mana Crystal used: Players/Magic's HeldUse) while fewer than
+	             Config.Mana.MaxCrystals 9 were used: one more, max + 20 and mana + 20.
+	  Off        with Config.Mana.Enabled false nothing ticks or is sent (the store still answers).
 
-	  start     forgets players who leave (call once, with the world's net).
-	  export    { mana, crystals } to save.
-	  restore   a saved character's mana and crystals (clamped: 0..max, 0..Config.Mana.MaxCrystals).
-	  get       mana and max mana (Config.Mana.Base + PerCrystal x crystals, at most Config.Mana.Max;
-	            accessories add to it once they work).
-	  spend     takes `amount` if there is that much (whether it did).
-	  add       gives up to the max.
+	  start       once, with the world's net.
+	  export      { mana, crystals } to save.
+	  restore     a saved character's mana and crystals (crystals 0..MaxCrystals; mana 0..Max now,
+	              and within the character's own max, its accessories once restored too, from the
+	              next tick).
+	  get         mana and max mana.
+	  spend       takes `amount` if there is that much (whether it did); a refusal is told.
+	  add         gives up to the max.
+	  potion      a mana potion: `add` and Mana Sickness.
+	  useCrystal  a Mana Crystal (whether it was used: false at nine).
+	  casting     marks a free cast (creative), so the player isn't standing still this tick.
+	  damageFactor  magic damage's share left by Mana Sickness (1 without).
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local SharedEffects = require(Shared.Effects)
+local SharedMana = require(Shared.Mana)
+local MagicSync = require(Shared.Net.MagicSync)
+local Protocol = require(Shared.Net.Protocol)
 
-type State = { mana: number, crystals: number }
+local Effects = require(script.Parent.Effects)
+local Inventories = require(script.Parent.Inventories)
+local PlayerPositions = require(script.Parent.PlayerPositions)
+
+-- Only what Mana uses of ServerNet.ServerNet.
+type Net = { send: (player: Player, kind: number, payload: buffer) -> () }
+
+type State = {
+	-- The regeneration's state (Shared/Mana: mana, delay) and the crystals used.
+	regen: SharedMana.State,
+	crystals: number,
+	-- The feet at the last tick (nil: none yet), and whether something was cast this tick.
+	x: number?,
+	y: number,
+	z: number,
+	cast: boolean,
+	-- What the client was last told (whole mana, max), the tick it was, and flags to tell.
+	sentMana: number,
+	sentMax: number,
+	sentTick: number,
+	refused: boolean,
+	full: boolean,
+	-- A character came since the player joined (every later one is a respawn: it starts full).
+	joined: boolean,
+}
 
 local Mana = {}
 
-local states: { [Player]: State } = {}
+local TICK = 1 / 20
+local MAX_TICKS_PER_FRAME = 4
+-- Ticks between two regeneration messages to one player.
+local SEND_TICKS = 4
+-- Blocks the feet may move in a tick and still stand still.
+local STILL = 0.01
+local SICKNESS = SharedEffects.id.ManaSickness
 
-local function maxOf(state: State): number
-	return math.min(Config.Mana.Base + Config.Mana.PerCrystal * state.crystals, Config.Mana.Max)
-end
+local states: { [Player]: State } = {}
+local net: Net? = nil
+local tickCount = 0
 
 local function stateOf(player: Player): State
 	local state = states[player]
 	if state == nil then
-		state = { mana = Config.Mana.Base, crystals = 0 }
+		state = {
+			regen = SharedMana.new(Config.Mana.Base),
+			crystals = 0,
+			x = nil,
+			y = 0,
+			z = 0,
+			cast = false,
+			sentMana = -1,
+			sentMax = -1,
+			sentTick = -math.huge,
+			refused = false,
+			full = false,
+			joined = false,
+		}
 		states[player] = state
 	end
 	return state
 end
 
-function Mana.start(_net: any)
+-- The player's max mana now: the crystals and the accessories worn.
+local function maxOf(player: Player, state: State): number
+	local window = Inventories.get(player)
+	return SharedMana.maxOf(state.crystals, if window then window.inventory else nil)
+end
+
+-- Tells the player their mana now (and the flags), and notes what was told.
+local function send(player: Player, state: State, max: number)
+	local current = net
+	if current == nil or not Config.Mana.Enabled or player.Parent == nil then
+		return
+	end
+	local mana = math.min(state.regen.mana, max)
+	current.send(
+		player,
+		Protocol.ServerMessage.Mana,
+		MagicSync.encodeMana({ mana = mana, max = max, refused = state.refused, full = state.full })
+	)
+	state.sentMana, state.sentMax, state.sentTick = math.floor(mana), max, tickCount
+	state.refused, state.full = false, false
+end
+
+-- Clamps to the max now and tells the player at once.
+local function sendNow(player: Player, state: State)
+	local max = maxOf(player, state)
+	SharedMana.clamp(state.regen, max)
+	send(player, state, max)
+end
+
+local function tickPlayer(player: Player, state: State)
+	local max = maxOf(player, state)
+	local x, y, z = PlayerPositions.feet(player)
+	local still = false
+	if x then
+		local lastX = state.x
+		if lastX then
+			local dx, dy, dz = x - lastX, y - state.y, z - state.z
+			still = dx * dx + dy * dy + dz * dz < STILL * STILL and not state.cast
+		end
+		state.x, state.y, state.z = x, y, z
+	end
+	state.cast = false
+	if PlayerPositions.alive(player) then
+		if SharedMana.tick(state.regen, max, still) then
+			state.full = true
+		end
+	else
+		SharedMana.clamp(state.regen, max)
+	end
+	local whole = math.floor(state.regen.mana)
+	local changed = whole ~= state.sentMana or max ~= state.sentMax or state.full or state.refused
+	if changed and tickCount - state.sentTick >= SEND_TICKS then
+		send(player, state, max)
+	end
+end
+
+--[[ API (see the header) ]]
+
+function Mana.start(serverNet: Net)
+	net = serverNet
+	local function onCharacter(player: Player)
+		local state = stateOf(player)
+		if state.joined then
+			-- (A respawn: full, as Terraria's.)
+			state.regen.mana = maxOf(player, state)
+			state.regen.delay = 0
+		end
+		state.joined = true
+		state.x = nil
+		sendNow(player, state)
+	end
+	local function onPlayer(player: Player)
+		player.CharacterAdded:Connect(function()
+			onCharacter(player)
+		end)
+		if player.Character then
+			onCharacter(player)
+		end
+	end
+	Players.PlayerAdded:Connect(onPlayer)
+	for _, player in Players:GetPlayers() do
+		onPlayer(player)
+	end
 	Players.PlayerRemoving:Connect(function(player: Player)
 		states[player] = nil
+	end)
+	if not Config.Mana.Enabled then
+		return
+	end
+	local accumulator = 0
+	RunService.Heartbeat:Connect(function(dt: number)
+		accumulator = math.min(accumulator + dt, TICK * MAX_TICKS_PER_FRAME)
+		while accumulator >= TICK do
+			accumulator -= TICK
+			tickCount += 1
+			for player, state in states do
+				tickPlayer(player, state)
+			end
+		end
 	end)
 end
 
 function Mana.export(player: Player): { mana: number, crystals: number }
 	local state = stateOf(player)
-	return { mana = state.mana, crystals = state.crystals }
+	return { mana = math.min(state.regen.mana, maxOf(player, state)), crystals = state.crystals }
 end
 
 function Mana.restore(player: Player, mana: number, crystals: number)
 	local state = stateOf(player)
 	state.crystals = if crystals == crystals then math.clamp(math.floor(crystals), 0, Config.Mana.MaxCrystals) else 0
-	state.mana = if mana == mana then math.clamp(mana, 0, maxOf(state)) else maxOf(state)
+	-- (Within the character's own max at the next tick: its accessories may come back after this.)
+	state.regen.mana = if mana == mana then math.clamp(mana, 0, Config.Mana.Max) else maxOf(player, state)
+	state.regen.delay = 0
+	send(player, state, maxOf(player, state))
 end
 
 function Mana.get(player: Player): (number, number)
 	local state = stateOf(player)
-	return state.mana, maxOf(state)
+	local max = maxOf(player, state)
+	return math.min(state.regen.mana, max), max
 end
 
 function Mana.spend(player: Player, amount: number): boolean
 	local state = stateOf(player)
-	if amount ~= amount or amount < 0 or state.mana < amount then
+	local max = maxOf(player, state)
+	SharedMana.clamp(state.regen, max)
+	if not SharedMana.spend(state.regen, max, amount) then
+		state.refused = true
+		send(player, state, max)
 		return false
 	end
-	state.mana -= amount
+	state.cast = true
+	send(player, state, max)
 	return true
 end
 
 function Mana.add(player: Player, amount: number)
 	local state = stateOf(player)
-	if amount == amount and amount > 0 then
-		state.mana = math.min(state.mana + amount, maxOf(state))
+	local max = maxOf(player, state)
+	SharedMana.clamp(state.regen, max)
+	if SharedMana.add(state.regen, max, amount) > 0 then
+		send(player, state, max)
 	end
+end
+
+function Mana.potion(player: Player, amount: number)
+	Mana.add(player, amount)
+	Effects.give(player, SICKNESS, SharedMana.sicknessTicks(Effects.ticks(player, SICKNESS)))
+end
+
+function Mana.useCrystal(player: Player): boolean
+	local state = stateOf(player)
+	if not SharedMana.canUseCrystal(state.crystals) then
+		return false
+	end
+	state.crystals += 1
+	local max = maxOf(player, state)
+	SharedMana.add(state.regen, max, Config.Mana.PerCrystal)
+	send(player, state, max)
+	return true
+end
+
+function Mana.casting(player: Player)
+	stateOf(player).cast = true
+end
+
+function Mana.damageFactor(player: Player): number
+	return SharedMana.damageFactor(Effects.ticks(player, SICKNESS))
 end
 
 return Mana

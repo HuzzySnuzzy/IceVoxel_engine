@@ -15,6 +15,9 @@
 	              1 item, 3 above 16, 4 above 32, 5 above 48. Copies of a block are scattered by
 	              up to 0.15 blocks (the same way for every stack of that item); flat items stack
 	              up front to back.
+	  Glow        Terraria's Fallen Star carries a warm PointLight and sparkles (it falls at night:
+	              server Players/FallenStars), so a falling star streaks and a fallen one is seen
+	              from afar in the dark.
 	  Pickup      a collected item flies to the collector's waist (halfway up to the eyes) over 3
 	              ticks, accelerating (ItemPickupParticle), then disappears. Removed items that
 	              nobody collected (despawned, merged, out of range) disappear at once.
@@ -38,6 +41,7 @@ local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local ItemPhysics = require(Shared.Entities.ItemPhysics)
 local Origin = require(Shared.World.Origin)
@@ -72,6 +76,10 @@ local LOOK_REBUILDS_PER_FRAME = 16
 -- The pickup flight: ticks, and where it ends above the collector's feet (blocks).
 local PICKUP_TICKS = 3
 local PICKUP_HEIGHT = 1.62 / 2
+-- Terraria's Fallen Star glows: its light's colour and range (blocks).
+local FALLEN_STAR = Items.id.FallenStar
+local STAR_GLOW = Color3.fromRGB(255, 226, 120)
+local STAR_LIGHT = 8
 
 type Copy = {
 	model: Model,
@@ -184,6 +192,30 @@ local function copyOffsets(item: number, amount: number): { CFrame }
 	return offsets
 end
 
+--[[
+	Terraria's Fallen Star (server Players/FallenStars) glows where it lies and falls: a warm
+	PointLight on its model and a few sparkles drifting off it (world-space particles, so a
+	falling star leaves a short trail of them).
+]]
+local function glow(part: BasePart)
+	local light = Instance.new("PointLight")
+	light.Color = STAR_GLOW
+	light.Brightness = 2
+	light.Range = STAR_LIGHT * BLOCK
+	light.Shadows = false
+	light.Parent = part
+	local sparkle = Instance.new("ParticleEmitter")
+	sparkle.Color = ColorSequence.new(STAR_GLOW)
+	sparkle.LightEmission = 1
+	sparkle.Rate = 6
+	sparkle.Lifetime = NumberRange.new(0.4, 0.9)
+	sparkle.Speed = NumberRange.new(0.5, 1.5)
+	sparkle.SpreadAngle = Vector2.new(180, 180)
+	sparkle.Size = NumberSequence.new(0.25, 0)
+	sparkle.Transparency = NumberSequence.new(0, 1)
+	sparkle.Parent = part
+end
+
 local function buildCopies(entity: Item)
 	for _, copy in entity.copies do
 		copy.model:Destroy()
@@ -207,6 +239,10 @@ local function buildCopies(entity: Item)
 		copies[k] = { model = model, offset = offset, parts = parts, partOffsets = partOffsets }
 	end
 	entity.copies = copies
+	local first = copies[1]
+	if entity.item == FALLEN_STAR and first and first.parts[1] then
+		glow(first.parts[1])
+	end
 end
 
 local function destroy(entity: Item)

@@ -71,8 +71,10 @@
 	only its warmth or chill (`apply` without a thirst state). A potion (Shared/Effects/PotionList:
 	a Drink with `effects`, no water) is drunk any time, Tough As Nails on or off, and its status
 	effects are given when it finishes (server Players/ToughAsNails through Players/Effects:
-	Minecraft's PotionItem.finishUsingItem; an instant effect acts on the next tick). Then
-	(`afterDrinking`):
+	Minecraft's PotionItem.finishUsingItem; an instant effect acts on the next tick). Terraria's
+	mana potions (Lesser Mana Potion 50, Mana Potion 100: a Drink with `mana`, no water) count as
+	potions: drunk any time, their mana and Mana Sickness given when they finish (server
+	Players/Mana.potion), a Glass Bottle back. Then (`afterDrinking`):
 	  one drink   one is used up and its empty container comes back (PotionItem.finishUsingItem:
 	              it replaces the stack when it was the last, else it goes into the inventory);
 	  sips        a sip wears it (its `damage`); the last sip leaves the empty container.
@@ -104,6 +106,9 @@ export type Drink = {
 	chill: number?,
 	-- Status effects it gives (Shared/Effects ids; a potion's: PotionList; nil: none).
 	effects: { PotionEffect }?,
+	-- Mana it restores (Terraria's mana potions, Shared/Mana; nil: none). The server gives it with
+	-- Mana Sickness when the drink finishes (Players/ToughAsNails through Players/Mana.potion).
+	mana: number?,
 }
 
 -- A status effect a drink gives: an Effects id, its ticks and amplifier.
@@ -139,6 +144,9 @@ Drinks.HERBAL_TEA = table.freeze({
 	warmth = 1200,
 	chill = 1200,
 }) :: Drink
+-- Terraria's mana potions (no water): 50 and 100 mana, each with Mana Sickness (Shared/Mana).
+Drinks.LESSER_MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 50 }) :: Drink
+Drinks.MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 100 }) :: Drink
 
 -- Ticks of holding the use button to drink an item (Minecraft's potions and TAN's drinks).
 Drinks.USE_TICKS = 32
@@ -164,6 +172,8 @@ local ITEMS: { [number]: DrinkItem } = {
 	[I.MintTea] = table.freeze({ drink = Drinks.MINT_TEA, empty = I.Bowl }),
 	[I.GingerTea] = table.freeze({ drink = Drinks.GINGER_TEA, empty = I.Bowl }),
 	[I.HerbalTea] = table.freeze({ drink = Drinks.HERBAL_TEA, empty = I.Bowl }),
+	[I.LesserManaPotion] = table.freeze({ drink = Drinks.LESSER_MANA, empty = I.GlassBottle }),
+	[I.ManaPotion] = table.freeze({ drink = Drinks.MANA, empty = I.GlassBottle }),
 }
 for _, variant in PotionList.all() do
 	local effect = Effects.id[variant.effect]
@@ -241,10 +251,15 @@ function Drinks.tempers(drink: Drink?): boolean
 	return drink ~= nil and ((drink.warmth or 0) > 0 or (drink.chill or 0) > 0)
 end
 
--- Is `drink` a potion (it gives status effects: drunk any time, see the header)?
+-- Is `drink` a potion (it gives status effects, or mana: drunk any time, see the header)?
 function Drinks.isPotion(drink: Drink?): boolean
 	local effects = if drink then drink.effects else nil
-	return effects ~= nil and #effects > 0
+	return (effects ~= nil and #effects > 0) or Drinks.manaOf(drink) > 0
+end
+
+-- Mana `drink` restores (0: none; Terraria's mana potions).
+function Drinks.manaOf(drink: Drink?): number
+	return if drink then drink.mana or 0 else 0
 end
 
 --[[

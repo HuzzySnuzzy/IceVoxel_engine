@@ -25,7 +25,9 @@
 	               shield and the minutes and seconds left, with thirst or temperature on), then
 	               Internal Warmth (a flame) and Internal Chill (a snowflake) while they do (with
 	               temperature on). Only with Config.Effects.Hud off: the status effects' icons in
-	               the top right (Ui/EffectHud) show the same three with their time left.
+	               the top right (Ui/EffectHud) show the same three with their time left. When
+	               Terraria's mana stars (Ui/ManaHud) push the item name up, this row and the
+	               reading above it go up as far (`render`'s `raise`).
 	  reading      while a Thermometer (ItemList, TAN's) is the held item, with temperature on: the
 	               row above the status row (in its place when it isn't drawn) reads out the body
 	               temperature and its target as numbers ("-3", "+5"), each in its zone's colour,
@@ -191,6 +193,10 @@ local readingTargetShadow: TextLabel? = nil
 local readingArrow: Frame? = nil
 local readingArt: { [string]: { Frame } } = {}
 local lastReading = ""
+-- The status and reading rows' places as built, and how far up they are moved now (Ui/Hud's
+-- `raise`: the mana stars under the held item's name, Ui/ManaHud).
+local statusY, readingY = 0, 0
+local raised = 0
 local edgesGui: ScreenGui? = nil
 local edges: { Frame } = {}
 local lastZone = math.huge
@@ -345,7 +351,8 @@ function SurvivalHud.build(canvas: Frame, layout: Layout)
 	chillIcon = snowflake
 
 	-- (In the status row's place when that isn't drawn.)
-	local readingY = if STATUS_ROW then layout.statusY - 10 else layout.statusY
+	statusY = layout.statusY
+	readingY = if STATUS_ROW then layout.statusY - 10 else layout.statusY
 	local readingFrame = holder(canvas, "Thermometer", layout.width - ROW_WIDTH, readingY, ROW_WIDTH, 9, 2)
 	readingFrame.Visible = false
 	readingRow = readingFrame
@@ -497,9 +504,22 @@ end
 
 --[[
 	Draws this frame (Ui/Hud's RenderStepped): `survival` when the hearts show (survival,
-	adventure, the HUD in play), `held` the held item (the Thermometer shows its reading).
+	adventure, the HUD in play), `held` the held item (the Thermometer shows its reading), `raise`
+	GUI pixels the status and reading rows move up with the held item's name (Ui/ManaHud's stars
+	under it; 0 or nil: where they were built).
 ]]
-function SurvivalHud.render(now: number, survival: boolean, held: number?)
+function SurvivalHud.render(now: number, survival: boolean, held: number?, raise: number?)
+	local up = raise or 0
+	if up ~= raised then
+		raised = up
+		local statusFrame, readingFrame = statusRow, readingRow
+		if statusFrame then
+			statusFrame.Position = UDim2.fromOffset(statusFrame.Position.X.Offset, statusY - up)
+		end
+		if readingFrame then
+			readingFrame.Position = UDim2.fromOffset(readingFrame.Position.X.Offset, readingY - up)
+		end
+	end
 	local status = SurvivalState.get()
 	local thirstShown = survival and status ~= nil and status.thirstOn
 	local temperatureShown = survival and status ~= nil and status.temperatureOn

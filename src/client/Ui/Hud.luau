@@ -31,6 +31,11 @@
 	             chill effects a row above the item name's (a long centred name reaches the
 	             right side, where they are), the numbers a held Thermometer reads above those,
 	             and frost or heat closing in from the screen's edges.
+	  mana       Terraria's mana (Ui/ManaHud, survival and adventure only): a row of stars on the
+	             left in the armor's row (over the armor icons when they show; a second row above
+	             past 200 mana) while a magic weapon is held, mana isn't full or just changed; the
+	             held item's name and the status row move up (`manaRaise`) when the stars reach
+	             the name's row.
 	  touch      a "..." button at the end of the hotbar opens the inventory (for spectators it is
 	             the spectator menu's middle click), a gear at its start the Options menu, a
 	             skill tree button over the gear the skill tree (Ui/SkillTreeScreen; with
@@ -74,6 +79,7 @@ local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SpectatorGui = require(script.Parent.SpectatorGui)
 local SurvivalHud = require(script.Parent.SurvivalHud)
+local ManaHud = require(script.Parent.ManaHud)
 local Style = require(script.Parent.Style)
 
 export type Mode = "play" | "creative" | "hidden"
@@ -609,6 +615,8 @@ function Hud.start()
 	-- armor, the clemency and effects above the item name's row, which long names fill across,
 	-- all on the right).
 	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeY = ARMOR_Y, statusY = NAME_Y_SURVIVAL - 10 })
+	-- Terraria's mana: stars on the left in the armor's row, or the row above it (Ui/ManaHud).
+	ManaHud.build(canvas, { armorY = ARMOR_Y, nameY = NAME_Y_SURVIVAL })
 
 	--[[ Held item name ]]
 
@@ -645,6 +653,8 @@ function Hud.start()
 	local nextShake = 0
 	local lastPoints = -1
 	local shown = true
+	-- GUI px the held item's name and the status row are moved up over the mana stars (Ui/ManaHud).
+	local manaRaise = 0
 
 	RunService.RenderStepped:Connect(function()
 		local now = os.clock()
@@ -697,7 +707,8 @@ function Hud.start()
 		if alpha > 0 then
 			name.TextTransparency = 1 - alpha
 			nameShadow.TextTransparency = 1 - alpha
-			local y = if survival then NAME_Y_SURVIVAL else NAME_Y_CREATIVE
+			-- (Above the mana stars when they reach its row: Ui/ManaHud's raise, from the last frame.)
+			local y = if survival then NAME_Y_SURVIVAL - manaRaise else NAME_Y_CREATIVE
 			name.Position = UDim2.fromOffset(0, y)
 			nameShadow.Position = UDim2.fromOffset(1, y + 1)
 		end
@@ -710,7 +721,10 @@ function Hud.start()
 		if armorRow.Visible ~= (points > 0) then
 			armorRow.Visible = points > 0
 		end
-		SurvivalHud.render(now, survival, if held then held.item else nil)
+		-- Terraria's mana stars (Ui/ManaHud): in the armor's row, or over the armor when it shows;
+		-- the held item's name and Tough As Nails' status row move up as far as they need.
+		manaRaise = ManaHud.render(now, survival, held ~= nil and Items.magic(held.item) ~= nil, points > 0)
+		SurvivalHud.render(now, survival, if held then held.item else nil, manaRaise)
 
 		-- Knowledge (survival and adventure, once the server sent it).
 		local status = ProgressionState.get()

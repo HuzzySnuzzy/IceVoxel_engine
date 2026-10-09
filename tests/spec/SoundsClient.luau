@@ -450,12 +450,10 @@ return function(t, shared, require, _server, client)
 			return string.find(source, pattern) ~= nil
 		end
 		-- Terraria's sounds whose players are still being built (the double jump: the accessories'
-		-- movement; the cast and mana full: the mana HUD and magic). Each comes off this list
-		-- with the code that plays it.
+		-- movement). Each comes off this list with the code that plays it (the cast and mana
+		-- full did: Interaction/Casting, Player/ManaState).
 		local pending: { [string]: boolean } = {
 			["entity.player.double_jump"] = true,
-			["item.magic.cast"] = true,
-			["entity.player.mana_full"] = true,
 		}
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`

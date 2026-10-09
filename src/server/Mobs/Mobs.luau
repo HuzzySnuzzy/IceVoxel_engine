@@ -48,6 +48,9 @@
 	                       and armor, knocked back from (x, z) when given; returns what landed
 	  Mobs.near(x, y, z, radius)   the live mobs around a point (MobView: id, kind, position,
 	                       box, health)
+	  Mobs.magicDamage(id, amount, attacker?, x?, z?, knockback?)   a magic projectile's hit
+	                       (Players/Magic): as `damage`, with the weapon's own knockback
+	  Mobs.ignite(id, ticks)   sets a mob burning for at least `ticks` (the spark's fire)
 	  Mobs.spawn(kind, x, y, z)    a mob of a MobList name at a position (0 when it can't)
 	  Mobs.explode(x, y, z, power, getBlock)   what a blast does to mobs (World/Explosions'
 	                       handler, set by the boot script)
@@ -593,6 +596,42 @@ function Mobs.damage(id: number, amount: number, attacker: Player?, x: number?, 
 		z = z,
 		knockback = if x and z then Combat.KNOCKBACK else nil,
 	})
+end
+
+--[[
+	A magic projectile's hit (Players/Magic): hurts mob `id` by `amount` half hearts through its
+	cooldown and armor (Terraria's defense against magic), credited to `attacker`, pushed away from
+	(x, z) by `knockback` blocks a tick (0: no push; the weapon's own, not a melee hit's 0.4).
+	Returns what landed.
+]]
+function Mobs.magicDamage(
+	id: number,
+	amount: number,
+	attacker: Player?,
+	x: number?,
+	z: number?,
+	knockback: number?
+): number
+	local mobs = mobWorld
+	if mobs == nil then
+		return 0
+	end
+	return mobs:hurt(id, amount, { player = attacker, x = x, z = z, knockback = knockback or 0 })
+end
+
+--[[
+	Sets mob `id` burning for at least `ticks` (Minecraft's Entity.setSecondsOnFire: a longer fire
+	already burning stays): the Wand of Sparking's spark (Players/Magic). Water and rain put it out
+	as any fire. Whether it is burning now.
+]]
+function Mobs.ignite(id: number, ticks: number): boolean
+	local mobs = mobWorld
+	local mob = if mobs then mobs:get(id) else nil
+	if mob == nil or mob.dead or not (ticks > 0) then
+		return false
+	end
+	mob.burn.fire = math.max(mob.burn.fire, math.floor(ticks))
+	return true
 end
 
 function Mobs.near(x: number, y: number, z: number, radius: number): { MobView }

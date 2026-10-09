@@ -322,6 +322,28 @@ A fast, Minecraft-style voxel engine for Roblox.
   (whatever your thirst, Tough As Nails on or off) and the Glass Bottle comes back. The tooltip
   lists the effect, its level and time, blue or red. Brewing is the Iron Age's, levels II and the
   long potions the Industrial Age's.
+- **Mana and magic (Terraria).** Mana works as in Terraria 1.4.4:
+  - **Capacity:** 20 to start. Each **Mana Crystal** (five Fallen Stars in the grid) adds 20 for
+    good, up to nine (200). A Band of Starpower adds 20 more, and the cap is 400.
+  - **Regeneration:** Terraria's rule. Spending starts a delay of 0.5 s at full mana to 3.3 s
+    empty, then mana comes back faster when it's nearly full and much faster standing still
+    (20 max: about 7.5 a second standing, 1.7 walking).
+  - **HUD:** a row of blue stars (20 mana each, half stars) over the hearts. They show while you
+    hold a magic weapon, while mana isn't full, and for 3 s after it changes. They sit above the
+    armour icons when you wear armour; the item name moves up out of their way.
+  - **Potions:** the **Lesser Mana Potion** (50) and **Mana Potion** (100) are drunk like
+    potions. Each adds 5 s of Mana Sickness, up to 10 s, which cuts magic damage by 5% for each
+    second left.
+  - **Weapons:** hold use to cast every use time along your aim. The **Wand of Sparking** (2 mana,
+    an arcing spark that sets mobs burning half the time) is found in mineshaft chests. The
+    **Emerald Staff** (6 mana, a straight bolt reaching 30 blocks) is crafted, Iron Age. The
+    **Water Bolt** (10 mana, bounces off five walls and goes through a mob) is a rare mineshaft
+    find.
+  - **Projectiles:** the server flies them and decides every hit. Your own shot flies at once,
+    and other clients fly the same path from three small messages.
+  - **Fallen Stars:** they fall at night near every player, about five a night, glowing as they
+    come down. The ones left on the ground vanish at dawn.
+  - **Off:** `Config.Mana` turns all of it off.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
@@ -1146,6 +1168,8 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Place a jigsaw | Right click a face: the jigsaw faces out of it (on a top or bottom face, its top points back at you) | L2 | Tap |
 | Drink / fill  | Right click a water source with an empty hand: a sip; with a Glass Bottle, a Bowl or a canteen: fill it; hold right click with a filled bottle, bowl or canteen, a tea or a potion for 1.6 s: drink it (letting go cancels; Tough As Nails) | L2 | Tap |
 | Boil water    | Right click a Campfire with a dirty water bottle, bowl or canteen: one boils clean (not sneaking; Tough As Nails) | L2 | Tap |
+| Cast magic    | Hold right click with a magic weapon (Wand of Sparking, Emerald Staff, Water Bolt): a cast every use time along the crosshair, while you have the mana (creative: free); a block with a menu still opens first | Hold L2 | Tap, or hold on the target |
+| Mana Crystal  | Right click with a Mana Crystal: +20 max mana for good (nine at most) | L2 | Tap |
 | Pick block    | Middle click (spectator: the spectator menu) |  |      |
 | Drop item     | `Q` (`Ctrl` + `Q`: the whole stack; not while `F3` is held) | D-pad down |    |
 | Inventory     | `E` (creative: the item picker; spectator: none) | Y   | `…` button |
@@ -1420,6 +1444,10 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             the container tables: bottles, canteens, bowls; the teas), Exertion
                             (movement that costs thirst), Boiling (dirty water boiled clean on a
                             campfire)
+  Mana/                     Terraria's mana, pure: init (capacity, 1.4.4's regeneration at 20 Hz,
+                            spending, Mana Sickness), StarFall (when and where Fallen Stars fall)
+  Magic/                    Projectiles (the spark, bolt and water kinds, the deterministic step
+                            both sides fly), Casting (a HeldUse's checks and the cast cadence)
   Progression/              knowledge, Ages and skills, pure: Knowledge (Minecraft's experience
                             curve, the sources and their numbers, fatigue and the budget), Ages
                             (what each opens and needs), Skills (the tree and its perks), init
@@ -1600,7 +1628,10 @@ src/server   -> ServerScriptService.IceVoxel
                             settings), Eating (food held 32 ticks: healing, used up),
                             Progression + ProgressionCommand + ProgressStore (knowledge, Ages and
                             skills: earning, the windows' recipe gate, perks for the parts above,
-                            /knowledge and /age, the DataStore)
+                            /knowledge and /age, the DataStore),
+                            Mana (each player's mana: regeneration, the Mana message, potions,
+                            crystals), Magic (casts and the projectiles' flights and hits),
+                            FallenStars (stars at night, gone at dawn)
 
 src/client   -> StarterPlayerScripts.IceVoxel
   IceVoxel_Client           boot
@@ -1632,10 +1663,12 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Interaction/              BlockInteraction (mining, placing, using), CrackOverlay, TankUse
                             (does a bucket on a machine act on its tanks or open its screen),
                             Drinking (Tough As Nails: filling, sipping, holding a drink), Eating
-                            (holding food); hitting mobs (BlockInteraction)
+                            (holding food), Casting (magic weapons and Mana Crystals, predicted);
+                            hitting mobs (BlockInteraction)
   Inventory/                ClientInventory + Prediction (predicted inventory)
   Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: thirst droplets, the
-                            temperature gauge, frost and heat at the edges), InventoryScreen (with the crafting,
+                            temperature gauge, frost and heat at the edges; ManaHud + ManaStars:
+                            Terraria's mana stars, the layout pure), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
                             energy bar and fluid gauges, empty armor and upgrade slots'
                             outlines), CreativeScreen,
@@ -1688,6 +1721,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             overlay in first person), SurvivalState (Tough As Nails' state from
                             the server), Exertion (reports sprinting, swimming and jumps),
                             EffectState (status effects from the server, counted down),
+                            ManaState (Terraria's mana from the server, casts predicted),
                             ProgressionState (knowledge, the Age and skills from the server; the
                             recipe gate and perks the client predicts with), ViewBob (Minecraft's
                             view bobbing and hurt tilt, pure), MouseLook (mouse sensitivity and
@@ -1701,6 +1735,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
                             animation step)
   Rendering/FuseView        lit TNT and Nukes flashing
+  Rendering/ProjectileView  magic projectiles flown with the server's pure step (neon balls,
+                            lights, trails), this player's casts predicted and adopted
   Rendering/TransmitterRenderer  Mekanism pipes, cables and machines: arms, fluids in pipes and
                             tanks, items moving through transporters, the windows of working
                             generators, Electric Furnaces and Oil Refineries, Batteries' charge
@@ -1847,6 +1883,11 @@ for performance:
 | `Mobs.ForgetTicks`        | 6000    | A creature with no player within 128 blocks this long is dropped (memory). |
 | `Mobs.TrackingDistance` / `SyncTicks` | 64 / 2 | Players see mobs this close; their state is sent every SyncTicks ticks while it changes. |
 | `Mobs.AttacksPerSecond`   | 10      | Attacks a player may send a second.                                 |
+| `Mana.Enabled`            | true    | Terraria's mana: stars on the HUD, regeneration, magic weapons, mana potions' mana and Fallen Stars (false: none of it; the store still saves what a character has). |
+| `Mana.Base` / `PerCrystal` / `MaxCrystals` / `Max` | 20 / 20 / 9 / 400 | Mana to start with, per Mana Crystal used, crystals usable (200 with nine), and the most with accessories. |
+| `Mana.SicknessSeconds` / `SicknessMax` / `SicknessDamage` | 5 / 10 / 0.05 | Mana Sickness: seconds each mana potion adds, the most, and the share of magic damage cut per second left. |
+| `Mana.HudLinger`          | 3       | Seconds the HUD's mana stars stay after mana changed (they also show while a magic weapon is held or mana isn't full). |
+| `Mana.Stars`              | PerNight 5, 16..48 blocks, 40 high | Fallen Stars: about PerNight a night for each player, onto the top block of a column MinDistance..MaxDistance blocks away, from FallHeight above it, between NightStart 13000 and NightEnd 23000 (the ones on the ground vanish at NightEnd); `Enabled = false`: none. |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
 | `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
 | `Explosions.MaxCells` / `ClusterSize` / `MinBlastVolume` | 4096 / 4 / 0.5 | Fuel one ignition sets off at most; a blast per cube this wide; cubes with less fuel (buckets) just flash into fire. |
