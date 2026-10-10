@@ -462,14 +462,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   gives three quarters of the last), all repeats give at most 20 points a minute (perks included),
   and blocks a player placed give nothing at all, so farms dry up. What a furnace pushes into a
   chest beside it, or a pipe pulls out, counts as smelted by whoever last used the furnace.
-  Knowledge opens five **Ages**, each at a level and two milestones: the **Stone Age** (where
+  Knowledge opens five **Ages**, each at a level and one or two milestones: the **Stone Age** (where
   everyone starts: wood, stone tools, the crafting table, furnace, chests, torches, glass, iron
   smelting, Tough As Nails' basics, cooked meat, leather armor and wool), the **Iron Age** (level 5,
   a Furnace crafted and an Iron Ingot smelted: iron and gold tools and armor, the Bucket, Shears,
   Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting, potions),
   the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic and
   advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and TNT,
-  potions II and long potions), the **Electric Age** (level 25, a Heat Generator and 6 biomes:
+  potions II and long potions), the **Electric Age** (level 25, a Heat Generator:
   cables, the Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion
   Generator, elite pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar
   Panel, the ultimate tiers, the Nuke). A later Age's crafting results stay out of the grid (shown

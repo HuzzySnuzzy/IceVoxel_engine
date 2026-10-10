@@ -26,7 +26,7 @@
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
 	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), and the
 	                  potions' strong (II) and long variants.
-	  Electric Age    (level 25, a Heat Generator crafted, 6 biomes discovered) basic and advanced
+	  Electric Age    (level 25, a Heat Generator crafted) basic and advanced
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
 	                  transporters, pipes and tanks.
@@ -225,7 +225,7 @@ local list: { Age } = {
 		level = 25,
 		milestones = {
 			{ category = "craft", key = "HeatGenerator", text = "Craft a Heat Generator" },
-			{ category = "biome", count = 6, text = "Discover 6 biomes" },
+			-- (No biome count: biomes are too large for finding six to be fun.)
 		},
 		reward = 150,
 		recipes = electric,

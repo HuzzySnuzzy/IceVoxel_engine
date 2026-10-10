@@ -329,15 +329,11 @@ return function(t, shared, require, server, client)
 		local both = Progression.advance(fast, fastSession)
 		t.eq(#both, 2, "Iron and Industrial together")
 		t.eq(fast.age, 3)
-		-- The Electric Age counts biomes.
+		-- The Electric Age: level 25 and a Heat Generator (no biomes to find).
 		Progression.setPoints(fast, Knowledge.total(25))
+		t.eq(#Progression.advance(fast, fastSession), 0, "no Heat Generator yet")
 		Progression.discover(fast, fastSession, "craft", "HeatGenerator")
-		for i = 1, 5 do
-			Progression.discover(fast, fastSession, "biome", `Biome{i}`)
-		end
-		t.eq(#Progression.advance(fast, fastSession), 0, "5 biomes")
-		Progression.discover(fast, fastSession, "biome", "Biome6")
-		t.eq(Progression.advance(fast, fastSession)[1].id, "electric", "6 biomes")
+		t.eq(Progression.advance(fast, fastSession)[1].id, "electric", "a Heat Generator crafted")
 		t.eq(#Progression.advance(fast, fastSession), 0, "the Atomic Age waits")
 		-- /age set: up, with the Ages passed counted as reached.
 		local set = Progression.new()
