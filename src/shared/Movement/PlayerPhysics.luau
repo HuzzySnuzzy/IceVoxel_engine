@@ -118,6 +118,7 @@ local Fluids = require(script.Parent.Parent.Fluids)
 local GameMode = require(script.Parent.Parent.GameMode)
 local FluidFlow = require(script.Parent.Parent.World.FluidFlow)
 local Hull = require(script.Parent.Hull)
+local Shapes = require(script.Parent.Parent.Blocks.Shapes)
 
 type Box = Hull.Box
 
@@ -496,12 +497,12 @@ function PlayerPhysics.knockback(state: State, kx: number, ky: number, kz: numbe
 	return true
 end
 
--- (A door's panel is boxes of its cell: Blocks.collision.)
+-- (A door's panel, a fence's post and arms, a pipe's core and arms: Blocks/Shapes.)
 local function solidChecker(world: World): Hull.SolidAt
 	local getBlock = world.getBlock
 	return function(x: number, y: number, z: number): boolean | Hull.Shape
 		local block = getBlock(x, y, z)
-		return block == nil or Blocks.collision(block)
+		return block == nil or Shapes.collisionAt(getBlock, x, y, z, block)
 	end
 end
 

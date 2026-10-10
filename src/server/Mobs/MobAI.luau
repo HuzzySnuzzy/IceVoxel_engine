@@ -52,6 +52,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Shapes = require(Shared.Blocks.Shapes)
 local DayCycle = require(Shared.DayCycle)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
@@ -166,7 +167,9 @@ function MobAI.hazard(block: number?): boolean
 	return AVOIDED_FLUID[buffer.readu8(Fluids.blockLut, block)] == true
 end
 
--- Is there a clear line between two points (no solid block: Minecraft's ClipContext COLLIDER)?
+-- Is there a clear line between two points (nothing that collides in the way, by its collision boxes:
+-- Minecraft's ClipContext COLLIDER; a closed door's panel hides a player, its open doorway does
+-- not; Blocks/Shapes.sight)?
 function MobAI.canSee(
 	getBlock: MobPhysics.GetBlock,
 	ax: number,
@@ -181,7 +184,8 @@ function MobAI.canSee(
 	if length < 1e-6 then
 		return true
 	end
-	return VoxelRaycast.cast(ax, ay, az, dx, dy, dz, length, getBlock, Blocks.isSolid) == nil
+	local stops, outline = Shapes.sight(getBlock)
+	return VoxelRaycast.cast(ax, ay, az, dx, dy, dz, length, getBlock, stops, outline) == nil
 end
 
 -- May mobs hunt this player (alive, and a game mode that can be hurt)?

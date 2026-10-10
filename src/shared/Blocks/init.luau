@@ -130,6 +130,10 @@ export type BlockDef = {
 	obstructs: boolean,
 	-- Not solid, but the movement hull bumps into its bounds (doors; see Blocks.collision).
 	collides: boolean,
+	-- The boxes the movement hull bumps into instead (pixels; up to 24 high: fences).
+	collision: { Bounds }?,
+	-- A fence post's arms (bits 1 North, 2 South, 4 West, 8 East), nil for anything else.
+	fence: number?,
 	-- The direction of the block it hangs on (nil: needs nothing) and the item placing / dropping
 	-- it when that is not the block itself.
 	support: string?,
@@ -588,6 +592,8 @@ for index, spec in BlockList do
 		bounds = spec.bounds or (if spec.shape then shapeBounds(spec.shape) else FULL_CELL),
 		obstructs = spec.obstructs == true or spec.collides == true,
 		collides = spec.collides == true,
+		collision = spec.collision,
+		fence = spec.fence,
 		support = spec.support,
 		item = spec.item,
 		brokenByFluid = spec.brokenByFluid == true,
@@ -1528,6 +1534,75 @@ function Blocks.doorPlacement(
 	return if variant and Blocks.canPlace(variant, getBlock, x, y, z) then variant else nil
 end
 
+--[[ Fences (BlockList `fence`) ]]
+
+-- A fence's arm bits per side, and back.
+local FENCE_BIT: { [string]: number } = { North = 1, South = 2, West = 4, East = 8 }
+local FENCE_BITS: { [number]: string } = { [1] = "North", [2] = "South", [4] = "West", [8] = "East" }
+-- Per fence group (keyed by its first block, the lone post): the variant for each set of arms.
+local fenceIds: { [number]: { [number]: number } } = {}
+for id, def in defs do
+	local mask = def.fence
+	if mask and def.caveTwin == nil then
+		assert(mask >= 0 and mask <= 15 and mask == math.floor(mask), `Fence {def.name} has bad arms {mask}`)
+		local base = (variants[id] or { id })[1]
+		local group = fenceIds[base] or {}
+		fenceIds[base] = group
+		assert(group[mask] == nil, `Two variants of fence {defs[base].name} have arms {mask}`)
+		group[mask] = id
+	end
+end
+for base, group in fenceIds do
+	for mask = 0, 15 do
+		assert(group[mask], `Fence {defs[base].name} lacks a variant with arms {mask}`)
+	end
+end
+
+-- Is the block a fence (any variant, or a cave twin of one)?
+function Blocks.isFence(id: number): boolean
+	local def = defs[id]
+	return def ~= nil and def.fence ~= nil
+end
+
+-- A fence's arms (bits 1 North, 2 South, 4 West, 8 East), nil for anything else.
+function Blocks.fenceArms(id: number): number?
+	local def = defs[id]
+	return if def then def.fence else nil
+end
+
+-- The variant of `id`'s fence (any variant, or a cave twin's fence) with arms `mask`.
+function Blocks.fenceVariant(id: number, mask: number): number?
+	local def = defs[id]
+	if def == nil or def.fence == nil then
+		return nil
+	end
+	local plain = if def.caveTwin then rawget(ids :: any, def.caveTwin) :: number else id
+	local group = fenceIds[(variants[plain] or { plain })[1]]
+	return if group then group[mask] else nil
+end
+
+--[[
+	The arms a fence at (x, y, z) reaches out (FenceBlock.connectsTo): to every side whose
+	neighbour is a fence, or a sturdy block (a solid full cube: not leaves, glass panes...). nil
+	neighbours (unloaded) join nothing.
+]]
+function Blocks.fenceConnections(
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number
+): number
+	local mask = 0
+	for bit, side in FENCE_BITS do
+		local d = DIRECTIONS[side]
+		local other = getBlock(x + d[1], y, z + d[3])
+		if other ~= nil and defs[other] ~= nil and (defs[other].fence ~= nil or Blocks.isSturdy(other)) then
+			mask = bit32.bor(mask, bit)
+		end
+	end
+	return mask
+end
+
 --[[
 	May `plant` (a single plant or a lower half) stand on `soil`? Its soil set (Minecraft's
 	BushBlock.mayPlaceOn and its overrides): mushrooms also stand on any sturdy opaque full block
@@ -1730,6 +1805,10 @@ function Blocks.placementFor(
 	if doorStates[base] then
 		return Blocks.doorPlacement(base, lx, lz, getBlock, x, y, z, hx, hz)
 	end
+	if fenceIds[base] then
+		-- (Joined to the fences and sturdy blocks beside it: FenceBlock.getStateForPlacement.)
+		return fenceIds[base][Blocks.fenceConnections(getBlock, x, y, z)]
+	end
 	if jigsawGroup(base) then
 		return Blocks.jigsawPlacement(nx, ny, nz, lx, ly, lz)
 	end
@@ -1818,7 +1897,11 @@ end
 local WHOLE_CELL = table.freeze({ 0, 0, 0, 1, 1, 1 })
 local obstructions: { [number]: { number } } = {}
 for id, def in defs do
-	if def.solid then
+	if def.collision then
+		-- (Explicit collision boxes: placing into a player goes by the outline, a fence's post and
+		-- arms.)
+		obstructions[id] = outlines[id] or WHOLE_CELL
+	elseif def.solid then
 		obstructions[id] = WHOLE_CELL
 	elseif def.obstructs then
 		obstructions[id] = outlines[id] or WHOLE_CELL
@@ -1830,14 +1913,41 @@ function Blocks.obstruction(id: number): { number }?
 end
 
 --[[
-	What the movement hull bumps into in a block's cell (Shared/Movement/Hull's SolidAt): true for
-	a solid block (its whole cell), the boxes of a `collides` block (its outline, block units within
-	the cell: a door's panel), else false.
+	What the movement hull bumps into in a block's cell (Shared/Movement/Hull's SolidAt): a block's
+	`collision` boxes (block units: a fence's post and arms, up to 1.5 high), else true for a solid
+	block (its whole cell), the boxes of a `collides` block (its outline: a door's panel), else
+	false. Blocks/Shapes adds what depends on the neighbours (pipes).
 ]]
 export type CollisionBox = { minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number }
 local collisions: { [number]: { CollisionBox } } = {}
 for id, def in defs do
-	if def.collides then
+	local explicit = def.collision
+	if explicit then
+		local boxes: { CollisionBox } = {}
+		for _, b in explicit do
+			assert(
+				b.min[2] >= 0
+					and b.max[2] <= 24
+					and b.min[1] >= 0
+					and b.max[1] <= 16
+					and b.min[3] >= 0
+					and b.max[3] <= 16,
+				`Block {def.name} collides outside its cell (or over 24 pixels high)`
+			)
+			table.insert(
+				boxes,
+				table.freeze({
+					minX = b.min[1] / 16,
+					minY = b.min[2] / 16,
+					minZ = b.min[3] / 16,
+					maxX = b.max[1] / 16,
+					maxY = b.max[2] / 16,
+					maxZ = b.max[3] / 16,
+				})
+			)
+		end
+		collisions[id] = table.freeze(boxes)
+	elseif def.collides then
 		local o = outlines[id] or WHOLE_CELL
 		collisions[id] = table.freeze({
 			table.freeze({ minX = o[1], minY = o[2], minZ = o[3], maxX = o[4], maxY = o[5], maxZ = o[6] }),
@@ -1846,10 +1956,11 @@ for id, def in defs do
 end
 
 function Blocks.collision(id: number): boolean | { CollisionBox }
-	if buffer.readu8(Blocks.solidLut, id) == 1 then
-		return true
+	local boxes = collisions[id]
+	if boxes then
+		return boxes
 	end
-	return collisions[id] or false
+	return buffer.readu8(Blocks.solidLut, id) == 1
 end
 
 --[[ Structures: creative only blocks, structure block modes, jigsaws, turning, cave twins ]]
@@ -2031,6 +2142,20 @@ end
 -- keep an axis), a jigsaw's turned orientation, else itself.
 local function turned(id: number, rotation: number, mirror: string): number
 	local def = defs[id]
+	local mask = def.fence
+	if mask then
+		if def.caveTwin then
+			-- (Only lone posts have twins: nothing to turn.)
+			return id
+		end
+		local turnedMask = 0
+		for bit, side in FENCE_BITS do
+			if bit32.band(mask, bit) ~= 0 then
+				turnedMask = bit32.bor(turnedMask, FENCE_BIT[Blocks.turnDirection(side, rotation, mirror)])
+			end
+		end
+		return Blocks.fenceVariant(id, turnedMask) or id
+	end
 	local door = def.door
 	if door then
 		-- (A mirror swaps the hinge too: DoorBlock.mirror.)

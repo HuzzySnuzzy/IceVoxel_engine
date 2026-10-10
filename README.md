@@ -869,7 +869,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   small move in a cave stays in the cave), else the nearest column with safe ground within 24
   blocks (a lake's, lava lake's, geyser's, ravine's or cave entrance's middle has none), else
   afloat on open water; the answer says where they landed.
-- **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. Logistical Transporters
+- **Mekanism pipes.** Mekanism 10's transmitters, for what the game has. A transmitter is aimed
+  at and collides by its core and the arms it joins (Mekanism's shapes; a pipe on the floor is
+  0.75 high: jump over it), not its whole block. Logistical Transporters
   (Basic, Advanced, Elite, Ultimate) carry items between chests, furnaces and machines, and you see
   them move: a side set to pull with the Configurator takes 1 / 16 / 32 / 64 items every half
   second, which travel at 1 / 2 / 4 / 10 blocks a second along the cheapest route (faster
@@ -1140,7 +1142,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   Climbing makes the ladder's, vine's or rope's own step sound every 1.67 blocks, the climb
   animation plays, and the `F3` overlay shows "climbing" and "stuck". Also: **Rails** (six iron
   ingots and a stick make 16, from the Iron Age) lie along the way you face; the **Oak Fence**
-  (planks and sticks) is a post; **Moss Block**, **Moss Carpet** (two moss make three), **Hanging
+  (planks and sticks) is a post that reaches rails out to the fences and solid blocks beside it,
+  changing as they come and go, and collides with its post and rails 1.5 blocks high as in
+  Minecraft: you walk right up to a lone post, but nobody (you, mobs) gets through or jumps over a
+  fence line, so pens hold their animals; **Moss Block**, **Moss Carpet** (two moss make three), **Hanging
   Roots** and **Mossy Cobblestone** (cobblestone and a vine or moss).
 - **Doors.** Minecraft's wooden doors in oak, spruce, birch, jungle and acacia (six planks of a
   wood in two columns make three; 200 ticks of furnace fuel). A door is two blocks tall and goes
@@ -1152,7 +1157,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   their outer sides (place the second beside the first and it takes the other hinge), open and
   close together when you use either, as long as both are open or both closed. Doors of
   different woods pair too. A door is a 3 pixel panel: you bump into it closed and walk past
-  it open, as mobs and dropped items do. Breaking either half breaks both and drops one door; a
+  it open, as mobs and dropped items do, and mobs can't see (or follow) you through a closed one,
+  nor an explosion reach you behind it. Breaking either half breaks both and drops one door; a
   door whose block underneath goes pops off. Each wood has its own windows (oak two, birch four,
   jungle two small ones, acacia one, spruce none), drawn from boxes, see-through. Opening plays
   `block.wooden_door.open` and closing `block.wooden_door.close` (swap them like any sound below).

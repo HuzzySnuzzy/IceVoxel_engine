@@ -88,8 +88,8 @@ return function(t, shared, require, server)
 			t.eq(B[name], last + index, `{name} id`)
 			t.ok(not Blocks.isCaveTwin(B[name]), `{name} is no twin`)
 		end
-		-- (Then the five doors' 32 halves each: Doors.)
-		t.eq(Blocks.count, 244 + 5 * 32, "17 blocks and 14 twins, then the doors")
+		-- (Then the five doors' 32 halves each: Doors; then the Oak Fence's 15 variants with arms.)
+		t.eq(Blocks.count, 244 + 5 * 32 + 15, "17 blocks and 14 twins, then the doors and fence arms")
 		for twin, of in TWINS do
 			local id = B[twin]
 			t.ok(id > B.MossyCobblestone, `{twin} comes after the plain blocks`)

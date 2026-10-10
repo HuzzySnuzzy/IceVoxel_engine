@@ -9,7 +9,8 @@
 
 	Blocks smaller than their cell (torches, lanterns) can pass an `outline` (Blocks.outline): the
 	ray must hit that box inside the cell, else it goes on past it (to the wall behind a torch), and
-	the face reported is the outline's.
+	the face reported is the outline's. An outline may be several boxes (six numbers each, one
+	after the other: a pipe's core and arms, Blocks/Shapes); the nearest one hit counts.
 ]]
 
 local VoxelRaycast = {}
@@ -91,8 +92,8 @@ end
 	`getBlock(x, y, z)` returns a block id or nil (unloaded = passes through).
 	`isTarget(id)` decides which blocks stop the ray.
 	`outline(id, x, y, z)` (optional): the part of the cell a block fills, { minX, minY, minZ,
-	maxX, maxY, maxZ } in 0..1, or nil for the whole cell (Blocks.outline, or Fire.outlineAt for a
-	fire's, which depends on its neighbours).
+	maxX, maxY, maxZ } in 0..1 (or several such boxes in a row), or nil for the whole cell
+	(Blocks.outline, or Fire.outlineAt for a fire's, which depends on its neighbours).
 ]]
 function VoxelRaycast.cast(
 	ox: number,
@@ -139,8 +140,26 @@ function VoxelRaycast.cast(
 			if box == nil then
 				return { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = t }
 			end
-			local enter, axis =
-				enterBox(ox, oy, oz, dx, dy, dz, x + box[1], y + box[2], z + box[3], x + box[4], y + box[5], z + box[6])
+			local enter, axis = nil, 0
+			for i = 1, #box - 5, 6 do
+				local e, a = enterBox(
+					ox,
+					oy,
+					oz,
+					dx,
+					dy,
+					dz,
+					x + box[i],
+					y + box[i + 1],
+					z + box[i + 2],
+					x + box[i + 3],
+					y + box[i + 4],
+					z + box[i + 5]
+				)
+				if e and (enter == nil or e < enter) then
+					enter, axis = e, a
+				end
+			end
 			if enter and enter <= maxDistance then
 				local hit = { x = x, y = y, z = z, nx = nx, ny = ny, nz = nz, block = block, distance = enter }
 				if axis ~= 0 then

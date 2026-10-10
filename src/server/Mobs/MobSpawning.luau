@@ -51,6 +51,7 @@ local ChunkLayout = require(Shared.World.ChunkLayout)
 local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
 local Hull = require(Shared.Movement.Hull)
+local Shapes = require(Shared.Blocks.Shapes)
 local LightEstimate = require(Shared.World.LightEstimate)
 local MobList = require(Shared.Entities.MobList)
 
@@ -174,7 +175,7 @@ function MobSpawning.validSpot(
 	local box = Hull.box(x + 0.5, y, z + 0.5, kind.width, kind.height)
 	local function solidAt(bx: number, by: number, bz: number): boolean | Hull.Shape
 		local block = getBlock(bx, by, bz)
-		return block == nil or Blocks.collision(block)
+		return block == nil or Shapes.collisionAt(getBlock, bx, by, bz, block)
 	end
 	if not Hull.noCollision(solidAt, box) then
 		return false

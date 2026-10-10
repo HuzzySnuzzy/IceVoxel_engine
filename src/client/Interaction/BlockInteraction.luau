@@ -159,6 +159,7 @@ local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
 local Doors = require(Shared.Blocks.Doors)
 local Fire = require(Shared.Fire)
+local Shapes = require(Shared.Blocks.Shapes)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
@@ -397,8 +398,36 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local function getBlock(x: number, y: number, z: number): number?
 		return world:getBlock(x, y, z)
 	end
-	-- Each block's outline where it is (Blocks.outline; a fire's from the walls it clings to).
-	local outlineAt = Fire.outlineAt(getBlock)
+	-- Each block's outline where it is (Blocks.outline; a fire's from the walls it clings to; a
+	-- transmitter's core and the arms it draws, Blocks/Shapes: several boxes).
+	local fireOutline = Fire.outlineAt(getBlock)
+	local function outlineAt(block: number, x: number, y: number, z: number): { number }?
+		if Transmitters.isTransmitter(block) then
+			local transmitters, acceptors = TransmitterRenderer.connections(x, y, z)
+			return Shapes.flat(Shapes.transmitterBoxes(block, transmitters, acceptors))
+		end
+		return fireOutline(block, x, y, z)
+	end
+	-- The box around an outline's boxes (one per outline list), for the highlight and the cracks.
+	local unions: { [{ number }]: { number } } = setmetatable({}, { __mode = "k" }) :: any
+	local function around(boxes: { number }): { number }
+		if #boxes <= 6 then
+			return boxes
+		end
+		local cached = unions[boxes]
+		if cached then
+			return cached
+		end
+		local box = { boxes[1], boxes[2], boxes[3], boxes[4], boxes[5], boxes[6] }
+		for i = 7, #boxes - 5, 6 do
+			for k = 0, 2 do
+				box[k + 1] = math.min(box[k + 1], boxes[i + k])
+				box[k + 4] = math.max(box[k + 4], boxes[i + k + 3])
+			end
+		end
+		unions[boxes] = box
+		return box
+	end
 
 	local function rootPart(): BasePart?
 		local character = player.Character
@@ -848,7 +877,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				hit.y,
 				hit.z,
 				math.floor(current.progress * 10),
-				outlineAt(hit.block, hit.x, hit.y, hit.z)
+				around(outlineAt(hit.block, hit.x, hit.y, hit.z) or FULL_OUTLINE)
 			)
 		end
 	end
@@ -1455,7 +1484,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				highlight.Parent = workspace.CurrentCamera
 			end
 			-- The block's outline: its cell, or the box of a torch, lantern or fire.
-			local box = outlineAt(hit.block, hit.x, hit.y, hit.z) or FULL_OUTLINE
+			local box = around(outlineAt(hit.block, hit.x, hit.y, hit.z) or FULL_OUTLINE)
 			if box ~= outlined then
 				outlined = box
 				highlight.Size = Vector3.new(box[4] - box[1], box[5] - box[2], box[6] - box[3]) * BLOCK

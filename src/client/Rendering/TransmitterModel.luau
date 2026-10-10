@@ -148,19 +148,18 @@ local PLATE = TransmitterModel.PLATE
 local DOWN, UP = Transmitters.DOWN, Transmitters.UP
 local NORMAL, PULL, PUSH = Transmitters.MODES.NORMAL, Transmitters.MODES.PULL, Transmitters.MODES.PUSH
 
--- A transmitter's sizes (pixels): half its core with the frame, and its arms' tube, collar and
--- plate across.
-export type Sizes = { core: number, arm: number, collar: number, plate: number }
+-- A transmitter's sizes (pixels; Shared/Transmitters, which Blocks/Shapes collides with).
+export type Sizes = Transmitters.Sizes
 
-local LARGE: Sizes = table.freeze({ core = CORE, arm = ARM, collar = COLLAR, plate = PLATE })
--- Mekanism's small transmitters (Universal Cables): a 6 pixel core.
-local SMALL: Sizes = table.freeze({ core = 3, arm = 4, collar = 5, plate = 8 })
+local LARGE: Sizes = Transmitters.LARGE
+local SMALL: Sizes = Transmitters.SMALL
+assert(LARGE.core == CORE and LARGE.arm == ARM and LARGE.collar == COLLAR and LARGE.plate == PLATE)
 TransmitterModel.SMALL = SMALL
 TransmitterModel.LARGE = LARGE
 
 -- The sizes of the transmitter `block` (small for Universal Cables, else Mekanism's large ones).
 function TransmitterModel.sizes(block: number?): Sizes
-	return if block and Transmitters.kindOf(block) == "energy" then SMALL else LARGE
+	return Transmitters.sizes(block)
 end
 
 --[[ Boxes ]]

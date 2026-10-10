@@ -35,6 +35,7 @@
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
+local Shapes = require(script.Parent.Parent.Blocks.Shapes)
 local Config = require(script.Parent.Parent.Config)
 local Coords = require(script.Parent.Coords)
 local VoxelRaycast = require(script.Parent.VoxelRaycast)
@@ -161,7 +162,9 @@ local function blocked(
 	if length < 1e-9 then
 		return false
 	end
-	return VoxelRaycast.cast(ax, ay, az, dx, dy, dz, length, getBlock, Blocks.isSolid) ~= nil
+	-- (Through what collides, by its boxes: Minecraft's ClipContext COLLIDER; a closed door shields.)
+	local stops, outline = Shapes.sight(getBlock)
+	return VoxelRaycast.cast(ax, ay, az, dx, dy, dz, length, getBlock, stops, outline) ~= nil
 end
 
 --[[

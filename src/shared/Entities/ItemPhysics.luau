@@ -40,6 +40,7 @@ local Blocks = require(script.Parent.Parent.Blocks)
 local Fluids = require(script.Parent.Parent.Fluids)
 local FluidFlow = require(script.Parent.Parent.World.FluidFlow)
 local Hull = require(script.Parent.Parent.Movement.Hull)
+local Shapes = require(script.Parent.Parent.Blocks.Shapes)
 
 type Box = Hull.Box
 
@@ -95,10 +96,10 @@ local current: GetBlock = function(_x: number, _y: number, _z: number): number?
 	return nil
 end
 
--- (A door's panel is boxes of its cell: Blocks.collision.)
+-- (A door's panel, a fence's post and arms, a pipe's core and arms: Blocks/Shapes.)
 local function solidAt(x: number, y: number, z: number): boolean | Hull.Shape
 	local block = current(x, y, z)
-	return block == nil or Blocks.collision(block)
+	return block == nil or Shapes.collisionAt(current, x, y, z, block)
 end
 
 -- The fluid of each block (Shared/Fluids id, 0 none; every level and cave twin), and per fluid

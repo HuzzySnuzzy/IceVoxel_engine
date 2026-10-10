@@ -95,6 +95,15 @@
 	                `bounds`, though it is not `solid` (Minecraft's collision shape: a door's 3 pixel
 	                panel, Blocks.collision). Implies `obstructs`. Lanterns keep none, so players
 	                walk through them as before.
+	  collision     { Bounds }: the boxes the movement hull bumps into instead (pixels; they may
+	                reach up to 24, half a block over the cell: a fence's post and arms, Minecraft's
+	                1.5 block fence collision), also for a `solid` block, whose cell then collides
+	                only there; placing into a player and line of sight go by them too.
+	  fence         0..15: the sides a fence post reaches an arm to (bits: 1 North, 2 South, 4 West,
+	                8 East; Minecraft's FenceBlock connections). A fence and its variants (one per
+	                set of sides) form a fence group: placing and neighbours changing pick the
+	                variant joining the fences and sturdy blocks beside it (Blocks.fenceConnections,
+	                server Behaviours/Fence); turning a structure turns its arms.
 	  support       The side the block hangs on: "Down" stands on the block below, "Up" hangs from
 	                the one above, "North" / "South" / "West" / "East" are fixed to that side. That
 	                block must be sturdy (`sturdy` above); when it goes, this one breaks and drops
@@ -278,6 +287,8 @@ export type BlockSpec = {
 	bounds: Bounds?,
 	obstructs: boolean?,
 	collides: boolean?,
+	collision: { Bounds }?,
+	fence: number?,
 	support: string?,
 	item: string?,
 	brokenByFluid: boolean?,
@@ -2851,29 +2862,77 @@ do
 end
 
 --[[
-	The Oak Fence (Minecraft's oak_fence), as a post only: its 4 x 4 pixel post, solid (the
-	movement hull makes it a full block, where Minecraft's collision is 1.5 high: players can step
-	onto one). Minecraft's fence also reaches arms towards fences and walls beside it; a block's
-	look here is its id alone, and the mineshafts' posts stand against rock, so the arms are left
-	out (a client overlay could draw them later without new blocks). Not sturdy (nothing hangs on
-	it). Strength 2, blast resistance 3, an axe mines it fast, wood sounds, burns like planks
-	(5 / 20), 300 ticks of fuel. Three from four oak planks and two sticks. Drawn in the planks'
-	texture (the pack's "planks" on the post).
+	The Oak Fence (Minecraft's oak_fence): a 4 x 4 pixel post, and two rails (2 pixels wide, 3
+	tall, at 6..9 and 12..15) out to every side it connects to: fences beside it and sturdy blocks
+	(`fence`; FenceBlock.connectsTo). OakFence is the lone post and the item; its 15 variants with
+	arms come at the end of the list (one per set of sides), and placing one, or a neighbour
+	changing, picks the variant (Blocks.fenceConnections, server Behaviours/Fence). Solid, but it
+	collides only with its post and arms (`collision`), 1.5 blocks high, as Minecraft's: players
+	and mobs can't jump over a fence (a pen holds its animals), and walk past a lone post. Its
+	outline: the post and arms 4 pixels wide. Not sturdy (nothing hangs on it). Strength 2, blast
+	resistance 3, an axe mines it fast, wood sounds, burns like planks (5 / 20), 300 ticks of fuel.
+	Three from four oak planks and two sticks. Drawn in the planks' texture (the pack's "planks").
 ]]
-table.insert(list, {
-	name = "OakFence",
-	displayName = "Oak Fence",
-	color = { 170, 134, 84 },
-	material = "WoodPlanks",
-	sound = "wood",
-	solid = true,
-	hardness = 2,
-	blastResistance = 3,
-	tool = "axe",
-	shape = { { size = { 4, 16, 4 }, offset = { 0, 0, 0 } } },
-	bounds = { min = { 6, 0, 6 }, max = { 10, 16, 10 } },
-	flammable = { ignite = 5, burn = 20 },
-})
+-- A fence post with arms to the sides of `mask` (`fence`): its shape, outline and collision.
+local FENCE_SIDES: { { bit: number, side: string } } = {
+	{ bit = 1, side = "North" },
+	{ bit = 2, side = "South" },
+	{ bit = 4, side = "West" },
+	{ bit = 8, side = "East" },
+}
+local function fencePost(mask: number): ({ ShapeBox }, Bounds, { Bounds })
+	local shape: { ShapeBox } = { { size = { 4, 16, 4 }, offset = { 0, 0, 0 } } }
+	local lo, hi = { 6, 0, 6 }, { 10, 16, 10 }
+	local collision: { Bounds } = { { min = { 6, 0, 6 }, max = { 10, 24, 10 } } }
+	for _, entry in FENCE_SIDES do
+		if bit32.band(mask, entry.bit) ~= 0 then
+			-- (Rails authored against the wall to the south, `onWall` turns them.)
+			table.insert(shape, onWall({ size = { 2, 3, 6 }, offset = { 0, -0.5, 5 } }, entry.side))
+			table.insert(shape, onWall({ size = { 2, 3, 6 }, offset = { 0, 5.5, 5 } }, entry.side))
+			local arm = wallBounds(entry.side, 6)
+			for k = 1, 3, 2 do
+				if arm.min[k] == 0 and arm.max[k] == 16 then
+					arm.min[k], arm.max[k] = 6, 10
+				end
+			end
+			for k = 1, 3 do
+				lo[k] = math.min(lo[k], arm.min[k])
+				hi[k] = math.max(hi[k], arm.max[k])
+			end
+			table.insert(collision, { min = { arm.min[1], 0, arm.min[3] }, max = { arm.max[1], 24, arm.max[3] } })
+		end
+	end
+	return shape, { min = lo, max = hi }, collision
+end
+local function fenceSpec(mask: number): BlockSpec
+	local shape, bounds, collision = fencePost(mask)
+	local name = "OakFence"
+	for _, entry in FENCE_SIDES do
+		if bit32.band(mask, entry.bit) ~= 0 then
+			name ..= entry.side
+		end
+	end
+	return {
+		name = name,
+		displayName = "Oak Fence",
+		color = { 170, 134, 84 },
+		material = "WoodPlanks",
+		sound = "wood",
+		solid = true,
+		placeable = mask == 0,
+		item = if mask == 0 then nil else "OakFence",
+		hardness = 2,
+		blastResistance = 3,
+		tool = "axe",
+		shape = shape,
+		bounds = bounds,
+		collision = collision,
+		fence = mask,
+		behaviour = "Fence",
+		flammable = { ignite = 5, burn = 20 },
+	}
+end
+table.insert(list, fenceSpec(0))
 
 --[[
 	The Cobweb (Minecraft's WebBlock): moving through one is slowed to a quarter sideways and a
@@ -3269,6 +3328,11 @@ do
 			end
 		end
 	end
+end
+
+-- The Oak Fence's variants with arms (see the Oak Fence above): one per set of sides.
+for mask = 1, 15 do
+	table.insert(list, fenceSpec(mask))
 end
 
 return list

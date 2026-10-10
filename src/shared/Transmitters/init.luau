@@ -136,6 +136,17 @@ function Transmitters.sideName(side: number): string
 	return Transmitters.SIDES[side + 1] or "?"
 end
 
+--[[ Sizes ]]
+
+-- A transmitter's sizes (pixels): half its core with the frame, and its arms' tube, collar and
+-- plate across (client Rendering/TransmitterModel draws them; Blocks/Shapes collides with and
+-- aims at the core and the arms as wide as their collars, or plates into acceptors).
+export type Sizes = { core: number, arm: number, collar: number, plate: number }
+-- Mekanism's large transmitters (transporters and pipes): an 8 pixel core.
+Transmitters.LARGE = table.freeze({ core = 4, arm = 6, collar = 7, plate = 10 }) :: Sizes
+-- Mekanism's small transmitters (Universal Cables): a 6 pixel core.
+Transmitters.SMALL = table.freeze({ core = 3, arm = 4, collar = 5, plate = 8 }) :: Sizes
+
 --[[ Connection modes ]]
 
 Transmitters.MODES = table.freeze({ NORMAL = 0, PUSH = 1, PULL = 2, NONE = 3 })
@@ -308,6 +319,11 @@ end
 
 function Transmitters.isTransmitter(block: number): boolean
 	return kinds[block] ~= nil
+end
+
+-- The sizes of the transmitter `block` (SMALL for Universal Cables, else LARGE).
+function Transmitters.sizes(block: number?): Sizes
+	return if block and kinds[block] == "energy" then Transmitters.SMALL else Transmitters.LARGE
 end
 
 -- Is it the Restrictive Transporter (path cost RESTRICTIVE_COST)?
