@@ -467,6 +467,14 @@ mix({ "PurifiedWaterBottle", "PurifiedWaterBottle", "FallenStar", "GlowDust" }, 
 mix({ "LesserManaPotion", "LesserManaPotion", "GlowLichen" }, "ManaPotion", 2)
 shape({ " EE", " SE", "S  " }, { E = "Emerald", S = "Stick" }, "EmeraldStaff")
 shape({ " L ", " L ", "LLL" }, { L = "Leather" }, "TopHat")
+--[[
+	Doors (Minecraft's): six planks of a wood in two columns of three make three of its doors.
+]]
+shape({ "##", "##", "##" }, { ["#"] = "Planks" }, "OakDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "SprucePlanks" }, "SpruceDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "BirchPlanks" }, "BirchDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "JunglePlanks" }, "JungleDoor", 3)
+shape({ "##", "##", "##" }, { ["#"] = "AcaciaPlanks" }, "AcaciaDoor", 3)
 mix({ "WhiteWool", "WhiteWool", "Leather", "Leather", "String" }, "TuxedoShirt")
 mix({ "Leather", "Leather", "Leather", "String" }, "TuxedoPants")
 
@@ -488,6 +496,12 @@ Recipes.fuel = {
 	WhiteWool = 100,
 	Ladder = 300,
 	OakFence = 300,
+	-- (Minecraft's ItemTags.WOODEN_DOORS.)
+	OakDoor = 200,
+	SpruceDoor = 200,
+	BirchDoor = 200,
+	JungleDoor = 200,
+	AcaciaDoor = 200,
 }
 
 Recipes.shaped = shaped

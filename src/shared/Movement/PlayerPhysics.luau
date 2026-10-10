@@ -496,11 +496,12 @@ function PlayerPhysics.knockback(state: State, kx: number, ky: number, kz: numbe
 	return true
 end
 
+-- (A door's panel is boxes of its cell: Blocks.collision.)
 local function solidChecker(world: World): Hull.SolidAt
 	local getBlock = world.getBlock
-	return function(x: number, y: number, z: number): boolean
+	return function(x: number, y: number, z: number): boolean | Hull.Shape
 		local block = getBlock(x, y, z)
-		return block == nil or Blocks.isSolid(block)
+		return block == nil or Blocks.collision(block)
 	end
 end
 

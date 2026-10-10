@@ -172,9 +172,9 @@ function MobSpawning.validSpot(
 	end
 	-- The whole box free: no solid block, nothing unloaded, no fluid, no fire.
 	local box = Hull.box(x + 0.5, y, z + 0.5, kind.width, kind.height)
-	local function solidAt(bx: number, by: number, bz: number): boolean
+	local function solidAt(bx: number, by: number, bz: number): boolean | Hull.Shape
 		local block = getBlock(bx, by, bz)
-		return block == nil or Blocks.isSolid(block)
+		return block == nil or Blocks.collision(block)
 	end
 	if not Hull.noCollision(solidAt, box) then
 		return false

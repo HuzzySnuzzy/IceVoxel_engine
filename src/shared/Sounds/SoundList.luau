@@ -286,6 +286,27 @@ SoundList.EVENTS = {
 		source = "blocks",
 		side = "server",
 	},
+	-- Wooden doors opening and closing (DoorBlock.playSound: BlockSetType's door sounds, volume 1,
+	-- pitch 0.9 to 1). The player using one hears it at once (Blocks/Doors predicts the door);
+	-- a double door plays once. Swap them for real recordings in SoundService.IceVoxelSounds.
+	{
+		name = "block.wooden_door.open",
+		id = GET_UP,
+		volume = 0.7,
+		pitch = 0.8,
+		pitchVariance = 0.05,
+		source = "blocks",
+		side = "predicted",
+	},
+	{
+		name = "block.wooden_door.close",
+		id = LAND,
+		volume = 0.8,
+		pitch = 0.85,
+		pitchVariance = 0.05,
+		source = "blocks",
+		side = "predicted",
+	},
 	-- A lit furnace crackling (AbstractFurnaceBlock.animateTick), while its window shows it burning.
 	{
 		name = "block.furnace.fire_crackle",

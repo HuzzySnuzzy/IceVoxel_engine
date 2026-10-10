@@ -359,6 +359,10 @@ local function makeTemplate(
 		if front then
 			part.Transparency = 1
 			TextureLooks.newDecal(front.texture, front.face, front.color).Parent = part
+			if front.back then
+				-- (A door shows its picture from both sides.)
+				TextureLooks.newDecal(front.texture, front.back, front.color).Parent = part
+			end
 		end
 	end
 	-- A shape in its cube faces' texture (the fence post's planks) at full detail; glowing boxes

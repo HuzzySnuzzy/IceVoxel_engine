@@ -141,6 +141,7 @@ local SettingsStore = require(Server.Players.SettingsStore)
 local Transmitters = require(Server.Transmitters.Transmitters)
 local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
+local DoorUse = require(Server.Players.DoorUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
@@ -232,6 +233,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	-- machines after the pipes (their cables are the pipes' nodes).
 	Transmitters.start(net, world)
 	ItemUse.start(net, world)
+	-- Doors after inventories (the Use hook).
+	DoorUse.start(net, world)
 	Machines.start(net, world)
 	-- Structure blocks after inventories (containers, the Use hook).
 	StructureBlocks.start(net, world)

@@ -93,6 +93,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local Doors = require(Shared.Blocks.Doors)
 local TexturePack = require(Shared.TexturePack)
 
 local Options = Config.Textures
@@ -152,7 +153,8 @@ local SIDES: { { face: Enum.NormalId, key: string } } = {
 }
 
 -- An image on one face of a part: its texture and Color3 (unclamped).
-export type Image = { face: Enum.NormalId, texture: string, color: Color3 }
+-- (`back`: the same image on that face too, a door's other side.)
+export type Image = { face: Enum.NormalId, texture: string, color: Color3, back: Enum.NormalId? }
 
 -- A part's look: material, MaterialVariant ("" none) of `texture` (nil: the block's own material,
 -- or for a far look whose texture is too dark, SmoothPlastic in the plain colour) and Color, plus
@@ -738,10 +740,17 @@ local function frontOf(info: Blocks.Appearance): Image?
 	local block = blockOf[info.id]
 	local support = if block then Blocks.get(block).support else nil
 	local face = if support then AWAY_FROM[support] else nil
+	local back: Enum.NormalId? = nil
+	-- A door's picture goes on both sides of its panel (Blocks/Doors: the side it lies against).
+	local facing, hinge, open = Blocks.doorState(block or -1)
+	if facing and hinge and open ~= nil then
+		local side = Doors.panelSide(facing, hinge, open)
+		face, back = AWAY_FROM[side], AWAY_FROM[Blocks.opposite(side)]
+	end
 	if drawn == nil or face == nil then
 		return nil
 	end
-	return { face = face, texture = drawn, color = rgb(paint(info, drawn, false)) }
+	return { face = face, texture = drawn, color = rgb(paint(info, drawn, false)), back = back }
 end
 
 --[[ Far mesh looks ]]

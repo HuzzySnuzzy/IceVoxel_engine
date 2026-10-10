@@ -90,8 +90,11 @@
 	                `bounds` keep it from being placed inside a player (Minecraft's
 	                BlockItem.canPlace) and falling sand lands on it (Blocks.obstruction). Players
 	                and items still pass through it, unlike Minecraft's, where they bump into and
-	                stand on lanterns: the movement hull only knows full cubes, and a solid lantern
-	                would be an invisible wall. Torches have no collision box in either game.
+	                stand on lanterns. Torches have no collision box in either game.
+	  collides      The movement hull (Shared/Movement/Hull: players, mobs, items) bumps into its
+	                `bounds`, though it is not `solid` (Minecraft's collision shape: a door's 3 pixel
+	                panel, Blocks.collision). Implies `obstructs`. Lanterns keep none, so players
+	                walk through them as before.
 	  support       The side the block hangs on: "Down" stands on the block below, "Up" hangs from
 	                the one above, "North" / "South" / "West" / "East" are fixed to that side. That
 	                block must be sturdy (`sturdy` above); when it goes, this one breaks and drops
@@ -234,6 +237,9 @@ export type MachineSpec = { kind: string }
 export type EnergySpec = { capacity: number, input: number?, output: number? }
 -- A plant (`plant`): its soil set, and the names of its other half.
 export type PlantSpec = { soil: string?, top: string?, bottom: string? }
+-- A door half (`door`): the way it faces, its hinge side ("Left" / "Right"), open or not, and
+-- which half (Shared/Blocks/Doors).
+export type DoorSpec = { facing: string, hinge: string, open: boolean, upper: boolean }
 -- A jigsaw block's orientation (`jigsaw`): the direction its front faces and its top.
 export type JigsawSpec = { front: string, top: string }
 -- How a block burns (`flammable`): Minecraft's ignite and burn odds.
@@ -271,6 +277,7 @@ export type BlockSpec = {
 	shape: { ShapeBox }?,
 	bounds: Bounds?,
 	obstructs: boolean?,
+	collides: boolean?,
 	support: string?,
 	item: string?,
 	brokenByFluid: boolean?,
@@ -280,6 +287,7 @@ export type BlockSpec = {
 	machine: MachineSpec?,
 	energy: EnergySpec?,
 	plant: PlantSpec?,
+	door: DoorSpec?,
 	tinted: boolean?,
 	foliageColor: { number }?,
 	scatter: boolean?,
@@ -3064,6 +3072,202 @@ do
 		}
 	do
 		caveTwin(name)
+	end
+end
+
+--[[
+	Doors (Minecraft's DoorBlock: oak, spruce, birch, jungle and acacia, one per planks). A door
+	is two blocks, a lower and an upper half (`door`), one block per facing (the way the player
+	looked placing it), hinge side, open or closed and half: 32 per wood. The lower half is the
+	item (OakDoor faces North, hinged on the left, closed); every other one names it as `item`,
+	is no item of its own and the upper halves drop nothing. Placing picks the facing and hinge
+	(Blocks.doorPlacement, DoorBlock.getStateForPlacement) and sets both halves; breaking either
+	removes both with one drop (server Network/EditRules, as tall plants'); a half left alone, or
+	a lower half without a sturdy block under it, pops (server Behaviours/Door). Right clicking
+	either half opens or closes the door, and its double door partner with it (`menu` "Door":
+	Shared/Blocks/Doors, server World/DoorUse), in every game mode but spectator.
+
+	Its panel is 3 pixels thick (`bounds`), across the cell's side nearest the player who placed
+	it while closed, against its hinge side while open, and players, mobs and items bump into it
+	(`collides`: Minecraft's collision shape) though it is not solid. Strength 3, an axe mines it
+	fast, wood sounds; Minecraft's wooden doors never catch fire from fire nearby (they are not in
+	FireBlock.bootStrap). Three doors from six planks of a wood (Crafting/Recipes), 200 ticks of
+	fuel each.
+
+	Drawn from boxes: the lower half a panel with a raised middle and an iron handle on the side
+	away from the hinge, the upper half a frame around each wood's windows (oak two, birch four,
+	jungle two small ones, acacia one, spruce none: Minecraft's door pictures' windows, see-through
+	here too). Its first box is a see-through plate the texture pack's door pictures go on, on both
+	sides (TexturePack Blocks OakDoor / OakDoorTop `Front`: blank, so the boxes show), in place of
+	the other boxes. The design is drawn for a left hinge and mirrored for a right one.
+]]
+do
+	-- Pixels across the door (u: -8 at the hinge .. 8), up the half (v: -8 .. 8): a box filling
+	-- that much of the panel, `thick` pixels thick (3: the panel; more stands proud on both sides),
+	-- authored against the wall to the south as `onWall` takes it.
+	local function piece(u0: number, u1: number, v0: number, v1: number, thick: number?, color: { number }?): ShapeBox
+		local t = thick or 3
+		return {
+			size = { u1 - u0, v1 - v0, t },
+			offset = { (u0 + u1) / 2, (v0 + v1) / 2, 6.5 },
+			color = color,
+		}
+	end
+	local function darker(c: { number }, by: number): { number }
+		return { math.floor(c[1] * by), math.floor(c[2] * by), math.floor(c[3] * by) }
+	end
+	local HANDLE = { 72, 72, 76 }
+	-- Each wood: its planks' colour and the frame around its upper half's windows (left and right
+	-- stiles, rails and mullions; the windows are what they leave open).
+	local WOODS: { { wood: string, color: { number }, upper: (c: { number }) -> { ShapeBox } } } = {
+		{
+			wood = "Oak",
+			color = { 170, 134, 84 },
+			upper = function(_c)
+				return {
+					piece(-8, -5, -8, 8),
+					piece(5, 8, -8, 8),
+					piece(-1, 1, -1, 5),
+					piece(-5, 5, 5, 8),
+					piece(-5, 5, -8, -1),
+				}
+			end,
+		},
+		{
+			wood = "Spruce",
+			color = { 114, 84, 48 },
+			upper = function(c)
+				return { piece(-8, 8, -8, 8), piece(-5, 5, -5, 5, 4, darker(c, 0.85)) }
+			end,
+		},
+		{
+			wood = "Birch",
+			color = { 196, 178, 123 },
+			upper = function(_c)
+				return {
+					piece(-8, -5, -8, 8),
+					piece(5, 8, -8, 8),
+					piece(-5, 5, 5, 8),
+					piece(-5, 5, -8, -3),
+					piece(-5, 5, 0.5, 2),
+					piece(-1, 1, -3, 5),
+				}
+			end,
+		},
+		{
+			wood = "Jungle",
+			color = { 160, 115, 80 },
+			upper = function(_c)
+				return {
+					piece(-8, -5, -8, 8),
+					piece(5, 8, -8, 8),
+					piece(-1, 1, 2, 5),
+					piece(-5, 5, 5, 8),
+					piece(-5, 5, -8, 2),
+				}
+			end,
+		},
+		{
+			wood = "Acacia",
+			color = { 168, 90, 50 },
+			upper = function(_c)
+				return {
+					piece(-8, -4, -8, 8),
+					piece(4, 8, -8, 8),
+					piece(-4, 4, 5, 8),
+					piece(-4, 4, -8, 0),
+				}
+			end,
+		},
+	}
+	local FACINGS = { "North", "South", "West", "East" }
+	local CLOCKWISE = { North = "East", East = "South", South = "West", West = "North" }
+	local COUNTER = { North = "West", West = "South", South = "East", East = "North" }
+	-- Which end of a panel against `side` the authored +u end turns to (`onWall`), per direction.
+	local PLUS_END: { [string]: string } = { South = "East", North = "West", East = "North", West = "South" }
+	-- A box of the design for a left hinge, mirrored (u flipped) for the other end.
+	local function mirrored(box: ShapeBox): ShapeBox
+		local copy = table.clone(box)
+		copy.offset = { -box.offset[1], box.offset[2], box.offset[3] }
+		return copy
+	end
+	for _, wood in WOODS do
+		local base = wood.wood .. "Door"
+		local plate: ShapeBox = { size = { 16, 16, 3 }, offset = { 0, 0, 6.5 }, transparency = 1 }
+		local lower: { ShapeBox } = {
+			plate,
+			piece(-8, 8, -8, 8),
+			piece(-5, 5, -5, 5, 4, darker(wood.color, 0.85)),
+			{ size = { 1.5, 3, 5 }, offset = { 5.75, 4.5, 6.5 }, color = HANDLE, material = "Metal" },
+		}
+		local upper: { ShapeBox } = { plate }
+		for _, box in wood.upper(wood.color) do
+			table.insert(upper, box)
+		end
+		for _, facing in FACINGS do
+			for _, hinge in { "Left", "Right" } do
+				for _, open in { false, true } do
+					-- The panel's side and the end its hinge is at (DoorBlock.getShape): closed,
+					-- across the side facing the placer, hinged on their left or right; open,
+					-- turned onto that hinge side, hinged at the old panel's side.
+					local hingeSide = if hinge == "Left" then COUNTER[facing] else CLOCKWISE[facing]
+					local back = OPPOSITE[facing]
+					local side = if open then hingeSide else back
+					local hingeEnd = if open then back else hingeSide
+					local flip = PLUS_END[side] == hingeEnd
+					for _, half in { "lower", "upper" } do
+						local isUpper = half == "upper"
+						local boxes: { ShapeBox } = {}
+						local design: { ShapeBox } = if isUpper then upper else lower
+						for _, box in design do
+							table.insert(boxes, onWall(if flip then mirrored(box) else box, side))
+						end
+						local name = base
+							.. (if facing == "North" then "" else facing)
+							.. (if hinge == "Right" then "Right" else "")
+							.. (if open then "Open" else "")
+							.. (if isUpper then "Top" else "")
+						local item = name == base
+						local spec: BlockSpec = {
+							name = name,
+							displayName = wood.wood .. " Door",
+							color = wood.color,
+							material = "WoodPlanks",
+							sound = "wood",
+							solid = false,
+							collides = true,
+							placeable = item,
+							item = if item then nil else base,
+							hardness = 3,
+							tool = "axe",
+							shape = boxes,
+							bounds = wallBounds(side, 3),
+							support = if isUpper then nil else "Down",
+							drops = if isUpper then false else nil,
+							menu = "Door",
+							behaviour = "Door",
+							door = { facing = facing, hinge = hinge, open = open, upper = isUpper },
+						}
+						if item then
+							-- (The item: the whole door at half size, upright, as Minecraft's
+							-- door item is drawn; ItemModels centres it on the panel's bounds.)
+							local icon: { ShapeBox } = {}
+							for k, half in { lower, upper } do
+								for _, box in half do
+									local o, sz = box.offset, box.size
+									local copy = table.clone(box)
+									copy.size = { sz[1] / 2, sz[2] / 2, sz[3] }
+									copy.offset = { o[1] / 2, o[2] / 2 + (if k == 1 then -4 else 4), o[3] }
+									table.insert(icon, copy)
+								end
+							end
+							spec.icon = icon
+						end
+						table.insert(list, spec)
+					end
+				end
+			end
+		end
 	end
 end
 

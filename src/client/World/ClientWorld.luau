@@ -97,6 +97,7 @@ export type ClientWorld = {
 	getBlock: (self: ClientWorld, x: number, y: number, z: number) -> number?,
 	isLoaded: (self: ClientWorld, x: number, z: number) -> boolean,
 	applyEdit: (self: ClientWorld, x: number, y: number, z: number, block: number) -> (),
+	predict: (self: ClientWorld, x: number, y: number, z: number, block: number) -> (),
 	breakBlock: (self: ClientWorld, x: number, y: number, z: number) -> (),
 	placeBlock: (self: ClientWorld, x: number, y: number, z: number, block: number, seq: number) -> (),
 	flush: (self: ClientWorld) -> (),
@@ -519,6 +520,12 @@ end
 -- Applies an edit from the server.
 function ClientWorld.applyEdit(self: ClientWorld, x: number, y: number, z: number, block: number)
 	apply(self, x, y, z, block, false)
+end
+
+-- Applies a change this player's own action will make on the server, sending nothing (the
+-- server's Edits confirm it, or put back what is there: a door opened, Blocks/Doors).
+function ClientWorld.predict(self: ClientWorld, x: number, y: number, z: number, block: number)
+	apply(self, x, y, z, block, true)
 end
 
 function ClientWorld.breakBlock(self: ClientWorld, x: number, y: number, z: number)

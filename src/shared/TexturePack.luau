@@ -415,6 +415,19 @@ local Textures: { [string]: Texture } = {
 	["vine"] = { Color = "", Material = "SmoothPlastic", Tint = true },
 	["hanging roots"] = { Color = "", Material = "SmoothPlastic", Tint = false },
 	["mossy cobblestone"] = { Color = "", Material = "Cobblestone", Tint = false },
+	-- Doors: Minecraft's door pictures, the lower and upper half's, drawn on both sides of the
+	-- door's plate in place of its boxes (see-through where the picture is: the windows). The same
+	-- picture serves both hinges. Fill an item's icon (Icons below) with the whole door too.
+	["oak door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["oak door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["spruce door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["spruce door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["birch door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["birch door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["jungle door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["jungle door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["acacia door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["acacia door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -557,6 +570,19 @@ local Blocks: { [string]: Faces } = {
 	Vine = { Front = "vine" },
 	HangingRoots = { Sprite = "hanging roots" },
 	MossyCobblestone = { All = "mossy cobblestone" },
+
+	-- Doors (an entry covers the door's lower halves; the ...Top entry its upper halves:
+	-- Blocks' door rule)
+	OakDoor = { Front = "oak door bottom" },
+	OakDoorTop = { Front = "oak door top" },
+	SpruceDoor = { Front = "spruce door bottom" },
+	SpruceDoorTop = { Front = "spruce door top" },
+	BirchDoor = { Front = "birch door bottom" },
+	BirchDoorTop = { Front = "birch door top" },
+	JungleDoor = { Front = "jungle door bottom" },
+	JungleDoorTop = { Front = "jungle door top" },
+	AcaciaDoor = { Front = "acacia door bottom" },
+	AcaciaDoorTop = { Front = "acacia door top" },
 }
 
 -- Item name (ItemList) -> its inventory icon ("" = not made yet; see the header).

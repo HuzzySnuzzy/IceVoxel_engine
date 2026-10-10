@@ -158,8 +158,16 @@ local function shapePrototype(model: Model, block: number, shape: { Blocks.Shape
 		if drawn and not drawn[i] then
 			continue
 		end
-		-- (Boxes past the shape's take the first box's template: no textures, no light.)
+		-- (Boxes past the shape's take the first box's template: no textures, no light, and not
+		-- its Front image either: a door's icon draws its upper half's boxes so.)
 		local part = PartPool.makeTemplate(appearance, if i <= boxes then i else 1)
+		if i > boxes then
+			for _, child in part:GetChildren() do
+				if child:IsA("Decal") then
+					child:Destroy()
+				end
+			end
+		end
 		if box.glow or not dressed or i > boxes then
 			part.Material = if box.glow then Enum.Material.Neon else material(box.material or def.material)
 			local c = box.color or def.color

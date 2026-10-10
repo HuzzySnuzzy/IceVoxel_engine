@@ -178,8 +178,9 @@ return function(t, shared, require)
 		-- the mobs' drops; 143 before the 29 potions, brewed in the grid; 172 before the Ladder,
 		-- two Rope recipes, Rails, the Oak Fence, the Moss Carpet and two of Mossy Cobblestone; 180
 		-- before Terraria's Aglet, Anklet of the Wind, Band of Starpower, Obsidian Skull, Mana
-		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants.)
-		t.eq(#Crafting.recipes, 191, "recipes compiled")
+		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants; 191
+		-- before the five doors.)
+		t.eq(#Crafting.recipes, 196, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

@@ -695,7 +695,10 @@ local function blockDetails(
 	if stuck then
 		table.insert(lines, gray(`Slows x {number(stuck[1])} across, x {number(stuck[2])} up and down`))
 	end
-	if def.menu then
+	if Blocks.isDoor(block) then
+		local _, hinge, open = Blocks.doorState(block)
+		table.insert(lines, gray(`{if open then "Open" else "Closed"}, hinged on the {string.lower(hinge or "")}`))
+	elseif def.menu then
 		-- (A machine's slots are its kind's, not BlockList's `container`.)
 		local slots = Machines.containerSize(block)
 		table.insert(lines, gray(if slots > 0 then `Menu {def.menu}, {slots} slots` else `Menu {def.menu}`))

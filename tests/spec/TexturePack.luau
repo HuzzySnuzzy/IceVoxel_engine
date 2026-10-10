@@ -286,6 +286,21 @@ local BLANKS = {
 	{ "hanging roots", { "HangingRoots", "CaveHangingRoots" } },
 	{ "mossy cobblestone", { "MossyCobblestone" } },
 }
+-- Doors: each wood's bottom picture on its 16 lower halves, its top picture on its 16 upper ones
+-- (BlockList's names: facing but North, Right, Open, Top).
+for _, wood in { "Oak", "Spruce", "Birch", "Jungle", "Acacia" } do
+	for _, upper in { false, true } do
+		local users = {}
+		for _, facing in { "", "South", "West", "East" } do
+			for _, hinge in { "", "Right" } do
+				for _, open in { "", "Open" } do
+					table.insert(users, `{wood}Door{facing}{hinge}{open}{if upper then "Top" else ""}`)
+				end
+			end
+		end
+		table.insert(BLANKS, { `{string.lower(wood)} door {if upper then "top" else "bottom"}`, users })
+	end
+end
 
 return function(t, shared, require)
 	local Blocks = require(shared.Blocks)
@@ -597,8 +612,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			188,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone)"
+			348,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone; then 32 halves of five doors)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}

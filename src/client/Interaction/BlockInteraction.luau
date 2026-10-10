@@ -157,6 +157,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Blocks = require(Shared.Blocks)
+local Doors = require(Shared.Blocks.Doors)
 local Fire = require(Shared.Fire)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
@@ -317,6 +318,9 @@ type Touch = {
 local function opensMenu(block: number, mode: string): boolean
 	if Blocks.get(block).menu == nil then
 		return false
+	elseif Blocks.isDoor(block) then
+		-- (Doors open for everyone but spectators: Players/DoorUse.)
+		return GameMode.canInteract(mode)
 	end
 	return not Blocks.isCreativeOnly(block) or GameMode.instabuild(mode)
 end
@@ -1024,6 +1028,20 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			and TankUse.acts(hit.block, stack.item, TransmitterRenderer.machine(hit.x, hit.y, hit.z))
 		if hit and opensMenu(hit.block, mode) and not secondary and not tankUse then
 			useSpent = true
+			-- A door (and its double door partner) opens at once, as the server will open it
+			-- (Blocks/Doors, Players/DoorUse), with its sound for this player.
+			local changes: { Doors.Change } = {}
+			if Blocks.isDoor(hit.block) then
+				changes = Doors.use(hit.block, getBlock, hit.x, hit.y, hit.z)
+			end
+			for _, change in changes do
+				world:predict(change.x, change.y, change.z, change.block)
+			end
+			local first = changes[1]
+			if first then
+				local sound = if Doors.opens(changes) then "block.wooden_door.open" else "block.wooden_door.close"
+				SoundPlayer.play(sound, first.x + 0.5, first.y + 1, first.z + 0.5)
+			end
 			ClientNet.send(Protocol.ClientMessage.Use, Protocol.encodeUse(hit.x, hit.y, hit.z))
 			swing()
 			return
@@ -1145,7 +1163,14 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		-- Torches and lanterns: the variant that something holds there (the clicked face first,
 		-- then the way the player looks), or nothing.
 		local look = workspace.CurrentCamera.CFrame.LookVector
-		local variant = Blocks.placementFor(block, hit.nx, hit.ny, hit.nz, look.X, look.Y, look.Z, getBlock, x, y, z)
+		-- (Where in the cell placed into the click landed: a door's hinge goes on that half.)
+		local hx, hz = nil, nil
+		if ray then
+			hx = ray.x + ray.direction.X * hit.distance - x
+			hz = ray.z + ray.direction.Z * hit.distance - z
+		end
+		local variant =
+			Blocks.placementFor(block, hit.nx, hit.ny, hit.nz, look.X, look.Y, look.Z, getBlock, x, y, z, hx, hz)
 		if variant == nil then
 			return
 		end

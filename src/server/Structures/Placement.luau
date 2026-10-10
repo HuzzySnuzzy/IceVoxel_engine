@@ -132,11 +132,12 @@ local HEIGHT_VISITS = 16
 -- Columns of the grid that finds overlapping pieces (blocks).
 local GRID = 16
 
--- Placed after the solid blocks: what hangs on, stands on or flows from another block.
+-- Placed after the solid blocks: what hangs on, stands on or flows from another block (both halves
+-- of a door too, so its upper half follows its lower half as a tall plant's does).
 local LATE: { boolean } = {}
 for block = 0, Blocks.count - 1 do
 	local def = Blocks.get(block)
-	LATE[block + 1] = def.support ~= nil or def.plant ~= nil or def.fluid ~= nil
+	LATE[block + 1] = def.support ~= nil or def.plant ~= nil or def.fluid ~= nil or def.door ~= nil
 end
 local function late(block: number): boolean
 	return LATE[block + 1] == true

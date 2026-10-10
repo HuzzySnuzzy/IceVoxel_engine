@@ -121,9 +121,10 @@ local current: GetBlock = function(_x: number, _y: number, _z: number): number?
 	return nil
 end
 
-local function solidAt(x: number, y: number, z: number): boolean
+-- (A door's panel is boxes of its cell: Blocks.collision.)
+local function solidAt(x: number, y: number, z: number): boolean | Hull.Shape
 	local block = current(x, y, z)
-	return block == nil or Blocks.isSolid(block)
+	return block == nil or Blocks.collision(block)
 end
 
 -- Per block: its fluid (Shared/Fluids id, 0 none), and per fluid id whether it is in lava's tag.

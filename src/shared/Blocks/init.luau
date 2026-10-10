@@ -128,6 +128,8 @@ export type BlockDef = {
 	bounds: Bounds,
 	-- Not solid, but has a collision box in Minecraft (lanterns; see Blocks.obstruction).
 	obstructs: boolean,
+	-- Not solid, but the movement hull bumps into its bounds (doors; see Blocks.collision).
+	collides: boolean,
 	-- The direction of the block it hangs on (nil: needs nothing) and the item placing / dropping
 	-- it when that is not the block itself.
 	support: string?,
@@ -145,6 +147,8 @@ export type BlockDef = {
 	-- take their soil's foliage colour, which soil blocks may have (`foliageColor`); `scatter`
 	-- plants are drawn at a per-position offset and turn.
 	plant: PlantSpec?,
+	-- A door half's facing, hinge, open state and half (BlockList `door`; Blocks/Doors).
+	door: DoorSpec?,
 	tinted: boolean,
 	foliageColor: { number }?,
 	scatter: boolean,
@@ -212,6 +216,7 @@ export type TankSpec = BlockList.TankSpec
 export type MachineSpec = BlockList.MachineSpec
 export type EnergySpec = BlockList.EnergySpec
 export type PlantSpec = BlockList.PlantSpec
+export type DoorSpec = BlockList.DoorSpec
 export type JigsawSpec = BlockList.JigsawSpec
 export type FlammableSpec = BlockList.FlammableSpec
 export type Texture = TexturePack.Texture
@@ -581,7 +586,8 @@ for index, spec in BlockList do
 		lightColor = spec.lightColor or DEFAULT_LIGHT_COLOR,
 		shape = spec.shape,
 		bounds = spec.bounds or (if spec.shape then shapeBounds(spec.shape) else FULL_CELL),
-		obstructs = spec.obstructs == true,
+		obstructs = spec.obstructs == true or spec.collides == true,
+		collides = spec.collides == true,
 		support = spec.support,
 		item = spec.item,
 		brokenByFluid = spec.brokenByFluid == true,
@@ -591,6 +597,7 @@ for index, spec in BlockList do
 		machine = spec.machine,
 		energy = spec.energy,
 		plant = spec.plant,
+		door = spec.door,
 		tinted = spec.tinted == true,
 		foliageColor = spec.foliageColor,
 		scatter = spec.scatter == true,
@@ -611,6 +618,7 @@ for index, spec in BlockList do
 	}
 	assert(spec.axis == nil or spec.axis == "X" or spec.axis == "Z", `Block {spec.name} has a bad axis {spec.axis}`)
 	assert(not def.chain or def.support ~= nil, `Block {spec.name} hangs in a chain on nothing (no support)`)
+	assert(not (def.collides and solid), `Block {spec.name} collides by its bounds but is solid (a full cube)`)
 	local stuck = spec.stuck
 	assert(
 		stuck == nil
@@ -695,7 +703,9 @@ for index, spec in BlockList do
 	if twin then
 		def.textures = twin.textures
 	else
-		local entry = packBlocks[spec.name] or groupEntries[spec.item or spec.name]
+		-- (A door's upper halves take its `<door>Top` entry, the upper half facing North.)
+		local upperDoor = if spec.door and spec.door.upper then packBlocks[(spec.item or spec.name) .. "Top"] else nil
+		local entry = packBlocks[spec.name] or upperDoor or groupEntries[spec.item or spec.name]
 		def.textures = if entry then resolveFaces(entry) else nil
 	end
 
@@ -1229,7 +1239,13 @@ for _, group in variants do
 	local base = group[1]
 	if bySupport[base] == nil then
 		local map = {}
-		if defs[base].axis then
+		if defs[base].door then
+			-- (A door's variants are its facings, hinges, open states and halves: `doorPlacement`
+			-- picks the one placed, so none is keyed by the floor it stands on.)
+			for _, id in group do
+				assert(defs[id].door, `Block {defs[id].name} is no door in door {defs[base].name}'s group`)
+			end
+		elseif defs[base].axis then
 			-- (An axis group's variants all lie on the floor: the facing picks them, not a side.)
 			local axes = {}
 			for _, id in group do
@@ -1366,6 +1382,150 @@ function Blocks.otherHalf(id: number): number?
 		return -1
 	end
 	return nil
+end
+
+--[[ Doors (BlockList `door`; Shared/Blocks/Doors) ]]
+
+--[[
+	Every door half by its door (its group's first block, the item), facing, hinge, open state and
+	half; and each half's other half, the same door's, kept with the tall plants' (`plantTop`,
+	`plantBottom`, `otherHalf`): breaking, placing, surviving and structures treat a door's halves
+	as a tall plant's. A door has all 32 halves (4 facings x 2 hinges x open or not x 2 halves).
+]]
+local doorStates: { [number]: DoorSpec } = {}
+local doorIds: { [string]: number } = {}
+local function doorKey(base: number, facing: string, hinge: string, open: boolean, upper: boolean): string
+	return `{base}|{facing}|{hinge}|{open}|{upper}`
+end
+for id, def in defs do
+	local door = def.door
+	if door then
+		assert(
+			HORIZONTAL[door.facing] and (door.hinge == "Left" or door.hinge == "Right"),
+			`Door {def.name} has a bad facing or hinge`
+		)
+		local group = variants[id]
+		assert(group ~= nil, `Door {def.name} is in no variant group (name its item)`)
+		local key = doorKey(group[1], door.facing, door.hinge, door.open, door.upper)
+		assert(doorIds[key] == nil, `Two door halves are {key}`)
+		doorStates[id] = door
+		doorIds[key] = id
+	end
+end
+for id, door in doorStates do
+	local base = variants[id][1]
+	for _, facing in { "North", "South", "West", "East" } do
+		for _, hinge in { "Left", "Right" } do
+			for _, open in { false, true } do
+				for _, upper in { false, true } do
+					assert(
+						doorIds[doorKey(base, facing, hinge, open, upper)],
+						`Door {defs[base].name} lacks a {facing} {hinge} {open} {upper} half`
+					)
+				end
+			end
+		end
+	end
+	local other = doorIds[doorKey(base, door.facing, door.hinge, door.open, not door.upper)]
+	if door.upper then
+		assert(defs[id].support == nil, `Door upper half {defs[id].name} must hang on nothing`)
+		plantBottoms[id] = other
+	else
+		assert(defs[id].support == "Down", `Door lower half {defs[id].name} must stand on a block`)
+		plantTops[id] = other
+	end
+end
+
+-- Is the block a door half?
+function Blocks.isDoor(id: number): boolean
+	return doorStates[id] ~= nil
+end
+
+-- A door half's facing, hinge ("Left" / "Right"), whether it is open and whether it is the upper
+-- half; nils for anything else.
+function Blocks.doorState(id: number): (string?, string?, boolean?, boolean?)
+	local door = doorStates[id]
+	if door == nil then
+		return nil, nil, nil, nil
+	end
+	return door.facing, door.hinge, door.open, door.upper
+end
+
+-- The half of `id`'s door (any of its halves) facing `facing` with `hinge`, `open` or not, the
+-- upper one or not; nil when `id` is no door.
+function Blocks.doorVariant(id: number, facing: string, hinge: string, open: boolean, upper: boolean): number?
+	local group = if doorStates[id] then variants[id] else nil
+	return if group then doorIds[doorKey(group[1], facing, hinge, open, upper)] else nil
+end
+
+-- The same door half opened (closed when open); nil for anything else.
+function Blocks.doorToggled(id: number): number?
+	local door = doorStates[id]
+	if door == nil then
+		return nil
+	end
+	return doorIds[doorKey(variants[id][1], door.facing, door.hinge, not door.open, door.upper)]
+end
+
+local DOOR_LEFT: { [string]: string } = { North = "West", West = "South", South = "East", East = "North" }
+local DOOR_RIGHT: { [string]: string } = { North = "East", East = "South", South = "West", West = "North" }
+
+--[[
+	The closed lower half of door `block` (any half) a player places at (x, y, z) looking along
+	(lx, lz), having clicked at (hx, hz) within that cell (0..1; nil: its middle), or nil when it
+	can't stand there (Blocks.canPlace: a sturdy block below, room above). Minecraft's
+	DoorBlock.getStateForPlacement: it faces the way the player looks; its hinge goes against the
+	side with more full blocks (solid unshaped cells) beside the door's two cells, else away from a
+	door already beside it (its double door partner: a door to the left gets a right hinge), else
+	on the half of the cell clicked (DoorBlock.getHinge).
+]]
+function Blocks.doorPlacement(
+	block: number,
+	lx: number,
+	lz: number,
+	getBlock: (x: number, y: number, z: number) -> number?,
+	x: number,
+	y: number,
+	z: number,
+	hx: number?,
+	hz: number?
+): number?
+	local facing = Blocks.horizontalFacing(lx, lz)
+	local left, right = DIRECTIONS[DOOR_LEFT[facing]], DIRECTIONS[DOOR_RIGHT[facing]]
+	local function full(bx: number, by: number, bz: number): boolean
+		local id = getBlock(bx, by, bz)
+		local def = if id then defs[id] else nil
+		return def ~= nil and def.solid and def.shape == nil
+	end
+	local function lowerDoor(bx: number, by: number, bz: number): boolean
+		local id = getBlock(bx, by, bz)
+		local door = if id then doorStates[id] else nil
+		return door ~= nil and not door.upper
+	end
+	local walls = 0
+	walls -= if full(x + left[1], y, z + left[3]) then 1 else 0
+	walls -= if full(x + left[1], y + 1, z + left[3]) then 1 else 0
+	walls += if full(x + right[1], y, z + right[3]) then 1 else 0
+	walls += if full(x + right[1], y + 1, z + right[3]) then 1 else 0
+	local leftDoor = lowerDoor(x + left[1], y, z + left[3])
+	local rightDoor = lowerDoor(x + right[1], y, z + right[3])
+	local hinge
+	if (leftDoor and not rightDoor) or walls > 0 then
+		hinge = "Right"
+	elseif (rightDoor and not leftDoor) or walls < 0 then
+		hinge = "Left"
+	else
+		local step = DIRECTIONS[facing]
+		local sx, sz = step[1], step[3]
+		local dx, dz = hx or 0.5, hz or 0.5
+		local onLeft = (sx >= 0 or dz >= 0.5)
+			and (sx <= 0 or dz <= 0.5)
+			and (sz >= 0 or dx <= 0.5)
+			and (sz <= 0 or dx >= 0.5)
+		hinge = if onLeft then "Left" else "Right"
+	end
+	local variant = Blocks.doorVariant(block, facing, hinge, false, false)
+	return if variant and Blocks.canPlace(variant, getBlock, x, y, z) then variant else nil
 end
 
 --[[
@@ -1543,7 +1703,9 @@ end
 	takes its orientation from the clicked face and the look (`jigsawPlacement`). An axis group
 	(rails) places the variant along the player's horizontal facing (East / West: "X", else "Z")
 	when it can lie there. Ladders and vines are wall variants like the wall torch, so a click
-	on a floor puts one on a wall beside the cell. Cave twins are never placed.
+	on a floor puts one on a wall beside the cell. A door places its closed lower half facing the
+	way the player looks, its hinge by `doorPlacement` (`hx`, `hz`: where in the cell the click
+	landed, 0..1). Cave twins are never placed.
 ]]
 function Blocks.placementFor(
 	block: number,
@@ -1556,13 +1718,18 @@ function Blocks.placementFor(
 	getBlock: (x: number, y: number, z: number) -> number?,
 	x: number,
 	y: number,
-	z: number
+	z: number,
+	hx: number?,
+	hz: number?
 ): number?
 	local group = variants[block]
 	if group == nil then
 		return if defs[block] and defs[block].caveTwin then nil else block
 	end
 	local base = group[1]
+	if doorStates[base] then
+		return Blocks.doorPlacement(base, lx, lz, getBlock, x, y, z, hx, hz)
+	end
 	if jigsawGroup(base) then
 		return Blocks.jigsawPlacement(nx, ny, nz, lx, ly, lz)
 	end
@@ -1660,6 +1827,29 @@ end
 
 function Blocks.obstruction(id: number): { number }?
 	return obstructions[id]
+end
+
+--[[
+	What the movement hull bumps into in a block's cell (Shared/Movement/Hull's SolidAt): true for
+	a solid block (its whole cell), the boxes of a `collides` block (its outline, block units within
+	the cell: a door's panel), else false.
+]]
+export type CollisionBox = { minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number }
+local collisions: { [number]: { CollisionBox } } = {}
+for id, def in defs do
+	if def.collides then
+		local o = outlines[id] or WHOLE_CELL
+		collisions[id] = table.freeze({
+			table.freeze({ minX = o[1], minY = o[2], minZ = o[3], maxX = o[4], maxY = o[5], maxZ = o[6] }),
+		})
+	end
+end
+
+function Blocks.collision(id: number): boolean | { CollisionBox }
+	if buffer.readu8(Blocks.solidLut, id) == 1 then
+		return true
+	end
+	return collisions[id] or false
 end
 
 --[[ Structures: creative only blocks, structure block modes, jigsaws, turning, cave twins ]]
@@ -1841,6 +2031,14 @@ end
 -- keep an axis), a jigsaw's turned orientation, else itself.
 local function turned(id: number, rotation: number, mirror: string): number
 	local def = defs[id]
+	local door = def.door
+	if door then
+		-- (A mirror swaps the hinge too: DoorBlock.mirror.)
+		local facing = Blocks.turnDirection(door.facing, rotation, mirror)
+		local flips = mirror ~= "none" and MIRRORED[mirror] ~= nil
+		local hinge = if flips then (if door.hinge == "Left" then "Right" else "Left") else door.hinge
+		return Blocks.doorVariant(id, facing, hinge, door.open, door.upper) or id
+	end
 	local orientation = def.jigsaw
 	if orientation then
 		local front = Blocks.turnDirection(orientation.front, rotation, mirror)

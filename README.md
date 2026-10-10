@@ -1142,6 +1142,21 @@ A fast, Minecraft-style voxel engine for Roblox.
   ingots and a stick make 16, from the Iron Age) lie along the way you face; the **Oak Fence**
   (planks and sticks) is a post; **Moss Block**, **Moss Carpet** (two moss make three), **Hanging
   Roots** and **Mossy Cobblestone** (cobblestone and a vine or moss).
+- **Doors.** Minecraft's wooden doors in oak, spruce, birch, jungle and acacia (six planks of a
+  wood in two columns make three; 200 ticks of furnace fuel). A door is two blocks tall and goes
+  on a sturdy block with room above. It faces the way you look, and its hinge goes against the
+  side with more walls beside it, else away from a door already beside it, else on the half of
+  the block you clicked (Minecraft's rules). Right click either half to open or close it, in every
+  game mode but spectator (adventure players open doors, as in Minecraft); sneaking with an item
+  in hand places instead. **Double doors:** two doors side by side facing the same way, hinged on
+  their outer sides (place the second beside the first and it takes the other hinge), open and
+  close together when you use either, as long as both are open or both closed. Doors of
+  different woods pair too. A door is a 3 pixel panel: you bump into it closed and walk past
+  it open, as mobs and dropped items do. Breaking either half breaks both and drops one door; a
+  door whose block underneath goes pops off. Each wood has its own windows (oak two, birch four,
+  jungle two small ones, acacia one, spruce none), drawn from boxes, see-through. Opening plays
+  `block.wooden_door.open` and closing `block.wooden_door.close` (swap them like any sound below).
+  Structures turn doors with them (a mirror swaps the hinge).
 - **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
   up to 5 blocks away, so it runs down slopes instead of flooding the ground around it. Flowing
   water steps down level by level, and its current pushes the player downstream. Lava and oil head
@@ -1243,6 +1258,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon | R2 | Tap the mob |
 | Eat           | Hold right click 1.6 s with food (meat, cooked or raw, rotten flesh) while hurt (creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
+| Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Climb         | Walk into a ladder or vine, or hold `Space` on a rope or a hanging vine (2.35 blocks a second); let go to slide down (a rope: a fast slide that never hurts); hold `Shift` to hold still | stick / A; B holds | move / Jump; Sneak holds |
@@ -2533,7 +2549,10 @@ keeps its own sounds); Neon, Glass, ForceField, Air and Water cannot take a Mate
 `Align = false` marks a noisy texture (leaves) that never needs odd boxes (see the tiling check
 below). The pack's `Blocks` table says which texture each block shows on each face: `All`,
 `Sides`, `Top` and `Bottom` (a face given nothing falls back to All, then Sides), `Front` for glow
-lichen, ladders, rails and vines (the face looking away from what it hangs on or lies on) and
+lichen, ladders, rails and vines (the face looking away from what it hangs on or lies on) and for
+doors (both sides of the panel: `OakDoor` covers a door's lower halves, `OakDoorTop` its upper
+halves; the same picture serves both hinges, and the windows are wherever the picture is
+see-through; give the item a whole-door picture in `Icons` too, as its model draws the boxes) and
 `Sprite` for plants, rope, cobwebs and hanging roots (two crossed images). An entry also covers
 the block's cave twin and the other blocks of its variant group (the six glow lichen sides, the
 four ladders and vines, both rails, a tall plant's top half unless it has its own). A filled

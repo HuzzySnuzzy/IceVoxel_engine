@@ -160,6 +160,11 @@ return table.freeze({
 	Vine = "Climbable greenery that hangs from walls.",
 	HangingRoots = "Roots poking down from a cave ceiling.",
 	MossyCobblestone = "Cobblestone overgrown with moss.",
+	OakDoor = "Right click to open. Two side by side open together.",
+	SpruceDoor = "A solid spruce door. Two side by side open together.",
+	BirchDoor = "A birch door with four little windows. Opens with a right click.",
+	JungleDoor = "A jungle wood door with small windows. Opens with a right click.",
+	AcaciaDoor = "An acacia door with one window. Opens with a right click.",
 
 	-- Armor -------------------------------------------------------------------------------------
 	LeatherHelmet = "Warm hide. Leather keeps the frost off.",

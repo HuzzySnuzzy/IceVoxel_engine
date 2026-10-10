@@ -3,14 +3,17 @@
 	Axis-aligned box ("hull") collision against the block grid, the way Minecraft Java Edition moves
 	entities (Entity.collide / collideWithShapes / Shapes.collide, Player.maybeBackOffFromEdge).
 
-	Units are blocks: block (x, y, z) fills [x, x + 1] on every axis. Every solid block is a full
-	cube. `solidAt(x, y, z)` tells whether a block blocks movement; callers treat unloaded blocks as
-	solid so nothing falls out of the loaded world.
+	Units are blocks: block (x, y, z) fills [x, x + 1] on every axis. `solidAt(x, y, z)` tells
+	whether a block blocks movement: true for a full cube, false (or nil) for none, or the boxes it
+	collides with (Shape: in the cell's own units, 0..1 on every axis, Minecraft's collision
+	VoxelShape: a door's 3 pixel panel). Callers treat unloaded blocks as solid so nothing falls out
+	of the loaded world. A Shape is truthy, so a caller asking only "anything there?" sees one as a
+	block.
 
 	A move is resolved one axis at a time: Y first, then the larger of the horizontal components,
-	then the other. Along an axis the box moves until it touches the first solid block whose cross
-	section it overlaps (by more than EPSILON); blocks it already overlaps are ignored, so a box stuck
-	inside a block can still get out. Pure Luau, no Roblox APIs.
+	then the other. Along an axis the box moves until it touches the first solid block or box whose
+	cross section it overlaps (by more than EPSILON); those it already overlaps are ignored, so a box
+	stuck inside a block can still get out. Pure Luau, no Roblox APIs.
 ]]
 
 local EPSILON = 1.0e-7
@@ -24,7 +27,10 @@ export type Box = {
 	maxZ: number,
 }
 
-export type SolidAt = (x: number, y: number, z: number) -> boolean
+-- A block's collision boxes in its own cell (0..1 on every axis; Hull's header).
+export type Shape = { Box }
+
+export type SolidAt = (x: number, y: number, z: number) -> boolean | Shape
 
 local floor = math.floor
 local ceil = math.ceil
@@ -63,12 +69,30 @@ function Hull.expandTowards(box: Box, dx: number, dy: number, dz: number): Box
 	}
 end
 
--- Does any solid block overlap the box (touching faces do not count)?
+-- Does a box of `shape` in cell (x, y, z) overlap `box` (touching faces do not count)?
+local function shapeOverlaps(shape: Shape, x: number, y: number, z: number, box: Box): boolean
+	for _, part in shape do
+		if
+			x + part.minX < box.maxX - EPSILON
+			and x + part.maxX > box.minX + EPSILON
+			and y + part.minY < box.maxY - EPSILON
+			and y + part.maxY > box.minY + EPSILON
+			and z + part.minZ < box.maxZ - EPSILON
+			and z + part.maxZ > box.minZ + EPSILON
+		then
+			return true
+		end
+	end
+	return false
+end
+
+-- Does any solid block (or box of a shaped one) overlap the box (touching faces do not count)?
 function Hull.noCollision(solidAt: SolidAt, box: Box): boolean
 	for x = floor(box.minX + EPSILON), floor(box.maxX - EPSILON) do
 		for y = floor(box.minY + EPSILON), floor(box.maxY - EPSILON) do
 			for z = floor(box.minZ + EPSILON), floor(box.maxZ - EPSILON) do
-				if solidAt(x, y, z) then
+				local solid = solidAt(x, y, z)
+				if solid == true or (type(solid) == "table" and shapeOverlaps(solid, x, y, z, box)) then
 					return false
 				end
 			end
@@ -77,38 +101,87 @@ function Hull.noCollision(solidAt: SolidAt, box: Box): boolean
 	return true
 end
 
--- Is any block of the cross section at `k` along `axis` solid? (1 = X, 2 = Y, 3 = Z; the other two
--- ranges are inclusive cell ranges.)
-local function layerSolid(
+--[[
+	The nearest face of an obstacle in the cross section at layer `k` along `axis` (1 = X, 2 = Y,
+	3 = Z; `a0..a1`, `b0..b1` the cells of the other two axes, inclusive) that the box moving along
+	the axis (`positive` or not) would hit, nil when none: for a positive move the lowest start of
+	a full block or shape box starting at or beyond `face` (the box's leading side), else the
+	highest end of one ending at or before it. Those starting behind the face are overlapped
+	already and ignored. A shape box must overlap the box's cross section itself.
+]]
+local function layerHit(
 	solidAt: SolidAt,
 	axis: number,
 	k: number,
 	a0: number,
 	a1: number,
 	b0: number,
-	b1: number
-): boolean
+	b1: number,
+	box: Box,
+	positive: boolean,
+	face: number
+): number?
+	local hit: number? = nil
 	for a = a0, a1 do
 		for b = b0, b1 do
-			local solid
+			local x, y, z
 			if axis == 1 then
-				solid = solidAt(k, a, b) -- a = y, b = z
+				x, y, z = k, a, b -- a = y, b = z
 			elseif axis == 2 then
-				solid = solidAt(a, k, b) -- a = x, b = z
+				x, y, z = a, k, b -- a = x, b = z
 			else
-				solid = solidAt(a, b, k) -- a = x, b = y
+				x, y, z = a, b, k -- a = x, b = y
 			end
-			if solid then
-				return true
+			local solid = solidAt(x, y, z)
+			if solid == true then
+				local at = if positive then k else k + 1
+				if if positive then at >= face - EPSILON else at <= face + EPSILON then
+					if hit == nil or (if positive then at < hit else at > hit) then
+						hit = at
+					end
+				end
+			elseif type(solid) == "table" then
+				for _, part in solid do
+					local lo, hi, across
+					if axis == 1 then
+						lo, hi = x + part.minX, x + part.maxX
+						across = y + part.minY < box.maxY - EPSILON
+							and y + part.maxY > box.minY + EPSILON
+							and z + part.minZ < box.maxZ - EPSILON
+							and z + part.maxZ > box.minZ + EPSILON
+					elseif axis == 2 then
+						lo, hi = y + part.minY, y + part.maxY
+						across = x + part.minX < box.maxX - EPSILON
+							and x + part.maxX > box.minX + EPSILON
+							and z + part.minZ < box.maxZ - EPSILON
+							and z + part.maxZ > box.minZ + EPSILON
+					else
+						lo, hi = z + part.minZ, z + part.maxZ
+						across = x + part.minX < box.maxX - EPSILON
+							and x + part.maxX > box.minX + EPSILON
+							and y + part.minY < box.maxY - EPSILON
+							and y + part.maxY > box.minY + EPSILON
+					end
+					if across then
+						local at = if positive then lo else hi
+						if if positive then at >= face - EPSILON else at <= face + EPSILON then
+							if hit == nil or (if positive then at < hit else at > hit) then
+								hit = at
+							end
+						end
+					end
+				end
 			end
 		end
 	end
-	return false
+	return hit
 end
 
 --[[
 	How far the box can move along `axis` (1 = X, 2 = Y, 3 = Z), up to `delta` (Shapes.collide):
-	`delta` shortened to the first solid block in the way.
+	`delta` shortened to the first solid block (or shape box) in the way. The scan starts at the
+	layer the box's leading side is in (a shape box there may still be ahead of it) and stops at
+	the first layer with a hit: anything in a later layer starts further on.
 ]]
 function Hull.collideAxis(solidAt: SolidAt, axis: number, box: Box, delta: number): number
 	if delta == 0 then
@@ -129,20 +202,21 @@ function Hull.collideAxis(solidAt: SolidAt, axis: number, box: Box, delta: numbe
 		b0, b1 = floor(box.minY + EPSILON), floor(box.maxY - EPSILON)
 	end
 	if delta > 0 then
-		-- Blocks starting at or beyond the box's far face, up to where the move ends.
-		local k = ceil(max - EPSILON)
+		local k = floor(max - EPSILON)
 		while k < max + delta do
-			if layerSolid(solidAt, axis, k, a0, a1, b0, b1) then
-				delta = k - max
+			local hit = layerHit(solidAt, axis, k, a0, a1, b0, b1, box, true, max)
+			if hit then
+				delta = math.min(delta, hit - max)
 				break
 			end
 			k += 1
 		end
 	else
-		local k = floor(min + EPSILON) - 1
+		local k = ceil(min + EPSILON) - 1
 		while k + 1 > min + delta do
-			if layerSolid(solidAt, axis, k, a0, a1, b0, b1) then
-				delta = k + 1 - min
+			local hit = layerHit(solidAt, axis, k, a0, a1, b0, b1, box, false, min)
+			if hit then
+				delta = math.max(delta, hit - min)
 				break
 			end
 			k -= 1
