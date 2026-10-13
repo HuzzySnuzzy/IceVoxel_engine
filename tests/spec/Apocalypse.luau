@@ -7,12 +7,15 @@
 	and skin tones packed in a variant, drops, knowledge, sounds, snake case names); the Mobs ops'
 	sizes and flags, the retired arrow op and the move op's deltas, and the Survivor message
 	(Shared/Net/Protocol); the blood moon's schedule (Apocalypse/BloodMoon); which sounds zombies
-	hear (Apocalypse/NoiseRules) and the server's noise bus (Apocalypse/NoiseBus); the ruins' and
+	hear (Apocalypse/NoiseRules) and the server's noise bus (Apocalypse/NoiseBus), which hears a
+	sound played at a player's feet with the game's audio off (Audio/Sounds); the ruins' and
 	bunkers' loot (Generation/ScavengeLoot); bats wearing (Entities/Combat); the new recipes,
 	smelting and their Ages; the monsters' old drops still found; the /locate kinds and POI
 	types; the no-op cities and bunkers the generator runs with until they come; and the Ruins
 	world setting with old worlds' rule (Save/WorldMeta).
 ]]
+
+local roblox = require("@lune/roblox")
 
 return function(t, shared, require, server)
 	local Blocks = require(shared.Blocks)
@@ -42,6 +45,7 @@ return function(t, shared, require, server)
 	local GameMode = require(shared.GameMode)
 	local WorldMeta = require(server.Save.WorldMeta)
 	local NoiseBus = require(server.Apocalypse.NoiseBus)
+	local ServerSounds = require(server.Audio.Sounds)
 
 	local B, I = Blocks.id, Items.id
 	local DAY = 24000
@@ -518,6 +522,47 @@ return function(t, shared, require, server)
 		heard = NoiseBus.take()
 		t.eq(#heard, 1, "only the glass")
 		t.eq(heard[1].radius, s.Glass)
+	end)
+
+	t.test("apocalypse: a sound at a player's feet is a noise even with the game's audio off", function()
+		-- (Audio/Sounds never starts in the specs, as with Config.Sounds.Enabled false. The feet
+		-- come from a character, through Movement/Rig, which reads Roblox's Vector3: lent here
+		-- from Lune's. A root 2 studs tall without a humanoid stands 3 studs over the feet.)
+		local BLOCK = Config.BlockSize
+		local root: any = {
+			Size = roblox.Vector3.new(2, 2, 1),
+			CFrame = roblox.CFrame.new(),
+			Position = roblox.Vector3.new(10.5 * BLOCK, 64 * BLOCK + 3, -20.5 * BLOCK),
+		}
+		function root.IsA(_, class: string): boolean
+			return class == "BasePart"
+		end
+		local character = {
+			FindFirstChild = function(_, name: string)
+				return if name == "HumanoidRootPart" then root else nil
+			end,
+			FindFirstChildOfClass = function()
+				return nil
+			end,
+		}
+		local lent = Vector3
+		Vector3 = roblox.Vector3
+		NoiseBus.take()
+		local ok, problem = pcall(function()
+			ServerSounds.playAt({ Character = character } :: any, "entity.player.hurt")
+			ServerSounds.playAt({ Character = nil } :: any, "block.glass.break")
+			ServerSounds.playAt({ Character = character } :: any, nil)
+		end)
+		Vector3 = lent
+		t.ok(ok, `played: {problem}`)
+		local heard = NoiseBus.take()
+		t.eq(#heard, 1, "the hurt player only: no noise without a position or a sound")
+		t.eq(heard[1].radius, Config.Apocalypse.Noise.Hurt, "a hurt's radius")
+		local noise = heard[1]
+		t.ok(
+			math.abs(noise.x - 10.5) < 1e-3 and math.abs(noise.y - 64) < 1e-3 and math.abs(noise.z + 20.5) < 1e-3,
+			`at the feet ({noise.x}, {noise.y}, {noise.z})`
+		)
 	end)
 
 	--[[ Loot, weapons, recipes ]]

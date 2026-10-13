@@ -168,10 +168,10 @@ mix({ "IronIngot", "Flint" }, "FlintAndSteel")
 
 --[[
 	Explosives. Gunpowder has no creeper to drop it here, and ruins hide some (Generation/
-	ScavengeLoot): a coal or charcoal and a flint in any slots make two (black powder is charcoal and saltpetre; flint stands in). TNT is Minecraft's:
-	gunpowder in an X with sand between (5 gunpowder, 4 sand). The Nuke (this game's, a mod's
-	toy): eight TNT around a block of diamond, so a crater costs 40 gunpowder, 32 sand and nine
-	diamonds.
+	ScavengeLoot): a coal or charcoal and a flint in any slots make two (black powder is charcoal
+	and saltpetre; flint stands in). TNT is Minecraft's: gunpowder in an X with sand between (5
+	gunpowder, 4 sand). The Nuke (this game's, a mod's toy): eight TNT around a block of diamond,
+	so a crater costs 40 gunpowder, 32 sand and nine diamonds.
 ]]
 mix({ "#coals", "Flint" }, "Gunpowder", 2)
 shape({ "X#X", "#X#", "X#X" }, { X = "Gunpowder", ["#"] = "Sand" }, "Tnt")
@@ -494,7 +494,7 @@ mix({ "Leather", "Leather", "Leather", "String" }, "TuxedoPants")
 	  Baseball Bat          two logs over a Stick (logs: no clash with the wooden sword)
 	  Spiked Bat            a Baseball Bat and three Nails
 	  Machete               two Iron Ingots on the diagonal over a Stick
-	  Crowbar               three Iron Ingots in a hook
+	  Crowbar               four Iron Ingots in a hook
 	  Supply Crate          planks and Sticks in a ring
 	  Ceiling Lamp          three Iron Nuggets round Glow Dust make two
 	  Bunker Hatch          four Iron Ingots (Minecraft's iron trapdoor)

@@ -82,8 +82,8 @@
 	  Config.Textures.SideImages.
 
 	Never textured (no entries): fluids, air, cave air and structure voids, torches, lanterns and
-	ceiling lamps, transmitters (pipes, cables, transporters), fluid tanks, machines and the solar panel, structure
-	blocks and jigsaws, and the Glow Block (Neon cannot take a MaterialVariant).
+	ceiling lamps, transmitters (pipes, cables, transporters), fluid tanks, machines and the solar
+	panel, structure blocks and jigsaws, and the Glow Block (Neon cannot take a MaterialVariant).
 
 	Icons (items that are no blocks)
 	  Item name (ItemList) -> the *Image* asset id of its inventory picture (a square image, best

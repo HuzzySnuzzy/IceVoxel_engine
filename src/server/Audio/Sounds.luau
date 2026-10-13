@@ -232,7 +232,8 @@ end
 
 -- Plays event `sound` at the feet of `player` (nothing without a position), except for `except`.
 function Sounds.playAt(player: Player, sound: (number | string)?, except: Player?, volume: number?, pitch: number?)
-	if sound == nil or not started then
+	-- (Not `started` here: `play` checks it after the noise bus, which hears muted sounds too.)
+	if sound == nil then
 		return
 	end
 	local x, y, z = PlayerPositions.feet(player)
