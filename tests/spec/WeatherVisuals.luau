@@ -929,13 +929,14 @@ return function(t, shared, require, _server, client)
 			t.eq((event :: any).source, "ambient", "Minecraft's WEATHER source: the ambient volume")
 		end
 		-- Appended at the end of the list (ids of the sounds before them unchanged), the distant
-		-- storms' two after them (tests/spec/DistantStorms), then Terraria's six and the wind.
+		-- storms' two after them (tests/spec/DistantStorms), then Terraria's six and the wind, then
+		-- the zombie apocalypse's ten.
 		local list = SoundList.EVENTS
 		local at = {}
 		for index, entry in list do
 			at[entry.name] = index
 		end
-		local terraria = 7
+		local terraria = 7 + 10
 		t.eq(at["weather.rain"], #list - 5 - terraria, "the four come before the distant storms' and Terraria's")
 		t.eq(at["entity.lightning_bolt.impact"], #list - 2 - terraria)
 		t.eq(at["entity.lightning_bolt.thunder.far"], #list - 1 - terraria)

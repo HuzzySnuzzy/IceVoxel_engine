@@ -633,10 +633,11 @@ return function(t, shared, require, server, client)
 		local purified = categories(JeiData.recipes(I.PurifiedWaterBowl))
 		t.eq(purified.crafting, 1, "mint")
 		t.eq(purified.smelting, 1, "the furnace")
-		-- Mint Leaves: the three cures, Mint Tea, Herbal Tea and the Potion of Swiftness.
-		t.eq(categories(JeiData.uses(I.MintLeaves)).crafting, 6)
-		-- Ginger Root: Ginger Tea, Herbal Tea and the Potion of Fire Resistance.
-		t.eq(categories(JeiData.uses(I.GingerRoot)).crafting, 3)
+		-- Mint Leaves: the three cures, Mint Tea, Herbal Tea, the Potion of Swiftness and the
+		-- zombie apocalypse's Herbal Poultice.
+		t.eq(categories(JeiData.uses(I.MintLeaves)).crafting, 7)
+		-- Ginger Root: Ginger Tea, Herbal Tea, the Potion of Fire Resistance and the Herbal Poultice.
+		t.eq(categories(JeiData.uses(I.GingerRoot)).crafting, 4)
 		t.eq(categories(JeiData.uses(I.PurifiedWaterBowl)).crafting, 3, "the three teas")
 		t.ok(JeiData.has("recipes", I.HerbalTea))
 		-- WAILA: the plant's name, its herb's icon.

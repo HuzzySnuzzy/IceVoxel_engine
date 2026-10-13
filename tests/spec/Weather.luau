@@ -840,7 +840,7 @@ return function(t, shared, require, server)
 		Fire.setRain(nil)
 	end)
 
-	t.test("rain: zombies don't burn in the rain or a thunderstorm's daylight", function()
+	t.test("rain: a mob that burns by day doesn't in the rain or a thunderstorm's daylight", function()
 		local function getBlock(_x: number, y: number, _z: number): number?
 			return if y < FLOOR then STONE else AIR
 		end
@@ -850,6 +850,12 @@ return function(t, shared, require, server)
 		local function run(rain: boolean, day: boolean): number
 			local world = MobWorld.new(getBlock, { maxMobs = 10, forgetTicks = 6000, random = lcg(5) })
 			local id = world:spawn(MobList.find("Zombie") :: number, 0.5, FLOOR, 0.5)
+			-- (No kind burns by day since the zombie apocalypse; MobWorld's rule stays for one that
+			-- does, so this zombie is given it.)
+			local mob = world:get(id) :: any
+			local kind = table.clone(mob.kind)
+			kind.burnsInDaylight = true
+			mob.kind = kind
 			local ctx = {
 				players = {},
 				dayTime = NOON,

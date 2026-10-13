@@ -68,9 +68,11 @@
 	                   regeneration, potions, Mana Crystals), magic weapons and their
 	                   projectiles (Players/Magic: casts, server-simulated flights, hits on mobs)
 	                   and Fallen Stars at night (Players/FallenStars)
-	 11. mobs      -> cows, sheep, pigs, chickens, zombies, skeletons, creepers and spiders
+	 11. mobs      -> cows, sheep, pigs, chickens and the apocalypse's zombies
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
-	                   blasts hurting them), and eating what they drop (Players/Eating)
+	                   blasts hurting them), eating what they drop (Players/Eating), and the
+	                   apocalypse's survival rules (Apocalypse/Survival: bites, wounds, survivor
+	                   records) and noises (Apocalypse/NoiseBus: sounds and blasts zombies hear)
 	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
 	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
 	                   on their windows, the perks the parts above ask for, saving, /knowledge and
@@ -142,6 +144,7 @@ local Transmitters = require(Server.Transmitters.Transmitters)
 local Machines = require(Server.Machines.Machines)
 local ItemUse = require(Server.Players.ItemUse)
 local DoorUse = require(Server.Players.DoorUse)
+local ToggleUse = require(Server.Players.ToggleUse)
 local Containers = require(Server.Players.Containers)
 local StructureBlocks = require(Server.Structures.StructureBlocks)
 local ToughAsNails = require(Server.Players.ToughAsNails)
@@ -150,6 +153,8 @@ local Magic = require(Server.Players.Magic)
 local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
+local Survival = require(Server.Apocalypse.Survival)
+local NoiseBus = require(Server.Apocalypse.NoiseBus)
 local Effects = require(Server.Players.Effects)
 local Progression = require(Server.Players.Progression)
 local WorldSave = require(Server.World.WorldSave)
@@ -233,8 +238,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	-- machines after the pipes (their cables are the pipes' nodes).
 	Transmitters.start(net, world)
 	ItemUse.start(net, world)
-	-- Doors after inventories (the Use hook).
+	-- Doors and toggling blocks (the bunker hatch) after inventories (the Use hook).
 	DoorUse.start(net, world)
+	ToggleUse.start(net, world)
 	Machines.start(net, world)
 	-- Structure blocks after inventories (containers, the Use hook).
 	StructureBlocks.start(net, world)
@@ -252,6 +258,9 @@ local function startWorld(settings: WorldSettings.Settings)
 	-- Config.Players.ServerPositions only).
 	PlayerRelay.start(net)
 	Eating.start(net)
+	-- The zombie apocalypse's bites, wounds, sprinting noise and survivor records (Mobs' hits,
+	-- eating's medicine).
+	Survival.start(net, world)
 	-- Knowledge, Ages and skills after inventories (the windows' recipe gate) and game modes; the
 	-- perks go to the parts that apply them.
 	Progression.start(net, world, WorldSettings.savesProgress(settings))
@@ -294,6 +303,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		Entities.explode(x, y, z, power)
 		Characters.explosion(x, y, z, power, getBlock, range)
 		Mobs.explode(x, y, z, power)
+		-- (A blast is a noise the zombies hear: Apocalypse/NoiseBus.)
+		NoiseBus.explosion(x, y, z, power)
 	end)
 	-- Rain puts burning players out (mobs ask the weather themselves: Mobs/Mobs).
 	Characters.setRain(WeatherServer.rainingAt)

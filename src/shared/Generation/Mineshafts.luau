@@ -363,9 +363,11 @@ export type Mineshafts = {
 	-- Every entrance whose keep-out box touches the block rectangle (only builds the plans that
 	-- may have one: cheap for far chunks; `yield` as for `plans`).
 	entrances: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Entrance },
-	-- The boxes an underground lava lake must not overlap (every piece grown by MARGIN and every
-	-- entrance shaft of the plans touching the rectangle; six numbers each).
-	boxes: (minX: number, minZ: number, maxX: number, maxZ: number) -> { number },
+	-- The boxes an underground lava lake (or a bunker: Generation/Bunkers) must not overlap
+	-- (every piece grown by MARGIN and every entrance shaft of the plans touching the rectangle;
+	-- six numbers each). `yield` goes to `plans`, so a caller outside `generate` can build plans
+	-- without a long stretch.
+	boxes: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { number },
 	--[[
 		Writes `plans` into the padded full detail chunk `data` (first core column originX,
 		originZ; `cells` tall; `heights` per padded column at pz * PADDED + px + 1: its full
@@ -1393,9 +1395,9 @@ function Mineshafts.new(seed: number, terrain: Terrain, layout: Layout?): Minesh
 		return list
 	end
 
-	local function boxes(minX: number, minZ: number, maxX: number, maxZ: number): { number }
+	local function boxes(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { number }
 		local list: { number } = {}
-		for _, plan in plans(minX, minZ, maxX, maxZ) do
+		for _, plan in plans(minX, minZ, maxX, maxZ, yield) do
 			for _, piece in plan.pieces do
 				local b = piece.outer
 				table.insert(list, b[1] - MARGIN + 1)

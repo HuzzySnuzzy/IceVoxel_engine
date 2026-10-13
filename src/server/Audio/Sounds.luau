@@ -16,6 +16,9 @@
 	             can't stream sounds to everyone near it.
 	  Off        before `start` and with Config.Sounds.Enabled false, playing does nothing. Flat
 	             (`ui`) events are the local player's alone and are never sent.
+	  Noise      every sound played here goes to Apocalypse/NoiseBus first (whatever the checks
+	             above say): the zombie apocalypse's noises zombies hear (Shared/Apocalypse/
+	             NoiseRules picks which).
 
 	What plays where (the hooks): blocks broken and placed by players (Network/ServerNet), torches
 	and lanterns popping off (Behaviours/Attached), plants popping off (Behaviours/Plant), chest
@@ -43,6 +46,7 @@ local Protocol = require(Shared.Net.Protocol)
 local SharedSounds = require(Shared.Sounds)
 
 local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
+local NoiseBus = require(script.Parent.Parent.Apocalypse.NoiseBus)
 
 type SoundCue = Protocol.SoundCue
 
@@ -207,6 +211,11 @@ function Sounds.play(
 	pitch: number?
 )
 	local index = resolve(sound)
+	-- (Every sound the server plays may be a noise zombies hear, Apocalypse/NoiseBus: before the
+	-- checks below, so muted audio deafens no zombie and `except` is heard like anyone.)
+	if index then
+		NoiseBus.fromSound(index, x, y, z)
+	end
 	if started and index then
 		queue:add(index, x, y, z, except, volume, pitch)
 	end

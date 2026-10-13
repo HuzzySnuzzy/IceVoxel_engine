@@ -12,7 +12,8 @@
 	          tanks).
 	  Tags    Minecraft's tag files' idea (#acquirable_job_site, #village): `workstation`,
 	          `machine` (every type whose blocks have a BlockList `machine`), `generator`,
-	          `container`, `structure`, `explosive`.
+	          `container`, `structure`, `explosive`, `scavenge` (what the ruins and bunkers hold
+	          loot in).
 	  Lookup  `lut` holds each block id's type index (u8, 0: none), for the hot loops that scan
 	          edits and templates (World/PoiSearch, Generation/StructureGen.pieceBlocks); `of`
 	          gives a block's type id.
@@ -42,14 +43,19 @@ local TYPES: { { any } } = {
 	{ "jigsaw", "Jigsaw" },
 	{ "tnt", "Tnt" },
 	{ "nuke", "Nuke" },
+	-- (The apocalypse's ruins and bunkers: their loot, and the hatch, open or shut.)
+	{ "supply_crate", "SupplyCrate" },
+	{ "medicine_cabinet", "MedicineCabinet" },
+	{ "bunker_hatch", "BunkerHatch" },
 }
 
 Poi.TAGS = table.freeze({
 	workstation = { "crafting_table", "furnace", "campfire", "electric_furnace", "oil_refinery" },
 	generator = { "heat_generator", "combustion_generator", "solar_panel" },
-	container = { "chest", "furnace", "fluid_tank" },
+	container = { "chest", "furnace", "fluid_tank", "supply_crate", "medicine_cabinet" },
 	structure = { "structure_block", "jigsaw" },
 	explosive = { "tnt", "nuke" },
+	scavenge = { "chest", "supply_crate", "medicine_cabinet" },
 } :: { [string]: { string } })
 -- Every type whose blocks are machines.
 Poi.MACHINE_TAG = "machine"

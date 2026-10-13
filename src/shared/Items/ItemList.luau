@@ -842,7 +842,8 @@ table.insert(list, {
 })
 
 --[[
-	Gunpowder (Minecraft's, which creepers drop: this game has no creepers). Black powder is
+	Gunpowder (Minecraft's, which creepers drop: this game has no creepers; the ruins' and bunkers'
+	crates and soldier zombies have some). Black powder is
 	charcoal and saltpetre; here a coal or charcoal and a flint make two (Shared/Crafting/Recipes),
 	and five of them with four sand make TNT (BlockList Tnt, server Behaviours/Tnt). A dark grey
 	heap of grains with a few lighter specks, as Minecraft's icon.
@@ -1074,8 +1075,9 @@ table.insert(list, {
 	Mutton, Raw Porkchop, Raw Chicken: a mob that dies burning drops it cooked, as Minecraft's
 	furnace_smelt loot function), cooked in a furnace (Steak, Cooked Mutton, Cooked Porkchop,
 	Cooked Chicken) and eaten with the 32 tick hold for health (Shared/Items/Foods), Feathers
-	(chickens), Rotten Flesh (zombies: edible, with a likely Thirst effect), Bones (skeletons),
-	String (spiders: four make White Wool). Gunpowder (creepers) is above. Pixel boxes like the
+	(chickens), Rotten Flesh (zombies: edible, with a likely Thirst effect), Bones (zombies now
+	and then, and the ruins' loot), String (cobwebs, and the ruins' loot: four make White Wool).
+	Gunpowder is above. Pixel boxes like the
 	other items: a ragged hide, slabs of meat with their fat or bone, a drumstick, a quill, a
 	knobbed bone and a looped thread, as Minecraft's icons.
 ]]
@@ -1245,8 +1247,8 @@ end
 	tip), Anklet of the Wind (a green band with feathers), Band of Regeneration (a red ring with a
 	heart gem) and Band of Starpower (a blue ring with a star), Obsidian Skull, Flipper (green
 	fins), Cobalt Shield (a blue round shield) and Feral Claws (a tan glove with claws). How each
-	is found: Shared/Crafting/Recipes, Generation/Mineshafts' fourth loot pool, Entities/MobList
-	(spiders' claws).
+	is found: Shared/Crafting/Recipes, Generation/Mineshafts' fourth loot pool, Generation/
+	ScavengeLoot (Feral Claws: the ruins' and bunkers' loot).
 ]]
 do
 	local WHITE = { 250, 250, 250 }
@@ -1616,6 +1618,324 @@ do
 		color = SUIT,
 		material = "Fabric",
 		model = LEGGINGS,
+	})
+end
+
+--[[
+	The zombie apocalypse's things (Generation/ScavengeLoot fills the ruins' and bunkers' crates
+	and cabinets with them; Crafting/Recipes makes some). Box models in their colours until
+	TexturePack.Icons has their pictures.
+
+	Medical supplies (eaten through Shared/Items/Foods, server Apocalypse/Survival): a Bandage
+	(a white roll), a Medkit (a red case with a white cross), Antibiotics (a pill bottle with an
+	orange cap), Painkillers (a blister strip), and the Herbal Poultice, mint and ginger bound in a
+	rag on a cloth pad: the renewable answer to a bite. Scavenged materials: a Rag (grey cloth from
+	old wool), Duct Tape (a grey ring), Nails (three of them) and Scrap Metal (jagged rusty plates;
+	a furnace makes Iron Nuggets of it). Food and drink from the ruins: Canned Beans and Canned
+	Peaches (tin cans with their labels), Crackers (a tan box), a Chocolate Bar (in a purple
+	wrapper), a Military Ration (an olive pouch), Bottled Water (a clear bottle with a blue cap)
+	and Soda (a red can). Weapons: a Baseball Bat and its Spiked Bat (no tool, but they wear: a
+	hit costs 1, Shared/Entities/Combat.wear), a Machete (a sword), a Crowbar (a pickaxe) and a
+	Fire Axe (an axe), modelled upright and tilted like Minecraft's tools.
+]]
+do
+	local WHITE = { 245, 245, 240 }
+	local BANDAGE = { 236, 232, 220 }
+	local MEDKIT = { 196, 40, 40 }
+	local PILLS = { 232, 232, 226 }
+	local PILL_CAP = { 222, 120, 40 }
+	local BLISTER = { 210, 214, 220 }
+	local RAG = { 150, 146, 136 }
+	local TAPE = { 150, 154, 158 }
+	local NAIL = { 170, 172, 176 }
+	local SCRAP = { 128, 90, 64 }
+	local CAN = { 170, 170, 166 }
+	local CRACKERS = { 206, 170, 110 }
+	local CHOCOLATE = { 92, 56, 36 }
+	local WRAPPER = { 120, 40, 120 }
+	local RATION = { 96, 104, 64 }
+	local BOTTLED = { 170, 210, 235 }
+	local SODA = { 200, 30, 40 }
+	local BAT = { 176, 134, 84 }
+	local BLADE = { 190, 194, 198 }
+	local GRIP = { 30, 30, 32 }
+	local CROWBAR = { 170, 36, 30 }
+	local AXE_HEAD = { 200, 40, 30 }
+	local AXE_HANDLE = { 220, 190, 60 }
+	local POULTICE = { 96, 140, 70 }
+	local PAD = { 220, 214, 196 }
+
+	-- A tin can with a label of `label` round its middle.
+	local function can(label: { number }): { ModelBox }
+		return {
+			{ size = { 8, 10, 6 }, offset = { 0, -1, 0 } },
+			{ size = { 8.2, 5, 6.2 }, offset = { 0, -1, 0 }, color = label, material = "SmoothPlastic" },
+			{ size = { 7, 0.8, 5 }, offset = { 0, 4.4, 0 }, color = shade(CAN, 1.15) },
+			{ size = { 1.2, 4, 0.4 }, offset = { -2.6, -1, 3.2 }, color = shade(label, 1.3) },
+		}
+	end
+	-- An upright bat from y = -10 (knob) to the barrel's end at the top.
+	local function bat(): { ModelBox }
+		return {
+			{ size = { 2.5, 1, 2.5 }, offset = { 0, -9.5, 0 }, color = shade(BAT, 0.7) },
+			{ size = { 1.5, 7, 1.5 }, offset = { 0, -5.5, 0 }, color = shade(BAT, 0.85) },
+			{ size = { 2.2, 3, 2.2 }, offset = { 0, -0.5, 0 } },
+			{ size = { 3, 9, 3 }, offset = { 0, 5.5, 0 } },
+			{ size = { 0.6, 8, 3.1 }, offset = { 1, 5.5, 0 }, color = shade(BAT, 1.15) },
+		}
+	end
+
+	table.insert(list, {
+		name = "Bandage",
+		maxStack = 16,
+		color = BANDAGE,
+		material = "Fabric",
+		model = {
+			{ size = { 10, 10, 6 }, offset = { 0, 1, 0 }, shape = "Cylinder" },
+			{ size = { 4, 4, 6.2 }, offset = { 0, 1, 0 }, shape = "Cylinder", color = shade(BANDAGE, 0.8) },
+			{ size = { 6, 3, 1 }, offset = { 3, -4.5, 2.4 }, rotation = -15 },
+		},
+	})
+	table.insert(list, {
+		name = "Medkit",
+		maxStack = 4,
+		color = MEDKIT,
+		material = "SmoothPlastic",
+		model = {
+			{ size = { 12, 9, 5 }, offset = { 0, -1.5, 0 } },
+			{ size = { 5, 1.5, 2 }, offset = { 0, 3.75, 0 }, color = shade(MEDKIT, 0.6) },
+			{ size = { 12.1, 0.6, 5.1 }, offset = { 0, 1.5, 0 }, color = shade(MEDKIT, 0.75) },
+			{ size = { 5, 1.6, 0.4 }, offset = { 0, -2, 2.6 }, color = WHITE },
+			{ size = { 1.6, 5, 0.4 }, offset = { 0, -2, 2.6 }, color = WHITE },
+		},
+	})
+	table.insert(list, {
+		name = "Antibiotics",
+		maxStack = 8,
+		color = PILLS,
+		material = "SmoothPlastic",
+		model = {
+			{ size = { 7, 9, 6 }, offset = { 0, -2, 0 } },
+			{ size = { 7.4, 3, 6.4 }, offset = { 0, 4, 0 }, color = PILL_CAP },
+			{ size = { 5, 4, 0.4 }, offset = { 0, -2, 3.1 }, color = shade(PILL_CAP, 0.9) },
+		},
+	})
+	local blister: { ModelBox } = { { size = { 12, 8, 1 }, offset = { 0, 0, 0 } } }
+	for _, x in { -3.5, 0, 3.5 } do
+		for _, y in { -2, 2 } do
+			table.insert(blister, { size = { 2.5, 2.5, 1 }, offset = { x, y, 0.8 }, color = WHITE, shape = "Ball" })
+		end
+	end
+	table.insert(list, {
+		name = "Painkillers",
+		maxStack = 16,
+		color = BLISTER,
+		material = "Foil",
+		model = blister,
+	})
+	table.insert(list, {
+		name = "Rag",
+		color = RAG,
+		material = "Fabric",
+		model = {
+			{ size = { 11, 7, 1.5 }, offset = { 0, -1, 0 }, rotation = 10 },
+			{ size = { 7, 5, 1.5 }, offset = { -1, 3, 0.3 }, rotation = -15, color = shade(RAG, 0.88) },
+			{ size = { 3, 4, 1.2 }, offset = { 5, -4.5, 0 }, rotation = 25, color = shade(RAG, 1.1) },
+		},
+	})
+	table.insert(list, {
+		name = "DuctTape",
+		maxStack = 16,
+		color = TAPE,
+		material = "Metal",
+		model = {
+			{ size = { 10, 10, 4 }, offset = { 0, 0, 0 }, shape = "Cylinder" },
+			{
+				size = { 5, 5, 4.2 },
+				offset = { 0, 0, 0 },
+				shape = "Cylinder",
+				color = { 120, 96, 70 },
+				material = "Wood",
+			},
+			{ size = { 3.5, 3, 1 }, offset = { 4, -5, 1.5 }, rotation = -30 },
+		},
+	})
+	local nails: { ModelBox } = {}
+	for index, x in { -3, 0, 3 } do
+		local turn = (index - 2) * 8
+		table.insert(nails, { size = { 1, 9, 1 }, offset = { x, -1, 0 }, rotation = turn })
+		table.insert(nails, { size = { 2.5, 1, 1.5 }, offset = { x - turn / 30, 3.5, 0 }, rotation = turn })
+	end
+	table.insert(list, {
+		name = "Nails",
+		color = NAIL,
+		material = "Metal",
+		model = nails,
+	})
+	table.insert(list, {
+		name = "ScrapMetal",
+		displayName = "Scrap Metal",
+		color = SCRAP,
+		material = "CorrodedMetal",
+		model = {
+			{ size = { 9, 6, 1 }, offset = { -1, 1, 0 }, rotation = 20 },
+			{ size = { 7, 4, 1 }, offset = { 2, -2.5, 0.6 }, rotation = -25, color = shade(SCRAP, 0.8) },
+			{ size = { 4, 4, 1 }, offset = { -3.5, -3, -0.4 }, rotation = 45, color = shade(SCRAP, 1.15) },
+		},
+	})
+	table.insert(list, {
+		name = "CannedBeans",
+		maxStack = 16,
+		color = CAN,
+		material = "Metal",
+		model = can({ 170, 60, 40 }),
+	})
+	table.insert(list, {
+		name = "CannedPeaches",
+		maxStack = 16,
+		color = CAN,
+		material = "Metal",
+		model = can({ 230, 150, 60 }),
+	})
+	table.insert(list, {
+		name = "Crackers",
+		color = CRACKERS,
+		material = "SmoothPlastic",
+		model = {
+			{ size = { 11, 8, 3 }, offset = { 0, 0, 0 } },
+			{ size = { 4.5, 4.5, 0.4 }, offset = { -2, 0, 1.6 }, color = shade(CRACKERS, 1.15) },
+			{ size = { 0.8, 0.8, 0.4 }, offset = { -2.8, 0.8, 1.8 }, color = shade(CRACKERS, 0.7) },
+			{ size = { 0.8, 0.8, 0.4 }, offset = { -1.2, -0.8, 1.8 }, color = shade(CRACKERS, 0.7) },
+			{ size = { 3, 1.2, 0.4 }, offset = { 3, 2, 1.6 }, color = { 200, 50, 40 } },
+		},
+	})
+	table.insert(list, {
+		name = "ChocolateBar",
+		color = CHOCOLATE,
+		material = "SmoothPlastic",
+		model = {
+			{ size = { 12, 6, 2 }, offset = { 0, 0, 0 } },
+			{ size = { 0.4, 6, 2.2 }, offset = { 4, 0, 0 }, color = shade(CHOCOLATE, 0.7) },
+			{ size = { 7, 6.4, 2.4 }, offset = { -2.5, 0, 0 }, color = WRAPPER },
+			{ size = { 4, 1.2, 0.4 }, offset = { -2.5, 0.5, 1.3 }, color = { 236, 200, 60 } },
+		},
+	})
+	table.insert(list, {
+		name = "MilitaryRation",
+		maxStack = 16,
+		color = RATION,
+		material = "Fabric",
+		model = {
+			{ size = { 10, 12, 2.5 }, offset = { 0, -1, 0 } },
+			{ size = { 10, 1.5, 2.7 }, offset = { 0, 5.25, 0 }, color = shade(RATION, 0.75) },
+			{ size = { 6, 3, 0.4 }, offset = { 0, -1, 1.4 }, color = shade(RATION, 1.4) },
+		},
+	})
+	table.insert(list, {
+		name = "BottledWater",
+		maxStack = 16,
+		color = BOTTLED,
+		material = "Glass",
+		model = {
+			{ size = { 6, 11, 5 }, offset = { 0, -2, 0 } },
+			{ size = { 3, 2, 3 }, offset = { 0, 4.5, 0 } },
+			{ size = { 3.4, 1.5, 3.4 }, offset = { 0, 6.25, 0 }, color = { 40, 90, 200 }, material = "SmoothPlastic" },
+			{ size = { 6.2, 3, 5.2 }, offset = { 0, -2, 0 }, color = { 60, 140, 220 }, material = "SmoothPlastic" },
+		},
+	})
+	table.insert(list, {
+		name = "SodaCan",
+		displayName = "Soda",
+		maxStack = 16,
+		color = SODA,
+		material = "Metal",
+		model = {
+			{ size = { 7, 11, 6 }, offset = { 0, -1, 0 } },
+			{ size = { 6, 0.8, 5 }, offset = { 0, 4.9, 0 }, color = CAN },
+			{ size = { 7.2, 1.5, 6.2 }, offset = { 0, -1, 0 }, color = WHITE },
+		},
+	})
+	table.insert(list, {
+		name = "BaseballBat",
+		attack = { damage = 5, speed = 1.0 },
+		durability = 120,
+		color = BAT,
+		material = "Wood",
+		model = bat(),
+		tilt = -45,
+	})
+	local spiked = bat()
+	for _, y in { 2.5, 5.5, 8.5 } do
+		table.insert(spiked, { size = { 4.6, 0.6, 0.6 }, offset = { 0, y, 0 }, color = NAIL, material = "Metal" })
+		table.insert(spiked, { size = { 0.6, 0.6, 4.6 }, offset = { 0, y + 1.2, 0 }, color = NAIL, material = "Metal" })
+	end
+	table.insert(list, {
+		name = "SpikedBat",
+		attack = { damage = 7, speed = 0.9 },
+		durability = 160,
+		color = BAT,
+		material = "Wood",
+		model = spiked,
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "Machete",
+		tool = { kind = "sword", speed = 6, level = 2 },
+		attack = { damage = 6, speed = 1.6 },
+		durability = 350,
+		color = BLADE,
+		material = "Metal",
+		model = {
+			{ size = { 3.5, 13, 0.8 }, offset = { 0, 2.5, 0 } },
+			{ size = { 1, 13, 0.9 }, offset = { -1.25, 2.5, 0 }, color = shade(BLADE, 1.15) },
+			{ size = { 2.5, 2.5, 0.8 }, offset = { 0.4, 9, 0 }, rotation = 45 },
+			{ size = { 2, 5, 1.6 }, offset = { 0, -6.5, 0 }, color = GRIP, material = "SmoothPlastic" },
+			{ size = { 2.6, 1, 1.8 }, offset = { 0, -3.5, 0 }, color = GRIP, material = "SmoothPlastic" },
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "Crowbar",
+		tool = { kind = "pickaxe", speed = 4, level = 1 },
+		attack = { damage = 5, speed = 1.2 },
+		durability = 500,
+		color = CROWBAR,
+		material = "Metal",
+		model = {
+			{ size = { 1.5, 16, 1.5 }, offset = { 0.5, -1, 0 } },
+			{ size = { 4, 1.5, 1.5 }, offset = { -1, 7.25, 0 }, rotation = 20 },
+			{ size = { 1.5, 2.5, 1.5 }, offset = { -2.75, 5.75, 0 }, rotation = -20 },
+			{ size = { 2.5, 1.2, 1.5 }, offset = { 1.5, -9, 0 }, rotation = -30, color = shade(CROWBAR, 0.8) },
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "FireAxe",
+		tool = { kind = "axe", speed = 6, level = 2 },
+		attack = { damage = 9, speed = 0.9 },
+		durability = 400,
+		color = AXE_HEAD,
+		material = "Metal",
+		model = {
+			{ size = { 1.5, 17, 1.25 }, offset = { 0, -1.5, 0 }, color = AXE_HANDLE, material = "Wood" },
+			{ size = { 3, 3.5, 1.5 }, offset = { -0.75, 6.5, 0 }, color = shade(AXE_HEAD, 0.85) },
+			{ size = { 2.25, 4.75, 1.5 }, offset = { -3.375, 5.875, 0 } },
+			{ size = { 1.25, 6.5, 1.5 }, offset = { -5.125, 5, 0 }, color = BLADE },
+			{ size = { 3, 1.5, 1.5 }, offset = { 2.5, 7, 0 }, rotation = -20, color = shade(AXE_HEAD, 0.85) },
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "HerbalPoultice",
+		maxStack = 16,
+		color = POULTICE,
+		material = "Fabric",
+		model = {
+			{ size = { 11, 9, 2 }, offset = { 0, 0, 0 }, color = PAD },
+			{ size = { 11.4, 4, 2.4 }, offset = { 0, 0, 0 } },
+			{ size = { 3, 2, 0.4 }, offset = { -2, 3, 1.1 }, rotation = 30, color = shade(POULTICE, 1.3) },
+			{ size = { 2.5, 1.5, 0.4 }, offset = { 2.5, -3, 1.1 }, rotation = -20, color = { 206, 168, 112 } },
+		},
 	})
 end
 

@@ -9,11 +9,10 @@
 	            facing, over that interval (`apply`, `pose`), so it moves smoothly and stops where
 	            the server has it; the facing turns the short way round. A jump of more than
 	            SNAP_DISTANCE blocks (a teleport, a respawn in range) snaps.
-	  Colours   each part's kind colour (a sheep's first part its fleece, `variant`); hurt (the
-	            server's flash flag, 10 ticks) blends every part towards Minecraft's hurt red
-	            (0.7 of the way, OverlayTexture's red overlay); a creeper with its fuse lit
-	            flashes white, faster as the fuse burns (Creeper renderer's swelling flash: on
-	            for the odd tenths of its 30 ticks); dying, it reddens and tips over on its side
+	  Colours   each part's kind colour (a sheep's first part its fleece, a zombie's its look's
+	            shirt: `variant`); hurt (the server's flash flag, 10 ticks) blends every part
+	            towards Minecraft's hurt red (0.7 of the way, OverlayTexture's red overlay);
+	            dying, it reddens and tips over on its side
 	            over 20 ticks (LivingEntityRenderer's death rotation: 90 degrees x
 	            sqrt(progress x 1.6), at most 90).
 	  Aiming    `pick` is the nearest mob box on a ray (WAILA names it, a left click hits it), and
@@ -34,7 +33,6 @@ export type Mob = {
 	variant: number,
 	health: number,
 	flags: number,
-	fuse: number,
 	-- The glide: from (fx, fy, fz, fyaw) at `startedAt` to (x, y, z, yaw) `duration` later.
 	fx: number,
 	fy: number,
@@ -57,7 +55,6 @@ export type State = {
 	yaw: number,
 	health: number,
 	flags: number,
-	fuse: number,
 }
 
 local MobModel = {}
@@ -73,7 +70,6 @@ MobModel.DEATH_SECONDS = 1
 MobModel.HURT = 1
 MobModel.BURNING = 2
 MobModel.DYING = 4
-MobModel.FUSE = 8
 
 -- The yaw `from` turned towards `to` by `alpha` (0..1) the short way round.
 function MobModel.lerpAngle(from: number, to: number, alpha: number): number
@@ -89,7 +85,6 @@ function MobModel.new(id: number, kind: MobList.Kind, variant: number, state: St
 		variant = variant,
 		health = state.health,
 		flags = state.flags,
-		fuse = state.fuse,
 		fx = state.x,
 		fy = state.y,
 		fz = state.z,
@@ -132,7 +127,6 @@ function MobModel.apply(mob: Mob, state: State, now: number)
 	mob.duration = MobModel.GLIDE
 	mob.health = state.health
 	mob.flags = state.flags
-	mob.fuse = state.fuse
 	if bit32.btest(state.flags, MobModel.DYING) then
 		mob.diedAt = mob.diedAt or now
 	else
@@ -150,28 +144,13 @@ function MobModel.tip(mob: Mob, now: number): number
 	return math.rad(math.min(90, math.sqrt(progress * 1.6) * 90))
 end
 
--- Is a creeper's white flash on at `now` (its fuse lit, `fuse` ticks of 30 burnt)?
-function MobModel.flashing(mob: Mob, now: number): boolean
-	if not bit32.btest(mob.flags, MobModel.FUSE) or mob.fuse <= 0 then
-		return false
-	end
-	local fuse = mob.kind.fuse
-	local total = if fuse then fuse.ticks else 30
-	-- (Faster as it burns: Minecraft flips every tenth of the swell.)
-	local rate = 4 + 12 * math.clamp(mob.fuse / total, 0, 1)
-	return math.floor(now * rate) % 2 == 1
-end
-
 --[[
-	The colour (0..255 each) of the mob's part `index` at `now`: its kind's (a sheep's fleece in
-	its variant), white while a creeper flashes, blended towards red while hurt or dying.
+	The colour (0..255 each) of the mob's part `index` at `now`: its kind's (a sheep's fleece or
+	a zombie's shirt in its variant), blended towards red while hurt or dying.
 ]]
-function MobModel.colour(mob: Mob, index: number, now: number): (number, number, number)
+function MobModel.colour(mob: Mob, index: number, _now: number): (number, number, number)
 	local base = if index == 1 then MobList.variantColor(mob.kind, mob.variant) else mob.kind.parts[index].color
 	local r, g, b = base[1], base[2], base[3]
-	if MobModel.flashing(mob, now) then
-		r, g, b = 255, 255, 255
-	end
 	if bit32.btest(mob.flags, MobModel.HURT) or mob.diedAt ~= nil then
 		local red, share = MobModel.HURT_COLOUR, MobModel.HURT_RED
 		r, g, b = r + (red[1] - r) * share, g + (red[2] - g) * share, b + (red[3] - b) * share

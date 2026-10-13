@@ -138,6 +138,16 @@
 	                (Minecraft's makeStuckInBlock: a cobweb's 0.25, 0.05, 0.25), and resets the
 	                fall distance. Blocks.stuckIn.
 
+	The zombie apocalypse (server Mobs/, Apocalypse/; Shared/Blocks/Toggles):
+	  zombieBreak   Ticks one ordinary zombie (MobList `breakPower` 1) hitting it needs to break it
+	                (Minecraft's BreakDoorGoal takes 240 for a door); nil: zombies never break it
+	                (ores, metal, obsidian, containers, machines, the bunker hatch...). Most blocks
+	                get it by name from ZOMBIE_BREAK at the end of the list, before the last cave
+	                twins (which copy it); doors and fences set it themselves. Blocks.zombieBreak.
+	  toggle        { to = "<Name>", sound = "<event>"? }: using it (`menu` "Toggle", server
+	                Players/ToggleUse) swaps it for block `to` and plays `sound` (the bunker
+	                hatch opening and shutting); `to` must toggle back. Blocks.toggleOf.
+
 	Plants (grass, ferns, flowers, mushrooms; Minecraft's BushBlock family, see "Plants" below):
 	  plant         { soil = "dirt" | "deadbush" | "mushroom"?, top = "<Name>"?, bottom = "<Name>"? }.
 	                A single plant or the lower half of a tall one stands on a block of its `soil`
@@ -253,6 +263,8 @@ export type DoorSpec = { facing: string, hinge: string, open: boolean, upper: bo
 export type JigsawSpec = { front: string, top: string }
 -- How a block burns (`flammable`): Minecraft's ignite and burn odds.
 export type FlammableSpec = { ignite: number, burn: number }
+-- What using a toggling block turns it into (`toggle`), and the sound it makes.
+export type ToggleSpec = { to: string, sound: string? }
 
 export type BlockSpec = {
 	name: string,
@@ -314,6 +326,8 @@ export type BlockSpec = {
 	chain: boolean?,
 	axis: string?,
 	stuck: { number }?,
+	zombieBreak: number?,
+	toggle: ToggleSpec?,
 }
 
 local list: { BlockSpec } = {
@@ -2930,6 +2944,8 @@ local function fenceSpec(mask: number): BlockSpec
 		fence = mask,
 		behaviour = "Fence",
 		flammable = { ignite = 5, burn = 20 },
+		-- (A zombie breaks a fence as it breaks dirt: ZOMBIE_BREAK below.)
+		zombieBreak = 300,
 	}
 end
 table.insert(list, fenceSpec(0))
@@ -3306,6 +3322,8 @@ do
 							menu = "Door",
 							behaviour = "Door",
 							door = { facing = facing, hinge = hinge, open = open, upper = isUpper },
+							-- (BreakDoorGoal's 240 ticks, every half: ZOMBIE_BREAK below.)
+							zombieBreak = 240,
 						}
 						if item then
 							-- (The item: the whole door at half size, upright, as Minecraft's
@@ -3333,6 +3351,363 @@ end
 -- The Oak Fence's variants with arms (see the Oak Fence above): one per set of sides.
 for mask = 1, 15 do
 	table.insert(list, fenceSpec(mask))
+end
+
+--[[
+	The zombie apocalypse's blocks (Generation/Cities, Generation/Bunkers, server Apocalypse/).
+	Each sets its own blast resistance and fire odds (the bootstraps above ran long before them).
+
+	The ruins: Asphalt, Cracked Asphalt and the two painted road lines (Road Line on top: white,
+	Yellow Road Line: the centre line; their sides and bottoms are asphalt), only found, never
+	crafted. Concrete (sand and gravel; the ruins' walls and the bunkers' shells), Cracked Concrete
+	(smelted Concrete), Mossy Concrete (with a Vine), Cracked and Mossy Bricks (likewise from
+	Bricks). Rusty Metal, the wrecks' corroded steel, breaks up into three Scrap Metal. The Supply
+	Crate (a stocked wooden crate) and the Medicine Cabinet (a steel cabinet for bandages and
+	pills) are 27 slot chests the ruins and bunkers fill with ScavengeLoot.
+
+	Barricades: three boards nailed over two battens, the Reinforced Barricade with two strips of
+	scrap steel behind them. Solid (their whole cell collides) but drawn as boards, nothing hangs
+	on them, and placing picks the one along the player's facing (`axis`, as rails: Barricade
+	spans East-West in front of a player facing North or South, BarricadeNorthSouth the other
+	way). A zombie needs 900 ticks for a barricade, 3000 for a reinforced one (ZOMBIE_BREAK).
+
+	The Bunker Hatch: a steel plate lying flush on the cell's floor over a ladder shaft (closed:
+	3 pixels high, walked over), turned up against the north side when open (BunkerHatchOpen).
+	Right clicking swaps the two (`menu` "Toggle", `toggle`; server Players/ToggleUse, which plays
+	its sound for everyone). Zombies never break it (no `zombieBreak`): a closed bunker is safe.
+
+	The Ceiling Lamp: a caged lamp hanging under a sturdy block (`support` Up), light 14; the
+	bunkers hang its cave twin (CaveCeilingLamp, made by the last twin loop below) in cave air.
+]]
+do
+	local function plain(spec: BlockSpec)
+		table.insert(list, spec)
+	end
+	local ASPHALT = { 54, 56, 60 }
+	plain({
+		name = "Asphalt",
+		color = ASPHALT,
+		material = "Asphalt",
+		sound = "stone",
+		hardness = 1.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		blastResistance = 3,
+	})
+	plain({
+		name = "CrackedAsphalt",
+		displayName = "Cracked Asphalt",
+		color = { 68, 68, 70 },
+		material = "Asphalt",
+		sound = "stone",
+		hardness = 1.2,
+		tool = "pickaxe",
+		toolLevel = 0,
+		blastResistance = 3,
+	})
+	plain({
+		name = "RoadLine",
+		displayName = "Road Line",
+		color = { 222, 222, 212 },
+		material = "Asphalt",
+		sound = "stone",
+		hardness = 1.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		blastResistance = 3,
+	})
+	plain({
+		name = "RoadLineYellow",
+		displayName = "Yellow Road Line",
+		color = { 214, 178, 58 },
+		material = "Asphalt",
+		sound = "stone",
+		hardness = 1.5,
+		tool = "pickaxe",
+		toolLevel = 0,
+		blastResistance = 3,
+	})
+	for _, concrete in
+		{
+			{ name = "Concrete", color = { 168, 168, 162 }, hardness = 1.8 },
+			{ name = "CrackedConcrete", color = { 150, 150, 144 }, hardness = 1.5 },
+			{ name = "MossyConcrete", color = { 122, 140, 100 }, hardness = 1.8 },
+		}
+	do
+		plain({
+			name = concrete.name,
+			color = concrete.color,
+			material = "Concrete",
+			sound = "stone",
+			hardness = concrete.hardness,
+			tool = "pickaxe",
+			toolLevel = 0,
+			blastResistance = 6,
+		})
+	end
+	for _, brick in
+		{
+			{ name = "CrackedBricks", color = { 140, 74, 60 } },
+			{ name = "MossyBricks", color = { 112, 108, 74 } },
+		}
+	do
+		plain({
+			name = brick.name,
+			color = brick.color,
+			material = "Brick",
+			sound = "stone",
+			hardness = 2,
+			tool = "pickaxe",
+			toolLevel = 0,
+			blastResistance = 6,
+		})
+	end
+	plain({
+		name = "RustyMetal",
+		displayName = "Rusty Metal",
+		color = { 128, 80, 52 },
+		material = "CorrodedMetal",
+		sound = "metal",
+		hardness = 3,
+		tool = "pickaxe",
+		toolLevel = 0,
+		blastResistance = 6,
+		drops = "ScrapMetal" :: string,
+		dropCount = 3,
+	})
+	plain({
+		name = "SupplyCrate",
+		displayName = "Supply Crate",
+		color = { 150, 112, 70 },
+		material = "WoodPlanks",
+		sound = "wood",
+		hardness = 2.5,
+		tool = "axe",
+		blastResistance = 2.5,
+		container = 27,
+		menu = "Chest",
+		flammable = { ignite = 5, burn = 20 },
+	})
+	plain({
+		name = "MedicineCabinet",
+		displayName = "Medicine Cabinet",
+		color = { 226, 228, 226 },
+		material = "Metal",
+		sound = "metal",
+		hardness = 2,
+		tool = "pickaxe",
+		blastResistance = 2,
+		container = 27,
+		menu = "Chest",
+	})
+
+	-- Barricades: boards across the cell along `axis` "Z" (spanning East-West, the battens in
+	-- front of them to the south), turned for "X"; `plates` adds the reinforced one's steel.
+	local BOARDS = { 150, 116, 74 }
+	local PLATE = { 120, 84, 60 }
+	local function barricade(axis: string, plates: boolean): { ShapeBox }
+		local boxes: { ShapeBox } = {}
+		-- (Authored for "Z": x across, z through the boards; swapped for "X".)
+		local function board(size: { number }, offset: { number }, color: { number }?, material: string?)
+			if axis == "X" then
+				size = { size[3], size[2], size[1] }
+				offset = { offset[3], offset[2], offset[1] }
+			end
+			table.insert(boxes, { size = size, offset = offset, color = color, material = material })
+		end
+		for _, y in { -5.5, 0, 5.5 } do
+			board({ 16, 3.5, 2 }, { 0, y, 0 })
+		end
+		for _, x in { -5, 5 } do
+			board({ 2, 16, 1.5 }, { x, 0, 1.75 }, { 128, 98, 62 })
+		end
+		if plates then
+			for _, y in { -2.75, 2.75 } do
+				board({ 16, 2, 0.6 }, { 0, y, -1.3 }, PLATE, "CorrodedMetal")
+			end
+		end
+		return boxes
+	end
+	for _, reinforced in { false, true } do
+		local base = if reinforced then "ReinforcedBarricade" else "Barricade"
+		for _, axis in { "Z", "X" } do
+			local turned = axis == "X"
+			plain({
+				name = if turned then base .. "NorthSouth" else base,
+				displayName = if reinforced then "Reinforced Barricade" else "Barricade",
+				color = BOARDS,
+				material = "WoodPlanks",
+				sound = "wood",
+				solid = true,
+				sturdy = false,
+				placeable = not turned,
+				item = if turned then base else nil,
+				hardness = if reinforced then 4 else 2,
+				tool = "axe",
+				blastResistance = if reinforced then 6 else 2,
+				shape = barricade(axis, reinforced),
+				bounds = { min = { 0, 0, 0 }, max = { 16, 16, 16 } },
+				axis = axis,
+				flammable = if reinforced then { ignite = 5, burn = 5 } else { ignite = 5, burn = 20 },
+			})
+		end
+	end
+
+	-- The Bunker Hatch, shut (lying on the floor) and open (up against the north side).
+	local HATCH = { 92, 96, 90 }
+	for _, open in { false, true } do
+		plain({
+			name = if open then "BunkerHatchOpen" else "BunkerHatch",
+			displayName = "Bunker Hatch",
+			color = HATCH,
+			material = "DiamondPlate",
+			sound = "metal",
+			solid = false,
+			collides = true,
+			placeable = not open,
+			item = if open then "BunkerHatch" else nil,
+			hardness = 5,
+			tool = "pickaxe",
+			toolLevel = 1,
+			blastResistance = 6,
+			shape = if open
+				then {
+					{ size = { 16, 16, 3 }, offset = { 0, 0, -6.5 } },
+					{ size = { 4, 1, 1 }, offset = { 0, -4, -4.5 }, color = { 60, 62, 60 } },
+				}
+				else {
+					{ size = { 16, 3, 16 }, offset = { 0, -6.5, 0 } },
+					{ size = { 4, 1, 1 }, offset = { 0, -4.5, 4 }, color = { 60, 62, 60 } },
+				},
+			bounds = if open then wallBounds("North", 3) else { min = { 0, 0, 0 }, max = { 16, 3, 16 } },
+			collision = if open then nil else { { min = { 0, 0, 0 }, max = { 16, 3, 16 } } },
+			menu = "Toggle",
+			toggle = if open
+				then { to = "BunkerHatch", sound = "block.bunker_hatch.close" }
+				else { to = "BunkerHatchOpen", sound = "block.bunker_hatch.open" },
+		})
+	end
+
+	-- The Ceiling Lamp: a steel housing under the ceiling and its glowing lamp below.
+	local lampShape: { ShapeBox } = {
+		{ size = { 4, 2, 4 }, offset = { 0, 5, 0 }, color = { 255, 236, 200 }, material = "Neon", glow = true },
+		{ size = { 6, 2, 6 }, offset = { 0, 7, 0 } },
+	}
+	plain({
+		name = "CeilingLamp",
+		displayName = "Ceiling Lamp",
+		color = { 70, 72, 74 },
+		material = "Metal",
+		sound = "metal",
+		solid = false,
+		placeable = true,
+		hardness = 0.5,
+		tool = "pickaxe",
+		blastResistance = 0.5,
+		light = 14,
+		lightColor = { 255, 236, 200 },
+		shape = lampShape,
+		bounds = { min = { 5, 12, 5 }, max = { 11, 16, 11 } },
+		support = "Up",
+		behaviour = "Attached",
+		brokenByFluid = true,
+	})
+end
+
+--[[
+	How long zombies take to break blocks (`zombieBreak`, ticks for one ordinary zombie: server
+	Mobs/MobAI hits the block it is blocked by while its target or the noise it follows is near
+	and level with it; several zombies share the damage). Glass shatters at once, leaves, wool and
+	soil soon, wood in half a minute, stone and brick in two, concrete in five; a door takes
+	Minecraft's 240 (BreakDoorGoal) and a barricade more than a plank wall. Doors and fences set
+	it themselves (above). Everything else (ores, metal and gem blocks, obsidian, machines, pipes,
+	every container, rusty metal, the bunker hatch, lights, plants and fluids) never breaks.
+	Applied before the last cave twins are made, so they copy it.
+]]
+local ZOMBIE_BREAK: { [string]: number } = {
+	Glass = 60,
+	OakLeaves = 120,
+	BirchLeaves = 120,
+	SpruceLeaves = 120,
+	AcaciaLeaves = 120,
+	JungleLeaves = 120,
+	WhiteWool = 120,
+	Dirt = 300,
+	Grass = 300,
+	DryGrass = 300,
+	CoarseDirt = 300,
+	Podzol = 300,
+	Mycelium = 300,
+	Sand = 300,
+	Gravel = 300,
+	Snow = 300,
+	MossBlock = 300,
+	PackedMud = 300,
+	Planks = 600,
+	BirchPlanks = 600,
+	SprucePlanks = 600,
+	AcaciaPlanks = 600,
+	JunglePlanks = 600,
+	OakLog = 600,
+	BirchLog = 600,
+	SpruceLog = 600,
+	AcaciaLog = 600,
+	JungleLog = 600,
+	Barricade = 900,
+	BarricadeNorthSouth = 900,
+	Stone = 2400,
+	Cobblestone = 2400,
+	MossyCobblestone = 2400,
+	StoneBricks = 2400,
+	CrackedStoneBricks = 2400,
+	SmoothStone = 2400,
+	Brick = 2400,
+	CrackedBricks = 2400,
+	MossyBricks = 2400,
+	Sandstone = 2400,
+	CutSandstone = 2400,
+	SmoothSandstone = 2400,
+	Asphalt = 2400,
+	CrackedAsphalt = 2400,
+	RoadLine = 2400,
+	RoadLineYellow = 2400,
+	ReinforcedBarricade = 3000,
+	ReinforcedBarricadeNorthSouth = 3000,
+	Concrete = 6000,
+	CrackedConcrete = 6000,
+	MossyConcrete = 6000,
+}
+do
+	local found = 0
+	for _, spec in list do
+		local ticks = ZOMBIE_BREAK[spec.name]
+		if ticks then
+			spec.zombieBreak = ticks
+			found += 1
+		end
+	end
+	local named = 0
+	for _ in ZOMBIE_BREAK do
+		named += 1
+	end
+	assert(found == named, "ZOMBIE_BREAK names a block that does not exist")
+end
+
+-- The last cave twins (see the mineshafts' twins above): the bunkers' ceiling lamps.
+for _, name in { "CeilingLamp" } do
+	local twin: BlockSpec? = nil
+	for _, spec in list do
+		if spec.name == name then
+			twin = table.clone(spec)
+			break
+		end
+	end
+	assert(twin, `No block {name} to twin`)
+	twin.name = "Cave" .. name
+	twin.placeable = false
+	twin.item = twin.item or name
+	twin.caveTwin = name
+	table.insert(list, twin)
 end
 
 return list

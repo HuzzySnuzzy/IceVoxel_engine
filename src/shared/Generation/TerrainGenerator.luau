@@ -35,6 +35,17 @@
 	Single Biome's one) and `climateScale` tell the biome search what to expect, and `poiBlocks`
 	where structures and mineshafts put chests, furnaces and the like.
 
+	The zombie apocalypse's ruins (Generation/Cities, Generation/Bunkers; the `ruins` option, lines
+	marked [ruins]): the cities wrap the relief (`relief` is `cities.relief`: cut and fill under
+	their footprints and roads; a raw pass-through elsewhere) and override the top block of their
+	streets (`sample`'s 7th value: the filler under it). Every planner (oil wells, lava, lakes,
+	mineshafts, the library's placer, surface caves, bunkers) reads the raw relief (`rawRelief`:
+	`rawOutsideHeight`, `rawBiomeAt`, `rawRiver`) and keeps out of `cities.blocked`, so whatever it
+	accepts stands on ground the wrapper leaves alone and its queries never build a road plan.
+	`generate` prepares the cities' caches for its padded chunk first, writes the buildings after
+	the trees and library structures (levels 0..Config.Cities.LodLevels) and the bunkers after the
+	mineshafts; `findSpawn` searches the raw relief, then shifts the spawn out of a city.
+
 	Chunks (see World/ChunkLayout)
 	  `generate(level, nx, nz)` fills a padded column. Level 0 is full detail; level L samples the
 	  same terrain every 2^L blocks horizontally (and every min(2^L, Lod.MaxVerticalStep) blocks
@@ -71,6 +82,8 @@ local Structures = require(script.Parent.Structures)
 local Writer = require(script.Parent.Structures.Writer)
 local Library = require(script.Parent.Parent.Structures.Library)
 local Locate = require(script.Parent.Locate)
+local Cities = require(script.Parent.Cities) -- [ruins]
+local Bunkers = require(script.Parent.Bunkers) -- [ruins]
 
 local SIZE = ChunkLayout.SIZE
 local P = ChunkLayout.PADDED
@@ -146,8 +159,9 @@ export type Generator = {
 	-- also return what the client's culling needs (ChunkResult `summary`, `surface`, ...).
 	generate: (level: number, nx: number, nz: number, yield: (() -> ())?, extras: boolean?) -> ChunkResult,
 	-- A spawn column: low, dry, gentle land near the hills, where no cave entrance or ravine opens
-	-- (SurfaceCaves.carvesTop). x, height, z.
-	findSpawn: () -> (number, number, number),
+	-- (SurfaceCaves.carvesTop), outside the ruins (Cities.spawnShift: `yield` while it looks). x,
+	-- height, z.
+	findSpawn: (yield: (() -> ())?) -> (number, number, number),
 	--[[
 		Seam limits for the mesher (GreedyMesher.Border.open) of node (level, nx, nz), given the
 		level of the coarser node on each side (-X, +X, -Z, +Z; 0 = none): how high that node's
@@ -234,6 +248,20 @@ export type Generator = {
 		lut: buffer,
 		yield: (() -> ())?
 	) -> { number })?,
+	--[[
+		The zombie apocalypse's ruins (Generation/Cities, Generation/Bunkers; nil: the world has
+		none, flat and debug worlds):
+		  prepare  warms every cache `column` may need in the block rectangle, calling `yield`
+		           (the map paints a tile after it); nil: nothing to warm
+		  cities   the city sites in the rectangle, `roads` the road segments (the map's overlay)
+		  cityAt   1 inside a city, 0 outside, between in its margin
+		  bunkers  the bunkers whose bounds touch the rectangle
+	]]
+	prepare: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> ())?,
+	cities: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Cities.Site })?,
+	roads: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Cities.Segment })?,
+	cityAt: ((x: number, z: number) -> number)?,
+	bunkers: ((minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { Bunkers.Plan })?,
 }
 
 -- A generated structure block with its settings (Generator `labels`): a SAVE block named `name`
@@ -252,20 +280,24 @@ export type Label = {
 	Config.Structures.Generate); `structures = false`: no library structures at all.
 	`biome`: a biome index (Biomes.list) every column gets, whatever its altitude and climate
 	(nil: the usual choice). `climateScale`: the climate noise is this many times as wide (nil or
-	1: the usual; 4: Minecraft's Large Biomes).
+	1: the usual; 4: Minecraft's Large Biomes). `ruins = false`: no cities, roads or bunkers (they
+	also follow `structures`, Config.Structures.Generate and Config.Cities / Bunkers.Enabled).
 ]]
 export type Options = {
 	library: Library.Library?,
 	structures: boolean?,
 	biome: number?,
 	climateScale: number?,
+	ruins: boolean?,
 }
 
 local TerrainGenerator = {}
 
 function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local opts: Options = options or {}
-	local relief = Relief.new(seed)
+	-- [ruins] The raw relief: what every planner reads (see the header); `relief` below is the
+	-- cities' wrapped one.
+	local rawRelief = Relief.new(seed)
 	-- (Large Biomes: the climate's wavelengths times climateScale; the border jitter stays.)
 	local climateScale = opts.climateScale or 1
 	local temperature = Noise.fbm2(seed, "climate.temperature", 1 / (5900 * climateScale), 3)
@@ -274,12 +306,6 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local jitterH = Noise.fbm2(seed, "climate.jitterH", 1 / 24, 2)
 	local bandJitter = Noise.fbm2(seed, "climate.band", 1 / 24, 2)
 	local patchNoise = Noise.fbm2(seed, "surface.patches", 1 / 10, 2)
-
-	local carveCaves = Caves.new(seed, function(x: number, z: number): number
-		return (relief.height(x, z, 0))
-	end)
-	local growFoliage = Foliage.new(seed)
-	local growLichen = CaveDecor.new(seed)
 
 	-- Terrain height (first air block) of a relief height: whole blocks, with room for structures.
 	local function clampHeight(y: number): number
@@ -292,24 +318,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		return h
 	end
 
-	-- Cave entrances and ravines, from the full detail surface (heights as `generate` fills them).
-	local surfaceCaves = SurfaceCaves.new(seed, function(x: number, z: number): (number, number)
-		local y, _, _, river = relief.height(x, z, 0)
-		return clampHeight(y), river
-	end, if Config.Caves.Enabled then Caves.regions(seed) else nil)
-
-	--[[
-		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
-		surface block, the relief's selector and river strength.
-	]]
 	-- Single Biome's biome (nil: chosen per column).
 	local forced = opts.biome
 	assert(forced == nil or Biomes.list[forced] ~= nil, "TerrainGenerator: unknown biome index")
 
-	local function sample(x: number, z: number, level: number): (number, number, number, number, number, number)
-		local y, unrivered, selector, river = relief.height(x, z, level)
-		local h = clampHeight(y)
-
+	-- The biome of column (x, z) from its relief's height without rivers and its selector.
+	local function biomeOf(x: number, z: number, unrivered: number, selector: number): number
 		local biome = MUSHROOM
 		if forced then
 			biome = forced
@@ -327,6 +341,22 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 			end
 		end
+		return biome
+	end
+
+	--[[
+		Column (x, z) of relief `r` as seen by LOD `level`: height (first air block), biome,
+		vegetation chance, surface block, the relief's selector and river strength.
+	]]
+	local function sampleWith(
+		r: Relief.Relief,
+		x: number,
+		z: number,
+		level: number
+	): (number, number, number, number, number, number)
+		local y, unrivered, selector, river = r.height(x, z, level)
+		local h = clampHeight(y)
+		local biome = biomeOf(x, z, unrivered, selector)
 
 		local def = Biomes.list[biome]
 		local surface
@@ -342,6 +372,62 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 		local vegetation = if h <= SEA + 1 or river >= RIVER_MUD then 0 else def.vegetation
 		return h, biome, vegetation, surface, selector, river
+	end
+
+	-- [ruins] The raw terrain every planner reads (see the header): a column's full detail
+	-- height, biome and river strength.
+	local function rawSample(x: number, z: number, level: number): (number, number, number, number, number, number)
+		return sampleWith(rawRelief, x, z, level)
+	end
+	local function rawOutsideHeight(x: number, z: number): number
+		return clampHeight((rawRelief.height(x, z, 0)))
+	end
+	local function rawBiomeAt(x: number, z: number): number
+		local _, unrivered, selector = rawRelief.height(x, z, 0)
+		return biomeOf(x, z, unrivered, selector)
+	end
+	local function rawRiver(x: number, z: number): number
+		local _, _, _, river = rawRelief.height(x, z, 0)
+		return river
+	end
+
+	-- [ruins] The cities (Generation/Cities: none without the ruins, structures or the config),
+	-- and the relief they wrap: the one every chunk, the map and the spawn see.
+	local ruins = opts.structures ~= false and opts.ruins ~= false and Config.Structures.Generate
+	local cities = if ruins and Config.Cities.Enabled
+		then Cities.new(seed, rawRelief, { rawBiome = rawBiomeAt, seaLevel = SEA })
+		else Cities.none(rawRelief)
+	local relief = cities.relief
+
+	local carveCaves = Caves.new(seed, function(x: number, z: number): number
+		return (relief.height(x, z, 0))
+	end)
+	local growFoliage = Foliage.new(seed)
+	local growLichen = CaveDecor.new(seed)
+
+	-- Cave entrances and ravines, from the full detail surface (heights as `generate` fills them;
+	-- [ruins] the raw relief's, and they keep out of the cities' `protects`).
+	local surfaceCaves = SurfaceCaves.new(seed, function(x: number, z: number): (number, number)
+		local y, _, _, river = rawRelief.height(x, z, 0)
+		return clampHeight(y), river
+	end, if Config.Caves.Enabled then Caves.regions(seed) else nil)
+
+	--[[
+		Column (x, z) as seen by LOD `level`: height (first air block), biome, vegetation chance,
+		surface block, the relief's selector and river strength, and [ruins] the filler under a
+		city's or a road's surface override (nil: natural ground).
+	]]
+	local function sample(
+		x: number,
+		z: number,
+		level: number
+	): (number, number, number, number, number, number, number?)
+		local h, biome, vegetation, surface, selector, river = sampleWith(relief, x, z, level)
+		local override, filler = cities.surface(x, z, h, level)
+		if override then
+			surface = override
+		end
+		return h, biome, vegetation, surface, selector, river, filler
 	end
 
 	-- Full detail height of a column just outside a chunk's padding (see the steep rule).
@@ -373,19 +459,17 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local placer: StructureGen.Placer? = nil
 	if library and opts.structures ~= false and #library.structures > 0 then
 		local function firstFreeHeight(x: number, z: number): number
-			-- Minecraft's WORLD_SURFACE_WG: the sea's surface counts as ground.
-			return math.max(outsideHeight(x, z), SEA)
+			-- Minecraft's WORLD_SURFACE_WG: the sea's surface counts as ground ([ruins] the raw
+			-- terrain's, as every planner's).
+			return math.max(rawOutsideHeight(x, z), SEA)
 		end
 		placer = StructureGen.new(seed, library, {
 			firstFreeHeight = firstFreeHeight,
-			biome = function(x: number, z: number): number
-				local _, biome = sample(x, z, 0)
-				return biome
-			end,
-			-- Dry land that `generate` doesn't turn into bare rock.
+			biome = rawBiomeAt,
+			-- Dry land that `generate` doesn't turn into bare rock ([ruins] nor the ruins' ground).
 			land = function(x: number, z: number): boolean
 				local h, biome = column(x, z)
-				return h > SEA and gentle(x, z, biome)
+				return h > SEA and gentle(x, z, biome) and #cities.blocked(x, z, x, z) == 0
 			end,
 		})
 	end
@@ -417,18 +501,14 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		end
 		return spawnX, spawnZ
 	end
-	local function biomeAt(x: number, z: number): number
-		local _, biome = sample(x, z, 0)
-		return biome
-	end
-
 	-- Oil wells and surface lava lakes, decided from the full detail terrain (every chunk and
-	-- level agrees). A lava lake also keeps clear of a geyser's oil lake.
+	-- level agrees; [ruins] the raw terrain, out of the cities' blocked area). A lava lake also
+	-- keeps clear of a geyser's oil lake.
 	local wells = OilWells.new(seed, {
-		height = outsideHeight,
-		biome = biomeAt,
+		height = rawOutsideHeight,
+		biome = rawBiomeAt,
 		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
-			return not piecesIn(minX, minZ, maxX, maxZ)
+			return not piecesIn(minX, minZ, maxX, maxZ) and #cities.blocked(minX, minZ, maxX, maxZ) == 0
 		end,
 		spawn = spawnColumn,
 		regions = if Config.Caves.Enabled then Caves.regions(seed) else nil,
@@ -437,13 +517,13 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			if not surfaceCaves.mayCarve(x, z) then
 				return nil
 			end
-			local h = outsideHeight(x, z)
+			local h = rawOutsideHeight(x, z)
 			return surfaceCaves.lowestCarved(0, x, z, h, h - 1)
 		end,
 	})
 	local lava = Lava.new(seed, {
-		height = outsideHeight,
-		biome = biomeAt,
+		height = rawOutsideHeight,
+		biome = rawBiomeAt,
 		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
 			for _, well in wells.find(minX, minZ, maxX, maxZ) do
 				local x0, z0, x1, z1 = wells.lakeBox(well)
@@ -451,81 +531,121 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 					return false
 				end
 			end
-			return not piecesIn(minX, minZ, maxX, maxZ)
+			return not piecesIn(minX, minZ, maxX, maxZ) and #cities.blocked(minX, minZ, maxX, maxZ) == 0
 		end,
 		spawn = spawnColumn,
 	})
 	-- Water lakes and puddles, likewise; they keep clear of oil wells (deposits too), lava lakes
 	-- and structures, and puddles of the columns a surface cave may open.
 	local lakes = Lakes.new(seed, {
-		height = outsideHeight,
-		biome = biomeAt,
+		height = rawOutsideHeight,
+		biome = rawBiomeAt,
 		free = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
 			return #wells.find(minX, minZ, maxX, maxZ) == 0
 				and #lava.surfaceLakes(minX, minZ, maxX, maxZ) == 0
 				and not piecesIn(minX, minZ, maxX, maxZ)
+				and #cities.blocked(minX, minZ, maxX, maxZ) == 0
 		end,
 		spawn = spawnColumn,
 		carvesTop = surfaceCaves.carvesTop,
 	})
-	-- Mineshafts, decided from the full detail terrain; they keep clear of all of the above (and
-	-- nothing above asks them), and follow Generate Structures.
+	--[[
+		What the underground planners keep out of (x0, z0, x1, z1 boxes, inclusive): library pieces,
+		oil wells (deposits) and their lakes, surface lava lakes, water lakes and puddles, each with
+		the margin its own queries keep (`yield` between them and after each puddle candidate: a
+		cold tile decides 9-16 puddles, up to 10 ms), and [ruins] the cities' blocked area.
+	]]
+	local function plannerBlocked(
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		yield: (() -> ())?
+	): { number }
+		local list: { number } = {}
+		local function add(x0: number, z0: number, x1: number, z1: number)
+			table.insert(list, x0)
+			table.insert(list, z0)
+			table.insert(list, x1)
+			table.insert(list, z1)
+		end
+		if placer then
+			for _, start in placer.starts(minX, minZ, maxX, maxZ) do
+				for _, piece in start.pieces do
+					local box = piece.box
+					add(box[1], box[3], box[4], box[6])
+				end
+			end
+		end
+		for _, well in wells.find(minX, minZ, maxX, maxZ) do
+			local r = math.max(well.radius, well.lakeRadius) + OilWells.MARGIN
+			add(well.x - r, well.z - r, well.x + r, well.z + r)
+		end
+		if yield then
+			yield()
+		end
+		for _, lake in lava.surfaceLakes(minX, minZ, maxX, maxZ) do
+			local m = Lava.PROTECT
+			add(lake.x - m, lake.z - m, lake.x + Lava.BOX - 1 + m, lake.z + Lava.BOX - 1 + m)
+		end
+		for _, lake in lakes.lakes(minX, minZ, maxX, maxZ) do
+			local m = Lakes.PROTECT
+			add(lake.x - m, lake.z - m, lake.x + Lakes.BOX - 1 + m, lake.z + Lakes.BOX - 1 + m)
+		end
+		if yield then
+			yield()
+		end
+		for _, puddle in lakes.puddles(minX, minZ, maxX, maxZ, yield) do
+			local m = Lakes.PUDDLE_MARGIN
+			add(puddle.x0 - m, puddle.z0 - m, puddle.x1 + m, puddle.z1 + m)
+		end
+		-- [ruins]
+		local ruinsBlocked = cities.blocked(minX, minZ, maxX, maxZ)
+		table.move(ruinsBlocked, 1, #ruinsBlocked, #list + 1, list)
+		return list
+	end
+
+	-- Mineshafts, decided from the full detail terrain ([ruins] the raw terrain); they keep clear
+	-- of all of the above (and nothing above asks them), and follow Generate Structures.
 	local mineshafts: Mineshafts.Mineshafts? = nil
 	if opts.structures ~= false and Config.Structures.Generate and Config.Mineshafts.Enabled then
 		mineshafts = Mineshafts.new(seed, {
-			height = outsideHeight,
-			biome = biomeAt,
-			river = function(x: number, z: number): number
-				local _, _, _, river = relief.height(x, z, 0)
-				return river
-			end,
-			-- Library pieces, oil wells (deposits) and their lakes, surface lava lakes, water lakes
-			-- and puddles, each with the margin its own queries keep (`yield` between them and
-			-- after each puddle candidate: a cold tile decides 9-16 puddles, up to 10 ms).
+			height = rawOutsideHeight,
+			biome = rawBiomeAt,
+			river = rawRiver,
+			blocked = plannerBlocked,
+			spawn = spawnColumn,
+			carvesTop = surfaceCaves.carvesTop,
+		})
+	end
+
+	-- [ruins] Bunkers (Generation/Bunkers), decided from the raw terrain, out of everything the
+	-- mineshafts keep out of, the mineshafts themselves and the cities' blocked area; and they
+	-- follow the ruins.
+	local bunkers = if ruins and Config.Bunkers.Enabled
+		then Bunkers.new(seed, {
+			height = rawOutsideHeight,
+			biome = rawBiomeAt,
+			river = rawRiver,
 			blocked = function(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { number }
-				local list: { number } = {}
-				local function add(x0: number, z0: number, x1: number, z1: number)
-					table.insert(list, x0)
-					table.insert(list, z0)
-					table.insert(list, x1)
-					table.insert(list, z1)
-				end
-				if placer then
-					for _, start in placer.starts(minX, minZ, maxX, maxZ) do
-						for _, piece in start.pieces do
-							local box = piece.box
-							add(box[1], box[3], box[4], box[6])
-						end
+				local list = plannerBlocked(minX, minZ, maxX, maxZ, yield)
+				local m = mineshafts
+				if m then
+					local boxes = m.boxes(minX, minZ, maxX, maxZ, yield)
+					for i = 1, #boxes, 6 do
+						table.insert(list, boxes[i])
+						table.insert(list, boxes[i + 2])
+						table.insert(list, boxes[i + 3])
+						table.insert(list, boxes[i + 5])
 					end
-				end
-				for _, well in wells.find(minX, minZ, maxX, maxZ) do
-					local r = math.max(well.radius, well.lakeRadius) + OilWells.MARGIN
-					add(well.x - r, well.z - r, well.x + r, well.z + r)
-				end
-				if yield then
-					yield()
-				end
-				for _, lake in lava.surfaceLakes(minX, minZ, maxX, maxZ) do
-					local m = Lava.PROTECT
-					add(lake.x - m, lake.z - m, lake.x + Lava.BOX - 1 + m, lake.z + Lava.BOX - 1 + m)
-				end
-				for _, lake in lakes.lakes(minX, minZ, maxX, maxZ) do
-					local m = Lakes.PROTECT
-					add(lake.x - m, lake.z - m, lake.x + Lakes.BOX - 1 + m, lake.z + Lakes.BOX - 1 + m)
-				end
-				if yield then
-					yield()
-				end
-				for _, puddle in lakes.puddles(minX, minZ, maxX, maxZ, yield) do
-					local m = Lakes.PUDDLE_MARGIN
-					add(puddle.x0 - m, puddle.z0 - m, puddle.x1 + m, puddle.z1 + m)
 				end
 				return list
 			end,
 			spawn = spawnColumn,
 			carvesTop = surfaceCaves.carvesTop,
+			cities = cities,
 		})
-	end
+		else Bunkers.none()
 
 	-- Per-column scratch arrays, reused between chunks (each worker actor has its own copy).
 	local heights: { number } = table.create(P * P, 0)
@@ -533,6 +653,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local surfaces: { number } = table.create(P * P, 0)
 	local topCells: { number } = table.create(P * P, 0)
 	local protected: { boolean } = table.create(P * P, false)
+	-- [ruins] Each padded column's filler under a surface override (0: natural ground; air is
+	-- never a filler).
+	local fillers: { number } = table.create(P * P, 0)
 
 	-- Is column (x, z) within STRUCTURE_MARGIN blocks of a piece of `starts`?
 	local function nearPiece(starts: { StructureGen.Start }, x: number, z: number): boolean
@@ -555,18 +678,21 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	--[[
 		Padded columns no surface cave may carve: within STRUCTURE_MARGIN blocks of a library
 		structure piece (its foundation would fill a pit under it and a path would float over a
-		ravine), and in `boxes` (x0, z0, x1, z1 per box, inclusive: surface lava lakes and geysers'
-		oil lakes with their margins; a surface cave there would open the lake's side). nil when
-		there are none. Pieces and boxes are world boxes, so every chunk agrees.
+		ravine), in `boxes` (x0, z0, x1, z1 per box, inclusive: surface lava lakes and geysers'
+		oil lakes with their margins; a surface cave there would open the lake's side), and
+		[ruins] where `protects` holds at the column's sample point (the cities' footprints and
+		built roads). nil when there are none. Pieces, boxes and the cities are world things, so
+		every chunk agrees.
 	]]
 	local function protectedColumns(
 		starts: { StructureGen.Start }?,
 		boxes: { number },
 		level: number,
 		originX: number,
-		originZ: number
+		originZ: number,
+		protects: ((x: number, z: number) -> boolean)?
 	): { boolean }?
-		if starts == nil and #boxes == 0 then
+		if starts == nil and #boxes == 0 and protects == nil then
 			return nil
 		end
 		local step = ChunkLayout.steps(level)
@@ -602,6 +728,17 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		for i = 1, #boxes, 4 do
 			protect(boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3])
 		end
+		if protects then
+			for pz = 0, P - 1 do
+				local wz = originZ + (pz - 1) * step + half
+				for px = 0, P - 1 do
+					if protects(originX + (px - 1) * step + half, wz) then
+						protected[pz * P + px + 1] = true
+						any = true
+					end
+				end
+			end
+		end
 		return if any then protected else nil
 	end
 
@@ -609,15 +746,28 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		local step, stepY = ChunkLayout.steps(level)
 		local half, halfY = step // 2, stepY // 2
 		local originX, originZ = nx * SIZE * step, nz * SIZE * step
+		local span = SIZE * step
 
-		-- 1. Sample every padded column at its cell center.
+		-- [ruins] Warm the cities' caches for everything below: the padding, the steep rule's
+		-- outside columns, the cave lattice and the seams' coarse cells.
+		local guard = 2 * (step + 2) + 16
+		cities.prepare(
+			originX - step - guard,
+			originZ - step - guard,
+			originX + span + step + guard,
+			originZ + span + step + guard,
+			yield
+		)
+
+		-- 1. Sample every padded column at its cell center ([ruins] and the filler under a
+		-- surface override).
 		local highest = SEA
 		for pz = 0, P - 1 do
 			local wz = originZ + (pz - 1) * step + half
 			for px = 0, P - 1 do
-				local h, biome, _, surface = sample(originX + (px - 1) * step + half, wz, level)
+				local h, biome, _, surface, _, _, filler = sample(originX + (px - 1) * step + half, wz, level)
 				local i = pz * P + px + 1
-				heights[i], biomes[i], surfaces[i] = h, biome, surface
+				heights[i], biomes[i], surfaces[i], fillers[i] = h, biome, surface, filler or 0
 				if h > highest then
 					highest = h
 				end
@@ -629,9 +779,13 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 		-- Library structures reaching the padded chunk, or a vegetation spot near it (see
 		-- StructureGen: trees keep clear of their pieces).
-		local span = SIZE * step
 		local starts: { StructureGen.Start }? = nil
 		local needed = (highest + STRUCTURE_ROOM + stepY - 1) // stepY
+		-- [ruins] Room for the cities' tallest building, plus a cell of air on top.
+		local cityTop = cities.top(level, originX, originZ)
+		if cityTop then
+			needed = math.max(needed, cityTop // stepY + 2)
+		end
 		if placer and level <= Config.StructureMaxLevel then
 			local reach = 2 * Structures.RADIUS
 			local x0, z0 = originX - step, originZ - step
@@ -701,6 +855,17 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 			end
 		end
+		do
+			-- [ruins] The bunkers' hatch collars, at every level.
+			local reach = Structures.RADIUS + 1
+			local collars = bunkers.keepOut(
+				originX - step - reach,
+				originZ - step - reach,
+				originX + span + step - 1 + reach,
+				originZ + span + step - 1 + reach
+			)
+			table.move(collars, 1, #collars, #keepOut + 1, keepOut)
+		end
 
 		-- The column buffer ends a little above the highest terrain (room for structures).
 		local cells = ChunkLayout.croppedHeight(needed, stepY)
@@ -745,14 +910,16 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				local h = heights[i]
 				local biome = Biomes.list[biomes[i]]
 				local top = surfaces[i]
-				local filler = if top == biome.top then biome.filler else top
+				-- ([ruins] An overridden column takes its override's filler.)
+				local override = fillers[i]
+				local filler = if override ~= 0 then override elseif top == biome.top then biome.filler else top
 				local fillerDepth = biome.fillerDepth
 
 				-- Steep slopes become bare rock. A full detail chunk's outermost columns also look
 				-- past the padding for their missing neighbour, so they get the surface the
 				-- neighbouring chunk's core gets (plants grow by it). (LOD padding is a lowered
-				-- skirt anyway.)
-				if h > SEA + 2 then
+				-- skirt anyway.) [ruins] Overridden columns (streets, roads) keep their surface.
+				if h > SEA + 2 and override == 0 then
 					local limit = (biome.steepSlope or CLIFF_SLOPE) * step
 					local slope = 0
 					if px > 0 then
@@ -828,7 +995,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 		if level <= SurfaceCaves.MAX_LEVEL then
-			local protectedCells = protectedColumns(starts, keepOut, level, originX, originZ)
+			local protectedCells = protectedColumns(starts, keepOut, level, originX, originZ, cities.protects)
 			local lowest =
 				surfaceCaves.carve(data, level, originX, originZ, heights, topCells, cells, protectedCells, yield)
 			if lowest < solidBelow then
@@ -869,8 +1036,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				emptyAbove = top
 			end
 		end
-		-- Mineshafts reaching the padded chunk (full detail only).
+		-- Mineshafts reaching the padded chunk (full detail only), and [ruins] the bunkers.
 		local shafts: { Mineshafts.Plan }? = nil
+		local bunkerPlans: { Bunkers.Plan }? = nil
 		if level == 0 and mineshafts then
 			local found = mineshafts.plans(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE, yield)
 			if #found > 0 then
@@ -878,15 +1046,25 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 		if level == 0 then
+			local found = bunkers.plans(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE, yield)
+			if #found > 0 then
+				bunkerPlans = found
+			end
+		end
+		if level == 0 then
 			Ores.place(data, seed, nx, nz, cells)
 			-- An underground lava lake, sunk into a cave floor (decided from this chunk's blocks; it
 			-- never reaches the neighbours' padding), not into a library structure's piece nor
-			-- near a mineshaft.
+			-- near a mineshaft or [ruins] a bunker.
 			if carved then
 				local blocked: ((number, number, number, number, number, number) -> boolean)? = nil
 				local taken: { number } = {}
 				if shafts and mineshafts then
 					taken = mineshafts.boxes(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE)
+				end
+				if bunkerPlans then
+					local boxes = bunkers.boxes(originX - 1, originZ - 1, originX + SIZE, originZ + SIZE)
+					table.move(boxes, 1, #boxes, #taken + 1, taken)
 				end
 				if starts or #taken > 0 then
 					local list: { StructureGen.Start } = starts or {}
@@ -955,8 +1133,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 				return true
 			end
+			-- ([ruins] Nor on the cities' asphalt, sidewalks or building lots.)
 			local accept = function(x: number, z: number, biome: number): boolean
-				return gentle(x, z, biome) and dry(x, z) and not surfaceCaves.carvesTop(x, z)
+				return gentle(x, z, biome)
+					and dry(x, z)
+					and not surfaceCaves.carvesTop(x, z)
+					and cities.treeAllowed(x, z)
 			end
 			if placer and starts then
 				local p, list = placer, starts
@@ -965,6 +1147,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 						and p.treeAllowed(list, x, z)
 						and dry(x, z)
 						and not surfaceCaves.carvesTop(x, z)
+						and cities.treeAllowed(x, z)
 				end
 			end
 			Structures.populate(
@@ -1010,10 +1193,49 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			end
 		end
 
+		-- [ruins] The cities' buildings, streets' decay, overgrowth, cars and loot, after the trees
+		-- and library structures, at levels 0..Config.Cities.LodLevels (massing beyond 0).
+		if level <= Config.Cities.LodLevels then
+			local lowest, top = cities.write({
+				data = data,
+				cells = cells,
+				level = level,
+				originX = originX,
+				originZ = originZ,
+				heights = heights,
+				topCells = topCells,
+				biomes = biomes,
+			}, yield)
+			if lowest < huge then
+				if lowest < solidBelow then
+					solidBelow = lowest
+				end
+				if top > emptyAbove then
+					emptyAbove = top
+				end
+				local span0 = structureSpan
+				structureSpan = if span0
+					then { math.min(span0[1], lowest), math.max(span0[2], top - 1) }
+					else { lowest, top - 1 }
+			end
+		end
+
 		-- Mineshafts, after the library structures (full detail only): cave air and cave twins in
 		-- the rock, marked in the cave lattice; their entrances' shafts open to the sky.
 		if shafts and mineshafts then
 			local lowest, top, map = mineshafts.write(shafts, data, originX, originZ, cells, heights, carved)
+			carved = map
+			if lowest < solidBelow then
+				solidBelow = lowest
+			end
+			if top > emptyAbove then
+				emptyAbove = top
+			end
+		end
+		-- [ruins] The bunkers, after the mineshafts (full detail only): cave air and cave twins, their
+		-- hatches and shafts open to the sky.
+		if bunkerPlans then
+			local lowest, top, map = bunkers.write(bunkerPlans, data, originX, originZ, cells, heights, carved)
 			carved = map
 			if lowest < solidBelow then
 				solidBelow = lowest
@@ -1208,15 +1430,45 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		return limits
 	end
 
-	function findSpawn(): (number, number, number)
+	-- Today's strict spawn column test on `sampler` (a gentle, dry, unfrozen grassy column well
+	-- above the sea, where no cave entrance or ravine opens): its height, or nil.
+	local function strictSpawn(
+		sampler: (number, number, number) -> (number, number, number, number, number, number),
+		x: number,
+		z: number
+	): number?
+		local h, biome, _, surface, _, river = sampler(x, z, 0)
+		if
+			not (h > SEA + 3 and h < SEA + 160 and river == 0 and surface == Biomes.list[biome].top and surface ~= SNOW)
+		then
+			return nil
+		end
+		for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
+			if math.abs(sampler(x + offset[1], z + offset[2], 0) - h) > 2 then
+				return nil
+			end
+		end
+		return if surfaceCaves.carvesTop(x, z) then nil else h
+	end
+
+	function findSpawn(yield: (() -> ())?): (number, number, number)
 		--[[
 			Walk an outward square spiral (every SPAWN_STEP blocks) for the first gentle, dry,
 			unfrozen column in the hills or plains next to the mountains: a view of the ranges without
 			starting on a cliff. The cheap selector rules out most spots first. The search stays within
 			SPAWN_RANGE of the origin, where float precision is fine. Some seeds put the origin in the
 			middle of a sea with no such land in range: then any dry land in range is taken (an
-			island), then any dry land further out, then the origin itself.
+			island), then any dry land further out, then the origin itself. [ruins] The spiral reads
+			the raw relief (a planner's view); its winner then moves out of a city if it stands in or
+			near one (Cities.spawnShift: to a column passing the strict test on the wrapped terrain,
+			outside the cities' `protects`).
 		]]
+		local function shifted(x: number, z: number): (number, number, number)
+			local sx, sz = cities.spawnShift(x, z, function(cx: number, cz: number): boolean
+				return strictSpawn(sample, cx, cz) ~= nil and not cities.protects(cx, cz)
+			end, yield)
+			return sx, sample(sx, sz, 0), sz
+		end
 		local SPAWN_STEP, SPAWN_RANGE, FAR_RANGE = 64, 5000, 12800
 		for pass = 1, 3 do
 			local strict = pass == 1
@@ -1224,29 +1476,26 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			local x, z, dx, dz = 0, 0, 0, -1
 			for _ = 1, (2 * rings + 1) ^ 2 do
 				local wx, wz = x * SPAWN_STEP, z * SPAWN_STEP
-				local a = if strict then math.abs(relief.selector(wx, wz)) else 0.25
+				local a = if strict then math.abs(rawRelief.selector(wx, wz)) else 0.25
 				if a > 0.2 and a < 0.32 then
-					local h, biome, _, surface, _, river = sample(wx, wz, 0)
-					local ok
 					if strict then
-						ok = h > SEA + 3
-							and h < SEA + 160
-							and river == 0
-							and surface == Biomes.list[biome].top
-							and surface ~= SNOW
-					else
-						ok = h > SEA + 1 and river < RIVER_MUD
-					end
-					if ok then
-						for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
-							if math.abs(sample(wx + offset[1], wz + offset[2], 0) - h) > (if strict then 2 else 4) then
-								ok = false
-								break
-							end
+						if strictSpawn(rawSample, wx, wz) then
+							return shifted(wx, wz)
 						end
-						-- Not where a cave entrance or ravine opens (last: it builds the worms around).
-						if ok and not surfaceCaves.carvesTop(wx, wz) then
-							return wx, h, wz
+					else
+						local h, _, _, _, _, river = rawSample(wx, wz, 0)
+						local ok = h > SEA + 1 and river < RIVER_MUD
+						if ok then
+							for _, offset in { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 } } do
+								if math.abs(rawSample(wx + offset[1], wz + offset[2], 0) - h) > 4 then
+									ok = false
+									break
+								end
+							end
+							-- Not where a cave entrance or ravine opens (last: it builds the worms around).
+							if ok and not surfaceCaves.carvesTop(wx, wz) then
+								return shifted(wx, wz)
+							end
 						end
 					end
 				end
@@ -1256,14 +1505,20 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				x, z = x + dx, z + dz
 			end
 		end
-		local h = sample(0, 0, 0)
-		return 0, h, 0
+		return shifted(0, 0)
 	end
 
 	local function structureContainer(x: number, y: number, z: number): { StructureGen.ContainerItem }?
 		local items = if placer then placer.container(x, y, z) else nil
 		if items == nil and mineshafts then
 			items = mineshafts.container(x, y, z)
+		end
+		-- [ruins]
+		if items == nil then
+			items = cities.container(x, y, z)
+		end
+		if items == nil then
+			items = bunkers.container(x, y, z)
 		end
 		return items
 	end
@@ -1538,6 +1793,13 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			fluidKinds(new)
 			caveKinds(new)
 			libraryKinds(new)
+			-- [ruins] The cities and bunkers, where the world has them.
+			if ruins and Config.Cities.Enabled then
+				table.insert(new, cities.locateKind())
+			end
+			if ruins and Config.Bunkers.Enabled then
+				table.insert(new, bunkers.locateKind())
+			end
 			kinds = new
 			return new
 		end
@@ -1562,6 +1824,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		if mineshafts then
 			Mineshafts.poiBlocks(mineshafts.plans(minX, minZ, maxX, maxZ, yield), lut, minX, minZ, maxX, maxZ, out)
 		end
+		-- [ruins]
+		cities.poiBlocks(minX, minZ, maxX, maxZ, lut, out, yield)
+		bunkers.poiBlocks(minX, minZ, maxX, maxZ, lut, out, yield)
 		return out
 	end
 
@@ -1594,6 +1859,12 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		biomes = if forced then { forced } else nil,
 		climateScale = climateScale,
 		poiBlocks = poiBlocks,
+		-- [ruins]
+		prepare = if ruins and Config.Cities.Enabled then cities.prepare else nil,
+		cities = cities.sites,
+		roads = cities.roads,
+		cityAt = cities.cityAt,
+		bunkers = bunkers.plans,
 	}
 end
 

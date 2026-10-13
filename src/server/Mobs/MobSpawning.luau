@@ -16,8 +16,9 @@
 	            player (Minecraft's 24 block rule). A pack's centre is the first spot down a
 	            column (creatures from 20 above the player's feet, monsters from a random height
 	            within 16 of them); its members, one kind (picked by spawn weight: sheep 12, pig 10,
-	            chicken 10, cow 8; spider 100, zombie 95, skeleton 100, creeper 100), spread up to
-	            4 blocks around it, `group` of them (2-4 creatures, 1-4 monsters), each on a spot
+	            chicken 10, cow 8; zombie 100, runner 25, crawler 12, screamer 5, brute 4,
+	            construction 4, soldier 3, doctor 2: MobList `spawn`), spread up to 4 blocks
+	            around it, `group` of them (2-4 creatures; 1-5 zombies, by kind), each on a spot
 	            of its own found within 3 blocks up or down.
 	  A spot    a solid, opaque, sturdy floor (not leaves, glass, a chest...) with the mob's whole
 	            box free above it (no solid block, no fluid, no fire: Burning.touching), no rail

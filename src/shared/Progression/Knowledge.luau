@@ -100,17 +100,25 @@ Knowledge.CRAFT = 0.1
 
 -- Points per mob a player killed (Shared/Entities/MobList names; server Mobs/Mobs' `died` event
 -- calls Players/Progression.killed): Minecraft's experience drops, animals 2 (the mean of their
--- 1-3), monsters 5, and a creeper one more for walking up to something that explodes. A mob
--- nobody listed gives MOB_DEFAULT.
+-- 1-3), an ordinary zombie and a runner 5 (Minecraft's monsters), a crawler one less (it can
+-- hardly fight back), the screamer and the zombies in their work clothes (police, firefighter,
+-- construction worker, doctor) 6, the armoured soldier 8 and the brute 10. A mob nobody listed
+-- gives MOB_DEFAULT.
 Knowledge.MOBS = table.freeze({
 	Sheep = 2,
 	Cow = 2,
 	Pig = 2,
 	Chicken = 2,
 	Zombie = 5,
-	Skeleton = 5,
-	Spider = 5,
-	Creeper = 6,
+	ZombieRunner = 5,
+	ZombieCrawler = 4,
+	ZombieScreamer = 6,
+	ZombiePolice = 6,
+	ZombieFirefighter = 6,
+	ZombieWorker = 6,
+	ZombieDoctor = 6,
+	ZombieSoldier = 8,
+	ZombieBrute = 10,
 }) :: { [string]: number }
 Knowledge.MOB_DEFAULT = 3
 

@@ -27,7 +27,9 @@
 	            Ids are "w" + 8 base 36 digits; the longest key ("w12345678/r/-1954_-1954/1_9")
 	            stays far below the 50 characters a DataStore key may have (a character's at most
 	            "w12345678/c/12345678901_4294967295", 34).
-	  Meta      v, id, name, worldType, options (WorldTypes.encodeOptions), seed (its digits:
+	  Meta      v, id, name, worldType, options (WorldTypes.encodeOptions; a world saved before
+	            the apocalypse's ruins has no `ruins` key and reads as off in `settings`, unless
+	            Config.Cities.OldWorlds), seed (its digits:
 	            Minecraft's /seed text, exact to 2^53, where JSON numbers may not be), difficulty,
 	            gameMode (new players'), allowCommands, owner (the user id of the player who
 	            created it on the title screen; 0: the game's), created and lastPlayed (os.time),
@@ -361,6 +363,12 @@ function WorldMeta.settings(meta: Meta): (WorldSettings.Settings?, string?)
 	end
 	local options = WorldTypes.decodeOptions(meta.options)
 	local structures = options[WorldSettings.STRUCTURES]
+	-- (A world saved before the ruins has no `ruins` key: it reads as off, so its unedited ground
+	-- never grows cities next to a player's builds, unless Config.Cities.OldWorlds; new worlds
+	-- store the key, so they keep their choice.)
+	if options[WorldTypes.RUINS] == nil then
+		options[WorldTypes.RUINS] = Config.Cities.OldWorlds == true
+	end
 	return {
 		name = meta.name,
 		gameMode = meta.gameMode,

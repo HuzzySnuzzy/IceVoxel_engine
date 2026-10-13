@@ -20,12 +20,16 @@
 	                  (Shared/Effects/PotionList; Minecraft's brewing waits for the Nether) and the
 	                  Mana Potion; Terraria's Aglet, Anklet of the Wind, Band of Starpower,
 	                  Obsidian Skull, Emerald Staff and Tuxedo (the Mana Crystal, Lesser Mana
-	                  Potion and Top Hat are the Stone Age's).
+	                  Potion and Top Hat are the Stone Age's); the apocalypse's Nails, Reinforced
+	                  Barricade, Spiked Bat, Machete, Crowbar, Ceiling Lamp and Bunker Hatch (its
+	                  Rag, Bandage, Medkit, Herbal Poultice, Barricade, Baseball Bat, Supply
+	                  Crate and aged bricks are the Stone Age's; loot ignores Ages).
 	  Industrial Age  (level 15, an Osmium Ingot smelted, a Bucket crafted) diamond tools and
 	                  armor, diamond, emerald and osmium blocks, osmium nuggets, Mekanism's basic
 	                  and advanced transporters, pipes and fluid tanks, the Configurator, the
-	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), and the
-	                  potions' strong (II) and long variants.
+	                  Heat Generator, Gunpowder and TNT (with the Demolition skill too), the
+	                  potions' strong (II) and long variants, and Concrete (cracked and mossy
+	                  too).
 	  Electric Age    (level 25, a Heat Generator crafted) basic and advanced
 	                  Universal Cables, the Electric Furnace, basic and advanced Batteries, the
 	                  upgrade cards, the Oil Refinery and the Combustion Generator, elite
@@ -115,6 +119,14 @@ for _, name in
 		"ManaPotion",
 		"TuxedoShirt",
 		"TuxedoPants",
+		-- (The apocalypse's things of iron: nails and what they make, the blades and the hatch.)
+		"Nails",
+		"ReinforcedBarricade",
+		"SpikedBat",
+		"Machete",
+		"Crowbar",
+		"CeilingLamp",
+		"BunkerHatch",
 	}
 do
 	table.insert(iron, name)
@@ -146,6 +158,10 @@ for _, name in
 		"HeatGenerator",
 		"Gunpowder",
 		"Tnt",
+		-- (Concrete, and what smelting and vines make of it: the results are gated, not the inputs.)
+		"Concrete",
+		"CrackedConcrete",
+		"MossyConcrete",
 	}
 do
 	table.insert(industrial, name)

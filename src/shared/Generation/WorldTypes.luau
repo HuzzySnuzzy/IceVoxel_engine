@@ -245,6 +245,18 @@ local STRUCTURES: Setting = {
 	description = "Outposts, mineshafts and the other structures of the structure library",
 }
 
+-- The zombie apocalypse's ruins (Generation/Cities, Generation/Bunkers): on for new worlds; a
+-- world saved before it has no `ruins` key and reads as off (server Save/WorldMeta), unless
+-- Config.Cities.OldWorlds. Shown on the Customize screen (every setting but `structures`).
+local RUINS: Setting = {
+	key = "ruins",
+	name = "Ruins",
+	kind = "toggle",
+	default = true,
+	description = "Overgrown cities, roads and hidden bunkers",
+}
+WorldTypes.RUINS = RUINS.key
+
 -- "BirchForest" -> "Birch Forest".
 local function spaced(name: string): string
 	return (string.gsub(name, "(%l)(%u)", "%1 %2"))
@@ -300,9 +312,9 @@ WorldTypes.register({
 	name = "Default",
 	description = "IceVoxel's own terrain: huge mountains, deep caves, the Underlands",
 	create = function(seed: number, options: Options): TerrainGenerator.Generator
-		return TerrainGenerator.new(seed, { structures = options.structures ~= false })
+		return TerrainGenerator.new(seed, { structures = options.structures ~= false, ruins = options.ruins ~= false })
 	end,
-	settings = { STRUCTURES },
+	settings = { STRUCTURES, RUINS },
 })
 
 WorldTypes.register({
@@ -352,10 +364,11 @@ WorldTypes.register({
 	create = function(seed: number, options: Options): TerrainGenerator.Generator
 		return TerrainGenerator.new(seed, {
 			structures = options.structures ~= false,
+			ruins = options.ruins ~= false,
 			biome = biomeOption(options.biome, "Plains"),
 		})
 	end,
-	settings = { BIOME, STRUCTURES },
+	settings = { BIOME, STRUCTURES, RUINS },
 })
 
 WorldTypes.register({
@@ -363,9 +376,12 @@ WorldTypes.register({
 	name = "Large Biomes",
 	description = "The Default terrain with biomes four times as wide",
 	create = function(seed: number, options: Options): TerrainGenerator.Generator
-		return TerrainGenerator.new(seed, { structures = options.structures ~= false, climateScale = 4 })
+		return TerrainGenerator.new(
+			seed,
+			{ structures = options.structures ~= false, ruins = options.ruins ~= false, climateScale = 4 }
+		)
 	end,
-	settings = { STRUCTURES },
+	settings = { STRUCTURES, RUINS },
 })
 
 WorldTypes.register({

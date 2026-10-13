@@ -1,7 +1,7 @@
 --[[
 	Mobs on the client: how they are drawn between the server's updates (Entities/MobModel: the
-	glide, the facing the short way round, snapping, the hurt red, a creeper's flash, tipping
-	over when dying), what the crosshair hits (`pick`), and what WAILA says about them
+	glide, the facing the short way round, snapping, the hurt red, tipping over when dying), what
+	the crosshair hits (`pick`), and what WAILA says about them
 	(Ui/WailaInfo.mob).
 ]]
 
@@ -12,10 +12,9 @@ return function(t, shared, require, _server, client)
 
 	local ZOMBIE = MobList.find("Zombie") :: number
 	local SHEEP = MobList.find("Sheep") :: number
-	local CREEPER = MobList.find("Creeper") :: number
 
-	local function state(x: number, y: number, z: number, yaw: number?, flags: number?, fuse: number?)
-		return { x = x, y = y, z = z, yaw = yaw or 0, health = 20, flags = flags or 0, fuse = fuse or 0 }
+	local function state(x: number, y: number, z: number, yaw: number?, flags: number?)
+		return { x = x, y = y, z = z, yaw = yaw or 0, health = 20, flags = flags or 0 }
 	end
 
 	t.test("mob model: glides between updates, turns the short way, snaps far jumps", function()
@@ -42,7 +41,7 @@ return function(t, shared, require, _server, client)
 		t.eq(x, 50, "snapped")
 	end)
 
-	t.test("mob model: hurt red, a creeper's white flash, dying tips over", function()
+	t.test("mob model: hurt red, dying tips over", function()
 		local sheep = MobList.get(SHEEP) :: MobList.Kind
 		local black = MobModel.new(2, sheep, 2, state(0, 0, 0), 0)
 		local r, g, b = MobModel.colour(black, 1, 0)
@@ -54,20 +53,8 @@ return function(t, shared, require, _server, client)
 		MobModel.apply(black, state(0, 0, 0, 0, MobModel.HURT), 1)
 		r, g, b = MobModel.colour(black, 1, 1)
 		t.ok(r > 150 and g < 20 and b < 20, `hurt: red ({r}, {g}, {b})`)
-		local creeper = MobList.get(CREEPER) :: MobList.Kind
-		local fuse = MobModel.new(3, creeper, 1, state(0, 0, 0, 0, MobModel.FUSE, 20), 0)
-		local white, green = 0, 0
-		for i = 0, 99 do
-			local cr, cg, cb = MobModel.colour(fuse, 1, i / 100)
-			if cr == 255 and cg == 255 and cb == 255 then
-				white += 1
-			else
-				green += 1
-			end
-		end
-		t.ok(white > 20 and green > 20, `a lit creeper flashes ({white} white, {green} green)`)
-		t.ok(not MobModel.flashing(MobModel.new(4, creeper, 1, state(0, 0, 0), 0), 0.5), "an unlit one doesn't")
-		local dying = MobModel.new(5, creeper, 1, state(0, 0, 0), 0)
+		local zombie = MobList.get(ZOMBIE) :: MobList.Kind
+		local dying = MobModel.new(5, zombie, 1, state(0, 0, 0), 0)
 		t.eq(MobModel.tip(dying, 1), 0, "alive: upright")
 		MobModel.apply(dying, state(0, 0, 0, 0, MobModel.DYING), 2)
 		t.ok(MobModel.tip(dying, 2.3) > 0 and MobModel.tip(dying, 2.3) < math.rad(90), "tipping")

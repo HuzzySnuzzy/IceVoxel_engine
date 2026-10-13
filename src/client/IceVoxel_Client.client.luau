@@ -43,9 +43,9 @@
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay,
 	                             TankUse: buckets on machines)
 	  Entities/EntityRenderer    dropped items
-	  Entities/MobRenderer       mobs (cows, sheep, pigs, chickens, zombies, skeletons, creepers,
-	                             spiders): boxes gliding between the server's updates, hurt
-	                             flashes, creepers' fuses, flames, arrows, their hits' knockback
+	  Entities/MobRenderer       mobs (cows, sheep, pigs, chickens and the apocalypse's zombies):
+	                             boxes gliding between the server's updates, hurt flashes,
+	                             flames, their hits' knockback
 	  Rendering/TransmitterRenderer  Mekanism pipes and machines: arms, fluids in pipes and tanks,
 	                             items moving through transporters, the windows of working
 	                             generators, furnaces and refineries (the server's

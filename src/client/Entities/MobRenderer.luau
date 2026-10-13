@@ -9,13 +9,11 @@
 	            them; all of them move with one BulkMoveTo a frame, after the camera.
 	  Motion    Entities/MobModel: a glide between the server's updates (10 a second), the facing
 	            turning the short way; dying, the mob tips over on its side.
-	  Looks     the hurt flash reddens every part, a creeper's lit fuse flashes it white (faster as
-	            it burns), a burning mob carries flames (a Fire on its body, BurningView's colours,
-	            sized to the box). Colours are written only when they change.
-	  Arrows    a skeleton's arrow is a thin shaft flying from the bow to where it struck at
-	            ARROW_SPEED (Minecraft's 1.6 blocks a tick), then gone; at most MAX_ARROWS fly.
-	  Knockback a zombie's or spider's hit (and an arrow's) comes as a `push` the hull adds to its
-	            velocity (Player/MovementController.knockback, as an explosion's).
+	  Looks     the hurt flash reddens every part, a burning mob carries flames (a Fire on its
+	            body, BurningView's colours, sized to the box). Colours are written only when they
+	            change.
+	  Knockback a zombie's hit comes as a `push` the hull adds to its velocity
+	            (Player/MovementController.knockback, as an explosion's).
 	The server only sends the mobs within Config.Mobs.TrackingDistance (64 blocks) of the player;
 	the parts go when it says they left. Its messages are taken from the moment this module loads
 	(see `start`), so none is lost while the client boots.
@@ -23,7 +21,7 @@
 	`mobsNear` and `pick` let other modules (Ui/Waila, Interaction/BlockInteraction) see where the
 	mobs are drawn, read only.
 
-	The floating origin (Shared/World/Origin): mobs and arrows stay in world blocks (doubles) and
+	The floating origin (Shared/World/Origin): mobs stay in world blocks (doubles) and
 	are placed every frame at render studs (world studs minus the origin, after the origin's render
 	step), so a move of the origin needs nothing here.
 ]]
@@ -45,12 +43,6 @@ local MobModel = require(script.Parent.MobModel)
 local BLOCK = Config.BlockSize
 -- After the camera, as the items.
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 1
--- Arrows: blocks a second, their shaft (blocks), how many fly at once.
-local ARROW_SPEED = 32
-local ARROW_LENGTH = 0.5
-local ARROW_WIDTH = 0.06
-local MAX_ARROWS = 32
-local ARROW_COLOUR = Color3.fromRGB(110, 84, 56)
 -- Spare parts kept for new mobs.
 local MAX_SPARE = 128
 -- Flames (BurningView's colours): Fire.Size per block of the box's height.
@@ -66,26 +58,12 @@ type Entry = {
 	fire: Fire?,
 }
 
--- (From the bow to where it struck, world blocks.)
-type Arrow = {
-	part: BasePart,
-	fromX: number,
-	fromY: number,
-	fromZ: number,
-	toX: number,
-	toY: number,
-	toZ: number,
-	startedAt: number,
-	duration: number,
-}
-
 local MobRenderer = {}
 
 local entries: { [number]: Entry } = {}
 local models: { [number]: MobModel.Mob } = {}
 local count = 0
 local spare: { BasePart } = {}
-local arrows: { Arrow } = {}
 -- (Made as the module loads, kept out of the workspace until `start`: mobs the server sends while
 -- the client boots are built in it, unseen.)
 local folder = Instance.new("Folder")
@@ -176,30 +154,6 @@ local function updateFire(entry: Entry)
 	end
 end
 
-local function shoot(op: any, now: number)
-	if #arrows >= MAX_ARROWS then
-		local oldest = table.remove(arrows, 1) :: Arrow
-		release(oldest.part)
-	end
-	local dx, dy, dz = op.tx - op.x, op.ty - op.y, op.tz - op.z
-	local part = newPart()
-	part.CastShadow = false
-	part.Size = Vector3.new(ARROW_WIDTH, ARROW_WIDTH, ARROW_LENGTH) * BLOCK
-	part.Color = ARROW_COLOUR
-	part.Parent = folder
-	table.insert(arrows, {
-		part = part,
-		fromX = op.x,
-		fromY = op.y,
-		fromZ = op.z,
-		toX = op.tx,
-		toY = op.ty,
-		toZ = op.tz,
-		startedAt = now,
-		duration = math.max(math.sqrt(dx * dx + dy * dy + dz * dz) / ARROW_SPEED, 0.05),
-	})
-end
-
 local function onMessage(payload: buffer)
 	local ops = Protocol.decodeMobs(payload, MobList.COUNT)
 	if ops == nil then
@@ -217,8 +171,6 @@ local function onMessage(payload: buffer)
 			end
 		elseif op.op == "remove" then
 			remove(op.id)
-		elseif op.op == "arrow" then
-			shoot(op, now)
 		elseif op.op == "push" then
 			MovementController.knockback(op.kx, op.ky, op.kz)
 		end
@@ -257,24 +209,6 @@ local function draw()
 				entry.colours[index] = colour
 				part.Color = Color3.fromRGB(r, g, b)
 			end
-		end
-	end
-	for i = #arrows, 1, -1 do
-		local arrow = arrows[i]
-		local alpha = (now - arrow.startedAt) / arrow.duration
-		if alpha >= 1 then
-			table.remove(arrows, i)
-			release(arrow.part)
-		else
-			local fx, fy, fz = arrow.fromX, arrow.fromY, arrow.fromZ
-			local tx, ty, tz = arrow.toX, arrow.toY, arrow.toZ
-			local at = Vector3.new(
-				(fx + (tx - fx) * alpha) * BLOCK - ox,
-				(fy + (ty - fy) * alpha) * BLOCK,
-				(fz + (tz - fz) * alpha) * BLOCK - oz
-			)
-			table.insert(moved, arrow.part)
-			table.insert(cframes, CFrame.lookAt(at, Vector3.new(tx * BLOCK - ox, ty * BLOCK, tz * BLOCK - oz)))
 		end
 	end
 	if #moved > 0 then

@@ -78,10 +78,12 @@ export type State = {
 	-- in step.
 	active: { [number]: Instance },
 	levels: Effects.Levels,
-	-- External effects (Effects `external`) and their ticks left (0 or absent: none), and those
-	-- whose owner holds them for now (not counting down).
+	-- External effects (Effects `external`) and their ticks left (0 or absent: none), those
+	-- whose owner holds them for now (not counting down), and the amplifier their owner gives
+	-- them (absent: 0; the apocalypse's Infection shows its stage).
 	external: { [number]: number },
 	paused: { [number]: boolean },
+	externalLevel: { [number]: number },
 	-- Per fluid id: ticks of unbroken contact; the fluids touched last tick (a mask).
 	contact: { [number]: number },
 	touched: number,
@@ -132,7 +134,17 @@ local function touches(mask: number, fluid: number): boolean
 end
 
 function EffectRules.new(): State
-	return { active = {}, levels = {}, external = {}, paused = {}, contact = {}, touched = 0, age = 0, sent = {} }
+	return {
+		active = {},
+		levels = {},
+		external = {},
+		paused = {},
+		externalLevel = {},
+		contact = {},
+		touched = 0,
+		age = 0,
+		sent = {},
+	}
 end
 
 -- (The levels follow the running effects: the instant ones never count.)
@@ -273,8 +285,9 @@ end
 
 -- Sets external effect `effect` to `ticks` left (0: none), as its owner keeps it; `paused` while
 -- the owner holds it (doesn't count it down: Tough As Nails' Thirst and Climate Clemency for a
--- creative player), so the client stops its countdown too.
-function EffectRules.setExternal(state: State, effect: number, ticks: number, paused: boolean?)
+-- creative player), so the client stops its countdown too; `amplifier` the level it shows (nil:
+-- 0; an infection's stage).
+function EffectRules.setExternal(state: State, effect: number, ticks: number, paused: boolean?, amplifier: number?)
 	if ticks > 0 or ticks == INFINITE then
 		state.external[effect] = ticks
 		if paused then
@@ -282,9 +295,16 @@ function EffectRules.setExternal(state: State, effect: number, ticks: number, pa
 		else
 			state.paused[effect] = nil
 		end
+		local level = if amplifier then math.clamp(math.floor(amplifier), 0, 255) else 0
+		if level > 0 then
+			state.externalLevel[effect] = level
+		else
+			state.externalLevel[effect] = nil
+		end
 	else
 		state.external[effect] = nil
 		state.paused[effect] = nil
+		state.externalLevel[effect] = nil
 	end
 end
 
@@ -441,10 +461,13 @@ function EffectRules.entries(state: State): { Effects.Entry }
 		end
 		local external = state.external[id]
 		if external then
-			table.insert(
-				entries,
-				{ effect = id, amplifier = 0, ticks = external, ambient = false, paused = state.paused[id] == true }
-			)
+			table.insert(entries, {
+				effect = id,
+				amplifier = state.externalLevel[id] or 0,
+				ticks = external,
+				ambient = false,
+				paused = state.paused[id] == true,
+			})
 		end
 	end
 	return entries
@@ -492,7 +515,7 @@ function EffectRules.needsSync(state: State): boolean
 				return true
 			end
 		elseif external then
-			if off(state, entry, 0, external, false, state.paused[id] == true) then
+			if off(state, entry, state.externalLevel[id] or 0, external, false, state.paused[id] == true) then
 				return true
 			end
 		elseif entry then

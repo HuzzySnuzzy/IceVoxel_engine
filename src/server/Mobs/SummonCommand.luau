@@ -9,8 +9,9 @@
 	    /kill @e[type=<kind>]             every mob of that kind: "Killed 3 entities"
 	    /kill @e                          every mob (players are left alone here)
 
-	A kind is a MobList name in any case, with or without "minecraft:" ("zombie",
-	"minecraft:creeper"). Who may: as /time (the operators' permission, Players/Operators); others
+	A kind is a MobList name in any case, with or without "minecraft:", or in snake case
+	("zombie", "minecraft:zombie", "zombie_brute", "ZombieBrute"); the usage lists every kind in
+	snake case (MobList.snake). Who may: as /time (the operators' permission, Players/Operators); others
 	get "You can't summon or kill mobs here". Killed
 	mobs die (drops, death records) as if hurt to death, without a killer.
 ]]
@@ -39,8 +40,12 @@ export type Result = {
 
 local SummonCommand = {}
 
-SummonCommand.SUMMON_USAGE =
-	"Usage: /summon <cow | sheep | pig | chicken | zombie | skeleton | creeper | spider> [x y z]"
+-- (Every kind in snake case, from the list: "cow | sheep | ... | zombie_doctor".)
+local kindNames: { string } = {}
+for _, kind in MobList.kinds do
+	table.insert(kindNames, MobList.snake(kind.name))
+end
+SummonCommand.SUMMON_USAGE = `Usage: /summon <{table.concat(kindNames, " | ")}> [x y z]`
 SummonCommand.KILL_USAGE = "Usage: /kill @e[type=<kind>] (or /kill @e: every mob)"
 SummonCommand.DENIED = "You can't summon or kill mobs here"
 SummonCommand.DISABLED = "Mobs are turned off (Config.Mobs.Enabled)"

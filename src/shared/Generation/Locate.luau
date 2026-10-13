@@ -119,6 +119,9 @@ Locate.STRUCTURES = table.freeze({
 	"lake",
 	"cave_entrance",
 	"ravine",
+	-- (The apocalypse's ruins: Generation/Cities, Generation/Bunkers.)
+	"city",
+	"bunker",
 })
 
 -- Structure tags (Minecraft's #mineshaft and kin); "library" gets every library structure.
@@ -127,6 +130,7 @@ Locate.STRUCTURE_TAGS = table.freeze({
 	oil_well = { "oil_geyser", "oil_deposit" },
 	lake = { "lava_lake", "lake" },
 	cave = { "cave_entrance", "ravine", "mineshaft_entrance" },
+	ruins = { "city", "bunker" },
 } :: { [string]: { string } })
 Locate.LIBRARY_TAG = "library"
 

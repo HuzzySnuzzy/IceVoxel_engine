@@ -61,13 +61,16 @@ local Operators = require(script.Parent.Operators)
 	An effect kept by another module (Effects `external`): `get` its ticks left for a player (0 or
 	nil: none; read every tick), `paused` whether the owner holds it for now (it doesn't count
 	down: the client is told to keep its time), `give` it for at least `ticks` (/effect give; the
-	owner's own rule, a longer one stays), `clear` it (/effect clear). Only `get` is needed.
+	owner's own rule, a longer one stays), `clear` it (/effect clear), `amplifier` the level it
+	shows (nil: 0; the apocalypse's Infection gives its stage, server Apocalypse/Infection). Only
+	`get` is needed.
 ]]
 export type Adapter = {
 	get: (player: Player) -> number?,
 	paused: ((player: Player) -> boolean)?,
 	give: ((player: Player, ticks: number) -> ())?,
 	clear: ((player: Player) -> ())?,
+	amplifier: ((player: Player) -> number)?,
 }
 
 local EffectsServer = {}
@@ -295,8 +298,14 @@ function EffectsServer.tick(player: Player, mode: string, health: number, maxHea
 	local state = stateOf(player)
 	local damage, heal = EffectRules.tick(state, mode, health, maxHealth)
 	for id, adapter in adapters do
-		local paused = adapter.paused
-		EffectRules.setExternal(state, id, adapter.get(player) or 0, paused ~= nil and paused(player))
+		local paused, amplifier = adapter.paused, adapter.amplifier
+		EffectRules.setExternal(
+			state,
+			id,
+			adapter.get(player) or 0,
+			paused ~= nil and paused(player),
+			if amplifier then amplifier(player) else nil
+		)
 	end
 	updateGlowing(player, state)
 	if EffectRules.needsSync(state) then

@@ -66,7 +66,11 @@
 	        cave air while caves are hidden (`cullLutHiddenCaves`, `caveTwinLut`), never part of
 	        their item's variants (`placementFor` never picks one), and turned back into their twin
 	        by `surfaceForm` (with CaveAir into Air) when a structure is saved;
-	      - `find(name)`: a block's id by name, nil when there is none (names from data).
+	      - `find(name)`: a block's id by name, nil when there is none (names from data);
+	  * the zombie apocalypse: how long an ordinary zombie takes to break a block (BlockList
+	    `zombieBreak`: `zombieBreak`, `zombieBreakLut`, u16 ticks, 0 = never) and the blocks a
+	    use swaps for another (`toggle`, `menu` "Toggle": the bunker hatch; `toggleOf`, checked
+	    when this module loads: the target exists and toggles back).
 ]]
 
 local BlockList = require(script.BlockList)
@@ -179,6 +183,10 @@ export type BlockDef = {
 	chain: boolean,
 	axis: string?,
 	stuck: { number }?,
+	-- Ticks one ordinary zombie needs to break it (BlockList `zombieBreak`), 0: never; and what a
+	-- use swaps it for (`toggle`: the block's name and the sound; see Blocks.toggleOf).
+	zombieBreak: number,
+	toggle: ToggleSpec?,
 	appearance: number,
 }
 
@@ -223,6 +231,7 @@ export type PlantSpec = BlockList.PlantSpec
 export type DoorSpec = BlockList.DoorSpec
 export type JigsawSpec = BlockList.JigsawSpec
 export type FlammableSpec = BlockList.FlammableSpec
+export type ToggleSpec = BlockList.ToggleSpec
 export type Texture = TexturePack.Texture
 
 -- A block's texture per face, resolved from its texture pack entry (texture names; see
@@ -620,8 +629,15 @@ for index, spec in BlockList do
 		chain = spec.chain == true,
 		axis = spec.axis,
 		stuck = if spec.stuck then table.freeze(table.clone(spec.stuck)) else nil,
+		zombieBreak = spec.zombieBreak or 0,
+		toggle = if spec.toggle then table.freeze(table.clone(spec.toggle)) else nil,
 		appearance = 0,
 	}
+	assert(
+		def.zombieBreak >= 0 and def.zombieBreak <= 65535 and def.zombieBreak == math.floor(def.zombieBreak),
+		`Block {spec.name} has a bad zombieBreak`
+	)
+	assert(spec.toggle == nil or spec.menu == "Toggle", `Block {spec.name} toggles but its menu is not "Toggle"`)
 	assert(spec.axis == nil or spec.axis == "X" or spec.axis == "Z", `Block {spec.name} has a bad axis {spec.axis}`)
 	assert(not def.chain or def.support ~= nil, `Block {spec.name} hangs in a chain on nothing (no support)`)
 	assert(not (def.collides and solid), `Block {spec.name} collides by its bounds but is solid (a full cube)`)
@@ -1212,6 +1228,48 @@ end
 -- sides and lava sets the air next to it alight.
 function Blocks.isFlammable(id: number): boolean
 	return id >= 0 and id < Blocks.count and buffer.readu8(Blocks.igniteLut, id) > 0
+end
+
+--[[
+	The zombie apocalypse (BlockList `zombieBreak`, `toggle`). `zombieBreakLut` holds each block's
+	break ticks for one ordinary zombie (u16; 0: zombies never break it), which server
+	Mobs/MobAI reads every tick a zombie is blocked; a cave twin copies its twin's. Toggling
+	blocks (the bunker hatch, `menu` "Toggle") name what a use turns them into, resolved here:
+	the target must exist and toggle back to the block (server Players/ToggleUse, Blocks/Toggles).
+]]
+Blocks.zombieBreakLut = buffer.create(Blocks.count * 2)
+for id, def in defs do
+	buffer.writeu16(Blocks.zombieBreakLut, id * 2, def.zombieBreak)
+end
+
+-- Ticks one ordinary zombie needs to break the block (0: never; unknown ids too).
+function Blocks.zombieBreak(id: number): number
+	return if id >= 0 and id < Blocks.count then buffer.readu16(Blocks.zombieBreakLut, id * 2) else 0
+end
+
+local toggles: { [number]: { block: number, sound: string? } } = {}
+for id, def in defs do
+	local toggle = def.toggle
+	if toggle then
+		local to = ids[toggle.to]
+		assert(to ~= nil, `Block {def.name} toggles to unknown block {toggle.to}`)
+		local back = defs[to].toggle
+		assert(
+			back ~= nil and back.to == def.name,
+			`Block {def.name} toggles to {toggle.to}, which doesn't toggle back`
+		)
+		toggles[id] = { block = to, sound = toggle.sound }
+	end
+end
+
+-- What a use turns block `id` into and the sound it makes (BlockList `toggle`): nil for blocks
+-- that don't toggle.
+function Blocks.toggleOf(id: number): (number?, string?)
+	local toggle = toggles[id]
+	if toggle == nil then
+		return nil, nil
+	end
+	return toggle.block, toggle.sound
 end
 
 --[[

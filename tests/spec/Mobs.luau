@@ -1,7 +1,7 @@
 --[[
 	Mobs: the kinds (Shared/Entities/MobList), their movement (Shared/Entities/MobPhysics: falls,
 	collisions, stepping up by jumping, never off a cliff), what they do (server Mobs/MobAI: wander,
-	panic, targets, melee, a creeper's fuse, a skeleton's bow, daylight), what happens to them
+	panic, targets, melee, zombies that walk by day), what happens to them
 	(Mobs/MobWorld: hurts and their cooldown, knockback, death and loot, blasts, despawning,
 	players' attacks: reach, sight, game modes, attack strength), natural spawning
 	(Mobs/MobSpawning: light, ground, caps, distances, never in chunks that don't tick), the light
@@ -38,7 +38,7 @@ return function(t, shared, require, server)
 		return MobList.find(name) :: number
 	end
 	local COW, SHEEP, PIG, CHICKEN = kindId("Cow"), kindId("Sheep"), kindId("Pig"), kindId("Chicken")
-	local ZOMBIE, SKELETON, CREEPER, SPIDER = kindId("Zombie"), kindId("Skeleton"), kindId("Creeper"), kindId("Spider")
+	local ZOMBIE, BRUTE, SOLDIER = kindId("Zombie"), kindId("ZombieBrute"), kindId("ZombieSoldier")
 
 	-- A deterministic random in [0, 1) (a small LCG).
 	local function lcg(seed: number): () -> number
@@ -139,17 +139,25 @@ return function(t, shared, require, server)
 
 	--[[ The kinds ]]
 
-	t.test("mobs: Minecraft's eight kinds, their boxes, health and drops", function()
-		t.eq(MobList.COUNT, 8, "cow, sheep, pig, chicken, zombie, skeleton, creeper, spider")
+	t.test("mobs: the four animals and the apocalypse's ten zombies, their boxes, health and drops", function()
+		-- (8 before the zombie apocalypse: its ten kinds replaced Minecraft's zombie, skeleton,
+		-- creeper and spider, the Zombie keeping its id 5.)
+		t.eq(MobList.COUNT, 14, "cow, sheep, pig, chicken and ten zombies")
 		local expect = {
 			{ "Cow", 0.9, 1.4, 10, false },
 			{ "Sheep", 0.9, 1.3, 8, false },
 			{ "Pig", 0.9, 0.9, 10, false },
 			{ "Chicken", 0.4, 0.7, 4, false },
 			{ "Zombie", 0.6, 1.95, 20, true },
-			{ "Skeleton", 0.6, 1.99, 20, true },
-			{ "Creeper", 0.6, 1.7, 20, true },
-			{ "Spider", 1.4, 0.9, 16, true },
+			{ "ZombieRunner", 0.6, 1.9, 12, true },
+			{ "ZombieBrute", 0.75, 1.99, 60, true },
+			{ "ZombieCrawler", 0.8, 0.6, 14, true },
+			{ "ZombieScreamer", 0.6, 1.9, 16, true },
+			{ "ZombieSoldier", 0.6, 1.95, 30, true },
+			{ "ZombiePolice", 0.6, 1.95, 24, true },
+			{ "ZombieFirefighter", 0.6, 1.95, 26, true },
+			{ "ZombieWorker", 0.6, 1.95, 24, true },
+			{ "ZombieDoctor", 0.6, 1.95, 18, true },
 		}
 		for id, row in expect do
 			local kind = MobList.get(id) :: MobList.Kind
@@ -158,25 +166,32 @@ return function(t, shared, require, server)
 			t.eq(kind.height, row[3], `{row[1]} height`)
 			t.eq(kind.health, row[4], `{row[1]} health`)
 			t.eq(kind.hostile, row[5], `{row[1]} category`)
+			t.eq(MobList.isZombie(kind), row[5], `{row[1]}: a zombie`)
 			t.ok(kind.eye < kind.height, `{row[1]} eyes in its box`)
 			t.ok(#kind.parts <= MobList.MAX_PARTS, `{row[1]} parts`)
+			t.ok(not kind.burnsInDaylight, `{row[1]} doesn't burn by day`)
 		end
 		t.eq(MobList.find("zombie"), ZOMBIE, "any case")
-		t.eq(MobList.find("minecraft:creeper"), CREEPER, "Minecraft's namespace")
+		t.eq(MobList.find("minecraft:zombie"), ZOMBIE, "Minecraft's namespace")
+		t.eq(MobList.find("zombie_brute"), BRUTE, "snake case")
+		t.eq(MobList.find("creeper"), nil, "gone")
 		t.eq(MobList.find("wither"), nil, "unknown")
 		local zombie = MobList.get(ZOMBIE) :: MobList.Kind
 		t.eq(zombie.attack, 3, "a zombie hits 3")
 		t.eq(zombie.armor, 2, "and has 2 armor")
-		t.ok(zombie.burnsInDaylight and (MobList.get(SKELETON) :: MobList.Kind).burnsInDaylight, "the undead burn")
-		t.eq((MobList.get(SPIDER) :: MobList.Kind).attack, 2, "a spider hits 2")
-		t.eq(((MobList.get(CREEPER) :: MobList.Kind).fuse :: MobList.Fuse).ticks, 30, "a creeper's 30 tick fuse")
-		t.eq(((MobList.get(CREEPER) :: MobList.Kind).fuse :: MobList.Fuse).power, 3, "of power 3")
+		t.eq(zombie.follow, 24, "and follows a player 24 blocks")
+		t.eq((MobList.get(BRUTE) :: MobList.Kind).attack, 7, "a brute hits 7")
 		-- Drops resolve to items.
 		local cow = MobList.get(COW) :: MobList.Kind
 		t.eq(cow.kindDrops[1].item, I.Leather)
 		t.eq(cow.kindDrops[2].item, I.RawBeef)
 		t.eq((MobList.get(SHEEP) :: MobList.Kind).kindDrops[1].item, B.WhiteWool, "sheep drop wool")
-		t.eq((MobList.get(CREEPER) :: MobList.Kind).kindDrops[1].item, I.Gunpowder, "creepers gunpowder")
+		t.eq(zombie.kindDrops[1].item, I.RottenFlesh, "zombies rotten flesh")
+		local gunpowder = false
+		for _, drop in (MobList.get(SOLDIER) :: MobList.Kind).kindDrops do
+			gunpowder = gunpowder or drop.item == I.Gunpowder
+		end
+		t.ok(gunpowder, "soldiers gunpowder")
 		-- Sheep colours by Minecraft's odds: mostly white.
 		local sheep = MobList.get(SHEEP) :: MobList.Kind
 		local random = lcg(3)
@@ -353,7 +368,7 @@ return function(t, shared, require, server)
 
 	--[[ What monsters do ]]
 
-	t.test("mob AI: monsters hunt the nearest survival player they see within 16 blocks", function()
+	t.test("mob AI: monsters hunt the nearest survival player they see within 24 blocks", function()
 		local getBlock, set, skyOpen = flat()
 		local world = newWorld(getBlock)
 		local id = world:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
@@ -380,8 +395,9 @@ return function(t, shared, require, server)
 		-- Too far, or behind a wall.
 		local world3 = newWorld(getBlock)
 		local id3 = world3:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
-		run(world3, context({ player("p", 17.5, FLOOR, 0.5) }, skyOpen), 20)
-		t.eq((world3:get(id3) :: MobWorld.Mob).ai.target, nil, "17 blocks away: no")
+		-- (17 blocks before the zombie apocalypse: a Zombie's `follow` is 24.)
+		run(world3, context({ player("p", 25.5, FLOOR, 0.5) }, skyOpen), 20)
+		t.eq((world3:get(id3) :: MobWorld.Mob).ai.target, nil, "25 blocks away: no")
 		for y = FLOOR, FLOOR + 4 do
 			for z = -3, 3 do
 				set(3, y, z, STONE)
@@ -417,82 +433,11 @@ return function(t, shared, require, server)
 		t.ok(dx <= 1.43 + 0.3, `in reach when hitting ({dx})`)
 	end)
 
-	t.test("mob AI: a creeper hisses within 3 blocks and explodes 30 ticks later, unless left", function()
+	t.test("mob AI: a zombie hurt hits back; creatures panic when hurt", function()
 		local getBlock, _, skyOpen = flat()
-		local world = newWorld(getBlock)
-		local id = world:spawn(CREEPER, 0.5, FLOOR, 0.5)
-		local target = player("p", 2.5, FLOOR, 0.5)
-		local ctx = context({ target }, skyOpen)
-		local explosions, sounds = {}, {}
-		local ticks = 0
-		while #explosions == 0 and ticks < 100 do
-			world:tick(ctx)
-			ticks += 1
-			local changes = world:takeChanges()
-			for _, blast in changes.explosions do
-				table.insert(explosions, blast)
-			end
-			for _, cue in changes.sounds do
-				table.insert(sounds, cue.name)
-			end
-		end
-		t.eq(#explosions, 1, "it went off")
-		t.eq(explosions[1].power, 3, "with power 3")
-		t.ok(ticks >= 30 and ticks <= 45, `about 30 ticks after noticing the player ({ticks})`)
-		t.ok(table.find(sounds, "entity.creeper.primed") ~= nil, "after hissing")
-		t.eq(world:get(id), nil, "and is gone")
-		-- Getting away cancels it.
+		-- Hurt from 6 blocks away, by day, a zombie turns on whoever did it.
 		local world2 = newWorld(getBlock)
-		local id2 = world2:spawn(CREEPER, 0.5, FLOOR, 0.5)
-		local runner = player("p", 2.5, FLOOR, 0.5)
-		local ctx2 = context({ runner }, skyOpen)
-		run(world2, ctx2, 20)
-		local creeper = world2:get(id2) :: MobWorld.Mob
-		t.ok(creeper.ai.swell > 0, `the fuse burns ({creeper.ai.swell})`)
-		runner.x = 12.5
-		run(world2, ctx2, 3)
-		local swell = creeper.ai.swell
-		run(world2, ctx2, 5)
-		t.ok(creeper.ai.swell < swell, "and cools once the player is 7 blocks away")
-		local blasts = 0
-		for _ = 1, 60 do
-			world2:tick(ctx2)
-			blasts += #world2:takeChanges().explosions
-			runner.x = creeper.body.x + 12
-		end
-		t.eq(blasts, 0, "no blast while the player keeps away")
-	end)
-
-	t.test("mob AI: skeletons shoot every 60 ticks within 15 blocks", function()
-		local getBlock, _, skyOpen = flat()
-		local world = newWorld(getBlock, 11)
-		world:spawn(SKELETON, 0.5, FLOOR, 0.5)
-		local ctx = context({ player("p", 8.5, FLOOR, 0.5) }, skyOpen)
-		local arrows, hits = 0, 0
-		for _ = 1, 400 do
-			world:tick(ctx)
-			local changes = world:takeChanges()
-			arrows += #changes.arrows
-			hits += #changes.hits
-			for _, hit in changes.hits do
-				t.ok(hit.damage >= 3 and hit.damage <= 5, "3-5 an arrow")
-			end
-		end
-		t.ok(arrows >= 5 and arrows <= 8, `a shot every 3 s ({arrows} in 20 s)`)
-		t.ok(hits >= 2, `most hit at 8 blocks ({hits} of {arrows})`)
-	end)
-
-	t.test("mob AI: spiders hunt in the dark, not by day; creatures panic when hurt", function()
-		local getBlock, _, skyOpen = flat()
-		local world = newWorld(getBlock)
-		local id = world:spawn(SPIDER, 0.5, FLOOR, 0.5)
-		run(world, context({ player("p", 6.5, FLOOR, 0.5) }, skyOpen, NOON), 20)
-		t.eq((world:get(id) :: MobWorld.Mob).ai.target, nil, "neutral in daylight")
-		run(world, context({ player("p", 6.5, FLOOR, 0.5) }, skyOpen, MIDNIGHT), 20)
-		t.eq((world:get(id) :: MobWorld.Mob).ai.target, "p", "hunts at night")
-		-- Hurt by day, it hits back.
-		local world2 = newWorld(getBlock)
-		local id2 = world2:spawn(SPIDER, 0.5, FLOOR, 0.5)
+		local id2 = world2:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
 		world2:hurt(id2, 1, { player = "p", x = 6.5, z = 0.5 })
 		run(world2, context({ player("p", 6.5, FLOOR, 0.5) }, skyOpen, NOON), 2)
 		t.eq((world2:get(id2) :: MobWorld.Mob).ai.target, "p", "revenge")
@@ -506,19 +451,28 @@ return function(t, shared, require, server)
 		t.ok(mob.body.x > 22, `and runs ({mob.body.x})`)
 	end)
 
-	t.test("mobs: zombies and skeletons burn in daylight under the open sky", function()
+	t.test("mobs: a kind that burns by day burns under the open sky, not in shade or at night", function()
+		-- (No kind burns by day since the zombie apocalypse; MobWorld's rule stays for one that
+		-- does, so these zombies are given it.)
+		local function burner(world, id: number)
+			local mob = world:get(id) :: any
+			local kind = table.clone(mob.kind)
+			kind.burnsInDaylight = true
+			mob.kind = kind
+			return id
+		end
 		local getBlock, set, skyOpen, skyClear = flat()
 		local world = newWorld(getBlock)
-		local open = world:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
-		local roofed = world:spawn(SKELETON, 20.5, FLOOR, 0.5)
+		local open = burner(world, world:spawn(ZOMBIE, 0.5, FLOOR, 0.5))
+		local roofed = burner(world, world:spawn(ZOMBIE, 20.5, FLOOR, 0.5))
 		for x = 18, 23 do
 			for z = -3, 3 do
 				set(x, FLOOR + 3, z, STONE)
 			end
 		end
 		-- Under a tree's leaves (Level.canSeeSky: sky light 14 there) and under glass (15).
-		local shaded = world:spawn(ZOMBIE, 40.5, FLOOR, 0.5)
-		local glazed = world:spawn(ZOMBIE, 60.5, FLOOR, 0.5)
+		local shaded = burner(world, world:spawn(ZOMBIE, 40.5, FLOOR, 0.5))
+		local glazed = burner(world, world:spawn(ZOMBIE, 60.5, FLOOR, 0.5))
 		for x = 38, 43 do
 			for z = -3, 3 do
 				set(x, FLOOR + 4, z, B.OakLeaves)
@@ -540,16 +494,40 @@ return function(t, shared, require, server)
 			world:tick(ctx)
 		end
 		local zombie = world:get(open) :: MobWorld.Mob
-		t.ok(zombie.health < 20, `the zombie in the sun burns ({zombie.health})`)
-		t.eq((world:get(roofed) :: MobWorld.Mob).health, 20, "the skeleton under a roof doesn't")
-		t.eq((world:get(shaded) :: MobWorld.Mob).health, 20, "nor a zombie in a tree's shade")
+		t.ok(zombie.health < 20, `the one in the sun burns ({zombie.health})`)
+		t.eq((world:get(roofed) :: MobWorld.Mob).health, 20, "the one under a roof doesn't")
+		t.eq((world:get(shaded) :: MobWorld.Mob).health, 20, "nor one in a tree's shade")
 		t.ok((world:get(glazed) :: MobWorld.Mob).health < 20, "glass doesn't shade")
 		t.eq((world:get(cow) :: MobWorld.Mob).health, 10, "nor does a cow")
 		-- Not at night.
 		local night = newWorld(getBlock)
-		local id = night:spawn(ZOMBIE, 0.5, FLOOR, 0.5)
+		local id = burner(night, night:spawn(ZOMBIE, 0.5, FLOOR, 0.5))
 		run(night, context({}, skyOpen, MIDNIGHT), 100)
 		t.eq((night:get(id) :: MobWorld.Mob).health, 20, "not at night")
+	end)
+
+	t.test("mobs: zombies walk by day under the open sky and don't burn", function()
+		local getBlock, _, skyOpen, skyClear = flat()
+		local world = newWorld(getBlock)
+		local ids = {}
+		for kind = ZOMBIE, MobList.COUNT do
+			table.insert(ids, world:spawn(kind, (kind - ZOMBIE) * 6 + 0.5, FLOOR, 0.5))
+		end
+		local ctx = context({}, skyOpen, NOON, skyClear)
+		for _ = 1, 100 do
+			for _, id in ids do
+				local mob = world:get(id)
+				if mob then
+					mob.ai.goal = "idle"
+				end
+			end
+			world:tick(ctx)
+		end
+		for _, id in ids do
+			local mob = world:get(id) :: MobWorld.Mob
+			t.eq(mob.health, mob.kind.health, `{mob.kind.name} in the noon sun is unhurt`)
+			t.eq(mob.burn.fire, 0, `{mob.kind.name} isn't alight`)
+		end
 	end)
 
 	--[[ Hurts, death and loot ]]
@@ -669,7 +647,7 @@ return function(t, shared, require, server)
 		t.eq(w:takeChanges().deaths[1].killer, nil)
 	end)
 
-	t.test("mobs: blasts hurt and push them, a creeper's too", function()
+	t.test("mobs: blasts hurt and push them", function()
 		local getBlock, _, skyOpen = flat()
 		local world = newWorld(getBlock)
 		local near = world:spawn(ZOMBIE, 2.5, FLOOR, 0.5)
@@ -1161,11 +1139,17 @@ return function(t, shared, require, server)
 		t.eq((result.summon :: any).kind, ZOMBIE)
 		t.eq((result.summon :: any).x, 10, "at the player's feet")
 		t.eq(result.feedback[1], "Summoned new Zombie")
-		local at = SummonCommand.run("/summon minecraft:creeper ~2 ~ 7", ctx) :: SummonCommand.Result
+		local at = SummonCommand.run("/summon minecraft:zombie_brute ~2 ~ 7", ctx) :: SummonCommand.Result
+		t.eq((at.summon :: any).kind, BRUTE, "a kind's snake case name")
 		t.eq((at.summon :: any).x, 12, "~2")
 		t.eq((at.summon :: any).y, FLOOR, "~")
 		t.eq((at.summon :: any).z, 7, "absolute")
 		t.eq((SummonCommand.run("/summon wither", ctx) :: SummonCommand.Result).summon, nil, "unknown kinds")
+		t.eq(
+			(SummonCommand.run("/summon creeper", ctx) :: SummonCommand.Result).summon,
+			nil,
+			"gone with the apocalypse"
+		)
 		t.eq((SummonCommand.run("/summon cow 1 2", ctx) :: SummonCommand.Result).summon, nil, "two coordinates")
 		t.eq((SummonCommand.run("/summon cow 99999 2 0", ctx) :: SummonCommand.Result).summon, nil, "too far")
 		local denied = SummonCommand.run("/summon cow", { mayUse = false, enabled = true, x = 0, y = 0, z = 0 })
@@ -1184,6 +1168,7 @@ return function(t, shared, require, server)
 	--[[ The wire ]]
 
 	t.test("protocol: Mobs, Attack and Eat round trips; malformed messages", function()
+		local flag = Protocol.MobFlag
 		local ops: { Protocol.MobOp } = {
 			{
 				op = "spawn",
@@ -1195,15 +1180,27 @@ return function(t, shared, require, server)
 				z = -3.25,
 				yaw = math.pi / 2,
 				health = 8,
-				flags = Protocol.MobFlag.Hurt + Protocol.MobFlag.Burning,
-				fuse = 0,
+				flags = flag.Hurt + flag.Burning,
 			},
-			{ op = "state", id = 9, x = -100.03125, y = 64.5, z = 2, yaw = 0, health = 20, flags = 8, fuse = 12 },
+			{ op = "state", id = 9, x = -100.03125, y = 64.5, z = 2, yaw = 0, health = 20, flags = flag.Aggressive },
 			{ op = "remove", id = 3 },
-			{ op = "arrow", id = 4, x = 1, y = 2, z = 3, tx = 4.5, ty = 5.5, tz = -6.5 },
+			{
+				op = "move",
+				id = 4,
+				dx = 0.5,
+				dy = -0.03125,
+				dz = -2.25,
+				yaw = math.pi,
+				health = 12,
+				flags = flag.Attack + flag.Breaking + flag.Screaming,
+			},
 			{ op = "push", id = 5, kx = 0.4, ky = 0.4, kz = -0.1 },
 		}
-		local decoded = Protocol.decodeMobs(Protocol.encodeMobs(ops), MobList.COUNT) :: { Protocol.MobOp }
+		local encoded = Protocol.encodeMobs(ops)
+		-- (The count, then 5 bytes of code and id an op: a spawn 17 more, a state 15, a move 9 and
+		-- a push 12. The creeper's fuse byte and the skeleton's arrow op 4 are gone.)
+		t.eq(buffer.len(encoded), 2 + (5 + 17) + (5 + 15) + 5 + (5 + 9) + (5 + 12), "the ops' sizes")
+		local decoded = Protocol.decodeMobs(encoded, MobList.COUNT) :: { Protocol.MobOp }
 		t.eq(#decoded, 5)
 		local spawn = decoded[1] :: any
 		t.eq(spawn.op, "spawn")
@@ -1214,15 +1211,43 @@ return function(t, shared, require, server)
 		t.near(spawn.yaw, math.pi / 2, 1e-9, "yaw in 1/256 turns")
 		t.eq(spawn.health, 8)
 		t.eq(spawn.flags, 3)
+		t.eq(spawn.fuse, nil, "no fuse")
 		local state = decoded[2] :: any
 		t.eq(state.x, -100.03125, "1/32 block")
-		t.eq(state.fuse, 12)
+		t.eq(state.flags, flag.Aggressive)
 		t.eq((decoded[3] :: any).op, "remove")
-		local arrow = decoded[4] :: any
-		t.eq(arrow.tz, -6.5)
+		local move = decoded[4] :: any
+		t.eq(move.op, "move")
+		t.eq(move.dx, 0.5)
+		t.eq(move.dy, -0.03125, "1/32 block")
+		t.eq(move.dz, -2.25)
+		t.near(move.yaw, math.pi, 1e-9)
+		t.eq(move.health, 12)
+		t.eq(move.flags, flag.Attack + flag.Breaking + flag.Screaming)
 		local push = decoded[5] :: any
 		t.near(push.kx, 0.4, 1e-6)
 		t.near(push.kz, -0.1, 1e-6)
+		-- A move's delta reaches +-32767 steps; further is held there (the server sends a state).
+		local limit = Protocol.MOB_DELTA_LIMIT / Protocol.MOB_POSITION_SCALE
+		local far = Protocol.decodeMobs(
+			Protocol.encodeMobs({
+				{ op = "move", id = 1, dx = limit, dy = -limit, dz = 5000, yaw = 0, health = 1, flags = 0 },
+			}),
+			MobList.COUNT
+		) :: { any }
+		t.eq(far[1].dx, limit)
+		t.eq(far[1].dy, -limit)
+		t.eq(far[1].dz, limit, "held to the limit")
+		local beyond = buffer.create(2 + 5 + 9)
+		buffer.writeu16(beyond, 0, 1)
+		buffer.writeu8(beyond, 2, 6)
+		buffer.writei16(beyond, 7, -32768)
+		t.eq(Protocol.decodeMobs(beyond, MobList.COUNT), nil, "a delta of -32768")
+		-- Op 4 (the skeleton's arrow) is retired: malformed.
+		local arrow = buffer.create(2 + 5 + 24)
+		buffer.writeu16(arrow, 0, 1)
+		buffer.writeu8(arrow, 2, 4)
+		t.eq(Protocol.decodeMobs(arrow, MobList.COUNT), nil, "op 4")
 		-- Malformed.
 		local bad = Protocol.encodeMobs({
 			{
@@ -1236,7 +1261,6 @@ return function(t, shared, require, server)
 				yaw = 0,
 				health = 0,
 				flags = 0,
-				fuse = 0,
 			},
 		})
 		t.eq(Protocol.decodeMobs(bad, MobList.COUNT), nil, "an unknown kind")

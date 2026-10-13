@@ -17,9 +17,8 @@
 	             player back through a `push` op the client adds to its movement, as an
 	             explosion's, which the server's speed checks are told to allow:
 	             Characters.knockedBack; less the player's knockback resistance, a Cobalt
-	             Shield's all of it: Characters.knockbackShare), a creeper's blast (World/Explosions.explode, power 3,
-	             at its feet: blocks, items, players and other mobs as any blast) and arrows (an
-	             `arrow` op for everyone near).
+	             Shield's all of it: Characters.knockbackShare); each hit that lands fires
+	             `playerHit` (the apocalypse's bites and wounds: server Apocalypse/Survival).
 	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
 	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
@@ -32,8 +31,8 @@
 	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs within
 	             Config.Mobs.TrackingDistance of their feet: a spawn when one comes into range, its
 	             state when it changed (position in 1/32 block, facing, health, the hurt flash,
-	             burning, dying, a creeper's fuse), a remove when it leaves range or is gone; all
-	             in one Mobs message with that period's arrows and the player's knockback.
+	             burning, dying), a remove when it leaves range or is gone; all in one Mobs
+	             message with the player's knockback.
 	  Commands   /summon <kind> [x y z] and /kill @e[type=<kind>] (Mobs/SummonCommand), for those
 	             who may change the time (the operators' permission: Players/Operators).
 	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent; a world type
@@ -46,6 +45,10 @@
 	  Mobs.died            Event (killer: Player?, kind: string, x, y, z, id): a mob died; the
 	                       killer is the player whose hit counts (the last within 5 s), nil for
 	                       anything else (fire, falls, blasts, /kill)
+	  Mobs.playerHit       Event (player: Player, kind: string, damage: number, fresh: boolean,
+	                       mobId: number): a mob's hit on a player landed (Characters.hurt: the
+	                       half hearts after armor and Resistance, and whether it was a fresh
+	                       hurt, not under the cooldown)
 	  Mobs.damage(id, amount, attacker?, x?, z?)   hurts a mob (half hearts) through its cooldown
 	                       and armor, knocked back from (x, z) when given; returns what landed
 	  Mobs.near(x, y, z, radius)   the live mobs around a point (MobView: id, kind, position,
@@ -55,7 +58,9 @@
 	                       refused by the hurt cooldown (a projectile strikes a mob once:
 	                       MobWorld's `ownImmunity`)
 	  Mobs.ignite(id, ticks)   sets a mob burning for at least `ticks` (the spark's fire)
-	  Mobs.spawn(kind, x, y, z)    a mob of a MobList name at a position (0 when it can't)
+	  Mobs.spawn(kind, x, y, z, variant?)    a mob of a MobList name at a position, in a variant
+	                       (a zombie's look and skin: MobList.lookVariant; random when nil), or 0
+	                       when it can't
 	  Mobs.explode(x, y, z, power, getBlock)   what a blast does to mobs (World/Explosions'
 	                       handler, set by the boot script)
 	  Mobs.lightning(x, y, z)   what a lightning bolt does to mobs (World/WeatherServer's strike
@@ -86,7 +91,6 @@ local Simulation = require(script.Parent.Parent.World.Simulation)
 local Skylight = require(script.Parent.Parent.World.Skylight)
 local TimeOfDay = require(script.Parent.Parent.World.TimeOfDay)
 local WeatherServer = require(script.Parent.Parent.World.WeatherServer)
-local Explosions = require(script.Parent.Parent.World.Explosions)
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
 local Entities = require(script.Parent.Parent.Entities.Entities)
 local Characters = require(script.Parent.Parent.Players.Characters)
@@ -133,13 +137,17 @@ local diedEvent = Instance.new("BindableEvent")
 -- Fires (killer: Player?, kind: string, x: number, y: number, z: number, id: number) when a mob
 -- dies (see the header).
 Mobs.died = diedEvent.Event
+local playerHitEvent = Instance.new("BindableEvent")
+-- Fires (player: Player, kind: string, damage: number, fresh: boolean, mobId: number) when a
+-- mob's hit on a player lands (see the header).
+Mobs.playerHit = playerHitEvent.Event
 
 local mobWorld: MobWorld.MobWorld? = nil
 local serverWorld: WorldServer.World? = nil
 local random = Random.new()
 -- Per player: the last state sent of each mob their client knows (quantized), and ops waiting
--- for the next sync (arrows, their knockback).
-type Sent = { x: number, y: number, z: number, yaw: number, health: number, flags: number, fuse: number }
+-- for the next sync (their knockback).
+type Sent = { x: number, y: number, z: number, yaw: number, health: number, flags: number }
 local known: { [Player]: { [number]: Sent } } = {}
 local pending: { [Player]: { Protocol.MobOp } } = {}
 -- Per player: the tick of their last swing and of their last change of held item, and that item.
@@ -200,7 +208,6 @@ local function flagsOf(mob: MobWorld.Mob): number
 	return (if mob.hurtTime > 0 then FLAGS.Hurt else 0)
 		+ (if mob.burn.fire > 0 then FLAGS.Burning else 0)
 		+ (if mob.dead then FLAGS.Dying else 0)
-		+ (if mob.ai.swell > 0 then FLAGS.Fuse else 0)
 end
 
 local function snapshot(mob: MobWorld.Mob): Sent
@@ -213,18 +220,11 @@ local function snapshot(mob: MobWorld.Mob): Sent
 		yaw = Protocol.mobYaw(body.yaw),
 		health = math.clamp(math.ceil(mob.health), 0, 255),
 		flags = flagsOf(mob),
-		fuse = math.clamp(mob.ai.swell, 0, 255),
 	}
 end
 
 local function same(a: Sent, b: Sent): boolean
-	return a.x == b.x
-		and a.y == b.y
-		and a.z == b.z
-		and a.yaw == b.yaw
-		and a.health == b.health
-		and a.flags == b.flags
-		and a.fuse == b.fuse
+	return a.x == b.x and a.y == b.y and a.z == b.z and a.yaw == b.yaw and a.health == b.health and a.flags == b.flags
 end
 
 -- Sends every player the mobs around them (see the header).
@@ -272,7 +272,6 @@ local function replicate(net: Net, mobs: MobWorld.MobWorld)
 								yaw = body.yaw,
 								health = now.health,
 								flags = now.flags,
-								fuse = now.fuse,
 							})
 						end
 					else
@@ -288,7 +287,6 @@ local function replicate(net: Net, mobs: MobWorld.MobWorld)
 								yaw = body.yaw,
 								health = now.health,
 								flags = now.flags,
-								fuse = now.fuse,
 							})
 						end
 					end
@@ -308,7 +306,7 @@ local function replicate(net: Net, mobs: MobWorld.MobWorld)
 end
 
 -- What the tick's changes do to the rest of the game (see the header).
-local function apply(mobs: MobWorld.MobWorld, world: WorldServer.World)
+local function apply(mobs: MobWorld.MobWorld)
 	local changes = mobs:takeChanges()
 	for _, cue in changes.sounds do
 		Sounds.play(cue.name, cue.x, cue.y, cue.z)
@@ -330,39 +328,16 @@ local function apply(mobs: MobWorld.MobWorld, world: WorldServer.World)
 	for _, hit in changes.hits do
 		local player = hit.key
 		if typeof(player) == "Instance" and player:IsA("Player") and player.Parent then
-			local _, fresh = Characters.hurt(player, hit.damage)
+			local landed, fresh = Characters.hurt(player, hit.damage)
+			if landed > 0 then
+				playerHitEvent:Fire(player, hit.kind, landed, fresh, hit.id)
+			end
 			-- (Knockback resistance takes its share off: a Cobalt Shield all of it.)
 			local share = Characters.knockbackShare(player)
 			if fresh and share > 0 then
 				local kx, ky, kz = hit.kx * share, hit.ky * share, hit.kz * share
 				queue(player, { op = "push", id = hit.id, kx = kx, ky = ky, kz = kz })
 				Characters.knockedBack(player, kx, ky, kz)
-			end
-		end
-	end
-	for _, blast in changes.explosions do
-		Explosions.explode(world, blast.x, blast.y, blast.z, blast.power)
-	end
-	if #changes.arrows > 0 then
-		local rangeSq = Settings.TrackingDistance * Settings.TrackingDistance
-		for _, player in Players:GetPlayers() do
-			local fx, fy, fz = feetOf(player)
-			if fx then
-				for _, arrow in changes.arrows do
-					local dx, dy, dz = arrow.x - fx, arrow.y - fy, arrow.z - fz
-					if dx * dx + dy * dy + dz * dz <= rangeSq then
-						queue(player, {
-							op = "arrow",
-							id = arrow.id,
-							x = arrow.x,
-							y = arrow.y,
-							z = arrow.z,
-							tx = arrow.tx,
-							ty = arrow.ty,
-							tz = arrow.tz,
-						})
-					end
-				end
 			end
 		end
 	end
@@ -585,7 +560,7 @@ function Mobs.start(net: Net, world: WorldServer.World)
 			}
 			mobs:tick(context)
 			MobSpawning.step(mobs, spawnState, context, Settings)
-			apply(mobs, world)
+			apply(mobs)
 			if tickCount % math.max(1, Settings.SyncTicks) == 0 then
 				replicate(net, mobs)
 			end
@@ -668,13 +643,13 @@ function Mobs.near(x: number, y: number, z: number, radius: number): { MobView }
 	return views
 end
 
-function Mobs.spawn(kind: string, x: number, y: number, z: number): number
+function Mobs.spawn(kind: string, x: number, y: number, z: number, variant: number?): number
 	local mobs = mobWorld
 	local id = MobList.find(kind)
 	if mobs == nil or id == nil then
 		return 0
 	end
-	return mobs:spawn(id, x, y, z)
+	return mobs:spawn(id, x, y, z, variant)
 end
 
 --[[
@@ -696,8 +671,8 @@ end
 
 -- Would `block` placed at (x, y, z) overlap a mob's box (dying ones too)? ServerNet refuses such
 -- a placement (its `occupied` rule), as Minecraft's Level.isUnobstructed refuses a block inside a
--- living entity: otherwise a block in a monster's head cell would blind it (no melee, fuse or
--- bow) until the wall smothers it.
+-- living entity: otherwise a block in a monster's head cell would blind it (no melee) until the
+-- wall smothers it.
 function Mobs.occupied(block: number, x: number, y: number, z: number): boolean
 	local mobs = mobWorld
 	local box = Blocks.obstruction(block)

@@ -346,8 +346,9 @@ return function(t, shared, require, _server, client)
 			end
 		end
 		-- (Then the mineshafts' tunnel decorations: four wall torches, two rails, the fence post, the
-		-- cobweb, the moss carpet, four vines and hanging roots.)
-		t.eq(twins, 22, "six glow lichen sides, lava and oil, and fourteen of the mineshafts'")
+		-- cobweb, the moss carpet, four vines and hanging roots; then the zombie apocalypse's
+		-- bunkers' Ceiling Lamp: 22 before it.)
+		t.eq(twins, 23, "six glow lichen sides, lava and oil, fourteen of the mineshafts' and the lamp")
 		t.eq(fluids, 2)
 		t.eq(Blocks.surfaceForm(Blocks.CAVE_AIR), AIR)
 		t.eq(Blocks.surfaceForm(STONE), STONE)

@@ -179,8 +179,9 @@ return function(t, shared, require)
 		-- two Rope recipes, Rails, the Oak Fence, the Moss Carpet and two of Mossy Cobblestone; 180
 		-- before Terraria's Aglet, Anklet of the Wind, Band of Starpower, Obsidian Skull, Mana
 		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants; 191
-		-- before the five doors.)
-		t.eq(#Crafting.recipes, 196, "recipes compiled")
+		-- before the five doors; 196 before the zombie apocalypse's medical supplies, barricades,
+		-- bats, blades, the hatch and concrete.)
+		t.eq(#Crafting.recipes, 213, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

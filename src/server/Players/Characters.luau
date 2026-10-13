@@ -72,6 +72,9 @@
 	    landed on, for everyone but the player, whose client played them already
 	    (LivingEntity.causeFallDamage). Spectators make none (GameModeRules.makesSounds).
 	  * a saved player's health comes back without a hurt sound (`restoreHealth`, World/WorldSave).
+	  * magic hurts from elsewhere (`magicHurt`: the apocalypse's infection, server
+	    Apocalypse/Infection): as the effects' own, through the cooldown without armor, then
+	    Resistance; not lethal unless asked (it then stops at 1 half heart).
 	  * Terraria's accessories (Players/Inventories.accessories: Items/Accessories' sums of what
 	    is worn): their defense joins the armor's wherever armor softens a hurt (lava, fire,
 	    blasts, mobs: Accessories.armorPoints); a Lucky Horseshoe takes fall damage away
@@ -478,8 +481,8 @@ function Characters.lightning(x: number, y: number, z: number): number
 end
 
 --[[
-	Hurts a living player by `amount` half hearts from a mob (server Mobs/Mobs: a zombie's or a
-	spider's hit, a skeleton's arrow), through the hurt cooldown lava, burning and explosions share
+	Hurts a living player by `amount` half hearts from a mob (server Mobs/Mobs: a zombie's hit),
+	through the hurt cooldown lava, burning and explosions share
 	and softened by the armor worn (Players/Burning.hurtPlayer; never in creative or spectator),
 	then by Resistance (Players/Effects.incomingDamage, as every other hurt here). Returns the half
 	hearts that landed and whether the hurt was a fresh one (not under the cooldown: Minecraft
@@ -527,6 +530,38 @@ function Characters.hurt(player: Player, amount: number): (number, boolean)
 		humanoid:TakeDamage(landed / MINECRAFT_HEALTH * humanoid.MaxHealth)
 	end
 	return landed, fresh and hit > 0
+end
+
+--[[
+	Magic damage to a living player (the apocalypse's infection: server Apocalypse/Infection), as
+	the status effects' own hurt in the burn tick deals it: `amount` half hearts through the hurt
+	cooldown (Players/Burning.hurtPlayer) with no armor, then Resistance
+	(Players/Effects.incomingDamage); never in creative or spectator. With `lethal` false it
+	never takes the player below 1 half heart (Poison's rule: Effects `lethal`); `math.huge` with
+	`lethal` kills. Returns the half hearts that landed.
+]]
+function Characters.magicHurt(player: Player, amount: number, lethal: boolean): number
+	local character = player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	if humanoid == nil or humanoid.Health <= 0 or not (amount > 0) then
+		return 0
+	end
+	local state = burning[player]
+	if state == nil then
+		state = Burning.newPlayer()
+		burning[player] = state
+	end
+	local landed = Effects.incomingDamage(player, Burning.hurtPlayer(state, GameMode.of(player), amount))
+	if not lethal then
+		local maxHealth = humanoid.MaxHealth
+		local health = if maxHealth > 0 then humanoid.Health / maxHealth * MINECRAFT_HEALTH else 0
+		landed = math.min(landed, math.max(0, health - 1))
+	end
+	if landed > 0 then
+		-- (TakeDamage respects the ForceField of players who can't be hurt.)
+		humanoid:TakeDamage(math.min(landed / MINECRAFT_HEALTH * humanoid.MaxHealth, humanoid.Health))
+	end
+	return landed
 end
 
 --[[

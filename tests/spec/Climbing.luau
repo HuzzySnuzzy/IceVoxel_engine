@@ -6,7 +6,7 @@
 	rope (a free-fall slide that never hurts, jump to climb it), climbing out of water, spectators
 	and flight, the top of a ladder, Entity.makeStuckInBlock in cobwebs (x 0.25 / x 0.05 for one
 	move, the velocity zeroed, the fall forgotten), and mobs: they climb a ladder they walk into,
-	cobwebs slow them, but not spiders.
+	and cobwebs slow them.
 ]]
 
 return function(t, shared, require)
@@ -375,9 +375,8 @@ return function(t, shared, require)
 		t.ok(twin[1] == 0.25 and twin[2] == 0.05 and twin[3] == 0.25, "twins slow alike")
 	end)
 
-	t.test("mobs: climb a ladder they walk into, not a bare wall; webs slow them but not spiders", function()
+	t.test("mobs: climb a ladder they walk into, not a bare wall; webs slow them", function()
 		local zombie = MobList.get(MobList.find("Zombie") :: number) :: MobList.Kind
-		local spider = MobList.get(MobList.find("Spider") :: number) :: MobList.Kind
 		local function getter(world: PlayerPhysics.World): MobPhysics.GetBlock
 			return world.getBlock
 		end
@@ -415,7 +414,8 @@ return function(t, shared, require)
 		end
 		t.eq(bare.y, 1, "a bare wall stops a zombie")
 
-		-- Through a row of webs: a zombie crawls, a spider walks on.
+		-- Through a row of webs a zombie crawls (every mob does: the spiders that walked on are
+		-- gone with the zombie apocalypse).
 		local webs = getter(physicsWorld(function(x, y, z)
 			if z >= 2 and z <= 30 and y >= 1 and y <= 2 and x >= -1 and x <= 1 then
 				return COBWEB
@@ -440,6 +440,5 @@ return function(t, shared, require)
 		local slowed = walked(zombie, webs)
 		t.near(slowed / 20, forward * zombie.speed * 0.25, 1e-6, "a zombie crawls through webs")
 		t.ok(slowed < walked(zombie, open) * 0.15, "far slower than in the open")
-		t.near(walked(spider, webs), walked(spider, open), 1e-9, "a spider is not slowed")
 	end)
 end

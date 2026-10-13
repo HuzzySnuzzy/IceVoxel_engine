@@ -285,6 +285,22 @@ local BLANKS = {
 	},
 	{ "hanging roots", { "HangingRoots", "CaveHangingRoots" } },
 	{ "mossy cobblestone", { "MossyCobblestone" } },
+	-- The zombie apocalypse's ruins and bunkers (the road lines' sides and bottoms are asphalt).
+	{ "asphalt", { "Asphalt", "RoadLine", "RoadLineYellow" } },
+	{ "cracked asphalt", { "CrackedAsphalt" } },
+	{ "road line", { "RoadLine" } },
+	{ "road line yellow", { "RoadLineYellow" } },
+	{ "concrete", { "Concrete" } },
+	{ "cracked concrete", { "CrackedConcrete" } },
+	{ "mossy concrete", { "MossyConcrete" } },
+	{ "cracked bricks", { "CrackedBricks" } },
+	{ "mossy bricks", { "MossyBricks" } },
+	{ "rusty metal", { "RustyMetal" } },
+	{ "supply crate side", { "SupplyCrate" } },
+	{ "supply crate top", { "SupplyCrate" } },
+	{ "medicine cabinet side", { "MedicineCabinet" } },
+	{ "medicine cabinet top", { "MedicineCabinet" } },
+	{ "bunker hatch", { "BunkerHatch", "BunkerHatchOpen" } },
 }
 -- Doors: each wood's bottom picture on its 16 lower halves, its top picture on its 16 upper ones
 -- (BlockList's names: facing but North, Right, Open, Top).
@@ -311,13 +327,14 @@ return function(t, shared, require)
 	local FACES = Blocks.TEXTURE_FACES
 	local CUBE = { "top", "bottom", "north", "south", "east", "west" }
 
-	-- Blocks that never carry a texture: not drawn, fluids, torches and lanterns, transmitters,
-	-- tanks, machines (the solar panel too), structure blocks, structure voids, jigsaws and the
-	-- Glow Block.
+	-- Blocks that never carry a texture: not drawn, fluids, torches, lanterns and ceiling lamps,
+	-- transmitters, tanks, machines (the solar panel too), structure blocks, structure voids,
+	-- jigsaws and the Glow Block.
 	local never: { [number]: boolean } = {}
 	-- (Fire: its animated flames are drawn by its own renderer, not the pack; the campfire is
-	-- shaped boxes like a lantern, its flames fire's.)
-	for _, base in { B.Torch, B.Lantern, B.Fire, B.Campfire } do
+	-- shaped boxes like a lantern, its flames fire's. The bunkers' ceiling lamps hang as their
+	-- cave twins.)
+	for _, base in { B.Torch, B.Lantern, B.Fire, B.Campfire, B.CeilingLamp } do
 		for _, id in Blocks.variants(base) do
 			never[id] = true
 			-- (The mineshafts' wall torches in caves are the wall torches' cave twins.)
@@ -612,8 +629,8 @@ return function(t, shared, require)
 	t.test("texture pack: appearances are keyed by textures", function()
 		t.eq(
 			#Blocks.appearances,
-			363,
-			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone; then 32 halves of five doors, then the fence's 15 variants with arms)"
+			382,
+			"no appearance split or merged (157, the 5 saplings and fire, TNT and the Nuke lit and not, the 2 herbs, the campfire, white wool; then the four ladders, rope, two rails, the fence, the cobweb, moss block and carpet, four vines, hanging roots and mossy cobblestone; then 32 halves of five doors, then the fence's 15 variants with arms; then the zombie apocalypse's 19 blocks, 363 before them: its Ceiling Lamp's cave twin shares the lamp's)"
 		)
 		-- Blocks share an appearance only as before: a fluid's levels, a cave twin and its twin.
 		local members: { [number]: { number } } = {}

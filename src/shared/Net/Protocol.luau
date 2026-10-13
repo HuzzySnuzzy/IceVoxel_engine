@@ -208,17 +208,28 @@
 	  Mobs           u16 count, count x op (u8 op, u32 mob id, then by op): the mobs within
 	                 Config.Mobs.TrackingDistance of the player (server Mobs/Mobs), positions in
 	                 1/32 block (i32 each: the feet), yaw in 1/256 of a turn (u8: facing
-	                 (sin, cos)), health in half hearts (u8), flags (u8: bit 0 hurt flash, 1
-	                 burning, 2 dying, 3 a creeper's fuse lit) and the fuse's ticks (u8):
+	                 (sin, cos)), health in half hearts (u8), flags (u8, MobFlag: bit 0 hurt flash,
+	                 1 burning, 2 dying, 3 aggressive (it has a target or hunts), 4 attacking (a
+	                 melee swing within the last 8 ticks), 5 breaking a block, 6 screaming (a
+	                 screamer's 40 tick shriek)):
 	                   1 spawn   u8 kind (Shared/Entities/MobList id), u8 variant, i32 x, y, z,
-	                             u8 yaw, u8 health, u8 flags, u8 fuse
-	                   2 state   i32 x, y, z, u8 yaw, u8 health, u8 flags, u8 fuse (sent when it
-	                             changed, every Config.Mobs.SyncTicks)
+	                             u8 yaw, u8 health, u8 flags (17 bytes)
+	                   2 state   i32 x, y, z, u8 yaw, u8 health, u8 flags (15 bytes: a full
+	                             position, sent when it changed and a move's delta would not fit)
 	                   3 remove  nothing (gone, died, or out of range)
-	                   4 arrow   i32 x, y, z, i32 tx, ty, tz: a skeleton's arrow flying from x to tx
+	                   4         retired (a skeleton's arrow once): malformed
 	                   5 push    f32 kx, ky, kz: this player's knockback from the mob's hit (blocks
 	                             per tick, at most MAX_KNOCKBACK)
+	                   6 move    i16 dx, dy, dz in 1/32 block, u8 yaw, u8 health, u8 flags (9
+	                             bytes): the change from the quantised position last sent to this
+	                             player (its spawn, state or move), so it never drifts; a delta
+	                             outside +-32767 steps goes as a state instead
 	                 An unknown op or kind, a wrong length or a non-finite push is malformed.
+	  Survivor       u32 alive ticks (this character's since it last died, in every world), u16
+	                 kills (zombies killed this life, clamped), u16 blood moons (survived this
+	                 life): 8 bytes, to the player alone on joining, on respawning and every
+	                 Config.Apocalypse.Survivor.SyncTicks (server Apocalypse/Survival); any other
+	                 length is malformed
 	  Effects        u8 count, count x (u8 effect, u8 amplifier, i32 ticks, u8 flags): every status
 	                 effect the player has (Shared/Effects: the running ones and Tough As Nails'
 	                 external ones), sent to them alone when the list changes, an effect ends
@@ -379,6 +390,7 @@ Protocol.ServerMessage = {
 	Avatar = 29,
 	Mana = 30,
 	Projectiles = 31,
+	Survivor = 32,
 }
 
 Protocol.EditAction = {
@@ -2528,7 +2540,10 @@ end
 -- Positions in Mobs messages are this many steps a block (i32: ±67 million blocks).
 Protocol.MOB_POSITION_SCALE = 32
 -- Mobs flags (see the header).
-Protocol.MobFlag = table.freeze({ Hurt = 1, Burning = 2, Dying = 4, Fuse = 8 })
+Protocol.MobFlag =
+	table.freeze({ Hurt = 1, Burning = 2, Dying = 4, Aggressive = 8, Attack = 16, Breaking = 32, Screaming = 64 })
+-- The largest step (1/32 block) a move op's delta may take on an axis (i16).
+Protocol.MOB_DELTA_LIMIT = 32767
 
 export type MobOp = {
 	op: "spawn",
@@ -2541,7 +2556,6 @@ export type MobOp = {
 	yaw: number,
 	health: number,
 	flags: number,
-	fuse: number,
 } | {
 	op: "state",
 	id: number,
@@ -2551,27 +2565,28 @@ export type MobOp = {
 	yaw: number,
 	health: number,
 	flags: number,
-	fuse: number,
-} | { op: "remove", id: number } | {
-	op: "arrow",
+} | { op: "remove", id: number } | { op: "push", id: number, kx: number, ky: number, kz: number } | {
+	op: "move",
 	id: number,
-	x: number,
-	y: number,
-	z: number,
-	tx: number,
-	ty: number,
-	tz: number,
-} | { op: "push", id: number, kx: number, ky: number, kz: number }
+	-- (Blocks: whole steps of 1/32, at most MOB_DELTA_LIMIT of them.)
+	dx: number,
+	dy: number,
+	dz: number,
+	yaw: number,
+	health: number,
+	flags: number,
+}
 
-local MOB_SPAWN, MOB_STATE, MOB_REMOVE, MOB_ARROW, MOB_PUSH = 1, 2, 3, 4, 5
-local MOB_CODE = { spawn = MOB_SPAWN, state = MOB_STATE, remove = MOB_REMOVE, arrow = MOB_ARROW, push = MOB_PUSH }
+-- (Op 4 was a skeleton's arrow: retired, so decoding it is malformed.)
+local MOB_SPAWN, MOB_STATE, MOB_REMOVE, MOB_PUSH, MOB_MOVE = 1, 2, 3, 5, 6
+local MOB_CODE = { spawn = MOB_SPAWN, state = MOB_STATE, remove = MOB_REMOVE, push = MOB_PUSH, move = MOB_MOVE }
 -- Bytes after the op's u8 code and u32 id.
 local MOB_SIZE = {
-	[MOB_SPAWN] = 2 + 12 + 4,
-	[MOB_STATE] = 12 + 4,
+	[MOB_SPAWN] = 2 + 12 + 3,
+	[MOB_STATE] = 12 + 3,
 	[MOB_REMOVE] = 0,
-	[MOB_ARROW] = 24,
 	[MOB_PUSH] = 12,
+	[MOB_MOVE] = 6 + 3,
 }
 local POSITION_LIMIT = 2 ^ 31 - 1
 
@@ -2581,6 +2596,15 @@ local function quantize(value: number): number
 		return 0
 	end
 	return math.clamp(q, -POSITION_LIMIT, POSITION_LIMIT)
+end
+
+-- A move delta (blocks) in steps, held to the i16 range.
+local function quantizeDelta(value: number): number
+	local q = math.round(value * Protocol.MOB_POSITION_SCALE)
+	if q ~= q then
+		return 0
+	end
+	return math.clamp(q, -Protocol.MOB_DELTA_LIMIT, Protocol.MOB_DELTA_LIMIT)
 end
 
 -- A yaw (radians) as 1/256 turns.
@@ -2623,16 +2647,15 @@ function Protocol.encodeMobs(ops: { MobOp }): buffer
 			buffer.writeu8(b, o + 12, Protocol.mobYaw(op.yaw))
 			buffer.writeu8(b, o + 13, u8(op.health))
 			buffer.writeu8(b, o + 14, u8(op.flags))
-			buffer.writeu8(b, o + 15, u8(op.fuse))
-			o += 16
-		elseif op.op == "arrow" then
-			buffer.writei32(b, o, quantize(op.x))
-			buffer.writei32(b, o + 4, quantize(op.y))
-			buffer.writei32(b, o + 8, quantize(op.z))
-			buffer.writei32(b, o + 12, quantize(op.tx))
-			buffer.writei32(b, o + 16, quantize(op.ty))
-			buffer.writei32(b, o + 20, quantize(op.tz))
-			o += 24
+			o += 15
+		elseif op.op == "move" then
+			buffer.writei16(b, o, quantizeDelta(op.dx))
+			buffer.writei16(b, o + 2, quantizeDelta(op.dy))
+			buffer.writei16(b, o + 4, quantizeDelta(op.dz))
+			buffer.writeu8(b, o + 6, Protocol.mobYaw(op.yaw))
+			buffer.writeu8(b, o + 7, u8(op.health))
+			buffer.writeu8(b, o + 8, u8(op.flags))
+			o += 9
 		elseif op.op == "push" then
 			buffer.writef32(b, o, op.kx)
 			buffer.writef32(b, o + 4, op.ky)
@@ -2682,7 +2705,6 @@ function Protocol.decodeMobs(b: buffer, kinds: number): { MobOp }?
 				yaw = buffer.readu8(b, o + 14) * turn,
 				health = buffer.readu8(b, o + 15),
 				flags = buffer.readu8(b, o + 16),
-				fuse = buffer.readu8(b, o + 17),
 			})
 		elseif code == MOB_STATE then
 			table.insert(ops, {
@@ -2694,20 +2716,24 @@ function Protocol.decodeMobs(b: buffer, kinds: number): { MobOp }?
 				yaw = buffer.readu8(b, o + 12) * turn,
 				health = buffer.readu8(b, o + 13),
 				flags = buffer.readu8(b, o + 14),
-				fuse = buffer.readu8(b, o + 15),
 			})
 		elseif code == MOB_REMOVE then
 			table.insert(ops, { op = "remove", id = id })
-		elseif code == MOB_ARROW then
+		elseif code == MOB_MOVE then
+			local dx, dy, dz = buffer.readi16(b, o), buffer.readi16(b, o + 2), buffer.readi16(b, o + 4)
+			local limit = Protocol.MOB_DELTA_LIMIT
+			if math.abs(dx) > limit or math.abs(dy) > limit or math.abs(dz) > limit then
+				return nil
+			end
 			table.insert(ops, {
-				op = "arrow",
+				op = "move",
 				id = id,
-				x = buffer.readi32(b, o) / scale,
-				y = buffer.readi32(b, o + 4) / scale,
-				z = buffer.readi32(b, o + 8) / scale,
-				tx = buffer.readi32(b, o + 12) / scale,
-				ty = buffer.readi32(b, o + 16) / scale,
-				tz = buffer.readi32(b, o + 20) / scale,
+				dx = dx / scale,
+				dy = dy / scale,
+				dz = dz / scale,
+				yaw = buffer.readu8(b, o + 6) * turn,
+				health = buffer.readu8(b, o + 7),
+				flags = buffer.readu8(b, o + 8),
 			})
 		else
 			local kx, ky, kz = buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)
@@ -2725,6 +2751,37 @@ function Protocol.decodeMobs(b: buffer, kinds: number): { MobOp }?
 		return nil
 	end
 	return ops
+end
+
+--[[ Survivor ]]
+
+-- Bytes of a Survivor message (see the header).
+Protocol.SURVIVOR_BYTES = 8
+
+export type Survivor = { alive: number, kills: number, moons: number }
+
+-- A Survivor message: alive ticks (u32), zombie kills and blood moons survived (u16 each),
+-- clamped to their ranges.
+function Protocol.encodeSurvivor(alive: number, kills: number, moons: number): buffer
+	local b = buffer.create(Protocol.SURVIVOR_BYTES)
+	local function whole(value: number, limit: number): number
+		if value ~= value then
+			return 0
+		end
+		return math.clamp(math.floor(value), 0, limit)
+	end
+	buffer.writeu32(b, 0, whole(alive, 2 ^ 32 - 1))
+	buffer.writeu16(b, 4, whole(kills, 65535))
+	buffer.writeu16(b, 6, whole(moons, 65535))
+	return b
+end
+
+-- A Survivor message's numbers, nil on a wrong length.
+function Protocol.decodeSurvivor(b: buffer): Survivor?
+	if buffer.len(b) ~= Protocol.SURVIVOR_BYTES then
+		return nil
+	end
+	return { alive = buffer.readu32(b, 0), kills = buffer.readu16(b, 4), moons = buffer.readu16(b, 6) }
 end
 
 function Protocol.encodeAttack(id: number): buffer

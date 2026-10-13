@@ -3,7 +3,7 @@
 	Where rain falls on the server: Minecraft 1.20.1's Level.isRainingAt, pure over the server's
 	world (peekChunk: loaded chunks only, never generating one) and the weather there (Shared/
 	Weather), so the tests run it. Fire going out and spreading less (Behaviours/Fire), players
-	getting wet (Players/ToughAsNails), zombies and skeletons not burning (Mobs/MobWorld) and where
+	getting wet (Players/ToughAsNails), mobs that burn in daylight not burning (Mobs/MobWorld) and where
 	lightning may strike (World/Lightning) all ask it, through World/WeatherServer.
 
 	  Raining   a cell is rained on when the precipitation over its column is over

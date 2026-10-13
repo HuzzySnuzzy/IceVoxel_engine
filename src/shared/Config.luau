@@ -238,6 +238,90 @@ local Config = {
 		SpawnClearance = 32,
 	},
 
+	--[[
+		Overgrown cities and the roads between them (Generation/Cities): the zombie apocalypse's
+		ruins, decided from the raw terrain only. They follow Generate Structures and the world's
+		Ruins setting (WorldTypes `ruins`; a world saved before it reads as off unless OldWorlds).
+	]]
+	Cities = {
+		Enabled = true,
+		-- true: worlds saved before the ruins also get them, in ground nobody has edited (cut and
+		-- fill next to an old world's edited chunks would leave cliffs at the seams).
+		OldWorlds = false,
+		-- One candidate city per Grid x Grid blocks, kept with Chance, then only where Accept of
+		-- the 25 lattice samples over its footprint are fit to build on.
+		Grid = 1024,
+		Chance = 0.5,
+		Accept = 21,
+		-- Footprint half-widths (blocks), and the margin blended back to the raw terrain.
+		MinRadius = 48,
+		MaxRadius = 224,
+		Margin = 24,
+		-- The street grid: a block every Block blocks, streets Street wide.
+		Block = 32,
+		Street = 7,
+		-- Floors: at most MaxFloors, full interiors up to FullFloors, FloorHeight blocks each.
+		MaxFloors = 12,
+		FullFloors = 4,
+		FloorHeight = 4,
+		-- Where a city may stand: the plateau's slope and height above the sea.
+		MaxSlope = 10,
+		MinAboveSea = 3,
+		-- LOD levels buildings are drawn at (massing beyond 0; nothing beyond this).
+		LodLevels = 4,
+		-- Decay: ruin, overgrowth and wrecked cars.
+		Ruin = 0.55,
+		Overgrowth = 0.6,
+		Cars = 0.08,
+		-- Bunkers under each city (fewest, most), in shed lots.
+		Bunkers = { 1, 2 },
+		-- Plan caches (entries): existence cells, site plans, road links, 256 block tiles.
+		Caches = { Cells = 1024, Sites = 32, Links = 64, Tiles = 512 },
+		Roads = {
+			Enabled = true,
+			-- Asphalt Width wide, a Shoulder each side, blended into the terrain over Blend.
+			Width = 5,
+			Shoulder = 1,
+			Blend = 8,
+			-- Links to the nearest city in each quadrant within LinkCells cells, wobbling up to
+			-- Wobble blocks, sampled every Step, graded to at most MaxGrade.
+			LinkCells = 2,
+			Wobble = 48,
+			Step = 8,
+			MaxGrade = 1 / 6,
+			-- A link is dropped where it would cut or fill more, or cross more water, than this.
+			MaxCut = 24,
+			MaxFill = 24,
+			MaxWater = 48,
+			-- Roads draw at LOD 0..SurfaceLevels and cut and fill at 0..CutLevels; none beyond.
+			SurfaceLevels = 2,
+			CutLevels = 3,
+			-- Decay: cracks, overgrown patches, potholes and wrecked cars.
+			Cracks = 0.25,
+			Overgrown = 0.12,
+			Potholes = 0.02,
+			Cars = 0.004,
+		},
+	},
+
+	-- Hidden bunkers (Generation/Bunkers): concrete rooms under a steel hatch, in the wild and under
+	-- the cities' sheds. They follow Generate Structures and the Ruins setting, as the cities do.
+	Bunkers = {
+		Enabled = true,
+		-- One candidate per Grid x Grid blocks, kept with Chance.
+		Grid = 768,
+		Chance = 0.3,
+		-- The floor this many blocks under the hatch (fewest, most), and its rooms.
+		Depth = { 9, 16 },
+		Rooms = { 3, 6 },
+		-- Chances a bunker is lit and overrun; no bunker within SpawnClearance blocks of the spawn;
+		-- hatch columns tried per cell.
+		Lit = 0.8,
+		Overrun = 0.15,
+		SpawnClearance = 64,
+		Candidates = 16,
+	},
+
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).
 	StructureMaxLevel = 2,
 
@@ -1244,7 +1328,7 @@ local Config = {
 		-- How far (blocks) the built-in kinds are searched: mineshafts and their entrances,
 		-- oil wells (geysers, deposits), surface lava lakes and water lakes, cave entrances,
 		-- ravines. Each is a ring count of its grid (Generation/Locate).
-		Radius = { mineshaft = 4096, oil = 16384, lake = 4096, cave = 3072, ravine = 6144 },
+		Radius = { mineshaft = 4096, oil = 16384, lake = 4096, cave = 3072, ravine = 6144, city = 24576, bunker = 6144 },
 		-- Biomes: Minecraft's 6400 blocks in steps of 32, both times min(the world's climate
 		-- scale, 2) (Large Biomes: 12800 in steps of 64, the same 160,801 samples at most).
 		BiomeRadius = 6400,
@@ -1265,9 +1349,8 @@ local Config = {
 		TrackingDistance = 96,
 	},
 
-	-- Mobs (Shared/Entities/MobList: cows, sheep, pigs, chickens, zombies, skeletons, creepers,
-	-- spiders; server Mobs/). They tick within Server.SimulationRadius chunks of a player and
-	-- freeze beyond.
+	-- Mobs (Shared/Entities/MobList: cows, sheep, pigs, chickens and zombies; server Mobs/). They
+	-- tick within Server.SimulationRadius chunks of a player and freeze beyond.
 	Mobs = {
 		-- false: no mobs at all (nothing spawns, ticks or is sent; /summon says so).
 		Enabled = true,
@@ -1275,12 +1358,13 @@ local Config = {
 		Spawning = true,
 		-- Most mobs at once in the world, and of each category (Minecraft's mob caps, scaled to the
 		-- simulated area) ...
-		MaxMobs = 300,
+		MaxMobs = 320,
 		MaxPassive = 120,
-		MaxHostile = 160,
-		-- ... and within 128 blocks of each player.
+		MaxHostile = 200,
+		-- ... and within 128 blocks of each player (HostileCap: the zombies' night cap; by day,
+		-- in cities and in a blood moon Apocalypse scales it; Peaceful zeroes it).
 		PassiveCap = 10,
-		HostileCap = 15,
+		HostileCap = 20,
 		-- Ticks between spawning rounds: monsters every second, creatures every 400 ticks
 		-- (Minecraft's spawnPersistent), each round `Attempts` packs a player.
 		HostileInterval = 20,
@@ -1297,6 +1381,126 @@ local Config = {
 		SyncTicks = 2,
 		-- Attacks a player may send per second (anti-spam; Minecraft's fastest is the hand's 4).
 		AttacksPerSecond = 10,
+		-- The zombies' R15 rigs (client Entities/MobRig, MobRigPool): at most MaxRigs drawn as
+		-- rigs, MaxFull of them full within FullDistance blocks, reduced to ReducedDistance, the
+		-- two-box stand-in beyond; Hysteresis blocks before a tier changes; spare rigs kept per
+		-- tier; parts that cast shadows.
+		Rig = {
+			MaxRigs = 40,
+			MaxFull = 16,
+			FullDistance = 16,
+			ReducedDistance = 40,
+			Hysteresis = 4,
+			SpareFull = 12,
+			SpareReduced = 16,
+			ShadowParts = 3,
+		},
+	},
+
+	--[[ The zombie apocalypse (server Mobs/ZombieDirector, Apocalypse/*; client SurvivorHud, BloodMoonSky) ]]
+	Apocalypse = {
+		-- false: no director, noise, breaking, infection, bleeding, blood moon or day counter
+		-- (zombies then act like the old zombie, without burning).
+		Enabled = true,
+		Zombies = {
+			-- By day zombies spawn on sky-open floors (no darkness roll; block light 0 still).
+			DaySpawning = true,
+			-- The per-player hostile cap by day, times HostileCap.
+			DayFactor = 0.35,
+			-- Cells LightEstimate.blockLight may search for a day spawn.
+			DayLightBudget = 512,
+			-- Caps times this while the player stands in a city.
+			CityFactor = 1.75,
+			-- Extra spacing (blocks) zombies keep from each other.
+			Separation = 0.1,
+			-- An idle or wandering zombie this far from every player thinks every 4th tick.
+			ThinDistance = 32,
+			-- Ticks between line-of-sight checks while chasing.
+			SightInterval = 3,
+			-- Zombies break blocks only within BreakReach blocks (horizontally) of the target or
+			-- noise they follow, HuntBreakReach of the player they hunt.
+			BreakReach = 8,
+			HuntBreakReach = 16,
+			-- (Blood moon) zombies this near a player hunt them (inside the ticking area), and keep
+			-- hunting while this near.
+			HuntRadius = 44,
+			HuntKeep = 56,
+			-- Leave rounds: every Interval ticks by day, a zombie over the cap walks away for Ticks,
+			-- and goes once Distance blocks from every player and unseen; a hunter that closed
+			-- less than a block in StuckTicks gives up.
+			Leave = { Interval = 600, Ticks = 600, Distance = 24, StuckTicks = 400 },
+			-- An infected player who dies rises as a zombie, this many ticks later.
+			RiseOnDeath = true,
+			RiseDelay = 100,
+		},
+		-- Noise (server Apocalypse/NoiseBus, Shared/Apocalypse/NoiseRules): radii in blocks.
+		Noise = {
+			Enabled = true,
+			Sprint = 8,
+			Break = 10,
+			Glass = 16,
+			Place = 6,
+			Door = 10,
+			Container = 6,
+			Hit = 8,
+			Hurt = 10,
+			ExplosionBase = 24,
+			ExplosionPerPower = 12,
+			ExplosionMax = 56,
+			Scream = 48,
+			-- The taker's factors: louder at night, muffled by rain at the source.
+			NightFactor = 1.25,
+			RainFactor = 0.7,
+			-- Ticks a zombie investigates a noise; noises kept a tick, and merged within Merge.
+			InvestigateTicks = 400,
+			MaxPerTick = 32,
+			Merge = 4,
+		},
+		-- Zombies breaking blocks: damage decays after Decay idle ticks; a hit sound every
+		-- HitInterval ticks.
+		Breaking = { Enabled = true, Decay = 100, HitInterval = 20 },
+		-- A bite's infection: Stages of StageTicks each (death at the end), a bite while infected
+		-- adds BiteAdvance, at most one roll every RollInterval ticks; each armor point shields
+		-- ArmorShield of the chance (at most ArmorShieldMax); stage IV hurts every DamageInterval.
+		Infection = {
+			Enabled = true,
+			StageTicks = 12000,
+			Stages = 4,
+			BiteAdvance = 2400,
+			RollInterval = 100,
+			ArmorShield = 0.0375,
+			ArmorShieldMax = 0.75,
+			DamageInterval = 100,
+		},
+		-- Bleeding from a hit: at least Ticks a hit, the amplifier at most MaxAmplifier.
+		Bleeding = { Enabled = true, Ticks = 400, MaxAmplifier = 1 },
+		-- Blood moons (Shared/Apocalypse/BloodMoon): every Every-th night from the First, from
+		-- Start to End ticks into the day (ramping over Ramp); waves every WaveInterval of WaveBase
+		-- + WavePerMoon x k a player into a cap of CapBase + CapPerMoon x k (at most CapMax), the
+		-- world's limits raised to MaxHostile and MaxMobs; hunts assigned every HuntInterval; the
+		-- sky tinted towards Tint, the moon MoonSize times as big.
+		BloodMoon = {
+			Enabled = true,
+			Every = 3,
+			First = 3,
+			Start = 12500,
+			End = 23500,
+			Ramp = 600,
+			WaveInterval = 600,
+			WaveBase = 6,
+			WavePerMoon = 2,
+			CapBase = 24,
+			CapPerMoon = 4,
+			CapMax = 60,
+			MaxHostile = 260,
+			MaxMobs = 360,
+			HuntInterval = 100,
+			Tint = { 170, 28, 28 },
+			TintStrength = 0.55,
+			MoonSize = 1.6,
+		},
+		-- The day counter (client Ui/SurvivorHud) and how often the server sends it.
+		Survivor = { DayCounter = true, SyncTicks = 1200 },
 	},
 
 	-- Sounds -----------------------------------------------------------------------------------------

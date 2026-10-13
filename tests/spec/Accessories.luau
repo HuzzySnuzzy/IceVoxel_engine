@@ -5,7 +5,7 @@
 	server's restoreEquipment), what worn accessories add up to (Items/Accessories: sums, the
 	largest, each once, open slots only, hidden ones still working, slots by Age, armor points),
 	and where they come from (Crafting/Recipes, Progression/Ages' gate, Generation/Mineshafts'
-	fourth loot pool, spiders' Feral Claws). Then what they do and show: the looks text drawn
+	fourth loot pool, the ruins' Feral Claws). Then what they do and show: the looks text drawn
 	(vanity over armor, hidden slots, closed rows, each once) and its parser, the tooltips, the
 	speed factor, knockback share, attack speed and regeneration, the server's InventoryState
 	(open slots, `has`, death drops), the Obsidian Skull on campfires (Players/Burning), and other
@@ -21,7 +21,7 @@ return function(t, shared, require, server, client)
 	local Items = require(shared.Items)
 	local Menu = require(shared.Inventory.Menu)
 	local Mineshafts = require(shared.Generation.Mineshafts)
-	local MobList = require(shared.Entities.MobList)
+	local ScavengeLoot = require(shared.Generation.ScavengeLoot)
 	local TexturePack = require(shared.TexturePack)
 	local Types = require(shared.Inventory.Types)
 	local InventoryState = require(server.Players.InventoryState)
@@ -213,7 +213,7 @@ return function(t, shared, require, server, client)
 		t.eq(Accessories.slotsForAge((Ages.byId("atomic") :: any).index), 7)
 	end)
 
-	t.test("accessories: recipes, the Age gate, mineshaft loot and the spider's claws", function()
+	t.test("accessories: recipes, the Age gate, mineshaft loot and the ruins' claws", function()
 		local function grid(cells: { [number]: string }): { [number]: Items.Stack? }
 			local out = {}
 			for slot, name in cells do
@@ -291,17 +291,19 @@ return function(t, shared, require, server, client)
 			end
 		end
 		t.ok(found > 80 and found < 160, `about 30% of 400 chests: {found}`)
-		-- The spider's Feral Claws: 2.5%, killed by a player.
-		local claws = nil
-		local spider = MobList.get(MobList.find("Spider") :: number) :: any
-		for _, drop in spider.drops do
-			if drop.item == "FeralClaws" then
-				claws = drop
+		-- Feral Claws, once the spider's drop (the zombie apocalypse removed spiders): the ruins'
+		-- police stations and the bunkers' armouries hide them (Generation/ScavengeLoot).
+		for _, name in { "police", "bunker_armory" } do
+			local hidden = false
+			for _, pool in ScavengeLoot.TABLES[name] do
+				for _, entry in pool.entries do
+					if entry[1] == "FeralClaws" then
+						hidden = true
+					end
+				end
 			end
+			t.ok(hidden, `the {name} loot hides Feral Claws`)
 		end
-		t.ok(claws ~= nil, "spiders drop Feral Claws")
-		t.eq((claws :: any).chance, 0.025)
-		t.eq((claws :: any).byPlayer, true)
 	end)
 
 	--[[ What the equipment does (the builders' rules on top of the stats) ]]

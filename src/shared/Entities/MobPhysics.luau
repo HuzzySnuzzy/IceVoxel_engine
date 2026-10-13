@@ -19,23 +19,20 @@
 	            vertically when shallow), gravity / 4. Walking into a wall at the surface hops out
 	            (0.3 up, LivingEntity's jumpOutOfFluid). The fall distance is cleared in water and
 	            halved every tick in lava.
-	  Climbing  `climbs` (spiders: Spider.onClimbable): pushing into a wall climbs it at 0.2 a tick.
-	            Every other mob climbs ladders, vines and rope (Blocks.isClimbable, the feet cell)
+	  Climbing  every mob climbs ladders, vines and rope (Blocks.isClimbable, the feet cell)
 	            as players do (LivingEntity.handleOnClimbable): no fall damage, sideways speed
 	            held to 0.15 a tick and the descent to 0.15 (rope: a free fall, Supplementaries'
 	            slide), and walking into a wall there or jumping sets 0.2 up after the move, 0.1176
 	            blocks a tick once gravity and drag have had theirs. Mobs never seek a ladder
 	            out (Minecraft's do not either); they climb one they walk into. In water a wall
-	            pushed into on a climbable lifts 0.2 too. Spiders climb by their wall rule only
-	            (Spider.onClimbable is its wall flag).
+	            pushed into on a climbable lifts 0.2 too.
 	  Cobwebs   (Entity.makeStuckInBlock) a mob whose box (deflated by 1e-7) is in a block with a
 	            `stuck` multiplier (Blocks.stuckIn: cobwebs 0.25, 0.05, 0.25) loses its fall
-	            distance, and its next move is multiplied by it with the velocity zeroed. Not
-	            spiders (Spider.makeStuckInBlock does nothing).
+	            distance, and its next move is multiplied by it with the velocity zeroed.
 	  Chickens  `slowFall`: falling speed x 0.6 a tick (Chicken.aiStep), no fall damage there.
 	  Collision Hull.collide with Minecraft's mob step height 0.6, so a mob must jump a full
 	            block (its AI does); unloaded blocks are solid. `horizontalCollision` says when a
-	            wall stopped it (the AI jumps, a spider climbs).
+	            wall stopped it (the AI jumps).
 	  Falling   the fall distance counts up while it falls; on landing `tick` returns it (fall
 	            damage is ceil(distance - 3), LivingEntity.causeFallDamage, MobWorld's).
 
@@ -75,7 +72,6 @@ export type Shape = {
 	width: number,
 	height: number,
 	speed: number,
-	climbs: boolean?,
 	slowFall: boolean?,
 }
 
@@ -213,11 +209,8 @@ local function moveRelative(body: Body, amount: number, forward: number)
 end
 
 -- The climbable block (ladder, vine, rope) at the body's feet (LivingEntity.onClimbable), nil when
--- none. Spiders climb by their own rule, never this one.
-local function climbableAt(body: Body, shape: Shape): number?
-	if shape.climbs then
-		return nil
-	end
+-- none.
+local function climbableAt(body: Body): number?
 	local block = current(floor(body.x), floor(body.y), floor(body.z))
 	return if block ~= nil and Blocks.isClimbable(block) then block else nil
 end
@@ -242,7 +235,7 @@ end
 
 -- Entity.move: a cobweb's multiplier from the last move first (the velocity stops); collide,
 -- update the ground and wall state, stop the axes that hit something; the fall distance
--- (checkFallDamage); then cobwebs in the box for the next move (not for spiders). Returns the
+-- (checkFallDamage); then cobwebs in the box for the next move. Returns the
 -- fall distance of a landing (0: none).
 local function move(body: Body, shape: Shape): number
 	local dx, dy, dz = body.vx, body.vy, body.vz
@@ -285,13 +278,10 @@ local function move(body: Body, shape: Shape): number
 		-- (Stepping up is no fall.)
 		body.fallDistance = 0
 	end
-	-- (Spider.makeStuckInBlock does nothing.)
-	if not shape.climbs then
-		local inside = stuckInside(body, shape)
-		if inside then
-			body.stuck = inside
-			body.fallDistance = 0
-		end
+	local inside = stuckInside(body, shape)
+	if inside then
+		body.stuck = inside
+		body.fallDistance = 0
 	end
 	return landed
 end
@@ -349,7 +339,7 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 		moveRelative(body, FLUID_ACCELERATION, forward)
 		landed = move(body, shape)
 		-- (A ladder or vine climbed out of water.)
-		if water > 0 and body.horizontalCollision and climbableAt(body, shape) then
+		if water > 0 and body.horizontalCollision and climbableAt(body) then
 			body.vy = CLIMB_SPEED
 		end
 		if water > 0 then
@@ -379,13 +369,8 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 			then shape.speed * (GROUND_FACTOR / (friction * friction * friction))
 			else AIR_ACCELERATION
 		moveRelative(body, acceleration, forward)
-		if shape.climbs and body.horizontalCollision and forward > 0 then
-			-- (Spider.onClimbable: a wall in the way is climbed.)
-			body.vy = CLIMB_SPEED
-			body.fallDistance = 0
-		end
 		-- Ladders, vines and rope (LivingEntity.handleOnClimbable, then the climb after the move).
-		local climbable = climbableAt(body, shape)
+		local climbable = climbableAt(body)
 		if climbable then
 			body.fallDistance = 0
 			body.vx = math.clamp(body.vx, -CLIMB_LIMIT, CLIMB_LIMIT)
@@ -395,7 +380,7 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 			end
 		end
 		landed = move(body, shape)
-		if (body.horizontalCollision or jump) and climbableAt(body, shape) then
+		if (body.horizontalCollision or jump) and climbableAt(body) then
 			body.vy = CLIMB_SPEED
 		end
 		body.vy -= GRAVITY

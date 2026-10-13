@@ -35,7 +35,6 @@ TitleRules.SPLASHES = table.freeze({
 	"Generated on your device!",
 	"Seeds are just numbers!",
 	"Try the Underlands!",
-	"Mind the creepers!",
 	"Boil your water!",
 	"Stay hydrated!",
 	"Lava hurts!",

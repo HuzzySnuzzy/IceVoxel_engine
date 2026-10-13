@@ -13,7 +13,7 @@
 	  Panic      creatures hurt by anything (PanicGoal) run at their `panic` speed for 3-5 s,
 	             away from whoever hurt them, picking a new spot whenever they get there.
 	  Steering   straight at the spot (or the target): it faces it and walks; a wall in the way
-	             is jumped (a block up: Minecraft's JumpControl), a spider climbs it. It never
+	             is jumped (a block up: Minecraft's JumpControl). It never
 	             walks off a drop of more than 3 blocks (the path finder's max fall), nor into
 	             lava, fire, a campfire, oil or fuel, nor where the ground isn't loaded: it stops
 	             (a stroll ends there).
@@ -22,30 +22,14 @@
 	             spectator players are never targets), looking again every 10 ticks, and hunt
 	             them until they are out of range, can't be hurt any more, or out of sight for 60
 	             ticks (unseenMemoryTicks). A monster hurt by a player hunts that player
-	             (HurtByTargetGoal). Spiders only notice players where it is dark (raw
-	             brightness under 8: Spider's target goal) and give up 1 tick in 100 in the
-	             light, but always hit back.
-	  Melee      zombies and spiders hit a target within Minecraft's reach (MeleeAttackGoal: the
-	             distance between them under sqrt((2 x width)^2 + target width): a zombie 1.43, a
-	             spider 2.9) that they can see, every 20 ticks, for their `attack` damage with a
-	             0.4 knockback; a spider leaps at a target 2-4 blocks away one tick in 5
-	             (LeapAtTargetGoal, 0.4 up).
-	  Creepers   SwellGoal: within 3 blocks of a target it can see, it stops and its fuse burns
-	             (`swell` up to 30 ticks, the hiss as it lights); a target 7 blocks away or out of
-	             sight lets it cool down again (`swell` back down a tick at a time). At 30 it
-	             explodes with power 3 (Creeper.explodeCreeper) and is gone, without drops.
-	  Skeletons  RangedBowAttackGoal on normal difficulty: a target within 15 blocks it can see is
-	             shot at every 60 ticks (40 ticks between shots, a 20 tick draw), standing still
-	             once it has seen the target for 20 ticks. Arrows are hitscan: one hits with
-	             1.15 - distance / 15 (between 0.25 and 0.95; Minecraft's arrow spread of 6 on
-	             normal) for 3-5 half hearts with a 0.4 knockback, else it flies past; either way
-	             the clients see it fly (`arrow` events). (A real projectile would need its own
-	             entity; a hitscan with Minecraft's damage, rate and a distance-based miss chance
-	             plays the same at this game's ranges.)
+	             (HurtByTargetGoal).
+	  Melee      zombies hit a target within Minecraft's reach (MeleeAttackGoal: the distance
+	             between them under sqrt((2 x width)^2 + target width): a zombie 1.43) that they
+	             can see, every 20 ticks, for their `attack` damage with a 0.4 knockback.
 
 	The mob's world gives it what it needs: the blocks, the players (feet, eyes, game modes, alive),
-	the day time and the open sky, random numbers and the events it emits (hits on players, arrows,
-	explosions, sounds).
+	the day time and the open sky, random numbers and the events it emits (hits on players,
+	sounds).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -53,13 +37,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Shapes = require(Shared.Blocks.Shapes)
-local DayCycle = require(Shared.DayCycle)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local MobPhysics = require(Shared.Entities.MobPhysics)
 local Combat = require(Shared.Entities.Combat)
-local LightEstimate = require(Shared.World.LightEstimate)
 local VoxelRaycast = require(Shared.World.VoxelRaycast)
 
 export type Goal = "idle" | "wander" | "panic" | "chase"
@@ -75,14 +57,6 @@ export type State = {
 	unseen: number,
 	-- Ticks to the next melee hit.
 	cooldown: number,
-	-- Creeper: fuse ticks lit and the way it goes (+1 lighting, -1 cooling).
-	swell: number,
-	swellDir: number,
-	-- Skeleton: ticks the target has been in sight (negative: out of it), ticks drawing the bow
-	-- (0: not drawing) and ticks until the next draw.
-	seeTime: number,
-	draw: number,
-	reload: number,
 }
 
 -- A player as mobs see them (blocks: feet, eye height above them).
@@ -110,21 +84,6 @@ MobAI.UNSEEN_MEMORY = 60
 MobAI.MELEE_COOLDOWN = 20
 MobAI.MAX_FALL = 3
 MobAI.FLOAT_CHANCE = 0.8
--- Spiders notice players under this raw brightness (Spider's getLightLevelDependentMagicValue
--- < 0.5) and drop a target in the light 1 tick in this many.
-MobAI.SPIDER_DARK = 8
-MobAI.SPIDER_GIVE_UP = 100
-MobAI.LEAP_MIN = 2
-MobAI.LEAP_MAX = 4
-MobAI.LEAP_CHANCE = 5
-MobAI.LEAP = 0.4
--- Skeletons: the target must have been seen this long before they stop to shoot.
-MobAI.BOW_SETTLE = 20
--- Hitscan arrows: the hit chance at a distance (see the header), the miss's offset (blocks).
-MobAI.ARROW_HIT_BASE = 1.15
-MobAI.ARROW_HIT_MIN = 0.25
-MobAI.ARROW_HIT_MAX = 0.95
-MobAI.ARROW_MISS = 1.5
 
 local sqrt = math.sqrt
 local atan2 = math.atan2
@@ -148,11 +107,6 @@ function MobAI.new(): State
 		target = nil,
 		unseen = 0,
 		cooldown = 0,
-		swell = 0,
-		swellDir = -1,
-		seeTime = 0,
-		draw = 0,
-		reload = 0,
 	}
 end
 
@@ -239,18 +193,6 @@ export type World = {
 	random: () -> number,
 	-- Events (Mobs/MobWorld's takeChanges).
 	hitPlayer: (self: any, mob: any, player: PlayerView, damage: number, kx: number, ky: number, kz: number) -> (),
-	arrow: (
-		self: any,
-		mob: any,
-		x: number,
-		y: number,
-		z: number,
-		tx: number,
-		ty: number,
-		tz: number,
-		hit: boolean
-	) -> (),
-	explodeMob: (self: any, mob: any, power: number) -> (),
 	sound: (self: any, name: string, x: number, y: number, z: number) -> (),
 }
 
@@ -287,17 +229,6 @@ local function playerOf(context: Context, key: any): PlayerView?
 	return nil
 end
 
--- The raw brightness (0..15) at the mob's eyes: the open sky by the time of day, or block light.
-local function brightness(world: World, context: Context, mob: Mob): number
-	local body = mob.body
-	local x, y, z = floor(body.x), floor(body.y + mob.kind.eye), floor(body.z)
-	local sky = if context.skyOpen(x, y, z) == true then LightEstimate.MAX - DayCycle.skyDarken(context.dayTime) else 0
-	if sky >= MobAI.SPIDER_DARK then
-		return sky
-	end
-	return math.max(sky, LightEstimate.blockLight(world.getBlock, x, y, z, 64))
-end
-
 -- The nearest player the mob may notice now (see the header), or nil.
 local function findTarget(world: World, context: Context, mob: Mob): PlayerView?
 	local kind, body = mob.kind, mob.body
@@ -316,9 +247,6 @@ local function findTarget(world: World, context: Context, mob: Mob): PlayerView?
 				best, bestDistance = player, distance
 			end
 		end
-	end
-	if best and kind.darkOnly and brightness(world, context, mob) >= MobAI.SPIDER_DARK then
-		return nil
 	end
 	return best
 end
@@ -364,80 +292,8 @@ local function steer(world: World, mob: Mob, x: number, z: number, modifier: num
 	if not MobAI.safeAhead(world.getBlock, body, kind) then
 		return 0, false, false
 	end
-	local jump = body.horizontalCollision and body.onGround and not kind.climbs
+	local jump = body.horizontalCollision and body.onGround
 	return walk(kind, modifier), jump, true
-end
-
---[[
-	Creeper's SwellGoal and Creeper.tick (see the header): the goal runs while the fuse burns or a
-	target is within `start` blocks, and stands the creeper still; it lights the fuse while the
-	target is seen within `cancel` blocks, else lets it cool. True while the goal runs.
-]]
-local function swell(world: World, mob: Mob, target: PlayerView?, distance: number, visible: boolean): boolean
-	local fuse = mob.kind.fuse :: MobList.Fuse
-	local ai, body = mob.ai, mob.body
-	local active = target ~= nil and (ai.swellDir > 0 or distance < fuse.start)
-	if active and distance <= fuse.cancel and visible then
-		ai.swellDir = 1
-	else
-		ai.swellDir = -1
-	end
-	if ai.swellDir > 0 and ai.swell == 0 then
-		world:sound("entity.creeper.primed", body.x, body.y + mob.kind.height / 2, body.z)
-	end
-	ai.swell = math.clamp(ai.swell + ai.swellDir, 0, fuse.ticks)
-	if ai.swell >= fuse.ticks then
-		world:explodeMob(mob, fuse.power)
-	end
-	return active
-end
-
--- A skeleton's bow (see the header); true while it stands to shoot.
-local function bow(world: World, mob: Mob, target: PlayerView, distance: number, visible: boolean): boolean
-	local spec = mob.kind.bow :: MobList.Bow
-	local ai, body, kind = mob.ai, mob.body, mob.kind
-	local inRange = distance <= spec.range
-	if visible then
-		ai.seeTime = math.max(ai.seeTime, 0) + 1
-	else
-		ai.seeTime = math.min(ai.seeTime, 0) - 1
-	end
-	if ai.draw > 0 then
-		if not visible and ai.seeTime < -60 then
-			ai.draw = 0
-		elseif visible then
-			ai.draw += 1
-			if ai.draw >= spec.draw then
-				ai.draw = 0
-				ai.reload = spec.interval
-				-- Loose: a hitscan arrow from the eyes to the target's chest.
-				local ex, ey, ez = body.x, body.y + kind.eye, body.z
-				local tx, ty, tz = target.x, target.y + target.eye * 0.6, target.z
-				local chance =
-					math.clamp(MobAI.ARROW_HIT_BASE - distance / spec.range, MobAI.ARROW_HIT_MIN, MobAI.ARROW_HIT_MAX)
-				local hit = inRange and world.random() < chance
-				world:sound("entity.skeleton.shoot", ex, ey, ez)
-				if hit then
-					local damage = spec.min + randomInt(world, spec.max - spec.min + 1)
-					local kx, ky, kz =
-						Combat.knockback(Combat.KNOCKBACK, body.x, body.z, target.x, target.z, 0, 0, 0, true)
-					world:hitPlayer(mob, target, damage, kx, ky, kz)
-					world:sound("entity.arrow.hit", tx, ty, tz)
-				else
-					local angle = world.random() * math.pi * 2
-					tx += math.cos(angle) * MobAI.ARROW_MISS
-					tz += math.sin(angle) * MobAI.ARROW_MISS
-					ty += (world.random() - 0.5) * MobAI.ARROW_MISS
-				end
-				world:arrow(mob, ex, ey, ez, tx, ty, tz, hit)
-			end
-		end
-	elseif ai.reload > 0 then
-		ai.reload -= 1
-	elseif visible and inRange then
-		ai.draw = 1
-	end
-	return inRange and ai.seeTime >= MobAI.BOW_SETTLE
 end
 
 --[[
@@ -464,11 +320,6 @@ function MobAI.step(world: World, context: Context, mob: Mob): (number, boolean)
 			local dx, dy, dz = target.x - body.x, target.y - body.y, target.z - body.z
 			if not MobAI.attackable(target) or dx * dx + dy * dy + dz * dz > follow * follow then
 				target = nil
-			elseif kind.darkOnly and world.random() * MobAI.SPIDER_GIVE_UP < 1 then
-				-- (A spider in the light gives up now and then.)
-				if brightness(world, context, mob) >= MobAI.SPIDER_DARK then
-					target = nil
-				end
 			end
 		end
 		if target == nil and (mob.age + mob.id) % MobAI.RETARGET_INTERVAL == 0 then
@@ -495,44 +346,18 @@ function MobAI.step(world: World, context: Context, mob: Mob): (number, boolean)
 				ai.target = nil
 				ai.goal = "idle"
 				ai.timer = 0
-				if kind.fuse then
-					swell(world, mob, nil, math.huge, false)
-				end
 				return 0, jump
 			end
 		end
 		local dx, dy, dz = target.x - body.x, target.y - body.y, target.z - body.z
 		local distance = sqrt(dx * dx + dy * dy + dz * dz)
-		if kind.fuse then
-			if swell(world, mob, target, distance, visible) then
-				face(body, target.x, target.z)
-				return 0, jump
-			end
-		elseif kind.bow then
-			if bow(world, mob, target, distance, visible) then
-				face(body, target.x, target.z)
-				return 0, jump
-			end
-		elseif kind.attack then
+		if kind.attack then
 			-- MeleeAttackGoal: in reach, seen, cooled down.
 			local reach = (2 * kind.width) ^ 2 + 0.6
 			if distance * distance <= reach and visible and ai.cooldown <= 0 then
 				ai.cooldown = MobAI.MELEE_COOLDOWN
 				local kx, ky, kz = Combat.knockback(Combat.KNOCKBACK, body.x, body.z, target.x, target.z, 0, 0, 0, true)
 				world:hitPlayer(mob, target, kind.attack, kx, ky, kz)
-			end
-			if
-				kind.leap
-				and body.onGround
-				and distance >= MobAI.LEAP_MIN
-				and distance <= MobAI.LEAP_MAX
-				and randomInt(world, MobAI.LEAP_CHANCE) == 0
-			then
-				-- LeapAtTargetGoal.
-				local length = math.max(sqrt(dx * dx + dz * dz), 1e-4)
-				body.vx = dx / length * MobAI.LEAP + body.vx * 0.2
-				body.vz = dz / length * MobAI.LEAP + body.vz * 0.2
-				body.vy = MobAI.LEAP
 			end
 			if distance * distance <= reach * 0.5 then
 				-- (Close enough: no need to walk into the player.)
@@ -542,9 +367,6 @@ function MobAI.step(world: World, context: Context, mob: Mob): (number, boolean)
 		end
 		local forward, hop = steer(world, mob, target.x, target.z, kind.chase or 1)
 		return forward, jump or hop
-	end
-	if kind.fuse and ai.swell > 0 then
-		swell(world, mob, nil, math.huge, false)
 	end
 
 	-- Panic, stroll, or stand.

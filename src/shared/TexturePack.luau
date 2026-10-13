@@ -81,8 +81,8 @@
 	  drawn as images of their own: bottoms with Config.Textures.BottomFaces, sides with
 	  Config.Textures.SideImages.
 
-	Never textured (no entries): fluids, air, cave air and structure voids, torches and lanterns,
-	transmitters (pipes, cables, transporters), fluid tanks, machines and the solar panel, structure
+	Never textured (no entries): fluids, air, cave air and structure voids, torches, lanterns and
+	ceiling lamps, transmitters (pipes, cables, transporters), fluid tanks, machines and the solar panel, structure
 	blocks and jigsaws, and the Glow Block (Neon cannot take a MaterialVariant).
 
 	Icons (items that are no blocks)
@@ -428,6 +428,24 @@ local Textures: { [string]: Texture } = {
 	["jungle door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
 	["acacia door bottom"] = { Color = "", Material = "WoodPlanks", Tint = false },
 	["acacia door top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	-- The zombie apocalypse's ruins and bunkers: roads (the lines painted on top, asphalt on the
+	-- sides), concrete and aged bricks, the wrecks' rusty steel, the supply crate and medicine
+	-- cabinet, and the bunker hatch. Barricades take "planks" and the ceiling lamp none (a light).
+	["asphalt"] = { Color = "", Material = "Asphalt", Tint = true },
+	["cracked asphalt"] = { Color = "", Material = "Asphalt", Tint = true },
+	["road line"] = { Color = "", Material = "Asphalt", Tint = false },
+	["road line yellow"] = { Color = "", Material = "Asphalt", Tint = false },
+	["concrete"] = { Color = "", Material = "Concrete", Tint = true },
+	["cracked concrete"] = { Color = "", Material = "Concrete", Tint = true },
+	["mossy concrete"] = { Color = "", Material = "Concrete", Tint = false },
+	["cracked bricks"] = { Color = "", Material = "Brick", Tint = true },
+	["mossy bricks"] = { Color = "", Material = "Brick", Tint = false },
+	["rusty metal"] = { Color = "", Material = "CorrodedMetal", Tint = false },
+	["supply crate side"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["supply crate top"] = { Color = "", Material = "WoodPlanks", Tint = false },
+	["medicine cabinet side"] = { Color = "", Material = "Metal", Tint = false },
+	["medicine cabinet top"] = { Color = "", Material = "Metal", Tint = false },
+	["bunker hatch"] = { Color = "", Material = "DiamondPlate", Tint = false },
 }
 
 -- Block name (BlockList) -> the texture of each face.
@@ -583,6 +601,24 @@ local Blocks: { [string]: Faces } = {
 	JungleDoorTop = { Front = "jungle door top" },
 	AcaciaDoor = { Front = "acacia door bottom" },
 	AcaciaDoorTop = { Front = "acacia door top" },
+
+	-- The zombie apocalypse (an entry covers a variant group: both barricades of a kind, both
+	-- bunker hatches)
+	Asphalt = { All = "asphalt" },
+	CrackedAsphalt = { All = "cracked asphalt" },
+	RoadLine = { Top = "road line", Sides = "asphalt", Bottom = "asphalt" },
+	RoadLineYellow = { Top = "road line yellow", Sides = "asphalt", Bottom = "asphalt" },
+	Concrete = { All = "concrete" },
+	CrackedConcrete = { All = "cracked concrete" },
+	MossyConcrete = { All = "mossy concrete" },
+	CrackedBricks = { All = "cracked bricks" },
+	MossyBricks = { All = "mossy bricks" },
+	RustyMetal = { All = "rusty metal" },
+	SupplyCrate = { Top = "supply crate top", Sides = "supply crate side", Bottom = "supply crate top" },
+	MedicineCabinet = { Top = "medicine cabinet top", Sides = "medicine cabinet side" },
+	Barricade = { All = "planks" },
+	ReinforcedBarricade = { All = "planks" },
+	BunkerHatch = { All = "bunker hatch" },
 }
 
 -- Item name (ItemList) -> its inventory icon ("" = not made yet; see the header).
@@ -613,6 +649,28 @@ local Icons: { [string]: string } = {
 	TopHat = "",
 	TuxedoShirt = "",
 	TuxedoPants = "",
+	-- The zombie apocalypse's medical supplies, materials, food and drink, and weapons.
+	Bandage = "",
+	Medkit = "",
+	Antibiotics = "",
+	Painkillers = "",
+	Rag = "",
+	DuctTape = "",
+	Nails = "",
+	ScrapMetal = "",
+	CannedBeans = "",
+	CannedPeaches = "",
+	Crackers = "",
+	ChocolateBar = "",
+	MilitaryRation = "",
+	BottledWater = "",
+	SodaCan = "",
+	BaseballBat = "",
+	SpikedBat = "",
+	Machete = "",
+	Crowbar = "",
+	FireAxe = "",
+	HerbalPoultice = "",
 }
 
 export type Pack = {

@@ -124,17 +124,23 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("crossover: a mob a player kills is knowledge (every kind priced, the first a discovery)", function()
+		-- (Animals 2; the zombies 4 to 10 by how hard they are: Knowledge.MOBS prices each.)
 		for _, kind in MobList.kinds do
 			t.ok(Knowledge.MOBS[kind.name] ~= nil, `{kind.name} has its knowledge`)
-			t.eq(Knowledge.MOBS[kind.name], if kind.hostile then (if kind.name == "Creeper" then 6 else 5) else 2)
+			t.eq(Knowledge.mobPoints(kind.name), Knowledge.MOBS[kind.name])
+			if kind.hostile then
+				t.ok(Knowledge.MOBS[kind.name] >= 4, `{kind.name}: a zombie's 4 or more`)
+			else
+				t.eq(Knowledge.MOBS[kind.name], 2, `{kind.name}: an animal's 2`)
+			end
 		end
 		local state, session = Progression.new(), Knowledge.newSession()
 		local budget = 20
 		t.eq(Progression.killed(state, session, "Cow", 0, budget), 10 + 2, "the first cow: discovery and 2")
 		t.eq(Progression.killed(state, session, "Cow", 0, budget), 1, "the second: 2 x 0.75, the half carried")
 		t.near(session.fraction, 0.5, 1e-9)
-		t.eq(Progression.killed(state, session, "Creeper", 0, budget), 10 + 6, "a creeper: 6")
-		t.eq(state.found.mob and state.found.mob.Creeper, true, "the kind is discovered")
+		t.eq(Progression.killed(state, session, "ZombieBrute", 0, budget), 10 + 10, "a brute: 10")
+		t.eq(state.found.mob and state.found.mob.ZombieBrute, true, "the kind is discovered")
 		-- The mobs' meat smelts for Minecraft's 0.35 a piece.
 		t.eq(Knowledge.smeltPoints("CookedBeef"), 0.35)
 	end)

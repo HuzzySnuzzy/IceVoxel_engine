@@ -167,8 +167,8 @@ shape({ "##", "##" }, { ["#"] = "GlowDust" }, "GlowBlock")
 mix({ "IronIngot", "Flint" }, "FlintAndSteel")
 
 --[[
-	Explosives. Gunpowder has no creeper to drop it here: a coal or charcoal and a flint in any
-	slots make two (black powder is charcoal and saltpetre; flint stands in). TNT is Minecraft's:
+	Explosives. Gunpowder has no creeper to drop it here, and ruins hide some (Generation/
+	ScavengeLoot): a coal or charcoal and a flint in any slots make two (black powder is charcoal and saltpetre; flint stands in). TNT is Minecraft's:
 	gunpowder in an X with sand between (5 gunpowder, 4 sand). The Nuke (this game's, a mod's
 	toy): eight TNT around a block of diamond, so a crater costs 40 gunpowder, 32 sand and nine
 	diamonds.
@@ -442,8 +442,8 @@ end
 
 --[[
 	Terraria's things, made from what this game has (Config.Accessories, Mana). Terraria finds most
-	early accessories in chests (here Generation/Mineshafts' fourth loot pool and spiders' Feral
-	Claws); the ones made here:
+	early accessories in chests (here Generation/Mineshafts' fourth loot pool, and the ruins' and
+	bunkers' loot for Feral Claws); the ones made here:
 	  Aglet               a Leather and two Iron Nuggets (the lace's leather, its metal tip)
 	  Anklet of the Wind  three Feathers, a String and an Emerald (Terraria's jungle find)
 	  Band of Starpower   four Gold Ingots around a Fallen Star (" G ", "GSG", " G ")
@@ -477,6 +477,53 @@ shape({ "##", "##", "##" }, { ["#"] = "JunglePlanks" }, "JungleDoor", 3)
 shape({ "##", "##", "##" }, { ["#"] = "AcaciaPlanks" }, "AcaciaDoor", 3)
 mix({ "WhiteWool", "WhiteWool", "Leather", "Leather", "String" }, "TuxedoShirt")
 mix({ "Leather", "Leather", "Leather", "String" }, "TuxedoPants")
+
+--[[
+	The apocalypse (Generation/ScavengeLoot hides the rest in the ruins and bunkers: no recipe for
+	the roads' asphalt and lines, rusty metal, the medicine cabinet, antibiotics, painkillers, duct
+	tape, the canned and bottled food and drink, or the Fire Axe):
+	  Rag                   White Wool torn into three
+	  Bandage               two Rags make two
+	  Medkit                two Bandages, Painkillers and Duct Tape
+	  Herbal Poultice       Mint Leaves, a Ginger Root and a Rag: the renewable answer to a bite
+	                        (it sets an infection back a stage; only Antibiotics cure it)
+	  Nails                 two Iron Nuggets make four (an ingot is already nine nuggets)
+	  Barricade             three planks over Nails make four (a barricade beats the planks it
+	                        costs: zombies take 900 ticks for one, 600 for a plank)
+	  Reinforced Barricade  a Barricade, two Scrap Metal and Nails
+	  Baseball Bat          two logs over a Stick (logs: no clash with the wooden sword)
+	  Spiked Bat            a Baseball Bat and three Nails
+	  Machete               two Iron Ingots on the diagonal over a Stick
+	  Crowbar               three Iron Ingots in a hook
+	  Supply Crate          planks and Sticks in a ring
+	  Ceiling Lamp          three Iron Nuggets round Glow Dust make two
+	  Bunker Hatch          four Iron Ingots (Minecraft's iron trapdoor)
+	  Concrete              Gravel and Sand on the diagonals make four
+	  Mossy Concrete, Mossy Bricks   Concrete or Bricks with a Vine
+	Smelting: Concrete cracks into Cracked Concrete, Bricks into Cracked Bricks, and Scrap Metal
+	melts into an Iron Nugget. Progression/Ages keeps the iron ones (and the hatch and lamp) for
+	the Iron Age and concrete for the Industrial Age.
+]]
+mix({ "WhiteWool" }, "Rag", 3)
+mix({ "Rag", "Rag" }, "Bandage", 2)
+mix({ "Bandage", "Bandage", "Painkillers", "DuctTape" }, "Medkit")
+mix({ "MintLeaves", "GingerRoot", "Rag" }, "HerbalPoultice")
+mix({ "IronNugget", "IronNugget" }, "Nails", 4)
+shape({ "PPP", " N " }, { P = "#planks", N = "Nails" }, "Barricade", 4)
+mix({ "Barricade", "ScrapMetal", "ScrapMetal", "Nails" }, "ReinforcedBarricade")
+shape({ "L", "L", "S" }, { L = "#logs", S = "Stick" }, "BaseballBat")
+mix({ "BaseballBat", "Nails", "Nails", "Nails" }, "SpikedBat")
+shape({ "  I", " I ", "S  " }, { I = "IronIngot", S = "Stick" }, "Machete")
+shape({ "II", " I", " I" }, { I = "IronIngot" }, "Crowbar")
+shape({ "SPS", "P P", "SPS" }, { S = "Stick", P = "#planks" }, "SupplyCrate")
+shape({ " N ", "NGN" }, { N = "IronNugget", G = "GlowDust" }, "CeilingLamp", 2)
+shape({ "II", "II" }, { I = "IronIngot" }, "BunkerHatch")
+shape({ "GS", "SG" }, { G = "Gravel", S = "Sand" }, "Concrete", 4)
+mix({ "Concrete", "Vine" }, "MossyConcrete")
+mix({ "Brick", "Vine" }, "MossyBricks")
+smelt("Concrete", "CrackedConcrete")
+smelt("Brick", "CrackedBricks")
+smelt("ScrapMetal", "IronNugget")
 
 Recipes.fuel = {
 	Coal = 1600,

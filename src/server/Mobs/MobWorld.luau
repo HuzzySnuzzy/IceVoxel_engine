@@ -7,7 +7,7 @@
 	Each tick (`tick`, 20 a second), in id order, for every mob whose chunk ticks (`context.active`:
 	loaded and within Config.Server.SimulationRadius chunks of a player, World/Simulation; the rest
 	are frozen where they are, as Minecraft's entities in chunks that don't tick):
-	  AI         Mobs/MobAI: wander, panic, hunt, hit, shoot, swell; it steers and jumps.
+	  AI         Mobs/MobAI: wander, panic, hunt, hit; it steers and jumps.
 	  Physics    Shared/Entities/MobPhysics: gravity, friction, fluids, collision, stepping and
 	             jumping, climbing, slow falling.
 	  Falls      landing after more than 3 blocks hurts ceil(distance - 3), through armor
@@ -16,8 +16,9 @@
 	             10 ticks and sets it burning 15 s, fire and campfires hurt, burning costs 1 every
 	             20 ticks, water and rain put it out (`context.rainingAt`, looked up only while it
 	             burns). (A mob catches fire after 20 ticks in a fire block,
-	             as a player does; Minecraft's mobs at once.) Zombies and skeletons burn in
-	             daylight (`burnsInDaylight`, Mob.isSunBurnTick): by day (Level.isDay with the
+	             as a player does; Minecraft's mobs at once.) A kind with `burnsInDaylight`
+	             burns in daylight (Mob.isSunBurnTick; the apocalypse's zombies don't): by day
+	             (Level.isDay with the
 	             weather where they stand, `context.isDay`: not in a thunderstorm), out of water
 	             and out of the rain (`context.rainingAt` at the feet or the top of the box),
 	             with the open sky over their eyes (`skyClear`: Level.canSeeSky's full sky light,
@@ -37,8 +38,7 @@
 	             drops: min..max each, `chance`, `byPlayer` only when a player killed it; raw meat
 	             cooked when it died burning).
 	  Blasts     `explode`: Minecraft's explosion damage and push (Shared/World/Explosion) on every
-	             live mob in reach, as for items and players. A creeper that blows up is gone
-	             without drops or a death.
+	             live mob in reach, as for items and players.
 	  Despawn    every 20 ticks, every mob (frozen ones too): a monster more than 128 blocks from
 	             every player goes at once; beyond 32 blocks, after 600 ticks without anything
 	             happening near it (noActionTime: hurt, or a player within 32, start it over;
@@ -49,8 +49,7 @@
 	At most `maxMobs` exist: spawning more fails (`spawn` returns 0).
 
 	What the rest of the server must act on piles up until `takeChanges`: spawned and removed
-	ids, deaths (kind, position, killer), drops, hits on players (damage, knockback), arrows,
-	explosions and sounds.
+	ids, deaths (kind, position, killer), drops, hits on players (damage, knockback) and sounds.
 
 	Positions are in blocks: a mob's position is the bottom centre of its box.
 ]]
@@ -114,8 +113,6 @@ export type Hit = {
 	ky: number,
 	kz: number,
 }
-export type Arrow = { id: number, x: number, y: number, z: number, tx: number, ty: number, tz: number, hit: boolean }
-export type Blast = { id: number, x: number, y: number, z: number, power: number }
 export type Sound = { name: string, x: number, y: number, z: number }
 
 export type Changes = {
@@ -124,8 +121,6 @@ export type Changes = {
 	deaths: { Death },
 	drops: { Drop },
 	hits: { Hit },
-	arrows: { Arrow },
-	explosions: { Blast },
 	sounds: { Sound },
 }
 
@@ -221,18 +216,6 @@ export type MobWorld = {
 	takeChanges: (self: MobWorld) -> Changes,
 	-- (MobAI's World.)
 	hitPlayer: (self: MobWorld, mob: Mob, player: PlayerView, damage: number, kx: number, ky: number, kz: number) -> (),
-	arrow: (
-		self: MobWorld,
-		mob: Mob,
-		x: number,
-		y: number,
-		z: number,
-		tx: number,
-		ty: number,
-		tz: number,
-		hit: boolean
-	) -> (),
-	explodeMob: (self: MobWorld, mob: Mob, power: number) -> (),
 	sound: (self: MobWorld, name: string, x: number, y: number, z: number) -> (),
 }
 
@@ -261,7 +244,7 @@ local CHUNK = ChunkLayout.SIZE
 local floor = math.floor
 
 local function newChanges(): Changes
-	return { spawned = {}, removed = {}, deaths = {}, drops = {}, hits = {}, arrows = {}, explosions = {}, sounds = {} }
+	return { spawned = {}, removed = {}, deaths = {}, drops = {}, hits = {}, sounds = {} }
 end
 
 function MobWorld.new(getBlock: MobPhysics.GetBlock, options: Options): MobWorld
@@ -681,27 +664,6 @@ function MobWorld.hitPlayer(
 		ky = ky,
 		kz = kz,
 	})
-end
-
-function MobWorld.arrow(
-	self: MobWorld,
-	mob: Mob,
-	x: number,
-	y: number,
-	z: number,
-	tx: number,
-	ty: number,
-	tz: number,
-	hit: boolean
-)
-	table.insert(self.changes.arrows, { id = mob.id, x = x, y = y, z = z, tx = tx, ty = ty, tz = tz, hit = hit })
-end
-
--- A creeper going off: the blast (for the next explosions step) and the creeper gone.
-function MobWorld.explodeMob(self: MobWorld, mob: Mob, power: number)
-	local body = mob.body
-	table.insert(self.changes.explosions, { id = mob.id, x = body.x, y = body.y, z = body.z, power = power })
-	removeMob(self, mob)
 end
 
 function MobWorld.sound(self: MobWorld, name: string, x: number, y: number, z: number)

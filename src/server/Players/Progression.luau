@@ -66,7 +66,7 @@
 
 	For the mobs: a player's kill calls `Progression.killed(player, mobName)` (the boot script
 	connects Mobs/Mobs' `died` event: a mob kind's first kill is a discovery, 10 points; every
-	kill a repeat of Knowledge.MOBS: animals 2, monsters 5, creepers 6, others 3).
+	kill a repeat of Knowledge.MOBS: animals 2, zombies 4-10 by kind, others 3).
 ]]
 
 local Players = game:GetService("Players")
