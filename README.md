@@ -24,28 +24,29 @@ A fast, Minecraft-style voxel engine for Roblox.
   Structures), and everyone joins it with Join World. Until then the world doesn't exist at all
   and nobody has a character. Operators (`/op`, `/deop`) may use the cheat commands, and Load
   World opens a saved world (below).
-- **Characters, as Terraria's.** Before the world, each player picks one of their characters (up
-  to 10 per Roblox account, with a 3D preview of each) or makes one: an R15 avatar editor starts
-  from your own Roblox avatar (skin colours for every part or one, hue and brightness, height,
-  width, depth, head, body type and proportion within Roblox's avatar rules, each of your own
-  accessories, clothes, body parts and animations on or off, the Classic and Natural presets), a
-  name and a difficulty: **Classic** keeps everything when it dies, **Mediumcore** drops
-  everything (Minecraft's rule), **Hardcore** drops everything and dies for good (a spectator for
-  the rest of the visit, then shown dead in the list). A character carries its look, inventory
-  and equipment, health, mana and Mana Crystals, status effects, thirst and temperature and its
-  Knowledge, Ages and skills from world to world and server to server; each world keeps only
-  where it stood and its game mode. It spawns with its own look and its name on the nametag, and
-  the list's preview shows it in the armor, vanity and accessories it wears. What it gains only
-  travels from a fair visit: in a world with Allow Commands, a superflat or debug world, or once
-  you went into creative, it leaves with the things (and progress) it had then, so nothing made
-  in creative reaches another world (Terraria keeps Journey characters apart); you are told.
-  Characters are saved in a DataStore with a lock each (one server at a time: one still saving
-  it is waited for, up to 30 seconds), every minute, when you leave and at shutdown; a list that
-  could not be read is never written over, and in Studio without API access characters last for
-  the session (the list says so). A returning player's old progress becomes their first
-  character (a Mediumcore "legacy" one), and the first of their characters to enter an old saved
-  world takes in what they had there (only a character that is saved, in a world that saves
-  progress; the world remembers it once the character was saved with it).
+- **Characters, as Terraria's.** Before the world, each player picks one of their characters (up to
+  10 per Roblox account, with a 3D preview of each) or makes one: an R15 avatar editor starts from
+  your own Roblox avatar (skin colours for every part or one, hue and brightness, height, width,
+  depth, head, body type and proportion within Roblox's avatar rules, each of your own accessories,
+  clothes, body parts and animations on or off, the Classic and Natural presets), a name and a
+  difficulty: **Classic** keeps everything when it dies, **Mediumcore** drops everything
+  (Minecraft's rule), **Hardcore** drops everything and dies for good (a spectator for the rest of
+  the visit, then shown dead in the list). A character carries its look, inventory and equipment,
+  health, mana and Mana Crystals, status effects (a zombie bite's infection among them), thirst and
+  temperature, its days survived, zombies killed and blood moons lived through, and its Knowledge,
+  Ages and skills from world to world and server to server; each world keeps only where it stood and
+  its game mode. It spawns with its own look and its name on the nametag, and the list's preview
+  shows it in the armor, vanity and accessories it wears. What it gains only travels from a fair
+  visit: in a world with Allow Commands, a superflat or debug world, or once you went into creative,
+  it leaves with the things (and progress) it had then, so nothing made in creative reaches another
+  world (Terraria keeps Journey characters apart); you are told. Characters are saved in a DataStore
+  with a lock each (one server at a time: one still saving it is waited for, up to 30 seconds),
+  every minute, when you leave and at shutdown; a list that could not be read is never written over,
+  and in Studio without API access characters last for the session (the list says so). A returning
+  player's old progress becomes their first character (a Mediumcore "legacy" one), and the first of
+  their characters to enter an old saved world takes in what they had there (only a character that
+  is saved, in a world that saves progress; the world remembers it once the character was saved with
+  it).
 - **Saving and loading worlds.** Worlds are saved in a DataStore, as Minecraft saves its level:
   every block anyone changed (each chunk's edits, in regions of 32 × 32 chunks a key), chests,
   furnaces still cooking, machines with their energy, tanks and slots, Mekanism pipes (side modes,
@@ -165,8 +166,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   in a ripple. Lit, it glows, flashes white, hisses (`entity.tnt.primed`), falls as Minecraft's
   primed TNT does (speeding up, through air, fire, plants and fluids, which it gives back), can't
   be broken, and 4 s later explodes with power 4 and no fire (in water it breaks nothing).
-  **Gunpowder** (creepers drop it too, see Mobs): a coal or charcoal and a flint make two; TNT is
-  Minecraft's recipe (5 gunpowder in an X, 4 sand).
+  **Gunpowder** (soldier zombies drop it too, and police stations and bunkers keep some): a coal
+  or charcoal and a flint make two; TNT is Minecraft's recipe (5 gunpowder in an X, 4 sand).
 - **The Nuke** (for fun, a mod's nuke). A dark casing with hazard stripes and the radiation sign,
   lit like TNT: it glows red, flashes and beeps every second for 10 s, then digs a crater no ray
   explosion could: a ragged sphere of radius 24 (± 20%, smooth noise and a block of crumble; the
@@ -270,40 +271,136 @@ A fast, Minecraft-style voxel engine for Roblox.
   armor** (any leaves, which Shears harvest) cools a step a piece: a desert's 9 becomes 5. Both
   have leather's armor points. A **Thermometer** (an iron nugget over glass over glow dust) held
   in the hand reads the body temperature and where it is going as numbers over the gauge.
-- **Mobs.** Minecraft 1.20.1's farm animals and classic monsters as simple boxes moving about (a
-  body in the kind's colour and a head on the side it faces): **cows** (0.9 × 1.4 blocks, 10
-  health), **sheep** (0.9 × 1.3, 8; white, now and then black, grey, brown or pink), **pigs**
-  (0.9 × 0.9, 10) and **chickens** (0.4 × 0.7, 4; they flap down slowly and take no fall damage)
-  wander, stand about and run off when hurt; **zombies** (0.6 × 1.95, 20, armor 2) and
-  **spiders** (1.4 × 0.9, 16; they climb walls, leap, and only hunt in the dark) hunt survival
-  and adventure players they can see within 16 blocks and hit them (3 and 2 half hearts every
-  second, through the armor, Resistance and the hurt cooldown, with a knockback); **skeletons** (0.6 × 1.99,
-  20) shoot within 15 blocks every 3 s (3-5 an arrow; the arrows are hitscan, seen flying);
-  **creepers** (0.6 × 1.7, 20) walk up, hiss within 3 blocks and 1.5 s later explode with power 3,
-  unless you get 7 blocks away. Zombies and skeletons burn in daylight under the open sky (a
-  tree's leaves shade them, glass doesn't). No block can be placed inside a mob. Mobs
-  walk at Minecraft's speeds (a zombie 2.3 blocks a second), jump up blocks, never walk off a drop
-  of more than 3 blocks or into lava, fire, oil or fuel, swim up in water, take fall, fire, lava
-  and explosion damage (TNT, fuel and creepers hurt and throw them), flash red when hurt, tip
+- **Mobs.** Minecraft 1.20.1's farm animals as simple boxes moving about (a body in the kind's
+  colour and a head on the side it faces), and the apocalypse's zombies (below): **cows** (0.9 ×
+  1.4 blocks, 10 health), **sheep** (0.9 × 1.3, 8; white, now and then black, grey, brown or
+  pink), **pigs** (0.9 × 0.9, 10) and **chickens** (0.4 × 0.7, 4; they flap down slowly and take
+  no fall damage) wander, stand about and run off when hurt. No block can be placed inside a mob.
+  Mobs walk at Minecraft's speeds (a zombie 2.3 blocks a second), jump up blocks, never walk off
+  a drop of more than 3 blocks or into lava, fire, oil or fuel, swim up in water, take fall,
+  fire, lava and explosion damage (TNT and fuel hurt and throw them), flash red when hurt, tip
   over when they die and drop Minecraft's loot a second later: **Leather** and **Raw Beef**,
-  **White Wool** and **Raw Mutton**, **Raw Porkchop**, **Feathers** and **Raw Chicken**, **Rotten
-  Flesh** (and now and then an iron ingot), **Bones**, **String**, **Gunpowder**; meat drops
-  cooked when the mob died burning. Raw meat cooks in a furnace; leather makes leather armor,
-  four string a block of wool (which burns like Minecraft's). **Food:** hold right click 1.6 s
-  with meat to eat it when hurt (steak and cooked porkchop heal 2 hearts, cooked mutton and
-  chicken 1.5, raw meat less; raw chicken and rotten flesh may give Tough As Nails' Thirst
-  effect). **Fighting:** a left click on a mob in reach (3 blocks, 6 in creative) hits it with
-  Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...; Strength adds 3 a level and
-  Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength every 0.6 s), knocks
-  it back and wears the weapon; WAILA names the mob and its health. A kill is knowledge: the first
-  of each kind 10 points, then 2 an animal, 5 a monster, 6 a creeper. Creatures spawn on grass in the light 24-44 blocks from players (10 at most
-  around each, counting the monsters in the simulated chunks), monsters on solid ground in the
-  dark, at night or in caves (15 at most; never by torchlight, as far as a torch's light reaches,
-  13 blocks, however big the room), from the same light estimate WAILA shows; monsters vanish far
-  from everyone (Minecraft's 128 and 32 block rules, those frozen out of reach too). Mobs only
-  move within the simulated chunks around players and freeze beyond (a frozen mob that dies
-  still goes). `/summon <kind> [x y z]` and `/kill @e[type=<kind>]` for operators.
+  **White Wool** and **Raw Mutton**, **Raw Porkchop**, **Feathers** and **Raw Chicken**, and a
+  zombie's **Rotten Flesh**, a **Bone** one time in four (now and then an iron ingot) and what
+  its kind carries; meat drops cooked when the mob died burning. Raw meat cooks in a furnace;
+  leather makes leather armor, four string a block of wool (which burns like Minecraft's).
+  **Food:** hold right click 1.6 s with meat to eat it when hurt (steak and cooked porkchop heal
+  2 hearts, cooked mutton and chicken 1.5, raw meat less; raw chicken and rotten flesh may give
+  Tough As Nails' Thirst effect). **Fighting:** a left click on a mob in reach (3 blocks, 6 in
+  creative) hits it with Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...; Strength
+  adds 3 a level and Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength
+  every 0.6 s), knocks it back and wears the weapon; WAILA names the mob and its health. A kill
+  is knowledge: the first of each kind 10 points, then 2 an animal and 4-10 a zombie (a crawler
+  4, a brute 10). Creatures spawn on grass in the light 24-44 blocks from players (10 at most
+  around each), zombies as below; monsters vanish far from everyone (Minecraft's 128 and 32
+  block rules, those frozen out of reach too). Mobs only move within the simulated chunks around
+  players and freeze beyond (a frozen mob that dies still goes). `/summon <kind> [x y z]` and
+  `/kill @e[type=<kind>]` for operators (kinds in snake case: `cow`, `zombie_brute`).
   `Config.Mobs` sets the caps and turns spawning or mobs off.
+- **Zombies.** The world is overrun. Ten kinds of zombie share one set of rules: the ordinary
+  **Zombie** (0.6 × 1.95 blocks, 20 health, armor 2, hits 3, chases at 2.3 blocks a second), the
+  **Runner** (12 health, hits 2, chases at 5 blocks a second: only a sprinting player gets away),
+  the **Brute** (60 health, armor 4, hits 7, slow, breaks blocks three times as fast and shrugs
+  off knockback), the legless **Crawler** (0.8 × 0.6: it fits under anything a block high), the
+  **Screamer** (it shrieks when it spots a player, and every zombie within 48 blocks comes to
+  look), and the **Soldier** (armor 10, hits 4, gunpowder), **Police**, **Firefighter** (fire
+  can't hurt it), **Construction** (it breaks blocks twice as fast; nails and scrap) and
+  **Doctor** zombies (bandages, pills, antibiotics). None of them burns in the sun.
+  - **Hunting:** they notice survival and adventure players they can see within 24 blocks
+    (runners and screamers 32, crawlers 16), chase them and hit within Minecraft's reach every
+    second with a knockback; out of sight for 3 seconds they lose you.
+  - **Noise** draws them: sprinting, breaking and placing blocks, glass, doors and the bunker
+    hatch, chests, fighting, getting hurt and explosions each make a noise with a radius
+    (`Config.Apocalypse.Noise`: a sprint 8 blocks, a block broken 10, glass 16, a blast 24 + 12 a
+    power), a quarter louder at night and muffled by rain. Every zombie without a target in
+    reach walks over to look (spread out round the spot) and looks for players at once.
+  - **Walls don't stop them.** A zombie pushing against a wall towards a player it is after
+    (within 8 blocks and level with it: from a block below its feet to two above; 16 for a blood
+    moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a brute 4,
+    two zombies together about 6), glass in 3, leaves and wool in 6, dirt and fences in 15,
+    planks and logs in 30, a **Barricade** in 45, stone and bricks in 2 minutes, a **Reinforced
+    Barricade** in 150 seconds, concrete in 5 minutes. The damage is shared by everyone hitting
+    the block and fades after 5 idle seconds; iron, ores, chests and machines and the bunker
+    hatch never break. Both halves of a door go and nothing drops, with a crash every zombie
+    within 10 blocks hears. They never dig down or up towards a player.
+  - **Day and night:** at night 20 zombies at most round each player spawn in the dark as
+    monsters do; by day 7, only on floors under the open sky and never where a torch's light
+    reaches (13 blocks); 1.75 times that where the player stands in a city, where police and
+    firefighters turn up too. Packs of 1-5 (by kind) spawn 24-44 blocks out. At dawn, and every
+    30 s by day, the zombies over a player's day cap with nothing to chase walk off, the furthest
+    first, and go once 24 blocks away and out of sight, so a crowd round a shelter thins out.
+  - **Blood moons** (every third night from the third: see Survival): waves of 8 zombies a
+    player (10, 12... at later moons) every 30 seconds, 28-44 blocks out on the ground under the
+    open sky (never on a roof they could not climb down from), up to 28 round each player (4 more
+    each moon, 60 at most); runners and brutes come more often each moon, and every zombie within
+    44 blocks hunts the nearest player, seen or not. Natural spawning waits meanwhile. At the
+    moon's end the hunts stop and the surplus leaves.
+  - **Crowds:** zombies keep a little room between each other, so a crowd spreads round its
+    target instead of standing in one spot, and squeeze through a doorway or an open door one at
+    a time; a shut bunker hatch is ground they walk over.
+  - **They look the part.** Zombies are drawn as Roblox **R15** bodies (head, upper and lower
+    torso, upper and lower arms, hands, upper and lower legs, feet), posed in code: arms reaching
+    forward (higher when they have a target), a shambling walk whose stride follows how fast
+    they really move, heads lolling to one side, a swing of both arms when they hit, both fists
+    hammering while they break a block, the head thrown back and arms flung wide when a screamer
+    shrieks. Each kind moves its own way: runners sprint, leaning in with pumping arms; brutes
+    are drawn 2.3 blocks tall and half again as broad, splay-legged and hunched; crawlers drag
+    themselves along on their arms, flat on the ground; screamers lurch and twitch.
+  - **Many variants:** every zombie wears one of its kind's outfits (32 in all: civilians in
+    tees, hoodies, flannel, office shirts, overalls and beanies; joggers and tracksuits; prison
+    orange, mechanics and the shirtless; hospital gowns; woodland, desert and urban soldiers with
+    vests and helmets; police in patrol and summer uniforms with caps; firefighters in turnout
+    gear with reflective bands and helmets; construction workers in hi-vis vests and hard hats;
+    doctors in white coats and scrubs) in one of six dead skin tones (192 looks), its clothes
+    torn and bloodied in places of its own, so no two look alike; every player sees each zombie
+    the same. Near zombies groan now and then (only the nearest eight within earshot, one at a
+    time), a brute lower, a screamer higher. Within 16 blocks up to 16 zombies are drawn in full,
+    out to 40 blocks a simpler body (8 boxes), further away two boxes, so a horde round the
+    player costs a phone little (F3's `mobs` line counts them).
+  - **Commands and switches:** `/summon zombie_brute` and `/kill @e[type=zombie_runner]` work as
+    for any mob, and kills, loot and knowledge too. `Config.Apocalypse.Enabled` false turns the
+    director, noise, breaking, blood moons and the survival below off (zombies then just hunt what
+    they see).
+- **Surviving the apocalypse.** A zombie's hit may wound or infect.
+  - **Infection:** a bite's infection (the Infection effect, its stage shown as its level) runs four
+    stages over two in-game days (40 real minutes): nothing at first, then Weakness (and thirst
+    draining faster), then Slowness, spells of Nausea and no natural health coming back, then
+    Slowness II and a half heart every 5 s that never takes the last one; untreated it kills exactly
+    48000 ticks after the bite, never before, and an infected player who dies **rises as a zombie**
+    where they fell, dressed like them (the chat says "<name> succumbed to the infection", then
+    "<name> rose again"). At most one roll every 5 s a player (a horde's hits don't stack), and
+    armor shields up to 75% of the chance (3.75% a point). A bite while infected takes it 2 minutes
+    on. **Antibiotics** (pharmacies, medicine cabinets, bunkers, doctor zombies) cure it at any
+    stage, with a minute of Weakness after a late one; a **Herbal Poultice** (Mint Leaves, a Ginger
+    Root and a Rag) takes it back a stage but never cures it. Creative and spectator players are
+    never wounded or infected, and an infection they carry stands still.
+  - **Bleeding** (a zombie's wound: 20 s, a half heart every 4 s, every 2 s when hit again)
+    stops at the last half heart; a **Bandage** (two Rags make two; a Rag is torn from wool) or
+    a **Medkit** stops it.
+  - **Medicine and the ruins' food** are used like food, by holding the use button (each its own
+    time and sound): the Bandage (2 s), Medkit (4 s, with Regeneration), Painkillers
+    (Regeneration), Antibiotics, the Herbal Poultice, Canned Beans and Peaches, Crackers (you
+    will want water), the Chocolate Bar (Speed, eaten any time) and the Military Ration; Bottled
+    Water is purified water whose bottle is kept, Soda a little water and Speed. The ruins and
+    bunkers hold most of it (`/locate poi medicine_cabinet`); rags, bandages, medkits and
+    poultices are crafted.
+  - **Building against them:** Nails (two Iron Nuggets make four), **Barricades** (three planks
+    over Nails make four; a zombie takes half again as long as on a plank) and **Reinforced
+    Barricades** (a Barricade, two Scrap Metal and Nails: 150 seconds), and the scavenger's
+    weapons: the **Baseball Bat**, the **Spiked Bat**, the **Machete**, the **Crowbar** and the
+    **Fire Axe** (found, never crafted: fire stations, bunker armories, firefighters).
+  - **Blood moons:** every third night (nights 3, 6, 9...) the sky turns red, the moon grows and
+    the hordes come (see Zombies); the HUD warns the day before ("Blood Moon tomorrow", "Blood
+    Moon tonight") and toasts its rise ("The Blood Moon rises", with a deep boom) and, for a
+    character that lived through it from its rise, its set ("You survived the Blood Moon").
+    `/time set` moves the blood moons with the clock.
+  - **The day counter** under the minimap's coordinates (under the Map button on touch screens,
+    in the corner without either) reads "Day 4 · Survived 2 days": the world's day and the days
+    this character has lived since it last died; where the corner is too narrow for the warning
+    on the same line (an iPad, a 1024 × 768 window) the warning goes on a line of its own under
+    it. The Day Counter setting (HUD) hides it. Each character also counts the zombies it killed
+    and the blood moons it survived, saved with it (and with characters off, in each world's
+    player record), and keeps its infection from world to world.
 - **Status effects.** Minecraft 1.20.1's MobEffects with their numbers: Speed (+20% ground speed a
   level) and Slowness (-15%), Haste (+20% mining speed a level) and Mining Fatigue (x 0.3, 0.09,
   0.0027...), Strength (+3 melee a level) and Weakness (-4, on hits on mobs), Jump Boost
@@ -314,7 +411,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   dehydration, which is starvation's; V: nothing), Night Vision (caves and nights lit, flickering in
   its last 10 s), Blindness (fog closing in to 5 blocks, no sprinting), Nausea (the camera rolls and
   the view sways, building up over 8 s), Instant Health and Instant Damage (4 and 6 half hearts,
-  doubling a level) and Glowing (an outline everyone sees through walls). They stack and refresh
+  doubling a level) and Glowing (an outline everyone sees through walls); the apocalypse adds
+  Bleeding and the Infection (see Surviving the apocalypse). They stack and refresh
   as Minecraft's (a stronger effect wins, a weaker longer one waits underneath and comes back), run
   on the server, and the client's movement and mining prediction use the same numbers as the
   server's checks. Creative and spectator players get them too, but nothing hurts them. Death
@@ -339,7 +437,7 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **Potions.** Brewed in a crafting grid (the game has no brewing stand): a Purified Water Bottle
   with an ingredient makes a potion, the potion with Glow Dust (the game's glowstone) its level II
   and with a coal or charcoal its long variant, Minecraft's durations: Swiftness (Mint Leaves),
-  Leaping (Cornflower), Strength (Gunpowder: creepers drop it), Healing (Gold Nugget), Harming (Red Mushroom), Poison
+  Leaping (Cornflower), Strength (Gunpowder), Healing (Gold Nugget), Harming (Red Mushroom), Poison
   (Lily of the Valley), Regeneration (Oxeye Daisy), Fire Resistance (Ginger Root), Night Vision
   (Glow Dust), Weakness (any tulip), and this game's Haste (Gold Ingot) and Resistance (Iron
   Ingot): 29 potions. Bottles of the effect's colour, stacking to 1; hold use 1.6 s to drink one
@@ -458,7 +556,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind killed 10, an Age
   reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5), logs (0.25), each
   item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft (0.1), each mob (an
-  animal 2, a monster 5, a creeper 6). Repeats wear off (a repeat of the same thing within a minute
+  animal 2, a zombie 4-10 by kind). Repeats wear off (a repeat of the same thing within a minute
   gives three quarters of the last), all repeats give at most 20 points a minute (perks included),
   and blocks a player placed give nothing at all, so farms dry up. What a furnace pushes into a
   chest beside it, or a pipe pulls out, counts as smelted by whoever last used the furnace.
@@ -528,8 +626,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   place about 23% of the time, a spell of rain lasts 17 minutes on average (2 minutes to a couple
   of hours), clear weather about 50, and the heaviest storms thunder (13% of the rainy time).
   Rain puts out fires under the open sky and keeps them from spreading, makes players wet (Tough
-  As Nails), and keeps zombies and skeletons from burning; a thunderstorm darkens the day enough
-  that they don't burn at all. Lightning strikes near players in thunderstorms (every 20 s or so
+  As Nails), and muffles noise, so zombies hear less of what is done in it (0.7 of a noise's
+  reach). Lightning strikes near players in thunderstorms (every 20 s or so
   under the heaviest), at the highest block or a living thing near it, setting fires (with
   doFireTick) and hurting the living within 3 blocks (5 half hearts and 8 s of fire, which the
   rain it strikes in puts out at once: Minecraft's), on a tower or a pillar too. Rain puts out
@@ -710,15 +808,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   80 blocks from the room): rooms with a domed roof, 3 × 3 corridors 10-20 blocks long with a
   support every 5 blocks (an oak plank beam on two oak fence posts; a quarter of them broken to their
   end planks), a rough ceiling, rails in a third of the corridors (with gaps), cobwebs in the
-  corners and whole spider corridors full of them, a rare wall torch, plank bridges with oak log
-  pillars where a corridor crosses a cave, crossings (some two floors tall) and stairs going down,
-  and a chest now and then (1 in 100 per section side) with Minecraft's mineshaft loot on this
-  game's items (an iron pickaxe, ingots, raw ores, a diamond, coal, porkchops, glow dust, herbs and
-  straw; rails, torches and rope). About 9-16 per km², fewer where a seed has more sea
-  (Minecraft's 1 in 250 chunks would be 15), each typically 60-150 pieces over some 130 × 130
-  blocks; the room's floor lies 28-64 blocks under the
+  corners and whole corridors full of them (Minecraft's spider corridors, with no spawner), a
+  rare wall torch, plank bridges with oak log pillars where a corridor crosses a cave, crossings
+  (some two floors tall) and stairs going down, and a chest now and then (1 in 100 per section
+  side) with Minecraft's mineshaft loot on this game's items (an iron pickaxe, ingots, raw ores,
+  a diamond, coal, porkchops, glow dust, herbs and straw; rails, torches and rope). About 9-16
+  per km², fewer where a seed has more sea (Minecraft's 1 in 250 chunks would be 15), each
+  typically 60-150 pieces over some 130 × 130 blocks; the room's floor lies 28-64 blocks under the
   surface, every piece keeps 6 blocks of ground over it, none goes below y 16 (the lava seas) or
-  near a lake, puddle, lava lake, oil well or library structure, so they never flood. In humid
+  near a lake, puddle, lava lake, oil well or library structure (nor under a city or a road), so
+  they never flood. In humid
   biomes they are **overgrown** (as one running into Minecraft's lush caves; jungles 72%, birch
   forests and mushroom fields 80%, old growth taigas 56%, forests and taigas 32%, never in dry
   biomes): moss on the rock around (floors, walls and ceilings; the woodwork stays wood), moss
@@ -742,6 +841,80 @@ A fast, Minecraft-style voxel engine for Roblox.
   collar and headframe can also open in untouched ground there, even in the natural floor of a
   house built before (its walls and roof stay; the pit is 20-85 blocks deep). The All Structures
   debug world shows a sample of each.
+- **Overgrown cities and roads.** The zombie apocalypse's ruins: towns and cities of a world that
+  ended years ago, and the roads between them. One candidate per 1024 × 1024 block cell (kept
+  with `Config.Cities.Chance`), tried at up to four spots, stands where the land is fit to build
+  on (hills or plains, dry, above the sea, not frozen and not in the mountains): about 6-11 per
+  100 km² on land worlds, most of them small towns (70-200 blocks across), now and then a city
+  with a downtown (up to about 450). The ground under a city is levelled to one plateau (cut and
+  fill, blended back to the terrain over 24 blocks), so the map, the far terrain and every chunk
+  agree.
+  - **Streets:** a grid of 7 block wide streets every 32 blocks: asphalt with a dashed yellow
+    centre line and white crosswalks at the crossings, concrete sidewalks, cracked patches,
+    potholes of gravel, and grass and moss pushing through.
+  - **Buildings**, by their distance from the centre: offices up to 12 floors with glass bands
+    downtown, apartments of 3-6 floors, shops (a grocery, a pharmacy, a hardware store or an
+    office), rows of four houses, parks (grass, trees), plazas, parking lots full of wrecks and
+    lots of rubble; every town has a police station, a fire station and a pharmacy. Buildings are
+    ruins: their tops collapse in a jagged line, walls are blown out, cracked and mossy, slabs
+    hole into rubble on the floor below, and the green takes them back (vines down the walls,
+    moss carpets on roofs and floors, grass and moss in the ground floors, cobwebs in the
+    corners; more of it in wet biomes, little in deserts). The first four floors are open rooms
+    with a ladder up a corner, doors (or a gap where a door was) and windows; higher floors are a
+    facade over a ring of rooms around a solid core. Rusted cars stand in the streets and on the
+    roads.
+  - **Loot** waits in chests, **Supply Crates** and **Medicine Cabinets** against the inside walls
+    (house, grocery, pharmacy, hardware, police, fire station, office and car tables: food,
+    water, bandages, painkillers, antibiotics, tools, nails, gunpowder): a big city holds about 15
+    antibiotics on average and every town at least one medicine cabinet. One or two small plank
+    sheds per town stand over a bunker's hatch (see Bunkers).
+  - **Roads** (5 blocks of asphalt with gravel shoulders, graded to at most 1 in 6, wobbling
+    gently, raised on causeways over short stretches of water) link each city to the nearest in
+    every quarter within two cells; links that would cross long water, climb into the mountains
+    or cut or fill more than 24 blocks are dropped.
+  - **From afar and on the map:** buildings show as their massing to LOD level 4 and roads to
+    level 2; the map paints cities as grey squares (their street grid darker at 8 blocks a pixel)
+    and roads as dark lines from 8 blocks a pixel out, and closer in the streets block by block.
+  - **Around them:** no lake, well, lava lake, outpost, mineshaft, cave entrance, ravine or tree
+    lands on a street, a road or a building lot. The spawn lands 150-400 blocks outside the
+    nearest city within 3 km of where it would be, so one is in sight. `/locate structure city`
+    finds the nearest (`#ruins`: a city or a bunker).
+  - **Switches:** the world's **Ruins** setting (Customize on Default, Single Biome and Large
+    Biomes; on by default for new worlds), Generate Structures, `Config.Structures.Generate` and
+    `Config.Cities.Enabled` turn them off (`Config.Cities.Roads.Enabled` the roads alone). A world
+    saved before the ruins existed stays without them unless `Config.Cities.OldWorlds`. The All
+    Structures debug world shows a sample town with one parcel of every kind.
+- **Bunkers.** Hidden hideouts from before the fall: a steel **Bunker Hatch** lying flush in the
+  ground (a collar of concrete and mossy concrete around it, grass and ferns hiding it) over a
+  ladder shaft 9-16 blocks deep into an **airlock**, a 3-wide **corridor** and 3-6 concrete rooms
+  off it (2-6 under a city's shed, where room is short).
+  - **Rooms:** always a **bunk room** (three Planks-and-wool bunks along each wall) and a
+    **storeroom** (3-5 Supply Crates and a Chest), then medical rooms (two Medicine Cabinets on
+    the wall, a cot), a generator room (an iron and rusty-metal machine, a Furnace, coal blocks, a
+    crate), an armory (two Chests and an iron rack) or a mess (two Crafting Tables, a crate).
+  - **Loot:** the storerooms hold cans, rations, water, torches, coal, gunpowder, rope, nails and
+    iron; the medical rooms medkits, bandages, antibiotics, painkillers and potions; the armories
+    machetes, fire axes, crowbars, iron swords and armor, gunpowder, TNT, a Cobalt Shield or Feral
+    Claws now and then; the generator rooms coal, fuel and oil, scrap metal, iron and a bucket.
+  - **Lit or not:** four in five are lit (Ceiling Lamps every five blocks of corridor, one or two
+    a room); the rest are dark, and zombies may spawn in them. About one in seven is **overrun**:
+    mossy walls, cobwebs under the ceilings, half its lamps gone and bones and rotten flesh among
+    the loot.
+  - **The hatch:** right click it to open or shut it (from inside too; it thuds, and zombies
+    hear it as a door). Climb out pressed against the ladder: the open hatch stands up on the far
+    side of the shaft. A shut hatch is a safe haven: zombies never break it and never dig down
+    (they walk over it). It is crafted too (four Iron Ingots), to seal a shelter of your own.
+  - **Where:** in the wild about one per 768 × 768 cell kept with 35%: 0.4-0.6 per km² (fewer
+    where a seed has more sea), on dry, level ground, never by water, a lake, a well, an outpost,
+    a city, next to a mineshaft (a deeper one may run underneath) or within 64 blocks of the
+    spawn; and 1-2 under each town, below a shed in its house lots (the outer ones first).
+    `/locate structure bunker` stands you on the nearest hatch and shows its y; `/locate poi
+    bunker_hatch`, `supply_crate` and `medicine_cabinet` find what is near.
+  - **Cost:** a bunker is written into the full detail chunks only, as cave air with cave-twin
+    lamps and cobwebs, so while caves are hidden it costs nothing to draw until you climb down
+    (the shaft is open like a mineshaft entrance's). Bunkers follow the Ruins setting and Generate
+    Structures (`Config.Bunkers.Enabled` turns them off alone). The All Structures debug world
+    shows a sample with every kind of room.
 - **World types.** Minecraft's world presets, each with its own options: **Default**;
   **Superflat**, layers from a preset line in this game's names (`Bedrock,2*Dirt,Grass;Plains`;
   Minecraft's own strings such as `minecraft:bedrock,2*minecraft:dirt,minecraft:grass_block` paste
@@ -754,12 +927,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   fluid levels included (not the cave twins, which look exactly like theirs), at y 70 on a grid
   with a gap between, nothing ticks so nothing flows or falls, spectator suggested), **All
   Structures** (every template of the structure library and every generated structure on a grass
-  floor, each with a structure block name tag that WAILA reads and F3 outlines) and **All Biomes**
+  floor, the sample mineshafts, bunker and town among them, each with a structure block name tag
+  that WAILA reads and F3 outlines) and **All Biomes**
   (a 16 block strip of every biome's ground, trees and plants). The void and the debug worlds
   spawn no mobs. The server publishes the type and its options with the seed, so every client and
   worker builds the same world; the far terrain, the map, WAILA's biome, Tough As Nails, safe
   spawning and sky checks all follow it.
-  The Create World screen offers every type (the debug worlds last) with its Customize screen;
+  The Create World screen offers every type (the debug worlds last) with its Customize screen
+  (Default, Single Biome and Large Biomes have the **Ruins** setting: cities, roads and bunkers);
   without the title screen `Config.World.Type` and `Config.World.Options` pick it.
 - **Glow lichen.** Minecraft's glow lichen grows in patches on cave walls and ceilings 13 blocks or
   more below the surface (about 3% of them, some 20 per chunk), with light 7 in a cool yellow green.
@@ -849,17 +1024,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   for operators (or everyone with Allow Commands): `/locate structure outpost` answers "The
   nearest outpost is at [1142, ~, 582] (1281 blocks away)" in true world coordinates (F3's).
   Structures are the library's (outposts) and the built-in `mineshaft`, `mineshaft_overgrown`,
-  `mineshaft_entrance`, `oil_geyser`, `oil_deposit`, `lava_lake`, `lake`, `cave_entrance` and
-  `ravine`, or a tag (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#library`); biomes by id
-  (`birch_forest`, `minecraft:jungle`) or tag (`#is_forest`, `#is_snowy`, `#band_peaks`...);
-  points of interest (chests, crafting tables, furnaces, campfires, the machines, batteries,
-  tanks, structure blocks, jigsaws, TNT and Nukes; `#workstation`, `#machine`, `#container`...)
-  within 256 blocks, placed ones and generated ones (an outpost's chests, a mineshaft's) alike.
+  `mineshaft_entrance`, `oil_geyser`, `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`,
+  `ravine`, `city` and `bunker`, or a tag (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#ruins`:
+  a city or a bunker, `#library`); biomes by id (`birch_forest`, `minecraft:jungle`) or tag
+  (`#is_forest`, `#is_snowy`, `#band_peaks`...); points of interest (chests, crafting tables,
+  furnaces, campfires, the machines, batteries, tanks, structure blocks, jigsaws, TNT and Nukes,
+  supply crates, medicine cabinets and bunker hatches; `#workstation`, `#machine`, `#container`,
+  `#scavenge`...) within 256 blocks, placed ones and generated ones (an outpost's chests, a
+  mineshaft's, a ruin's or a bunker's crates and cabinets) alike.
   A structure or biome search generates no chunk: it reads the generators' plans cell by cell,
   nearest first, and answers the true nearest (Minecraft's sometimes answers a farther one); a
   poi search checks each generated candidate by generating its chunk on the search's own
   generator (never the world's). Underground things show their y (a mineshaft's room, an
-  entrance's collar, a point of interest's block, where Minecraft shows `~`), surface ones `~`;
+  entrance's collar, a bunker's hatch, a point of interest's block, where Minecraft shows `~`),
+  surface ones `~`;
   distances are horizontal. Searches run on the server a slice of each frame (3 ms, just before
   the chunk preload's slice), so a long one (no outpost for 100 regions, a rare biome: about a
   second of work) never stalls it. The coordinates are green: click them with the chat open and
@@ -1090,15 +1268,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   and mining blocks (by material: stone, wood, gravel, grass, sand, glass, snow, metal, wool,
   water), footsteps every 1.67 blocks (yours and other players'), hurting landings, splashing and
   swimming, chest lids, the furnace you are using crackling while it burns, items picked up, tools
-  breaking, armor put on, getting hurt and dying, interface clicks and Minecraft's cave moods;
-  lava popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss
-  when water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
-  crackling; fire crackling, hissing when punched out, and flint and steel striking; mobs hurt
-  and dying (each kind its own pitch), a creeper's hiss, a skeleton's bow and its arrows
-  striking, players' hits (strong and weak) and eating. Only water and fuel splash and make swimming sounds. They are stand-ins made from the
-  sounds every Roblox client ships, told apart by pitch, so nothing has to be uploaded, and players
-  hear what others do within 16 blocks. Each one can be replaced by your own sound (see
-  Extending).
+  breaking, armor put on, getting hurt and dying, interface clicks and Minecraft's cave moods; lava
+  popping and bubbling, hissing where water hardens it, the sizzle of burning and its hiss when
+  water puts it out, buckets of lava and oil (thicker than water's) and Combustion Generators
+  crackling; fire crackling, hissing when punched out, and flint and steel striking; mobs hurt and
+  dying (each kind its own pitch: a brute low, a screamer high), zombies groaning, bashing at a
+  block and breaking it through, a screamer's shriek, the bunker hatch, bandages, medkits and pills,
+  a blood moon rising, players' hits (strong and weak) and eating. Only water and fuel splash and
+  make swimming sounds. They are stand-ins made from the sounds every Roblox client ships, told
+  apart by pitch, so nothing has to be uploaded, and players hear what others do within 16 blocks.
+  Each one can be replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
@@ -1138,7 +1317,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   forgotten (Minecraft's makeStuckInBlock); a sword cuts one quickly for String, Shears take the
   cobweb, a bare hand gets nothing; no player spawns or teleports into one (mobs may, as in
   Minecraft). Mobs climb ladders, vines and rope they
-  walk into and get caught in webs, except spiders, which climb any wall and walk through webs.
+  walk into and get caught in webs.
   Climbing makes the ladder's, vine's or rope's own step sound every 1.67 blocks, the climb
   animation plays, and the `F3` overlay shows "climbing" and "stuck". Also: **Rails** (six iron
   ingots and a stick make 16, from the Iron Age) lie along the way you face; the **Oak Fence**
@@ -1147,20 +1326,20 @@ A fast, Minecraft-style voxel engine for Roblox.
   Minecraft: you walk right up to a lone post, but nobody (you, mobs) gets through or jumps over a
   fence line, so pens hold their animals; **Moss Block**, **Moss Carpet** (two moss make three), **Hanging
   Roots** and **Mossy Cobblestone** (cobblestone and a vine or moss).
-- **Doors.** Minecraft's wooden doors in oak, spruce, birch, jungle and acacia (six planks of a
-  wood in two columns make three; 200 ticks of furnace fuel). A door is two blocks tall and goes
-  on a sturdy block with room above. It faces the way you look, and its hinge goes against the
-  side with more walls beside it, else away from a door already beside it, else on the half of
-  the block you clicked (Minecraft's rules). Right click either half to open or close it, in every
-  game mode but spectator (adventure players open doors, as in Minecraft); sneaking with an item
-  in hand places instead. **Double doors:** two doors side by side facing the same way, hinged on
-  their outer sides (place the second beside the first and it takes the other hinge), open and
-  close together when you use either, as long as both are open or both closed. Doors of
-  different woods pair too. A door is a 3 pixel panel: you bump into it closed and walk past
-  it open, as mobs and dropped items do, and mobs can't see (or follow) you through a closed one,
-  nor an explosion reach you behind it. Breaking either half breaks both and drops one door; a
-  door whose block underneath goes pops off. Each wood has its own windows (oak two, birch four,
-  jungle two small ones, acacia one, spruce none), drawn from boxes, see-through. Opening plays
+- **Doors.** Minecraft's wooden doors in oak, spruce, birch, jungle and acacia (six planks of a wood
+  in two columns make three; 200 ticks of furnace fuel). A door is two blocks tall and goes on a
+  sturdy block with room above. It faces the way you look, and its hinge goes against the side with
+  more walls beside it, else away from a door already beside it, else on the half of the block you
+  clicked (Minecraft's rules). Right click either half to open or close it, in every game mode but
+  spectator (adventure players open doors, as in Minecraft); sneaking with an item in hand places
+  instead. **Double doors:** two doors side by side facing the same way, hinged on their outer sides
+  (place the second beside the first and it takes the other hinge), open and close together when you
+  use either, as long as both are open or both closed. Doors of different woods pair too. A door is
+  a 3 pixel panel: you bump into it closed and walk past it open, as mobs and dropped items do, and
+  mobs can't see (or follow) you through a closed one, nor an explosion reach you behind it (zombies
+  break one down in 12 s: see Zombies). Breaking either half breaks both and drops one door; a door
+  whose block underneath goes pops off. Each wood has its own windows (oak two, birch four, jungle
+  two small ones, acacia one, spruce none), drawn from boxes, see-through. Opening plays
   `block.wooden_door.open` and closing `block.wooden_door.close` (swap them like any sound below).
   Structures turn doors with them (a mirror swaps the hinge).
 - **Water that finds the way down.** Like Minecraft, water spreads only towards the nearest drop
@@ -1202,10 +1381,11 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
   Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
   and face images that take each block's own colour (one bark image for every log, each in its
-  wood's colour), plants as crossed images. The 32 textures made so far are in, and 61 blank
-  entries wait for the rest. Distant chunks take the colour each block averages to on screen, so
-  they match the textured terrain near you, or keep their materials and textures with the Far
-  Materials setting. See Block textures.
+  wood's colour), plants as crossed images. The 33 textures made so far are in, and 102 blank
+  entries wait for the rest (the apocalypse's blocks and items among them, blank on purpose).
+  Distant chunks take the colour each block averages to on screen, so they match the textured
+  terrain near you, or keep their materials and textures with the Far Materials setting. See
+  Block textures.
 - **Far meshes.** Regions of distant chunks that stopped changing are merged into a few MeshParts
   built with EditableMesh ("superchunks"), replacing thousands of parts: at the default view,
   81k parts become 35k parts + 90 meshes in the mountains. Parts stay the fallback, so nothing breaks
@@ -1262,9 +1442,10 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
 | Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon | R2 | Tap the mob |
-| Eat           | Hold right click 1.6 s with food (meat, cooked or raw, rotten flesh) while hurt (creative: any time); letting go stops | L2 | Tap |
+| Eat / use medicine | Hold right click with food or medicine (meat and tins 1.6 s, crackers and the chocolate bar 1.2 s, the Bandage 2 s, the Medkit 4 s, pills 1.2-1.6 s, the ration 2.4 s) when it would do something: hurt, bleeding or infected (the Chocolate Bar any time; creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
+| Open a hatch  | Right click a Bunker Hatch, from above or from the ladder below, to open or shut it (every game mode but spectator; zombies hear it) | L2 | Tap |
 | Select slot   | `1`–`9`, mouse wheel (unless the Scroll Wheel setting is Zoom), or click a slot (spectator: the spectator menu) | L1 / R1 | Tap a slot |
 | Place a torch / lantern | Right click: the top of a block stands it, a side hangs a wall torch, the underside hangs a lantern | L2 | Tap |
 | Climb         | Walk into a ladder or vine, or hold `Space` on a rope or a hanging vine (2.35 blocks a second); let go to slide down (a rope: a fast slide that never hurts); hold `Shift` to hold still | stick / A; B holds | move / Jump; Sneak holds |
@@ -1312,10 +1493,10 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Debug keys    | `F3` + `Q` lists them in the chat (`F3` + `N`, `F3` + `Q`, `F3` + `F4`) | | |
 | Time          | `/time set day` (`noon`, `night`, `midnight`, `6000`, `0.5d`), `/time add 1000`, `/time query daytime`; `/gamerule doDaylightCycle false` stops the clock (operators) | | |
 | Weather       | `/weather clear`, `/weather rain`, `/weather thunder` with an optional duration (`300s`, `0.5d`, `6000` ticks; default Minecraft's random one: rain 10-20 minutes, thunder 3-13, clear 10-150), everywhere, blending in over 5 s (operators); `/weather query` (anyone) says what it is doing where you stand; `/gamerule doWeatherCycle false` stops the storms and holds the override's time (operators) | | |
-| Mobs          | `/summon zombie` (at your feet) or `/summon cow ~ ~ ~5`; `/kill @e[type=zombie]`, `/kill @e` (every mob) (operators) | | |
-| Locate        | `/locate structure outpost` (or `#mineshaft`, `mineshaft_entrance`, `oil_geyser`, `lava_lake`, `ravine`...), `/locate biome jungle` (or `#is_forest`...), `/locate poi chest` (or `#machine`...) (operators); the answer's green coordinates type their `/tp` when clicked | | |
+| Mobs          | `/summon zombie` (at your feet) or `/summon zombie_brute ~ ~ ~5`: every kind in snake case (`cow`, `sheep`, `pig`, `chicken`, `zombie`, `zombie_runner`, `zombie_brute`, `zombie_crawler`, `zombie_screamer`, `zombie_soldier`, `zombie_police`, `zombie_firefighter`, `zombie_worker`, `zombie_doctor`); `/kill @e[type=zombie_brute]`, `/kill @e` (every mob) (operators) | | |
+| Locate        | `/locate structure outpost` (or `city`, `bunker`, `#ruins`, `#mineshaft`, `mineshaft_entrance`, `oil_geyser`, `lava_lake`, `ravine`...), `/locate biome jungle` (or `#is_forest`...), `/locate poi chest` (or `medicine_cabinet`, `supply_crate`, `bunker_hatch`, `#scavenge`, `#machine`...) (operators); the answer's green coordinates type their `/tp` when clicked | | |
 | Teleport      | `/tp 100 64 -20`, `/tp ~ ~ ~10`, `/tp <player>`, `/tp <players> <x> <y> <z>`, `/tp <players> <player>` (also `/teleport`; players are names, their start, `@s` or `@a`) (operators) | | |
-| Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); hover or tap an effect icon for its name and time | | Tap an icon |
+| Status effects | `/effect give @s speed 60 1` (`<player>` a name, `@s`, `@p` or `@a`; seconds 1-1000000 or `infinite`, default 30; amplifier 0-255), `/effect clear [player] [effect]` (operators); the apocalypse's: `/effect give @s bleeding 20`, `/effect give @s infection 60` (starts an infection, or takes one 60 s on), `/effect clear @s infection` (cures it); hover or tap an effect icon for its name and time | | Tap an icon |
 | Knowledge and Ages | `/knowledge add\|set <player> <amount> [points\|levels]` (also `/xp`), `/knowledge query <player> [levels]`, `/age set <player> <age>` (`iron`, `Iron Age`, `2`), `/age query <player>`; players are names, `@s` or `@a`; changing needs an operator, as `/time` (where progress is saved for every server: `Gameplay.Admins`, the owner or Studio) | | |
 | Generation    | `/genstats` (operators): the server's background chunk generation over the last 10 s (chunks/s, ms/s, the worst frame), the backlog and the chunks generated inline | | |
 | Saving        | `/save-all` (save now: "Saving the game (this may take a moment!)", then "Saved the game"), `/save-off` (no automatic saves until `/save-on`; shutdown still saves), `/save-on` (operators only); the saving icon shows bottom right while the world saves | | |
@@ -1341,7 +1522,7 @@ right) or A; buttons cycle their values. Done (on a sub-page: back to the page i
 | Controls        | Mouse Settings..., Key Binds... (the two pages below), Sneak (Hold / Toggle), Sprint (Toggle / Hold), Touch Buttons (touch screens; after rejoining) |
 | Mouse Settings  | Sensitivity (0-200%: "*yawn*" to "HYPERSPEED!!!", 100% Roblox's own feel), Scroll Sensitivity (0.01-10.00), Invert Mouse, Discrete Scrolling, Scroll Wheel (Hotbar / Zoom); with a mouse |
 | Key Binds       | Every key binding (below): click its key, then press a key or a mouse button; Reset (per row), Reset Keys (all); with a keyboard |
-| HUD             | Minimap, WAILA, Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
+| HUD             | Minimap, WAILA, Day Counter (the day, the days survived and the blood moon's warnings under the minimap), Attack Indicator (OFF / Crosshair / Hotbar), GUI Scale (Auto, 1 .. the largest this screen allows: 4 at 1920 x 1080, 9 on a 4K window; Auto is always the largest, as in Minecraft) |
 | Chat Settings   | Chat (Shown / Commands Only: no players' messages, and none sent / Hidden: no chat at all), Chat Text Opacity (10-100%), Text Background (0-100%), Text Size (OFF, 1-100%), Line Spacing (0-100%), Chat Delay (None, 0.5-6 s: other players' messages come out one per delay), Width (40-320 GUI pixels), Focused Height and Unfocused Height (20-180), Command Suggestions |
 | Accessibility Settings | View Bobbing, Distortion Effects (0-100%), FOV Effects (0-100%), Damage Tilt (0-100%) |
 | Weather         | Clouds (OFF / Fast / Fancy), Weather (rain and snow: OFF / Fast / Fancy) |
@@ -1484,7 +1665,8 @@ enter a world your character is yours for the visit: to play another, leave and 
   unless you set it yourself) and **World** (World Type: every world type the game has, the
   debug worlds last, with its description, and **Customize** when the type declares settings:
   Single Biome's biome, Superflat's preset with Minecraft's flat presets on a button and what is
-  wrong with a preset typed in shown in red, its Trees and Plants; the seed: a number is used as
+  wrong with a preset typed in shown in red, its Trees and Plants, and Ruins (overgrown cities,
+  roads and bunkers; on) for Default, Single Biome and Large Biomes; the seed: a number is used as
   it is, any other text becomes Minecraft's number for it (Java's `String.hashCode`, so "glacier"
   is 108181935), blank is random; Generate Structures, greyed out for types without library
   structures). Picking a debug world picks its game mode too (All Blocks: Spectator, as
@@ -1519,8 +1701,10 @@ or random ticks; Peaceful spawns no monsters in any world.
 src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and worker actors)
   Config                    every tunable setting
   Blocks/  BlockList        block definitions -> ids, appearances, lookup tables (hardness, tools,
-                            drops, menus), plants (soil sets, tall halves, foliage tints), each
-                            block's textures per face from the pack (`variantTexture`, `alignLut`)
+                            drops, menus, how long zombies take to break them), plants (soil
+                            sets, tall halves, foliage tints), each block's textures per face
+                            from the pack (`variantTexture`, `alignLut`); Toggles (blocks a use
+                            swaps: the bunker hatch)
   TexturePack               the texture pack: every block texture (maps, Material, Tint, Average)
                             and the texture of each block's faces; hand-edited, pure data
   Items/                    the item registry, stacks and item data (validation, tooltip lines,
@@ -1561,18 +1745,26 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             example), Pools (explicit template pools), Structures (what generates)
   Entities/ItemPhysics      dropped item movement (server and client; floating in water and fuel,
                             in lava and oil)
-  Entities/MobList          mob kinds (Minecraft's boxes, health, speeds, loot, spawn weights,
-                            sounds, how the client draws them); MobPhysics (a mob's movement
-                            tick: walking, jumping, fluids, ladders and walls, cobwebs, falls);
+  Entities/MobList          mob kinds: the farm animals and the ten zombie kinds (Minecraft's
+                            boxes, health, speeds, loot, spawn weights in the wild, in cities and
+                            in hordes, sounds, the zombies' abilities, their R15 rigs and looks);
+                            MobPhysics (a mob's movement tick: walking, jumping, fluids, ladders
+                            and walls, cobwebs, falls);
                             Combat (players hitting mobs: weapon damage, attack strength, reach,
                             knockback, wear)
-  Items/Foods               what eating meat does (healing, the Thirst effect's odds), raw to
+  Items/Foods               food and medicine (healing, use times, cures, effects, the Thirst
+                            effect's odds, who may use one, what finishing one does), raw to
                             cooked
+  Apocalypse/               the zombie apocalypse's shared rules, pure: BloodMoon (the horde
+                            nights' schedule from the day time), Infection (a bite's progress,
+                            stages, symptoms, bites, cures, dormancy), NoiseRules (which sounds
+                            zombies hear, and how far)
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools (and status effects' Haste and Mining Fatigue)
   Effects/  EffectList      status effects (Minecraft's MobEffects, Oil Coated, Fuel Soaked, Tough
-                            As Nails' four): the registry, the modifiers movement, mining, combat
-                            and burning read, ticking rules, the HUD's order and flashing;
+                            As Nails' four, Mana Sickness, Bleeding and the Infection): the
+                            registry, the modifiers movement, mining, combat and burning read,
+                            ticking rules, the HUD's order and flashing;
             PotionList      the potions (ingredients, levels, durations: items, recipes, drinks)
   ToughAsNails/             Tough As Nails, pure: Thirst (thirst, hydration, exhaustion,
                             dehydration, regeneration, the Thirst effect), Temperature (-10..10
@@ -1622,6 +1814,14 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             pieces, foundations, generated chests)
     Mineshafts              Minecraft's mineshafts (piece grammar, overgrown ones, entrance
                             shafts with a rope, chest loot; full detail only)
+    Cities                  the overgrown cities and roads: where they stand, the wrapped relief
+                            (cut and fill), the streets' surface, `blocked` for the planners,
+                            caches, the spawn's shift, writing them (levels 0-4); CityLayout
+                            (a city's parcels, buildings, ruin, overgrowth, cars and loot;
+                            pure), Roads (a road's line, grading and surface; pure)
+    Bunkers                 hidden bunkers: wild and city sites, layouts, writing (full detail
+                            only), loot and POIs
+    ScavengeLoot            the ruins' and bunkers' loot tables
     CaveDecor               glow lichen on cave walls (full detail only)
     Foliage                 ground plants by biome (full detail only)
     WorldTypes              the world types (registry, options and settings, hints, the
@@ -1629,7 +1829,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
     LayeredGenerator        a whole generator from layer stacks, placed blocks and a structure
                             placer (flat, void and debug worlds; every LOD level)
     Superflat               superflat preset lines, Minecraft's presets
-    DebugWorlds             the debug worlds' grids (all blocks, all structures, all biomes)
+    DebugWorlds             the debug worlds' grids (all blocks, all structures with the sample
+                            mineshafts, bunker and town, all biomes)
     Locate                  /locate's searches: ids and tags, ring searches over the
                             generators' cell grids (cheap probes, exact verifies), the biome
                             rings (pure; the generators' `locateKinds` probe their own cells)
@@ -1653,8 +1854,9 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   WorldSettings             the world's settings (Create World): seeds as Minecraft reads them,
                             checking a request, a world type's options, publishing them;
                             commands' permission and argument attributes
-  Poi                       /locate poi's types and tags (chests, furnaces, machines...): the
-                            blocks of each, a lookup table by block id
+  Poi                       /locate poi's types and tags (chests, furnaces, machines, supply
+                            crates, medicine cabinets, bunker hatches...): the blocks of each, a
+                            lookup table by block id
   SaveText                  the words and sizes of saved worlds (the toast, the list, the chat)
   Movement/                 Hull (box vs blocks collision), PlayerPhysics (Minecraft movement
                             tick, spectators' flight through blocks), Rig (hull <-> cosmetic
@@ -1713,11 +1915,22 @@ src/server   -> ServerScriptService.IceVoxel
                             blasts),
                             Entities (spawning, replication)
   Mobs/                     MobWorld (mobs' rules: ticks, hurts, death and loot, blasts, despawn,
-                            players' attacks; pure), MobAI (wander, panic, hunt, melee, a
-                            creeper's fuse, a skeleton's bow; pure), MobSpawning (natural spawning
-                            by light, ground and caps; pure), SummonCommand (/summon, /kill;
-                            pure), Mobs (20 Hz ticks, replication, attacks, commands, the `died`
-                            event and other scripts' hooks)
+                            players' attacks, blocks zombies break; pure), MobAI (wander, panic,
+                            hunt, melee; the zombies' noise, breaking, blood moon hunts, leaving
+                            and screams; pure), MobCrowd (zombies kept apart; pure), MobSpawning
+                            (natural spawning by light, ground and caps, by day on open ground,
+                            packs; pure), ZombieDirector (caps by day, night and city, blood moon
+                            waves and hunts, leave rounds; pure), MobTracking (what each client
+                            is told: spawns, moves, states, removes; pure), SummonCommand
+                            (/summon, /kill; pure), Mobs (20 Hz ticks, replication, attacks,
+                            commands, breaking blocks, the `died` and `playerHit` events and
+                            other scripts' hooks)
+  Apocalypse/               the zombie apocalypse on the server: NoiseBus (the tick's noises:
+                            sounds played, explosions, sprints, screams), Infection (each
+                            player's infection and its external effect), SurvivalRules (bites,
+                            wounds, the survivor record, the blood moon watch, rising; pure),
+                            Survival (bites, kills, deaths, rising, sprint noise, the Survivor
+                            message)
   Transmitters/             Mekanism pipes on the server: TransmitterWorld (states, networks, tanks;
                             pure), Transport (items in transporters), Fluids (every fluid in
                             pipes, machines' fluid tanks, the fluid ejector),
@@ -1734,7 +1947,8 @@ src/server   -> ServerScriptService.IceVoxel
                             Generate; pure), StructureStore (their settings), Placement (LOAD and
                             Generate plans, placed over frames), Permission (who may use them)
   Players/ItemUse           the Configurator, buckets, flint and steel and dirty water (on a
-                            campfire) used on blocks (UseItem)
+                            campfire) used on blocks (UseItem); ToggleUse (the bunker hatch
+                            opened and shut)
   Players/PlayerPositions   where every player is, for all server code (feet in blocks, doubles;
                             reach, teleports): the characters, or with
                             Config.Players.ServerPositions the server's own, from checked client
@@ -1840,15 +2054,20 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             the lines, ChatInput the box's rules: sending, history, Tab;
                             ChatFormat the messages' looks; all pure), HoverTip (every menu
                             button's tooltip) + ButtonHelp (their texts) + TooltipLayout
-                            (wrapping and placement; pure)
+                            (wrapping and placement; pure), SurvivorHud (the day counter
+                            and the blood moon's toasts) + SurvivorLine (their texts, widths
+                            and timing; pure)
   Audio/                    SoundPlayer (pooled 3D / interface sounds, the server's Sound messages,
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
                             mood), CaveMood (Minecraft's mood, pure), Music + MusicRules (the
                             background music; when and which, pure), SoundRules (the pure rules)
-  Entities/EntityRenderer   dropped items; MobRenderer + MobModel (mobs: boxes gliding between
-                            updates, hurt flashes, creepers' fuses, flames, arrows; the pure pose
-                            and aim)
+  Entities/EntityRenderer   dropped items; MobRenderer (mobs: boxes, zombies' R15 rigs, flames,
+                            groans), MobParts (the mobs' Parts, Fire and BulkMoveTo, shared with
+                            the Studio probe), MobModel (the pure glide, move-op baseline,
+                            stride and aim), MobRig (the R15 part tables and pose maths, pure),
+                            ZombieLooks (outfit colours, pure), MobRigPool (rig tiers and pools,
+                            pure), ZombieVoices (who groans when, pure)
   Map/                      MapLayer (EditableImage ring), MapView, Minimap, WorldMap,
                             Waypoints, ContextMenu, WeatherLayer (the weather mode over both
                             maps, painted a band a frame) + WeatherMap (its colours, grids, cache,
@@ -1887,6 +2106,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             from their poses, pure)
   Rendering/ExplosionView   explosions: the blast drawn, the knockback, a camera shake
   Rendering/EffectView      Night Vision, Blindness and Nausea on the view
+  Rendering/BloodMoonSky    the blood moon's red sky and bigger moon (the tint pure)
+  Player/SurvivorState      the server's Survivor record, the alive ticks counted on between
+                            messages
   Rendering/FireRenderer    fire's and campfires' animated flames (SurfaceGui planes, one shared
                             animation step)
   Rendering/FuseView        lit TNT and Nukes flashing
@@ -1901,14 +2123,16 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             chests, crafting tables, furnaces, Mekanism's machines, structure
                             blocks and jigsaws)
   Rendering/StructureBoxes  structure blocks' outlines, names and air markers
-  Debug/DebugOverlay        F3 stats, time of day and weather (also WAILA's extended view); DebugKeys
-                            (Minecraft's debug keys: F3 when let go, F3 + N, F3 + F4, F3 + Q)
+  Debug/DebugOverlay        F3 stats, time of day and weather, the mobs and their rigs (also
+                            WAILA's extended view); DebugKeys (Minecraft's debug keys: F3 when
+                            let go, F3 + N, F3 + F4, F3 + Q)
 
 tests/       Lune scripts: unit tests, benchmark, terrain preview, structure (structure data on the
              command line), build_structures (the example outpost's builder), build_textures (the
              texture pack -> src/textures; logic in lib/TextureBuild)
 tools/probes Studio probes, never in the place: RebaseProbe (what a floating-origin move costs),
-             UnionProbe (CSG unions of real terrain sections); how to run them in their README
+             UnionProbe (CSG unions of real terrain sections), ZombieRigProbe (what posing and
+             moving the zombies' rigs costs on a device); how to run them in their README
 docs/        ARCHITECTURE.md (how everything fits together)
 ```
 
@@ -1971,6 +2195,30 @@ for performance:
 | `Mineshafts.OvergrownHumidity` / `OvergrownChance` | { 0.1, 0.6 } / 0.8 | Overgrown with a chance rising from 0 at biome humidity 0.1 to 0.8 at 0.6 and above. |
 | `Mineshafts.EntranceChance` | 0.5  | The chance an overgrown mineshaft has an entrance shaft with a rope (when a dry, level spot passes: none under the sea or a beach). |
 | `Mineshafts.SpawnClearance` | 32   | No entrance this close to the spawn (blocks). |
+| `Cities.Enabled` | true | Overgrown cities and their roads (Generation/Cities); they also follow the Ruins setting, Generate Structures and `Structures.Generate`. |
+| `Cities.OldWorlds` | false | true: worlds saved before the ruins existed get them too, in ground nobody edited (off by default: cut and fill next to an old world's edited chunks would leave cliffs at the seams). |
+| `Cities.Grid` / `Chance` / `Tries` / `Accept` | 1024 / 0.36 / 4 / 21 | One candidate per 1024 × 1024 blocks kept with `Chance`, up to `Tries` spots (a size and a centre) tried until one fits: `Accept` of 25 lattice samples over the footprint fit to build on. |
+| `Cities.MinRadius` / `MaxRadius` / `Margin` | 48 / 224 / 24 | Footprint half-widths (most cities are small towns), and the margin blended back to the terrain. |
+| `Cities.Block` / `Street` | 32 / 7 | A street every 32 blocks, 7 wide (sidewalk, 5 of asphalt, sidewalk). |
+| `Cities.MaxFloors` / `FullFloors` / `FloorHeight` | 12 / 4 / 4 | Floors at most; full interiors (rooms, ladders, loot) up to floor 4, above it a ring of rooms around a solid core; 4 blocks a floor. |
+| `Cities.MaxSlope` / `MinAboveSea` | 10 / 3 | A footprint's fit samples span at most 1.5 × 10 blocks of height; the plateau at least 3 over the sea. |
+| `Cities.LodLevels` | 4 | Buildings drawn at LOD levels 0-4 (massing beyond full detail), none beyond. |
+| `Cities.Ruin` / `Overgrowth` / `Cars` | 0.55 / 0.6 / 0.08 | How ruined a building is on average, how overgrown (times the biome's humidity: jungles most, deserts little), and the chance of a wreck per lane of a street stretch. |
+| `Cities.Bunkers` | { 1, 2 } | Bunker sheds per city (Generation/Bunkers puts a hatch in each). |
+| `Cities.Caches` | Cells 1024, Sites 32, Links 64, Tiles 512 | Plan caches per generator (each worker its own). |
+| `Cities.Roads.Enabled` | true | Roads between cities. |
+| `Cities.Roads.Width` / `Shoulder` / `Blend` | 5 / 1 / 8 | Asphalt width, gravel shoulder each side, blend into the terrain. |
+| `Cities.Roads.LinkCells` / `Wobble` / `Step` / `MaxGrade` | 2 / 48 / 8 / 1/6 | Links to the nearest city per quarter within 2 cells; the line wobbles up to 48 blocks, sampled every 8, graded to at most 1 in 6. |
+| `Cities.Roads.MaxCut` / `MaxFill` / `MaxWater` | 24 / 24 / 48 | A link is dropped where it would cut or fill more, or cross a longer run of water. |
+| `Cities.Roads.SurfaceLevels` / `CutLevels` | 2 / 3 | Roads are drawn at LOD 0-2 and level the ground at 0-3. |
+| `Cities.Roads.Cracks` / `Overgrown` / `Potholes` / `Cars` | 0.25 / 0.12 / 0.02 / 0.004 | Asphalt decay (cracked patches, grass and moss patches times the overgrowth, potholes) and wrecks per road block. |
+| `Bunkers.Enabled` | true | Hidden bunkers (Generation/Bunkers); they also follow the world's Ruins setting, Generate Structures and `Structures.Generate`. |
+| `Bunkers.Grid` / `Chance` | 768 / 0.35 | One wild candidate per 768 × 768 blocks, kept with `Chance` (0.38-0.61 per km² measured on five seeds; 0.59 at most on dry land). |
+| `Bunkers.Candidates` | 24 | Hatch columns tried per kept cell (dry, level ground; the first that passes). |
+| `Bunkers.Depth` | { 9, 16 } | The floor this many blocks under the hatch (fewest, most); a city's bunker is 12 under its shed. |
+| `Bunkers.Rooms` | { 3, 6 } | Rooms along the corridor (a bunk room and a storeroom always among them; a city's shed drops some, down to those two, when its town has no room for them). |
+| `Bunkers.Lit` / `Overrun` | 0.8 / 0.15 | Shares lit (ceiling lamps) and overrun (moss, cobwebs, half the lamps gone, bones in the loot). |
+| `Bunkers.SpawnClearance` | 64 | No bunker within this many blocks of the spawn. |
 | `StructureMaxLevel`       | 2       | Highest LOD level that still shows trees and library structures.   |
 | `Structures.Permission`   | {}      | Who may use structure blocks and jigsaws in creative besides operators (the owner, `Gameplay.Admins` and Studio among them): user ids, or true (anyone in creative) / false. |
 | `Structures.MaxSize` / `MaxOffset` | 48 / 48 | A structure block's largest size and relative position per axis (Minecraft's). |
@@ -1980,7 +2228,7 @@ for performance:
 | `Structures.DataPieceChars` | 16000 | Structure text travels in pieces of this many characters, `DataPiecesPerSecond` (20) a second. |
 | `Structures.Generate`     | true    | Library structures generate in the world; false: none do.          |
 | `Locate.BudgetMs` / `TimeoutSeconds` / `Queue` | 3 / 20 / 8 | `/locate`'s searches: milliseconds of each server frame, how long one may run before answering not found, how many may wait. |
-| `Locate.StructureRings` / `Radius` | 100 / per kind | How far structures are searched: rings of placement regions (Minecraft's 100), and blocks for the built-in kinds (`mineshaft` 4096, `oil` 16384, `lake` 4096, `cave` 3072, `ravine` 6144). |
+| `Locate.StructureRings` / `Radius` | 100 / per kind | How far structures are searched: rings of placement regions (Minecraft's 100), and blocks for the built-in kinds (`mineshaft` 4096, `oil` 16384, `lake` 4096, `cave` 3072, `ravine` 6144, `city` 24576, `bunker` 6144). |
 | `Locate.BiomeRadius` / `BiomeStep` | 6400 / 32 | Minecraft's biome search (times the world's climate scale, at most 2: Large Biomes). |
 | `Locate.PoiRadius` / `PoiGeneratedNear` | 256 / false | Points of interest within this many blocks (3D); true: generated ones only in loaded chunks. |
 | `Render.Textures`         | true    | Draw the texture pack's textures (the Textures setting); false: every block in its plain material and colour. |
@@ -2044,13 +2292,35 @@ for performance:
 | `Entities.ItemLifetime`   | 300     | Seconds before a dropped item disappears.                           |
 | `Entities.MaxItems`       | 1000    | Most dropped items at once (the oldest go first).                   |
 | `Mobs.Enabled` / `Spawning` | true / true | Mobs at all (false: none spawn, tick or are sent) / natural spawning (`/summon` still works). |
-| `Mobs.MaxMobs` / `MaxPassive` / `MaxHostile` | 300 / 120 / 160 | Most mobs in the world, creatures and monsters among them.  |
-| `Mobs.PassiveCap` / `HostileCap` | 10 / 15 | Most creatures / monsters within 128 blocks of a player for spawning to go on. |
+| `Mobs.MaxMobs` / `MaxPassive` / `MaxHostile` | 320 / 120 / 200 | Most mobs in the world, creatures and zombies among them (360 / 260 while a blood moon is up: `Apocalypse.BloodMoon.MaxMobs` / `MaxHostile`). |
+| `Mobs.PassiveCap` / `HostileCap` | 10 / 20 | Most creatures / zombies within 128 blocks of a player for spawning to go on; the zombies' is the night's (by day × `Apocalypse.Zombies.DayFactor`: 7; in a city × `CityFactor`: 35 and 12; a blood moon's cap instead through one; 0, as Peaceful: no zombies and no waves). |
 | `Mobs.HostileInterval` / `PassiveInterval` / `Attempts` | 20 / 400 / 3 | Ticks between spawning rounds of monsters and creatures; packs tried per player a round. |
 | `Mobs.SpawnDistance`      | 24, 44  | Blocks from a player a pack spawns (never within 24 of anyone).     |
 | `Mobs.ForgetTicks`        | 6000    | A creature with no player within 128 blocks this long is dropped (memory). |
 | `Mobs.TrackingDistance` / `SyncTicks` | 64 / 2 | Players see mobs this close; their state is sent every SyncTicks ticks while it changes. |
 | `Mobs.AttacksPerSecond`   | 10      | Attacks a player may send a second.                                 |
+| `Mobs.Rig.MaxRigs` / `MaxFull` | 40 / 16 | Most zombies drawn as R15 bodies, and as full ones (the rest of the nearest 40 as the simpler 8-box body, everyone else as two boxes). |
+| `Mobs.Rig.FullDistance` / `ReducedDistance` | 16 / 40 | Blocks from where the player hears and sees (the camera, kept within 4 blocks of the eyes) within which a zombie is drawn in full / as the simpler body. |
+| `Mobs.Rig.Hysteresis` | 4 | Blocks past a distance before a zombie's drawing changes back (and how much nearer a newcomer must be to take a capped place), so zombies at an edge don't flicker. |
+| `Mobs.Rig.SpareFull` / `SpareReduced` | 12 / 16 | Bodies of each kind kept for reuse when zombies go (none are made while a horde comes and goes). |
+| `Mobs.Rig.ShadowParts` | 3 | How many of the head, upper torso and lower torso cast shadows (the simpler body: of the head and torso); 0 for none. |
+| `Apocalypse.Enabled` | true | The zombie apocalypse's rules: false turns off the director, noise, breaking, blood moons, bites, wounds, sprint noise, the day counter and its toasts (zombies then just hunt what they see; a saved infection is kept but dormant: nothing shows, grows, hurts or holds regeneration back, so turning it on again loses nothing). |
+| `Apocalypse.Zombies.DaySpawning` / `DayFactor` / `DayLightBudget` | true / 0.35 / 2048 | Zombies spawn by day on floors under the open sky with no block light, the cap times DayFactor (the light search's cell budget: 2048 sees as far as a torch's light reaches on open ground, 13 blocks). |
+| `Apocalypse.Zombies.CityFactor` | 1.75 | Caps times this while the player stands in a city. |
+| `Apocalypse.Zombies.Separation` | 0.1 | Extra room (blocks) zombies keep from each other. |
+| `Apocalypse.Zombies.ThinDistance` / `SightInterval` | 32 / 3 | An idle zombie this far from every player thinks every 4th tick; a chasing one checks its line of sight every 3 ticks. |
+| `Apocalypse.Zombies.BreakReach` / `HuntBreakReach` | 8 / 16 | Zombies break blocks only this near (horizontally) what they go for / the player they hunt. |
+| `Apocalypse.Zombies.HuntRadius` / `HuntKeep` | 44 / 56 | Blood moon: zombies this near a player hunt them, and keep on while this near. |
+| `Apocalypse.Zombies.Leave` | Interval 600, Ticks 600, Distance 24, StuckTicks 400 | Leave rounds every Interval ticks by day; a zombie sent away walks off for Ticks and goes once Distance blocks from everyone and unseen; a hunter that got no closer in StuckTicks gives up. |
+| `Apocalypse.Zombies.RiseOnDeath` / `RiseDelay` | true / 100 | An infected player's death raises a Zombie this many ticks later, where they fell. |
+| `Apocalypse.Noise` | Sprint 8, Break 10, Glass 16, Place 6, Door 10, Container 6, Hit 8, Hurt 10, explosions 24 + 12 a power (56 at most), Scream 48 | Noise radii (blocks); × `NightFactor` 1.25 at night, × `RainFactor` 0.7 where it rains; a zombie investigates for `InvestigateTicks` 400; at most `MaxPerTick` 32 a tick, merged within `Merge` 4; `Enabled = false`: none. |
+| `Apocalypse.Breaking` | Enabled, Decay 100, HitInterval 20 | Zombies breaking blocks; damage fades after Decay idle ticks; a thud every HitInterval ticks. |
+| `Apocalypse.Infection` | 12000 × 4 stages | `StageTicks`, `Stages` (death at their product), `BiteAdvance` (2400: a bite while infected), `RollInterval` (100: one roll a player), `ArmorShield` / `ArmorShieldMax` (0.0375 a point, at most 0.75), `DamageInterval` (100: stage IV's half heart); `Enabled = false`: no bite infects. |
+| `Apocalypse.Bleeding` | 400 ticks, amplifier ≤ 1 | `Ticks` a wound gives at least, `MaxAmplifier`; `Enabled = false`: no wounds. |
+| `Apocalypse.BloodMoon` | Every 3, First 3, Start 12500, End 23500, Ramp 600 | Blood moons: every Every-th night from the First, Start to End ticks into the day, ramping in and out over Ramp; `Enabled = false`: none. |
+| `Apocalypse.BloodMoon` waves | WaveInterval 600, WaveBase 6, WavePerMoon 2, CapBase 24, CapPerMoon 4, CapMax 60, HuntInterval 100 | Waves of WaveBase + WavePerMoon × k a player every WaveInterval ticks into a cap of CapBase + CapPerMoon × k (at most CapMax), k the moon's number; hunts given out every HuntInterval ticks; the world's limits `MaxMobs` / `MaxHostile` 360 / 260 meanwhile. |
+| `Apocalypse.BloodMoon.Tint` / `TintStrength` / `MoonSize` | {170, 28, 28} / 0.55 / 1.6 | The red sky: the light's and haze's tint at full strength, the moon's size (times the place's). |
+| `Apocalypse.Survivor` | DayCounter true, SyncTicks 1200 | The day counter for everyone (false hides it whatever the setting says); how often the server sends each player their record. |
 | `Mana.Enabled`            | true    | Terraria's mana: stars on the HUD, regeneration, magic weapons, mana potions' mana and Fallen Stars (false: none of it; the store still saves what a character has). |
 | `Mana.Base` / `PerCrystal` / `MaxCrystals` / `Max` | 20 / 20 / 9 / 400 | Mana to start with, per Mana Crystal used, crystals usable (200 with nine), and the most with accessories. |
 | `Mana.SicknessSeconds` / `SicknessMax` / `SicknessDamage` | 5 / 10 / 0.05 | Mana Sickness: seconds each mana potion adds, the most, and the share of magic damage cut per second left. |
@@ -2249,6 +2519,35 @@ can't see):
 - **The cost:** run `tools/probes/RebaseProbe.client.luau` on a PC and a phone and apply its rule
   (`tools/probes/README.md`) to `Origin.RebaseDistance` / `SoftDistance` and far meshes.
 
+**Studio checklist for the zombie apocalypse** (still to take: the Lune specs, ApocalypseGlue
+among them, play every rule out on a real world server, but only Studio shows how it looks, sounds
+and costs on a device):
+
+- **The rigs' cost:** run `tools/probes/ZombieRigProbe.client.luau` on a PC and on the lowest
+  target phone (both passes, rigs and boxes), note its line (Lua ms median / p90 / max, frame ms,
+  parts moved, rigs, parts made after the warm-up: 0, flames lost: 0) and apply the decision
+  table in `tools/probes/README.md` to `Config.Mobs.Rig`; until then the rigs' cost on a low-end
+  device is only Lune's (0.17 ms native, 0.97 ms interpreted a frame for 60 zombies).
+- **The rigs' look:** every kind walking, running, crawling, hitting, hammering at a door and
+  shrieking; a brute at a doorway and on a ladder; `/summon zombie_brute` and the other kinds.
+- **A bite:** infection through a Herbal Poultice and Antibiotics (Weakness after a late cure),
+  bleeding stopped by a Bandage, and an infected death rising as a zombie in the player's clothes.
+- **A blood moon:** `/time set 61000` on day 3's night: the red sky, the bigger moon, the boom and
+  toasts, waves of hunters on the ground (none on roofs); `/time set day` and `maxMobs` is back to
+  320; zombies round a player sealed in a bunker walk off at dawn.
+- **A horde breaking in:** a door, a plank wall and a Barricade of a city building giving way.
+- **The survival HUD:** the day line wrapping on an iPad (1180 × 820) the day before a moon, the
+  toasts' widths, no "You survived" toast after dying under the moon; the regeneration pause with
+  Tough As Nails' thirst and temperature both off; with `Characters.Enabled` off, the survivor
+  record and an infection kept in the world's player record.
+- **The bunkers:** the hatch by right click from above and below and its sound heard by the user,
+  climbing out with the real controller, the caves revealed in the airlock.
+- **The ruins:** city chunks, far massing and the map's overlay on a real client; the first
+  wrapped column of a new city or road region on the client's main thread (1.6-2.2 ms median in
+  Lune, up to about 5) in the MicroProfiler.
+- **Old worlds and commands:** a world saved before the ruins (no `ruins` key) loads without them;
+  `/locate structure #ruins`, `city` and `bunker`; `/locate poi medicine_cabinet`.
+
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,
 `"singleBiome"`, `"largeBiomes"`, `"debugBlocks"`, `"debugStructures"`, `"debugBiomes"`) and
@@ -2309,8 +2608,14 @@ with their own Volume and PlaybackSpeed (times the volume settings, varied a lit
 built-in ones), heard as far as the event (16 blocks). To change the defaults instead, edit `id`,
 `volume` and `pitch` in SoundList: block types have a `dig` clip (breaking, placing) and a `step`
 clip (walking, mining hits, falls), scaled per action like Minecraft. A block's sound type is its
-`sound` in BlockList (`sound = "metal"`), else its material's. Server scripts can play any event
-to the players near a point:
+`sound` in BlockList (`sound = "metal"`), else its material's. The apocalypse's sounds are
+events like the rest, so a Sound of the same name replaces each: `entity.zombie.ambient` (a
+groan, played by each client), `entity.zombie.attack_wooden_door` and `.break_wooden_door` (a
+zombie bashing a block and breaking it through), `entity.zombie_screamer.scream`, the voices'
+`entity.zombie.hurt` / `.death` (and the runner's, brute's and screamer's own),
+`block.bunker_hatch.open` / `.close`, `item.bandage.apply`, `item.medkit.use`,
+`item.pills.swallow` and `ambient.blood_moon.rise`. Server scripts can play any event to the
+players near a point:
 
 ```lua
 local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
@@ -2483,44 +2788,72 @@ mix({ "Marble", "Coal" }, "DarkMarble")                       -- shapeless
 smelt("Marble", "SmoothMarble")                               -- furnace
 ```
 
-**A mob.** Append a kind to `src/shared/Entities/MobList.luau` (ids are list positions, sent as a
-u8: at the end) with Minecraft's numbers; everything else follows from its record:
+**A zombie kind (or any mob).** Append a kind to `src/shared/Entities/MobList.luau` (ids are list
+positions, sent as a u8: at the end); everything else follows from its record. Zombie kinds are
+data: an archetype is one `zombie({ ... })` call, the helper filling in what every zombie shares
+(`hostile`, the apocalypse's rules, `follow` 24, `infect` 0.04, `bleed` 0.15, the zombie's
+voice), the record its numbers, its R15 rig and its looks:
 
 ```lua
-table.insert(list, {
-	name = "Goat", hostile = false,
-	width = 0.9, height = 1.3, eye = 1.1, health = 10, speed = 0.2,
-	wander = 1, panic = 1.25,                                  -- speed modifiers
-	drops = { { item = "Leather", min = 0, max = 1 } },        -- loot (chance?, byPlayer?)
-	spawn = { weight = 5, group = { 2, 3 } },                  -- creatures: on grass, in the light
-	sounds = { hurt = "entity.goat.hurt", death = "entity.goat.death" }, -- SoundList events
-	parts = {                                                  -- at most 2 boxes, +Z forward
-		{ size = { 0.9, 0.9, 0.9 }, offset = { 0, 0.75, 0 }, color = { 220, 214, 200 } },
-		{ size = { 0.4, 0.45, 0.4 }, offset = { 0, 1.0, 0.55 }, color = { 200, 190, 170 } },
-	},
-	color = { 220, 214, 200 },                                 -- WAILA's icon
-})
+table.insert(list, zombie({
+	name = "ZombieMiner", displayName = "Miner Zombie",
+	width = 0.6, height = 1.95, eye = 1.74, health = 26, speed = 0.22,
+	armor = 4, attack = 4, breakPower = 2.5,                     -- hits, and digs walls faster
+	drops = { FLESH, BONE, { item = "Coal", min = 1, max = 3, chance = 0.4 } },
+	spawn = { weight = 3, cityWeight = 1, hordeWeight = 2, group = { 1, 2 } }, -- wild, city, horde
+	rig = { kind = "R15", gait = "shamble", width = 0.85 }, -- shamble, run, brute, crawl or lurch
+	looks = wardrobe({                                           -- outfits, one picked by weight
+		{ name = "Overalls", weight = 10, shirt = { 90, 80, 70 }, pants = { 50, 60, 90 },
+			shoes = { 60, 44, 30 }, vest = { 50, 60, 90 },
+			hat = { kind = "helmet", color = { 220, 190, 60 } } },
+		{ name = "Shirtless", weight = 4, pants = { 60, 60, 66 }, legs = "shorts", torn = 0.4 },
+	}),
+	parts = standing(0.6, 1.95, { 90, 80, 70 }),                 -- far stand-in, WAILA's colour
+}))
 ```
 
-A monster (`hostile = true`) hunts players within `follow` blocks and hits for `attack` half
-hearts; `burnsInDaylight`, `climbs`, `darkOnly`, `leap`, `fuse = { ticks, power, start, cancel }`
-(a creeper) and `bow = { range, draw, interval, min, max }` (a skeleton) give it Minecraft's
-behaviours (`server/Mobs/MobAI`). Add its two sound events at the end of SoundList. From a server
-script:
+- **Abilities** are fields MobAI's zombie rules read, so no server code names a kind: `breakPower`
+  (progress a tick on a block's `zombieBreak`), `hearing` (times a noise's radius), `scream = {
+  radius, cooldown }` (a screamer's shriek), `fireImmune`, `knockbackResist` (0..1), `infect` and
+  `bleed` (a landed hit's chances, before armor), `follow` and `chase`; `spawn.hordeGrowth` makes
+  it more common each blood moon.
+- **A look** is a row of `looks` (or `looksFrom = "Zombie"` to wear another kind's): `shirt` (nil:
+  shirtless), `pants`, `shoes` (nil: barefoot), `sleeves` ("long", "short" or "none"), `legs`
+  ("long" or "shorts"), `gloves`, at most two of `vest`, `stripes` and `hat` (`cap`, `helmet`,
+  `hardhat`, `firehelmet` or `beanie`), and the `torn` and `blood` odds. Up to 31 looks a kind fit
+  the variant byte with the skin tones, and every client dresses a zombie the same from its
+  variant and id, so nothing more is sent. A new gait is a profile in client `Entities/MobRig`
+  (`GAITS`); a new kind of motion is code in its `angles`.
+- **Its voice:** the zombie's, or one of its own: a line in SoundList's `MOB_VOICES` (`{ kind =
+  "zombie_miner", hurt = 0.9, death = 0.85 }` makes `entity.zombie_miner.hurt` and `.death`, which
+  `sounds = { hurt = ..., death = ... }` names; swap them like any sound). Its knowledge goes in
+  `Progression/Knowledge.MOBS` (else 3 a kill); `/summon zombie_miner` finds it by itself.
+
+A creature (`hostile = false`, no `zombie`) is a plain record with Minecraft's numbers: `wander`
+and `panic` speeds, `spawn = { weight, group }` (on grass, in the light), and at most 2 `parts`
+boxes (+Z forward; `variants` recolour the first, as sheep's wool). From a server script:
 
 ```lua
 local Mobs = require(game.ServerScriptService.IceVoxel.Mobs.Mobs)
-local id = Mobs.spawn("Zombie", x + 0.5, y, z + 0.5)            -- feet position (blocks)
+local id = Mobs.spawn("ZombieMiner", x + 0.5, y, z + 0.5)     -- feet (blocks); a variant may follow
 Mobs.damage(id, 4, nil, x, z)                                 -- half hearts, knocked back from (x, z)
 for _, mob in Mobs.near(x, y, z, 16) do print(mob.kind, mob.health) end
 Mobs.died:Connect(function(killer: Player?, kind: string, x, y, z, id)
 	if killer then print(killer.Name, "killed a", kind) end
 end)
+Mobs.playerHit:Connect(function(player: Player, kind: string, damage: number, fresh: boolean, id)
+	-- a zombie's hit landed (Apocalypse/Survival rolls its bites and wounds here)
+end)
 ```
 
-**Food.** `src/shared/Items/Foods.luau` lists what eating an item does: `[Items.id.CookedBeef] =
-{ heal = 4 }` (half hearts) with an optional `effect = { kind = "thirst", chance, ticks }`; any item
-in the table is eaten with the 32 tick hold, with no other change.
+**Food and medicine.** `src/shared/Items/Foods.luau` lists what using an item does:
+`[Items.id.CookedBeef] = { heal = 4 }` (half hearts) with an optional `effect = { kind = "thirst",
+chance, ticks }`, and for the apocalypse's tins and medicine `useTicks` (the hold, 32 by default),
+`cures` (effect names: Bleeding, the Infection), `effects` (given when it finishes), `aftermath`
+(an effect after curing an infection that had reached a stage: Antibiotics' Weakness), `setback`
+(the Herbal Poultice), `sound` and `burp`. Any item in the table is used with its hold and no other
+change; `Foods.canUse` decides when (hurt, or something it cures, or any time for a food with
+effects).
 
 **Ages, skills and knowledge.** A new result belongs to the Stone Age (open to everyone) unless
 an Age names it: add its name to that Age's `recipes` in `src/shared/Progression/Ages.luau` (a
@@ -2596,8 +2929,10 @@ textures have no Average. The generator writes nothing for a pack with errors (i
 `"rbxassetid://<number>"`, unknown fields, bad averages, and whatever Blocks refuses) and warns
 about a normal map that repeats its colour map and about filled textures no block uses.
 
-**Blank entries.** `Color = ""` means "not made yet": 60 entries wait for you (`--list` names
-them). While a block's sides and top are blank it keeps its plain Roblox material and colour, as
+**Blank entries.** `Color = ""` means "not made yet": 102 textures wait for you (`--list` names
+them; the apocalypse's asphalt, road lines, concrete, aged bricks, rusty metal, supply crate,
+medicine cabinet and bunker hatch among them, and its items' `Icons` are blank too). While a
+block's sides and top are blank it keeps its plain Roblox material and colour, as
 without textures. A part takes one MaterialVariant on all six faces, so once its sides' texture is
 filled in (or its top's, when the bottom has no other filled texture) its blank faces show that
 one: a log's ends show the bark until `"log top"` is filled, cut sandstone's blank sides show the
@@ -3091,14 +3426,17 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 1,754 tests, all passing (lava and oil have LavaOil,
-LavaOilServer, LavaOilClient, LavaGeneration, OilWells, Refinery and Combustion; the texture pack
-has TexturePack, TextureLooks and FarLooks; fire has Fire; Tough As Nails has ToughAsNails, Herbs
-and SurvivalGear; mobs have Mobs and MobsClient; status effects and potions have Effects; knowledge,
-Ages and skills have Progression; where those three meet, Crossover; the floating origin and "fake
-coords" have Origin, Rebase, PlayerSync, PositionStore, MoveCheck, Interest, RemoteMotion and
-LocalPosition; the server's preloading has ServerGeneration; `/locate` has Locate, LocateCommand and
-LocatePoi).
+`lune run tests/run` runs the whole suite: 2,071 tests, all passing (the zombie apocalypse has
+Apocalypse (its registries and shared rules), Zombies (the server's zombies, the director, tracking
+and their costs), MobRig, MobRigPool, ZombieVoices and ZombieRigProbe (the rigs), Infection, Medical
+and Survivor (survival), Cities, Bunkers and, where they all meet on a real world server,
+ApocalypseGlue; lava and oil have LavaOil, LavaOilServer, LavaOilClient, LavaGeneration, OilWells,
+Refinery and Combustion; the texture pack has TexturePack, TextureLooks and FarLooks; fire has Fire;
+Tough As Nails has ToughAsNails, Herbs and SurvivalGear; mobs have Mobs and MobsClient; status
+effects and potions have Effects; knowledge, Ages and skills have Progression; where those three
+meet, Crossover; the floating origin and "fake coords" have Origin, Rebase, PlayerSync,
+PositionStore, MoveCheck, Interest, RemoteMotion and LocalPosition; the server's preloading has
+ServerGeneration; `/locate` has Locate, LocateCommand and LocatePoi).
 
 The test loader (`tests/lib/Loader`) passes `script`, `require` and `game` to each module as
 arguments rather than through an environment table, so Luau's fast builtins stay on and Lune
@@ -3138,11 +3476,43 @@ Natural next steps, roughly in order:
 - **More of Mekanism.** Machines on the machine framework, side configuration for machines, energy
   items and the Energy Cubes' charge slots, gases (Pressurized Tubes), heat (Thermodynamic
   Conductors) and the Logistical Sorter.
-- **More combat and mobs.** Players can't hurt each other yet (PvP), there are no bows, critical
-  hits, sweeps or enchantments, mobs steer straight at their goal (no path finding: a wall with a
-  door in it stops them) and don't push each other apart; skeletons' arrows are hitscan, not
-  projectiles; more kinds (endermen, slimes, wolves, villagers), breeding and taming, mob light
-  levels by biome, baby mobs, sheep shearing and dyes.
+- **More combat and mobs.** Players can't hurt each other yet (PvP), there are no bows, guns,
+  critical hits, sweeps or enchantments; more kinds (wolves, villagers, other survivors), breeding
+  and taming, mob light levels by biome, baby mobs, sheep shearing and dyes. Animals don't push
+  each other apart (zombies do).
+- **Hordes that find their way.** Zombies and blood moon hordes steer straight at what they go
+  for: no path finding. A wall between a zombie and the player it is after is broken through if
+  the zombie can break it, never walked round, and against one it can't break (iron, a chest) it
+  stands until it loses interest; a hunter that gets no closer for 20 seconds gives up and leaves.
+  They never dig down or up towards a player (only from a block below their feet to two above),
+  never break a block more than 8 blocks (16 for hunters) from what they go for, and an idle
+  zombie more than 32 blocks from every player thinks every 4th tick, so far crowds wander a
+  little slower.
+- **Zombies' bodies.** They are anchored boxes posed in code, not Humanoids: no clothing images,
+  faces, layered accessories or Roblox animations, no ragdoll (a dying zombie tips over like any
+  mob), hats are single boxes without brims. The drawn bodies are bigger than the hitboxes in
+  places (a brute's shoulders and head go through door frames and lintels, a crawler's head and
+  arms reach past its 0.8 block box and its hands press into the ground as it claws); hits and
+  collisions use the boxes. Limbs never move faster than 17.4 studs a second, so a runner's feet
+  slide a little at full sprint and a swing in mid-stride takes a few frames longer.
+- **The ruins.** Old worlds stay without them: a world saved before the apocalypse has no Ruins
+  setting and reads it as off, so no city levels the ground next to its edited chunks
+  (`Config.Cities.OldWorlds = true` opts such worlds in: the ruins then appear only in ground
+  nobody edited, and may leave a cliff against an edited chunk). Beyond full detail a building is
+  its massing (levels 1-2 its decayed envelope, 3-4 one height per building), none past level 4;
+  roads are drawn to level 2. Roads link only cities within two cells, never bridge more than 48
+  blocks of water and never tunnel. Floors above the fourth are shells (a facade, a ring of rooms
+  and a solid core, no ladder up): in a city's footprint a spawn or teleport never lands above the
+  last full floor. Bunkers are full detail only (a hatch appears when its chunk does), and a
+  city's needs room inside the footprint: a shed 10-14 blocks inside a town's north edge keeps
+  3-5 rooms, and two sheds close together may leave one only its bunk room and storeroom. The All
+  Structures sample town's shed has no bunker under it.
+- **Survival's corners.** With thirst and temperature both off the server guesses sprinting from
+  the feet's speed (over 5 blocks a second), so a fast fall or a push may count as a noise. The
+  blood moon's sky follows the camera's sky exposure (caves keep their colour), and with
+  `Lighting.Enabled = false` the place keeps its own sky. `/effect clear` cures an infection
+  without the antibiotics' Weakness; Resistance V makes a player immune to the infection's last
+  tick. A `/time set` past a blood moon's end counts the moon without its "You survived" toast.
 - **More of lava and oil.** Basalt, water aquifers,
   BuildCraft's oil springs and its refinery's heat and by-products, fire-resistant items, lava
   particles, and lava's lights in far chunks (they carry none: a far lava lake is unlit Neon).
@@ -3152,7 +3522,7 @@ Natural next steps, roughly in order:
   meal, sugar cane, seagrass and kelp, lily pads, vines, sweet berry bushes, and wheat, so grass
   can drop seeds. Plants are drawn only within `Lod.FoliageDistance`; Minecraft draws them to the
   render distance, which would need them merged into far fewer parts or meshes.
-- **More of the texture pack.** The 61 blank textures and every texture's Average; see-through
+- **More of the texture pack.** The 102 blank textures and every texture's Average; see-through
   leaves and glass once Roblox turns MaterialVariant cut-outs (`AlphaMode`) on for game clients
   (off as of October 2026, so block textures are opaque, and sprites are Decals on thin parts);
   the Studio checks above (tiling, grass sides, far mesh UVs).

@@ -51,7 +51,10 @@ node key) and `posKey(x, y, z)` for block positions.
 
 1. **Columns.** For every padded column, `sample(x, z, level)` computes the height and surface:
    - the *relief* (`Relief.luau`, below) gives the height, the height without rivers, the
-     terrain-type selector and the river strength;
+     terrain-type selector and the river strength; where the world has ruins it is the cities'
+     wrapped relief (`Cities.relief`: cut and fill under a city's footprint and along its roads,
+     the raw relief everywhere else; see Cities and roads), and a street's or road's top block
+     overrides the surface (`sample`'s 7th value: the filler under it);
    - the *biome* is picked by altitude first: the height without rivers (so a river bed belongs to
      its banks), dithered by a few blocks, falls into one of seven bands (lowland, forest, highland,
      meadow, alpine, snowy slopes, peaks; `BiomeList.bands`), and the biome is the one of that band
@@ -94,46 +97,58 @@ node key) and `posKey(x, y, z)` for block positions.
    7 above y 197 (2 per 128 blocks). Osmium is about as common as iron below y 197 and about half
    as common above. Every feature draws from one random stream per chunk, in list order: new
    features go at the end, so earlier ores never move (a Generation test pins them).
-7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`), then
-   the structure library's jigsaw structures (`StructureGen.luau`), whose air clears trees and
-   whose structure voids keep them. See below.
-8. **Mineshafts** (level 0 only, `Mineshafts.luau`): their pieces carved and furnished as cave air
+7. **Structures** (up to `Config.StructureMaxLevel`): trees and cacti (`Structures.populate`; never
+   on a city's asphalt, sidewalks or lots, nor on a bunker's collar), then the structure library's
+   jigsaw structures (`StructureGen.luau`), whose air clears trees and whose structure voids keep
+   them. See below.
+8. **Cities** (levels 0..`Config.Cities.LodLevels`, `Cities.luau`): the buildings, the streets'
+   decay, overgrowth, cars and loot containers, after the trees and library structures; massing
+   beyond full detail. See Cities and roads below.
+9. **Mineshafts** (level 0 only, `Mineshafts.luau`): their pieces carved and furnished as cave air
    and cave twins, overgrowth, then their entrance shafts open to the sky. See Mineshafts below.
-9. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures and mineshafts, so it only
+10. **Bunkers** (level 0 only, `Bunkers.luau`), after the mineshafts: concrete shells, cave air
+   and cave twins inside, the ladder shaft, the hatch and its collar. See Bunkers below.
+11. **Glow lichen** (level 0 only, `CaveDecor.luau`), after structures and mineshafts, so it only
    clings to rock that is still there; it grows only in cave air, so surface caves get none. See
    below.
-10. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
+12. **Ground plants** (level 0 only, `Foliage.luau`), after structures, so nothing grows under a
    trunk, leaves or a building, nor in or over a pit or an entrance shaft (the column's generated
    top must be ground with air above). See Foliage below.
 
 The generator also returns two hints the mesher uses to skip work: `solidBelow` (everything below is
-rock or cave air; lowered under a structure's cells that are neither, under surface caves' air
-and under ordinary Lava and Oil) and `emptyAbove` (everything above is air; raised over trees,
-structures, plants and geysers' spouts). A dug lake (a geyser's oil lake, a water lake or a
-puddle) lowers its columns' `topCells`, so the sky line and the Horizon summary keep describing the ground, and whatever puts
-cave cells into rock (deposits, the spout below a lake, underground lava lakes) marks the cave
-lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads those cells
-instead of assuming rock; mineshafts, which also put planks, logs and moss into caves, mark every
-lattice cell their pieces and shafts touch as read (`Caves.markRead`: a cell flagged "cave air
-throughout" becomes "read" too).
-`TerrainGenerator.new(seed, options?)` takes the structure library to generate (`options.library`,
-default `Library.load()` while `Config.Structures.Generate` is on; `structures = false` for none);
-`generator.structures(minX, minZ, maxX, maxZ)` lists the generated structures with a piece in a
-rectangle, `generator.structureContainer(x, y, z)` the items a generated chest starts with and
-`generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds
-them, `carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one
-opens. `generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the
-map paints their geysers), `oilLake(well)` a geyser's lake columns, `lavaLakes(...)` the
-surface lava lakes and `waterLakes(...)` / `puddles(...)` the water lakes and puddles.
-`options.biome` (a biome index) puts one biome on every column and `options.climateScale` widens
-the climate noise (World types below); without them a world is byte for byte what it was
-(tests/spec/WorldTypeGenerators pins digests of chunks, columns, the spawn and a map tile).
-`generator.mineshafts(minX, minZ, maxX, maxZ)` (optional: the Default and the debug structures
-world have it) lists the mineshafts whose bounds touch a rectangle, and `structureContainer`
-answers for their chests too (after the library's).
+rock or cave air; lowered under a structure's cells that are neither, under surface caves' air and
+under ordinary Lava and Oil) and `emptyAbove` (everything above is air; raised over trees,
+structures, plants and geysers' spouts). A dug lake (a geyser's oil lake, a water lake or a puddle)
+lowers its columns' `topCells`, so the sky line and the Horizon summary keep describing the ground,
+and whatever puts cave cells into rock (deposits, the spout below a lake, underground lava lakes)
+marks the cave lattice (`Caves.mark`; a chunk without caves gets one), so World/SectionGraph reads
+those cells instead of assuming rock; mineshafts, which also put planks, logs and moss into caves,
+mark every lattice cell their pieces and shafts touch as read (`Caves.markRead`: a cell flagged
+"cave air throughout" becomes "read" too). `TerrainGenerator.new(seed, options?)` takes the
+structure library to generate (`options.library`, default `Library.load()` while
+`Config.Structures.Generate` is on; `structures = false` for none); `generator.structures(minX,
+minZ, maxX, maxZ)` lists the generated structures with a piece in a rectangle,
+`generator.structureContainer(x, y, z)` the items a generated chest starts with and
+`generator.surfaceCaves` the cave entrances and ravines (`worms(minX, minZ, maxX, maxZ)` finds them,
+`carvesTop(x, z)` says whether one opens at a column). `findSpawn` skips columns where one opens.
+`generator.oilWells(minX, minZ, maxX, maxZ)` lists the oil wells near a rectangle (the map paints
+their geysers), `oilLake(well)` a geyser's lake columns, `lavaLakes(...)` the surface lava lakes and
+`waterLakes(...)` / `puddles(...)` the water lakes and puddles. `options.biome` (a biome index) puts
+one biome on every column and `options.climateScale` widens the climate noise (World types below);
+without them a world is byte for byte what it was (tests/spec/WorldTypeGenerators pins digests of
+chunks, columns, the spawn and a map tile). `generator.mineshafts(minX, minZ, maxX, maxZ)`
+(optional: the Default and the debug structures world have it) lists the mineshafts whose bounds
+touch a rectangle, and `structureContainer` answers for their chests too (after the library's).
+Where the world has ruins (the `ruins` option), `generator.cities(...)`, `roads(...)` and
+`bunkers(...)` list them (the map's overlay, the debug world's labels), `cityAt(x, z)` says how much
+a column is in a city (1 inside, 0 outside, between in its margin: SafeSpot, the zombies' caps and
+kinds), `prepare(rect, yield)` warms the cities' caches before a wrapped query, and
+`structureContainer` and `poiBlocks` chain to the cities and then the bunkers. Every planner (oil
+wells, lava, lakes, mineshafts, the library's placer, surface caves, bunkers) reads the raw relief
+(`rawOutsideHeight`, `rawBiomeAt`, `rawRiver`) and keeps out of `cities.blocked`.
 `generator.seaLevel` is the sea's surface (`Config.SeaLevel` here; the map, safe spawning and
-structures' ground read it) and `generator.labels` (optional) lists generated structure blocks
-with settings of their own (the debug structures world's name tags).
+structures' ground read it) and `generator.labels` (optional) lists generated structure blocks with
+settings of their own (the debug structures world's name tags).
 
 ### Relief: JJThunder To The Max style (`Relief.luau`)
 
@@ -525,11 +540,14 @@ RandomSpreadStructurePlacement, written right after the trees at levels up to
   the same draws the full assembly begins with): its box centre's column must be in one of the
   structure's biomes and, with `onLand`, dry and not bare rock (the generator's steep rule). Only
   then is the whole structure assembled, `size` levels deep. Every check reads full detail terrain
-  through the generator's `firstFreeHeight` (Minecraft's WORLD_SURFACE_WG: the ground, or the
-  sea's surface over water), `biome` and `land`, so every chunk and level agrees. Assembled starts,
-  and rejected ones, stay in an LRU per generator of `CACHE_PER_STRUCTURE` (8) per structure, at
-  least `CACHE_SIZE` (48), so the dozens of chunks a structure covers assemble it once per worker
-  and a library of many structures doesn't thrash it.
+  through the generator's `firstFreeHeight` (Minecraft's WORLD_SURFACE_WG: the ground, or the sea's
+  surface over water), `biome` and `land`, so every chunk and level agrees ([ruins] the raw terrain,
+  after `blocked` says the start column and its four neighbours lie outside the cities' area; an
+  optional `Terrain.clear(minX, minZ, maxX, maxZ)` then drops an assembled start whose bounds it
+  refuses, cached as dropped, so no outpost piece lies on a street, a road or a lot: see Cities and
+  roads). Assembled starts, and rejected ones, stay in an LRU per generator of `CACHE_PER_STRUCTURE`
+  (8) per structure, at least `CACHE_SIZE` (48), so the dozens of chunks a structure covers assemble
+  it once per worker and a library of many structures doesn't thrash it.
 - **Which starts.** Stateless, like trees: a chunk asks `starts` for every structure whose start
   position is within its `reach` (Library: every block within that many blocks of the start) of
   the padded box grown by twice the tree radius, and keeps those whose pieces' bounds touch it.
@@ -657,6 +675,223 @@ detail chunks only (caves exist only there), in step 8 after the library structu
 - The debug structures world (`DebugWorlds`) writes two fixed samples (`Mineshafts.sample`)
   through the same module into its floor's stone.
 
+### Cities and roads (`Cities.luau`, `CityLayout.luau`, `Roads.luau`)
+
+The zombie apocalypse's ruins. Everything here is decided from the **raw** relief (`rawRelief`),
+the raw biome, the seed and `Util/Hash` only, never from the generator's `column` or `sample`
+(which read the relief this module wraps: that would recurse). Three modules: `Cities` decides
+where cities and roads are and wraps the relief; `CityLayout` (pure) is what stands in a city,
+parcel by parcel; `Roads` (pure) is a road's geometry and grading. They exist where the world's
+`ruins` option is on (WorldTypes' Ruins setting; a world saved before it reads it as off unless
+`Config.Cities.OldWorlds`), with Generate Structures, `Structures.Generate` and
+`Config.Cities.Enabled`. Tested in `tests/spec/Cities`.
+
+- **Existence** (`Config.Cities`). One candidate per `Grid` (1024) block cell, kept with `Chance`
+  (0.36), from `Hash.rng(Hash.hash3(citySalt, gx, 0, gz))`; then up to `Tries` (4) spots, each a
+  size (`half` = MinRadius // 32 + floor((MaxRadius // 32 − MinRadius // 32 + 1) u²), 1..7, R = 32
+  half + 3, so the footprint starts and ends on a street) and a centre kept `M0` = MaxRadius +
+  Margin + 64 inside the cell (a city and its margin never leave their cell, so a column's city is
+  its own cell's). A spot stands when `Accept` (21) of a 5 × 5 lattice over the footprint pass
+  (|selector| in [0.22, 0.40): hills or plains, river < 0.05, height ≥ sea + `MinAboveSea`, a raw
+  biome neither frozen nor of the mountains) and the passing heights span ≤ 1.5 `MaxSlope`;
+  selectors first (the corners and the middle first), then each sample's height and biome
+  together, stopping at the fifth failure or as soon as the samples passing so far span more than
+  the limit: most rejections cost a few selector samples, some 0.03 ms a cell on average, nothing
+  allocated. Four tries at 0.36 give 6.8-11 cities per 100 km² on seeds 1, 99 and 12345 (one spot
+  at 0.5 gave 4.5-7.5: the lattice refuses many spots).
+- **Site plan** (`CityLayout.plan`, LRU `Caches.Sites` 32): the plateau H (the median of a 9 × 9
+  lattice of raw heights, at least sea + MinAboveSea) and the overgrowth o = `Overgrowth` ×
+  clamp((humidity + 0.8) / 1.4, 0.15, 1) of the centre's raw biome; the parcels' kinds from
+  per-parcel hashes by ring distance d (downtown ≤ 0.35 only in cities of half ≥ 4: d is pulled
+  outwards in towns), with a police station, a fire station and (unless one stands) a pharmacy on
+  the mid ring's lowest hashes, and `Bunkers` (1-2) outer house lots turned into sheds over a
+  bunker's hatch (`bunkerSpots`). Lots are planned lazily (each complete before it is kept);
+  `lotTop` gives a lot's height from the same hashes without planning it.
+- **The wrapper** (`relief.height(x, z, level)`). A 256 block tile's class (a plain integer-keyed
+  table, cleared past 65536) is 0 when no footprint + Margin and no candidate road corridor
+  touches it: the raw values after one lookup. Else the city weight (1 in the footprint,
+  smoothstep over Margin) and, at levels ≤ `Roads.CutLevels`, the road weight (1 within Width / 2
+  + Shoulder of the nearest segment of the tile's 32 block bucket, smoothstep over Blend) pull y
+  towards the plateau or the graded road (at least sea + 1: a causeway); river × (1 − w); u and s
+  stay raw so biomes never shift. One memo of the last column serves the wrapper, `surface`,
+  `protects` and `treeAllowed` alike.
+- **The raw invariant.** Outside the union of `blocked`'s boxes (32-aligned: every footprint +
+  Margin and every *candidate* link's corridor, Wobble + Width / 2 + Shoulder + Blend = 59.5 blocks
+  either side of its gates' straight line, which bounds the Chaikin curve whatever its plan), the
+  wrapped relief equals the raw one and `surface` is nil; `protects` lies inside it. `blocked`
+  needs existence tests only, never a road plan: a cell's candidate links are the pairs of cities
+  within `LinkCells` cells of it and of each other whose corridor touches it, found by testing an
+  end's cell only when the other end stands, never a city's quarter choices. A cold `blocked` of a
+  planner's small rectangle tests 7 cells (median; at most 17), 0.08 ms median and ~1.2-1.5 ms at
+  worst; a planner that may yield passes its yield (`blocked(minX, minZ, maxX, maxZ, yield?)`).
+  Every planner (lakes, wells, lava, mineshafts, outposts, surface caves, bunkers) reads the raw
+  terrain and keeps out of `blocked`, so whatever it accepts stands on ground the wrapper leaves
+  alone, and no planner query ever builds a road plan. The outposts' placer tests `blocked` over
+  the start column and its four neighbours before reading the raw terrain, and drops an assembled
+  start whose bounds reach `blocked` (StructureGen's optional `Terrain.clear`, cached as dropped,
+  so every chunk, `starts` query and `/locate outpost` agrees). Checked over a 4 km square around
+  a city (91,199 columns outside the boxes) and every outpost in 20 km squares on three seeds (399
+  outposts, 11,923 pieces).
+- **Roads** (`Roads.luau`, `Config.Cities.Roads`). A city links to the nearest city in each
+  quarter within `LinkCells` (2) cells; link(A, B) when B is A's choice or A is B's; the gates are
+  the points of the facing footprint sides nearest the other city, on a street's centre line. The
+  plan (from the lower cell's gate): control points every 128 blocks pushed sideways by up to
+  `Wobble`, two rounds of Chaikin, resampled every `Step` (8); raw heights (water raised to sea +
+  1), a 9-vertex moving average twice, the ends pinned to both plateaus over 64 blocks, then the
+  slope clamp (each vertex into the band both ends can reach at `MaxGrade`, then a forward pass).
+  Dropped, at both ends alike, when a water run exceeds `MaxWater`, more than 10% of vertices lie
+  in the mountains, or the grading cuts or fills more than `MaxCut` / `MaxFill`. Segments go into
+  256 block tiles (32 block buckets; LRU `Caches.Tiles` 512, plans `Caches.Links` 64). Surface at
+  levels ≤ `SurfaceLevels`: asphalt within Width / 2 (a dashed Yellow Road Line within 0.5 of the
+  centre, decayed like the streets), a gravel or coarse dirt shoulder out to Width / 2 + Shoulder.
+  Wrecks at vertices with a hash under Cars × Step, square to the road in its right lane. 60-92%
+  of cities with a neighbour get a road (11 of 12 on seed 12345, 16 of 21 on seed 99).
+- **Streets and buildings** (`CityLayout`, its header has every rule): streets every 32 blocks, 7
+  wide (sidewalks, asphalt, the dashed yellow line outside the crossings, and white Road Line
+  crosswalks on lanes 1, 3 and 5 of the rows either side of each crossing: the only place the
+  white line lies; decay: potholes, grass and moss where a 4 block value noise falls in its lowest
+  Overgrown × o share, 4 × 4 cracked patches, the crosswalks fading alike); buildings inset one
+  block from their 25 × 25 lot (houses 10 × 10 in four 12 × 12 lots), 4 blocks a floor; full
+  interiors to `FullFloors` (rooms, a 1 × 1 ladder shaft, containers, cobwebs), above it a facade,
+  a ring of rooms two deep and a solid core; ruin r per building: a jagged top (value noise, per 2
+  × 2 columns in 2 block steps, never below the ground floor's door), walls blown out by 4 block
+  panels and cracked or mossy by 8 block panels (few big boxes for the mesher), slab holes in 4 ×
+  4 patches with rubble under; vines only where the same pure wall function says their wall
+  stands; plants only on soil and carpets on sturdy blocks; trees only in parks (`treeAllowed`).
+  Containers' positions are in the plan; `container(x, y, z)` rolls `ScavengeLoot` with the
+  cities' loot salt (a big city holds about 15 Antibiotics in expectation, every town a Medicine
+  Cabinet).
+- **Writing** (`write(args, yield)`, levels 0..`LodLevels`): the plans and their lots first,
+  yielding as they are planned (a far node over a big city plans ~100 lots, ~4 ms cold), then the
+  writer (`CityLayout.begin` .. `finish`, module state, one chunk at a time per actor), which never
+  yields: another generate on the same actor during a yield would take the writer over. Full
+  detail writes every block, clipped to the padded chunk; levels 1-2 point-sample each building's
+  decayed envelope filled with its wall material (and the rubble mounds); levels 3-4 fill each
+  building's box to its highest decayed top (`envelope`, per 2 × 2 columns), so no skyline
+  flickers between levels. Every block depends only on its position and the plans, so a chunk's
+  padding is its neighbour's core (compared at levels 0-4).
+- **Caching and yields.** `prepare(rect, yield)` builds the cells (with the links' reach), tile
+  classes, sites, and the links and tiles touching a rectangle where a candidate's corridor
+  reaches it, yielding every 64 relief samples; nothing is cached before it is complete and no
+  random stream lives across a yield (plans keep numbers). `generate` prepares its padded chunk
+  plus 2 × (cell + 2) + 16 blocks, MapPainter each tile, `spawnShift` each candidate; after that a
+  generate builds nothing (the `built()` counter). /locate probes run the existence test without
+  caching it.
+- **Spawn** (`spawnShift`): findSpawn searches the raw relief as before, then moves the spawn to
+  the first column passing its strict test (on the wrapped terrain, outside `protects`) on 7
+  bearings (±45° in 15° steps towards the raw spawn) 150-400 blocks outside the nearest city's
+  margin within 3 km; with no city or no candidate, the raw spawn if it passes, else the spiral
+  goes on. SafeSpot (Players) scans a column in a city's footprint (`cityAt` 1) from no higher than
+  one above the last full floor's feet ((FullFloors − 1) × FloorHeight + 1 = 13 blocks over the
+  plateau), in a chunk a player has edited too: above it a tall building's floors are a ring of
+  rooms sealed behind glass with no ladder up, and its broken top is open sky 20-40 blocks over
+  the street.
+- **Measured** (Lune, native, the best of rounds with the two generators taking turns, a 4-core
+  machine): a downtown full detail chunk 3.6-4.4 ms against 2.6-3.1 ms without cities (budget ×
+  1.6 + 3 ms); levels 1-2 3.0 against 2.4-2.6 (× 1.3 + 3); levels 3-4 1.7-1.8 against 1.4-1.5
+  (× 1.2 + 2); plain chunks in a world with cities 1.71-1.82 against 1.67-1.80 off (× 1.05 + 0.5);
+  a cold `prepare` of one 1024 cell and its links 6-17 ms, longest stretch < 1 ms (budget 40 / 3);
+  a map tile at 64 blocks a pixel ~33 ms in 431 yields; a cold findSpawn 7.4-12.6 ms, longest
+  stretch ≤ 0.6 ms; a road or city column's first `column` on a fresh generator 1.6-2.2 ms median,
+  2.8-5.1 ms at worst. A cold downtown chunk's longest stretch between yields is 0.7 ms at levels
+  0, 1 and 3, ~1.3 at 4 and ~1.8 at 2, where the tree pass alone takes it (~1.6-1.8 ms with or
+  without cities): the Cities spec holds it to 3 ms, and it comes in at 3.0-3.1 ms in about one
+  run in ten when the machine is briefly slow. Meshing (tests/bench): downtown chunks 1.44-2.17 ×
+  the parts of the same plain chunks (bound 2.5; 1.38-2.12 before the crosswalks). Server
+  preload (`tests/servergen`): walk1 p99 8.58 ms with cities against 8.36 without (+3%), sprint8
+  8.93 against 8.96.
+
+### Bunkers (`Bunkers.luau`)
+
+The zombie apocalypse's hidden hideouts, on the mineshafts' pattern: plans from hashes and the
+**raw** terrain (TerrainGenerator hands over the raw relief's height, biome and river, like every
+planner, so a wild bunker stands where the cities' wrapper leaves the ground alone), an LRU of
+grid cells, yields, and cell rules that keep hidden caves working and a chunk's padding equal to
+its neighbour's core. Written in full detail chunks only, after the mineshafts; they follow the
+ruins (`Config.Bunkers.Enabled` turns them off alone). Tested in `tests/spec/Bunkers`.
+
+- **Wild sites** (`Config.Bunkers`). One candidate per `Grid` × `Grid` (768) cell, kept with
+  `Chance` (0.35), from `Hash.rng(Hash.hash3(salt, gx, 0, gz))`; then up to `Candidates` (24) hatch
+  columns, each a core column (2..13) of a chunk lying `INSET` (64) blocks or more inside the cell.
+  The first that passes is the hatch: the 5 × 5 collar is dry land (above sea level + 2, no river)
+  within a block of the centre's height; its layout (drawn from the hatch column's own hash, so
+  every chunk agrees whichever candidate it reached first) keeps `COVER` (3) blocks of ground over
+  every room's shell on a world-aligned 4 block lattice, and stays above the caves' lava sea; its
+  bounds keep `SpawnClearance` (64) from the spawn; no surface cave opens on the collar; nothing
+  TerrainGenerator's planners' `blocked` lists (library pieces, oil wells, lava and water lakes,
+  puddles, `cities.blocked`) comes within `MARGIN` (2) of its bounds; and, asked last (a cold
+  mineshaft plan is the dearest lookup), no mineshaft piece or entrance shaft
+  (`mineshafts.boxes`, handed the yield) comes within `MARGIN` of a room's shell or the shaft's
+  column in three dimensions, so a deeper mineshaft may run underneath. Measured: 0.38-0.61 per
+  km² on five seeds (0.59 at most on dry land).
+- **City sites.** `cities.bunkerSpots(rect, yield)` gives each shed's (x, H, z); the hatch goes
+  there, the floor `CITY_DEPTH` (12) under it. A shed may stand only 10 blocks inside its town's
+  edge, so the drawn layout is tried in turn: the most rooms first (extra rooms dropped, never the
+  bunks or the storeroom), at each count the rooms on alternating sides, then all on one side (the
+  side away from a near edge), the corridor heading north, east or west, its first side swapped. A
+  layout is tried by its bounds alone (`layoutBounds`, a few microseconds; `geometry` takes its
+  bounds from it, and the spec checks they are exactly the rooms' boxes and the collar's). The
+  first whose bounds lie within `REACH` (40), inside the footprint grown by `GUARD` + 1 (the
+  footprint is levelled flat to H, so the cover holds without asking the wrapped relief), clear of
+  the other sheds' airlocks and collars, of the whole bunkers of the sheds whose hatch comes first
+  and of the spawn, and that leaves every later shed near it a layout of its own, is the bunker;
+  else the first that fits; when none fits there is no bunker. Under the real cities on five
+  seeds all 123 sheds of 104 towns get one (rooms 2: 1, 3: 37, 4: 36, 5: 28, 6: 21); a lone shed
+  10-14 blocks inside a town's north edge keeps 3-5 rooms. City bunkers skip `blocked` (the
+  city's own area is in it); nothing else is there to avoid.
+- **Layout** (one `Hash.rng` of the hatch column, every draw in a fixed order): the floor `Depth`
+  (9..16) under the hatch's first air, never below `Caves.LavaLevel + 1`; the **airlock** (5 × 5
+  inside, 4 tall) under the shaft, which comes down by its south wall (the ladder's: the open
+  hatch stands up against its cell's north side, across the shaft from the ladder, so a climber
+  pressed against the ladder rises past it and steps out onto the collar); the **corridor** (3
+  wide, 3 tall inside) from its north, east or west wall, at least 10 + 6 × ceil(rooms / 2) long;
+  `Rooms` (3..6) alternating sides from a drawn first side: exactly one bunk room (7 along × 9 deep)
+  and one storeroom (7 × 7), then by weight medical (5 × 7), generator (7 × 7, one at most),
+  armory (5 × 7, one at most) or mess (7 × 9), their order shuffled. Doorways are 1 × 2 openings
+  (a door in cave air would be drawn while caves are hidden). Everything lies within `REACH` (40)
+  of the hatch (asserted), which bounds the cells a lookup builds.
+- **Writing** (`write`): per plan, every room's shell, then every inside, the doorways, the
+  furnishings, the lamps and cobwebs, then the shaft, hatch, collar and plants. A shell or inside
+  cell is written only up to its column's limit (Mineshafts' `limitAt`: `GUARD` (2) under its own
+  and its four neighbours' surfaces; past the padding the generator's wrapped relief), there it
+  becomes Concrete (10% cracked, 35% mossy when overrun; the floor Concrete or Smooth Stone) or
+  cave air whatever was there, so a bunker is sealed and no fluid ever borders its inside.
+  Furnishings are opaque full blocks (Planks, White Wool, Supply Crate, Chest, Medicine Cabinet,
+  Iron Block, Rusty Metal, Furnace, Coal Block, Crafting Table: nothing to twin); lamps and cobwebs
+  go in as their cave twins (CaveCeilingLamp, CaveCobweb). The shaft: the plain `Ladder` (on the
+  shaft's south wall) from the ground's top layer down to the floor, its walls Concrete from the
+  airlock's ceiling up, the shut `BunkerHatch` at the first air, the 8 collar cells Concrete or
+  Mossy Concrete with the ground over them cut level, and 70% of the ring two blocks out planted
+  with grass and ferns where the soil takes them. Each room's outer box and the shaft are marked
+  `Caves.markRead`.
+- **TerrainGenerator.** `bunkers.keepOut(rect, yield)` (the collars: no tree, no surface cave) is
+  asked at the levels that read it (up to 2); the planners' `blocked` and the mineshafts' `boxes`
+  are handed over apart; plans at level 0 next to the mineshafts', `write` after them; underground
+  lava lakes keep off `boxes` (every room grown by 2 and the shaft); `structureContainer` and
+  `poiBlocks` chain to the bunkers last.
+- **Loot and POIs.** `container(x, y, z)` is `ScavengeLoot.roll(table, salt, x, y, z)` with the
+  bunkers' loot salt (`bunker_storage`, `bunker_medical`, `bunker_armory`, `bunker_generator`); an
+  overrun bunker's containers roll with another salt and add Bone (1-3) and Rotten Flesh (1-4) in
+  free slots. `poiBlocks` lists every container and hatch from the plans.
+- **The hatch** is a `toggle` block (`menu = "Toggle"`: `Shared/Blocks/Toggles`, pure, swaps
+  BunkerHatch and BunkerHatchOpen and names the sound; server `Players/ToggleUse` applies a Use,
+  10 a second at most, for everyone but spectators, with no client prediction, so its sound
+  reaches the user too and NoiseRules makes it a door's noise). Its `zombieBreak` is 0; the shut
+  plate is ground to MobPhysics (`dropAt`), the open one a drop.
+- **Locating.** "bunker" on the 768 grid: a cell's probe is its hash (a wild candidate) or a city
+  in one of the city cells overlapping it, answered at the cell's centre; the verify builds the
+  cell's wild plan and the city bunkers whose hatch lies in the cell (yielding) and answers the
+  hatch nearest the player, with its y.
+- **Costs** (Lune, against the same world without bunkers, the generators in turn): full detail
+  chunks over two bunkers 3.7-4.1 ms against 3.5-3.7 ms warm, 5.1-5.4 against 4.8-5.1 from fresh
+  generators (budget ×1.15 + 2 ms); far nodes (levels 1-2) the same warm; a cold plan lookup at a
+  hatch (a fresh generator) median 8.9-10.9 ms against a plain chunk's 7.6-9.7 ms (about 1.2-1.3
+  chunks, more than the design's "under one chunk": it decides the mineshafts and surface caves
+  around the hatch), the worst 21-31 ms; plain chunks spread over 12 km within × 1.05 + 0.5 ms at
+  the median at levels 0-4 (the level 2 bound is the tightest: about 4% of margin when the "without"
+  median comes out low); a cold plan search's longest stretch between yields 0.5-0.9 ms (budget
+  3 ms), at most `PAUSE` (64) terrain lookups between yields.
+
 ### Glow lichen (`CaveDecor.luau`)
 
 Minecraft 1.20.1's `glow_lichen` feature (104-157 tries a chunk on stone-type faces 13+ blocks
@@ -742,16 +977,20 @@ players get with the menu off; `debug`: the screen lists these last). The server
 `ReplicatedStorage.IceVoxel`; the server, the client boot and every chunk worker build the same
 generator from them (`fromAttributes`); `published` reads the type back once the world exists.
 `Config.World.Type` / `Config.World.Options` choose the world a server starts without the menu.
+The **Ruins** setting (`ruins`, a toggle on the Default, Single Biome and Large Biomes; on by
+default) turns the cities, roads and bunkers on; a world saved before it existed has no `ruins`
+key in its options and reads it as off (server `Save/WorldMeta`), so no city cuts or fills the
+ground next to its edited chunks, unless `Config.Cities.OldWorlds` (ApocalypseGlue checks both).
 
 | Type | Generator | Notes |
 | --- | --- | --- |
-| Default | TerrainGenerator | `structures` toggle |
+| Default | TerrainGenerator | `structures` and `ruins` toggles |
 | Superflat | Superflat on LayeredGenerator | `preset` text (layers bottom up, then the biome), `decoration` toggle |
 | The Void | LayeredGenerator | 33 x 33 stone platform at y 64, cobblestone centre; no mobs |
-| Single Biome | TerrainGenerator `biome` | `biome` choice (BiomeList), `structures` |
-| Large Biomes | TerrainGenerator `climateScale = 4` | `structures` |
+| Single Biome | TerrainGenerator `biome` | `biome` choice (BiomeList), `structures`, `ruins` |
+| Large Biomes | TerrainGenerator `climateScale = 4` | `structures`, `ruins` |
 | Debug: All Blocks | DebugWorlds on LayeredGenerator | every block id once; no ticks, no mobs, spectator |
-| Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, two sample mineshafts, name tags; no ticks, no mobs |
+| Debug: All Structures | DebugWorlds, StructureGen fixed layout | every library template and structure, two sample mineshafts, a sample bunker and a sample town, name tags; no ticks, no mobs |
 | Debug: All Biomes | DebugWorlds on LayeredGenerator | a 16 block strip per biome; no mobs |
 
 **LayeredGenerator** builds a whole Generator from a stack of layers per column (one stack
@@ -801,7 +1040,18 @@ the start, so WAILA names them and F3 draws the outline. Then two sample minesha
 generator is the LayeredGenerator's with its full detail `generate` wrapped to write them into the
 floor's stone through Generation/Mineshafts (24 blocks under the floor; the overgrown one's
 entrance opens on the floor with its rope), `structureContainer` answering for their chests and
-`mineshafts` listing them. All Biomes repeats 16 block strips of
+`mineshafts` listing them. After the mineshafts a sample bunker (`Bunkers.sample`: the corridor
+heading east, every kind of room, lit), written by a `Bunkers.new(seed, flat terrain, layout)`
+with the floor as its surface, so its padding agrees; `locateList` lists it as "bunker" standing
+on its hatch, and `poiBlocks` adds its containers and hatch. Last, "city": `Cities.sample`, a
+fixed town of 4 × 4 parcels (a downtown office, apartments, a plaza, rubble, the four shops, the
+police and fire stations, houses, a park, a parking lot, a bunker shed), written over the floor as
+the Default writes its cities at levels 0..`Cities.LodLevels`: the streets' surface over the
+grass, the buildings, each chunk grown (`ChunkLayout.grow`) to hold them and its Horizon summary
+made again. Its containers (`CityLayout.containersIn`) hold their loot, `cities` lists it for the
+map, `locateList` for /locate, `poiBlocks` its containers, and `cityAt` marks its footprint for
+SafeSpot. The sample town's shed has no bunker under it (the debug world's `Bunkers.new` is
+given only the sample bunker's layout). All Biomes repeats 16 block strips of
 every biome's ground (stone, filler, top) with its trees and plants.
 Single Biome changes only the biome pick (the terrain's height is the Default's everywhere: a
 desert's sand climbs the mountains, a tundra freezes the seas); Large Biomes only the climate's
@@ -1569,7 +1819,14 @@ Oil wells' geysers are painted over it as black dots in the oil's colour (`paint
 lake's radius, not the lake's exact shape); a tile has a few wells at most, and the dots add
 nothing measurable. Water lakes (at up to 8 blocks a pixel) and puddles (up to 2) are painted as
 water where a pixel's centre column holds theirs (`paintLakes`, from `generator.waterLakes` and
-`generator.puddles`); further out they would be a pixel or less.
+`generator.puddles`); further out they would be a pixel or less. The ruins: before painting a
+tile MapPainter calls `generator.prepare` for its rectangle (with the painter's yield), so
+`column` never builds a city or road plan at once; it also yields every 32 pixels of a row and
+decides the oil wells half a spacing square at a time. From `CITY_SCALE` (8) blocks a pixel out,
+`paintCities` paints each city's footprint grey {120, 120, 118} (its street grid {92, 92, 90} at
+exactly 8 blocks a pixel) and `paintRoads` every road segment as a one pixel line {62, 62, 66},
+walked half a pixel at a time; closer in, the streets and roads show through `column` block by
+block (a map tile at 64 blocks a pixel: ~33 ms in 431 yields, the longest ~0.6 ms).
 
 Roblox re-uploads only one displayed EditableImage per frame, so each map is a single
 EditableImage used as a ring buffer (`Map/MapLayer`): tile `(tx, tz)` lives in slot
@@ -1899,9 +2156,8 @@ but never for spectators (`moveNoClip`). Teleports (`place`) and game mode chang
 
 **Mobs** (`Entities/MobPhysics`) use the same rules: a mob whose feet cell is climbable gets the
 clamps before its move (rope: no descent limit) and 0.2 after it when it walked into something or
-its AI jumped, so a zombie that walks into a ladder climbs it at 0.1176 a tick; they never seek one
-out. Spiders keep their own wall climbing (`climbs`: Spider.onClimbable is its wall flag) and are
-not slowed by webs (Spider.makeStuckInBlock does nothing); every other mob is.
+its AI jumped, so a zombie that walks into a ladder climbs it at 0.1176 a tick (a brute up a
+bunker's shaft: the glue spec); they never seek one out. Every mob is slowed by webs.
 
 **Using rope** (`Shared/Rope`, pure; server `Players/ItemUse`; client
 `Interaction/BlockInteraction`). Supplementaries' `RopeHelper`: Rope used (not sneaking) on any rope of a column walks down the
@@ -2629,8 +2885,10 @@ override's weights, which `at`, `grid` and `forecastAt` take.
   chance of 0.2 + age × 0.03 a fire tick, and a cell near rain never catches.
 - *Wetness* (`Players/ToughAsNails`): rain at a player's feet or the top of their box, checked
   once a second, makes them wet, as water does (TAN: 3 steps colder).
-- *The undead* (`Mobs/MobWorld`): zombies and skeletons don't burn in the rain
-  (isInWaterRainOrBubble) or where the weather makes it not day (`isDayAt`: a thunderstorm).
+- *Noise* (`Mobs/ZombieDirector.hear`): a noise where it rains carries 0.7 as far
+  (`Apocalypse.Noise.RainFactor`), so zombies hear less of what is done in a storm. (A kind with
+  `burnsInDaylight` would not burn in the rain or where the weather makes it not day, `isDayAt`:
+  a thunderstorm, as Minecraft's undead; no kind has it now.)
 - *Burning* (`Players/Burning`'s RAIN bit, Entity.move's isInWaterRainOrBubble): rain at the feet
   or the top of the box puts out a burning player (`Characters.setRain`) or mob, whatever set it
   (a bolt, daylight, lava they left), after the tick's fire and lava; the weather is asked only
@@ -2706,7 +2964,8 @@ the Clouds and Weather settings reach it through `WeatherClient.setClouds` / `se
   lands more than a block above the camera and the camera's column is roofed) plays, when
   nextInt(3) < the ticks since the last one. Volume and pitch from `Weather.rainSound`.
 - *Light and fog* (`Weather/WeatherSky`, pure): `Rendering/LightingController` passes
-  `DayCycle.environment`'s values through `WeatherSky.apply` every update: what the sky gives
+  `DayCycle.environment`'s values through `WeatherSky.apply` (and then, on a blood moon's night,
+  `Rendering/BloodMoonSky.apply`: Blood moon and the day counter) every update: what the sky gives
   (OutdoorAmbient, the sun's Brightness and ColorShift_Top, the sky box's diffuse and specular
   light) times Minecraft's dimming, the sun also by `Sky.CoverSun` of the cloud cover, the fog's
   colour by `Weather.fogColour` (the Atmosphere's Color), the Atmosphere's Haze up by `Sky.Haze`
@@ -2848,10 +3107,10 @@ server's weather changed. Until a new picture is done the last one stays, placed
 The wind (speed and compass point) and its arrow show with the step.
 
 Not done: snow layers piling up and cauldrons filling (the game has no snow layer or cauldron
-blocks), charged creepers and skeleton horse traps; rain splashes (Minecraft's rain particles on
-the ground) and the sky box's own greying (Roblox's sky can't be tinted by a property, so the
-picture is graded instead); real rain, snow and thunder textures and sounds (stand-ins, set in
-Config and SoundList).
+blocks), Minecraft's charged creepers and skeleton horse traps (the game has neither mob); rain
+splashes (Minecraft's rain particles on the ground) and the sky box's own greying (Roblox's sky
+can't be tinted by a property, so the picture is graded instead); real rain, snow and thunder
+textures and sounds (stand-ins, set in Config and SoundList).
 
 ## Game modes (`GameMode`, server `Players/GameModes` and `Players/GameModeRules`)
 
@@ -3608,8 +3867,8 @@ catches when fire or lava arrives next to it and when it flows next to them. Cru
   flowing cells) counts 3.6 buckets, not 43.
 - `power(v)` = `BucketPower` (4) × ∛v within `MinPower`..`MaxPower` (1..12): blast reach scales with
   the cube root of the charge (Hopkinson–Cranz), and Minecraft's power is a reach (entities within
-  2 × power, rays through 1.73 × power blocks of air). A bucket is TNT, 4 buckets 6.3 (a charged
-  creeper), 8 buckets 8, 27 buckets 12.
+  2 × power, rays through 1.73 × power blocks of air). A bucket is TNT, 4 buckets 6.3 (Minecraft's
+  charged creeper), 8 buckets 8, 27 buckets 12.
 - `plan`: the body is cut into `ClusterSize` (4) wide cubes centred on the cell that caught; each
   cube is one blast, at its fuel's weighted centre, with the power of its buckets, `delay` ticks
   after catching: the flood fill distance of its nearest cell / `ChainBlocksPerTick` (1.5). Cubes
@@ -3973,14 +4232,14 @@ Minecraft 1.20.1's MobEffect and MobEffectInstance, this game's two from the flu
 Nails' four, in one list. Tested in `tests/spec/Effects`.
 
 **The registry** (`Shared/Effects`, its data in `Effects/EffectList`; ids are u8 list positions,
-append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Mining Fatigue,
-5 Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration,
-11 Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison,
-17 Wither, 18 Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal
-Chill, 24 Climate Clemency. A record holds its name, `/effect` id (Minecraft's), colour (MobEffect's
-int), category (beneficial, harmful, neutral), HUD glyph and what it does as data. `find` takes a
-name, a display name or an `/effect` id with or without a namespace; `levelName` writes "Speed II"
-(roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
+append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Mining Fatigue, 5
+Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration, 11
+Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison, 17 Wither, 18
+Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal Chill, 24 Climate
+Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection. A record holds its name, `/effect` id
+(Minecraft's), colour (MobEffect's int), category (beneficial, harmful, neutral), HUD glyph and what
+it does as data. `find` takes a name, a display name or an `/effect` id with or without a namespace;
+`levelName` writes "Speed II" (roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
 
 | Effect | Per level (amplifier + 1) | Minecraft's code |
 | ------ | ------------------------- | ---------------- |
@@ -3997,6 +4256,8 @@ name, a display name or an `/effect` id with or without a namespace; `levelName`
 | Oil Coated / Fuel Soaked | burning × 2 and + 1 a hurt / × 3, catches at once, lit by blasts; water washes off | this game's |
 | Night Vision, Blindness, Nausea, Glowing | the view (client), the outline (server Highlight) | GameRenderer, FogRenderer |
 | Thirst, Internal Warmth / Chill, Climate Clemency | kept by Tough As Nails (`external`) | TAN 1.20's effects |
+| Bleeding | hurts 1 every 80 >> amp ticks while health > 1 (`lethal = false`, as Poison) | the apocalypse's |
+| Infection | kept by server Apocalypse/Infection (`external`; the stage is the adapter's `amplifier`) | the apocalypse's |
 
 The modifiers read `Levels` (effect id → amplifier): `speedFactor`, `miningFactor`, `jumpBoost`,
 `meleeDamage`, `incomingDamage`, `fireRules` (nil when nothing changes: no allocation),
@@ -4126,7 +4387,7 @@ budget's bucket and the fraction of a point not yet given.
 | a crafting result taken | 8 (`craft`) | 0.1 a craft (`CRAFT`) |
 | a smelted result taken out (or pushed out, or pulled by a pipe: for the furnace's last user) | 10 (`smelt`) | Minecraft's furnace experience per item: iron and osmium ingots 0.7, gold, diamond, emerald 1, charcoal 0.15, others 0.1 (`SMELTED`) |
 | a biome stood in | 20 (`biome`) | - |
-| a mob killed (Mobs/Mobs' `died`, wired to `killed` by the boot script) | 10 (`mob`) | animals 2 (Minecraft's 1-3), monsters 5, creepers 6, others 3 (`MOBS`) |
+| a mob killed (Mobs/Mobs' `died`, wired to `killed` by the boot script) | 10 (`mob`) | animals 2 (Minecraft's 1-3), zombies by kind: a crawler 4, a zombie or runner 5, the screamer, police, firefighter, construction and doctor zombies 6, a soldier 8, a brute 10; others 3 (`MOBS`, `MOB_DEFAULT`) |
 | an Age reached | its reward: 50, 100, 150, 200 (`age`) | - |
 
 Repeats go through `Knowledge.repeatPoints(session, key, base, now, budget)`: each repeat of the
@@ -5234,82 +5495,130 @@ Dropped items are Minecraft's ItemEntity:
 - Clients run the same `ItemPhysics` between syncs, ease corrections in, and draw items bobbing and
   spinning (more copies for bigger stacks). A picked-up item flies to the player.
 
-## Mobs (`Entities/MobList`, server `Mobs/`, client `Entities/MobRenderer`)
+## Mobs (`Entities/MobList`, server `Mobs/`, client `Entities/`)
 
-Minecraft 1.20.1's farm animals and classic monsters as plain hitboxes. Tested in
-`tests/spec/Mobs` (server and shared) and `tests/spec/MobsClient`.
+Minecraft 1.20.1's farm animals and the zombie apocalypse's zombies as hitboxes, the zombies drawn
+as R15 rigs. Tested in `tests/spec/Mobs` (the world, physics, spawning, costs), `tests/spec/Zombies`
+(the zombies' rules, the director, tracking, costs), `tests/spec/MobsClient`, `MobRig`,
+`MobRigPool`, `ZombieVoices` and `ZombieRigProbe` (the client), and `tests/spec/ApocalypseGlue`
+(all of it together on a real world server over a generated town).
 
-**Kinds** (`Shared/Entities/MobList`, append only: a kind's id is a u8 on the wire). Each record
+**Kinds** (`Shared/Entities/MobList`, append only: a kind's id is a u8 on the wire; monsters are
+never saved, so the three monsters the list once had gave their ids 6-8 to zombie kinds). A record
 holds Minecraft's numbers (box, eyes, health, MOVEMENT_SPEED, armor, attack damage, the goals'
-speed modifiers), its abilities (`burnsInDaylight`, `slowFall`, `fallDamage`, `climbs`,
-`darkOnly`, `leap`, a creeper's `fuse`, a skeleton's `bow`), its loot, spawn weight and group,
-hurt and death sounds, and how the client draws it (at most 2 boxes, `variants` recolouring the
-first: sheep's natural colours by Minecraft's odds). The registry resolves the loot to item ids
-at load (a typo fails loudly).
+speed modifiers, `follow`), its loot (`drops`), its spawn weights (`spawn`: `weight` in the wild,
+`cityWeight` in a city, `hordeWeight` in a blood moon's waves grown by `hordeGrowth` a moon,
+`group`), hurt and death sounds and how the client draws it: at most 2 `parts` boxes (the
+animals; a zombie's far stand-in), `variants` recolouring the first (sheep's natural colours by
+Minecraft's odds), and for a zombie `rig` (gait, height, width, hidden parts) and `looks`. A
+zombie's abilities are fields too (`zombie`, `breakPower`, `hearing`, `scream`, `fireImmune`,
+`knockbackResist`, `infect`, `bleed`): zombie kinds are data, and no server code names a kind. The
+registry resolves the loot to item ids at load (a typo fails loudly), checks every sound, each
+zombie's rig and each look's extras. `MobList.find` takes a name in any case, with "minecraft:",
+or in snake case (`zombie_brute`); `MobList.lookVariant(look, skin)` packs a zombie's look and skin
+tone into the u8 `variant`.
 
-| Kind     | Box          | Health | Speed | Does                                                              |
-| -------- | ------------ | ------ | ----- | ----------------------------------------------------------------- |
-| Cow      | 0.9 × 1.4    | 10     | 0.2   | wanders, panics (x2); leather 0-2, beef 1-3                       |
-| Sheep    | 0.9 × 1.3    | 8      | 0.23  | wanders, panics (x1.25); white wool, mutton 1-2                    |
-| Pig      | 0.9 × 0.9    | 10     | 0.25  | wanders, panics (x1.25); porkchop 1-3                              |
-| Chicken  | 0.4 × 0.7    | 4      | 0.25  | falls x 0.6 a tick, no fall damage; feathers 0-2, chicken          |
-| Zombie   | 0.6 × 1.95   | 20     | 0.23  | armor 2, hits 3, burns by day; rotten flesh 0-2 (+2.5% iron)       |
-| Skeleton | 0.6 × 1.99   | 20     | 0.25  | shoots within 15 (3-5, every 60 ticks), burns by day; bones 0-2    |
-| Creeper  | 0.6 × 1.7    | 20     | 0.25  | 30 tick fuse within 3, cancelled at 7, power 3; gunpowder 0-2      |
-| Spider   | 1.4 × 0.9    | 16     | 0.3   | hits 2, climbs, leaps, hunts only in the dark; string 0-2          |
+| Kind                | Box         | Health | Speed | Does                                                              |
+| ------------------- | ----------- | ------ | ----- | ----------------------------------------------------------------- |
+| Cow                 | 0.9 × 1.4   | 10     | 0.2   | wanders, panics (x2); leather 0-2, beef 1-3                       |
+| Sheep               | 0.9 × 1.3   | 8      | 0.23  | wanders, panics (x1.25); white wool, mutton 1-2                   |
+| Pig                 | 0.9 × 0.9   | 10     | 0.25  | wanders, panics (x1.25); porkchop 1-3                             |
+| Chicken             | 0.4 × 0.7   | 4      | 0.25  | falls x 0.6 a tick, no fall damage; feathers 0-2, chicken         |
+| Zombie              | 0.6 × 1.95  | 20     | 0.23  | armor 2, hits 3; rotten flesh 0-2, a bone 25% (+2.5% iron); 11 looks |
+| Runner              | 0.6 × 1.9   | 12     | 0.31  | chases x1.2 (4.98 blocks a second), hits 2, follow 32, hearing 1.2 |
+| Brute               | 0.75 × 1.99 | 60     | 0.18  | armor 4, hits 7, breaks x3, knockback x0.2; drawn 2.3 tall, width 1.1 |
+| Crawler             | 0.8 × 0.6   | 14     | 0.12  | legless, follow 16; wears the zombie's looks                     |
+| Screamer            | 0.6 × 1.9   | 16     | 0.25  | shrieks (a noise of 48, every 400 ticks at most), follow 32       |
+| Soldier Zombie      | 0.6 × 1.95  | 30     | 0.23  | armor 10, hits 4; gunpowder 0-2, a ration 10%                     |
+| Police Zombie       | 0.6 × 1.95  | 24     | 0.23  | armor 6; cities only (weight 0 in the wild)                       |
+| Firefighter Zombie  | 0.6 × 1.95  | 26     | 0.22  | armor 6, `fireImmune`, breaks x1.5; a Fire Axe 2%; cities only    |
+| Construction Zombie | 0.6 × 1.95  | 24     | 0.23  | armor 4, hits 4, breaks x2; nails, scrap metal                    |
+| Doctor Zombie       | 0.6 × 1.95  | 18     | 0.23  | bandages 15%, painkillers 5%, antibiotics 12%                     |
 
-**Movement** (`Shared/Entities/MobPhysics`, pure): LivingEntity.aiStep and travel for a mob
-steered by its AI: `forward` (Minecraft's zza: speed x modifier x 0.98) along its yaw (facing
-(sin, cos)), the jump. Ground acceleration speed x 0.216 / f³ (so a zombie walks 0.114 blocks a
-tick, 2.3 a second: tested), air 0.02, gravity 0.08, x 0.98 vertically and f x 0.91 sideways;
-water's tag (water, fuel) 0.02 / x 0.8 / sinking 0.005, lava's tag (lava, oil) x 0.5 and
-gravity / 4; jumping 0.42 off the ground 10 ticks apart or 0.04 in a fluid deeper than 0.4 (how
-FloatGoal keeps mobs up); a ledge at the surface is hopped out of (0.3). Collision is `Hull` with
-Minecraft's mob step of 0.6, so a full block takes a jump; a spider pushing into a wall climbs
-at 0.2 a tick. The fall distance (cleared in water, halved in lava) comes back on landing.
-`dropAt` answers how far the floor is below a step (nil beyond the depth: a cliff).
+**Movement** (`Shared/Entities/MobPhysics`, pure, native): LivingEntity.aiStep and travel for a mob
+steered by its AI: `forward` (Minecraft's zza: speed x modifier x 0.98) along its yaw (facing (sin,
+cos)), the jump. Ground acceleration speed x 0.216 / f³ (so a zombie walks 0.114 blocks a tick, 2.3
+a second: tested), air 0.02, gravity 0.08, x 0.98 vertically and f x 0.91 sideways; water's tag
+(water, fuel) 0.02 / x 0.8 / sinking 0.005, lava's tag (lava, oil) x 0.5 and gravity / 4; jumping
+0.42 off the ground 10 ticks apart or 0.04 in a fluid deeper than 0.4 (how FloatGoal keeps mobs up);
+a ledge at the surface is hopped out of (0.3). Collision is `Hull` (native) with Minecraft's mob
+step of 0.6, so a full block takes a jump; ladders, vines and rope are climbed, cobwebs hold. The
+fall distance (cleared in water, halved in lava) comes back on landing. For crowds: `quiet` (the
+box's columns hold nothing that acts on a mob: one scan, kept on the body while the box stays in the
+same cells) skips the fluid, climbing and stuck-in scans; `rest` is the fast path for a mob standing
+still on a full block in quiet cells (a dozen block reads instead of a tick's forty); friction comes
+from a table by block id. `dropAt` answers how far the floor is below a step (nil beyond the depth:
+a cliff); a floor plate whose collision boxes all sit on the cell's floor, at most half a block high
+(a shut bunker hatch), is ground, so a zombie walks over a hatch it can't break, and an open hatch
+is a drop.
 
-**AI** (`server/Mobs/MobAI`, pure): direct steering, no path finding.
+**AI** (`server/Mobs/MobAI`, pure, native): direct steering, no path finding.
 - Wander (RandomStrollGoal: one tick in 120, a spot 3-10 blocks away, at most 100 ticks), stand
   idle between; panic (creatures hurt by anything: 3-5 s at `panic` speed away from the hurt's
   source); float (jump 4 ticks in 5 when deeper than 0.4 or in lava).
-- Steering faces the goal and walks; a wall is jumped (a spider climbs it). `safeAhead` refuses a
-  step into an unloaded cell, a hazard (fire, campfire, lava, oil, fuel: `hazard`) or over a drop
-  of more than 3 blocks (the path finder's max fall): the mob stops (a stroll ends, a panic picks
-  another spot).
+- Steering faces the goal and walks; a wall is jumped. `safeAhead` refuses a step into an
+  unloaded cell, a hazard (fire, campfire, lava, oil, fuel: `hazard`) or over a drop of more than
+  `MAX_FALL` (3) blocks (the path finder's max fall): the mob stops (a stroll ends, a panic picks
+  another spot). A zombie pressed against the cells ahead lines up with the nearest gap its box
+  fits through within a block across (a doorway, the 13/16 an open door leaves) and walks through
+  without jumping.
 - Targets: every 10 ticks (staggered by id) a monster without one looks for the nearest living
-  survival or adventure player (never creative or spectator: `attackable`) within `follow` (16)
-  it can see (`canSee`: a voxel ray from its eyes to theirs, solid blocks stop it); it keeps the
-  target while in range and attackable, and drops it after 60 ticks out of sight. Hurt by a
-  player, it hunts them (HurtByTargetGoal). Spiders notice players only under raw brightness 8
-  (the open sky by the time of day, else `LightEstimate.blockLight` with a 64 cell budget) and
-  give up 1 tick in 100 in the light.
-- Melee (zombie, spider): Minecraft's reach (distance² ≤ (2w)² + 0.6) with the target in sight,
-  every 20 ticks: a `hits` record with the damage and a 0.4 knockback away from the mob
-  (`Combat.knockback`). A spider leaps at a target 2-4 blocks away one tick in 5.
-- Creeper: SwellGoal and Creeper.tick: the goal runs while the fuse burns or a target is within
-  3 blocks (standing still), the fuse lights (+1 a tick; the hiss on the first) while the target
-  is seen within 7, else cools (-1); at 30 an `explosions` record (power 3) and the creeper is
-  gone (no loot, no death record).
-- Skeleton: RangedBowAttackGoal on normal: `seeTime` counts the target in sight; with it seen 20
-  ticks within 15 blocks it stands; a 20 tick draw, then a hitscan shot and a 40 tick reload. A
-  shot hits with 1.15 - distance / 15 (0.25..0.95) for 3-5 with a 0.4 knockback, else flies 1.5
-  blocks off; either way an `arrows` record (the clients draw it) and the bow's sound.
+  survival or adventure player (never creative or spectator: `attackable`) within `follow` (24
+  for most zombies, `MobList.FOLLOW` 16 when absent) it can see (`canSee`: a voxel ray from its
+  eyes to theirs through collision shapes, native); it keeps the target while in range and
+  attackable, and drops it after 60 ticks out of sight. Hurt by a player, it hunts them
+  (HurtByTargetGoal).
+- Melee: Minecraft's reach (distance² ≤ (2w)² + target width: a zombie 1.43) with the target in
+  sight, every 20 ticks: a `hits` record with the damage and a 0.4 knockback away from the mob
+  (`Combat.knockback`), and the swing shown 8 ticks (`swing`: the Attack flag).
+- The zombie rules (every kind with `zombie`), in order each tick:
+  - Leave: sent away by the director, it walks off from the nearest player (legs of 16 blocks) at
+    its wander speed and does nothing else; a player's hit calls it back.
+  - Thinning: idle or strolling with no player within `Zombies.ThinDistance` (32), it thinks every
+    4th tick (by age and id) and stands in between (never on a tick with noises).
+  - Sight: chasing, the ray to the target every `SightInterval` (3) ticks staggered by id, kept as
+    `visible`; the 60 tick unseen memory counts in those steps (not while it breaks a block).
+  - Noise: with no target it takes the loudest noise of the tick within radius × `hearing` (by how
+    far inside the reach), investigates (0.9 of its chase speed, to a spot within 1.5 blocks of the
+    noise picked by its id) for `Noise.InvestigateTicks` (400), and looks for a player at once.
+  - Hunt: a blood moon's hunter steers at its player unseen, kept to `HuntKeep` (56); one that
+    closed less than a block in `Leave.StuckTicks` (400) and isn't fighting or breaking leaves.
+  - Breaking: blocked (horizontal collision and under 0.05 blocks of progress a tick for 10 ticks,
+    climbing excluded) by cells that all have `Blocks.zombieBreak`, with what it goes for within
+    `BreakReach` (8; `HuntBreakReach` 16 for a hunt) horizontally and from a block below its feet
+    to two above: it faces the softest cell and adds `breakPower` a tick to the block's shared
+    damage (`MobWorld.damageBlock`, keyed by cell; a door's upper half uses the lower's key) until
+    it reaches the block's `zombieBreak` (glass 60 ticks, leaves and wool 120, doors 240, soil and
+    fences 300, planks and logs 600, a Barricade 900, stone and bricks 2400, a Reinforced
+    Barricade 3000, concrete 6000; 0: never, as iron, ores, containers, machines and the hatch).
+    It stops when the block changes, it is pushed 1.5 blocks off, or its goal is gone.
+  - Screamer: on gaining a target with the cooldown over, 40 ticks of shrieking (the sound and a
+    noise of its `scream.radius`, 48), at most every `scream.cooldown` (400) ticks. The shriek
+    counts down every tick whatever else the screamer does (sent away or thinned), so the
+    Screaming flag never shows longer than 40 ticks.
+  State per mob: goal, target, hunt, leave, visible, the cell broken (bx, by, bz, the block when it
+  began, ticks), swing, scream and its cooldown, the blocked count, the hunter's progress, the
+  investigated noise.
 
-**The world** (`server/Mobs/MobWorld`, pure, `MobWorld.new(getBlock, options)`): mobs by id in id
-order, ticked at 20 Hz (`tick(context)`: the players as PlayerViews (feet, eye height, game
-mode, alive), the day time, `skyOpen`, `skyClear` and `active(cx, cz)`). Frozen (`frozen`) when
-its chunk doesn't tick or its cell isn't loaded. Each live mob: AI, physics, fall damage (ceil(d
-- 3), bypassing armor; not chickens), daylight burning (by day, out of water, the sky over the
-eyes at full light: `skyClear`, World/Skylight.clear, Level.canSeeSky's sky light 15, so leaves
-and fluids shade and glass doesn't; 1 tick in 25 → 8 s),
-`Players/Burning.tickPlayer` as for a player (lava, fire, campfires, burning, water; a mob
-catches fire after 20 ticks in a fire block like a player, Minecraft's mobs at once) and
-suffocation (eyes in an opaque block, 1 under the cooldown).
+**The world** (`server/Mobs/MobWorld`, pure, native, `MobWorld.new(getBlock, options)`): mobs by id
+in id order, ticked at 20 Hz (`tick(context)`: the players as PlayerViews (feet, eye height, game
+mode, alive), the day time, `skyOpen`, `skyClear`, `active(cx, cz)`, and the zombies' context:
+noises, `breaking`, the director's hunts). Frozen (`frozen`) when its chunk doesn't tick or its
+cell isn't loaded. Each live mob: AI, the crowd's push, physics, fall damage (ceil(d - 3),
+bypassing armor; not chickens), daylight burning for a kind with `burnsInDaylight` (no zombie has
+it), `Players/Burning.tickPlayer` as for a player (lava, fire, campfires, burning, water; never for
+a `fireImmune` kind) and suffocation (eyes in an opaque block, 1 under the cooldown).
+- Crowds (`Mobs/MobCrowd`, pure, native): every tick the live zombies are hashed into 2 block
+  cells and each pair closer than their half widths + `Separation` (0.1) is pushed apart (0.05 ×
+  the overlap a tick, a coincident pair along a direction its ids pick); positions are read at the
+  start of the tick, so the result doesn't depend on the order mobs tick in; the push is added to
+  the velocity between AI and physics. The hash holds only this tick's cells (their lists go back
+  to a pool each tick).
 - `hurt(id, amount, source)`: Burning.hurtPlayer's LivingEntity cooldown (10 ticks: only a bigger
   hurt lands, by the difference) and the kind's armor unless `bypassArmor`; a fresh hurt flashes
-  10 ticks (`hurtTime`), sounds, knocks back (`source.knockback` from (x, z)), and makes creatures
-  panic or monsters hunt the player. A player's hurt counts for the kill 100 ticks.
+  10 ticks (`hurtTime`), sounds, knocks back (`source.knockback` from (x, z), less the kind's
+  `knockbackResist`), and makes creatures panic or monsters hunt the player. A player's hurt
+  counts for the kill 100 ticks.
 - Death: the death sound, a `deaths` record (kind, position, killer or nil), 20 ticks lying (the
   dying flag), then the loot (`kindDrops`: min..max, `chance`, `byPlayer` only with a killer; raw
   meat cooked when it died burning: `Foods.COOKED`) and gone; the 20 ticks count in a frozen
@@ -5317,102 +5626,359 @@ suffocation (eyes in an opaque block, 1 under the cooldown).
 - `overlaps(box)`: is any mob's box (dying ones too) in it? ServerNet refuses a block placed
   inside a mob (its `occupied` rule, `Mobs.occupied` with the block's Blocks.obstruction: Level.
   isUnobstructed), as inside a player; the client checks the mobs where it draws them first.
-  Otherwise a block in a monster's head cell would blind it (no melee, fuse or shot) until the
-  wall smothered it.
 - `explode(x, y, z, power)`: Explosion.seenPercent / hit on each live mob in reach: the damage
-  through `hurt` and the push added to its velocity.
+  through `hurt` and the push (less `knockbackResist`) added to its velocity.
 - `attack(id, attacker)`: refused for the dead, spectators (`Combat.reach` 0), dying or gone mobs,
   a box beyond the mode's reach from the eyes (+ `SERVER_LEEWAY` 1), or out of sight (the mob's
   centre, eyes and feet); else the held item's damage, with the attacker's Strength and Weakness
-  (`levels`: Effects.meleeDamage, as Minecraft's attack_damage modifiers) x 1.9's strength
-  (`Combat.strength(ticks since the swing or the change of item, speed)`) with a 0.4 knockback;
-  returns the landed hurt and whether it was strong.
+  (`levels`: Effects.meleeDamage) x 1.9's strength (`Combat.strength(ticks since the swing or the
+  change of item, speed)`) with a 0.4 knockback; returns the landed hurt and whether it was strong.
+- Blocks: `damageBlock` (shared damage by cell, pruned every 20 ticks after `Breaking.Decay` idle
+  ticks), `blockHit` (a thud record every `HitInterval`), `breakBlock` (a breaks record, once per
+  cell per tick), `noise` (a noises record: the screamer's).
 - Despawn every 20 ticks over every mob (Mob.checkDespawn): nothing with no players; monsters
-  beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40 (a frozen
-  monster's idle time counts on in this check: the chunks that tick reach about 56 blocks,
-  Minecraft's simulation distance past 128, where its monsters would tick and idle away);
-  creatures with no player within 128 for `ForgetTicks` go; below y -64 anything.
-- `takeChanges()`: spawned, removed, deaths, drops, hits, arrows, explosions, sounds.
-Measured in Lune on a flat world with a player (mixed kinds, at night): 50 / 150 / 300 mobs
-cost 0.14 / 0.45 / 0.85 ms a tick native, 0.44 / 1.35 / 2.76 ms interpreted (~9 µs a mob).
+  beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40 unless
+  `persistent` (a wave's hunter); a sent-away zombie (`leave`) goes once `Leave.Distance` (24)
+  blocks from every player and unseen (no player's eyes see its eyes within 64 blocks); creatures
+  with no player within 128 for `ForgetTicks` go; below y -64 anything.
+- `takeChanges()`: spawned, removed, deaths, drops, hits, sounds, block hits, breaks, noises.
+Measured in Lune on a flat world with one player (the median of 3, native / interpreted, budget in
+brackets): 200 zombies chasing 1.49 / 5.46 ms a tick (3 / 8), 200 idle round a creative player
+0.81 / 2.89 ms (1.5 / 4: 2.1 ms native before the quiet scans, the rest fast path and the
+pairwise crowd); tests/spec/Zombies holds each to its budget and 15% (measured again before
+failing).
 
-**Spawning** (`server/Mobs/MobSpawning`, pure): monsters every `HostileInterval` (20) ticks,
-creatures every `PassiveInterval` (400), for each living non-spectator player whose 128 block
-census is under `HostileCap` (15) / `PassiveCap` (10) and the world under `MaxHostile` /
-`MaxPassive` / `MaxMobs`: `Attempts` (3) packs, each a kind by spawn weight, a column 24-44
-blocks out (`SpawnDistance`) in a chunk that ticks (the census counts a player's monsters only
-in those chunks: frozen ones farther out would fill the cap with none about the player, and they
-idle away), its centre the first standing spot down the
-column (creatures from 20 above the player's feet over 48, monsters from ±16 over 24), 2-4 /
-1-4 members spread ±4, each on its own spot within 3 up or down. `validSpot`: the chunk ticks, a
-solid opaque sturdy floor (grass or dry grass for creatures), the box free (no solid, unloaded,
-fluid, fire or campfire cell: Hull and Burning.touching), no rail in the feet's cell or the
-one above (Minecraft's `#prevent_mob_spawning_inside`; a cobweb does not stop a spawn, as
-NaturalSpawner.isValidEmptySpawnBlock allows), 24 blocks from every player, and the
-light: creatures raw brightness above 8, monsters Minecraft's two rolls
-(`LightEstimate.darkForMonsters`) and then no block light (searched with `SPAWN_BUDGET`, only
-for the spots the rolls let through). Measured on generated terrain (seed 12345, a player
-switching between two spots 80 blocks apart every 2 minutes at night): before, 15 monsters
-within 128 blocks of which 10-12 frozen at the old spot, none spawning about the player; now
-14-15 ticking about the player within a minute of arriving and 4-11 frozen ones idling away.
+**Spawning** (`server/Mobs/MobSpawning`, pure, native): monsters every `HostileInterval` (20)
+ticks, creatures every `PassiveInterval` (400), for each living non-spectator player whose 128
+block census is under the cap (`context.hostileCap(player)`: the director's, below; `PassiveCap`
+10) and the world under `MaxHostile` / `MaxPassive` / `MaxMobs` (the director's limits):
+`Attempts` (3) packs, each a kind by spawn weight (`cityWeight` where the generator's `cityAt` is
+0.5 or more at the pack's centre: police and firefighters only there), a column 24-44 blocks out
+(`SpawnDistance`) in a chunk that ticks (the census counts a player's monsters only in those
+chunks), its centre the first standing spot down the column (creatures from 20 above the player's
+feet over 48, monsters from ±16 over 24), 2-4 creatures or a zombie kind's `group` (1-5) spread
+±4, each on its own spot within 3 up or down. `validSpot` (with a light rule: "dark", "day",
+"wave", "animal"): the chunk ticks, a solid opaque sturdy floor (grass or dry grass for
+creatures), the box free (no solid, unloaded, fluid, fire or campfire cell: Hull and
+Burning.touching), no rail in the feet's cell or the one above (Minecraft's
+`#prevent_mob_spawning_inside`; a cobweb does not stop a spawn), 24 blocks from every player, and
+the light: creatures raw brightness above 8; monsters Minecraft's two rolls
+(`LightEstimate.darkForMonsters`) and then no block light (searched with `SPAWN_BUDGET`); a zombie
+by day (`context.daySpawn`) a floor under the open sky, no darkness roll, but still no block light
+within `DayLightBudget` (2048) cells, as far as a torch's light reaches; a wave's anywhere under
+the open sky. A pack's members that need no block light share one search (`MobSpawning.dark`: a
+breadth first search from all their cells at once, about two members' searches for a pack of
+five); only where it finds light (or runs out of budget) does each member search on its own, so
+the answer is the same as one search each. `spawnPack` (a pack of a kind round a column: the
+waves') and `findFloor` are exported. While `context.hostilePaused` (a blood moon) no monster
+spawns naturally. Measured: a daytime spawning round 0.96 ms native (budget 3; 4.5 interpreted).
 
-**Light** (`Shared/World/LightEstimate`, pure, shared): `blockLight` (the search the cave mood
-used, moved here: sources less one per open cell, 256 cells, no allocations; a monster's spawn
-check `SPAWN_BUDGET` 2048, every cell a torch lights (13 steps) in a room of any height or on the
-open ground, stopping at the first light found: a torch 12 blocks off in a 2, 3 or 6 high hall
-gives 2, where 256 cells reached 8 blocks; ~0.7 ms a dark open-ground search interpreted, 0.1
-with 256), `skyLight` (15
-where `open`, else 15 less the steps to the nearest open cell through open cells within 48:
-an overhang's edge 14, a cave 0; the server's `open` is World/Skylight.open), `darkForMonsters`
-(Monster.isDarkEnoughToSpawn: block light 0, sky ≤ rand(32), max(sky - skyDarken, block) ≤
-rand(0..7)) and `brightForAnimals` (> 8). WAILA's block light and Audio/CaveMood use the same.
+**Light** (`Shared/World/LightEstimate`, pure, shared): `blockLight` (sources less one per open
+cell, 256 cells, no allocations; a monster's spawn check `SPAWN_BUDGET` 2048, every cell a torch
+lights (13 steps) in a room of any height or on the open ground, stopping at the first light
+found), `skyLight` (15 where `open`, else 15 less the steps to the nearest open cell through open
+cells within 48: an overhang's edge 14, a cave 0; the server's `open` is World/Skylight.open),
+`darkForMonsters` (Monster.isDarkEnoughToSpawn: block light 0, sky ≤ rand(32), max(sky -
+skyDarken, block) ≤ rand(0..7)) and `brightForAnimals` (> 8). WAILA's block light and
+Audio/CaveMood use the same.
+
+**Tracking** (`server/Mobs/MobTracking`, pure): what each client is told every `SyncTicks` (2):
+spawns within `TrackingDistance` (64; 128 a message), removes beyond 72 (8 blocks of hysteresis)
+or gone, and for a known mob whose state (position in 1/32 steps, yaw, health, flags) changed a
+move (op 6, 14 bytes: the step from the position last sent to that player, so the client never
+drifts) or a state (op 2) when a step won't fit an i16. Mobs beyond 32 blocks are looked at every
+other sync (by id), dying ones every sync. Flags: Hurt, Burning, Dying, Aggressive (a target or a
+hunt), Attack (8 ticks after a swing), Breaking, Screaming. 60 zombies on the move cost 2 + 60 ×
+14 = 842 bytes a sync.
 
 **On the server** (`server/Mobs/Mobs`): 20 Hz on Heartbeat (4 ticks a frame at most). Every 10
-ticks the ticking chunks from `Simulation.activeChunks` (a key set); players from their
-characters (Rig.feet, eyes 1.62). After each tick: sounds (Audio/Sounds), deaths (the `died`
-BindableEvent: killer Player or nil, kind, x, y, z, id), loot (Entities.spawnItem), hits
-(`Characters.hurt`: Burning.hurtPlayer's cooldown and the armor worn, then Resistance; a fresh one
-queues a `push` for the player), creepers' blasts (`Explosions.explode`, power 3 at the feet: a blast like any,
-which reaches the boot script's handler and so `Mobs.explode` for the other mobs), arrows
-(queued for players within tracking range). Every `SyncTicks` (2) each player gets one Mobs
-message: spawns for mobs coming within `TrackingDistance` (64; 128 spawns a message at most),
-states of known mobs whose quantized state changed (a per-player copy of what was sent), removes
-for those that left or are gone, and the queued arrows and push. Attacks: a token bucket of
+ticks the ticking chunks from `Simulation.activeChunks` (a key set); players from
+Players/PlayerPositions (feet, eyes 1.62). Each tick: the world's limits from
+`ZombieDirector.limits` (raised through a blood moon, worked out from the day time every tick),
+the noises (`Apocalypse/NoiseBus.take`, then `ZombieDirector.hear`: the night's and the rain's
+factors), the context's `cityAt` and `ground` (the generator's own, read once at start: a column's
+city share and height, the waves' floor rule), `MobSpawning.step`, then `ZombieDirector.step`.
+After it: sounds (Audio/Sounds), deaths (the `died` BindableEvent: killer Player or nil, kind, x,
+y, z, id), loot (Entities.spawnItem), hits (`Characters.hurt`: Burning.hurtPlayer's cooldown and
+the armor worn, then Resistance; a fresh one queues a `push` for the player; each landed hit fires
+`playerHit` with the kind's name, which Apocalypse/Survival turns into bites and wounds), block hits
+(entity.zombie.attack_wooden_door, glass block.glass.hit), breaks (`world:setBlock` to air with
+nothing dropped: both halves of a door at once with entity.zombie.break_wooden_door and a noise
+of `Noise.Break` (10), glass with block.glass.break, anything else its own break sound, which
+NoiseRules hears) and the screamers' noises back to the NoiseBus. Attacks: a token bucket of
 `AttacksPerSecond`, the held item (Inventories.heldTool, watched every tick for the attack
-strength's reset), `MobWorld.attack` with the player's effect levels (Players/Effects.levels),
-the strong or weak attack sound, the weapon's wear
-(Combat.wear: swords 1, tools 2; not with instabuild). Placing: `Mobs.occupied(block, x, y,
-z)` (ServerNet's `occupied` rule). /summon and /kill: TextChatCommands (or
-Chatted), SummonCommand's parse and the operators' permission (Players/Operators.permitted). The boot script connects `died` to
-Players/Progression.killed for a player's kills (the kind's first a discovery, then
-Knowledge.MOBS: animals 2, monsters 5, creepers 6).
+strength's reset), `MobWorld.attack` with the player's effect levels, the strong or weak attack
+sound, the weapon's wear (Combat.wear: swords 1, tools 2; not with instabuild). Placing:
+`Mobs.occupied(block, x, y, z)` (ServerNet's `occupied` rule). /summon and /kill:
+TextChatCommands (or Chatted), SummonCommand's parse (any kind by name or in snake case; the usage
+lists every kind in snake case) and the operators' permission (Players/Operators.permitted).
+`Mobs.spawn(kind, x, y, z, variant?)` takes a look (a risen player's). The boot script connects
+`died` to Players/Progression.killed (the kind's first a discovery, then Knowledge.MOBS: animals
+2, zombies 4-10 by kind); Apocalypse/Survival listens to it itself (a zombie kill on the
+survivor record).
 
 **Combat and food** (`Shared/Entities/Combat`, `Shared/Items/Foods`, pure): ItemList's `attack`
 (swords 4-7 at 1.6 a second, axes 7-9 at 0.8-1, pickaxes 2-5, shovels 2.5-5.5, hoes 1, the hand 1
-at 4), `strength` (Player.getAttackStrengthScale(0.5)), `damage` (x (0.2 + s² x 0.8)), `reach`
-(3, creative 6, spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: heal (cooked
-beef and porkchop 4, mutton and chicken 3, raw 1-2, rotten flesh 2) and an optional effect
-(raw chicken 30%, rotten flesh 80%: TAN's Thirst effect 600 ticks, Minecraft's Hunger), `canEat`
-(hurt or invulnerable, never a spectator), `COOKED`. The 32 tick hold is Drinking's: client
-`Interaction/Eating`, server `Players/Eating` (start / finish / cancel, the time, slot and item
-checked, health += heal scaled to MaxHealth, one item used up outside creative, the burp).
+at 4; the apocalypse's bats, machete, crowbar and Fire Axe), `strength`
+(Player.getAttackStrengthScale(0.5)), `damage` (x (0.2 + s² x 0.8)), `reach` (3, creative 6,
+spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: heal (cooked beef and
+porkchop 4, mutton and chicken 3, raw 1-2, rotten flesh 2; the ruins' tins 2-8) and an optional
+effect (raw chicken and crackers 30%, rotten flesh 80%: TAN's Thirst effect 600 ticks, Minecraft's
+Hunger), `useTicks` (32 by default: crackers and the chocolate bar 24, the ration 48, medicine
+its own), `canUse` (who may use one: see Infection and bleeding for the medicine) and `canEat`
+(a plain food: hurt or invulnerable, never a spectator), `COOKED`. The hold is Drinking's:
+client `Interaction/Eating`, server `Players/Eating` (start / finish / cancel, the time, slot
+and item checked, `Foods.finish` with the server's hooks, one item used up outside creative, the
+burp unless `burp` is false).
 
-**On the client** (`Entities/MobRenderer`, `Entities/MobModel`): MobModel (pure) glides each mob
-from where it is drawn to the new state over the sync interval (yaw the short way; > 8 blocks
-snaps), colours parts (the variant, hurt → 0.7 of the way to red, a lit creeper flashing white
-faster as it burns), tips a dying mob over 1 s (sqrt(progress x 1.6) x 90°) and picks the nearest
-live box on a ray. MobRenderer takes the Mobs messages from the moment it loads (the boot script
-requires it before anything waits), its parts in a folder kept out of the workspace until `start`:
-the server sends a spawn once and then only changes, so a message dropped by ClientNet's backlog (64
-a kind, ~6 s of the stream) while a slow client booted left mobs invisible or ghosted for good.
-MobRenderer: anchored, non-colliding, non-queried Parts from a pool (128 spare), one BulkMoveTo a
-frame after the camera, colours written only on change, a Fire (BurningView's colours) on a burning
-mob's body, arrows as thin shafts flying at 32 blocks a second (at most 32), `push` ops to
-`MovementController.knockback`. BlockInteraction aims at mobs first (`mobOn`: MobRenderer.pick on
-the aim ray, then the box within Combat.reach of the hull's eyes): a mob nearer than the block hides
-it (no outline, no mining, no placing) and a press (a tap on touch) sends Attack. WAILA
-(`pickEntity`) names mobs as items and players (`WailaInfo.mob`: name, "Health h / max", F3: kind,
-id, position; a colour box icon).
+**On the client** (`Entities/MobRenderer` and `MobParts`; pure: `MobModel`, `MobRig`,
+`ZombieLooks`, `MobRigPool`, `ZombieVoices`).
+- *MobModel* glides each mob from where it is drawn to its new state over the sync interval (yaw
+  the short way; > 8 blocks snaps). The glide lasts `GLIDE` (0.1 s), or the interval since the
+  last update when moving updates come regularly 1.5-3.5 glides apart (this update and the one
+  before both moved the mob, and both intervals are in that band: the server's half-rate state
+  for mobs beyond 32 blocks), so far zombies walk on between updates instead of stopping; a near
+  zombie that stood a sync or two keeps a 0.1 s glide when it walks off. The move op adds its i16
+  deltas in 1/32 block to the position last decoded for that mob (`bx, by, bz`: its spawn, state
+  or move); positions are whole steps of 1/32, exact in a double, so the sum never drifts from the
+  server's (MobsClient: 2000 random moves and states end on the server's integers exactly). For
+  rigs it keeps Minecraft's WalkAnimationState (`stride`: `walk` eases 0.4 a tick towards min(speed
+  × 4, 1), speed from the glide's delta held 2.5 glides, `phase` advancing `walk` a tick); three
+  blends (`aggro`, `hammer`, `shriek`) move at 4 a second towards the Aggressive, Breaking and
+  Screaming flags, and the Attack flag's rising edge starts a 0.35 s swing (not restarted
+  mid-swing). It colours the boxes (variant, hurt → 0.7 of the way to red), tips a dying mob over
+  1 s (sqrt(progress x 1.6) x 90°) and picks the nearest live box on a ray.
+- *MobRig* holds the R15 part tables (studs at scale 1, the mob's +Z-forward frame): 15 body parts
+  on 10 joints (waist, neck, shoulders, elbows, hips, knees; wrists and ankles fixed), plus at most
+  two extras from the look (a vest 1.08 × 0.94 × 1.16 of the upper torso, a 0.15 stud reflective
+  band, one-box hats), so at most 17 parts; the reduced rig is 8 at most (head, one torso, one box
+  per limb, the hat and vest). A rig is scaled `sy = height × BlockSize / 5.2`, `sx = sy ×
+  rig.width` (default 0.8), then posed rigidly: each part's frame is its parent's × the pivot's
+  offset × Rx(pitch) × Rz(roll) × the centre's offset, composed in plain numbers (12 a part,
+  CFrame.new's order; no CFrame, so Lune measures it as Roblox runs it). Gaits (`GAITS`): shamble
+  (Minecraft's zombie: legs ±cos(phase × 0.6662) × 1.4 × walk, arms forward −π/2.25, −π/1.9
+  aggressive, an id-hashed head tilt, sway), run (a sprinter's stride, arms pumping), brute
+  (splayed, hunched), crawl (pitched 88° about the hips 0.22 blocks above the floor, arms reaching,
+  lower legs and feet hidden), lurch (shamble plus an id-timed twitch); on top an attack swing,
+  hammering and a scream. **Speed limit:** each limb's joints are moved from their last posed
+  angles so that no corner moves faster than `LIMB_SPEED` (17.4 studs a second, 0.29 a frame at 60
+  frames a second), the waist's sway carrying the arms included; the MobRig spec fuzzes flags and
+  pace for every kind (at most 0.286). Shadows: only the head and torso parts
+  (`Mobs.Rig.ShadowParts`).
+- *ZombieLooks* turns a variant (look × skin tone) and the mob's id into a packed colour per part,
+  once at spawn: skin head; the shirt on the upper torso (skin when shirtless), the upper arms
+  unless sleeveless, the forearms only with long sleeves; the pants on the lower torso, thighs and
+  (unless shorts) shins; gloves or skin; shoes or skin; the extras' colours. Each cloth part then
+  shows skin where hash2(id, part) < `torn` (never the seat of the pants) and is stained 0.35 of
+  the way to dark red where hash2(id, part + 32) < `blood`. Nothing about a zombie's appearance is
+  sent beyond its spawn's variant.
+- *MobRigPool* (pure, over an injected part factory) does each frame's bookkeeping: distances from
+  the listener (Audio/SoundPlayer's: the camera kept within 4 blocks of the eyes), an insertion
+  sort, tiers with hysteresis (full ≤ 16 blocks, out past 20; reduced ≤ 40, out past 44; the
+  nearest 16 full and 40 rigs, a holder keeping its place over a newcomer up to 4 blocks nearer),
+  rigs released before any is acquired, whole-rig pools per tier (12 full, 16 reduced, 64
+  impostors kept), re-sizing and re-colouring on reuse only where they differ, a burning mob's
+  flames moved to the part its tier burns on and taken off a rig before it is let go, and the
+  frame's output: the parts and their 12-number frames (every rig posed every frame:
+  `REDUCED_EVERY` 1; 2 poses the reduced rigs every other frame, a fallback for a slow phone).
+- *ZombieVoices* picks who groans: the nearest 8 live zombies within 24 blocks (the event's 16
+  when shorter), each on its own 6-20 s period from its id, the longest overdue first, at most one
+  groan every 1.5 s in all; MobRenderer plays `entity.zombie.ambient` at the zombie's eyes with a
+  gait's pitch (no server event: groans cost the network nothing).
+- *MobRenderer* (the glue) takes the Mobs messages from the moment it loads (the boot script
+  requires it before anything waits: the server sends a spawn once and then only changes), keeps
+  a `MobModel` per mob in a `MobRigPool`, runs `MobRigPool.frame` after the camera, makes and
+  destroys a burning mob's Fire, plays the groans, and passes `push` ops to
+  `MovementController.knockback`. Its Roblox side is *MobParts*, which the Studio probe uses too:
+  the pool's part factory (anchored, non-colliding, non-queried SmoothPlastic Parts, parked with
+  Parent nil, any Fire taken off before a part is destroyed), the flames (BurningView's colours)
+  and the frame's move (every part in one `BulkMoveTo`). `MobRenderer.count()` and `rigs()` feed
+  F3's `mobs` line (mobs known; full and reduced rigs and the parts moved last frame).
+  BlockInteraction aims at mobs first (`mobOn`: MobRenderer.pick on the aim ray, then the box
+  within Combat.reach of the hull's eyes): a mob nearer than the block hides it and a press (a tap
+  on touch) sends Attack. WAILA (`pickEntity`) names mobs (`WailaInfo.mob`: name, "Health h /
+  max", F3: kind, id, position; a colour box icon).
+- **Costs** (Lune, the median frame of each run, the median of 5 runs; native / interpreted):
+  posing 16 full + 24 reduced rigs 0.084 / 0.504 ms; the whole bookkeeping and posing for 60
+  zombies round a player 0.169 / 0.966 ms (budgets 1.2 / 1.5); at most 411 rig parts moved a frame
+  (464 by construction); 0 parts made in 60 s after a 30 s warm-up while 60 zombies kept crossing
+  tiers. Not measured in Lune: `CFrame.new` × parts, the engine's `BulkMoveTo`, shadows and
+  drawing: `tools/probes/ZombieRigProbe.client.luau` measures them on a device (numbers on a
+  low-end phone still to be taken); `tests/spec/ZombieRigProbe` runs the probe whole on Lune's
+  Roblox instances.
+
+## Zombie director and noise (`server/Mobs/ZombieDirector`, `Apocalypse/NoiseBus`, `Apocalypse/NoiseRules`)
+
+`ZombieDirector` (pure, native) runs every tick after natural spawning with `Config.Mobs` and
+`Config.Apocalypse` (both overridable for tests):
+- **Caps**: a player's monster cap is round(HostileCap × (1 at night, `DayFactor` by day) × city),
+  city = `CityFactor` where the player stands in a city (`cityAt` ≥ 0.5): 20 / 7 / 35 / 12. Through
+  a blood moon of number k: min(`CapMax`, round((`CapBase` + `CapPerMoon` × k) × city)): 28, 32,
+  36... (49, 56, 60 in a city). HostileCap 0 (Peaceful) zeroes every cap: no spawns, no waves.
+- **Limits**: `MaxMobs` / `MaxHostile` 320 / 200, or `BloodMoon.MaxMobs` / `MaxHostile` 360 / 260
+  while a blood moon is up, worked out from the day time every tick (never set at dusk and put
+  back at dawn, so neither `/time set` nor a restart in a moon leaves them raised).
+- **Waves**: at the moon's rise and every `WaveInterval` (600) ticks (never where
+  `Config.Mobs.Spawning` is false: the void and the debug worlds), for each living survival or
+  adventure player, `WaveBase` + `WavePerMoon` × k zombies (8, 10, 12...) within their cap and the
+  world's room, in packs of 3-5 (`spawnPack`) 28-44 blocks out on sky-open floors in ticking
+  chunks, at most `WAVE_ABOVE` (`MobAI.MAX_FALL`, 3) above the generator's ground there
+  (`context.ground`: never on a city's roofs or a tree's crown, where its hunters could never come
+  down; in seed 99's big city 59 of 320 wave zombies stood 4-20 blocks up before this rule, none
+  after, all 320 still placed), 8 tries a player; kinds by `hordeWeight` grown by `hordeGrowth` ×
+  (k - 1) (runners and brutes more often each moon); each hunts that player and is persistent.
+  Natural monster spawning waits (`hostilePaused`).
+- **Hunts**: every `HuntInterval` (100) ticks of a moon, every zombie with no target within
+  `HuntRadius` (44) of a living survival or adventure player hunts the nearest one.
+- **The moon's end** (or `/time set` past it): every hunt ends, and a leave round runs against
+  the day's caps.
+- **Leave rounds**: at dawn (`DayCycle.isDay` turning true), at the moon's end and every
+  `Leave.Interval` (600) ticks by day: per living non-spectator player, the zombies within
+  `LEAVE_RADIUS` (32) blocks beyond their cap (the day's at dawn) that have no target in sight and
+  break nothing, the furthest first, get `leave` = `Leave.Ticks`; MobWorld removes them once far
+  enough and unseen, so a crowd round a shelter thins out by day (the glue spec: 8 of 20 round a
+  player sealed in a bunker left at dawn, down to the town's day cap of 12).
+- `hear(noises, night, rainingAt, settings)`: the tick's noises with the night (× 1.25) and rain
+  (× 0.7 where it rains at the noise) factors.
+Measured (Lune, native / interpreted, the middle of three runs): the whole tick a k = 3 wave comes
+on 0.36 / 1.03 ms for 1 player with 24 hunters, 0.82 / 2.75 ms for 4 players with 96 (budget 4
+native); a k = 3 moon with 4 players and 144 zombies hunting 1.10 / 3.92 ms a tick (budget 5
+native).
+
+**Noise.** `Shared/Apocalypse/NoiseRules` (pure) says which sound events are noises and how far
+they carry: a block broken `Break` (10), glass `Glass` (16), placed `Place` (6), a door or the
+bunker hatch `Door` (10), a container's lid `Container` (6), a player's hit landing `Hit` (8), a
+player hurt `Hurt` (10); every mob's own sounds and the client-side events are silent.
+`server/Apocalypse/NoiseBus` collects a tick's noises: `fromSound` (Audio/Sounds.play calls it
+ahead of its own started and enabled checks, so muting the game's audio deafens no zombie),
+`explosion` (`ExplosionBase` + `ExplosionPerPower` × power, at most `ExplosionMax`: 24 + 12 a
+power, 56), `emit` (a sprint: Apocalypse/Survival once a second, `Sprint` 8; a shriek: Mobs,
+`Scream` 48), merged within `Merge` (4) blocks and at most `MaxPerTick` (32) a tick; `take` hands
+them to Mobs once a tick. A noise carries no "who": a zombie that hears one looks for a target at
+once. With `Apocalypse.Enabled` or `Noise.Enabled` false nothing is heard.
+
+## Infection and bleeding (`Apocalypse/Infection`, server `Apocalypse/`, `Items/Foods`)
+
+The zombie apocalypse's survival rules are pure and tested in Lune (`tests/spec/Infection`,
+`Medical`, `Survivor`, `Apocalypse`); the glue plays them out (ApocalypseGlue runs the bite, the
+medicine and the rising on a real world server).
+
+- **`Shared/Apocalypse/Infection`** (pure): progress `p` counts from 1 at the bite (0 healthy;
+  saved as is). `stage(p)` = `(p - 1) // StageTicks + 1`, at most `Stages`; the Infection effect's
+  amplifier is the stage less one and its ticks the countdown `LETHAL + 1 - p` (`LETHAL` =
+  StageTicks × Stages = 48000). `tick(p, s, out)` grows it a tick and says what the tick does:
+  refresh the stage's symptoms (every 20 ticks, given for 60, so a cure lets them lapse at once:
+  II Weakness and thirst draining faster, III Weakness, Slowness and no natural regeneration, IV
+  Weakness and Slowness II), stage III's Nausea (200 ticks every 1200), stage IV's half heart
+  (every `DamageInterval`), or death (the tick that takes `p` past LETHAL: exactly 48000 ticks
+  after the bite). `rollBite` is a landed bite: never for creative or spectator (`affects`), at
+  most one roll every `RollInterval`, the kind's `infect` less the armor's shield (`chance`:
+  `ArmorShield` a point, at most `ArmorShieldMax`), a new infection at 1 or an old one
+  `BiteAdvance` on (`bite`, never past LETHAL). `setBack` is the poultice (`p - StageTicks`, at
+  least 1: never a cure), `AFTERMATH_STAGE` / `AFTERMATH_TICKS` Antibiotics' Weakness (stage III
+  on, a minute), `blocksRegeneration` the stage III rule, `drainsThirst` stage II's, `fromSaved` a
+  saved `p` checked. `dormant(s)` (`Enabled` false; the server passes such a copy while
+  `Apocalypse.Enabled` is off): nothing is caught, and a saved infection stands still with no
+  countdown, level, symptoms, drain, regeneration hold, hurt or death, kept for when it is back.
+- **Server `Apocalypse/Infection`** (glue): each player's `p` and last roll. It owns the external
+  Infection effect (`Players/Effects.addExternal` with the stage as the adapter's `amplifier`,
+  `paused` for creative and spectator, `/effect give` starting or advancing it, `/effect clear`
+  curing it). `tick(player, mode)` (Survival's loop) gives the symptoms through `Players/Effects`,
+  drains Tough As Nails' thirst, and hurts through `Players/Characters.magicHurt` (stage IV with
+  `lethal` false, so it stops at the last half heart; the end with `math.huge, true`; Resistance
+  applies, armor doesn't). The regeneration block: `Players/ToughAsNails.setRegenBlock` joins the
+  infection to the frozen / overheated rule in TAN's tick, which both pauses the Roblox Health
+  script and holds thirst's regeneration; with thirst and temperature off TAN's tick doesn't run,
+  so Infection asks for the pause every tick itself (`ToughAsNails.pauseRegeneration`: a no-op
+  while TAN's tick runs or when nothing changes, and it finds a character's new Health script).
+  `cure(player)` takes off the symptoms it gave (only effects with no more time left than a
+  symptom's); `died` clears it and says whether it killed (a dormant one raises no zombie). A
+  leaving player is forgotten only after every PlayerRemoving handler ran (`task.defer`, as
+  `Players/Mana`), so the saves made as they leave read the live progress.
+- **Server `Apocalypse/SurvivalRules`** (pure) and **`Apocalypse/Survival`** (glue):
+  `Mobs.playerHit` gives a fresh landed hit by a `zombie` kind on a survival or adventure player
+  its infection roll and its `bleed` roll (`SurvivalRules.bleeding`: at least `Bleeding.Ticks`, a
+  level up when already bleeding, at most `MaxAmplifier`, through `Players/Effects.give`, whose
+  MobEffectInstance.update keeps the longer or stronger). One 20 Hz loop ticks every living player
+  (`tickLiving`): the survivor record (`alive` ticks since the last death, in every game mode), the
+  blood moon watch only while `Apocalypse.Enabled` (`moonTick`: a moon seen rising and then setting
+  the same night counts; a `/time set` back forgets it), the infection, and once a second a sprint
+  noise (`NoiseBus.emit`, `Noise.Sprint`) for a sprinting player who makes sounds (TAN's sprint
+  reports, or with TAN off the feet's speed: `measuredSprint`). `Mobs.died` with a killer counts
+  zombie kills. A death starts the record over, tells everyone "<name> succumbed to the
+  infection" when it was the infection, and raises a Zombie `RiseDelay` ticks later where the
+  player fell (`rises`; `Mobs.spawn(..., variant)`: the civilian look whose shirt is nearest the
+  player's torso colour, a skin tone by UserId: `riseVariant`; "<name> rose again"). The record
+  goes to the player as Protocol `Survivor` (8 bytes) on each character, after a restore, a kill
+  or a moon survived, and every `Survivor.SyncTicks`.
+- **Saved**: Save/CharacterCodec version 2 appends u32 alive, u16 kills, u16 moons and u32
+  infection to a character; a version 1 record reads them as 0. `Players/CharacterStore` captures
+  them (`Survival.export`, the cache for a leaving player) and restores them on entering
+  (`Survival.restore`); `keepThings` keeps the infection with the effects (an unfair visit can't
+  cure it for good), while the record is the character's own (like deaths and time played). With
+  `Characters.Enabled` off, each world's player record (Save/PlayerCodec version 3, flag bit 5: the
+  same four numbers, written only when not all 0) carries them through `World/WorldSave`'s capture,
+  leaving fallback and restore; versions 1 and 2 read them as 0.
+- **Bleeding** is a plain data effect (EffectList: `interval = 80, damage = 1, lethal = false`):
+  EffectRules' `current > 1` rule stops it at the last half heart; amplifier 1 halves the
+  interval. Every hurt the survival rules deal goes through `Characters.magicHurt` or EffectRules,
+  so Resistance applies and the hurt cooldown holds.
+- **Medicine** reuses eating (Protocol Eat): `Items/Foods` entries carry `useTicks`, `cures`
+  (Shared/Effects names), `effects`, `aftermath` (Antibiotics' Weakness, given when the infection
+  the cure ended had reached its `stage`, read through the `infectionStage` hook before the cure),
+  `setback`, `sound` and `burp`; `Foods.canUse` is who may use one, `Foods.finish(food, hooks)`
+  what finishing it does (the server's hooks: heal, `Effects.remove` for every cure (the Infection
+  goes to its owner), `Infection.setBack`, `Infection.stage`, `Effects.give`, TAN's Thirst effect),
+  so the specs play the whole rule out with fakes. The client predicts `canUse` with
+  `Player/EffectState` and plays medicine's sound as the use starts (no bites, no burp); the server
+  plays it to everyone else. Bottled Water and Soda are `ToughAsNails/Drinks` entries (Soda's Speed
+  makes it a "potion": drunk any time).
+
+## Blood moon and the day counter (`Apocalypse/BloodMoon`, client `Rendering/BloodMoonSky`, `Ui/SurvivorHud`)
+
+- **The schedule** (`Shared/Apocalypse/BloodMoon`, pure) is a function of the replicated day time,
+  so the server's director, the sky, the day line and the survivor's count agree with no message
+  and nothing to save (the glue spec checks all four over ten days: nights 3, 6 and 9). The night
+  of day d (DayCycle's, day 0 from sunrise) spans `Start` (12500) .. `End` (23500) ticks into it,
+  and is a blood moon's when d + 1 is a multiple of `Every` (3) and at least `First` (3);
+  `intensity` ramps from 0 to 1 over `Ramp` (600) ticks after Start and back before End; `active`
+  while it is above 0; `number` is which moon it is (k), `daysUntil` the whole days to the next.
+  `/time set` moves the schedule with the clock: everything derived from it is worked out again
+  every tick (the director's caps and limits, the sky, the line).
+- **The sky** (`Rendering/BloodMoonSky`) runs in `LightingController.update` right after
+  `WeatherSky.apply`: `apply(environment, intensity × exposure)` moves the ambient, outdoor
+  ambient, colour shift and the Atmosphere's colour and decay toward `Tint` by `amount ×
+  TintStrength` (pure, tested: nothing by day, the full tint at midnight of a blood day); `update`
+  drives its own ColorCorrectionEffect ("IceVoxelBloodMoon", disabled at 0) and the Sky's
+  MoonAngularSize (the place's size as the base, × `MoonSize` at full). Roblox composes the
+  correction with the weather's and the fluids', so no other file changes; with
+  `Lighting.Enabled` false nothing here runs.
+- **The day line** (`Ui/SurvivorLine`, pure) says "Day N · Survived D days" ("Day N" outside
+  survival and adventure; a red "Blood Moon" / "Blood Moon tonight" (until it rises, never after it
+  set) / "Blood Moon tomorrow"), its widths on one row and wrapped (`widths`), the toasts due
+  between two frames' day times (`events`: dawn of a blood day, its rise, its set; a step back or
+  of more than 600 ticks is none) and their widths (`toastWidth`: the text and 8 a side, at least
+  160). The set's toast is the server's word: `confirmSet` pairs the clock's set with a Survivor
+  message raising the moons survived (`Player/SurvivorState.moonsRaised`) within 10 s, either
+  first, so a character that died under the moon or a saved record coming back toasts nothing.
+  `Ui/SurvivorHud` draws them: the line in the pixel font, a row the coordinates line's height (two
+  when HudLayout wraps it), both widths given to `UiScale.setDayLine`; the toasts as wide as their
+  text in HudLayout's `notice` slot (`UiScale.setToast("notice", width)`), one at a time, waiting
+  while there is no room, the rise with `ambient.blood_moon.rise`. `Player/SurvivorState` keeps the
+  last Survivor message and counts the alive ticks on between messages. The Day Counter setting
+  (PlayerSettings 59, HUD page) and `Apocalypse.Survivor.DayCounter` hide the line.
+- **The layout** (`Ui/HudLayout`) gains `Input.dayLine` / `dayWidth` / `dayWrap` / `notice` and
+  `Layout.day` / `dayRows` / `notice`: the day line goes GAP under the coordinates line, else under
+  the touch Map button, else in the area's corner, on one row where that fits and with its warning
+  on a second row where it doesn't (with a warning one row is 45 to 50 characters, 360 to 400 GUI
+  pixels, and an iPad's or a 1024 × 768 window's corner is about 320 at its Auto scale); the
+  column's bottom moves under it, so the toasts and effect icons follow and WAILA keeps left of it.
+  The HudLayout spec sweeps every screen and scale with the day line's real texts in all three
+  places (31488 combinations: always placed, wrapped only where one row doesn't fit) and the widest
+  toast.
+- **The server's side** of a moon is the director's (waves, hunts, the raised limits, the leave
+  round at its end: Zombie director and noise) and Survival's (`moonTick`: a moon lived through
+  from its rise to its set counts on the survivor record).
 
 ## Sounds (`Sounds/`, server `Audio/Sounds`, client `Audio/SoundPlayer`)
 
@@ -5473,10 +6039,13 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
 | Side        | Events                                                     | How                              |
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
 | `predicted` | block break / place / fall (fire's break: its hiss), player small / big fall | the acting client at once; the server sends everyone else |
-| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish, explosions | the server sends everyone near, the player included |
-| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient, fire crackle | clients only, never sent |
+| `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish, explosions; zombies bashing and breaking blocks, a screamer's shriek, the bunker hatch, medicine (to everyone else; the user's client plays its own as the use starts) | the server sends everyone near, the player included |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient, fire crackle; zombies' groans (Entities/ZombieVoices), the blood moon's rise (Ui/SurvivorHud) | clients only, never sent |
 
-**The server** (`Audio/Sounds`) queues sounds and, once a frame, sends each player whose feet are
+**The server** (`Audio/Sounds`) hands every sound it plays to the zombies' noise bus first
+(`Apocalypse/NoiseBus.fromSound`, ahead of its own started and enabled checks, so turning the
+game's audio off deafens no zombie: Zombie director and noise), then queues it and, once a frame,
+sends each player whose feet are
 within the event's distance (times a volume above 1, at most 2.55) plus `Sounds.BroadcastSlack`
 blocks one `Sound` message with all of theirs, at most `Sounds.MaxPerFrame`, leaving out the player
 whose client predicted it. Sounds a player's own messages cause (chest lids, armor put on) use up
@@ -5621,15 +6190,16 @@ seed and the full detail terrain, and the generators answer for one cell at a ti
 
 - **Ids and tags** (`Generation/Locate`, pure). A `Registry` per kind of thing: structures (the
   built-in kinds `mineshaft`, `mineshaft_overgrown`, `mineshaft_entrance`, `oil_geyser`,
-  `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`, `ravine`, then the library's structures;
-  a library name clashing with a built-in one is left out), biomes (BiomeList's 18) and points of
-  interest (`Shared/Poi`). Ids show in snake case without a namespace ("birch_forest") and match
-  loosely (`Locate.key`: any case, "minecraft:" or "icevoxel:" dropped, no `_`, spaces or dashes).
-  Tags (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#library`; `#is_forest`, `#is_taiga`,
-  `#is_mountain`, `#is_hill`, `#is_savanna`, `#is_jungle`, `#is_snowy`, `#band_lowland` ..
-  `#band_peaks`, also without "is_"; `#workstation`, `#machine`, `#generator`, `#container`,
-  `#structure`, `#explosive`) search their members together and answer "#tag (member)". An id
-  in the registry that this world can't have answers not found at once (no probe); an unknown one
+  `oil_deposit`, `lava_lake`, `lake`, `cave_entrance`, `ravine`, `city`, `bunker`, then the
+  library's structures; a library name clashing with a built-in one is left out), biomes
+  (BiomeList's 18) and points of interest (`Shared/Poi`). Ids show in snake case without a namespace
+  ("birch_forest") and match loosely (`Locate.key`: any case, "minecraft:" or "icevoxel:" dropped,
+  no `_`, spaces or dashes). Tags (`#mineshaft`, `#oil_well`, `#lake`, `#cave`, `#ruins` (a city or
+  a bunker), `#library`; `#is_forest`, `#is_taiga`, `#is_mountain`, `#is_hill`, `#is_savanna`,
+  `#is_jungle`, `#is_snowy`, `#band_lowland` .. `#band_peaks`, also without "is_"; `#workstation`,
+  `#machine`, `#generator`, `#container`, `#structure`, `#explosive`, `#scavenge`: chests, supply
+  crates and medicine cabinets) search their members together and answer "#tag (member)". An id in
+  the registry that this world can't have answers not found at once (no probe); an unknown one
   Minecraft's parse errors.
 - **Kinds** (the generator's `locateKinds`, TerrainGenerator). One kind per locatable structure,
   on a cell grid (`grid`, `origin`): a `probe` that never touches a cache (a library structure's
@@ -5637,7 +6207,9 @@ seed and the full detail terrain, and the generators answer for one cell at a ti
   start: a hash and two columns, 10 µs; an oil well's or a lake's decision, read from the cache
   when there, else decided and not stored; a surface cave's hash) and an exact `verify` for the
   few candidates that might be nearest (`StructureGen.assembleAt`, `Mineshafts.planAt`,
-  `SurfaceCaves.wormOf`: cached as the chunks cache them, 0.5-5 ms, yielding). `slack` bounds how
+  `SurfaceCaves.wormOf`: cached as the chunks cache them, 0.5-5 ms, yielding; a city's is its
+  cell's existence test, uncached, and a bunker's its 768 cell's hash or a city overlapping it:
+  see Cities and roads and Bunkers). `slack` bounds how
   far a verified position lies outside its cell, `spread` how far from its probe (an entrance from
   its room, a ravine's nearest step from its start). Left out when the world can't have them: no
   structures, a Single Biome outside a structure's biomes, too dry for moss (overgrown mineshafts
@@ -5709,15 +6281,16 @@ Minecraft's title screen and Create World screen, and its server operators.
 
 **Boot.** The server starts what doesn't need a world first, on `Network/LobbyNet`:
 Players/Operators, Players/SettingsStore (so the title screen's Options menu saves) and, with
-`Config.MainMenu.Enabled`, Players/WorldMenu (the boot script turns `Players.CharacterAutoLoads`
-off first of all). Everything else is the boot script's `startWorld(settings)`, which
+`Config.MainMenu.Enabled`, Players/WorldMenu (the boot script turns `Players.CharacterAutoLoads` off
+first of all). Everything else is the boot script's `startWorld(settings)`, which
 `World/WorldInfo.create` runs exactly once: from WorldMenu when the operator creates the world, or
 at once with the menu off (`WorldSettings.fromConfig`: `Config.World` and `Config.Seed`). Before it
 runs, `WorldInfo.apply` puts the settings into the server's Config (new players' game mode
 `Gameplay.DefaultGameMode`, the difficulty `Server.Fire.Difficulty`, and Peaceful's
-`Mobs.HostileCap` / `MaxHostile` 0: no monsters spawn; /summon still makes them; a world type with
-`mobs = false`: `Mobs.Spawning` off), and `startWorld` hands Allow Commands to Operators and builds
-the block ticker without behaviours for a type with `ticks = false` (the debug worlds). `startWorld` publishes last (`WorldSettings.publish`:
+`Mobs.HostileCap` / `MaxHostile` 0: no zombies spawn, nor blood moon waves; /summon still makes
+them; a world type with `mobs = false`: `Mobs.Spawning` off, so no waves either), and `startWorld`
+hands Allow Commands to Operators and builds the block ticker without behaviours for a type with
+`ticks = false` (the debug worlds). `startWorld` publishes last (`WorldSettings.publish`:
 "WorldName", "Difficulty", "AllowCommands", then WorldTypes' "WorldType", "WorldOptions" and
 "Seed"), so every part is up before a client starts loading. A `startWorld` that throws leaves the
 state "failed" for good (half the parts may have started: the server needs a restart).
@@ -5830,9 +6403,12 @@ its regions and its players.
 - Players (`Save/PlayerCodec`, Minecraft's playerdata): feet and facing (or none: back at the
   spawn), health in half hearts, game mode and the previous one, the selected slot, inventory,
   armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
-  the running status effects. Knowledge, Ages and skills stay in Players/ProgressStore, for every
-  world. 60-400 bytes. A record holding items this version doesn't know is applied (what it can
-  read) but never written that session.
+  the running status effects, and (version 3, flag bit 5, written only when not all 0) the
+  apocalypse's survivor record and infection with `Characters.Enabled` off (Infection and
+  bleeding). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
+  bytes. A record holding items this version doesn't know is applied (what it can read) but
+  never written that session. The world's options carry its `ruins` setting; a record from before
+  the ruins has no key and reads it as off (World types).
 - Not saved: fire's ages (fire comes back at age 0), a lit TNT's or Nuke's fuse (a lit block
   with no record starts its full fuse, Behaviours/Tnt), explosions under way, items' and mobs'
   velocities, monsters, the session's SAVE texts of structure blocks (copy the IVS1 text) and
@@ -6025,7 +6601,7 @@ with the origin; what is placed every frame (after the origin's render step) onl
 | `LightningView` | near bolts and strike anchors; the far bolts' Attachments (their anchor stays at the identity) − d | |
 | `CloudView` | each ring's Model `PivotTo(GetPivot() − d)` (never its parts one by one: its WorldPivot stays right) | |
 | `SoundPlayer` (`Origin.onRebase`) | the emitter's Attachments, the distant voices' sources and the listener − d (the emitter stays at the identity) | the listener |
-| `EntityRenderer`, `MobRenderer`, `ExplosionView` | | items and pickup flights, mobs and arrows, the Nuke's six parts (a per-frame updater replaced its CFrame tweens) |
+| `EntityRenderer`, `MobRenderer` (+ `MobParts`, `MobRigPool`, `MobRig`), `ExplosionView` | | items and pickup flights, mobs (zombies' R15 rigs in three tiers, pooled, in one `BulkMoveTo`), the Nuke's six parts (a per-frame updater replaced its CFrame tweens) |
 
 Containers out of the workspace are never moved at a move (the lazy rule: a part goes into the
 workspace only placed for the current origin):
@@ -6265,8 +6841,9 @@ second, half hearts). The shared groundwork (data, codecs, messages), then how e
   and Anklet of the Wind (+5% / +10% speed), Band of Regeneration (a half heart every 10 s), Band of
   Starpower (+20 mana), Obsidian Skull (+1 armour, no campfire hurt), Flipper (swim x2), Cobalt
   Shield (no knockback, +1 armour), Feral Claws (+12% attack speed). Mineshaft chests hide most of
-  them (a fourth loot pool after Minecraft's three); spiders drop Feral Claws. How they are worn,
-  work and show: Equipment, below.
+  them (a fourth loot pool after Minecraft's three); Feral Claws are also in the ruins' house and
+  police loot and the bunkers' armories, a Cobalt Shield in the last two
+  (Generation/ScavengeLoot). How they are worn, work and show: Equipment, below.
 - **Mana** (`Config.Mana`, server `Players/Mana`): 20, +20 a Mana Crystal (five Fallen Stars) up
   to 200, accessories on top, 400 at most; Mana Sickness is effect 25. Magic weapons (ItemList
   `magic`: Wand of Sparking, Emerald Staff, Water Bolt) and the mana potions are items;
@@ -6646,7 +7223,11 @@ bottom of the screen and the saving icon sat on the minimap).
     (the HUD's pixel font, as wide as its text, right aligned) 2 under it; on a touch screen with
     the minimap off the 32 × 16 Map button, never under a finger's 32 pixels high (64 wide:
     `mapButtonSize`; the minimap's cloud button likewise takes taps in a square of at least 32
-    pixels, `touchSide`);
+    pixels, `touchSide`); the apocalypse's day line under the coordinates line (else the Map
+    button, else in the corner), on one row or wrapped onto two (`setDayLine`; see Blood moon and
+    the day counter), the column's bottom moving under it;
+  - the blood moon's toast in its own `notice` slot (`setToast("notice", width)`), under the
+    lowest toast showing;
   - the toasts: slot 1 under that column is Now Playing's place, shown or not; "World saved" takes
     slot 1, or slot 2 under Now Playing while that one shows or once it went under it
     (SaveIndicator's rule: it never moves back up), else beside slot 1, else it waits for room, as
@@ -6729,7 +7310,8 @@ live edits after it must arrive in the order they were sent.
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
 | server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
-| server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state) / state (position in 1/32 block, yaw in 1/256 turn, health, flags, fuse: 21 bytes) / remove / arrow (from, to) / push (this player's knockback) |
+| server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state: 22 bytes with the op and id) / state (position in 1/32 block, yaw in 1/256 turn, health, flags: 20 bytes) / remove / push (this player's knockback) / move (op 6: the change of position from the one last sent to this player, i16 steps of 1/32 block, yaw, health, flags: 14 bytes); flags: hurt, burning, dying, aggressive, attacking, breaking, screaming; op 4 (an arrow once) is retired |
+| server → client | `Survivor`      | the player's own survivor record: u32 alive ticks (this character's since it last died), u16 zombies killed, u16 blood moons survived (8 bytes, on joining and respawning, after a kill or a moon survived, and every `Apocalypse.Survivor.SyncTicks`) |
 | server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (bit 0 ambient, bit 1 paused: an external effect its owner holds, not counted down)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |
 | server → client | `Progress`      | the player's own knowledge points (u32), Age, unlocked skills, discovery counts by category and the Ages' milestones as bits (21 bytes and one a skill, after every change, one a frame at most) |
 | server → client | `MenuState`     | the title screen's state (u8: waiting, creating, ready, failed), the operator's name and the world's (u16 length + text each), on joining and to everyone on a change |
@@ -6880,8 +7462,13 @@ sends stay in one ordered stream.
   edit. Placing over a replaceable plant drops nothing; the other half of a tall one then pops by
   itself with its no-tool drop (nothing for tall grass and large ferns).
 - `Entities/`: dropped items (see Item entities).
-- `Mobs/`: mobs, their spawning, players' attacks and /summon (see Mobs); `Players/Eating`: food.
-  `Characters.hurt` is how a mob's hit reaches a player (the hurt cooldown and armor).
+- `Mobs/`: mobs, their spawning, the zombie director, players' attacks and /summon (see Mobs,
+  Zombie director and noise); `Players/Eating`: food and medicine. `Characters.hurt` is how a
+  mob's hit reaches a player (the hurt cooldown and armor). `Apocalypse/`: the noise bus and the
+  survival rules (see Infection and bleeding, Blood moon); the boot script starts
+  `Apocalypse/Survival` (which runs the Infection and listens to `Mobs.playerHit` and `Mobs.died`
+  itself) and hands every blast to `NoiseBus.explosion`. `Players/ToggleUse`: the bunker hatch
+  (see Bunkers).
 - `Players/GameModes`, `Players/GameModeCommand`, `Players/GameModeRules`: see Game modes.
   `Players/Inventories`, `Players/Containers`: see Items and inventories. `World/TimeOfDay` and
   `Players/TimeCommands`: see Day and night. `Audio/Sounds`: see Sounds.
@@ -6927,7 +7514,9 @@ sends stay in one ordered stream.
   chunks nobody edited the terrain is exactly what the generator makes, so open water is skipped
   from the generator's height alone and columns are scanned from just above the tallest structure.
   Spawning re-checks the spawn spot on every respawn, since players may have built or poured water
-  there; when no safe spot exists it waits 30 s before searching again.
+  there; when no safe spot exists it waits 30 s before searching again. In a city's footprint
+  (the generator's `cityAt` is 1) a column is scanned from no higher than one above the last full
+  floor's feet, in edited chunks too (see Cities and roads).
 
 ## Server chunk generation (server `World/Simulation`, `World/GenQueue`, `World/WorldServer`)
 
@@ -7179,9 +7768,36 @@ Saving worlds).
 - Mob kinds (`Entities/MobList` positions) go on the wire as a u8: append, never reorder. Mobs
   only tick in the chunks World/Simulation keeps (loaded, near a player) and read blocks with
   `peekBlock`; spawning never generates terrain and never places a mob in a chunk that doesn't
-  tick. Mob AI and physics stay pure (MobWorld, MobAI, MobSpawning, MobPhysics take their blocks,
-  players, time and randomness as arguments), so the specs run them; Roblox calls stay in
-  `Mobs/Mobs`. Light for gameplay comes from `World/LightEstimate`, the one estimate WAILA shows.
+  tick. Mob AI and physics stay pure (MobWorld, MobAI, MobCrowd, MobSpawning, MobTracking,
+  ZombieDirector, MobPhysics take their blocks, players, time and randomness as arguments), so the
+  specs run them; Roblox calls stay in `Mobs/Mobs`. Light for gameplay comes from
+  `World/LightEstimate`, the one estimate WAILA shows.
+- Zombie kinds are data: rig, looks, stats. A kind's numbers, abilities (`breakPower`, `hearing`,
+  `scream`, `fireImmune`, `knockbackResist`, `infect`, `bleed`), spawn weights, `rig` (gait, scale,
+  hidden parts) and `looks` are MobList rows; MobAI's zombie rules apply to every kind with
+  `zombie` and the director's to all of them, and no server code names a kind; the client draws
+  any kind from its rows (a new gait is a profile in MobRig). A zombie's look is its variant byte
+  (look × skin) and its tears and blood its id's hash: nothing about its appearance is sent beyond
+  the spawn. Rig maths stay pure numbers (no CFrame), so Lune measures them as Roblox runs them;
+  only `Entities/MobParts` (for MobRenderer and the Studio probe) touches Parts.
+- Every sound the server plays goes through `Audio/Sounds.play`, which tells the noise bus before
+  anything else; a new noise is a NoiseRules radius or a `NoiseBus.emit`, never a call into the AI.
+- Ruins are decided from the raw relief only; planners read the raw relief and keep out of
+  `cities.blocked`. `generate`, MapPainter and `spawnShift` read the wrapped relief and `prepare`
+  first; any other wrapped `column` (the client's camera column, WAILA, the server's SafeSpot and
+  the zombies' ground) builds what it needs at once (a road or city column's first touch some
+  0.3-5 ms once per region and generator instance), then nothing. Nothing may yield between
+  `CityLayout.begin` and `finish` (the writer is module state).
+- A bunker's every block decision is its plan's and its own column's (the column limit reads the
+  neighbours' heights: the chunk's, or the generator's wrapped relief past the padding); its
+  inside is cave air and cave twins (or opaque full blocks), so hidden bunkers cost nothing to
+  draw; a wild bunker's hatch and shaft lie in a chunk's core columns, a city shed's may lie
+  anywhere and is written alike in the padding.
+- An infection is progress, not a timer: it is saved as `p`, never re-derived from the clock, and
+  creative and spectator hold it (the external effect's `paused`). Every hurt the survival rules
+  deal goes through `Characters.magicHurt` (or EffectRules for Bleeding), so Resistance applies
+  and none bypasses `Effects.incomingDamage`. The blood moon is a function of the day time on
+  every side: never store or send it.
 - Projectile kinds (`Magic/Projectiles.KINDS` positions) go on the wire as a u8, so append and
   never reorder. `Projectiles.step` must stay pure and deterministic, with the same double
   arithmetic on both sides, starts rounded to f32 and no randomness: the server only sends where a
