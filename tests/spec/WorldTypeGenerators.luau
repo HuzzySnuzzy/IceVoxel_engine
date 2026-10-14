@@ -255,7 +255,9 @@ return function(t, shared, require, server)
 	-- data digests moved (from 3763431356 and 3358180211); nothing else of any row did.
 	-- Cities and roads (Generation/Cities) moved nothing here: no row's chunk, column, map tile
 	-- or outpost lies in `cities.blocked`, and the nearest city to the spawn (2724, 2747, 3.6 km)
-	-- lies beyond spawnShift's 3 km, so the spawn stays.
+	-- lies beyond spawnShift's 3 km, so the spawn stays. Bunkers (Generation/Bunkers) moved nothing
+	-- either: every row, the columns, the spawn, the map tile and the outposts hold with cities,
+	-- roads and bunkers all on.
 	local PINNED = {
 		{ 0, 0, 0, 2497134012, 2385823076, 637642054, 112, 73, 75 },
 		{ 0, 3, -2, 3308524465, 2787425146, 1146561170, 112, 71, 74 },
@@ -691,9 +693,9 @@ return function(t, shared, require, server)
 
 	t.test("debug structures: every template and generated structure once, no overlaps, tags outside", function()
 		local entries = DebugWorlds.structureLayout(SEED, library)
-		-- (And the two sample mineshafts, Generation/Mineshafts, and the sample town,
-		-- Generation/Cities.)
-		t.eq(#entries, #library.names + #library.structures + 3, "every template and structure")
+		-- (And the two sample mineshafts, Generation/Mineshafts, the sample bunker,
+		-- Generation/Bunkers, and the sample town, Generation/Cities.)
+		t.eq(#entries, #library.names + #library.structures + 4, "every template and structure")
 		local seen: { [string]: number } = {}
 		for _, e in entries do
 			seen[e.name] = (seen[e.name] or 0) + 1
@@ -842,9 +844,10 @@ return function(t, shared, require, server)
 		t.eq(
 			#gen.structures(-10, -10, 10000, 10000)
 				+ #(gen.mineshafts :: any)(-10, -10, 10000, 10000)
+				+ #(gen.bunkers :: any)(-10, -10, 10000, 10000)
 				+ #(gen.cities :: any)(-10, -10, 10000, 10000),
 			#labels,
-			"every start, sample mineshaft and sample town"
+			"every start, sample mineshaft, sample bunker and sample town"
 		)
 	end)
 

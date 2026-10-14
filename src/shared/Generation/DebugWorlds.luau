@@ -43,9 +43,13 @@
 	             Generation/Mineshafts into the floor's stone (MINESHAFT_DEPTH under the floor,
 	             in full detail chunks, as the Default's), the overgrown one with its entrance at
 	             the room's centre: the collar and headframe on the floor and a rope all the way
-	             down. Their name tags' regions reach down to them. Last, after every other entry
-	             (its footprint's corner on a chunk's corner), "city": the zombie apocalypse's
-	             sample town (Cities.sample: one parcel of every kind, a bunker shed), written over
+	             down. Their name tags' regions reach down to them. After them, "bunker": a
+	             fixed bunker (Bunkers.sample: the airlock under its hatch and ladder shaft, a
+	             corridor and every kind of room, lit), written by Generation/Bunkers into the
+	             floor's stone (CITY_DEPTH under the floor) in full detail chunks, as the
+	             Default's. Last, after every other entry (its footprint's corner on a chunk's
+	             corner), "city": the zombie apocalypse's sample town (Cities.sample: one parcel
+	             of every kind, a bunker shed with no bunker under it), written over
 	             the floor as the Default writes its cities at levels 0..Config.Cities.LodLevels:
 	             the streets' surface over the grass (with its filler at full detail, in the
 	             ground's top cell beyond), the buildings (massing beyond full detail), each chunk
@@ -67,8 +71,9 @@
 	`locateList` holds every generated jigsaw
 	structure laid out (at its start piece's centre, by its id) and the two sample mineshafts
 	("mineshaft", "mineshaft_overgrown" at their room's centre, and the overgrown one's
-	"mineshaft_entrance") and the sample town ("city", at its centre); `poiBlocks` adds the
-	samples' containers.
+	"mineshaft_entrance"), the sample bunker ("bunker", standing on its hatch) and the sample town
+	("city", at its centre); `poiBlocks` adds the samples' chests, crates, cabinets and the
+	bunker's hatch.
 ]]
 
 local Blocks = require(script.Parent.Parent.Blocks)
@@ -84,6 +89,7 @@ local Mineshafts = require(script.Parent.Mineshafts)
 local Cities = require(script.Parent.Cities)
 local CityLayout = require(script.Parent.CityLayout)
 local ScavengeLoot = require(script.Parent.ScavengeLoot)
+local Bunkers = require(script.Parent.Bunkers) -- [bunkers]
 local Locate = require(script.Parent.Locate)
 local ChunkLayout = require(script.Parent.Parent.World.ChunkLayout)
 local Horizon = require(script.Parent.Parent.World.Horizon)
@@ -163,6 +169,8 @@ export type Entry = {
 	mineshaft: Mineshafts.Plan?,
 	-- The sample town (its `start` has no pieces: Generation/CityLayout writes it).
 	city: CityLayout.Plan?,
+	-- [bunkers] The sample bunker (Generation/Bunkers writes it).
+	bunker: Bunkers.Plan?,
 }
 
 -- A piece moved by (dx, dz).
@@ -346,6 +354,47 @@ function DebugWorlds.structureLayout(seed: number, library: Library.Library): { 
 		-- The next one a chunk apart.
 		roomX += (sizeX // 16 + 2) * 16
 	end
+	-- [bunkers] The sample bunker, a chunk after them in their row: its hatch on the floor 3 blocks
+	-- in from its bounds' west side (Bunkers.sample), in a chunk's core columns (3 + 3 mod 16).
+	do
+		local plan = Bunkers.sample(roomX + 3, floor, roomZ)
+		local b = plan.bounds
+		local sizeX, sizeY, sizeZ = b[4] - b[1] + 1, b[5] - b[2] + 1, b[6] - b[3] + 1
+		local x, z = b[1], b[3]
+		local labelX, labelY, labelZ = x, floor, z - DebugWorlds.LABEL
+		table.insert(entries, {
+			name = "bunker",
+			x = x,
+			z = z,
+			sizeX = sizeX,
+			sizeZ = sizeZ,
+			start = {
+				name = "bunker",
+				index = #entries + 1,
+				chunkX = x // 16,
+				chunkZ = z // 16,
+				x = x,
+				z = z,
+				pieces = {},
+				templates = {},
+				bounds = { x, b[2], z, b[4], b[5], b[6] },
+				foundation = false,
+			},
+			label = {
+				x = labelX,
+				y = labelY,
+				z = labelZ,
+				name = "bunker",
+				offset = {
+					0,
+					math.clamp(b[2] - labelY, -maxOffset, maxOffset),
+					math.min(DebugWorlds.LABEL, maxOffset),
+				},
+				size = { math.min(sizeX, maxSize), math.min(sizeY, maxSize), math.min(sizeZ, maxSize) },
+			},
+			bunker = plan,
+		})
+	end
 
 	-- The sample town (Cities.sample), after every other entry: its footprint's corner on a
 	-- chunk's corner, its name tag ROW_GAP south of the furthest box.
@@ -409,11 +458,14 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 	local tag = Blocks.structureBlock("save") :: number
 	local samples: { Mineshafts.Plan } = {}
 	local towns: { CityLayout.Plan } = {}
+	local bunkerSamples: { Bunkers.Plan } = {} -- [bunkers]
 	for _, entry in entries do
 		if entry.mineshaft then
 			table.insert(samples, entry.mineshaft)
 		elseif entry.city then
 			table.insert(towns, entry.city)
+		elseif entry.bunker then
+			table.insert(bunkerSamples, entry.bunker) -- [bunkers]
 		else
 			table.insert(starts, entry.start)
 		end
@@ -475,6 +527,39 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 		end,
 	}, sampleLayout)
 	local flatHeights = table.create(ChunkLayout.PADDED * ChunkLayout.PADDED, floor)
+	-- [bunkers] The sample bunker, likewise (after the mineshafts, as the Default writes them).
+	local function bunkerLayout(minX: number, minZ: number, maxX: number, maxZ: number): { Bunkers.Plan }
+		local list: { Bunkers.Plan } = {}
+		for _, plan in bunkerSamples do
+			local b = plan.bounds
+			if b[1] <= maxX and b[4] >= minX and b[3] <= maxZ and b[6] >= minZ then
+				table.insert(list, plan)
+			end
+		end
+		return list
+	end
+	local function flat(): number
+		return floor
+	end
+	local bunkers = Bunkers.new(seed, {
+		height = flat,
+		biome = function(): number
+			return PLAINS
+		end,
+		river = function(): number
+			return 0
+		end,
+		blocked = function(): { number }
+			return {}
+		end,
+		spawn = function(): (number, number)
+			return -2, -2 * DebugWorlds.LABEL
+		end,
+		carvesTop = function(): boolean
+			return false
+		end,
+		surface = flat,
+	}, bunkerLayout)
 	local generate = gen.generate
 	local size = ChunkLayout.SIZE
 
@@ -598,6 +683,14 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 				r.solidBelow = math.min(r.solidBelow, lowest)
 				r.emptyAbove = math.max(r.emptyAbove, math.min(top, r.height))
 			end
+			-- [bunkers]
+			local found = bunkers.plans(originX - 1, originZ - 1, originX + size, originZ + size)
+			if #found > 0 then
+				local lowest, top, map = bunkers.write(found, r.data, originX, originZ, r.height, flatHeights, r.carved)
+				r.carved = map
+				r.solidBelow = math.min(r.solidBelow, lowest)
+				r.emptyAbove = math.max(r.emptyAbove, math.min(top, r.height))
+			end
 		end
 		if level <= Config.Cities.LodLevels then
 			writeTowns(r, level, nx, nz, extras)
@@ -619,7 +712,7 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 		end
 	end
 	wrapped.structureContainer = function(x: number, y: number, z: number): { StructureGen.ContainerItem }?
-		local found = gen.structureContainer(x, y, z) or mineshafts.container(x, y, z)
+		local found = gen.structureContainer(x, y, z) or mineshafts.container(x, y, z) or bunkers.container(x, y, z)
 		if found then
 			return found
 		end
@@ -663,12 +756,17 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 	): { Mineshafts.Plan }
 		return mineshafts.plans(minX, minZ, maxX, maxZ, yield)
 	end
+	wrapped.bunkers = bunkers.plans -- [bunkers]
 
 	-- /locate: the laid out generated structures and the sample mineshafts (see the header).
 	local listed: { Locate.Listed } = {}
 	for _, entry in entries do
 		local plan = entry.mineshaft
-		if plan then
+		local bunker = entry.bunker
+		if bunker then
+			-- [bunkers] Standing on its hatch.
+			table.insert(listed, { id = "bunker", x = bunker.x, y = bunker.y, z = bunker.z, showY = true })
+		elseif plan then
 			local box = plan.pieces[1].box
 			local id = if plan.overgrown then "mineshaft_overgrown" else "mineshaft"
 			local x, z = (box[1] + box[4]) // 2, (box[3] + box[6]) // 2
@@ -718,6 +816,7 @@ function DebugWorlds.allStructures(seed: number, library: Library.Library?): Ter
 				table.insert(out, block)
 			end
 		end)
+		Bunkers.poiOf(bunkerLayout(minX, minZ, maxX, maxZ), lut, minX, minZ, maxX, maxZ, out) -- [bunkers]
 		return out
 	end
 	return wrapped

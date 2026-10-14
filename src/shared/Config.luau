@@ -313,18 +313,21 @@ local Config = {
 	-- the cities' sheds. They follow Generate Structures and the Ruins setting, as the cities do.
 	Bunkers = {
 		Enabled = true,
-		-- One candidate per Grid x Grid blocks, kept with Chance.
+		-- One candidate per Grid x Grid blocks, kept with Chance (0.35, was 0.3: seas and mountains
+		-- leave many cells without a site, and 0.3 measured 0.22 per km² on seed 777's coasts;
+		-- 0.35 measures 0.38-0.61 on five seeds, at most 0.59 on dry land).
 		Grid = 768,
-		Chance = 0.3,
-		-- The floor this many blocks under the hatch (fewest, most), and its rooms.
+		Chance = 0.35,
+		-- The floor this many blocks under the hatch (fewest, most), and its rooms (a city's shed
+		-- drops some where its town is short of room, down to the bunks and the storeroom).
 		Depth = { 9, 16 },
 		Rooms = { 3, 6 },
 		-- Chances a bunker is lit and overrun; no bunker within SpawnClearance blocks of the spawn;
-		-- hatch columns tried per cell.
+		-- hatch columns tried per cell (24, was 16: a coastal cell's land is found more often).
 		Lit = 0.8,
 		Overrun = 0.15,
 		SpawnClearance = 64,
-		Candidates = 16,
+		Candidates = 24,
 	},
 
 	-- Highest LOD level that still receives trees / structures (0 = only full detail chunks).

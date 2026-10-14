@@ -181,6 +181,11 @@ return function(t, shared, require, _server)
 					add(math.floor(worm.x[at]), math.floor(worm.z[at]))
 				end
 			end
+		elseif id == "bunker" then
+			-- (Generation/Bunkers: standing on the hatch; the wild ones and the cities'.)
+			for _, plan in (gen.bunkers :: any)(x0, z0, x1, z1) do
+				add(plan.x, plan.z)
+			end
 		end
 		return out
 	end
@@ -197,6 +202,7 @@ return function(t, shared, require, _server)
 		"cave_entrance",
 		"ravine",
 		"city",
+		"bunker",
 	}
 
 	for _, seed in { 12345, 7 } do

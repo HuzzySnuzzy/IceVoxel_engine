@@ -639,26 +639,15 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 
 	-- [ruins] Bunkers (Generation/Bunkers), decided from the raw terrain, out of everything the
 	-- mineshafts keep out of, the mineshafts themselves and the cities' blocked area; and they
-	-- follow the ruins.
+	-- follow the ruins. [bunkers] The mineshafts apart, in three dimensions: Bunkers asks for
+	-- them only when the rest is clear (building a mineshaft's plan is the dearest lookup).
 	local bunkers = if ruins and Config.Bunkers.Enabled
 		then Bunkers.new(seed, {
 			height = rawOutsideHeight,
 			biome = rawBiomeAt,
 			river = rawRiver,
-			blocked = function(minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?): { number }
-				local list = plannerBlocked(minX, minZ, maxX, maxZ, yield)
-				local m = mineshafts
-				if m then
-					local boxes = m.boxes(minX, minZ, maxX, maxZ, yield)
-					for i = 1, #boxes, 6 do
-						table.insert(list, boxes[i])
-						table.insert(list, boxes[i + 2])
-						table.insert(list, boxes[i + 3])
-						table.insert(list, boxes[i + 5])
-					end
-				end
-				return list
-			end,
+			blocked = plannerBlocked,
+			mineshafts = if mineshafts then mineshafts.boxes else nil,
 			spawn = spawnColumn,
 			carvesTop = surfaceCaves.carvesTop,
 			cities = cities,
@@ -873,14 +862,17 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 			end
 		end
-		do
-			-- [ruins] The bunkers' hatch collars, at every level.
+		-- [bunkers] The bunkers' hatch collars, at every level that grows trees or carves surface
+		-- caves (nothing else reads `keepOut`), with the yield: a cold plan search reads the
+		-- terrain and the blocked areas.
+		if level <= math.max(Config.StructureMaxLevel, SurfaceCaves.MAX_LEVEL) then
 			local reach = Structures.RADIUS + 1
 			local collars = bunkers.keepOut(
 				originX - step - reach,
 				originZ - step - reach,
 				originX + span + step - 1 + reach,
-				originZ + span + step - 1 + reach
+				originZ + span + step - 1 + reach,
+				yield
 			)
 			table.move(collars, 1, #collars, #keepOut + 1, keepOut)
 		end
