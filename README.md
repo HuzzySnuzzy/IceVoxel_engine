@@ -1602,7 +1602,7 @@ the Performance page, the far meshes' state. A few notes on what the settings do
   ones), and every other menu button a description: rest the pointer on it, select it with a
   gamepad, or hold a finger on it on a touch screen (`client/Ui/HoverTip`; the texts are in
   `client/Ui/ButtonHelp`, easy to edit).
-- Fog: Atmosphere fades the far land and clouds into the sky (thicker in rain and snow, with a
+- Fog: Atmosphere fades the far land and clouds into the sky (much thicker in rain, snow and storms, with a
   haze along the horizon); OFF clears the Atmosphere (density and haze 0), a clear view to the
   edge. Water, lava, oil, fuel and Blindness keep their fog either way. In a place that keeps its
   own lighting (`Lighting.Enabled` false) with its own Atmosphere it reads "Place's Own"; without
@@ -2417,6 +2417,7 @@ for performance:
 | `Render.Fog`              | true    | The Fog setting's default; false: no haze at all. |
 | `Lighting.Atmosphere.Edge` / `Scale` | 0.1 / 0.1 | The light left at the view distance (0.1: 90% hazed) and the Atmosphere's Scale x Density^4 per stud (Roblox publishes no formula; calibrate it in Studio, see Config). Density 0.247 at 2048 blocks, 0.294 at 1024, 0.350 at 512, 0.208 at 4096. |
 | `Lighting.Atmosphere.WeatherPower` | 1/3 | Rain, snow and thunder haze it as for a view `Weather.Fog`'s factor to this power as far (1/3 keeps the storm clouds overhead at most half hazed from 1024 blocks of view up; 1 would wash them out). |
+| `Lighting.Atmosphere.RainDensity` / `ThunderDensity` | 0.44 / 0.667 | The Density the weather itself brings outdoors, rising with the rain to RainDensity and with a storm (or full snow) to ThunderDensity; the denser of this and the view's edge rule shows. At Scale 0.1 rain hazes things half at about 62 blocks, a full storm at about 12 (the clouds overhead and far lightning fade into it). 0 turns it off. |
 | `Lighting.Atmosphere.ThinBelow` | 0.4 | Under this much sky exposure the haze thins out, by (exposure / ThinBelow)^2, so deep cave walls never fade into a daylit sky; the view out of a tunnel stays hazed for its first 9 blocks. |
 | `Lighting.Atmosphere.Offset` / `ColorFloor` | 0.05 / 0 | How sharp a sky the haze fades into (low: the edge melts into it; high: silhouettes, LOD changes show); the time of day's haze colour raised to this at its brightest channel before the weather darkens it (0: Minecraft's own; raise it only if the night horizon looks black in the Roblox player). |
 | `Lighting.Day` / `Night` / `Dusk` `.Haze` / `Glare` / `Decay` | 0.25 / 0.2 / 0.8, glare 0 / 0 / 0.4 | The Atmosphere's haze along the horizon, glow round the sun and colour away from it, blended like the light (the dusk glare only while the sun is above the horizon); its Color is `FogColor` (Minecraft's fog colours). |

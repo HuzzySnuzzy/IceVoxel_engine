@@ -16,6 +16,10 @@
 	            nearer FogEnd) would haze the storm clouds overhead towards the clear sky behind
 	            them, since this haze starts at the camera where the old fog started at 55%; the
 	            storm's look is the sky's Haze and darker Color (Weather/WeatherSky) instead.
+	            On top of that the weather sets a Density of its own (`weatherExtinction`): up to
+	            RainDensity in full rain and ThunderDensity in a full thunderstorm, by how hard it
+	            falls; the denser of the two shows. In heavy rain the storm clouds overhead and far
+	            lightning fade into the grey (the price of a thick storm).
 	  Caves     the haze fades things into the sky behind them, daylit even in a cave: below
 	            ThinBelow of sky exposure (Rendering/SkyExposure: 1 outdoors, 0 deep underground) k
 	            thins out by (exposure / ThinBelow)^2, so deep cave walls stay clear while a tunnel's
@@ -114,6 +118,30 @@ function AtmosphereModel.reach(density: number, share: number, settings: Setting
 end
 
 --[[
+	The extinction (per stud) the weather alone thickens the haze to, for the weather's fog factor
+	`weather` (WeatherSky.fog: 1 clear, Config.Weather.Fog.Rain at full rain, .Thunder at full
+	thunder; already back to 1 indoors): k rises from 0 in clear weather to RainDensity's at full
+	rain, then on to ThunderDensity's at full thunder (a nearer factor, full snow, stays there),
+	blending in k (~ Density^4). 0 with RainDensity 0: the view's edge rule alone.
+]]
+function AtmosphereModel.weatherExtinction(weather: number, settings: Settings?): number
+	local atmosphere = settings or Config.Lighting.Atmosphere
+	local rainDensity = atmosphere.RainDensity or 0
+	if rainDensity <= 0 or weather >= 1 then
+		return 0
+	end
+	local fog = Config.Weather.Fog
+	local scale = atmosphere.Scale
+	local rainK = scale * rainDensity ^ 4
+	local thunderK = scale * math.max(atmosphere.ThunderDensity or 0, rainDensity) ^ 4
+	if weather >= fog.Rain then
+		return rainK * (1 - weather) / math.max(1 - fog.Rain, 1e-3)
+	end
+	local storm = math.clamp((fog.Rain - weather) / math.max(fog.Rain - fog.Thunder, 1e-3), 0, 1)
+	return rainK + (thunderK - rainK) * storm
+end
+
+--[[
 	`out` (a list of three, 0..255) set to `rgb` with its brightest channel raised to `floor`
 	(the hue kept; black stays black); returns `out` (which may be `rgb` itself).
 ]]
@@ -157,7 +185,10 @@ function AtmosphereModel.state(
 	if on then
 		local reach = math.clamp(exposure / math.max(atmosphere.ThinBelow, 1e-3), 0, 1)
 		local nearer = math.clamp(weather, 0.05, 1) ^ math.max(atmosphere.WeatherPower, 0)
-		local k = AtmosphereModel.extinction(view * nearer, atmosphere.Edge)
+		local k = math.max(
+			AtmosphereModel.extinction(view * nearer, atmosphere.Edge),
+			AtmosphereModel.weatherExtinction(weather, atmosphere)
+		)
 		out.density = AtmosphereModel.density(k * reach * reach, atmosphere)
 		out.haze = math.clamp(environment.haze, 0, 10)
 		out.glare = math.clamp(environment.glare, 0, 10)

@@ -27,7 +27,7 @@ return function(t, shared, require, _server, client)
 	local VIEWS = { 256, 512, 1024, 2048, 4096 }
 
 	-- The Atmosphere at noon, outdoors, clear, for a view of `view` blocks (weather factor `weather`).
-	local function outdoors(view: number, weather: number?, exposure: number?, on: boolean?): any
+	local function outdoors(view: number, weather: number?, exposure: number?, on: boolean?, use: any?): any
 		local environment = DayCycle.environment(6000, exposure or 1)
 		return AtmosphereModel.state(
 			AtmosphereModel.new(),
@@ -35,9 +35,13 @@ return function(t, shared, require, _server, client)
 			view * BLOCK,
 			weather or 1,
 			exposure or 1,
-			if on == nil then true else on
+			if on == nil then true else on,
+			use
 		)
 	end
+	-- The edge rule alone (the weather's own Density off).
+	local edgeOnly = table.clone(settings)
+	edgeOnly.RainDensity = 0
 
 	--[[ Distance ]]
 
@@ -82,98 +86,168 @@ return function(t, shared, require, _server, client)
 		t.ok(AtmosphereModel.density(1e9) == 1, "clamped to Roblox's range")
 	end)
 
-	t.test("atmosphere: rain, snow and thunder thicken the haze, the storm clouds overhead stay", function()
-		local clear = outdoors(2048)
-		local rain = outdoors(2048, WeatherSky.fog(1, 0, false, 1))
-		local snow = outdoors(2048, WeatherSky.fog(1, 0, true, 1))
-		local storm = outdoors(2048, WeatherSky.fog(1, 1, false, 1))
-		t.ok(rain.density > clear.density, "rain is denser")
-		t.ok(snow.density > rain.density, "snow denser still (0.4)")
-		t.ok(storm.density > rain.density, "thunder too (0.45)")
-		-- The edge rule for a view the factor to WeatherPower as far: Density x factor^(-power/4).
-		local factor, power = Config.Weather.Fog.Rain, settings.WeatherPower
-		t.ok(power > 0 and power < 1, "a share of the old fog's nearer FogEnd")
-		t.near(rain.density, clear.density * factor ^ (-power / 4), 1e-9, "the equivalent density")
+	t.test("atmosphere: the weather's own density, RainDensity in full rain, ThunderDensity in a storm", function()
+		local rainFactor, thunderFactor = WeatherSky.fog(1, 0, false, 1), WeatherSky.fog(1, 1, false, 1)
+		for _, view in VIEWS do
+			local clear = outdoors(view)
+			local rain = outdoors(view, rainFactor)
+			local storm = outdoors(view, thunderFactor)
+			local snow = outdoors(view, WeatherSky.fog(1, 0, true, 1))
+			t.near(clear.density, outdoors(view, 1, 1, true, edgeOnly).density, 1e-12, `clear: the edge rule ({view})`)
+			t.near(
+				rain.density,
+				math.max(settings.RainDensity, outdoors(view, rainFactor, 1, true, edgeOnly).density),
+				1e-9,
+				`full rain ({view})`
+			)
+			t.near(
+				storm.density,
+				math.max(settings.ThunderDensity, outdoors(view, thunderFactor, 1, true, edgeOnly).density),
+				1e-9,
+				`full thunder ({view})`
+			)
+			t.near(snow.density, storm.density, 1e-9, `full snow as thick as thunder ({view})`)
+		end
+		t.near(settings.RainDensity, 0.44, 1e-9, "the asked rain density")
+		t.near(settings.ThunderDensity, 0.667, 1e-9, "the asked storm density")
+		-- It grows with the rain and the storm, smoothly in k, and never thins.
+		local last = -1
+		for i = 0, 20 do
+			local amount = i / 20
+			local density = outdoors(2048, WeatherSky.fog(amount, 0, false, 1)).density
+			t.ok(density >= last - 1e-12, `heavier rain, thicker ({amount})`)
+			last = density
+		end
+		for i = 0, 20 do
+			local amount = i / 20
+			local density = outdoors(2048, WeatherSky.fog(1, amount, false, 1)).density
+			t.ok(density >= last - 1e-12, `a stronger storm, thicker ({amount})`)
+			last = density
+		end
+		-- Half rain: half of full rain's k.
+		local half = outdoors(2048, WeatherSky.fog(0.5, 0, false, 1)).density
 		t.near(
-			AtmosphereModel.haze(2048 * BLOCK * factor ^ power, rain.density),
-			1 - EDGE,
-			1e-6,
-			"90% at the rain's distance"
+			settings.Scale * half ^ 4,
+			settings.Scale * settings.RainDensity ^ 4 / 2,
+			1e-9,
+			"half the rain, half the k"
 		)
-		-- Indoors the weather's factor goes back to 1 (WeatherSky.fog by the exposure).
-		t.eq(WeatherSky.fog(1, 1, false, 0), 1)
+		-- Indoors (no sky) the weather adds nothing; deep in a cave nothing at all.
+		t.near(outdoors(2048, WeatherSky.fog(1, 1, false, 0), 1).density, outdoors(2048).density, 1e-12, "under a roof")
+		t.eq(outdoors(2048, thunderFactor, 0).density, 0, "deep underground")
+		-- What it looks like (Scale 0.1): rain half hazes at about 62 blocks, a storm at about 12.
+		local rainHalf = AtmosphereModel.reach(settings.RainDensity, 0.5) / BLOCK
+		local stormHalf = AtmosphereModel.reach(settings.ThunderDensity, 0.5) / BLOCK
+		t.ok(rainHalf > 55 and rainHalf < 70, `rain: half hazed at {rainHalf} blocks`)
+		t.ok(stormHalf > 10 and stormHalf < 14, `storm: half hazed at {stormHalf} blocks`)
+	end)
 
-		-- The haze starts at the camera: the storm's cloud deck overhead (Drop lower, a camera at
-		-- y 64) stays at most half hazed into the clear sky behind it from 1024 blocks up, where
-		-- the old fog (from 55% of its FogEnd) never reached it. The whole factor would wash the
-		-- rain clouds out.
-		local clouds = Config.Weather.Clouds
-		local overhead = (clouds.Altitude - clouds.Drop - 64) * BLOCK
-		local whole = table.clone(settings)
-		whole.WeatherPower = 1
-		for _, view in { 1024, 2048, 4096 } do
-			for _, weather in
-				{ WeatherSky.fog(1, 0, false, 1), WeatherSky.fog(1, 0, true, 1), WeatherSky.fog(1, 1, false, 1) }
-			do
-				local density = outdoors(view, weather).density
-				t.ok(AtmosphereModel.haze(overhead, density) <= 0.5, `storm clouds overhead at {view} ({weather})`)
-				t.ok(
-					AtmosphereModel.haze(view * BLOCK, density) >= 1 - EDGE,
-					`the edge hazed at least as much ({view})`
+	t.test(
+		"atmosphere: the edge rule alone: rain, snow and thunder thicken the haze, the storm clouds overhead stay",
+		function()
+			local function outdoors(view: number, weather: number?): any
+				return AtmosphereModel.state(
+					AtmosphereModel.new(),
+					DayCycle.environment(6000, 1),
+					view * BLOCK,
+					weather or 1,
+					1,
+					true,
+					edgeOnly
 				)
 			end
-			local washed = AtmosphereModel.state(
-				AtmosphereModel.new(),
-				DayCycle.environment(6000, 1),
-				view * BLOCK,
-				Config.Weather.Fog.Snow,
-				1,
-				true,
-				whole
+			local clear = outdoors(2048)
+			local rain = outdoors(2048, WeatherSky.fog(1, 0, false, 1))
+			local snow = outdoors(2048, WeatherSky.fog(1, 0, true, 1))
+			local storm = outdoors(2048, WeatherSky.fog(1, 1, false, 1))
+			t.ok(rain.density > clear.density, "rain is denser")
+			t.ok(snow.density > rain.density, "snow denser still (0.4)")
+			t.ok(storm.density > rain.density, "thunder too (0.45)")
+			-- The edge rule for a view the factor to WeatherPower as far: Density x factor^(-power/4).
+			local factor, power = Config.Weather.Fog.Rain, settings.WeatherPower
+			t.ok(power > 0 and power < 1, "a share of the old fog's nearer FogEnd")
+			t.near(rain.density, clear.density * factor ^ (-power / 4), 1e-9, "the equivalent density")
+			t.near(
+				AtmosphereModel.haze(2048 * BLOCK * factor ^ power, rain.density),
+				1 - EDGE,
+				1e-6,
+				"90% at the rain's distance"
 			)
-			if view == 1024 then
-				t.ok(AtmosphereModel.haze(overhead, washed.density) > 0.6, "(the whole factor: washed out)")
-			end
-		end
+			-- Indoors the weather's factor goes back to 1 (WeatherSky.fog by the exposure).
+			t.eq(WeatherSky.fog(1, 1, false, 0), 1)
 
-		-- The storm's sky: more haze, darker colour, no glare round a sun behind the clouds (the
-		-- sun low, a little before it sets).
-		local base = DayCycle.environment(12500, 1)
-		local wet = WeatherSky.apply(DayCycle.environment(12500, 1), 1, 1, 1, 1)
-		local sky = Config.Weather.Sky
-		t.near(wet.haze, base.haze + sky.Haze + sky.ThunderHaze, 1e-9, "haze up by the weather")
-		t.eq(wet.glare, 0, "no glare in the rain")
-		t.ok(base.glare > 0, "(the sunset has some)")
-		local clearState = AtmosphereModel.state(AtmosphereModel.new(), base, 6144, 1, 1, true)
-		local wetState = AtmosphereModel.state(AtmosphereModel.new(), wet, 6144, 0.45, 1, true)
-		t.ok(wetState.color[1] < clearState.color[1], "a darker haze colour (Minecraft's rain fog)")
-		t.ok(wetState.haze > clearState.haze)
-		-- Darker by Minecraft's rain and thunder at any time, the night too, with or without a
-		-- ColorFloor: it goes on the time of day's colour, before the weather darkens it.
-		local floored = table.clone(settings)
-		floored.ColorFloor = 96
-		for _, floor in { settings, floored } do
-			for _, dayTime in { 6000, 12785, 18000 } do
-				local function colour(rain: number, thunder: number): { number }
-					local environment = AtmosphereModel.floor(DayCycle.environment(dayTime, 1), floor)
-					WeatherSky.apply(environment, rain, thunder, math.max(rain, thunder), 1)
-					return AtmosphereModel.state(AtmosphereModel.new(), environment, 6144, 1, 1, true, floor).color
+			-- The haze starts at the camera: the storm's cloud deck overhead (Drop lower, a camera at
+			-- y 64) stays at most half hazed into the clear sky behind it from 1024 blocks up, where
+			-- the old fog (from 55% of its FogEnd) never reached it. The whole factor would wash the
+			-- rain clouds out.
+			local clouds = Config.Weather.Clouds
+			local overhead = (clouds.Altitude - clouds.Drop - 64) * BLOCK
+			local whole = table.clone(edgeOnly)
+			whole.WeatherPower = 1
+			for _, view in { 1024, 2048, 4096 } do
+				for _, weather in
+					{ WeatherSky.fog(1, 0, false, 1), WeatherSky.fog(1, 0, true, 1), WeatherSky.fog(1, 1, false, 1) }
+				do
+					local density = outdoors(view, weather).density
+					t.ok(AtmosphereModel.haze(overhead, density) <= 0.5, `storm clouds overhead at {view} ({weather})`)
+					t.ok(
+						AtmosphereModel.haze(view * BLOCK, density) >= 1 - EDGE,
+						`the edge hazed at least as much ({view})`
+					)
 				end
-				local dry, rainy, thundery = colour(0, 0), colour(1, 0), colour(1, 1)
-				for i = 1, 3 do
-					t.ok(rainy[i] < dry[i], `rain darkens it ({dayTime}, floor {floor.ColorFloor})`)
-					t.ok(thundery[i] < rainy[i], `thunder more ({dayTime}, floor {floor.ColorFloor})`)
+				local washed = AtmosphereModel.state(
+					AtmosphereModel.new(),
+					DayCycle.environment(6000, 1),
+					view * BLOCK,
+					Config.Weather.Fog.Snow,
+					1,
+					true,
+					whole
+				)
+				if view == 1024 then
+					t.ok(AtmosphereModel.haze(overhead, washed.density) > 0.6, "(the whole factor: washed out)")
 				end
-				-- Minecraft's own factors on whatever the time of day gave.
-				t.near(thundery[1] / dry[1], 0.25, 1e-9, "red and green: (1 - 0.5) x (1 - 0.5)")
-				t.near(thundery[3] / dry[3], 0.3, 1e-9, "blue: (1 - 0.4) x (1 - 0.5)")
 			end
+
+			-- The storm's sky: more haze, darker colour, no glare round a sun behind the clouds (the
+			-- sun low, a little before it sets).
+			local base = DayCycle.environment(12500, 1)
+			local wet = WeatherSky.apply(DayCycle.environment(12500, 1), 1, 1, 1, 1)
+			local sky = Config.Weather.Sky
+			t.near(wet.haze, base.haze + sky.Haze + sky.ThunderHaze, 1e-9, "haze up by the weather")
+			t.eq(wet.glare, 0, "no glare in the rain")
+			t.ok(base.glare > 0, "(the sunset has some)")
+			local clearState = AtmosphereModel.state(AtmosphereModel.new(), base, 6144, 1, 1, true)
+			local wetState = AtmosphereModel.state(AtmosphereModel.new(), wet, 6144, 0.45, 1, true)
+			t.ok(wetState.color[1] < clearState.color[1], "a darker haze colour (Minecraft's rain fog)")
+			t.ok(wetState.haze > clearState.haze)
+			-- Darker by Minecraft's rain and thunder at any time, the night too, with or without a
+			-- ColorFloor: it goes on the time of day's colour, before the weather darkens it.
+			local floored = table.clone(settings)
+			floored.ColorFloor = 96
+			for _, floor in { settings, floored } do
+				for _, dayTime in { 6000, 12785, 18000 } do
+					local function colour(rain: number, thunder: number): { number }
+						local environment = AtmosphereModel.floor(DayCycle.environment(dayTime, 1), floor)
+						WeatherSky.apply(environment, rain, thunder, math.max(rain, thunder), 1)
+						return AtmosphereModel.state(AtmosphereModel.new(), environment, 6144, 1, 1, true, floor).color
+					end
+					local dry, rainy, thundery = colour(0, 0), colour(1, 0), colour(1, 1)
+					for i = 1, 3 do
+						t.ok(rainy[i] < dry[i], `rain darkens it ({dayTime}, floor {floor.ColorFloor})`)
+						t.ok(thundery[i] < rainy[i], `thunder more ({dayTime}, floor {floor.ColorFloor})`)
+					end
+					-- Minecraft's own factors on whatever the time of day gave.
+					t.near(thundery[1] / dry[1], 0.25, 1e-9, "red and green: (1 - 0.5) x (1 - 0.5)")
+					t.near(thundery[3] / dry[3], 0.3, 1e-9, "blue: (1 - 0.4) x (1 - 0.5)")
+				end
+			end
+			-- In a cave the weather changes nothing.
+			local cave = WeatherSky.apply(DayCycle.environment(6000, 0), 1, 1, 1, 0)
+			t.eq(cave.haze, 0, "no haze underground")
+			t.eq(cave.glare, 0)
 		end
-		-- In a cave the weather changes nothing.
-		local cave = WeatherSky.apply(DayCycle.environment(6000, 0), 1, 1, 1, 0)
-		t.eq(cave.haze, 0, "no haze underground")
-		t.eq(cave.glare, 0)
-	end)
+	)
 
 	t.test("atmosphere: caves thin it out with the sky exposure; the Fog setting off clears it", function()
 		local outside = outdoors(2048)

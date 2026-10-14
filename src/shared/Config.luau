@@ -966,6 +966,13 @@ local Config = {
 			hazed into the clear sky behind them from 1024 blocks of view up (the whole factor, 1,
 			would wash them out: this haze starts at the camera, the old fog at 55%); the storm's
 			Haze and darker Color grey the horizon instead.
+			RainDensity / ThunderDensity: the Density the weather itself brings, whatever the view
+			(the denser of this and the edge rule shows): rising from clear weather to RainDensity
+			in full rain, then to ThunderDensity in a full thunderstorm or full snow (Weather.Fog's
+			nearer factors), blended in k (~ Density^4); none indoors.
+			At Scale 0.1: 0.44 hazes things half at 62 blocks and 90% at 205 (heavy rain); 0.667
+			half at 12 blocks and 90% at 39 (a downpour: the storm clouds overhead and lightning
+			farther than about 40 blocks fade into the grey). 0 turns it off (WeatherPower alone).
 			ThinBelow: under this much sky exposure (Rendering/SkyExposure) the haze thins out, k
 			by (exposure / ThinBelow)^2, so deep cave walls never fade into a daylit sky, while a
 			tunnel's mouth (exposure 1 - distance / 16) keeps the full haze over the view out of it
@@ -982,6 +989,8 @@ local Config = {
 			Scale = 0.1,
 			Edge = 0.1,
 			WeatherPower = 1 / 3,
+			RainDensity = 0.44,
+			ThunderDensity = 0.667,
 			ThinBelow = 0.4,
 			Offset = 0.05,
 			ColorFloor = 0,
