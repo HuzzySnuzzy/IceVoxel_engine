@@ -301,7 +301,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   **Zombie** (0.6 × 1.95 blocks, 20 health, armor 2, hits 3, chases at 2.3 blocks a second), the
   **Runner** (12 health, hits 2, chases at 5 blocks a second: only a sprinting player gets away),
   the **Brute** (60 health, armor 4, hits 7, slow, breaks blocks three times as fast and shrugs
-  off knockback), the legless **Crawler** (0.8 × 0.6: it fits under anything a block high), the
+  off knockback), the legless **Crawler** (0.75 × 0.6: it fits under anything a block high and through an
+  open door), the
   **Screamer** (it shrieks when it spots a player, and every zombie within 48 blocks comes to
   look), and the **Soldier** (armor 10, hits 4, gunpowder), **Police**, **Firefighter** (fire
   can't hurt it), **Construction** (it breaks blocks twice as fast; nails and scrap) and
@@ -315,12 +316,14 @@ A fast, Minecraft-style voxel engine for Roblox.
     power), a quarter louder at night and muffled by rain. Every zombie without a target in
     reach walks over to look (spread out round the spot) and looks for players at once.
   - **Walls don't stop them.** A zombie pushing against a wall towards a player it is after
-    (within 8 blocks and level with it: from a block below its feet to two above; 16 for a blood
-    moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a brute 4,
+    (within 8 blocks and level with it: from a block below its feet to two above, judged
+    standing on the ground, so a player on a cliff three blocks up is safe from digging; 16 for a
+    blood moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a brute 4,
     two zombies together about 6), glass in 3, leaves and wool in 6, dirt and fences in 15,
     planks and logs in 30, a **Barricade** in 45, stone and bricks in 2 minutes, a **Reinforced
     Barricade** in 150 seconds, concrete in 5 minutes. The damage is shared by everyone hitting
-    the block and fades after 5 idle seconds; iron, ores, chests and machines and the bunker
+    the block and fades after 5 idle seconds, and it belongs to that block: break a hammered
+    plank and put a new one, or a barricade, and the zombies start over; iron, ores, chests and machines and the bunker
     hatch never break. Both halves of a door go and nothing drops, with a crash every zombie
     within 10 blocks hears. They never dig down or up towards a player.
   - **Day and night:** at night 20 zombies at most round each player spawn in the dark as

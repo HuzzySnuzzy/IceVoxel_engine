@@ -20,7 +20,9 @@
 	             by day, at night, in a city, in a blood moon; maxMobs and MaxHostile are worked
 	             out again every tick, so /time set or a restart in a blood moon never leaves them
 	             raised), day spawning (Zombies.DaySpawning) and the blood moon's pause of natural
-	             monster spawning; then the director runs (waves, hunts, leave rounds).
+	             monster spawning; then the director runs (waves, hunts, leave rounds). The
+	             server script chains `blockChanged` onto WorldServer.onChanged, so zombies'
+	             damage on a block broken and replaced starts over (MobWorld.blockChanged).
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
 	             (Characters.hurt: the hurt cooldown, armor and Resistance; a fresh one knocks the
@@ -720,6 +722,15 @@ function Mobs.occupied(block: number, x: number, y: number, z: number): boolean
 	return mobs ~= nil
 		and box ~= nil
 		and mobs:overlaps(x + box[1], y + box[2], z + box[3], x + box[4], y + box[5], z + box[6])
+end
+
+-- For WorldServer.onChanged: block (x, y, z) changed from `old` to `new` (zombies' damage on a
+-- block replaced starts over: MobWorld.blockChanged).
+function Mobs.blockChanged(x: number, y: number, z: number, old: number, new: number)
+	local mobs = mobWorld
+	if mobs then
+		mobs:blockChanged(x, y, z, old, new)
+	end
 end
 
 -- The mobs' simulation (nil before `start`): World/WorldSave saves and restores farm animals

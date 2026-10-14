@@ -18,8 +18,9 @@
 	  Brute              0.75 x 1.99  1.8   60      0.18   slow, huge (drawn 1.1 wide, 2.3 tall),
 	                                                       hits 7, breaks blocks three times as fast,
 	                                                       shrugs off knockback
-	  Crawler            0.8 x 0.6    0.45  14      0.12   legless, drags itself along; fits under
-	                                                       anything a block high
+	  Crawler            0.75 x 0.6   0.45  14      0.12   legless, drags itself along; fits under
+	                                                       anything a block high (drawn 0.8 wide;
+	                                                       the box fits an open door's 13/16)
 	  Screamer           0.6 x 1.9    1.7   16      0.25   shrieks when it spots a player: every
 	                                                       zombie within 48 blocks comes to look
 	  Soldier Zombie     0.6 x 1.95   1.74  30      0.23   armoured (10), hits 4; gunpowder
@@ -557,7 +558,8 @@ table.insert(
 	zombie({
 		name = "ZombieCrawler",
 		displayName = "Crawler",
-		width = 0.8,
+		-- (0.75 like the brute's, so it lines up with an open door's 13/16; drawn 0.8 wide.)
+		width = 0.75,
 		height = 0.6,
 		eye = 0.45,
 		health = 14,

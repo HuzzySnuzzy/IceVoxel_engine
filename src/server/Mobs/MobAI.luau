@@ -60,7 +60,8 @@
 	             (400) and isn't breaking or fighting gives up and leaves.
 	  Breaking   blocked (walking into a wall for 10 ticks with less than 0.05 blocks of progress a
 	             tick; the cell ahead at its feet or head has a collision shape: a closed door
-	             counts) by blocks it can break (Blocks.zombieBreak: all of the blocked cells; an
+	             counts; it starts only standing on the ground, so a zombie jumping at a cliff
+	             judges levels and cells from its feet on the floor) by blocks it can break (Blocks.zombieBreak: all of the blocked cells; an
 	             iron block or a chest in the way stops it), and only when what it heads for is
 	             near and level with it (a target within Zombies.BreakReach (8) blocks
 	             horizontally, a hunted player within HuntBreakReach (16), the noise it
@@ -761,8 +762,11 @@ local function advance(
 	if squeezing then
 		hop = false
 	end
+	-- (Only from the ground: a zombie jumping at a wall counts blocked in the air too, and its
+	-- feet up there would make a target 3 up look level and the cells above its head look ahead.)
 	if
 		ai.blockedTicks >= MobAI.BLOCKED_TICKS
+		and body.onGround
 		and reach > 0
 		and context.breaking == true
 		and breakable(body, gx, gy, gz, reach)

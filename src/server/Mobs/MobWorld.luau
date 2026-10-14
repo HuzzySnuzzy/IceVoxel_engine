@@ -62,7 +62,10 @@
 	             (`damageBlock`: one tally a cell, a door's on its lower half, so zombies on one
 	             door share it), which a block left alone for Apocalypse.Breaking.Decay ticks
 	             loses; at the block's Blocks.zombieBreak it gives way: a `breaks` record (once),
-	             which Mobs/Mobs acts on (it removes the block and drops nothing).
+	             which Mobs/Mobs acts on (it removes the block and drops nothing). The tally is
+	             the block's own: when the cell's block goes or becomes another block (a player
+	             breaks a hammered plank and puts a new one, or a barricade), it starts over; the
+	             same block's variants keep it (a door opened or shut, a fence's arms).
 	At most `maxMobs` exist: spawning more fails (`spawn` returns 0).
 
 	What the rest of the server must act on piles up until `takeChanges`: spawned and removed
@@ -216,6 +219,10 @@ export type Options = {
 	random: (() -> number)?,
 }
 
+-- A cell's damage (see the header): so far, the tick last hit, the cell (a door's lower half) and
+-- the block's family (`damageFamily`).
+export type DamageEntry = { progress: number, last: number, x: number, y: number, z: number, family: number }
+
 export type MobWorld = {
 	getBlock: MobPhysics.GetBlock,
 	options: Options,
@@ -230,7 +237,7 @@ export type MobWorld = {
 	dirty: boolean,
 	-- Zombies' damage on blocks (by Coords.posKey of the cell, a door's lower half), and the cells
 	-- reported broken since the last takeChanges.
-	damage: { [number]: { progress: number, last: number } },
+	damage: { [number]: DamageEntry },
 	broken: { [number]: boolean },
 	crowd: MobCrowd.Crowd,
 
@@ -261,6 +268,7 @@ export type MobWorld = {
 	sound: (self: MobWorld, name: string, x: number, y: number, z: number) -> (),
 	damageBlock: (self: MobWorld, x: number, y: number, z: number, power: number) -> (number, number),
 	blockDamage: (self: MobWorld, x: number, y: number, z: number) -> number,
+	blockChanged: (self: MobWorld, x: number, y: number, z: number, old: number, new: number) -> (),
 	blockHit: (self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number) -> (),
 	breakBlock: (self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number) -> (),
 	noise: (self: MobWorld, x: number, y: number, z: number, radius: number) -> (),
@@ -742,15 +750,28 @@ function MobWorld.sound(self: MobWorld, name: string, x: number, y: number, z: n
 	table.insert(self.changes.sounds, { name = name, x = x, y = y, z = z })
 end
 
--- The cell a block's damage is kept on: a door's upper half keeps it on its lower half.
-local function damageKey(self: MobWorld, x: number, y: number, z: number, block: number?): number
+-- The cell a block's damage is kept on (its key and y): a door's upper half keeps it on its lower
+-- half.
+local function damageKey(self: MobWorld, x: number, y: number, z: number, block: number?): (number, number)
 	if block ~= nil and Blocks.isDoor(block) then
 		local lower = Blocks.plantBottom(block)
 		if lower ~= nil and self.getBlock(x, y - 1, z) == lower then
-			return posKey(x, y - 1, z)
+			return posKey(x, y - 1, z), y - 1
 		end
 	end
-	return posKey(x, y, z)
+	return posKey(x, y, z), y
+end
+
+-- Which block a damaged cell holds, as far as its damage goes: the variants of one block (a door's
+-- halves and states, a fence's arms, a cave twin and its twin) are one.
+local families: { [number]: number } = {}
+local function damageFamily(block: number): number
+	local family = families[block]
+	if family == nil then
+		family = Blocks.variants(Blocks.surfaceForm(block))[1]
+		families[block] = family
+	end
+	return family
 end
 
 --[[
@@ -763,10 +784,11 @@ function MobWorld.damageBlock(self: MobWorld, x: number, y: number, z: number, p
 	if needed <= 0 then
 		return 0, 0
 	end
-	local key = damageKey(self, x, y, z, block)
+	local key, cellY = damageKey(self, x, y, z, block)
+	local family = damageFamily(block :: number)
 	local entry = self.damage[key]
-	if entry == nil or self.tickCount - entry.last > Apocalypse.Breaking.Decay then
-		entry = { progress = 0, last = self.tickCount }
+	if entry == nil or self.tickCount - entry.last > Apocalypse.Breaking.Decay or entry.family ~= family then
+		entry = { progress = 0, last = self.tickCount, x = x, y = cellY, z = z, family = family }
 		self.damage[key] = entry
 	end
 	entry.progress += power
@@ -776,11 +798,33 @@ end
 
 -- The damage on the block at (x, y, z) so far (0: none, or it decayed).
 function MobWorld.blockDamage(self: MobWorld, x: number, y: number, z: number): number
-	local entry = self.damage[damageKey(self, x, y, z, self.getBlock(x, y, z))]
-	if entry == nil or self.tickCount - entry.last > Apocalypse.Breaking.Decay then
+	local block = self.getBlock(x, y, z)
+	local entry = self.damage[(damageKey(self, x, y, z, block))]
+	if
+		entry == nil
+		or block == nil
+		or self.tickCount - entry.last > Apocalypse.Breaking.Decay
+		or entry.family ~= damageFamily(block)
+	then
 		return 0
 	end
 	return entry.progress
+end
+
+--[[
+	Block (x, y, z) changed from `old` to `new` (WorldServer.onChanged, through Mobs/Mobs): its
+	damage starts over unless the new block is a variant of the old (see the header). The tick's
+	own check (MobWorld.tick) can't tell a block broken and a new one put in between two ticks.
+]]
+function MobWorld.blockChanged(self: MobWorld, x: number, y: number, z: number, old: number, new: number)
+	if next(self.damage) == nil or damageFamily(old) == damageFamily(new) then
+		return
+	end
+	self.damage[posKey(x, y, z)] = nil
+	if Blocks.isDoor(old) and Blocks.plantBottom(old) ~= nil then
+		-- (A door's upper half: its damage is kept on its lower half.)
+		self.damage[posKey(x, y - 1, z)] = nil
+	end
 end
 
 function MobWorld.blockHit(self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number)
@@ -789,7 +833,7 @@ end
 
 -- The block at (x, y, z) gave way (reported once, however many zombies were at it).
 function MobWorld.breakBlock(self: MobWorld, _mob: Mob, x: number, y: number, z: number, block: number)
-	local key = damageKey(self, x, y, z, block)
+	local key = (damageKey(self, x, y, z, block))
 	if self.broken[key] then
 		return
 	end
@@ -975,6 +1019,13 @@ end
 function MobWorld.tick(self: MobWorld, context: Context)
 	self.tickCount += 1
 	local getBlock = self.getBlock
+	-- (A damaged cell whose block went or became another starts over: see the header.)
+	for key, entry in self.damage do
+		local block = getBlock(entry.x, entry.y, entry.z)
+		if block == nil or damageFamily(block) ~= entry.family then
+			self.damage[key] = nil
+		end
+	end
 	-- (Where the zombies stand at the start of the tick: Mobs/MobCrowd.)
 	MobCrowd.build(self.crowd, self.order :: any, Apocalypse.Zombies.Separation)
 	-- (Nothing spawns during the tick; mobs that go are only flagged until the end of it.)

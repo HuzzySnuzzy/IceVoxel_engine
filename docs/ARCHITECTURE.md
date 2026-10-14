@@ -5527,7 +5527,7 @@ tone into the u8 `variant`.
 | Zombie              | 0.6 × 1.95  | 20     | 0.23  | armor 2, hits 3; rotten flesh 0-2, a bone 25% (+2.5% iron); 11 looks |
 | Runner              | 0.6 × 1.9   | 12     | 0.31  | chases x1.2 (4.98 blocks a second), hits 2, follow 32, hearing 1.2 |
 | Brute               | 0.75 × 1.99 | 60     | 0.18  | armor 4, hits 7, breaks x3, knockback x0.2; drawn 2.3 tall, width 1.1 |
-| Crawler             | 0.8 × 0.6   | 14     | 0.12  | legless, follow 16; wears the zombie's looks                     |
+| Crawler             | 0.75 × 0.6  | 14     | 0.12  | legless, follow 16; drawn 0.8 wide; wears the zombie's looks     |
 | Screamer            | 0.6 × 1.9   | 16     | 0.25  | shrieks (a noise of 48, every 400 ticks at most), follow 32       |
 | Soldier Zombie      | 0.6 × 1.95  | 30     | 0.23  | armor 10, hits 4; gunpowder 0-2, a ration 10%                     |
 | Police Zombie       | 0.6 × 1.95  | 24     | 0.23  | armor 6; cities only (weight 0 in the wild)                       |
@@ -5586,8 +5586,14 @@ is a drop.
   - Breaking: blocked (horizontal collision and under 0.05 blocks of progress a tick for 10 ticks,
     climbing excluded) by cells that all have `Blocks.zombieBreak`, with what it goes for within
     `BreakReach` (8; `HuntBreakReach` 16 for a hunt) horizontally and from a block below its feet
-    to two above: it faces the softest cell and adds `breakPower` a tick to the block's shared
-    damage (`MobWorld.damageBlock`, keyed by cell; a door's upper half uses the lower's key) until
+    to two above, starting only on the ground (a zombie jumping at a cliff is blocked in the air
+    too, and its airborne feet would make a player 3 up look 2 up and the cells above its head
+    look ahead): it faces the softest cell and adds `breakPower` a tick to the block's shared
+    damage (`MobWorld.damageBlock`, keyed by cell; a door's upper half uses the lower's key; the
+    entry keeps the block's family, `Blocks.variants(surfaceForm)[1]`, and starts over when the
+    cell's block goes or becomes another: checked each tick and on `blockChanged`, which the
+    server chains onto `WorldServer.onChanged` through Mobs/Mobs; a door opened or shut, a
+    fence's arms and a cave twin keep it) until
     it reaches the block's `zombieBreak` (glass 60 ticks, leaves and wool 120, doors 240, soil and
     fences 300, planks and logs 600, a Barricade 900, stone and bricks 2400, a Reinforced
     Barricade 3000, concrete 6000; 0: never, as iron, ores, containers, machines and the hatch).
@@ -5634,7 +5640,8 @@ a `fireImmune` kind) and suffocation (eyes in an opaque block, 1 under the coold
   (`levels`: Effects.meleeDamage) x 1.9's strength (`Combat.strength(ticks since the swing or the
   change of item, speed)`) with a 0.4 knockback; returns the landed hurt and whether it was strong.
 - Blocks: `damageBlock` (shared damage by cell, pruned every 20 ticks after `Breaking.Decay` idle
-  ticks), `blockHit` (a thud record every `HitInterval`), `breakBlock` (a breaks record, once per
+  ticks, and each tick when the cell's block went or became another; `blockChanged` for a block
+  broken and replaced between two ticks), `blockHit` (a thud record every `HitInterval`), `breakBlock` (a breaks record, once per
   cell per tick), `noise` (a noises record: the screamer's).
 - Despawn every 20 ticks over every mob (Mob.checkDespawn): nothing with no players; monsters
   beyond 128 blocks of every player go, beyond 32 after 600 idle ticks one check in 40 unless

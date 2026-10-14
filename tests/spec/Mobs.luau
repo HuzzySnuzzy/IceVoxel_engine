@@ -153,7 +153,7 @@ return function(t, shared, require, server)
 			{ "Zombie", 0.6, 1.95, 20, true },
 			{ "ZombieRunner", 0.6, 1.9, 12, true },
 			{ "ZombieBrute", 0.75, 1.99, 60, true },
-			{ "ZombieCrawler", 0.8, 0.6, 14, true },
+			{ "ZombieCrawler", 0.75, 0.6, 14, true },
 			{ "ZombieScreamer", 0.6, 1.9, 16, true },
 			{ "ZombieSoldier", 0.6, 1.95, 30, true },
 			{ "ZombiePolice", 0.6, 1.95, 24, true },

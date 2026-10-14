@@ -191,6 +191,8 @@ local function startWorld(settings: WorldSettings.Settings)
 		Machines.blockChanged(x, y, z, old, new)
 		-- Structure blocks and jigsaws keep their settings while they stand.
 		StructureBlocks.blockChanged(x, y, z, old, new)
+		-- Zombies' damage on a block replaced starts over.
+		Mobs.blockChanged(x, y, z, old, new)
 		-- Its region is written at the next save.
 		WorldSave.blockChanged(x, y, z)
 	end

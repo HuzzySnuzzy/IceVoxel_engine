@@ -728,6 +728,165 @@ return function(t, shared, require, server)
 		t.ok(mob.body.z > 3, `and went through ({mob.body.z})`)
 	end)
 
+	t.test(
+		"zombies: never dig into a cliff under a player 3 up, whatever the start (judged from the ground)",
+		function()
+			-- A dirt cliff from z (or x) = 3 on, its top `up` blocks up, the player on it; a zombie
+			-- below chasing or hunting them walks into the face and jumps at it. (Judged from its
+			-- feet in the air, the player 3 up looked 2 up and it dug in under them.)
+			local function dig(kind: number, up: number, hunt: boolean, alongX: boolean, lateral: number, depth: number)
+				local getBlock, set, skyOpen = flat()
+				if alongX then
+					box(set, 3, FLOOR, -12, 14, FLOOR + up - 1, 12, B.Dirt)
+				else
+					box(set, -12, FLOOR, 3, 12, FLOOR + up - 1, 14, B.Dirt)
+				end
+				local world = newWorld(getBlock, 101)
+				local px, pz = 0.5 + lateral, depth
+				local sx, sz = 0.5 - lateral * 0.7, -1.5
+				if alongX then
+					px, pz, sx, sz = pz, px, sz, sx
+				end
+				local id = world:spawn(kind, sx, FLOOR, sz, nil, 0)
+				local mob = world:get(id) :: MobWorld.Mob
+				if hunt then
+					mob.ai.hunt = "p"
+					mob.persistent = true
+				else
+					mob.ai.target, mob.ai.goal = "p", "chase"
+				end
+				local ctx = context({ player("p", px, FLOOR + up, pz) }, skyOpen)
+				local broken, started = 0, 0
+				for _ = 1, 1000 do
+					world:tick(ctx)
+					if mob.ai.bx ~= nil and mob.ai.breakTicks == 1 then
+						started += 1
+						t.ok(mob.body.onGround, "breaking starts on the ground")
+					end
+					local changes = world:takeChanges()
+					broken += #changes.breaks
+					applyBreaks(changes, getBlock, set)
+				end
+				return broken, started
+			end
+			local runs, dug = 0, 0
+			for _, kind in { ZOMBIE, RUNNER, BRUTE } do
+				for _, hunt in { false, true } do
+					for i, start in { { false, 0, 4.5 }, { true, 0.6, 6.5 }, { false, -1.2, 8.5 }, { true, -0.4, 4.5 } } do
+						local broken, started = dig(kind, 3, hunt, start[1], start[2], start[3])
+						runs += 1
+						if broken > 0 or started > 0 then
+							dug += 1
+							print(
+								`         {MobList.get(kind).name} ({if hunt then "hunt" else "chase"}, start {i}) dug in`
+							)
+						end
+					end
+				end
+			end
+			t.eq(dug, 0, `3 up: never ({dug} of {runs} runs dug in)`)
+			-- 2 up is level enough: it digs in.
+			for _, kind in { ZOMBIE, RUNNER, BRUTE } do
+				local broken = dig(kind, 2, false, false, 0, 4.5)
+				t.ok(broken > 0, `{MobList.get(kind).name}: 2 up it digs in`)
+			end
+		end
+	)
+
+	t.test("zombies: a crawler lines up with an open door and crawls through it, breaking nothing", function()
+		-- (An open door leaves 13/16 of its cell: a crawler's box, 0.75 like the brute's, fits.)
+		for _, hinge in { "Left", "Right" } do
+			for _, sx in { 0.5, 0.2, 0.8 } do
+				local getBlock, set, skyOpen = flat()
+				box(set, -5, FLOOR, 3, 5, FLOOR + 3, 3, STONE)
+				set(0, FLOOR, 3, Blocks.doorVariant(B.OakDoor, "North", hinge, true, false) :: number)
+				set(0, FLOOR + 1, 3, Blocks.doorVariant(B.OakDoor, "North", hinge, true, true) :: number)
+				local world = newWorld(getBlock)
+				local id = world:spawn(CRAWLER, sx, FLOOR, 0.5, nil, 0)
+				local mob = world:get(id) :: MobWorld.Mob
+				mob.ai.target, mob.ai.goal = "p", "chase"
+				local ctx = context({ player("p", 0.5, FLOOR, 7.5) }, skyOpen)
+				local broken, hit = 0, false
+				for _ = 1, 400 do
+					world:tick(ctx)
+					hit = hit or mob.ai.bx ~= nil
+					local changes = world:takeChanges()
+					broken += #changes.breaks
+					applyBreaks(changes, getBlock, set)
+				end
+				t.ok(mob.body.z > 4.2, `{hinge} hinge, from x {sx}: through ({mob.body.z})`)
+				t.ok(not hit and broken == 0, "without hitting the door")
+				t.ok(Blocks.isDoor(getBlock(0, FLOOR, 3) :: number), "which still stands")
+			end
+		end
+	end)
+
+	t.test("zombies: damage stays with its block: one broken and put back, or swapped, starts over", function()
+		-- A planks doorway hammered to 400 of its 600.
+		local function hammered()
+			local getBlock, set, skyOpen = flat()
+			wall(set, B.Planks)
+			local world = newWorld(getBlock)
+			local id = world:spawn(ZOMBIE, 0.5, FLOOR, 2.3, nil, 0)
+			local mob = world:get(id) :: MobWorld.Mob
+			mob.ai.target, mob.ai.goal = "p", "chase"
+			local ctx = context({ player("p", 0.5, FLOOR, 6.5) }, skyOpen)
+			for _ = 1, 600 do
+				run(world, ctx, 1, getBlock, set)
+				if world:blockDamage(0, FLOOR, 3) >= 400 then
+					break
+				end
+			end
+			t.near(world:blockDamage(0, FLOOR, 3), 400, 1, "the plank at its feet hammered to 400")
+			return world, ctx, getBlock, set
+		end
+		-- The player breaks it and puts a new one a tick later: the new plank starts at 0.
+		local world, ctx, getBlock, set = hammered()
+		set(0, FLOOR, 3, AIR)
+		run(world, ctx, 1, getBlock, set)
+		set(0, FLOOR, 3, B.Planks)
+		t.eq(world:blockDamage(0, FLOOR, 3), 0, "a new plank: no damage")
+		run(world, ctx, 100, getBlock, set)
+		local fresh = world:blockDamage(0, FLOOR, 3)
+		t.ok(fresh > 0 and fresh <= 100, `hammered afresh: {fresh} after 100 ticks`)
+		t.eq(getBlock(0, FLOOR, 3), B.Planks, "and it stands")
+		-- Broken and put back between two ticks: the world tells it (WorldServer.onChanged).
+		world, ctx, getBlock, set = hammered()
+		set(0, FLOOR, 3, AIR)
+		world:blockChanged(0, FLOOR, 3, B.Planks, AIR)
+		set(0, FLOOR, 3, B.Planks)
+		world:blockChanged(0, FLOOR, 3, AIR, B.Planks)
+		t.eq(world:blockDamage(0, FLOOR, 3), 0, "put back at once: no damage either")
+		-- Swapped for a barricade (no word from the world): it starts over too.
+		world, ctx, getBlock, set = hammered()
+		set(0, FLOOR, 3, B.Barricade)
+		t.eq(world:blockDamage(0, FLOOR, 3), 0, "a barricade in its place: no damage")
+		run(world, ctx, 100, getBlock, set)
+		t.ok(world:blockDamage(0, FLOOR, 3) <= 100, `{world:blockDamage(0, FLOOR, 3)} on the barricade`)
+		-- The same block's variants keep it: a door opened and shut, a fence's arms.
+		local getDoor, setDoor = flat()
+		door(setDoor, 0, FLOOR, 3)
+		setDoor(4, FLOOR, 3, B.OakFence)
+		local doors = newWorld(getDoor)
+		for _ = 1, 100 do
+			doors:damageBlock(0, FLOOR + 1, 3, 1)
+			doors:damageBlock(4, FLOOR, 3, 1)
+		end
+		local shut = getDoor(0, FLOOR, 3) :: number
+		local shutTop = getDoor(0, FLOOR + 1, 3) :: number
+		door(setDoor, 0, FLOOR, 3, true)
+		doors:blockChanged(0, FLOOR, 3, shut, getDoor(0, FLOOR, 3) :: number)
+		doors:blockChanged(0, FLOOR + 1, 3, shutTop, getDoor(0, FLOOR + 1, 3) :: number)
+		local arms = Blocks.fenceVariant(B.OakFence, 1) :: number
+		setDoor(4, FLOOR, 3, arms)
+		doors:blockChanged(4, FLOOR, 3, B.OakFence, arms)
+		doors:tick(context({}, function()
+			return true
+		end))
+		t.eq(doors:blockDamage(0, FLOOR, 3), 100, "the opened door keeps its 100")
+		t.eq(doors:blockDamage(4, FLOOR, 3), 100, "the fence with an arm keeps its 100")
+	end)
+
 	--[[ 5. The brute ]]
 
 	t.test("zombies: the brute walks through an open door and climbs a 1 x 1 ladder shaft", function()
