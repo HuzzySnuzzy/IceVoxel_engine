@@ -5664,7 +5664,14 @@ block census is under the cap (`context.hostileCap(player)`: the director's, bel
 (`SpawnDistance`) in a chunk that ticks (the census counts a player's monsters only in those
 chunks), its centre the first standing spot down the column (creatures from 20 above the player's
 feet over 48, monsters from ±16 over 24), 2-4 creatures or a zombie kind's `group` (1-5) spread
-±4, each on its own spot within 3 up or down. `validSpot` (with a light rule: "dark", "day",
+±4, each on its own spot within 3 up or down. In a city (`cityAt` 0.5 or more at the centre) a
+monster pack keeps to floors at most `GROUND_ABOVE` (`MobAI.MAX_FALL`, 3) above
+`context.ground` (the generator's plateau): a centre found higher scans on down below that floor
+(a building's ground floor, the street), and a member above the pack's ceiling must be within 3
+of its own column's ground (`spawnPack`'s `ceiling`, which the waves pass too). Zombies drop at
+most 3 and take no ladder down, so before this rule a fifth of a downtown's night spawns stood
+4-12 blocks up (43 of 196 in 2 minutes; 65 of 432 by day), stranded, and kept a third of the
+city's cap of 35 for good; after it none, at the same rate (189 and 469). `validSpot` (with a light rule: "dark", "day",
 "wave", "animal"): the chunk ticks, a solid opaque sturdy floor (grass or dry grass for
 creatures), the box free (no solid, unloaded, fluid, fire or campfire cell: Hull and
 Burning.touching), no rail in the feet's cell or the one above (Minecraft's
@@ -5832,7 +5839,7 @@ burp unless `burp` is false).
   chunks, at most `WAVE_ABOVE` (`MobAI.MAX_FALL`, 3) above the generator's ground there
   (`context.ground`: never on a city's roofs or a tree's crown, where its hunters could never come
   down; in seed 99's big city 59 of 320 wave zombies stood 4-20 blocks up before this rule, none
-  after, all 320 still placed), 8 tries a player; kinds by `hordeWeight` grown by `hordeGrowth` ×
+  after, all 320 still placed; its members too, through `spawnPack`'s ceiling), 8 tries a player; kinds by `hordeWeight` grown by `hordeGrowth` ×
   (k - 1) (runners and brutes more often each moon); each hunts that player and is persistent.
   Natural monster spawning waits (`hostilePaused`).
 - **Hunts**: every `HuntInterval` (100) ticks of a moon, every zombie with no target within

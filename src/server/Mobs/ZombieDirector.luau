@@ -27,7 +27,7 @@
 	             floors under the open sky in the chunks that tick (never inside a roofed base or a
 	             bunker) and at most MobAI.MAX_FALL (3) above the generator's ground there
 	             (`context.ground`: never on a city's roofs or a tree's crown, where they could
-	             never come down), the kinds by their `hordeWeight` grown by `hordeGrowth` x
+	             never come down; each member too), the kinds by their `hordeWeight` grown by `hordeGrowth` x
 	             (k - 1) (runners and brutes come more often each moon); each one hunts that
 	             player (MobAI `hunt`) and is `persistent`. Natural monster spawning stops meanwhile (MobSpawning's
 	             `hostilePaused`).
@@ -373,14 +373,12 @@ function ZombieDirector.wave(
 				cz,
 				ZombieDirector.WAVE_SCAN
 			)
-			if
-				cy == nil
-				or (ground ~= nil and cy > ground(cx, cz) + ZombieDirector.WAVE_ABOVE)
-				or context.skyOpen(cx, cy, cz) ~= true
-			then
+			-- (Its members keep off the roofs too: MobSpawning.spawnPack's ceiling.)
+			local ceiling = if cy ~= nil and ground ~= nil then ground(cx, cz) + ZombieDirector.WAVE_ABOVE else nil
+			if cy == nil or (ceiling ~= nil and cy > ceiling) or context.skyOpen(cx, cy, cz) ~= true then
 				continue
 			end
-			local ids = MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt, "wave")
+			local ids = MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt, "wave", ceiling)
 			for _, id in ids do
 				local mob = world:get(id)
 				if mob then

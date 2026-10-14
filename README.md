@@ -301,12 +301,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   **Zombie** (0.6 × 1.95 blocks, 20 health, armor 2, hits 3, chases at 2.3 blocks a second), the
   **Runner** (12 health, hits 2, chases at 5 blocks a second: only a sprinting player gets away),
   the **Brute** (60 health, armor 4, hits 7, slow, breaks blocks three times as fast and shrugs
-  off knockback), the legless **Crawler** (0.75 × 0.6: it fits under anything a block high and through an
-  open door), the
-  **Screamer** (it shrieks when it spots a player, and every zombie within 48 blocks comes to
-  look), and the **Soldier** (armor 10, hits 4, gunpowder), **Police**, **Firefighter** (fire
-  can't hurt it), **Construction** (it breaks blocks twice as fast; nails and scrap) and
-  **Doctor** zombies (bandages, pills, antibiotics). None of them burns in the sun.
+  off knockback), the legless **Crawler** (0.75 × 0.6: it fits under anything a block high and
+  through an open door), the **Screamer** (it shrieks when it spots a player, and every zombie
+  within 48 blocks comes to look), and the **Soldier** (armor 10, hits 4, gunpowder),
+  **Police**, **Firefighter** (fire can't hurt it), **Construction** (it breaks blocks twice as
+  fast; nails and scrap) and **Doctor** zombies (bandages, pills, antibiotics). None of them
+  burns in the sun.
   - **Hunting:** they notice survival and adventure players they can see within 24 blocks
     (runners and screamers 32, crawlers 16), chase them and hit within Minecraft's reach every
     second with a knockback; out of sight for 3 seconds they lose you.
@@ -317,21 +317,24 @@ A fast, Minecraft-style voxel engine for Roblox.
     reach walks over to look (spread out round the spot) and looks for players at once.
   - **Walls don't stop them.** A zombie pushing against a wall towards a player it is after
     (within 8 blocks and level with it: from a block below its feet to two above, judged
-    standing on the ground, so a player on a cliff three blocks up is safe from digging; 16 for a
-    blood moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a brute 4,
-    two zombies together about 6), glass in 3, leaves and wool in 6, dirt and fences in 15,
-    planks and logs in 30, a **Barricade** in 45, stone and bricks in 2 minutes, a **Reinforced
-    Barricade** in 150 seconds, concrete in 5 minutes. The damage is shared by everyone hitting
-    the block and fades after 5 idle seconds, and it belongs to that block: break a hammered
-    plank and put a new one, or a barricade, and the zombies start over; iron, ores, chests and machines and the bunker
-    hatch never break. Both halves of a door go and nothing drops, with a crash every zombie
-    within 10 blocks hears. They never dig down or up towards a player.
+    standing on the ground, so a player on a cliff three blocks up is safe from digging; 16 for
+    a blood moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a
+    brute 4, two zombies together about 6), glass in 3, leaves and wool in 6, dirt and fences in
+    15, planks and logs in 30, a **Barricade** in 45, stone and bricks in 2 minutes, a
+    **Reinforced Barricade** in 150 seconds, concrete in 5 minutes. The damage is shared by
+    everyone hitting the block and fades after 5 idle seconds, and it belongs to that block:
+    break a hammered plank and put a new one, or a barricade, and the zombies start over; iron,
+    ores, chests and machines and the bunker hatch never break. Both halves of a door go and
+    nothing drops, with a crash every zombie within 10 blocks hears. They never dig down or up
+    towards a player.
   - **Day and night:** at night 20 zombies at most round each player spawn in the dark as
     monsters do; by day 7, only on floors under the open sky and never where a torch's light
     reaches (13 blocks); 1.75 times that where the player stands in a city, where police and
-    firefighters turn up too. Packs of 1-5 (by kind) spawn 24-44 blocks out. At dawn, and every
-    30 s by day, the zombies over a player's day cap with nothing to chase walk off, the furthest
-    first, and go once 24 blocks away and out of sight, so a crowd round a shelter thins out.
+    firefighters turn up too, in the streets and the buildings' ground floors but never on an
+    upper floor or a roof they could not come down from. Packs of 1-5 (by kind) spawn 24-44
+    blocks out. At dawn, and every 30 s by day, the zombies over a player's day cap with nothing
+    to chase walk off, the furthest first, and go once 24 blocks away and out of sight, so a
+    crowd round a shelter thins out.
   - **Blood moons** (every third night from the third: see Survival): waves of 8 zombies a
     player (10, 12... at later moons) every 30 seconds, 28-44 blocks out on the ground under the
     open sky (never on a roof they could not climb down from), up to 28 round each player (4 more

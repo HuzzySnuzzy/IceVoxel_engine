@@ -20,7 +20,9 @@
 	      (360), a wave of 8 hunters on the town's open floors, the client's sky and day line agree
 	      with the server; /time set day: 320 again, the hunt over, the sky clear; in seed 99's big
 	      city (-1627, -1513) three waves land all 24 on its streets and lots, none on a roof (the
-	      glue hands the director the generator's ground: ZombieDirector.WAVE_ABOVE)
+	      glue hands the director the generator's ground: ZombieDirector.WAVE_ABOVE), and its
+	      natural spawns, night and day, never land more than 3 above its ground either
+	      (MobSpawning.GROUND_ABOVE)
 	   3  a horde zombie (a hunter of the blood moon) breaks into the town's shed through its Oak
 	      Door unseen (both halves, nothing dropped, its noise), its Breaking flag on the client, and
 	      crosses the shut hatch (Entities/MobPhysics: a floor plate is ground) to hit the player
@@ -955,17 +957,27 @@ return function(t, shared, require, server, client)
 		end
 	)
 
-	t.test("glue: a blood moon's waves in a downtown land on its streets and lots, never on a roof", function()
-		local big: any = nil
-		for _, site in gen.cities(-1700, -1600, -1550, -1450) do
-			if site.radius >= 160 then
-				big = site
+	-- Seed 99's big city at -1627, -1513, a street's centre line through the middle of its
+	-- downtown (px, pz) and the chunks round it (generated once, on first use).
+	local downtownCache: any = nil
+	local function downtownOf(): (any, number, number, any)
+		if downtownCache == nil then
+			local big: any = nil
+			for _, site in gen.cities(-1700, -1600, -1550, -1450) do
+				if site.radius >= 160 then
+					big = site
+				end
 			end
+			assert(big, "seed 99's city at -1627, -1513")
+			local px, pz = big.x + 0.5, big.z + 9.5
+			downtownCache = { big = big, px = px, pz = pz, area = area(math.floor(px), math.floor(pz)) }
 		end
-		assert(big, "seed 99's city at -1627, -1513")
-		-- (A street's centre line through the middle of the downtown.)
-		local px, pz = big.x + 0.5, big.z + 9.5
-		local downtown = area(math.floor(px), math.floor(pz))
+		local d = downtownCache
+		return d.big, d.px, d.pz, d.area
+	end
+
+	t.test("glue: a blood moon's waves in a downtown land on its streets and lots, never on a roof", function()
+		local big, px, pz, downtown = downtownOf()
 		local h = glue(newWorld(nil, downtown), downtown)
 		h.time = MOON1
 		local p = h.join(px, big.y, pz)
@@ -988,6 +1000,40 @@ return function(t, shared, require, server, client)
 		print(`    {landed} wave zombies in the downtown, {high} more than 3 blocks above its ground`)
 		t.eq(landed, 3 * (Moon.WaveBase + Moon.WavePerMoon), "three waves of 8, every one delivered")
 		t.eq(high, 0, "none on a roof, where it could never come down")
+	end)
+
+	t.test("glue: natural spawns in a downtown, night and day, never land higher than 3 above its ground", function()
+		-- (The upper floors and roofs: a zombie there could never come down, MobAI.MAX_FALL, and
+		-- would fill the city's cap for good. Each zombie is taken away once seen, so packs keep
+		-- coming.)
+		local big, px, pz, downtown = downtownOf()
+		for _, case in { { MIDNIGHT, "midnight" }, { NOON, "noon" } } do
+			local h = glue(newWorld(nil, downtown), downtown)
+			h.time = case[1]
+			h.join(px, big.y, pz)
+			local world = h.Mobs.world() :: any
+			local landed, high, inside = 0, 0, 0
+			for _ = 1, 600 do
+				h.tick(1)
+				for _, mob in zombies(h) do
+					local x, z = math.floor(mob.body.x), math.floor(mob.body.z)
+					local above = mob.body.y - gen.column(x, z)
+					landed += 1
+					if above > MobAI.MAX_FALL then
+						high += 1
+					end
+					if Skylight.open(h.world, x, math.floor(mob.body.y), z) ~= true then
+						inside += 1
+					end
+					world:remove(mob.id)
+				end
+			end
+			print(
+				`    {case[2]}: {landed} natural zombies in the downtown ({inside} under a roof), {high} more than 3 blocks above its ground`
+			)
+			t.ok(landed >= 20, `{case[2]}: they come ({landed})`)
+			t.eq(high, 0, `{case[2]}: none on an upper floor or a roof`)
+		end
 	end)
 
 	--[[ 3. Breaking into the shed ]]

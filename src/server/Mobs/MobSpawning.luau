@@ -23,7 +23,14 @@
 	            30, police 12, crawler 12, construction 8, firefighter 6, brute 6, screamer 6,
 	            doctor 5, soldier 1), spread up to 4 blocks around it, `group` of them (2-4
 	            creatures; 1-5 zombies, by kind), each on a spot of its own found within 3 blocks up
-	            or down (`spawnPack`, which a blood moon's waves use too: Mobs/ZombieDirector).
+	            or down (`spawnPack`, which a blood moon's waves use too: Mobs/ZombieDirector). In
+	            a city a monster pack keeps to floors at most GROUND_ABOVE (MobAI.MAX_FALL, 3)
+	            above the generator's ground (`context.ground`: the plateau): never on the upper
+	            floors and roofs a zombie could never come down from (it drops at most 3 and
+	            takes no ladder down), so none fills the city's cap stranded up there. A floor
+	            found higher, the column scan goes on down below it (a building's ground floor, the
+	            street); a member higher than its pack's ceiling must be within it of its own
+	            column's ground.
 	  Caps      a player's monster cap is `context.hostileCap(player)` when given (the zombie
 	            apocalypse's: by day, at night, in a city, in a blood moon: Mobs/ZombieDirector),
 	            else Settings.HostileCap; while `context.hostilePaused` (a blood moon) no monster
@@ -78,6 +85,7 @@ local LightEstimate = require(Shared.World.LightEstimate)
 local MobList = require(Shared.Entities.MobList)
 
 local Burning = require(script.Parent.Parent.Players.Burning)
+local MobAI = require(script.Parent.MobAI)
 local MobWorld = require(script.Parent.MobWorld)
 
 local Apocalypse = Config.Apocalypse
@@ -136,6 +144,8 @@ MobSpawning.PASSIVE_HEIGHT = 20
 MobSpawning.PASSIVE_SCAN = 48
 MobSpawning.HOSTILE_HEIGHT = 16
 MobSpawning.HOSTILE_SCAN = 24
+-- In a city a monster's floor is at most this far above the generator's ground (see the header).
+MobSpawning.GROUND_ABOVE = MobAI.MAX_FALL
 
 local floor = math.floor
 local CHUNK = ChunkLayout.SIZE
@@ -481,9 +491,10 @@ local findFloor = MobSpawning.findFloor
 --[[
 	Spawns up to `count` mobs of `kind` around the pack centre (x, y, z) (a cell: its floor
 	found), the first there and each other within PACK_SPREAD blocks on a floor of its own within
-	PACK_SEARCH up or down, each on a valid spot (`light`: see validSpot). The members that need
-	no block light are judged together (`dark`, see the header) and spawn after the rest. Returns
-	their ids.
+	PACK_SEARCH up or down, each on a valid spot (`light`: see validSpot) and, given a `ceiling`,
+	at most that high unless within GROUND_ABOVE of its own column's `context.ground` (see the
+	header). The members that need no block light are judged together (`dark`, see the header)
+	and spawn after the rest. Returns their ids.
 ]]
 function MobSpawning.spawnPack(
 	world: MobWorld.MobWorld,
@@ -494,9 +505,11 @@ function MobSpawning.spawnPack(
 	z: number,
 	count: number,
 	nextInt: (n: number) -> number,
-	light: Light?
+	light: Light?,
+	ceiling: number?
 ): { number }
 	local getBlock = world.getBlock
+	local ground = context.ground
 	local ids = {}
 	-- (The members waiting on the block light: their cells, flat, and their search budgets.)
 	local waiting: { number }? = nil
@@ -509,6 +522,9 @@ function MobSpawning.spawnPack(
 			mz += nextInt(MobSpawning.PACK_SPREAD * 2 + 1) - MobSpawning.PACK_SPREAD
 		end
 		local my = findFloor(getBlock, kind, mx, y + MobSpawning.PACK_SEARCH, mz, MobSpawning.PACK_SEARCH * 2)
+		if my and ceiling and my > ceiling and (ground == nil or my > ground(mx, mz) + MobSpawning.GROUND_ABOVE) then
+			my = nil
+		end
 		if my then
 			local ok, budget = spotRules(getBlock, context, kind, mx, my, mz, nextInt, light)
 			if ok and budget then
@@ -585,12 +601,23 @@ local function tryPack(
 		scan = MobSpawning.PASSIVE_SCAN
 	end
 	local cy = findFloor(getBlock, kind, cx, startY, cz, scan)
+	local ceiling: number? = nil
+	local ground = context.ground
+	if hostile and weights == "city" and ground ~= nil then
+		-- (Never on a city floor it couldn't come down from: on down the column, see the header.)
+		local top = ground(cx, cz) + MobSpawning.GROUND_ABOVE
+		ceiling = top
+		local bottom = startY - scan
+		while cy ~= nil and cy > top do
+			cy = findFloor(getBlock, kind, cx, cy - 2, cz, cy - 2 - bottom)
+		end
+	end
 	if cy == nil then
 		return 0
 	end
 	local group = kind.spawn.group
 	local size = math.min(group[1] + nextInt(group[2] - group[1] + 1), room)
-	return #MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt)
+	return #MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt, nil, ceiling)
 end
 
 --[[
