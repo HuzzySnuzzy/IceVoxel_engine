@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	Mobs on the server: Minecraft 1.20.1's LivingEntity / Mob rules for the kinds of
 	Shared/Entities/MobList, without any Roblox APIs so the tests run them (Mobs/Mobs is the Roblox
@@ -7,7 +8,11 @@
 	Each tick (`tick`, 20 a second), in id order, for every mob whose chunk ticks (`context.active`:
 	loaded and within Config.Server.SimulationRadius chunks of a player, World/Simulation; the rest
 	are frozen where they are, as Minecraft's entities in chunks that don't tick):
-	  AI         Mobs/MobAI: wander, panic, hunt, hit; it steers and jumps.
+	  AI         Mobs/MobAI: wander, panic, hunt, hit; it steers and jumps. Zombies also hear
+	             noises, hunt through blood moons, walk away when sent, and break blocks
+	             (`damageBlock`, below).
+	  Crowds     zombies keep a little room between them (Mobs/MobCrowd: hashed once a tick from
+	             where they stood at its start, each pushed between its AI and its physics).
 	  Physics    Shared/Entities/MobPhysics: gravity, friction, fluids, collision, stepping and
 	             jumping, climbing, slow falling.
 	  Falls      landing after more than 3 blocks hurts ceil(distance - 3), through armor
@@ -16,7 +21,9 @@
 	             10 ticks and sets it burning 15 s, fire and campfires hurt, burning costs 1 every
 	             20 ticks, water and rain put it out (`context.rainingAt`, looked up only while it
 	             burns). (A mob catches fire after 20 ticks in a fire block,
-	             as a player does; Minecraft's mobs at once.) A kind with `burnsInDaylight`
+	             as a player does; Minecraft's mobs at once.) A `fireImmune` kind (the
+	             firefighter zombie) never burns: fire, lava and campfires don't hurt it and
+	             lightning doesn't light it. A kind with `burnsInDaylight`
 	             burns in daylight (Mob.isSunBurnTick; the apocalypse's zombies don't): by day
 	             (Level.isDay with the
 	             weather where they stand, `context.isDay`: not in a thunderstorm), out of water
@@ -29,8 +36,9 @@
 	             which only a bigger hurt lands, by the difference), softened by the kind's armor
 	             unless it bypasses it (falls, burning, walls); a fresh hurt flashes the mob red
 	             for 10 ticks (hurtTime), plays its hurt sound, knocks it back 0.4 away from where
-	             it came from (Combat.knockback) and makes it panic (creatures) or hunt the player
-	             (monsters, MobAI.hurt). A player's hit counts for the kill for 100 ticks
+	             it came from (Combat.knockback; less its kind's `knockbackResist`, as blasts'
+	             pushes are) and makes it panic (creatures) or hunt the player (monsters,
+	             MobAI.hurt). A player's hit counts for the kill for 100 ticks
 	             (lastHurtByPlayerTime).
 	  Death      at 0 health it dies: the death sound, a `deaths` record (the killer: the player
 	             whose hit counts, or nil), and 20 ticks later (the body lies tipped and red; the
@@ -43,13 +51,24 @@
 	             every player goes at once; beyond 32 blocks, after 600 ticks without anything
 	             happening near it (noActionTime: hurt, or a player within 32, start it over;
 	             a frozen one's time counts on, as Minecraft's would tick there), one check in
-	             40 (Minecraft: a tick in 800). Creatures stay, but one with no
-	             player within 128 blocks for Config.Mobs.ForgetTicks goes too, to keep memory
-	             bounded. Below the world (y < -64) anything goes.
+	             40 (Minecraft: a tick in 800), unless it is `persistent` (a zombie hunting
+	             through a blood moon). A zombie sent away (MobAI `leave`) goes once it is
+	             Apocalypse.Zombies.Leave.Distance (24) blocks from every player and no player
+	             within 64 blocks can see it (from their eyes to its eyes), however near the 32.
+	             Creatures stay, but one with no player within 128 blocks for
+	             Config.Mobs.ForgetTicks goes too, to keep memory bounded. Below the world
+	             (y < -64) anything goes.
+	  Blocks     a zombie breaking a block puts its `breakPower` a tick on the block's damage
+	             (`damageBlock`: one tally a cell, a door's on its lower half, so zombies on one
+	             door share it), which a block left alone for Apocalypse.Breaking.Decay ticks
+	             loses; at the block's Blocks.zombieBreak it gives way: a `breaks` record (once),
+	             which Mobs/Mobs acts on (it removes the block and drops nothing).
 	At most `maxMobs` exist: spawning more fails (`spawn` returns 0).
 
 	What the rest of the server must act on piles up until `takeChanges`: spawned and removed
-	ids, deaths (kind, position, killer), drops, hits on players (damage, knockback) and sounds.
+	ids, deaths (kind, position, killer), drops, hits on players (damage, knockback), sounds,
+	zombies' hits on blocks (the thud, every Breaking.HitInterval ticks), blocks broken and
+	noises made (a screamer's shriek, for Apocalypse/NoiseBus).
 
 	Positions are in blocks: a mob's position is the bottom centre of its box.
 ]]
@@ -60,6 +79,8 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Combat = require(Shared.Entities.Combat)
+local Config = require(Shared.Config)
+local Coords = require(Shared.World.Coords)
 local DayCycle = require(Shared.DayCycle)
 local Effects = require(Shared.Effects)
 local Explosion = require(Shared.World.Explosion)
@@ -71,6 +92,7 @@ local MobPhysics = require(Shared.Entities.MobPhysics)
 local Burning = require(script.Parent.Parent.Players.Burning)
 local Lightning = require(script.Parent.Parent.World.Lightning)
 local MobAI = require(script.Parent.MobAI)
+local MobCrowd = require(script.Parent.MobCrowd)
 
 export type PlayerView = MobAI.PlayerView
 
@@ -99,6 +121,8 @@ export type Mob = {
 	killer: any?,
 	burnedDeath: boolean,
 	removed: boolean,
+	-- (Zombies.) Hunting through a blood moon: it never idles away (see the header).
+	persistent: boolean,
 	ai: MobAI.State,
 }
 
@@ -114,6 +138,10 @@ export type Hit = {
 	kz: number,
 }
 export type Sound = { name: string, x: number, y: number, z: number }
+-- A zombie's hit on a block (mob id, the cell, its block) and a block a zombie broke.
+export type BlockHit = { id: number, x: number, y: number, z: number, block: number }
+export type Break = { x: number, y: number, z: number, block: number }
+export type Noise = MobAI.Noise
 
 export type Changes = {
 	spawned: { number },
@@ -122,6 +150,9 @@ export type Changes = {
 	drops: { Drop },
 	hits: { Hit },
 	sounds: { Sound },
+	blockHits: { BlockHit },
+	breaks: { Break },
+	noises: { Noise },
 }
 
 -- Where a hurt comes from (all optional): a player (kill credit, a monster's revenge), a
@@ -171,6 +202,10 @@ export type Context = {
 	isDay: ((x: number, z: number) -> boolean)?,
 	-- Does chunk (cx, cz) tick (loaded and near a player)?
 	active: (cx: number, cz: number) -> boolean,
+	-- (Zombies: MobAI's.) This tick's noises, whether it is night, whether zombies break blocks.
+	noises: { Noise }?,
+	night: boolean?,
+	breaking: boolean?,
 }
 
 export type Options = {
@@ -191,6 +226,13 @@ export type MobWorld = {
 	live: number,
 	tickCount: number,
 	changes: Changes,
+	-- Mobs went since the id order was last rebuilt.
+	dirty: boolean,
+	-- Zombies' damage on blocks (by Coords.posKey of the cell, a door's lower half), and the cells
+	-- reported broken since the last takeChanges.
+	damage: { [number]: { progress: number, last: number } },
+	broken: { [number]: boolean },
+	crowd: MobCrowd.Crowd,
 
 	spawn: (self: MobWorld, kind: number, x: number, y: number, z: number, variant: number?, yaw: number?) -> number,
 	get: (self: MobWorld, id: number) -> Mob?,
@@ -217,6 +259,11 @@ export type MobWorld = {
 	-- (MobAI's World.)
 	hitPlayer: (self: MobWorld, mob: Mob, player: PlayerView, damage: number, kx: number, ky: number, kz: number) -> (),
 	sound: (self: MobWorld, name: string, x: number, y: number, z: number) -> (),
+	damageBlock: (self: MobWorld, x: number, y: number, z: number, power: number) -> (number, number),
+	blockDamage: (self: MobWorld, x: number, y: number, z: number) -> number,
+	blockHit: (self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number) -> (),
+	breakBlock: (self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number) -> (),
+	noise: (self: MobWorld, x: number, y: number, z: number, radius: number) -> (),
 }
 
 local MobWorld = {}
@@ -237,14 +284,30 @@ MobWorld.SUN_BURN_SECONDS = 8
 MobWorld.SUN_BURN_CHANCE = 1.2 / 30
 MobWorld.IN_WALL_DAMAGE = 1
 MobWorld.VOID_Y = -64
+-- A zombie sent away stays while a player within this many blocks can see it.
+MobWorld.LEAVE_SIGHT = 64
 
 local SURVIVAL = GameMode.SURVIVAL
 local TICKS_PER_SECOND = 20
 local CHUNK = ChunkLayout.SIZE
 local floor = math.floor
+local posKey = Coords.posKey
+local Apocalypse = Config.Apocalypse
+-- (Fire Resistance's rules, for a `fireImmune` kind: no fire hurt lands, nothing sets it alight.)
+local FIRE_IMMUNE: Effects.FireRules = table.freeze({ immune = true, factor = 0, bonus = 0, ignites = false })
 
 local function newChanges(): Changes
-	return { spawned = {}, removed = {}, deaths = {}, drops = {}, hits = {}, sounds = {} }
+	return {
+		spawned = {},
+		removed = {},
+		deaths = {},
+		drops = {},
+		hits = {},
+		sounds = {},
+		blockHits = {},
+		breaks = {},
+		noises = {},
+	}
 end
 
 function MobWorld.new(getBlock: MobPhysics.GetBlock, options: Options): MobWorld
@@ -258,6 +321,10 @@ function MobWorld.new(getBlock: MobPhysics.GetBlock, options: Options): MobWorld
 		live = 0,
 		tickCount = 0,
 		changes = newChanges(),
+		dirty = false,
+		damage = {},
+		broken = {},
+		crowd = MobCrowd.new(),
 	}
 	return (setmetatable(self, MobWorld) :: any) :: MobWorld
 end
@@ -310,6 +377,7 @@ function MobWorld.spawn(
 		killer = nil,
 		burnedDeath = false,
 		removed = false,
+		persistent = false,
 		ai = MobAI.new(),
 	}
 	self.byId[id] = mob
@@ -346,6 +414,7 @@ local function removeMob(self: MobWorld, mob: Mob)
 	mob.removed = true
 	self.byId[mob.id] = nil
 	self.live -= 1
+	self.dirty = true
 	table.insert(self.changes.removed, mob.id)
 end
 
@@ -500,7 +569,7 @@ function MobWorld.hurt(self: MobWorld, id: number, amount: number, source: Sourc
 	apply(self, mob, landed, fresh)
 	if fresh and source and source.x and source.z then
 		local body = mob.body
-		local strength = source.knockback or 0
+		local strength = (source.knockback or 0) * (1 - (mob.kind.knockbackResist or 0))
 		if strength > 0 then
 			body.vx, body.vy, body.vz =
 				Combat.knockback(strength, source.x, source.z, body.x, body.z, body.vx, body.vy, body.vz, body.onGround)
@@ -598,7 +667,9 @@ function MobWorld.lightning(self: MobWorld, x: number, y: number, z: number, dam
 		local body, kind = mob.body, mob.kind
 		if Lightning.hits(x, y, z, body.x, body.y, body.z, kind.width, kind.height) then
 			local burn = mob.burn
-			burn.fire = if burn.fire > 0 then burn.fire + 1 else burnTicks
+			if not kind.fireImmune then
+				burn.fire = if burn.fire > 0 then burn.fire + 1 else burnTicks
+			end
 			MobWorld.hurt(self, mob.id, damage, nil)
 			reached += 1
 		end
@@ -632,9 +703,10 @@ function MobWorld.explode(self: MobWorld, x: number, y: number, z: number, power
 		local damage, px, py, pz = Explosion.hit(x, y, z, power, body.x, body.y, body.z, body.y + kind.eye, seen)
 		if damage then
 			MobWorld.hurt(self, mob.id, damage, { x = x, z = z })
-			body.vx += px
-			body.vy += py
-			body.vz += pz
+			local share = 1 - (kind.knockbackResist or 0)
+			body.vx += px * share
+			body.vy += py * share
+			body.vz += pz * share
 			body.onGround = false
 			if mob.dead then
 				killed += 1
@@ -670,6 +742,66 @@ function MobWorld.sound(self: MobWorld, name: string, x: number, y: number, z: n
 	table.insert(self.changes.sounds, { name = name, x = x, y = y, z = z })
 end
 
+-- The cell a block's damage is kept on: a door's upper half keeps it on its lower half.
+local function damageKey(self: MobWorld, x: number, y: number, z: number, block: number?): number
+	if block ~= nil and Blocks.isDoor(block) then
+		local lower = Blocks.plantBottom(block)
+		if lower ~= nil and self.getBlock(x, y - 1, z) == lower then
+			return posKey(x, y - 1, z)
+		end
+	end
+	return posKey(x, y, z)
+end
+
+--[[
+	A zombie's `power` more damage on the block at (x, y, z) (see the header): its damage so far
+	and what breaks it (Blocks.zombieBreak; 0: it never breaks).
+]]
+function MobWorld.damageBlock(self: MobWorld, x: number, y: number, z: number, power: number): (number, number)
+	local block = self.getBlock(x, y, z)
+	local needed = if block then Blocks.zombieBreak(block) else 0
+	if needed <= 0 then
+		return 0, 0
+	end
+	local key = damageKey(self, x, y, z, block)
+	local entry = self.damage[key]
+	if entry == nil or self.tickCount - entry.last > Apocalypse.Breaking.Decay then
+		entry = { progress = 0, last = self.tickCount }
+		self.damage[key] = entry
+	end
+	entry.progress += power
+	entry.last = self.tickCount
+	return entry.progress, needed
+end
+
+-- The damage on the block at (x, y, z) so far (0: none, or it decayed).
+function MobWorld.blockDamage(self: MobWorld, x: number, y: number, z: number): number
+	local entry = self.damage[damageKey(self, x, y, z, self.getBlock(x, y, z))]
+	if entry == nil or self.tickCount - entry.last > Apocalypse.Breaking.Decay then
+		return 0
+	end
+	return entry.progress
+end
+
+function MobWorld.blockHit(self: MobWorld, mob: Mob, x: number, y: number, z: number, block: number)
+	table.insert(self.changes.blockHits, { id = mob.id, x = x, y = y, z = z, block = block })
+end
+
+-- The block at (x, y, z) gave way (reported once, however many zombies were at it).
+function MobWorld.breakBlock(self: MobWorld, _mob: Mob, x: number, y: number, z: number, block: number)
+	local key = damageKey(self, x, y, z, block)
+	if self.broken[key] then
+		return
+	end
+	self.broken[key] = true
+	self.damage[key] = nil
+	table.insert(self.changes.breaks, { x = x, y = y, z = z, block = block })
+end
+
+function MobWorld.noise(self: MobWorld, x: number, y: number, z: number, radius: number)
+	table.insert(self.changes.noises, { x = x, y = y, z = z, radius = radius })
+end
+
 --[[ Ticking ]]
 
 local function playersNearest(players: { PlayerView }, x: number, y: number, z: number): number
@@ -682,6 +814,21 @@ local function playersNearest(players: { PlayerView }, x: number, y: number, z: 
 		end
 	end
 	return math.sqrt(best)
+end
+
+-- May a zombie sent away go (see the header): no player within LEAVE_SIGHT can see it?
+local function unseen(self: MobWorld, players: { PlayerView }, mob: Mob): boolean
+	local body, kind = mob.body, mob.kind
+	local ex, ey, ez = body.x, body.y + kind.eye, body.z
+	local limit = MobWorld.LEAVE_SIGHT * MobWorld.LEAVE_SIGHT
+	for _, player in players do
+		local px, py, pz = player.x, player.y + player.eye, player.z
+		local dx, dy, dz = px - ex, py - ey, pz - ez
+		if dx * dx + dy * dy + dz * dz <= limit and MobAI.canSee(self.getBlock, px, py, pz, ex, ey, ez) then
+			return false
+		end
+	end
+	return true
 end
 
 -- Despawning (see the header), every DESPAWN_INTERVAL ticks for every mob. With nobody in the
@@ -702,7 +849,16 @@ local function despawn(self: MobWorld, context: Context)
 		end
 		local distance = playersNearest(context.players, body.x, body.y, body.z)
 		if mob.kind.hostile then
-			if distance > MobWorld.DESPAWN_DISTANCE then
+			if
+				distance > MobWorld.DESPAWN_DISTANCE
+				-- (Sent away, far enough and out of sight.)
+				or (
+					mob.ai.leave > 0
+					and not mob.dead
+					and distance >= Apocalypse.Zombies.Leave.Distance
+					and unseen(self, context.players, mob)
+				)
+			then
 				removeMob(self, mob)
 			elseif distance < MobWorld.NO_DESPAWN_DISTANCE then
 				mob.idle = 0
@@ -713,7 +869,11 @@ local function despawn(self: MobWorld, context: Context)
 				if mob.frozen then
 					mob.idle += interval
 				end
-				if mob.idle > MobWorld.IDLE_DESPAWN and floor(self.random() * MobWorld.DESPAWN_ODDS) == 0 then
+				if
+					not mob.persistent
+					and mob.idle > MobWorld.IDLE_DESPAWN
+					and floor(self.random() * MobWorld.DESPAWN_ODDS) == 0
+				then
 					removeMob(self, mob)
 				end
 			end
@@ -736,6 +896,20 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 	if mob.removed then
 		return
 	end
+	if kind.zombie then
+		MobCrowd.push(self.crowd, mob :: any)
+	end
+	if
+		not kind.burnsInDaylight
+		and mob.burn.fire <= 0
+		and mob.burn.cooldown <= 0
+		and MobPhysics.rest(body, kind, forward, jump, self.getBlock)
+	then
+		-- (Standing still on a full block in empty cells: nothing moves, burns or smothers it;
+		-- the tick's end state set without the tick. Burning.tickPlayer would only clear `heat`.)
+		mob.burn.heat = 0
+		return
+	end
 	local landed = MobPhysics.tick(body, kind, forward, jump, self.getBlock)
 	if landed > MobPhysics.SAFE_FALL and kind.fallDamage ~= false then
 		MobWorld.hurt(self, mob.id, math.ceil(landed - MobPhysics.SAFE_FALL), { bypassArmor = true })
@@ -750,6 +924,7 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 	local isDay, rainingAt = context.isDay, context.rainingAt
 	if
 		kind.burnsInDaylight
+		and not kind.fireImmune
 		and body.waterDepth <= 0
 		and mob.burn.fire <= 0
 		and DayCycle.isDay(context.dayTime)
@@ -760,13 +935,23 @@ local function tickMob(self: MobWorld, context: Context, mob: Mob)
 	then
 		mob.burn.fire = MobWorld.SUN_BURN_SECONDS * TICKS_PER_SECOND
 	end
-	local touching = Burning.touchingAt(self.getBlock, body.x, body.y, body.z, kind.width, kind.height)
+	-- (No fire, lava or water in quiet cells: MobPhysics' `quiet`.)
+	local touching = if body.quiet
+		then 0
+		else Burning.touchingAt(self.getBlock, body.x, body.y, body.z, kind.width, kind.height)
 	if mob.burn.fire > 0 and rainingAt ~= nil and Burning.inRain(rainingAt, body.x, body.y, body.z, kind.height) then
 		-- (Rain puts it out: a bolt's fire, or the day's, once the storm reaches it.)
 		touching = bit32.bor(touching, Burning.RAIN)
 	end
 	local fresh = mob.burn.cooldown <= 1
-	local damage = Burning.tickPlayer(mob.burn, SURVIVAL, touching, kind.armor or 0, 0)
+	local damage = Burning.tickPlayer(
+		mob.burn,
+		SURVIVAL,
+		touching,
+		kind.armor or 0,
+		0,
+		if kind.fireImmune then FIRE_IMMUNE else nil
+	)
 	if damage > 0 then
 		apply(self, mob, damage, fresh)
 		if not mob.dead and fresh then
@@ -790,6 +975,8 @@ end
 function MobWorld.tick(self: MobWorld, context: Context)
 	self.tickCount += 1
 	local getBlock = self.getBlock
+	-- (Where the zombies stand at the start of the tick: Mobs/MobCrowd.)
+	MobCrowd.build(self.crowd, self.order :: any, Apocalypse.Zombies.Separation)
 	-- (Nothing spawns during the tick; mobs that go are only flagged until the end of it.)
 	for _, mob in self.order do
 		if mob.removed then
@@ -830,21 +1017,32 @@ function MobWorld.tick(self: MobWorld, context: Context)
 	end
 	if self.tickCount % MobWorld.DESPAWN_INTERVAL == 0 then
 		despawn(self, context)
-	end
-	-- Drop gone mobs from the id order.
-	local kept = table.create(self.live)
-	for _, mob in self.order do
-		if not mob.removed then
-			table.insert(kept, mob)
+		-- (Damage on blocks left alone decays.)
+		local decay = Apocalypse.Breaking.Decay
+		for key, entry in self.damage do
+			if self.tickCount - entry.last > decay then
+				self.damage[key] = nil
+			end
 		end
 	end
-	self.order = kept
+	-- Drop gone mobs from the id order (only when some went).
+	if self.dirty then
+		self.dirty = false
+		local kept = table.create(self.live)
+		for _, mob in self.order do
+			if not mob.removed then
+				table.insert(kept, mob)
+			end
+		end
+		self.order = kept
+	end
 end
 
 -- The changes since the last call (see Changes).
 function MobWorld.takeChanges(self: MobWorld): Changes
 	local changes = self.changes
 	self.changes = newChanges()
+	table.clear(self.broken)
 	return changes
 end
 

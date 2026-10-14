@@ -26,6 +26,8 @@ return function(t, shared, require, server)
 	local MobAI = require(server.Mobs.MobAI)
 	local MobSpawning = require(server.Mobs.MobSpawning)
 	local SummonCommand = require(server.Mobs.SummonCommand)
+	local ZombieDirector = require(server.Mobs.ZombieDirector)
+	local Config = require(shared.Config)
 	local Skylight = require(server.World.Skylight)
 
 	local B, I = Blocks.id, Items.id
@@ -908,6 +910,41 @@ return function(t, shared, require, server)
 			MobSpawning.step(lit, litState, context({ p }, litSky, MIDNIGHT), litSettings)
 		end
 		t.eq(lit:count(), 0, "no monsters where torches light the ground")
+		-- The zombie apocalypse (Mobs/Mobs' context): zombies walk the open ground by day too, up
+		-- to the day's cap (Mobs/ZombieDirector: 7 of the night's 20), but torch-lit ground still
+		-- stays empty, and a blood moon pauses natural spawning (its waves bring them).
+		local function apocalypse(dayTime: number, extra: { [string]: any }?): any
+			local ctx = context({ p }, skyOpen, dayTime) :: any
+			local night = dayTime == MIDNIGHT
+			ctx.daySpawn = true
+			ctx.hostileCap = function(): number
+				return ZombieDirector.cap(Config.Mobs, Config.Apocalypse, night, 0, 0)
+			end
+			for key, value in extra or {} do
+				ctx[key] = value
+			end
+			return ctx
+		end
+		local day = newWorld(getBlock, 23)
+		local dayState = MobSpawning.new()
+		for _ = 1, 300 do
+			MobSpawning.step(day, dayState, apocalypse(NOON), litSettings)
+		end
+		t.eq((MobSpawning.census(day)), 7, "zombies on the open ground at noon: the day cap of 7")
+		local litDay = newWorld(getLit, 8)
+		local litDayState = MobSpawning.new()
+		local litDayContext = apocalypse(NOON)
+		litDayContext.skyOpen = litSky
+		for _ = 1, 300 do
+			MobSpawning.step(litDay, litDayState, litDayContext, litSettings)
+		end
+		t.eq(litDay:count(), 0, "torches keep the open ground clear by day too")
+		local moon = newWorld(getBlock, 24)
+		local moonState = MobSpawning.new()
+		for _ = 1, 300 do
+			MobSpawning.step(moon, moonState, apocalypse(MIDNIGHT, { hostilePaused = true }), litSettings)
+		end
+		t.eq(moon:count(), 0, "a blood moon: no natural spawns")
 	end)
 
 	t.test("spawning: never near a player, in chunks that don't tick, or in blocks; global caps", function()
@@ -1339,6 +1376,30 @@ return function(t, shared, require, server)
 			local ms = (os.clock() - start) / ticks * 1000
 			print(string.format("         %d mobs: %.3f ms a tick (%d left)", n, ms, world:count()))
 			t.ok(ms < 20, `{n} mobs cost under 20 ms a tick ({ms})`)
+		end
+		-- 200 zombies (every kind) chasing one player at midnight, and 200 standing about a
+		-- creative one (design §5: 3 and 1.5 ms native, 8 and 4 ms with NOCODEGEN=1; the Zombies
+		-- spec measures them closely, its comment has the numbers; here a loose bound).
+		for _, chasing in { true, false } do
+			local world = newWorld(getBlock, 3, 1000)
+			local p = player("p", 0.5, FLOOR, 0.5, if chasing then GameMode.SURVIVAL else GameMode.CREATIVE)
+			for i = 1, 200 do
+				local kind = ZOMBIE + (i - 1) % (MobList.COUNT - ZOMBIE + 1)
+				local angle = i * 2.399
+				local distance = 6 + i % (if chasing then 25 else 55)
+				world:spawn(kind, 0.5 + math.cos(angle) * distance, FLOOR, 0.5 + math.sin(angle) * distance)
+			end
+			local ctx = context({ p }, skyOpen, MIDNIGHT)
+			run(world, ctx, 20)
+			local start = os.clock()
+			for _ = 1, 100 do
+				world:tick(ctx)
+				world:takeChanges()
+			end
+			local ms = (os.clock() - start) / 100 * 1000
+			local label = if chasing then "200 zombies chasing" else "200 zombies idle"
+			print(string.format("         %s: %.3f ms a tick", label, ms))
+			t.ok(ms < 20, `{label} under 20 ms a tick ({ms})`)
 		end
 		-- A spawning round (both categories due, 3 packs each) for one player at night, with
 		-- caves under the ground for the monsters' column scans to find.

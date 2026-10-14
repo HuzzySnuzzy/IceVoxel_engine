@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	Axis-aligned box ("hull") collision against the block grid, the way Minecraft Java Edition moves
 	entities (Entity.collide / collideWithShapes / Shapes.collide, Player.maybeBackOffFromEdge).

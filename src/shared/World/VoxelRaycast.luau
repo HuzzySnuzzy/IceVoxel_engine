@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	Voxel raycast (Amanatides & Woo grid traversal).
 

@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	Natural mob spawning (pure; Mobs/Mobs runs it every tick): Minecraft 1.20.1's NaturalSpawner
 	cut down to a bounded number of tries around each player.
@@ -17,9 +18,16 @@
 	            column (creatures from 20 above the player's feet, monsters from a random height
 	            within 16 of them); its members, one kind (picked by spawn weight: sheep 12, pig 10,
 	            chicken 10, cow 8; zombie 100, runner 25, crawler 12, screamer 5, brute 4,
-	            construction 4, soldier 3, doctor 2: MobList `spawn`), spread up to 4 blocks
-	            around it, `group` of them (2-4 creatures; 1-5 zombies, by kind), each on a spot
-	            of its own found within 3 blocks up or down.
+	            construction 4, soldier 3, doctor 2: MobList `spawn`; in a city, `context.cityAt`
+	            0.5 or more at the pack's centre, the zombies' `cityWeight`s: zombie 100, runner
+	            30, police 12, crawler 12, construction 8, firefighter 6, brute 6, screamer 6,
+	            doctor 5, soldier 1), spread up to 4 blocks around it, `group` of them (2-4
+	            creatures; 1-5 zombies, by kind), each on a spot of its own found within 3 blocks up
+	            or down (`spawnPack`, which a blood moon's waves use too: Mobs/ZombieDirector).
+	  Caps      a player's monster cap is `context.hostileCap(player)` when given (the zombie
+	            apocalypse's: by day, at night, in a city, in a blood moon: Mobs/ZombieDirector),
+	            else Settings.HostileCap; while `context.hostilePaused` (a blood moon) no monster
+	            spawns naturally at all (the waves bring them).
 	  A spot    a solid, opaque, sturdy floor (not leaves, glass, a chest...) with the mob's whole
 	            box free above it (no solid block, no fluid, no fire: Burning.touching), no rail
 	            in its cell or the one above (Minecraft's #prevent_mob_spawning_inside, so a
@@ -31,15 +39,27 @@
 	              monsters   no block light at all and dark enough by Minecraft's rolls
 	                         (Shared/World/LightEstimate.darkForMonsters: at night about half the
 	                         open ground, by day only out of the sky's reach: caves, deep
-	                         overhangs).
+	                         overhangs);
+	              zombies    by day (`context.daySpawn`: Apocalypse.Zombies.DaySpawning) on a
+	                         floor under the open sky the darkness rolls are skipped, but the
+	                         block light must still be 0 (searched over DayLightBudget, 2048
+	                         cells: as far as a torch's light reaches on open ground, 13 blocks),
+	                         so torches keep a courtyard clear; under a roof or underground they
+	                         need the dark as any monster;
+	              waves      (`spawnPack`'s "wave" light: a blood moon's) under the open sky, in any
+	                         light: never inside a roofed base or a bunker.
 	            The light is Shared/World/LightEstimate's estimate from the loaded blocks (the
 	            server keeps no light map; the sky is World/Skylight.open), the same estimate the
 	            client's WAILA shows.
-	  Costs     per round at most players x Attempts packs x 4 members, each spot a short column
-	            scan and one sky search of 48 cells, and for a monster whose light rolls pass a
-	            block light search of up to LightEstimate.SPAWN_BUDGET (2048) cells, so torches
-	            keep monsters out of a room as far as their light reaches (13 blocks), however
-	            big the room (a creature's: 256 cells).
+	  Costs     per round at most players x Attempts packs x 5 members, each spot a short column
+	            scan and one sky search of 48 cells, and for a monster whose light rolls pass (or
+	            a zombie by day) a block light search of up to LightEstimate.SPAWN_BUDGET (2048)
+	            cells, so torches keep monsters out of a room as far as their light reaches (13
+	            blocks), however big the room (a creature's: 256 cells). A pack's members share
+	            one search (`dark`: from all their cells at once, which costs about two members'
+	            searches for a pack of five, since their reaches overlap); only where it finds
+	            light does each member search on its own (LightEstimate.blockLight), so the
+	            answer is the same as one search each.
 
 	Config.Mobs.Spawning = false turns natural spawning off (/summon still works).
 ]]
@@ -49,6 +69,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
+local Config = require(Shared.Config)
 local DayCycle = require(Shared.DayCycle)
 local GameMode = require(Shared.GameMode)
 local Hull = require(Shared.Movement.Hull)
@@ -58,6 +79,8 @@ local MobList = require(Shared.Entities.MobList)
 
 local Burning = require(script.Parent.Parent.Players.Burning)
 local MobWorld = require(script.Parent.MobWorld)
+
+local Apocalypse = Config.Apocalypse
 
 export type Settings = {
 	Spawning: boolean,
@@ -76,7 +99,22 @@ export type Context = {
 	dayTime: number,
 	skyOpen: (x: number, y: number, z: number) -> boolean?,
 	active: (cx: number, cz: number) -> boolean,
+	-- (The zombie apocalypse; all optional.) How much a column is in a city (1 inside, 0 outside:
+	-- the generator's cityAt), a player's monster cap, whether zombies spawn by day on open
+	-- ground, and whether natural monster spawning is paused (a blood moon).
+	cityAt: ((x: number, z: number) -> number)?,
+	hostileCap: ((player: MobWorld.PlayerView) -> number)?,
+	daySpawn: boolean?,
+	hostilePaused: boolean?,
 }
+
+-- How a spot's light is judged (see the header): "dark" (monsters: Minecraft's rolls), "day"
+-- (zombies on an open floor by day: block light 0 only), "wave" (open sky, any light),
+-- "animal" (creatures: bright enough). nil: by the kind and the context.
+export type Light = "dark" | "day" | "wave" | "animal"
+
+-- Which weights pick a zombie kind: the wild's, a city's, a blood moon's waves'.
+export type Weights = "wild" | "city" | "horde"
 
 export type State = { tick: number }
 
@@ -110,32 +148,76 @@ function MobSpawning.new(): State
 	return { tick = 0 }
 end
 
--- The kinds of a category (hostile or not) and their total spawn weight.
-local function kindsOf(hostile: boolean): ({ MobList.Kind }, number)
+-- A kind's spawn weight by `weights` in blood moon `moon` (1, 2...; the horde's growth).
+function MobSpawning.weight(kind: MobList.Kind, weights: Weights?, moon: number?): number
+	local spawn = kind.spawn
+	if weights == "city" then
+		return spawn.cityWeight or spawn.weight
+	elseif weights == "horde" then
+		local base = spawn.hordeWeight or spawn.weight
+		return base * (1 + (spawn.hordeGrowth or 0) * math.max(0, (moon or 1) - 1))
+	end
+	return spawn.weight
+end
+
+-- The kinds of a category (hostile or not) with a weight by `weights`, and their total.
+local function kindsOf(hostile: boolean, weights: Weights?): ({ MobList.Kind }, number)
 	local kinds, total = {}, 0
 	for _, kind in MobList.kinds do
-		if kind.hostile == hostile and kind.spawn.weight > 0 then
+		local weight = MobSpawning.weight(kind, weights, 1)
+		if kind.hostile == hostile and weight > 0 then
 			table.insert(kinds, kind)
-			total += kind.spawn.weight
+			total += weight
 		end
 	end
 	return kinds, total
 end
-local HOSTILE_KINDS, HOSTILE_WEIGHT = kindsOf(true)
-local PASSIVE_KINDS, PASSIVE_WEIGHT = kindsOf(false)
+local HOSTILE_KINDS, HOSTILE_WEIGHT = kindsOf(true, "wild")
+local CITY_KINDS, CITY_WEIGHT = kindsOf(true, "city")
+local PASSIVE_KINDS, PASSIVE_WEIGHT = kindsOf(false, "wild")
+local ZOMBIE_KINDS: { MobList.Kind } = {}
+for _, kind in MobList.kinds do
+	if kind.zombie then
+		table.insert(ZOMBIE_KINDS, kind)
+	end
+end
 
--- A kind of the category, by spawn weight (WeightedRandom).
-local function pickKind(hostile: boolean, random: () -> number): MobList.Kind
-	local kinds = if hostile then HOSTILE_KINDS else PASSIVE_KINDS
-	local pick = random() * (if hostile then HOSTILE_WEIGHT else PASSIVE_WEIGHT)
+--[[
+	A kind of the category, by spawn weight (WeightedRandom): monsters by `weights` ("wild" by
+	default; "horde" grows with blood moon `moon`), creatures by their own.
+]]
+function MobSpawning.pickKind(hostile: boolean, random: () -> number, weights: Weights?, moon: number?): MobList.Kind
+	if hostile and weights == "horde" then
+		local total = 0
+		for _, kind in ZOMBIE_KINDS do
+			total += MobSpawning.weight(kind, "horde", moon)
+		end
+		local pick = random() * total
+		for _, kind in ZOMBIE_KINDS do
+			pick -= MobSpawning.weight(kind, "horde", moon)
+			if pick < 0 then
+				return kind
+			end
+		end
+		return ZOMBIE_KINDS[1]
+	end
+	local kinds, total = PASSIVE_KINDS, PASSIVE_WEIGHT
+	if hostile then
+		kinds, total = HOSTILE_KINDS, HOSTILE_WEIGHT
+		if weights == "city" then
+			kinds, total = CITY_KINDS, CITY_WEIGHT
+		end
+	end
+	local pick = random() * total
 	for _, kind in kinds do
-		pick -= kind.spawn.weight
+		pick -= MobSpawning.weight(kind, if hostile then weights or "wild" else "wild", 1)
 		if pick < 0 then
 			return kind
 		end
 	end
 	return kinds[#kinds]
 end
+local pickKind = MobSpawning.pickKind
 
 -- Is block cell (x, y, z) at least MIN_PLAYER_DISTANCE from every player?
 local function awayFromPlayers(players: { MobWorld.PlayerView }, x: number, y: number, z: number): boolean
@@ -150,18 +232,19 @@ local function awayFromPlayers(players: { MobWorld.PlayerView }, x: number, y: n
 end
 
 --[[
-	May a mob of `kind` spawn standing in block cell (x, y, z) (its feet at the cell's bottom
-	centre)? See the header. `nextInt` rolls Minecraft's light tests.
+	validSpot's rules but the block light's (see validSpot): false, or true and nil (the spot will
+	do), or true and the budget of the block light search that must find no light for it to do.
 ]]
-function MobSpawning.validSpot(
+local function spotRules(
 	getBlock: (x: number, y: number, z: number) -> number?,
 	context: Context,
 	kind: MobList.Kind,
 	x: number,
 	y: number,
 	z: number,
-	nextInt: (n: number) -> number
-): boolean
+	nextInt: (n: number) -> number,
+	light: Light?
+): (boolean, number?)
 	if not context.active(x // CHUNK, z // CHUNK) then
 		return false
 	end
@@ -170,6 +253,10 @@ function MobSpawning.validSpot(
 		return false
 	end
 	if kind.hostile == false and below ~= GRASS and below ~= DRY_GRASS then
+		return false
+	end
+	if light == "wave" and context.skyOpen(x, y, z) ~= true then
+		-- (A wave comes in under the open sky only.)
 		return false
 	end
 	-- The whole box free: no solid block, nothing unloaded, no fluid, no fire.
@@ -191,15 +278,31 @@ function MobSpawning.validSpot(
 	if not awayFromPlayers(context.players, x, y, z) then
 		return false
 	end
+	if light == "wave" then
+		return true
+	end
+	if
+		light == "day"
+		or (
+			light == nil
+			and context.daySpawn == true
+			and kind.zombie == true
+			and DayCycle.isDay(context.dayTime)
+			and context.skyOpen(x, y, z) == true
+		)
+	then
+		-- (A zombie on an open floor by day: no darkness rolls, but no block light either.)
+		return true, Apocalypse.Zombies.DayLightBudget
+	end
 	local sky = LightEstimate.skyLight(getBlock, context.skyOpen, x, y, z)
-	if kind.hostile then
+	if kind.hostile and light ~= "animal" then
 		-- The sky's rolls first (as with no block light), then the block light, which must be 0:
 		-- the same odds, but the costly search (every cell a torch could light: SPAWN_BUDGET)
 		-- only for spots the rolls let through.
 		if not LightEstimate.darkForMonsters(sky, 0, DayCycle.skyDarken(context.dayTime), nextInt) then
 			return false
 		end
-		return LightEstimate.blockLight(getBlock, x, y, z, LightEstimate.SPAWN_BUDGET, 1) == 0
+		return true, LightEstimate.SPAWN_BUDGET
 	end
 	if LightEstimate.brightForAnimals(sky, 0) then
 		return true
@@ -207,9 +310,144 @@ function MobSpawning.validSpot(
 	return LightEstimate.brightForAnimals(sky, LightEstimate.blockLight(getBlock, x, y, z))
 end
 
+--[[
+	May a mob of `kind` spawn standing in block cell (x, y, z) (its feet at the cell's bottom
+	centre)? See the header. `nextInt` rolls Minecraft's light tests; `light` says how the light
+	is judged (nil: by the kind and the context).
+]]
+function MobSpawning.validSpot(
+	getBlock: (x: number, y: number, z: number) -> number?,
+	context: Context,
+	kind: MobList.Kind,
+	x: number,
+	y: number,
+	z: number,
+	nextInt: (n: number) -> number,
+	light: Light?
+): boolean
+	local ok, budget = spotRules(getBlock, context, kind, x, y, z, nextInt, light)
+	if ok and budget then
+		return LightEstimate.blockLight(getBlock, x, y, z, budget, 1) == 0
+	end
+	return ok
+end
+
+-- Per block: its light (Blocks.light, the low 4 bits) and 16 when it is opaque (light stops).
+local LIGHT_INFO = buffer.create(Blocks.count)
+for id = 0, Blocks.count - 1 do
+	buffer.writeu8(LIGHT_INFO, id, Blocks.light(id) + (if Blocks.isOpaque(id) then 16 else 0))
+end
+local BLOCK_COUNT = Blocks.count
+local MAX_LIGHT = LightEstimate.MAX
+-- `dark`'s scratch, reused (as LightEstimate's): a visited stamp per cell offset from the first
+-- cell (within REACH each way), and the frontiers as flat offset lists.
+local REACH = 31
+local SPAN = REACH * 2 + 2
+local darkSeen = buffer.create(SPAN * SPAN * SPAN * 2)
+local darkStamp = 0
+local darkFront: { number } = {}
+local darkNext: { number } = {}
+local STEP_X = { 1, -1, 0, 0, 0, 0 }
+local STEP_Y = { 0, 0, 1, -1, 0, 0 }
+local STEP_Z = { 0, 0, 0, 0, 1, -1 }
+
+--[[
+	Is the block light 0 in every one of `cells` (flat x, y, z lists of block cells)? One breadth
+	first search from all of them at once, as LightEstimate.blockLight searches from one: through
+	cells that aren't opaque, a source of light L at d steps from the nearest of them lighting it
+	when L > d, at most `budget` cells. true: no light reaches any of them; false: light reaches at
+	least one (which, `dark` doesn't say); nil: it can't tell (the budget ran out, or the cells lie
+	too far apart for one search).
+]]
+function MobSpawning.dark(
+	getBlock: (x: number, y: number, z: number) -> number?,
+	cells: { number },
+	budget: number
+): boolean?
+	local n = #cells
+	if n == 0 then
+		return true
+	end
+	darkStamp += 1
+	if darkStamp > 65535 then
+		buffer.fill(darkSeen, 0, 0)
+		darkStamp = 1
+	end
+	local stamp = darkStamp
+	local ox, oy, oz = cells[1], cells[2], cells[3]
+	-- (Every cell the search may reach, MAX_LIGHT - 1 steps from a start, within REACH.)
+	local spread = REACH - (MAX_LIGHT - 1)
+	local front, nextFront = darkFront, darkNext
+	table.clear(front)
+	local count = 0
+	for i = 1, n, 3 do
+		local x, y, z = cells[i], cells[i + 1], cells[i + 2]
+		local dx, dy, dz = x - ox, y - oy, z - oz
+		if dx < -spread or dx > spread or dy < -spread or dy > spread or dz < -spread or dz > spread then
+			return nil
+		end
+		local key = (((dx + REACH) * SPAN + (dy + REACH)) * SPAN + (dz + REACH)) * 2
+		if buffer.readu16(darkSeen, key) ~= stamp then
+			buffer.writeu16(darkSeen, key, stamp)
+			local block = getBlock(x, y, z)
+			if block ~= nil and block >= 0 and block < BLOCK_COUNT then
+				local info = buffer.readu8(LIGHT_INFO, block)
+				if info % 16 > 0 then
+					return false
+				end
+				-- (An opaque cell has its own light only.)
+				if info < 16 then
+					local m = #front
+					front[m + 1], front[m + 2], front[m + 3] = dx, dy, dz
+					count += 1
+				end
+			end
+		end
+	end
+	local exhausted = false
+	local distance = 0
+	-- (Light from d + 1 steps away reaches a start only from a source brighter than d + 1.)
+	while #front > 0 and distance + 1 < MAX_LIGHT do
+		local steps = distance + 1
+		table.clear(nextFront)
+		for i = 1, #front, 3 do
+			local cx, cy, cz = front[i], front[i + 1], front[i + 2]
+			for side = 1, 6 do
+				local nx, ny, nz = cx + STEP_X[side], cy + STEP_Y[side], cz + STEP_Z[side]
+				if nx >= -REACH and nx <= REACH and ny >= -REACH and ny <= REACH and nz >= -REACH and nz <= REACH then
+					local key = (((nx + REACH) * SPAN + (ny + REACH)) * SPAN + (nz + REACH)) * 2
+					if buffer.readu16(darkSeen, key) ~= stamp then
+						buffer.writeu16(darkSeen, key, stamp)
+						local block = getBlock(ox + nx, oy + ny, oz + nz)
+						if block ~= nil and block >= 0 and block < BLOCK_COUNT then
+							local info = buffer.readu8(LIGHT_INFO, block)
+							if info % 16 > steps then
+								return false
+							end
+							-- (Cells of the last step are only looked at: nothing lies beyond.)
+							if info < 16 and steps + 1 < MAX_LIGHT then
+								if count < budget then
+									count += 1
+									local m = #nextFront
+									nextFront[m + 1], nextFront[m + 2], nextFront[m + 3] = nx, ny, nz
+								else
+									exhausted = true
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		front, nextFront = nextFront, front
+		distance = steps
+	end
+	return if exhausted then nil else true
+end
+
 -- The first cell going down from (x, y, z) over `scan` cells whose floor is solid with room for
 -- `kind` above it, or nil (an unloaded cell ends the search).
-local function findFloor(
+function MobSpawning.findFloor(
 	getBlock: (x: number, y: number, z: number) -> number?,
 	kind: MobList.Kind,
 	x: number,
@@ -235,6 +473,76 @@ local function findFloor(
 	end
 	return nil
 end
+local findFloor = MobSpawning.findFloor
+
+--[[
+	Spawns up to `count` mobs of `kind` around the pack centre (x, y, z) (a cell: its floor
+	found), the first there and each other within PACK_SPREAD blocks on a floor of its own within
+	PACK_SEARCH up or down, each on a valid spot (`light`: see validSpot). The members that need
+	no block light are judged together (`dark`, see the header) and spawn after the rest. Returns
+	their ids.
+]]
+function MobSpawning.spawnPack(
+	world: MobWorld.MobWorld,
+	context: Context,
+	kind: MobList.Kind,
+	x: number,
+	y: number,
+	z: number,
+	count: number,
+	nextInt: (n: number) -> number,
+	light: Light?
+): { number }
+	local getBlock = world.getBlock
+	local ids = {}
+	-- (The members waiting on the block light: their cells, flat, and their search budgets.)
+	local waiting: { number }? = nil
+	local budgets: { number } = {}
+	local total = 0
+	for member = 1, count do
+		local mx, mz = x, z
+		if member > 1 then
+			mx += nextInt(MobSpawning.PACK_SPREAD * 2 + 1) - MobSpawning.PACK_SPREAD
+			mz += nextInt(MobSpawning.PACK_SPREAD * 2 + 1) - MobSpawning.PACK_SPREAD
+		end
+		local my = findFloor(getBlock, kind, mx, y + MobSpawning.PACK_SEARCH, mz, MobSpawning.PACK_SEARCH * 2)
+		if my then
+			local ok, budget = spotRules(getBlock, context, kind, mx, my, mz, nextInt, light)
+			if ok and budget then
+				local list = waiting or {}
+				waiting = list
+				local m = #list
+				list[m + 1], list[m + 2], list[m + 3] = mx, my, mz
+				table.insert(budgets, budget)
+				total += budget
+			elseif ok then
+				local id = world:spawn(kind.id, mx + 0.5, my, mz + 0.5)
+				if id ~= 0 then
+					table.insert(ids, id)
+				end
+			end
+		end
+	end
+	if waiting then
+		local allDark = MobSpawning.dark(getBlock, waiting, total)
+		-- (Light somewhere among several, or no answer: whose, each one's own search says. A lone
+		-- member the search found light at is lit.)
+		local each = allDark == nil or (allDark == false and #waiting > 3)
+		for i = 1, #waiting, 3 do
+			local mx, my, mz = waiting[i], waiting[i + 1], waiting[i + 2]
+			if
+				allDark == true
+				or (each and LightEstimate.blockLight(getBlock, mx, my, mz, budgets[(i + 2) // 3], 1) == 0)
+			then
+				local id = world:spawn(kind.id, mx + 0.5, my, mz + 0.5)
+				if id ~= 0 then
+					table.insert(ids, id)
+				end
+			end
+		end
+	end
+	return ids
+end
 
 -- Tries one pack of `hostile` mobs around `player`; returns how many spawned.
 local function tryPack(
@@ -250,7 +558,8 @@ local function tryPack(
 		return floor(random() * n)
 	end
 	local getBlock = world.getBlock
-	local kind = pickKind(hostile, random)
+	-- (The kind's roll first, its weights once the pack's centre is known.)
+	local kindRoll = random()
 	local near, far = settings.SpawnDistance[1], settings.SpawnDistance[2]
 	local angle = random() * math.pi * 2
 	local distance = near + random() * (far - near)
@@ -259,6 +568,11 @@ local function tryPack(
 	if not context.active(cx // CHUNK, cz // CHUNK) then
 		return 0
 	end
+	local cityAt = context.cityAt
+	local weights: Weights = if hostile and cityAt and cityAt(cx + 0.5, cz + 0.5) >= 0.5 then "city" else "wild"
+	local kind = pickKind(hostile, function(): number
+		return kindRoll
+	end, weights)
 	local startY, scan
 	if hostile then
 		startY = floor(player.y) + nextInt(MobSpawning.HOSTILE_HEIGHT * 2 + 1) - MobSpawning.HOSTILE_HEIGHT
@@ -273,21 +587,7 @@ local function tryPack(
 	end
 	local group = kind.spawn.group
 	local size = math.min(group[1] + nextInt(group[2] - group[1] + 1), room)
-	local spawned = 0
-	for member = 1, size do
-		local x, z = cx, cz
-		if member > 1 then
-			x += nextInt(MobSpawning.PACK_SPREAD * 2 + 1) - MobSpawning.PACK_SPREAD
-			z += nextInt(MobSpawning.PACK_SPREAD * 2 + 1) - MobSpawning.PACK_SPREAD
-		end
-		local y = findFloor(getBlock, kind, x, cy + MobSpawning.PACK_SEARCH, z, MobSpawning.PACK_SEARCH * 2)
-		if y and MobSpawning.validSpot(getBlock, context, kind, x, y, z, nextInt) then
-			if world:spawn(kind.id, x + 0.5, y, z + 0.5) ~= 0 then
-				spawned += 1
-			end
-		end
-	end
-	return spawned
+	return #MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt)
 end
 
 --[[
@@ -344,12 +644,13 @@ function MobSpawning.step(world: MobWorld.MobWorld, state: State, context: Conte
 			totalHostile, totalPassive = census(world)
 		end
 		local localHostile, localPassive = census(world, player.x, player.y, player.z)
+		local cap = if context.hostileCap then context.hostileCap(player) else settings.HostileCap
 		for _ = 1, settings.Attempts do
 			if world.live >= world.options.maxMobs then
 				return spawned
 			end
-			if hostileDue then
-				local room = math.min(settings.HostileCap - localHostile, settings.MaxHostile - totalHostile)
+			if hostileDue and not context.hostilePaused then
+				local room = math.min(cap - localHostile, settings.MaxHostile - totalHostile)
 				if room > 0 then
 					local n = tryPack(world, context, settings, player, true, room)
 					localHostile += n

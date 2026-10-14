@@ -1407,8 +1407,9 @@ local Config = {
 			DaySpawning = true,
 			-- The per-player hostile cap by day, times HostileCap.
 			DayFactor = 0.35,
-			-- Cells LightEstimate.blockLight may search for a day spawn.
-			DayLightBudget = 512,
+			-- Cells LightEstimate.blockLight may search for a day spawn (2048: every cell a
+			-- torch lights on open ground, 13 blocks, as LightEstimate.SPAWN_BUDGET).
+			DayLightBudget = 2048,
 			-- Caps times this while the player stands in a city.
 			CityFactor = 1.75,
 			-- Extra spacing (blocks) zombies keep from each other.

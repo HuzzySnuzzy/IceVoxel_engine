@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[[
 	Mob movement, one 20 Hz tick at a time: Minecraft Java Edition 1.20.1's LivingEntity.aiStep and
 	travel for a Mob walking where its AI steers it (server Mobs/MobWorld runs it, Mobs/MobAI
@@ -36,6 +37,17 @@
 	  Falling   the fall distance counts up while it falls; on landing `tick` returns it (fall
 	            damage is ceil(distance - 3), LivingEntity.causeFallDamage, MobWorld's).
 
+	  Quiet     the cells a box is in are looked at three times a tick (fluids before the move,
+	            cobwebs after it, and MobWorld's fire and lava), mostly to find air: one scan
+	            first (`quiet`: every cell of the box's columns, from its feet's to its head's, has
+	            nothing that acts on a mob: no collision, fluid, climbing, cobweb, fire or
+	            campfire) answers all three for such a box, and is only done again after a move
+	            that takes the box into other cells (`body.quiet`, for MobWorld too).
+	  Resting   a mob standing still (`rest`: no input, on the ground, no speed, not falling or
+	            stuck) right on top of a full block, every cell of its box quiet, would tick to
+	            the very same state: it is set to that state with a few block reads (a dozen at
+	            most) instead of a tick's forty or so.
+
 	Units are blocks and ticks. Pure Luau, deterministic.
 ]]
 
@@ -65,6 +77,8 @@ export type Body = {
 	lavaDepth: number,
 	-- The multiplier a cobweb puts on the next move (Entity.stuckSpeedMultiplier), nil when none.
 	stuck: { number }?,
+	-- The cells of its box were all quiet after the last move (see the header).
+	quiet: boolean?,
 }
 
 -- What moves: a kind's hitbox and abilities (Shared/Entities/MobList).
@@ -118,12 +132,6 @@ local current: GetBlock = function(_x: number, _y: number, _z: number): number?
 	return nil
 end
 
--- (A door's panel, a fence's post and arms, a pipe's core and arms: Blocks/Shapes.)
-local function solidAt(x: number, y: number, z: number): boolean | Hull.Shape
-	local block = current(x, y, z)
-	return block == nil or Shapes.collisionAt(current, x, y, z, block)
-end
-
 -- Per block: its fluid (Shared/Fluids id, 0 none), and per fluid id whether it is in lava's tag.
 local fluidLut = Fluids.blockLut
 local LAVA_LIKE: { [number]: boolean } = {}
@@ -133,6 +141,70 @@ end
 
 local function fluidOf(block: number?): number
 	return if block then buffer.readu8(fluidLut, block) else 0
+end
+
+--[[
+	Per block: its collision (SHAPE: 0 none, 1 its whole cell, 2 boxes, or its neighbours decide:
+	Blocks/Shapes.collisionAt), and whether it is quiet (QUIET 1: see the header).
+]]
+local SHAPE = buffer.create(Blocks.count)
+local QUIET = buffer.create(Blocks.count)
+do
+	local fire, campfire = Blocks.find("Fire"), Blocks.find("Campfire")
+	for id = 0, Blocks.count - 1 do
+		local collision = Blocks.collision(id)
+		local dynamic = Shapes.isDynamic(id)
+		local shape = if dynamic then 2 elseif collision == false then 0 elseif collision == true then 1 else 2
+		buffer.writeu8(SHAPE, id, shape)
+		local quiet = shape == 0
+			and fluidOf(id) == 0
+			and not Blocks.isClimbable(id)
+			and buffer.readu8(Blocks.stuckLut, id) == 0
+			and id ~= fire
+			and id ~= campfire
+		buffer.writeu8(QUIET, id, if quiet then 1 else 0)
+	end
+end
+
+-- (A door's panel, a fence's post and arms, a pipe's core and arms: Blocks/Shapes.)
+local function solidAt(x: number, y: number, z: number): boolean | Hull.Shape
+	local block = current(x, y, z)
+	if block == nil then
+		return true
+	end
+	local shape = buffer.readu8(SHAPE, block)
+	if shape == 0 then
+		return false
+	elseif shape == 1 then
+		return true
+	end
+	return Shapes.collisionAt(current, x, y, z, block)
+end
+
+-- The cells a box's tests look at: its columns, from its feet's cell to its head's (see Quiet).
+local function cellRange(body: Body, shape: Shape): (number, number, number, number, number, number)
+	local half = shape.width / 2
+	return floor(body.x - half),
+		floor(body.x + half),
+		floor(body.y + INSIDE_EPSILON),
+		floor(body.y + shape.height),
+		floor(body.z - half),
+		floor(body.z + half)
+end
+
+-- Are all the cells in the range quiet (unloaded ones are not)?
+local function quietCells(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): boolean
+	for x = x0, x1 do
+		for z = z0, z1 do
+			for y = y0, y1 do
+				local block = current(x, y, z)
+				if block == nil or buffer.readu8(QUIET, block) == 0 then
+					return false
+				end
+			end
+		end
+	end
+	return true
 end
 
 function MobPhysics.new(x: number, y: number, z: number, yaw: number?): Body
@@ -191,11 +263,22 @@ local function fluidDepths(body: Body, shape: Shape): (number, number)
 	return water, lava
 end
 
+-- Per block: its friction (Blocks `friction`).
+local FRICTION = buffer.create(Blocks.count * 8)
+for id = 0, Blocks.count - 1 do
+	buffer.writef64(FRICTION, id * 8, Blocks.get(id).friction)
+end
+
 -- The friction of the block carrying the body (under its centre, Minecraft's
 -- getBlockPosBelowThatAffectsMyMovement, 0.5 down).
 local function groundFriction(body: Body): number
 	local block = current(floor(body.x), floor(body.y - 0.500001), floor(body.z))
-	return if block then Blocks.get(block).friction else 0.6
+	return if block then buffer.readf64(FRICTION, block * 8) else 0.6
+end
+
+-- Is the feet's cell among the quiet cells (so it holds no ladder)?
+local function feetQuiet(body: Body): boolean
+	return body.quiet == true and floor(body.y) == floor(body.y + INSIDE_EPSILON)
 end
 
 -- Entity.moveRelative: `amount` of acceleration along the facing, `forward` of it (|forward| <= 1).
@@ -237,7 +320,8 @@ end
 -- update the ground and wall state, stop the axes that hit something; the fall distance
 -- (checkFallDamage); then cobwebs in the box for the next move. Returns the
 -- fall distance of a landing (0: none).
-local function move(body: Body, shape: Shape): number
+local function move(body: Body, shape: Shape, quiet: boolean): number
+	local ox0, ox1, oy0, oy1, oz0, oz1 = cellRange(body, shape)
 	local dx, dy, dz = body.vx, body.vy, body.vz
 	local stuck = body.stuck
 	if stuck then
@@ -278,7 +362,13 @@ local function move(body: Body, shape: Shape): number
 		-- (Stepping up is no fall.)
 		body.fallDistance = 0
 	end
-	local inside = stuckInside(body, shape)
+	-- (Cobwebs: none in quiet cells; the same cells as before the move are as quiet as they were.)
+	local x0, x1, y0, y1, z0, z1 = cellRange(body, shape)
+	if not (quiet and x0 == ox0 and x1 == ox1 and y0 == oy0 and y1 == oy1 and z0 == oz0 and z1 == oz1) then
+		quiet = quietCells(x0, x1, y0, y1, z0, z1)
+	end
+	body.quiet = quiet
+	local inside = if quiet then nil else stuckInside(body, shape)
 	if inside then
 		body.stuck = inside
 		body.fallDistance = 0
@@ -299,7 +389,12 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 	local previous = current
 	current = getBlock
 
-	local water, lava = fluidDepths(body, shape)
+	local quiet = quietCells(cellRange(body, shape))
+	body.quiet = quiet
+	local water, lava = 0, 0
+	if not quiet then
+		water, lava = fluidDepths(body, shape)
+	end
 	body.waterDepth, body.lavaDepth = water, lava
 	if water > 0 then
 		body.fallDistance = 0
@@ -337,7 +432,7 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 		-- LivingEntity.travel's fluid branches.
 		local y0 = body.y
 		moveRelative(body, FLUID_ACCELERATION, forward)
-		landed = move(body, shape)
+		landed = move(body, shape, quiet)
 		-- (A ladder or vine climbed out of water.)
 		if water > 0 and body.horizontalCollision and climbableAt(body) then
 			body.vy = CLIMB_SPEED
@@ -370,7 +465,7 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 			else AIR_ACCELERATION
 		moveRelative(body, acceleration, forward)
 		-- Ladders, vines and rope (LivingEntity.handleOnClimbable, then the climb after the move).
-		local climbable = climbableAt(body)
+		local climbable = if feetQuiet(body) then nil else climbableAt(body)
 		if climbable then
 			body.fallDistance = 0
 			body.vx = math.clamp(body.vx, -CLIMB_LIMIT, CLIMB_LIMIT)
@@ -379,8 +474,8 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 				body.vy = max(body.vy, -CLIMB_LIMIT)
 			end
 		end
-		landed = move(body, shape)
-		if (body.horizontalCollision or jump) and climbableAt(body) then
+		landed = move(body, shape, quiet)
+		if (body.horizontalCollision or jump) and not feetQuiet(body) and climbableAt(body) then
 			body.vy = CLIMB_SPEED
 		end
 		body.vy -= GRAVITY
@@ -395,6 +490,63 @@ function MobPhysics.tick(body: Body, shape: Shape, forward: number, jump: boolea
 
 	current = previous
 	return landed
+end
+
+--[[
+	A mob standing still (see the header's Resting): when nothing would move it this tick (no
+	input, on the ground with no speed, not falling, in no fluid or cobweb, right on top of a full
+	block under one of its columns, every cell of its box quiet), sets the body to what a tick
+	would leave it as and returns true; else changes nothing and returns false (tick it).
+]]
+function MobPhysics.rest(body: Body, shape: Shape, forward: number, jump: boolean, getBlock: GetBlock): boolean
+	if
+		forward ~= 0
+		or jump
+		or not body.onGround
+		or body.vx ~= 0
+		or body.vz ~= 0
+		or body.fallDistance ~= 0
+		or body.waterDepth > 0
+		or body.lavaDepth > 0
+		or body.stuck ~= nil
+	then
+		return false
+	end
+	local y = math.round(body.y)
+	if math.abs(body.y - y) > 1e-9 then
+		return false
+	end
+	local x0, x1, y0, y1, z0, z1 = cellRange(body, shape)
+	if y0 ~= y then
+		return false
+	end
+	-- (On a full block: one under any of its columns carries it, as a tick would find.)
+	local carried = false
+	for x = x0, x1 do
+		for z = z0, z1 do
+			local below = getBlock(x, y - 1, z)
+			if below == nil then
+				return false
+			end
+			carried = carried or buffer.readu8(SHAPE, below) == 1
+		end
+	end
+	if not carried then
+		return false
+	end
+	local previous = current
+	current = getBlock
+	local quiet = quietCells(x0, x1, y0, y1, z0, z1)
+	current = previous
+	if not quiet then
+		return false
+	end
+	-- (What a tick on the ground leaves: gravity's step down stopped by the floor.)
+	body.vy = -GRAVITY * VERTICAL_DRAG
+	body.jumpDelay = 0
+	body.horizontalCollision = false
+	body.quiet = true
+	return true
 end
 
 --[[

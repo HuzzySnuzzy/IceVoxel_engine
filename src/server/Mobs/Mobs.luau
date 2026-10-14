@@ -11,6 +11,15 @@
 	             World/WeatherServer (`rainingAt`, `isDayAt`: no burning in the rain or a
 	             thunderstorm). Players are their
 	             feet (Players/PlayerPositions), standing eyes (1.62), game mode and health.
+	  Zombies    each tick the zombie apocalypse's (Config.Apocalypse) context: the noises heard
+	             (Apocalypse/NoiseBus.take, 1.25 times as far at night and 0.7 times where it
+	             rains at the noise), whether it is night (DayCycle.isDay) and whether zombies
+	             break blocks (Breaking.Enabled), how much a column is in a city (the generator's
+	             cityAt), each player's monster cap and the world's limits (Mobs/ZombieDirector:
+	             by day, at night, in a city, in a blood moon; maxMobs and MaxHostile are worked
+	             out again every tick, so /time set or a restart in a blood moon never leaves them
+	             raised), day spawning (Zombies.DaySpawning) and the blood moon's pause of natural
+	             monster spawning; then the director runs (waves, hunts, leave rounds).
 	  Effects    what MobWorld reports each tick: sounds (Audio/Sounds), deaths (the `died` event),
 	             loot (Entities.spawnItem: popping out of the body), hits on players
 	             (Characters.hurt: the hurt cooldown, armor and Resistance; a fresh one knocks the
@@ -19,6 +28,14 @@
 	             Characters.knockedBack; less the player's knockback resistance, a Cobalt
 	             Shield's all of it: Characters.knockbackShare); each hit that lands fires
 	             `playerHit` (the apocalypse's bites and wounds: server Apocalypse/Survival).
+	             Zombies' blocks: a hit on a block thuds (entity.zombie.attack_wooden_door; glass
+	             block.glass.hit), a block broken goes (`world:setBlock` to air, so every block
+	             rule hears of it) with nothing dropped: a door with both its halves at once (or
+	             Behaviours/Door would pop the other half as an item) and the door breaking sound
+	             (entity.zombie.break_wooden_door), glass shattering (block.glass.break), anything
+	             else its own break sound (those are noises too: Audio/Sounds.play; a door, whose
+	             zombie sound is none, makes Noise.Break's 10 through Apocalypse/NoiseBus). A
+	             screamer's shriek goes to Apocalypse/NoiseBus, heard next tick.
 	  Attacks    Protocol Attack (mob id), at most Config.Mobs.AttacksPerSecond a player:
 	             MobWorld.attack checks the player (alive, not a spectator), the reach from their
 	             eyes (Shared/Entities/Combat: 3 blocks, 6 in creative, plus a block of leeway) and
@@ -28,18 +45,24 @@
 	             Strength and Weakness (Players/Effects.levels); a hit plays
 	             entity.player.attack.strong or .weak and wears a tool (swords 1, other tools 2;
 	             not in creative).
-	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs within
-	             Config.Mobs.TrackingDistance of their feet: a spawn when one comes into range, its
-	             state when it changed (position in 1/32 block, facing, health, the hurt flash,
-	             burning, dying), a remove when it leaves range or is gone; all in one Mobs
-	             message with the player's knockback.
+	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs around their feet
+	             (Mobs/MobTracking): a spawn when one comes within Config.Mobs.TrackingDistance, a
+	             remove when it is more than 8 blocks beyond that or gone (so a mob at the edge
+	             isn't spawned and removed over and over), and in between what changed (facing,
+	             health, the flags: hurt flash, burning, dying, aggressive (a target or a hunt),
+	             attacking (a swing in the last 8 ticks), breaking a block, screaming) as a move
+	             (op 6: the change of its position from the one last sent to this player, in
+	             whole 1/32 block steps, so it never drifts; a state, op 2, when a step would not
+	             fit an i16). Mobs more than 32 blocks away are looked at every other sync (by
+	             their id), five times a second. All in one Mobs message with the player's
+	             knockback: 60 zombies on the move cost 2 + 60 x 14 bytes.
 	  Commands   /summon <kind> [x y z] and /kill @e[type=<kind>] (Mobs/SummonCommand), for those
 	             who may change the time (the operators' permission: Players/Operators).
 	  Off        with Config.Mobs.Enabled false nothing spawns, ticks or is sent; a world type
 	             with `mobs = false` (the void and the debug worlds: Generation/WorldTypes) has no
-	             natural spawning, and Peaceful no monsters (World/WorldInfo.apply sets
-	             Config.Mobs.Spawning / the hostile caps before the world starts; /summon still
-	             works).
+	             natural spawning and no blood moon waves, and Peaceful no monsters
+	             (World/WorldInfo.apply sets Config.Mobs.Spawning / the hostile caps before the
+	             world starts; /summon still works).
 
 	For other server scripts (the integration hooks):
 	  Mobs.died            Event (killer: Player?, kind: string, x, y, z, id): a mob died; the
@@ -78,6 +101,8 @@ local TextChatService = game:GetService("TextChatService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
+local DayCycle = require(Shared.DayCycle)
+local SharedSounds = require(Shared.Sounds)
 local WorldSettings = require(Shared.WorldSettings)
 local Combat = require(Shared.Entities.Combat)
 local Accessories = require(Shared.Items.Accessories)
@@ -98,9 +123,12 @@ local Effects = require(script.Parent.Parent.Players.Effects)
 local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
 local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
+local NoiseBus = require(script.Parent.Parent.Apocalypse.NoiseBus)
 local MobWorld = require(script.Parent.MobWorld)
 local MobSpawning = require(script.Parent.MobSpawning)
+local MobTracking = require(script.Parent.MobTracking)
 local SummonCommand = require(script.Parent.SummonCommand)
+local ZombieDirector = require(script.Parent.ZombieDirector)
 
 -- Only what Mobs uses of ServerNet.ServerNet.
 type Net = {
@@ -124,12 +152,14 @@ local TICK = 1 / 20
 local MAX_TICKS_PER_FRAME = 4
 -- Ticks between refreshes of the ticking chunks.
 local ACTIVE_INTERVAL = 10
--- Mobs spawned on one client per message; the rest follow at the next sync.
-local MAX_SPAWNS_PER_MESSAGE = 128
 local EYE = Combat.EYE
 local LIMIT = Protocol.MAX_COORDINATE + 64
 local MAX_HEIGHT = 4096
-local FLAGS = Protocol.MobFlag
+local AIR = Blocks.AIR
+local GLASS_BREAK = SharedSounds.id["block.glass.break"]
+local GLASS_HIT = SharedSounds.id["block.glass.hit"]
+local DOOR_HIT = "entity.zombie.attack_wooden_door"
+local DOOR_BREAK = "entity.zombie.break_wooden_door"
 
 local Mobs = {}
 
@@ -147,14 +177,14 @@ local serverWorld: WorldServer.World? = nil
 local random = Random.new()
 -- Per player: the last state sent of each mob their client knows (quantized), and ops waiting
 -- for the next sync (their knockback).
-type Sent = { x: number, y: number, z: number, yaw: number, health: number, flags: number }
-local known: { [Player]: { [number]: Sent } } = {}
+local known: { [Player]: { [number]: MobTracking.Sent } } = {}
 local pending: { [Player]: { Protocol.MobOp } } = {}
 -- Per player: the tick of their last swing and of their last change of held item, and that item.
 type Swing = { swing: number, changed: number, item: number? }
 local swings: { [Player]: Swing } = {}
 local attackBuckets: { [Player]: { tokens: number, last: number } } = {}
 local tickCount = 0
+local syncCount = 0
 
 local function finite(x: number, y: number, z: number): boolean
 	return x == x and y == y and z == z and math.abs(x) <= LIMIT and math.abs(z) <= LIMIT and math.abs(y) <= MAX_HEIGHT
@@ -204,39 +234,14 @@ local function queue(player: Player, op: Protocol.MobOp)
 	table.insert(list, op)
 end
 
-local function flagsOf(mob: MobWorld.Mob): number
-	return (if mob.hurtTime > 0 then FLAGS.Hurt else 0)
-		+ (if mob.burn.fire > 0 then FLAGS.Burning else 0)
-		+ (if mob.dead then FLAGS.Dying else 0)
-end
-
-local function snapshot(mob: MobWorld.Mob): Sent
-	local body = mob.body
-	local scale = Protocol.MOB_POSITION_SCALE
-	return {
-		x = math.round(body.x * scale),
-		y = math.round(body.y * scale),
-		z = math.round(body.z * scale),
-		yaw = Protocol.mobYaw(body.yaw),
-		health = math.clamp(math.ceil(mob.health), 0, 255),
-		flags = flagsOf(mob),
-	}
-end
-
-local function same(a: Sent, b: Sent): boolean
-	return a.x == b.x and a.y == b.y and a.z == b.z and a.yaw == b.yaw and a.health == b.health and a.flags == b.flags
-end
-
 -- Sends every player the mobs around them (see the header).
 local function replicate(net: Net, mobs: MobWorld.MobWorld)
-	local range = Settings.TrackingDistance
-	local rangeSq = range * range
+	syncCount += 1
 	local all = mobs:each()
-	local scale = Protocol.MOB_POSITION_SCALE
 	-- (Each mob's state once, shared by every player's record of it: never changed after.)
-	local states: { [number]: Sent } = {}
+	local states: { [number]: MobTracking.Sent } = {}
 	for _, mob in all do
-		states[mob.id] = snapshot(mob)
+		states[mob.id] = MobTracking.snapshot(mob)
 	end
 	for _, player in Players:GetPlayers() do
 		local seen = known[player]
@@ -247,62 +252,35 @@ local function replicate(net: Net, mobs: MobWorld.MobWorld)
 		local ops: { Protocol.MobOp } = pending[player] or {}
 		pending[player] = nil
 		local px, py, pz = feetOf(player)
-		local inRange: { [number]: boolean } = {}
-		local spawns = 0
-		if px then
-			for _, mob in all do
-				local body = mob.body
-				local dx, dy, dz = body.x - px, body.y - py, body.z - pz
-				if dx * dx + dy * dy + dz * dz <= rangeSq then
-					local now = states[mob.id]
-					local last = seen[mob.id]
-					if last == nil then
-						if spawns < MAX_SPAWNS_PER_MESSAGE then
-							spawns += 1
-							inRange[mob.id] = true
-							seen[mob.id] = now
-							table.insert(ops, {
-								op = "spawn",
-								id = mob.id,
-								kind = mob.kind.id,
-								variant = mob.variant,
-								x = now.x / scale,
-								y = now.y / scale,
-								z = now.z / scale,
-								yaw = body.yaw,
-								health = now.health,
-								flags = now.flags,
-							})
-						end
-					else
-						inRange[mob.id] = true
-						if not same(last, now) then
-							seen[mob.id] = now
-							table.insert(ops, {
-								op = "state",
-								id = mob.id,
-								x = now.x / scale,
-								y = now.y / scale,
-								z = now.z / scale,
-								yaw = body.yaw,
-								health = now.health,
-								flags = now.flags,
-							})
-						end
-					end
-				end
-			end
-		end
-		for id in seen do
-			if not inRange[id] then
-				seen[id] = nil
-				table.insert(ops, { op = "remove", id = id })
-			end
-		end
+		MobTracking.ops(ops, seen, all, states, px, py, pz, Settings.TrackingDistance, syncCount)
 		if #ops > 0 then
 			net.send(player, Protocol.ServerMessage.Mobs, Protocol.encodeMobs(ops))
 		end
 	end
+end
+
+--[[
+	A block a zombie broke (MobWorld's `breaks`; see the header): it goes, both halves of a door,
+	with nothing dropped and its sound. Nothing happens when the block changed meanwhile.
+]]
+local function breakBlock(world: WorldServer.World, x: number, y: number, z: number, block: number)
+	if world:peekBlock(x, y, z) ~= block then
+		return
+	end
+	if Blocks.isDoor(block) then
+		local dy = Blocks.otherHalf(block)
+		local partner = if dy == nil then nil elseif dy > 0 then Blocks.plantTop(block) else Blocks.plantBottom(block)
+		world:setBlock(x, y, z, AIR)
+		if dy ~= nil and partner ~= nil and world:peekBlock(x, y + dy, z) == partner then
+			world:setBlock(x, y + dy, z, AIR)
+		end
+		Sounds.play(DOOR_BREAK, x + 0.5, y + 0.5, z + 0.5)
+		-- (The zombie's own door sound is no noise, Apocalypse/NoiseRules: a block broken is.)
+		NoiseBus.emit(x + 0.5, y + 0.5, z + 0.5, Config.Apocalypse.Noise.Break)
+		return
+	end
+	world:setBlock(x, y, z, AIR)
+	Sounds.playBlock(block, "break", x, y, z)
 end
 
 -- What the tick's changes do to the rest of the game (see the header).
@@ -310,6 +288,19 @@ local function apply(mobs: MobWorld.MobWorld)
 	local changes = mobs:takeChanges()
 	for _, cue in changes.sounds do
 		Sounds.play(cue.name, cue.x, cue.y, cue.z)
+	end
+	for _, hit in changes.blockHits do
+		local glass = SharedSounds.block(hit.block, "break") == GLASS_BREAK
+		Sounds.play(if glass then GLASS_HIT else DOOR_HIT, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5)
+	end
+	local world = serverWorld
+	if world then
+		for _, broken in changes.breaks do
+			breakBlock(world, broken.x, broken.y, broken.z, broken.block)
+		end
+	end
+	for _, noise in changes.noises do
+		NoiseBus.emit(noise.x, noise.y, noise.z, noise.radius)
 	end
 	for _, death in changes.deaths do
 		local killer = death.killer
@@ -522,6 +513,12 @@ function Mobs.start(net: Net, world: WorldServer.World)
 	})
 	mobWorld = mobs
 	local spawnState = MobSpawning.new()
+	local director = ZombieDirector.new()
+	local generator = (world :: any).generator
+	local generatorCityAt = if generator then generator.cityAt else nil
+	local function cityAt(x: number, z: number): number
+		return if generatorCityAt then generatorCityAt(x, z) else 0
+	end
 	local active: { [number]: boolean } = {}
 	local function isActive(cx: number, cz: number): boolean
 		return active[Coords.chunkKey(cx, cz)] == true
@@ -547,6 +544,30 @@ function Mobs.start(net: Net, world: WorldServer.World)
 			end
 			watchHeld()
 			local dayTime = TimeOfDay.get()
+			local apocalypse = Config.Apocalypse
+			local on = apocalypse.Enabled
+			local night = not DayCycle.isDay(dayTime)
+			local moonUp, moon = ZombieDirector.moon(apocalypse, dayTime)
+			local maxMobs, maxHostile = ZombieDirector.limits(Settings, apocalypse, dayTime)
+			mobs.options.maxMobs = maxMobs
+			local spawnSettings: MobSpawning.Settings = {
+				Spawning = Settings.Spawning,
+				PassiveCap = Settings.PassiveCap,
+				HostileCap = Settings.HostileCap,
+				MaxPassive = Settings.MaxPassive,
+				MaxHostile = maxHostile,
+				PassiveInterval = Settings.PassiveInterval,
+				HostileInterval = Settings.HostileInterval,
+				Attempts = Settings.Attempts,
+				SpawnDistance = Settings.SpawnDistance,
+			}
+			-- (Off, the old zombie's rules: nothing heard.)
+			local noises: { NoiseBus.Noise }? = nil
+			if on then
+				noises = ZombieDirector.hear(NoiseBus.take(), night, WeatherServer.rainingAt, apocalypse.Noise)
+			else
+				NoiseBus.take()
+			end
 			local context = {
 				players = playerViews(),
 				dayTime = dayTime,
@@ -557,9 +578,19 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				isDay = function(x: number, z: number): boolean
 					return WeatherServer.isDayAt(x, z, dayTime)
 				end,
+				noises = noises,
+				night = night,
+				breaking = on and apocalypse.Breaking.Enabled,
+				cityAt = cityAt,
+				hostileCap = function(player: MobWorld.PlayerView): number
+					return ZombieDirector.cap(Settings, apocalypse, night, cityAt(player.x, player.z), moon)
+				end,
+				daySpawn = on and apocalypse.Zombies.DaySpawning,
+				hostilePaused = moonUp,
 			}
 			mobs:tick(context)
-			MobSpawning.step(mobs, spawnState, context, Settings)
+			MobSpawning.step(mobs, spawnState, context, spawnSettings)
+			ZombieDirector.step(mobs, director, context, Settings, apocalypse)
 			apply(mobs)
 			if tickCount % math.max(1, Settings.SyncTicks) == 0 then
 				replicate(net, mobs)
@@ -614,7 +645,7 @@ end
 function Mobs.ignite(id: number, ticks: number): boolean
 	local mobs = mobWorld
 	local mob = if mobs then mobs:get(id) else nil
-	if mob == nil or mob.dead or not (ticks > 0) then
+	if mob == nil or mob.dead or not (ticks > 0) or mob.kind.fireImmune then
 		return false
 	end
 	mob.burn.fire = math.max(mob.burn.fire, math.floor(ticks))

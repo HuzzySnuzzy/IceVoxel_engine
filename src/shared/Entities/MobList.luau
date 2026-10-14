@@ -14,7 +14,7 @@
 	                                                       damage
 	  Zombie             0.6 x 1.95   1.74  20      0.23   the ordinary dead: hunts players, hits 3
 	                                                       (armor 2), comes in civilian clothes
-	  Runner             0.6 x 1.9    1.7   12      0.33   fast (x1.2 chasing), frail, hits 2
+	  Runner             0.6 x 1.9    1.7   12      0.31   fast (x1.2 chasing), frail, hits 2
 	  Brute              0.75 x 1.99  1.8   60      0.18   slow, huge (drawn 1.1 wide, 2.3 tall),
 	                                                       hits 7, breaks blocks three times as fast,
 	                                                       shrugs off knockback
@@ -462,7 +462,9 @@ table.insert(
 		height = 1.9,
 		eye = 1.7,
 		health = 12,
-		speed = 0.33,
+		-- (0.33 at first: x 1.2 chasing that is 5.64 blocks a second, past a sprinting player's
+		-- 5.6; 0.31 chases at 4.98, between a walk's 4.3 and a sprint, Mobs/MobAI's tuning.)
+		speed = 0.31,
 		chase = 1.2,
 		attack = 2,
 		follow = 32,
