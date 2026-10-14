@@ -762,15 +762,24 @@ parcel by parcel; `Roads` (pure) is a road's geometry and grading. They exist wh
   × 2 columns in 2 block steps, never below the ground floor's door), walls blown out by 4 block
   panels and cracked or mossy by 8 block panels (few big boxes for the mesher), slab holes in 4 ×
   4 patches with rubble under; vines only where the same pure wall function says their wall
-  stands, hung in 4 column curtains from their lowest jagged top (one box a curtain); moss
-  carpets on 0.5 o of the roofs in 8 block patches; plants only on soil and carpets on sturdy
-  blocks; trees in parks, plazas and on the streets' grass off the sidewalks and a block clear
-  of every wreck (`treeAllowed`), the spot's vegetation chance raised to at least `Trees` × o
-  (`vegetation`, read by TerrainGenerator's tree step, which skips its slope test on a level
-  footprint). Measured on seed 99 (citylook): a taiga city's streets 35.5% grass or moss and
-  15.8% planted (6.0% and 0.4% before), a desert one's 24.7% and 10.1% (0.7%, 0), road centre
-  lines 25% green and 7.3% planted (3.2%, 0.15%); downtown meshes at most 2.42× the bench's plain
-  chunks (2.17× before; the budget 2.5×).
+  stands, hung in 4 column curtains (0.3 o of the columns, 3-10 long) from their lowest jagged
+  top, a tower's (4 floors or more) a third as many, from one of its three lowest floor lines
+  where the street sees them: every vine block is a part of its own (a shaped block, never
+  merged), so they are the dearest green and towers are where they pile up; the roof's top layer
+  Moss Block on 0.5 o of it in 8 block patches (full blocks that merge: Moss Carpet there cost a
+  part a block); plants only on soil and carpets on sturdy blocks; trees in parks, plazas and on
+  the streets' grass off the sidewalks and a block clear of every wreck (`treeAllowed`), the
+  spot's vegetation chance raised to at least `Trees` × o (`vegetation`, read by
+  TerrainGenerator's tree step, which skips its slope test on a level footprint). The trees are
+  the biome's own: a plains town grows a few (10 trunks in seed 99's at 1674, 655), a desert town
+  next to none (its cactus takes no root on grass: seed 99's desert city holds 14 acacia logs in
+  all and 433 dead bushes). Measured on seed 99 (citylook): a taiga city's streets 35.5% grass or
+  moss and 15.8% planted (6.0% and 0.4% before), a desert one's 24.7% and 10.1% (0.7%, 0), road centre
+  lines 25% green and 7.3% planted (3.2%, 0.15%). Downtowns mesh into at most 2.44× the bench's
+  plain chunks' parts over the 11 of seeds 12345, 99, 1, 7, 42 and 2024 (tests/spec/Cities checks
+  them all against the budget, 2.5×; 2.34× at most over 17 more on twelve other seeds): a forest
+  downtown is the worst, its walls the most overgrown (3.26× with 0.45 o of the walls in vine
+  curtains 4-14 long from every top and carpets on the roofs).
   Containers' positions are in the plan; `container(x, y, z)` rolls `ScavengeLoot` with the
   cities' loot salt (a big city holds about 15 Antibiotics in expectation, every town a Medicine
   Cabinet).

@@ -592,38 +592,46 @@ return function(t, shared, require, server)
 		t.ok(a < b * 1.05 + 0.0005, "plain chunks: x 1.05 + 0.5 ms")
 	end)
 
-	t.test("cities: every downtown meshes into at most 2.5 times the bench's plain chunks", function()
-		local GreedyMesher = require(shared.Meshing.GreedyMesher)
-		local QuadMesher = require(shared.Meshing.QuadMesher)
-		-- Parts, quads and meshing time a chunk (tests/bench's way: plants left out; generated
-		-- first, so only the meshing is timed).
-		local function meshed(g: any, list: { { number } }): (number, number, number)
-			local parts, quads, time = 0, 0, 0
-			for _, c in list do
-				local r = g.generate(0, c[1], c[2])
-				local s = os.clock()
-				for y0 = 0, r.height - 1, Config.SectionHeight do
-					local y1 = y0 + Config.SectionHeight
-					if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, true) then
-						local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, true)
-						parts += count
-					end
+	-- Parts, quads and meshing time a chunk (tests/bench's way: plants left out; generated first,
+	-- so only the meshing is timed).
+	local GreedyMesher = require(shared.Meshing.GreedyMesher)
+	local QuadMesher = require(shared.Meshing.QuadMesher)
+	local function meshed(g: any, list: { { number } }): (number, number, number)
+		local parts, quads, time = 0, 0, 0
+		for _, c in list do
+			local r = g.generate(0, c[1], c[2])
+			local s = os.clock()
+			for y0 = 0, r.height - 1, Config.SectionHeight do
+				local y1 = y0 + Config.SectionHeight
+				if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, true) then
+					local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, true)
+					parts += count
 				end
-				time += os.clock() - s
-				local q0, q1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
-				local _, n = QuadMesher.mesh(r.data, r.height, q0, q1, true)
-				quads += n
 			end
-			return parts / #list, quads / #list, time / #list
+			time += os.clock() - s
+			local q0, q1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
+			local _, n = QuadMesher.mesh(r.data, r.height, q0, q1, true)
+			quads += n
 		end
-		-- The budget's plain chunks: tests/bench's, the 16 around the spawn of its world (seed
-		-- 12345). The downtowns: the 16 chunks in the middle of every city with one (R >= 131,
-		-- `half` 4 and up) here, against them.
-		local bench = TerrainGenerator.new(12345)
-		local sx, _, sz = bench.findSpawn()
-		local reference = chunksAround(sx, sz, 4)
-		meshed(bench, reference)
-		local pp, pq, pm = meshed(bench, reference)
+		return parts / #list, quads / #list, time / #list
+	end
+	-- The budget's plain chunks: tests/bench's, the 16 around the spawn of its world (seed 12345).
+	local benchParts: number?, benchQuads: number?, benchTime: number?
+	local function plainChunks(): (number, number, number)
+		if benchParts == nil then
+			local bench = TerrainGenerator.new(12345)
+			local sx, _, sz = bench.findSpawn()
+			local reference = chunksAround(sx, sz, 4)
+			meshed(bench, reference)
+			benchParts, benchQuads, benchTime = meshed(bench, reference)
+		end
+		return benchParts :: number, benchQuads :: number, benchTime :: number
+	end
+
+	t.test("cities: every downtown meshes into at most 2.5 times the bench's plain chunks", function()
+		-- The downtowns: the 16 chunks in the middle of every city with one (R >= 131, `half` 4
+		-- and up) here, against the bench's plain chunks.
+		local pp, pq, pm = plainChunks()
 		print(string.format("    plain (the bench's): %.0f parts, %.0f quads, %.2f ms a chunk", pp, pq, pm * 1000))
 		local count, sumTime = 0, 0
 		for _, site in all do
@@ -653,6 +661,40 @@ return function(t, shared, require, server)
 		t.ok(count >= 3, "downtowns measured")
 		-- (Meshing time over them all: one chunk's is a fraction of a millisecond, its noise large.)
 		t.ok(sumTime / count <= 2.5 * pm, "meshing time")
+	end)
+
+	t.test("cities: the downtowns of five more seeds mesh into at most 2.5 times its parts too", function()
+		-- (Seed 99's alone hid the forest ones, the most overgrown: vines are parts of their own,
+		-- one a block, and 0.45 o of the walls in curtains 4-14 long put seed 1's downtown at 3.26
+		-- times and seed 12345's at 2.87.)
+		local pp, pq = plainChunks()
+		local count, worst = 0, 0
+		for _, seed in { 12345, 1, 7, 42, 2024 } do
+			local g = TerrainGenerator.new(seed)
+			for _, site in g.cities(-10000, -10000, 10000, 10000) do
+				if site.radius >= 131 then
+					local dp, dq = meshed(g, chunksAround(site.x, site.z, 4))
+					count += 1
+					worst = math.max(worst, dp / pp)
+					print(
+						string.format(
+							"    seed %d, downtown at %d, %d: %.0f parts (%.2fx), %.0f quads (%.2fx)",
+							seed,
+							site.x,
+							site.z,
+							dp,
+							dp / pp,
+							dq,
+							dq / pq
+						)
+					)
+					t.ok(dp <= 2.5 * pp, `seed {seed}: parts at {site.x}, {site.z} ({dp / pp}x)`)
+					t.ok(dq <= 2.5 * pq, `seed {seed}: quads at {site.x}, {site.z}`)
+				end
+			end
+		end
+		t.ok(count >= 5, `downtowns measured ({count})`)
+		print(string.format("    the worst: %.2fx", worst))
 	end)
 
 	t.test("cities: a generate after `prepare` builds no cell, site, link or tile", function()

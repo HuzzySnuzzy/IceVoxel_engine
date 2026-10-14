@@ -861,16 +861,18 @@ A fast, Minecraft-style voxel engine for Roblox.
     centre line and white crosswalks at the crossings, concrete sidewalks, cracked patches,
     potholes of gravel, and the green taking them back: a fifth to two fifths of the asphalt
     (more of the sidewalks) gone to grass and moss in patches, tall grass and ferns on the
-    grass, and trees growing out of the streets' grass, the parks and the plazas (even in a
-    plains or desert town, whose own biome grows few).
+    grass, and trees growing out of the streets' grass, the parks and the plazas (a few even in a
+    plains town, whose own biome grows next to none; a desert town's green grows dead bushes and
+    next to no trees, as the desert does).
   - **Buildings**, by their distance from the centre: offices up to 12 floors with glass bands
     downtown, apartments of 3-6 floors, shops (a grocery, a pharmacy, a hardware store or an
     office), rows of four houses, parks (grass, trees), plazas, parking lots full of wrecks and
     lots of rubble; every town has a police station, a fire station and a pharmacy. Buildings are
     ruins: their tops collapse in a jagged line, walls are blown out, cracked and mossy, slabs
-    hole into rubble on the floor below, and the green takes them back (vines down the walls,
-    moss carpets on roofs and floors, grass and moss in the ground floors, cobwebs in the
-    corners; more of it in wet biomes, a jungle's twice a desert's). The first four floors are open
+    hole into rubble on the floor below, and the green takes them back (curtains of vines down
+    the walls, low on the towers, moss on the roofs, moss carpets on the floors, grass and moss
+    in the ground floors, cobwebs in the corners; more of it in wet biomes, a jungle's twice a
+    desert's). The first four floors are open
     rooms with a ladder up a corner, doors (or a gap where a door was) and windows; higher floors
     are a facade over a ring of rooms around a solid core. Rusted cars stand in the streets and on
     the roads, whose asphalt greens and grows plants like the streets'.

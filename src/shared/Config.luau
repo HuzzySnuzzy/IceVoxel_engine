@@ -276,9 +276,11 @@ local Config = {
 		-- biome's humidity factor ((humidity + 0.8) / 1.4, at least OvergrowthFloor: a desert or
 		-- plains town still greens, a jungle one most): 0.4 to 0.8. Trees: a vegetation spot on
 		-- the city's grass (parks, plazas, the streets' grass patches off the sidewalks and the
-		-- wrecks) grows a tree at least Trees x o of the time, whatever the biome's own chance (a
-		-- plains town's 0.012 grew next to none). (Overgrowth 0.6 and a floor of 0.15 left 94% of
-		-- a taiga city's streets bare asphalt, and a plains town at o 0.24.)
+		-- wrecks) grows one of its biome's trees at least Trees x o of the time, whatever the
+		-- biome's own chance (a plains town's 0.012 grew next to none); a desert has none (its
+		-- cactus takes no root on grass), so a desert town grows next to no trees. (Overgrowth 0.6
+		-- and a floor of 0.15 left 94% of a taiga city's streets bare asphalt, and a plains town at
+		-- o 0.24.)
 		Ruin = 0.55,
 		Overgrowth = 0.8,
 		OvergrowthFloor = 0.5,

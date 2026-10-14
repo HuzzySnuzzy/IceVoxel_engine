@@ -57,24 +57,31 @@
 	            2 x 2 columns in steps of 2 blocks, never below the ground floor's three lower rows
 	            (the door and the ground floor's containers always stand). Walls decay in panels a
 	            floor tall (few big boxes for the mesher): blown out by PANEL (4 blocks along a
-	            wall; rows 1-3 open, 0.15 r), else cracked (0.25 r) or mossy (0.3 o) by AGE_PANEL
+	            wall; rows 1-3 open, 0.15 r), else cracked (0.25 r) or mossy (0.2 o) by AGE_PANEL
 	            (8), never a corner, the door's frame or the ladder's wall, and the floor line (row
 	            0) stays whole. The slabs between the full floors hole in 4 x 4 patches (0.1 r), a
 	            layer of rubble (Gravel or Cracked Concrete) under each on the floor below; the
 	            ground slab, the roof and the ring of rooms above never do.
-	  Overgrowth  vines hang in curtains VINE_PANEL (4) columns wide (0.45 o of them), from the
-	            lowest of their jagged tops down 4-14 blocks (one length a curtain: one box),
-	            outside the wall, the first on its wall (a sturdy block), the rest on the vine above;
-	            Moss Carpet on 0.5 o of the roofs (in ROOF_PATCH (8) block patches) and 0.04 o of
-	            the floors (patches of a value noise, on a sturdy block); Grass and Moss Block in
+	  Overgrowth  vines hang in curtains VINE_PANEL (4) columns wide (0.3 o of them), from the
+	            lowest of their jagged tops down 3-10 blocks (one length a curtain), outside the
+	            wall, the first on its wall (a sturdy block), the rest on the vine above. Every vine
+	            is a part of its own (a shaped block: GreedyMesher never merges them), the dearest
+	            green, and a downtown of towers is where the parts pile up: a tower (TOWER_FLOORS
+	            (4) floors or more) has TOWER_VINES (0.3) of the curtains, each hanging from one of
+	            its lowest TOWER_LINES (3) floor lines (whole rows) instead of its top, where the
+	            street sees them. The roof's top layer is Moss Block in
+	            ROOF_PATCH (8) block patches on 0.5 o of it (full blocks: a patch merges into few
+	            boxes, where Moss Carpet on it cost a part a block); Moss Carpet on 0.04 o of the
+	            floors (patches of a value noise, on a sturdy block); Grass and Moss Block in
 	            4 x 4 patches of 0.3 o r of the ground floors (Generation/Foliage plants them);
 	            Cobwebs in 0.05 r of the upper corners of the full floors (ruins give String).
 	            Parks are Grass. Trees grow in parks and plazas and on the streets' grass off the
 	            sidewalks and a block clear of every wreck (`treeAllowed`), at least Cities.Trees x
 	            o of a vegetation spot whatever the biome's own chance (Generation/Cities
-	            `vegetation`); nothing grows on asphalt or concrete. Rubble lots: a mound max(0, 3
-	            - dist / 3 + noise) of Gravel, Cracked Concrete and Brick and one or two wall stubs;
-	            plazas Concrete; parking lots Asphalt with wrecks.
+	            `vegetation`; the biome's own trees: a desert's cactus takes no root on grass, so a
+	            desert town grows next to none); nothing grows on asphalt or concrete. Rubble lots:
+	            a mound max(0, 3 - dist / 3 + noise) of Gravel, Cracked Concrete and Brick and one or
+	            two wall stubs; plazas Concrete; parking lots Asphalt with wrecks.
 	  Cars      on each street stretch between two crossings, per lane, Cars of a chance: 2 x 4,
 	            Coal Block wheels at the corners and Rusty Metal between them (30%: one is a Supply
 	            Crate of car loot), Rusty Metal hood and trunk over them and a Glass cabin (50% open).
@@ -113,11 +120,16 @@ local LOT = BLOCK - STREET -- 25: a parcel's side
 -- Tuning --------------------------------------------------------------------------------------------
 local COLLAPSE_FLOORS = 2.5 -- the jagged top loses up to r x this many floors
 local WALL_HOLES, SLAB_HOLES = 0.15, 0.1 -- holes in walls and slabs, times r
-local CRACKS, MOSS = 0.25, 0.3 -- aged walls: cracked (times r), mossy (times o)
-local VINES = 0.45 -- wall columns with a vine, times o
-local VINE_MIN, VINE_MAX = 4, 14 -- a vine's length
-local VINE_PANEL = 4 -- vines hang in curtains this wide, one length (few boxes for the mesher)
-local ROOF_CARPET, FLOOR_CARPET = 0.5, 0.04 -- moss carpet on roofs and floors, times o
+local CRACKS, MOSS = 0.25, 0.2 -- aged walls: cracked (times r), mossy (times o)
+-- Wall columns with a vine, times o; a tower's (TOWER_FLOORS floors or more) times TOWER_VINES
+-- too, hanging from one of its lowest TOWER_LINES floor lines. (Every vine block is a part: 0.45
+-- o, 4-14 long from every top put seed 1's forest downtown at 3.26 times a plain chunk's parts,
+-- over the 2.5 budget.)
+local VINES = 0.3
+local TOWER_FLOORS, TOWER_VINES, TOWER_LINES = 4, 0.3, 3
+local VINE_MIN, VINE_MAX = 3, 10 -- a vine's length
+local VINE_PANEL = 4 -- vines hang in curtains this wide, one length
+local ROOF_MOSS, FLOOR_CARPET = 0.5, 0.04 -- moss on roofs (Moss Block) and floors (carpet), times o
 local ROOF_PATCH = 8 -- a roof's moss in patches of a value noise this wide
 local PANEL = 4 -- walls blow out in panels this many blocks along a wall, one floor tall
 local AGE_PANEL = 8 -- and crack or grow moss in panels this wide (few big boxes for the mesher)
@@ -1383,6 +1395,14 @@ local function writeColumn(b: Building, x: number, z: number)
 		local block: number
 		if k >= floors then
 			block = b.slab
+			-- (Moss on the roof, where the top stands whole: its top layer, full blocks.)
+			if
+				y == b.top - 1
+				and et == b.top
+				and vnoise(bxor(b.salt, S_CARPET), x, z, ROOF_PATCH) < share(ROOF_MOSS * o)
+			then
+				block = MOSS_BLOCK
+			end
 		elseif k < b.full then
 			if row == 0 then
 				if k == 0 then
@@ -1447,10 +1467,6 @@ local function writeColumn(b: Building, x: number, z: number)
 		end
 		put(x, y, z, block)
 	end
-	-- Moss carpet on the roof, where the top stands whole.
-	if et == b.top and vnoise(bxor(b.salt, S_CARPET), x, z, ROOF_PATCH) < share(ROOF_CARPET * o) then
-		put(x, b.top, z, CARPET)
-	end
 end
 
 -- Full detail: the vines down the outer walls of building b (see the header).
@@ -1459,7 +1475,7 @@ local function writeVines(b: Building)
 		return
 	end
 	local salt = bxor(b.salt, S_VINE)
-	local chance = VINES * b.o
+	local chance = VINES * b.o * (if b.floors >= TOWER_FLOORS then TOWER_VINES else 1)
 	for side = 1, 4 do
 		local dx, dz = SIDE_DX[side], SIDE_DZ[side]
 		local width = if side == 1 or side == 3 then b.x1 - b.x0 else b.z1 - b.z0
@@ -1471,7 +1487,7 @@ local function writeVines(b: Building)
 				continue
 			end
 			-- (One hash a curtain of VINE_PANEL columns, which hang from the lowest of their
-			-- jagged tops down one length: one box for the mesher.)
+			-- jagged tops down one length.)
 			local alongX = side == 1 or side == 3
 			local h = if alongX
 				then cellHash(salt, x // VINE_PANEL, side, z)
@@ -1490,6 +1506,11 @@ local function writeVines(b: Building)
 			local topY = math.huge
 			for k = max(first, lo), min(first + VINE_PANEL - 1, hi) do
 				topY = min(topY, if alongX then effTop(b, k, z) - 1 else effTop(b, x, k) - 1)
+			end
+			if b.floors >= TOWER_FLOORS then
+				-- (A tower's hangs from one of its lowest floor lines, a whole row, where the
+				-- street sees it.)
+				topY = min(topY, b.y0 + (1 + (h // 1048576) % TOWER_LINES) * FH)
 			end
 			local length = VINE_MIN + (h // 4096) % (VINE_MAX - VINE_MIN + 1)
 			local wall = CityLayout.wallBlock(b, x, topY, z)
