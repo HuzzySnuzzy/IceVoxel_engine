@@ -37,7 +37,8 @@
 	             character that is saved, in a world that saves progress, not in creative; the
 	             world's mark waits for this character's first save with it, confirmImport), then its
 	             inventory and equipment (Players/Inventories.restore, restoreEquipment), Tough
-	             As Nails, effects, mana and crystals (Players/Mana) and progress
+	             As Nails, effects, the zombie apocalypse's survivor record and infection
+	             (Apocalypse/Survival.restore), mana and crystals (Players/Mana) and progress
 	             (Players/Progression.restore); its health on its first body, the leftovers of an
 	             old record dropped at its feet, the nametag (Humanoid.DisplayName) its name.
 	             `look` gives Players/WorldMenu the look it spawns with.
@@ -110,6 +111,8 @@ local Mana = require(script.Parent.Mana)
 local Progression = require(script.Parent.Progression)
 local ProgressStore = require(script.Parent.ProgressStore)
 local ToughAsNails = require(script.Parent.ToughAsNails)
+local Survival = require(Server.Apocalypse.Survival)
+local SurvivalRules = require(Server.Apocalypse.SurvivalRules)
 
 type Record = CharacterCodec.Record
 type Stack = Items.Stack
@@ -138,6 +141,7 @@ type Cache = {
 	thirst: any,
 	temperature: any,
 	effects: any,
+	survivor: SurvivalRules.Saved?,
 	progress: unknown?,
 }
 
@@ -506,6 +510,15 @@ local function capture(player: Player, user: User, selected: Selected): Record
 	record.temperature = (temperature or cache.temperature or base.temperature) :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or cache.effects or base.effects) :: any
+	-- (The zombie apocalypse's survivor record and infection: Apocalypse/Survival.)
+	local survivor = Survival.export(player) or cache.survivor
+	if survivor then
+		record.alive, record.kills, record.moons = survivor.alive, survivor.kills, survivor.moons
+		record.infection = survivor.infection
+	else
+		record.alive, record.kills, record.moons = base.alive, base.kills, base.moons
+		record.infection = base.infection
+	end
 	local kept = selected.kept
 	if kept then
 		-- (Not a fair visit: the things it had then.)
@@ -1004,6 +1017,10 @@ local function refreshCache(player: Player, selected: Selected, progress: boolea
 	if effects then
 		cache.effects = effects
 	end
+	local survivor = Survival.export(player)
+	if survivor then
+		cache.survivor = survivor
+	end
 	if progress then
 		local exported = Progression.export(player)
 		if exported ~= nil then
@@ -1109,6 +1126,9 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 	})
 	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any)
 	Effects.restore(player, record.effects :: any)
+	local survivor: SurvivalRules.Saved =
+		{ alive = record.alive, kills = record.kills, moons = record.moons, infection = record.infection }
+	Survival.restore(player, survivor)
 	selected.progressWritable = Progression.restore(player, selected.progress)
 	-- (Mana after the progress and the accessory slots its Age opens: the max it is held to from
 	-- the next tick counts every accessory the character wears, a Band of Starpower included.)
@@ -1127,6 +1147,7 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 		thirst = record.thirst,
 		temperature = record.temperature,
 		effects = record.effects,
+		survivor = survivor,
 		progress = selected.progress,
 	}
 	local character = player.Character

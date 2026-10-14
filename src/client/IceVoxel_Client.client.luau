@@ -109,6 +109,11 @@
 	                             the predicted inventory, mining and boiling perks), which Ui/Hud
 	                             draws as the knowledge bar; Ui/AgeToast shows a new Age's banner,
 	                             Ui/SkillTreeScreen the skill tree (K)
+	  Player/SurvivorState       the zombie apocalypse's survivor record from the server (days
+	                             alive, kills, blood moons survived), which Ui/SurvivorHud shows as
+	                             the day line under the minimap with the blood moon's warnings and
+	                             toasts; the blood moon's red sky is Rendering/BloodMoonSky's
+	                             (through LightingController)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -159,6 +164,7 @@ local ProjectileView = require(Client.Rendering.ProjectileView)
 local EffectView = require(Client.Rendering.EffectView)
 local EffectHud = require(Client.Ui.EffectHud)
 local ProgressionState = require(Client.Player.ProgressionState)
+local SurvivorState = require(Client.Player.SurvivorState)
 local GameModeSwitcher = require(Client.Ui.GameModeSwitcher)
 local DebugOverlay = require(Client.Debug.DebugOverlay)
 local Waila = require(Client.Ui.Waila)
@@ -178,6 +184,7 @@ local AgeToast = require(Client.Ui.AgeToast)
 local Hud = require(Client.Ui.Hud)
 local MainMenu = require(Client.Ui.MainMenu)
 local SaveIndicator = require(Client.Ui.SaveIndicator)
+local SurvivorHud = require(Client.Ui.SurvivorHud)
 local Style = require(Client.Ui.Style)
 local UiScale = require(Client.Ui.UiScale)
 
@@ -262,6 +269,7 @@ Settings.register("hud", function(values)
 	-- (The minimap's corner, and so the toasts, effect icons and WAILA around it: Ui/UiScale.)
 	Map.setMinimapVisible(on(values, "minimap"))
 	Waila.setEnabled(on(values, "waila"))
+	SurvivorHud.setEnabled(on(values, "dayCounter"))
 	UiScale.setSetting(values.guiScale)
 	AttackIndicator.setMode(values.attackIndicator)
 end)
@@ -382,6 +390,7 @@ ClientInventory.start()
 SurvivalState.start()
 EffectState.start()
 ManaState.start()
+SurvivorState.start()
 -- (After the inventory: it sets the recipe gate on the prediction.)
 ProgressionState.start()
 Screens.start()
@@ -452,6 +461,9 @@ MusicToast.start()
 Music.start()
 -- (After the music toast: the saving toast goes under it while it shows.)
 SaveIndicator.start()
+-- (The day line under the minimap and the blood moon's toasts: before the effect icons, which
+-- go under them.)
+SurvivorHud.start()
 -- (After the toast: the icons go under its place; after the camera and the fluid's fog.)
 EffectHud.start()
 EffectView.start()

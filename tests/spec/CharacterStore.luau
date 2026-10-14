@@ -7,8 +7,9 @@
 	stops saving, saves carry order numbers, a visit that stopped being fair keeps the things it
 	had then (CharacterCodec.keepThings), creating writes the record
 	before the list (an orphan of a failed list write is taken over), the most a user keeps,
-	deleting and renaming refused while another server has the character, and the session-only
-	store in memory.
+	deleting and renaming refused while another server has the character, the session-only
+	store in memory, and the zombie apocalypse's survivor record and infection in the record
+	(CharacterCodec version 2; a version 1 record reads them as 0).
 ]]
 
 return function(t, shared, require, server)
@@ -461,6 +462,54 @@ return function(t, shared, require, server)
 		t.ok(live.slots[5] ~= kept.slots[5], "copies: the kept things stay as they were")
 		local back = CharacterCodec.fromText(CharacterCodec.toText(live)) :: any
 		t.eq(back.slots[5].count, 3)
+	end)
+
+	t.test("character store: the survivor record and infection are saved (version 2; version 1 reads 0)", function()
+		-- (The zombie apocalypse: server Apocalypse/Survival's record and Apocalypse/Infection's
+		-- progress, Save/CharacterCodec version 2.)
+		t.eq(CharacterCodec.VERSION, 2, "bumped for the survivor record")
+		local record = newRecord(5, "Survivor")
+		t.eq(record.alive, 0, "a new character starts at 0")
+		t.eq(record.infection, 0, "healthy")
+		record.alive, record.kills, record.moons, record.infection = 24000 * 3 + 17, 41, 2, 30123
+		local back = CharacterCodec.fromText(CharacterCodec.toText(record)) :: CharacterCodec.Record
+		t.ok(back ~= nil, "round trips")
+		t.eq(back.alive, 24000 * 3 + 17)
+		t.eq(back.kills, 41)
+		t.eq(back.moons, 2)
+		t.eq(back.infection, 30123)
+		-- Out of range: clamped to the fields' sizes.
+		record.kills, record.moons, record.alive, record.infection = 70000, -3, 0 / 0, 2 ^ 40
+		local clamped = CharacterCodec.fromText(CharacterCodec.toText(record)) :: CharacterCodec.Record
+		t.eq(clamped.kills, 65535)
+		t.eq(clamped.moons, 0)
+		t.eq(clamped.alive, 0, "NaN reads 0")
+		t.eq(clamped.infection, 4294967295)
+		-- A version 1 record (before the apocalypse): the same bytes without the last 12, read with
+		-- zeros.
+		record.alive, record.kills, record.moons, record.infection = 99, 9, 1, 500
+		local bytes = CharacterCodec.encode(record)
+		local old = buffer.create(buffer.len(bytes) - 12)
+		buffer.copy(old, 0, bytes, 0, buffer.len(old))
+		buffer.writeu8(old, 0, 1)
+		local legacy, why = CharacterCodec.decode(old)
+		t.ok(legacy ~= nil, `a version 1 record still reads ({why})`)
+		if legacy then
+			t.eq(legacy.alive, 0)
+			t.eq(legacy.kills, 0)
+			t.eq(legacy.moons, 0)
+			t.eq(legacy.infection, 0)
+			t.eq(legacy.name, "Survivor", "the rest as it was")
+		end
+		-- Version 2 bytes cut short are damaged.
+		local short = buffer.create(buffer.len(bytes) - 4)
+		buffer.copy(short, 0, bytes, 0, buffer.len(short))
+		t.eq((CharacterCodec.decode(short)), nil, "a truncated survivor record")
+		-- The infection is one of the things a visit that stopped being fair keeps.
+		local kept = CharacterCodec.new(5, "Survivor", D.Classic, Appearance.default(), 0)
+		CharacterCodec.keepThings(kept, record)
+		t.eq(kept.infection, 500)
+		t.eq(kept.kills, 0, "the record itself is the character's, not a thing")
 	end)
 
 	--[[ Deleting and renaming ]]

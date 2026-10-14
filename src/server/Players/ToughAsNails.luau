@@ -30,7 +30,11 @@
 	             removed as it appears. Otherwise that script stays, but is disabled while the
 	             body is fully frozen or overheated, as thirst's regeneration waits then
 	             (Temperature.stopsRegeneration: its half heart every 5 s would undo the
-	             extremes' hurts).
+	             extremes' hurts), and while the regeneration block says so (`setRegenBlock`:
+	             the zombie apocalypse's infection from stage III, server Apocalypse/Infection),
+	             which stops thirst's regeneration too: one rule for both kinds. With thirst and
+	             temperature off no tick runs here, so the infection pauses the script itself
+	             (`pauseRegeneration`).
 	  Clemency   TAN's Climate Clemency: a player's first character since joining gets
 	             Config.ToughAsNails.ClemencyTicks of it (5 minutes), every later one (a respawn)
 	             RespawnClemencyTicks (a minute); a player returning to a saved world keeps what
@@ -41,7 +45,8 @@
 	             (`restore`, World/WorldSave), as TAN keeps them in the player's data.
 	  Exertion   the client's movement reports (Protocol Exertion, ToughAsNails/Exertion), bounded
 	             by the time since the last one, cost exhaustion; their sprint flag counts as
-	             sprinting for SPRINT_HOLD seconds. Breaking a block costs Thirst.EXHAUSTION.mine
+	             sprinting for SPRINT_HOLD seconds (`sprinting`: the zombie apocalypse's sprint
+	             noise, server Apocalypse/Survival). Breaking a block costs Thirst.EXHAUSTION.mine
 	             (ServerNet's `broke` rule, `blockBroken`).
 	  Drinking   Protocol Drink (Shared/ToughAsNails/Drinks): a living player who is not a
 	             spectator, the item really in their hand.
@@ -162,6 +167,8 @@ export type Perks = {
 	insulation: (player: Player) -> number,
 }
 local perks: Perks? = nil
+-- Says whether a player's natural regeneration is held (see the header: `setRegenBlock`).
+local regenBlock: ((player: Player) -> boolean)? = nil
 
 local records: { [Player]: Record } = {}
 -- Players whose first character since joining has come (their next ones are respawns).
@@ -352,8 +359,10 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 	else
 		Temperature.tickEffects(temperature, mode)
 	end
-	-- (Fully frozen or overheated: no health comes back, by thirst's rule or Roblox's.)
-	local stopped = temperatureOn() and Temperature.stopsRegeneration(temperature)
+	-- (Fully frozen or overheated, or the regeneration block holding it: no health comes back, by
+	-- thirst's rule or Roblox's.)
+	local block = regenBlock
+	local stopped = (temperatureOn() and Temperature.stopsRegeneration(temperature)) or (block ~= nil and block(player))
 	pauseRobloxRegeneration(record, character, stopped)
 	if thirstOn() then
 		local hot = temperatureOn() and Temperature.zone(temperature.value) == Temperature.HOT
@@ -510,6 +519,35 @@ end
 -- Sets Progression's perks (see Perks; nil: none).
 function ToughAsNailsServer.setPerks(value: Perks?)
 	perks = value
+end
+
+--[[
+	Sets the regeneration block (nil: none): while `fn(player)` holds, neither thirst's
+	regeneration nor the Roblox Health script gives that player health back (see the header). The
+	zombie apocalypse's infection sets it (server Apocalypse/Infection).
+]]
+function ToughAsNailsServer.setRegenBlock(fn: ((player: Player) -> boolean)?)
+	regenBlock = fn
+end
+
+--[[
+	Pauses (or lets run again) `player`'s Roblox Health script where this module's own tick doesn't
+	run (thirst and temperature both off); while it runs, its tick decides through the
+	regeneration block and this does nothing.
+]]
+function ToughAsNailsServer.pauseRegeneration(player: Player, paused: boolean)
+	local record = records[player]
+	local character = player.Character
+	if record == nil or character == nil or thirstOn() or temperatureOn() then
+		return
+	end
+	pauseRobloxRegeneration(record, character, paused)
+end
+
+-- Is `player` sprinting (their client's last movement report said so, within SPRINT_HOLD s)?
+function ToughAsNailsServer.sprinting(player: Player): boolean
+	local record = records[player]
+	return record ~= nil and os.clock() < record.sprintingUntil
 end
 
 -- ServerNet's `broke` rule: `player` broke `block` in survival (Minecraft's EXHAUSTION_MINE).

@@ -227,6 +227,7 @@ Pages.list = {
 		items = {
 			setting("minimap"),
 			setting("waila"),
+			setting("dayCounter"),
 			setting("attackIndicator", true),
 			setting("guiScale"),
 		},

@@ -17,6 +17,10 @@
 	  mint tea                7       0.6        -          chill 2 min      a mint leaf brewed
 	  ginger tea              7       0.6        -          warmth 2 min     a ginger root
 	  herbal tea              8       0.65       -          both 1 min       both herbs
+	  bottled water           6       0.4        -              -            the ruins': a Glass
+	                                                                         Bottle back
+	  soda                    4       0.2        -              -            Speed for 20 s; drunk
+	                                                                         any time, no can back
 	(hydration is the modifier: Thirst.drink adds thirst x modifier x 2; the Thirst effect costs
 	0.015 exhaustion a tick, so 15 s of it is 4.5 exhaustion, about a point of hydration or
 	thirst; a longer one already running stays, so sips in a row cost one effect. TAN's own 75%
@@ -144,6 +148,16 @@ Drinks.HERBAL_TEA = table.freeze({
 	warmth = 1200,
 	chill = 1200,
 }) :: Drink
+-- The ruins' soda (the zombie apocalypse, Generation/ScavengeLoot): a little water, little
+-- hydration and Speed for 20 s; its can is not kept. (Its effects make it drunk any time, as a
+-- potion: thirsty or not, thirst on or off.)
+Drinks.SODA = table.freeze({
+	thirst = 4,
+	hydration = 0.2,
+	chance = 0,
+	effectTicks = 0,
+	effects = table.freeze({ table.freeze({ effect = Effects.id.Speed, ticks = 400, amplifier = 0 }) }),
+}) :: Drink
 -- Terraria's mana potions (no water): 50 and 100 mana, each with Mana Sickness (Shared/Mana).
 Drinks.LESSER_MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 50 }) :: Drink
 Drinks.MANA = table.freeze({ thirst = 0, hydration = 0, chance = 0, effectTicks = 0, mana = 100 }) :: Drink
@@ -174,6 +188,10 @@ local ITEMS: { [number]: DrinkItem } = {
 	[I.HerbalTea] = table.freeze({ drink = Drinks.HERBAL_TEA, empty = I.Bowl }),
 	[I.LesserManaPotion] = table.freeze({ drink = Drinks.LESSER_MANA, empty = I.GlassBottle }),
 	[I.ManaPotion] = table.freeze({ drink = Drinks.MANA, empty = I.GlassBottle }),
+	-- The ruins' drinks (the zombie apocalypse): bottled water is purified water whose bottle is
+	-- kept; a soda's can is not.
+	[I.BottledWater] = table.freeze({ drink = Drinks.PURIFIED, empty = I.GlassBottle }),
+	[I.SodaCan] = table.freeze({ drink = Drinks.SODA }),
 }
 for _, variant in PotionList.all() do
 	local effect = Effects.id[variant.effect]

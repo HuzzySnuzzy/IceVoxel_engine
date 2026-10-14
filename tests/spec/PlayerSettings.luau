@@ -103,6 +103,7 @@ return function(t, shared, require, _server, client)
 				"touchButtons",
 				"minimap",
 				"waila",
+				"dayCounter",
 				"guiScale",
 				"preset",
 			}
@@ -118,6 +119,16 @@ return function(t, shared, require, _server, client)
 		t.eq(far.effect, "textures")
 		t.eq(far.default, if Config.Render.FarMaterials then 1 else 0)
 		t.eq(far.preset, false)
+		-- The zombie apocalypse's Day Counter: id 59 (after the weather's 58), a HUD toggle, on.
+		local day = PlayerSettings.entry("dayCounter")
+		t.eq(day.id, 59)
+		t.eq(PlayerSettings.byId[59], day)
+		t.eq(day.kind, "toggle")
+		t.eq(day.page, "hud")
+		t.eq(day.effect, "hud")
+		t.eq(day.default, 1)
+		t.eq(day.preset, false)
+		t.ok(day.tooltip ~= nil and string.find(day.tooltip :: string, "Blood Moon", 1, true) ~= nil, "its tooltip")
 	end)
 
 	t.test("player settings: clamp snaps to the step, clamps to the range and the phone limit", function()

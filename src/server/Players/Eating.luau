@@ -1,18 +1,26 @@
 --!strict
 --[[
-	Eating on the server (Protocol Eat; the rules are Shared/Items/Foods, the client's hold is
-	Interaction/Eating): Minecraft's 32 tick use of a food, as Tough As Nails' drinking
-	(Players/ToughAsNails) does it for drinks.
+	Eating and medicine on the server (Protocol Eat; the rules are Shared/Items/Foods, the client's
+	hold is Interaction/Eating): Minecraft's use of a food, as Tough As Nails' drinking
+	(Players/ToughAsNails) does it for drinks, and the zombie apocalypse's medical supplies used
+	the same way.
 
-	  start   the held item is a food the player may eat now (Foods.canEat: hurt, or creative; not
-	          a spectator, not dead): the time, the hotbar slot and the item are noted;
-	  finish  the same item in the same slot, held at least Foods.USE_TICKS - FINISH_LEEWAY ticks
-	          since `start`, and still edible: the food heals at once (its half hearts scaled to
-	          the Humanoid's MaxHealth, as every hurt is), rolls its effect (Tough As Nails'
-	          Thirst effect for raw chicken and rotten flesh, when thirst is on:
-	          Shared/ToughAsNails/Thirst.giveEffect on the player's state) and is used up (one
-	          item, not in creative); everyone else hears the burp (entity.player.burp: the eater's
-	          client plays its own bites and burp);
+	  start   the held item is a food the player may use now (Foods.canUse: hurt, bleeding for a
+	          bandage, infected for antibiotics or a poultice, any time for a treat with effects,
+	          creative whenever; never a spectator, never dead): the time, the hotbar slot and the
+	          item are noted;
+	  finish  the same item in the same slot, held at least its Foods.useTicks - FINISH_LEEWAY
+	          ticks since `start`, and still usable: Foods.finish plays it out here, healing at
+	          once (its half hearts scaled to the Humanoid's MaxHealth, as every hurt is), curing
+	          (Players/Effects.remove: the Infection goes to its owner, server
+	          Apocalypse/Infection.cure), setting an infection back a stage (Infection.setBack:
+	          the Herbal Poultice), giving its status effects and Antibiotics' Weakness after a
+	          late cure (Players/Effects.give; the stage before the cure is
+	          Infection.stage's) and rolling Tough As Nails' Thirst effect for raw chicken,
+	          rotten flesh and crackers when thirst is on (Shared/ToughAsNails/Thirst.giveEffect
+	          on the player's state); then it is used up (one item, not in creative); everyone
+	          else hears the burp (entity.player.burp), or medicine's own sound (Foods `sound`:
+	          the user's client played it as the use started);
 	  cancel  let go early: forgotten.
 	Sounds a player's requests cause use their budget (Audio/Sounds.allow).
 ]]
@@ -29,6 +37,8 @@ local SharedToughAsNails = require(Shared.ToughAsNails)
 local Thirst = require(Shared.ToughAsNails.Thirst)
 
 local Sounds = require(script.Parent.Parent.Audio.Sounds)
+local Infection = require(script.Parent.Parent.Apocalypse.Infection)
+local EffectsServer = require(script.Parent.Effects)
 local Inventories = require(script.Parent.Inventories)
 local ToughAsNails = require(script.Parent.ToughAsNails)
 
@@ -61,9 +71,45 @@ local function selectedSlot(player: Player): number?
 	return if window then window.inventory.selected else nil
 end
 
--- May the player eat `item` now?
+-- May the player use `item` now?
 local function mayEat(player: Player, humanoid: Humanoid, item: number?): boolean
-	return Foods.isFood(item) and Foods.canEat(humanoid.Health, humanoid.MaxHealth, GameMode.of(player))
+	local food = Foods.of(item)
+	if food == nil then
+		return false
+	end
+	return Foods.canUse(food, humanoid.Health, humanoid.MaxHealth, GameMode.of(player), function(name: string): boolean
+		return EffectsServer.has(player, name)
+	end)
+end
+
+-- Plays out `food` finishing for `player` (Foods.finish's hooks; see the header).
+local function finish(player: Player, humanoid: Humanoid, food: Foods.Food)
+	Foods.finish(food, {
+		heal = function(halfHearts: number)
+			humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + halfHearts / HEALTH * humanoid.MaxHealth)
+		end,
+		cure = function(name: string)
+			EffectsServer.remove(player, name)
+		end,
+		setBack = function()
+			Infection.setBack(player)
+		end,
+		infectionStage = function(): number
+			return Infection.stage(player)
+		end,
+		give = function(effect: number, ticks: number, amplifier: number)
+			EffectsServer.give(player, effect, ticks, amplifier)
+		end,
+		thirst = function(ticks: number)
+			local thirst = ToughAsNails.state(player)
+			if thirst and SharedToughAsNails.thirstOn() then
+				Thirst.giveEffect(thirst, ticks)
+			end
+		end,
+		random = function(): number
+			return random:NextNumber()
+		end,
+	})
 end
 
 local function onEat(player: Player, payload: buffer)
@@ -87,32 +133,27 @@ local function onEat(player: Player, payload: buffer)
 	else
 		local holding = eating[player]
 		eating[player] = nil
+		local food = Foods.of(held and held.item)
 		if
 			holding == nil
 			or held == nil
+			or food == nil
 			or held.item ~= holding.item
 			or selectedSlot(player) ~= holding.slot
-			or now - holding.started < (Foods.USE_TICKS - FINISH_LEEWAY) * TICK
+			or now - holding.started < (Foods.useTicks(food) - FINISH_LEEWAY) * TICK
 			or not mayEat(player, humanoid, held.item)
 		then
 			return
 		end
-		local food = Foods.of(held.item) :: Foods.Food
-		local heal, effectTicks = Foods.eat(food, function(): number
-			return random:NextNumber()
-		end)
-		humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + heal / HEALTH * humanoid.MaxHealth)
-		if effectTicks > 0 and food.effect and food.effect.kind == "thirst" then
-			local thirst = ToughAsNails.state(player)
-			if thirst and SharedToughAsNails.thirstOn() then
-				Thirst.giveEffect(thirst, effectTicks)
-			end
-		end
+		finish(player, humanoid, food)
 		if not GameMode.instabuild(GameMode.of(player)) then
 			Inventories.setHeld(player, if held.count > 1 then Items.withCount(held, held.count - 1) else nil)
 		end
 		if Sounds.allow(player) then
-			Sounds.playAt(player, Foods.BURP, player)
+			local sound = if Foods.isMedical(food) then food.sound else Foods.BURP
+			if sound then
+				Sounds.playAt(player, sound, player)
+			end
 		end
 	end
 end

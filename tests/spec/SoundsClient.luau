@@ -451,16 +451,11 @@ return function(t, shared, require, _server, client)
 		end
 		-- Terraria's sounds whose players were still being built came off this list with the code
 		-- that plays them (the double jump: Player/EquipmentLooks.airJump; the cast and mana full:
-		-- Interaction/Casting, Player/ManaState). It stays for the next client sound added ahead of
-		-- its player: the zombie apocalypse's, now (the zombies' groans: Entities/ZombieVoices; the
-		-- medical items: their use; the blood moon's rise: Rendering/BloodMoonSky). Each comes off
-		-- with the code that plays it.
-		local pending: { [string]: boolean } = {
-			["item.bandage.apply"] = true,
-			["item.medkit.use"] = true,
-			["item.pills.swallow"] = true,
-			["ambient.blood_moon.rise"] = true,
-		}
+		-- Interaction/Casting, Player/ManaState), and so did the zombie apocalypse's (the zombies'
+		-- groans: Entities/ZombieVoices; the medical items' sounds: Interaction/Eating; the blood
+		-- moon's rise: Ui/SurvivorHud). It stays for the next client sound added ahead of its player,
+		-- which comes off with the code that plays it.
+		local pending: { [string]: boolean } = {}
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
 			if pending[sound.name] then

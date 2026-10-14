@@ -83,6 +83,16 @@ return function(t, shared, require, _server, client)
 			t.ok(#rows <= 8, `{entry.key}'s tooltip is short ({#rows} rows)`)
 			t.eq(ButtonHelp.text("options.setting", entry.key), tooltip, `{entry.key} reaches the menu`)
 		end
+		-- The zombie apocalypse's Day Counter (setting 59): its tooltip, on the HUD page.
+		local day = ButtonHelp.text("options.setting", "dayCounter")
+		t.ok(day ~= nil and string.find(day, "survived", 1, true) ~= nil, "the Day Counter's tooltip")
+		local onHud = false
+		for _, item in Pages.byId.hud.items do
+			if item.kind == "setting" and item.id == "dayCounter" then
+				onHud = true
+			end
+		end
+		t.ok(onHud, "the Day Counter is on the HUD page")
 		for _, action in KeyBindings.ACTIONS do
 			local entry = PlayerSettings.entry(KeyBindings.settingKey(action.id))
 			t.eq(entry.tooltip, action.tooltip, `{action.id}: the binding's tooltip is its action's`)

@@ -4,17 +4,25 @@
 	2560 x 1440) and 4K, times every GUI Scale choice the screen offers, the minimap on and off,
 	touch on and off, the toasts and the saving icon showing or not and a few sets of effect icons:
 	everything placed stays inside the safe area below the top bar; the minimap, its coordinates
-	line, the Map button, the toasts, the effect icons, the saving icon, the touch buttons and the
-	HUD's canvas never overlap (also while its rows are raised over the mana stars); WAILA's
-	reserve covers the minimap column; the toasts start under the minimap's scaled bottom. Named
-	regressions: on a 667 x 375 phone the effect icons ran past the bottom of the screen and the
-	saving icon sat on the minimap (the corner was pinned to a 192 pixel minimap and raised by a
-	fixed 150 GUI pixels).
+	line, the zombie apocalypse's day line (in its three places: under the coordinates line, under
+	the Map button, in the corner; its real texts, a blood moon's warning wrapped onto a second
+	row where one row doesn't fit, and always placed) and its notice toasts (as wide as their
+	texts), the Map button, the toasts, the effect icons, the saving icon, the touch buttons and
+	the HUD's canvas never overlap (also while its rows are raised over the mana stars); WAILA's
+	reserve covers the minimap column and the day line; the toasts start under the minimap's
+	scaled bottom (under the day line when it shows). Named regressions: on a 667 x 375 phone the
+	effect icons ran past the bottom of the screen and the saving icon sat on the minimap (the
+	corner was pinned to a 192 pixel minimap and raised by a fixed 150 GUI pixels); on an iPad and
+	a 1024 x 768 window at their Auto GUI scale the day line vanished the day before a blood moon
+	and on its day until it rose (one row of 360 GUI pixels didn't fit and nothing took its place),
+	and the blood moon's toasts ran past the screen's edge (a 160 pixel toast for 208 and 216
+	pixels of text).
 ]]
 
 return function(t, _shared, require, _server, client)
 	local GuiScale = require(client.Ui.GuiScale)
 	local HudLayout = require(client.Ui.HudLayout)
+	local SurvivorLine = require(client.Ui.SurvivorLine)
 
 	type Insets = HudLayout.Insets
 	type Rect = HudLayout.Rect
@@ -234,6 +242,339 @@ return function(t, _shared, require, _server, client)
 			t.ok(#problems == 0, table.concat(problems, "\n         "))
 		end
 	)
+
+	--[[ The zombie apocalypse's day line (Ui/SurvivorHud) and its notice toasts ]]
+
+	-- The pixel font: 8 GUI pixels a character (tests/spec/TextWrap's Arcade).
+	local function measure(text: string): number
+		return (utf8.len(text) :: number) * 8
+	end
+	-- The day line's real texts, from "Day 5" (creative) to the longest a long world shows, as
+	-- Ui/SurvivorHud measures them: { one row, wrapped }.
+	local DAY_LINES: { { number | false } } = {}
+	for _, line in
+		{
+			{ "Day 5", nil },
+			{ "Day 4 · Survived 3 days", nil },
+			{ "Day 3 · Survived 2 days", "Blood Moon tonight" },
+			{ "Day 999 · Survived 999 days", "Blood Moon tomorrow" },
+		} :: { { string? } }
+	do
+		local one, wrap = SurvivorLine.widths(line[1] :: string, line[2], measure)
+		table.insert(DAY_LINES, { one, wrap or false })
+	end
+	-- The blood moon's toasts' widths, the widest of them.
+	local widestToast = 0
+	for _, text in SurvivorLine.TOASTS do
+		widestToast = math.max(widestToast, SurvivorLine.toastWidth(measure(text)))
+	end
+
+	-- Every screen and scale with the day line showing: the minimap on and off, touch on and off,
+	-- the day line's real texts, the toasts (Now Playing, "World saved", a notice of Minecraft's
+	-- width and the widest blood moon's), the saving icon and effect icons. `check(input, layout)`
+	-- returns a problem or nil.
+	local function sweepDay(check: (HudLayout.Input, HudLayout.Layout) -> string?): (number, { string })
+		local count = 0
+		local problems: { string } = {}
+		for _, screen in SCREENS do
+			local w, h, inset = screen[1], screen[2], screen[3]
+			for _, touch in { false, true } do
+				for _, choice in GuiScale.choices(w, h, touch) do
+					local scale = GuiScale.base(w, h, touch, choice)
+					for _, minimap in { true, false } do
+						for _, coords in COORDS do
+							for _, dayLine in DAY_LINES do
+								local dayWidth, dayWrap = dayLine[1] :: number, dayLine[2]
+								for _, music in { false, true } do
+									for _, save in { false, 160 } do
+										for _, notice in { false, 160, widestToast } do
+											for _, saving in { false, true } do
+												for _, effects in { EFFECTS[1], EFFECTS[3] } do
+													local input: HudLayout.Input = {
+														width = w,
+														height = h,
+														insets = inset,
+														scale = scale,
+														touch = touch,
+														minimap = minimap,
+														coordsWidth = coords,
+														music = music,
+														save = if save then save else nil,
+														saveUnder = false,
+														effects = effects,
+														saving = saving,
+														debugRight = nil,
+														dayLine = true,
+														dayWidth = dayWidth,
+														dayWrap = if dayWrap then dayWrap else nil,
+														notice = if notice then notice else nil,
+														buttons = nil,
+													}
+													count += 1
+													local problem = check(input, HudLayout.compute(input))
+													if problem and #problems < 5 then
+														table.insert(
+															problems,
+															`{describe(input)} day {dayWidth}/{dayWrap} notice {input.notice}: {problem}`
+														)
+													end
+												end
+											end
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		return count, problems
+	end
+
+	t.test("hud layout: the day line, in all three places, inside the safe area and overlapping nothing", function()
+		local count, problems = sweepDay(function(input, layout)
+			local day = layout.day
+			if day == nil then
+				return "no day line"
+			end
+			local s = input.scale
+			local rows = layout.dayRows
+			if math.abs(day.h - HudLayout.COORDS_HEIGHT * rows * s) > 1e-9 then
+				return `the day line is {day.h} tall on {rows} rows`
+			end
+			local width = if rows == 2 then input.dayWrap else input.dayWidth
+			if width == nil or math.abs(day.w - math.max(width, HudLayout.MINIMAP) * s) > 1e-9 then
+				return `the day line is {day.w} wide on {rows} rows`
+			end
+			-- Wrapped only where one row has no room.
+			if rows == 2 then
+				local single = table.clone(input)
+				single.dayWrap = nil
+				if HudLayout.compute(single).day ~= nil then
+					return "wrapped where one row fits"
+				end
+			end
+			local area = layout.area
+			if math.abs(day.x + day.w - (area.x + area.w)) > 1 then
+				return "the day line is not right aligned"
+			end
+			-- Its place: under the coordinates line, under the Map button, or in the corner.
+			local under = layout.coords or layout.mapButton
+			if input.minimap then
+				local coords = layout.coords :: Rect
+				if math.abs(day.y - (coords.y + coords.h + HudLayout.GAP * s)) > 1 then
+					return "not under the coordinates line"
+				end
+			elseif input.touch then
+				local button = layout.mapButton :: Rect
+				if button == nil or math.abs(day.y - (button.y + button.h + HudLayout.GAP * s)) > 1 then
+					return "not under the Map button"
+				end
+			elseif under ~= nil or math.abs(day.y - area.y) > 1 then
+				return "not in the corner"
+			end
+			-- Everything that shows: inside, and disjoint.
+			local safe = HudLayout.safeArea(input.width, input.height, input.insets)
+			local rects = shown(input, layout)
+			rects.day = day
+			rects.notice = layout.notice :: any
+			for name, r in rects do
+				if not HudLayout.inside(r, safe) then
+					return `{name} leaves the safe area`
+				end
+				for other, q in rects do
+					if name < other and HudLayout.overlaps(r, q) then
+						return `{name} overlaps {other}`
+					end
+				end
+				for _, button in layout.buttons do
+					if HudLayout.overlaps(r, button) then
+						return `{name} covers a touch button`
+					end
+				end
+				if HudLayout.overlaps(r, layout.hud) then
+					return `{name} covers the HUD`
+				end
+			end
+			-- The toasts' slot and the effect icons start under it (the column's bottom).
+			local music = layout.music
+			if music and not input.music and music.y < day.y + day.h then
+				return "the toast slot starts above the day line"
+			end
+			local icons = layout.effects
+			if icons and not layout.effectsAside and icons.y < day.y + day.h then
+				return "the effect icons start above the day line"
+			end
+			-- WAILA keeps left of it.
+			if day.x < layout.wailaRight then
+				local low = layout.wailaLow
+				if low == nil or low.y > day.y or low.right > day.x then
+					return "WAILA's reserve leaves the day line"
+				end
+			end
+			-- A notice showing alone is placed (on a roomy screen; among other toasts it may wait
+			-- for room, as they do), under the other toasts.
+			local notice = layout.notice
+			if input.notice and notice == nil and input.height >= 768 and not input.music and not input.save then
+				return "the notice was dropped"
+			end
+			if notice and input.music and layout.music and notice.x + notice.w > (layout.music :: Rect).x then
+				if notice.y < (layout.music :: Rect).y + (layout.music :: Rect).h then
+					return "the notice is not under Now Playing"
+				end
+			end
+			return nil
+		end)
+		t.ok(count > 30000, `the sweep ran ({count})`)
+		t.ok(#problems == 0, table.concat(problems, "\n         "))
+	end)
+
+	t.test("hud layout: a blood moon's warning wraps under the day line where one row doesn't fit", function()
+		local one, wrap = SurvivorLine.widths("Day 2 · Survived 1 day", "Blood Moon tomorrow", measure)
+		t.eq(one, 360, "one row: 44 characters and the shadow, in steps of 8")
+		t.eq(wrap, 184, "wrapped: the wider of its rows")
+		local bar = insets(0, 0, 0, 0, 58)
+		-- (An iPad and a 1024 x 768 window at their Auto scale: 3.125 to 3.375; 1080p's 4.)
+		for _, screen in
+			{
+				{ 1024, 768, true, 2 },
+				{ 1180, 820, true, 2 },
+				{ 1194, 834, true, 2 },
+				{ 1024, 768, false, 2 },
+				{ 1920, 1080, false, 1 },
+			}
+		do
+			local w, h, touch, rows = screen[1], screen[2], screen[3], screen[4]
+			for _, minimap in { true, false } do
+				local layout = HudLayout.compute({
+					width = w,
+					height = h,
+					insets = bar,
+					scale = GuiScale.base(w, h, touch, 0),
+					touch = touch,
+					minimap = minimap,
+					coordsWidth = 160,
+					music = false,
+					save = nil,
+					saveUnder = false,
+					effects = nil,
+					saving = false,
+					debugRight = nil,
+					dayLine = true,
+					dayWidth = one,
+					dayWrap = wrap,
+					buttons = nil,
+				})
+				local where = `{w} x {h} touch {touch} minimap {minimap}`
+				t.ok(layout.day ~= nil, `{where}: the line shows`)
+				t.eq(layout.dayRows, rows, `{where}: on {rows} rows`)
+				-- (The toasts go under both rows.)
+				local day = layout.day :: Rect
+				t.ok((layout.music :: Rect).y >= day.y + day.h, `{where}: the toasts under it`)
+			end
+		end
+	end)
+
+	t.test("hud layout: the blood moon's toasts are as wide as their texts, and placed alone", function()
+		for _, text in SurvivorLine.TOASTS do
+			local width = SurvivorLine.toastWidth(measure(text))
+			t.ok(width >= measure(text) + 2 * SurvivorLine.TOAST_PADDING, `"{text}" fits its toast ({width})`)
+			t.ok(width >= HudLayout.TOAST_WIDTH and width % 8 == 0)
+		end
+		t.eq(SurvivorLine.toastWidth(measure("The Blood Moon rises")), 184)
+		t.eq(widestToast, 240, "You survived the Blood Moon: 27 characters")
+		local layout = HudLayout.compute({
+			width = 1024,
+			height = 768,
+			insets = insets(0, 0, 0, 0, 58),
+			scale = GuiScale.base(1024, 768, true, 0),
+			touch = true,
+			minimap = true,
+			coordsWidth = 160,
+			music = false,
+			save = nil,
+			saveUnder = false,
+			effects = nil,
+			saving = false,
+			debugRight = nil,
+			dayLine = true,
+			dayWidth = 192,
+			notice = widestToast,
+			buttons = nil,
+		})
+		local notice = layout.notice :: Rect
+		t.eq(notice.w, widestToast * layout.scale, "the whole toast")
+		t.ok(notice.x + notice.w <= layout.area.x + layout.area.w + 0.5, "inside the screen's edge")
+	end)
+
+	t.test("hud layout: the day line's three places on a desktop and a phone, the toasts under it", function()
+		local function input(overrides: { [string]: any }): HudLayout.Input
+			local base: HudLayout.Input = {
+				width = 1920,
+				height = 1080,
+				insets = insets(0, 0, 0, 0, 58),
+				scale = 4,
+				touch = false,
+				minimap = true,
+				coordsWidth = 160,
+				music = false,
+				save = nil,
+				saveUnder = false,
+				effects = nil,
+				saving = false,
+				debugRight = nil,
+				dayLine = true,
+				dayWidth = 120,
+				buttons = nil,
+			}
+			for key, value in overrides do
+				(base :: any)[key] = value
+			end
+			return base
+		end
+		-- With the minimap: under the coordinates line; the toast slot under the day line.
+		local desk = HudLayout.compute(input({}))
+		local coords, day = desk.coords :: Rect, desk.day :: Rect
+		t.eq(day.y, coords.y + coords.h + 8)
+		t.eq(day.h, 40, "the coordinates line's height at scale 4")
+		t.eq(day.w, 480, "120 GUI pixels of text")
+		t.eq((desk.music :: Rect).y, day.y + day.h + 8, "slot 1 under the day line")
+		local without = HudLayout.compute(input({ dayLine = false }))
+		t.eq(without.day, nil, "no day line when it doesn't show")
+		t.eq((without.music :: Rect).y, coords.y + coords.h + 8, "the slot as before")
+		-- Neither minimap nor touch: in the corner, the toasts under it.
+		local corner = HudLayout.compute(input({ minimap = false }))
+		local alone = corner.day :: Rect
+		t.eq(alone.y, 58 + 16, "the area's top")
+		t.eq(alone.x + alone.w, 1920 - 16, "right aligned")
+		t.eq((corner.music :: Rect).y, alone.y + alone.h + 8)
+		t.eq(corner.wailaRight, alone.x - 8, "WAILA keeps left of it")
+		-- A touch screen with the minimap off: under the Map button.
+		local touch = HudLayout.compute(input({
+			width = 667,
+			height = 375,
+			scale = GuiScale.base(667, 375, true, 0),
+			touch = true,
+			minimap = false,
+		}))
+		local button, under = touch.mapButton :: Rect, touch.day :: Rect
+		t.eq(under.y, button.y + button.h + 2 * touch.scale)
+		t.ok(under.x + under.w <= touch.area.x + touch.area.w + 0.5, "right aligned")
+		-- A notice toast goes under the toasts that show; beside them when the HUD is in the way.
+		local both = HudLayout.compute(input({ save = 160, notice = 160 }))
+		local save, notice = both.save :: Rect, both.notice :: Rect
+		t.eq(notice.y, save.y + save.h + 8, "under World saved")
+		local three = HudLayout.compute(input({ music = true, save = 160, notice = 160 }))
+		local beside = three.notice :: Rect
+		t.eq(beside.y, (three.music :: Rect).y, "a third toast would reach the HUD: beside slot 1")
+		t.ok(beside.x + beside.w <= (three.music :: Rect).x, "left of it")
+		local first = HudLayout.compute(input({ notice = 200 }))
+		t.eq((first.notice :: Rect).y, (first.music :: Rect).y, "slot 1 when no toast shows")
+		t.eq((first.notice :: Rect).w, 800, "as wide as its text")
+		local icons = HudLayout.compute(input({ notice = 160, effects = HudLayout.effectsSize(2, 1) }))
+		t.eq((icons.effects :: Rect).y, (icons.notice :: Rect).y + 128 + 8, "the effect icons under the notice")
+	end)
 
 	local function phone(overrides: { [string]: any }): HudLayout.Input
 		local input: HudLayout.Input = {

@@ -15,7 +15,8 @@
 	            them) with the wear under it ("Durability: 200 / 250", Minecraft's advanced
 	            tooltip line, a stack's `damage`), "When on Head:" (blue "+2 Armor", "+2 Armor
 	            Toughness", and Tough As Nails' insulation "+1 Warmth", "+1 Cooling", "Keeps you
-	            from freezing"), "When eaten:" (Items/Foods: "Heals 2 hearts", a risk in red),
+	            from freezing"), "When eaten:" (Items/Foods: "Heals 2 hearts", "Cures Bleeding", a
+	            risk in red; "When used:" for medicine),
 	            "When drunk:" (ToughAsNails/Drinks: thirst and hydration, the Thirst risk of dirty
 	            water in red, a tea's Internal Warmth or Chill, a potion's effects through
 	            Shared/Effects.tooltip, red when harmful) with a canteen's "Sips: 2 / 3" under it,
@@ -327,13 +328,33 @@ end
 -- Food effects' kinds (Items/Foods) -> Shared/Effects ids.
 local FOOD_EFFECTS: { [string]: number } = { thirst = Effects.id.Thirst }
 
--- "When eaten:" (Items/Foods).
+-- "When eaten:" (Items/Foods), or "When used:" for medicine: what it heals, cures ("Cures
+-- Bleeding"), sets back and gives.
 local function foodLines(lines: { Line }, item: number)
 	local food = Foods.of(item)
 	if food == nil then
 		return
 	end
-	local body: { Line } = { { text = `Heals {Tooltip.hearts(food.heal)}`, colour = "blue" } }
+	local body: { Line } = {}
+	if food.heal > 0 then
+		table.insert(body, { text = `Heals {Tooltip.hearts(food.heal)}`, colour = "blue" })
+	end
+	local cures = food.cures
+	if cures and #cures > 0 then
+		local names = {}
+		for _, name in cures do
+			local id = Effects.id[name]
+			local def = if id then Effects.get(id) else nil
+			table.insert(names, if def then def.displayName else name)
+		end
+		table.insert(body, { text = `Cures {table.concat(names, ", ")}`, colour = "blue" })
+	end
+	if food.setback then
+		table.insert(body, { text = "Sets an infection back a stage", colour = "blue" })
+	end
+	if food.effects then
+		effectLines(body, food.effects)
+	end
 	local effect = food.effect
 	local id = if effect then FOOD_EFFECTS[effect.kind] else nil
 	if effect and id then
@@ -343,7 +364,7 @@ local function foodLines(lines: { Line }, item: number)
 			`{Tooltip.number(effect.chance * 100)}% chance: `
 		)
 	end
-	section(lines, "When eaten:", body)
+	section(lines, if Foods.isMedical(food) then "When used:" else "When eaten:", body)
 end
 
 -- "When drunk:" (ToughAsNails/Drinks; a mana potion's mana is Shared/Mana.tooltip's).

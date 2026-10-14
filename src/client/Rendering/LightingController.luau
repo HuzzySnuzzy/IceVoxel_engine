@@ -38,6 +38,10 @@
 	             darkens what the sky gives by Minecraft's rain and thunder darkening, hides some
 	             of the sun under full cloud cover and darkens the fog's colour (Weather/
 	             WeatherSky.apply), as much as the sky reaches the camera: caves don't change.
+	  Blood moon the zombie apocalypse's horde nights (Rendering/BloodMoonSky, right after the
+	             weather): the ambients, the sky's colour shift and the haze tinted red as far as
+	             the sky reaches the camera, its own colour grading and a bigger moon; nothing by
+	             day or on other nights (Shared/Apocalypse/BloodMoon's schedule).
 	  Effects    Night Vision (`setNightVision`, Rendering/EffectView: its scale, 0..1, flickering
 	             in its last 10 s) raises the ambient and outdoor ambient towards
 	             Config.Effects.NightVisionAmbient's grey, so caves and nights read lit, as
@@ -64,6 +68,7 @@ local Origin = require(Shared.World.Origin)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local AtmosphereModel = require(script.Parent.AtmosphereModel)
+local BloodMoonSky = require(script.Parent.BloodMoonSky)
 local SkyExposure = require(script.Parent.SkyExposure)
 local ViewSettings = require(script.Parent.ViewSettings)
 local WeatherSky = require(script.Parent.Parent.Weather.WeatherSky)
@@ -224,6 +229,10 @@ local function update(dt: number)
 	-- (The haze colour's floor goes on the time of day's colour, before the weather darkens it.)
 	AtmosphereModel.floor(environment)
 	WeatherSky.apply(environment, WeatherState.rain, WeatherState.storm, WeatherState.clouds, current)
+	-- (The blood moon's red over the weather, as far as the sky reaches the camera.)
+	local bloodMoon = BloodMoonSky.intensity(dayTime)
+	BloodMoonSky.apply(environment, bloodMoon * current)
+	BloodMoonSky.update(bloodMoon, current)
 	if nightVision > 0 then
 		-- (Night Vision: the ambients raised towards its grey.)
 		local grey = Config.Effects.NightVisionAmbient

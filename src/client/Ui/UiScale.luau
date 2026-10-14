@@ -29,12 +29,12 @@
 	             what. Its `kind` says whether it is "scaled" (GUI pixels under a UIScale that
 	             follows the base) or "screen" (screen-relative by design: the first-person hand,
 	             the fire and frost overlays, the Nuke's flash, the world map's backdrop).
-	  corner     what shows in the HUD's corner (`setMinimap`, `setToast`, `setEffects`,
-	             `setSaving`, `setDebugRight`, `setHudRaise`) and Roblox's touch buttons (the live
-	             JumpButton and ContextActionService buttons, measured again when PlayerGui's
-	             children change and every BUTTON_CHECK seconds on touch screens) go into
-	             HudLayout.compute; `hud()` is the result (screen pixels) and `hudChanged` fires
-	             when anything in it may have moved.
+	  corner     what shows in the HUD's corner (`setMinimap`, `setDayLine`, `setToast`,
+	             `setEffects`, `setSaving`, `setDebugRight`, `setHudRaise`) and Roblox's touch
+	             buttons (the live JumpButton and ContextActionService buttons, measured again
+	             when PlayerGui's children change and every BUTTON_CHECK seconds on touch screens)
+	             go into HudLayout.compute; `hud()` is the result (screen pixels) and `hudChanged`
+	             fires when anything in it may have moved.
 
 	Ui/Style's guiScale, setScaleOverride and scaleChanged forward here for older callers.
 ]]
@@ -141,6 +141,10 @@ local corner = {
 	saving = false,
 	debugRight = nil :: number?,
 	hudRaise = 0,
+	dayLine = false,
+	dayWidth = HudLayout.MINIMAP,
+	dayWrap = nil :: number?,
+	notice = nil :: number?,
 }
 -- Roblox's touch buttons as last measured (nil: none found), and the corner's layout.
 local buttons: { HudLayout.Rect }? = nil
@@ -264,6 +268,10 @@ local function layoutCorner()
 		saving = corner.saving,
 		debugRight = corner.debugRight,
 		hudRaise = corner.hudRaise,
+		dayLine = corner.dayLine,
+		dayWidth = corner.dayWidth,
+		dayWrap = corner.dayWrap,
+		notice = corner.notice,
 		buttons = buttons,
 	})
 end
@@ -503,11 +511,28 @@ function UiScale.setMinimap(shown: boolean, coordsWidth: number?)
 end
 
 --[[
-	A toast shows (`width` GUI pixels) or went (nil): "music" Now Playing (Ui/MusicToast), "save"
-	World saved (Ui/SaveIndicator; `under`: it sits under Now Playing).
+	The day line shows (Ui/SurvivorHud), `width` GUI pixels on one row, `wrap` with its blood
+	moon's notice on a second row (nil: no notice; HudLayout wraps it where one row doesn't fit).
 ]]
-function UiScale.setToast(kind: "music" | "save", width: number?, under: boolean?)
-	if kind == "music" then
+function UiScale.setDayLine(shown: boolean, width: number, wrap: number?)
+	if shown ~= corner.dayLine or width ~= corner.dayWidth or wrap ~= corner.dayWrap then
+		corner.dayLine, corner.dayWidth, corner.dayWrap = shown, width, wrap
+		cornerChanged()
+	end
+end
+
+--[[
+	A toast shows (`width` GUI pixels) or went (nil): "music" Now Playing (Ui/MusicToast), "save"
+	World saved (Ui/SaveIndicator; `under`: it sits under Now Playing), "notice" a blood moon's
+	notice (Ui/SurvivorHud).
+]]
+function UiScale.setToast(kind: "music" | "save" | "notice", width: number?, under: boolean?)
+	if kind == "notice" then
+		if width ~= corner.notice then
+			corner.notice = width
+			cornerChanged()
+		end
+	elseif kind == "music" then
 		local showing = width ~= nil
 		if showing ~= corner.music then
 			corner.music = showing

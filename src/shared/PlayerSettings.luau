@@ -1126,6 +1126,25 @@ local ENTRIES: { Entry } = {
 		labels = { [0] = "OFF", [1] = "Fast", [2] = "Fancy" },
 		tooltip = "Rain and snow falling around you: within 10 blocks on Fancy, 5 on Fast.",
 	},
+	-- The zombie apocalypse's day counter (client Ui/SurvivorHud): the world's day and the days
+	-- this character survived, under the minimap, with the blood moon's warnings. Off with
+	-- Config.Apocalypse.Survivor.DayCounter whatever this says.
+	{
+		id = 59,
+		key = "dayCounter",
+		name = "Day Counter",
+		kind = "toggle",
+		page = "hud",
+		min = 0,
+		max = 1,
+		step = 1,
+		default = 1,
+		effect = "hud",
+		preset = false,
+		format = "plain",
+		tooltip = "The day and the days you have survived, under the minimap, with a warning "
+			.. "before each Blood Moon.",
+	},
 }
 
 -- The key bindings (Shared/KeyBindings), generated: one per action, ids from KEY_BASE in the

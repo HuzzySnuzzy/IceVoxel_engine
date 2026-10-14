@@ -12,8 +12,11 @@
 	            (Shared/Mana), the inventory (36 slots, 4 armor, the cursor, the selected hotbar
 	            slot) and Terraria's equipment (7 accessories, 4 vanity armor, 7 vanity accessories,
 	            the hidden bits: Inventory/Types), Tough As Nails' thirst and temperature and the
-	            status effects (as Save/PlayerCodec's), and the worlds whose old per-world record
-	            it has imported (`imported`: the migration's, once each). Where it stands and its
+	            status effects (as Save/PlayerCodec's), the worlds whose old per-world record it
+	            has imported (`imported`: the migration's, once each), and the zombie
+	            apocalypse's survivor record (`alive` ticks since it last died, zombie `kills`,
+	            blood `moons` survived: server Apocalypse/Survival) and its bite's `infection`
+	            (the progress, 0 healthy: Shared/Apocalypse/Infection). Where it stands and its
 	            game mode are each world's (Save/WorldCharacterCodec); its Knowledge, Ages and
 	            skills are a table beside the bytes in the value (Shared/Progression.toRecord).
 	  Bytes     u8 VERSION, u8 flags (bit 0 thirst, 1 temperature, 2 dead, 3 legacy), u32 id,
@@ -23,12 +26,14 @@
 	            slots, 37..40 armor, 41 cursor, 42..48 accessories, 49..52 vanity armor, 53..59
 	            vanity accessories), stack (Save/SaveCodec)), [5 x f32 thirst], [10 x f32
 	            temperature], u8 n + n x (u8 effect, u8 amplifier, i32 ticks, u8 ambient), u8 n +
-	            n x text (imported world ids). 100 bytes to 3 KB: far below a key's 4 MB.
+	            n x text (imported world ids), then (version 2 on) u32 alive, u16 kills, u16 moons,
+	            u32 infection. 100 bytes to 3 KB: far below a key's 4 MB. A version 1 record (before
+	            the apocalypse) reads with its survivor record and infection at 0.
 	            Decoding checks every number; anything odd is a damaged record (nil), an unknown
 	            item is dropped and counted (`dropped`, as PlayerCodec's: such a record is not
 	            written back this session).
-	  Things    `keepThings`: one record's inventory, equipment, mana, Mana Crystals and effects
-	            copied into another (Players/CharacterStore saves a visit that stopped being fair
+	  Things    `keepThings`: one record's inventory, equipment, mana, Mana Crystals, effects and
+	            infection copied into another (Players/CharacterStore saves a visit that stopped being fair
 	            with the things it had then).
 	  Value     what the DataStore key "u<UserId>/c<id>" holds: { v = 1, data = base85 bytes,
 	            progress = Progression's record or nil, lock = { job, at, released? } } (the lock is
@@ -86,6 +91,12 @@ export type Record = {
 	effects: { PlayerCodec.Effect },
 	-- World ids whose old per-world record this character imported.
 	imported: { string },
+	-- The zombie apocalypse's survivor record (since it last died) and its bite's infection
+	-- progress (0: healthy).
+	alive: number,
+	kills: number,
+	moons: number,
+	infection: number,
 	-- Stacks of items this version doesn't know, left out while reading (never written).
 	dropped: number,
 }
@@ -99,7 +110,8 @@ export type Index = {
 
 local CharacterCodec = {}
 
-CharacterCodec.VERSION = 1
+-- (1 before the zombie apocalypse's survivor record and infection.)
+CharacterCodec.VERSION = 2
 CharacterCodec.VALUE_VERSION = 1
 CharacterCodec.INDEX_VERSION = 1
 -- Most imported world ids a record keeps (the oldest go first).
@@ -149,6 +161,10 @@ function CharacterCodec.new(
 		temperature = nil,
 		effects = {},
 		imported = {},
+		alive = 0,
+		kills = 0,
+		moons = 0,
+		infection = 0,
 		dropped = 0,
 	}
 end
@@ -190,6 +206,7 @@ function CharacterCodec.keepThings(record: Record, from: Record)
 	record.vanityAccessories = copyStore(from.vanityAccessories, Types.VANITY_ACCESSORY_SIZE)
 	record.hidden = from.hidden
 	record.mana, record.crystals = from.mana, from.crystals
+	record.infection = from.infection
 	local effects: { PlayerCodec.Effect } = {}
 	for _, effect in from.effects do
 		table.insert(effects, table.clone(effect))
@@ -286,6 +303,13 @@ function CharacterCodec.encode(record: Record): buffer
 	for i = first, #imported do
 		SaveCodec.text(w, imported[i])
 	end
+	local function whole(value: number, limit: number): number
+		return if finite(value) then math.clamp(math.floor(value), 0, limit) else 0
+	end
+	SaveCodec.u32(w, whole(record.alive, 4294967295))
+	SaveCodec.u16(w, whole(record.kills, 65535))
+	SaveCodec.u16(w, whole(record.moons, 65535))
+	SaveCodec.u32(w, whole(record.infection, 4294967295))
 	return SaveCodec.finish(w)
 end
 
@@ -390,6 +414,12 @@ local function decode(bytes: buffer): Record
 	end
 	for _ = 1, SaveCodec.readU8(r) do
 		table.insert(record.imported, SaveCodec.readText(r))
+	end
+	if version >= 2 then
+		record.alive = SaveCodec.readU32(r)
+		record.kills = SaveCodec.readU16(r)
+		record.moons = SaveCodec.readU16(r)
+		record.infection = SaveCodec.readU32(r)
 	end
 	if not SaveCodec.atEnd(r) then
 		error("character has bytes left over", 0)

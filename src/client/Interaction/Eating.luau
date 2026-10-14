@@ -1,17 +1,24 @@
 --!strict
 --[[
-	Eating on this player's client, for Interaction/BlockInteraction: a right click with a food in
-	hand (Shared/Items/Foods: the meat mobs drop, cooked or raw, and rotten flesh), when no block's
-	menu takes the click, starts Minecraft's 32 tick hold, as Interaction/Drinking does for drinks:
+	Eating and medicine on this player's client, for Interaction/BlockInteraction: a right click
+	with a food in hand (Shared/Items/Foods: the meat mobs drop, cooked or raw, rotten flesh, the
+	ruins' tins and treats, and the zombie apocalypse's medical supplies), when no block's menu
+	takes the click, starts Minecraft's hold of the use button, as Interaction/Drinking does for
+	drinks:
 
 	  start   Eat start, then while the use button stays down (`stop` when it is let go), the same
-	          item in the same hotbar slot and no screen open, Foods.USE_TICKS (32) ticks count at
-	          20 a second, with Minecraft's bite (entity.generic.eat) every 4 ticks from the 7th
-	          (LivingEntity.triggerItemUseEffects); at 32, Eat finish and the burp
-	          (entity.player.burp). Anything else cancels it (Eat cancel).
-	Only when the player may eat (Foods.canEat: hurt, or in creative; never a spectator). Nothing is
-	predicted: the server's inventory snapshot brings the eaten item and the health comes back with
-	the character's.
+	          item in the same hotbar slot and no screen open, the food's Foods.useTicks (32 for
+	          Minecraft's food) count at 20 a second, with Minecraft's bite (entity.generic.eat)
+	          every 4 ticks from the 7th (LivingEntity.triggerItemUseEffects); at the end, Eat
+	          finish and the burp (entity.player.burp). Anything else cancels it (Eat cancel).
+	          Medicine (Foods.isMedical) plays its own sound (Foods `sound`: item.bandage.apply,
+	          item.medkit.use, item.pills.swallow) as the use starts, instead of the bites and the
+	          burp; the server plays it to everyone else when it finishes.
+	Only when the player may use it (Foods.canUse, with the effects this client was told of,
+	Player/EffectState: hurt, bleeding for a bandage, infected for antibiotics or a poultice, any
+	time for a treat with effects, creative whenever; never a spectator). Nothing is predicted: the
+	server's inventory snapshot brings the used item and the health comes back with the
+	character's.
 ]]
 
 local Players = game:GetService("Players")
@@ -19,12 +26,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
+local Effects = require(Shared.Effects)
 local Foods = require(Shared.Items.Foods)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local EffectState = require(script.Parent.Parent.Player.EffectState)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
@@ -35,8 +44,18 @@ local TICK = 1 / 20
 -- Minecraft's bites: every 4 ticks once 7 have passed.
 local BITE_EVERY = 4
 local BITE_FROM = 7
+-- The sounds medicine plays here (Foods `sound`): checked against the table as this loads, so a
+-- food naming a sound this client doesn't play fails at once.
+local MEDICINE_SOUNDS: { [string]: boolean } = {
+	["item.bandage.apply"] = true,
+	["item.medkit.use"] = true,
+	["item.pills.swallow"] = true,
+}
+for item, food in Foods.ITEMS do
+	assert(food.sound == nil or MEDICINE_SOUNDS[food.sound], `Food {item}'s sound {food.sound} is not played here`)
+end
 
-type Holding = { slot: number, item: number, elapsed: number, ticks: number }
+type Holding = { slot: number, item: number, elapsed: number, ticks: number, length: number, food: Foods.Food }
 local holding: Holding? = nil
 local started = false
 
@@ -63,7 +82,7 @@ end
 -- How far the food has got (0..1), nil when none.
 function Eating.progress(): number?
 	local current = holding
-	return if current then math.min(current.ticks / Foods.USE_TICKS, 1) else nil
+	return if current then math.min(current.ticks / current.length, 1) else nil
 end
 
 -- Is `stack` food?
@@ -71,23 +90,40 @@ function Eating.handles(stack: Items.Stack?): boolean
 	return stack ~= nil and Foods.isFood(stack.item)
 end
 
--- May the player eat now (their character's health, game `mode`)?
-local function mayEat(mode: string): boolean
+-- Has this player effect `name` (as the server last said)?
+local function has(name: string): boolean
+	local id = Effects.id[name]
+	return id ~= nil and (EffectState.get(id)) ~= nil
+end
+
+-- May the player use `food` now (their character's health, game `mode`)?
+local function mayEat(food: Foods.Food, mode: string): boolean
 	local character = Players.LocalPlayer.Character
 	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
 	if humanoid == nil or humanoid.Health <= 0 then
 		return false
 	end
-	return Foods.canEat(humanoid.Health, humanoid.MaxHealth, mode)
+	return Foods.canUse(food, humanoid.Health, humanoid.MaxHealth, mode, has)
 end
 
 -- A right click with `stack` in game `mode`: starts eating it. Returns whether it did.
 function Eating.use(stack: Items.Stack?, mode: string): boolean
-	if holding or stack == nil or not Eating.handles(stack) or not mayEat(mode) then
+	local food = if stack then Foods.of(stack.item) else nil
+	if holding or stack == nil or food == nil or not mayEat(food, mode) then
 		return false
 	end
-	holding = { slot = ClientInventory.selected(), item = stack.item, elapsed = 0, ticks = 0 }
+	holding = {
+		slot = ClientInventory.selected(),
+		item = stack.item,
+		elapsed = 0,
+		ticks = 0,
+		length = Foods.useTicks(food),
+		food = food,
+	}
 	ClientNet.send(Protocol.ClientMessage.Eat, Protocol.encodeEat(Protocol.EatAction.Start))
+	if Foods.isMedical(food) and food.sound then
+		play(food.sound)
+	end
 	return true
 end
 
@@ -106,16 +142,19 @@ local function update(dt: number)
 		cancel()
 		return
 	end
+	local medical = Foods.isMedical(current.food)
 	current.elapsed += dt
-	while current.ticks < Foods.USE_TICKS and current.elapsed >= (current.ticks + 1) * TICK do
+	while current.ticks < current.length and current.elapsed >= (current.ticks + 1) * TICK do
 		current.ticks += 1
-		local remaining = Foods.USE_TICKS - current.ticks
+		local remaining = current.length - current.ticks
 		if remaining == 0 then
 			holding = nil
 			ClientNet.send(Protocol.ClientMessage.Eat, Protocol.encodeEat(Protocol.EatAction.Finish))
-			play("entity.player.burp")
+			if not medical then
+				play("entity.player.burp")
+			end
 			return
-		elseif remaining <= Foods.USE_TICKS - BITE_FROM and remaining % BITE_EVERY == 0 then
+		elseif not medical and remaining <= current.length - BITE_FROM and remaining % BITE_EVERY == 0 then
 			play("entity.generic.eat")
 		end
 	end

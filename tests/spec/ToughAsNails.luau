@@ -1,7 +1,8 @@
 --[[
 	Tough As Nails: thirst (Minecraft's FoodData with water: exhaustion -> hydration -> thirst,
 	the Thirst effect, regeneration that needs thirst, dehydration down to the floor, half the
-	drain under Climate Clemency), drinks (hand, dirty, purified; their chances with an injected
+	drain under Climate Clemency, the regeneration block that holds both thirst's and Roblox's
+	regeneration for the zombie apocalypse's infection), drinks (hand, dirty, purified; their chances with an injected
 	random; Internal Warmth and Chill; bottles and canteens filling and emptying, creative's
 	rules; the container tables), movement exhaustion (Exertion: what the client measures, what
 	the server allows), body temperature (the climate on the -10..10 scale and its zones, the
@@ -11,6 +12,8 @@
 	fake world: heat and cold sources and their distance, checks, insulation), the recipes
 	(bottles, the canteen, purification by smelting) and the Protocol messages.
 ]]
+
+local fs = require("@lune/fs")
 
 return function(t, shared, require, server)
 	local Biomes = require(shared.Biomes)
@@ -219,6 +222,49 @@ return function(t, shared, require, server)
 		t.eq(held, 0, "stopped: no regeneration")
 		t.eq(frozen.timer, 0)
 		t.eq(frozen.exhaustion, 0, "and none of its exhaustion")
+	end)
+
+	t.test("thirst: the regeneration block (an infection from stage III) stops both kinds", function()
+		-- (Server Players/ToughAsNails can't run outside Roblox; its rule is checked in its source:
+		-- the block joins the frozen or overheated rule in `stopped`, which both pauses the Roblox
+		-- Health script and holds thirst's regeneration, and server Apocalypse/Infection sets the
+		-- block from Shared/Apocalypse/Infection.blocksRegeneration.)
+		local function code(path: string): string
+			local source = fs.readFile(path)
+			source = string.gsub(source, "%-%-%[(=*)%[.-%]%1%]", "")
+			return (string.gsub(source, "%-%-[^\n]*", ""))
+		end
+		local tan = code("src/server/Players/ToughAsNails.luau")
+		local stopped = string.match(tan, "local stopped = (.-)\n%s*pauseRobloxRegeneration")
+		t.ok(stopped ~= nil, "`stopped` is worked out right before the Health script's pause")
+		t.ok(stopped and string.find(stopped, "Temperature.stopsRegeneration", 1, true), "the extremes")
+		t.ok(stopped and string.find(stopped, "block(player)", 1, true), "and the regeneration block")
+		t.ok(string.find(tan, "pauseRobloxRegeneration(record, character, stopped)", 1, true), "Roblox's kind")
+		t.ok(string.match(tan, "Thirst%.tick%(%s*thirst,.-stopped,") ~= nil, "thirst's kind")
+		t.ok(string.find(tan, "function ToughAsNailsServer.setRegenBlock", 1, true), "the block's setter")
+		t.ok(string.find(tan, "function ToughAsNailsServer.pauseRegeneration", 1, true), "the pause without a tick")
+		t.ok(string.find(tan, "function ToughAsNailsServer.sprinting", 1, true), "the sprint flag")
+		local infection = code("src/server/Apocalypse/Infection.luau")
+		t.ok(string.find(infection, "ToughAsNails.setRegenBlock(", 1, true), "the infection sets the block")
+		t.ok(string.find(infection, "Rules.blocksRegeneration", 1, true), "from the pure rule")
+		-- (With Tough As Nails off the infection asks for the pause every tick, kept nowhere, so a
+		-- character that came without dying, its Health script new, is paused too.)
+		local tick = string.match(infection, "function Infection%.tick%(.-\nend")
+		t.ok(tick and string.find(tick, "ToughAsNails.pauseRegeneration(player,", 1, true), "asked every tick")
+		t.ok(tick and not string.find(tick, "paused[", 1, true), "no remembered pause to go stale")
+		-- Thirst's kind, held: no health back, none of its exhaustion spent.
+		local held = Thirst.new()
+		local healed = 0
+		for _ = 1, 400 do
+			healed += select(2, Thirst.tick(held, SURVIVAL, 10, 20, 0, false, true))
+		end
+		t.eq(healed, 0, "held: nothing comes back")
+		local free = Thirst.new()
+		local back = 0
+		for _ = 1, 400 do
+			back += select(2, Thirst.tick(free, SURVIVAL, 10, 20, 0, false, false))
+		end
+		t.ok(back > 0, "free: it comes back")
 	end)
 
 	t.test("thirst: creative and spectator players stand still", function()

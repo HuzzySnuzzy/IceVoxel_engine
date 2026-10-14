@@ -2,10 +2,11 @@
 --[[
 	Where the HUD's shared corner goes (pure: numbers in, rectangles out, so the tests place every
 	screen and every GUI Scale choice): the top right corner holds the minimap with its
-	coordinates line (or the touch "Map" button while the minimap is off), the toasts under it
-	(Minecraft's ToastComponent: the Now Playing toast in the first slot, the "World saved" toast
-	in it or under it), the status effect icons (Minecraft's Gui.renderEffects: the top right) and
-	the saving icon at the bottom right; WAILA keeps out of them, and right of the F3 text.
+	coordinates line (or the touch "Map" button while the minimap is off) and the zombie
+	apocalypse's day line under them, the toasts under that (Minecraft's ToastComponent: the Now
+	Playing toast in the first slot, the "World saved" toast in it or under it, the blood moon's
+	notices under those), the status effect icons (Minecraft's Gui.renderEffects: the top right)
+	and the saving icon at the bottom right; WAILA keeps out of them, and right of the F3 text.
 
 	Everything is in screen pixels: (0, 0) the screen's top left, `width` x `height` the camera's
 	viewport. Sizes are GUI pixels (below) times the GUI scale, so the corner grows and shrinks
@@ -21,6 +22,16 @@
 	            button takes the corner (the only way to the world map there), never smaller than
 	            a finger's TOUCH_TARGET (`mapButtonSize`); `touchSide` is the same floor for the
 	            minimap's own weather button (Map/Minimap).
+	  day line  the day counter (Ui/SurvivorHud: "Day 4 · Survived 2 days", a blood moon's
+	            warning), as tall as the coordinates line (COORDS_HEIGHT) and as wide as its text
+	            (`dayWidth`, at least the minimap's width), right aligned, GAP under the column's
+	            last piece: the coordinates line, else (touch, the minimap off) the Map button,
+	            else at the area's top right. Where that row doesn't fit (with a warning it is 45
+	            to 50 characters, 360 to 400 GUI pixels, and an iPad's or a 1024 x 768 window's
+	            area is about 320 at its Auto scale) the warning goes on a second row under the day's
+	            text (`dayWrap`, its wider row's width; `dayRows` 2), so the line never goes
+	            away while it carries the warning. The column's bottom moves under it, so the
+	            toasts and the effect icons follow, and WAILA keeps left of it where it is wider.
 	  in the way  Roblox's touch controls (the live JumpButton and ContextActionService buttons,
 	            `buttons`; on a touch screen without them PlayerModule's jump button rule:
 	            `jumpButton`), which never scale with the GUI scale, so they are measured, not
@@ -30,13 +41,16 @@
 	  saving    while it shows: the bottom right, raised above every button in its way (by the
 	            buttons' real size, not a fixed raise times the scale); dropped if that reaches the
 	            minimap column.
-	  toasts    slot 1 starts GAP under the column (the coordinates line, the Map button, or the
-	            area's top): the Now Playing toast's place, shown or not (it slides in there).
+	  toasts    slot 1 starts GAP under the column (the day line, the coordinates line, the Map
+	            button, or the area's top): the Now Playing toast's place, shown or not (it slides
+	            in there).
 	            The "World saved" toast takes slot 1 unless Now Playing shows or it already went
 	            under it (`saveUnder`: SaveIndicator never moves it back up while it shows), then
 	            slot 2 GAP under slot 1. A toast that cannot go there (the saving icon, a button or
 	            the bottom in the way: small phones) goes beside slot 1, left of it, else it waits
-	            (nil) until there is room, as Minecraft's toasts queue for a free slot.
+	            (nil) until there is room, as Minecraft's toasts queue for a free slot. A notice
+	            (`notice`: the blood moon's, Ui/SurvivorHud) goes GAP under the lowest toast
+	            showing at the right edge (slot 1 when none), by the same rules.
 	  effects   the icons' block (rows of 24 x 24 icons, `effectsSize`) takes the toast slot while
 	            no toast shows, else goes under the lowest toast showing; when that reaches the
 	            bottom, a button or the saving icon, it goes beside the toasts (left of them), else
@@ -122,6 +136,13 @@ export type Input = {
 	saving: boolean,
 	-- The F3 text's right edge (screen pixels) while it is open.
 	debugRight: number?,
+	-- The day line shows (Ui/SurvivorHud), its width on one row and, with a blood moon's notice
+	-- that can wrap onto a second row, its width wrapped (GUI pixels; nil: no notice).
+	dayLine: boolean?,
+	dayWidth: number?,
+	dayWrap: number?,
+	-- A notice toast shows (its width, GUI pixels; Ui/SurvivorHud's blood moon notices).
+	notice: number?,
 	-- GUI pixels the HUD's held item name and status row reach above its canvas (Ui/Hud: they
 	-- move up over Terraria's mana stars, Ui/ManaStars.layout; 0 or nil without).
 	hudRaise: number?,
@@ -141,6 +162,11 @@ export type Layout = {
 	music: Rect?,
 	-- "World saved" while it shows (nil while it waits for room).
 	save: Rect?,
+	-- The day line (nil: none, or no room) and its rows (1; 2 with its notice wrapped under its
+	-- text), and a notice toast while it shows (nil: none, or no room yet).
+	day: Rect?,
+	dayRows: number,
+	notice: Rect?,
 	-- The status effect icons' block, the scale it is drawn at, and whether it went beside the
 	-- minimap column or the toasts.
 	effects: Rect?,
@@ -341,6 +367,9 @@ function HudLayout.compute(input: Input): Layout
 		mapButton = nil,
 		music = nil,
 		save = nil,
+		day = nil,
+		dayRows = 1,
+		notice = nil,
 		effects = nil,
 		effectsScale = s,
 		effectsAside = false,
@@ -374,6 +403,27 @@ function HudLayout.compute(input: Input): Layout
 		table.insert(placed, button)
 		top = button
 		columnBottom = button.y + button.h
+	end
+	-- (The day line under the column, or in the corner, on one row or wrapped onto two; the column
+	-- ends under it.)
+	if input.dayLine then
+		local y = if top then columnBottom + gap else area.y
+		local function dayRect(w: number, rows: number): Rect?
+			local width = math.max(w, HudLayout.MINIMAP) * s
+			local r = snap(rect(right - width, y, width, HudLayout.COORDS_HEIGHT * rows * s))
+			return if HudLayout.inside(r, safe) and hit(r, placed) == nil then r else nil
+		end
+		local day, rows = dayRect(input.dayWidth or 0, 1), 1
+		local wrap = input.dayWrap
+		if day == nil and wrap then
+			day, rows = dayRect(wrap, 2), 2
+		end
+		if day then
+			layout.day, layout.dayRows = day, rows
+			table.insert(placed, day)
+			top = top or day
+			columnBottom = day.y + day.h
+		end
 	end
 	local slotTop = columnBottom + gap
 
@@ -430,6 +480,19 @@ function HudLayout.compute(input: Input): Layout
 			end
 		end
 	end
+	local noticeWidth = input.notice
+	if noticeWidth then
+		local w = math.max(noticeWidth, HudLayout.TOAST_WIDTH) * s
+		local y = if toastBottom then toastBottom + gap else slotTop
+		local notice, moved = find(space, y, besideToasts, w, toastH)
+		layout.notice = notice
+		if notice then
+			table.insert(placed, notice)
+			if not moved then
+				toastBottom = math.max(toastBottom or 0, notice.y + notice.h)
+			end
+		end
+	end
 
 	--[[ The status effect icons ]]
 
@@ -457,16 +520,21 @@ function HudLayout.compute(input: Input): Layout
 
 	local wailaRight = if top then top.x - gap else right
 	-- (Pieces put beside the column at the top are in its way too.)
-	for _, piece in { layout.music, layout.save, layout.effects } do
+	for _, piece in { layout.music, layout.save, layout.notice, layout.effects } do
 		if piece and piece.y < slotTop and (piece ~= layout.music or input.music) then
 			wailaRight = math.min(wailaRight, piece.x - gap)
 		end
 	end
 	layout.wailaRight = math.floor(wailaRight)
-	local coords = layout.coords
-	if coords then
-		layout.wailaLow = { y = coords.y, right = math.floor(math.min(wailaRight, coords.x - gap)) }
+	-- (The column's lower pieces, the coordinates and the day line, may be wider than its top.)
+	local low: { y: number, right: number }? = nil
+	for _, piece in { layout.coords, layout.day } do
+		if piece and piece ~= top then
+			local edge = math.floor(math.min(wailaRight, piece.x - gap))
+			low = if low then { y = low.y, right = math.min(low.right, edge) } else { y = piece.y, right = edge }
+		end
 	end
+	layout.wailaLow = low
 	local debugRight = input.debugRight
 	if debugRight then
 		layout.wailaAvoid = math.ceil(debugRight + gap)

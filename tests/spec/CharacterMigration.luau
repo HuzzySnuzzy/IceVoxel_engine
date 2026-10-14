@@ -1,7 +1,8 @@
 --[[
 	Returning players' old data into characters (server Save/CharacterMigration, Config.Characters
 	.Migrate): the old progress becomes a Mediumcore "legacy" character with the user's avatar all
-	worn; an old per-world player record (Save/PlayerCodec, version 1 or 2) is taken in once per
+	worn; an old per-world player record (Save/PlayerCodec, version 1, 2 or 3: the zombie
+	apocalypse's survivor record, which versions 1 and 2 read as zeros) is taken in once per
 	world by the first character entering it (its place and game mode to the world's entry for
 	that character, its slots, armor, equipment (no accessory worn twice), cursor and Mana
 	Crystals into the character, what does not fit listed to drop), the character keeping the
@@ -189,6 +190,11 @@ return function(t, shared, require, server)
 		t.eq((back :: any).legacy, true)
 		t.eq((keptProgress :: any).points, 340)
 		t.eq(lock, nil, "nobody holds it until it is selected")
+		-- (The zombie apocalypse's survivor record, CharacterCodec version 2: a migrated character
+		-- starts it afresh, healthy, and keeps it through its key.)
+		t.eq(CharacterCodec.VERSION, 2)
+		local stored = back :: CharacterCodec.Record
+		t.eq(stored.alive + stored.kills + stored.moons + stored.infection, 0, "a fresh survivor record")
 	end)
 
 	t.test("character migration: an old record's things go into the character; what doesn't fit is listed", function()
@@ -423,6 +429,68 @@ return function(t, shared, require, server)
 		SaveCodec.stack(w, Items.newStack(Items.id.HermesBoots, 1) :: any)
 		SaveCodec.u8(w, 0)
 		t.eq((PlayerCodec.decode(SaveCodec.finish(w))), nil)
-		t.eq(PlayerCodec.VERSION, 2)
+	end)
+
+	t.test("character migration: a survivor record (version 3) round trips; versions 1 and 2 read zeros", function()
+		t.eq(PlayerCodec.VERSION, 3, "bumped for the survivor record")
+		local record = oldRecord()
+		record.alive, record.kills, record.moons, record.infection = 50000, 12, 2, 30001
+		local back = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any
+		t.eq(back.alive, 50000)
+		t.eq(back.kills, 12)
+		t.eq(back.moons, 2)
+		t.eq(back.infection, 30001)
+		t.eq(back.slots[20].item, id.IronIngot, "the rest as before")
+		-- Version 2: the same bytes without the last 12 (u32 alive, u16 kills, u16 moons, u32
+		-- infection) and their flag (bit 5) under version byte 2.
+		local bytes = PlayerCodec.encode(record)
+		t.ok(bit32.btest(buffer.readu8(bytes, 1), 32), "the survivor record's flag")
+		local two = buffer.create(buffer.len(bytes) - 12)
+		buffer.copy(two, 0, bytes, 0, buffer.len(two))
+		buffer.writeu8(two, 0, 2)
+		buffer.writeu8(two, 1, buffer.readu8(bytes, 1) - 32)
+		local old = PlayerCodec.decode(two) :: any
+		t.ok(old ~= nil, "a version 2 record reads")
+		t.eq(old.alive, 0)
+		t.eq(old.kills, 0)
+		t.eq(old.moons, 0)
+		t.eq(old.infection, 0, "healthy")
+		t.eq(old.cursor.count, 60)
+		-- Version 2 never had them: such bytes are damage. A fresh record writes none.
+		t.ok(not bit32.btest(buffer.readu8(PlayerCodec.encode(PlayerCodec.new()), 1), 32), "all 0: none")
+		local wrong = buffer.create(buffer.len(bytes))
+		buffer.copy(wrong, 0, bytes, 0, buffer.len(bytes))
+		buffer.writeu8(wrong, 0, 2)
+		t.eq((PlayerCodec.decode(wrong)), nil)
+		local plain = PlayerCodec.fromText(versionOne(oldRecord())) :: any
+		t.eq(plain.alive, 0, "version 1: zeros too")
+		-- Damage written as nothing odd: non-finite and out-of-range numbers are clamped.
+		local odd = oldRecord()
+		odd.alive, odd.kills, odd.moons, odd.infection = 0 / 0, 1e9, -3, math.huge
+		local clamped = PlayerCodec.fromText(PlayerCodec.toText(odd)) :: any
+		t.eq(clamped.alive, 0)
+		t.eq(clamped.kills, 65535)
+		t.eq(clamped.moons, 0)
+		t.eq(clamped.infection, 0)
+		-- Nothing live yet (the title screen): the saved record's survivor record is kept.
+		local captured = PlayerCodec.new()
+		local kept = PlayerCodec.withWaiting(
+			captured,
+			record,
+			{ standing = false, climate = false, effects = false, mana = false, survivor = false }
+		)
+		t.eq(kept.alive, 50000)
+		t.eq(kept.infection, 30001)
+		local live = PlayerCodec.new()
+		live.alive = 7
+		t.eq(
+			PlayerCodec.withWaiting(
+				live,
+				record,
+				{ standing = true, climate = true, effects = true, mana = true, survivor = true }
+			).alive,
+			7,
+			"live: the live one's"
+		)
 	end)
 end

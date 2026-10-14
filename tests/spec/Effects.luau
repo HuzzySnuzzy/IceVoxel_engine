@@ -1,7 +1,8 @@
 --[[
 	Status effects (Shared/Effects, server Players/EffectRules, Players/EffectCommand): the
 	registry, Minecraft 1.20.1's MobEffectInstance.update and tick (hidden effects, Regeneration,
-	Poison, Wither and the instant effects on their ticks, invulnerable modes), the modifiers the
+	Poison, Wither, the zombie apocalypse's Bleeding and the instant effects on their ticks,
+	invulnerable modes), the modifiers the
 	movement, mining, combat and burning read (on both the client's and the server's paths), the
 	effects oil and fuel give and water washes off, burning with Fire Resistance, Oil Coated and
 	Fuel Soaked, the potions (items, brewing, drinking), the Effects message, the server's sync
@@ -241,6 +242,36 @@ return function(t, shared, require, server, client)
 		local forever = EffectRules.new()
 		EffectRules.give(forever, E.Regeneration, INFINITE, 0)
 		t.eq(select(2, run(forever, 100)), 2, "every 50 ticks of age")
+	end)
+
+	t.test("effects: Bleeding hurts every 80 ticks (40 at II) and stops at 1 half heart", function()
+		-- (The zombie apocalypse's wounds: server Apocalypse/Survival gives at least 400 ticks a hit.)
+		local def = Effects.get(E.Bleeding) :: Effects.Effect
+		t.eq(def.interval, 80)
+		t.eq(def.damage, 1)
+		t.eq(def.lethal, false, "not lethal")
+		t.eq(def.category, "harmful")
+		local bleeding = EffectRules.new()
+		EffectRules.give(bleeding, E.Bleeding, 400, 0)
+		t.eq(run(bleeding, 400), 5, "I: a half heart every 80 ticks, five over 400")
+		t.ok(not EffectRules.has(bleeding, E.Bleeding), "and it ends")
+		local worse = EffectRules.new()
+		EffectRules.give(worse, E.Bleeding, 400, 1)
+		t.eq(run(worse, 400), 10, "II: every 40, ten over 400")
+		-- Played out on a body: it never takes the last half heart.
+		local body = EffectRules.new()
+		EffectRules.give(body, E.Bleeding, 2000, 1)
+		local health = 6
+		for _ = 1, 2000 do
+			local hurt = EffectRules.tick(body, SURVIVAL, health, 20)
+			health -= hurt
+			t.ok(health >= 1, "never below 1 half heart")
+		end
+		t.eq(health, 1, "down to the last half heart, no further")
+		t.eq(run(EffectRules.new(), 10, SURVIVAL, 1), 0)
+		local creative = EffectRules.new()
+		EffectRules.give(creative, E.Bleeding, 400, 1)
+		t.eq(run(creative, 400, CREATIVE), 0, "creative: never hurt")
 	end)
 
 	t.test("effects: Instant Health and Instant Damage act once (4 << amp, 6 << amp)", function()
