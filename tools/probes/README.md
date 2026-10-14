@@ -9,8 +9,9 @@ Console (F9), and delete them again.
 | --- | --- | --- |
 | `RebaseProbe.client.luau` | One floating-origin move: the Luau gather, `workspace:BulkMoveTo` and the frames after it, at 17k, 35k, 80k and 140k parts | `Config.Origin.RebaseDistance` / `SoftDistance` and whether far meshes start at level 1 (below) |
 | `UnionProbe.client.luau` + `UnionProbeSections.luau` | `GeometryService:UnionAsync` on real terrain sections: time, worst frame, triangles, a one-block edit's re-union, memory by category, draw calls by eye | Whether CSG unions could ever beat parts plus far meshes for chunk rendering (today: no) |
+| `ZombieRigProbe.client.luau` | 60 zombies round the player drawn as the game draws them (R15 rigs, `MobRigPool`): the rig update's Lua time a frame (MicroProfiler label `IceVoxelZombieRigs`), frame times, parts moved and made, against the same zombies as two boxes each | `Config.Mobs.Rig` (MaxRigs, MaxFull, distances, ShadowParts) on low-end devices |
 
-Run both on a PC **and on one phone**: phones are where both costs matter.
+Run each on a PC **and on one phone**: phones are where these costs matter.
 
 ## RebaseProbe
 
@@ -73,3 +74,49 @@ draw calls), every block edit would wait on an asynchronous CSG job, and streami
 Revisit unions only if a probe surprises: unions under about 5 ms each **and** their draw calls
 batched. Even then, try far meshes from level 1 first (`Render.FarMeshes.MinLevel = 1`), which
 does the same job with code that exists.
+
+## ZombieRigProbe
+
+Zombies near the player are Roblox R15 bodies of anchored parts posed in code (client
+`Entities/MobRig`, `MobRigPool`, `MobRenderer`): at most 16 full rigs (17 parts) within 16 blocks
+and 24 reduced rigs (8 parts) to 40 blocks, the rest two boxes each, so at most 464 rig parts
+move a frame in the one `BulkMoveTo`. Lune measures the Luau side without the engine's
+(`tests/spec/MobRigPool`'s cost test: the glides, tiers and poses of 60 zombies, every rig posed
+every frame, about 0.17 ms native and 0.97 ms interpreted a frame); this probe adds `CFrame.new`,
+the move, shadows and drawing, on the device. It draws with the game's own parts code
+(`Entities/MobParts`: MobRenderer's part factory, flames and `BulkMoveTo`), and
+`tests/spec/ZombieRigProbe` runs it whole in Lune on Lune's Roblox instances (a stand-in clock,
+RenderStepped and `BulkMoveTo`), so it is known to finish and count right before a device run;
+there it prints `450 parts moved | 16 / 24 rigs | 0 parts made after the warm-up | 0 flames lost`
+(rigs) and `120 parts moved | 0 / 0 rigs | 0 | 0` (boxes), with no times.
+
+1. Play a copy of the IceVoxel place (the probe requires the game's own modules from
+   `ReplicatedStorage.IceVoxel` and `PlayerScripts.IceVoxel`), on open ground.
+2. Put `ZombieRigProbe.client.luau` in `StarterPlayer.StarterPlayerScripts` as a LocalScript.
+3. Stand still. After 5 s it runs two passes of 10 s warm-up and 30 s measured, 60 zombies of
+   every kind and look circling the player in its own folder (beside whatever the game draws),
+   and prints one line each:
+
+   ```
+   [ZombieRigProbe] pass | Lua ms median / p90 / max | frame ms mean / p90 | parts moved | full / reduced rigs | parts made after the warm-up | flames lost
+   ```
+
+   `rigs` uses `Config.Mobs.Rig` as it is; `boxes` draws every zombie as two boxes (MaxRigs 0),
+   the old drawing. The frame columns' difference is what the rigs cost the engine. Parts moved
+   is the most in one frame and the rigs are that frame's (reduced rigs take what is left of
+   MaxRigs 40, so 24 when 16 are full). Open the MicroProfiler (Ctrl+F6; on a phone, the
+   Developer Console) to see `IceVoxelZombieRigs`.
+
+**Decision rule** (on the lowest device the game targets):
+
+| Lua median (rigs) | frame mean, rigs minus boxes | Action |
+| --- | --- | --- |
+| ≤ 1.2 ms | ≤ 2 ms | Keep `Config.Mobs.Rig` |
+| > 1.2 ms | any | `MaxRigs = 24`, `MaxFull = 8` (a phone override, as `Render.FarMeshes.Mobile`); if still over, `MobRigPool.REDUCED_EVERY = 2` (reduced rigs posed every other frame: about 0.15 ms less interpreted, but their limbs then step up to 0.58 studs every other frame, twice `MobRig.LIMB_SPEED`'s 0.29 a frame) |
+| ≤ 1.2 ms | > 2 ms | `ShadowParts = 1` (heads only), then `ReducedDistance = 28` |
+
+Parts made after the warm-up must be 0 in both passes (the pools hold every rig). Every sixth
+zombie burns (a `Fire` that `MobRigPool` moves to the part its tier burns on and takes off a rig
+before letting it go); `flames lost` must be 0 too, and no "Parent property of Fire is locked"
+error may appear in the Output.
+

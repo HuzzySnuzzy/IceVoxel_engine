@@ -1,17 +1,26 @@
 --!strict
 --[[
-	Mobs on the client (the server's Mobs messages, server Mobs/Mobs): each mob is a couple of
-	plain boxes, as Shared/Entities/MobList draws it: its body in its kind's colour (a sheep's in
-	its fleece's) and a head on the side it faces, so which way it looks reads from afar.
+	Mobs on the client (the server's Mobs messages, server Mobs/Mobs). Cows, sheep, pigs and
+	chickens are a couple of plain boxes, as Shared/Entities/MobList draws them: the body in the
+	kind's colour (a sheep's in its fleece's) and a head on the side it faces. Zombies are Roblox
+	R15 bodies posed in code (Entities/MobRig), dressed in their look (Entities/ZombieLooks):
+	full rigs near the player, reduced ones further out, the two boxes beyond
+	(Entities/MobRigPool, Config.Mobs.Rig).
 
-	  Parts     anchored Parts that collide with, touch and are queried by nothing (SmoothPlastic,
-	            casting shadows), at most 2 a mob, kept in a pool when mobs go so a new one reuses
-	            them; all of them move with one BulkMoveTo a frame, after the camera.
-	  Motion    Entities/MobModel: a glide between the server's updates (10 a second), the facing
-	            turning the short way; dying, the mob tips over on its side.
-	  Looks     the hurt flash reddens every part, a burning mob carries flames (a Fire on its
-	            body, BurningView's colours, sized to the box). Colours are written only when they
-	            change.
+	  Parts     anchored Parts that collide with, touch and are queried by nothing (SmoothPlastic;
+	            shadows only from a rig's head and torso and from the boxes), kept in pools when
+	            mobs go or change tier so new ones reuse them (MobRigPool); all of them move with
+	            one BulkMoveTo a frame, after the camera (Entities/MobParts, the same code the
+	            Studio probe tools/probes/ZombieRigProbe times).
+	  Motion    Entities/MobModel: a glide between the server's updates (10 a second; the move op's
+	            deltas add up exactly), the facing turning the short way, the zombies' stride and
+	            flag blends; dying, the mob tips over on its side.
+	  Looks     a zombie's colours are worked out once at its spawn; the hurt flash reddens every
+	            part (a rig once as it starts and once as it ends); a burning mob carries flames (a
+	            Fire on its body, its rig's upper torso or reduced torso, BurningView's colours).
+	  Voices    zombies groan now and then (Entities/ZombieVoices picks who: the nearest 8 within
+	            reach, one at a time every 1.5 s), played here at the zombie through
+	            Audio/SoundPlayer (`entity.zombie.ambient`; the server sends no event).
 	  Knockback a zombie's hit comes as a `push` the hull adds to its velocity
 	            (Player/MovementController.knockback, as an explosion's).
 	The server only sends the mobs within Config.Mobs.TrackingDistance (64 blocks) of the player;
@@ -30,87 +39,53 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
-local Config = require(Shared.Config)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
 local Origin = require(Shared.World.Origin)
+local Sounds = require(Shared.Sounds)
 
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local MobModel = require(script.Parent.MobModel)
+local MobParts = require(script.Parent.MobParts)
+local MobRigPool = require(script.Parent.MobRigPool)
+local ZombieVoices = require(script.Parent.ZombieVoices)
 
-local BLOCK = Config.BlockSize
 -- After the camera, as the items.
 local RENDER_PRIORITY = Enum.RenderPriority.Camera.Value + 1
--- Spare parts kept for new mobs.
-local MAX_SPARE = 128
--- Flames (BurningView's colours): Fire.Size per block of the box's height.
-local FLAME_COLOUR = Color3.fromRGB(255, 140, 30)
-local FLAME_GLOW = Color3.fromRGB(255, 220, 90)
-local FLAME_SIZE = 3
-
-type Entry = {
-	model: MobModel.Mob,
-	parts: { BasePart },
-	-- The colours last written to each part (packed 0xRRGGBB).
-	colours: { number },
-	fire: Fire?,
-}
+-- The zombies' groan, and how far one is worth picking (its event's reach, at most RADIUS).
+local AMBIENT = "entity.zombie.ambient"
+local ambientEvent = Sounds.get(AMBIENT)
+local VOICE_REACH = math.min(ZombieVoices.RADIUS, if ambientEvent then ambientEvent.maxDistance else math.huge)
 
 local MobRenderer = {}
 
-local entries: { [number]: Entry } = {}
 local models: { [number]: MobModel.Mob } = {}
+local fires: { [number]: Fire } = {}
 local count = 0
-local spare: { BasePart } = {}
 -- (Made as the module loads, kept out of the workspace until `start`: mobs the server sends while
 -- the client boots are built in it, unseen.)
 local folder = Instance.new("Folder")
 folder.Name = "IceVoxelMobs"
 
-local function newPart(): BasePart
-	local part = table.remove(spare)
-	if part then
-		return part
-	end
-	local fresh = Instance.new("Part")
-	fresh.Name = "Mob"
-	fresh.Anchored = true
-	fresh.CanCollide = false
-	fresh.CanQuery = false
-	fresh.CanTouch = false
-	fresh.CastShadow = true
-	fresh.Locked = true
-	fresh.Material = Enum.Material.SmoothPlastic
-	fresh.TopSurface = Enum.SurfaceType.Smooth
-	fresh.BottomSurface = Enum.SurfaceType.Smooth
-	return fresh
-end
-
-local function release(part: BasePart)
-	part.Parent = nil
-	if #spare < MAX_SPARE then
-		table.insert(spare, part)
-	else
-		part:Destroy()
-	end
-end
+local pool = MobRigPool.new(MobParts.factory(folder))
+local voices = ZombieVoices.new()
 
 local function remove(id: number)
-	local entry = entries[id]
-	if entry == nil then
+	if models[id] == nil then
 		return
 	end
-	entries[id] = nil
 	models[id] = nil
 	count -= 1
-	if entry.fire then
-		entry.fire:Destroy()
+	local fire = fires[id]
+	MobRigPool.remove(pool, id)
+	if fire then
+		fire:Destroy()
+		fires[id] = nil
 	end
-	for _, part in entry.parts do
-		release(part)
-	end
+	ZombieVoices.forget(voices, id)
 end
 
 local function spawn(op: any, now: number)
@@ -120,37 +95,24 @@ local function spawn(op: any, now: number)
 	end
 	remove(op.id)
 	local model = MobModel.new(op.id, kind, op.variant, op, now)
-	local parts = {}
-	for _, box in kind.parts do
-		local part = newPart()
-		part.Size = Vector3.new(box.size[1], box.size[2], box.size[3]) * BLOCK
-		part.Parent = folder
-		table.insert(parts, part)
-	end
-	entries[op.id] = { model = model, parts = parts, colours = table.create(#parts, -1), fire = nil }
 	models[op.id] = model
+	MobRigPool.add(pool, model)
 	count += 1
 end
 
-local function packed(r: number, g: number, b: number): number
-	return bit32.bor(bit32.lshift(math.round(r), 16), bit32.lshift(math.round(g), 8), math.round(b))
-end
-
--- Flames on a burning mob's body (BurningView's look), none otherwise.
-local function updateFire(entry: Entry)
-	local burning = MobModel.burning(entry.model)
-	local fire = entry.fire
+-- Flames on a burning mob's body (BurningView's look), none otherwise; MobRigPool keeps them on
+-- the part its current tier burns on (and off any part it lets go).
+local function updateFire(model: MobModel.Mob)
+	local burning = MobModel.burning(model)
+	local fire: Fire? = fires[model.id]
 	if burning and fire == nil then
-		local flames = Instance.new("Fire")
-		flames.Color = FLAME_COLOUR
-		flames.SecondaryColor = FLAME_GLOW
-		flames.Heat = 9
-		flames.Size = math.max(2, entry.model.kind.height * FLAME_SIZE)
-		flames.Parent = entry.parts[1]
-		entry.fire = flames
+		local flames = MobParts.flames(model.kind.height)
+		fires[model.id] = flames
+		MobRigPool.setFlames(pool, model.id, flames)
 	elseif not burning and fire then
+		MobRigPool.setFlames(pool, model.id, nil)
 		fire:Destroy()
-		entry.fire = nil
+		fires[model.id] = nil
 	end
 end
 
@@ -163,11 +125,21 @@ local function onMessage(payload: buffer)
 	for _, op in ops do
 		if op.op == "spawn" then
 			spawn(op, now)
+			local model = models[op.id]
+			if model then
+				updateFire(model)
+			end
+		elseif op.op == "move" then
+			local model = models[op.id]
+			if model then
+				MobModel.move(model, op.dx, op.dy, op.dz, op.yaw, op.health, op.flags, now)
+				updateFire(model)
+			end
 		elseif op.op == "state" then
-			local entry = entries[op.id]
-			if entry then
-				MobModel.apply(entry.model, op, now)
-				updateFire(entry)
+			local model = models[op.id]
+			if model then
+				MobModel.apply(model, op, now)
+				updateFire(model)
 			end
 		elseif op.op == "remove" then
 			remove(op.id)
@@ -177,42 +149,25 @@ local function onMessage(payload: buffer)
 	end
 end
 
-local moved: { BasePart } = {}
 local cframes: { CFrame } = {}
 
 local function draw()
 	local now = os.clock()
-	table.clear(moved)
-	table.clear(cframes)
-	-- (World blocks to render studs: Shared/World/Origin.)
-	local ox, oz = Origin.x, Origin.z
-	for _, entry in entries do
-		local model = entry.model
-		local x, y, z, yaw = MobModel.pose(model, now)
-		local base = CFrame.new(x * BLOCK - ox, y * BLOCK, z * BLOCK - oz) * CFrame.Angles(0, yaw, 0)
-		local tip = MobModel.tip(model, now)
-		if tip > 0 then
-			-- (On its side: about the facing, around the bottom of its box.)
-			local half = model.kind.width / 2 * BLOCK
-			base = base * CFrame.new(half, 0, 0) * CFrame.Angles(0, 0, -tip) * CFrame.new(-half, 0, 0)
-		end
-		for index, part in entry.parts do
-			local box = model.kind.parts[index]
-			table.insert(moved, part)
-			table.insert(
-				cframes,
-				base * CFrame.new(box.offset[1] * BLOCK, box.offset[2] * BLOCK, box.offset[3] * BLOCK)
-			)
-			local r, g, b = MobModel.colour(model, index, now)
-			local colour = packed(r, g, b)
-			if entry.colours[index] ~= colour then
-				entry.colours[index] = colour
-				part.Color = Color3.fromRGB(r, g, b)
-			end
-		end
+	-- (From where the player hears: the camera kept near the eyes, in blocks.)
+	local listener = SoundPlayer.listener()
+	if listener == nil then
+		return
 	end
-	if #moved > 0 then
-		workspace:BulkMoveTo(moved, cframes, Enum.BulkMoveMode.FireCFrameChanged)
+	MobRigPool.frame(pool, now, listener.X, listener.Y, listener.Z, Origin.x, Origin.z)
+	MobParts.move(pool, cframes)
+	-- A groan now and then.
+	local groan = ZombieVoices.step(voices, now, pool.zombies, pool.zombieIds, pool.zombieDistances, VOICE_REACH)
+	local model = if groan then models[groan] else nil
+	if model then
+		local x, y, z = MobModel.pose(model, now)
+		local rig = model.kind.rig
+		local pitch = if rig then ZombieVoices.PITCH[rig.gait] or 1 else 1
+		SoundPlayer.play(AMBIENT, x, y + model.kind.eye, z, nil, pitch)
 	end
 end
 
@@ -234,6 +189,11 @@ end
 -- Number of mobs the client knows (for the debug overlay).
 function MobRenderer.count(): number
 	return count
+end
+
+-- Zombies drawn as full and reduced rigs last frame, and the parts moved (for the debug overlay).
+function MobRenderer.rigs(): (number, number, number)
+	return pool.fullRigs, pool.reducedRigs, pool.count
 end
 
 -- A mob as other modules see it: id, kind (MobList), where it is drawn (blocks: its feet), its

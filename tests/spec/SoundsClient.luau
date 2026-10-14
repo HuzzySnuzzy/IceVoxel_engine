@@ -456,7 +456,6 @@ return function(t, shared, require, _server, client)
 		-- medical items: their use; the blood moon's rise: Rendering/BloodMoonSky). Each comes off
 		-- with the code that plays it.
 		local pending: { [string]: boolean } = {
-			["entity.zombie.ambient"] = true,
 			["item.bandage.apply"] = true,
 			["item.medkit.use"] = true,
 			["item.pills.swallow"] = true,
