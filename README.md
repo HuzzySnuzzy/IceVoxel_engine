@@ -2311,6 +2311,7 @@ for performance:
 | `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. Neither heals while fully frozen or overheated. |
 | `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |
 | `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.005 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
+| `ToughAsNails.Grading` | Enabled, -0.5 / 0.5, 1 s | The picture's Saturation as the extremes build (Rendering/TemperatureGrade): down by up to 0.5 while freezing to death, up by up to 0.5 while overheating, in proportion to how far hypothermia / hyperthermia has got, eased over 1 s. |
 | `ToughAsNails.ChangeTicks` / `RecoverTicks` | 140 / 70 | Ticks per step of the body temperature (-10..10) away from neutral / back towards it (neutral to icy: 56 s in the coldest place). |
 | `ToughAsNails.ClemencyTicks` / `RespawnClemencyTicks` | 6000 / 1200 | Climate Clemency on joining / respawning: the temperature held neutral, half the thirst drain, no dehydration (0: none). |
 | `ToughAsNails.WetTicks` | 100 | Ticks a player stays wet out of water (3 steps colder). |

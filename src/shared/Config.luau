@@ -1265,6 +1265,11 @@ local Config = {
 		HeatingBlocks = { "Lava", "Fire", "Campfire" },
 		-- Blocks that cool the player by 3 steps within ProximityRadius.
 		CoolingBlocks = { "Ice", "PackedIce", "BlueIce", "Snow" },
+		-- The picture as the extremes build (client Rendering/TemperatureGrade): its Saturation
+		-- goes by Freezing at full hypothermia (colour draining out as the player freezes to
+		-- death) and by Overheating at full hyperthermia (too vivid as they cook), in proportion
+		-- on the way; Seconds: how fast it follows (time constant).
+		Grading = { Enabled = true, Freezing = -0.5, Overheating = 0.5, Seconds = 1 },
 	},
 
 	-- Progression: knowledge, Ages and the skill tree -----------------------------------------------

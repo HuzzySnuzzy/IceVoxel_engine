@@ -94,7 +94,9 @@
 	                             flash, fireball and mushroom cloud
 	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature from
 	                             the server, which Ui/SurvivalHud draws (droplets, the gauge, frost
-	                             and heat at the edges); Interaction/Drinking drinks and fills
+	                             and heat at the edges; Rendering/TemperatureGrade drains the
+	                             colour as they freeze and saturates it as they overheat);
+	                             Interaction/Drinking drinks and fills
 	                             bottles and canteens (and drinks potions), Player/Exertion
 	                             reports sprinting and jumps
 	  Player/EffectState         status effects from the server (Speed, Haste, Night Vision,
@@ -160,6 +162,7 @@ local SpectatorView = require(Client.Player.SpectatorView)
 local BurningView = require(Client.Player.BurningView)
 local ExplosionView = require(Client.Rendering.ExplosionView)
 local SurvivalState = require(Client.Player.SurvivalState)
+local TemperatureGrade = require(Client.Rendering.TemperatureGrade)
 local EffectState = require(Client.Player.EffectState)
 local ManaState = require(Client.Player.ManaState)
 local ProjectileView = require(Client.Rendering.ProjectileView)
@@ -391,6 +394,7 @@ end)
 
 ClientInventory.start()
 SurvivalState.start()
+TemperatureGrade.start()
 EffectState.start()
 ManaState.start()
 SurvivorState.start()
