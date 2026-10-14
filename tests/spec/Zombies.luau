@@ -72,6 +72,7 @@ return function(t, shared, require, server)
 	local DayCycle = require(shared.DayCycle)
 	local GameMode = require(shared.GameMode)
 	local MobList = require(shared.Entities.MobList)
+	local MobPhysics = require(shared.Entities.MobPhysics)
 	local Protocol = require(shared.Net.Protocol)
 	local SharedSounds = require(shared.Sounds)
 	local BloodMoon = require(shared.Apocalypse.BloodMoon)
@@ -790,6 +791,66 @@ return function(t, shared, require, server)
 				local broken = dig(kind, 2, false, false, 0, 4.5)
 				t.ok(broken > 0, `{MobList.get(kind).name}: 2 up it digs in`)
 			end
+		end
+	)
+
+	t.test(
+		"zombies: a wall with water at its foot (a moat 1 or 2 deep, a pool on the floor) is broken afloat",
+		function()
+			-- A planks wall at z = 3 from the water's bottom to 4 above the floor, water in front of it
+			-- (z = 0..2), a blood moon's hunter coming through the water at its player behind the wall.
+			-- Afloat it never touches the ground: it breaks from where it floats, its box over three
+			-- cells, lines up with its hole between hops out of the water, and each block it breaks
+			-- counts as progress (no giving up between blocks).
+			local runs, started, afloat, crawlerBroke, through = 0, 0, 0, 0, 0
+			local stuck = {}
+			for _, depth in { 1, 2, 0 } do
+				for _, kind in { ZOMBIE, BRUTE, CRAWLER } do
+					for _, sx in { 0.5, 0.2, 0.8 } do
+						local getBlock, set, skyOpen = flat()
+						local bottom = FLOOR - depth
+						box(set, -6, bottom, 0, 6, math.max(bottom, FLOOR - 1), 2, B.Water)
+						box(set, -6, bottom, 3, 6, FLOOR + 3, 3, B.Planks)
+						local world = newWorld(getBlock, 101)
+						local id = world:spawn(kind, sx, FLOOR, -1.5, nil, 0)
+						local mob = world:get(id) :: MobWorld.Mob
+						mob.ai.hunt = "p"
+						mob.persistent = true
+						local ctx = context({ player("p", sx, FLOOR, 6.5) }, skyOpen)
+						runs += 1
+						local start: boolean? = nil
+						local broken, got = 0, false
+						for _ = 1, 3000 do
+							world:tick(ctx)
+							if start == nil and mob.ai.bx ~= nil and mob.ai.breakTicks == 1 then
+								start = not mob.body.onGround and MobPhysics.afloat(mob.body, getBlock)
+							end
+							local changes = world:takeChanges()
+							broken += #changes.breaks
+							applyBreaks(changes, getBlock, set)
+							if mob.body.z > 3.9 then
+								got = true
+								break
+							end
+						end
+						started += if start ~= nil then 1 else 0
+						afloat += if start then 1 else 0
+						local name = MobList.get(kind).name
+						if kind == CRAWLER then
+							-- (A crawler hits at half the pace: it is still on its second plank.)
+							crawlerBroke += if broken > 0 then 1 else 0
+						elseif got then
+							through += 1
+						else
+							table.insert(stuck, `{name} from x {sx}, {depth} deep ({broken} broken)`)
+						end
+					end
+				end
+			end
+			t.eq(started, runs, `every one hits the wall ({started} of {runs})`)
+			t.eq(afloat, runs, `afloat, its feet off the ground ({afloat} of {runs})`)
+			t.eq(crawlerBroke, 9, `every crawler breaks a plank in 3000 ticks ({crawlerBroke} of 9)`)
+			t.eq(through, 18, `every zombie and brute is through in 3000 ticks: {table.concat(stuck, "; ")}`)
 		end
 	)
 

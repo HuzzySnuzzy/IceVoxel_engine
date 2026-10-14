@@ -317,8 +317,10 @@ A fast, Minecraft-style voxel engine for Roblox.
     reach walks over to look (spread out round the spot) and looks for players at once.
   - **Walls don't stop them.** A zombie pushing against a wall towards a player it is after
     (within 8 blocks and level with it: from a block below its feet to two above, judged
-    standing on the ground, so a player on a cliff three blocks up is safe from digging; 16 for
-    a blood moon's hunters) stands and hits the block: a closed door gives way in 12 seconds (a
+    standing on the ground, or afloat, so a player on a cliff three blocks up is safe from
+    digging; 16 for a blood moon's hunters) stands and hits the block, swimming too: a moat or a
+    pool at a wall's foot only slows them (afloat, a zombie has three blocks to break where it
+    has two on the ground). A closed door gives way in 12 seconds (a
     brute 4, two zombies together about 6), glass in 3, leaves and wool in 6, dirt and fences in
     15, planks and logs in 30, a **Barricade** in 45, stone and bricks in 2 minutes, a
     **Reinforced Barricade** in 150 seconds, concrete in 5 minutes. The damage is shared by
@@ -3494,7 +3496,8 @@ Natural next steps, roughly in order:
 - **Hordes that find their way.** Zombies and blood moon hordes steer straight at what they go
   for: no path finding. A wall between a zombie and the player it is after is broken through if
   the zombie can break it, never walked round, and against one it can't break (iron, a chest) it
-  stands until it loses interest; a hunter that gets no closer for 20 seconds gives up and leaves.
+  stands until it loses interest; a hunter that gets no closer for 20 seconds (and breaks nothing)
+  gives up and leaves.
   They never dig down or up towards a player (only from a block below their feet to two above),
   never break a block more than 8 blocks (16 for hunters) from what they go for, and an idle
   zombie more than 32 blocks from every player thinks every 4th tick, so far crowds wander a

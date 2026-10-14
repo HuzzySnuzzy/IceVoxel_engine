@@ -20,7 +20,11 @@
 	             (a stroll ends there). A zombie pressed against the cells ahead lines up with the
 	             nearest gap in them its box fits through within a block across (a doorway, the
 	             13/16 an open door leaves: Minecraft's path finder walks cell centres, which a
-	             brute's 0.75 wide box would scrape the door on).
+	             brute's 0.75 wide box would scrape the door on), in the cells its box spans
+	             where it last stood (`standY`: on the ground, or afloat; three cells for a zombie
+	             afloat, its feet partway up one), so a hop out of the water or a jump at the wall
+	             doesn't lose the gap; failing that, a block up from the cell it is in (a raised
+	             doorway it jumps into).
 	  Targets    monsters notice the nearest living survival or adventure player within `follow`
 	             (24 for most zombies) blocks they can see (NearestAttackableTargetGoal with
 	             mustSee; creative and spectator players are never targets), looking again every 10
@@ -57,12 +61,17 @@
 	             `persistent`): it steers at them with no need to see them; seen, it is an
 	             ordinary chase that keeps the hunt, kept up to Zombies.HuntKeep (56) blocks
 	             away. A hunter that closed less than a block on its player in Leave.StuckTicks
-	             (400) and isn't breaking or fighting gives up and leaves.
+	             (400) and isn't breaking or fighting gives up and leaves (a block it breaks
+	             starts the count over: a wall of several is progress).
 	  Breaking   blocked (walking into a wall for 10 ticks with less than 0.05 blocks of progress a
-	             tick; the cell ahead at its feet or head has a collision shape: a closed door
-	             counts; it starts only standing on the ground, so a zombie jumping at a cliff
-	             judges levels and cells from its feet on the floor) by blocks it can break (Blocks.zombieBreak: all of the blocked cells; an
-	             iron block or a chest in the way stops it), and only when what it heads for is
+	             tick; a cell just ahead of its box, from its feet's to its head's, has a collision
+	             shape: a closed door counts; it starts only standing: on the ground, or afloat
+	             (MobPhysics.afloat: its feet in a fluid deep enough to float in, where it can stay,
+	             unlike the top of a jump; three cells ahead then), so a zombie jumping at a cliff
+	             judges levels and cells from its feet on the floor, and one in a moat at a wall's
+	             foot, which never touches the ground there, from where it floats) by blocks it can
+	             break (Blocks.zombieBreak: all of the blocked cells; an iron block or a chest in
+	             the way stops it), and only when what it heads for is
 	             near and level with it (a target within Zombies.BreakReach (8) blocks
 	             horizontally, a hunted player within HuntBreakReach (16), the noise it
 	             investigates within BreakReach; and their feet from 1 block below its own to 2
@@ -134,6 +143,9 @@ export type State = {
 	blockedTicks: number,
 	lastX: number,
 	lastZ: number,
+	-- The y of its feet when it last stood (on the ground, or afloat pressed against something;
+	-- nil: not yet), to line up with a gap from there (see the header's Steering).
+	standY: number?,
 	-- A hunter's progress: ticks since the last check and its distance then (-1: none yet).
 	progressTimer: number,
 	progressDistance: number,
@@ -194,6 +206,9 @@ MobAI.LEAVE_LEG = 16
 -- heading for a spot this far on.
 MobAI.SQUEEZE_REACH = 1
 MobAI.SQUEEZE_AHEAD = 0.2
+-- How far above where it last stood a zombie in the air still lines up from there: the top of a
+-- jump (1.25) or of a hop out of the water (about 1.4).
+MobAI.HOP_REACH = 1.5
 
 local sqrt = math.sqrt
 local atan2 = math.atan2
@@ -238,6 +253,7 @@ function MobAI.new(): State
 		blockedTicks = 0,
 		lastX = 0,
 		lastZ = 0,
+		standY = nil,
 		progressTimer = 0,
 		progressDistance = -1,
 		nx = 0,
@@ -522,9 +538,9 @@ end
 
 --[[
 	The cells in front of a blocked mob that stop it (see the header): along the dominant axis of
-	its facing first, then the other, the cells just past its box at its feet and (taller than a
-	block) its head with a collision shape. Fills `out` with x, y, z, block per cell; returns how
-	many.
+	its facing first, then the other, the cells just past its box with a collision shape, from its
+	feet's up to its head's (two for a zombie on the floor; three afloat, its feet partway up a
+	cell). Fills `out` with x, y, z, block per cell; returns how many.
 ]]
 local blockedScratch: { number } = table.create(8)
 local function blockedCells(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body, kind: MobList.Kind): number
@@ -532,7 +548,7 @@ local function blockedCells(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body
 	local sx, sz = sin(body.yaw), cos(body.yaw)
 	local reach = kind.width / 2 + 0.1
 	local feet = floor(body.y + 0.001)
-	local top = if kind.height > 1 then feet + 1 else feet
+	local top = math.max(feet, floor(body.y + kind.height - 0.001))
 	local xFirst = abs(sx) >= abs(sz)
 	for pass = 1, 2 do
 		local alongX = (pass == 1) == xFirst
@@ -604,6 +620,8 @@ local function breakStep(world: World, mob: Mob): boolean
 	if needed > 0 and progress >= needed then
 		world:breakBlock(mob, bx, by, bz, ai.bblock)
 		stopBreaking(ai)
+		-- (A block broken is a hunter's progress: its stuck count starts over.)
+		ai.progressTimer, ai.progressDistance = 0, -1
 		return false
 	end
 	return true
@@ -611,13 +629,18 @@ end
 
 --[[
 	Lining up with a gap (see the header's Steering): a zombie pressed against the row of cells
-	ahead (along the main axis of its facing, at its feet and, taller than a block, its head) looks
+	ahead (along the main axis of its facing, those its box spans with its feet at `feetY`) looks
 	for the free stretch across its way nearest its middle, within SQUEEZE_REACH blocks, that is
 	wide enough for its box: a doorway, or an open door's 13/16. Returns the coordinate across its
 	way to steer at and whether it moves along X, or nil when it is lined up already or no gap fits.
 ]]
 local spans: { number } = table.create(16)
-local function squeeze(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body, kind: MobList.Kind): (number?, boolean)
+local function squeeze(
+	getBlock: MobPhysics.GetBlock,
+	body: MobPhysics.Body,
+	kind: MobList.Kind,
+	feetY: number
+): (number?, boolean)
 	local sx, sz = sin(body.yaw), cos(body.yaw)
 	local alongX = abs(sx) >= abs(sz)
 	local half = kind.width / 2
@@ -627,8 +650,8 @@ local function squeeze(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body, kin
 	local row = if alongX
 		then floor(body.x + (if sx > 0 then ahead else -ahead))
 		else floor(body.z + (if sz > 0 then ahead else -ahead))
-	local feet = floor(body.y + 0.001)
-	local top = if kind.height > 1 then feet + 1 else feet
+	local feet = floor(feetY + 0.001)
+	local top = math.max(feet, floor(feetY + kind.height - 0.001))
 	local first = floor(across - half) - 1
 	local last = floor(across + half) + 1
 	-- The blocked stretches across the way, as lo, hi pairs.
@@ -695,6 +718,15 @@ local function squeeze(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body, kin
 	return best, alongX
 end
 
+--[[
+	Does the mob stand where it is, to judge levels and cells from its feet (see the header's
+	Breaking): on the ground, or afloat (MobPhysics.afloat: in a fluid deep enough to float in, as
+	in a moat; it can stay at that level, unlike the top of a jump)?
+]]
+local function standing(getBlock: MobPhysics.GetBlock, body: MobPhysics.Body): boolean
+	return body.onGround or MobPhysics.afloat(body, getBlock)
+end
+
 -- Is (x, y, z) (feet) near enough and level with the mob to break towards (see the header)?
 local function breakable(body: MobPhysics.Body, x: number, y: number, z: number, reach: number): boolean
 	local dx, dz = x - body.x, z - body.z
@@ -743,10 +775,24 @@ local function advance(
 		ai.blockedTicks = 0
 	end
 	local squeezing = false
+	if body.onGround then
+		ai.standY = body.y
+	end
 	if body.horizontalCollision then
+		if not body.onGround and MobPhysics.afloat(body, world.getBlock) then
+			ai.standY = body.y
+		end
 		-- (Pressed against something: line up with a gap in it, if one fits, sideways and a
-		-- little on, without jumping.)
-		local across, alongX = squeeze(world.getBlock, body, mob.kind)
+		-- little on, without jumping. Judged from where it last stood, up to a hop below it, so
+		-- the top of a hop out of the water doesn't steer it off the hole it made; failing that,
+		-- from the cell it is in, as for a raised doorway it jumps into.)
+		local standY = ai.standY
+		local feet = if standY and body.y >= standY and body.y - standY <= MobAI.HOP_REACH then standY else body.y
+		local across, alongX = squeeze(world.getBlock, body, mob.kind, feet)
+		local cell = floor(body.y + 0.001)
+		if across == nil and cell > floor(feet + 0.001) then
+			across, alongX = squeeze(world.getBlock, body, mob.kind, cell)
+		end
 		if across then
 			local sx, sz = sin(body.yaw), cos(body.yaw)
 			if alongX then
@@ -762,14 +808,15 @@ local function advance(
 	if squeezing then
 		hop = false
 	end
-	-- (Only from the ground: a zombie jumping at a wall counts blocked in the air too, and its
-	-- feet up there would make a target 3 up look level and the cells above its head look ahead.)
+	-- (Only standing: a zombie jumping at a wall counts blocked in the air too, and its feet up
+	-- there would make a target 3 up look level and the cells above its head look ahead. Afloat
+	-- in a moat at a wall's foot it stands: it never touches the ground there.)
 	if
 		ai.blockedTicks >= MobAI.BLOCKED_TICKS
-		and body.onGround
 		and reach > 0
 		and context.breaking == true
 		and breakable(body, gx, gy, gz, reach)
+		and standing(world.getBlock, body)
 		and startBreaking(world, mob)
 	then
 		ai.blockedTicks = 0

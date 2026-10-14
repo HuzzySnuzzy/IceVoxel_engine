@@ -5560,10 +5560,12 @@ fall distance (cleared in water, halved in lava) comes back on landing. For crow
 box's columns hold nothing that acts on a mob: one scan, kept on the body while the box stays in the
 same cells) skips the fluid, climbing and stuck-in scans; `rest` is the fast path for a mob standing
 still on a full block in quiet cells (a dozen block reads instead of a tick's forty); friction comes
-from a table by block id. `dropAt` answers how far the floor is below a step (nil beyond the depth:
-a cliff); a floor plate whose collision boxes all sit on the cell's floor, at most half a block high
-(a shut bunker hatch), is ground, so a zombie walks over a hatch it can't break, and an open hatch
-is a drop.
+from a table by block id. `afloat` says whether a body's feet are under the surface of a fluid
+deeper than 0.4 from its floor (one it floats in, where the zombies' AI lets it stand and break; the
+body's `waterDepth` was taken before its last move). `dropAt` answers how far the floor is below a
+step (nil beyond the depth: a cliff); a floor plate whose collision boxes all sit on the cell's
+floor, at most half a block high (a shut bunker hatch), is ground, so a zombie walks over a hatch it
+can't break, and an open hatch is a drop.
 
 **AI** (`server/Mobs/MobAI`, pure, native): direct steering, no path finding.
 - Wander (RandomStrollGoal: one tick in 120, a spot 3-10 blocks away, at most 100 ticks), stand
@@ -5574,7 +5576,10 @@ is a drop.
   `MAX_FALL` (3) blocks (the path finder's max fall): the mob stops (a stroll ends, a panic picks
   another spot). A zombie pressed against the cells ahead lines up with the nearest gap its box
   fits through within a block across (a doorway, the 13/16 an open door leaves) and walks through
-  without jumping.
+  without jumping. The row is the cells its box spans where it last stood (`standY`: on the ground,
+  or afloat pressed against something; three cells afloat), up to `HOP_REACH` (1.5) below it in the
+  air, so the top of a jump or of a hop out of the water doesn't steer it off the gap; failing that,
+  the cells from the one it is in (a raised doorway it jumps into).
 - Targets: every 10 ticks (staggered by id) a monster without one looks for the nearest living
   survival or adventure player (never creative or spectator: `attackable`) within `follow` (24
   for most zombies, `MobList.FOLLOW` 16 when absent) it can see (`canSee`: a voxel ray from its
@@ -5595,13 +5600,16 @@ is a drop.
     far inside the reach), investigates (0.9 of its chase speed, to a spot within 1.5 blocks of the
     noise picked by its id) for `Noise.InvestigateTicks` (400), and looks for a player at once.
   - Hunt: a blood moon's hunter steers at its player unseen, kept to `HuntKeep` (56); one that
-    closed less than a block in `Leave.StuckTicks` (400) and isn't fighting or breaking leaves.
+    closed less than a block in `Leave.StuckTicks` (400) and isn't fighting or breaking leaves (a
+    block it breaks starts the count over).
   - Breaking: blocked (horizontal collision and under 0.05 blocks of progress a tick for 10 ticks,
-    climbing excluded) by cells that all have `Blocks.zombieBreak`, with what it goes for within
+    climbing excluded) by cells that all have `Blocks.zombieBreak` (those just ahead of its box,
+    from its feet's to its head's: two on the ground, three afloat), with what it goes for within
     `BreakReach` (8; `HuntBreakReach` 16 for a hunt) horizontally and from a block below its feet
-    to two above, starting only on the ground (a zombie jumping at a cliff is blocked in the air
-    too, and its airborne feet would make a player 3 up look 2 up and the cells above its head
-    look ahead): it faces the softest cell and adds `breakPower` a tick to the block's shared
+    to two above, starting only standing: on the ground or `MobPhysics.afloat` (a zombie jumping
+    at a cliff is blocked in the air too, and its airborne feet would make a player 3 up look 2 up
+    and the cells above its head look ahead; one in a moat never touches the ground, and where it
+    floats it can stay): it faces the softest cell and adds `breakPower` a tick to the block's shared
     damage (`MobWorld.damageBlock`, keyed by cell; a door's upper half uses the lower's key; the
     entry keeps the block's family, `Blocks.variants(surfaceForm)[1]`, and starts over when the
     cell's block goes or becomes another: checked each tick and on `blockChanged`, which the

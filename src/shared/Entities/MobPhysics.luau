@@ -284,6 +284,33 @@ local function fluidDepths(body: Body, shape: Shape): (number, number)
 	return water, lava
 end
 
+--[[
+	Is the body afloat where it is now: its feet under the surface of a fluid deeper than
+	FLUID_JUMP_THRESHOLD from the floor up (one a mob floats in, jumping at the surface; it stands
+	on the floor of a shallower one)? Looks at the column under its centre. (The body's
+	`waterDepth` and `lavaDepth` were taken at the start of its last tick, before it moved.)
+]]
+function MobPhysics.afloat(body: Body, getBlock: GetBlock): boolean
+	local x, z = floor(body.x), floor(body.z)
+	local feet = floor(body.y)
+	local fluid = fluidOf(getBlock(x, feet, z))
+	if fluid == 0 then
+		return false
+	end
+	local top, bottom = feet, feet
+	while top - feet < 64 and fluidOf(getBlock(x, top + 1, z)) == fluid do
+		top += 1
+	end
+	local surface = top + buffer.readu8(Blocks.fluidHeightLut, getBlock(x, top, z) :: number) / Blocks.FLUID_FULL
+	if body.y >= surface then
+		return false
+	end
+	while feet - bottom < 64 and fluidOf(getBlock(x, bottom - 1, z)) == fluid do
+		bottom -= 1
+	end
+	return surface - bottom > MobPhysics.FLUID_JUMP_THRESHOLD
+end
+
 -- Per block: its friction (Blocks `friction`).
 local FRICTION = buffer.create(Blocks.count * 8)
 for id = 0, Blocks.count - 1 do
