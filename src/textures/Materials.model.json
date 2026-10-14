@@ -2,6 +2,28 @@
 	"className": "Folder",
 	"children": [
 		{
+			"name": "IV_andesite",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Rock",
+				"ColorMapContent": "rbxassetid://135061946280047",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_asphalt",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Asphalt",
+				"ColorMapContent": "rbxassetid://70532405855463",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
+				"StudsPerTile": 3
+			}
+		},
+		{
 			"name": "IV_bricks",
 			"className": "MaterialVariant",
 			"properties": {
@@ -62,6 +84,50 @@
 				"ColorMapContent": "rbxassetid://75251272775135",
 				"MaterialPattern": "Regular",
 				"NormalMapContent": "rbxassetid://84237009727338",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_concrete",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Concrete",
+				"ColorMapContent": "rbxassetid://83707291495507",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://134665376447341",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cracked_asphalt",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Asphalt",
+				"ColorMapContent": "rbxassetid://135061946280047",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cracked_bricks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Brick",
+				"ColorMapContent": "rbxassetid://78619102429227",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://126476239211015",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_cracked_concrete",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Concrete",
+				"ColorMapContent": "rbxassetid://83707291495507",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://134665376447341",
 				"StudsPerTile": 3
 			}
 		},
@@ -206,12 +272,78 @@
 			}
 		},
 		{
+			"name": "IV_medicine_cabinet_side",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Metal",
+				"ColorMapContent": "rbxassetid://125353153474912",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://97000542660093",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_medicine_cabinet_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Metal",
+				"ColorMapContent": "rbxassetid://125353153474912",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://97000542660093",
+				"StudsPerTile": 3
+			}
+		},
+		{
 			"name": "IV_missing_texture",
 			"className": "MaterialVariant",
 			"properties": {
 				"BaseMaterial": "SmoothPlastic",
 				"ColorMapContent": "rbxassetid://925810526",
 				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_moss_block",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Grass",
+				"ColorMapContent": "rbxassetid://133332486942553",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://80266253786825",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_mossy_bricks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Brick",
+				"ColorMapContent": "rbxassetid://78619102429227",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://126476239211015",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_mossy_cobblestone",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Cobblestone",
+				"ColorMapContent": "rbxassetid://136109631002116",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://97401111826072",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_mossy_concrete",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Concrete",
+				"ColorMapContent": "rbxassetid://83707291495507",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://134665376447341",
 				"StudsPerTile": 3
 			}
 		},
@@ -255,6 +387,39 @@
 				"ColorMapContent": "rbxassetid://118497034160890",
 				"MaterialPattern": "Regular",
 				"NormalMapContent": "rbxassetid://129159801834926",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_polished_andesite",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Concrete",
+				"ColorMapContent": "rbxassetid://70532405855463",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_road_line",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Asphalt",
+				"ColorMapContent": "rbxassetid://70532405855463",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_road_line_yellow",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Asphalt",
+				"ColorMapContent": "rbxassetid://70532405855463",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://84287333684009",
 				"StudsPerTile": 3
 			}
 		},
@@ -312,6 +477,17 @@
 			}
 		},
 		{
+			"name": "IV_smooth_stone",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Concrete",
+				"ColorMapContent": "rbxassetid://126386401149504",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://92601327159349",
+				"StudsPerTile": 3
+			}
+		},
+		{
 			"name": "IV_snow",
 			"className": "MaterialVariant",
 			"properties": {
@@ -334,6 +510,39 @@
 			}
 		},
 		{
+			"name": "IV_stone_bricks",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "Brick",
+				"ColorMapContent": "rbxassetid://95612339340500",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://114812382647958",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_supply_crate_side",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "WoodPlanks",
+				"ColorMapContent": "rbxassetid://83206835598770",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://98971183237888",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_supply_crate_top",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "WoodPlanks",
+				"ColorMapContent": "rbxassetid://83206835598770",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://98971183237888",
+				"StudsPerTile": 3
+			}
+		},
+		{
 			"name": "IV_tall_grass_bottom",
 			"className": "MaterialVariant",
 			"properties": {
@@ -350,6 +559,17 @@
 				"BaseMaterial": "SmoothPlastic",
 				"ColorMapContent": "rbxassetid://104285260856645",
 				"MaterialPattern": "Regular",
+				"StudsPerTile": 3
+			}
+		},
+		{
+			"name": "IV_vine",
+			"className": "MaterialVariant",
+			"properties": {
+				"BaseMaterial": "SmoothPlastic",
+				"ColorMapContent": "rbxassetid://112502994131665",
+				"MaterialPattern": "Regular",
+				"NormalMapContent": "rbxassetid://97312068579996",
 				"StudsPerTile": 3
 			}
 		}

@@ -3,10 +3,15 @@
 	Background music, as Minecraft's (Audio/MusicRules decides when and which; the tracks are in
 	Shared/Sounds/MusicList).
 
-	  Places   surface tracks above ground, cave tracks in caves: the sky light reaching the camera
-	           (Rendering/LightingController.skyExposure) decides, with MusicRules' thresholds and
-	           delay. A track of the other kind fades out over Config.Music.FadeSeconds when the
-	           player goes underground or comes back up, and one of the new kind follows.
+	  Places   surface tracks above ground (night tracks there at night), cave tracks in caves:
+	           the sky light reaching the camera (Rendering/LightingController.skyExposure)
+	           decides, with MusicRules' thresholds and delay. A track of the other place fades out
+	           over Config.Music.FadeSeconds when the player goes underground or comes back up, and
+	           one of the new place follows.
+	  Night    Shared/DayCycle.isDay at the game's clock (LightingController.dayTime, the server's),
+	           the rule the sky, the mobs and the zombies follow: on the surface at night a track
+	           comes from MusicList.Night (Surface when it has none to play). It is read only when
+	           a track is picked, so dusk and dawn never cut one.
 	  Timing   the first track about FirstDelay seconds after joining, then one every MinDelay to
 	           MaxDelay seconds after the last ends (Minecraft's 10 to 20 minutes).
 	  Playing  one Sound (SoundService.IceVoxelMusic), flat, never looped. Its file is preloaded
@@ -29,6 +34,7 @@ local SoundService = game:GetService("SoundService")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local DayCycle = require(Shared.DayCycle)
 local MusicList = require(Shared.Sounds.MusicList)
 
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
@@ -37,10 +43,11 @@ local MusicRules = require(script.Parent.MusicRules)
 local SoundPlayer = require(script.Parent.SoundPlayer)
 
 type Place = MusicRules.Place
+type List = MusicRules.List
 type Track = MusicList.Track
 
 -- The track playing or loading.
-type Current = { place: Place, index: number, track: Track, playing: boolean, title: string? }
+type Current = { place: Place, list: List, index: number, track: Track, playing: boolean, title: string? }
 
 local Music = {}
 
@@ -54,11 +61,16 @@ local fade = 1
 local titles: { [string]: string } = {}
 local toasts = true
 
-local function tracksOf(place: Place): { Track }
-	return if place == "cave" then MusicList.Cave else MusicList.Surface
+local function tracksOf(list: List): { Track }
+	return if list == "cave" then MusicList.Cave elseif list == "night" then MusicList.Night else MusicList.Surface
 end
 
-local COUNTS: { [Place]: number } = { surface = #MusicList.Surface, cave = #MusicList.Cave }
+local COUNTS: { [List]: number } = { surface = #MusicList.Surface, night = #MusicList.Night, cave = #MusicList.Cave }
+
+-- Is it night at the game's clock (the rule the sky and the mobs follow)?
+local function isNight(): boolean
+	return not DayCycle.isDay(LightingController.dayTime())
+end
 
 local function random(): number
 	return math.random()
@@ -97,15 +109,16 @@ local function stopped(ending: MusicRules.Ending, failedIndex: number?)
 	end
 end
 
--- Loads track `index` of `place` and plays it, unless something else happened meanwhile.
-local function begin(place: Place, index: number)
-	local track = tracksOf(place)[index]
+-- Loads track `index` of `list` (for `place`) and plays it, unless something else happened
+-- meanwhile.
+local function begin(place: Place, list: List, index: number)
+	local track = tracksOf(list)[index]
 	local player = sound
 	if track == nil or player == nil then
 		stopped("failed", index)
 		return
 	end
-	local mine: Current = { place = place, index = index, track = track, playing = false }
+	local mine: Current = { place = place, list = list, index = index, track = track, playing = false }
 	current = mine
 	fade = 1
 	player:Stop()
@@ -135,7 +148,7 @@ local function begin(place: Place, index: number)
 			return
 		end
 		if not player.IsLoaded then
-			warn(`[IceVoxel] Music track {track.Id} ({place}) did not load; it is skipped from now on.`)
+			warn(`[IceVoxel] Music track {track.Id} ({list}) did not load; it is skipped from now on.`)
 			stopped("failed", index)
 			return
 		end
@@ -159,22 +172,20 @@ local function step(dt: number)
 	local level = if settings.Enabled then SoundPlayer.sourceVolume("music") else 0
 	-- (Muted with nothing playing: the music waits, nothing is downloaded.)
 	if level > 0 or music.playing then
-		for _, action in MusicRules.step(music, settings, dt, LightingController.skyExposure(), COUNTS, random) do
+		local exposure = LightingController.skyExposure()
+		for _, action in MusicRules.step(music, settings, dt, exposure, COUNTS, random, isNight()) do
 			if action.kind == "play" then
-				begin(action.place, action.track)
+				begin(action.place, action.list, action.track)
 			end
 		end
 	end
-	if music.fading then
-		local playing = current
-		if playing == nil or not playing.playing then
-			-- (A track still loading is dropped by its loader.)
-		else
-			fade -= dt / math.max(settings.FadeSeconds, 1e-3)
-			if fade <= 0 then
-				player:Stop()
-				stopped("faded")
-			end
+	local playing = current
+	-- (A track still loading when it has to fade is dropped by its loader.)
+	if music.fading and playing ~= nil and playing.playing then
+		fade -= dt / math.max(settings.FadeSeconds, 1e-3)
+		if fade <= 0 then
+			player:Stop()
+			stopped("faded")
 		end
 	end
 	player.Volume = settings.Volume * level * math.clamp(fade, 0, 1)
@@ -208,7 +219,10 @@ function Music.setToasts(value: boolean)
 	MusicToast.setEnabled(value)
 end
 
--- For F3: where the player is for the music, what plays (its title) and the seconds until the next.
+--[[
+	For F3: the list the music plays from ("surface", "night" or "cave": the track's playing, else
+	where the next would come from now), what plays (its title) and the seconds until the next.
+]]
 function Music.status(): (string, string?, number)
 	local music = state
 	local playing = current
@@ -216,7 +230,8 @@ function Music.status(): (string, string?, number)
 		return "surface", nil, 0
 	end
 	local title = if playing and playing.playing then playing.title else nil
-	return music.place, title, math.max(music.wait, 0)
+	local list = if playing then playing.list else MusicRules.listOf(music.place, isNight(), COUNTS, music.failed)
+	return list, title, math.max(music.wait, 0)
 end
 
 return Music

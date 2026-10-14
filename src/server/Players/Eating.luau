@@ -8,7 +8,9 @@
 	  start   the held item is a food the player may use now (Foods.canUse: hurt, bleeding for a
 	          bandage, infected for antibiotics or a poultice, any time for a treat with effects,
 	          creative whenever; never a spectator, never dead): the time, the hotbar slot and the
-	          item are noted;
+	          item are noted, and a food that is not medicine is the player's use for every
+	          client to hear (Players/UseState: Types.USE_EAT, the eating loop at the player,
+	          client Audio/UseSounds) until it ends here, however it ends;
 	  finish  the same item in the same slot, held at least its Foods.useTicks - FINISH_LEEWAY
 	          ticks since `start`, and still usable: Foods.finish plays it out here, healing at
 	          once (its half hearts scaled to the Humanoid's MaxHealth, as every hurt is), curing
@@ -41,6 +43,8 @@ local Infection = require(script.Parent.Parent.Apocalypse.Infection)
 local EffectsServer = require(script.Parent.Effects)
 local Inventories = require(script.Parent.Inventories)
 local ToughAsNails = require(script.Parent.ToughAsNails)
+local UseState = require(script.Parent.UseState)
+local Types = require(Shared.Inventory.Types)
 
 -- Only what Eating uses of ServerNet.ServerNet.
 type Net = { on: (kind: number, handler: (player: Player, payload: buffer) -> ()) -> () }
@@ -115,6 +119,8 @@ end
 local function onEat(player: Player, payload: buffer)
 	local action = Protocol.decodeEat(payload)
 	local humanoid = humanoidOf(player)
+	-- (Whatever comes, the food held so far is done with: only an accepted start begins one.)
+	UseState.finish(player, Types.USE_EAT)
 	if action == nil or humanoid == nil then
 		eating[player] = nil
 		return
@@ -129,6 +135,10 @@ local function onEat(player: Player, payload: buffer)
 		local slot = selectedSlot(player)
 		if held and slot and mayEat(player, humanoid, held.item) then
 			eating[player] = { started = now, slot = slot, item = held.item }
+			local food = Foods.of(held.item)
+			if food and not Foods.isMedical(food) then
+				UseState.begin(player, Types.USE_EAT, Foods.useTicks(food))
+			end
 		end
 	else
 		local holding = eating[player]

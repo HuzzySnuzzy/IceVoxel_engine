@@ -523,6 +523,9 @@ return function(t, shared, require, server, client)
 		players.GameModeRules = server.Players.GameModeRules
 		players.EffectCommand = server.Players.EffectCommand
 		players.EffectRules = server.Players.EffectRules
+		-- (Eating names the player's use for every client to hear: the module as it is, not
+		-- started, so nothing expires.)
+		players.UseState = server.Players.UseState
 		glueNode(players, "Effects", "src/server/Players/Effects.luau")
 		glueNode(players, "Eating", "src/server/Players/Eating.luau")
 		glueNode(players, "ToggleUse", "src/server/Players/ToggleUse.luau")
@@ -1797,6 +1800,12 @@ return function(t, shared, require, server, client)
 				t.ok(TexturePack.Textures[name] ~= nil, `{name} is a texture`)
 			end
 		end
+		-- (The fourth sheet made the roads', the concrete's, the aged bricks', the supply crate's
+		-- and the medicine cabinet's: tests/spec/DataSheet checks their ids. The rest wait.)
+		for _, name in { "rusty metal", "bunker hatch" } do
+			local texture = TexturePack.Textures[name]
+			t.eq(texture and texture.Color, "", `the {name} texture is blank, ready to fill`)
+		end
 		for _, name in
 			{
 				"asphalt",
@@ -1808,16 +1817,14 @@ return function(t, shared, require, server, client)
 				"mossy concrete",
 				"cracked bricks",
 				"mossy bricks",
-				"rusty metal",
 				"supply crate side",
 				"supply crate top",
 				"medicine cabinet side",
 				"medicine cabinet top",
-				"bunker hatch",
 			}
 		do
 			local texture = TexturePack.Textures[name]
-			t.eq(texture and texture.Color, "", `the {name} texture is blank, ready to fill`)
+			t.ok(texture ~= nil and texture.Color ~= "", `the {name} texture is made`)
 		end
 		for name, how in { Asphalt = "generated", RoadLine = "generated", RoadLineYellow = "generated" } do
 			t.eq(reach[B[name]], how, `{name} lies in the town's streets`)

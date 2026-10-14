@@ -2251,7 +2251,13 @@ Minecraft names them) to a colour map (`""` until made), optional normal, roughn
 maps, the `Material` its MaterialVariant is based on, `Tint` (true, the default: the drawn block's
 voxel colour; false: the image's own; a block name: that block's colour), `Average` and `Align`.
 `Blocks` maps a block name to its faces (`All`, `Sides`, `Top`, `Bottom`, `Front`, `Sprite`).
-`StudsPerTile` is 3 (a block face), `ShowMissing` swaps blank textures for `Missing`.
+`StudsPerTile` is 3 (a block face), `ShowMissing` swaps blank textures for `Missing`. Entries may
+share maps, as the data sheets do on purpose: one picture reads as several blocks through their
+tints (cracked and mossy bricks and concrete in their own colours), and a block-name tint keeps a
+shared texture in one block's colour wherever it is drawn (`"asphalt"`'s `Tint = "Asphalt"`: a
+road line's sides stay road-dark while its top, `"road line"`, is asphalt's picture in the line's
+own white or yellow; a blank top would show the sides' texture, `variantTexture` below, and the
+line would vanish). `tests/spec/DataSheet` lists a sheet's ids and where each one goes.
 
 **Resolution** (`Blocks`, when it loads). Every def gets `textures` (`TextureFaces`: `top`,
 `bottom`, `north`, `south`, `east`, `west`, `front`, `sprite`, texture names, blank ones too; nil
@@ -6040,19 +6046,24 @@ ends with the cave moods, built from `Sounds/MusicList.Moods` (`ambient.cave.moo
 `ambient.cave`, client side, volume 0.5, falling back on the stand-in wind; `Sounds.MOODS`); the
 music is not in the catalogue (Audio/Music plays it, following the `music` source volume).
 - Blocks have a sound type (`sound`, else by material: Wood wood, Ground gravel as Minecraft's
-  dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type has a dig clip
-  (break, place) and a step clip (step, hit, fall), scaled per action like Minecraft (break and
-  place (v + 1) / 2 and pitch 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15, fall v x 0.5 and 0.75).
-  With one thud and one footstep for everything, pitch tells the materials apart (placed: wool
-  0.6, gravel 0.72, stone 0.8, sand 0.88, wood 0.96, grass 1.08, metal 1.2, snow 1.32; glass is
-  placed like stone and shatters when broken).
+  dirt, Ice glass, Metal metal...; fluids water; `Blocks.soundLut`). A type has a dig clip and a
+  step clip (step, hit, fall), and its break and place clips are the data sheet's two recordings
+  (`SoundList.RECORDED`, given to every type at its dig clip's volume, pitch and variance, the dig
+  thud as their `fallback`), all scaled per action like Minecraft (break and place (v + 1) / 2 and
+  pitch 0.8, hit (v + 1) / 8 and 0.5, step v x 0.15, fall v x 0.5 and 0.75). With one recording
+  each for everything, pitch tells the materials apart (placed: wool 0.6, gravel 0.72, stone 0.8,
+  sand 0.88, wood 0.96, grass 1.08, metal 1.2, snow 1.32; glass is placed like stone and shatters
+  when broken, water splashes).
 - Files: a client ships eleven sounds (content/sounds in Roblox's file manifest, checked against
   version 0.741): action_falling.ogg, action_footsteps_plastic.mp3, action_get_up.mp3,
   action_jump.mp3, action_jump_land.mp3, action_swim.mp3, impact_explosion_03.mp3,
   impact_water.mp3, oof.ogg, ouch.ogg and volume_slider.ogg. The catalogue uses only those, all
   but action_jump.mp3 (the classic gear sounds such as glassbreak.wav or unsheath.wav, and
   uuhhh.mp3, are gone). An event may still name a `fallback`, which clients play when its file
-  fails to load.
+  fails to load. The game's own uploads in the catalogue each have a way back to those files: the
+  cave moods and the blocks' break and place recordings a `fallback`, the eating and drinking
+  loops (`entity.generic.eating`, `.drinking`) Minecraft's clicks (Audio/UseSoundRules). Other
+  recordings replace stand-ins as overrides (`src/sounds`, below).
 - Lookups: `block(block, action)`, `container(block, opened)` (chest lids), `equip(old, new)`
   (armor put on), `fall(halfHearts)` (small up to 4, else big), `lookupNames` (override names).
 - Lava (appended at the end of the list): `block.lava.pop` and `block.lava.ambient` (lava open to
@@ -6087,7 +6098,7 @@ music is not in the catalogue (Audio/Music plays it, following the `music` sourc
 | ----------- | ---------------------------------------------------------- | -------------------------------- |
 | `predicted` | block break / place / fall (fire's break: its hiss), player small / big fall | the acting client at once; the server sends everyone else |
 | `server`    | chest open / close, item pickup, tool break, hurt, death, armor equip, buckets, lava's fizz, burn, extinguish, explosions; zombies bashing and breaking blocks, a screamer's shriek, the bunker hatch, medicine (to everyone else; the user's client plays its own as the use starts) | the server sends everyone near, the player included |
-| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient, fire crackle; zombies' groans (Entities/ZombieVoices), the blood moon's rise (Ui/SurvivorHud) | clients only, never sent |
+| `client`    | mining hits, footsteps, splash, swim, clicks, furnace crackle, cave moods, lava pop and ambient, fire crackle; zombies' groans (Entities/ZombieVoices), the blood moon's rise (Ui/SurvivorHud), every player's eating and drinking loops (Audio/UseSounds: the user's from their hold, the others' from the server's `IceVoxelUse` attribute) | clients only, never sent |
 
 **The server** (`Audio/Sounds`) hands every sound it plays to the zombies' noise bus first
 (`Apocalypse/NoiseBus.fromSound`, ahead of its own started and enabled checks, so turning the
@@ -6114,8 +6125,15 @@ World/Explosions (`entity.generic.explode`: appended after the lava's events, Mi
 
 **Overrides.** Sounds in `SoundService.IceVoxelSounds` (or ReplicatedStorage) named like an event,
 else like its category (`block.break`, `item.armor.equip`), replace it; several with one name are
-picked at random.
-
+picked at random. The game ships its own there (`src/sounds`, Rojo): the weather's
+(`Weather.model.json`) and the zombies' voices (`Zombies.model.json`: three `entity.zombie.ambient`
+groans; a growl and two deaths for each zombie voice's own hurt and death events, never their
+category `entity.mob.*`, which covers the farm animals too). A replacement plays at its
+PlaybackSpeed varied by the event's variance as a share of the event's pitch, so the voices' speeds
+(brute 0.65, zombie 1, runner 1.3, screamer 1.6) keep the kinds apart in the stand-ins' order, and
+no two kinds' spreads overlap (the stand-ins' never did either). The stand-ins stay in SoundList for
+a game without the folder, and a replacement whose file never loads is left out (`SoundPlayer`
+preloads them as the catalogue's files), so its event plays the stand-in again.
 **The client** (`Audio/`). `SoundPlayer` plays everything: the server's `Sound` messages and the
 client's own sounds, which play at once as Minecraft's client does.
 - Voices: 32 Sounds in Attachments of one invisible anchored Part
@@ -6143,7 +6161,13 @@ client's own sounds, which play at once as Minecraft's client does.
   failed; a Sound that loads always counts) plays its fallback from then on, with a warning.
 - Overrides: the override folder (SoundService, else ReplicatedStorage) is indexed by Sound name
   and watched. The event's name wins over its category; several Sounds with one name are picked
-  at random.
+  at random. Each is preloaded once; one that never loads (`SoundRules.loadFailed`) is left out of
+  the index, with a warning.
+- Loops (`setLoop(key, name, x, y, z)`, `endLoop`): a looped sound at a moving point kept up by
+  its caller every frame, on a Sound and Attachment of its own on the emitter, heard as far as its
+  event (linear rolloff), following the volume settings; nil, out of hearing or muted, it stops at
+  once, and it starts over (with a fresh pitch roll) when its event changes. `loads(name)`: does
+  an event play its own sound (an override, or its file not failed)?
 - Roblox's `RbxCharacterSounds` is disabled (its running, landing and death sounds would double
   ours) and the sounds it made are removed.
 
@@ -6164,6 +6188,21 @@ What the client plays itself:
   feet (`SoundRules.observe` guesses the ground, edges included, and the water; lying down in
   water is swimming).
 - Screens and JEI: clicks on buttons, tabs, page arrows, Back and "+" (not on slots or items).
+- `UseSounds` (rules in `UseSoundRules`, pure): every player eating (a food, not medicine) or
+  drinking, every frame, at the mouth (feet + 1.5): the local player from their own hold at once
+  (`Interaction/Eating.useLength`, `Drinking.useLength`; the hold now also ends on death), the
+  others from the player attribute `Types.USE_ATTRIBUTE` ("eat" / "drink") at the body this
+  client draws (`RemotePlayers`: tracked, shown, alive). The server's `Players/UseState` sets it
+  when Eating or ToughAsNails accepts a start and clears it however the use ends (finish, cancel,
+  refusal; the character dead or gone, the player leaving, a second past the use's length with no
+  end received). A use plays its loop (`entity.generic.eating` / `.drinking`, the data sheet's
+  recordings) until it ends, stopped that very frame; only when the loop cannot play
+  (`SoundPlayer.loads` false) does it click instead, Minecraft's `entity.generic.eat` / `.drink`
+  on ticks 8, 12, ... (every 4 from the 7th: Minecraft's rule for every use whose length is a
+  multiple of 4, as every food's and drink's is), never on a known length's last tick and never
+  with the loop. The burp after a food and the last gulp after a drink stay (the eater's client at
+  once, the server to everyone else), telling a finished use from one put away; medicine keeps
+  its own sound and no loop.
 - `Ambience`:
   - the open furnace window, while burning: crackles with Minecraft's odds for a furnace a block
     or two away (about every 4 s);
@@ -6199,8 +6238,9 @@ What the client plays itself:
       Moods setting only keep it quiet.
 
 **Music** (`Audio/Music`, rules in `Audio/MusicRules`, tracks in `Sounds/MusicList`):
-- Minecraft's MusicManager with the surface and caves as its situations. `MusicRules.step`
-  (every frame) and `ended` (reported back) make a pure state machine:
+- Minecraft's MusicManager with the surface and caves as its situations, and the surface's night
+  as a list of its own. `MusicRules.step` (every frame, with the exposure and whether it is night)
+  and `ended` (reported back) make a pure state machine:
   - **place**: "cave" once `LightingController.skyExposure()` has been under `CaveExposure` (0.2)
     for `SwitchSeconds` (5), "surface" once over `SurfaceExposure` (0.5) as long; between the two
     it stays.
@@ -6209,7 +6249,12 @@ What the client plays itself:
     most `SwitchDelay` (3 s) after one fades out or fails to load.
   - **a place change**: a track of the other kind gets a `fade` action (Minecraft's
     replaceCurrentMusic), and the wait drops to at most `SwitchDelay`.
-  - **starts**: a track of the place's kind, at random, never the last one of that kind (unless
+  - **lists**: a track comes from `listOf(place, night)`: Cave underground; on the surface Night
+    at night (`not DayCycle.isDay(LightingController.dayTime())`, the game's clock and the rule
+    the sky and mobs follow), Surface by day, or at night when Night has nothing to play (empty,
+    or every track failed). The place alone decides fades, so dusk and dawn never cut a track;
+    the next follows the time then. Last and failed tracks are kept per list.
+  - **starts**: a track of the place's list, at random, never the last one of that list (unless
     it is the only one left) nor a failed one, and never while the exposure already says the
     other place.
 - One Sound (SoundService.IceVoxelMusic), flat and not looped, plays it:

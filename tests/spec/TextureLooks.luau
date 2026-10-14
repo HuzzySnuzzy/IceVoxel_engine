@@ -421,6 +421,42 @@ return function(t)
 		t.eq(Looks.itemFaces(app("Water")), nil)
 	end)
 
+	t.test("texture looks: road lines show their paint on top of dark asphalt sides", function()
+		local asphalt = colourOf("Asphalt")
+		for name, paint in { RoadLine = "road line", RoadLineYellow = "road line yellow" } do
+			-- Near: the asphalt variant on every face in Asphalt's colour, the paint over the top
+			-- in the line's own (unknown averages: a plain multiply).
+			local look = Looks.nearLook(app(name))
+			t.eq(look.texture, "asphalt", `{name}: asphalt's variant`)
+			t.eq(look.material, Enum.Material.Asphalt)
+			sameColour(t, look.color, asphalt, `{name}: dark asphalt sides`)
+			t.eq(#look.images, 1, `{name}: one image, the paint`)
+			local top = imageOn(look, Enum.NormalId.Top)
+			t.eq(top.texture, paint, `{name}: the paint on top`)
+			sameColour(t, top.color, colourOf(name), `{name}: in the line's colour`)
+			-- Far: the top dominates, in the line's colour.
+			local far = Looks.farLook(app(name))
+			t.eq(far.texture, paint, `{name}: far, the paint`)
+			sameColour(t, far.color, colourOf(name), `{name}: far colour`)
+		end
+		for _, name in { "Asphalt", "CrackedAsphalt" } do
+			local look = Looks.nearLook(app(name))
+			sameColour(t, look.color, colourOf(name), `{name} in its dark colour`)
+			t.eq(#look.images, 0, `{name}: one texture everywhere`)
+		end
+		-- With measured averages each face averages its own colour exactly: the paint brightens
+		-- past the picture (an image can), the asphalt darkens it.
+		local world = newLooks()
+		local L, BB = world.Looks, world.Blocks
+		local grey = { 120, 120, 122 }
+		L.applyAverages({ asphalt = grey, ["road line"] = grey, ["road line yellow"] = grey })
+		for _, name in { "RoadLine", "RoadLineYellow" } do
+			local appearance = BB.get(BB.id[name]).appearance
+			sameColour(t, L.averageOf(appearance, "top"), byteColour(BB.get(BB.id[name]).color), `{name} top`, 1e-6)
+			sameColour(t, L.averageOf(appearance, "north"), asphalt, `{name} side`, 1e-6)
+		end
+	end)
+
 	t.test("texture looks: item cube faces, sprites and glow lichen", function()
 		local faces = Looks.itemFaces(app("Grass")) :: { any }
 		t.eq(#faces, 6, "every face of a grass item")

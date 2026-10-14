@@ -201,9 +201,62 @@ local SHEET = {
 	{ "tall grass bottom", "100266742601250", nil, "SmoothPlastic", true, { "TallGrass" } },
 	{ "tall grass top", "104285260856645", nil, "SmoothPlastic", true, { "TallGrassTop" } },
 	{ "missing texture", "925810526", nil, "SmoothPlastic", false, {} },
+	-- The fourth sheet (icevoxel_4), which shares maps on purpose, and the entries made from its
+	-- maps that it does not list: cracked and mossy concrete take concrete's (as the sheet does
+	-- for cracked and mossy bricks), the road lines' tops asphalt's in the line's own colour.
+	-- These were blank before it (BLANKS below lists what still is).
+	{ "andesite", "135061946280047", "84287333684009", "Rock", true, { "Andesite" } },
+	{ "polished andesite", "70532405855463", "84287333684009", "Concrete", true, { "PolishedAndesite" } },
+	{ "smooth stone", "126386401149504", "92601327159349", "Concrete", true, { "SmoothStone" } },
+	{ "stone bricks", "95612339340500", "114812382647958", "Brick", true, { "StoneBricks" } },
+	{
+		"mossy cobblestone",
+		"136109631002116",
+		"97401111826072",
+		"Cobblestone",
+		false,
+		{ "MossyCobblestone" },
+	},
+	{
+		"moss block",
+		"133332486942553",
+		"80266253786825",
+		"Grass",
+		false,
+		{ "MossBlock", "MossCarpet", "CaveMossCarpet" },
+	},
+	{
+		"vine",
+		"112502994131665",
+		"97312068579996",
+		"SmoothPlastic",
+		true,
+		{ "Vine", "VineNorth", "VineWest", "VineEast", "CaveVine", "CaveVineNorth", "CaveVineWest", "CaveVineEast" },
+	},
+	{
+		"asphalt",
+		"70532405855463",
+		"84287333684009",
+		"Asphalt",
+		"Asphalt",
+		{ "Asphalt", "RoadLine", "RoadLineYellow" },
+	},
+	{ "cracked asphalt", "135061946280047", "84287333684009", "Asphalt", true, { "CrackedAsphalt" } },
+	{ "road line", "70532405855463", "84287333684009", "Asphalt", true, { "RoadLine" } },
+	{ "road line yellow", "70532405855463", "84287333684009", "Asphalt", true, { "RoadLineYellow" } },
+	{ "concrete", "83707291495507", "134665376447341", "Concrete", true, { "Concrete" } },
+	{ "cracked concrete", "83707291495507", "134665376447341", "Concrete", true, { "CrackedConcrete" } },
+	{ "mossy concrete", "83707291495507", "134665376447341", "Concrete", true, { "MossyConcrete" } },
+	{ "cracked bricks", "78619102429227", "126476239211015", "Brick", true, { "CrackedBricks" } },
+	{ "mossy bricks", "78619102429227", "126476239211015", "Brick", true, { "MossyBricks" } },
+	{ "supply crate side", "83206835598770", "98971183237888", "WoodPlanks", false, { "SupplyCrate" } },
+	{ "supply crate top", "83206835598770", "98971183237888", "WoodPlanks", false, { "SupplyCrate" } },
+	{ "medicine cabinet side", "125353153474912", "97000542660093", "Metal", false, { "MedicineCabinet" } },
+	{ "medicine cabinet top", "125353153474912", "97000542660093", "Metal", false, { "MedicineCabinet" } },
 }
 
--- The textures waiting to be made (blank when added), and the blocks using them.
+-- The textures waiting to be made (blank when added), and the blocks using them. A texture made
+-- moves to SHEET with its ids.
 local BLANKS = {
 	{ "bedrock", { "Bedrock" } },
 	{ "coarse dirt", { "CoarseDirt" } },
@@ -212,13 +265,9 @@ local BLANKS = {
 	{ "mycelium top", { "Mycelium" } },
 	{ "mycelium side", { "Mycelium" } },
 	{ "dry grass side", { "DryGrass" } },
-	{ "andesite", { "Andesite" } },
 	{ "granite", { "Granite" } },
-	{ "polished andesite", { "PolishedAndesite" } },
 	{ "polished diorite", { "PolishedDiorite" } },
 	{ "polished granite", { "PolishedGranite" } },
-	{ "smooth stone", { "SmoothStone" } },
-	{ "stone bricks", { "StoneBricks" } },
 	{ "emerald ore", { "EmeraldOre" } },
 	{ "osmium ore", { "OsmiumOre" } },
 	{ "coal block", { "CoalBlock" } },
@@ -278,28 +327,9 @@ local BLANKS = {
 	{ "rope", { "Rope" } },
 	{ "rail", { "Rail", "RailEastWest", "CaveRail", "CaveRailEastWest" } },
 	{ "cobweb", { "Cobweb", "CaveCobweb" } },
-	{ "moss block", { "MossBlock", "MossCarpet", "CaveMossCarpet" } },
-	{
-		"vine",
-		{ "Vine", "VineNorth", "VineWest", "VineEast", "CaveVine", "CaveVineNorth", "CaveVineWest", "CaveVineEast" },
-	},
 	{ "hanging roots", { "HangingRoots", "CaveHangingRoots" } },
-	{ "mossy cobblestone", { "MossyCobblestone" } },
-	-- The zombie apocalypse's ruins and bunkers (the road lines' sides and bottoms are asphalt).
-	{ "asphalt", { "Asphalt", "RoadLine", "RoadLineYellow" } },
-	{ "cracked asphalt", { "CrackedAsphalt" } },
-	{ "road line", { "RoadLine" } },
-	{ "road line yellow", { "RoadLineYellow" } },
-	{ "concrete", { "Concrete" } },
-	{ "cracked concrete", { "CrackedConcrete" } },
-	{ "mossy concrete", { "MossyConcrete" } },
-	{ "cracked bricks", { "CrackedBricks" } },
-	{ "mossy bricks", { "MossyBricks" } },
+	-- The zombie apocalypse's ruins and bunkers still waiting (the fourth sheet made the rest).
 	{ "rusty metal", { "RustyMetal" } },
-	{ "supply crate side", { "SupplyCrate" } },
-	{ "supply crate top", { "SupplyCrate" } },
-	{ "medicine cabinet side", { "MedicineCabinet" } },
-	{ "medicine cabinet top", { "MedicineCabinet" } },
 	{ "bunker hatch", { "BunkerHatch", "BunkerHatchOpen" } },
 }
 -- Doors: each wood's bottom picture on its 16 lower halves, its top picture on its 16 upper ones
@@ -495,6 +525,85 @@ return function(t, shared, require)
 		end
 		for name, texture in Pack.Textures do
 			t.ok(texture.Color == "" or texture.Normal ~= texture.Color, `{name}: normal map is not the colour map`)
+		end
+	end)
+
+	t.test("texture pack: shared maps in their own colours: road lines, aged concrete and bricks", function()
+		-- The colour a texture drawn on block `block` is tinted towards (nil: its own colours).
+		local function target(texture: string, block: string): { number }?
+			local tint = Pack.Textures[texture].Tint
+			if tint == false then
+				return nil
+			end
+			return Blocks.get(B[if type(tint) == "string" then tint else block]).color
+		end
+		local function colour(block: string): { number }
+			return Blocks.get(B[block]).color
+		end
+		local function luma(c: { number }): number
+			return 0.2126 * c[1] + 0.7152 * c[2] + 0.0722 * c[3]
+		end
+		local SIDES = { "north", "south", "east", "west", "bottom" }
+		local asphalt = colour("Asphalt")
+		-- The road lines: the paint on top in the line's own colour, filled (a blank top would
+		-- show the sides' texture, the header's rule, and the line would vanish), the sides and
+		-- bottom asphalt in Asphalt's dark colour, as beside them.
+		for name, top in { RoadLine = "road line", RoadLineYellow = "road line yellow" } do
+			local faces = Blocks.get(B[name]).textures
+			t.eq(faces.top, top, `{name}: its paint on top`)
+			t.ok(Blocks.textureFilled(top), `{name}: the paint is filled, so it never falls back to the sides`)
+			t.eq(target(top, name), colour(name), `{name}: the paint in the line's own colour`)
+			for _, side in SIDES do
+				t.eq(faces[side], "asphalt", `{name} {side}`)
+				t.eq(target("asphalt", name), asphalt, `{name} {side}: asphalt in Asphalt's colour`)
+			end
+			t.ok(luma(colour(name)) > 2.5 * luma(asphalt), `{name}: the paint stands out on the asphalt`)
+			-- (The sides' texture is the variant on every face; the top is drawn over it.)
+			t.eq(Blocks.variantTexture(Blocks.get(B[name]).appearance), "asphalt", `{name}: the variant`)
+		end
+		local yellow = colour("RoadLineYellow")
+		t.ok(yellow[1] > 1.5 * yellow[3] and yellow[2] > 1.5 * yellow[3], "the yellow line is yellow")
+		local white = colour("RoadLine")
+		t.ok(math.abs(white[1] - white[3]) < 20 and luma(white) > 180, "the white line is white")
+		-- Asphalt and cracked asphalt: their own texture on every face, dark.
+		for name, texture in { Asphalt = "asphalt", CrackedAsphalt = "cracked asphalt" } do
+			local faces = Blocks.get(B[name]).textures
+			for _, face in { "top", "north", "south", "east", "west", "bottom" } do
+				t.eq(faces[face], texture, `{name} {face}`)
+			end
+			local c = target(texture, name) :: { number }
+			t.eq(c, colour(name), `{name}: its own colour`)
+			t.ok(luma(c) < 80, `{name} is dark`)
+		end
+		-- Cracked asphalt is andesite's picture, the road lines' paint asphalt's (the sheet's).
+		t.eq(Pack.Textures["cracked asphalt"].Color, Pack.Textures.andesite.Color, "cracked asphalt: andesite's")
+		t.eq(Pack.Textures["road line"].Color, Pack.Textures.asphalt.Color, "the paint: asphalt's maps")
+		t.eq(Pack.Textures["road line yellow"].Color, Pack.Textures.asphalt.Color)
+
+		-- Cracked and mossy concrete take concrete's maps, cracked and mossy bricks the bricks',
+		-- each in its own colour: the cracked darker than the plain block in every channel, the
+		-- mossy greener (a larger share of green).
+		local function greenShare(c: { number }): number
+			return c[2] / (c[1] + c[2] + c[3])
+		end
+		for plain, aged in
+			{
+				concrete = { "Concrete", "CrackedConcrete", "MossyConcrete" },
+				bricks = { "Brick", "CrackedBricks", "MossyBricks" },
+			}
+		do
+			local base, cracked, mossy = aged[1], aged[2], aged[3]
+			for _, block in { cracked, mossy } do
+				local texture = Blocks.get(B[block]).textures.north
+				t.eq(Pack.Textures[texture].Color, Pack.Textures[plain].Color, `{block}: {plain}'s picture`)
+				t.eq(Pack.Textures[texture].Normal, Pack.Textures[plain].Normal, `{block}: {plain}'s normal map`)
+				t.eq(target(texture, block), colour(block), `{block}: tinted with its own colour`)
+			end
+			t.eq(target(plain, base), colour(base), `{base}: its own colour`)
+			for k = 1, 3 do
+				t.ok(colour(cracked)[k] < colour(base)[k], `{cracked} darker than {base} (channel {k})`)
+			end
+			t.ok(greenShare(colour(mossy)) > greenShare(colour(base)) + 0.03, `{mossy} greener than {base}`)
 		end
 	end)
 

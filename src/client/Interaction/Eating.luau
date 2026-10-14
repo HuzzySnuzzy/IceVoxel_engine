@@ -7,13 +7,15 @@
 	drinks:
 
 	  start   Eat start, then while the use button stays down (`stop` when it is let go), the same
-	          item in the same hotbar slot and no screen open, the food's Foods.useTicks (32 for
-	          Minecraft's food) count at 20 a second, with Minecraft's bite (entity.generic.eat)
-	          every 4 ticks from the 7th (LivingEntity.triggerItemUseEffects); at the end, Eat
+	          item in the same hotbar slot, no screen open and the player alive, the food's
+	          Foods.useTicks (32 for Minecraft's food) count at 20 a second; at the end, Eat
 	          finish and the burp (entity.player.burp). Anything else cancels it (Eat cancel).
-	          Medicine (Foods.isMedical) plays its own sound (Foods `sound`: item.bandage.apply,
-	          item.medkit.use, item.pills.swallow) as the use starts, instead of the bites and the
-	          burp; the server plays it to everyone else when it finishes.
+	          While it lasts the eating loop plays at the player (Audio/UseSounds, from
+	          `useLength`; Minecraft's bites, entity.generic.eat every 4 ticks from the 7th, only
+	          when the loop's recording fails to load). Medicine (Foods.isMedical) plays its own
+	          sound (Foods `sound`: item.bandage.apply, item.medkit.use, item.pills.swallow) as
+	          the use starts, instead of the loop and the burp; the server plays it to everyone
+	          else when it finishes.
 	Only when the player may use it (Foods.canUse, with the effects this client was told of,
 	Player/EffectState: hurt, bleeding for a bandage, infected for antibiotics or a poultice, any
 	time for a treat with effects, creative whenever; never a spectator). Nothing is predicted: the
@@ -41,9 +43,6 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Eating = {}
 
 local TICK = 1 / 20
--- Minecraft's bites: every 4 ticks once 7 have passed.
-local BITE_EVERY = 4
-local BITE_FROM = 7
 -- The sounds medicine plays here (Foods `sound`): checked against the table as this loads, so a
 -- food naming a sound this client doesn't play fails at once.
 local MEDICINE_SOUNDS: { [string]: boolean } = {
@@ -77,6 +76,16 @@ end
 -- Is the player eating?
 function Eating.isEating(): boolean
 	return holding ~= nil
+end
+
+-- The ticks the food being eaten lasts while it sounds like eating (the loop, Audio/UseSounds),
+-- nil when nothing is eaten or it is medicine (which plays its own sound).
+function Eating.useLength(): number?
+	local current = holding
+	if current == nil or Foods.isMedical(current.food) then
+		return nil
+	end
+	return current.length
 end
 
 -- How far the food has got (0..1), nil when none.
@@ -132,13 +141,26 @@ function Eating.stop()
 	cancel()
 end
 
+-- Is this player's character alive?
+local function alive(): boolean
+	local character = Players.LocalPlayer.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	return humanoid ~= nil and humanoid.Health > 0
+end
+
 local function update(dt: number)
 	local current = holding
 	if current == nil then
 		return
 	end
 	local stack = ClientInventory.selectedStack()
-	if Screens.isOpen() or ClientInventory.selected() ~= current.slot or stack == nil or stack.item ~= current.item then
+	if
+		Screens.isOpen()
+		or ClientInventory.selected() ~= current.slot
+		or stack == nil
+		or stack.item ~= current.item
+		or not alive()
+	then
 		cancel()
 		return
 	end
@@ -146,16 +168,13 @@ local function update(dt: number)
 	current.elapsed += dt
 	while current.ticks < current.length and current.elapsed >= (current.ticks + 1) * TICK do
 		current.ticks += 1
-		local remaining = current.length - current.ticks
-		if remaining == 0 then
+		if current.ticks == current.length then
 			holding = nil
 			ClientNet.send(Protocol.ClientMessage.Eat, Protocol.encodeEat(Protocol.EatAction.Finish))
 			if not medical then
 				play("entity.player.burp")
 			end
 			return
-		elseif not medical and remaining <= current.length - BITE_FROM and remaining % BITE_EVERY == 0 then
-			play("entity.generic.eat")
 		end
 	end
 end

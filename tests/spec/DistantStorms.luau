@@ -610,8 +610,8 @@ return function(t, shared, require, _server, client)
 
 	t.test("distant storms: their sounds are in the catalogue, after the rest, played by the client", function()
 		local list = SoundList.EVENTS
-		-- (Terraria's six came after them, then the wind, then the zombie apocalypse's ten:
-		-- Shared/Sounds/SoundList.)
+		-- (Terraria's six came after them, then the wind, then the zombie apocalypse's ten, then
+		-- the fourth data sheet's eating and drinking loops: Shared/Sounds/SoundList.)
 		local wind = 0
 		for index, event in list do
 			if event.name == "weather.wind" then
@@ -622,7 +622,8 @@ return function(t, shared, require, _server, client)
 		t.eq(list[wind - 7].name, "weather.rain.far")
 		t.eq(list[wind - 6].name, "entity.player.double_jump")
 		t.eq(list[wind + 10].name, "ambient.blood_moon.rise", "the wind, then the apocalypse's ten")
-		t.eq(#list, wind + 10)
+		t.eq(list[wind + 12].name, "entity.generic.drinking", "then the two loops")
+		t.eq(#list, wind + 12)
 		for _, name in { "entity.lightning_bolt.thunder.far", "weather.rain.far" } do
 			local event = Sounds.get(Sounds.id[name]) :: any
 			t.eq(event.side, "client")

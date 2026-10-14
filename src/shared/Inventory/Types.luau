@@ -192,6 +192,15 @@ Types.HELD_ATTRIBUTE = "IceVoxelHeldItem"
 -- Player attribute with what the character shows (comma separated item ids, 0 none: head, chest,
 -- legs, feet, then the accessories drawn), set by the server so every client can draw it.
 Types.LOOKS_ATTRIBUTE = "IceVoxelLooks"
+--[[
+	Player attribute with the use the player holds the button for: USE_EAT (a food that is not
+	medicine, which plays its own sound) or USE_DRINK (a held drink), nil otherwise. Set by the
+	server while the use lasts (server Players/UseState), so every client can play its sound at
+	the player (client Audio/UseSounds); the user's own client plays theirs from its own hold.
+]]
+Types.USE_ATTRIBUTE = "IceVoxelUse"
+Types.USE_EAT = "eat"
+Types.USE_DRINK = "drink"
 
 --[[ Terraria's equipment (see the header) ]]
 

@@ -70,7 +70,8 @@
 	                   and Fallen Stars at night (Players/FallenStars)
 	 11. mobs      -> cows, sheep, pigs, chickens and the apocalypse's zombies
 	                   (Mobs/Mobs: their ticks, spawning, players' attacks, replication, /summon,
-	                   blasts hurting them), eating what they drop (Players/Eating), and the
+	                   blasts hurting them), eating what they drop (Players/Eating; who eats or
+	                   drinks for every client to hear: Players/UseState), and the
 	                   apocalypse's survival rules (Apocalypse/Survival: bites, wounds, survivor
 	                   records) and noises (Apocalypse/NoiseBus: sounds and blasts zombies hear)
 	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
@@ -153,6 +154,7 @@ local Magic = require(Server.Players.Magic)
 local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
 local Eating = require(Server.Players.Eating)
+local UseState = require(Server.Players.UseState)
 local Survival = require(Server.Apocalypse.Survival)
 local NoiseBus = require(Server.Apocalypse.NoiseBus)
 local Effects = require(Server.Players.Effects)
@@ -260,6 +262,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	-- Config.Players.ServerPositions only).
 	PlayerRelay.start(net)
 	Eating.start(net)
+	-- (Ends the uses eating and drinking begin when their players die, leave or go quiet.)
+	UseState.start()
 	-- The zombie apocalypse's bites, wounds, sprinting noise and survivor records (Mobs' hits,
 	-- eating's medicine).
 	Survival.start(net, world)

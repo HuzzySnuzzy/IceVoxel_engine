@@ -5,7 +5,7 @@
 	(Containers' onOpeners, also through InventoryState) and where item pickups sound (EntityWorld).
 ]]
 
-return function(t, shared, require, server, _client)
+return function(t, shared, require, server, client)
 	local Blocks = require(shared.Blocks)
 	local Items = require(shared.Items)
 	local Config = require(shared.Config)
@@ -17,6 +17,7 @@ return function(t, shared, require, server, _client)
 	local Containers = require(server.Players.Containers)
 	local InventoryState = require(server.Players.InventoryState)
 	local EntityWorld = require(server.Entities.EntityWorld)
+	local UseSoundRules = require(client.Audio.UseSoundRules)
 
 	local B = Blocks.id
 	local I = Items.id
@@ -83,7 +84,7 @@ return function(t, shared, require, server, _client)
 		end), "id errors on unknown names")
 	end)
 
-	t.test("sounds: every event is well formed and plays a file every client ships", function()
+	t.test("sounds: every event is well formed, a file every client ships or one with a way back to it", function()
 		-- content/sounds in Roblox's file manifest (version 0.741, MaximumADHD/Roblox-Client-Tracker
 		-- rbxManifest.txt): every sound file a client has. The classic gear sounds (glassbreak.wav,
 		-- snap.wav, button.wav, swordslash.wav, unsheath.wav...) and uuhhh.mp3 are gone.
@@ -104,18 +105,22 @@ return function(t, shared, require, server, _client)
 			local file = string.match(id, "^rbxasset://sounds/([^/]+)$")
 			return file ~= nil and SHIPPED[file] == true
 		end
-		-- (The cave moods are the game's own uploads, MusicList.Moods; their fallback ships.)
-		local function mood(id: string): boolean
-			return table.find(MusicList.Moods, id) ~= nil and string.find(id, "^rbxassetid://%d+$") ~= nil
+		-- The game's own uploads: the cave moods (MusicList.Moods) and the data sheets' recordings
+		-- (every block's break and place, the eating and drinking loops). Each has a way back to a
+		-- sound every client ships: a `fallback`, or for the loops Minecraft's clicks
+		-- (Audio/UseSoundRules: played instead when the loop's file fails to load).
+		local function uploaded(id: string): boolean
+			return string.find(id, "^rbxassetid://%d+$") ~= nil
+		end
+		local loopClicks: { [string]: string } = {}
+		for kind, name in UseSoundRules.LOOPS do
+			loopClicks[name] = UseSoundRules.CLICKS[kind]
 		end
 		for _, id in Sounds.contentIds() do
-			t.ok(certain(id) or mood(id), `{id} ships with every client`)
+			t.ok(certain(id) or uploaded(id), `{id} ships with every client, or is the game's own`)
 		end
 		for _, event in Sounds.events do
-			t.ok(
-				string.find(event.id, "^rbxasset://sounds/") ~= nil or mood(event.id),
-				`{event.name} is a built-in sound`
-			)
+			t.ok(certain(event.id) or uploaded(event.id), `{event.name} is a built-in sound or the game's own`)
 			t.ok(event.volume > 0 and event.volume <= 2, `{event.name} volume {event.volume}`)
 			t.ok(event.pitch > 0.1 and event.pitch < 4, `{event.name} pitch {event.pitch}`)
 			t.ok(event.pitchVariance >= 0 and event.pitchVariance < event.pitch, `{event.name} variance`)
@@ -133,10 +138,24 @@ return function(t, shared, require, server, _client)
 			end
 		end
 		for _, event in Sounds.events do
-			if mood(event.id) then
-				t.ok(event.fallback ~= nil, `{event.name} falls back on a sound every client ships`)
-			else
-				t.ok(certain(event.id), `{event.name} ({event.id}) ships with every client`)
+			if not certain(event.id) then
+				local clicks = loopClicks[event.name]
+				if clicks then
+					t.eq(event.fallback, nil, `{event.name}: its clicks are its fallback`)
+					t.ok(certain((Sounds.get(clicks) :: any).id), `{event.name} falls back on {clicks}, which ships`)
+				else
+					t.ok(event.fallback ~= nil, `{event.name} ({event.id}) falls back on a sound every client ships`)
+				end
+			end
+		end
+		-- The uploads: the moods, the loops and the blocks' break and place recordings, no others.
+		local recorded = { [SoundList.RECORDED["break"]] = true, [SoundList.RECORDED.place] = true }
+		for _, event in Sounds.events do
+			if uploaded(event.id) then
+				t.ok(
+					table.find(MusicList.Moods, event.id) ~= nil or loopClicks[event.name] ~= nil or recorded[event.id],
+					`{event.name}: a known upload`
+				)
 			end
 		end
 	end)
@@ -157,15 +176,20 @@ return function(t, shared, require, server, _client)
 		t.ok(Sounds.find("ambient.cave") ~= nil, "the stand-in stays for an empty list")
 	end)
 
-	t.test("sounds: the music list (MusicList): audio ids, surface and cave tracks", function()
-		t.ok(#MusicList.Surface > 0 and #MusicList.Cave > 0, "both kinds have tracks")
-		for kind, tracks in { Surface = MusicList.Surface, Cave = MusicList.Cave } do
+	t.test("sounds: the music list (MusicList): audio ids, surface, night and cave tracks", function()
+		t.ok(#MusicList.Surface > 0 and #MusicList.Night > 0 and #MusicList.Cave > 0, "every list has tracks")
+		local everywhere = {}
+		for kind, tracks in { Surface = MusicList.Surface, Night = MusicList.Night, Cave = MusicList.Cave } do
 			local seen = {}
 			for i, track in tracks do
 				t.ok(string.find(track.Id, "^rbxassetid://%d+$") ~= nil, `{kind} {i}: {track.Id}`)
 				t.eq(type(track.Title), "string", `{kind} {i}: a title ("" for the audio's name)`)
 				t.ok(not seen[track.Id], `{kind} {i}: listed once`)
+				t.ok(not everywhere[track.Id], `{kind} {i}: in no other list`)
 				seen[track.Id] = true
+			end
+			for id in seen do
+				everywhere[id] = true
 			end
 		end
 		-- The sheet's ids, written out in full (it stored them in scientific notation).
@@ -173,7 +197,10 @@ return function(t, shared, require, server, _client)
 		t.eq(MusicList.Cave[1].Id, "rbxassetid://273398061")
 		t.eq(MusicList.Moods[5], "rbxassetid://3231980820")
 		t.eq(#MusicList.Surface, 12, "the sheet's 13 rows, one of them a repeat")
-		t.eq(#MusicList.Cave, 2)
+		-- (The fourth sheet added the Surface NightTime list and four cave tracks: their ids are
+		-- tests/spec/DataSheet's.)
+		t.eq(#MusicList.Night, 7, "the sheet's Surface NightTime")
+		t.eq(#MusicList.Cave, 6, "two, then the fourth sheet's four")
 		t.eq(#MusicList.Moods, 10)
 	end)
 
@@ -285,6 +312,28 @@ return function(t, shared, require, server, _client)
 			check(typeName, "step", "step", { 0.15, 0 }, 1)
 			check(typeName, "fall", "step", { 0.5, 0 }, 0.75)
 		end
+		-- Every type's break and place play the sheet's recordings, its old thud (`dig`) their
+		-- fallback, scaled with them; glass keeps its shatter for breaking, water its splash.
+		for _, typeName in Blocks.SOUND_TYPES do
+			local blockType = types[typeName]
+			for action, id in SoundList.RECORDED do
+				local event = Sounds.get(`block.{typeName}.{action}`) :: any
+				if typeName == "water" or (typeName == "glass" and action == "break") then
+					t.ok(event.id ~= id, `block.{typeName}.{action} keeps its own sound`)
+				else
+					t.eq(event.id, id, `block.{typeName}.{action}: the sheet's recording`)
+					local fallback = event.fallback
+					t.ok(fallback ~= nil, `block.{typeName}.{action} falls back`)
+					t.eq(fallback and fallback.id, blockType.dig.id, `block.{typeName}.{action}: on the stand-in`)
+					t.near(fallback and fallback.volume or 0, event.volume, 1e-9, "scaled as the recording is")
+					t.near(fallback and fallback.pitch or 0, event.pitch, 1e-9)
+					t.eq(event.category, `block.{action}`, "a developer's block.<action> Sound still replaces it")
+				end
+			end
+		end
+		t.eq(SoundList.RECORDED["break"], "rbxassetid://73168198865721", "the sheet's Generic_Break")
+		t.eq(SoundList.RECORDED.place, "rbxassetid://101534882480796", "the sheet's Generic_Place")
+		t.eq(Sounds.get("block.water.place").id, "rbxasset://sounds/impact_water.mp3", "water still splashes")
 		-- Glass shatters when broken, but is placed like stone.
 		t.eq(Sounds.get("block.glass.break").id, "rbxasset://sounds/impact_explosion_03.mp3", "glass breaks")
 		t.ok(Sounds.get("block.glass.break").duration, "only the explosion's crack")

@@ -35,6 +35,12 @@
 	             When all are busy the quietest as heard now gives way to a louder one
 	             (SoundRules.acquireQuietest): it fades out over SoundRules.DISTANT_FADE seconds
 	             first (no click), then the louder one starts on its voice.
+	  Loops      a looped sound at a moving point, kept up by its caller every frame (`setLoop`,
+	             keyed by anything: a player eating or drinking, Audio/UseSounds), on a Sound of
+	             its own in an Attachment of the emitter, heard as far as its event as a voice is,
+	             following the volume settings while it plays; set to nothing, it stops at once.
+	             `loads` says whether an event plays its own sound (a developer's replacement, or
+	             its file, which has not failed): a loop that cannot falls back on its caller's.
 	  Voices     a voice is free again once its sound ends, or when it is cut at the event's
 	             `duration`; when all are busy the oldest is taken, and a kind of sound never has
 	             more than a few at once (overlapping mining hits, many footsteps:
@@ -53,7 +59,11 @@
 	             (else ReplicatedStorage), named like an event or its category, replace it
 	             (SoundRules.chooseOverride; several with one name are picked from at random).
 	             Their SoundId, Volume, PlaybackSpeed and SoundGroup are used, heard as far as the
-	             event. The folder is watched: Sounds added or removed during the game count.
+	             event. The folder is watched: Sounds added or removed during the game count. The
+	             game ships some there (src/sounds: the weather's, the zombies' voices). Each is
+	             preloaded once; one whose file never loads (SoundRules.loadFailed, as the
+	             catalogue's files) is left out from then on, with a warning, so its event plays
+	             its own sound again (the stand-in).
 	  Defaults   Roblox's own character sounds (PlayerScripts.RbxCharacterSounds: running,
 	             landing, dying...) would double these, so that script is disabled and the sounds
 	             it made are removed.
@@ -167,6 +177,10 @@ type Bed = {
 	volume: number,
 	flatVolume: number,
 }
+-- A loop kept up by its caller (`setLoop`): its Sound and Attachment, the event playing (nil:
+-- stopped), its volume at cue 1 before the volume settings (taken when it starts) and the volume
+-- written.
+type Loop = { attachment: Attachment, sound: Sound, event: Event?, clip: number, volume: number }
 
 local SoundPlayer = {}
 
@@ -182,6 +196,7 @@ local distantVoices: { Distant } = {}
 -- The Sound.Volume each distant voice started at (SoundRules.acquireQuietest).
 local distantLoudness: { number } = {}
 local beds: { Bed } = {}
+local loops: { [any]: Loop } = {}
 local playedThisFrame = 0
 -- Files that failed to load (their events play their fallback).
 local failed: { [string]: boolean } = {}
@@ -196,6 +211,8 @@ local mixed: SoundRules.Settings = { Volume = 1, Sources = {} }
 -- Replacement Sounds by name; nil when they need indexing again.
 local overrideIndex: { [string]: { Sound } }? = nil
 local preloadedOverrides: { [Sound]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+-- Replacement files that never loaded (their Sounds are left out of the index).
+local overrideFailed: { [string]: boolean } = {}
 
 --[[ Files ]]
 
@@ -268,6 +285,52 @@ local function overrideFolder(): Instance?
 	return SoundService:FindFirstChild(name) or ReplicatedStorage:FindFirstChild(name)
 end
 
+--[[
+	Preloads replacement Sounds new to the index and leaves out, from then on, those whose file
+	never loads (as `preload` judges the catalogue's: SoundRules.loadPending, loadFailed), so their
+	events play their own sounds. Runs in its own thread.
+]]
+local function preloadOverrides(fresh: { Sound })
+	local reported: { [string]: SoundRules.LoadReport } = {}
+	pcall(function()
+		ContentProvider:PreloadAsync(fresh, function(contentId: string, status: Enum.AssetFetchStatus)
+			if status == Enum.AssetFetchStatus.Success then
+				reported[contentId] = "ok"
+			elseif status == Enum.AssetFetchStatus.Failure or status == Enum.AssetFetchStatus.TimedOut then
+				reported[contentId] = "failed"
+			end
+		end)
+	end)
+	local since = os.clock()
+	while true do
+		local waiting = false
+		for _, sound in fresh do
+			if SoundRules.loadPending(sound.IsLoaded, reported[sound.SoundId], os.clock() - since) then
+				waiting = true
+				break
+			end
+		end
+		if not waiting then
+			break
+		end
+		task.wait(0.25)
+	end
+	local changed = false
+	for _, sound in fresh do
+		local id = sound.SoundId
+		if not overrideFailed[id] and SoundRules.loadFailed(sound.IsLoaded, reported[id]) then
+			overrideFailed[id] = true
+			changed = true
+			warn(
+				`[IceVoxel] Replacement Sound {sound:GetFullName()} ({id}) did not load; its event plays its own sound.`
+			)
+		end
+	end
+	if changed then
+		invalidate()
+	end
+end
+
 -- Replacement Sounds by name (indexed again after the folder changes).
 local function overrides(): { [string]: { Sound } }
 	local index = overrideIndex
@@ -290,7 +353,7 @@ local function overrides(): { [string]: { Sound } }
 	local fresh: { Sound } = {}
 	if folder then
 		for _, descendant in folder:GetDescendants() do
-			if descendant:IsA("Sound") and descendant.SoundId ~= "" then
+			if descendant:IsA("Sound") and descendant.SoundId ~= "" and not overrideFailed[descendant.SoundId] then
 				local list = built[descendant.Name]
 				if list == nil then
 					list = {}
@@ -305,11 +368,7 @@ local function overrides(): { [string]: { Sound } }
 		end
 	end
 	if #fresh > 0 then
-		task.spawn(function()
-			pcall(function()
-				ContentProvider:PreloadAsync(fresh)
-			end)
-		end)
+		task.spawn(preloadOverrides, fresh)
 	end
 	overrideIndex = built
 	return built
@@ -952,6 +1011,110 @@ function SoundPlayer.setBed(
 		equalizer.LowGain, equalizer.MidGain, equalizer.HighGain = low, mid, high
 	end
 	setGains(bed.voice, low, mid, high)
+end
+
+--[[ Loops ]]
+
+--[[
+	Does event `name` play its own sound: a developer's replacement Sound, or its file, which has
+	not failed to load? (Audio/UseSounds plays the old clicks when an eating or drinking loop
+	cannot.) An unknown name errors.
+]]
+function SoundPlayer.loads(name: string): boolean
+	local event = resolve(name)
+	if event == nil then
+		return false
+	end
+	if SoundRules.chooseOverride(overrides(), Sounds.lookupNames(event.index), 0) ~= nil then
+		return true
+	end
+	return not failed[event.id]
+end
+
+local function stopLoop(loop: Loop)
+	if loop.event then
+		loop.event = nil
+		loop.sound:Stop()
+	end
+end
+
+--[[
+	Loop `key` (anything, a Player say) plays event `name` (nil: nothing) looped at (x, y, z),
+	blocks: call it every frame while it should. It starts from the beginning when its event
+	changes or it was stopped (with a pitch of the event's variance), follows the point and the
+	volume settings while it plays, and stops at once given nil, out of the event's hearing, or
+	with the volume at 0. `endLoop` frees it.
+]]
+function SoundPlayer.setLoop(key: any, name: string?, x: number, y: number, z: number)
+	local loop = loops[key]
+	local event = if name then resolve(name) else nil
+	local parent = emitterPart
+	if event == nil or parent == nil or not enabled then
+		if loop then
+			stopLoop(loop)
+		end
+		return
+	end
+	local position = renderAt(x, y, z)
+	local range = SoundRules.range(event, 1) * BLOCK
+	local listener = hearingPoint()
+	local mix = SoundPlayer.sourceVolume(event.source)
+	if mix <= 0 or (listener and (listener - position).Magnitude > range + CULL_SLACK) then
+		if loop then
+			stopLoop(loop)
+		end
+		return
+	end
+	if loop == nil then
+		local holder = Instance.new("Attachment")
+		holder.Name = "Loop"
+		holder.Parent = parent
+		local sound = Instance.new("Sound")
+		sound.Name = "Loop"
+		sound.Looped = true
+		sound.RollOffMode = Enum.RollOffMode.Linear
+		sound.Parent = holder
+		local made: Loop = { attachment = holder, sound = sound, event = nil, clip = 0, volume = -1 }
+		loops[key] = made
+		loop = made
+	end
+	local current = loop :: Loop
+	current.attachment.Position = position
+	local sound = current.sound
+	if current.event ~= event then
+		local playback, replacement = playbackOf(event, 1, 1)
+		if playback.volume <= 0 then
+			stopLoop(current)
+			return
+		end
+		sound:Stop()
+		current.event = event
+		current.clip = playback.volume / mix
+		current.volume = -1
+		sound.SoundId = playback.id
+		sound.PlaybackSpeed = playback.pitch
+		sound.SoundGroup = if replacement then replacement.SoundGroup else nil
+		sound.RollOffMaxDistance = range
+		sound.RollOffMinDistance = math.min(Config.Sounds.MinDistance * BLOCK, range)
+		sound.TimePosition = 0
+		sound:Play()
+	end
+	-- (The volume settings are followed while it plays.)
+	local level = math.clamp(current.clip * mix, 0, SoundRules.MAX_VOLUME)
+	if math.abs(level - current.volume) > 0.002 then
+		current.volume = level
+		sound.Volume = level
+	end
+end
+
+-- Loop `key` stops and is freed (a player gone).
+function SoundPlayer.endLoop(key: any)
+	local loop = loops[key]
+	if loop then
+		loops[key] = nil
+		loop.sound:Stop()
+		loop.attachment:Destroy()
+	end
 end
 
 -- An interface button or tab was clicked (ui.button.click; Config.Sounds.Interface).

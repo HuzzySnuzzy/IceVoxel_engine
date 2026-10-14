@@ -66,8 +66,10 @@
 	                             Sound messages, developer overrides), MovementSounds (footsteps,
 	                             swimming, landings), Ambience (a lit furnace, Heat or
 	                             Combustion Generator, lava, fire, Minecraft's cave mood:
-	                             CaveMood),
-	                             Music (surface and cave tracks, Minecraft's timing: MusicRules)
+	                             CaveMood), UseSounds (players eating and drinking: the loops,
+	                             UseSoundRules),
+	                             Music (surface, night and cave tracks, Minecraft's timing:
+	                             MusicRules)
 	  Ui/MusicToast              the "Now Playing" toast in the top right corner
 	  Ui/SaveIndicator           the saving icon (bottom right) while the server saves the
 	                             world, and the "World saved" toast for operators; it hears the
@@ -173,6 +175,7 @@ local SoundPlayer = require(Client.Audio.SoundPlayer)
 local MovementSounds = require(Client.Audio.MovementSounds)
 local Ambience = require(Client.Audio.Ambience)
 local Music = require(Client.Audio.Music)
+local UseSounds = require(Client.Audio.UseSounds)
 local MusicToast = require(Client.Ui.MusicToast)
 local Settings = require(Client.Settings)
 local Keybinds = require(Client.Settings.Keybinds)
@@ -454,6 +457,7 @@ DebugOverlay.start(streamer)
 Waila.start(world, generator)
 Map.start(pool, generator)
 MovementSounds.start(world)
+UseSounds.start()
 Ambience.start(function(x: number, y: number, z: number): number?
 	return world:getBlock(x, y, z)
 end)

@@ -8,7 +8,11 @@
 	The sounds are files every Roblox client ships with (rbxasset://sounds/...), so the game makes
 	sound with nothing uploaded. They are stand-ins, told apart by pitch and volume. To use real
 	sounds, put Sound instances named like the events in a folder (README, "Sounds"), or change the
-	`id`s here to your own rbxassetid://.
+	`id`s here to your own rbxassetid://. The game's own recordings (the data sheets') are here
+	where an event has none to replace: every block's break and place (BLOCK_TYPES, with the
+	stand-in as each clip's `fallback`), the eating and drinking loops (whose fallback is the old
+	clicks), the cave moods (Sounds/MusicList); the weather's and the zombies' replace their
+	stand-ins from SoundService.IceVoxelSounds (src/sounds) instead.
 
 	Built-in files: a client ships only eleven sounds (content/sounds in Roblox's file manifest,
 	checked for version 0.741): action_falling.ogg, action_footsteps_plastic.mp3,
@@ -124,6 +128,11 @@ local OOF = "rbxasset://sounds/oof.ogg"
 local OUCH = "rbxasset://sounds/ouch.ogg"
 local TICK = "rbxasset://sounds/volume_slider.ogg" -- the settings menu's volume tick
 
+-- The fourth data sheet's "Main SFX": a block broken and a block placed ("Fallback block break
+-- sound", "Fallback block place sound"), for every block sound type (BLOCK_TYPES).
+local GENERIC_BREAK = "rbxassetid://73168198865721"
+local GENERIC_PLACE = "rbxassetid://101534882480796"
+
 -- The first footstep of the walking loop (seconds of the file).
 local ONE_STEP = 0.3
 
@@ -139,11 +148,15 @@ SoundList.ACTIONS = {
 } :: { Action }
 
 --[[
-	Block sound types. With one thud and one footstep for everything, the pitch tells the materials
-	apart, each type a step above the last when broken or placed: wool 0.6, gravel 0.72, stone
-	0.8, sand 0.88, wood 0.96, grass 1.08, ringing metal 1.2 (Minecraft's metal is its stone
-	sounds at pitch 1.5), snow 1.32. Glass is placed, walked on and hit like stone, as in
-	Minecraft, and shatters when broken; water uses the splash and swimming sounds.
+	Block sound types. With one break, one place and one footstep recording for everything, the
+	pitch tells the materials apart, each type a step above the last when broken or placed: wool
+	0.6, gravel 0.72, stone 0.8, sand 0.88, wood 0.96, grass 1.08, ringing metal 1.2 (Minecraft's
+	metal is its stone sounds at pitch 1.5), snow 1.32. Glass is placed, walked on and hit like
+	stone, as in Minecraft, and shatters when broken; water uses the splash and swimming sounds.
+	Breaking and placing play the sheet's recordings (GENERIC_BREAK, GENERIC_PLACE: each type's
+	`actions`, added below the list from its `dig` clip's volume, pitch and variance, so every
+	type keeps its own); `dig`, the thud, is their fallback should a recording fail to load. A
+	developer's Sound named block.<type>.break (or block.break) still replaces them.
 ]]
 SoundList.BLOCK_TYPES = {
 	{
@@ -263,6 +276,32 @@ SoundList.BLOCK_TYPES = {
 		step = { id = STEPS, volume = 1.4, pitchVariance = 0.08, duration = ONE_STEP },
 	},
 } :: { BlockType }
+
+--[[
+	Every type's break and place clip: the sheet's recording at the type's `dig` volume, pitch and
+	variance (so Minecraft's per type scaling, ACTIONS, still tells the materials apart), with the
+	`dig` clip itself as the fallback. A type's own clip for an action stays (glass's shatter);
+	water keeps its splash for both (Minecraft's bucket, not a block's).
+]]
+SoundList.RECORDED = table.freeze({ ["break"] = GENERIC_BREAK, place = GENERIC_PLACE }) :: { [string]: string }
+for _, blockType in SoundList.BLOCK_TYPES do
+	if blockType.name ~= "water" then
+		local dig = blockType.dig
+		local actions: { [string]: Clip } = blockType.actions or {}
+		blockType.actions = actions
+		for action, id in SoundList.RECORDED do
+			if actions[action] == nil then
+				actions[action] = {
+					id = id,
+					volume = dig.volume,
+					pitch = dig.pitch,
+					pitchVariance = dig.pitchVariance,
+					fallback = { id = dig.id, volume = dig.volume, pitch = dig.pitch, duration = dig.duration },
+				}
+			end
+		end
+	end
+end
 
 -- Every other event. Block events (block.<type>.<action>) come first in the catalogue, then these
 -- in this order.
@@ -594,9 +633,11 @@ SoundList.EVENTS = {
 		Minecraft's 32 tick use: entity.generic.drink (volume 0.5, pitch 0.9..1.0,
 		LivingEntity.triggerItemUseEffects) every 4 ticks from the 7th and once more at the end,
 		which the drinker's client plays itself while the server plays the last one to everyone
-		else; a sip from a water source with an empty hand (TAN's hand drinking) plays it once. A
-		Glass Bottle or a canteen filled at water: item.bottle.fill (BottleItem, volume 1). Stand-ins:
-		a short swim stroke pitched up into a gulp, and the splash pitched high.
+		else; a sip from a water source with an empty hand (TAN's hand drinking) plays it once. The
+		gulps every 4 ticks now play only when the drinking loop's recording fails to load
+		(entity.generic.drinking, below); the last one and the sip always. A Glass Bottle or a
+		canteen filled at water: item.bottle.fill (BottleItem, volume 1). Stand-ins: a short swim
+		stroke pitched up into a gulp, and the splash pitched high.
 	]]
 	{
 		name = "entity.generic.drink",
@@ -790,11 +831,23 @@ table.insert(SoundList.EVENTS, {
 	screamer's own voices; a player's hit landing (entity.player.attack.strong, or .weak before
 	the weapon recovered: Player.attack, 1.9's attack strength) and eating (entity.generic.eat
 	every 4 ticks from the 7th of the 32 tick hold, and entity.player.burp at the end: Player.eat;
-	the eater's client plays its own, the server the last one to everyone else). Stand-ins told
+	the eater's client plays its own, the server the last one to everyone else; the bites now play
+	only when the eating loop's recording fails to load: entity.generic.eating). Stand-ins told
 	apart by pitch: the ouch and the oof for hurts and deaths (low for cows and the brute, high for
 	chickens and the screamer), the landing thud into the hits, a footstep into a bite. The
 	zombies' groans, door bashing and screams, and the bunker hatch, are with the apocalypse's
 	sounds at the end of the list.
+
+	The zombies' real voices (the sheet's "Mob SFX": a growl for every hurt, two deaths) ship as
+	Sounds named like these events in SoundService.IceVoxelSounds (src/sounds/Zombies.model.json),
+	which play instead of the stand-ins; the stand-ins stay, for a game without that folder (or
+	a recording that fails to load: Audio/SoundPlayer then plays the event's own sound again).
+	Each voice has its own Sounds, named by the event, never by the category: entity.mob.hurt
+	would make the cows growl too. A replacement plays at its own PlaybackSpeed varied by the
+	event's variance as a share of its pitch (Audio/SoundRules.playback): when hurt about +-13%
+	for the zombie, +-10% the runner, +-22% the brute and +-6% the screamer, half that or less
+	dying. So the model pitches the kinds 1, 1.3, 0.65 and 1.6, in the stand-ins' order and, as
+	theirs, with no two kinds' spreads overlapping (tests/spec/ZombieVoices checks it).
 ]]
 -- Each voice's event name and the pitch of its hurt and death.
 local MOB_VOICES: { { kind: string, hurt: number, death: number } } = {
@@ -1116,7 +1169,10 @@ table.insert(
 	The zombie apocalypse (server Mobs/, Apocalypse/, Players/ToggleUse; client Entities/
 	ZombieVoices, Ui/SurvivorHud), after the rest. Stand-ins:
 	  entity.zombie.ambient              a zombie's groan: the oof pitched down. Each client plays
-	                                     it from the zombies it tracks (no server event).
+	                                     it from the zombies it tracks (no server event), at the
+	                                     gait's pitch (ZombieVoices.PITCH). The game ships the
+	                                     sheet's three groans in SoundService.IceVoxelSounds
+	                                     (src/sounds/Zombies.model.json): one of them plays.
 	  entity.zombie.attack_wooden_door   a zombie bashing the block it breaks: a heavy thud
 	  entity.zombie.break_wooden_door    the block giving way: the explosion's crack pitched up
 	  entity.zombie_screamer.scream      a screamer's shriek: the falling wind pitched far up
@@ -1229,6 +1285,43 @@ for _, event in
 			duration = 3.0,
 			ui = true,
 			source = "ambient",
+			side = "client",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
+--[[
+	Eating and drinking loops (the fourth sheet's "Main SFX": "loop this during eating", "loop this
+	during drinking"; this game's, as Minecraft clicks entity.generic.eat / .drink every 4 ticks
+	instead). While a player holds the use button on a food (not medicine, which keeps its own
+	sound) or a drink, the recording loops at their mouth and stops the moment the use ends:
+	finished, cancelled, the slot changed, dead or gone (client Audio/UseSounds, by the rules of
+	Audio/UseSoundRules). The user's own client plays theirs at once from its own hold, every other
+	client from the server's player attribute (Inventory/Types.USE_ATTRIBUTE), so each client
+	plays them itself. Only when a recording fails to load (Audio/SoundPlayer.loads) do the old
+	clicks play instead, never both; the burp after a food and the last gulp after a drink stay.
+	The ids are the recordings themselves (no stand-in: the clicks are the fallback); swap one
+	here, or give a Sound of the event's name in SoundService.IceVoxelSounds, which loops too.
+	After the rest, so no other event's number changed.
+]]
+for _, event in
+	{
+		{
+			name = "entity.generic.eating",
+			id = "rbxassetid://124005963174357",
+			volume = 0.6,
+			pitchVariance = 0.05,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "entity.generic.drinking",
+			id = "rbxassetid://79766888063175",
+			volume = 0.6,
+			pitchVariance = 0.03,
+			source = "players",
 			side = "client",
 		},
 	} :: { EventSpec }

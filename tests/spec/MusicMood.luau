@@ -1,7 +1,8 @@
 --[[
 	The background music's rules (client Audio/MusicRules: Minecraft's MusicManager with the surface
-	and caves as its situations) and Minecraft's cave mood (Audio/CaveMood, with the light it reads:
-	CaveMood.blockLight and Rendering/SkyExposure.skyLight), on made-up worlds and timelines.
+	and caves as its situations, and the surface's Night list at night) and Minecraft's cave mood
+	(Audio/CaveMood, with the light it reads: CaveMood.blockLight and
+	Rendering/SkyExposure.skyLight), on made-up worlds and timelines.
 ]]
 
 return function(t, shared, require, _server, client)
@@ -171,6 +172,118 @@ return function(t, shared, require, _server, client)
 		t.eq(#run(state, SETTINGS.SwitchDelay + 0.2, 0), 0)
 		t.eq(state.playing, nil)
 		t.ok(state.wait > SETTINGS.MinDelay - SETTINGS.SwitchDelay - 1, "a usual wait")
+	end)
+
+	t.test("music: the surface at night plays the Night list; dusk and dawn never cut a track", function()
+		local DayCycle = require(shared.DayCycle)
+		local MusicList = require(shared.Sounds.MusicList)
+		-- The game's own lists' sizes, and the rule Audio/Music passes in: night when
+		-- DayCycle.isDay says no, at the game's clock.
+		local LISTS = { surface = #MusicList.Surface, night = #MusicList.Night, cave = #MusicList.Cave }
+		t.ok(LISTS.night > 0, "the sheet's night tracks")
+		local function night(dayTime: number): boolean
+			return not DayCycle.isDay(dayTime)
+		end
+		-- Runs the rules for `seconds` at `exposure` and night or day; returns every action.
+		local function at(state: any, seconds: number, exposure: number, isNight: boolean, counts: any?): { any }
+			local actions = {}
+			local elapsed = 0
+			while elapsed < seconds - 1e-9 do
+				for _, action in MusicRules.step(state, SETTINGS, 0.1, exposure, counts or LISTS, always(0.5), isNight) do
+					table.insert(actions, action)
+				end
+				elapsed += 0.1
+			end
+			return actions
+		end
+		-- Dusk: the first tick of night after noon (a little before Minecraft's sunset ends).
+		local dusk: number = 0
+		for tick = 6000, 18000 do
+			if night(tick) then
+				dusk = tick
+				break
+			end
+		end
+		t.ok(dusk > 12000 and dusk < 13500, `dusk at {dusk}`)
+		t.ok(not night(6000) and night(18000), "noon is day, midnight night")
+
+		-- By day on the surface: Surface.
+		local day = MusicRules.new(SETTINGS, "surface")
+		local actions = at(day, SETTINGS.FirstDelay + 0.2, 1, night(dusk - 1))
+		t.eq(#actions, 1)
+		t.eq(actions[1].list, "surface", "the last day tick: Surface")
+		t.eq(actions[1].place, "surface")
+		-- At night on the surface: Night (its place is still the surface).
+		local dark = MusicRules.new(SETTINGS, "surface")
+		actions = at(dark, SETTINGS.FirstDelay + 0.2, 1, night(dusk))
+		t.eq(actions[1].list, "night", "the first night tick: Night")
+		t.eq(actions[1].place, "surface")
+		t.ok(actions[1].track >= 1 and actions[1].track <= LISTS.night, "a night track")
+		t.eq(dark.list, "night")
+		-- Underground, day or night: Cave.
+		for _, isNight in { true, false } do
+			local cave = MusicRules.new(SETTINGS, "cave")
+			actions = at(cave, SETTINGS.FirstDelay + 0.2, 0, isNight)
+			t.eq(actions[1].list, "cave", `underground ({if isNight then "night" else "day"})`)
+		end
+
+		-- Dusk: a day track playing when night falls plays on (no fade); the next comes from Night.
+		local s = MusicRules.new(SETTINGS, "surface")
+		t.eq(at(s, SETTINGS.FirstDelay + 0.2, 1, false)[1].list, "surface")
+		t.eq(#at(s, 600, 1, true), 0, "night falling cuts nothing, starts nothing")
+		t.eq(s.list, "surface")
+		t.ok(not s.fading, "not fading")
+		MusicRules.ended(s, SETTINGS, "finished", always(0))
+		actions = at(s, SETTINGS.MinDelay + 0.2, 1, true)
+		t.eq(#actions, 1)
+		t.eq(actions[1].list, "night", "the next track follows the night")
+		-- Dawn likewise: the night track plays on, the next is Surface's.
+		t.eq(#at(s, 600, 1, false), 0, "dawn cuts nothing")
+		t.eq(s.list, "night")
+		MusicRules.ended(s, SETTINGS, "finished", always(0))
+		t.eq(at(s, SETTINGS.MinDelay + 0.2, 1, false)[1].list, "surface", "then a day track")
+		-- Going underground at night fades a night track as it does a day one; back up, Night.
+		MusicRules.ended(s, SETTINGS, "finished", always(0))
+		at(s, SETTINGS.MinDelay + 0.2, 1, true)
+		t.eq(s.list, "night")
+		actions = at(s, SETTINGS.SwitchSeconds + 0.2, 0, true)
+		t.eq(actions[1].kind, "fade", "underground: the night track fades")
+		MusicRules.ended(s, SETTINGS, "faded", always(0.5))
+		t.eq(at(s, SETTINGS.SwitchDelay + 0.2, 0, true)[1].list, "cave")
+
+		-- No repeats within a list: Night's last track is not Surface's.
+		local repeats = MusicRules.new(SETTINGS, "surface")
+		local first = at(repeats, SETTINGS.FirstDelay + 0.2, 1, true)[1]
+		MusicRules.ended(repeats, SETTINGS, "finished", always(0))
+		local second = at(repeats, SETTINGS.MinDelay + 0.2, 1, true)[1]
+		t.ok(second.track ~= first.track, "another night track")
+		t.eq(repeats.last.night, second.track)
+		t.eq(repeats.last.surface, nil, "Surface's own last is untouched")
+
+		-- An empty Night list: Surface at night.
+		local empty = MusicRules.new(SETTINGS, "surface")
+		local counts = { surface = LISTS.surface, night = 0, cave = LISTS.cave }
+		t.eq(at(empty, SETTINGS.FirstDelay + 0.2, 1, true, counts)[1].list, "surface", "no night tracks")
+		t.eq(MusicRules.listOf("surface", true, counts), "surface")
+		t.eq(MusicRules.listOf("surface", true, { surface = 3 }), "surface", "no Night list at all")
+		-- Every night track failed to load: Surface too; one failed: the others.
+		local failing = MusicRules.new(SETTINGS, "surface")
+		local played = at(failing, SETTINGS.FirstDelay + 0.2, 1, true)[1]
+		MusicRules.ended(failing, SETTINGS, "failed", always(0.5), played.track)
+		t.ok(failing.failed.night[played.track], "the failed night track is marked in Night")
+		t.eq(next(failing.failed.surface), nil, "not in Surface")
+		local another = at(failing, SETTINGS.SwitchDelay + 0.2, 1, true)[1]
+		t.eq(another.list, "night")
+		t.ok(another.track ~= played.track, "another night track")
+		for i = 1, LISTS.night do
+			failing.failed.night[i] = true
+		end
+		t.eq(MusicRules.listOf("surface", true, LISTS, failing.failed), "surface", "every night track failed")
+		t.eq(MusicRules.listOf("cave", true, LISTS, failing.failed), "cave")
+		t.eq(MusicRules.listOf("surface", false, LISTS, nil), "surface", "by day")
+		-- The rules without a night flag (or counts without Night) are the day's, as before.
+		local plain = MusicRules.new(SETTINGS, "surface")
+		t.eq(run(plain, SETTINGS.FirstDelay + 0.2, 1)[1].list, "surface")
 	end)
 
 	--[[ Cave mood ]]

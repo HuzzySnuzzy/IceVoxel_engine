@@ -422,7 +422,7 @@ return function(t, shared, require, server)
 		t.ok(not Blocks.mayPlaceOn(B.ShortGrass, B.MossyCobblestone))
 	end)
 
-	t.test("mineshaft blocks: texture pack entries (blank) for every new block", function()
+	t.test("mineshaft blocks: texture pack entries for every new block, blank until made", function()
 		local function faces(name: string): any
 			return Blocks.get(B[name]).textures
 		end
@@ -439,12 +439,17 @@ return function(t, shared, require, server)
 		t.eq(faces("VineEast").front, "vine")
 		t.eq(faces("HangingRoots").sprite, "hanging roots")
 		t.eq(faces("MossyCobblestone").north, "mossy cobblestone")
-		for _, texture in
-			{ "ladder", "rope", "rail", "cobweb", "moss block", "vine", "hanging roots", "mossy cobblestone" }
-		do
+		for _, texture in { "ladder", "rope", "rail", "cobweb", "hanging roots" } do
 			t.eq(TexturePack.Textures[texture].Color, "", `{texture} is blank until made`)
 		end
-		-- Until then each draws its voxel colour.
+		-- (The fourth sheet made the moss block's, the vine's and mossy cobblestone's: the moss
+		-- in its picture's own green, the vine in its voxel colour, as Minecraft tints vines;
+		-- tests/spec/DataSheet checks their ids.)
+		for texture, tint in { ["moss block"] = false, vine = true, ["mossy cobblestone"] = false } do
+			t.ok(TexturePack.Textures[texture].Color ~= "", `{texture} is made`)
+			t.eq(TexturePack.Textures[texture].Tint, tint, `{texture} tint`)
+		end
+		-- Blank ones draw their voxel colour until made.
 		t.eq(Blocks.get(B.MossBlock).color[2], 110)
 	end)
 

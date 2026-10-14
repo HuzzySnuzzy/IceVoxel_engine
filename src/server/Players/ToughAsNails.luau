@@ -52,7 +52,10 @@
 	             spectator, the item really in their hand.
 	               start / finish  a bottle or canteen held from `start` to `finish` for at
 	                               least Drinks.USE_TICKS - FINISH_LEEWAY ticks, the same item in
-	                               the same slot, while they may drink it (Drinks.drinkable:
+	                               the same slot (the player's use meanwhile, for every client
+	                               to hear: Players/UseState, Types.USE_DRINK, the drinking
+	                               loop; it ends with the drink, however it ends), while they
+	                               may drink it (Drinks.drinkable:
 	                               thirsty with thirst on, Thirst.canDrink; a tea whenever
 	                               temperature is on): drunk (its water only with thirst on),
 	                               the Thirst effect rolled, Internal Warmth or Chill given (a
@@ -111,6 +114,8 @@ local Containers = require(script.Parent.Containers)
 local Inventories = require(script.Parent.Inventories)
 local ManaServer = require(script.Parent.Mana)
 local PlayerPositions = require(script.Parent.PlayerPositions)
+local UseState = require(script.Parent.UseState)
+local Types = require(Shared.Inventory.Types)
 
 local Thirst = require(Shared.ToughAsNails.Thirst)
 local Temperature = require(Shared.ToughAsNails.Temperature)
@@ -434,15 +439,19 @@ local function onDrink(world: WorldServer.World, player: Player, payload: buffer
 	local now = os.clock()
 	if action == actions.Cancel then
 		record.drinking = nil
+		UseState.finish(player, Types.USE_DRINK)
 	elseif action == actions.Start then
 		record.drinking = nil
+		UseState.finish(player, Types.USE_DRINK)
 		local slot = selectedSlot(player)
 		if held and slot and mayDrink(record, held.item, mode) then
 			record.drinking = { started = now, slot = slot, item = held.item }
+			UseState.begin(player, Types.USE_DRINK, Drinks.USE_TICKS)
 		end
 	elseif action == actions.Finish then
 		local drinking = record.drinking
 		record.drinking = nil
+		UseState.finish(player, Types.USE_DRINK)
 		local drink = Drinks.of(held and held.item)
 		if
 			drinking == nil

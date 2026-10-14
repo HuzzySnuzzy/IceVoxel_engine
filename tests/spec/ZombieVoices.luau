@@ -1,11 +1,19 @@
 --[[
 	The zombies' groans (client Entities/ZombieVoices): at most one every 1.5 s however many
 	zombies are near, only the nearest 8 within reach groan, each on its own period of 6 to 20 s
-	from its id, and none beyond the reach.
+	from its id, and none beyond the reach. And their real voices (src/sounds/Zombies.model.json,
+	SoundService.IceVoxelSounds): every zombie kind's hurt and death replaced by name, the kinds
+	kept apart by pitch as the stand-ins were, with their variety, the stand-ins kept.
 ]]
 
-return function(t, _shared, require, _server, client)
+local fs = require("@lune/fs")
+local serde = require("@lune/serde")
+
+return function(t, shared, require, _server, client)
 	local ZombieVoices = require(client.Entities.ZombieVoices)
+	local SoundRules = require(client.Audio.SoundRules)
+	local Sounds = require(shared.Sounds)
+	local MobList = require(shared.Entities.MobList)
 
 	-- `n` zombies (ids 1..n) at `first`, `first + gap`... blocks, nearest first.
 	local function crowd(n: number, first: number, gap: number): ({ number }, { number })
@@ -97,5 +105,77 @@ return function(t, _shared, require, _server, client)
 		ZombieVoices.forget(voices, id)
 		t.eq(voices.due[id], nil, "forgotten")
 		t.ok(ZombieVoices.PITCH.brute < 1 and ZombieVoices.PITCH.lurch > 1, "a brute groans lower, a screamer higher")
+	end)
+
+	t.test("zombie voices: the shipped recordings voice every zombie kind, apart and varied", function()
+		local model = serde.decode("json", fs.readFile("src/sounds/Zombies.model.json"))
+		t.eq(model.ClassName, "Folder")
+		local byName: { [string]: { any } } = {}
+		for _, child in model.Children do
+			t.eq(child.ClassName, "Sound")
+			local event = Sounds.get(child.Name)
+			t.ok(event ~= nil, `{child.Name} is an event`)
+			t.ok(event == nil or event.category ~= child.Name, `{child.Name} names an event, not a category`)
+			t.ok(string.match(child.Properties.SoundId, "^rbxassetid://%d+$") ~= nil, child.Properties.SoundId)
+			t.ok(child.Properties.Volume > 0 and child.Properties.Volume <= 1, `{child.Name}: a sane volume`)
+			byName[child.Name] = byName[child.Name] or {}
+			table.insert(byName[child.Name], child.Properties)
+		end
+		-- Never a category's name: entity.mob.hurt and .death cover the cows, sheep, pigs and
+		-- chickens too.
+		for _, category in { "entity.mob.hurt", "entity.mob.death" } do
+			t.eq(byName[category], nil, `nothing named {category}`)
+		end
+		-- The groans: three variants, picked at random (with the gait's pitch: ZombieVoices.PITCH).
+		t.eq(#(byName["entity.zombie.ambient"] or {}), 3, "three groans")
+		-- Every zombie kind's own hurt and death events have recordings: a growl when hurt, the two
+		-- deaths when it dies.
+		local speeds: { [string]: number } = {}
+		local kinds = 0
+		for _, kind in MobList.kinds do
+			if MobList.isZombie(kind) then
+				kinds += 1
+				for _, name in { kind.sounds.hurt, kind.sounds.death } do
+					local shipped = byName[name]
+					t.ok(shipped ~= nil, `{kind.name}: {name} has a recording`)
+					t.eq(#(shipped or {}), if name == kind.sounds.hurt then 1 else 2, `{name}: its variants`)
+					for _, props in shipped or {} do
+						local speed = props.PlaybackSpeed or 1
+						t.eq(speeds[name] or speed, speed, `{name}: one pitch for its variants`)
+						speeds[name] = speed
+					end
+				end
+			end
+		end
+		t.eq(kinds, 10, "the ten zombie kinds")
+		-- The kinds apart, in the stand-ins' order: the brute lowest, then the zombie, the runner a
+		-- little higher, the screamer higher. A replacement plays at its PlaybackSpeed varied by
+		-- the event's variance as a share of its pitch (SoundRules.playback). As with the
+		-- stand-ins, the spreads never overlap: the highest growl of one kind is still below the
+		-- lowest of the next (and each kind still varies).
+		local SETTINGS = { Volume = 1, Sources = {} }
+		local ORDER = { "zombie_brute", "zombie", "zombie_runner", "zombie_screamer" }
+		for _, action in { "hurt", "death" } do
+			local lows, highs, mids = {}, {}, {}
+			for i, kind in ORDER do
+				local name = `entity.{kind}.{action}`
+				local event = Sounds.get(name) :: any
+				local override = { id = "rbxassetid://1", volume = 1, speed = speeds[name] }
+				lows[i] = SoundRules.playback(event, override, nil, 1, 1, 0, SETTINGS).pitch
+				mids[i] = SoundRules.playback(event, override, nil, 1, 1, 0.5, SETTINGS).pitch
+				highs[i] = SoundRules.playback(event, override, nil, 1, 1, 0.999999, SETTINGS).pitch
+				t.near(mids[i], speeds[name], 1e-9, `{name}: its own speed in the middle`)
+				t.ok(highs[i] - lows[i] > 0.04, `{name} varies ({lows[i]} to {highs[i]})`)
+				-- The stand-in the recording replaces stays the event's own sound.
+				t.ok(string.find(event.id, "^rbxasset://sounds/") ~= nil, `{name}: its stand-in stays`)
+			end
+			for i = 2, #ORDER do
+				t.ok(mids[i] > mids[i - 1], `{ORDER[i]} {action} above {ORDER[i - 1]}`)
+				t.ok(mids[i] > highs[i - 1], `{ORDER[i]} {action} beyond {ORDER[i - 1]}'s spread`)
+				t.ok(mids[i - 1] < lows[i], `{ORDER[i - 1]} {action} below {ORDER[i]}'s spread`)
+				t.ok(lows[i] > highs[i - 1], `{ORDER[i]} {action} never overlaps {ORDER[i - 1]}`)
+			end
+		end
+		t.eq(speeds["entity.zombie.hurt"], 1, "the zombie's voice as recorded")
 	end)
 end

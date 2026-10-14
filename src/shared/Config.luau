@@ -1545,7 +1545,9 @@ local Config = {
 		or ReplicatedStorage, named like an event ("block.stone.break") or its category with the
 		variant left out ("block.break"); several with one name are picked from at random. They play
 		with their own Volume and PlaybackSpeed instead of the event's (still scaled by the settings
-		below and varied by the event's pitch variance), heard as far as the event.
+		below and varied by the event's pitch variance), heard as far as the event. The game ships
+		its own recordings there too (src/sounds: the weather's, the zombies' voices); one whose
+		file fails to load is left out, so its event plays the stand-in.
 	]]
 	Sounds = {
 		-- false: no sounds at all (the server sends none and clients play none).

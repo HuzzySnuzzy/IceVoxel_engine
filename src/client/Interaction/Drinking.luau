@@ -8,17 +8,20 @@
 	  fill   Drink fill at the source (the server fills it and splashes)                swing
 	  hand   Drink hand at the source, and the gulp at once (TAN's hand drinking)       swing
 	  drink  Drink start, then while the use button stays down (`stop` when it is let go), the
-	         same item in the same hotbar slot and no screen open, Drinks.USE_TICKS (32) ticks
-	         count at 20 a second, with Minecraft's gulp (entity.generic.drink) every 4 ticks from
-	         the 7th (LivingEntity.triggerItemUseEffects); at 32, Drink finish and the last gulp.
-	         Anything else cancels it (Drink cancel). The arm stays put (Player/HeldItems has no
-	         use animation) and the player moves at full speed: only the sounds tell.
+	         same item in the same hotbar slot, no screen open and the player alive,
+	         Drinks.USE_TICKS (32) ticks count at 20 a second; at 32, Drink finish and the last
+	         gulp (entity.generic.drink). Anything else cancels it (Drink cancel). While it lasts
+	         the drinking loop plays at the player (Audio/UseSounds, from `useLength`; Minecraft's
+	         gulps every 4 ticks from the 7th, LivingEntity.triggerItemUseEffects, only when the
+	         loop's recording fails to load). The arm stays put (Player/HeldItems has no use
+	         animation) and the player moves at full speed: only the sounds tell.
 	Nothing is predicted: the server's inventory snapshot brings the emptied bottle or the worn
 	canteen, and its Survival message the thirst. Spectators do none of it, and drinks need
 	SurvivalState.canDrink (thirsty, or creative; a tea whenever temperature is on; a potion
 	always, with Tough As Nails off too: its effects come in the server's Effects message).
 ]]
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
@@ -42,9 +45,6 @@ local Drinking = {}
 
 local DRINK = "entity.generic.drink"
 local TICK = 1 / 20
--- Minecraft's gulps: every 4 ticks once 7 have passed (remaining ticks <= USE_TICKS - 7).
-local GULP_EVERY = 4
-local GULP_FROM = 7
 
 type Holding = { slot: number, item: number, elapsed: number, ticks: number }
 local holding: Holding? = nil
@@ -69,6 +69,11 @@ end
 -- Is the player holding a drink to their mouth?
 function Drinking.isDrinking(): boolean
 	return holding ~= nil
+end
+
+-- The ticks the drink being drunk lasts (the drinking loop, Audio/UseSounds), nil when none.
+function Drinking.useLength(): number?
+	return if holding then Drinks.USE_TICKS else nil
 end
 
 -- How far the drink has got (0..1), nil when none.
@@ -118,27 +123,38 @@ function Drinking.stop()
 	cancel()
 end
 
+-- Is this player's character alive?
+local function alive(): boolean
+	local character = Players.LocalPlayer.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+	return humanoid ~= nil and humanoid.Health > 0
+end
+
 local function update(dt: number)
 	local current = holding
 	if current == nil then
 		return
 	end
 	local stack = ClientInventory.selectedStack()
-	if Screens.isOpen() or ClientInventory.selected() ~= current.slot or stack == nil or stack.item ~= current.item then
+	if
+		Screens.isOpen()
+		or ClientInventory.selected() ~= current.slot
+		or stack == nil
+		or stack.item ~= current.item
+		or not alive()
+	then
 		cancel()
 		return
 	end
 	current.elapsed += dt
 	while current.ticks < Drinks.USE_TICKS and current.elapsed >= (current.ticks + 1) * TICK do
 		current.ticks += 1
-		local remaining = Drinks.USE_TICKS - current.ticks
-		if remaining == 0 then
+		if current.ticks == Drinks.USE_TICKS then
 			holding = nil
 			ClientNet.send(Protocol.ClientMessage.Drink, Protocol.encodeDrink(Protocol.DrinkAction.Finish))
+			-- (The last gulp: a finished drink, not one put away.)
 			gulp()
 			return
-		elseif remaining <= Drinks.USE_TICKS - GULP_FROM and remaining % GULP_EVERY == 0 then
-			gulp()
 		end
 	end
 end

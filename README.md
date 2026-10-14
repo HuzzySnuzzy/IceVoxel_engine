@@ -1268,10 +1268,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   the game knows about the block: id, position and chunk, biome, hardness, tool, drops with the held
   item and by hand, break time, light, fluid level, render kind, friction and menu.
 - **Music.** Minecraft's background music: a track now and then (the first a few seconds after
-  joining, then every 10 to 20 minutes), surface tracks above ground and cave tracks in caves; going
-  underground fades a surface track out and a cave track follows (and the other way back up), so
-  surface music never plays underground. A "Now Playing" toast slides in at the top right with the
-  track's title for five seconds. The tracks are in `src/shared/Sounds/MusicList.luau`.
+  joining, then every 10 to 20 minutes), surface tracks above ground by day, night tracks there at
+  night (the game's own night: the sky dark enough that zombies come out) and cave tracks in caves;
+  going underground fades a surface or night track out and a cave track follows (and the other way
+  back up), so surface music never plays underground. Dusk and dawn never cut a track: the next
+  one follows the time. A "Now Playing" toast slides in at the top right with the track's title
+  for five seconds. The tracks are in `src/shared/Sounds/MusicList.luau`.
 - **Cave moods.** Minecraft's cave mood: every tick a random block within 8 blocks of you makes
   the mood grow in the dark (1/6000; dark open cave counts 4 times, so bigger caves bring it
   sooner) and shrink in daylight or by torches; at 100% one of the cave mood sounds plays a couple
@@ -1287,10 +1289,14 @@ A fast, Minecraft-style voxel engine for Roblox.
   crackling; fire crackling, hissing when punched out, and flint and steel striking; mobs hurt and
   dying (each kind its own pitch: a brute low, a screamer high), zombies groaning, bashing at a
   block and breaking it through, a screamer's shriek, the bunker hatch, bandages, medkits and pills,
-  a blood moon rising, players' hits (strong and weak) and eating. Only water and fuel splash and
-  make swimming sounds. They are stand-ins made from the sounds every Roblox client ships, told
-  apart by pitch, so nothing has to be uploaded, and players hear what others do within 16 blocks.
-  Each one can be replaced by your own sound (see Extending).
+  a blood moon rising, players' hits (strong and weak), eating and drinking. Only water and fuel
+  splash and make swimming sounds. Most are stand-ins made from the sounds every Roblox client
+  ships, told apart by pitch, so nothing has to be uploaded, and players hear what others do within
+  16 blocks. The game ships real recordings for the rest: the weather (thunder, rain, wind), the
+  zombies' groans, growl and deaths (every kind, at its own pitch), a block broken and placed (every
+  material, at its own pitch and volume) and a loop while a player eats or drinks, heard by the
+  players near as long as the food or drink is held (each with the stand-in as its fallback should
+  it fail to load). Each one can be replaced by your own sound (see Extending).
 - **Server-authoritative interaction.** Mining, placing and every inventory click are predicted on
   the client and validated by the server: timing, reach, what the player holds. Block updates power
   falling sand and gravel (which break into an item on a torch or a flower, Minecraft's torch
@@ -1394,8 +1400,10 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **A texture pack.** Every block texture is in one module, `src/shared/TexturePack.luau`, like a
   Minecraft resource pack: 512 × 512 images, one per 3-stud block face, drawn as MaterialVariants
   and face images that take each block's own colour (one bark image for every log, each in its
-  wood's colour), plants as crossed images. The 33 textures made so far are in, and 102 blank
-  entries wait for the rest (the apocalypse's blocks and items among them, blank on purpose).
+  wood's colour), plants as crossed images. The 53 textures made so far are in (the roads,
+  concrete, aged bricks, stones, moss, vines, the supply crate and the medicine cabinet the latest),
+  and 82 blank entries wait for the rest (the apocalypse's rusty metal, bunker hatch and items
+  among them, blank on purpose).
   Distant chunks take the colour each block averages to on screen, so they match the textured
   terrain near you, or keep their materials and textures with the Far Materials setting. See
   Block textures.
@@ -1796,7 +1804,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             (the state: awards, discoveries, advancing, unlocking, the recipe
                             gate, perks, death, the saved record, the client's status)
   Sounds/  SoundList        sound events (Minecraft's names) -> built-in sounds, block sound types
-           MusicList        the music (surface and cave tracks) and the cave mood sounds
+           MusicList        the music (surface, night and cave tracks) and the cave mood sounds
   DayCycle                  Minecraft's day: celestial angle, sky light, isDay and the sun's
                             brightness (solar panels), /time arguments, lighting blends
   Weather/ init             the weather clock, /weather's overrides and their blending, the
@@ -1880,6 +1888,11 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
 src/textures -> generated from the texture pack by tests/build_textures (never edit by hand)
   Materials.model.json      MaterialService.IceVoxel: a MaterialVariant IV_<name> per filled texture
   Images.model.json         ReplicatedStorage.IceVoxelTextures: a Texture prototype of the same name
+
+src/sounds   -> SoundService.IceVoxelSounds: the game's own recordings, Sounds named like the
+                events they replace (edit a SoundId to swap one)
+  Weather.model.json        thunder near and far, the rain loop, the wind loop
+  Zombies.model.json        the zombies' groans, growl and deaths, Sounds per voice event
 
 src/server   -> ServerScriptService.IceVoxel
   IceVoxel_Server           boot: operators, settings and the title screen first, then
@@ -1997,6 +2010,8 @@ src/server   -> ServerScriptService.IceVoxel
                             links, the searches' budgeted queue; pure),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
                             settings), Eating (food held 32 ticks: healing, used up),
+                            UseState (who eats or drinks: the player attribute every client
+                            plays the loops from),
                             Progression + ProgressionCommand + ProgressStore (knowledge, Ages and
                             skills: earning, the windows' recipe gate, perks for the parts above,
                             /knowledge and /age, the DataStore),
@@ -2074,7 +2089,9 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             overrides), MovementSounds (footsteps, swimming, landings), Ambience
                             (furnaces, Heat and Combustion Generators crackling, lava, the cave
                             mood), CaveMood (Minecraft's mood, pure), Music + MusicRules (the
-                            background music; when and which, pure), SoundRules (the pure rules)
+                            background music; when and which, surface, night or cave, pure),
+                            SoundRules (the pure rules), UseSounds + UseSoundRules (eating and
+                            drinking loops, every player's; the rules pure)
   Entities/EntityRenderer   dropped items; MobRenderer (mobs: boxes, zombies' R15 rigs, flames,
                             groans), MobParts (the mobs' Parts, Fire and BulkMoveTo, shared with
                             the Studio probe), MobModel (the pure glide, move-op baseline,
@@ -2604,8 +2621,20 @@ distant hiss play it looped, duller under a roof) and a wind loop (`weather.wind
 louder in a strong wind, a storm and high up, silent underground; Config.Weather.Wind). The
 loops heard from all around (the rain on the player, the wind) play flat, so turning the camera
 never pans them; the distant hiss is heard from the storm's side. Roblox's Doppler shift is off
-(SoundService.DopplerScale 0). Edit that file to swap them. To use your own, add a Folder named `IceVoxelSounds` to SoundService
-(or ReplicatedStorage) and put Sound instances in it, named like the event they replace:
+(SoundService.DopplerScale 0). Edit that file to swap them. The zombies' voices ship the same way,
+in `src/sounds/Zombies.model.json` (SoundService.IceVoxelSounds.Zombies): three groans
+(`entity.zombie.ambient`, one at random, at the gait's pitch), a growl for every zombie voice's
+hurt and two deaths for every voice's death. Each voice has its own Sounds, named by the event
+(`entity.zombie.hurt` for most kinds, `entity.zombie_runner.hurt`, `entity.zombie_brute.hurt`,
+`entity.zombie_screamer.hurt` and the same `.death`s), never by their category `entity.mob.hurt`,
+which would make the cows growl too; their PlaybackSpeed keeps the kinds apart (brute 0.65,
+zombie 1, runner 1.3, screamer 1.6), and each still varies by its event's pitch variance (as a
+share of the event's pitch: about ±13% for the zombie's hurt, ±22% the brute's), never into its
+neighbour's range, as the stand-ins never did. Swap a recording by editing its SoundId there;
+delete a Sound and its event plays the stand-in again, as it does when a shipped Sound's file
+fails to load (the game warns and leaves it out). To use your own, add a Folder named
+`IceVoxelSounds` to SoundService (or ReplicatedStorage) and put Sound instances in it, named like
+the event they replace:
 
 ```
 SoundService
@@ -2622,16 +2651,29 @@ variant left out (`block.break` for every `block.<type>.break`, `item.armor.equi
 `item.armor.equip_<material>`). Several Sounds with one name are Minecraft's variants. They play
 with their own Volume and PlaybackSpeed (times the volume settings, varied a little like the
 built-in ones), heard as far as the event (16 blocks). To change the defaults instead, edit `id`,
-`volume` and `pitch` in SoundList: block types have a `dig` clip (breaking, placing) and a `step`
-clip (walking, mining hits, falls), scaled per action like Minecraft. A block's sound type is its
-`sound` in BlockList (`sound = "metal"`), else its material's. The apocalypse's sounds are
-events like the rest, so a Sound of the same name replaces each: `entity.zombie.ambient` (a
-groan, played by each client), `entity.zombie.attack_wooden_door` and `.break_wooden_door` (a
-zombie bashing a block and breaking it through), `entity.zombie_screamer.scream`, the voices'
-`entity.zombie.hurt` / `.death` (and the runner's, brute's and screamer's own),
-`block.bunker_hatch.open` / `.close`, `item.bandage.apply`, `item.medkit.use`,
-`item.pills.swallow` and `ambient.blood_moon.rise`. Server scripts can play any event to the
-players near a point:
+`volume` and `pitch` in SoundList: block types have a `dig` clip and a `step` clip (walking, mining
+hits, falls), scaled per action like Minecraft. Breaking and placing play the data sheet's
+recordings (`GENERIC_BREAK`, `GENERIC_PLACE` in SoundList, given to every type at its `dig`
+volume, pitch and variance, so each material still sounds its own), with the `dig` thud as their
+fallback should one fail to load; glass keeps its shatter for breaking and water its splash. Swap
+them there, or override one type (`block.stone.break`) or all (`block.break`, `block.place`) with
+a Sound. A block's sound type is its `sound` in BlockList (`sound = "metal"`), else its
+material's.
+
+Eating and drinking loop the data sheet's recordings (`entity.generic.eating` and
+`entity.generic.drinking`, their ids in SoundList; a Sound of either name replaces it and loops too)
+while the use button is held on a food (medicine keeps its own sound) or a drink: the eater hears it
+at once from their own client, other players near hear it too (the server sets the `IceVoxelUse`
+player attribute while the use lasts), and it stops the moment the use ends (finished, cancelled,
+another slot, death, leaving). Should a recording fail to load, Minecraft's clicks every 4 ticks
+(`entity.generic.eat`, `entity.generic.drink`) play instead, never both; the burp after a food and
+the last gulp after a drink stay either way. The apocalypse's sounds are events like the rest, so a
+Sound of the same name replaces each: `entity.zombie.ambient` (a groan, played by each client;
+shipped, as above), `entity.zombie.attack_wooden_door` and `.break_wooden_door` (a zombie bashing a
+block and breaking it through), `entity.zombie_screamer.scream`, the voices' `entity.zombie.hurt` /
+`.death` (and the runner's, brute's and screamer's own), `block.bunker_hatch.open` / `.close`,
+`item.bandage.apply`, `item.medkit.use`, `item.pills.swallow` and `ambient.blood_moon.rise`. Server
+scripts can play any event to the players near a point:
 
 ```lua
 local Sounds = require(game.ServerScriptService.IceVoxel.Audio.Sounds)
@@ -2654,8 +2696,9 @@ silence the world; a Scriptable camera hears from where it is.
 texture pack holds the textures:
 
 ```lua
-Surface = { { Id = "rbxassetid://...", Title = "" }, ... },  -- above ground
-Cave = { { Id = "rbxassetid://...", Title = "" }, ... },     -- in caves
+Surface = { { Id = "rbxassetid://...", Title = "" }, ... },  -- above ground by day
+Night = { { Id = "rbxassetid://...", Title = "" }, ... },    -- above ground at night
+Cave = { { Id = "rbxassetid://...", Title = "" }, ... },     -- in caves, day or night
 Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambient.cave
 ```
 
@@ -2667,6 +2710,11 @@ Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambi
   `exposure`): under 0.2 for 5 seconds is a cave, over 0.5 for 5 seconds the surface again. A track
   of the wrong kind fades out over 4 seconds and one of the new kind starts within 3; nothing new
   starts while the light says the other place. A track that fails to load is skipped with a warning.
+- **Night:** on the surface at night (the game's own rule, `DayCycle.isDay` false at the server's
+  clock: from a little before sunset to a little after sunrise, as the sky, the mobs and the
+  zombies have it) a track comes from `Night`, by day from `Surface`. The time is read when a
+  track is picked, so dusk and dawn never cut one. An empty `Night` list (or one whose tracks all
+  failed to load) leaves the surface its `Surface` tracks at night too.
 - **Moods:** each becomes the event `ambient.cave.mood<N>` (category `ambient.cave`, so a Sound named
   `ambient.cave` in the override folder replaces them all), played at Minecraft's volume 0.5,
   heard 16 blocks away. The mood itself is Minecraft's
@@ -2682,8 +2730,11 @@ Moods = { "rbxassetid://...", ... },                         -- Minecraft's ambi
   the open sky, one less per step from it along a few rays into tunnels; block light from the
   light sources through open cells, one less per block (a few blocks around in big caverns).
 - **Settings:** Music & Sounds has the Music volume, Cave Moods and Music Toasts.
-- **F3:** a `music` line shows surface or cave, the track playing (or the time to the next) and
-  the mood.
+- **F3:** a `music` line shows the list (surface, night or cave), the track playing (or the time
+  to the next) and the mood.
+- **New data sheets:** `tests/spec/DataSheet.luau` lists every id the latest sheet brought and
+  where each one is used (pack entries, music lists, shipped Sounds, catalogue events); copy its
+  table for the next sheet so the same checks run on it.
 
 **Pipes and tanks.** A transmitter is a block with `transmitter = { kind = "item" | "fluid", tier =
 1..4, restrictive = true? }` and a tank one with `tank = { tier, capacity }` in BlockList; the
@@ -2945,9 +2996,9 @@ textures have no Average. The generator writes nothing for a pack with errors (i
 `"rbxassetid://<number>"`, unknown fields, bad averages, and whatever Blocks refuses) and warns
 about a normal map that repeats its colour map and about filled textures no block uses.
 
-**Blank entries.** `Color = ""` means "not made yet": 102 textures wait for you (`--list` names
-them; the apocalypse's asphalt, road lines, concrete, aged bricks, rusty metal, supply crate,
-medicine cabinet and bunker hatch among them, and its items' `Icons` are blank too). While a
+**Blank entries.** `Color = ""` means "not made yet": 82 textures wait for you (`--list` names
+them; the apocalypse's rusty metal and bunker hatch among them, and its items' `Icons` are blank
+too). While a
 block's sides and top are blank it keeps its plain Roblox material and colour, as
 without textures. A part takes one MaterialVariant on all six faces, so once its sides' texture is
 filled in (or its top's, when the bottom has no other filled texture) its blank faces show that
@@ -2965,7 +3016,14 @@ drawn as images of their own: bottoms with `Config.Textures.BottomFaces`, sides 
   own colour, and dry grass shows the grass top in its own colour;
 - `false`: the image's own colours (ores, the grass side, glow lichen, flowers and mushrooms);
 - a block name: that block's colour wherever it is drawn (`"dirt"` is `Tint = "Dirt"`, so the dirt
-  under grass is dirt coloured, not grass coloured).
+  under grass is dirt coloured, not grass coloured; `"asphalt"` is `Tint = "Asphalt"`, so a road
+  line's sides stay as dark as the road beside them).
+
+Several entries may share one image (the data sheets do it on purpose): cracked and mossy bricks
+are the bricks' picture and cracked and mossy concrete concrete's, each tinted with its own voxel
+colour (darker, greener), and the road lines' paint is asphalt's picture tinted white or yellow
+until a painted line is made. Keep a road line's top filled: a blank top shows the sides' texture,
+and the line would vanish into the asphalt.
 
 A tint can only **darken**: a part shows its texture times its Color, which Roblox stores in 8 bits
 and stops at white. So a texture shared by tinted blocks should be light, ideally greyscale, and at
@@ -3079,6 +3137,18 @@ rebuilt, off-screen in the background within the frame budget, and swapped in.
 - the crafting table's bottom falls back to its sides (Minecraft's is planks: `Bottom =
   "planks"`, seen only with BottomFaces), and smooth sandstone is the sandstone top on every face,
   as in Minecraft.
+- the fourth sheet's rows are named loosely: "Concrete" is `"concrete"`; "crate" fills the supply
+  crate's `"supply crate side"` and `"supply crate top"`, and "cabinet" the medicine cabinet's
+  two, each pair with one picture; "moss" ("All things moss") is `"moss block"`, which the moss
+  block and the moss carpet share;
+- cracked asphalt uses andesite's maps (the sheet: "Yes uses andesite textures"), and asphalt
+  polished andesite's, as the sheet gives them; cracked and mossy bricks keep the bricks' maps,
+  tinted by their own colours ("maybe darker tint", "maybe greener tint");
+- not on the sheet, by decision: cracked and mossy concrete take concrete's maps and the two
+  road-line tops asphalt's, all tinted by their own colours (so the lines' white and yellow paint
+  shows; a blank top would show the asphalt sides' picture and the line would vanish);
+- the vine's normal map (`97312068579996`) is kept in the pack but never drawn: the vine is a
+  plate, whose picture is a Decal, and a Decal takes no normal map.
 
 **Spawn safety.** `src/server/Players/SpawnUnsafeBlocks.luau` lists what a player must not stand on
 (`Floor`), stand in (`Body`, fluids by name) or touch (`Hazards`), plus the headroom and search
@@ -3442,12 +3512,14 @@ lune run tests/build_structures [--check] [--print]   # rebuild (or check) the e
 lune run tests/build_textures [--check] [--list]     # the texture pack's Rojo files; blanks (--list)
 ```
 
-`lune run tests/run` runs the whole suite: 2,071 tests, all passing (the zombie apocalypse has
+`lune run tests/run` runs the whole suite: 2,090 tests, all passing (the zombie apocalypse has
 Apocalypse (its registries and shared rules), Zombies (the server's zombies, the director, tracking
 and their costs), MobRig, MobRigPool, ZombieVoices and ZombieRigProbe (the rigs), Infection, Medical
 and Survivor (survival), Cities, Bunkers and, where they all meet on a real world server,
 ApocalypseGlue; lava and oil have LavaOil, LavaOilServer, LavaOilClient, LavaGeneration, OilWells,
-Refinery and Combustion; the texture pack has TexturePack, TextureLooks and FarLooks; fire has Fire;
+Refinery and Combustion; the texture pack has TexturePack, TextureLooks and FarLooks; the data
+sheets' assets have DataSheet, the eating and drinking loops UseSounds, the music MusicMood, the
+zombies' voices ZombieVoices; fire has Fire;
 Tough As Nails has ToughAsNails, Herbs and SurvivalGear; mobs have Mobs and MobsClient; status
 effects and potions have Effects; knowledge, Ages and skills have Progression; where those three
 meet, Crossover; the floating origin and "fake coords" have Origin, Rebase, PlayerSync,
@@ -3539,7 +3611,7 @@ Natural next steps, roughly in order:
   meal, sugar cane, seagrass and kelp, lily pads, vines, sweet berry bushes, and wheat, so grass
   can drop seeds. Plants are drawn only within `Lod.FoliageDistance`; Minecraft draws them to the
   render distance, which would need them merged into far fewer parts or meshes.
-- **More of the texture pack.** The 102 blank textures and every texture's Average; see-through
+- **More of the texture pack.** The 82 blank textures and every texture's Average; see-through
   leaves and glass once Roblox turns MaterialVariant cut-outs (`AlphaMode`) on for game clients
   (off as of October 2026, so block textures are opaque, and sprites are Decals on thin parts);
   the Studio checks above (tiling, grass sides, far mesh UVs).
