@@ -27,7 +27,8 @@
 	             floors under the open sky in the chunks that tick (never inside a roofed base or a
 	             bunker) and at most MobAI.MAX_FALL (3) above the generator's ground there
 	             (`context.ground`: never on a city's roofs or a tree's crown, where they could
-	             never come down; each member too), the kinds by their `hordeWeight` grown by `hordeGrowth` x
+	             never come down: a floor found up there, the column scan goes on below it,
+	             MobSpawning.floorBelow; each member too), the kinds by their `hordeWeight` grown by `hordeGrowth` x
 	             (k - 1) (runners and brutes come more often each moon); each one hunts that
 	             player (MobAI `hunt`) and is `persistent`. Natural monster spawning stops meanwhile (MobSpawning's
 	             `hostilePaused`).
@@ -88,15 +89,16 @@ ZombieDirector.LEAVE_RADIUS = 32
 -- A wave's packs: 3-5 zombies, 28-44 blocks out, the floor looked for from WAVE_HEIGHT above the
 -- player's feet down WAVE_SCAN cells and at most WAVE_ABOVE (MobAI.MAX_FALL) above the
 -- generator's ground there (context.ground: a city's roofs, Generation/CityLayout's 4 blocks a
--- floor, or a tree's crown would strand its hunters where they can't come down), at most
--- WAVE_TRIES packs a player.
+-- floor, or a tree's crown would strand its hunters where they can't come down: the scan goes on
+-- below), at most WAVE_TRIES packs a player (16: an overgrown jungle town's canopy hides the sky
+-- from many tries, and 8 delivered 5 of a wave of 8 there).
 ZombieDirector.PACK_MIN = 3
 ZombieDirector.PACK_MAX = 5
 ZombieDirector.WAVE_NEAR = 28
 ZombieDirector.WAVE_FAR = 44
 ZombieDirector.WAVE_HEIGHT = 24
 ZombieDirector.WAVE_SCAN = 56
-ZombieDirector.WAVE_TRIES = 8
+ZombieDirector.WAVE_TRIES = 16
 ZombieDirector.WAVE_ABOVE = MobAI.MAX_FALL
 
 local floor = math.floor
@@ -365,17 +367,19 @@ function ZombieDirector.wave(
 			if not context.active(cx // CHUNK, cz // CHUNK) then
 				continue
 			end
-			local cy = MobSpawning.findFloor(
+			-- (A floor found higher than the ceiling, a roof or a tree's crown, the scan goes on below
+			-- it; the members keep under it too: MobSpawning.spawnPack's ceiling.)
+			local ceiling = if ground ~= nil then ground(cx, cz) + ZombieDirector.WAVE_ABOVE else nil
+			local cy = MobSpawning.floorBelow(
 				getBlock,
 				kind,
 				cx,
 				floor(player.y) + ZombieDirector.WAVE_HEIGHT,
 				cz,
-				ZombieDirector.WAVE_SCAN
+				ZombieDirector.WAVE_SCAN,
+				ceiling
 			)
-			-- (Its members keep off the roofs too: MobSpawning.spawnPack's ceiling.)
-			local ceiling = if cy ~= nil and ground ~= nil then ground(cx, cz) + ZombieDirector.WAVE_ABOVE else nil
-			if cy == nil or (ceiling ~= nil and cy > ceiling) or context.skyOpen(cx, cy, cz) ~= true then
+			if cy == nil or context.skyOpen(cx, cy, cz) ~= true then
 				continue
 			end
 			local ids = MobSpawning.spawnPack(world, context, kind, cx, cy, cz, size, nextInt, "wave", ceiling)

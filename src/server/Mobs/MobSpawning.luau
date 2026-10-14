@@ -489,6 +489,31 @@ end
 local findFloor = MobSpawning.findFloor
 
 --[[
+	The first floor down column (x, z) from y over `scan` cells (`findFloor`) at most `top` high
+	(nil: any): a floor found higher (an upper floor, a roof, a tree's crown), the scan goes on
+	below it, to the same bottom.
+]]
+function MobSpawning.floorBelow(
+	getBlock: (x: number, y: number, z: number) -> number?,
+	kind: MobList.Kind,
+	x: number,
+	y: number,
+	z: number,
+	scan: number,
+	top: number?
+): number?
+	local cy = findFloor(getBlock, kind, x, y, z, scan)
+	if top == nil then
+		return cy
+	end
+	local bottom = y - scan
+	while cy ~= nil and cy > top do
+		cy = findFloor(getBlock, kind, x, cy - 2, z, cy - 2 - bottom)
+	end
+	return cy
+end
+
+--[[
 	Spawns up to `count` mobs of `kind` around the pack centre (x, y, z) (a cell: its floor
 	found), the first there and each other within PACK_SPREAD blocks on a floor of its own within
 	PACK_SEARCH up or down, each on a valid spot (`light`: see validSpot) and, given a `ceiling`,
@@ -600,18 +625,14 @@ local function tryPack(
 		startY = floor(player.y) + MobSpawning.PASSIVE_HEIGHT
 		scan = MobSpawning.PASSIVE_SCAN
 	end
-	local cy = findFloor(getBlock, kind, cx, startY, cz, scan)
-	local ceiling: number? = nil
+	-- (Never on a city floor it couldn't come down from: on down the column, see the header.)
 	local ground = context.ground
-	if hostile and weights == "city" and ground ~= nil then
-		-- (Never on a city floor it couldn't come down from: on down the column, see the header.)
-		local top = ground(cx, cz) + MobSpawning.GROUND_ABOVE
-		ceiling = top
-		local bottom = startY - scan
-		while cy ~= nil and cy > top do
-			cy = findFloor(getBlock, kind, cx, cy - 2, cz, cy - 2 - bottom)
-		end
-	end
+	local ceiling = if hostile
+			and weights == "city"
+			and ground ~= nil
+		then ground(cx, cz) + MobSpawning.GROUND_ABOVE
+		else nil
+	local cy = MobSpawning.floorBelow(getBlock, kind, cx, startY, cz, scan, ceiling)
 	if cy == nil then
 		return 0
 	end

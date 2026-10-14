@@ -1124,12 +1124,19 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 		-- terrain: the height of the cell their root is in, sampled like `generate` does.
 		if level <= Config.StructureMaxLevel then
 			local w = Writer.new(data, originX, originZ, step, stepY, cells)
-			local structureColumn = column
+			-- ([ruins] A city's grass grows trees at least Cities.Trees x o of the time, whatever
+			-- the biome's own chance: `cities.vegetation`.)
+			local structureColumn = function(x: number, z: number): (number, number, number, number)
+				local h, biome, vegetation, surface = column(x, z)
+				local least = cities.vegetation(x, z)
+				return h, biome, if least > vegetation then least else vegetation, surface
+			end
 			if level > 0 then
 				structureColumn = function(x: number, z: number): (number, number, number, number)
 					local _, biome, vegetation, surface = column(x, z)
+					local least = cities.vegetation(x, z)
 					local h = sample(x // step * step + half, z // step * step + half, level)
-					return h, biome, vegetation, surface
+					return h, biome, if least > vegetation then least else vegetation, surface
 				end
 			end
 			-- Not on bare rock, near a library structure's piece, in a surface lava or water lake's,
@@ -1143,21 +1150,26 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				end
 				return true
 			end
-			-- ([ruins] Nor on the cities' asphalt, sidewalks or building lots.)
+			-- ([ruins] Nor on the cities' asphalt, sidewalks or building lots. A city's footprint is
+			-- level by construction: no slope test there, whose four column samples a spot would
+			-- cost a city's many green spots some milliseconds a chunk.)
+			local function levelGround(x: number, z: number, biome: number): boolean
+				return cities.cityAt(x, z) >= 1 or gentle(x, z, biome)
+			end
 			local accept = function(x: number, z: number, biome: number): boolean
-				return gentle(x, z, biome)
+				return cities.treeAllowed(x, z)
+					and levelGround(x, z, biome)
 					and dry(x, z)
 					and not surfaceCaves.carvesTop(x, z)
-					and cities.treeAllowed(x, z)
 			end
 			if placer and starts then
 				local p, list = placer, starts
 				accept = function(x: number, z: number, biome: number): boolean
-					return gentle(x, z, biome)
+					return cities.treeAllowed(x, z)
+						and levelGround(x, z, biome)
 						and p.treeAllowed(list, x, z)
 						and dry(x, z)
 						and not surfaceCaves.carvesTop(x, z)
-						and cities.treeAllowed(x, z)
 				end
 			end
 			Structures.populate(

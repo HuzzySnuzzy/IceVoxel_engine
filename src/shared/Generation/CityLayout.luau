@@ -15,11 +15,15 @@
 	            asphalt, and the street's rows either side of one (v % 32 = 7 and 31) are a
 	            crosswalk, the white Road Line on lanes 1, 3 and 5 (the only place it lies). Decay
 	            (`surface`): Gravel potholes (Roads.Potholes per block), Grass and Moss Block
-	            patches where a 4 block value noise falls in the lowest Roads.Overgrown x o of its
-	            range (`share`: the noise's quantiles), Cracked Asphalt (Cracked Concrete on
-	            sidewalks) in CRACK_PATCH (4) square patches (Roads.Cracks): a crosswalk fades the
-	            same way. Asphalt, lines and sidewalks lie on Gravel, the grass on Dirt (the
-	            override's filler).
+	            patches where a GREEN_PATCH (8) block value noise falls in the lowest
+	            Roads.Overgrown x o of its range (`share`: the noise's quantiles; half again on the
+	            sidewalks; grass or moss by the noise's 8 x 8 cell, so a patch is few boxes), Cracked
+	            Asphalt (Cracked Concrete on sidewalks) in CRACK_PATCH (4) square patches
+	            (Roads.Cracks): a crosswalk fades the same way. Asphalt, lines and sidewalks lie on
+	            Gravel, the grass on Dirt (the override's filler). STREET_PLANTS (0.6) of the
+	            streets' grass carries short grass, tall grass or a fern (`writeStreetPlants`, where
+	            nothing stands: the roads' grass too, Generation/Cities), whatever the biome's own
+	            ground plants.
 	  Parcels   the 25 x 25 blocks between streets (pu = u // 32, pv = v // 32), each from its own
 	            hash. d: the parcel's ring around the centre ((ring + 0.5) / half), pulled outwards
 	            in small towns (d = 1 - (1 - d) x (0.5 + 0.5 (half - 1) / 6): only a city of half 4
@@ -53,18 +57,22 @@
 	            2 x 2 columns in steps of 2 blocks, never below the ground floor's three lower rows
 	            (the door and the ground floor's containers always stand). Walls decay in panels a
 	            floor tall (few big boxes for the mesher): blown out by PANEL (4 blocks along a
-	            wall; rows 1-3 open, 0.15 r), else cracked (0.25 r) or mossy (0.2 o) by AGE_PANEL
+	            wall; rows 1-3 open, 0.15 r), else cracked (0.25 r) or mossy (0.3 o) by AGE_PANEL
 	            (8), never a corner, the door's frame or the ladder's wall, and the floor line (row
 	            0) stays whole. The slabs between the full floors hole in 4 x 4 patches (0.1 r), a
 	            layer of rubble (Gravel or Cracked Concrete) under each on the floor below; the
 	            ground slab, the roof and the ring of rooms above never do.
-	  Overgrowth  vines hang from the jagged top of 0.3 o of the walls' columns down 3-12 blocks,
+	  Overgrowth  vines hang in curtains VINE_PANEL (4) columns wide (0.45 o of them), from the
+	            lowest of their jagged tops down 4-14 blocks (one length a curtain: one box),
 	            outside the wall, the first on its wall (a sturdy block), the rest on the vine above;
-	            Moss Carpet on 0.15 o of the roofs and 0.04 o of the floors (patches of a value
-	            noise, on a sturdy block); Grass and Moss Block in 4 x 4 patches of 0.15 o r of the
-	            ground floors (Generation/Foliage plants them); Cobwebs in 0.05 r of the upper
-	            corners of the full floors (ruins give String). Parks are Grass (trees grow there:
-	            `treeAllowed`); nothing grows on asphalt or concrete. Rubble lots: a mound max(0, 3
+	            Moss Carpet on 0.5 o of the roofs (in ROOF_PATCH (8) block patches) and 0.04 o of
+	            the floors (patches of a value noise, on a sturdy block); Grass and Moss Block in
+	            4 x 4 patches of 0.3 o r of the ground floors (Generation/Foliage plants them);
+	            Cobwebs in 0.05 r of the upper corners of the full floors (ruins give String).
+	            Parks are Grass. Trees grow in parks and plazas and on the streets' grass off the
+	            sidewalks and a block clear of every wreck (`treeAllowed`), at least Cities.Trees x
+	            o of a vegetation spot whatever the biome's own chance (Generation/Cities
+	            `vegetation`); nothing grows on asphalt or concrete. Rubble lots: a mound max(0, 3
 	            - dist / 3 + noise) of Gravel, Cracked Concrete and Brick and one or two wall stubs;
 	            plazas Concrete; parking lots Asphalt with wrecks.
 	  Cars      on each street stretch between two crossings, per lane, Cars of a chance: 2 x 4,
@@ -105,16 +113,20 @@ local LOT = BLOCK - STREET -- 25: a parcel's side
 -- Tuning --------------------------------------------------------------------------------------------
 local COLLAPSE_FLOORS = 2.5 -- the jagged top loses up to r x this many floors
 local WALL_HOLES, SLAB_HOLES = 0.15, 0.1 -- holes in walls and slabs, times r
-local CRACKS, MOSS = 0.25, 0.2 -- aged walls: cracked (times r), mossy (times o)
-local VINES = 0.3 -- wall columns with a vine, times o
-local VINE_MIN, VINE_MAX = 3, 12 -- a vine's length
-local ROOF_CARPET, FLOOR_CARPET = 0.15, 0.04 -- moss carpet on roofs and floors, times o
+local CRACKS, MOSS = 0.25, 0.3 -- aged walls: cracked (times r), mossy (times o)
+local VINES = 0.45 -- wall columns with a vine, times o
+local VINE_MIN, VINE_MAX = 4, 14 -- a vine's length
+local VINE_PANEL = 4 -- vines hang in curtains this wide, one length (few boxes for the mesher)
+local ROOF_CARPET, FLOOR_CARPET = 0.5, 0.04 -- moss carpet on roofs and floors, times o
+local ROOF_PATCH = 8 -- a roof's moss in patches of a value noise this wide
 local PANEL = 4 -- walls blow out in panels this many blocks along a wall, one floor tall
 local AGE_PANEL = 8 -- and crack or grow moss in panels this wide (few big boxes for the mesher)
 local CRACK_PATCH = 4 -- streets and sidewalks crack in patches this wide
+local GREEN_PATCH = 8 -- and grow grass and moss in patches of a value noise this wide
 local BAND_SEGMENT = 8 -- a window band's glass is whole or broken this many blocks at a time
 local SLAB_PATCH = 4 -- slab holes, ground floor greens: patches this wide
-local GROUND_GREEN = 0.15 -- grass and moss in the ground floors, times o x r
+local GROUND_GREEN = 0.3 -- grass and moss in the ground floors, times o x r
+local STREET_PLANTS = 0.6 -- the streets' grass under short grass, tall grass or a fern
 local COBWEBS = 0.05 -- the full floors' upper corners, times r
 local GLASS_CHANCE = 0.7 -- a window's glass, times 1 - r
 local DOOR_CHANCE = 0.6 -- an Oak Door (else a gap)
@@ -126,6 +138,7 @@ local floor = math.floor
 local min, max = math.min, math.max
 local abs = math.abs
 local readu8 = buffer.readu8
+local readu16 = buffer.readu16
 local writeu16 = buffer.writeu16
 local bxor = bit32.bxor
 local rshift = bit32.rshift
@@ -141,6 +154,8 @@ local PLANKS, GLASS = id.Planks, id.Glass
 local GRAVEL, DIRT, GRASS, MOSS_BLOCK, CARPET = id.Gravel, id.Dirt, id.Grass, id.MossBlock, id.MossCarpet
 local COBWEB, RUSTY, CRATE, CABINET, CHEST = id.Cobweb, id.RustyMetal, id.SupplyCrate, id.MedicineCabinet, id.Chest
 local COAL_BLOCK = id.CoalBlock
+local SHORT_GRASS, TALL_GRASS, FERN = id.ShortGrass, id.TallGrass, id.Fern
+local TALL_GRASS_TOP = Blocks.plantTop(TALL_GRASS) :: number
 
 local STURDY = Blocks.sturdyLut
 
@@ -280,7 +295,7 @@ end
 local S_COLLAPSE, S_HOLE, S_SLAB, S_CRACK, S_MOSS = 0x0C01, 0x0E1E, 0x51AB, 0xC4AC, 0x3055
 local S_GLASS, S_VINE, S_WEB, S_CARPET, S_GROUND = 0x6A55, 0x7111, 0x3EB, 0xCA9E, 0x6200
 local S_POT, S_GREEN, S_STREET_CRACK, S_CAR, S_MOUND, S_RUBBLE = 0x9077, 0x64EE, 0x5C4A, 0xCA4, 0x3D, 0x4B
-local S_WALK = 0xA1C
+local S_WALK, S_PLANT = 0xA1C, 0x9A47
 
 --[[ Types ]]
 
@@ -1001,8 +1016,10 @@ local function asphaltDecay(salt: number, block: number, x: number, z: number, o
 	if roll(bxor(salt, S_POT), x, 0, z) < roads.Potholes then
 		return GRAVEL, GRAVEL
 	end
-	if vnoise(bxor(salt, S_GREEN), x, z, 4) < share(roads.Overgrown * o) then
-		return if roll(bxor(salt, S_GREEN), x, 1, z) < 0.5 then GRASS else MOSS_BLOCK, DIRT
+	if vnoise(bxor(salt, S_GREEN), x, z, GREEN_PATCH) < share(roads.Overgrown * o) then
+		-- (Grass or moss by the patch's lattice cell, not block by block: few boxes.)
+		return if roll(bxor(salt, S_GREEN), x // GREEN_PATCH, 1, z // GREEN_PATCH) < 0.5 then GRASS else MOSS_BLOCK,
+			DIRT
 	end
 	if roll(bxor(salt, S_STREET_CRACK), x // CRACK_PATCH, 0, z // CRACK_PATCH) < roads.Cracks then
 		return CRACKED_ASPHALT, GRAVEL
@@ -1014,7 +1031,7 @@ CityLayout.asphaltDecay = asphaltDecay
 -- A sidewalk or plaza block at (x, z): block, filler.
 local function concreteDecay(salt: number, x: number, z: number, o: number): (number, number)
 	local roads = cfg.Roads
-	if vnoise(bxor(salt, S_WALK), x, z, 4) < share(roads.Overgrown * o * 1.5) then
+	if vnoise(bxor(salt, S_WALK), x, z, GREEN_PATCH) < share(roads.Overgrown * o * 1.5) then
 		return GRASS, DIRT
 	end
 	if roll(bxor(salt, S_STREET_CRACK), x // CRACK_PATCH, 1, z // CRACK_PATCH) < roads.Cracks then
@@ -1065,13 +1082,29 @@ function CityLayout.surface(p: Plan, x: number, z: number): (number?, number?)
 	return nil, nil
 end
 
--- May a tree grow at (x, z) of plan p's footprint? Only in parks.
+--[[
+	May a tree grow at (x, z) of plan p's footprint (on grass: the tree's own soil rule)? In parks
+	and plazas, and on a street's grass patches off its sidewalks and off every wreck's cells (and
+	a block clear of them, so no trunk stands in a car); never on a building's, a house's, a rubble
+	or a parking lot.
+]]
 function CityLayout.treeAllowed(p: Plan, x: number, z: number): boolean
 	local u, v = x - p.x0, z - p.z0
-	if u % BLOCK < STREET or v % BLOCK < STREET then
-		return false
+	local su, sv = u % BLOCK, v % BLOCK
+	if su < STREET or sv < STREET then
+		-- (A sidewalk: the row next to a lot.)
+		if (su < STREET and (su == 0 or su == STREET - 1)) and sv >= STREET then
+			return false
+		end
+		if (sv < STREET and (sv == 0 or sv == STREET - 1)) and su >= STREET then
+			return false
+		end
+		local cars: { number } = {}
+		CityLayout.streetCars(p, x - 1, z - 1, x + 1, z + 1, cars)
+		return #cars == 0
 	end
-	return p.kinds[(v // BLOCK) * p.n + u // BLOCK + 1] == "park"
+	local kind = p.kinds[(v // BLOCK) * p.n + u // BLOCK + 1]
+	return kind == "park" or kind == "plaza"
 end
 
 -- The parcel (pu, pv) holding (x, z) of plan p's footprint, nil on a street.
@@ -1415,7 +1448,7 @@ local function writeColumn(b: Building, x: number, z: number)
 		put(x, y, z, block)
 	end
 	-- Moss carpet on the roof, where the top stands whole.
-	if et == b.top and vnoise(bxor(b.salt, S_CARPET), x, z, 5) < share(ROOF_CARPET * o) then
+	if et == b.top and vnoise(bxor(b.salt, S_CARPET), x, z, ROOF_PATCH) < share(ROOF_CARPET * o) then
 		put(x, b.top, z, CARPET)
 	end
 end
@@ -1437,16 +1470,27 @@ local function writeVines(b: Building)
 			if ox < wX0 or ox > wX1 or oz < wZ0 or oz > wZ1 then
 				continue
 			end
-			local h = cellHash(salt, x, side, z)
+			-- (One hash a curtain of VINE_PANEL columns, which hang from the lowest of their
+			-- jagged tops down one length: one box for the mesher.)
+			local alongX = side == 1 or side == 3
+			local h = if alongX
+				then cellHash(salt, x // VINE_PANEL, side, z)
+				else cellHash(salt, x, side, z // VINE_PANEL)
 			if h / 4294967296 >= chance then
 				continue
 			end
 			if side == b.doorSide and abs(along - b.doorAlong) <= 1 then
 				continue
 			end
-			-- From the jagged top's highest wall cell down a hashed length: the first hangs on its
+			-- From the curtain's highest wall cell down a hashed length: the first hangs on its
 			-- wall (a sturdy block), the rest on the vine above.
-			local topY = effTop(b, x, z) - 1
+			local first = (if alongX then x else z) // VINE_PANEL * VINE_PANEL
+			local lo = if alongX then b.x0 + 1 else b.z0 + 1
+			local hi = if alongX then b.x1 - 1 else b.z1 - 1
+			local topY = math.huge
+			for k = max(first, lo), min(first + VINE_PANEL - 1, hi) do
+				topY = min(topY, if alongX then effTop(b, k, z) - 1 else effTop(b, x, k) - 1)
+			end
 			local length = VINE_MIN + (h // 4096) % (VINE_MAX - VINE_MIN + 1)
 			local wall = CityLayout.wallBlock(b, x, topY, z)
 			if wall == nil or readu8(STURDY, wall) == 0 then
@@ -1614,6 +1658,55 @@ function CityLayout.writeLot(p: Plan, lot: Lot)
 end
 
 -- Full detail: the street cars of plan p reaching the chunk being written.
+--[[
+	Full detail: a plant at (x, y, z) of the chunk being written, on the grass under it, where the
+	cell is free (no trunk, no wreck): by `r` in [0, 1) tall grass (where the cell above is free
+	too), short grass or a fern. Returns whether it grew.
+]]
+local function groundPlant(x: number, y: number, z: number, r: number): boolean
+	if wLevel ~= 0 or x < wX0 or x > wX1 or z < wZ0 or z > wZ1 or y < 1 or y + 1 >= wCells then
+		return false
+	end
+	local at = ((y * P + (z - wZ0)) * P + (x - wX0)) * 2
+	if readu16(wData, at) ~= AIR or readu16(wData, at - P * P * 2) ~= GRASS then
+		return false
+	end
+	if r < 0.3 and readu16(wData, at + P * P * 2) == AIR then
+		put(x, y, z, TALL_GRASS)
+		put(x, y + 1, z, TALL_GRASS_TOP)
+	else
+		put(x, y, z, if r > 0.8 then FERN else SHORT_GRASS)
+	end
+	return true
+end
+CityLayout.groundPlant = groundPlant
+CityLayout.STREET_PLANTS = STREET_PLANTS
+
+--[[
+	Full detail: plants on plan p's streets' grass patches in the chunk being written (STREET_PLANTS
+	of them: short grass, tall grass, ferns: `groundPlant`), so a street's green reads from afar
+	whatever the biome's own ground plants (Generation/Foliage plants the rest of the city's
+	grass: parks, yards).
+]]
+function CityLayout.writeStreetPlants(p: Plan)
+	if wLevel ~= 0 then
+		return
+	end
+	local side = 2 * p.radius
+	for z = max(wZ0, p.z0), min(wZ1, p.z0 + side) do
+		local sv = (z - p.z0) % BLOCK
+		for x = max(wX0, p.x0), min(wX1, p.x0 + side) do
+			if sv >= STREET and (x - p.x0) % BLOCK >= STREET then
+				continue
+			end
+			local r = roll(bxor(p.salt, S_PLANT), x, 0, z)
+			if r < STREET_PLANTS and CityLayout.surface(p, x, z) == GRASS then
+				groundPlant(x, p.y, z, r / STREET_PLANTS)
+			end
+		end
+	end
+end
+
 function CityLayout.writeStreetCars(p: Plan)
 	if wLevel ~= 0 then
 		return

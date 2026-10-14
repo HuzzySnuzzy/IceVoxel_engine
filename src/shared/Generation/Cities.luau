@@ -25,7 +25,10 @@
 	               it, so whatever they accept stands on ground the wrapper leaves alone; one that
 	               may yield passes its `yield` (optional).
 	  protects     exactly: a footprint + Margin, or a built road + Blend (no surface cave there).
-	  treeAllowed  trees grow here (not on asphalt, sidewalks or building lots).
+	  treeAllowed  trees grow here (not on asphalt, sidewalks, building, house, rubble or parking
+	               lots, nor within 2 blocks of a road's shoulder: CityLayout.treeAllowed).
+	  vegetation   the least vegetation chance of a spot here: Trees x o in a footprint (the
+	               generator raises the biome's own to it), else 0.
 	  top          the first air above the highest building block a chunk's level-`level` node
 	               at (originX, originZ) holds (the generator's `needed`), nil: none.
 	  write        the buildings, streets' decay, overgrowth, cars and loot containers into a
@@ -57,8 +60,9 @@
 	middle first; the test stops at the fifth failure, or as soon as the samples passing so far
 	span more than the limit (a hill shows after a few heights). Its plan (Sites cache):
 	the plateau H, the median of a 9 x 9 lattice of heights (at least SeaLevel + MinAboveSea), and
-	its overgrowth o = Overgrowth x clamp((humidity + 0.8) / 1.4, 0.15, 1) of the centre's biome
-	(every city is somewhat overgrown, the jungle's most).
+	its overgrowth o = Overgrowth x clamp((humidity + 0.8) / 1.4, OvergrowthFloor, 1) of the
+	centre's biome (`overgrowthOf`: 0.4 to 0.8; every city is well overgrown, a desert or plains
+	town at the floor, the jungle's most).
 
 	Roads (Config.Cities.Roads). A city links to the nearest city in each quarter (east, north,
 	west, south, by the signs of dx + dz and dx - dz) within LinkCells x Grid; link(A, B) when B is
@@ -80,8 +84,10 @@
 	w). The surface: the city's (CityLayout.surface) in the footprint at every level; on a road at
 	levels up to SurfaceLevels, Asphalt within Width / 2 (a dashed Yellow Road Line within 0.5 of
 	the centre, decayed as the streets), a Gravel or Coarse Dirt shoulder out to Width / 2 +
-	Shoulder; else nil. Wrecks on the roads: at vertices (Step apart) with a hash under Cars x Step,
-	more than PIN blocks from a gate, square to the road's main axis in its right lane.
+	Shoulder; else nil. A road's o is its middle's biome's (`overgrowthOf`). Wrecks on the roads:
+	at vertices (Step apart) with a hash under Cars x Step, more than PIN blocks from a gate,
+	square to the road's main axis in its right lane; then plants on the asphalt's grass
+	(`roadPlants`: CityLayout.groundPlant, as the streets').
 
 	Candidates and links. A cell's candidate links are the pairs of cities within LinkCells cells
 	of it, and within LinkCells x Grid of each other, whose corridor touches it: a superset of its
@@ -144,6 +150,8 @@ export type Cities = {
 	blocked: (minX: number, minZ: number, maxX: number, maxZ: number, yield: (() -> ())?) -> { number },
 	protects: (x: number, z: number) -> boolean,
 	treeAllowed: (x: number, z: number) -> boolean,
+	-- The least vegetation chance of a spot at (x, z) (0 outside a city's footprint).
+	vegetation: (x: number, z: number) -> number,
 	top: (level: number, originX: number, originZ: number) -> number?,
 	write: (args: WriteArgs, yield: (() -> ())?) -> (number, number),
 	container: (x: number, y: number, z: number) -> { StructureGen.ContainerItem }?,
@@ -253,6 +261,14 @@ do
 		UNFIT[i] = biome.frozen or not low
 	end
 end
+
+-- A city's (or a road's) overgrowth o from its biome's humidity (Config.Cities: Overgrowth and
+-- OvergrowthFloor, see the header).
+local function overgrowthOf(humidity: number): number
+	local cfg = Config.Cities
+	return cfg.Overgrowth * math.clamp((humidity + 0.8) / 1.4, cfg.OvergrowthFloor, 1)
+end
+Cities.overgrowthOf = overgrowthOf
 
 local function cellKey(gx: number, gz: number): number
 	return (gx + 1048576) * 2097152 + (gz + 1048576)
@@ -456,6 +472,9 @@ function Cities.none(raw: Relief.Relief): Cities
 		end,
 		treeAllowed = function(_x: number, _z: number): boolean
 			return true
+		end,
+		vegetation = function(_x: number, _z: number): number
+			return 0
 		end,
 		top = function(_level: number, _originX: number, _originZ: number): number?
 			return nil
@@ -948,7 +967,7 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		local H = max(clampHeight(heights[41]), SEA + cfg.MinAboveSea)
 		local humidity = Biomes.list[rawBiome(e.x, e.z)].humidity
 		spend(w, 2)
-		local o = cfg.Overgrowth * math.clamp((humidity + 0.8) / 1.4, 0.15, 1)
+		local o = overgrowthOf(humidity)
 		local new = CityLayout.plan(e, H, o)
 		setSite(key, new)
 		return new
@@ -974,7 +993,7 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		local humidity = Biomes.list[rawBiome(mx, mz)].humidity
 		spend(w, 2)
 		local new = base :: RoadPlan
-		new.o = cfg.Overgrowth * math.clamp((humidity + 0.8) / 1.4, 0.15, 1)
+		new.o = overgrowthOf(humidity)
 		setLink(link.id, new)
 		return new
 	end
@@ -1252,6 +1271,21 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		return not (mRoad and mRoadD <= BAND + 2)
 	end
 
+	-- (Trees on a city's grass at least Config.Cities.Trees x o of the time: see the header.)
+	local function vegetation(x: number, z: number): number
+		local tx, tz = x // TILE, z // TILE
+		local c = classes[cellKey(tx, tz)] or classOf(tx, tz)
+		if c == 0 then
+			return 0
+		end
+		lookupCity(x, z)
+		local plan = mPlan
+		if plan and mDist <= 0 then
+			return cfg.Trees * plan.o
+		end
+		return 0
+	end
+
 	local function cityAt(x: number, z: number): number
 		local e = cellAt(x // GRID, z // GRID).exist
 		if not e then
@@ -1425,6 +1459,40 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		end
 	end
 
+	-- The road plan's grass patches in the block rectangle (on its asphalt: within HALF_WIDTH of
+	-- its centre line) carry plants as the streets' do (CityLayout.groundPlant), on each
+	-- column's own ground (`heights`: the padded columns' first air from (minX, minZ)).
+	local plantSalt = Hash.hash2(seed, 0x9A47, 0x2D)
+	local function roadPlants(
+		plan: RoadPlan,
+		minX: number,
+		minZ: number,
+		maxX: number,
+		maxZ: number,
+		heights: { number }
+	)
+		local P = ChunkLayout.PADDED
+		local chance = CityLayout.STREET_PLANTS
+		local px, pz = plan.x, plan.z
+		local reach = math.ceil(HALF_WIDTH)
+		for j = 1, plan.count - 1 do
+			local ax, az, bx, bz = px[j], pz[j], px[j + 1], pz[j + 1]
+			local x0, x1 = max(minX, floor(min(ax, bx)) - reach), min(maxX, floor(max(ax, bx)) + reach)
+			local z0, z1 = max(minZ, floor(min(az, bz)) - reach), min(maxZ, floor(max(az, bz)) + reach)
+			for z = z0, z1 do
+				for x = x0, x1 do
+					if Roads.segmentDistance2(x + 0.5, z + 0.5, ax, az, bx, bz) > HALF_WIDTH * HALF_WIDTH then
+						continue
+					end
+					local r = Hash.hash3(plantSalt, x, 0, z) / 4294967296
+					if r < chance then
+						CityLayout.groundPlant(x, heights[(z - minZ) * P + (x - minX) + 1], z, r / chance)
+					end
+				end
+			end
+		end
+	end
+
 	--[[ Writing ]]
 
 	local function write(args: WriteArgs, yield: (() -> ())?): (number, number)
@@ -1464,6 +1532,7 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		end
 		for _, plan in plans do
 			CityLayout.writeStreetCars(plan)
+			CityLayout.writeStreetPlants(plan)
 		end
 		if roadPlans then
 			-- Road wrecks, on each column's own ground (`heights`: the padded columns' first air).
@@ -1479,6 +1548,10 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 						CityLayout.putBlock(x, heights[(z - z0) * P + (x - x0) + 1] + dy, z, block)
 					end
 				end)
+			end
+			-- (After the wrecks: no plant under one.)
+			for _, plan in roadPlans do
+				roadPlants(plan, x0, z0, x1, z1, heights)
 			end
 		end
 		return CityLayout.finish()
@@ -1728,6 +1801,7 @@ function Cities.new(seed: number, raw: Relief.Relief, options: Options): Cities
 		blocked = blocked,
 		protects = protects,
 		treeAllowed = treeAllowed,
+		vegetation = vegetation,
 		top = top,
 		write = write,
 		container = container,

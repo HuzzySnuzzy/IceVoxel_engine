@@ -701,7 +701,9 @@ parcel by parcel; `Roads` (pure) is a road's geometry and grading. They exist wh
   at 0.5 gave 4.5-7.5: the lattice refuses many spots).
 - **Site plan** (`CityLayout.plan`, LRU `Caches.Sites` 32): the plateau H (the median of a 9 × 9
   lattice of raw heights, at least sea + MinAboveSea) and the overgrowth o = `Overgrowth` ×
-  clamp((humidity + 0.8) / 1.4, 0.15, 1) of the centre's raw biome; the parcels' kinds from
+  clamp((humidity + 0.8) / 1.4, `OvergrowthFloor`, 1) of the centre's raw biome (0.4-0.8 at 0.8
+  and 0.5; a road's from its middle's biome; 0.6 and a floor of 0.15 left a desert town at 0.09,
+  a plains one at 0.24 and 94% of a taiga city's streets bare asphalt); the parcels' kinds from
   per-parcel hashes by ring distance d (downtown ≤ 0.35 only in cities of half ≥ 4: d is pulled
   outwards in towns), with a police station, a fire station and (unless one stands) a pharmacy on
   the mid ring's lowest hashes, and `Bunkers` (1-2) outer house lots turned into sheds over a
@@ -744,20 +746,31 @@ parcel by parcel; `Roads` (pure) is a road's geometry and grading. They exist wh
   256 block tiles (32 block buckets; LRU `Caches.Tiles` 512, plans `Caches.Links` 64). Surface at
   levels ≤ `SurfaceLevels`: asphalt within Width / 2 (a dashed Yellow Road Line within 0.5 of the
   centre, decayed like the streets), a gravel or coarse dirt shoulder out to Width / 2 + Shoulder.
-  Wrecks at vertices with a hash under Cars × Step, square to the road in its right lane. 60-92%
+  Wrecks at vertices with a hash under Cars × Step, square to the road in its right lane; then
+  plants on the asphalt's grass (`roadPlants`, CityLayout.groundPlant: 0.6 of it). 60-92%
   of cities with a neighbour get a road (11 of 12 on seed 12345, 16 of 21 on seed 99).
 - **Streets and buildings** (`CityLayout`, its header has every rule): streets every 32 blocks, 7
   wide (sidewalks, asphalt, the dashed yellow line outside the crossings, and white Road Line
   crosswalks on lanes 1, 3 and 5 of the rows either side of each crossing: the only place the
-  white line lies; decay: potholes, grass and moss where a 4 block value noise falls in its lowest
-  Overgrown × o share, 4 × 4 cracked patches, the crosswalks fading alike); buildings inset one
+  white line lies; decay: potholes, grass and moss where an 8 block value noise falls in its
+  lowest Overgrown × o share (half again on sidewalks; grass or moss per 8 × 8 noise cell, so a
+  patch is few boxes), 4 × 4 cracked patches, the crosswalks fading alike; 0.6 of the grass
+  planted with short or tall grass or a fern by `writeStreetPlants`); buildings inset one
   block from their 25 × 25 lot (houses 10 × 10 in four 12 × 12 lots), 4 blocks a floor; full
   interiors to `FullFloors` (rooms, a 1 × 1 ladder shaft, containers, cobwebs), above it a facade,
   a ring of rooms two deep and a solid core; ruin r per building: a jagged top (value noise, per 2
   × 2 columns in 2 block steps, never below the ground floor's door), walls blown out by 4 block
   panels and cracked or mossy by 8 block panels (few big boxes for the mesher), slab holes in 4 ×
   4 patches with rubble under; vines only where the same pure wall function says their wall
-  stands; plants only on soil and carpets on sturdy blocks; trees only in parks (`treeAllowed`).
+  stands, hung in 4 column curtains from their lowest jagged top (one box a curtain); moss
+  carpets on 0.5 o of the roofs in 8 block patches; plants only on soil and carpets on sturdy
+  blocks; trees in parks, plazas and on the streets' grass off the sidewalks and a block clear
+  of every wreck (`treeAllowed`), the spot's vegetation chance raised to at least `Trees` × o
+  (`vegetation`, read by TerrainGenerator's tree step, which skips its slope test on a level
+  footprint). Measured on seed 99 (citylook): a taiga city's streets 35.5% grass or moss and
+  15.8% planted (6.0% and 0.4% before), a desert one's 24.7% and 10.1% (0.7%, 0), road centre
+  lines 25% green and 7.3% planted (3.2%, 0.15%); downtown meshes at most 2.42× the bench's plain
+  chunks (2.17× before; the budget 2.5×).
   Containers' positions are in the plan; `container(x, y, z)` rolls `ScavengeLoot` with the
   cities' loot salt (a big city holds about 15 Antibiotics in expectation, every town a Medicine
   Cabinet).
@@ -5839,8 +5852,11 @@ burp unless `burp` is false).
   chunks, at most `WAVE_ABOVE` (`MobAI.MAX_FALL`, 3) above the generator's ground there
   (`context.ground`: never on a city's roofs or a tree's crown, where its hunters could never come
   down; in seed 99's big city 59 of 320 wave zombies stood 4-20 blocks up before this rule, none
-  after, all 320 still placed; its members too, through `spawnPack`'s ceiling), 8 tries a player; kinds by `hordeWeight` grown by `hordeGrowth` ×
-  (k - 1) (runners and brutes more often each moon); each hunts that player and is persistent.
+  after, all 320 still placed; its members too, through `spawnPack`'s ceiling; a floor found
+  higher, the column scan goes on below it: `MobSpawning.floorBelow`), 16 tries a player (an
+  overgrown jungle town's canopy hides the sky from many); kinds by `hordeWeight` grown by
+  `hordeGrowth` × (k - 1) (runners and brutes more often each moon); each hunts that player and
+  is persistent.
   Natural monster spawning waits (`hostilePaused`).
 - **Hunts**: every `HuntInterval` (100) ticks of a moon, every zombie with no target within
   `HuntRadius` (44) of a living survival or adventure player hunts the nearest one.

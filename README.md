@@ -857,7 +857,10 @@ A fast, Minecraft-style voxel engine for Roblox.
   agree.
   - **Streets:** a grid of 7 block wide streets every 32 blocks: asphalt with a dashed yellow
     centre line and white crosswalks at the crossings, concrete sidewalks, cracked patches,
-    potholes of gravel, and grass and moss pushing through.
+    potholes of gravel, and the green taking them back: a fifth to two fifths of the asphalt
+    (more of the sidewalks) gone to grass and moss in patches, tall grass and ferns on the
+    grass, and trees growing out of the streets' grass, the parks and the plazas (even in a
+    plains or desert town, whose own biome grows few).
   - **Buildings**, by their distance from the centre: offices up to 12 floors with glass bands
     downtown, apartments of 3-6 floors, shops (a grocery, a pharmacy, a hardware store or an
     office), rows of four houses, parks (grass, trees), plazas, parking lots full of wrecks and
@@ -865,10 +868,10 @@ A fast, Minecraft-style voxel engine for Roblox.
     ruins: their tops collapse in a jagged line, walls are blown out, cracked and mossy, slabs
     hole into rubble on the floor below, and the green takes them back (vines down the walls,
     moss carpets on roofs and floors, grass and moss in the ground floors, cobwebs in the
-    corners; more of it in wet biomes, little in deserts). The first four floors are open rooms
-    with a ladder up a corner, doors (or a gap where a door was) and windows; higher floors are a
-    facade over a ring of rooms around a solid core. Rusted cars stand in the streets and on the
-    roads.
+    corners; more of it in wet biomes, a jungle's twice a desert's). The first four floors are open
+    rooms with a ladder up a corner, doors (or a gap where a door was) and windows; higher floors
+    are a facade over a ring of rooms around a solid core. Rusted cars stand in the streets and on
+    the roads, whose asphalt greens and grows plants like the streets'.
   - **Loot** waits in chests, **Supply Crates** and **Medicine Cabinets** against the inside walls
     (house, grocery, pharmacy, hardware, police, fire station, office and car tables: food,
     water, bandages, painkillers, antibiotics, tools, nails, gunpowder): a big city holds about 15
@@ -2209,7 +2212,9 @@ for performance:
 | `Cities.MaxFloors` / `FullFloors` / `FloorHeight` | 12 / 4 / 4 | Floors at most; full interiors (rooms, ladders, loot) up to floor 4, above it a ring of rooms around a solid core; 4 blocks a floor. |
 | `Cities.MaxSlope` / `MinAboveSea` | 10 / 3 | A footprint's fit samples span at most 1.5 × 10 blocks of height; the plateau at least 3 over the sea. |
 | `Cities.LodLevels` | 4 | Buildings drawn at LOD levels 0-4 (massing beyond full detail), none beyond. |
-| `Cities.Ruin` / `Overgrowth` / `Cars` | 0.55 / 0.6 / 0.08 | How ruined a building is on average, how overgrown (times the biome's humidity: jungles most, deserts little), and the chance of a wreck per lane of a street stretch. |
+| `Cities.Ruin` / `Overgrowth` / `Cars` | 0.55 / 0.8 / 0.08 | How ruined a building is on average, how overgrown (times the biome's humidity factor, at least `OvergrowthFloor`: a city's o is 0.4-0.8, jungles most), and the chance of a wreck per lane of a street stretch. |
+| `Cities.OvergrowthFloor` | 0.5 | The least humidity factor of a city's overgrowth: a desert or plains town greens half as much as a jungle one. |
+| `Cities.Trees` | 0.5 | A vegetation spot on a city's grass (parks, plazas, the streets' grass patches) grows a tree at least `Trees` × o of the time, whatever its biome's own chance. |
 | `Cities.Bunkers` | { 1, 2 } | Bunker sheds per city (Generation/Bunkers puts a hatch in each). |
 | `Cities.Caches` | Cells 1024, Sites 32, Links 64, Tiles 512 | Plan caches per generator (each worker its own). |
 | `Cities.Roads.Enabled` | true | Roads between cities. |
@@ -2217,7 +2222,7 @@ for performance:
 | `Cities.Roads.LinkCells` / `Wobble` / `Step` / `MaxGrade` | 2 / 48 / 8 / 1/6 | Links to the nearest city per quarter within 2 cells; the line wobbles up to 48 blocks, sampled every 8, graded to at most 1 in 6. |
 | `Cities.Roads.MaxCut` / `MaxFill` / `MaxWater` | 24 / 24 / 48 | A link is dropped where it would cut or fill more, or cross a longer run of water. |
 | `Cities.Roads.SurfaceLevels` / `CutLevels` | 2 / 3 | Roads are drawn at LOD 0-2 and level the ground at 0-3. |
-| `Cities.Roads.Cracks` / `Overgrown` / `Potholes` / `Cars` | 0.25 / 0.12 / 0.02 / 0.004 | Asphalt decay (cracked patches, grass and moss patches times the overgrowth, potholes) and wrecks per road block. |
+| `Cities.Roads.Cracks` / `Overgrown` / `Potholes` / `Cars` | 0.25 / 0.55 / 0.02 / 0.004 | Asphalt decay (cracked patches, grass and moss patches on `Overgrown` × o of the asphalt and half again of the sidewalks, potholes) and wrecks per road block. |
 | `Bunkers.Enabled` | true | Hidden bunkers (Generation/Bunkers); they also follow the world's Ruins setting, Generate Structures and `Structures.Generate`. |
 | `Bunkers.Grid` / `Chance` | 768 / 0.35 | One wild candidate per 768 × 768 blocks, kept with `Chance` (0.38-0.61 per km² measured on five seeds; 0.59 at most on dry land). |
 | `Bunkers.Candidates` | 24 | Hatch columns tried per kept cell (dry, level ground; the first that passes). |

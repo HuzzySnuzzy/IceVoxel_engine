@@ -272,9 +272,17 @@ local Config = {
 		MinAboveSea = 3,
 		-- LOD levels buildings are drawn at (massing beyond 0; nothing beyond this).
 		LodLevels = 4,
-		-- Decay: ruin, overgrowth and wrecked cars.
+		-- Decay: ruin, overgrowth and wrecked cars. A city's overgrowth o is Overgrowth times its
+		-- biome's humidity factor ((humidity + 0.8) / 1.4, at least OvergrowthFloor: a desert or
+		-- plains town still greens, a jungle one most): 0.4 to 0.8. Trees: a vegetation spot on
+		-- the city's grass (parks, plazas, the streets' grass patches off the sidewalks and the
+		-- wrecks) grows a tree at least Trees x o of the time, whatever the biome's own chance (a
+		-- plains town's 0.012 grew next to none). (Overgrowth 0.6 and a floor of 0.15 left 94% of
+		-- a taiga city's streets bare asphalt, and a plains town at o 0.24.)
 		Ruin = 0.55,
-		Overgrowth = 0.6,
+		Overgrowth = 0.8,
+		OvergrowthFloor = 0.5,
+		Trees = 0.5,
 		Cars = 0.08,
 		-- Bunkers under each city (fewest, most), in shed lots.
 		Bunkers = { 1, 2 },
@@ -299,9 +307,11 @@ local Config = {
 			-- Roads draw at LOD 0..SurfaceLevels and cut and fill at 0..CutLevels; none beyond.
 			SurfaceLevels = 2,
 			CutLevels = 3,
-			-- Decay: cracks, overgrown patches, potholes and wrecked cars.
+			-- Decay: cracks, overgrown patches (Grass and Moss Block on Overgrown x o of the
+			-- asphalt, a fifth to two fifths, and half again of the sidewalks; 0.12 left 94-99%
+			-- of the streets and roads bare), potholes and wrecked cars.
 			Cracks = 0.25,
-			Overgrown = 0.12,
+			Overgrown = 0.55,
 			Potholes = 0.02,
 			Cars = 0.004,
 		},

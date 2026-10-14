@@ -30,6 +30,7 @@ return function(t, shared, require, server)
 	local Ores = require(shared.Generation.Ores)
 	local Lava = require(shared.Generation.Lava)
 	local Lakes = require(shared.Generation.Lakes)
+	local Biomes = require(shared.Biomes)
 
 	local SIZE = ChunkLayout.SIZE
 	local P = ChunkLayout.PADDED
@@ -1331,6 +1332,118 @@ return function(t, shared, require, server)
 			end
 		end
 	)
+
+	t.test("ruins: overgrown: a desert downtown's streets a fifth green and planted, its road too, trees", function()
+		-- (Overgrowth 0.6 with a humidity floor of 0.15 left a desert town at o 0.09: 0.7% of its
+		-- streets green, none planted, and the roads 3% green; trees grew only in parks.)
+		-- (At least 0.8 x 0.5: a desert or plains town's.)
+		local least = 0.4
+		for _, site in all do
+			local plan = cities.planAt(site.x, site.z)
+			t.ok(plan.o >= least - 1e-9, `o {plan.o} at {site.x}, {site.z}: at least {least}`)
+		end
+		t.near(planBig.o, least, 1e-9, "the desert downtown: the floor")
+		local greenTop: { [number]: boolean } = { [B.Grass] = true, [B.MossBlock] = true }
+		-- The big city's streets in its downtown's chunks: the top block and what stands on it.
+		local streets, greens, planted = 0, 0, 0
+		for _, c in downtown do
+			for lz = 0, SIZE - 1 do
+				for lx = 0, SIZE - 1 do
+					local x, z = c[1] * SIZE + lx, c[2] * SIZE + lz
+					local u, v = x - planBig.x0, z - planBig.z0
+					if u % cfg.Block < cfg.Street or v % cfg.Block < cfg.Street then
+						streets += 1
+						local top = blockAt(gen, x, BIG.y - 1, z)
+						if greenTop[top] then
+							greens += 1
+						end
+						if Blocks.isPlant(blockAt(gen, x, BIG.y, z)) then
+							planted += 1
+							t.ok(top == B.Grass, `a street plant on grass at {x}, {z}`)
+						end
+					end
+				end
+			end
+		end
+		-- The road's asphalt in its chunks (its own surface: not the shoulders' gravel and dirt).
+		local road, roadGreen, roadPlanted = 0, 0, 0
+		local paved: { [number]: boolean } = {
+			[B.Asphalt] = true,
+			[B.CrackedAsphalt] = true,
+			[B.RoadLineYellow] = true,
+			[B.Grass] = true,
+			[B.MossBlock] = true,
+		}
+		for _, c in roadChunks do
+			for lz = 0, SIZE - 1 do
+				for lx = 0, SIZE - 1 do
+					local x, z = c[1] * SIZE + lx, c[2] * SIZE + lz
+					local h = gen.column(x, z)
+					local override = cities.surface(x, z, h, 0)
+					if override and paved[override] then
+						road += 1
+						if greenTop[override] then
+							roadGreen += 1
+						end
+						if Blocks.isPlant(blockAt(gen, x, h, z)) then
+							roadPlanted += 1
+						end
+					end
+				end
+			end
+		end
+		-- Trees: in a plains town's parks and on its streets' grass (the plains' own chance, 0.012,
+		-- grew next to none in a town: Cities.Trees x o sets the least).
+		local green: any = nil
+		local bestD = math.huge
+		for _, site in all do
+			local _, biome = gen.column(site.x, site.z)
+			local d = site.x * site.x + site.z * site.z
+			if site.radius >= 60 and site.radius < 131 and Biomes.list[biome].name == "Plains" and d < bestD then
+				green, bestD = site, d
+			end
+		end
+		assert(green, "a plains town")
+		local planTown = cities.planAt(green.x, green.z)
+		local parkTrees, streetTrees = 0, 0
+		for z = green.z - green.radius, green.z + green.radius do
+			for x = green.x - green.radius, green.x + green.radius do
+				if isLog[blockAt(gen, x, green.y, z)] then
+					local u, v = x - planTown.x0, z - planTown.z0
+					if u % cfg.Block < cfg.Street or v % cfg.Block < cfg.Street then
+						streetTrees += 1
+					else
+						parkTrees += 1
+					end
+					t.ok(cities.treeAllowed(x, z), `a trunk where trees may grow at {x}, {z}`)
+				end
+			end
+		end
+		print(
+			string.format(
+				"    desert downtown (o %.2f): %d street columns, %.1f%% green, %.1f%% planted; road: %d columns, %.1f%% green, %.1f%% planted; plains town at %d, %d (o %.2f): %d park and %d street trunks",
+				planBig.o,
+				streets,
+				100 * greens / streets,
+				100 * planted / streets,
+				road,
+				100 * roadGreen / road,
+				100 * roadPlanted / road,
+				green.x,
+				green.z,
+				planTown.o,
+				parkTrees,
+				streetTrees
+			)
+		)
+		t.ok(streets > 1000 and road > 100, "streets and road measured")
+		t.ok(greens / streets >= 0.2, "a fifth of the streets green or more")
+		t.ok(planted / streets >= 0.07, "plants on them")
+		t.ok(roadGreen / road >= 0.15, "the road's asphalt a sixth green or more")
+		t.ok(roadPlanted / road >= 0.05, "plants on it")
+		t.ok(parkTrees >= 5, "trees in its parks")
+		t.ok(streetTrees >= 1, "and on its streets")
+	end)
 
 	t.test(
 		"ruins: every ladder rung hangs on its wall, no Gravel over a hole, carpets on sturdy blocks (3 seeds)",
