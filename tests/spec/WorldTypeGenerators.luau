@@ -257,7 +257,8 @@ return function(t, shared, require, server)
 	-- or outpost lies in `cities.blocked`, and the nearest city to the spawn (2724, 2747, 3.6 km)
 	-- lies beyond spawnShift's 3 km, so the spawn stays. Bunkers (Generation/Bunkers) moved nothing
 	-- either: every row, the columns, the spawn, the map tile and the outposts hold with cities,
-	-- roads and bunkers all on.
+	-- roads and bunkers all on. Recomputed at the apocalypse's glue commit (every feature on, the
+	-- streets' crosswalks too) and with Ruins off: each value the same as pinned here.
 	local PINNED = {
 		{ 0, 0, 0, 2497134012, 2385823076, 637642054, 112, 73, 75 },
 		{ 0, 3, -2, 3308524465, 2787425146, 1146561170, 112, 71, 74 },

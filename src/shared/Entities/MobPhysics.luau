@@ -166,6 +166,27 @@ do
 	end
 end
 
+--[[
+	Per block: whether it is a floor plate (PLATE 1): collision boxes all lying on its cell's floor
+	and at most half a block high, as a shut bunker hatch's (Generation/Bunkers puts one flush on
+	the ground over a shaft). A mob stands on one, so `dropAt` counts it as ground where it stands
+	and below: without that a zombie saw the shaft under a shut hatch as a drop and would not
+	cross the hatch (a city shed's floor, its middle cell).
+]]
+local PLATE = buffer.create(Blocks.count)
+for id = 0, Blocks.count - 1 do
+	local collision = Blocks.collision(id)
+	if type(collision) == "table" and #collision > 0 then
+		local plate = true
+		for _, box in collision do
+			if box.minY > 0 or box.maxY > 0.5 then
+				plate = false
+			end
+		end
+		buffer.writeu8(PLATE, id, if plate then 1 else 0)
+	end
+end
+
 -- (A door's panel, a fence's post and arms, a pipe's core and arms: Blocks/Shapes.)
 local function solidAt(x: number, y: number, z: number): boolean | Hull.Shape
 	local block = current(x, y, z)
@@ -552,17 +573,22 @@ end
 --[[
 	The ground under a step of the body to (x, z) (blocks): how far the floor is below its feet
 	there (0: level, -1: one block up), nil when no floor is within `depth` blocks (a drop) or
-	the cell is not loaded. For the AI's "don't walk off a cliff" check.
+	the cell is not loaded. A floor plate (PLATE: a shut bunker hatch) is ground, in the feet's
+	cell too. For the AI's "don't walk off a cliff" check.
 ]]
 function MobPhysics.dropAt(getBlock: GetBlock, x: number, y: number, z: number, depth: number): number?
 	local bx, bz = floor(x), floor(z)
 	local feet = floor(y + 0.001)
+	local here = getBlock(bx, feet, bz)
+	if here ~= nil and buffer.readu8(PLATE, here) == 1 then
+		return 0
+	end
 	for d = 0, depth do
 		local block = getBlock(bx, feet - 1 - d, bz)
 		if block == nil then
 			return nil
 		end
-		if Blocks.isSolid(block) or fluidOf(block) ~= 0 then
+		if Blocks.isSolid(block) or fluidOf(block) ~= 0 or buffer.readu8(PLATE, block) == 1 then
 			return d
 		end
 	end

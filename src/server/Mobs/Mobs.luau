@@ -15,7 +15,8 @@
 	             (Apocalypse/NoiseBus.take, 1.25 times as far at night and 0.7 times where it
 	             rains at the noise), whether it is night (DayCycle.isDay) and whether zombies
 	             break blocks (Breaking.Enabled), how much a column is in a city (the generator's
-	             cityAt), each player's monster cap and the world's limits (Mobs/ZombieDirector:
+	             cityAt) and its ground (the generator's column: waves keep off roofs), each
+	             player's monster cap and the world's limits (Mobs/ZombieDirector:
 	             by day, at night, in a city, in a blood moon; maxMobs and MaxHostile are worked
 	             out again every tick, so /time set or a restart in a blood moon never leaves them
 	             raised), day spawning (Zombies.DaySpawning) and the blood moon's pause of natural
@@ -519,6 +520,14 @@ function Mobs.start(net: Net, world: WorldServer.World)
 	local function cityAt(x: number, z: number): number
 		return if generatorCityAt then generatorCityAt(x, z) else 0
 	end
+	-- (The generator's ground: blood moon waves keep off the cities' roofs, ZombieDirector.)
+	local generatorColumn = if generator then generator.column else nil
+	local ground: ((x: number, z: number) -> number)? = nil
+	if generatorColumn then
+		ground = function(x: number, z: number): number
+			return (generatorColumn(x, z))
+		end
+	end
 	local active: { [number]: boolean } = {}
 	local function isActive(cx: number, cz: number): boolean
 		return active[Coords.chunkKey(cx, cz)] == true
@@ -587,6 +596,7 @@ function Mobs.start(net: Net, world: WorldServer.World)
 				end,
 				daySpawn = on and apocalypse.Zombies.DaySpawning,
 				hostilePaused = moonUp,
+				ground = ground,
 			}
 			mobs:tick(context)
 			MobSpawning.step(mobs, spawnState, context, spawnSettings)

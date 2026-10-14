@@ -799,6 +799,9 @@ return function(t, shared, require)
 			-- of overgrown ones with one is about EntranceChance only of those under dry land (the start
 			-- room's column above the sea's shore); one under the sea or a beach has none. Measured on
 			-- eight seeds: 9.2-16.1 per km², 0.38-0.57 of those under dry land and 0.18-0.45 of all.
+			-- Cities, roads and bunkers since e7bab0f: seed 12345's count moved from 470 to 469 (13.06
+			-- to 13.03 per km²: one start now in `cities.blocked`); its overgrown, entrance and wet
+			-- counts and all of seeds 777's and 2024's stayed (370 and 357; Ruins off and on alike).
 			local R = 3000
 			local SEA = Config.SeaLevel
 			for _, seed in { SEED, 777, 2024 } do

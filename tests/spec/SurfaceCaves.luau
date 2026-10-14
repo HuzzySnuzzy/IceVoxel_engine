@@ -977,6 +977,9 @@ return function(t, shared, require, server)
 				t.ok(depth >= 0 and depth <= ravineCfg.Depth[2] + 30, `ravine depth {depth}`)
 			end
 		end
+		-- (Cities, roads and bunkers moved nothing here: the worms are planned from the raw
+		-- relief, 36 entrances per km² with Ruins on as off; a city only stops their carving in
+		-- the columns it `protects`.)
 		local km2 = 16
 		print(
 			`    within 2 km of the origin: {entrances / km2} entrances per km2 ({branched} branched), {ravines / km2} ravines`

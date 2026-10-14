@@ -5,8 +5,10 @@
 	or "always shown"; the full detail split underground), far mesh status (MeshOverlay), the frame rate, and the
 	player's movement hull (position, speed, ground / water / sprint / flying / noclip /
 	spectating / pose, game mode, flying speed; MovementController), the dropped items the client
-	knows about (EntityRenderer), the time of day (the clock, day number, Minecraft's sky light
-	outdoors and how much of it reaches the camera; Rendering/LightingController), the fog showing
+	knows about (EntityRenderer), the mobs it knows and how its zombies were drawn last frame (full
+	and reduced R15 rigs, the parts moved: Entities/MobRenderer.rigs), the time of day (the clock,
+	day number, Minecraft's sky light outdoors and how much of it reaches the camera;
+	Rendering/LightingController), the fog showing
 	(LightingController.describeFog: the Atmosphere's density, how far it hazes things 90%, its
 	haze, glare and offset; or a fluid's or Blindness' Lighting fog, start and end in blocks) and
 	the music (surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
@@ -61,6 +63,7 @@ local EffectState = require(script.Parent.Parent.Player.EffectState)
 local ManaState = require(script.Parent.Parent.Player.ManaState)
 local ProjectileView = require(script.Parent.Parent.Rendering.ProjectileView)
 local EntityRenderer = require(script.Parent.Parent.Entities.EntityRenderer)
+local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local LightingController = require(script.Parent.Parent.Rendering.LightingController)
 local WeatherClient = require(script.Parent.Parent.Weather)
 local Ambience = require(script.Parent.Parent.Audio.Ambience)
@@ -233,6 +236,13 @@ local function movementLine(): string
 		s.flyingSpeed,
 		EntityRenderer.count()
 	)
+end
+
+-- The mobs the client knows, and how the zombies were drawn last frame (Entities/MobRenderer:
+-- full R15 rigs, reduced rigs, and the parts moved in its one BulkMoveTo, boxes included).
+local function mobsLine(): string
+	local full, reduced, parts = MobRenderer.rigs()
+	return `mobs    {MobRenderer.count()}  rigs {full} full, {reduced} reduced  {parts} parts moved`
 end
 
 -- The render origin (Shared/World/Origin) and its moves (Rendering/Rebase); with the server's own
@@ -461,6 +471,7 @@ function DebugOverlay.start(streamer: ChunkStreamer.ChunkStreamer)
 			caveLine(stats),
 			meshLine(streamer.renderer.overlay:getStats()),
 			movementLine(),
+			mobsLine(),
 			originLine(),
 			timeLine(),
 			LightingController.describeFog(),

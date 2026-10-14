@@ -12,11 +12,14 @@
 	  Streets   every Block (32) blocks, Street (7) wide: u % 32 < 7 or v % 32 < 7. Across a
 	            street running along z: a Concrete sidewalk at 0 and 6, Asphalt 1..5, the dashed
 	            Yellow Road Line at 3 (v % 8 < 4) outside the crossings; crossings are plain
-	            asphalt. Decay (`surface`): Gravel potholes (Roads.Potholes per block), Grass and
-	            Moss Block patches where a 4 block value noise falls in the lowest Roads.Overgrown
-	            x o of its range (`share`: the noise's quantiles), Cracked Asphalt (Cracked Concrete
-	            on sidewalks) in CRACK_PATCH (4) square patches (Roads.Cracks). Asphalt, lines and sidewalks lie on
-	            Gravel, the grass on Dirt (the override's filler).
+	            asphalt, and the street's rows either side of one (v % 32 = 7 and 31) are a
+	            crosswalk, the white Road Line on lanes 1, 3 and 5 (the only place it lies). Decay
+	            (`surface`): Gravel potholes (Roads.Potholes per block), Grass and Moss Block
+	            patches where a 4 block value noise falls in the lowest Roads.Overgrown x o of its
+	            range (`share`: the noise's quantiles), Cracked Asphalt (Cracked Concrete on
+	            sidewalks) in CRACK_PATCH (4) square patches (Roads.Cracks): a crosswalk fades the
+	            same way. Asphalt, lines and sidewalks lie on Gravel, the grass on Dirt (the
+	            override's filler).
 	  Parcels   the 25 x 25 blocks between streets (pu = u // 32, pv = v // 32), each from its own
 	            hash. d: the parcel's ring around the centre ((ring + 0.5) / half), pulled outwards
 	            in small towns (d = 1 - (1 - d) x (0.5 + 0.5 (half - 1) / 6): only a city of half 4
@@ -129,7 +132,7 @@ local rshift = bit32.rshift
 
 local id = Blocks.id
 local AIR = Blocks.AIR
-local ASPHALT, CRACKED_ASPHALT, LINE_YELLOW = id.Asphalt, id.CrackedAsphalt, id.RoadLineYellow
+local ASPHALT, CRACKED_ASPHALT, LINE_YELLOW, LINE_WHITE = id.Asphalt, id.CrackedAsphalt, id.RoadLineYellow, id.RoadLine
 local CONCRETE, CRACKED_CONCRETE, MOSSY_CONCRETE = id.Concrete, id.CrackedConcrete, id.MossyConcrete
 local BRICK, CRACKED_BRICKS, MOSSY_BRICKS = id.Brick, id.CrackedBricks, id.MossyBricks
 local STONE_BRICKS, CRACKED_STONE_BRICKS = id.StoneBricks, id.CrackedStoneBricks
@@ -1034,12 +1037,16 @@ function CityLayout.surface(p: Plan, x: number, z: number): (number?, number?)
 		if streetU and not streetV then
 			if su == 0 or su == STREET - 1 then
 				return concreteDecay(salt, x, z, o)
+			elseif (sv == STREET or sv == BLOCK - 1) and su % 2 == 1 then
+				block = LINE_WHITE
 			elseif su == STREET // 2 and v % 8 < 4 then
 				block = LINE_YELLOW
 			end
 		elseif streetV and not streetU then
 			if sv == 0 or sv == STREET - 1 then
 				return concreteDecay(salt, x, z, o)
+			elseif (su == STREET or su == BLOCK - 1) and sv % 2 == 1 then
+				block = LINE_WHITE
 			elseif sv == STREET // 2 and u % 8 < 4 then
 				block = LINE_YELLOW
 			end

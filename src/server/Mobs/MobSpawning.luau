@@ -106,6 +106,9 @@ export type Context = {
 	hostileCap: ((player: MobWorld.PlayerView) -> number)?,
 	daySpawn: boolean?,
 	hostilePaused: boolean?,
+	-- The generator's ground at a column (its height: the first air above the terrain, a city's
+	-- plateau, no building): blood moon waves keep off what stands above it (ZombieDirector).
+	ground: ((x: number, z: number) -> number)?,
 }
 
 -- How a spot's light is judged (see the header): "dark" (monsters: Minecraft's rolls), "day"
