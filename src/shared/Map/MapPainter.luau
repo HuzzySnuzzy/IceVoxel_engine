@@ -21,6 +21,15 @@
 	The sea is the generator's (`seaLevel`: a superflat world's water layers, none in a void), and
 	a column with nothing in it (`column`'s surface is air: the void, a debug world's gaps) is
 	painted VOID, a dark grey.
+
+	The zombie apocalypse's ruins (Generation/Cities): a tile first warms the generator's caches
+	for its rectangle (`prepare`, with the painter's yield), so the wrapped terrain `column` reads
+	never builds a city or road plan at once. At up to CITY_SCALE (8) blocks a pixel the columns
+	themselves show the streets and roads (their asphalt, concrete and grass); from it on each city
+	is painted as a CITY grey square (its footprint), with its street grid darker at exactly
+	CITY_SCALE (a street every four pixels; coarser, a grid would be noise), and the roads between
+	them as one pixel lines in ROAD grey (`paintRoads`: every segment, walked half a pixel at a
+	time), over everything else.
 ]]
 
 local Config = require(script.Parent.Parent.Config)
@@ -37,6 +46,11 @@ local VOID = { 18, 18, 22 }
 
 -- Coarsest zoom (blocks per pixel) that paints water lakes / puddles.
 local LAKE_SCALE, PUDDLE_SCALE = 8, 2
+-- Pixels painted between two yields at most (and after every row).
+local ROW_PART = 32
+-- From this zoom (blocks per pixel) on, cities are squares and roads lines (see the header).
+local CITY_SCALE = 8
+local CITY, STREETS, ROAD = { 120, 120, 118 }, { 92, 92, 90 }, { 62, 62, 66 }
 
 local writeu32 = buffer.writeu32
 local floor = math.floor
@@ -90,17 +104,34 @@ local function shade(
 	return pack(c[1] * k, c[2] * k, c[3] * k)
 end
 
--- Paints the geysers of the wells near the tile (see the header).
+-- Paints the geysers of the wells near the tile (see the header). With `yield`, the wells are
+-- decided half a Spacing square at a time first, a yield after each (a coarse tile spans dozens
+-- of cells, and each square decides the few cells around it it has not seen yet).
 local function paintWells(
 	generator: TerrainGenerator.Generator,
 	pixels: buffer,
 	originX: number,
 	originZ: number,
 	scale: number,
-	size: number
+	size: number,
+	yield: (() -> ())?
 )
 	local span = size * scale
 	local oil = pack(OIL[1], OIL[2], OIL[3])
+	if yield then
+		local spacing = Config.Caves.OilWells.Spacing // 2
+		for z = originZ, originZ + span - 1, spacing do
+			for x = originX, originX + span - 1, spacing do
+				generator.oilWells(
+					x,
+					z,
+					math.min(x + spacing, originX + span) - 1,
+					math.min(z + spacing, originZ + span) - 1
+				)
+				yield()
+			end
+		end
+	end
 	for _, well in generator.oilWells(originX, originZ, originX + span - 1, originZ + span - 1) do
 		if not well.geyser then
 			continue
@@ -164,6 +195,77 @@ local function paintLakes(
 	end
 end
 
+-- Paints the cities near the tile as squares (see the header).
+local function paintCities(
+	generator: TerrainGenerator.Generator,
+	pixels: buffer,
+	originX: number,
+	originZ: number,
+	scale: number,
+	size: number,
+	yield: (() -> ())?
+)
+	local cities = generator.cities
+	if cities == nil or scale < CITY_SCALE then
+		return
+	end
+	local span = size * scale
+	local half = scale // 2
+	local block = Config.Cities.Block
+	local street = Config.Cities.Street
+	local grey = pack(CITY[1], CITY[2], CITY[3])
+	local streets = pack(STREETS[1], STREETS[2], STREETS[3])
+	for _, site in cities(originX, originZ, originX + span - 1, originZ + span - 1, yield) do
+		local x0, z0 = site.x - site.radius, site.z - site.radius
+		local x1, z1 = site.x + site.radius, site.z + site.radius
+		for py = math.max(0, (z0 - originZ) // scale), math.min(size - 1, (z1 - originZ) // scale) do
+			local z = originZ + py * scale + half
+			if z < z0 or z > z1 then
+				continue
+			end
+			for px = math.max(0, (x0 - originX) // scale), math.min(size - 1, (x1 - originX) // scale) do
+				local x = originX + px * scale + half
+				if x >= x0 and x <= x1 then
+					-- (A pixel holding a street's centre line, 3 blocks into it: one in four at 8.)
+					local u0, v0 = originX + px * scale - x0, originZ + py * scale - z0
+					local onStreet = (street // 2 - u0) % block < scale or (street // 2 - v0) % block < scale
+					writeu32(pixels, (py * size + px) * 4, if scale == CITY_SCALE and onStreet then streets else grey)
+				end
+			end
+		end
+	end
+end
+
+-- Paints the roads near the tile as one pixel lines, at CITY_SCALE blocks a pixel and coarser.
+function MapPainter.paintRoads(
+	generator: TerrainGenerator.Generator,
+	pixels: buffer,
+	originX: number,
+	originZ: number,
+	scale: number,
+	size: number,
+	yield: (() -> ())?
+)
+	local roads = generator.roads
+	if roads == nil or scale < CITY_SCALE then
+		return
+	end
+	local span = size * scale
+	local colour = pack(ROAD[1], ROAD[2], ROAD[3])
+	for _, segment in roads(originX, originZ, originX + span - 1, originZ + span - 1, yield) do
+		local ax, az = (segment.x0 - originX) / scale, (segment.z0 - originZ) / scale
+		local bx, bz = (segment.x1 - originX) / scale, (segment.z1 - originZ) / scale
+		local steps = math.max(1, math.ceil(math.max(math.abs(bx - ax), math.abs(bz - az)) * 2))
+		for i = 0, steps do
+			local t = i / steps
+			local px, py = floor(ax + (bx - ax) * t), floor(az + (bz - az) * t)
+			if px >= 0 and px < size and py >= 0 and py < size then
+				writeu32(pixels, (py * size + px) * 4, colour)
+			end
+		end
+	end
+end
+
 function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 	local column = generator.column
 	local sea = generator.seaLevel or SEA
@@ -172,6 +274,11 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 	return function(originX: number, originZ: number, scale: number, size: number, yield: (() -> ())?): buffer
 		local pixels = buffer.create(size * size * 4)
 		local half = scale // 2
+		-- The ruins' caches for every column read below (see the header).
+		local prepare = generator.prepare
+		if prepare then
+			prepare(originX - scale, originZ - scale, originX + size * scale, originZ + size * scale, yield)
+		end
 		-- Heights on a (size + 1)^2 grid: one extra row to the north and column to the west, used
 		-- for shading. Grid cell (i, j) is at heights[j * stride + i + 1]; pixel (px, py) is (px + 1, py + 1).
 		local stride = size + 1
@@ -190,13 +297,19 @@ function MapPainter.new(generator: TerrainGenerator.Generator): Painter
 				local west = heights[row + i]
 				local north = heights[row - stride + i + 1]
 				writeu32(pixels, (py * size + px) * 4, shade(h, west, north, scale, biome, vegetation, surface, sea))
+				-- (Every ROW_PART pixels too: a coarse tile's columns lie far apart, each its own.)
+				if yield and px % ROW_PART == ROW_PART - 1 and px < size - 1 then
+					yield()
+				end
 			end
 			if yield then
 				yield()
 			end
 		end
 		paintLakes(generator, pixels, originX, originZ, scale, size)
-		paintWells(generator, pixels, originX, originZ, scale, size)
+		paintWells(generator, pixels, originX, originZ, scale, size, yield)
+		paintCities(generator, pixels, originX, originZ, scale, size, yield)
+		MapPainter.paintRoads(generator, pixels, originX, originZ, scale, size, yield)
 		return pixels
 	end
 end

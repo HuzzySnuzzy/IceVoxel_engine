@@ -394,8 +394,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	-- [ruins] The cities (Generation/Cities: none without the ruins, structures or the config),
 	-- and the relief they wrap: the one every chunk, the map and the spawn see.
 	local ruins = opts.structures ~= false and opts.ruins ~= false and Config.Structures.Generate
+	-- ([cities] `biomeOf` too: the existence test reads a sample's biome from its own height.)
 	local cities = if ruins and Config.Cities.Enabled
-		then Cities.new(seed, rawRelief, { rawBiome = rawBiomeAt, seaLevel = SEA })
+		then Cities.new(seed, rawRelief, { rawBiome = rawBiomeAt, seaLevel = SEA, biomeOf = biomeOf })
 		else Cities.none(rawRelief)
 	local relief = cities.relief
 
@@ -467,9 +468,26 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			firstFreeHeight = firstFreeHeight,
 			biome = rawBiomeAt,
 			-- Dry land that `generate` doesn't turn into bare rock ([ruins] nor the ruins' ground).
+			-- [cities] Out of the cities' blocked area first; outside it the wrapped terrain is the
+			-- raw terrain (Generation/Cities' raw invariant), so the rest reads the raw relief as
+			-- every planner does, and a placer's query never builds a city's or a road's plan.
 			land = function(x: number, z: number): boolean
-				local h, biome = column(x, z)
-				return h > SEA and gentle(x, z, biome) and #cities.blocked(x, z, x, z) == 0
+				if #cities.blocked(x - 1, z - 1, x + 1, z + 1) > 0 then
+					return false
+				end
+				local h, biome = rawSample(x, z, 0)
+				if h <= SEA then
+					return false
+				end
+				local limit = Biomes.list[biome].steepSlope or CLIFF_SLOPE
+				return math.abs(rawOutsideHeight(x - 1, z) - h) < limit
+					and math.abs(rawOutsideHeight(x + 1, z) - h) < limit
+					and math.abs(rawOutsideHeight(x, z - 1) - h) < limit
+					and math.abs(rawOutsideHeight(x, z + 1) - h) < limit
+			end,
+			-- [cities] A structure's whole bounds keep out of the cities' blocked area.
+			clear = function(minX: number, minZ: number, maxX: number, maxZ: number): boolean
+				return #cities.blocked(minX, minZ, maxX, maxZ) == 0
 			end,
 		})
 	end
@@ -599,8 +617,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			local m = Lakes.PUDDLE_MARGIN
 			add(puddle.x0 - m, puddle.z0 - m, puddle.x1 + m, puddle.z1 + m)
 		end
-		-- [ruins]
-		local ruinsBlocked = cities.blocked(minX, minZ, maxX, maxZ)
+		-- [ruins] ([cities] with the planner's yield: a cold region's existence tests.)
+		local ruinsBlocked = cities.blocked(minX, minZ, maxX, maxZ, yield)
 		table.move(ruinsBlocked, 1, #ruinsBlocked, #list + 1, list)
 		return list
 	end
@@ -1435,7 +1453,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 	local function strictSpawn(
 		sampler: (number, number, number) -> (number, number, number, number, number, number),
 		x: number,
-		z: number
+		z: number,
+		yield: (() -> ())? -- [cities] (to the surface caves' worms)
 	): number?
 		local h, biome, _, surface, _, river = sampler(x, z, 0)
 		if
@@ -1448,7 +1467,7 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				return nil
 			end
 		end
-		return if surfaceCaves.carvesTop(x, z) then nil else h
+		return if surfaceCaves.carvesTop(x, z, yield) then nil else h
 	end
 
 	function findSpawn(yield: (() -> ())?): (number, number, number)
@@ -1463,24 +1482,39 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 			near one (Cities.spawnShift: to a column passing the strict test on the wrapped terrain,
 			outside the cities' `protects`).
 		]]
-		local function shifted(x: number, z: number): (number, number, number)
-			local sx, sz = cities.spawnShift(x, z, function(cx: number, cz: number): boolean
-				return strictSpawn(sample, cx, cz) ~= nil and not cities.protects(cx, cz)
-			end, yield)
+		-- [cities] (nil when a strict pass's spawn neither moved nor passes on the wrapped terrain:
+		-- the spiral goes on.)
+		local function spawnOk(cx: number, cz: number): boolean
+			return strictSpawn(sample, cx, cz, yield) ~= nil and not cities.protects(cx, cz)
+		end
+		local function shifted(x: number, z: number, strict: boolean): (number?, number, number)
+			local sx, sz = cities.spawnShift(x, z, spawnOk, yield)
+			if strict and sx == x and sz == z and not spawnOk(x, z) then
+				return nil, 0, 0
+			end
 			return sx, sample(sx, sz, 0), sz
 		end
 		local SPAWN_STEP, SPAWN_RANGE, FAR_RANGE = 64, 5000, 12800
+		local SPAWN_YIELD = 16 -- [cities]
 		for pass = 1, 3 do
 			local strict = pass == 1
 			local rings = (if pass == 3 then FAR_RANGE else SPAWN_RANGE) // SPAWN_STEP
 			local x, z, dx, dz = 0, 0, 0, -1
-			for _ = 1, (2 * rings + 1) ^ 2 do
+			for step = 1, (2 * rings + 1) ^ 2 do
+				-- [cities] (A yield every SPAWN_YIELD steps: the spawn search runs in a worker's or the
+				-- server's slices, 3 ms each.)
+				if yield and step % SPAWN_YIELD == 0 then
+					yield()
+				end
 				local wx, wz = x * SPAWN_STEP, z * SPAWN_STEP
 				local a = if strict then math.abs(rawRelief.selector(wx, wz)) else 0.25
 				if a > 0.2 and a < 0.32 then
 					if strict then
-						if strictSpawn(rawSample, wx, wz) then
-							return shifted(wx, wz)
+						if strictSpawn(rawSample, wx, wz, yield) then
+							local sx, sy, sz = shifted(wx, wz, true) -- [cities]
+							if sx then
+								return sx, sy, sz
+							end
 						end
 					else
 						local h, _, _, _, _, river = rawSample(wx, wz, 0)
@@ -1493,8 +1527,9 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 								end
 							end
 							-- Not where a cave entrance or ravine opens (last: it builds the worms around).
-							if ok and not surfaceCaves.carvesTop(wx, wz) then
-								return shifted(wx, wz)
+							if ok and not surfaceCaves.carvesTop(wx, wz, yield) then
+								local sx, sy, sz = shifted(wx, wz, false) -- [cities]
+								return sx :: number, sy, sz
 							end
 						end
 					end
@@ -1505,7 +1540,8 @@ function TerrainGenerator.new(seed: number, options: Options?): Generator
 				x, z = x + dx, z + dz
 			end
 		end
-		return shifted(0, 0)
+		local sx, sy, sz = shifted(0, 0, false) -- [cities]
+		return sx :: number, sy, sz
 	end
 
 	local function structureContainer(x: number, y: number, z: number): { StructureGen.ContainerItem }?

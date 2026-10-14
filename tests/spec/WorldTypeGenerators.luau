@@ -253,6 +253,9 @@ return function(t, shared, require, server)
 	-- Horizon summary and surface, height, solidBelow, emptyAbove (outposts in the last three).
 	-- Mineshafts (Generation/Mineshafts) since reach the full detail chunks 0,0 and -150,60: their
 	-- data digests moved (from 3763431356 and 3358180211); nothing else of any row did.
+	-- Cities and roads (Generation/Cities) moved nothing here: no row's chunk, column, map tile
+	-- or outpost lies in `cities.blocked`, and the nearest city to the spawn (2724, 2747, 3.6 km)
+	-- lies beyond spawnShift's 3 km, so the spawn stays.
 	local PINNED = {
 		{ 0, 0, 0, 2497134012, 2385823076, 637642054, 112, 73, 75 },
 		{ 0, 3, -2, 3308524465, 2787425146, 1146561170, 112, 71, 74 },
@@ -688,8 +691,9 @@ return function(t, shared, require, server)
 
 	t.test("debug structures: every template and generated structure once, no overlaps, tags outside", function()
 		local entries = DebugWorlds.structureLayout(SEED, library)
-		-- (And the two sample mineshafts, Generation/Mineshafts.)
-		t.eq(#entries, #library.names + #library.structures + 2, "every template and structure")
+		-- (And the two sample mineshafts, Generation/Mineshafts, and the sample town,
+		-- Generation/Cities.)
+		t.eq(#entries, #library.names + #library.structures + 3, "every template and structure")
 		local seen: { [string]: number } = {}
 		for _, e in entries do
 			seen[e.name] = (seen[e.name] or 0) + 1
@@ -836,10 +840,190 @@ return function(t, shared, require, server)
 		local world = WorldServer.new(gen)
 		t.eq(SafeSpot.column(world, x, z), DebugWorlds.FLOOR, "standing on the floor")
 		t.eq(
-			#gen.structures(-10, -10, 10000, 10000) + #(gen.mineshafts :: any)(-10, -10, 10000, 10000),
+			#gen.structures(-10, -10, 10000, 10000)
+				+ #(gen.mineshafts :: any)(-10, -10, 10000, 10000)
+				+ #(gen.cities :: any)(-10, -10, 10000, 10000),
 			#labels,
-			"every start and sample mineshaft"
+			"every start, sample mineshaft and sample town"
 		)
+	end)
+
+	t.test("debug structures: the sample town's streets, buildings, loot and far massing", function()
+		local CityLayout = require(shared.Generation.CityLayout)
+		local ScavengeLoot = require(shared.Generation.ScavengeLoot)
+		local gen = DebugWorlds.allStructures(SEED, library)
+		local entry: any = nil
+		for _, e in DebugWorlds.structureLayout(SEED, library) do
+			if e.city then
+				entry = e
+			end
+		end
+		t.ok(entry ~= nil, "the town is laid out")
+		local plan = entry.city
+		local FLOOR = DebugWorlds.FLOOR
+		local cache: { [string]: any } = {}
+		local function chunk(level: number, cx: number, cz: number): any
+			local key = `{level} {cx},{cz}`
+			local r = cache[key]
+			if r == nil then
+				r = gen.generate(level, cx, cz, nil, true)
+				cache[key] = r
+				checkChunk(r, `town L{level} {cx},{cz}`)
+			end
+			return r
+		end
+		local function blockAt(x: number, y: number, z: number): number
+			local r = chunk(0, x // SIZE, z // SIZE)
+			return if y < r.height then ChunkLayout.get(r.data, x % SIZE, y, z % SIZE) else AIR
+		end
+		-- Its streets over the floor: every override CityLayout gives, on the grass's cell.
+		local side = 2 * plan.radius
+		local streets = 0
+		for z = plan.z0, plan.z0 + side, 3 do
+			for x = plan.x0, plan.x0 + side, 3 do
+				local block = CityLayout.surface(plan, x, z)
+				if block then
+					streets += 1
+					t.eq(blockAt(x, FLOOR - 1, z), block, `the street at {x}, {z}`)
+				end
+			end
+		end
+		t.ok(streets > 500, `streets ({streets})`)
+		-- Every parcel kind of the sample, each building's walls as CityLayout puts them.
+		local kinds: { [string]: boolean } = {}
+		local walls, containers = 0, 0
+		local salt = Hash.hash2(SEED, Hash.string("cities.loot"), 0x0C17)
+		for pv = 0, plan.n - 1 do
+			for pu = 0, plan.n - 1 do
+				local lot = CityLayout.lot(plan, pu, pv)
+				kinds[lot.kind] = true
+				for _, b in lot.buildings do
+					kinds[b.kind] = true
+					for y = b.y0, b.top - 1 do
+						for _, c in { { b.x0, b.z0 }, { b.x1, b.z1 }, { b.x0 + 2, b.z0 }, { b.x1, b.z0 + 3 } } do
+							local want = CityLayout.wallBlock(b, c[1], y, c[2])
+							if want then
+								walls += 1
+								t.eq(blockAt(c[1], y, c[2]), want, `{b.kind}'s wall at {c[1]}, {y}, {c[2]}`)
+							end
+						end
+					end
+					for k = 1, #b.containers, 4 do
+						local x, y, z = b.containers[k], b.containers[k + 1], b.containers[k + 2]
+						containers += 1
+						t.eq(blockAt(x, y, z), b.containers[k + 3], `{b.kind}'s container at {x}, {y}, {z}`)
+						local items = gen.structureContainer(x, y, z) :: any
+						local want = ScavengeLoot.roll(b.tables[(k + 3) // 4], salt, x, y, z)
+						t.ok(items ~= nil and #items == #want, `{b.kind}'s container holds its table's loot`)
+					end
+					if b.hatchX then
+						t.eq(blockAt(b.hatchX, FLOOR - 1, b.hatchZ :: number), B.Concrete, "the shed's concrete")
+						t.eq(blockAt(b.hatchX, FLOOR, b.hatchZ :: number), AIR, "air over it")
+					end
+				end
+			end
+		end
+		for _, kind in
+			{
+				"office",
+				"apartment",
+				"plaza",
+				"rubble",
+				"shop",
+				"police",
+				"fire",
+				"houses",
+				"house",
+				"shed",
+				"park",
+				"parking",
+			}
+		do
+			t.ok(kinds[kind], `a {kind}`)
+		end
+		t.ok(walls > 500 and containers >= 10, `walls ({walls}) and containers ({containers})`)
+		-- Every container block in the town (the buildings' and the wrecks' Supply Crates on the
+		-- streets and parking lots) holds loot and is a point of interest.
+		local lut = buffer.create(Blocks.count)
+		for _, name in { "Chest", "SupplyCrate", "MedicineCabinet" } do
+			buffer.writeu8(lut, B[name], 1)
+		end
+		local listed: { [string]: boolean } = {}
+		local poi = (gen.poiBlocks :: any)(plan.x0, plan.z0, plan.x0 + side, plan.z0 + side, lut)
+		for k = 1, #poi, 4 do
+			listed[`{poi[k]},{poi[k + 1]},{poi[k + 2]}`] = true
+		end
+		local blocks, wrecks = 0, 0
+		for z = plan.z0, plan.z0 + side do
+			for x = plan.x0, plan.x0 + side do
+				for y = FLOOR, FLOOR + Config.Cities.FullFloors * Config.Cities.FloorHeight do
+					local id = blockAt(x, y, z)
+					if readu8(lut, id) ~= 0 then
+						blocks += 1
+						if id == B.SupplyCrate and y == FLOOR and CityLayout.surface(plan, x, z) then
+							wrecks += 1
+						end
+						local items = gen.structureContainer(x, y, z)
+						t.ok(items ~= nil, `{Blocks.get(id).name} at {x}, {y}, {z} holds loot`)
+						t.ok(listed[`{x},{y},{z}`], `{Blocks.get(id).name} at {x}, {y}, {z} is a point of interest`)
+					end
+				end
+			end
+		end
+		t.eq(#poi // 4, blocks, "the points of interest are the container blocks")
+		t.ok(wrecks > 0, `wrecks' crates on the streets ({wrecks})`)
+		-- Points of interest, the map's overlay and /locate.
+		local cabinets = buffer.create(Blocks.count)
+		buffer.writeu8(cabinets, B.MedicineCabinet, 1)
+		local found = (gen.poiBlocks :: any)(plan.x0, plan.z0, plan.x0 + side, plan.z0 + side, cabinets)
+		t.ok(#found >= 8, "the pharmacy's cabinets as points of interest")
+		t.eq(#(gen.cities :: any)(plan.x0, plan.z0, plan.x0, plan.z0), 1, "the map's city square")
+		local listed = false
+		for _, l in (gen.locateList :: any)() do
+			if l.id == "city" and l.x == plan.x and l.z == plan.z then
+				listed = true
+			end
+		end
+		t.ok(listed, "/locate structure city")
+		-- Far levels: massing up to LodLevels over the floor (cells above its ground cell in the
+		-- columns sampled inside the town), nothing beyond; the node over the tallest building.
+		local office = CityLayout.lot(plan, 0, 0).buildings[1]
+		t.eq(office.kind, "office")
+		t.ok(office.floors > Config.Cities.FullFloors, "a tall office")
+		local ox, oz = (office.x0 + office.x1) // 2, (office.z0 + office.z1) // 2
+		for level = 1, Config.Cities.LodLevels + 1 do
+			local step, stepY = ChunkLayout.steps(level)
+			local span = SIZE * step
+			local nx, nz = ox // span, oz // span
+			local r = chunk(level, nx, nz)
+			local ground = LayeredGenerator.topCellOf(FLOOR, stepY, stepY // 2)
+			local above, paved = 0, 0
+			for pz = 1, SIZE do
+				local z = nz * span + (pz - 1) * step + step // 2
+				for px = 1, SIZE do
+					local x = nx * span + (px - 1) * step + step // 2
+					if x >= plan.x0 and x <= plan.x0 + side and z >= plan.z0 and z <= plan.z0 + side then
+						for y = ground + 1, r.height - 1 do
+							if at(r, px, y, pz) ~= AIR then
+								above += 1
+							end
+						end
+						-- The streets' surface in the ground's top cell.
+						local street = CityLayout.surface(plan, x, z)
+						if street and level <= Config.Cities.LodLevels then
+							t.eq(at(r, px, ground, pz), street, `L{level}: the street at {x}, {z}`)
+							paved += 1
+						end
+					end
+				end
+			end
+			if level <= Config.Cities.LodLevels then
+				t.ok(above > 0, `L{level}: the town's massing`)
+				t.ok(paved > 0, `L{level}: the town's streets`)
+			else
+				t.eq(above, 0, `L{level}: nothing`)
+			end
+		end
 	end)
 
 	--[[ Debug: All Biomes ]]

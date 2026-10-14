@@ -10,6 +10,9 @@
 	underground split): parts, meshing time, the boxes' bytes and the sparse lights with caves
 	hidden (no camera underground) and always shown (every section revealed, capped towards the
 	coarser nodes around, a section with no cave cell near meshed hidden as the workers do).
+	And a downtown row: the 4 x 4 full detail chunks in the middle of the biggest city within 12 km
+	of the viewpoint (Generation/Cities), their parts, quads and meshing time against the 16
+	plain chunks around the viewpoint (the budget: 2.5 times).
 ]]
 
 local process = require("@lune/process")
@@ -99,6 +102,78 @@ for level = 0, Config.Lod.Levels - 1 do
 		end
 	end
 	print(string.format("  %d    %6.2f ms  %6.2f ms  %6.0f", level, tg / n * 1000, tm / n * 1000, tb / n))
+end
+
+-- A full detail chunk's parts, quads (QuadMesher: the far meshes' faces) and meshing time (the
+-- best of three meshings: one takes a fraction of a millisecond, and a busy machine only adds).
+local function meshFull(nx: number, nz: number): (number, number, number)
+	local r = gen.generate(0, nx, nz)
+	local boxes, ms = 0, math.huge
+	for _ = 1, 3 do
+		local t0 = os.clock()
+		boxes = 0
+		for y0 = 0, r.height - 1, Config.SectionHeight do
+			local y1 = y0 + Config.SectionHeight
+			if not GreedyMesher.isTrivial(y0, y1, r.solidBelow, r.emptyAbove, true) then
+				local _, count = GreedyMesher.mesh(r.data, r.height, y0, y1, true, nil, true)
+				boxes += count
+			end
+		end
+		ms = math.min(ms, (os.clock() - t0) * 1000)
+	end
+	local q0, q1 = GreedyMesher.activeRange(r.solidBelow, r.emptyAbove, r.height)
+	local _, quads = QuadMesher.mesh(r.data, r.height, q0, q1, true)
+	return boxes, quads, ms
+end
+do
+	local function average(list: { { number } }): (number, number, number)
+		local b, q, m = 0, 0, 0
+		for _, c in list do
+			local boxes, quads, ms = meshFull(c[1], c[2])
+			b, q, m = b + boxes, q + quads, m + ms
+		end
+		return b / #list, q / #list, m / #list
+	end
+	local big = nil
+	local cities = gen.cities
+	if cities then
+		for _, site in cities(sx - 12000, sz - 12000, sx + 12000, sz + 12000) do
+			if big == nil or site.radius > big.radius then
+				big = site
+			end
+		end
+	end
+	if big then
+		local plainChunks, downtown = {}, {}
+		for dz = -2, 1 do
+			for dx = -2, 1 do
+				table.insert(plainChunks, { sx // 16 + dx, sz // 16 + dz })
+				table.insert(downtown, { big.x // 16 + dx, big.z // 16 + dz })
+			end
+		end
+		-- (Twice each: the first pass warms up, the second's meshing time counts.)
+		average(plainChunks)
+		average(downtown)
+		local pb, pq, pm = average(plainChunks)
+		local db, dq, dm = average(downtown)
+		print(
+			string.format(
+				"\nDowntown full detail chunk (city at %d, %d, R %d), average of 16, against the 16 plain ones:\n  plain:    %6.0f parts, %6.0f quads, %5.2f ms meshing\n  downtown: %6.0f parts (%.2fx), %6.0f quads (%.2fx), %5.2f ms meshing (%.2fx)",
+				big.x,
+				big.z,
+				big.radius,
+				pb,
+				pq,
+				pm,
+				db,
+				db / pb,
+				dq,
+				dq / pq,
+				dm,
+				dm / pm
+			)
+		)
+	end
 end
 
 local _, _, caveBoxes = meshNode(0, sx // 16, sz // 16, true)

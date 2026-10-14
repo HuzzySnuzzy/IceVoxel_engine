@@ -249,9 +249,12 @@ local Config = {
 		-- fill next to an old world's edited chunks would leave cliffs at the seams).
 		OldWorlds = false,
 		-- One candidate city per Grid x Grid blocks, kept with Chance, then only where Accept of
-		-- the 25 lattice samples over its footprint are fit to build on.
+		-- the 25 lattice samples over its footprint are fit to build on (Tries spots per cell, at
+		-- the end of this section). 0.36 with 4 tries: 6-11 sites per 100 km² where a third or
+		-- more of the land is hills and plains (tests/spec/Cities: 11.0, 6.8 and 8.5 on seeds
+		-- 12345, 1 and 99; a 20 km square mostly of mountains or sea has fewer).
 		Grid = 1024,
-		Chance = 0.5,
+		Chance = 0.36,
 		Accept = 21,
 		-- Footprint half-widths (blocks), and the margin blended back to the raw terrain.
 		MinRadius = 48,
@@ -302,6 +305,8 @@ local Config = {
 			Potholes = 0.02,
 			Cars = 0.004,
 		},
+		-- Spots (a size and a centre) tried per kept cell until one fits.
+		Tries = 4,
 	},
 
 	-- Hidden bunkers (Generation/Bunkers): concrete rooms under a steel hatch, in the wild and under

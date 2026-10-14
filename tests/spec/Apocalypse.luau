@@ -782,10 +782,13 @@ return function(t, shared, require, server)
 		t.eq(#noBunkers.plans(-1000, -1000, 1000, 1000), 0)
 		t.eq(noBunkers.locateKind().id, "bunker")
 		t.eq((noBunkers.locateKind().probe(0, 0)), nil)
-		-- For now the generator with Ruins on generates exactly what it does with them off.
+		-- With Ruins on the generator has cities (Generation/Cities: tests/spec/Cities); off it has
+		-- none, and away from them (nothing `blocked` there) both generate the same.
 		local on = TerrainGenerator.new(42)
 		local off = TerrainGenerator.new(42, { ruins = false })
-		t.ok(on.cities ~= nil and #(on.cities :: any)(-2048, -2048, 2048, 2048) == 0, "no city sites yet")
+		t.ok(on.prepare ~= nil and off.prepare == nil, "only Ruins on has the cities' caches")
+		t.ok(#(on.cities :: any)(-8192, -8192, 8192, 8192) > 0, "city sites with Ruins on")
+		t.eq(#(off.cities :: any)(-8192, -8192, 8192, 8192), 0, "none with Ruins off")
 		local a, b = on.generate(0, 3, -2), off.generate(0, 3, -2)
 		t.ok(buffer.tostring(a.data) == buffer.tostring(b.data), "the same chunk")
 		for i = 0, 7 do

@@ -16,7 +16,8 @@
 	     structure's biomes (Minecraft checks the biome there too);
 	  2. with `onLand`, that column is dry land (above sea level) and not bare rock (no steeper than
 	     the biome allows: the generator's steep rule);
-	  3. then the whole structure is assembled (Jigsaw.assemble, `size` levels).
+	  3. then the whole structure is assembled (Jigsaw.assemble, `size` levels), and kept when
+	     its bounds are `clear` (when the terrain has that check).
 	Assembled starts (and rejected ones) are kept in an LRU per generator, sized by the library
 	(CACHE_PER_STRUCTURE per structure), so the dozens of chunks a structure covers assemble it
 	once per worker.
@@ -111,12 +112,16 @@ end
 	  firstFreeHeight  Minecraft's WORLD_SURFACE_WG: the first air above the ground, or above the
 	                   sea's surface over water;
 	  biome            the column's biome index;
-	  land             whether a start may stand there with `onLand` (dry, not bare rock).
+	  land             whether a start may stand there with `onLand` (dry, not bare rock);
+	  clear            optional: whether an assembled structure's bounds (x, z, inclusive) may
+	                   stand where they lie (the zombie apocalypse's ruins keep their footprints
+	                   and roads to themselves); nil: anywhere.
 ]]
 export type Terrain = {
 	firstFreeHeight: (x: number, z: number) -> number,
 	biome: (x: number, z: number) -> number,
 	land: (x: number, z: number) -> boolean,
+	clear: ((minX: number, minZ: number, maxX: number, maxZ: number) -> boolean)?,
 }
 
 -- An assembled structure (read only).
@@ -312,7 +317,8 @@ function StructureGen.new(seed: number, library: Library.Library, terrain: Terra
 				end
 			end
 			local bounds = Jigsaw.bounds(kept)
-			if bounds then
+			local clear = terrain.clear
+			if bounds and (clear == nil or clear(bounds[1], bounds[3], bounds[4], bounds[6])) then
 				start = {
 					name = structure.name,
 					index = index,

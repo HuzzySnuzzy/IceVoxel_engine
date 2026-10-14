@@ -162,6 +162,11 @@ return function(t, shared, require, _server)
 					add(math.floor(worm.startX), math.floor(worm.startZ))
 				end
 			end
+		elseif id == "city" then
+			-- (Generation/Cities: a site's centre, the existence test's.)
+			for _, site in gen.cities(x0, z0, x1, z1) do
+				add(site.x, site.z)
+			end
 		elseif id == "ravine" then
 			for _, worm in gen.surfaceCaves.worms(x0, z0, x1, z1) do
 				if worm.kind == "ravine" then
@@ -191,6 +196,7 @@ return function(t, shared, require, _server)
 		"lake",
 		"cave_entrance",
 		"ravine",
+		"city",
 	}
 
 	for _, seed in { 12345, 7 } do

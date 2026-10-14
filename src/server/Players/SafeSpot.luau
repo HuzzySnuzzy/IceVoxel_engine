@@ -8,7 +8,16 @@
 	generate chunks on the server while searching.
 
 	Columns in chunks nobody edited are exactly what the generator made, so for those the scan
-	starts just above the tallest structure and open water is skipped without loading the chunk.
+	starts just above the tallest structure and open water is skipped without loading the chunk;
+	in an edited chunk it starts just above the column's top block. Inside a city's footprint (the
+	generator's `cityAt` is 1: Generation/Cities, the debug structures world's sample town) the
+	scan starts no higher than CITY_CLEARANCE, edited chunk or not: one above the feet on the
+	ruins' last full floor (Config.Cities FullFloors and FloorHeight). Above it a tall building's
+	floors are a ring of rooms behind its facade, closed by glass and walls with no ladder up, and
+	its broken top is open sky 20-40 blocks over the street with no way down, so a spot there would
+	shut a player in or strand them. Lower roofs (houses, shops) are still found, and so are the
+	full floors, which the ladder shafts join to the ground. (So a player's own tower inside a
+	city's footprint puts them at most on that height, not on its top.)
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,8 +35,10 @@ type World = WorldServer.World
 local HEIGHT = Config.WorldHeight
 local SEA = Config.SeaLevel
 local CHUNK = Config.ChunkSize
--- Generated structures (trees) never reach higher than this above the terrain surface.
+-- Generated structures (trees) never reach higher than this above the terrain surface; in a
+-- city's footprint the scan starts one above the last full floor's feet (see the header).
 local STRUCTURE_CLEARANCE = 20
+local CITY_CLEARANCE = (Config.Cities.FullFloors - 1) * Config.Cities.FloorHeight + 1
 local SIDES = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }
 
 -- Turns block / fluid group names into a set of block ids.
@@ -87,14 +98,21 @@ function SafeSpot.column(world: World, x: number, z: number): number?
 	local surface, biome = world.generator.column(x, z)
 	-- (The world type's sea: a superflat world's water layers, none in a void.)
 	local sea = world.generator.seaLevel or SEA
+	local cityAt = world.generator.cityAt
+	local inCity = cityAt ~= nil and cityAt(x, z) >= 1
 	local top
 	if world:chunkEdits(x // CHUNK, z // CHUNK) then
 		top = world:topBlock(x, z) + 1
+		if inCity then
+			-- The ruins above the last full floor are still there whatever was edited.
+			top = math.min(top, math.max(surface, sea) + CITY_CLEARANCE)
+		end
 	else
 		if surface < sea and not Biomes.list[biome].frozen then
 			return nil -- open water
 		end
-		top = math.min(math.max(surface, sea) + STRUCTURE_CLEARANCE, HEIGHT - headroom)
+		local clearance = if inCity then CITY_CLEARANCE else STRUCTURE_CLEARANCE
+		top = math.min(math.max(surface, sea) + clearance, HEIGHT - headroom)
 	end
 	for y = top, math.max(surface, 1), -1 do
 		if SafeSpot.isSafe(world, x, y, z) then
