@@ -38,9 +38,31 @@
 	In a hand: `handSize` / `handPivot` place a model in a character's right hand (Player/HeldItems,
 	the inventory's character preview). Tools and sticks are held like Minecraft's "handheld" items:
 	upright (their tilt undone), held at the handle, pointing forward and up with the blade forward.
-	Torches and the Configurator are held the same way, by the stick or the grip. Everything else
-	keeps the block pose.
+	Torches, the Configurator and the melee weapons (Shared/Weapons: the bats, the wrench) are held
+	the same way, by the stick or the grip. A firearm at rest is held at its grip, its barrel along
+	the hand's forward a little down (Player/HeldItems poses guns with Player/WeaponPoses instead).
+	Everything else keeps the block pose.
 	`holdPivot` does the same for any pose (first person).
+
+	Firearms (Shared/Weapons) are dressed and aimed by their WeaponList `look` (model pixels, the
+	view space before the tilt: x along the barrel, y up):
+	  build     `buildFirearm(item, lookKey, size)`: the gun's boxes plus what is mounted
+	            (Shared/Weapons/WeaponState.lookKey: the player attribute Types.HELD_LOOK_ATTRIBUTE
+	            for other players), each the item's own model at the gun's `scale`: the magazine
+	            hanging below its `mag` point (centred on it), an optic standing on its `optic`
+	            point, a muzzle device going on from the barrel's end (`muzzle`), the weapon light
+	            centred on its `light` point with a SpotLight shining along the barrel from its lens
+	            (its Beam: range in blocks, at most Roblox's 60 studs, cone angle, brightness; on
+	            while the look says lit, without shadows: Player/HeldItems gives the local player's
+	            its shadows). Cached per gun, look and size like `build`.
+	  size      `firearmSize(item)`: every gun at FIREARM_STUDS studs a design pixel, so a pistol
+	            and a rifle keep their proportions in a hand and in the first-person view.
+	  pivots    `firearmPivot(item, size, pose, frame)` puts the gun's view space on `frame`'s axes
+	            (right = the barrel, up = up) with its anchor at `frame`'s position: the grip for
+	            "hand" (third person) and "hip" (first person, low right), the sight line above the
+	            grip for "sights" (so the sight line lies on the view axis). `firearmPoint` gives
+	            where the barrel ends (past a muzzle device: tracers and flashes start there) or the
+	            light's lens for a placed gun.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -49,9 +71,11 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
 local Config = require(Shared.Config)
 local Items = require(Shared.Items)
+local Weapons = require(Shared.Weapons)
 
 local BlockDecor = require(script.Parent.BlockDecor)
 local PartPool = require(script.Parent.PartPool)
+local ShotRules = require(script.Parent.ShotRules)
 local TextureLooks = require(script.Parent.TextureLooks)
 
 local BLOCK = Config.BlockSize
@@ -69,6 +93,12 @@ local HANDHELD_PITCH = math.rad(45)
 local GRIP_FROM_END = 3.5
 -- Non-tool items held like tools (by the end, pointing forward).
 local HANDHELD_NAMES: { [string]: boolean } = { Stick = true, Torch = true, Configurator = true }
+-- Studs a design pixel of a firearm spans in a hand and in the first-person view.
+local FIREARM_STUDS = 0.075
+-- Roblox's longest light (studs).
+local MAX_LIGHT_RANGE = 60
+-- A gun held at rest (`handPivot`: the inventory's preview) points this far down (radians).
+local FIREARM_REST = math.rad(20)
 
 local ItemModels = {}
 
@@ -328,7 +358,8 @@ end
 -- Is the item held like a tool (Minecraft's "handheld" models: tools and sticks; and torches)?
 function ItemModels.isHandheld(item: number): boolean
 	local def = Items.get(item)
-	return def ~= nil and ((def.block == nil and def.tool ~= nil) or HANDHELD_NAMES[def.name] == true)
+	return def ~= nil
+		and ((def.block == nil and def.tool ~= nil) or HANDHELD_NAMES[def.name] == true or Weapons.melee(item) ~= nil)
 end
 
 -- Height (view space pixels) of the point a handheld item is held by: near the end of its handle.
@@ -368,6 +399,9 @@ end
 
 -- Size (studs) to build `item` at for a character's hand.
 function ItemModels.handSize(item: number): number
+	if Weapons.firearm(item) then
+		return ItemModels.firearmSize(item)
+	end
 	return if ItemModels.isHandheld(item) then HANDHELD_SIZE else HAND_SIZE
 end
 
@@ -386,6 +420,14 @@ function ItemModels.handPivot(item: number, character: Model): CFrame?
 	local base = if attachment and attachment:IsA("Attachment")
 		then attachment.WorldCFrame
 		else hand.CFrame * CFrame.new(0, -hand.Size.Y / 2, 0)
+	if Weapons.firearm(item) then
+		-- A gun at rest: at the grip, along the hand's forward, its muzzle a little down.
+		local frame = hand.CFrame
+		local forward, up = frame.LookVector, frame.UpVector
+		local c, s = math.cos(FIREARM_REST), math.sin(FIREARM_REST)
+		local rest = CFrame.fromMatrix(base.Position, forward * c - up * s, up * c + forward * s)
+		return ItemModels.firearmPivot(item, ItemModels.firearmSize(item), "hand", rest)
+	end
 	if not ItemModels.isHandheld(item) then
 		return base * CFrame.new(0, 0, -HAND_SIZE * 0.3) * CFrame.Angles(0, math.rad(45), 0)
 	end
@@ -397,6 +439,238 @@ function ItemModels.handPivot(item: number, character: Model): CFrame?
 	-- The item's right: back and up, so its left (where blades are drawn) faces forward and down.
 	local right = up * c - forward * s
 	return ItemModels.holdPivot(item, HANDHELD_SIZE, CFrame.fromMatrix(base.Position, right, along))
+end
+
+--[[ Firearms (see the header) ]]
+
+export type FirearmPose = "hand" | "hip" | "sights"
+
+-- An item model's extent (design pixels, view space, boxes unrotated): min x, max x, min y, max y.
+local extents: { [number]: { number } } = {}
+local function extentOf(item: number): { number }
+	local cached = extents[item]
+	if cached then
+		return cached
+	end
+	local def = Items.get(item)
+	local out = { 0, 0, 0, 0 }
+	if def and def.model and #def.model > 0 then
+		out = { math.huge, -math.huge, math.huge, -math.huge }
+		for _, box in def.model do
+			out[1] = math.min(out[1], box.offset[1] - box.size[1] / 2)
+			out[2] = math.max(out[2], box.offset[1] + box.size[1] / 2)
+			out[3] = math.min(out[3], box.offset[2] - box.size[2] / 2)
+			out[4] = math.max(out[4], box.offset[2] + box.size[2] / 2)
+		end
+	end
+	extents[item] = out
+	return out
+end
+
+local function pointOf(point: { number }?): Vector3?
+	if point == nil then
+		return nil
+	end
+	return Vector3.new(point[1], point[2], point[3] or 0)
+end
+
+-- A mounted part: its item, where its view space's origin goes (model pixels) and the name its
+-- parts take ("Magazine", "Optic", "Muzzle", "Light").
+type Mounted = { item: number, at: Vector3, name: string }
+
+-- Where a gun's mounted parts go and where its barrel and light end (model pixels, view space).
+type Dress = {
+	parts: { Mounted },
+	muzzle: Vector3,
+	-- The sight line's height: through the optic's middle when one is mounted.
+	sight: number,
+	-- The light's lens (nil: no light), its beam and whether it is on.
+	lens: Vector3?,
+	beam: Weapons.Beam?,
+	lit: boolean,
+}
+
+local dresses: { [string]: Dress } = {}
+-- The last one asked for (asked every frame for the first-person gun: no key built then).
+local lastSpec: Weapons.FirearmSpec? = nil
+local lastKey = ""
+local lastDress: Dress? = nil
+
+-- How gun `spec` is dressed for look key `lookKey` (cached by both).
+local function dressOf(spec: Weapons.FirearmSpec, lookKey: string): Dress
+	local last = lastDress
+	if last and spec == lastSpec and lookKey == lastKey then
+		return last
+	end
+	local key = `{spec.item}:{lookKey}`
+	local cached = dresses[key]
+	if cached then
+		lastSpec, lastKey, lastDress = spec, lookKey, cached
+		return cached
+	end
+	local scale = spec.scale
+	local look = spec.look
+	local mag, optic, device, lamp, lit = ShotRules.lookParts(lookKey)
+	local parts: { Mounted } = {}
+	local muzzle = pointOf(look.muzzle) :: Vector3
+	local lens: Vector3? = nil
+	local beam: Weapons.Beam? = nil
+	-- (Each part's own pixels are drawn at the gun's scale.)
+	local magPoint = pointOf(look.mag)
+	if mag ~= 0 and magPoint and Items.get(mag) then
+		local e = extentOf(mag)
+		local at = magPoint - Vector3.new((e[1] + e[2]) / 2, e[4], 0) * scale
+		table.insert(parts, { item = mag, at = at, name = "Magazine" })
+	end
+	local sight = look.sight
+	local opticPoint = pointOf(look.optic)
+	if optic ~= 0 and opticPoint and Items.get(optic) then
+		local e = extentOf(optic)
+		local at = opticPoint - Vector3.new((e[1] + e[2]) / 2, e[3], 0) * scale
+		table.insert(parts, { item = optic, at = at, name = "Optic" })
+		sight = opticPoint.Y + (e[4] - e[3]) / 2 * scale
+	end
+	if device ~= 0 and Items.get(device) then
+		local e = extentOf(device)
+		local at = muzzle - Vector3.new(e[1], (e[3] + e[4]) / 2, 0) * scale
+		table.insert(parts, { item = device, at = at, name = "Muzzle" })
+		muzzle += Vector3.new((e[2] - e[1]) * scale, 0, 0)
+	end
+	local lightPoint = pointOf(look.light)
+	local light = Weapons.attachment(lamp)
+	if lamp ~= 0 and lightPoint and light and Items.get(lamp) then
+		local e = extentOf(lamp)
+		local centreX, centreY = (e[1] + e[2]) / 2, (e[3] + e[4]) / 2
+		local at = lightPoint - Vector3.new(centreX, centreY, 0) * scale
+		table.insert(parts, { item = lamp, at = at, name = "Light" })
+		lens = lightPoint + Vector3.new((e[2] - centreX) * scale, 0, 0)
+		beam = light.beam
+	end
+	local dress: Dress = {
+		parts = table.freeze(parts),
+		muzzle = muzzle,
+		sight = sight,
+		lens = lens,
+		beam = beam,
+		lit = lit and lens ~= nil,
+	}
+	dresses[key] = table.freeze(dress)
+	lastSpec, lastKey, lastDress = spec, lookKey, dress
+	return dress
+end
+
+-- Size (studs) to build firearm `item` at for a hand or the first-person view (see the header).
+function ItemModels.firearmSize(item: number): number
+	local spec = Weapons.firearm(item)
+	return FIREARM_STUDS * 16 / (if spec then spec.scale else 1)
+end
+
+local function firearmPrototype(item: number, lookKey: string, size: number): Model
+	local model = prototype(item, size)
+	local spec = Weapons.firearm(item)
+	if spec == nil then
+		return model
+	end
+	local view = viewFrame(Items.get(item))
+	local pixel = size / 16
+	local dress = dressOf(spec, lookKey)
+	for _, mounted in dress.parts do
+		local part = prototype(mounted.item, size * spec.scale)
+		local place = view * CFrame.new(mounted.at * pixel) * viewFrame(Items.get(mounted.item)):Inverse()
+		for _, child in part:GetChildren() do
+			if child:IsA("BasePart") then
+				child.CFrame = place * child.CFrame
+				child.Name = mounted.name
+				child.Parent = model
+			end
+		end
+		part:Destroy()
+	end
+	local lens = dress.lens
+	local beam = dress.beam
+	local body = model.PrimaryPart
+	if lens and beam and body then
+		-- The light shines along the barrel from the lens (a light in an Attachment shines along
+		-- its front, -Z).
+		local mount = Instance.new("Attachment")
+		mount.Name = "LightMount"
+		local origin = view * (lens * pixel)
+		local barrel = view:VectorToWorldSpace(Vector3.xAxis)
+		mount.CFrame = body.CFrame:Inverse() * CFrame.lookAt(origin, origin + barrel)
+		mount.Parent = body
+		local spot = Instance.new("SpotLight")
+		spot.Name = "Beam"
+		spot.Face = Enum.NormalId.Front
+		spot.Range = math.min(beam.range * BLOCK, MAX_LIGHT_RANGE)
+		spot.Angle = beam.angle
+		spot.Brightness = beam.brightness
+		spot.Color = Color3.fromRGB(255, 244, 214)
+		spot.Shadows = false
+		spot.Enabled = dress.lit
+		spot.Parent = mount
+	end
+	return model
+end
+
+--[[
+	A new model of firearm `item` dressed as look key `lookKey` says (see the header), fitting
+	`size` like `build` (its pivot the view space's origin turned like `build`'s). Anything that
+	is no firearm is `build`'s.
+]]
+function ItemModels.buildFirearm(item: number, lookKey: string, size: number): Model
+	if Weapons.firearm(item) == nil then
+		return ItemModels.build(item, size)
+	end
+	local key = `{item}:{size}:{lookKey}`
+	local cached: Model? = prototypes[key]
+	if not cached then
+		local built = firearmPrototype(item, lookKey, size)
+		prototypes[key] = built
+		return built:Clone()
+	end
+	return cached:Clone()
+end
+
+--[[
+	The pivot for a model of firearm `item` built at `size` (dressed as `lookKey`) so its view space
+	lies on `frame`'s axes (x: the barrel, y: up) with the pose's anchor at `frame`'s position: the
+	grip for "hand" and "hip", the sight line above the grip for "sights" (through a mounted
+	optic's middle: the optic's parts are named "Optic", for the first-person view to hide in the
+	sights).
+]]
+function ItemModels.firearmPivot(item: number, size: number, pose: FirearmPose, frame: CFrame, lookKey: string?): CFrame
+	local spec = Weapons.firearm(item)
+	local pixel = size / 16
+	local ax, ay = 0, 0
+	if spec then
+		local grip = spec.look.grip
+		ax, ay = grip[1], grip[2]
+		if pose == "sights" then
+			ay = if lookKey then dressOf(spec, lookKey).sight else spec.look.sight
+		end
+	end
+	return frame * CFrame.new(-ax * pixel, -ay * pixel, 0) * viewFrame(Items.get(item)):Inverse()
+end
+
+--[[
+	Where the barrel of firearm `item` (built at `size`, dressed as `lookKey`, its model at
+	`pivot`) ends ("muzzle": past a muzzle device), or its light's lens ("lens"; the muzzle when
+	it has none), in `pivot`'s space.
+]]
+function ItemModels.firearmPoint(
+	item: number,
+	lookKey: string,
+	size: number,
+	pivot: CFrame,
+	which: "muzzle" | "lens"
+): Vector3
+	local spec = Weapons.firearm(item)
+	if spec == nil then
+		return pivot.Position
+	end
+	local dress = dressOf(spec, lookKey)
+	local point = if which == "lens" then dress.lens or dress.muzzle else dress.muzzle
+	return (pivot * viewFrame(Items.get(item))) * (point * (size / 16))
 end
 
 return ItemModels

@@ -28,7 +28,11 @@
 	             Nails' temperature on, survival and adventure), with its reading after the name:
 	             the body temperature and its target, each in its zone's colour (Theme.Zone), an
 	             arrow between them in the way it is going (warming orange, cooling blue, white on
-	             target). The text has a faint dark outline for bright skies.
+	             target). The text has a faint dark outline for bright skies. Held too while a
+	             firearm or a magazine is the held item (Shared/Weapons): as in DayZ no rounds are
+	             counted there; Ui/WeaponHud draws its small raise, reload and jam indicator and
+	             the reload bar on the box's weapon anchor (`weaponAnchor`: a frame over the box,
+	             its size, made with it).
 	  attack     the attack indicator's square (Ui/AttackIndicator, the Hotbar setting): a quickbar
 	             cell beside the bar (HudLayout.attackX: right of the "..." button on touch screens,
 	             left of the bar otherwise, as the bottom right is the status icons') filling white
@@ -76,6 +80,7 @@ local Items = require(Shared.Items)
 local PlayerSettings = require(Shared.PlayerSettings)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 local Types = require(Shared.Inventory.Types)
+local Weapons = require(Shared.Weapons)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
@@ -133,6 +138,9 @@ local attackSlot: Frame? = nil
 local attackFill: Frame? = nil
 local attackProgress: number? = nil
 local previewWindow: Types.Window? = nil
+-- The item box's weapon anchor (Ui/WeaponHud) and the text scaling its labels follow.
+local weaponFrame: Frame? = nil
+local weaponScaled: Style.Scaled? = nil
 
 local cells: { TextButton } = {}
 -- The quickbar's bar and the touch buttons (for Hud.covers).
@@ -224,6 +232,15 @@ function Hud.setAttackIndicator(progress: number?)
 			fill.Position = UDim2.fromOffset(1, 17 - shown)
 		end
 	end
+end
+
+--[[
+	The held item's box's weapon anchor (Ui/WeaponHud's indicator and reload bar): a transparent
+	frame over the box, its size, shown and faded with it, and the text scaling its labels follow.
+	nil before `start`.
+]]
+function Hud.weaponAnchor(): (Frame?, Style.Scaled?)
+	return weaponFrame, weaponScaled
 end
 
 -- The on-screen area of hotbar slot 1..9 (the creative screen clicks it like a window slot).
@@ -335,6 +352,15 @@ local function buildNameBox(hotbar: Frame, scaled: Style.Scaled): NameBox
 	arrow.Parent = root
 	local arrowParts = Dayz.glyph(arrow, 0, 0, Dayz.Art.readingArrow, Dayz.Colour.Text, 1)
 	local name, value, target = nameLabel(root, scaled), nameLabel(root, scaled), nameLabel(root, scaled)
+	-- The weapon anchor (see `weaponAnchor`).
+	local anchor = Instance.new("Frame")
+	anchor.Name = "Weapon"
+	anchor.BackgroundTransparency = 1
+	anchor.BorderSizePixel = 0
+	anchor.Size = UDim2.fromScale(1, 1)
+	anchor.ZIndex = 4
+	anchor.Parent = root
+	weaponFrame, weaponScaled = anchor, scaled
 	return {
 		root = root,
 		dot = dot,
@@ -635,7 +661,8 @@ function Hud.start()
 			layoutNameBox(nameBox, lines, if thermometer then reading else nil)
 			shownAlpha = -1
 		end
-		-- Shown for a while when the selection or the item in it changes; held with a Thermometer.
+		-- Shown for a while when the selection or the item in it changes; held with a Thermometer,
+		-- a firearm or a magazine (Shared/Weapons).
 		local slot = ClientInventory.selected()
 		local itemKey = item or 0
 		if slot ~= lastSlot or itemKey ~= lastItem then
@@ -644,7 +671,8 @@ function Hud.start()
 		end
 		local alpha = 0
 		if mode == "play" and held then
-			alpha = if thermometer then 1 else math.clamp((nameUntil - now) / Theme.Time.NAME_FADE, 0, 1)
+			local weapon = Weapons.firearm(item) ~= nil or Weapons.magazine(item) ~= nil
+			alpha = if thermometer or weapon then 1 else math.clamp((nameUntil - now) / Theme.Time.NAME_FADE, 0, 1)
 		end
 		if alpha ~= shownAlpha then
 			shownAlpha = alpha

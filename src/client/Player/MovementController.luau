@@ -52,6 +52,12 @@
 	            camera and the screen effects have moved it (VIEW_BOB_PRIORITY) and taken off
 	            again before the camera updates (`unbob`), so the camera's own turning never takes
 	            them in; none while frozen or spectating someone.
+	  Weapons   a raised firearm (Player/AimCamera, Interaction/Firearms): the sights' zoom divides
+	            the field of view (`setAimZoom`: a multiplier like the FOV sway, not scaled by FOV
+	            Effects), raising and guarding slow the player and bar sprinting (`setAimSlow`: a
+	            sprint stops and the sprint key toggles nothing meanwhile: in the sights it holds
+	            breath instead), and the camera looks over the right shoulder (`setShoulder`: studs
+	            in the character's space, added to the camera offset).
 	  Modes     the game mode attribute (Shared/GameMode) gives the hull its abilities
 	            (PlayerPhysics.setGameMode): creative may fly (double tap jump); spectators always
 	            fly, through everything (noClip), and their mouse wheel changes the flying speed
@@ -234,6 +240,13 @@ local fovSetting: number? = nil
 local fovEffects = 1
 -- A status effect's sway of the field of view (Nausea), a multiplier.
 local fovSway = 1
+-- A raised firearm (Player/AimCamera): the sights' zoom (a multiplier on the field of view), the
+-- speed's factor and whether sprinting is barred, and the shoulder offset (studs, the character's
+-- space).
+local aimZoom = 1
+local aimSlow = 1
+local aimNoSprint = false
+local shoulder = Vector3.zero
 -- The View Bobbing and Damage Tilt settings (Settings/: on, and the tilt's share 0..1).
 local viewBobbing = true
 local damageTilt = 1
@@ -469,6 +482,28 @@ function MovementController.setFovSway(multiplier: number)
 	fovSway = multiplier
 end
 
+-- The sights' zoom: a multiplier on the field of view (1 / zoom; 1: none), applied every frame on
+-- top of everything else, not scaled by FOV Effects (Player/AimCamera).
+function MovementController.setAimZoom(multiplier: number)
+	aimZoom = multiplier
+end
+
+--[[
+	A raised firearm's or a guard's slowness (Player/AimCamera): the ground speed times `factor`,
+	and with `noSprint` no sprinting (a sprint stops; the sprint key toggles nothing meanwhile).
+	(1, false): none.
+]]
+function MovementController.setAimSlow(factor: number, noSprint: boolean)
+	aimSlow = factor
+	aimNoSprint = noSprint
+end
+
+-- The camera over the shoulder (studs in the character's space: right, up, back), added to the
+-- camera offset every frame (Player/AimCamera; Vector3.zero: none).
+function MovementController.setShoulder(offset: Vector3)
+	shoulder = offset
+end
+
 -- The View Bobbing setting: the camera bobs while walking (Minecraft's bobView).
 function MovementController.setViewBobbing(on: boolean)
 	viewBobbing = on
@@ -620,8 +655,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 	local function onSprint(held: boolean, touch: boolean)
 		followSprintMode()
 		if touch or Movement.ToggleSprint then
-			-- (Ctrl+Q in an inventory screen must not toggle sprinting.)
-			if held and not inputTaken() then
+			-- (Ctrl+Q in an inventory screen must not toggle sprinting; nor does the key while a
+			-- raised firearm bars sprinting: in the sights it holds breath.)
+			if held and not inputTaken() and not aimNoSprint then
 				-- Toggles what the player sees: a sprint started by double tapping stops too.
 				local view = MovementController.current
 				sprintOn = not (sprintOn or (view ~= nil and view.state.sprinting))
@@ -695,7 +731,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 		if math.abs(target - fovModifier) < 1e-4 then
 			fovModifier = target
 		end
-		camera.FieldOfView = math.clamp(baseFov * fovModifier * fovSway, 1, MAX_FOV)
+		camera.FieldOfView = math.clamp(baseFov * fovModifier * fovSway * aimZoom, 1, MAX_FOV)
 		setFov = camera.FieldOfView
 	end
 	local function resetFov()
@@ -1161,13 +1197,21 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 					previousX, previousY, previousZ = state.x, state.y, state.z
 					local previous = Vector3.new(previousX, previousY, previousZ)
 					-- (The status effects as the server last sent them, and the accessories worn.)
-					state.speedFactor = EffectState.speedFactor() * (1 + worn.speed)
+					state.speedFactor = EffectState.speedFactor() * (1 + worn.speed) * aimSlow
 					local jumpBoost, fallReduction = EffectState.jumpBoost()
 					state.jumpBoost = jumpBoost + worn.jump
 					state.fallReduction = fallReduction
 						+ Accessories.fallReduction(worn)
 						+ (if worn.noFallDamage then NO_FALL else 0)
-					state.noSprint = EffectState.noSprint()
+					state.noSprint = EffectState.noSprint() or aimNoSprint
+					if aimNoSprint then
+						-- (A raised firearm: the sprint stops, a toggled one too.)
+						state.sprinting = false
+						if sprintOn then
+							sprintOn = false
+							setTitle("IceVoxelSprint", "Sprint")
+						end
+					end
 					state.tooHungry = SurvivalState.tooHungry(GameMode.of(player))
 					state.airJumpsMax = worn.airJumps
 					state.runBoost = worn.runBoost
@@ -1240,7 +1284,9 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 				rootJoint.C0 = CFrame.new(cframe:VectorToObjectSpace(lag)) * rootJointC0
 			end
 			local toEye = Vector3.new(0, eye * BLOCK - rootHeight, 0) + lag
-			hum.CameraOffset = cframe:VectorToObjectSpace(toEye) - Vector3.new(0, cameraHeight(hum, rootPart), 0)
+			hum.CameraOffset = cframe:VectorToObjectSpace(toEye)
+				- Vector3.new(0, cameraHeight(hum, rootPart), 0)
+				+ shoulder
 
 			-- Minecraft's FOV modifier: x 1.1 flying, x SprintFov sprinting, and the effects' speed.
 			local fov = 1

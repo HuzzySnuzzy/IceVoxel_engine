@@ -165,9 +165,9 @@ WeaponList.firearms = {
 			grip = { -3.5, -3 },
 			muzzle = { 6, 2 },
 			sight = 3.6,
-			mag = { -3.5, -4 },
-			optic = { 0, 3.8 },
-			light = { 3, -0.5 },
+			mag = { -3.5, 2 },
+			optic = { 0, 3.5 },
+			light = { 3, -1.6 },
 		},
 	},
 	Revolver = {
@@ -213,7 +213,7 @@ WeaponList.firearms = {
 			sight = 3.1,
 			mag = { 2, -1 },
 			optic = { 0, 3.2 },
-			light = { 7, 0 },
+			light = { 8, -0.6 },
 		},
 	},
 	PumpShotgun = {
@@ -240,7 +240,7 @@ WeaponList.firearms = {
 			muzzle = { 13, 2 },
 			sight = 2.9,
 			optic = { -6, 3 },
-			light = { 10, -0.6 },
+			light = { 11, -1.2 },
 		},
 	},
 	DoubleBarrelShotgun = {
@@ -328,7 +328,7 @@ WeaponList.firearms = {
 			sight = 4.6,
 			mag = { 2, -0.5 },
 			optic = { 0, 4.6 },
-			light = { 8, 0.3 },
+			light = { 8, -0.9 },
 		},
 	},
 	HuntingRifle = {
