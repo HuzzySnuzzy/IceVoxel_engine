@@ -129,7 +129,9 @@ return function(t, shared, require, server)
 		for index, name in ITEMS do
 			t.eq(I[name], 4256 + index, `{name}'s id`)
 		end
-		t.eq(Items.list[#Items.list].name, "HerbalPoultice", "the last item")
+		-- (The weapons' 34 came after: was "HerbalPoultice"; HerbalPoultice is still 4277.)
+		t.eq(Items.list[#Items.list].name, "Sledgehammer", "the last item")
+		t.eq(I.HerbalPoultice, 4277, "the apocalypse's last item")
 		t.eq(Items.maxStack(I.Bandage), 16)
 		t.eq(Items.maxStack(I.Medkit), 4)
 		t.eq(Items.maxStack(I.Rag), 64)

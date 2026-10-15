@@ -43,7 +43,11 @@
 	                             (GameModeSwitcher: F3 + F4)
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay,
-	                             TankUse: buckets on machines)
+	                             TankUse: buckets on machines); weapons in the manner of DayZ
+	                             (Shared/Weapons): Firearms (raising, firing, reloading, the aim
+	                             camera, poses and HUD), MeleeInput (light and heavy attacks,
+	                             guarding), and Rendering/ShotView (every shot near: flashes,
+	                             tracers, impacts, sounds), started after BlockInteraction
 	  Entities/EntityRenderer    dropped items
 	  Entities/MobRenderer       mobs (cows, sheep, pigs, chickens and the apocalypse's zombies):
 	                             boxes gliding between the server's updates, hurt flashes,
@@ -145,6 +149,9 @@ local LightingController = require(Client.Rendering.LightingController)
 local WeatherClient = require(Client.Weather)
 local FluidFog = require(Client.Rendering.FluidFog)
 local BlockInteraction = require(Client.Interaction.BlockInteraction)
+local Firearms = require(Client.Interaction.Firearms)
+local MeleeInput = require(Client.Interaction.MeleeInput)
+local ShotView = require(Client.Rendering.ShotView)
 local ClientInventory = require(Client.Inventory.ClientInventory)
 local Screens = require(Client.Ui.Screens)
 local EntityRenderer = require(Client.Entities.EntityRenderer)
@@ -460,6 +467,10 @@ SpectatorView.start()
 BurningView.start()
 ExplosionView.start()
 BlockInteraction.start(world)
+-- Weapons (Shared/Weapons): firearms, the melee rework's input, and the shots seen and heard.
+Firearms.start(world)
+MeleeInput.start()
+ShotView.start(world)
 GameModeSwitcher.start()
 DebugOverlay.start(streamer)
 Waila.start(world, generator)

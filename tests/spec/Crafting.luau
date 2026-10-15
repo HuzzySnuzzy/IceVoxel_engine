@@ -180,8 +180,9 @@ return function(t, shared, require)
 		-- before Terraria's Aglet, Anklet of the Wind, Band of Starpower, Obsidian Skull, Mana
 		-- Crystal, two mana potions, Emerald Staff, Top Hat, Tuxedo Shirt and Tuxedo Pants; 191
 		-- before the five doors; 196 before the zombie apocalypse's medical supplies, barricades,
-		-- bats, blades, the hatch and concrete.)
-		t.eq(#Crafting.recipes, 213, "recipes compiled")
+		-- bats, blades, the hatch and concrete; 213 before the weapons' Improvised Suppressor and
+		-- Crossbow Bolts.)
+		t.eq(#Crafting.recipes, 215, "recipes compiled")
 	end)
 
 	t.test("crafting: the Oil Refinery and the Combustion Generator, Mekanism's machine shapes", function()

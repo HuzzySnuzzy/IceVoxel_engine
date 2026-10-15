@@ -55,6 +55,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Drinks = require(Shared.ToughAsNails.Drinks)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
+local WeaponState = require(Shared.Weapons.WeaponState)
 
 local MenuLayout = require(script.Parent.MenuLayout)
 local TextWrap = require(script.Parent.TextWrap)
@@ -564,9 +565,10 @@ end
 
 --[[
 	The texts of the held item's box (the inventory's HANDS, the HUD's name): its name, its
-	condition, and one detail: a durable item's "Durability 200 / 250", a canteen's "Sips 2 / 3", a
-	stack's "x 32", an energy item's charge ("1.2 kJ"). nil for an empty hand. (Builds a table:
-	call it when the held stack changed, not per frame.)
+	condition, and one detail: a firearm's or a magazine's rounds (Shared/Weapons/WeaponState
+	.detail: "12 / 15 +1", "No magazine", "JAMMED"), else a durable item's "Durability 200 / 250", a
+	canteen's "Sips 2 / 3", a stack's "x 32", an energy item's charge ("1.2 kJ"). nil for an empty
+	hand. (Builds a table: call it when the held stack changed, not per frame.)
 ]]
 function Theme.handsLines(stack: Items.Stack?): HandsLines?
 	if stack == nil or stack.item == nil then
@@ -577,7 +579,10 @@ function Theme.handsLines(stack: Items.Stack?): HandsLines?
 	local detail: string? = nil
 	local def = Items.get(item)
 	local max = def and def.durability
-	if fraction and max then
+	local weapon = WeaponState.detail(stack)
+	if weapon then
+		detail = weapon
+	elseif fraction and max then
 		local damage = Items.cleanDamage(stack.damage) or 0
 		local left = math.max(0, max - damage)
 		detail = if sips then `Sips {left} / {max}` else `Durability {left} / {max}`

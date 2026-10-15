@@ -8,9 +8,13 @@
 	local action is numbered, applied at once and sent (ClientMessage.Inventory), so clicks feel
 	instant and the server's answer quietly wins if it disagrees.
 
-	Placing a block is the one action not sent here: `place` predicts the item being used up and
+	Placing a block is one action not sent here: `place` predicts the item being used up and
 	returns its number, which travels inside the Edit message (BlockInteraction / ClientWorld), so
-	the server applies the placement and the use together.
+	the server applies the placement and the use together. Firing is the other: `fire` predicts
+	one shot of the held firearm (Shared/Weapons/WeaponState.fire through Menu's `fire` action:
+	the chamber empties, the next round feeds, the gun wears) and returns its number, which rides
+	the Fire message (Net/WeaponSync, Interaction/Firearms); the server applies the shot and the
+	round together and acknowledges the number whatever happens, and only it knows of a jam.
 
 	The window comes from the snapshots: window 0 is the inventory screen's (the inventory and its
 	own 2 x 2 crafting grid, Types.newWindow); when the server opens a block (a chest, a crafting
@@ -140,6 +144,9 @@ function ClientInventory.apply(action: Types.Action)
 	if action.kind == "place" then
 		ClientInventory.place(action.item)
 		return
+	elseif action.kind == "fire" then
+		ClientInventory.fire(action.item)
+		return
 	end
 	local current = mode()
 	if not Menu.allows(action, current) then
@@ -173,6 +180,17 @@ end
 ]]
 function ClientInventory.place(item: number): number
 	local seq = prediction:push({ kind = "place", item = item }, mode())
+	notify()
+	return seq
+end
+
+--[[
+	A shot of the held firearm `item` is being fired: predicts it (the chamber empties, the next
+	round feeds, the gun wears; nothing in creative) and returns the action number for the Fire
+	message (Net/WeaponSync), which carries it to the server.
+]]
+function ClientInventory.fire(item: number): number
+	local seq = prediction:push({ kind = "fire", item = item }, mode())
 	notify()
 	return seq
 end

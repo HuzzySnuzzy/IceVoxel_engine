@@ -1991,6 +1991,109 @@ local Config = {
 		},
 	},
 
+	-- Weapons -----------------------------------------------------------------------------------------
+
+	--[[
+		Firearms and the melee rework in the manner of DayZ (Shared/Weapons, server Weapons/, client
+		Interaction/Firearms): raise to fire, magazines and chambers in the item data, condition and
+		jams, server-side ballistics with head shots, noise that draws the infected.
+	]]
+	Weapons = {
+		-- false: firearms never fire (they bash like clubs) and no shot is sent.
+		Enabled = true,
+		-- Bullets, pellets and bolts hurt players.
+		PvP = true,
+		-- Damage times this on a head hit: zombies, other mobs, players; a zombie whose look wears a
+		-- helmet, hard hat or fire helmet takes this share of a head hit.
+		ZombieHead = 3,
+		MobHead = 2,
+		PlayerHead = 2,
+		HelmetShare = 0.6,
+		-- Flight: gravity (blocks/s^2), the longest flight (blocks), seconds of flight a segment.
+		Gravity = 9.8,
+		MaxRange = 256,
+		SegmentSeconds = 0.05,
+		-- Glass (block names) shatters and the bullet goes on with GlassShare of its damage (not for
+		-- players who may not build); bullets pass leaves.
+		ShatterGlass = true,
+		ShatterBlocks = { "Glass" },
+		GlassShare = 0.7,
+		PassLeaves = true,
+		-- Knockback (blocks a tick) of a bullet and of each pellet (a shot's pellets at most 0.4).
+		BulletKnockback = 0.1,
+		PelletKnockback = 0.05,
+		-- A firearm's hit on a player opens Bleeding this often (Apocalypse.Bleeding's rules).
+		BleedChance = 0.5,
+		-- Spread: raised in third person, moving, crouching (times the weapon's).
+		ShoulderSpread = 1.8,
+		MovingSpread = 2,
+		CrouchSpread = 0.8,
+		-- Sway: moving, crouching, hurt (under half health), not in the sights.
+		MovingSway = 2.5,
+		CrouchSway = 0.6,
+		HurtSway = 1.5,
+		ShoulderSway = 1.3,
+		-- Holding breath (the sprint key in the sights): seconds, then seconds out of breath, and
+		-- the sway factors of each.
+		HoldBreathSeconds = 3,
+		OutOfBreathSeconds = 3,
+		HoldBreathSway = 0.15,
+		OutOfBreathSway = 1.5,
+		-- Recoil: the share of each kick that comes back and over how long; crouching and shoulder
+		-- (third person) factors.
+		RecoilRecover = 0.6,
+		RecoilRecoverSeconds = 0.25,
+		CrouchRecoil = 0.8,
+		ShoulderRecoil = 1.2,
+		-- Jam chance a shot by condition (Pristine, Worn, Damaged, Badly damaged, Ruined): the
+		-- weapon's and its magazine's are added.
+		JamChance = { 0, 0.002, 0.01, 0.04, 1 },
+		-- Ticks: raised before the first shot, clearing a jam, switching the fire mode.
+		RaiseTicks = 6,
+		UnjamTicks = 40,
+		ModeTicks = 4,
+		-- Speed while raised, in the sights and guarding (no sprinting in any of them).
+		RaisedSpeed = 0.65,
+		SightsSpeed = 0.5,
+		GuardSpeed = 0.5,
+		-- Field of view divided by this in iron sights (an optic's own zoom instead).
+		IronSightsZoom = 1.15,
+		-- Third person raised: the camera over the right shoulder (studs), and a centre dot.
+		ShoulderOffset = { 1.6, 0.4, 0 },
+		ShoulderDot = true,
+		-- Noise (blocks): at a shot's impact this far or more from the shooter; the least a
+		-- suppressed shot makes.
+		ImpactNoise = 8,
+		SuppressedMinNoise = 8,
+		-- Server checks: the claimed origin's distance from the server's eyes, the direction's
+		-- length slack, shots a second (bursts of twice that), how far a mob's last-sent position
+		-- may be from its own to count for lag compensation.
+		OriginSlack = 2.5,
+		DirectionSlack = 0.01,
+		ShotsPerSecond = 20,
+		LagCompMax = 2,
+		-- Who is sent a shot (blocks), and beyond what distance its far sound plays instead.
+		ShotBroadcast = 256,
+		FarSound = 64,
+		-- Tracers, and how long they show (seconds).
+		Tracers = true,
+		TracerSeconds = 0.06,
+		-- A crossbow bolt that hits a block drops as an item this often (one that hits a mob: half).
+		BoltRecover = 0.7,
+		-- The melee rework (Shared/Weapons/Melee): seconds held for a heavy attack, its knockback
+		-- and food exhaustion (times a light hit's), the guard's front cone and the finisher's back
+		-- cone (cosines), and the strongest zombie a finisher kills (health).
+		Melee = {
+			Enabled = true,
+			HeavyHold = 0.45,
+			HeavyKnockback = 0.8,
+			HeavyExhaustion = 3,
+			GuardCone = 0.5,
+			FinisherCone = 0.5,
+			FinisherMaxHealth = 30,
+		},
+	},
+
 	-- GUI scale (client) -------------------------------------------------------------------------------
 
 	--[[

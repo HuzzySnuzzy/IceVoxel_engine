@@ -91,6 +91,7 @@ local Foods = require(Shared.Items.Foods)
 local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local MobPhysics = require(Shared.Entities.MobPhysics)
+local Melee = require(Shared.Weapons.Melee)
 
 local Burning = require(script.Parent.Parent.Players.Burning)
 local Lightning = require(script.Parent.Parent.World.Lightning)
@@ -173,8 +174,9 @@ export type Source = {
 }
 
 -- A player's swing at a mob (`attack`): who, where their feet and eyes are, their game mode, the
--- item in hand, ticks since their last swing or change of item (Combat.strength) and their status
--- effects (Strength and Weakness: Shared/Effects.meleeDamage; nil: none).
+-- item in hand, ticks since their last swing or change of item (Combat.strength), their status
+-- effects (Strength and Weakness: Shared/Effects.meleeDamage; nil: none) and whether it is the
+-- melee rework's heavy attack (Shared/Weapons/Melee; nil: a light one).
 export type Attacker = {
 	key: any,
 	x: number,
@@ -186,6 +188,7 @@ export type Attacker = {
 	item: number?,
 	ticks: number,
 	levels: Effects.Levels?,
+	heavy: boolean?,
 }
 
 export type Context = {
@@ -610,6 +613,11 @@ end
 	strength then scales). Returns the half hearts that landed (0: refused, or under the mob's hurt
 	cooldown) and whether it was a strong hit (strength 0.9 or more; else a weak one), or nil and
 	why it was refused.
+	The melee rework (Shared/Weapons/Melee): a `heavy` attack's base damage is Melee.heavyDamage
+	(still scaled by the attack strength) and its knockback Melee.knockback(true); a zombie that
+	is not aware of anyone (no target, no hunt), hit from behind (its facing against the direction
+	to the attacker: Melee.finisher's `behindDot`) with a finisher weapon, dies outright (its
+	health and one more, through its armor), when its kind's health allows.
 ]]
 function MobWorld.attack(self: MobWorld, id: number, attacker: Attacker): (number?, boolean | string)
 	local mob = self.byId[id]
@@ -649,16 +657,40 @@ function MobWorld.attack(self: MobWorld, id: number, attacker: Attacker): (numbe
 		return nil, "sight"
 	end
 	local base, speed = Combat.attackOf(attacker.item)
+	local heavy = attacker.heavy == true
+	if heavy then
+		base = Melee.heavyDamage(attacker.item, base)
+	end
 	local levels = attacker.levels
 	if levels then
 		base = Effects.meleeDamage(base, levels)
 	end
 	local strength = Combat.strength(attacker.ticks, speed)
+	local knockback = Melee.knockback(heavy)
+	-- (A finisher: an unaware zombie from behind. Facing (sin yaw, cos yaw) against the way to the
+	-- attacker.)
+	if MobList.isZombie(kind) then
+		local ai = mob.ai
+		local aware = ai.target ~= nil or ai.hunt ~= nil
+		local dx, dz = attacker.x - body.x, attacker.z - body.z
+		local length = math.sqrt(dx * dx + dz * dz)
+		local behind = if length > 1e-6 then (math.sin(body.yaw) * dx + math.cos(body.yaw) * dz) / length else 1
+		if Melee.finisher(attacker.item, aware, behind, kind.health) then
+			local landed = MobWorld.hurt(self, id, mob.health + 1, {
+				player = attacker.key,
+				x = attacker.x,
+				z = attacker.z,
+				knockback = knockback,
+				bypassArmor = true,
+			})
+			return landed, strength >= Combat.STRONG
+		end
+	end
 	local landed = MobWorld.hurt(
 		self,
 		id,
 		Combat.damage(base, strength),
-		{ player = attacker.key, x = attacker.x, z = attacker.z, knockback = Combat.KNOCKBACK }
+		{ player = attacker.key, x = attacker.x, z = attacker.z, knockback = knockback }
 	)
 	return landed, strength >= Combat.STRONG
 end

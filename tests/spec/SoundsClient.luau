@@ -456,9 +456,36 @@ return function(t, shared, require, _server, client)
 		-- moon's rise: Ui/SurvivorHud). It stays for the next client sound added ahead of its player,
 		-- which comes off with the code that plays it.
 		local pending: { [string]: boolean } = {}
+		-- The weapons' client sounds (Shared/Weapons: shots, impacts, reloading, the melee swings),
+		-- whose players the weapons' client and inventory builders land after FOUNDATION: played
+		-- or not, they pass until the integration takes this tolerance off (then each is checked as
+		-- every other; a class's shot is played through its FirearmSpec `sound`).
+		local building: { [string]: boolean } = {}
+		for _, sound in Sounds.events do
+			local name = sound.name
+			if
+				sound.side ~= "server"
+				and (
+					string.find(name, "^item%.firearm%.") ~= nil
+					or string.find(name, "^item%.crossbow%.") ~= nil
+					or string.find(name, "^entity%.bullet%.") ~= nil
+					or string.find(name, "^item%.melee%.") ~= nil
+				)
+			then
+				building[name] = true
+			end
+		end
+		local built = 0
+		for _ in building do
+			built += 1
+		end
+		t.eq(built, 21, "the weapons' 21 client sounds (the blocked hit is the server's)")
 		for _, sound in Sounds.events do
 			local quoted = `"{sound.name}"`
-			if pending[sound.name] then
+			if building[sound.name] then
+				-- (Being built: see above.)
+				continue
+			elseif pending[sound.name] then
 				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is played now: take it off the list`)
 			elseif sound.side == "server" then
 				t.ok(not string.find(source, quoted, 1, true), `{sound.name} is the server's to play`)

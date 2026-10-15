@@ -135,6 +135,14 @@ export type Window = {
 	  close     close the window (the carried stack goes back into the inventory)
 	  hide      show or hide the look of accessory slot `slot` (1..7) or armor slot `slot` - 8
 	            (9..12): `hidden`'s bit slot - 1 (Terraria's eye toggles; the item still works)
+	  weapon    a weapon action (Shared/Weapons/Loading: op 1 reload, 2 load one round, 3 clear a
+	            jam, 4 next fire mode, 5 the weapon light, 6 detach `part` of the gun or magazine
+	            in window slot `slot`; ops 1..5 act on the held gun, slot -1). The server times
+	            them (Players/Inventories' weapon hooks)
+	  fire      one shot of the held firearm `item` (Shared/Weapons/WeaponState.fire: the chamber
+	            empties, wear, the next round fed, `jam` when the server rolled one); like
+	            `place`, never sent on its own: its number rides the Fire message
+	            (Net/WeaponSync), and only the server knows `jam`
 ]]
 export type Action =
 	{ kind: "click", window: number, slot: number, clickType: number, button: number }
@@ -153,6 +161,8 @@ export type Action =
 	}
 	| { kind: "close", window: number }
 	| { kind: "hide", slot: number, hidden: boolean }
+	| { kind: "weapon", op: number, slot: number, part: number }
+	| { kind: "fire", item: number, jam: boolean? }
 
 -- The server's state of a player's inventory, after the player's action number `ack`.
 export type Snapshot = {
@@ -201,6 +211,22 @@ Types.LOOKS_ATTRIBUTE = "IceVoxelLooks"
 Types.USE_ATTRIBUTE = "IceVoxelUse"
 Types.USE_EAT = "eat"
 Types.USE_DRINK = "drink"
+--[[
+	Player attribute with what dresses the held firearm (Shared/Weapons/WeaponState.lookKey: the
+	magazine, optic, muzzle device and light item ids and whether the light is on, "" when the
+	hand holds no firearm), set by the server beside HELD_ATTRIBUTE so every client can draw the
+	gun as it is (Rendering/ItemModels).
+]]
+Types.HELD_LOOK_ATTRIBUTE = "IceVoxelHeldLook"
+--[[
+	Player attribute with how the player holds their weapon: AIM_RAISED (a firearm raised to fire)
+	or AIM_GUARD (a melee weapon guarding), nil otherwise. Set by the server (server Weapons/) from
+	the client's Weapon messages, for every client's poses and the server's own rules (no shot
+	unless raised, zombie hits cut while guarding).
+]]
+Types.AIM_ATTRIBUTE = "IceVoxelAim"
+Types.AIM_RAISED = "raised"
+Types.AIM_GUARD = "guard"
 
 --[[ Terraria's equipment (see the header) ]]
 

@@ -1939,6 +1939,538 @@ do
 	})
 end
 
+--[[
+	Weapons in the manner of DayZ (Shared/Weapons: WeaponList holds their numbers, WeaponState
+	what a stack's item data keeps; server Weapons/, client Interaction/Firearms). Box models in
+	their colours until TexturePack.Icons has their pictures; the client builder may tune the
+	models and tilts.
+
+	Firearms (ids 4278..4288: a 9mm pistol, a .357 revolver, a 9mm submachine gun, a pump and a
+	double-barrel shotgun, a bolt-action and a semi-automatic 7.62 rifle, a 5.56 assault rifle, a
+	scoped .308 hunting rifle, a .22 small-bore rifle and a crossbow) stack to 1 and wear as they
+	fire (`durability`; they never break, they stop firing when Ruined); their `attack` is the bash
+	of a lowered gun. Handguns lie flat, long guns tilted 30 degrees, barrels to the right.
+	Magazines (4289..4293) wear as their rounds are fired. Ammunition (4294..4302) stacks: 9mm,
+	.357, buckshot and slug shells, .22, 5.56, 7.62, .308 and crossbow bolts. Attachments
+	(4303..4307): a red dot sight and a rifle scope, a suppressor and an improvised one (a bottle
+	and tape) that wear, and a weapon flashlight. Melee (4308..4311): a kitchen knife and a hunting
+	knife (swords), a pipe wrench (no tool, it wears like the bats) and a sledgehammer (a
+	pickaxe), modelled upright and tilted like Minecraft's tools. A gun's boxes are its design's,
+	drawn at its WeaponList `scale` so it fits the icon's cube (long guns at 0.58, keeping their
+	proportions to each other).
+]]
+local WeaponList = require(script.Parent.Parent.Weapons.WeaponList)
+do
+	local GUNMETAL = { 58, 60, 64 }
+	local POLY = { 34, 34, 36 }
+	local STOCK = { 120, 78, 44 }
+	local DARK = { 92, 60, 34 }
+	local GUN_STEEL = { 150, 152, 156 }
+	local BRASS = { 196, 160, 70 }
+	local OLIVE = { 86, 92, 60 }
+	local TIP_COPPER = { 190, 120, 60 }
+
+	-- A box of `size` at `offset` (pixels) in `colour`, of `material` (default the item's), turned
+	-- `rotation` degrees about the view axis.
+	local function box(
+		size: { number },
+		offset: { number },
+		colour: { number },
+		material: string?,
+		rotation: number?
+	): ModelBox
+		return { size = size, offset = offset, color = colour, material = material, rotation = rotation }
+	end
+	-- Cartridges standing side by side at `xs`: a case of `case` (w x h, `caseColour`) and a tip
+	-- (`tip` size, `tipColour`) on top, `tipShape` "Ball" for a round nose.
+	local function cartridges(
+		xs: { number },
+		case: { number },
+		caseColour: { number },
+		tip: { number },
+		tipColour: { number },
+		tipY: number?,
+		tipShape: string?
+	): { ModelBox }
+		local boxes: { ModelBox } = {}
+		local y = tipY or case[2] / 2 + tip[2] / 2
+		for _, x in xs do
+			table.insert(boxes, box({ case[1], case[2], case[1] }, { x, 0, 0 }, caseColour, "Metal"))
+			table.insert(boxes, {
+				size = { tip[1], tip[2], tip[1] },
+				offset = { x, y, 0 },
+				color = tipColour,
+				material = "Metal",
+				shape = tipShape,
+			})
+		end
+		return boxes
+	end
+	-- Two shotgun shells: a coloured hull on a brass base.
+	local function shells(hull: { number }): { ModelBox }
+		local boxes: { ModelBox } = {}
+		for _, x in { -2, 2 } do
+			table.insert(boxes, box({ 3, 7, 3 }, { x, 0, 0 }, hull, "SmoothPlastic"))
+			table.insert(boxes, box({ 3.2, 2, 3.2 }, { x, -3.5, 0 }, BRASS, "Metal"))
+		end
+		return boxes
+	end
+	-- A bolt-action rifle's boxes in `wood`.
+	local function boltRifle(wood: { number }): { ModelBox }
+		return {
+			box({ 26, 3, 2.4 }, { -2, 0, 0 }, wood, "Wood"),
+			box({ 12, 1.2, 1.2 }, { 13, 1.6, 0 }, GUN_STEEL),
+			box({ 6, 2.2, 2 }, { -2, 2, 0 }, GUNMETAL),
+			box({ 1, 2.5, 1 }, { -4, 1, 1.6 }, GUN_STEEL, nil, -30),
+			box({ 5, 5, 2.4 }, { -15, -1, 0 }, wood, "Wood", 10),
+		}
+	end
+
+	-- Firearm `name`'s boxes at its WeaponList `scale`.
+	local function drawn(name: string, boxes: { ModelBox }): { ModelBox }
+		local scale = WeaponList.firearms[name].scale or 1
+		if scale == 1 then
+			return boxes
+		end
+		local out: { ModelBox } = {}
+		for _, b in boxes do
+			table.insert(out, {
+				size = { b.size[1] * scale, b.size[2] * scale, b.size[3] * scale },
+				offset = { b.offset[1] * scale, b.offset[2] * scale, b.offset[3] * scale },
+				color = b.color,
+				material = b.material,
+				rotation = b.rotation,
+				shape = b.shape,
+			})
+		end
+		return out
+	end
+
+	--[[ Firearms ]]
+
+	table.insert(list, {
+		name = "Pistol",
+		displayName = "9mm Pistol",
+		durability = 1500,
+		attack = { damage = 3, speed = 1.0 },
+		color = GUNMETAL,
+		material = "Metal",
+		model = drawn("Pistol", {
+			box({ 11, 3, 2.5 }, { 0.5, 2, 0 }, GUNMETAL),
+			box({ 9, 1.5, 2.4 }, { 0, 0.25, 0 }, POLY, "SmoothPlastic"),
+			box({ 3, 6, 2.6 }, { -3.5, -3, 0 }, POLY, "SmoothPlastic", -12),
+			box({ 3, 1, 1 }, { -0.5, -1.2, 0 }, POLY, "SmoothPlastic"),
+		}),
+		tilt = 0,
+	})
+	table.insert(list, {
+		name = "Revolver",
+		durability = 1500,
+		attack = { damage = 3, speed = 1.0 },
+		color = GUN_STEEL,
+		material = "Metal",
+		model = drawn("Revolver", {
+			box({ 8, 1.6, 1.6 }, { 4, 2, 0 }, GUN_STEEL),
+			box({ 4, 3.4, 3 }, { -1, 1.6, 0 }, GUN_STEEL),
+			box({ 5, 3, 2 }, { -1, 1.5, 0 }, GUNMETAL),
+			box({ 3, 6, 2.6 }, { -4, -2.5, 0 }, STOCK, "Wood", -20),
+		}),
+		tilt = 0,
+	})
+	table.insert(list, {
+		name = "Smg",
+		displayName = "SMG",
+		durability = 2000,
+		attack = { damage = 3, speed = 1.0 },
+		color = POLY,
+		material = "Metal",
+		model = drawn("Smg", {
+			box({ 12, 4, 3 }, { 0, 1, 0 }, POLY, "SmoothPlastic"),
+			box({ 4, 1.5, 1.5 }, { 8, 1.5, 0 }, GUN_STEEL),
+			box({ 2.5, 5, 2.6 }, { -2, -3, 0 }, POLY, "SmoothPlastic", -10),
+			box({ 6, 2, 2 }, { -9, 1, 0 }, POLY, "SmoothPlastic"),
+		}),
+		tilt = 0,
+	})
+	table.insert(list, {
+		name = "PumpShotgun",
+		durability = 800,
+		attack = { damage = 4, speed = 1.0 },
+		color = STOCK,
+		material = "Metal",
+		model = drawn("PumpShotgun", {
+			box({ 20, 1.6, 1.6 }, { 3, 2, 0 }, GUN_STEEL),
+			box({ 14, 1.4, 1.4 }, { 1, 0.4, 0 }, GUN_STEEL),
+			box({ 5, 2.2, 2.4 }, { 6, 0.3, 0 }, STOCK, "Wood"),
+			box({ 7, 3.5, 2.6 }, { -6, 1, 0 }, GUNMETAL),
+			box({ 9, 3.5, 2.4 }, { -14, 0, 0 }, STOCK, "Wood", 8),
+		}),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "DoubleBarrelShotgun",
+		displayName = "Double-Barrel Shotgun",
+		durability = 600,
+		attack = { damage = 4, speed = 1.0 },
+		color = STOCK,
+		material = "Metal",
+		model = drawn("DoubleBarrelShotgun", {
+			box({ 18, 1.5, 1.5 }, { 4, 2.4, 0 }, GUN_STEEL),
+			box({ 18, 1.5, 1.5 }, { 4, 0.9, 0 }, GUN_STEEL),
+			box({ 5, 3.5, 2.6 }, { -7, 1.4, 0 }, GUNMETAL),
+			box({ 6, 1.8, 2.4 }, { 2, 0, 0 }, STOCK, "Wood"),
+			box({ 10, 4, 2.4 }, { -14, 0, 0 }, STOCK, "Wood", 10),
+		}),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "BoltActionRifle",
+		displayName = "Bolt-Action Rifle",
+		durability = 1200,
+		attack = { damage = 4, speed = 1.0 },
+		color = STOCK,
+		material = "Metal",
+		model = drawn("BoltActionRifle", boltRifle(STOCK)),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "SemiAutoRifle",
+		displayName = "Semi-Auto Rifle",
+		durability = 1500,
+		attack = { damage = 4, speed = 1.0 },
+		color = DARK,
+		material = "Metal",
+		model = drawn("SemiAutoRifle", {
+			box({ 24, 3, 2.4 }, { -2, 0, 0 }, DARK, "Wood"),
+			box({ 12, 1.2, 1.2 }, { 13, 1.6, 0 }, GUN_STEEL),
+			box({ 8, 2.6, 2 }, { -1, 2.2, 0 }, GUNMETAL),
+			box({ 3, 3, 2 }, { -1, -1.5, 0 }, GUNMETAL),
+		}),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "AssaultRifle",
+		durability = 2500,
+		attack = { damage = 4, speed = 1.0 },
+		color = POLY,
+		material = "Metal",
+		model = drawn("AssaultRifle", {
+			box({ 12, 4, 2.8 }, { 0, 1.5, 0 }, POLY, "SmoothPlastic"),
+			box({ 7, 3, 3 }, { 7, 2, 0 }, POLY, "SmoothPlastic"),
+			box({ 8, 1.4, 1.4 }, { 10, 2, 0 }, GUN_STEEL),
+			box({ 7, 3, 2.4 }, { -10, 1, 0 }, POLY, "SmoothPlastic"),
+			box({ 2.5, 5, 2.6 }, { -2, -2.5, 0 }, POLY, "SmoothPlastic", -15),
+			box({ 8, 1, 2 }, { 0, 4, 0 }, POLY, "SmoothPlastic"),
+		}),
+		tilt = 30,
+	})
+	local hunting = boltRifle(DARK)
+	table.insert(hunting, box({ 10, 2.4, 2.4 }, { -1, 4.5, 0 }, POLY, "SmoothPlastic"))
+	table.insert(hunting, box({ 1, 3, 3 }, { 4, 4.5, 0 }, POLY, "SmoothPlastic"))
+	table.insert(hunting, box({ 1, 3, 3 }, { -6, 4.5, 0 }, POLY, "SmoothPlastic"))
+	table.insert(list, {
+		name = "HuntingRifle",
+		durability = 1200,
+		attack = { damage = 4, speed = 1.0 },
+		color = DARK,
+		material = "Metal",
+		model = drawn("HuntingRifle", hunting),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "SmallBoreRifle",
+		displayName = "Small-Bore Rifle",
+		durability = 2500,
+		attack = { damage = 3, speed = 1.0 },
+		color = STOCK,
+		material = "Metal",
+		model = drawn("SmallBoreRifle", {
+			box({ 18, 3, 2.2 }, { -2, 0, 0 }, STOCK, "Wood"),
+			box({ 9, 1, 1 }, { 11, 1.6, 0 }, GUN_STEEL),
+			box({ 6, 2.4, 2 }, { -1, 2, 0 }, GUNMETAL),
+		}),
+		tilt = 30,
+	})
+	table.insert(list, {
+		name = "Crossbow",
+		durability = 600,
+		attack = { damage = 3, speed = 1.0 },
+		color = STOCK,
+		material = "Wood",
+		model = drawn("Crossbow", {
+			box({ 16, 2.5, 2.4 }, { 0, 0, 0 }, STOCK, "Wood"),
+			box({ 1.5, 16, 1.5 }, { 7, 1, 0 }, POLY, "SmoothPlastic"),
+			box({ 1, 15, 0.4 }, { 3, 1, 0 }, { 230, 230, 220 }, "Fabric"),
+			box({ 2, 3, 1.5 }, { 9.5, 1, 0 }, GUN_STEEL, "Metal"),
+		}),
+		tilt = 30,
+	})
+
+	--[[ Magazines ]]
+
+	table.insert(list, {
+		name = "PistolMagazine",
+		displayName = "9mm Pistol Magazine",
+		durability = 1500,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 2.4, 8, 2 }, { 0, 0, 0 }, POLY),
+			box({ 3, 1, 2.4 }, { 0, -4.3, 0 }, POLY),
+		},
+	})
+	table.insert(list, {
+		name = "SmgMagazine",
+		displayName = "SMG Magazine",
+		durability = 2000,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 3, 12, 2.2 }, { 0, 0, 0 }, POLY),
+			box({ 3.6, 1, 2.6 }, { 0, -6.3, 0 }, POLY),
+		},
+	})
+	table.insert(list, {
+		name = "RifleMagazine",
+		displayName = "Assault Rifle Magazine",
+		durability = 2500,
+		color = OLIVE,
+		material = "SmoothPlastic",
+		model = {
+			box({ 3.5, 12, 2.4 }, { 0, 0, 0 }, OLIVE, nil, 12),
+			box({ 4, 1, 2.8 }, { 1.2, -6, 0 }, POLY, nil, 12),
+		},
+	})
+	table.insert(list, {
+		name = "HuntingMagazine",
+		displayName = "Hunting Rifle Magazine",
+		durability = 1200,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = { box({ 3, 4, 2.4 }, { 0, 0, 0 }, POLY) },
+	})
+	table.insert(list, {
+		name = "SmallBoreMagazine",
+		displayName = ".22 Magazine",
+		durability = 2500,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 4, 4, 2.4 }, { 0, 0, 0 }, POLY),
+			{
+				size = { 2.6, 2.6, 2.6 },
+				offset = { 0, 0, 1 },
+				color = GUNMETAL,
+				material = "Metal",
+				shape = "Cylinder",
+			},
+		},
+	})
+
+	--[[ Ammunition ]]
+
+	local THREE = { -3, 0, 3 }
+	table.insert(list, {
+		name = "Rounds9mm",
+		displayName = "9mm Rounds",
+		maxStack = 60,
+		color = BRASS,
+		material = "Metal",
+		model = cartridges(THREE, { 2, 4 }, BRASS, { 1.6, 1.6 }, { 180, 120, 70 }, 2.6, "Ball"),
+	})
+	table.insert(list, {
+		name = "Rounds357",
+		displayName = ".357 Rounds",
+		maxStack = 40,
+		color = BRASS,
+		material = "Metal",
+		model = cartridges(THREE, { 2, 5.5 }, BRASS, { 1.6, 1.6 }, { 200, 200, 205 }, 3.35, "Ball"),
+	})
+	table.insert(list, {
+		name = "Buckshot",
+		displayName = "12 Gauge Buckshot",
+		maxStack = 30,
+		color = { 170, 40, 36 },
+		material = "SmoothPlastic",
+		model = shells({ 170, 40, 36 }),
+	})
+	table.insert(list, {
+		name = "Slugs",
+		displayName = "12 Gauge Slugs",
+		maxStack = 30,
+		color = { 50, 110, 60 },
+		material = "SmoothPlastic",
+		model = shells({ 50, 110, 60 }),
+	})
+	table.insert(list, {
+		name = "Rounds22",
+		displayName = ".22 Rounds",
+		-- (The design's 100 is past every slot's limit of 64: Inventory/Menu caps stacks there.)
+		maxStack = 64,
+		color = BRASS,
+		material = "Metal",
+		model = cartridges({ -4.5, -1.5, 1.5, 4.5 }, { 1.2, 3 }, BRASS, { 1, 1 }, { 170, 110, 70 }),
+	})
+	local rounds556 = cartridges(THREE, { 1.8, 6 }, BRASS, { 1, 1.5 }, { 120, 120, 124 }, 5)
+	for _, x in THREE do
+		table.insert(rounds556, box({ 1.2, 1.5, 1.2 }, { x, 3.7, 0 }, BRASS))
+	end
+	table.insert(list, {
+		name = "Rounds556",
+		displayName = "5.56 Rounds",
+		maxStack = 60,
+		color = BRASS,
+		material = "Metal",
+		model = rounds556,
+	})
+	table.insert(list, {
+		name = "Rounds762",
+		displayName = "7.62 Rounds",
+		maxStack = 40,
+		color = { 120, 120, 110 },
+		material = "Metal",
+		model = cartridges(THREE, { 2.2, 6 }, { 120, 120, 110 }, { 1.6, 2 }, TIP_COPPER, 4),
+	})
+	table.insert(list, {
+		name = "Rounds308",
+		displayName = ".308 Rounds",
+		maxStack = 40,
+		color = BRASS,
+		material = "Metal",
+		model = cartridges(THREE, { 2.4, 8 }, BRASS, { 1.6, 2.4 }, TIP_COPPER, 5),
+	})
+	table.insert(list, {
+		name = "CrossbowBolt",
+		maxStack = 16,
+		color = STOCK,
+		material = "Wood",
+		model = {
+			box({ 1, 14, 1 }, { 0, 0, 0 }, STOCK),
+			box({ 2, 2, 1 }, { 0, 7.5, 0 }, GUN_STEEL, "Metal", 45),
+			box({ 3, 3, 0.4 }, { 0, -6, 0 }, { 180, 40, 40 }, "Fabric"),
+		},
+		tilt = -45,
+	})
+
+	--[[ Attachments ]]
+
+	table.insert(list, {
+		name = "RedDotSight",
+		maxStack = 1,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 6, 1.5, 3 }, { 0, -2, 0 }, POLY),
+			box({ 4, 4, 3 }, { 0, 0.5, 0 }, POLY),
+			box({ 2.5, 2.5, 0.4 }, { 0, 0.5, 1.6 }, { 220, 60, 60 }, "Glass"),
+		},
+	})
+	table.insert(list, {
+		name = "RifleScope",
+		maxStack = 1,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 14, 2.6, 2.6 }, { 0, 0, 0 }, POLY),
+			box({ 3, 3.6, 3.6 }, { -6, 0, 0 }, POLY),
+			box({ 4, 4, 4 }, { 6, 0, 0 }, POLY),
+			box({ 2, 2, 2 }, { 0, 2, 0 }, POLY),
+		},
+	})
+	table.insert(list, {
+		name = "Suppressor",
+		durability = 400,
+		color = POLY,
+		material = "Metal",
+		model = {
+			box({ 12, 3.2, 3.2 }, { 0, 0, 0 }, POLY),
+			box({ 1, 3.4, 3.4 }, { -5.5, 0, 0 }, GUN_STEEL),
+		},
+	})
+	table.insert(list, {
+		name = "ImprovisedSuppressor",
+		durability = 40,
+		color = { 150, 190, 215 },
+		material = "Glass",
+		model = {
+			box({ 9, 4, 4 }, { 0, 0, 0 }, { 150, 190, 215 }, "Glass"),
+			box({ 1.5, 4.4, 4.4 }, { -2.5, 0, 0 }, { 150, 154, 158 }, "Fabric"),
+			box({ 1.5, 4.4, 4.4 }, { 2, 0, 0 }, { 150, 154, 158 }, "Fabric"),
+		},
+	})
+	table.insert(list, {
+		name = "WeaponFlashlight",
+		maxStack = 1,
+		color = POLY,
+		material = "SmoothPlastic",
+		model = {
+			box({ 6, 2.6, 2.6 }, { 0, 0, 0 }, POLY),
+			box({ 2, 3.6, 3.6 }, { 3.5, 0, 0 }, POLY),
+			box({ 0.4, 2.8, 2.8 }, { 4.7, 0, 0 }, { 255, 240, 180 }, "Glass"),
+		},
+	})
+
+	--[[ Melee ]]
+
+	table.insert(list, {
+		name = "KitchenKnife",
+		tool = { kind = "sword", speed = 2, level = 0 },
+		attack = { damage = 4, speed = 2.0 },
+		durability = 100,
+		color = GUN_STEEL,
+		material = "Metal",
+		model = {
+			box({ 2, 9, 0.6 }, { 0, 3, 0 }, GUN_STEEL),
+			box({ 0.6, 9, 0.7 }, { -0.8, 3, 0 }, { 200, 204, 208 }),
+			box({ 1.8, 5, 1.4 }, { 0, -4.5, 0 }, POLY, "SmoothPlastic"),
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "HuntingKnife",
+		tool = { kind = "sword", speed = 4, level = 1 },
+		attack = { damage = 5, speed = 1.8 },
+		durability = 250,
+		color = GUN_STEEL,
+		material = "Metal",
+		model = {
+			box({ 2.6, 9, 0.8 }, { 0, 3, 0 }, GUN_STEEL),
+			box({ 1.8, 1.8, 0.8 }, { 0, 7.5, 0 }, GUN_STEEL, nil, 45),
+			box({ 4, 1, 1.6 }, { 0, -1.5, 0 }, GUN_STEEL),
+			box({ 2, 5, 1.8 }, { 0, -4.5, 0 }, DARK, "Wood"),
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "PipeWrench",
+		attack = { damage = 6, speed = 1.0 },
+		durability = 300,
+		color = { 170, 40, 30 },
+		material = "Metal",
+		model = {
+			box({ 2, 14, 1.6 }, { 0, -1, 0 }, { 170, 40, 30 }),
+			box({ 5, 2.5, 2 }, { -1, 7, 0 }, GUN_STEEL),
+			box({ 2, 4, 2 }, { -3, 5.5, 0 }, GUN_STEEL),
+			box({ 2, 1, 2.2 }, { 0, 5, 0 }, GUN_STEEL),
+		},
+		tilt = -45,
+	})
+	table.insert(list, {
+		name = "Sledgehammer",
+		-- (Speed 4, the stone pickaxe's, as the Crowbar's: WAILA names a tier's slowest tool.)
+		tool = { kind = "pickaxe", speed = 4, level = 1 },
+		attack = { damage = 8, speed = 0.6 },
+		durability = 300,
+		color = GUNMETAL,
+		material = "Metal",
+		model = {
+			box({ 1.5, 17, 1.5 }, { 0, -1.5, 0 }, STOCK, "Wood"),
+			box({ 7, 4, 4 }, { 0, 7.5, 0 }, GUNMETAL),
+		},
+		tilt = -45,
+	})
+end
+
 -- Add new items above this line. Every potion of PotionList must have its items here: a potion
 -- added there after the first FIRST_POTIONS needs a loop of its own just above this line (it can't
 -- join the first one without moving every item after it).

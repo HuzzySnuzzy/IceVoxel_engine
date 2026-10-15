@@ -1329,4 +1329,198 @@ do
 	table.insert(SoundList.EVENTS, event)
 end
 
+--[[
+	Weapons (Shared/Weapons; client Interaction/Firearms and Rendering/ShotView, server Weapons/),
+	after the rest so no other event's number changed. Stand-ins on the shipped files: a gun's
+	shot is the explosion's crack, cut short and pitched by its class (a pistol high and short, a
+	heavy rifle low and long; every class's fire event shares the category item.firearm.fire, so
+	one Sound of that name replaces them all); a suppressed shot a soft, short crack; far away
+	(beyond Config.Weapons.FarSound) a low rolling boom; the crossbow's twang a rustle pitched up.
+	A dry trigger and a jam click the volume tick; reloading, chambering and attaching are thuds
+	pitched up; a round loaded a tick; unloading a rustle. Bullets hitting a block a high tap,
+	flesh a dull thud. The melee rework's swing and heavy swing are rustles, a blocked hit a thud.
+
+	  side       client: each client plays them (the shooter at once, the others from the Shots
+	             message), never sent; predicted: the player's own client at once, the server to
+	             everyone else when it accepts the action (reload, a round, chambering); server:
+	             the server to everyone near (a blocked zombie hit).
+	The fire event of a gun is item.firearm.<class>.fire (Shared/Weapons' FirearmSpec `sound`),
+	the crossbow's item.crossbow.fire. Every one is an ordinary event: a Sound of its name in
+	SoundService.IceVoxelSounds (or the override folder) replaces it.
+]]
+local function shot(class: string, volume: number, pitch: number, duration: number, maxDistance: number): EventSpec
+	return {
+		name = `item.firearm.{class}.fire`,
+		category = "item.firearm.fire",
+		id = EXPLOSION,
+		volume = volume,
+		pitch = pitch,
+		pitchVariance = 0.04,
+		duration = duration,
+		maxDistance = maxDistance,
+		source = "players",
+		side = "client",
+	}
+end
+for _, event in
+	{
+		shot("pistol", 0.9, 2.4, 0.25, 128),
+		shot("revolver", 1.0, 2.0, 0.3, 144),
+		shot("smg", 0.8, 2.7, 0.18, 128),
+		shot("shotgun", 1.2, 1.3, 0.45, 160),
+		shot("rifle", 1.1, 1.8, 0.35, 192),
+		shot("heavy", 1.3, 1.25, 0.5, 224),
+		shot("small", 0.45, 3.2, 0.12, 48),
+		{
+			name = "item.crossbow.fire",
+			id = GET_UP,
+			volume = 0.6,
+			pitch = 2.2,
+			duration = 0.25,
+			maxDistance = 16,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.suppressed",
+			id = EXPLOSION,
+			volume = 0.3,
+			pitch = 3.6,
+			pitchVariance = 0.1,
+			duration = 0.08,
+			maxDistance = 32,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.far",
+			id = EXPLOSION,
+			volume = 0.5,
+			pitch = 0.7,
+			duration = 0.8,
+			maxDistance = 256,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.dry",
+			id = TICK,
+			volume = 0.5,
+			pitch = 0.6,
+			maxDistance = 8,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.jam",
+			id = TICK,
+			volume = 0.7,
+			pitch = 0.4,
+			maxDistance = 8,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.reload",
+			id = LAND,
+			volume = 0.5,
+			pitch = 2.6,
+			duration = 0.2,
+			maxDistance = 16,
+			source = "players",
+			side = "predicted",
+		},
+		{
+			name = "item.firearm.load_round",
+			id = TICK,
+			volume = 0.5,
+			pitch = 1.6,
+			maxDistance = 12,
+			source = "players",
+			side = "predicted",
+		},
+		{
+			name = "item.firearm.chamber",
+			id = LAND,
+			volume = 0.6,
+			pitch = 3.2,
+			duration = 0.12,
+			maxDistance = 16,
+			source = "players",
+			side = "predicted",
+		},
+		{
+			name = "item.firearm.unload",
+			id = GET_UP,
+			volume = 0.4,
+			pitch = 2.0,
+			duration = 0.2,
+			maxDistance = 8,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.firearm.attach",
+			id = LAND,
+			volume = 0.4,
+			pitch = 2.8,
+			duration = 0.1,
+			maxDistance = 8,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "entity.bullet.impact",
+			id = LAND,
+			volume = 0.35,
+			pitch = 2.2,
+			pitchVariance = 0.2,
+			maxDistance = 24,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "entity.bullet.flesh",
+			id = LAND,
+			volume = 0.5,
+			pitch = 1.1,
+			pitchVariance = 0.1,
+			maxDistance = 24,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.melee.swing",
+			id = GET_UP,
+			volume = 0.4,
+			pitch = 1.9,
+			duration = 0.15,
+			maxDistance = 12,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.melee.heavy",
+			id = GET_UP,
+			volume = 0.6,
+			pitch = 1.3,
+			duration = 0.25,
+			maxDistance = 16,
+			source = "players",
+			side = "client",
+		},
+		{
+			name = "item.melee.block",
+			id = LAND,
+			volume = 0.8,
+			pitch = 1.6,
+			maxDistance = 16,
+			source = "players",
+			side = "server",
+		},
+	} :: { EventSpec }
+do
+	table.insert(SoundList.EVENTS, event)
+end
+
 return SoundList

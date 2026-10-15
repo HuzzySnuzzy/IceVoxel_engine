@@ -127,6 +127,8 @@ for _, name in
 		"Crowbar",
 		"CeilingLamp",
 		"BunkerHatch",
+		-- (The weapons' iron: crossbow bolts.)
+		"CrossbowBolt",
 	}
 do
 	table.insert(iron, name)

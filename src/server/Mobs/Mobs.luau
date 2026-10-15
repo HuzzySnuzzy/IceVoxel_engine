@@ -48,7 +48,13 @@
 	             Strength and Weakness (Players/Effects.levels); a hit plays
 	             entity.player.attack.strong or .weak and wears a tool (swords 1, other tools 2;
 	             not in creative); one that hurt costs the player food exhaustion (Minecraft's
-	             EXHAUSTION_ATTACK: Players/ToughAsNails.attacked).
+	             EXHAUSTION_ATTACK: Players/ToughAsNails.attacked). The melee rework
+	             (Shared/Weapons/Melee): an Attack with the heavy flag is a heavy attack
+	             (MobWorld's Attacker.heavy), whose landed hit costs the exhaustion
+	             Melee.exhaustion(true) times; a zombie's hit on a player guarding (the
+	             Types.AIM_ATTRIBUTE "guard") with a melee weapon facing it (their look,
+	             Players/PlayerPositions.look) is cut by Melee.guardShare, and item.melee.block
+	             sounds when it cut anything.
 	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs around their feet
 	             (Mobs/MobTracking): a spawn when one comes within Config.Mobs.TrackingDistance, a
 	             remove when it is more than 8 blocks beyond that or gone (so a mob at the edge
@@ -84,6 +90,13 @@
 	                       (Players/Magic): as `damage`, with the weapon's own knockback, never
 	                       refused by the hurt cooldown (a projectile strikes a mob once:
 	                       MobWorld's `ownImmunity`)
+	  Mobs.weaponDamage(id, amount, player, ox, oz, knockback, head)   a shot's hit (server
+	                       Weapons/: every pellet of one shot summed): as magicDamage (own
+	                       immunity, so automatic fire lands every round), a head hit through
+	                       no armor, credited to the shooter (kills count as melee kills do)
+	  Mobs.targets(player, x, y, z, radius)   the live mobs a shot may hit (WeaponTarget: id,
+	                       kind, variant, feet, yaw) with where `player`'s client was last sent
+	                       each one (sx, sy, sz; nil when it knows none): lag compensation
 	  Mobs.ignite(id, ticks)   sets a mob burning for at least `ticks` (the spark's fire)
 	  Mobs.spawn(kind, x, y, z, variant?)    a mob of a MobList name at a position, in a variant
 	                       (a zombie's look and skin: MobList.lookVariant; random when nil), or 0
@@ -114,6 +127,8 @@ local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
+local Types = require(Shared.Inventory.Types)
+local Melee = require(Shared.Weapons.Melee)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local Simulation = require(script.Parent.Parent.World.Simulation)
@@ -150,6 +165,22 @@ export type MobView = {
 	width: number,
 	height: number,
 	health: number,
+}
+
+-- A live mob a shot may hit (`targets`): its kind, variant (its look: a helmet?), feet and yaw
+-- (radians: facing (sin yaw, cos yaw)), and the feet `player`'s client was last sent (nil, nil, nil
+-- when it was sent none).
+export type WeaponTarget = {
+	id: number,
+	kind: MobList.Kind,
+	variant: number,
+	x: number,
+	y: number,
+	z: number,
+	yaw: number,
+	sx: number?,
+	sy: number?,
+	sz: number?,
 }
 
 local Settings = Config.Mobs
@@ -324,7 +355,22 @@ local function apply(mobs: MobWorld.MobWorld)
 	for _, hit in changes.hits do
 		local player = hit.key
 		if typeof(player) == "Instance" and player:IsA("Player") and player.Parent then
-			local landed, fresh = Characters.hurt(player, hit.damage)
+			-- (Guarding with a melee weapon cuts a zombie's hit from the front: Weapons/Melee.)
+			local damage = hit.damage
+			local mob = mobs:get(hit.id)
+			if mob and MobList.isZombie(mob.kind) and player:GetAttribute(Types.AIM_ATTRIBUTE) == Types.AIM_GUARD then
+				local fx, _, fz = feetOf(player)
+				if fx then
+					local lx, _, lz = PlayerPositions.look(player)
+					local share =
+						Melee.guardShare(Inventories.heldTool(player), true, lx, lz, mob.body.x - fx, mob.body.z - fz)
+					if share > 0 then
+						damage *= 1 - math.clamp(share, 0, 1)
+						Sounds.playAt(player, "item.melee.block")
+					end
+				end
+			end
+			local landed, fresh = Characters.hurt(player, damage)
 			if landed > 0 then
 				playerHitEvent:Fire(player, hit.kind, landed, fresh, hit.id)
 			end
@@ -355,7 +401,7 @@ end
 
 local function onAttack(player: Player, payload: buffer)
 	local mobs = mobWorld
-	local id = Protocol.decodeAttack(payload)
+	local id, heavy = Protocol.decodeAttack(payload)
 	if mobs == nil or id == nil or not Settings.Enabled then
 		return
 	end
@@ -398,6 +444,7 @@ local function onAttack(player: Player, payload: buffer)
 		ticks = since,
 		-- (Strength and Weakness.)
 		levels = Effects.levels(player),
+		heavy = heavy,
 	})
 	if landed == nil then
 		return
@@ -414,8 +461,11 @@ local function onAttack(player: Player, payload: buffer)
 		)
 	end
 	if landed > 0 then
-		-- (Player.attack: causeFoodExhaustion after a hit that hurt.)
-		ToughAsNails.attacked(player)
+		-- (Player.attack: causeFoodExhaustion after a hit that hurt; a heavy one costs more:
+		-- Weapons/Melee.)
+		for _ = 1, Melee.exhaustion(heavy) do
+			ToughAsNails.attacked(player)
+		end
 	end
 	if landed > 0 and not GameMode.instabuild(mode) then
 		local wear = Combat.wear(held)
@@ -660,6 +710,68 @@ end
 	already burning stays): the Wand of Sparking's spark (Players/Magic). Water and rain put it out
 	as any fire. Whether it is burning now.
 ]]
+--[[
+	A shot's hit (server Weapons/; every pellet of one shot summed): hurts mob `id` by `amount`
+	half hearts, credited to `player` (kills count: Mobs.died and Progression, as melee kills),
+	pushed away from (ox, oz) by `knockback` blocks a tick. Like a magic projectile it keeps its
+	own immunity (the hurt cooldown never refuses it: automatic fire lands every round); a `head`
+	hit goes through no armor. Returns what landed.
+]]
+function Mobs.weaponDamage(
+	id: number,
+	amount: number,
+	player: Player?,
+	ox: number,
+	oz: number,
+	knockback: number,
+	head: boolean
+): number
+	local mobs = mobWorld
+	if mobs == nil then
+		return 0
+	end
+	return mobs:hurt(id, amount, {
+		player = player,
+		x = ox,
+		z = oz,
+		knockback = knockback,
+		bypassArmor = head,
+		ownImmunity = true,
+	})
+end
+
+--[[
+	The live mobs within `radius` blocks of (x, y, z) a shot of `player`'s may hit (WeaponTarget),
+	each with the feet `player`'s client was last sent (Mobs/MobTracking's record, in blocks), for
+	the lag compensation of server Weapons/.
+]]
+function Mobs.targets(player: Player, x: number, y: number, z: number, radius: number): { WeaponTarget }
+	local mobs = mobWorld
+	local found: { WeaponTarget } = {}
+	if mobs == nil then
+		return found
+	end
+	local seen = known[player]
+	local scale = Protocol.MOB_POSITION_SCALE
+	for _, mob in mobs:near(x, y, z, radius) do
+		local body = mob.body
+		local sent = if seen then seen[mob.id] else nil
+		table.insert(found, {
+			id = mob.id,
+			kind = mob.kind,
+			variant = mob.variant,
+			x = body.x,
+			y = body.y,
+			z = body.z,
+			yaw = body.yaw,
+			sx = if sent then sent.x / scale else nil,
+			sy = if sent then sent.y / scale else nil,
+			sz = if sent then sent.z / scale else nil,
+		})
+	end
+	return found
+end
+
 function Mobs.ignite(id: number, ticks: number): boolean
 	local mobs = mobWorld
 	local mob = if mobs then mobs:get(id) else nil

@@ -77,6 +77,16 @@
 	copies the data, crafting results have none (except a recipe that keeps an ingredient's,
 	Crafting/Recipes `keep`: a Battery's tier upgrade keeps its charge), and a creative `creative`
 	action may set both (Minecraft's creative slot packet; the data must pass Items.validData).
+
+	Weapons in the manner of DayZ (Shared/Weapons): a PICKUP click asks Weapons/Loading first
+	(`Loading.click`: ammunition dropped on a magazine or a gun loads it, a magazine on its gun
+	attaches, an attachment on a gun mounts, a right click with an empty cursor unloads), right
+	after a crafting result's own rule, and Minecraft's pickup runs only when it did not handle the
+	click; Loading gets Menu's slot functions (`get`, `set`, `add`), as it never requires Menu. The
+	`weapon` action is Loading.apply's (reload, a round, a jam cleared, the fire mode, the light,
+	detaching), the `fire` action WeaponState.fire's on the held firearm (only when the hand holds
+	the action's item; a refused shot changes nothing). Both are allowed wherever a player may
+	interact (`allows`), and replay on the client like every other action.
 ]]
 
 local Items = require(script.Parent.Parent.Items)
@@ -85,6 +95,8 @@ local Crafting = require(script.Parent.Parent.Crafting)
 local Machines = require(script.Parent.Parent.Machines)
 local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Types = require(script.Parent.Types)
+local Loading = require(script.Parent.Parent.Weapons.Loading)
+local WeaponState = require(script.Parent.Parent.Weapons.WeaponState)
 
 type Stack = Types.Stack
 type Window = Types.Window
@@ -577,6 +589,9 @@ function Menu.add(inventory: Inventory, stack: Stack): Stack?
 	return make(item, count, damage, data)
 end
 
+-- Menu's slot functions as Weapons/Loading takes them (it never requires Menu).
+local OPS: Loading.MenuOps = table.freeze({ get = Menu.get, set = Menu.set, add = Menu.add })
+
 --[[ Clicks ]]
 
 -- Clicking outside the window with a stack: throw all of it (left) or one (right).
@@ -619,6 +634,10 @@ end
 local function pickup(window: Window, index: number, button: number)
 	if isCraftResult(window, index) then
 		pickupResult(window, index)
+		return
+	end
+	-- (Loading, unloading and attaching weapons: Weapons/Loading's, before Minecraft's rules.)
+	if Loading.click(window, index, button, OPS) then
 		return
 	end
 	local inventory = window.inventory
@@ -1229,6 +1248,24 @@ local function applyAction(window: Window, action: Action, creative: boolean): {
 			inventory.hidden = if hidden then bit32.bor(bits, bit) else bit32.band(bits, bit32.bnot(bit))
 		end
 		return {}
+	elseif action.kind == "weapon" then
+		-- (Reloading, a round by hand, a jam, the fire mode, the light, detaching: Weapons/Loading.)
+		return Loading.apply(window, action, creative, OPS)
+	elseif action.kind == "fire" then
+		-- One shot of the held firearm (Weapons/WeaponState.fire); refused, nothing changes.
+		local selected = inventory.selected
+		if not isInt(selected) or selected < 1 or selected > HOTBAR then
+			return {}
+		end
+		local held = inventory.slots[selected]
+		if held == nil or held.count < 1 or held.item ~= action.item then
+			return {}
+		end
+		local fired = WeaponState.fire(held, action.jam == true, creative)
+		if fired then
+			inventory.slots[selected] = fired
+		end
+		return {}
 	end
 	return {}
 end
@@ -1237,8 +1274,8 @@ end
 	May a player in game `mode` (Shared/GameMode) perform `action` at all? Spectators open menus
 	read only: they may only close a window and pick a hotbar slot (Minecraft's
 	handleContainerClick sends a spectator the menu again instead of clicking, Q drops nothing,
-	handleSetCreativeModeSlot wants creative). Creative slots need instabuild. The rest is up to
-	`apply`'s rules.
+	handleSetCreativeModeSlot wants creative). Creative slots need instabuild. The rest (the
+	weapons' `weapon` and `fire` among them) is up to `apply`'s rules.
 ]]
 function Menu.allows(action: Action, mode: string): boolean
 	if action.kind == "close" or action.kind == "select" then

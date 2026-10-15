@@ -525,6 +525,15 @@ smelt("Concrete", "CrackedConcrete")
 smelt("Brick", "CrackedBricks")
 smelt("ScrapMetal", "IronNugget")
 
+--[[
+	Weapons (Shared/Weapons; DayZ makes no gun, magazine or round: the ruins and bunkers hide them,
+	Generation/ScavengeLoot):
+	  Improvised Suppressor  a Glass Bottle and Duct Tape (it muffles a few dozen shots)
+	  Crossbow Bolt          an Iron Nugget over a Stick over a Feather make four (the Iron Age's)
+]]
+mix({ "GlassBottle", "DuctTape" }, "ImprovisedSuppressor")
+shape({ "N", "S", "F" }, { N = "IronNugget", S = "Stick", F = "Feather" }, "CrossbowBolt", 4)
+
 Recipes.fuel = {
 	Coal = 1600,
 	Charcoal = 1600,

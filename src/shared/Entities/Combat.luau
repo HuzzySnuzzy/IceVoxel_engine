@@ -17,13 +17,15 @@
 	            The server allows SERVER_LEEWAY more for the mob's movement and the latency.
 	  Knockback LivingEntity.knockback(0.4) away from the attacker (`knockback`): the velocity
 	            halves and the push is added sideways; on the ground the mob hops up to 0.4.
-	  Wear      Minecraft's hurtEnemy: a sword wears 1 a hit, other tools 2, a bat 1 (`wear`).
+	  Wear      Minecraft's hurtEnemy: a sword wears 1 a hit, other tools 2, a bat 1 (`wear`); a
+	            firearm's bash (Shared/Weapons: a lowered gun's `attack`) never wears it.
 
 	Units are blocks and ticks.
 ]]
 
 local GameMode = require(script.Parent.Parent.GameMode)
 local Items = require(script.Parent.Parent.Items)
+local Weapons = require(script.Parent.Parent.Weapons)
 
 local Combat = {}
 
@@ -79,10 +81,11 @@ function Combat.reach(mode: string): number
 end
 
 -- How much hitting a mob wears `item` (Minecraft's hurtEnemy): swords 1, other tools 2, a
--- weapon that is no tool (the apocalypse's bats: an `attack` and a `durability`) 1, else 0.
+-- weapon that is no tool (the apocalypse's bats: an `attack` and a `durability`) 1, a firearm's
+-- bash 0 (guns wear only by firing), else 0.
 function Combat.wear(item: number?): number
 	local def = if item then Items.get(item) else nil
-	if def == nil or def.durability == nil then
+	if def == nil or def.durability == nil or Weapons.firearm(item) ~= nil then
 		return 0
 	end
 	local tool = Items.tool(item)

@@ -27,6 +27,10 @@
 	                   6 close     u8 window
 	                   7 hide      u8 slot (1..7 an accessory's look, 9..12 an armor piece's),
 	                               u8 hidden (0 / 1): Terraria's eye toggles
+	                   8 weapon    u8 op (1..6), i16 slot (-1: the held weapon), u8 part (0..6):
+	                               a weapon action (Shared/Weapons/Loading: reload, a round by
+	                               hand, a jam cleared, the fire mode, the light, detaching)
+	                 (The `fire` action is never sent here: its number rides a Fire message.)
 	  Use            i32 x, u16 y, i32 z: right click on a usable block (opens a chest)
 	  UseItem        i32 x, u16 y, i32 z, u8 side (0..5), u8 flags (bit 0: sneaking): a right click
 	                 on block (x, y, z) with an item that is no block (the Configurator, buckets).
@@ -77,8 +81,10 @@
 	                   3 cancel  let go early
 	                   4 hand    a sip from the water source with an empty hand
 	                   5 fill    fill the held Glass Bottle or canteen at the water source
-	  Attack         u32 mob id: a left click on a mob (server Mobs/Mobs checks the reach from the
-	                 eyes, the line of sight and the game mode, and hits with the held item)
+	  Attack         u32 mob id, then optionally u8 flags (bit 0: a heavy attack, the melee
+	                 rework's: Shared/Weapons/Melee; other bits 0): a left click on a mob (server
+	                 Mobs/Mobs checks the reach from the eyes, the line of sight and the game mode,
+	                 and hits with the held item); 4 or 5 bytes
 	  Eat            u8 action: 1 start / 2 finish / 3 cancel holding a food (Shared/Items/Foods;
 	                 the server checks the time held and the item, as for Drink)
 	  UnlockSkill    u8 skill: unlock node `skill` of the skill tree (its place in
@@ -111,6 +117,9 @@
 	                 avatar editor's look and previews (Net/CharacterSync, its codecs and bytes)
 	  HeldUse        use the held item without a block: a magic weapon casts, a Mana Crystal is
 	                 used up (Net/MagicSync)
+	  Fire           a shot of the held firearm, its inventory action number (the predicted
+	                 `fire`) aboard: aim, stance, origin and direction (Net/WeaponSync)
+	  Weapon         raising or lowering a firearm, guarding with a melee weapon (Net/WeaponSync)
 
 	Server -> client
 	  ChunkEdits     u16 chunkCount, per chunk: i32 cx, i32 cz, u32 count, count x (u32 localIndex, u16 block)
@@ -288,6 +297,8 @@
 	  Avatar         the user's own avatar for the character editor (Net/CharacterSync)
 	  Mana           the player's mana and max mana (Net/MagicSync)
 	  Projectiles    magic projectiles near the player: spawn, sync, end (Net/MagicSync)
+	  Shots          the shots fired near the player (and their own, refused or not): where each
+	                 pellet ended and what it hit (Net/WeaponSync)
 
 	Item data (Items.Data, Minecraft's item NBT, flat): u8 n (0 = no data, at most
 	  Items.MAX_DATA_KEYS), then n entries sorted by key: u8 keyLength (1..32) + key ([%w_]),
@@ -359,6 +370,8 @@ Protocol.ClientMessage = {
 	Spectate = 24,
 	CharacterAction = 25,
 	HeldUse = 26,
+	Fire = 27,
+	Weapon = 28,
 }
 
 Protocol.ServerMessage = {
@@ -394,6 +407,7 @@ Protocol.ServerMessage = {
 	Mana = 30,
 	Projectiles = 31,
 	Survivor = 32,
+	Shots = 33,
 }
 
 Protocol.EditAction = {
@@ -680,8 +694,15 @@ end
 
 local ACTION_CLICK, ACTION_DRAG, ACTION_SELECT, ACTION_DROP, ACTION_CREATIVE, ACTION_CLOSE = 1, 2, 3, 4, 5, 6
 local ACTION_HIDE = 7
+local ACTION_WEAPON = 8
+-- A weapon action's ops and parts (Shared/Weapons/Loading.Op, .Part).
+Protocol.WEAPON_OPS = 6
+Protocol.WEAPON_PARTS = 6
 
--- Encodes inventory action number `seq`. `place` actions travel inside Edit messages instead.
+--[[
+	Encodes inventory action number `seq`. `place` actions travel inside Edit messages instead, and
+	`fire` actions inside Fire messages (Net/WeaponSync): either errors here.
+]]
 function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Action): buffer
 	local b
 	if action.kind == "click" then
@@ -727,6 +748,12 @@ function Protocol.encodeInventoryAction(seq: number, action: InventoryTypes.Acti
 		buffer.writeu8(b, 4, ACTION_HIDE)
 		buffer.writeu8(b, 5, action.slot)
 		buffer.writeu8(b, 6, if action.hidden then 1 else 0)
+	elseif action.kind == "weapon" then
+		b = buffer.create(9)
+		buffer.writeu8(b, 4, ACTION_WEAPON)
+		buffer.writeu8(b, 5, action.op)
+		buffer.writei16(b, 6, action.slot)
+		buffer.writeu8(b, 8, action.part)
 	else
 		error(`Inventory action {action.kind} is not sent on its own`)
 	end
@@ -792,6 +819,12 @@ function Protocol.decodeInventoryAction(b: buffer): (number?, InventoryTypes.Act
 			return nil, nil
 		end
 		return seq, { kind = "hide", slot = buffer.readu8(b, 5), hidden = hidden == 1 }
+	elseif kind == ACTION_WEAPON and len == 9 then
+		local op, part = buffer.readu8(b, 5), buffer.readu8(b, 8)
+		if op < 1 or op > Protocol.WEAPON_OPS or part > Protocol.WEAPON_PARTS then
+			return nil, nil
+		end
+		return seq, { kind = "weapon", op = op, slot = buffer.readi16(b, 6), part = part }
 	end
 	return nil, nil
 end
@@ -2804,18 +2837,29 @@ function Protocol.decodeSurvivor(b: buffer): Survivor?
 	return { alive = buffer.readu32(b, 0), kills = buffer.readu16(b, 4), moons = buffer.readu16(b, 6) }
 end
 
-function Protocol.encodeAttack(id: number): buffer
-	local b = buffer.create(4)
+-- An Attack on mob `id` (see the header); a `heavy` one (the melee rework's) carries its flags byte.
+function Protocol.encodeAttack(id: number, heavy: boolean?): buffer
+	local b = buffer.create(if heavy then 5 else 4)
 	buffer.writeu32(b, 0, id)
+	if heavy then
+		buffer.writeu8(b, 4, 1)
+	end
 	return b
 end
 
--- The mob id of an Attack message, nil when malformed.
-function Protocol.decodeAttack(b: buffer): number?
-	if buffer.len(b) ~= 4 then
-		return nil
+-- The mob id of an Attack message and whether it is a heavy attack; nil when malformed.
+function Protocol.decodeAttack(b: buffer): (number?, boolean)
+	local len = buffer.len(b)
+	if len == 4 then
+		return buffer.readu32(b, 0), false
+	elseif len == 5 then
+		local flags = buffer.readu8(b, 4)
+		if flags > 1 then
+			return nil, false
+		end
+		return buffer.readu32(b, 0), flags == 1
 	end
-	return buffer.readu32(b, 0)
+	return nil, false
 end
 
 -- Eat actions (see the header).

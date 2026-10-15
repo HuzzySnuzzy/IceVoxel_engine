@@ -73,6 +73,17 @@
 
 	Saved      a saved world keeps every player's inventory (World/WorldSave reads it through
 	           `get`, and puts a returning player's back with `restore`).
+
+	Weapons    (Shared/Weapons) a shot comes from server Weapons/ (`fire`: the Fire message's
+	           action number acknowledged, the round fired and the wear applied; it hands back the
+	           gun as it was). The inventory's `weapon` actions (reload, a round, a jam, the fire
+	           mode, the light, detaching) pass the weapon hooks (`setWeaponHooks`, server
+	           Weapons/' locks and sounds): `allow` may refuse one (acknowledged unchanged, so the
+	           client's prediction is undone), `applied` hears of each one handled with the stack it
+	           acted on before and after. A firearm's bash and anything else never wears a gun
+	           (`wearTool` skips firearms and magazines: they wear only by firing). Beside
+	           Types.HELD_ATTRIBUTE every snapshot sets Types.HELD_LOOK_ATTRIBUTE, what dresses the
+	           held gun (WeaponState.lookKey: "" for anything else), when it changed.
 ]]
 
 local Players = game:GetService("Players")
@@ -85,11 +96,14 @@ local Blocks = require(Shared.Blocks)
 local ChunkLayout = require(Shared.World.ChunkLayout)
 local Coords = require(Shared.World.Coords)
 local GameMode = require(Shared.GameMode)
+local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local SharedSounds = require(Shared.Sounds)
 local Types = require(Shared.Inventory.Types)
 local Menu = require(Shared.Inventory.Menu)
 local Accessories = require(Shared.Items.Accessories)
+local Weapons = require(Shared.Weapons)
+local WeaponState = require(Shared.Weapons.WeaponState)
 
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
@@ -102,6 +116,17 @@ local GameModeRules = require(script.Parent.GameModeRules)
 local PlayerPositions = require(script.Parent.PlayerPositions)
 
 type Stack = Types.Stack
+
+--[[
+	Server Weapons/' say over the inventory's `weapon` actions (`setWeaponHooks`): `allow` (nil:
+	all) may refuse one before it runs; `applied` (nil: none) hears of one that ran, with the stack
+	it acted on before and after (the held stack for slot -1, else the window slot's; copies, nil
+	for none).
+]]
+export type WeaponHooks = {
+	allow: ((player: Player, action: Types.Action) -> boolean)?,
+	applied: ((player: Player, action: Types.Action, before: Stack?, after: Stack?) -> ())?,
+}
 
 local HEIGHT = Config.WorldHeight
 -- Seconds between the checks that close chests players walked away from.
@@ -198,6 +223,23 @@ end
 -- Acknowledges inventory action `seq` (a refused placement), so the client undoes its prediction.
 function Inventories.acknowledge(player: Player, seq: number)
 	state:acknowledge(player, seq)
+end
+
+--[[
+	A shot of the held firearm `item` (the Fire message's action number `seq`), after server
+	Weapons/' checks: acknowledges `seq` whatever happens and fires (InventoryState.fire: `jam`
+	the server's roll; creative players fire for free). Returns the gun as it was before the shot
+	(its `ch` the round fired), nil when nothing was fired.
+]]
+function Inventories.fire(player: Player, seq: number, item: number, jam: boolean): Stack?
+	return state:fire(player, seq, item, jam, GameMode.instabuildOf(player))
+end
+
+local weaponHooks: WeaponHooks? = nil
+
+-- Server Weapons/' hooks over the inventory's `weapon` actions (see WeaponHooks); nil: none.
+function Inventories.setWeaponHooks(hooks: WeaponHooks?)
+	weaponHooks = hooks
 end
 
 --[[
@@ -367,6 +409,11 @@ end
 -- breaks, which everyone near hears (the owner too: clients don't predict wear). The wear
 -- filter (perks) may skip some of it.
 function Inventories.wearTool(player: Player, amount: number)
+	-- (Firearms and magazines wear only by firing, Shared/Weapons/WeaponState.fire.)
+	local held = state:heldStack(player)
+	if held and (Weapons.firearm(held.item) or Weapons.magazine(held.item)) then
+		return
+	end
 	local filter = wearFilter
 	if filter then
 		amount = filter(player, amount)
@@ -488,10 +535,33 @@ local function onUse(world: WorldServer.World, player: Player, payload: buffer)
 	throw(player, thrown, false)
 end
 
+-- The stack a weapon action acts on (see WeaponHooks): a copy, nil for none.
+local function weaponTarget(player: Player, action: Types.Action): Stack?
+	if action.kind ~= "weapon" then
+		return nil
+	end
+	if action.slot == -1 then
+		return Items.copyStack(state:heldStack(player))
+	end
+	local window = state:window(player)
+	return if window then Items.copyStack(Menu.get(window, action.slot)) else nil
+end
+
 local function onInventory(player: Player, payload: buffer)
 	local seq, action = Protocol.decodeInventoryAction(payload)
 	if seq == nil or action == nil then
 		return
+	end
+	-- A weapon action: server Weapons/ may refuse it (its locks), and hears of it after.
+	local hooks = if action.kind == "weapon" then weaponHooks else nil
+	local before: Stack? = nil
+	if hooks then
+		local allow = hooks.allow
+		if allow and not allow(player, action) then
+			state:acknowledge(player, seq)
+			return
+		end
+		before = weaponTarget(player, action)
 	end
 	-- An action in a furnace window may give it something to cook or burn.
 	local window = state:window(player)
@@ -512,6 +582,9 @@ local function onInventory(player: Player, payload: buffer)
 	local thrown = state:applyAs(player, seq, action, GameMode.of(player))
 	actor = nil
 	throw(player, thrown, false)
+	if hooks and hooks.applied then
+		hooks.applied(player, action, before, weaponTarget(player, action))
+	end
 	if fx ~= nil and container and container.kind == "furnace" then
 		Containers.default:markActive(fx, fy, fz)
 	end
@@ -689,6 +762,11 @@ function Inventories.start(net: ServerNet.ServerNet, world: WorldServer.World)
 				local item = if held then held.item else 0
 				if player:GetAttribute(Types.HELD_ATTRIBUTE) ~= item then
 					player:SetAttribute(Types.HELD_ATTRIBUTE, item)
+				end
+				-- (And what dresses a held gun: its magazine, attachments and light.)
+				local look = WeaponState.lookKey(held)
+				if (player:GetAttribute(Types.HELD_LOOK_ATTRIBUTE) or "") ~= look then
+					player:SetAttribute(Types.HELD_LOOK_ATTRIBUTE, look)
 				end
 				-- The accessories' sums, speed factor and looks (see the header).
 				refreshEquipment(player, inventory)

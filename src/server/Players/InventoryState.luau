@@ -35,6 +35,11 @@
 	hand with `setHeld` and hands stacks over with `give` (Inventory.add; the rest comes back);
 	`has` is Minecraft's Inventory.contains.
 
+	Firing a firearm (Shared/Weapons) travels in Fire messages, not as an inventory action: `fire`
+	acknowledges the shot's action number and applies Inventory/Menu's `fire` action on the held
+	gun (WeaponState.fire: the chamber empties, the next round feeds, the gun wears, a rolled jam),
+	handing back the gun as it was before, from which the round fired is read.
+
 	Functions that take stacks out of the world (throws, close leftovers, deaths) return them; the
 	caller turns them into item entities. Stacks keep their item data (Items `data`) through all of
 	it; `place` hands back the stack a block was placed from, data included, so whatever kept the
@@ -50,6 +55,7 @@ local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
+local WeaponState = require(Shared.Weapons.WeaponState)
 
 local Containers = require(script.Parent.Containers)
 
@@ -85,6 +91,7 @@ export type InventoryState = {
 	apply: (self: InventoryState, key: any, seq: number, action: Action, creative: boolean) -> { Stack },
 	applyAs: (self: InventoryState, key: any, seq: number, action: Action, mode: string) -> { Stack },
 	place: (self: InventoryState, key: any, block: number, seq: number, creative: boolean) -> (boolean, Stack?),
+	fire: (self: InventoryState, key: any, seq: number, item: number, jam: boolean, creative: boolean) -> Stack?,
 	acknowledge: (self: InventoryState, key: any, seq: number) -> (),
 	open: (
 		self: InventoryState,
@@ -211,8 +218,9 @@ function InventoryState.apply(self: InventoryState, key: any, seq: number, actio
 	end
 	acknowledge(player, seq)
 	local window = player.window
-	if action.kind == "place" then
-		-- Placing travels in Edit messages and goes through `place`, after the block checks.
+	if action.kind == "place" or action.kind == "fire" then
+		-- Placing travels in Edit messages and goes through `place`, after the block checks; a shot
+		-- in Fire messages, through `fire`.
 		return {}
 	elseif action.kind == "close" then
 		if action.window ~= window.id then
@@ -223,7 +231,7 @@ function InventoryState.apply(self: InventoryState, key: any, seq: number, actio
 	end
 	local thrown = Menu.apply(window, action, creative)
 	local kind = action.kind
-	if kind == "click" or kind == "drag" or kind == "creative" then
+	if kind == "click" or kind == "drag" or kind == "creative" or kind == "weapon" then
 		-- Other viewers of the same chest see the change.
 		markViewers(self, key, player)
 	end
@@ -281,6 +289,36 @@ function InventoryState.place(
 	end
 	Menu.apply(player.window, { kind = "place", item = item }, false)
 	return true, from
+end
+
+--[[
+	A shot of the held firearm `item` (inventory action `seq`, from the Fire message), after the
+	server's checks: acknowledges `seq` whatever happens, then applies the `fire` action
+	(Inventory/Menu: WeaponState.fire with the server's `jam` roll; `creative` fires for free).
+	Returns the held gun as it was before the shot (a copy: its `ch` is the round fired), or nil
+	when nothing was fired (no such player, the hand holds something else, or the gun can't fire).
+]]
+function InventoryState.fire(
+	self: InventoryState,
+	key: any,
+	seq: number,
+	item: number,
+	jam: boolean,
+	creative: boolean
+): Stack?
+	local player = self.players[key]
+	if player == nil then
+		return nil
+	end
+	acknowledge(player, seq)
+	local inventory = player.window.inventory
+	local held = inventory.slots[inventory.selected]
+	if held == nil or held.count < 1 or held.item ~= item or WeaponState.fire(held, jam, creative) == nil then
+		return nil
+	end
+	local before = Items.copyStack(held)
+	Menu.apply(player.window, { kind = "fire", item = item, jam = jam }, creative)
+	return before
 end
 
 -- Acknowledges action `seq` without changing anything (a refused placement: undoes the prediction).

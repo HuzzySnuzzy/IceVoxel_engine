@@ -304,6 +304,11 @@ local TOOLTIPS: { [string]: string } = {
 	jeiBack = "Back to the recipes shown before.",
 	weatherMap = "Switches the minimap and the world map to the weather: rain, snow, storms, clouds, "
 		.. "the wind and a forecast.",
+	reload = "Reloads the firearm in your hand from your best magazine, or a round at a time into "
+		.. "its own; clears a jam.",
+	fireMode = "Switches the firearm in your hand between single shots and automatic fire.",
+	weaponLight = "Turns the light mounted on the firearm in your hand on or off.",
+	sights = "With a firearm raised in third person: looks down its sights, and back over the " .. "shoulder.",
 }
 
 local progression = (Config :: any).Progression
@@ -346,6 +351,12 @@ local ACTIONS: { Action } = {
 	-- The maps' weather mode (Map/WeatherLayer: precipitation, thunder and clouds, the wind and
 	-- the forecast over the minimap and the world map).
 	action("weatherMap", "Weather Map", "map", "B", "game"),
+	-- The firearms' keys (Shared/Weapons, client Interaction/Firearms): reload or clear a jam, the
+	-- fire mode, the weapon light, the sights in third person.
+	action("reload", "Reload / Clear Jam", "gameplay", "R", "game"),
+	action("fireMode", "Fire Mode", "gameplay", "F", "game"),
+	action("weaponLight", "Weapon Light", "gameplay", "L", "game"),
+	action("sights", "Toggle Sights", "gameplay", "V", "game"),
 }
 
 local byId: { [string]: Action } = {}

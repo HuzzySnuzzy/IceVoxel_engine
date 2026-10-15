@@ -150,6 +150,22 @@
 	them to everyone else): a block's break sound when it breaks, its place sound when placed (the
 	variant placed), and while mining in survival its hit sound every 4 ticks on one block
 	(SoundRules.hitTick), unbreakable ones too.
+
+	Weapons in the manner of DayZ (Shared/Weapons), handed to their own modules here:
+	  Firearms  with a firearm in hand the attack button never mines or breaks a block (in any
+	            mode): a press goes to Interaction/Firearms.attackPress (a raised gun fires), and
+	            when it doesn't take it a mob in reach is bashed (an Attack with the gun: its
+	            ItemList `attack`). The use button, unless it is on a block that opens a menu (a
+	            chest, a door, the hatch) and the player doesn't sneak, goes to Firearms.usePress
+	            (raising), with a free mouse too (no camera drag then); one it doesn't take uses as
+	            before. Touch: holds and taps with a firearm only use blocks (its buttons are
+	            Firearms'). Minecraft's crosshair hides while Firearms.hidesCrosshair or
+	            `setCrosshairHidden` says so.
+	  Melee     a press on a mob in reach goes to Interaction/MeleeInput.press (a light attack at
+	            once, or later on release, or a heavy one: `attack(mob, heavy)`), its release to
+	            MeleeInput.release; the use button with a listed melee weapon (Weapons.melee), on
+	            the same terms as a firearm's, to MeleeInput.guardPress (guarding).
+	Firearms and MeleeInput never require this module (it requires them).
 ]]
 
 local Players = game:GetService("Players")
@@ -178,6 +194,7 @@ local Drinks = require(Shared.ToughAsNails.Drinks)
 local Boiling = require(Shared.ToughAsNails.Boiling)
 local Combat = require(Shared.Entities.Combat)
 local Rope = require(Shared.Rope)
+local Weapons = require(Shared.Weapons)
 
 local ClientWorld = require(script.Parent.Parent.World.ClientWorld)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
@@ -206,6 +223,8 @@ local MobRenderer = require(script.Parent.Parent.Entities.MobRenderer)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local AttackIndicator = require(script.Parent.Parent.Ui.AttackIndicator)
+local Firearms = require(script.Parent.Firearms)
+local MeleeInput = require(script.Parent.MeleeInput)
 
 local BLOCK = Config.BlockSize
 local REACH = Config.Interaction.Reach
@@ -295,6 +314,20 @@ end
 -- The side of the aimed-at transmitter the Configurator would act on, or nil. Read only.
 function BlockInteraction.targetSide(): number?
 	return readSide()
+end
+
+-- Minecraft's crosshair (shown for gamepads) hidden by another module (a raised firearm's own dot
+-- or sights; Interaction/Firearms hides it through Firearms.hidesCrosshair instead).
+local crosshairHidden = false
+
+-- Hides (true) or shows again (false) Minecraft's crosshair.
+function BlockInteraction.setCrosshairHidden(hidden: boolean)
+	crosshairHidden = hidden
+end
+
+-- Is `stack` a firearm (Shared/Weapons)?
+local function isFirearm(stack: Items.Stack?): boolean
+	return stack ~= nil and Weapons.firearm(stack.item) ~= nil
 end
 
 type Particle = {
@@ -534,7 +567,9 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	-- MouseEnabled alone would aim at wherever the hidden cursor was left.)
 	local function pointer(): Vector2
 		local preferred = UserInputService.PreferredInput
-		crosshair.Visible = preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad
+		crosshair.Visible = (preferred == Enum.PreferredInput.Gamepad or preferred == Enum.PreferredInput.MicroGamepad)
+			and not crosshairHidden
+			and not Firearms.hidesCrosshair()
 		if
 			preferred == Enum.PreferredInput.KeyboardAndMouse
 			and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
@@ -1313,9 +1348,10 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	--[[ Hitting mobs ]]
 
-	-- Hits `mob` (the server checks the reach, the sight and the game mode, then hurts it).
-	local function attack(mob: MobRenderer.MobView)
-		ClientNet.send(Protocol.ClientMessage.Attack, Protocol.encodeAttack(mob.id))
+	-- Hits `mob` (the server checks the reach, the sight and the game mode, then hurts it); a
+	-- `heavy` hit is the melee rework's heavy attack (Interaction/MeleeInput).
+	local function attack(mob: MobRenderer.MobView, heavy: boolean?)
+		ClientNet.send(Protocol.ClientMessage.Attack, Protocol.encodeAttack(mob.id, heavy == true))
 		-- (The weapon starts recovering: the attack indicator, Ui/AttackIndicator.)
 		AttackIndicator.attacked()
 		swing()
@@ -1334,10 +1370,20 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 		end
 		local mode = ClientInventory.mode()
 		local mob = mobTarget
-		if mob and not GameMode.isSpectator(mode) then
-			-- A mob in front of the block: hit it (one hit a press), mine nothing.
+		local held = ClientInventory.selectedStack()
+		if isFirearm(held) and not GameMode.isSpectator(mode) then
+			-- A firearm never mines: raised it fires (Interaction/Firearms), lowered it bashes.
 			stopMining()
-			attack(mob)
+			if not Firearms.attackPress(source, mob, attack) and mob then
+				attack(mob)
+			end
+			return
+		end
+		if mob and not GameMode.isSpectator(mode) then
+			-- A mob in front of the block: hit it (one hit a press: light or heavy, at once or on
+			-- release, Interaction/MeleeInput), mine nothing.
+			stopMining()
+			MeleeInput.press(source, mob, held, attack)
 			return
 		end
 		if GameMode.isSpectator(mode) then
@@ -1366,13 +1412,68 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 
 	local function endAttack(source: string)
 		attackHeld[source] = nil
+		Firearms.attackRelease(source)
+		MeleeInput.release(source, mobTarget, attack)
 		if not anyHeld(attackHeld) then
 			stopMining()
 		end
 	end
 
+	-- Use presses a weapon took, by source: "firearm" (Firearms.usePress: raising) or "melee"
+	-- (MeleeInput.guardPress: guarding).
+	local weaponUseHeld: { [string]: string } = {}
+
+	--[[
+		The use button went down (`source`) with a firearm or a listed melee weapon in hand, not on
+		a block that opens a menu (unless sneaking): true when its module took it (see the header).
+	]]
+	local function weaponUse(source: string): boolean
+		if weaponUseHeld[source] ~= nil then
+			return true
+		end
+		local mode = ClientInventory.mode()
+		local held = ClientInventory.selectedStack()
+		if held == nil or GameMode.isSpectator(mode) then
+			return false
+		end
+		local firearm = isFirearm(held)
+		if not firearm and Weapons.melee(held.item) == nil then
+			return false
+		end
+		local view = MovementController.current
+		local sneaking = view ~= nil and view.state.sneaking
+		local hit = target
+		if hit and opensMenu(hit.block, mode) and not sneaking then
+			return false
+		end
+		if firearm then
+			if Firearms.usePress(source) then
+				weaponUseHeld[source] = "firearm"
+				return true
+			end
+		elseif MeleeInput.guardPress(source) then
+			weaponUseHeld[source] = "melee"
+			return true
+		end
+		return false
+	end
+
+	-- The use button a weapon took went up.
+	local function weaponUseEnd(source: string)
+		local taken = weaponUseHeld[source]
+		weaponUseHeld[source] = nil
+		if taken == "firearm" then
+			Firearms.useRelease(source)
+		elseif taken == "melee" then
+			MeleeInput.guardRelease(source)
+		end
+	end
+
 	local function beginUse(source: string, hit: Hit?, ray: Ray?)
 		if Screens.isOpen() or GameModeSwitcher.isOpen() then
+			return
+		end
+		if useHeld[source] == nil and weaponUse(source) then
 			return
 		end
 		local first = not anyHeld(useHeld)
@@ -1384,6 +1485,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	end
 
 	local function endUse(source: string)
+		weaponUseEnd(source)
 		useHeld[source] = nil
 		if not anyHeld(useHeld) then
 			useSpent = false
@@ -1399,6 +1501,13 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 	local rightMoved = 0
 
 	local function releaseAll()
+		for source in attackHeld do
+			Firearms.attackRelease(source)
+			MeleeInput.release(source, nil, attack)
+		end
+		for source in weaponUseHeld do
+			weaponUseEnd(source)
+		end
 		table.clear(attackHeld)
 		table.clear(useHeld)
 		useSpent = false
@@ -1474,8 +1583,15 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			end
 		end
 		if startHold then
-			-- (With a magic weapon a held finger casts at it instead of breaking: Interaction/Casting.)
-			if Casting.handles(ClientInventory.selectedStack()) and not GameMode.isSpectator(mode) then
+			-- (With a magic weapon a held finger casts at it instead of breaking: Interaction/Casting.
+			-- With a firearm it does nothing: its touch buttons are Interaction/Firearms'.)
+			local inHand = ClientInventory.selectedStack()
+			if isFirearm(inHand) then
+				if t then
+					t.holding = false
+					t.moved = true
+				end
+			elseif Casting.handles(inHand) and not GameMode.isSpectator(mode) then
 				beginUse("touch", target, targetRay)
 			else
 				beginAttack("touch")
@@ -1511,15 +1627,17 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				releaseAll()
 			end
 		else
-			-- Breaking: at once with instabuild, over time in survival, never without mayBuild.
-			if GameMode.instabuild(mode) then
+			-- Breaking: at once with instabuild, over time in survival, never without mayBuild, and
+			-- never with a firearm in hand (it raises, fires and bashes: Interaction/Firearms).
+			local firearm = isFirearm(ClientInventory.selectedStack())
+			if GameMode.instabuild(mode) and not firearm then
 				if mining then
 					stopMining()
 				end
 				if anyHeld(attackHeld) then
 					creativeBreak(now)
 				end
-			elseif not GameMode.mayBuild(mode) then
+			elseif firearm or not GameMode.mayBuild(mode) then
 				if mining then
 					stopMining()
 				end
@@ -1572,9 +1690,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 				kind == Enum.UserInputType.MouseButton2
 				and UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter
 			then
-				-- A free mouse's right drag turns the camera: only a short click uses.
-				rightDownAt = os.clock()
-				rightMoved = 0
+				-- A free mouse's right drag turns the camera: only a short click uses. (A weapon's
+				-- raise or guard takes the button at once instead: no drag.)
+				if not weaponUse("mouse") then
+					rightDownAt = os.clock()
+					rightMoved = 0
+				end
 			else
 				-- First person / shift lock, or another button or key: held, it repeats.
 				beginUse("mouse", target, targetRay)
@@ -1634,7 +1755,7 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 			endAttack("mouse")
 		end
 		if Keybinds.matches("use", input) then
-			if useHeld.mouse then
+			if useHeld.mouse or weaponUseHeld.mouse then
 				endUse("mouse")
 			elseif rightDownAt then
 				-- Right drag turns the camera (the mouse stays put meanwhile, so count its
@@ -1666,10 +1787,12 @@ function BlockInteraction.start(world: ClientWorld.ClientWorld)
 					if ray then
 						mob, distance = mobOn(ray)
 					end
+					-- (A firearm's tap never bashes: it only uses blocks.)
 					if
 						mob
 						and (hit == nil or distance < hit.distance)
 						and not GameMode.isSpectator(ClientInventory.mode())
+						and not isFirearm(ClientInventory.selectedStack())
 					then
 						attack(mob)
 					else

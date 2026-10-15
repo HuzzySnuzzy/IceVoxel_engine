@@ -73,7 +73,9 @@
 	                   blasts hurting them), eating what they drop (Players/Eating; who eats or
 	                   drinks for every client to hear: Players/UseState), and the
 	                   apocalypse's survival rules (Apocalypse/Survival: bites, wounds, survivor
-	                   records) and noises (Apocalypse/NoiseBus: sounds and blasts zombies hear)
+	                   records) and noises (Apocalypse/NoiseBus: sounds and blasts zombies hear);
+	                   then the weapons (Weapons/: firearms in the manner of DayZ, Shared/Weapons:
+	                   shots, raising and guarding, the inventory's weapon actions timed)
 	 12. progress   -> knowledge, the Ages and the skill tree (Players/Progression: what players
 	                   earn mining, crafting, smelting, exploring and killing mobs, the recipe gate
 	                   on their windows, the perks the parts above ask for, saving, /knowledge and
@@ -153,6 +155,7 @@ local Mana = require(Server.Players.Mana)
 local Magic = require(Server.Players.Magic)
 local FallenStars = require(Server.Players.FallenStars)
 local Mobs = require(Server.Mobs.Mobs)
+local Weapons = require(Server.Weapons)
 local Eating = require(Server.Players.Eating)
 local UseState = require(Server.Players.UseState)
 local Survival = require(Server.Apocalypse.Survival)
@@ -258,6 +261,8 @@ local function startWorld(settings: WorldSettings.Settings)
 	FallenStars.start(net, world)
 	-- Mobs after items (their loot), characters (their hits) and inventories (attacks, eating).
 	Mobs.start(net, world)
+	-- Firearms after mobs (their targets and damage) and inventories (the rounds fired).
+	Weapons.start(net, world)
 	-- Other players' poses to those who may see them (Players/PlayerRelay; with
 	-- Config.Players.ServerPositions only).
 	PlayerRelay.start(net)
