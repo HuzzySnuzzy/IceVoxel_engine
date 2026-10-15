@@ -1,13 +1,16 @@
 --!strict
 --[[
 	Tough As Nails on the server: every player's thirst and body temperature (the rules are
-	Shared/ToughAsNails, pure and tested; this plays them out). Config.ToughAsNails turns each on
-	and off; with both off nothing here ticks, but drinking still listens: potions are drunk
-	whatever TAN does, and bottles fill at water for brewing them.
+	Shared/ToughAsNails, pure and tested; this plays them out), and beside them Minecraft's hunger
+	(Shared/Hunger: the food bar thirst was modelled on). Config.ToughAsNails turns thirst and
+	temperature on and off, Config.Hunger the food bar; with all three off nothing here ticks, but
+	drinking still listens: potions are drunk whatever TAN does, and bottles fill at water for
+	brewing them.
 
 	  Ticks      20 a second (catching up a few per frame), for every living player:
 	               * a hurt that landed since the last tick (health went down, not by this
-	                 module) costs Thirst.EXHAUSTION.hurt;
+	                 module) costs Thirst.EXHAUSTION.hurt, and as much of the food bar's
+	                 (Hunger.EXHAUSTION.hurt);
 	               * water touching the standing box (Players/Burning.touching) makes them wet, and
 	                 so does rain at their feet or the top of the box, looked at once a second
 	                 (World/WeatherServer.rainingAt: Minecraft's isInRain, TAN's wetness);
@@ -19,35 +22,52 @@
 	                 temperature off only its countdowns, Temperature.tickEffects, for the
 	                 clemency's sake), then Thirst.tick (with the HOT zone's sweating:
 	                 Config.ToughAsNails.HotExhaustion; at half the drain under the clemency;
-	                 no regeneration while fully frozen or overheated) and
+	                 no regeneration while fully frozen or overheated; none of its own at all with
+	                 hunger on), then Hunger.tick (with Minecraft's Hunger effect's exhaustion,
+	                 Hunger.effectExhaustion of the player's effects: Players/Effects; the
+	                 regeneration held as thirst's is, and wanting thirst 18 or more while
+	                 Config.ToughAsNails.ThirstRegeneration has thirst rule it; Climate Clemency
+	                 leaves the food bar alone, as TAN's does) and
 	                 what they cost or give back: Humanoid:TakeDamage (half hearts scaled to
 	                 MaxHealth, as Players/Characters does; it respects the ForceField of creative
 	                 players, who are spared anyway) and regeneration;
 	               * the player's Survival message when what it says changed, at most every
 	                 SEND_TICKS ticks (and at once for a new character).
-	  Health     with thirst on and Config.ToughAsNails.ThirstRegeneration, health comes back only
-	             by thirst's rule: the character's Roblox "Health" script (its regeneration) is
-	             removed as it appears. Otherwise that script stays, but is disabled while the
-	             body is fully frozen or overheated, as thirst's regeneration waits then
-	             (Temperature.stopsRegeneration: its half heart every 5 s would undo the
+	  Health     with hunger on, health comes back only by hunger's natural regeneration
+	             (Config.Hunger.NaturalRegeneration; none at all without it, as Minecraft's
+	             naturalRegeneration rule), and with thirst on and Config.ToughAsNails
+	             .ThirstRegeneration only while thirst is 18 or more too; with hunger off, thirst
+	             on and ThirstRegeneration, by thirst's rule (Thirst.tick's own). Either way the
+	             character's Roblox "Health" script (its regeneration) is removed as it appears.
+	             Otherwise that script stays, but is disabled while the
+	             body is fully frozen or overheated, as thirst's and hunger's regeneration wait
+	             then (Temperature.stopsRegeneration: its half heart every 5 s would undo the
 	             extremes' hurts), and while the regeneration block says so (`setRegenBlock`:
 	             the zombie apocalypse's infection from stage III, server Apocalypse/Infection),
-	             which stops thirst's regeneration too: one rule for both kinds. With thirst and
-	             temperature off no tick runs here, so the infection pauses the script itself
-	             (`pauseRegeneration`).
+	             which stops thirst's and hunger's regeneration too: one rule for every kind.
+	             With thirst, temperature and hunger off no tick runs here, so the infection
+	             pauses the script itself (`pauseRegeneration`).
 	  Clemency   TAN's Climate Clemency: a player's first character since joining gets
 	             Config.ToughAsNails.ClemencyTicks of it (5 minutes), every later one (a respawn)
 	             RespawnClemencyTicks (a minute); a player returning to a saved world keeps what
 	             was left of theirs (Saved, below).
-	  Death      a new character starts over (full thirst, neutral, dry), as TAN resets on respawn.
-	  Saved      a saved world keeps each player's thirst and temperature (`export`), and gives
-	             them back to a returning player's next character, or the one standing
-	             (`restore`, World/WorldSave), as TAN keeps them in the player's data.
+	  Death      a new character starts over (full thirst, neutral, dry, and a full food bar: 20
+	             food, 5 saturation), as TAN resets on respawn and Minecraft's respawned player
+	             gets a new FoodData.
+	  Saved      a saved world keeps each player's thirst, temperature and hunger (`export`), and
+	             gives them back to a returning player's next character, or the one standing
+	             (`restore`, World/WorldSave; with characters Players/CharacterStore), as TAN and
+	             Minecraft keep them in the player's data.
 	  Exertion   the client's movement reports (Protocol Exertion, ToughAsNails/Exertion), bounded
-	             by the time since the last one, cost exhaustion; their sprint flag counts as
-	             sprinting for SPRINT_HOLD seconds (`sprinting`: the zombie apocalypse's sprint
-	             noise, server Apocalypse/Survival). Breaking a block costs Thirst.EXHAUSTION.mine
-	             (ServerNet's `broke` rule, `blockBroken`).
+	             by the time since the last one, cost exhaustion, thirst's and the same of the
+	             food bar's; their sprint flag counts as sprinting for SPRINT_HOLD seconds
+	             (`sprinting`: the zombie apocalypse's sprint noise, server Apocalypse/Survival,
+	             and the temperature's), unless the food bar is too low to sprint (hunger on,
+	             Hunger.canSprint: 6 or less, not for creative and spectator players), which the
+	             client's movement already keeps from sprinting. Breaking a block costs
+	             Thirst.EXHAUSTION.mine and Hunger.EXHAUSTION.mine (ServerNet's `broke` rule,
+	             `blockBroken`); an attack that lands on a mob Hunger.EXHAUSTION.attack, the food
+	             bar's only (server Mobs/Mobs, `attacked`).
 	  Drinking   Protocol Drink (Shared/ToughAsNails/Drinks): a living player who is not a
 	             spectator, the item really in their hand.
 	               start / finish  a bottle or canteen held from `start` to `finish` for at
@@ -76,6 +96,7 @@
 	  Heat       lit furnaces (a furnace container burning: litTime > 0) and working Heat and
 	             Combustion Generators (their machine's active flag) are heat sources
 	             (Climate.addHeatSource), besides Config.ToughAsNails.HeatingBlocks.
+	  Eating     server Players/Eating asks for the food bar (`hunger`) and fills it (Hunger.eat).
 	  Effects    TAN's Thirst, Internal Warmth, Internal Chill and Climate Clemency are status
 	             effects in TAN 1.20, so they are listed with the others (Players/Effects
 	             `addExternal`: read from the states here every tick, Thirst with thirst on, the
@@ -93,6 +114,7 @@ local Config = require(Shared.Config)
 local SharedEffects = require(Shared.Effects)
 local Fluids = require(Shared.Fluids)
 local GameMode = require(Shared.GameMode)
+local Hunger = require(Shared.Hunger)
 local Protocol = require(Shared.Net.Protocol)
 local PlayerPhysics = require(Shared.Movement.PlayerPhysics)
 local SharedMachines = require(Shared.Machines)
@@ -142,6 +164,7 @@ local FILL = "item.bottle.fill"
 type Record = {
 	thirst: Thirst.State,
 	temperature: Temperature.State,
+	hunger: Hunger.State,
 	-- os.clock() until which the player counts as sprinting.
 	sprintingUntil: number,
 	-- The last Exertion report (os.clock()) and how many came this second.
@@ -186,6 +209,7 @@ local function newRecord(clemency: number): Record
 	return {
 		thirst = Thirst.new(),
 		temperature = Temperature.new(clemency),
+		hunger = Hunger.new(),
 		sprintingUntil = 0,
 		lastReport = os.clock(),
 		reports = 0,
@@ -205,6 +229,10 @@ local function thirstOn(): boolean
 end
 local function temperatureOn(): boolean
 	return ToughAsNails.temperatureOn()
+end
+-- Is Minecraft's hunger on (Config.Hunger)?
+local function hungerOn(): boolean
+	return Hunger.on()
 end
 
 local function humanoidOf(player: Player): Humanoid?
@@ -235,10 +263,11 @@ end
 
 -- The player's Survival message as of now.
 local function status(record: Record): Protocol.SurvivalStatus
-	local thirst, temperature = record.thirst, record.temperature
+	local thirst, temperature, hunger = record.thirst, record.temperature, record.hunger
 	return {
 		thirstOn = thirstOn(),
 		temperatureOn = temperatureOn(),
+		hungerOn = hungerOn(),
 		wet = Temperature.isWet(temperature),
 		warmth = temperature.warmth > 0,
 		chill = temperature.chill > 0,
@@ -252,6 +281,9 @@ local function status(record: Record): Protocol.SurvivalStatus
 		effect = thirst.effect,
 		-- (Whole seconds, so it changes the message once a second.)
 		clemency = math.ceil(temperature.clemency / 20),
+		food = hunger.food,
+		saturation = hunger.saturation,
+		foodExhaustion = hunger.exhaustion,
 	}
 end
 
@@ -320,9 +352,14 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 		return
 	end
 	local health = humanoid.Health / maxHealth * HEALTH
-	local thirst, temperature = record.thirst, record.temperature
-	if thirstOn() and record.health and health < record.health - 1e-3 and ToughAsNails.affects(mode) then
-		Thirst.addExhaustion(thirst, Thirst.EXHAUSTION.hurt)
+	local thirst, temperature, hunger = record.thirst, record.temperature, record.hunger
+	if record.health and health < record.health - 1e-3 and ToughAsNails.affects(mode) then
+		if thirstOn() then
+			Thirst.addExhaustion(thirst, Thirst.EXHAUSTION.hurt)
+		end
+		if hungerOn() then
+			Hunger.addExhaustion(hunger, Hunger.EXHAUSTION.hurt)
+		end
 	end
 
 	local damage, heal = 0, 0
@@ -365,7 +402,7 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 		Temperature.tickEffects(temperature, mode)
 	end
 	-- (Fully frozen or overheated, or the regeneration block holding it: no health comes back, by
-	-- thirst's rule or Roblox's.)
+	-- hunger's rule, thirst's or Roblox's.)
 	local block = regenBlock
 	local stopped = (temperatureOn() and Temperature.stopsRegeneration(temperature)) or (block ~= nil and block(player))
 	pauseRobloxRegeneration(record, character, stopped)
@@ -378,8 +415,24 @@ local function tickPlayer(net: ServerNet.ServerNet, view: Climate.View, player: 
 			HEALTH,
 			if hot then Config.ToughAsNails.HotExhaustion else 0,
 			Temperature.clement(temperature),
-			stopped,
+			-- (Hunger on: its regeneration is the only one, so thirst's own is always held.)
+			stopped or hungerOn(),
 			if perks then perks.thirstRate(player) else nil
+		)
+		damage += lost
+		heal += gained
+	end
+	if hungerOn() then
+		-- (Thirst has its say while it rules regeneration: TAN's both bars high.)
+		local rules = thirstOn() and Config.ToughAsNails.ThirstRegeneration
+		local lost, gained = Hunger.tick(
+			hunger,
+			mode,
+			health,
+			HEALTH,
+			Hunger.effectExhaustion(EffectsServer.levels(player)),
+			stopped,
+			if rules then thirst.thirst else nil
 		)
 		damage += lost
 		heal += gained
@@ -414,9 +467,18 @@ local function onExertion(player: Player, payload: buffer)
 	end
 	local seconds = math.min(now - record.lastReport, 2) + 0.25
 	record.lastReport = now
-	record.sprintingUntil = if report.sprinting then now + SPRINT_HOLD else 0
-	if thirstOn() and humanoidOf(player) and ToughAsNails.affects(GameMode.of(player)) then
-		Thirst.addExhaustion(record.thirst, Exertion.exhaustion(Exertion.clamp(report, seconds)))
+	local mode = GameMode.of(player)
+	-- (Too hungry to sprint: the flag is not believed. Hunger.canSprint, LocalPlayer's rule.)
+	local mayRun = not hungerOn() or Hunger.canSprint(record.hunger.food, mode)
+	record.sprintingUntil = if report.sprinting and mayRun then now + SPRINT_HOLD else 0
+	if humanoidOf(player) and ToughAsNails.affects(mode) then
+		local exhaustion = Exertion.exhaustion(Exertion.clamp(report, seconds))
+		if thirstOn() then
+			Thirst.addExhaustion(record.thirst, exhaustion)
+		end
+		if hungerOn() then
+			Hunger.addExhaustion(record.hunger, exhaustion)
+		end
 	end
 end
 
@@ -541,13 +603,13 @@ end
 
 --[[
 	Pauses (or lets run again) `player`'s Roblox Health script where this module's own tick doesn't
-	run (thirst and temperature both off); while it runs, its tick decides through the
+	run (thirst, temperature and hunger all off); while it runs, its tick decides through the
 	regeneration block and this does nothing.
 ]]
 function ToughAsNailsServer.pauseRegeneration(player: Player, paused: boolean)
 	local record = records[player]
 	local character = player.Character
-	if record == nil or character == nil or thirstOn() or temperatureOn() then
+	if record == nil or character == nil or thirstOn() or temperatureOn() or hungerOn() then
 		return
 	end
 	pauseRobloxRegeneration(record, character, paused)
@@ -562,8 +624,22 @@ end
 -- ServerNet's `broke` rule: `player` broke `block` in survival (Minecraft's EXHAUSTION_MINE).
 function ToughAsNailsServer.blockBroken(player: Player, _block: number)
 	local record = records[player]
-	if record and thirstOn() and ToughAsNails.affects(GameMode.of(player)) then
-		Thirst.addExhaustion(record.thirst, Thirst.EXHAUSTION.mine)
+	if record and ToughAsNails.affects(GameMode.of(player)) then
+		if thirstOn() then
+			Thirst.addExhaustion(record.thirst, Thirst.EXHAUSTION.mine)
+		end
+		if hungerOn() then
+			Hunger.addExhaustion(record.hunger, Hunger.EXHAUSTION.mine)
+		end
+	end
+end
+
+-- Server Mobs/Mobs: `player`'s attack landed on a mob (Minecraft's EXHAUSTION_ATTACK, the food
+-- bar's only: see the header).
+function ToughAsNailsServer.attacked(player: Player)
+	local record = records[player]
+	if record and hungerOn() and ToughAsNails.affects(GameMode.of(player)) then
+		Hunger.addExhaustion(record.hunger, Hunger.EXHAUSTION.attack)
 	end
 end
 
@@ -576,10 +652,17 @@ function ToughAsNailsServer.state(player: Player): (Thirst.State?, Temperature.S
 	return record.thirst, record.temperature
 end
 
+-- A player's food bar while hunger is on (nil: off, or before their first character); server
+-- Players/Eating reads and fills it.
+function ToughAsNailsServer.hunger(player: Player): Hunger.State?
+	local record = records[player]
+	return if record and hungerOn() then record.hunger else nil
+end
+
 --[[ Saving (World/WorldSave) ]]
 
 -- Saved state waiting for a player's next character (their record is made on it).
-local restored: { [Player]: { thirst: Thirst.State?, temperature: Temperature.State? } } = {}
+local restored: { [Player]: { thirst: Thirst.State?, temperature: Temperature.State?, hunger: Hunger.State? } } = {}
 
 -- Copies the fields of `from` that `into` has (numbers only, finite).
 local function copyNumbers(into: { [string]: any }, from: { [string]: any }?)
@@ -594,10 +677,16 @@ local function copyNumbers(into: { [string]: any }, from: { [string]: any }?)
 	end
 end
 
-local function applySaved(record: Record, thirst: Thirst.State?, temperature: Temperature.State?)
+local function applySaved(record: Record, thirst: Thirst.State?, temperature: Temperature.State?, hunger: Hunger.State?)
 	copyNumbers(record.thirst :: any, thirst :: any)
 	copyNumbers(record.temperature :: any, temperature :: any)
+	copyNumbers(record.hunger :: any, hunger :: any)
 	record.thirst.thirst = math.clamp(record.thirst.thirst, 0, Thirst.MAX)
+	local food = record.hunger
+	food.food = math.clamp(math.round(food.food), 0, Hunger.MAX)
+	food.saturation = math.clamp(food.saturation, 0, food.food)
+	food.exhaustion = math.clamp(food.exhaustion, 0, Hunger.MAX_EXHAUSTION)
+	food.timer = math.max(math.floor(food.timer), 0)
 	record.temperature.value = math.clamp(record.temperature.value, Temperature.MIN, Temperature.MAX)
 	record.temperature.target = math.clamp(record.temperature.target, Temperature.MIN, Temperature.MAX)
 	-- (Health set with it is no hurt.)
@@ -605,25 +694,32 @@ local function applySaved(record: Record, thirst: Thirst.State?, temperature: Te
 	record.sent = nil
 end
 
--- A player's thirst and temperature as a save keeps them (copies; nil before a character).
-function ToughAsNailsServer.export(player: Player): (Thirst.State?, Temperature.State?)
+-- A player's thirst, temperature and food bar as a save keeps them (copies; nil before a
+-- character).
+function ToughAsNailsServer.export(player: Player): (Thirst.State?, Temperature.State?, Hunger.State?)
 	local record = records[player]
 	if record == nil then
-		return nil, nil
+		return nil, nil, nil
 	end
-	return table.clone(record.thirst), table.clone(record.temperature)
+	return table.clone(record.thirst), table.clone(record.temperature), table.clone(record.hunger)
 end
 
 --[[
-	A saved player's thirst and temperature (Climate Clemency left included): into their record
-	when their character stands, else into their next character's instead of a fresh one.
+	A saved player's thirst, temperature (Climate Clemency left included) and food bar (nil: a
+	record from before hunger, a full bar): into their record when their character stands, else
+	into their next character's instead of a fresh one.
 ]]
-function ToughAsNailsServer.restore(player: Player, thirst: Thirst.State?, temperature: Temperature.State?)
+function ToughAsNailsServer.restore(
+	player: Player,
+	thirst: Thirst.State?,
+	temperature: Temperature.State?,
+	hunger: Hunger.State?
+)
 	local record = records[player]
 	if record and player.Character then
-		applySaved(record, thirst, temperature)
+		applySaved(record, thirst, temperature, hunger)
 	else
-		restored[player] = { thirst = thirst, temperature = temperature }
+		restored[player] = { thirst = thirst, temperature = temperature, hunger = hunger }
 	end
 end
 
@@ -741,14 +837,14 @@ local function registerHeatSources()
 end
 
 --[[
-	Starts thirst and temperature (nothing when Config.ToughAsNails turns both off). Players/
-	Inventories and Machines must have started.
+	Starts thirst, temperature and hunger (nothing ticks when Config.ToughAsNails turns both off and
+	Config.Hunger is off). Players/Inventories and Machines must have started.
 ]]
 function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.World)
 	assert(not started, "ToughAsNails.start was already called")
 	started = true
-	local on = thirstOn() or temperatureOn()
-	if on then
+	local on = thirstOn() or temperatureOn() or hungerOn()
+	if thirstOn() or temperatureOn() then
 		registerHeatSources()
 		registerEffects()
 	end
@@ -768,7 +864,7 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 
 	local function onCharacter(player: Player, character: Model)
 		-- (A new character starts over, as TAN's respawned player, with Climate Clemency: the
-		-- long one for the first character since joining.)
+		-- long one for the first character since joining, and a full food bar, Minecraft's.)
 		local settings = Config.ToughAsNails
 		local clemency = if joined[player] then settings.RespawnClemencyTicks else settings.ClemencyTicks
 		joined[player] = true
@@ -777,9 +873,9 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 		local saved = restored[player]
 		if saved then
 			restored[player] = nil
-			applySaved(record, saved.thirst, saved.temperature)
+			applySaved(record, saved.thirst, saved.temperature, saved.hunger)
 		end
-		if thirstOn() and Config.ToughAsNails.ThirstRegeneration then
+		if hungerOn() or (thirstOn() and Config.ToughAsNails.ThirstRegeneration) then
 			stopRobloxRegeneration(character)
 		end
 	end
@@ -805,7 +901,7 @@ function ToughAsNailsServer.start(net: ServerNet.ServerNet, world: WorldServer.W
 	net.on(Protocol.ClientMessage.Drink, function(player: Player, payload: buffer)
 		onDrink(world, player, payload)
 	end)
-	-- (Both off: drinking potions and filling bottles only, nothing ticks.)
+	-- (All three off: drinking potions and filling bottles only, nothing ticks.)
 	if not on then
 		return
 	end

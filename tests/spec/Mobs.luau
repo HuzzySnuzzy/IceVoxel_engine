@@ -1321,7 +1321,9 @@ return function(t, shared, require, server)
 
 	--[[ Food ]]
 
-	t.test("food: cooked meat heals more, raw chicken and rotten flesh may bring the Thirst effect", function()
+	t.test("food: cooked meat heals more (hunger off), raw chicken and rotten flesh may bring their risk", function()
+		-- (`heal` is what a food does with Minecraft's hunger off; with it on, the nutrition fills
+		-- the food bar instead: tests/spec/Hunger.)
 		local function heal(item: number): number
 			return (Foods.eat(Foods.of(item) :: Foods.Food, function()
 				return 0.99
@@ -1341,14 +1343,15 @@ return function(t, shared, require, server)
 		local _, ticks = Foods.eat(Foods.of(I.RottenFlesh) :: Foods.Food, function()
 			return 0.5
 		end)
-		t.eq(ticks, 600, "80%: 30 s of the Thirst effect")
+		t.eq(ticks, 600, "80%: 30 s of its risk (Minecraft's Hunger; the Thirst effect with hunger off)")
 		local _, chicken = Foods.eat(Foods.of(I.RawChicken) :: Foods.Food, function()
 			return 0.5
 		end)
 		t.eq(chicken, 0, "raw chicken: 30%")
 		t.eq(Foods.of(I.Dirt), nil, "not food")
-		t.ok(Foods.canEat(10, 20, GameMode.SURVIVAL), "a hurt player eats")
+		t.ok(Foods.canEat(10, 20, GameMode.SURVIVAL), "a hurt player eats (hunger off)")
 		t.ok(not Foods.canEat(20, 20, GameMode.SURVIVAL), "a full one doesn't")
+		t.ok(Foods.canEat(20, 20, GameMode.SURVIVAL, 18), "hunger on: a bar below 20 eats")
 		t.ok(Foods.canEat(20, 20, GameMode.CREATIVE), "creative eats whenever")
 		t.ok(not Foods.canEat(10, 20, GameMode.SPECTATOR), "spectators never")
 		t.eq(Foods.USE_TICKS, 32)

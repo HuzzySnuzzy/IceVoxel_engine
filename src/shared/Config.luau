@@ -1211,6 +1211,35 @@ local Config = {
 		KeepInventory = false,
 	},
 
+	-- Hunger (Minecraft's food bar) -----------------------------------------------------------------
+
+	--[[
+		Minecraft 1.20.1's hunger (FoodData; Shared/Hunger, server Players/ToughAsNails runs it with
+		thirst): the ten shanks over the hotbar (food 0..20, saturation, exhaustion), foods filling
+		them (Items/Foods: Minecraft's nutrition and saturation), natural regeneration from a full
+		bar, starvation at an empty one, no sprinting at 6 or less, and Minecraft's Hunger effect.
+		With Tough As Nails' thirst on, the droplets sit a row above the shanks and health comes back
+		only while both bars are high. Survival and adventure players only: creative and spectator
+		players' food stands still and they may always eat.
+	]]
+	Hunger = {
+		-- The food bar at all. false: no shanks, foods heal health at once as before (Items/Foods'
+		-- `heal`), thirst's own regeneration rules health (ToughAsNails.ThirstRegeneration), and the
+		-- HUD's rows sit where they did.
+		Enabled = true,
+		-- Minecraft's naturalRegeneration game rule: health comes back from food (with saturation
+		-- at a full bar, half a heart every 10 ticks for up to 6 exhaustion; else at 18 or more,
+		-- half a heart every 80 ticks for 6). This replaces Roblox's own regeneration (the
+		-- character's Health script). false: no natural regeneration at all.
+		NaturalRegeneration = true,
+		-- Starvation (food 0) takes half a heart every 80 ticks while health is above this many half
+		-- hearts (Minecraft's normal difficulty: 1; easy stops at 10; 0 = to death, hard).
+		StarvationFloor = 1,
+		-- Food exhaustion each tick of Minecraft's Hunger effect, per level (HungerMobEffect:
+		-- 0.005 x (amplifier + 1)): rotten flesh's 30 s at level I is 3 exhaustion, most of a point.
+		EffectExhaustion = 0.005,
+	},
+
 	-- Thirst and body temperature (Tough As Nails) ---------------------------------------------------
 
 	--[[
@@ -1226,10 +1255,12 @@ local Config = {
 		Thirst = true,
 		-- Body temperature: the gauge over the hotbar, hypothermia and hyperthermia.
 		Temperature = true,
-		-- With Thirst on, health comes back only while thirst is 18 or more: half a heart every 80
-		-- ticks for 6 exhaustion (Minecraft's natural regeneration, thirst for food). This replaces
-		-- Roblox's own regeneration (the character's Health script). false keeps Roblox's. With
-		-- Temperature on, neither heals while the body is fully frozen or overheated.
+		-- With Thirst on, health comes back only while thirst is 18 or more. With Hunger on, that is
+		-- a condition on hunger's natural regeneration (TAN: both bars high); with Hunger off,
+		-- thirst regenerates itself: half a heart every 80 ticks for 6 exhaustion (Minecraft's
+		-- natural regeneration, thirst for food), replacing Roblox's own regeneration (the
+		-- character's Health script). false: thirst has no say (Hunger off: Roblox's stays). With
+		-- Temperature on, nothing heals while the body is fully frozen or overheated.
 		ThirstRegeneration = true,
 		-- Dehydration (thirst 0) takes half a heart every 120 ticks while health is above this many
 		-- half hearts (Minecraft's starvation on normal difficulty: 1; 0 = to death, hard).
@@ -1249,7 +1280,8 @@ local Config = {
 		-- TAN's Climate Clemency, ticks of it on joining (6000: 5 minutes) and after respawning
 		-- (1200: a minute). While it lasts the temperature's target stays within NEUTRAL (no
 		-- hypothermia or hyperthermia), thirst drains at half the rate and dehydration doesn't
-		-- hurt. It counts down only in survival and adventure. 0 turns either off.
+		-- hurt (Hunger's food bar is untouched by it, as in TAN). It counts down only in survival
+		-- and adventure. 0 turns either off.
 		ClemencyTicks = 6000,
 		RespawnClemencyTicks = 1200,
 		-- Ticks the player stays wet after leaving water (being wet cools by 3 steps).

@@ -457,6 +457,12 @@ return function(t, shared, require, server, client)
 			state = function()
 				return nil
 			end,
+			-- (Minecraft's food bar: none here, so food heals as with hunger off; attacks cost
+			-- nothing.)
+			hunger = function()
+				return nil
+			end,
+			attacked = function() end,
 		}
 		-- MobSpawning as it is, keeping each tick's context (the glue's: cityAt, the caps, noises).
 		local spawning = setmetatable({

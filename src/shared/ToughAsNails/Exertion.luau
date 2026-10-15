@@ -1,7 +1,8 @@
 --!strict
 --[[
-	Movement that costs thirst, pure: Minecraft 1.20.1's Player.checkMovementStatistics and
-	Player.jumpFromGround, whose food exhaustion TAN's thirst counts too (Thirst.EXHAUSTION).
+	Movement that costs thirst and food, pure: Minecraft 1.20.1's Player.checkMovementStatistics and
+	Player.jumpFromGround, whose food exhaustion TAN's thirst counts too (Thirst.EXHAUSTION; the
+	same amount goes to Minecraft's food bar with hunger on, Shared/Hunger).
 
 	Movement is the client's (Player/MovementController), as in Minecraft, whose server takes the
 	client's positions and sprint flag. So the client measures each movement tick (`record`, with

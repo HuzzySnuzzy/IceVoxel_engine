@@ -467,7 +467,8 @@ return function(t, shared, require, server)
 	t.test("character store: the survivor record and infection are saved (version 2; version 1 reads 0)", function()
 		-- (The zombie apocalypse: server Apocalypse/Survival's record and Apocalypse/Infection's
 		-- progress, Save/CharacterCodec version 2.)
-		t.eq(CharacterCodec.VERSION, 2, "bumped for the survivor record")
+		-- (3 since Minecraft's food bar, the test below.)
+		t.eq(CharacterCodec.VERSION, 3, "bumped for the survivor record, then the food bar")
 		local record = newRecord(5, "Survivor")
 		t.eq(record.alive, 0, "a new character starts at 0")
 		t.eq(record.infection, 0, "healthy")
@@ -510,6 +511,43 @@ return function(t, shared, require, server)
 		CharacterCodec.keepThings(kept, record)
 		t.eq(kept.infection, 500)
 		t.eq(kept.kills, 0, "the record itself is the character's, not a thing")
+	end)
+
+	t.test("character store: the food bar is saved (version 3; older records have none: a full bar)", function()
+		-- (Minecraft's hunger: Shared/Hunger's state, kept by server Players/ToughAsNails.)
+		local record = newRecord(6, "Hungry")
+		t.eq(record.hunger, nil, "a new character keeps none: it starts full")
+		local plain = CharacterCodec.encode(record)
+		t.ok(not bit32.btest(buffer.readu8(plain, 1), 16), "no food bar, no flag")
+		record.hunger = { food = 7, saturation = 1.5, exhaustion = 3.25, timer = 42 }
+		local bytes = CharacterCodec.encode(record)
+		t.ok(bit32.btest(buffer.readu8(bytes, 1), 16), "the food bar's flag (bit 4)")
+		t.eq(buffer.len(bytes), buffer.len(plain) + 16, "four f32 at the end")
+		local back = CharacterCodec.decode(bytes) :: CharacterCodec.Record
+		t.ok(back ~= nil and back.hunger ~= nil, "round trips")
+		local hunger = (back :: any).hunger
+		t.eq(hunger.food, 7)
+		t.eq(hunger.saturation, 1.5)
+		t.eq(hunger.exhaustion, 3.25)
+		t.eq(hunger.timer, 42)
+		-- A version 2 record (before the food bar) reads with none; a version 2 byte with the
+		-- flag is damage.
+		local two = buffer.create(buffer.len(plain))
+		buffer.copy(two, 0, plain, 0)
+		buffer.writeu8(two, 0, 2)
+		local old = CharacterCodec.decode(two)
+		t.ok(old ~= nil and old.hunger == nil, "version 2: no food bar (a full one)")
+		local wrong = buffer.create(buffer.len(bytes))
+		buffer.copy(wrong, 0, bytes, 0)
+		buffer.writeu8(wrong, 0, 2)
+		t.eq((CharacterCodec.decode(wrong)), nil, "version 2 never had the flag")
+		-- Non-finite numbers are damage; what is written is cleaned (NaN as 0).
+		local cut = buffer.create(buffer.len(bytes) - 4)
+		buffer.copy(cut, 0, bytes, 0, buffer.len(cut))
+		t.eq((CharacterCodec.decode(cut)), nil, "a truncated food bar")
+		record.hunger = { food = 0 / 0, saturation = 2, exhaustion = 0, timer = 0 }
+		local cleaned = (CharacterCodec.decode(CharacterCodec.encode(record)) :: any).hunger
+		t.eq(cleaned.food, 0, "NaN writes 0")
 	end)
 
 	--[[ Deleting and renaming ]]

@@ -67,6 +67,31 @@ return function(t, shared, require, server)
 		t.ok(Foods.canEat(20, 20, CREATIVE) and not Foods.canEat(4, 20, SPECTATOR))
 	end)
 
+	t.test("medical: with hunger on, food goes by the food bar (Player.canEat), medicine by health", function()
+		local beans, steak, chocolate = food(I.CannedBeans), food(I.CookedBeef), food(I.ChocolateBar)
+		local bandage, painkillers = food(I.Bandage), food(I.Painkillers)
+		-- (The last argument is the food bar; nil is hunger off, the tests above.)
+		t.ok(Foods.canUse(steak, 20, 20, SURVIVAL, none, 19), "full health, a bar below 20: eaten")
+		t.ok(not Foods.canUse(steak, 4, 20, SURVIVAL, none, 20), "hurt, a full bar: not eaten")
+		t.ok(not Foods.canUse(beans, 4, 20, ADVENTURE, none, 20))
+		t.ok(Foods.canUse(beans, 4, 20, ADVENTURE, none, 0), "starving")
+		t.ok(Foods.canUse(chocolate, 20, 20, SURVIVAL, none, 20), "a treat any time (canAlwaysEat)")
+		t.ok(Foods.canUse(steak, 20, 20, CREATIVE, none, 20), "creative whenever")
+		t.ok(not Foods.canUse(steak, 4, 20, SPECTATOR, none, 0), "a spectator never")
+		-- Medicine heals as ever, the food bar has no say.
+		t.ok(Foods.canUse(painkillers, 10, 20, SURVIVAL, none, 20), "hurt: painkillers, a full bar or not")
+		t.ok(not Foods.canUse(painkillers, 20, 20, SURVIVAL, none, 2), "not at full health")
+		t.ok(Foods.canUse(bandage, 20, 20, SURVIVAL, having("Bleeding"), 20))
+		t.ok(Foods.canEat(20, 20, SURVIVAL, 19) and not Foods.canEat(4, 20, SURVIVAL, 20))
+		for item, entry in Foods.ITEMS do
+			t.eq(
+				Foods.nourishes(entry),
+				not Foods.isMedical(entry),
+				`{Items.displayName(item)}: food feeds, medicine heals`
+			)
+		end
+	end)
+
 	t.test("medical: how long each is held, its sound, no burp for medicine", function()
 		local expected = {
 			[I.Bandage] = 40,
@@ -100,11 +125,26 @@ return function(t, shared, require, server)
 		t.eq(food(I.Medkit).heal, 8)
 	end)
 
-	-- Finishes `item` through fake hooks (an infection at `stage`, 0 by default): what was healed,
-	-- cured, given and whether the infection went back and thirst was given.
-	local function finish(item: number, roll: number?, stage: number?)
-		local log = { healed = 0, cured = {} :: { string }, given = {} :: { number }, setBack = false, thirst = 0 }
+	-- Finishes `item` through fake hooks (an infection at `stage`, 0 by default; `hunger` true: the
+	-- food bar's hook is there, Minecraft's hunger on): what was healed, fed, cured, given and
+	-- whether the infection went back and thirst was given.
+	local function finish(item: number, roll: number?, stage: number?, hunger: boolean?)
+		local log = {
+			healed = 0,
+			fed = 0,
+			saturation = 0,
+			cured = {} :: { string },
+			given = {} :: { number },
+			setBack = false,
+			thirst = 0,
+		}
 		Foods.finish(food(item), {
+			feed = if hunger
+				then function(nutrition: number, modifier: number)
+					log.fed += nutrition
+					log.saturation += nutrition * modifier * 2
+				end
+				else nil,
 			heal = function(halfHearts: number)
 				log.healed += halfHearts
 			end,
@@ -158,6 +198,34 @@ return function(t, shared, require, server)
 		t.eq(finish(I.Crackers, 0.29).thirst, 600, "dry: the Thirst effect at 30%")
 		t.eq(finish(I.Crackers, 0.31).thirst, 0)
 		t.eq(finish(I.CannedBeans, 0).thirst, 0, "beans carry no risk")
+		-- (No food bar: hunger off, so food heals and rotten flesh brings the Thirst effect.)
+		t.eq(finish(I.CannedBeans).healed, 6)
+		t.eq(finish(I.RottenFlesh, 0.5).thirst, 600, "hunger off: rotten flesh's risk is thirst")
+	end)
+
+	t.test("medical: with hunger on, food fills the bar; medicine still heals; Hunger for flesh", function()
+		local beans = finish(I.CannedBeans, 0.99, nil, true)
+		t.eq(beans.fed, 6, "Canned Beans: 6 food")
+		t.ok(math.abs(beans.saturation - 7.2) < 1e-9, "and 6 x 0.6 x 2 saturation")
+		t.eq(beans.healed, 0, "no healing")
+		local ration = finish(I.MilitaryRation, 0.99, nil, true)
+		t.eq(ration.fed, 8)
+		local medkit = finish(I.Medkit, 0.99, nil, true)
+		t.eq(medkit.healed, 8, "medicine heals with hunger on")
+		t.eq(medkit.fed, 0)
+		local flesh = finish(I.RottenFlesh, 0.5, nil, true)
+		t.eq(flesh.fed, 4)
+		t.eq(flesh.given[1], E.Hunger, "80%: Minecraft's Hunger")
+		t.eq(flesh.thirst, 0, "not thirst")
+		t.eq(#finish(I.RottenFlesh, 0.85, nil, true).given, 0, "20%: nothing")
+		t.eq(finish(I.RawChicken, 0.29, nil, true).given[1], E.Hunger, "raw chicken 30%")
+		t.eq(#finish(I.RawChicken, 0.31, nil, true).given, 0)
+		local crackers = finish(I.Crackers, 0.29, nil, true)
+		t.eq(crackers.thirst, 600, "crackers stay thirsty")
+		t.eq(#crackers.given, 0)
+		local chocolate = finish(I.ChocolateBar, 0.99, nil, true)
+		t.eq(chocolate.fed, 3)
+		t.eq(chocolate.given[1], E.Speed, "and its Speed")
 	end)
 
 	t.test("medical: a bandage stops the bleeding (Players/EffectRules)", function()
@@ -240,7 +308,9 @@ return function(t, shared, require, server)
 		t.ok(not has(I.Antibiotics, "Heals 0 hearts"), "no healing line for 0")
 		t.ok(has(I.HerbalPoultice, "Sets an infection back a stage"))
 		t.ok(has(I.Medkit, "Regeneration (0:10)"))
-		t.ok(has(I.CannedBeans, "When eaten:") and has(I.CannedBeans, "Heals 3 hearts"))
+		-- (Minecraft's hunger on, Config's default: a tin fills the food bar instead of healing.)
+		t.ok(has(I.CannedBeans, "When eaten:") and has(I.CannedBeans, "Restores 6 hunger"))
+		t.ok(has(I.CannedBeans, "+7.2 Saturation"))
 		t.ok(has(I.ChocolateBar, "Speed (0:10)"))
 		t.ok(has(I.SodaCan, "When drunk:") and has(I.SodaCan, "Speed (0:20)"))
 		t.ok(has(I.BottledWater, "Restores 6 thirst"))

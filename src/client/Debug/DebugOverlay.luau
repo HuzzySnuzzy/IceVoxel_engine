@@ -12,8 +12,9 @@
 	(LightingController.describeFog: the Atmosphere's density, how far it hazes things 90%, its
 	haze, glare and offset; or a fluid's or Blindness' Lighting fog, start and end in blocks) and
 	the music (surface or cave, the track playing or the seconds to the next; Audio/Music) with the cave
-	mood (Audio/Ambience), as Minecraft's "Mood N%", and Tough As Nails' numbers (Player/
-	SurvivalState: thirst, hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
+	mood (Audio/Ambience), as Minecraft's "Mood N%", and Minecraft's hunger and Tough As Nails'
+	numbers (Player/SurvivalState: food, saturation and exhaustion with Config.Hunger on; thirst,
+	hydration, exhaustion, the Thirst effect's seconds, Climate Clemency's
 	time left; the body temperature (-10..10) and its target with their zones, hypothermia and
 	hyperthermia ticks of Temperature.EXTREME_TICKS, wet, Internal Warmth and Chill; then
 	Terraria's mana and max, Player/ManaState, and the magic projectiles flying, Rendering/
@@ -144,7 +145,8 @@ local function musicLine(): string
 	return string.format("music   %s  %s  mood %d%%", place, playing, math.floor(Ambience.mood() * 100))
 end
 
--- Tough As Nails: thirst and body temperature, as the server last sent them.
+-- Minecraft's hunger and Tough As Nails: the food bar, thirst and body temperature, as the server
+-- last sent them.
 local function survivalLine(): string
 	local status = SurvivalState.get()
 	if status == nil then
@@ -159,6 +161,14 @@ local function survivalLine(): string
 			math.ceil(status.effect / 20)
 		)
 		else "thirst off"
+	local food = if status.hungerOn
+		then string.format(
+			"food %d  saturation %.1f  exhaustion %.2f  ",
+			status.food,
+			status.saturation,
+			status.foodExhaustion
+		)
+		else ""
 	local clemency = if status.clemency > 0
 		then string.format("  clemency %d:%02d", status.clemency // 60, status.clemency % 60)
 		else ""
@@ -181,7 +191,7 @@ local function survivalLine(): string
 	-- Terraria's mana (Player/ManaState: as the server last sent it, less predicted casts) and the
 	-- magic projectiles this client flies (Rendering/ProjectileView).
 	local mana, max = ManaState.get()
-	return `survival {thirst}{clemency}\n        {temperature}  mana {mana}/{max}  {ProjectileView.count()} shots`
+	return `survival {food}{thirst}{clemency}\n        {temperature}  mana {mana}/{max}  {ProjectileView.count()} shots`
 end
 
 -- The status effects, as the server last sent them (counted down since).

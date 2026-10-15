@@ -83,8 +83,9 @@
 	Food and medicine (Interaction/Eating: the meat mobs drop, the ruins' tins, bandages, medkits,
 	pills) are used the same way, holding the use button for the item's use time (Foods.useTicks:
 	32 ticks unless the item names its own), after a block's menu, in adventure too, while the
-	player may use it (Shared/Items/Foods.canUse: hurt, bleeding or infected as the item needs, a
-	treat any time, or in creative).
+	player may use it (Shared/Items/Foods.canUse: a food bar under 20 for food with Minecraft's
+	hunger on, else hurt; bleeding or infected as the item needs, a treat any time, or in
+	creative).
 	Magic (Interaction/Casting: Terraria's magic weapons and Mana Crystals), after a block's menu
 	and food, in adventure and creative too: a magic weapon casts along the aim (towards what the
 	camera's ray hits) every use time of the weapon while the use button is held (checked every

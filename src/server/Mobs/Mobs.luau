@@ -47,7 +47,8 @@
 	             recharges it faster: Items/Accessories.hasteTicks), with the player's
 	             Strength and Weakness (Players/Effects.levels); a hit plays
 	             entity.player.attack.strong or .weak and wears a tool (swords 1, other tools 2;
-	             not in creative).
+	             not in creative); one that hurt costs the player food exhaustion (Minecraft's
+	             EXHAUSTION_ATTACK: Players/ToughAsNails.attacked).
 	  Tracking   every SyncTicks (2: 10 a second) each player gets the mobs around their feet
 	             (Mobs/MobTracking): a spawn when one comes within Config.Mobs.TrackingDistance, a
 	             remove when it is more than 8 blocks beyond that or gone (so a mob at the edge
@@ -126,6 +127,7 @@ local Effects = require(script.Parent.Parent.Players.Effects)
 local Operators = require(script.Parent.Parent.Players.Operators)
 local Inventories = require(script.Parent.Parent.Players.Inventories)
 local PlayerPositions = require(script.Parent.Parent.Players.PlayerPositions)
+local ToughAsNails = require(script.Parent.Parent.Players.ToughAsNails)
 local NoiseBus = require(script.Parent.Parent.Apocalypse.NoiseBus)
 local MobWorld = require(script.Parent.MobWorld)
 local MobSpawning = require(script.Parent.MobSpawning)
@@ -410,6 +412,10 @@ local function onAttack(player: Player, payload: buffer)
 			body.y + mob.kind.height / 2,
 			body.z
 		)
+	end
+	if landed > 0 then
+		-- (Player.attack: causeFoodExhaustion after a hit that hurt.)
+		ToughAsNails.attacked(player)
 	end
 	if landed > 0 and not GameMode.instabuild(mode) then
 		local wear = Combat.wear(held)

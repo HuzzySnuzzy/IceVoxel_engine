@@ -4033,6 +4033,64 @@ three caps) rising 60 blocks over 9 s from fire to smoke, six anchored inert par
 14 s, and a 2.5 s shake of up to 4°. WAILA says "Explosive: power 4", "Explosive: 24 block
 crater" and, on lit ones, "Lit: stand back!".
 
+## Hunger (`Shared/Hunger`, server `Players/ToughAsNails`, `Players/Eating`, client `Ui/SurvivalHud`)
+
+Minecraft 1.20.1's food bar (FoodData), the bar Tough As Nails' thirst was modelled on. The rules
+are one pure shared module (`Shared/Hunger`, tested tick by tick in `tests/spec/Hunger`); server
+`Players/ToughAsNails` keeps each player's bar in the same record as thirst and temperature, ticks
+it beside them and sends it in the same `Survival` message. `Config.Hunger.Enabled` turns it on and
+off; off restores the game before it exactly (foods heal health, thirst's own regeneration, the
+HUD's rows where they were).
+
+- **State**: food 0..20 (starts 20), saturation 0..food (starts 5), exhaustion 0..40 (above 4, 4 is
+  taken off and a point of saturation goes, or of food when there is none: one step a tick), the
+  tick timer. A new character (a respawn) gets a new bar, as Minecraft's respawned player gets a
+  new FoodData.
+- **Exhaustion**: Minecraft's FoodConstants (`Hunger.EXHAUSTION`), the same amounts thirst gets
+  (the client's `Exertion` reports: 0.1 a sprinted metre, 0.01 in water, 0.05 a jump, 0.2 a sprint
+  jump; a block broken 0.005; a hurt that landed 0.1) and an attack that landed on a mob 0.1
+  (EXHAUSTION_ATTACK, server `Mobs/Mobs` -> `ToughAsNails.attacked`: the food bar's only, so
+  thirst is exactly what it was); the HOT zone's sweating is thirst's alone. Minecraft's **Hunger**
+  effect (EffectList 28, a running effect, `drainsFood`) adds `Config.Hunger.EffectExhaustion`
+  (0.005) × (amplifier + 1) every tick (`Hunger.effectExhaustion` of the player's levels).
+- **A tick** (after the effects, Player.tick's order): the effect's exhaustion, the exhaustion
+  into lost points, then, hurt and with natural regeneration (`NaturalRegeneration`, Minecraft's
+  game rule) and not held: a full bar with saturation heals min(saturation, 6) / 6 half hearts
+  every 10 ticks for as much exhaustion (1.11's fast regeneration); else food 18+ half a heart
+  every 80 ticks for 6; else (held or not) at food 0 starvation, half a heart every 80 ticks while
+  health is above `StarvationFloor` (1: normal difficulty), the timer going round either way.
+- **Held**: the same `stopped` that holds every regeneration: fully frozen or overheated
+  (`Temperature.stopsRegeneration`) or the infection from stage III (`setRegenBlock`). With thirst
+  on and `ToughAsNails.ThirstRegeneration`, thirst 18+ is needed too (`tick`'s `thirst`: TAN wants
+  both bars high), and thirst's own regeneration is retired (the server always passes it
+  `stopped`), so health has one source; dehydration stays. Roblox's `Health` script is removed
+  whenever hunger is on. Climate Clemency halves thirst's drain only: TAN's clemency is about the
+  climate and water, so the food bar drains and starves as ever under it.
+- **Eating** (`Items/Foods`, server `Players/Eating`): a food has Minecraft's `nutrition` and
+  `saturation` modifier; finishing it with the bar's hook (`feed`, given while hunger is on) is
+  FoodData.eat (food + n up to 20, saturation + n × modifier × 2 up to the new food) instead of
+  healing. `Foods.canUse` takes the bar: a food while it is under 20 (Player.canEat), whatever the
+  health; a treat with effects any time (canAlwaysEat); creative whenever; medicine (no
+  nutrition) by health as before. Raw chicken (30%) and rotten flesh (80%) roll Minecraft's
+  Hunger for 30 s (Tough As Nails' Thirst with hunger off); crackers keep the Thirst effect.
+- **Sprinting**: LocalPlayer.aiStep's `foodLevel > 6 || mayfly` (`Hunger.canSprint`): the client's
+  physics (`PlayerPhysics` `tooHungry`, set from `Player/SurvivalState.tooHungry`) neither starts a
+  sprint nor keeps one at 6 or less, and the server ignores a too-hungry report's sprint flag (the
+  zombies' sprint noise, the temperature's sprinting). Creative and spectator (mayfly) are exempt.
+- **Creative and spectator** (GameMode.invulnerable): nothing drains, heals or hurts; they eat
+  whenever.
+- **Saves**: the bar (food, saturation, exhaustion, timer) is an optional flagged block of the
+  player record (Save/PlayerCodec version 4, flag bit 6) and the character (Save/CharacterCodec
+  version 3, flag bit 4); older records have none and give a full bar.
+- **HUD**: `Ui/HudLayout.rows` places every row of the hotbar's canvas: the shanks right-aligned
+  level with the hearts (10 drumsticks of pixel art, filled from the right, a half shank its right
+  half with the bone, `Hunger.shank`; green under Hunger, read from `Player/EffectState`; jittering
+  with no saturation, `Hunger.jitters`); TAN's droplets a row above them (TAN's place), and the
+  thermometer, the held item's name, the status row and the reading each a row higher than
+  before, the canvas a row taller (80), so the corner's layout keeps clear of all of it (tested:
+  the rows pairwise apart, the mana stars' raise clear of them, the old rows exactly with hunger
+  off). F3's `survival` line starts with food, saturation and exhaustion.
+
 ## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/SurvivalHud`)
 
 The Tough As Nails mod's survival mechanics, after its 1.20 version: thirst and body temperature,
@@ -4064,7 +4122,9 @@ still, the extremes clear and nothing hurts; the HUD shows with the hearts.
   drain, `CLEMENCY_RATE`) and dehydration doesn't hurt;
 - with `ThirstRegeneration` the character's Roblox `Health` script is removed, so health only
   comes back by thirst's rule; otherwise it stays, disabled while the body is fully frozen or
-  overheated (`Temperature.stopsRegeneration`).
+  overheated (`Temperature.stopsRegeneration`);
+- with Minecraft's hunger on (above) thirst's regeneration branch is retired (the server passes
+  `stopped`) and thirst 18+ is a condition of hunger's regeneration instead; dehydration stays.
 
 **Drinks** (`ToughAsNails/Drinks`): drinking is FoodData.eat (thirst + n up to 20, hydration +
 n × modifier × 2 up to the new thirst), and a dirty drink rolls TAN's Thirst effect (a longer one
@@ -4234,14 +4294,17 @@ with a check.
   zones' colours, the trend's arrow between) a row above the status row (Ui/Hud passes the held
   item to `SurvivalHud.render`).
 
-**Sync and HUD.** The server sends `Survival` (14 bytes: flags with wet, Internal Warmth and Chill,
-thirst, hydration, exhaustion, the temperature and its target as -10..10, frozen and heat, the
-Thirst effect's ticks, Climate Clemency's seconds) to the player alone when its bytes change, at
+**Sync and HUD.** The server sends `Survival` (17 bytes: flags with wet, Internal Warmth and Chill
+and hunger on, thirst, hydration, exhaustion, the temperature and its target as -10..10, frozen and
+heat, the Thirst effect's ticks, Climate Clemency's seconds, then the food bar: food, saturation in
+tenths, food exhaustion) to the player alone when its bytes change, at
 most every 4 ticks and at once for a new character (a respawn starts over: full thirst, neutral,
-dry). `Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's canvas (so the
-GUI scale is the hotbar's): 10 droplets right-aligned level with the hearts (hunger's place,
-filled from the right, half droplets their right half; green under the Thirst effect; jittering
-with no hydration, Minecraft's hunger rule); above them, level with the armor, a 75 × 9
+dry, a full food bar). `Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's
+canvas (so the GUI scale is the hotbar's; rows by `Ui/HudLayout.rows`): with hunger on Minecraft's
+shanks level with the hearts (above) and 10 droplets right-aligned a row above them (TAN's place;
+with hunger off level with the hearts, hunger's own place), filled from the right, half droplets
+their right half; green under the Thirst effect; jittering with no hydration, Minecraft's hunger
+rule; above them a 75 × 9
 thermometer (a bulb in the zone's colour: pale blue, blue, green, orange, red; a tube of 21 cells
 tinted by zone with ticks at the zone borders; a pin on the temperature and an arrow beside it for
 the trend); a row higher, above the held item name's row (the centred name, long for most of the
@@ -4264,7 +4327,7 @@ append only, sent in the Effects message): 1 Speed, 2 Slowness, 3 Haste, 4 Minin
 Strength, 6 Instant Health, 7 Instant Damage, 8 Jump Boost, 9 Nausea, 10 Regeneration, 11
 Resistance, 12 Fire Resistance, 13 Blindness, 14 Night Vision, 15 Weakness, 16 Poison, 17 Wither, 18
 Glowing, 19 Oil Coated, 20 Fuel Soaked, 21 Thirst, 22 Internal Warmth, 23 Internal Chill, 24 Climate
-Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection. A record holds its name, `/effect` id
+Clemency, 25 Mana Sickness, 26 Bleeding, 27 Infection, 28 Hunger. A record holds its name, `/effect` id
 (Minecraft's), colour (MobEffect's int), category (beneficial, harmful, neutral), HUD glyph and what
 it does as data. `find` takes a name, a display name or an `/effect` id with or without a namespace;
 `levelName` writes "Speed II" (roman to X), `formatTicks` "m:ss" / "h:mm:ss" / "**:**".
@@ -4286,6 +4349,7 @@ it does as data. `find` takes a name, a display name or an `/effect` id with or 
 | Thirst, Internal Warmth / Chill, Climate Clemency | kept by Tough As Nails (`external`) | TAN 1.20's effects |
 | Bleeding | hurts 1 every 80 >> amp ticks while health > 1 (`lethal = false`, as Poison) | the apocalypse's |
 | Infection | kept by server Apocalypse/Infection (`external`; the stage is the adapter's `amplifier`) | the apocalypse's |
+| Hunger | 0.005 × level food exhaustion a tick (`drainsFood`, `Config.Hunger.EffectExhaustion`; Shared/Hunger), the shanks green | HungerMobEffect |
 
 The modifiers read `Levels` (effect id → amplifier): `speedFactor`, `miningFactor`, `jumpBoost`,
 `meleeDamage`, `incomingDamage`, `fireRules` (nil when nothing changes: no allocation),
@@ -5758,7 +5822,8 @@ of `Noise.Break` (10), glass with block.glass.break, anything else its own break
 NoiseRules hears) and the screamers' noises back to the NoiseBus. Attacks: a token bucket of
 `AttacksPerSecond`, the held item (Inventories.heldTool, watched every tick for the attack
 strength's reset), `MobWorld.attack` with the player's effect levels, the strong or weak attack
-sound, the weapon's wear (Combat.wear: swords 1, tools 2; not with instabuild). Placing:
+sound, the weapon's wear (Combat.wear: swords 1, tools 2; not with instabuild), and a hit that hurt
+costs food exhaustion (`Players/ToughAsNails.attacked`, Minecraft's EXHAUSTION_ATTACK). Placing:
 `Mobs.occupied(block, x, y, z)` (ServerNet's `occupied` rule). /summon and /kill:
 TextChatCommands (or Chatted), SummonCommand's parse (any kind by name or in snake case; the usage
 lists every kind in snake case) and the operators' permission (Players/Operators.permitted).
@@ -5771,12 +5836,16 @@ survivor record).
 (swords 4-7 at 1.6 a second, axes 7-9 at 0.8-1, pickaxes 2-5, shovels 2.5-5.5, hoes 1, the hand 1
 at 4; the apocalypse's bats, machete, crowbar and Fire Axe), `strength`
 (Player.getAttackStrengthScale(0.5)), `damage` (x (0.2 + s² x 0.8)), `reach` (3, creative 6,
-spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: heal (cooked beef and
-porkchop 4, mutton and chicken 3, raw 1-2, rotten flesh 2; the ruins' tins 2-8) and an optional
-effect (raw chicken and crackers 30%, rotten flesh 80%: TAN's Thirst effect 600 ticks, Minecraft's
-Hunger), `useTicks` (32 by default: crackers and the chocolate bar 24, the ration 48, medicine
-its own), `canUse` (who may use one: see Infection and bleeding for the medicine) and `canEat`
-(a plain food: hurt or invulnerable, never a spectator), `COOKED`. The hold is Drinking's:
+spectators 0), `knockback` (LivingEntity.knockback), `wear`. Foods: Minecraft's `nutrition` and
+`saturation` modifier (cooked beef and porkchop 8 / 0.8, mutton 6 / 0.8, chicken 6 / 0.6, raw beef
+and porkchop 3 / 0.3, raw mutton and chicken 2 / 0.3, rotten flesh 4 / 0.1; the ruins' tins and
+ration 2-8: see Hunger), `heal` for hunger off (cooked beef and porkchop 4, mutton and chicken 3,
+raw 1-2, rotten flesh 2; the ruins' tins 2-8) and an optional risk (raw chicken 30% and rotten
+flesh 80%: Minecraft's Hunger 600 ticks, TAN's Thirst effect with hunger off; crackers 30% the
+Thirst effect), `useTicks` (32 by default: crackers and the chocolate bar 24, the ration 48,
+medicine its own), `canUse` (who may use one: a food while the bar is under 20, or hurt with
+hunger off; see Infection and bleeding for the medicine) and `canEat` (a plain food; invulnerable
+whenever, never a spectator), `COOKED`. The hold is Drinking's:
 client `Interaction/Eating`, server `Players/Eating` (start / finish / cancel, the time, slot
 and item checked, `Foods.finish` with the server's hooks, one item used up outside creative, the
 burp unless `burp` is false).
@@ -5941,7 +6010,8 @@ medicine and the rising on a real world server).
   `lethal` false, so it stops at the last half heart; the end with `math.huge, true`; Resistance
   applies, armor doesn't). The regeneration block: `Players/ToughAsNails.setRegenBlock` joins the
   infection to the frozen / overheated rule in TAN's tick, which both pauses the Roblox Health
-  script and holds thirst's regeneration; with thirst and temperature off TAN's tick doesn't run,
+  script and holds thirst's and hunger's regeneration; with thirst, temperature and hunger off TAN's
+  tick doesn't run,
   so Infection asks for the pause every tick itself (`ToughAsNails.pauseRegeneration`: a no-op
   while TAN's tick runs or when nothing changes, and it finds a character's new Health script).
   `cure(player)` takes off the symptoms it gave (only effects with no more time left than a
@@ -6497,7 +6567,8 @@ its regions and its players.
   armor and cursor, Tough As Nails' thirst and temperature (Climate Clemency left included) and
   the running status effects, and (version 3, flag bit 5, written only when not all 0) the
   apocalypse's survivor record and infection with `Characters.Enabled` off (Infection and
-  bleeding). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
+  bleeding), and (version 4, flag bit 6) Minecraft's food bar (food, saturation, exhaustion,
+  timer; older records have none: a full bar). Knowledge, Ages and skills stay in Players/ProgressStore, for every world. 60-400
   bytes. A record holding items this version doesn't know is applied (what it can read) but
   never written that session. The world's options carry its `ruins` setting; a record from before
   the ruins has no key and reads it as off (World types).
@@ -6912,8 +6983,8 @@ second, half hearts). The shared groundwork (data, codecs, messages), then how e
 - **Characters** (`Config.Characters`, `Shared/Characters`): up to 10 per Roblox user, chosen on the
   title screen before the world. A character carries its look, name, difficulty (Classic keeps
   everything on death, Mediumcore drops it, Hardcore dies for good), inventory and equipment,
-  health, mana and Mana Crystals, effects, Tough As Nails and its Knowledge/Ages/skills between
-  worlds; a world keeps only where each character stood, its game mode and a spawn point.
+  health, mana and Mana Crystals, effects, Tough As Nails, its food bar (CharacterCodec version 3,
+  flag bit 4: Minecraft's hunger) and its Knowledge/Ages/skills between worlds; a world keeps only where each character stood, its game mode and a spawn point.
   `Save/CharacterCodec` is the record (inventory places 1..59: `Inventory/Types.PLACE_*`), its
   DataStore value (`{ v, data, progress, lock }`: the session lock inside the value, so loading
   with it and every save are one UpdateAsync each) and the user's index (`{ v, next, chars }`);
@@ -7377,7 +7448,7 @@ live edits after it must arrive in the order they were sent.
 | client → server | `SetGameMode`   | a GameType id (u8: 0 survival … 3 spectator): switch one's own game mode (the switcher, `F3` + `N`) |
 | client → server | `SpectatorTeleport` | a player's user id (f64, whole and finite): a spectator teleports to them |
 | client → server | `SaveSettings`  | the chosen settings of the client's device profile (below), after changes and when the menu closes |
-| client → server | `Exertion`      | movement that costs thirst since the last report: cm sprinted and in water, jumps, sprint jumps, sprinting now (7 bytes, about once a second) |
+| client → server | `Exertion`      | movement that costs thirst and food since the last report: cm sprinted and in water, jumps, sprint jumps, sprinting now (7 bytes, about once a second) |
 | client → server | `Drink`         | u8 action: start / finish / cancel holding a drink; hand (a sip) / fill (a bottle or canteen) at a water source's cell |
 | client → server | `Attack`        | u32 mob id: a left click on a mob (4 bytes) |
 | client → server | `Eat`           | u8 action: start / finish / cancel holding a food |
@@ -7401,7 +7472,7 @@ live edits after it must arrive in the order they were sent.
 | server → client | `StructureData` | a piece of the text a SAVE made, for the player who saved: transfer, index, count, text |
 | server → client | `Settings`      | one device profile's saved settings, one message per profile once loaded on join (count 0: none) |
 | server → client | `Explosion`     | an explosion within 64 blocks: centre, power, this player's knockback (7 × f32; Minecraft's explode packet without its block list) |
-| server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks) and temperature (level, target, frozen, heat, wet), and which are on (10 bytes, when it changes, at most every 4 ticks) |
+| server → client | `Survival`      | the player's own thirst (thirst, hydration, exhaustion, Thirst effect ticks), temperature (level, target, frozen, heat, wet) and food bar (food, saturation, exhaustion), and which are on (17 bytes, when it changes, at most every 4 ticks) |
 | server → client | `Mobs`          | mobs in tracking range: spawn (kind, variant, state: 22 bytes with the op and id) / state (position in 1/32 block, yaw in 1/256 turn, health, flags: 20 bytes) / remove / push (this player's knockback) / move (op 6: the change of position from the one last sent to this player, i16 steps of 1/32 block, yaw, health, flags: 14 bytes); flags: hurt, burning, dying, aggressive, attacking, breaking, screaming; op 4 (an arrow once) is retired |
 | server → client | `Survivor`      | the player's own survivor record: u32 alive ticks (this character's since it last died), u16 zombies killed, u16 blood moons survived (8 bytes, on joining and respawning, after a kill or a moon survived, and every `Apocalypse.Survivor.SyncTicks`) |
 | server → client | `Effects`       | the player's status effects: u8 count, count × (u8 effect, u8 amplifier, i32 ticks (-1 infinite), u8 flags (bit 0 ambient, bit 1 paused: an external effect its owner holds, not counted down)), 7 bytes each, when the client's countdown would be off (EffectRules.needsSync) and empty for a new character |

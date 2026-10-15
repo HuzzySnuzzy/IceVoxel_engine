@@ -3,7 +3,8 @@
 	Status effects (Minecraft 1.20.1's MobEffect and MobEffectInstance), shared and pure: the
 	registry of EffectList (ids are u8 list positions, append only: 1 Speed .. 18 Glowing,
 	19 Oil Coated, 20 Fuel Soaked, 21..24 Tough As Nails' Thirst, Internal Warmth, Internal Chill,
-	Climate Clemency, 25 Terraria's Mana Sickness) and the rules both sides need, so the client's
+	Climate Clemency, 25 Terraria's Mana Sickness, 26 Bleeding, 27 Infection, 28 Minecraft's
+	Hunger) and the rules both sides need, so the client's
 	prediction and the server's checks agree:
 
 	  Registry   `id.Name`, `get`, `list`, `find` (a name or an /effect id, "minecraft:" or not, any
@@ -77,6 +78,8 @@ export type Effect = {
 	washOff: boolean,
 	view: string?,
 	noSprint: boolean,
+	-- Drains food every tick (Minecraft's Hunger: Shared/Hunger.effectExhaustion).
+	drainsFood: boolean,
 	external: boolean,
 }
 
@@ -165,6 +168,7 @@ for id, spec in EffectList do
 		washOff = spec.washOff == true,
 		view = spec.view,
 		noSprint = spec.noSprint == true,
+		drainsFood = spec.drainsFood == true,
 		external = spec.external == true,
 	}
 	list[id] = table.freeze(record)

@@ -15,8 +15,9 @@
 	            them) with the wear under it ("Durability: 200 / 250", Minecraft's advanced
 	            tooltip line, a stack's `damage`), "When on Head:" (blue "+2 Armor", "+2 Armor
 	            Toughness", and Tough As Nails' insulation "+1 Warmth", "+1 Cooling", "Keeps you
-	            from freezing"), "When eaten:" (Items/Foods: "Heals 2 hearts", "Cures Bleeding", a
-	            risk in red; "When used:" for medicine),
+	            from freezing"), "When eaten:" (Items/Foods: with hunger on "Restores 8 hunger" and
+	            "+12.8 Saturation", with it off "Heals 2 hearts"; "Cures Bleeding", a risk in
+	            red: Minecraft's Hunger, or the Thirst effect; "When used:" for medicine),
 	            "When drunk:" (ToughAsNails/Drinks: thirst and hydration, the Thirst risk of dirty
 	            water in red, a tea's Internal Warmth or Chill, a potion's effects through
 	            Shared/Effects.tooltip, red when harmful) with a canteen's "Sips: 2 / 3" under it,
@@ -46,6 +47,7 @@ local Effects = require(script.Parent.Parent.Effects)
 local Items = require(script.Parent)
 local Accessories = require(script.Parent.Accessories)
 local Foods = require(script.Parent.Foods)
+local Hunger = require(script.Parent.Parent.Hunger)
 local LoreList = require(script.Parent.LoreList)
 local Machines = require(script.Parent.Parent.Machines)
 local Mana = require(script.Parent.Parent.Mana)
@@ -325,9 +327,6 @@ local function armorLines(lines: { Line }, def: Items.ItemDef)
 	section(lines, `When on {Items.ARMOR_SLOTS[armor.slot]}:`, body)
 end
 
--- Food effects' kinds (Items/Foods) -> Shared/Effects ids.
-local FOOD_EFFECTS: { [string]: number } = { thirst = Effects.id.Thirst }
-
 -- "When eaten:" (Items/Foods), or "When used:" for medicine: what it heals, cures ("Cures
 -- Bleeding"), sets back and gives.
 local function foodLines(lines: { Line }, item: number)
@@ -336,7 +335,16 @@ local function foodLines(lines: { Line }, item: number)
 		return
 	end
 	local body: { Line } = {}
-	if food.heal > 0 then
+	local hunger = Hunger.on()
+	if hunger and Foods.nourishes(food) then
+		-- (FoodData.eat: the nutrition, and nutrition x modifier x 2 saturation.)
+		local nutrition = food.nutrition or 0
+		table.insert(body, { text = `Restores {Tooltip.number(nutrition)} hunger`, colour = "blue" })
+		local saturation = nutrition * (food.saturation or 0) * 2
+		if saturation > 0 then
+			table.insert(body, { text = `+{Tooltip.number(saturation)} Saturation`, colour = "blue" })
+		end
+	elseif food.heal > 0 then
 		table.insert(body, { text = `Heals {Tooltip.hearts(food.heal)}`, colour = "blue" })
 	end
 	local cures = food.cures
@@ -356,7 +364,7 @@ local function foodLines(lines: { Line }, item: number)
 		effectLines(body, food.effects)
 	end
 	local effect = food.effect
-	local id = if effect then FOOD_EFFECTS[effect.kind] else nil
+	local id = Foods.riskEffect(food, hunger)
 	if effect and id then
 		effectLines(
 			body,

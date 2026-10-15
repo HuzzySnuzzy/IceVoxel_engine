@@ -25,8 +25,8 @@
 	            is nearest the player's torso colour, in one of the skin tones by the player's
 	            id (`riseVariant`, MobList.lookVariant).
 	  Sprinting a sprinting player makes a Noise.Sprint noise every SPRINT_EVERY ticks: Tough As
-	            Nails' sprint reports (Players/ToughAsNails.sprinting), or with Tough As Nails off
-	            (no reports come then) the feet's horizontal speed over a second
+	            Nails' sprint reports (Players/ToughAsNails.sprinting), or with Tough As Nails and
+	            Minecraft's hunger off (no reports come then) the feet's horizontal speed over a second
 	            (`measuredSprint`: above SPRINT_SPEED, below TELEPORT_SPEED, so a teleport is no
 	            noise).
 ]]

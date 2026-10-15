@@ -35,9 +35,10 @@
 	  in the way  Roblox's touch controls (the live JumpButton and ContextActionService buttons,
 	            `buttons`; on a touch screen without them PlayerModule's jump button rule:
 	            `jumpButton`), which never scale with the GUI scale, so they are measured, not
-	            guessed in GUI pixels; and the HUD's canvas (Ui/Hud: 182 x 70 GUI pixels, 230 wide
-	            with the touch buttons, at the bottom centre; `hudRaise` taller while its name and
-	            status row sit higher over the mana stars). Nothing of the corner covers them.
+	            guessed in GUI pixels; and the HUD's canvas (Ui/Hud: 182 x 70 GUI pixels, 80 with
+	            Minecraft's hunger on (its shanks' row: `rows`), 230 wide with the touch buttons, at
+	            the bottom centre; `hudRaise` taller while its name and status row sit higher over
+	            the mana stars). Nothing of the corner covers them.
 	  saving    while it shows: the bottom right, raised above every button in its way (by the
 	            buttons' real size, not a fixed raise times the scale); dropped if that reaches the
 	            minimap column.
@@ -65,6 +66,16 @@
 	            (`wailaLow.y`, with F3's extended lines), left of `wailaLow.right` too; with F3
 	            open, right of `wailaAvoid` (`debugRight`, the F3 text's right edge, plus GAP).
 
+	The canvas' own rows (`rows`, Ui/Hud and Ui/SurvivalHud place by it): the hotbar at the bottom,
+	the hearts 17 above its top and the armor a row (10) above them on the left; on the right,
+	level with the hearts, Minecraft's hunger shanks (with Config.Hunger on), then Tough As Nails'
+	thirst droplets (level with the hearts without hunger, a row up with it: TAN's place, over the
+	food bar), the thermometer a row above the droplets, the held item's name (centred, so a long
+	one reaches the right side) a row above that, the status row above the name and a held
+	Thermometer's reading above that. Each row is 9 pixels in a 10 pixel step; with hunger on
+	everything from the droplets up moves a row up and the canvas is a row taller, so the corner
+	keeps clear of all of it; with hunger off the rows are exactly as before the food bar.
+
 	Every rectangle that shows is disjoint from every other, from the buttons and from the HUD
 	(tested over phones, tablets, desktops and 4K, every GUI Scale choice, the minimap on and off,
 	touch on and off, toasts and the saving icon showing or not). Client Ui/UiScale feeds it the
@@ -76,6 +87,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Hunger = require(Shared.Hunger)
 
 local HudLayout = {}
 
@@ -103,14 +115,41 @@ HudLayout.EFFECT_STEP = 25
 HudLayout.EFFECT_ROW = 26
 HudLayout.EFFECT_TIP = 12
 -- Ui/Hud's canvas: the hotbar, hearts, armour and item name (wider with the touch buttons beside
--- the hotbar), one pixel above the safe area's bottom; `hudRaise` more on top while the name and
--- the status row are moved up over Terraria's mana stars.
+-- the hotbar), one pixel above the safe area's bottom, a row taller with the hunger shanks
+-- (`rows`); `hudRaise` more on top while the name and the status row are moved up over
+-- Terraria's mana stars.
 HudLayout.HUD_WIDTH = 182
 HudLayout.HUD_TOUCH_WIDTH = 230
-HudLayout.HUD_HEIGHT = 70
+-- A row of the canvas (hearts, droplets...: 9 pixels and a gap) and the side rows' width.
+HudLayout.ROW = 10
+HudLayout.ROW_WIDTH = 81
+-- The canvas without the shanks' row, and the row they add (Config.Hunger on).
+HudLayout.HUD_BASE_HEIGHT = 70
+HudLayout.HUNGER_ROW = if Hunger.on() then HudLayout.ROW else 0
+HudLayout.HUD_HEIGHT = HudLayout.HUD_BASE_HEIGHT + HudLayout.HUNGER_ROW
 
 -- A rectangle in screen pixels.
 export type Rect = { x: number, y: number, w: number, h: number }
+
+-- The tops of the canvas' rows (GUI pixels from its top; see the header).
+export type Rows = {
+	-- The canvas' height and the hotbar's top.
+	height: number,
+	bar: number,
+	-- Left: the hearts and the armor above them.
+	hearts: number,
+	armor: number,
+	-- Right: the hunger shanks (nil without hunger), the thirst droplets, the thermometer.
+	food: number?,
+	thirst: number,
+	gauge: number,
+	-- The held item's name in survival (centred) and in creative (lower: no hearts).
+	name: number,
+	nameCreative: number,
+	-- Tough As Nails' status row over the name, and the Thermometer's reading over that.
+	status: number,
+	reading: number,
+}
 
 -- The safe area's insets from each edge, and the top bar's bottom from the screen's top.
 export type Insets = { left: number, top: number, right: number, bottom: number, bar: number }
@@ -240,6 +279,34 @@ end
 -- TOUCH_TARGET screen pixels).
 function HudLayout.touchSide(side: number, scale: number): number
 	return math.max(side, math.ceil(HudLayout.TOUCH_TARGET / scale))
+end
+
+--[[
+	The canvas' rows with the hunger shanks or without (see the header): Minecraft's hotbar 22
+	high at the bottom, the hearts 17 above its top, the item name 37 above it (23 without hearts),
+	a row higher and the canvas a row taller with the shanks.
+]]
+function HudLayout.rows(hunger: boolean): Rows
+	local row = HudLayout.ROW
+	local extra = if hunger then row else 0
+	local height = HudLayout.HUD_BASE_HEIGHT + extra
+	local bar = height - 22
+	local hearts = bar - 17
+	local thirst = hearts - extra
+	local name = bar - 37 - extra
+	return {
+		height = height,
+		bar = bar,
+		hearts = hearts,
+		armor = hearts - row,
+		food = if hunger then hearts else nil,
+		thirst = thirst,
+		gauge = thirst - row,
+		name = name,
+		nameCreative = bar - 23,
+		status = name - row,
+		reading = name - 2 * row,
+	}
 end
 
 -- Ui/Hud's canvas at `scale` (at most: the HUD shrinks to fit narrower screens), `raise` GUI

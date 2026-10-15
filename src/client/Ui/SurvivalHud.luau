@@ -1,18 +1,26 @@
 --!strict
 --[[
-	Tough As Nails on the HUD (Ui/Hud builds it into its canvas, so the GUI scale is the hotbar's),
-	from the state the server sends (Player/SurvivalState), survival and adventure only, as the
-	hearts:
+	Minecraft's hunger and Tough As Nails on the HUD (Ui/Hud builds it into its canvas, so the GUI
+	scale is the hotbar's; Ui/HudLayout.rows places the rows), from the state the server sends
+	(Player/SurvivalState), survival and adventure only, as the hearts:
 
-	  droplets     with thirst on: 10 droplets on the right above the hotbar, where Minecraft's
-	               hunger sits (its 81 x 9 row level with the hearts), filled from the right as
-	               hunger is (thirst 2 points a droplet, a half droplet its right half). Pixel art
-	               like the hearts. Under TAN's Thirst effect (dirty water) they turn a sickly
-	               green, as hunger's shanks do under Hunger; with no hydration left they jitter
-	               like hunger without saturation (Gui.renderPlayerHealth: each droplet moves
-	               -1..1 pixel on ticks where tick % (thirst x 3 + 1) == 0).
-	  gauge        with temperature on: a thermometer in the row over the droplets (the armor
-	               row's mirror, where Minecraft draws the air bubbles), 75 x 9 pixels, right-
+	  shanks       with hunger on (Config.Hunger): Minecraft's 10 hunger shanks (drumsticks) on the
+	               right above the hotbar, its 81 x 9 row level with the hearts, filled from the
+	               right (food 2 points a shank, a half shank its right half, the bone end:
+	               Hunger.shank). Pixel art like the hearts and the droplets. Under Minecraft's
+	               Hunger effect (Player/EffectState) they turn green (Gui.renderPlayerHealth's
+	               hunger sprites); with no saturation left they jitter (each shank moves -1..1
+	               pixel on ticks where tick % (food x 3 + 1) == 0: Hunger.jitters).
+	  droplets     with thirst on: 10 droplets on the right above the hotbar: a row above the
+	               shanks with hunger on (TAN's place, over the food bar), else in hunger's own
+	               place level with the hearts; filled from the right as hunger is (thirst 2
+	               points a droplet, a half droplet its right half). Pixel art like the hearts.
+	               Under TAN's Thirst effect (dirty water) they turn a sickly green, as hunger's
+	               shanks do under Hunger; with no hydration left they jitter like hunger without
+	               saturation (each droplet moves -1..1 pixel on ticks where tick % (thirst x 3 +
+	               1) == 0).
+	  gauge        with temperature on: a thermometer in the row over the droplets (where
+	               Minecraft draws the air bubbles), 75 x 9 pixels, right-
 	               aligned with them: a round bulb in the colour of the body's zone (pale blue
 	               icy, blue cold, green neutral, orange warm, red hot; TAN's orb colours), then a
 	               tube of 21 cells of 3 pixels, one per step of the -10..10 scale, tinted dimly by
@@ -44,22 +52,28 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
+local Effects = require(Shared.Effects)
+local Hunger = require(Shared.Hunger)
 local Items = require(Shared.Items)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 
+local EffectState = require(script.Parent.Parent.Player.EffectState)
 local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
 
--- Where Ui/Hud puts things (GUI pixels in its canvas).
+-- Where Ui/Hud puts things (GUI pixels in its canvas: Ui/HudLayout.rows).
 export type Layout = {
-	-- The canvas' width (the hotbar's), the droplets' row, and the tops of the gauge's row and of
-	-- the status row above it, clear of the held item name's row (both right-aligned with the
-	-- droplets; the thermometer's reading goes a row above the status row).
+	-- The canvas' width (the hotbar's), the shanks' row (nil: hunger off), the droplets' row, and
+	-- the tops of the gauge's row, of the status row above the held item name's row and of the
+	-- thermometer's reading above that (all right-aligned with the droplets; the reading takes
+	-- the status row's place when that isn't drawn).
 	width: number,
+	foodY: number?,
 	rowY: number,
 	gaugeY: number,
 	statusY: number,
+	readingY: number,
 }
 
 local SurvivalHud = {}
@@ -90,6 +104,19 @@ local DROPLET = {
 	"KLLLLRRRK",
 	".KLLLRRK.",
 	"..KKKKK..",
+}
+-- 9 x 9, Minecraft's hunger shank (a drumstick, its bone to the top right): K outline, L / R the
+-- meat's left / right half, H a highlight (with the left half), B the bone (with the right half).
+local SHANK = {
+	"......KK.",
+	".....KBBK",
+	".....KBK.",
+	"..KKKBK..",
+	".KHLRKK..",
+	"KHLLRRK..",
+	"KLLLRRK..",
+	".KLLRK...",
+	"..KKK....",
 }
 -- 7 x 7 (the gauge's rows 1..7): K outline, F fill, H highlight; its right column runs into the
 -- tube.
@@ -150,6 +177,13 @@ local WATER = Color3.fromRGB(48, 118, 230)
 local WATER_SHINE = Color3.fromRGB(160, 210, 255)
 local SICK = Color3.fromRGB(112, 160, 64)
 local SICK_SHINE = Color3.fromRGB(176, 214, 120)
+local MEAT = Color3.fromRGB(190, 104, 48)
+local MEAT_SHINE = Color3.fromRGB(236, 160, 98)
+local BONE = Color3.fromRGB(236, 228, 208)
+-- Under Minecraft's Hunger: the meat green, the bone a pale green.
+local HUNGRY = Color3.fromRGB(122, 148, 46)
+local HUNGRY_SHINE = Color3.fromRGB(184, 206, 108)
+local HUNGRY_BONE = Color3.fromRGB(206, 220, 160)
 local EMPTY = Color3.fromRGB(28, 32, 44)
 local EMPTY_SHINE = Color3.fromRGB(44, 50, 66)
 local WARMING = Color3.fromRGB(255, 150, 40)
@@ -171,8 +205,11 @@ local ZONE_COLOURS: { [number]: { Color3 } } = {
 -- How much of a zone's colour the tube's cells keep (the rest is the empty colour).
 local TUBE_TINT = 0.45
 
+-- A droplet or a shank: its frame, its parts by letter, what it was painted as, its x.
 type Droplet = { frame: Frame, parts: { [string]: { Frame } }, key: string, x: number }
 
+local foodRow: Frame? = nil
+local shanks: { Droplet } = {}
 local row: Frame? = nil
 local droplets: { Droplet } = {}
 local gauge: Frame? = nil
@@ -281,6 +318,54 @@ local function holder(parent: Instance, name: string, x: number, y: number, w: n
 	return frame
 end
 
+-- A shank in state 0 empty, 1 half (the right half and the bone), 2 full; green under Hunger.
+local function paintShank(shank: Droplet, state: number, hungry: boolean)
+	local key = `{state}{hungry}`
+	if shank.key == key then
+		return
+	end
+	shank.key = key
+	local meat = if hungry then HUNGRY else MEAT
+	local shine = if hungry then HUNGRY_SHINE else MEAT_SHINE
+	local bone = if hungry then HUNGRY_BONE else BONE
+	Style.paint(shank.parts.R, if state >= 1 then meat else EMPTY)
+	Style.paint(shank.parts.B, if state >= 1 then bone else EMPTY_SHINE)
+	Style.paint(shank.parts.L, if state >= 2 then meat else EMPTY)
+	Style.paint(shank.parts.H, if state >= 2 then shine else EMPTY_SHINE)
+end
+
+-- A row of ten icons of `art` (`palette` its first look) at `y`, right-aligned in the canvas.
+local function iconRow(
+	canvas: Frame,
+	name: string,
+	icon: string,
+	width: number,
+	y: number,
+	art: { string },
+	palette: { [string]: Color3 }
+): (Frame, { Droplet })
+	local frame = holder(canvas, name, width - ROW_WIDTH, y, ROW_WIDTH, 9, 2)
+	frame.Visible = false
+	local icons: { Droplet } = {}
+	for i = 1, 10 do
+		local x = 72 - (i - 1) * 8
+		local iconFrame = holder(frame, `{icon}{i}`, x, 0, 9, 9, 1)
+		local parts = Style.pixelArt(iconFrame, 0, 0, art, palette, 1)
+		icons[i] = { frame = iconFrame, parts = parts, key = "", x = x }
+	end
+	return frame, icons
+end
+
+-- Moves the icons of a row -1..1 pixel on a tick where `jitter` says so, back to 0 otherwise.
+local function shake(icons: { Droplet }, jitter: boolean)
+	for _, icon in icons do
+		local y = if jitter then math.random(-1, 1) else 0
+		if icon.frame.Position.Y.Offset ~= y then
+			icon.frame.Position = UDim2.fromOffset(icon.x, y)
+		end
+	end
+end
+
 -- The thermometer (see the header) at the top left of `parent`.
 local function buildGauge(parent: Frame)
 	local tubeEnd = SurvivalHud.cellX(Temperature.MAX) + CELL
@@ -310,18 +395,30 @@ local function buildGauge(parent: Frame)
 	arrows.right, arrows.left = right, left
 end
 
--- Builds the droplets, the gauge and the status row into Ui/Hud's `canvas`, and the edges in a
--- screen of their own.
+-- Builds the shanks, the droplets, the gauge and the status row into Ui/Hud's `canvas`, and the
+-- edges in a screen of their own.
 function SurvivalHud.build(canvas: Frame, layout: Layout)
-	local thirstRow = holder(canvas, "Thirst", layout.width - ROW_WIDTH, layout.rowY, ROW_WIDTH, 9, 2)
-	thirstRow.Visible = false
-	row = thirstRow
-	for i = 1, 10 do
-		local x = 72 - (i - 1) * 8
-		local frame = holder(thirstRow, `Droplet{i}`, x, 0, 9, 9, 1)
-		local parts = Style.pixelArt(frame, 0, 0, DROPLET, { K = OUTLINE, L = EMPTY, R = EMPTY, H = EMPTY_SHINE }, 1)
-		droplets[i] = { frame = frame, parts = parts, key = "", x = x }
+	local foodY = layout.foodY
+	if foodY then
+		foodRow, shanks = iconRow(
+			canvas,
+			"Hunger",
+			"Shank",
+			layout.width,
+			foodY,
+			SHANK,
+			{ K = OUTLINE, L = EMPTY, R = EMPTY, H = EMPTY_SHINE, B = EMPTY_SHINE }
+		)
 	end
+	row, droplets = iconRow(
+		canvas,
+		"Thirst",
+		"Droplet",
+		layout.width,
+		layout.rowY,
+		DROPLET,
+		{ K = OUTLINE, L = EMPTY, R = EMPTY, H = EMPTY_SHINE }
+	)
 
 	local gaugeFrame = holder(canvas, "Temperature", layout.width - GAUGE_WIDTH, layout.gaugeY, GAUGE_WIDTH, 9, 2)
 	gaugeFrame.Visible = false
@@ -353,7 +450,7 @@ function SurvivalHud.build(canvas: Frame, layout: Layout)
 
 	-- (In the status row's place when that isn't drawn.)
 	statusY = layout.statusY
-	readingY = if STATUS_ROW then layout.statusY - 10 else layout.statusY
+	readingY = if STATUS_ROW then layout.readingY else layout.statusY
 	local readingFrame = holder(canvas, "Thermometer", layout.width - ROW_WIDTH, readingY, ROW_WIDTH, 9, 2)
 	readingFrame.Visible = false
 	readingRow = readingFrame
@@ -523,8 +620,10 @@ function SurvivalHud.render(now: number, survival: boolean, held: number?, raise
 		end
 	end
 	local status = SurvivalState.get()
+	local hungerShown = survival and status ~= nil and status.hungerOn and foodRow ~= nil
 	local thirstShown = survival and status ~= nil and status.thirstOn
 	local temperatureShown = survival and status ~= nil and status.temperatureOn
+	setVisible(foodRow, hungerShown)
 	setVisible(row, thirstShown)
 	setVisible(gauge, temperatureShown)
 	local statusShown = STATUS_ROW and (thirstShown or temperatureShown)
@@ -544,18 +643,23 @@ function SurvivalHud.render(now: number, survival: boolean, held: number?, raise
 		tickCount += 1
 	end
 
+	if hungerShown then
+		local hungry = EffectState.levels()[Effects.id.Hunger] ~= nil
+		for i, shank in shanks do
+			paintShank(shank, Hunger.shank(status.food, i), hungry)
+		end
+		if ticked then
+			shake(shanks, Hunger.jitters(status.saturation, status.food, tickCount))
+		end
+	end
+
 	if thirstShown then
 		local sick = status.effect > 0
 		for i, droplet in droplets do
 			paintDroplet(droplet, SurvivalHud.dropletState(status.thirst, i), sick)
-			if ticked then
-				local y = if SurvivalHud.jitters(status.hydration, status.thirst, tickCount)
-					then math.random(-1, 1)
-					else 0
-				if droplet.frame.Position.Y.Offset ~= y then
-					droplet.frame.Position = UDim2.fromOffset(droplet.x, y)
-				end
-			end
+		end
+		if ticked then
+			shake(droplets, SurvivalHud.jitters(status.hydration, status.thirst, tickCount))
 		end
 	end
 

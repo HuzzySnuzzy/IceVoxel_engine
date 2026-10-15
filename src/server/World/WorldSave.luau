@@ -46,7 +46,7 @@
 	             until it is, they wait on the title screen (WorldMenu's `beforeEnter`, at most
 	             ENTER_WAIT seconds). Their inventory and game mode come back at once, the rest on
 	             their first character: where they stood and looked (Players/Spawning's
-	             placement), health (Characters.restoreHealth), Tough As Nails and effects; until
+	             placement), health (Characters.restoreHealth), Tough As Nails (and the food bar) and effects; until
 	             a character stands, what they are saved with is the record's (PlayerCodec
 	             .withWaiting: leaving from the title screen keeps their place). A player whose
 	             record could not be read starts afresh, and one whose record holds items this
@@ -603,9 +603,10 @@ local function capture(player: Player, ps: PlayerState): (Record, number)
 		record.vanityAccessories = inventory.vanityAccessories
 		record.hidden = inventory.hidden
 	end
-	local thirst, temperature = ToughAsNails.export(player)
+	local thirst, temperature, hunger = ToughAsNails.export(player)
 	record.thirst = thirst :: any
 	record.temperature = temperature :: any
+	record.hunger = hunger :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or {}) :: any
 	-- (Terraria's mana and crystals: nil once Players/Mana forgot a leaving player.)
@@ -644,6 +645,7 @@ local function finalRecord(player: Player, ps: PlayerState): (Record, number)
 	end
 	if cached and fresh.thirst == nil then
 		fresh.thirst, fresh.temperature = cached.thirst, cached.temperature
+		fresh.hunger = cached.hunger
 	end
 	if cached and Effects.export(player) == nil then
 		fresh.effects = cached.effects
@@ -682,7 +684,7 @@ local function applyRecord(player: Player, ps: PlayerState, record: Record)
 	if record.previous then
 		player:SetAttribute(GameMode.PREVIOUS_ATTRIBUTE, record.previous)
 	end
-	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any)
+	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any, record.hunger :: any)
 	Effects.restore(player, record.effects :: any)
 	-- (A record without mana, version 1's or a new player's: Players/Mana's own start.)
 	local mana = record.mana

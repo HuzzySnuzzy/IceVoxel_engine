@@ -26,12 +26,15 @@
 	             the progress into the level (Shared/Progression/Knowledge.progress), and the level
 	             in green with a black outline over its middle, between the hearts and the
 	             droplets (shown from level 1, Minecraft's). From Player/ProgressionState.
-	  survival   Tough As Nails (Ui/SurvivalHud, survival and adventure only too): the thirst
-	             droplets on the right level with the hearts, the temperature thermometer above
-	             them (level with the armor), Climate Clemency's time left and the warmth and
-	             chill effects a row above the item name's (a long centred name reaches the
-	             right side, where they are), the numbers a held Thermometer reads above those,
-	             and frost or heat closing in from the screen's edges.
+	  survival   Minecraft's hunger and Tough As Nails (Ui/SurvivalHud, survival and adventure only
+	             too): the hunger shanks on the right level with the hearts (with Config.Hunger
+	             on), the thirst droplets a row above them (level with the hearts without hunger),
+	             the temperature thermometer above the droplets, Climate Clemency's time left and
+	             the warmth and chill effects a row above the item name's (a long centred name
+	             reaches the right side, where they are), the numbers a held Thermometer reads
+	             above those, and frost or heat closing in from the screen's edges. With hunger
+	             on, the item name and everything over the droplets sit a row higher and the
+	             canvas is a row taller (Ui/HudLayout.rows, which places every row).
 	  mana       Terraria's mana (Ui/ManaHud, survival and adventure only): a row of stars on the
 	             left in the armor's row (over the armor icons when they show; a second row above
 	             past 200 mana) while a magic weapon is held, mana isn't full or just changed; the
@@ -69,6 +72,7 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
+local Hunger = require(Shared.Hunger)
 local Items = require(Shared.Items)
 local Accessories = require(Shared.Items.Accessories)
 local Knowledge = require(Shared.Progression.Knowledge)
@@ -83,6 +87,7 @@ local HoverTip = require(script.Parent.HoverTip)
 local ItemIcon = require(script.Parent.ItemIcon)
 local SpectatorGui = require(script.Parent.SpectatorGui)
 local SurvivalHud = require(script.Parent.SurvivalHud)
+local HudLayout = require(script.Parent.HudLayout)
 local ManaHud = require(script.Parent.ManaHud)
 local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
@@ -91,15 +96,17 @@ export type Mode = "play" | "creative" | "hidden"
 
 local HOTBAR = Types.HOTBAR_SIZE
 -- Layout (GUI pixels): Minecraft's hotbar is 182 x 22, hearts 17 px above its top, armor 10
--- above them, the item name 37 above (23 without hearts).
+-- above them, the item name 37 above (23 without hearts); a row higher, the canvas a row taller,
+-- with the hunger shanks (Ui/HudLayout.rows).
+local ROWS = HudLayout.rows(Hunger.on())
 local WIDTH = 182
 local TOUCH_BUTTON = 22
-local HEIGHT = 70
-local BAR_Y = HEIGHT - 22
-local HEARTS_Y = BAR_Y - 17
-local ARMOR_Y = HEARTS_Y - 10
-local NAME_Y_SURVIVAL = BAR_Y - 37
-local NAME_Y_CREATIVE = BAR_Y - 23
+local HEIGHT = ROWS.height
+local BAR_Y = ROWS.bar
+local HEARTS_Y = ROWS.hearts
+local ARMOR_Y = ROWS.armor
+local NAME_Y_SURVIVAL = ROWS.name
+local NAME_Y_CREATIVE = ROWS.nameCreative
 -- Minecraft's experience bar: 182 x 5, 7 above the hotbar's top (its y is height - 29); the level
 -- 13 above it (height - 35), centred, over the gap between the hearts and the droplets.
 local KNOWLEDGE_Y = BAR_Y - 7
@@ -615,10 +622,17 @@ function Hud.start()
 		hearts[i] = newIcon(heartRow, (i - 1) * 8, HEART)
 		armor[i] = newIcon(armorRow, (i - 1) * 8, ARMOR)
 	end
-	-- Thirst and temperature (the droplets level with the hearts, the thermometer level with the
-	-- armor, the clemency and effects above the item name's row, which long names fill across,
-	-- all on the right).
-	SurvivalHud.build(canvas, { width = WIDTH, rowY = HEARTS_Y, gaugeY = ARMOR_Y, statusY = NAME_Y_SURVIVAL - 10 })
+	-- Hunger, thirst and temperature (the shanks level with the hearts, the droplets above them,
+	-- the thermometer above those, the clemency and effects above the item name's row, which long
+	-- names fill across, all on the right: HudLayout.rows).
+	SurvivalHud.build(canvas, {
+		width = WIDTH,
+		foodY = ROWS.food,
+		rowY = ROWS.thirst,
+		gaugeY = ROWS.gauge,
+		statusY = ROWS.status,
+		readingY = ROWS.reading,
+	})
 	-- Terraria's mana: stars on the left in the armor's row, or the row above it (Ui/ManaHud).
 	ManaHud.build(canvas, { armorY = ARMOR_Y, nameY = NAME_Y_SURVIVAL })
 

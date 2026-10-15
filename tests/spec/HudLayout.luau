@@ -16,12 +16,17 @@
 	a 1024 x 768 window at their Auto GUI scale the day line vanished the day before a blood moon
 	and on its day until it rose (one row of 360 GUI pixels didn't fit and nothing took its place),
 	and the blood moon's toasts ran past the screen's edge (a 160 pixel toast for 208 and 216
-	pixels of text).
+	pixels of text). The canvas' own rows (`rows`: the hotbar, the knowledge bar, the hearts and
+	armor, Minecraft's hunger shanks, Tough As Nails' droplets and thermometer, the item name, the
+	status row and the Thermometer's reading) never overlap, with the shanks and without (then
+	exactly where they were before the food bar), and the mana stars' raise clears them either way.
 ]]
 
-return function(t, _shared, require, _server, client)
+return function(t, shared, require, _server, client)
 	local GuiScale = require(client.Ui.GuiScale)
 	local HudLayout = require(client.Ui.HudLayout)
+	local ManaStars = require(client.Ui.ManaStars)
+	local Hunger = require(shared.Hunger)
 	local SurvivorLine = require(client.Ui.SurvivorLine)
 
 	type Insets = HudLayout.Insets
@@ -687,6 +692,83 @@ return function(t, _shared, require, _server, client)
 		-- Without a raise the HUD is its canvas, as before.
 		local plain = HudLayout.compute(phone({}))
 		t.eq(plain.hud.h, HudLayout.HUD_HEIGHT * plain.scale)
+	end)
+
+	t.test("hud layout: the canvas' rows, with the hunger shanks and without, never overlap", function()
+		local WIDTH = HudLayout.HUD_WIDTH
+		local ROW = HudLayout.ROW_WIDTH
+		for _, hunger in { false, true } do
+			local rows = HudLayout.rows(hunger)
+			local function right(y: number, w: number): Rect
+				return { x = WIDTH - w, y = y, w = w, h = 9 }
+			end
+			local pieces: { [string]: Rect } = {
+				hotbar = { x = 0, y = rows.bar, w = WIDTH, h = 22 },
+				-- (The knowledge bar: 5 high, 7 above the hotbar's top, Ui/Hud.)
+				knowledge = { x = 0, y = rows.bar - 7, w = WIDTH, h = 5 },
+				hearts = { x = 0, y = rows.hearts, w = ROW, h = 9 },
+				armor = { x = 0, y = rows.armor, w = ROW, h = 9 },
+				droplets = right(rows.thirst, ROW),
+				-- (The thermometer is 75 wide.)
+				gauge = right(rows.gauge, 75),
+				-- (The item name is centred: a long one spans the canvas.)
+				name = { x = 0, y = rows.name, w = WIDTH, h = 9 },
+				status = right(rows.status, ROW),
+				reading = right(rows.reading, ROW),
+			}
+			local food = rows.food
+			if food then
+				pieces.shanks = right(food, ROW)
+			end
+			for a, ra in pieces do
+				for b, rb in pieces do
+					if a < b then
+						t.ok(not HudLayout.overlaps(ra, rb), `hunger {hunger}: {a} and {b} apart`)
+					end
+				end
+				if a ~= "reading" then
+					t.ok(ra.y >= 0 and ra.y + ra.h <= rows.height, `hunger {hunger}: {a} inside the canvas`)
+				end
+			end
+			t.eq(rows.reading, rows.status - 10, "the reading a row above the status row")
+			t.eq(rows.height - rows.bar, 22, "the hotbar at the bottom")
+			t.eq(rows.bar - rows.hearts, 17, "the hearts 17 above it (Minecraft's)")
+			-- Terraria's mana stars (left, in or over the armor's row) push the name and the rows
+			-- over it up just clear of their top row, never into the canvas' other rows.
+			for _, case in { { 20, false }, { 20, true }, { 400, false }, { 400, true } } do
+				local bottom, raise = ManaStars.layout(rows.armor, case[1], case[2], rows.name)
+				local top = bottom - ManaStars.ROW * (ManaStars.rows(case[1]) - 1)
+				local name = `hunger {hunger}, mana {case[1]}, armored {case[2]}`
+				t.ok(rows.name - raise + ManaStars.ROW <= top, `{name}: the name over the stars`)
+				t.ok(bottom + 9 <= rows.hearts, `{name}: the stars over the hearts`)
+			end
+		end
+		-- Without the shanks: exactly the rows before the food bar.
+		local off = HudLayout.rows(false)
+		t.eq(off.height, 70)
+		t.eq(off.bar, 48)
+		t.eq(off.hearts, 31)
+		t.eq(off.armor, 21)
+		t.eq(off.food, nil)
+		t.eq(off.thirst, 31, "the droplets in hunger's place")
+		t.eq(off.gauge, 21)
+		t.eq(off.name, 11)
+		t.eq(off.nameCreative, 25)
+		t.eq(off.status, 1)
+		t.eq(off.reading, -9)
+		-- With them: the shanks in the droplets' old place, everything above a row up, the canvas a
+		-- row taller (measured from its bottom).
+		local on = HudLayout.rows(true)
+		t.eq(on.height, off.height + 10)
+		t.eq(on.food, on.hearts, "the shanks level with the hearts")
+		t.eq(on.thirst, on.hearts - 10, "the droplets a row above them (Tough As Nails' place)")
+		for _, key in { "bar", "hearts", "armor", "nameCreative" } do
+			t.eq(on.height - (on :: any)[key], off.height - (off :: any)[key], `{key} stays`)
+		end
+		for _, key in { "gauge", "name", "status", "reading" } do
+			t.eq(on.height - (on :: any)[key], off.height - (off :: any)[key] + 10, `{key} a row up`)
+		end
+		t.eq(HudLayout.HUD_HEIGHT, HudLayout.rows(Hunger.on()).height, "the corner keeps clear of the whole canvas")
 	end)
 
 	t.test("hud layout: the toasts' slots, the Map button and WAILA's edges", function()

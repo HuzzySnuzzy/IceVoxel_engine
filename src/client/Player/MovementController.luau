@@ -87,7 +87,9 @@
 	  Effects   the status effects the server sent (Player/EffectState) go onto the hull before
 	            every tick: Speed, Slowness and Oil Coated's speed factor, Jump Boost, Blindness
 	            keeping sprints from starting (PlayerPhysics); the field of view follows the speed
-	            factor as Minecraft's does ((factor + 1) / 2, Speed I: x 1.1).
+	            factor as Minecraft's does ((factor + 1) / 2, Speed I: x 1.1). So does the food bar
+	            the server last sent (Player/SurvivalState.tooHungry: Minecraft's hunger at 6 or
+	            less, no sprinting unless the mode may fly).
 	  Accessories  Terraria's, worn in the predicted inventory (Inventory/ClientInventory; summed by
 	            Items/Accessories.stats into one table, again only when the inventory changes): the
 	            speed share times the effects' speed factor, the jump added to Jump Boost's (and
@@ -135,6 +137,7 @@ local EffectState = require(script.Parent.EffectState)
 local EquipmentLooks = require(script.Parent.EquipmentLooks)
 local Exertion = require(script.Parent.Exertion)
 local LocalPosition = require(script.Parent.LocalPosition)
+local SurvivalState = require(script.Parent.SurvivalState)
 local RemotePlayers = require(script.Parent.RemotePlayers)
 local ViewBob = require(script.Parent.ViewBob)
 
@@ -1165,6 +1168,7 @@ function MovementController.start(world: ClientWorld.ClientWorld, streamer: Stre
 						+ Accessories.fallReduction(worn)
 						+ (if worn.noFallDamage then NO_FALL else 0)
 					state.noSprint = EffectState.noSprint()
+					state.tooHungry = SurvivalState.tooHungry(GameMode.of(player))
 					state.airJumpsMax = worn.airJumps
 					state.runBoost = worn.runBoost
 					state.swimFactor = 1 + worn.swim

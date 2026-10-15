@@ -18,7 +18,9 @@
 	           room to crouch either;
 	  sprint   starts with the sprint key or a double tap forward (not while crouching), stops without
 	           forward input, when running into a wall (not when sliding along one) or when swimming
-	           at the surface; crouching does not stop it (sprint-sneaking, as in 1.20);
+	           at the surface; crouching does not stop it (sprint-sneaking, as in 1.20); with the
+	           food bar at 6 or less (`tooHungry`, Minecraft's hunger) it neither starts nor goes
+	           on unless the player may fly (LocalPlayer.aiStep: foodLevel > 6 || mayfly);
 	  water    acceleration 0.02, drag 0.8 (0.9 horizontally when sprinting), slow sinking (gravity / 16),
 	           jump swims up and sneak down (0.04 per tick), the current pushes (0.014), and swimming
 	           against a ledge just above the water hops out (0.3); sprinting under water swims (0.6
@@ -75,7 +77,8 @@
 	           also slows (never speeds) the acceleration in fluids, so oil's Slowness slows wading;
 	           `jumpBoost` adds to the jump velocity and `fallReduction` blocks to the safe fall
 	           (Jump Boost: +0.1 and a block a level); `noSprint` keeps sprinting from starting
-	           (Blindness: LocalPlayer.canStartSprinting).
+	           (Blindness: LocalPlayer.canStartSprinting). `tooHungry` (the food bar, Shared/
+	           Hunger, set by the controller too) keeps it from starting and stops it.
 	  accessories  Terraria's (Items/Accessories, set on the state by the client's controller;
 	           every field's default leaves Minecraft's movement exactly as it was):
 	             air jumps  (Cloud in a Bottle) `airJumpsMax` jumps in the air, each a new press of
@@ -297,6 +300,8 @@ export type State = {
 	jumpBoost: number,
 	fallReduction: number,
 	noSprint: boolean,
+	-- The food bar is at 6 or less (Minecraft's hunger): no sprinting unless `mayFly`.
+	tooHungry: boolean,
 	-- Terraria's accessories (see the header): jumps in the air a time aloft (0: none) and how
 	-- many are left; the share sprinting builds the ground speed up by (0: none), the ticks sprinted
 	-- on the ground and the multiplier reached (1); swimming's multiplier (1); the share of
@@ -394,6 +399,7 @@ function PlayerPhysics.new(x: number, y: number, z: number): State
 		jumpBoost = 0,
 		fallReduction = 0,
 		noSprint = false,
+		tooHungry = false,
 		airJumpsMax = 0,
 		airJumpsLeft = 0,
 		runBoost = 0,
@@ -1003,6 +1009,8 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 	state.sneaking = input.sneak
 	local impulse = forward >= SPRINT_IMPULSE or (state.underWater and forward > 1.0e-5)
 	state.hadSprintImpulse = impulse
+	-- (LocalPlayer.aiStep's `foodLevel > 6 || mayfly`.)
+	local fed = not state.tooHungry or state.mayFly
 	-- Out of blocks the player is stuck in, checked at four points inside the hull (not
 	-- spectators, who belong in blocks).
 	if not noClip then
@@ -1024,6 +1032,7 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		and not prevShift
 		and not prevImpulse
 		and not state.noSprint
+		and fed
 	then
 		if state.sprintTriggerTime <= 0 and not input.sprint then
 			state.sprintTriggerTime = DOUBLE_TAP_TICKS
@@ -1037,12 +1046,14 @@ function PlayerPhysics.tick(state: State, input: Input, world: World): Events
 		and input.sprint
 		and (not state.inWater or state.underWater)
 		and not state.noSprint
+		and fed
 	then
 		state.sprinting = true
 	end
 	-- (Uses last tick's collision flags.)
 	if state.sprinting then
-		local noForward = forward <= 1.0e-5
+		-- (Too hungry stops it as no forward input does.)
+		local noForward = forward <= 1.0e-5 or not fed
 		if state.swimming then
 			if (not state.onGround and not input.sneak and noForward) or not state.inWater then
 				state.sprinting = false

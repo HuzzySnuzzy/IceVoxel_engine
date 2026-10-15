@@ -240,7 +240,10 @@ return function(t, shared, require, server)
 		t.ok(stopped and string.find(stopped, "Temperature.stopsRegeneration", 1, true), "the extremes")
 		t.ok(stopped and string.find(stopped, "block(player)", 1, true), "and the regeneration block")
 		t.ok(string.find(tan, "pauseRobloxRegeneration(record, character, stopped)", 1, true), "Roblox's kind")
-		t.ok(string.match(tan, "Thirst%.tick%(%s*thirst,.-stopped,") ~= nil, "thirst's kind")
+		-- (Thirst's own kind is always held with Minecraft's hunger on, whose kind takes its place
+		-- and is held by the same `stopped`.)
+		t.ok(string.match(tan, "Thirst%.tick%(%s*thirst,.-stopped or hungerOn%(%),") ~= nil, "thirst's kind")
+		t.ok(string.match(tan, "Hunger%.tick%(%s*hunger,[^)]-%)%),%s*stopped,") ~= nil, "hunger's kind")
 		t.ok(string.find(tan, "function ToughAsNailsServer.setRegenBlock", 1, true), "the block's setter")
 		t.ok(string.find(tan, "function ToughAsNailsServer.pauseRegeneration", 1, true), "the pause without a tick")
 		t.ok(string.find(tan, "function ToughAsNailsServer.sprinting", 1, true), "the sprint flag")
@@ -1064,9 +1067,15 @@ return function(t, shared, require, server)
 			heat = 0,
 			effect = 345,
 			clemency = 299,
+			-- (Minecraft's food bar: Shared/Hunger.)
+			hungerOn = true,
+			food = 7,
+			saturation = 3.6,
+			foodExhaustion = 2.5,
 		}
 		local payload = Protocol.encodeSurvival(status)
-		t.eq(buffer.len(payload), 14, "14 bytes")
+		-- (14 before the food bar's three bytes.)
+		t.eq(buffer.len(payload), 17, "17 bytes")
 		local decoded = assert(Protocol.decodeSurvival(payload))
 		for key, value in status do
 			if type(value) == "number" then
@@ -1087,12 +1096,19 @@ return function(t, shared, require, server)
 			t.eq(Protocol.decodeSurvival(copy), nil, why)
 		end
 		broken(1, buffer.writeu8, 21, "thirst over 20")
-		broken(0, buffer.writeu8, 32, "unknown flags")
+		broken(0, buffer.writeu8, 64, "unknown flags (bit 5 is hunger's now)")
+		broken(14, buffer.writeu8, 21, "food over 20")
+		broken(15, buffer.writeu8, 201, "saturation over 20")
+		status.hungerOn, status.food, status.saturation, status.foodExhaustion = false, 0, 0, 99
+		decoded = assert(Protocol.decodeSurvival(Protocol.encodeSurvival(status)))
+		t.ok(not decoded.hungerOn and decoded.food == 0 and decoded.saturation == 0, "hunger off, an empty bar")
+		t.eq(decoded.foodExhaustion, 255 / 50, "exhaustion clamped to its byte")
 		broken(4, buffer.writeu8, 21, "temperature over 10")
 		broken(5, buffer.writeu8, 255, "target over 10")
 		broken(6, buffer.writeu16, Temperature.EXTREME_TICKS + 1, "frozen over full")
 		broken(8, buffer.writeu16, Temperature.EXTREME_TICKS + 1, "heat over full")
-		t.eq(Protocol.decodeSurvival(buffer.create(10)), nil, "the old size")
+		t.eq(Protocol.decodeSurvival(buffer.create(10)), nil, "an old size")
+		t.eq(Protocol.decodeSurvival(buffer.create(14)), nil, "the size before hunger")
 		t.ok(Protocol.ServerMessage.Survival ~= nil and Protocol.ClientMessage.Drink ~= Protocol.ClientMessage.Exertion)
 	end)
 end

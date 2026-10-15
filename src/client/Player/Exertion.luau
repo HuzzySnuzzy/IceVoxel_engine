@@ -1,10 +1,11 @@
 --!strict
 --[[
-	Reports the movement that costs thirst (Tough As Nails; Shared/ToughAsNails/Exertion): Player/
+	Reports the movement that costs thirst and food (Tough As Nails and Minecraft's hunger;
+	Shared/ToughAsNails/Exertion): Player/
 	MovementController hands every movement tick to `tick`, which counts it, and about once a
 	second (Exertion.INTERVAL), or as soon as sprinting starts or stops, what was counted goes to
 	the server (Protocol Exertion) with the sprint flag (the body temperature's sprinting).
-	Nothing is sent while thirst and temperature are off (no Survival message ever came), nor while
+	Nothing is sent while thirst, temperature and hunger are off (no Survival message ever came), nor while
 	there is nothing new.
 ]]
 

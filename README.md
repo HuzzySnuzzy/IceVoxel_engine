@@ -32,8 +32,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   difficulty: **Classic** keeps everything when it dies, **Mediumcore** drops everything
   (Minecraft's rule), **Hardcore** drops everything and dies for good (a spectator for the rest of
   the visit, then shown dead in the list). A character carries its look, inventory and equipment,
-  health, mana and Mana Crystals, status effects (a zombie bite's infection among them), thirst and
-  temperature, its days survived, zombies killed and blood moons lived through, and its Knowledge,
+  health, mana and Mana Crystals, status effects (a zombie bite's infection among them), its food
+  bar, thirst and temperature, its days survived, zombies killed and blood moons lived through, and its Knowledge,
   Ages and skills from world to world and server to server; each world keeps only where it stood and
   its game mode. It spawns with its own look and its name on the nametag, and the list's preview
   shows it in the armor, vanity and accessories it wears. What it gains only travels from a fair
@@ -55,8 +55,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   that was flowing flows on), the clock and doDaylightCycle, the weather (its clock,
   doWeatherCycle and a `/weather` override with its time left: storms go on where they were),
   the world's operators, and each
-  player's place, facing, health, game mode, inventory and armor, thirst and temperature and
-  status effects (with characters the character carries all of that but where it stood and its
+  player's place, facing, health, game mode, inventory and armor, food bar, thirst and temperature
+  and status effects (with characters the character carries all of that but where it stood and its
   game mode, above; without them progress is kept per player for every world). Autosave every 5
   minutes writes only what changed (a house and a tunnel, a chest, a furnace, a battery, pipes,
   an item and a cow: about 1.1 KB of a key); `/save-all`, `/save-off` and `/save-on` as
@@ -211,12 +211,32 @@ A fast, Minecraft-style voxel engine for Roblox.
   until you dig next to them; no tree or plant stands in them and no cave entrance opens under
   them. Far terrain shows the lakes (LOD levels 1-2) and the map paints both (lakes up to 8
   blocks a pixel, puddles up to 2); puddles are drawn near the player only.
+- **Hunger (Minecraft's).** Minecraft 1.20.1's food bar: 20 points as 10 shanks on the right above
+  the hotbar, level with the hearts (filled from the right, a half shank for an odd point), and
+  saturation that goes first, drained by exhaustion (sprinting 0.1 a metre, swimming 0.01, a
+  jump 0.05, a sprint jump 0.2, a block broken 0.005, a hurt or an attack that lands 0.1). Food
+  fills it with Minecraft's numbers (a steak 8 points and 12.8 saturation, raw beef 3, rotten
+  flesh 4 with an 80% chance of the Hunger effect, the ruins' tins and rations their own: see
+  Mobs and the zombie apocalypse); you can eat whenever the bar isn't full (the Chocolate Bar any
+  time, creative whenever). Health comes back from the bar alone (Roblox's own regeneration is
+  off): with a full bar and saturation half a heart's worth every 0.5 s, burning the saturation;
+  at 18 or more half a heart every 4 s for 6 exhaustion; at 0 you starve, half a heart every 4 s
+  down to half a heart. At 6 or less you can't sprint. Minecraft's **Hunger** effect (raw chicken
+  30%, rotten flesh 80%, 30 s; `/effect give @s hunger`) drains the bar faster (0.005 exhaustion a
+  tick a level) and turns the shanks green; with no saturation left they jitter, as Minecraft's
+  do. With thirst on (below) health only comes back while thirst is 18 or more too (Tough As
+  Nails: both bars high), and nothing heals while frozen or overheated through or once an
+  infection reaches stage III. Death gives a full bar back (20 points, 5 saturation); worlds and
+  characters keep it. Creative and spectator players are untouched. `Config.Hunger` turns it off
+  (foods then heal health at once, as before, and thirst rules regeneration).
 - **Thirst and body temperature (Tough As Nails).** The Tough As Nails mod's survival, after its
   1.20 version. Thirst is Minecraft's hunger with water: 20 points (10 droplets on the right above
-  the hotbar) and hydration that goes first, drained by exhaustion (sprinting 0.1 a metre,
-  swimming 0.01, a jump 0.05, a sprint jump 0.2, a block broken 0.005, a hurt 0.1, sweating while
-  hot). At 0 you lose half a heart every 6 s down to half a heart, and health only comes back
-  with 18 or more (half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration is off).
+  the hotbar, a row above the hunger shanks: Tough As Nails' place; in the shanks' own place with
+  hunger off) and hydration that goes first, drained by exhaustion (the same as hunger's but for
+  attacks, plus sweating while hot). At 0 you lose half a heart every 6 s down to half a heart, and
+  health only comes back with 18 or more (with hunger on as a condition of hunger's regeneration;
+  with it off by thirst's own: half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration
+  is off).
   Drink from a water source with an empty hand (1 point), fill a Glass Bottle (three glass in a
   V make three) or a Canteen (an iron nugget over three iron ingots in a cup; three sips) at a
   water source, and hold use 1.6 s to drink: dirty water gives 4 points with a 50% chance of the
@@ -235,7 +255,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   about 3 minutes to kill from neutral; a drink can give Internal Warmth or Chill, which hold
   the cold or the heat off. Joining gives 5 minutes of
   Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at half the rate
-  and doesn't hurt. Frost or heat closes in from the screen's edges, and a thermometer over the
+  and doesn't hurt (hunger is untouched by it, as in Tough As Nails). Frost or heat closes in from the screen's edges, and a thermometer over the
   droplets shows the temperature, coloured by zone, with an arrow for where it is going; the
   clemency's time left and the effects are status effect icons in the top right. Creative and
   spectator players are untouched.
@@ -284,9 +304,12 @@ A fast, Minecraft-style voxel engine for Roblox.
   zombie's **Rotten Flesh**, a **Bone** one time in four (now and then an iron ingot) and what
   its kind carries; meat drops cooked when the mob died burning. Raw meat cooks in a furnace;
   leather makes leather armor, four string a block of wool (which burns like Minecraft's).
-  **Food:** hold right click 1.6 s with meat to eat it when hurt (steak and cooked porkchop heal
-  2 hearts, cooked mutton and chicken 1.5, raw meat less; raw chicken and rotten flesh may give
-  Tough As Nails' Thirst effect). **Fighting:** a left click on a mob in reach (3 blocks, 6 in
+  **Food:** hold right click 1.6 s with meat to eat it when your food bar isn't full (Minecraft's
+  nutrition and saturation: steak and cooked porkchop 8 points and 12.8 saturation, cooked mutton
+  6 and 9.6, cooked chicken 6 and 7.2, raw beef and porkchop 3, raw mutton and chicken 2, rotten
+  flesh 4 and 0.8; raw chicken (30%) and rotten flesh (80%) may give Minecraft's Hunger for 30 s).
+  With hunger off it heals instead when you are hurt (steak and cooked porkchop 2 hearts, cooked
+  mutton and chicken 1.5, raw meat less) and the risk is Tough As Nails' Thirst effect. **Fighting:** a left click on a mob in reach (3 blocks, 6 in
   creative) hits it with Minecraft's weapon damage (the hand 1, swords 4-7, axes 7-9...; Strength
   adds 3 a level and Weakness takes 4) and 1.9's attack recovery (a sword hits at full strength
   every 0.6 s), knocks it back and wears the weapon; WAILA names the mob and its health. A kill
@@ -387,8 +410,11 @@ A fast, Minecraft-style voxel engine for Roblox.
     a **Medkit** stops it.
   - **Medicine and the ruins' food** are used like food, by holding the use button (each its own
     time and sound): the Bandage (2 s), Medkit (4 s, with Regeneration), Painkillers
-    (Regeneration), Antibiotics, the Herbal Poultice, Canned Beans and Peaches, Crackers (you
-    will want water), the Chocolate Bar (Speed, eaten any time) and the Military Ration; Bottled
+    (Regeneration), Antibiotics, the Herbal Poultice (medicine heals health, hunger or not), and
+    the food: Canned Beans (6 food, 7.2 saturation), Canned Peaches (4, 2.4), Crackers (2, 0.4;
+    you will want water: a 30% chance of the Thirst effect), the Chocolate Bar (3, 1.8; Speed,
+    eaten any time) and the Military Ration (8, 12.8; with hunger off they heal 3, 2, 1, 1.5 and
+    4 hearts); Bottled
     Water is purified water whose bottle is kept, Soda a little water and Speed. The ruins and
     bunkers hold most of it (`/locate poi medicine_cabinet`); rags, bandages, medkits and
     poultices are crafted.
@@ -428,7 +454,8 @@ A fast, Minecraft-style voxel engine for Roblox.
   and the toasts, or beside them on small phones (beneficial in the top row, the rest below,
   longest first, blinking out over their last 10 s; hover one, or tap it on a touch screen, for
   its name, level and time), and Minecraft's list of names and times beside any open screen; F3
-  lists them too. Tough As Nails'
+  lists them too. Minecraft's Hunger is one of them (the food bar's, from raw chicken and rotten
+  flesh). Tough As Nails'
   Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them (its own
   status row over the hotbar shows only with `Config.Effects.Hud` off; the Thirst effect and the
   clemency wait in creative and spectator, their times standing still on the icons). `/effect give
@@ -547,8 +574,9 @@ A fast, Minecraft-style voxel engine for Roblox.
     numbers), then "Durability: 200 / 250";
   - **armor:** "When on Head:", "+2 Armor", "+2 Armor Toughness" and Tough As Nails' insulation
     ("+1 Warmth", "+1 Cooling", "Keeps you from freezing");
-  - **food and drinks:** "When eaten: Heals 2 hearts", "When drunk: Restores 6 thirst, +4.8
-    Hydration", dirty water's "50% chance: Thirst (0:15)" in red, a tea's Internal Warmth, a
+  - **food and drinks:** "When eaten: Restores 8 hunger, +12.8 Saturation" (with hunger off
+    "Heals 2 hearts"), rotten flesh's "80% chance: Hunger (0:30)" in red, "When drunk: Restores 6
+    thirst, +4.8 Hydration", dirty water's "50% chance: Thirst (0:15)" in red, a tea's Internal Warmth, a
     potion's effects, a canteen's "Sips: 2 / 3";
   - **fuel:** "Burns for 80 s, smelts 8 items" and what a Heat or Combustion Generator makes of it;
   - **blocks:** the tool they need ("Needs a Stone Pickaxe or better", "Best tool: Axe"), light,
@@ -1463,7 +1491,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | ------------- | --------------------------- | ------- | ---------- |
 | Break block   | Hold left click (survival mines, creative breaks at once; adventure and spectator break nothing) | R2 | Hold |
 | Attack a mob  | Left click a mob in reach (3 blocks, creative 6; it hides the block behind it): one hit a click, with the held weapon | R2 | Tap the mob |
-| Eat / use medicine | Hold right click with food or medicine (meat and tins 1.6 s, crackers and the chocolate bar 1.2 s, the Bandage 2 s, the Medkit 4 s, pills 1.2-1.6 s, the ration 2.4 s) when it would do something: hurt, bleeding or infected (the Chocolate Bar any time; creative: any time); letting go stops | L2 | Tap |
+| Eat / use medicine | Hold right click with food or medicine (meat and tins 1.6 s, crackers and the chocolate bar 1.2 s, the Bandage 2 s, the Medkit 4 s, pills 1.2-1.6 s, the ration 2.4 s) when it would do something: food while the food bar isn't full (hurt, with hunger off), medicine when hurt, bleeding or infected (the Chocolate Bar any time; creative: any time); letting go stops | L2 | Tap |
 | Place / use   | Right click (opens chests, crafting tables, furnaces, machines; adventure and spectator only open them) | L2 | Tap |
 | Open a door   | Right click either half (and a double door's other door opens with it); `Shift` + right click with an item places instead | L2 | Tap |
 | Open a hatch  | Right click a Bunker Hatch, from above or from the ladder below, to open or shut it (every game mode but spectator; zombies hear it) | L2 | Tap |
@@ -1773,9 +1801,13 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             and walls, cobwebs, falls);
                             Combat (players hitting mobs: weapon damage, attack strength, reach,
                             knockback, wear)
-  Items/Foods               food and medicine (healing, use times, cures, effects, the Thirst
-                            effect's odds, who may use one, what finishing one does), raw to
-                            cooked
+  Items/Foods               food and medicine (Minecraft's nutrition and saturation, healing
+                            with hunger off and for medicine, use times, cures, effects, the
+                            Hunger and Thirst effects' odds, who may use one, what finishing one
+                            does), raw to cooked
+  Hunger                    Minecraft's food bar, pure (FoodData: food, saturation, exhaustion,
+                            eating, the fast and slow regeneration, starvation, the Hunger
+                            effect's drain, the sprint rule, the HUD's shanks and jitter)
   Apocalypse/               the zombie apocalypse's shared rules, pure: BloodMoon (the horde
                             nights' schedule from the day time), Infection (a bite's progress,
                             stages, symptoms, bites, cures, dormancy), NoiseRules (which sounds
@@ -1783,7 +1815,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
   GameMode, Mining          the four game modes and what each allows, mining times by hand and
                             with tools (and status effects' Haste and Mining Fatigue)
   Effects/  EffectList      status effects (Minecraft's MobEffects, Oil Coated, Fuel Soaked, Tough
-                            As Nails' four, Mana Sickness, Bleeding and the Infection): the
+                            As Nails' four, Mana Sickness, Bleeding, the Infection and Minecraft's
+                            Hunger): the
                             registry, the modifiers movement, mining, combat and burning read,
                             ticking rules, the HUD's order and flashing;
             PotionList      the potions (ingredients, levels, durations: items, recipes, drinks)
@@ -1792,7 +1825,7 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             in five zones, the target, the drift, hypothermia and hyperthermia,
                             Internal Warmth and Chill, Climate Clemency), Drinks (water sources,
                             the container tables: bottles, canteens, bowls; the teas), Exertion
-                            (movement that costs thirst), Boiling (dirty water boiled clean on a
+                            (movement that costs thirst and food), Boiling (dirty water boiled clean on a
                             campfire)
   Mana/                     Terraria's mana, pure: init (capacity, 1.4.4's regeneration at 20 Hz,
                             spending, Mana Sickness), StarFall (when and where Fallen Stars fall)
@@ -1998,8 +2031,8 @@ src/server   -> ServerScriptService.IceVoxel
                             damage, invulnerability, suffocation, lava and burning, explosions),
                             Burning (lava, fire and campfires hurting and burning players and
                             items, the hurt cooldown explosions share; pure), ToughAsNails
-                            (thirst and body temperature: ticks, drinking, exertion, the HUD's
-                            state) + Climate (the surroundings: biome, roof, heat and cold
+                            (thirst, body temperature and Minecraft's food bar: ticks, drinking,
+                            exertion, the HUD's state) + Climate (the surroundings: biome, roof, heat and cold
                             sources; pure), Effects (status effects: the API, sending, Glowing,
                             /effect) + EffectRules (giving, ticking, the fluids' effects, the
                             sync rule; pure) + EffectCommand (/effect; pure),
@@ -2009,7 +2042,8 @@ src/server   -> ServerScriptService.IceVoxel
                             LocateCommands + LocateCommand (/locate: parsing, answers and their
                             links, the searches' budgeted queue; pure),
                             WaypointStore and SettingsStore (DataStores: waypoints, player
-                            settings), Eating (food held 32 ticks: healing, used up),
+                            settings), Eating (food held 32 ticks: the food bar filled, or
+                            healing, used up),
                             UseState (who eats or drinks: the player attribute every client
                             plays the loops from),
                             Progression + ProgressionCommand + ProgressStore (knowledge, Ages and
@@ -2052,8 +2086,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             (holding food), Casting (magic weapons and Mana Crystals, predicted);
                             hitting mobs (BlockInteraction)
   Inventory/                ClientInventory + Prediction (predicted inventory)
-  Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: thirst droplets, the
-                            temperature gauge, frost and heat at the edges; ManaHud + ManaStars:
+  Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: hunger shanks, thirst
+                            droplets, the temperature gauge, frost and heat at the edges; ManaHud + ManaStars:
                             Terraria's mana stars, the layout pure), InventoryScreen (with the crafting,
                             chest, furnace and machine panels laid out by MenuLayout, machines'
                             energy bar and fluid gauges, empty armor and upgrade slots'
@@ -2307,8 +2341,12 @@ for performance:
 | `Accessories.Slots` / `ExtraSlotAges` | 5 / {"industrial", "atomic"} | Accessory slots every character has open, and the Ages that open one more each (7 at most). |
 | `Accessories.RunDelay` / `RunRamp` | 10 / 12 | Hermes Boots: ticks of sprinting on the ground before the speed builds, then ticks to its full boost. |
 | `Accessories.AirJumpPower` | 0.36   | A Cloud in a Bottle's take-off speed (blocks a tick; 0.36 rises 0.96 blocks, a ground jump's 0.42 rises 1.25). |
+| `Hunger.Enabled`          | true    | Minecraft's food bar: the shanks over the hotbar, foods filling it (Minecraft's nutrition and saturation), regeneration from it, starvation, no sprint at 6 or less, the Hunger effect. false: no shanks, foods heal health at once (as before), thirst rules regeneration, the HUD's rows where they were. |
+| `Hunger.NaturalRegeneration` | true | Minecraft's naturalRegeneration rule: a full bar with saturation heals half a heart's worth every 10 ticks (for up to 6 exhaustion), 18 or more half a heart every 80 ticks (for 6); replaces Roblox's regeneration. false: no natural regeneration at all. |
+| `Hunger.StarvationFloor`  | 1       | Starvation (food 0) hurts half a heart every 80 ticks while health is above this many half hearts (Minecraft's normal difficulty: 1; easy 10; 0 = to death, hard). |
+| `Hunger.EffectExhaustion` | 0.005   | Food exhaustion a tick of Minecraft's Hunger effect, per level (rotten flesh's 30 s: 3, most of a point). |
 | `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
-| `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+ (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false keeps Roblox's. Neither heals while fully frozen or overheated. |
+| `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+: with hunger on as a condition of hunger's regeneration (both bars high), with it off by thirst's own (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false: thirst has no say (hunger off: Roblox's stays). Nothing heals while fully frozen or overheated. |
 | `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |
 | `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.005 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
 | `ToughAsNails.Grading` | Enabled, -0.5 / 0.5, 1 s | The picture's Saturation as the extremes build (Rendering/TemperatureGrade): down by up to 0.5 while freezing to death, up by up to 0.5 while overheating, in proportion to how far hypothermia / hyperthermia has got, eased over 1 s. |
@@ -2570,9 +2608,13 @@ and costs on a device):
   toasts, waves of hunters on the ground (none on roofs); `/time set day` and `maxMobs` is back to
   320; zombies round a player sealed in a bunker walk off at dawn.
 - **A horde breaking in:** a door, a plank wall and a Barricade of a city building giving way.
+- **The hunger shanks:** how the procedural drumsticks read next to the hearts and droplets (full,
+  half, empty; green under `/effect give @s hunger`; the jitter with no saturation), the droplets,
+  thermometer, item name and status row a row higher, nothing touching on a phone at its GUI
+  scale, and the sprint refused at 6 food with a real controller.
 - **The survival HUD:** the day line wrapping on an iPad (1180 × 820) the day before a moon, the
   toasts' widths, no "You survived" toast after dying under the moon; the regeneration pause with
-  Tough As Nails' thirst and temperature both off; with `Characters.Enabled` off, the survivor
+  Tough As Nails' thirst and temperature and Minecraft's hunger all off; with `Characters.Enabled` off, the survivor
   record and an infection kept in the world's player record.
 - **The bunkers:** the hatch by right click from above and below and its sound heard by the user,
   climbing out with the real controller, the caves revealed in the airlock.
@@ -2915,13 +2957,16 @@ end)
 ```
 
 **Food and medicine.** `src/shared/Items/Foods.luau` lists what using an item does:
-`[Items.id.CookedBeef] = { heal = 4 }` (half hearts) with an optional `effect = { kind = "thirst",
-chance, ticks }`, and for the apocalypse's tins and medicine `useTicks` (the hold, 32 by default),
+`[Items.id.CookedBeef] = { heal = 4, nutrition = 8, saturation = 0.8 }` (Minecraft's
+FoodProperties: food points and the saturation modifier, what it does with hunger on; `heal` in half
+hearts with it off, and medicine's, which has no nutrition) with an optional `effect = { kind =
+"hunger", chance, ticks }` (Minecraft's Hunger; Tough As Nails' Thirst with hunger off, or always
+with kind "thirst"), and for the apocalypse's tins and medicine `useTicks` (the hold, 32 by default),
 `cures` (effect names: Bleeding, the Infection), `effects` (given when it finishes), `aftermath`
 (an effect after curing an infection that had reached a stage: Antibiotics' Weakness), `setback`
 (the Herbal Poultice), `sound` and `burp`. Any item in the table is used with its hold and no other
-change; `Foods.canUse` decides when (hurt, or something it cures, or any time for a food with
-effects).
+change; `Foods.canUse` decides when (a food bar under 20 for food, hurt for medicine and for food
+with hunger off, or something it cures, or any time for a food with effects).
 
 **Ages, skills and knowledge.** A new result belongs to the Stone Age (open to everyone) unless
 an Age names it: add its name to that Age's `recipes` in `src/shared/Progression/Ages.luau` (a
@@ -3597,7 +3642,7 @@ Natural next steps, roughly in order:
   city's needs room inside the footprint: a shed 10-14 blocks inside a town's north edge keeps
   3-5 rooms, and two sheds close together may leave one only its bunk room and storeroom. The All
   Structures sample town's shed has no bunker under it.
-- **Survival's corners.** With thirst and temperature both off the server guesses sprinting from
+- **Survival's corners.** With thirst, temperature and hunger all off the server guesses sprinting from
   the feet's speed (over 5 blocks a second), so a fast fall or a push may count as a noise. The
   blood moon's sky follows the camera's sky exposure (caves keep their colour), and with
   `Lighting.Enabled = false` the place keeps its own sky. `/effect clear` cures an infection

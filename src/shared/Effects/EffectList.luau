@@ -52,6 +52,10 @@
 	               (an outline everyone sees through walls: the server's Highlight).
 	  noSprint     can't start sprinting while it lasts (Blindness: LocalPlayer.canStartSprinting).
 	Elsewhere:
+	  drainsFood   food exhaustion every tick, Config.Hunger.EffectExhaustion (0.005) per level
+	               (Minecraft's Hunger: HungerMobEffect.applyEffectTick, causeFoodExhaustion(0.005
+	               x (amplifier + 1)) on every tick); Shared/Hunger adds it (nothing with hunger
+	               off, nor for creative and spectator players).
 	  external     its state is kept by another module (Tough As Nails' Thirst, Internal Warmth,
 	               Internal Chill and Climate Clemency: server Players/ToughAsNails) and only read
 	               (and given or cleared by /effect) through an adapter (server Players/Effects
@@ -83,6 +87,7 @@ export type EffectSpec = {
 	washOff: boolean?,
 	view: string?,
 	noSprint: boolean?,
+	drainsFood: boolean?,
 	external: boolean?,
 }
 
@@ -325,6 +330,17 @@ local list: { EffectSpec } = {
 		category = "harmful",
 		icon = "skull",
 		external = true,
+	},
+	-- 28: Minecraft's Hunger (MobEffects.HUNGER, its colour), from rotten flesh and raw chicken
+	-- (Items/Foods): the food bar drains faster and its shanks turn green (client Ui/SurvivalHud).
+	-- Kept by Players/Effects like any other; Shared/Hunger reads its level.
+	{
+		name = "Hunger",
+		command = "hunger",
+		color = { 88, 118, 83 },
+		category = "harmful",
+		icon = "drumstick",
+		drainsFood = true,
 	},
 }
 

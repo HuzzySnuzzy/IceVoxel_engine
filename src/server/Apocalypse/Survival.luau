@@ -16,8 +16,8 @@
 	             (Apocalypse/Infection.tick), and once a second (players spread over it) a sprint
 	             noise of Noise.Sprint blocks at the feet of a sprinting player
 	             (Apocalypse/NoiseBus.emit; Players/ToughAsNails.sprinting, or the feet's speed
-	             with Tough As Nails off: SurvivalRules.measuredSprint) who makes sounds (not a
-	             spectator).
+	             with Tough As Nails and Minecraft's hunger off: SurvivalRules.measuredSprint) who
+	             makes sounds (not a spectator).
 	  Kills      Mobs/Mobs.died with a player the killer and a zombie kind: a kill on their record.
 	  Death      the record starts over; an infected player's death (Apocalypse/Infection.died)
 	             tells everyone "<name> succumbed to the infection" when it was the infection, and
@@ -49,6 +49,7 @@ local GameMode = require(Shared.GameMode)
 local MobList = require(Shared.Entities.MobList)
 local Protocol = require(Shared.Net.Protocol)
 local SharedToughAsNails = require(Shared.ToughAsNails)
+local Hunger = require(Shared.Hunger)
 
 local ServerNet = require(script.Parent.Parent.Network.ServerNet)
 local WorldServer = require(script.Parent.Parent.World.WorldServer)
@@ -211,7 +212,7 @@ end
 local function sprinting(player: Player, fx: number, fz: number): boolean
 	local last = lastFeet[player]
 	lastFeet[player] = { x = fx, z = fz }
-	if SharedToughAsNails.thirstOn() or SharedToughAsNails.temperatureOn() then
+	if SharedToughAsNails.thirstOn() or SharedToughAsNails.temperatureOn() or Hunger.on() then
 		return ToughAsNails.sprinting(player)
 	end
 	return last ~= nil and SurvivalRules.measuredSprint(fx - last.x, fz - last.z, SurvivalRules.SPRINT_EVERY * TICK)

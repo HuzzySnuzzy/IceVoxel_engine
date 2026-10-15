@@ -5,22 +5,27 @@
 	(Players/ToughAsNails) does it for drinks, and the zombie apocalypse's medical supplies used
 	the same way.
 
-	  start   the held item is a food the player may use now (Foods.canUse: hurt, bleeding for a
-	          bandage, infected for antibiotics or a poultice, any time for a treat with effects,
-	          creative whenever; never a spectator, never dead): the time, the hotbar slot and the
+	  start   the held item is a food the player may use now (Foods.canUse: with Minecraft's
+	          hunger on a food bar below 20 for a food (Player.canEat; the bar is
+	          Players/ToughAsNails.hunger), with it off hurt; bleeding for a bandage, infected
+	          for antibiotics or a poultice, hurt for the rest of medicine, any time for a treat
+	          with effects, creative whenever; never a spectator, never dead): the time, the hotbar slot and the
 	          item are noted, and a food that is not medicine is the player's use for every
 	          client to hear (Players/UseState: Types.USE_EAT, the eating loop at the player,
 	          client Audio/UseSounds) until it ends here, however it ends;
 	  finish  the same item in the same slot, held at least its Foods.useTicks - FINISH_LEEWAY
-	          ticks since `start`, and still usable: Foods.finish plays it out here, healing at
+	          ticks since `start`, and still usable: Foods.finish plays it out here, filling the
+	          food bar with hunger on (Hunger.eat: its nutrition and saturation), else healing at
 	          once (its half hearts scaled to the Humanoid's MaxHealth, as every hurt is), curing
 	          (Players/Effects.remove: the Infection goes to its owner, server
 	          Apocalypse/Infection.cure), setting an infection back a stage (Infection.setBack:
 	          the Herbal Poultice), giving its status effects and Antibiotics' Weakness after a
 	          late cure (Players/Effects.give; the stage before the cure is
-	          Infection.stage's) and rolling Tough As Nails' Thirst effect for raw chicken,
-	          rotten flesh and crackers when thirst is on (Shared/ToughAsNails/Thirst.giveEffect
-	          on the player's state); then it is used up (one item, not in creative); everyone
+	          Infection.stage's) and rolling its risk: Minecraft's Hunger for raw chicken and
+	          rotten flesh with hunger on (Players/Effects.give), Tough As Nails' Thirst effect for
+	          crackers, and for those two with hunger off, when thirst is on
+	          (Shared/ToughAsNails/Thirst.giveEffect on the player's state); then it is used up
+	          (one item, not in creative); everyone
 	          else hears the burp (entity.player.burp), or medicine's own sound (Foods `sound`:
 	          the user's client played it as the use started);
 	  cancel  let go early: forgotten.
@@ -33,6 +38,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Foods = require(Shared.Items.Foods)
 local GameMode = require(Shared.GameMode)
+local Hunger = require(Shared.Hunger)
 local Items = require(Shared.Items)
 local Protocol = require(Shared.Net.Protocol)
 local SharedToughAsNails = require(Shared.ToughAsNails)
@@ -81,17 +87,24 @@ local function mayEat(player: Player, humanoid: Humanoid, item: number?): boolea
 	if food == nil then
 		return false
 	end
+	local hunger = ToughAsNails.hunger(player)
 	return Foods.canUse(food, humanoid.Health, humanoid.MaxHealth, GameMode.of(player), function(name: string): boolean
 		return EffectsServer.has(player, name)
-	end)
+	end, if hunger then hunger.food else nil)
 end
 
 -- Plays out `food` finishing for `player` (Foods.finish's hooks; see the header).
 local function finish(player: Player, humanoid: Humanoid, food: Foods.Food)
+	local hunger = ToughAsNails.hunger(player)
 	Foods.finish(food, {
 		heal = function(halfHearts: number)
 			humanoid.Health = math.min(humanoid.MaxHealth, humanoid.Health + halfHearts / HEALTH * humanoid.MaxHealth)
 		end,
+		feed = if hunger
+			then function(nutrition: number, saturationModifier: number)
+				Hunger.eat(hunger, nutrition, saturationModifier)
+			end
+			else nil,
 		cure = function(name: string)
 			EffectsServer.remove(player, name)
 		end,

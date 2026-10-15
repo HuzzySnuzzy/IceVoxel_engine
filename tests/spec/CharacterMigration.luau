@@ -191,8 +191,8 @@ return function(t, shared, require, server)
 		t.eq((keptProgress :: any).points, 340)
 		t.eq(lock, nil, "nobody holds it until it is selected")
 		-- (The zombie apocalypse's survivor record, CharacterCodec version 2: a migrated character
-		-- starts it afresh, healthy, and keeps it through its key.)
-		t.eq(CharacterCodec.VERSION, 2)
+		-- starts it afresh, healthy, and keeps it through its key. 3 since the food bar.)
+		t.eq(CharacterCodec.VERSION, 3)
 		local stored = back :: CharacterCodec.Record
 		t.eq(stored.alive + stored.kills + stored.moons + stored.infection, 0, "a fresh survivor record")
 	end)
@@ -432,7 +432,8 @@ return function(t, shared, require, server)
 	end)
 
 	t.test("character migration: a survivor record (version 3) round trips; versions 1 and 2 read zeros", function()
-		t.eq(PlayerCodec.VERSION, 3, "bumped for the survivor record")
+		-- (4 since Minecraft's food bar: the test below.)
+		t.eq(PlayerCodec.VERSION, 4, "bumped for the survivor record, then the food bar")
 		local record = oldRecord()
 		record.alive, record.kills, record.moons, record.infection = 50000, 12, 2, 30001
 		local back = PlayerCodec.fromText(PlayerCodec.toText(record)) :: any
@@ -492,5 +493,57 @@ return function(t, shared, require, server)
 			7,
 			"live: the live one's"
 		)
+	end)
+
+	t.test("character migration: the food bar (version 4) round trips; versions 1 to 3 have none", function()
+		-- (Minecraft's hunger, Shared/Hunger: an optional block after the survivor record, as that
+		-- one came, flag bit 6.)
+		local record = oldRecord()
+		record.alive = 5
+		t.eq(record.hunger, nil, "none kept: the player starts with a full bar")
+		local plain = PlayerCodec.encode(record)
+		t.ok(not bit32.btest(buffer.readu8(plain, 1), 64), "no food bar, no flag")
+		record.hunger = { food = 13, saturation = 0.5, exhaustion = 2.75, timer = 61 }
+		local bytes = PlayerCodec.encode(record)
+		t.ok(bit32.btest(buffer.readu8(bytes, 1), 64), "the food bar's flag")
+		t.eq(buffer.len(bytes), buffer.len(plain) + 16, "four f32 at the end")
+		local back = PlayerCodec.decode(bytes) :: any
+		t.ok(back ~= nil, "round trips")
+		t.eq(back.hunger.food, 13)
+		t.eq(back.hunger.saturation, 0.5)
+		t.eq(back.hunger.exhaustion, 2.75)
+		t.eq(back.hunger.timer, 61)
+		t.eq(back.alive, 5, "the survivor record before it")
+		-- Version 3 (before the food bar): the same bytes without it read with none; a version 3
+		-- byte with the flag is damage (an older server refuses a newer record the same way).
+		local three = buffer.create(buffer.len(plain))
+		buffer.copy(three, 0, plain, 0)
+		buffer.writeu8(three, 0, 3)
+		local old = PlayerCodec.decode(three) :: any
+		t.ok(old ~= nil and old.hunger == nil, "version 3: no food bar")
+		local wrong = buffer.create(buffer.len(bytes))
+		buffer.copy(wrong, 0, bytes, 0)
+		buffer.writeu8(wrong, 0, 3)
+		t.eq((PlayerCodec.decode(wrong)), nil, "version 3 never had the flag")
+		t.eq((PlayerCodec.fromText(versionOne(oldRecord())) :: any).hunger, nil, "version 1: none")
+		local cut = buffer.create(buffer.len(bytes) - 1)
+		buffer.copy(cut, 0, bytes, 0, buffer.len(cut))
+		t.eq((PlayerCodec.decode(cut)), nil, "a truncated food bar")
+		-- Nothing live yet (the title screen): the saved record's food bar is kept with the rest
+		-- of the climate; once a character stands, the live one's.
+		local waiting = PlayerCodec.withWaiting(
+			PlayerCodec.new(),
+			record,
+			{ standing = false, climate = false, effects = false, mana = false, survivor = false }
+		)
+		t.eq((waiting.hunger :: any).food, 13)
+		local live = PlayerCodec.new()
+		live.hunger = { food = 20, saturation = 5, exhaustion = 0, timer = 0 }
+		local standing = PlayerCodec.withWaiting(
+			live,
+			record,
+			{ standing = true, climate = true, effects = true, mana = true, survivor = true }
+		)
+		t.eq((standing.hunger :: any).food, 20, "live: the live one's")
 	end)
 end

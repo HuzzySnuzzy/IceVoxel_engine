@@ -6,6 +6,7 @@
 ]]
 
 return function(t, shared, require)
+	local Config = require(shared.Config)
 	local Items = require(shared.Items)
 	local LoreList = require(shared.Items.LoreList)
 	local Tooltip = require(shared.Items.Tooltip)
@@ -78,12 +79,29 @@ return function(t, shared, require)
 		t.eq(table.find(diamond, "Keeps you from freezing"), nil, "only leather is freeze immune")
 	end)
 
-	t.test("tooltips: food heals, and a risky one says its chance in red", function()
-		t.ok(table.find(Tooltip.texts(id.CookedBeef), "Heals 2 hearts") ~= nil)
-		t.ok(table.find(Tooltip.texts(id.RawMutton), "Heals half a heart") ~= nil)
+	t.test("tooltips: food fills hunger (or heals, hunger off), a risky one says its chance in red", function()
+		-- (Minecraft's hunger on, Config's default: the nutrition and the saturation it adds.)
+		t.ok(table.find(Tooltip.texts(id.CookedBeef), "Restores 8 hunger") ~= nil)
+		t.ok(table.find(Tooltip.texts(id.CookedBeef), "+12.8 Saturation") ~= nil, "8 x 0.8 x 2")
+		t.ok(table.find(Tooltip.texts(id.RawMutton), "+1.2 Saturation") ~= nil)
+		t.eq(table.find(Tooltip.texts(id.CookedBeef), "Heals 2 hearts"), nil, "no healing with hunger")
 		local flesh = Tooltip.lines(id.RottenFlesh)
 		t.ok(find(flesh, "When eaten:") ~= nil)
-		t.eq(line(flesh, "80% chance: Thirst (0:30)").colour, "red")
+		t.eq(line(flesh, "80% chance: Hunger (0:30)").colour, "red", "Minecraft's Hunger")
+		t.ok(table.find(Tooltip.texts(id.Crackers), "30% chance: Thirst (0:30)") ~= nil, "dry crackers")
+		t.ok(table.find(Tooltip.texts(id.Bandage), "Heals 1 heart") ~= nil, "medicine heals either way")
+		-- Hunger off: the game before the food bar.
+		Config.Hunger.Enabled = false
+		local ok, err = pcall(function()
+			t.ok(table.find(Tooltip.texts(id.CookedBeef), "Heals 2 hearts") ~= nil)
+			t.ok(table.find(Tooltip.texts(id.RawMutton), "Heals half a heart") ~= nil)
+			t.eq(table.find(Tooltip.texts(id.CookedBeef), "Restores 8 hunger"), nil)
+			t.eq(line(Tooltip.lines(id.RottenFlesh), "80% chance: Thirst (0:30)").colour, "red")
+		end)
+		Config.Hunger.Enabled = true
+		if not ok then
+			error(err, 0)
+		end
 	end)
 
 	t.test("tooltips: drinks say thirst, hydration, dirt and a tea's warmth", function()

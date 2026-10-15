@@ -37,7 +37,7 @@
 	             character that is saved, in a world that saves progress, not in creative; the
 	             world's mark waits for this character's first save with it, confirmImport), then its
 	             inventory and equipment (Players/Inventories.restore, restoreEquipment), Tough
-	             As Nails, effects, the zombie apocalypse's survivor record and infection
+	             As Nails and the food bar, effects, the zombie apocalypse's survivor record and infection
 	             (Apocalypse/Survival.restore), mana and crystals (Players/Mana) and progress
 	             (Players/Progression.restore); its health on its first body, the leftovers of an
 	             old record dropped at its feet, the nametag (Humanoid.DisplayName) its name.
@@ -140,6 +140,7 @@ type Cache = {
 	crystals: number?,
 	thirst: any,
 	temperature: any,
+	hunger: any,
 	effects: any,
 	survivor: SurvivalRules.Saved?,
 	progress: unknown?,
@@ -505,9 +506,10 @@ local function capture(player: Player, user: User, selected: Selected): Record
 		record.mana = cache.mana or base.mana
 		record.crystals = cache.crystals or base.crystals
 	end
-	local thirst, temperature = ToughAsNails.export(player)
+	local thirst, temperature, hunger = ToughAsNails.export(player)
 	record.thirst = (thirst or cache.thirst or base.thirst) :: any
 	record.temperature = (temperature or cache.temperature or base.temperature) :: any
+	record.hunger = (hunger or cache.hunger or base.hunger) :: any
 	local effects = Effects.export(player)
 	record.effects = (effects or cache.effects or base.effects) :: any
 	-- (The zombie apocalypse's survivor record and infection: Apocalypse/Survival.)
@@ -1009,9 +1011,9 @@ local function refreshCache(player: Player, selected: Selected, progress: boolea
 	end
 	local mana = Mana.export(player)
 	cache.mana, cache.crystals = mana.mana, mana.crystals
-	local thirst, temperature = ToughAsNails.export(player)
+	local thirst, temperature, hunger = ToughAsNails.export(player)
 	if thirst then
-		cache.thirst, cache.temperature = thirst, temperature
+		cache.thirst, cache.temperature, cache.hunger = thirst, temperature, hunger
 	end
 	local effects = Effects.export(player)
 	if effects then
@@ -1124,7 +1126,7 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 		vanityAccessories = record.vanityAccessories,
 		hidden = record.hidden,
 	})
-	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any)
+	ToughAsNails.restore(player, record.thirst :: any, record.temperature :: any, record.hunger :: any)
 	Effects.restore(player, record.effects :: any)
 	local survivor: SurvivalRules.Saved =
 		{ alive = record.alive, kills = record.kills, moons = record.moons, infection = record.infection }
@@ -1146,6 +1148,7 @@ local function apply(player: Player, user: User, selected: Selected, leftovers: 
 		crystals = record.crystals,
 		thirst = record.thirst,
 		temperature = record.temperature,
+		hunger = record.hunger,
 		effects = record.effects,
 		survivor = survivor,
 		progress = selected.progress,

@@ -15,7 +15,8 @@
 	  timer       FoodData's tickTimer: ticks towards the next regeneration or dehydration hurt.
 
 	Exhaustion comes from Minecraft's FoodConstants, which TAN's thirst counts as well
-	(Player.causeFoodExhaustion): EXHAUSTION below. Movement is the client's to measure
+	(Player.causeFoodExhaustion): EXHAUSTION below (with hunger on, the same amounts go to the food
+	bar too: Shared/Hunger.EXHAUSTION). Movement is the client's to measure
 	(ToughAsNails/Exertion: Minecraft's server takes the client's sprint flag and positions too);
 	breaking blocks and hurts the server sees itself. Being in the HOT zone adds
 	Config.ToughAsNails.HotExhaustion (0.005) every tick (sweating; `tick`'s `extra`).
@@ -28,7 +29,11 @@
 	                (FoodData's slow branch; its fast branch spends food's saturation, and
 	                hydration is no food, so it is left out); never while `stopped` (fully frozen
 	                or overheated, Temperature.stopsRegeneration: the extremes hurt every 100
-	                ticks, which this would outlast for anyone with water);
+	                ticks, which this would outlast for anyone with water). With Minecraft's
+	                hunger on (Shared/Hunger) the server always passes `stopped`: health comes
+	                back by hunger's natural regeneration then, which wants thirst 18 or more
+	                too (TAN: both bars high), and this branch is retired, so dehydration below
+	                is all thirst does to health;
 	  dehydration   at thirst 0: half a heart every DEHYDRATION_INTERVAL (120, gentler than
 	                starvation's 80) ticks while health is above Config.ToughAsNails
 	                .DehydrationFloor half hearts (FoodData's starvation on normal difficulty:

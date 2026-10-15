@@ -197,14 +197,17 @@
 	                 without the block list (blocks come as edits). Non-finite numbers, a power
 	                 outside 0..MAX_EXPLOSION_POWER or a push over MAX_KNOCKBACK are malformed.
 	  Survival       u8 flags (bit 0 thirst on, 1 temperature on, 2 wet, 3 Internal Warmth,
-	                 4 Internal Chill), u8 thirst (0..20), u8 hydration x 10, u8 exhaustion x 50
-	                 (clamped to 255), u8 temperature + 10 and u8 target + 10 (the body
-	                 temperature -10..10 and where it is going), u16 frozen and u16 heat
+	                 4 Internal Chill, 5 hunger on), u8 thirst (0..20), u8 hydration x 10, u8
+	                 exhaustion x 50 (clamped to 255), u8 temperature + 10 and u8 target + 10
+	                 (the body temperature -10..10 and where it is going), u16 frozen and u16 heat
 	                 (0..Temperature.EXTREME_TICKS), u16 Thirst effect ticks, u16 Climate
-	                 Clemency seconds left (rounded up): 14 bytes, the player's own thirst and
-	                 body temperature (Shared/ToughAsNails), sent to them alone when it changes
-	                 (at most every few ticks, and at once on joining and respawning); unknown
-	                 flags and out of range values are malformed
+	                 Clemency seconds left (rounded up), u8 food (0..20), u8 saturation x 10
+	                 (0..200: the HUD only asks whether any is left, F3 prints it), u8 food
+	                 exhaustion x 50 (clamped to 255): 17 bytes, the player's own thirst, body
+	                 temperature (Shared/ToughAsNails) and hunger (Shared/Hunger; Minecraft's
+	                 Hunger effect is in their Effects message, as every effect), sent to them
+	                 alone when it changes (at most every few ticks, and at once on joining and
+	                 respawning); unknown flags and out of range values are malformed
 	  Mobs           u16 count, count x op (u8 op, u32 mob id, then by op): the mobs within
 	                 Config.Mobs.TrackingDistance of the player (server Mobs/Mobs), positions in
 	                 1/32 block (i32 each: the feet), yaw in 1/256 of a turn (u8: facing
@@ -2450,10 +2453,11 @@ function Protocol.decodeDrink(b: buffer): (number?, number, number, number)
 	return action, 0, 0, 0
 end
 
--- A player's thirst and temperature as their HUD shows them (Survival).
+-- A player's thirst, temperature and hunger as their HUD shows them (Survival).
 export type SurvivalStatus = {
 	thirstOn: boolean,
 	temperatureOn: boolean,
+	hungerOn: boolean,
 	wet: boolean,
 	-- TAN's Internal Warmth and Internal Chill are on.
 	warmth: boolean,
@@ -2471,9 +2475,14 @@ export type SurvivalStatus = {
 	effect: number,
 	-- Seconds left of TAN's Climate Clemency.
 	clemency: number,
+	-- Minecraft's food bar (Shared/Hunger): food 0..20, saturation (tenths) and exhaustion.
+	food: number,
+	saturation: number,
+	foodExhaustion: number,
 }
 
-Protocol.SURVIVAL_BYTES = 14
+-- (14 before Minecraft's hunger.)
+Protocol.SURVIVAL_BYTES = 17
 
 function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 	local b = buffer.create(Protocol.SURVIVAL_BYTES)
@@ -2482,6 +2491,7 @@ function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 		+ (if status.wet then 4 else 0)
 		+ (if status.warmth then 8 else 0)
 		+ (if status.chill then 16 else 0)
+		+ (if status.hungerOn then 32 else 0)
 	local extreme = Temperature.EXTREME_TICKS
 	buffer.writeu8(b, 0, flags)
 	buffer.writeu8(b, 1, math.clamp(math.round(status.thirst), 0, 20))
@@ -2493,6 +2503,9 @@ function Protocol.encodeSurvival(status: SurvivalStatus): buffer
 	buffer.writeu16(b, 8, math.clamp(math.round(status.heat), 0, extreme))
 	buffer.writeu16(b, 10, math.clamp(math.round(status.effect), 0, 65535))
 	buffer.writeu16(b, 12, math.clamp(math.ceil(status.clemency), 0, 65535))
+	buffer.writeu8(b, 14, math.clamp(math.round(status.food), 0, 20))
+	buffer.writeu8(b, 15, math.clamp(math.round(status.saturation * 10), 0, 200))
+	buffer.writeu8(b, 16, math.clamp(math.round(status.foodExhaustion * 50), 0, 255))
 	return b
 end
 
@@ -2505,21 +2518,25 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 	local thirst, hydration = buffer.readu8(b, 1), buffer.readu8(b, 2)
 	local temperature, target = buffer.readu8(b, 4), buffer.readu8(b, 5)
 	local frozen, heat = buffer.readu16(b, 6), buffer.readu16(b, 8)
+	local food, saturation = buffer.readu8(b, 14), buffer.readu8(b, 15)
 	local span, extreme = Temperature.MAX - Temperature.MIN, Temperature.EXTREME_TICKS
 	if
-		flags > 31
+		flags > 63
 		or thirst > 20
 		or hydration > 200
 		or temperature > span
 		or target > span
 		or frozen > extreme
 		or heat > extreme
+		or food > 20
+		or saturation > 200
 	then
 		return nil
 	end
 	return {
 		thirstOn = bit32.btest(flags, 1),
 		temperatureOn = bit32.btest(flags, 2),
+		hungerOn = bit32.btest(flags, 32),
 		wet = bit32.btest(flags, 4),
 		warmth = bit32.btest(flags, 8),
 		chill = bit32.btest(flags, 16),
@@ -2532,6 +2549,9 @@ function Protocol.decodeSurvival(b: buffer): SurvivalStatus?
 		heat = heat,
 		effect = buffer.readu16(b, 10),
 		clemency = buffer.readu16(b, 12),
+		food = food,
+		saturation = saturation / 10,
+		foodExhaustion = buffer.readu8(b, 16) / 50,
 	}
 end
 

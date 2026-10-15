@@ -17,10 +17,12 @@
 	          the use starts, instead of the loop and the burp; the server plays it to everyone
 	          else when it finishes.
 	Only when the player may use it (Foods.canUse, with the effects this client was told of,
-	Player/EffectState: hurt, bleeding for a bandage, infected for antibiotics or a poultice, any
-	time for a treat with effects, creative whenever; never a spectator). Nothing is predicted: the
-	server's inventory snapshot brings the used item and the health comes back with the
-	character's.
+	Player/EffectState, and the food bar, Player/SurvivalState, while Minecraft's hunger is on: a
+	food while the bar isn't full; with hunger off hurt; bleeding for a bandage, infected for
+	antibiotics or a poultice, hurt for the rest of medicine, any time for a treat with effects,
+	creative whenever; never a spectator). Nothing is predicted: the server's inventory snapshot
+	brings the used item, the food bar comes back in the next Survival message and the health with
+	the character's.
 ]]
 
 local Players = game:GetService("Players")
@@ -36,6 +38,7 @@ local Protocol = require(Shared.Net.Protocol)
 local ClientNet = require(script.Parent.Parent.Net.ClientNet)
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local EffectState = require(script.Parent.Parent.Player.EffectState)
+local SurvivalState = require(script.Parent.Parent.Player.SurvivalState)
 local MovementController = require(script.Parent.Parent.Player.MovementController)
 local Screens = require(script.Parent.Parent.Ui.Screens)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
@@ -112,7 +115,7 @@ local function mayEat(food: Foods.Food, mode: string): boolean
 	if humanoid == nil or humanoid.Health <= 0 then
 		return false
 	end
-	return Foods.canUse(food, humanoid.Health, humanoid.MaxHealth, mode, has)
+	return Foods.canUse(food, humanoid.Health, humanoid.MaxHealth, mode, has, SurvivalState.foodLevel())
 end
 
 -- A right click with `stack` in game `mode`: starts eating it. Returns whether it did.

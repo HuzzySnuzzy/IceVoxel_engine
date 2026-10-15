@@ -9,7 +9,8 @@
 	                Chill, Climate Clemency (the grace after joining and respawning)
 	  Drinks        what is drunk (water sources, dirty and purified bottles and canteens) and how
 	                containers fill and empty (data tables: new containers and drinks are entries)
-	  Exertion      movement measured by the client for thirst (sprinting, swimming, jumps)
+	  Exertion      movement measured by the client for thirst (sprinting, swimming, jumps; and
+	                for Minecraft's hunger, Shared/Hunger, which the server runs beside thirst)
 	  Boiling       dirty water boiled clean on a campfire (the gear for the climate: the
 	                Campfire, Straw and Leaf armor and the Thermometer are BlockList / ItemList's)
 

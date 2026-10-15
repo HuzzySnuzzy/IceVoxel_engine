@@ -2097,6 +2097,10 @@ return function(t, shared, require, server)
 						return p.x, p.y, p.z
 					end,
 				}),
+				-- (A landed attack costs food exhaustion: Minecraft's hunger, nothing here.)
+				ToughAsNails = stub({
+					attacked = function() end,
+				}),
 			},
 			Apocalypse = { NoiseBus = server.Apocalypse.NoiseBus },
 		}

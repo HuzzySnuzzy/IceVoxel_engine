@@ -1,9 +1,11 @@
 --!strict
 --[[
-	This player's thirst and body temperature (Tough As Nails) as the server last sent them
-	(Protocol Survival, server Players/ToughAsNails): what the HUD (Ui/SurvivalHud), drinking
-	(Interaction/Drinking) and F3 (Debug/DebugOverlay) read. nil until the first message, and for
-	good when Config.ToughAsNails turns thirst and temperature off (the server sends nothing).
+	This player's thirst and body temperature (Tough As Nails) and food bar (Minecraft's hunger,
+	Shared/Hunger) as the server last sent them (Protocol Survival, server Players/ToughAsNails):
+	what the HUD (Ui/SurvivalHud), drinking (Interaction/Drinking), eating (Interaction/Eating:
+	`foodLevel`), sprinting (Player/MovementController: `tooHungry`) and F3 (Debug/DebugOverlay)
+	read. nil until the first message, and for good when Config.ToughAsNails turns thirst and
+	temperature off and Config.Hunger is off (the server sends nothing).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
+local Hunger = require(Shared.Hunger)
 local Protocol = require(Shared.Net.Protocol)
 local ToughAsNails = require(Shared.ToughAsNails)
 local Drinks = require(Shared.ToughAsNails.Drinks)
@@ -44,6 +47,21 @@ function SurvivalState.canDrink(mode: string, drink: Drinks.Drink?): boolean
 	end
 	local thirsty = GameMode.invulnerable(mode) or status.thirst < ToughAsNails.Thirst.MAX
 	return Drinks.drinkable(drink, thirsty, status.thirstOn, status.temperatureOn)
+end
+
+-- The food bar while hunger is on (nil: off, or nothing from the server yet): Foods.canUse's.
+function SurvivalState.foodLevel(): number?
+	local status = current
+	return if status and status.hungerOn then status.food else nil
+end
+
+--[[
+	Is this player too hungry to sprint in game `mode` (hunger on and Hunger.canSprint says no:
+	food 6 or less, a mode that can't fly)? false until the server said.
+]]
+function SurvivalState.tooHungry(mode: string): boolean
+	local food = SurvivalState.foodLevel()
+	return food ~= nil and not Hunger.canSprint(food, mode)
 end
 
 -- Is hand drinking on (Config.ToughAsNails.HandDrinking)?
