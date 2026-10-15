@@ -39,7 +39,24 @@
 	           closes the screen (Minecraft's touch screen mode).
 
 	Drags show their result as they grow: the screen draws a copy of the window with the drag
-	applied.
+	applied. While a stack is carried, what dropping it would do where it is (Ui/Theme.feedback:
+	fits, blocked, swap, combine, or the drop place) goes to the carried stack (Ui/DragGhost) and
+	to the inventory screen (`setFeedback`).
+
+	The parts of an open screen live in modules of their own: the darkened world (Ui/Backdrop), the
+	carried stack (Ui/DragGhost) and the item tooltip (Ui/ItemTooltip: Screens compares its keys,
+	places it, and on a mouse shows it once the same thing has been hovered Theme.Time.TOOLTIP_DELAY,
+	its top left at the pointer, kept TOOLTIP_MARGIN screen pixels inside the screen; gamepad and
+	touch place it as Minecraft does). Roots of the inventory family are marked for the survival
+	look (Style.Dayz.mark).
+
+	Layout: an inventory screen that lays itself out (`place`, the survival look's columns) is given
+	the screen (one View table, updated in place) and returns its GUI scale; JEI's list then docks
+	where the inventory says (`jeiDock`, one Placement table reused) and the status icons dock in
+	its band (`statusRect` -> Ui/StatusDock, cleared whenever the inventory is not the shown
+	screen). Without `place` the inventory is fitted and centred as Minecraft's. While the recipe
+	view is open an inventory with `setViewing` hides what the view covers itself and stays shown.
+	A touch tap where items are thrown (`inDropZone`) with nothing carried does not close it.
 
 	Panels: another module's screen (Ui/StructureScreen: the structure block and jigsaw screens)
 	is shown with `showPanel`, in the screens' GUI and with everything that comes with an open
@@ -74,27 +91,28 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
-local Tooltip = require(Shared.Items.Tooltip)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local Backdrop = require(script.Parent.Backdrop)
 local CreativeScreen = require(script.Parent.CreativeScreen)
+local DragGhost = require(script.Parent.DragGhost)
 local Hud = require(script.Parent.Hud)
 local InventoryScreen = require(script.Parent.InventoryScreen)
-local ItemIcon = require(script.Parent.ItemIcon)
+local ItemTooltip = require(script.Parent.ItemTooltip)
 local Jei = require(script.Parent.Jei)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
+local StatusDock = require(script.Parent.StatusDock)
 local Style = require(script.Parent.Style)
-local TextWrap = require(script.Parent.TextWrap)
+local Theme = require(script.Parent.Theme)
 local UiScale = require(script.Parent.UiScale)
 local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
-local ProgressionState = require(script.Parent.Parent.Player.ProgressionState)
 
 type Target = SlotClicks.Target
 type Kind = "inventory" | "creative" | "panel"
-type Line = { text: string, colour: Color3 }
+type Line = ItemTooltip.Line
 
 --[[
 	A screen of another module shown by Screens (showPanel). Its `root` is parented into the
@@ -121,8 +139,10 @@ local TOUCH_MOVE = 10
 -- Gamepad right stick: scroll a row this often while pushed past STICK_DEAD_ZONE.
 local STICK_REPEAT = 0.12
 local STICK_DEAD_ZONE = 0.5
--- Minecraft's tooltip sits 12 GUI pixels right of and above the pointer.
+-- Minecraft's tooltip sits 12 GUI pixels right of and above the pointer (gamepad, touch); a
+-- mouse's has its top left at the pointer, at least this many screen pixels inside the screen.
 local TOOLTIP_OFFSET = 12
+local TOOLTIP_MARGIN = 10
 -- Escape both reaches InputBegan (sometimes) and opens Roblox's menu: one press within this many
 -- seconds acts once.
 local ESCAPE_REPEAT = 0.3
@@ -300,104 +320,36 @@ function Screens.toggle()
 	end
 end
 
--- Shared/Items/Tooltip's colour names -> the palette.
-local TOOLTIP_COLOURS: { [Tooltip.Colour]: Color3 } = {
-	white = Style.Colour.Text,
-	gray = Style.Colour.Gray,
-	blue = Style.Colour.Blue,
-	red = Style.Colour.Red,
-	darkGreen = Style.Colour.DarkGreen,
-	lore = Style.Colour.Lore,
-}
-
 --[[
-	The tooltip of `item` (and of the `stack` it is in, when it is a slot's: its data and wear):
-	Shared/Items/Tooltip's lines (name, item data, lore, what it is, its stat blocks, its wear, and
-	for a player the recipe gate judges what making it needs), in Minecraft's colours. The
-	inventory, the creative grid and JEI all show these.
+	What a carried `cursor` would do over `target` in `window` (Ui/Theme.feedback, from Menu's
+	rules): nil over nothing, "drop" outside, else the slot's answer.
 ]]
-local function tooltipLines(item: number, stack: Items.Stack?): { Line }
-	local lines: { Line } = {}
-	for _, line in Tooltip.lines(item, stack, { gate = ProgressionState.gate() }) do
-		table.insert(lines, { text = line.text, colour = TOOLTIP_COLOURS[line.colour] or Style.Colour.Text })
+local function feedbackAt(window: Types.Window, target: Target?, cursor: Items.Stack): Theme.Feedback?
+	if target == nil then
+		return nil
+	elseif target.kind == "outside" then
+		return Theme.feedback(true, "drop", false, false, false, false, false)
+	elseif target.kind ~= "slot" then
+		return nil
 	end
-	return lines
+	local index = target.index
+	local stack = Menu.get(window, index)
+	local result = Menu.isResultSlot(window, index)
+	local same = stack ~= nil and Menu.stacksMatch(cursor, stack)
+	local room = false
+	if stack then
+		room = if result
+			then cursor.count + stack.count <= Items.maxStack(cursor.item)
+			else stack.count < Menu.maxStackFor(window, index, cursor.item)
+	end
+	return Theme.feedback(true, "slot", stack == nil, Menu.mayPlace(window, index, cursor.item), same, room, result)
 end
 
--- What the tooltip of `item` in `stack` depends on beyond the item (its wear, its data, the
--- recipe gate's verdict), so it is rebuilt only when that changes.
-local function tooltipState(item: number, stack: Items.Stack?): string
-	local lock = ProgressionState.lockText(item) or ""
-	if stack == nil or stack.item ~= item then
-		return lock
-	end
-	return `{Items.cleanDamage(stack.damage) or 0}#{Items.dataKey(stack.data)}#{lock}`
-end
-
--- Lines wider than this (GUI pixels) wrap (the lore), as the settings' tooltips do; never
--- narrower than the name.
-local TOOLTIP_WRAP = 200
-
--- `lines` with every line wider than the wrap width cut into rows of its colour (Ui/TextWrap).
-local function wrapLines(lines: { Line }): { Line }
-	local width = TOOLTIP_WRAP
-	if lines[1] then
-		width = math.max(width, Style.textWidth(lines[1].text))
-	end
-	local measure = function(text: string): number
-		return Style.textWidth(text)
-	end
-	local out: { Line } = {}
-	for i, line in lines do
-		if i == 1 or line.text == "" or measure(line.text) <= width then
-			table.insert(out, line)
-		else
-			for _, row in TextWrap.wrap(line.text, width, measure) do
-				table.insert(out, { text = row, colour = line.colour })
-			end
-		end
-	end
-	return out
-end
-
--- Minecraft's tooltip: a dark purple box with a lighter purple border, the name, then details.
-local function buildTooltip(parent: Frame, lines: { Line }): Vector2
-	parent:ClearAllChildren()
-	lines = wrapLines(lines)
-	local scale = Instance.new("UIScale")
-	scale.Name = "Scale"
-	scale.Parent = parent
-	local width = 0
-	for _, line in lines do
-		width = math.max(width, Style.textWidth(line.text))
-	end
-	-- 10 pixels per line, and 2 more under the name.
-	local height = 8 + (#lines - 1) * 10 + (if #lines > 1 then 2 else 0)
-	local w, h = width + 8, height + 8
-	local back = Style.frame(parent, 0, 0, w, h, Style.Colour.TooltipBack, 1)
-	back.BackgroundTransparency = 0.06
-	local border = Style.border(back, 1, 1, w - 2, h - 2, 1, Color3.new(1, 1, 1), 2)
-	-- (The border colours blended over the background, as Minecraft draws them translucent.)
-	local top, bottom = Color3.fromRGB(36, 0, 90), Color3.fromRGB(23, 0, 50)
-	for i, frame in border do
-		frame.BackgroundColor3 = if i == 2 then bottom else top
-		if i >= 3 then
-			frame.BackgroundColor3 = Color3.new(1, 1, 1)
-			local gradient = Instance.new("UIGradient")
-			gradient.Rotation = 90
-			gradient.Color = ColorSequence.new(top, bottom)
-			gradient.Parent = frame
-		end
-	end
-	local y = 4
-	for i, line in lines do
-		if line.text ~= "" then
-			Style.shadowText(back, line.text, 4, y, width + 2, 8, line.colour, 5)
-		end
-		y += if i == 1 then 12 else 10
-	end
-	parent.Size = UDim2.fromOffset(w, h)
-	return Vector2.new(w, h)
+-- The left and right edges (screen pixels) of `root`, sized in GUI pixels under `scale`.
+local function span(root: GuiObject, scale: number, viewportX: number): (number, number)
+	local width = root.Size.X.Offset * scale
+	local left = root.Position.X.Scale * viewportX + root.Position.X.Offset - root.AnchorPoint.X * width
+	return left, left + width
 end
 
 function Screens.start()
@@ -416,18 +368,8 @@ function Screens.start()
 	-- Under the HUD (whose hotbar is the creative screen's hotbar row), over the map.
 	local gui = UiScale.screenGui("IceVoxelScreens", "Screens", { inset = true, kind = "scaled", enabled = false })
 
-	-- Minecraft darkens the world behind a screen.
-	local backdrop = Instance.new("Frame")
-	backdrop.Name = "Backdrop"
-	backdrop.BackgroundColor3 = Color3.fromRGB(16, 16, 16)
-	backdrop.BorderSizePixel = 0
-	backdrop.Size = UDim2.fromScale(1, 1)
-	backdrop.ZIndex = 0
-	backdrop.Parent = gui
-	local fade = Instance.new("UIGradient")
-	fade.Rotation = 90
-	fade.Transparency = NumberSequence.new(0.25, 0.19)
-	fade.Parent = backdrop
+	-- The world behind a screen is darkened.
+	local backdrop = Backdrop.new(gui)
 
 	-- Visible and Modal: Roblox frees the mouse (also in first person) while it is shown.
 	local modal = Instance.new("TextButton")
@@ -452,25 +394,16 @@ function Screens.start()
 
 	-- The carried stack and the tooltip, above everything (also the HUD).
 	local top = UiScale.screenGui("IceVoxelCursor", "Cursor", { inset = true, kind = "scaled", enabled = false })
-	local carried = Instance.new("Frame")
-	carried.Name = "Carried"
-	carried.BackgroundTransparency = 1
-	carried.AnchorPoint = Vector2.new(0.5, 0.5)
-	carried.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
-	carried.Visible = false
-	carried.Parent = top
-	local carriedScale = Instance.new("UIScale")
-	carriedScale.Parent = carried
-	local carriedIcon = ItemIcon.new(carried, 0, 0, 1)
-	local tooltip = Instance.new("Frame")
-	tooltip.Name = "Tooltip"
-	tooltip.BackgroundTransparency = 1
-	tooltip.Visible = false
-	tooltip.ZIndex = 2
-	tooltip.Parent = top
-	-- What the tooltip shows (the item and its extra lines, joined), to rebuild it only on a change.
+	local ghost = DragGhost.new(top)
+	local tooltip = ItemTooltip.new(top)
+	-- What the tooltip shows (its key), to rebuild it only on a change; what is hovered now and
+	-- since when (the mouse's delay).
 	local tooltipKey = ""
 	local tooltipSize = Vector2.zero
+	local hoverKey = ""
+	local hoverSince = 0
+	-- Whether the inventory was last told of drag feedback (it is told nil once after).
+	local feedbackShown = false
 
 	-- JEI: the item list beside the screens and the recipe view (Ui/Jei). Recipes are moved into
 	-- the crafting grid only from the inventory screen, which shows it.
@@ -483,6 +416,13 @@ function Screens.start()
 			return current == "inventory" and GameMode.canInteract(ClientInventory.mode())
 		end,
 	})
+
+	-- The inventory family's roots are drawn in the survival look.
+	Style.Dayz.mark(inventory.root)
+	Style.Dayz.mark(creative.root)
+	Style.Dayz.mark(jei.list.root)
+	Style.Dayz.mark(jei.view.root)
+	Style.Dayz.mark(tooltip.root)
 
 	gui.Parent = playerGui
 	top.Parent = playerGui
@@ -605,10 +545,28 @@ function Screens.start()
 		end
 	end
 
+	-- The screen as an inventory that lays itself out sees it, and JEI's placement: one table each,
+	-- updated in place every frame.
+	local view: InventoryScreen.View = { w = 0, h = 0, top = 0, base = 1, touch = false }
+	local placement: Jei.Placement = {
+		viewportX = 0,
+		top = 0,
+		bottom = 0,
+		guiRight = 0,
+		scale = 1,
+		viewScale = 1,
+		dock = nil,
+		docked = nil,
+		viewX = nil,
+	}
+
 	-- (The GUI scale from Ui/UiScale, fitted to this GUI's own area: the device's safe area.)
 	local function layout()
 		local viewport = gui.AbsoluteSize
+		local inset = GuiService:GetGuiInset().Y
 		local scale
+		-- The shown screen's edges (screen pixels): JEI's list and the effect list keep beside it.
+		local left, right
 		-- Where JEI's list may reach down to: above the creative screen's hotbar row (also while the
 		-- recipe view hides it, so the list keeps its cells instead of rebuilding them).
 		local listBottom = viewport.Y
@@ -637,29 +595,58 @@ function Screens.start()
 				creative.root.Position = UDim2.new(0.5, 0, 0, y)
 			end
 		else
-			local size = inventory:size()
-			width = size.X
-			scale = UiScale.fit(size.X, size.Y, viewport)
-			setScale(inventoryScale, scale)
+			local place = inventory.place
+			if place then
+				-- (The survival look lays itself out and positions its root.)
+				view.w, view.h, view.top = viewport.X, viewport.Y, inset
+				view.base, view.touch = UiScale.base(), UiScale.touch()
+				scale = place(inventory, view)
+				setScale(inventoryScale, scale)
+				left, right = span(inventory.root, scale, viewport.X)
+				width = (right - left) / scale
+			else
+				local size = inventory:size()
+				width = size.X
+				scale = UiScale.fit(size.X, size.Y, viewport)
+				setScale(inventoryScale, scale)
+			end
+		end
+		if left == nil or right == nil then
+			-- (Centred.)
+			left, right = viewport.X / 2 - width / 2 * scale, viewport.X / 2 + width / 2 * scale
 		end
 		-- JEI: the recipe view in the panel's place (at most the panel's scale), the list to the right
 		-- of the shown panel (all are centred; the inventory with its equipment panel is wider than
-		-- MenuLayout.WIDTH, so its own size counts).
+		-- MenuLayout.WIDTH, so its own size counts), or docked where the inventory says.
 		local viewSize = jei.view:size()
-		screenLeftEdge = viewport.X / 2 - width / 2 * scale
-		jei:place({
-			viewportX = viewport.X,
-			top = GuiService:GetGuiInset().Y,
-			bottom = listBottom,
-			guiRight = viewport.X / 2 + width / 2 * scale,
-			scale = scale,
-			viewScale = math.min(scale, UiScale.fit(viewSize.X, viewSize.Y, viewport)),
-		})
-		setScale(carriedScale, scale)
-		local tooltipScale = tooltip:FindFirstChild("Scale")
-		if tooltipScale and tooltipScale:IsA("UIScale") then
-			setScale(tooltipScale, scale)
+		screenLeftEdge = left
+		placement.viewportX = viewport.X
+		placement.top = inset
+		placement.bottom = listBottom
+		placement.guiRight = right
+		placement.scale = scale
+		placement.viewScale = math.min(scale, UiScale.fit(viewSize.X, viewSize.Y, viewport))
+		local jeiDock = inventory.jeiDock
+		if current == "inventory" and jeiDock then
+			placement.dock = jeiDock(inventory)
+			placement.docked = true
+			local jeiViewX = inventory.jeiViewX
+			placement.viewX = if jeiViewX then jeiViewX(inventory) else nil
+		else
+			placement.dock = nil
+			placement.docked = nil
+			placement.viewX = nil
 		end
+		jei:place(placement)
+		-- The status icons dock in the open inventory's band (the inventory says where).
+		local statusRect = inventory.statusRect
+		if current == "inventory" and statusRect then
+			StatusDock.set(statusRect(inventory))
+		else
+			StatusDock.set(nil, 1)
+		end
+		ghost:setScale(scale)
+		tooltip:setScale(scale)
 		return scale
 	end
 
@@ -701,7 +688,17 @@ function Screens.start()
 	-- creative screen's hotbar row.
 	local function applyVisibility()
 		local viewing = jei:viewOpen()
-		inventory.root.Visible = current == "inventory" and not viewing
+		local setViewing = inventory.setViewing
+		if setViewing then
+			-- (It hides what the recipe view covers itself.)
+			setViewing(inventory, viewing)
+			inventory.root.Visible = current == "inventory"
+		else
+			inventory.root.Visible = current == "inventory" and not viewing
+		end
+		if current ~= "inventory" then
+			StatusDock.set(nil, 1)
+		end
 		creative.root.Visible = current == "creative" and not viewing
 		local shownPanel = panel
 		if shownPanel then
@@ -768,6 +765,7 @@ function Screens.start()
 			end
 		end
 		current = kind
+		backdrop:setOpen(true, kind)
 		resetPointer()
 		local shownPanel = panel
 		if kind == "panel" and shownPanel then
@@ -807,8 +805,11 @@ function Screens.start()
 		if current == nil then
 			return
 		end
+		local wasKind: Kind = current
 		local wasPanel = current == "panel"
 		current = nil
+		backdrop:setOpen(false, wasKind)
+		StatusDock.set(nil, 1)
 		resetPointer()
 		creative:releaseFocus()
 		-- (Also closes the recipe view and drops the search field's focus.)
@@ -829,8 +830,15 @@ function Screens.start()
 		lastWindowId = ClientInventory.window().id
 		gui.Enabled = false
 		top.Enabled = false
-		tooltip.Visible = false
-		carried.Visible = false
+		tooltip.root.Visible = false
+		ghost:render(nil, Vector2.zero, nil, nil)
+		if feedbackShown then
+			feedbackShown = false
+			local setFeedback = inventory.setFeedback
+			if setFeedback then
+				setFeedback(inventory, nil)
+			end
+		end
 		Hud.setMode("play")
 		Hud.setHover(nil)
 		Hud.setPreview(nil)
@@ -1083,8 +1091,12 @@ function Screens.start()
 			end
 			local target = t.target
 			if target and target.kind == "outside" and ClientInventory.window().inventory.cursor == nil then
-				close()
-				return
+				-- (Not where items are thrown: a tap there is no way out.)
+				local inDropZone = inventory.inDropZone
+				if not (current == "inventory" and inDropZone and inDropZone(inventory, t.position)) then
+					close()
+					return
+				end
 			end
 			clicks:click(target, SlotClicks.Button.Left, false, now)
 		else
@@ -1292,8 +1304,8 @@ function Screens.start()
 		local scale = layout()
 		if current == "panel" then
 			-- (No slots, carried stack or tooltips on a panel.)
-			tooltip.Visible = false
-			carried.Visible = false
+			tooltip.root.Visible = false
+			ghost:render(nil, Vector2.zero, nil, nil)
 			return
 		end
 
@@ -1359,15 +1371,19 @@ function Screens.start()
 		end
 		jei:render(now, point)
 
-		-- The carried stack follows the pointer.
+		-- The carried stack follows the pointer, and says what dropping it there would do (from the
+		-- real window: the drag preview's copy only shows the drag).
 		local cursor = shown.inventory.cursor
 		local origin = top.AbsolutePosition
-		if cursor and point then
-			carriedIcon:set(cursor.item, cursor.count, cursor.damage, cursor.data)
-			carried.Position = UDim2.fromOffset(point.X - origin.X, point.Y - origin.Y)
-			carried.Visible = true
-		else
-			carried.Visible = false
+		local carriedNow = window.inventory.cursor
+		local feedback: Theme.Feedback? = if carriedNow and not viewing
+			then feedbackAt(window, hover, carriedNow)
+			else nil
+		ghost:render(point, origin, cursor, feedback)
+		local setFeedback = inventory.setFeedback
+		if setFeedback and current == "inventory" and (carriedNow or feedbackShown) then
+			feedbackShown = carriedNow ~= nil
+			setFeedback(inventory, feedback)
 		end
 
 		-- The hovered item's tooltip (only with nothing carried, like Minecraft), or JEI's: its items
@@ -1398,34 +1414,38 @@ function Screens.start()
 				end
 			end
 		end
-		local key = if item then `{item}#{tooltipState(item, slotStack)}` else ""
-		if extra then
-			for _, line in extra do
-				key ..= `|{line.text}`
-			end
+		local key = tooltip:key(item, slotStack, extra)
+		if key ~= hoverKey then
+			hoverKey = key
+			hoverSince = now
 		end
 		if key ~= "" and point then
 			if key ~= tooltipKey then
-				local lines: { Line } = if item then tooltipLines(item, slotStack) else {}
-				if extra then
-					table.move(extra, 1, #extra, #lines + 1, lines)
-				end
 				tooltipKey = key
-				tooltipSize = buildTooltip(tooltip, lines)
-				layout()
+				tooltipSize = tooltip:build(item, slotStack, extra)
 			end
 			local size = tooltipSize * scale
 			local screen = top.AbsoluteSize
-			local x = point.X - origin.X + TOOLTIP_OFFSET * scale
-			local y = point.Y - origin.Y - TOOLTIP_OFFSET * scale
-			if x + size.X > screen.X then
-				x = point.X - origin.X - (TOOLTIP_OFFSET + 4) * scale - size.X
+			local x, y
+			if inputKind() == "mouse" then
+				-- Its top left at the pointer, kept inside the screen.
+				local margin = TOOLTIP_MARGIN
+				x = math.clamp(point.X - origin.X, margin, math.max(margin, screen.X - size.X - margin))
+				y = math.clamp(point.Y - origin.Y, margin, math.max(margin, screen.Y - size.Y - margin))
+			else
+				x = point.X - origin.X + TOOLTIP_OFFSET * scale
+				y = point.Y - origin.Y - TOOLTIP_OFFSET * scale
+				if x + size.X > screen.X then
+					x = point.X - origin.X - (TOOLTIP_OFFSET + 4) * scale - size.X
+				end
+				x = math.max(0, x)
+				y = math.clamp(y, 0, math.max(0, screen.Y - size.Y))
 			end
-			y = math.clamp(y, 0, math.max(0, screen.Y - size.Y))
-			tooltip.Position = UDim2.fromOffset(math.max(0, x), y)
-			tooltip.Visible = true
+			tooltip.root.Position = UDim2.fromOffset(x, y)
+			-- (A mouse's waits until the same thing has been hovered a moment.)
+			tooltip.root.Visible = inputKind() ~= "mouse" or now - hoverSince >= Theme.Time.TOOLTIP_DELAY
 		else
-			tooltip.Visible = false
+			tooltip.root.Visible = false
 		end
 	end)
 end

@@ -2008,6 +2008,26 @@ local Config = {
 		-- The minimap's side in GUI pixels (times the scale on screen; Map.MinimapSize is its image).
 		Minimap = 56,
 	},
+
+	--[[
+		The inventory and the HUD's quickbar (client Ui/Theme, Ui/Screens, the quickbar and the
+		status icons): drawn in a dark, flat survival-game look.
+	]]
+	Ui = {
+		-- The quickbar's fade: seconds without hotbar activity before it fades (0: never), the
+		-- transparency it fades to, and how long the fade takes.
+		QuickbarFadeAfter = 0,
+		QuickbarFadeTo = 0.6,
+		QuickbarFadeTime = 0.6,
+		-- The world behind an open inventory blurs (BlurEffect.Size; 0: off); never on touch screens.
+		InventoryBlur = 8,
+		-- The VICINITY column's GROUND strip shows dropped items within this many blocks (0: none,
+		-- the strip stays as the place to throw things), refreshed this often (seconds).
+		GroundRadius = 4,
+		GroundRefresh = 0.25,
+		-- Numbers under the status icons (false: icons, colours and arrows only).
+		StatusValues = false,
+	},
 }
 
 return Config

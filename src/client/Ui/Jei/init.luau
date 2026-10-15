@@ -65,6 +65,15 @@ export type Placement = {
 	guiRight: number,
 	scale: number,
 	viewScale: number,
+	--[[
+		The inventory docks the list into its ITEMS section (Ui/InventoryScreen.jeiDock): the
+		dock's rect (x, y its top left in screen pixels; w, h GUI pixels) or false while ITEMS is
+		collapsed or too small, `docked` while the inventory docks the list, and the recipe view's
+		centre x (screen pixels) when set. (Ui/Screens reuses one table: compare, don't keep.)
+	]]
+	dock: ({ x: number, y: number, w: number, h: number } | false)?,
+	docked: boolean?,
+	viewX: number?,
 }
 
 export type Jei = {

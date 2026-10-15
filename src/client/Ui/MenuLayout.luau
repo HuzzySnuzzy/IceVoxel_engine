@@ -28,6 +28,9 @@
 	                (ItemStack.getBarWidth /
 	                getBarColor) and Mekanism's energy bar in its place on items that hold energy
 	                (batteries)
+	  wear          what is left of a durable item (`wear`: durability left over durability, 1 when
+	                new; a canteen's is its sips left, said apart so it is drawn as a quantity, not
+	                as damage), for the condition the inventory shows
 
 	A slot's (x, y) is its item's top left corner, as in Minecraft's menus: the 18 x 18 slot frame
 	(and the hit area) is one pixel up and left of it, a large frame five.
@@ -42,6 +45,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Blocks = require(Shared.Blocks)
+local Drinks = require(Shared.ToughAsNails.Drinks)
 local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 local Machines = require(Shared.Machines)
@@ -545,6 +549,26 @@ function MenuLayout.lineTexts(container: Container?): { string }
 end
 
 --[[ Durability bar ]]
+
+--[[
+	What is left of a stack of `item` worn by `damage`: for an item with a durability, the share of it
+	left, (max - damage) / max (1 when undamaged, never below 0), and whether that durability counts
+	sips (a canteen: Shared/ToughAsNails/Drinks' `sips`, a quantity rather than wear). nil, false for
+	items without durability.
+]]
+function MenuLayout.wear(item: number?, damage: number?): (number?, boolean)
+	if item == nil then
+		return nil, false
+	end
+	local def = Items.get(item)
+	local max = def and def.durability
+	if max == nil or max <= 0 then
+		return nil, false
+	end
+	local worn = if damage and damage == damage and damage > 0 then damage else 0
+	local entry = Drinks.entry(item)
+	return math.clamp((max - worn) / max, 0, 1), entry ~= nil and entry.sips == true
+end
 
 --[[
 	Minecraft's durability bar for a stack of `item` worn by `damage`: shown once the item has a

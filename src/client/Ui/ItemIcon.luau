@@ -23,8 +23,26 @@
 	the stack's data too. The bar is made the first time an icon needs one and scales with the
 	icon.
 
-	`ItemIcon.slot` is an inventory slot with an icon and the hover overlay (`big`: a result slot's
-	large frame).
+	Two looks. Without a `look` an icon is the Minecraft one above (WAILA, the skill tree, the game
+	mode switcher keep it). With `look = "dayz"` (the inventory family: Ui/Theme, Style.Dayz) the
+	picture is drawn darker (Theme's ItemTint, ImageColor3: `setDimmed`'s colour wins while dimmed
+	and un-dimming gives the tint back), the count is a small dark box at the bottom right
+	(Style.Dayz.countBox: shown above 1, as wide as its digits, sized by the GUI scale through
+	`setScale`), and the bar is one pixel tall along the bottom (Theme.Size.BAR): a damaged durable
+	item's in its condition's colour (Theme.condition of MenuLayout.wear) on a dark track, a
+	canteen's sips in white on a light track (always: a quantity), an energy item's in the energy
+	colour. Nothing tints the cell. `setTransparency` fades the whole icon (the quickbar's fade),
+	combined with `setDimmed`.
+
+	`ItemIcon.slot` is an inventory slot in that look (only the inventory family uses it): an 18 x
+	18 transparent button one pixel up and left of the item (the hit area), a face (17 x 17 inside
+	the slot's grid lines, or 24 x 24 for a `big` result slot) made with Style.Dayz.slotFace and
+	never painted here afterwards (its owner paints it: Style.Dayz.paintFace), the icon, and the
+	hover: a transparent frame over the face with an outline, hidden (Style.Dayz.setLit). `tab` is
+	a creative / JEI tab in that look: a dark panel square with a hairline, the active one grey.
+
+	Style.Dayz and Style.Theme are looked up inside the functions only (never at load), so the
+	RenderPipeline spec's Style stub keeps loading this module.
 
 	An item with a picture in Shared/TexturePack's `Icons` (Items.icon: filled in, not "") is drawn
 	as that image instead of its model (pixel art kept sharp: ResamplerMode.Pixelated); the image
@@ -75,9 +93,13 @@ local DIMMED_TRANSPARENCY = 0.35
 local MILD_COLOUR = Color3.fromRGB(175, 175, 175)
 local MILD_TRANSPARENCY = 0.15
 
+-- The icon looks: nil is Minecraft's, "dayz" the inventory family's (see the header).
+export type Look = "dayz"
+
 export type ItemIcon = {
 	-- 16 x 16 GUI pixels: the viewport and the count.
 	root: Frame,
+	look: Look?,
 	item: number?,
 	count: number,
 	-- The tool wear shown (0 = none) and the item data shown (its energy bar).
@@ -86,28 +108,45 @@ export type ItemIcon = {
 	set: (self: ItemIcon, item: number?, count: number?, damage: number?, data: Items.Data?) -> (),
 	setCountColour: (self: ItemIcon, colour: Color3?) -> (),
 	setDimmed: (self: ItemIcon, dimmed: boolean, mild: boolean?) -> (),
+	-- The GUI scale the icon is shown at (dayz look: the count box's size; no-op when unchanged).
+	setScale: (self: ItemIcon, scale: number) -> (),
+	-- Fades the whole icon (0 shown .. 1 gone), combined with setDimmed.
+	setTransparency: (self: ItemIcon, transparency: number) -> (),
 	destroy: (self: ItemIcon) -> (),
 }
 
 type Self = ItemIcon & {
 	viewport: ViewportFrame,
 	camera: Camera,
-	label: TextLabel,
-	shadow: TextLabel,
+	-- The count: Minecraft's shadowed text, or the dayz look's box and its text.
+	label: TextLabel?,
+	shadow: TextLabel?,
+	countBox: Frame?,
+	countText: TextLabel?,
 	model: Model?,
 	block: boolean?,
-	-- The durability or energy bar (made when first needed) and its coloured part.
+	-- The durability or energy bar (made when first needed), its coloured part and the
+	-- transparency of its track (dayz: dark or light).
 	bar: Frame?,
 	barFill: Frame?,
+	barTrackAlpha: number,
 	-- The item's picture (TexturePack.Icons), made when first needed.
 	image: ImageLabel?,
+	-- The picture's colour and transparency when not dimmed, as dimmed, and the fade.
+	baseColour: Color3,
+	dimColour: Color3,
+	dimAlpha: number,
+	fade: number,
+	-- The GUI scale the count box is sized for (dayz).
+	scale: number,
 }
 
--- An inventory slot: the inset frame (a TextButton), the icon and the hover overlay.
+-- An inventory slot: its button (the 18 x 18 hit area), its face, the icon and the hover outline.
 export type Slot = {
 	button: TextButton,
 	icon: ItemIcon,
 	hover: Frame,
+	face: Frame,
 }
 
 local ItemIcon = {}
@@ -186,9 +225,10 @@ end
 
 --[[
 	A new icon in `parent` with the 16 x 16 item area at (x, y) (GUI pixels). Its count shows at the
-	bottom right when above 1, Minecraft style.
+	bottom right when above 1, Minecraft style, or in the `look` (see the header). With `scaled`
+	(a Style.Dayz.scaled registry, dayz look) the icon follows its owner's GUI scale.
 ]]
-function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemIcon
+function ItemIcon.new(parent: Instance, x: number, y: number, z: number?, look: Look?, scaled: Style.Scaled?): ItemIcon
 	local root = Instance.new("Frame")
 	root.Name = "ItemIcon"
 	root.BackgroundTransparency = 1
@@ -212,26 +252,37 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
 
-	-- Minecraft draws the count with its right edge one pixel past the item, at the bottom.
-	local label, shadow = Style.shadowText(
-		root,
-		"",
-		0,
-		Style.ITEM - Style.COUNT_SIZE + 1,
-		Style.ITEM + 1,
-		Style.COUNT_SIZE,
-		Style.Colour.Text,
-		2,
-		Enum.TextXAlignment.Right,
-		Style.COUNT_SIZE
-	)
-	label.Visible = false
-	shadow.Visible = false
+	local label: TextLabel?, shadow: TextLabel?, countBox: Frame?, countText: TextLabel? = nil, nil, nil, nil
+	local baseColour = Color3.new(1, 1, 1)
+	if look == "dayz" then
+		local Dayz = Style.Dayz
+		baseColour = Dayz.Colour.ItemTint
+		viewport.ImageColor3 = baseColour
+		countBox, countText = Dayz.countBox(root, 3)
+	else
+		-- Minecraft draws the count with its right edge one pixel past the item, at the bottom.
+		local text, textShadow = Style.shadowText(
+			root,
+			"",
+			0,
+			Style.ITEM - Style.COUNT_SIZE + 1,
+			Style.ITEM + 1,
+			Style.COUNT_SIZE,
+			Style.Colour.Text,
+			2,
+			Enum.TextXAlignment.Right,
+			Style.COUNT_SIZE
+		)
+		text.Visible = false
+		textShadow.Visible = false
+		label, shadow = text, textShadow
+	end
 
 	root.Parent = parent
 
 	local self = {
 		root = root,
+		look = look,
 		item = nil,
 		count = 0,
 		damage = 0,
@@ -240,14 +291,67 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?): ItemI
 		camera = camera,
 		label = label,
 		shadow = shadow,
+		countBox = countBox,
+		countText = countText,
 		model = nil,
 		block = nil,
 		bar = nil,
 		barFill = nil,
+		barTrackAlpha = 0,
 		image = nil,
+		baseColour = baseColour,
+		dimColour = baseColour,
+		dimAlpha = 0,
+		fade = 0,
+		scale = 1,
 	}
 	live[self] = true
-	return (setmetatable(self, ItemIcon) :: any) :: ItemIcon
+	local icon = (setmetatable(self, ItemIcon) :: any) :: ItemIcon
+	if scaled and look == "dayz" then
+		scaled:add(icon)
+	end
+	return icon
+end
+
+-- 1 - (1 - a)(1 - b): two transparencies over each other.
+local function over(a: number, b: number): number
+	return 1 - (1 - a) * (1 - b)
+end
+
+-- The picture's colour and transparency now (dimmed, faded).
+local function paintPicture(self: Self)
+	local transparency = over(self.dimAlpha, self.fade)
+	self.viewport.ImageColor3 = self.dimColour
+	self.viewport.ImageTransparency = transparency
+	local image = self.image
+	if image then
+		image.ImageColor3 = self.dimColour
+		image.ImageTransparency = transparency
+	end
+end
+
+-- The count's and the bar's transparency now (faded).
+local function paintFade(self: Self)
+	local fade = self.fade
+	local label, shadow = self.label, self.shadow
+	if label and shadow then
+		label.TextTransparency = fade
+		shadow.TextTransparency = fade
+	end
+	local box, text = self.countBox, self.countText
+	if box and text then
+		box.BackgroundTransparency = over(Style.Dayz.Alpha.CountBox, fade)
+		text.TextTransparency = fade
+	end
+	local bar, fill = self.bar, self.barFill
+	if bar and fill then
+		if self.look == "dayz" then
+			bar.BackgroundTransparency = over(self.barTrackAlpha, fade)
+		else
+			bar.BackgroundTransparency = fade
+		end
+		fill.BackgroundTransparency = fade
+	end
 end
 
 --[[
@@ -288,12 +392,86 @@ local function setBar(self: Self, damage: number, data: Items.Data?)
 		newFill.Parent = newBar
 		bar, fill = newBar, newFill
 		self.bar, self.barFill = newBar, newFill
+		paintFade(self)
 	end
 	assert(bar and fill, "durability bar")
 	-- The top one of its two rows, `width` of 13 pixels.
 	fill.Size = UDim2.fromScale(width / MenuLayout.BAR_WIDTH, 1 / MenuLayout.BAR_HEIGHT)
 	fill.BackgroundColor3 = rgb
 	bar.Visible = true
+end
+
+--[[
+	The dayz look's bar: one pixel along the bottom (Theme.Size.BAR). A damaged durable item's
+	durability left in its condition's colour on BarTrack, a canteen's sips in white on
+	QuantityTrack (shown full too: a quantity), else an energy item's charge in the energy colour.
+]]
+local function setDayzBar(self: Self, damage: number, data: Items.Data?)
+	local Dayz, Theme = Style.Dayz, Style.Theme
+	local fraction, sips = MenuLayout.wear(self.item, damage)
+	local fill: number? = nil
+	local colour: Color3 = Dayz.Colour.Quantity
+	local track = "BarTrack"
+	if fraction and sips then
+		fill = fraction
+		track = "QuantityTrack"
+	elseif fraction and damage > 0 then
+		local condition = Theme.condition(fraction)
+		fill = fraction
+		if condition then
+			colour = Dayz.Condition[condition.name]
+		end
+	else
+		local width, energyColour = MenuLayout.energyItemBar(self.item, data)
+		if width then
+			fill = width / MenuLayout.BAR_WIDTH
+			colour = Color3.fromRGB(energyColour[1], energyColour[2], energyColour[3])
+		end
+	end
+	local bar, barFill = self.bar, self.barFill
+	if fill == nil then
+		if bar and bar.Visible then
+			bar.Visible = false
+		end
+		return
+	end
+	if bar == nil or barFill == nil then
+		local item, geometry = Style.ITEM, Theme.Size.BAR
+		local newBar = Instance.new("Frame")
+		newBar.Name = "Bar"
+		newBar.BorderSizePixel = 0
+		newBar.Position = UDim2.fromScale(geometry.x / item, geometry.y / item)
+		newBar.Size = UDim2.fromScale(geometry.w / item, geometry.h / item)
+		-- Above the model, under the count box.
+		newBar.ZIndex = 2
+		newBar.Parent = self.root
+		local newFill = Instance.new("Frame")
+		newFill.Name = "Fill"
+		newFill.BorderSizePixel = 0
+		newFill.ZIndex = 1
+		newFill.Parent = newBar
+		bar, barFill = newBar, newFill
+		self.bar, self.barFill = newBar, newFill
+	end
+	assert(bar and barFill, "bar")
+	bar.BackgroundColor3 = Dayz.Colour[track]
+	self.barTrackAlpha = Dayz.Alpha[track]
+	barFill.Size = UDim2.fromScale(fill :: number, 1)
+	barFill.BackgroundColor3 = colour
+	bar.Visible = true
+	paintFade(self)
+end
+
+-- The dayz count box's size for `text` at the icon's scale.
+local function sizeCount(self: Self, text: string)
+	local box, label = self.countBox, self.countText
+	if box == nil or label == nil then
+		return
+	end
+	local Theme = Style.Theme
+	local height, size, digit = Theme.count(self.scale)
+	box.Size = UDim2.fromOffset(Theme.countWidth(text, digit), height)
+	label.TextSize = size
 end
 
 --[[
@@ -359,43 +537,78 @@ function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?
 	if shown ~= self.count then
 		self.count = shown
 		local text = if shown > 1 then tostring(shown) else ""
-		self.label.Text = text
-		self.shadow.Text = text
-		self.label.Visible = shown > 1
-		self.shadow.Visible = shown > 1
+		local label, shadow, box, countText = self.label, self.shadow, self.countBox, self.countText
+		if label and shadow then
+			label.Text = text
+			shadow.Text = text
+			label.Visible = shown > 1
+			shadow.Visible = shown > 1
+		end
+		if box and countText then
+			countText.Text = text
+			sizeCount(self, text)
+			box.Visible = shown > 1
+		end
 	end
 	local wear = if item and damage and damage > 0 then damage else 0
 	local held = if item then data else nil
 	if wear ~= self.damage or held ~= self.data or itemChanged then
 		self.damage = wear
 		self.data = held
-		setBar(self, wear, held)
+		if self.look == "dayz" then
+			setDayzBar(self, wear, held)
+		else
+			setBar(self, wear, held)
+		end
 	end
 end
 
 -- Count colour (Minecraft draws an over-full drag preview in yellow); nil = white.
 function ItemIcon.setCountColour(self: Self, colour: Color3?)
 	local c = colour or Style.Colour.Text
-	if self.label.TextColor3 ~= c then
-		self.label.TextColor3 = c
-		self.shadow.TextColor3 = Style.shadowOf(c)
+	local label, shadow, countText = self.label, self.shadow, self.countText
+	if label and shadow then
+		if label.TextColor3 ~= c then
+			label.TextColor3 = c
+			shadow.TextColor3 = Style.shadowOf(c)
+		end
+	elseif countText and countText.TextColor3 ~= c then
+		countText.TextColor3 = c
 	end
 end
 
--- Draws the item greyed and faded (a locked recipe's result; `mild`: a locked skill), or as it is.
+--[[
+	Draws the item greyed and faded (a locked recipe's result; `mild`: a locked skill), or as it is
+	(in the dayz look: tinted).
+]]
 function ItemIcon.setDimmed(self: Self, dimmed: boolean, mild: boolean?)
-	local colour = if not dimmed then Color3.new(1, 1, 1) elseif mild then MILD_COLOUR else DIMMED_COLOUR
-	if self.viewport.ImageColor3 ~= colour then
-		self.viewport.ImageColor3 = colour
-		self.viewport.ImageTransparency = if not dimmed
-			then 0
-			elseif mild then MILD_TRANSPARENCY
-			else DIMMED_TRANSPARENCY
-		local image = self.image
-		if image then
-			image.ImageColor3 = colour
-			image.ImageTransparency = self.viewport.ImageTransparency
-		end
+	local colour = if not dimmed then self.baseColour elseif mild then MILD_COLOUR else DIMMED_COLOUR
+	local alpha = if not dimmed then 0 elseif mild then MILD_TRANSPARENCY else DIMMED_TRANSPARENCY
+	if colour ~= self.dimColour or alpha ~= self.dimAlpha then
+		self.dimColour, self.dimAlpha = colour, alpha
+		paintPicture(self)
+	end
+end
+
+-- The GUI scale the icon is shown at: the dayz count box follows Theme.count. Classic: nothing.
+function ItemIcon.setScale(self: Self, scale: number)
+	if self.look ~= "dayz" or scale == self.scale or scale ~= scale or scale <= 0 then
+		return
+	end
+	self.scale = scale
+	local text = self.countText
+	if text then
+		sizeCount(self, text.Text)
+	end
+end
+
+-- Fades the whole icon (picture, count, bar): 0 shown .. 1 gone, over any dimming.
+function ItemIcon.setTransparency(self: Self, transparency: number)
+	local t = math.clamp(transparency, 0, 1)
+	if t ~= self.fade then
+		self.fade = t
+		paintPicture(self)
+		paintFade(self)
 	end
 end
 
@@ -464,15 +677,29 @@ ItemModels.changed:Connect(function()
 end)
 
 --[[
-	An inventory slot in `parent` for the item at (x, y) (GUI pixels; the slot frame is one pixel up
-	and left of it): the inset frame, which is a selectable TextButton, its icon and the hover
-	overlay, all inside the button. `big`: drawn with the 26 x 26 result frame (Style.slot).
+	An inventory slot in `parent` for the item at (x, y) (GUI pixels; the slot's 18 x 18 hit area is
+	one pixel up and left of it), in the dayz look (see the header): the transparent button, its
+	face (a `big` result slot's 24 x 24), the icon and the hover outline, all inside the button.
+	With `scaled` the outline and the icon follow its owner's GUI scale.
 ]]
-function ItemIcon.slot(parent: Instance, x: number, y: number, z: number?, big: boolean?): Slot
-	local button = Style.slot(parent, x, y, z, big)
-	local icon = ItemIcon.new(button, 1, 1, 5)
-	local hover = Style.hover(button, 1, 1, 10)
-	return { button = button, icon = icon, hover = hover }
+function ItemIcon.slot(parent: Instance, x: number, y: number, z: number?, big: boolean?, scaled: Style.Scaled?): Slot
+	local Dayz, Theme = Style.Dayz, Style.Theme
+	local button = Style.itemButton(parent, x, y, z)
+	local size = if big then Theme.Size.BIG_FACE else Theme.Size.CELL
+	local offset = if big then 1 - (Theme.Size.BIG_FACE - Style.ITEM) // 2 else 1
+	local face = Dayz.slotFace(button, offset, offset, size, size, 1)
+	local icon = ItemIcon.new(button, 1, 1, 5, "dayz", scaled)
+	local hover = Instance.new("Frame")
+	hover.Name = "Hover"
+	hover.BackgroundTransparency = 1
+	hover.BorderSizePixel = 0
+	hover.Position = UDim2.fromOffset(offset, offset)
+	hover.Size = UDim2.fromOffset(size, size)
+	hover.ZIndex = 10
+	hover.Visible = false
+	Dayz.outline(hover, nil, nil, scaled)
+	hover.Parent = button
+	return { button = button, icon = icon, hover = hover, face = face }
 end
 
 -- Height of a tab above its panel's top edge, and its width (Minecraft's creative tabs).
@@ -483,24 +710,27 @@ ItemIcon.TAB_WIDTH = 28
 export type Tab = { button: TextButton, frames: { GuiObject } }
 
 --[[
-	A Minecraft creative tab showing `item`, at x on top of a panel whose top edge is at y = TAB_HEIGHT
-	in `parent`. Put it in the same parent as the panel (ZIndex 1): the active tab is drawn over the
-	panel's border (ZIndex 2 and 3), merging into it; the others sit behind the panel (ZIndex 0),
-	darker.
+	A creative or JEI tab showing `item`, at x on top of a panel whose top edge is at y = TAB_HEIGHT
+	in `parent` (Minecraft's footprint and hit area), in the dayz look: an inactive tab is a dark
+	Panel square with a hairline behind the panel (ZIndex 0); the active one is TopHeader grey,
+	reaching down over the panel's edge (ZIndex 2) so it merges into it.
 ]]
-function ItemIcon.tab(parent: Instance, x: number, item: number?, active: boolean): Tab
+function ItemIcon.tab(parent: Instance, x: number, item: number?, active: boolean, scaled: Style.Scaled?): Tab
+	local Dayz = Style.Dayz
 	local width, top = ItemIcon.TAB_WIDTH, ItemIcon.TAB_HEIGHT
+	local key = if active then "TopHeader" else "Panel"
 	local root = if active
-		then Style.panel(parent, x, 0, width, top + 4)
-		else Style.panel(parent, x, 2, width, top + 2, Style.Colour.Slot)
-	root.ZIndex = if active then 2 else 0
-	local frames: { GuiObject } = { root }
-	if active then
-		-- Hide the tab's bottom edge and the panel's top border under it.
-		table.insert(frames, Style.frame(parent, x + 3, top, width - 6, 4, Style.Colour.Panel, 3))
+		then Style.frame(parent, x, 0, width, top + 4, Dayz.Colour[key], 2)
+		else Style.frame(parent, x, 2, width, top + 2, Dayz.Colour[key], 0)
+	root.Name = "Tab"
+	root.BackgroundTransparency = Dayz.Alpha[key]
+	root.Active = true
+	if not active then
+		Dayz.outline(root, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	end
+	local frames: { GuiObject } = { root }
 	if item then
-		ItemIcon.new(root, 6, if active then 7 else 6, 6):set(item, 1)
+		ItemIcon.new(root, 6, if active then 7 else 6, 6, "dayz", scaled):set(item, 1)
 	end
 	local button = Instance.new("TextButton")
 	button.Text = ""

@@ -3104,9 +3104,23 @@ return function(t, shared, require, _server, client)
 		t.eq(sim.doubled, 0, "lights")
 	end)
 
-	-- Loads Ui/ItemIcon into `world` (Style stubbed: no TextService under Lune).
+	--[[
+		Loads Ui/ItemIcon into `world` (Style stubbed: no TextService under Lune). The stub carries
+		what the icon reads: the Minecraft look's count text, and for the survival look (`look =
+		"dayz"`, read inside functions only) Ui/Theme (pure, the real one) and Style.Dayz's colours,
+		transparencies, condition colours and count box, made from Theme as Style makes them.
+	]]
 	local function itemIconIn(world: any, load: (string) -> any, sharedRequire: (any) -> any): any
 		local MenuLayout = require(client.Ui.MenuLayout)
+		local Theme = require(client.Ui.Theme)
+		local colours, alphas, conditions = {}, {}, {}
+		for key, c in Theme.Colour do
+			colours[key] = Color3.fromRGB(c.r, c.g, c.b)
+			alphas[key] = c.t
+		end
+		for _, level in Theme.CONDITIONS do
+			conditions[level.name] = Color3.fromRGB(level.rgb[1], level.rgb[2], level.rgb[3])
+		end
 		local Style = {
 			ITEM = 16,
 			COUNT_SIZE = 8,
@@ -3120,6 +3134,22 @@ return function(t, shared, require, _server, client)
 			shadowOf = function(c: any): any
 				return c
 			end,
+			Theme = Theme,
+			Dayz = {
+				Colour = colours,
+				Alpha = alphas,
+				Condition = conditions,
+				countBox = function(parent: any, z: number?): (any, any)
+					local box, text = world.new("Frame"), world.new("TextLabel")
+					box.Name = "Count"
+					box.ZIndex = z or 3
+					box.Visible = false
+					text.Text = ""
+					text.Parent = box
+					box.Parent = parent
+					return box, text
+				end,
+			},
 		}
 		local ui: any = { MenuLayout = { __ui = "MenuLayout" }, Style = { __ui = "Style" } }
 		ui.Parent = { Rendering = { ItemModels = { __ui = "ItemModels" } } }
@@ -3233,6 +3263,72 @@ return function(t, shared, require, _server, client)
 			t.ok(icon.model ~= olds[i] and rawget(olds[i], "__destroyed"), `icon {i} rebuilt`)
 			t.eq(textures(icon), 0, `icon {i}: plain`)
 		end
+	end)
+
+	t.test("item icons: the survival look tints, boxes the count, bars condition and sips", function()
+		local root, sharedRequire = neutralEnv()
+		local world = newWorld(root)
+		local load = rendering(world, root, sharedRequire)
+		local ItemIcon = itemIconIn(world, load, sharedRequire)
+		local Theme = require(client.Ui.Theme)
+		local Items = require(shared.Items)
+		local I = Items.id
+		local tint = Color3.fromRGB(179, 179, 179)
+		local screen = world.new("Frame")
+		local icon = ItemIcon.new(screen, 0, 0, nil, "dayz")
+		t.eq(icon.look, "dayz")
+		t.ok(nearColour(icon.viewport.ImageColor3, tint), "the picture is tinted")
+		t.eq(icon.label, nil, "no Minecraft count text")
+		-- A stack: its count in the box, as wide as its digits.
+		icon:set(I.Cobblestone, 32)
+		t.eq(icon.countBox.Visible, true)
+		t.eq(icon.countText.Text, "32")
+		local height, _, digit = Theme.count(1)
+		t.eq(icon.countBox.Size.X.Offset, Theme.countWidth("32", digit))
+		t.eq(icon.countBox.Size.Y.Offset, height)
+		icon:setScale(3)
+		local height3, size3, digit3 = Theme.count(3)
+		t.eq(icon.countBox.Size.Y.Offset, height3, "the box follows the scale")
+		t.eq(icon.countBox.Size.X.Offset, Theme.countWidth("32", digit3))
+		t.eq(icon.countText.TextSize, size3)
+		icon:set(I.Cobblestone, 1)
+		t.eq(icon.countBox.Visible, false, "no count for one")
+		-- A damaged tool: its condition's colour, its durability left.
+		icon:set(I.IronPickaxe, 1, 125)
+		t.eq(icon.bar.Visible, true)
+		t.near(icon.barFill.Size.X.Scale, 0.5, 1e-9)
+		local damaged = Theme.condition(0.5) :: any
+		t.ok(nearColour(icon.barFill.BackgroundColor3, Color3.fromRGB(table.unpack(damaged.rgb))), "Damaged")
+		t.ok(nearColour(icon.bar.BackgroundColor3, Color3.new(0, 0, 0)), "on the dark track")
+		icon:set(I.IronPickaxe, 1, 0)
+		t.eq(icon.bar.Visible, false, "an undamaged tool has no bar")
+		-- A canteen's sips: white on the light track, full ones too.
+		icon:set(I.PurifiedWaterCanteen, 1, 0)
+		t.eq(icon.bar.Visible, true, "sips are a quantity")
+		t.near(icon.barFill.Size.X.Scale, 1, 1e-9)
+		t.ok(nearColour(icon.bar.BackgroundColor3, Color3.new(1, 1, 1)), "the light track")
+		icon:set(I.Stone, 1)
+		t.eq(icon.bar.Visible, false)
+		-- Dimming wins over the tint; un-dimming gives it back; the fade combines with both.
+		icon:setDimmed(true)
+		t.ok(not nearColour(icon.viewport.ImageColor3, tint), "dimmed")
+		icon:setDimmed(false)
+		t.ok(nearColour(icon.viewport.ImageColor3, tint), "the tint is back")
+		icon:setTransparency(0.6)
+		t.near(icon.viewport.ImageTransparency, 0.6, 1e-9)
+		icon:set(I.Cobblestone, 5)
+		t.near(icon.countText.TextTransparency, 0.6, 1e-9, "the count fades too")
+		icon:setTransparency(0)
+		t.near(icon.viewport.ImageTransparency, 0, 1e-9)
+		-- The Minecraft look is unchanged.
+		local classic = ItemIcon.new(screen, 0, 0)
+		classic:set(I.Cobblestone, 32)
+		t.eq(classic.countBox, nil)
+		t.eq(classic.label.Text, "32")
+		local plain = classic.viewport.ImageColor3
+		t.ok(plain == nil or nearColour(plain, Color3.new(1, 1, 1)), "untinted (Roblox's white)")
+		classic:setScale(4)
+		t.eq(classic.scale, 1, "setScale does nothing in the Minecraft look")
 	end)
 
 	--[[

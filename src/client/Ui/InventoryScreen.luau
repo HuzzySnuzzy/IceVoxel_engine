@@ -81,6 +81,7 @@ local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
+local Theme = require(script.Parent.Theme)
 
 type Window = Types.Window
 type Target = SlotClicks.Target
@@ -238,6 +239,15 @@ type SlotWidget = {
 	ghost: Frame?,
 }
 
+--[[
+	Where the screens' GUI is, for `place` (Ui/Screens keeps one table and updates its fields): its
+	AbsoluteSize (screen pixels, the device's safe area), Roblox's top bar (GuiService:GetGuiInset().Y),
+	the GUI scale (UiScale.base) and whether the screen is a touch screen (UiScale.touch).
+]]
+export type View = { w: number, h: number, top: number, base: number, touch: boolean }
+-- A rectangle: x, y and w, h (see each member for its units).
+export type Rect = { x: number, y: number, w: number, h: number }
+
 export type InventoryScreen = {
 	root: Frame,
 	-- The lines of a tooltip for what is under `point` that is no item (a machine's energy bar).
@@ -256,6 +266,32 @@ export type InventoryScreen = {
 	opened: (self: InventoryScreen) -> (),
 	closed: (self: InventoryScreen) -> (),
 	follow: (self: InventoryScreen, point: Vector2?) -> (),
+
+	--[[
+		The survival look's members (Ui/Screens uses each only when it is there):
+
+		  place       lays the screen out for `view` and positions the root (Screens keeps
+		              setting the root's UIScale to what it returns); returns the GUI scale.
+		              Cheap when nothing changed.
+		  jeiDock     where JEI's item list goes: x, y the top left in screen pixels, w, h GUI
+		              pixels; false while ITEMS is collapsed or too small. The same table until
+		              the layout changes.
+		  jeiViewX    the recipe view's centre x (screen pixels), nil for the default.
+		  statusRect  where the status icons dock (absolute screen pixels) and the GUI scale, or
+		              nil (Ui/StatusDock).
+		  setViewing  the recipe view opened (true) or closed: the screen hides what it covers.
+		  setFeedback what the carried stack would do over the hovered target (Theme.feedback),
+		              every frame while carrying and once with nil after.
+		  inDropZone  is `point` (screen pixels) over the place items are thrown? A touch tap
+		              there with nothing carried does not close the screen.
+	]]
+	place: ((self: InventoryScreen, view: View) -> number)?,
+	jeiDock: ((self: InventoryScreen) -> Rect | false)?,
+	jeiViewX: ((self: InventoryScreen) -> number?)?,
+	statusRect: ((self: InventoryScreen) -> (Rect?, number))?,
+	setViewing: ((self: InventoryScreen, viewing: boolean) -> ())?,
+	setFeedback: ((self: InventoryScreen, feedback: Theme.Feedback?) -> ())?,
+	inDropZone: ((self: InventoryScreen, point: Vector2) -> boolean)?,
 }
 
 -- A furnace panel's gauge: a clipping frame over `rect` showing part of the lit art (in `holder`).
