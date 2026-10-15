@@ -15,7 +15,16 @@
 	  centre     (wide) the player, unboxed (Ui/PlayerPreview, turning towards the pointer), over
 	             HANDS: a grey header, the held item's name on a black bar with its condition dot,
 	             the item large (a slot of its own: the selected hotbar slot), its condition word
-	             and one detail line (Theme.handsLines: durability, sips, a stack's count, energy)
+	             and one detail line (Theme.handsLines: durability, sips, a stack's count, energy;
+	             a firearm's or a magazine's rounds, Shared/Weapons/WeaponState.detail). A held
+	             firearm shows what is in it as chips beside the item (the weapons design's 9.5):
+	             MAG and OPTIC left of it, MUZZLE and LIGHT right of it, each only while that
+	             part is in, named by the part when its name fits the chip (else by the slot),
+	             with its condition dot when it wears (the magazine, a suppressor). A click on a
+	             chip takes the part off (Inventory action "weapon" op 6, detach, on the held
+	             slot: Shared/Weapons/Loading puts it onto the cursor when that is empty, else
+	             into the inventory) with the item.firearm.unload sound; resting on one shows
+	             its name and condition (`tooltipAt`)
 	  EQUIPMENT  (right) a grey top header with the gear (the Options menu) and, on touch, the
 	             close button; a strip of the worn armor over the accessories (window 0; other
 	             windows the armor alone), each empty one showing its silhouette, closed accessory
@@ -90,6 +99,9 @@ local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
+local Weapons = require(Shared.Weapons)
+local Loading = require(Shared.Weapons.Loading)
+local WeaponState = require(Shared.Weapons.WeaponState)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
 local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
@@ -178,6 +190,34 @@ export type InventoryScreen = {
 	inDropZone: ((self: InventoryScreen, point: Vector2) -> boolean)?,
 }
 
+--[[
+	HANDS' chips (see the header): which detach part (Shared/Weapons/Loading.Part) each one takes
+	off, the held firearm's data that holds it, and the slot's name it shows when the part's own
+	name does not fit.
+]]
+type ChipSpec = { part: number, key: string, label: string }
+local CHIPS: { ChipSpec } = {
+	{ part = Loading.Part.Magazine, key = "mag", label = "MAG" },
+	{ part = Loading.Part.Optic, key = "optic", label = "OPTIC" },
+	{ part = Loading.Part.Muzzle, key = "muzzle", label = "MUZZLE" },
+	{ part = Loading.Part.Light, key = "light", label = "LIGHT" },
+}
+-- A chip's height, its gap from the item and the HANDS edge, and between its two rows (GUI pixels).
+local CHIP_H = 10
+local CHIP_GAP = 2
+
+-- A chip: its button, condition dot and text, the part it shows (nil: hidden) and that part's
+-- wear, and the width it was placed at.
+type Chip = {
+	spec: ChipSpec,
+	button: TextButton,
+	dot: Frame,
+	text: TextLabel,
+	item: number?,
+	wear: number,
+	width: number,
+}
+
 -- HANDS' texts and its item.
 type Hands = {
 	header: Style.TopHeader,
@@ -189,6 +229,8 @@ type Hands = {
 	detail: TextLabel,
 	holder: Frame,
 	widget: SlotWidgets.SlotWidget,
+	-- A held firearm's parts (MAG, OPTIC, MUZZLE, LIGHT).
+	chips: { Chip },
 	-- The held stack its texts show (compared by value: a drag preview copies stacks).
 	item: number?,
 	count: number,
@@ -387,6 +429,53 @@ local function buildHands(self: Self): Hands
 	scale.Scale = Size.BIG_FACE / Style.ITEM
 	scale.Parent = holder
 	local widget = self.widgets:slot(holder, "hands", 0, 0, "inventory", 1, false, self.handsScaled)
+	-- A held firearm's chips (placed with the layout, shown with the parts that are in).
+	local chips: { Chip } = {}
+	for _, spec in CHIPS do
+		local button = Dayz.button(body, "", 0, 0, 0, CHIP_H, 4, self.scaled)
+		button.Name = "Chip"
+		button.Visible = false
+		local chipDot = Dayz.dot(button, 2, (CHIP_H - Size.DOT) // 2, Size.DOT, 3)
+		chipDot.Visible = false
+		local text = Dayz.label(
+			button,
+			spec.label,
+			0,
+			0,
+			0,
+			CHIP_H,
+			"tiny",
+			Dayz.Colour.TextSoft,
+			3,
+			Enum.TextXAlignment.Center,
+			self.scaled
+		)
+		text.TextTruncate = Enum.TextTruncate.AtEnd
+		local chip: Chip = {
+			spec = spec,
+			button = button,
+			dot = chipDot,
+			text = text,
+			item = nil,
+			wear = 0,
+			width = 0,
+		}
+		button.Activated:Connect(function()
+			if self.viewing or chip.item == nil then
+				return
+			end
+			-- (The held gun by its window slot: Weapons/Loading's detach.)
+			local window = ClientInventory.window()
+			local slot = Menu.windowIndex(window, "inventory", window.inventory.selected)
+			local action: Types.Action =
+				{ kind = "weapon", op = Loading.Op.Detach, slot = slot or -1, part = spec.part }
+			if slot and ClientInventory.allows(action) then
+				SoundPlayer.playFlat("item.firearm.unload")
+				ClientInventory.apply(action)
+			end
+		end)
+		table.insert(chips, chip)
+	end
 	return {
 		header = header,
 		section = section,
@@ -397,11 +486,78 @@ local function buildHands(self: Self): Hands
 		detail = detail,
 		holder = holder,
 		widget = widget,
+		chips = chips,
 		item = nil,
 		count = 0,
 		damage = nil,
 		data = nil,
 	}
+end
+
+-- The condition of a chip's part (nil: the part doesn't wear: an optic, the light).
+local function chipCondition(chip: Chip): Theme.Condition?
+	local item = chip.item
+	local def = if item then Items.get(item) else nil
+	if item == nil or def == nil or def.durability == nil then
+		return nil
+	end
+	return Theme.condition(WeaponState.fraction(item, chip.wear))
+end
+
+-- A shown chip's dot and text: the part's name when it fits beside the dot, else the slot's.
+local function paintChip(chip: Chip)
+	local item = chip.item
+	if item == nil then
+		return
+	end
+	local condition = chipCondition(chip)
+	chip.dot.Visible = condition ~= nil
+	if condition then
+		chip.dot.BackgroundColor3 = Color3.fromRGB(condition.rgb[1], condition.rgb[2], condition.rgb[3])
+	end
+	local left = if condition then Size.DOT + 3 else 1
+	local room = math.max(0, chip.width - left - 1)
+	local name = Items.displayName(item)
+	chip.text.Text = if Dayz.measure(name, Theme.Text.tiny) <= room then name else chip.spec.label
+	chip.text.Position = UDim2.fromOffset(left, 0)
+	chip.text.Size = UDim2.fromOffset(room, CHIP_H)
+end
+
+--[[
+	Places HANDS' chips beside its item (`parts`: InventoryColumns.hands): MAG and OPTIC in two
+	rows left of it, MUZZLE and LIGHT right of it, each as wide as the room between the item and
+	the edge.
+]]
+local function placeChips(hands: Hands, parts: InventoryColumns.HandsLayout)
+	local item = parts.item
+	local width = math.max(0, item.x - 2 * CHIP_GAP)
+	for index, chip in hands.chips do
+		local row = (index - 1) % 2
+		local x = if index <= 2 then CHIP_GAP else item.x + item.w + CHIP_GAP
+		chip.width = width
+		chip.button.Position = UDim2.fromOffset(x, item.y + 1 + row * (CHIP_H + CHIP_GAP))
+		chip.button.Size = UDim2.fromOffset(width, CHIP_H)
+		paintChip(chip)
+	end
+end
+
+-- The chips of the held `stack` (all hidden for anything that is no firearm).
+local function renderChips(hands: Hands, stack: Types.Stack?)
+	local gun = stack ~= nil and Weapons.firearm(stack.item) ~= nil
+	for _, chip in hands.chips do
+		local item: number?, wear = nil, 0
+		if gun and stack then
+			local key = chip.spec.key
+			if key == "mag" then
+				item, wear = WeaponState.magazine(stack)
+			elseif key == "optic" or key == "muzzle" or key == "light" then
+				item, wear = WeaponState.attachment(stack, key)
+			end
+		end
+		chip.item, chip.wear = item, wear
+		chip.button.Visible = item ~= nil
+		paintChip(chip)
+	end
 end
 
 -- The band: nine quick cells with the hotbar's slots over them, and the selection outline.
@@ -800,6 +956,7 @@ local function apply(
 		hands.condition.Size = UDim2.fromOffset(parts.condition.w, parts.condition.h)
 		hands.detail.Position = UDim2.fromOffset(parts.detail.x, parts.detail.y)
 		hands.detail.Size = UDim2.fromOffset(parts.detail.w, parts.detail.h)
+		placeChips(hands, parts)
 	end
 
 	-- Eyes (a mouse's in the slots' corners, a finger's larger).
@@ -979,6 +1136,7 @@ local function renderHands(self: Self, stack: Types.Stack?)
 		hands.dot.BackgroundColor3 = Color3.fromRGB(condition.rgb[1], condition.rgb[2], condition.rgb[3])
 		hands.dot.BackgroundTransparency = Theme.DOT_T
 	end
+	renderChips(hands, if item then stack else nil)
 end
 
 -- The band's number boxes and selection outline.
@@ -1061,9 +1219,22 @@ end
 --[[
 	A tooltip for what is under `point` besides items: a locked crafting result ("Iron Pickaxe",
 	"Requires the Iron Age"), a closed accessory slot ("Opens at the Industrial Age"), a machine's
-	energy bar ("1.2 kJ / 20 kJ") or tank ("Lava: 5,000 mB"), a ground item.
+	energy bar ("1.2 kJ / 20 kJ") or tank ("Lava: 5,000 mB"), a ground item, a HANDS chip
+	("Suppressor", "Worn", "Click to take it off").
 ]]
 function InventoryScreen.tooltipAt(self: Self, point: Vector2, window: Window): { string }?
+	for _, chip in self.hands.chips do
+		local item = chip.item
+		if item and not self.viewing and Style.shown(chip.button) and Style.contains(chip.button, point) then
+			local condition = chipCondition(chip)
+			local lines = { Items.displayName(item) }
+			if condition then
+				table.insert(lines, condition.name)
+			end
+			table.insert(lines, "Click to take it off")
+			return lines
+		end
+	end
 	local widget = self.widgets:widgetAt(point)
 	if widget then
 		if self.widgets:isResult(widget, window) then

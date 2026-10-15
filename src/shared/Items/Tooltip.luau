@@ -27,6 +27,14 @@
 	            (Shared/Mana.tooltip); last, with `options.gate` (the player's Progression state
 	            while the recipe gate applies), what making it needs in red ("Crafting requires
 	            the Iron Age", Shared/Progression.lockText).
+	  Weapons   (Shared/Weapons/Describe) a firearm's or magazine's own state right under the
+	            name with the item data's lines (its magazine and rounds, the chambered round,
+	            the fire mode, what is mounted; a jam and a ruined gun in red), and after the
+	            wear the weapon's block: a firearm's "When fired:" (each round's damage and each
+	            fire mode's rate in dark green, its calibre, feed, mounts), a round's "As
+	            ammunition:", a magazine's "As a magazine:", an attachment's "When mounted:" and
+	            a melee weapon's "Melee:" (its heavy attack, guard and finisher, while the melee
+	            rework is on).
 	  Tools     a pickaxe (any kind with blocks that need more than its lowest tier) names its
 	            harvest level (Wood, Stone, Iron, Diamond: gold is wood's) and the best blocks it
 	            harvests (ores first); every tool but swords its mining speed (Shared/Mining).
@@ -56,6 +64,7 @@ local Smelting = require(script.Parent.Parent.Crafting.Smelting)
 local Drinks = require(script.Parent.Parent.ToughAsNails.Drinks)
 local Tiers = require(script.Parent.Parent.Transmitters.Tiers)
 local Fluids = require(script.Parent.Parent.Fluids)
+local Describe = require(script.Parent.Parent.Weapons.Describe)
 
 type Stack = Items.Stack
 
@@ -445,6 +454,15 @@ local function fuelLines(lines: { Line }, item: number)
 	section(lines, "As fuel:", body)
 end
 
+-- A weapon's block (Shared/Weapons/Describe.stats): a firearm's, a round's, a magazine's, an
+-- attachment's or a melee weapon's.
+local function weaponLines(lines: { Line }, item: number)
+	local heading, body = Describe.stats(item)
+	if heading then
+		section(lines, heading, body)
+	end
+end
+
 -- Lines of another module (Items/Accessories, Shared/Mana): the first a gray heading after an
 -- empty line, the rest blue; a lone line stays gray.
 local function moduleLines(lines: { Line }, more: { string })
@@ -483,6 +501,10 @@ function Tooltip.lines(item: number, stack: Stack?, options: Options?): { Line }
 		for _, text in Items.describe(stack) do
 			table.insert(lines, { text = text, colour = "gray" })
 		end
+		-- (A firearm's or a magazine's rounds, chamber, mode and parts: Weapons/Describe.)
+		for _, line in Describe.state(stack) do
+			table.insert(lines, line)
+		end
 	end
 	local lore = LoreList[def.name]
 	if lore then
@@ -502,6 +524,7 @@ function Tooltip.lines(item: number, stack: Stack?, options: Options?): { Line }
 	if not sips then
 		wearLine(lines, def, stack, "Durability")
 	end
+	weaponLines(lines, item)
 	armorLines(lines, def)
 	foodLines(lines, item)
 	drinkLines(lines, item)

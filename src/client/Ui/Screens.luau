@@ -41,7 +41,10 @@
 	Drags show their result as they grow: the screen draws a copy of the window with the drag
 	applied. While a stack is carried, what dropping it would do where it is (Ui/Theme.feedback:
 	fits, blocked, swap, combine, or the drop place) goes to the carried stack (Ui/DragGhost) and
-	to the inventory screen (`setFeedback`).
+	to the inventory screen (`setFeedback`); over weapons the weapons' combine answers first
+	(Shared/Weapons/Loading.combines: rounds onto a magazine or a gun, a magazine or an attachment
+	onto its gun). A click that loads, attaches or unloads a weapon plays its sound for the
+	clicking player alone (item.firearm.load_round, attach, unload).
 
 	The parts of an open screen live in modules of their own: the darkened world (Ui/Backdrop), the
 	carried stack (Ui/DragGhost) and the item tooltip (Ui/ItemTooltip: Screens compares its keys,
@@ -96,8 +99,10 @@ local GameMode = require(Shared.GameMode)
 local Items = require(Shared.Items)
 local Menu = require(Shared.Inventory.Menu)
 local Types = require(Shared.Inventory.Types)
+local Loading = require(Shared.Weapons.Loading)
 
 local ClientInventory = require(script.Parent.Parent.Inventory.ClientInventory)
+local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local Backdrop = require(script.Parent.Backdrop)
 local CreativeScreen = require(script.Parent.CreativeScreen)
 local DragGhost = require(script.Parent.DragGhost)
@@ -134,6 +139,13 @@ export type Panel = {
 	capturing: (() -> boolean)?,
 	escaped: (() -> ())?,
 	wheel: ((delta: number) -> ())?,
+}
+
+-- The sound of each weapon combine a click makes (Shared/Weapons/Loading.kind; "blocked" has none).
+local WEAPON_SOUNDS: { [string]: string } = {
+	load = "item.firearm.load_round",
+	attach = "item.firearm.attach",
+	unload = "item.firearm.unload",
 }
 
 -- Touch: a long press is a right click; a finger moving this far (pixels) drags or scrolls.
@@ -342,7 +354,11 @@ end
 
 --[[
 	What a carried `cursor` would do over `target` in `window` (Ui/Theme.feedback, from Menu's
-	rules): nil over nothing, "drop" outside, else the slot's answer.
+	rules): nil over nothing, "drop" outside, else the slot's answer. Weapons first
+	(Shared/Weapons/Loading.combines, as Menu's PICKUP asks Loading before its own rules): rounds
+	over a magazine or a gun that takes them, a magazine or an attachment over its gun are
+	"combine" (orange), the same family refused (another calibre, full, a part that doesn't fit)
+	"blocked" (red).
 ]]
 local function feedbackAt(window: Types.Window, target: Target?, cursor: Items.Stack): Theme.Feedback?
 	if target == nil then
@@ -355,6 +371,12 @@ local function feedbackAt(window: Types.Window, target: Target?, cursor: Items.S
 	local index = target.index
 	local stack = Menu.get(window, index)
 	local result = Menu.isResultSlot(window, index)
+	local combine = if result then nil else Loading.combines(cursor, stack)
+	if combine == "combine" then
+		return "combine"
+	elseif combine == "blocked" then
+		return "blocked"
+	end
 	local same = stack ~= nil and Menu.stacksMatch(cursor, stack)
 	local room = false
 	if stack then
@@ -449,10 +471,27 @@ function Screens.start()
 
 	--[[ Clicks ]]
 
+	-- A slot click goes to the prediction and the server; a weapon combine's sound (rounds
+	-- loaded, a part attached, one taken out: Weapons/Loading.kind, the same reading the click
+	-- acts on) is the clicking player's alone, played as it goes.
+	local function applyClick(action: Types.Action)
+		if action.kind == "click" and action.clickType == Menu.ClickType.Pickup and ClientInventory.allows(action) then
+			local window = ClientInventory.window()
+			local kind = if action.window == window.id
+				then Loading.kind(window.inventory.cursor, Menu.get(window, action.slot), action.button)
+				else nil
+			local sound = if kind then WEAPON_SOUNDS[kind] else nil
+			if sound then
+				SoundPlayer.playFlat(sound)
+			end
+		end
+		ClientInventory.apply(action)
+	end
+
 	local clicks = SlotClicks.new({
 		window = ClientInventory.window,
 		creative = ClientInventory.isCreative,
-		apply = ClientInventory.apply,
+		apply = applyClick,
 	})
 
 	local function targetAt(point: Vector2): Target?

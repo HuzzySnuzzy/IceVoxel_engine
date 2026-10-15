@@ -15,6 +15,12 @@
 	icons showing an item build their models again a few at a time (REBUILD_BUDGET per frame,
 	hidden screens' icons too), never all in one frame.
 
+	A firearm or a magazine (Shared/Weapons) counts its rounds instead of its stack, as DayZ's
+	inventory does: the count is WeaponState.shownCount of the stack (a gun's rounds and its
+	chambered one, a magazine's rounds), shown even when it is 1 and not at all when 0, in either
+	look. It is worked out only when the item or its data changed (data tables are values), so a
+	screen drawn every frame does no work for it.
+
 	A worn tool gets Minecraft's durability bar under it (Ui/MenuLayout.durabilityBar: up to 13
 	pixels at (2, 13) of the 16 x 16 item on a black 13 x 2 background, from green to red). A
 	machine's item that holds energy (its data's `energy`: a charged Battery, a generator broken
@@ -56,6 +62,8 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Config = require(Shared.Config)
 local Items = require(Shared.Items)
+local Weapons = require(Shared.Weapons)
+local WeaponState = require(Shared.Weapons.WeaponState)
 
 local ItemModels = require(script.Parent.Parent.Rendering.ItemModels)
 local MenuLayout = require(script.Parent.MenuLayout)
@@ -139,6 +147,11 @@ type Self = ItemIcon & {
 	fade: number,
 	-- The GUI scale the count box is sized for (dayz).
 	scale: number,
+	-- The count's text shown ("" for none), and a firearm's or magazine's rounds (WeaponState
+	-- .shownCount) with the data they were read from.
+	shownText: string,
+	rounds: number?,
+	roundsData: Items.Data?,
 }
 
 -- An inventory slot: its button (the 18 x 18 hit area), its face, the icon and the hover outline.
@@ -304,6 +317,9 @@ function ItemIcon.new(parent: Instance, x: number, y: number, z: number?, look: 
 		dimAlpha = 0,
 		fade = 0,
 		scale = 1,
+		shownText = "",
+		rounds = nil,
+		roundsData = nil,
 	}
 	live[self] = true
 	local icon = (setmetatable(self, ItemIcon) :: any) :: ItemIcon
@@ -478,8 +494,9 @@ end
 
 --[[
 	Shows `item` (nil = nothing) with `count` (drawn when above 1), a tool's wear `damage` (its
-	durability bar when worn) and the stack's `data` (the energy bar of an item that holds energy).
-	Cheap when nothing changed (data tables are values: a new one is new data).
+	durability bar when worn) and the stack's `data` (the energy bar of an item that holds energy;
+	a firearm's or a magazine's rounds, drawn instead of the count: see the header). Cheap when
+	nothing changed (data tables are values: a new one is new data).
 ]]
 function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?, data: Items.Data?)
 	local itemChanged = item ~= self.item
@@ -536,20 +553,33 @@ function ItemIcon.set(self: Self, item: number?, count: number?, damage: number?
 		end
 	end
 	local shown = if item then count or 1 else 0
-	if shown ~= self.count then
-		self.count = shown
-		local text = if shown > 1 then tostring(shown) else ""
+	self.count = shown
+	-- (A firearm's or a magazine's rounds instead of its count: read again only on new data.)
+	local rounds: number? = nil
+	if item and (Weapons.firearm(item) or Weapons.magazine(item)) then
+		if itemChanged or data ~= self.roundsData then
+			self.roundsData = data
+			self.rounds = WeaponState.shownCount({ item = item, count = 1, data = data })
+		end
+		rounds = self.rounds
+	else
+		self.roundsData, self.rounds = nil, nil
+	end
+	local text = if rounds then tostring(rounds) elseif shown > 1 then tostring(shown) else ""
+	if text ~= self.shownText then
+		self.shownText = text
+		local visible = text ~= ""
 		local label, shadow, box, countText = self.label, self.shadow, self.countBox, self.countText
 		if label and shadow then
 			label.Text = text
 			shadow.Text = text
-			label.Visible = shown > 1
-			shadow.Visible = shown > 1
+			label.Visible = visible
+			shadow.Visible = visible
 		end
 		if box and countText then
 			countText.Text = text
 			sizeCount(self, text)
-			box.Visible = shown > 1
+			box.Visible = visible
 		end
 	end
 	local wear = if item and damage and damage > 0 then damage else 0
