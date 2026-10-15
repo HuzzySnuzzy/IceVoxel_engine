@@ -25,6 +25,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Protocol = require(Shared.Net.Protocol)
 local Temperature = require(Shared.ToughAsNails.Temperature)
 
+local Style = require(script.Parent.Style)
 local UiScale = require(script.Parent.UiScale)
 
 local SurvivalHud = {}
@@ -32,8 +33,6 @@ local SurvivalHud = {}
 -- The edges reach this far into the screen (share of its height / width) at full strength.
 local EDGE = 0.3
 local EDGE_STRENGTH = 0.85
-local FROST = Color3.fromRGB(205, 235, 255)
-local HEAT = Color3.fromRGB(255, 96, 32)
 
 local edgesGui: ScreenGui? = nil
 local edges: { Frame } = {}
@@ -85,14 +84,16 @@ function SurvivalHud.renderEdges(status: Protocol.SurvivalStatus?)
 	if gui == nil then
 		return
 	end
-	local colour, strength = FROST, 0
+	-- (The edges' colours: Theme's Frost and Heat.)
+	local Colour = Style.Dayz.Colour
+	local colour, strength = Colour.Frost, 0
 	if status and status.temperatureOn then
 		local frost = status.frozen / Temperature.EXTREME_TICKS
 		local heat = status.heat / Temperature.EXTREME_TICKS
 		if frost >= heat then
-			colour, strength = FROST, frost
+			colour, strength = Colour.Frost, frost
 		else
-			colour, strength = HEAT, heat
+			colour, strength = Colour.Heat, heat
 		end
 	end
 	local on = strength > 0

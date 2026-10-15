@@ -1001,7 +1001,7 @@ table.insert(list, {
 	on (SoundList.ARMOR).
 
 	Thermometer (TAN's): while it is the held item, the HUD reads out the body temperature and
-	where it is going as numbers over the gauge (client Ui/SurvivalHud). A glass tube on an iron
+	where it is going in the item-in-hands box over the quickbar (client Ui/Hud). A glass tube on an iron
 	plate with a red bulb; an iron nugget over glass over glow dust (the game's redstone) makes
 	it.
 ]]

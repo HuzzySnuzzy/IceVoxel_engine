@@ -3,8 +3,8 @@
 	Progression: knowledge (this game's experience), the Ages and the skill tree, shared and pure
 	(no Roblox APIs, so the tests run it). The server plays it out (server Players/Progression:
 	awards, Ages, skills, saving, the commands) and sends each player their own state (Protocol
-	Progress), which the client draws (Ui/Hud's knowledge bar and level, Ui/AgeToast, the skill
-	tree screen Ui/SkillTreeScreen) and gates crafting with in its prediction.
+	Progress), which the client draws (Ui/StatusCluster's knowledge bar and level, Ui/AgeToast,
+	the skill tree screen Ui/SkillTreeScreen) and gates crafting with in its prediction.
 
 	  Knowledge   Minecraft's experience curve, the sources and their numbers, the repeats'
 	              fatigue and budget (Progression/Knowledge)

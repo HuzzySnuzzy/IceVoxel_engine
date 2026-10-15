@@ -35,8 +35,8 @@
 	inventory's `hide` action); over one, `targetAt` says nothing, so no slot click happens under
 	it. They describe themselves when hovered (Ui/HoverTip, "inventory.eye").
 
-	Silhouettes come from Ui/Silhouettes by name, looked up when first drawn: a name it does not
-	have (or the module missing) draws an empty mask (`silhouette`).
+	Silhouettes come from Ui/Silhouettes by name (Style.Dayz.silhouette: drawn once per name; a
+	name it does not draw is an empty mask), and the eyes' art from Style.Dayz.Art.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52,7 +52,6 @@ local SoundPlayer = require(script.Parent.Parent.Audio.SoundPlayer)
 local HoverTip = require(script.Parent.HoverTip)
 local InventoryColumns = require(script.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.ItemIcon)
-local Masks = require(script.Parent.Masks)
 local SlotClicks = require(script.Parent.SlotClicks)
 local Style = require(script.Parent.Style)
 local Theme = require(script.Parent.Theme)
@@ -62,51 +61,8 @@ type Target = SlotClicks.Target
 
 local Dayz = Style.Dayz
 
--- A silhouette's place and size in its slot (button coordinates: the item's (1, 1)).
-local GHOST_AT, GHOST_SIZE = 2, 14
--- VANITY's mark in the face's top left corner.
-local MARK = 3
--- The padlock on a closed accessory slot (button coordinates).
-local LOCK_AT, LOCK_SIZE = 4, 10
--- The eyes: open (shown) and shut (hidden), 9 x 9 for a finger's accessory eye, else 6 x 6.
-local EYE_ART = {
-	".........",
-	"..#####..",
-	".#.....#.",
-	"#..###..#",
-	"#..###..#",
-	"#..###..#",
-	".#.....#.",
-	"..#####..",
-	".........",
-}
-local EYE_SHUT_ART = {
-	".........",
-	".........",
-	".........",
-	"#.......#",
-	".#.....#.",
-	"..#####..",
-	"..#.#.#..",
-	".........",
-	".........",
-}
-local SMALL_EYE_ART = {
-	"......",
-	".####.",
-	"#.##.#",
-	"#.##.#",
-	".####.",
-	"......",
-}
-local SMALL_EYE_SHUT_ART = {
-	"......",
-	"......",
-	"#....#",
-	".####.",
-	"#.#.#.",
-	"......",
-}
+local Size = Theme.Size
+local Art = Dayz.Art
 
 export type SlotWidget = {
 	view: ItemIcon.Slot,
@@ -181,43 +137,6 @@ type Self = SlotWidgets & {
 local SlotWidgets = {}
 SlotWidgets.__index = SlotWidgets
 
---[[ Silhouettes ]]
-
--- The mask of Ui/Silhouettes' `name` (empty when it has none), for Style.Dayz.maskImage.
-local function silhouetteMask(name: string): () -> Masks.Mask
-	return function(): Masks.Mask
-		local size = Theme.Size.MASK
-		local module = script.Parent:FindFirstChild("Silhouettes")
-		if module and module:IsA("ModuleScript") then
-			local ok, ops = pcall(function()
-				return (require :: any)(module).ops(name)
-			end)
-			if ok and type(ops) == "table" then
-				return Masks.render(ops, size, size)
-			end
-		end
-		return Masks.render({}, size, size)
-	end
-end
-
---[[
-	Ui/Silhouettes' `name` drawn at (x, y) of `parent`, `w` x `h`, in `colour` at `transparency`
-	(Style.Dayz.maskImage: made once per name; Style.Dayz.tint recolours it).
-]]
-function SlotWidgets.silhouette(
-	parent: Instance,
-	name: string,
-	x: number,
-	y: number,
-	w: number,
-	h: number,
-	colour: Color3,
-	transparency: number,
-	z: number?
-): GuiObject
-	return Dayz.maskImage(parent, name, silhouetteMask(name), x, y, w, h, colour, transparency, z)
-end
-
 --[[ Building ]]
 
 function SlotWidgets.new(): SlotWidgets
@@ -280,19 +199,19 @@ function SlotWidgets.ghost(_self: Self, widget: SlotWidget, name: string, vanity
 	holder.Size = UDim2.fromScale(1, 1)
 	holder.ZIndex = 3
 	holder.Parent = widget.view.button
-	SlotWidgets.silhouette(
+	Dayz.silhouette(
 		holder,
 		name,
-		GHOST_AT,
-		GHOST_AT,
-		GHOST_SIZE,
-		GHOST_SIZE,
+		Size.GHOST_AT,
+		Size.GHOST_AT,
+		Size.GHOST,
+		Size.GHOST,
 		Dayz.Colour[key],
 		Dayz.Alpha[key],
 		1
 	)
 	if vanity then
-		local mark = Style.frame(holder, 1, 1, MARK, MARK, Dayz.Colour.GhostMark, 2)
+		local mark = Style.frame(holder, 1, 1, Size.GHOST_MARK, Size.GHOST_MARK, Dayz.Colour.GhostMark, 2)
 		mark.BackgroundTransparency = Dayz.Alpha.GhostMark
 	end
 	widget.ghost = holder
@@ -321,13 +240,13 @@ function SlotWidgets.lock(_self: Self, widget: SlotWidget)
 	holder.ZIndex = 11
 	holder.Visible = false
 	holder.Parent = widget.view.button
-	SlotWidgets.silhouette(
+	Dayz.silhouette(
 		holder,
 		"padlock",
-		LOCK_AT,
-		LOCK_AT,
-		LOCK_SIZE,
-		LOCK_SIZE,
+		Size.LOCK_AT,
+		Size.LOCK_AT,
+		Size.LOCK,
+		Size.LOCK,
 		Dayz.Colour.Lock,
 		Dayz.Alpha.Lock,
 		1
@@ -365,11 +284,11 @@ function SlotWidgets.eye(self: Self, parent: Instance, group: string, slot: numb
 	button.ZIndex = 12
 	button.SelectionImageObject = Style.selectionImage
 	button.Parent = parent
-	local shut = eyeArt(button, SMALL_EYE_SHUT_ART, Dayz.Colour.TextDisabled, Dayz.Alpha.TextDisabled)
+	local shut = eyeArt(button, Art.smallEyeShut, Dayz.Colour.TextDisabled, Dayz.Alpha.TextDisabled)
 	shut.Visible = false
 	local eye: Eye = {
 		button = button,
-		open = eyeArt(button, SMALL_EYE_ART, Dayz.Colour.Text, 0),
+		open = eyeArt(button, Art.smallEye, Dayz.Colour.Text, 0),
 		shut = shut,
 		slot = slot,
 		group = group,
@@ -400,7 +319,7 @@ function SlotWidgets.placeEye(self: Self, eye: Eye, rect: InventoryColumns.Rect)
 	if button.Size ~= size then
 		button.Size = size
 	end
-	local small = math.min(rect.w, rect.h) < #EYE_ART
+	local small = math.min(rect.w, rect.h) < #Art.eye
 	if small == eye.small then
 		return
 	end
@@ -408,10 +327,10 @@ function SlotWidgets.placeEye(self: Self, eye: Eye, rect: InventoryColumns.Rect)
 	local wasShut = eye.shut.Visible
 	eye.open:Destroy()
 	eye.shut:Destroy()
-	eye.open = eyeArt(button, if small then SMALL_EYE_ART else EYE_ART, Dayz.Colour.Text, 0)
+	eye.open = eyeArt(button, if small then Art.smallEye else Art.eye, Dayz.Colour.Text, 0)
 	eye.shut = eyeArt(
 		button,
-		if small then SMALL_EYE_SHUT_ART else EYE_SHUT_ART,
+		if small then Art.smallEyeShut else Art.eyeShut,
 		Dayz.Colour.TextDisabled,
 		Dayz.Alpha.TextDisabled
 	)

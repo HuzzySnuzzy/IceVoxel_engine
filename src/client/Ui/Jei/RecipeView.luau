@@ -59,7 +59,6 @@ local SoundPlayer = require(script.Parent.Parent.Parent.Audio.SoundPlayer)
 local HoverTip = require(script.Parent.Parent.HoverTip)
 local InventoryColumns = require(script.Parent.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.Parent.ItemIcon)
-local SlotWidgets = require(script.Parent.Parent.SlotWidgets)
 local Style = require(script.Parent.Parent.Style)
 local Theme = require(script.Parent.Parent.Theme)
 local JeiData = require(script.Parent.JeiData)
@@ -86,16 +85,10 @@ export type State = {
 
 local WIDTH, HEIGHT = JeiLayout.VIEW_WIDTH, JeiLayout.VIEW_HEIGHT
 local TAB_HEIGHT, TAB_WIDTH = ItemIcon.TAB_HEIGHT, ItemIcon.TAB_WIDTH
--- The title bar (panel coordinates): it holds Back and the close button (JeiLayout.BACK, CLOSE).
-local TITLE_BAR = { x = 0, y = 3, w = WIDTH, h = Theme.Size.SECTION_HEADER }
 -- The page row's text (around JeiLayout.PAGE_Y, between the arrows).
 local PAGE_ROW = { y = JeiLayout.PREV.y, h = JeiLayout.PREV.h }
--- The red over a missing ingredient (JEI: 0x66FF0000 over the slot).
-local MISSING_TRANSPARENCY = 0.6
--- The gauges' bars (GUI pixels thick) and the chevron and padlock sizes.
-local BAR = 2
-local CHEVRON = 8
-local PADLOCK = 8
+-- (The gauges' bars, the chevron and the padlock: Theme.Size's GAUGE, CHEVRON and PADLOCK.)
+local Size = Theme.Size
 -- JEI's shapeless mark: two arrows crossing over (9 x 10).
 local SHAPELESS_ART = {
 	".....#...",
@@ -285,7 +278,8 @@ function RecipeView.new(parent: Instance): RecipeView
 	self.panel = panel
 	local titleBar = Dayz.section(panel, "", { face = "none", scaled = scaled })
 	titleBar.root.Name = "TitleBar"
-	titleBar:place(TITLE_BAR.x, TITLE_BAR.y, TITLE_BAR.w, TITLE_BAR.h, 0)
+	local titleRect = JeiLayout.TITLE_BAR
+	titleBar:place(titleRect.x, titleRect.y, titleRect.w, titleRect.h, 0)
 	self.titleBar = titleBar
 	self.pageLabel = Dayz.label(
 		panel,
@@ -348,7 +342,7 @@ end
 
 -- A thin bar across the middle of `rect` (an arrow's or a flame's place): `colour` on the light track.
 local function gaugeBar(parent: Frame, rect: Rect, colour: Color3): Style.Bar
-	local bar = Dayz.bar(parent, rect.x, rect.y + math.floor((rect.h - BAR) / 2), rect.w, BAR, false, 5)
+	local bar = Dayz.bar(parent, rect.x, rect.y + math.floor((rect.h - Size.GAUGE) / 2), rect.w, Size.GAUGE, false, 5)
 	bar.track.BackgroundColor3 = Dayz.Colour.QuantityTrack
 	bar.track.BackgroundTransparency = Dayz.Alpha.QuantityTrack
 	bar.fill.BackgroundColor3 = colour
@@ -408,8 +402,9 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 
 	for index, spot in layout.inputs do
 		local slot = ItemIcon.slot(frame, spot.x, spot.y, 4, spot.big, scaled)
-		local missing = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Dayz.Colour.Warning, 9)
-		missing.BackgroundTransparency = MISSING_TRANSPARENCY
+		-- (The red over a missing ingredient: JEI's 0x66FF0000 over the slot.)
+		local missing = Style.frame(slot.button, 1, 1, Style.ITEM, Style.ITEM, Dayz.Colour.Missing, 9)
+		missing.BackgroundTransparency = Dayz.Alpha.Missing
 		missing.Visible = false
 		local cell: CellWidget = { slot = slot, items = entry.inputs[index], cell = index, missing = missing }
 		table.insert(widget.cells, cell)
@@ -446,13 +441,13 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		widget.output = slot
 		self.byButton[slot.button] = slot.icon
 		-- (Shown while the recipe is locked: `refreshLocks`.)
-		local padlock = SlotWidgets.silhouette(
+		local padlock = Dayz.silhouette(
 			frame,
 			"padlock",
-			out.x + Style.ITEM - PADLOCK + 1,
+			out.x + Style.ITEM - Size.PADLOCK + 1,
 			out.y - 1,
-			PADLOCK,
-			PADLOCK,
+			Size.PADLOCK,
+			Size.PADLOCK,
 			Dayz.Colour.Text,
 			0,
 			9
@@ -465,13 +460,13 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 		if entry.category == "smelting" or entry.category == "refining" then
 			widget.arrow = gaugeBar(frame, arrow, Dayz.Colour.Quantity)
 		else
-			SlotWidgets.silhouette(
+			Dayz.silhouette(
 				frame,
 				"chevron",
-				arrow.x + math.floor((arrow.w - CHEVRON) / 2),
-				arrow.y + math.floor((arrow.h - CHEVRON) / 2),
-				CHEVRON,
-				CHEVRON,
+				arrow.x + math.floor((arrow.w - Size.CHEVRON) / 2),
+				arrow.y + math.floor((arrow.h - Size.CHEVRON) / 2),
+				Size.CHEVRON,
+				Size.CHEVRON,
 				Dayz.Colour.Chevron,
 				Dayz.Alpha.Chevron,
 				5

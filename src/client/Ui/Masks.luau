@@ -54,8 +54,11 @@ local function inRect(px: number, py: number, x: number, y: number, w: number, h
 	end
 	radius = math.min(radius, w / 2, h / 2)
 	-- The nearest point of the rectangle shrunk by the radius: inside when within the radius of it.
-	local cx = math.clamp(px, x + radius, x + w - radius)
-	local cy = math.clamp(py, y + radius, y + h - radius)
+	-- (With the radius half a side, rounding can leave that side's far bound a hair under its near
+	-- one, which math.clamp refuses: the far bound is kept at least the near one.)
+	local left, top = x + radius, y + radius
+	local cx = math.clamp(px, left, math.max(left, x + w - radius))
+	local cy = math.clamp(py, top, math.max(top, y + h - radius))
 	local dx, dy = px - cx, py - cy
 	return dx * dx + dy * dy <= radius * radius
 end

@@ -169,7 +169,7 @@ EffectIcons.GLYPHS = table.freeze({
 		".KCK.KCK.",
 		".KK...KK.",
 	},
-	-- Minecraft's Hunger: a drumstick (the HUD's shank, Ui/SurvivalHud), its bone white.
+	-- Minecraft's Hunger: a drumstick (Minecraft's shank), its bone white.
 	drumstick = {
 		"......KK.",
 		".....KWWK",

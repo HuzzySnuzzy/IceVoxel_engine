@@ -1215,17 +1215,17 @@ local Config = {
 
 	--[[
 		Minecraft 1.20.1's hunger (FoodData; Shared/Hunger, server Players/ToughAsNails runs it with
-		thirst): the ten shanks over the hotbar (food 0..20, saturation, exhaustion), foods filling
-		them (Items/Foods: Minecraft's nutrition and saturation), natural regeneration from a full
-		bar, starvation at an empty one, no sprinting at 6 or less, and Minecraft's Hunger effect.
-		With Tough As Nails' thirst on, the droplets sit a row above the shanks and health comes back
-		only while both bars are high. Survival and adventure players only: creative and spectator
+		thirst): the food bar (food 0..20, saturation, exhaustion; the HUD's FOOD status icon),
+		foods filling it (Items/Foods: Minecraft's nutrition and saturation), natural regeneration
+		from a full bar, starvation at an empty one, no sprinting at 6 or less, and Minecraft's
+		Hunger effect. With Tough As Nails' thirst on, health comes back only while both bars are
+		high. Survival and adventure players only: creative and spectator
 		players' food stands still and they may always eat.
 	]]
 	Hunger = {
-		-- The food bar at all. false: no shanks, foods heal health at once as before (Items/Foods'
-		-- `heal`), thirst's own regeneration rules health (ToughAsNails.ThirstRegeneration), and the
-		-- HUD's rows sit where they did.
+		-- The food bar at all. false: no FOOD status icon, foods heal health at once as before
+		-- (Items/Foods' `heal`), and thirst's own regeneration rules health
+		-- (ToughAsNails.ThirstRegeneration).
 		Enabled = true,
 		-- Minecraft's naturalRegeneration game rule: health comes back from food (with saturation
 		-- at a full bar, half a heart every 10 ticks for up to 6 exhaustion; else at 18 or more,
@@ -1251,9 +1251,9 @@ local Config = {
 		players' stats stand still and never hurt.
 	]]
 	ToughAsNails = {
-		-- Thirst: drinking, dehydration at 0 and the droplets over the hotbar.
+		-- Thirst: drinking, dehydration at 0 and the HUD's THIRST status icon.
 		Thirst = true,
-		-- Body temperature: the gauge over the hotbar, hypothermia and hyperthermia.
+		-- Body temperature: the HUD's TEMPERATURE status icon, hypothermia and hyperthermia.
 		Temperature = true,
 		-- With Thirst on, health comes back only while thirst is 18 or more. With Hunger on, that is
 		-- a condition on hunger's natural regeneration (TAN: both bars high); with Hunger off,
@@ -1307,7 +1307,7 @@ local Config = {
 	-- Progression: knowledge, Ages and the skill tree -----------------------------------------------
 
 	--[[
-		Knowledge (this game's experience: Minecraft's curve, the green bar over the hotbar), the
+		Knowledge (this game's experience: Minecraft's curve, the bar under the status icons), the
 		Ages (Stone, Iron, Industrial, Electric, Atomic: each opens recipes) and the skill tree (a
 		point a level, small perks). Shared/Progression has the rules and numbers, server
 		Players/Progression plays them out. Survival and adventure players earn knowledge;
@@ -1669,8 +1669,8 @@ local Config = {
 		-- Keep each player's choices between sessions in a DataStore, one profile per kind of
 		-- device (desktop, touch, console). In Studio this needs API access, as SaveWaypoints.
 		Save = true,
-		-- Opens and closes the menu (Enum.KeyCode names; touch: the gear beside the hotbar, and
-		-- the gear in the inventory). The key is the Options key binding's default.
+		-- Opens and closes the menu (Enum.KeyCode names; touch: the gear beside the quickbar, and
+		-- the gear in the inventory's EQUIPMENT header). The key is the Options key binding's default.
 		Key = "P",
 		GamepadButton = "DPadRight",
 		-- Seconds after the last change before the costly ones apply (view distance, caves,
@@ -1867,8 +1867,8 @@ local Config = {
 		-- Poison and Fuel Soaked; water washes the coat off). Off, the fluids leave players be;
 		-- potions and /effect still work.
 		FluidEffects = true,
-		-- The effect icons in the top right corner (and the list beside open screens). Off, Tough
-		-- As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill.
+		-- The effect icons in the top right corner (and the list beside open screens). Off, the
+		-- status icons' badges show Climate Clemency, Internal Warmth and Chill too.
 		Hud = true,
 		-- Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's
 		-- sway (a share of it), times the FOV Effects setting (Minecraft's Distortion Effects).
@@ -1962,7 +1962,7 @@ local Config = {
 		Sickness. Fallen Stars fall at night.
 	]]
 	Mana = {
-		-- false: no mana (no stars on the HUD, no falling stars; magic weapons do nothing).
+		-- false: no mana (no MANA status icon, no falling stars; magic weapons do nothing).
 		Enabled = true,
 		-- Mana to start with, per Mana Crystal used, crystals usable, and the most with everything.
 		Base = 20,
@@ -1974,8 +1974,8 @@ local Config = {
 		SicknessSeconds = 5,
 		SicknessMax = 10,
 		SicknessDamage = 0.05,
-		-- Seconds the HUD's stars stay after mana changed (they show while a magic item is held or
-		-- mana is not full).
+		-- Seconds the MANA status icon stays lit after mana changed (it is lit while a magic item is
+		-- held or mana is not full, dimmed otherwise).
 		HudLinger = 3,
 		-- Fallen Stars: each player sees about PerNight a night, falling FallHeight blocks onto the
 		-- ground MinDistance..MaxDistance blocks away, between NightStart and NightEnd (time of day,
@@ -2025,7 +2025,8 @@ local Config = {
 		-- the strip stays as the place to throw things), refreshed this often (seconds).
 		GroundRadius = 4,
 		GroundRefresh = 0.25,
-		-- Numbers under the status icons (false: icons, colours and arrows only).
+		-- Numbers under the status icons (false: icons, colours and arrows only, like the survival
+		-- games they follow).
 		StatusValues = false,
 	},
 }

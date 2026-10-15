@@ -15,9 +15,9 @@
 	                Campfire, Straw and Leaf armor and the Thermometer are BlockList / ItemList's)
 
 	The server runs them (Players/ToughAsNails, its surroundings from Players/Climate) and sends
-	each player their own state (Protocol Survival), which the HUD draws (client Ui/SurvivalHud:
-	the droplets, the thermometer, the clemency's time and the effects, the frost and heat at the
-	screen's edges) and F3 prints. Config.ToughAsNails turns thirst and temperature on and off and
+	each player their own state (Protocol Survival), which the HUD draws (client Ui/StatusCluster:
+	the THIRST and TEMPERATURE status icons, the clemency's and the effects' badges; Ui/SurvivalHud:
+	the frost and heat at the screen's edges) and F3 prints. Config.ToughAsNails turns thirst and temperature on and off and
 	tunes them.
 
 	Survival and adventure players are affected (`affects`); creative and spectator players are

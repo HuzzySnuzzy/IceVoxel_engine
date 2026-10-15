@@ -54,9 +54,8 @@ local GRID_X, GRID_Y = 8, 34
 local BAR_H = Theme.Size.SECTION_HEADER
 local CLOSE = 12
 local SEARCH_X, SEARCH_Y = 7, 17
--- The scrollbar's track; its thumb is Style.Dayz.scrollbar's (THUMB_H tall).
+-- The scrollbar's track; its thumb is Style.Dayz.scrollbar's (Theme's THUMB_H tall).
 local TRACK_X, TRACK_Y, TRACK_W, TRACK_H = 154, 33, 14, 90
-local THUMB_H = 15
 
 type Cell = { view: ItemIcon.Slot, item: number }
 
@@ -216,7 +215,7 @@ local function scrollTo(self: Self, point: Vector2)
 	local track = self.scrollbar.track
 	local position, size = track.AbsolutePosition, track.AbsoluteSize
 	local pixels = size.Y / TRACK_H
-	local thumb = math.min(THUMB_H, TRACK_H) * pixels
+	local thumb = math.min(Theme.Size.THUMB_H, TRACK_H) * pixels
 	local span = size.Y - thumb
 	if span <= 0 then
 		return

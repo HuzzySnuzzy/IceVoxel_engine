@@ -4,9 +4,10 @@
 	Tough As Nails' thirst (Shared/ToughAsNails/Thirst) was modelled on, and the rules around it
 	(Player.canEat, LocalPlayer's sprint rule, HungerMobEffect). Config.Hunger turns it on and off
 	(`on`) and tunes it; server Players/ToughAsNails plays it out beside thirst, every player's
-	state sent to them in the Survival message (client Ui/SurvivalHud draws the shanks).
+	state sent to them in the Survival message (client Ui/StatusCluster draws it as the FOOD
+	status icon).
 
-	  food        foodLevel 0..MAX (20): the ten shanks over the hotbar. Starts full.
+	  food        foodLevel 0..MAX (20): Minecraft's ten shanks, the FOOD icon's fill. Starts full.
 	  saturation  saturationLevel 0..food (a float), used up before food. Starts at
 	              START_SATURATION (5).
 	  exhaustion  exhaustionLevel 0..MAX_EXHAUSTION (40, FoodData.addExhaustion's cap): above STEP
@@ -53,10 +54,10 @@
 	Sprinting (`canSprint`): LocalPlayer.aiStep's `foodLevel > 6 || mayfly`: at SPRINT_FOOD (6) or
 	less a sprint neither starts nor goes on, unless the mode may fly (creative, spectator).
 
-	The HUD's helpers (client Ui/SurvivalHud, pure here so the tests read them): `shank` (each of
-	the ten from the right, 2 points a shank, a half shank for an odd point) and `jitters`
-	(Gui.renderPlayerHealth: without saturation the shanks shake on ticks where
-	tick % (food x 3 + 1) == 0).
+	Minecraft's food bar rules, kept specced though the HUD now shows a status icon instead (its
+	falling arrows stand for the shake): `shank` (each of the ten from the right, 2 points a shank,
+	a half shank for an odd point) and `jitters` (Gui.renderPlayerHealth: without saturation the
+	shanks shake on ticks where tick % (food x 3 + 1) == 0).
 ]]
 
 local Config = require(script.Parent.Config)
@@ -228,7 +229,7 @@ function Hunger.tick(
 	return 0, 0
 end
 
---[[ The HUD (client Ui/SurvivalHud) ]]
+--[[ Minecraft's food bar (specced; the HUD's FOOD icon is client Ui/StatusCluster's) ]]
 
 -- The state of shank `i` (1 = rightmost) at `food` points: 0 empty, 1 half, 2 full.
 function Hunger.shank(food: number, i: number): number

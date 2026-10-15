@@ -18,6 +18,7 @@ return function(t, shared, require, _server, client)
 	local JeiData = require(client.Ui.Jei.JeiData)
 	local JeiLayout = require(client.Ui.Jei.JeiLayout)
 	local JeiTransfer = require(client.Ui.Jei.JeiTransfer)
+	local Theme = require(client.Ui.Theme)
 
 	local id = Items.id
 
@@ -443,6 +444,21 @@ return function(t, shared, require, _server, client)
 				t.ok(not overlaps(a, header[j]), `{a.what} overlaps {header[j].what}`)
 			end
 		end
+		-- The title bar (a section bar, Theme's SECTION_HEADER tall) across the panel holds Back
+		-- and the close button, and stays above the page row.
+		local bar = JeiLayout.TITLE_BAR
+		t.eq(bar.h, Theme.Size.SECTION_HEADER, "the title bar is a section bar's height")
+		t.ok(bar.x == 0 and bar.w == JeiLayout.VIEW_WIDTH, "the title bar spans the panel")
+		for _, button in { JeiLayout.BACK, JeiLayout.CLOSE } do
+			t.ok(
+				button.x >= bar.x
+					and button.y >= bar.y
+					and button.x + button.w <= bar.x + bar.w
+					and button.y + button.h <= bar.y + bar.h,
+				`a button at {button.x} inside the title bar`
+			)
+		end
+		t.ok(bar.y + bar.h <= JeiLayout.PREV.y, "the title bar above the page row")
 	end)
 
 	t.test("jei: the item list fits right of the inventory, collapses, hides", function()

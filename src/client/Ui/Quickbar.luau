@@ -14,15 +14,16 @@
 	             the spectator menu's heads and icons under it stay visible).
 	  items      Ui/ItemIcon in the survival look (tinted pictures, the count box, the condition,
 	             sips or energy bar), following the HUD's scale (`scaled`). Each icon lives inside
-	             its cell, at HudLayout.quickIcon (one pixel into the 18 x 18 cell) and z ICON_Z:
-	             over the cell's face (z 1) and under its number box (z 3). The ScreenGuis order
-	             their children by sibling (UiScale.screenGui), so an icon made beside the bar
-	             instead, at any z, would draw over every part of the bar, the number boxes too.
+	             its cell, at HudLayout.quickIcon (one pixel into the 18 x 18 cell) and the cell's
+	             item layer (Style.Dayz.QuickZ): over its face and under its number box. The
+	             ScreenGuis order their children by sibling (UiScale.screenGui), so an icon made
+	             beside the bar instead, at any z, would draw over every part of the bar, the
+	             number boxes too.
 	  numbers    each cell's key (Settings/Keybinds "hotbar1".."hotbar9", one or two characters:
 	             HudLayout.quickKey; read again when the bindings change) in a number box
 	             (Style.Dayz.paintNumber at Theme.quickNumber): boxed in the top right corner over
 	             an item, faint in the middle of an empty cell. Hidden on touch screens (there are
-	             no keys) and while the tiny text would be under 8 screen pixels (6 x scale < 8).
+	             no keys) and while the tiny text would be under 8 screen pixels (Theme.numbersShown).
 	  layers     from the bottom: each cell (its base, face, icon and number box, in that order),
 	             the HUD's Slot buttons (Ui/Hud, z 4: transparent), the selection (z 6), the
 	             hover outlines (z 7). tests/spec/Quickbar builds the bar on Roblox instances and
@@ -96,11 +97,6 @@ local Quickbar = {}
 Quickbar.__index = Quickbar
 
 local SLOTS = Types.HOTBAR_SIZE
--- The tiny role's text must come out at least this many screen pixels tall to show.
-local NUMBER_MIN_PX = 8
--- An icon's ZIndex inside its cell: over the face (Style.Dayz.quickCell's z 1), under the number
--- box (its z 3).
-local ICON_Z = 2
 
 -- Every Quickbar built (their key names go stale when the bindings change).
 local built: { Self } = {}
@@ -175,7 +171,7 @@ function Quickbar.build(hotbar: Frame, bar: number, scaled: Style.Scaled): Quick
 	for i = 1, SLOTS do
 		-- (The icon inside its cell: see the header's `items` and `layers`.)
 		local r, c = HudLayout.quickIcon(i, bar), HudLayout.quickCell(i, bar)
-		icons[i] = ItemIcon.new(cells[i].base, r.x - c.x, r.y - c.y, ICON_Z, "dayz", scaled)
+		icons[i] = ItemIcon.new(cells[i].base, r.x - c.x, r.y - c.y, Style.Dayz.QuickZ.item, "dayz", scaled)
 		local hover = Instance.new("Frame")
 		hover.Name = `Hover{i}`
 		hover.BackgroundTransparency = 1
@@ -274,7 +270,7 @@ function Quickbar.render(self: Self, now: number, mode: Mode, window: Types.Wind
 	end
 	local inventory = if window then window.inventory else nil
 	local changed = mode ~= self.shownMode or selected ~= self.shownSelected
-	local showNumbers = not UiScale.touch() and Style.Theme.Text.tiny * self.scaled.scale >= NUMBER_MIN_PX
+	local showNumbers = Style.Theme.numbersShown(self.scaled.scale, UiScale.touch())
 	if changed or showNumbers ~= self.numbersShown then
 		self.numbersShown = showNumbers
 		repaint = true

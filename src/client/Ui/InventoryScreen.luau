@@ -23,10 +23,11 @@
 	             corner on a mouse, a finger's button under it on touch); BACKPACK (n/27): the 27
 	             inventory slots; VANITY (window 0): the vanity armor (an eye each) and vanity
 	             accessories, fainter silhouettes with a corner mark
-	  band       the window's nine hotbar slots as the quickbar (Style.Dayz quick cells, the
-	             selected one olive under an outline, number boxes from the Hotbar Slot key
-	             bindings: hidden on touch and while too small to read), the status icons docked
-	             at its right (`statusRect`, Ui/StatusDock; survival-like modes only)
+	  band       the window's nine hotbar slots as the quickbar (Style.Dayz quick cells, each slot
+	             inside its cell under the number box (Style.Dayz.quickSlot), the selected one olive
+	             under an outline, number boxes from the Hotbar Slot key bindings: hidden on touch
+	             and while too small to read), the status icons docked at its right (`statusRect`,
+	             Ui/StatusDock; survival-like modes only)
 
 	Behind the side columns (wide) two dark strips run from the screen's edges to 3 GUI pixels
 	past them. Every root of the family is marked for the look (Ui/Screens), so button tooltips
@@ -87,6 +88,7 @@ local Keybinds = require(script.Parent.Parent.Settings.Keybinds)
 local ContainerPanel = require(script.Parent.ContainerPanel)
 local GroundStrip = require(script.Parent.GroundStrip)
 local HoverTip = require(script.Parent.HoverTip)
+local HudLayout = require(script.Parent.HudLayout)
 local InventoryColumns = require(script.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.ItemIcon)
 local MenuLayout = require(script.Parent.MenuLayout)
@@ -108,17 +110,6 @@ local BIT = InventoryColumns.BIT
 -- The worn slots' silhouettes (Ui/Silhouettes names), armor 1..4 and every accessory.
 local ARMOR_GHOSTS = { "head", "chest", "legs", "feet" }
 local ACCESSORY_GHOST = "accessory"
--- CRAFTING's chevron (body coordinates) and its glyph size.
-local CRAFT_ARROW = { x = 86, y = 14, w = 16, h = 13 }
-local CHEVRON = 8
--- The side strips reach this far past the side columns (GUI pixels).
-local STRIP_REACH = 3
--- Number boxes show from this many screen pixels of text (Theme.Text.tiny x scale).
-local NUMBER_MIN = 8
--- The block's picture in its section bar: a 16 px icon at this UIScale (Theme HEADER_PICTURE).
-local PICTURE_SCALE = Size.HEADER_PICTURE / Style.ITEM
--- Key binding names longer than this are left off the quickbar's number boxes.
-local NUMBER_CHARS = 2
 
 --[[
 	Where the screens' GUI is, for `place` (Ui/Screens keeps one table and updates its fields): its
@@ -266,10 +257,10 @@ type Self = InventoryScreen & {
 local InventoryScreen = {}
 InventoryScreen.__index = InventoryScreen
 
--- The quickbar number box text of hotbar slot `i`: its key binding's name when short enough.
+-- The quickbar number box text of hotbar slot `i`: its key binding's name when short enough
+-- (HudLayout.quickKey, as the HUD's quickbar shows it).
 local function numberOf(i: number): string
-	local name = Keybinds.name(`hotbar{i}`)
-	return if #name <= NUMBER_CHARS then name else ""
+	return HudLayout.quickKey(Keybinds.name(`hotbar{i}`))
 end
 
 -- Makes `section` collapse (its `bit`) when its bar is clicked; its tooltip says what a click does.
@@ -408,7 +399,11 @@ local function buildBand(self: Self): Band
 	local numbers: { string } = {}
 	for i = 1, Types.HOTBAR_SIZE do
 		local cell = Dayz.quickCell(frame, 0, 0, 2, self.scaled)
-		local widget = self.widgets:slot(frame, "band", 0, 0, "inventory", i, false, self.scaled)
+		-- The slot inside its cell, at the cell's layers (Style.Dayz.quickSlot): its picture over
+		-- the face and under the number box, its hover outline over the box. (Made beside the
+		-- cells, the slot's picture would draw over the whole cell, number box included.)
+		local widget = self.widgets:slot(cell.base, "band", 1, 1, "inventory", i, false, self.scaled)
+		Dayz.quickSlot(cell, widget.view.button, widget.view.hover)
 		widget.quick = true
 		widget.face = cell.face
 		table.insert(cells, cell)
@@ -541,13 +536,14 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 	self.ground = GroundStrip.new(ground.body, self.scaled)
 	local craft = newSection(self, "craft", "Crafting", { face = "grid", collapsible = true, glyph = "crafting" })
 	addSlots(self, craft.body, "craft", InventoryColumns.spots("craft", self.wide), true)
-	SlotWidgets.silhouette(
+	local arrow, chevron = InventoryColumns.CRAFT_ARROW, Size.CHEVRON
+	Dayz.silhouette(
 		craft.body,
 		"chevron",
-		CRAFT_ARROW.x + (CRAFT_ARROW.w - CHEVRON) // 2,
-		CRAFT_ARROW.y + (CRAFT_ARROW.h - CHEVRON) // 2,
-		CHEVRON,
-		CHEVRON,
+		arrow.x + (arrow.w - chevron) // 2,
+		arrow.y + (arrow.h - chevron) // 2,
+		chevron,
+		chevron,
 		Dayz.Colour.Chevron,
 		Dayz.Alpha.Chevron,
 		3
@@ -647,7 +643,7 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 			holder.Size = UDim2.fromOffset(Style.ITEM, Style.ITEM)
 			holder.Parent = built.picture
 			local scale = Instance.new("UIScale")
-			scale.Scale = PICTURE_SCALE
+			scale.Scale = Dayz.PICTURE_SCALE
 			scale.Parent = holder
 			local icon = ItemIcon.new(holder, 0, 0, 1, "dayz", self.scaled)
 			icon:set(if Items.isValid(panelContainer.block) then panelContainer.block else nil, 1)
@@ -775,25 +771,24 @@ local function apply(
 		end
 	end
 
-	-- The band: the quickbar's cells and slots, at HudLayout's cell maths from the bar.
+	-- The band: the quickbar's cells (their slots inside), at HudLayout's cell maths from the bar.
 	local band = self.band
 	band.frame.Position = UDim2.fromOffset(a.band.x, a.band.y)
 	band.frame.Size = UDim2.fromOffset(a.band.w, a.band.h)
 	local barX, barY = a.quickbar.x, a.quickbar.y - a.band.y
 	for i, cell in band.cells do
-		local cx, cy = InventoryColumns.quickCell(i)
-		cell.base.Position = UDim2.fromOffset(barX + cx, barY + cy)
-		band.widgets[i].view.button.Position = UDim2.fromOffset(barX + cx, barY + cy)
+		local at = HudLayout.quickCell(i, 0)
+		cell.base.Position = UDim2.fromOffset(barX + at.x, barY + at.y)
 	end
 	band.selected = 0
 
-	-- The side strips (wide), from the screen's edges to STRIP_REACH past the side columns.
+	-- The side strips (wide), from the screen's edges to Theme's STRIP_REACH past the side columns.
 	local left, right = self.strips[1], self.strips[2]
 	if a.mode == "wide" then
 		local x0, y0 = -p.x / scale, -p.y / scale
 		local height = view.h / scale
-		local leftEnd = a.columns[1].x + a.columns[1].w + STRIP_REACH
-		local rightStart = a.columns[3].x - STRIP_REACH
+		local leftEnd = a.columns[1].x + a.columns[1].w + Size.STRIP_REACH
+		local rightStart = a.columns[3].x - Size.STRIP_REACH
 		left.Position = UDim2.fromOffset(x0, y0)
 		left.Size = UDim2.fromOffset(leftEnd - x0, height)
 		right.Position = UDim2.fromOffset(rightStart, y0)
@@ -930,7 +925,7 @@ end
 -- The band's number boxes and selection outline.
 local function renderBand(self: Self, inventory: Types.Inventory, selected: number)
 	local band = self.band
-	local show = not self.touch and Theme.Text.tiny * self.scale >= NUMBER_MIN
+	local show = Theme.numbersShown(self.scale, self.touch)
 	for i, cell in band.cells do
 		Dayz.paintNumber(cell, if show then band.numbers[i] else "", inventory.slots[i] ~= nil)
 	end

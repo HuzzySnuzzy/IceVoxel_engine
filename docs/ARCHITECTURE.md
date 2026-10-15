@@ -2584,12 +2584,14 @@ Roblox's chat window and input bar, which the client turns off before the title 
 (`Chat.hideRoblox`: `ChatWindowConfiguration`, `ChatInputBarConfiguration`,
 `ChannelTabsConfiguration` `.Enabled = false`; the title screen has no chat, as Minecraft's). Box
 and lines are drawn over the HUD (DisplayOrder 12, as Minecraft draws the chat over the hotbar),
-under a screen's backdrop while one is open (8). On touch, the tap on the HUD's chat button that
-takes the box's focus closes the chat, and the button's own Activated right after (`TAP_CLOSE`)
-does not open it again. Roblox still carries
-every message: players' text is only ever sent with `TextChannel:SendAsync` and shown from
-`TextChatService.MessageReceived`, so Roblox filters it for each reader; the game never sends
-player text through its own remotes. No server code and no Protocol message were added.
+under a screen's backdrop while one is open (8); on a PC the lines and the overlay message rise by
+the HUD's lift (`HudLayout.lifted`: 5 % of the screen's height), so they stay above the lifted
+quickbar and its item box at every GUI Scale (tested in `tests/spec/HudLayout`). On touch, the tap
+on the HUD's chat button that takes the box's focus closes the chat, and the button's own Activated
+right after (`TAP_CLOSE`) does not open it again. Roblox still carries every message: players' text
+is only ever sent with `TextChannel:SendAsync` and shown from `TextChatService.MessageReceived`, so
+Roblox filters it for each reader; the game never sends player text through its own remotes. No
+server code and no Protocol message were added.
 
 - **Lines** (`ChatLog`, pure, tested in tests/spec/Chat). The newest 100 messages are kept, each
   wrapped (at spaces; long words by characters; never through a UTF-8 character) to the chat's
@@ -3165,9 +3167,9 @@ Code never compares modes: it asks what one allows, `GameMode.<ability>(mode)` o
   or dropped, the item selection, creative slots and middle-click clones, operator blocks. Every
   `creative` parameter (`Menu.apply`, `EditRules`, `UseRules`, `InventoryState.apply`) is this
   ability. `GameMode.isCreative(player)` is kept for older callers.
-- `mayBuild`: breaking, placing and using items on blocks. `isSurvivalLike`: hearts and armour.
-  `canInteract`: slot clicks, drags and drops (spectators open menus read only). `showsHud`: the
-  hotbar and the held item's name.
+- `mayBuild`: breaking, placing and using items on blocks. `isSurvivalLike`: the status icons
+  (health, armour, the survival stats). `canInteract`: slot clicks, drags and drops (spectators
+  open menus read only). `showsHud`: the quickbar and the held item's name.
 - `ALL` lists the modes by Minecraft's GameType id (0 survival, 1 creative, 2 adventure,
   3 spectator; `id`, `fromId`), `ORDER` the switcher's (Creative, Survival, Adventure, Spectator).
   `parse` reads `survival` / `s` / `0`, `creative` / `c` / `1`, `adventure` / `a` / `2` and
@@ -3287,13 +3289,15 @@ Client modules ask Shared/GameMode's abilities of the local player's mode
   current one, and closes. Escape (Roblox's menu), an inventory screen opening or respawning
   close it without switching. While it is shown, a Modal button frees the mouse and takes the
   clicks, and it has the keys like a Minecraft Screen: the player stands still
-  (MovementController), the hotbar's and spectator menu's keys and the wheel do nothing
+  (MovementController), the quickbar's and spectator menu's keys and the wheel do nothing
   (`Hud.setInputTaken`), and neither do BlockInteraction's buttons.
-- **HUD** (`Ui/Hud`). Hearts, armour and the knowledge bar show in `isSurvivalLike` modes (survival, adventure), the
-  held item's name higher above them; without `showsHud` (spectators) there is no hotbar, item
-  name, hearts or armour, and the spectator menu takes the hotbar's place.
+- **HUD** (`Ui/Hud`). The status icons (health, armour, the survival stats, mana, the badges and
+  the knowledge bar: `Ui/StatusCluster`) show in `isSurvivalLike` modes (survival, adventure);
+  without `showsHud` (spectators) there is no quickbar and no item name box, and the spectator
+  menu takes the quickbar's place.
 - **The spectator menu** (`Ui/SpectatorGui`; its model `Ui/SpectatorMenu`, pure, tested):
-  Minecraft's SpectatorMenu and SpectatorGui, drawn with the hotbar's bar and selection frame. A
+  Minecraft's SpectatorMenu and SpectatorGui, drawn with the quickbar's bar and selection outline
+  (`Quickbar.drawBar`, `drawSelection`). A
   spectator's number key, middle click, gamepad L1 / R1 or the touch "…" button opens its root
   page; then a number selects a slot and the same number again (or the middle click, gamepad
   D-pad up, the "…" button) uses it; a click or tap on a slot is its number. Slot 1 "Teleport to
@@ -3470,29 +3474,36 @@ results carry none.
 Death drops the whole inventory (unless `Gameplay.KeepInventory`, or the player was spectating).
 Inventories and chests live for the session.
 
-**Screens** (`Ui/`), old-school Minecraft styled from Frames only (gray beveled panels, inset slots,
-the Arcade pixel font):
-- `Hud`: the hotbar (1–9, the wheel unless the Scroll Wheel setting makes it zoom, L1 / R1, taps;
-  on touch screens the "…" inventory button at its end and the Options gear at its start), the
-  held item's name, and hearts and armor in survival and adventure; spectators get the spectator
-  menu in the hotbar's place (see Game modes). Roblox's health bar and backpack are turned off.
-  Its scale is the GUI scale (`Ui/UiScale`, see "GUI scale"): Minecraft's, with the GUI Scale
-  setting, fitted to the safe area.
-- `InventoryScreen` (`E`; spectators have none): the armor column on the left with a character
-  preview, the 2 × 2 crafting grid and its result at the top right, the 27 slots and the hotbar. An
-  open block's panel sits above it (`Ui/MenuLayout`, Minecraft's coordinates): a chest's rows, a
-  crafting table's 3 × 3 grid and result, or a furnace's input, fuel and output with the flame and
-  arrow gauges from the furnace's `data`. Worn tools show Minecraft's durability bar, and machines'
-  items that hold energy an energy bar in its place. A gear where Minecraft's recipe book button
-  is opens the Options menu.
+**Screens** (`Ui/`): the inventory family (the HUD's quickbar and status icons, the inventory,
+the creative picker, JEI) is drawn in a survival game's dark look; see "The inventory and the HUD"
+below for the modules. In short:
+- `Hud`: the quickbar (`Ui/Quickbar`; 1–9, the wheel unless the Scroll Wheel setting makes it
+  zoom, L1 / R1, taps; on touch screens the "…" inventory button at its end and the Options gear
+  at its start), the held item's name box over it, and the status icons (`Ui/StatusCluster`) at the
+  bottom right in survival and adventure; spectators get the spectator menu in the quickbar's
+  place (see Game modes). Roblox's health bar and backpack are turned off. Its scale is the GUI
+  scale (`Ui/UiScale`, see "GUI scale"), fitted to the safe area, and on a PC the canvas sits 5 %
+  of the screen's height above the bottom (`HudLayout.lift`).
+- `InventoryScreen` (`E`; spectators have none): three columns over a quickbar band
+  (`Ui/InventoryColumns` lays them out and picks the scale): VICINITY (the GROUND strip, CRAFTING
+  or the open block's section from `Ui/MenuLayout`'s panels, ITEMS with JEI docked), the player
+  over HANDS, and EQUIPMENT (armor and accessories, BACKPACK, VANITY). Worn tools show a thin bar
+  in their condition's colour, and machines' items that hold energy an energy bar in its place.
+  The gear in EQUIPMENT's header opens the Options menu.
 - `CreativeScreen` (`E` with instabuild, in creative): the "Item selection" picker, a search box
-  that filters `Items.search` as you type, an 8-column scrolling grid, and the hotbar under it.
-  Clicking an item gives a full stack; dropping a stack on the grid deletes it.
+  that filters `Items.search` as you type, an 8-column scrolling grid, and the HUD's quickbar under
+  it as its hotbar row. Clicking an item gives a full stack; dropping a stack on the grid deletes
+  it.
 - `SlotClicks` turns mouse, keys, touch and gamepad into Minecraft's click actions (pure, tested).
 - `Screens` opens and closes them, frees the mouse (in first person too) and stops the character
-  while one is open. Other modules' screens (the structure block and jigsaw screens, the Options
-  menu) are shown as panels (`showPanel`, `closePanel`) with the same darkened world and free mouse
-  but none of the inventory's input.
+  while one is open; it places the inventory (`place`), docks JEI (`jeiDock`, `jeiViewX`), docks
+  the status icons (`statusRect`, `Ui/StatusDock`), works out the drag feedback for the hovered
+  slot (`Theme.feedback`), shows item tooltips after `Theme.Time.TOOLTIP_DELAY` on a mouse, and
+  throws a carried stack where the screen's `targetAt` says `outside` (the inventory: its GROUND
+  strip and anywhere outside its root). Other modules' screens (the
+  structure block and jigsaw screens, the Options menu) are shown as panels (`showPanel`,
+  `closePanel`) with the same darkened world and free mouse but none of the inventory's input;
+  they keep Minecraft's look (`Style`'s gray beveled panels and pixel font).
 
 **Item icons and models** (`Rendering/ItemModels`, `Ui/ItemIcon`). An item's model is a cube with the
 block's look (the terrain's part template: material and colour, or with textures one image per
@@ -3657,6 +3668,175 @@ CaveAir into Air when a structure is saved (`caveTwinOf`, `caveTwinFor`, `isCave
 
 **Obsidian** (Minecraft's): what water makes of a lava source (see Fluids). Hardness 50, a diamond
 pickaxe or nothing (`toolLevel` 3: 9.4 s; 250 s by hand, for no drop); it drops itself.
+
+## The inventory and the HUD (client `Ui/Theme`, `Ui/Style` (`Style.Dayz`), `Ui/Masks`, `Ui/Silhouettes`, `Ui/InventoryColumns`, `Ui/SlotWidgets`, `Ui/Quickbar`, `Ui/StatusCluster`, `Ui/StatusLayout`, `Ui/StatusGlyphs`, `Ui/StatusDock`)
+
+The inventory family is drawn in one look, after a survival game's (DayZ's shapes, colours and
+layout; none of its art): the HUD's quickbar and status icons, the inventory, the creative picker,
+JEI and its recipe view, item tooltips, the carried stack, the backdrop behind open inventories and
+the button tooltips inside them. There is no switch and no second look to keep working (git is the
+rollback); the Options menu, the skill tree, the title and character screens, chat, the maps,
+WAILA, the game mode switcher and the structure screens keep `Style`'s Minecraft look. Mechanics
+are untouched: slots, stacks, SlotClicks, the window numbering, crafting, gauges' data, JEI,
+creative tabs, equipment and mana work as before.
+
+### Tokens and builders (`Ui/Theme`, `Style.Dayz`)
+
+`Ui/Theme` is pure (no Roblox APIs, no Color3; specced in `tests/spec/Theme`): every colour is
+`{ r, g, b, t }` (`Colour`: panels, cells, quickbar, text, controls, tooltips, status icons, the
+HUD's text strokes, attack fill, ambient rim, frost and heat), `Zone` (temperature numbers),
+`FeedbackColour` (green fits, red blocked, light blue swap, orange combine, white drop, at
+`FEEDBACK_T`), `CONDITIONS` (Pristine > 0.80, Worn > 0.60, Damaged > 0.40, Badly damaged > 0.20,
+Ruined), `Text` roles (top 8 bold, section 7, body 8, small 7, tiny 6; Roboto, `weight`: Light only
+from `LIGHT_MIN` 14 screen pixels), `Size` (GUI pixels: headers, cells 17 / pitch 18 / line 1, the
+band 26, dots, bars, masks, the name box's paddings, gauges, chevrons, padlocks, ghosts, the touch
+header floor; `OUTLINE_PX` 2 is screen pixels), `Gradient`, `Tip` (the item tooltip's geometry),
+`Time` (tooltip delay 0.25 s, blink 0.25 s, the name box 2 s + 0.5 s fade, the hit flash 1 s) and
+`Words`. Its pure helpers: `condition`, `feedback` (positional, nothing built per frame), `caps`,
+`sectionTitle` ("BACKPACK (14/27)"), `face` (empty / filled / selected / locked), `count` (a count
+box's height, text size and digit width by scale), `countWidth`, `strokeThickness` (OUTLINE_PX
+through a UIScale: `STROKE_FOLLOWS_UISCALE`), `quickNumber` (the number box in its cell),
+`numbersShown` (off touch, from `NUMBER_MIN_PX` 8 screen pixels of tiny text), `tooltipColour`,
+`liquid`, `handsLines` (the held item's name, condition and detail line, shared by HANDS and the
+HUD's name box), `tip` (the tooltip's layout, with room kept for the widest count so a count
+changing under the pointer is rewritten in place). `MenuLayout.wear` gives the durability left
+and whether it is sips.
+
+`Style.Dayz` turns the tokens into Color3s (`Colour`, `Alpha`: strict, an unknown key errors),
+`Zone`, `Feedback`, `Condition` and Roboto Fonts (`face(weight)`, cached) once at load, and holds
+the builders, each writing a property only when its value changes so owners may call them every
+frame: `topHeader`, `section` (a bar with a picture, a capitalised title and, when collapsible, a
+minus / plus; its body a slab, strip, ground, hands or panel face), `slotFace` + `paintFace`,
+`quickCell` + `paintNumber` + `quickSlot` (the layers inside a cell, `QuickZ`: face, the owner's
+picture, the number box, a hover outline), `lines` (one Frame per grid-line rect), `outline`
+(UIStroke in Border mode, inside, mitred; its thickness kept OUTLINE_PX by a `scaled()` registry
+per root that also re-weights its labels when the root's UIScale changes), `setLit`, `label`,
+`textStroke`, `countBox`, `divider`, `dot`, `bar`, `button`, `toggleButton`, `field`,
+`scrollbar`, `tooltipBox`, `mark` (an attribute on each root of the look: button tooltips under
+it draw the dark box), `glyph` (one-colour pixel art; `Art`: the HUD's touch buttons, the
+reading's arrow, the eyes) and the masks below. Faces have one painter each: `paintFace` is called
+by `Ui/SlotWidgets` (the inventory's) and `Ui/Quickbar` (the HUD's) only; ItemIcon makes faces
+and never paints them afterwards.
+
+### Masks and silhouettes (`Ui/Masks`, `Ui/Silhouettes`, `Ui/StatusGlyphs`)
+
+`Ui/Masks` is pure (specced in `tests/spec/Masks`): a drawing is a list of shapes in unit
+coordinates (circle, rounded rect, even-odd polygon, ring), each painting in or, with `cut`,
+taking out; `render` samples each pixel on a grid (`samples` x `samples`) into alphas 0..1,
+`downsample` keeps the mean alpha, `rows` turns a mask into "#" / "." rows (the blocky fallback),
+`vignette` is the backdrop's darkening. `Ui/Silhouettes` (pure) holds the look's own drawings:
+head, chest, legs, feet, accessory, backpack, crafting, vanity, gear, close, items, minus, plus,
+padlock, chevron; `Ui/StatusGlyphs` (pure) the six notifiers, the badges (one per Effects name in
+`StatusLayout.BADGES` and `STATUS_BADGES`) and the trend chevrons. Both render at 48 pixels with
+3 x 3 samples a pixel (a 4 x 4 glyph took about 1.6 times as long).
+
+`Style.Dayz.maskImage` shows a mask by name: an ImageLabel whose image is one EditableImage per
+name (white, the mask's alpha), tinted by ImageColor3 (`tint` recolours it). A name not drawn yet
+is queued and drawn on a later frame, at most `MASK_BUDGET` (4 ms) a frame and at least one name,
+so opening a screen never draws in a burst; `Silhouettes.NAMES` are queued as Style loads. Where an
+EditableImage can't be made (the API is off, the memory budget used up) the image gets the blocky
+fallback: the mask downsampled to its size as `glyph` Frames. `silhouette` draws a Silhouettes
+name; `maskContent` draws a one-off mask at once (the vignette).
+
+### Icons, tooltip, carried stack and backdrop (`Ui/ItemIcon`, `Ui/ItemTooltip`, `Ui/DragGhost`, `Ui/Backdrop`, `Ui/HoverTip`)
+
+`ItemIcon.new(..., look = "dayz", scaled)` (opt-in: WAILA's and the skill tree's icons keep
+Minecraft's): the picture at `ItemTint` (179: a dark inventory's dimmer items), the count in a
+black box at the bottom right (`Theme.count` by scale: fixed digit widths, never measured), a
+damaged item's 1 pixel bar in its condition's colour (`MenuLayout.wear` → `Theme.condition`), a
+canteen's sips as a white quantity bar, an energy item's charge in `MenuLayout.energyItemBar`'s
+colour;
+`setScale` and `setTransparency` for the owners. `ItemIcon.slot` is the 18 x 18 transparent button
+with a face, the picture and a hover outline; `ItemIcon.tab` a creative or JEI tab.
+`Ui/ItemTooltip` builds the dark tooltip from `Theme.tip` (a header with the condition dot, the
+name, the condition word and the count; the 40 pixel picture on the left; the lines on the right
+in the look's colours; a cyan pill naming the water or a bucket's fluid) only when its `key`
+changes; the key leaves the count out, and `key` rewrites the drawn count in place when only that
+changed, so Screens' 0.25 s mouse delay does not restart as a furnace fills a stack.
+`Ui/DragGhost` draws the carried stack on a filled face with the drag feedback colour on its
+outline. `Ui/Backdrop` puts a light layer and a vignette (`Masks.vignette` as one stretched image)
+behind an open inventory or creative screen and blurs the world (`Config.Ui.InventoryBlur`) on a
+mouse; on touch, or without the vignette, a darker layer (`BackdropTouch`), the blur kept on a
+mouse; panels keep Minecraft's layer. `Ui/HoverTip` draws a button's tooltip in the dark box under
+a marked root, Minecraft's elsewhere.
+
+### The inventory screen (`Ui/InventoryScreen`, `Ui/InventoryColumns`, `Ui/SlotWidgets`, `Ui/ContainerPanel`, `Ui/GroundStrip`, `Ui/PlayerPreview`)
+
+`Ui/InventoryColumns` is the layout, pure (specced in `tests/spec/InventoryColumns` for every
+window and machine panel, every collapse bitmask, mouse and touch, three heights and three centre
+widths, plus an on-screen sweep of more than 50 000 placements): `arrange` stacks the sections of
+each column (VICINITY 176: the top header, GROUND, CRAFTING or the block's section, ITEMS; the
+centre 86 to 176: the character over HANDS; EQUIPMENT 176: the top header, the worn strip, BACKPACK,
+VANITY) over the band, a folded or absent section giving its room to ITEMS and the character;
+`place` picks the mode and the scale from the screens GUI's size (`GuiScale.fit` per mode; wide
+while that is at least min(base, 2), 1.5 on touch; on a PC the bottom lifted `INSET` 5 % like the
+HUD, the centre widened until the side columns reach 5 % of the width in), the root's rect and y
+(the top margin given up first where both don't fit, never past the bottom); `spots`, `eyes`,
+`frame`, `hands`, `gridLines` (one rect per line, no pixel twice), `topHeader` (touch: a finger's
+`HudLayout.TOUCH_TARGET` at the base scale, at least `TOUCH_HEADER_MIN`), `used` (a section
+title's count, from the window, so a folded section still counts), `containerOffset` (MenuLayout
+panels without their title strip), `CRAFT_ARROW`. `InventoryScreen` builds the pieces once,
+re-places them only when the view, the block, the folded sections, the equipment or the recipe
+view change (one compare, nothing allocated otherwise), draws the window every frame and
+hit-tests: `targetAt` (a live slot; the GROUND strip and anywhere outside the root: `outside`;
+anything else inside the root: nothing), `tooltipAt` (a locked crafting result, a closed accessory
+slot, a machine's energy bar and tanks while its section is open, a ground item). It gives Screens
+`place`, `jeiDock`, `jeiViewX`, `statusRect`, `setViewing`, `setFeedback` and `inDropZone`.
+
+`Ui/SlotWidgets` holds every slot widget (an `ItemIcon.slot` with its store, index and window slot,
+in a group per section): `assign` makes a folded or absent section's slots not live (window -1,
+hidden, not Selectable), `draw` paints faces and outlines each frame (writes only on change),
+`ghost` (a worn slot's silhouette, VANITY's fainter with a corner mark), `lock` (a closed accessory
+slot's padlock), `eye` / `placeEye`, `lockedResult` (a crafting result the recipe gate keeps back,
+greyed), and the hit tests. The band's nine slots are put inside their quick cells
+(`Style.Dayz.quickSlot`) so each cell's number box draws over the item and the hover outline over
+both; their numbers are the Hotbar Slot bindings' names (`HudLayout.quickKey`), shown while
+`Theme.numbersShown`. `Ui/ContainerPanel` draws the open block's section from MenuLayout's panel (a
+chest's rows, a crafting table, a furnace, a machine: gauges as thin bars, tanks, the energy bar,
+status lines, a chevron for a static arrow). `Ui/GroundStrip` polls `EntityRenderer.itemsNear` every
+`Config.Ui.GroundRefresh` s within `GroundRadius` blocks into a fixed pool of 9 icons, outlines the
+strip while a stack is carried and then, when it is empty, says "Drop here". `Ui/PlayerPreview` is
+the character in a ViewportFrame, turning towards the pointer and wearing the looks.
+
+### The quickbar (`Ui/Quickbar`, `Ui/Hud`, `Ui/HudLayout`)
+
+`Ui/Quickbar` draws the HUD's quickbar at `HudLayout`'s cell maths (182 x 22, nine 18 x 18 cells 20
+apart, the items at `3 + 20(i - 1)`: `quickHit`, `quickCell`, `quickIcon`): each cell a
+`Style.Dayz.quickCell` with its ItemIcon made inside it at `QuickZ.item` (over the face, under the
+number box: the ScreenGuis order children by sibling, so a picture beside the bar would cover the
+boxes), the Slot buttons (z 4), the selection (z 6: a white outline, no fill) and hover outlines
+(z 7, the creative row's) over them. It is the only painter of the HUD's faces (selected olive,
+occupied filled, empty empty) and paints a slot only when it, the selection, the mode, the keys or
+the numbers' visibility change; the numbers come from the key bindings (read again when they
+change). It fades only with `Config.Ui.QuickbarFadeAfter` above 0. `drawBar` / `drawSelection`
+give `Ui/SpectatorGui` the same look for the spectator menu. `tests/spec/Quickbar` builds it on
+Lune's Roblox instances and checks the layers, the paint, the scale rule and the inventory band's
+`quickSlot`. `Ui/Hud` holds the canvas (`HudLayout.CANVAS`, lifted `HudLayout.lift`), the
+quickbar, the held item's name box (`Theme.handsLines`, a Thermometer's reading after it), the
+attack indicator's cell, the touch buttons (`Style.Dayz.Art`) and the status icons.
+
+### The status icons (`Ui/StatusCluster`, `Ui/StatusLayout`, `Ui/StatusGlyphs`, `Ui/StatusDock`)
+
+`Ui/StatusLayout` is the rules, pure (specced in `tests/spec/StatusLayout`): the notifier columns
+(THIRST, FOOD, TEMPERATURE | MANA, ARMOR, HEALTH, each present while its feature is on, so the
+columns never move for a value), the badges' rows of five above them in priority order, the
+knowledge row, the three variants (`full`: badges, notifiers, values, knowledge; `lean`: badges
+and notifiers; `dock`: the notifiers alone), `level` / `temperatureLevel` / `colour` / `blinkOn`
+(white, yellow, red, blinking; the cold side in blues), `fill` (rows lit), the trends
+(`healthTrend` with its drains, `regenerating` by hunger's or thirst's rule, `foodTrend`,
+`thirstTrend`, `temperatureTrend`, `manaTrend`), `valueText` and `badgeText`. `Ui/StatusCluster`
+builds the icons once in the HUD's ScreenGui and every frame compares and writes what changed
+(the blink and the hit flash change a colour four times a second while they run): it reads the
+Humanoid, `Player/SurvivalState`, `Player/ManaState` (`ManaStars.shown` dims MANA),
+`Player/EffectState` (badges; `badgesShown` tells `Ui/EffectHud` to leave those effects out),
+`Player/ProgressionState` and the worn armor points. It reports its sizes to `UiScale.setStatus`,
+so `HudLayout` places it with the corner. `Ui/StatusDock` (pure) is the hand-off with the open
+inventory: Screens sets the band's status rect and scale from `InventoryScreen.statusRect`, and
+the cluster draws its dock variant there while the inventory shows (its badges counted all the
+same, so opening the inventory moves nothing in the HUD's layout).
+
+`Ui/SurvivalHud` keeps only the frost and heat at the screen's edges; `Ui/ManaHud` is gone
+(`Ui/ManaStars` stays as the mana rules' pure part).
 
 ## Item data (`Items`, Mekanism's sustained data)
 
@@ -4033,14 +4213,14 @@ three caps) rising 60 blocks over 9 s from fire to smoke, six anchored inert par
 14 s, and a 2.5 s shake of up to 4°. WAILA says "Explosive: power 4", "Explosive: 24 block
 crater" and, on lit ones, "Lit: stand back!".
 
-## Hunger (`Shared/Hunger`, server `Players/ToughAsNails`, `Players/Eating`, client `Ui/SurvivalHud`)
+## Hunger (`Shared/Hunger`, server `Players/ToughAsNails`, `Players/Eating`, client `Ui/StatusCluster`)
 
 Minecraft 1.20.1's food bar (FoodData), the bar Tough As Nails' thirst was modelled on. The rules
 are one pure shared module (`Shared/Hunger`, tested tick by tick in `tests/spec/Hunger`); server
 `Players/ToughAsNails` keeps each player's bar in the same record as thirst and temperature, ticks
 it beside them and sends it in the same `Survival` message. `Config.Hunger.Enabled` turns it on and
-off; off restores the game before it exactly (foods heal health, thirst's own regeneration, the
-HUD's rows where they were).
+off; off restores the game before it exactly (foods heal health, thirst's own regeneration; the
+HUD drops its FOOD icon).
 
 - **State**: food 0..20 (starts 20), saturation 0..food (starts 5), exhaustion 0..40 (above 4, 4 is
   taken off and a point of saturation goes, or of food when there is none: one step a tick), the
@@ -4082,16 +4262,14 @@ HUD's rows where they were).
 - **Saves**: the bar (food, saturation, exhaustion, timer) is an optional flagged block of the
   player record (Save/PlayerCodec version 4, flag bit 6) and the character (Save/CharacterCodec
   version 3, flag bit 4); older records have none and give a full bar.
-- **HUD**: `Ui/HudLayout.rows` places every row of the hotbar's canvas: the shanks right-aligned
-  level with the hearts (10 drumsticks of pixel art, filled from the right, a half shank its right
-  half with the bone, `Hunger.shank`; green under Hunger, read from `Player/EffectState`; jittering
-  with no saturation, `Hunger.jitters`); TAN's droplets a row above them (TAN's place), and the
-  thermometer, the held item's name, the status row and the reading each a row higher than
-  before, the canvas a row taller (80), so the corner's layout keeps clear of all of it (tested:
-  the rows pairwise apart, the mana stars' raise clear of them, the old rows exactly with hunger
-  off). F3's `survival` line starts with food, saturation and exhaustion.
+- **HUD**: the FOOD status icon (`Ui/StatusCluster`, see "The inventory and the HUD"): the
+  drumstick's silhouette empties from the top with the food points, yellow at 6, red at 3,
+  blinking at 0; two falling arrows under the Hunger effect (read from `Player/EffectState`) and a
+  Hunger badge, one with no saturation left (where Minecraft's shanks jitter). Minecraft's shank
+  rules (`Hunger.shank`, `Hunger.jitters`) and the old rows (`Ui/HudLayout.rows`) stay specced in
+  `tests/spec/Hunger`. F3's `survival` line starts with food, saturation and exhaustion.
 
-## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/SurvivalHud`)
+## Thirst and temperature (`ToughAsNails/`, server `Players/ToughAsNails`, `Players/Climate`, client `Ui/StatusCluster`, `Ui/SurvivalHud`)
 
 The Tough As Nails mod's survival mechanics, after its 1.20 version: thirst and body temperature,
 tuned gentler than the mod (a fine temperature scale that moves slowly, slow extremes, a grace
@@ -4100,7 +4278,7 @@ them out at 20 ticks a second and sends each player their own state; the client 
 reports its movement. `Config.ToughAsNails` turns thirst and temperature on and off (with both off
 the server module does nothing and no message is sent). Survival and adventure players only
 (`ToughAsNails.affects`: not GameMode.invulnerable): creative and spectator players' stats stand
-still, the extremes clear and nothing hurts; the HUD shows with the hearts.
+still, the extremes clear and nothing hurts; the HUD shows their status icons with the others.
 
 **Thirst** (`ToughAsNails/Thirst`, TAN's ThirstData = Minecraft 1.20.1's FoodData with water):
 - thirst 0..20 (starts 20), hydration 0..thirst (starts 5, food's saturation), exhaustion 0..40;
@@ -4290,32 +4468,26 @@ with a check.
   holds -6 (COLD) anywhere, three pieces -7, two -8 (ICY); a taiga's night (-9) is -5. A full leaf
   set turns a desert's 9 into 5 (WARM) and the hottest 10 into 6; one piece leaves 8 (HOT);
 - the **Thermometer** (ItemList; an iron nugget over glass over glow dust): while it is the held
-  item, Ui/SurvivalHud reads the temperature and the target out as numbers ("-3", "+5" in their
-  zones' colours, the trend's arrow between) a row above the status row (Ui/Hud passes the held
-  item to `SurvivalHud.render`).
+  item, Ui/Hud's item-in-hands box over the quickbar reads the temperature and the target out
+  after its name ("-3", "+5" in their zones' colours, an arrow between them in the trend's
+  colour), and the TEMPERATURE icon's arrows say how fast it moves (one to three, by the distance
+  to the target).
 
 **Sync and HUD.** The server sends `Survival` (17 bytes: flags with wet, Internal Warmth and Chill
 and hunger on, thirst, hydration, exhaustion, the temperature and its target as -10..10, frozen and
 heat, the Thirst effect's ticks, Climate Clemency's seconds, then the food bar: food, saturation in
 tenths, food exhaustion) to the player alone when its bytes change, at
 most every 4 ticks and at once for a new character (a respawn starts over: full thirst, neutral,
-dry, a full food bar). `Player/SurvivalState` keeps it; `Ui/SurvivalHud` draws inside the hotbar's
-canvas (so the GUI scale is the hotbar's; rows by `Ui/HudLayout.rows`): with hunger on Minecraft's
-shanks level with the hearts (above) and 10 droplets right-aligned a row above them (TAN's place;
-with hunger off level with the hearts, hunger's own place), filled from the right, half droplets
-their right half; green under the Thirst effect; jittering with no hydration, Minecraft's hunger
-rule; above them a 75 × 9
-thermometer (a bulb in the zone's colour: pale blue, blue, green, orange, red; a tube of 21 cells
-tinted by zone with ticks at the zone borders; a pin on the temperature and an arrow beside it for
-the trend); a row higher, above the held item name's row (the centred name, long for most of the
-Tough As Nails items, reaches the right side), right-aligned, Climate Clemency's shield and time
-left (m:ss) and the Internal Warmth (flame) and Chill (snowflake) icons, only with
-`Config.Effects.Hud` off (the status effect icons list the same three, with their time); and the
-frost or heat closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its
-own behind the HUD). F3 prints a `survival` line with all the numbers. Knowledge's bar (Ui/Hud)
-fits between the hearts' and droplets' row and the hotbar, its level in the gap between them, so
-none of these rows moved for it; all of them are in the one canvas and its UIScale, so they keep
-apart at every GUI scale and on touch screens.
+dry, a full food bar). `Player/SurvivalState` keeps it; `Ui/StatusCluster` draws it as status
+icons (see "The inventory and the HUD"): THIRST (a drop emptying with the points, yellow at 6, red
+at 3, blinking at 0; two falling arrows under the Thirst effect, one with no hydration left) and
+TEMPERATURE (a thermometer filling with the body temperature on -10..10, its zone's level: white
+when neutral, yellow then red on the hot side, cyan then blue on the cold, blinking while
+`frozen` / `heat` rise; an arrow towards the target), with Climate Clemency (its whole minutes
+left), Internal Warmth and Chill as badges only with `Config.Effects.Hud` off (the status effect
+icons list the same three, with their time). `Ui/SurvivalHud` keeps only the frost or heat
+closing in from the screen's edges as `frozen` / `heat` rise (a ScreenGui of its own behind the
+HUD, in `Theme`'s Frost and Heat). F3 prints a `survival` line with all the numbers.
 
 ## Status effects (`Effects/`, server `Players/Effects`, client `Player/EffectState`, `Ui/EffectHud`, `Rendering/EffectView`)
 
@@ -4349,7 +4521,7 @@ it does as data. `find` takes a name, a display name or an `/effect` id with or 
 | Thirst, Internal Warmth / Chill, Climate Clemency | kept by Tough As Nails (`external`) | TAN 1.20's effects |
 | Bleeding | hurts 1 every 80 >> amp ticks while health > 1 (`lethal = false`, as Poison) | the apocalypse's |
 | Infection | kept by server Apocalypse/Infection (`external`; the stage is the adapter's `amplifier`) | the apocalypse's |
-| Hunger | 0.005 × level food exhaustion a tick (`drainsFood`, `Config.Hunger.EffectExhaustion`; Shared/Hunger), the shanks green | HungerMobEffect |
+| Hunger | 0.005 × level food exhaustion a tick (`drainsFood`, `Config.Hunger.EffectExhaustion`; Shared/Hunger), a Hunger badge and two falling arrows on the FOOD icon | HungerMobEffect |
 
 The modifiers read `Levels` (effect id → amplifier): `speedFactor`, `miningFactor`, `jumpBoost`,
 `meleeDamage`, `incomingDamage`, `fireRules` (nil when nothing changes: no allocation),
@@ -4428,27 +4600,31 @@ level and time (blue, harmful red).
 
 **The client.** `Player/EffectState` keeps the last Effects message and when it came, counts down
 (`list`, `get`) and keeps the modifiers worked out once per message: MovementController puts the
-speed factor, Jump Boost and Blindness onto the hull before every tick (PlayerPhysics' ground
-speed and, unlike Minecraft, a slowing factor in fluids too so oil's Slowness slows wading; jump
-velocity; the safe fall; no sprint start) and widens the field of view by (factor + 1) / 2;
-BlockInteraction times mining with its levels (Mining.playerFactor, with the perks).
-`Rendering/EffectView` (after the camera) raises Lighting's ambients for Night Vision
-(LightingController.setNightVision), closes the fog in black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
-LightingController.setEffectFogColour, in the same frame: Lighting's fog with the Atmosphere out of Lighting) and rolls the camera and sways the field of view for
-Nausea (MovementController.setFovSway; the wobble times the Distortion Effects setting squared,
-Minecraft's screenEffectScale: `EffectView.setDistortion`), with a ColorCorrectionEffect for the brightness, darkness
-and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons (24 × 24 frames,
-9 × 9 glyphs from `Ui/EffectIcons` at 2 pixels, beneficial row over the rest, longest first,
-GroupTransparency for the last 10 s' blinking) where `Ui/HudLayout` puts them (the toast slot,
-under the toasts, or beside them on small screens; see "GUI scale"), the hovered or tapped
-one's name and time under them, and Minecraft's 120 × 32 list on the left while an inventory
-screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9, under the
-cursor's 20), never taking clicks, Minecraft's 32 wide compact list (glyphs alone) when the full one
-would reach the screen's panels (`Screens.screenLeft`), none when even that wouldn't fit, and
-nothing behind panel screens (skill tree, Options: `Screens.panelOpen`). Its ScreenGui orders
-children over parents (ZIndexBehavior Sibling, as Style's builders expect: under Instance.new's
-Global ordering each list panel's outline covered its own face and text). It is rebuilt only when
-a message comes. F3 lists every effect.
+speed factor, Jump Boost and Blindness onto the hull before every tick (PlayerPhysics' ground speed
+and, unlike Minecraft, a slowing factor in fluids too so oil's Slowness slows wading; jump velocity;
+the safe fall; no sprint start) and widens the field of view by (factor + 1) / 2; BlockInteraction
+times mining with its levels (Mining.playerFactor, with the perks). `Rendering/EffectView` (after
+the camera) raises Lighting's ambients for Night Vision (LightingController.setNightVision), closes
+the fog in black for Blindness (ViewSettings.setEffectFog, which wins over a fluid's when nearer;
+LightingController.setEffectFogColour, in the same frame: Lighting's fog with the Atmosphere out of
+Lighting) and rolls the camera and sways the field of view for Nausea
+(MovementController.setFovSway; the wobble times the Distortion Effects setting squared, Minecraft's
+screenEffectScale: `EffectView.setDistortion`), with a ColorCorrectionEffect for the brightness,
+darkness and tint, writing only what changed. `Ui/EffectHud` draws Minecraft's icons in the survival
+look (24 × 24 dark Panel squares with a hairline, a pale blue rim for an ambient effect; 9 × 9
+glyphs from `Ui/EffectIcons` at 2 pixels, beneficial row over the rest, longest first,
+GroupTransparency for the last 10 s' blinking) where `Ui/HudLayout` puts them (the toast slot, under
+the toasts, or beside them on small screens; see "GUI scale"), the hovered or tapped one's name and
+time under them (Roboto, a faint dark outline), leaving out the effects the status icons show as
+badges while they do (`StatusCluster.badgesShown`: Bleeding, Infection, Poison, Wither, Hunger,
+Thirst, Nausea), and Minecraft's 120 × 32 list (flat dark panels, every effect) on the left while an
+inventory screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9,
+under the cursor's 20), never taking clicks, Minecraft's 32 wide compact list (glyphs alone) when
+the full one would reach the screen's panels (`Screens.screenLeft`), none when even that wouldn't
+fit, and nothing behind panel screens (skill tree, Options: `Screens.panelOpen`). Its ScreenGui
+orders children over parents (ZIndexBehavior Sibling, as Style's builders expect: under
+Instance.new's Global ordering each list panel's outline covered its own face and text). It is
+rebuilt only when a message comes. F3 lists every effect.
 
 ## Knowledge, Ages and skills (`Progression/`, server `Players/Progression`, client `Player/ProgressionState`)
 
@@ -4605,11 +4781,10 @@ up on its own: Inventories' results handler), and the perks' `miningFactor`, `we
 Age, skills, discovery counts by category, the milestones' bits) as a state for the shared rules
 (`fromStatus`: no discoveries), sets the prediction's gate, answers the perks the client predicts
 with, and plays the orb sound for points (at most every 0.08 s), the level-up for a level and the
-challenge fanfare for an Age (none for the first message). `Ui/Hud` draws Minecraft's experience
-bar where Minecraft's layout already leaves it room (182 x 5, 7 GUI pixels above the hotbar's
-top, under the hearts' and droplets' row, which stay where they were) and the level in green
-with a black outline over its middle (13 above the hotbar, between the hearts and the
-droplets), in survival and adventure. `Ui/AgeToast` fades a new Age's name in big (its colour,
+challenge fanfare for an Age (none for the first message). `Ui/StatusCluster` draws the knowledge
+row under the status icons (the full variant, while there is room: `Ui/StatusLayout`'s XP_H
+row, the level's number right-aligned in white and a 2 pixel progress bar beside it), in
+survival and adventure. `Ui/AgeToast` fades a new Age's name in big (its colour,
 "A new Age begins", how many recipes it opens). `Ui/SkillTreeScreen` is a panel (K, D-pad left,
 the touch button over the gear): a column per Age, a row per node (Skills `row`: the knowledge,
 tools and survival branches), lines from prerequisites (along a row, else through the gap after
@@ -4667,18 +4842,23 @@ the Campfire for boiling), also uses every entry of its categories, after its ow
 (crafting, smelting, fuel, refining, heating, combustion, boiling), without the empty ones.
 
 **Screens.** While an inventory screen is open:
-- The list sits right of the shown panel at its GUI scale (`JeiLayout.list`; the panel's own width,
-  176 px for most, wider for the creative picker and the inventory with its equipment): up to 9 columns
-  and 16 rows of 18 px cells (every cell is a ViewportFrame), fewer on narrow screens, hidden when
-  not even 3 columns fit, and in creative above the hotbar row (also while the recipe view hides
-  it, so the cells are not rebuilt). Its arrows or the wheel turn the pages; the page text drops
+- In the survival inventory the list is docked in its ITEMS section's body (`JeiLayout.docked`
+  for the rect `InventoryScreen.jeiDock` gives, at the inventory's scale): up to 9 columns and 16
+  rows of 18 px cells (every cell is a ViewportFrame), as many rows as the body holds, none while
+  ITEMS is folded; a dock that only changes its place moves the parts, one that changes its rows
+  rebuilds the cells (`sameCells` / `samePlacement`). Beside the creative picker it sits right of
+  the panel at its GUI scale (`JeiLayout.list`), fewer columns on narrow screens, hidden when not
+  even 3 fit, above the quickbar row (also while the recipe view hides it, so the cells are not
+  rebuilt). Its arrows or the wheel turn the pages; the page text drops
   to "n" where "n / m" does not fit. The search field filters with `Items.search` as you type; it
   is a TextBox, Screens ignores keys while one has focus, and the list gives up the focus when it
   hides.
 - Left click or R: recipes; right click or U: uses. R and U work over any item: the list, the
-  view, slots, the creative grid and the hotbar. Lookups that find nothing do nothing.
-- The recipe view takes the inventory panel's place: Screens hides the panel and makes no slot
-  clicks while it is shown. It has category tabs, pages, and as many recipes as fit (two crafting
+  view, slots, the creative grid and the quickbar. Lookups that find nothing do nothing.
+- The recipe view shows over the survival inventory's middle and right columns
+  (`InventoryScreen.jeiViewX`; narrow: over the right one), which hide (`setViewing`), and over the
+  creative panel's place; Screens makes no slot clicks under it while it is shown (the VICINITY
+  column stays, inert). It has category tabs, pages, and as many recipes as fit (two crafting
   or smelting recipes, three fuels). Clicking its items navigates, Back or Backspace returns
   through the history, and E, Escape or gamepad B go back to the inventory. Escape also opens
   Roblox's menu (MenuOpened): with the view open that only closes the view, so the menu shows
@@ -7172,31 +7352,32 @@ accessories (window 0: 45–51, 52–55, 56–62); every one holds a single item
 
 **Looks.** The server sets the player attribute `Types.LOOKS_ATTRIBUTE` to `Accessories.looks`
 ("head,chest,legs,feet,accessory,...": vanity over armor, hidden armor 0, only accessories with a
-`worn` place, each once) whenever it changes; every client's `Player/EquipmentLooks` draws it,
-the local player from the predicted inventory at once. Armor is Minecraft's layers (a box a little
+`worn` place, each once) whenever it changes; every client's `Player/EquipmentLooks` draws it, the
+local player from the predicted inventory at once. Armor is Minecraft's layers (a box a little
 larger than each body part, boots over leggings over the body; R15 and R6), a vanity hat an
 ItemModels model on the head, accessories their models at their place (feet, the left hand: the
 right one holds the item, back, waist, face, head, neck; a second at the same place a step along).
 One render step after the camera moves every piece with one BulkMoveTo into reused arrays; pieces
 are rebuilt only when the looks, the character, a body part's size or the item looks change, and
-hidden in first person, for spectators, dead bodies and unshown players. The inventory's preview
-wears the same (`dress`). An air jump puffs a cloud and plays `entity.player.double_jump`: the
-local player's on PlayerPhysics' `airJumped`; other players' are told from their relayed poses
-(`Player/AirJumps`, pure: a sharp rise of the drawn feet after 0.15 s off the ground, counted when
-the pose's Jumped flag shows within 0.1 s, since `RemoteMotion` takes the flags of the nearer
-pose).
+hidden in first person, for spectators, dead bodies and unshown players. The inventory's player
+(`Ui/PlayerPreview`) wears the same (`dress`). An air jump puffs a cloud and plays
+`entity.player.double_jump`: the local player's on PlayerPhysics' `airJumped`; other players' are
+told from their relayed poses (`Player/AirJumps`, pure: a sharp rise of the drawn feet after 0.15 s
+off the ground, counted when the pose's Jumped flag shows within 0.1 s, since `RemoteMotion` takes
+the flags of the nearer pose).
 
-**The panel** (`Ui/InventoryScreen`, window 0 only, also creative's inventory tab): 84 x 166 GUI
-pixels docked 2 right of the player panel, so `size()` is 262 wide there (JEI and the screens lay
-out from it). Columns: vanity armor (violet ghosts, a 6 x 6 eye per slot in its top right corner,
-an 8 x 8 button out to the frame's corner on touch, never over the slot's middle:
-`MenuLayout.armorEye`), vanity accessories,
-accessories (closed rows darkened with a padlock: "Opens at the Industrial Age") and a 9 x 9 eye per
-accessory row (16 x 18 buttons on touch). The eyes are buttons of their own sending `hide`;
-`targetAt` says nothing over them. Tooltips add `Accessories.tooltip` ("When worn:" and a line an
-effect, or "Vanity: worn for its look only").
+**In the inventory** (`Ui/InventoryScreen`'s EQUIPMENT column, laid out by `Ui/InventoryColumns`;
+window 0 only, also creative's inventory tab; see "The inventory and the HUD"): a headerless strip
+of the armor over the seven accessories (other windows: the armor alone), each empty one showing
+its silhouette (`Ui/Silhouettes`: head, chest, legs, feet, accessory), closed accessory slots
+shaded under a padlock ("Opens at the Industrial Age"), an eye per accessory (a 6 x 6 one in the
+slot's top right corner, `MenuLayout.armorEye`; on touch a 16 x 18 button under it); then
+BACKPACK, then VANITY: the vanity armor (an eye each, never over the slot's middle) and the vanity
+accessories, fainter silhouettes with a corner mark. The eyes are buttons of their own sending
+`hide` (`Ui/SlotWidgets`); `targetAt` says nothing over them. Tooltips add `Accessories.tooltip`
+("When worn:" and a line an effect, or "Vanity: worn for its look only").
 
-### Mana and magic (`Mana`, `Mana/StarFall`, `Magic/Projectiles`, `Magic/Casting`, server `Players/Mana`, `Players/Magic`, `Players/FallenStars`, client `Player/ManaState`, `Ui/ManaHud`, `Interaction/Casting`, `Rendering/ProjectileView`)
+### Mana and magic (`Mana`, `Mana/StarFall`, `Magic/Projectiles`, `Magic/Casting`, server `Players/Mana`, `Players/Magic`, `Players/FallenStars`, client `Player/ManaState`, `Ui/StatusCluster`, `Interaction/Casting`, `Rendering/ProjectileView`)
 
 Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
 
@@ -7266,13 +7447,14 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   a trail, interpolated between ticks at `Origin.blocksToRender` (no Rebase mover; trails are
   cleared when the origin moves). A cast the server refused takes away the newest prediction not
   yet adopted.
-- **HUD** (`Ui/ManaHud` built into `Ui/Hud`'s canvas, pure layout in `Ui/ManaStars`): 10 stars a
-  row (9 x 9 pixel art, 8 GUI px apart, 20 mana a star: full, half, empty), left-aligned in the
-  armour's row, or the row above it when armour icons show; past 200 mana a second row goes
-  above. They show in survival and adventure only, while a magic weapon is selected, while mana
-  is not full, or for `Config.Mana.HudLinger` 3 s after a change, and they blink when a cast is
-  refused. The held item's name and Tough As Nails' status row move up only as far as needed to
-  clear the stars (`ManaStars.layout`'s raise).
+- **HUD** (`Ui/StatusCluster`'s MANA status icon, see "The inventory and the HUD"): a four-point
+  star emptying from the top with mana's share (yellow under a quarter, red under a tenth, no
+  blink of its own), in survival and adventure only. It is lit while `Ui/ManaStars.shown` says
+  Terraria's stars would show (a magic weapon selected, mana not full, or `Config.Mana.HudLinger`
+  3 s after a change), dimmed whole otherwise; it blinks white after a refused cast and its arrow
+  rises or falls for a second after mana changes. `Ui/ManaStars` keeps Terraria's star row rules
+  (full, half, empty; rows; layout) pure and specced in `tests/spec/Mana`, though no stars are
+  drawn.
 - **Fallen Stars** (`Mana/StarFall`, pure; server `Players/FallenStars`): at night (time of day
   13000..23000), once a second, each player in survival, adventure or creative has a
   PerNight / night-seconds chance (5 a night on average, whatever the day length) of a Fallen Star
@@ -7301,10 +7483,10 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   `CharacterLooks.preview`'s `dressed`), and `Ui/CharacterPreview` dresses the clone with
   `EquipmentLooks.dress`, so the list shows each character as it plays.
 - **The interface follows the GUI scale.** The character pages and the avatar editor are pages of
-  MainMenu's scaled 320 x 240 canvas, the mana stars are in the HUD's canvas, the equipment panel
-  is part of the inventory screen (`size()` 262 wide, which JEI and the effect list lay out from).
-  While the stars show, the HUD's name and status row sit up to 20 GUI pixels higher; Hud tells
-  UiScale (`setHudRaise`), and `HudLayout` keeps the corner clear of the taller HUD.
+  MainMenu's scaled 320 x 240 canvas, the MANA icon is one of the status icons (placed by
+  `HudLayout` with the rest), and the equipment is the inventory's EQUIPMENT column (scaled with
+  the inventory by `Ui/InventoryColumns.place`). Nothing raises the HUD's canvas any more
+  (`UiScale.setHudRaise(0)`, kept for its callers).
 - **Tooltips and F3.** `Shared/Mana.tooltip` adds a magic weapon's damage, mana a cast and fire
   chance, a mana potion's mana, the Mana Crystal's +20 and the Fallen Star's "Disappears after the
   sunrise" under the accessories' lines; F3's survival line ends with the mana and the magic
@@ -7379,7 +7561,22 @@ bottom of the screen and the saving icon sat on the minimap).
   desktops and 4K, every offered choice, the minimap on and off, touch on and off, toasts, effect
   icons and the saving icon showing or not). In screen pixels, from the screen, the insets, the
   scale, touch and what shows (each widget tells `UiScale`: `setMinimap`, `setToast`, `setEffects`,
-  `setSaving`, `setDebugRight`; each places itself on `hudChanged`):
+  `setSaving`, `setDebugRight`, `setStatus`; each places itself on `hudChanged`):
+  - the HUD's canvas (`CANVAS`, 182 × 46 GUI pixels, 230 wide on touch for the buttons beside the
+    quickbar), centred at the bottom, one pixel and `lift` (5 % of the screen's height on a PC, 0
+    on touch) above the safe area's bottom; the quickbar's cells (`quickHit`, `quickCell`,
+    `quickIcon`, shared with the inventory's band and the spectator menu) and the attack
+    indicator's cell (`attack`: left of the bar on a PC, right of the "..." on touch); the chat's
+    lines and overlay message rise by the same lift (`lifted`);
+  - the status icons (`status`, from `Ui/StatusLayout`'s sizes through `setStatus`), placed after
+    the minimap column and the day line and before everything else: on a PC at the bottom right on
+    the quickbar's line (the lift in from the right, at least the margin), else raised over what
+    they hit there, else left of the touch buttons, else above the canvas; on touch left of the
+    touch buttons first, then above the canvas, then raised; the full variant
+    (badges, notifiers, the knowledge row) first, then the lean one, then the lean one smaller down
+    to half the scale but never under 8 / 7 (its 7 pixel text stays 8 screen pixels); never in the
+    thumbstick's zone (tested over every screen, scale, touch and saving setting with 0, 5 and 10
+    badges: always placed, never shrunk on the spec screens);
   - the minimap `Config.UiScale.Minimap` (56) GUI pixels square, 4 GUI pixels inside the safe
     area's top right corner below the top bar (224 pixels at 1080p's Auto, 84 on a phone at 1.5;
     its picture is still `Map.MinimapSize` map pixels, the same 384 blocks), its coordinates line
@@ -7410,11 +7607,10 @@ bottom of the screen and the saving icon sat on the minimap).
     (`wailaAvoid`, from `DebugOverlay.rightEdge`).
 
   Everything that shows is inside the safe area and disjoint from everything else, the touch
-  buttons and the HUD (with the HUD's rows raised over the mana stars only while the item name or
-  a Thermometer's reading is drawn: `Hud` reports the raise then). The toasts, the effect icons, the saving icon and WAILA hide with the HUD
-  (the world map hides it), the minimap's corner while the world map covers it. Where things go
-  with a 20 character coordinates line, both toasts, the saving icon and two rows of three effect
-  icons:
+  buttons, the HUD's canvas and the status icons (nothing raises the canvas any more: `setHudRaise`
+  stays at 0). The toasts, the effect icons, the saving icon and WAILA hide with the HUD (the world
+  map hides it), the minimap's corner while the world map covers it. Where things go with a 20
+  character coordinates line, both toasts, the saving icon and two rows of three effect icons:
 
   | Screen | Auto | Minimap | Slot 1 top | Notes |
   | --- | --- | --- | --- | --- |
@@ -7915,6 +8111,12 @@ Saving worlds).
   seed, its grid cell, the full detail surface and the seed-only cave regions; whether one opens
   under a tree (`carvesTop`) or where it cuts a seam (`lowestCarved`, `mayCarve`) is answered from
   the worms too, never from a chunk's data, so every chunk and level agrees. Keep it so.
+- The inventory family's colours, sizes, timings and fixed words live in `Ui/Theme` (pure) and its
+  builders and pixel art in `Style.Dayz`: a module that needs a new one adds it there, not as a
+  local. A slot face has one painter (`paintFace`: `Ui/SlotWidgets` for the inventory, `Ui/Quickbar`
+  for the HUD). An item picture in a quick cell goes inside the cell at its layers (`QuickZ`,
+  `quickSlot`), never beside it: the ScreenGuis order children by sibling, so a picture beside the
+  cells covers their number boxes (`tests/spec/Quickbar`).
 - Player setting ids (`PlayerSettings` entries) are saved and sent: append, never reorder or
   reuse one. A setting's effect key needs a function registered in the client script
   (`Settings.missing()` lists those without), and anything a worker needs travels in its jobs:

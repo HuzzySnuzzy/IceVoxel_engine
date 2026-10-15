@@ -13,7 +13,7 @@
 	           item.magic.cast at once (predicted: the server plays it for the others) and the
 	           mana taken here (Player/ManaState.spend) until the server says. Without the
 	           mana (as far as this client knows) nothing is cast, as Terraria (creative: free),
-	           and the HUD's stars blink (ManaState.noteRefused).
+	           and the HUD's MANA notifier blinks (ManaState.noteRefused).
 	  aim      from the eyes (the local hull: feet + PlayerPhysics.eyeHeight, 1.62 standing, 1.27
 	           sneaking, as the server's spawn) towards what the camera's ray points at: the block
 	           it hits, else AIM_DISTANCE blocks along it, so third person's camera aims where its
@@ -123,7 +123,7 @@ function ClientCasting.use(stack: Items.Stack, mode: string, aim: Aim, hitDistan
 	end
 	local free = Casting.free(mode)
 	if not free and not ManaState.has(magic.mana) then
-		-- (The stars blink: Ui/ManaHud.)
+		-- (The MANA notifier blinks: Ui/StatusCluster.)
 		ManaState.noteRefused()
 		return nil
 	end

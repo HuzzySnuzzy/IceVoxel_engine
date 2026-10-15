@@ -1,16 +1,16 @@
 --!strict
 --[[
 	This player's mana as the server last sent it (Net/MagicSync Mana, server Players/Mana): what
-	the HUD's stars (Ui/ManaHud) and casting (Interaction/Casting) read. Mana and max are 0
-	until the first message (none comes with Config.Mana off: no stars are drawn then).
+	the HUD's MANA notifier (Ui/StatusCluster) and casting (Interaction/Casting) read. Mana and
+	max are 0 until the first message (none comes with Config.Mana off: no notifier then).
 
-	  changedAt  os.clock() when the whole mana or the max last changed (the HUD's stars linger
-	             Config.Mana.HudLinger after it).
+	  changedAt  os.clock() when the whole mana or the max last changed (the notifier stays lit
+	             Config.Mana.HudLinger after it: Ui/ManaStars.shown).
 	  refused    a message saying a cast was refused fires `refused` (the newest cast this client
 	             predicted didn't happen: Rendering/ProjectileView drops its projectile); for want
-	             of mana it also blinks the stars (refused for another reason, `dropped`: too soon,
-	             too many in flight, it doesn't); `noteRefused` blinks them for a cast this client
-	             didn't send for want of mana.
+	             of mana it also blinks the MANA notifier (refused for another reason, `dropped`:
+	             too soon, too many in flight, it doesn't); `noteRefused` blinks it for a cast this
+	             client didn't send for want of mana.
 	  full       regeneration just filled it: Terraria's chime, entity.player.mana_full (flat).
 	  spend      a cast predicted here takes its mana at once, so a held button doesn't predict a
 	             cast the server will refuse; the server's next message (sent at once after the
@@ -60,7 +60,7 @@ function ManaState.has(amount: number): boolean
 	return mana >= amount
 end
 
--- A cast this client didn't send for want of mana: the stars blink as for a refused one (no
+-- A cast this client didn't send for want of mana: the notifier blinks as for a refused one (no
 -- prediction is taken away: none was made).
 function ManaState.noteRefused()
 	refusedAt = os.clock()

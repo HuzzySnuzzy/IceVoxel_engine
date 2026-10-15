@@ -42,7 +42,9 @@
 	    (`countAt` says which text) and the box keeps its size.
 
 	Values that only builders need at a glance (tooltip delay, blink period, the HUD name's timing)
-	are under `Time`.
+	are under `Time`; the look's few fixed words (a ground item's hint, the empty GROUND strip) under
+	`Words`. The quickbar's key numbers show only off touch and from NUMBER_MIN_PX screen pixels of
+	text (`numbersShown`), on the HUD and in the inventory's band alike.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -143,6 +145,10 @@ Theme.Line = table.freeze({ body = 10, small = 9 })
 -- Light text below this many screen pixels is too thin: it is drawn Regular.
 Theme.LIGHT_MIN = 14
 
+-- The quickbar's key numbers show only from this many screen pixels of text (the tiny role at the
+-- scale: `numbersShown`).
+Theme.NUMBER_MIN_PX = 8
+
 --[[ Geometry (GUI pixels) ]]
 
 Theme.Size = table.freeze({
@@ -186,6 +192,31 @@ Theme.Size = table.freeze({
 	MASK = 48,
 	-- A scrollbar's thumb.
 	THUMB_H = 15,
+	-- Touch top headers: at least this tall (InventoryColumns.topHeader: HudLayout's TOUCH_TARGET
+	-- screen pixels at the base scale).
+	TOUCH_HEADER_MIN = 22,
+	-- The HUD's item-in-hands box: its side padding, the gap after the condition dot, the gap
+	-- before a Thermometer's reading and the gaps around the reading's arrow.
+	NAME_PAD = 3,
+	NAME_DOT_GAP = 3,
+	READING_GAP = 5,
+	READING_ARROW_GAP = 2,
+	-- The dark strips behind the side columns reach this far past them (wide).
+	STRIP_REACH = 3,
+	-- A gauge's bar (a furnace's progress and fuel, a machine's energy and progress), the crafting
+	-- chevron and the recipe view's padlock on a locked result.
+	GAUGE = 2,
+	CHEVRON = 8,
+	PADLOCK = 8,
+	-- The room a block's status line keeps at its right (the energy bar's column).
+	LINE_ROOM = 16,
+	-- A worn slot's silhouette (at GHOST_AT, GHOST square, in the 18 x 18 slot button), VANITY's
+	-- corner mark and a closed accessory slot's padlock (at LOCK_AT, LOCK square).
+	GHOST_AT = 2,
+	GHOST = 14,
+	GHOST_MARK = 3,
+	LOCK_AT = 4,
+	LOCK = 10,
 })
 
 --[[ Colours ]]
@@ -254,6 +285,12 @@ Theme.Colour = table.freeze({
 	TipHead = rgba(0, 0, 0, 0.06),
 	TipBody = rgba(0, 0, 0, 0.14),
 	Liquid = rgba(0, 238, 255, 0.50),
+	-- Text outlines over the world: badge counts and the hovered effect's line, and the fainter one
+	-- of the HUD's item name (readable over a bright sky).
+	TextStroke = rgba(0, 0, 0, 0.40),
+	TextStrokeSoft = rgba(0, 0, 0, 0.75),
+	-- The red over a missing ingredient in the recipe view (Warning, see-through).
+	Missing = rgba(255, 80, 80, 0.60),
 
 	-- The status icons.
 	Icon = rgba(220, 220, 220, 0),
@@ -266,6 +303,13 @@ Theme.Colour = table.freeze({
 	GlyphEmpty = rgba(220, 220, 220, 0.75),
 	XpTrack = rgba(255, 255, 255, 0.75),
 	XpFill = rgba(255, 255, 255, 0),
+
+	-- The rest of the HUD: the attack indicator's rising fill, an ambient effect's pale blue rim,
+	-- and the frost and heat at the screen's edges (t unused: their strength sets it).
+	AttackFill = rgba(255, 255, 255, 0.35),
+	AmbientRim = rgba(150, 200, 230, 0.40),
+	Frost = rgba(205, 235, 255, 0),
+	Heat = rgba(255, 96, 32, 0),
 })
 
 --[[
@@ -451,6 +495,15 @@ function Theme.quickNumber(occupied: boolean): (number, number, number, number)
 		return 12, 0, 6, 6
 	end
 	return 6, 6, 6, 6
+end
+
+--[[
+	Do the quickbar's number boxes show at GUI `scale` (the HUD's quickbar and the inventory's band)?
+	Not on a `touch` screen (it has no number keys), and not while the tiny text would come out under
+	NUMBER_MIN_PX screen pixels.
+]]
+function Theme.numbersShown(scale: number, touch: boolean): boolean
+	return not touch and Theme.Text.tiny * scale >= Theme.NUMBER_MIN_PX
 end
 
 --[[ Tooltips ]]
@@ -771,6 +824,14 @@ function Theme.tip(input: TipInput, measure: Measure): TipLayout
 		countAt = countAt,
 	}
 end
+
+--[[ Words ]]
+
+-- The look's fixed words: a ground item's tooltip line, and the GROUND strip's empty-state text.
+Theme.Words = table.freeze({
+	GROUND_HINT = "Walk over it to pick it up",
+	DROP_HERE = "Drop here",
+})
 
 --[[ Timing ]]
 

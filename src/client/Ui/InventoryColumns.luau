@@ -45,8 +45,9 @@
 	    CHARACTER_MIN) plus the band (`minimum`), at most MAX_HEIGHT; extra height goes to ITEMS on
 	    the left and to the character in the centre.
 	  * The band: the open window's nine hotbar slots as the quickbar (HudLayout's cell maths:
-	    `quickIcon`), centred when that leaves the status icons' room at its right (wide), else at
-	    the left; the status icons' place at the band's right when they fit beside the bar.
+	    quickCell and quickIcon from the bar's top left), centred when that leaves the status
+	    icons' room at its right (wide), else at the left; the status icons' place at the band's
+	    right when they fit beside the bar.
 	  * Slots keep the 18 px pitch of MenuLayout (whose coordinates and the CraftingUi spec stay):
 	    a slot's (x, y) is its item's top left, its 18 x 18 frame one pixel up and left (a large
 	    result's 26 x 26 frame five), and its grid lines at x - 1 and x + 17 (big: x - 5, x + 20),
@@ -77,6 +78,7 @@ local Shared = ReplicatedStorage:WaitForChild("IceVoxel")
 local Types = require(Shared.Inventory.Types)
 
 local GuiScale = require(script.Parent.GuiScale)
+local HudLayout = require(script.Parent.HudLayout)
 local MenuLayout = require(script.Parent.MenuLayout)
 local Theme = require(script.Parent.Theme)
 
@@ -179,6 +181,8 @@ InventoryColumns.BODY_CUT = 12
 -- Section bodies.
 InventoryColumns.GROUND_H = 22
 InventoryColumns.CRAFT_H = 40
+-- CRAFTING's chevron between the 2 x 2 grid and its result (body coordinates).
+InventoryColumns.CRAFT_ARROW = table.freeze({ x = 86, y = 14, w = 16, h = 13 }) :: Rect
 InventoryColumns.BACKPACK_H = 58
 InventoryColumns.VANITY_H = 42
 -- The worn strip: window 0 on a mouse, on touch (a row of eyes), other windows (armor only).
@@ -192,9 +196,6 @@ InventoryColumns.CHARACTER_MIN = 96
 InventoryColumns.HANDS_H = 76
 -- The status icons docked in the band (Ui/StatusDock; the notifier row only).
 InventoryColumns.STATUS_W, InventoryColumns.STATUS_H = 93, 23
--- Touch top headers: this many screen pixels at the base scale, never under TOUCH_HEADER_MIN.
-InventoryColumns.TOUCH_TARGET = 32
-InventoryColumns.TOUCH_HEADER_MIN = 22
 -- The quickbar in the band (HudLayout's bar), and the GROUND strip's places.
 InventoryColumns.QUICK_W, InventoryColumns.QUICK_H = 182, 22
 InventoryColumns.GROUND_SLOTS = 9
@@ -224,15 +225,18 @@ local TITLES = table.freeze({ "VICINITY", "EQUIPMENT" })
 
 --[[ Pieces ]]
 
--- The top headers' height: TOP_HEADER on a mouse; on touch TOUCH_TARGET screen pixels at `base`.
+--[[
+	The top headers' height: TOP_HEADER on a mouse; on touch a finger's HudLayout.TOUCH_TARGET screen
+	pixels at `base`, never under Theme's TOUCH_HEADER_MIN.
+]]
 function InventoryColumns.topHeader(touch: boolean, base: number): number
 	if not touch then
 		return Size.TOP_HEADER
 	end
 	if base ~= base or base <= 0 then
-		return InventoryColumns.TOUCH_HEADER_MIN
+		return Size.TOUCH_HEADER_MIN
 	end
-	return math.max(InventoryColumns.TOUCH_HEADER_MIN, math.ceil(InventoryColumns.TOUCH_TARGET / base))
+	return math.max(Size.TOUCH_HEADER_MIN, math.ceil(HudLayout.TOUCH_TARGET / base))
 end
 
 -- Is `kind` collapsed in `input`'s bitmask? (Only the collapsible kinds have a bit.)
@@ -579,15 +583,6 @@ end
 -- Where the block's section draws a MenuLayout panel's content: its y moved by this.
 function InventoryColumns.containerOffset(): number
 	return -BODY_CUT
-end
-
--- The item of the band's hotbar slot `i` (1..9) from the quickbar's top left (HudLayout's
--- quickIcon(i, 0)), and its 18 x 18 cell (quickCell).
-function InventoryColumns.quickIcon(i: number): (number, number)
-	return 3 + 20 * (i - 1), 3
-end
-function InventoryColumns.quickCell(i: number): (number, number)
-	return 2 + 20 * (i - 1), 2
 end
 
 --[[ Grid lines ]]

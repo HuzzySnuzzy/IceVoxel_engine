@@ -112,8 +112,6 @@ local GLYPH = StatusLayout.GLYPH
 local COLUMN = StatusLayout.COLUMN
 -- The glyph's place in its column.
 local GLYPH_X = (COLUMN - GLYPH) // 2
--- A badge number's faint dark outline.
-local COUNT_STROKE_T = 0.4
 -- The thermometer item (its holder's trend shows how fast).
 local THERMOMETER = Items.id.Thermometer
 local DRAINS = { Effects.id.Bleeding, Effects.id.Poison, Effects.id.Wither }
@@ -274,8 +272,7 @@ local function newBadge(parent: Frame, name: string, s: Style.Scaled): Badge
 		Enum.TextXAlignment.Right,
 		s
 	)
-	count.TextStrokeColor3 = Color3.new(0, 0, 0)
-	count.TextStrokeTransparency = COUNT_STROKE_T
+	Dayz.textStroke(count, "TextStroke")
 	return {
 		name = name,
 		id = Effects.id[name],

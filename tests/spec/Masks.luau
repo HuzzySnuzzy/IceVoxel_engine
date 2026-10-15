@@ -2,8 +2,9 @@
 	Anti-aliased masks from vector shapes (client Ui/Masks): the rendered size and alphas in 0..1, a
 	full rectangle covering everything, a half-plane's edge column half covered with 4 x 4 samples,
 	a circle's area close to pi r squared, cuts taking area out, rounded corners and rings and the
-	even-odd polygon, downsampling keeping the mean alpha, the "#" / "." rows of the blocky art, and
-	the vignette: clear inside, `edge` at the corners, rising along the diagonal.
+	even-odd polygon, a rect rounded by half its side (rounding never crossing its bounds),
+	downsampling keeping the mean alpha, the "#" / "." rows of the blocky art, and the vignette:
+	clear inside, `edge` at the corners, rising along the diagonal.
 ]]
 
 return function(t, _shared, require, _server, client)
@@ -105,6 +106,26 @@ return function(t, _shared, require, _server, client)
 		}, size, size)
 		t.eq(at(frame, 24, 24), 0, "the even-odd hole")
 		t.eq(at(frame, 2, 24), 1, "the frame")
+	end)
+
+	t.test("masks: a rect rounded by half its side draws (its bounds never cross)", function()
+		-- Named regression: with r half the side, x + r came out a hair over x + w - r for these
+		-- corners (0.01 + 0.01 > 0.03 - 0.01 in floating point), and math.clamp refused the bounds.
+		for _, case in { { 0.01, 0.02 }, { 0.01, 0.06 }, { 0.01, 0.07 }, { 0.01, 0.08 } } do
+			local x, side = case[1], case[2]
+			local ok, mask = pcall(Masks.render, {
+				{ shape = { kind = "rect", x = x, y = x, w = side, h = side, r = side / 2 } },
+			}, 48, 48)
+			t.ok(ok, `x {x}, side {side}: {if ok then "" else tostring(mask)}`)
+			if ok then
+				t.ok(mean(mask) > 0, `x {x}, side {side}: drawn`)
+			end
+		end
+		-- A pill (r half the height) is a rect with round ends: about its area.
+		local pill =
+			Masks.render({ { shape = { kind = "rect", x = 0.1, y = 0.3, w = 0.8, h = 0.4, r = 0.2 } } }, 48, 48)
+		local area = 0.4 * 0.4 + (0.8 - 0.4) * 0.4 - (0.4 * 0.4 - math.pi * 0.2 * 0.2)
+		t.ok(math.abs(mean(pill) - area) < 0.02, `the pill's area {mean(pill)} vs {area}`)
 	end)
 
 	t.test("masks: downsample keeps the mean alpha", function()

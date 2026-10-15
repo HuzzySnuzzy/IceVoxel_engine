@@ -211,55 +211,53 @@ A fast, Minecraft-style voxel engine for Roblox.
   until you dig next to them; no tree or plant stands in them and no cave entrance opens under
   them. Far terrain shows the lakes (LOD levels 1-2) and the map paints both (lakes up to 8
   blocks a pixel, puddles up to 2); puddles are drawn near the player only.
-- **Hunger (Minecraft's).** Minecraft 1.20.1's food bar: 20 points as 10 shanks on the right above
-  the hotbar, level with the hearts (filled from the right, a half shank for an odd point), and
-  saturation that goes first, drained by exhaustion (sprinting 0.1 a metre, swimming 0.01, a
-  jump 0.05, a sprint jump 0.2, a block broken 0.005, a hurt or an attack that lands 0.1). Food
-  fills it with Minecraft's numbers (a steak 8 points and 12.8 saturation, raw beef 3, rotten
-  flesh 4 with an 80% chance of the Hunger effect, the ruins' tins and rations their own: see
-  Mobs and the zombie apocalypse); you can eat whenever the bar isn't full (the Chocolate Bar any
-  time, creative whenever). Health comes back from the bar alone (Roblox's own regeneration is
-  off): with a full bar and saturation half a heart's worth every 0.5 s, burning the saturation;
-  at 18 or more half a heart every 4 s for 6 exhaustion; at 0 you starve, half a heart every 4 s
-  down to half a heart. At 6 or less you can't sprint. Minecraft's **Hunger** effect (raw chicken
-  30%, rotten flesh 80%, 30 s; `/effect give @s hunger`) drains the bar faster (0.005 exhaustion a
-  tick a level) and turns the shanks green; with no saturation left they jitter, as Minecraft's
-  do. With thirst on (below) health only comes back while thirst is 18 or more too (Tough As
-  Nails: both bars high), and nothing heals while frozen or overheated through or once an
-  infection reaches stage III. Death gives a full bar back (20 points, 5 saturation); worlds and
-  characters keep it. Creative and spectator players are untouched. `Config.Hunger` turns it off
+- **Hunger (Minecraft's).** Minecraft 1.20.1's food bar: 20 points (the FOOD status icon at the
+  bottom right, emptying from the top as they go: see The inventory and the HUD below), and
+  saturation that goes first, drained by exhaustion (sprinting 0.1 a metre, swimming 0.01, a jump
+  0.05, a sprint jump 0.2, a block broken 0.005, a hurt or an attack that lands 0.1). Food fills it
+  with Minecraft's numbers (a steak 8 points and 12.8 saturation, raw beef 3, rotten flesh 4 with an
+  80% chance of the Hunger effect, the ruins' tins and rations their own: see Mobs and the zombie
+  apocalypse); you can eat whenever the bar isn't full (the Chocolate Bar any time, creative
+  whenever). Health comes back from the bar alone (Roblox's own regeneration is off): with a full
+  bar and saturation half a heart's worth every 0.5 s, burning the saturation; at 18 or more half a
+  heart every 4 s for 6 exhaustion; at 0 you starve, half a heart every 4 s down to half a heart. At
+  6 or less you can't sprint. Minecraft's **Hunger** effect (raw chicken 30%, rotten flesh 80%, 30
+  s; `/effect give @s hunger`) drains the bar faster (0.005 exhaustion a tick a level): the FOOD
+  icon shows two falling arrows and a Hunger badge (one falling arrow with no saturation left, where
+  Minecraft's shanks jitter). With thirst on (below) health only comes back while thirst is 18 or
+  more too (Tough As Nails: both bars high), and nothing heals while frozen or overheated through or
+  once an infection reaches stage III. Death gives a full bar back (20 points, 5 saturation); worlds
+  and characters keep it. Creative and spectator players are untouched. `Config.Hunger` turns it off
   (foods then heal health at once, as before, and thirst rules regeneration).
 - **Thirst and body temperature (Tough As Nails).** The Tough As Nails mod's survival, after its
-  1.20 version. Thirst is Minecraft's hunger with water: 20 points (10 droplets on the right above
-  the hotbar, a row above the hunger shanks: Tough As Nails' place; in the shanks' own place with
-  hunger off) and hydration that goes first, drained by exhaustion (the same as hunger's but for
-  attacks, plus sweating while hot). At 0 you lose half a heart every 6 s down to half a heart, and
-  health only comes back with 18 or more (with hunger on as a condition of hunger's regeneration;
-  with it off by thirst's own: half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration
-  is off).
-  Drink from a water source with an empty hand (1 point), fill a Glass Bottle (three glass in a
-  V make three) or a Canteen (an iron nugget over three iron ingots in a cup; three sips) at a
-  water source, and hold use 1.6 s to drink: dirty water gives 4 points with a 50% chance of the
-  Thirst effect (15 s of extra exhaustion, the droplets turn green), purified water (smelt the
-  dirty bottle or canteen in a furnace) 6 and hydration with no risk. Body temperature is a
-  number from -10 to 10 in five zones (icy -10..-8, cold, neutral -2..2, warm, hot 8..10) that
+  1.20 version. Thirst is Minecraft's hunger with water: 20 points (the THIRST status icon) and
+  hydration that goes first, drained by exhaustion (the same as hunger's but for attacks, plus
+  sweating while hot). At 0 you lose half a heart every 6 s down to half a heart, and health only
+  comes back with 18 or more (with hunger on as a condition of hunger's regeneration; with it off by
+  thirst's own: half a heart every 4 s, for 6 exhaustion; Roblox's own regeneration is off). Drink
+  from a water source with an empty hand (1 point), fill a Glass Bottle (three glass in a V make
+  three) or a Canteen (an iron nugget over three iron ingots in a cup; three sips) at a water
+  source, and hold use 1.6 s to drink: dirty water gives 4 points with a 50% chance of the Thirst
+  effect (15 s of extra exhaustion: two falling arrows on THIRST and a Thirst badge), purified water
+  (smelt the dirty bottle or canteen in a furnace) 6 and hydration with no risk. Body temperature is
+  a number from -10 to 10 in five zones (icy -10..-8, cold, neutral -2..2, warm, hot 8..10) that
   steps towards what the place says, a step every 7 s (3.5 s back towards neutral): the biome
-  (tundra -10, taiga -4, plains 0, jungle 7, desert 9), colder high up and outdoors at night,
-  milder under a roof (towards neutral, day and night: a taiga house is -2), neutral deep
-  underground; being wet cools 3 steps, sprinting warms 2,
-  lava, fire, a campfire, a lit furnace or a working generator within 5 blocks warm 3 (5 within
-  2 blocks), ice and snow cool 3 (not that close to a fire), and armor insulates (leather and
-  straw warm a step a piece towards neutral, leather stops freezing too; leaves cool a step).
-  Icy for 20 s freezes you (half a heart every 5 s, and no health comes back meanwhile, whatever
-  you drink), hot overheats you the same way and makes you sweat, so the harshest cold takes
-  about 3 minutes to kill from neutral; a drink can give Internal Warmth or Chill, which hold
-  the cold or the heat off. Joining gives 5 minutes of
-  Climate Clemency (a respawn 1): the temperature stays neutral, thirst drains at half the rate
-  and doesn't hurt (hunger is untouched by it, as in Tough As Nails). Frost or heat closes in from the screen's edges, and a thermometer over the
-  droplets shows the temperature, coloured by zone, with an arrow for where it is going; the
-  clemency's time left and the effects are status effect icons in the top right. Creative and
-  spectator players are untouched.
-  `Config.ToughAsNails` turns thirst or temperature off.
+  (tundra -10, taiga -4, plains 0, jungle 7, desert 9), colder high up and outdoors at night, milder
+  under a roof (towards neutral, day and night: a taiga house is -2), neutral deep underground;
+  being wet cools 3 steps, sprinting warms 2, lava, fire, a campfire, a lit furnace or a working
+  generator within 5 blocks warm 3 (5 within 2 blocks), ice and snow cool 3 (not that close to a
+  fire), and armor insulates (leather and straw warm a step a piece towards neutral, leather stops
+  freezing too; leaves cool a step). Icy for 20 s freezes you (half a heart every 5 s, and no health
+  comes back meanwhile, whatever you drink), hot overheats you the same way and makes you sweat, so
+  the harshest cold takes about 3 minutes to kill from neutral; a drink can give Internal Warmth or
+  Chill, which hold the cold or the heat off. Joining gives 5 minutes of Climate Clemency (a respawn
+  1): the temperature stays neutral, thirst drains at half the rate and doesn't hurt (hunger is
+  untouched by it, as in Tough As Nails). Frost or heat closes in from the screen's edges, and the
+  TEMPERATURE status icon fills with the temperature, coloured by zone (blues on the cold side,
+  yellow then red on the hot), blinking while you freeze or overheat, with an arrow towards where it
+  is going; the clemency's time left and the effects are status effect icons in the top right.
+  Creative and spectator players are untouched. `Config.ToughAsNails` turns thirst or temperature
+  off.
 - **Herbs, bowls and teas (Tough As Nails).** Two herbs grow wild in rare small patches (about 4
   plants, some 30 blocks apart on open ground): **Mint** on plains, in meadows and jungles, and
   **Wild Ginger** under the trees of forests, birch forests and taigas, so the cold biomes have a
@@ -290,7 +288,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   set holds a tundra at -6 by day and by night, out of the ice (three pieces just about). **Leaf
   armor** (any leaves, which Shears harvest) cools a step a piece: a desert's 9 becomes 5. Both
   have leather's armor points. A **Thermometer** (an iron nugget over glass over glow dust) held
-  in the hand reads the body temperature and where it is going as numbers over the gauge.
+  in the hand reads the body temperature and where it is going (each in its zone's colour, an
+  arrow between) in the item box over the quickbar, and makes the TEMPERATURE icon's arrows say
+  how fast it changes (one to three).
 - **Mobs.** Minecraft 1.20.1's farm animals as simple boxes moving about (a body in the kind's
   colour and a head on the side it faces), and the apocalypse's zombies (below): **cows** (0.9 ×
   1.4 blocks, 10 health), **sheep** (0.9 × 1.3, 8; white, now and then black, grey, brown or
@@ -450,15 +450,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   as Minecraft's (a stronger effect wins, a weaker longer one waits underneath and comes back), run
   on the server, and the client's movement and mining prediction use the same numbers as the
   server's checks. Creative and spectator players get them too, but nothing hurts them. Death
-  clears them; they are not saved. Icons in Minecraft's frames in the top right, under the minimap
-  and the toasts, or beside them on small phones (beneficial in the top row, the rest below,
-  longest first, blinking out over their last 10 s; hover one, or tap it on a touch screen, for
-  its name, level and time), and Minecraft's list of names and times beside any open screen; F3
-  lists them too. Minecraft's Hunger is one of them (the food bar's, from raw chicken and rotten
-  flesh). Tough As Nails'
-  Thirst, Internal Warmth, Internal Chill and Climate Clemency are listed with them (its own
-  status row over the hotbar shows only with `Config.Effects.Hud` off; the Thirst effect and the
-  clemency wait in creative and spectator, their times standing still on the icons). `/effect give
+  clears them; they are not saved. Icons on dark squares in the top right, under the minimap and
+  the toasts, or beside them on small phones (beneficial in the top row, the rest below, longest
+  first, blinking out over their last 10 s; hover one, or tap it on a touch screen, for its name,
+  level and time), and Minecraft's list of names and times beside an open inventory; F3 lists
+  them too. Bleeding, the Infection, Poison, Wither, Hunger, Thirst and Nausea show as badges over
+  the status icons instead (see The inventory and the HUD). Minecraft's Hunger is one of them
+  (the food bar's, from raw chicken and rotten flesh). Tough As Nails' Thirst, Internal Warmth,
+  Internal Chill and Climate Clemency are listed with them (the status icons' badges show the last
+  three only with `Config.Effects.Hud` off; the Thirst effect and the clemency wait in creative
+  and spectator, their times standing still on the icons). `/effect give
   <player> <effect> [seconds | infinite] [amplifier]` and `/effect clear [player] [effect]` with
   Minecraft's ids and wording (operators, as `/time`).
 - **Oil and fuel on the skin.** Wading in crude oil is Slowness II, and leaving it leaves you **Oil
@@ -486,9 +487,9 @@ A fast, Minecraft-style voxel engine for Roblox.
     empty, then mana comes back faster when it's nearly full and much faster standing still
     (20 max: about 7.5 a second standing, 1.7 walking; standing still means a fifth of a second
     without moving or casting).
-  - **HUD:** a row of blue stars (20 mana each, half stars) over the hearts. They show while you
-    hold a magic weapon, while mana isn't full, and for 3 s after it changes. They sit above the
-    armour icons when you wear armour; the item name moves up out of their way.
+  - **HUD:** the MANA status icon empties as mana is spent (yellow under a quarter, red under a
+    tenth). It is lit while you hold a magic weapon, while mana isn't full and for 3 s after it
+    changes, dimmed otherwise, and blinks after a cast the server refused.
   - **Potions:** the **Lesser Mana Potion** (50) and **Mana Potion** (100) are drunk like
     potions. Each adds 5 s of Mana Sickness, up to 10 s, which cuts magic damage by 5% for each
     second left.
@@ -508,18 +509,72 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **Saved:** mana and the crystals used go with the character (with characters off, with the
     world's player record).
   - **Off:** `Config.Mana` turns all of it off.
+- **The inventory and the HUD, in a survival game's look.** The inventory, the creative picker,
+  JEI, the quickbar, the status icons, item tooltips and the carried stack are drawn after DayZ's
+  inventory and HUD (its shapes, colours and layout only, none of its art): flat dark panels with
+  hairlines, grey and black headers with faint gradients, Roboto text, our own anti-aliased
+  silhouettes, item pictures a little darker than in the world. Other screens (the Options menu,
+  the skill tree, the title screen, chat, maps, WAILA) keep Minecraft's look.
+  - **The inventory** (`E`) has three columns over a band. On the left, **VICINITY**: a GROUND strip
+    with the dropped items within 4 blocks (up to 9; `Config.Ui.GroundRadius`; walk over one to pick
+    it up), then **CRAFTING** (the 2 × 2 grid) or the open block's section (a chest with its count,
+    "CHEST (12/27)", a crafting table, a furnace or a machine with its gauges), then **ITEMS**, the
+    JEI list. In the middle, the player (turning towards the pointer) over **HANDS**: the held item
+    large, its name, a condition dot and word and one detail line (durability, sips, a stack's
+    count, energy). On the right, **EQUIPMENT** (its gear opens the Options menu): the armor over
+    the seven accessory slots with their eyes and padlocks, then **BACKPACK (n/27)** and **VANITY**.
+    The band holds the hotbar slots as the quickbar and, in survival and adventure, the status icons
+    at its right. Where three columns would have to shrink below GUI scale 2 (1.5 on touch; the
+    screen's own scale when that is smaller) only the side columns show. Behind it the world blurs
+    on a PC (`Config.Ui.InventoryBlur`) under a vignette.
+  - **Cells:** one dark slab per grid with faint lines between the cells; empty cells are clear,
+    full ones faintly lit, with a black count box in the corner and, on a damaged item, a thin bar
+    in its condition's colour; empty armor and accessory slots show a faint silhouette of what
+    goes there.
+  - **Collapsing sections:** click the bar of CRAFTING, the block's section, ITEMS, BACKPACK or
+    VANITY (the minus or plus at its right end) to fold it to its bar and back. A folded section's
+    slots take no clicks, its title still counts what it holds, and its room goes to ITEMS and the
+    player. VANITY starts folded on touch screens; the rest is remembered for the session.
+  - **Throwing:** drag a stack onto the GROUND strip (outlined in white while you carry one, "Drop
+    here" while it is empty) or let go of it outside the screen to throw it; anywhere else in the
+    screen (headers, gaps, the player, the band) nothing happens. On touch a tap on the strip with
+    nothing carried does not close the inventory. `Q` still drops the hovered stack.
+  - **Dragging:** only outlines change colour, the carried stack's and the slot's under it: green
+    where it fits, red where it can't go, light blue to swap, orange to stack.
+  - **The quickbar** at the bottom centre (lifted 5 % of the screen's height on a PC, none on
+    touch): nine flat grey cells, the selected one olive under a white outline, each key in a black
+    box at the cell's top right over an item (a faint box in the middle of an empty cell; none on
+    touch or while too small to read), and the held item's name in a grey box above for 2 s after
+    it changes (or for as long as a Thermometer is held, with its reading). It never fades unless
+    `Config.Ui.QuickbarFadeAfter` says so.
+  - **The status icons** at the bottom right, on the quickbar's line where they fit: THIRST, FOOD,
+    TEMPERATURE, a divider, MANA, ARMOR and HEALTH (each while its feature is on), white
+    silhouettes that empty from the top as the stat drops. They turn yellow, then red, then blink
+    red and white: health at 6, 3 and 1.5 hearts, food and thirst at 6, 3 and 0 points, mana under
+    a quarter and a tenth (no blink), the temperature by zone (blues on the cold side, blinking
+    while freezing or overheating); armor stays white and fills with its points. Up to three
+    arrows above an icon mean its stat is rising, below it falling: health falls one for each of
+    bleeding, poison, wither, starving and dehydration (else one for 2 s after a hit) and rises
+    while it regenerates; food and thirst fall two under the Hunger or Thirst effect and one with
+    no saturation or hydration left; the temperature points towards where it is going (a held
+    Thermometer says how fast); mana moves for a second after it changes. Conditions (Bleeding,
+    the Infection, Poison, Wither, Hunger, Thirst, Nausea) are small badges in rows of five above
+    the icons, with their level from II (the infection its stage); the knowledge level and its bar
+    sit under them. No numbers by default (`Config.Ui.StatusValues`). With the inventory open the
+    six icons alone sit in its band.
 - **Four game modes.** Minecraft's survival, creative, adventure and spectator, switched with
   `/gamemode <mode>` (`/gm s`, `c`, `a`, `sp`, or `0`–`3`) in the chat, `F3` + `N` (spectator and
   back) or the `F3` + `F4` game mode switcher.
   - **Survival:** blocks take Minecraft's time to mine, by hand or with tools, cracking as they
     go, and drop as items that bob on the ground until someone walks over them. Stone and ores need
     a pickaxe of the right tier to drop anything (iron and osmium ore a stone pickaxe, diamonds an iron one),
-    and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor
-    slots on the left and a 2 × 2 crafting grid at the top right, with Terraria's equipment beside
-    it (below); chests, crafting tables and furnaces open above it. Clicks work as in Minecraft: shift-click, number keys, dragging to
-    spread, double click. Items drop on death.
-  - **Creative:** an old-school "Item selection" picker with a search bar, instant breaking, flying
-    (double tap jump), and nothing hurts.
+    and tools wear out. Placing uses items up. Players have a Minecraft inventory: 36 slots, armor,
+    a 2 × 2 crafting grid and Terraria's equipment (below), laid out in a survival game's columns
+    (see The inventory and the HUD); chests, crafting tables and furnaces open in its VICINITY
+    column. Clicks work as in Minecraft: shift-click, number keys, dragging to spread, double
+    click. Items drop on death.
+  - **Creative:** an "Item selection" picker with a search bar (in the inventory's dark look),
+    instant breaking, flying (double tap jump), and nothing hurts.
   - **Adventure:** survival without building: blocks can't be broken or placed and items can't be
     used on them (buckets, the Configurator), and no block is outlined; chests, furnaces, crafting
     tables and machines still open. Health, falls, pickups, the inventory and death drops are
@@ -528,7 +583,7 @@ A fast, Minecraft-style voxel engine for Roblox.
     blocks above its top (the mouse wheel sets the flying speed); nothing hurts. Players who don't
     spectate neither see nor hear a spectator (other spectators see a translucent floating head).
     Spectators pick up and change nothing, look into chests, furnaces and machines read only, and
-    keep their inventory if they die. Instead of the hotbar, a number key or the middle click
+    keep their inventory if they die. Instead of the quickbar, a number key or the middle click
     opens Minecraft's spectator menu: `1` "Teleport to Player" lists the other players' heads (7
     on the first page, then 6 a page), a player's number pressed twice teleports there, `9`
     closes it. A left click on a player looks through their eyes until you sneak. With the
@@ -549,14 +604,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   mirrored, shift-click crafts as many as possible, and two worn tools repair into one. Furnaces
   smelt raw ores, sand, cobblestone and logs with Minecraft's fuel times, and keep cooking while
   nobody watches.
-- **Just Enough Items.** Next to every inventory screen (the inventory, chests, crafting tables,
-  furnaces, the creative picker), a JEI-style list of every item, a page at a time, with a search
-  box. Click an item, or press `R` over any item (in the list, a slot, the hotbar or a recipe), to
+- **Just Enough Items.** In the inventory's ITEMS section (with a chest, crafting table, furnace or
+  machine open too) and beside the creative picker, a JEI-style list of every item, a page at a
+  time, with a search box. Click an item, or press `R` over any item (in the list, a slot, the
+  quickbar or a recipe), to
   see how it is made; right click or `U` shows what it is used for: crafting recipes on a 3 × 3
   grid (an ingredient any planks will do for cycles through them), smelting with its 10 seconds,
   and fuels with how many items they smelt. On a crafting table, a furnace, a Heat Generator or an
   Electric Furnace, `U` also lists every recipe made in it (JEI's catalysts). Items inside a recipe
-  open their own recipes, `Backspace` goes back and `E` or `Escape` returns to the inventory. The
+  open their own recipes (shown over the inventory's middle and right columns), `Backspace` goes
+  back and `E` or `Escape` returns to the inventory. The
   `+` beside a crafting recipe moves its ingredients from the inventory into the open crafting grid
   (`Shift`: as many sets as you have); when it is greyed out, hovering it says why and shows what is
   missing. In creative, `Shift` + click gives a full stack. Three more categories show fluids as
@@ -564,13 +621,16 @@ A fast, Minecraft-style voxel engine for Roblox.
   bucket and block in lookups: refining (a bucket of oil into fuel in 5 s for 20 kJ), the Heat
   Generator's lava ("Makes 4 MJ", "200 J/t for 1000 s") and the Combustion Generator's fuel ("Makes
   10 MJ", "2.5 kJ/t for 200 s"); `U` on an Oil Refinery or a Combustion Generator lists theirs.
-- **Item tooltips.** Hovering any item (a slot, the creative picker, JEI) shows Minecraft's
-  tooltip with everything the game knows about it: the name, what the stack holds (a tank's
-  fluid, a battery's charge), a line of lore in dark purple saying what the item is for ("Allows
-  the holder to double jump", "Purify it in a furnace, on a campfire or with mint"), then
+- **Item tooltips.** Hovering any item (a slot, the creative picker, JEI; a quarter of a second
+  with a mouse) shows a dark tooltip with everything the game knows about it: a header with the
+  name, the condition of a durable item (a coloured dot and Pristine, Worn, Damaged, Badly damaged
+  or Ruined) and the count, the item's picture on the left, a cyan pill naming the water or a
+  bucket's fluid, what the stack holds (a tank's fluid, a battery's charge), a line of lore in
+  grey saying what the item is for ("Allows the holder to double jump", "Purify it in a furnace,
+  on a campfire or with mint"), then
   - **tools:** harvest level and the best blocks a pickaxe harvests ("Harvest level: Iron",
     "Harvests up to: Gold Ore, Diamond Ore, Emerald Ore"), mining speed, and Minecraft's "When in
-    Main Hand:" block in dark green (" 6 Attack Damage", " 1.6 Attack Speed": the real combat
+    Main Hand:" block in light grey (" 6 Attack Damage", " 1.6 Attack Speed": the real combat
     numbers), then "Durability: 200 / 250";
   - **armor:** "When on Head:", "+2 Armor", "+2 Armor Toughness" and Tough As Nails' insulation
     ("+1 Warmth", "+1 Cooling", "Keeps you from freezing");
@@ -587,9 +647,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   Every item has its lore in `Shared/Items/LoreList` (one line each, easy to edit; a test checks
   none is missing).
 - **Knowledge, Ages and a skill tree.** Knowledge is this game's experience: Minecraft's curve (2L +
-  7 points a level to 15, 5L - 38 to 30, 9L - 158 above) and its green bar over the hotbar with the
-  level over it (survival and adventure). It comes from first times above all: a block kind mined 5
-  points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind killed 10, an Age
+  7 points a level to 15, 5L - 38 to 30, 9L - 158 above), shown as a thin bar with the level under
+  the status icons (survival and adventure). It comes from first times above all: a block kind mined
+  5 points, an item crafted 8, a result smelted 10, a biome visited 20, a mob kind killed 10, an Age
   reached 50 to 200; and a little again and again: ores (coal 1 .. diamond 5), logs (0.25), each
   item smelted (Minecraft's furnace experience: an iron ingot 0.7), each craft (0.1), each mob (an
   animal 2, a zombie 4-10 by kind). Repeats wear off (a repeat of the same thing within a minute
@@ -603,24 +663,25 @@ A fast, Minecraft-style voxel engine for Roblox.
   Flint and Steel, the Lantern, the Canteen, the Thermometer, gold and osmium smelting, potions),
   the **Industrial Age** (level 15, an Osmium Ingot and a Bucket: diamond gear, Mekanism's basic and
   advanced pipes, transporters and tanks, the Configurator, the Heat Generator, gunpowder and TNT,
-  potions II and long potions), the **Electric Age** (level 25, a Heat Generator:
-  cables, the Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion
-  Generator, elite pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar
-  Panel, the ultimate tiers, the Nuke). A later Age's crafting results stay out of the grid (shown
-  greyed with "Requires the Iron Age"; JEI puts a padlock on them) and furnaces take nothing that
-  would smelt into one; reaching an Age is automatic, with a banner, a fanfare and a line in
-  everyone's chat. Each level is a **skill point** for the skill tree (`K`): 18 small perks in three
-  branches across the Ages, 1 to 5 points each: Forager (+10% knowledge from discoveries), Quarrying
-  (stone tools mine 10% faster), Hardy (thirst drains 10% slower), Firekeeper (campfires boil twice
-  as fast), Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation
-  (a step of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar,
-  Tempering, Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke),
-  Mastery and Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death;
-  in a superflat or debug world, or one with Allow Commands, what is earned stays on that server.
+  potions II and long potions), the **Electric Age** (level 25, a Heat Generator: cables, the
+  Electric Furnace, Batteries, upgrade cards, the Oil Refinery, the Combustion Generator, elite
+  pipes) and the **Atomic Age** (level 40, an Oil Refinery and a Battery: the Solar Panel, the
+  ultimate tiers, the Nuke). A later Age's crafting results stay out of the grid (shown greyed with
+  "Requires the Iron Age"; JEI puts a padlock on them) and furnaces take nothing that would smelt
+  into one; reaching an Age is automatic, with a banner, a fanfare and a line in everyone's chat.
+  Each level is a **skill point** for the skill tree (`K`): 18 small perks in three branches across
+  the Ages, 1 to 5 points each: Forager (+10% knowledge from discoveries), Quarrying (stone tools
+  mine 10% faster), Hardy (thirst drains 10% slower), Firekeeper (campfires boil twice as fast),
+  Smithing (tools wear 15% slower), Prospector (ores give twice the knowledge), Insulation (a step
+  of warmth and cooling), Ironworking, Demolition (unlocks gunpowder and TNT), Scholar, Tempering,
+  Diamond Cutting, Thermoregulation, Endurance, Polymath, Fission (unlocks the Nuke), Mastery and
+  Enlightenment. Progress is saved (DataStore "IceVoxelProgress_v1") and survives death; in a
+  superflat or debug world, or one with Allow Commands, what is earned stays on that server.
   Creative players have every recipe and earn nothing. `/knowledge` and `/age` set it for testing.
-- **Accessories and vanity (Terraria).** The inventory has Terraria's equipment panel to the right
-  of the player: 7 accessory slots (5 open; the Industrial Age opens a 6th and the Atomic Age a 7th,
-  a padlock until then), 4 vanity armor slots and 7 vanity accessory slots. An accessory goes in
+- **Accessories and vanity (Terraria).** The inventory's EQUIPMENT column holds Terraria's
+  equipment: under the armor, 7 accessory slots (5 open; the Industrial Age opens a 6th and the
+  Atomic Age a 7th, a padlock until then), and in VANITY 4 vanity armor slots and 7 vanity
+  accessory slots. An accessory goes in
   one accessory slot at a time (shift-click wears it, as it does armor and vanity pieces); what the
   accessory slots wear works, what the vanity slots wear only shows. Each accessory row and armor
   slot has an eye that hides its look and keeps its effect. The early-game accessories:
@@ -634,7 +695,7 @@ A fast, Minecraft-style voxel engine for Roblox.
   and **Feral Claws** (the attack bar fills 12% faster). Every character draws what it wears,
   vanity over armor (armor and vanity armor as Minecraft-like layers on the R15 or R6 body,
   accessories as small models on the feet, hand, back, waist or face), the same in the
-  inventory's preview; the tooltip says what each does ("When worn:"). The server checks the
+  inventory's middle column; the tooltip says what each does ("When worn:"). The server checks the
   faster movement (its move check allows the worn speed) and applies knockback, regeneration,
   attack speed, fall damage and campfires itself.
 - **Day and night.** Minecraft's 20 minute day (24000 ticks: sunrise 0, noon 6000, sunset 12000,
@@ -1039,11 +1100,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   mountains 45% of the parts on screen are hidden; skipping them keeps a third fewer parts while
   walking (84k parts become 49k after loading, at the default view with far meshes off).
 - **Settings menu.** Minecraft's Options screen (`P`, gamepad D-pad right, or the gear at the left
-  end of the hotbar on touch screens): a graphics preset (Low, Medium, High, Ultra) and every view,
-  performance, sound, control, HUD and chat setting, applied while you play and saved per player
-  and kind of device. See [Settings menu](#settings-menu).
+  end of the quickbar on touch screens): a graphics preset (Low, Medium, High, Ultra) and every
+  view, performance, sound, control, HUD and chat setting, applied while you play and saved per
+  player and kind of device. See [Settings menu](#settings-menu).
 - **Chat.** Minecraft 1.20.1's chat instead of Roblox's window and bar: lines at the bottom left
-  above the hotbar in the pixel font with a shadow and a dark background, fading 10 s after they
+  above the quickbar in the pixel font with a shadow and a dark background, fading 10 s after they
   arrive (all of them back while the box is open), 100 kept and scrolled with the wheel. `T`
   opens the box (`/` with "/" typed; both are key bindings): `Enter` sends, `Escape` closes, `Up` /
   `Down` bring back what you sent, `Tab` completes command names, `/locate`'s arguments and
@@ -1058,9 +1119,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   nobody knows is not sent but answered with Minecraft's red "Unknown or incomplete command, see
   below for error". Chat Settings: Chat (Shown, Commands Only, Hidden), text and background
   opacity, text size, line spacing, chat delay, width, focused and unfocused height, command
-  suggestions. On touch screens a speech bubble over the `…` button opens and closes it. The chat
-  draws over the hotbar, as Minecraft's; the title screen has no chat (Roblox's is off from the
-  start).
+  suggestions. On touch screens a speech bubble over the `…` button opens and closes it. On a PC
+  the chat rises with the quickbar (5 % of the screen's height), so it stays clear of it; the
+  title screen has no chat (Roblox's is off from the start).
 - **Finding things: `/locate` and `/tp`.** Minecraft 1.20.1's `/locate structure | biome | poi`
   for operators (or everyone with Allow Commands): `/locate structure outpost` answers "The
   nearest outpost is at [1142, ~, 582] (1281 blocks away)" in true world coordinates (F3's).
@@ -1278,8 +1339,9 @@ A fast, Minecraft-style voxel engine for Roblox.
   that holds a fluid fills the new tank too. Items with different data never stack, and wherever a
   stack goes (clicks, chests, furnaces, transporters, the ground, death drops) its data goes with
   it.
-- **Items drawn in 3D.** Every icon (hotbar, inventory, creative picker) is a small 3D model in a
-  ViewportFrame with the same look as the block in the world. Dropped items and the item in a
+- **Items drawn in 3D.** Every icon (quickbar, inventory, creative picker) is a small 3D model in a
+  ViewportFrame with the same look as the block in the world (a little darker in the inventory and
+  the quickbar). Dropped items and the item in a
   character's hand are drawn the same way.
 - **WAILA (What Am I Looking At).** A panel at the top of the screen names what the crosshair
   points at, like the Jade mod: the block's icon and name, the tool and tier it needs with a
@@ -1402,7 +1464,8 @@ A fast, Minecraft-style voxel engine for Roblox.
 - **GUI scale, Minecraft's way.** One scale for the whole interface: Auto is the largest scale that
   still leaves 320 x 240 GUI pixels on the screen (4 at 1920 x 1080, 6 at 2560 x 1440, 9 on a 4K
   window; eighths on touch screens: 1.5 on a small phone), and the GUI Scale button offers Auto
-  and 1 up to that largest, so every choice looks different. The HUD, the hotbar, the inventory
+  and 1 up to that largest, so every choice looks different. The HUD, the quickbar, the inventory
+  (a step smaller where its three columns need the room: 5 at 2560 x 1440, 8 on a 4K window)
   and every screen, the chat, the minimap (56 GUI pixels square: 224 pixels at 1080p, 84 on a
   phone) with its coordinates line, the toasts, the status effect icons, the saving icon, WAILA,
   the crosshair (Minecraft's plus) and the title screen all follow it; F3, the world map's bar and
@@ -1524,7 +1587,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Swim up / down | Hold `Space` / `Shift` in water or fuel (in lava and oil `Space` rises slowly; there is no swimming) | A / B | Jump / Sneak |
 | Swim fast     | Sprint under water or fuel; look where to go | L3 | Sprint button |
 | Climb out     | Swim (or wade) at a ledge just above the surface | stick | move |
-| In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the hotbar, `Q` drop, double click to collect, drag to spread | A / X / Y, B closes | tap / long press |
+| In the inventory | Left / right click, `Shift` + click, `1`–`9` swap with the quickbar, `Q` drop, double click to collect, drag to spread; drop a carried stack on the GROUND strip or outside the screen to throw it; click a section's bar (CRAFTING, the block's, ITEMS, BACKPACK, VANITY) to fold or unfold it | A / X / Y, B closes | tap / long press; tap a section's bar |
 | Equipment (inventory) | `Shift` + click an accessory, armor or vanity piece to wear it; click an eye to hide or show that look | Y on a piece; A on an eye | Tap (the eyes have finger-sized buttons) |
 | Air jump      | `Space` again in mid-air, wearing a Cloud in a Bottle | A | Jump button |
 | Recipes / uses (JEI) | Click / right click an item in the list, or `R` / `U` over any item; `Backspace` back, `E` / `Escape` back to the inventory | A / X on a list item, B leaves the recipes | Tap / long press |
@@ -1534,7 +1597,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 | Weather map   | `B` (the Weather Map key binding), or the ☁ button on the minimap or the world map: the weather over both maps; on the world map, Now / +2 / +5 / +10 / +20 min along its bottom forecast it | | Tap ☁ on the minimap or the world map |
 | Map menu      | Right click the map         | R3      | Long press |
 | Minimap zoom  | `-` / `=`                   |         |            |
-| Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory | D-pad right; B closes | Gear at the left end of the hotbar |
+| Options menu  | `P` (`P` again, `E`, `Escape` or Done close it), or the gear in the inventory's EQUIPMENT header | D-pad right; B closes | Gear at the left end of the quickbar |
 | Walk          | `W` / `S` / `A` / `D` (Roblox's arrow keys no longer walk: bind them if you like) | left stick | thumbstick |
 | Chat / command | `T` / `/` (the Open Chat and Open Command bindings) | | |
 | Skill tree    | `K` (`K` again, `E`, `Escape` or Done close it): click a skill, then Unlock; hover an Age's name for what it takes | D-pad left; A selects, B closes | The button over the gear |
@@ -1555,7 +1618,7 @@ defaults. Escape, `Shift` / `Ctrl` with clicks, the mouse on inventory slots, th
 ## Settings menu
 
 `P` opens Minecraft's Options screen (gamepad: D-pad right; touch: the gear at the left end of the
-hotbar; anywhere: the gear in the inventory, where Minecraft's recipe book button is). Changes
+quickbar; anywhere: the gear in the inventory's EQUIPMENT header). Changes
 apply while you play: cheap ones at the next frame, costly ones (view, caves, plants, shadows,
 textures, far materials, far meshes) 0.4 s after a slider stops (`Settings.ApplyDelay`), so
 dragging a slider rebuilds the world once. Sliders move by dragging, clicking, the D-pad (left /
@@ -1604,15 +1667,15 @@ The other new options, each Minecraft's:
   vertical look round (not a gamepad's stick or a touch drag); it needs Roblox's camera scripts,
   and the page says so when they are missing.
 - Scroll Sensitivity and Discrete Scrolling: the wheel's turns add up (scaled; Discrete: a notch
-  is a notch, however fine the wheel or trackpad) and each whole step moves the hotbar one slot
+  is a notch, however fine the wheel or trackpad) and each whole step moves the quickbar one slot
   (also the spectator menu and flying speed); open screens scroll by the scaled turn.
 - View Bobbing: the camera sways and dips while walking on the ground (Minecraft's bob, about a
   tenth of a block). Damage Tilt: the camera tilts up to 14° for half a second when hurt.
   Distortion Effects: how much of Nausea's wobble shows (squared, as Minecraft's: 50% is a
   quarter); FOV Effects now only scales the flying, sprinting and Speed widening.
 - Attack Indicator: while the held weapon recovers after a hit (its attack speed: a sword in 0.6
-  s, an axe in 1-1.25 s), a bar under the crosshair (or the mouse, while it is free) or a square
-  right of the hotbar fills up.
+  s, an axe in 1-1.25 s), a bar under the crosshair (or the mouse, while it is free) or a quickbar
+  cell left of the quickbar (right of the `…` button on touch) fills up.
 - Sneak: Hold (Minecraft's default) or Toggle.
 - Clouds and Weather (Minecraft keeps Clouds on its Video Settings, which is full here, and draws
   rain and snow by its Graphics setting): Fancy clouds are boxes with storm towers and rain
@@ -1807,7 +1870,8 @@ src/shared   -> ReplicatedStorage.IceVoxel          (used by server, client and 
                             does), raw to cooked
   Hunger                    Minecraft's food bar, pure (FoodData: food, saturation, exhaustion,
                             eating, the fast and slow regeneration, starvation, the Hunger
-                            effect's drain, the sprint rule, the HUD's shanks and jitter)
+                            effect's drain, the sprint rule; Minecraft's shanks and jitter,
+                            specced, though the HUD shows the FOOD status icon)
   Apocalypse/               the zombie apocalypse's shared rules, pure: BloodMoon (the horde
                             nights' schedule from the day time), Infection (a bite's progress,
                             stages, symptoms, bites, cures, dormancy), NoiseRules (which sounds
@@ -2086,14 +2150,24 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             (holding food), Casting (magic weapons and Mana Crystals, predicted);
                             hitting mobs (BlockInteraction)
   Inventory/                ClientInventory + Prediction (predicted inventory)
-  Ui/                       Screens, Hud (hotbar, hearts; SurvivalHud: hunger shanks, thirst
-                            droplets, the temperature gauge, frost and heat at the edges; ManaHud + ManaStars:
-                            Terraria's mana stars, the layout pure), InventoryScreen (with the crafting,
-                            chest, furnace and machine panels laid out by MenuLayout, machines'
-                            energy bar and fluid gauges, empty armor and upgrade slots'
-                            outlines), CreativeScreen,
-                            ItemIcon (viewport icons, durability and energy bars), SlotClicks
-                            (Minecraft clicks), Style, Waila + WailaInfo (what the crosshair
+  Ui/                       Screens (opening, clicks, drag feedback, tooltips, JEI's place),
+                            Theme (the survival look's tokens and rules; pure) + Style (Minecraft's
+                            look, and Style.Dayz: the survival look's builders) + Masks (anti-
+                            aliased masks from vector shapes; pure) + Silhouettes (the look's own
+                            drawings; pure), Hud (the HUD canvas, the item-in-hands box, the
+                            touch buttons) + Quickbar (the quickbar) + StatusCluster (the status
+                            icons, badges and knowledge bar) with StatusLayout and StatusGlyphs
+                            (their rules and silhouettes; pure) and StatusDock (their place in the
+                            open inventory), SurvivalHud (frost and heat at the screen's edges),
+                            ManaStars (when mana counts as shown; pure), InventoryScreen (the
+                            three columns) with InventoryColumns (its layout and scale; pure),
+                            SlotWidgets (its slots, eyes and padlocks), ContainerPanel (the open
+                            block's section: MenuLayout's panels, gauges and tanks), GroundStrip
+                            (dropped items nearby, the throw place) and PlayerPreview (the
+                            player), CreativeScreen, ItemTooltip, DragGhost (the carried stack),
+                            Backdrop (the blur and vignette behind open screens), ItemIcon
+                            (viewport icons, count boxes, condition and energy bars), SlotClicks
+                            (Minecraft clicks), Waila + WailaInfo (what the crosshair
                             points at), Jei/ (Just Enough Items: item list, recipe view, recipe
                             transfer), StructureScreen + StructureForm (the structure block and
                             jigsaw screens and their model), FormWidgets (Minecraft's fields and
@@ -2106,7 +2180,7 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             EffectHud + EffectIcons (status effect icons in the top right, the
                             list beside open screens, their glyphs), SkillTreeScreen (the skill
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
-                            weapon's recovery under the crosshair or beside the hotbar), MainMenu
+                            weapon's recovery under the crosshair or beside the quickbar), MainMenu
                             (the title screen, Create World and Load World) + TitleRules +
                             CreateWorldForm + WorldListRules (their rules; pure),
                             CharacterSelect (the character list) + AvatarEditor (the R15 editor)
@@ -2341,11 +2415,11 @@ for performance:
 | `Accessories.Slots` / `ExtraSlotAges` | 5 / {"industrial", "atomic"} | Accessory slots every character has open, and the Ages that open one more each (7 at most). |
 | `Accessories.RunDelay` / `RunRamp` | 10 / 12 | Hermes Boots: ticks of sprinting on the ground before the speed builds, then ticks to its full boost. |
 | `Accessories.AirJumpPower` | 0.36   | A Cloud in a Bottle's take-off speed (blocks a tick; 0.36 rises 0.96 blocks, a ground jump's 0.42 rises 1.25). |
-| `Hunger.Enabled`          | true    | Minecraft's food bar: the shanks over the hotbar, foods filling it (Minecraft's nutrition and saturation), regeneration from it, starvation, no sprint at 6 or less, the Hunger effect. false: no shanks, foods heal health at once (as before), thirst rules regeneration, the HUD's rows where they were. |
+| `Hunger.Enabled`          | true    | Minecraft's food bar: the FOOD status icon, foods filling it (Minecraft's nutrition and saturation), regeneration from it, starvation, no sprint at 6 or less, the Hunger effect. false: no FOOD icon, foods heal health at once (as before), thirst rules regeneration. |
 | `Hunger.NaturalRegeneration` | true | Minecraft's naturalRegeneration rule: a full bar with saturation heals half a heart's worth every 10 ticks (for up to 6 exhaustion), 18 or more half a heart every 80 ticks (for 6); replaces Roblox's regeneration. false: no natural regeneration at all. |
 | `Hunger.StarvationFloor`  | 1       | Starvation (food 0) hurts half a heart every 80 ticks while health is above this many half hearts (Minecraft's normal difficulty: 1; easy 10; 0 = to death, hard). |
 | `Hunger.EffectExhaustion` | 0.005   | Food exhaustion a tick of Minecraft's Hunger effect, per level (rotten flesh's 30 s: 3, most of a point). |
-| `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no HUD, no damage). |
+| `ToughAsNails.Thirst` / `Temperature` | true / true | Tough As Nails' thirst and body temperature (each off: no stats, no THIRST or TEMPERATURE status icon, no damage). |
 | `ToughAsNails.ThirstRegeneration` | true | Health comes back only with thirst 18+: with hunger on as a condition of hunger's regeneration (both bars high), with it off by thirst's own (half a heart every 80 ticks for 6 exhaustion), replacing Roblox's regeneration; false: thirst has no say (hunger off: Roblox's stays). Nothing heals while fully frozen or overheated. |
 | `ToughAsNails.DehydrationFloor` | 1 | Half hearts dehydration (a hurt every 120 ticks) stops at (Minecraft's normal difficulty; 0: to death). |
 | `ToughAsNails.HandDrinking` / `HotExhaustion` | true / 0.005 | Sipping from water sources with an empty hand; thirst exhaustion a tick while hot. |
@@ -2392,10 +2466,10 @@ for performance:
 | `Apocalypse.BloodMoon` waves | WaveInterval 600, WaveBase 6, WavePerMoon 2, CapBase 24, CapPerMoon 4, CapMax 60, HuntInterval 100 | Waves of WaveBase + WavePerMoon × k a player every WaveInterval ticks into a cap of CapBase + CapPerMoon × k (at most CapMax), k the moon's number; hunts given out every HuntInterval ticks; the world's limits `MaxMobs` / `MaxHostile` 360 / 260 meanwhile. |
 | `Apocalypse.BloodMoon.Tint` / `TintStrength` / `MoonSize` | {170, 28, 28} / 0.55 / 1.6 | The red sky: the light's and haze's tint at full strength, the moon's size (times the place's). |
 | `Apocalypse.Survivor` | DayCounter true, SyncTicks 1200 | The day counter for everyone (false hides it whatever the setting says); how often the server sends each player their record. |
-| `Mana.Enabled`            | true    | Terraria's mana: stars on the HUD, regeneration, magic weapons, mana potions' mana and Fallen Stars (false: none of it; the store still saves what a character has). |
+| `Mana.Enabled`            | true    | Terraria's mana: the MANA status icon, regeneration, magic weapons, mana potions' mana and Fallen Stars (false: none of it; the store still saves what a character has). |
 | `Mana.Base` / `PerCrystal` / `MaxCrystals` / `Max` | 20 / 20 / 9 / 400 | Mana to start with, per Mana Crystal used, crystals usable (200 with nine), and the most with accessories. |
 | `Mana.SicknessSeconds` / `SicknessMax` / `SicknessDamage` | 5 / 10 / 0.05 | Mana Sickness: seconds each mana potion adds, the most, and the share of magic damage cut per second left. |
-| `Mana.HudLinger`          | 3       | Seconds the HUD's mana stars stay after mana changed (they also show while a magic weapon is held or mana isn't full). |
+| `Mana.HudLinger`          | 3       | Seconds the MANA status icon stays lit after mana changed (it is also lit while a magic weapon is held or mana isn't full; dimmed otherwise). |
 | `Mana.Stars`              | PerNight 5, 16..48 blocks, 40 high | Fallen Stars: about PerNight a night for each player, onto the top block of a column MinDistance..MaxDistance blocks away, from FallHeight above it, between NightStart 13000 and NightEnd 23000 (the ones on the ground vanish at NightEnd); `Enabled = false`: none. |
 | `Explosions.BucketPower` / `MinPower` / `MaxPower` | 4 / 1 / 12 | Burning fuel: a blast's power is BucketPower × the cube root of its buckets, within these. |
 | `Explosions.FlowingShare` | 1/16    | What a flowing fuel cell counts, times its fill (a source is a bucket). |
@@ -2411,7 +2485,7 @@ for performance:
 | `Nuke.EditsPerTick` / `ReadsPerTick` | 500 / 16000 | Cost bounds per server tick (each edit is 12 bytes to every client). |
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Effects.FluidEffects` | true | Oil and fuel give their effects (Slowness II and Oil Coated; Nausea, Poison and Fuel Soaked); off, they leave players be (potions and `/effect` still work). |
-| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: Tough As Nails' status row over the hotbar shows Climate Clemency, Internal Warmth and Chill). |
+| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: the status icons' badges show Climate Clemency, Internal Warmth and Chill too). |
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Server.GenerationBudgetMs` / `UrgentGenerationBudgetMs` | 4 / 8 | Milliseconds a frame the server spends generating the chunks around players (a second generator, sliced: World/GenQueue); the urgent budget while a player's own chunk or one next to it is missing or more than `UrgentBacklog` (49) chunks wait. |
@@ -2489,6 +2563,10 @@ for performance:
 | `Settings.Key` / `GamepadButton` | P / DPadRight | Open and close the Options menu (the key: the Options key binding's default). |
 | `Settings.ApplyDelay`     | 0.4     | Seconds after the last change before costly ones apply (view, caves, plants, shadows, textures, far meshes). |
 | `Settings.SaveDelay` / `LoadWait` | 1.5 / 1 | Seconds before changes are sent to the server; seconds a joining client waits for its saved settings. |
+| `Ui.QuickbarFadeAfter` / `QuickbarFadeTo` / `QuickbarFadeTime` | 0 / 0.6 / 0.6 | The quickbar's fade: seconds without hotbar activity before it fades (0: never, the default), the transparency it fades to, and how long the fade takes. |
+| `Ui.InventoryBlur`        | 8       | How much the world behind an open inventory or creative screen blurs (BlurEffect.Size; 0: off); never on touch screens. |
+| `Ui.GroundRadius` / `GroundRefresh` | 4 / 0.25 | The GROUND strip lists dropped items within this many blocks (0: none; the strip stays as the place to throw), looked up this often (seconds). |
+| `Ui.StatusValues`         | false   | Numbers under the status icons (half hearts, points, the temperature, mana, armor); false: icons, colours and arrows only. |
 
 Lighting comes from `default.project.json`: Future technology, shadows, a dark ambient light, an
 Atmosphere (its daytime values: tests/spec/Atmosphere checks they match what the client writes)
@@ -2608,10 +2686,8 @@ and costs on a device):
   toasts, waves of hunters on the ground (none on roofs); `/time set day` and `maxMobs` is back to
   320; zombies round a player sealed in a bunker walk off at dawn.
 - **A horde breaking in:** a door, a plank wall and a Barricade of a city building giving way.
-- **The hunger shanks:** how the procedural drumsticks read next to the hearts and droplets (full,
-  half, empty; green under `/effect give @s hunger`; the jitter with no saturation), the droplets,
-  thermometer, item name and status row a row higher, nothing touching on a phone at its GUI
-  scale, and the sprint refused at 6 food with a real controller.
+- **Hunger:** the sprint refused at 6 food with a real controller (the FOOD status icon is in the
+  inventory and HUD checklist below).
 - **The survival HUD:** the day line wrapping on an iPad (1180 × 820) the day before a moon, the
   toasts' widths, no "You survived" toast after dying under the moon; the regeneration pause with
   Tough As Nails' thirst and temperature and Minecraft's hunger all off; with `Characters.Enabled` off, the survivor
@@ -2623,6 +2699,41 @@ and costs on a device):
   Lune, up to about 5) in the MicroProfiler.
 - **Old worlds and commands:** a world saved before the ruins (no `ruins` key) loads without them;
   `/locate structure #ruins`, `city` and `bunker`; `/locate poi medicine_cabinet`.
+
+**Studio checklist for the inventory and HUD** (the survival look; the Lune specs check its layout,
+rules and layers, not how it looks): at 1920 × 1080, 1366 × 768, 667 × 375 touch emulation and
+568 × 320:
+
+- **The inventory:** `E` opens three columns (two on a narrow phone); every click, shift-click,
+  drag, double click, number key and `Q` works on every section and on the band's quickbar;
+  folded sections take no clicks (and a folded BACKPACK or chest still counts what it holds); a
+  chest, a crafting table, a furnace and each machine show in VICINITY with working gauges (a
+  folded machine's energy bar and tanks give no tooltip); the grid lines and hairlines at
+  fractional scales; the 360 px tall phones (800 × 360, 740 × 360) with the screen under the top
+  bar and its band just above the bottom.
+- **JEI and creative:** JEI docks in ITEMS and its `+` fills the 2 × 2 and the 3 × 3; the recipe
+  view shows over the middle and right columns; creative's tabs switch, its grid scrolls and its
+  thumb drags; the creative and recipe title bars beside the inventory's section bars, Back and
+  close still clickable over them.
+- **Equipment:** the eyes hide looks; closed accessory slots say when they open; HANDS follows the
+  selected slot (and reads at UIScale 1.5); the player preview's camera, held item and looks.
+- **Throwing:** a stack thrown on the GROUND strip and outside the screen, nowhere else; a touch
+  tap on the strip does not close; the strip's items within 4 blocks, its polling cost.
+- **The quickbar:** its numbers boxed over real item pictures (over, not under them; on the HUD
+  and in the inventory's band, and after rebinding a key), the selection, no fade by default (and the fade with `Config.Ui.QuickbarFadeAfter` above 0); the
+  attack indicator's cell; the spectator menu drawn on it; the creative row's clicks and hover;
+  the touch buttons' hit areas and art; the chat's lines and "Chat disabled in client options."
+  above the lifted quickbar at GUI Scale 1-3.
+- **The status icons:** in the HUD (levels, blinking, arrows, badges and their numbers, the
+  knowledge bar, the placement on each screen) and docked in the inventory's band while it is
+  open (in the right place at its scale); the Thermometer reading in the item-in-hands box; the
+  frost and heat edges; the effect icons leaving the badges' effects out.
+- **The look:** the tooltip's delay, picture, liquid pill and a count changing under the pointer;
+  the drag outlines' colours; Roboto's weights (does Light exist?); UIStroke thickness under
+  UIScale (`Theme.STROKE_FOLLOWS_UISCALE`); the silhouettes drawn through EditableImages and the
+  blocky fallback without them; the vignette and blur (and the blur without the vignette);
+  gamepad selection order and Focus red; ViewportFrame cost on a low-end device; Options, WAILA
+  and the skill tree unchanged.
 
 `Seed = nil` gives every server a random world; set a number for a fixed one. With the title
 screen off, `World.Type` picks the world type (`"default"`, `"superflat"`, `"void"`,

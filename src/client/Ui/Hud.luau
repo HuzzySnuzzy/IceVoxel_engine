@@ -104,47 +104,8 @@ local NAME_Y = HudLayout.QUICK.name
 local TOUCH_BUTTON = 22
 -- The spectator menu's label: in the item box's row (SpectatorGui.renderTooltip).
 local SPECTATOR_LABEL_Y = NAME_Y
--- The item box: its padding, the gap after the condition dot, the gaps around the reading's arrow.
-local NAME_PAD = 3
-local DOT_GAP = 3
-local READING_GAP = 5
-local ARROW_GAP = 2
--- The text's faint outline (readable over a bright sky).
-local NAME_STROKE_T = 0.75
--- The attack square's rising fill (white, a little see-through).
-local ATTACK_FILL_T = 0.35
 -- The item that reads the temperature out.
 local THERMOMETER = Items.id.Thermometer
-
--- The touch "..." button's dots, and the skill tree's and chat's glyphs (one colour: white).
-local MORE_ART = { "##.##.##", "##.##.##" }
--- The skill tree: three nodes joined.
-local SKILLS_ART = {
-	"....###....",
-	"....###....",
-	".....#.....",
-	".#########.",
-	".#.......#.",
-	"###.....###",
-	"###.....###",
-	".#.......#.",
-	".#.......#.",
-	"###.....###",
-}
--- The chat: a speech bubble.
-local CHAT_ART = {
-	".#########.",
-	"#.........#",
-	"#.........#",
-	"#..#.#.#..#",
-	"#.........#",
-	"#.........#",
-	".##.######.",
-	".#.#.......",
-	".##........",
-}
--- The reading's arrow (3 x 5, pointing right: value to target).
-local ARROW_ART = { "#..", "##.", "###", "##.", "#.." }
 
 local Hud = {}
 
@@ -352,8 +313,7 @@ type NameBox = {
 
 local function nameLabel(parent: Instance, scaled: Style.Scaled): TextLabel
 	local label = Style.Dayz.label(parent, "", 0, 0, 0, 0, "body", Style.Dayz.Colour.Text, 3, nil, scaled)
-	label.TextStrokeColor3 = Color3.new(0, 0, 0)
-	label.TextStrokeTransparency = NAME_STROKE_T
+	Style.Dayz.textStroke(label, "TextStrokeSoft")
 	label.TextTruncate = Enum.TextTruncate.AtEnd
 	return label
 end
@@ -366,14 +326,14 @@ local function buildNameBox(hotbar: Frame, scaled: Style.Scaled): NameBox
 	root.BackgroundTransparency = Dayz.Alpha.StripBody
 	root.Visible = false
 	local DOT = Theme.Size.DOT
-	local dot = Dayz.dot(root, NAME_PAD, (NAME_H - DOT) / 2, DOT, 2)
+	local dot = Dayz.dot(root, Theme.Size.NAME_PAD, (NAME_H - DOT) / 2, DOT, 2)
 	local arrow = Instance.new("Frame")
 	arrow.Name = "Trend"
 	arrow.BackgroundTransparency = 1
 	arrow.Size = UDim2.fromOffset(3, 5)
 	arrow.ZIndex = 3
 	arrow.Parent = root
-	local arrowParts = Dayz.glyph(arrow, 0, 0, ARROW_ART, Dayz.Colour.Text, 1)
+	local arrowParts = Dayz.glyph(arrow, 0, 0, Dayz.Art.readingArrow, Dayz.Colour.Text, 1)
 	local name, value, target = nameLabel(root, scaled), nameLabel(root, scaled), nameLabel(root, scaled)
 	return {
 		root = root,
@@ -402,17 +362,18 @@ end
 	reading (`reading`: the body temperature and its target, rounded; nil: none).
 ]]
 local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { number }?)
-	local NAME_H = Theme.Size.NAME_H
-	local x = NAME_PAD
+	local Size = Theme.Size
+	local NAME_H = Size.NAME_H
+	local x = Size.NAME_PAD
 	local condition = lines and lines.condition
 	box.dot.Visible = condition ~= nil
 	if condition then
 		box.dot.BackgroundColor3 = Style.Dayz.Condition[condition.name]
-		x += Theme.Size.DOT + DOT_GAP
+		x += Size.DOT + Size.NAME_DOT_GAP
 	end
 	local text = if lines then lines.name else ""
 	box.name.Text = text
-	local nameW = math.min(measure(text), WIDTH - 2 * NAME_PAD)
+	local nameW = math.min(measure(text), WIDTH - 2 * Size.NAME_PAD)
 	place(box.name, x, nameW + 1, NAME_H)
 	x += nameW
 	box.value.Visible = reading ~= nil
@@ -422,23 +383,23 @@ local function layoutNameBox(box: NameBox, lines: Theme.HandsLines?, reading: { 
 		local value, target = reading[1], reading[2]
 		local valueText = StatusLayout.valueText("temperature", value)
 		local targetText = StatusLayout.valueText("temperature", target)
-		x += READING_GAP
+		x += Size.READING_GAP
 		local w = measure(valueText)
 		box.value.Text = valueText
 		box.value.TextColor3 = Style.Dayz.Zone[Temperature.zone(value)]
 		place(box.value, x, w + 1, NAME_H)
-		x += w + ARROW_GAP
+		x += w + Size.READING_ARROW_GAP
 		box.arrow.Position = UDim2.fromOffset(x, (NAME_H - 5) / 2)
 		local trend = if target > value then Style.Dayz.Zone[1] elseif target < value then Style.Dayz.Zone[-1] else nil
 		Style.Dayz.tint(box.arrow, trend or Style.Dayz.Colour.Text)
-		x += 3 + ARROW_GAP
+		x += 3 + Size.READING_ARROW_GAP
 		w = measure(targetText)
 		box.target.Text = targetText
 		box.target.TextColor3 = Style.Dayz.Zone[Temperature.zone(target)]
 		place(box.target, x, w + 1, NAME_H)
 		x += w
 	end
-	local width = math.min(x + NAME_PAD, WIDTH)
+	local width = math.min(x + Size.NAME_PAD, WIDTH)
 	box.root.Size = UDim2.fromOffset(width, NAME_H)
 	box.root.Position = UDim2.fromOffset((WIDTH - width) / 2, NAME_Y)
 end
@@ -451,7 +412,7 @@ local function fadeNameBox(box: NameBox, alpha: number)
 	box.dot.BackgroundTransparency = 1 - (1 - Theme.DOT_T) * alpha
 	for _, label in box.labels do
 		label.TextTransparency = gone
-		label.TextStrokeTransparency = 1 - (1 - NAME_STROKE_T) * alpha
+		label.TextStrokeTransparency = 1 - (1 - Dayz.Alpha.TextStrokeSoft) * alpha
 	end
 	for _, part in box.arrowParts do
 		part.BackgroundTransparency = gone
@@ -518,8 +479,8 @@ function Hud.start()
 	local attack = Style.Dayz.quickCell(hotbar, HudLayout.attackX(false), BAR_Y + 2, 3, scaled)
 	attack.base.Name = "AttackIndicator"
 	attack.base.Visible = false
-	local fill = Style.frame(attack.base, 1, 17, 16, 0, Style.Dayz.Colour.Quantity, 4)
-	fill.BackgroundTransparency = ATTACK_FILL_T
+	local fill = Style.frame(attack.base, 1, 17, 16, 0, Style.Dayz.Colour.AttackFill, 4)
+	fill.BackgroundTransparency = Style.Dayz.Alpha.AttackFill
 	attackSlot, attackFill = attack.base, fill
 
 	-- The spectator menu, in the quickbar's place.
@@ -532,7 +493,7 @@ function Hud.start()
 	--[[ Touch buttons ]]
 
 	-- The "..." button opens the inventory (for spectators it is the middle click).
-	local more, moreButton = touchButton(canvas, "More", WIDTH + 2, BAR_Y, MORE_ART, function()
+	local more, moreButton = touchButton(canvas, "More", WIDTH + 2, BAR_Y, Style.Dayz.Art.more, function()
 		if mode == "play" and GameMode.isSpectator(ClientInventory.mode()) then
 			-- (Spectators have no inventory: the button is their middle click.)
 			SpectatorGui.middleClick()
@@ -552,15 +513,22 @@ function Hud.start()
 	end)
 	HoverTip.attach(gearButton, "hud.options")
 	-- The skill tree over the gear (progression on).
-	local skills, skillsButton = touchButton(canvas, "Skills", -(TOUCH_BUTTON + 2), BAR_Y - 24, SKILLS_ART, function()
-		if skillsHandler then
-			SoundPlayer.click()
-			skillsHandler()
+	local skills, skillsButton = touchButton(
+		canvas,
+		"Skills",
+		-(TOUCH_BUTTON + 2),
+		BAR_Y - 24,
+		Style.Dayz.Art.skills,
+		function()
+			if skillsHandler then
+				SoundPlayer.click()
+				skillsHandler()
+			end
 		end
-	end)
+	)
 	HoverTip.attach(skillsButton, "hud.skills")
 	-- The chat over the "..." button (Ui/Chat).
-	local chat, chatButton = touchButton(canvas, "Chat", WIDTH + 2, BAR_Y - 24, CHAT_ART, function()
+	local chat, chatButton = touchButton(canvas, "Chat", WIDTH + 2, BAR_Y - 24, Style.Dayz.Art.chat, function()
 		if chatHandler then
 			SoundPlayer.click()
 			chatHandler()

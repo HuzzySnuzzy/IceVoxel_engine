@@ -15,9 +15,10 @@
 	             snowflake
 	  chevrons   a rising and a falling chevron (a wide flat "^" and "v"), CHEVRON_W x CHEVRON_H
 
-	`render(name)` draws one into a mask (SIZE x SIZE pixels; the chevrons CHEVRON_W x CHEVRON_H),
-	which Style.Dayz.maskImage shows smaller and keeps, once, by name. Names: the notifiers'
-	("health"), the badges' (Effects names: "Bleeding"), "chevronUp" and "chevronDown".
+	`render(name)` draws one into a mask (SIZE x SIZE pixels; the chevrons CHEVRON_W x CHEVRON_H;
+	SAMPLES x SAMPLES samples a pixel), which Style.Dayz.maskImage shows smaller and keeps, once, by
+	name. Names: the notifiers' ("health"), the badges' (Effects names: "Bleeding"), "chevronUp"
+	and "chevronDown".
 ]]
 
 local Masks = require(script.Parent.Masks)
@@ -28,6 +29,10 @@ local StatusGlyphs = {}
 StatusGlyphs.SIZE = 48
 StatusGlyphs.CHEVRON_W = 48
 StatusGlyphs.CHEVRON_H = 20
+-- Samples per axis in each pixel: 3 x 3 (nine levels of edge) like Ui/Silhouettes. Drawing a
+-- mask costs its samples and Style.Dayz draws at least one a frame; 4 x 4 cost the slowest
+-- glyph about 1.6 times as long (65 against 41 ms under Lune).
+StatusGlyphs.SAMPLES = 3
 
 local function circle(x: number, y: number, r: number, cut: boolean?): Masks.Op
 	return { shape = { kind = "circle", x = x, y = y, r = r }, cut = cut }
@@ -216,9 +221,9 @@ end
 function StatusGlyphs.render(name: string): Masks.Mask
 	local ops = StatusGlyphs.ops(name) or {}
 	if name == "chevronUp" or name == "chevronDown" then
-		return Masks.render(ops, StatusGlyphs.CHEVRON_W, StatusGlyphs.CHEVRON_H)
+		return Masks.render(ops, StatusGlyphs.CHEVRON_W, StatusGlyphs.CHEVRON_H, StatusGlyphs.SAMPLES)
 	end
-	return Masks.render(ops, StatusGlyphs.SIZE, StatusGlyphs.SIZE)
+	return Masks.render(ops, StatusGlyphs.SIZE, StatusGlyphs.SIZE, StatusGlyphs.SAMPLES)
 end
 
 return StatusGlyphs

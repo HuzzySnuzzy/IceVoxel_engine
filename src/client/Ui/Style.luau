@@ -33,7 +33,11 @@
 	    drawings are Ui/Silhouettes, `silhouette`) shown by `maskImage` through an EditableImage
 	    made in the game (white, tinted), as blocky Frames (`glyph`) where an image can't be made.
 	    A mask is drawn once per name, on a later frame than the one that first asks for it (a
-	    few milliseconds a frame at most), never in a burst when a screen opens.
+	    few milliseconds a frame at most), never in a burst when a screen opens. The look's
+	    one-colour pixel art (touch buttons, eyes, the reading's arrow) is `Art`.
+	  * A quickbar cell (`quickCell`) layers its face, its owner's item picture, its number box and
+	    a hover outline in that order (`QuickZ`); a picture goes inside the cell (`quickSlot` for an
+	    inventory slot), never beside it, or it would cover the number box.
 	  * No sharp-edged flat bars: the grey top headers and the black section bars carry a faint
 	    vertical gradient (Theme.Gradient) averaging their tokens.
 	  * Outlines are UIStrokes in Border mode (`outline`: never Contextual, which would stroke the
@@ -727,6 +731,88 @@ Dayz.Condition = strict("Condition", conditionColours)
 
 -- Text sizes by role (Theme.Text).
 Dayz.Text = Theme.Text
+
+-- A 16 px item icon at this UIScale fills a section header's picture (Theme HEADER_PICTURE).
+Dayz.PICTURE_SCALE = Theme.Size.HEADER_PICTURE / Style.ITEM
+
+--[[
+	The look's one-colour pixel art ("#" rows, drawn with `glyph`): the HUD's touch buttons (the
+	"..." that opens the inventory, the skill tree's three joined nodes, the chat's speech bubble),
+	the arrow of a Thermometer's reading in the item-in-hands box (3 x 5, value to target), and the
+	inventory's eyes, open (shown) and shut (hidden): 9 x 9 for a finger's accessory eye on touch,
+	6 x 6 in a slot's corner.
+]]
+Dayz.Art = table.freeze({
+	more = table.freeze({ "##.##.##", "##.##.##" }),
+	skills = table.freeze({
+		"....###....",
+		"....###....",
+		".....#.....",
+		".#########.",
+		".#.......#.",
+		"###.....###",
+		"###.....###",
+		".#.......#.",
+		".#.......#.",
+		"###.....###",
+	}),
+	chat = table.freeze({
+		".#########.",
+		"#.........#",
+		"#.........#",
+		"#..#.#.#..#",
+		"#.........#",
+		"#.........#",
+		".##.######.",
+		".#.#.......",
+		".##........",
+	}),
+	readingArrow = table.freeze({ "#..", "##.", "###", "##.", "#.." }),
+	eye = table.freeze({
+		".........",
+		"..#####..",
+		".#.....#.",
+		"#..###..#",
+		"#..###..#",
+		"#..###..#",
+		".#.....#.",
+		"..#####..",
+		".........",
+	}),
+	eyeShut = table.freeze({
+		".........",
+		".........",
+		".........",
+		"#.......#",
+		".#.....#.",
+		"..#####..",
+		"..#.#.#..",
+		".........",
+		".........",
+	}),
+	smallEye = table.freeze({
+		"......",
+		".####.",
+		"#.##.#",
+		"#.##.#",
+		".####.",
+		"......",
+	}),
+	smallEyeShut = table.freeze({
+		"......",
+		"......",
+		"#....#",
+		".####.",
+		"#.#.#.",
+		"......",
+	}),
+} :: { [string]: { string } })
+
+-- Sets `label`'s text outline to the colour token `key` (TextStroke, TextStrokeSoft).
+function Dayz.textStroke(label: TextLabel, key: string)
+	label.TextStrokeColor3 = Dayz.Colour[key]
+	label.TextStrokeTransparency = Dayz.Alpha[key]
+end
 
 local function enumFont(name: string): Enum.Font
 	local ok, font = pcall(function()
@@ -1605,16 +1691,25 @@ end
 local numberShown: { [Frame]: string } = setmetatable({}, { __mode = "k" }) :: any
 
 --[[
+	The layers inside a quick cell's base (`quickCell`), from the bottom: its face, the item
+	picture its owner puts in the cell (an ItemIcon made inside the base at `item`, or a slot's
+	button through `quickSlot`), the number box, and a hover outline. The ScreenGuis order their
+	children by sibling (Ui/UiScale), so a picture made beside the cells instead, at any ZIndex,
+	would draw over every part of them, the number boxes too (tests/spec/Quickbar).
+]]
+Dayz.QuickZ = table.freeze({ face = 1, item = 2, number = 3, outline = 4 })
+
+--[[
 	A quickbar cell, 18 x 18 at (x, y): the cell's base, the face over it (painted by its owner),
-	and the number box (hidden until `paintNumber`).
+	and the number box (hidden until `paintNumber`), at the QuickZ layers.
 ]]
 function Dayz.quickCell(parent: Instance, x: number, y: number, z: number?, scaled: Scaled?): QuickCell
 	local size = Theme.Size.PITCH
 	local base = filled(parent, x, y, size, size, "QuickCell", z or 2)
 	base.Name = "QuickCell"
-	local face = Dayz.slotFace(base, 0, 0, size, size, 1)
+	local face = Dayz.slotFace(base, 0, 0, size, size, Dayz.QuickZ.face)
 	local bx, by, bw, bh = Theme.quickNumber(false)
-	local box = filled(base, bx, by, bw, bh, "QuickNumberBoxEmpty", 3)
+	local box = filled(base, bx, by, bw, bh, "QuickNumberBoxEmpty", Dayz.QuickZ.number)
 	box.Name = "Number"
 	box.Visible = false
 	Dayz.outline(box, Dayz.Colour.QuickNumberLineEmpty, Dayz.Alpha.QuickNumberLineEmpty, scaled)
@@ -1623,6 +1718,20 @@ function Dayz.quickCell(parent: Instance, x: number, y: number, z: number?, scal
 	digit.Size = UDim2.fromScale(1, 1)
 	digit.TextTransparency = Dayz.Alpha.QuickNumberTextEmpty
 	return { base = base, face = face, box = box, digit = digit }
+end
+
+--[[
+	Puts an item slot (ItemIcon.slot: its 18 x 18 `button` holding the picture, and its `hover`
+	outline) into quick cell `cell` at the cell's layers: the button over the face and under the
+	number box, the outline over the number box. The button takes the cell's top left (its item at
+	(1, 1): HudLayout.quickIcon), so placing the cell places the slot.
+]]
+function Dayz.quickSlot(cell: QuickCell, button: GuiObject, hover: GuiObject)
+	button.Position = UDim2.fromOffset(0, 0)
+	button.ZIndex = Dayz.QuickZ.item
+	button.Parent = cell.base
+	hover.ZIndex = Dayz.QuickZ.outline
+	hover.Parent = cell.base
 end
 
 --[[

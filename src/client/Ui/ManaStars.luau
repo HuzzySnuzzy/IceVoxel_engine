@@ -1,18 +1,20 @@
 --!strict
 --[[
-	The HUD's mana stars (Ui/ManaHud draws them), pure: which stars are full, half or empty, where
-	each goes, where the row sits and when it shows, so the tests check the layout without Roblox.
+	Terraria's mana stars, pure: which stars are full, half or empty, where each goes, where the row
+	sits and when it shows. The HUD no longer draws the stars (the status icons' MANA notifier,
+	Ui/StatusCluster, shows mana, dimmed while `shown` says the stars would not show); the row's
+	rules stay specced (tests/spec/Mana).
 
-	Terraria draws a star per 20 mana (Shared/Mana.STAR); here, in Minecraft's HUD language, a row
-	of 10 like the hearts (9 x 9 pixel art, 8 GUI px apart), left aligned:
+	Terraria draws a star per 20 mana (Shared/Mana.STAR); in Minecraft's HUD language the row was 10
+	like the hearts (9 x 9 pixel art, 8 GUI px apart), left aligned:
 	  state     a star is full with its 20, half with any part of them, else empty (the server
 	            sends whole mana, so "full" is honest: 19 shows half).
 	  rows      ten a row; a max past 200 (accessories) starts a second row 10 px above.
-	  layout    the bottom row sits in the armor's row (Ui/Hud's ARMOR_Y 21) when no armor icons
-	            show, else a row above them (11). The held item's name (11 in survival) and Tough
-	            As Nails' status row above it (Ui/SurvivalHud) then move up by `raise`: just enough
-	            for the name to clear the top row (0 when the stars take the armor's row alone, 10
-	            over armor or with two rows, 20 with both).
+	  layout    the bottom row sits in the armor's row (`armorY`) when no armor icons show, else a
+	            row above them (11). The held item's name (11 in survival) and a status row above
+	            it then move up by `raise`: just enough for the name to clear the top row (0 when
+	            the stars take the armor's row alone, 10 over armor or with two rows, 20 with
+	            both).
 	  shown     survival and adventure only (as the hearts), while a magic weapon is selected, while
 	            mana is not full, or for Config.Mana.HudLinger 3 s after it changed; never without
 	            mana (max 0: Config.Mana off, or nothing from the server yet).

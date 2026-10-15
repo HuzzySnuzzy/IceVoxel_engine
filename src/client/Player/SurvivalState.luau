@@ -2,9 +2,9 @@
 --[[
 	This player's thirst and body temperature (Tough As Nails) and food bar (Minecraft's hunger,
 	Shared/Hunger) as the server last sent them (Protocol Survival, server Players/ToughAsNails):
-	what the HUD (Ui/SurvivalHud), drinking (Interaction/Drinking), eating (Interaction/Eating:
-	`foodLevel`), sprinting (Player/MovementController: `tooHungry`) and F3 (Debug/DebugOverlay)
-	read. nil until the first message, and for good when Config.ToughAsNails turns thirst and
+	what the HUD (Ui/StatusCluster's status icons, Ui/SurvivalHud's frost and heat), drinking
+	(Interaction/Drinking), eating (Interaction/Eating: `foodLevel`), sprinting
+	(Player/MovementController: `tooHungry`) and F3 (Debug/DebugOverlay) read. nil until the first message, and for good when Config.ToughAsNails turns thirst and
 	temperature off and Config.Hunger is off (the server sends nothing).
 ]]
 

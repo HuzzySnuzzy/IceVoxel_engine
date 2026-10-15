@@ -332,7 +332,8 @@ local list: { EffectSpec } = {
 		external = true,
 	},
 	-- 28: Minecraft's Hunger (MobEffects.HUNGER, its colour), from rotten flesh and raw chicken
-	-- (Items/Foods): the food bar drains faster and its shanks turn green (client Ui/SurvivalHud).
+	-- (Items/Foods): the food bar drains faster (the HUD's FOOD icon falls, with a Hunger badge:
+	-- client Ui/StatusCluster).
 	-- Kept by Players/Effects like any other; Shared/Hunger reads its level.
 	{
 		name = "Hunger",

@@ -2,8 +2,8 @@
 --[[
 	Terraria's mana (Config.Mana), shared and pure: how much a player may hold, how it comes back,
 	what spending and potions do, and Mana Sickness. Server Players/Mana plays it out at 20 ticks a
-	second (the authority: casting, potions, crystals, saving), client Player/ManaState and
-	Ui/ManaHud only show what the server says.
+	second (the authority: casting, potions, crystals, saving), client Player/ManaState and the
+	status icons' MANA notifier (Ui/StatusCluster) only show what the server says.
 
 	  Capacity   max = min(Max 400, Base 20 + PerCrystal 20 x crystals + the accessories' `mana`)
 	             (Terraria's statManaMax2: 20 to start, each Mana Crystal adds 20 for good while

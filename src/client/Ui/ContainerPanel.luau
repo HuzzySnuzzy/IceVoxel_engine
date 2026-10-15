@@ -42,17 +42,17 @@ local InventoryColumns = require(script.Parent.InventoryColumns)
 local MenuLayout = require(script.Parent.MenuLayout)
 local SlotWidgets = require(script.Parent.SlotWidgets)
 local Style = require(script.Parent.Style)
+local Theme = require(script.Parent.Theme)
 
 type Window = Types.Window
 
 local Dayz = Style.Dayz
 
--- The bars' thickness (GUI pixels), and the chevron's size.
-local BAR = 2
-local CHEVRON = 8
--- A text line's height, and the room kept right of a line (the energy bar).
+-- (Gauge bars, the chevron and the room kept right of a status line: Theme.Size's GAUGE, CHEVRON
+-- and LINE_ROOM.)
+local Size = Theme.Size
+-- A text line's height.
 local LINE_H = 8
-local LINE_ROOM = 16
 
 -- A machine's tank gauge: its frame, the fluid filling it (rows and fluid shown).
 type Tank = { frame: Frame, fill: Frame, spot: MenuLayout.TankSpot, shown: number, fluid: number }
@@ -81,9 +81,10 @@ type Self = ContainerPanel & {
 local ContainerPanel = {}
 ContainerPanel.__index = ContainerPanel
 
--- A horizontal bar `BAR` tall across the middle of `rect` (body coordinates), on the light track.
+-- A horizontal bar `Size.GAUGE` tall across the middle of `rect` (body coordinates), on the light track.
 local function quantityBar(body: Frame, rect: MenuLayout.Rect, cut: number, colour: Color3): Style.Bar
-	local bar = Dayz.bar(body, rect.x, rect.y + cut + math.floor((rect.h - BAR) / 2), rect.w, BAR, false, 4)
+	local bar =
+		Dayz.bar(body, rect.x, rect.y + cut + math.floor((rect.h - Size.GAUGE) / 2), rect.w, Size.GAUGE, false, 4)
 	bar.track.BackgroundColor3 = Dayz.Colour.QuantityTrack
 	bar.track.BackgroundTransparency = Dayz.Alpha.QuantityTrack
 	bar.fill.BackgroundColor3 = colour
@@ -159,13 +160,13 @@ function ContainerPanel.new(
 	-- A crafting table's static arrow: a chevron.
 	local arrow = layout.arrow
 	if arrow then
-		local chevron = SlotWidgets.silhouette(
+		local chevron = Dayz.silhouette(
 			body,
 			"chevron",
-			arrow.x + math.floor((arrow.w - CHEVRON) / 2),
-			arrow.y + cut + math.floor((arrow.h - CHEVRON) / 2),
-			CHEVRON,
-			CHEVRON,
+			arrow.x + math.floor((arrow.w - Size.CHEVRON) / 2),
+			arrow.y + cut + math.floor((arrow.h - Size.CHEVRON) / 2),
+			Size.CHEVRON,
+			Size.CHEVRON,
 			Dayz.Colour.Chevron,
 			Dayz.Alpha.Chevron,
 			3
@@ -187,7 +188,15 @@ function ContainerPanel.new(
 	local energy = layout.energy
 	if energy then
 		-- Mekanism's power bar: a thin bar down its middle, filling from the bottom.
-		local bar = Dayz.bar(body, energy.x + math.floor((energy.w - BAR) / 2), energy.y + cut, BAR, energy.h, true, 4)
+		local bar = Dayz.bar(
+			body,
+			energy.x + math.floor((energy.w - Size.GAUGE) / 2),
+			energy.y + cut,
+			Size.GAUGE,
+			energy.h,
+			true,
+			4
+		)
 		self.energy = bar
 		self.energyHit = hitFrame(body, energy, cut)
 		table.insert(parts, bar.track)
@@ -200,7 +209,7 @@ function ContainerPanel.new(
 			"",
 			status.x,
 			status.y + cut,
-			MenuLayout.WIDTH - status.x - LINE_ROOM,
+			MenuLayout.WIDTH - status.x - Size.LINE_ROOM,
 			LINE_H,
 			"small",
 			Dayz.Colour.TextSoft,
@@ -219,7 +228,7 @@ function ContainerPanel.new(
 			"",
 			at.x,
 			at.y + cut,
-			MenuLayout.WIDTH - at.x - LINE_ROOM,
+			MenuLayout.WIDTH - at.x - Size.LINE_ROOM,
 			LINE_H,
 			"small",
 			Dayz.Colour.TextSoft,

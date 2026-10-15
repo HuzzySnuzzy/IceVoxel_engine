@@ -19,6 +19,11 @@
 	          regression: the pictures were made beside the bar at z 5, which drew them over the
 	          whole bar, number boxes included (25 of a box's 36 pixels and its digit covered); the
 	          same check run on that old arrangement says so.
+	  band    the inventory's band puts each hotbar slot (ItemIcon.slot's button, picture and hover
+	          outline) into its quick cell with Style.Dayz.quickSlot: the number box over the
+	          picture, the hover over the box, the selection on top (InventoryScreen's source is
+	          checked for the call). Named regression: slots made beside the cells covered the
+	          boxes.
 	  paint   the faces: the selected slot's olive, occupied ones filled, the empty one empty; the
 	          numbers: the key names, shown only for a scale whose tiny text is 8 screen pixels
 	          tall or more, and never on a touch screen.
@@ -340,6 +345,79 @@ return function(t, shared, sharedRequire, _server, _client)
 		t.ok(not drawsOver(box, old.root), "the box under a picture made beside the bar")
 		t.ok(drawsOver(old.root, box), "the picture over the box")
 		t.ok(drawsOver(box, bar.icons[1].root), "and over the picture made in its cell")
+	end)
+
+	--[[
+		The inventory's band (Ui/InventoryScreen's buildBand): each hotbar slot is an ItemIcon.slot
+		(its 18 x 18 button holding the face, the picture and the hover outline) put into its quick
+		cell by Style.Dayz.quickSlot. Stand-in slot as ItemIcon.slot builds it (checked against its
+		source); the real Style.Dayz does the rest.
+	]]
+	local function slotStub(parent: any, x: number, y: number): (any, any, any)
+		local Dayz = Style.Dayz
+		local button = Style.itemButton(parent, x, y, nil)
+		Dayz.slotFace(button, 1, 1, 17, 17, 1)
+		local icon = ItemIconStub.new(button, 1, 1, 5, "dayz", nil)
+		local hover = Instance.new("Frame")
+		hover.Position = UDim2.fromOffset(1, 1)
+		hover.Size = UDim2.fromOffset(17, 17)
+		hover.ZIndex = 10
+		hover.Parent = button
+		return button, icon, hover
+	end
+
+	t.test("quickbar: the inventory band's slots sit in their cells, under the number boxes", function()
+		local slotSource = fs.readFile(ITEM_ICON)
+		local slotBody = string.match(slotSource, "function ItemIcon%.slot%((.-)\nend\n") or ""
+		for _, line in
+			{
+				"local button = Style.itemButton(parent, x, y, z)",
+				"local icon = ItemIcon.new(button, 1, 1, 5,",
+				"hover.ZIndex = 10",
+				"hover.Parent = button",
+			}
+		do
+			t.ok(string.find(slotBody, line, 1, true) ~= nil, `ItemIcon.slot: {line}`)
+		end
+		local screen = fs.readFile("src/client/Ui/InventoryScreen.luau")
+		for _, line in
+			{
+				'self.widgets:slot(cell.base, "band", 1, 1,',
+				"Dayz.quickSlot(cell, widget.view.button, widget.view.hover)",
+			}
+		do
+			t.ok(string.find(screen, line, 1, true) ~= nil, `InventoryScreen's band: {line}`)
+		end
+
+		local gui = Instance.new("ScreenGui")
+		gui.ZIndexBehavior = roblox.Enum.ZIndexBehavior.Sibling
+		local frame = Instance.new("Frame")
+		frame.ZIndex = 2
+		frame.Parent = gui
+		local selection = Instance.new("Frame")
+		selection.ZIndex = 9
+		selection.Parent = frame
+		for i = 1, 9 do
+			local at = HudLayout.quickCell(i, 0)
+			local cell = Style.Dayz.quickCell(frame, at.x, at.y, 2, nil)
+			local button, icon, hover = slotStub(cell.base, 1, 1)
+			Style.Dayz.quickSlot(cell, button, hover)
+			Style.Dayz.paintNumber(cell, tostring(i), true)
+			local picture = rectIn(icon.root, frame)
+			local want = HudLayout.quickIcon(i, 0)
+			t.ok(picture.x == want.x and picture.y == want.y, `slot {i}: the picture at HudLayout.quickIcon`)
+			t.ok(HudLayout.overlaps(rectIn(cell.box, frame), picture), `slot {i}: the box overlaps the picture`)
+			t.ok(drawsOver(cell.box, icon.root), `slot {i}: the number box over the picture`)
+			t.ok(drawsOver(cell.digit, icon.root), `slot {i}: its digit over the picture`)
+			t.ok(drawsOver(icon.root, cell.face), `slot {i}: the picture over the cell's face`)
+			t.ok(drawsOver(hover, cell.box), `slot {i}: the hover outline over the number box`)
+			t.ok(drawsOver(selection, cell.box) and drawsOver(selection, icon.root), `slot {i}: the selection on top`)
+		end
+		-- Named regression: the slots were made beside the cells (button z 4 in the band's frame),
+		-- which drew each picture over its whole cell, number box included.
+		local cell = Style.Dayz.quickCell(frame, 0, 0, 2, nil)
+		local _, icon = slotStub(frame, 1, 1)
+		t.ok(drawsOver(icon.root, cell.box), "the old band: the picture over the number box")
 	end)
 
 	t.test("quickbar: faces and numbers painted for the selection, the items and the scale", function()

@@ -1,7 +1,7 @@
 --!strict
 --[[
 	This player's knowledge, Age and skills as the server last sent them (Protocol Progress, server
-	Players/Progression): what the HUD's knowledge bar (Ui/Hud), the Age banner (Ui/AgeToast), the
+	Players/Progression): what the HUD's knowledge bar (Ui/StatusCluster), the Age banner (Ui/AgeToast), the
 	skill tree (Ui/SkillTreeScreen), the crafting screens' locked results and JEI's lock marks
 	read, and the rules the client predicts with the same functions as the server:
 

@@ -32,12 +32,11 @@ local Origin = require(Shared.World.Origin)
 local InventoryColumns = require(script.Parent.InventoryColumns)
 local ItemIcon = require(script.Parent.ItemIcon)
 local Style = require(script.Parent.Style)
+local Theme = require(script.Parent.Theme)
 
 local Dayz = Style.Dayz
-
--- What the tooltip of a ground item says under its name.
-local HINT = "Walk over it to pick it up"
-local DROP_HERE = "Drop here"
+-- The tooltip line under a ground item's name, and the empty strip's text (Theme.Words).
+local Words = Theme.Words
 
 type Place = { icon: ItemIcon.ItemIcon, hit: Frame, item: number?, count: number }
 
@@ -101,8 +100,19 @@ function GroundStrip.new(body: Frame, scaled: Style.Scaled): GroundStrip
 	Dayz.outline(outline, nil, nil, scaled)
 	outline.Parent = body
 
-	local hint =
-		Dayz.label(body, DROP_HERE, 0, 0, 0, 0, "small", Dayz.Colour.TextMuted, 6, Enum.TextXAlignment.Center, scaled)
+	local hint = Dayz.label(
+		body,
+		Words.DROP_HERE,
+		0,
+		0,
+		0,
+		0,
+		"small",
+		Dayz.Colour.TextMuted,
+		6,
+		Enum.TextXAlignment.Center,
+		scaled
+	)
 	hint.Size = UDim2.fromScale(1, 1)
 	hint.Visible = false
 
@@ -200,9 +210,9 @@ function GroundStrip.tooltipAt(self: Self, point: Vector2): { string }?
 		if item and Style.contains(place.hit, point) then
 			local name = Items.displayName(item)
 			if place.count > 1 then
-				return { name, `x {place.count}`, HINT }
+				return { name, `x {place.count}`, Words.GROUND_HINT }
 			end
-			return { name, HINT }
+			return { name, Words.GROUND_HINT }
 		end
 	end
 	return nil

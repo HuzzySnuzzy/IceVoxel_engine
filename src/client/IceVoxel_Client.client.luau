@@ -36,8 +36,10 @@
 	  Rendering/FluidFog         the view from inside water, lava, oil or fuel: Minecraft's fluid
 	                             fog in the fluid's colour and a tint
 	  Inventory/ClientInventory  the inventory, predicted (Inventory/Menu) and corrected by the server
-	  Ui/                        hotbar HUD, inventory and creative screens (Screens), item icons,
-	                             the spectator menu (SpectatorGui), the game mode switcher
+	  Ui/                        the HUD (Hud: the quickbar, Quickbar; the status icons,
+	                             StatusCluster), the inventory and creative screens (Screens) in
+	                             the dark survival look (Theme, Style.Dayz), item icons, the
+	                             spectator menu (SpectatorGui), the game mode switcher
 	                             (GameModeSwitcher: F3 + F4)
 	  Ui/Waila                   what the crosshair points at (Jade's WAILA; more while F3 is open)
 	  Interaction/               mining / placing / using blocks (BlockInteraction, CrackOverlay,
@@ -92,10 +94,11 @@
 	  Rendering/ExplosionView    explosions (the server's Explosion messages): the blast drawn, its
 	                             knockback on the movement, a short camera shake; the Nuke's
 	                             flash, fireball and mushroom cloud
-	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature from
-	                             the server, which Ui/SurvivalHud draws (droplets, the gauge, frost
-	                             and heat at the edges; Rendering/TemperatureGrade drains the
-	                             colour as they freeze and saturates it as they overheat);
+	  Player/SurvivalState       Tough As Nails: this player's thirst and body temperature (and
+	                             Minecraft's food bar) from the server, which Ui/StatusCluster
+	                             draws as status icons and Ui/SurvivalHud as frost and heat at the
+	                             edges (Rendering/TemperatureGrade drains the colour as they
+	                             freeze and saturates it as they overheat);
 	                             Interaction/Drinking drinks and fills
 	                             bottles and canteens (and drinks potions), Player/Exertion
 	                             reports sprinting and jumps
@@ -104,14 +107,15 @@
 	                             draws them in the top right corner (a list beside open screens),
 	                             Rendering/EffectView does Night Vision, Blindness and Nausea
 	  Debug/DebugOverlay         F3 statistics and Minecraft's debug keys (F3 + N, F3 + F4, F3 + Q)
-	  Player/ManaState           Terraria's mana from the server, which Ui/ManaHud draws as stars
-	                             over the hearts; Interaction/Casting casts magic weapons and
+	  Player/ManaState           Terraria's mana from the server, which Ui/StatusCluster draws as
+	                             the MANA status icon; Interaction/Casting casts magic weapons and
 	                             uses Mana Crystals (predicted), Rendering/ProjectileView flies
 	                             every magic projectile with the server's pure step (neon balls,
 	                             trails), and Fallen Stars glow (Entities/EntityRenderer)
 	  Player/ProgressionState    knowledge, the Age and skills from the server (the recipe gate on
-	                             the predicted inventory, mining and boiling perks), which Ui/Hud
-	                             draws as the knowledge bar; Ui/AgeToast shows a new Age's banner,
+	                             the predicted inventory, mining and boiling perks), which
+	                             Ui/StatusCluster draws as the knowledge bar under the status
+	                             icons; Ui/AgeToast shows a new Age's banner,
 	                             Ui/SkillTreeScreen the skill tree (K)
 	  Player/SurvivorState       the zombie apocalypse's survivor record from the server (days
 	                             alive, kills, blood moons survived), which Ui/SurvivorHud shows as

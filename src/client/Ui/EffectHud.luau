@@ -79,13 +79,6 @@ local LIST_ROOM = 132
 local LIST_MARGIN = 8
 local LIST_TOP = 40
 
--- An ambient effect's (a beacon's, a fluid's) square has a pale blue outline instead of the
--- hairline.
-local AMBIENT_RIM = Color3.fromRGB(150, 200, 230)
-local AMBIENT_RIM_T = 0.4
--- The hovered icon's line: a faint dark outline round its text.
-local TIP_STROKE_T = 0.4
-
 -- The effects the status icons show as badges (left out of the icons while they do).
 local BADGE_IDS: { [number]: boolean } = {}
 for _, name in StatusLayout.BADGES do
@@ -124,7 +117,8 @@ local function drawIcon(parent: Instance, x: number, y: number, entry: Effects.E
 	local square = Style.frame(parent, x, y, ICON, ICON, Dayz.Colour.Panel, z)
 	square.BackgroundTransparency = Dayz.Alpha.Panel
 	if entry.ambient then
-		Dayz.outline(square, AMBIENT_RIM, AMBIENT_RIM_T, scaled)
+		-- (An ambient effect's, a beacon's or a fluid's: a pale blue rim instead of the hairline.)
+		Dayz.outline(square, Dayz.Colour.AmbientRim, Dayz.Alpha.AmbientRim, scaled)
 	else
 		Dayz.outline(square, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	end
@@ -179,8 +173,7 @@ function EffectHud.start()
 		Enum.TextXAlignment.Right,
 		iconsScaled
 	)
-	tip.TextStrokeColor3 = Color3.new(0, 0, 0)
-	tip.TextStrokeTransparency = TIP_STROKE_T
+	Style.Dayz.textStroke(tip, "TextStroke")
 
 	local list = Instance.new("Frame")
 	list.Name = "List"

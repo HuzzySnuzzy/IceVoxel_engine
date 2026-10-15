@@ -102,6 +102,8 @@ JeiLayout.VIEW_HEIGHT = 166
 JeiLayout.TITLE_Y = 6
 JeiLayout.BACK = { x = 5, y = 4, w = 36, h = 12 } :: Rect
 JeiLayout.CLOSE = { x = 159, y = 4, w = 12, h = 12 } :: Rect
+-- The title bar behind them (a section bar, Theme's SECTION_HEADER tall), holding BACK and CLOSE.
+JeiLayout.TITLE_BAR = { x = 0, y = 3, w = JeiLayout.VIEW_WIDTH, h = 14 } :: Rect
 JeiLayout.PAGE_Y = 19
 JeiLayout.PREV = { x = 7, y = 18, w = 12, h = 12 } :: Rect
 JeiLayout.NEXT = { x = 157, y = 18, w = 12, h = 12 } :: Rect

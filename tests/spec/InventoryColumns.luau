@@ -16,6 +16,7 @@ return function(t, shared, require, _server, client)
 	local Blocks = require(shared.Blocks)
 	local Machines = require(shared.Machines)
 	local Types = require(shared.Inventory.Types)
+	local HudLayout = require(client.Ui.HudLayout)
 	local InventoryColumns = require(client.Ui.InventoryColumns)
 	local MenuLayout = require(client.Ui.MenuLayout)
 	local Theme = require(client.Ui.Theme)
@@ -900,15 +901,18 @@ return function(t, shared, require, _server, client)
 			t.eq(spot.store, "ground")
 			t.ok(inside(C.frame(spot), { x = 0, y = 0, w = 176, h = C.GROUND_H }), "a ground place inside the strip")
 		end
-		-- The band's cells: HudLayout's quickbar maths, inside the bar, apart.
+		-- The band's cells: HudLayout's quickbar maths from the bar's top left, inside the band's
+		-- quickbar (QUICK_W x QUICK_H), the item one pixel into its cell.
 		for i = 1, Types.HOTBAR_SIZE do
-			local x, y = C.quickIcon(i)
-			t.eq(x, 3 + 20 * (i - 1))
-			t.eq(y, 3)
-			local cx, cy = C.quickCell(i)
-			t.eq(cx, x - 1)
-			t.eq(cy, y - 1)
-			t.ok(cx >= 0 and cx + 18 <= 182 and cy + 18 <= 22, `cell {i} inside the bar`)
+			local icon, cell = HudLayout.quickIcon(i, 0), HudLayout.quickCell(i, 0)
+			t.eq(icon.x, 3 + 20 * (i - 1))
+			t.eq(icon.y, 3)
+			t.eq(cell.x, icon.x - 1)
+			t.eq(cell.y, icon.y - 1)
+			t.ok(
+				cell.x >= 0 and cell.x + cell.w <= C.QUICK_W and cell.y + cell.h <= C.QUICK_H,
+				`cell {i} inside the bar`
+			)
 		end
 		t.eq(C.spots("jei", input)[1], nil, "ITEMS has no slots")
 		t.eq(C.spots("character", input)[1], nil)

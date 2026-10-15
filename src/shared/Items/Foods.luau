@@ -4,7 +4,7 @@
 	meat mobs drop (Shared/Entities/MobList), the zombie apocalypse's tinned food and its medical
 	supplies, used with Minecraft's hold of the use button (Item.getUseDuration: 32 ticks for
 	food, a drink's hold as Shared/ToughAsNails/Drinks does it; an item may name its own
-	`useTicks`). With Minecraft's hunger on (Config.Hunger, Shared/Hunger) a food fills the shanks
+	`useTicks`). With Minecraft's hunger on (Config.Hunger, Shared/Hunger) a food fills the food bar
 	with Minecraft's nutrition and saturation modifier (FoodProperties: FoodData.eat adds the
 	nutrition to the food bar and nutrition x modifier x 2 to its saturation); with hunger off it
 	heals at once what its hunger would have brought back (`heal`, about half the nutrition: the
@@ -28,10 +28,11 @@
 
 	(nutrition in points of the 20, saturation the modifier and in brackets what it adds; heals in
 	half hearts, with hunger off.) Minecraft's Hunger effect (Shared/Effects: the food bar drains
-	faster, the shanks turn green) is what raw chicken and rotten flesh may bring, as in Minecraft;
-	with hunger off they bring Tough As Nails' Thirst effect instead (Shared/ToughAsNails/Thirst:
-	extra exhaustion of the thirst bar, the droplets turn green; nothing at all with thirst off
-	too), as before the food bar. Crackers are dry: their risk is the Thirst effect either way.
+	faster; the HUD's FOOD icon shows falling arrows and a Hunger badge) is what raw chicken and
+	rotten flesh may bring, as in Minecraft; with hunger off they bring Tough As Nails' Thirst
+	effect instead (Shared/ToughAsNails/Thirst: extra exhaustion of the thirst bar, the THIRST
+	icon's arrows fall and a Thirst badge shows; nothing at all with thirst off too), as before the
+	food bar. Crackers are dry: their risk is the Thirst effect either way.
 	Rolled once a food (`effect`, LivingEntity.addEatEffect). Cooking is the furnace's
 	(Crafting/Recipes); a mob that dies burning drops its meat cooked (`COOKED`, Minecraft's
 	furnace_smelt loot function).
