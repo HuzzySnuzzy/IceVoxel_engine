@@ -28,6 +28,11 @@
 	             menu's GUI scale from Ui/UiScale; the base GUI scale for an object under none),
 	             so it reads as the menu's own text. It is drawn on its own ScreenGui on the "Tip"
 	             layer, over every menu (the title screen's too).
+	  Look       an object under a root drawn in the inventory family's survival look (a root
+	             Style.Dayz.mark tagged: attribute IceVoxelLook = "dayz", found on the same walk up
+	             the ancestors that finds the scale) gets that look's dark box instead
+	             (Style.Dayz.tooltipBox: near-black, no border, white Roboto text), measured and
+	             wrapped in Roboto; the geometry stays TooltipLayout's.
 	`drawBox` draws the box itself (TooltipLayout.size, a 1 pixel purple border blended over the
 	translucent back, rows LINE apart with the text's shadow), for callers that place their own.
 ]]
@@ -91,6 +96,11 @@ local function measure(text: string): number
 	return Style.textWidth(text)
 end
 
+-- (The survival look's text: Roboto at the tooltip's size.)
+local function measureRoboto(text: string): number
+	return Style.Dayz.measure(text, TooltipLayout.TEXT)
+end
+
 -- Draws Minecraft's tooltip box with `rows` into `parent` at (0, 0); returns its width and height.
 function HoverTip.drawBox(parent: Instance, rows: { string }): (number, number)
 	local w, h = TooltipLayout.size(rows, measure)
@@ -140,9 +150,12 @@ function HoverTip.consumed(object: GuiObject): boolean
 	return at ~= nil and os.clock() - at < CONSUME
 end
 
--- The scale `object` is drawn at: the UIScales over it, or the base GUI scale under none.
-local function scaleOf(object: GuiObject): number
-	local scale, found = 1, false
+--[[
+	The scale `object` is drawn at (the UIScales over it, or the base GUI scale under none), and
+	whether it is under a root of the survival look (Style.Dayz.mark).
+]]
+local function scaleOf(object: GuiObject): (number, boolean)
+	local scale, found, survival = 1, false, false
 	local current: Instance? = object
 	while current and not current:IsA("LayerCollector") do
 		local uiScale = current:FindFirstChildWhichIsA("UIScale")
@@ -150,12 +163,15 @@ local function scaleOf(object: GuiObject): number
 			scale *= uiScale.Scale
 			found = true
 		end
+		if current:GetAttribute("IceVoxelLook") == "dayz" then
+			survival = true
+		end
 		current = current.Parent
 	end
 	if not found or scale <= 0 then
-		return UiScale.base()
+		return UiScale.base(), survival
 	end
-	return scale
+	return scale, survival
 end
 
 local function mousePoint(): Vector2
@@ -208,9 +224,15 @@ local function draw(object: GuiObject, text: string)
 		return
 	end
 	inner:ClearAllChildren()
-	local w, h = HoverTip.drawBox(inner, TooltipLayout.wrap(text, measure))
+	local scale, survival = scaleOf(object)
+	local w, h
+	if survival then
+		w, h = Style.Dayz.tooltipBox(inner, TooltipLayout.wrap(text, measureRoboto))
+	else
+		w, h = HoverTip.drawBox(inner, TooltipLayout.wrap(text, measure))
+	end
 	shownText, shownW, shownH = text, w, h
-	shownScale = scaleOf(object)
+	shownScale = scale
 	uiScale.Scale = shownScale
 	frame.Size = UDim2.fromOffset(w, h)
 end

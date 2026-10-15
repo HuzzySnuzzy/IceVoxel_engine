@@ -28,11 +28,11 @@
 	picture is drawn darker (Theme's ItemTint, ImageColor3: `setDimmed`'s colour wins while dimmed
 	and un-dimming gives the tint back), the count is a small dark box at the bottom right
 	(Style.Dayz.countBox: shown above 1, as wide as its digits, sized by the GUI scale through
-	`setScale`), and the bar is one pixel tall along the bottom (Theme.Size.BAR): a damaged durable
-	item's in its condition's colour (Theme.condition of MenuLayout.wear) on a dark track, a
-	canteen's sips in white on a light track (always: a quantity), an energy item's in the energy
-	colour. Nothing tints the cell. `setTransparency` fades the whole icon (the quickbar's fade),
-	combined with `setDimmed`.
+	`setScale`, its digits Light once they are tall enough on screen: Theme.thin), and the bar is
+	one pixel tall along the bottom (Theme.Size.BAR): a damaged durable item's in its condition's
+	colour (Theme.condition of MenuLayout.wear) on a dark track, a canteen's sips in white on a
+	light track (always: a quantity), an energy item's in the energy colour. Nothing tints the
+	cell. `setTransparency` fades the whole icon (the quickbar's fade), combined with `setDimmed`.
 
 	`ItemIcon.slot` is an inventory slot in that look (only the inventory family uses it): an 18 x
 	18 transparent button one pixel up and left of the item (the hit area), a face (17 x 17 inside
@@ -462,7 +462,8 @@ local function setDayzBar(self: Self, damage: number, data: Items.Data?)
 	paintFade(self)
 end
 
--- The dayz count box's size for `text` at the icon's scale.
+-- The dayz count box's size for `text` at the icon's scale, and its digits' weight (Light once
+-- they are tall enough on screen: Theme.thin).
 local function sizeCount(self: Self, text: string)
 	local box, label = self.countBox, self.countText
 	if box == nil or label == nil then
@@ -472,6 +473,7 @@ local function sizeCount(self: Self, text: string)
 	local height, size, digit = Theme.count(self.scale)
 	box.Size = UDim2.fromOffset(Theme.countWidth(text, digit), height)
 	label.TextSize = size
+	label.FontFace = Style.Dayz.face(Theme.thin(size, self.scale))
 end
 
 --[[
@@ -590,7 +592,8 @@ function ItemIcon.setDimmed(self: Self, dimmed: boolean, mild: boolean?)
 	end
 end
 
--- The GUI scale the icon is shown at: the dayz count box follows Theme.count. Classic: nothing.
+-- The GUI scale the icon is shown at: the dayz count box follows Theme.count (its size, its
+-- digits' weight). Classic: nothing.
 function ItemIcon.setScale(self: Self, scale: number)
 	if self.look ~= "dayz" or scale == self.scale or scale ~= scale or scale <= 0 then
 		return
@@ -713,7 +716,8 @@ export type Tab = { button: TextButton, frames: { GuiObject } }
 	A creative or JEI tab showing `item`, at x on top of a panel whose top edge is at y = TAB_HEIGHT
 	in `parent` (Minecraft's footprint and hit area), in the dayz look: an inactive tab is a dark
 	Panel square with a hairline behind the panel (ZIndex 0); the active one is TopHeader grey,
-	reaching down over the panel's edge (ZIndex 2) so it merges into it.
+	reaching down over the panel's edge (ZIndex 2) so it merges into it. A gamepad's selection is
+	the Focus outline (Style.Dayz.focus).
 ]]
 function ItemIcon.tab(parent: Instance, x: number, item: number?, active: boolean, scaled: Style.Scaled?): Tab
 	local Dayz = Style.Dayz
@@ -738,8 +742,8 @@ function ItemIcon.tab(parent: Instance, x: number, item: number?, active: boolea
 	button.AutoButtonColor = false
 	button.Size = UDim2.fromScale(1, 1)
 	button.ZIndex = 8
-	button.SelectionImageObject = Style.selectionImage
 	button.Parent = root
+	Dayz.focus(button, scaled)
 	return { button = button, frames = frames }
 end
 

@@ -29,6 +29,17 @@
 	    fits, red blocked, light blue swaps, orange combines, white the drop strip.
 	  * The status icons are white when fine, yellow, then red, then blinking (Icon, Warn, Critical;
 	    the cold side in its own blues); temperature numbers take their zone's colour (`Zone`).
+	  * Headers are not quite flat (`Gradient`): the grey top headers darken a little towards their
+	    bottom edge and the black section bars thin out towards theirs, each averaging its token's
+	    value, so a header reads as the token says from a distance.
+	  * The item tooltip (`tip`): a dark header (a condition dot, the name, the condition word, the
+	    count) over a dark body (the item's picture on the left, a liquid pill and the tooltip's
+	    lines on the right, wrapped), between Tip.MIN_W and Tip.MAX_W wide; a tooltip of no item
+	    (a fluid, a gauge, a button of the recipe view) is its first line as a header over the
+	    rest. One layout per thing hovered: the owner calls `tip` only when what it shows changed.
+	    A stack's count is not part of that: the header keeps room for the widest the count may
+	    read (`countRoom`), so a count that changes under the pointer is rewritten in place
+	    (`countAt` says which text) and the box keeps its size.
 
 	Values that only builders need at a glance (tooltip delay, blink period, the HUD name's timing)
 	are under `Time`.
@@ -42,6 +53,7 @@ local Fluids = require(Shared.Fluids)
 local Items = require(Shared.Items)
 
 local MenuLayout = require(script.Parent.MenuLayout)
+local TextWrap = require(script.Parent.TextWrap)
 
 export type Rgba = { r: number, g: number, b: number, t: number }
 export type Condition = { name: string, above: number, rgb: { number } }
@@ -52,6 +64,53 @@ export type Weight = "Light" | "Regular" | "Bold"
 export type HandsLines = { name: string, condition: Condition?, detail: string? }
 -- What a carried stack is over (`feedback`): a slot, the drop strip (or outside), or nothing.
 export type Over = "slot" | "drop" | "none"
+-- A rectangle in GUI pixels.
+export type Rect = { x: number, y: number, w: number, h: number }
+-- A line of the item tooltip: its text and its colour's key (Theme.Colour).
+export type TipLine = { text: string, colour: string }
+-- One text the item tooltip draws: where, in which role, colour key and alignment.
+export type TipText = {
+	text: string,
+	colour: string,
+	role: Role,
+	align: "left" | "right" | "center",
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+}
+-- What an item tooltip shows (`tip`).
+export type TipInput = {
+	-- The item's name (or, without a picture, the tooltip's first line) and its colour key.
+	name: string,
+	nameColour: string?,
+	-- The item's condition (its dot and word), its count ("32 / 64") and its liquid (the pill).
+	condition: Condition?,
+	count: string?,
+	-- The widest the count may read while this tooltip shows ("88 / 64"): the header keeps room
+	-- for it, so the box keeps its width as the count changes (nil: the count's own width).
+	countRoom: string?,
+	liquid: string?,
+	-- An item's tooltip (a picture, the two-row header); false: a plain one (a fluid, a gauge).
+	picture: boolean,
+	-- The body's lines, unwrapped ("" a small gap).
+	lines: { TipLine },
+}
+-- The item tooltip laid out (GUI pixels): its size, the header's height (the body is below it),
+-- the dot, the picture and the pill (when shown), every text, and which of them is the count (its
+-- index in `texts`: the owner may rewrite that one's text in place, within the room kept for it).
+export type TipLayout = {
+	w: number,
+	h: number,
+	head: number,
+	dot: Rect?,
+	picture: Rect?,
+	pill: Rect?,
+	texts: { TipText },
+	countAt: number?,
+}
+-- Measures `text` at TextSize `size` (GUI pixels).
+export type Measure = (text: string, size: number) -> number
 
 local Theme = {}
 
@@ -125,6 +184,8 @@ Theme.Size = table.freeze({
 	GLYPH = 11,
 	BADGE = 9,
 	MASK = 48,
+	-- A scrollbar's thumb.
+	THUMB_H = 15,
 })
 
 --[[ Colours ]]
@@ -187,6 +248,9 @@ Theme.Colour = table.freeze({
 	Button = rgba(0, 0, 0, 0.40),
 	ButtonHover = rgba(255, 255, 255, 0.85),
 	Field = rgba(0, 0, 0, 0.30),
+	-- A scrollbar's thumb, while it can scroll and while it cannot.
+	ThumbActive = rgba(220, 220, 220, 0.30),
+	Thumb = rgba(220, 220, 220, 0.80),
 	TipHead = rgba(0, 0, 0, 0.06),
 	TipBody = rgba(0, 0, 0, 0.14),
 	Liquid = rgba(0, 238, 255, 0.50),
@@ -202,6 +266,19 @@ Theme.Colour = table.freeze({
 	GlyphEmpty = rgba(220, 220, 220, 0.75),
 	XpTrack = rgba(255, 255, 255, 0.75),
 	XpFill = rgba(255, 255, 255, 0),
+})
+
+--[[
+	The headers' faint gradients (top to bottom). The grey top headers are TOP_GREY multiplied from
+	TOP_FROM down to TOP_TO (a mean of TopHeader's 128); the black section bars go from SECTION_FROM
+	to SECTION_TO transparency (a mean of SectionHeader's 0.20).
+]]
+Theme.Gradient = table.freeze({
+	TOP_GREY = 141,
+	TOP_FROM = 1,
+	TOP_TO = 0.82,
+	SECTION_FROM = 0.12,
+	SECTION_TO = 0.28,
 })
 
 -- Temperature numbers by zone (-2 freezing .. 2 burning).
@@ -311,7 +388,13 @@ function Theme.weight(role: Role, scale: number): Weight
 	elseif role == "body" then
 		return "Regular"
 	end
-	return if Theme.Text[role] * scale >= Theme.LIGHT_MIN then "Light" else "Regular"
+	return Theme.thin(Theme.Text[role], scale)
+end
+
+-- Light for text of TextSize `size` that comes out at least LIGHT_MIN screen pixels tall at GUI
+-- `scale`, else Regular (a count box's digits, the small roles).
+function Theme.thin(size: number, scale: number): Weight
+	return if size * scale >= Theme.LIGHT_MIN then "Light" else "Regular"
 end
 
 --[[
@@ -442,6 +525,251 @@ function Theme.handsLines(stack: Items.Stack?): HandsLines?
 		end
 	end
 	return { name = Items.displayName(item), condition = Theme.condition(fraction, sips), detail = detail }
+end
+
+--[[ The item tooltip ]]
+
+Theme.Tip = table.freeze({
+	-- An item tooltip's width: its contents' within these.
+	MIN_W = 140,
+	MAX_W = 220,
+	-- An item tooltip's header (the name over the condition word and the count, each row ROW_H
+	-- tall at NAME_Y and WORD_Y), and a plain tooltip's (its first line).
+	HEAD = 18,
+	PLAIN_HEAD = 14,
+	NAME_Y = 1,
+	WORD_Y = 9,
+	ROW_H = 8,
+	-- The padding round everything, the condition dot's top left, and the name's left edge after
+	-- the dot (PAD without one).
+	PAD = 4,
+	DOT_X = 4,
+	DOT_Y = 7,
+	NAME_X = 11,
+	-- Between the condition word and the count.
+	GAP = 6,
+	-- The body's text column: from TEXT_X (right of the picture) to PAD from the right edge.
+	TEXT_X = 48,
+	-- The liquid pill: its height, its text's side padding and the gap under it.
+	PILL_H = 9,
+	PILL_PAD = 3,
+	PILL_GAP = 2,
+	-- An empty line's gap between blocks of lines.
+	BLANK = 4,
+	-- The body's least height: the picture and its padding.
+	BODY_MIN = 48,
+})
+
+-- The rows of `lines` wrapped to `width` into `texts`, from `y`; returns the y after the last row.
+local function tipRows(
+	texts: { TipText },
+	lines: { TipLine },
+	x: number,
+	y: number,
+	width: number,
+	measure: Measure
+): number
+	local tip = Theme.Tip
+	local size, pitch = Theme.Text.small, Theme.Line.small
+	local gap, added = false, 0
+	local measureSmall = function(text: string): number
+		return measure(text, size)
+	end
+	for _, line in lines do
+		if line.text == "" then
+			-- (A gap only between rows: none at the top or the bottom.)
+			gap = added > 0
+			continue
+		end
+		for _, row in TextWrap.wrap(line.text, width, measureSmall) do
+			if gap then
+				y += tip.BLANK
+				gap = false
+			end
+			added += 1
+			table.insert(
+				texts,
+				{
+					text = row,
+					colour = line.colour,
+					role = "small",
+					align = "left",
+					x = x,
+					y = y,
+					w = width,
+					h = pitch,
+				} :: TipText
+			)
+			y += pitch
+		end
+	end
+	return y
+end
+
+-- The widest of `lines` unwrapped at the small size.
+local function widest(lines: { TipLine }, measure: Measure): number
+	local width = 0
+	for _, line in lines do
+		if line.text ~= "" then
+			width = math.max(width, measure(line.text, Theme.Text.small))
+		end
+	end
+	return width
+end
+
+--[[
+	The item tooltip of `input` laid out, measuring text with `measure` (see the header). An item's:
+	the header (HEAD tall: with a condition, its dot at DOT_X, DOT_Y and the name from NAME_X; the
+	name on the top row and the condition word and the count, right-aligned with room for its
+	countRoom, on the bottom one, or the name alone centred down the header), then the body: the
+	picture at PAD, PAD under the header, and from TEXT_X the liquid pill and the lines, wrapped to
+	the column; the body is at least BODY_MIN tall. A plain tooltip's: the name in a PLAIN_HEAD
+	header, the lines under it.
+]]
+function Theme.tip(input: TipInput, measure: Measure): TipLayout
+	local tip = Theme.Tip
+	local pad = tip.PAD
+	local body, small = Theme.Text.body, Theme.Text.small
+	local texts: { TipText } = {}
+	local nameColour = input.nameColour or "Text"
+	if not input.picture then
+		local head = tip.PLAIN_HEAD
+		local need = math.max(measure(input.name, body), widest(input.lines, measure)) + 2 * pad
+		local w = math.min(math.ceil(need), tip.MAX_W)
+		table.insert(
+			texts,
+			{
+				text = input.name,
+				colour = nameColour,
+				role = "body",
+				align = "left",
+				x = pad,
+				y = 0,
+				w = w - 2 * pad,
+				h = head,
+			} :: TipText
+		)
+		local bottom = tipRows(texts, input.lines, pad, head + pad, w - 2 * pad, measure)
+		local h = if #texts > 1 then bottom + pad else head
+		return { w = w, h = h, head = head, dot = nil, picture = nil, pill = nil, texts = texts, countAt = nil }
+	end
+	local condition = input.condition
+	local nameX = if condition then tip.NAME_X else pad
+	local word = if condition then condition.name else nil
+	local count = input.count
+	-- The width the contents ask for, unwrapped.
+	local need = nameX + measure(input.name, body) + pad
+	local second = 0
+	if word then
+		second += measure(word, small)
+	end
+	if count then
+		local room = input.countRoom
+		local countW = measure(count, small)
+		if room then
+			countW = math.max(countW, measure(room, small))
+		end
+		second += countW + (if word then tip.GAP else 0)
+	end
+	need = math.max(need, nameX + second + pad)
+	local column = widest(input.lines, measure)
+	local liquid = input.liquid
+	if liquid then
+		column = math.max(column, measure(liquid, small) + 2 * tip.PILL_PAD)
+	end
+	need = math.max(need, tip.TEXT_X + column + pad)
+	local w = math.clamp(math.ceil(need), tip.MIN_W, tip.MAX_W)
+	-- The header.
+	local head = tip.HEAD
+	local rows = word ~= nil or count ~= nil
+	table.insert(
+		texts,
+		{
+			text = input.name,
+			colour = nameColour,
+			role = "body",
+			align = "left",
+			x = nameX,
+			y = if rows then tip.NAME_Y else 0,
+			w = w - nameX - pad,
+			h = if rows then tip.ROW_H else head,
+		} :: TipText
+	)
+	if word then
+		table.insert(
+			texts,
+			{
+				text = word,
+				colour = "Text",
+				role = "small",
+				align = "left",
+				x = nameX,
+				y = tip.WORD_Y,
+				w = w - nameX - pad,
+				h = tip.ROW_H,
+			} :: TipText
+		)
+	end
+	local countAt: number? = nil
+	if count then
+		countAt = #texts + 1
+		table.insert(
+			texts,
+			{
+				text = count,
+				colour = "Text",
+				role = "small",
+				align = "right",
+				x = nameX,
+				y = tip.WORD_Y,
+				w = w - nameX - pad,
+				h = tip.ROW_H,
+			} :: TipText
+		)
+	end
+	local dot: Rect? = nil
+	if condition then
+		dot = { x = tip.DOT_X, y = tip.DOT_Y, w = Theme.Size.DOT, h = Theme.Size.DOT }
+	end
+	-- The body.
+	local picture = Theme.Size.TIP_PICTURE
+	local x, width = tip.TEXT_X, w - tip.TEXT_X - pad
+	local y = head + pad
+	local pill: Rect? = nil
+	if liquid then
+		pill = { x = x, y = y, w = width, h = tip.PILL_H }
+		table.insert(
+			texts,
+			{
+				text = liquid,
+				colour = "Text",
+				role = "small",
+				align = "center",
+				x = x,
+				y = y,
+				w = width,
+				h = tip.PILL_H,
+			} :: TipText
+		)
+		y += tip.PILL_H + tip.PILL_GAP
+	end
+	local before = #texts
+	local bottom = tipRows(texts, input.lines, x, y, width, measure)
+	if #texts == before and liquid then
+		-- (No line under the pill: no gap under it either.)
+		bottom -= tip.PILL_GAP
+	end
+	local bodyHeight = math.max(tip.BODY_MIN, bottom + pad - head)
+	return {
+		w = w,
+		h = head + bodyHeight,
+		head = head,
+		dot = dot,
+		picture = { x = pad, y = head + pad, w = picture, h = picture },
+		pill = pill,
+		texts = texts,
+		countAt = countAt,
+	}
 end
 
 --[[ Timing ]]

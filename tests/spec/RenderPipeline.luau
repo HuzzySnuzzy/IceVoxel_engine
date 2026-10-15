@@ -3108,9 +3108,11 @@ return function(t, shared, require, _server, client)
 		Loads Ui/ItemIcon into `world` (Style stubbed: no TextService under Lune). The stub carries
 		what the icon reads: the Minecraft look's count text, and for the survival look (`look =
 		"dayz"`, read inside functions only) Ui/Theme (pure, the real one) and Style.Dayz's colours,
-		transparencies, condition colours and count box, made from Theme as Style makes them.
+		transparencies, condition colours, fonts by weight (a table naming the weight), count box,
+		slot face, outline and focus, made from Theme as Style makes them. Returns the module and the
+		stub (`painted` counts paintFace calls: the icon makes faces and never paints them).
 	]]
-	local function itemIconIn(world: any, load: (string) -> any, sharedRequire: (any) -> any): any
+	local function itemIconIn(world: any, load: (string) -> any, sharedRequire: (any) -> any): (any, any)
 		local MenuLayout = require(client.Ui.MenuLayout)
 		local Theme = require(client.Ui.Theme)
 		local colours, alphas, conditions = {}, {}, {}
@@ -3121,10 +3123,40 @@ return function(t, shared, require, _server, client)
 		for _, level in Theme.CONDITIONS do
 			conditions[level.name] = Color3.fromRGB(level.rgb[1], level.rgb[2], level.rgb[3])
 		end
-		local Style = {
+		local UDim2 = roblox.UDim2
+		local function frame(parent: any, x: number, y: number, w: number, h: number, z: number?): any
+			local made = world.new("Frame")
+			made.Position = UDim2.fromOffset(x, y)
+			made.Size = UDim2.fromOffset(w, h)
+			made.ZIndex = z or 1
+			made.Parent = parent
+			return made
+		end
+		local function stroke(object: any, name: string): any
+			local made = world.new("UIStroke")
+			made.Name = name
+			made.Parent = object
+			return made
+		end
+		local Style
+		Style = {
 			ITEM = 16,
 			COUNT_SIZE = 8,
+			painted = 0,
 			Colour = { Text = Color3.new(1, 1, 1) },
+			frame = function(parent: any, x: number, y: number, w: number, h: number, colour: any, z: number?): any
+				local made = frame(parent, x, y, w, h, z)
+				made.BackgroundColor3 = colour
+				return made
+			end,
+			itemButton = function(parent: any, x: number, y: number, z: number?): any
+				local button = world.new("TextButton")
+				button.Position = UDim2.fromOffset(x - 1, y - 1)
+				button.Size = UDim2.fromOffset(18, 18)
+				button.ZIndex = z or 4
+				button.Parent = parent
+				return button
+			end,
 			shadowText = function(parent: any): (any, any)
 				local label, shadow = world.new("TextLabel"), world.new("TextLabel")
 				label.Parent = parent
@@ -3139,6 +3171,23 @@ return function(t, shared, require, _server, client)
 				Colour = colours,
 				Alpha = alphas,
 				Condition = conditions,
+				face = function(weight: string): any
+					return { weight = weight }
+				end,
+				slotFace = function(parent: any, x: number, y: number, w: number, h: number, z: number?): any
+					local face = frame(parent, x, y, w, h, z)
+					face.Name = "Face"
+					return face
+				end,
+				paintFace = function()
+					Style.painted += 1
+				end,
+				outline = function(object: any): any
+					return stroke(object, "Outline")
+				end,
+				focus = function(object: any): any
+					return stroke(object, "Focus")
+				end,
 				countBox = function(parent: any, z: number?): (any, any)
 					local box, text = world.new("Frame"), world.new("TextLabel")
 					box.Name = "Count"
@@ -3166,7 +3215,7 @@ return function(t, shared, require, _server, client)
 		end
 		local path = "src/client/Ui/ItemIcon.luau"
 		local chunk = luau.load(withHeader(fs.readFile(path)), { debugName = path })
-		return chunk(
+		return (chunk :: any)(
 			{ Parent = ui },
 			req,
 			world.game,
@@ -3183,7 +3232,8 @@ return function(t, shared, require, _server, client)
 			world.task,
 			world.warn,
 			world.print
-		)
+		),
+			Style
 	end
 
 	t.test("textures: item icons build their models again a few per frame after a change of item looks", function()
@@ -3286,11 +3336,18 @@ return function(t, shared, require, _server, client)
 		local height, _, digit = Theme.count(1)
 		t.eq(icon.countBox.Size.X.Offset, Theme.countWidth("32", digit))
 		t.eq(icon.countBox.Size.Y.Offset, height)
+		t.eq(icon.countText.FontFace.weight, "Regular", "7 px digits at scale 1: Regular")
+		icon:setScale(2)
+		t.eq(icon.countText.FontFace.weight, "Light", "7 x 2 = 14 screen px: Light")
 		icon:setScale(3)
 		local height3, size3, digit3 = Theme.count(3)
 		t.eq(icon.countBox.Size.Y.Offset, height3, "the box follows the scale")
 		t.eq(icon.countBox.Size.X.Offset, Theme.countWidth("32", digit3))
 		t.eq(icon.countText.TextSize, size3)
+		t.eq(icon.countText.FontFace.weight, "Light")
+		icon:setScale(1.5)
+		t.eq(icon.countText.FontFace.weight, "Regular", "7 x 1.5: Regular again")
+		icon:setScale(3)
 		icon:set(I.Cobblestone, 1)
 		t.eq(icon.countBox.Visible, false, "no count for one")
 		-- A damaged tool: its condition's colour, its durability left.
@@ -3329,6 +3386,88 @@ return function(t, shared, require, _server, client)
 		t.ok(plain == nil or nearColour(plain, Color3.new(1, 1, 1)), "untinted (Roblox's white)")
 		classic:setScale(4)
 		t.eq(classic.scale, 1, "setScale does nothing in the Minecraft look")
+	end)
+
+	t.test("item icons: the survival look's slot (hit area, face, hover) and tabs", function()
+		local root, sharedRequire = neutralEnv()
+		local world = newWorld(root)
+		local load = rendering(world, root, sharedRequire)
+		local ItemIcon, Style = itemIconIn(world, load, sharedRequire)
+		local Theme = require(client.Ui.Theme)
+		local Items = require(shared.Items)
+		local I = Items.id
+		local screen = world.new("Frame")
+		local added = {}
+		local scaled = {
+			add = function(_, object: any)
+				table.insert(added, object)
+			end,
+		}
+		local function rect(object: any): (number, number, number, number)
+			return object.Position.X.Offset, object.Position.Y.Offset, object.Size.X.Offset, object.Size.Y.Offset
+		end
+		-- A slot for the item at (10, 20): the 18 x 18 button one pixel up and left of it.
+		local slot = ItemIcon.slot(screen, 10, 20, 4, false, scaled)
+		local x, y, w, h = rect(slot.button)
+		t.eq(x, 9)
+		t.eq(y, 19)
+		t.eq(w, 18, "the hit area stays 18 x 18")
+		t.eq(h, 18)
+		-- The face inside the slot's grid lines: from the item's corner, CELL square.
+		local fx, fy, fw, fh = rect(slot.face)
+		t.eq(fx, 1)
+		t.eq(fy, 1)
+		t.eq(fw, Theme.Size.CELL)
+		t.eq(fh, Theme.Size.CELL)
+		t.eq(slot.face.Parent, slot.button)
+		-- The hover: hidden, over the face, outlined, above the icon.
+		local hx, hy, hw, hh = rect(slot.hover)
+		t.eq(hx, fx)
+		t.eq(hy, fy)
+		t.eq(hw, fw)
+		t.eq(hh, fh)
+		t.eq(slot.hover.Visible, false)
+		t.eq(#childrenOf(slot.hover, "UIStroke"), 1, "the hover is an outline")
+		t.ok(slot.hover.ZIndex > slot.icon.root.ZIndex, "the outline over the item")
+		t.eq(slot.icon.look, "dayz")
+		t.eq(slot.icon.root.Parent, slot.button)
+		t.eq(slot.icon.root.Position.X.Offset, 1, "the item at its slot coordinates")
+		t.eq(added[1], slot.icon, "the icon follows the owner's scale")
+		-- A result slot: the big face round the item, the same hit area.
+		local big = ItemIcon.slot(screen, 10, 20, 4, true)
+		local bx, by, bw, bh = rect(big.face)
+		t.eq(bw, Theme.Size.BIG_FACE)
+		t.eq(bh, Theme.Size.BIG_FACE)
+		t.eq(bx, 1 - (Theme.Size.BIG_FACE - 16) // 2, "centred on the item")
+		t.eq(by, bx)
+		local _, _, bigW = rect(big.button)
+		t.eq(bigW, 18)
+		-- The icon never paints a face (only its owner does).
+		slot.icon:set(I.Cobblestone, 12)
+		slot.icon:set(nil)
+		t.eq(Style.painted, 0, "no paintFace from ItemIcon")
+		-- Tabs: an inactive dark one with a hairline behind the panel, the active one grey over it.
+		local idle = ItemIcon.tab(screen, 0, I.Stone, false, scaled)
+		local active = ItemIcon.tab(screen, 30, I.Stone, true, scaled)
+		local idleRoot, activeRoot = idle.frames[1], active.frames[1]
+		t.eq(idleRoot.ZIndex, 0, "behind the panel")
+		t.ok(activeRoot.ZIndex > 0, "over the panel's edge")
+		t.eq(idleRoot.BackgroundTransparency, Theme.Colour.Panel.t)
+		t.eq(activeRoot.BackgroundTransparency, Theme.Colour.TopHeader.t)
+		local _, idleY, idleW, idleH = rect(idleRoot)
+		local _, activeY, activeW, activeH = rect(activeRoot)
+		t.eq(idleW, ItemIcon.TAB_WIDTH)
+		t.eq(activeW, ItemIcon.TAB_WIDTH)
+		t.ok(activeY < idleY, "the active tab stands taller")
+		t.ok(activeY + activeH > ItemIcon.TAB_HEIGHT, "the active tab reaches over the panel's top edge")
+		t.ok(idleY + idleH > ItemIcon.TAB_HEIGHT, "an inactive one tucks behind it")
+		t.eq(#childrenOf(idleRoot, "UIStroke"), 1, "the inactive tab's hairline")
+		t.eq(#childrenOf(activeRoot, "UIStroke"), 0, "the active tab has none")
+		for _, tab in { idle, active } do
+			local focus = childrenOf(tab.button, "UIStroke")
+			t.eq(#focus, 1, "a gamepad's selection is the Focus outline")
+			t.eq(focus[1].Name, "Focus")
+		end
 	end)
 
 	--[[

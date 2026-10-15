@@ -29,11 +29,19 @@
 	transparencies (`Alpha`) and Fonts (`face`) once, here. Its rules:
 
 	  * Everything is a Frame, TextLabel, TextButton, UIStroke, UICorner (dots only) or UIGradient;
-	    no image assets. Silhouettes and glyphs are masks (Ui/Masks) shown by `maskImage`, as blocky
-	    Frames (`glyph`) where an image can't be made.
+	    no image assets. Silhouettes, glyphs and badges are masks (Ui/Masks; this look's own
+	    drawings are Ui/Silhouettes, `silhouette`) shown by `maskImage` through an EditableImage
+	    made in the game (white, tinted), as blocky Frames (`glyph`) where an image can't be made.
+	    A mask is drawn once per name, on a later frame than the one that first asks for it (a
+	    few milliseconds a frame at most), never in a burst when a screen opens.
+	  * No sharp-edged flat bars: the grey top headers and the black section bars carry a faint
+	    vertical gradient (Theme.Gradient) averaging their tokens.
 	  * Outlines are UIStrokes in Border mode (`outline`: never Contextual, which would stroke the
 	    letters of a text object), inside the edge, mitred, FixedSize; their thickness keeps
 	    Theme.Size.OUTLINE_PX screen pixels at any scale through a `scaled` registry.
+	  * Gamepad selection draws no selection image of Roblox's: a selected header turns Focus red,
+	    a selected button or field gets the Focus outline (`focus`), and a pressed button's face is
+	    Focus red.
 	  * Text is Roboto (`face(weight)`), sized by role (Theme.Text), its weight by role and scale
 	    (Theme.weight): a `scaled` registry re-weights its labels when the scale changes. Each owner
 	    of a scaled root (the inventory, the creative screen, JEI, the recipe view, the quickbar, the
@@ -48,10 +56,13 @@
 	    draw the dark box (`tooltipBox`).
 ]]
 
+local AssetService = game:GetService("AssetService")
+local RunService = game:GetService("RunService")
 local TextService = game:GetService("TextService")
 
 local GuiScale = require(script.Parent.GuiScale)
 local Masks = require(script.Parent.Masks)
+local Silhouettes = require(script.Parent.Silhouettes)
 local Theme = require(script.Parent.Theme)
 local TooltipLayout = require(script.Parent.TooltipLayout)
 local UiScale = require(script.Parent.UiScale)
@@ -856,12 +867,8 @@ end
 local STROKE_POSITION = strokeValue("BorderStrokePosition", "Inner")
 local STROKE_SIZING = strokeValue("StrokeSizingMode", "FixedSize")
 
---[[
-	An outline round `object`'s edge, inside it: `colour` (default Outline, white) at
-	`transparency` (default 0), OUTLINE_PX screen pixels thick at the `scaled` registry's scale
-	(OUTLINE_PX GUI pixels without one). Always Border mode, mitred, FixedSize.
-]]
-function Dayz.outline(object: GuiObject, colour: Color3?, transparency: number?, scaled: Scaled?): UIStroke
+-- A UIStroke in this look's outline mode round `object` (see `outline`), not recorded as its outline.
+local function newStroke(object: GuiObject, colour: Color3, transparency: number, scaled: Scaled?): UIStroke
 	local stroke = Instance.new("UIStroke")
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	if STROKE_POSITION then
@@ -871,14 +878,42 @@ function Dayz.outline(object: GuiObject, colour: Color3?, transparency: number?,
 	if STROKE_SIZING then
 		(stroke :: any).StrokeSizingMode = STROKE_SIZING
 	end
-	stroke.Color = colour or Dayz.Colour.Outline
-	stroke.Transparency = transparency or Dayz.Alpha.Outline
+	stroke.Color = colour
+	stroke.Transparency = transparency
 	stroke.Thickness = Theme.Size.OUTLINE_PX
 	stroke.Parent = object
-	outlines[object] = stroke
 	if scaled then
 		scaled:stroke(stroke)
 	end
+	return stroke
+end
+
+--[[
+	An outline round `object`'s edge, inside it: `colour` (default Outline, white) at
+	`transparency` (default 0), OUTLINE_PX screen pixels thick at the `scaled` registry's scale
+	(OUTLINE_PX GUI pixels without one). Always Border mode, mitred, FixedSize.
+]]
+function Dayz.outline(object: GuiObject, colour: Color3?, transparency: number?, scaled: Scaled?): UIStroke
+	local stroke = newStroke(object, colour or Dayz.Colour.Outline, transparency or Dayz.Alpha.Outline, scaled)
+	outlines[object] = stroke
+	return stroke
+end
+
+--[[
+	Gamepad (and keyboard) selection in this look: a Focus outline round `object` while it is
+	selected, instead of Roblox's selection image (its own stroke, so it never fights an outline
+	the object already has). Returns the stroke.
+]]
+function Dayz.focus(object: GuiObject, scaled: Scaled?): UIStroke
+	local stroke = newStroke(object, Dayz.Colour.Focus, Dayz.Alpha.Focus, scaled)
+	stroke.Enabled = false
+	object.SelectionImageObject = noSelectionImage
+	object.SelectionGained:Connect(function()
+		stroke.Enabled = true
+	end)
+	object.SelectionLost:Connect(function()
+		stroke.Enabled = false
+	end)
 	return stroke
 end
 
@@ -978,33 +1013,199 @@ function Dayz.glyph(
 	return frames
 end
 
+--[[ Masks shown as images ]]
+
 --[[
-	Recolours what `maskImage` or `glyph` drew into `object`: an image's ImageColor3 /
-	ImageTransparency, or every Frame under a blocky holder. Call it on change, not per frame.
+	Every mask is drawn once (by the function its first `maskImage` gave) and kept by name, then
+	made into one EditableImage per name (white, its alpha the mask's), which every image of that
+	name shows, tinted by ImageColor3. Drawing a mask takes a few milliseconds per name, so it is
+	never done all at once: a name not drawn yet is queued and drawn on a later frame (at most
+	MASK_BUDGET seconds a frame, at least one name), and its images fill in then. Where an
+	EditableImage can't be made (the API is off, the memory budget is used up), the image gets the
+	blocky fallback instead: the mask at its size as `glyph` Frames inside it. The silhouettes
+	(Ui/Silhouettes) are queued as this module loads, so they are ready before a screen opens.
 ]]
-function Dayz.tint(object: GuiObject, colour: Color3, transparency: number?)
-	if object:IsA("ImageLabel") or object:IsA("ImageButton") then
-		local image = object :: any
-		image.ImageColor3 = colour
-		image.ImageTransparency = transparency or 0
+
+local MASK_BUDGET = 0.004
+
+-- Drawn masks, the functions that draw the ones not drawn yet, the queue, and the images
+-- waiting for each.
+local maskCache: { [string]: Masks.Mask } = {}
+local maskMakers: { [string]: () -> Masks.Mask } = {}
+local maskQueue: { string } = {}
+local maskWaiting: { [string]: { ImageLabel } } = {}
+-- Each name's image content, the names no image could be made for, and the blocky rows by name
+-- and size.
+local maskContent: { [string]: Content } = {}
+local maskNoImage: { [string]: boolean } = {}
+local maskRows: { [string]: { string } } = {}
+-- Whether EditableImages can be made at all (false after the API refused once).
+local editableOk = true
+-- Each mask image's size when made, and its colour and transparency now (weak).
+local maskSizes: { [ImageLabel]: Vector2 } = setmetatable({}, { __mode = "k" }) :: any
+local maskTints: { [GuiObject]: { colour: Color3, transparency: number } } = setmetatable({}, { __mode = "k" }) :: any
+local maskStep: RBXScriptConnection? = nil
+
+-- An EditableImage of `mask` (white, the mask's alpha), or nil when none can be made.
+local function editableOf(mask: Masks.Mask): EditableImage?
+	if not editableOk then
+		return nil
+	end
+	local ok, result = pcall(function()
+		return AssetService:CreateEditableImage({ Size = Vector2.new(mask.w, mask.h) })
+	end)
+	if not ok then
+		editableOk = false
+		warn(`[IceVoxel] survival look: EditableImage is not available, glyphs fall back to blocks: {result}`)
+		return nil
+	end
+	local image = result :: EditableImage?
+	if image == nil then
+		return nil
+	end
+	local count = mask.w * mask.h
+	local pixels = buffer.create(count * 4)
+	for i = 0, count - 1 do
+		local offset = i * 4
+		buffer.writeu8(pixels, offset, 255)
+		buffer.writeu8(pixels, offset + 1, 255)
+		buffer.writeu8(pixels, offset + 2, 255)
+		buffer.writeu8(pixels, offset + 3, math.clamp(math.floor(mask.alpha[i + 1] * 255 + 0.5), 0, 255))
+	end
+	local written = pcall(function()
+		image:WritePixelsBuffer(Vector2.zero, Vector2.new(mask.w, mask.h), pixels)
+	end)
+	if not written then
+		image:Destroy()
+		return nil
+	end
+	return image
+end
+
+-- The content of `name`'s drawn mask (made the first time), or nil when it has no image.
+local function contentOf(name: string, mask: Masks.Mask): Content?
+	local content = maskContent[name]
+	if content or maskNoImage[name] then
+		return content
+	end
+	local image = editableOf(mask)
+	if image == nil then
+		maskNoImage[name] = true
+		return nil
+	end
+	local made = Content.fromObject(image)
+	maskContent[name] = made
+	return made
+end
+
+-- Shows `name`'s drawn mask in `image`: the picture, or the blocky fallback at its size.
+local function fillMask(image: ImageLabel, name: string)
+	local mask = maskCache[name]
+	if mask == nil or image.Parent == nil then
 		return
 	end
-	for _, child in object:GetDescendants() do
-		if child:IsA("Frame") then
-			child.BackgroundColor3 = colour
-			child.BackgroundTransparency = transparency or 0
+	local content = contentOf(name, mask)
+	if content then
+		image.ImageContent = content
+		return
+	end
+	local size = maskSizes[image] or image.AbsoluteSize
+	local cw, ch = math.max(1, math.floor(size.X + 0.5)), math.max(1, math.floor(size.Y + 0.5))
+	local key = `{name}:{cw}x{ch}`
+	local rows = maskRows[key]
+	if rows == nil then
+		rows = Masks.rows(Masks.downsample(mask, cw, ch))
+		maskRows[key] = rows
+	end
+	local tint = maskTints[image]
+	local colour = if tint then tint.colour else image.ImageColor3
+	local transparency = if tint then tint.transparency else image.ImageTransparency
+	local holder = Instance.new("Frame")
+	holder.Name = "Blocks"
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.Size = UDim2.fromScale(1, 1)
+	holder.ZIndex = 1
+	Dayz.glyph(holder, 0, 0, rows :: { string }, colour, 1, transparency)
+	holder.Parent = image
+end
+
+-- Draws `name`'s mask now (if it is not drawn yet) and fills the images waiting for it.
+local function drawMask(name: string)
+	if maskCache[name] == nil then
+		local make = maskMakers[name]
+		local ok, drawn = pcall(make or function(): Masks.Mask
+			return { w = 1, h = 1, alpha = { 0 } }
+		end)
+		if not ok then
+			warn(`[IceVoxel] survival look: the mask {name} could not be drawn: {drawn}`)
+			drawn = { w = 1, h = 1, alpha = { 0 } }
+		end
+		maskCache[name] = drawn :: Masks.Mask
+		maskMakers[name] = nil
+	end
+	local waiting = maskWaiting[name]
+	if waiting then
+		maskWaiting[name] = nil
+		for _, image in waiting do
+			fillMask(image, name)
 		end
 	end
 end
 
--- Masks drawn so far, by name, and their blocky rows by name and size.
-local maskCache: { [string]: Masks.Mask } = {}
-local maskRows: { [string]: { string } } = {}
+-- Each frame while names wait: draws them until the budget is spent (at least one).
+local function stepMasks()
+	local deadline = os.clock() + MASK_BUDGET
+	repeat
+		local name = table.remove(maskQueue, 1)
+		if name == nil then
+			break
+		end
+		drawMask(name)
+	until os.clock() >= deadline
+	if #maskQueue == 0 and maskStep then
+		maskStep:Disconnect()
+		maskStep = nil
+	end
+end
+
+-- Queues `name` (drawn by `make`) unless it is drawn or queued already.
+local function queueMask(name: string, make: () -> Masks.Mask)
+	if maskCache[name] ~= nil or maskMakers[name] ~= nil then
+		return
+	end
+	maskMakers[name] = make
+	table.insert(maskQueue, name)
+	if maskStep == nil then
+		maskStep = RunService.Heartbeat:Connect(stepMasks)
+	end
+end
+
+--[[
+	Recolours what `maskImage` or `glyph` drew into `object`: an image's ImageColor3 /
+	ImageTransparency, and every Frame under it (the blocky fallback, or a `glyph` holder). Kept
+	for an image still waiting for its mask. Call it on change, not per frame.
+]]
+function Dayz.tint(object: GuiObject, colour: Color3, transparency: number?)
+	local t = transparency or 0
+	maskTints[object] = { colour = colour, transparency = t }
+	if object:IsA("ImageLabel") or object:IsA("ImageButton") then
+		local image = object :: any
+		image.ImageColor3 = colour
+		image.ImageTransparency = t
+	end
+	for _, child in object:GetDescendants() do
+		if child:IsA("Frame") and child.Name ~= "Blocks" then
+			child.BackgroundColor3 = colour
+			child.BackgroundTransparency = t
+		end
+	end
+end
 
 --[[
 	A silhouette, glyph or badge at (x, y), `w` x `h`, from the mask `name` (drawn once by `mask`
-	and kept): white tinted `colour` at `transparency`. (This version draws the blocky fallback:
-	the mask at the target size as `glyph` Frames.) Recolour it with `tint`.
+	and kept, see above): white tinted `colour` at `transparency`, an ImageLabel named `name` that
+	shows the mask as soon as it is drawn (at once when it already is). Recolour it with `tint`.
 ]]
 function Dayz.maskImage(
 	parent: Instance,
@@ -1018,60 +1219,85 @@ function Dayz.maskImage(
 	transparency: number,
 	z: number?
 ): GuiObject
-	local holder = Instance.new("Frame")
-	holder.Name = name
-	holder.BackgroundTransparency = 1
-	holder.BorderSizePixel = 0
-	holder.Position = UDim2.fromOffset(x, y)
-	holder.Size = UDim2.fromOffset(w, h)
-	holder.ZIndex = z or 1
-	local cw, ch = math.max(1, math.floor(w + 0.5)), math.max(1, math.floor(h + 0.5))
-	local key = `{name}:{cw}x{ch}`
-	local rows = maskRows[key]
-	if rows == nil then
-		local drawn = maskCache[name]
-		if drawn == nil then
-			drawn = mask()
-			maskCache[name] = drawn
+	local image = Instance.new("ImageLabel")
+	image.Name = name
+	image.BackgroundTransparency = 1
+	image.BorderSizePixel = 0
+	image.Position = UDim2.fromOffset(x, y)
+	image.Size = UDim2.fromOffset(w, h)
+	image.ImageColor3 = colour
+	image.ImageTransparency = transparency
+	image.ZIndex = z or 1
+	image.Parent = parent
+	maskSizes[image] = Vector2.new(w, h)
+	if maskCache[name] then
+		fillMask(image, name)
+	else
+		queueMask(name, mask)
+		local waiting = maskWaiting[name]
+		if waiting == nil then
+			waiting = {}
+			maskWaiting[name] = waiting
 		end
-		rows = Masks.rows(Masks.downsample(drawn :: Masks.Mask, cw, ch))
-		maskRows[key] = rows
+		table.insert(waiting, image)
 	end
-	Dayz.glyph(holder, 0, 0, rows :: { string }, colour, 1, transparency)
-	holder.Parent = parent
-	return holder
+	return image
 end
 
--- 8 x 8 glyphs of this version's header buttons, section pictures and toggles.
-local GLYPHS: { [string]: { string } } = {
-	gear = { "...##...", ".######.", ".##..##.", "##....##", "##....##", ".##..##.", ".######.", "...##..." },
-	close = { "#......#", ".#....#.", "..#..#..", "...##...", "...##...", "..#..#..", ".#....#.", "#......#" },
-	items = { "###.###.", "###.###.", "###.###.", "........", "###.###.", "###.###.", "###.###.", "........" },
-	minus = { "........", "........", "........", "########", "########", "........", "........", "........" },
-	plus = { "...##...", "...##...", "...##...", "########", "########", "...##...", "...##...", "...##..." },
-	backpack = { "..####..", ".#....#.", "########", "#......#", "#.####.#", "#......#", "#......#", "########" },
-	crafting = { "########", "#..#..##", "#..#..##", "########", "#..#..##", "#..#..##", "########", "........" },
-	vanity = { ".##..##.", "########", "########", ".######.", "..####..", "..####..", "..####..", "..####.." },
-}
-
--- An 8 x 8 glyph in a transparent holder at (x, y) of `parent` (nothing for unknown names).
-local function smallGlyph(parent: Instance, name: string, x: number, y: number, colour: Color3, z: number): Frame
-	local holder = Instance.new("Frame")
-	holder.Name = name
-	holder.BackgroundTransparency = 1
-	holder.BorderSizePixel = 0
-	holder.Position = UDim2.fromOffset(x, y)
-	holder.Size = UDim2.fromOffset(8, 8)
-	holder.ZIndex = z
-	local art = GLYPHS[name]
-	if art then
-		Dayz.glyph(holder, 0, 0, art, colour, 1)
+--[[
+	The image content of the mask `name` (drawn by `mask` now if it is not drawn yet: for one-off
+	masks such as the backdrop's vignette), or nil when no EditableImage can be made.
+]]
+function Dayz.maskContent(name: string, mask: () -> Masks.Mask): Content?
+	queueMask(name, mask)
+	drawMask(name)
+	local index = table.find(maskQueue, name)
+	if index then
+		table.remove(maskQueue, index)
 	end
-	holder.Parent = parent
-	return holder
+	local drawn = maskCache[name]
+	return if drawn then contentOf(name, drawn) else nil
+end
+
+-- One of Ui/Silhouettes' drawings as a `maskImage` (an empty mask for a name it does not draw).
+function Dayz.silhouette(
+	parent: Instance,
+	name: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	colour: Color3,
+	transparency: number,
+	z: number?
+): GuiObject
+	return Dayz.maskImage(parent, name, function(): Masks.Mask
+		return Silhouettes.render(name)
+	end, x, y, w, h, colour, transparency, z)
+end
+
+-- The silhouettes are drawn over the first frames after this loads, not when a screen opens.
+for _, name in Silhouettes.NAMES do
+	queueMask(name, function(): Masks.Mask
+		return Silhouettes.render(name)
+	end)
 end
 
 --[[ Headers and sections ]]
+
+-- A Frame's faint top-to-bottom gradient (Theme.Gradient): the grey's colour, or the black's alpha.
+local function gradient(object: GuiObject, grey: boolean)
+	local g = Theme.Gradient
+	local ramp = Instance.new("UIGradient")
+	ramp.Rotation = 90
+	if grey then
+		ramp.Color =
+			ColorSequence.new(Color3.new(g.TOP_FROM, g.TOP_FROM, g.TOP_FROM), Color3.new(g.TOP_TO, g.TOP_TO, g.TOP_TO))
+	else
+		ramp.Transparency = NumberSequence.new(g.SECTION_FROM, g.SECTION_TO)
+	end
+	ramp.Parent = object
+end
 
 type TopHeaderSelf = TopHeader & { text: string, scaled: Scaled? }
 
@@ -1096,6 +1322,11 @@ function TopHeaderClass.place(self: TopHeaderSelf, x: number, y: number, w: numb
 	end
 end
 
+--[[
+	A square button `size` wide at the header's right end (its right edge `fromRight` in), the
+	`glyph` silhouette (HEADER_GLYPH square) black in its middle: a light overlay while hovered,
+	the Focus outline while a gamepad selects it.
+]]
 function TopHeaderClass.button(
 	self: TopHeaderSelf,
 	glyph: "gear" | "close" | "items",
@@ -1113,10 +1344,10 @@ function TopHeaderClass.button(
 	button.Position = UDim2.new(1, -fromRight, 0.5, 0)
 	button.Size = UDim2.fromOffset(size, size)
 	button.ZIndex = 4
-	button.SelectionImageObject = Style.selectionImage
-	local holder = smallGlyph(button, glyph, 0, 0, Dayz.Colour.TopHeaderText, 1)
-	holder.AnchorPoint = Vector2.new(0.5, 0.5)
-	holder.Position = UDim2.fromScale(0.5, 0.5)
+	local side = Theme.Size.HEADER_GLYPH
+	local picture = Dayz.silhouette(button, glyph, 0, 0, side, side, Dayz.Colour.TopHeaderText, 0, 1)
+	picture.AnchorPoint = Vector2.new(0.5, 0.5)
+	picture.Position = UDim2.fromScale(0.5, 0.5)
 	local function hover(on: boolean)
 		button.BackgroundTransparency = if on then Dayz.Alpha.ButtonHover else 1
 	end
@@ -1126,18 +1357,24 @@ function TopHeaderClass.button(
 	button.MouseLeave:Connect(function()
 		hover(false)
 	end)
+	Dayz.focus(button, self.scaled)
 	button.Parent = self.root
 	return button
 end
 
 --[[
-	A column's top header bar (grey, its text bold black in capitals, centred). Place it with
-	`place`; `button` adds the gear, close or items buttons at its right.
+	A column's top header bar (grey, a little darker at the bottom; its text bold black in
+	capitals, centred). Place it with `place`; `button` adds the gear, close or items buttons at
+	its right.
 ]]
 function Dayz.topHeader(parent: Instance, text: string, z: number?, scaled: Scaled?): TopHeader
-	local root = filled(parent, 0, 0, 0, Theme.Size.TOP_HEADER, "TopHeader", z or 2)
+	local g = Theme.Gradient
+	local root =
+		Style.frame(parent, 0, 0, 0, Theme.Size.TOP_HEADER, Color3.fromRGB(g.TOP_GREY, g.TOP_GREY, g.TOP_GREY), z or 2)
+	root.BackgroundTransparency = Dayz.Alpha.TopHeader
 	root.Name = "TopHeader"
 	root.Active = true
+	gradient(root, true)
 	local caps = Theme.caps(text)
 	local label =
 		Dayz.label(root, caps, 0, 0, 0, 0, "top", Dayz.Colour.TopHeaderText, 2, Enum.TextXAlignment.Center, scaled)
@@ -1158,8 +1395,8 @@ type SectionSelf = Section & {
 	text: string,
 	headerHeight: number,
 	bodyHeight: number,
-	minus: Frame?,
-	plus: Frame?,
+	minus: GuiObject?,
+	plus: GuiObject?,
 }
 
 local SectionClass = {}
@@ -1226,9 +1463,10 @@ function SectionClass.destroy(self: SectionSelf)
 end
 
 --[[
-	A section: the black header bar (title in capitals, centred; a picture holder at its left; a
-	minus / plus at its right when collapsible) over the body, filled per `options.face`. Place it
-	with `place`; collapsing is the owner's (it lays the column out again).
+	A section: the black header bar (title in capitals, centred; a picture holder at its left, with
+	the `glyph` silhouette when given; a minus / plus at its right when collapsible; the bar turns
+	Focus red while a gamepad selects it) over the body, filled per `options.face`. Place it with
+	`place`; collapsing is the owner's (it lays the column out again).
 ]]
 function Dayz.section(parent: Instance, title: string, options: SectionOptions?): Section
 	local opts: SectionOptions = options or {}
@@ -1244,12 +1482,20 @@ function Dayz.section(parent: Instance, title: string, options: SectionOptions?)
 	header.Text = ""
 	header.AutoButtonColor = false
 	header.BorderSizePixel = 0
+	-- (The bar's transparency is its gradient's, averaging SectionHeader's.)
 	header.BackgroundColor3 = Dayz.Colour.SectionHeader
-	header.BackgroundTransparency = Dayz.Alpha.SectionHeader
+	header.BackgroundTransparency = 0
 	header.Size = UDim2.fromOffset(0, Theme.Size.SECTION_HEADER)
 	header.ZIndex = 3
 	header.Selectable = opts.collapsible == true
-	header.SelectionImageObject = Style.selectionImage
+	header.SelectionImageObject = noSelectionImage
+	gradient(header, false)
+	header.SelectionGained:Connect(function()
+		header.BackgroundColor3 = Dayz.Colour.Focus
+	end)
+	header.SelectionLost:Connect(function()
+		header.BackgroundColor3 = Dayz.Colour.SectionHeader
+	end)
 	header.Parent = root
 	local caps = Theme.caps(title)
 	local label = Dayz.label(
@@ -1277,8 +1523,8 @@ function Dayz.section(parent: Instance, title: string, options: SectionOptions?)
 	picture.Parent = header
 	local glyph = opts.glyph
 	if glyph then
-		local inset = (pictureSize - 8) // 2
-		smallGlyph(picture, glyph, inset, inset, Dayz.Colour.SectionHeaderText, 1)
+		-- (One pixel in from the holder's edges.)
+		Dayz.silhouette(picture, glyph, 1, 1, pictureSize - 2, pictureSize - 2, Dayz.Colour.SectionHeaderText, 0, 1)
 	end
 	local body = Instance.new("Frame")
 	body.Name = "Body"
@@ -1303,8 +1549,8 @@ function Dayz.section(parent: Instance, title: string, options: SectionOptions?)
 		text = caps,
 		headerHeight = Theme.Size.SECTION_HEADER,
 		bodyHeight = 0,
-		minus = nil :: Frame?,
-		plus = nil :: Frame?,
+		minus = nil :: GuiObject?,
+		plus = nil :: GuiObject?,
 	}
 	if opts.collapsible then
 		local toggle = Theme.Size.HEADER_TOGGLE
@@ -1317,10 +1563,10 @@ function Dayz.section(parent: Instance, title: string, options: SectionOptions?)
 		holder.Size = UDim2.fromOffset(toggle, toggle)
 		holder.ZIndex = 3
 		holder.Parent = header
-		local minus = smallGlyph(holder, "minus", 0, 0, Dayz.Colour.SectionHeaderText, 1)
-		local plus = smallGlyph(holder, "plus", 0, 0, Dayz.Colour.SectionHeaderText, 1)
+		local white = Dayz.Colour.SectionHeaderText
+		self.minus = Dayz.silhouette(holder, "minus", 0, 0, toggle, toggle, white, 0, 1)
+		local plus = Dayz.silhouette(holder, "plus", 0, 0, toggle, toggle, white, 0, 1)
 		plus.Visible = false
-		self.minus = minus
 		self.plus = plus
 	end
 	root.Parent = parent
@@ -1373,7 +1619,7 @@ function Dayz.quickCell(parent: Instance, x: number, y: number, z: number?, scal
 	box.Visible = false
 	Dayz.outline(box, Dayz.Colour.QuickNumberLineEmpty, Dayz.Alpha.QuickNumberLineEmpty, scaled)
 	local digit =
-		Dayz.label(box, "", 0, 0, 0, 0, "tiny", Dayz.Colour.QuickNumberTextEmpty, 2, Enum.TextXAlignment.Center)
+		Dayz.label(box, "", 0, 0, 0, 0, "tiny", Dayz.Colour.QuickNumberTextEmpty, 2, Enum.TextXAlignment.Center, scaled)
 	digit.Size = UDim2.fromScale(1, 1)
 	digit.TextTransparency = Dayz.Alpha.QuickNumberTextEmpty
 	return { base = base, face = face, box = box, digit = digit }
@@ -1424,7 +1670,7 @@ end
 
 --[[
 	A stack count's box for the bottom right of a 16 x 16 icon (hidden; its owner sizes it by
-	Theme.count and Theme.countWidth and sets the text).
+	Theme.count and Theme.countWidth, weights it by Theme.thin and sets the text).
 ]]
 function Dayz.countBox(parent: Instance, z: number?): (Frame, TextLabel)
 	local height, size, digit = Theme.count(1)
@@ -1438,7 +1684,7 @@ function Dayz.countBox(parent: Instance, z: number?): (Frame, TextLabel)
 	label.BackgroundTransparency = 1
 	label.BorderSizePixel = 0
 	label.Size = UDim2.fromScale(1, 1)
-	label.FontFace = Dayz.face("Regular")
+	label.FontFace = Dayz.face(Theme.thin(size, 1))
 	label.TextSize = size
 	label.TextColor3 = Dayz.Colour.Text
 	label.TextXAlignment = Enum.TextXAlignment.Center
@@ -1507,19 +1753,79 @@ end
 --[[ Controls ]]
 
 --[[
-	A flat button at (x, y), `w` x `h`: a dark face, a hairline, its text (TextSoft) centred; a light
-	overlay while hovered or selected, and the Focus outline while a gamepad selects it.
+	A flat button's states: its face (Button; Focus red while pressed), the light overlay while
+	hovered or selected, its outline (Hairline; Focus while a gamepad selects it) and its text
+	(TextSoft; TextDisabled when off). Wired to the button's input; `set` turns it on or off.
 ]]
-function Dayz.button(
+local function flatButton(
+	button: TextButton,
+	overlay: Frame,
+	stroke: UIStroke,
+	label: TextLabel?
+): (enabled: boolean) -> ()
+	local enabled, hovered, selected, pressed = true, false, false, false
+	local function paint()
+		local down = enabled and pressed
+		button.BackgroundColor3 = if down then Dayz.Colour.Focus else Dayz.Colour.Button
+		button.BackgroundTransparency = if down then Dayz.Alpha.Focus else Dayz.Alpha.Button
+		overlay.Visible = enabled and not down and (hovered or selected)
+		stroke.Color = if selected then Dayz.Colour.Focus else Dayz.Colour.Hairline
+		stroke.Transparency = if selected then Dayz.Alpha.Focus else Dayz.Alpha.Hairline
+		if label then
+			label.TextColor3 = if enabled then Dayz.Colour.TextSoft else Dayz.Colour.TextDisabled
+			label.TextTransparency = if enabled then 0 else Dayz.Alpha.TextDisabled
+		end
+	end
+	local function presses(input: InputObject): boolean
+		return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+	end
+	button.MouseEnter:Connect(function()
+		hovered = true
+		paint()
+	end)
+	button.MouseLeave:Connect(function()
+		hovered, pressed = false, false
+		paint()
+	end)
+	button.SelectionGained:Connect(function()
+		selected = true
+		paint()
+	end)
+	button.SelectionLost:Connect(function()
+		selected = false
+		paint()
+	end)
+	button.InputBegan:Connect(function(input: InputObject)
+		if presses(input) then
+			pressed = true
+			paint()
+		end
+	end)
+	button.InputEnded:Connect(function(input: InputObject)
+		if presses(input) and pressed then
+			pressed = false
+			paint()
+		end
+	end)
+	paint()
+	return function(value: boolean)
+		if value ~= enabled then
+			enabled = value
+			paint()
+		end
+	end
+end
+
+-- A flat button's frame, outline and hover overlay at (x, y), `w` x `h` (see `button`).
+local function buttonParts(
 	parent: Instance,
-	text: string,
 	x: number,
 	y: number,
 	w: number,
 	h: number,
 	z: number?,
 	scaled: Scaled?
-): TextButton
+): (TextButton, Frame, UIStroke)
 	local button = Instance.new("TextButton")
 	button.Name = "Button"
 	button.Text = ""
@@ -1536,34 +1842,41 @@ function Dayz.button(
 	overlay.Name = "Hover"
 	overlay.Size = UDim2.fromScale(1, 1)
 	overlay.Visible = false
-	if text ~= "" then
-		local label =
-			Dayz.label(button, text, 0, 0, 0, 0, "body", Dayz.Colour.TextSoft, 2, Enum.TextXAlignment.Center, scaled)
-		label.Size = UDim2.fromScale(1, 1)
-	end
-	button.MouseEnter:Connect(function()
-		overlay.Visible = true
-	end)
-	button.MouseLeave:Connect(function()
-		overlay.Visible = false
-	end)
-	button.SelectionGained:Connect(function()
-		overlay.Visible = true
-		stroke.Color = Dayz.Colour.Focus
-		stroke.Transparency = Dayz.Alpha.Focus
-	end)
-	button.SelectionLost:Connect(function()
-		overlay.Visible = false
-		stroke.Color = Dayz.Colour.Hairline
-		stroke.Transparency = Dayz.Alpha.Hairline
-	end)
 	button.Parent = parent
+	return button, overlay, stroke
+end
+
+--[[
+	A flat button at (x, y), `w` x `h`: a dark face with a hairline, its text (TextSoft) centred; a
+	light overlay while hovered, the Focus outline while a gamepad selects it, a Focus red face
+	while pressed.
+]]
+function Dayz.button(
+	parent: Instance,
+	text: string,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	z: number?,
+	scaled: Scaled?
+): TextButton
+	local button, overlay, stroke = buttonParts(parent, x, y, w, h, z, scaled)
+	local label: TextLabel? = nil
+	if text ~= "" then
+		local made =
+			Dayz.label(button, text, 0, 0, 0, 0, "body", Dayz.Colour.TextSoft, 2, Enum.TextXAlignment.Center, scaled)
+		made.Size = UDim2.fromScale(1, 1)
+		label = made
+	end
+	flatButton(button, overlay, stroke, label)
 	return button
 end
 
 --[[
-	`button` that can be turned off: off, its text is TextDisabled and it does not light up (the
-	caller still decides what a click on it does). Returns the button and its on / off switch.
+	`button` that can be turned off: off, its text is TextDisabled and it neither lights up nor
+	turns red when pressed (the caller still decides what a click on it does). Returns the button
+	and its on / off switch.
 ]]
 function Dayz.toggleButton(
 	parent: Instance,
@@ -1574,60 +1887,15 @@ function Dayz.toggleButton(
 	h: number,
 	z: number?
 ): (TextButton, (enabled: boolean) -> ())
-	local button = Instance.new("TextButton")
-	button.Name = "Button"
-	button.Text = ""
-	button.AutoButtonColor = false
-	button.BorderSizePixel = 0
-	button.BackgroundColor3 = Dayz.Colour.Button
-	button.BackgroundTransparency = Dayz.Alpha.Button
-	button.Position = UDim2.fromOffset(x, y)
-	button.Size = UDim2.fromOffset(w, h)
-	button.ZIndex = z or 4
-	button.SelectionImageObject = noSelectionImage
-	local stroke = Dayz.outline(button, Dayz.Colour.Hairline, Dayz.Alpha.Hairline)
-	local overlay = filled(button, 0, 0, 0, 0, "ButtonHover", 1)
-	overlay.Name = "Hover"
-	overlay.Size = UDim2.fromScale(1, 1)
-	overlay.Visible = false
+	local button, overlay, stroke = buttonParts(parent, x, y, w, h, z, nil)
 	local label = Dayz.label(button, text, 0, 0, 0, 0, "body", Dayz.Colour.TextSoft, 2, Enum.TextXAlignment.Center)
 	label.Size = UDim2.fromScale(1, 1)
-	local enabled, hovered, selected = true, false, false
-	local function paint()
-		overlay.Visible = enabled and (hovered or selected)
-		label.TextColor3 = if enabled then Dayz.Colour.TextSoft else Dayz.Colour.TextDisabled
-		label.TextTransparency = if enabled then 0 else Dayz.Alpha.TextDisabled
-		stroke.Color = if selected then Dayz.Colour.Focus else Dayz.Colour.Hairline
-		stroke.Transparency = if selected then Dayz.Alpha.Focus else Dayz.Alpha.Hairline
-	end
-	button.MouseEnter:Connect(function()
-		hovered = true
-		paint()
-	end)
-	button.MouseLeave:Connect(function()
-		hovered = false
-		paint()
-	end)
-	button.SelectionGained:Connect(function()
-		selected = true
-		paint()
-	end)
-	button.SelectionLost:Connect(function()
-		selected = false
-		paint()
-	end)
-	button.Parent = parent
-	return button, function(value: boolean)
-		if value ~= enabled then
-			enabled = value
-			paint()
-		end
-	end
+	return button, flatButton(button, overlay, stroke, label)
 end
 
 --[[
-	A text field at (x, y), `w` x 12: a dark face with a hairline, white text, `placeholder` in
-	Placeholder grey while empty. Returns the TextBox (inside a clipping frame).
+	A text field at (x, y), `w` x 12: a dark face with a hairline (Focus while typing), white text,
+	`placeholder` in Placeholder grey while empty. Returns the TextBox (inside a clipping frame).
 ]]
 function Dayz.field(
 	parent: Instance,
@@ -1641,7 +1909,7 @@ function Dayz.field(
 	local frame = filled(parent, x, y, w, 12, "Field", z or 4)
 	frame.Name = "FieldFrame"
 	frame.ClipsDescendants = true
-	Dayz.outline(frame, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
+	local stroke = Dayz.outline(frame, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	local box = Instance.new("TextBox")
 	box.Name = "Field"
 	box.BackgroundTransparency = 1
@@ -1658,17 +1926,35 @@ function Dayz.field(
 	box.TextYAlignment = Enum.TextYAlignment.Center
 	box.Text = ""
 	box.ZIndex = 1
-	box.SelectionImageObject = Style.selectionImage
+	box.SelectionImageObject = noSelectionImage
 	box.Parent = frame
+	local typing, selected = false, false
+	local function paint()
+		local focused = typing or selected
+		stroke.Color = if focused then Dayz.Colour.Focus else Dayz.Colour.Hairline
+		stroke.Transparency = if focused then Dayz.Alpha.Focus else Dayz.Alpha.Hairline
+	end
+	box.Focused:Connect(function()
+		typing = true
+		paint()
+	end)
+	box.FocusLost:Connect(function()
+		typing = false
+		paint()
+	end)
+	box.SelectionGained:Connect(function()
+		selected = true
+		paint()
+	end)
+	box.SelectionLost:Connect(function()
+		selected = false
+		paint()
+	end)
 	if scaled then
 		scaled:label(box, "body")
 	end
 	return box
 end
-
--- The scrollbar's thumb: its height and its transparency while it can scroll and while not.
-local THUMB_H = 15
-local THUMB_ACTIVE, THUMB_IDLE = 0.3, 0.8
 
 type ScrollbarSelf = Scrollbar & { h: number, fraction: number, active: boolean? }
 
@@ -1679,42 +1965,48 @@ function ScrollbarClass.place(self: ScrollbarSelf, fraction: number, active: boo
 	local f = if fraction == fraction then math.clamp(fraction, 0, 1) else 0
 	if f ~= self.fraction then
 		self.fraction = f
-		local thumbH = math.min(THUMB_H, self.h)
+		local thumbH = math.min(Theme.Size.THUMB_H, self.h)
 		self.thumb.Position = UDim2.fromOffset(0, math.floor((self.h - thumbH) * f + 0.5))
 	end
 	if active ~= self.active then
 		self.active = active
-		self.thumb.BackgroundTransparency = if active then THUMB_ACTIVE else THUMB_IDLE
+		local key = if active then "ThumbActive" else "Thumb"
+		self.thumb.BackgroundColor3 = Dayz.Colour[key]
+		self.thumb.BackgroundTransparency = Dayz.Alpha[key]
 	end
 end
 
--- A scrollbar at (x, y), `w` x `h`: a Field track with a hairline and a light thumb.
+-- A scrollbar at (x, y), `w` x `h`: a Field track with a hairline and a light thumb (THUMB_H tall).
 function Dayz.scrollbar(parent: Instance, x: number, y: number, w: number, h: number, z: number?): Scrollbar
 	local track = filled(parent, x, y, w, h, "Field", z or 4)
 	track.Name = "Scrollbar"
 	Dayz.outline(track, Dayz.Colour.Hairline, Dayz.Alpha.Hairline)
-	local thumb = Style.frame(track, 0, 0, w, math.min(THUMB_H, h), Dayz.Colour.TextSoft, 1)
+	local thumb = filled(track, 0, 0, w, math.min(Theme.Size.THUMB_H, h), "Thumb", 1)
 	thumb.Name = "Thumb"
-	thumb.BackgroundTransparency = THUMB_IDLE
 	local self = { track = track, thumb = thumb, h = h, fraction = 0, active = nil }
 	local scrollbar = (setmetatable(self, ScrollbarClass) :: any) :: Scrollbar
 	scrollbar:place(0, false)
 	return scrollbar
 end
 
+-- Width of `text` in this look's font at TextSize `size` (GUI pixels; Regular metrics).
+function Dayz.measure(text: string, size: number): number
+	return Style.textWidth(text, size, Dayz.FONT)
+end
+
 --[[
 	A button tooltip's dark box with `rows` (TooltipLayout's geometry, measured in Roboto) into
-	`parent` at (0, 0); returns its width and height (Ui/HoverTip under a marked root).
+	`parent` at (0, 0): TipHead black, white text, no border; returns its width and height
+	(Ui/HoverTip under a marked root).
 ]]
 function Dayz.tooltipBox(parent: Instance, rows: { string }): (number, number)
 	local measure = function(text: string): number
-		return Style.textWidth(text, TooltipLayout.TEXT, Dayz.FONT)
+		return Dayz.measure(text, TooltipLayout.TEXT)
 	end
 	local w, h = TooltipLayout.size(rows, measure)
 	local pad = TooltipLayout.PAD
-	local back = filled(parent, 0, 0, w, h, "TipBody", 1)
+	local back = filled(parent, 0, 0, w, h, "TipHead", 1)
 	back.Name = "Box"
-	Dayz.outline(back, Dayz.Colour.Hairline, Dayz.Alpha.Hairline)
 	for i, row in rows do
 		Dayz.label(
 			back,
@@ -1724,7 +2016,7 @@ function Dayz.tooltipBox(parent: Instance, rows: { string }): (number, number)
 			w - 2 * pad + 2,
 			TooltipLayout.TEXT,
 			"body",
-			Dayz.Colour.TextSoft,
+			Dayz.Colour.Text,
 			5
 		)
 	end
