@@ -140,6 +140,8 @@ HudLayout.SAVING_HEIGHT = 16
 HudLayout.EFFECT_STEP = 25
 HudLayout.EFFECT_ROW = 26
 HudLayout.EFFECT_TIP = 12
+-- The open inventory's row of effect icons (in its band) squeezes them down to this step.
+HudLayout.EFFECT_SQUEEZE = 8
 -- The bottom lift on a PC: this share of the screen's height (see the header).
 HudLayout.LIFT = 0.05
 
@@ -459,6 +461,27 @@ function HudLayout.effectsSize(columns: number, rows: number): { w: number, h: n
 		w = (columns - 1) * HudLayout.EFFECT_STEP + 24,
 		h = (rows - 1) * HudLayout.EFFECT_ROW + 24 + HudLayout.EFFECT_TIP,
 	}
+end
+
+--[[
+	The open inventory's row of effect icons (its band's `effects` place, Ui/EffectHud): how many
+	of `count` 24 pixel squares show in `width` pixels (the icons' own pixels) and the step between
+	them. EFFECT_STEP apart while they fit, closer when they need the room (Minecraft squeezes its
+	inventory list the same way), never under EFFECT_SQUEEZE: past that only as many as fit show.
+]]
+function HudLayout.effectRow(count: number, width: number): (number, number)
+	local icon = 24
+	if count <= 0 or width < icon then
+		return 0, HudLayout.EFFECT_STEP
+	elseif count == 1 then
+		return 1, HudLayout.EFFECT_STEP
+	end
+	local room = width - icon
+	local step = math.min(HudLayout.EFFECT_STEP, math.floor(room / (count - 1)))
+	if step >= HudLayout.EFFECT_SQUEEZE then
+		return count, step
+	end
+	return math.min(count, 1 + room // HudLayout.EFFECT_SQUEEZE), HudLayout.EFFECT_SQUEEZE
 end
 
 -- `r` with its corner on whole pixels (sizes stay exact: GUI pixels x the scale).

@@ -16,15 +16,20 @@
 	             0..6 above the glyph, the glyph 6..17, falling chevrons 17..23; with
 	             Config.Ui.StatusValues the value 23..30 under it (`valueText`).
 	  glyphs     each glyph empties from the top as its stat drops (`fill`: rows lit of GLYPH, 0
-	             only at nothing, all only when full), and takes its level's colour (`level`,
-	             `temperatureLevel`, `colour`): levels 1 and 2 white-grey (Icon), 3 yellow (Warn),
-	             4 red (Critical), 5 blinking red and white every Theme.Time.BLINK; temperature's
-	             cold side in its own blues (ColdWarn, ColdCritical). Thresholds: health in half
+	             only at nothing, all only when full, spread over the drawing's own height rather
+	             than its square, `litHeight`, so one row lit is a row of the drawing), and takes
+	             its level's colour (`level`, `temperatureLevel`, `colour`): levels 1 and 2
+	             white-grey (Icon), 3 yellow (Warn), 4 red (Critical), 5 blinking red and white
+	             every Theme.Time.BLINK; temperature's cold side in its own blues (ColdWarn,
+	             ColdCritical). The emptied part is faint grey while the stat is fine and takes the
+	             level's colour (and blink) from level 3 (`emptyColour`, at Theme.GLYPH_ALARM_T),
+	             so a starving player's empty stomach is a blinking red one. Thresholds: health in half
 	             hearts of 20 (scaled from the Humanoid's maximum: `halves`) yellow at 12 or less,
 	             red at 6, blinking at 3; food and thirst points yellow at 6, red at 3, blinking at
 	             0; mana's share yellow under 0.25, red under 0.10 (no blink); armor always Icon
 	             (its fill is its points, out of 20); temperature by zone: neutral 0, warning +-1,
-	             critical +-2, blinking while freezing or overheating.
+	             critical +-2, blinking while freezing or overheating. Mana full and idle (no magic
+	             weapon held) is lit through but faint (`manaPaint`), unlike an empty star.
 	  trends     1 to 3 chevrons above a glyph while its stat rises, below while it falls
 	             (`chevronAt`): health falls by its drains (Bleeding, Poison, Wither, starving,
 	             dehydrated: one chevron each, up to 3), else one for a hit in the last 2 s, else
@@ -296,6 +301,18 @@ function StatusLayout.colour(level: number, side: Side, blinkOn: boolean): strin
 	return "Icon"
 end
 
+--[[
+	The Theme.Colour key of a glyph's emptied part at `level` on `side`: GlyphEmpty (faint grey)
+	while fine (levels 1 and 2), else the level's colour as `colour` gives it, blink included
+	(Ui/StatusCluster draws it at Theme.GLYPH_ALARM_T), so the alarm shows however little is lit.
+]]
+function StatusLayout.emptyColour(level: number, side: Side, blinkOn: boolean): string
+	if level <= 2 then
+		return "GlyphEmpty"
+	end
+	return StatusLayout.colour(level, side, blinkOn)
+end
+
 -- Is the blink in its bright phase at `now` (seconds), blinking every `period`?
 function StatusLayout.blinkOn(now: number, period: number): boolean
 	return math.floor(now / period) % 2 == 0
@@ -310,6 +327,54 @@ function StatusLayout.fill(value: number, max: number): number
 		return rows
 	end
 	return math.clamp(math.floor(value / max * rows + 0.5), 1, rows - 1)
+end
+
+--[[
+	How the mana star is painted: its rows lit, the lit part's colour key and the emptied part's.
+	`shown`: Ui/ManaStars.shown (false: no magic weapon held, full and unchanged for a while);
+	`refused`: a cast the server refused just now; `blinkOn`: the blink's bright phase. Not shown
+	with a maximum, the star is full and idle: lit through in GlyphIdle (faint), never the empty
+	star's look; without a maximum (no mana yet) only the faint empty copy. A refused cast blinks
+	the whole star white, lit part and emptied part, so it shows at no mana too.
+]]
+function StatusLayout.manaPaint(
+	shown: boolean,
+	mana: number,
+	max: number,
+	refused: boolean,
+	blinkOn: boolean
+): (number, string, string)
+	if not shown then
+		if max > 0 then
+			return StatusLayout.GLYPH, "GlyphIdle", "GlyphEmpty"
+		end
+		return 0, "Icon", "GlyphEmpty"
+	end
+	local rows = StatusLayout.fill(mana, max)
+	if refused and blinkOn then
+		return rows, "Blink", "Blink"
+	end
+	local level = StatusLayout.level("mana", mana, max)
+	return rows, StatusLayout.colour(level, "neutral", blinkOn), StatusLayout.emptyColour(level, "neutral", blinkOn)
+end
+
+--[[
+	The height (GUI pixels, up from the glyph's bottom) of the bright copy's clip for `rows` lit
+	(`fill`) on a glyph whose drawing spans `top`..`bottom` (unit coordinates down its square:
+	Ui/StatusGlyphs.extent): nothing at 0 rows, the whole glyph at GLYPH, else the empty margin
+	under the drawing plus that share of the drawing's height, so the first row lit is a row of
+	the drawing, not of the margin under it.
+]]
+function StatusLayout.litHeight(rows: number, top: number, bottom: number): number
+	local glyph = StatusLayout.GLYPH
+	if rows <= 0 then
+		return 0
+	elseif rows >= glyph then
+		return glyph
+	end
+	local low = math.clamp(bottom, 0, 1)
+	local high = math.clamp(top, 0, low)
+	return ((1 - low) + rows / glyph * (low - high)) * glyph
 end
 
 --[[ Trends (chevrons: positive rising, negative falling, 0 none) ]]

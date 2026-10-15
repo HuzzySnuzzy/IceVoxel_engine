@@ -18,10 +18,13 @@
 	             knowledge row or Config.Ui.StatusValues change them, and nil outside survival, so
 	             the rest of the HUD's corner keeps clear of them.
 	  notifiers  THIRST, FOOD, TEMPERATURE | MANA, ARMOR, HEALTH (each while its feature is on:
-	             StatusLayout.columns). Each glyph is a dim copy (GlyphEmpty) under a bright one in a
-	             bottom-anchored clipping frame as tall as the rows lit (StatusLayout.fill), so it
+	             StatusLayout.columns). Each glyph is a dim copy under a bright one in a
+	             bottom-anchored clipping frame as tall as the rows lit (StatusLayout.fill, spread
+	             over the drawing's own height: StatusGlyphs.extent, StatusLayout.litHeight), so it
 	             empties from the top; the bright one takes its level's colour (StatusLayout.colour,
-	             blinking every Theme.Time.BLINK at level 5); up to three chevrons above it while
+	             blinking every Theme.Time.BLINK at level 5), and so does the dim one from level 3
+	             (StatusLayout.emptyColour, at Theme.GLYPH_ALARM_T; faint GlyphEmpty below), so the
+	             alarm shows at 0 too, where nothing is lit; up to three chevrons above it while
 	             the stat rises, below while it falls. The data:
 	               health       the Humanoid's health as half hearts of 20 (StatusLayout.halves);
 	                            flashes white for Theme.Time.FLASH after a hit; falls by its drains
@@ -34,9 +37,10 @@
 	                            zone's level (cold side blue), blinking while freezing or
 	                            overheating; the chevrons point to its target (a held Thermometer
 	                            says how fast).
-	               mana         Player/ManaState; dimmed whole (GlyphEmpty) while Ui/ManaStars says
-	                            the stars would not show (no magic weapon, full and unchanged);
-	                            blinks white after a cast the server refused.
+	               mana         Player/ManaState; lit through but faint (GlyphIdle) while
+	                            Ui/ManaStars says the stars would not show (no magic weapon, full
+	                            and unchanged), so it never looks like an empty star; the whole
+	                            star blinks white after a cast the server refused.
 	               armor        Items/Accessories.armorPoints, out of 20, always Icon white.
 	             With Config.Ui.StatusValues the number under each (full variant only).
 	  badges     StatusLayout.BADGES while their effect runs (Player/EffectState), and
@@ -86,12 +90,16 @@ type Variant = StatusLayout.Variant
 type Column = {
 	frame: Frame,
 	clip: Frame,
+	empty: GuiObject,
 	bright: GuiObject,
+	top: number,
+	bottom: number,
 	up: { GuiObject },
 	down: { GuiObject },
 	value: TextLabel,
 	rows: number,
 	colour: string,
+	emptyColour: string,
 	trend: number,
 	number: number,
 }
@@ -164,9 +172,9 @@ local lastMana = -1
 local manaDelta = 0
 local manaChangedAt = -math.huge
 
-local function mask(name: string): () -> Masks.Mask
-	return function()
-		return StatusGlyphs.render(name)
+local function mask(name: string): () -> Masks.Drawing
+	return function(): Masks.Drawing
+		return StatusGlyphs.job(name)
 	end
 end
 
@@ -180,7 +188,7 @@ local function newColumn(parent: Frame, name: Notifier, s: Style.Scaled): Column
 	frame.Visible = false
 	frame.Parent = parent
 	local glyphY = StatusLayout.ROW.glyph
-	Dayz.maskImage(
+	local empty = Dayz.maskImage(
 		frame,
 		`status.{name}`,
 		mask(name),
@@ -234,15 +242,20 @@ local function newColumn(parent: Frame, name: Notifier, s: Style.Scaled): Column
 		s
 	)
 	value.Visible = false
+	local top, bottom = StatusGlyphs.extent(name)
 	return {
 		frame = frame,
 		clip = clip,
+		empty = empty,
 		bright = bright,
+		top = top,
+		bottom = bottom,
 		up = up,
 		down = down,
 		value = value,
 		rows = 0,
 		colour = "Icon",
+		emptyColour = "GlyphEmpty",
 		trend = 0,
 		number = math.huge,
 	}
@@ -384,15 +397,34 @@ local function setVisible(object: GuiObject?, visible: boolean)
 	end
 end
 
--- Paints a column: rows lit, colour key, trend, and its value (nil: none).
-local function paint(column: Column, rows: number, colour: string, trend: number, number: number?, name: Notifier)
+--[[
+	Paints a column: rows lit (StatusLayout.fill, over the drawing's own height:
+	StatusLayout.litHeight), the lit part's colour key (at its token's transparency), the emptied
+	part's (StatusLayout.emptyColour: GlyphEmpty at its own, a level's colour at
+	Theme.GLYPH_ALARM_T), trend, and its value (nil: none).
+]]
+local function paint(
+	column: Column,
+	rows: number,
+	colour: string,
+	emptyColour: string,
+	trend: number,
+	number: number?,
+	name: Notifier
+)
+	local Dayz = Style.Dayz
 	if rows ~= column.rows then
 		column.rows = rows
-		column.clip.Size = UDim2.fromOffset(GLYPH, rows)
+		column.clip.Size = UDim2.fromOffset(GLYPH, StatusLayout.litHeight(rows, column.top, column.bottom))
 	end
 	if colour ~= column.colour then
 		column.colour = colour
-		Style.Dayz.tint(column.bright, Style.Dayz.Colour[colour], 0)
+		Dayz.tint(column.bright, Dayz.Colour[colour], Dayz.Alpha[colour])
+	end
+	if emptyColour ~= column.emptyColour then
+		column.emptyColour = emptyColour
+		local alpha = if emptyColour == "GlyphEmpty" then Dayz.Alpha.GlyphEmpty else Theme.GLYPH_ALARM_T
+		Dayz.tint(column.empty, Dayz.Colour[emptyColour], alpha)
 	end
 	if trend ~= column.trend then
 		column.trend = trend
@@ -668,6 +700,7 @@ function StatusCluster.render(now: number, mode: string)
 		columns.health,
 		StatusLayout.fill(halves, 20),
 		healthColour,
+		StatusLayout.emptyColour(healthLevel, "neutral", blink),
 		StatusLayout.healthTrend(drains, regenerating, now - hurtAt < StatusLayout.HURT_TREND),
 		halves,
 		"health"
@@ -678,7 +711,15 @@ function StatusCluster.render(now: number, mode: string)
 		armorDirty = false
 		armorPoints = Accessories.armorPoints(ClientInventory.inventory())
 	end
-	paint(columns.armor, StatusLayout.fill(math.min(armorPoints, 20), 20), "Icon", 0, armorPoints, "armor")
+	paint(
+		columns.armor,
+		StatusLayout.fill(math.min(armorPoints, 20), 20),
+		"Icon",
+		"GlyphEmpty",
+		0,
+		armorPoints,
+		"armor"
+	)
 
 	-- Mana.
 	if present.mana then
@@ -694,21 +735,16 @@ function StatusCluster.render(now: number, mode: string)
 		local refused = now - ManaState.refusedAt() < Theme.Time.FLASH
 		local magic = held ~= nil and Items.magic(held.item) ~= nil
 		local shows = ManaStars.shown(survival, magic or refused, mana, max, now - ManaState.changedAt())
-		if shows then
-			local level = StatusLayout.level("mana", mana, max)
-			local colour = if refused and blink then "Blink" else StatusLayout.colour(level, "neutral", blink)
-			paint(
-				columns.mana,
-				StatusLayout.fill(mana, max),
-				colour,
-				StatusLayout.manaTrend(manaDelta, now - manaChangedAt),
-				mana,
-				"mana"
-			)
-		else
-			-- (Dimmed whole: the dim copy alone.)
-			paint(columns.mana, 0, "Icon", 0, mana, "mana")
-		end
+		local rows, colour, emptyColour = StatusLayout.manaPaint(shows, mana, max, refused, blink)
+		paint(
+			columns.mana,
+			rows,
+			colour,
+			emptyColour,
+			if shows then StatusLayout.manaTrend(manaDelta, now - manaChangedAt) else 0,
+			mana,
+			"mana"
+		)
 	end
 
 	if status then
@@ -719,6 +755,7 @@ function StatusCluster.render(now: number, mode: string)
 				columns.food,
 				StatusLayout.fill(food, 20),
 				StatusLayout.colour(level, "neutral", blink),
+				StatusLayout.emptyColour(level, "neutral", blink),
 				StatusLayout.foodTrend(status.saturation, levels[HUNGER_EFFECT] ~= nil),
 				food,
 				"food"
@@ -730,6 +767,7 @@ function StatusCluster.render(now: number, mode: string)
 				columns.thirst,
 				StatusLayout.fill(thirst, 20),
 				StatusLayout.colour(level, "neutral", blink),
+				StatusLayout.emptyColour(level, "neutral", blink),
 				StatusLayout.thirstTrend(status.hydration, status.effect > 0),
 				thirst,
 				"thirst"
@@ -742,6 +780,7 @@ function StatusCluster.render(now: number, mode: string)
 				columns.temperature,
 				StatusLayout.fill(value - Temperature.MIN, Temperature.MAX - Temperature.MIN),
 				StatusLayout.colour(level, side, blink),
+				StatusLayout.emptyColour(level, side, blink),
 				StatusLayout.temperatureTrend(value, status.target, held ~= nil and held.item == THERMOMETER),
 				math.round(value),
 				"temperature"

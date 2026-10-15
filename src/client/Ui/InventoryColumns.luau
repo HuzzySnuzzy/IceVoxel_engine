@@ -16,7 +16,7 @@
 	      |   block's) |   | HANDS       |   |              |
 	      | ITEMS      |   |             |   |              |
 	      +------------+   +-------------+   +--------------+
-	      |          quickbar (182 x 22, centred)       status (93 x 23) |   the band, 26 tall
+	      | effects      quickbar (182 x 22, centred)       status (93 x 23) |   the band, 26 tall
 
 	Narrow mode (a small screen, where wide would fall below MIN_WIDE_SCALE): the left and the
 	right columns only, 358 wide; no character and no HANDS.
@@ -47,7 +47,9 @@
 	  * The band: the open window's nine hotbar slots as the quickbar (HudLayout's cell maths:
 	    quickCell and quickIcon from the bar's top left), centred when that leaves the status
 	    icons' room at its right (wide), else at the left; the status icons' place at the band's
-	    right when they fit beside the bar.
+	    right when they fit beside the bar; the effect icons' place (`effects`, as tall as the
+	    bar) in the wider free stretch beside the bar: its left while the bar is centred, else
+	    between the bar and the status icons, BAND_GAP from each.
 	  * Slots keep the 18 px pitch of MenuLayout (whose coordinates and the CraftingUi spec stay):
 	    a slot's (x, y) is its item's top left, its 18 x 18 frame one pixel up and left (a large
 	    result's 26 x 26 frame five), and its grid lines at x - 1 and x + 17 (big: x - 5, x + 20),
@@ -138,12 +140,14 @@ export type Arrangement = {
 	-- The sections by kind (a Kind string).
 	byKind: { [string]: Section },
 	-- ITEMS' body (nil while collapsed), the GROUND strip (the throw target), the band, the
-	-- quickbar in it and the status icons' place (nil when they do not fit beside the bar).
+	-- quickbar in it, the status icons' place (nil when they do not fit beside the bar) and the
+	-- effect icons' (nil when not one fits).
 	jei: Rect?,
 	drop: Rect,
 	band: Rect,
 	quickbar: Rect,
 	status: Rect?,
+	effects: Rect?,
 }
 
 -- The screens GUI as `place` sees it (screen pixels: its AbsoluteSize, Roblox's top bar).
@@ -198,6 +202,10 @@ InventoryColumns.HANDS_H = 76
 InventoryColumns.STATUS_W, InventoryColumns.STATUS_H = 93, 23
 -- The quickbar in the band (HudLayout's bar), and the GROUND strip's places.
 InventoryColumns.QUICK_W, InventoryColumns.QUICK_H = 182, 22
+-- The effect icons' place in the band (Ui/EffectHud draws them there, as tall as the bar) is
+-- at least this wide (one icon), and keeps BAND_GAP from the quickbar and the status icons.
+InventoryColumns.EFFECTS_MIN_W = 22
+InventoryColumns.BAND_GAP = 4
 InventoryColumns.GROUND_SLOTS = 9
 -- Collapse bits (Input.collapsed).
 InventoryColumns.BIT = table.freeze({ craft = 1, container = 2, jei = 4, backpack = 8, vanity = 16 })
@@ -213,6 +221,7 @@ local JEI_MIN, CHARACTER_MIN, HANDS_H =
 	InventoryColumns.JEI_MIN, InventoryColumns.CHARACTER_MIN, InventoryColumns.HANDS_H
 local STATUS_W, STATUS_H = InventoryColumns.STATUS_W, InventoryColumns.STATUS_H
 local QUICK_W, QUICK_H = InventoryColumns.QUICK_W, InventoryColumns.QUICK_H
+local EFFECTS_MIN_W, BAND_GAP = InventoryColumns.EFFECTS_MIN_W, InventoryColumns.BAND_GAP
 local SECTION_HEADER, SECTION_GAP = Size.SECTION_HEADER, Size.SECTION_GAP
 local COLUMN_GAP, QUICK_BAND = Size.COLUMN_GAP, Size.QUICK_BAND
 local PITCH = Size.PITCH
@@ -375,9 +384,20 @@ function InventoryColumns.arrange(input: Input): Arrangement
 	if width - (quickX + QUICK_W) < STATUS_W + 4 then
 		quickX = 0
 	end
-	local status = if width - STATUS_W >= quickX + QUICK_W + 4
+	local status = if width - STATUS_W >= quickX + QUICK_W + BAND_GAP
 		then rect(width - STATUS_W, height - STATUS_H, STATUS_W, STATUS_H)
 		else nil
+	-- The effect icons: the wider free stretch of the band beside the quickbar (left of it when it
+	-- is centred, else between it and the status icons).
+	local leftW = quickX - BAND_GAP
+	local afterBar = quickX + QUICK_W + BAND_GAP
+	local rightW = (if status then status.x - BAND_GAP else width) - afterBar
+	local effects: Rect? = nil
+	if leftW >= rightW and leftW >= EFFECTS_MIN_W then
+		effects = rect(0, height - QUICK_H, leftW, QUICK_H)
+	elseif rightW >= EFFECTS_MIN_W then
+		effects = rect(afterBar, height - QUICK_H, rightW, QUICK_H)
+	end
 
 	return {
 		mode = input.mode,
@@ -393,6 +413,7 @@ function InventoryColumns.arrange(input: Input): Arrangement
 		band = rect(0, height - QUICK_BAND, width, QUICK_BAND),
 		quickbar = rect(quickX, height - QUICK_H, QUICK_W, QUICK_H),
 		status = status,
+		effects = effects,
 	}
 end
 

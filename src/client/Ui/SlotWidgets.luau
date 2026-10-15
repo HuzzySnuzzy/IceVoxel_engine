@@ -103,7 +103,7 @@ export type SlotWidgets = {
 	eye: (self: SlotWidgets, parent: Instance, group: string, slot: number) -> Eye,
 	placeEye: (self: SlotWidgets, eye: Eye, rect: InventoryColumns.Rect) -> (),
 	drop: (self: SlotWidgets, group: string) -> (),
-	assign: (self: SlotWidgets, window: Window, live: { [string]: boolean }) -> (),
+	assign: (self: SlotWidgets, window: Window, live: { [string]: boolean }, inert: boolean?) -> (),
 	draw: (
 		self: SlotWidgets,
 		window: Window,
@@ -369,9 +369,12 @@ end
 --[[
 	Every widget's window slot for `window`'s layout (only the container's size matters), -1 while
 	its group is not `live`; a widget not live is hidden and not Selectable, so neither the pointer
-	nor a gamepad reaches it. Eyes follow their group.
+	nor a gamepad reaches it. Eyes follow their group. `inert` (the recipe view over the screen):
+	the live ones stay shown but none is Selectable, so a gamepad cannot stop on a slot that takes
+	no press.
 ]]
-function SlotWidgets.assign(self: Self, window: Window, live: { [string]: boolean })
+function SlotWidgets.assign(self: Self, window: Window, live: { [string]: boolean }, inert: boolean?)
+	local selectable = inert ~= true
 	for _, widget in self.widgets do
 		local on = live[widget.group] == true
 		local index = if on then Menu.windowIndex(window, widget.store, widget.index) or -1 else -1
@@ -381,8 +384,8 @@ function SlotWidgets.assign(self: Self, window: Window, live: { [string]: boolea
 		if button.Visible ~= shown then
 			button.Visible = shown
 		end
-		if button.Selectable ~= shown then
-			button.Selectable = shown
+		if button.Selectable ~= (shown and selectable) then
+			button.Selectable = shown and selectable
 		end
 	end
 	for _, eye in self.eyes do
@@ -390,8 +393,8 @@ function SlotWidgets.assign(self: Self, window: Window, live: { [string]: boolea
 		if eye.button.Visible ~= on then
 			eye.button.Visible = on
 		end
-		if eye.button.Selectable ~= on then
-			eye.button.Selectable = on
+		if eye.button.Selectable ~= (on and selectable) then
+			eye.button.Selectable = on and selectable
 		end
 	end
 end

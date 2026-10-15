@@ -66,8 +66,14 @@
 	              until the layout changes; false while ITEMS is collapsed.
 	  jeiViewX    the recipe view's centre: over the centre and right columns (narrow: the right).
 	  statusRect  the band's status place (absolute screen pixels) and the scale.
+	  effectsRect the band's effect icons' place (absolute screen pixels) and the scale: Ui/EffectHud
+	              draws every running effect there while the inventory shows (Ui/Screens.
+	              effectsDock), as a side list would not fit beside the screen.
 	  setViewing  the recipe view opened: the centre, the right column, the band and the strips
-	              hide (the VICINITY column stays, inert: Screens routes no clicks under the view).
+	              hide; the VICINITY column stays, drawn every frame (Screens keeps calling
+	              `render`, with no hover) but inert: Screens routes no clicks under the view, and
+	              its section bars, "items" button, GROUND strip and slots take no click of their
+	              own and no gamepad selection.
 	  setFeedback the drag feedback for the hovered slot (every frame while carrying, nil after).
 	  inDropZone  over the GROUND strip (a touch tap there does not close the screen).
 ]]
@@ -151,6 +157,8 @@ export type InventoryScreen = {
 		  jeiViewX    the recipe view's centre x (screen pixels), nil for the default.
 		  statusRect  where the status icons dock (absolute screen pixels) and the GUI scale, or
 		              nil (Ui/StatusDock).
+		  effectsRect where the effect icons go (absolute screen pixels) and the GUI scale, or nil
+		              (Ui/Screens.effectsDock, read by Ui/EffectHud).
 		  setViewing  the recipe view opened (true) or closed: the screen hides what it covers.
 		  setFeedback what the carried stack would do over the hovered target (Theme.feedback),
 		              every frame while carrying and once with nil after.
@@ -161,6 +169,7 @@ export type InventoryScreen = {
 	jeiDock: ((self: InventoryScreen) -> Rect | false)?,
 	jeiViewX: ((self: InventoryScreen) -> number?)?,
 	statusRect: ((self: InventoryScreen) -> (Rect?, number))?,
+	effectsRect: ((self: InventoryScreen) -> (Rect?, number))?,
 	setViewing: ((self: InventoryScreen, viewing: boolean) -> ())?,
 	setFeedback: ((self: InventoryScreen, feedback: Theme.Feedback?) -> ())?,
 	inDropZone: ((self: InventoryScreen, point: Vector2) -> boolean)?,
@@ -249,6 +258,7 @@ type Self = InventoryScreen & {
 	dock: Rect | false,
 	viewX: number?,
 	status: Rect?,
+	effects: Rect?,
 	width: number,
 	height: number,
 	lastPoint: Vector2?,
@@ -266,6 +276,10 @@ end
 -- Makes `section` collapse (its `bit`) when its bar is clicked; its tooltip says what a click does.
 local function collapsible(self: Self, section: Style.Section, bit: number)
 	section.header.Activated:Connect(function()
+		-- (Under the recipe view the VICINITY column takes nothing.)
+		if self.viewing then
+			return
+		end
 		SoundPlayer.click()
 		if bit == BIT.vanity then
 			self.vanityChosen = true
@@ -489,6 +503,7 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 			dock = false,
 			viewX = nil,
 			status = nil,
+			effects = nil,
 			width = InventoryColumns.LEFT_W,
 			height = InventoryColumns.MAX_HEIGHT,
 			lastPoint = nil,
@@ -510,6 +525,9 @@ function InventoryScreen.new(parent: Instance): InventoryScreen
 	local items = self.left:button("items", 1, Size.HEADER_BUTTON)
 	items.Visible = false
 	items.Activated:Connect(function()
+		if self.viewing then
+			return
+		end
 		SoundPlayer.click()
 		self.onTab()
 	end)
@@ -594,7 +612,7 @@ local function refreshLive(self: Self)
 	live.vanity = self.equipShown and on("vanity")
 	live.hands = on("hands")
 	live.band = a ~= nil
-	self.widgets:assign(self.layoutWindow, live)
+	self.widgets:assign(self.layoutWindow, live, self.viewing)
 end
 
 --[[
@@ -661,7 +679,22 @@ function InventoryScreen.setLayout(self: Self, container: Types.Container?, tabs
 	refreshLive(self)
 end
 
--- Shows what the arrangement has (and, while the recipe view is open, only the VICINITY column).
+-- Makes `button` take clicks and a gamepad's selection (`on`) or not.
+local function setTakes(button: GuiButton, on: boolean)
+	if button.Selectable ~= on then
+		button.Selectable = on
+	end
+	if button.Active ~= on then
+		button.Active = on
+	end
+end
+
+--[[
+	Shows what the arrangement has (and, while the recipe view is open, only the VICINITY column,
+	inert: its section bars, the "items" button and the GROUND strip take no click and no gamepad
+	selection, and its slots are not Selectable (refreshLive), since Ui/Screens routes nothing
+	under the view).
+]]
 local function refreshVisibility(self: Self)
 	local a = self.arrangement
 	if a == nil then
@@ -683,6 +716,13 @@ local function refreshVisibility(self: Self)
 	for _, strip in self.strips do
 		strip.Visible = wide and not viewing
 	end
+	for kind, section in self.sections do
+		if (BIT :: any)[kind] ~= nil then
+			setTakes(section.header, not viewing)
+		end
+	end
+	setTakes(self.itemsButton, not viewing)
+	setTakes(self.ground.button, not viewing)
 end
 
 -- Sizes a top header's button `button` (`size` square, `fromRight` from its right end).
@@ -799,17 +839,20 @@ local function apply(
 	local jei = a.jei
 	self.dock = if jei then { x = p.x + jei.x * scale, y = p.y + jei.y * scale, w = jei.w, h = jei.h } else false
 	self.viewX = p.x + InventoryColumns.viewCentre(a) * scale
-	local status = a.status
 	local parent = root.Parent
 	local origin = if parent and parent:IsA("GuiBase2d") then parent.AbsolutePosition else Vector2.zero
-	self.status = if status
-		then {
-			x = origin.X + p.x + status.x * scale,
-			y = origin.Y + p.y + status.y * scale,
-			w = status.w * scale,
-			h = status.h * scale,
-		}
-		else nil
+	local function onScreen(r: Rect?): Rect?
+		return if r
+			then {
+				x = origin.X + p.x + r.x * scale,
+				y = origin.Y + p.y + r.y * scale,
+				w = r.w * scale,
+				h = r.h * scale,
+			}
+			else nil
+	end
+	self.status = onScreen(a.status)
+	self.effects = onScreen(a.effects)
 
 	refreshVisibility(self)
 	refreshLive(self)
@@ -881,12 +924,21 @@ function InventoryScreen.statusRect(self: Self): (Rect?, number)
 	return self.status, self.scale
 end
 
+-- The band's effect icons' place (absolute screen pixels) and the scale, while the band shows.
+function InventoryScreen.effectsRect(self: Self): (Rect?, number)
+	if self.viewing then
+		return nil, self.scale
+	end
+	return self.effects, self.scale
+end
+
 function InventoryScreen.setViewing(self: Self, viewing: boolean)
 	if viewing == self.viewing then
 		return
 	end
 	self.viewing = viewing
 	refreshVisibility(self)
+	refreshLive(self)
 end
 
 function InventoryScreen.setFeedback(self: Self, feedback: Theme.Feedback?)

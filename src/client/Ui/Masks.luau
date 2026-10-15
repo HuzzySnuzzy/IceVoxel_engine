@@ -18,7 +18,8 @@
 
 	`render` samples each pixel `samples` x `samples` times on a regular grid (4 x 4 unless told
 	otherwise) and keeps the share of samples inside as the pixel's alpha (0..1), so edges come out
-	smooth at any size. The masks are drawn once, at 48 x 48 px (Ui/Theme's Size.MASK), and shown
+	smooth at any size; `begin` and `step` draw the same mask a few rows at a time, so a caller
+	with a frame budget can stop in the middle of a mask. The masks are drawn once, at 48 x 48 px (Ui/Theme's Size.MASK), and shown
 	smaller by the GPU, or `downsample`d (each target pixel the area-weighted mean of the source
 	pixels it covers, so the mean alpha is kept) when a smaller copy is needed. `rows` turns a mask
 	into "#" / "." text rows, the blocky art drawn with Frames where images can't be made.
@@ -37,6 +38,10 @@ export type Shape =
 export type Op = { shape: Shape, cut: boolean? }
 -- `w` x `h` pixels, their alpha (0..1) row by row from the top left.
 export type Mask = { w: number, h: number, alpha: { number } }
+-- A mask being drawn (`begin`): `step` draws its next rows into `mask`; `row` rows are done.
+export type Job = { ops: { Op }, samples: number, row: number, mask: Mask }
+-- What a mask's maker gives Style.Dayz: the mask drawn, or a job to draw over frames.
+export type Drawing = Mask | Job
 
 local Masks = {}
 
@@ -103,14 +108,30 @@ function Masks.contains(shape: Shape, px: number, py: number): boolean
 end
 
 --[[
-	The mask of `ops` drawn into `w` x `h` pixels, each pixel's alpha the share of its `samples` x
-	`samples` sample points (default SAMPLES) the drawing covers.
+	A drawing of `ops` into `w` x `h` pixels, not drawn yet: `step` draws it a few rows at a time
+	(Style.Dayz spreads a mask over frames that way), `render` all at once. Each pixel's alpha is
+	the share of its `samples` x `samples` sample points (default SAMPLES) the drawing covers.
 ]]
-function Masks.render(ops: { Op }, w: number, h: number, samples: number?): Mask
-	local n = math.max(1, math.floor(samples or Masks.SAMPLES))
+function Masks.begin(ops: { Op }, w: number, h: number, samples: number?): Job
+	return {
+		ops = ops,
+		samples = math.max(1, math.floor(samples or Masks.SAMPLES)),
+		row = 0,
+		mask = { w = w, h = h, alpha = table.create(w * h, 0) },
+	}
+end
+
+-- Draws up to `rows` more rows of `job` (from the top); whether the mask is done.
+function Masks.step(job: Job, rows: number): boolean
+	local mask = job.mask
+	local w, h = mask.w, mask.h
+	local alpha = mask.alpha
+	local ops = job.ops
+	local n = job.samples
 	local total = n * n
-	local alpha = table.create(w * h, 0)
-	for py = 0, h - 1 do
+	local first = job.row
+	local last = math.min(h, first + math.max(0, rows)) - 1
+	for py = first, last do
 		for px = 0, w - 1 do
 			local covered = 0
 			for sy = 0, n - 1 do
@@ -131,7 +152,18 @@ function Masks.render(ops: { Op }, w: number, h: number, samples: number?): Mask
 			alpha[py * w + px + 1] = covered / total
 		end
 	end
-	return { w = w, h = h, alpha = alpha }
+	job.row = math.max(first, last + 1)
+	return job.row >= h
+end
+
+--[[
+	The mask of `ops` drawn into `w` x `h` pixels at once, each pixel's alpha the share of its
+	`samples` x `samples` sample points (default SAMPLES) the drawing covers.
+]]
+function Masks.render(ops: { Op }, w: number, h: number, samples: number?): Mask
+	local job = Masks.begin(ops, w, h, samples)
+	Masks.step(job, h)
+	return job.mask
 end
 
 --[[

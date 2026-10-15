@@ -28,7 +28,9 @@
 	  * Drag feedback only colours outlines (`feedback`, `FeedbackColour`, at FEEDBACK_T): green
 	    fits, red blocked, light blue swaps, orange combines, white the drop strip.
 	  * The status icons are white when fine, yellow, then red, then blinking (Icon, Warn, Critical;
-	    the cold side in its own blues); temperature numbers take their zone's colour (`Zone`).
+	    the cold side in its own blues), the whole silhouette: the part lit in full, the emptied
+	    part at GLYPH_ALARM_T (faint GlyphEmpty while fine); temperature numbers take their zone's
+	    colour (`Zone`).
 	  * Headers are not quite flat (`Gradient`): the grey top headers darken a little towards their
 	    bottom edge and the black section bars thin out towards theirs, each averaging its token's
 	    value, so a header reads as the token says from a distance.
@@ -300,7 +302,11 @@ Theme.Colour = table.freeze({
 	ColdCritical = rgba(30, 144, 220, 0),
 	-- (The blinking levels' other colour.)
 	Blink = rgba(255, 255, 255, 0),
+	-- The emptied part of a glyph while its stat is fine (from level 3 the emptied part takes
+	-- the level's colour at GLYPH_ALARM_T instead), and a whole glyph with nothing to say (mana
+	-- full and idle: lit through, faint).
 	GlyphEmpty = rgba(220, 220, 220, 0.75),
+	GlyphIdle = rgba(220, 220, 220, 0.55),
 	XpTrack = rgba(255, 255, 255, 0.75),
 	XpFill = rgba(255, 255, 255, 0),
 
@@ -333,6 +339,12 @@ Theme.Zone = table.freeze({
 	[1] = rgba(238, 130, 39),
 	[2] = rgba(217, 44, 40),
 } :: { [number]: Rgba })
+
+--[[
+	The emptied part of a status glyph at a warning level or worse (3..5): the level's colour (and
+	its blink) at this transparency, so the alarm shows however little of the glyph is lit.
+]]
+Theme.GLYPH_ALARM_T = 0.5
 
 --[[ Drag feedback (outlines only) ]]
 

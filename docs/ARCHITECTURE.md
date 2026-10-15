@@ -3722,18 +3722,21 @@ and never paints them afterwards.
 
 `Ui/Masks` is pure (specced in `tests/spec/Masks`): a drawing is a list of shapes in unit
 coordinates (circle, rounded rect, even-odd polygon, ring), each painting in or, with `cut`,
-taking out; `render` samples each pixel on a grid (`samples` x `samples`) into alphas 0..1,
-`downsample` keeps the mean alpha, `rows` turns a mask into "#" / "." rows (the blocky fallback),
+taking out; `render` samples each pixel on a grid (`samples` x `samples`) into alphas 0..1
+(`begin` and `step` draw the same mask a few rows at a time), `downsample` keeps the mean alpha, `rows` turns a mask into "#" / "." rows (the blocky fallback),
 `vignette` is the backdrop's darkening. `Ui/Silhouettes` (pure) holds the look's own drawings:
 head, chest, legs, feet, accessory, backpack, crafting, vanity, gear, close, items, minus, plus,
 padlock, chevron; `Ui/StatusGlyphs` (pure) the six notifiers, the badges (one per Effects name in
-`StatusLayout.BADGES` and `STATUS_BADGES`) and the trend chevrons. Both render at 48 pixels with
-3 x 3 samples a pixel (a 4 x 4 glyph took about 1.6 times as long).
+`StatusLayout.BADGES` and `STATUS_BADGES`) and the trend chevrons, and `extent` (how far down its
+square a drawing reaches, for the notifiers' fill). Both render at 48 pixels with 3 x 3 samples a
+pixel (a 4 x 4 glyph took about 1.6 times as long), and both give `job`s (`Masks.begin`).
 
 `Style.Dayz.maskImage` shows a mask by name: an ImageLabel whose image is one EditableImage per
 name (white, the mask's alpha), tinted by ImageColor3 (`tint` recolours it). A name not drawn yet
-is queued and drawn on a later frame, at most `MASK_BUDGET` (4 ms) a frame and at least one name,
-so opening a screen never draws in a burst; `Silhouettes.NAMES` are queued as Style loads. Where an
+is queued and drawn over later frames from its maker's job, `MASK_ROWS` (2) rows a step, steps
+until `MASK_BUDGET` (4 ms) of the frame is spent (at least one step), so no frame pays for a whole
+mask (one took 2 to 21 ms interpreted, 33 of them at start and spawn) and opening a screen never
+draws in a burst; a maker may also give the mask drawn; `Silhouettes.NAMES` are queued as Style loads. Where an
 EditableImage can't be made (the API is off, the memory budget used up) the image gets the blocky
 fallback: the mask downsampled to its size as `glyph` Frames. `silhouette` draws a Silhouettes
 name; `maskContent` draws a one-off mask at once (the vignette).
@@ -3758,7 +3761,9 @@ outline. `Ui/Backdrop` puts a light layer and a vignette (`Masks.vignette` as on
 behind an open inventory or creative screen and blurs the world (`Config.Ui.InventoryBlur`) on a
 mouse; on touch, or without the vignette, a darker layer (`BackdropTouch`), the blur kept on a
 mouse; panels keep Minecraft's layer. `Ui/HoverTip` draws a button's tooltip in the dark box under
-a marked root, Minecraft's elsewhere.
+a marked root, Minecraft's elsewhere; an attached object's entry goes when the object is destroyed
+(a section bar's "expand"/"collapse" variant reaches the bar, and Luau's weak keys are not
+ephemerons, so a rebuilt block section would otherwise stay in its table for the session).
 
 ### The inventory screen (`Ui/InventoryScreen`, `Ui/InventoryColumns`, `Ui/SlotWidgets`, `Ui/ContainerPanel`, `Ui/GroundStrip`, `Ui/PlayerPreview`)
 
@@ -3781,7 +3786,15 @@ view change (one compare, nothing allocated otherwise), draws the window every f
 hit-tests: `targetAt` (a live slot; the GROUND strip and anywhere outside the root: `outside`;
 anything else inside the root: nothing), `tooltipAt` (a locked crafting result, a closed accessory
 slot, a machine's energy bar and tanks while its section is open, a ground item). It gives Screens
-`place`, `jeiDock`, `jeiViewX`, `statusRect`, `setViewing`, `setFeedback` and `inDropZone`.
+`place`, `jeiDock`, `jeiViewX`, `statusRect`, `effectsRect` (the band's free stretch beside the
+quickbar, `InventoryColumns.arrange`'s `effects`, where `Ui/EffectHud` draws every running effect),
+`setViewing`, `setFeedback` and `inDropZone`. Under the recipe view (`setViewing`) the VICINITY
+column stays shown and Screens keeps drawing it (no hover, no drag), so a furnace's gauges and the
+GROUND strip stay live, but it is inert: its section bars and the creative "items" button ignore
+clicks and, with the GROUND strip and its slots (`SlotWidgets.assign`'s `inert`), are not
+Selectable. `tests/spec/SurvivalLookGlue` runs the real screen on a fake Roblox client
+(`tests/lib/FakeClient`) to check that, the effects' place, the tooltips' cleanup, the outlines'
+scale registries and the masks' frame budget.
 
 `Ui/SlotWidgets` holds every slot widget (an `ItemIcon.slot` with its store, index and window slot,
 in a group per section): `assign` makes a folded or absent section's slots not live (window -1,
@@ -3822,7 +3835,11 @@ attack indicator's cell, the touch buttons (`Style.Dayz.Art`) and the status ico
 columns never move for a value), the badges' rows of five above them in priority order, the
 knowledge row, the three variants (`full`: badges, notifiers, values, knowledge; `lean`: badges
 and notifiers; `dock`: the notifiers alone), `level` / `temperatureLevel` / `colour` / `blinkOn`
-(white, yellow, red, blinking; the cold side in blues), `fill` (rows lit), the trends
+(white, yellow, red, blinking; the cold side in blues), `emptyColour` (a glyph's emptied part:
+faint `GlyphEmpty` while fine, the level's colour and blink from level 3 at `Theme.GLYPH_ALARM_T`,
+so the alarm shows at 0 where nothing is lit), `fill` (rows lit) and `litHeight` (the rows spread
+over the drawing's own height, `StatusGlyphs.extent`, not its square's margins), `manaPaint` (full
+idle mana lit through in faint `GlyphIdle`, unlike an empty star), the trends
 (`healthTrend` with its drains, `regenerating` by hunger's or thirst's rule, `foodTrend`,
 `thirstTrend`, `temperatureTrend`, `manaTrend`), `valueText` and `badgeText`. `Ui/StatusCluster`
 builds the icons once in the HUD's ScreenGui and every frame compares and writes what changed
@@ -4617,8 +4634,11 @@ GroupTransparency for the last 10 s' blinking) where `Ui/HudLayout` puts them (t
 the toasts, or beside them on small screens; see "GUI scale"), the hovered or tapped one's name and
 time under them (Roboto, a faint dark outline), leaving out the effects the status icons show as
 badges while they do (`StatusCluster.badgesShown`: Bleeding, Infection, Poison, Wither, Hunger,
-Thirst, Nausea), and Minecraft's 120 × 32 list (flat dark panels, every effect) on the left while an
-inventory screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9,
+Thirst, Nausea), a row of every effect in the open survival inventory's band beside the quickbar
+(`Screens.effectsDock`, from `InventoryScreen.effectsRect`; harmful first from the right end, as
+tall as the bar, squeezed by `HudLayout.effectRow`: that inventory reaches the screen's 5 % inset,
+so no list fits beside it), and otherwise Minecraft's 120 × 32 list (flat dark panels, every
+effect) on the left while an inventory screen is open: over the screens' darkened backdrop (DisplayOrder 10, above Screens' 9,
 under the cursor's 20), never taking clicks, Minecraft's 32 wide compact list (glyphs alone) when
 the full one would reach the screen's panels (`Screens.screenLeft`), none when even that wouldn't
 fit, and nothing behind panel screens (skill tree, Options: `Screens.panelOpen`). Its ScreenGui
@@ -4858,7 +4878,8 @@ the Campfire for boiling), also uses every entry of its categories, after its ow
 - The recipe view shows over the survival inventory's middle and right columns
   (`InventoryScreen.jeiViewX`; narrow: over the right one), which hide (`setViewing`), and over the
   creative panel's place; Screens makes no slot clicks under it while it is shown (the VICINITY
-  column stays, inert). It has category tabs, pages, and as many recipes as fit (two crafting
+  column stays, drawn every frame and inert: its bars, buttons and slots take no click or gamepad
+  selection). It has category tabs, pages, and as many recipes as fit (two crafting
   or smelting recipes, three fuels). Clicking its items navigates, Back or Backspace returns
   through the history, and E, Escape or gamepad B go back to the inventory. Escape also opens
   Roblox's menu (MenuOpened): with the view open that only closes the view, so the menu shows
@@ -7451,7 +7472,8 @@ Terraria 1.4.4's mana, server-authoritative like health, in Minecraft's ticks.
   star emptying from the top with mana's share (yellow under a quarter, red under a tenth, no
   blink of its own), in survival and adventure only. It is lit while `Ui/ManaStars.shown` says
   Terraria's stars would show (a magic weapon selected, mana not full, or `Config.Mana.HudLinger`
-  3 s after a change), dimmed whole otherwise; it blinks white after a refused cast and its arrow
+  3 s after a change), lit through but faint otherwise (`StatusLayout.manaPaint`: never the empty
+  star's look, which is red); the whole star blinks white after a refused cast and its arrow
   rises or falls for a second after mana changes. `Ui/ManaStars` keeps Terraria's star row rules
   (full, half, empty; rows; layout) pure and specced in `tests/spec/Mana`, though no stars are
   drawn.
@@ -7533,7 +7555,7 @@ bottom of the screen and the saving icon sat on the minimap).
   | Toasts, Effects | 7 | Now Playing, the status effect icons |
   | Saving, Waila, ChatUnderScreens | 8 | saving icon and "World saved", WAILA, the chat under an open screen |
   | Screens, AttackBar | 9 | inventories and menus, the attack indicator |
-  | Hud, EffectList | 10 | the HUD, the effect list beside open screens |
+  | Hud, EffectList | 10 | the HUD, the effect list beside open screens (or its row in the inventory's band) |
   | AgeToast | 11 | a new Age's banner |
   | Chat | 12 | the chat |
   | Switcher | 15 | F3 + F4 |

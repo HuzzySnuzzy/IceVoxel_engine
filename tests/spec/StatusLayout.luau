@@ -6,7 +6,9 @@
 	other), the variants' sizes, the levels' thresholds (health in half hearts of 20 whatever the
 	Humanoid's maximum, food, thirst, mana, temperature by zone with freezing and overheating), the
 	colours by level and side, the glyph's fill (empty only at nothing, full only when full, never
-	going down as the stat goes up), the trends, the regeneration rule with hunger on and off, the
+	going down as the stat goes up, spread over the drawing's own height so any non-zero stat
+	lights some of it), the emptied part's colour (the level's from level 3, blinking at 5, so
+	the alarm shows at 0 where nothing is lit), full idle mana apart from an empty star, the trends, the regeneration rule with hunger on and off, the
 	value and badge texts, and every silhouette: drawn, non-empty, alphas in 0..1, the drop and the
 	thermometer symmetric, every badge an effect that exists.
 ]]
@@ -234,6 +236,141 @@ return function(t, shared, require, _server, client)
 		end
 		t.eq(StatusLayout.fill(5, 0), 0, "no maximum")
 		t.eq(StatusLayout.fill(30, 20), rows, "armor past 20")
+	end)
+
+	-- The share of a notifier's drawing (its alpha) inside the bright copy's clip, `height` GUI
+	-- pixels up from the glyph's bottom (as the clip shows it).
+	local function litShare(mask, height: number): number
+		local total, inside = 0, 0
+		local cut = mask.h * (1 - height / StatusLayout.GLYPH)
+		for y = 0, mask.h - 1 do
+			local below = math.clamp((y + 1) - cut, 0, 1)
+			for x = 0, mask.w - 1 do
+				local a = mask.alpha[y * mask.w + x + 1]
+				total += a
+				inside += a * below
+			end
+		end
+		return if total > 0 then inside / total else 0
+	end
+
+	t.test("status layout: the rows lit spread over the drawing, not its margins", function()
+		local G = StatusLayout.GLYPH
+		for _, name in ORDER do
+			local top, bottom = StatusGlyphs.extent(name)
+			t.ok(top >= 0 and top < bottom and bottom <= 1, `{name}: its drawing's span {top}..{bottom}`)
+			t.eq(StatusLayout.litHeight(0, top, bottom), 0, `{name}: nothing lit at 0 rows`)
+			t.eq(StatusLayout.litHeight(G, top, bottom), G, `{name}: all of it when full`)
+			local last = 0
+			for rows = 1, G - 1 do
+				local height = StatusLayout.litHeight(rows, top, bottom)
+				t.ok(height > last and height < G, `{name}: {rows} rows lit more than {rows - 1}`)
+				last = height
+			end
+			-- (The first row lit is a row of the drawing, above the empty margin under it.)
+			local margin = (1 - bottom) * G
+			t.ok(StatusLayout.litHeight(1, top, bottom) >= margin + (bottom - top) - 1e-9, `{name}: one row of it`)
+		end
+		local top, bottom = StatusGlyphs.extent("food")
+		t.ok(math.abs(top - 0.02) < 1e-9 and math.abs(bottom - 0.88) < 1e-9, "the stomach's span: tube to sack")
+		t.eq(select(2, StatusGlyphs.extent("nothing")), 1, "an unknown drawing: the whole square")
+	end)
+
+	t.test("status layout: the alarm shows however little of a glyph is lit", function()
+		local Temperature = require(shared.ToughAsNails.Temperature)
+		-- Each stat's values: level, side, and the rows lit, as Ui/StatusCluster works them out.
+		local function each(name: string, visit: (value: number, level: number, side: string, rows: number) -> ())
+			if name == "temperature" then
+				for value = Temperature.MIN, Temperature.MAX do
+					local level, side = StatusLayout.temperatureLevel(Temperature.zone(value), 0, 0)
+					visit(
+						value,
+						level,
+						side,
+						StatusLayout.fill(value - Temperature.MIN, Temperature.MAX - Temperature.MIN)
+					)
+				end
+				return
+			end
+			for value = 0, 20 do
+				local level = StatusLayout.level(name :: any, value, 20)
+				visit(value, level, "neutral", StatusLayout.fill(value, 20))
+			end
+		end
+		local checked = 0
+		for _, name in { "food", "thirst", "health", "temperature", "mana" } do
+			local mask = StatusGlyphs.render(name)
+			local top, bottom = StatusGlyphs.extent(name)
+			local lastShare = -1
+			each(name, function(value, level, side, rows)
+				local share = litShare(mask, StatusLayout.litHeight(rows, top, bottom))
+				local where = `{name} {value} (level {level}, {math.floor(share * 100 + 0.5)}% lit)`
+				t.ok(share >= lastShare - 1e-9, `{where}: never less lit than the value under it`)
+				lastShare = share
+				if rows > 0 then
+					t.ok(share > 0.005, `{where}: something of the drawing lit`)
+				else
+					t.eq(share, 0, `{where}: nothing lit`)
+				end
+				for _, blinkOn in { true, false } do
+					local empty = StatusLayout.emptyColour(level, side, blinkOn)
+					if level >= 3 then
+						-- (Lit or not, the whole silhouette carries the level's colour.)
+						t.eq(empty, StatusLayout.colour(level, side, blinkOn), `{where}: the emptied part's colour`)
+						t.ok(empty ~= "GlyphEmpty" and empty ~= "Icon", `{where}: the emptied part warns`)
+					else
+						t.eq(empty, "GlyphEmpty", `{where}: faint while fine`)
+					end
+				end
+				if level >= 5 then
+					t.ok(
+						StatusLayout.emptyColour(level, side, true) ~= StatusLayout.emptyColour(level, side, false),
+						`{where}: the emptied part blinks`
+					)
+				end
+				-- (What the review found: at 0 to 3 points of food or thirst nothing red showed.)
+				if (name == "food" or name == "thirst") and value >= 1 and value <= 3 then
+					t.ok(share >= 0.05, `{where}: a visible share lit`)
+				end
+				checked += 1
+			end)
+		end
+		t.eq(checked, 5 * 21)
+		-- Starving and dehydrated: blinking red, the whole stomach and drop.
+		t.eq(StatusLayout.emptyColour(StatusLayout.level("food", 0, 20), "neutral", false), "Critical")
+		t.eq(StatusLayout.emptyColour(StatusLayout.level("thirst", 0, 20), "neutral", true), "Blink")
+		-- Freezing: blinking blue whatever the fill.
+		local level, side = StatusLayout.temperatureLevel(-2, 10, 0)
+		t.eq(StatusLayout.emptyColour(level, side, false), "ColdCritical")
+		t.eq(StatusLayout.emptyColour(StatusLayout.level("mana", 0, 200), "neutral", true), "Critical", "no mana")
+	end)
+
+	t.test("status layout: full idle mana never looks like an empty star", function()
+		local M = StatusLayout.manaPaint
+		local G = StatusLayout.GLYPH
+		for _, blinkOn in { true, false } do
+			local idleRows, idleLit, idleEmpty = M(false, 200, 200, false, blinkOn)
+			local emptyRows, emptyLit, emptyEmpty = M(true, 0, 200, false, blinkOn)
+			t.eq(idleRows, G, "idle: lit through")
+			t.eq(idleLit, "GlyphIdle", "idle: faint")
+			t.eq(idleEmpty, "GlyphEmpty")
+			t.eq(emptyRows, 0, "no mana: nothing lit")
+			t.eq(emptyEmpty, "Critical", "no mana: the whole star red")
+			t.ok(
+				`{idleRows} {idleLit} {idleEmpty}` ~= `{emptyRows} {emptyLit} {emptyEmpty}`,
+				"idle full and empty look apart"
+			)
+			local fullRows, fullLit = M(true, 200, 200, false, blinkOn)
+			t.ok(fullRows == G and fullLit == "Icon", "full with a magic weapon: bright")
+		end
+		-- A refused cast blinks the whole star, at no mana too.
+		local rows, lit, empty = M(true, 0, 200, true, true)
+		t.ok(rows == 0 and lit == "Blink" and empty == "Blink", "refused at no mana: the emptied part blinks")
+		local _, offLit, offEmpty = M(true, 0, 200, true, false)
+		t.ok(offLit == "Critical" and offEmpty == "Critical", "refused, the dark phase: red")
+		t.eq(M(false, 0, 0, false, true), 0, "no mana yet: nothing lit")
+		t.eq(select(3, M(true, 30, 200, false, true)), "Warn", "low mana: the emptied part warns")
+		t.eq(select(3, M(true, 120, 200, false, true)), "GlyphEmpty", "fine: faint")
 	end)
 
 	t.test("status layout: trends", function()

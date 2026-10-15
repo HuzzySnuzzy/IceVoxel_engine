@@ -54,8 +54,11 @@
 	the screen (one View table, updated in place) and returns its GUI scale; JEI's list then docks
 	where the inventory says (`jeiDock`, one Placement table reused) and the status icons dock in
 	its band (`statusRect` -> Ui/StatusDock, cleared whenever the inventory is not the shown
-	screen). Without `place` the inventory is fitted and centred as Minecraft's. While the recipe
-	view is open an inventory with `setViewing` hides what the view covers itself and stays shown.
+	screen), and so do the effect icons (`effectsRect` -> `effectsDock`, read by Ui/EffectHud).
+	Without `place` the inventory is fitted and centred as Minecraft's. While the recipe
+	view is open an inventory with `setViewing` hides what the view covers itself and stays shown,
+	drawn every frame (no hover, no drag: the view takes the input) so what shows beside the view
+	stays live.
 	A touch tap where items are thrown (`inDropZone`) with nothing carried does not close it.
 
 	Panels: another module's screen (Ui/StructureScreen: the structure block and jigsaw screens)
@@ -252,6 +255,22 @@ function Screens.screenLeft(): number?
 		return nil
 	end
 	return screenLeftEdge
+end
+
+--[[
+	Where the open inventory wants the effect icons (its band's free stretch beside the quickbar:
+	InventoryScreen.effectsRect, absolute screen pixels) and the GUI scale, as last laid out; nil
+	while it offers none (another screen, the recipe view over the band, no room). Ui/EffectHud
+	draws every running effect there rather than in its list beside the screen, which a survival
+	inventory as wide as the screen leaves no room for. The same table until the layout changes.
+]]
+local effectsDockRect: InventoryScreen.Rect? = nil
+local effectsDockScale = 1
+function Screens.effectsDock(): (InventoryScreen.Rect?, number)
+	if current ~= "inventory" then
+		return nil, effectsDockScale
+	end
+	return effectsDockRect, effectsDockScale
 end
 
 -- Set by start.
@@ -638,12 +657,19 @@ function Screens.start()
 			placement.viewX = nil
 		end
 		jei:place(placement)
-		-- The status icons dock in the open inventory's band (the inventory says where).
+		-- The status icons dock in the open inventory's band (the inventory says where), and so
+		-- do the effect icons.
 		local statusRect = inventory.statusRect
 		if current == "inventory" and statusRect then
 			StatusDock.set(statusRect(inventory))
 		else
 			StatusDock.set(nil, 1)
+		end
+		local effectsRect = inventory.effectsRect
+		if current == "inventory" and effectsRect then
+			effectsDockRect, effectsDockScale = effectsRect(inventory)
+		else
+			effectsDockRect = nil
 		end
 		ghost:setScale(scale)
 		tooltip:setScale(scale)
@@ -1358,6 +1384,11 @@ function Screens.start()
 			if previewing then
 				previewing = false
 				Hud.setPreview(nil)
+			end
+			-- (What an inventory keeps shown beside the view, its VICINITY column, stays live:
+			-- gauges, slots, counts, the ground. No hover and no drag: the view takes the input.)
+			if current == "inventory" and inventory.setViewing then
+				inventory:render(shown, nil, dragged)
 			end
 		elseif current == "creative" then
 			creative:render(shown, hover, dragged)

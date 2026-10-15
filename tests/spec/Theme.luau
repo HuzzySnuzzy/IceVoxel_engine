@@ -64,6 +64,10 @@ return function(t, shared, require, _server, client)
 		t.eq(Theme.Colour.CellFilled.t, 0.96)
 		t.eq(Theme.Colour.SectionBody.t, 0.29)
 		t.eq(Theme.Colour.ItemTint.r, 179)
+		-- The status glyphs: a warning glyph's emptied part shows more than a fine one's, and a
+		-- full idle glyph more than an empty one.
+		t.ok(Theme.GLYPH_ALARM_T >= 0 and Theme.GLYPH_ALARM_T < Theme.Colour.GlyphEmpty.t, "the alarm's emptied part")
+		t.ok(Theme.Colour.GlyphIdle.t < Theme.Colour.GlyphEmpty.t, "idle stronger than empty")
 	end)
 
 	t.test("theme: text sizes, fonts and sizes", function()

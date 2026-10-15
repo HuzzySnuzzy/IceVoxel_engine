@@ -523,8 +523,9 @@ A fast, Minecraft-style voxel engine for Roblox.
     large, its name, a condition dot and word and one detail line (durability, sips, a stack's
     count, energy). On the right, **EQUIPMENT** (its gear opens the Options menu): the armor over
     the seven accessory slots with their eyes and padlocks, then **BACKPACK (n/27)** and **VANITY**.
-    The band holds the hotbar slots as the quickbar and, in survival and adventure, the status icons
-    at its right. Where three columns would have to shrink below GUI scale 2 (1.5 on touch; the
+    The band holds the hotbar slots as the quickbar, every running effect as a row of icons beside
+    it (harmful ones first, closer together when there are many) and, in survival and adventure, the
+    status icons at its right. Where three columns would have to shrink below GUI scale 2 (1.5 on touch; the
     screen's own scale when that is smaller) only the side columns show. Behind it the world blurs
     on a PC (`Config.Ui.InventoryBlur`) under a vignette.
   - **Cells:** one dark slab per grid with faint lines between the cells; empty cells are clear,
@@ -535,6 +536,9 @@ A fast, Minecraft-style voxel engine for Roblox.
     VANITY (the minus or plus at its right end) to fold it to its bar and back. A folded section's
     slots take no clicks, its title still counts what it holds, and its room goes to ITEMS and the
     player. VANITY starts folded on touch screens; the rest is remembered for the session.
+  - **The recipe view** (`R` or `U` over an item) shows over the middle and right columns; VICINITY
+    stays beside it, still live (a furnace keeps cooking on screen, the GROUND strip keeps
+    updating) but taking no clicks or gamepad selection until the view closes.
   - **Throwing:** drag a stack onto the GROUND strip (outlined in white while you carry one, "Drop
     here" while it is empty) or let go of it outside the screen to throw it; anywhere else in the
     screen (headers, gaps, the player, the band) nothing happens. On touch a tap on the strip with
@@ -550,9 +554,11 @@ A fast, Minecraft-style voxel engine for Roblox.
   - **The status icons** at the bottom right, on the quickbar's line where they fit: THIRST, FOOD,
     TEMPERATURE, a divider, MANA, ARMOR and HEALTH (each while its feature is on), white
     silhouettes that empty from the top as the stat drops. They turn yellow, then red, then blink
-    red and white: health at 6, 3 and 1.5 hearts, food and thirst at 6, 3 and 0 points, mana under
+    red and white, the whole silhouette (its emptied part fainter), so an empty stomach still
+    blinks red: health at 6, 3 and 1.5 hearts, food and thirst at 6, 3 and 0 points, mana under
     a quarter and a tenth (no blink), the temperature by zone (blues on the cold side, blinking
-    while freezing or overheating); armor stays white and fills with its points. Up to three
+    while freezing or overheating); armor stays white and fills with its points. Full mana with no
+    magic weapon held shows faint but whole, never like an empty star. Up to three
     arrows above an icon mean its stat is rising, below it falling: health falls one for each of
     bleeding, poison, wither, starving and dehydration (else one for 2 s after a hit) and rises
     while it regenerates; food and thirst fall two under the Hunger or Thirst effect and one with
@@ -2178,7 +2184,8 @@ src/client   -> StarterPlayerScripts.IceVoxel
                             HudLayout (Minecraft's scale and the corner's layout; pure),
                             MusicToast (Now Playing),
                             EffectHud + EffectIcons (status effect icons in the top right, the
-                            list beside open screens, their glyphs), SkillTreeScreen (the skill
+                            row in the open inventory's band and the list beside other open
+                            screens, their glyphs), SkillTreeScreen (the skill
                             tree, K), AgeToast (a new Age's banner), AttackIndicator (the
                             weapon's recovery under the crosshair or beside the quickbar), MainMenu
                             (the title screen, Create World and Load World) + TitleRules +
@@ -2485,7 +2492,7 @@ for performance:
 | `Nuke.EditsPerTick` / `ReadsPerTick` | 500 / 16000 | Cost bounds per server tick (each edit is 12 bytes to every client). |
 | `Nuke.Power` / `EffectDistance` / `LookPower` | 28 / 256 / 16 | Players and items: Minecraft's damage and push at this power; who sees it; blasts this strong get the nuke's look. |
 | `Effects.FluidEffects` | true | Oil and fuel give their effects (Slowness II and Oil Coated; Nausea, Poison and Fuel Soaked); off, they leave players be (potions and `/effect` still work). |
-| `Effects.Hud` | true | The status effect icons in the top right corner and the list beside open screens (off: the status icons' badges show Climate Clemency, Internal Warmth and Chill too). |
+| `Effects.Hud` | true | The status effect icons in the top right corner, the row in the open inventory's band and the list beside the other open screens (off: the status icons' badges show Climate Clemency, Internal Warmth and Chill too). |
 | `Effects.NauseaRoll` / `NauseaFov` | 7 / 0.1 | Nausea's wobble at full strength: the camera's roll (degrees) and the field of view's sway (a share), times the Distortion Effects setting squared (Minecraft's screenEffectScale). |
 | `Effects.NightVisionAmbient` | 150 | Night Vision raises the ambient light of caves and nights to this grey (0-255). |
 | `Server.GenerationBudgetMs` / `UrgentGenerationBudgetMs` | 4 / 8 | Milliseconds a frame the server spends generating the chunks around players (a second generator, sliced: World/GenQueue); the urgent budget while a player's own chunk or one next to it is missing or more than `UrgentBacklog` (49) chunks wait. |
@@ -2725,9 +2732,13 @@ rules and layers, not how it looks): at 1920 × 1080, 1366 × 768, 667 × 375 to
   the touch buttons' hit areas and art; the chat's lines and "Chat disabled in client options."
   above the lifted quickbar at GUI Scale 1-3.
 - **The status icons:** in the HUD (levels, blinking, arrows, badges and their numbers, the
-  knowledge bar, the placement on each screen) and docked in the inventory's band while it is
-  open (in the right place at its scale); the Thermometer reading in the item-in-hands box; the
-  frost and heat edges; the effect icons leaving the badges' effects out.
+  knowledge bar, the placement on each screen; starving, dehydrated, near death and freezing read
+  as a red or blue blinking silhouette, and full idle mana as a faint whole star) and docked in the
+  inventory's band while it is open (in the right place at its scale); the effect icons' row in
+  the band beside the quickbar (every effect, squeezed when many); the Thermometer reading in the
+  item-in-hands box; the frost and heat edges; the effect icons leaving the badges' effects out.
+- **The recipe view:** VICINITY beside it keeps updating (a furnace's gauges, the GROUND strip)
+  and takes no click or gamepad selection (its bars, the creative "items" button, its slots).
 - **The look:** the tooltip's delay, picture, liquid pill and a count changing under the pointer;
   the drag outlines' colours; Roboto's weights (does Light exist?); UIStroke thickness under
   UIScale (`Theme.STROKE_FOLLOWS_UISCALE`); the silhouettes drawn through EditableImages and the
@@ -3694,7 +3705,11 @@ released; textured terrain with MaterialService and the prototypes loaded from t
 `src/textures` files), and `tests/spec/Streaming` the real ChunkStreamer and ClientWorld with a
 fake worker pool, renderer and network (checking every frame that no ground goes uncovered, no
 two levels overlap and no tunnel opens onto the void, through loading, edits, teleports, caves
-and hidden terrain).
+and hidden terrain). `tests/spec/SurvivalLookGlue` runs the real inventory screen, Style and
+HoverTip on a fake Roblox client (`tests/lib/FakeClient`: instances with events, Destroying and
+UIScale-aware absolute positions), for what only glue does: the recipe view's live but inert
+VICINITY column, the effects' place in the band, tooltip entries freed with their objects,
+outlines following their screen's scale and masks drawn within a frame's budget.
 
 Formatting, linting and type checking:
 

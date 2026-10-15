@@ -1104,21 +1104,25 @@ end
 --[[
 	Every mask is drawn once (by the function its first `maskImage` gave) and kept by name, then
 	made into one EditableImage per name (white, its alpha the mask's), which every image of that
-	name shows, tinted by ImageColor3. Drawing a mask takes a few milliseconds per name, so it is
-	never done all at once: a name not drawn yet is queued and drawn on a later frame (at most
-	MASK_BUDGET seconds a frame, at least one name), and its images fill in then. Where an
+	name shows, tinted by ImageColor3. Drawing a mask takes several milliseconds per name, so it is
+	never done all at once: a name not drawn yet is queued and drawn over later frames, MASK_ROWS
+	rows a step (its maker gives a Masks job), steps until MASK_BUDGET seconds of the frame are
+	spent (at least one step), and its images fill in when it is done. Where an
 	EditableImage can't be made (the API is off, the memory budget is used up), the image gets the
 	blocky fallback instead: the mask at its size as `glyph` Frames inside it. The silhouettes
 	(Ui/Silhouettes) are queued as this module loads, so they are ready before a screen opens.
 ]]
 
 local MASK_BUDGET = 0.004
+-- Rows of a mask drawn in one step (a 48 pixel mask takes 24 steps).
+local MASK_ROWS = 2
 
--- Drawn masks, the functions that draw the ones not drawn yet, the queue, and the images
--- waiting for each.
+-- Drawn masks, the functions that draw the ones not drawn yet (the mask, or a job to step), the
+-- queue, the one being drawn, and the images waiting for each.
 local maskCache: { [string]: Masks.Mask } = {}
-local maskMakers: { [string]: () -> Masks.Mask } = {}
+local maskMakers: { [string]: () -> Masks.Drawing } = {}
 local maskQueue: { string } = {}
+local maskDrawing: { name: string, job: Masks.Job }? = nil
 local maskWaiting: { [string]: { ImageLabel } } = {}
 -- Each name's image content, the names no image could be made for, and the blocky rows by name
 -- and size.
@@ -1216,20 +1220,15 @@ local function fillMask(image: ImageLabel, name: string)
 	holder.Parent = image
 end
 
--- Draws `name`'s mask now (if it is not drawn yet) and fills the images waiting for it.
-local function drawMask(name: string)
-	if maskCache[name] == nil then
-		local make = maskMakers[name]
-		local ok, drawn = pcall(make or function(): Masks.Mask
-			return { w = 1, h = 1, alpha = { 0 } }
-		end)
-		if not ok then
-			warn(`[IceVoxel] survival look: the mask {name} could not be drawn: {drawn}`)
-			drawn = { w = 1, h = 1, alpha = { 0 } }
-		end
-		maskCache[name] = drawn :: Masks.Mask
-		maskMakers[name] = nil
-	end
+-- (What a maker that failed draws.)
+local function emptyMask(): Masks.Mask
+	return { w = 1, h = 1, alpha = { 0 } }
+end
+
+-- Keeps `drawn` as `name`'s mask and fills the images waiting for it.
+local function finishMask(name: string, drawn: Masks.Mask)
+	maskCache[name] = drawn
+	maskMakers[name] = nil
 	local waiting = maskWaiting[name]
 	if waiting then
 		maskWaiting[name] = nil
@@ -1239,24 +1238,89 @@ local function drawMask(name: string)
 	end
 end
 
--- Each frame while names wait: draws them until the budget is spent (at least one).
+-- Starts `name`'s mask: a maker that gives the mask drawn finishes it at once; one that gives a
+-- job (Masks.begin) returns it, to be drawn by `stepJob`.
+local function startMask(name: string): Masks.Job?
+	local make = maskMakers[name]
+	local ok, drawn = pcall(make or emptyMask)
+	if not ok then
+		warn(`[IceVoxel] survival look: the mask {name} could not be drawn: {drawn}`)
+		finishMask(name, emptyMask())
+		return nil
+	end
+	if (drawn :: any).alpha ~= nil then
+		finishMask(name, drawn :: Masks.Mask)
+		return nil
+	end
+	return drawn :: Masks.Job
+end
+
+-- Draws up to `rows` more rows of `name`'s `job`, finishing the mask when it is done; whether it is.
+local function stepJob(name: string, job: Masks.Job, rows: number): boolean
+	local ok, done = pcall(Masks.step, job, rows)
+	if not ok then
+		warn(`[IceVoxel] survival look: the mask {name} could not be drawn: {done}`)
+		finishMask(name, emptyMask())
+		return true
+	end
+	if done then
+		finishMask(name, job.mask)
+	end
+	return done
+end
+
+-- Draws `name`'s mask now, whole (if it is not drawn yet), and fills the images waiting for it.
+local function drawMask(name: string)
+	if maskCache[name] ~= nil then
+		return
+	end
+	local job: Masks.Job?
+	local drawing = maskDrawing
+	if drawing and drawing.name == name then
+		job = drawing.job
+		maskDrawing = nil
+	else
+		job = startMask(name)
+	end
+	if job then
+		stepJob(name, job, math.huge)
+	end
+end
+
+--[[
+	Each frame while masks wait: draws the one under way MASK_ROWS rows at a time, then the next
+	in the queue, until the frame's MASK_BUDGET is spent (at least one step). A mask is never drawn
+	whole in one go, so no frame pays for a whole slow mask.
+]]
 local function stepMasks()
 	local deadline = os.clock() + MASK_BUDGET
 	repeat
-		local name = table.remove(maskQueue, 1)
-		if name == nil then
-			break
+		local drawing = maskDrawing
+		if drawing == nil then
+			local name = table.remove(maskQueue, 1)
+			if name == nil then
+				break
+			end
+			if maskCache[name] == nil then
+				local job = startMask(name)
+				if job then
+					drawing = { name = name, job = job }
+					maskDrawing = drawing
+				end
+			end
 		end
-		drawMask(name)
+		if drawing and stepJob(drawing.name, drawing.job, MASK_ROWS) then
+			maskDrawing = nil
+		end
 	until os.clock() >= deadline
-	if #maskQueue == 0 and maskStep then
+	if #maskQueue == 0 and maskDrawing == nil and maskStep then
 		maskStep:Disconnect()
 		maskStep = nil
 	end
 end
 
 -- Queues `name` (drawn by `make`) unless it is drawn or queued already.
-local function queueMask(name: string, make: () -> Masks.Mask)
+local function queueMask(name: string, make: () -> Masks.Drawing)
 	if maskCache[name] ~= nil or maskMakers[name] ~= nil then
 		return
 	end
@@ -1296,7 +1360,7 @@ end
 function Dayz.maskImage(
 	parent: Instance,
 	name: string,
-	mask: () -> Masks.Mask,
+	mask: () -> Masks.Drawing,
 	x: number,
 	y: number,
 	w: number,
@@ -1334,7 +1398,7 @@ end
 	The image content of the mask `name` (drawn by `mask` now if it is not drawn yet: for one-off
 	masks such as the backdrop's vignette), or nil when no EditableImage can be made.
 ]]
-function Dayz.maskContent(name: string, mask: () -> Masks.Mask): Content?
+function Dayz.maskContent(name: string, mask: () -> Masks.Drawing): Content?
 	queueMask(name, mask)
 	drawMask(name)
 	local index = table.find(maskQueue, name)
@@ -1357,15 +1421,15 @@ function Dayz.silhouette(
 	transparency: number,
 	z: number?
 ): GuiObject
-	return Dayz.maskImage(parent, name, function(): Masks.Mask
-		return Silhouettes.render(name)
+	return Dayz.maskImage(parent, name, function(): Masks.Drawing
+		return Silhouettes.job(name)
 	end, x, y, w, h, colour, transparency, z)
 end
 
 -- The silhouettes are drawn over the first frames after this loads, not when a screen opens.
 for _, name in Silhouettes.NAMES do
-	queueMask(name, function(): Masks.Mask
-		return Silhouettes.render(name)
+	queueMask(name, function(): Masks.Drawing
+		return Silhouettes.job(name)
 	end)
 end
 
@@ -1985,7 +2049,7 @@ end
 --[[
 	`button` that can be turned off: off, its text is TextDisabled and it neither lights up nor
 	turns red when pressed (the caller still decides what a click on it does). Returns the button
-	and its on / off switch.
+	and its on / off switch. Its outlines and text follow `scaled` as `button`'s do.
 ]]
 function Dayz.toggleButton(
 	parent: Instance,
@@ -1994,10 +2058,12 @@ function Dayz.toggleButton(
 	y: number,
 	w: number,
 	h: number,
-	z: number?
+	z: number?,
+	scaled: Scaled?
 ): (TextButton, (enabled: boolean) -> ())
-	local button, overlay, stroke = buttonParts(parent, x, y, w, h, z, nil)
-	local label = Dayz.label(button, text, 0, 0, 0, 0, "body", Dayz.Colour.TextSoft, 2, Enum.TextXAlignment.Center)
+	local button, overlay, stroke = buttonParts(parent, x, y, w, h, z, scaled)
+	local label =
+		Dayz.label(button, text, 0, 0, 0, 0, "body", Dayz.Colour.TextSoft, 2, Enum.TextXAlignment.Center, scaled)
 	label.Size = UDim2.fromScale(1, 1)
 	return button, flatButton(button, overlay, stroke, label)
 end
@@ -2085,11 +2151,22 @@ function ScrollbarClass.place(self: ScrollbarSelf, fraction: number, active: boo
 	end
 end
 
--- A scrollbar at (x, y), `w` x `h`: a Field track with a hairline and a light thumb (THUMB_H tall).
-function Dayz.scrollbar(parent: Instance, x: number, y: number, w: number, h: number, z: number?): Scrollbar
+--[[
+	A scrollbar at (x, y), `w` x `h`: a Field track with a hairline (following `scaled`, as every
+	outline of a screen does) and a light thumb (THUMB_H tall).
+]]
+function Dayz.scrollbar(
+	parent: Instance,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	z: number?,
+	scaled: Scaled?
+): Scrollbar
 	local track = filled(parent, x, y, w, h, "Field", z or 4)
 	track.Name = "Scrollbar"
-	Dayz.outline(track, Dayz.Colour.Hairline, Dayz.Alpha.Hairline)
+	Dayz.outline(track, Dayz.Colour.Hairline, Dayz.Alpha.Hairline, scaled)
 	local thumb = filled(track, 0, 0, w, math.min(Theme.Size.THUMB_H, h), "Thumb", 1)
 	thumb.Name = "Thumb"
 	local self = { track = track, thumb = thumb, h = h, fraction = 0, active = nil }

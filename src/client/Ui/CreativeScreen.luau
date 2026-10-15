@@ -189,7 +189,7 @@ function CreativeScreen.new(parent: Instance): CreativeScreen
 		end
 	end
 
-	self.scrollbar = Dayz.scrollbar(panel, TRACK_X, TRACK_Y, TRACK_W, TRACK_H, 4)
+	self.scrollbar = Dayz.scrollbar(panel, TRACK_X, TRACK_Y, TRACK_W, TRACK_H, 4, scaled)
 
 	return self
 end

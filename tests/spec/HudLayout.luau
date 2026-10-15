@@ -21,7 +21,8 @@
 	ran past the screen's edge (a 160 pixel toast for 208 and 216 pixels of text). The quickbar's
 	canvas: the bar at its bottom, the item-in-hands box over it, room for the touch buttons, nine
 	cells on Minecraft's hotbar math (the spectator menu's icons), the key names its number boxes
-	show. The chat's lines and its overlay message (Ui/Chat's heights over Minecraft's hotbar, read
+	show; the open inventory's row of effect icons (every one shown in its room, squeezed down to
+	EFFECT_SQUEEZE, then as many as fit). The chat's lines and its overlay message (Ui/Chat's heights over Minecraft's hotbar, read
 	from its source) go up with the lifted canvas and stay over it on every screen and GUI Scale
 	choice; named regression: at GUI Scale 1 on a 1920 x 1080 desktop the unlifted overlay message
 	("Chat disabled in client options.", 64 to 72 screen pixels up) sat on the lifted quickbar (55 to
@@ -849,6 +850,28 @@ return function(t, shared, require, _server, client)
 		-- Without a raise the HUD is its canvas, as before.
 		local plain = HudLayout.compute(phone({}))
 		t.eq(plain.hud.h, HudLayout.HUD_HEIGHT * plain.scale)
+	end)
+
+	t.test("hud layout: the open inventory's row of effect icons", function()
+		local R = HudLayout.effectRow
+		local STEP, SQUEEZE = HudLayout.EFFECT_STEP, HudLayout.EFFECT_SQUEEZE
+		t.eq(select(1, R(0, 200)), 0, "none")
+		t.eq(select(1, R(3, 23)), 0, "no room for one")
+		t.eq(select(1, R(1, 24)), 1, "one in one's room")
+		local shown, step = R(3, 200)
+		t.ok(shown == 3 and step == STEP, "three in plenty of room, Minecraft's step")
+		shown, step = R(6, 100)
+		t.ok(shown == 6 and step < STEP and step >= SQUEEZE, `six squeezed ({step})`)
+		shown, step = R(30, 100)
+		t.ok(shown < 30 and step == SQUEEZE, `thirty: as many as fit ({shown})`)
+		for count = 1, 20 do
+			for width = 24, 300, 7 do
+				local n, s = R(count, width)
+				t.ok(n >= 1 and n <= count, `{count} in {width}: some shown`)
+				t.ok(s <= STEP and s >= SQUEEZE, `{count} in {width}: step in range`)
+				t.ok((n - 1) * s + 24 <= width, `{count} in {width}: inside the place`)
+			end
+		end
 	end)
 
 	t.test("hud layout: the quickbar's canvas, its cells and key names", function()

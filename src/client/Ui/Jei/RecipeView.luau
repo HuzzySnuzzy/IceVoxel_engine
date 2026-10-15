@@ -497,7 +497,7 @@ local function buildEntry(self: Self, entry: Entry, x: number, y: number): Entry
 	end
 	local plus = layout.plus
 	if plus and entry.recipe then
-		local button, setEnabled = Dayz.toggleButton(frame, "+", plus.x, plus.y, plus.w, plus.h, 6)
+		local button, setEnabled = Dayz.toggleButton(frame, "+", plus.x, plus.y, plus.w, plus.h, 6, self.scaled)
 		button.Visible = false
 		button.Activated:Connect(function()
 			local status = widget.status

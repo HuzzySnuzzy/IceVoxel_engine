@@ -5,7 +5,8 @@
 	sections sit inside their columns 2 apart (strips right under their header), the slots' frames
 	inside their section bodies and apart, the eyes clear of every other slot and of their own
 	slot's middle, the block's content cut by its title strip, ITEMS growing with the height, the
-	band at the bottom with the quickbar and the status icons apart; the least heights and the
+	band at the bottom with the quickbar, the status icons and the effect icons apart (and room for
+	the effects on the review's four Studio screens); the least heights and the
 	placement table of the design (mode, scale, height, centre width per screen); the root inside
 	its area on every screen, GuiScale base, window and collapse (MARGIN off its bottom while that
 	fits); section counts read from the window, collapsed or not; grid lines that paint every frame
@@ -381,6 +382,21 @@ return function(t, shared, require, _server, client)
 			t.eq(status.w, C.STATUS_W)
 			t.eq(status.h, C.STATUS_H)
 		end
+		-- The effect icons' place: in the band, as tall as the bar, BAND_GAP clear of the bar and
+		-- the status icons, at least one icon wide.
+		local effects = a.effects
+		t.ok(effects ~= nil, `{what}: the effect icons have a place`)
+		if effects then
+			t.ok(inside(effects, a.band), `{what}: the effect icons in the band`)
+			t.eq(effects.h, a.quickbar.h, `{what}: as tall as the bar`)
+			t.eq(effects.y, a.quickbar.y, `{what}: on the bar's line`)
+			t.ok(effects.w >= C.EFFECTS_MIN_W, `{what}: room for an icon`)
+			local gapped = { x = effects.x - C.BAND_GAP, y = effects.y, w = effects.w + 2 * C.BAND_GAP, h = effects.h }
+			t.ok(not overlaps(gapped, a.quickbar), `{what}: the effect icons clear of the quickbar`)
+			if status then
+				t.ok(not overlaps(gapped, status), `{what}: the effect icons clear of the status icons`)
+			end
+		end
 		if wide then
 			t.eq(a.quickbar.x, math.floor((a.width - 182) / 2), `{what}: the quickbar centred when wide`)
 		end
@@ -707,6 +723,44 @@ return function(t, shared, require, _server, client)
 		local _, narrowLeast = C.minimum(narrow)
 		local guiScale = require(client.Ui.GuiScale)
 		t.eq(guiScale.fit(3.125, 358, narrowLeast, 1024, 710, true, narrowLeast), 2.75, "narrow would be 2.75")
+	end)
+
+	t.test("inventory columns: the open inventory keeps its effects in view on the Studio screens", function()
+		-- (Review finding: the side list of effects had no room left of a screen-wide inventory at
+		-- 1920 x 1080, 1366 x 768 and 568 x 320, so no effect showed while picking a bandage.)
+		local screens = {
+			{ what = "1920 x 1080", w = 1920, h = 1080, base = 4, touch = false },
+			{ what = "1366 x 768", w = 1366, h = 768, base = 3, touch = false },
+			{ what = "667 x 375 touch", w = 667, h = 375, base = 1.5, touch = true },
+			{ what = "568 x 320 touch", w = 568, h = 320, base = 1.25, touch = true },
+		}
+		local checked = 0
+		for _, screen in screens do
+			for _, window in windows do
+				local collapsed = if screen.touch and window.container == nil then BIT.vanity else 0
+				local wide = inputOf(window, "wide", false, 0, collapsed)
+				local narrow = inputOf(window, "narrow", false, 0, collapsed)
+				local view = { w = screen.w, h = screen.h, top = 58, base = screen.base, touch = screen.touch }
+				local p = C.place(view, wide, narrow)
+				local input = if p.mode == "wide" then wide else narrow
+				input.height, input.centreW = p.height, p.centreW
+				local a = C.arrange(input)
+				local what = `{screen.what} {window.name} ({p.mode} at {p.scale})`
+				local effects = a.effects
+				t.ok(effects ~= nil, `{what}: a place for the effects`)
+				if effects then
+					-- (Ui/EffectHud draws 24 pixel icons as tall as the place: its width in their pixels.)
+					local width = effects.w * 24 / effects.h
+					local shown = HudLayout.effectRow(3, width)
+					t.eq(shown, 3, `{what}: three effects side by side ({effects.w} wide)`)
+					t.ok(HudLayout.effectRow(8, width) >= 6, `{what}: six of eight squeezed in`)
+					local tall = effects.h * p.scale
+					t.ok(tall >= 16, `{what}: icons {tall} screen pixels tall`)
+				end
+				checked += 1
+			end
+		end
+		t.eq(checked, 4 * #windows)
 	end)
 
 	t.test("inventory columns: the root stays inside the area on every screen, window and collapse", function()

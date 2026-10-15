@@ -242,4 +242,10 @@ function Silhouettes.render(name: string, size: number?): Masks.Mask
 	return Masks.render(Silhouettes.ops(name), side, side, Silhouettes.SAMPLES)
 end
 
+-- The same mask, not drawn yet (Masks.step draws it a few rows at a time: Style.Dayz).
+function Silhouettes.job(name: string, size: number?): Masks.Job
+	local side = size or Silhouettes.SIZE
+	return Masks.begin(Silhouettes.ops(name), side, side, Silhouettes.SAMPLES)
+end
+
 return Silhouettes

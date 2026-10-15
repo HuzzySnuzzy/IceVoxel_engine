@@ -4,7 +4,8 @@
 	a circle's area close to pi r squared, cuts taking area out, rounded corners and rings and the
 	even-odd polygon, a rect rounded by half its side (rounding never crossing its bounds),
 	downsampling keeping the mean alpha, the "#" / "." rows of the blocky art, and the vignette:
-	clear inside, `edge` at the corners, rising along the diagonal.
+	clear inside, `edge` at the corners, rising along the diagonal; a mask drawn a few rows at a time
+	(`begin`, `step`) is the mask drawn at once.
 ]]
 
 return function(t, _shared, require, _server, client)
@@ -36,6 +37,33 @@ return function(t, _shared, require, _server, client)
 		end
 		local nothing = Masks.render({}, 4, 4)
 		t.eq(mean(nothing), 0, "no shapes: nothing")
+	end)
+
+	t.test("masks: drawn a few rows at a time, the same mask", function()
+		local ops = {
+			{ shape = { kind = "circle", x = 0.5, y = 0.5, r = 0.4 } },
+			{ shape = { kind = "rect", x = 0.3, y = 0.3, w = 0.4, h = 0.4, r = 0.1 }, cut = true },
+		}
+		local whole = Masks.render(ops, 13, 11, 3)
+		local job = Masks.begin(ops, 13, 11, 3)
+		t.eq(job.row, 0, "nothing drawn yet")
+		t.ok(not Masks.step(job, 0), "no rows: not done")
+		t.eq(job.row, 0)
+		local steps = 0
+		local done = false
+		repeat
+			steps += 1
+			done = Masks.step(job, 3)
+			if not done then
+				t.eq(job.row, steps * 3, `step {steps}: three more rows`)
+			end
+		until done
+		t.eq(steps, 4, "11 rows three at a time: four steps")
+		t.eq(job.row, 11)
+		t.ok(Masks.step(job, 3), "done stays done")
+		for i, a in whole.alpha do
+			t.eq(job.mask.alpha[i], a, `pixel {i}`)
+		end
 	end)
 
 	t.test("masks: a half-plane's edge column is half covered with 4 samples", function()

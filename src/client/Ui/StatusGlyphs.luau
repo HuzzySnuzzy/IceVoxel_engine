@@ -17,7 +17,7 @@
 
 	`render(name)` draws one into a mask (SIZE x SIZE pixels; the chevrons CHEVRON_W x CHEVRON_H;
 	SAMPLES x SAMPLES samples a pixel), which Style.Dayz.maskImage shows smaller and keeps, once, by
-	name. Names: the notifiers' ("health"), the badges' (Effects names: "Bleeding"), "chevronUp"
+	name; `job(name)` is the same mask not drawn yet, which Style.Dayz draws a few rows a frame. Names: the notifiers' ("health"), the badges' (Effects names: "Bleeding"), "chevronUp"
 	and "chevronDown".
 ]]
 
@@ -30,8 +30,8 @@ StatusGlyphs.SIZE = 48
 StatusGlyphs.CHEVRON_W = 48
 StatusGlyphs.CHEVRON_H = 20
 -- Samples per axis in each pixel: 3 x 3 (nine levels of edge) like Ui/Silhouettes. Drawing a
--- mask costs its samples and Style.Dayz draws at least one a frame; 4 x 4 cost the slowest
--- glyph about 1.6 times as long (65 against 41 ms under Lune).
+-- mask costs its samples (Style.Dayz spreads the drawing over frames a few rows at a time); 4 x 4
+-- cost the slowest glyph about 1.6 times as long (65 against 41 ms under Lune).
 StatusGlyphs.SAMPLES = 3
 
 local function circle(x: number, y: number, r: number, cut: boolean?): Masks.Op
@@ -217,13 +217,55 @@ function StatusGlyphs.ops(name: string): { Masks.Op }?
 	return StatusGlyphs.NOTIFIERS[name] or StatusGlyphs.BADGES[name]
 end
 
--- The mask of drawing `name` at its size (an unknown name draws an empty glyph).
-function StatusGlyphs.render(name: string): Masks.Mask
+--[[
+	How far down its square drawing `name` reaches: the top and bottom (unit coordinates) of the
+	shapes it paints in (cuts left out: they only take away inside them). Ui/StatusCluster lights
+	a notifier's rows over this span (StatusLayout.litHeight), not over the margins round it.
+	0, 1 for an unknown or empty drawing.
+]]
+function StatusGlyphs.extent(name: string): (number, number)
+	local top, bottom = math.huge, -math.huge
+	local ops: { Masks.Op } = StatusGlyphs.ops(name) or {}
+	for _, op in ops do
+		if op.cut then
+			continue
+		end
+		local shape = op.shape
+		local low, high = 0, 1
+		if shape.kind == "circle" or shape.kind == "ring" then
+			low, high = shape.y - shape.r, shape.y + shape.r
+		elseif shape.kind == "rect" then
+			low, high = shape.y, shape.y + shape.h
+		elseif shape.kind == "poly" then
+			low, high = math.huge, -math.huge
+			for i = 2, #shape.points, 2 do
+				low = math.min(low, shape.points[i])
+				high = math.max(high, shape.points[i])
+			end
+		end
+		top, bottom = math.min(top, low), math.max(bottom, high)
+	end
+	if top > bottom then
+		return 0, 1
+	end
+	return math.clamp(top, 0, 1), math.clamp(bottom, 0, 1)
+end
+
+-- The mask of drawing `name` at its size, not drawn yet (Masks.step draws it a few rows at a
+-- time: Style.Dayz spreads it over frames). An unknown name draws an empty glyph.
+function StatusGlyphs.job(name: string): Masks.Job
 	local ops = StatusGlyphs.ops(name) or {}
 	if name == "chevronUp" or name == "chevronDown" then
-		return Masks.render(ops, StatusGlyphs.CHEVRON_W, StatusGlyphs.CHEVRON_H, StatusGlyphs.SAMPLES)
+		return Masks.begin(ops, StatusGlyphs.CHEVRON_W, StatusGlyphs.CHEVRON_H, StatusGlyphs.SAMPLES)
 	end
-	return Masks.render(ops, StatusGlyphs.SIZE, StatusGlyphs.SIZE, StatusGlyphs.SAMPLES)
+	return Masks.begin(ops, StatusGlyphs.SIZE, StatusGlyphs.SIZE, StatusGlyphs.SAMPLES)
+end
+
+-- The mask of drawing `name` at its size, drawn at once (an unknown name draws an empty glyph).
+function StatusGlyphs.render(name: string): Masks.Mask
+	local job = StatusGlyphs.job(name)
+	Masks.step(job, job.mask.h)
+	return job.mask
 end
 
 return StatusGlyphs

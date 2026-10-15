@@ -17,8 +17,16 @@
 	           Hovering one with the mouse, or tapping it on a touch screen (tap again to hide),
 	           writes its name, level and time under the rows ("Speed II 1:23", "**:**" for one
 	           that never ends).
-	  List     while an inventory screen is open (the inventory, a chest, the creative picker:
-	           Ui/Screens) the icons give way to Minecraft's inventory list, on the left of the
+	  Band     while the survival inventory is open (window 0, a chest, a block: Ui/Screens.
+	           effectsDock, the free stretch of its quickbar band beside the bar) the icons give
+	           way to a row of every running effect there, at the bar's height: harmful and
+	           neutral ones first from the right end, then the beneficial ones, 25 apart and closer
+	           when they need the room (HudLayout.effectRow), the glyphs alone. That inventory is
+	           as wide as the screen, so nothing would fit beside it; the status icons beside the
+	           row show no badges.
+	  List     while another inventory screen is open (the creative picker, or the inventory when
+	           its band has no room or the recipe view covers it: Ui/Screens) the icons give way to
+	           Minecraft's inventory list, on the left of the
 	           screen (where JEI moves it, its item list taking the right): a 120 x 32 panel per
 	           effect with the glyph, the name and level in white and the time in grey, 33 apart
 	           (closer when more than five need the room, as Minecraft squeezes them). It draws
@@ -38,7 +46,7 @@
 	(Roboto: Style.Dayz.label). While the status icons show their badges in the HUD
 	(StatusCluster.badgesShown: Bleeding, Infection, Poison, Wither, Hunger, Thirst, Nausea:
 	StatusLayout.BADGES) the icons leave those effects out, and the block's size given to UiScale
-	is the size without them; the inventory's list shows every effect.
+	is the size without them; the inventory's row and list show every effect.
 ]]
 
 local Players = game:GetService("Players")
@@ -78,6 +86,10 @@ local LIST_ROOM = 132
 -- Screen pixels from the safe area's left edge and below the top bar for the list.
 local LIST_MARGIN = 8
 local LIST_TOP = 40
+
+-- How the list draws: Minecraft's list, its compact one (the glyphs alone), or the row in the
+-- open inventory's band (Screens.effectsDock).
+type ListMode = "full" | "compact" | "dock"
 
 -- The effects the status icons show as badges (left out of the icons while they do).
 local BADGE_IDS: { [number]: boolean } = {}
@@ -186,8 +198,23 @@ function EffectHud.start()
 	listScale.Parent = list
 	local listScaled = Style.Dayz.scaled()
 
-	-- Where Ui/HudLayout puts the icons (hidden when it finds no room), at its scale; the list at
-	-- the GUI scale, below the top bar.
+	-- How the list draws now, and the band's row's width (the icons' pixels) while it is there.
+	local listMode: ListMode = "full"
+	local dockWidth = 0
+
+	-- The list beside the screens: at the GUI scale, below the top bar.
+	local function placeList()
+		local scaleNow = UiScale.hud().scale
+		if listScale.Scale ~= scaleNow then
+			listScale.Scale = scaleNow
+		end
+		listScaled:setScale(scaleNow)
+		local insets = UiScale.insets()
+		list.Position = UDim2.fromOffset(insets.left + LIST_MARGIN, insets.bar + LIST_TOP)
+	end
+
+	-- Where Ui/HudLayout puts the icons (hidden when it finds no room), at its scale; the list
+	-- (`placeList`) beside the screens.
 	local placed = true
 	local function layout()
 		local corner = UiScale.hud()
@@ -200,19 +227,16 @@ function EffectHud.start()
 			end
 			iconsScaled:setScale(corner.effectsScale)
 		end
-		if listScale.Scale ~= corner.scale then
-			listScale.Scale = corner.scale
+		-- (In the band, the row follows the dock every frame instead.)
+		if listMode ~= "dock" then
+			placeList()
 		end
-		listScaled:setScale(corner.scale)
-		local insets = UiScale.insets()
-		list.Position = UDim2.fromOffset(insets.left + LIST_MARGIN, insets.bar + LIST_TOP)
 	end
 
-	-- Draws the icons and the list again from the effects the server sent (`compact`: the list
-	-- with the glyphs alone; `badges`: the status icons show their badges, which the icons leave
-	-- out).
+	-- Draws the icons and the list again from the effects the server sent (`listMode`: the list,
+	-- its compact form, or the band's row `dockWidth` of the icons' pixels wide; `badges`: the
+	-- status icons show their badges, which the icons leave out).
 	local lastLayout = ""
-	local compact = false
 	local badges = false
 	local function build()
 		local now = os.clock()
@@ -233,7 +257,7 @@ function EffectHud.start()
 		for _, entry in rest do
 			table.insert(parts, `{entry.effect}:{entry.amplifier}:{entry.ambient}`)
 		end
-		table.insert(parts, if compact then "c" else "f")
+		table.insert(parts, if listMode == "dock" then `d{dockWidth}` else listMode)
 		table.insert(parts, if badges then "b" else "-")
 		local key = table.concat(parts, " ")
 		if key == lastLayout then
@@ -309,7 +333,22 @@ function EffectHud.start()
 				table.insert(icons, { entry = entry, group = canvas, seconds = -1, alpha = 1 })
 			end
 		end
+		if listMode == "dock" then
+			-- The band's row: every effect, the harmful and neutral ones first from the right end
+			-- (the first drawn over the ones left of it when they squeeze), then the beneficial.
+			local ordered = table.clone(rest)
+			table.move(good, 1, #good, #ordered + 1, ordered)
+			local shown, step = HudLayout.effectRow(#ordered, dockWidth)
+			list.Size = UDim2.fromOffset(dockWidth, ICON)
+			for i = 1, shown do
+				local entry = ordered[i]
+				drawIcon(list, dockWidth - ICON - (i - 1) * step, 0, entry, (shown - i + 1) * 10, listScaled)
+				table.insert(rows, { entry = entry, seconds = -1, alpha = 1 })
+			end
+			return
+		end
 		-- The inventory list: every effect, beneficial first, as the icons.
+		local compact = listMode == "compact"
 		local all = table.clone(good)
 		table.move(rest, 1, #rest, #all + 1, all)
 		local step = if #all > 5 then math.min(LIST_STEP, LIST_ROOM // (#all - 1)) else LIST_STEP
@@ -372,15 +411,39 @@ function EffectHud.start()
 		if gui.DisplayOrder ~= order then
 			gui.DisplayOrder = order
 		end
-		-- The list beside the screen's panels: full, compact, or none when even that would reach them.
+		-- The row in the open inventory's band, else the list beside the screen's panels: full,
+		-- compact, or none when even that would reach them.
 		local listShown = screen
 		if screen then
-			local left = Screens.screenLeft()
-			local room = if left then left - LIST_MARGIN * 2 else math.huge
-			local wantCompact = LIST_WIDTH * listScale.Scale > room
-			listShown = COMPACT_WIDTH * listScale.Scale <= room
-			if wantCompact ~= compact then
-				compact = wantCompact
+			local dock = Screens.effectsDock()
+			local want: ListMode
+			local width = dockWidth
+			if dock and dock.h > 0 then
+				want = "dock"
+				local iconScale = dock.h / ICON
+				width = math.floor(dock.w / iconScale + 1e-6)
+				local origin = gui.AbsolutePosition
+				local x, y = dock.x - origin.X, dock.y - origin.Y
+				local at = list.Position
+				if at.X.Offset ~= x or at.Y.Offset ~= y or at.X.Scale ~= 0 or at.Y.Scale ~= 0 then
+					list.Position = UDim2.fromOffset(x, y)
+				end
+				if listScale.Scale ~= iconScale then
+					listScale.Scale = iconScale
+					listScaled:setScale(iconScale)
+				end
+			else
+				if listMode == "dock" then
+					-- (Back beside the screen, at the GUI scale.)
+					placeList()
+				end
+				local left = Screens.screenLeft()
+				local room = if left then left - LIST_MARGIN * 2 else math.huge
+				want = if LIST_WIDTH * listScale.Scale > room then "compact" else "full"
+				listShown = COMPACT_WIDTH * listScale.Scale <= room
+			end
+			if want ~= listMode or (want == "dock" and width ~= dockWidth) then
+				listMode, dockWidth = want, width
 				build()
 			end
 		end

@@ -9,7 +9,9 @@
 	             (written as a string literal: tests/spec/ButtonHelp finds them in the sources);
 	             `variant` picks one of the entry's variants, a string or a function asked each time
 	             the tooltip shows (a button whose meaning changes: an eye that hides or shows).
-	             Attaching an object again replaces its id. Its connections go with the object.
+	             Attaching an object again replaces its id. Its connections go with the object, and
+	             its entry when it is destroyed (also an entry whose variant reaches the object:
+	             Luau's weak keys are not ephemerons).
 	  Mouse      resting on the object for HOVER_DELAY seconds shows it near the pointer
 	             (TooltipLayout.nearPointer: Minecraft's DefaultTooltipPositioner), following the
 	             pointer; leaving hides it. MouseEnter that comes from a touch is ignored.
@@ -404,6 +406,17 @@ function HoverTip.attach(object: GuiObject, id: string, variant: Variant?)
 		return
 	end
 	attached[object] = { id = id, variant = variant }
+	-- (A weak key is not enough: a variant function that reaches its object (a section bar's
+	-- "expand"/"collapse" reads its section, which holds the bar) keeps the entry alive, since
+	-- Luau's weak tables are not ephemerons. Destroying drops it.)
+	object.Destroying:Once(function()
+		attached[object] = nil
+		disabled[object] = nil
+		pressedAt[object] = nil
+		if hovering == object then
+			hovering = nil
+		end
+	end)
 	object.MouseEnter:Connect(function()
 		if lastInputIs("Touch") then
 			return
